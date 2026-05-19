@@ -14,6 +14,11 @@ type tool_profile = Mcp_server_eio_types.tool_profile =
 
 let make_response = Mcp_transport_protocol.make_response
 let make_error = Mcp_transport_protocol.make_error
+
+let make_error_typed ?data ~id (code : Mcp_error_code.t) message =
+  make_error ?data ~id (Mcp_error_code.to_wire_code code) message
+;;
+
 let is_jsonrpc_v2 = Mcp_transport_protocol.is_jsonrpc_v2
 let is_jsonrpc_response = Mcp_transport_protocol.is_jsonrpc_response
 let get_id = Mcp_transport_protocol.get_id
@@ -157,13 +162,13 @@ let maybe_emit_resource_notifications ~success ~tool_name =
 
 let handle_initialize_eio ?(profile = Full) id params =
   match Mcp_transport_protocol.validate_initialize_params params with
-  | Error msg -> make_error ~id (-32602) msg
+  | Error msg -> make_error_typed ~id Mcp_error_code.Invalid_params msg
   | Ok () ->
     let protocol_version =
       params |> Mcp_transport_protocol.protocol_version_from_params
     in
     (match Mcp_transport_protocol.validate_protocol_version protocol_version with
-     | Error msg -> make_error ~id (-32602) msg
+     | Error msg -> make_error_typed ~id Mcp_error_code.Invalid_params msg
      | Ok protocol_version ->
        make_response
          ~id
@@ -257,7 +262,7 @@ let handle_list_tools_eio
    | None -> ());
   let total_count = List.length tools in
   match TP.page_items_with_cursor ~kind:"tools" tools cursor with
-  | Error msg -> make_error ~id (-32602) msg
+  | Error msg -> make_error_typed ~id Mcp_error_code.Invalid_params msg
   | Ok (page, next_cursor) ->
     let result_fields =
       [ "tools", `List (List.map (TP.tool_json_for_profile ?usage_summary profile) page) ]
@@ -303,7 +308,7 @@ let handle_list_resources_eio id cursor =
     |> List.sort (fun (a : Mcp_server.mcp_resource) b -> String.compare a.uri b.uri)
   in
   match TP.page_items_with_cursor ~kind:"resources" resources cursor with
-  | Error msg -> make_error ~id (-32602) msg
+  | Error msg -> make_error_typed ~id Mcp_error_code.Invalid_params msg
   | Ok (page, next_cursor) ->
     let resources_json = List.map Mcp_server.resource_to_json page in
     let result_fields =
@@ -322,7 +327,7 @@ let handle_list_resource_templates_eio id cursor =
       String.compare a.uri_template b.uri_template)
   in
   match TP.page_items_with_cursor ~kind:"resourceTemplates" templates cursor with
-  | Error msg -> make_error ~id (-32602) msg
+  | Error msg -> make_error_typed ~id Mcp_error_code.Invalid_params msg
   | Ok (page, next_cursor) ->
     let templates_json = List.map Mcp_server.resource_template_to_json page in
     let result_fields =
@@ -342,7 +347,7 @@ let handle_list_prompts_eio id cursor =
             String.compare a.name b.name)
   in
   match TP.page_items_with_cursor ~kind:"prompts" prompts cursor with
-  | Error msg -> make_error ~id (-32602) msg
+  | Error msg -> make_error_typed ~id Mcp_error_code.Invalid_params msg
   | Ok (page, next_cursor) ->
     let prompts_json = List.map Mcp_prompt_surface.prompt_json page in
     let result_fields =
@@ -356,7 +361,7 @@ let handle_list_prompts_eio id cursor =
 
 let handle_get_prompt_eio state id params =
   match params with
-  | None -> make_error ~id (-32602) "Missing params"
+  | None -> make_error_typed ~id Mcp_error_code.Invalid_params "Missing params"
   | Some (`Assoc _ as payload) ->
     let open Yojson.Safe.Util in
     (match payload |> member "name" with
@@ -375,37 +380,37 @@ let handle_get_prompt_eio state id params =
             Config.raw_all_tool_schemas
         with
         | Ok json -> make_response ~id json
-        | Error msg -> make_error ~id (-32602) msg)
-     | _ -> make_error ~id (-32602) "Invalid params: name must be a string")
-  | Some _ -> make_error ~id (-32602) "Invalid params: expected object"
+        | Error msg -> make_error_typed ~id Mcp_error_code.Invalid_params msg)
+     | _ -> make_error_typed ~id Mcp_error_code.Invalid_params "Invalid params: name must be a string")
+  | Some _ -> make_error_typed ~id Mcp_error_code.Invalid_params "Invalid params: expected object"
 ;;
 
 let handle_resources_subscribe_eio id ?mcp_session_id params =
   let open Yojson.Safe.Util in
   match mcp_session_id, params with
-  | None, _ -> make_error ~id (-32600) "resources/subscribe requires an MCP session"
+  | None, _ -> make_error_typed ~id Mcp_error_code.Invalid_request "resources/subscribe requires an MCP session"
   | Some session_id, Some (`Assoc _ as payload) ->
     (match payload |> member "uri" with
      | `String uri ->
        subscribe_resource_for_session ~session_id ~uri;
        make_response ~id (`Assoc [])
-     | _ -> make_error ~id (-32602) "Invalid params: uri must be a string")
-  | Some _, None -> make_error ~id (-32602) "Missing params"
-  | Some _, Some _ -> make_error ~id (-32602) "Invalid params: expected object"
+     | _ -> make_error_typed ~id Mcp_error_code.Invalid_params "Invalid params: uri must be a string")
+  | Some _, None -> make_error_typed ~id Mcp_error_code.Invalid_params "Missing params"
+  | Some _, Some _ -> make_error_typed ~id Mcp_error_code.Invalid_params "Invalid params: expected object"
 ;;
 
 let handle_resources_unsubscribe_eio id ?mcp_session_id params =
   let open Yojson.Safe.Util in
   match mcp_session_id, params with
-  | None, _ -> make_error ~id (-32600) "resources/unsubscribe requires an MCP session"
+  | None, _ -> make_error_typed ~id Mcp_error_code.Invalid_request "resources/unsubscribe requires an MCP session"
   | Some session_id, Some (`Assoc _ as payload) ->
     (match payload |> member "uri" with
      | `String uri ->
        unsubscribe_resource_for_session ~session_id ~uri;
        make_response ~id (`Assoc [])
-     | _ -> make_error ~id (-32602) "Invalid params: uri must be a string")
-  | Some _, None -> make_error ~id (-32602) "Missing params"
-  | Some _, Some _ -> make_error ~id (-32602) "Invalid params: expected object"
+     | _ -> make_error_typed ~id Mcp_error_code.Invalid_params "Invalid params: uri must be a string")
+  | Some _, None -> make_error_typed ~id Mcp_error_code.Invalid_params "Missing params"
+  | Some _, Some _ -> make_error_typed ~id Mcp_error_code.Invalid_params "Invalid params: expected object"
 ;;
 
 let optional_string_member key fields =
@@ -431,12 +436,12 @@ let string_list_member key fields =
 
 let dashboard_response_or_error id = function
   | Ok result -> make_response ~id result
-  | Error msg -> make_error ~id (-32600) msg
+  | Error msg -> make_error_typed ~id Mcp_error_code.Invalid_request msg
 ;;
 
 let handle_dashboard_hello_eio state id ?mcp_session_id params =
   match mcp_session_id, params with
-  | None, _ -> make_error ~id (-32600) "dashboard/hello requires a WebSocket session"
+  | None, _ -> make_error_typed ~id Mcp_error_code.Invalid_request "dashboard/hello requires a WebSocket session"
   | Some session_id, Some (`Assoc fields) ->
     let token = optional_string_member "token" fields in
     Server_mcp_transport_ws.dashboard_hello
@@ -445,13 +450,13 @@ let handle_dashboard_hello_eio state id ?mcp_session_id params =
       ?token
       ()
     |> dashboard_response_or_error id
-  | Some _, None -> make_error ~id (-32602) "Missing params"
-  | Some _, Some _ -> make_error ~id (-32602) "Invalid params: expected object"
+  | Some _, None -> make_error_typed ~id Mcp_error_code.Invalid_params "Missing params"
+  | Some _, Some _ -> make_error_typed ~id Mcp_error_code.Invalid_params "Invalid params: expected object"
 ;;
 
 let handle_dashboard_subscribe_eio state id ?mcp_session_id params =
   match mcp_session_id, params with
-  | None, _ -> make_error ~id (-32600) "dashboard/subscribe requires a WebSocket session"
+  | None, _ -> make_error_typed ~id Mcp_error_code.Invalid_request "dashboard/subscribe requires a WebSocket session"
   | Some session_id, Some (`Assoc fields) ->
     let route = optional_string_member "route" fields in
     let slices = string_list_member "slices" fields in
@@ -459,14 +464,14 @@ let handle_dashboard_subscribe_eio state id ?mcp_session_id params =
     ignore state;
     Server_mcp_transport_ws.dashboard_subscribe ~session_id ?route ~slices ()
     |> dashboard_response_or_error id
-  | Some _, None -> make_error ~id (-32602) "Missing params"
-  | Some _, Some _ -> make_error ~id (-32602) "Invalid params: expected object"
+  | Some _, None -> make_error_typed ~id Mcp_error_code.Invalid_params "Missing params"
+  | Some _, Some _ -> make_error_typed ~id Mcp_error_code.Invalid_params "Invalid params: expected object"
 ;;
 
 let handle_dashboard_unsubscribe_eio id ?mcp_session_id params =
   match mcp_session_id, params with
   | None, _ ->
-    make_error ~id (-32600) "dashboard/unsubscribe requires a WebSocket session"
+    make_error_typed ~id Mcp_error_code.Invalid_request "dashboard/unsubscribe requires a WebSocket session"
   | Some session_id, Some (`Assoc fields) ->
     let slices = string_list_member "slices" fields in
     let slices_opt = if slices = [] then None else Some slices in
@@ -475,21 +480,21 @@ let handle_dashboard_unsubscribe_eio id ?mcp_session_id params =
   | Some session_id, None ->
     Server_mcp_transport_ws.dashboard_unsubscribe ~session_id ()
     |> dashboard_response_or_error id
-  | Some _, Some _ -> make_error ~id (-32602) "Invalid params: expected object"
+  | Some _, Some _ -> make_error_typed ~id Mcp_error_code.Invalid_params "Invalid params: expected object"
 ;;
 
 let handle_dashboard_ping_eio id ?mcp_session_id params =
   match mcp_session_id, params with
-  | None, _ -> make_error ~id (-32600) "dashboard/ping requires a WebSocket session"
+  | None, _ -> make_error_typed ~id Mcp_error_code.Invalid_request "dashboard/ping requires a WebSocket session"
   | Some session_id, None | Some session_id, Some (`Assoc _) ->
     Server_mcp_transport_ws.dashboard_ping ~session_id ()
     |> dashboard_response_or_error id
-  | Some _, Some _ -> make_error ~id (-32602) "Invalid params: expected object"
+  | Some _, Some _ -> make_error_typed ~id Mcp_error_code.Invalid_params "Invalid params: expected object"
 ;;
 
 let handle_dashboard_ack_eio id ?mcp_session_id params =
   match mcp_session_id, params with
-  | None, _ -> make_error ~id (-32600) "dashboard/ack requires a WebSocket session"
+  | None, _ -> make_error_typed ~id Mcp_error_code.Invalid_request "dashboard/ack requires a WebSocket session"
   | Some session_id, Some (`Assoc fields) ->
     let seq =
       match List.assoc_opt "seq" fields with
@@ -509,8 +514,8 @@ let handle_dashboard_ack_eio id ?mcp_session_id params =
     in
     Server_mcp_transport_ws.dashboard_ack ~session_id ~seq ?buffered_amount ()
     |> dashboard_response_or_error id
-  | Some _, None -> make_error ~id (-32602) "Missing params"
-  | Some _, Some _ -> make_error ~id (-32602) "Invalid params: expected object"
+  | Some _, None -> make_error_typed ~id Mcp_error_code.Invalid_params "Missing params"
+  | Some _, Some _ -> make_error_typed ~id Mcp_error_code.Invalid_params "Invalid params: expected object"
 ;;
 
 let handle_dashboard_ack_notification ?mcp_session_id params =
@@ -588,31 +593,33 @@ let handle_request
       | exn -> Error (Printexc.to_string exn)
     in
     match json with
-    | Error msg -> make_error ~id:`Null ~data:(`String msg) (-32700) "Parse error"
+    | Error msg ->
+      make_error_typed ~id:`Null ~data:(`String msg) Mcp_error_code.Parse_error "Parse error"
     | Ok json ->
       if
         match json with
         | `List _ -> true
         | _ -> false
       then
-        make_error
+        make_error_typed
           ~id:`Null
-          (-32600)
+          Mcp_error_code.Invalid_request
           "JSON-RPC batch requests are not supported on this MCP endpoint"
       else if is_jsonrpc_response json
       then `Null
       else if not (is_jsonrpc_v2 json)
-      then make_error ~id:`Null (-32600) "Invalid Request: jsonrpc must be 2.0"
+      then make_error_typed ~id:`Null Mcp_error_code.Invalid_request "Invalid Request: jsonrpc must be 2.0"
       else (
         match jsonrpc_request_of_yojson json with
-        | Error msg -> make_error ~id:`Null ~data:(`String msg) (-32600) "Invalid Request"
+        | Error msg ->
+          make_error_typed ~id:`Null ~data:(`String msg) Mcp_error_code.Invalid_request "Invalid Request"
         | Ok req ->
           let id = get_id req in
           if not (is_valid_request_id id)
           then
-            make_error
+            make_error_typed
               ~id:`Null
-              (-32600)
+              Mcp_error_code.Invalid_request
               "Invalid Request: id must be string, number, or null"
           else if Mcp_transport_protocol.is_notification req
           then (
@@ -627,12 +634,12 @@ let handle_request
               | "initialized" | "notifications/initialized" -> make_response ~id `Null
               | "resources/list" ->
                 (match TP.parse_cursor_only_params req.params with
-                 | Error msg -> make_error ~id (-32602) msg
+                 | Error msg -> make_error_typed ~id Mcp_error_code.Invalid_params msg
                  | Ok { cursor } -> handle_list_resources_eio id cursor)
               | "resources/read" -> handle_read_resource_eio state id req.params
               | "resources/templates/list" ->
                 (match TP.parse_cursor_only_params req.params with
-                 | Error msg -> make_error ~id (-32602) msg
+                 | Error msg -> make_error_typed ~id Mcp_error_code.Invalid_params msg
                  | Ok { cursor } -> handle_list_resource_templates_eio id cursor)
               | "resources/subscribe" ->
                 handle_resources_subscribe_eio id ?mcp_session_id req.params
@@ -649,12 +656,12 @@ let handle_request
               | "dashboard/ack" -> handle_dashboard_ack_eio id ?mcp_session_id req.params
               | "prompts/list" ->
                 (match TP.parse_cursor_only_params req.params with
-                 | Error msg -> make_error ~id (-32602) msg
+                 | Error msg -> make_error_typed ~id Mcp_error_code.Invalid_params msg
                  | Ok { cursor } -> handle_list_prompts_eio id cursor)
               | "prompts/get" -> handle_get_prompt_eio state id req.params
               | "tools/list" ->
                 (match TP.requested_tool_list_params req.params with
-                 | Error msg -> make_error ~id (-32602) msg
+                 | Error msg -> make_error_typed ~id Mcp_error_code.Invalid_params msg
                  | Ok { names; include_hidden; include_deprecated; include_usage; cursor }
                    ->
                    let list_profile =
@@ -698,7 +705,7 @@ let handle_request
                              state
                              call_profile
                              name)
-                      then make_error ~id (-32601) (unavailable_tool_message name)
+                      then make_error_typed ~id Mcp_error_code.Method_not_found (unavailable_tool_message name)
                       else (
                         Log.Mcp.emit
                           Log.Info
@@ -748,8 +755,8 @@ let handle_request
                         result)
                     with
                     | Yojson.Safe.Util.Type_error (_, _) ->
-                      make_error ~id (-32602) "Invalid params: name must be a string")
-                 | None -> make_error ~id (-32602) "Missing params")
+                      make_error_typed ~id Mcp_error_code.Invalid_params "Invalid params: name must be a string")
+                 | None -> make_error_typed ~id Mcp_error_code.Invalid_params "Missing params")
               | method_ when Mcp_sdk_adapter_masc.handles_method method_ ->
                 Mcp_sdk_adapter_masc.dispatch_request
                   ~handle_call_tool_eio
@@ -761,26 +768,26 @@ let handle_request
                   ?auth_token
                   json
                 |> Option.value ~default:`Null
-              | method_ -> make_error ~id (-32601) ("Method not found: " ^ method_)
+              | method_ -> make_error_typed ~id Mcp_error_code.Method_not_found ("Method not found: " ^ method_)
             with
             | Invalid_argument msg when contains_casefold msg "masc not initialized" ->
-              make_error
+              make_error_typed
                 ~id
-                (-32603)
+                Mcp_error_code.Internal_error
                 (Masc_domain.masc_error_to_string
                    (Masc_domain.System Masc_domain.System_error.NotInitialized))
             | Eio.Cancel.Cancelled _ as exn -> raise exn
             | exn ->
               let err = Printexc.to_string exn in
               Log.Mcp.error "Request handling failed: method=%s: %s" req.method_ err;
-              make_error ~id (-32603) (Printf.sprintf "Internal error: %s" err)))
+              make_error_typed ~id Mcp_error_code.Internal_error (Printf.sprintf "Internal error: %s" err)))
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
-    make_error
+    make_error_typed
       ~id:`Null
       ~data:(`String (Printexc.to_string exn))
-      (-32603)
+      Mcp_error_code.Internal_error
       "Internal error"
 ;;
 

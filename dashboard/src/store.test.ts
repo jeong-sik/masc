@@ -107,7 +107,7 @@ describe('oasHealthSummary', () => {
       agent_name: 'dreamer',
       timestamp: 1,
       event_key: 'lifecycle',
-      phase: 'running',
+      phase: 'Running',
       detail: 'started',
     } satisfies OasAgentEvent)
     expect(oasHealthSummary.value.agentEventsCount).toBe(2)

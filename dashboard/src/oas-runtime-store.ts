@@ -1,5 +1,6 @@
 import { appendLiveOasEvent } from './components/session-trace/session-trace-live-store'
 import { isRecord, asNumber, asString } from './components/common/normalize'
+import { toKeeperPhase } from './keeper-store-normalize'
 import { fetchTelemetry, type TelemetryEntry } from './api/dashboard'
 import { OAS_TELEMETRY_REPLAY_LIMIT } from './config/constants'
 import {
@@ -273,7 +274,7 @@ function keeperLifecycleEvent(event: OasRuntimeEnvelope): OasKeeperLifecycleEven
     actor_kind: 'keeper',
     keeper_name: keeperName,
     event: asString(payload.event),
-    phase: asString(payload.phase),
+    phase: toKeeperPhase(asString(payload.phase)),
     detail: asString(payload.detail),
     event_type: runtimeEventType(event),
     correlation_id: asString(event.correlation_id),

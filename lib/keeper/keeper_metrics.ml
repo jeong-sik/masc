@@ -34,6 +34,8 @@ type t =
   | TurnReattempts
   | TurnRegressions
   | TurnLivelockBlocks
+  | TurnLivelockBlocksRepeated
+  | TurnLivelockBlocksThresholdPark
   | TurnLatencyBucket
   | TurnLatencyByModelBucket
   | ProviderCooldownSkip
@@ -238,6 +240,9 @@ let to_string = function
   | TurnReattempts -> "masc_keeper_turn_reattempts_total"
   | TurnRegressions -> "masc_keeper_turn_regressions_total"
   | TurnLivelockBlocks -> "masc_keeper_turn_livelock_blocks_total"
+  | TurnLivelockBlocksRepeated -> "masc_keeper_turn_livelock_blocks_repeated_total"
+  | TurnLivelockBlocksThresholdPark ->
+    "masc_keeper_turn_livelock_blocks_threshold_park_total"
   | TurnLatencyBucket -> "masc_keeper_turn_latency_bucket_total"
   | TurnLatencyByModelBucket -> "masc_keeper_turn_latency_by_model_bucket_total"
   | ProviderCooldownSkip -> "masc_keeper_provider_cooldown_skip_total"

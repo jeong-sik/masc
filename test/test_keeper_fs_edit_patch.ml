@@ -7,6 +7,7 @@
 module Coord = Masc_mcp.Coord
 module Keeper_exec_fs = Masc_mcp.Keeper_exec_fs
 module Keeper_registry = Masc_mcp.Keeper_registry
+module Keeper_tool_alias = Masc_mcp.Keeper_tool_alias
 module Keeper_types = Masc_mcp.Keeper_types
 module Keeper_alerting_path = Masc_mcp.Keeper_alerting_path
 module Fs_compat = Fs_compat
@@ -78,6 +79,7 @@ let setup ?(sandbox = Keeper_types.Local) f =
       (Keeper_alerting_path.playground_path_of_keeper meta.name)
   in
   ensure_dir playground;
+  ignore (Keeper_registry.register ~base_path:base meta.name meta);
   f ~config ~meta ~playground
 
 let parse raw = Yojson.Safe.from_string raw
@@ -91,6 +93,19 @@ let parse_error raw =
 
 let parse_int raw field =
   parse raw |> Json.member field |> Json.to_int_option
+
+let public_fs_edit_call ~public ~config ~(meta : Keeper_types.keeper_meta) args =
+  let args = Keeper_tool_alias.translate_input ~public args in
+  Keeper_exec_fs.handle_keeper_fs_edit
+    ~turn_sandbox_factory:None
+    ~config
+    ~keeper_name:meta.name
+    ~args
+
+let seed_single_playground_repo playground =
+  let repo = Filename.concat playground "repos/masc-mcp" in
+  ensure_dir (Filename.concat repo ".git");
+  repo
 
 (* ── Tests ───────────────────────────────────────────────────────── *)
 
@@ -260,6 +275,47 @@ let test_overwrite_unchanged_by_patch_addition () =
   Alcotest.(check string) "overwrite wrote bytes"
     "fresh" (Fs_compat.load_file path)
 
+let test_public_edit_maps_top_relative_single_repo_path () =
+  setup @@ fun ~config ~meta ~playground ->
+  let repo = seed_single_playground_repo playground in
+  let path = Filename.concat repo "lib/src.ml" in
+  ensure_dir (Filename.dirname path);
+  Fs_compat.save_file path "let x = 1\n";
+  let raw =
+    public_fs_edit_call
+      ~public:"Edit"
+      ~config
+      ~meta
+      (`Assoc
+        [
+          ("file_path", `String "lib/src.ml");
+          ("old_string", `String "let x = 1");
+          ("new_string", `String "let x = 2");
+        ])
+  in
+  Alcotest.(check bool) "ok" true (parse_ok raw);
+  Alcotest.(check string) "file edited through single repo rewrite"
+    "let x = 2\n" (Fs_compat.load_file path)
+
+let test_public_write_maps_top_relative_single_repo_path () =
+  setup @@ fun ~config ~meta ~playground ->
+  let repo = seed_single_playground_repo playground in
+  let path = Filename.concat repo "lib/generated.ml" in
+  let raw =
+    public_fs_edit_call
+      ~public:"Write"
+      ~config
+      ~meta
+      (`Assoc
+        [
+          ("file_path", `String "lib/generated.ml");
+          ("content", `String "let generated = true\n");
+        ])
+  in
+  Alcotest.(check bool) "ok" true (parse_ok raw);
+  Alcotest.(check string) "file written through single repo rewrite"
+    "let generated = true\n" (Fs_compat.load_file path)
+
 let () =
   Alcotest.run "Keeper_fs_edit_patch"
     [
@@ -281,5 +337,9 @@ let () =
             test_patch_delete_via_empty_new_string;
           Alcotest.test_case "overwrite mode regression" `Quick
             test_overwrite_unchanged_by_patch_addition;
+          Alcotest.test_case "public Edit maps top-relative single repo path" `Quick
+            test_public_edit_maps_top_relative_single_repo_path;
+          Alcotest.test_case "public Write maps top-relative single repo path" `Quick
+            test_public_write_maps_top_relative_single_repo_path;
         ] );
     ]

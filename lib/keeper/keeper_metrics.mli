@@ -26,6 +26,8 @@ type t =
   | TurnReattempts
   | TurnRegressions
   | TurnLivelockBlocks
+  | TurnLivelockBlocksRepeated
+  | TurnLivelockBlocksThresholdPark
   | TurnLatencyBucket
   | TurnLatencyByModelBucket
   | ProviderCooldownSkip

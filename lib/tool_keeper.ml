@@ -492,7 +492,12 @@ let handle_keeper_msg ctx args : tool_result =
       (match Turn.preflight_keeper_msg ctx resolved_args with
       | Error err -> (false, err)
       | Ok () ->
-      let request_id = Keeper_msg_async.submit ~sw:ctx.sw
+      let timeout_sec =
+        match Turn.keeper_msg_timeout_override resolved_args with
+        | Ok value -> value
+        | Error _ -> None
+      in
+      let request_id = Keeper_msg_async.submit ?timeout_sec ~clock:ctx.clock ~sw:ctx.sw
         ~base_path:ctx.config.base_path
         ~keeper_name:name
         ~f:(fun () ->
@@ -502,6 +507,7 @@ let handle_keeper_msg ctx args : tool_result =
             invalidate_status_cache name
           end;
           (ok, body))
+        ()
       in
       let json = `Assoc [
         ("request_id", `String request_id);

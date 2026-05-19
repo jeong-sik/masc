@@ -294,9 +294,15 @@ let gc_stale () =
     |> List.iter (fun id -> Hashtbl.remove pending id))
 ;;
 
-let set_status request_id status =
+let is_terminal_status = function
+  | Done _ | Lost _ -> true
+  | Queued | Running -> false
+;;
+
+let set_status ?(preserve_terminal = false) request_id status =
   with_lock (fun () ->
     match Hashtbl.find_opt pending request_id with
+    | Some entry when preserve_terminal && is_terminal_status entry.status -> ()
     | Some entry ->
       let completed_at =
         match status with
@@ -309,8 +315,8 @@ let set_status request_id status =
     | None -> ())
 ;;
 
-let set_status_protected request_id status =
-  Eio.Cancel.protect (fun () -> set_status request_id status)
+let set_status_protected ?preserve_terminal request_id status =
+  Eio.Cancel.protect (fun () -> set_status ?preserve_terminal request_id status)
 ;;
 
 let cancelled_lost_status exn =
@@ -322,9 +328,29 @@ let cancelled_lost_status exn =
     }
 ;;
 
+let timeout_done_status ~request_id ~keeper_name ~timeout_sec =
+  Done
+    { ok = false
+    ; body =
+        Yojson.Safe.to_string
+          (`Assoc
+              [ "error", `String "keeper_msg_timeout"
+              ; "message", `String "keeper_msg request exceeded timeout_sec"
+              ; "request_id", `String request_id
+              ; "keeper_name", `String keeper_name
+              ; "timeout_sec", `Float timeout_sec
+              ])
+    }
+;;
+
+type worker_result =
+  | Worker_done of tool_result
+  | Worker_timeout of { timeout_sec : float }
+
 (** Submit a keeper_msg turn for async execution.
     Forks a background fiber on [sw], returns the request_id immediately. *)
-let submit ~sw ~base_path ~(f : unit -> tool_result) ~keeper_name : string =
+let submit ?clock ?timeout_sec ~sw ~base_path ~(f : unit -> tool_result)
+    ~keeper_name () : string =
   gc_stale ();
   ignore (gc_stale_disk ~base_path);
   let request_id = generate_request_id ~keeper_name in
@@ -341,11 +367,20 @@ let submit ~sw ~base_path ~(f : unit -> tool_result) ~keeper_name : string =
     Hashtbl.replace pending request_id entry;
     persist_entry entry);
   Eio.Fiber.fork_daemon ~sw (fun () ->
-    set_status_protected request_id Running;
+    set_status_protected ~preserve_terminal:true request_id Running;
     let result =
       try
-        let ok, body = f () in
-        Done { ok; body }
+        let worker_result =
+          match clock, timeout_sec with
+          | Some clock, Some timeout_sec ->
+            (try Worker_done (Eio.Time.with_timeout_exn clock timeout_sec f) with
+             | Eio.Time.Timeout -> Worker_timeout { timeout_sec })
+          | None, _ | _, None -> Worker_done (f ())
+        in
+        (match worker_result with
+         | Worker_done (ok, body) -> Done { ok; body }
+         | Worker_timeout { timeout_sec } ->
+           timeout_done_status ~request_id ~keeper_name ~timeout_sec)
       with
       | Eio.Cancel.Cancelled _ as e -> cancelled_lost_status e
       | exn ->
@@ -354,7 +389,7 @@ let submit ~sw ~base_path ~(f : unit -> tool_result) ~keeper_name : string =
           ; body = Printf.sprintf "keeper_msg failed: %s" (Printexc.to_string exn)
           }
     in
-    set_status_protected request_id result;
+    set_status_protected ~preserve_terminal:true request_id result;
     `Stop_daemon);
   request_id
 ;;

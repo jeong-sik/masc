@@ -32,11 +32,17 @@ function normalizeCascadeRef(raw: unknown): CascadeRef | null {
   return { group, item }
 }
 
-/** Maps lowercase backend phase strings to PascalCase KeeperPhase values.
- *  Backend (keeper_state_machine.ml) emits lowercase: "offline", "running", "handing_off", etc.
- *  Frontend KeeperPhase type uses PascalCase: "Offline", "Running", "HandingOff", etc.
+/** Maps lowercase backend phase strings (`keeper_state_machine.ml:phase_to_string`)
+ *  to PascalCase `KeeperPhase` values. The two unions must stay 1:1 — this is
+ *  enforced at compile time by `_BACKEND_PHASE_COVERAGE_CHECK` below.
+ *
+ *  SSOT contract:
+ *    backend variant added → lowercase entry added AND KeeperPhase union extended.
+ *    KeeperPhase union extended → coverage check fails if lowercase entry missing.
+ *  Drift in either direction surfaces as a typecheck failure, not a silent
+ *  string-as-truth fallback.
  */
-const BACKEND_PHASE_MAP: Record<string, KeeperPhase> = {
+const BACKEND_PHASE_LOWERCASE_MAP = {
   offline: 'Offline',
   running: 'Running',
   failing: 'Failing',
@@ -50,7 +56,12 @@ const BACKEND_PHASE_MAP: Record<string, KeeperPhase> = {
   restarting: 'Restarting',
   dead: 'Dead',
   zombie: 'Zombie',
-  // Also accept PascalCase for forward-compat / test fixtures
+} as const satisfies Record<string, KeeperPhase>
+
+/** Forward-compat PascalCase passthrough — accepts already-typed values from
+ *  test fixtures or future backend emit paths. Constrained to `KeeperPhase`
+ *  keys so a typo would fail typecheck. */
+const BACKEND_PHASE_PASCAL_PASSTHROUGH = {
   Offline: 'Offline',
   Running: 'Running',
   Failing: 'Failing',
@@ -64,13 +75,33 @@ const BACKEND_PHASE_MAP: Record<string, KeeperPhase> = {
   Restarting: 'Restarting',
   Dead: 'Dead',
   Zombie: 'Zombie',
-}
+} as const satisfies Record<KeeperPhase, KeeperPhase>
+
+// Compile-time coverage check: every KeeperPhase variant must appear as a
+// *value* in the lowercase map. If KeeperPhase adds a new arm but the
+// lowercase entry is forgotten, this line fails to typecheck.
+//
+//   type _Missing = Exclude<KeeperPhase, typeof MAP[keyof typeof MAP]>
+//
+// resolves to `never` only when the map is exhaustive over KeeperPhase.
+type _LowercaseMapValueUnion = typeof BACKEND_PHASE_LOWERCASE_MAP[keyof typeof BACKEND_PHASE_LOWERCASE_MAP]
+type _MissingLowercaseCoverage = Exclude<KeeperPhase, _LowercaseMapValueUnion>
+// If the lowercase map drifts away from `KeeperPhase`, `_MissingLowercaseCoverage`
+// resolves to the un-mapped variant string and the `true` literal fails to assign.
+const _BACKEND_PHASE_COVERAGE_CHECK: [_MissingLowercaseCoverage] extends [never] ? true : _MissingLowercaseCoverage = true
+void _BACKEND_PHASE_COVERAGE_CHECK
 
 export function toKeeperPhase(raw: string | null | undefined): KeeperPhase | null {
   if (!raw) return null
   const trimmed = raw.trim()
   if (!trimmed) return null
-  return BACKEND_PHASE_MAP[trimmed] ?? null
+  if (trimmed in BACKEND_PHASE_LOWERCASE_MAP) {
+    return BACKEND_PHASE_LOWERCASE_MAP[trimmed as keyof typeof BACKEND_PHASE_LOWERCASE_MAP]
+  }
+  if (trimmed in BACKEND_PHASE_PASCAL_PASSTHROUGH) {
+    return BACKEND_PHASE_PASCAL_PASSTHROUGH[trimmed as keyof typeof BACKEND_PHASE_PASCAL_PASSTHROUGH]
+  }
+  return null
 }
 
 function normalizeKeeperAgentStatus(value: unknown): Keeper['status'] {

@@ -227,6 +227,8 @@ val metric_keeper_turn_starts : string
 val metric_keeper_turn_reattempts : string
 val metric_keeper_turn_regressions : string
 val metric_keeper_turn_livelock_blocks : string
+val metric_keeper_turn_livelock_blocks_repeated : string
+val metric_keeper_turn_livelock_blocks_threshold_park : string
 val metric_keeper_turn_latency_bucket : string
 val metric_keeper_turn_latency_by_model_bucket : string
 val metric_keeper_provider_cooldown_skip : string

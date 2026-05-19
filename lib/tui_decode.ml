@@ -63,13 +63,28 @@ type log_entry = {
 
 let ( let* ) = Result.bind
 
+let json_kind_name : Yojson.Safe.t -> string = function
+  | `Null -> "null"
+  | `Bool _ -> "bool"
+  | `Int _ -> "int"
+  | `Intlit _ -> "intlit"
+  | `Float _ -> "float"
+  | `String _ -> "string"
+  | `Assoc _ -> "object"
+  | `List _ -> "array"
+  | `Tuple _ -> "tuple"
+  | `Variant _ -> "variant"
+
 let member key json = Yojson.Safe.Util.member key json
 
 let optional_string json key =
   match member key json with
   | `Null -> Ok None
   | `String s -> Ok (Some s)
-  | _ -> Error (Printf.sprintf "field '%s' must be a string" key)
+  | other ->
+      Error
+        (Printf.sprintf "field '%s' must be a string (received %s)" key
+           (json_kind_name other))
 
 let optional_int json key =
   match member key json with
@@ -80,20 +95,29 @@ let optional_int json key =
       | Some n -> Ok (Some n)
       | None ->
           Error (Printf.sprintf "field '%s' has non-integer intlit %S" key s))
-  | _ -> Error (Printf.sprintf "field '%s' must be an int" key)
+  | other ->
+      Error
+        (Printf.sprintf "field '%s' must be an int (received %s)" key
+           (json_kind_name other))
 
 let optional_float json key =
   match member key json with
   | `Null -> Ok None
   | `Float f -> Ok (Some f)
   | `Int n -> Ok (Some (Float.of_int n))
-  | _ -> Error (Printf.sprintf "field '%s' must be a float" key)
+  | other ->
+      Error
+        (Printf.sprintf "field '%s' must be a float (received %s)" key
+           (json_kind_name other))
 
 let optional_bool json key =
   match member key json with
   | `Null -> Ok None
   | `Bool b -> Ok (Some b)
-  | _ -> Error (Printf.sprintf "field '%s' must be a bool" key)
+  | other ->
+      Error
+        (Printf.sprintf "field '%s' must be a bool (received %s)" key
+           (json_kind_name other))
 
 let require_string_field json key = require_string json key
 let require_int_field json key = require_int json key
@@ -107,9 +131,11 @@ let require_string_list json key =
         (fun idx item ->
           match item with
           | `String value -> Ok value
-          | _ ->
+          | bad ->
               Error
-                (Printf.sprintf "field '%s[%d]' must be a string" key idx))
+                (Printf.sprintf
+                   "field '%s[%d]' must be a string (received %s)" key idx
+                   (json_kind_name bad)))
         items
       |> List.fold_left
            (fun acc item ->
@@ -119,7 +145,10 @@ let require_string_list json key =
            (Ok [])
       |> Result.map List.rev
   | `Null -> Error (Printf.sprintf "missing required field '%s'" key)
-  | _ -> Error (Printf.sprintf "field '%s' must be an array" key)
+  | other ->
+      Error
+        (Printf.sprintf "field '%s' must be an array (received %s)" key
+           (json_kind_name other))
 
 let string_of_intlike_float_field key f =
   if not (Float.is_finite f) then
@@ -134,8 +163,18 @@ let decode_status json =
   | `String s -> Ok s
   | `List (`String s :: _) -> Ok s
   | `List [] -> Error "field 'status' list must not be empty"
+  | `List (bad :: _) ->
+      Error
+        (Printf.sprintf
+           "field 'status' list head must be a string (received %s)"
+           (json_kind_name bad))
   | `Null -> Error "missing required field 'status'"
-  | _ -> Error "field 'status' must be a string or non-empty string array"
+  | other ->
+      Error
+        (Printf.sprintf
+           "field 'status' must be a string or non-empty string array \
+            (received %s)"
+           (json_kind_name other))
 
 let decode_agent json =
   let* name = require_string_field json "name" in
@@ -173,7 +212,11 @@ let decode_keeper ~filename json =
     match member "models" json with
     | `Null -> Ok []
     | `List _ -> require_string_list json "models"
-    | _ -> Error "field 'models' must be a list of strings"
+    | other ->
+        Error
+          (Printf.sprintf
+             "field 'models' must be a list of strings (received %s)"
+             (json_kind_name other))
   in
   let* k_proactive_enabled = require_bool_field json "proactive_enabled" in
   let* k_initiative_enabled = optional_bool json "initiative_enabled" in
@@ -186,7 +229,12 @@ let decode_keeper ~filename json =
     | `Float f -> string_of_intlike_float_field "last_turn_ts" f
     | `Int n -> Ok (string_of_int n)
     | `Null -> Ok ""
-    | _ -> Error "field 'last_turn_ts' must be a string, number, or null"
+    | other ->
+        Error
+          (Printf.sprintf
+             "field 'last_turn_ts' must be a string, number, or null \
+              (received %s)"
+             (json_kind_name other))
   in
   let* k_compaction_count = require_int_field json "compaction_count" in
   let* k_compaction_ratio_gate = require_float_field json "compaction_ratio_gate" in
@@ -260,7 +308,11 @@ let parse_log_entry line =
     match member "tools_used" json with
     | `Null -> Ok []
     | `List _ -> require_string_list json "tools_used"
-    | _ -> Error "field 'tools_used' must be an array"
+    | other ->
+        Error
+          (Printf.sprintf
+             "field 'tools_used' must be an array (received %s)"
+             (json_kind_name other))
   in
   let* le_tools_used = le_tools_used in
   let* le_compacted = optional_bool json "compacted" in

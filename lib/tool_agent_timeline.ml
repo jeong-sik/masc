@@ -387,8 +387,8 @@ let turn_completed_events (config : Coord.config) ~agent_name ~limit :
          with Eio.Cancel.Cancelled _ as ex -> raise ex | _ -> None
        in
        let latency_ms =
-         try e.payload |> member "latency_ms" |> to_int
-         with Eio.Cancel.Cancelled _ as ex -> raise ex | _ -> 0
+         try Some (e.payload |> member "latency_ms" |> to_int)
+         with Eio.Cancel.Cancelled _ as ex -> raise ex | _ -> None
        in
        let model_used =
          try e.payload |> member "model_used" |> to_string
@@ -399,8 +399,8 @@ let turn_completed_events (config : Coord.config) ~agent_name ~limit :
          |> Option.value ~default:"unknown"
        in
        let context_ratio =
-         try e.payload |> member "context_ratio" |> to_float
-         with Eio.Cancel.Cancelled _ as ex -> raise ex | _ -> 0.0
+         try Some (e.payload |> member "context_ratio" |> to_float)
+         with Eio.Cancel.Cancelled _ as ex -> raise ex | _ -> None
        in
        let tools_used =
          try e.payload |> member "tools_used" |> to_list
@@ -450,10 +450,10 @@ let turn_completed_events (config : Coord.config) ~agent_name ~limit :
                  ("cache_creation_tokens", Json_util.int_opt_to_json cache_creation_tokens);
                  ("cache_read_tokens", Json_util.int_opt_to_json cache_read_tokens);
                  ("cost_usd", Json_util.float_opt_to_json cost_usd);
-                 ("latency_ms", `Int latency_ms);
+                 ("latency_ms", Json_util.int_opt_to_json latency_ms);
                  ("model_used", `String model_used);
                  ("work_kind", `String work_kind);
-                 ("context_ratio", `Float context_ratio);
+                 ("context_ratio", Json_util.float_opt_to_json context_ratio);
                  ("tools_used", `List (List.map (fun s -> `String s) tools_used));
                ] @ optional_fields);
          })

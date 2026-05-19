@@ -142,6 +142,7 @@ let run_corpus_row fixture =
       ~allowlist
       ~path_policy:Gate.allow_all_paths
       ~sandbox:Gate.host_sandbox
+      ()
   in
   Alcotest.(check string)
     (label ^ " ir verdict")
@@ -202,6 +203,7 @@ let test_quoted_pipe_single_stage_shape () =
       ~allowlist
       ~path_policy:Gate.allow_all_paths
       ~sandbox:Gate.host_sandbox
+      ()
   with
   | Gate.Allow context ->
     Alcotest.(check int) "stage count" 1 (Gate.stage_count context);
@@ -225,6 +227,7 @@ let test_real_three_stage_pipeline_ordering () =
       ~allowlist
       ~path_policy:Gate.allow_all_paths
       ~sandbox:Gate.host_sandbox
+      ()
   with
   | Gate.Allow context ->
     Alcotest.(check int) "stage count" 3 (Gate.stage_count context);
@@ -261,6 +264,7 @@ let test_pipeline_segment_rejection_carries_stage_index () =
       ~allowlist
       ~path_policy:Gate.allow_all_paths
       ~sandbox:Gate.host_sandbox
+      ()
   with
   | Gate.Reject { reason = Gate.Pipeline_segment_disallowed { stage = 2; bin = "sed" }; _ } -> ()
   | other ->
@@ -279,6 +283,7 @@ let test_pipes_disabled () =
       ~allowlist:policy
       ~path_policy:Gate.allow_all_paths
       ~sandbox:Gate.host_sandbox
+      ()
   with
   | Gate.Reject { reason = Gate.Pipes_not_allowed { stages = 2 }; _ } -> ()
   | other ->
@@ -303,7 +308,7 @@ let test_lower_typed_single_stage () =
     }
   in
   match
-    Gate.lower_typed_pipeline ~stages:[ stage ] ~sandbox:Gate.host_sandbox
+    Gate.lower_typed_pipeline ~stages:[ stage ] ~sandbox:Gate.host_sandbox ()
   with
   | Gate.Allow context ->
     Alcotest.(check int) "stage count" 1 (Gate.stage_count context);
@@ -341,6 +346,7 @@ let test_lower_typed_three_stage_matches_raw () =
               ; make_stage "head" [ "-20" ]
               ]
       ~sandbox:Gate.host_sandbox
+      ()
   in
   let raw =
     Gate.gate
@@ -348,6 +354,7 @@ let test_lower_typed_three_stage_matches_raw () =
       ~allowlist
       ~path_policy:Gate.allow_all_paths
       ~sandbox:Gate.host_sandbox
+      ()
   in
   match typed, raw with
   | Gate.Allow tc, Gate.Allow rc ->
@@ -368,7 +375,7 @@ let test_lower_typed_three_stage_matches_raw () =
 
 let test_lower_typed_empty_is_cannot_parse () =
   match
-    Gate.lower_typed_pipeline ~stages:[] ~sandbox:Gate.host_sandbox
+    Gate.lower_typed_pipeline ~stages:[] ~sandbox:Gate.host_sandbox ()
   with
   | Gate.Cannot_parse { reason = Gate.Parse_error } -> ()
   | other ->
@@ -390,6 +397,7 @@ let test_path_policy_rejects () =
       ~allowlist
       ~path_policy:policy
       ~sandbox:Gate.host_sandbox
+      ()
   with
   | Gate.Reject { reason = Gate.Path_outside_policy { stage = 1; raw_path = "/etc/shadow"; _ }; _ } -> ()
   | other ->
@@ -409,6 +417,7 @@ let test_sandbox_target_propagates_to_every_stage () =
       ~allowlist
       ~path_policy:Gate.allow_all_paths
       ~sandbox
+      ()
   with
   | Gate.Allow context ->
     List.iter
@@ -462,6 +471,7 @@ let test_backslash_pipe_in_double_quotes_diverges () =
       ~allowlist
       ~path_policy:Gate.allow_all_paths
       ~sandbox:Gate.host_sandbox
+      ()
   with
   | Gate.Cannot_parse { reason = Gate.Parse_error } -> ()
   | other ->
@@ -483,6 +493,7 @@ let test_brace_expansion_is_too_complex_glob_brace () =
       ~allowlist
       ~path_policy:Gate.allow_all_paths
       ~sandbox:Gate.host_sandbox
+      ()
   with
   | Gate.Too_complex { reason = Gate.Unsupported_construct `Glob_brace } -> ()
   | other ->
@@ -506,6 +517,7 @@ let test_absolute_path_traversal_phase1_allows () =
       ~allowlist
       ~path_policy:Gate.allow_all_paths
       ~sandbox:Gate.host_sandbox
+      ()
   with
   | Gate.Allow context ->
     Alcotest.(check int) "stage count" 1 (Gate.stage_count context);

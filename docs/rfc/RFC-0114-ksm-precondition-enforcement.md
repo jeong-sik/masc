@@ -3,12 +3,12 @@ rfc: "0114"
 title: "KSM event precondition enforcement at apply_event boundary"
 status: Draft
 created: 2026-05-17
-updated: 2026-05-17
+updated: 2026-05-20
 author: vincent
 supersedes: []
 superseded_by: null
 related: ["0002", "0042", "0072", "0113"]
-implementation_prs: []
+implementation_prs: [15939]
 ---
 
 # RFC-0114: KSM event precondition enforcement at apply_event boundary

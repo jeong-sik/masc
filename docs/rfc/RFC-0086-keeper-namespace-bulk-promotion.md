@@ -3,12 +3,12 @@ rfc: "0086"
 title: "Keeper namespace bulk promotion to sub-library"
 status: Draft
 created: 2026-05-15
-updated: 2026-05-15
+updated: 2026-05-20
 author: vincent
 supersedes: []
 superseded_by: null
 related: ["0056", "0042", "0050"]
-implementation_prs: []
+implementation_prs: [15467,15474,15488,15493,15494,15522,15531]
 ---
 
 # RFC-0086 — Keeper namespace bulk promotion to sub-library

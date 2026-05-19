@@ -3,12 +3,12 @@ rfc: "0010"
 title: "ocamlformat config reconciliation"
 status: Draft
 created: 2026-05-12
-updated: 2026-05-12
+updated: 2026-05-20
 author: vincent
 supersedes: []
 superseded_by: null
 related: ["0058"]
-implementation_prs: []
+implementation_prs: [14952]
 ---
 
 # RFC-0010 — ocamlformat config reconciliation

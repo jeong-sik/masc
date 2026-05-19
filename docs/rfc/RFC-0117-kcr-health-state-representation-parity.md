@@ -3,12 +3,12 @@ rfc: "0117"
 title: "KCR item-health representation parity — typed Degraded variant + spec cooldown action + PerKeeperIsolation correction"
 status: Draft
 created: 2026-05-17
-updated: 2026-05-17
+updated: 2026-05-20
 author: vincent
 supersedes: []
 superseded_by: null
 related: ["0042", "0072", "0113", "0114", "0115", "0116"]
-implementation_prs: []
+implementation_prs: [15957]
 ---
 
 # RFC-0117: KCR item-health representation parity — typed Degraded variant + spec cooldown action + PerKeeperIsolation correction

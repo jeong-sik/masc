@@ -3,12 +3,12 @@ rfc: "0137"
 title: "Host FD pressure → Keeper pause (safety-net for Docker VM FD accumulation)"
 status: Draft
 created: 2026-05-19
-updated: 2026-05-19
+updated: 2026-05-20
 author: jeong-sik
 supersedes: []
 superseded_by: null
 related: ["0097", "0101"]
-implementation_prs: []
+implementation_prs: [16665]
 ---
 
 # RFC-0137 — Host FD pressure → Keeper pause

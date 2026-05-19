@@ -3,12 +3,12 @@ rfc: "0079"
 title: "Log row typed encoder + silent-drop removal"
 status: Draft
 created: 2026-05-14
-updated: 2026-05-14
+updated: 2026-05-20
 author: vincent
 supersedes: []
 superseded_by: null
 related: ["0042", "0044", "0058", "0078"]
-implementation_prs: []
+implementation_prs: [15211]
 ---
 
 # RFC-0079: Log row typed encoder + silent-drop removal

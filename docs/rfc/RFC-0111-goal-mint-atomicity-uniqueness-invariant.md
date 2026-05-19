@@ -3,12 +3,12 @@ rfc: "0111"
 title: "Goal mint atomicity — auto-goal uniqueness invariant at write boundary"
 status: Draft
 created: 2026-05-17
-updated: 2026-05-17
+updated: 2026-05-20
 author: vincent
 supersedes: []
 superseded_by: null
 related: ["0042", "0077", "0088", "0110"]
-implementation_prs: []
+implementation_prs: [15927]
 ---
 
 # RFC-0111: Goal mint atomicity — auto-goal uniqueness invariant at write boundary

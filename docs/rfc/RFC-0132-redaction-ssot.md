@@ -3,12 +3,12 @@ rfc: "0132"
 title: "Redaction SSOT — `runtime` boundary-label private type"
 status: Draft
 created: 2026-05-19
-updated: 2026-05-19
+updated: 2026-05-20
 author: claude-cron-loop (vincent)
 supersedes: []
 superseded_by: null
 related: ["0085", "0088", "0089", "0126", "0131"]
-implementation_prs: []
+implementation_prs: [16531,16536,16537]
 ---
 
 # RFC-0132 — Redaction SSOT for `"runtime"` boundary label

@@ -3,12 +3,12 @@ rfc: "0116"
 title: "KCR fallback cap mechanism parity — explicit counter at spec ↔ visited-list at runtime"
 status: Draft
 created: 2026-05-17
-updated: 2026-05-17
+updated: 2026-05-20
 author: vincent
 supersedes: []
 superseded_by: null
 related: ["0042", "0072", "0113", "0114", "0115"]
-implementation_prs: []
+implementation_prs: [15947]
 ---
 
 # RFC-0116: KCR fallback cap mechanism parity — explicit counter at spec ↔ visited-list at runtime

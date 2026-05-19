@@ -3,12 +3,12 @@ rfc: "0081"
 title: "OAS Telemetry Envelope Context & Keeper/Goal Pivot Timeline"
 status: Draft
 created: 2026-05-14
-updated: 2026-05-14
+updated: 2026-05-20
 author: vincent
 supersedes: []
 superseded_by: null
 related: ["0046", "0049", "0063"]
-implementation_prs: []
+implementation_prs: [15137]
 ---
 
 # RFC-0081 — OAS Telemetry Envelope Context & Keeper/Goal Pivot Timeline

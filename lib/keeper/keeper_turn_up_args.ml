@@ -67,6 +67,18 @@ let json_non_null_member_present key (json : Yojson.Safe.t) =
       | Some _ -> true)
   | _ -> false
 
+let json_kind_name : Yojson.Safe.t -> string = function
+  | `Null -> "null"
+  | `Bool _ -> "bool"
+  | `Int _ -> "int"
+  | `Intlit _ -> "intlit"
+  | `Float _ -> "float"
+  | `String _ -> "string"
+  | `Assoc _ -> "object"
+  | `List _ -> "array"
+  | `Tuple _ -> "tuple"
+  | `Variant _ -> "variant"
+
 let parse_present_tool_name_list_opt args key =
   match json_assoc_member_opt key args with
   | None -> Ok None
@@ -74,12 +86,17 @@ let parse_present_tool_name_list_opt args key =
       let rec collect acc index = function
         | [] -> Ok (Some (normalize_tool_name_list (List.rev acc)))
         | `String value :: rest -> collect (value :: acc) (index + 1) rest
-        | _ :: _ ->
-            Error (Printf.sprintf "%s[%d] must be a string" key index)
+        | bad :: _ ->
+            Error
+              (Printf.sprintf "%s[%d] must be a string (received %s)" key
+                 index (json_kind_name bad))
       in
       collect [] 0 items
   | Some `Null -> Error (Printf.sprintf "%s must not be null" key)
-  | Some _ -> Error (Printf.sprintf "%s must be an array of strings" key)
+  | Some other ->
+      Error
+        (Printf.sprintf "%s must be an array of strings (received %s)" key
+           (json_kind_name other))
 
 let parse_present_string_list_opt args key =
   match json_assoc_member_opt key args with
@@ -88,12 +105,17 @@ let parse_present_string_list_opt args key =
       let rec collect acc index = function
         | [] -> Ok (Some (normalize_name_list (List.rev acc)))
         | `String value :: rest -> collect (value :: acc) (index + 1) rest
-        | _ :: _ ->
-            Error (Printf.sprintf "%s[%d] must be a string" key index)
+        | bad :: _ ->
+            Error
+              (Printf.sprintf "%s[%d] must be a string (received %s)" key
+                 index (json_kind_name bad))
       in
       collect [] 0 items
   | Some `Null -> Error (Printf.sprintf "%s must not be null" key)
-  | Some _ -> Error (Printf.sprintf "%s must be an array of strings" key)
+  | Some other ->
+      Error
+        (Printf.sprintf "%s must be an array of strings (received %s)" key
+           (json_kind_name other))
 
 let parse_enum_string_opt args key of_string ~allowed_values =
   match json_assoc_member_opt key args with
@@ -106,7 +128,10 @@ let parse_enum_string_opt args key of_string ~allowed_values =
             (Printf.sprintf "invalid %s '%s' (allowed: %s)"
                key raw allowed_values))
   | Some `Null -> Error (Printf.sprintf "%s must not be null" key)
-  | Some _ -> Error (Printf.sprintf "%s must be a string" key)
+  | Some other ->
+      Error
+        (Printf.sprintf "%s must be a string (received %s)" key
+           (json_kind_name other))
 
 let parse_cascade_name_opt args =
   match get_string_opt args "cascade_name" with
@@ -171,7 +196,10 @@ let parse_tool_access_input (args : Yojson.Safe.t) :
               | Ok access -> Ok (Some access)
               | Error msg -> Error msg))
       | Some `Null -> Ok None
-      | Some _ -> Error "tool_access must be an object"
+      | Some other ->
+          Error
+            (Printf.sprintf "tool_access must be an object (received %s)"
+               (json_kind_name other))
       | None -> Ok None
     in
     match tool_access_opt with

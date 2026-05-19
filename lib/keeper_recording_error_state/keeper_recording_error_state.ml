@@ -1,3 +1,8 @@
+(* WORKAROUND-CARRYOVER: tracked by docs/rfc/RFC-0144-workaround-sunset-keeper-dedup-carryover.md.
+   Removal: per-[error_kind] sunset criteria (§4). This layer demotes repeated
+   ERROR lines to DEBUG; the root fix is reducing the underlying error rate
+   (per-arm root-fix table in RFC §3). *)
+
 (* Dedupe state for [Keeper_registry.record_error] noise.
 
    See [.mli] for the rationale. This module is intentionally stdlib-only

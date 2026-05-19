@@ -12,6 +12,7 @@ import { useEffect, useState } from 'preact/hooks'
 // see `lib/server/server_dashboard_http.ml:1114`), which is orthogonal to
 // the blocker-class-vs-stale-execution axis and stays inline below.
 import { deriveKeeperAttention, deriveKeeperOperationalState } from '../lib/keeper-operational-state'
+import { deriveFiberAlive } from '../lib/keeper-fiber-alive'
 import { formatPct1 } from '../lib/format-number'
 import { formatDuration } from '../lib/format-time'
 import { ActionButton } from './common/button'
@@ -192,11 +193,13 @@ export function deriveKeeperLiveTruth({
   // §AI코드생성 §2 Unknown-→-Permissive-Default anti-pattern that let stale
   // flat-record fields silently feed status badges; removed here.
   const turnPhase = compactToken(compositeSnapshot?.turn_phase ?? keeper.pipeline_stage)
-  const fiberAlive =
-    compositeSnapshot?.phase_diagnosis?.conditions.fiber_alive
-    ?? keeper.keepalive_running
-    ?? keeper.presence_keepalive
-    ?? (linkedState !== 'offline')
+  // Typed SSOT (lib/keeper-fiber-alive.ts) — preserves provenance instead of
+  // collapsing four semantically distinct signals into one OR-chain.
+  const fiberAlive = deriveFiberAlive({
+    keeper,
+    composite: compositeSnapshot,
+    linkedState,
+  }).alive
   const activeTurn = compositeSnapshot?.is_live === true || !isIdleTurnPhase(compositeSnapshot?.turn_phase)
 
   // RFC-0135 PR-5 + PR-14a: blocker-class axis via typed

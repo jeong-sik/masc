@@ -203,6 +203,84 @@ let resolve_turn_intent_block substitutions =
         observe_turn_intent_render_failure msg;
         raw)
 
+(** In-binary fallback prose for the externalized turn-intent and user-prompt
+    bullet files under [config/prompts/]. Used only when the registry returns
+    an empty body (missing file, frontmatter-only file, or markdown_dir not
+    set in tests). The in-binary copy is kept byte-for-byte equal to the
+    canonical markdown body (post-trim, single trailing newline injected by
+    [load_externalized_bullet]) so that a degraded prompt config still emits
+    the same guidance text. Edits should land in both places to keep them
+    aligned with the keeper.* markdown files. *)
+let fallback_externalized_bullet key =
+  if String.equal key Keeper_prompt_names.turn_intent_claim_guidance_a then
+    Some
+      "- See unclaimed work and you do not already hold a task? Call \
+       keeper_task_claim with {}. It auto-claims the next eligible task; \
+       you do not need a task_id argument. keeper_tasks_list remains the \
+       canonical way to inspect backlog state — use it any time you need to \
+       diagnose what work exists, not just when the claim returns empty."
+  else if String.equal key Keeper_prompt_names.turn_intent_claim_guidance_b then
+    Some
+      "- Need GitHub or PR inspection via keeper_shell op=gh? Claim first. \
+       gh repo context is derived from your active task worktree/current_task_id."
+  else if String.equal key Keeper_prompt_names.turn_intent_board_activity_guidance then
+    Some
+      "- See board activity? Use the listed post_id. If the preview is \
+       enough, comment directly with keeper_board_comment. If you need the \
+       full post, call keeper_board_get and keeper_board_comment in the same \
+       response; keeper_board_get alone is passive and fails actionable turns."
+  else if String.equal key Keeper_prompt_names.turn_intent_board_post_guidance then
+    Some "- Have a finding or update? Call keeper_board_post."
+  else if String.equal key Keeper_prompt_names.turn_intent_board_curation_guidance then
+    Some
+      "- See enough board activity to summarize or route? Call \
+       keeper_board_curation_submit with a concise snapshot."
+  else if String.equal key Keeper_prompt_names.turn_intent_broadcast_guidance then
+    Some "- Need to share broadly? Call keeper_broadcast."
+  else if String.equal key Keeper_prompt_names.immediate_task_move then
+    Some
+      "- Call keeper_task_claim with {} to claim the next eligible \
+       unclaimed task.\n\
+       - For the routine claim flow, call keeper_task_claim directly; use \
+       keeper_tasks_list to inspect backlog state, diagnose missing work, \
+       or verify task lifecycle. Never substitute Bash probes (ls/cat/find \
+       against .masc/, backlog.json, or repo-local task files) for \
+       keeper_tasks_list — keeper_shell blocks those with \
+       `task_state_file_probe_blocked`.\n\
+       - Prefer keeper_task_claim before keeper_board_list or keeper_shell \
+       when you have no claimed task.\n\
+       - If you need keeper_shell op=gh, claim first so gh can derive repo \
+       context from your active task worktree/current_task_id."
+  else None
+
+(** Load a turn-intent or user-prompt bullet from [config/prompts/].
+    Returns the body with a single trailing newline so multiple bullets
+    concatenate cleanly. Returns [""] when the key is toggled off; the
+    toggle is supplied by the caller. *)
+let load_externalized_bullet ~enabled key =
+  if not enabled then ""
+  else
+    let trimmed =
+      String.trim (Prompt_registry.get_prompt key)
+    in
+    if String.equal trimmed "" then
+      match fallback_externalized_bullet key with
+      | Some prose ->
+          Prometheus.inc_counter
+            Keeper_metrics.metric_keeper_prompt_failures
+            ~labels:[("prompt", key)]
+            ();
+          Log.Keeper.warn
+            "externalized prompt '%s' resolved empty; using in-binary fallback"
+            key;
+          prose ^ "\n"
+      | None ->
+          Log.Keeper.warn
+            "externalized prompt '%s' resolved empty and no fallback registered"
+            key;
+          ""
+    else trimmed ^ "\n"
+
 let autonomous_trigger_lines
     ~(decision : Keeper_world_observation.keeper_cycle_decision)
     ~(observation : Keeper_world_observation.world_observation) : string list =
@@ -300,47 +378,42 @@ let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
     && not meta.paused
     && Option.is_none meta.current_task_id
   in
+  (* Turn intent body and each conditional guidance bullet live as markdown
+     under config/prompts/. The OCaml side only computes the boolean toggle
+     for each bullet and loads the prose via Prompt_registry; the prose
+     itself (and any future edits) stay in the markdown files alongside the
+     other keeper prompts. See lib/keeper/keeper_prompt_names.ml for the
+     key set and fallback_externalized_bullet above for in-binary fallbacks. *)
   let board_activity_guidance =
-    if tool_allowed "keeper_board_get" && tool_allowed "keeper_board_comment" then
-      "- See board activity? Use the listed post_id. If the preview is enough, comment directly with keeper_board_comment. If you need the full post, call keeper_board_get and keeper_board_comment in the same response; keeper_board_get alone is passive and fails actionable turns.\n"
-    else
-      ""
+    load_externalized_bullet
+      ~enabled:(tool_allowed "keeper_board_get"
+                && tool_allowed "keeper_board_comment")
+      Keeper_prompt_names.turn_intent_board_activity_guidance
   in
   let board_post_guidance =
-    if tool_allowed "keeper_board_post" then
-      "- Have a finding or update? Call keeper_board_post.\n"
-    else
-      ""
+    load_externalized_bullet
+      ~enabled:(tool_allowed "keeper_board_post")
+      Keeper_prompt_names.turn_intent_board_post_guidance
   in
   let board_curation_guidance =
-    if tool_allowed "keeper_board_curation_submit" then
-      "- See enough board activity to summarize or route? Call keeper_board_curation_submit with a concise snapshot.\n"
-    else
-      ""
+    load_externalized_bullet
+      ~enabled:(tool_allowed "keeper_board_curation_submit")
+      Keeper_prompt_names.turn_intent_board_curation_guidance
   in
   let broadcast_guidance =
-    if tool_allowed "keeper_broadcast" then
-      "- Need to share broadly? Call keeper_broadcast.\n"
-    else
-      ""
+    load_externalized_bullet
+      ~enabled:(tool_allowed "keeper_broadcast")
+      Keeper_prompt_names.turn_intent_broadcast_guidance
   in
-  (* Turn intent body lives at config/prompts/keeper.turn_intent.md.
-     The OCaml side only assembles the conditional guidance bullets and feeds
-     them in as template variables; the prose itself (and any future edits)
-     stay in the markdown file alongside the other keeper prompts. *)
   let claim_guidance_a =
-    if show_claim_guidance then
-      "- See unclaimed work and you do not already hold a task? Call keeper_task_claim with {}. \
-       It auto-claims the next eligible task; you do not need a task_id argument. \
-       keeper_tasks_list remains the canonical way to inspect backlog state — \
-       use it any time you need to diagnose what work exists, not just when the claim returns empty.\n"
-    else ""
+    load_externalized_bullet
+      ~enabled:show_claim_guidance
+      Keeper_prompt_names.turn_intent_claim_guidance_a
   in
   let claim_guidance_b =
-    if show_claim_guidance then
-      "- Need GitHub or PR inspection via keeper_shell op=gh? Claim first. \
-       gh repo context is derived from your active task worktree/current_task_id.\n"
-    else ""
+    load_externalized_bullet
+      ~enabled:show_claim_guidance
+      Keeper_prompt_names.turn_intent_claim_guidance_b
   in
   let turn_intent_substitutions =
     [
@@ -466,21 +539,18 @@ let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
     Buffer.add_string ubuf
       (format_scope_messages observation.pending_scope_messages);
     Buffer.add_string ubuf "\n\n");
-  (* 8. Immediate task move — reactive operational guidance *)
+  (* 8. Immediate task move — reactive operational guidance.
+     Body lives at config/prompts/keeper.immediate_task_move.md. The OCaml
+     side only owns the section header and the trailing blank line; the
+     bullet prose stays in the markdown file alongside the other keeper
+     prompts (see fallback_externalized_bullet for the in-binary mirror). *)
   if show_claim_guidance then (
     Buffer.add_string ubuf "### Immediate Task Move\n";
     Buffer.add_string ubuf
-      "- Call keeper_task_claim with {} to claim the next eligible unclaimed task.\n";
-    Buffer.add_string ubuf
-      "- For the routine claim flow, call keeper_task_claim directly; \
-       use keeper_tasks_list to inspect backlog state, diagnose missing work, \
-       or verify task lifecycle. Never substitute Bash probes (ls/cat/find against \
-       .masc/, backlog.json, or repo-local task files) for keeper_tasks_list — \
-       keeper_shell blocks those with `task_state_file_probe_blocked`.\n";
-    Buffer.add_string ubuf
-      "- Prefer keeper_task_claim before keeper_board_list or keeper_shell when you have no claimed task.\n";
-    Buffer.add_string ubuf
-      "- If you need keeper_shell op=gh, claim first so gh can derive repo context from your active task worktree/current_task_id.\n\n");
+      (load_externalized_bullet
+         ~enabled:true
+         Keeper_prompt_names.immediate_task_move);
+    Buffer.add_char ubuf '\n');
   (* 9. Board activity — reactive trigger *)
   if observation.pending_board_events <> [] then (
     Buffer.add_string ubuf

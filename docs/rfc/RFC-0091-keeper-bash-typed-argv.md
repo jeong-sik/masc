@@ -3,12 +3,12 @@ rfc: "0091"
 title: "Keeper bash tool: cmd string → typed Argv schema (lexer/validator 박멸)"
 status: Draft
 created: 2026-05-17
-updated: 2026-05-17
+updated: 2026-05-20
 author: vincent
 supersedes: []
 superseded_by: null
 related: ["0042", "0084", "0089"]
-implementation_prs: []
+implementation_prs: [15720]
 ---
 
 # RFC-0091 — Keeper bash tool: cmd string → typed Argv schema

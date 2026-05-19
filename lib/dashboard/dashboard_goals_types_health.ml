@@ -158,9 +158,23 @@ let goal_fsm_to_json ~effective_policy (goal : Goal_store.goal)
     ]
 
 let display_disposition_of_receipt_json receipt =
+  (* Previously this defaulted to the literal "unknown", which then hit
+     the [| "unknown" -> "Alert"/"unmapped_cascade_state"] arm below.
+     That conflated two distinct producer-side failure modes:
+     (1) missing [operator_disposition] field — the receipt was emitted
+         without the disposition at all (producer bug);
+     (2) [operator_disposition = "unknown"] — the producer explicitly
+         declared the state unmapped at the cascade layer.
+
+     Using a bracketed sentinel as the default lets the match below
+     fall through to the [_ -> "Alert"/"unmapped_operator_disposition"]
+     catch-all, which is the more accurate classification for case (1).
+     Both cases still surface as "Alert" severity (no operator-visible
+     regression in alerting), but the reason label now distinguishes
+     them so the operator can chase the right producer fix. *)
   let operator_disposition =
     receipt |> member "operator_disposition" |> to_string_option
-    |> Option.value ~default:"unknown"
+    |> Option.value ~default:"<missing operator_disposition field>"
   in
   let operator_disposition_reason =
     receipt |> member "operator_disposition_reason" |> to_string_option

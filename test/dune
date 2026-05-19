@@ -258,6 +258,7 @@
   test_git_graph_snapshot
   test_worktree_status_single_flight_9632
   test_tool_input_validation
+  test_yojson_type_error_repro
   test_failure_learnings_10325
   test_agent_stress_emit_10341
   test_autoresearch_codegen
@@ -572,6 +573,7 @@
   test_git_graph_snapshot
   test_worktree_status_single_flight_9632
   test_tool_input_validation
+  test_yojson_type_error_repro
   test_failure_learnings_10325
   test_agent_stress_emit_10341
   test_autoresearch_codegen

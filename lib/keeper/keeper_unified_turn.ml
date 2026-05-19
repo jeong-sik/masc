@@ -487,94 +487,60 @@ let run_keeper_cycle
                                 ~turn_id:keeper_turn_id
                                 ~prev:Keeper_turn_fsm.Awaiting_provider
                                 Keeper_turn_fsm.Streaming;
-                              try
-                                Eio.Time.with_timeout_exn
-                                  clock
-                                  attempt_watchdog_s
-                                  (fun () ->
-                                     Keeper_agent_run.run_turn
-                                       ~config
-                                       ~meta:run_meta
-                                       ~base_dir
-                                       ~max_context:execution.max_context
-                                       ~build_turn_prompt
-                                       ~user_message
-                                       ~cascade_name:execution.cascade_name
-                                       ~world_observation:observation
-                                       ~turn_affordances
-                                       ?provider_filter:
-                                         (Env_config_keeper.KeeperCascade
-                                          .provider_allowlist
-                                            ())
-                                       ~generation:run_generation
-                                       ~max_turns
-                                       ~max_idle_turns
-                                       ~history_user_source:"world_state_prompt"
-                                       ~history_assistant_source:"internal_assistant"
-                                       ~degraded_retry_applied:
-                                         (Option.is_some !degraded_retry_info)
-                                       ?degraded_retry_cascade:
-                                         (Option.map
-                                            (fun (retry : EC.degraded_retry) ->
-                                               retry.next_cascade)
-                                            !degraded_retry_info)
-                                       ?fallback_reason:
-                                         (Option.map
-                                            (fun (retry : EC.degraded_retry) ->
-                                               retry.fallback_reason)
-                                            !degraded_retry_info)
-                                       ~cascade_rotation_attempts:
-                                         (List.rev !cascade_rotation_attempts)
-                                       ~temperature:execution.temperature
-                                       ~max_tokens:execution.max_tokens
-                                       ~oas_timeout_s
-                                       ~oas_timeout_is_explicit:false
-                                       ?max_cost_usd
-                                       ~trajectory_acc
-                                       ~is_retry
-                                       ?shared_context
-                                       ?event_bus:(Keeper_event_bus.get ())
-                                       ())
-                              with
-                              | Eio.Cancel.Cancelled _ as e ->
-                                (* Cycle 1b-iv: external cancellation that escapes the
-                     in-band receipt builder in [Keeper_agent_run.run_turn].
-                     The 14 inner Cancel handlers all re-raise; without an
-                     outer catch the receipt for this turn is silently
-                     dropped (FSM emits Streaming then nothing — the turn
-                     just disappears from the operator's timeline).
-
-                     Emit a minimal cancelled receipt + matching FSM
-                     Cancelled transition before re-raising.  When
-                     [fiber_stop] is confirmed set in the registry the
-                     cancellation came from the supervisor cooperative-stop
-                     path: emit SupervisorRequestsStop (Streaming →
-                     Streaming) to record the signal-raised window, then
-                     HonorStopSignal (Streaming → Cancelled supervisor_stop).
-                     For other Eio cancellations (switch teardown, timeout)
-                     [fiber_stop] is false and we skip straight to
-                     HonorStopSignal with the same conservative cancel
-                     reason. *)
-                                record_streaming_cancelled_observation
-                                  ~config
-                                  ~run_meta
-                                  ~run_generation
-                                  ~cascade_name:execution.cascade_name
-                                  ~keeper_turn_id
-                                  ();
-                                raise e
-                              | Eio.Time.Timeout ->
-                                Error
-                                  (Agent_sdk.Error.Api
-                                     (Timeout
-                                        { message =
-                                            Printf.sprintf
-                                              "Turn wall-clock budget exhausted during \
-                                               cascade attempt (budget=%.1fs, \
-                                               watchdog=%.1fs)"
-                                              oas_timeout_s
-                                              attempt_watchdog_s
-                                        })))
+                              Keeper_unified_turn_attempt_watchdog.dispatch
+                                ~clock
+                                ~attempt_watchdog_s
+                                ~oas_timeout_s
+                                ~on_cancelled:(fun () ->
+                                  record_streaming_cancelled_observation
+                                    ~config
+                                    ~run_meta
+                                    ~run_generation
+                                    ~cascade_name:execution.cascade_name
+                                    ~keeper_turn_id
+                                    ())
+                                ~run:(fun () ->
+                                  Keeper_agent_run.run_turn
+                                    ~config
+                                    ~meta:run_meta
+                                    ~base_dir
+                                    ~max_context:execution.max_context
+                                    ~build_turn_prompt
+                                    ~user_message
+                                    ~cascade_name:execution.cascade_name
+                                    ~world_observation:observation
+                                    ~turn_affordances
+                                    ?provider_filter:
+                                      (Env_config_keeper.KeeperCascade.provider_allowlist ())
+                                    ~generation:run_generation
+                                    ~max_turns
+                                    ~max_idle_turns
+                                    ~history_user_source:"world_state_prompt"
+                                    ~history_assistant_source:"internal_assistant"
+                                    ~degraded_retry_applied:
+                                      (Option.is_some !degraded_retry_info)
+                                    ?degraded_retry_cascade:
+                                      (Option.map
+                                         (fun (retry : EC.degraded_retry) ->
+                                            retry.next_cascade)
+                                         !degraded_retry_info)
+                                    ?fallback_reason:
+                                      (Option.map
+                                         (fun (retry : EC.degraded_retry) ->
+                                            retry.fallback_reason)
+                                         !degraded_retry_info)
+                                    ~cascade_rotation_attempts:
+                                      (List.rev !cascade_rotation_attempts)
+                                    ~temperature:execution.temperature
+                                    ~max_tokens:execution.max_tokens
+                                    ~oas_timeout_s
+                                    ~oas_timeout_is_explicit:false
+                                    ?max_cost_usd
+                                    ~trajectory_acc
+                                    ~is_retry
+                                    ?shared_context
+                                    ?event_bus:(Keeper_event_bus.get ())
+                                    ()))
                        in
                        let fail_open_rotation_cascades =
                          active_fail_open_rotation_cascades ()

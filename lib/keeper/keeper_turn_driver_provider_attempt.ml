@@ -163,6 +163,17 @@ let record_candidate_health_error candidate sdk_err =
         ~error_kind
         ~error_reason
         ()))
+  else if sdk_error_is_required_tool_contract_violation sdk_err
+  then (
+    let error_kind = health_error_kind "required_tool_contract_violation" in
+    health_keys
+    |> List.iter (fun provider_key ->
+      Cascade_health_tracker.record_terminal_failure
+        Cascade_health_tracker.global
+        ~provider_key
+        ~error_kind
+        ~error_reason
+        ()))
   else
     match sdk_error_soft_rate_limited sdk_err with
     | Some retry_after_s ->

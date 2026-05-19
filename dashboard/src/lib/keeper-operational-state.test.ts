@@ -7,7 +7,6 @@ import {
   compositeIsTurnIdle,
   compositePhaseTone,
   derivePreferredPhase,
-  deriveKeeperAttention,
   deriveKeeperDisplayReason,
   deriveKeeperOperationalState,
   deriveKeeperTurnPhase,
@@ -70,6 +69,7 @@ describe('deriveKeeperOperationalState — paused branch', () => {
     })
     expect(state).toEqual<KeeperOperationalState>({
       kind: 'paused',
+      attention: 'clean',
       cause: 'unknown',
     })
   })
@@ -81,6 +81,7 @@ describe('deriveKeeperOperationalState — paused branch', () => {
     })
     expect(state).toEqual<KeeperOperationalState>({
       kind: 'paused',
+      attention: 'clean',
       cause: 'operator',
     })
   })
@@ -95,6 +96,7 @@ describe('deriveKeeperOperationalState — paused branch', () => {
     })
     expect(state).toEqual<KeeperOperationalState>({
       kind: 'paused',
+      attention: 'clean',
       cause: 'supervisor',
     })
   })
@@ -106,6 +108,7 @@ describe('deriveKeeperOperationalState — paused branch', () => {
     })
     expect(state).toEqual<KeeperOperationalState>({
       kind: 'paused',
+      attention: 'clean',
       cause: 'operator',
     })
   })
@@ -123,7 +126,7 @@ describe('deriveKeeperOperationalState — offline branch', () => {
       keeper: makeKeeper({ phase, status: 'offline' }),
       composite: null,
     })
-    expect(state).toEqual<KeeperOperationalState>({ kind: 'offline', cause })
+    expect(state).toEqual<KeeperOperationalState>({ kind: 'offline', attention: 'clean', cause })
   })
 
   it.each<['offline' | 'inactive' | 'unbooted']>([
@@ -157,6 +160,7 @@ describe('deriveKeeperOperationalState — stuck branch (RFC-0135 §1.1 root)', 
     })
     expect(state).toEqual<KeeperOperationalState>({
       kind: 'stuck',
+      attention: 'clean',
       reason: 'synthetic_stall',
     })
   })
@@ -164,6 +168,8 @@ describe('deriveKeeperOperationalState — stuck branch (RFC-0135 §1.1 root)', 
   it('blocker AND execution_current=true ⇒ stuck (receipt is current)', () => {
     // execution_current=true means the receipt matches the *current* live
     // turn (server_dashboard_http.ml:1061-1074) — the blocker is meaningful.
+    // attention=blocked here because runtime_attention.blocked=true (kind/
+    // attention orthogonality covered in the §13 axis-extension suite).
     const state = deriveKeeperOperationalState({
       keeper: makeKeeper({ runtime_blocker_class: 'cascade_exhausted' }),
       composite: makeComposite({
@@ -172,6 +178,7 @@ describe('deriveKeeperOperationalState — stuck branch (RFC-0135 §1.1 root)', 
     })
     expect(state).toEqual<KeeperOperationalState>({
       kind: 'stuck',
+      attention: 'blocked',
       reason: 'cascade_exhausted',
     })
   })
@@ -188,6 +195,7 @@ describe('deriveKeeperOperationalState — stuck branch (RFC-0135 §1.1 root)', 
     })
     expect(state).toEqual<KeeperOperationalState>({
       kind: 'stuck',
+      attention: 'clean',
       reason: 'oas_timeout_budget',
     })
   })
@@ -203,6 +211,7 @@ describe('deriveKeeperOperationalState — stuck branch (RFC-0135 §1.1 root)', 
     })
     expect(state).toEqual<KeeperOperationalState>({
       kind: 'stuck',
+      attention: 'clean',
       reason: 'fiber_dead',
     })
   })
@@ -226,6 +235,7 @@ describe('deriveKeeperOperationalState — running branch with conditioning', ()
     })
     expect(state).toEqual<KeeperOperationalState>({
       kind: 'running',
+      attention: 'clean',
       turnPhase: 'idle',
       staleBlocker: null,
     })
@@ -258,6 +268,7 @@ describe('deriveKeeperOperationalState — running branch with conditioning', ()
     })
     expect(state).toEqual<KeeperOperationalState>({
       kind: 'running',
+      attention: 'clean',
       turnPhase: 'executing',
       staleBlocker: 'synthetic_stall',
     })
@@ -275,6 +286,7 @@ describe('deriveKeeperOperationalState — running branch with conditioning', ()
     })
     expect(state).toEqual<KeeperOperationalState>({
       kind: 'running',
+      attention: 'clean',
       turnPhase: 'idle',
       staleBlocker: null,
     })
@@ -356,6 +368,7 @@ describe('deriveKeeperOperationalState — priority invariants', () => {
     })
     expect(state).toEqual<KeeperOperationalState>({
       kind: 'running',
+      attention: 'clean',
       turnPhase: 'idle',
       staleBlocker: 'turn_timeout',
     })
@@ -443,35 +456,79 @@ describe('compositeIsRunning / compositeIsTurnIdle — wire-format helpers', () 
   })
 })
 
-describe('deriveKeeperAttention — RFC-0135 PR-14a', () => {
-  const makeComposite = (
-    attentionOverrides: Partial<{ blocked: boolean; needs_attention: boolean }>,
-  ): KeeperCompositeSnapshot =>
-    ({
-      keeper: 'test',
-      runtime_attention: {
-        blocked: false,
-        needs_attention: false,
-        ...attentionOverrides,
-      },
-    } as unknown as KeeperCompositeSnapshot)
+describe('KeeperOperationalState.attention axis — RFC-0135 §13 Goal-2 (2026-05-20)', () => {
+  // The standalone `deriveKeeperAttention` was retired in favour of
+  // a per-variant `attention` axis on `KeeperOperationalState`. The
+  // priority rule (blocked > needs_attention > clean) is unchanged;
+  // the migration moved derivation into `deriveKeeperOperationalState`
+  // so external callers can no longer OR-merge an off-SSOT attention
+  // axis with kind (audit B3 root pattern).
 
-  it('blocked=true ⇒ blocked', () => {
-    expect(deriveKeeperAttention(makeComposite({ blocked: true }))).toBe<KeeperAttention>('blocked')
+  it('blocked=true ⇒ attention=blocked', () => {
+    const state = deriveKeeperOperationalState({
+      keeper: makeKeeper(),
+      composite: makeComposite({ runtime_attention: attention({ blocked: true }) }),
+    })
+    expect(state.attention).toBe<KeeperAttention>('blocked')
   })
-  it('needs_attention=true ⇒ needs_attention', () => {
-    expect(deriveKeeperAttention(makeComposite({ needs_attention: true }))).toBe<KeeperAttention>('needs_attention')
+
+  it('needs_attention=true ⇒ attention=needs_attention', () => {
+    const state = deriveKeeperOperationalState({
+      keeper: makeKeeper(),
+      composite: makeComposite({ runtime_attention: attention({ needs_attention: true }) }),
+    })
+    expect(state.attention).toBe<KeeperAttention>('needs_attention')
   })
+
   it('blocked beats needs_attention when both set', () => {
-    expect(
-      deriveKeeperAttention(makeComposite({ blocked: true, needs_attention: true })),
-    ).toBe<KeeperAttention>('blocked')
+    const state = deriveKeeperOperationalState({
+      keeper: makeKeeper(),
+      composite: makeComposite({
+        runtime_attention: attention({ blocked: true, needs_attention: true }),
+      }),
+    })
+    expect(state.attention).toBe<KeeperAttention>('blocked')
   })
-  it('neither flag set ⇒ clean', () => {
-    expect(deriveKeeperAttention(makeComposite({}))).toBe<KeeperAttention>('clean')
+
+  it('neither flag set ⇒ attention=clean', () => {
+    const state = deriveKeeperOperationalState({
+      keeper: makeKeeper(),
+      composite: makeComposite({ runtime_attention: attention({}) }),
+    })
+    expect(state.attention).toBe<KeeperAttention>('clean')
   })
-  it('null composite ⇒ clean (no backend attestation)', () => {
-    expect(deriveKeeperAttention(null)).toBe<KeeperAttention>('clean')
+
+  it('null composite ⇒ attention=clean (no backend attestation)', () => {
+    const state = deriveKeeperOperationalState({
+      keeper: makeKeeper(),
+      composite: null,
+    })
+    expect(state.attention).toBe<KeeperAttention>('clean')
+  })
+
+  // §13 axis × kind orthogonality matrix — attention is computed
+  // independently of which `kind` variant the keeper resolves into.
+  it.each<[
+    'offline' | 'paused' | 'stuck' | 'running',
+    Partial<Keeper>,
+    Partial<KeeperCompositeSnapshot> | null,
+    KeeperAttention,
+  ]>([
+    // kind=paused × attention=blocked
+    ['paused', { paused: true }, { runtime_attention: attention({ blocked: true }) }, 'blocked'],
+    // kind=offline × attention=needs_attention
+    ['offline', { phase: 'Offline' }, { runtime_attention: attention({ needs_attention: true }) }, 'needs_attention'],
+    // kind=stuck × attention=blocked
+    ['stuck', { runtime_blocker_class: 'oas_timeout_budget' as KeeperRuntimeBlockerClass }, { runtime_attention: attention({ blocked: true }) }, 'blocked'],
+    // kind=running × attention=clean
+    ['running', {}, { runtime_attention: attention({}) }, 'clean'],
+  ])('kind=%s × attention=%s — axes orthogonal', (kind, keeperOverrides, compositeOverrides, expectedAttention) => {
+    const state = deriveKeeperOperationalState({
+      keeper: makeKeeper(keeperOverrides),
+      composite: compositeOverrides === null ? null : makeComposite(compositeOverrides),
+    })
+    expect(state.kind).toBe(kind)
+    expect(state.attention).toBe<KeeperAttention>(expectedAttention)
   })
 })
 

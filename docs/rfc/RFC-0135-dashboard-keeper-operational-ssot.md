@@ -238,6 +238,30 @@ PR-1 머지 후 PR-2~7 은 모두 같은 SSOT 호출자이므로 **동시 진행
 4. **외부 reader** (CLI, JIRA hook 등) 중 `runtime_blocker_class` 직접 의존하는 곳이 있다면 PR-6 deprecation 일정에 영향 — audit 필요.
 5. **`fsm-hub-types` 누락 audit**: PR #16552 body 가 명시한 `statusLabel ↔ monitoring-runtime ↔ fsm-hub-types` 3곳 vocab 분산 중 `fsm-hub-types` 가 본 RFC §1.5 audit 에서 누락되었다. PR-1 spec 확정 전 추가 grep + matrix 보강 필요.
 
+## §13 Axes Extensions (post-merge typed-state evolution)
+
+`KeeperOperationalState` 는 PR-1 머지 시 4 variant (offline/paused/stuck/running) sum 으로 출발했고, 각 variant 가 *kind 별* 데이터만 가진 minimal shape 였다. 이후 audit (2026-05-19) 가 typed sum **외부** 에서 OR 합류되는 axes 를 다수 발견 — 이 axes 는 variant 와 직교 (paused 키퍼도 attention='needs_attention' 가능, running 키퍼도 attention='blocked' 가능). 외부 OR 합류는 RFC §9-2 (OR-축 visibility 분기) 거부 기준에 직접 해당.
+
+본 절은 typed sum 에 흡수된 axes 의 evolution 을 한 줄씩 기록한다.
+
+### Goal-2 / 2026-05-20 — `attention: KeeperAttention` 흡수
+
+- **흡수 대상**: `composite.runtime_attention.{blocked, needs_attention}` 의 2-bit axis. 우선순위 `blocked > needs_attention > clean`.
+- **이전 패턴**: `lib/keeper-operational-state.ts:179 deriveKeeperAttention(composite)` standalone helper + 외부 consumer (`components/keeper-detail-runtime.ts:213` audit B3) 가 `stuckByBlockerClass || attention !== 'clean'` OR-merge.
+- **이후 패턴**: `KeeperOperationalState` 의 4 variant 모두 `attention: KeeperAttention` axis 보유. derive 함수가 일관 derive → variant 별 첨부. callsite 는 `opState.attention` 직접 read.
+- **외부 helper 정리**: `deriveKeeperAttention` export 제거 → private `computeKeeperAttention`. 마지막 외부 consumer 가 `opState.attention` 으로 routing 되어 standalone export 불필요.
+- **테스트**: 4 variant 각각의 `attention` 값이 `composite.runtime_attention` 와 정확히 매핑되는지 검증 (clean/blocked/needs_attention × 4 variant = 12 case).
+- **B3 closure 증명**: `keeper-detail-runtime.ts` 의 `import { deriveKeeperAttention }` 사라짐 = SSOT 외부 axis 단일 callsite 의 완전 흡수.
+
+### 향후 흡수 후보 (audit Goal-2 잔여)
+
+- `turnPhase: KeeperTurnPhase` (현재 running variant 만 가짐 → 모든 variant 로 일반화). composite preferred → flat fallback 의 SSOT 내부화.
+- `displaySummary: string | null` (`runtime_blocker_summary` 흡수). `keeper-detail-runtime.ts:256` 의 추가 fallback 제거 prereq.
+- `phase: KeeperPhase | null` (composite preferred SSOT 내부화). `lib/monitoring-runtime.ts:165 toKeeperPhase(keeper.phase) ?? lifecyclePhase` fallback 흡수.
+
+각 axis 는 별도 PR 로 stack. 모두 audit B-cluster 의 부분 closure 에 해당.
+
 ## §12 변경 이력
 
 - 2026-05-19 vincent — 초안 작성, 3 사례 기반 root-cause 정리, PR 시퀀스 §5.
+- 2026-05-20 vincent (via claude-code) — §13 추가, Goal-2 `attention` axis 흡수 + 후속 axes 후보 명시. audit B3 closure.

@@ -123,12 +123,46 @@ function normalizeKeeperAgentStatus(value: unknown): Keeper['status'] {
   return 'offline'
 }
 
+// Closed set of strings that `keeperDisplayStatus` is allowed to emit
+// when an offline keeper is rendered. The first 8 are dashboard-classified
+// labels; the last 5 are backend FSM phase names that leak through
+// untranslated. Kept as a `const` set so adding a new value at the
+// `KeeperLifecycleState` union type forces a parallel update here
+// (and forces tsc to fail at consumers if drift occurs).
+const KEEPER_LIFECYCLE_STATES: ReadonlySet<KeeperLifecycleState> = new Set<KeeperLifecycleState>([
+  'active', 'compacting', 'preparing', 'handoff-imminent',
+  'idle', 'offline', 'unbooted', 'stopped',
+  'paused', 'crashed', 'dead', 'zombie', 'unknown',
+])
+
+// Typed parse: replaces the `as KeeperLifecycleState` cast that
+// previously trusted whatever `keeperDisplayStatus` returned. Returns
+// `null` on unrecognized input; callers decide the fallback. Mirrors
+// `toKeeperPhase` (line 94 of this file) in shape.
+export function toKeeperLifecycleState(raw: string | null | undefined): KeeperLifecycleState | null {
+  if (!raw) return null
+  const trimmed = raw.trim()
+  if (!trimmed) return null
+  return KEEPER_LIFECYCLE_STATES.has(trimmed as KeeperLifecycleState)
+    ? (trimmed as KeeperLifecycleState)
+    : null
+}
+
 export function deriveLifecycleState(keeper: Keeper): KeeperLifecycleState {
   // RFC-0139 PR-2: strict-superset migration off `isOfflineStatus`
   // (status-only). `isKeeperOffline` adds the terminal-FSM-phase axis
   // (Offline/Stopped/Dead/Crashed/Zombie) so a keeper crashed mid-tick
   // is caught even when its wire-format status hasn't transitioned yet.
-  if (isKeeperOffline(keeper)) return keeperDisplayStatus(keeper) as KeeperLifecycleState
+  if (isKeeperOffline(keeper)) {
+    // Replaces an `as KeeperLifecycleState` cast that lied to the type
+    // system when `keeperDisplayStatus` returned a backend FSM name
+    // (`'paused'` / `'crashed'` / `'dead'` / `'zombie'` / `'unknown'`)
+    // outside the original 8-tag union. The union has now been widened
+    // to include those 5 names; `toKeeperLifecycleState` enforces the
+    // boundary at runtime so a future drift surfaces as `'idle'`
+    // instead of a silent type-system lie.
+    return toKeeperLifecycleState(keeperDisplayStatus(keeper)) ?? 'idle'
+  }
 
   const series = keeper.metrics_series
   if (!series || series.length === 0) {

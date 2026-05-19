@@ -529,6 +529,24 @@ export interface KeeperTrustSummary {
   latest_causal_event?: KeeperTrustLatestEvent | null
 }
 
+// Dashboard rendering union returned by `deriveLifecycleState`
+// (keeper-store-normalize.ts). The first 8 are dashboard-classified
+// metrics-driven labels; the last 5 are backend FSM phase names that
+// leak through when `isKeeperOffline(keeper)` is true and the body
+// returns `keeperDisplayStatus(keeper)` directly.
+//
+// Pre-honest version of this type was just the first 8; the
+// `keeperDisplayStatus(keeper) as KeeperLifecycleState` cast lied about
+// the runtime shape (`'paused'`, `'crashed'`, `'dead'`, `'zombie'`, and
+// `'unknown'` can leak through). Downstream consumers
+// (`keeperStateTone` in components/common/status-chip.ts) already
+// handle the FSM-name vocabulary, so the right fix is to widen the
+// type to match reality rather than narrow the runtime via a lossy
+// mapping.
+//
+// `PipelineStage` (this file, ~line 709) is the typed backend mirror
+// for a different axis (pipeline_stage_of_phase, 10-value union); these
+// two unions deliberately overlap on the FSM-name tail.
 export type KeeperLifecycleState =
   | 'active'
   | 'compacting'
@@ -538,6 +556,13 @@ export type KeeperLifecycleState =
   | 'offline'
   | 'unbooted'
   | 'stopped'
+  // Backend FSM phase names that leak through deriveLifecycleState's
+  // `isKeeperOffline` branch via keeperDisplayStatus(keeper).
+  | 'paused'
+  | 'crashed'
+  | 'dead'
+  | 'zombie'
+  | 'unknown'
 
 export interface Goal {
   id: string

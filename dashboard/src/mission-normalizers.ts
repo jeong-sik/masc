@@ -1,4 +1,5 @@
 import { isRecord, asString, asNumber, asBoolean, extractArray } from './components/common/normalize'
+import { normalizePendingConfirmation } from './pending-confirm'
 import {
   normalizeAttentionItem,
   normalizeRecommendedAction,
@@ -192,21 +193,7 @@ function normalizeKeeper(raw: unknown): OperatorKeeperSnapshot | null {
   }
 }
 
-function normalizePendingConfirmation(raw: unknown): PendingConfirmation | null {
-  if (!isRecord(raw)) return null
-  const token = asString(raw.confirm_token) ?? asString(raw.token)
-  if (!token) return null
-  return {
-    confirm_token: token,
-    actor: asString(raw.actor),
-    action_type: asString(raw.action_type),
-    target_type: asString(raw.target_type),
-    target_id: asString(raw.target_id) ?? null,
-    delegated_tool: asString(raw.delegated_tool),
-    created_at: asString(raw.created_at),
-    preview: raw.preview,
-  }
-}
+// normalizePendingConfirmation imported from pending-confirm.ts (SSOT)
 
 function normalizeActionDescriptor(raw: unknown): OperatorActionDescriptor | null {
   if (!isRecord(raw)) return null

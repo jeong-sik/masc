@@ -8,8 +8,8 @@ import {
   normalizeGovernanceJudgeSummary,
   normalizeGovernanceJudgment,
   normalizeKeeperApprovalQueueItem,
-  normalizePendingConfirmation,
 } from './board'
+import { normalizePendingConfirmation } from '../pending-confirm'
 import { normalizeKeeperTrustTerminalReason } from '../keeper-store-normalize'
 import { currentDashboardActor, get, post, withRetries, NAMESPACE_TRUTH_GET_TIMEOUT_MS } from './core'
 import {

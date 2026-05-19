@@ -759,7 +759,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
      missing identity falls through to External_mcp.  Issue #8915. *)
   let keeper_entry =
     if String.length agent_name = 0 then None
-    else Keeper_registry.find_by_agent_name agent_name
+    else Keeper_registry_lookup.find_by_agent_name agent_name
   in
   let source : Tool_registry.call_source =
     match keeper_entry with

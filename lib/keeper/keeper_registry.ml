@@ -1486,61 +1486,9 @@ let tool_usage_of ~base_path name =
     |> List.sort (fun (_, a) (_, b) -> Int.compare b.count a.count)
 ;;
 
-(** Look up a keeper by name across all base_paths (O(n) scan). *)
-let find_by_name name =
-  StringMap.fold
-    (fun _k v acc ->
-       match acc with
-       | Some _ -> acc
-       | None -> if String.equal v.name name then Some v else None)
-    (Atomic.get registry)
-    None
-;;
-
-let find_by_agent_name agent_name =
-  StringMap.fold
-    (fun _k v acc ->
-       match acc with
-       | Some _ -> acc
-       | None -> if String.equal v.meta.agent_name agent_name then Some v else None)
-    (Atomic.get registry)
-    None
-;;
-
-let find_by_id (uid : Keeper_id.Uid.t) =
-  StringMap.fold
-    (fun _k v acc ->
-       match acc with
-       | Some _ -> acc
-       | None ->
-         (match v.meta.keeper_id with
-          | Some id when Keeper_id.Uid.equal id uid -> Some v
-          | _ -> None))
-    (Atomic.get registry)
-    None
-;;
-
-let tool_usage_of_by_name name =
-  match find_by_name name with
-  | None -> []
-  | Some entry ->
-    StringMap.fold (fun n e acc -> (n, e) :: acc) entry.tool_usage []
-    |> List.sort (fun (_, a) (_, b) -> Int.compare b.count a.count)
-;;
-
-(* -- Config resolution --------------------------------------------- *)
-
-let resolve_config (config : Coord_utils_backend_setup.config) keeper_name
-  : Coord_utils_backend_setup.config
-  =
-  if keeper_name = ""
-  then config
-  else (
-    (* Keeper config resolution is scoped to the caller's current base_path.
-       Do not retarget requests across other base_path registries. *)
-    match get ~base_path:config.base_path keeper_name with
-    | Some _ | None -> config)
-;;
+(* Lookup API (find_by_name / find_by_agent_name / find_by_id /
+   tool_usage_of_by_name / resolve_config) moved to
+   Keeper_registry_lookup. *)
 
 (* -- Tool usage persistence ---------------------------------------- *)
 

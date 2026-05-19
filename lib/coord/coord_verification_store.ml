@@ -57,8 +57,23 @@ let verdict_of_yojson = function
              | _ -> "no reason given"
            in
            Ok (`Partial (score, reason))
-       | _ -> Error "unknown or missing verdict")
-  | _ -> Error "verdict must be a JSON object"
+       | other ->
+           let got =
+             match other with
+             | Some j -> Printf.sprintf "got %s" (Json_util.excerpt j)
+             | None -> "field missing"
+           in
+           Error
+             (Printf.sprintf
+                "unknown or missing 'verdict' (expected one of: \
+                 pass | fail | partial; %s)"
+                got))
+  | other ->
+      Error
+        (Printf.sprintf
+           "verdict must be a JSON object, got %s: %s"
+           (Json_util.kind_name other)
+           (Json_util.excerpt other))
 
 let request_status_of_yojson = function
   | `Assoc fields ->
@@ -67,13 +82,38 @@ let request_status_of_yojson = function
        | Some (`String "assigned") ->
            (match List.assoc_opt "verifier" fields with
             | Some (`String agent) -> Ok (`Assigned agent)
-            | _ -> Error "assigned requires 'verifier' field")
+            | other ->
+                let got =
+                  match other with
+                  | Some j -> Printf.sprintf "got %s" (Json_util.excerpt j)
+                  | None -> "field missing"
+                in
+                Error
+                  (Printf.sprintf
+                     "assigned status requires 'verifier' string field \
+                      (%s)"
+                     got))
        | Some (`String "completed") ->
            (match verdict_of_yojson (`Assoc fields) with
             | Ok verdict -> Ok (`Completed verdict)
             | Error err -> Error err)
-       | _ -> Error "unknown request status")
-  | _ -> Error "request status must be a JSON object"
+       | other ->
+           let got =
+             match other with
+             | Some j -> Printf.sprintf "got %s" (Json_util.excerpt j)
+             | None -> "field missing"
+           in
+           Error
+             (Printf.sprintf
+                "unknown 'status' (expected one of: pending | assigned \
+                 | completed; %s)"
+                got))
+  | other ->
+      Error
+        (Printf.sprintf
+           "request status must be a JSON object, got %s: %s"
+           (Json_util.kind_name other)
+           (Json_util.excerpt other))
 
 let request_header_of_yojson = function
   | `Assoc fields ->
@@ -109,8 +149,24 @@ let request_header_of_yojson = function
              | None -> `Pending
            in
            Ok { id; task_id; worker; verifier; created_at; status }
-       | _ -> Error "verification request requires 'id', 'task_id', 'worker' fields")
-  | _ -> Error "verification request must be a JSON object"
+       | id_opt, task_opt, worker_opt ->
+           let missing =
+             List.filter_map
+               (fun (name, opt) -> if Option.is_none opt then Some name else None)
+               [ "id", id_opt; "task_id", task_opt; "worker", worker_opt ]
+           in
+           Error
+             (Printf.sprintf
+                "verification request missing required string field(s) \
+                 [%s] (object had keys: [%s])"
+                (String.concat ", " missing)
+                (String.concat ", " (List.map fst fields))))
+  | other ->
+      Error
+        (Printf.sprintf
+           "verification request must be a JSON object, got %s: %s"
+           (Json_util.kind_name other)
+           (Json_util.excerpt other))
 
 let load_request_header base_path req_id =
   let path = request_path base_path req_id in

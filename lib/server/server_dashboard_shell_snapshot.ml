@@ -73,7 +73,7 @@ let select_telemetry_summary_json
         Server_timing.measure
           timing_obj
           Server_timing.Telemetry_summary_aggregate
-          (fun () -> Telemetry_unified.summary_json ~base_path ~masc_root ()))
+          (fun () -> Telemetry_unified.summary_json ~base_path ~masc_root ())))
 ;;
 
 let select_project_snapshot_json ~state ~sw ~clock ?timing req

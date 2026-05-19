@@ -7,6 +7,7 @@ type cannot_parse_kind =
   | Parse_error
   | Parse_aborted of Masc_exec.Parsed.reason_aborted
   | Too_complex of Masc_exec.Parsed.reason_too_complex
+  | Unsupported_nested_pipeline of { stage_index : int }
 
 type shape =
   | Simple
@@ -32,9 +33,27 @@ type decision =
     }
   | Cannot_parse of { kind : cannot_parse_kind }
 
-let rec simples_of_ir = function
-  | Masc_exec.Shell_ir.Simple simple -> [ simple ]
-  | Masc_exec.Shell_ir.Pipeline stages -> List.concat_map simples_of_ir stages
+(* Walk a Shell_ir.t and return a flat [simple list] if there are no
+   nested pipelines, or [Error stage_index] (0-based) for the first
+   nested stage encountered.
+
+   The current bash_subset grammar never produces nested pipelines
+   (see lib/exec/parser/bash.ml's [to_shell_ir] which maps a list of
+   stages directly to [Pipeline (List.map Simple ...)]); but the
+   [Shell_ir.t] type allows nesting structurally, so this walker
+   is the explicit fail-closed boundary.  RFC-0131 PR-1b replaces
+   the prior [List.concat_map] flattener that silently collapsed
+   any future nested pipeline into a flat stage list. *)
+let safe_simples_of_ir : Masc_exec.Shell_ir.t -> (Masc_exec.Shell_ir.simple list, int) result
+  = function
+  | Masc_exec.Shell_ir.Simple simple -> Ok [ simple ]
+  | Masc_exec.Shell_ir.Pipeline stages ->
+    let rec loop idx acc = function
+      | [] -> Ok (List.rev acc)
+      | Masc_exec.Shell_ir.Simple s :: rest -> loop (idx + 1) (s :: acc) rest
+      | Masc_exec.Shell_ir.Pipeline _ :: _ -> Error idx
+    in
+    loop 0 [] stages
 ;;
 
 let shape_of_count = function
@@ -42,12 +61,15 @@ let shape_of_count = function
   | stages -> Pipeline { stages }
 ;;
 
-let parsed_context_of_ast ast =
-  let simples = simples_of_ir ast in
-  let stage_bins =
-    simples |> List.map (fun simple -> Masc_exec.Bin.to_string simple.Masc_exec.Shell_ir.bin)
-  in
-  { ast; shape = shape_of_count (List.length stage_bins); stage_bins }
+let parsed_context_of_shell_ir ast : (parsed_context, cannot_parse_kind) result =
+  match safe_simples_of_ir ast with
+  | Error stage_index -> Error (Unsupported_nested_pipeline { stage_index })
+  | Ok simples ->
+    let stage_bins =
+      simples
+      |> List.map (fun simple -> Masc_exec.Bin.to_string simple.Masc_exec.Shell_ir.bin)
+    in
+    Ok { ast; shape = shape_of_count (List.length stage_bins); stage_bins }
 ;;
 
 let parse ?caller:_ cmd =
@@ -56,7 +78,7 @@ let parse ?caller:_ cmd =
      ignored-argument pattern is intentional: PR-1a establishes the
      API surface; PR-3 wires the counters. *)
   match Masc_exec_bash_parser.Bash.parse_string cmd with
-  | Masc_exec.Parsed.Parsed ast -> Ok (parsed_context_of_ast ast)
+  | Masc_exec.Parsed.Parsed ast -> parsed_context_of_shell_ir ast
   | Masc_exec.Parsed.Parse_error _ -> Error Parse_error
   | Masc_exec.Parsed.Parse_aborted r -> Error (Parse_aborted r)
   | Masc_exec.Parsed.Too_complex r -> Error (Too_complex r)
@@ -127,6 +149,7 @@ let cannot_parse_kind_tag = function
   | Parse_aborted `Timeout_50ms -> "timeout"
   | Parse_aborted `Depth_limit -> "depth_limit"
   | Parse_aborted `Token_limit_50k -> "token_limit"
+  | Unsupported_nested_pipeline _ -> "unsupported_nested_pipeline"
   | Too_complex `Heredoc -> "heredoc"
   | Too_complex `Here_string -> "here_string"
   | Too_complex `Cmd_subst -> "cmd_subst"

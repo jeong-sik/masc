@@ -6423,7 +6423,7 @@ let test_degraded_retry_after_recoverable_error_includes_oas_timeout_budget () =
             { budget_sec = 273.0
             ; keeper_turn_timeout_sec = 1200.0
             ; estimated_input_tokens = 2_000
-            ; source = "adaptive_estimated_input_tokens"
+            ; source = "static_300s"
             ; remaining_turn_budget_sec = Some 600.0
             ; min_required_sec = 15.0
             ; phase = "test_phase"
@@ -8123,8 +8123,8 @@ let test_bounded_oas_timeout_first_attempt_uses_full_usable_budget () =
       budget.remaining_turn_budget_sec;
     check
       string
-      "source records adaptive default cap"
-      "adaptive_estimated_input_tokens"
+      "source records static_300s default cap"
+      "static_300s"
       budget.source
   | None -> fail "expected bounded timeout"
 ;;
@@ -8161,7 +8161,7 @@ let test_attempt_watchdog_fires_before_outer_turn_timeout () =
     ; remaining_turn_budget_sec = 293.0
     ; estimated_input_tokens = 2_000
     ; max_turns = 4
-    ; source = "adaptive_per_attempt_retry"
+    ; source = "static_300s_per_attempt_retry"
     }
   in
   check
@@ -8231,7 +8231,7 @@ let oas_timeout_budget_error () =
        { budget_sec = 273.0
        ; keeper_turn_timeout_sec = 1200.0
        ; estimated_input_tokens = 2_000
-       ; source = "adaptive_estimated_input_tokens"
+       ; source = "static_300s"
        ; remaining_turn_budget_sec = Some 600.0
        ; min_required_sec = 15.0
        ; phase = "test_phase"
@@ -8452,7 +8452,7 @@ let test_degraded_retry_wall_clock_budget_allows_remaining_turn_time () =
   with
   | None -> fail "degraded retry should use remaining wall-clock budget"
   | Some budget ->
-    check string "source marks wall-clock retry" "adaptive_wall_clock_retry" budget.source;
+    check string "source marks wall-clock retry" "static_300s_wall_clock_retry" budget.source;
     check
       (float 0.01)
       "wall-clock retry leaves finalization guard"

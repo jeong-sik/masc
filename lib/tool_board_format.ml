@@ -416,7 +416,8 @@ let judgment_arg args =
     | `String value when String.equal (String.trim value) "" -> None
     | `String _ as value -> Some value
     | `Assoc _ as value -> Some value
-    | _ -> None
+    | `List _ as value -> Some value
+    | `Bool _ | `Int _ | `Intlit _ | `Float _ -> None
   in
   match value_of "judgment" with
   | Some _ as value -> value

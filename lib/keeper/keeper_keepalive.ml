@@ -683,7 +683,7 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
         Keeper_registry.register_offline ~base_path:ctx.config.base_path m.name m
       in
       (* Restore persisted tool usage stats from previous session *)
-      Keeper_registry.restore_tool_usage ~base_path:ctx.config.base_path m.name;
+      Keeper_registry_tool_usage_persistence.restore ~base_path:ctx.config.base_path m.name;
       let stop = reg.fiber_stop in
       let wakeup = reg.fiber_wakeup in
       (* Start optional gRPC heartbeat fiber *)

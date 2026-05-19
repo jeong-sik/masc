@@ -1488,103 +1488,16 @@ let tool_usage_of ~base_path name =
 
 (* Lookup API (find_by_name / find_by_agent_name / find_by_id /
    tool_usage_of_by_name / resolve_config) moved to
-   Keeper_registry_lookup. *)
+   Keeper_registry_lookup.
 
-(* -- Tool usage persistence ---------------------------------------- *)
+   Tool usage persistence (tool_usage_path / flush_tool_usage /
+   restore_tool_usage) moved to Keeper_registry_tool_usage_persistence;
+   the CAS-bound write path is exposed below as
+   [set_tool_usage_entry]. *)
 
-let tool_usage_path ~base_path name =
-  let dir =
-    Filename.concat (Common.masc_dir_from_base_path ~base_path) "keepers/tool_usage"
-  in
-  Filename.concat dir (name ^ ".json")
-;;
-
-let flush_tool_usage ~base_path name =
-  match StringMap.find_opt (registry_key ~base_path name) (Atomic.get registry) with
-  | None -> ()
-  | Some entry ->
-    let items =
-      StringMap.fold
-        (fun tool_name (e : tool_call_entry) acc ->
-           `Assoc
-             [ "tool", `String tool_name
-             ; "count", `Int e.count
-             ; "successes", `Int e.successes
-             ; "failures", `Int e.failures
-             ; "last_used_at", `Float e.last_used_at
-             ]
-           :: acc)
-        entry.tool_usage
-        []
-    in
-    let json =
-      `Assoc
-        [ "keeper", `String name
-        ; "flushed_at", `Float (Time_compat.now ())
-        ; "tools", `List items
-        ]
-    in
-    let path = tool_usage_path ~base_path name in
-    (try
-       Fs_compat.mkdir_p (Filename.dirname path);
-       Fs_compat.save_file path (Yojson.Safe.to_string json ^ "\n")
-     with
-     | Eio.Cancel.Cancelled _ as e -> raise e
-     | exn ->
-       Prometheus.inc_counter
-         Keeper_metrics.metric_keeper_tool_usage_flush_failures
-         ~labels:[ "keeper", name ]
-         ();
-       Log.Keeper.error "flush_tool_usage %s: %s" name (Printexc.to_string exn))
-;;
-
-let restore_tool_usage ~base_path name =
-  let path = tool_usage_path ~base_path name in
-  if not (Fs_compat.file_exists path)
-  then ()
-  else (
-    match StringMap.find_opt (registry_key ~base_path name) (Atomic.get registry) with
-    | None -> ()
-    | Some _entry ->
-      (try
-         let content = Fs_compat.load_file path in
-         let json = Yojson.Safe.from_string content in
-         let tools =
-           match json with
-           | `Assoc fields ->
-             (match List.assoc_opt "tools" fields with
-              | Some (`List items) -> items
-              | _ -> [])
-           | _ -> []
-         in
-         List.iter
-           (fun item ->
-              match
-                ( Safe_ops.json_string_opt "tool" item
-                , Safe_ops.json_int_opt "count" item
-                , Safe_ops.json_int_opt "successes" item
-                , Safe_ops.json_int_opt "failures" item
-                , Safe_ops.json_float_opt "last_used_at" item )
-              with
-              | ( Some tool_name
-                , Some count
-                , Some successes
-                , Some failures
-                , Some last_used_at )
-                when tool_name <> "" ->
-                let e = { count; successes; failures; last_used_at } in
-                update_entry ~base_path name (fun ent ->
-                  { ent with tool_usage = StringMap.add tool_name e ent.tool_usage })
-              | _ -> ())
-           tools
-       with
-       | Eio.Cancel.Cancelled _ as e -> raise e
-       | exn ->
-         Prometheus.inc_counter
-           Keeper_metrics.metric_keeper_checkpoint_failures
-           ~labels:[ "keeper", name; "site", "restore_tool_usage" ]
-           ();
-         Log.Keeper.warn "restore_tool_usage %s: %s" name (Printexc.to_string exn)))
+let set_tool_usage_entry ~base_path ~name ~tool_name (e : tool_call_entry) =
+  update_entry ~base_path name (fun ent ->
+    { ent with tool_usage = StringMap.add tool_name e ent.tool_usage })
 ;;
 
 (* ── RFC-0002 Event Dispatch ───────────────────────────── *)

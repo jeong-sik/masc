@@ -1,4 +1,5 @@
 import { html } from 'htm/preact'
+import { asNullableString } from './normalize'
 
 export interface DashboardFeedSourceMetadata {
   dashboard_surface?: string
@@ -7,12 +8,9 @@ export interface DashboardFeedSourceMetadata {
   generated_at_iso?: string
 }
 
-function nonEmptyString(value: unknown): string | null {
-  return typeof value === 'string' && value.trim() !== '' ? value : null
-}
 
 function retentionValue(meta: DashboardFeedSourceMetadata): string | null {
-  const direct = nonEmptyString(meta.retention?.durable_store)
+  const direct = asNullableString(meta.retention?.durable_store)
   if (direct) return direct
 
   const stores = meta.retention?.durable_stores

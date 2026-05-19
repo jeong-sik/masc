@@ -9,7 +9,7 @@ import type {
   ProviderLogTailResponse,
 } from '../api/dashboard.js'
 import { VirtualList } from './common/virtual-list'
-import { asRecord } from './common/normalize'
+import { asRecord, asNullableString } from './common/normalize'
 import { TextInput } from './common/input'
 import { Select } from './common/select'
 import { Checkbox } from './common/checkbox'
@@ -188,12 +188,6 @@ function interpolateStructuredMessage(
   return rendered
 }
 
-function nestedString(value: unknown): string | null {
-  if (typeof value !== 'string') return null
-  const trimmed = value.trim()
-  return trimmed === '' ? null : trimmed
-}
-
 function positiveLine(value: unknown): number | undefined {
   if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 1) return value
   if (typeof value !== 'string') return undefined
@@ -202,7 +196,7 @@ function positiveLine(value: unknown): number | undefined {
 }
 
 function idString(value: unknown): string | undefined {
-  const text = nestedString(value)
+  const text = asNullableString(value)
   if (text) return text
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 1
     ? String(value)
@@ -212,9 +206,9 @@ function idString(value: unknown): string | undefined {
 function codeLocationFromRecord(record: Record<string, unknown> | null): LogCodeLocation | null {
   if (!record) return null
   const filePath =
-    nestedString(record.file_path)
-    ?? nestedString(record.path)
-    ?? nestedString(record.file)
+    asNullableString(record.file_path)
+    ?? asNullableString(record.path)
+    ?? asNullableString(record.file)
   if (filePath) {
     return {
       filePath,
@@ -275,12 +269,12 @@ function failureEnvelope(entry: LogEntry): FailureEnvelope | null {
   const envelope = asRecord(details?.failure_envelope)
   if (!envelope) return null
 
-  const surface = nestedString(envelope.surface)
-  const entityKind = nestedString(envelope.entity_kind)
-  const causeCode = nestedString(envelope.cause_code)
-  const severity = nestedString(envelope.severity)
-  const summary = nestedString(envelope.summary)
-  const recoverability = nestedString(envelope.recoverability)
+  const surface = asNullableString(envelope.surface)
+  const entityKind = asNullableString(envelope.entity_kind)
+  const causeCode = asNullableString(envelope.cause_code)
+  const severity = asNullableString(envelope.severity)
+  const summary = asNullableString(envelope.summary)
+  const recoverability = asNullableString(envelope.recoverability)
 
   if (!surface || !entityKind || !causeCode || !severity || !summary || !recoverability) {
     return null
@@ -289,12 +283,12 @@ function failureEnvelope(entry: LogEntry): FailureEnvelope | null {
   return {
     surface,
     entity_kind: entityKind,
-    entity_id: nestedString(envelope.entity_id),
+    entity_id: asNullableString(envelope.entity_id),
     cause_code: causeCode,
     severity,
     summary,
     recoverability,
-    operator_action: nestedString(envelope.operator_action),
+    operator_action: asNullableString(envelope.operator_action),
     evidence_ref: asRecord(envelope.evidence_ref),
   }
 }

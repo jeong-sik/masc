@@ -34,6 +34,28 @@ export function isKeeperPaused(keeper: Keeper): boolean {
   return false
 }
 
+/** Keeper is in a *terminal failure* phase as classified by the
+ *  backend's `agent_fsm.ml` (KSM cluster). The three phases here are
+ *  distinct from operator-pinned shutdown (`Offline` / `Stopped`) — a
+ *  crashed/dead/zombie keeper went down *involuntarily*.
+ *
+ *  Audit finding A1 (2026-05-19): keeper-reactivity-monitor.ts:227
+ *  inlined this 3-literal OR chain on the same line that already
+ *  called `isKeeperPaused`, so the surface had one typed predicate and
+ *  one raw literal chain — a self-documented inconsistency. Adding a
+ *  new terminal-failure phase to `agent_fsm.ml` updates every consumer
+ *  here at once. */
+const CRASHED_PHASES: ReadonlySet<string> = new Set<string>([
+  'Crashed',
+  'Dead',
+  'Zombie',
+])
+
+export function isKeeperCrashed(keeper: Keeper): boolean {
+  const phase = keeper.phase
+  return typeof phase === 'string' && CRASHED_PHASES.has(phase)
+}
+
 /** Operator considers the keeper offline / down on any of: terminal
  *  FSM phases (Offline/Stopped/Dead/Crashed/Zombie) or one of the
  *  three off-tokens emitted in `keeper.status`. */

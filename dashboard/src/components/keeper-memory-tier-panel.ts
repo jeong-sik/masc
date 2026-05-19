@@ -16,6 +16,7 @@ import { TextInput } from './common/input'
 import { StatusChip, type StatusChipTone } from './common/status-chip'
 import { buildCompactionSpec } from './keeper-fsm-specs'
 import { setupVisibleAutoRefresh } from '../lib/auto-refresh'
+import { toKeeperPhase } from '../keeper-store-normalize'
 
 const REFRESH_MS = 30_000
 
@@ -161,7 +162,11 @@ export function KeeperMemoryTierPanel({
     [usage, query, filter],
   )
   const phase = snapshot?.phase ?? null
-  const isCompacting = phase === 'Compacting' || phase === 'compacting'
+  // RFC-0135 PR-2 normalization (audit A2): the composite observer
+  // emits lowercase phase tokens while flat keeper records use
+  // PascalCase. `toKeeperPhase` collapses both into the canonical
+  // PascalCase form so a single equality covers either wire shape.
+  const isCompacting = toKeeperPhase(phase) === 'Compacting'
   const compactionStage = snapshot?.compaction.stage ?? (isCompacting ? 'compacting' : 'accumulating')
   const compactionSpec = buildCompactionSpec(compactionStage, phase)
 

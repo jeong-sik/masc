@@ -9,6 +9,7 @@ import { formatTimeAgo } from '../lib/format-time'
 import { FilterChips } from './common/filter-chips'
 import { PanelCard } from './common/panel-card'
 import { ProgressBar } from './common/progress-bar'
+import { failureReasonLabel } from './fsm-hub-types'
 import {
   groupCrashCohorts,
   filterCrashLog,
@@ -150,7 +151,7 @@ export function SupervisorDiagnosticsPanel({ keeper }: { keeper: Keeper }) {
         ${last_failure_reason ? html`
           <div class="flex items-center justify-between">
             <${MutedLabel}>마지막 실패 원인</${MutedLabel}>
-            <span class="text-2xs font-mono text-[var(--rose-light)]">${last_failure_reason}</span>
+            <span class="text-2xs font-mono text-[var(--rose-light)]" title=${last_failure_reason}>${failureReasonLabel(last_failure_reason)}</span>
           </div>
         ` : null}
         ${dead_since ? html`

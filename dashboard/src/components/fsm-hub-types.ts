@@ -204,6 +204,44 @@ export function displayState(value: string): string {
   return STATE_DISPLAY_NAMES[value] ?? value
 }
 
+/** Korean labels for `last_failure_reason` cohort bases. Backend emits
+ *  the value via `Keeper_registry_types.failure_reason_to_string`
+ *  (lib/keeper/keeper_registry_types.ml:104-135) in the parametric
+ *  format `<base>(<detail>)` (e.g. `heartbeat_consecutive_failures(3)`,
+ *  `tool_required_unsatisfied(code:detail)`). The 11 closed-sum bases
+ *  match the `failure_reason_to_string` base prefixes (line 104-135).
+ *  Note: `failure_reason_cohort_key` (line 146-159) uses shortened
+ *  keys (`heartbeat_failures`, `turn_failures`) for metric grouping
+ *  and is NOT the wire format. Helper splits the
+ *  raw string at the first `(`, maps the base to Korean, and reattaches
+ *  the `(detail)` portion verbatim so operators retain the parametric
+ *  payload while reading a Korean label. Unknown bases fall back to
+ *  the raw string. */
+const FAILURE_REASON_BASE_LABELS: Record<string, string> = {
+  heartbeat_consecutive_failures: '하트비트 연속 실패',
+  turn_consecutive_failures: '턴 연속 실패',
+  stale_turn_timeout: 'Stale 턴 시간 초과',
+  stale_termination_storm: 'Stale 종료 폭주',
+  stale_fleet_batch: 'Fleet stale 배치',
+  oas_timeout_budget_loop: 'OAS 타임아웃 예산 루프',
+  provider_runtime_error: 'Provider 런타임 오류',
+  tool_required_unsatisfied: '필수 도구 미충족',
+  ambiguous_partial_commit: '부분 commit 모호',
+  fiber_unresolved: 'Fiber 미해결',
+  exception: '런타임 예외',
+}
+
+export function failureReasonLabel(value: string | null | undefined): string | null {
+  if (!value) return null
+  const trimmed = value.trim()
+  if (!trimmed) return null
+  const parenIdx = trimmed.indexOf('(')
+  const base = parenIdx >= 0 ? trimmed.slice(0, parenIdx) : trimmed
+  const koreanBase = FAILURE_REASON_BASE_LABELS[base]
+  if (!koreanBase) return trimmed
+  return parenIdx >= 0 ? `${koreanBase}${trimmed.slice(parenIdx)}` : koreanBase
+}
+
 /** Korean labels for `execution.outcome` / `keeper.latest_execution_outcome`.
  *  Backend emits the TLA-prefix form via
  *  `Keeper_execution_receipt.outcome_kind_to_tla_receipt`

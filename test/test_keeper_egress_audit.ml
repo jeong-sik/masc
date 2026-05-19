@@ -14,7 +14,7 @@ let temp_dir () =
   Unix.mkdir path 0o755;
   path
 
-let make_meta ~name ~sandbox =
+let make_meta ?(paused = false) ?(autoboot_enabled = true) ~name ~sandbox () =
   let json =
     `Assoc
       [
@@ -24,6 +24,8 @@ let make_meta ~name ~sandbox =
         ("goal", `String "egress audit test");
         ( "sandbox_profile",
           `String (Keeper_types.sandbox_profile_to_string sandbox) );
+        ("paused", `Bool paused);
+        ("autoboot_enabled", `Bool autoboot_enabled);
       ]
   in
   match Masc_test_deps.meta_of_json_fixture json with
@@ -54,7 +56,7 @@ let write_egress_at path =
 
 let test_docker_ok_when_expected_present () =
   let config = make_config () in
-  let meta = make_meta ~name:"sangsu" ~sandbox:Keeper_types.Docker in
+  let meta = make_meta ~name:"sangsu" ~sandbox:Keeper_types.Docker () in
   let expected = Masc_mcp.Keeper_shell_docker.egress_policy_path ~config ~meta in
   write_egress_at expected;
   let r = Keeper_egress_audit.audit_one ~config ~meta in
@@ -64,7 +66,7 @@ let test_docker_ok_when_expected_present () =
 
 let test_docker_stale_orphan_when_only_host_direct_present () =
   let config = make_config () in
-  let meta = make_meta ~name:"executor" ~sandbox:Keeper_types.Docker in
+  let meta = make_meta ~name:"executor" ~sandbox:Keeper_types.Docker () in
   let host_direct =
     Keeper_egress_audit.host_direct_egress_path ~config ~meta
   in
@@ -87,7 +89,7 @@ let test_docker_stale_orphan_when_only_host_direct_present () =
 
 let test_docker_missing_when_neither_present () =
   let config = make_config () in
-  let meta = make_meta ~name:"verifier" ~sandbox:Keeper_types.Docker in
+  let meta = make_meta ~name:"verifier" ~sandbox:Keeper_types.Docker () in
   let r = Keeper_egress_audit.audit_one ~config ~meta in
   match r.status with
   | Keeper_egress_audit.Missing_at_expected _ -> ()
@@ -97,7 +99,7 @@ let test_docker_missing_when_neither_present () =
 
 let test_local_ok_when_expected_present () =
   let config = make_config () in
-  let meta = make_meta ~name:"ramarama" ~sandbox:Keeper_types.Local in
+  let meta = make_meta ~name:"ramarama" ~sandbox:Keeper_types.Local () in
   let expected = Masc_mcp.Keeper_shell_docker.egress_policy_path ~config ~meta in
   write_egress_at expected;
   let r = Keeper_egress_audit.audit_one ~config ~meta in
@@ -110,7 +112,9 @@ let test_local_missing_does_not_check_orphan () =
      impossible by construction.  A missing file is always
      [Missing_at_expected]. *)
   let config = make_config () in
-  let meta = make_meta ~name:"velvet-hammer" ~sandbox:Keeper_types.Local in
+  let meta =
+    make_meta ~name:"velvet-hammer" ~sandbox:Keeper_types.Local ()
+  in
   let r = Keeper_egress_audit.audit_one ~config ~meta in
   match r.status with
   | Keeper_egress_audit.Missing_at_expected _ -> ()
@@ -120,13 +124,17 @@ let test_local_missing_does_not_check_orphan () =
 
 let test_audit_all_partitions_correctly () =
   let config = make_config () in
-  let m_ok = make_meta ~name:"sangsu" ~sandbox:Keeper_types.Docker in
+  let m_ok = make_meta ~name:"sangsu" ~sandbox:Keeper_types.Docker () in
   write_egress_at
     (Masc_mcp.Keeper_shell_docker.egress_policy_path ~config ~meta:m_ok);
-  let m_stale = make_meta ~name:"executor" ~sandbox:Keeper_types.Docker in
+  let m_stale =
+    make_meta ~name:"executor" ~sandbox:Keeper_types.Docker ()
+  in
   write_egress_at
     (Keeper_egress_audit.host_direct_egress_path ~config ~meta:m_stale);
-  let m_missing = make_meta ~name:"verifier" ~sandbox:Keeper_types.Docker in
+  let m_missing =
+    make_meta ~name:"verifier" ~sandbox:Keeper_types.Docker ()
+  in
   let results =
     Keeper_egress_audit.audit_all ~config
       ~metas:[ m_ok; m_stale; m_missing ]
@@ -144,7 +152,7 @@ let starts_with prefix s =
 
 let test_format_log_line_tags () =
   let config = make_config () in
-  let m = make_meta ~name:"sangsu" ~sandbox:Keeper_types.Docker in
+  let m = make_meta ~name:"sangsu" ~sandbox:Keeper_types.Docker () in
   let r_missing = Keeper_egress_audit.audit_one ~config ~meta:m in
   Alcotest.(check bool)
     "missing line tagged [egress_audit:missing]" true
@@ -157,6 +165,25 @@ let test_format_log_line_tags () =
     "ok line tagged [egress_audit:ok]" true
     (starts_with "[egress_audit:ok]"
        (Keeper_egress_audit.format_log_line r_ok))
+
+let test_inactive_missing_reason () =
+  let reason meta =
+    Keeper_egress_audit.inactive_missing_reason meta
+    |> Option.value ~default:""
+  in
+  Alcotest.(check string)
+    "active keeper has no suppression reason" ""
+    (reason (make_meta ~name:"active" ~sandbox:Keeper_types.Local ()));
+  Alcotest.(check string)
+    "paused suppresses missing egress warning" "paused"
+    (reason
+       (make_meta ~paused:true ~name:"paused" ~sandbox:Keeper_types.Local ()));
+  Alcotest.(check string)
+    "autoboot disabled suppresses missing egress warning"
+    "autoboot_disabled"
+    (reason
+       (make_meta ~autoboot_enabled:false ~name:"disabled"
+          ~sandbox:Keeper_types.Local ()))
 
 let () =
   Alcotest.run "Keeper Egress Audit"
@@ -182,5 +209,10 @@ let () =
       ( "log format",
         [
           Alcotest.test_case "tag prefixes" `Quick test_format_log_line_tags;
+        ] );
+      ( "warning suppression",
+        [
+          Alcotest.test_case "inactive missing reason" `Quick
+            test_inactive_missing_reason;
         ] );
     ]

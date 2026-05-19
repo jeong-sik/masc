@@ -108,7 +108,7 @@ let rec check_json_strings_valid_utf8 label = function
              (Printf.sprintf "%s[%d]" label idx)
              value)
         values
-  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Tuple _ | `Variant _ -> ()
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ -> ()
 
 let test_timeout_quality_is_error () =
   let quality =

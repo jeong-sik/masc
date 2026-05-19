@@ -22,16 +22,6 @@ type t = {
 
 let tool_host_log_module_name = "ToolHost"
 
-let json_kind_name : Yojson.Safe.t -> string = function
-  | `Null -> "null"
-  | `Bool _ -> "bool"
-  | `Int _ -> "int"
-  | `Intlit _ -> "intlit"
-  | `Float _ -> "float"
-  | `String _ -> "string"
-  | `Assoc _ -> "object"
-  | `List _ -> "array"
-
 let severity_to_string = function
   | Warn -> "warn"
   | Bad -> "bad"
@@ -152,7 +142,7 @@ let required_string json key =
       Error
         (Printf.sprintf
            "failure field %s must be a string (received %s)" key
-           (json_kind_name other))
+           (Json_util.kind_name other))
 
 let optional_string json key =
   let open Yojson.Safe.Util in
@@ -209,7 +199,7 @@ let of_yojson json =
   | other ->
       Error
         (Printf.sprintf "failure envelope must be a JSON object (received %s)"
-           (json_kind_name other))
+           (Json_util.kind_name other))
 
 let attach_to_details details envelope =
   match details with

@@ -90,16 +90,6 @@ let to_yojson (t : t) : Yojson.Safe.t =
     "created_at", `Float t.created_at;
   ]
 
-let json_kind_name : Yojson.Safe.t -> string = function
-  | `Null -> "null"
-  | `Bool _ -> "bool"
-  | `Int _ -> "int"
-  | `Intlit _ -> "intlit"
-  | `Float _ -> "float"
-  | `String _ -> "string"
-  | `Assoc _ -> "object"
-  | `List _ -> "array"
-
 let opt_int_of_yojson = function
   | `Null -> Ok None
   | `Int i -> Ok (Some i)
@@ -107,7 +97,7 @@ let opt_int_of_yojson = function
       Error
         (Invalid_payload
            (Printf.sprintf "expected null or int (received %s)"
-              (json_kind_name other)))
+              (Json_util.kind_name other)))
 
 let assoc_get key = function
   | `Assoc kvs -> (
@@ -118,7 +108,7 @@ let assoc_get key = function
       Error
         (Invalid_payload
            (Printf.sprintf "expected JSON object (received %s)"
-              (json_kind_name other)))
+              (Json_util.kind_name other)))
 
 let string_of_yojson key json =
   match assoc_get key json with
@@ -127,7 +117,7 @@ let string_of_yojson key json =
       Error
         (Invalid_payload
            (Printf.sprintf "%s: expected string (received %s)" key
-              (json_kind_name other)))
+              (Json_util.kind_name other)))
   | Error e -> Error e
 
 let int_of_yojson key json =
@@ -137,7 +127,7 @@ let int_of_yojson key json =
       Error
         (Invalid_payload
            (Printf.sprintf "%s: expected int (received %s)" key
-              (json_kind_name other)))
+              (Json_util.kind_name other)))
   | Error e -> Error e
 
 let float_of_yojson key json =
@@ -148,7 +138,7 @@ let float_of_yojson key json =
       Error
         (Invalid_payload
            (Printf.sprintf "%s: expected float (received %s)" key
-              (json_kind_name other)))
+              (Json_util.kind_name other)))
   | Error e -> Error e
 
 let opt_int_field key json =

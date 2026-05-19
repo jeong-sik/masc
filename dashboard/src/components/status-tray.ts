@@ -169,8 +169,18 @@ function countKeeperAttention(keeperInput: readonly Keeper[]): number {
   return keeperInput.filter(keeper => {
     if (keeper.needs_attention) return true
     if (hasExecutionAttentionEvidence(keeper)) return true
-    const status = (keeper.status ?? '').toLowerCase()
-    return status.includes('crash') || status === 'dead' || status === 'zombie'
+    // Terminal/crashed lifecycle states. The previous version inspected
+    // `keeper.status` for `'crash' | 'dead' | 'zombie'`, but the
+    // backend `Keeper.status` emit (`patched_keeper_status` in
+    // `lib/server/server_dashboard_http_execution_surfaces.ml:424-432`)
+    // only ever produces `'offline' | 'busy' | 'active' | 'listening' | 'idle'`.
+    // None of those crashed-state tokens are emitted into the status
+    // slot — they belong to `Keeper.phase` (typed `KeeperPhase` union
+    // in `core.ts:879-892`), normalised by `toKeeperPhase` at the wire
+    // boundary. Comparing typed phase tokens here means crashed keepers
+    // actually get counted as attention rather than silently slipping
+    // past an axis-confused string match.
+    return keeper.phase === 'Crashed' || keeper.phase === 'Dead' || keeper.phase === 'Zombie'
   }).length
 }
 

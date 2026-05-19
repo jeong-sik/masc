@@ -517,7 +517,7 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
         ${nextHumanActionText && !suppressDuplicateNextAction
           ? html`<span><strong class="text-[var(--color-fg-secondary)]">다음 액션</strong> · ${nextHumanActionText}</span>`
           : null}
-        ${stopCause
+        ${stopCause && isTurnTerminalFailureCode(stopCause.code)
           ? html`<span><strong class="text-[var(--color-fg-secondary)]">정지 원인</strong> · ${stopCause.code}${stopCause.summary ? html` · <${SyntheticAwareText} text=${stopCause.summary} />` : null}</span>`
           : null}
         ${latestTerminalCode && latestTerminalCode !== stopCause?.code

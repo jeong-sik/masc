@@ -396,6 +396,7 @@ function buildAgentRoster(
 function countAgentsByStatus(
   agentList: Agent[],
   keeperList: Keeper[],
+  compositeByKeeperKey: ReadonlyMap<string, KeeperCompositeSnapshot> | null = null,
 ): Record<StatusFilter, number> {
   const keeperLookup = buildKeeperRuntimeLookup(keeperList)
   const counts: Record<StatusFilter, number> = {
@@ -408,7 +409,16 @@ function countAgentsByStatus(
 
   for (const agent of agentList) {
     const keeperRuntime = findKeeperRuntimeForAgent(agent, keeperLookup)
-    const band = runtimeBandMetaForAgent(agent, keeperRuntime).key
+    // RFC-0135 PR-12: pass composite to band derivation so stale
+    // blockers are demoted via SSOT instead of inflating attention.
+    const composite =
+      keeperRuntime && compositeByKeeperKey
+        ? compositeByKeeperKey.get(keeperRuntime.name)
+          ?? (typeof keeperRuntime.keeper_id === 'string'
+            ? compositeByKeeperKey.get(keeperRuntime.keeper_id) ?? null
+            : null)
+        : null
+    const band = runtimeBandMetaForAgent(agent, keeperRuntime, composite).key
     counts[band] += 1
   }
 
@@ -502,17 +512,25 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
   )
   const bandByAgent = useMemo(
     () => new Map(
-      scopedAgents.map(agent => [
-        agent.name,
-        runtimeBandMetaForAgent(
-          agent,
+      scopedAgents.map(agent => {
+        const keeperRuntime =
           keeperRuntimeLookup.get(agent.name)
             ?? findKeeperRuntimeForAgent(agent, keeperRuntimeLookup)
-            ?? findKeeperRuntime(agent.name, runtimeKeeperList),
-        ),
-      ] as const),
+            ?? findKeeperRuntime(agent.name, runtimeKeeperList)
+        // RFC-0135 PR-12: thread composite snapshot through band
+        // derivation so stale-blocker demotion in the typed SSOT
+        // applies to the badge color too.
+        const composite =
+          keeperRuntime
+            ? compositeByKeeperKey.get(keeperRuntime.name)
+              ?? (typeof keeperRuntime.keeper_id === 'string'
+                ? compositeByKeeperKey.get(keeperRuntime.keeper_id) ?? null
+                : null)
+            : null
+        return [agent.name, runtimeBandMetaForAgent(agent, keeperRuntime, composite)] as const
+      }),
     ),
-    [scopedAgents, keeperRuntimeLookup, runtimeKeeperList],
+    [scopedAgents, keeperRuntimeLookup, runtimeKeeperList, compositeByKeeperKey],
   )
   const normalizedSearch = search.trim().toLowerCase()
   const searchTermsByAgent = useMemo(
@@ -567,7 +585,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
       return a.name.localeCompare(b.name)
     })
 
-  const counts = countAgentsByStatus(scopedAgents, runtimeKeeperList)
+  const counts = countAgentsByStatus(scopedAgents, runtimeKeeperList, compositeByKeeperKey)
   const showExecutionFallbackState = shouldShowExecutionFallbackState({
     executionLoaded: executionLoaded.value,
     executionLoading: executionLoading.value,
@@ -685,7 +703,17 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
             ?? findKeeperRuntimeForAgent(agent, keeperRuntimeLookup)
             ?? findKeeperRuntime(agent.name, runtimeKeeperList)
           const band = bandByAgent.get(agent.name) ?? runtimeBandMeta('attention')
-          const keeperMonitoring = keeperRuntime ? summarizeKeeperMonitoring(keeperRuntime) : null
+          // RFC-0135 PR-12: detail panel summary shares the same composite
+          // pickup as bandByAgent so the visible state and the band tone
+          // can never disagree on stale-vs-live blocker classification.
+          const compositeForMonitoring: KeeperCompositeSnapshot | null =
+            keeperRuntime
+              ? compositeByKeeperKey.get(keeperRuntime.name)
+                ?? (typeof keeperRuntime.keeper_id === 'string'
+                  ? compositeByKeeperKey.get(keeperRuntime.keeper_id) ?? null
+                  : null)
+              : null
+          const keeperMonitoring = keeperRuntime ? summarizeKeeperMonitoring(keeperRuntime, compositeForMonitoring) : null
           const monitoringEvidence = keeperMonitoring ? summarizeMonitoringEvidence(keeperMonitoring) : null
           const fsmPhase = keeperRuntime ? keeperPhaseForDisplay(keeperRuntime) : null
           const isKeeper = keeperRuntime != null

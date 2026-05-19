@@ -182,9 +182,11 @@ let invalid_cascade_profiles () : (string * string list) list =
 let invalid_cascade_assignment_profiles () : (string * string list) list =
   (cascade_profile_gate ()).invalid_assignments
 
-let telemetry_summary_cache_key ~base_path ~masc_root =
-  let digest = Digest.string (base_path ^ "\000" ^ masc_root) |> Digest.to_hex in
-  "dashboard:telemetry_summary:" ^ digest
+(* [telemetry_summary_cache_key] moved to
+   [Server_dashboard_shell_snapshot] (Phase 3 Step 2) where the only
+   remaining caller (the cold-start fallback path) now lives.  Same
+   byte-identical digest, so cache slots written before the router
+   migration are still hit by readers after it. *)
 
 let trimmed_query_param req key =
   match Server_utils.query_param req key |> Option.map String.trim with
@@ -982,8 +984,13 @@ let rec add_routes ~sw ~clock router =
   |> Http.Router.get "/api/v1/dashboard/tools" (fun request reqd ->
        with_public_read (fun state req reqd ->
            let timing = Server_timing.create () in
+           (* RFC-0138 Phase 3 Step 2: wait-free read via
+              [Dashboard_snapshot.current ()] when an actor filter is
+              not requested.  Per-actor variant continues through
+              [dashboard_tools_http_json] until the snapshot type
+              grows an [Actor_filter] arm. *)
            let json =
-             dashboard_tools_http_json
+             Server_dashboard_shell_snapshot.select_tools_json
                ~timing
                ?actor:
                  (dashboard_actor_for_request
@@ -1309,16 +1316,15 @@ let rec add_routes ~sw ~clock router =
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/telemetry/summary" (fun request reqd ->
        with_public_read (fun state req reqd ->
-         let config = state.Mcp_server.room_config in
-         let base_path = config.base_path in
-         let masc_root = Coord.masc_root_dir config in
-         let cache_key = telemetry_summary_cache_key ~base_path ~masc_root in
          let timing = Server_timing.create () in
+         (* RFC-0138 Phase 3 Step 2: wait-free read via
+            [Dashboard_snapshot.current ()].telemetry_summary when the
+            refresh fiber has published; falls back through the same
+            [Dashboard_cache] + [Telemetry_unified.summary_json] path
+            for cold start. *)
          let json =
-           Server_timing.measure timing Cache_lookup (fun () ->
-             Dashboard_cache.get_or_compute cache_key ~ttl:30.0 (fun () ->
-               Server_timing.measure timing Telemetry_summary_aggregate (fun () ->
-                 Telemetry_unified.summary_json ~base_path ~masc_root ())))
+           Server_dashboard_shell_snapshot.select_telemetry_summary_json
+             ~timing state.Mcp_server.room_config
          in
          Http.Response.json ~compress:true ~request:req
            ~extra_headers:(Server_timing.extra_header timing)

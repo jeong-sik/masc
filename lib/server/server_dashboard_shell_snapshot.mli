@@ -1,14 +1,23 @@
-(** RFC-0138 Phase 3 Step 1 — /shell read path selector.
+(** RFC-0138 Phase 3 Steps 1+2 — dashboard read path selectors.
 
-    [Server_dashboard_http_core] cannot host this helper because
+    Historically named [Server_dashboard_shell_snapshot] for Step 1;
+    Step 2 extends the same module with [select_tools_json] and
+    [select_telemetry_summary_json].  Step 5 of the migration sequence
+    is expected to rename this module to
+    [Server_dashboard_snapshot_select] once all four projections wire
+    through it.
+
+    [Server_dashboard_http_core] cannot host these helpers because
     [Dashboard_snapshot] already calls into [Server_dashboard_http_core]
-    for its refresh-fiber compute path; placing the selector here keeps
-    the dependency arrows acyclic:
+    for its refresh-fiber compute path; placing the selectors here
+    keeps the dependency arrows acyclic:
 
       [Server_routes_http_routes_dashboard]
         -> [Server_dashboard_shell_snapshot]
-             -> [Dashboard_snapshot]   (read slot, lock-free)
-             -> [Server_dashboard_http_core]  (fallback compute) *)
+             -> [Dashboard_snapshot]                  (lock-free read)
+             -> [Server_dashboard_http_core]          (shell fallback)
+             -> [Server_dashboard_http_runtime_info]  (tools fallback)
+             -> [Telemetry_unified]                   (telemetry fallback) *)
 
 val select_shell_json :
   ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
@@ -33,3 +42,33 @@ val select_shell_json :
     The snapshot-hit branch records a [snapshot_read] phase in
     [~timing] so the [Server-Timing] header lets us measure the p99
     retire criterion ("snapshot_read;dur~0ms p99 for /shell"). *)
+
+val select_tools_json :
+  ?actor:string ->
+  ?timing:Server_timing.t ->
+  Coord.config ->
+  Yojson.Safe.t
+(** RFC-0138 Phase 3 Step 2 — /api/v1/dashboard/tools read path
+    selector.  Returns [Dashboard_snapshot.current ()].tools when the
+    refresh fiber has published AND [~actor] is omitted (the snapshot
+    stores the canonical full registry view, not per-agent filtered
+    catalogues).  Falls back to
+    [Server_dashboard_http_runtime_info.dashboard_tools_http_json]
+    otherwise.
+
+    Per RFC-0138 §3.3 Step 2 the per-actor variant continues through
+    [Dashboard_cache] until the snapshot type grows an [Actor_filter]
+    arm; retire criterion is the [Server-Timing snapshot_read;dur~0ms]
+    p99 on the actor-less call path. *)
+
+val select_telemetry_summary_json :
+  ?timing:Server_timing.t ->
+  Coord.config ->
+  Yojson.Safe.t
+(** RFC-0138 Phase 3 Step 2 — /api/v1/dashboard/telemetry/summary read
+    path selector.  Returns [Dashboard_snapshot.current ()].telemetry_summary
+    when the refresh fiber has published.  Falls back to the
+    [Dashboard_cache.get_or_compute] + [Telemetry_unified.summary_json]
+    compute path (same logic the handler runs today) when the snapshot
+    slot is empty — bootstrap path is paid at most once per process
+    lifetime. *)

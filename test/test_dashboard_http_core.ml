@@ -796,6 +796,81 @@ let test_shell_snapshot_wire_light_variant_bypasses_snapshot () =
     (json |> member "wire_sentinel" = `Null);
   Lib.Dashboard_snapshot.reset_for_test ()
 
+(* RFC-0138 Phase 3 Step 2 — /tools and /telemetry/summary wire tests.
+
+   Cover the new selector matrix on
+   [Server_dashboard_shell_snapshot.select_tools_json] and
+   [..._telemetry_summary_json]. *)
+
+let test_tools_snapshot_wire_returns_snapshot_when_actor_omitted () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  Lib.Dashboard_snapshot.reset_for_test ();
+  let sentinel = `Assoc [ "tools_sentinel", `String "from-snapshot" ] in
+  Lib.Dashboard_snapshot.publish_for_test
+    (Lib.Dashboard_snapshot.make_for_test
+       ~shell:`Null ~tools:sentinel
+       ~namespace_truth:`Null ~telemetry_summary:`Null);
+  let timing = Lib.Server_timing.create () in
+  let json =
+    Lib.Server_dashboard_shell_snapshot.select_tools_json
+      ~timing config
+  in
+  let open Yojson.Safe.Util in
+  Alcotest.(check string)
+    "actor-less snapshot path returns published sentinel"
+    "from-snapshot"
+    (json |> member "tools_sentinel" |> to_string);
+  Alcotest.(check bool)
+    "Server-Timing header records snapshot_read phase on hit"
+    true
+    (let header = Lib.Server_timing.to_header_value timing in
+     let re = Re.compile (Re.Perl.re "snapshot_read") in
+     Re.execp re header);
+  Lib.Dashboard_snapshot.reset_for_test ()
+
+(* [test_tools_snapshot_wire_bypasses_snapshot_when_actor_given]
+   intentionally omitted from the unit suite.  The selector's
+   actor=Some branch routes to
+   [Server_dashboard_http_runtime_info.dashboard_tools_http_json] which
+   requires a full Eio scheduler + runtime probe wiring not present
+   in [with_test_env].  Integration coverage of the actor-filter
+   bypass belongs in [test_dashboard_tools.ml] (which already runs
+   inside the live HTTP harness).  See RFC-0138 §3.3 Step 2 retire
+   criterion: snapshot grows an [Actor_filter] arm. *)
+
+let test_telemetry_summary_snapshot_wire_returns_snapshot () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  Lib.Dashboard_snapshot.reset_for_test ();
+  let sentinel = `Assoc [ "tele_sentinel", `String "from-snapshot" ] in
+  Lib.Dashboard_snapshot.publish_for_test
+    (Lib.Dashboard_snapshot.make_for_test
+       ~shell:`Null ~tools:`Null
+       ~namespace_truth:`Null ~telemetry_summary:sentinel);
+  let timing = Lib.Server_timing.create () in
+  let json =
+    Lib.Server_dashboard_shell_snapshot.select_telemetry_summary_json
+      ~timing config
+  in
+  let open Yojson.Safe.Util in
+  Alcotest.(check string)
+    "telemetry_summary snapshot path returns published sentinel"
+    "from-snapshot"
+    (json |> member "tele_sentinel" |> to_string);
+  Lib.Dashboard_snapshot.reset_for_test ()
+
+let test_telemetry_summary_snapshot_wire_falls_back_when_empty () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  Lib.Dashboard_snapshot.reset_for_test ();
+  let timing = Lib.Server_timing.create () in
+  let json =
+    Lib.Server_dashboard_shell_snapshot.select_telemetry_summary_json
+      ~timing config
+  in
+  Alcotest.(check bool)
+    "fallback path produces a non-null JSON object"
+    true
+    (match json with `Assoc _ -> true | _ -> false)
+
 let () =
   run "dashboard_http_core"
     [
@@ -849,5 +924,11 @@ let () =
             test_shell_snapshot_wire_falls_back_when_empty;
           test_case "RFC-0138 shell wire light variant bypasses snapshot" `Quick
             test_shell_snapshot_wire_light_variant_bypasses_snapshot;
+          test_case "RFC-0138 tools wire returns snapshot when actor omitted" `Quick
+            test_tools_snapshot_wire_returns_snapshot_when_actor_omitted;
+          test_case "RFC-0138 telemetry_summary wire returns snapshot" `Quick
+            test_telemetry_summary_snapshot_wire_returns_snapshot;
+          test_case "RFC-0138 telemetry_summary wire falls back when empty" `Quick
+            test_telemetry_summary_snapshot_wire_falls_back_when_empty;
         ] );
     ]

@@ -428,23 +428,6 @@ let validate_sandbox_settings
     ~allowed_paths =
   if allowed_paths = [ "*" ] then
     Error "allowed_paths=[\"*\"] is not supported; enumerate explicit paths instead"
-  else if Env_config_keeper.KeeperSandbox.hard_mode ()
-          && sandbox_profile <> Docker then
-    Error
-      "MASC_KEEPER_SANDBOX_HARD_MODE requires sandbox_profile=docker"
-  else if Env_config_keeper.KeeperSandbox.hard_mode ()
-          && network_mode <> Network_none then
-    Error
-      "MASC_KEEPER_SANDBOX_HARD_MODE requires network_mode=none; git/gh egress is brokered by structured tools"
-  else if Env_config_keeper.KeeperSandbox.hard_mode ()
-          && github_identity = None
-          && not (Keeper_gh_env.root_gh_config_dir_exists config) then
-    Error
-      "MASC_KEEPER_SANDBOX_HARD_MODE requires an effective GitHub identity: configure github_identity in the keeper profile or install the root bundle at $base_path/.masc/github-identities/root/gh"
-  else if Env_config_keeper.KeeperSandbox.hard_mode ()
-          && Env_config_keeper.KeeperSandbox.relax_fs () then
-    Error
-      "MASC_KEEPER_SANDBOX_HARD_MODE requires MASC_KEEPER_SANDBOX_RELAX_FS=false"
   else
   match sandbox_profile with
   | Local -> (

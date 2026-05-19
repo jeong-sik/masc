@@ -18,12 +18,6 @@
 
 (** {1 Hardening — security policy and resource limits} *)
 module Hardening : sig
-  val hard_mode : unit -> bool
-  (** Forces rootless/userns runtime checks, disables Docker-side
-      git/gh credential dispatch, and forbids ambient operator
-      credential fallback.
-      Env: [MASC_KEEPER_SANDBOX_HARD_MODE].  Default: [false]. *)
-
   val pids_limit : unit -> int
   (** Docker [--pids-limit].  Floored at 32.
       Env: [MASC_KEEPER_SANDBOX_PIDS_LIMIT].  Default: 128. *)
@@ -42,11 +36,6 @@ module Hardening : sig
 
   val relax_fs : unit -> bool
   (** When true, omit [--read-only] and drop [/tmp]'s [noexec] bit.
-      Returns the raw env value; the hard_mode interaction is
-      enforced by callers reading {!read_only_rootfs_args} and
-      {!tmpfs_mount} rather than by this getter.  Operators who set
-      both should expect their explicit [relax_fs] to win against
-      the implicit hard_mode default — change with care.
       Env: [MASC_KEEPER_SANDBOX_RELAX_FS].  Default: [false]. *)
 
   val read_only_rootfs_args : unit -> string list
@@ -64,12 +53,10 @@ module Hardening : sig
 
   val require_rootless : unit -> bool
   (** Fail closed unless Docker reports rootless mode support.
-      Always true when {!hard_mode} is true.
       Env: [MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS].  Default: [false]. *)
 
   val require_userns : unit -> bool
   (** Fail closed unless Docker reports userns support.
-      Always true when {!hard_mode} is true.
       Env: [MASC_KEEPER_SANDBOX_REQUIRE_USERNS].  Default: [false]. *)
 end
 
@@ -109,8 +96,7 @@ module Runtime : sig
   (** When true, keeper_bash commands beginning with ["git "] or
       ["gh "] run in a dedicated container with network egress and
       read-only mounts from the selected root/keeper GitHub identity
-      bundle.  Effective value is [false] when {!Hardening.hard_mode}
-      is true.
+      bundle.
       Env: [MASC_KEEPER_SANDBOX_GIT_DISPATCH].  Default: [true]. *)
 
   val docker_playground_enabled : unit -> bool
@@ -222,8 +208,7 @@ val effective_config_json : unit -> Yojson.Safe.t
       where [source] is one of ["env"], ["default"], or
       ["load_bearing_floor"] (for [Gh_min] / [required_commands])
       and [env_var] is [null] for non-overridable values.
-    - [derived.<key>] = effective values after cross-cutting rules
-      (e.g. [hard_mode] coerces [relax_fs] to [false]).
+    - [derived.<key>] = effective values after cross-cutting rules.
 
     Operators read [raw] to confirm "did my env override take?" and
     [derived] to see "what will Docker actually see?". *)

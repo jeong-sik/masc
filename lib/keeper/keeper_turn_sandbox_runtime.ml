@@ -27,9 +27,6 @@ let create
       ~turn_id
       ()
   =
-  let network_mode =
-    if Env_config_keeper.KeeperSandbox.hard_mode () then Network_none else network_mode
-  in
   { config
   ; meta
   ; turn_id

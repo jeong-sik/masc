@@ -148,8 +148,7 @@ val sandbox_allowed_path_within_private_root :
   string ->
   bool
 
-(** Validate sandbox + network + allowed_paths against
-    [MASC_KEEPER_SANDBOX_HARD_MODE] policy and the
+(** Validate sandbox + network + allowed_paths against the
     [Local | Docker] profile constraints. Returns [Error msg] with
     a remediation hint when settings are inconsistent. *)
 val validate_sandbox_settings :

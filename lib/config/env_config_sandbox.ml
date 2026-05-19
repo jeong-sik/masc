@@ -24,9 +24,6 @@ open Env_config_core
 (* --------------------------------------------------------------- *)
 
 module Hardening = struct
-  let hard_mode () =
-    get_bool ~default:false "MASC_KEEPER_SANDBOX_HARD_MODE"
-
   let pids_limit () =
     max 32 (get_int ~default:128 "MASC_KEEPER_SANDBOX_PIDS_LIMIT")
 
@@ -54,12 +51,10 @@ module Hardening = struct
     get_string ~default:"" "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE"
 
   let require_rootless () =
-    hard_mode ()
-    || get_bool ~default:false "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS"
+    get_bool ~default:false "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS"
 
   let require_userns () =
-    hard_mode ()
-    || get_bool ~default:false "MASC_KEEPER_SANDBOX_REQUIRE_USERNS"
+    get_bool ~default:false "MASC_KEEPER_SANDBOX_REQUIRE_USERNS"
 end
 
 (* --------------------------------------------------------------- *)
@@ -94,8 +89,7 @@ module Runtime = struct
       "MASC_KEEPER_SANDBOX_DOCKER_IMAGE"
 
   let git_dispatch () =
-    (not (Hardening.hard_mode ()))
-    && get_bool ~default:true "MASC_KEEPER_SANDBOX_GIT_DISPATCH"
+    get_bool ~default:true "MASC_KEEPER_SANDBOX_GIT_DISPATCH"
 
   let docker_playground_enabled () =
     get_bool ~default:false "MASC_KEEPER_DOCKER_PLAYGROUND"
@@ -253,10 +247,7 @@ let string_v s : Yojson.Safe.t = `String s
 
 let raw_hardening () : Yojson.Safe.t =
   `Assoc
-    [ "hard_mode",
-      entry_env_overridable ~env_var:"MASC_KEEPER_SANDBOX_HARD_MODE"
-        (bool_v (Hardening.hard_mode ()))
-    ; "pids_limit",
+    [ "pids_limit",
       entry_env_overridable ~env_var:"MASC_KEEPER_SANDBOX_PIDS_LIMIT"
         (int_v (Hardening.pids_limit ()))
     ; "nofile_limit",

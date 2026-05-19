@@ -260,7 +260,6 @@ end
 (** {1 Keeper sandbox (alias layer over {!Env_config_sandbox})} *)
 
 module KeeperSandbox : sig
-  val hard_mode : unit -> bool
   val docker_image : unit -> string
   val preflight_enabled : unit -> bool
   val pids_limit : unit -> int

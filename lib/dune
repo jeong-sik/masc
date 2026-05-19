@@ -168,6 +168,7 @@
   keeper_context_core_message_json
   keeper_context_core_tool_pair_repair
   keeper_context_core_history_migration
+  keeper_context_core_checkpoint_sanitize
   keeper_context_core
   keeper_compact_policy
   keeper_compact_audit

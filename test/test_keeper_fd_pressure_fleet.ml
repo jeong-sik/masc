@@ -192,6 +192,59 @@ let test_nofile_probe_is_native_not_shell () =
     | Some limit -> Alcotest.failf "expected positive native nofile limit, got %d" limit
     | None -> Alcotest.fail "expected native nofile probe to resolve on Unix")
 
+(* RFC-0137 — external engage from host FD pressure (PR-1). *)
+
+let test_engage_external_crit_advances_cooldown () =
+  FD.reset_for_tests ();
+  Alcotest.(check bool) "inactive before engage" false (FD.active ());
+  let ts = Time_compat.now () in
+  FD.engage_external ~reason:"sysmon fd=75%" ~level:FD.External_crit ~ts ();
+  Alcotest.(check bool) "active after CRIT engage" true (FD.active ());
+  let remaining = FD.remaining_sec () in
+  (* default CRIT cooldown = 1800s; allow slack for slow CI scheduling. *)
+  Alcotest.(check bool)
+    (Printf.sprintf "remaining %.0fs ≈ 1800 (within [1700, 1801])" remaining)
+    true
+    (remaining >= 1700.0 && remaining <= 1801.0);
+  FD.reset_for_tests ()
+
+let test_engage_external_stale_ts_is_noop () =
+  FD.reset_for_tests ();
+  let now = Time_compat.now () in
+  FD.engage_external ~reason:"current WARN" ~level:FD.External_warn ~ts:now ();
+  let after_first = FD.remaining_sec () in
+  (* Engage with a [ts] 120s in the past — produces a smaller [until_ts]
+     than the existing cooldown, so [cas_monotonic_max] must reject it.
+     No separate last_external_ts atomic exists by design — the monotonic
+     CAS on [cooldown_until] is the only ordering primitive. *)
+  FD.engage_external
+    ~reason:"stale WARN — should be no-op"
+    ~level:FD.External_warn
+    ~ts:(now -. 120.0)
+    ();
+  let after_stale = FD.remaining_sec () in
+  Alcotest.(check bool)
+    (Printf.sprintf
+       "stale ts did not shorten cooldown (before=%.0f after=%.0f)"
+       after_first
+       after_stale)
+    true
+    (after_stale >= after_first -. 1.0);
+  FD.reset_for_tests ()
+
+let test_engage_external_crit_extends_warn () =
+  FD.reset_for_tests ();
+  let ts = Time_compat.now () in
+  FD.engage_external ~reason:"WARN first" ~level:FD.External_warn ~ts ();
+  let after_warn = FD.remaining_sec () in
+  FD.engage_external ~reason:"CRIT escalates" ~level:FD.External_crit ~ts ();
+  let after_crit = FD.remaining_sec () in
+  Alcotest.(check bool)
+    (Printf.sprintf "CRIT %.0fs extends WARN %.0fs" after_crit after_warn)
+    true
+    (after_crit > after_warn);
+  FD.reset_for_tests ()
+
 let () =
   Alcotest.run
     "keeper_fd_pressure_fleet"
@@ -216,5 +269,13 @@ let () =
             test_nofile_cache_single_flight_resolves_once
         ; Alcotest.test_case "nofile probe is native" `Quick
             test_nofile_probe_is_native_not_shell
+        ] )
+    ; ( "external-engage"
+      , [ Alcotest.test_case "CRIT advances cooldown to ~1800s" `Quick
+            test_engage_external_crit_advances_cooldown
+        ; Alcotest.test_case "stale ts is no-op (monotonic rejection)" `Quick
+            test_engage_external_stale_ts_is_noop
+        ; Alcotest.test_case "CRIT extends WARN cooldown" `Quick
+            test_engage_external_crit_extends_warn
         ] )
     ]

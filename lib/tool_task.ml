@@ -938,7 +938,19 @@ and handle_transition ?agent_tool_names ~tool_name ~start_time ctx args =
                   ~config:ctx.config ~task ~assignee ~verification_id ~evidence_refs
               | Masc_domain.Todo | Masc_domain.Claimed _ | Masc_domain.InProgress _
               | Masc_domain.Done _ | Masc_domain.Cancelled _ -> ())
-           | None -> ())
+           | None -> ());
+          (* Record CDAL verdict attribution on submit_pr_evidence so the
+             dashboard gets a complete audit line.  When tasks bypass
+             Done_action and go directly to submit_pr_evidence, the
+             gate_check call on the Done_action path never fires and
+             the CDAL gate shows zero entries in Dashboard_attribution
+             even when contracts are present. *)
+          if Env_config_runtime.Cdal.gate_enabled () then
+            ignore
+              (Cdal_verdict_gate.gate_check
+                 ~gate_label:(cdal_gate_label_for_task task_opt)
+                 ~warn_on_missing:false
+                 ~task_id ())
         | Masc_domain.Approve_verification ->
           let verification_id = Option.value ~default:"" verification_id_before in
           Verification_protocol.notify_approve_verification

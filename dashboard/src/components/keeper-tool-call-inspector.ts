@@ -8,7 +8,7 @@ import { fetchKeeperToolCalls } from '../api/dashboard'
 import type { ToolCallEntry, ToolCallsResponse, TelemetryFreshnessMetadata } from '../api/dashboard'
 import { formatTimeHms } from '../lib/format-time'
 import { LoadingState } from './common/feedback-state'
-import { asNullableString, asRecord, positiveLine } from './common/normalize'
+import { asNullableString, asRecord, positiveLine, idString } from './common/normalize'
 import { SectionCap } from './common/section-cap'
 import { toolCategory, formatDuration, durationColor } from './tool-call-shared'
 import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
@@ -85,14 +85,6 @@ type ToolRouteContextFields = Pick<
 >
 type MutableToolRouteContext = {
   -readonly [K in keyof ToolRouteContextFields]?: ToolRouteContextFields[K]
-}
-
-function idString(value: unknown): string | undefined {
-  const text = asNullableString(value)
-  if (text) return text
-  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 1
-    ? String(value)
-    : undefined
 }
 
 function parseInputRecord(input: string): Record<string, unknown> | null {

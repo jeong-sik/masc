@@ -9,7 +9,7 @@ import type {
   ProviderLogTailResponse,
 } from '../api/dashboard.js'
 import { VirtualList } from './common/virtual-list'
-import { asRecord, asNullableString, positiveLine } from './common/normalize'
+import { asRecord, asNullableString, positiveLine, idString } from './common/normalize'
 import { TextInput } from './common/input'
 import { Select } from './common/select'
 import { Checkbox } from './common/checkbox'
@@ -186,14 +186,6 @@ function interpolateStructuredMessage(
     rendered = rendered.replace(/%[sd]/, value)
   }
   return rendered
-}
-
-function idString(value: unknown): string | undefined {
-  const text = asNullableString(value)
-  if (text) return text
-  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 1
-    ? String(value)
-    : undefined
 }
 
 function codeLocationFromRecord(record: Record<string, unknown> | null): LogCodeLocation | null {

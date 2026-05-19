@@ -82,6 +82,14 @@ export function extractArray(value: unknown, keys: string[] = []): unknown[] {
   return []
 }
 
+export function idString(value: unknown): string | undefined {
+  const text = asNullableString(value)
+  if (text) return text
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 1
+    ? String(value)
+    : undefined
+}
+
 export function positiveLine(value: unknown): number | undefined {
   if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 1) return value
   if (typeof value !== 'string') return undefined

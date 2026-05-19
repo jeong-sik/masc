@@ -47,6 +47,9 @@ let stream_idle_state_is_activity = function
 ;;
 
 type timeout_phase =
+  | Admission
+  | Queue
+  | First_token
   | Http_operation
   | Non_streaming_body
   | Stream_body
@@ -54,9 +57,14 @@ type timeout_phase =
   | Provider_step
   | Cli_stdout_idle
   | Caller_budget
+  | Wall_clock
+  | Capacity_backpressure
   | Unknown_timeout
 
 let timeout_phase_to_label = function
+  | Admission -> "admission"
+  | Queue -> "queue"
+  | First_token -> "first_token"
   | Http_operation -> "http_operation"
   | Non_streaming_body -> "non_streaming_body"
   | Stream_body -> "stream_body"
@@ -64,11 +72,21 @@ let timeout_phase_to_label = function
   | Provider_step -> "provider_step"
   | Cli_stdout_idle -> "cli_stdout_idle"
   | Caller_budget -> "caller_budget"
+  | Wall_clock -> "wall_clock"
+  | Capacity_backpressure -> "capacity_backpressure"
   | Unknown_timeout -> "unknown_timeout"
 ;;
 
 let timeout_phase_of_label label =
-  let label = String.trim label in
+  let normalize label =
+    label
+    |> String.trim
+    |> String.lowercase_ascii
+    |> String.map (function
+      | '-' | ' ' -> '_'
+      | ch -> ch)
+  in
+  let label = normalize label in
   let stream_idle_prefix = "stream_idle:" in
   if String.starts_with ~prefix:stream_idle_prefix label
   then
@@ -78,24 +96,41 @@ let timeout_phase_of_label label =
     |> Option.map (fun state -> Stream_idle state)
   else
     match label with
+    | "admission" | "admission_timeout" -> Some Admission
+    | "queue" | "provider_queue" | "admission_queue"
+    | "admission_queue_timeout" | "queued" ->
+      Some Queue
+    | "first_token" | "no_first_token" | "time_to_first_token" | "ttft" ->
+      Some First_token
     | "http_operation" -> Some Http_operation
     | "non_streaming_body" -> Some Non_streaming_body
     | "stream_body" -> Some Stream_body
+    | "stream_idle" -> Some (Stream_idle Streaming_unknown)
     | "provider_step" -> Some Provider_step
     | "cli_stdout_idle" -> Some Cli_stdout_idle
     | "caller_budget" -> Some Caller_budget
+    | "wall_clock" | "wall_clock_timeout" | "wall_exceeded" | "max_execution_time" ->
+      Some Wall_clock
+    | "capacity_backpressure" | "capacity_exhausted" | "slot_full"
+    | "client_capacity" | "client_capacity_full" ->
+      Some Capacity_backpressure
     | "unknown_timeout" -> Some Unknown_timeout
     | _ -> None
 ;;
 
 let timeout_phase_is_streaming_activity = function
   | Stream_idle state -> stream_idle_state_is_activity state
+  | Admission
+  | Queue
+  | First_token
   | Http_operation
   | Non_streaming_body
   | Stream_body
   | Provider_step
   | Cli_stdout_idle
   | Caller_budget
+  | Wall_clock
+  | Capacity_backpressure
   | Unknown_timeout -> false
 ;;
 
@@ -224,12 +259,14 @@ let liveness_is_lost = function
   | Recent_heartbeat | In_turn_progress | Unknown_liveness -> false
 ;;
 
-let oas_budget_loop_effect ~strikes ~liveness =
-  match strikes with
-  | Some n when n >= 3 && liveness_is_lost liveness ->
+let oas_budget_loop_effect ~phase ~strikes ~liveness =
+  match phase, strikes with
+  | _, Some n when n >= 3 && liveness_is_lost liveness ->
     Pause_keeper, Operator_breaker, Inspect_keeper_liveness, "oas_timeout_budget_liveness_lost"
-  | Some n when n >= 3 ->
+  | _, Some n when n >= 3 ->
     Pause_current_work, Provider_cooldown, Reroute_or_tune_provider, "oas_timeout_budget_loop"
+  | Some Capacity_backpressure, _ ->
+    Soft_fail_turn, Provider_cooldown, Reroute_or_tune_provider, "oas_timeout_budget"
   | _ -> Soft_fail_turn, Provider_cooldown, Inspect_timeout_budget, "oas_timeout_budget"
 ;;
 
@@ -259,6 +296,14 @@ let decide = function
         (if has_activity
          then "provider_stream_idle_active:" ^ stream_idle_state_to_label state
          else "provider_stream_idle:" ^ stream_idle_state_to_label state)
+  | Provider_timeout { phase = Some Capacity_backpressure; liveness = _ } ->
+    make_decision
+      ~failure_scope:Provider_scope
+      ~lifecycle_effect:Soft_fail_turn
+      ~circuit_effect:Provider_cooldown
+      ~operator_action:Reroute_or_tune_provider
+      ~keeper_death_allowed:false
+      ~reason:"provider_timeout:capacity_backpressure"
   | Provider_timeout { phase; liveness = _ } ->
     let reason =
       match phase with
@@ -274,7 +319,7 @@ let decide = function
       ~reason
   | Oas_timeout_budget { phase; strikes; liveness } ->
     let lifecycle_effect, circuit_effect, operator_action, reason =
-      oas_budget_loop_effect ~strikes ~liveness
+      oas_budget_loop_effect ~phase ~strikes ~liveness
     in
     let reason =
       match phase with

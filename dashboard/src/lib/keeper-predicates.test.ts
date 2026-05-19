@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import type { Keeper } from '../types/core'
 import {
+  isKeeperCrashed,
   isKeeperPaused,
   isKeeperOffline,
   isKeeperRunningExcludingRestarting,
@@ -48,6 +49,26 @@ describe('isKeeperOffline', () => {
   })
   it('Running keeper not offline', () => {
     expect(isKeeperOffline(k({ phase: 'Running' }))).toBe(false)
+  })
+})
+
+describe('isKeeperCrashed — audit A1 (2026-05-19)', () => {
+  it.each<[Keeper['phase']]>([
+    ['Crashed'], ['Dead'], ['Zombie'],
+  ])('phase=%s ⇒ crashed', (phase) => {
+    expect(isKeeperCrashed(k({ phase }))).toBe(true)
+  })
+  it.each<[Keeper['phase']]>([
+    ['Running'], ['Paused'], ['Offline'], ['Stopped'], ['Restarting'],
+    ['Failing'], ['Overflowed'], ['Compacting'], ['HandingOff'], ['Draining'],
+  ])('phase=%s ⇒ NOT crashed (terminal-failure-only subset)', (phase) => {
+    expect(isKeeperCrashed(k({ phase }))).toBe(false)
+  })
+  it('null phase ⇒ NOT crashed', () => {
+    expect(isKeeperCrashed(k({ phase: null }))).toBe(false)
+  })
+  it('undefined phase ⇒ NOT crashed', () => {
+    expect(isKeeperCrashed(k())).toBe(false)
   })
 })
 

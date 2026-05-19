@@ -21,7 +21,7 @@ import { KeeperPhaseTimeline, refreshKeeperPhaseTimeline } from './keeper-phase-
 import { KeeperLifecycleTimeline, refreshKeeperLifecycleTimeline } from './keeper-lifecycle-timeline'
 import { TurnBudgetGaugePanel } from './turn-budget-gauge'
 import { parsePrometheusText, type ParsedMetric } from './prometheus-metrics'
-import { isKeeperPaused } from '../lib/keeper-predicates'
+import { isKeeperCrashed, isKeeperPaused } from '../lib/keeper-predicates'
 import { fetchWithTimeout, authHeaders } from '../api/core'
 import { TimeAgo } from './common/time-ago'
 import { LoadingState, ErrorRecoverable } from './common/feedback-state'
@@ -224,7 +224,7 @@ function HealthGrid({ allKeepers }: { allKeepers: Keeper[] }) {
               ? Date.now() - k.last_activity_ago_s * 1000
               : null
             const isPaused = isKeeperPaused(k)
-            const isCrashed = k.phase === 'Crashed' || k.phase === 'Dead' || k.phase === 'Zombie'
+            const isCrashed = isKeeperCrashed(k)
 
             return html`
               <tr

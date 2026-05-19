@@ -11,6 +11,7 @@
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { useEffect } from 'preact/hooks'
+import { TLA_POLL_INTERVAL_MS } from '../config/constants'
 import {
   fetchTlaSpecs,
   type TlaSpecCategory,
@@ -116,7 +117,7 @@ export function VerificationSpecsPanel() {
 
   useEffect(() => {
     void loadSpecs(resource)
-    const id = setInterval(() => void loadSpecs(resource), 60_000)
+    const id = setInterval(() => void loadSpecs(resource), TLA_POLL_INTERVAL_MS)
     return () => { clearInterval(id); resource.cancel() }
   }, [resource])
 

@@ -9,6 +9,7 @@
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { useEffect } from 'preact/hooks'
+import { TLA_POLL_INTERVAL_MS } from '../config/constants'
 import {
   fetchTlcResults,
   type TlaSpecCategory,
@@ -205,7 +206,7 @@ export function TlcResultsPanel() {
 
   useEffect(() => {
     void loadTlcResults(resource)
-    const id = setInterval(() => void loadTlcResults(resource), 60_000)
+    const id = setInterval(() => void loadTlcResults(resource), TLA_POLL_INTERVAL_MS)
     return () => { clearInterval(id); resource.cancel() }
   }, [resource])
 

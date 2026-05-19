@@ -65,10 +65,11 @@ let partial_response_of_stop
     ~(model_id : string)
     ~(text : string)
   : Agent_sdk.Types.api_response =
+  (* RFC-0132 PR-2: api_response model surface = external boundary; redact via SSOT. *)
   let _ = model_id in
   {
     id = session_id;
-    model = "runtime";
+    model = Boundary_redaction.to_string Boundary_redaction.runtime_model_label;
     stop_reason = Agent_sdk.Types.EndTurn;
     content = [ Agent_sdk.Types.Text text ];
     usage = None;

@@ -311,7 +311,11 @@ let maybe_rollover_oas_handoff
                      };
                    }
                  in
-                 let model = "runtime" in
+                 (* RFC-0132 PR-2: handoff event surface = external boundary; redact via SSOT. *)
+                 let model =
+                   Boundary_redaction.to_string
+                     Boundary_redaction.runtime_model_label
+                 in
                  let handoff_json =
                    `Assoc
                      [

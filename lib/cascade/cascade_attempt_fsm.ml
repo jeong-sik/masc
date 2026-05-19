@@ -553,7 +553,9 @@ let provider_label provider =
   | "" -> "unknown"
   | value -> value
 
-let public_runtime_provider_label = "runtime"
+(* RFC-0132 PR-2: cascade-fsm public surface label = external boundary; redact via SSOT. *)
+let public_runtime_provider_label =
+  Boundary_redaction.to_string Boundary_redaction.runtime_provider_label
 
 let provider_error_capacity_scope = function
   | Llm_provider.Error.CapacityModel -> `Model

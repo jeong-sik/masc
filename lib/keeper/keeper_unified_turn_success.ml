@@ -5,7 +5,9 @@ module KEC = Keeper_exec_context
 module KUM = Keeper_unified_metrics
 module Social = Keeper_social_model
 
-let runtime_lane_label = "runtime"
+(* RFC-0132 PR-2: success-path keeper-facing metric label = external boundary; redact via SSOT. *)
+let runtime_lane_label =
+  Boundary_redaction.to_string Boundary_redaction.runtime_model_label
 
 let turn_cost result =
   let used_model_id = Keeper_agent_run.surface_model_used result in

@@ -46,7 +46,9 @@ and cascade_fallback_event = {
 
 module StringMap = Map.Make(String)
 
-let public_runtime_model_label = "runtime"
+(* RFC-0132 PR-2: legacy-runner OAS/dashboard surface = external boundary; redact via SSOT. *)
+let public_runtime_model_label =
+  Boundary_redaction.to_string Boundary_redaction.runtime_model_label
 
 type cascade_counter = {
   calls : int;

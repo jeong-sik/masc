@@ -760,7 +760,11 @@ let run_turn
           Agent.run. Post-run episode creation requires an explicit
           flush_incremental call since AfterTurn already fired. *)
                  let text = Agent_sdk.Types.text_of_content result.response.content in
-                 let model = "runtime" in
+                 (* RFC-0132 PR-2: receipt model surface = external boundary; redact via SSOT. *)
+                 let model =
+                   Boundary_redaction.to_string
+                     Boundary_redaction.runtime_model_label
+                 in
                  receipt_turn_count_ref := Some result.turns;
                  receipt_model_used_ref := Some model;
                  receipt_stop_reason_ref := Some result.stop_reason;

@@ -243,8 +243,12 @@ let sdk_agent_error_fields = function
     ; "limit_usd", `Float limit_usd
     ]
   | Agent_sdk.Error.CostBudgetUnenforceable { model_id = _; limit_usd } ->
+    (* RFC-0132 PR-2: event surface model value = external boundary; redact via SSOT.
+       The "runtime" JSON key is a schema field name (not a label). *)
     [ "variant", `String "cost_budget_unenforceable"
-    ; "runtime", `String "runtime"
+    ; "runtime",
+      `String
+        (Boundary_redaction.to_string Boundary_redaction.runtime_model_label)
     ; "limit_usd", `Float limit_usd
     ]
   | Agent_sdk.Error.UnrecognizedStopReason { reason } ->

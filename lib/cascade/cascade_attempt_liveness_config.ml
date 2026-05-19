@@ -89,7 +89,9 @@ let valid_sample (s : success_sample) =
   && finite_non_negative s.max_inter_chunk_ms
   && finite_non_negative s.wall_ms
 
-let runtime_candidate_key = "runtime"
+(* RFC-0132 PR-2: liveness candidate key = external boundary; redact via SSOT. *)
+let runtime_candidate_key =
+  Boundary_redaction.to_string Boundary_redaction.runtime_model_label
 
 let normalize_candidate_key raw =
   let key = String.trim raw in

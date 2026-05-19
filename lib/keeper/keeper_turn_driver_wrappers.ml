@@ -82,7 +82,13 @@ let run_model_by_label
                          (Accept_rejected
                             {
                               scope = model_label;
-                              model = Some "runtime";
+                              (* RFC-0132 PR-2: model field = external boundary; redact via SSOT.
+                                 The reason format string keeps the literal runtime label as
+                                 debug content (excluded from codemod — internal observability). *)
+                              model =
+                                Some
+                                  (Boundary_redaction.to_string
+                                     Boundary_redaction.runtime_model_label);
                               reason =
                                 Printf.sprintf
                                   "response rejected by accept (runtime=%s)"

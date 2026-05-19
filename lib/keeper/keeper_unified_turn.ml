@@ -15,7 +15,7 @@ include Keeper_turn_liveness
 include Keeper_turn_cascade_budget
 include Keeper_unified_turn_types
 
-let runtime_lane_label = "runtime"
+(* RFC-0132 PR-2: removed dead [runtime_lane_label] (0 callers). *)
 
 include Keeper_unified_turn_phase_plan
 

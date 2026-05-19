@@ -10,9 +10,12 @@ let provider_kind_string (cfg : Llm_provider.Provider_config.t) =
 
 (* External-observability labels.  The Runtime Lens redaction lives here
    (record_probe_metrics below); the boot-log JSON keeps real provider
-   identity (see [Cascade_catalog_runtime_json]). *)
-let public_runtime_provider_label = "runtime"
-let public_runtime_model_label = "runtime"
+   identity (see [Cascade_catalog_runtime_json]).
+   RFC-0132 PR-2: external-observability labels = external boundary; redact via SSOT. *)
+let public_runtime_provider_label =
+  Boundary_redaction.to_string Boundary_redaction.runtime_provider_label
+let public_runtime_model_label =
+  Boundary_redaction.to_string Boundary_redaction.runtime_model_label
 
 let candidate_probe_error (candidate : candidate_runtime) message =
   {

@@ -409,8 +409,12 @@ let dashboard_status_of_stop_reason = function
 let record_dashboard_oas_response ~config ~total_duration_ms ?serialization_ms
     ~status (response : Agent_sdk.Types.api_response) =
   try
-    Dashboard_oas_bridge.record_response ~provider_id:"runtime"
-      ~model_id:"runtime"
+    (* RFC-0132 PR-2: dashboard surface = external boundary; redact via SSOT. *)
+    Dashboard_oas_bridge.record_response
+      ~provider_id:
+        (Boundary_redaction.to_string Boundary_redaction.runtime_provider_label)
+      ~model_id:
+        (Boundary_redaction.to_string Boundary_redaction.runtime_model_label)
       ~total_duration_ms ?serialization_ms ~status response
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn

@@ -3,7 +3,7 @@
 // Zero-dependency fallback (no external graph library).
 
 import { html } from 'htm/preact'
-import { formatDateTimeIso } from '../../lib/format-time'
+import { formatDateTimeIso, formatTimeHmMs } from '../../lib/format-time'
 
 export interface ConversationMessage {
   id: string
@@ -35,11 +35,7 @@ interface AgentConversationProps {
   testId?: string
 }
 
-function formatTime(ts: number): string {
-  const d = new Date(ts)
-  if (!Number.isFinite(d.getTime())) return '--:--'
-  return d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })
-}
+const formatTime = formatTimeHmMs
 
 
 export function summarizeAgentConversation(messages: ConversationMessage[]): AgentConversationSummary {

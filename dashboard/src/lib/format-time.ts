@@ -122,6 +122,26 @@ export function formatDateTimeIso(ts: number): string | undefined {
   return d.toISOString()
 }
 
+/** Format ms timestamp as "HH:MM:SS". Returns fallback for invalid. */
+export function formatTimeHmsMs(tsMs: number, fallback = '--:--:--'): string {
+  if (!Number.isFinite(tsMs)) return fallback
+  const d = new Date(tsMs)
+  if (!Number.isFinite(d.getTime())) return fallback
+  return d.toLocaleTimeString('ko-KR', {
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+  })
+}
+
+/** Format ms timestamp as "HH:MM". Returns fallback for invalid. */
+export function formatTimeHmMs(tsMs: number, fallback = '--:--'): string {
+  if (!Number.isFinite(tsMs)) return fallback
+  const d = new Date(tsMs)
+  if (!Number.isFinite(d.getTime())) return fallback
+  return d.toLocaleTimeString('ko-KR', {
+    hour: '2-digit', minute: '2-digit',
+  })
+}
+
 /** Format a numeric delta with sign prefix. */
 export function formatDelta(delta: number, decimals = 4): string {
   const sign = delta >= 0 ? '+' : ''

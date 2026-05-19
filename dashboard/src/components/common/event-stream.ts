@@ -5,7 +5,7 @@
 
 import { html } from 'htm/preact'
 import { useMemo } from 'preact/hooks'
-import { formatDateTimeIso } from '../../lib/format-time'
+import { formatDateTimeIso, formatTimeHmsMs } from '../../lib/format-time'
 
 export interface StreamEvent {
   id: string
@@ -93,11 +93,7 @@ function levelLabel(level: string): string {
   return level === 'error' ? '에러' : level === 'warn' ? '경고' : '정보'
 }
 
-function formatTime(ts: number): string {
-  const d = new Date(ts)
-  if (!Number.isFinite(d.getTime())) return '--:--:--'
-  return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}:${d.getSeconds().toString().padStart(2, '0')}`
-}
+const formatTime = formatTimeHmsMs
 
 
 export function getVisibleStreamEvents(events: StreamEvent[], maxItems: number): StreamEvent[] {

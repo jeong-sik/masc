@@ -584,6 +584,7 @@
   test_run_local_script
   test_tool_prefilter
   test_keeper_state_machine
+  test_keeper_state_machine_preconditions
   test_keeper_state_machine_correspondence
   test_keeper_state_machine_tla_correspondence
   test_keeper_lifecycle_hooks

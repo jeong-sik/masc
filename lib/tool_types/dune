@@ -22,4 +22,5 @@
  (name masc_mcp_tool_types)
  (public_name masc_mcp.tool_types)
  (wrapped false)
- (libraries yojson masc_log masc_core eio time_compat))
+ (libraries yojson masc_log masc_core eio time_compat)
+ (preprocess (pps ppx_deriving_yojson)))

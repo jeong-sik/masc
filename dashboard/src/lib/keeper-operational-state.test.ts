@@ -151,16 +151,34 @@ describe('deriveKeeperOperationalState — stuck branch (RFC-0135 §1.1 root)', 
     })
   })
 
-  it('blocker AND execution_current=false ⇒ stuck (RFC §1.1)', () => {
+  it('blocker AND execution_current=true ⇒ stuck (receipt is current)', () => {
+    // execution_current=true means the receipt matches the *current* live
+    // turn (server_dashboard_http.ml:1061-1074) — the blocker is meaningful.
     const state = deriveKeeperOperationalState({
       keeper: makeKeeper({ runtime_blocker_class: 'cascade_exhausted' }),
       composite: makeComposite({
-        runtime_attention: attention({ execution_current: false, blocked: true }),
+        runtime_attention: attention({ execution_current: true, blocked: true }),
       }),
     })
     expect(state).toEqual<KeeperOperationalState>({
       kind: 'stuck',
       reason: 'cascade_exhausted',
+    })
+  })
+
+  it('blocker without explicit stale marker ⇒ stuck (fail-closed default)', () => {
+    // attention present but execution_current undefined → no explicit
+    // stale marker → blocker stays meaningful (fail-closed). Mirrors the
+    // older-backend case where runtime_attention may omit the field.
+    const state = deriveKeeperOperationalState({
+      keeper: makeKeeper({ runtime_blocker_class: 'oas_timeout_budget' }),
+      composite: makeComposite({
+        runtime_attention: attention({ execution_current: undefined }),
+      }),
+    })
+    expect(state).toEqual<KeeperOperationalState>({
+      kind: 'stuck',
+      reason: 'oas_timeout_budget',
     })
   })
 
@@ -203,10 +221,13 @@ describe('deriveKeeperOperationalState — running branch with conditioning', ()
     })
   })
 
-  it('RFC §1.1 EXACT scenario: blocker set BUT execution_current=true → running, blocker is stale', () => {
+  it('RFC §1.1 EXACT scenario: blocker set BUT execution_current=false → running, blocker is stale', () => {
     // This is the lifecycle-worker case the user reported on 2026-05-19:
     // list card showed "현재 차단 · synthetic_stall" while detail showed
-    // "턴 진행 중 · executing live". The SSOT verdict must be running.
+    // "턴 진행 중 · executing live". The detail panel's pre-RFC logic
+    // demoted the blocker when execution_current=false (receipt is from
+    // a prior turn). The typed SSOT mirrors that, producing
+    // `running { staleBlocker: synthetic_stall }`.
     const state = deriveKeeperOperationalState({
       keeper: makeKeeper({
         phase: 'Running',
@@ -219,7 +240,8 @@ describe('deriveKeeperOperationalState — running branch with conditioning', ()
         is_live: true,
         runtime_attention: attention({
           state: 'active',
-          execution_current: true,
+          execution_current: false,
+          stale_execution_receipt: true,
           blocked: false,
         }),
       }),
@@ -294,17 +316,39 @@ describe('deriveKeeperOperationalState — priority invariants', () => {
     expect(state.kind).toBe('offline')
   })
 
-  it('stuck beats running (when execution not fresh)', () => {
+  it('stuck beats running (when receipt is current — execution_current=true)', () => {
+    // Mirror of the pre-RFC detail-panel logic: the blocker drives the
+    // headline iff the receipt is from the current live turn.
     const state = deriveKeeperOperationalState({
       keeper: makeKeeper({
         phase: 'Running',
         runtime_blocker_class: 'turn_timeout',
       }),
       composite: makeComposite({
-        runtime_attention: attention({ execution_current: false }),
+        runtime_attention: attention({ execution_current: true }),
       }),
     })
     expect(state.kind).toBe('stuck')
+  })
+
+  it('running with staleBlocker beats stuck (when receipt is from prior turn)', () => {
+    const state = deriveKeeperOperationalState({
+      keeper: makeKeeper({
+        phase: 'Running',
+        runtime_blocker_class: 'turn_timeout',
+      }),
+      composite: makeComposite({
+        runtime_attention: attention({
+          execution_current: false,
+          stale_execution_receipt: true,
+        }),
+      }),
+    })
+    expect(state).toEqual<KeeperOperationalState>({
+      kind: 'running',
+      turnPhase: 'idle',
+      staleBlocker: 'turn_timeout',
+    })
   })
 })
 

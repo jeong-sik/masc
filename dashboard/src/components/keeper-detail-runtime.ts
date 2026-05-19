@@ -4,6 +4,14 @@
 
 import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
+// RFC-0135 PR-5: detail panel and roster card derive blocker conditioning
+// through the same typed `KeeperOperationalState` SSOT (PR-1 #16576), so
+// `현재 차단 / 이전 차단` decisions cannot diverge between the two
+// surfaces. The `runtime_attention.blocked / needs_attention` signals
+// represent *live-execution* attention (`execution_current && blocked`,
+// see `lib/server/server_dashboard_http.ml:1114`), which is orthogonal to
+// the blocker-class-vs-stale-execution axis and stays inline below.
+import { deriveKeeperOperationalState } from '../lib/keeper-operational-state'
 import { formatPct1 } from '../lib/format-number'
 import { formatDuration } from '../lib/format-time'
 import { ActionButton } from './common/button'
@@ -190,13 +198,22 @@ export function deriveKeeperLiveTruth({
     ?? keeper.presence_keepalive
     ?? (linkedState !== 'offline')
   const activeTurn = compositeSnapshot?.is_live === true || !isIdleTurnPhase(compositeSnapshot?.turn_phase)
-  const previousExecutionReceipt =
-    compositeSnapshot?.runtime_attention?.stale_execution_receipt === true
-    || compositeSnapshot?.runtime_attention?.execution_current === false
-  const blocked =
+
+  // RFC-0135 PR-5: route the blocker-class axis through the typed SSOT,
+  // matching the roster card (`agent-roster.ts:rosterStateNote`). The
+  // attention-level axis (live-execution blocked / needs_attention) is
+  // separate — backend sets it as `execution_current && blocked`, which
+  // typed state does not cover, so it stays inline.
+  const opState = deriveKeeperOperationalState({
+    keeper,
+    composite: compositeSnapshot,
+  })
+  const stuckByBlockerClass = opState.kind === 'stuck'
+  const staleBlocker = opState.kind === 'running' ? opState.staleBlocker : null
+  const attentionBlocked =
     compositeSnapshot?.runtime_attention?.blocked === true
     || compositeSnapshot?.runtime_attention?.needs_attention === true
-    || (!previousExecutionReceipt && Boolean(keeper.runtime_blocker_class))
+  const blocked = stuckByBlockerClass || attentionBlocked
   const stopRequested =
     compositeSnapshot?.runtime_attention?.fiber_stop_requested === true
     || compositeSnapshot?.phase_diagnosis?.conditions.stop_requested === true
@@ -293,8 +310,21 @@ export function deriveKeeperLiveTruth({
       },
       {
         label: '차단',
-        value: blocked ? compactToken(compositeSnapshot?.runtime_attention?.state, 'blocked') : 'none',
-        detail: `${runtimeReason} · ${toolContract}`,
+        // RFC-0135 PR-5: typed reason takes precedence so the row text
+        // matches the roster card ("synthetic_stall" vs bare "blocked").
+        // When the receipt is from a prior turn (`staleBlocker` set),
+        // the row stays at 'none' (current execution is not blocked)
+        // and the prior-turn class is shown in the detail line below.
+        // This preserves the pre-RFC "차단 = none means clean now"
+        // operator mental model.
+        value: stuckByBlockerClass
+          ? opState.reason
+          : attentionBlocked
+            ? compactToken(compositeSnapshot?.runtime_attention?.state, 'blocked')
+            : 'none',
+        detail: staleBlocker !== null
+          ? `${runtimeReason} · ${toolContract} · 이전 차단: ${staleBlocker}`
+          : `${runtimeReason} · ${toolContract}`,
         tone: blocked ? 'warn' : 'ok',
       },
     ],

@@ -154,6 +154,11 @@ let bg_revalidate_backoff_factor = 2.0
 
 exception Compute_timeout of string * bool
 
+let is_compute_timeout exn =
+  match exn with
+  | Compute_timeout _ -> true
+  | _ -> false
+
 let is_internal_race_cancel exn =
   match exn with
   | Eio.Cancel.Cancelled _ ->
@@ -376,7 +381,7 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
            value
        | Some (Error exn) ->
            let fallback_val = ref None in
-           if not (is_internal_race_cancel exn) then
+           if not (is_internal_race_cancel exn || is_compute_timeout exn) then
              Log.Dashboard.error "cache revalidation failed: %s" (Printexc.to_string exn);
            atomic_update table (fun map ->
              match SMap.find_opt key map with

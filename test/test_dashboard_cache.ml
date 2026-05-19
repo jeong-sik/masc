@@ -29,6 +29,32 @@ let test_proactive_refresh_timeout_message_names_phase () =
      elapsed_s=33.2"
     msg
 
+let latest_log_seq () =
+  match Log.Ring.recent ~limit:1 () with
+  | [] -> -1
+  | entry :: _ -> entry.Log.Ring.seq
+
+let test_compute_timeout_not_logged_as_error ~clock () =
+  Dashboard_cache.invalidate_all ();
+  let before_seq = latest_log_seq () in
+  let result =
+    Dashboard_cache.get_or_compute_with_timeout "timeout-no-error" ~ttl:0.1
+      ~clock ~timeout_sec:0.01 (fun () ->
+        Eio.Time.sleep clock 0.1;
+        `String "never")
+  in
+  Alcotest.(check string) "timeout kind" "owner" (timeout_kind result);
+  let cache_revalidation_errors =
+    Log.Ring.recent ~since_seq:before_seq
+      ~min_level:(Log.level_to_int Log.Error)
+      ()
+    |> List.filter (fun entry ->
+      String_util.contains_substring entry.Log.Ring.message
+        "cache revalidation failed")
+  in
+  Alcotest.(check int) "compute timeout does not emit ERROR" 0
+    (List.length cache_revalidation_errors)
+
 (* -- 1. Nested get_or_compute must not deadlock ----------------------------- *)
 
 let test_nested_no_deadlock () =
@@ -586,6 +612,8 @@ let () =
         [
           test_case "proactive refresh timeout names phase" `Quick
             test_proactive_refresh_timeout_message_names_phase;
+          test_case "compute timeout is not logged as error" `Quick
+            (test_compute_timeout_not_logged_as_error ~clock);
           test_case "stale preserved on timeout" `Quick
             (fun () ->
                Eio.Switch.run @@ fun sw ->

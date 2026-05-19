@@ -1443,7 +1443,6 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
          (execution, transport_health) start immediately. *)
       Server_dashboard_http.start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock;
       Server_dashboard_http.start_transport_health_refresh_loop ~state ~sw ~clock;
-      Server_routes_http_runtime.start_full_health_snapshot_refresh_loop ~sw ~clock;
       Server_dashboard_http.start_mission_refresh_loop ~state ~sw ~clock;
       Server_dashboard_http.start_operator_snapshot_refresh_loop ~state ~sw ~clock;
       Server_dashboard_http.start_operator_digest_refresh_loop ~state ~sw ~clock;
@@ -1468,7 +1467,11 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
          | Eio.Cancel.Cancelled _ as e -> raise e
          | exn ->
              Log.Dashboard.warn "shell cache pre-warm failed: %s"
-             (Printexc.to_string exn)));
+             (Printexc.to_string exn));
+        (* Full-health scans are heavier than the probe path. Start them after
+           shell prewarm has either succeeded or exhausted its own budget so
+           cold-start diagnostics do not contend with the shell's first render. *)
+        Server_routes_http_runtime.start_full_health_snapshot_refresh_loop ~sw ~clock);
       start_lazy_startup state;
       (match catalog_validation_error with
        | Some detail -> Server_startup_state.mark_degraded ~error:detail

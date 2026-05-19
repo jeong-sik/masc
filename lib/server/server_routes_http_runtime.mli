@@ -218,6 +218,9 @@ module For_testing : sig
   val refresh_full_health_snapshot_now :
     ?listener:string -> Httpun.Request.t -> unit
   (** Synchronously recomputes and stores the cached full-health snapshot. *)
+
+  val full_health_refresh_timing : unit -> float * float
+  (** Returns [(interval_sec, timeout_sec)] for the full-health refresh loop. *)
 end
 
 val keeper_fleet_runtime_resolution_fields : unit -> (string * Yojson.Safe.t) list

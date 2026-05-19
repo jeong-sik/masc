@@ -32,7 +32,8 @@ let session_status_string session_json =
       | Some value -> value
       | None ->
           trim_to_option (string_field "status" session_json)
-          |> Option.value ~default:"unknown")
+          |> Option.value
+               ~default:"<missing status field in summary / meta / session>")
 
 let session_recent_events session_json =
   list_field "recent_events" session_json

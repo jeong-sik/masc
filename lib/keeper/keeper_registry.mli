@@ -78,16 +78,8 @@ val all : ?base_path:string -> unit -> registry_entry list
 (** Update the meta for a registered keeper. No-op if not found. *)
 val update_meta : base_path:string -> string -> keeper_meta -> unit
 
-(** Persist the last cascade provider attempt in keeper runtime meta.
-    Best-effort: missing keepers or meta write failures are ignored. *)
-val record_cascade_attempt :
-  base_path:string -> keeper_name:string -> cascade_attempt_record -> unit
-
-(** Add [provider=<id> http=<status>] to [fiber_unresolved] outcomes when
-    keeper runtime meta has a recorded cascade attempt. Other outcomes are
-    returned unchanged. *)
-val enrich_fiber_unresolved_outcome :
-  base_path:string -> keeper_name:string -> string -> string
+(* Cascade-attempt persistence + enrichment moved to
+   Keeper_registry_cascade_attempt (record / enrich_fiber_unresolved_outcome). *)
 
 (** Record a restart. Increments restart_count and updates last_restart_ts. *)
 val record_restart : base_path:string -> string -> unit

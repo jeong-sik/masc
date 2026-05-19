@@ -609,7 +609,7 @@ let run_named
                       (* NDT-OK: external provider observation timestamp only. *)
                   }
                 in
-                Keeper_registry.record_cascade_attempt ~base_path ~keeper_name record
+                Keeper_registry_cascade_attempt.record ~base_path ~keeper_name record
           in
           let http_status_of_provider_error = function
             | Some (Provider_error.ServerError { code; _ }) -> Some code

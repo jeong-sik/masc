@@ -619,7 +619,7 @@ let record_keeper_crashed
   if resolve_registry_done entry (`Crashed reason)
   then (
     let outcome =
-      Keeper_registry.enrich_fiber_unresolved_outcome
+      Keeper_registry_cascade_attempt.enrich_fiber_unresolved_outcome
         ~base_path
         ~keeper_name
         reason

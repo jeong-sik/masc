@@ -295,16 +295,29 @@ function agentBand(status: string | undefined | null): RuntimeBand {
   const parsed = parseAgentStatus(status)
   if (parsed === 'inactive' || parsed === 'offline') return 'offline'
   if (parsed != null) return 'active'
-  // Wire-format tokens outside the declared AgentStatus union. The
-  // OCaml backend agent_status sum (lib/types/types_core.ml:42) emits
-  // only Active|Busy|Listening|Inactive; 'dead' and 'left' here are
-  // legacy defensive arms from before the typed union was defined
-  // (predates RFC-0139). Kept as documented compat until a wire-format
-  // audit confirms zero emission, then collapse into the parsed-null
-  // branch below.
-  const lower = status.trim().toLowerCase()
-  if (lower === 'dead' || lower === 'left') return 'offline'
-  return 'active'
+  // Wire-format tokens outside the declared AgentStatus union
+  // (`parseAgentStatus` returned null). The OCaml backend
+  // `agent_status` sum (lib/types/types_core.ml:42) emits only
+  // Active|Busy|Listening|Inactive, plus `dashboard_mission_agents.ml:206-207`
+  // adds `"offline" | "unknown"` via typed-union bypass.
+  //
+  // Wire-format audit 2026-05-20: `rg -n '"dead"|"left"' lib/` returned
+  // zero hits in the `agent.status` slot — `"dead"` belongs to
+  // `Fiber_dead`/`KH_dead`/`subsystem_health`, `"left"` belongs to
+  // `Span_left` (different axis vocabularies). Defensive arms for
+  // those tokens dropped.
+  //
+  // Unknown token surfaces as `'attention'` (not the prior `'active'`
+  // default). `"unknown"` is an emitted backend default
+  // (`dashboard_mission_agents.ml:207` `| None -> "unknown"`,
+  // `dashboard_execution_builders.ml:209` `~default:"unknown"`), so the
+  // previous `'active'` fallback silently absorbed operator-relevant
+  // ambiguity into a "running" badge. `'attention'` ("주의 필요 — 응답
+  // 지연, 오류, 복구, 승계 등으로 상태 확인이 필요합니다") preserves
+  // that signal. Software-development.md §"Unknown → Permissive
+  // Default" anti-pattern: unknown input must surface as a distinct
+  // state, not collapse into the happy-path default.
+  return 'attention'
 }
 
 function runtimeBandForAgent(

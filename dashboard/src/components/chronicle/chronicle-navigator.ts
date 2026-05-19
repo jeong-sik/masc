@@ -6,6 +6,7 @@ import {
   chronicleLaneLabel,
 } from './chronicle-model'
 import type { ChronicleEvent, ChronicleLane } from './chronicle-types'
+import { formatTimeHmsMs } from '../../lib/format-time'
 
 interface ChronicleNavigatorProps {
   events: readonly ChronicleEvent[]
@@ -23,11 +24,7 @@ const LANE_TONE: Record<ChronicleLane, string> = {
   conversation: 'border-[var(--color-status-warn)]',
 }
 
-function formatTime(timestamp: number): string {
-  const date = new Date(timestamp)
-  if (!Number.isFinite(date.getTime())) return '--:--:--'
-  return `${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}:${date.getSeconds().toString().padStart(2, '0')}`
-}
+const formatTime = formatTimeHmsMs
 
 function formatMetadataValue(value: unknown): string {
   if (value == null) return ''

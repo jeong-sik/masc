@@ -804,8 +804,13 @@ let full_health_snapshot = ref None
 let full_health_refresh_in_flight = ref false
 let full_health_refresh_started_at = ref None
 let full_health_refresh_requested = ref false
-let full_health_refresh_interval_sec = 10.0
-let full_health_refresh_timeout_sec = 8.0
+let full_health_refresh_timeout_sec =
+  Float.max 8.0 Env_config_runtime.Dashboard.shell_timeout_sec
+;;
+
+let full_health_refresh_interval_sec =
+  Float.max 30.0 (full_health_refresh_timeout_sec +. 5.0)
+;;
 
 let with_full_health_snapshot_lock f =
   Stdlib.Mutex.lock full_health_snapshot_mu;
@@ -1068,6 +1073,9 @@ module For_testing = struct
 
   let refresh_full_health_snapshot_now ?(listener = "http/1.1") request =
     refresh_full_health_snapshot_sync ~listener request
+
+  let full_health_refresh_timing () =
+    (full_health_refresh_interval_sec, full_health_refresh_timeout_sec)
 end
 
 let full_health_requested request =

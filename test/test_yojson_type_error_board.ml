@@ -1,12 +1,8 @@
-(** task-318: Reproduce Yojson Type_error with minimal test cases.
+(** task-318: Pin board JSON boundary behavior with minimal test cases.
 
     Exercises the JSON boundary in [Tool_board_format] that surfaces
-    [Yojson.Safe.Util.Type_error] when callers pass unexpected JSON shapes
-    for optional fields like `sources`, `meta`, etc.
-
-    The companion boundary wrapper [with_yojson_boundary] converts these
-    into structured error results — this test verifies the *raw* exceptions
-    so we pin down the exact trigger conditions. *)
+    unexpected JSON shapes for optional fields like `sources`, `meta`,
+    etc. *)
 
 open Alcotest
 open Masc_mcp
@@ -15,52 +11,34 @@ open Masc_mcp
 
 let () = Mirage_crypto_rng_unix.use_default ()
 
+let pp_yojson ppf json =
+  Format.pp_print_string ppf (Yojson.Safe.pretty_to_string json)
+
+let yojson = testable pp_yojson Yojson.Safe.equal
+
 (** Build a `Yojson.Safe.t` args association list. *)
 let args_of_list fields : Yojson.Safe.t =
   `Assoc fields
 
-(** Extract string from Tool_result error, or raise. *)
-let error_string_of_result r =
-  match r with
-  | Tool_result.{ kind = `Error; text; _ } -> text
-  | _ -> failwith "expected error result"
-
 (* ---- Test: source_entries_arg with non-list "sources" ---- *)
 
-let test_source_entries_non_list_raises () =
-  (* "sources" is a string instead of a list — must raise Type_error *)
+let test_source_entries_non_list_returns_none () =
+  (* "sources" is a string instead of a list — ignore it safely *)
   let args = args_of_list [ "sources", `String "https://example.com" ] in
-  let raises =
-    try
-      let _ : Yojson.Safe.t option list option =
-        Tool_board_format.source_entries_arg args
-      in
-      false
-    with Yojson.Safe.Util.Type_error _ -> true
-  in
-  check bool "non-list sources must raise Type_error" true raises
+  let result = Tool_board_format.source_entries_arg args in
+  check (option (list yojson)) "non-list sources return None" None result
 
-let test_source_entries_null_raises () =
+let test_source_entries_null_returns_none () =
   (* "sources" is null instead of a list *)
   let args = args_of_list [ "sources", `Null ] in
-  let raises =
-    try
-      let _ = Tool_board_format.source_entries_arg args in
-      false
-    with Yojson.Safe.Util.Type_error _ -> true
-  in
-  check bool "null sources must raise Type_error" true raises
+  let result = Tool_board_format.source_entries_arg args in
+  check (option (list yojson)) "null sources return None" None result
 
-let test_source_entries_int_raises () =
+let test_source_entries_int_returns_none () =
   (* "sources" is an int instead of a list *)
   let args = args_of_list [ "sources", `Int 42 ] in
-  let raises =
-    try
-      let _ = Tool_board_format.source_entries_arg args in
-      false
-    with Yojson.Safe.Util.Type_error _ -> true
-  in
-  check bool "int sources must raise Type_error" true raises
+  let result = Tool_board_format.source_entries_arg args in
+  check (option (list yojson)) "int sources return None" None result
 
 (* ---- Test: source_entries_arg with valid list ---- *)
 
@@ -76,7 +54,7 @@ let test_source_entries_valid_list () =
       ]
   in
   let result = Tool_board_format.source_entries_arg args in
-  check (option (list (testable Yojson.Safe.pretty_to_string (fun a b -> Yojson.Safe.equal a b))))
+  check (option (list yojson))
     "valid sources list"
     (Some
        [ `Assoc [ "url", `String "https://example.com"
@@ -90,7 +68,7 @@ let test_source_entries_valid_list () =
 let test_source_entries_empty_list () =
   let args = args_of_list [ "sources", `List [] ] in
   let result = Tool_board_format.source_entries_arg args in
-  check (option (list (testable Yojson.Safe.pretty_to_string (fun a b -> Yojson.Safe.equal a b))))
+  check (option (list yojson))
     "empty list returns None"
     None
     result
@@ -100,7 +78,7 @@ let test_source_entries_empty_list () =
 let test_source_entries_missing_key () =
   let args = args_of_list [ "content", `String "hello" ] in
   let result = Tool_board_format.source_entries_arg args in
-  check (option (list (testable Yojson.Safe.pretty_to_string (fun a b -> Yojson.Safe.equal a b))))
+  check (option (list yojson))
     "missing key returns None"
     None
     result
@@ -116,7 +94,7 @@ let test_source_entry_non_string_url () =
       ]
   in
   let result = Tool_board_format.source_entries_arg args in
-  check (option (list (testable Yojson.Safe.pretty_to_string (fun a b -> Yojson.Safe.equal a b))))
+  check (option (list yojson))
     "non-string url entry is filtered out → None"
     None
     result
@@ -132,7 +110,7 @@ let test_merge_sources_null_meta () =
       (Some `Null)
       sources
   in
-  check (option (testable Yojson.Safe.pretty_to_string (fun a b -> Yojson.Safe.equal a b)))
+  check (option yojson)
     "null meta gets replaced with Assoc containing sources"
     (Some
        (`Assoc
@@ -150,7 +128,7 @@ let test_merge_sources_int_meta () =
       (Some (`Int 99))
       sources
   in
-  check (option (testable Yojson.Safe.pretty_to_string (fun a b -> Yojson.Safe.equal a b)))
+  check (option yojson)
     "int meta gets replaced with Assoc containing sources"
     (Some
        (`Assoc
@@ -159,25 +137,25 @@ let test_merge_sources_int_meta () =
           ]))
     result
 
-(* ---- Test: normalize_arg_payload on nested unexpected types ---- *)
+(* ---- Test: normalize_board_post_meta on nested unexpected types ---- *)
 
-let test_normalize_arg_payload_string_meta () =
+let test_normalize_board_post_meta_string_meta () =
   (* meta field is a plain string — normalize should not crash *)
   let args = args_of_list [ "meta", `String "some meta" ] in
   let raises =
     try
-      let _ = Tool_board_format.normalize_arg_payload args in
+      let _ = Tool_board_format.normalize_board_post_meta args in
       false
     with Yojson.Safe.Util.Type_error _ -> true
   in
   check bool "string meta must not raise Type_error" false raises
 
-let test_normalize_arg_payload_list_meta () =
+let test_normalize_board_post_meta_list_meta () =
   (* meta field is a list — normalize should not crash *)
   let args = args_of_list [ "meta", `List [ `String "a" ] ] in
   let raises =
     try
-      let _ = Tool_board_format.normalize_arg_payload args in
+      let _ = Tool_board_format.normalize_board_post_meta args in
       false
     with Yojson.Safe.Util.Type_error _ -> true
   in
@@ -190,12 +168,12 @@ let () =
     [
       ( "source_entries_arg"
       , [
-          test_case "non-list sources raises Type_error" `Quick
-            test_source_entries_non_list_raises;
-          test_case "null sources raises Type_error" `Quick
-            test_source_entries_null_raises;
-          test_case "int sources raises Type_error" `Quick
-            test_source_entries_int_raises;
+          test_case "non-list sources return None" `Quick
+            test_source_entries_non_list_returns_none;
+          test_case "null sources return None" `Quick
+            test_source_entries_null_returns_none;
+          test_case "int sources return None" `Quick
+            test_source_entries_int_returns_none;
           test_case "valid sources list parsed" `Quick
             test_source_entries_valid_list;
           test_case "empty list returns None" `Quick
@@ -212,11 +190,11 @@ let () =
           test_case "int meta replaced" `Quick
             test_merge_sources_int_meta;
         ] );
-      ( "normalize_arg_payload"
+      ( "normalize_board_post_meta"
       , [
           test_case "string meta does not crash" `Quick
-            test_normalize_arg_payload_string_meta;
+            test_normalize_board_post_meta_string_meta;
           test_case "list meta does not crash" `Quick
-            test_normalize_arg_payload_list_meta;
+            test_normalize_board_post_meta_list_meta;
         ] );
     ]

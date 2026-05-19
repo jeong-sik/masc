@@ -544,7 +544,7 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
           ? html`<span><strong class="text-[var(--color-fg-secondary)]">사용 도구</strong> · ${usedTools.join(', ')}</span>`
           : null}
         ${unexpectedTools.length > 0
-          ? html`<span class="text-[var(--color-status-err)]"><strong>외부 도구</strong> · ${unexpectedTools.join(', ')}</span>`
+          ? html`<span class="text-[var(--color-status-err)]" title="키퍼 persona의 허용 도구 목록 외부에서 호출된 도구 — 계약 위반"><strong>허용 외 도구</strong> · ${unexpectedTools.join(', ')}</span>`
           : null}
         ${missingRequiredTools.length > 0
           ? html`<span class="text-[var(--color-status-err)]"><strong>누락</strong> · ${missingRequiredTools.join(', ')}</span>`

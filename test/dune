@@ -725,6 +725,7 @@
   test_activity_graph
   test_masc_log
   test_dashboard_namespace_truth
+  test_dashboard_snapshot
   test_server_runtime_bootstrap
   test_server_runtime_bootstrap_codex_config
   test_server_base_path_diagnostics
@@ -952,6 +953,7 @@
   test_activity_graph
   test_masc_log
   test_dashboard_namespace_truth
+  test_dashboard_snapshot
   test_server_runtime_bootstrap
   test_server_runtime_bootstrap_codex_config
   test_server_base_path_diagnostics

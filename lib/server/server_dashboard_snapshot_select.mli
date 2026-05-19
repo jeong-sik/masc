@@ -1,11 +1,13 @@
-(** RFC-0138 Phase 3 Steps 1+2 — dashboard read path selectors.
+(** RFC-0138 Phase 3 — dashboard read path selectors.
 
-    Historically named [Server_dashboard_shell_snapshot] for Step 1;
-    Step 2 extends the same module with [select_tools_json] and
-    [select_telemetry_summary_json].  Step 5 of the migration sequence
-    is expected to rename this module to
-    [Server_dashboard_snapshot_select] once all four projections wire
-    through it.
+    Steps 1+2+3 published a [Dashboard_snapshot]-first read path for
+    four projections: [/shell], [/tools], [/telemetry/summary], and
+    [/project-snapshot] (+ aliases [/namespace-truth], [/room-truth]).
+    Step 5 of the migration sequence renamed this module from
+    [Server_dashboard_shell_snapshot] to [Server_dashboard_snapshot_select]
+    and retired [Dashboard_cache] from the cold-start fallback in
+    [select_telemetry_summary_json] (the path runs at most once per
+    process before the refresh fiber publishes).
 
     [Server_dashboard_http_core] cannot host these helpers because
     [Dashboard_snapshot] already calls into [Server_dashboard_http_core]
@@ -13,7 +15,7 @@
     keeps the dependency arrows acyclic:
 
       [Server_routes_http_routes_dashboard]
-        -> [Server_dashboard_shell_snapshot]
+        -> [Server_dashboard_snapshot_select]
              -> [Dashboard_snapshot]                  (lock-free read)
              -> [Server_dashboard_http_core]          (shell fallback)
              -> [Server_dashboard_http_runtime_info]  (tools fallback)

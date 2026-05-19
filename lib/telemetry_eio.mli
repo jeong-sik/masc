@@ -195,6 +195,7 @@ val track_tool_called :
   ?session_id:string ->
   ?operation_id:string ->
   ?worker_run_id:string ->
+  ?failure_class:Tool_result.tool_failure_class ->
   ?error_kind:error_kind ->
   ?error_message:string ->
   ?exit_code:int ->

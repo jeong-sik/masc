@@ -15,6 +15,7 @@ import { TextInput } from './common/input'
 import { get } from '../api/core'
 import { SurfaceCard } from './common/card'
 import { SkeletonText } from './common/skeleton'
+import { TELEMETRY_AUTO_REFRESH_MS } from '../config/constants'
 
 interface LogResponse {
   ok: boolean
@@ -174,7 +175,7 @@ export function SidecarLogViewer({ connectorId }: { connectorId: string }) {
       if (getEntry(connectorId).open) {
         void fetchLogs(connectorId, getEntry(connectorId).requestedLines)
       }
-    }, 30000)
+    }, TELEMETRY_AUTO_REFRESH_MS)
     return () => clearInterval(id)
   }, [connectorId])
 

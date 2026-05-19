@@ -790,11 +790,21 @@ let make_health_json ?(listener = "http/1.1") request =
              (Prometheus.metric_total "masc_lazy_task_boot_guard_fired_total")));
   ]
 
+(* [stale_since_ts] records the wall-clock time of the FIRST refresh
+   failure since the last successful refresh.  It is preserved across
+   subsequent consecutive failures (never overwritten — see
+   [mark_full_health_snapshot_error]) and cleared on the next
+   successful [store_full_health_snapshot].  This lets downstream
+   consumers compute "how long has the snapshot been stale?" without
+   relying on the per-failure [computed_at] timestamp, which under
+   partial-degradation now points at the LAST successful refresh, not
+   the failure event. *)
 type full_health_snapshot = {
   fields : (string * Yojson.Safe.t) list;
   computed_at : float;
   duration_ms : int;
   error : string option;
+  stale_since_ts : float option;
 }
 
 let full_health_snapshot_ttl_sec = 2.0
@@ -804,8 +814,20 @@ let full_health_snapshot = ref None
 let full_health_refresh_in_flight = ref false
 let full_health_refresh_started_at = ref None
 let full_health_refresh_requested = ref false
+(* Consecutive [/health?full=1] refresh failures (timeouts or
+   exceptions).  Reset to 0 on every successful
+   [store_full_health_snapshot]; incremented inside
+   [mark_full_health_snapshot_error].  Guarded by
+   [full_health_snapshot_mu] like every other piece of refresh
+   bookkeeping. *)
+let full_health_consecutive_failures = ref 0
 let full_health_refresh_timeout_sec =
-  Float.max 8.0 Env_config_runtime.Dashboard.shell_timeout_sec
+  Float.max Env_config_runtime.Dashboard.full_health_refresh_timeout_sec
+    Env_config_runtime.Dashboard.shell_timeout_sec
+;;
+
+let full_health_critical_failure_threshold =
+  Env_config_runtime.Dashboard.full_health_critical_failure_threshold
 ;;
 
 let full_health_refresh_interval_sec =
@@ -914,6 +936,7 @@ let compute_full_health_snapshot ?(listener = "http/1.1") request =
       computed_at = finished_at;
       duration_ms = duration_ms ~started_at ~finished_at;
       error = None;
+      stale_since_ts = None;
     }
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -925,6 +948,7 @@ let compute_full_health_snapshot ?(listener = "http/1.1") request =
         computed_at = finished_at;
         duration_ms = duration_ms ~started_at ~finished_at;
         error = Some error;
+        stale_since_ts = Some finished_at;
       }
 
 let store_full_health_snapshot snapshot =
@@ -932,23 +956,76 @@ let store_full_health_snapshot snapshot =
       full_health_snapshot := Some snapshot;
       full_health_refresh_in_flight := false;
       full_health_refresh_started_at := None;
-      full_health_refresh_requested := false)
+      full_health_refresh_requested := false;
+      (* Successful refresh — clear consecutive-failure counter so the
+         critical alarm only re-fires after another N successive
+         failures.  A snapshot is "successful" iff [error] is None;
+         the inline error path in [compute_full_health_snapshot]
+         routes through here too, so guard on the field. *)
+      match snapshot.error with
+      | None -> full_health_consecutive_failures := 0
+      | Some _ -> ())
 
 let mark_full_health_snapshot_error exn =
   let now = Unix.gettimeofday () in
   let error = Printexc.to_string exn in
   with_full_health_snapshot_lock (fun () ->
+      (* Partial degradation: preserve the last successful snapshot's
+         per-component [fields] and overwrite only the [error] /
+         [stale_since_ts] / refresh-bookkeeping signals.  If we have
+         no prior snapshot (warm path on cold boot), fall back to the
+         all-error placeholder so the field set stays well-typed. *)
+      let preserved_fields, prior_stale_since =
+        match !full_health_snapshot with
+        | Some s when Option.is_none s.error ->
+            (* Previous snapshot was clean — keep its component
+               fields, this is a fresh failure so [stale_since_ts]
+               starts at [now]. *)
+            (s.fields, None)
+        | Some s ->
+            (* Previous snapshot was already an error placeholder —
+               keep whatever [fields] it had (which may itself be
+               preserved last-good data from an even earlier
+               success) and DO NOT overwrite the [stale_since_ts]
+               timestamp.  This pins [stale_since_ts] to the FIRST
+               failure of the current outage. *)
+            (s.fields, s.stale_since_ts)
+        | None ->
+            (* Cold boot — no prior snapshot.  Fall back to the
+               original all-error placeholder behaviour. *)
+            (full_health_placeholder_fields ~error ~status:"error" (), None)
+      in
+      let stale_since_ts =
+        match prior_stale_since with
+        | Some t -> Some t
+        | None -> Some now
+      in
       full_health_snapshot :=
         Some
           {
-            fields = full_health_placeholder_fields ~error ~status:"error" ();
+            fields = preserved_fields;
             computed_at = now;
             duration_ms = 0;
             error = Some error;
+            stale_since_ts;
           };
       full_health_refresh_in_flight := false;
       full_health_refresh_started_at := None;
-      full_health_refresh_requested := false)
+      full_health_refresh_requested := false;
+      (* Increment the consecutive-failure counter and emit the
+         Prometheus critical-edge signal ONLY when we cross the
+         configured threshold on this exact failure.  Subsequent
+         failures past the threshold do not re-emit — operators
+         get one structural alert per outage, not a noisy stream
+         scaling with the failure count. *)
+      incr full_health_consecutive_failures;
+      if !full_health_consecutive_failures
+         = full_health_critical_failure_threshold
+      then
+        Prometheus.inc_counter
+          "masc_full_health_refresh_critical_total"
+          ~labels:[ "reason", "consecutive_failures" ]
+          ())
 
 let compute_full_health_snapshot_for_refresh ?(listener = "http/1.1") request =
   with_full_health_snapshot_lock (fun () ->
@@ -972,9 +1049,9 @@ let full_health_snapshot_metadata ~now ~refresh_in_flight ~refresh_started_at
         now -. started_at > full_health_refresh_timeout_sec
     | _ -> false
   in
-  let snapshot_age_ms, computed_at, duration_ms, error, status =
+  let snapshot_age_ms, computed_at, duration_ms, error, stale_since_ts, status =
     match snapshot with
-    | None -> (`Null, `Null, `Null, `Null, "warming")
+    | None -> (`Null, `Null, `Null, `Null, `Null, "warming")
     | Some snapshot ->
         let status =
           match snapshot.error with
@@ -982,10 +1059,16 @@ let full_health_snapshot_metadata ~now ~refresh_in_flight ~refresh_started_at
           | None when snapshot_is_stale ~now snapshot -> "stale"
           | None -> "ready"
         in
+        let stale_since_ts_json =
+          match snapshot.stale_since_ts with
+          | Some t -> `Float t
+          | None -> `Null
+        in
         ( `Int (duration_ms ~started_at:snapshot.computed_at ~finished_at:now),
           `Float snapshot.computed_at,
           `Int snapshot.duration_ms,
           (match snapshot.error with Some error -> `String error | None -> `Null),
+          stale_since_ts_json,
           status )
   in
   `Assoc
@@ -1005,6 +1088,14 @@ let full_health_snapshot_metadata ~now ~refresh_in_flight ~refresh_started_at
         `Int (int_of_float (full_health_refresh_timeout_sec *. 1000.)) );
       ("component_timed_out", `Bool component_timed_out);
       ("error", error);
+      (* [stale_since_ts] is the wall-clock of the FIRST failure of
+         the current outage; null when the snapshot is fresh.
+         Consumers should prefer this over [computed_at_unix] for
+         "how long stale?" reasoning under partial-degradation, since
+         [computed_at_unix] under an error now points at the failure
+         time of the latest refresh attempt, not the last good
+         data. *)
+      ("stale_since_ts", stale_since_ts);
     ]
 
 let mark_full_health_refresh_requested () =
@@ -1069,7 +1160,8 @@ module For_testing = struct
         full_health_snapshot := None;
         full_health_refresh_in_flight := false;
         full_health_refresh_started_at := None;
-        full_health_refresh_requested := false)
+        full_health_refresh_requested := false;
+        full_health_consecutive_failures := 0)
 
   let refresh_full_health_snapshot_now ?(listener = "http/1.1") request =
     refresh_full_health_snapshot_sync ~listener request

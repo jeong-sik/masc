@@ -361,6 +361,8 @@ module Dashboard : sig
   val shell_timeout_sec : float
   val shell_light_timeout_sec : float
   val render_timeout_sec : float
+  val full_health_refresh_timeout_sec : float
+  val full_health_critical_failure_threshold : int
 end
 
 (** {1 Internal timers / cache TTLs} *)

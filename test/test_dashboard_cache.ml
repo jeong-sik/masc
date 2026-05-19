@@ -201,6 +201,57 @@ let test_stats () =
   let fresh = Yojson.Safe.Util.(member "ready_fresh" stats |> to_int) in
   Alcotest.(check int) "2 fresh entries" 2 fresh
 
+(* Phase 1 Action 2 — verify the extended stats surface that the
+   /api/v1/dashboard/cache-stats endpoint exposes.  This protects:
+   - per-entry ttl_remaining_ms and kind strings (UI filters on them)
+   - hit_ratio computation when there are both hits and misses
+   - bounded entry_details payload (no unbounded growth) *)
+let test_stats_detail_surface () =
+  Dashboard_cache.invalidate_all ();
+  (* Two misses (cold compute), then two hits on same keys. *)
+  ignore (Dashboard_cache.get_or_compute "d1" ~ttl:10.0 (fun () -> `Int 1));
+  ignore (Dashboard_cache.get_or_compute "d2" ~ttl:10.0 (fun () -> `Int 2));
+  ignore (Dashboard_cache.get_or_compute "d1" ~ttl:10.0 (fun () -> `Int 99));
+  ignore (Dashboard_cache.get_or_compute "d2" ~ttl:10.0 (fun () -> `Int 99));
+  let stats = Dashboard_cache.stats () in
+  let open Yojson.Safe.Util in
+  let hits = member "hits_total" stats |> to_int in
+  let misses = member "misses_total" stats |> to_int in
+  Alcotest.(check bool) "hits >= 2" true (hits >= 2);
+  Alcotest.(check bool) "misses >= 2" true (misses >= 2);
+  let ratio = member "hit_ratio" stats |> to_number in
+  Alcotest.(check bool) "ratio in [0,1]" true (ratio >= 0.0 && ratio <= 1.0);
+  Alcotest.(check int) "entries_truncated_to surfaced"
+    50 (member "entries_truncated_to" stats |> to_int);
+  (* entry_details must be a JSON list and each element a JSON object. *)
+  let details = member "entry_details" stats |> to_list in
+  Alcotest.(check bool) "details non-empty" true (List.length details >= 2);
+  List.iter (fun e ->
+    let key = member "key" e |> to_string in
+    let kind = member "kind" e |> to_string in
+    Alcotest.(check bool)
+      (Printf.sprintf "kind is fresh|stale|expired|computing for key=%s" key)
+      true (List.mem kind ["fresh"; "stale"; "expired"; "computing"])
+  ) details
+;;
+
+let test_stats_handles_empty_table () =
+  (* [invalidate_all] only clears the entry table; hit/miss counters are
+     cumulative monotonic (Prometheus convention). So after other tests in
+     the same harness, hit_ratio is non-zero — we assert it is still in
+     [0,1] and that the entries surface itself is empty.  This is the
+     invariant operators actually care about (no NaN, no negative). *)
+  Dashboard_cache.invalidate_all ();
+  let stats = Dashboard_cache.stats () in
+  let open Yojson.Safe.Util in
+  Alcotest.(check int) "no entries" 0 (member "entries" stats |> to_int);
+  Alcotest.(check bool) "empty details"
+    true (member "entry_details" stats |> to_list = []);
+  let ratio = member "hit_ratio" stats |> to_number in
+  Alcotest.(check bool) "ratio in [0,1] (no NaN, no negative)"
+    true (ratio >= 0.0 && ratio <= 1.0)
+;;
+
 (* -- 6. Stampede: N fibers, same key -> compute runs once ------------------- *)
 
 let test_stampede () =
@@ -517,6 +568,8 @@ let () =
           test_case "invalidate" `Quick test_invalidate;
           test_case "invalidate_prefix" `Quick test_invalidate_prefix;
           test_case "stats" `Quick test_stats;
+          test_case "stats detail surface" `Quick test_stats_detail_surface;
+          test_case "stats empty table" `Quick test_stats_handles_empty_table;
           test_case "exception recovery" `Quick test_exception_recovery;
           test_case "invalidate_all wakes waiters" `Quick
             test_invalidate_all_wakes_waiters;

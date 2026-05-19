@@ -39,6 +39,21 @@
     composition contract (G2.2) is enforced at the facade boundary
     rather than emerging as a silent behavior in dispatch. *)
 
+(** Caller identity for telemetry partition.
+
+    Mirrors the [caller] tag added to the legacy
+    [Lib.Shell_command_gate] via RFC-0131 PR-1a (#16335, MERGED).
+    Currently the optional [?caller] arg on {!gate} and
+    {!lower_typed_pipeline} is captured but does not change behavior —
+    the field exists so the upcoming telemetry counter exposure
+    (RFC-0131 PR-3, Plan Phase 4 measurement window) can already emit
+    per-caller rows before the actual counter plumbing lands.  When
+    unset, the gate behaves identically to the pre-tag SSOT. *)
+type caller =
+  | Worker_dev_tools
+  | Tool_code_write
+  | Keeper_shell_bash
+
 (** Parsed-but-rejected reasons. *)
 type reject_reason =
   | Command_not_in_allowlist of { bin : string }
@@ -127,21 +142,27 @@ val host_sandbox : sandbox_context
     sandbox. *)
 
 val gate
-  :  raw:string
+  :  ?caller:caller
+  -> raw:string
   -> allowlist:allowlist_policy
   -> path_policy:path_policy
   -> sandbox:sandbox_context
+  -> unit
   -> verdict
 (** Phase 1 SSOT entrypoint. Calls
     {!Masc_exec_bash_parser.Bash.parse_string} once, lifts the result
     into a {!parsed_context}, then applies allowlist and path policy
     in that order. Sandbox context is recorded on every stage's
     [Masc_exec.Shell_ir.simple.sandbox] field so downstream consumers
-    can route to [Exec_dispatch] in Phase 4 without re-parsing. *)
+    can route to [Exec_dispatch] in Phase 4 without re-parsing.
+    [?caller] is captured for the upcoming telemetry partition
+    (RFC-0131 PR-3) and does not affect the verdict. *)
 
 val lower_typed_pipeline
-  :  stages:Masc_exec.Shell_ir.simple list
+  :  ?caller:caller
+  -> stages:Masc_exec.Shell_ir.simple list
   -> sandbox:sandbox_context
+  -> unit
   -> verdict
 (** Lower a typed pipeline (e.g. from {!Keeper_tool_bash_input}) into
     the same {!verdict} shape. Empty input yields {!Cannot_parse
@@ -149,10 +170,13 @@ val lower_typed_pipeline
     multiple stages yield [Allow] with a non-nested
     [Pipeline]. Nested pipelines are forbidden because the input type
     already guarantees [Simple] stages — this helper exists so typed
-    input shares the {!verdict} surface with raw input. *)
+    input shares the {!verdict} surface with raw input.  [?caller] is
+    captured for the upcoming telemetry partition (RFC-0131 PR-3) and
+    does not affect the verdict. *)
 
 (** {1 Tags for telemetry} *)
 
+val caller_tag : caller -> string
 val verdict_tag : verdict -> string
 val reject_reason_tag : reject_reason -> string
 val parse_reason_tag : parse_reason -> string

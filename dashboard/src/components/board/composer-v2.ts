@@ -16,6 +16,7 @@ import {
   stateBlockKeys,
   STATE_BLOCK_TEMPLATE,
 } from '../ops/ops-state'
+import { isKeeperOffline } from '../../lib/keeper-predicates'
 
 export type ComposerV2Mode = 'broadcast' | 'dm' | 'state-block'
 
@@ -61,10 +62,6 @@ const MENTION_LISTBOX_ID = 'composer-v2-mention-listbox'
 function normalizeRoomId(roomId: string | null | undefined): string {
   const normalized = roomId?.trim().replace(/^#+/, '')
   return normalized || 'default'
-}
-
-function normalizeStatus(value: unknown): string {
-  return typeof value === 'string' ? value.trim().toLowerCase() : ''
 }
 
 function keeperNameFromTarget(value: string): string | null {
@@ -163,8 +160,13 @@ export function ComposerV2({ roomId }: { roomId?: string | null }) {
   const room = normalizeRoomId(roomId)
   const snapshot = operatorSnapshot.value
   const busy = submitting || operatorActionBusy.value
+  // RFC-0135 audit B5 (2026-05-19): the previous local
+  // normalizeStatus-against-the-offline-literal filter matched only
+  // the literal offline token and silently let inactive / unbooted
+  // keepers through as "online". The SSOT isKeeperOffline catches
+  // all three off-tokens.
   const onlineKeepers = (snapshot?.keepers ?? [])
-    .filter(keeper => normalizeStatus(keeper.status) !== 'offline')
+    .filter(keeper => !isKeeperOffline(keeper))
     .map(keeper => ({ name: keeper.name, status: keeper.status }))
   const onlineKeeperNames = onlineKeepers.map(keeper => keeper.name).join('\0')
   const selectedKeeper = keeperNameFromTarget(keeperTarget)

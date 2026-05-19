@@ -23,6 +23,10 @@
 #   §9-5  Same Korean word emitted as both a state noun (badge/chip) and
 #         an action verb (button label) in the same file — append `하기`
 #         to the verb form per PR-7.
+#   §9-6  Status-only offline classifier (audit B5, 2026-05-19) — local
+#         `keeper.status !== 'offline'` filters undercount presence.
+#         Must route through `isKeeperOffline` SSOT (catches the full
+#         off-token set: `offline | inactive | unbooted`).
 #
 # Allowlist: scripts/lint/dashboard-ssot-keeper-state.allowlist
 #   path:line — line-anchored debt entry
@@ -180,6 +184,29 @@ for kw in "${collision_keywords[@]}"; do
     done <<< "$bad_button"
   fi
 done
+
+# §9-6 — Status-only offline classifier (audit B5, 2026-05-19).
+# Detect `<anything>(keeper.status) !== 'offline'` or `(.status) === 'offline'`
+# style guards. The SSOT `isKeeperOffline(keeper)` catches all three
+# off-tokens (`offline | inactive | unbooted`) — local helpers that
+# only literal-match `'offline'` undercount presence (PR-B migrated
+# the three sites originally affected: composer-v2, keeper-utilities,
+# quick-intervene).
+#
+# Exempt: lib/keeper-predicates.ts (canonical reader).
+status_offline_classifier=$(
+  rg -n \
+    --type ts \
+    -g '!dashboard/src/lib/keeper-predicates.ts' \
+    -g '!dashboard/src/lib/keeper-predicates.test.ts' \
+    '\([a-zA-Z_]+\.status\s*\)?\s*!==\s*[\x27"]offline[\x27"]' \
+    dashboard/src 2>/dev/null || true
+)
+if [[ -n "$status_offline_classifier" ]]; then
+  while IFS= read -r line; do
+    [[ -n "$line" ]] && violations+=("§9-6 status-only offline classifier:$line")
+  done <<< "$status_offline_classifier"
+fi
 
 # Allowlist filter.
 allowlist_lines=$(grep -vE '^\s*(#|$)' "$ALLOWLIST_FILE" || true)

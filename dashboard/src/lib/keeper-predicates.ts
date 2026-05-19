@@ -56,10 +56,27 @@ export function isKeeperCrashed(keeper: Keeper): boolean {
   return typeof phase === 'string' && CRASHED_PHASES.has(phase)
 }
 
+/** Structural subset of `Keeper` accepted by `isKeeperOffline`.
+ *  The predicate only reads `phase` and `status`, so callers that
+ *  receive narrower snapshot shapes (e.g. `OperatorKeeperSnapshot`,
+ *  which has no `phase` field) can pass them in directly. When
+ *  `phase` is absent the switch falls through to the status-token
+ *  check — the more conservative answer than only matching the
+ *  literal `'offline'` token.
+ *
+ *  Audit finding B5 (2026-05-19): two callsites used a local
+ *  `normalizeStatus(keeper.status) !== 'offline'` which only catches
+ *  one of the three off-tokens (`offline | inactive | unbooted`).
+ *  Routing them through this predicate closes the undercount. */
+export interface KeeperOfflineInput {
+  phase?: Keeper['phase']
+  status?: string
+}
+
 /** Operator considers the keeper offline / down on any of: terminal
  *  FSM phases (Offline/Stopped/Dead/Crashed/Zombie) or one of the
  *  three off-tokens emitted in `keeper.status`. */
-export function isKeeperOffline(keeper: Keeper): boolean {
+export function isKeeperOffline(keeper: KeeperOfflineInput): boolean {
   switch (keeper.phase) {
     case 'Offline':
     case 'Stopped':

@@ -638,6 +638,10 @@ let metric_keeper_lifecycle_dispatch_rejections =
   "masc_keeper_lifecycle_dispatch_rejections_total"
 ;;
 
+let metric_keeper_recording_error_dedup =
+  "masc_keeper_recording_error_dedup_total"
+;;
+
 let metric_keeper_paused_state_persist_errors =
   "masc_keeper_paused_state_persist_errors_total"
 ;;

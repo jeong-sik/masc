@@ -160,6 +160,17 @@ export const STATE_DISPLAY_NAMES: Record<string, string> = {
   compacting: '압축 중',
   // KMC
   accumulating: '수집 중',
+  // KCB (LT-16-KCB Phase 3) — circuit breaker display states emitted by
+  // `Keeper_failure_circuit_breaker.display_state_to_string`
+  // (lib/keeper/keeper_failure_circuit_breaker.ml:438):
+  // clean | warning | cooling. The lane is consumed via
+  // `extractLaneValue` (line 30) and the per-keeper KCB badge added in
+  // #16365. Without these entries the Korean facade falls through to
+  // raw English so operators see `KCB clean` while every other axis
+  // renders Korean.
+  clean: '정상',
+  warning: '경고',
+  cooling: '냉각 중',
   // KSM
   running: '가동 중',
   failing: '오류 발생',
@@ -193,6 +204,29 @@ export function displayState(value: string): string {
   return STATE_DISPLAY_NAMES[value] ?? value
 }
 
+/** Korean labels for `execution.outcome` / `keeper.latest_execution_outcome`.
+ *  Backend emits the TLA-prefix form via
+ *  `Keeper_execution_receipt.outcome_kind_to_tla_receipt`
+ *  (lib/keeper/keeper_execution_receipt.ml:24-29):
+ *  receipt_done / receipt_skipped / receipt_failed / receipt_cancelled.
+ *  The TLA spec ReceiptIsAuthoritative invariant
+ *  (keeper_execution_receipt.ml:54-58) fixes this canonical form.
+ *  Kept separate from `STATE_DISPLAY_NAMES` so generic short tokens
+ *  do not collide; the prefix makes collisions unlikely but the
+ *  per-axis helper pattern (#16374, #16377, #16380, #16382, #16388,
+ *  #16396) is the established discipline. */
+const EXECUTION_OUTCOME_LABELS: Record<string, string> = {
+  receipt_done: '완료',
+  receipt_skipped: '건너뜀',
+  receipt_failed: '실패',
+  receipt_cancelled: '취소됨',
+}
+
+export function executionOutcomeLabel(value: string | null | undefined): string | null {
+  if (!value) return null
+  return EXECUTION_OUTCOME_LABELS[value] ?? value
+}
+
 /** Korean labels for `trust.disposition`. Backend emits 4 closed-sum
  *  values via `display_disposition_of_operator`
  *  (lib/keeper/keeper_runtime_trust_snapshot.ml:687-697):
@@ -213,6 +247,36 @@ const TRUST_DISPOSITION_LABELS: Record<string, string> = {
 export function trustDispositionLabel(value: string | null | undefined): string | null {
   if (!value) return null
   return TRUST_DISPOSITION_LABELS[value] ?? value
+}
+
+
+/** Korean labels for `execution.tool_contract_result`. Backend emits 11
+ *  closed-sum values via `Keeper_execution_receipt.tool_contract_result_to_string`
+ *  (lib/keeper/keeper_execution_receipt.ml:181-193). The labels are
+ *  intentionally NOT folded into `STATE_DISPLAY_NAMES` because that map
+ *  is the shared FSM-axis facade and accepting generic keys like
+ *  `unknown` / `violated` there would risk collisions with future axes
+ *  that emit the same English token. Consumers route through
+ *  {!toolContractLabel} instead so the chip surface (turn-fsm-detail-panel,
+ *  fleet-fsm-matrix) shows Korean for known wire values and the raw
+ *  token for unknown ones, matching the `displayState` fallback shape. */
+const TOOL_CONTRACT_LABELS: Record<string, string> = {
+  unknown: '도구 계약 미상',
+  not_dispatched: '도구 호출 미발생',
+  violated: '도구 계약 위반',
+  tool_surface_mismatch: '도구 표면 불일치',
+  no_tool_capable_provider: '도구 가능 provider 없음',
+  missing_required_tool_use: '필수 도구 호출 누락',
+  claim_only_after_owned_task: 'claim 전용 (소유 task 후)',
+  needs_execution_progress: '실행 진척 필요',
+  passive_only: 'passive 만 수행',
+  satisfied_completion: '계약 충족 (완료)',
+  satisfied_execution: '계약 충족 (실행)',
+}
+
+export function toolContractLabel(value: string | null | undefined): string | null {
+  if (!value) return null
+  return TOOL_CONTRACT_LABELS[value] ?? value
 }
 
 export type StateEntries = {

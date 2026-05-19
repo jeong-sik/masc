@@ -293,7 +293,7 @@ let guard_transition ?ctx ~keeper_name ~turn_id ~from_state ~to_state () =
          dependency cycle). *)
       let detail =
         Printf.sprintf
-          "fsm:transition:violation keeper=%s turn=%s from=%s to=%s \
+          "fsm:transition:violation keeper=%s turn=%d from=%s to=%s \
            reason=%s"
           keeper_name turn_id violation.from_state violation.to_state
           violation.reason

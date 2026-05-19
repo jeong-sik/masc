@@ -130,10 +130,15 @@ function formatMs(ms: number | null | undefined): string {
 
 function executionReceiptTone(execution: KeeperCompositeExecution | undefined): 'ok' | 'warn' | 'bad' | 'muted' {
   if (!execution?.latest_receipt_present) return 'muted'
+  // `execution.outcome` wire format is the TLA-prefix form emitted by
+  // `outcome_kind_to_tla_receipt`
+  // (lib/keeper/keeper_execution_receipt.ml:24-29). 'ok' / 'error' short
+  // forms never appear on this field — those compares were dead, so the
+  // receipt tone never reached 'ok' or 'bad' regardless of actual outcome.
   const outcome = execution.outcome?.toLowerCase()
   const terminal = execution.terminal_reason_code?.toLowerCase() ?? ''
-  if (outcome === 'ok' || terminal === 'completed') return 'ok'
-  if (terminal.includes('config') || terminal.includes('exhausted') || outcome === 'error') return 'bad'
+  if (outcome === 'receipt_done' || outcome === 'receipt_skipped' || terminal === 'completed') return 'ok'
+  if (terminal.includes('config') || terminal.includes('exhausted') || outcome === 'receipt_failed') return 'bad'
   return 'warn'
 }
 

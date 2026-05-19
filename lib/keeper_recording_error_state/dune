@@ -1,0 +1,25 @@
+; Keeper_recording_error_state — typed dedupe state for
+; Keeper_registry.record_error log noise.
+;
+; MASC/OAS Error-Warn Reduction Goal §P6 (config/auth/performance noise):
+; the registry "recording error name=X error=Y" line previously emitted
+; the raw error string at ERROR level on every call, fuelling 96+ same
+; pair emissions in 30-minute slices (system_log_2026-05-16 sample,
+; 299 events/day; verifier sandbox_docker ~48%).
+;
+; This sub-library hosts the classifier (closed sum type) and the
+; in-memory dedupe Hashtbl behind a Mutex. Pure stdlib (Digest +
+; Hashtbl + Mutex + String); no Eio link so the standalone test
+; executable builds in seconds without dragging the main library.
+;
+; (include_subdirs no) opts out of the parent (include_subdirs
+; unqualified). (wrapped false) keeps the bare identifier
+; [Keeper_recording_error_state] to match the existing lib/keeper/*
+; flat namespace at call sites.
+(include_subdirs no)
+
+(library
+ (name masc_mcp_keeper_recording_error_state)
+ (public_name masc_mcp.keeper_recording_error_state)
+ (wrapped false)
+ (libraries))

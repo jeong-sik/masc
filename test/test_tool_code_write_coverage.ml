@@ -35,6 +35,14 @@ let json_int_field key text =
      | _ -> fail ("missing JSON int field: " ^ key))
   | _ -> fail "expected JSON object"
 
+let json_bool_field key text =
+  match Yojson.Safe.from_string text with
+  | `Assoc fields ->
+    (match List.assoc_opt key fields with
+     | Some (`Bool value) -> value
+     | _ -> fail ("missing JSON bool field: " ^ key))
+  | _ -> fail "expected JSON object"
+
 let tool_code_write_policy_load_failure_metric () =
   Prometheus.metric_value_or_zero
     Masc_mcp.Keeper_metrics.metric_keeper_tool_policy_failures
@@ -420,6 +428,13 @@ let test_validate_code_shell_command_allows_grep () =
   check (result unit string) "grep allowed" (Ok ())
     (Tool_code_write.validate_code_shell_command "grep -R -n TODO lib")
 
+let test_validate_code_shell_command_allows_sed_and_pwd () =
+  check (result unit string) "sed read allowed" (Ok ())
+    (Tool_code_write.validate_code_shell_command
+       "sed -n '440,480p' lib/tool_code_write.ml");
+  check (result unit string) "pwd allowed" (Ok ())
+    (Tool_code_write.validate_code_shell_command "pwd")
+
 let test_validate_code_shell_command_allows_quoted_regex_alternation () =
   check (result unit string) "quoted rg alternation allowed" (Ok ())
     (Tool_code_write.validate_code_shell_command
@@ -427,6 +442,19 @@ let test_validate_code_shell_command_allows_quoted_regex_alternation () =
   check (result unit string) "quoted alternation before real pipe allowed" (Ok ())
     (Tool_code_write.validate_code_shell_command
        "rg 'keeper.*tool|tool.*keeper' --type=ml -l | head -20")
+
+let test_validate_code_shell_command_allows_log_regression_shapes () =
+  check (result unit string) "escaped alternation from logs stays inside rg"
+    (Ok ())
+    (Tool_code_write.validate_code_shell_command
+       "rg -n \"cancel\\|Switch\\|Fiber\" lib/telemetry_eio.ml");
+  check (result unit string) "type-filtered escaped alternation stays inside rg"
+    (Ok ())
+    (Tool_code_write.validate_code_shell_command
+       "rg \"of_yojson\\|to_yojson\" --type ml -n lib/tool_args.ml");
+  check (result unit string) "find allows stderr dev-null sink" (Ok ())
+    (Tool_code_write.validate_code_shell_command
+       "find . -name \"cascade.toml\" -type f 2>/dev/null")
 
 let test_validate_code_shell_command_uses_code_shell_allowlist_hint () =
   match Tool_code_write.validate_code_shell_command "python3 --version" with
@@ -569,6 +597,64 @@ let test_code_git_status_marks_docker_keeper_route () =
     (json_string_field "sandbox_profile" msg);
   check string "brokered via" "brokered" (json_string_field "via" msg);
   check string "brokered route" "brokered" (json_string_field "route_via" msg)
+
+let test_code_edit_identical_replacement_is_noop () =
+  let base_path = fresh_base_path () in
+  let config = make_config base_path in
+  let file_dir =
+    Filename.concat base_path
+      ".masc/playground/test-agent/repos/masc-mcp/lib"
+  in
+  mkdir_p file_dir;
+  let file = Filename.concat file_dir "demo.ml" in
+  let original = "let value = 1\n" in
+  write_file file original;
+  let ctx =
+    { Tool_code_write.config;
+      agent_name = "test-agent";
+    }
+  in
+  let args =
+    `Assoc
+      [
+        ("path", `String "repos/masc-mcp/lib/demo.ml");
+        ("old_string", `String "let value = 1");
+        ("new_string", `String "let value = 1");
+      ]
+  in
+  let ok, msg = dispatch_exn ctx ~name:"masc_code_edit" ~args in
+  check bool "identical replacement is successful noop" true ok;
+  check int "no replacements" 0 (json_int_field "replacements" msg);
+  check bool "noop field" true (json_bool_field "noop" msg);
+  check string "reason" "old_string and new_string are identical"
+    (json_string_field "reason" msg);
+  check string "file unchanged" original
+    (In_channel.with_open_bin file In_channel.input_all)
+
+let test_code_edit_identical_replacement_missing_file_still_fails () =
+  let base_path = fresh_base_path () in
+  let config = make_config base_path in
+  let file_dir =
+    Filename.concat base_path
+      ".masc/playground/test-agent/repos/masc-mcp/lib"
+  in
+  mkdir_p file_dir;
+  let ctx =
+    { Tool_code_write.config;
+      agent_name = "test-agent";
+    }
+  in
+  let args =
+    `Assoc
+      [
+        ("path", `String "repos/masc-mcp/lib/missing.ml");
+        ("old_string", `String "let value = 1");
+        ("new_string", `String "let value = 1");
+      ]
+  in
+  let ok, msg = dispatch_exn ctx ~name:"masc_code_edit" ~args in
+  check bool "missing file remains failed" false ok;
+  check bool "reports missing file" true (contains "File not found" msg)
 
 let test_code_shell_missing_docker_cwd_reports_worktree_hint () =
   let base_path = fresh_base_path () in
@@ -752,6 +838,46 @@ let test_writable_path_maps_relative_repos_prefix () =
     (check string) "repos/ path resolves under own playground repos"
       expected resolved
 
+let test_writable_path_maps_single_repo_top_relative_path () =
+  let base_path = fresh_base_path () in
+  let config = make_config base_path in
+  let repo_lib =
+    Filename.concat base_path ".masc/playground/agent-a/repos/masc-mcp/lib"
+  in
+  mkdir_p repo_lib;
+  let raw = "lib/demo.ml" in
+  let expected =
+    Filename.concat repo_lib "demo.ml" |> Masc_mcp.Tool_code.normalize_path
+  in
+  let result =
+    Tool_code_write.validate_writable_path ~agent_name:"agent-a" config raw
+  in
+  match result with
+  | Error e ->
+    fail ("expected single repo top-relative path to map into own playground, got: "
+          ^ Masc_domain.masc_error_to_string e)
+  | Ok resolved ->
+    (check string) "top-relative lib path resolves under only repo"
+      expected resolved
+
+let test_writable_path_keeps_multi_repo_top_relative_path_blocked () =
+  let base_path = fresh_base_path () in
+  let config = make_config base_path in
+  mkdir_p
+    (Filename.concat base_path ".masc/playground/agent-a/repos/masc-mcp/lib");
+  mkdir_p
+    (Filename.concat base_path ".masc/playground/agent-a/repos/oas/lib");
+  let result =
+    Tool_code_write.validate_writable_path
+      ~agent_name:"agent-a"
+      config
+      "lib/demo.ml"
+  in
+  check bool "multi-repo top-relative path is not guessed" true
+    (is_error result);
+  check bool "multi-repo error remains sandbox block" true
+    (contains "Write restricted to allowed sandboxes" (error_msg result))
+
 let test_writable_path_maps_docker_relative_repos_prefix () =
   let base_path = fresh_base_path () in
   let config = make_config base_path in
@@ -905,6 +1031,12 @@ let () =
       test_case "missing docker cwd reports worktree hint" `Quick
         test_code_git_missing_docker_cwd_reports_worktree_hint;
     ]);
+    ("masc_code_edit", [
+      test_case "identical replacement is noop" `Quick
+        test_code_edit_identical_replacement_is_noop;
+      test_case "identical replacement missing file still fails" `Quick
+        test_code_edit_identical_replacement_missing_file_still_fails;
+    ]);
     ("validate_code_shell_command", [
       test_case "allows pipe with allowlisted segments" `Quick
         test_validate_code_shell_command_allows_pipe;
@@ -916,8 +1048,12 @@ let () =
         test_validate_code_shell_command_rejects_direct_dune;
       test_case "allows grep" `Quick
         test_validate_code_shell_command_allows_grep;
+      test_case "allows sed and pwd" `Quick
+        test_validate_code_shell_command_allows_sed_and_pwd;
       test_case "allows quoted regex alternation" `Quick
         test_validate_code_shell_command_allows_quoted_regex_alternation;
+      test_case "allows log-derived read command shapes" `Quick
+        test_validate_code_shell_command_allows_log_regression_shapes;
       test_case "uses code shell allowlist hint" `Quick
         test_validate_code_shell_command_uses_code_shell_allowlist_hint;
       test_case "rejects semicolon" `Quick
@@ -940,6 +1076,10 @@ let () =
         test_writable_path_allows_own_playground;
       test_case "writable_path maps relative repos prefix" `Quick
         test_writable_path_maps_relative_repos_prefix;
+      test_case "writable_path maps single repo top-relative path" `Quick
+        test_writable_path_maps_single_repo_top_relative_path;
+      test_case "writable_path blocks multi-repo top-relative path" `Quick
+        test_writable_path_keeps_multi_repo_top_relative_path_blocked;
       test_case "writable_path maps Docker relative repos prefix" `Quick
         test_writable_path_maps_docker_relative_repos_prefix;
       test_case "writable_path maps Docker container path" `Quick

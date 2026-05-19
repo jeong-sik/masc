@@ -85,7 +85,7 @@ function execution(
   return {
     latest_receipt_present: true,
     recorded_at: '2026-04-25T07:30:00Z',
-    outcome: 'ok',
+    outcome: 'receipt_done',
     terminal_reason_code: 'completed',
     operator_disposition: 'pass',
     operator_disposition_reason: 'healthy',
@@ -204,7 +204,7 @@ describe('runtimeAttentionForSnapshot', () => {
     const snap = snapshot({
       is_live: false,
       execution: execution({
-        outcome: 'error',
+        outcome: 'receipt_failed',
         terminal_reason_code: 'api_error',
         operator_disposition: 'pause_human',
         operator_disposition_reason: 'tool_required_unsatisfied',
@@ -230,7 +230,7 @@ describe('runtimeAttentionForSnapshot', () => {
     const snap = snapshot({
       is_live: false,
       execution: execution({
-        outcome: 'ok',
+        outcome: 'receipt_done',
         terminal_reason_code: 'completed',
         operator_disposition: 'pass',
         operator_disposition_reason: 'healthy',
@@ -392,7 +392,7 @@ describe('runtimeAttentionForSnapshot', () => {
       name: 'blocked',
       is_live: false,
       execution: execution({
-        outcome: 'error',
+        outcome: 'receipt_failed',
         terminal_reason_code: 'api_error',
         operator_disposition: 'pause_human',
       }),
@@ -437,7 +437,7 @@ describe('runtimeAttentionForSnapshot', () => {
     const snap = snapshot({
       is_live: false,
       execution: execution({
-        outcome: 'error',
+        outcome: 'receipt_failed',
         terminal_reason_code: 'completion_contract_violation:require_tool_use',
         operator_disposition: 'pause_human',
         operator_disposition_reason: 'tool_required_unsatisfied',
@@ -468,7 +468,7 @@ describe('runtimeAttentionForSnapshot', () => {
     const snap = snapshot({
       is_live: true,
       execution: execution({
-        outcome: 'error',
+        outcome: 'receipt_failed',
         terminal_reason_code: 'api_error_timeout',
         operator_disposition: 'pause_human',
         operator_disposition_reason: 'tool_required_unsatisfied',
@@ -495,7 +495,7 @@ describe('fleetCellPresentation', () => {
       phase: 'Running',
       is_live: false,
       execution: execution({
-        outcome: 'error',
+        outcome: 'receipt_failed',
         terminal_reason_code: 'api_error',
         operator_disposition: 'pause_human',
         operator_disposition_reason: 'tool_required_unsatisfied',
@@ -546,7 +546,7 @@ describe('buildRuntimeAssistPrompt', () => {
       phase: 'Running',
       is_live: false,
       execution: execution({
-        outcome: 'error',
+        outcome: 'receipt_failed',
         terminal_reason_code: 'api_error',
         operator_disposition: 'pause_human',
         operator_disposition_reason: 'tool_required_unsatisfied',
@@ -758,7 +758,7 @@ describe('FleetFsmMatrix streaming fallback', () => {
           phase: 'Running',
           is_live: false,
           execution: execution({
-            outcome: 'error',
+            outcome: 'receipt_failed',
             terminal_reason_code: 'api_error',
             operator_disposition: 'pause_human',
           }),
@@ -782,7 +782,7 @@ describe('FleetFsmMatrix streaming fallback', () => {
           phase: 'Running',
           is_live: false,
           execution: execution({
-            outcome: 'error',
+            outcome: 'receipt_failed',
             terminal_reason_code: 'api_error',
             operator_disposition: 'pause_human',
             operator_disposition_reason: 'tool_required_unsatisfied',
@@ -828,7 +828,7 @@ describe('FleetFsmMatrix streaming fallback', () => {
           phase: 'Running',
           is_live: false,
           execution: execution({
-            outcome: 'error',
+            outcome: 'receipt_failed',
             terminal_reason_code: 'api_error',
             operator_disposition: 'pause_human',
             operator_disposition_reason: 'tool_required_unsatisfied',
@@ -887,7 +887,7 @@ describe('FleetFsmMatrix streaming fallback', () => {
           phase: 'Running',
           is_live: false,
           execution: execution({
-            outcome: 'error',
+            outcome: 'receipt_failed',
             terminal_reason_code: 'api_error',
             operator_disposition: 'unknown',
           }),

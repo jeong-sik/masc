@@ -373,6 +373,16 @@ val metric_keeper_llm_bridge_failures : string
 val metric_keeper_shell_bash_failures : string
 val metric_keeper_rollover_failures : string
 val metric_keeper_lifecycle_dispatch_rejections : string
+
+(** [masc_keeper_recording_error_dedup_total] — bumped by
+    [Keeper_registry.record_error] when a [(keeper, error)] pair has
+    already been seen in this process lifetime and the log line is
+    demoted from ERROR to DEBUG. Labels: [keeper], [error_kind] (from
+    [Keeper_recording_error_state.error_kind_to_string]). The first
+    occurrence of a pair is *not* counted here; it keeps the ERROR
+    emission. See MASC/OAS Error-Warn Reduction Goal §P6. *)
+val metric_keeper_recording_error_dedup : string
+
 val metric_keeper_paused_state_persist_errors : string
 val metric_keeper_unexpected_tool_partial_tolerance : string
 val metric_keeper_require_tool_use_violations : string

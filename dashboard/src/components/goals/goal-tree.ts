@@ -15,6 +15,7 @@ import { EmptyState, ErrorState, LoadingState } from '../common/feedback-state'
 import { ActionButton } from '../common/button'
 import { FilterChips } from '../common/filter-chips'
 import { StatusBadge } from '../common/status-badge'
+import { executionOutcomeLabel } from '../fsm-hub-types'
 import { ringFocusClasses } from '../common/ring'
 import { trustDispositionLabel } from '../fsm-hub-types'
 import { TimeAgo } from '../common/time-ago'
@@ -945,8 +946,8 @@ function KeeperCard({ keeper }: { keeper: GoalDetailKeeper }) {
             </span>
           ` : null}
           ${keeper.latest_execution_outcome ? html`
-            <span class="rounded-[var(--r-1)] border border-card-border/60 bg-[var(--color-bg-elevated)] px-2 py-0.5 text-3xs font-semibold text-text-body">
-              ${keeper.latest_execution_outcome}
+            <span class="rounded-[var(--r-1)] border border-card-border/60 bg-[var(--color-bg-elevated)] px-2 py-0.5 text-3xs font-semibold text-text-body" title=${keeper.latest_execution_outcome}>
+              ${executionOutcomeLabel(keeper.latest_execution_outcome)}
             </span>
           ` : null}
         </div>

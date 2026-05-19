@@ -726,7 +726,7 @@ let tool_search_alias_entries =
   ; "keeper_voice_session_start", "음성 세션 시작"
   ; "keeper_voice_session_end", "음성 세션 종료"
   ; "masc_code_search", "코드 검색 소스코드 찾기 심볼"
-  ; "masc_code_read", "코드 읽기 파일 소스코드"
+  ; "masc_code_read", "코드 읽기 단일 파일 (디렉토리 아님)"
   ; "masc_code_edit", "코드 편집 수정 파일 변경"
   ; "masc_code_write", "코드 작성 파일 생성 쓰기"
   ; "masc_code_symbols", "코드 심볼 함수 클래스 정의"

@@ -72,8 +72,9 @@ let masc_config_spec : tool_spec =
 let masc_code_read_spec : tool_spec =
   { name = "masc_code_read"
   ; description =
-      "Read a file with offset/limit pagination for large files. Use when inspecting \
-       source code during task execution without loading the entire file into context."
+      "Read a single file with offset/limit pagination. Returns typed error_kind on \
+       failure (path_is_directory, file_not_found, binary_file, file_too_large, \
+       io_error). For directories use masc_code_search or shell 'ls -la'."
   ; parameters =
       [ { p_name = "path"
         ; p_type = T_string { enum = None; default = None }

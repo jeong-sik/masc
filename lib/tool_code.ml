@@ -36,25 +36,13 @@ type context = {
 }
 
 
-(* Security: Binary file extensions *)
-let binary_extensions = [
-  ".so"; ".a"; ".lib"; ".dll"; ".dylib";
-  ".wasm"; ".o"; ".obj";
-  ".jpg"; ".jpeg"; ".png"; ".gif"; ".bmp"; ".ico"; ".webp";
-  ".mp3"; ".mp4"; ".avi"; ".mov"; ".wav"; ".flac";
-  ".zip"; ".tar"; ".gz"; ".bz2"; ".xz"; ".7z";
-  ".pdf"; ".doc"; ".docx"; ".xls"; ".xlsx"; ".ppt"; ".pptx";
-]
-
-(* Security: Check if file is binary by extension *)
-let is_binary_file path =
-  List.exists (fun ext ->
-    String.length path >= String.length ext &&
-    String.equal (String.sub path (String.length path - String.length ext) (String.length ext)) ext
-  ) binary_extensions
-
-(* Security: Check file size limit (500KB) *)
-let max_file_size = 500 * 1024
+(* Security: Binary file extension check + size cap.
+   The SSOT moved into [Tool_code_read_core] so the read pipeline can
+   be composed without depending on [Tool_code]. The values here are
+   thin re-exports kept for wire compatibility (public [tool_code.mli]
+   exposes them). *)
+let is_binary_file = Tool_code_read_core.is_binary_file
+let max_file_size = Tool_code_read_core.max_file_size
 
 (* Security: Normalize path by resolving . and .. segments.
    Returns a clean absolute path with no traversal components. *)
@@ -531,7 +519,9 @@ let handle_code_symbols ~tool_name ~start_time ctx args =
         end
   end
 
-(* Handler: masc_code_read - Read file with offset/limit *)
+(* Handler: masc_code_read - Read file with offset/limit.
+   Pipeline lives in [Tool_code_read_core] (SSOT shared with the
+   keeper-side handler [Keeper_exec_masc.handle_keeper_masc_code_read]). *)
 let handle_code_read ~tool_name ~start_time ctx args =
   let path = get_string args "path" "" in
   let offset = get_int args "offset" 0 in
@@ -539,52 +529,24 @@ let handle_code_read ~tool_name ~start_time ctx args =
 
   if String.equal path "" then
     Tool_result.error ~tool_name ~start_time "Path required: 'path' parameter"
-  else begin
+  else
     match validate_read_path ~agent_name:ctx.agent_name ctx.config path with
-    | Error e -> Tool_result.error ~tool_name ~start_time (Masc_domain.masc_error_to_string e)
+    | Error e ->
+        Tool_result.error ~tool_name ~start_time
+          (Masc_domain.masc_error_to_string e)
     | Ok validated_path ->
-        if not (Sys.file_exists validated_path) then
-          Tool_result.error ~tool_name ~start_time (Printf.sprintf "File not found: %s" path)
-        else if is_binary_file validated_path then
-          Tool_result.error ~tool_name ~start_time "Binary file detected"
-        else begin
-          let file_size = (Unix.stat validated_path).Unix.st_size in
-          if file_size > max_file_size then
-            Tool_result.error ~tool_name ~start_time (Printf.sprintf "File too large: %d bytes (max: %d)" file_size max_file_size)
-          else begin
-            try
-              let content = In_channel.with_open_text validated_path In_channel.input_all in
-              let lines = String.split_on_char '\n' content in
-              let total_lines = List.length lines in
-
-              (* Validate offset *)
-              let safe_offset = max 0 (min offset total_lines) in
-
-              (* Calculate end line *)
-              let safe_limit = min limit (total_lines - safe_offset) in
-
-              (* Extract lines *)
-              let selected_lines = ref [] in
-              for i = safe_offset to safe_offset + safe_limit - 1 do
-                match List.nth_opt lines i with
-                | Some line -> selected_lines := line :: !selected_lines
-                | None -> ()
-              done;
-
-              let result_lines = List.rev !selected_lines in
-              let response = `Assoc [
-                ("path", `String path);
-                ("offset", `Int safe_offset);
-                ("limit", `Int safe_limit);
-                ("total_lines", `Int total_lines);
-                ("lines", `List (List.map (fun s -> `String s) result_lines));
-              ] in
-              Tool_result.ok ~tool_name ~start_time (Yojson.Safe.to_string response)
-            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-              Tool_result.error ~tool_name ~start_time (Printf.sprintf "Failed to read file: %s" (Stdlib.Printexc.to_string exn))
-          end
-        end
-  end
+      (match
+         Tool_code_read_core.read_with_pagination
+           ~display_path:path ~validated_path ~offset ~limit
+       with
+       | Ok ok ->
+           Tool_result.ok ~tool_name ~start_time
+             (Yojson.Safe.to_string
+                (Tool_code_read_core.ok_to_json ~display_path:path ok))
+       | Error err ->
+           Tool_result.error ~tool_name ~start_time
+             (Yojson.Safe.to_string
+                (Tool_code_read_core.read_error_to_json err)))
 
 (* Dispatch function - returns None if tool not handled *)
 let dispatch ctx ~name ~args : Tool_result.t option =
@@ -659,9 +621,9 @@ Pair with masc_code_read to then read specific line ranges of interest.";
   (* masc_code_read *)
   {
     name = "masc_code_read";
-    description = "Read a file with offset/limit pagination for token-efficient access to specific sections. \
-Use when you know the line range you need, especially for large files. \
-After masc_code_symbols identifies the relevant line numbers.";
+    description = "Read a single file with offset/limit pagination. \
+Returns typed error_kind on failure (path_is_directory, file_not_found, binary_file, file_too_large, io_error). \
+For directories use masc_code_search or shell 'ls -la'.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [

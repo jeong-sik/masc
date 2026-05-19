@@ -1227,6 +1227,7 @@
   test_tool_code_coverage
   test_tool_code_write_coverage
   test_tool_code_read_containment
+  test_tool_code_read_directory_typed_error
   test_tool_library_coverage
   test_tool_shard_coverage
   test_context_compact_oas_coverage
@@ -1286,6 +1287,7 @@
   test_tool_code_coverage
   test_tool_code_write_coverage
   test_tool_code_read_containment
+  test_tool_code_read_directory_typed_error
   test_tool_library_coverage
   test_tool_shard_coverage
   test_context_compact_oas_coverage

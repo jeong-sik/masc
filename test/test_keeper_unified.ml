@@ -5934,7 +5934,34 @@ let test_run_keeper_cycle_livelock_block_returns_error () =
               true
               (contains_substring
                  Yojson.Safe.Util.(receipt |> member "terminal_reason_code" |> to_string)
-                 "turn_livelock:attempts_exhausted")))
+                 "turn_livelock:attempts_exhausted"));
+         (match Masc_mcp.Keeper_types.read_meta config meta.name with
+          | Ok (Some persisted) ->
+            check bool "livelock persists paused keeper" true persisted.paused;
+            (match persisted.runtime.last_blocker with
+             | Some blocker ->
+               check
+                 string
+                 "livelock blocker class"
+                 "turn_livelock_blocked"
+                 (Masc_mcp.Keeper_types.blocker_class_to_string blocker.klass);
+               check
+                 bool
+                 "livelock blocker detail"
+                 true
+                 (contains_substring blocker.detail "keeper turn livelock blocked")
+             | None -> fail "expected livelock blocker");
+            let decision =
+              WO.keeper_cycle_decision ~meta:persisted base_observation
+            in
+            check bool "paused livelock keeper does not reschedule" false decision.should_run;
+            check
+              (list string)
+              "paused livelock skip reason"
+              [ "keeper_paused" ]
+              (WO.verdict_reasons_to_strings decision.verdict)
+          | Ok None -> fail "expected persisted livelock meta"
+          | Error err -> fail ("read_meta failed: " ^ err)))
 ;;
 
 let test_streaming_cancel_records_supervisor_stop_when_fiber_stop_set () =

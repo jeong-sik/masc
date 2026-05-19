@@ -63,6 +63,16 @@ let test_existing_mappings_unchanged () =
       fail ("turn wall-clock timeout mapped to " ^ KT.blocker_class_to_string other)
   | None -> fail "turn wall-clock timeout returned None"
 
+let test_turn_livelock_text_maps () =
+  match
+    B.blocker_class_of_string
+      "keeper turn livelock blocked: attempts_exhausted attempts=3 max_attempts=3"
+  with
+  | Some KT.Turn_livelock_blocked -> ()
+  | Some other ->
+      fail ("turn livelock mapped to " ^ KT.blocker_class_to_string other)
+  | None -> fail "turn livelock returned None"
+
 let () =
   run "keeper_blocker_class_completion_contract"
     [
@@ -86,5 +96,6 @@ let () =
         [
           test_case "existing turn-timeout mapping unchanged" `Quick
             test_existing_mappings_unchanged;
+          test_case "turn livelock text maps" `Quick test_turn_livelock_text_maps;
         ] );
     ]

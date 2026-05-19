@@ -175,6 +175,7 @@ type blocker_class = Keeper_meta_contract.blocker_class =
   | Turn_timeout_after_queue_wait
   | Oas_timeout_budget
   | Turn_timeout
+  | Turn_livelock_blocked
   | Completion_contract_violation
   | No_tool_capable_provider
   | Stay_silent_loop

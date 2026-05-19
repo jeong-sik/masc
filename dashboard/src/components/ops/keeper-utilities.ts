@@ -5,7 +5,8 @@ import { CARD_STANDARD } from '../common/card'
 import { Select } from '../common/select'
 import { operatorActionBusy, operatorSnapshot } from '../../operator-store'
 import type { OperatorActionDescriptor } from '../../types'
-import { actionTypeLabel, executeAction, normalizeStatus } from './helpers'
+import { actionTypeLabel, executeAction } from './helpers'
+import { isKeeperOffline } from '../../lib/keeper-predicates'
 
 const ADAPTED_KEEPER_ACTIONS = new Set([
   'keeper_probe',
@@ -55,8 +56,11 @@ export function KeeperUtilitiesPanel() {
   const actions = (snapshot?.available_actions ?? []).filter(visibleKeeperAction)
   if (actions.length === 0) return null
 
+  // RFC-0135 audit B5 (2026-05-19): SSOT-routed presence filter (see
+  // composer-v2.ts for the same migration). The previous status-only
+  // literal-offline check undercounted inactive / unbooted keepers.
   const onlineKeepers = (snapshot?.keepers ?? [])
-    .filter(keeper => normalizeStatus(keeper.status) !== 'offline')
+    .filter(keeper => !isKeeperOffline(keeper))
   const selectedName = onlineKeepers.some(keeper => keeper.name === selectedKeeper.value)
     ? selectedKeeper.value
     : (onlineKeepers[0]?.name ?? '')

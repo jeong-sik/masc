@@ -170,7 +170,10 @@ export const keeperHealthSummary: ReadonlySignal<KeeperHealthSummary> = computed
     const ratio = k.context_ratio ?? 0
     if (ratio > thresholds.critical) criticalCount++
     else if (ratio > thresholds.warn || stale.has(k.name)) warningCount++
-    return { name: k.name, ratio, stage: (k.pipeline_stage ?? 'unknown') as PipelineStage }
+    // No `as PipelineStage` cast: `k.pipeline_stage` is `PipelineStage | undefined`
+    // post-normalize (toPipelineStage at keeper-store-normalize.ts), so the
+    // `?? 'unknown'` (PipelineStage member) is already correctly typed.
+    return { name: k.name, ratio, stage: k.pipeline_stage ?? 'unknown' }
   }).sort((a, b) => b.ratio - a.ratio)
 
   return {

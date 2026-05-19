@@ -104,6 +104,28 @@ export function toKeeperPhase(raw: string | null | undefined): KeeperPhase | nul
   return null
 }
 
+// Closed runtime mirror of the `PipelineStage` type (types/core.ts:709).
+// `keeper-store-normalize.ts:569` previously cast `asString(row.pipeline_stage)`
+// directly with `as PipelineStage`, which trusted whatever the backend
+// emitted. `toPipelineStage` enforces the boundary at the normalizer
+// edge so an unrecognized string returns `null` instead of polluting
+// the typed value. Mirrors `toKeeperPhase` (line 94) and
+// `toKeeperLifecycleState` (iter65, sibling cleanup PR).
+const PIPELINE_STAGES: ReadonlySet<PipelineStage> = new Set<PipelineStage>([
+  'idle', 'compacting', 'handoff', 'offline',
+  'failing', 'overflowed', 'draining', 'paused',
+  'crashed', 'restarting', 'unknown',
+])
+
+export function toPipelineStage(raw: string | null | undefined): PipelineStage | null {
+  if (!raw) return null
+  const trimmed = raw.trim()
+  if (!trimmed) return null
+  return PIPELINE_STAGES.has(trimmed as PipelineStage)
+    ? (trimmed as PipelineStage)
+    : null
+}
+
 function normalizeKeeperAgentStatus(value: unknown): Keeper['status'] {
   const raw = typeof value === 'string' ? value.trim().toLowerCase() : ''
   if (
@@ -566,7 +588,13 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
       return {
         name,
         runtime_class: 'keeper' as const,
-        pipeline_stage: (asString(row.pipeline_stage) ?? 'unknown') as PipelineStage,
+        // Typed parse replaces an `as PipelineStage` cast that trusted
+        // whatever string `row.pipeline_stage` carried (it's `string | null`
+        // upstream — see api/dashboard.ts:265). Unrecognized values fall
+        // back to `'unknown'` (a valid PipelineStage tag) so consumers
+        // can render the keeper as "stage not known yet" rather than
+        // routing an arbitrary backend string through a lying type.
+        pipeline_stage: toPipelineStage(asString(row.pipeline_stage)) ?? 'unknown',
         phase: toKeeperPhase(asString(row.phase)),
         paused: asBoolean(row.paused),
         registered:

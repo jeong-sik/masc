@@ -14,8 +14,6 @@ let kind_name : Yojson.Safe.t -> string = function
   | `String _ -> "string"
   | `Assoc _ -> "object"
   | `List _ -> "array"
-  | `Tuple _ -> "tuple"
-  | `Variant _ -> "variant"
 
 type t = {
   origin_artifact_ids : Shared_types.Artifact_id.t list;

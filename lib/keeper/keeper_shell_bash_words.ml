@@ -167,6 +167,41 @@ let gh_pr_create_sequence = function
     && String.equal create.text "create"
   | _ -> false
 
+type gh_pr_native_subcommand =
+  | Gh_pr_list
+  | Gh_pr_status
+  | Gh_pr_diff
+  | Gh_pr_review
+
+let gh_pr_native_subcommand_sequence = function
+  | gh :: pr :: subcommand :: _
+    when String.equal (command_name gh.text) "gh"
+         && String.equal pr.text "pr" ->
+    (match subcommand.text with
+     | "list" -> Some Gh_pr_list
+     | "view" | "status" | "checks" -> Some Gh_pr_status
+     | "diff" -> Some Gh_pr_diff
+     | "review" | "comment" -> Some Gh_pr_review
+     | _ -> None)
+  | _ -> None
+
+let rec cmd_gh_pr_native_subcommand cmd =
+  let words = shell_words_with_boundaries cmd in
+  let rec loop = function
+    | word :: rest when word.starts_command ->
+      (match gh_pr_native_subcommand_sequence (strip_command_wrappers (word :: rest)) with
+       | Some _ as hit -> hit
+       | None -> loop rest)
+    | _ :: rest -> loop rest
+    | [] -> None
+  in
+  match loop words with
+  | Some _ as hit -> hit
+  | None ->
+    (match shell_c_payload words with
+     | Some payload -> cmd_gh_pr_native_subcommand payload
+     | None -> None)
+
 let rec cmd_contains_gh_pr_create cmd =
   let words = shell_words_with_boundaries cmd in
   let rec loop = function

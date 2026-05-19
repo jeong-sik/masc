@@ -1281,6 +1281,7 @@ let test_keeper_bash_task_state_file_probe_uses_task_tools () =
   Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
   Keeper_registry.clear ();
   let meta = make_readonly_meta "task-file-probe" in
+  let _ = Coord.init config ~agent_name:(Some meta.name) in
   let playground = Filename.concat base_path (playground_path_of meta.name) in
   ensure_dir playground;
   let raw =
@@ -1298,16 +1299,22 @@ let test_keeper_bash_task_state_file_probe_uses_task_tools () =
       ()
   in
   let json = Yojson.Safe.from_string raw in
-  Alcotest.(check (option string)) "task file probe is blocked"
-    (Some "task_state_file_probe_blocked") (parse_error_field raw);
-  Alcotest.(check string) "suggested tool"
+  Alcotest.(check bool) "task file probe succeeds via autoroute" true
+    (json |> Json.member "ok" |> Json.to_bool);
+  Alcotest.(check bool) "task file probe is autorouted" true
+    (json |> Json.member "auto_routed" |> Json.to_bool);
+  Alcotest.(check string) "autorouted to tasks list"
     "keeper_tasks_list"
-    (json |> Json.member "diagnosis" |> Json.member "tool_suggestion" |> Json.to_string);
-  (match parse_hint raw with
-   | Some hint ->
-     Alcotest.(check bool) "hint points to keeper_tasks_list" true
-	       (String_util.contains_substring hint "keeper_tasks_list")
-	   | None -> Alcotest.fail ("expected hint, got: " ^ raw))
+    (json |> Json.member "auto_routed_to_tool" |> Json.to_string);
+  Alcotest.(check string) "original error preserved"
+    "task_state_file_probe_blocked"
+    (json |> Json.member "original_error" |> Json.to_string);
+  Alcotest.(check bool) "instruction points to keeper_tasks_list" true
+    (String_util.contains_substring
+       (json |> Json.member "instruction" |> Json.to_string)
+       "keeper_tasks_list");
+  Alcotest.(check (option string)) "not returned as bash error" None
+    (parse_error_field raw)
 
 let test_keeper_bash_unrelated_task_json_is_not_task_state_probe () =
   with_eio_fs @@ fun () ->
@@ -1407,6 +1414,7 @@ let test_keeper_bash_task_state_http_probe_uses_task_tools () =
   Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
   Keeper_registry.clear ();
   let meta = make_write_enabled_meta "task-http-probe" in
+  let _ = Coord.init config ~agent_name:(Some meta.name) in
   let playground = Filename.concat base_path (playground_path_of meta.name) in
   ensure_dir playground;
   let raw =
@@ -1425,16 +1433,22 @@ let test_keeper_bash_task_state_http_probe_uses_task_tools () =
       ()
   in
   let json = Yojson.Safe.from_string raw in
-  Alcotest.(check (option string)) "localhost task probe is blocked"
-    (Some "task_state_http_probe_blocked") (parse_error_field raw);
-  Alcotest.(check string) "suggested tool"
+  Alcotest.(check bool) "localhost task probe succeeds via autoroute" true
+    (json |> Json.member "ok" |> Json.to_bool);
+  Alcotest.(check bool) "localhost task probe is autorouted" true
+    (json |> Json.member "auto_routed" |> Json.to_bool);
+  Alcotest.(check string) "autorouted to tasks list"
     "keeper_tasks_list"
-    (json |> Json.member "diagnosis" |> Json.member "tool_suggestion" |> Json.to_string);
-  (match parse_hint raw with
-   | Some hint ->
-     Alcotest.(check bool) "hint points to keeper_tasks_list" true
-       (String_util.contains_substring hint "keeper_tasks_list")
-   | None -> Alcotest.fail ("expected hint, got: " ^ raw))
+    (json |> Json.member "auto_routed_to_tool" |> Json.to_string);
+  Alcotest.(check string) "original error preserved"
+    "task_state_http_probe_blocked"
+    (json |> Json.member "original_error" |> Json.to_string);
+  Alcotest.(check bool) "instruction points to keeper_tasks_list" true
+    (String_util.contains_substring
+       (json |> Json.member "instruction" |> Json.to_string)
+       "keeper_tasks_list");
+  Alcotest.(check (option string)) "not returned as bash error" None
+    (parse_error_field raw)
 
 let test_keeper_bash_echo_task_api_url_is_not_http_probe () =
   with_eio_fs @@ fun () ->

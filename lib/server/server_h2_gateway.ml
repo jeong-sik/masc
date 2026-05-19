@@ -81,7 +81,11 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
     in
     let h2_respond_auth_error h2_reqd err =
       let status = http_status_of_auth_error err in
-      h2_respond_json h2_reqd (auth_error_json err) ~status ~extra_headers:cors
+      h2_respond_json
+        h2_reqd
+        (auth_error_json err)
+        ~status:(status :> H2.Status.t)
+        ~extra_headers:cors
     in
     let h2_respond_agent_rate_limited h2_reqd ~rl_key =
       h2_respond_json h2_reqd
@@ -235,7 +239,11 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
               with
               | Error err ->
                   let status = http_status_of_auth_error err in
-                  h2_respond_json h2_reqd (auth_error_json err) ~status ~extra_headers:cors
+                  h2_respond_json
+                    h2_reqd
+                    (auth_error_json err)
+                    ~status:(status :> H2.Status.t)
+                    ~extra_headers:cors
               | Ok () ->
                   h2_read_body h2_reqd (fun body_str ->
                     match Server_webrtc_transport.handle_offer_request body_str with
@@ -260,7 +268,11 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
               with
               | Error err ->
                   let status = http_status_of_auth_error err in
-                  h2_respond_json h2_reqd (auth_error_json err) ~status ~extra_headers:cors
+                  h2_respond_json
+                    h2_reqd
+                    (auth_error_json err)
+                    ~status:(status :> H2.Status.t)
+                    ~extra_headers:cors
               | Ok () ->
                   h2_read_body h2_reqd (fun body_str ->
                     match Server_webrtc_transport.handle_answer_request body_str with

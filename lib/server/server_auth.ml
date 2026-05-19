@@ -612,7 +612,7 @@ let respond_auth_error request reqd err =
     ("content-length", string_of_int (String.length body))
     :: cors_headers origin
   ) in
-  let response = Httpun.Response.create ~headers status in
+  let response = Httpun.Response.create ~headers (status :> Httpun.Status.t) in
   Httpun.Reqd.respond_with_string reqd response body
 
 (** Respond with 429 Too Many Requests when the per-agent rate limit is

@@ -74,3 +74,46 @@ export function keeperCanWakeup(keeper: Keeper): boolean {
   if (keeperIsStuckOnRecoverableBlocker(keeper)) return true
   return !isKeeperPaused(keeper) && !isKeeperOffline(keeper)
 }
+
+// RFC-0135 PR-11 — running predicate excluding `Restarting`.
+//
+// The action panel's `canPause`/`canWake` gates treat `Restarting` as
+// "stuck" (kicked but not yet running), not "running". This subset of
+// the SSOT running variant is action-panel-specific but had been
+// inlined as a 10-literal OR chain at keeper-action-panel.ts:99-117
+// with a self-doc comment admitting the duplication. The full literal
+// set lives here so a new lifecycle phase added to the running cluster
+// is reflected in every consumer at once.
+const RUNNING_STATUS_TOKENS = new Set<string>([
+  'active',
+  'running',
+  'idle',
+  'busy',
+])
+
+const RUNNING_PHASES_EXCLUDING_RESTARTING: ReadonlySet<string> = new Set<string>([
+  'Running',
+  'Failing',
+  'Overflowed',
+  'Compacting',
+  'HandingOff',
+  'Draining',
+])
+
+/** Keeper is "running" for action-panel purposes — turn-producing,
+ *  alive, but explicitly *not* `Restarting`. The action panel routes
+ *  `Restarting` to the wakeup branch (kicked-but-not-ticking) rather
+ *  than the pause branch, so a single SSOT predicate must distinguish.
+ *
+ *  Strict subset of `deriveKeeperOperationalState(...).kind === 'running'`
+ *  — it excludes the `Restarting` phase the typed state currently maps
+ *  to `running`. When `KeeperOperationalState` gains a dedicated
+ *  `restarting` variant (RFC-0135 follow-up Goal-2), this predicate
+ *  collapses to that check. */
+export function isKeeperRunningExcludingRestarting(keeper: Keeper): boolean {
+  const status = (keeper.status ?? '').toLowerCase()
+  if (RUNNING_STATUS_TOKENS.has(status)) return true
+  const phase = keeper.phase
+  if (typeof phase === 'string' && RUNNING_PHASES_EXCLUDING_RESTARTING.has(phase)) return true
+  return false
+}

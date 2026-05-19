@@ -3,7 +3,12 @@ import type { Keeper, KeeperRuntimeBlockerClass } from '../types/core'
 import { KEEPER_RUNTIME_BLOCKER_CLASSES } from '../types/core'
 import type { KeeperCompositeSnapshot } from '../api/schemas/keeper-composite'
 import {
+  compositeIsRunning,
+  compositeIsTurnIdle,
+  compositePhaseTone,
   deriveKeeperOperationalState,
+  toKsmPhase,
+  type KeeperKsmPhase,
   type KeeperOperationalState,
 } from './keeper-operational-state'
 
@@ -381,3 +386,54 @@ interface DeriveInputsLite {
   keeper: Keeper
   composite: KeeperCompositeSnapshot | null
 }
+
+describe('toKsmPhase — RFC-0135 PR-11 wire-boundary narrow', () => {
+  it.each<KeeperKsmPhase>([
+    'offline', 'running', 'failing', 'overflowed', 'compacting',
+    'handing_off', 'draining', 'paused', 'stopped', 'crashed',
+    'restarting', 'dead', 'zombie',
+  ])('accepts canonical KSM phase %s', (phase) => {
+    expect(toKsmPhase(phase)).toBe(phase)
+  })
+  it('returns null on unknown string', () => {
+    expect(toKsmPhase('plotting_revenge')).toBeNull()
+  })
+  it('returns null on null/undefined', () => {
+    expect(toKsmPhase(null)).toBeNull()
+    expect(toKsmPhase(undefined)).toBeNull()
+  })
+  it('returns null on empty string', () => {
+    expect(toKsmPhase('')).toBeNull()
+  })
+})
+
+describe('compositePhaseTone — RFC-0135 PR-11 exhaustive switch', () => {
+  it.each<KeeperKsmPhase>(['offline', 'running'])('phase %s ⇒ active', (phase) => {
+    expect(compositePhaseTone(phase)).toBe('active')
+  })
+  it.each<KeeperKsmPhase>([
+    'overflowed', 'compacting', 'handing_off', 'draining', 'paused', 'restarting',
+  ])('phase %s ⇒ warn', (phase) => {
+    expect(compositePhaseTone(phase)).toBe('warn')
+  })
+  it.each<KeeperKsmPhase>([
+    'failing', 'stopped', 'crashed', 'dead', 'zombie',
+  ])('phase %s ⇒ err', (phase) => {
+    expect(compositePhaseTone(phase)).toBe('err')
+  })
+})
+
+describe('compositeIsRunning / compositeIsTurnIdle — wire-format helpers', () => {
+  it('phase=running ⇒ true', () => {
+    expect(compositeIsRunning({ phase: 'running' })).toBe(true)
+  })
+  it('phase=paused ⇒ false', () => {
+    expect(compositeIsRunning({ phase: 'paused' })).toBe(false)
+  })
+  it('turn_phase=idle ⇒ true', () => {
+    expect(compositeIsTurnIdle({ turn_phase: 'idle' })).toBe(true)
+  })
+  it('turn_phase=executing ⇒ false', () => {
+    expect(compositeIsTurnIdle({ turn_phase: 'executing' })).toBe(false)
+  })
+})

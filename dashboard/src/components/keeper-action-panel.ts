@@ -33,6 +33,7 @@ import type { Keeper } from '../types'
 import {
   isKeeperOffline,
   isKeeperPaused,
+  isKeeperRunningExcludingRestarting,
   keeperIsStuckOnRecoverableBlocker,
 } from '../lib/keeper-predicates'
 
@@ -91,30 +92,17 @@ export function keeperActionVisibility(keeper: Keeper): {
   canBoot: boolean
   canShutdown: boolean
 } {
-  // RFC-0135 PR-3: paused / offline / stuck-on-recoverable predicates
-  // come from the canonical SSOT (`lib/keeper-predicates.ts`). Only the
-  // "running" axis stays inline — it is action-panel-specific (a strict
-  // subset of typed-state `running` that explicitly excludes
-  // `restarting`, which the `canWake` branch treats as stuck).
-  const status = (keeper.status ?? '').toLowerCase()
-  const phase = (keeper.phase ?? '').toString().toLowerCase()
-  const isRunning =
-    status === 'active' ||
-    status === 'running' ||
-    status === 'idle' ||
-    status === 'busy' ||
-    phase === 'running' ||
-    phase === 'failing' ||
-    phase === 'overflowed' ||
-    phase === 'compacting' ||
-    phase === 'handing_off' ||
-    phase === 'draining'
-
+  // RFC-0135 PR-11: every visibility axis routes through SSOT predicates
+  // in `lib/keeper-predicates.ts`. The previous 10-literal inline OR
+  // chain for `isRunning` (with self-doc admitting the duplication) was
+  // promoted to `isKeeperRunningExcludingRestarting` so a new lifecycle
+  // phase added to the running cluster updates every consumer at once.
   const isPaused = isKeeperPaused(keeper)
   const isOffline = isKeeperOffline(keeper)
+  const isRunning = isKeeperRunningExcludingRestarting(keeper)
   // `restarting` is a kicked-but-not-yet-running state — treat as stuck
   // so the wakeup action stays visible until the keeper resumes ticks.
-  const isStuck = phase === 'restarting' || keeperIsStuckOnRecoverableBlocker(keeper)
+  const isStuck = keeper.phase === 'Restarting' || keeperIsStuckOnRecoverableBlocker(keeper)
 
   return {
     canPause:    isRunning && !isPaused,

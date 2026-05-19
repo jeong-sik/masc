@@ -2,6 +2,7 @@
 // Each returns an FsmGraphSpec consumed by CytoscapeFsm.
 
 import type { FsmGraphSpec, FsmNode, FsmEdge } from './common/cytoscape-fsm'
+import { compositePhaseTone, toKsmPhase } from '../lib/keeper-operational-state'
 
 
 // ================================================================
@@ -136,21 +137,14 @@ function clusterNodes(
 }
 
 export function buildCompositeFsmSpec(params: CompositeFsmParams): FsmGraphSpec {
-  const ksmTone: 'active' | 'warn' | 'err' =
-    (params.phase === 'failing'
-      || params.phase === 'stopped'
-      || params.phase === 'crashed'
-      || params.phase === 'dead'
-      || params.phase === 'zombie')
-      ? 'err'
-      : (params.phase === 'overflowed'
-        || params.phase === 'compacting'
-        || params.phase === 'handing_off'
-        || params.phase === 'draining'
-        || params.phase === 'paused'
-        || params.phase === 'restarting')
-        ? 'warn'
-        : 'active'
+  // RFC-0135 PR-11: phase tone derivation moved to SSOT
+  // (`compositePhaseTone` in `lib/keeper-operational-state.ts`). Same 6
+  // warn-phase literals were copy-pasted between this builder and
+  // `fsm-hub-invariant-analysis.ts` (N-of-M anti-pattern). Unknown wire
+  // values fall back to 'active' to match the previous fall-through
+  // semantics of the inline OR chain.
+  const ksmPhase = toKsmPhase(params.phase)
+  const ksmTone: 'active' | 'warn' | 'err' = ksmPhase === null ? 'active' : compositePhaseTone(ksmPhase)
   const nodes: FsmNode[] = [
     ...clusterNodes('KSM', 'KSM · keeper lifecycle', KSM_STATES, params.phase, ksmTone),
     ...clusterNodes('KTC', 'KTC · turn cycle', KTC_STATES, params.turnPhase, 'active'),

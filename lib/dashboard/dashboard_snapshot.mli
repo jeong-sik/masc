@@ -43,13 +43,24 @@ val refresh_loop :
   sw:Eio.Switch.t ->
   clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   config:Coord.config ->
+  ?state:Mcp_server.server_state ->
   interval_sec:float ->
+  unit ->
   unit
 (** Run forever in the given switch.  Every [interval_sec] seconds,
     recompute a fresh {!t} and publish via [Atomic.set].  If a refresh
     raises, the {b previous} snapshot stays live (no torn state) and
     the error is logged.  Cancellation via the switch propagates
-    cleanly through {!Eio.Time.sleep}. *)
+    cleanly through {!Eio.Time.sleep}.
+
+    [?state] (RFC-0138 Phase 3 Step 3) — when supplied, the refresh
+    loop additionally populates the snapshot's [namespace_truth] via
+    [Server_dashboard_http_namespace_truth.namespace_truth_snapshot_from_caches].
+    That function reads cached refs only (no PG I/O, no fiber
+    timeouts), so it is safe to call from a background fiber.  When
+    [?state] is omitted, [namespace_truth] stays [`Null] in published
+    snapshots — handlers fall back to the synchronous request-fiber
+    path. *)
 
 val publish_for_test : t -> unit
 (** Test-only injection.  No production caller may use this. *)

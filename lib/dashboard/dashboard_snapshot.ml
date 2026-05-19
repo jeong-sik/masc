@@ -87,11 +87,16 @@ let current_or_bootstrap ~config =
   | None -> bootstrap ~config
 ;;
 
-(* Refresh loop is intentionally minimal in this prototype — it computes
-   the same fields as bootstrap and publishes unconditionally each
-   tick.  Handler wire-up + namespace_truth integration come next; this
-   PR ships the storage + lifecycle primitive only. *)
-let refresh_loop ~sw:_ ~clock ~config ~interval_sec =
+(* RFC-0138 Phase 3 Step 3: refresh loop now optionally accepts the
+   server_state so it can populate [namespace_truth] from the cached
+   refs that [Server_dashboard_http_namespace_truth.namespace_truth_snapshot_from_caches]
+   exposes.  That function reads only process-local refs (no PG I/O,
+   no fiber timeouts), so it is safe in a background fiber — moving
+   the read here is what retires the 6 MASC_NAMESPACE_TRUTH_*_TIMEOUT_S
+   env knobs from the request path (Step 4). *)
+let refresh_loop
+      ~sw:_ ~clock ~config ?state ~interval_sec ()
+  =
   let log_failure label exn =
     Log.Dashboard.warn
       "dashboard_snapshot refresh: %s failed (snapshot held at previous publish): %s"
@@ -119,7 +124,18 @@ let refresh_loop ~sw:_ ~clock ~config ~interval_sec =
         let masc_root = Coord.masc_root_dir config in
         Telemetry_unified.summary_json ~base_path ~masc_root ())
     in
-    let namespace_truth = `Null in
+    let namespace_truth =
+      match state with
+      | None -> `Null
+      | Some state ->
+        safe "namespace_truth" (fun () ->
+          match
+            Server_dashboard_http_namespace_truth.namespace_truth_snapshot_from_caches
+              state
+          with
+          | Some json -> json
+          | None -> `Null)
+    in
     {
       generated_at = Unix.gettimeofday ();
       generation = next_generation ();

@@ -72,3 +72,31 @@ val select_telemetry_summary_json :
     compute path (same logic the handler runs today) when the snapshot
     slot is empty — bootstrap path is paid at most once per process
     lifetime. *)
+
+val select_project_snapshot_json :
+  state:Mcp_server.server_state ->
+  sw:Eio.Switch.t ->
+  clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  ?timing:Server_timing.t ->
+  Httpun.Request.t ->
+  Yojson.Safe.t
+(** RFC-0138 Phase 3 Step 3 — /project-snapshot (+ alias
+    /namespace-truth, /room-truth) read path selector.
+
+    Returns [Dashboard_snapshot.current ()].namespace_truth when the
+    refresh fiber has populated it (refresh_loop must be invoked with
+    [~state] — see [Dashboard_snapshot.refresh_loop]).  Falls back to
+    [Server_dashboard_http_namespace_truth.dashboard_namespace_truth_http_json]
+    in two cases:
+
+    - [Dashboard_snapshot.current ()] is [None] — cold start before
+      first refresh tick.
+    - The snapshot exists but [.namespace_truth = `Null] — refresh
+      fiber ran without [~state] (older boot path) OR the
+      cached-refs read returned [None] (execution cache not yet
+      hydrated).
+
+    Retire criterion (RFC-0138 §3.3 Step 3): Server-Timing
+    "snapshot_read;dur~0ms" p99 on /project-snapshot.  Step 4
+    retires the 6 [MASC_NAMESPACE_TRUTH_*_TIMEOUT_S] env knobs once
+    the fallback compute branch is unused. *)

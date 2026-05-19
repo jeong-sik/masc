@@ -871,6 +871,45 @@ let test_telemetry_summary_snapshot_wire_falls_back_when_empty () =
     true
     (match json with `Assoc _ -> true | _ -> false)
 
+(* RFC-0138 Phase 3 Step 3 — /project-snapshot wire test.
+
+   We can only unit-test the snapshot-hit branch.  The fallback branch
+   calls [dashboard_namespace_truth_http_json] which requires a full
+   server_state + Eio scheduler + 6 timeout env knobs ([with_test_env]
+   does not synthesise these).  The fallback path lives in
+   [test_dashboard_namespace_truth.ml] integration coverage. *)
+
+let test_project_snapshot_wire_returns_snapshot_when_populated () =
+  with_test_env @@ fun ~env ~sw ~config:_ ->
+  Lib.Dashboard_snapshot.reset_for_test ();
+  let sentinel =
+    `Assoc [ "namespace_truth_sentinel", `String "from-snapshot" ]
+  in
+  Lib.Dashboard_snapshot.publish_for_test
+    (Lib.Dashboard_snapshot.make_for_test
+       ~shell:`Null ~tools:`Null
+       ~namespace_truth:sentinel ~telemetry_summary:`Null);
+  let clock = Eio.Stdenv.clock env in
+  let state = Lib.Mcp_server.create_state ~base_path:"/tmp/rfc-0138-step3" in
+  let req = request "/api/v1/dashboard/project-snapshot" in
+  let timing = Lib.Server_timing.create () in
+  let json =
+    Lib.Server_dashboard_shell_snapshot.select_project_snapshot_json
+      ~state ~sw ~clock ~timing req
+  in
+  let open Yojson.Safe.Util in
+  Alcotest.(check string)
+    "populated snapshot path returns published sentinel"
+    "from-snapshot"
+    (json |> member "namespace_truth_sentinel" |> to_string);
+  Alcotest.(check bool)
+    "Server-Timing header records snapshot_read phase on hit"
+    true
+    (let header = Lib.Server_timing.to_header_value timing in
+     let re = Re.compile (Re.Perl.re "snapshot_read") in
+     Re.execp re header);
+  Lib.Dashboard_snapshot.reset_for_test ()
+
 let () =
   run "dashboard_http_core"
     [
@@ -930,5 +969,7 @@ let () =
             test_telemetry_summary_snapshot_wire_returns_snapshot;
           test_case "RFC-0138 telemetry_summary wire falls back when empty" `Quick
             test_telemetry_summary_snapshot_wire_falls_back_when_empty;
+          test_case "RFC-0138 project-snapshot wire returns snapshot when populated" `Quick
+            test_project_snapshot_wire_returns_snapshot_when_populated;
         ] );
     ]

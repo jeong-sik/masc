@@ -301,29 +301,49 @@ export function deriveKeeperLiveTruth({
   }
 }
 
+type EvidenceStampVisual = {
+  tone: StatusChipTone
+  label: string
+  timestamp: number | null
+  errorMessage: string | null
+}
+
+/** Project the typed evidence union onto the stamp display fields.
+ *  Exhaustive `switch` — TypeScript's `noFallthroughCasesInSwitch` plus
+ *  the absence of `default:` make a new union arm a compile error. */
+function projectEvidenceStamp(state: KeeperDetailEvidenceState<unknown>): EvidenceStampVisual {
+  switch (state.kind) {
+    case 'fresh':
+      return { tone: 'ok', label: 'fresh', timestamp: state.fetchedAt, errorMessage: null }
+    case 'stale':
+      // Stale = previously fresh, current fetch failed. Surface the
+      // age via timestamp AND the failure message — the operator must
+      // see both, not just the cached data underneath.
+      return { tone: 'warn', label: 'stale', timestamp: state.fetchedAt, errorMessage: state.error }
+    case 'error':
+      return { tone: 'warn', label: 'error', timestamp: null, errorMessage: state.error }
+    case 'loading':
+      return { tone: 'neutral', label: 'loading', timestamp: null, errorMessage: null }
+  }
+}
+
 function EvidenceStamp({
   label,
   evidence,
 }: {
   label: string
-  evidence: Pick<KeeperDetailEvidenceState<unknown>, 'refreshedAtMs' | 'error' | 'loading'>
+  evidence: KeeperDetailEvidenceState<unknown>
 }) {
-  const state = evidence.error
-    ? 'error'
-    : evidence.refreshedAtMs
-      ? 'fresh'
-      : evidence.loading
-        ? 'loading'
-        : 'missing'
-  const tone: StatusChipTone =
-    state === 'fresh' ? 'ok' : state === 'error' ? 'warn' : 'neutral'
+  const visual = projectEvidenceStamp(evidence)
   return html`
     <span class="inline-flex min-w-0 items-center gap-1.5 text-3xs text-[var(--color-fg-muted)]">
-      <${StatusChip} tone=${tone} uppercase=${false}>${label}<//>
-      ${evidence.refreshedAtMs
-        ? html`<${TimeAgo} timestamp=${evidence.refreshedAtMs} />`
-        : html`<span>${state}</span>`}
-      ${evidence.error ? html`<span class="truncate text-[var(--color-status-warn)]">${evidence.error}</span>` : null}
+      <${StatusChip} tone=${visual.tone} uppercase=${false}>${label}<//>
+      ${visual.timestamp !== null
+        ? html`<${TimeAgo} timestamp=${visual.timestamp} />`
+        : html`<span>${visual.label}</span>`}
+      ${visual.errorMessage !== null
+        ? html`<span class="truncate text-[var(--color-status-warn)]">${visual.errorMessage}</span>`
+        : null}
     </span>
   `
 }

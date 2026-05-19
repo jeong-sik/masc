@@ -74,12 +74,22 @@ export type ObservedLaneSummary = {
 
 export type InvariantViolationCounts = Record<keyof KeeperCompositeInvariants, number>
 
+/** Discriminated union for the composite snapshot's fetch state. The
+ *  prior shape conflated success and failure by keeping `snapshot`
+ *  populated after `fetch_failed` (Workaround Rejection Bar §2).
+ *  Consumers must now `switch (status.kind)` to read the snapshot —
+ *  stale data is only visible when explicitly accepted on the
+ *  `'stale'` arm. The `idle` arm represents "no keeper selected yet". */
+export type HubFetchStatus =
+  | { kind: 'idle' }
+  | { kind: 'loading' }
+  | { kind: 'fresh'; snapshot: KeeperCompositeSnapshot; fetchedAt: number }
+  | { kind: 'stale'; snapshot: KeeperCompositeSnapshot; fetchedAt: number; stalenessMs: number; error: string }
+  | { kind: 'error'; error: string }
+
 export type HubState = {
   keeperName: string | null
-  snapshot: KeeperCompositeSnapshot | null
-  loading: boolean
-  error: string | null
-  lastFetchAt: number
+  status: HubFetchStatus
   observations: CompositeObservation[]
   invariantSampleCount: number
   invariantViolations: InvariantViolationCounts
@@ -88,7 +98,7 @@ export type HubState = {
 export type HubAction =
   | { type: 'fetch_started'; keeperName: string }
   | { type: 'fetch_succeeded'; keeperName: string; snapshot: KeeperCompositeSnapshot; fetchedAt: number }
-  | { type: 'fetch_failed'; keeperName: string; error: string }
+  | { type: 'fetch_failed'; keeperName: string; error: string; failedAt: number }
 
 export const MAX_OBSERVATIONS = 30
 export const MAX_TRANSITION_HISTORY = 20
@@ -103,13 +113,26 @@ const ZERO_VIOLATIONS: InvariantViolationCounts = {
 
 export const initialHubState: HubState = {
   keeperName: null,
-  snapshot: null,
-  loading: false,
-  error: null,
-  lastFetchAt: 0,
+  status: { kind: 'idle' },
   observations: [],
   invariantSampleCount: 0,
   invariantViolations: { ...ZERO_VIOLATIONS },
+}
+
+/** Returns the snapshot only when status is `'fresh'`. Stale/error/
+ *  loading/idle collapse to `null`. Consumers that want stale data
+ *  must `switch` on `status.kind` directly and show a staleness
+ *  banner. */
+export function hubFreshSnapshot(status: HubFetchStatus): KeeperCompositeSnapshot | null {
+  switch (status.kind) {
+    case 'fresh':
+      return status.snapshot
+    case 'stale':
+    case 'idle':
+    case 'loading':
+    case 'error':
+      return null
+  }
 }
 
 export const TRANSITION_FIELDS: Array<{ field: string; key: LaneKey }> = [

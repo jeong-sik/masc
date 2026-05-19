@@ -9,6 +9,7 @@
  auth_config_store
  auth_credential_store
  auth_nickname
+ auth_room_secret
  auth_storage
  auth_tool_authorization
  plan_action_outcome

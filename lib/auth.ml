@@ -926,70 +926,21 @@ let authorize_tool_v2 config ~agent_name ~token ~tool_name : (unit, masc_error) 
 (* Coord secret (for room-level auth)            *)
 (* ============================================ *)
 
-(** Initialize room secret *)
-let init_room_secret config : string =
-  ensure_auth_dirs config;
-  let secret = generate_token () in
-  let hash = sha256_hash secret in
-  save_private_text_file (room_secret_file config) hash;
-  (* Update auth config with hash *)
-  let cfg = load_auth_config config in
-  save_auth_config config { cfg with room_secret_hash = Some hash };
-  secret (* Return raw secret to show user once *)
-;;
+module Room_secret = Auth_room_secret
 
-(** Verify room secret *)
-let verify_room_secret config secret : bool =
-  let hash = sha256_hash secret in
-  let file = room_secret_file config in
-  if Sys.file_exists file
-  then (
-    let stored_hash = String.trim (In_channel.with_open_text file In_channel.input_all) in
-    hash = stored_hash)
-  else false
-;;
+let init_room_secret = Room_secret.init_room_secret
+let verify_room_secret = Room_secret.verify_room_secret
 
 (* ============================================ *)
 (* High-level auth operations                   *)
 (* ============================================ *)
 
-(** Enable authentication for a room.
-    Creates a bootstrap admin token for the enabling agent to prevent
-    circular permission deadlock (BUG-025). *)
 let enable_auth config ~require_token ~agent_name : string * string option =
-  let secret = init_room_secret config in
-  let cfg = load_auth_config config in
-  save_auth_config config { cfg with enabled = true; require_token };
-  let bootstrap_token =
-    if agent_name <> ""
-    then (
-      write_initial_admin config agent_name;
-      match create_token config ~agent_name ~role:Admin with
-      | Ok (token, _cred) -> Some token
-      | Error e ->
-        Log.Auth.warn
-          "[enable_auth] bootstrap token creation failed for %s: %s"
-          agent_name
-          (Masc_domain.show_masc_error e);
-        None)
-    else None
-  in
-  secret, bootstrap_token
+  Room_secret.enable_auth ~create_token config ~require_token ~agent_name
 ;;
 
-(** Disable authentication *)
-let disable_auth config =
-  let cfg = load_auth_config config in
-  save_auth_config config { cfg with enabled = false };
-  let file = initial_admin_file config in
-  if Sys.file_exists file then Sys.remove file
-;;
-
-(** Check if auth is enabled *)
-let is_auth_enabled config : bool =
-  let cfg = load_auth_config config in
-  cfg.enabled
-;;
+let disable_auth = Room_secret.disable_auth
+let is_auth_enabled = Room_secret.is_auth_enabled
 
 let bare_alias_audit_interval_default = 60.0
 

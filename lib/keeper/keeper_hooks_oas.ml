@@ -79,6 +79,48 @@ let idle_decision_to_label = function
   | Agent_sdk.Hooks.AdjustParams _ -> "adjust_params"
   | Agent_sdk.Hooks.ElicitInput _ -> "elicit_input"
 
+let failure_class_of_tool_error_json json =
+  let direct = Safe_ops.json_string_opt "failure_class" json in
+  let nested =
+    match Yojson.Safe.Util.member "detail" json with
+    | `Assoc _ as detail -> Safe_ops.json_string_opt "failure_class" detail
+    | _ -> None
+  in
+  match direct with
+  | Some _ -> direct
+  | None -> nested
+
+let failure_class_of_tool_error_text error =
+  try
+    let json = Yojson.Safe.from_string error in
+    failure_class_of_tool_error_json json
+  with
+  | _ -> None
+
+let tool_error_failure_class ?base_path error =
+  match Tool_output.decode_from_oas error with
+  | Tool_output.Inline inline -> failure_class_of_tool_error_text inline
+  | Tool_output.Stored { sha256; preview; _ } ->
+    let from_store =
+      match base_path with
+      | None -> None
+      | Some base_path ->
+        Safe_ops.protect ~default:None (fun () ->
+            let store = Tool_blob_store.create ~base_path in
+            match Tool_blob_store.fetch store ~sha256 with
+            | Some payload -> failure_class_of_tool_error_text payload
+            | None -> None)
+    in
+    (match from_store with
+     | Some _ -> from_store
+     | None -> failure_class_of_tool_error_text preview)
+
+let self_correcting_tool_failure_class ?base_path error =
+  match tool_error_failure_class ?base_path error with
+  | Some ("workflow_rejection" | "policy_rejection" as failure_class) ->
+    Some failure_class
+  | _ -> None
+
 module Gate_attempt = Keeper_hooks_oas_gate_attempt
 
 let render_pre_tool_gate_output = Gate_attempt.render_pre_tool_gate_output
@@ -715,49 +757,59 @@ let make_hooks
 
     on_tool_error = Some (function
       | Agent_sdk.Hooks.OnToolError { tool_name; error } ->
-        (* Always increment the durable Prometheus signal: noise
-           dedupe is a log-surface concern only; the counter carries
-           the count for dashboards and alert rules. *)
-        Prometheus.inc_counter
-          Keeper_metrics.metric_keeper_lifecycle_callback_failures
-          ~labels:[(label_keeper, (!meta_ref).name); (label_callback, callback_label_on_tool_error)]
-          ();
-        (* λ-HOOK-ERROR (2026-05-19) — typed dedupe of repeated
-           [on_tool_error] hook ERROR lines. system_log 1000-line
-           sample (keeper:verifier × Bash × 2, lifecycle-worker-fast-1
-           × masc_worktree_create × 2, lifecycle-reviewer-fast-1 ×
-           keeper_pr_review_comment × 2, analyst × masc_transition ×
-           2) shows the same (keeper, tool, error) triple recurring
-           across time; only the first occurrence carries
-           operator-visible ERROR value. See
-           lib/keeper_tool_hook_error_state for rationale. *)
         let keeper_name = (!meta_ref).name in
-        let error_signature = Keeper_tool_hook_error_state.normalize error in
-        (match
-           Keeper_tool_hook_error_state.record
-             ~keeper_name
-             ~tool_name
-             ~error_signature
-             ()
-         with
-         | `First ->
-           Log.Keeper.error "keeper:%s tool_error: %s — %s"
-             keeper_name tool_name error
-         | `Repeated n ->
-           Log.Keeper.debug
-             "keeper:%s tool_error repeated (total=%d, dedup): %s — %s"
-             keeper_name n tool_name error
-         | `Threshold_silence n ->
-           Log.Keeper.error
-             "keeper:%s tool_error threshold-silence after %d identical: %s — %s"
-             keeper_name n tool_name error;
+        (match self_correcting_tool_failure_class ~base_path:config.base_path error with
+         | Some failure_class ->
+           Log.Keeper.warn "keeper:%s tool_%s: %s — %s"
+             keeper_name failure_class tool_name error
+         | None ->
+           (* Always increment the durable Prometheus signal for real
+              tool/runtime failures: noise dedupe is a log-surface concern
+              only; the counter carries the count for dashboards and alert
+              rules. Deterministic workflow/policy rejections are handled
+              above as self-correcting control flow. *)
            Prometheus.inc_counter
              Keeper_metrics.metric_keeper_lifecycle_callback_failures
              ~labels:
                [ (label_keeper, keeper_name)
-               ; (label_callback, "on_tool_error_threshold_silence")
+               ; (label_callback, callback_label_on_tool_error)
                ]
-             ());
+             ();
+           (* λ-HOOK-ERROR (2026-05-19) — typed dedupe of repeated
+              [on_tool_error] hook ERROR lines. system_log 1000-line
+              sample (keeper:verifier × Bash × 2, lifecycle-worker-fast-1
+              × masc_worktree_create × 2, lifecycle-reviewer-fast-1 ×
+              keeper_pr_review_comment × 2, analyst × masc_transition ×
+              2) shows the same (keeper, tool, error) triple recurring
+              across time; only the first occurrence carries
+              operator-visible ERROR value. See
+              lib/keeper_tool_hook_error_state for rationale. *)
+           let error_signature = Keeper_tool_hook_error_state.normalize error in
+           (match
+              Keeper_tool_hook_error_state.record
+                ~keeper_name
+                ~tool_name
+                ~error_signature
+                ()
+            with
+            | `First ->
+              Log.Keeper.error "keeper:%s tool_error: %s — %s"
+                keeper_name tool_name error
+            | `Repeated n ->
+              Log.Keeper.debug
+                "keeper:%s tool_error repeated (total=%d, dedup): %s — %s"
+                keeper_name n tool_name error
+            | `Threshold_silence n ->
+              Log.Keeper.error
+                "keeper:%s tool_error threshold-silence after %d identical: %s — %s"
+                keeper_name n tool_name error;
+              Prometheus.inc_counter
+                Keeper_metrics.metric_keeper_lifecycle_callback_failures
+                ~labels:
+                  [ (label_keeper, keeper_name)
+                  ; (label_callback, "on_tool_error_threshold_silence")
+                  ]
+                ()));
         Agent_sdk.Hooks.Continue
       | _ -> Agent_sdk.Hooks.Continue);
 

@@ -80,11 +80,29 @@ let make_test_hooks keeper_name =
   Hooks.make_hooks ~config ~meta_ref ~generation:1 ()
 ;;
 
+let make_test_hooks_at_root keeper_name root =
+  let config = Masc_mcp.Coord.default_config root in
+  let meta_ref = ref (make_meta keeper_name) in
+  Hooks.make_hooks ~config ~meta_ref ~generation:1 ()
+;;
+
 let lifecycle_callback_failure_count ~keeper ~callback =
   Masc_mcp.Prometheus.metric_value_or_zero
     Masc_mcp.Keeper_metrics.metric_keeper_lifecycle_callback_failures
     ~labels:[ "keeper", keeper; "callback", callback ]
     ()
+;;
+
+let latest_log_seq () =
+  match Log.Ring.recent ~limit:1 () with
+  | entry :: _ -> entry.Log.Ring.seq
+  | [] -> -1
+;;
+
+let find_keeper_log_since ~since_seq ~message_substring =
+  Log.Ring.recent ~limit:50 ~module_filter:"Keeper" ~since_seq ()
+  |> List.find_opt (fun (entry : Log.Ring.entry) ->
+         String_util.contains_substring entry.message message_substring)
 ;;
 
 let on_stop_count ~keeper ~stop_reason =
@@ -1071,6 +1089,67 @@ let test_on_tool_error_hook_records_callback_failure_metric () =
   check (float 0.001) "on_tool_error counter increments" 1.0 (after -. before)
 ;;
 
+let test_on_tool_error_workflow_rejection_logs_warn_without_callback_failure () =
+  let keeper = "callback-on-tool-workflow-rejection-keeper" in
+  let hooks = make_test_hooks keeper in
+  let hook = require_hook "on_tool_error" hooks.on_tool_error in
+  let before = lifecycle_callback_failure_count ~keeper ~callback:"on_tool_error" in
+  let before_seq = latest_log_seq () in
+  let error =
+    {|{"ok":false,"error":"keeper_bash_command_shape_blocked","failure_class":"workflow_rejection"}|}
+  in
+  check_continue
+    "on_tool_error workflow rejection"
+    (hook (Agent_sdk.Hooks.OnToolError { tool_name = "Bash"; error }));
+  let after = lifecycle_callback_failure_count ~keeper ~callback:"on_tool_error" in
+  check
+    (float 0.001)
+    "workflow rejection does not increment callback failures"
+    0.0
+    (after -. before);
+  match
+    find_keeper_log_since
+      ~since_seq:before_seq
+      ~message_substring:("keeper:" ^ keeper ^ " tool_workflow_rejection: Bash")
+  with
+  | Some entry -> check string "log level" "WARN" (Log.level_to_string entry.level)
+  | None -> fail "expected workflow rejection to be logged as keeper WARN"
+;;
+
+let test_on_tool_error_blob_workflow_rejection_logs_warn_without_callback_failure
+    () =
+  let keeper = "callback-on-tool-blob-workflow-rejection-keeper" in
+  let root = temp_dir () in
+  let hooks = make_test_hooks_at_root keeper root in
+  let hook = require_hook "on_tool_error" hooks.on_tool_error in
+  let before = lifecycle_callback_failure_count ~keeper ~callback:"on_tool_error" in
+  let before_seq = latest_log_seq () in
+  let payload =
+    Printf.sprintf
+      {|{"ok":false,"error":"keeper_bash_command_shape_blocked","padding":"%s","detail":{"failure_class":"workflow_rejection"}}|}
+      (String.make 260 'x')
+  in
+  let store = Tool_blob_store.create ~base_path:root in
+  let error = Tool_blob_store.put store ~bytes:payload ~mime:"text/plain" in
+  let error = Tool_output.encode_for_oas error in
+  check_continue
+    "on_tool_error blob workflow rejection"
+    (hook (Agent_sdk.Hooks.OnToolError { tool_name = "Bash"; error }));
+  let after = lifecycle_callback_failure_count ~keeper ~callback:"on_tool_error" in
+  check
+    (float 0.001)
+    "blob workflow rejection does not increment callback failures"
+    0.0
+    (after -. before);
+  match
+    find_keeper_log_since
+      ~since_seq:before_seq
+      ~message_substring:("keeper:" ^ keeper ^ " tool_workflow_rejection: Bash")
+  with
+  | Some entry -> check string "blob log level" "WARN" (Log.level_to_string entry.level)
+  | None -> fail "expected blob workflow rejection to be logged as keeper WARN"
+;;
+
 let test_on_stop_hook_records_stop_reason_metric () =
   let keeper = "callback-on-stop-keeper" in
   let hooks = make_test_hooks keeper in
@@ -1690,6 +1769,14 @@ let () =
             "on_tool_error records callback metric"
             `Quick
             test_on_tool_error_hook_records_callback_failure_metric
+        ; test_case
+            "on_tool_error workflow rejection logs warn"
+            `Quick
+            test_on_tool_error_workflow_rejection_logs_warn_without_callback_failure
+        ; test_case
+            "on_tool_error blob workflow rejection logs warn"
+            `Quick
+            test_on_tool_error_blob_workflow_rejection_logs_warn_without_callback_failure
         ; test_case
             "on_stop records stop reason metric"
             `Quick

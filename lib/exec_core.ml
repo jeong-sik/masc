@@ -34,6 +34,25 @@ type retryability =
   | Self_correct
   | Operator_required
 
+(* RFC-0092 Phase B Step 1: typed validator hand-off marker.
+   Replaces string-based "next_action" suggestion in blocked_result_json
+   extras with a closed sum.  Consumers (Cluster C Step 5,
+   keeper_shell_bash.ml block path) will populate this; readers
+   pattern-match exhaustively so new validator stages become a
+   compile-time addition. *)
+type validator_stage =
+  | Probe_task_state
+  | Probe_http
+  | Probe_search
+  | Allowed
+
+let validator_stage_to_string = function
+  | Probe_task_state -> "probe_task_state"
+  | Probe_http -> "probe_http"
+  | Probe_search -> "probe_search"
+  | Allowed -> "allowed"
+;;
+
 type artifact_policy =
   | Inline_only
   | Persist_if_large

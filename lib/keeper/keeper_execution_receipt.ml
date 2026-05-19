@@ -208,6 +208,80 @@ let tool_contract_result_of_contract_status
   | Satisfied_execution -> Contract_satisfied_execution
 ;;
 
+(* Structured contract-violation terminal_reason_code encoding.
+   The legacy wire format is:
+     completion_contract_violation:<contract_id>
+   The extended format adds called and satisfying tool lists:
+     completion_contract_violation:<contract_id>:called[t1,t2]:satisfying[t3,t4]
+   Both forms start with the same prefix so existing prefix-matching
+   consumers (dashboard, disposition logic) remain backward-compatible.
+   Empty tool lists are encoded as empty brackets: called[]:satisfying[]. *)
+
+let encode_tool_list = function
+  | [] -> "[]"
+  | tools -> "[" ^ String.concat "," tools ^ "]"
+;;
+
+let encode_contract_violation_reason
+    ~called_tools
+    ~satisfying_tools
+    (contract_id : string)
+  : string
+  =
+  Printf.sprintf
+    "completion_contract_violation:%s:called%s:satisfying%s"
+    contract_id
+    (encode_tool_list called_tools)
+    (encode_tool_list satisfying_tools)
+;;
+
+(* Decode the extended terminal_reason_code back into its components.
+   Returns [None] if the string is not a contract-violation code.
+   For the legacy format (no called/satisfying suffix), both lists are [ [] ]. *)
+let decode_tool_list str =
+  let len = String.length str in
+  if len < 2 then None
+  else if String.sub str 0 1 <> "[" || String.sub str (len - 1) 1 <> "]"
+  then None
+  else
+    let inner = String.sub str 1 (len - 2) in
+    if inner = "" then Some []
+    else Some (String.split_on_char ',' inner)
+;;
+
+let decode_contract_violation_reason (wire : string)
+  : (string * string list * string list) option
+  =
+  let prefix = "completion_contract_violation:" in
+  if not (String.starts_with ~prefix wire) then None
+  else
+    let rest = String.sub wire (String.length prefix) (String.length wire - String.length prefix) in
+    match String.split_on_char ':' rest with
+    | [] -> None
+    | [ contract_id ] ->
+      Some (contract_id, [], [])
+    | contract_id :: parts ->
+      let called = ref [] in
+      let satisfying = ref [] in
+      let consumed = ref 0 in
+      List.iter (fun part ->
+        if String.length part > 6 && String.sub part 0 6 = "called"
+        then (
+          match decode_tool_list (String.sub part 6 (String.length part - 6)) with
+          | Some tools -> called := tools; incr consumed
+          | None -> ())
+        else if String.length part > 10 && String.sub part 0 10 = "satisfying"
+        then (
+          match decode_tool_list (String.sub part 10 (String.length part - 10)) with
+          | Some tools -> satisfying := tools; incr consumed
+          | None -> ())
+        else ()
+      ) parts;
+      if !consumed > 0
+      then Some (contract_id, !called, !satisfying)
+      else Some (contract_id, [], [])
+;;
+
 type cascade_rotation_attempt =
   { from_cascade : cascade_name
   ; to_cascade : cascade_name
@@ -270,6 +344,36 @@ let stop_reason_to_string = function
     (match tool_name with
      | Some tool -> Printf.sprintf "mutation_boundary:%s:%d" tool turns_used
      | None -> Printf.sprintf "mutation_boundary:%d" turns_used)
+;;
+
+(* Build an extended terminal_reason_code from a receipt whose
+   terminal_reason_code is already set to the legacy
+   "completion_contract_violation:<id>" form. Uses the receipt's
+   canonical_tools + observed_tools + tools_used as called_tools
+   and tool_surface.required_tools as satisfying_tools.
+   Returns the original code unchanged if it is not a contract-violation
+   code or is already enriched. *)
+let enrich_contract_violation_reason (receipt : t) : string =
+  match decode_contract_violation_reason receipt.terminal_reason_code with
+  | None -> receipt.terminal_reason_code
+  | Some (_contract_id, _called, _satisfying) ->
+    if _called <> [] || _satisfying <> []
+    then receipt.terminal_reason_code
+    else
+      let canonical_names names =
+        names
+        |> List.map Keeper_tool_disclosure.canonical_tool_name
+        |> Keeper_types.dedupe_keep_order
+      in
+      let called =
+        canonical_names
+          (receipt.canonical_tools @ receipt.observed_tools @ receipt.tools_used)
+      in
+      let satisfying = canonical_names receipt.tool_surface.required_tools in
+      encode_contract_violation_reason
+        ~called_tools:called
+        ~satisfying_tools:satisfying
+        _contract_id
 ;;
 
 let sandbox_kind_of_meta (meta : Keeper_types.keeper_meta) : Keeper_types.sandbox_profile =
@@ -625,6 +729,7 @@ let operator_disposition (receipt : t)
 ;;
 
 let to_json (receipt : t) =
+  let terminal_reason_code = enrich_contract_violation_reason receipt in
   let disposition, disposition_reason = operator_disposition receipt in
   let operator_disposition = operator_disposition_kind_to_string disposition in
   let operator_disposition_reason =
@@ -701,7 +806,7 @@ let to_json (receipt : t) =
         | None -> `Null )
     ; "goal_ids", list_json receipt.goal_ids
     ; "outcome", `String (outcome_kind_to_tla_receipt receipt.outcome)
-    ; "terminal_reason_code", `String receipt.terminal_reason_code
+    ; "terminal_reason_code", `String terminal_reason_code
     ; "operator_disposition", `String operator_disposition
     ; "operator_disposition_reason", `String operator_disposition_reason
     ; "runtime_contract", runtime_contract
@@ -889,6 +994,7 @@ let should_emit_operator_broadcast receipt ~disposition ~reason =
 ;;
 
 let operator_broadcast_payload (receipt : t) ~disposition ~reason =
+  let terminal_reason_code = enrich_contract_violation_reason receipt in
   let disposition_s = operator_disposition_kind_to_string disposition in
   let reason_s = operator_disposition_reason_to_string reason in
   `Assoc
@@ -904,7 +1010,7 @@ let operator_broadcast_payload (receipt : t) ~disposition ~reason =
     ; "disposition", `String disposition_s
     ; "disposition_reason", `String reason_s
     ; "outcome", `String (outcome_kind_to_tla_receipt receipt.outcome)
-    ; "terminal_reason_code", `String receipt.terminal_reason_code
+    ; "terminal_reason_code", `String terminal_reason_code
     ; ( "current_task_id"
       , match receipt.current_task_id with
         | Some value -> `String value
@@ -920,6 +1026,15 @@ let operator_broadcast_payload (receipt : t) ~disposition ~reason =
         | Some value -> `String value
         | None -> `Null )
     ; "tools_used", list_json receipt.tools_used
+    ; ( "contract_violation_detail"
+      , match decode_contract_violation_reason terminal_reason_code with
+        | None -> `Null
+        | Some (contract_id, called, satisfying) ->
+          `Assoc
+            [ "contract_id", `String contract_id
+            ; "called_tools", list_json called
+            ; "satisfying_tools", list_json satisfying
+            ] )
     ; ( "tool_contract"
       , `Assoc
           [ ( "result"

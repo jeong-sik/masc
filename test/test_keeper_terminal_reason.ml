@@ -511,6 +511,124 @@ let test_legacy_gh_worktree_text () =
     (terminal_next_action terminal)
 ;;
 
+(* Contract violation encoding/decoding tests *)
+
+module KER = Masc_mcp.Keeper_execution_receipt
+
+let test_encode_tool_list () =
+  check string "empty" "[]" (KER.encode_tool_list []);
+  check string "single" "[keeper_board_list]" (KER.encode_tool_list [ "keeper_board_list" ]);
+  check
+    string
+    "multiple"
+    "[keeper_board_list,keeper_memory_search]"
+    (KER.encode_tool_list [ "keeper_board_list"; "keeper_memory_search" ])
+;;
+
+let test_encode_contract_violation_reason () =
+  check
+    string
+    "empty tools"
+    "completion_contract_violation:require_tool_use:called[]:satisfying[]"
+    (KER.encode_contract_violation_reason ~called_tools:[] ~satisfying_tools:[] "require_tool_use");
+  check
+    string
+    "with tools"
+    "completion_contract_violation:require_tool_use:called[keeper_board_list,keeper_memory_search]:satisfying[keeper_board_post,masc_broadcast]"
+    (KER.encode_contract_violation_reason
+       ~called_tools:[ "keeper_board_list"; "keeper_memory_search" ]
+       ~satisfying_tools:[ "keeper_board_post"; "masc_broadcast" ]
+       "require_tool_use")
+;;
+
+let test_decode_legacy_format () =
+  let result = KER.decode_contract_violation_reason "completion_contract_violation:require_tool_use" in
+  (match result with
+   | None -> Alcotest.fail "expected Some for legacy format"
+   | Some (contract_id, called, satisfying) ->
+     check string "contract_id" "require_tool_use" contract_id;
+     check (list string) "called empty" [] called;
+     check (list string) "satisfying empty" [] satisfying)
+;;
+
+let test_decode_extended_format () =
+  let wire =
+    "completion_contract_violation:require_tool_use:called[keeper_board_list,keeper_memory_search]:satisfying[keeper_board_post,masc_broadcast]"
+  in
+  let result = KER.decode_contract_violation_reason wire in
+  (match result with
+   | None -> Alcotest.fail "expected Some for extended format"
+   | Some (contract_id, called, satisfying) ->
+     check string "contract_id" "require_tool_use" contract_id;
+     check
+       (list string)
+       "called"
+       [ "keeper_board_list"; "keeper_memory_search" ]
+       called;
+     check
+       (list string)
+       "satisfying"
+       [ "keeper_board_post"; "masc_broadcast" ]
+       satisfying)
+;;
+
+let test_decode_extended_empty_tools () =
+  let wire = "completion_contract_violation:require_tool_use:called[]:satisfying[]" in
+  let result = KER.decode_contract_violation_reason wire in
+  (match result with
+   | None -> Alcotest.fail "expected Some for extended format with empty tools"
+   | Some (contract_id, called, satisfying) ->
+     check string "contract_id" "require_tool_use" contract_id;
+     check (list string) "called empty" [] called;
+     check (list string) "satisfying empty" [] satisfying)
+;;
+
+let test_decode_non_violation () =
+  let result = KER.decode_contract_violation_reason "api_error_rate_limited" in
+  check (option string) "non-violation -> None" None
+    (Option.map (fun (cid, _, _) -> cid) result);
+  let result2 = KER.decode_contract_violation_reason "" in
+  check (option string) "empty string -> None" None
+    (Option.map (fun (cid, _, _) -> cid) result2)
+;;
+
+let test_decode_roundtrip () =
+  let called = [ "tool_a"; "tool_b"; "tool_c" ] in
+  let satisfying = [ "tool_x" ] in
+  let encoded =
+    KER.encode_contract_violation_reason ~called_tools:called ~satisfying_tools:satisfying "my_contract"
+  in
+  let decoded = KER.decode_contract_violation_reason encoded in
+  (match decoded with
+   | None -> Alcotest.fail "roundtrip: expected Some"
+   | Some (cid, dec_called, dec_satisfying) ->
+     check string "contract_id" "my_contract" cid;
+     check (list string) "called" called dec_called;
+     check (list string) "satisfying" satisfying dec_satisfying)
+;;
+
+let test_prefix_backward_compat () =
+  (* Both legacy and extended forms must start with the prefix that
+     the dashboard disposition logic checks via String.starts_with *)
+  let legacy = "completion_contract_violation:require_tool_use" in
+  let extended =
+    KER.encode_contract_violation_reason
+      ~called_tools:[ "a" ]
+      ~satisfying_tools:[ "b" ]
+      "require_tool_use"
+  in
+  check
+    bool
+    "legacy starts with prefix"
+    true
+    (String.starts_with ~prefix:"completion_contract_violation:" legacy);
+  check
+    bool
+    "extended starts with prefix"
+    true
+    (String.starts_with ~prefix:"completion_contract_violation:" extended)
+;;
+
 let () =
   run
     "keeper_terminal_reason"
@@ -605,6 +723,22 @@ let () =
             `Quick
             test_structured_no_tool_capable_provider
         ; test_case "legacy gh missing worktree text" `Quick test_legacy_gh_worktree_text
+        ] )
+    ; ( "contract violation encoding"
+      , [ test_case "encode_tool_list" `Quick test_encode_tool_list
+        ; test_case
+            "encode_contract_violation_reason"
+            `Quick
+            test_encode_contract_violation_reason
+        ; test_case "decode legacy format" `Quick test_decode_legacy_format
+        ; test_case "decode extended format" `Quick test_decode_extended_format
+        ; test_case
+            "decode extended empty tools"
+            `Quick
+            test_decode_extended_empty_tools
+        ; test_case "decode non-violation" `Quick test_decode_non_violation
+        ; test_case "decode roundtrip" `Quick test_decode_roundtrip
+        ; test_case "prefix backward compat" `Quick test_prefix_backward_compat
         ] )
     ]
 ;;

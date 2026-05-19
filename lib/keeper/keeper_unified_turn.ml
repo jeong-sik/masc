@@ -592,57 +592,12 @@ let run_keeper_cycle
                            KCP.runtime_name_to_string execution.cascade_name
                          in
                          let mark_terminal_error err =
-                           if EC.is_cascade_exhausted_error err
-                           then (
-                             Keeper_registry.mark_turn_cascade_exhausted
-                               ~base_path:config.base_path
-                               meta.name;
-                             Prometheus.inc_counter
-                               Keeper_metrics.metric_keeper_fsm_edge_transitions
-                               ~labels:[ "edge", "kcl_to_ktc_exhaustion" ]
-                               ();
-                             (* Cycle 52 narrative: cascade exhaustion is a silent
-                   failure on dashboards reading only Turn_failed.  The
-                   fsm_edge counter records the transition, but operators
-                   forensically investigating "why is this keeper stuck?"
-                   benefit from a structured WARN line distinguishing
-                   'all cascades exhausted' from 'single transient error'.
-                   Companion to PR #11708 (gate rejection narrative) and
-                   PR #11717 (unmapped regression alert). *)
-                             Log.Keeper.warn
-                               "%s: all cascades exhausted (terminal) — last_err=%s \
-                                attempt=%d attempted_cascades=[%s]"
-                               meta.name
-                               (Agent_sdk.Error.to_string err)
-                               attempt
-                               (String.concat ", " attempted_cascades);
-                             Prometheus.inc_counter
-                               Keeper_metrics.metric_keeper_oas_execution_errors
-                               ~labels:
-                                 [ "keeper", meta.name; "phase", Keeper_oas_execution_error_phase.(to_label Cascade_exhausted) ]
-                               ())
-                           else (
-                             Keeper_registry.set_turn_phase
-                               ~base_path:config.base_path
-                               meta.name
-                               Keeper_registry.(Packed Turn_finalizing);
-                             (* Cycle 52 narrative companion: non-exhaustion terminal
-                   errors (transient).  Logged so dashboard readers can
-                   distinguish exhaustion from transient failure without
-                   re-parsing Turn_finalizing reason fields. *)
-                             Prometheus.inc_counter
-                               Keeper_metrics.metric_keeper_oas_execution_errors
-                               ~labels:
-                                 [ "keeper", meta.name
-                                 ; "phase", Keeper_oas_execution_error_phase.(to_label Terminal_non_exhaustion)
-                                 ]
-                               ();
-                             Log.Keeper.warn
-                               "%s: turn terminal (non-exhaustion error) — err=%s \
-                                attempt=%d"
-                               meta.name
-                               (Agent_sdk.Error.to_string err)
-                               attempt)
+                           Keeper_unified_turn_terminal_error.handle
+                             ~config
+                             ~keeper_name:meta.name
+                             ~attempt
+                             ~attempted_cascades
+                             err
                          in
                          let attempt_timeout_budget = ref None in
                          let max_turns =

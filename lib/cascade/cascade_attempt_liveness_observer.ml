@@ -353,7 +353,16 @@ let start_tick_fiber (t : t) ~(sw : Eio.Switch.t)
             end
           in
           try loop () with
-          | Eio.Cancel.Cancelled _ -> ()
+          (* Cooperative cancel: re-raise so the parent switch sees the
+             signal propagate out of this fiber. Previously [-> ()] which
+             absorbed the cancel and broke Eio back-propagation conventions
+             (every other live-loop fiber in lib/keeper/keeper_keepalive.ml,
+             lib/keeper/keeper_heartbeat_loop.ml does the explicit re-raise). *)
+          | Eio.Cancel.Cancelled _ as e -> raise e
+          (* Liveness_kill is the loop's own terminator: the body raises it
+             via [react_to_output] when the budget is exceeded and we want
+             the fiber to exit cleanly without surfacing the exception to
+             the parent. Intentional absorption. *)
           | Liveness_kill _ -> ()
           | exn ->
               Log.Misc.warn

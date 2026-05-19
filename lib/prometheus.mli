@@ -213,6 +213,21 @@ val metric_oas_bus_capacity : string
     ["oas_event_bridge: kind-only fallback ..."]. *)
 val metric_oas_bridge_unmigrated_payload_kind : string
 
+(** Counter: occurrences where
+    [Cascade_attempt_fsm.provider_label] received an empty or
+    whitespace-only string and substituted the literal ["unknown"]
+    label.  No labels (the empty-input case is the only signal —
+    cardinality 1).
+
+    A non-zero rate means an upstream metric/log emitter is passing
+    an empty provider through {!Cascade_attempt_fsm.provider_label}.
+    The helper paints over the symptom for metric-label safety; this
+    counter and the paired WARN line are the operator's signal that
+    the source needs a real provider value.  Fix: trace the
+    paired ["[cascade_attempt:empty_provider_label]"] WARN to the
+    call site and pass a real provider through. *)
+val metric_cascade_attempt_empty_provider_label : string
+
 val metric_runtime_ollama_probe_generate_skips : string
 
 (** #9632: subprocess executions that exceeded their configured

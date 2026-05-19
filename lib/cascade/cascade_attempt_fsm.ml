@@ -548,9 +548,31 @@ let sdk_error_is_hard_quota (err : Agent_sdk.Error.sdk_error) : bool =
   | Agent_sdk.Error.A2a _
   | Agent_sdk.Error.Internal _ -> false
 
+(* [provider_label] sanitises an upstream-supplied provider string
+   into a metric/log label value.  Empty / whitespace-only input
+   is replaced with the literal "unknown" so Prometheus labels stay
+   well-formed.  The replacement is fail-open by design (we never
+   want metric emission to itself raise), but the empty case is
+   almost always a bug at the call site — the caller forgot to
+   thread a real provider through.  WARN + counter make the
+   substitution visible so the root call site can be traced and
+   fixed; the helper itself does not change behaviour. *)
 let provider_label provider =
   match String.trim provider with
-  | "" -> "unknown"
+  | "" ->
+      Prometheus.inc_counter
+        Prometheus.metric_cascade_attempt_empty_provider_label
+        ();
+      let bt =
+        Printexc.raw_backtrace_to_string (Printexc.get_callstack 6)
+      in
+      Log.Misc.warn
+        "[cascade_attempt:empty_provider_label] provider_label received \
+         empty/blank input; substituting \"unknown\".  Fix the call \
+         site that passed an empty provider through \
+         Cascade_attempt_fsm.provider_label. Callstack (top 6):\n%s"
+        bt;
+      "unknown"
   | value -> value
 
 (* RFC-0132 PR-2: cascade-fsm public surface label = external boundary; redact via SSOT. *)

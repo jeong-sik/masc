@@ -216,7 +216,7 @@ LOC moves since plan (size monolith-reduction proxy):
 | B | OAS-MASC boundary redaction SSOT — closed public-label types | Replace 11+ `"runtime"` literals with `Boundary_redaction` module exposing private types | RFC required |
 | C | MCP request admission reducer + identity FSM (H1/H2 parity) | Expand `Server_mcp_request_context` to 6 outputs; consume from H1+H2 as adapters | RFC required (with 2 PR-able prereqs) |
 | C-pre1 | ~~*PR-able*: Wire H2 to `Server_mcp_actor_injection`~~ — **WITHDRAWN, already closed by PR #16137 (`33adab28fd`, "test: pin MCP H1/H2 admission parity")** | n/a | closed |
-| C-pre2 | *PR-able*: Hoist `internal_keeper_runtime` decision (3 sites) | Single helper inside `Server_mcp_request_context` | PR |
+| C-pre2 | ~~*PR-able*: Hoist `internal_keeper_runtime` decision (3 sites)~~ — **WITHDRAWN, hoist already exists at `lib/server/server_auth.ml:351` (`Server_auth.is_verified_internal_keeper_request`); the "3 sites" are byte-identical applications of the already-hoisted function, not three independent decisions** | n/a | closed |
 | D | Request Identity reducer + Auth/credential store carve-out | `Request_identity.t` record; split `auth.ml` 1,651 LoC into `Credential_store` + `Request_identity` | RFC required |
 | E | Single JSONL substrate (sunset `Fs_compat.append_jsonl`) | Migrate 33 callers; converge on `Jsonl_writer` | PR-able (multi-PR) |
 | F | DashboardSurface envelope adoption | Per-projection wrap; possibly v2 contract | PR-able per projection + RFC for v2 |
@@ -271,3 +271,40 @@ Future research syntheses should:
 1. Run the dispatch ratchet *before* the synthesis is committed (each PR-able lane validated by a quick dispatch).
 2. Include `git log --oneline <baseline>..origin/main -- <gap-file-list>` per gap, not only aggregate count.
 3. Treat "1-day-old plan + 205 commits" as high-drift baseline requiring per-claim verification.
+
+---
+
+## CORRECTION 2 (2026-05-19, post-dispatch verification of C-pre2)
+
+### Gap 3 C-pre2 lane is also factually invalidated
+
+**Finding**: Verify-only sub-agent dispatch on C-pre2 (`internal_keeper_runtime` decision hoist) discovered the hoist target already exists.
+
+**Actual state at `origin/main` HEAD `909c334f4e`**:
+
+- The 3 "decision sites" identified (`server_h2_gateway.ml:408-411`, `server_mcp_transport_http.ml:385-388`, `server_mcp_transport_http.ml:765-768`) are *byte-identical 2-line applications* of `Server_auth.is_verified_internal_keeper_request ~base_path request`.
+- The decision function itself lives at `lib/server/server_auth.ml:351-355`:
+  ```ocaml
+  let is_verified_internal_keeper_request ~base_path request =
+    match auth_token_from_request request with
+    | Some token when Auth.verify_internal_keeper_token base_path ~token ->
+        Option.is_some (internal_keeper_agent_from_request request)
+    | _ -> false
+  ```
+- Production `true`-emitting sites: **0** (token + agent header gated by `Auth.verify_internal_keeper_token`). Test-only literals: 2 in `test_mcp_server_eio.ml:2228, 2284` (fixture-injected, not decision binding).
+- The 13+ `~internal_keeper_runtime` plumbing references in `lib/mcp_server_eio*.ml` are pure forwarders (curry/partial application) — they thread the value, never decide.
+
+### Implications
+
+- C-pre2 as described ("hoist the decision into a helper") is *already done*. Recommended action **demote to closed (no-op)**.
+- Optional H2 (de-dup the 2-line application snippet into a transport-level helper) is < 30 LoC churn, not PR-worthy as a standalone.
+- **2/2 PR-able prereqs (C-pre1, C-pre2) invalidated by dispatch ratchet**. This is a stronger signal than a single false claim — the original Gap 3 synthesis systematically conflated "current code state" with "plan-baseline state".
+
+### Remaining PR-able candidates from §RFC Candidate Summary
+
+Untested by ratchet (treat as candidates pending verify):
+
+- **E**: JSONL substrate sunset — 33 caller migration. Caller count needs refresh against current HEAD.
+- **F**: DashboardSurface envelope adoption — 1 consumer claim needs refresh.
+
+Both should run the same verify-only ratchet before any dispatch.

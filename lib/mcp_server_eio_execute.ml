@@ -75,8 +75,22 @@ let resolve_join_state ~room_initialized ~join_required ~agent_name ~base_path ~
            || try_candidate (Printf.sprintf "keeper-%s-agent" bundle.keeper_name))
       in
       match
+        (* Previously [Sys_error _ | Yojson.Json_error _ -> Ok false]
+           silently collapsed read-side failure modes from
+           [normalize_all_names] (missing agents file, malformed JSON)
+           into "not joined" — indistinguishable from a legitimate
+           [false] result. The MCP tool surface gates handlers on this
+           bool, so a silent false here is an unguarded negative cap.
+           [Cancelled] propagates unchanged. *)
         try join_via_aliases () with
-        | Sys_error _ | Yojson.Json_error _ -> Ok false
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | (Sys_error _ | Yojson.Json_error _) as exn ->
+          Log.Mcp.warn
+            "[resolve_join_state] alias lookup failed for %s: %s; treating \
+             as not-joined"
+            agent_name
+            (Printexc.to_string exn);
+          Ok false
       with
       | Ok joined -> joined
       | Error _ -> false))
@@ -420,8 +434,23 @@ let execute_tool_eio
               let is_joined =
                 if !room_init_cached
                 then (
+                  (* Same silent-false anti-pattern as resolve_join_state
+                     at line ~78. Auto-join gate hides the failure mode
+                     that distinguishes "agent really isn't joined yet"
+                     from "we can't read the join state". Invalid_argument
+                     is kept because [Coord.is_agent_joined] surface
+                     formerly raised it on malformed agent_name input;
+                     dropping it changes scope. *)
                   try Coord.is_agent_joined config ~agent_name with
-                  | Sys_error _ | Yojson.Json_error _ | Invalid_argument _ -> false)
+                  | Eio.Cancel.Cancelled _ as e -> raise e
+                  | (Sys_error _ | Yojson.Json_error _ | Invalid_argument _) as exn
+                    ->
+                    Log.Mcp.warn
+                      "[is_agent_joined gate] read failed for %s: %s; \
+                       treating as not-joined"
+                      agent_name
+                      (Printexc.to_string exn);
+                    false)
                 else false
               in
               if is_joined

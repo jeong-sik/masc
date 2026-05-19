@@ -392,6 +392,11 @@ export const KEEPER_RUNTIME_BLOCKER_CLASSES = [
   'turn_timeout_after_queue_wait',
   'oas_timeout_budget',
   'turn_timeout',
+  // Emitted by `lib/keeper/keeper_meta_contract.ml:101` (Turn_livelock_blocked)
+  // serialized via `blocker_class_to_string` → `"turn_livelock_blocked"`.
+  // Korean label already exists at `fsm-hub-types.ts:572` — the union
+  // omission caused silent string-fallback narrowing on the wire.
+  'turn_livelock_blocked',
   'completion_contract_violation',
   'cascade_exhausted',
   'no_tool_capable_provider',

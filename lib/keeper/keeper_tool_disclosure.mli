@@ -170,16 +170,22 @@ val tool_name_can_satisfy_required_contract : string -> bool
 (** Validate an observed generic [Require_tool_use] call. This accepts mutating
     tools and completion tools. Keeper-local observation/discovery tools and
     LLM-native read/search aliases remain passive: they can inform a later
-    action, but cannot satisfy a required-action contract by themselves. *)
+    action, but cannot satisfy a required-action contract by themselves.
+
+    When [satisfying_tools] is provided and non-empty, the error message
+    appends actionable alternatives so the model knows which tools to call
+    instead of the rejected passive one. *)
 val required_tool_satisfaction
-  :  Agent_sdk.Completion_contract.tool_call
+  :  ?satisfying_tools:string list
+  -> Agent_sdk.Completion_contract.tool_call
   -> (unit, string) result
 
 (** Variant of [required_tool_satisfaction] for an explicit
     [required_tools] contract. A non-keeper read-only tool can satisfy the turn
     only when the operator/task contract named that exact tool. *)
 val required_tool_satisfaction_for_required_names
-  :  required_tool_names:string list
+  :  ?satisfying_tools:string list
+  -> required_tool_names:string list
   -> Agent_sdk.Completion_contract.tool_call
   -> (unit, string) result
 
@@ -189,9 +195,13 @@ val required_tool_satisfaction_for_required_names
     classifies passive-only / no-execution-progress calls after the run, where
     it can emit a precise receipt without converting the turn into a provider
     contract error that can durable-pause the keeper. Explicit
-    [required_tool_names] still require the named tool. *)
+    [required_tool_names] still require the named tool.
+
+    [satisfying_tools] is forwarded to [required_tool_satisfaction] so
+    the rejection message includes actionable alternatives. *)
 val required_tool_satisfaction_for_turn
-  :  required_tool_names:string list
+  :  ?satisfying_tools:string list
+  -> required_tool_names:string list
   -> Agent_sdk.Completion_contract.tool_call
   -> (unit, string) result
 

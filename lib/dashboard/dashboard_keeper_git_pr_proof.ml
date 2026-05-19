@@ -22,27 +22,7 @@ let stage_specs =
   ]
 ;;
 
-let contains_substring text needle =
-  let text_len = String.length text in
-  let needle_len = String.length needle in
-  if needle_len = 0
-  then true
-  else if needle_len > text_len
-  then false
-  else (
-    let rec matches_at i j =
-      j = needle_len
-      || (String.get text (i + j) = String.get needle j
-          && matches_at i (j + 1))
-    in
-    let rec loop i =
-      if i + needle_len > text_len
-      then false
-      else if matches_at i 0 then true
-      else loop (i + 1)
-    in
-    loop 0)
-;;
+let contains_substring text needle = String_util.contains_substring text needle
 
 let lower text = String.lowercase_ascii text
 

@@ -253,8 +253,7 @@ let runtime_contract_json_from_fields ~keeper_name ?agent_name ?trace_id
       ("cascade_profile", string_opt_json cascade_profile);
     ]
 
-let contains_substring haystack needle =
-  String_util.contains_substring haystack needle
+let contains_substring haystack needle = String_util.contains_substring haystack needle
 
 let json_string_field name = function
   | `Assoc _ as json -> Json_util.get_string_nonempty json name

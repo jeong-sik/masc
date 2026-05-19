@@ -174,20 +174,7 @@ let normalize_int s =
   |> Stdlib.int_of_string_opt
 ;;
 
-let contains_substring needle haystack =
-  let needle_len = String.length needle in
-  let haystack_len = String.length haystack in
-  if needle_len = 0
-  then true
-  else if needle_len > haystack_len
-  then false
-  else (
-    let rec loop i =
-      i + needle_len <= haystack_len
-      && (String.equal (Stdlib.String.sub haystack i needle_len) needle || loop (i + 1))
-    in
-    loop 0)
-;;
+let contains_substring needle haystack = String_util.contains_substring haystack needle
 
 let split_lines text = String.split_on_char '\n' text |> List.map String.trim
 

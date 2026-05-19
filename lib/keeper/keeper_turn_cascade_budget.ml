@@ -123,8 +123,8 @@ let resolve_bounded_oas_timeout_budget_with_turn_budget
         with
         | Some _, true -> "override_wall_clock_retry"
         | Some _, false -> "override_per_attempt_retry"
-        | None, true -> "adaptive_wall_clock_retry"
-        | None, false -> "adaptive_per_attempt_retry"
+        | None, true -> "static_300s_wall_clock_retry"
+        | None, false -> "static_300s_per_attempt_retry"
       in
       Some
         {
@@ -151,8 +151,8 @@ let resolve_bounded_oas_timeout_budget_with_turn_budget
         match runtime.oas_timeout_override_sec.value, capped_by_turn_budget with
         | Some _, true -> "override_capped_by_turn_budget"
         | Some _, false -> "override"
-        | None, true -> "adaptive_estimated_input_tokens_capped_by_turn_budget"
-        | None, false -> "adaptive_estimated_input_tokens"
+        | None, true -> "static_300s_capped_by_turn_budget"
+        | None, false -> "static_300s"
       in
       Some
         {

@@ -150,6 +150,14 @@ while [ \"$#\" -gt 0 ]; do\n\
   shift\n\
 done\n\
 case \"$*\" in\n\
+  *\"gh repo view \"*missing/repo*\"--json nameWithOwner\"*)\n\
+    printf '%s\\n' \"GraphQL: Could not resolve to a Repository with the name 'missing/repo'. (repository)\"\n\
+    exit 1\n\
+    ;;\n\
+  *\"gh repo view \"*jeong-sik/masc-mcp*\"--json nameWithOwner\"*)\n\
+    printf '%s\\n' '{\"nameWithOwner\":\"jeong-sik/masc-mcp\"}'\n\
+    exit 0\n\
+    ;;\n\
   *\"--json isDraft,headRefName,labels\"*)\n\
     if [ -n \"$KEEPER_FAKE_PR_VIEW_JSON\" ]; then\n\
       printf '%s\\n' \"$KEEPER_FAKE_PR_VIEW_JSON\"\n\
@@ -414,6 +422,54 @@ let test_approve_blocks_human_ready_pr_before_review () =
   check bool "blocked before gh pr review approve" false
     (contains_substring log "--approve")
 
+let test_comment_rejects_unresolved_explicit_repo_before_review () =
+  with_fake_docker @@ fun () ->
+  setup_docker_review @@ fun ~config ~meta ->
+  let log_path = Filename.concat config.Coord.base_path "docker.log" in
+  with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
+  let raw =
+    KTPR.handle_keeper_pr_review_comment ~config ~meta
+      ~args:
+        (`Assoc
+          [ ("pr_number", `Int 13510)
+          ; ("body", `String "approve must not reach gh pr review")
+          ; ("event", `String "APPROVE")
+          ; ("repo", `String "missing/repo")
+          ])
+  in
+  check (option bool) "repo unresolved response is not ok" (Some false)
+    (parse_bool_field raw "ok");
+  check (option string) "repo unresolved error"
+    (Some "keeper_pr_review_repo_unresolved")
+    (parse_string_field raw "error");
+  check (option string) "repo unresolved class"
+    (Some "workflow_rejection")
+    (parse_string_field raw "failure_class");
+  check (option bool) "repo unresolved is not retryable" (Some false)
+    (parse_bool_field raw "retryable");
+  check (option string) "repo unresolved is blocked"
+    (Some "blocked")
+    (parse_string_field raw "semantic_status");
+  check (option string) "repo preserved" (Some "missing/repo")
+    (parse_string_field raw "repo");
+  check (option string) "event preserved" (Some "APPROVE")
+    (parse_string_field raw "event");
+  check (option string) "explicit repo preflight via docker" (Some "docker")
+    (parse_string_field raw "via");
+  check (option string) "explicit repo output keeps gh failure"
+    (Some
+       "GraphQL: Could not resolve to a Repository with the name \
+        'missing/repo'. (repository)\n")
+    (parse_string_field raw "output");
+  let log = read_file log_path in
+  check bool "repo preflight checked explicit target" true
+    (contains_substring log "gh repo view"
+     && contains_substring log "missing/repo");
+  check bool "repo preflight blocks approve metadata lookup" false
+    (contains_substring log "--json isDraft,headRefName,labels");
+  check bool "repo preflight blocks review mutation" false
+    (contains_substring log "gh pr review 13510")
+
 let test_reply_routes_through_docker_and_infers_repo () =
   with_fake_docker @@ fun () ->
   setup_docker_review @@ fun ~config ~meta ->
@@ -478,6 +534,8 @@ let () =
         test_comment_and_approve_route_through_docker;
       test_case "approve blocks human-ready PR before review" `Quick
         test_approve_blocks_human_ready_pr_before_review;
+      test_case "explicit unresolved repo blocks review mutation" `Quick
+        test_comment_rejects_unresolved_explicit_repo_before_review;
       test_case "reply routes through docker and infers repo" `Quick
         test_reply_routes_through_docker_and_infers_repo;
     ]

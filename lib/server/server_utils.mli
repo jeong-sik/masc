@@ -101,8 +101,8 @@ val board_fetch_limit :
     lookup tiers, all operator-visible through the [source] field:
 
     1. [keeper_registry_agent_name] —
-       {!Keeper_registry.find_by_agent_name}
-    2. [keeper_registry_name] — {!Keeper_registry.find_by_name}
+       {!Keeper_registry_lookup.find_by_agent_name}
+    2. [keeper_registry_name] — {!Keeper_registry_lookup.find_by_name}
     3. [keeper_alias_contract] —
        {!Keeper_identity.canonical_keeper_name_from_agent_name}
 

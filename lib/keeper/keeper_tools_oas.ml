@@ -29,7 +29,7 @@ type tool_bundle =
     These public functions preserve the existing API surface. *)
 
 let tool_usage_for_keeper keeper_name : (string * tool_call_entry) list =
-  Keeper_registry.tool_usage_of_by_name keeper_name
+  Keeper_registry_lookup.tool_usage_of_by_name keeper_name
 ;;
 
 let tool_usage_json keeper_name : Yojson.Safe.t =

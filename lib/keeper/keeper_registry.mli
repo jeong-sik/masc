@@ -376,25 +376,9 @@ val record_tool_use :
 val tool_usage_of : base_path:string -> string ->
   (string * Keeper_types.tool_call_entry) list
 
-(** Look up a keeper by name across all base_paths (O(n) scan). *)
-val find_by_name : string -> registry_entry option
-
-(** Look up a keeper by agent_name across all base_paths (O(n) scan). *)
-val find_by_agent_name : string -> registry_entry option
-
-(** Look up a keeper by stable UID across all base_paths (O(n) scan). *)
-val find_by_id : Keeper_id.Uid.t -> registry_entry option
-
-(** Get tool usage by keeper name (scans all base_paths). *)
-val tool_usage_of_by_name : string ->
-  (string * Keeper_types.tool_call_entry) list
-
-(** Resolve config for a keeper tool dispatch.
-    Tries scoped lookup first (O(1) map lookup), then falls back to
-    cross-base_path scan (O(n)) when not found in the caller's scope.
-    Returns config with the keeper's actual base_path, or the original
-    config unchanged if the keeper is not in the registry. *)
-val resolve_config : Coord_utils_backend_setup.config -> string -> Coord_utils_backend_setup.config
+(* Lookup API moved to Keeper_registry_lookup:
+   find_by_name / find_by_agent_name / find_by_id /
+   tool_usage_of_by_name / resolve_config. *)
 
 (** Flush in-memory tool usage stats to disk for persistence across restarts. *)
 val flush_tool_usage : base_path:string -> string -> unit

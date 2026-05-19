@@ -1008,7 +1008,7 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
   else
     let config = state.Mcp_server.room_config in
     let resolve_keeper_agent_name () =
-      match Keeper_registry.find_by_name name with
+      match Keeper_registry_lookup.find_by_name name with
       | Some entry -> Some entry.meta.agent_name
       | None -> (
           match Keeper_types.read_meta config name with
@@ -1314,7 +1314,7 @@ let handle_keeper_directive_post state _agent_name req reqd body_str =
            | _ ->
                Log.Server.warn "Unknown keeper directive: %s" action_str);
           let resolved_agent_name =
-            match Keeper_registry.find_by_name name with
+            match Keeper_registry_lookup.find_by_name name with
             | Some entry -> entry.meta.agent_name
             | None -> (
                 match meta_opt with

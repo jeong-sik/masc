@@ -58,11 +58,11 @@ let board_actor_keeper_identity raw =
   let raw = String.trim raw in
   if raw = "" then None
   else
-    match Keeper_registry.find_by_agent_name raw with
+    match Keeper_registry_lookup.find_by_agent_name raw with
     | Some entry ->
         Some (entry.name, Some entry.meta.agent_name, "keeper_registry_agent_name")
     | None -> (
-        match Keeper_registry.find_by_name raw with
+        match Keeper_registry_lookup.find_by_name raw with
         | Some entry ->
             Some (entry.name, Some entry.meta.agent_name, "keeper_registry_name")
         | None -> (

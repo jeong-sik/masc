@@ -57,6 +57,7 @@ import {
 // 2026-05-19 lifecycle-worker symptom (`현재 차단 · synthetic_stall` in
 // the list while detail showed `턴 진행 중 · executing live`).
 import { deriveKeeperOperationalState } from '../lib/keeper-operational-state'
+import { isKeeperPaused } from '../lib/keeper-predicates'
 import type { KeeperCompositeSnapshot } from '../api/schemas/keeper-composite'
 import { fleetCompositeSnapshot } from '../composite-signals'
 
@@ -188,9 +189,15 @@ function findKeeperRuntimeForAgent(
 
 type KeeperFilterMode = 'all' | 'agent-only' | 'keeper-only'
 
-function isRuntimeBackedKeeper(keeper: Pick<Keeper, 'paused' | 'registered' | 'keepalive_running'>): boolean {
+function isRuntimeBackedKeeper(keeper: Keeper): boolean {
   if (keeper.registered === false && keeper.keepalive_running === false) return false
-  if (keeper.paused === true && keeper.registered !== true && keeper.keepalive_running !== true) return false
+  // RFC-0135 PR-13: use canonical paused predicate. SSOT also covers
+  // `phase === 'Paused'` / `status === 'paused'` / `pipeline_stage ===
+  // 'paused'`. Effect: an FSM-paused but-not-flag-paused keeper that
+  // also lost registration + keepalive is now filtered out, matching
+  // the "no real backing runtime" intent the original `paused === true`
+  // check captured only partially.
+  if (isKeeperPaused(keeper) && keeper.registered !== true && keeper.keepalive_running !== true) return false
   return true
 }
 

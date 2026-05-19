@@ -6,6 +6,7 @@ import {
   keeperRuntimeBlockerLabel,
   keeperRuntimeBlockerHint,
 } from '../lib/keeper-runtime-display'
+import { isKeeperPaused } from '../lib/keeper-predicates'
 import { TimeAgo } from './common/time-ago'
 import { formatDuration } from './mission-utils'
 import type { Keeper } from '../types'
@@ -161,8 +162,13 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
   const socialFallbackActive = keeper.social_model_recognized === false
   const attentionReason = keeper.attention_reason?.trim() || null
   const nextHumanAction = keeper.next_human_action?.trim() || null
-  const pausedRuntimeBlocker = keeper.paused === true && runtimeBlockerClass != null
-  const attentionReasonText = attentionReasonLabel(attentionReason, keeper.paused === true)
+  // RFC-0135 PR-13: canonical paused predicate. SSOT also covers
+  // FSM phase=Paused / pipeline_stage=paused / status=paused, so the
+  // "paused + live blocker" composite flag and the attention-reason
+  // label now agree across the four paused axes (RFC §1.5 Cluster C3).
+  const isPaused = isKeeperPaused(keeper)
+  const pausedRuntimeBlocker = isPaused && runtimeBlockerClass != null
+  const attentionReasonText = attentionReasonLabel(attentionReason, isPaused)
   const nextHumanActionText = nextHumanActionLabel(nextHumanAction)
   const sandboxTarget = keeper.sandbox_target?.trim() || keeper.sandbox_profile?.trim() || null
   const persistedPolicyCount = keeper.approval_policy_effective?.persisted_rules

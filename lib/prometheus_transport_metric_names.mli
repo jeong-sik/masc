@@ -81,6 +81,25 @@ val metric_cache_hits_total : string
 (** Companion to {!metric_cache_hits_total}; same [cache] label values. *)
 val metric_cache_misses_total : string
 
+(** Stuck-eviction counter for cache slots whose [Computing] state outlived
+    the watchdog budget despite the [release_on_cancel] cleanup hook.
+
+    Increments only from the watchdog branch in
+    {!Dashboard_cache.get_or_compute_eio} when a waiter forces a recompute
+    because the [Computing] slot has been alive beyond [max_wait_sec].
+
+    SLO: sustained rate >0.1/min indicates [release_on_cancel] is failing
+    to fire (compute fiber not getting cancelled when caller switch dies),
+    which leaves orphan slots blocking new waiters. Alert is paired with
+    the structural fix (release_on_cancel + caller-budget watchdog), not a
+    standalone telemetry-as-fix. Labels: cache=dashboard. *)
+val metric_cache_stuck_evictions_total : string
+
+(** Histogram of elapsed-seconds at the time a stuck eviction fired.
+    Labels: cache=dashboard. Quantiles surface whether stuck slots are
+    just past the watchdog ceiling or pathologically older. *)
+val metric_cache_stuck_elapsed_seconds : string
+
 (** Companion to {!metric_cache_hits_total}; same [cache] label values. *)
 val metric_ws_client_buffered_bytes : string
 

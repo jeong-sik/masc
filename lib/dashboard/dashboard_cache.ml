@@ -185,12 +185,32 @@ let timeout_json ~key ~timeout_sec ~timeout_kind =
 (** Maximum seconds a waiter will poll for a [Computing] slot before evicting
     it and recomputing.
 
-    This must stay at or above the largest caller wait budget used with
-    [get_or_compute_with_timeout]; otherwise concurrent waiters can evict an
-    active [Computing { stale = None }] slot before their own wait budget is
-    exhausted, causing early failures and duplicate recomputation.  Keep this
-    above the current 120s caller budget. *)
-let max_wait_sec = 130.0
+    Derived from the configured caller timeout budgets so the watchdog
+    invariant "watchdog >= largest caller budget" holds by construction.
+    Previously hardcoded to 130.0, which silently drifted from caller
+    config when env overrides were introduced.  Multiplier N = 8 gives
+    headroom so the watchdog is a *floor* protection — under normal
+    operation the structural cleanup ([release_on_cancel]) keeps slots
+    from ever reaching this ceiling.  An SLO alert on
+    [masc_cache_stuck_evictions_total] pages operators if it does fire,
+    because that signals [release_on_cancel] is not firing. *)
+let max_wait_safety_factor = 8.0
+
+let max_wait_sec () =
+  let open Env_config_runtime.Dashboard in
+  let longest_caller_budget =
+    List.fold_left Float.max 1.0
+      [
+        execution_timeout_sec;
+        execution_trust_timeout_sec;
+        mission_timeout_sec;
+        shell_timeout_sec;
+        shell_light_timeout_sec;
+        shell_prewarm_inner_timeout_sec;
+      ]
+  in
+  longest_caller_budget *. max_wait_safety_factor
+
 let wait_poll_interval_sec = 0.25
 
 (** PR-0.2.A: dashboard cache hit/miss observation labels.  Pure
@@ -224,7 +244,11 @@ let inc_cache_miss () =
     When no stale data is available (case 3 or [Computing { stale = None }]),
     waiters use bounded poll-retry instead of [Condition.await] to avoid
     the cancellation-immune deadlock.  If a [Computing] slot is stuck beyond
-    [max_wait_sec], waiters evict it and recompute.
+    [max_wait_sec ()], waiters evict it and recompute — but the primary
+    cleanup path is [release_on_cancel] inside the compute fiber's
+    [Eio.Cancel.Cancelled] handler, which releases the slot the moment
+    the caller's switch is cancelled.  The watchdog is a floor protection
+    that emits [masc_cache_stuck_evictions_total] when it fires.
 
     Waiter budget is reset when the watched [Computing] slot is replaced
     (detected via [cond] physical identity change), preventing cascading
@@ -254,11 +278,12 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
           | Some timeout_sec -> waited >= timeout_sec
           | None -> false
         in
+        let watchdog_ceiling = max_wait_sec () in
         if timed_out_waiter then
           (`Timed_out, map)
-        else if elapsed > max_wait_sec || waited > max_wait_sec then begin
+        else if elapsed > watchdog_ceiling || waited > watchdog_ceiling then begin
           Log.Dashboard.warn "cache: evicting stale Computing slot for %s (%.1fs elapsed)" key elapsed;
-          (`Retry, SMap.remove key map)
+          (`Retry_stuck (elapsed, watchdog_ceiling), SMap.remove key map)
         end else
           (`Wait token, map)
       | Some (Ready entry) ->
@@ -345,28 +370,47 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
       (* PR-0.2.A: cache miss observation (this fiber must compute). *)
       inc_cache_miss ();
       let result_ref = ref None in
+      (* release_on_cancel: when the caller's switch is cancelled (HTTP
+         client disconnect, [Eio.Time.with_timeout] tripping the caller
+         budget), tear down the [Computing] slot this fiber installed so
+         new waiters do not poll an orphan until the watchdog evicts it.
+
+         Scoped to the current fiber's [token]: if a later fiber has
+         already replaced the slot, we leave its work alone.  When the
+         slot carried a stale fallback, demote it back to [Ready stale]
+         so subsequent reads can serve cached data instead of blocking;
+         when [stale = None], remove the slot entirely so the next
+         lookup observes a cache miss and recomputes. *)
+      let release_on_cancel () =
+        let ts = now () in
+        let backoff_grace = stale_grace *. bg_revalidate_backoff_factor in
+        atomic_update table (fun map ->
+          match SMap.find_opt key map with
+          | Some (Computing { token = c; stale = Some s; _ }) when c = token ->
+              ((), SMap.add key
+                (Ready { value = s; expires_at = ts; stale_until = ts +. backoff_grace })
+                map)
+          | Some (Computing { token = c; stale = None; _ }) when c = token ->
+              ((), SMap.remove key map)
+          | _ -> ((), map))
+      in
       let run_compute () =
         try result_ref := Some (Ok (compute ()))
         with
-        | Eio.Cancel.Cancelled _ as e -> raise e
+        | Eio.Cancel.Cancelled _ as e ->
+            release_on_cancel ();
+            raise e
         | exn -> result_ref := Some (Error exn)
       in
-      (match Eio_context.get_clock_opt () with
-       | Some clock ->
-           let compute_done = ref false in
-           Eio.Fiber.first
-             (fun () ->
-                run_compute ();
-                compute_done := true)
-             (fun () ->
-                Eio.Time.sleep clock max_wait_sec;
-                if not !compute_done then
-                  Log.Dashboard.warn "cache compute timeout: %s (%.0fs)" key max_wait_sec)
-       | None ->
-           (* Some read-model tests enable Eio without seeding the global
-              Eio_context clock. In that harness, run inline without the
-              watchdog rather than hard-failing. *)
-           run_compute ());
+      (* The caller already wraps [compute] in [Eio.Time.with_timeout]
+         (see [get_or_compute_with_timeout] below), so running a second
+         [Eio.Fiber.first] watchdog here just creates two cancellation
+         surfaces racing each other.  Trust the caller's budget and run
+         inline.  The poll-loop watchdog [max_wait_sec] above still
+         exists as a floor protection if [release_on_cancel] ever
+         regresses, and an SLO alert on the stuck-evictions counter
+         catches that regression. *)
+      run_compute ();
       let ts = now () in
       (match !result_ref with
        | Some (Ok value) ->
@@ -413,7 +457,8 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
                       ((), SMap.add key (Ready cooldown) map)
                   | None ->
                       let err_json =
-                        timeout_json ~key ~timeout_sec:max_wait_sec ~timeout_kind:"compute"
+                        timeout_json ~key ~timeout_sec:(max_wait_sec ())
+                          ~timeout_kind:"compute"
                       in
                       fallback_val := Some err_json;
                       let cooldown = { value = err_json; expires_at = ts +. 5.0; stale_until = ts +. 5.0 } in
@@ -423,7 +468,16 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
            (match !fallback_val with
             | Some v -> v
             | None -> `Assoc [("error", `String "Compute timeout")]))
-    | `Retry -> try_get ~waited ~watching_token
+    | `Retry_stuck (elapsed, _ceiling) ->
+      (* Pair the watchdog with an SLO-actionable signal: if this counter
+         climbs sustainedly, [release_on_cancel] is not firing and the
+         structural fix has regressed.  Telemetry-as-fix is forbidden by
+         the workaround rejection bar; this is telemetry-on-fix-failure. *)
+      Prometheus.inc_counter Prometheus.metric_cache_stuck_evictions_total
+        ~labels:cache_metric_label ();
+      Prometheus.observe_histogram Prometheus.metric_cache_stuck_elapsed_seconds
+        ~labels:cache_metric_label elapsed;
+      try_get ~waited ~watching_token
   in
   try_get ~waited:0.0 ~watching_token:None
 

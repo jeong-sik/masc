@@ -304,6 +304,18 @@ let register
     metric_cache_misses_total
     "Cache lookup misses (compute required). Labels: cache=eio|dashboard."
     `Counter;
+  add
+    metric_cache_stuck_evictions_total
+    "Cache slots evicted by the watchdog because a Computing state outlived \
+     the wait budget despite release_on_cancel cleanup. Labels: cache=dashboard. \
+     SLO: sustained rate >0.1/min indicates release_on_cancel is failing to fire."
+    `Counter;
+  register_histogram
+    ~name:metric_cache_stuck_elapsed_seconds
+    ~help:
+      "Elapsed seconds at which a stuck-Computing cache slot was watchdog-evicted. \
+       Labels: cache=dashboard."
+    ();
   register_histogram
     ~name:metric_ws_client_buffered_bytes
     ~help:"Dashboard client WebSocket.bufferedAmount reported on each ack"

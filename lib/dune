@@ -145,6 +145,7 @@
    keeper_shell_bash_task_probe
    keeper_shell_bash_task_state
    keeper_shell_bash_shape_messages
+   keeper_shell_bash_shape_ir
    keeper_shell_bash
    keeper_shell_ops
    keeper_exec_shell

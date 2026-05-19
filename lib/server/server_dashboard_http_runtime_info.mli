@@ -66,10 +66,16 @@ val dashboard_perf_http_json : Coord.config -> Yojson.Safe.t
     skew, etc). *)
 
 val dashboard_tools_http_json :
-  ?actor:string -> Coord.config -> Yojson.Safe.t
+  ?actor:string ->
+  ?timing:Server_timing.t ->
+  Coord.config ->
+  Yojson.Safe.t
 (** Renders the dashboard tools projection.  [?actor]
     selects the per-agent tool catalogue when present;
-    otherwise the full registry surface is returned. *)
+    otherwise the full registry surface is returned.  When [?timing] is
+    provided, internal phases (config_resolution, runtime_resolution,
+    tools_compute) are accumulated into the [Server_timing.t] for surfacing
+    via the [Server-Timing] response header. *)
 
 (** {1 Runtime-probe test seams} *)
 

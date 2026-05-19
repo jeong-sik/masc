@@ -331,7 +331,9 @@ let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
   let claim_guidance_a =
     if show_claim_guidance then
       "- See unclaimed work and you do not already hold a task? Call keeper_task_claim with {}. \
-       It auto-claims the next eligible task; you do not need task_id or keeper_tasks_list first.\n"
+       It auto-claims the next eligible task; you do not need a task_id argument. \
+       keeper_tasks_list remains the canonical way to inspect backlog state — \
+       use it any time you need to diagnose what work exists, not just when the claim returns empty.\n"
     else ""
   in
   let claim_guidance_b =
@@ -470,7 +472,11 @@ let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
     Buffer.add_string ubuf
       "- Call keeper_task_claim with {} to claim the next eligible unclaimed task.\n";
     Buffer.add_string ubuf
-      "- Do not wait for keeper_tasks_list unless the claim call says no eligible task.\n";
+      "- For the routine claim flow, call keeper_task_claim directly; \
+       use keeper_tasks_list to inspect backlog state, diagnose missing work, \
+       or verify task lifecycle. Never substitute Bash probes (ls/cat/find against \
+       .masc/, backlog.json, or repo-local task files) for keeper_tasks_list — \
+       keeper_shell blocks those with `task_state_file_probe_blocked`.\n";
     Buffer.add_string ubuf
       "- Prefer keeper_task_claim before keeper_board_list or keeper_shell when you have no claimed task.\n";
     Buffer.add_string ubuf

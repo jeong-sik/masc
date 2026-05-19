@@ -208,39 +208,16 @@ let first_disallowed_stage_bin ~allowed_commands stage_bins =
     stage_bins
 ;;
 
-let validate_command_coding_legacy_segments ~allow_pipes ~allowed_commands trimmed =
-  match split_pipeline_segments trimmed with
-  | Error msg -> Error (Command_not_allowed msg)
-  | Ok segments ->
-    if (not allow_pipes) && List.length segments > 1
-    then Error Pipes_not_allowed
-    else if List.exists invokes_direct_dune segments
-    then Error Direct_dune_invocation
-    else (
-      let rec validate_segments = function
-        | [] -> Ok ()
-        | segment :: rest ->
-          (match extract_command_name segment with
-           | None -> Error Empty_command
-           | Some name when List.mem name allowed_commands ->
-             validate_segments rest
-           | Some name -> Error (Command_not_allowed name))
-      in
-      validate_segments segments)
-;;
-
 let validate_command_coding_parsed ~allow_pipes ~allowed_commands context =
   let stage_bins = context.Shell_command_gate.stage_bins in
   if (not allow_pipes) && Shell_command_gate.stage_count context > 1
-  then `Error Pipes_not_allowed
+  then Error Pipes_not_allowed
   else if List.exists (String.equal "dune") stage_bins
-  then `Error Direct_dune_invocation
-  else if List.exists (fun name -> String.equal name "env" || String.equal name "opam") stage_bins
-  then `Use_legacy_segments
+  then Error Direct_dune_invocation
   else (
     match first_disallowed_stage_bin ~allowed_commands stage_bins with
-    | None -> `Ok
-    | Some name -> `Error (Command_not_allowed name))
+    | None -> Ok ()
+    | Some name -> Error (Command_not_allowed name))
 ;;
 
 (* RFC-0131 PR-5 — facade reject_reason → block_reason wire-shape
@@ -276,45 +253,24 @@ let validate_command_coding_with_allowlist
   else if has_unsafe_redirection trimmed
   then Error Unsafe_redirect
   else (
-    (* Legacy verdict — what this function returned at PR-4 head.
-       Tagged with [`Parsed] when the typed bin-allowlist check ran,
-       [`Legacy_segments] when env/opam args forced a fall to the
-       regex segment validator.  The PR-5 authority flip below only
-       acts on [`Parsed] — env/opam KV-pair semantics live in the
-       legacy_segments path and remain authoritative there until
-       PR-6 (legacy purge). *)
-    let legacy_tagged =
+    (* Legacy verdict — direct [Result] now that the legacy_segments
+       fallback has been removed (env/opam are already in
+       [dev_allowed_commands]; the redundant [`Use_legacy_segments]
+       branch and the regex segment validator were dropped — this PR).
+       Parse failures conservatively map to [Error Injection] —
+       unparseable input is treated as potentially unsafe. *)
+    let legacy_result =
       match Shell_command_gate.parse ?caller trimmed with
-      | Ok context -> (
-        match validate_command_coding_parsed ~allow_pipes ~allowed_commands context with
-        | `Use_legacy_segments ->
-          `Legacy_segments
-            (validate_command_coding_legacy_segments
-               ~allow_pipes
-               ~allowed_commands
-               trimmed)
-        | `Ok -> `Parsed (Ok ())
-        | `Error reason -> `Parsed (Error reason))
-      | Error _ ->
-        `Legacy_segments
-          (validate_command_coding_legacy_segments
-             ~allow_pipes
-             ~allowed_commands
-             trimmed)
+      | Ok context ->
+        validate_command_coding_parsed ~allow_pipes ~allowed_commands context
+      | Error _ -> Error Injection
     in
     match caller with
-    | None ->
-      (match legacy_tagged with
-       | `Parsed r -> r
-       | `Legacy_segments r -> r)
+    | None -> legacy_result
     | Some c ->
       (* RFC-0131 PR-5 — parallel facade call.  Emit is automatic via
          [Legendary_counters.incr_shell_gate] inside
-         [Shell_command_gate.validate_allowlist] (RFC-0131 PR-3).
-         This is the first production caller of the verdict-producing
-         facade entry; until this PR landed, the
-         [Legendary_counters.shell_gate_*] buckets were structurally
-         wired but volume was 0 in production. *)
+         [Shell_command_gate.validate_allowlist] (RFC-0131 PR-3). *)
       let facade_verdict =
         Shell_command_gate.validate_allowlist
           ~caller:c
@@ -322,21 +278,16 @@ let validate_command_coding_with_allowlist
           ~allowed_commands
           trimmed
       in
-      (match Shell_gate_authority.authority_enabled c, legacy_tagged with
-       | false, `Parsed r -> r
-       | false, `Legacy_segments r -> r
-       | true, `Legacy_segments r -> r
-       | true, `Parsed _ ->
-         (* RFC-0131 §4.4 — facade verdict authoritative; legacy
-            fallback only on [Cannot_parse] (parser coverage gap). *)
-         (match facade_verdict with
-          | Allow _ -> Ok ()
-          | Reject { reason; _ } -> Error (block_reason_of_reject reason)
-          | Cannot_parse { kind = _ } ->
-            validate_command_coding_legacy_segments
-              ~allow_pipes
-              ~allowed_commands
-              trimmed)))
+      if Shell_gate_authority.authority_enabled c
+      then (
+        (* RFC-0131 §4.4 — facade verdict authoritative; legacy
+           fallback only on [Cannot_parse] (parser coverage gap, which
+           now itself yields [Error Injection]). *)
+        match facade_verdict with
+        | Allow _ -> Ok ()
+        | Reject { reason; _ } -> Error (block_reason_of_reject reason)
+        | Cannot_parse { kind = _ } -> legacy_result)
+      else legacy_result)
 ;;
 
 (** Relaxed command validation for Coding/Full preset keepers.

@@ -1213,6 +1213,24 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
     in
     sync_once ();
     sync_loop ());
+  (* RFC-0138 Phase 3 Step 1: lock-free dashboard snapshot refresher.
+     Publishes shell/tools/telemetry_summary every [interval_sec] so
+     HTTP read handlers can serve via wait-free [Atomic.get] instead of
+     racing the synchronous compute path through [Dashboard_cache].
+
+     The interval (2.0s) matches RFC-0138 §6 Q2: frontend polls /shell
+     every 3s, so a 2s refresh keeps staleness bounded at 5s (2s + 3s)
+     while leaving the compute path fully out of the request fiber. *)
+  Eio.Fiber.fork ~sw (fun () ->
+    try
+      Dashboard_snapshot.refresh_loop
+        ~sw ~clock ~config:state.room_config ~interval_sec:2.0
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | exn ->
+      Log.Server.error
+        "dashboard_snapshot refresh fiber crashed: %s"
+        (Printexc.to_string exn));
   let resolved_base = state.room_config.base_path in
   let masc_dir = Coord.masc_root_dir state.room_config in
   resolved_base, masc_dir

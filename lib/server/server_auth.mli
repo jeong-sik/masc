@@ -182,8 +182,19 @@ val ensure_same_origin_browser_request :
 
 val http_status_of_auth_error :
   Masc_domain.masc_error ->
-  [> `Forbidden | `Internal_server_error | `Unauthorized ]
-(** HTTP status to return for a given auth-domain error. *)
+  [> `Bad_request
+  | `Forbidden
+  | `Internal_server_error
+  | `Not_found
+  | `Too_many_requests
+  | `Unauthorized
+  ]
+(** HTTP status to return for a given [Masc_domain.masc_error].
+    PR #16690 made the .ml exhaustive (mirroring [Masc_error.code]),
+    expanding the return set from 3 tags to 6.  The signature stays
+    row-polymorphic so callers can narrow to [Httpun.Status.t] or
+    [H2.Status.t] at the use site — both protocols include this
+    six-tag subset. *)
 
 val server_state : Mcp_server.server_state option ref
 (** Process-wide server state handle used by auth helpers when no

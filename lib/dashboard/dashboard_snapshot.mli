@@ -41,7 +41,7 @@ val current_or_bootstrap : config:Coord.config -> t
 
 val refresh_loop :
   sw:Eio.Switch.t ->
-  clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   config:Coord.config ->
   interval_sec:float ->
   unit

@@ -509,6 +509,91 @@ type task_handoff_context = {
   updated_by : string option; [@default None]
 } [@@deriving show, yojson { strict = false }]
 
+(** Deliverable type for task classification *)
+type deliverable_type =
+  | Code
+  | Documentation
+  | Research
+  | Design
+  | Ops
+  | Review
+[@@deriving show, eq]
+
+let deliverable_type_to_string = function
+  | Code -> "code"
+  | Documentation -> "documentation"
+  | Research -> "research"
+  | Design -> "design"
+  | Ops -> "ops"
+  | Review -> "review"
+
+let deliverable_type_of_string = function
+  | "code" -> Ok Code
+  | "documentation" -> Ok Documentation
+  | "research" -> Ok Research
+  | "design" -> Ok Design
+  | "ops" -> Ok Ops
+  | "review" -> Ok Review
+  | s -> Error (Printf.sprintf "unknown deliverable_type: %s" s)
+
+let deliverable_type_to_yojson t = `String (deliverable_type_to_string t)
+
+let deliverable_type_of_yojson = function
+  | `String s -> deliverable_type_of_string s
+  | _ -> Error "deliverable_type must be a string"
+
+(** Default verifier contract templates per deliverable type *)
+let default_verifier_contract (dt : deliverable_type) : task_contract =
+  match dt with
+  | Code ->
+    { strict = false
+    ; completion_contract = [ "all tests pass"; "no type errors" ]
+    ; required_tools = []
+    ; required_evidence = [ "commit_sha"; "pr_url" ]
+    ; inspect_gate_evidence = [ "diff_summary"; "changed_files" ]
+    ; verify_gate_evidence = [ "ci_green"; "review_approved" ]
+    ; links = default_task_execution_links }
+  | Documentation ->
+    { strict = false
+    ; completion_contract = [ "content covers stated scope"; "links valid" ]
+    ; required_tools = []
+    ; required_evidence = [ "doc_path"; "word_count" ]
+    ; inspect_gate_evidence = [ "rendered_preview"; "grammar_check" ]
+    ; verify_gate_evidence = [ "peer_review"; "accuracy_confirmed" ]
+    ; links = default_task_execution_links }
+  | Research ->
+    { strict = false
+    ; completion_contract = [ "claim supported by evidence"; "sources cited" ]
+    ; required_tools = []
+    ; required_evidence = [ "sources_list"; "findings_summary" ]
+    ; inspect_gate_evidence = [ "methodology_sound"; "claims_falsifiable" ]
+    ; verify_gate_evidence = [ "fact_check"; "peer_review" ]
+    ; links = default_task_execution_links }
+  | Design ->
+    { strict = false
+    ; completion_contract = [ "requirements addressed"; "constraints documented" ]
+    ; required_tools = []
+    ; required_evidence = [ "design_doc_path"; "decision_log" ]
+    ; inspect_gate_evidence = [ "interface_spec"; "edge_cases_covered" ]
+    ; verify_gate_evidence = [ "stakeholder_signoff"; "feasibility_check" ]
+    ; links = default_task_execution_links }
+  | Ops ->
+    { strict = false
+    ; completion_contract = [ "runbook tested"; "alerts configured" ]
+    ; required_tools = []
+    ; required_evidence = [ "runbook_path"; "alert_rules" ]
+    ; inspect_gate_evidence = [ "dry_run_output"; "rollback_verified" ]
+    ; verify_gate_evidence = [ "on_call_review"; "incident_response_drill" ]
+    ; links = default_task_execution_links }
+  | Review ->
+    { strict = false
+    ; completion_contract = [ "all items reviewed"; "verdict recorded" ]
+    ; required_tools = []
+    ; required_evidence = [ "review_notes"; "verdict" ]
+    ; inspect_gate_evidence = [ "checklist_complete"; "blockers_identified" ]
+    ; verify_gate_evidence = [ "author_acknowledged"; "followups_tracked" ]
+    ; links = default_task_execution_links }
+
 (** Task definition *)
 type task = {
   id: string;
@@ -522,6 +607,7 @@ type task = {
   worktree: worktree_info option; [@default None]  (* linked worktree info *)
   goal_id: string option; [@default None]  (** Structured goal linkage SSOT *)
   stage: Task_stage.t option; [@default None]  (** Coding task stage gate *)
+  deliverable_type: deliverable_type; [@default Code]
   contract: task_contract option; [@default None]
   handoff_context: task_handoff_context option; [@default None]
   cycle_count: int; [@default 0]

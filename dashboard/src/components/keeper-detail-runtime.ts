@@ -11,7 +11,7 @@ import { useEffect, useState } from 'preact/hooks'
 // represent *live-execution* attention (`execution_current && blocked`,
 // see `lib/server/server_dashboard_http.ml:1114`), which is orthogonal to
 // the blocker-class-vs-stale-execution axis and stays inline below.
-import { deriveKeeperAttention, deriveKeeperOperationalState, deriveKeeperTurnPhase } from '../lib/keeper-operational-state'
+import { deriveKeeperOperationalState, deriveKeeperTurnPhase } from '../lib/keeper-operational-state'
 import { deriveFiberAlive } from '../lib/keeper-fiber-alive'
 import { deriveBlockerReason } from '../lib/keeper-blocker-reason'
 import { formatPct1 } from '../lib/format-number'
@@ -216,20 +216,17 @@ export function deriveKeeperLiveTruth({
   const activeTurn = compositeSnapshot?.is_live === true || !isIdleTurnPhase(compositeSnapshot?.turn_phase)
 
   // RFC-0135 PR-5 + PR-14a: blocker-class axis via typed
-  // `KeeperOperationalState` SSOT; orthogonal backend-attention axis
-  // via `deriveKeeperAttention`. Previously the attention OR was
-  // inlined (`composite.runtime_attention.blocked ||
-  // .needs_attention`), making the two axes a parallel input pair to
-  // the same `blocked` flag that downstream UI checked. The helper
-  // now owns the priority + null-fallback decision so a future axis
-  // (e.g. `acknowledged_at`) is added in one place.
+  // `KeeperOperationalState` SSOT. RFC-0135 §10 Goal-2 (2026-05-20):
+  // attention is now a per-variant axis on `opState` itself rather
+  // than a separately-derived axis OR-merged here. The previous
+  // external OR-pair pattern (audit finding B3) is closed.
   const opState = deriveKeeperOperationalState({
     keeper,
     composite: compositeSnapshot,
   })
   const stuckByBlockerClass = opState.kind === 'stuck'
   const staleBlocker = opState.kind === 'running' ? opState.staleBlocker : null
-  const attention = deriveKeeperAttention(compositeSnapshot ?? null)
+  const attention = opState.attention
   const blocked = stuckByBlockerClass || attention !== 'clean'
   const stopRequested =
     compositeSnapshot?.runtime_attention?.fiber_stop_requested === true

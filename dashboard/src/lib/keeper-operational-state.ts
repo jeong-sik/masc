@@ -68,12 +68,20 @@ export type StuckReason = KeeperRuntimeBlockerClass | 'fiber_dead' | 'unknown'
 //   clean            — neither set, no orange edge on dashboard
 export type KeeperAttention = 'blocked' | 'needs_attention' | 'clean'
 
+// RFC-0135 §10 Goal-2 (audit 2026-05-19): backend `runtime_attention`
+// axis is *orthogonal* to operational kind — a running keeper can have
+// `attention='needs_attention'`, a stuck keeper can have its attention
+// cleared after operator ack. Lifting `attention` into the typed state
+// removes the audit-finding B3 pattern where callers OR-merged
+// `opState.kind === 'stuck'` with a separately-derived attention axis
+// (forming an external axis-pair the typed sum couldn't enforce).
 export type KeeperOperationalState =
-  | { readonly kind: 'offline'; readonly cause: OfflineCause }
-  | { readonly kind: 'paused'; readonly cause: PausedCause }
-  | { readonly kind: 'stuck'; readonly reason: StuckReason }
+  | { readonly kind: 'offline'; readonly attention: KeeperAttention; readonly cause: OfflineCause }
+  | { readonly kind: 'paused'; readonly attention: KeeperAttention; readonly cause: PausedCause }
+  | { readonly kind: 'stuck'; readonly attention: KeeperAttention; readonly reason: StuckReason }
   | {
       readonly kind: 'running'
+      readonly attention: KeeperAttention
       readonly turnPhase: string
       readonly staleBlocker: KeeperRuntimeBlockerClass | null
     }
@@ -86,11 +94,15 @@ export interface DeriveInputs {
 export function deriveKeeperOperationalState(
   { keeper, composite }: DeriveInputs,
 ): KeeperOperationalState {
+  // RFC-0135 §10 Goal-2: attention is now an axis on every variant so
+  // callers don't need to OR-merge it externally. Computed once here.
+  const attentionAxis = computeKeeperAttention(composite)
+
   if (isPaused(keeper)) {
-    return { kind: 'paused', cause: derivePausedCause(keeper) }
+    return { kind: 'paused', attention: attentionAxis, cause: derivePausedCause(keeper) }
   }
   if (isOffline(keeper, composite)) {
-    return { kind: 'offline', cause: deriveOfflineCause(keeper) }
+    return { kind: 'offline', attention: attentionAxis, cause: deriveOfflineCause(keeper) }
   }
 
   const blockerClass = keeper.runtime_blocker_class ?? null
@@ -103,11 +115,11 @@ export function deriveKeeperOperationalState(
     || attention?.stale_execution_receipt === true
 
   if (blockerClass !== null && !explicitlyStale) {
-    return { kind: 'stuck', reason: blockerClass }
+    return { kind: 'stuck', attention: attentionAxis, reason: blockerClass }
   }
 
   if (composite !== null && compositeFiberKnownDead(composite)) {
-    return { kind: 'stuck', reason: 'fiber_dead' }
+    return { kind: 'stuck', attention: attentionAxis, reason: 'fiber_dead' }
   }
 
   const turnPhase = composite?.turn_phase ?? keeper.pipeline_stage ?? 'idle'
@@ -115,7 +127,7 @@ export function deriveKeeperOperationalState(
   // surfaced as informational context, not a headline.
   const staleBlocker =
     explicitlyStale && blockerClass !== null ? blockerClass : null
-  return { kind: 'running', turnPhase, staleBlocker }
+  return { kind: 'running', attention: attentionAxis, turnPhase, staleBlocker }
 }
 
 function isPaused(k: Keeper): boolean {
@@ -176,7 +188,14 @@ function compositeFiberKnownDead(c: KeeperCompositeSnapshot): boolean {
  *  attestation the dashboard has no basis to claim attention is needed.
  *  Callers may still combine this with `state.kind === 'stuck'` if
  *  blocker-class evidence alone should surface an alert. */
-export function deriveKeeperAttention(
+/** Private — used only by `deriveKeeperOperationalState` to derive the
+ *  per-variant `attention` axis. After RFC-0135 §10 Goal-2 the
+ *  per-variant axis replaced the externally-derived attention used by
+ *  `keeper-detail-runtime.ts:213` (audit B3 closure); callers now read
+ *  `opState.attention` directly. Kept as a private helper to keep the
+ *  derivation rule (priority: blocked > needs_attention > clean)
+ *  localized to one place. */
+function computeKeeperAttention(
   composite: KeeperCompositeSnapshot | null,
 ): KeeperAttention {
   const attention = composite?.runtime_attention

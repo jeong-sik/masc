@@ -59,7 +59,7 @@ let test_record_cascade_attempt_round_trips_from_meta () =
         ; timestamp = 1_768_600_000.25
         }
       in
-      Registry.record_cascade_attempt
+      Masc_mcp.Keeper_registry_cascade_attempt.record
         ~base_path:config.base_path
         ~keeper_name
         expected;

@@ -235,7 +235,7 @@ let launch_supervised_fiber
                  | None -> "stale_turn_timeout"
 	               in
 	               let outcome =
-	                 Keeper_registry.enrich_fiber_unresolved_outcome
+	                 Keeper_registry_cascade_attempt.enrich_fiber_unresolved_outcome
 	                   ~base_path
 	                   ~keeper_name:meta.name
 	                   reason
@@ -321,7 +321,7 @@ let launch_supervised_fiber
 	             in
 	             let reason = Keeper_registry.failure_reason_to_string fr in
 	             let outcome =
-	               Keeper_registry.enrich_fiber_unresolved_outcome
+	               Keeper_registry_cascade_attempt.enrich_fiber_unresolved_outcome
 	                 ~base_path
 	                 ~keeper_name:meta.name
 	                 reason
@@ -403,7 +403,7 @@ let launch_supervised_fiber
 	                    Keeper_registry.Fiber_unresolved
 	                in
 	                let outcome =
-	                  Keeper_registry.enrich_fiber_unresolved_outcome
+	                  Keeper_registry_cascade_attempt.enrich_fiber_unresolved_outcome
 	                    ~base_path
 	                    ~keeper_name:meta.name
 	                    reason
@@ -1404,7 +1404,7 @@ let sweep_and_recover (ctx : _ context) =
 	    if Keeper_registry.try_resolve_done entry (`Crashed msg)
 	    then (
 	      let outcome =
-	        Keeper_registry.enrich_fiber_unresolved_outcome
+	        Keeper_registry_cascade_attempt.enrich_fiber_unresolved_outcome
 	          ~base_path
 	          ~keeper_name:entry.name
 	          msg

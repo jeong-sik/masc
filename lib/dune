@@ -6,6 +6,7 @@
   (language c)
   (names nofile_stubs))
 (private_modules
+ auth_config_store
  auth_nickname
  auth_storage
  auth_tool_authorization

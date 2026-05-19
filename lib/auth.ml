@@ -37,33 +37,10 @@ let read_initial_admin = Storage.read_initial_admin
 (* Auth config management                       *)
 (* ============================================ *)
 
-let persist_auth_config config (auth_cfg : auth_config) =
-  ensure_auth_dirs config;
-  let file = auth_config_file config in
-  let json = auth_config_to_yojson auth_cfg in
-  save_private_text_file file (Yojson.Safe.pretty_to_string json)
-;;
+module Config_store = Auth_config_store
 
-(** Load auth config *)
-let load_auth_config config : auth_config =
-  let file = auth_config_file config in
-  if file_exists file
-  then (
-    try
-      let content = read_text_file file in
-      let json = Yojson.Safe.from_string content in
-      match auth_config_of_yojson json with
-      | Ok cfg -> cfg
-      | Error msg ->
-        Log.Auth.warn "[load_auth_config] parse error for %s: %s" file msg;
-        default_auth_config
-    with
-    | Sys_error _ | Yojson.Json_error _ -> default_auth_config)
-  else default_auth_config
-;;
-
-(** Save auth config *)
-let save_auth_config config (auth_cfg : auth_config) = persist_auth_config config auth_cfg
+let load_auth_config = Config_store.load_auth_config
+let save_auth_config = Config_store.save_auth_config
 
 (* ============================================ *)
 (* Credential management                        *)

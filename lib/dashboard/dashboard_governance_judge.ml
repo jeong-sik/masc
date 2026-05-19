@@ -164,8 +164,7 @@ let status_stale_visible = "stale_visible"
 let status_offline = "offline"
 let status_backoff = "backoff"
 
-let contains_substring haystack needle =
-  String_util.contains_substring haystack needle
+let contains_substring haystack needle = String_util.contains_substring haystack needle
 
 let degraded_reason_of_error message =
   let lower = String.lowercase_ascii message in

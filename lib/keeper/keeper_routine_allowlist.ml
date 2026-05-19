@@ -197,20 +197,7 @@ let first_nonempty_string_field keys = function
       keys
   | _ -> None
 
-let contains_substring haystack needle =
-  let haystack_len = String.length haystack in
-  let needle_len = String.length needle in
-  if needle_len = 0
-  then true
-  else if needle_len > haystack_len
-  then false
-  else (
-    let last = haystack_len - needle_len in
-    let rec loop i =
-      i <= last
-      && (String.equal (String.sub haystack i needle_len) needle || loop (i + 1))
-    in
-    loop 0)
+let contains_substring haystack needle = String_util.contains_substring haystack needle
 
 let path_has_git_dir path =
   String.equal (Filename.basename path) ".git" || contains_substring path "/.git/"

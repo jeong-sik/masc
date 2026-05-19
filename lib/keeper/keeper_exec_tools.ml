@@ -46,15 +46,7 @@ let search_char c =
 
 let normalize_search_text text = String.lowercase_ascii (String.map search_char text)
 
-let contains_substring text needle =
-  let text_len = String.length text in
-  let needle_len = String.length needle in
-  let rec loop idx =
-    idx + needle_len <= text_len
-    && (String.sub text idx needle_len = needle || loop (idx + 1))
-  in
-  needle_len = 0 || loop 0
-;;
+let contains_substring text needle = String_util.contains_substring text needle
 
 let search_terms query =
   normalize_search_text query

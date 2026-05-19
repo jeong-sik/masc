@@ -28,6 +28,9 @@ export function hydrateFleetCompositeSnapshot(payload: unknown): void {
       fleetCompositeSnapshot.value = parseFleetCompositeSnapshot(payload)
     })
     .catch(err => {
-      console.debug('[Composite] fleet snapshot hydration failed', err instanceof Error ? err.message : '')
+      // Mirrors sse-store.ts §256 rationale: hydration failures leave the UI
+      // showing stale composite data — operator-actionable, so warn (visible
+      // in default DevTools level) rather than debug (hidden).
+      console.warn('[Composite] fleet snapshot hydration failed', err instanceof Error ? err.message : '')
     })
 }

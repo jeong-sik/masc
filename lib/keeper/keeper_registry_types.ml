@@ -1120,15 +1120,28 @@ let is_paired_lifecycle_event = function
 ;;
 
 let origin_allows_paired_lifecycle_event origin event =
-  match origin, event with
-  | Post_turn_lifecycle, event when is_paired_lifecycle_event event -> true
-  | ( Operator_compact
-    , ( Keeper_state_machine.Compaction_started
-      | Keeper_state_machine.Compaction_completed _
-      | Keeper_state_machine.Compaction_failed _ ) ) -> true
-  | Generic_dispatch, event when is_paired_lifecycle_event event -> false
-  | Operator_compact, event when is_paired_lifecycle_event event -> false
-  | _, _ -> true
+  (* This guard only constrains paired lifecycle events (compaction +
+     handoff half-events). For any other event the gate is outside its
+     domain and returns true unconditionally — the caller's question
+     does not apply. *)
+  if not (is_paired_lifecycle_event event) then true
+  else
+    (* Outer match is exhaustive on [lifecycle_event_origin] so adding a
+       new origin variant forces an explicit arm here instead of silently
+       inheriting the previous [_, _ -> true] default-allow catch-all,
+       which was the FSM-sparse-match anti-pattern called out in
+       instructions/software-development.md §4. *)
+    match origin with
+    | Post_turn_lifecycle -> true
+    | Generic_dispatch -> false
+    | Operator_compact ->
+      (* Operator_compact authorizes only compaction half-events;
+         handoff half-events flow through other origins. *)
+      (match event with
+       | Keeper_state_machine.Compaction_started
+       | Keeper_state_machine.Compaction_completed _
+       | Keeper_state_machine.Compaction_failed _ -> true
+       | _ -> false)
 ;;
 
 let pending_measurement_after_event now entry event =

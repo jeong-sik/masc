@@ -155,19 +155,22 @@ if [[ -n "$catch_all_default" ]]; then
 fi
 
 # §9-5 — Noun/verb Korean label collision.
-# For each known collision keyword, flag a file that contains BOTH:
-#   - the bare noun form  (e.g. 일시정지)  AND
-#   - a bare button label without 하기 suffix at the verb site.
-# Heuristic: `>일시정지<` (button text) is suspect; PR-7 converted these
-# to `>일시정지하기<`. We skip files where the verb is never used as
-# a button (badge-only files).
-collision_keywords=("일시정지" "재개" "기동" "종료")
+# For each known collision keyword, flag a file that contains a button
+# label without 하기 suffix at the verb site. Two button-shape patterns
+# are checked because the codebase uses both:
+#   - htm/preact `<${ActionButton}>...<//>` (template close)
+#   - native `<button ...>...</button>` (explicit close)
+# PR-7 converted action-panel/alert-strip to `${kw}하기`. PR-10 extends
+# the sweep to keeper-detail-lifecycle, keeper-config-panel, tool-executor.
+# The list of keywords grows when noun/verb usage diverges in practice;
+# `편집`, `실행`, `초기화` were added after the 2026-05-19 audit.
+collision_keywords=("일시정지" "재개" "기동" "종료" "편집" "실행" "초기화")
 for kw in "${collision_keywords[@]}"; do
-  # Files containing a button-like `>${kw}<//>` pattern that is not the
-  # 하기-suffixed verb form.
+  # Files containing a button-like pattern that is not the 하기-suffixed
+  # verb form. Captures both `<//>` and `</button>` close shapes.
   bad_button=$(
     rg -n --type ts \
-      ">${kw}<//>" \
+      ">${kw}<(//|/button)>" \
       dashboard/src 2>/dev/null \
     | grep -v "${kw}하기" || true
   )

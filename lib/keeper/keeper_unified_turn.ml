@@ -433,47 +433,25 @@ let run_keeper_cycle
                      match Eio_context.get_clock () with
                      | Error msg -> Error (Agent_sdk.Error.Internal msg)
                      | Ok clock ->
-                       let timeout_sec = Keeper_runtime_resolved.turn_timeout_sec () in
                        start_background_turn_event_bus_drain ~clock;
-                       let turn_started_at = Eio.Time.now clock in
-                       let turn_deadline = turn_started_at +. timeout_sec in
-                       let remaining_turn_budget_s () =
-                         Float.max 0.0 (turn_deadline -. Eio.Time.now clock)
-                       in
-                       let retry_phase_started_at = ref None in
-                       let elapsed_ms seconds =
-                         int_of_float (Float.max 0.0 seconds *. 1000.0)
-                       in
-                       let current_turn_phase_elapsed_ms () =
-                         let now = Eio.Time.now clock in
-                         match !retry_phase_started_at with
-                         | None -> elapsed_ms (now -. turn_started_at), Some 0
-                         | Some retry_started_at ->
-                           ( elapsed_ms (retry_started_at -. turn_started_at)
-                           , Some (elapsed_ms (now -. retry_started_at)) )
-                       in
-                       let keeper_profile =
-                         Keeper_types_profile.load_keeper_profile_defaults meta.name
-                       in
-                       let max_idle_turns, max_turns =
-                         match channel with
-                         | Keeper_world_observation.Reactive ->
-                           ( Keeper_runtime_resolved.reactive_max_idle_turns ()
-                           , Keeper_types_profile.effective_max_turns_per_call
-                               keeper_profile )
-                         | Keeper_world_observation.Scheduled_autonomous ->
-                           ( Keeper_runtime_resolved.autonomous_max_idle_turns ()
-                           , Keeper_types_profile
-                             .effective_max_turns_per_call_scheduled_autonomous
-                               keeper_profile )
-                       in
-                       let initial_tool_requirement =
-                         if
-                           Keeper_agent_run.should_require_tools_for_initial_turn
-                             ~max_turns
-                             ~turn_affordances
-                         then Keeper_agent_tool_surface.Required
-                         else Keeper_agent_tool_surface.Optional
+                       let { Keeper_unified_turn_retry_setup.timeout_sec
+                           ; turn_started_at
+                           ; turn_deadline
+                           ; remaining_turn_budget_s
+                           ; retry_phase_started_at
+                           ; elapsed_ms
+                           ; current_turn_phase_elapsed_ms
+                           ; keeper_profile
+                           ; max_idle_turns
+                           ; max_turns
+                           ; initial_tool_requirement
+                           }
+                         =
+                         Keeper_unified_turn_retry_setup.build
+                           ~now:(fun () -> Eio.Time.now clock)
+                           ~keeper_name:meta.name
+                           ~channel
+                           ~turn_affordances
                        in
                        let do_run
                              ~(execution : cascade_execution)

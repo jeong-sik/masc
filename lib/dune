@@ -182,6 +182,7 @@
   keeper_text_processing
   keeper_summarizer
   keeper_context_core_message_json
+  keeper_context_core_history
   keeper_context_core
   keeper_compact_policy
   keeper_compact_audit

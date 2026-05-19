@@ -135,7 +135,21 @@ let create_submit_request ~(config : Coord.config)
 let notify_submit_for_verification ~(config : Coord.config)
     ~(task : Masc_domain.task) ~assignee ~verification_id ~evidence_refs =
   let spec = submit_request_spec ~config ~task ~assignee ~evidence_refs in
-  let meta_json = `Assoc [
+  (* Include CDAL verdict metadata when a verdict exists for this task,
+     so downstream consumers (dashboard, verification auditor) can see
+     the gate result without re-querying the verdict store. *)
+  let cdal_verdict_fields =
+    if Env_config_runtime.Cdal.gate_enabled () then
+      (match Cdal_verdict_gate.lookup_latest_verdict
+               ~warn_on_missing:false ~task_id:task.id () with
+       | None -> []
+       | Some v ->
+         let open Cdal_types in
+         let verdict_json = contract_verdict_to_json v in
+         [ ("cdal_verdict", verdict_json) ])
+    else []
+  in
+  let meta_json = `Assoc ([
     ("type", `String spec.board_type);
     ("task_id", `String task.id);
     ("verification_id", `String verification_id);
@@ -144,7 +158,7 @@ let notify_submit_for_verification ~(config : Coord.config)
     ("criteria", `List (List.map Verification.criterion_to_yojson spec.criteria));
     ("request_kind", `String spec.request_kind);
     ("next_action", `String spec.next_action);
-  ] in
+  ] @ cdal_verdict_fields) in
   let () =
     match Board_dispatch.create_post
       ~author:"system"
@@ -162,14 +176,14 @@ let notify_submit_for_verification ~(config : Coord.config)
         "board post failed (task=%s vrf=%s): %s"
         task.id verification_id (Board_types.show_board_error e)
   in
-  Subscriptions.push_event_to_sessions (`Assoc [
+  Subscriptions.push_event_to_sessions (`Assoc ([
     ("type", `String "masc/verification/requested");
     ("task_id", `String task.id);
     ("verification_id", `String verification_id);
     ("worker", `String assignee);
     ("evidence_refs", `List (List.map (fun s -> `String s) evidence_refs));
     ("timestamp", `Float (Time_compat.now ()));
-  ]);
+  ] @ cdal_verdict_fields));
   ()
 
 let on_submit_for_verification ~(config : Coord.config)

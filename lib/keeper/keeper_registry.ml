@@ -1333,24 +1333,7 @@ let set_tool_usage_entry ~base_path ~name ~tool_name (e : tool_call_entry) =
 
 (* ── RFC-0002 Event Dispatch ───────────────────────────── *)
 
-let validate_paired_lifecycle_origin origin event =
-  if origin_allows_paired_lifecycle_event origin event
-  then Ok ()
-  else
-    Error
-      (Keeper_state_machine.Precondition_violation
-         { event = Keeper_state_machine.event_to_string event
-         ; reason =
-             Printf.sprintf
-               "paired lifecycle event requires origin=post_turn_lifecycle%s; got %s"
-               (match event with
-                | Keeper_state_machine.Compaction_started
-                | Keeper_state_machine.Compaction_completed _
-                | Keeper_state_machine.Compaction_failed _ -> " or origin=operator_compact"
-                | _ -> "")
-               (lifecycle_event_origin_to_string origin)
-         })
-;;
+let validate_paired_lifecycle_origin = Keeper_registry_event_validators.paired_lifecycle_origin
 
 (* Entry-action dispatch observability helpers
    (execute_entry_action_observability / followup_event_of_entry_action /
@@ -1366,54 +1349,7 @@ let record_followup_dispatch_rejection =
   Keeper_registry_entry_action_dispatch.record_dispatch_rejection
 ;;
 
-(* RFC-0072 Phase 6: the 3×3 compaction matrix dispatched as an exhaustive
-   match — the 3 valid pairs (incl. idempotent self-loops) return [()], the
-   3 forbidden pairs raise the typed [Compaction_transition_violation]
-   (replacing the prior bare [assert], whose [Assert_failure] carried no
-   labels).  Still wrapped in [Keeper_fsm_guard_runtime.wrap_unit] so
-   [metric_fsm_guard_violation] (action=compaction_transition, stage=guard)
-   fires on a forbidden pair; the match stays exhaustive so adding a
-   [compaction_stage] variant triggers Warning 8 here.  No
-   [Compaction_transition] GADT / [resolve_*] helper: with 3 states and a
-   single consumer the resolver indirection would be premature. *)
-let validate_compaction_transition ~from ~to_ =
-  Keeper_fsm_guard_runtime.wrap_unit
-    ~action:"compaction_transition"
-    ~stage:"guard"
-    (fun () ->
-       match from, to_ with
-       (* Idempotent self-loops + valid cross-state transitions (6). *)
-       | Packed Compaction_accumulating, Packed Compaction_accumulating
-       | Packed Compaction_accumulating, Packed Compaction_compacting
-       (* via set_compaction_stage *)
-       | Packed Compaction_compacting, Packed Compaction_accumulating
-       (* via set_compaction_stage: retry after a failed compaction *)
-       | Packed Compaction_compacting, Packed Compaction_compacting
-       | Packed Compaction_compacting, Packed Compaction_done
-       (* via set_compaction_stage *)
-       | Packed Compaction_done, Packed Compaction_done -> ()
-       (* Forbidden transitions (3). *)
-       | Packed Compaction_accumulating, Packed Compaction_done ->
-         raise_compaction_transition_violation
-           ~where:"validate_compaction_transition"
-           ~from
-           ~to_
-           ~violation:Accumulating_to_done
-       | Packed Compaction_done, Packed Compaction_accumulating ->
-         (* terminal; a fresh compaction is a reset, not a transition *)
-         raise_compaction_transition_violation
-           ~where:"validate_compaction_transition"
-           ~from
-           ~to_
-           ~violation:Done_to_accumulating
-       | Packed Compaction_done, Packed Compaction_compacting ->
-         (* terminal *)
-         raise_compaction_transition_violation
-           ~where:"validate_compaction_transition"
-           ~from
-           ~to_
-           ~violation:Done_to_compacting)
-;;
+let validate_compaction_transition = Keeper_registry_event_validators.compaction_transition
 
 let compaction_stage_after_event entry event =
   let old_stage = entry.compaction_stage in

@@ -795,15 +795,12 @@ let execute_tool_eio
                      Some (Keeper_sandbox_factory.create ~config ~meta ())
                    in
                    let turn_sandbox_factory_git =
-                     if Env_config_keeper.KeeperSandbox.hard_mode ()
-                     then None
-                     else
-                       Some
-                         (Keeper_sandbox_factory.create
-                            ~default_network_override:Keeper_types.Network_inherit
-                            ~config
-                            ~meta
-                            ())
+                     Some
+                       (Keeper_sandbox_factory.create
+                          ~default_network_override:Keeper_types.Network_inherit
+                          ~config
+                          ~meta
+                          ())
                    in
                    let cleanup_one ~during_exception label = function
                      | None -> ()

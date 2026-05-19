@@ -307,8 +307,7 @@ let append_pr_review_action_metric
     | Docker, ("keeper_pr_review_comment" | "keeper_pr_review_reply") ->
         Some "brokered"
     | Docker, "keeper_shell" ->
-        if Env_config_keeper.KeeperSandbox.hard_mode () then Some "brokered"
-        else Some "docker"
+        Some "docker"
     | _ -> None
   in
   match
@@ -374,12 +373,8 @@ let append_pr_work_action_metrics
     () =
   let route_via_fallback =
     match meta.sandbox_profile, tool_name with
-    | Docker, "keeper_pr_create" ->
-        if Env_config_keeper.KeeperSandbox.hard_mode () then Some "brokered"
-        else Some "docker"
-    | Docker, "keeper_shell" ->
-        if Env_config_keeper.KeeperSandbox.hard_mode () then Some "brokered"
-        else Some "docker"
+    | Docker, "keeper_pr_create" -> Some "docker"
+    | Docker, "keeper_shell" -> Some "docker"
     | Docker, ("keeper_bash" | "masc_code_shell" | "masc_code_git") ->
         Some "docker"
     | _ -> None

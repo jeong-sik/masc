@@ -1,7 +1,7 @@
 (** Sandbox config SSOT tests.
 
-    Pin defaults, env-override semantics, hard_mode interactions, and
-    JSON shape for {!Env_config_sandbox}.  Pattern mirrors
+    Pin defaults, env-override semantics, and JSON shape for
+    {!Env_config_sandbox}.  Pattern mirrors
     {!Test_env_config_exec_timeout_10426}. *)
 
 open Alcotest
@@ -30,8 +30,7 @@ let with_env name value f =
    we clear them for default-pinning tests so the result is independent
    of CI/dev-machine environment. *)
 let sandbox_env_names =
-  [ "MASC_KEEPER_SANDBOX_HARD_MODE"
-  ; "MASC_KEEPER_SANDBOX_PIDS_LIMIT"
+  [ "MASC_KEEPER_SANDBOX_PIDS_LIMIT"
   ; "MASC_KEEPER_SANDBOX_NOFILE_LIMIT"
   ; "MASC_KEEPER_SANDBOX_MEMORY"
   ; "MASC_KEEPER_SANDBOX_TMPFS_SIZE"
@@ -100,7 +99,6 @@ let with_clean_sandbox_env f =
 let test_defaults_pinned () =
   with_clean_sandbox_env @@ fun () ->
   (* Hardening *)
-  check bool "Hardening.hard_mode default" false (S.Hardening.hard_mode ());
   check int "Hardening.pids_limit default" 128 (S.Hardening.pids_limit ());
   check int "Hardening.nofile_limit default" 245_760
     (S.Hardening.nofile_limit ());
@@ -226,18 +224,8 @@ let test_gh_min_floor_ignores_env () =
       (S.Shell_timeout.timeout_sec ~bucket:S.Shell_timeout.Gh_min ()))
 
 (* ---------------------------------------------------------------- *)
-(* 4. Hard-mode interactions                                        *)
+(* 4. Filesystem derivation                                         *)
 (* ---------------------------------------------------------------- *)
-
-let test_hard_mode_forces_require_flags () =
-  with_clean_sandbox_env @@ fun () ->
-  with_env "MASC_KEEPER_SANDBOX_HARD_MODE" (Some "true") (fun () ->
-    check bool "hard_mode forces require_rootless true"
-      true (S.Hardening.require_rootless ());
-    check bool "hard_mode forces require_userns true"
-      true (S.Hardening.require_userns ());
-    check bool "hard_mode forces git_dispatch false"
-      false (S.Runtime.git_dispatch ()))
 
 let test_relax_fs_propagates_to_derived () =
   (* relax_fs raw value passes through; derived values change. *)
@@ -285,12 +273,12 @@ let test_json_shape_has_top_level_keys () =
         (Printf.sprintf "raw.%s exists" k)
         true (List.mem_assoc k raw_assoc))
     raw_keys;
-  (* Probe the entry shape on hardening.hard_mode *)
+  (* Probe the entry shape on hardening.pids_limit *)
   let hardening = List.assoc "hardening" raw_assoc in
   let hardening_assoc = match hardening with `Assoc xs -> xs | _ -> [] in
-  let hard_mode_entry = List.assoc "hard_mode" hardening_assoc in
+  let pids_limit_entry = List.assoc "pids_limit" hardening_assoc in
   let entry_keys =
-    match hard_mode_entry with `Assoc xs -> List.map fst xs | _ -> []
+    match pids_limit_entry with `Assoc xs -> List.map fst xs | _ -> []
   in
   check (slist string compare) "raw entry has value/source/env_var keys"
     [ "env_var"; "source"; "value" ] entry_keys
@@ -320,10 +308,8 @@ let () =
         ; test_case "Gh_min floor ignores env" `Quick
             test_gh_min_floor_ignores_env
         ] )
-    ; ( "hard-mode",
-        [ test_case "hard_mode forces require flags" `Quick
-            test_hard_mode_forces_require_flags
-        ; test_case "relax_fs propagates to derived" `Quick
+    ; ( "filesystem",
+        [ test_case "relax_fs propagates to derived" `Quick
             test_relax_fs_propagates_to_derived
         ] )
     ; ( "json-shape",

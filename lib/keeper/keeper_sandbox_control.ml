@@ -58,11 +58,7 @@ let managed_container_name ~(meta : keeper_meta) ~(network_label : string) =
     (Unix.getpid ())
     (now_ms ())
 
-let configured_effective_network network_mode =
-  if Env_config_keeper.KeeperSandbox.hard_mode () then
-    Network_none
-  else
-    network_mode
+let configured_effective_network network_mode = network_mode
 
 let live_containers ~config ~meta ~timeout_sec =
   Keeper_sandbox_runtime.list_containers

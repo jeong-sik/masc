@@ -302,13 +302,6 @@ let handle_keeper_shell
     else
       Keeper_docker_read.container_path_of_host ~config ~meta ~host_path
   in
-  if Env_config_keeper.KeeperSandbox.hard_mode ()
-     && meta.sandbox_profile <> Docker
-  then
-    error_json
-      ~fields:[ "op", `String op ]
-      "MASC_KEEPER_SANDBOX_HARD_MODE requires sandbox_profile=docker"
-  else
   match op with
   | "pwd" ->
     (match cwd_target () with
@@ -989,25 +982,11 @@ let handle_keeper_shell
            if safe = "" || safe = "." || safe = ".." then "repo" else safe
          in
          let clone_path = Filename.concat repos_dir repo_name in
-         let docker_hard_mode_brokered =
-           meta.sandbox_profile = Docker
-           && Env_config_keeper.KeeperSandbox.hard_mode ()
-         in
          let route_fields =
            if meta.sandbox_profile = Docker then
-             [ "via", `String
-                 (if docker_hard_mode_brokered then "brokered" else "docker") ]
+             [ "via", `String "docker" ]
            else
              []
-         in
-         let run_brokered_git ~cwd ~timeout_sec argv =
-           match Keeper_gh_env.keeper_process_env config ~keeper_name:meta.name with
-           | Error err -> (Unix.WEXITED 127, err)
-           | Ok env ->
-               Masc_exec.Exec_gate.run_argv_with_status ~actor:`Coord_git
-                 ~raw_source:(String.concat " " argv)
-                 ~summary:"keeper brokered git command"
-                 ?env ~cwd ~timeout_sec argv
          in
          let normalize_existing_origin_to_https clone_path =
            match
@@ -1063,10 +1042,7 @@ let handle_keeper_shell
                 in
                 (* Already cloned — pull latest instead *)
                 let st, out =
-                  if docker_hard_mode_brokered then
-                    run_brokered_git ~cwd:repos_dir ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Shell ())
-                      [ "git"; "-C"; clone_path; "pull"; "--ff-only" ]
-                  else if meta.sandbox_profile = Docker then
+                  if meta.sandbox_profile = Docker then
                     match
                       Keeper_shell_shared.run_docker_shell_command_with_status ~config ~meta
                         ~cwd:repos_dir ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Shell ())
@@ -1112,11 +1088,7 @@ let handle_keeper_shell
            in
            let shallow = depth > 0 in
            let st, out =
-             if docker_hard_mode_brokered then
-               run_brokered_git ~cwd:repos_dir
-                 ~timeout_sec:(Keeper_tool_policy.clone_timeout_sec ())
-                 ("git" :: "clone" :: depth_args @ [ clone_url; clone_path ])
-             else if meta.sandbox_profile = Docker then
+             if meta.sandbox_profile = Docker then
                let clone_cmd =
                  String.concat " "
                    (List.map Filename.quote
@@ -1210,14 +1182,9 @@ let handle_keeper_shell
             (Keeper_gh_shared.render_simple_gh_command cmd)
         in
         let gh_base ~ok ~cwd ~command extras =
-          let docker_hard_mode_brokered =
-            meta.sandbox_profile = Docker
-            && Env_config_keeper.KeeperSandbox.hard_mode ()
-          in
           let route_fields =
             if meta.sandbox_profile = Docker then
-              [ "via", `String
-                  (if docker_hard_mode_brokered then "brokered" else "docker") ]
+              [ "via", `String "docker" ]
             else
               []
           in
@@ -1268,7 +1235,6 @@ let handle_keeper_shell
           in
           let gh_process =
             if meta.sandbox_profile = Docker
-               && not (Env_config_keeper.KeeperSandbox.hard_mode ())
             then
               match
                 Keeper_shell_shared.run_docker_shell_command_with_status ~config ~meta ~cwd

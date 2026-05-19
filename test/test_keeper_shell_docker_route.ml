@@ -512,38 +512,6 @@ let test_git_clone_routes_through_docker () =
     (response_mentions raw "path"
        (Filename.concat playground "repos/masc-mcp"))
 
-let test_hard_mode_git_clone_uses_brokered_route () =
-  with_tool_policy_config @@ fun () ->
-  with_env "MASC_KEEPER_SANDBOX_HARD_MODE" "true" @@ fun () ->
-  with_env "MASC_KEEPER_SANDBOX_RELAX_FS" "false" @@ fun () ->
-  setup ~sandbox:Keeper_types.Docker
-  @@ fun ~config ~meta ~playground ->
-  let factory = Keeper_sandbox_factory.create ~config ~meta () in
-  Fun.protect
-    ~finally:(fun () -> Keeper_sandbox_factory.cleanup factory)
-  @@ fun () ->
-  let raw =
-    Keeper_exec_shell.handle_keeper_shell
-      ~turn_sandbox_factory:(Some factory)
-      ~exec_cache:None ~config ~meta
-      ~args:
-        (`Assoc
-          [
-            ("op", `String "git_clone");
-            ("url", `String "https://github.com/jeong-sik/masc-mcp.git");
-          ])
-  in
-  Alcotest.(check (option bool)) "git_clone fails before host git without identity"
-    (Some false)
-    (parse_bool_field raw "ok");
-  Alcotest.(check (option string)) "via=brokered" (Some "brokered")
-    (parse_string_field raw "via");
-  Alcotest.(check bool) "output mentions missing github_identity" true
-    (response_mentions raw "output" "github_identity");
-  Alcotest.(check bool) "clone path stays inside keeper repos" true
-    (response_mentions raw "path"
-       (Filename.concat playground "repos/masc-mcp"))
-
 let test_bash_routes_through_docker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "" @@ fun () ->
   setup ~sandbox:Keeper_types.Docker
@@ -997,22 +965,6 @@ let test_git_worktree_add_uses_host_git_metadata () =
     (contains_substring git_marker repo);
   Alcotest.(check bool) "worktree gitdir does not use container root" false
     (contains_substring git_marker (Keeper_sandbox.container_root meta.name))
-
-let test_hard_mode_blocks_raw_gh_bash () =
-  with_env "MASC_KEEPER_SANDBOX_HARD_MODE" "true" @@ fun () ->
-  setup ~sandbox:Keeper_types.Docker
-  @@ fun ~config ~meta ~playground:_ ->
-  let raw =
-    Keeper_exec_shell.handle_keeper_bash ~turn_sandbox_factory:None
-      ~turn_sandbox_factory_git:None ~exec_cache:None ~config ~meta
-      ~args:(`Assoc [ ("cmd", `String "gh pr list") ])
-      ()
-  in
-  Alcotest.(check (option string)) "raw gh hard-mode error"
-    (Some "gh_requires_brokered_structured_tool")
-    (parse_string_field raw "error");
-  Alcotest.(check bool) "hint mentions structured op=gh" true
-    (response_mentions raw "hint" "keeper_shell op=gh")
 
 let test_keeper_shell_gh_pr_create_requires_dedicated_tool () =
   with_tool_policy_config @@ fun () ->
@@ -1829,9 +1781,6 @@ let () =
             "docker keeper git push routes through git-creds docker"
             `Quick test_bash_git_push_routes_through_git_creds_docker;
           Alcotest.test_case
-            "hard mode blocks raw gh keeper_bash"
-            `Quick test_hard_mode_blocks_raw_gh_bash;
-          Alcotest.test_case
             "keeper_shell gh pr create requires keeper_pr_create"
             `Quick test_keeper_shell_gh_pr_create_requires_dedicated_tool;
           Alcotest.test_case
@@ -1910,8 +1859,6 @@ let () =
           Alcotest.test_case
             "git-creds mounts only the selected keeper identity"
             `Quick test_git_creds_mounts_only_selected_keeper_identity;
-          Alcotest.test_case "hard mode git_clone uses brokered route" `Quick
-            test_hard_mode_git_clone_uses_brokered_route;
           Alcotest.test_case "git_clone repairs existing docker clone checkout"
             `Quick test_git_clone_repairs_existing_docker_clone_checkout;
           Alcotest.test_case "docker worktree gitdir paths are host-repaired"

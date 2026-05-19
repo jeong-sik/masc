@@ -96,7 +96,6 @@ type required_command_check =
 
 type docker_preflight =
   { ok : bool
-  ; hard_mode : bool
   ; credential_fallbacks_disabled : bool
   ; git_egress : string
   ; image : string
@@ -1158,7 +1157,6 @@ let docker_preflight_to_yojson (preflight : docker_preflight) =
     [ "backend", `String "docker"
     ; "status", `String (if preflight.ok then "ok" else "error")
     ; "ok", `Bool preflight.ok
-    ; "hard_mode", `Bool preflight.hard_mode
     ; "credential_fallbacks_disabled", `Bool preflight.credential_fallbacks_disabled
     ; "git_egress", `String preflight.git_egress
     ; "image", `String preflight.image
@@ -1213,8 +1211,6 @@ let ensure_keeper_sandbox_runtime ~timeout_sec =
   let seccomp_profile =
     String.trim (Env_config_keeper.KeeperSandbox.seccomp_profile ())
   in
-  let hard_mode = Env_config_keeper.KeeperSandbox.hard_mode () in
-  let relax_fs = Env_config_keeper.KeeperSandbox.relax_fs () in
   let require_rootless = Env_config_keeper.KeeperSandbox.require_rootless () in
   let require_userns = Env_config_keeper.KeeperSandbox.require_userns () in
   let seccomp_args =
@@ -1227,9 +1223,7 @@ let ensure_keeper_sandbox_runtime ~timeout_sec =
   match seccomp_args with
   | Error _ as err -> err
   | Ok seccomp_args ->
-    if hard_mode && relax_fs
-    then Error "sandbox hard mode requires MASC_KEEPER_SANDBOX_RELAX_FS=false"
-    else if (not require_rootless) && not require_userns
+    if (not require_rootless) && not require_userns
     then Ok seccomp_args
     else (
       match
@@ -1245,19 +1239,13 @@ let ensure_keeper_sandbox_runtime ~timeout_sec =
         if require_rootless && not (has "rootless")
         then
           Error
-            (if hard_mode
-             then "sandbox hard mode requires Docker rootless mode"
-             else
-               "sandbox runtime requires Docker rootless mode (set \
-                MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS=false to disable this check)")
+            "sandbox runtime requires Docker rootless mode (set \
+             MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS=false to disable this check)"
         else if require_userns && not (has "userns")
         then
           Error
-            (if hard_mode
-             then "sandbox hard mode requires Docker userns support"
-             else
-               "sandbox runtime requires Docker userns support (set \
-                MASC_KEEPER_SANDBOX_REQUIRE_USERNS=false to disable this check)")
+            "sandbox runtime requires Docker userns support (set \
+             MASC_KEEPER_SANDBOX_REQUIRE_USERNS=false to disable this check)"
         else Ok seccomp_args)
 ;;
 
@@ -1266,7 +1254,6 @@ let docker_preflight ~timeout_sec () =
   then None
   else (
     let timeout_sec = docker_preflight_timeout ~timeout_sec in
-    let hard_mode = Env_config_keeper.KeeperSandbox.hard_mode () in
     let image = Env_config_keeper.KeeperSandbox.docker_image () in
     let docker_runtime_ok, docker_runtime_error =
       match docker_info_security_options ~timeout_sec with
@@ -1308,7 +1295,7 @@ let docker_preflight ~timeout_sec () =
          then
            Some
              "Fix the keeper sandbox hardening configuration \
-              (seccomp/rootless/userns/hard-mode) and rerun doctor."
+              (seccomp/rootless/userns) and rerun doctor."
          else None)
       ]
       |> List.filter_map (fun action -> action)
@@ -1328,12 +1315,9 @@ let docker_preflight ~timeout_sec () =
           && image_present
           && command_error = None
           && missing_commands = []
-      ; hard_mode
-      ; credential_fallbacks_disabled = hard_mode
+      ; credential_fallbacks_disabled = false
       ; git_egress =
-          (if hard_mode
-           then "brokered_structured_tools"
-           else if Env_config_keeper.KeeperSandbox.with_git_dispatch_enabled ()
+          (if Env_config_keeper.KeeperSandbox.with_git_dispatch_enabled ()
            then "docker_git_dispatch"
            else "container_network_policy")
       ; image

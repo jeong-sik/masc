@@ -7,12 +7,12 @@ import { keeperDisplayStatus, keeperRuntimeBlockerHint } from './keeper-runtime-
 // PHASE_ID_MAP elsewhere; the three maps drifted independently.
 import { toKeeperPhase } from '../keeper-store-normalize'
 import { isKeeperPaused } from './keeper-predicates'
-// RFC-0135 PR-12: route blocker visibility through the typed SSOT so
-// stale vs live blocker distinction (composite.execution_current /
-// stale_execution_receipt) is honored. Previously the inline
-// `Boolean(keeper.runtime_blocker_class)` flipped attention on stale
-// receipts that the typed state demoted to `running.staleBlocker`.
-import { deriveKeeperOperationalState } from './keeper-operational-state'
+// RFC-0135 PR-12 + PR-14d: route blocker visibility through the typed
+// SSOT (stale vs live distinction) and consume composite-preferred
+// phase via `derivePreferredPhase`. Previously
+// `keeperPhaseForDisplay` consumed only `keeper.phase`, ignoring
+// live phase emitted by composite SSE.
+import { derivePreferredPhase, deriveKeeperOperationalState } from './keeper-operational-state'
 
 export type RuntimeBand = 'active' | 'attention' | 'paused' | 'offline'
 
@@ -158,7 +158,10 @@ function normalizeStage(stage: PipelineStage | string | null | undefined): strin
   return stage ? String(stage) : 'offline'
 }
 
-export function keeperPhaseForDisplay(keeper: Keeper): string | null {
+export function keeperPhaseForDisplay(
+  keeper: Keeper,
+  composite: KeeperCompositeSnapshot | null = null,
+): string | null {
   const lifecycleKey = keeperDisplayStatus(keeper)
   const lifecyclePhase = toKeeperPhase(lifecycleKey)
   if (
@@ -169,7 +172,13 @@ export function keeperPhaseForDisplay(keeper: Keeper): string | null {
   ) {
     return lifecyclePhase
   }
-  return toKeeperPhase(keeper.phase) ?? lifecyclePhase
+  // RFC-0135 PR-14d: composite-preferred phase before flat-record
+  // `keeper.phase`. The terminal-phase guard above intentionally
+  // ignores composite — once `keeperDisplayStatus` says paused/stopped/
+  // offline/dead, that's the authoritative answer (live composite
+  // phase from a previous SSE frame cannot override an operator-
+  // pinned terminal state).
+  return derivePreferredPhase(keeper, composite) ?? lifecyclePhase
 }
 
 function isHeartbeatStale(keeper: Keeper): boolean {
@@ -249,7 +258,7 @@ export function summarizeKeeperMonitoring(
   composite: KeeperCompositeSnapshot | null = null,
 ): KeeperMonitoringSummary {
   const lifecycleKey = keeperDisplayStatus(keeper)
-  const phaseKey = keeperPhaseForDisplay(keeper) ?? 'unknown'
+  const phaseKey = keeperPhaseForDisplay(keeper, composite) ?? 'unknown'
   const stage = stageMeta(normalizeStage(keeper.pipeline_stage))
   const band = BAND_META[keeperBand(keeper, composite, phaseKey, lifecycleKey)]
 

@@ -37,9 +37,11 @@
 
 import type {
   Keeper,
+  KeeperPhase,
   KeeperRuntimeBlockerClass,
   PipelineStage,
 } from '../types/core'
+import { toKeeperPhase } from '../keeper-store-normalize'
 import type {
   KeeperCompositeSnapshot,
 } from '../api/schemas/keeper-composite'
@@ -330,4 +332,30 @@ export function deriveKeeperTurnPhase(
   const flatStage: PipelineStage | undefined = keeper.pipeline_stage
   if (typeof flatStage === 'string' && flatStage.length > 0) return flatStage
   return null
+}
+
+// RFC-0135 PR-14d — composite-preferred phase SSOT (Goal-2d).
+//
+// Two phase sources exist on the wire:
+//   - `composite.phase` (lowercase, live KSM wire format)
+//   - `keeper.phase` (PascalCase, flat-record snapshot)
+// `monitoring-runtime.ts:keeperPhaseForDisplay` previously consumed
+// only `keeper.phase`, leaving composite-fresh phase signals unused
+// when a composite snapshot was available. This helper centralizes
+// the precedence so `monitoring-runtime` and `agent-roster` see the
+// same phase for the same keeper.
+
+/** Composite-preferred `KeeperPhase`. Returns the typed PascalCase
+ *  value from composite if present and narrow-able, else from the
+ *  flat record, else `null`. */
+export function derivePreferredPhase(
+  keeper: Pick<Keeper, 'phase'>,
+  composite: KeeperCompositeSnapshot | null,
+): KeeperPhase | null {
+  const compositePhase = composite?.phase
+  if (typeof compositePhase === 'string' && compositePhase.length > 0) {
+    const narrowed = toKeeperPhase(compositePhase)
+    if (narrowed !== null) return narrowed
+  }
+  return toKeeperPhase(keeper.phase)
 }

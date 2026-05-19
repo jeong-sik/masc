@@ -1,0 +1,21 @@
+# Existing provider/model identity debt in the OAS-owned provider migration
+# boundary. Keep this list shrinking; do not add entries without linking to a
+# catalog/runtime-binding replacement task.
+#
+# Format: path:line:literal
+lib/cascade/cascade_runtime.ml:69:auto
+lib/cascade/cascade_runtime.ml:78:custom
+lib/cascade/cascade_runtime.ml:99:openai_compat
+lib/cascade/cascade_runtime.ml:357:auto
+lib/provider_runtime_projection.ml:84:llama
+lib/provider_runtime_projection.ml:84:llama.cpp
+lib/provider_runtime_projection.ml:84:llamacpp
+lib/provider_runtime_projection.ml:115:auto
+lib/provider_runtime_projection.ml:124:claude
+lib/provider_runtime_projection.ml:124:codex
+lib/provider_runtime_projection.ml:124:gemini
+lib/provider_runtime_projection.ml:124:llama
+lib/provider_runtime_projection.ml:222:llama
+lib/provider_runtime_projection.ml:247:auto
+lib/provider_runtime_projection.ml:298:openrouter
+lib/provider_runtime_projection.ml:331:ollama

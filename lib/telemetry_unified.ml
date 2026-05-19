@@ -529,7 +529,8 @@ let same_tool_call_signature left right =
   &&
   (match left.success, right.success with
    | Some a, Some b -> Bool.equal a b
-   | _ -> true)
+   | None, None -> true
+   | Some _, None | None, Some _ -> false)
   && abs_float (left.ts -. right.ts) <= 5.0
 
 let suppress_shadow_agent_tool_events entries =

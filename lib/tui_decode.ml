@@ -63,16 +63,6 @@ type log_entry = {
 
 let ( let* ) = Result.bind
 
-let json_kind_name : Yojson.Safe.t -> string = function
-  | `Null -> "null"
-  | `Bool _ -> "bool"
-  | `Int _ -> "int"
-  | `Intlit _ -> "intlit"
-  | `Float _ -> "float"
-  | `String _ -> "string"
-  | `Assoc _ -> "object"
-  | `List _ -> "array"
-
 let member key json = Yojson.Safe.Util.member key json
 
 let optional_string json key =
@@ -82,7 +72,7 @@ let optional_string json key =
   | other ->
       Error
         (Printf.sprintf "field '%s' must be a string (received %s)" key
-           (json_kind_name other))
+           (Json_util.kind_name other))
 
 let optional_int json key =
   match member key json with
@@ -96,7 +86,7 @@ let optional_int json key =
   | other ->
       Error
         (Printf.sprintf "field '%s' must be an int (received %s)" key
-           (json_kind_name other))
+           (Json_util.kind_name other))
 
 let optional_float json key =
   match member key json with
@@ -106,7 +96,7 @@ let optional_float json key =
   | other ->
       Error
         (Printf.sprintf "field '%s' must be a float (received %s)" key
-           (json_kind_name other))
+           (Json_util.kind_name other))
 
 let optional_bool json key =
   match member key json with
@@ -115,7 +105,7 @@ let optional_bool json key =
   | other ->
       Error
         (Printf.sprintf "field '%s' must be a bool (received %s)" key
-           (json_kind_name other))
+           (Json_util.kind_name other))
 
 let require_string_field json key = require_string json key
 let require_int_field json key = require_int json key
@@ -133,7 +123,7 @@ let require_string_list json key =
               Error
                 (Printf.sprintf
                    "field '%s[%d]' must be a string (received %s)" key idx
-                   (json_kind_name bad)))
+                   (Json_util.kind_name bad)))
         items
       |> List.fold_left
            (fun acc item ->
@@ -146,7 +136,7 @@ let require_string_list json key =
   | other ->
       Error
         (Printf.sprintf "field '%s' must be an array (received %s)" key
-           (json_kind_name other))
+           (Json_util.kind_name other))
 
 let string_of_intlike_float_field key f =
   if not (Float.is_finite f) then
@@ -165,14 +155,14 @@ let decode_status json =
       Error
         (Printf.sprintf
            "field 'status' list head must be a string (received %s)"
-           (json_kind_name bad))
+           (Json_util.kind_name bad))
   | `Null -> Error "missing required field 'status'"
   | other ->
       Error
         (Printf.sprintf
            "field 'status' must be a string or non-empty string array \
             (received %s)"
-           (json_kind_name other))
+           (Json_util.kind_name other))
 
 let decode_agent json =
   let* name = require_string_field json "name" in
@@ -214,7 +204,7 @@ let decode_keeper ~filename json =
         Error
           (Printf.sprintf
              "field 'models' must be a list of strings (received %s)"
-             (json_kind_name other))
+             (Json_util.kind_name other))
   in
   let* k_proactive_enabled = require_bool_field json "proactive_enabled" in
   let* k_initiative_enabled = optional_bool json "initiative_enabled" in
@@ -232,7 +222,7 @@ let decode_keeper ~filename json =
           (Printf.sprintf
              "field 'last_turn_ts' must be a string, number, or null \
               (received %s)"
-             (json_kind_name other))
+             (Json_util.kind_name other))
   in
   let* k_compaction_count = require_int_field json "compaction_count" in
   let* k_compaction_ratio_gate = require_float_field json "compaction_ratio_gate" in
@@ -310,7 +300,7 @@ let parse_log_entry line =
         Error
           (Printf.sprintf
              "field 'tools_used' must be an array (received %s)"
-             (json_kind_name other))
+             (Json_util.kind_name other))
   in
   let* le_tools_used = le_tools_used in
   let* le_compacted = optional_bool json "compacted" in

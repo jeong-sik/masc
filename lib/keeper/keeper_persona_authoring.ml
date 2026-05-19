@@ -29,15 +29,6 @@ let assoc_without key fields =
 
 let assoc_set key value fields = (key, value) :: assoc_without key fields
 
-let json_kind_name : Yojson.Safe.t -> string = function
-  | `Null -> "null"
-  | `Bool _ -> "bool"
-  | `Int _ -> "int"
-  | `Intlit _ -> "intlit"
-  | `Float _ -> "float"
-  | `String _ -> "string"
-  | `Assoc _ -> "object"
-  | `List _ -> "array"
 ;;
 
 let assoc_get key = function
@@ -573,7 +564,7 @@ let normalize_keeper_json ~handle keeper_json =
     Error
       (Printf.sprintf
          "profile.keeper must be an object (received %s)"
-         (json_kind_name other))
+         (Json_util.kind_name other))
 ;;
 
 let normalize_profile ~handle profile =
@@ -605,7 +596,7 @@ let normalize_profile ~handle profile =
       Error
         (Printf.sprintf
            "profile must be a JSON object (received %s)"
-           (json_kind_name other)))
+           (Json_util.kind_name other)))
 ;;
 
 let ensure_personas_root root =

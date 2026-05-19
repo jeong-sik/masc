@@ -6,6 +6,7 @@
 import { html } from 'htm/preact'
 import { useMemo } from 'preact/hooks'
 import { formatPct1 } from '../../lib/format-number'
+import { formatDateTimeIso } from '../../lib/format-time'
 
 export interface MemoryEntry {
   id: string
@@ -44,11 +45,6 @@ function formatTime(ts: number): string {
   return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`
 }
 
-function formatDateTime(ts: number): string | undefined {
-  const d = new Date(ts)
-  if (!Number.isFinite(d.getTime())) return undefined
-  return d.toISOString()
-}
 
 export function getVisibleShortTermMemory(entries: MemoryEntry[]): MemoryEntry[] {
   return entries
@@ -178,7 +174,7 @@ export function AgentMemory({ entries, testId }: AgentMemoryProps) {
                       <span class="min-w-0 flex-1 truncate text-[var(--color-fg-primary)]">${e.content}</span>
                       <time
                         class="shrink-0 text-3xs text-[var(--color-fg-secondary)]"
-                        datetime=${formatDateTime(e.timestamp)}
+                        datetime=${formatDateTimeIso(e.timestamp)}
                         >${formatTime(e.timestamp)}</time
                       >
                     </div>

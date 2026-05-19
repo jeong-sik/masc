@@ -114,6 +114,14 @@ export function formatTimeAgoEn(iso: string): string {
   return `${Math.floor(diff / SECONDS_PER_DAY)}d ago`
 }
 
+/** Format millisecond timestamp as ISO string. Returns undefined for invalid. */
+export function formatDateTimeIso(ts: number): string | undefined {
+  if (!Number.isFinite(ts)) return undefined
+  const d = new Date(ts)
+  if (!Number.isFinite(d.getTime())) return undefined
+  return d.toISOString()
+}
+
 /** Format a numeric delta with sign prefix. */
 export function formatDelta(delta: number, decimals = 4): string {
   const sign = delta >= 0 ? '+' : ''

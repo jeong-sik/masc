@@ -3,6 +3,7 @@
 // Zero-dependency fallback (no external graph library).
 
 import { html } from 'htm/preact'
+import { formatDateTimeIso } from '../../lib/format-time'
 
 export interface ConversationMessage {
   id: string
@@ -40,11 +41,6 @@ function formatTime(ts: number): string {
   return d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })
 }
 
-function formatDateTime(ts: number): string | undefined {
-  const d = new Date(ts)
-  if (!Number.isFinite(d.getTime())) return undefined
-  return d.toISOString()
-}
 
 export function summarizeAgentConversation(messages: ConversationMessage[]): AgentConversationSummary {
   const ids = new Set(messages.map(msg => msg.id))
@@ -126,7 +122,7 @@ function MessageBubble({
       >
         ${msg.content}
       </div>
-      <time class="text-3xs text-[var(--color-fg-muted)]" datetime=${formatDateTime(msg.timestamp)}>
+      <time class="text-3xs text-[var(--color-fg-muted)]" datetime=${formatDateTimeIso(msg.timestamp)}>
         ${formatTime(msg.timestamp)}
       </time>
     </article>

@@ -4,6 +4,7 @@
 // Displays failure frequency, error types, and correlation summary.
 
 import { html } from 'htm/preact'
+import { formatDateTimeIso } from '../../lib/format-time'
 
 export interface FailureEntry {
   id: string
@@ -66,12 +67,6 @@ function formatTime(ts: number): string {
   })
 }
 
-function formatDateTime(ts: number): string | undefined {
-  if (!Number.isFinite(ts)) return undefined
-  const d = new Date(ts)
-  if (!Number.isFinite(d.getTime())) return undefined
-  return d.toISOString()
-}
 
 export function failureEntryStatus(failure: FailureEntry): FailureEntryStatus {
   if (failure.resolved) return 'resolved'
@@ -256,7 +251,7 @@ export function FailureHistory({
                     ${f.agentId.slice(0, 8)}
                   </span>
                   <span class="text-xs text-[var(--color-fg-secondary)]">·</span>
-                  <time class="text-xs text-[var(--color-fg-secondary)]" datetime=${formatDateTime(f.timestamp)}>
+                  <time class="text-xs text-[var(--color-fg-secondary)]" datetime=${formatDateTimeIso(f.timestamp)}>
                     ${formatTime(f.timestamp)}
                   </time>
                 </div>

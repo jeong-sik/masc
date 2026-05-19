@@ -730,12 +730,62 @@ let make_keeper_tool_handler
                  name
                  detail
              | None, false ->
-               Log.Keeper.error
-                 "tool %s returned error result (%d/%d): %s"
-                 name
-                 count
-                 max_consecutive_failures
-                 detail);
+               (* MASC/OAS Error-Warn Reduction Goal §P3 adjacency
+                  (2026-05-19): the same (tool, normalized detail)
+                  tuple recurs as the supervisor walks the 1->2->3
+                  retry ladder, so a single transient failure
+                  emits at ERROR three times. Route the log
+                  surface through [Keeper_tool_retry_state] so
+                  attempts 2+ within the same retry cycle and
+                  identical failures across cycles are demoted to
+                  DEBUG, with one durable ERROR plus a Prometheus
+                  counter when the silence threshold trips.
+
+                  [WORKAROUND-CARRYOVER]: this is a noise-dedupe
+                  layer. The root fix is upstream (reduce the
+                  rate of tool-call failures themselves — args
+                  validation, container reuse RFC-0097, etc.).
+                  See the PR body. *)
+               let error_signature =
+                 Keeper_tool_retry_state.normalize detail
+               in
+               (match
+                  Keeper_tool_retry_state.record
+                    ~tool_name:name
+                    ~error_signature
+                    ~attempt:count
+                    ()
+                with
+                | `First ->
+                  Log.Keeper.error
+                    "tool %s returned error result (%d/%d): %s"
+                    name
+                    count
+                    max_consecutive_failures
+                    detail
+                | `Repeated n ->
+                  Log.Keeper.debug
+                    "tool %s repeated retry log (%d/%d, total=%d, \
+                     dedup): %s"
+                    name
+                    count
+                    max_consecutive_failures
+                    n
+                    detail
+                | `Threshold_silence n ->
+                  Log.Keeper.error
+                    "tool %s threshold-silence after %d identical \
+                     retries: %s"
+                    name
+                    n
+                    detail;
+                  Prometheus.inc_counter
+                    Keeper_metrics.metric_keeper_tools_oas_failures
+                    ~labels:
+                      [ "tool", name
+                      ; "site", "retry_threshold_silence"
+                      ]
+                    ()));
             (match deterministic_reason with
              | Some reason ->
                Prometheus.inc_counter

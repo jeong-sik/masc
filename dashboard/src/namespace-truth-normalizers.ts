@@ -7,6 +7,7 @@ import {
   normalizeRecommendedAction,
   normalizeShellMetaCognitionSummary,
 } from './store-normalizers'
+import { normalizePendingConfirmSummary } from './pending-confirm'
 import type {
   DashboardAttentionEvent,
   DashboardNamespaceTruthAttentionSummary,
@@ -19,29 +20,7 @@ import type {
   PendingConfirmSummary,
 } from './types'
 
-function normalizePendingConfirmSummary(raw: unknown): PendingConfirmSummary | null {
-  if (!isRecord(raw)) return null
-  return {
-    actor_filter: asString(raw.actor_filter) ?? null,
-    filter_active: asBoolean(raw.filter_active) ?? false,
-    visible_count: asNumber(raw.visible_count) ?? 0,
-    total_count: asNumber(raw.total_count) ?? 0,
-    hidden_count: asNumber(raw.hidden_count) ?? 0,
-    hidden_actors: asStringArray(raw.hidden_actors),
-    confirm_required_actions: extractArray(raw.confirm_required_actions).flatMap(item => {
-      if (!isRecord(item)) return []
-      const actionType = asString(item.action_type)
-      const targetType = asString(item.target_type)
-      if (!actionType || !targetType) return []
-      return [{
-        action_type: actionType,
-        target_type: targetType,
-        description: asString(item.description),
-        confirm_required: asBoolean(item.confirm_required),
-      }]
-    }),
-  }
-}
+// normalizePendingConfirmSummary imported from pending-confirm.ts (SSOT)
 
 function normalizeAttentionSummary(raw: unknown): DashboardNamespaceTruthAttentionSummary | null {
   if (!isRecord(raw)) return null

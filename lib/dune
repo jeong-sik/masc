@@ -8,6 +8,7 @@
 (private_modules
  auth_nickname
  auth_storage
+ auth_tool_authorization
  plan_action_outcome
  prometheus_text
  error_event_type

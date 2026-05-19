@@ -74,7 +74,7 @@ let report_keeper_cycle_side_effect_issue
   : unit
   =
   let message = Printf.sprintf "keeper cycle %s failed: %s" side_effect detail in
-  Keeper_registry.record_error ~base_path:config.base_path keeper_name message;
+  Keeper_registry_error_recording.record ~base_path:config.base_path keeper_name message;
   Prometheus.inc_counter
     Keeper_metrics.metric_keeper_dispatch_event_failures
     ~labels:[ "keeper", keeper_name; "site", side_effect_metric_label side_effect ]

@@ -84,13 +84,12 @@ val update_meta : base_path:string -> string -> keeper_meta -> unit
 (** Record a restart. Increments restart_count and updates last_restart_ts. *)
 val record_restart : base_path:string -> string -> unit
 
-(** Record an error message. *)
-val record_error :
-  base_path:string ->
-  ?details:Yojson.Safe.t ->
-  string ->
-  string ->
-  unit
+(* [record_error] moved to [Keeper_registry_error_recording.record]. *)
+
+(** CAS-write the [last_error] slot for keeper [name]. Exposed for
+    [Keeper_registry_error_recording.record] which holds the dedup
+    logic. *)
+val set_last_error_entry : base_path:string -> name:string -> string -> unit
 
 (** Clear the last recorded error for a keeper. *)
 val clear_error : base_path:string -> string -> unit

@@ -248,7 +248,7 @@ let start_managed_container
                       Printf.sprintf "docker_managed_container_start_failed: %s"
                         (Worker_dev_tools.truncate_for_log out)
                     in
-                    Keeper_registry.record_error
+                    Keeper_registry_error_recording.record
                       ~base_path:config.base_path meta.name message;
                     Error message))
     | Error err -> Error err

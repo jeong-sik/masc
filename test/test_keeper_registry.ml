@@ -1054,7 +1054,7 @@ let test_record_error () =
   let _entry = R.register ~base_path:bp "k6" (make_meta "k6") in
   check bool "no error initially" true
     (Option.is_none (Option.bind (R.get ~base_path:bp "k6") (fun e -> e.last_error)));
-  R.record_error ~base_path:bp "k6" "something broke";
+  Masc_mcp.Keeper_registry_error_recording.record ~base_path:bp "k6" "something broke";
   match R.get ~base_path:bp "k6" with
   | None -> fail "expected k6"
   | Some e ->
@@ -1063,7 +1063,7 @@ let test_record_error () =
 let test_clear_error () =
   R.clear ();
   let _entry = R.register ~base_path:bp "k6-clear" (make_meta "k6-clear") in
-  R.record_error ~base_path:bp "k6-clear" "stale error";
+  Masc_mcp.Keeper_registry_error_recording.record ~base_path:bp "k6-clear" "stale error";
   R.clear_error ~base_path:bp "k6-clear";
   match R.get ~base_path:bp "k6-clear" with
   | None -> fail "expected k6-clear"
@@ -1080,7 +1080,7 @@ let test_noop_on_missing () =
   R.update_meta ~base_path:bp "ghost" (make_meta "ghost");
   ignore (R.dispatch_event ~base_path:bp "ghost" KSM.Operator_pause);
   R.record_restart ~base_path:bp "ghost";
-  R.record_error ~base_path:bp "ghost" "err";
+  Masc_mcp.Keeper_registry_error_recording.record ~base_path:bp "ghost" "err";
   R.clear_error ~base_path:bp "ghost";
   R.record_crash ~base_path:bp "ghost" 0.0 "crash";
   R.set_grpc_close ~base_path:bp "ghost" None;

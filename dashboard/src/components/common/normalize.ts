@@ -97,6 +97,24 @@ export function positiveLine(value: unknown): number | undefined {
   return /^[1-9]\d*$/.test(trimmed) ? Number.parseInt(trimmed, 10) : undefined
 }
 
+export interface CodeLocation {
+  readonly filePath: string
+  readonly line?: number
+}
+
+export function extractCodeLocation(record: Record<string, unknown> | null): CodeLocation | null {
+  if (!record) return null
+  const filePath =
+    asNullableString(record.file_path)
+    ?? asNullableString(record.path)
+    ?? asNullableString(record.file)
+  if (!filePath) return null
+  return {
+    filePath,
+    line: positiveLine(record.line) ?? positiveLine(record.line_start) ?? positiveLine(record.lineno),
+  }
+}
+
 export function toIsoTimestamp(value: unknown): string | undefined {
   if (typeof value === 'string' && value.trim() !== '') return value
   if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return undefined

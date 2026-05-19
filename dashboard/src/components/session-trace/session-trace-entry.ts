@@ -8,7 +8,7 @@ import { TimeAgo } from '../common/time-ago'
 import { Markdown } from '../common/markdown'
 import { ProgressBar } from '../common/progress-bar'
 import { truncate } from '../../lib/truncate'
-import { asNullableString, asRecord, positiveLine } from '../common/normalize'
+import { asNullableString, asRecord, extractCodeLocation, type CodeLocation } from '../common/normalize'
 import { formatCost } from '../../lib/format-number'
 import { toolCategory, durationColor, formatDuration, formatArgs as sharedFormatArgs } from '../tool-call-shared'
 import { SectionHeader } from '../common/section-header'
@@ -150,10 +150,7 @@ function formatArgs(args: Record<string, unknown> | string): string {
   return sharedFormatArgs(args)
 }
 
-interface TraceCodeLocation {
-  readonly filePath: string
-  readonly line?: number
-}
+type TraceCodeLocation = CodeLocation
 
 type TraceRouteContextFields = Pick<
   IdeContextRouteContext,
@@ -182,16 +179,8 @@ function stringishField(value: unknown): string | null {
 }
 
 function recordCodeLocation(value: Record<string, unknown>): TraceCodeLocation | null {
-  const filePath =
-    asNullableString(value.file_path)
-    ?? asNullableString(value.path)
-    ?? asNullableString(value.file)
-  if (filePath) {
-    return {
-      filePath,
-      line: positiveLine(value.line) ?? positiveLine(value.line_start) ?? positiveLine(value.lineno),
-    }
-  }
+  const direct = extractCodeLocation(value)
+  if (direct) return direct
 
   const input = value.input
   if (input && typeof input === 'object' && !Array.isArray(input)) {

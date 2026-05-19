@@ -9,7 +9,7 @@ import type {
   ProviderLogTailResponse,
 } from '../api/dashboard.js'
 import { VirtualList } from './common/virtual-list'
-import { asRecord, asNullableString, positiveLine, idString } from './common/normalize'
+import { asRecord, asNullableString, idString, extractCodeLocation } from './common/normalize'
 import { TextInput } from './common/input'
 import { Select } from './common/select'
 import { Checkbox } from './common/checkbox'
@@ -92,11 +92,6 @@ type FailureEnvelope = {
   recoverability: string
   operator_action: string | null
   evidence_ref: Record<string, unknown> | null
-}
-
-interface LogCodeLocation {
-  readonly filePath: string
-  readonly line?: number
 }
 
 type LogRouteContextFields = Pick<
@@ -188,28 +183,13 @@ function interpolateStructuredMessage(
   return rendered
 }
 
-function codeLocationFromRecord(record: Record<string, unknown> | null): LogCodeLocation | null {
-  if (!record) return null
-  const filePath =
-    asNullableString(record.file_path)
-    ?? asNullableString(record.path)
-    ?? asNullableString(record.file)
-  if (filePath) {
-    return {
-      filePath,
-      line: positiveLine(record.line) ?? positiveLine(record.line_start) ?? positiveLine(record.lineno),
-    }
-  }
-  return null
-}
-
 function mergeLogRouteRecord(
   context: MutableLogRouteContext,
   record: Record<string, unknown> | null,
   overwrite = false,
 ): void {
   if (!record) return
-  const location = codeLocationFromRecord(record)
+  const location = extractCodeLocation(record)
   if (location && (overwrite || context.filePath === undefined)) context.filePath = location.filePath
   if (location?.line !== undefined && (overwrite || context.line === undefined)) context.line = location.line
 

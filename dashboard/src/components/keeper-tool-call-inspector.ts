@@ -8,7 +8,7 @@ import { fetchKeeperToolCalls } from '../api/dashboard'
 import type { ToolCallEntry, ToolCallsResponse, TelemetryFreshnessMetadata } from '../api/dashboard'
 import { formatTimeHms } from '../lib/format-time'
 import { LoadingState } from './common/feedback-state'
-import { asNullableString, asRecord, positiveLine, idString } from './common/normalize'
+import { asRecord, idString, extractCodeLocation } from './common/normalize'
 import { SectionCap } from './common/section-cap'
 import { toolCategory, formatDuration, durationColor } from './tool-call-shared'
 import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
@@ -95,26 +95,13 @@ function parseInputRecord(input: string): Record<string, unknown> | null {
   }
 }
 
-function codeLocationFromRecord(record: Record<string, unknown> | null): Pick<ToolRouteContextFields, 'filePath' | 'line'> | null {
-  if (!record) return null
-  const filePath =
-    asNullableString(record.file_path)
-    ?? asNullableString(record.path)
-    ?? asNullableString(record.file)
-  if (!filePath) return null
-  return {
-    filePath,
-    line: positiveLine(record.line) ?? positiveLine(record.line_start) ?? positiveLine(record.lineno),
-  }
-}
-
 function mergeToolRouteRecord(
   context: MutableToolRouteContext,
   record: Record<string, unknown> | null,
   overwrite = false,
 ): void {
   if (!record) return
-  const location = codeLocationFromRecord(record)
+  const location = extractCodeLocation(record)
   if (location?.filePath && (overwrite || context.filePath === undefined)) context.filePath = location.filePath
   if (location?.line !== undefined && (overwrite || context.line === undefined)) context.line = location.line
 

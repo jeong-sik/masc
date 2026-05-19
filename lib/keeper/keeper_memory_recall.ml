@@ -17,6 +17,13 @@ let read_file_tail_lines path ~max_bytes ~max_lines : string list =
   if max_lines <= 0 then []
   else if not (Fs_compat.file_exists path) then []
   else
+    (* The catch-all below preserves prior behavior (return [[]] on
+       IO failure), but read errors used to be indistinguishable from
+       "no recorded memory" — both paths returned the empty list.
+       Emit a counter + WARN so corrupt / missing memory bank files
+       become visible in operator dashboards. Label cardinality is
+       bounded by reusing [Keeper_memory_recall_exn_class] (a 4-value
+       closed sum); the full error string still goes to the log body. *)
     try
       let fd = Unix.openfile path [ Unix.O_RDONLY ] 0 in
       Fun.protect
@@ -71,8 +78,19 @@ let read_file_tail_lines path ~max_bytes ~max_lines : string list =
           else
             let drop = n - max_lines in
             List.filteri (fun i _ -> i >= drop) lines)
-    with Sys_error _ | Unix.Unix_error _ | End_of_file ->
-      []
+    with
+    | (Sys_error _ | Unix.Unix_error _ | End_of_file) as exn ->
+        let exn_label =
+          Keeper_memory_recall_exn_class.(to_label (classify exn))
+        in
+        Log.Keeper.warn
+          "read_file_tail_lines: dropping read of %s: %s"
+          path (Printexc.to_string exn);
+        Prometheus.inc_counter
+          Keeper_metrics.metric_keeper_memory_recall_read_errors
+          ~labels:[ ("exception_class", exn_label) ]
+          ();
+        []
 
 let read_keeper_memory_summary
     (config : Coord.config)

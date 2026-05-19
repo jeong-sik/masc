@@ -429,6 +429,76 @@ let test_dashboard_tools_usage_marks_store_path_collision () =
       check int "tool usage path collision has synthetic gap" 1
         (usage |> member "coverage_gap_count" |> to_int))
 
+(* Phase 2 Action 4 — confirm the 30s Dashboard_cache wrapping holds.
+   Two back-to-back calls with the same actor must return byte-identical
+   payload (same [generated_at] timestamp); a different actor must
+   compute a fresh payload (different cache key).  We do not assert
+   exact compute count because the underlying Tool_unified.summary_report
+   has no observable counter — same-payload is the cleanest invariant.
+
+   This protects against a regression where the cache key drops the
+   actor, which would leak permission-scoped tool inventories across
+   agents. *)
+let test_dashboard_tools_cache_returns_same_payload_for_same_actor () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      with_stubbed_git_probe @@ fun () ->
+      with_dashboard_eio @@ fun () ->
+      let config = Coord_utils.default_config dir in
+      seed_git_probe_cache config;
+      ignore (Lib.Coord.init config ~agent_name:(Some "dashboard"));
+      Lib.Tool_usage_log.init ~base_path:dir ();
+      Lib.Dashboard_cache.invalidate_all ();
+      let first =
+        Lib.Server_dashboard_http.dashboard_tools_http_json ~actor:"dashboard"
+          config
+      in
+      let second =
+        Lib.Server_dashboard_http.dashboard_tools_http_json ~actor:"dashboard"
+          config
+      in
+      let open Yojson.Safe.Util in
+      let ts a = a |> member "generated_at" |> to_string in
+      check string "same actor returns cached payload (same generated_at)"
+        (ts first) (ts second))
+;;
+
+let test_dashboard_tools_cache_separates_actors () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      with_stubbed_git_probe @@ fun () ->
+      with_dashboard_eio @@ fun () ->
+      let config = Coord_utils.default_config dir in
+      seed_git_probe_cache config;
+      ignore (Lib.Coord.init config ~agent_name:(Some "dashboard"));
+      Lib.Tool_usage_log.init ~base_path:dir ();
+      Lib.Dashboard_cache.invalidate_all ();
+      let _ =
+        Lib.Server_dashboard_http.dashboard_tools_http_json ~actor:"dashboard"
+          config
+      in
+      (* Distinct actor must compute a *separate* cache entry — verify
+         via the entries count growing in Dashboard_cache stats. *)
+      let entries_before =
+        Lib.Dashboard_cache.stats ()
+        |> Yojson.Safe.Util.(fun j -> member "entries" j |> to_int)
+      in
+      let _ =
+        Lib.Server_dashboard_http.dashboard_tools_http_json
+          ~actor:"other-agent" config
+      in
+      let entries_after =
+        Lib.Dashboard_cache.stats ()
+        |> Yojson.Safe.Util.(fun j -> member "entries" j |> to_int)
+      in
+      check bool "distinct actor adds a separate cache entry"
+        true (entries_after > entries_before))
+;;
+
 let () =
   run "dashboard_tools"
     [
@@ -441,5 +511,11 @@ let () =
              test_tool_usage_store_failure_records_coverage_gap;
            test_case "tool usage marks store path collision" `Quick
              test_dashboard_tools_usage_marks_store_path_collision;
+         ]);
+      ("cache", [
+           test_case "same actor returns cached payload" `Quick
+             test_dashboard_tools_cache_returns_same_payload_for_same_actor;
+           test_case "distinct actors get separate cache entries" `Quick
+             test_dashboard_tools_cache_separates_actors;
          ]);
     ]

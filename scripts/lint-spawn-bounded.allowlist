@@ -19,12 +19,10 @@
 # lib/bounded_proc/bounded_proc.ml:17  — the canonical helper itself.
 lib/bounded_proc/bounded_proc.ml:17
 
-# lib/process/process_eio.ml:35, 495, 526 — doc-comment reference + `spawn_and_drain_{stdout,both}`.
-# Line 35: doc-comment reference only (not a real spawn call).
-# Lines 495, 526: Private functions. Every caller (run_argv*, run_argv_with_status*,
+# lib/process/process_eio.ml:495, 526 — `spawn_and_drain_{stdout,both}`.
+# Private functions. Every caller (run_argv*, run_argv_with_status*,
 # run_argv_with_stdin*) wraps in `Eio.Time.with_timeout_exn clk timeout_sec`
 # + `Eio.Switch.run` and the process-wide spawn guard.
-lib/process/process_eio.ml:35
 lib/process/process_eio.ml:495
 lib/process/process_eio.ml:526
 

@@ -966,6 +966,9 @@ let store_full_health_snapshot snapshot =
       | None -> full_health_consecutive_failures := 0
       | Some _ -> ())
 
+let full_health_refresh_timeout_error error =
+  String_util.contains_substring error "refresh_timeout label=full_health_snapshot"
+
 let mark_full_health_snapshot_error exn =
   let now = Unix.gettimeofday () in
   let error = Printexc.to_string exn in
@@ -1047,7 +1050,10 @@ let full_health_snapshot_metadata ~now ~refresh_in_flight ~refresh_started_at
     match (refresh_in_flight, refresh_started_at) with
     | true, Some started_at ->
         now -. started_at > full_health_refresh_timeout_sec
-    | _ -> false
+    | _ ->
+        (match snapshot with
+         | Some { error = Some error; _ } -> full_health_refresh_timeout_error error
+         | _ -> false)
   in
   let snapshot_age_ms, computed_at, duration_ms, error, stale_since_ts, status =
     match snapshot with
@@ -1165,6 +1171,8 @@ module For_testing = struct
 
   let refresh_full_health_snapshot_now ?(listener = "http/1.1") request =
     refresh_full_health_snapshot_sync ~listener request
+
+  let mark_full_health_snapshot_error = mark_full_health_snapshot_error
 
   let full_health_refresh_timing () =
     (full_health_refresh_interval_sec, full_health_refresh_timeout_sec)

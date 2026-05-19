@@ -211,7 +211,9 @@ let nonempty_list = function
   | Some values -> values
   | None -> []
 
-let runtime_lane_label = "runtime"
+(* RFC-0132 PR-2: contract surface label = external boundary; redact via SSOT. *)
+let runtime_lane_label =
+  Boundary_redaction.to_string Boundary_redaction.runtime_model_label
 
 let runtime_lane_opt = function
   | Some value when String.trim value <> "" -> Some runtime_lane_label

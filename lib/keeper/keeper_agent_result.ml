@@ -59,7 +59,9 @@ let nonempty_trimmed raw =
   let trimmed = String.trim raw in
   if trimmed = "" then None else Some trimmed
 
-let runtime_lane_label = "runtime"
+(* RFC-0132 PR-2: agent-result surface label = external boundary; redact via SSOT. *)
+let runtime_lane_label =
+  Boundary_redaction.to_string Boundary_redaction.runtime_model_label
 
 let surface_model_used (_result : run_result) : string = runtime_lane_label
 

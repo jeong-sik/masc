@@ -9,8 +9,9 @@ let active_model_of_meta (m : keeper_meta) : string =
   ""
 
 let active_model_label_of_meta (m : keeper_meta) : string =
+  (* RFC-0132 PR-2: meta surface is external (status detail); redact via SSOT. *)
   let _ = m in
-  "runtime"
+  Boundary_redaction.to_string Boundary_redaction.runtime_model_label
 
 let next_model_hint_of_meta (m : keeper_meta) : string option =
   let _ = m in

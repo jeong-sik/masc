@@ -76,7 +76,9 @@ type usage_trust = Keeper_usage_trust.t =
   | Usage_trusted
   | Usage_untrusted of string list
 
-let runtime_lane_label = "runtime"
+(* RFC-0132 PR-2: Prometheus metric label = external boundary; redact via SSOT. *)
+let runtime_lane_label =
+  Boundary_redaction.to_string Boundary_redaction.runtime_model_label
 
 let classify_usage_trust ~(usage_reported : bool)
     ~(usage : Agent_sdk.Types.api_usage)
@@ -183,8 +185,9 @@ let label_or_unknown raw =
   if trimmed = "" then "unknown" else trimmed
 
 let provider_kind_of_model_used raw =
+  (* RFC-0132 PR-2: provider kind label = external boundary; redact via SSOT. *)
   let _ = raw in
-  "runtime"
+  Boundary_redaction.to_string Boundary_redaction.runtime_provider_label
 
 let record_turn_latency_by_model_bucket
     ~(keeper : string)

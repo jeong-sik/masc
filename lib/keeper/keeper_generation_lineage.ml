@@ -116,8 +116,11 @@ let manifest_json
     ~(trigger_reason : string)
     ~(context_ratio : float)
     ~(model : string) =
+  (* RFC-0132 PR-2: lineage emit surface = external boundary; redact via SSOT. *)
   let _ = model in
-  let model = "runtime" in
+  let model =
+    Boundary_redaction.to_string Boundary_redaction.runtime_model_label
+  in
   let child_trace_id = Keeper_id.Trace_id.to_string child.runtime.trace_id in
   let parent_generation = parent.runtime.generation in
   let child_generation = child.runtime.generation in
@@ -165,8 +168,11 @@ let index_entry_json
     ~(trigger_reason : string)
     ~(context_ratio : float)
     ~(model : string) =
+  (* RFC-0132 PR-2: lineage emit surface = external boundary; redact via SSOT. *)
   let _ = model in
-  let model = "runtime" in
+  let model =
+    Boundary_redaction.to_string Boundary_redaction.runtime_model_label
+  in
   let child_trace_id = Keeper_id.Trace_id.to_string child.runtime.trace_id in
   let parent_generation = parent.runtime.generation in
   let child_generation = child.runtime.generation in

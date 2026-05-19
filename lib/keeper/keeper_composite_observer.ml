@@ -114,6 +114,13 @@ type last_outcome = {
   selected_model : string option;
 }
 
+type live_turn = {
+  turn_id : int;
+  started_at : float;
+  last_progress_at : float;
+  last_progress_kind : string option;
+}
+
 type snapshot = {
   keeper_name : string;
   correlation_id : string;
@@ -129,6 +136,7 @@ type snapshot = {
   invariants : invariants_check;
   conditions : Keeper_state_machine.conditions;
   is_live : bool;
+  live_turn : live_turn option;
   last_outcome : last_outcome option;
   fiber_stop_flag : bool;
   fiber_wakeup_flag : bool;
@@ -466,6 +474,17 @@ let observe
     invariants;
     conditions = entry.conditions;
     is_live;
+    live_turn =
+      (match entry.current_turn_observation with
+       | Some obs ->
+         Some
+           {
+             turn_id = obs.turn_id;
+             started_at = obs.started_at;
+             last_progress_at = obs.last_progress_at;
+             last_progress_kind = obs.last_progress_kind;
+           }
+       | None -> None);
     last_outcome =
       (match entry.last_completed_turn with
        | Some lc ->
@@ -654,6 +673,18 @@ let snapshot_to_json (s : snapshot) : Yojson.Safe.t =
     "phase_diagnosis", phase_diagnosis_to_json
       ~current_phase:s.phase s.conditions;
     "is_live", `Bool s.is_live;
+    "live_turn", (match s.live_turn with
+      | Some live ->
+        `Assoc [
+          "turn_id", `Int live.turn_id;
+          "started_at", `Float live.started_at;
+          "last_progress_at", `Float live.last_progress_at;
+          "last_progress_kind",
+            (match live.last_progress_kind with
+             | Some kind -> `String kind
+             | None -> `Null);
+        ]
+      | None -> `Null);
     "last_outcome", (match s.last_outcome with
       | Some lo -> `Assoc [
           "turn_id", `Int lo.turn_id;

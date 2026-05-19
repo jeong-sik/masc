@@ -1065,6 +1065,11 @@ let json_string_eq key json expected =
 ;;
 
 let composite_latest_activity_epoch snapshot execution =
+  let live_turn_progress_epoch =
+    match json_member "live_turn" snapshot with
+    | `Assoc _ as live_turn -> json_number "last_progress_at" live_turn
+    | _ -> None
+  in
   let last_outcome_epoch =
     match json_member "last_outcome" snapshot with
     | `Assoc _ as last_outcome -> json_number "ended_at" last_outcome
@@ -1075,10 +1080,11 @@ let composite_latest_activity_epoch snapshot execution =
     | Some raw -> Masc_domain.parse_iso8601_opt raw
     | None -> None
   in
-  match last_outcome_epoch, receipt_epoch with
-  | Some a, Some b -> Some (max a b)
-  | Some value, None | None, Some value -> Some value
-  | None, None -> None
+  [ live_turn_progress_epoch; last_outcome_epoch; receipt_epoch ]
+  |> List.filter_map Fun.id
+  |> function
+  | [] -> None
+  | first :: rest -> Some (List.fold_left max first rest)
 ;;
 
 let composite_snapshot_is_idle snapshot =
@@ -1246,12 +1252,54 @@ let composite_execution_blocked execution =
   | _ -> false
 ;;
 
+let composite_execution_receipt_present execution =
+  Option.value ~default:false (json_bool "latest_receipt_present" execution)
+;;
+
+let composite_execution_receipt_epoch execution =
+  match json_string "recorded_at" execution with
+  | Some raw -> Masc_domain.parse_iso8601_opt raw
+  | None -> None
+;;
+
+let composite_live_turn_started_epoch snapshot =
+  match json_member "live_turn" snapshot with
+  | `Assoc _ as live_turn -> json_number "started_at" live_turn
+  | _ -> None
+;;
+
+let composite_live_turn_last_progress_epoch snapshot =
+  match json_member "live_turn" snapshot with
+  | `Assoc _ as live_turn -> json_number "last_progress_at" live_turn
+  | _ -> None
+;;
+
+let composite_execution_current_for_runtime_state ~snapshot ~execution =
+  if not (composite_execution_receipt_present execution)
+  then true
+  else (
+    let is_live = Option.value ~default:false (json_bool "is_live" snapshot) in
+    if not is_live
+    then true
+    else
+      match
+        ( composite_live_turn_started_epoch snapshot,
+          composite_execution_receipt_epoch execution )
+      with
+      | Some live_started_at, Some receipt_at -> receipt_at >= live_started_at
+      | _ -> false)
+;;
+
 type composite_runtime_attention =
   { cra_is_live : bool
   ; cra_fiber_stop_requested : bool
   ; cra_stale_long_enough : bool
   ; cra_idle_attention : bool
   ; cra_blocked : bool
+  ; cra_execution_current : bool
+  ; cra_stale_execution_receipt : bool
+  ; cra_live_turn_started_at : float option
+  ; cra_live_turn_last_progress_at : float option
   ; cra_stale_without_live_turn : bool
   ; cra_needs_attention : bool
   ; cra_reason : string option
@@ -1273,26 +1321,39 @@ let composite_runtime_attention ~snapshot ~execution =
   let idle_attention =
     is_live && composite_snapshot_is_idle snapshot && stale_long_enough
   in
-  let blocked = composite_execution_blocked execution in
+  let execution_current =
+    composite_execution_current_for_runtime_state ~snapshot ~execution
+  in
+  let stale_execution_receipt =
+    composite_execution_receipt_present execution && not execution_current
+  in
+  let blocked = execution_current && composite_execution_blocked execution in
   let stale_without_live_turn = (not is_live) && stale_long_enough in
   let needs_attention =
     blocked || fiber_stop_requested || stale_without_live_turn || idle_attention
   in
-  let reason =
-    if composite_execution_claim_no_eligible execution
+  let execution_reason =
+    if not execution_current
+    then None
+    else if composite_execution_claim_no_eligible execution
     then Some "claim_scope_no_eligible"
     else match json_string "operator_disposition_reason" execution with
     | Some value when String.trim value <> "" -> Some value
     | _ ->
       (match json_string "terminal_reason_code" execution with
        | Some value when String.trim value <> "" -> Some value
-       | _ when fiber_stop_requested -> Some "fiber_stop_requested"
-       | _ when idle_attention -> Some "idle_composite"
-       | _ when stale_without_live_turn -> Some "not_live"
        | _ when needs_attention && composite_execution_config_drift execution ->
          Some "keeper_cascade_override_drift"
        | _ when blocked -> Some "runtime_blocked"
        | _ -> None)
+  in
+  let reason =
+    match execution_reason with
+    | Some _ as reason -> reason
+    | None when fiber_stop_requested -> Some "fiber_stop_requested"
+    | None when idle_attention -> Some "idle_composite"
+    | None when stale_without_live_turn -> Some "not_live"
+    | None -> None
   in
   let state =
     if blocked
@@ -1310,6 +1371,10 @@ let composite_runtime_attention ~snapshot ~execution =
   ; cra_stale_long_enough = stale_long_enough
   ; cra_idle_attention = idle_attention
   ; cra_blocked = blocked
+  ; cra_execution_current = execution_current
+  ; cra_stale_execution_receipt = stale_execution_receipt
+  ; cra_live_turn_started_at = composite_live_turn_started_epoch snapshot
+  ; cra_live_turn_last_progress_at = composite_live_turn_last_progress_epoch snapshot
   ; cra_stale_without_live_turn = stale_without_live_turn
   ; cra_needs_attention = needs_attention
   ; cra_reason = reason
@@ -1326,10 +1391,18 @@ let composite_runtime_attention_json attention ~snapshot =
     ; "reason", Json_util.string_opt_to_json attention.cra_reason
     ; "raw_phase", Json_util.string_opt_to_json (json_string "phase" snapshot)
     ; "is_live", `Bool attention.cra_is_live
+    ; "execution_current", `Bool attention.cra_execution_current
+    ; "stale_execution_receipt", `Bool attention.cra_stale_execution_receipt
+    ; "live_turn_started_at",
+      Json_util.float_opt_to_json attention.cra_live_turn_started_at
+    ; "live_turn_last_progress_at",
+      Json_util.float_opt_to_json attention.cra_live_turn_last_progress_at
     ; ( "source"
       , `String
           (if attention.cra_blocked
            then "execution_receipt"
+           else if attention.cra_stale_execution_receipt
+           then "live_turn"
            else if attention.cra_fiber_stop_requested
            then "registry_fiber_stop"
            else "composite_snapshot") )

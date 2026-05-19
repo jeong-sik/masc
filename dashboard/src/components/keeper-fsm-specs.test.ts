@@ -296,4 +296,24 @@ describe('buildTurnFsmSpec', () => {
       expect.objectContaining({ source: 'idle', target: 'prompting', label: 'StartTurn' }),
     ]))
   })
+
+  // Drift guard: mirrors `lib/keeper/keeper_registry_types.ml:259-291`
+  // `module Turn_phase_transition`. Each GADT constructor is a valid
+  // turn_phase transition the OCaml runtime can take, and the FSM
+  // visualization must list every one of them. If the OCaml GADT gains
+  // or loses a constructor, this test fails until both sides are aligned.
+  it('exposes every (from, to) pair from the OCaml Turn_phase_transition GADT', () => {
+    const spec = buildTurnFsmSpec('executing')
+    const expected = new Set([
+      'idle->prompting',
+      'prompting->routing', 'prompting->executing', 'prompting->finalizing', 'prompting->exhausted',
+      'routing->prompting', 'routing->executing', 'routing->exhausted',
+      'executing->prompting', 'executing->routing', 'executing->compacting', 'executing->finalizing', 'executing->exhausted',
+      'compacting->prompting', 'compacting->finalizing', 'compacting->exhausted',
+      'finalizing->prompting', 'finalizing->routing', 'finalizing->executing', 'finalizing->exhausted',
+      'exhausted->prompting', 'exhausted->routing', 'exhausted->executing',
+    ])
+    const seen = new Set(spec.edges.map(e => `${e.source}->${e.target}`))
+    expect(seen).toEqual(expected)
+  })
 })

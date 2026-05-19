@@ -409,6 +409,8 @@ val metric_keeper_episode_create_failures : string
 val metric_keeper_memory_activity_emit_failures : string
 val metric_keeper_supervisor_sweep_failures : string
 val metric_keeper_toml_reconcile_sweep_failures : string
+val metric_keeper_toml_reconcile_dedup : string
+val metric_keeper_reconcile_disabled : string
 val metric_keeper_tool_usage_flush_failures : string
 val metric_keeper_turn_timeout_committed : string
 val metric_keeper_turn_error_after_tools : string

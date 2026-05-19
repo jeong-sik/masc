@@ -564,11 +564,7 @@ let satisfied_required_tool_names_of_outcomes
     (calls : (string * string) list) =
   calls
   |> List.filter_map (fun (tool_name, outcome) ->
-    if String.equal outcome "ok"
-       && Keeper_tool_disclosure.tool_name_can_satisfy_required_contract
-            tool_name
-    then Some tool_name
-    else None)
+    if String.equal outcome "ok" then Some tool_name else None)
   |> Keeper_types.dedupe_keep_order
 
 let preferred_tool_choice_for_required_tool_names

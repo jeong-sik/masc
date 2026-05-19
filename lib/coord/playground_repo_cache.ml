@@ -18,11 +18,26 @@ let git_meta repo_path args =
   Masc_exec.Exec_gate.run_argv_with_status ~actor:`Coord_git ~raw_source:("git -C " ^ repo_path ^ " " ^ String.concat " " args) ~summary:"git metadata query" ~timeout_sec:git_meta_timeout_sec
     ("git" :: "-C" :: repo_path :: args)
 
-let cache_update_mu = Stdlib.Mutex.create ()
+let cache_update_eio_mu = Eio.Mutex.create ()
+let cache_update_std_mu = Stdlib.Mutex.create ()
 
+(* Cache writes include Fs_compat I/O, which can yield under Eio.  Use an
+   Eio mutex in fibers so same-domain concurrent updates queue cooperatively;
+   keep a Stdlib fallback for direct non-Eio test/helper calls. *)
 let with_cache_update_lock f =
-  Stdlib.Mutex.lock cache_update_mu;
-  Fun.protect ~finally:(fun () -> Stdlib.Mutex.unlock cache_update_mu) f
+  let with_stdlib_lock () =
+    Stdlib.Mutex.lock cache_update_std_mu;
+    Fun.protect ~finally:(fun () -> Stdlib.Mutex.unlock cache_update_std_mu) f
+  in
+  let inside_eio =
+    try
+      Eio.Fiber.check ();
+      true
+    with Stdlib.Effect.Unhandled _ -> false
+  in
+  if inside_eio
+  then Eio.Mutex.use_rw ~protect:true cache_update_eio_mu f
+  else with_stdlib_lock ()
 
 let is_shallow_repo repo_path =
   try

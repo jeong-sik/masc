@@ -668,7 +668,15 @@ let take_first_n n lst =
 
 (** Composite health score: success_rate * speed_score * cost_score.
     - speed_score: p95 latency based. None = 1.0 (no penalty without data).
-    - cost_score: placeholder 1.0 (cost tracking not yet wired). *)
+    - cost_score: banded thresholds from {!cost_score_of_avg} over the
+      average cost ring populated by {!record_event} when [cost_usd]
+      is provided. None = 1.0 (no penalty until samples accumulate).
+
+    The function is total in the score arguments — callers receive the
+    multiplied score regardless of whether samples exist. Read together
+    with {!build_info_locked} which feeds [avg_cost_locked] through
+    [cost_score_of_avg]; the dashboard's per-provider cost banding is
+    therefore wired end-to-end (no longer a stub). *)
 let compute_health_score ~success_rate ~p95_latency_ms_opt ~cost_score_opt =
   let speed_score =
     match p95_latency_ms_opt with

@@ -85,10 +85,15 @@ val validate : mode:allowlist_mode -> bash_input -> (unit, validation_error) res
     effects, no exceptions. *)
 
 val to_shell_ir :
-  mode:allowlist_mode -> bash_input -> (Masc_exec.Shell_ir.t, validation_error) result
+  ?sandbox:Masc_exec.Sandbox_target.t ->
+  mode:allowlist_mode ->
+  bash_input ->
+  (Masc_exec.Shell_ir.t, validation_error) result
 (** Validate and lower [input] into {!Masc_exec.Shell_ir.t}.  [Pipeline]
     inputs become an explicit {!Masc_exec.Shell_ir.Pipeline}; literal ["|"]
-    argv tokens remain ordinary argument data and never create a pipeline. *)
+    argv tokens remain ordinary argument data and never create a pipeline.
+    [sandbox] defaults to host execution; keeper callers may provide Docker
+    runtime targets after sandbox/profile resolution. *)
 
 val pp_validation_error : Format.formatter -> validation_error -> unit
 (** Human-readable formatter for {!validation_error}.  Stable across

@@ -5,35 +5,38 @@ import { isObservedStall } from './fsm-hub-lane-analysis'
 // isObservedStall
 // ================================================================
 
+// Wire format is lowercase + snake_case (phase_to_string in
+// keeper_state_machine.ml:21-35). Prior fixtures asserted PascalCase
+// that never reached the function in production — mock↔mock loophole.
 describe('isObservedStall', () => {
   // --- phase lane ---
 
-  it('detects Failing stall at 90s', () => {
-    expect(isObservedStall('phase', 'Failing', 90)).toBe(true)
+  it('detects failing stall at 90s', () => {
+    expect(isObservedStall('phase', 'failing', 90)).toBe(true)
   })
 
-  it('does not detect Failing stall below 90s', () => {
-    expect(isObservedStall('phase', 'Failing', 89)).toBe(false)
+  it('does not detect failing stall below 90s', () => {
+    expect(isObservedStall('phase', 'failing', 89)).toBe(false)
   })
 
-  it('detects Overflowed stall at 60s', () => {
-    expect(isObservedStall('phase', 'Overflowed', 60)).toBe(true)
+  it('detects overflowed stall at 60s', () => {
+    expect(isObservedStall('phase', 'overflowed', 60)).toBe(true)
   })
 
-  it('detects Compacting stall at 90s', () => {
-    expect(isObservedStall('phase', 'Compacting', 90)).toBe(true)
+  it('detects compacting stall at 90s', () => {
+    expect(isObservedStall('phase', 'compacting', 90)).toBe(true)
   })
 
-  it('detects HandingOff stall at 60s', () => {
-    expect(isObservedStall('phase', 'HandingOff', 60)).toBe(true)
+  it('detects handing_off stall at 60s', () => {
+    expect(isObservedStall('phase', 'handing_off', 60)).toBe(true)
   })
 
-  it('detects Draining stall at 60s', () => {
-    expect(isObservedStall('phase', 'Draining', 60)).toBe(true)
+  it('detects draining stall at 60s', () => {
+    expect(isObservedStall('phase', 'draining', 60)).toBe(true)
   })
 
-  it('does not detect Running stall', () => {
-    expect(isObservedStall('phase', 'Running', 120)).toBe(false)
+  it('does not detect running stall', () => {
+    expect(isObservedStall('phase', 'running', 120)).toBe(false)
   })
 
   // --- turn lane ---

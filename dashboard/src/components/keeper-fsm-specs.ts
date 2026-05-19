@@ -68,23 +68,43 @@ const TURN_FSM_STATE_ALIASES: Readonly<Record<string, KeeperTurnFsmState>> = {
   awaiting_tool: 'awaiting_tool_result',
 }
 
+// 23 canonical turn_phase transitions. Mirrors the GADT enumeration in
+// `lib/keeper/keeper_registry_types.ml:259-291 module Turn_phase_transition`
+// (RFC-0072 Phase 4b/5). Every constructor on the GADT corresponds to one
+// edge here; adding a new constructor in OCaml must be paired with a new
+// edge in this list, otherwise the dashboard visualization hides a real
+// transition the runtime can take. The previous list omitted the four
+// `* -> exhausted` arms from prompting/routing/compacting/finalizing,
+// surfacing only the `executing -> exhausted` path even though cascade
+// exhaustion can be entered from any non-terminal turn phase.
 const TURN_FSM_EDGES: FsmEdge[] = [
+  // From Idle (1): boot dispatch.
   { source: 'idle', target: 'prompting', label: 'StartTurn' },
+  // From Prompting (4): routing / executing / finalizing / exhausted.
   { source: 'prompting', target: 'routing', label: 'RouteOk' },
   { source: 'prompting', target: 'executing', label: 'SkipRouting' },
   { source: 'prompting', target: 'finalizing', label: 'SkipExecution' },
-  { source: 'routing', target: 'executing', label: 'CascadeRouted', type: 'cascade' },
+  { source: 'prompting', target: 'exhausted', label: 'Exhausted', type: 'error' },
+  // From Routing (3): retry-back / dispatch / exhausted.
   { source: 'routing', target: 'prompting', label: 'Retry' },
+  { source: 'routing', target: 'executing', label: 'CascadeRouted', type: 'cascade' },
+  { source: 'routing', target: 'exhausted', label: 'Exhausted', type: 'error' },
+  // From Executing (5): retry-back / re-entry / compacting / completion / exhausted.
+  { source: 'executing', target: 'prompting', label: 'Retry' },
+  { source: 'executing', target: 'routing', label: 'Retry' },
   { source: 'executing', target: 'compacting', label: 'CompactionGate' },
   { source: 'executing', target: 'finalizing', label: 'Complete' },
   { source: 'executing', target: 'exhausted', label: 'Exhausted', type: 'error' },
-  { source: 'executing', target: 'routing', label: 'Retry' },
-  { source: 'executing', target: 'prompting', label: 'Retry' },
-  { source: 'compacting', target: 'finalizing', label: 'CompactionDone', type: 'recovery' },
+  // From Compacting (3): retry / completion / exhausted.
   { source: 'compacting', target: 'prompting', label: 'CompactionRetry' },
+  { source: 'compacting', target: 'finalizing', label: 'CompactionDone', type: 'recovery' },
+  { source: 'compacting', target: 'exhausted', label: 'Exhausted', type: 'error' },
+  // From Finalizing (4): degraded retry across phases / exhausted.
   { source: 'finalizing', target: 'prompting', label: 'NextTurn' },
   { source: 'finalizing', target: 'routing', label: 'NextTurnSkip' },
   { source: 'finalizing', target: 'executing', label: 'NextTurnDirect' },
+  { source: 'finalizing', target: 'exhausted', label: 'Exhausted', type: 'error' },
+  // From Exhausted (3): retry after compaction.
   { source: 'exhausted', target: 'prompting', label: 'RetryAfterExhausted' },
   { source: 'exhausted', target: 'routing', label: 'RetryAfterExhausted' },
   { source: 'exhausted', target: 'executing', label: 'RetryAfterExhausted' },

@@ -11642,6 +11642,24 @@ let test_preferred_tool_choice_for_required_turn_claims_first () =
             [ "keeper_pr_review_comment", "ok" ]));
   check
     (list string)
+    "successful passive required tool call is satisfied"
+    []
+    (Surface.outstanding_required_tool_names
+       ~required_tool_names:[ "keeper_pr_review_read"; "keeper_pr_review_comment" ]
+       ~satisfied_tool_names:
+         (Surface.satisfied_required_tool_names_of_outcomes
+            [ "keeper_pr_review_read", "ok"; "keeper_pr_review_comment", "ok" ]));
+  check
+    (list string)
+    "passive required tool does not keep forcing exact retry after review action"
+    [ "keeper_pr_review_comment" ]
+    (Surface.outstanding_required_tool_names
+       ~required_tool_names:[ "keeper_pr_review_read"; "keeper_pr_review_comment" ]
+       ~satisfied_tool_names:
+         (Surface.satisfied_required_tool_names_of_outcomes
+            [ "keeper_pr_review_read", "ok" ]));
+  check
+    (list string)
     "idempotent no-progress success stays outstanding"
     [ "masc_worktree_create" ]
     (Surface.outstanding_required_tool_names
@@ -12985,6 +13003,30 @@ let () =
               (EC.is_transient_network_error
                  (Agent_sdk.Error.Api
                     (ServerError { status = 503; message = "Service Unavailable" }))))
+        ; test_case "ServerError 522 (Cloudflare connection timeout) detected" `Quick
+          (fun () ->
+            check
+              bool
+              "522 cloudflare connection timeout is transient"
+              true
+              (EC.is_transient_network_error
+                 (Agent_sdk.Error.Api
+                    (ServerError
+                       { status = 522
+                       ; message = "Connection timed out"
+                       }))))
+        ; test_case "ServerError 524 (Cloudflare gateway timeout) detected" `Quick
+          (fun () ->
+            check
+              bool
+              "524 cloudflare timeout is transient"
+              true
+              (EC.is_transient_network_error
+                 (Agent_sdk.Error.Api
+                    (ServerError
+                       { status = 524
+                       ; message = "A timeout occurred"
+                       }))))
         ; test_case "ServerError 500 not transient" `Quick (fun () ->
             check
               bool

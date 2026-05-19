@@ -10,6 +10,7 @@ import { TimeAgo } from './common/time-ago'
 import { formatDuration } from './mission-utils'
 import type { Keeper } from '../types'
 import { StrongSecondary, RuntimeBadge } from './keeper-detail-primitives'
+import { trustDispositionLabel as resolveTrustDispositionLabel } from './fsm-hub-types'
 import { keeperNeedsDiagnosticAttention, refreshAfterRuntimeAction } from './keeper-detail-helpers'
 import { pauseKeeper, resumeKeeper, wakeKeeper } from '../api/keeper'
 import { showToast } from './common/toast'
@@ -198,11 +199,9 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
         : trustDisposition === 'Pass'
           ? 'bg-[var(--ok-10)] text-[var(--color-status-ok)]'
           : 'bg-[var(--color-bg-hover)] text-[var(--color-fg-secondary)]'
-  const trustDispositionLabel = trustDisposition
-    ? ({ Alert: '경보', Blocked: '차단', Pause: '정지', Pass: '통과' } as Record<string, string>)[
-        trustDisposition
-      ] ?? trustDisposition
-    : null
+  // Inline 4-entry copy moved to `./fsm-hub-types` so the same map
+  // doesn't drift between this surface and `goals/goal-tree.ts:194`.
+  const trustDispositionLabel = resolveTrustDispositionLabel(trustDisposition)
 
   return html`
     <div class="px-6 pt-4">

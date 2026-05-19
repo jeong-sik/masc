@@ -33,6 +33,7 @@
  prometheus_format
  prometheus_key
  prometheus_store
+ prometheus_render
  prometheus_process
  prometheus_builtin_metric_names
  prometheus_builtin_metrics_part1
@@ -72,6 +73,7 @@
  dashboard_mission_assembly
  keeper_persona_authoring_contract
  keeper_persona_authoring_slug
+ keeper_types_profile_sandbox
  keeper_types_profile
  keeper_meta_tool_access
  keeper_meta_contract
@@ -90,6 +92,7 @@
  dashboard_http_keeper_outcomes
  dashboard_http_keeper_trust
  dashboard_http_keeper
+ server_dashboard_http_keeper_api_checkpoints
  server_dashboard_http_keeper_runtime_manifest_scan
  server_dashboard_http_keeper_runtime_lens_proof
  server_dashboard_http_keeper_runtime_lens_swimlane
@@ -108,6 +111,7 @@
  server_routes_http_routes_room
  server_routes_http_routes_dashboard
  server_routes_http_routes_activity
+ server_runtime_config_root_bootstrap
  server_mcp_transport_http_types
  server_mcp_transport_http_session
  server_mcp_transport_http_headers
@@ -137,6 +141,7 @@
    keeper_shell_bg_task
    keeper_shell_shared
    keeper_shell_bash_words
+   keeper_shell_bash_redirects
    keeper_shell_bash
    keeper_shell_ops
    keeper_exec_shell
@@ -164,8 +169,10 @@
   keeper_fs
   keeper_identity
   keeper_current_task_reconcile keeper_checkpoint_store
+  keeper_registry_orphan_drops
   keeper_text_processing
   keeper_summarizer
+  keeper_context_core_message_json
   keeper_context_core
   keeper_compact_policy
   keeper_compact_audit
@@ -179,6 +186,7 @@
   keeper_agent_result
   keeper_agent_error
   keeper_agent_memory_episode
+  keeper_run_tools_search
   provider_runtime_projection
   voice_bridge_transport
   cascade_wire_overlay
@@ -209,6 +217,7 @@
   keeper_turn_lifecycle
   keeper_msg_async
   keeper_event_bus
+  keeper_supervisor_startup_helpers
   keeper_supervisor_alive_but_stuck
   keeper_supervisor_liveness_recovery
   keeper_supervisor_restart_noop
@@ -221,6 +230,7 @@
   worker_container
   worker_container_runners
   worker_dev_tools_paths
+  worker_dev_tools_log_sanitize
   ;; keeper_memory sub-modules
   keeper_memory_policy_summary_filter
   keeper_memory_policy
@@ -265,6 +275,7 @@
   tool_schema_dsl
   tool_misc_transport
   tool_misc_admin
+  tool_keeper_persona_audit
   enforcement_status
   tool_misc_web_search
   tool_misc_web_fetch
@@ -301,6 +312,10 @@
   model_inference_metrics_reader
   model_inference_metrics_aggregate
   model_inference_metrics_json
+  ;; godfile decomposition Lane D — internal facade-only sibling of
+  ;; Tool_catalog. Owns effect_domain / tool_group types and typed-name
+  ;; inference tables. Public surface stays in tool_catalog.mli.
+  tool_catalog_inference
   )
  (libraries
    mcp_protocol
@@ -496,6 +511,10 @@
    ;; Bash subset parser (RFC v5 A1) — for shadow AST telemetry
    ;; in worker_dev_tools pending regex-to-AST migration.
    masc_mcp.masc_exec_bash_parser
+   ;; Phase 1 SSOT command gate facade (Shell IR Promotion Goal Plan
+   ;; 2026-05-18). Advisory-only in Phase 1; new callers target this
+   ;; module so Phase 2+ can retire lib-root duplicates.
+   masc_mcp.masc_exec_command_gate
    ;; Autoresearch leaf modules (types, serde, storage, metric, git, file)
    masc_autoresearch
    ;; Board types (extracted sub-library — first step toward board isolation)

@@ -1,3 +1,8 @@
+type caller =
+  | Worker_dev_tools
+  | Tool_code_write
+  | Keeper_shell_bash
+
 type cannot_parse_kind =
   | Parse_error
   | Parse_aborted of Masc_exec.Parsed.reason_aborted
@@ -45,7 +50,11 @@ let parsed_context_of_ast ast =
   { ast; shape = shape_of_count (List.length stage_bins); stage_bins }
 ;;
 
-let parse cmd =
+let parse ?caller:_ cmd =
+  (* [caller] is captured for the upcoming telemetry partition
+     (RFC-0131 PR-3) and does not affect the parse result.  The
+     ignored-argument pattern is intentional: PR-1a establishes the
+     API surface; PR-3 wires the counters. *)
   match Masc_exec_bash_parser.Bash.parse_string cmd with
   | Masc_exec.Parsed.Parsed ast -> Ok (parsed_context_of_ast ast)
   | Masc_exec.Parsed.Parse_error _ -> Error Parse_error
@@ -74,8 +83,8 @@ let first_disallowed_stage ~allowed_commands context =
   scan 1 context.stage_bins
 ;;
 
-let validate_allowlist ?(allow_pipes = true) ~allowed_commands cmd =
-  match parse cmd with
+let validate_allowlist ?caller ?(allow_pipes = true) ~allowed_commands cmd =
+  match parse ?caller cmd with
   | Error kind -> Cannot_parse { kind }
   | Ok context ->
     let stages = stage_count context in
@@ -105,6 +114,12 @@ let validate_allowlist ?(allow_pipes = true) ~allowed_commands cmd =
             Printf.sprintf "pipeline with %d stages is not allowed" stages
         in
         Reject { context; reason; diagnostic })
+;;
+
+let caller_tag = function
+  | Worker_dev_tools -> "worker_dev_tools"
+  | Tool_code_write -> "tool_code_write"
+  | Keeper_shell_bash -> "keeper_shell_bash"
 ;;
 
 let cannot_parse_kind_tag = function

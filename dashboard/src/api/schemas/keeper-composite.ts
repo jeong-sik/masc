@@ -122,6 +122,13 @@ const KeeperLastOutcomeSchema = object({
   selected_model: nullable(string()),
 })
 
+const KeeperLiveTurnSchema = object({
+  turn_id: number(),
+  started_at: number(),
+  last_progress_at: number(),
+  last_progress_kind: nullable(string()),
+})
+
 const KeeperCompositeExecutionSchema = object({
   latest_receipt_present: boolean(),
   recorded_at: nullable(string()),
@@ -181,6 +188,10 @@ const KeeperRuntimeAttentionSchema = object({
   raw_phase: nullable(string()),
   is_live: boolean(),
   source: string(),
+  execution_current: optional(boolean()),
+  stale_execution_receipt: optional(boolean()),
+  live_turn_started_at: optional(nullable(number())),
+  live_turn_last_progress_at: optional(nullable(number())),
 })
 
 const OperatorRecommendedActionSchema = object({
@@ -227,6 +238,7 @@ export const KeeperCompositeSnapshotSchema = object({
   fsm_guard_violations: number(),
   phase_diagnosis: optional(KeeperPhaseDiagnosisSchema),
   is_live: boolean(),
+  live_turn: optional(nullable(KeeperLiveTurnSchema)),
   last_outcome: nullable(KeeperLastOutcomeSchema),
   idle_seconds: optional(number()),
   last_turn_ts: optional(number()),

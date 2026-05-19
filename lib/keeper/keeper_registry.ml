@@ -26,6 +26,7 @@ include Keeper_registry_types
 
 let registry : registry_entry StringMap.t Atomic.t = Atomic.make StringMap.empty
 let running_count_atomic = Atomic.make 0
+module Orphan_drops = Keeper_registry_orphan_drops
 
 (** CAS loop for clamped decrement.  [Atomic.fetch_and_add _ (-1)] can
     leave the counter negative if increment/decrement paths interleave,
@@ -62,76 +63,6 @@ let put_entry key entry =
   loop ()
 ;;
 
-(* P0-2 (2026-05-07): orphan turn-loop observability.
-
-   Background — [update_entry] returns silently when the key is absent
-   (the keeper was deregistered while a caller still held its name).
-   At fleet scale the WARN line is invisible: a single orphan keeper
-   emits 30+ drops per turn (each tool-dispatch + each phase setter).
-   See verifier-loop incident 2026-05-07.
-
-   Surgical observability fix:
-   - Track per-(name) drop count in a [(int * float) StringMap.t Atomic]
-     (count, first_drop_at) so we can detect "many drops in a short
-     window" without a wall-clock heuristic at every caller.
-   - Bump [metric_keeper_registry_update_dropped] every drop.
-   - Edge-trigger: when count crosses [orphan_drop_threshold] inside
-     [orphan_drop_window_sec], emit one WARN and bump
-     [metric_keeper_registry_orphan_threshold_breached] exactly once
-     per breach window.  Individual drops stay DEBUG; the metric is the
-     durable signal and the threshold log is the operator attention point.
-   - Reset state on the successful Some-entry path (orphan resolved)
-     and after the window expires.
-
-   Behavior is otherwise unchanged: the dropped update is still
-   silently absorbed (29 caller signatures preserved). Fiber
-   cancellation on orphan detection is intentionally out of scope —
-   that requires unregister-time fiber cancel and is RFC-level. *)
-let orphan_drop_threshold = 5
-let orphan_drop_window_sec = 60.0
-let orphan_drop_state : (int * float) StringMap.t Atomic.t = Atomic.make StringMap.empty
-
-(* Returns [(count, breached_now)]. [breached_now] is [true] exactly
-   on the transition from below-threshold to at-threshold within an
-   active window. *)
-let record_orphan_drop ~base_path name =
-  let key = registry_key ~base_path name in
-  let now = Time_compat.now () in
-  let rec loop () =
-    let current = Atomic.get orphan_drop_state in
-    let count, first_at, breached_now =
-      match StringMap.find_opt key current with
-      | Some (prev_count, prev_first_at)
-        when now -. prev_first_at <= orphan_drop_window_sec ->
-        let new_count = prev_count + 1 in
-        let breached =
-          prev_count < orphan_drop_threshold && new_count >= orphan_drop_threshold
-        in
-        new_count, prev_first_at, breached
-      | _ ->
-        (* Fresh window (no prior state, or prior window expired). *)
-        1, now, false
-    in
-    let updated = StringMap.add key (count, first_at) current in
-    if Atomic.compare_and_set orphan_drop_state current updated
-    then count, breached_now
-    else loop ()
-  in
-  loop ()
-;;
-
-let clear_orphan_drop ~base_path name =
-  let key = registry_key ~base_path name in
-  let rec loop () =
-    let current = Atomic.get orphan_drop_state in
-    if StringMap.mem key current
-    then (
-      let updated = StringMap.remove key current in
-      if not (Atomic.compare_and_set orphan_drop_state current updated) then loop ())
-  in
-  loop ()
-;;
-
 (** Apply [f entry] and write back.  No-op if key absent.
 
     The find + apply + write is serialised via CAS so that concurrent
@@ -143,7 +74,7 @@ let update_entry ~base_path name f =
     let current = Atomic.get registry in
     match StringMap.find_opt key current with
     | None ->
-      let count, breached = record_orphan_drop ~base_path name in
+      let count, breached = Orphan_drops.record ~base_path name in
       Prometheus.inc_counter
         Keeper_metrics.metric_keeper_registry_update_dropped
         ~labels:[ "name", name ]
@@ -161,7 +92,7 @@ let update_entry ~base_path name f =
           name
           base_path
           count
-          orphan_drop_window_sec)
+          Orphan_drops.window_sec)
       else
         Log.Keeper.debug
           "registry: update_entry name=%s base_path=%s: entry not found, update dropped \
@@ -173,7 +104,7 @@ let update_entry ~base_path name f =
       let updated = StringMap.add key (f entry) current in
       if not (Atomic.compare_and_set registry current updated)
       then loop ()
-      else clear_orphan_drop ~base_path name
+      else Orphan_drops.clear ~base_path name
   in
   loop ()
 ;;
@@ -188,7 +119,7 @@ let update_entry_if_registered ~base_path name f =
       let updated = StringMap.add key (f entry) current in
       if Atomic.compare_and_set registry current updated
       then (
-        clear_orphan_drop ~base_path name;
+        Orphan_drops.clear ~base_path name;
         true)
       else loop ()
   in

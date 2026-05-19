@@ -16,6 +16,7 @@ import { ActionButton } from '../common/button'
 import { FilterChips } from '../common/filter-chips'
 import { StatusBadge } from '../common/status-badge'
 import { ringFocusClasses } from '../common/ring'
+import { trustDispositionLabel } from '../fsm-hub-types'
 import { TimeAgo } from '../common/time-ago'
 import { TaskCreateForm } from '../task-manage/task-create-form'
 import type {
@@ -191,12 +192,9 @@ function healthLabel(health: GoalTreeNode['health']): string {
   }
 }
 
-function trustDispositionLabel(disposition: string | null | undefined): string | null {
-  if (!disposition) return null
-  return ({ Alert: '경보', Blocked: '차단', Pause: '정지', Pass: '통과' } as Record<string, string>)[
-    disposition
-  ] ?? disposition
-}
+// `trustDispositionLabel` moved to `../fsm-hub-types` to deduplicate the
+// 4-entry inline label literal that also lived in
+// `keeper-detail-alert-strip.ts:201-205`. Same map, single SSOT.
 
 function compactTrustList(items: readonly string[] | null | undefined): string[] {
   return (items ?? []).map(item => item.trim()).filter(Boolean)

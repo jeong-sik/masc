@@ -375,6 +375,16 @@ let migrate_room_to_flat (state : Mcp_server.server_state) =
 let migrate_legacy_trace_dirs (state : Mcp_server.server_state) =
   migrate_legacy_dirs_with_renames state [ ("perpetual", "traces") ]
 
+let keeper_egress_inactive_missing_reason
+    ~(metas : Keeper_types.keeper_meta list)
+    (r : Keeper_egress_audit.result) =
+  metas
+  |> List.find_opt (fun (meta : Keeper_types.keeper_meta) ->
+    String.equal meta.name r.keeper_name)
+  |> function
+  | Some meta -> Keeper_egress_audit.inactive_missing_reason meta
+  | None -> None
+
 let audit_keeper_egress_policies (state : Mcp_server.server_state) =
   (* PR-Eg2b (Leak 11): on every boot, audit each keeper's [egress.json]
      placement.  Reads only — never writes.  Writes are deferred to the
@@ -410,6 +420,14 @@ let audit_keeper_egress_policies (state : Mcp_server.server_state) =
   else begin
     let results = Keeper_egress_audit.audit_all ~config ~metas in
     let oks, missings, orphans = Keeper_egress_audit.partition results in
+    let active_missings, inactive_missings =
+      List.fold_left
+        (fun (active, inactive) r ->
+          match keeper_egress_inactive_missing_reason ~metas r with
+          | Some reason -> (active, (r, reason) :: inactive)
+          | None -> (r :: active, inactive))
+        ([], []) missings
+    in
     List.iter (fun r ->
       Log.Misc.info "%s" (Keeper_egress_audit.format_log_line r))
       oks;
@@ -417,16 +435,24 @@ let audit_keeper_egress_policies (state : Mcp_server.server_state) =
       Log.Misc.warn "%s" (Keeper_egress_audit.format_log_line r);
       Prometheus.inc_counter Prometheus.metric_egress_audit_missing
         ~labels:[("keeper", r.Keeper_egress_audit.keeper_name)] ())
-      missings;
+      active_missings;
+    List.iter
+      (fun (r, reason) ->
+        Log.Misc.info "%s inactive_reason=%s"
+          (Keeper_egress_audit.format_log_line r)
+          reason)
+      inactive_missings;
     List.iter (fun r ->
       Log.Misc.warn "%s" (Keeper_egress_audit.format_log_line r);
       Prometheus.inc_counter Prometheus.metric_egress_audit_stale_orphan
         ~labels:[("keeper", r.Keeper_egress_audit.keeper_name)] ())
       orphans;
     Log.Misc.info
-      "[egress_audit:summary] total=%d ok=%d missing=%d stale_orphan=%d"
+      "[egress_audit:summary] total=%d ok=%d missing=%d inactive_missing=%d stale_orphan=%d"
       (List.length results) (List.length oks)
-      (List.length missings) (List.length orphans)
+      (List.length active_missings)
+      (List.length inactive_missings)
+      (List.length orphans)
   end
 
 let bootstrap_server_state_blocking (state : Mcp_server.server_state) =

@@ -37,5 +37,9 @@ val format_log_line : result -> string
 (** Grep-friendly one-line summary tagged
     [[egress_audit:ok|missing|stale_orphan]]. *)
 
+val inactive_missing_reason : Keeper_types.keeper_meta -> string option
+(** [Some reason] when a missing egress policy should not page operators
+    because the keeper is intentionally inactive. *)
+
 val partition : result list -> result list * result list * result list
 (** Split into [(ok, missing, stale_orphan)] in input order. *)

@@ -61,7 +61,11 @@ MEMORY `project_cascade_tier_group_misroute_2026_05_17` is a sibling incident: c
 
 ### Phase 1 — `Json_field` helper module
 
-New `lib/cascade/json_field.ml(.mli)`:
+**Scope amendment (2026-05-20)**: the helper lives at `lib/json/json_field.ml(.mli)` — not `lib/cascade/` — because `lib/telemetry_unified.ml` carries the same JSON-extraction catch-all shape at 21 sites (`:53`, `:284-300`, `:448-525`, `:598-641`, `:899` measured 2026-05-20). Promoting the helper to `lib/json/` lets both call families share it. Both modules' migrations move under Phase 1.
+
+The original `lib/cascade/`-scoped sketch below is preserved for archival purposes; the actual module path is `lib/json/`.
+
+New `lib/json/json_field.ml(.mli)`:
 
 ```ocaml
 (** Typed extraction from Yojson.Safe.t with explicit shape-mismatch
@@ -89,7 +93,9 @@ val log_wrong_shape : label:string -> 'a extraction -> 'a option
     response classification path. *)
 ```
 
-Phase 1 replaces ~20 catch-alls. The two helpers (`to_option`, `log_wrong_shape`) keep migration mechanical while preserving the option-call-site contract.
+Phase 1 replaces ~20 catch-alls in `cascade_error_classify.ml` **plus the 21 catch-alls in `telemetry_unified.ml`** (audit 2026-05-20). The two helpers (`to_option`, `log_wrong_shape`) keep migration mechanical while preserving the option-call-site contract.
+
+The telemetry_unified sites are technically *boundary-correct* today: a non-`String value gets `None` because the Yojson variant doesn't match, and the caller already accepts `None` semantics. They are migrated alongside cascade_error_classify so that *schema drift in upstream payloads becomes operator-visible* via `log_wrong_shape` rather than silently disappearing. No data-loss bug is being fixed in telemetry_unified — the migration is purely diagnostic.
 
 `log_wrong_shape` is **not** a telemetry-as-fix workaround (RFC-0088 §3.1) because the underlying *fix* is the typed variant — the log is a diagnostic affordance for the case where schema drift is unavoidable (third-party provider response).
 
@@ -116,14 +122,14 @@ The variant has ~25 constructors; the audit will publish which are reachable fro
 ## 6. Non-goals
 
 - Replacing `Yojson` with a typed schema (e.g. `atd`). Out of scope; would touch every JSON boundary in masc-mcp.
-- Touching `cascade_attempt_fsm.ml` 13-site substring classifier. Tracked separately (RFC-0042 follow-up).
-- Touching `telemetry_unified.ml` 22 catch-alls. Tracked separately.
+- Touching `cascade_attempt_fsm.ml` 13-site substring classifier. Tracked separately (RFC-0042 / RFC-0057 follow-up).
+- ~~Touching `telemetry_unified.ml` 22 catch-alls. Tracked separately.~~ **Moved into Phase 1 scope on 2026-05-20** — see Phase 1 amendment.
 
 ## 7. Test plan
 
 | Phase | Test |
 |---|---|
-| Phase 1 | Unit tests for each `Json_field` extractor — `Found`, `Wrong_shape`, `Field_absent` cases. Round-trip test: malformed `reason` field (`{"reason": 42}`) → `Wrong_shape { expected="string"; got="int" }`. |
+| Phase 1 | Unit tests for each `Json_field` extractor — `Found`, `Wrong_shape`, `Field_absent` cases. Round-trip test: malformed `reason` field (`{"reason": 42}`) → `Wrong_shape { expected="string"; got="int" }`. Telemetry_unified migration: `tool_called_detail_from_fields` against a `{"event": ["Tool_called", 42, …]}` payload (Int instead of Assoc) emits a `log_wrong_shape` line and returns `None` (same as before, with diagnostic). |
 | Phase 2 | Existing `test/test_cascade_error_classify*.ml` suites must continue to pass against the new facade. Add a "no-direct-import" lint check ensuring downstream callers go through the facade until Phase 2 closeout. |
 | Phase 3 | `dune-coverage` report shows ≥95% reachability of the post-split variant constructors. |
 
@@ -136,7 +142,7 @@ The variant has ~25 constructors; the audit will publish which are reachable fro
 
 ## 9. Open questions
 
-1. Should `Json_field` live in `lib/cascade/` or a more general `lib/json/` location? Tentative: `lib/cascade/` for Phase 1, promote to `lib/json/` if Phase 2/3 reveal callers in other subsystems.
+1. ~~Should `Json_field` live in `lib/cascade/` or a more general `lib/json/` location?~~ **Resolved 2026-05-20**: `lib/json/` from Phase 1. The same audit that produced RFC-0141 also flagged 21 sites in `lib/telemetry_unified.ml`; promoting the helper at the start avoids a later module-move and lets both call families migrate under a single PR-1.
 2. Should Phase 2 facade be deleted in the same PR as the module split, or two PRs? Two PRs — split first to surface call-site failures, then delete facade once green.
 
 ## 10. Related work

@@ -815,8 +815,34 @@ let sanitize_checkpoint_message
                 || kept_tool_result_chars + tool_chars
                    > default_max_checkpoint_tool_result_total_chars
              then
-               (* Over count or aggregate budget: stub the result *)
-               let stub_content = "[tool result cleared]" in
+               (* Over count or aggregate byte budget: stub the result.
+                  The two triggers are split into separate [reason]
+                  labels (and named in [stub_content]) so operators
+                  reading the Prometheus rate or inspecting a stubbed
+                  checkpoint know which cap to revisit, and so an
+                  LLM that later reads the checkpoint can tell that a
+                  payload was removed (and why) rather than silently
+                  reasoning over the placeholder. *)
+               let stub_reason =
+                 if kept_tool_results
+                    >= default_max_checkpoint_tool_results_per_message
+                 then "over_count"
+                 else "over_aggregate_bytes"
+               in
+               let stub_content =
+                 Printf.sprintf
+                   "[tool result cleared: reason=%s tool_use_id=%s \
+                    original_bytes=%d; removed by \
+                    Keeper_context_core.sanitize_checkpoint_message \
+                    to fit checkpoint budget]"
+                   stub_reason
+                   tool_use_id
+                   tool_chars
+               in
+               Prometheus.inc_counter
+                 Prometheus.metric_keeper_context_tool_result_compacted
+                 ~labels:[ "action", "stubbed"; "reason", stub_reason ]
+                 ();
                let stub =
                  Agent_sdk.Types.ToolResult
                    { tool_use_id;
@@ -834,7 +860,15 @@ let sanitize_checkpoint_message
                      dropped_chars = tool_chars } )
              else if tool_chars > default_max_checkpoint_tool_result_chars
              then
-               (* Individual result too large: truncate *)
+               (* Individual result too large: truncate.  The cap
+                  marker already advertises truncation in the content
+                  itself; the counter increment is what surfaces the
+                  rate to operators without log scraping. *)
+               Prometheus.inc_counter
+                 Prometheus.metric_keeper_context_tool_result_compacted
+                 ~labels:
+                   [ "action", "truncated"; "reason", "over_single_byte" ]
+                 ();
                let capped =
                  String.sub content 0
                    default_max_checkpoint_tool_result_chars

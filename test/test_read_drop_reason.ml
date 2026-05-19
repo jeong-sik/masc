@@ -24,6 +24,9 @@ let canonical : (string * R.t) list =
   ; "Decompression_error", R.Decompression_error
   ; "Path_normalization_error", R.Path_normalization_error
   ; "Stat_error", R.Stat_error
+  ; (* RFC-0134 PR-1. *)
+    "Concurrent_removal", R.Concurrent_removal
+  ; "Transient_fd_pressure", R.Transient_fd_pressure
   ]
 ;;
 
@@ -47,6 +50,54 @@ let test_unknown_wire_becomes_other () =
   match R.of_wire "totally_new_label" with
   | R.Other s -> Alcotest.(check string) "unknown → Other s" "totally_new_label" s
   | _ -> Alcotest.fail "expected Other for unknown wire"
+;;
+
+let test_rfc_0134_wire_strings () =
+  (* RFC-0134 PR-1 §3.1 wire mapping is part of the public contract;
+     PR-3 will switch caller behavior keyed on these exact byte
+     strings (e.g. "concurrent_removal" must not get re-routed to the
+     data-integrity counter). Pin them here so a typo in the
+     serialiser cannot drift them silently. *)
+  Alcotest.(check string)
+    "Concurrent_removal wire = \"concurrent_removal\""
+    "concurrent_removal"
+    (R.to_wire R.Concurrent_removal);
+  Alcotest.(check string)
+    "Transient_fd_pressure wire = \"transient_fd_pressure\""
+    "transient_fd_pressure"
+    (R.to_wire R.Transient_fd_pressure)
+;;
+
+let test_rfc_0134_new_variants_disjoint () =
+  (* The two new variants must not equal any pre-existing constructor
+     under [equal] (which would silently merge counter buckets). *)
+  let pre_existing =
+    [ R.List_dir_error
+    ; R.Entry_load_error
+    ; R.Invalid_payload
+    ; R.Json_syntax_error
+    ; R.Lock_contention
+    ; R.Schema_version_mismatch
+    ; R.Decompression_error
+    ; R.Path_normalization_error
+    ; R.Stat_error
+    ]
+  in
+  List.iter
+    (fun pre ->
+       Alcotest.(check bool)
+         (Format.asprintf "Concurrent_removal <> %a" R.pp pre)
+         false
+         (R.equal R.Concurrent_removal pre);
+       Alcotest.(check bool)
+         (Format.asprintf "Transient_fd_pressure <> %a" R.pp pre)
+         false
+         (R.equal R.Transient_fd_pressure pre))
+    pre_existing;
+  Alcotest.(check bool)
+    "Concurrent_removal <> Transient_fd_pressure"
+    false
+    (R.equal R.Concurrent_removal R.Transient_fd_pressure)
 ;;
 
 let test_legacy_constants_byte_compat () =
@@ -86,6 +137,16 @@ let () =
             "Safe_ops legacy constants byte-equal to to_wire"
             `Quick
             test_legacy_constants_byte_compat
+        ] )
+    ; ( "rfc-0134 pr-1"
+      , [ Alcotest.test_case
+            "new variants emit stable wire strings"
+            `Quick
+            test_rfc_0134_wire_strings
+        ; Alcotest.test_case
+            "new variants are disjoint from pre-existing"
+            `Quick
+            test_rfc_0134_new_variants_disjoint
         ] )
     ]
 ;;

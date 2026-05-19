@@ -76,6 +76,8 @@ let keeper_masc_path_blocked
       candidates)
 ;;
 
+(* Pipeline lives in [Tool_code_read_core] (SSOT shared with the
+   agent-side handler [Tool_code.handle_code_read]). *)
 let handle_keeper_masc_code_read
       ~(config : Coord.config)
       ~(meta : keeper_meta)
@@ -90,46 +92,16 @@ let handle_keeper_masc_code_read
     match resolve_keeper_read_path ~config ~meta ~raw_path:path with
     | Error e -> error_json e
     | Ok target ->
-      if not (Sys.file_exists target)
-      then error_json (Printf.sprintf "File not found: %s" path)
-      else if Tool_code.is_binary_file target
-      then error_json "Binary file detected"
-      else (
-        let file_size = (Unix.stat target).Unix.st_size in
-        if file_size > Tool_code.max_file_size
-        then
-          error_json
-            (Printf.sprintf
-               "File too large: %d bytes (max: %d)"
-               file_size
-               Tool_code.max_file_size)
-        else (
-          try
-            let content = Fs_compat.load_file target in
-            let lines = String.split_on_char '\n' content in
-            let total_lines = List.length lines in
-            let safe_offset = max 0 (min offset total_lines) in
-            let safe_limit = min limit (total_lines - safe_offset) in
-            let selected_lines = ref [] in
-            for i = safe_offset to safe_offset + safe_limit - 1 do
-              match List.nth_opt lines i with
-              | Some line -> selected_lines := line :: !selected_lines
-              | None -> ()
-            done;
-            let result_lines = List.rev !selected_lines in
-            Yojson.Safe.to_string
-              (`Assoc
-                  [ "path", `String path
-                  ; "offset", `Int safe_offset
-                  ; "limit", `Int safe_limit
-                  ; "total_lines", `Int total_lines
-                  ; "lines", `List (List.map (fun line -> `String line) result_lines)
-                  ])
-          with
-          | Eio.Cancel.Cancelled _ as e -> raise e
-          | exn ->
-            error_json
-              (Printf.sprintf "Failed to read file: %s" (Printexc.to_string exn)))))
+      (match
+         Tool_code_read_core.read_with_pagination
+           ~display_path:path ~validated_path:target ~offset ~limit
+       with
+       | Ok ok ->
+         Yojson.Safe.to_string
+           (Tool_code_read_core.ok_to_json ~display_path:path ok)
+       | Error err ->
+         Yojson.Safe.to_string
+           (Tool_code_read_core.read_error_to_json err)))
 ;;
 
 let handle_keeper_masc_tool

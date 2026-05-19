@@ -13,9 +13,7 @@ function humanize(code: string): string {
     .trim()
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value != null && typeof value === 'object' && !Array.isArray(value)
-}
+import { isRecord } from './type-guards'
 
 function coerceRawStopCause(raw: unknown): StopCause | null {
   if (!isRecord(raw)) return null

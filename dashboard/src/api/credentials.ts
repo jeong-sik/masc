@@ -42,9 +42,8 @@ export function coerceCredentialType(raw: unknown): CredentialType {
   return 'github'
 }
 
-export function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
+import { isRecord } from '../lib/type-guards'
+export { isRecord }
 
 export function parseCredentialState(raw: unknown): CredentialState | null {
   if (!isRecord(raw)) return null

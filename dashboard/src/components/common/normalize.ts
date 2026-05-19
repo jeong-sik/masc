@@ -1,9 +1,8 @@
 // Shared type-safe normalization utilities for unknown API/SSE payloads.
 // Single source of truth — all dashboard modules import from here.
 
-export function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
+import { isRecord } from '../../lib/type-guards'
+export { isRecord }
 
 export function asString(value: unknown): string | undefined
 export function asString(value: unknown, fallback: string): string

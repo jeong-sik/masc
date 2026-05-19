@@ -146,9 +146,7 @@ function fail<T = never>(path: string | undefined, message: string): SafeParseRe
   return { success: false, error: { issues: [{ path, message }] } }
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value)
-}
+import { isRecord } from '../lib/type-guards'
 
 function isIgnorableMcpNotification(value: unknown): boolean {
   if (!isRecord(value)) return false

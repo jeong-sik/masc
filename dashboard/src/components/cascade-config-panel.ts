@@ -11,7 +11,7 @@ import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
 import { useSignal } from '@preact/signals'
 import { fetchGateKeepers, type GateKeeperInfo } from '../api/gate'
-import { SECONDS_PER_MINUTE, SECONDS_PER_HOUR, SECONDS_PER_DAY } from '../lib/format-time'
+import { formatTimeAgo } from '../lib/format-time'
 import {
   fetchCascadeClientCapacity,
   fetchCascadeClientCapacityHistory,
@@ -870,15 +870,6 @@ function capacityTone(entry: CascadeClientCapacityEntry): 'ok' | 'warn' | 'bad' 
   return 'ok'
 }
 
-function fmtRelativeTime(tsSec: number): string {
-  const deltaSec = Date.now() / 1000 - tsSec
-  if (!Number.isFinite(deltaSec) || deltaSec < 0) return '방금'
-  if (deltaSec < 1) return '방금'
-  if (deltaSec < SECONDS_PER_MINUTE) return `${Math.floor(deltaSec)}초 전`
-  if (deltaSec < SECONDS_PER_HOUR) return `${Math.floor(deltaSec / SECONDS_PER_MINUTE)}분 전`
-  if (deltaSec < SECONDS_PER_DAY) return `${Math.floor(deltaSec / SECONDS_PER_HOUR)}시간 전`
-  return `${Math.floor(deltaSec / SECONDS_PER_DAY)}일 전`
-}
 
 function eventKindTone(kind: CascadeCapacityEventKind): 'ok' | 'neutral' | 'bad' {
   switch (kind) {
@@ -1019,7 +1010,7 @@ function StrategyTraceTable({
           const tone = traceKindTone(e.kind)
           return html`
           <tr class="border-b border-[var(--color-border-default)] last:border-b-0">
-            <td class="py-1 text-[var(--color-fg-muted)] tabular-nums">${fmtRelativeTime(e.ts)}</td>
+            <td class="py-1 text-[var(--color-fg-muted)] tabular-nums">${formatTimeAgo(e.ts)}</td>
             <td class="py-1"><code class="text-[var(--color-fg-primary)]">${e.cascade_name}</code></td>
             <td class="py-1 text-[var(--color-fg-muted)]">${e.strategy}</td>
             <${NumCell}>${e.cycle}</${NumCell}>
@@ -1054,7 +1045,7 @@ function ClientCapacityHistoryTable({
           const tone = eventKindTone(e.kind)
           return html`
           <tr class="border-b border-[var(--color-border-default)] last:border-b-0">
-            <td class="py-1 text-[var(--color-fg-muted)] tabular-nums">${fmtRelativeTime(e.ts)}</td>
+            <td class="py-1 text-[var(--color-fg-muted)] tabular-nums">${formatTimeAgo(e.ts)}</td>
             <td class="py-1"><${StatusChip} tone=${tone}>${eventKindLabel(e.kind)}<//></td>
             <td class="py-1"><code class="text-[var(--color-fg-primary)]">${e.key}</code></td>
             <${NumCell}>${e.active_after}</${NumCell}>

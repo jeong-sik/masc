@@ -14,6 +14,7 @@ import { TimeAgo } from './common/time-ago'
 import { SectionHeader } from './common/section-header'
 import { StatusChip, type StatusChipTone } from './common/status-chip'
 import { toolCategory } from './tool-call-shared'
+import { formatIndependentCounters, formatRatioPair } from './counter-format'
 import type { Keeper } from '../types'
 import type {
   KeeperCompositeSnapshot,
@@ -948,10 +949,32 @@ function runtimeTraceEventIds(trace: KeeperRuntimeTraceResponse): string {
 
 function runtimeTraceMemoryEvidence(trace: KeeperRuntimeTraceResponse): string {
   const memory = trace.memory
+  // inj present/injected is a true ratio pair: scan increments
+  // memory_injected_count unconditionally and memory_injected_present_count
+  // only when content is present, so present ≤ injected always holds.
+  // (see server_dashboard_http_keeper_runtime_manifest_scan.ml:152-154)
+  //
+  // flush success/error are independent monotonic counters; rendering as
+  // "N/M" would falsely imply a ratio. Use formatIndependentCounters.
+  //
+  // ep/proc episodes_flushed/procedures_flushed are also independent.
   return [
-    `inj ${memory.memory_injected_present_count}/${memory.memory_injected_count}`,
-    `flush ${memory.memory_flush_success_count}/${memory.memory_flush_error_count}`,
-    `ep/proc ${memory.episodes_flushed}/${memory.procedures_flushed}`,
+    `inj ${formatRatioPair({
+      numerator: memory.memory_injected_present_count,
+      denominator: memory.memory_injected_count,
+    })}`,
+    `flush ${formatIndependentCounters({
+      leftLabel: 'success',
+      leftValue: memory.memory_flush_success_count,
+      rightLabel: 'error',
+      rightValue: memory.memory_flush_error_count,
+    })}`,
+    `ep/proc ${formatIndependentCounters({
+      leftLabel: 'ep',
+      leftValue: memory.episodes_flushed,
+      rightLabel: 'proc',
+      rightValue: memory.procedures_flushed,
+    })}`,
   ].join(' · ')
 }
 
@@ -1066,15 +1089,15 @@ export function RuntimeLensSection({
         />
         <${SignalRow} label="proof tools" value=${formatLensList(proof.tools)} />
         <${SignalRow} label="network proof" value=${formatLensList(proof.network_modes)} />
-        <${SignalRow} label="context compaction" value=${`${context.context_compacted_count}/${context.context_compact_started_count}`} />
-        <${SignalRow} label="memory flush" value=${`${memory.memory_flush_success_count}/${memory.memory_flush_error_count}`} />
+        <${SignalRow} label="context compaction" value=${formatRatioPair({ numerator: context.context_compacted_count, denominator: context.context_compact_started_count })} />
+        <${SignalRow} label="memory flush" value=${formatIndependentCounters({ leftLabel: 'success', leftValue: memory.memory_flush_success_count, rightLabel: 'error', rightValue: memory.memory_flush_error_count })} />
         <${SignalRow} label="trace id" value=${compactToken(trace.trace_id)} />
         <${SignalRow}
           label="manifest file"
           value=${trace.manifest_path_present ? 'present' : 'missing'}
           title=${trace.manifest_path}
         />
-        <${SignalRow} label="manifest rows" value=${`${trace.manifest_returned_rows}/${trace.manifest_total_rows}`} />
+        <${SignalRow} label="manifest rows" value=${formatRatioPair({ numerator: trace.manifest_returned_rows, denominator: trace.manifest_total_rows })} />
         <${SignalRow} label="receipt rows" value=${trace.receipt_returned_rows} />
         <${SignalRow} label="manifest raw rows" value=${trace.manifest_rows.length} />
         <${SignalRow} label="receipt raw rows" value=${trace.receipts.length} />

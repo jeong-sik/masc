@@ -169,7 +169,7 @@ let test_rotation_skips_direct_tier_after_attempted_tier_group () =
       retry.next_cascade
   | None -> fail "Expected rotation to skip duplicate direct tier candidate"
 
-let test_required_tool_rotation_uses_explicit_fallback_hint () =
+let test_required_tool_rotation_prioritizes_tool_route_before_fallback_hint () =
   let err =
     Owne.sdk_error_of_masc_internal_error
       (Owne.Resumable_cli_session
@@ -185,18 +185,47 @@ let test_required_tool_rotation_uses_explicit_fallback_hint () =
     KEC.degraded_rotation_after_recoverable_error
       ~rotation_cascades:[ "glm-coding-with-spark"; "strict_tool_candidates" ]
       ~fallback_hint:"ollama_cloud_stable"
-      ~base_cascade:"glm-coding-with-spark"
+      ~base_cascade:"strict_tool_candidates"
+      ~effective_cascade:"strict_tool_candidates"
+      ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Required
+      ~attempted_cascades:[ "strict_tool_candidates" ]
+      err
+  with
+  | Some retry ->
+    check string "tool-required route wins" "glm-coding-with-spark"
+      retry.next_cascade;
+    check string "reason is resumable_cli_session" "resumable_cli_session"
+      (KEC.degraded_retry_reason_to_string retry.fallback_reason)
+  | None -> fail "Required-tool resumable session should use tool route"
+
+let test_required_tool_rotation_uses_fallback_hint_after_tool_route_attempted () =
+  let err =
+    Owne.sdk_error_of_masc_internal_error
+      (Owne.Resumable_cli_session
+         {
+           cascade_name = cascade_name "strict_tool_candidates";
+           detail =
+             "CLI JSON-stream transport reported a resumable session (exit 75). \
+              Resumable session available via -r.";
+           exit_code = Some 75;
+         })
+  in
+  match
+    KEC.degraded_rotation_after_recoverable_error
+      ~rotation_cascades:[ "glm-coding-with-spark"; "strict_tool_candidates" ]
+      ~fallback_hint:"ollama_cloud_stable"
+      ~base_cascade:"strict_tool_candidates"
       ~effective_cascade:"strict_tool_candidates"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Required
       ~attempted_cascades:[ "strict_tool_candidates"; "glm-coding-with-spark" ]
       err
   with
   | Some retry ->
-    check string "explicit fallback hint wins" "ollama_cloud_stable"
-      retry.next_cascade;
+    check string "explicit fallback hint remains terminal fallback"
+      "ollama_cloud_stable" retry.next_cascade;
     check string "reason is resumable_cli_session" "resumable_cli_session"
       (KEC.degraded_retry_reason_to_string retry.fallback_reason)
-  | None -> fail "Required-tool resumable session should use explicit fallback"
+  | None -> fail "Required-tool resumable session should use terminal fallback"
 
 (* ---- Status-code-aware rotation tests ----------------------------------- *)
 
@@ -391,8 +420,10 @@ let () =
             test_catalog_rotation_preserves_order_without_base_injection;
           test_case "skips direct tier after attempted tier-group" `Quick
             test_rotation_skips_direct_tier_after_attempted_tier_group;
-          test_case "required-tool rotation honors explicit fallback hint" `Quick
-            test_required_tool_rotation_uses_explicit_fallback_hint;
+          test_case "required-tool rotation prefers tool route before fallback hint" `Quick
+            test_required_tool_rotation_prioritizes_tool_route_before_fallback_hint;
+          test_case "required-tool rotation keeps fallback hint after tool route" `Quick
+            test_required_tool_rotation_uses_fallback_hint_after_tool_route_attempted;
           test_case "soft rate-limit rotates to next cascade" `Quick
             test_rotation_finds_next_cascade_for_rate_limit;
           test_case "auth error rotates to next cascade" `Quick

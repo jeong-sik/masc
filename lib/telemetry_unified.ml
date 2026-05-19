@@ -448,16 +448,16 @@ let assoc_field name = function
   | _ -> None
 
 let string_field name json =
-  match assoc_field name json with
-  | Some (`String value) ->
+  match Json_field.string json name |> Json_field.to_option with
+  | None -> None
+  | Some value ->
     let value = String.trim value in
     if value = "" then None else Some value
-  | _ -> None
+;;
 
 let bool_field name json =
-  match assoc_field name json with
-  | Some (`Bool value) -> Some value
-  | _ -> None
+  Json_field.bool json name |> Json_field.to_option
+;;
 
 let drop_prefix prefix value =
   if String.starts_with ~prefix value then

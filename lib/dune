@@ -87,6 +87,7 @@
  server_dashboard_http_cache
  server_dashboard_surface
  server_dashboard_http_perf
+ server_dashboard_http_memory_subsystems
  dashboard_http_helpers
  dashboard_http_monitoring
  dashboard_http_keeper_outcomes

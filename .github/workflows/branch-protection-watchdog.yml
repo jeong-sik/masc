@@ -15,9 +15,18 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - name: Require branch protection audit token
+        env:
+          BRANCH_PROTECTION_AUDIT_TOKEN: ${{ secrets.BRANCH_PROTECTION_AUDIT_TOKEN }}
+        run: |
+          if [[ -z "${BRANCH_PROTECTION_AUDIT_TOKEN:-}" ]]; then
+            echo "::error title=Branch protection watchdog missing audit token::Configure repository secret BRANCH_PROTECTION_AUDIT_TOKEN with a token that can read branch protection. The default GITHUB_TOKEN cannot read branch protection and must not be used as a fallback."
+            exit 1
+          fi
+
       - name: Verify main branch protection drift
         env:
-          GH_TOKEN: ${{ secrets.BRANCH_PROTECTION_AUDIT_TOKEN || github.token }}
+          GH_TOKEN: ${{ secrets.BRANCH_PROTECTION_AUDIT_TOKEN }}
           BRANCH_PROTECTION_REPOSITORY: ${{ github.repository }}
           BRANCH_PROTECTION_BRANCH: main
           BRANCH_PROTECTION_REQUIRED_CONTEXTS: CI Gate,Draft Auto-Merge Guard

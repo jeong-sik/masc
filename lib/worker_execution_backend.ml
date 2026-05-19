@@ -15,16 +15,6 @@ let of_string value =
 let to_yojson backend =
   `String (to_string backend)
 
-let json_kind_name : Yojson.Safe.t -> string = function
-  | `Null -> "null"
-  | `Bool _ -> "bool"
-  | `Int _ -> "int"
-  | `Intlit _ -> "intlit"
-  | `Float _ -> "float"
-  | `String _ -> "string"
-  | `Assoc _ -> "object"
-  | `List _ -> "array"
-
 let of_yojson = function
   | `String value -> (
       match of_string value with
@@ -36,4 +26,4 @@ let of_yojson = function
       Error
         (Printf.sprintf
            "worker execution backend must be a string (received %s)"
-           (json_kind_name other))
+           (Json_util.kind_name other))

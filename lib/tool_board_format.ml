@@ -19,17 +19,6 @@ module Float = Stdlib.Float
     truncated-markdown detector, and the Yojson-error boundary shared
     across the [Tool_board] submodules. Stage 10 split. *)
 
-let json_kind_name : Yojson.Safe.t -> string = function
-  | `Null -> "null"
-  | `Bool _ -> "bool"
-  | `Int _ -> "int"
-  | `Intlit _ -> "intlit"
-  | `Float _ -> "float"
-  | `String _ -> "string"
-  | `Assoc _ -> "object"
-  | `List _ -> "array"
-;;
-
 (** Strip [STATE]...[/STATE] blocks. Inlined to avoid the
     Keeper_prompt dependency cycle via Keeper_alerting. *)
 let strip_state_blocks_text (s : string) : string =
@@ -552,7 +541,7 @@ let provenance_arg args =
        Error
          (Printf.sprintf
             "provenance must be an object (received %s)"
-            (json_kind_name other))
+            (Json_util.kind_name other))
      | _ -> Ok (`Assoc []))
   | _ -> Ok (`Assoc [])
 ;;

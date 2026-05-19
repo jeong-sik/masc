@@ -8,16 +8,6 @@
 
 open Yojson.Safe.Util
 
-let json_kind_name : Yojson.Safe.t -> string = function
-  | `Null -> "null"
-  | `Bool _ -> "bool"
-  | `Int _ -> "int"
-  | `Intlit _ -> "intlit"
-  | `Float _ -> "float"
-  | `String _ -> "string"
-  | `Assoc _ -> "object"
-  | `List _ -> "array"
-
 let parse_task_contract args =
   match args |> member "contract" with
   | `Null -> Ok None
@@ -31,7 +21,7 @@ let parse_task_contract args =
       Error
         (Printf.sprintf
            "contract must be an object when provided (received %s)"
-           (json_kind_name other))
+           (Json_util.kind_name other))
 
 let is_internal_marker key =
   String.length key > 0 && Char.equal key.[0] '_'
@@ -163,7 +153,7 @@ let parse_handoff_context ~(agent_name : string)
       Error
         (Printf.sprintf
            "handoff_context must be an object when provided (received %s)"
-           (json_kind_name other))
+           (Json_util.kind_name other))
 
 let transition_known_args =
   [

@@ -3,7 +3,7 @@ rfc: "0136"
 title: "Keeper Unified Turn — Phase 4: Retry Loop Body Decomposition"
 status: Active
 created: 2026-05-19
-updated: 2026-05-19
+updated: 2026-05-20
 author: vincent
 supersedes: []
 superseded_by: null

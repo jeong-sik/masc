@@ -443,6 +443,19 @@ let test_validate_code_shell_command_allows_quoted_regex_alternation () =
     (Tool_code_write.validate_code_shell_command
        "rg 'keeper.*tool|tool.*keeper' --type=ml -l | head -20")
 
+let test_validate_code_shell_command_allows_log_regression_shapes () =
+  check (result unit string) "escaped alternation from logs stays inside rg"
+    (Ok ())
+    (Tool_code_write.validate_code_shell_command
+       "rg -n \"cancel\\|Switch\\|Fiber\" lib/telemetry_eio.ml");
+  check (result unit string) "type-filtered escaped alternation stays inside rg"
+    (Ok ())
+    (Tool_code_write.validate_code_shell_command
+       "rg \"of_yojson\\|to_yojson\" --type ml -n lib/tool_args.ml");
+  check (result unit string) "find allows stderr dev-null sink" (Ok ())
+    (Tool_code_write.validate_code_shell_command
+       "find . -name \"cascade.toml\" -type f 2>/dev/null")
+
 let test_validate_code_shell_command_uses_code_shell_allowlist_hint () =
   match Tool_code_write.validate_code_shell_command "python3 --version" with
   | Error reason ->
@@ -1039,6 +1052,8 @@ let () =
         test_validate_code_shell_command_allows_sed_and_pwd;
       test_case "allows quoted regex alternation" `Quick
         test_validate_code_shell_command_allows_quoted_regex_alternation;
+      test_case "allows log-derived read command shapes" `Quick
+        test_validate_code_shell_command_allows_log_regression_shapes;
       test_case "uses code shell allowlist hint" `Quick
         test_validate_code_shell_command_uses_code_shell_allowlist_hint;
       test_case "rejects semicolon" `Quick

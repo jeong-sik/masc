@@ -828,6 +828,33 @@ module Dashboard = struct
   let render_timeout_sec =
     Float.max 5.0
       (get_float ~default:60.0 "MASC_DASHBOARD_RENDER_TIMEOUT_SEC")
+
+  (** Full-health snapshot proactive refresh timeout (seconds).
+
+      Caps a single [/health?full=1] cache refresh attempt in
+      [Server_routes_http_runtime.start_full_health_snapshot_refresh_loop].
+      Default 8s preserves the pre-extraction literal at
+      [server_routes_http_runtime.ml:807]. The effective value is then
+      clamped to be at least [shell_timeout_sec] so the full-health
+      refresh budget never undershoots the dashboard shell render
+      budget (the test
+      [test_full_health_refresh_budget_tracks_shell_budget] enforces
+      this).  Floor 1s prevents degenerate operator overrides. *)
+  let full_health_refresh_timeout_sec =
+    Float.max 1.0
+      (get_float ~default:8.0 "MASC_FULL_HEALTH_REFRESH_TIMEOUT_SEC")
+
+  (** Number of consecutive [/health?full=1] cache-refresh failures
+      that must accumulate before
+      [masc_full_health_refresh_critical_total] is incremented exactly
+      once (the counter fires on the edge, not on every subsequent
+      failure).  Default 5 matches the observed "still warming"
+      threshold in production logs where 1-4 transient timeouts
+      typically self-recover.  Floor 1 keeps the counter at least
+      reachable.  *)
+  let full_health_critical_failure_threshold =
+    Stdlib.max 1
+      (get_int ~default:5 "MASC_FULL_HEALTH_CRITICAL_FAILURE_THRESHOLD")
 end
 
 (** {1 Internal Timers and TTLs}

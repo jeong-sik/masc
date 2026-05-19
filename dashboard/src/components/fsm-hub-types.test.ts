@@ -162,9 +162,7 @@ describe('constants', () => {
 describe('initialHubState', () => {
   it('has correct initial values', () => {
     expect(initialHubState.keeperName).toBeNull()
-    expect(initialHubState.snapshot).toBeNull()
-    expect(initialHubState.loading).toBe(false)
-    expect(initialHubState.error).toBeNull()
+    expect(initialHubState.status.kind).toBe('idle')
     expect(initialHubState.observations).toEqual([])
     expect(initialHubState.invariantSampleCount).toBe(0)
   })

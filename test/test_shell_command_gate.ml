@@ -119,12 +119,13 @@ let test_parse_with_caller_matches_without () =
     Alcotest.failf "without=Error %s but with_caller=Ok" (Gate.cannot_parse_kind_tag wk)
 ;;
 
-(* RFC-0131 PR-1c — ?redirect_allowed policy flag.
+(* RFC-0131 PR-1b/PR-1c — typed-IR nested pipeline and redirect policy.
 
-   The bash_subset grammar classifies redirects as Too_complex `Redirect,
-   so [Gate.parse] cannot produce a parsed_context with redirects today.
-   Tests below use [Gate.validate_parsed_context] with a manually
-   constructed context to exercise the policy boundary directly. *)
+   The current bash_subset grammar (see lib/exec/parser/bash.ml's
+   [to_shell_ir]) only emits non-nested pipelines and classifies redirects
+   as Too_complex `Redirect.  The tests below exercise the typed-IR entry
+   directly to pin both policy boundaries before typed argv lowering grows
+   those shapes. *)
 
 let mk_bin name =
   match Masc_exec.Bin.of_string name with
@@ -132,22 +133,7 @@ let mk_bin name =
   | Ok bin -> bin
 ;;
 
-let mk_simple_with_file_write bin_name =
-  let bin = mk_bin bin_name in
-  let target = Masc_exec.Path_scope.classify ~raw:"out.txt" ~cwd:"/tmp" in
-  let redirect =
-    Masc_exec.Redirect_scope.File { fd = 1; target; mode = Masc_exec.Redirect_scope.Write }
-  in
-  { Masc_exec.Shell_ir.bin
-  ; args = []
-  ; env = []
-  ; cwd = None
-  ; redirects = [ redirect ]
-  ; sandbox = Masc_exec.Sandbox_target.host ()
-  }
-;;
-
-let mk_simple bin_name =
+let mk_simple bin_name : Masc_exec.Shell_ir.simple =
   let bin = mk_bin bin_name in
   { Masc_exec.Shell_ir.bin
   ; args = []
@@ -156,6 +142,15 @@ let mk_simple bin_name =
   ; redirects = []
   ; sandbox = Masc_exec.Sandbox_target.host ()
   }
+;;
+
+let mk_simple_with_file_write bin_name =
+  let simple = mk_simple bin_name in
+  let target = Masc_exec.Path_scope.classify ~raw:"out.txt" ~cwd:"/tmp" in
+  let redirect =
+    Masc_exec.Redirect_scope.File { fd = 1; target; mode = Masc_exec.Redirect_scope.Write }
+  in
+  { simple with redirects = [ redirect ] }
 ;;
 
 let mk_simple_context s =
@@ -226,6 +221,52 @@ let test_validate_allowlist_default_unchanged_with_explicit_true () =
     (Gate.decision_tag with_explicit)
 ;;
 
+let test_typed_input_flat_pipeline_round_trips () =
+  let ast =
+    Masc_exec.Shell_ir.Pipeline
+      [ Masc_exec.Shell_ir.Simple (mk_simple "rg")
+      ; Masc_exec.Shell_ir.Simple (mk_simple "head")
+      ]
+  in
+  match Gate.parsed_context_of_shell_ir ast with
+  | Ok context ->
+    Alcotest.(check int) "stage count" 2 (Gate.stage_count context);
+    check_stage_bins "stage bins" [ "rg"; "head" ] context
+  | Error kind ->
+    Alcotest.failf
+      "expected Ok for flat pipeline, got Error %s"
+      (Gate.cannot_parse_kind_tag kind)
+;;
+
+let test_typed_input_nested_pipeline_rejected () =
+  let inner =
+    Masc_exec.Shell_ir.Pipeline
+      [ Masc_exec.Shell_ir.Simple (mk_simple "sort")
+      ; Masc_exec.Shell_ir.Simple (mk_simple "head")
+      ]
+  in
+  let outer = Masc_exec.Shell_ir.Pipeline
+    [ Masc_exec.Shell_ir.Simple (mk_simple "rg"); inner ]
+  in
+  match Gate.parsed_context_of_shell_ir outer with
+  | Error (Gate.Unsupported_nested_pipeline { stage_index = 1 }) -> ()
+  | Error other ->
+    Alcotest.failf
+      "expected Unsupported_nested_pipeline at index 1, got %s"
+      (Gate.cannot_parse_kind_tag other)
+  | Ok context ->
+    Alcotest.failf
+      "expected Error, got Ok with stage_bins=[%s]"
+      (String.concat "; " context.Gate.stage_bins)
+;;
+
+let test_unsupported_nested_pipeline_tag () =
+  Alcotest.(check string)
+    "tag"
+    "unsupported_nested_pipeline"
+    (Gate.cannot_parse_kind_tag (Gate.Unsupported_nested_pipeline { stage_index = 0 }))
+;;
+
 let () =
   Alcotest.run
     "shell_command_gate"
@@ -274,6 +315,20 @@ let () =
             "default behavior unchanged with explicit ~redirect_allowed:true"
             `Quick
             test_validate_allowlist_default_unchanged_with_explicit_true
+        ] )
+    ; ( "typed_input"
+      , [ Alcotest.test_case
+            "flat pipeline round trips"
+            `Quick
+            test_typed_input_flat_pipeline_round_trips
+        ; Alcotest.test_case
+            "nested pipeline rejected with stage index"
+            `Quick
+            test_typed_input_nested_pipeline_rejected
+        ; Alcotest.test_case
+            "unsupported_nested_pipeline tag"
+            `Quick
+            test_unsupported_nested_pipeline_tag
         ] )
     ]
 ;;

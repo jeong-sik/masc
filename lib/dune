@@ -142,6 +142,7 @@
    keeper_shell_shared
    keeper_shell_bash_words
    keeper_shell_bash_redirects
+   keeper_shell_bash_task_probe
    keeper_shell_bash
    keeper_shell_ops
    keeper_exec_shell
@@ -462,6 +463,18 @@
    ;; mirrors the keeper_livelock_state pattern so the standalone
    ;; alcotest builds in seconds without dragging the main library.
    masc_mcp.keeper_tool_retry_state
+   ;; LAMBDA-HOOK-ERROR (2026-05-19): typed dedupe state for the
+   ;; Keeper_hooks_oas on_tool_error hook ERROR log noise (8 events
+   ;; from 4 distinct (keeper, tool) triples in a 1000-line system_log
+   ;; sample — keeper:verifier × Bash, lifecycle-worker-fast-1 ×
+   ;; masc_worktree_create, lifecycle-reviewer-fast-1 ×
+   ;; keeper_pr_review_comment, analyst × masc_transition). Single
+   ;; emit site at lib/keeper/keeper_hooks_oas.ml:720. Sibling of
+   ;; keeper_tool_retry_state with a (keeper, tool, signature) key.
+   ;; Stdlib-only leaf; mirrors the keeper_tool_retry_state pattern so
+   ;; the standalone alcotest builds in seconds without dragging the
+   ;; main library.
+   masc_mcp.keeper_tool_hook_error_state
    ;; RFC-0086 Phase 2.B prereq — Tool_catalog_surfaces (lib/ root, 554+103 LoC)
    ;; extracted to lib/tool_catalog_surfaces/. deps: Agent_sdk + stdlib only.
    ;; Unblocks one of 6 cycle modules identified in plan §8.14 iter-2.

@@ -21,6 +21,15 @@ type cannot_parse_kind =
   | Parse_error
   | Parse_aborted of Masc_exec.Parsed.reason_aborted
   | Too_complex of Masc_exec.Parsed.reason_too_complex
+  | Unsupported_nested_pipeline of { stage_index : int }
+      (** A [Shell_ir.Pipeline] stage was itself a [Shell_ir.Pipeline].
+          [stage_index] is the 0-based position of the offending stage.
+          The current bash_subset grammar never produces this shape, so
+          this arm is unreachable via {!parse}; it can surface from the
+          typed-IR entry {!parsed_context_of_shell_ir} when a caller
+          constructs a {!Masc_exec.Shell_ir.t} manually.  RFC-0131
+          PR-1b: replaces the prior silent flattening for fail-closed
+          policy. *)
 
 type shape =
   | Simple
@@ -61,6 +70,15 @@ val parse : ?caller:caller -> string -> (parsed_context, cannot_parse_kind) resu
 (** Parse a raw command into a reusable Shell_ir context.  [?caller] is
     captured for the upcoming telemetry partition (RFC-0131 PR-3) and
     does not affect the parse result. *)
+
+val parsed_context_of_shell_ir
+  :  Masc_exec.Shell_ir.t
+  -> (parsed_context, cannot_parse_kind) result
+(** Promote an already-parsed {!Masc_exec.Shell_ir.t} (e.g. lowered
+    from a typed argv per RFC-0091) into the same context returned by
+    {!parse}.  Nested pipelines surface as
+    {!Unsupported_nested_pipeline} rather than being silently
+    flattened — RFC-0131 PR-1b §4.5 (typed argv compatibility). *)
 
 val validate_allowlist
   :  ?caller:caller

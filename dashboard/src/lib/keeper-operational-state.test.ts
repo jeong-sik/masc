@@ -6,6 +6,7 @@ import {
   compositeIsRunning,
   compositeIsTurnIdle,
   compositePhaseTone,
+  derivePreferredPhase,
   deriveKeeperAttention,
   deriveKeeperDisplayReason,
   deriveKeeperOperationalState,
@@ -540,5 +541,32 @@ describe('deriveKeeperTurnPhase — RFC-0135 PR-14b', () => {
   })
   it('returns null when both sources empty', () => {
     expect(deriveKeeperTurnPhase({} as Keeper, null)).toBeNull()
+  })
+})
+
+describe('derivePreferredPhase — RFC-0135 PR-14d', () => {
+  it('composite wire phase wins over flat keeper.phase', () => {
+    expect(
+      derivePreferredPhase(
+        { phase: 'Running' } as Keeper,
+        { phase: 'compacting' } as unknown as KeeperCompositeSnapshot,
+      ),
+    ).toBe('Compacting')
+  })
+  it('falls back to keeper.phase when composite empty', () => {
+    expect(
+      derivePreferredPhase({ phase: 'HandingOff' } as Keeper, null),
+    ).toBe('HandingOff')
+  })
+  it('falls back to keeper.phase when composite has unknown wire value', () => {
+    expect(
+      derivePreferredPhase(
+        { phase: 'Running' } as Keeper,
+        { phase: 'inventing_new_state' } as unknown as KeeperCompositeSnapshot,
+      ),
+    ).toBe('Running')
+  })
+  it('returns null when neither source has a known phase', () => {
+    expect(derivePreferredPhase({} as Keeper, null)).toBeNull()
   })
 })

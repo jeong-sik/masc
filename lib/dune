@@ -249,6 +249,7 @@
   keeper_memory_llm_summary
   keeper_memory_recall
   keeper_status_bridge
+  keeper_runtime_trust_timeline
   keeper_hooks_oas_gate_attempt
   keeper_hooks_oas_output_json
   keeper_hooks_oas_response_metrics

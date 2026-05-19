@@ -68,6 +68,16 @@ jobs:
       - name: Run lint
         run: bash scripts/lint/no-provider-name-hardcoding.sh --fail
 
+  no-runtime-literal-outside-boundary-redaction:
+    name: Boundary redaction SSOT enforcement (RFC-0132 PR-3)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ripgrep
+        run: sudo apt-get install -y -qq ripgrep
+      - name: Run lint
+        run: bash scripts/lint/no-runtime-literal-outside-boundary-redaction.sh --fail
+
   no-fabricated-telemetry:
     name: Math.random in components
     runs-on: ubuntu-latest

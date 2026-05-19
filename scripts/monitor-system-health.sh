@@ -37,6 +37,12 @@ DISK_PCT_WARN="${MASC_SYSMON_DISK_PCT_WARN:-90}"
 DISK_PCT_CRIT="${MASC_SYSMON_DISK_PCT_CRIT:-95}"
 ALERT_COOLDOWN="${MASC_SYSMON_ALERT_COOLDOWN:-300}"
 
+# Pressure flag file. masc-mcp server (future) is expected to poll this
+# and engage Keeper_fd_pressure when level=CRIT. We always rewrite it
+# atomically so a reader sees a consistent snapshot.
+PRESSURE_STATE_FILE="${MASC_SYSMON_PRESSURE_STATE:-/tmp/masc-host-pressure.state}"
+PRESSURE_EVENTS_FILE="${MASC_SYSMON_PRESSURE_EVENTS:-/tmp/masc-host-pressure.events.jsonl}"
+
 usage() {
   cat <<'EOF'
 monitor-system-health.sh - Recurring system FD/OOM/Disk monitor with macOS alerts.
@@ -62,6 +68,16 @@ Thresholds (env override, defaults shown):
 Logs:
   <log-dir>/sysmon.log         per-iteration metrics
   <log-dir>/sysmon-alerts.log  one line per fired alert
+
+Pressure flag (for masc-mcp server integration, future):
+  /tmp/masc-host-pressure.state    latest snapshot when level != OK;
+                                   removed when system is OK.
+  /tmp/masc-host-pressure.events.jsonl  append-only history.
+  Override paths via MASC_SYSMON_PRESSURE_STATE / MASC_SYSMON_PRESSURE_EVENTS.
+  Reader contract: parse JSON line for level/kinds/summary/ts/pid.
+  Server polls this file (e.g. once per second) and invokes
+  Keeper_fd_pressure.engage when level=CRIT. Wiring is RFC-pending
+  (Keeper subsystem RFC area).
 
 Platform:
   macOS only (sysctl, vm_stat, osascript, lsof). On Linux this script exits early.
@@ -135,9 +151,28 @@ docker_playground_summary() {
   "$helper" --limit 3 2>/dev/null | head -20 | tr '\n' ' ' || true
 }
 
+write_pressure_state() {
+  # Args: level (OK|WARN|CRIT), kinds_csv ("fd,swap,..."), summary
+  local level="$1" kinds="$2" summary="$3"
+  local ts=$(date '+%FT%T%z')
+  local payload
+  payload=$(printf '{"level":"%s","kinds":"%s","summary":"%s","ts":"%s","pid":%d}' \
+            "$level" "$kinds" "$summary" "$ts" "$$")
+  if [ "$level" = "OK" ]; then
+    rm -f "$PRESSURE_STATE_FILE" 2>/dev/null || true
+  else
+    printf '%s\n' "$payload" > "${PRESSURE_STATE_FILE}.tmp" 2>/dev/null \
+      && mv -f "${PRESSURE_STATE_FILE}.tmp" "$PRESSURE_STATE_FILE" 2>/dev/null || true
+  fi
+  printf '%s\n' "$payload" >> "$PRESSURE_EVENTS_FILE" 2>/dev/null || true
+}
+
 iteration() {
   local ts num_files fd_pct swap_used_mb swap_gb free_pages free_gb load root_pct data_pct
   local docker_n ollama_n keeper_n
+  local pressure_level="OK"
+  local pressure_kinds=""
+  local pressure_summary=""
   ts=$(date '+%FT%T')
 
   num_files=$(sysctl -n kern.num_files)
@@ -162,8 +197,13 @@ iteration() {
 
   if [ "$fd_pct" -ge "$FD_PCT_CRIT" ]; then
     notify fd_total CRIT "FD ${fd_pct}%" "${num_files}/${FD_MAX} top: $(fd_top5) | docker-playground: $(docker_playground_summary)"
+    pressure_level="CRIT"; pressure_kinds="${pressure_kinds}fd_total,"
+    pressure_summary="${pressure_summary}fd=${fd_pct}% "
   elif [ "$fd_pct" -ge "$FD_PCT_WARN" ]; then
     notify fd_total WARN "FD ${fd_pct}%" "${num_files}/${FD_MAX} top: $(fd_top5)"
+    [ "$pressure_level" = "OK" ] && pressure_level="WARN"
+    pressure_kinds="${pressure_kinds}fd_total,"
+    pressure_summary="${pressure_summary}fd=${fd_pct}% "
   fi
 
   local top_line top_fd top_cmd top_pid
@@ -173,40 +213,66 @@ iteration() {
   top_pid=$(echo "$top_line" | awk '{print $3}')
   if [ "${top_fd:-0}" -ge "$FD_PROC_CRIT" ]; then
     notify "fd_proc_${top_pid}" CRIT "FD storm ${top_cmd}" "pid=${top_pid} fds=${top_fd} (max/proc=${FD_PER_PROC_MAX})"
+    pressure_level="CRIT"; pressure_kinds="${pressure_kinds}fd_proc,"
+    pressure_summary="${pressure_summary}${top_cmd}[${top_pid}]=${top_fd}fds "
   elif [ "${top_fd:-0}" -ge "$FD_PROC_WARN" ]; then
     notify "fd_proc_${top_pid}" WARN "FD elevated ${top_cmd}" "pid=${top_pid} fds=${top_fd}"
+    [ "$pressure_level" = "OK" ] && pressure_level="WARN"
+    pressure_kinds="${pressure_kinds}fd_proc,"
   fi
 
   if [ "$swap_gb" -ge "$SWAP_GB_CRIT" ]; then
     local top_mem
     top_mem=$(ps -A -o pid,rss,comm | sort -rk2 -n | head -3 | awk '{printf "%s(%dM) ", $3, $2/1024}')
     notify swap CRIT "Swap ${swap_gb}GB" "OOM risk. top RSS: $top_mem"
+    pressure_level="CRIT"; pressure_kinds="${pressure_kinds}swap,"
+    pressure_summary="${pressure_summary}swap=${swap_gb}G "
   elif [ "$swap_gb" -ge "$SWAP_GB_WARN" ]; then
     notify swap WARN "Swap ${swap_gb}GB" "memory growth"
+    [ "$pressure_level" = "OK" ] && pressure_level="WARN"
+    pressure_kinds="${pressure_kinds}swap,"
   fi
 
   if [ "$free_gb" -le "$FREE_GB_CRIT" ]; then
     notify free CRIT "Free RAM ${free_gb}GB" "imminent compressor/swap"
+    pressure_level="CRIT"; pressure_kinds="${pressure_kinds}free,"
+    pressure_summary="${pressure_summary}free=${free_gb}G "
   elif [ "$free_gb" -le "$FREE_GB_WARN" ]; then
     notify free WARN "Free RAM ${free_gb}GB" "memory pressure approaching"
+    [ "$pressure_level" = "OK" ] && pressure_level="WARN"
+    pressure_kinds="${pressure_kinds}free,"
   fi
 
   if [ "$load" -ge "$LOAD_CRIT" ]; then
     notify load CRIT "Load avg ${load}" "system saturated"
+    pressure_level="CRIT"; pressure_kinds="${pressure_kinds}load,"
+    pressure_summary="${pressure_summary}load=${load} "
   elif [ "$load" -ge "$LOAD_WARN" ]; then
     notify load WARN "Load avg ${load}" "high parallelism"
+    [ "$pressure_level" = "OK" ] && pressure_level="WARN"
+    pressure_kinds="${pressure_kinds}load,"
   fi
 
   if [ "${root_pct:-0}" -ge "$DISK_PCT_CRIT" ]; then
     notify disk_root CRIT "/ at ${root_pct}%" "sealed system volume full"
+    pressure_level="CRIT"; pressure_kinds="${pressure_kinds}disk_root,"
   elif [ "${root_pct:-0}" -ge "$DISK_PCT_WARN" ]; then
     notify disk_root WARN "/ at ${root_pct}%" ""
+    [ "$pressure_level" = "OK" ] && pressure_level="WARN"
+    pressure_kinds="${pressure_kinds}disk_root,"
   fi
   if [ "${data_pct:-0}" -ge "$DISK_PCT_CRIT" ]; then
     notify disk_data CRIT "/Data at ${data_pct}%" "user volume nearly full"
+    pressure_level="CRIT"; pressure_kinds="${pressure_kinds}disk_data,"
+    pressure_summary="${pressure_summary}/Data=${data_pct}% "
   elif [ "${data_pct:-0}" -ge "$DISK_PCT_WARN" ]; then
     notify disk_data WARN "/Data at ${data_pct}%" ""
+    [ "$pressure_level" = "OK" ] && pressure_level="WARN"
+    pressure_kinds="${pressure_kinds}disk_data,"
   fi
+
+  pressure_kinds="${pressure_kinds%,}"
+  write_pressure_state "$pressure_level" "$pressure_kinds" "${pressure_summary% }"
 }
 
 echo "$(date '+%FT%T') sysmon started pid=$$ FD_MAX=$FD_MAX FD_PER_PROC_MAX=$FD_PER_PROC_MAX interval=${INTERVAL}s once=${ONCE} notify=${NOTIFY}" >> "$LOG"

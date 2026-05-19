@@ -2,7 +2,7 @@
 
 (* Inline kind_name helper — multimodal sub-lib lists (libraries shared_types
    unix yojson) and intentionally excludes masc_core (Json_util's home) for
-   RFC-0056 dependency-leaf isolation. The 12-line cost of an inline copy is
+   RFC-0056 dependency-leaf isolation. The 10-line cost of an inline copy is
    the smaller trade-off vs widening the sub-lib's dependency surface. Iter#32
    PR #16534 set this same pattern for chronicle_event + autonomous/stimulus. *)
 let kind_name : Yojson.Safe.t -> string = function

@@ -14,6 +14,11 @@ module PD = Masc_exec.Parsed
 module ST = Masc_exec.Sandbox_target
 module BIN = Masc_exec.Bin
 
+type caller =
+  | Worker_dev_tools
+  | Tool_code_write
+  | Keeper_shell_bash
+
 type reject_reason =
   | Command_not_in_allowlist of { bin : string }
   | Pipeline_segment_disallowed of { stage : int; bin : string }
@@ -239,14 +244,19 @@ let parse_only_to_stages (parsed : SI.t PD.t) :
      | Nested_pipeline -> Error (`Too_complex Unsupported_nested_pipeline))
 ;;
 
-let gate ~raw ~allowlist ~path_policy ~sandbox : verdict =
+let gate ?caller:_ ~raw ~allowlist ~path_policy ~sandbox () : verdict =
+  (* [caller] is captured for the upcoming telemetry partition
+     (RFC-0131 PR-3) and does not affect the verdict.  The
+     ignored-argument pattern is intentional: this iter establishes
+     the API surface; PR-3 wires the counters. *)
   match parse_only_to_stages (Masc_exec_bash_parser.Bash.parse_string raw) with
   | Error (`Cannot_parse reason) -> Cannot_parse { reason }
   | Error (`Too_complex reason) -> Too_complex { reason }
   | Ok stages -> apply_policy ~allowlist ~path_policy ~sandbox ~stages
 ;;
 
-let lower_typed_pipeline ~stages ~sandbox : verdict =
+let lower_typed_pipeline ?caller:_ ~stages ~sandbox () : verdict =
+  (* See note on [gate] — [caller] is API-shape-only for now. *)
   match stages with
   | [] -> Cannot_parse { reason = Parse_error }
   | _ ->
@@ -254,6 +264,12 @@ let lower_typed_pipeline ~stages ~sandbox : verdict =
     (match make_context ~stages with
      | None -> Cannot_parse { reason = Parse_error }
      | Some context -> Allow context)
+;;
+
+let caller_tag = function
+  | Worker_dev_tools -> "worker_dev_tools"
+  | Tool_code_write -> "tool_code_write"
+  | Keeper_shell_bash -> "keeper_shell_bash"
 ;;
 
 let verdict_tag = function

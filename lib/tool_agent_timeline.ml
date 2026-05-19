@@ -362,53 +362,27 @@ let turn_completed_events (config : Coord.config) ~agent_name ~limit :
   |> List.filter_map (fun (e : Activity_graph.event) ->
        let ts = Float.of_int e.ts_ms /. 1000.0 in
        let open Yojson.Safe.Util in
-       let keeper_name =
-         try e.payload |> member "keeper_name" |> to_string
-         with Eio.Cancel.Cancelled _ as ex -> raise ex | _ -> "unknown"
-       in
-       let input_tokens =
-         try Some (e.payload |> member "input_tokens" |> to_int)
-         with Eio.Cancel.Cancelled _ as ex -> raise ex | _ -> None
-       in
-       let output_tokens =
-         try Some (e.payload |> member "output_tokens" |> to_int)
-         with Eio.Cancel.Cancelled _ as ex -> raise ex | _ -> None
-       in
+       (* Pure-shape JSON access via Safe_ops: no exception swallow, no
+          performative [Cancelled] re-raise. Behavior parity with the prior
+          [try ... |> to_X with _ -> default] pattern on missing/wrong-typed
+          fields; widens acceptance to string-coerced numerics per the
+          codebase convention documented in Safe_ops.json_*_opt. *)
+       let keeper_name = Safe_ops.json_string ~default:"unknown" "keeper_name" e.payload in
+       let input_tokens = Safe_ops.json_int_opt "input_tokens" e.payload in
+       let output_tokens = Safe_ops.json_int_opt "output_tokens" e.payload in
        let cache_creation_tokens =
-         try Some (e.payload |> member "cache_creation_tokens" |> to_int)
-         with Eio.Cancel.Cancelled _ as ex -> raise ex | _ -> None
+         Safe_ops.json_int_opt "cache_creation_tokens" e.payload
        in
-       let cache_read_tokens =
-         try Some (e.payload |> member "cache_read_tokens" |> to_int)
-         with Eio.Cancel.Cancelled _ as ex -> raise ex | _ -> None
-       in
-       let cost_usd =
-         try Some (e.payload |> member "cost_usd" |> to_float)
-         with Eio.Cancel.Cancelled _ as ex -> raise ex | _ -> None
-       in
-       let latency_ms =
-         try Some (e.payload |> member "latency_ms" |> to_int)
-         with Eio.Cancel.Cancelled _ as ex -> raise ex | _ -> None
-       in
-       let model_used =
-         try e.payload |> member "model_used" |> to_string
-         with Eio.Cancel.Cancelled _ as ex -> raise ex | _ -> "unknown"
-       in
+       let cache_read_tokens = Safe_ops.json_int_opt "cache_read_tokens" e.payload in
+       let cost_usd = Safe_ops.json_float_opt "cost_usd" e.payload in
+       let latency_ms = Safe_ops.json_int_opt "latency_ms" e.payload in
+       let model_used = Safe_ops.json_string ~default:"unknown" "model_used" e.payload in
        let work_kind =
          Keeper_unified_metrics.work_kind_of_json e.payload
          |> Option.value ~default:"unknown"
        in
-       let context_ratio =
-         try Some (e.payload |> member "context_ratio" |> to_float)
-         with Eio.Cancel.Cancelled _ as ex -> raise ex | _ -> None
-       in
-       let tools_used =
-         try e.payload |> member "tools_used" |> to_list
-             |> List.filter_map (fun j ->
-                  try Some (to_string j)
-                  with Eio.Cancel.Cancelled _ as ex -> raise ex | _ -> None)
-         with Eio.Cancel.Cancelled _ as ex -> raise ex | _ -> []
-       in
+       let context_ratio = Safe_ops.json_float_opt "context_ratio" e.payload in
+       let tools_used = Safe_ops.json_string_list "tools_used" e.payload in
        let optional_fields =
          let reasoning =
            try match e.payload |> member "reasoning_tokens" with

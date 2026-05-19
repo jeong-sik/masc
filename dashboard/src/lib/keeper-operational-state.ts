@@ -60,11 +60,33 @@ export function deriveKeeperOperationalState(
 
   const blockerClass = keeper.runtime_blocker_class ?? null
   const attention = composite?.runtime_attention ?? null
-  const executionFresh = attention?.execution_current === true
+  // `execution_current === true` is the strongest fresh-turn signal,
+  // but backend may leave it unset (or briefly `false`) while a fresh
+  // turn is in flight and the first receipt for it hasn't landed.
+  // `is_live === true` confirms a live turn is in progress; either
+  // signal is enough to treat a flat `runtime_blocker_class` as a
+  // stale prior-turn leftover rather than an active blocker (matches
+  // the `previousExecutionReceipt` interpretation in the legacy
+  // `deriveKeeperLiveTruth` path that this module is taking over).
+  const executionFresh =
+    attention?.execution_current === true || composite?.is_live === true
   const staleReceipt = attention?.stale_execution_receipt === true
 
   if (blockerClass !== null && !executionFresh) {
     return { kind: 'stuck', reason: blockerClass }
+  }
+
+  // Backend explicitly flagged the keeper as needing attention. Trust
+  // this over the flat blocker-class read — backend has already done
+  // the stale-receipt conditioning for us. When no typed
+  // `runtime_blocker_class` is present (or it's an old keeper that
+  // lost the class but kept the attention flag), fall back to the
+  // `'unknown'` StuckReason variant.
+  if (
+    attention?.blocked === true
+    || attention?.needs_attention === true
+  ) {
+    return { kind: 'stuck', reason: blockerClass ?? 'unknown' }
   }
 
   if (composite !== null && compositeFiberKnownDead(composite)) {

@@ -231,6 +231,40 @@ describe('deriveKeeperOperationalState — running branch with conditioning', ()
     })
   })
 
+  it('is_live=true with execution_current=false still treats blocker as stale (running, RFC §1.1 sibling)', () => {
+    // Backend may briefly emit `execution_current=false` early in a
+    // fresh turn — before the first receipt for it has landed — while
+    // still flagging the live turn via `is_live=true`. The flat
+    // `runtime_blocker_class` from the prior turn must not surface as
+    // an active blocker in this window. Matches the
+    // `deriveKeeperLiveTruth` fixture 2 expectation
+    // (`previousExecutionReceipt` short-circuit) that this typed-sum
+    // is taking over.
+    const state = deriveKeeperOperationalState({
+      keeper: makeKeeper({
+        phase: 'Running',
+        status: 'active',
+        runtime_blocker_class: 'cascade_exhausted',
+        runtime_blocker_summary: 'previous turn exhausted cascade',
+      }),
+      composite: makeComposite({
+        is_live: true,
+        turn_phase: 'executing',
+        runtime_attention: attention({
+          state: 'ok',
+          execution_current: false,
+          stale_execution_receipt: true,
+          blocked: false,
+        }),
+      }),
+    })
+    expect(state).toEqual<KeeperOperationalState>({
+      kind: 'running',
+      turnPhase: 'executing',
+      staleBlocker: 'cascade_exhausted',
+    })
+  })
+
   it('stale_execution_receipt=true with no blocker still surfaces as running (staleBlocker null)', () => {
     const state = deriveKeeperOperationalState({
       keeper: makeKeeper({ phase: 'Running', status: 'active' }),

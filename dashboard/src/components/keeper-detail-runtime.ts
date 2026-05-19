@@ -25,6 +25,10 @@ import { serverStatus, shellRuntimeResolution } from '../store'
 import { operatorSnapshot } from '../operator-store'
 import type { KeeperDetailEvidenceState } from './keeper-detail-hooks'
 import {
+  deriveKeeperOperationalState,
+  type KeeperOperationalState,
+} from '../lib/keeper-operational-state'
+import {
   allowlistEmptyState,
   auditMetadataState,
   linkedRuntimeState,
@@ -165,6 +169,49 @@ function terminalEventLabel(trace: KeeperRuntimeTraceResponse | null): {
   }
 }
 
+// ── Typed-state → headline / tone helpers (RFC-0135 PR-5) ───────────
+//
+// Two pure projections from `KeeperOperationalState` to the headline
+// text + tone the panel renders. Kept here (rather than inside
+// keeper-operational-state) because the *exact* Korean wording and
+// the warnings-present / runtime-trace-present overrides are
+// LIVE-TRUTH-specific cosmetics. The kind branching, however, is
+// exhaustive — TS catches new arms before they ship.
+
+function headlineForState(
+  state: KeeperOperationalState,
+  context: { fiberAlive: boolean; runtimeTracePresent: boolean },
+): string {
+  switch (state.kind) {
+    case 'offline':
+      return context.runtimeTracePresent ? '실행 미확인' : '증거 부족'
+    case 'paused':
+      return '일시정지'
+    case 'stuck':
+      return '조치 필요'
+    case 'running':
+      if (state.staleBlocker !== null) return '턴 진행 중'
+      return context.fiberAlive ? '턴 진행 중' : '대기 중'
+  }
+}
+
+function toneForState(
+  state: KeeperOperationalState,
+  context: { warningsPresent: boolean; runtimeTracePresent: boolean },
+): StatusChipTone {
+  if (context.warningsPresent) return 'warn'
+  switch (state.kind) {
+    case 'offline':
+      return context.runtimeTracePresent ? 'warn' : 'neutral'
+    case 'paused':
+      return 'warn'
+    case 'stuck':
+      return 'warn'
+    case 'running':
+      return 'ok'
+  }
+}
+
 export function deriveKeeperLiveTruth({
   keeper,
   compositeSnapshot,
@@ -177,55 +224,36 @@ export function deriveKeeperLiveTruth({
   runtimeResolution?: KeeperLiveTruthRuntimeInput | null
 }): KeeperLiveTruthSummary {
   const linkedState = linkedRuntimeState(keeper)
-  // Per-axis SSOT routing (RFC-0046 §4.3): the FSM hub below this panel is
-  // the canonical phase/turn surface, so this panel only needs `turnPhase`
-  // for the contextual "현재 턴" row detail. The old 3-way fallback
-  // `compositeSnapshot?.phase ?? keeper.phase ?? keeper.status` was the
-  // §AI코드생성 §2 Unknown-→-Permissive-Default anti-pattern that let stale
-  // flat-record fields silently feed status badges; removed here.
+  // RFC-0135 PR-5 — headline / tone / blocked are driven by the typed
+  // operational state SSOT in `lib/keeper-operational-state.ts`. The
+  // previous inline conditioning (3-OR blocked, multi-arm headline,
+  // matching tone ladder) lived in this function only; now both the
+  // roster (RFC-0135 PR-4 / `rosterStateNote`) and this LIVE TRUTH
+  // panel share the same derivation, which closes the §1.1
+  // list-vs-detail divergence at the source.
+  const state = deriveKeeperOperationalState({ keeper, composite: compositeSnapshot })
   const turnPhase = compactToken(compositeSnapshot?.turn_phase ?? keeper.pipeline_stage)
+  // `fiberAlive` and `activeTurn` are still useful as *row-level
+  // detail* (런타임 row + 현재 턴 row) even though they no longer
+  // drive the headline.
   const fiberAlive =
     compositeSnapshot?.phase_diagnosis?.conditions.fiber_alive
     ?? keeper.keepalive_running
     ?? keeper.presence_keepalive
     ?? (linkedState !== 'offline')
   const activeTurn = compositeSnapshot?.is_live === true || !isIdleTurnPhase(compositeSnapshot?.turn_phase)
-  const previousExecutionReceipt =
-    compositeSnapshot?.runtime_attention?.stale_execution_receipt === true
-    || compositeSnapshot?.runtime_attention?.execution_current === false
-  const blocked =
-    compositeSnapshot?.runtime_attention?.blocked === true
-    || compositeSnapshot?.runtime_attention?.needs_attention === true
-    || (!previousExecutionReceipt && Boolean(keeper.runtime_blocker_class))
   const stopRequested =
     compositeSnapshot?.runtime_attention?.fiber_stop_requested === true
     || compositeSnapshot?.phase_diagnosis?.conditions.stop_requested === true
   const traceEvidence = terminalEventLabel(runtimeTrace)
   const warnings = runtimeWarningList(runtimeResolution)
-  const headline =
-    stopRequested
-      ? '종료 신호'
-      : blocked
-        ? '조치 필요'
-        : fiberAlive && activeTurn
-          ? '턴 진행 중'
-          : fiberAlive
-            ? '대기 중'
-            : runtimeTrace
-              ? '실행 미확인'
-              : '증거 부족'
-  const tone: StatusChipTone =
-    stopRequested
-      ? 'bad'
-      : blocked || warnings.length > 0
-        ? 'warn'
-        : fiberAlive && activeTurn
-          ? 'ok'
-          : fiberAlive
-            ? 'neutral'
-            : runtimeTrace
-              ? 'warn'
-              : 'neutral'
+  const blocked = state.kind === 'stuck'
+  const headline = stopRequested
+    ? '종료 신호'
+    : headlineForState(state, { fiberAlive, runtimeTracePresent: runtimeTrace !== null })
+  const tone: StatusChipTone = stopRequested
+    ? 'bad'
+    : toneForState(state, { warningsPresent: warnings.length > 0, runtimeTracePresent: runtimeTrace !== null })
 
   const idleLabel =
     typeof compositeSnapshot?.idle_seconds === 'number'

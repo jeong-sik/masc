@@ -1,17 +1,13 @@
 import { signal } from '@preact/signals'
 import type { OperatorRecommendedAction, RouteState } from './types'
-import { isRecord } from './components/common/normalize'
+import { isRecord, asNullableString, asRecord } from './components/common/normalize'
 import { isRootTarget } from './components/ops/helpers'
 
 const STORAGE_KEY = 'masc_dashboard_workflow_context'
 const CONTEXT_TTL_MS = 15 * 60 * 1000
 
-function asString(value: unknown): string | null {
-  return typeof value === 'string' && value.trim() !== '' ? value.trim() : null
-}
-
 function asDisplayString(value: unknown): string | null {
-  const text = asString(value)
+  const text = asNullableString(value)
   if (text) return text
   if (typeof value === 'number' && Number.isFinite(value)) return String(value)
   return null
@@ -44,33 +40,29 @@ export interface DashboardWorkflowContext {
   created_at: string
 }
 
-function normalizePayload(value: unknown): Record<string, unknown> | null {
-  return isRecord(value) ? value : null
-}
-
 function parseStoredContext(raw: string | null): DashboardWorkflowContext | null {
   if (!raw) return null
   try {
     const parsed = JSON.parse(raw) as unknown
     if (!isRecord(parsed)) return null
-    const id = asString(parsed.id)
-    const sourceSurface = asString(parsed.source_surface)
-    const sourceLabel = asString(parsed.source_label)
-    const summary = asString(parsed.summary)
-    const createdAt = asString(parsed.created_at)
+    const id = asNullableString(parsed.id)
+    const sourceSurface = asNullableString(parsed.source_surface)
+    const sourceLabel = asNullableString(parsed.source_label)
+    const summary = asNullableString(parsed.summary)
+    const createdAt = asNullableString(parsed.created_at)
     if (!id || (sourceSurface !== 'mission' && sourceSurface !== 'execution') || !sourceLabel || !summary || !createdAt) return null
     return {
       id,
       source_surface: sourceSurface,
       source_label: sourceLabel,
-      action_type: asString(parsed.action_type),
-      target_type: asString(parsed.target_type),
-      target_id: asString(parsed.target_id),
-      focus_kind: asString(parsed.focus_kind),
-      operation_id: asString(parsed.operation_id),
+      action_type: asNullableString(parsed.action_type),
+      target_type: asNullableString(parsed.target_type),
+      target_id: asNullableString(parsed.target_id),
+      focus_kind: asNullableString(parsed.focus_kind),
+      operation_id: asNullableString(parsed.operation_id),
       summary,
-      payload_preview: asString(parsed.payload_preview),
-      suggested_payload: normalizePayload(parsed.suggested_payload),
+      payload_preview: asNullableString(parsed.payload_preview),
+      suggested_payload: asRecord(parsed.suggested_payload),
       preview: parsed.preview ?? null,
       evidence: parsed.evidence ?? null,
       created_at: createdAt,
@@ -102,10 +94,10 @@ export function extractActionPayload(
   action?: OperatorRecommendedAction | null,
 ): Record<string, unknown> | null {
   if (!action) return null
-  const direct = normalizePayload(action.suggested_payload)
+  const direct = asRecord(action.suggested_payload)
   if (direct) return direct
   if (isRecord(action.preview)) {
-    const previewPayload = normalizePayload(action.preview.payload)
+    const previewPayload = asRecord(action.preview.payload)
     if (previewPayload) return previewPayload
   }
   return null

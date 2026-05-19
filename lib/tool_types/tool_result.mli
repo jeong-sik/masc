@@ -18,6 +18,10 @@ type tool_failure_class =
   | Runtime_failure (** Internal error/bug — non-retryable *)
   | Workflow_rejection (** Business rule violation — non-retryable *)
 
+val tool_failure_class_to_yojson : tool_failure_class -> Yojson.Safe.t
+val tool_failure_class_of_yojson :
+  Yojson.Safe.t -> (tool_failure_class, string) result
+
 val tool_failure_class_to_string : tool_failure_class -> string
 
 (** [Transient_error] is the only retryable class. *)

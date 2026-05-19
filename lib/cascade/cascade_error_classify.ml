@@ -77,36 +77,27 @@ let masc_internal_error_prefix = "[masc_oas_error] "
 let string_list_json values =
   `List (List.map (fun value -> `String value) values)
 
-let string_list_of_assoc key = function
-  | `Assoc fields -> (
-      match List.assoc_opt key fields with
-      | Some (`List values) ->
-          values
-          |> List.filter_map (function
-               | `String value -> Some value
-               | _ -> None)
-      | _ -> [])
-  | _ -> []
+let string_list_of_assoc key json =
+  match Json_field.list json key |> Json_field.to_option with
+  | None -> []
+  | Some values ->
+    values
+    |> List.filter_map (function
+         | `String value -> Some value
+         | _ -> None)
+;;
 
-let provider_rejection_of_json = function
-  | `Assoc fields ->
-      let field name =
-        match List.assoc_opt name fields with
-        | Some (`String value) -> Some value
-        | _ -> None
-      in
-      (match field "reason" with
-       | Some reason ->
-           Some { reason }
-       | _ -> None)
-  | _ -> None
+let provider_rejection_of_json json =
+  match Json_field.string json "reason" |> Json_field.to_option with
+  | Some reason -> Some { reason }
+  | None -> None
+;;
 
-let provider_rejections_of_assoc key = function
-  | `Assoc fields -> (
-      match List.assoc_opt key fields with
-      | Some (`List values) -> List.filter_map provider_rejection_of_json values
-      | _ -> [])
-  | _ -> []
+let provider_rejections_of_assoc key json =
+  match Json_field.list json key |> Json_field.to_option with
+  | None -> []
+  | Some values -> List.filter_map provider_rejection_of_json values
+;;
 
 let provider_rejection_reasons_of_assoc key json =
   string_list_of_assoc key json
@@ -118,12 +109,9 @@ let provider_rejection_reasons rejections =
   |> List.filter (fun reason -> reason <> "")
   |> Json_util.dedupe_keep_order
 
-let string_opt_of_assoc key = function
-  | `Assoc fields -> (
-      match List.assoc_opt key fields with
-      | Some (`String value) -> Some value
-      | _ -> None)
-  | _ -> None
+let string_opt_of_assoc key json =
+  Json_field.string json key |> Json_field.to_option
+;;
 
 let masc_internal_error_to_json = function
   | Cascade_exhausted { cascade_name; reason } ->

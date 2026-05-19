@@ -690,6 +690,13 @@ let run_named
         ~error_kind
         ~error_reason
         ()
+    else if sdk_error_is_required_tool_contract_violation sdk_err then
+      Cascade_health_tracker.record_terminal_failure
+        Cascade_health_tracker.global
+        ~provider_key:model_key
+        ~error_kind
+        ~error_reason
+        ()
     else if sdk_error_is_resumable_cli_session sdk_err
             || sdk_error_is_terminal_provider_runtime_failure sdk_err
     then

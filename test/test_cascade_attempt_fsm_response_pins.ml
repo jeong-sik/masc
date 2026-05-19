@@ -116,11 +116,60 @@ let test_case_insensitive () =
   check_bool "lower" true lower
 ;;
 
+let required_tool_contract_violation_error () =
+  Agent_sdk.Error.Agent
+    (CompletionContractViolation
+       { contract = Agent_sdk.Completion_contract_id.Require_tool_use
+       ; reason =
+           "required tool contract unsatisfied: tool_choice requested tool use, but \
+            the model returned no ToolUse block"
+       })
+;;
+
+let test_required_tool_contract_violation_is_typed () =
+  let err = required_tool_contract_violation_error () in
+  check_bool
+    "required tool contract predicate"
+    true
+    (Cascade_attempt_fsm.sdk_error_is_required_tool_contract_violation err);
+  Alcotest.(check (option string))
+    "fallback class"
+    (Some "required_tool_contract_violation")
+    (Cascade_attempt_fsm.sdk_error_cascade_fallback_class err)
+;;
+
+let test_required_tool_contract_violation_ignores_legacy_internal_text () =
+  let err =
+    Agent_sdk.Error.Internal
+      "Completion contract [require_tool_use] violated: required tool contract \
+       unsatisfied: tool_choice requested tool use, but the model returned no ToolUse \
+       block"
+  in
+  check_bool
+    "legacy internal text is not typed contract evidence"
+    false
+    (Cascade_attempt_fsm.sdk_error_is_required_tool_contract_violation err);
+  Alcotest.(check (option string))
+    "no fallback class"
+    None
+    (Cascade_attempt_fsm.sdk_error_cascade_fallback_class err)
+;;
+
 let () =
   Alcotest.run
     "cascade_attempt_fsm_response_pins"
     [ "hard_quota", [ Alcotest.test_case "pin fixtures" `Quick test_hard_quota_pins ]
     ; "max_turns", [ Alcotest.test_case "pin fixtures" `Quick test_max_turns_pins ]
     ; "case_insensitive", [ Alcotest.test_case "ci check" `Quick test_case_insensitive ]
+    ; ( "required_tool_contract"
+      , [ Alcotest.test_case
+            "typed contract maps to fallback class"
+            `Quick
+            test_required_tool_contract_violation_is_typed
+        ; Alcotest.test_case
+            "legacy internal text ignored"
+            `Quick
+            test_required_tool_contract_violation_ignores_legacy_internal_text
+        ] )
     ]
 ;;

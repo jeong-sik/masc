@@ -115,13 +115,11 @@ let update_entry_if_registered ~base_path name f =
   let rec loop () =
     let current = Atomic.get registry in
     match StringMap.find_opt key current with
-    | None -> false
+    | None -> ()
     | Some entry ->
       let updated = StringMap.add key (f entry) current in
       if Atomic.compare_and_set registry current updated
-      then (
-        Orphan_drops.clear ~base_path name;
-        true)
+      then Orphan_drops.clear ~base_path name
       else loop ()
   in
   loop ()
@@ -672,7 +670,7 @@ let stamp_turn_progress ~now ~event_kind obs =
 let mark_turn_started ~base_path name =
   let changed = ref false in
   let now = Time_compat.now () in
-  ignore (update_entry_if_registered ~base_path name (fun e ->
+  update_entry_if_registered ~base_path name (fun e ->
     let turn_id = e.meta.runtime.usage.total_turns + 1 in
     let obs =
       { turn_id
@@ -691,14 +689,14 @@ let mark_turn_started ~base_path name =
     { e with
       current_turn_observation = Some obs
     ; compaction_stage = Packed Compaction_accumulating
-    }));
+    });
   if !changed then broadcast_composite_changed ~name ~ts_unix:now
 ;;
 
 let record_turn_progress ~base_path name ~event_kind =
   let now = Time_compat.now () in
-  ignore (update_entry_if_registered ~base_path name (fun e ->
-    update_current_turn e (stamp_turn_progress ~now ~event_kind)))
+  update_entry_if_registered ~base_path name (fun e ->
+    update_current_turn e (stamp_turn_progress ~now ~event_kind))
 ;;
 
 (* RFC-0045: SDK-turn boundary reset.  Resets in-turn FSM fields without
@@ -713,7 +711,7 @@ let record_turn_progress ~base_path name ~event_kind =
 let mark_sdk_turn_started ~base_path name =
   let changed = ref false in
   let now = Time_compat.now () in
-  ignore (update_entry_if_registered ~base_path name (fun e ->
+  update_entry_if_registered ~base_path name (fun e ->
     match e.current_turn_observation with
     | None -> e
     | Some obs ->
@@ -731,14 +729,14 @@ let mark_sdk_turn_started ~base_path name =
           ; decision_stage = Packed Decision_undecided
           }
         in
-        { e with current_turn_observation = Some new_obs })));
+        { e with current_turn_observation = Some new_obs }));
   if !changed then broadcast_composite_changed ~name ~ts_unix:now
 ;;
 
 let mark_turn_measurement ~base_path name =
   let changed = ref false in
   let now = Time_compat.now () in
-  ignore (update_entry_if_registered ~base_path name (fun e ->
+  update_entry_if_registered ~base_path name (fun e ->
     match e.current_turn_observation, e.pending_turn_measurement with
     | Some obs, Some measurement ->
       changed := true;
@@ -753,7 +751,7 @@ let mark_turn_measurement ~base_path name =
             }
       ; pending_turn_measurement = None
       }
-    | _ -> e));
+    | _ -> e);
   if !changed then broadcast_composite_changed ~name ~ts_unix:now
 ;;
 
@@ -825,7 +823,7 @@ let set_turn_decision_stage ~base_path name (decision_stage : decision_stage_act
   let target_packed = decision_stage_active_to_packed decision_stage in
   let changed = ref false in
   let now = Time_compat.now () in
-  ignore (update_entry_if_registered ~base_path name (fun e ->
+  update_entry_if_registered ~base_path name (fun e ->
     update_current_turn e (fun obs ->
       if obs.decision_stage = target_packed
       then obs
@@ -833,7 +831,7 @@ let set_turn_decision_stage ~base_path name (decision_stage : decision_stage_act
         changed := true;
         { (stamp_turn_progress ~now ~event_kind:"decision_stage" obs) with
           decision_stage = target_packed
-        }))));
+        })));
   if !changed then broadcast_composite_changed ~name ~ts_unix:now
 ;;
 
@@ -864,7 +862,7 @@ let set_turn_cascade_state ~base_path name (cascade_state : packed_cascade_state
      axis (which also dispatches through its resolver as of Phase 4b). *)
   let changed = ref false in
   let now = Time_compat.now () in
-  ignore (update_entry_if_registered ~base_path name (fun e ->
+  update_entry_if_registered ~base_path name (fun e ->
     update_current_turn e (fun obs ->
       let new_turn_phase = turn_phase_of_cascade_state cascade_state in
       match resolve_cascade_transition ~from:obs.cascade_state ~target:cascade_state with
@@ -886,7 +884,7 @@ let set_turn_cascade_state ~base_path name (cascade_state : packed_cascade_state
                ~from:obs.cascade_state
                ~to_:cascade_state
                ~violation);
-        obs)));
+        obs));
   if !changed then broadcast_composite_changed ~name ~ts_unix:now
 ;;
 
@@ -1013,7 +1011,7 @@ let set_turn_phase ~base_path name (turn_phase : packed_turn_phase) =
      arm below. *)
   let changed = ref false in
   let now = Time_compat.now () in
-  ignore (update_entry_if_registered ~base_path name (fun e ->
+  update_entry_if_registered ~base_path name (fun e ->
     update_current_turn e (fun obs ->
       match resolve_turn_phase_transition ~from:obs.turn_phase ~target:turn_phase with
       | Resolved_turn_idempotent -> obs
@@ -1043,26 +1041,26 @@ let set_turn_phase ~base_path name (turn_phase : packed_turn_phase) =
                ~from:obs.turn_phase
                ~to_:turn_phase
                ~violation);
-        obs)));
+        obs));
   if !changed then broadcast_composite_changed ~name ~ts_unix:now
 ;;
 
 let set_turn_selected_model ~base_path name selected_model =
   let changed = ref false in
   let now = Time_compat.now () in
-  ignore (update_entry_if_registered ~base_path name (fun e ->
+  update_entry_if_registered ~base_path name (fun e ->
     update_current_turn e (fun obs ->
       changed := true;
       { (stamp_turn_progress ~now ~event_kind:"selected_model" obs) with
         selected_model
-      })));
+      }));
   if !changed then broadcast_composite_changed ~name ~ts_unix:now
 ;;
 
 let prepare_turn_retry_after_compaction ~base_path name =
   let changed = ref false in
   let now = Time_compat.now () in
-  ignore (update_entry_if_registered ~base_path name (fun e ->
+  update_entry_if_registered ~base_path name (fun e ->
     update_current_turn e (fun obs ->
       validate_cascade_transition
         ~from:obs.cascade_state
@@ -1074,7 +1072,7 @@ let prepare_turn_retry_after_compaction ~base_path name =
       ; decision_stage = Packed Decision_guard_ok
       ; cascade_state = Packed Cascade_idle
       ; selected_model = None
-      })));
+      }));
   if !changed then broadcast_composite_changed ~name ~ts_unix:now
 ;;
 
@@ -1108,7 +1106,7 @@ let mark_turn_finished ~base_path name =
   let completed_turn_to_record = ref None in
   let changed = ref false in
   let now = Time_compat.now () in
-  ignore (update_entry_if_registered ~base_path name (fun e ->
+  update_entry_if_registered ~base_path name (fun e ->
     let had_live_turn =
       match e.current_turn_observation with
       | Some _ -> true
@@ -1147,7 +1145,7 @@ let mark_turn_finished ~base_path name =
         }
       else e.meta
     in
-    { e with meta; current_turn_observation = None; last_completed_turn }));
+    { e with meta; current_turn_observation = None; last_completed_turn });
   Option.iter
     (Keeper_transition_audit.record_completed_turn ~keeper_name:name)
     !completed_turn_to_record;

@@ -266,7 +266,7 @@ let validate_writable_path ~(agent_name : string) config path =
       Ok canonical_path
     else
       Error (System (System_error.IoError (Printf.sprintf
-        "Write restricted to allowed sandboxes for agent %s. \
+        "path_outside_sandbox: Write restricted to allowed sandboxes for agent %s. \
          Expected path prefix: %s (or /.worktrees/ for server ops). \
          Got: %s. Cross-agent playground writes are blocked — write \
          under your own playground only. Call masc_status if you are \

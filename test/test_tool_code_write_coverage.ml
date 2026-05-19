@@ -211,6 +211,11 @@ let dispatch_exn ctx ~name ~args =
   | Some result -> (result.success, result.legacy_message)
   | None -> fail ("dispatch returned None for " ^ name)
 
+let dispatch_result_exn ctx ~name ~args =
+  match Tool_code_write.dispatch ctx ~name ~args with
+  | Some result -> result
+  | None -> fail ("dispatch returned None for " ^ name)
+
 let test_allowed_org () =
   with_temp_policy [ "jeong-sik" ] @@ fun bp ->
   (check (result unit string)) "allowed org passes"
@@ -693,6 +698,39 @@ let test_code_shell_missing_docker_cwd_reports_worktree_hint () =
   check bool "error suggests worktree creation" true
     (contains "masc_worktree_create" msg)
 
+let test_code_shell_cross_agent_playground_is_policy_rejection () =
+  let base_path = fresh_base_path () in
+  let config = make_config base_path in
+  let playground_root = Filename.concat base_path ".masc/playground" in
+  mkdir_p playground_root;
+  let ctx =
+    { Tool_code_write.config;
+      agent_name = "keeper-verifier-agent";
+    }
+  in
+  let args =
+    `Assoc
+      [
+        ("command", `String "pwd");
+        ("cwd", `String playground_root);
+        ("timeout", `Int 5);
+      ]
+  in
+  let result =
+    dispatch_result_exn ctx ~name:"masc_code_shell" ~args
+  in
+  check bool "cross-agent playground cwd rejected" false result.success;
+  check bool "error keeps sandbox path marker" true
+    (contains "path_outside_sandbox" result.legacy_message);
+  check bool "error explains cross-agent write block" true
+    (contains "Cross-agent playground writes are blocked"
+       result.legacy_message);
+  check (option string) "sandbox write block is policy rejection"
+    (Some "policy_rejection")
+    (Option.map
+       Tool_result.tool_failure_class_to_string
+       (Tool_result.failure_class result))
+
 let test_code_shell_rg_exit_one_no_matches_is_success () =
   with_temp_dir "tool-code-shell-rg" @@ fun dir ->
   let fixture = Filename.concat dir "sample.ml" in
@@ -1070,6 +1108,8 @@ let () =
         test_validate_code_shell_command_rejects_semicolon;
       test_case "missing docker cwd reports worktree hint" `Quick
         test_code_shell_missing_docker_cwd_reports_worktree_hint;
+      test_case "cross-agent playground cwd is policy rejection" `Quick
+        test_code_shell_cross_agent_playground_is_policy_rejection;
       test_case "rg exit 1 no-match is success" `Quick
         test_code_shell_rg_exit_one_no_matches_is_success;
       test_case "rg quoted regex pipe no-match is success" `Quick

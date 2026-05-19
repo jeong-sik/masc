@@ -195,8 +195,12 @@ let bash_public_schema =
     [ property
         "command"
         "string"
-        "The shell command to execute. Single command only. No chaining (&&, ||, ;), \
-         pipes (|), or redirects (>, >>). Example: 'scripts/dune-local.sh build', 'rg pattern lib/'."
+        "The single shell command to execute through the public Bash front door. Do \
+         not call keeper_* or masc_* tool names here; use visible task/board/PR tools \
+         directly. For file reads or search, use Read or Grep first. No chaining (&&, \
+         ||, ;), pipes (|), redirects (>, >>), command substitution, or background \
+         operators. Always set cwd for multi-repo git/gh commands. Example: \
+         'scripts/dune-local.sh build test/test_keeper_tool_alias.exe'."
     ; property
         "cwd"
         "string"

@@ -3,6 +3,7 @@ import type { DashboardNamespaceTruthResponse } from '../types'
 import { telemetrySourceLabel } from '../config/telemetry-sources'
 import type { Keeper, StopCause } from '../types'
 import { formatElapsedCompact } from '../lib/format-time'
+import { formatMsCompact } from '../lib/format-number'
 import { normalizeStopCause } from '../lib/stop-cause'
 import {
   keeperActivityDisplay,
@@ -537,8 +538,7 @@ export function formatPercent(value: number | null, digits = 0): string {
 
 export function formatLatency(ms: number): string {
   if (!Number.isFinite(ms) || ms <= 0) return '-'
-  if (ms < 1000) return `${Math.round(ms)}ms`
-  return `${(ms / 1000).toFixed(1)}s`
+  return formatMsCompact(ms)
 }
 
 export function formatActivity(seconds: number | null): string {

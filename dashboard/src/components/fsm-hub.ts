@@ -3,6 +3,7 @@ import { useEffect, useMemo, useReducer, useRef, useState } from 'preact/hooks'
 import { InlineSpinner } from './common/inline-spinner'
 import { DialogOverlay } from './common/dialog'
 import { TextInput } from './common/input'
+import { formatMsCompact } from '../lib/format-number'
 
 import {
   fetchKeeperComposite,
@@ -130,11 +131,7 @@ function shortText(value: string | null | undefined, max = 80): string {
   return text.length > max ? `${text.slice(0, max)}...` : text
 }
 
-function formatMs(ms: number | null | undefined): string {
-  if (ms == null || !Number.isFinite(ms) || ms < 0) return ''
-  if (ms >= 1000) return `${Math.round(ms / 1000)}s`
-  return `${Math.round(ms)}ms`
-}
+const formatMs = formatMsCompact
 
 function executionReceiptTone(execution: KeeperCompositeExecution | undefined): 'ok' | 'warn' | 'bad' | 'muted' {
   if (!execution?.latest_receipt_present) return 'muted'

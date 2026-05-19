@@ -687,6 +687,16 @@ let runtime_resolution_json (config : Coord.config) =
       @ Server_routes_http_runtime.keeper_fleet_runtime_resolution_fields () )
 ;;
 
+(* 30-second TTL chosen to match the dashboard frontend's natural refresh
+   cadence (~3s polling × 10 = a fresh value at least every minute under
+   sustained load).  Tool inventory + usage stats rarely change inside a
+   30s window — the per-actor cache key isolates permission changes from
+   leaking across actors. *)
+let dashboard_tools_cache_ttl_sec = 30.0
+
+let dashboard_tools_cache_key ~base_path ~actor =
+  Printf.sprintf "tools:%s:%s" base_path actor
+
 let dashboard_tools_http_json ?actor ?timing (config : Coord.config) : Yojson.Safe.t =
   let ctx : Tool_misc.context =
     { config; agent_name = Option.value ~default:"dashboard" actor }
@@ -696,29 +706,44 @@ let dashboard_tools_http_json ?actor ?timing (config : Coord.config) : Yojson.Sa
     | None -> f ()
     | Some t -> Server_timing.measure t phase f
   in
-  let config_resolution =
-    run Projection_config_resolution (fun () ->
-      Config_dir_resolver.(resolve () |> to_json))
+  let actor_for_key = Option.value ~default:"dashboard" actor in
+  let cache_key =
+    dashboard_tools_cache_key ~base_path:config.base_path ~actor:actor_for_key
   in
-  let runtime_resolution =
-    run Projection_runtime_resolution (fun () -> runtime_resolution_json config)
+  let compute () =
+    let config_resolution =
+      run Projection_config_resolution (fun () ->
+        Config_dir_resolver.(resolve () |> to_json))
+    in
+    let runtime_resolution =
+      run Projection_runtime_resolution (fun () -> runtime_resolution_json config)
+    in
+    let inventory =
+      run Tools_compute (fun () ->
+        Tool_misc.tool_inventory_json ctx ~include_hidden:true ~include_deprecated:true)
+    in
+    let usage =
+      run Tools_compute (fun () ->
+        Tool_unified.summary_report ()
+        |> Tool_usage_log.attach_source_metadata
+             ~masc_root:(Coord.masc_root_dir config))
+    in
+    `Assoc
+      [ "generated_at", `String (Masc_domain.now_iso ())
+      ; "config_resolution", config_resolution
+      ; "runtime_resolution", runtime_resolution
+      ; "tool_inventory", inventory
+      ; "tool_usage", usage
+      ]
   in
-  let inventory =
-    run Tools_compute (fun () ->
-      Tool_misc.tool_inventory_json ctx ~include_hidden:true ~include_deprecated:true)
-  in
-  let usage =
-    run Tools_compute (fun () ->
-      Tool_unified.summary_report ()
-      |> Tool_usage_log.attach_source_metadata ~masc_root:(Coord.masc_root_dir config))
-  in
-  `Assoc
-    [ "generated_at", `String (Masc_domain.now_iso ())
-    ; "config_resolution", config_resolution
-    ; "runtime_resolution", runtime_resolution
-    ; "tool_inventory", inventory
-    ; "tool_usage", usage
-    ]
+  match timing with
+  | None ->
+    Dashboard_cache.get_or_compute cache_key ~ttl:dashboard_tools_cache_ttl_sec
+      compute
+  | Some t ->
+    Server_timing.measure t Cache_lookup (fun () ->
+      Dashboard_cache.get_or_compute cache_key
+        ~ttl:dashboard_tools_cache_ttl_sec compute)
 ;;
 
 let dashboard_perf_http_json = Server_dashboard_http_perf.dashboard_perf_http_json

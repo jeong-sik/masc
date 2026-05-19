@@ -3,12 +3,12 @@ rfc: "0136"
 title: "Keeper Unified Turn — Stage Decomposition of run_keeper_cycle"
 status: Active
 created: 2026-05-19
-updated: 2026-05-19
+updated: 2026-05-20
 author: vincent
 supersedes: []
 superseded_by: null
 related: ["0051", "0056", "0085"]
-implementation_prs: [16604, 16624, 16643, 16701, 16709, 16751]
+implementation_prs: [16604, 16624, 16643]
 ---
 
 # RFC-0136 — Keeper Unified Turn Decomposition

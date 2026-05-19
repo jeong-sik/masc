@@ -1,0 +1,7 @@
+[
+  {"id":"task-001","title":"Fix login bug","description":"Fix the login timeout issue in auth module. Acceptance: login completes in <2s."},
+  {"id":"task-002","title":"Improve system","description":"Improve the overall system performance and enhance user experience, add better caching, optimize database queries, refactor legacy code, and more."},
+  {"id":"task-003","title":"Build dashboard","description":"1. Create user widget. 2. Add analytics panel. 3. Integrate with API. 4. Deploy to staging."},
+  {"id":"task-004","title":"Refactor utils","description":"Clean up the utility functions. TBD: which ones."},
+  {"id":"task-005","title":"Add OAuth2 provider","description":"Implement OAuth2 login with Google and GitHub. Acceptance: users can sign in via both providers, tokens refresh automatically."}
+]

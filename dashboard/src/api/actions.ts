@@ -66,7 +66,10 @@ export async function fetchActivityGraph(
     return parseActivityGraphResponse(raw)
   } catch (err) {
     if (err instanceof ActionsActivitySchemaDriftError) throw err
-    console.debug('[activity] graph fetch failed', err instanceof Error ? err.message : err)
+    // Mirrors sse-store.ts §256: activity graph fetch failures cause the
+    // dashboard to show empty / stale activity data. Promote to warn so the
+    // operator sees the failure at default DevTools level.
+    console.warn('[activity] graph fetch failed', err instanceof Error ? err.message : err)
     throw err
   }
 }
@@ -86,7 +89,10 @@ export async function fetchSwimlane(
     return parseSwimlaneResponse(raw)
   } catch (err) {
     if (err instanceof ActionsActivitySchemaDriftError) throw err
-    console.debug('[activity] swimlane fetch failed', err instanceof Error ? err.message : err)
+    // Mirrors sse-store.ts §256: swimlane fetch failures cause the dashboard
+    // to show empty / stale swimlane data. Promote to warn so the operator
+    // sees the failure at default DevTools level.
+    console.warn('[activity] swimlane fetch failed', err instanceof Error ? err.message : err)
     throw err
   }
 }

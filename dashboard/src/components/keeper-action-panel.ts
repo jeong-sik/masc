@@ -229,10 +229,11 @@ function KeeperActionRow({ keeper }: { keeper: Keeper }) {
  */
 export function KeeperActionPanel() {
   const keeperList = keepers.value
-  const online = keeperList.filter(k => {
-    const s = (k.status ?? '').toLowerCase()
-    return s !== 'offline' || k.phase === 'Paused' || k.paused
-  })
+  // RFC-0135 PR-9b: route the "should we show this keeper in the action
+  // panel?" filter through the typed predicates instead of an inline OR
+  // chain — paused keepers should still appear (so operator can resume)
+  // even when their status appears offline.
+  const online = keeperList.filter(k => !isKeeperOffline(k) || isKeeperPaused(k))
 
   if (keeperList.length === 0) {
     return null

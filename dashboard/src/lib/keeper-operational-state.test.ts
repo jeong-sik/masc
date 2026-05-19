@@ -9,6 +9,7 @@ import {
   deriveKeeperAttention,
   deriveKeeperDisplayReason,
   deriveKeeperOperationalState,
+  deriveKeeperTurnPhase,
   toKsmPhase,
   type KeeperAttention,
   type KeeperKsmPhase,
@@ -514,5 +515,30 @@ describe('deriveKeeperDisplayReason — RFC-0135 PR-14c', () => {
   })
   it('returns null when no source has a non-empty value', () => {
     expect(deriveKeeperDisplayReason({} as Keeper, null)).toBeNull()
+  })
+})
+
+describe('deriveKeeperTurnPhase — RFC-0135 PR-14b', () => {
+  it('composite turn_phase wins over flat pipeline_stage', () => {
+    expect(
+      deriveKeeperTurnPhase(
+        { pipeline_stage: 'idle' } as Keeper,
+        { turn_phase: 'executing' } as unknown as KeeperCompositeSnapshot,
+      ),
+    ).toBe('executing')
+  })
+  it('falls back to pipeline_stage when composite null', () => {
+    expect(deriveKeeperTurnPhase({ pipeline_stage: 'compacting' } as Keeper, null)).toBe('compacting')
+  })
+  it('falls back to pipeline_stage when composite turn_phase empty string', () => {
+    expect(
+      deriveKeeperTurnPhase(
+        { pipeline_stage: 'handoff' } as Keeper,
+        { turn_phase: '' } as unknown as KeeperCompositeSnapshot,
+      ),
+    ).toBe('handoff')
+  })
+  it('returns null when both sources empty', () => {
+    expect(deriveKeeperTurnPhase({} as Keeper, null)).toBeNull()
   })
 })

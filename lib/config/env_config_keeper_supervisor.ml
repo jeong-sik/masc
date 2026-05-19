@@ -2,12 +2,12 @@
 
 open Env_config_core
 
-(** Route per-keeper supervise fork through the shared [Domain_pool]
-    (RFC-0059 PR-7-pilot) instead of staying on the main domain's Eio
-    scheduler. Default OFF - opt-in. When ON, [Domain_pool_ref.get ()]
-    must return [Some pool] (set at boot by [server_runtime_bootstrap]);
-    if [None] the supervisor falls back to [Eio.Fiber.fork ~sw:ctx.sw]
-    silently. *)
+(** Historical keeper Domain_pool pilot flag.
+
+    The supervisor still reads this for observability, but keepalive
+    fibers remain on the owning Eio domain. The keepalive body touches
+    Eio switches, clocks, turn timeouts, and provider streams; routing
+    the whole body through [Domain_pool.submit_io] is not domain-safe. *)
 let domain_pool_enabled =
   Feature_flag_registry.get_bool "MASC_KEEPER_DOMAIN_POOL_ENABLED"
 ;;

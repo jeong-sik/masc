@@ -86,7 +86,7 @@ let all_flags : flag list = [
 
   (* ── Keeper ───────────────────────────────────────────────── *)
   { env_name = "MASC_KEEPER_DOMAIN_POOL_ENABLED";
-    description = "Route per-keeper supervise fork through the shared Eio.Executor_pool (RFC-0059 PR-7-pilot) instead of the main scheduler. Falls back to Eio.Fiber.fork if pool ref is None.";
+    description = "Historical keeper DomainPool pilot flag. Supervisor keepalive fibers now stay on the owning Eio domain because they use switches, clocks, and provider streams.";
     default = false; category = "keeper";
     lifecycle = Experimental; since = "2.170.0" };
 

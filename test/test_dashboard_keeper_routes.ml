@@ -742,6 +742,8 @@ let append_execution_receipt
       Some Masc_mcp.Keeper_config.local_recovery_cascade_name)
     ?(fallback_reason = Some Masc_mcp.Keeper_error_classify.Turn_timeout)
     ?(required_tool_candidates = [])
+    ?started_at
+    ?ended_at
     config ~keeper_name =
   let meta =
     match Masc_mcp.Keeper_types.read_meta config keeper_name with
@@ -750,10 +752,14 @@ let append_execution_receipt
     | Error err -> fail ("read_meta failed for receipt: " ^ err)
   in
   let started_at =
-    iso_of_unix (Unix.gettimeofday () +. 2.0)
+    match started_at with
+    | Some value -> value
+    | None -> iso_of_unix (Unix.gettimeofday () +. 2.0)
   in
   let ended_at =
-    iso_of_unix (Unix.gettimeofday () +. 3.0)
+    match ended_at with
+    | Some value -> value
+    | None -> iso_of_unix (Unix.gettimeofday () +. 3.0)
   in
   let receipt : Masc_mcp.Keeper_execution_receipt.t =
     {
@@ -1782,6 +1788,79 @@ let test_composite_runtime_attention_surfaces_fiber_stop () =
            actions))
 ;;
 
+let test_composite_runtime_attention_ignores_previous_receipt_during_live_turn () =
+  let base_path = Filename.temp_file "dashboard-keeper-live-turn-receipt-" "" in
+  (try Sys.remove base_path with
+   | _ -> ());
+  Unix.mkdir base_path 0o755;
+  Fun.protect
+    ~finally:(fun () ->
+      Masc_mcp.Keeper_registry.clear ();
+      rm_rf base_path)
+    (fun () ->
+      let keeper_name = "live_turn_previous_receipt_demo" in
+      let config = Masc_mcp.Coord.default_config base_path in
+      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "bootstrap-admin"));
+      Fs_compat.mkdir_p (Masc_mcp.Keeper_types.keeper_dir config);
+      write_file
+        (Masc_mcp.Keeper_types.keeper_meta_path config keeper_name)
+        (make_keeper_meta_json ~name:keeper_name ~paused:false ());
+      let meta =
+        match Masc_mcp.Keeper_types.read_meta config keeper_name with
+        | Ok (Some meta) -> meta
+        | Ok None -> fail "keeper meta missing for live-turn receipt test"
+        | Error err -> fail ("read_meta failed: " ^ err)
+      in
+      ignore
+        (Masc_mcp.Keeper_registry.register
+           ~base_path:config.base_path keeper_name meta);
+      let receipt_started_at = iso_of_unix (Unix.gettimeofday () -. 120.0) in
+      let receipt_ended_at = iso_of_unix (Unix.gettimeofday () -. 60.0) in
+      append_execution_receipt
+        ~tool_contract_result:Contract_missing_required_tool_use
+        ~tools_used:[]
+        ~started_at:receipt_started_at
+        ~ended_at:receipt_ended_at
+        config
+        ~keeper_name;
+      Masc_mcp.Keeper_registry.mark_turn_started ~base_path:config.base_path
+        keeper_name;
+      Masc_mcp.Keeper_registry.mark_turn_provider_attempt_started
+        ~base_path:config.base_path keeper_name;
+      let entry =
+        match Masc_mcp.Keeper_registry.get ~base_path:config.base_path keeper_name with
+        | Some entry -> entry
+        | None -> fail "keeper registry entry missing after live turn start"
+      in
+      let open Yojson.Safe.Util in
+      let json =
+        Masc_mcp.Server_dashboard_http.dashboard_keeper_composite_json
+          ~config entry
+      in
+      check bool "live-turn fixture is live" true (json |> member "is_live" |> to_bool);
+      (match json |> member "live_turn" with
+       | `Assoc _ -> ()
+       | other ->
+         Alcotest.failf
+           "expected live_turn object, got %s"
+           (Yojson.Safe.to_string other));
+      let runtime_attention = json |> member "runtime_attention" in
+      check string "previous receipt does not block current turn" "ok"
+        (runtime_attention |> member "state" |> to_string);
+      check bool "previous receipt ignored for blocker" false
+        (runtime_attention |> member "blocked" |> to_bool);
+      check bool "previous receipt needs no action" false
+        (runtime_attention |> member "needs_attention" |> to_bool);
+      check bool "receipt is not current live-turn evidence" false
+        (runtime_attention |> member "execution_current" |> to_bool);
+      check bool "stale execution receipt surfaced" true
+        (runtime_attention |> member "stale_execution_receipt" |> to_bool);
+      check string "runtime source follows live turn" "live_turn"
+        (runtime_attention |> member "source" |> to_string);
+      check int "previous receipt creates no runtime actions" 0
+        (json |> member "recommended_actions" |> to_list |> List.length))
+;;
+
 let with_fleet_work_discovery_fixture f =
   let base_path = Filename.temp_file "dashboard-fleet-work-discovery-" "" in
   (try Sys.remove base_path with
@@ -2185,6 +2264,10 @@ let () =
             "composite runtime attention surfaces fiber stop"
             `Quick
             test_composite_runtime_attention_surfaces_fiber_stop
+        ; test_case
+            "composite runtime attention ignores previous receipt during live turn"
+            `Quick
+            test_composite_runtime_attention_ignores_previous_receipt_during_live_turn
         ; test_case
             "fleet composite surfaces no work-discovery keeper"
             `Quick

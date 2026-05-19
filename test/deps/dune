@@ -102,6 +102,13 @@
    (re_export masc_mcp.masc_tool_blob_store)
    (re_export masc_process)
    (re_export masc_mcp.masc_exec)
+   ;; Phase 1 SSOT shell command gate facade (Shell IR Promotion Goal
+   ;; Plan 2026-05-18). Re-exported so test code uses
+   ;; [Masc_exec_command_gate.Shell_command_gate] directly without
+   ;; colliding with the lib-root [Masc_mcp.Shell_command_gate] kept
+   ;; in place during Phase 1.
+   (re_export masc_mcp.masc_exec_command_gate)
+   (re_export masc_mcp.masc_exec_bash_parser)
    (re_export masc_coord)
    (re_export masc_types)
    (re_export mirage-crypto)

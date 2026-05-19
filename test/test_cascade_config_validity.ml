@@ -105,6 +105,53 @@ let test_cascade_json_absent () =
   check bool "config/cascade.json absent" false (Sys.file_exists (config_path "cascade.json"))
 ;;
 
+let find_tier_group cfg name =
+  cfg.Types.tier_groups
+  |> List.find_opt (fun (group : Types.cascade_tier_group) ->
+    String.equal group.name name)
+;;
+
+let index_of value values =
+  let rec loop index = function
+    | [] -> None
+    | candidate :: rest ->
+      if String.equal candidate value then Some index else loop (index + 1) rest
+  in
+  loop 0 values
+;;
+
+let test_ollama_cloud_stable_is_system_only () =
+  let cfg = load_checked_in_cascade_toml () in
+  match find_tier_group cfg "ollama_cloud_stable" with
+  | None -> fail "missing tier-group.ollama_cloud_stable"
+  | Some group ->
+    check
+      (option bool)
+      "ollama_cloud_stable keeper-assignable"
+      (Some false)
+      group.keeper_assignable
+;;
+
+let test_strict_tool_group_does_not_bypass_glm_before_ollama_cloud () =
+  let cfg = load_checked_in_cascade_toml () in
+  match find_tier_group cfg "strict_tool_candidates" with
+  | None -> fail "missing tier-group.strict_tool_candidates"
+  | Some group ->
+    (match index_of "ollama_cloud_stable" group.tiers with
+     | None -> ()
+     | Some cloud_index ->
+       (match index_of "glm-coding-with-spark" group.tiers with
+        | Some glm_index when glm_index < cloud_index -> ()
+        | Some _ ->
+          fail
+            "strict_tool_candidates must try glm-coding-with-spark before \
+             ollama_cloud_stable"
+        | None ->
+          fail
+            "strict_tool_candidates must not include ollama_cloud_stable without \
+             glm-coding-with-spark ahead of it"))
+;;
+
 let check_qwen_thinking_control cfg model_id =
   match Types.model_capabilities_for_id cfg model_id with
   | Some c ->
@@ -133,6 +180,14 @@ let () =
             `Quick
             test_cascade_toml_runtime_validates_without_rejected_profiles
         ; test_case "cascade.json is not a checked-in source" `Quick test_cascade_json_absent
+        ; test_case
+            "ollama_cloud_stable is system-only"
+            `Quick
+            test_ollama_cloud_stable_is_system_only
+        ; test_case
+            "strict tool group does not bypass GLM before Ollama Cloud"
+            `Quick
+            test_strict_tool_group_does_not_bypass_glm_before_ollama_cloud
         ; test_case
             "qwen models use chat_template_kwargs thinking control"
             `Quick

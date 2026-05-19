@@ -8,33 +8,34 @@ import {
 
 // ── swimlaneSegmentColor ──────────────────────────────────────
 
+// Wire format: backend (keeper_state_machine.ml:21-35 + keeper_composite_observer.ml:141-201)
+// emits all lane values lowercase + snake_case. Prior fixtures asserted
+// PascalCase ('Failing', 'Overflowed', 'Stable', 'HandingOff') that the
+// backend never emits — mock↔mock loophole that hid the dead branches.
 describe('swimlaneSegmentColor', () => {
   it('returns alarm color for alarm values', () => {
-    expect(swimlaneSegmentColor('Failing')).toBe('bg-[var(--bad-50)]')
+    expect(swimlaneSegmentColor('failing')).toBe('bg-[var(--bad-50)]')
     expect(swimlaneSegmentColor('gate_rejected')).toBe('bg-[var(--bad-50)]')
     expect(swimlaneSegmentColor('exhausted')).toBe('bg-[var(--bad-50)]')
-    // Overflowed is in ALARM_VALUES, so it returns alarm color (line 55 matches first)
-    expect(swimlaneSegmentColor('Overflowed')).toBe('bg-[var(--bad-50)]')
   })
 
   it('returns idle color for idle-like values', () => {
     expect(swimlaneSegmentColor('idle')).toBe('bg-[var(--color-bg-panel-alt)]')
     expect(swimlaneSegmentColor('undecided')).toBe('bg-[var(--color-bg-panel-alt)]')
     expect(swimlaneSegmentColor('accumulating')).toBe('bg-[var(--color-bg-panel-alt)]')
-    expect(swimlaneSegmentColor('Stable')).toBe('bg-[var(--color-bg-panel-alt)]')
   })
 
-  it('returns warn color for Compacting', () => {
-    expect(swimlaneSegmentColor('Compacting')).toBe('bg-[var(--amber-bright-45)]')
+  it('returns warn color for overflowed and compacting', () => {
+    expect(swimlaneSegmentColor('overflowed')).toBe('bg-[var(--amber-bright-45)]')
     expect(swimlaneSegmentColor('compacting')).toBe('bg-[var(--amber-bright-45)]')
   })
 
-  it('returns handoff color for HandingOff', () => {
-    expect(swimlaneSegmentColor('HandingOff')).toBe('bg-[var(--purple-50)]')
+  it('returns handoff color for handing_off', () => {
+    expect(swimlaneSegmentColor('handing_off')).toBe('bg-[var(--purple-50)]')
   })
 
-  it('returns default active color for unknown values', () => {
-    expect(swimlaneSegmentColor('Running')).toBe('bg-[var(--indigo-45)]')
+  it('returns default active color for unknown / active values', () => {
+    expect(swimlaneSegmentColor('running')).toBe('bg-[var(--indigo-45)]')
     expect(swimlaneSegmentColor('thinking')).toBe('bg-[var(--indigo-45)]')
   })
 })

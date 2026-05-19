@@ -166,6 +166,20 @@ type last_outcome = {
   selected_model : string option;
 }
 
+(** Live turn timing, surfaced separately from [last_outcome] so dashboard
+    enrichers can tell whether a terminal receipt belongs to the current
+    turn or to a previous one. *)
+type live_turn = {
+  turn_id : int;
+  started_at : float;
+      (** Unix timestamp when the current turn observation was installed. *)
+  last_progress_at : float;
+      (** Unix timestamp of the most recent in-turn progress signal. *)
+  last_progress_kind : string option;
+      (** Low-cardinality label for the signal that refreshed
+          [last_progress_at]. *)
+}
+
 type snapshot = {
   keeper_name : string;
       (** Canonical keeper identity from the registry entry. This is separate
@@ -200,6 +214,10 @@ type snapshot = {
           actively executing and the live sub-FSM fields reflect its
           state. [false] indicates an idle keeper; sub-FSM fields
           revert to [Idle]/[Undecided]. *)
+  live_turn : live_turn option;
+      (** Current live turn timing. [Some _] iff [is_live = true]. This is
+          the causality boundary used by dashboard enrichers before treating
+          the latest terminal receipt as a current blocker. *)
   last_outcome : last_outcome option;
       (** Most recent completed turn, surfaced separately from live
           state so operators can see "what just finished" without

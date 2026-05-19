@@ -52,32 +52,39 @@ function invariantDetail(
   }
 }
 
+// Backend (lib/keeper/keeper_state_machine.ml:21-35) emits phase strings
+// via `phase_to_string` in lowercase + snake_case: 'running', 'failing',
+// 'handing_off' etc. The composite observer (keeper_composite_observer.ml:628)
+// passes the same wire format through `snapshot.phase`. Compare against
+// those exact tokens — PascalCase comparisons are dead branches in production.
 function nextExpectedStep(snapshot: KeeperCompositeSnapshot): string {
-  const collapsedFrom = snapshot.phase === 'Stable' ? snapshot.collapsed_from : null
   if (!snapshot.is_live) {
     return snapshot.last_outcome
       ? '다음 live turn 이 idle placeholder 로부터 KTC/KDP/KCL 을 repopulate 해야 함.'
       : '아직 완료된 턴 없음 — first live turn 이 observer 를 채워야 함.'
   }
-  if (snapshot.phase === 'Failing' && snapshot.cascade.state === 'exhausted') {
-    return '정상 provider path 또는 명시적 recovery clearance 가 Failing 을 해제해야 Running 재개 가능.'
+  // `collapsed_from` carries the raw KSM phase when the composite has folded
+  // it under a parent projection. When present it is the operator-actionable
+  // signal — surface it before the surface-phase arms, since the surface
+  // phase is just the carrier label. See file header comment for the
+  // casing-SSOT background.
+  if (snapshot.collapsed_from) {
+    return `lifecycle 가 raw phase ${snapshot.collapsed_from} 에서 carrier phase 로 collapse 됨; 다음 meaningful edge 가 turn activity 재개 전에 그 underlying condition 을 clear 해야 함.`
   }
-  if (snapshot.phase === 'Overflowed') {
+  if (snapshot.phase === 'failing' && snapshot.cascade.state === 'exhausted') {
+    return '정상 provider path 또는 명시적 recovery clearance 가 failing 을 해제해야 running 재개 가능.'
+  }
+  if (snapshot.phase === 'overflowed') {
     return 'context overflow 은 compaction 또는 명시적 operator clearance 로 해소되어야 lifecycle 이 정착 가능.'
   }
-  if (snapshot.phase === 'Compacting' || snapshot.compaction.stage === 'compacting') {
-    return 'KMC 가 done 에 도달한 뒤 KSM 이 Running 으로 control 을 반환해야 함.'
+  if (snapshot.phase === 'compacting' || snapshot.compaction.stage === 'compacting') {
+    return 'KMC 가 done 에 도달한 뒤 KSM 이 running 으로 control 을 반환해야 함.'
   }
-  if (snapshot.phase === 'HandingOff') {
+  if (snapshot.phase === 'handing_off') {
     return 'handoff completion 이 관측되면 현재 keeper 는 stop 해야 함.'
   }
-  if (snapshot.phase === 'Draining') {
-    return 'lifecycle 가 Stopped 로 정착되기 전에 Draining 이 완료되어야 함.'
-  }
-  if (snapshot.phase === 'Stable') {
-    return collapsedFrom
-      ? `lifecycle 가 raw phase ${collapsedFrom} 에서 Stable 로 collapse 됨; 다음 meaningful edge 가 turn activity 재개 전에 그 underlying condition 을 clear 해야 함.`
-      : 'lifecycle 가 active turn cycle 밖에 있음; 다음 meaningful edge 는 새 live turn 또는 operator action 에서 시작되어야 함.'
+  if (snapshot.phase === 'draining') {
+    return 'lifecycle 가 stopped 로 정착되기 전에 draining 이 완료되어야 함.'
   }
   if (snapshot.decision.stage === 'gate_rejected') {
     return 'blocked turn 은 cascade/tool execution 진입 없이 idle 로 finalize 되어야 함.'
@@ -126,7 +133,7 @@ export function deriveOperationalInsight(
 
   const lanes = precomputedLanes ?? deriveObservedLaneSummaries(snapshot, observations, now)
   const stalledLane = lanes.find(lane => lane.stalled)
-  if (snapshot.phase === 'Failing' && snapshot.cascade.state === 'exhausted') {
+  if (snapshot.phase === 'failing' && snapshot.cascade.state === 'exhausted') {
     return {
       tone: 'error',
       headline: 'cascade exhaustion 후 실패',
@@ -164,7 +171,7 @@ export function deriveOperationalInsight(
       ],
     }
   }
-  if (snapshot.phase === 'Compacting' || snapshot.compaction.stage === 'compacting') {
+  if (snapshot.phase === 'compacting' || snapshot.compaction.stage === 'compacting') {
     return {
       tone: 'info',
       headline: 'Compaction 가 현재 턴 소유',
@@ -176,8 +183,8 @@ export function deriveOperationalInsight(
       ],
     }
   }
-  if (snapshot.phase === 'Overflowed' || snapshot.phase === 'HandingOff' || snapshot.phase === 'Draining' || snapshot.phase === 'Stable') {
-    const collapsedDetail = snapshot.phase === 'Stable' && snapshot.collapsed_from
+  if (snapshot.phase === 'overflowed' || snapshot.phase === 'handing_off' || snapshot.phase === 'draining') {
+    const collapsedDetail = snapshot.collapsed_from
       ? ` raw keeper phase is ${snapshot.collapsed_from} — 이건 단순한 idleness 가 아님.`
       : ''
     return {

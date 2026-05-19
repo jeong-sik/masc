@@ -267,6 +267,16 @@ let register
      origin."
     `Counter;
   add
+    Keeper_metrics.metric_keeper_toml_reconcile_dedup
+    "Total repeated TOML reconcile failures suppressed to DEBUG after the first WARN. \
+     Labeled by keeper and outcome (repeated|threshold_disable)."
+    `Counter;
+  add
+    Keeper_metrics.metric_keeper_reconcile_disabled
+    "Total keepers parked by the TOML reconcile back-off after the consecutive-failure \
+     threshold is crossed. Labeled by keeper."
+    `Counter;
+  add
     Keeper_metrics.metric_keeper_tool_usage_flush_failures
     "Total tool usage JSONL flush failures in keeper_registry. Labeled by keeper."
     `Counter;

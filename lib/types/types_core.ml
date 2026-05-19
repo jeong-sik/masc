@@ -3,16 +3,6 @@
 (* Newtypes are in ids.ml *)
 include Ids
 
-let json_kind_name : Yojson.Safe.t -> string = function
-  | `Null -> "null"
-  | `Bool _ -> "bool"
-  | `Int _ -> "int"
-  | `Intlit _ -> "intlit"
-  | `Float _ -> "float"
-  | `String _ -> "string"
-  | `Assoc _ -> "object"
-  | `List _ -> "array"
-
 (* ============================================ *)
 (* Timestamp utilities                          *)
 (* ============================================ *)
@@ -160,6 +150,8 @@ let short_json_repr = function
   | `Assoc _ -> "<object>"
   | `List _ -> "<array>"
   | `Intlit s -> s
+  | `Tuple _ -> "<tuple>"
+  | `Variant _ -> "<variant>"
 
 let agent_of_yojson json =
   match agent_of_yojson_generated json with
@@ -723,7 +715,7 @@ let tempo_mode_of_yojson = function
   | other ->
     Error
       (Printf.sprintf "Expected string for tempo_mode (received %s)"
-         (json_kind_name other))
+         (Json_util.kind_name other))
 
 (** Tempo configuration *)
 type tempo_config = {
@@ -836,7 +828,7 @@ let a2a_task_status_of_yojson = function
   | other ->
     Error
       (Printf.sprintf "Expected string for A2A task status (received %s)"
-         (json_kind_name other))
+         (Json_util.kind_name other))
 
 (** Portal status - enforced at compile time *)
 type portal_state =
@@ -860,7 +852,7 @@ let portal_state_of_yojson = function
   | other ->
     Error
       (Printf.sprintf "Expected string for portal state (received %s)"
-         (json_kind_name other))
+         (Json_util.kind_name other))
 
 (** A2A Task - Google A2A Protocol task object *)
 type a2a_task = {

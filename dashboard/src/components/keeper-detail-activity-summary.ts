@@ -1,10 +1,18 @@
 import { html } from 'htm/preact'
 import { TimeAgo } from './common/time-ago'
+import { formatDuration } from '../lib/format-time'
+import { keeperActivityDisplay } from '../lib/keeper-runtime-display'
 import type { Keeper } from '../types'
 
+// SSOT: 활동 시간 표시는 raw `keeper.last_heartbeat`를 직접 읽지 않고
+// `keeperActivityDisplay()`로 통일한다. 헤드라인/사이드바/헤더가
+// 같은 helper를 소비해 다른 timestamp field가 동시에 렌더링되는
+// "26초 전 / 18시간 전 / 27일 전" 3중 표시 모순을 봉인한다.
 export function KeeperActivitySummary({ keeper }: { keeper: Keeper }) {
+  const activity = keeperActivityDisplay(keeper, keeper.agent?.last_seen)
+  const hasActivitySignal = activity.source !== 'none' && activity.source !== 'created'
   const hasActivity =
-    keeper.last_heartbeat ||
+    hasActivitySignal ||
     keeper.last_speech_act ||
     keeper.recent_output_preview ||
     keeper.memory_recent_note ||
@@ -14,9 +22,14 @@ export function KeeperActivitySummary({ keeper }: { keeper: Keeper }) {
 
   return html`
     <div class="flex flex-wrap items-start gap-3 px-1">
-      ${keeper.last_heartbeat
+      ${hasActivitySignal
         ? html`<span class="inline-flex items-center gap-1.5 text-2xs text-[var(--color-fg-muted)] px-2.5 py-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]">
-            하트비트 <${TimeAgo} timestamp=${keeper.last_heartbeat} />
+            ${activity.label}
+            ${activity.timestamp
+              ? html`<${TimeAgo} timestamp=${activity.timestamp} />`
+              : activity.ageSeconds != null
+                ? html`${formatDuration(activity.ageSeconds)} 전`
+                : null}
           </span>`
         : null}
       ${keeper.last_speech_act

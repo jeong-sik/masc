@@ -7,11 +7,7 @@ import { showToast } from './common/toast'
 import type { Keeper } from '../types'
 import { refreshDashboard, keepers } from '../store'
 import { KeeperPhaseAndStage } from './keeper-phase-indicator'
-import { formatDuration } from '../lib/format-time'
-import {
-  keeperDisplayModel,
-  type KeeperActivityDisplay,
-} from '../lib/keeper-runtime-display'
+import { keeperDisplayModel } from '../lib/keeper-runtime-display'
 
 function SectionLabel({ children }: { children: unknown }) {
   return html`<div class="text-3xs font-semibold uppercase tracking-[var(--track-label)] text-[var(--color-fg-muted)]">${children}</div>`
@@ -255,70 +251,30 @@ function scrollToKeeperDetailSection(sectionId: KeeperDetailSectionId): void {
   document.getElementById(sectionId)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 
-function KeeperDetailQuickFact({
-  label,
-  children,
-}: {
-  label: string
-  children: ComponentChildren
-}) {
-  return html`
-    <div class="rounded-[var(--r-5)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] px-3.5 py-3">
-      <${SectionLabel}>${label}</${SectionLabel}>
-      <div class="mt-1 text-sm font-medium leading-snug text-[var(--color-fg-primary)]">${children}</div>
-    </div>
-  `
-}
-
-function KeeperActivityValue({ activity }: { activity: KeeperActivityDisplay }) {
-  if (activity.timestamp) {
-    return html`${activity.label} <${TimeAgo} timestamp=${activity.timestamp} />`
-  }
-  if (activity.ageSeconds != null) {
-    return html`${activity.label} ${formatDuration(activity.ageSeconds)} 전`
-  }
-  return html`정보 없음`
-}
-
-export function KeeperDetailOverviewSidebar({
-  effectiveStatus,
-  contextRatioPct,
-  effectiveModelLabel,
-  effectiveModel,
-  activity,
-}: {
-  effectiveStatus: string
-  contextRatioPct: string
-  effectiveModelLabel: string
-  effectiveModel: string
-  activity: KeeperActivityDisplay
-}) {
+// `KeeperDetailOverviewSidebar` previously rendered a 4-cell QuickFact
+// grid (상태 / 컨텍스트 / 런타임 / 최근 활동) above the navigation. Each
+// cell duplicated information shown elsewhere on the page (page header
+// status chip, KpiGrid context ratio, hardcoded placeholder
+// '런타임 runtime', page header activity subtitle). The grid was removed
+// 2026-05-19 as part of the SSOT reconciliation plan (Phase 5). What
+// remains is the sticky scroll navigation — the only piece that was
+// providing unique value.
+export function KeeperDetailOverviewSidebar() {
   return html`
     <aside class="order-2 xl:order-1 xl:sticky xl:top-[104px] xl:self-start" aria-label="키퍼 프로필 요약">
-      <div class="flex flex-col gap-4 rounded-[var(--r-6)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-4 shadow-[var(--shadow-panel)]">
-        <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
-          <${KeeperDetailQuickFact} label="상태">${effectiveStatus}<//>
-          <${KeeperDetailQuickFact} label="컨텍스트">${contextRatioPct}<//>
-          <${KeeperDetailQuickFact} label=${effectiveModelLabel}>${effectiveModel}<//>
-          <${KeeperDetailQuickFact} label="최근 활동">
-            <${KeeperActivityValue} activity=${activity} />
-          <//>
-        </div>
-
-        <div class="rounded-[var(--r-5)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] p-3.5">
-          <${SectionLabel}>빠른 이동</${SectionLabel}>
-          <div class="mt-3 flex flex-col gap-2">
-            ${KEEPER_DETAIL_SECTIONS.map((section) => html`
-              <button
-                type="button"
-                class="rounded-[var(--r-5)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2 text-left transition-colors hover:bg-[var(--color-bg-hover)]"
-                onClick=${() => scrollToKeeperDetailSection(section.id)}
-              >
-                <div class="text-sm font-medium text-[var(--color-fg-primary)]">${section.label}</div>
-                <div class="mt-1 text-2xs leading-relaxed text-[var(--color-fg-muted)]">${section.summary}</div>
-              </button>
-            `)}
-          </div>
+      <div class="rounded-[var(--r-5)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] p-3.5 shadow-[var(--shadow-panel)]">
+        <${SectionLabel}>빠른 이동</${SectionLabel}>
+        <div class="mt-3 flex flex-col gap-2">
+          ${KEEPER_DETAIL_SECTIONS.map((section) => html`
+            <button
+              type="button"
+              class="rounded-[var(--r-5)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2 text-left transition-colors hover:bg-[var(--color-bg-hover)]"
+              onClick=${() => scrollToKeeperDetailSection(section.id)}
+            >
+              <div class="text-sm font-medium text-[var(--color-fg-primary)]">${section.label}</div>
+              <div class="mt-1 text-2xs leading-relaxed text-[var(--color-fg-muted)]">${section.summary}</div>
+            </button>
+          `)}
         </div>
       </div>
     </aside>

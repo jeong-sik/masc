@@ -51,7 +51,6 @@ import { FsmHub } from './fsm-hub'
 import { currentDashboardActor } from '../api'
 import type { Keeper } from '../types'
 import type { KeeperCompositeSnapshot, KeeperRuntimeTraceResponse } from '../api/keeper'
-import type { keeperActivityDisplay } from '../lib/keeper-runtime-display'
 import { KeeperRuntimeAlertStrip } from './keeper-detail-alert-strip'
 import { KeeperCommsPanel, PlaygroundReposPanel } from './keeper-detail-comms'
 import { KeeperClearContextDialog } from './keeper-detail-lifecycle'
@@ -59,11 +58,6 @@ import type { KeeperDetailEvidenceState } from './keeper-detail-hooks'
 
 export interface KeeperDetailBodyProps {
   keeper: Keeper
-  effectiveStatus: string
-  contextRatioPct: string
-  effectiveModelLabel: string
-  effectiveModel: string
-  activityDisplay: ReturnType<typeof keeperActivityDisplay>
   compositeSnapshot: KeeperCompositeSnapshot | null
   runtimeTrace: KeeperRuntimeTraceResponse | null
   compositeEvidence: KeeperDetailEvidenceState<KeeperCompositeSnapshot>
@@ -84,11 +78,6 @@ export interface KeeperDetailBodyProps {
 
 export function KeeperDetailBody({
   keeper,
-  effectiveStatus,
-  contextRatioPct,
-  effectiveModelLabel,
-  effectiveModel,
-  activityDisplay,
   compositeSnapshot,
   runtimeTrace,
   compositeEvidence,
@@ -108,13 +97,7 @@ export function KeeperDetailBody({
 }: KeeperDetailBodyProps) {
   return html`
     <div class="grid gap-5 xl:grid-cols-[280px_minmax(0,1fr)]">
-      <${KeeperDetailOverviewSidebar}
-        effectiveStatus=${effectiveStatus}
-        contextRatioPct=${contextRatioPct}
-        effectiveModelLabel=${effectiveModelLabel}
-        effectiveModel=${effectiveModel}
-        activity=${activityDisplay}
-      />
+      <${KeeperDetailOverviewSidebar} />
 
       <div class="order-1 xl:order-2 flex flex-col gap-5">
         <${KeeperRuntimeAlertStrip} keeper=${keeper} />

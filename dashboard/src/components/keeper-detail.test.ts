@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen } from '@testing-library/preact'
+import { cleanup, render, screen } from '@testing-library/preact'
 import { html } from 'htm/preact'
 
 import type { Keeper } from '../types'
@@ -317,38 +317,13 @@ describe('KeeperDetailPage', () => {
     expect(mocks.selectKeeper).toHaveBeenCalledWith('analyst')
   })
 
-  it('surfaces and clears keeper route focus without dropping the keepers view', () => {
-    const analyst = {
-      name: 'analyst',
-      status: 'active',
-      phase: 'Running',
-      pipeline_stage: 'idle',
-      agent_name: 'keeper-analyst-agent',
-      runtime_class: 'keeper',
-      agent: {
-        exists: true,
-        name: 'keeper-analyst-agent',
-        agent_type: 'agent',
-        status: 'active',
-      },
-    } as unknown as Keeper
-    keepers.value = [analyst]
-
-    render(html`<${KeeperDetailPage} />`)
-
-    const focus = screen.getByTestId('keeper-route-focus')
-    expect(focus.textContent).toContain('ROUTE FOCUS')
-    expect(focus.textContent).toContain('KEEPER analyst')
-    expect(focus.textContent).toContain('agent keeper-analyst-agent')
-    expect(document.querySelector('[data-route-focused-keeper="analyst"]')).toBeTruthy()
-
-    fireEvent.click(screen.getByRole('button', { name: 'CLEAR' }))
-
-    expect(mocks.replaceRoute).toHaveBeenCalledWith('monitoring', {
-      section: 'agents',
-      view: 'keepers',
-    })
-  })
+  // Removed test 'surfaces and clears keeper route focus...' (2026-05-19):
+  // KeeperRouteFocusPanel was deleted as part of the Phase 5 layout SSOT
+  // reconciliation. Page header (KeeperDetailHeaderInfo) renders the same
+  // keeper name + status, and the existing close button covers the CLEAR
+  // navigation. `data-route-focused-keeper` attribute moved to the outer
+  // page container in keeper-detail-page.ts and remains testable from
+  // there if needed.
 })
 
 function makeSummary(overrides: Partial<KeeperCheckpointSummary> = {}): KeeperCheckpointSummary {

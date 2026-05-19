@@ -832,6 +832,23 @@ let emit_sdk_provider_error_metric ~cascade_name ~provider err =
    here and clamped/defaulted at the tracker boundary so the caller's
    semantics ("the 429 still happened, so cool down at least the
    default") are maintained centrally. *)
+(* [Provider.CapacityExhausted] is a typed signal that the provider rejected
+   the request for capacity reasons (slot full, model overloaded, region
+   throttled). One event is enough evidence to deprioritize the provider
+   for the rest of the cycle — the same logic that justifies
+   [sdk_error_soft_rate_limited]'s immediate-cooldown handling (see
+   [Cascade_health_tracker.soft_rate_limit_cooldown_sec] doc: "a single
+   429 should already deprioritize the provider"). Threshold-counting via
+   [record_failure] would burn 2 additional cascade attempts on a
+   provider that has just declared it cannot serve. *)
+let sdk_error_capacity_exhausted_retry_after_s (err : Agent_sdk.Error.sdk_error)
+  : float option option =
+  match err with
+  | Agent_sdk.Error.Provider
+      (Llm_provider.Error.CapacityExhausted { retry_after; _ }) ->
+    Some retry_after
+  | _ -> None
+
 let sdk_error_soft_rate_limited (err : Agent_sdk.Error.sdk_error)
   : float option option =
   match err with

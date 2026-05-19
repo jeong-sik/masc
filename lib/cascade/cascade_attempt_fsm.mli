@@ -123,6 +123,17 @@ val sdk_error_soft_rate_limited :
     [retry_after].  [Some None] when [retry_after] is absent.
     [None] for non-429 or hard-quota-429 errors. *)
 
+val sdk_error_capacity_exhausted_retry_after_s :
+  Agent_sdk.Error.sdk_error -> float option option
+(** [Some (Some retry_after)] for a [Provider.CapacityExhausted] error
+    carrying a parsed [retry_after].  [Some None] when [retry_after] is
+    absent.  [None] for all other errors.  Mirrors
+    {!sdk_error_soft_rate_limited} so [Cascade_health_tracker.record_soft_rate_limited]
+    can be reused for the immediate-cooldown semantics — one capacity
+    rejection is enough to deprioritize the provider, threshold-counting
+    via [record_failure] would burn additional cascade attempts on the
+    same exhausted provider. *)
+
 val sdk_error_is_max_turns_exceeded : Agent_sdk.Error.sdk_error -> bool
 
 val sdk_error_cascade_fallback_class :

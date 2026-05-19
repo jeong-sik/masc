@@ -186,6 +186,50 @@ let test_policy_denied_structured_error_gets_semantic_failure () =
       (Some "policy_denied")
       (Safe_ops.json_string_opt "category" failure_category))
 
+let test_structured_ok_overrides_transport_failure_for_semantic_success () =
+  with_tmp_log (fun () ->
+    Keeper_tool_call_log.log_call
+      ~keeper_name:"k" ~tool_name:"keeper_bash"
+      ~input:(`Assoc [ "cmd", `String "rg missing lib" ])
+      ~output_text:
+        {|{"ok":true,"semantic_status":"no_match","summary":"Search completed with no matches."}|}
+      ~success:false ~duration_ms:1.0 ();
+    let entries = Keeper_tool_call_log.read_recent ~n:1 () in
+    let entry = List.hd entries in
+    Alcotest.(check bool) "transport failure preserved" false
+      (Safe_ops.json_bool ~default:true "success" entry);
+    Alcotest.(check bool) "semantic success follows structured output" true
+      (Safe_ops.json_bool ~default:false "semantic_success" entry);
+    Alcotest.(check (option string)) "semantic outcome"
+      (Some "no_match")
+      (Safe_ops.json_string_opt "semantic_outcome" entry))
+
+let test_blocked_structured_output_keeps_semantic_category () =
+  with_tmp_log (fun () ->
+    Keeper_tool_call_log.log_call
+      ~keeper_name:"k" ~tool_name:"keeper_bash"
+      ~input:(`Assoc [ "cmd", `String "git log --oneline | head -5" ])
+      ~output_text:
+        {|{"ok":false,"error":"keeper_bash_command_shape_blocked","failure_class":"workflow_rejection","semantic_status":"blocked","shape_block":"pipe_or_redirect"}|}
+      ~success:false ~duration_ms:1.0 ();
+    let entries = Keeper_tool_call_log.read_recent ~n:1 () in
+    let entry = List.hd entries in
+    Alcotest.(check bool) "semantic success is false" false
+      (Safe_ops.json_bool ~default:true "semantic_success" entry);
+    Alcotest.(check (option string)) "semantic outcome"
+      (Some "blocked")
+      (Safe_ops.json_string_opt "semantic_outcome" entry);
+    let summary = Dashboard_http_tool_quality.aggregate ~n:10 () in
+    let failure_category =
+      summary
+      |> Yojson.Safe.Util.member "failure_categories"
+      |> Yojson.Safe.Util.to_list
+      |> List.hd
+    in
+    Alcotest.(check (option string)) "failure category keeps shape tag"
+      (Some "shape_block:pipe_or_redirect")
+      (Safe_ops.json_string_opt "category" failure_category))
+
 let test_turn_context_fields_stored () =
   with_tmp_log (fun () ->
     Keeper_tool_call_log.set_turn_context
@@ -939,6 +983,10 @@ let () =
         ; eio_test "model field stored" test_model_field_stored
         ; eio_test "policy denied is semantic failure"
             test_policy_denied_structured_error_gets_semantic_failure
+        ; eio_test "structured ok overrides transport failure"
+            test_structured_ok_overrides_transport_failure_for_semantic_success
+        ; eio_test "blocked output keeps semantic category"
+            test_blocked_structured_output_keeps_semantic_category
         ; eio_test "turn context fields stored" test_turn_context_fields_stored
         ; eio_test "turn context fields absent without context"
             test_turn_context_fields_absent_without_context

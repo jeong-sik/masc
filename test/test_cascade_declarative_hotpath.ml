@@ -329,6 +329,12 @@ let test_strategy_preserved () =
     (Cascade_strategy.kind_to_string
        primary.Hotpath.strategy.Cascade_strategy.kind)
 
+let test_tier_group_priority_cycles_cover_all_tiers () =
+  let snapshot = get_snapshot valid_toml in
+  let primary = find_profile snapshot "tier-group.primary" in
+  check int "priority tier max_cycles spans tier count"
+    2 primary.Hotpath.strategy.Cascade_strategy.cycle.max_cycles
+
 let test_probes_field_absent () =
   (* Mirror type has no probes field — this test verifies the type shape *)
   let snapshot = get_snapshot valid_toml in
@@ -746,6 +752,10 @@ let () =
           `Quick
           test_tier_group_inference_max_tokens_uses_model_capability;
         test_case "strategy preserved" `Quick test_strategy_preserved;
+        test_case
+          "tier-group priority cycles cover all tiers"
+          `Quick
+          test_tier_group_priority_cycles_cover_all_tiers;
         test_case "probes field absent" `Quick test_probes_field_absent;
         test_case "ollama_max_concurrent" `Quick test_ollama_max_concurrent;
       ];

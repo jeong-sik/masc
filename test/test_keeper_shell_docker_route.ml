@@ -1264,8 +1264,12 @@ let test_sandbox_root_git_cwd_multi_repo_blocks_before_exec () =
   | Some msg ->
     Alcotest.(check bool) "mentions multiple repos" true
       (contains_substring msg "multiple sandbox repos");
-    Alcotest.(check bool) "mentions concrete cwd" true
-      (contains_substring msg "\"cwd\": \"repos/alpha\"");
+    Alcotest.(check bool) "mentions public Bash retry shape" true
+      (contains_substring msg
+         "Bash { \"command\": \"gh pr list\", \"cwd\": \"repos/alpha\" }");
+    Alcotest.(check bool) "keeps legacy keeper_bash retry shape" true
+      (contains_substring msg
+         "keeper_bash { \"cmd\": \"gh pr list\", \"cwd\": \"repos/alpha\" }");
     Alcotest.(check bool) "lists beta too" true
       (contains_substring msg "alpha, beta")
 
@@ -1290,7 +1294,7 @@ let test_sandbox_root_git_cwd_multi_repo_cd_hint_uses_command_repo () =
   | None -> Alcotest.fail "expected multi repo cwd guidance"
   | Some msg ->
     Alcotest.(check bool) "suggests stripped command" true
-      (contains_substring msg "\"cmd\": \"git status\"");
+      (contains_substring msg "\"command\": \"git status\"");
     Alcotest.(check bool) "suggests command-selected worktree cwd" true
       (contains_substring msg
          "\"cwd\": \"repos/masc-mcp/.worktrees/keeper-nick0cave-agent-task-236\"");

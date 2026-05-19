@@ -93,6 +93,26 @@ const CascadeRawConfigResponseSchema = object({
   source_path: string(),
   source_editable: boolean(),
   source_text: string(),
+  assist: optional(object({
+    parse_status: picklist(['parsed', 'unavailable']),
+    providers: array(string()),
+    models: array(string()),
+    bindings: array(string()),
+    aliases: array(string()),
+    tiers: array(string()),
+    tier_groups: array(string()),
+    routes: array(string()),
+    feature_params: array(object({
+      key: string(),
+      scope: string(),
+      value_type: string(),
+      example: string(),
+    })),
+    errors: array(object({
+      path: string(),
+      message: string(),
+    })),
+  })),
 })
 
 export type CascadeRawConfigResponse = InferOutput<typeof CascadeRawConfigResponseSchema>

@@ -64,6 +64,8 @@ interface CascadeData {
   slo: CascadeSloResponse | null
 }
 
+type CascadeRawConfigAssist = NonNullable<CascadeRawConfigResponse['assist']>
+
 async function loadCascadeData(resource: ManagedAsyncResource<CascadeData>) {
   await resource.load(async (signal) => {
     const gateKeepersPromise = fetchGateKeepers(signal)
@@ -193,6 +195,56 @@ function validateSourceConfigText(
   _sourceText: string,
 ): string | null {
   return null
+}
+
+function positiveIntOrDefault(value: string, fallback: number): number {
+  const parsed = Number.parseInt(value, 10)
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback
+}
+
+function normalizeTomlBlock(source: string, snippet: string): string {
+  const base = source.trimEnd()
+  const block = snippet.trim()
+  if (block === '') return source
+  return `${base}${base === '' ? '' : '\n\n'}${block}\n`
+}
+
+export function buildCascadeBindingSnippet(
+  provider: string,
+  model: string,
+  maxConcurrent: number,
+): string {
+  return [
+    `[${provider}.${model}]`,
+    'is-default = false',
+    `max-concurrent = ${Math.max(1, maxConcurrent)}`,
+  ].join('\n')
+}
+
+export function buildCascadeThinkingAliasSnippet(
+  provider: string,
+  model: string,
+  budget: number,
+): string {
+  return [
+    `[${provider}.${model}.thinking]`,
+    'temperature = 0.2',
+    'thinking-enabled = true',
+    `thinking-budget = ${Math.max(1, budget)}`,
+  ].join('\n')
+}
+
+export function buildCascadeTierSnippet(
+  tier: string,
+  member: string,
+  maxConcurrent: number,
+): string {
+  return [
+    `[tier.${tier}]`,
+    `members = ["${member}"]`,
+    'strategy = "failover"',
+    `max-concurrent = ${Math.max(1, maxConcurrent)}`,
+  ].join('\n')
 }
 
 function validationTone(status: CascadeValidationStatus): 'ok' | 'warn' | 'bad' {
@@ -1050,6 +1102,178 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
+function SourceAssistInput({
+  id,
+  label,
+  value,
+  options,
+  onInput,
+}: {
+  id: string
+  label: string
+  value: string
+  options: readonly string[]
+  onInput: (value: string) => void
+}) {
+  return html`
+    <label class="flex min-w-0 flex-1 flex-col gap-1 text-2xs font-medium uppercase tracking-wide text-[var(--color-fg-muted)]">
+      ${label}
+      <input
+        class="w-full rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-1.5 font-mono text-xs text-[var(--color-fg-primary)]"
+        list=${`${id}-list`}
+        value=${value}
+        onInput=${(event: Event) => onInput((event.target as HTMLInputElement).value)}
+      />
+      <datalist id=${`${id}-list`}>
+        ${options.map(option => html`<option value=${option} />`)}
+      </datalist>
+    </label>
+  `
+}
+
+function firstNonEmpty(values: readonly string[]): string {
+  return values.find(value => value.trim() !== '') ?? ''
+}
+
+function selectedBindingLabel(
+  provider: string,
+  model: string,
+  assist: CascadeRawConfigAssist,
+): string {
+  if (provider.trim() !== '' && model.trim() !== '') return `${provider.trim()}.${model.trim()}`
+  return firstNonEmpty(assist.bindings)
+}
+
+function CascadeSourceAssist({
+  assist,
+  provider,
+  model,
+  tier,
+  maxConcurrent,
+  thinkingBudget,
+  onProviderInput,
+  onModelInput,
+  onTierInput,
+  onMaxConcurrentInput,
+  onThinkingBudgetInput,
+  onInsert,
+}: {
+  assist: CascadeRawConfigAssist
+  provider: string
+  model: string
+  tier: string
+  maxConcurrent: string
+  thinkingBudget: string
+  onProviderInput: (value: string) => void
+  onModelInput: (value: string) => void
+  onTierInput: (value: string) => void
+  onMaxConcurrentInput: (value: string) => void
+  onThinkingBudgetInput: (value: string) => void
+  onInsert: (snippet: string) => void
+}) {
+  const parentBinding = selectedBindingLabel(provider, model, assist)
+  const hasProviderModel = provider.trim() !== '' && model.trim() !== ''
+  const hasMember = parentBinding.trim() !== ''
+  const tierName = tier.trim() || 'primary'
+  const maxConcurrentValue = positiveIntOrDefault(maxConcurrent, 2)
+  const thinkingBudgetValue = positiveIntOrDefault(thinkingBudget, 8192)
+  const parsed = assist.parse_status === 'parsed'
+
+  return html`
+    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-subtle)] p-3">
+      <div class="mb-3 flex items-center gap-2">
+        <${StatusChip} tone=${parsed ? 'ok' : 'warn'} uppercase=${false}>${parsed ? 'parsed' : 'parse issue'}<//>
+        <span class="text-xs text-[var(--color-fg-muted)]">
+          ${assist.providers.length} providers · ${assist.models.length} models · ${assist.bindings.length} bindings
+        </span>
+      </div>
+      ${assist.errors.length > 0
+        ? html`
+          <div class="mb-3 rounded-[var(--r-1)] border border-[var(--color-status-warn)] px-2 py-1 text-xs text-[var(--color-fg-muted)]">
+            ${assist.errors[0]?.path}: ${assist.errors[0]?.message}
+          </div>
+        `
+        : null}
+      <div class="grid gap-2 md:grid-cols-3">
+        <${SourceAssistInput}
+          id="cascade-provider-assist"
+          label="Provider"
+          value=${provider}
+          options=${assist.providers}
+          onInput=${onProviderInput}
+        />
+        <${SourceAssistInput}
+          id="cascade-model-assist"
+          label="Model"
+          value=${model}
+          options=${assist.models}
+          onInput=${onModelInput}
+        />
+        <${SourceAssistInput}
+          id="cascade-tier-assist"
+          label="Tier"
+          value=${tier}
+          options=${assist.tiers.length > 0 ? assist.tiers : ['primary']}
+          onInput=${onTierInput}
+        />
+      </div>
+      <div class="mt-2 grid gap-2 md:grid-cols-2">
+        <label class="flex min-w-0 flex-col gap-1 text-2xs font-medium uppercase tracking-wide text-[var(--color-fg-muted)]">
+          max-concurrent
+          <input
+            class="w-full rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-1.5 text-xs text-[var(--color-fg-primary)]"
+            type="number"
+            min="1"
+            value=${maxConcurrent}
+            onInput=${(event: Event) => onMaxConcurrentInput((event.target as HTMLInputElement).value)}
+          />
+        </label>
+        <label class="flex min-w-0 flex-col gap-1 text-2xs font-medium uppercase tracking-wide text-[var(--color-fg-muted)]">
+          thinking-budget
+          <input
+            class="w-full rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-1.5 text-xs text-[var(--color-fg-primary)]"
+            type="number"
+            min="1"
+            value=${thinkingBudget}
+            onInput=${(event: Event) => onThinkingBudgetInput((event.target as HTMLInputElement).value)}
+          />
+        </label>
+      </div>
+      <div class="mt-3 flex flex-wrap gap-2">
+        <${Btn}
+          disabled=${!hasProviderModel}
+          onClick=${() => onInsert(buildCascadeBindingSnippet(provider.trim(), model.trim(), maxConcurrentValue))}
+        >
+          Insert binding
+        <//>
+        <${Btn}
+          disabled=${!hasProviderModel}
+          onClick=${() => onInsert(buildCascadeThinkingAliasSnippet(provider.trim(), model.trim(), thinkingBudgetValue))}
+        >
+          Insert thinking alias
+        <//>
+        <${Btn}
+          disabled=${!hasMember}
+          onClick=${() => onInsert(buildCascadeTierSnippet(tierName, parentBinding, maxConcurrentValue))}
+        >
+          Insert tier
+        <//>
+      </div>
+      ${assist.feature_params.length > 0
+        ? html`
+          <div class="mt-3 flex flex-wrap gap-1">
+            ${assist.feature_params.map(param => html`
+              <span title=${`${param.scope} · ${param.example}`}>
+                <${StatusChip} tone="neutral" uppercase=${false}>${param.key}<//>
+              </span>
+            `)}
+          </div>
+        `
+        : null}
+    </div>
+  `
+}
+
 function CascadeRawConfigEditor({
   raw,
   onRefresh,
@@ -1061,6 +1285,11 @@ function CascadeRawConfigEditor({
   const editorDirty = useSignal(false)
   const saving = useSignal(false)
   const saveMessage = useSignal<string | null>(null)
+  const assistProvider = useSignal(firstNonEmpty(raw?.assist?.providers ?? []))
+  const assistModel = useSignal(firstNonEmpty(raw?.assist?.models ?? []))
+  const assistTier = useSignal(firstNonEmpty(raw?.assist?.tiers ?? []) || 'primary')
+  const maxConcurrent = useSignal('2')
+  const thinkingBudget = useSignal('8192')
   const mode = rawConfigModeSummary(raw)
   const sourceEditable = raw !== null && raw.source_editable !== false
 
@@ -1068,6 +1297,20 @@ function CascadeRawConfigEditor({
     if (!raw || editorDirty.value) return
     editorText.value = raw.source_text
   }, [raw?.updated_at, raw?.source_path, raw?.source_text])
+
+  useEffect(() => {
+    const assist = raw?.assist
+    if (!assist) return
+    if (!assist.providers.includes(assistProvider.value)) {
+      assistProvider.value = firstNonEmpty(assist.providers)
+    }
+    if (!assist.models.includes(assistModel.value)) {
+      assistModel.value = firstNonEmpty(assist.models)
+    }
+    if (!assist.tiers.includes(assistTier.value)) {
+      assistTier.value = firstNonEmpty(assist.tiers) || 'primary'
+    }
+  }, [raw?.updated_at, raw?.source_path])
 
   const syntaxError = validateSourceConfigText(raw, editorText.value)
   const saveDisabled = saving.value
@@ -1079,6 +1322,12 @@ function CascadeRawConfigEditor({
     editorText.value = raw?.source_text ?? ''
     editorDirty.value = false
     saveMessage.value = 'Latest source snapshot restored in the editor.'
+  }
+
+  const insertSnippet = (snippet: string) => {
+    editorText.value = normalizeTomlBlock(editorText.value, snippet)
+    editorDirty.value = true
+    saveMessage.value = null
   }
 
   const handleSave = async (event: Event) => {
@@ -1121,6 +1370,24 @@ function CascadeRawConfigEditor({
         </p>
 
         <form class="flex flex-col gap-3" onSubmit=${handleSave}>
+          ${raw?.assist
+            ? html`
+              <${CascadeSourceAssist}
+                assist=${raw.assist}
+                provider=${assistProvider.value}
+                model=${assistModel.value}
+                tier=${assistTier.value}
+                maxConcurrent=${maxConcurrent.value}
+                thinkingBudget=${thinkingBudget.value}
+                onProviderInput=${(value: string) => { assistProvider.value = value }}
+                onModelInput=${(value: string) => { assistModel.value = value }}
+                onTierInput=${(value: string) => { assistTier.value = value }}
+                onMaxConcurrentInput=${(value: string) => { maxConcurrent.value = value }}
+                onThinkingBudgetInput=${(value: string) => { thinkingBudget.value = value }}
+                onInsert=${insertSnippet}
+              />
+            `
+            : null}
           <textarea
             aria-label="설정 편집기"
             class="h-96 w-full rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-3 py-2 font-mono text-xs text-[var(--color-fg-primary)]"

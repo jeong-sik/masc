@@ -409,6 +409,11 @@ export const KEEPER_RUNTIME_BLOCKER_CLASSES = [
   'supervisor_paused',
   'synthetic_stall',
   'self_imposed_idle',
+  // Emitted by `lib/keeper/keeper_unified_turn_stay_silent.ml:76` when
+  // a keeper produces consecutive silent turns above the configured
+  // threshold. Serialized via
+  // `keeper_meta_contract.ml:147 blocker_class_to_string Stay_silent_loop`.
+  'stay_silent_loop',
   'sdk_max_turns_exceeded',
   'sdk_token_budget_exceeded',
   'sdk_cost_budget_exceeded',

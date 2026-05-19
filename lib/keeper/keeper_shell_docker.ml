@@ -621,10 +621,27 @@ let command_repos_path_hint cmd =
   match leading_cd_rewrite cmd with
   | Some (path, rest) -> Some (path, rest)
   | None ->
-    let tokens =
+    let string_tokens () =
       String.split_on_char ' ' (String.trim cmd)
       |> List.filter (fun s -> s <> "")
     in
+    let parsed_tokens () =
+      match Masc_exec_bash_parser.Bash.parse_string cmd with
+      | Masc_exec.Parsed.Parsed (Masc_exec.Shell_ir.Simple simple) ->
+        let bin = Masc_exec.Bin.to_string simple.bin in
+        let args =
+          simple.args
+          |> List.filter_map (function
+            | Masc_exec.Shell_ir.Lit arg -> Some arg
+            | Masc_exec.Shell_ir.Concat _ | Masc_exec.Shell_ir.Var _ -> None)
+        in
+        Some (bin :: args)
+      | Masc_exec.Parsed.Parsed (Masc_exec.Shell_ir.Pipeline _)
+      | Masc_exec.Parsed.Parse_error _
+      | Masc_exec.Parsed.Parse_aborted _
+      | Masc_exec.Parsed.Too_complex _ -> None
+    in
+    let tokens = Option.value (parsed_tokens ()) ~default:(string_tokens ()) in
     tokens
     |> List.find_map (fun token ->
          match normalize_repos_path_token token with
@@ -702,9 +719,12 @@ let resolve_sandbox_root_git_cwd ~(config : Coord.config) ~(meta : keeper_meta) 
           (Printf.sprintf
              "sandbox root cannot run git/gh: mount point %s is not a git repository and \
               multiple sandbox repos exist. Set cwd explicitly before retrying. Example \
-              next call: keeper_bash { \"cmd\": %S, \"cwd\": %S }. Available \
-              repos: %s. Do not retry the same cmd from sandbox root."
+              next call: Bash { \"command\": %S, \"cwd\": %S }. Legacy internal form: \
+              keeper_bash { \"cmd\": %S, \"cwd\": %S }. Available repos: %s. Do not \
+              retry the same cmd from sandbox root."
              host_root
+             suggested_cmd
+             suggested_cwd
              suggested_cmd
              suggested_cwd
              (String.concat ", " many)) )))

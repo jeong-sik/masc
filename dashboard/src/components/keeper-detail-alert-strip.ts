@@ -10,7 +10,12 @@ import { TimeAgo } from './common/time-ago'
 import { formatDuration } from './mission-utils'
 import type { Keeper } from '../types'
 import { StrongSecondary, RuntimeBadge } from './keeper-detail-primitives'
+<<<<<<< HEAD
 import { trustDispositionLabel as resolveTrustDispositionLabel } from './fsm-hub-types'
+||||||| parent of 782f34b080 (fix(dashboard): Korean labels for operator_disposition + operator_disposition_reason)
+=======
+import { operatorDispositionReasonLabel } from './fsm-hub-types'
+>>>>>>> 782f34b080 (fix(dashboard): Korean labels for operator_disposition + operator_disposition_reason)
 import { keeperNeedsDiagnosticAttention, refreshAfterRuntimeAction } from './keeper-detail-helpers'
 import { pauseKeeper, resumeKeeper, wakeKeeper } from '../api/keeper'
 import { showToast } from './common/toast'
@@ -326,7 +331,7 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
           ? html`<span><strong class="text-[var(--color-fg-secondary)]">권장 조치</strong> · ${latestNextAction}</span>`
           : null}
         ${shouldShowOperatorDispositionReason
-          ? html`<span><${StrongSecondary}>운영자 판단</${StrongSecondary}> · ${operatorDispositionReason}</span>`
+          ? html`<span title=${operatorDispositionReason ?? ''}><${StrongSecondary}>운영자 판단</${StrongSecondary}> · ${operatorDispositionReasonLabel(operatorDispositionReason)}</span>`
           : null}
         ${trustDisposition
           ? html`

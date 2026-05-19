@@ -15,7 +15,12 @@ import { EmptyState, ErrorState, LoadingState } from '../common/feedback-state'
 import { ActionButton } from '../common/button'
 import { FilterChips } from '../common/filter-chips'
 import { StatusBadge } from '../common/status-badge'
+<<<<<<< HEAD
 import { executionOutcomeLabel } from '../fsm-hub-types'
+||||||| parent of 4cc3b7dc43 (fix(dashboard): Korean labels for operator_disposition + operator_disposition_reason)
+=======
+import { operatorDispositionReasonLabel } from '../fsm-hub-types'
+>>>>>>> 4cc3b7dc43 (fix(dashboard): Korean labels for operator_disposition + operator_disposition_reason)
 import { ringFocusClasses } from '../common/ring'
 import { trustDispositionLabel } from '../fsm-hub-types'
 import { TimeAgo } from '../common/time-ago'
@@ -1033,7 +1038,7 @@ function KeeperCard({ keeper }: { keeper: GoalDetailKeeper }) {
             ` : null}
             ${/* Show receipt-level operator cause when it adds detail beyond trustSummary. */
               shouldShowOperatorDispositionReason ? html`
-              <span>운영자 ${operatorDispositionReason}</span>
+              <span title=${operatorDispositionReason ?? ''}>운영자 ${operatorDispositionReasonLabel(operatorDispositionReason)}</span>
             ` : null}
           </div>
         </div>

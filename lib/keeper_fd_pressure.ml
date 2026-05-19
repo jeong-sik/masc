@@ -198,6 +198,60 @@ let degraded_trust_json ?now () =
     ]
 ;;
 
+(* RFC-0137: host-external FD pressure → cooldown trip.
+
+   [Keeper_fd_pressure.note] is reactive — it fires only when an internal
+   call site hits EMFILE/ENFILE. That misses the slow-burn case where the
+   *host* kernel FD table accumulates against [kern.maxfiles] from an
+   adjacent process (Apple Virtualization VM XPC under Docker Desktop)
+   while masc-mcp's own [nofile] budget stays comfortable.
+
+   The out-of-process [sysmon-fd-oom-disk.sh] daemon emits a JSON state
+   file at [/tmp/masc-host-pressure.state] on WARN/CRIT thresholds; the
+   [Host_fd_pressure_poller] (PR-2) reads it on a 1s cadence and invokes
+   [engage_external].
+
+   Monotonic guarantee: stale [ts] produces a smaller [until_ts] than
+   the current [cooldown_until], so [cas_monotonic_max] rejects it — no
+   separate last_external_ts atomic needed. *)
+type external_level =
+  | External_warn
+  | External_crit
+
+let string_of_external_level = function
+  | External_warn -> "warn"
+  | External_crit -> "crit"
+;;
+
+let external_cooldown_sec_of level =
+  let default_sec, env_var =
+    match level with
+    | External_warn -> 600.0, "MASC_HOST_PRESSURE_COOLDOWN_WARN_SEC"
+    | External_crit -> 1800.0, "MASC_HOST_PRESSURE_COOLDOWN_CRIT_SEC"
+  in
+  Env_config_core.get_float ~default:default_sec env_var
+  |> Float.max 5.0
+  |> Float.min 3600.0
+;;
+
+let engage_external ~reason ~level ~ts () =
+  let cooldown = external_cooldown_sec_of level in
+  let until_ts = ts +. cooldown in
+  let advanced = cas_monotonic_max ~atom:cooldown_until until_ts in
+  if advanced
+  then begin
+    let now = Time_compat.now () in
+    let last = Atomic.get last_log_at in
+    if now -. last >= 10.0 && Atomic.compare_and_set last_log_at last now
+    then
+      Log.Keeper.error
+        "fd_pressure: external engage level=%s cooldown=%.0fs reason=%s"
+        (string_of_external_level level)
+        cooldown
+        reason
+  end
+;;
+
 let reset_for_tests () =
   Atomic.set cooldown_until 0.0;
   Atomic.set last_log_at 0.0;

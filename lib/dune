@@ -214,6 +214,7 @@
   voice_bridge_transport
   cascade_wire_overlay
   cascade_event_bridge_inference
+  cascade_event_bridge_error_json
   cascade_http_probe_url
   cascade_agent_context
   cascade_health_tracker_config

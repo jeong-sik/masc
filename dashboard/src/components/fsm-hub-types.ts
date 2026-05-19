@@ -227,6 +227,56 @@ export function executionOutcomeLabel(value: string | null | undefined): string 
   return EXECUTION_OUTCOME_LABELS[value] ?? value
 }
 
+
+/** Korean labels for the three tool-surface axes emitted by
+ *  `lib/keeper/keeper_agent_tool_surface.ml`:
+ *  - `tool_requirement` (3 values, line 24-27):
+ *    required / optional / none.
+ *  - `tool_surface_class` (3 values, line 103-107, RFC-0065 §3.2.2):
+ *    none / public_only / mixed.
+ *  - `turn_lane` (6 values, line 57-63):
+ *    pre_dispatch / text_only / tool_required / tool_optional /
+ *    tool_disabled / retry.
+ *  Tooltips in `fsm-hub.ts:159-160` and stale-cause parts list in
+ *  `fleet-fsm-matrix.ts:289-295` currently interpolate these as raw
+ *  English tokens. Each helper keeps the raw token as fallback so a
+ *  backend-ahead variant still surfaces verbatim. */
+const TOOL_REQUIREMENT_LABELS: Record<string, string> = {
+  required: '필수',
+  optional: '선택',
+  none: '없음',
+}
+
+const TOOL_SURFACE_CLASS_LABELS: Record<string, string> = {
+  none: '도구 없음',
+  public_only: '공개 도구만',
+  mixed: '혼합 도구',
+}
+
+const TURN_LANE_LABELS: Record<string, string> = {
+  pre_dispatch: '디스패치 전',
+  text_only: '텍스트 전용',
+  tool_required: '도구 필수',
+  tool_optional: '도구 선택',
+  tool_disabled: '도구 비활성',
+  retry: '재시도',
+}
+
+export function toolRequirementLabel(value: string | null | undefined): string | null {
+  if (!value) return null
+  return TOOL_REQUIREMENT_LABELS[value] ?? value
+}
+
+export function toolSurfaceClassLabel(value: string | null | undefined): string | null {
+  if (!value) return null
+  return TOOL_SURFACE_CLASS_LABELS[value] ?? value
+}
+
+export function turnLaneLabel(value: string | null | undefined): string | null {
+  if (!value) return null
+  return TURN_LANE_LABELS[value] ?? value
+}
+
 /** Korean labels for `trust.disposition`. Backend emits 4 closed-sum
  *  values via `display_disposition_of_operator`
  *  (lib/keeper/keeper_runtime_trust_snapshot.ml:687-697):

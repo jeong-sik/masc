@@ -9,6 +9,7 @@ import type {
   ProviderLogTailResponse,
 } from '../api/dashboard.js'
 import { VirtualList } from './common/virtual-list'
+import { asRecord } from './common/normalize'
 import { TextInput } from './common/input'
 import { Select } from './common/select'
 import { Checkbox } from './common/checkbox'
@@ -187,11 +188,6 @@ function interpolateStructuredMessage(
   return rendered
 }
 
-function nestedRecord(value: unknown): Record<string, unknown> | null {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
-  return value as Record<string, unknown>
-}
-
 function nestedString(value: unknown): string | null {
   if (typeof value !== 'string') return null
   const trimmed = value.trim()
@@ -276,7 +272,7 @@ function hasLogRouteContext(context: MutableLogRouteContext): boolean {
 
 function failureEnvelope(entry: LogEntry): FailureEnvelope | null {
   const details = entryDetails(entry)
-  const envelope = nestedRecord(details?.failure_envelope)
+  const envelope = asRecord(details?.failure_envelope)
   if (!envelope) return null
 
   const surface = nestedString(envelope.surface)
@@ -299,7 +295,7 @@ function failureEnvelope(entry: LogEntry): FailureEnvelope | null {
     summary,
     recoverability,
     operator_action: nestedString(envelope.operator_action),
-    evidence_ref: nestedRecord(envelope.evidence_ref),
+    evidence_ref: asRecord(envelope.evidence_ref),
   }
 }
 
@@ -354,13 +350,13 @@ export function summarizeLogWindow(entries: LogEntry[]): LogWindowSummary {
 
 export function logRouteLinks(entry: LogEntry): ReadonlyArray<IdeContextRouteLink> {
   const details = entryDetails(entry)
-  const failureEnvelopeRecord = nestedRecord(details?.failure_envelope)
+  const failureEnvelopeRecord = asRecord(details?.failure_envelope)
   const context: MutableLogRouteContext = {}
-  mergeLogRouteRecord(context, nestedRecord(details?.context))
-  mergeLogRouteRecord(context, nestedRecord(details?.evidence_ref))
-  mergeLogRouteRecord(context, nestedRecord(failureEnvelopeRecord?.evidence_ref))
-  mergeLogRouteRecord(context, nestedRecord(details?.tool_args))
-  mergeLogRouteRecord(context, nestedRecord(details?.input))
+  mergeLogRouteRecord(context, asRecord(details?.context))
+  mergeLogRouteRecord(context, asRecord(details?.evidence_ref))
+  mergeLogRouteRecord(context, asRecord(failureEnvelopeRecord?.evidence_ref))
+  mergeLogRouteRecord(context, asRecord(details?.tool_args))
+  mergeLogRouteRecord(context, asRecord(details?.input))
   mergeLogRouteRecord(context, details, true)
   if (!hasLogRouteContext(context)) return []
   return routeLinksForContext({

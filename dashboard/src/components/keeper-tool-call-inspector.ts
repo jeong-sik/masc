@@ -8,6 +8,7 @@ import { fetchKeeperToolCalls } from '../api/dashboard'
 import type { ToolCallEntry, ToolCallsResponse, TelemetryFreshnessMetadata } from '../api/dashboard'
 import { formatTimeHms } from '../lib/format-time'
 import { LoadingState } from './common/feedback-state'
+import { asNullableString, asRecord } from './common/normalize'
 import { SectionCap } from './common/section-cap'
 import { toolCategory, formatDuration, durationColor } from './tool-call-shared'
 import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
@@ -86,10 +87,6 @@ type MutableToolRouteContext = {
   -readonly [K in keyof ToolRouteContextFields]?: ToolRouteContextFields[K]
 }
 
-function stringField(value: unknown): string | null {
-  return typeof value === 'string' && value.trim() !== '' ? value.trim() : null
-}
-
 function positiveLine(value: unknown): number | undefined {
   if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 1) return value
   if (typeof value !== 'string') return undefined
@@ -98,22 +95,16 @@ function positiveLine(value: unknown): number | undefined {
 }
 
 function idString(value: unknown): string | undefined {
-  const text = stringField(value)
+  const text = asNullableString(value)
   if (text) return text
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 1
     ? String(value)
     : undefined
 }
 
-function nestedRecord(value: unknown): Record<string, unknown> | null {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : null
-}
-
 function parseInputRecord(input: string): Record<string, unknown> | null {
   try {
-    return nestedRecord(JSON.parse(input))
+    return asRecord(JSON.parse(input))
   } catch {
     return null
   }
@@ -122,9 +113,9 @@ function parseInputRecord(input: string): Record<string, unknown> | null {
 function codeLocationFromRecord(record: Record<string, unknown> | null): Pick<ToolRouteContextFields, 'filePath' | 'line'> | null {
   if (!record) return null
   const filePath =
-    stringField(record.file_path)
-    ?? stringField(record.path)
-    ?? stringField(record.file)
+    asNullableString(record.file_path)
+    ?? asNullableString(record.path)
+    ?? asNullableString(record.file)
   if (!filePath) return null
   return {
     filePath,
@@ -174,13 +165,13 @@ function mergeToolInputContext(
     mergeToolInputContext(context, parseInputRecord(input), depth + 1)
     return
   }
-  const record = nestedRecord(input)
+  const record = asRecord(input)
   if (!record) return
-  const failureEnvelope = nestedRecord(record.failure_envelope)
-  mergeToolRouteRecord(context, nestedRecord(record.context))
-  mergeToolRouteRecord(context, nestedRecord(record.evidence_ref))
-  mergeToolRouteRecord(context, nestedRecord(failureEnvelope?.evidence_ref))
-  mergeToolRouteRecord(context, nestedRecord(record.tool_args))
+  const failureEnvelope = asRecord(record.failure_envelope)
+  mergeToolRouteRecord(context, asRecord(record.context))
+  mergeToolRouteRecord(context, asRecord(record.evidence_ref))
+  mergeToolRouteRecord(context, asRecord(failureEnvelope?.evidence_ref))
+  mergeToolRouteRecord(context, asRecord(record.tool_args))
   mergeToolInputContext(context, record.input, depth + 1)
   mergeToolRouteRecord(context, record, true)
 }

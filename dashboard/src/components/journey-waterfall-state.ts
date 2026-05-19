@@ -4,6 +4,7 @@ import type {
   TrajectoryResponse,
 } from '../api/dashboard'
 import type { KeeperRuntimeTraceResponse } from '../api/keeper'
+import { asNullableString } from './common/normalize'
 import type { Keeper } from '../types'
 import {
   buildTraceEvents,
@@ -114,16 +115,12 @@ const EMPTY_TIMELINE: AgentTimelineResponse = {
   },
 }
 
-function stringValue(value: unknown): string | null {
-  return typeof value === 'string' && value.trim() !== '' ? value : null
-}
-
 function numberValue(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null
 }
 
 function traceEventSource(event: UnifiedTraceEvent): WaterfallEntrySource {
-  const origin = stringValue(event.detail.trace_origin)
+  const origin = asNullableString(event.detail.trace_origin)
   if (origin === 'trajectory+tool_call_log') return 'trajectory+tool_call_log'
   if (origin === 'tool_call_log') return 'tool_call_log'
   if (origin === 'trajectory') return 'trajectory'
@@ -131,7 +128,7 @@ function traceEventSource(event: UnifiedTraceEvent): WaterfallEntrySource {
 }
 
 function traceEventTraceId(event: UnifiedTraceEvent): string | null {
-  return stringValue(event.detail.trace_id)
+  return asNullableString(event.detail.trace_id)
 }
 
 function traceEventStatus(event: UnifiedTraceEvent): WaterfallEntryStatus {

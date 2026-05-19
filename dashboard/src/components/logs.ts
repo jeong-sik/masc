@@ -9,7 +9,7 @@ import type {
   ProviderLogTailResponse,
 } from '../api/dashboard.js'
 import { VirtualList } from './common/virtual-list'
-import { asRecord, asNullableString } from './common/normalize'
+import { asRecord, asNullableString, positiveLine } from './common/normalize'
 import { TextInput } from './common/input'
 import { Select } from './common/select'
 import { Checkbox } from './common/checkbox'
@@ -186,13 +186,6 @@ function interpolateStructuredMessage(
     rendered = rendered.replace(/%[sd]/, value)
   }
   return rendered
-}
-
-function positiveLine(value: unknown): number | undefined {
-  if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 1) return value
-  if (typeof value !== 'string') return undefined
-  const trimmed = value.trim()
-  return /^[1-9]\d*$/.test(trimmed) ? Number.parseInt(trimmed, 10) : undefined
 }
 
 function idString(value: unknown): string | undefined {

@@ -82,6 +82,13 @@ export function extractArray(value: unknown, keys: string[] = []): unknown[] {
   return []
 }
 
+export function positiveLine(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 1) return value
+  if (typeof value !== 'string') return undefined
+  const trimmed = value.trim()
+  return /^[1-9]\d*$/.test(trimmed) ? Number.parseInt(trimmed, 10) : undefined
+}
+
 export function toIsoTimestamp(value: unknown): string | undefined {
   if (typeof value === 'string' && value.trim() !== '') return value
   if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return undefined

@@ -8,7 +8,7 @@ import { TimeAgo } from '../common/time-ago'
 import { Markdown } from '../common/markdown'
 import { ProgressBar } from '../common/progress-bar'
 import { truncate } from '../../lib/truncate'
-import { asNullableString, asRecord } from '../common/normalize'
+import { asNullableString, asRecord, positiveLine } from '../common/normalize'
 import { formatCost } from '../../lib/format-number'
 import { toolCategory, durationColor, formatDuration, formatArgs as sharedFormatArgs } from '../tool-call-shared'
 import { SectionHeader } from '../common/section-header'
@@ -179,12 +179,6 @@ function stringishField(value: unknown): string | null {
   if (typeof value === 'string') return asNullableString(value)
   if (typeof value === 'number' && Number.isFinite(value)) return String(value)
   return null
-}
-
-function positiveLine(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 1
-    ? value
-    : undefined
 }
 
 function recordCodeLocation(value: Record<string, unknown>): TraceCodeLocation | null {

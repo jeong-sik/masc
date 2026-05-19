@@ -1476,7 +1476,7 @@ let dashboard_bootstrap_http_json
          well as /project-snapshot.  Without this wire, the
          "fallback runs ≤1× per process" claim in #16738 is false for
          bootstrap-driven loads. *)
-      Server_dashboard_shell_snapshot.select_project_snapshot_json
+      Server_dashboard_snapshot_select.select_project_snapshot_json
         ~state ~sw ~clock request)
   in
   let goals =

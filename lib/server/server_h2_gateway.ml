@@ -708,7 +708,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
                  router (see server_routes_http_routes_dashboard.ml).
                  Without this, H/2 clients bypass Dashboard_snapshot
                  entirely and the cold-start fallback claim is false. *)
-              Server_dashboard_shell_snapshot.select_project_snapshot_json
+              Server_dashboard_snapshot_select.select_project_snapshot_json
                 ~state ~sw ~clock httpun_request
             in
             h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors)

@@ -127,11 +127,10 @@ val validate_code_shell_command :
   string -> (unit, string) Result.t
 (** [validate_code_shell_command command] delegates to
     {!Worker_dev_tools.validate_command_coding_with_allowlist}
-    with [~allow_pipes:true] and the pinned
-    [allowed_shell_commands] list (dune-local, make, npm/npx/node,
-    git, ls, cat, head, tail, wc, rg, grep, find, sed, pwd, diff, patch, mkdir,
-    opam, ocamlfind, tsc).  Drift in the allowlist changes the
-    keeper sandbox surface — pinned at the contract seam. *)
+    with [~allow_pipes:true] and the pinned [Dev_exec_allowlist.dev]
+    surface plus tool-specific commands ([diff], [patch], [mkdir],
+    [ocamlfind], [tsc]).  Drift in the allowlist changes the keeper
+    sandbox surface — pinned at the contract seam. *)
 
 (** {1 Git clone validation} *)
 

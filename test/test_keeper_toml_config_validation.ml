@@ -94,8 +94,13 @@ let test_committed_keepers_are_pr_work_capable () =
              (Option.map KTP.sandbox_profile_to_string defaults.sandbox_profile);
            check (option string) (name ^ " network_mode") (Some "inherit")
              (Option.map KTP.network_mode_to_string defaults.network_mode);
+           let expected_github_identity =
+             match name with
+             | "verifier" -> "reviewer-keepers-nonoperator-0506b"
+             | _ -> "anyang-keepers"
+           in
            check (option string) (name ^ " github_identity")
-             (Some "anyang-keepers") defaults.github_identity;
+             (Some expected_github_identity) defaults.github_identity;
            check (option string) (name ^ " git_identity_mode")
              (Some "github_identity") defaults.git_identity_mode;
            let preset =
@@ -154,6 +159,32 @@ let test_verifier_config_hides_worker_lifecycle_tools () =
   match KTP.load_keeper_toml path with
   | Error e -> fail (Printf.sprintf "verifier.toml: %s" e)
   | Ok (_loaded_name, defaults) ->
+      let contains ~needle haystack =
+        let len = String.length haystack in
+        let nlen = String.length needle in
+        let found = ref false in
+        if nlen <= len then
+          for i = 0 to len - nlen do
+            if String.sub haystack i nlen = needle then found := true
+          done;
+        !found
+      in
+      let instructions = Option.value ~default:"" defaults.instructions in
+      check
+        bool
+        "verifier treats PR refs as artifact evidence"
+        true
+        (contains ~needle:"PR artifact 검증" instructions);
+      check
+        bool
+        "verifier must not reject solely on empty task worktree"
+        true
+        (contains ~needle:"task-local worktree가 없거나 비어 있다는 이유만으로 reject하지 마라" instructions);
+      check
+        bool
+        "verifier blocks instead of rejecting inaccessible GitHub artifacts"
+        true
+        (contains ~needle:"GitHub/main artifact에 접근할 수 없으면 reject 대신 blocker" instructions);
       let preset =
         match defaults.tool_preset with
         | Some raw -> (

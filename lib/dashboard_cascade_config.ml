@@ -10,6 +10,161 @@
 
 open Dashboard_cascade_helpers
 
+let sorted_unique_strings values =
+  values
+  |> List.map String.trim
+  |> List.filter (fun value -> not (String.equal value ""))
+  |> List.sort_uniq String.compare
+;;
+
+let feature_param_json ~key ~scope ~value_type ~example =
+  `Assoc
+    [ "key", `String key
+    ; "scope", `String scope
+    ; "value_type", `String value_type
+    ; "example", `String example
+    ]
+;;
+
+let cascade_source_feature_params_json =
+  `List
+    [ feature_param_json
+        ~key:"is-default"
+        ~scope:"binding"
+        ~value_type:"boolean"
+        ~example:"is-default = false"
+    ; feature_param_json
+        ~key:"max-concurrent"
+        ~scope:"binding,tier"
+        ~value_type:"integer"
+        ~example:"max-concurrent = 2"
+    ; feature_param_json
+        ~key:"temperature"
+        ~scope:"alias"
+        ~value_type:"float"
+        ~example:"temperature = 0.2"
+    ; feature_param_json
+        ~key:"max-input"
+        ~scope:"alias"
+        ~value_type:"integer"
+        ~example:"max-input = 32768"
+    ; feature_param_json
+        ~key:"max-output"
+        ~scope:"alias"
+        ~value_type:"integer"
+        ~example:"max-output = 8192"
+    ; feature_param_json
+        ~key:"thinking-enabled"
+        ~scope:"alias"
+        ~value_type:"boolean"
+        ~example:"thinking-enabled = true"
+    ; feature_param_json
+        ~key:"thinking-budget"
+        ~scope:"alias"
+        ~value_type:"integer"
+        ~example:"thinking-budget = 8192"
+    ; feature_param_json
+        ~key:"keep-alive"
+        ~scope:"binding"
+        ~value_type:"string"
+        ~example:"keep-alive = \"30m\""
+    ; feature_param_json
+        ~key:"num-ctx"
+        ~scope:"binding"
+        ~value_type:"integer"
+        ~example:"num-ctx = 32768"
+    ; feature_param_json
+        ~key:"price-input"
+        ~scope:"binding"
+        ~value_type:"float"
+        ~example:"price-input = 0.15"
+    ; feature_param_json
+        ~key:"price-output"
+        ~scope:"binding"
+        ~value_type:"float"
+        ~example:"price-output = 0.60"
+    ; feature_param_json
+        ~key:"strategy"
+        ~scope:"tier,tier-group"
+        ~value_type:"string"
+        ~example:"strategy = \"priority_tier\""
+    ; feature_param_json
+        ~key:"max-cycles"
+        ~scope:"tier.cycle-policy"
+        ~value_type:"integer"
+        ~example:"max-cycles = 3"
+    ; feature_param_json
+        ~key:"sticky-ttl-ms"
+        ~scope:"tier"
+        ~value_type:"integer"
+        ~example:"sticky-ttl-ms = 30000"
+    ]
+;;
+
+let parse_error_to_json (error : Cascade_declarative_parser.parse_error) =
+  `Assoc [ "path", `String error.path; "message", `String error.message ]
+;;
+
+let source_assist_json source_text =
+  match Cascade_declarative_parser.parse_string source_text with
+  | Error errors ->
+    `Assoc
+      [ "parse_status", `String "unavailable"
+      ; "providers", `List []
+      ; "models", `List []
+      ; "bindings", `List []
+      ; "aliases", `List []
+      ; "tiers", `List []
+      ; "tier_groups", `List []
+      ; "routes", `List []
+      ; "feature_params", cascade_source_feature_params_json
+      ; "errors", `List (List.map parse_error_to_json errors)
+      ]
+  | Ok cfg ->
+    let bindings =
+      cfg.Cascade_declarative_types.bindings
+      |> List.map Cascade_declarative_types.binding_key
+    in
+    let aliases =
+      cfg.Cascade_declarative_types.aliases
+      |> List.map Cascade_declarative_types.alias_key
+    in
+    let string_list values = string_list_to_json (sorted_unique_strings values) in
+    `Assoc
+      [ "parse_status", `String "parsed"
+      ; ( "providers"
+        , string_list
+            (List.map
+               (fun (p : Cascade_declarative_types.cascade_provider) -> p.id)
+               cfg.providers)
+        )
+      ; ( "models"
+        , string_list
+            (List.map
+               (fun (m : Cascade_declarative_types.cascade_model_spec) -> m.id)
+               cfg.models)
+        )
+      ; "bindings", string_list bindings
+      ; "aliases", string_list aliases
+      ; ( "tiers"
+        , string_list
+            (List.map (fun (t : Cascade_declarative_types.cascade_tier) -> t.name) cfg.tiers)
+        )
+      ; ( "tier_groups"
+        , string_list
+            (List.map
+               (fun (tg : Cascade_declarative_types.cascade_tier_group) -> tg.name)
+               cfg.tier_groups)
+        )
+      ; ( "routes"
+        , string_list
+            (List.map (fun (r : Cascade_declarative_types.cascade_route) -> r.name) cfg.routes)
+        )
+      ; "feature_params", cascade_source_feature_params_json
+      ; "errors", `List []
+      ]
+;;
+
 (** Profiles to surface in the dashboard.
 
     When the validated runtime snapshot is unavailable (for example
@@ -290,6 +445,7 @@ let raw_config_json () =
     ; "source_path", `String source.source_path
     ; "source_editable", `Bool (Option.is_none !source_read_error)
     ; "source_text", `String source_text
+    ; "assist", source_assist_json source_text
     ; "raw_json", `String raw_json
     ; ( "materialization_error"
       , match materialization_error with

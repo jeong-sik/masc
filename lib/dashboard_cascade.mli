@@ -87,6 +87,24 @@ val invalid_assignments_for_public_profiles :
         "source_path": "/path/to/cascade.toml",
         "source_editable": true,
         "source_text": "comment = ...\n[providers.X]\n...",
+        "assist": {
+          "parse_status": "parsed" | "unavailable",
+          "providers": ["glm-coding", ...],
+          "models": ["glm-auto", ...],
+          "bindings": ["glm-coding.glm-auto", ...],
+          "aliases": ["glm-coding.glm-auto.deep", ...],
+          "tiers": ["primary", ...],
+          "tier_groups": ["primary", ...],
+          "routes": ["keeper_turn", ...],
+          "feature_params": [
+            { "key": "thinking-enabled",
+              "scope": "alias",
+              "value_type": "boolean",
+              "example": "thinking-enabled = true" },
+            ...
+          ],
+          "errors": []
+        },
         "raw_json": "{ ... }\n",
         "materialization_error": null | "..."
       }
@@ -97,6 +115,9 @@ val invalid_assignments_for_public_profiles :
     {!Cascade_toml_materializer.render_toml_to_json_string}. RFC-0058 §9
     Phase 9.3 retired the JSON-native authoring mode and the on-disk JSON
     sibling, so the [config_path] and [raw_json_editable] fields are gone.
+    [assist] is a dashboard authoring helper derived from the same TOML source:
+    it exposes only opaque provider/model/tier identifiers and supported
+    MASC-side feature parameter names, not provider-specific model semantics.
 
     @since 0.160.1 *)
 val raw_config_json : unit -> Yojson.Safe.t

@@ -101,6 +101,13 @@ val tool_filter_rejection_label :
 
 val capacity_key : t -> string
 val capacity_keys : t list -> string list
+val declared_client_capacity : t -> int option
+(** Client-side [max-concurrent] declared on the provider-model binding.
+    This is opaque to routing callers: [None] means the candidate did not
+    declare a MASC-owned client semaphore. *)
+
+val register_declared_client_capacity : t -> unit
+(** Register the candidate's declared client semaphore, when present. *)
 
 val runtime_urls : t list -> string list
 val local_runtime_urls : t list -> string list

@@ -186,6 +186,7 @@
   test_tool_exposure
   test_autonomy_liberation
   test_keeper_unified
+  test_keeper_unified_context_budget
   test_keeper_unified_context_overflow
   test_keeper_unified_turn_pipeline_records
   test_keeper_unified_idle_cooldown
@@ -493,6 +494,7 @@
   test_tool_exposure
   test_autonomy_liberation
   test_keeper_unified
+  test_keeper_unified_context_budget
   test_keeper_unified_context_overflow
   test_keeper_unified_turn_pipeline_records
   test_keeper_unified_idle_cooldown

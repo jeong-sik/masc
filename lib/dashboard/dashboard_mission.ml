@@ -71,7 +71,10 @@ let session_status_string session_json =
   | None -> (
       match trim_to_option (string_field "status" meta) with
       | Some value -> value
-      | None -> trim_to_option (string_field "status" session_json) |> Option.value ~default:"unknown")
+      | None ->
+          trim_to_option (string_field "status" session_json)
+          |> Option.value
+               ~default:"<missing status field in summary / meta / session>")
 
 let session_recent_events session_json =
   list_field "recent_events" session_json
@@ -126,7 +129,7 @@ let creator_looks_system created_by =
 let session_origin_kind session_meta =
   let created_by =
     trim_to_option (string_field "created_by" session_meta)
-    |> Option.value ~default:"unknown"
+    |> Option.value ~default:"<missing created_by field>"
   in
   trim_to_option (string_field "origin_kind" session_meta)
   |> Option.value

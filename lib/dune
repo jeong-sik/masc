@@ -29,6 +29,7 @@
  keeper_metric_emit_dropped_site
  keeper_post_turn_wirein_failure_site
  atomic_orphan_size_class
+ operator_control_context_snapshot
  silent_dashboard_actor_outcome
  sse_jsonrpc_filter
  prometheus_format
@@ -60,6 +61,7 @@
  dashboard_keeper_feature_proof
  dashboard_keeper_git_pr_proof
  dashboard_keeper_tool_failure_proof
+ board_core_json
  board_core
  board_curation
  board_votes_json
@@ -89,18 +91,21 @@
  server_dashboard_http_cache
  server_dashboard_surface
  server_dashboard_http_perf
+ server_dashboard_http_memory_subsystems
  dashboard_http_helpers
  dashboard_http_monitoring
  dashboard_http_keeper_outcomes
  dashboard_http_keeper_trust
  dashboard_http_keeper_feeds
  dashboard_http_keeper
+ server_dashboard_http_keeper_api_trace
  server_dashboard_http_keeper_api_checkpoints
  server_dashboard_http_keeper_runtime_manifest_scan
  server_dashboard_http_keeper_runtime_lens_proof
  server_dashboard_http_keeper_runtime_lens_swimlane
  server_dashboard_http_keeper_runtime_lens_summaries
  server_dashboard_http_keeper_runtime_lens_gaps
+ server_dashboard_http_core_entities
  dashboard_goal_loop
  dashboard_http_autoresearch
  dashboard_harness_health
@@ -110,11 +115,14 @@
  server_routes_http_pages
  server_routes_http_runtime
  server_routes_http_keeper_stream
+ server_routes_http_sidecar_paths
  server_routes_http_routes_frontend
  server_routes_http_routes_room
+ server_routes_http_dashboard_provider_logs
  server_routes_http_routes_dashboard
  server_routes_http_routes_activity
  server_runtime_config_root_bootstrap
+ server_runtime_codex_mcp_sync
  server_mcp_transport_http_types
  server_mcp_transport_http_session
  server_mcp_transport_http_headers
@@ -180,6 +188,7 @@
   keeper_text_processing
   keeper_summarizer
   keeper_context_core_message_json
+  keeper_context_core_history
   keeper_context_core
   keeper_compact_policy
   keeper_compact_audit
@@ -194,13 +203,16 @@
   keeper_agent_error
   keeper_agent_memory_episode
   keeper_run_tools_search
+  keeper_run_tools_work_discovery
   provider_runtime_projection
   voice_bridge_transport
   cascade_wire_overlay
+  cascade_event_bridge_inference
   cascade_http_probe_url
   cascade_agent_context
   cascade_health_tracker_config
   cascade_metrics_registry
+  cascade_transport_cli_config
   keeper_oas_checkpoint
   keeper_cascade_engine
   keeper_turn_driver
@@ -249,6 +261,7 @@
   keeper_memory_llm_summary
   keeper_memory_recall
   keeper_status_bridge
+  keeper_runtime_trust_timeline
   keeper_hooks_oas_gate_attempt
   keeper_hooks_oas_output_json
   keeper_hooks_oas_response_metrics
@@ -421,7 +434,8 @@
    masc_mcp.dashboard_eval_feed
    ;; RFC-0004 Phase A0.1 PR-1 — Typed SSE event lib (lib/sse_event/).
    ;; atdgen-generated payload types + hand-rolled envelope wrap that
-   ;; mirrors cascade_event_bridge.wrap_event/json_string_opt
+   ;; mirrors cascade_event_bridge.wrap_event and
+   ;; cascade_event_bridge_inference.json_string_opt
    ;; semantics.  PR-2 onwards: cascade_event_bridge arms call into
    ;; Sse_event.<event>_constructor instead of inline `Assoc.
    masc_mcp.sse_event

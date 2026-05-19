@@ -45,11 +45,14 @@ describe('statusLabel', () => {
 })
 
 describe('displayStatus', () => {
-  it('maps core statuses', () => {
+  // displayStatus now delegates to statusLabel — same key, same label.
+  // The prior `failed → '문제'` divergence is intentionally removed; both
+  // call sites get `'오류'` so operators see one consistent surface.
+  it('maps core statuses (delegates to statusLabel)', () => {
     expect(displayStatus('active')).toBe('진행 중')
     expect(displayStatus('paused')).toBe('일시정지')
     expect(displayStatus('done')).toBe('완료')
-    expect(displayStatus('failed')).toBe('문제')
+    expect(displayStatus('failed')).toBe('오류') // was '문제' — unified
     expect(displayStatus('stopped')).toBe('중단됨')
     expect(displayStatus('offline')).toBe('오프라인')
     expect(displayStatus('idle')).toBe('대기')
@@ -63,6 +66,23 @@ describe('displayStatus', () => {
   it('is case-insensitive', () => {
     expect(displayStatus('ACTIVE')).toBe('진행 중')
     expect(displayStatus('Paused')).toBe('일시정지')
+  })
+})
+
+describe('statusLabel collision fixes (Iter#36)', () => {
+  // Before this PR three pairs of distinct English keys collapsed onto the
+  // same Korean label, making the dashboard label ambiguous.
+  it('listening / idle / todo no longer all map to 대기', () => {
+    expect(statusLabel('listening')).toBe('수신 대기')
+    expect(statusLabel('idle')).toBe('대기')
+    expect(statusLabel('todo')).toBe('예정')
+  })
+  it('interrupted (run aborted mid-flight) is distinct from stopped (clean termination)', () => {
+    expect(statusLabel('interrupted')).toBe('인터럽트됨')
+    expect(statusLabel('stopped')).toBe('중단됨')
+  })
+  it('in_progress aliases active/running', () => {
+    expect(statusLabel('in_progress')).toBe('진행 중')
   })
 })
 

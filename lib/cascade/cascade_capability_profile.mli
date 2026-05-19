@@ -78,11 +78,35 @@ val resolve_provider_filter : string -> string option
     declared in the TOML profile, or [None] if the profile is
     built-in or has no filter. *)
 
+(** Why a {!provider_satisfies_named_profile} call could not produce a
+    [bool] answer.  An unknown profile name is a config error (the
+    operator typo'd a profile name in [cascade.toml] or a downstream
+    pin removed a profile) — silently returning [false] would emit a
+    misleading lint warning like "all models fail profile X" when the
+    real issue is "profile X is unknown".  The [builtin] / [declared]
+    fields list the two known pools separately so the diagnostic can
+    say which side the name should have come from. *)
+type named_profile_lookup_error =
+  | Unknown_named_profile of
+      { name : string; builtin : string list; declared : string list }
+
+(** Format a {!named_profile_lookup_error} as a user-facing string for
+    drop-in use in lint warnings and config error messages. *)
+val named_profile_lookup_error_to_string :
+  named_profile_lookup_error -> string
+
 val provider_satisfies_named_profile :
-  string -> Provider_tool_support.capabilities -> bool
-(** String-based satisfaction check.  Resolves the profile name
-    (built-in or declared), then checks capabilities.  Returns
-    [false] for unknown profile names. *)
+  name:string ->
+  Provider_tool_support.capabilities ->
+  (bool, named_profile_lookup_error) result
+(** [provider_satisfies_named_profile ~name caps] is [Ok true] iff
+    [caps] satisfies every [Required] capability of profile [name],
+    and [Ok false] when at least one [Required] capability is missing.
+    Returns an [Error] when [name] is neither a built-in profile name
+    ({!Cascade_capability_schema.all_profile_names}) nor a TOML-declared
+    profile ({!declared_profile_names}); callers must not collapse the
+    [Error] to [false] because the two cases imply different operator
+    actions (fix profile name vs upgrade provider capabilities). *)
 
 val required_capabilities_of_string_list :
   string list -> required_capabilities

@@ -86,8 +86,17 @@ let classify_failure_output (output : string) : string =
       let fallback_category () =
         match Safe_ops.json_string_opt "error" j |> Option.map String.trim with
         | Some "command_blocked_readonly" ->
+          (* The block payload normally carries a [category] string
+             naming which readonly policy rule fired (e.g. "write",
+             "exec", "network").  Dashboard groups on the full key
+             [command_blocked_readonly:<category>], so a bare "unknown"
+             tells the operator the rule fired but hides which policy
+             class.  Use a structured marker so the operator can grep
+             the source events and find the producer that omitted the
+             field. *)
           let category =
-            Safe_ops.json_string_opt "category" j |> Option.value ~default:"unknown"
+            Safe_ops.json_string_opt "category" j
+            |> Option.value ~default:"<missing category field>"
           in
           Printf.sprintf "command_blocked_readonly:%s" category
         | Some error when error <> "" -> normalize_failure_text error
@@ -122,14 +131,18 @@ let cascade_bucket_key record =
      | Some value when String.trim value <> "" -> value
      | _ -> "runtime")
 
+(* Split the two failure modes that previously collapsed to the
+   bare "unknown" bucket so a non-zero count on either tells the
+   operator a distinct producer fix: missing/non-bool field vs
+   non-object record envelope. *)
 let thinking_mode_of_record record =
   match record with
   | `Assoc fields ->
     (match List.assoc_opt "thinking_enabled" fields with
      | Some (`Bool true) -> "enabled"
      | Some (`Bool false) -> "disabled"
-     | _ -> "unknown")
-  | _ -> "unknown"
+     | _ -> "<missing thinking_enabled field>")
+  | _ -> "<non-object record envelope>"
 
 let bool_field_opt record field =
   match record with
@@ -168,8 +181,8 @@ let hour_key_of_record record =
      | Some (`Int i) -> hour_of_unix (Float.of_int i)
      | Some (`String s) when String.length s >= 13 -> String.sub s 0 13
      | Some (`String s) -> s
-     | _ -> "unknown")
-  | _ -> "unknown"
+     | _ -> "<missing or non-numeric ts field>")
+  | _ -> "<non-object record envelope>"
 
 let update_rate_table table key ok =
   let key = if String.trim key = "" then "unknown" else key in
@@ -285,13 +298,20 @@ let aggregate ?(n = 5000) ?window_hours () : Yojson.Safe.t =
   let failure_cats : (string, int ref) Hashtbl.t = Hashtbl.create 32 in
   List.iter (fun record ->
     incr total;
+    (* [tool] and [keeper] become bucket keys in the dashboard
+       histogram.  A bare "unknown" bucket appears in the same column
+       as a legitimate tool named "unknown", so the operator cannot
+       tell "the tool field was missing from N records" apart from
+       "tool 'unknown' was invoked N times".  Use structured markers
+       so a non-zero bucket on either is a producer-side fix
+       signal. *)
     let tool =
       Safe_ops.json_string_opt "tool" record
-      |> Option.value ~default:"unknown"
+      |> Option.value ~default:"<missing tool field>"
     in
     let keeper =
       Safe_ops.json_string_opt "keeper" record
-      |> Option.value ~default:"unknown"
+      |> Option.value ~default:"<missing keeper field>"
     in
     let ok = tool_success_of_record record in
     let semantic_outcome = semantic_outcome_of_record record ~ok in

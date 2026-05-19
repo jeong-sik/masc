@@ -367,6 +367,80 @@ export function toolContractLabel(value: string | null | undefined): string | nu
   return TOOL_CONTRACT_LABELS[value] ?? value
 }
 
+
+
+/** Korean labels for `execution.operator_disposition`. Backend emits 8
+ *  closed-sum values via
+ *  `Keeper_execution_receipt.operator_disposition_kind_to_string`
+ *  (lib/keeper/keeper_execution_receipt.ml:401-410). Kept separate
+ *  from `STATE_DISPLAY_NAMES` to avoid collision on generic tokens
+ *  like `unknown` / `skipped` that other axes also emit. */
+const OPERATOR_DISPOSITION_LABELS: Record<string, string> = {
+  pass: '진행',
+  pause_human: '운영자 일시정지',
+  alert_exhausted: '경보 소진',
+  fail_open_next_cascade: '다음 cascade 로 fail-open',
+  pass_next_model: '다음 모델로 진행',
+  user_cancelled: '사용자 취소',
+  skipped: '건너뜀',
+  unknown: '미상',
+}
+
+export function operatorDispositionLabel(value: string | null | undefined): string | null {
+  if (!value) return null
+  return OPERATOR_DISPOSITION_LABELS[value] ?? value
+}
+
+/** Korean labels for `execution.operator_disposition_reason`. Backend
+ *  emits 13 closed-sum values via
+ *  `Keeper_execution_receipt.operator_disposition_reason_to_string`
+ *  (lib/keeper/keeper_execution_receipt.ml:427-441). Paired with
+ *  {!operatorDispositionLabel} at every emit site — same atomic
+ *  coverage as the attention_reason / next_human_action pair fixed
+ *  by #16355. */
+const OPERATOR_DISPOSITION_REASON_LABELS: Record<string, string> = {
+  healthy: '정상',
+  cascade_exhausted: '캐스케이드 소진',
+  preflight_config_error: '실행 전 설정 오류',
+  degraded_retry: '저하 상태 재시도',
+  cascade_fallback: '캐스케이드 폴백',
+  provider_runtime_error: 'Provider 런타임 오류',
+  internal_error: '내부 오류',
+  tool_required_unsatisfied: '필수 도구 미충족',
+  tool_route_recoverable_failure: '도구 라우팅 복구 가능 실패',
+  turn_livelock_blocked: '턴 livelock 차단',
+  cancelled: '취소됨',
+  phase_skipped: 'phase 건너뜀',
+  unmapped_cascade_state: '매핑되지 않은 cascade 상태',
+}
+
+export function operatorDispositionReasonLabel(
+  value: string | null | undefined,
+): string | null {
+  if (!value) return null
+  return OPERATOR_DISPOSITION_REASON_LABELS[value] ?? value
+}
+
+/** Korean labels for `execution.cascade.outcome` /
+ *  `keeper.cascade_outcome`. Backend emits 4 closed-sum values via
+ *  `Keeper_execution_receipt.cascade_outcome_to_string`
+ *  (lib/keeper/keeper_execution_receipt.ml:144-149). Kept separate
+ *  from `STATE_DISPLAY_NAMES` because `completed` and
+ *  `not_observed` are generic tokens other axes may emit (same
+ *  isolation pattern as TOOL_CONTRACT_LABELS in #16374 and
+ *  OPERATOR_DISPOSITION_LABELS in #16377). */
+const CASCADE_OUTCOME_LABELS: Record<string, string> = {
+  passed_to_next_model: '다음 모델로 진행',
+  completed: '완료',
+  not_observed: '관측되지 않음',
+  not_dispatched: '디스패치 안 됨',
+}
+
+export function cascadeOutcomeLabel(value: string | null | undefined): string | null {
+  if (!value) return null
+  return CASCADE_OUTCOME_LABELS[value] ?? value
+}
+
 export type StateEntries = {
   phase: number
   turn: number

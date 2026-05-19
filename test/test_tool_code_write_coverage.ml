@@ -488,6 +488,28 @@ let test_validate_code_shell_command_rejects_semicolon () =
         (String.starts_with ~prefix:"Shell injection syntax" reason)
   | Ok () -> fail "expected semicolon chaining to be rejected"
 
+let test_code_shell_command_shape_block_is_workflow_rejection () =
+  let ctx = make_ctx () in
+  let result =
+    dispatch_result_exn ctx ~name:"masc_code_shell"
+      ~args:
+        (`Assoc
+          [
+            ("command", `String "dune build; tail -5");
+            ("timeout", `Int 5);
+          ])
+  in
+  check bool "command shape rejected" false result.success;
+  check bool "error keeps shell injection diagnostic" true
+    (String.starts_with
+       ~prefix:"Shell injection syntax"
+       result.legacy_message);
+  check (option string) "command shape is workflow rejection"
+    (Some "workflow_rejection")
+    (Option.map
+       Tool_result.tool_failure_class_to_string
+       (Tool_result.failure_class result))
+
 (* ── Per-agent containment (#6527 iter 6) ───────────────────────────
    Regression tests for PR #6610 — verify that validate_writable_path
    and validate_clone_cwd refuse cross-agent playground writes even
@@ -1106,6 +1128,8 @@ let () =
         test_validate_code_shell_command_uses_code_shell_allowlist_hint;
       test_case "rejects semicolon" `Quick
         test_validate_code_shell_command_rejects_semicolon;
+      test_case "command shape block is workflow rejection" `Quick
+        test_code_shell_command_shape_block_is_workflow_rejection;
       test_case "missing docker cwd reports worktree hint" `Quick
         test_code_shell_missing_docker_cwd_reports_worktree_hint;
       test_case "cross-agent playground cwd is policy rejection" `Quick

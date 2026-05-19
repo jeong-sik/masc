@@ -20,6 +20,35 @@ import {
 import { keeperNeedsDiagnosticAttention, refreshAfterRuntimeAction } from './keeper-detail-helpers'
 import { pauseKeeper, resumeKeeper, wakeKeeper } from '../api/keeper'
 import { showToast } from './common/toast'
+import {
+  SYNTHETIC_SCOPE_LABEL,
+  SYNTHETIC_TOOLTIP,
+  stripSyntheticMarker,
+} from '../lib/synthetic-marker'
+
+/**
+ * Render a text field that *might* carry the backend `[SYNTHETIC]`
+ * prefix. Synthesized values render with a side chip + tooltip so
+ * operators don't mistake a backend fallback for ground-truth model
+ * output. Phase 4 surface fix for the §1.6 asymmetry: memory search
+ * already rejected synthetic rows, but the dashboard rendered them
+ * verbatim until now.
+ */
+function SyntheticAwareText({ text }: { text: string }) {
+  const { stripped, synthesized } = stripSyntheticMarker(text)
+  if (!synthesized) return html`<span>${stripped}</span>`
+  return html`
+    <span class="inline-flex flex-wrap items-baseline gap-1.5">
+      <span
+        class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--warn-30)] bg-[var(--warn-10)] px-1.5 py-px text-[10px] font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-status-warn)]"
+        title=${SYNTHETIC_TOOLTIP}
+      >
+        ${SYNTHETIC_SCOPE_LABEL}
+      </span>
+      <span>${stripped}</span>
+    </span>
+  `
+}
 
 // Backend `attention_reason` is set across three emit sites (verified by
 // `rg '"attention_reason".*\`String "' lib/`):
@@ -402,16 +431,16 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
           ? html`<span><strong class="text-[var(--color-fg-secondary)]">다음 액션</strong> · ${nextHumanActionText}</span>`
           : null}
         ${stopCause
-          ? html`<span><strong class="text-[var(--color-fg-secondary)]">정지 원인</strong> · ${stopCause.code}${stopCause.summary ? html` · ${stopCause.summary}` : null}</span>`
+          ? html`<span><strong class="text-[var(--color-fg-secondary)]">정지 원인</strong> · ${stopCause.code}${stopCause.summary ? html` · <${SyntheticAwareText} text=${stopCause.summary} />` : null}</span>`
           : null}
         ${latestTerminalCode && latestTerminalCode !== stopCause?.code
-          ? html`<span><strong class="text-[var(--color-fg-secondary)]">종료 코드</strong> · ${latestTerminalCode}${latestTerminalSummary ? html` · ${latestTerminalSummary}` : null}</span>`
+          ? html`<span><strong class="text-[var(--color-fg-secondary)]">종료 코드</strong> · ${latestTerminalCode}${latestTerminalSummary ? html` · <${SyntheticAwareText} text=${latestTerminalSummary} />` : null}</span>`
           : null}
         ${latestNextAction
           ? html`<span title=${latestNextAction}><strong class="text-[var(--color-fg-secondary)]">권장 조치</strong> · ${nextHumanActionLabel(latestNextAction)}</span>`
           : null}
-        ${shouldShowOperatorDispositionReason
-          ? html`<span><${StrongSecondary}>운영자 판단</${StrongSecondary}> · ${operatorDispositionReason}</span>`
+        ${shouldShowOperatorDispositionReason && operatorDispositionReason
+          ? html`<span><${StrongSecondary}>운영자 판단</${StrongSecondary}> · <${SyntheticAwareText} text=${operatorDispositionReason} /></span>`
           : null}
         ${trustDisposition
           ? html`

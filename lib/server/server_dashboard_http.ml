@@ -1470,7 +1470,14 @@ let dashboard_bootstrap_http_json
   in
   let namespace_truth =
     slice "namespace_truth" (fun () ->
-      dashboard_namespace_truth_http_json ~state ~sw ~clock request)
+      (* RFC-0138 Phase 3 Step 3 follow-up — route through the snapshot
+         selector instead of calling the compute path directly so the
+         lock-free read takes effect for /api/v1/dashboard/bootstrap as
+         well as /project-snapshot.  Without this wire, the
+         "fallback runs ≤1× per process" claim in #16738 is false for
+         bootstrap-driven loads. *)
+      Server_dashboard_shell_snapshot.select_project_snapshot_json
+        ~state ~sw ~clock request)
   in
   let goals =
     slice "goals" (fun () ->

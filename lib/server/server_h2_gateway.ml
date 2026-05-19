@@ -703,7 +703,13 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
       | `GET, "/api/v1/dashboard/room-truth" ->
           with_h2_public_read h2_reqd (fun state ->
             let json =
-              dashboard_namespace_truth_http_json ~state ~sw ~clock httpun_request
+              (* RFC-0138 Phase 3 Step 3 follow-up — route H/2 gateway
+                 through the snapshot selector for parity with the H/1
+                 router (see server_routes_http_routes_dashboard.ml).
+                 Without this, H/2 clients bypass Dashboard_snapshot
+                 entirely and the cold-start fallback claim is false. *)
+              Server_dashboard_shell_snapshot.select_project_snapshot_json
+                ~state ~sw ~clock httpun_request
             in
             h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors)
 

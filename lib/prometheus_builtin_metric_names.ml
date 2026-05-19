@@ -95,6 +95,7 @@ let metric_pool_idle_total = Pool_metrics.metric_idle_total
 let metric_pool_inflight_total = Pool_metrics.metric_inflight_total
 let metric_pool_reuse_total = Pool_metrics.metric_reuse_total
 let metric_pool_evict_total = Pool_metrics.metric_evict_total
+let metric_pool_evict_failure_total = Pool_metrics.metric_evict_failure_total
 let metric_pool_create_total = Pool_metrics.metric_create_total
 
 include Prometheus_policy_metric_names

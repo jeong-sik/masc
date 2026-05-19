@@ -90,6 +90,7 @@ type idle_entry = {
 type stats_counters = {
   mutable reuse_count_total  : int;
   mutable evict_count_total  : int;
+  mutable evict_failure_count_total : int;
   mutable create_count_total : int;
   mutable inflight           : int;
 }
@@ -97,6 +98,7 @@ type stats_counters = {
 let new_counters () =
   { reuse_count_total = 0;
     evict_count_total = 0;
+    evict_failure_count_total = 0;
     create_count_total = 0;
     inflight = 0; }
 
@@ -156,7 +158,16 @@ let start_eviction_fiber t =
         Eio.Time.sleep clock (t.config.idle_ttl_seconds /. 2.0);
         let now = Eio.Time.now clock in
         (try evict_expired_entries t now
-         with _ -> ());
+         with
+         | Eio.Cancel.Cancelled _ as e -> raise e
+         | exn ->
+             t.counters.evict_failure_count_total
+               <- t.counters.evict_failure_count_total + 1;
+             Printf.eprintf
+               "[masc_http_client.pool] eviction fiber caught \
+                exception (count=%d): %s\n%!"
+               t.counters.evict_failure_count_total
+               (Printexc.to_string exn));
         loop ()
       end
     in
@@ -528,6 +539,7 @@ type stats = {
   total_inflight : int;
   reuse_count_total : int;
   evict_count_total : int;
+  evict_failure_count_total : int;
   create_count_total : int;
 }
 
@@ -545,6 +557,7 @@ let stats t : stats =
       total_inflight = t.counters.inflight;
       reuse_count_total = t.counters.reuse_count_total;
       evict_count_total = t.counters.evict_count_total;
+      evict_failure_count_total = t.counters.evict_failure_count_total;
       create_count_total = t.counters.create_count_total; })
 
 (* ── Test-only ─────────────────────────────────────────────────── *)

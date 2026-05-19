@@ -125,6 +125,7 @@ let test_stats_zero_state_shape () =
     total_inflight = 0;
     reuse_count_total = 0;
     evict_count_total = 0;
+    evict_failure_count_total = 0;
     create_count_total = 0;
   } in
   Alcotest.(check int) "zero total_idle" 0 zero.total_idle;

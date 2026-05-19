@@ -10,6 +10,7 @@ let metric_idle_total = "masc_pool_idle_total"
 let metric_inflight_total = "masc_pool_inflight_total"
 let metric_reuse_total = "masc_pool_reuse_total"
 let metric_evict_total = "masc_pool_evict_total"
+let metric_evict_failure_total = "masc_pool_evict_failure_total"
 let metric_create_total = "masc_pool_create_total"
 
 let current_snapshot () =

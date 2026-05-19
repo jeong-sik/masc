@@ -272,6 +272,7 @@
   tool_schema_dsl
   tool_misc_transport
   tool_misc_admin
+  tool_keeper_persona_audit
   enforcement_status
   tool_misc_web_search
   tool_misc_web_fetch

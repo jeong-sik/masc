@@ -197,7 +197,7 @@ let validate_command_with_allowlist ~allowed_commands cmd =
     | Some name -> Error (Command_not_allowed name))
 ;;
 
-let validate_command cmd =
+let validate_command ?caller:_ cmd =
   validate_command_with_allowlist ~allowed_commands:dev_allowed_commands cmd
 ;;
 

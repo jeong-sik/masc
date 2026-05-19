@@ -62,8 +62,14 @@ val dev_allowed_commands : string list
     default [shell_exec] tool.  Rejects empty input, chaining, and any
     command outside the dev allowlist (rg / grep / dune-local.sh / git / ...).
     Bare [dune] is intentionally rejected; local agents must use
-    [scripts/dune-local.sh] so builds share the host-wide lock. *)
-val validate_command : string -> (unit, block_reason) result
+    [scripts/dune-local.sh] so builds share the host-wide lock.
+    [?caller] is accepted for call-site parity with the coding validators;
+    strict validation does not parse through {!Shell_command_gate}, so the
+    value is captured but does not affect the verdict. *)
+val validate_command
+  :  ?caller:Shell_command_gate.caller
+  -> string
+  -> (unit, block_reason) result
 
 (** Relaxed validator for Coding/Full preset keepers.  Allows pipes
     and fd redirects; still blocks shell injection, process

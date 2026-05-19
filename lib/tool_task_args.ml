@@ -17,8 +17,6 @@ let json_kind_name : Yojson.Safe.t -> string = function
   | `String _ -> "string"
   | `Assoc _ -> "object"
   | `List _ -> "array"
-  | `Tuple _ -> "tuple"
-  | `Variant _ -> "variant"
 
 let parse_task_contract args =
   match args |> member "contract" with

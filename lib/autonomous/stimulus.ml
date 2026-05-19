@@ -89,8 +89,6 @@ let json_kind_name : Yojson.Safe.t -> string = function
   | `String _ -> "string"
   | `Assoc _ -> "object"
   | `List _ -> "array"
-  | `Tuple _ -> "tuple"
-  | `Variant _ -> "variant"
 
 (* Defensive parsing: no exceptions escape — every malformed input
    maps to [Error msg] with a localised reason. The salience and id

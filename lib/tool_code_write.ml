@@ -47,13 +47,15 @@ let first_nonempty_line output =
   |> List.map String.trim
   |> List.find_opt (fun s -> not (String.equal s ""))
 
-(* Shell command allowlist *)
-let allowed_shell_commands = [
-  "dune-local.sh"; "make"; "npm"; "npx"; "node";
-  "git"; "ls"; "cat"; "head"; "tail"; "wc";
-  "rg"; "grep"; "find"; "sed"; "pwd"; "diff"; "patch"; "mkdir";
-  "opam"; "ocamlfind"; "tsc";
-]
+let add_unique acc item =
+  if List.exists (String.equal item) acc then acc else acc @ [ item ]
+
+(* Shell command allowlist.  Keep this aligned with keeper_bash/dev shell so
+   safe coding probes do not fail only because they entered through
+   masc_code_shell.  Tool-specific extras are kept here. *)
+let allowed_shell_commands =
+  List.fold_left add_unique Dev_exec_allowlist.dev
+    [ "diff"; "patch"; "mkdir"; "ocamlfind"; "tsc" ]
 
 let validate_code_shell_command (command : string) : (unit, string) Result.t =
   Worker_dev_tools.validate_command_coding_with_allowlist
@@ -936,9 +938,8 @@ Use when removing generated, obsolete, or conflicting files during code work.";
     name = "masc_code_shell";
     description = "Run an allowlisted command in an allowed coding sandbox \
 (.worktrees/ or .masc/playground/). \
-Allowed: scripts/dune-local.sh, make, npm, npx, node, git, ls, cat, head, tail, \
-wc, rg, grep, find, sed, pwd, diff, patch, mkdir, opam, ocamlfind, tsc. Use for building and \
-testing code in isolated worktrees. For unrestricted shell at project root, use keeper_bash. \
+Allowed: keeper dev-shell commands plus diff, patch, mkdir, ocamlfind, and tsc. \
+Use for building and testing code in isolated worktrees. For unrestricted shell at project root, use keeper_bash. \
 Returns exit_code and stdout (truncated at " ^ max_output_label ^ ").";
     input_schema = `Assoc [
       ("type", `String "object");

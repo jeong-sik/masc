@@ -435,6 +435,14 @@ let test_validate_code_shell_command_allows_sed_and_pwd () =
   check (result unit string) "pwd allowed" (Ok ())
     (Tool_code_write.validate_code_shell_command "pwd")
 
+let test_validate_code_shell_command_uses_dev_allowlist_ssot () =
+  check (result unit string) "echo probe allowed" (Ok ())
+    (Tool_code_write.validate_code_shell_command "echo Docker probe OK");
+  check (result unit string) "python3 dev probe allowed" (Ok ())
+    (Tool_code_write.validate_code_shell_command "python3 --version");
+  check (result unit string) "ruff dev probe allowed" (Ok ())
+    (Tool_code_write.validate_code_shell_command "ruff --version")
+
 let test_validate_code_shell_command_allows_quoted_regex_alternation () =
   check (result unit string) "quoted rg alternation allowed" (Ok ())
     (Tool_code_write.validate_code_shell_command
@@ -457,13 +465,13 @@ let test_validate_code_shell_command_allows_log_regression_shapes () =
        "find . -name \"cascade.toml\" -type f 2>/dev/null")
 
 let test_validate_code_shell_command_uses_code_shell_allowlist_hint () =
-  match Tool_code_write.validate_code_shell_command "python3 --version" with
+  match Tool_code_write.validate_code_shell_command "curl --version" with
   | Error reason ->
       check bool "uses caller-specific allowlist label" true
         (msg_contains ~needle:"Allowed commands for this tool" reason);
       check bool "names grep because code shell allows it" true
         (msg_contains ~needle:"grep" reason)
-  | Ok () -> fail "expected python3 to be rejected by masc_code_shell allowlist"
+  | Ok () -> fail "expected curl to be rejected by masc_code_shell allowlist"
 
 let test_validate_code_shell_command_rejects_semicolon () =
   match
@@ -1050,6 +1058,8 @@ let () =
         test_validate_code_shell_command_allows_grep;
       test_case "allows sed and pwd" `Quick
         test_validate_code_shell_command_allows_sed_and_pwd;
+      test_case "uses dev allowlist SSOT" `Quick
+        test_validate_code_shell_command_uses_dev_allowlist_ssot;
       test_case "allows quoted regex alternation" `Quick
         test_validate_code_shell_command_allows_quoted_regex_alternation;
       test_case "allows log-derived read command shapes" `Quick

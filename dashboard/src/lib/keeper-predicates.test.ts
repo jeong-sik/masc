@@ -44,11 +44,18 @@ describe('isKeeperOffline', () => {
   ])('phase=%s ⇒ offline', (phase) => {
     expect(isKeeperOffline(k({ phase }))).toBe(true)
   })
-  it.each([['offline'], ['inactive'], ['unbooted']])('status=%s ⇒ offline', (status) => {
+  it.each([['offline'], ['inactive'], ['unbooted'], ['stopped']])('status=%s ⇒ offline', (status) => {
     expect(isKeeperOffline(k({ status }))).toBe(true)
   })
   it('Running keeper not offline', () => {
     expect(isKeeperOffline(k({ phase: 'Running' }))).toBe(false)
+  })
+  it('audit B5 absorbed: status-only `stopped` token (legacy isOfflineStatus arm)', () => {
+    // Pre RFC-0139 PR-2 the `'stopped'` status token was recognised
+    // only by `lib/status-utils.isOfflineStatus`. The keeper-side SSOT
+    // now absorbs it so a wire-format-only snapshot (phase missing)
+    // still routes to the offline branch.
+    expect(isKeeperOffline({ status: 'stopped' })).toBe(true)
   })
 })
 

@@ -1,5 +1,5 @@
 import { html } from 'htm/preact'
-import { isOfflineStatus } from '../lib/status-utils'
+import { isKeeperOffline } from '../lib/keeper-predicates'
 import { KeeperConversationPanel } from './keeper-shared'
 import { PanelCard } from './common/panel-card'
 import { SectionHeader } from './common/section-header'
@@ -9,7 +9,9 @@ import { isRecord } from './common/normalize'
 import type { Keeper } from '../types'
 
 export function KeeperCommsPanel({ keeper }: { keeper: Keeper }) {
-  const isOffline = isOfflineStatus(keeper.status)
+  // RFC-0139 PR-2: SSOT-routed offline check — see
+  // keeper-store-normalize.ts for the parallel migration.
+  const isOffline = isKeeperOffline(keeper)
 
   return html`
     <div class="border-t border-[var(--color-border-divider)] pt-5">

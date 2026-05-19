@@ -415,7 +415,16 @@ let normalize_board_post_meta args =
   let base_fields =
     match Yojson.Safe.Util.member "meta" args with
     | `Assoc fields -> fields
-    | _ -> []
+    | `Null -> []
+    | other ->
+      (* RFC-0093 Phase B Step 3: split permissive `_ -> []` into typed
+         arms.  `Null` is the legitimate "meta field absent" path; any
+         other JSON type means the caller passed a wrong-typed meta and
+         should be surfaced rather than silently dropped. *)
+      Log.BoardLog.warn
+        "normalize_board_post_meta: ignoring non-object meta argument: %s"
+        (Yojson.Safe.to_string other);
+      []
   in
   let base_fields =
     match Tool_args.get_string_opt args "classification_reason" with

@@ -12,7 +12,6 @@
 
 open Keeper_types
 open Keeper_execution
-module StringMap = Map.Make (String)
 module Startup_helpers = Keeper_supervisor_startup_helpers
 
 (* ── Pure helpers ────────────────────────────────────────── *)
@@ -972,36 +971,11 @@ let cleanup_dead_tombstone (ctx : _ context) (entry : Keeper_registry.registry_e
    persists, the keeper crashes again, lands back in the next
    sweep's [to_restart] with the same cohort, and the counter
    resumes. *)
-type sp_escape_state =
-  { mutable last_dominant_cohort : string
-  ; mutable consecutive_suppressions : int
-  }
-
-let sp_escape_state = { last_dominant_cohort = ""; consecutive_suppressions = 0 }
-
-(** Probe cadence.  10 sweeps × default 30s sweep interval = 5
-    minute probe — long enough that genuine systemic issues aren't
-    probed back into life every cycle, short enough that a transient
-    cohort clears within 1-2 probes once the root condition is fixed.
-    Code constant rather than env knob per
-    [feedback_no-hyperparameter-as-env-knob] — this is calibration,
-    not operator policy. *)
-let probe_after_n_suppressions = 10
-
-(** Bounded minority exception for partial stale recovery.
-
-    The live regression was 6/17 keepers: enough to trip the global
-    self-preservation ratio gate, but not a fleet-wide provider/cascade
-    storm.  Keep this below a majority so large-but-not-universal stale
-    cohorts still go through the circuit breaker/probe path. *)
-let partial_stale_recovery_max_ratio = 0.50
-
 (** Reset the escape-valve state.  Test-only; production code never
     needs to call this (state cycles through the [last_dominant_cohort]
     inequality branch naturally). *)
 let reset_self_preservation_escape_state_for_test () =
-  sp_escape_state.last_dominant_cohort <- "";
-  sp_escape_state.consecutive_suppressions <- 0
+  Keeper_supervisor_self_preservation.reset_for_test ()
 ;;
 
 
@@ -1013,166 +987,11 @@ let reset_self_preservation_escape_state_for_test () =
     #10887: emits a probe restart every [probe_after_n_suppressions]
     consecutive suppressions of the same cohort. *)
 let apply_self_preservation ~keepers_dir ~total_keepers to_restart =
-  let sp_ratio = Env_config.KeeperSupervisor.self_preservation_ratio in
-  let sp_min = Env_config.KeeperSupervisor.self_preservation_min_candidates in
-  let n_candidates = List.length to_restart in
-  let n_total = max 1 total_keepers in
-  let ratio = float_of_int n_candidates /. float_of_int n_total in
-  if ratio > sp_ratio && n_candidates >= sp_min
-  then (
-    (* Group by failure_reason ADT variant (not string prefix) *)
-    let insert_cohort acc (entry : Keeper_registry.registry_entry) _msg =
-      let key = cohort_key_of_reason entry.last_failure_reason in
-      let prev = StringMap.find_opt key acc |> Option.value ~default:[] in
-      StringMap.add key ((entry, _msg) :: prev) acc
-    in
-    let cohorts =
-      List.fold_left
-        (fun acc ((e, m) : _ * string) -> insert_cohort acc e m)
-        StringMap.empty
-        to_restart
-    in
-    let dominant_key, dominant_entries =
-      StringMap.fold
-        (fun k v (best_k, best_v) ->
-           if List.length v > List.length best_v then k, v else best_k, best_v)
-        cohorts
-        ("", [])
-    in
-    if List.length dominant_entries >= sp_min
-    then (
-      let dominant_count = List.length dominant_entries in
-      let dominant_ratio = float_of_int dominant_count /. float_of_int n_total in
-      if
-        String.equal dominant_key stale_turn_timeout_cohort_key
-        && dominant_ratio <= partial_stale_recovery_max_ratio
-      then (
-        reset_self_preservation_escape_state_for_test ();
-        Log.Keeper.warn
-          "self-preservation: allowing partial stale_turn_timeout recovery cohort \
-           through (dominant=%d/%d ratio_dominant=%.2f, overall_candidates=%d/%d \
-           ratio_overall=%.2f)"
-          dominant_count
-          n_total
-          dominant_ratio
-          n_candidates
-          n_total
-          ratio;
-        to_restart)
-      else (
-        (* #10887: track consecutive suppressions of the same dominant
-         cohort.  Different cohort -> counter resets to 1; same
-         cohort -> counter increments. *)
-        if String.equal sp_escape_state.last_dominant_cohort dominant_key
-        then
-          sp_escape_state.consecutive_suppressions
-          <- sp_escape_state.consecutive_suppressions + 1
-        else (
-          sp_escape_state.last_dominant_cohort <- dominant_key;
-          sp_escape_state.consecutive_suppressions <- 1);
-        let probe_due =
-          sp_escape_state.consecutive_suppressions >= probe_after_n_suppressions
-        in
-        let probe_entry =
-          if probe_due
-          then (
-            match dominant_entries with
-            | (e, _) :: _ -> Some e.Keeper_registry.name
-            | [] -> None)
-          else None
-        in
-        let suppressed_names =
-          List.filter_map
-            (fun ((e : Keeper_registry.registry_entry), _) ->
-               match probe_entry with
-               | Some probe_name when String.equal e.name probe_name -> None
-               | _ -> Some e.name)
-            dominant_entries
-        in
-        let suppressed_count = List.length suppressed_names in
-        (match probe_entry with
-         | Some probe_name ->
-           (* Probe valve fires — positive signal, fleet is attempting
-              auto-recovery.  WARN regardless of ratio. *)
-           Log.Keeper.warn
-             "self-preservation probe: allowing %s through after %d consecutive \
-              same-cohort suppressions (ratio=%.2f, cohort=%s)"
-             probe_name
-             sp_escape_state.consecutive_suppressions
-             ratio
-             dominant_key;
-           (* Reset the counter so the next probe is also
-              [probe_after_n_suppressions] sweeps away. *)
-           sp_escape_state.consecutive_suppressions <- 0
-         | None ->
-           (* #10945 + #10887: split universal (ratio>=0.99) vs partial
-              suppression.  Universal = entire fleet sharing one
-              cohort = auto-recovery is structurally OFF — log ERROR
-              with operator-actionable hint.  Partial = circuit
-              breaker working as designed = WARN.  Both lines carry
-              [streak=N] so dashboards can show how close the next
-              probe valve is. *)
-           if ratio >= 0.99
-           then (
-             Prometheus.inc_counter
-               Keeper_metrics.metric_keeper_self_preservation_universal
-               ~labels:[ "cohort", dominant_key ]
-               ();
-             Log.Keeper.error
-               "self-preservation: UNIVERSAL suppression %d/%d (ratio=%.2f, cohort=%s, \
-                streak=%d) — auto-recovery is OFF until operator clears the shared \
-                failure mode (e.g. cascade.toml hot-reload, token rotation, or kill the \
-                dominant cohort to let SP release).  Probe valve will allow one keeper \
-                through after %d consecutive suppressions.  See #10887 / #10765."
-               suppressed_count
-               n_total
-               ratio
-               dominant_key
-               sp_escape_state.consecutive_suppressions
-               probe_after_n_suppressions)
-           else
-             Log.Keeper.warn
-               "self-preservation: suppressing %d/%d restarts (ratio=%.2f, cohort=%s, \
-                streak=%d)"
-               suppressed_count
-               n_total
-               ratio
-               dominant_key
-               sp_escape_state.consecutive_suppressions);
-        publish_lifecycle
-          ~event:
-            (Keeper_lifecycle_events.Custom_event
-               { verb = Keeper_lifecycle_events.Self_preservation; phase = None })
-          "supervisor"
-          (Printf.sprintf
-             "%d/%d suppressed, cohort=%s%s"
-             suppressed_count
-             n_total
-             dominant_key
-             (match probe_entry with
-              | Some name -> Printf.sprintf ", probe=%s" name
-              | None -> ""))
-          ();
-        Keeper_crash_persistence.enqueue_sp_event
-          ~keepers_dir
-          ~ts:(Time_compat.now ())
-          ~suppressed_count
-          ~total:n_total
-          ~ratio
-          ~dominant_cohort:dominant_key;
-        List.filter
-          (fun ((e : Keeper_registry.registry_entry), _) ->
-             not (List.mem e.name suppressed_names))
-          to_restart))
-    else (
-      (* Dominant cohort below sp_min — no suppression this cycle,
-         so the streak no longer applies to this cohort. *)
-      reset_self_preservation_escape_state_for_test ();
-      to_restart))
-  else (
-    (* No suppression: streak resets. *)
-    reset_self_preservation_escape_state_for_test ();
-    to_restart)
+  Keeper_supervisor_self_preservation.apply
+    ~keepers_dir
+    ~publish_lifecycle
+    ~total_keepers
+    to_restart
 ;;
 
 

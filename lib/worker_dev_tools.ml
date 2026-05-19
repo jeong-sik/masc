@@ -242,6 +242,23 @@ let validate_command_coding_parsed ~allow_pipes ~allowed_commands context =
     | Some name -> `Error (Command_not_allowed name))
 ;;
 
+(* RFC-0131 PR-5 — facade reject_reason → block_reason wire-shape
+   mapping for the authority-flip path.  Exhaustive over the closed
+   sum {!Shell_command_gate.reject_reason}; a new variant on the
+   facade side forces an arm here at compile time.  Two arms collapse
+   onto [Command_not_allowed]: facade carries stage-index detail the
+   legacy [block_reason] did not expose, and the wire-shape contract
+   (RFC-0131 §4.3 "preserving wire shape") forbids widening
+   [block_reason] just for the flip path — PR-6 (legacy purge) is the
+   correct place to revisit the surface. *)
+let block_reason_of_reject : Shell_command_gate.reject_reason -> block_reason
+  = function
+  | Command_not_in_allowlist { bin } -> Command_not_allowed bin
+  | Pipeline_segment_disallowed { bin; _ } -> Command_not_allowed bin
+  | Pipes_not_allowed _ -> Pipes_not_allowed
+  | Redirect_disallowed_in_caller _ -> Unsafe_redirect
+;;
+
 let validate_command_coding_with_allowlist
       ?caller
       ?(allow_pipes = true)
@@ -258,15 +275,67 @@ let validate_command_coding_with_allowlist
   else if has_unsafe_redirection trimmed
   then Error Unsafe_redirect
   else (
-    match Shell_command_gate.parse ?caller trimmed with
-    | Ok context -> (
-      match validate_command_coding_parsed ~allow_pipes ~allowed_commands context with
-      | `Use_legacy_segments ->
-        validate_command_coding_legacy_segments ~allow_pipes ~allowed_commands trimmed
-      | `Ok -> Ok ()
-      | `Error reason -> Error reason)
-    | Error _ ->
-      validate_command_coding_legacy_segments ~allow_pipes ~allowed_commands trimmed)
+    (* Legacy verdict — what this function returned at PR-4 head.
+       Tagged with [`Parsed] when the typed bin-allowlist check ran,
+       [`Legacy_segments] when env/opam args forced a fall to the
+       regex segment validator.  The PR-5 authority flip below only
+       acts on [`Parsed] — env/opam KV-pair semantics live in the
+       legacy_segments path and remain authoritative there until
+       PR-6 (legacy purge). *)
+    let legacy_tagged =
+      match Shell_command_gate.parse ?caller trimmed with
+      | Ok context -> (
+        match validate_command_coding_parsed ~allow_pipes ~allowed_commands context with
+        | `Use_legacy_segments ->
+          `Legacy_segments
+            (validate_command_coding_legacy_segments
+               ~allow_pipes
+               ~allowed_commands
+               trimmed)
+        | `Ok -> `Parsed (Ok ())
+        | `Error reason -> `Parsed (Error reason))
+      | Error _ ->
+        `Legacy_segments
+          (validate_command_coding_legacy_segments
+             ~allow_pipes
+             ~allowed_commands
+             trimmed)
+    in
+    match caller with
+    | None ->
+      (match legacy_tagged with
+       | `Parsed r -> r
+       | `Legacy_segments r -> r)
+    | Some c ->
+      (* RFC-0131 PR-5 — parallel facade call.  Emit is automatic via
+         [Legendary_counters.incr_shell_gate] inside
+         [Shell_command_gate.validate_allowlist] (RFC-0131 PR-3).
+         This is the first production caller of the verdict-producing
+         facade entry; until this PR landed, the
+         [Legendary_counters.shell_gate_*] buckets were structurally
+         wired but volume was 0 in production. *)
+      let facade_verdict =
+        Shell_command_gate.validate_allowlist
+          ~caller:c
+          ~allow_pipes
+          ~allowed_commands
+          trimmed
+      in
+      (match Shell_gate_authority.authority_enabled c, legacy_tagged with
+       | false, `Parsed r -> r
+       | false, `Legacy_segments r -> r
+       | true, `Legacy_segments r -> r
+       | true, `Parsed _ ->
+         (* RFC-0131 §4.4 — facade verdict authoritative; legacy
+            fallback only on [Cannot_parse] (parser coverage gap). *)
+         (match facade_verdict with
+          | Allow _ -> Ok ()
+          | Reject { reason; _ } -> Error (block_reason_of_reject reason)
+          | Cannot_parse { kind = _ } ->
+            validate_command_coding_legacy_segments
+              ~allow_pipes
+              ~allowed_commands
+              trimmed)))
 ;;
 
 (** Relaxed command validation for Coding/Full preset keepers.

@@ -92,6 +92,19 @@ let tool_post_create : Masc_domain.tool_schema =
                     ; ( "description"
                       , `String "public|unlisted|internal|direct (default: internal)" )
                     ] )
+              ; ( "post_kind"
+                , `Assoc
+                    [ "type", `String "string"
+                    ; ( "description"
+                      , `String
+                          "Optional post classification: 'direct' (alias 'human') = \
+                           caller is a human user; 'automation' = caller is an agent or \
+                           automated source. 'system' is reserved for internal surfaces \
+                           (keeper, operator) and will be rejected if sent by an \
+                           external caller. When omitted, inferred from author: \
+                           empty/anonymous → automation; registered agent → automation; \
+                           otherwise human." )
+                    ] )
               ; ( "ttl_hours"
                 , `Assoc
                     [ "type", `String "integer"

@@ -249,6 +249,18 @@ let to_json manifest =
       ("links", links_to_json manifest.links);
     ]
 
+let json_kind_name : Yojson.Safe.t -> string = function
+  | `Null -> "null"
+  | `Bool _ -> "bool"
+  | `Int _ -> "int"
+  | `Intlit _ -> "intlit"
+  | `Float _ -> "float"
+  | `String _ -> "string"
+  | `Assoc _ -> "object"
+  | `List _ -> "array"
+  | `Tuple _ -> "tuple"
+  | `Variant _ -> "variant"
+
 let field key fields =
   match List.assoc_opt key fields with
   | Some value -> Ok value
@@ -257,26 +269,38 @@ let field key fields =
 let required_string key fields =
   match field key fields with
   | Ok (`String value) -> Ok value
-  | Ok _ -> Error (Printf.sprintf "field %S must be a string" key)
+  | Ok other ->
+      Error
+        (Printf.sprintf "field %S must be a string (received %s)" key
+           (json_kind_name other))
   | Error _ as err -> err
 
 let required_int key fields =
   match field key fields with
   | Ok (`Int value) -> Ok value
-  | Ok _ -> Error (Printf.sprintf "field %S must be an int" key)
+  | Ok other ->
+      Error
+        (Printf.sprintf "field %S must be an int (received %s)" key
+           (json_kind_name other))
   | Error _ as err -> err
 
 let optional_string key fields =
   match List.assoc_opt key fields with
   | None | Some `Null -> Ok None
   | Some (`String value) -> Ok (Some value)
-  | Some _ -> Error (Printf.sprintf "field %S must be a string or null" key)
+  | Some other ->
+      Error
+        (Printf.sprintf "field %S must be a string or null (received %s)" key
+           (json_kind_name other))
 
 let optional_int key fields =
   match List.assoc_opt key fields with
   | None | Some `Null -> Ok None
   | Some (`Int value) -> Ok (Some value)
-  | Some _ -> Error (Printf.sprintf "field %S must be an int or null" key)
+  | Some other ->
+      Error
+        (Printf.sprintf "field %S must be an int or null (received %s)" key
+           (json_kind_name other))
 
 let links_of_json = function
   | `Assoc fields -> (
@@ -290,7 +314,10 @@ let links_of_json = function
               | Error _ as err -> err
               | Ok tool_call_log_path ->
                   Ok { receipt_path; checkpoint_path; tool_call_log_path })))
-  | _ -> Error "field \"links\" must be an object"
+  | other ->
+      Error
+        (Printf.sprintf "field \"links\" must be an object (received %s)"
+           (json_kind_name other))
 
 let reject_retired_manifest_fields fields =
   match List.find_opt (fun (key, _) -> redacts_provider_model_key key) fields with
@@ -357,7 +384,10 @@ let of_json = function
                 decision;
                 links;
               })
-  | _ -> Error "manifest row must be a JSON object"
+  | other ->
+      Error
+        (Printf.sprintf "manifest row must be a JSON object (received %s)"
+           (json_kind_name other))
 
 let dated_jsonl_today_path base_dir =
   let open Unix in

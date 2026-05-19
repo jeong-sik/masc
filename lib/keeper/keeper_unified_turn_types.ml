@@ -109,6 +109,8 @@ let cascade_exhaustion_reason_code
   | Keeper_types.Candidates_filtered_after_cycles ->
     "cascade_exhausted_candidates_filtered"
   | Keeper_types.Max_turns_exceeded -> "cascade_exhausted_max_turns"
+  | Keeper_types.Structural_attempt_timeout _ ->
+    "cascade_exhausted_structural_attempt_timeout"
   | Keeper_types.Other_detail detail -> cascade_exhaustion_detail_code detail
 ;;
 

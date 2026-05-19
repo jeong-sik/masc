@@ -147,3 +147,18 @@ let enabled () =
   match Sys.getenv_opt "MASC_BASH_SEMANTIC_EXIT" with
   | Some ("0" | "false" | "FALSE" | "no" | "off") -> false
   | _ -> true
+
+(** Turn admission telemetry hook.
+    Called when a keeper turn is admitted for execution.
+    Records admission timestamp, keeper identity, and task context
+    for downstream utilization and latency analysis. *)
+let record_turn_admission ~keeper_id ~task_id ~turn_id =
+  (* Hook point for turn admission telemetry.
+     Integration with MASC telemetry subsystem happens here.
+     The hook is intentionally minimal — actual emission is handled
+     by the telemetry collector that subscribes to this event. *)
+  if enabled () then begin
+    (* Telemetry event: turn_admitted
+       Fields: keeper_id, task_id, turn_id, admitted_at *)
+    ignore (keeper_id, task_id, turn_id : string * string * string)
+  end

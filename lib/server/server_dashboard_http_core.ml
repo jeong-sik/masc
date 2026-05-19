@@ -1530,11 +1530,39 @@ let shell_projection_trace_log cache_key =
     , snapshot.snapshot_elapsed_ms )
 ;;
 
-let dashboard_shell_payload_json ?(light = false) (config : Coord.config) : Yojson.Safe.t =
+(* Closed mapping from internal projection labels to Server_timing phases.
+   Total over the label set actually emitted by [dashboard_shell_payload_json];
+   any label outside that set is recorded as [Custom label] so an unintended
+   typo surfaces in the response header rather than vanishing silently. *)
+let shell_projection_label_to_phase : string -> Server_timing.phase = function
+  | "status" -> Projection_status
+  | "agents" -> Projection_agents
+  | "tasks" -> Projection_tasks
+  | "keepers" -> Projection_keepers
+  | "configured_keepers" -> Projection_configured_keepers
+  | "meta_cognition" -> Projection_meta_cognition
+  | "config_resolution" -> Projection_config_resolution
+  | "runtime_resolution" -> Projection_runtime_resolution
+  | other -> Custom other
+;;
+
+let dashboard_shell_payload_json
+      ?timing
+      ?(light = false)
+      (config : Coord.config)
+  : Yojson.Safe.t
+  =
   let cluster = Env_config_core.cluster_name () in
   let cache_key = dashboard_shell_cache_key ~light config in
   let trace = shell_projection_trace_start ~cache_key ~light in
   let started_at = Unix.gettimeofday () in
+  let record_timing label elapsed_ms =
+    match timing with
+    | None -> ()
+    | Some t ->
+      Server_timing.record_ms t (shell_projection_label_to_phase label)
+        (float_of_int elapsed_ms)
+  in
   let measure_ms label f =
     shell_projection_trace_start_projection trace label;
     let t0 = Unix.gettimeofday () in
@@ -1542,6 +1570,7 @@ let dashboard_shell_payload_json ?(light = false) (config : Coord.config) : Yojs
     | value ->
       let elapsed_ms = int_of_float ((Unix.gettimeofday () -. t0) *. 1000.0) in
       shell_projection_trace_finish_projection trace label elapsed_ms;
+      record_timing label elapsed_ms;
       value, elapsed_ms
     | exception (Eio.Cancel.Cancelled _ as exn) ->
       (* Keep the active projection marker for timeout fallback diagnostics. *)
@@ -1549,6 +1578,7 @@ let dashboard_shell_payload_json ?(light = false) (config : Coord.config) : Yojs
     | exception exn ->
       let elapsed_ms = int_of_float ((Unix.gettimeofday () -. t0) *. 1000.0) in
       shell_projection_trace_finish_projection trace label elapsed_ms;
+      record_timing label elapsed_ms;
       raise exn
   in
   let measure_json_projection label f =
@@ -1800,14 +1830,19 @@ let dashboard_shell_auth_json ~(request : Httpun.Request.t) (config : Coord.conf
     ]
 ;;
 
-let dashboard_shell_http_json ?clock ?request ?(light = false) (config : Coord.config)
+let dashboard_shell_http_json
+      ?clock
+      ?request
+      ?timing
+      ?(light = false)
+      (config : Coord.config)
   : Yojson.Safe.t
   =
   let cache_key = dashboard_shell_cache_key ~light config in
   let compute () =
     (* Shell endpoint is read-only; use config directly without isolation
        since state is not available in this context. *)
-    dashboard_shell_payload_json ~light config
+    dashboard_shell_payload_json ?timing ~light config
   in
   let clock_opt =
     match clock with
@@ -1858,20 +1893,25 @@ let dashboard_shell_http_json ?clock ?request ?(light = false) (config : Coord.c
     && (Atomic.get shell_warming || startup_shell_bootstrap_pending)
     && not (Atomic.get shell_warmed)
   in
+  let cache_load () =
+    match clock_opt with
+    | Some clock ->
+      Dashboard_cache.get_or_compute_with_timeout
+        cache_key
+        ~ttl:15.0
+        ~clock
+        ~timeout_sec:(dashboard_shell_timeout_for ~light)
+        compute
+    | None -> Dashboard_cache.get_or_compute cache_key ~ttl:15.0 compute
+  in
   let payload =
     if startup_prewarm_pending
     then fallback_payload ()
     else (
       let computed =
-        match clock_opt with
-        | Some clock ->
-          Dashboard_cache.get_or_compute_with_timeout
-            cache_key
-            ~ttl:15.0
-            ~clock
-            ~timeout_sec:(dashboard_shell_timeout_for ~light)
-            compute
-        | None -> Dashboard_cache.get_or_compute cache_key ~ttl:15.0 compute
+        match timing with
+        | None -> cache_load ()
+        | Some t -> Server_timing.measure t Cache_lookup cache_load
       in
       if is_dashboard_cache_timeout_json computed
       then timeout_fallback_payload (dashboard_shell_timeout_for ~light)

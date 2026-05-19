@@ -75,6 +75,7 @@
  keeper_persona_authoring_slug
  keeper_types_profile_sandbox
  keeper_types_profile_oas_env
+ keeper_types_profile_unknown_toml
  keeper_types_profile
  keeper_meta_tool_access
  keeper_meta_contract

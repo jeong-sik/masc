@@ -404,7 +404,13 @@ let resolve_keeper_shell_read_cwd
   match resolved with
   | Error _ as err -> err
   | Ok cwd when Fs_compat.file_exists cwd && Sys.is_directory cwd -> Ok cwd
-  | Ok cwd -> Error (Printf.sprintf "cwd_not_directory: %s" cwd)
+  | Ok cwd ->
+    let exists = Fs_compat.file_exists cwd in
+    let detail =
+      if not exists then "path_does_not_exist"
+      else "path_is_file_not_directory"
+    in
+    Error (Printf.sprintf "cwd_not_directory: %s (%s)" cwd detail)
 
 let resolve_keeper_shell_write_cwd
       ~(config : Coord.config)

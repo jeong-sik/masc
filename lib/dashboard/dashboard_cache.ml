@@ -192,11 +192,19 @@ let wait_poll_interval_sec = 0.25
     instrumentation — never branches on these counters. *)
 let cache_metric_label = [("cache", "dashboard")]
 
+(* Local hit/miss counters in addition to Prometheus, because Prometheus has
+   no read-back API in this codebase and we want to surface live ratios via
+   [stats ()] without forcing operators to scrape /metrics. *)
+let cache_hits_total = Atomic.make 0
+let cache_misses_total = Atomic.make 0
+
 let inc_cache_hit () =
+  Atomic.incr cache_hits_total;
   Prometheus.inc_counter Prometheus.metric_cache_hits_total
     ~labels:cache_metric_label ()
 
 let inc_cache_miss () =
+  Atomic.incr cache_misses_total;
   Prometheus.inc_counter Prometheus.metric_cache_misses_total
     ~labels:cache_metric_label ()
 
@@ -553,6 +561,28 @@ let invalidate_all () =
   Atomic.set table SMap.empty;
   clear_timeout_circuit_all ()
 
+(* Slot kind string used in [stats ()] entry list and tests.  Kept as a
+   total function rather than a string buried in [stats ()] so callers can
+   pattern-match it (e.g. dashboard UI filters by kind). *)
+type slot_kind = Fresh | Stale | Expired | Computing_slot
+
+let slot_kind_to_string = function
+  | Fresh -> "fresh"
+  | Stale -> "stale"
+  | Expired -> "expired"
+  | Computing_slot -> "computing"
+;;
+
+let slot_kind ~now_ts = function
+  | Ready e ->
+    if now_ts <= e.expires_at then Fresh
+    else if now_ts <= e.stale_until then Stale
+    else Expired
+  | Computing _ -> Computing_slot
+;;
+
+let max_entries_in_stats = 50
+
 let stats () =
   let map = Atomic.get table in
   let now_ts = Time_compat.now () in
@@ -560,17 +590,68 @@ let stats () =
   let ready_stale = ref 0 in
   let ready_expired = ref 0 in
   let computing = ref 0 in
-  SMap.iter (fun _ v ->
-    match v with
-    | Ready e ->
-        if now_ts <= e.expires_at then
-          incr ready_fresh
-        else if now_ts <= e.stale_until then
-          incr ready_stale
-        else
-          incr ready_expired
-    | Computing _ -> incr computing
+  let entries_acc = ref [] in
+  SMap.iter (fun k v ->
+    let kind = slot_kind ~now_ts v in
+    (match kind with
+     | Fresh -> incr ready_fresh
+     | Stale -> incr ready_stale
+     | Expired -> incr ready_expired
+     | Computing_slot -> incr computing);
+    let entry_json =
+      match v with
+      | Ready e ->
+        `Assoc [
+          ("key", `String k);
+          ("kind", `String (slot_kind_to_string kind));
+          ("ttl_remaining_ms", `Int (int_of_float ((e.expires_at -. now_ts) *. 1000.0)));
+          ("stale_remaining_ms",
+           `Int (int_of_float ((e.stale_until -. now_ts) *. 1000.0)));
+        ]
+      | Computing { started_at; stale; _ } ->
+        `Assoc [
+          ("key", `String k);
+          ("kind", `String "computing");
+          ("computing_for_ms", `Int (int_of_float ((now_ts -. started_at) *. 1000.0)));
+          ("has_stale_fallback", `Bool (Option.is_some stale));
+        ]
+    in
+    entries_acc := entry_json :: !entries_acc
   ) map;
+  (* Truncate per-entry list to bound payload size — operators looking for
+     specific keys can read [/metrics] for the full prometheus surface. *)
+  let entries_list =
+    let all = List.rev !entries_acc in
+    if List.length all <= max_entries_in_stats
+    then all
+    else (
+      (* Keep the [max_entries_in_stats] entries closest to expiry (most
+         actionable) — sort by ttl_remaining_ms ascending and take first N. *)
+      let key_of = function
+        | `Assoc fields ->
+          (match List.assoc_opt "ttl_remaining_ms" fields with
+           | Some (`Int n) -> n
+           | _ ->
+             (match List.assoc_opt "computing_for_ms" fields with
+              | Some (`Int n) -> -n  (* computing slots first *)
+              | _ -> max_int))
+        | _ -> max_int
+      in
+      List.sort (fun a b -> compare (key_of a) (key_of b)) all
+      |> List.filteri (fun i _ -> i < max_entries_in_stats))
+  in
+  let hits = Atomic.get cache_hits_total in
+  let misses = Atomic.get cache_misses_total in
+  let total = hits + misses in
+  let hit_ratio =
+    if total = 0 then 0.0 else float_of_int hits /. float_of_int total
+  in
+  let timeout_circuit_map = Atomic.get timeout_circuit_table in
+  let circuit_open_count =
+    SMap.fold (fun _ c acc ->
+      if c.opened_until > now_ts then acc + 1 else acc
+    ) timeout_circuit_map 0
+  in
   `Assoc [
     ("entries", `Int (SMap.cardinal map));
     ("fresh", `Int !ready_fresh);
@@ -580,4 +661,11 @@ let stats () =
     ("ready_stale", `Int !ready_stale);
     ("computing", `Int !computing);
     ("max_entries", `Int max_entries);
+    ("hits_total", `Int hits);
+    ("misses_total", `Int misses);
+    ("hit_ratio", `Float hit_ratio);
+    ("timeout_circuit_open", `Int circuit_open_count);
+    ("timeout_circuit_tracked", `Int (SMap.cardinal timeout_circuit_map));
+    ("entries_truncated_to", `Int max_entries_in_stats);
+    ("entry_details", `List entries_list);
   ]

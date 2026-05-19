@@ -8,6 +8,7 @@ import { hashForRoute, navigate, route } from '../router'
 import { connected, reconnectCount, lastDisconnectedAt } from '../sse'
 import { dashboardWsOnlyEnabled } from '../dashboard-ws-cutover'
 import { dashboardWsConnected, dashboardWsSseFallbackActive } from '../dashboard-ws-state'
+import { isKeeperPaused } from '../lib/keeper-predicates'
 import { dashboardLoading, executionError, keepers, serverStatus, shellCounts, shellRuntimeResolution } from '../store'
 import { missionSnapshot, missionLoading } from '../mission-signals'
 import { namespaceTruthInitializing } from '../namespace-truth-store'
@@ -165,12 +166,14 @@ interface DashboardHealthInput {
   loading: boolean
 }
 
-function keeperLooksPaused(keeper: Keeper): boolean {
-  const phase = String(keeper.phase ?? '').toLowerCase()
-  const stage = String(keeper.pipeline_stage ?? '').toLowerCase()
-  const status = String(keeper.status ?? '').toLowerCase()
-  return keeper.paused === true || phase === 'paused' || stage === 'paused' || status === 'paused'
-}
+// RFC-0135 PR-3: the local `keeperLooksPaused` was one of four
+// parallel paused-predicate chains. Canonical implementation now in
+// `../lib/keeper-predicates.ts` covers exactly the same four axes
+// (paused / phase / pipeline_stage / status).
+//
+// Note: the canonical predicate compares `phase === 'Paused'` (PascalCase
+// per `KeeperPhase`) instead of the previous lowercased comparison —
+// this matches the wire type and the three other former chains.
 
 function fdPressureBlockedKeepers(fleetSafety: DashboardFleetSafetyHealth): number {
   const candidates = [
@@ -354,7 +357,7 @@ export function dashboardHealthChips(input: DashboardHealthInput): DashboardHeal
     })
   }
 
-  const pausedKeepers = input.keepers.filter(keeperLooksPaused).length
+  const pausedKeepers = input.keepers.filter(isKeeperPaused).length
   if (pausedKeepers > 0) {
     chips.push({
       key: 'paused-keepers',

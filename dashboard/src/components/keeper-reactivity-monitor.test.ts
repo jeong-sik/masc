@@ -3,8 +3,8 @@ import {
   extractKeeperStopSummaries,
   extractProactiveSkips,
   extractBatchTerminations,
-  isKeeperPaused,
 } from './keeper-reactivity-monitor'
+import { isKeeperPaused } from '../lib/keeper-predicates'
 import type { ParsedMetric } from './prometheus-metrics'
 import type { Keeper } from '../types'
 

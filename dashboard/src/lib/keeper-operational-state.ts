@@ -144,3 +144,91 @@ function compositeFiberKnownDead(c: KeeperCompositeSnapshot): boolean {
   const fiberAlive = diag.conditions.fiber_alive
   return fiberAlive === false
 }
+
+// RFC-0135 PR-11 — Composite KSM phase SSOT helpers.
+//
+// `KeeperCompositeSnapshot.phase` is wire-format lowercase emitted by
+// backend `lib/server/server_dashboard_http.ml` and typed as bare
+// `string` in `api/schemas/keeper-composite.ts`. Three call sites had
+// re-implemented phase grouping inline:
+//   - keeper-fsm-specs.ts:140-150   (ksmTone — 11-literal 2-tier OR)
+//   - fsm-hub-invariant-analysis.ts:74-186  (8 literal compares)
+//   - fleet-fsm-matrix.ts:262,486,497  (running/idle compares)
+// Same 6 warn-phase literals were copy-pasted between fsm-specs and
+// invariant-analysis (N-of-M anti-pattern; software-development.md
+// §AI 코드 생성 안티패턴 #2).
+//
+// `KeeperKsmPhase` is the closed sum of states emitted by the backend
+// KeeperStateMachine TLA spec (KSM_STATES in keeper-fsm-specs.ts).
+// `compositePhaseTone` is total and exhaustive — adding a new variant
+// here requires touching every consumer at compile time.
+
+export type KeeperKsmPhase =
+  | 'offline'
+  | 'running'
+  | 'failing'
+  | 'overflowed'
+  | 'compacting'
+  | 'handing_off'
+  | 'draining'
+  | 'paused'
+  | 'stopped'
+  | 'crashed'
+  | 'restarting'
+  | 'dead'
+  | 'zombie'
+
+const KSM_PHASE_VALUES: ReadonlySet<string> = new Set<KeeperKsmPhase>([
+  'offline', 'running', 'failing', 'overflowed', 'compacting',
+  'handing_off', 'draining', 'paused', 'stopped', 'crashed',
+  'restarting', 'dead', 'zombie',
+])
+
+/** Narrow `string` to `KeeperKsmPhase` if it is a known value, else
+ *  return `null`. Use at the schema/wire boundary; downstream code
+ *  should consume the typed sum directly. */
+export function toKsmPhase(raw: string | null | undefined): KeeperKsmPhase | null {
+  if (raw == null) return null
+  return KSM_PHASE_VALUES.has(raw) ? (raw as KeeperKsmPhase) : null
+}
+
+/** Three-valued tone classification used by FSM-graph node rendering
+ *  and invariant cards: terminal/error phases → 'err', long-running
+ *  rare-state phases → 'warn', live forward-progress phases → 'active'.
+ *
+ *  Exhaustive over `KeeperKsmPhase`. If TypeScript reports a missing
+ *  case after adding a new variant, route it to the appropriate tone —
+ *  do not add a `default:` (RFC-0135 §9-4 forbids catch-all). */
+export function compositePhaseTone(phase: KeeperKsmPhase): 'active' | 'warn' | 'err' {
+  switch (phase) {
+    case 'offline':
+    case 'running':
+      return 'active'
+    case 'overflowed':
+    case 'compacting':
+    case 'handing_off':
+    case 'draining':
+    case 'paused':
+    case 'restarting':
+      return 'warn'
+    case 'failing':
+    case 'stopped':
+    case 'crashed':
+    case 'dead':
+    case 'zombie':
+      return 'err'
+  }
+}
+
+/** Composite snapshot is in the "running" KSM bucket. Mirrors the
+ *  semantic of `state.kind === 'running'` for typed-keeper SSOT but
+ *  operates on the lowercase wire format from composite snapshots. */
+export function compositeIsRunning(snapshot: { phase: string }): boolean {
+  return snapshot.phase === 'running'
+}
+
+/** Composite snapshot is in the "idle" KTC turn-phase bucket.
+ *  Lowercase wire format. */
+export function compositeIsTurnIdle(snapshot: { turn_phase: string }): boolean {
+  return snapshot.turn_phase === 'idle'
+}

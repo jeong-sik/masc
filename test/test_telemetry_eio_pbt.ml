@@ -90,6 +90,7 @@ let gen_event : Telemetry_eio.event QCheck.Gen.t =
              error_message;
              exit_code;
              stderr_excerpt;
+             failure_class = None;
            })
   | _ ->
       let* agent_id = string_small in
@@ -144,6 +145,7 @@ let saturated_tool_called : Telemetry_eio.event_record =
           error_message = Some "boom";
           exit_code = Some 1;
           stderr_excerpt = Some "...";
+          failure_class = None;
         };
   }
 

@@ -59,6 +59,7 @@ type event =
       error_message : string option; [@default None]
       exit_code : int option; [@default None]
       stderr_excerpt : string option; [@default None]
+      failure_class : Tool_result.tool_failure_class option; [@default None]
     }
   | Tool_assigned of {
       agent_id : string;

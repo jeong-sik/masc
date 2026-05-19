@@ -31,6 +31,19 @@ type t =
   | Path_normalization_error
   (** Path containment / canonicalisation rejected the entry. *)
   | Stat_error (** [stat] / [lstat] failed before file open. *)
+  | Concurrent_removal
+  (** RFC-0134 PR-1. Entry was present at directory enumeration
+          but absent at load time (TOCTOU race between [list_dir] and
+          a concurrent writer that uses delete-then-replace). Not a
+          data loss; the entry was concurrently retired by another
+          writer. PR-3 of RFC-0134 routes this away from the
+          data-integrity WARN/counter path. *)
+  | Transient_fd_pressure
+  (** RFC-0134 PR-1. Underlying [open()] failed with
+          [ENFILE]/[EMFILE]. Not data loss; retry-eligible under
+          RFC-0097 backpressure. PR-3 of RFC-0134 routes this to a
+          DEBUG line (or a separate metric in PR-4), not the
+          data-integrity counter. *)
   | Other of string
   (** Escape hatch for one-off surfaces. PR introducing a new
           [Other] payload must justify why the value cannot be
@@ -55,6 +68,8 @@ type t =
     - [Decompression_error] → ["decompression_error"]
     - [Path_normalization_error] → ["path_normalization_error"]
     - [Stat_error] → ["stat_error"]
+    - [Concurrent_removal] → ["concurrent_removal"] (RFC-0134 PR-1)
+    - [Transient_fd_pressure] → ["transient_fd_pressure"] (RFC-0134 PR-1)
     - [Other s] → [s] (verbatim) *)
 val to_wire : t -> string
 

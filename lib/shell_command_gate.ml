@@ -191,6 +191,23 @@ let validate_parsed_context
     | None -> Allow context)
 ;;
 
+(* RFC-0131 PR-3 — variant bridge between the facade [caller] sum and
+   the [Legendary_counters] partition sum.  Same shape on purpose;
+   the legacy facade and Legendary_counters live in the same library
+   (no cycle), so the bridge is mechanical and forces an update at
+   compile time when either side grows a variant. *)
+let legendary_caller_of = function
+  | Worker_dev_tools -> Legendary_counters.Worker_dev_tools
+  | Tool_code_write -> Legendary_counters.Tool_code_write
+  | Keeper_shell_bash -> Legendary_counters.Keeper_shell_bash
+;;
+
+let legendary_verdict_kind_of = function
+  | Allow _ -> Legendary_counters.Allow
+  | Reject _ -> Legendary_counters.Reject
+  | Cannot_parse _ -> Legendary_counters.Cannot_parse
+;;
+
 let validate_allowlist
       ?caller
       ?(allow_pipes = true)
@@ -198,9 +215,19 @@ let validate_allowlist
       ~allowed_commands
       cmd
   =
-  match parse ?caller cmd with
-  | Error kind -> Cannot_parse { kind }
-  | Ok context -> validate_parsed_context ~allow_pipes ~redirect_allowed ~allowed_commands context
+  let verdict =
+    match parse ?caller cmd with
+    | Error kind -> Cannot_parse { kind }
+    | Ok context ->
+      validate_parsed_context ~allow_pipes ~redirect_allowed ~allowed_commands context
+  in
+  (match caller with
+   | Some c ->
+     Legendary_counters.incr_shell_gate
+       ~caller:(legendary_caller_of c)
+       ~verdict:(legendary_verdict_kind_of verdict)
+   | None -> ());
+  verdict
 ;;
 
 let caller_tag = function

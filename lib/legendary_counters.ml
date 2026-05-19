@@ -38,6 +38,21 @@ let typed_advisor_allow = Atomic.make 0
 let typed_advisor_reject = Atomic.make 0
 let typed_advisor_cannot_parse = Atomic.make 0
 
+(* RFC-0131 PR-3 — caller × verdict partition for the
+   [Shell_command_gate] facade.  3 callers × 3 verdicts = 9 atomic
+   counters.  Names follow [shell_gate_<caller>_<verdict>]; the
+   typed-dispatch in [incr_shell_gate] is exhaustive over both sums
+   so a new caller or verdict variant is a compile error. *)
+let shell_gate_worker_dev_tools_allow = Atomic.make 0
+let shell_gate_worker_dev_tools_reject = Atomic.make 0
+let shell_gate_worker_dev_tools_cannot_parse = Atomic.make 0
+let shell_gate_tool_code_write_allow = Atomic.make 0
+let shell_gate_tool_code_write_reject = Atomic.make 0
+let shell_gate_tool_code_write_cannot_parse = Atomic.make 0
+let shell_gate_keeper_shell_bash_allow = Atomic.make 0
+let shell_gate_keeper_shell_bash_reject = Atomic.make 0
+let shell_gate_keeper_shell_bash_cannot_parse = Atomic.make 0
+
 let incr a = ignore (Atomic.fetch_and_add a 1)
 
 let incr_gate_diff (diff : Gate_diff_types.gate_diff) =
@@ -101,6 +116,34 @@ let incr_typed_advisor (a : Shell_ir_validator.advisory) =
   | Shell_ir_validator.Reject _ -> incr typed_advisor_reject
   | Shell_ir_validator.Cannot_parse _ -> incr typed_advisor_cannot_parse
 
+(* RFC-0131 PR-3 — typed dispatch for caller × verdict partition.
+   Exhaustive over [shell_gate_caller × shell_gate_verdict_kind]; a
+   new variant in either sum forces an update here at compile time. *)
+type shell_gate_caller =
+  | Worker_dev_tools
+  | Tool_code_write
+  | Keeper_shell_bash
+
+type shell_gate_verdict_kind =
+  | Allow
+  | Reject
+  | Cannot_parse
+
+let incr_shell_gate ~caller ~verdict =
+  let counter =
+    match caller, verdict with
+    | Worker_dev_tools, Allow -> shell_gate_worker_dev_tools_allow
+    | Worker_dev_tools, Reject -> shell_gate_worker_dev_tools_reject
+    | Worker_dev_tools, Cannot_parse -> shell_gate_worker_dev_tools_cannot_parse
+    | Tool_code_write, Allow -> shell_gate_tool_code_write_allow
+    | Tool_code_write, Reject -> shell_gate_tool_code_write_reject
+    | Tool_code_write, Cannot_parse -> shell_gate_tool_code_write_cannot_parse
+    | Keeper_shell_bash, Allow -> shell_gate_keeper_shell_bash_allow
+    | Keeper_shell_bash, Reject -> shell_gate_keeper_shell_bash_reject
+    | Keeper_shell_bash, Cannot_parse -> shell_gate_keeper_shell_bash_cannot_parse
+  in
+  incr counter
+
 let reset () =
   Atomic.set gate_diff_total 0;
   Atomic.set gate_diff_agree 0;
@@ -132,7 +175,16 @@ let reset () =
   Atomic.set gh_exit_unknown 0;
   Atomic.set typed_advisor_allow 0;
   Atomic.set typed_advisor_reject 0;
-  Atomic.set typed_advisor_cannot_parse 0
+  Atomic.set typed_advisor_cannot_parse 0;
+  Atomic.set shell_gate_worker_dev_tools_allow 0;
+  Atomic.set shell_gate_worker_dev_tools_reject 0;
+  Atomic.set shell_gate_worker_dev_tools_cannot_parse 0;
+  Atomic.set shell_gate_tool_code_write_allow 0;
+  Atomic.set shell_gate_tool_code_write_reject 0;
+  Atomic.set shell_gate_tool_code_write_cannot_parse 0;
+  Atomic.set shell_gate_keeper_shell_bash_allow 0;
+  Atomic.set shell_gate_keeper_shell_bash_reject 0;
+  Atomic.set shell_gate_keeper_shell_bash_cannot_parse 0
 
 type snapshot = {
   gate_diff_total : int;
@@ -168,6 +220,16 @@ type snapshot = {
   typed_advisor_allow : int;
   typed_advisor_reject : int;
   typed_advisor_cannot_parse : int;
+  (* RFC-0131 PR-3 — Shell_command_gate caller × verdict partition. *)
+  shell_gate_worker_dev_tools_allow : int;
+  shell_gate_worker_dev_tools_reject : int;
+  shell_gate_worker_dev_tools_cannot_parse : int;
+  shell_gate_tool_code_write_allow : int;
+  shell_gate_tool_code_write_reject : int;
+  shell_gate_tool_code_write_cannot_parse : int;
+  shell_gate_keeper_shell_bash_allow : int;
+  shell_gate_keeper_shell_bash_reject : int;
+  shell_gate_keeper_shell_bash_cannot_parse : int;
 }
 
 let snapshot () =
@@ -206,6 +268,24 @@ let snapshot () =
     typed_advisor_allow = Atomic.get typed_advisor_allow;
     typed_advisor_reject = Atomic.get typed_advisor_reject;
     typed_advisor_cannot_parse = Atomic.get typed_advisor_cannot_parse;
+    shell_gate_worker_dev_tools_allow =
+      Atomic.get shell_gate_worker_dev_tools_allow;
+    shell_gate_worker_dev_tools_reject =
+      Atomic.get shell_gate_worker_dev_tools_reject;
+    shell_gate_worker_dev_tools_cannot_parse =
+      Atomic.get shell_gate_worker_dev_tools_cannot_parse;
+    shell_gate_tool_code_write_allow =
+      Atomic.get shell_gate_tool_code_write_allow;
+    shell_gate_tool_code_write_reject =
+      Atomic.get shell_gate_tool_code_write_reject;
+    shell_gate_tool_code_write_cannot_parse =
+      Atomic.get shell_gate_tool_code_write_cannot_parse;
+    shell_gate_keeper_shell_bash_allow =
+      Atomic.get shell_gate_keeper_shell_bash_allow;
+    shell_gate_keeper_shell_bash_reject =
+      Atomic.get shell_gate_keeper_shell_bash_reject;
+    shell_gate_keeper_shell_bash_cannot_parse =
+      Atomic.get shell_gate_keeper_shell_bash_cannot_parse;
   }
 
 let snapshot_to_json (s : snapshot) : Yojson.Safe.t =
@@ -244,6 +324,24 @@ let snapshot_to_json (s : snapshot) : Yojson.Safe.t =
     ("typed_advisor_allow", `Int s.typed_advisor_allow);
     ("typed_advisor_reject", `Int s.typed_advisor_reject);
     ("typed_advisor_cannot_parse", `Int s.typed_advisor_cannot_parse);
+    ("shell_gate_worker_dev_tools_allow",
+     `Int s.shell_gate_worker_dev_tools_allow);
+    ("shell_gate_worker_dev_tools_reject",
+     `Int s.shell_gate_worker_dev_tools_reject);
+    ("shell_gate_worker_dev_tools_cannot_parse",
+     `Int s.shell_gate_worker_dev_tools_cannot_parse);
+    ("shell_gate_tool_code_write_allow",
+     `Int s.shell_gate_tool_code_write_allow);
+    ("shell_gate_tool_code_write_reject",
+     `Int s.shell_gate_tool_code_write_reject);
+    ("shell_gate_tool_code_write_cannot_parse",
+     `Int s.shell_gate_tool_code_write_cannot_parse);
+    ("shell_gate_keeper_shell_bash_allow",
+     `Int s.shell_gate_keeper_shell_bash_allow);
+    ("shell_gate_keeper_shell_bash_reject",
+     `Int s.shell_gate_keeper_shell_bash_reject);
+    ("shell_gate_keeper_shell_bash_cannot_parse",
+     `Int s.shell_gate_keeper_shell_bash_cannot_parse);
   ]
 
 let safe_ratio ~num ~den =

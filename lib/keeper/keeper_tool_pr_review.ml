@@ -249,6 +249,54 @@ let run_pr_review_shell ~(config : Coord.config) ~(meta : keeper_meta)
     in
     { status; output; via = "host" }
 
+let repo_unresolved_json ~(config : Coord.config) (meta : keeper_meta)
+    ~repo_slug ~(result : pr_review_exec_result) ?pr_number ?event () =
+  Yojson.Safe.to_string
+    (`Assoc
+      ([
+         "ok", `Bool false;
+         "error", `String "keeper_pr_review_repo_unresolved";
+         "failure_class", `String "workflow_rejection";
+         "retryable", `Bool false;
+         "semantic_status", `String "blocked";
+         "repo", `String repo_slug;
+         "keeper", `String meta.name;
+         "execution_via", `String result.via;
+         "output", `String result.output;
+         ( "remediation",
+           `String
+             "Use the canonical repository slug, or omit repo when the task \
+              worktree/current project can infer it." );
+       ]
+       @ route_fields ~via:result.via meta
+       @ identity_attestation_fields ~config meta
+       @ (match pr_number with
+          | Some number -> [ "pr_number", `Int number ]
+          | None -> [])
+       @
+       match event with
+       | Some value -> [ "event", `String value ]
+       | None -> []))
+
+let explicit_repo_unresolved_error ~(config : Coord.config) (meta : keeper_meta)
+    ~repo_arg ~repo_slug ?pr_number ?event () =
+  if String.trim repo_arg = "" then None
+  else
+    let cmd =
+      Printf.sprintf "gh repo view %s --json nameWithOwner 2>&1"
+        repo_slug
+    in
+    let result =
+      run_pr_review_shell ~config ~meta
+        ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Pr_review ())
+        ~cmd
+    in
+    if status_ok result.status then None
+    else
+      Some
+        (repo_unresolved_json ~config meta ~repo_slug ~result ?pr_number ?event
+           ())
+
 (** Detect "PR not found" in [gh] CLI output. Strings stable across [gh]
     versions; covers both REST 404 and GraphQL "Could not resolve". When
     matched, the keeper sees a structured error and a redirect hint instead
@@ -416,51 +464,75 @@ let handle_keeper_pr_review_read
     match effective_repo_slug ~config ~repo with
     | Error msg -> error_json msg
     | Ok repo_slug ->
-    let repo_flag_arg = repo_flag repo_slug in
-    (* Get PR metadata *)
-    let meta_cmd = Printf.sprintf
-      "gh pr view %d%s --json title,body,state,files,reviews,comments,additions,deletions 2>&1"
-      pr_number repo_flag_arg in
-    let meta_result =
-      run_pr_review_shell ~config ~meta
-        ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Pr_review ())
-        ~cmd:meta_cmd in
-    (* Get PR diff (truncated) *)
-    let diff_cmd = Printf.sprintf
-      "gh pr diff %d%s 2>&1 | head -c %d"
-      pr_number repo_flag_arg Common.max_tool_output_bytes in
-    let diff_result =
-      run_pr_review_shell ~config ~meta
-        ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Pr_review ())
-        ~cmd:diff_cmd in
-    let diff_truncated = String.length diff_result.output >= Common.max_tool_output_bytes in
-    let meta_ok = status_ok meta_result.status in
-    if not meta_ok && (pr_not_found_in_output meta_result.output || pr_not_found_in_output diff_result.output) then
-      Yojson.Safe.to_string
-        (`Assoc
-            ([ "ok", `Bool false
-             ; "error", `String "pr_not_found"
-             ; "pr_number", `Int pr_number
-             ; "repo", `String repo_slug
-             ; "execution_via", `String meta_result.via
-             ; "hint", `String "PR may have been closed/deleted or the number is wrong. Use keeper_pr_list (or `gh pr list`) to see open PRs before retrying."
-             ]
-             @ route_fields ~via:meta_result.via meta
-             @ identity_attestation_fields ~config meta))
-    else
-      Yojson.Safe.to_string
-        (`Assoc
-            ([ "ok", `Bool meta_ok
-             ; "pr_number", `Int pr_number
-             ; "repo", `String repo_slug
-             ; "execution_via", `String meta_result.via
-             ; "metadata", `String meta_result.output
-             ; "diff", `String diff_result.output
-             ; "diff_truncated", `Bool diff_truncated
-             ; "diff_status", `Bool (status_ok diff_result.status)
-             ]
-             @ route_fields ~via:meta_result.via meta
-             @ identity_attestation_fields ~config meta))
+        (match
+           explicit_repo_unresolved_error ~config meta ~repo_arg:repo
+             ~repo_slug ~pr_number ()
+         with
+         | Some error -> error
+         | None ->
+             let repo_flag_arg = repo_flag repo_slug in
+             (* Get PR metadata *)
+             let meta_cmd =
+               Printf.sprintf
+                 "gh pr view %d%s --json title,body,state,files,reviews,comments,additions,deletions 2>&1"
+                 pr_number repo_flag_arg
+             in
+             let meta_result =
+               run_pr_review_shell ~config ~meta
+                 ~timeout_sec:
+                   (Env_config_exec_timeout.timeout_sec ~caller:Pr_review ())
+                 ~cmd:meta_cmd
+             in
+             (* Get PR diff (truncated) *)
+             let diff_cmd =
+               Printf.sprintf "gh pr diff %d%s 2>&1 | head -c %d" pr_number
+                 repo_flag_arg Common.max_tool_output_bytes
+             in
+             let diff_result =
+               run_pr_review_shell ~config ~meta
+                 ~timeout_sec:
+                   (Env_config_exec_timeout.timeout_sec ~caller:Pr_review ())
+                 ~cmd:diff_cmd
+             in
+             let diff_truncated =
+               String.length diff_result.output >= Common.max_tool_output_bytes
+             in
+             let meta_ok = status_ok meta_result.status in
+             if
+               (not meta_ok)
+               && (pr_not_found_in_output meta_result.output
+                  || pr_not_found_in_output diff_result.output)
+             then
+               Yojson.Safe.to_string
+                 (`Assoc
+                   ([ "ok", `Bool false
+                    ; "error", `String "pr_not_found"
+                    ; "pr_number", `Int pr_number
+                    ; "repo", `String repo_slug
+                    ; "execution_via", `String meta_result.via
+                    ; ( "hint"
+                      , `String
+                          "PR may have been closed/deleted or the number is \
+                           wrong. Use keeper_pr_list (or `gh pr list`) to see \
+                           open PRs before retrying." )
+                    ]
+                    @ route_fields ~via:meta_result.via meta
+                    @ identity_attestation_fields ~config meta))
+             else
+               Yojson.Safe.to_string
+                 (`Assoc
+                   ([ "ok", `Bool meta_ok
+                    ; "pr_number", `Int pr_number
+                    ; "repo", `String repo_slug
+                    ; "execution_via", `String meta_result.via
+                    ; "metadata", `String meta_result.output
+                    ; "diff", `String diff_result.output
+                    ; "diff_truncated", `Bool diff_truncated
+                    ; "diff_status", `Bool (status_ok diff_result.status)
+                    ]
+                    @ route_fields ~via:meta_result.via meta
+                    @ identity_attestation_fields ~config meta))
+        )
 ;;
 
 let handle_keeper_pr_review_comment
@@ -499,16 +571,23 @@ let handle_keeper_pr_review_comment
         match effective_repo_slug ~config ~repo with
         | Error msg -> error_json msg
         | Ok repo_slug ->
-            let repo_flag_arg = repo_flag repo_slug in
-            let approve_preflight_result =
-              match event with
-              | Approve ->
-                  approve_preflight
-                    ~config ~meta ~pr_number ~repo_slug ~repo_flag_arg
-                  |> Result.map (fun json -> Some json)
-              | Comment | Request_changes -> Ok None
-            in
-            (match approve_preflight_result with
+            (match
+               explicit_repo_unresolved_error ~config meta ~repo_arg:repo
+                 ~repo_slug ~pr_number
+                 ~event:(pr_review_event_to_string event) ()
+             with
+             | Some error -> error
+             | None ->
+                 let repo_flag_arg = repo_flag repo_slug in
+                 let approve_preflight_result =
+                   match event with
+                   | Approve ->
+                       approve_preflight
+                         ~config ~meta ~pr_number ~repo_slug ~repo_flag_arg
+                       |> Result.map (fun json -> Some json)
+                   | Comment | Request_changes -> Ok None
+                 in
+                 (match approve_preflight_result with
              | Error preflight ->
                  let preflight_via =
                    match json_string_member "via" preflight with
@@ -571,7 +650,7 @@ let handle_keeper_pr_review_comment
                       @
                       match approve_preflight_json with
                       | Some json -> [ "preflight", json ]
-                      | None -> [])))
+                      | None -> []))))
 ;;
 
 let handle_keeper_pr_review_reply
@@ -606,33 +685,40 @@ let handle_keeper_pr_review_reply
       match effective_repo_slug ~config ~repo with
       | Error msg -> error_json msg
       | Ok owner_repo ->
-        let result =
-          with_pr_review_body_file ~config ~meta ~body
-          @@ fun body_file ->
-          let cmd =
-            Printf.sprintf
-              "gh api repos/%s/pulls/%d/comments/%d/replies -F body=@%s 2>&1"
-              owner_repo
-              pr_number
-              comment_id
-              (Filename.quote body_file)
-          in
-          run_pr_review_shell ~config ~meta
-            ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Pr_review_post ())
-            ~cmd
-        in
-        Log.Keeper.info "pr_review_reply: pr=%d comment=%d keeper=%s ok=%b"
-          pr_number comment_id meta.name (status_ok result.status);
-        Yojson.Safe.to_string
-          (`Assoc
-              ([ "ok", `Bool (status_ok result.status)
-               ; "pr_number", `Int pr_number
-               ; "repo", `String owner_repo
-               ; "execution_via", `String result.via
-               ; "comment_id", `Int comment_id
-               ; "output", `String result.output
-               ; "keeper", `String meta.name
-               ]
-               @ route_fields ~via:result.via meta
-               @ identity_attestation_fields ~config meta))
+          (match
+             explicit_repo_unresolved_error ~config meta ~repo_arg:repo
+               ~repo_slug:owner_repo ~pr_number ~event:"REPLY" ()
+           with
+           | Some error -> error
+           | None ->
+               let result =
+                 with_pr_review_body_file ~config ~meta ~body
+                 @@ fun body_file ->
+                 let cmd =
+                   Printf.sprintf
+                     "gh api repos/%s/pulls/%d/comments/%d/replies -F body=@%s \
+                      2>&1"
+                     owner_repo pr_number comment_id (Filename.quote body_file)
+                 in
+                 run_pr_review_shell ~config ~meta
+                   ~timeout_sec:
+                     (Env_config_exec_timeout.timeout_sec
+                        ~caller:Pr_review_post ())
+                   ~cmd
+               in
+               Log.Keeper.info
+                 "pr_review_reply: pr=%d comment=%d keeper=%s ok=%b" pr_number
+                 comment_id meta.name (status_ok result.status);
+               Yojson.Safe.to_string
+                 (`Assoc
+                   ([ "ok", `Bool (status_ok result.status)
+                    ; "pr_number", `Int pr_number
+                    ; "repo", `String owner_repo
+                    ; "execution_via", `String result.via
+                    ; "comment_id", `Int comment_id
+                    ; "output", `String result.output
+                    ; "keeper", `String meta.name
+                    ]
+                    @ route_fields ~via:result.via meta
+                    @ identity_attestation_fields ~config meta)))
 ;;

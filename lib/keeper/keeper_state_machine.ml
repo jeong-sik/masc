@@ -1210,12 +1210,26 @@ let check_event_precondition (c : conditions) (ev : event)
 (* ── apply_event ───────────────────────────────────────── *)
 
 let apply_event ~current_phase ~conditions ~event ~now =
-  (* Terminal states reject all events *)
+  (* Terminal states reject all events. Non-terminal phases enumerated
+     explicitly per software-development.md §"FSM Sparse Match" — if a
+     new phase variant is added, this match surfaces warning 8 instead
+     of silently routing the new phase to the non-terminal branch
+     (which is wrong if the new phase is itself intended terminal).
+     Mirrors the [can_transition] exhaustive refactor in #16747. *)
   match current_phase with
   | Stopped | Dead | Zombie ->
     Error
       (Terminal_state { current = current_phase; attempted_event = event_to_string event })
-  | _ ->
+  | Offline
+  | Running
+  | Failing
+  | Overflowed
+  | Compacting
+  | HandingOff
+  | Draining
+  | Paused
+  | Crashed
+  | Restarting ->
     (match check_event_precondition conditions event with
      | Error _ as e -> e
      | Ok () ->

@@ -1139,6 +1139,45 @@ let observe
   }
 ;;
 
+let observe_direct_keeper_msg
+      ~allowed_tool_names
+      ~(config : Coord.config)
+      ~(meta : keeper_meta)
+  : world_observation
+  =
+  let ( unclaimed_task_count
+      , claimable_task_count
+      , failed_task_count
+      , pending_verification_count
+      , backlog_updated_since_last_scheduled_autonomous )
+    =
+    read_backlog_counts ~allowed_tool_names ~config ~meta
+  in
+  { pending_mentions = []
+  ; pending_board_events = []
+  ; pending_scope_messages = []
+  ; message_cursor_updates = []
+  ; idle_seconds = compute_idle_seconds ~meta
+  ; active_goals = meta.active_goal_ids
+  ; continuity_summary = read_continuity_summary ~config ~meta
+  ; worktree_change_summary =
+      Worktree_live_context.capture_change_block
+        ~base_path:config.base_path
+        ~actor_key:meta.name
+  ; context_ratio = read_context_ratio ~config ~meta
+  ; economic_pressure =
+      Agent_economy.economic_pressure ~base_path:config.base_path ~agent_name:meta.name
+  ; unclaimed_task_count
+  ; claimable_task_count
+  ; failed_task_count
+  ; pending_verification_count
+  ; backlog_updated_since_last_scheduled_autonomous
+  ; active_agent_count = count_active_agents ~config
+  ; last_turn_budget = None
+  ; work_discovery_due = false
+  }
+;;
+
 let durable_signal_present
       ~allowed_tool_names
       ~pending_board_events

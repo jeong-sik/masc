@@ -229,6 +229,20 @@ val observe :
   meta:Keeper_types.keeper_meta ->
   world_observation
 
+(** Build the observation used by direct [masc_keeper_msg] turns.
+
+    This intentionally reads durable room/task state, including pending
+    verification counts, while suppressing transient board/message events and
+    cursor updates. Direct operator messages should not advance autonomous
+    cursors, inherit unrelated room chatter, or synthesize scheduled
+    work-discovery timer signals, but they must still see the durable work
+    signals that drive tool-use contracts. *)
+val observe_direct_keeper_msg :
+  allowed_tool_names:string list option ->
+  config:Coord.config ->
+  meta:Keeper_types.keeper_meta ->
+  world_observation
+
 (** Non-mutating probe for the smart-heartbeat gate.
 
     Returns [true] when durable room state already contains work that should

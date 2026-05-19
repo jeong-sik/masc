@@ -1757,6 +1757,8 @@
 
 (include stanzas/test_phase2_self_preservation.inc)
 
+(include stanzas/test_parse_outcome.inc)
+
 (include stanzas/test_pr_open_script.inc)
 
 (include stanzas/test_process_eio_default_timeout.inc)

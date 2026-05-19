@@ -1,0 +1,9 @@
+(include_subdirs no)
+(library
+ (name parse_outcome)
+ (public_name masc_mcp.parse_outcome)
+ (modules parse_outcome)
+ ; RFC-0144 §Design — base library has zero Yojson dependency; only
+ ; stdlib + Eio (for Cancel.Cancelled). Yojson-aware classification is
+ ; opt-in via [of_exn] at call sites that already link Yojson.
+ (libraries eio))

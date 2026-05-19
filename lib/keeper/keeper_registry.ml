@@ -485,9 +485,22 @@ let () =
 ;;
 
 let mark_dead ~base_path name ~at =
+  (* Same metric is also incremented at line ~1907 via
+     `phase_to_string tr.new_phase`, which emits lowercase wire format
+     (`dead`, `running`, `handing_off`, ...). The historical hardcoded
+     `"Dead"` here split the time series in two — `to_phase="Dead"`
+     from this site vs `to_phase="dead"` from the transition path —
+     so any Prometheus consumer aggregating on `to_phase` undercounted
+     deaths. Route through `phase_to_string` so both emit sites share
+     the SSOT casing. `from_phase` stays as the literal sentinel
+     `"direct"` to flag transition-bypass writes. *)
   Prometheus.inc_counter
     Keeper_metrics.metric_keeper_lifecycle_transitions
-    ~labels:[ "keeper", name; "from_phase", "direct"; "to_phase", "Dead" ]
+    ~labels:
+      [ "keeper", name
+      ; "from_phase", "direct"
+      ; "to_phase", Keeper_state_machine.phase_to_string Dead
+      ]
     ();
   Log.Keeper.error "registry: marking keeper dead name=%s at=%.0f" name at;
   update_entry ~base_path name (fun entry ->

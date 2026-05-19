@@ -434,20 +434,28 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
       | Some (`String "cascade_exhausted") -> (
           match string_opt_of_assoc "cascade_name" json with
           | Some cascade_name ->
-            let reason =
-              match List.assoc_opt "reason" (match json with `Assoc fields -> fields | _ -> []) with
+            (* If the reason payload does not round-trip through a typed
+               [cascade_exhaustion_reason] variant, the entire payload is
+               returned as [None] so the caller treats the SDK error as
+               opaque. Synthesizing a sentinel reason here would be
+               indistinguishable from a real cascade-reason value and
+               poison downstream typed pattern matches. *)
+            let reason_opt =
+              match List.assoc_opt "reason"
+                      (match json with `Assoc fields -> fields | _ -> []) with
               | Some json_val ->
-                  (match Keeper_types.cascade_exhaustion_reason_of_json json_val with
-                   | Some r -> r
-                   | None -> Other_detail "unknown_cascade_reason")
-              | None -> Other_detail "missing_reason_field"
+                  Keeper_types.cascade_exhaustion_reason_of_json json_val
+              | None -> None
             in
-            Some
-              (Cascade_exhausted
-                 {
-                   cascade_name = cascade_name_of_string cascade_name;
-                   reason;
-                 })
+            (match reason_opt with
+             | Some reason ->
+               Some
+                 (Cascade_exhausted
+                    {
+                      cascade_name = cascade_name_of_string cascade_name;
+                      reason;
+                    })
+             | None -> None)
           | None -> None)
       | Some (`String "resumable_cli_session") -> (
           match string_opt_of_assoc "cascade_name" json, string_opt_of_assoc "detail" json with

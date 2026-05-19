@@ -108,6 +108,13 @@ let eval_base ~base_path =
 let eval_dir ~base_path ~agent_name =
   Filename.concat (eval_base ~base_path) agent_name
 
+(* Silent [Sys_error _ -> []] previously hid two distinct failure modes
+   behind "no agents have eval data": (1) the eval directory is
+   legitimately empty (expected during fresh boot before any verdict
+   write), (2) the directory is unreadable due to permission denied,
+   missing parent, or filesystem unavailability. Operators staring at
+   an empty Eval Feed pane need to tell these apart. Same pattern as
+   #16712, #16720, #16724, #16725, #16729 (silent-failure series). *)
 let list_agents ~base_path =
   let dir = eval_base ~base_path in
   try
@@ -116,7 +123,14 @@ let list_agents ~base_path =
     |> List.filter (fun name ->
          Sys.is_directory (Filename.concat dir name))
     |> List.sort String.compare
-  with Sys_error _ -> []
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | Sys_error msg ->
+    Log.Dashboard.warn
+      "[eval_feed.list_agents] eval directory unreadable at %s: %s"
+      dir
+      msg;
+    []
 
 let read_latest ~base_path ~agent_name ~limit =
   let dir = eval_dir ~base_path ~agent_name in
@@ -126,7 +140,16 @@ let read_latest ~base_path ~agent_name ~limit =
       |> Array.to_list
       |> List.filter (fun f -> Filename.check_suffix f ".json")
       |> List.sort (fun a b -> String.compare b a)
-    with Sys_error _ -> []
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | Sys_error msg ->
+      Log.Dashboard.warn
+        "[eval_feed.read_latest] per-agent verdict directory unreadable for \
+         %s at %s: %s"
+        agent_name
+        dir
+        msg;
+      []
   in
   let rec collect acc remaining = function
     | [] -> List.rev acc

@@ -86,10 +86,41 @@ let all_profile_names =
 let is_known_profile name =
   List.exists (fun (n, _) -> String.equal n name) builtin_profiles
 
-let is_subset_profile src_name dst_name =
-  match resolve_profile src_name, resolve_profile dst_name with
-  | Some src, Some dst ->
-      List.for_all
-        (fun cap -> List.mem cap dst.required_capabilities)
-        src.required_capabilities
-  | _, _ -> false
+type profile_lookup_error =
+  | Unknown_source_profile of { name : string; known : string list }
+  | Unknown_destination_profile of { name : string; known : string list }
+  | Unknown_both_profiles of { src : string; dst : string; known : string list }
+
+let profile_lookup_error_to_string = function
+  | Unknown_source_profile { name; known } ->
+      Printf.sprintf
+        "unknown source profile %S (known: %s)"
+        name
+        (String.concat ", " known)
+  | Unknown_destination_profile { name; known } ->
+      Printf.sprintf
+        "unknown destination profile %S (known: %s)"
+        name
+        (String.concat ", " known)
+  | Unknown_both_profiles { src; dst; known } ->
+      Printf.sprintf
+        "unknown source profile %S and unknown destination profile %S \
+         (known: %s)"
+        src
+        dst
+        (String.concat ", " known)
+
+let is_subset_profile ~src ~dst =
+  match resolve_profile src, resolve_profile dst with
+  | Some s, Some d ->
+      Ok
+        (List.for_all
+           (fun cap -> List.mem cap d.required_capabilities)
+           s.required_capabilities)
+  | None, None ->
+      Error (Unknown_both_profiles { src; dst; known = all_profile_names })
+  | None, Some _ ->
+      Error (Unknown_source_profile { name = src; known = all_profile_names })
+  | Some _, None ->
+      Error
+        (Unknown_destination_profile { name = dst; known = all_profile_names })

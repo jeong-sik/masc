@@ -186,6 +186,7 @@
   test_tool_exposure
   test_autonomy_liberation
   test_keeper_unified
+  test_keeper_unified_context_overflow
   test_keeper_unified_idle_cooldown
   test_keeper_unified_inline_skip
   test_keeper_unified_metacognition
@@ -491,6 +492,7 @@
   test_tool_exposure
   test_autonomy_liberation
   test_keeper_unified
+  test_keeper_unified_context_overflow
   test_keeper_unified_idle_cooldown
   test_keeper_unified_inline_skip
   test_keeper_unified_metacognition

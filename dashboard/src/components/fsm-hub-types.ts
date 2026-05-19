@@ -193,6 +193,29 @@ export function displayState(value: string): string {
   return STATE_DISPLAY_NAMES[value] ?? value
 }
 
+/** Korean labels for `execution.outcome` / `keeper.latest_execution_outcome`.
+ *  Backend emits the TLA-prefix form via
+ *  `Keeper_execution_receipt.outcome_kind_to_tla_receipt`
+ *  (lib/keeper/keeper_execution_receipt.ml:24-29):
+ *  receipt_done / receipt_skipped / receipt_failed / receipt_cancelled.
+ *  The TLA spec ReceiptIsAuthoritative invariant
+ *  (keeper_execution_receipt.ml:54-58) fixes this canonical form.
+ *  Kept separate from `STATE_DISPLAY_NAMES` so generic short tokens
+ *  do not collide; the prefix makes collisions unlikely but the
+ *  per-axis helper pattern (#16374, #16377, #16380, #16382, #16388,
+ *  #16396) is the established discipline. */
+const EXECUTION_OUTCOME_LABELS: Record<string, string> = {
+  receipt_done: '완료',
+  receipt_skipped: '건너뜀',
+  receipt_failed: '실패',
+  receipt_cancelled: '취소됨',
+}
+
+export function executionOutcomeLabel(value: string | null | undefined): string | null {
+  if (!value) return null
+  return EXECUTION_OUTCOME_LABELS[value] ?? value
+}
+
 /** Korean labels for `trust.disposition`. Backend emits 4 closed-sum
  *  values via `display_disposition_of_operator`
  *  (lib/keeper/keeper_runtime_trust_snapshot.ml:687-697):

@@ -23,7 +23,8 @@ import {
   STATE_BLOCK_TEMPLATE,
   type QuickComposerMode,
 } from './ops-state'
-import { executeAction, normalizeStatus } from './helpers'
+import { executeAction } from './helpers'
+import { isKeeperOffline } from '../../lib/keeper-predicates'
 
 interface ComposerTarget {
   action_type: 'broadcast' | 'keeper_message'
@@ -162,7 +163,9 @@ export function QuickIntervene() {
   const busy = operatorActionBusy.value
   const currentRoute = route.value
 
-  const onlineKeepers = keepers.filter(k => normalizeStatus(k.status) !== 'offline')
+  // RFC-0135 audit B5 (2026-05-19): SSOT-routed presence filter — see
+  // composer-v2.ts/keeper-utilities.ts for the parallel migrations.
+  const onlineKeepers = keepers.filter(k => !isKeeperOffline(k))
   const onlineKeeperNames = onlineKeepers.map(keeper => keeper.name).join('\0')
   const mode = quickComposerMode.value
   const stateKeys = mode === 'state' ? stateBlockKeys(quickMessage.value) : []

@@ -33,10 +33,6 @@ export {
 
 export { prettyJson, displayStatus }
 
-export function normalizeStatus(value: unknown): string {
-  return typeof value === 'string' ? value.trim().toLowerCase() : ''
-}
-
 function canonicalizeActionType(value?: string | null): string | null {
   if (!value) return null
   const normalized = value.trim()

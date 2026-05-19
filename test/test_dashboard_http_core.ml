@@ -721,7 +721,7 @@ let test_dashboard_message_json_surfaces_temporal_decay_fields () =
 
 (* RFC-0138 Phase 3 Step 1 — /shell snapshot wire tests.
 
-   These exercise [Server_dashboard_shell_snapshot.select_shell_json]
+   These exercise [Server_dashboard_snapshot_select.select_shell_json]
    directly, which is what the /api/v1/dashboard/shell handler now
    calls.  Three cases cover the full selector matrix:
 
@@ -740,7 +740,7 @@ let test_shell_snapshot_wire_returns_snapshot_when_published () =
        ~namespace_truth:`Null ~telemetry_summary:`Null);
   let timing = Lib.Server_timing.create () in
   let json =
-    Lib.Server_dashboard_shell_snapshot.select_shell_json
+    Lib.Server_dashboard_snapshot_select.select_shell_json
       ~timing config
   in
   let open Yojson.Safe.Util in
@@ -761,7 +761,7 @@ let test_shell_snapshot_wire_falls_back_when_empty () =
   Lib.Dashboard_snapshot.reset_for_test ();
   let timing = Lib.Server_timing.create () in
   let snapshot_json =
-    Lib.Server_dashboard_shell_snapshot.select_shell_json
+    Lib.Server_dashboard_snapshot_select.select_shell_json
       ~timing config
   in
   let direct_json =
@@ -786,7 +786,7 @@ let test_shell_snapshot_wire_light_variant_bypasses_snapshot () =
        ~namespace_truth:`Null ~telemetry_summary:`Null);
   let timing = Lib.Server_timing.create () in
   let json =
-    Lib.Server_dashboard_shell_snapshot.select_shell_json
+    Lib.Server_dashboard_snapshot_select.select_shell_json
       ~timing ~light:true config
   in
   let open Yojson.Safe.Util in
@@ -799,7 +799,7 @@ let test_shell_snapshot_wire_light_variant_bypasses_snapshot () =
 (* RFC-0138 Phase 3 Step 2 — /tools and /telemetry/summary wire tests.
 
    Cover the new selector matrix on
-   [Server_dashboard_shell_snapshot.select_tools_json] and
+   [Server_dashboard_snapshot_select.select_tools_json] and
    [..._telemetry_summary_json]. *)
 
 let test_tools_snapshot_wire_returns_snapshot_when_actor_omitted () =
@@ -812,7 +812,7 @@ let test_tools_snapshot_wire_returns_snapshot_when_actor_omitted () =
        ~namespace_truth:`Null ~telemetry_summary:`Null);
   let timing = Lib.Server_timing.create () in
   let json =
-    Lib.Server_dashboard_shell_snapshot.select_tools_json
+    Lib.Server_dashboard_snapshot_select.select_tools_json
       ~timing config
   in
   let open Yojson.Safe.Util in
@@ -848,7 +848,7 @@ let test_telemetry_summary_snapshot_wire_returns_snapshot () =
        ~namespace_truth:`Null ~telemetry_summary:sentinel);
   let timing = Lib.Server_timing.create () in
   let json =
-    Lib.Server_dashboard_shell_snapshot.select_telemetry_summary_json
+    Lib.Server_dashboard_snapshot_select.select_telemetry_summary_json
       ~timing config
   in
   let open Yojson.Safe.Util in
@@ -863,7 +863,7 @@ let test_telemetry_summary_snapshot_wire_falls_back_when_empty () =
   Lib.Dashboard_snapshot.reset_for_test ();
   let timing = Lib.Server_timing.create () in
   let json =
-    Lib.Server_dashboard_shell_snapshot.select_telemetry_summary_json
+    Lib.Server_dashboard_snapshot_select.select_telemetry_summary_json
       ~timing config
   in
   Alcotest.(check bool)
@@ -894,7 +894,7 @@ let test_project_snapshot_wire_returns_snapshot_when_populated () =
   let req = request "/api/v1/dashboard/project-snapshot" in
   let timing = Lib.Server_timing.create () in
   let json =
-    Lib.Server_dashboard_shell_snapshot.select_project_snapshot_json
+    Lib.Server_dashboard_snapshot_select.select_project_snapshot_json
       ~state ~sw ~clock ~timing req
   in
   let open Yojson.Safe.Util in

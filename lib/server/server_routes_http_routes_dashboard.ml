@@ -182,11 +182,12 @@ let invalid_cascade_profiles () : (string * string list) list =
 let invalid_cascade_assignment_profiles () : (string * string list) list =
   (cascade_profile_gate ()).invalid_assignments
 
-(* [telemetry_summary_cache_key] moved to
-   [Server_dashboard_shell_snapshot] (Phase 3 Step 2) where the only
-   remaining caller (the cold-start fallback path) now lives.  Same
-   byte-identical digest, so cache slots written before the router
-   migration are still hit by readers after it. *)
+(* RFC-0138 Phase 3 Step 5 — [telemetry_summary_cache_key] deleted
+   along with [Dashboard_cache.get_or_compute] from the cold-start
+   fallback path.  After Step 1/2/3 wired snapshot reads in front of
+   compute, the fallback runs at most once per process and a cache
+   slot is not worth keeping live.  See
+   [Server_dashboard_snapshot_select.select_telemetry_summary_json]. *)
 
 let trimmed_query_param req key =
   match Server_utils.query_param req key |> Option.map String.trim with
@@ -473,7 +474,7 @@ let rec add_routes ~sw ~clock router =
             published; falls back to [dashboard_shell_http_json] for
             light variant + first-request cold start. *)
          let json =
-           Server_dashboard_shell_snapshot.select_shell_json
+           Server_dashboard_snapshot_select.select_shell_json
              ?clock:state.Mcp_server.clock ~request:req
              ~timing ~light state.Mcp_server.room_config
          in
@@ -703,7 +704,7 @@ let rec add_routes ~sw ~clock router =
             spawned without ~state) falls through to the synchronous
             namespace-truth path inside the timing measurement. *)
          let json =
-           Server_dashboard_shell_snapshot.select_project_snapshot_json
+           Server_dashboard_snapshot_select.select_project_snapshot_json
              ~state ~sw ~clock ~timing req
          in
          Http.Response.json ~compress:true ~request:req
@@ -719,7 +720,7 @@ let rec add_routes ~sw ~clock router =
             spawned without ~state) falls through to the synchronous
             namespace-truth path inside the timing measurement. *)
          let json =
-           Server_dashboard_shell_snapshot.select_project_snapshot_json
+           Server_dashboard_snapshot_select.select_project_snapshot_json
              ~state ~sw ~clock ~timing req
          in
          Http.Response.json ~compress:true ~request:req
@@ -735,7 +736,7 @@ let rec add_routes ~sw ~clock router =
             spawned without ~state) falls through to the synchronous
             namespace-truth path inside the timing measurement. *)
          let json =
-           Server_dashboard_shell_snapshot.select_project_snapshot_json
+           Server_dashboard_snapshot_select.select_project_snapshot_json
              ~state ~sw ~clock ~timing req
          in
          Http.Response.json ~compress:true ~request:req
@@ -1005,7 +1006,7 @@ let rec add_routes ~sw ~clock router =
               [dashboard_tools_http_json] until the snapshot type
               grows an [Actor_filter] arm. *)
            let json =
-             Server_dashboard_shell_snapshot.select_tools_json
+             Server_dashboard_snapshot_select.select_tools_json
                ~timing
                ?actor:
                  (dashboard_actor_for_request
@@ -1338,7 +1339,7 @@ let rec add_routes ~sw ~clock router =
             [Dashboard_cache] + [Telemetry_unified.summary_json] path
             for cold start. *)
          let json =
-           Server_dashboard_shell_snapshot.select_telemetry_summary_json
+           Server_dashboard_snapshot_select.select_telemetry_summary_json
              ~timing state.Mcp_server.room_config
          in
          Http.Response.json ~compress:true ~request:req

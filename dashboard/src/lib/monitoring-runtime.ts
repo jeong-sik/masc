@@ -206,9 +206,20 @@ function keeperBand(
   // chain (`paused || phaseKey === 'Paused' || lifecycleKey === 'paused'`)
   // was one of four parallel paused checks that drifted independently.
   if (isKeeperPaused(keeper)) return 'paused'
+  // `lifecycleKey` is the return value of `keeperDisplayStatus`. Its
+  // reachable vocabulary is `'paused' | 'offline' | 'unbooted' | 'stopped'
+  // | 'idle' | 'busy' | 'active' | 'listening' | <lowercased phase>
+  // | 'unknown'` (see `keeper-runtime-display.ts:124-135` +
+  // `refineOfflineStatus:140-166`). `'inactive'` is never produced —
+  // when the wire-level `keeper.status` is `'inactive'`,
+  // `keeperDisplayStatus` routes through `refineOfflineStatus` which
+  // returns `'offline' | 'unbooted' | 'stopped' | 'idle' | <phase>`
+  // instead. Dead defensive arm removed accordingly. (The matching
+  // `'inactive'` arm in `keeperDisplayStatus`'s own match was also
+  // examined in PR #16728 — kept there as the entry guard since it
+  // gates the input-side normalization.)
   if (
     lifecycleKey === 'offline'
-    || lifecycleKey === 'inactive'
     || lifecycleKey === 'unbooted'
     || lifecycleKey === 'stopped'
     || OFFLINE_PHASES.has(phaseKey)

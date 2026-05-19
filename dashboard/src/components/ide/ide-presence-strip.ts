@@ -1,5 +1,7 @@
 import { html } from 'htm/preact'
 import { useEffect, useMemo, useState } from 'preact/hooks'
+import { fetchWithTimeout, get } from '../../api/core'
+import { DEFAULT_GET_TIMEOUT_MS } from '../../config/constants'
 import { KeeperBadge } from '../keeper-badge'
 import {
   createKeeperPresenceStore,
@@ -144,13 +146,19 @@ export function parseWorktreeSSE(body: string): WorktreeEntry[] {
   return entries
 }
 
-/** Fetch worktree status from the SSE endpoint. Returns [] on failure. */
+/** Fetch worktree status from the SSE endpoint. Returns [] on failure.
+ *  Uses fetchWithTimeout directly because the endpoint returns SSE-formatted
+ *  text (data: lines), not JSON — get<T>() would fail at JSON.parse. */
 async function fetchWorktreeEntries(): Promise<WorktreeEntry[]> {
   try {
-    const res = await fetch('/api/dashboard/worktree-status')
+    const res = await fetchWithTimeout(
+      '/api/dashboard/worktree-status',
+      { headers: {} },
+      DEFAULT_GET_TIMEOUT_MS,
+    )
     if (!res.ok) return []
-    const body = await res.text()
-    return parseWorktreeSSE(body)
+    const text = await res.text()
+    return parseWorktreeSSE(text)
   } catch {
     return []
   }
@@ -163,18 +171,13 @@ interface PresenceData {
 
 async function fetchPresence(): Promise<PresenceData> {
   try {
-    const [agentsRes, statusRes, worktrees] = await Promise.all([
-      fetch('/api/v1/agents?limit=20'),
-      fetch('/api/v1/status'),
+    const [agentsData, statusData, worktrees] = await Promise.all([
+      get<{ agents: ApiAgent[] }>('/api/v1/agents?limit=20'),
+      get<ApiStatus>('/api/v1/status'),
       fetchWorktreeEntries(),
     ])
-    if (!agentsRes.ok || !statusRes.ok) {
-      return { snapshot: disconnectedSnapshot('api_unavailable'), worktrees }
-    }
-    const agentsData = await agentsRes.json()
-    const statusData = await statusRes.json()
     const agents: ApiAgent[] = Array.isArray(agentsData.agents) ? agentsData.agents : []
-    const snapshot = agentsToPresence(agents, statusData as ApiStatus, worktrees)
+    const snapshot = agentsToPresence(agents, statusData, worktrees)
     return { snapshot, worktrees }
   } catch {
     return { snapshot: disconnectedSnapshot('fetch_failed'), worktrees: [] }

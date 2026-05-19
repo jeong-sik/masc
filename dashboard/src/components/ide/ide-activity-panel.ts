@@ -1,5 +1,6 @@
 import { html } from 'htm/preact'
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
+import { get } from '../../api/core'
 import { keeperHueIndex } from '../../../design-system/headless-core/keeper-line-ownership'
 import type { IdeAnnotation } from '../../api/schemas/ide-annotations'
 import type { UnifiedDiffRow } from '../../api/workspace'
@@ -195,9 +196,7 @@ function mapApiEvent(event: ApiActivityEvent, roomId: string): RunActivityEvent 
 
 async function fetchActivityEvents(): Promise<ActivityFetchResult> {
   try {
-    const res = await fetch('/api/v1/activity/events?limit=50')
-    if (!res.ok) return { events: EMPTY_ACTIVITY, roomId: DEFAULT_ROOM_ID, ok: false }
-    const data: ApiActivityResponse = await res.json()
+    const data = await get<ApiActivityResponse>('/api/v1/activity/events?limit=50')
     const rawEvents = data.events
     if (!Array.isArray(rawEvents) || rawEvents.length === 0) {
       return { events: EMPTY_ACTIVITY, roomId: DEFAULT_ROOM_ID, ok: true }

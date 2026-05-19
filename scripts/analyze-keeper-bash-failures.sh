@@ -18,6 +18,17 @@ set -euo pipefail
 BASE_PATH="${1:-${MASC_BASE_PATH:-$(pwd)}}"
 WINDOW_HOURS="${2:-240}"
 TOOL_CALLS_DIR="${BASE_PATH}/.masc/tool_calls"
+LEGENDARY_BASH_COUNTERS_URL="${MASC_LEGENDARY_BASH_COUNTERS_URL:-}"
+if [ -z "$LEGENDARY_BASH_COUNTERS_URL" ]; then
+  if [ -n "${MASC_HTTP_BASE_URL:-}" ]; then
+    LEGENDARY_BASH_COUNTERS_URL="${MASC_HTTP_BASE_URL%/}/api/v1/legendary_bash/shadow_counters"
+  else
+    MASC_COUNTER_HOST="${MASC_HOST:-127.0.0.1}"
+    MASC_COUNTER_PORT="${MASC_HTTP_PORT:-${MASC_PORT:-8935}}"
+    LEGENDARY_BASH_COUNTERS_URL="http://${MASC_COUNTER_HOST}:${MASC_COUNTER_PORT}/api/v1/legendary_bash/shadow_counters"
+  fi
+fi
+LEGENDARY_BASH_COUNTERS_TIMEOUT_SEC="${MASC_LEGENDARY_BASH_COUNTERS_TIMEOUT_SEC:-2}"
 
 if ! command -v jq >/dev/null 2>&1; then
   echo "jq required" >&2
@@ -197,3 +208,51 @@ echo
 echo "[top failed commands by surface]"
 jq -Rr --argjson cutoff "$CUTOFF" "$SURFACE_FILTER | select(failed) | [.tool, category, cmd] | @tsv" "${FILES[@]}" |
 sort | uniq -c | sort -nr | awk 'NR <= 80 { print }'
+
+echo
+echo "[live legendary bash counters]"
+if ! command -v curl >/dev/null 2>&1; then
+  echo "unavailable	curl_missing"
+else
+  COUNTERS_JSON="$(
+    curl -fsS --max-time "$LEGENDARY_BASH_COUNTERS_TIMEOUT_SEC" \
+      "$LEGENDARY_BASH_COUNTERS_URL" 2>/dev/null || true
+  )"
+  if [ -z "$COUNTERS_JSON" ]; then
+    echo "unavailable	${LEGENDARY_BASH_COUNTERS_URL}"
+  else
+    echo "url	${LEGENDARY_BASH_COUNTERS_URL}"
+    echo "$COUNTERS_JSON" | jq -r '
+      def n($key): (.[$key] // 0);
+      "typed_advisor_outcome\tcount",
+      ("allow\t" + (n("typed_advisor_allow") | tostring)),
+      ("reject\t" + (n("typed_advisor_reject") | tostring)),
+      ("cannot_parse\t" + (n("typed_advisor_cannot_parse") | tostring)),
+      "",
+      "shell_gate_caller\tallow\treject\tcannot_parse",
+      ("worker_dev_tools\t"
+       + (n("shell_gate_worker_dev_tools_allow") | tostring) + "\t"
+       + (n("shell_gate_worker_dev_tools_reject") | tostring) + "\t"
+       + (n("shell_gate_worker_dev_tools_cannot_parse") | tostring)),
+      ("tool_code_write\t"
+       + (n("shell_gate_tool_code_write_allow") | tostring) + "\t"
+       + (n("shell_gate_tool_code_write_reject") | tostring) + "\t"
+       + (n("shell_gate_tool_code_write_cannot_parse") | tostring)),
+      ("keeper_shell_bash\t"
+       + (n("shell_gate_keeper_shell_bash_allow") | tostring) + "\t"
+       + (n("shell_gate_keeper_shell_bash_reject") | tostring) + "\t"
+       + (n("shell_gate_keeper_shell_bash_cannot_parse") | tostring)),
+      "",
+      "gate_diff_bucket\tcount",
+      ("total\t" + (n("gate_diff_total") | tostring)),
+      ("agree\t" + (n("gate_diff_agree") | tostring)),
+      ("legacy_allow_shadow_deny\t" + (n("gate_diff_legacy_allow_shadow_deny") | tostring)),
+      ("legacy_deny_shadow_allow\t" + (n("gate_diff_legacy_deny_shadow_allow") | tostring)),
+      ("shadow_cannot_parse\t" + (n("gate_diff_shadow_cannot_parse") | tostring)),
+      "",
+      "gate_diff_ratio\tvalue",
+      ("disagree_ratio\t" + ((.ratios.disagree_ratio // 0) | tostring)),
+      ("shadow_parse_coverage\t" + ((.ratios.shadow_parse_coverage // 0) | tostring))
+    '
+  fi
+fi

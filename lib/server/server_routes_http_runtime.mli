@@ -109,8 +109,9 @@ val make_health_json :
   ?listener:string -> Httpun.Request.t -> Yojson.Safe.t
 (** [make_health_json ?listener request] builds the full health diagnostics
     JSON body.  [listener] defaults to ["http/1.1"] and is overridden to
-    ["h2"] by the H2 gateway.  The public [/health] route uses
-    {!make_health_response_json}; callers request this full body with
+    ["h2"] by the H2 gateway.  This is the force-compute diagnostic builder
+    used by tests and snapshot refreshes.  The public [/health] route uses
+    {!make_health_response_json}; callers request cached full diagnostics with
     [/health?full=1].
 
     {2 Top-level keys (operator-visible contract)}
@@ -195,9 +196,20 @@ val make_health_probe_json :
 val make_health_response_json :
   ?listener:string -> Httpun.Request.t -> Yojson.Safe.t
 (** [make_health_response_json ?listener request] is the public [/health]
-    renderer.  It returns {!make_health_probe_json} by default and upgrades to
-    {!make_health_json} only when the request query contains [full=1] /
-    [full=true]. *)
+    renderer.  It returns {!make_health_probe_json} by default.  When the
+    request query contains [full=1] / [full=true], it returns the latest cached
+    full-health snapshot plus cheap request-local fields and starts a
+    background refresh when the snapshot is missing or stale.  The HTTP handler
+    must not synchronously run durable keeper scans. *)
+
+module For_testing : sig
+  val reset_full_health_snapshot : unit -> unit
+  (** Clears the cached full-health snapshot and in-flight refresh marker. *)
+
+  val refresh_full_health_snapshot_now :
+    ?listener:string -> Httpun.Request.t -> unit
+  (** Synchronously recomputes and stores the cached full-health snapshot. *)
+end
 
 val keeper_fleet_runtime_resolution_fields : unit -> (string * Yojson.Safe.t) list
 (** [keeper_fleet_runtime_resolution_fields ()] returns the health/fleet

@@ -22,6 +22,9 @@ val stream_idle_state_of_label : string -> stream_idle_state option
 val stream_idle_state_is_activity : stream_idle_state -> bool
 
 type timeout_phase =
+  | Admission
+  | Queue
+  | First_token
   | Http_operation
   | Non_streaming_body
   | Stream_body
@@ -29,6 +32,8 @@ type timeout_phase =
   | Provider_step
   | Cli_stdout_idle
   | Caller_budget
+  | Wall_clock
+  | Capacity_backpressure
   | Unknown_timeout
 
 val timeout_phase_to_label : timeout_phase -> string

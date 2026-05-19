@@ -1,5 +1,6 @@
 import { currentDashboardActor, get, post, del, put, withRetries, defaultBoardVoter } from './core'
 import { isRecord, asNullableString, asString, asNumber, asInt, asStringList } from '../components/common/normalize'
+import { asKeeperApprovalRiskLevel } from '../lib/governance-risk-level'
 import { timeBoardRequest } from '../board-metrics'
 import type {
   BoardActorIdentity, BoardPost, BoardComment, BoardReactionSummary,
@@ -65,7 +66,7 @@ export function normalizeKeeperApprovalQueueItem(raw: unknown): KeeperApprovalQu
   const id = asString(raw.id, '').trim()
   const keeperName = asString(raw.keeper_name, '').trim()
   const toolName = asString(raw.tool_name, '').trim()
-  const riskLevel = asString(raw.risk_level, '').trim()
+  const riskLevel = asKeeperApprovalRiskLevel(raw.risk_level)
   if (!id || !keeperName || !toolName || !riskLevel) return null
   const runtimeContract = isRecord(raw.runtime_contract)
     ? {

@@ -158,6 +158,12 @@ let blocker_class_of_string (reason : string) : blocker_class option =
   if trimmed = ""
   then None
   else if
+    String_util.contains_substring_ci trimmed "capacity_exhausted"
+    || String_util.contains_substring_ci trimmed "capacity exhausted"
+    || String_util.contains_substring_ci trimmed "slot full"
+    || String_util.contains_substring_ci trimmed "client capacity"
+  then Some Capacity_exhausted
+  else if
     String_util.contains_substring_ci
       trimmed
       "turn outcome ambiguous after committed mutating tool call(s)"
@@ -214,6 +220,9 @@ let blocker_class_of_string (reason : string) : blocker_class option =
 ;;
 
 let blocker_class_of_sdk_error (err : Agent_sdk.Error.sdk_error) : blocker_class option =
+  match Keeper_error_classify.recoverable_cascade_failure_reason err with
+  | Some Keeper_error_classify.Capacity_exhausted -> Some Capacity_exhausted
+  | _ ->
   match Keeper_turn_driver.classify_masc_internal_error err with
   | Some (Keeper_turn_driver.Cascade_exhausted { reason; _ }) ->
     Some (Cascade_exhausted reason)
@@ -269,6 +278,15 @@ type runtime_blocker_surface =
   ; continue_gate : bool
   }
 
+let runtime_blocker_class_label ?(summary = "") cls =
+  match cls with
+  | Capacity_exhausted -> "capacity_exhausted"
+  | Cascade_exhausted (Other_detail detail)
+    when Keeper_error_classify.message_looks_like_capacity_backpressure detail
+         || Keeper_error_classify.message_looks_like_capacity_backpressure summary ->
+      "capacity_exhausted"
+  | _ -> blocker_class_to_string cls
+
 let is_timeout_budget_blocker_class blocker_class =
   String.equal blocker_class (blocker_class_to_string Oas_timeout_budget)
   || String.equal blocker_class (blocker_class_to_string Turn_timeout)
@@ -277,10 +295,19 @@ let is_timeout_budget_blocker_class blocker_class =
 let runtime_blocker_surface_of_typed_class ?(summary = "") (cls : blocker_class)
   : runtime_blocker_surface
   =
-  let str = blocker_class_to_string cls in
+  let str = runtime_blocker_class_label ~summary cls in
   let continue_gate = blocker_class_continue_gate cls in
   let summary =
     match cls with
+    | Capacity_exhausted ->
+      if summary = ""
+      then "Provider or client capacity backpressure blocked this keeper turn."
+      else summary
+    | Cascade_exhausted (Other_detail _)
+      when String.equal str "capacity_exhausted" ->
+      if summary = ""
+      then "Provider or client capacity backpressure blocked this keeper turn."
+      else summary
     | Cascade_exhausted reason ->
       if summary = ""
       then cascade_exhaustion_summary reason
@@ -340,11 +367,12 @@ let runtime_blocker_surface_of_typed_class ?(summary = "") (cls : blocker_class)
 
 let runtime_blocker_surface_of_legacy_string reason cls =
   match cls with
-  | Cascade_exhausted _ -> runtime_blocker_surface_of_typed_class cls
+  | Cascade_exhausted _ -> runtime_blocker_surface_of_typed_class ~summary:reason cls
   (* All other blocker classes carry no embedded reason payload, so the
      legacy string [reason] argument provides the fallback summary. *)
   | Ambiguous_post_commit_timeout
   | Ambiguous_post_commit_failure
+  | Capacity_exhausted
   | Autonomous_slot_wait_timeout
   | Admission_queue_wait_timeout
   | Turn_timeout_after_queue_wait

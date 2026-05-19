@@ -243,6 +243,7 @@ let validate_command_coding_parsed ~allow_pipes ~allowed_commands context =
 ;;
 
 let validate_command_coding_with_allowlist
+      ?caller
       ?(allow_pipes = true)
       ~(allowed_commands : string list)
       cmd
@@ -257,7 +258,7 @@ let validate_command_coding_with_allowlist
   else if has_unsafe_redirection trimmed
   then Error Unsafe_redirect
   else (
-    match Shell_command_gate.parse trimmed with
+    match Shell_command_gate.parse ?caller trimmed with
     | Ok context -> (
       match validate_command_coding_parsed ~allow_pipes ~allowed_commands context with
       | `Use_legacy_segments ->
@@ -271,8 +272,9 @@ let validate_command_coding_with_allowlist
 (** Relaxed command validation for Coding/Full preset keepers.
     Allows pipes and redirects; validates every command in the pipeline
     against [dev_allowed_commands]. *)
-let validate_command_coding cmd =
+let validate_command_coding ?caller cmd =
   validate_command_coding_with_allowlist
+    ?caller
     ~allow_pipes:true
     ~allowed_commands:dev_allowed_commands
     cmd

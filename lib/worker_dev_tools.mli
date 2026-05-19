@@ -69,14 +69,23 @@ val validate_command : string -> (unit, block_reason) result
     and fd redirects; still blocks shell injection, process
     substitution, and unsafe redirects.  Validates every segment of
     the pipeline against the dev allowlist. *)
-val validate_command_coding : string -> (unit, block_reason) result
+val validate_command_coding
+  :  ?caller:Shell_command_gate.caller
+  -> string
+  -> (unit, block_reason) result
+(** [?caller] is forwarded to {!Shell_command_gate.parse} via
+    {!validate_command_coding_with_allowlist} for the upcoming
+    telemetry partition (RFC-0131 PR-3).  Captured but does not affect
+    the verdict. *)
 
 (** Customizable variant of {!validate_command_coding} for callers that
     need a non-default allowlist.  [allow_pipes] defaults to [true];
     setting it to [false] yields {!Pipes_not_allowed} for any pipeline
-    longer than one segment. *)
+    longer than one segment.  [?caller] is forwarded to
+    {!Shell_command_gate.parse} for telemetry partition. *)
 val validate_command_coding_with_allowlist
-  :  ?allow_pipes:bool
+  :  ?caller:Shell_command_gate.caller
+  -> ?allow_pipes:bool
   -> allowed_commands:string list
   -> string
   -> (unit, block_reason) result

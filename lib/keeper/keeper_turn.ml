@@ -104,28 +104,12 @@ let update_direct_turn_meta (meta : keeper_meta) ~(latency_ms : int)
     ~total_cost_usd:updated_meta.runtime.usage.total_cost_usd;
   updated_meta
 
-let direct_turn_observation (meta : keeper_meta) :
+let direct_turn_observation ~(config : Coord.config) (meta : keeper_meta) :
     Keeper_world_observation.world_observation =
-  {
-    pending_mentions = [];
-    pending_board_events = [];
-    pending_scope_messages = [];
-    message_cursor_updates = [];
-    idle_seconds = 0;
-    active_goals = meta.active_goal_ids;
-    continuity_summary = meta.continuity_summary;
-    worktree_change_summary = None;
-    context_ratio = 0.0;
-    economic_pressure = Agent_economy.Normal;
-    unclaimed_task_count = 0;
-    claimable_task_count = 0;
-    failed_task_count = 0;
-    pending_verification_count = 0;
-    backlog_updated_since_last_scheduled_autonomous = false;
-    active_agent_count = 0;
-    last_turn_budget = None;
-    work_discovery_due = false;
-  }
+  Keeper_world_observation.observe_direct_keeper_msg
+    ~allowed_tool_names:None
+    ~config
+    ~meta
 
 let resolve_turn_cascade_name (meta : keeper_meta) =
   let raw_name = String.trim (Keeper_types.cascade_name_of_meta meta) in
@@ -498,6 +482,12 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
             in
             Progress.Tracker.step turn_tracker
               ~message:(Printf.sprintf "Executing Agent.run for %s" name) ();
+            let world_observation = direct_turn_observation ~config:ctx.config meta in
+            let turn_affordances =
+              Keeper_unified_metrics.observed_affordances_of_observation
+                ~meta
+                world_observation
+            in
             let run_result, latency_ms =
               Keeper_exec_context.timed (fun () ->
                   Keeper_agent_run.run_turn
@@ -507,7 +497,8 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                     ~user_message:message
                     ~cascade_name:
                       (Keeper_cascade_profile.Runtime_name turn_cascade_name)
-                    ~world_observation:(direct_turn_observation meta)
+                    ~world_observation
+                    ~turn_affordances
                     ~required_tool_names
                     ?oas_timeout_s:keeper_msg_oas_timeout_s
                     ?provider_filter:(Env_config_keeper.KeeperCascade.provider_allowlist ())
@@ -613,7 +604,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                  Keeper_unified_metrics.append_metrics_snapshot
                    ~config:ctx.config
                    ~meta:updated_meta
-                   ~observation:(direct_turn_observation updated_meta)
+                   ~observation:(direct_turn_observation ~config:ctx.config updated_meta)
                    ~result
                    ~latency_ms
                    ~turn_cost:(turn_cost_for_result ~meta:updated_meta result)

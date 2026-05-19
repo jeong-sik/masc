@@ -11928,6 +11928,83 @@ let test_direct_keeper_msg_timeout_overrides_meta_per_provider_timeout () =
     (KAR.per_provider_timeout_for_turn ~meta ~timeout_s:900.0 ())
 ;;
 
+let test_direct_keeper_msg_observation_keeps_durable_verification_signal () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+       Eio_main.run
+       @@ fun env ->
+       Fs_compat.set_fs (Eio.Stdenv.fs env);
+       set_test_base_path base_dir;
+       let config = Masc_mcp.Coord.default_config base_dir in
+       ignore (Masc_mcp.Coord.init config ~agent_name:(Some "observer"));
+       let submitted_at = "2026-05-19T00:00:00Z" in
+       let task : Types.task =
+         { id = "task-direct-verification"
+         ; title = "Direct verifier work"
+         ; description = "awaiting verification"
+         ; task_status =
+             Types.AwaitingVerification
+               { assignee = "worker"
+               ; submitted_at
+               ; verification_id = "verify-direct-1"
+               ; deadline = None
+               }
+         ; priority = 3
+         ; files = []
+         ; created_at = submitted_at
+         ; created_by = Some "worker"
+         ; worktree = None
+         ; goal_id = None
+         ; stage = None
+         ; contract = None
+         ; handoff_context = None
+         ; cycle_count = 0
+         ; do_not_reclaim_reason = None
+         }
+       in
+       let backlog : Types.backlog =
+         { tasks = [ task ]; last_updated = submitted_at; version = 1 }
+       in
+       Masc_mcp.Coord.write_backlog config backlog;
+       let meta =
+         { minimal_meta with
+           name = "verifier"
+         ; mention_targets = [ "verifier" ]
+         ; work_discovery_enabled = Some false
+         }
+       in
+       let obs =
+         WO.observe_direct_keeper_msg
+           ~allowed_tool_names:None
+           ~config
+           ~meta
+       in
+       check int "pending verification is read from backlog" 1
+         obs.pending_verification_count;
+       check int "direct msg suppresses room mentions" 0 (List.length obs.pending_mentions);
+       check int "direct msg suppresses board events" 0
+         (List.length obs.pending_board_events);
+       check int "direct msg suppresses scope messages" 0
+         (List.length obs.pending_scope_messages);
+       check int "direct msg does not emit cursor updates" 0
+         (List.length obs.message_cursor_updates);
+       let affordances = UM.observed_affordances_of_observation ~meta obs in
+       check
+         bool
+         "direct msg exposes task_verify affordance"
+         true
+         (List.mem "task_verify" affordances);
+       check
+         bool
+         "direct msg task_verify can require an active tool"
+         true
+         (KAR.should_require_tools_for_initial_turn
+            ~max_turns:2
+            ~turn_affordances:affordances))
+;;
+
 let test_internal_keeper_loop_timeout_honors_meta_per_provider_timeout () =
   let meta =
     { (make_meta "internal-timeout-cap") with per_provider_timeout_s = Some 120.0 }
@@ -13605,6 +13682,10 @@ let () =
             "direct keeper msg timeout overrides stale per-provider timeout"
             `Quick
             test_direct_keeper_msg_timeout_overrides_meta_per_provider_timeout
+        ; test_case
+            "direct keeper msg observes durable verification signal"
+            `Quick
+            test_direct_keeper_msg_observation_keeps_durable_verification_signal
         ; test_case
             "internal keeper loop honors profile per-provider timeout"
             `Quick

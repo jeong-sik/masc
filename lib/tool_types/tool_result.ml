@@ -22,6 +22,7 @@ type tool_failure_class =
   | Policy_rejection (** Auth/permission/boundary — permanent *)
   | Runtime_failure (** Internal error/bug — non-retryable *)
   | Workflow_rejection (** Business rule violation — non-retryable *)
+[@@deriving yojson]
 
 let tool_failure_class_to_string = function
   | Transient_error -> "transient_error"

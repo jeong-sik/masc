@@ -926,10 +926,28 @@ type docker_shell_result =
   ; network_label : string
   }
 
-(* docker run --rm includes image layer pull + container creation cold start.
-   A 1s floor is insufficient even for trivial commands. This minimum applies
-   only to the run path, not to docker exec against a warm container. *)
-let docker_run_min_timeout_sec = 5.0
+(* docker run --rm wall-clock covers slot_wait + spawn + container
+   cold start + actual cmd + drain. A 5s floor was insufficient under
+   typical conditions — trivial commands such as [git -C ... status]
+   were timing out at 5s because the cold-start path alone (image pull
+   + container creation + shell init) can take 10-60s on a cold host.
+
+   #8688 raised the gh-cli floor to [gh_min_timeout_sec = 15s] for the
+   same class of failure (sub-network-latency timeouts cascading into
+   401 retries); the docker path was left at 5s — an N-of-M between
+   sibling timeout floors. This restores parity (15s gh + 5s headroom
+   for container creation) and exposes an env override so operators
+   can tune for slow-pull fleets without rebuilding.
+
+   This minimum applies only to the [docker run] path, not to
+   [docker exec] against a warm container. *)
+let docker_run_min_timeout_sec =
+  let default = 20.0 in
+  let raw =
+    try float_of_string (Sys.getenv "MASC_KEEPER_DOCKER_RUN_MIN_TIMEOUT_SEC")
+    with Not_found | Failure _ -> default
+  in
+  Float.max 1.0 raw
 
 let docker_cleanup_rm_timeout_sec () =
   Env_config_sandbox.Shell_timeout.timeout_sec

@@ -331,10 +331,10 @@ let test_keeper_bash_elapsed_duration_preserves_positive_sub_ms () =
 let test_keeper_bash_timeout_floor_is_not_sub_io_latency () =
   let args = `Assoc [ "timeout_sec", `Float 1.0 ] in
   Alcotest.(check (float 0.001))
-    "keeper_bash timeout floor"
-    Keeper_exec_shell.keeper_bash_min_timeout_sec
+    "keeper_bash native timeout floor"
+    Keeper_exec_shell.keeper_bash_native_min_timeout_sec
     (Masc_mcp.Keeper_shell_shared.clamp_shell_timeout
-       ~min_sec:Keeper_exec_shell.keeper_bash_min_timeout_sec
+       ~min_sec:Keeper_exec_shell.keeper_bash_native_min_timeout_sec
        ~default:Masc_mcp.Keeper_shell_shared.io_timeout_sec
        args)
 

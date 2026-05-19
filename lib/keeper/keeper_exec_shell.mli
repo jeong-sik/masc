@@ -28,9 +28,12 @@ val gh_min_timeout_sec : float
     tests can lock the floor against drift back to sub-network-latency
     values. See #8688. *)
 
-val keeper_bash_min_timeout_sec : float
-(** Minimum timeout_sec floor applied to keeper_bash. Exposed so regression
-    tests can lock the floor against drift back to sub-I/O-latency values. *)
+val keeper_bash_native_min_timeout_sec : float
+(** Minimum timeout_sec floor applied to keeper_bash on the *native*
+    (non-Docker) executor path. Exposed so regression tests can lock the
+    floor against drift back to sub-I/O-latency values.  The Docker
+    dispatch path re-clamps independently to
+    {!Keeper_shell_docker.docker_run_min_timeout_sec}. *)
 
 val rewrite_turn_runtime_paths_to_host :
   config:Coord.config ->

@@ -177,8 +177,11 @@ let register
   add
     metric_process_timeout
     "Total subprocess executions that exceeded their configured timeout. Labeled by \
-     program and timeout_bucket (Timeout_bucket.to_label: lt_1s | ge_1s_lt_15s | \
-     ge_15s_lt_60s | ge_60s_lt_300s | ge_300s)."
+     program, timeout_bucket (Timeout_bucket.to_label: lt_1s | ge_1s_lt_15s | \
+     ge_15s_lt_60s | ge_60s_lt_300s | ge_300s), and stage \
+     (Process_eio.timeout_stage: slot_wait | spawn | command — distinguishes \
+     timeouts spent waiting for an external slot, in process creation, or in the \
+     running child)."
     `Counter;
   add
     metric_bg_task_sidecar_failures

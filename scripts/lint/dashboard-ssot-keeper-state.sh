@@ -47,27 +47,49 @@ fi
 # under `set -e`.
 violations=()
 
-# §9-1 — Flat runtime_blocker_* read.
-# Allowed in: lib/keeper-operational-state.ts (typed SSOT),
-#             agent-roster.ts (already calls SSOT, reads summary
-#                              for display string after gate),
-#             keeper-detail-runtime.ts (same).
-# Match: `keeper.runtime_blocker_class` or `keeper.runtime_blocker_summary`
-# Skip exempt files.
+# §9-1 — Blocker class branched on a literal enum string outside SSOT.
+#
+# Narrower than `keeper.runtime_blocker_(class|summary)` — only catches
+# `keeper.runtime_blocker_class === '<literal>'` direct comparisons,
+# the actual SSOT bypass pattern (visibility decision keyed on a
+# hardcoded blocker class). Existence checks
+# (`Boolean(keeper.runtime_blocker_class)`, `?? null`, `?.trim()`) and
+# passthrough wire-export
+# (`runtime_blocker_class: keeper.runtime_blocker_class`) stay
+# legitimate.
+#
+# Exempt files (canonical readers — comparison is their job):
+#   - lib/keeper-operational-state.ts        : typed SSOT
+#   - lib/keeper-predicates.ts               : WAKEUP_RECOVERABLE_BLOCKERS set
+#   - lib/keeper-runtime-display.ts          : display-label / hint mapper
+#   - components/agent-roster.ts             : routes via SSOT
+#   - components/keeper-detail-runtime.ts    : same
+#   - components/keeper-detail-alert-strip.ts: same
+#   - components/keeper-action-panel.ts      : uses SSOT predicates
+#   - components/fleet-telemetry-utils.ts    : telemetry passthrough
+#                                              (wire→export, no decision)
+#
+# New components must route through the SSOT or join this exempt list
+# with a PR-body rationale.
 flat_blocker_matches=$(
   rg -n \
     --type ts \
     -g '!dashboard/src/lib/keeper-operational-state.ts' \
     -g '!dashboard/src/lib/keeper-operational-state.test.ts' \
+    -g '!dashboard/src/lib/keeper-predicates.ts' \
+    -g '!dashboard/src/lib/keeper-predicates.test.ts' \
+    -g '!dashboard/src/lib/keeper-runtime-display.ts' \
+    -g '!dashboard/src/lib/keeper-runtime-display.test.ts' \
+    -g '!dashboard/src/components/fleet-telemetry-utils.ts' \
+    -g '!dashboard/src/components/fleet-telemetry-utils.test.ts' \
     -g '!dashboard/src/components/agent-roster.ts' \
     -g '!dashboard/src/components/agent-roster.test.ts' \
     -g '!dashboard/src/components/keeper-detail-runtime.ts' \
     -g '!dashboard/src/components/keeper-detail-runtime.test.ts' \
     -g '!dashboard/src/components/keeper-detail-alert-strip.ts' \
     -g '!dashboard/src/components/keeper-detail-alert-strip.test.ts' \
-    -g '!dashboard/src/components/keeper-runtime-display*' \
     -g '!dashboard/src/components/keeper-action-panel.ts' \
-    'keeper\.runtime_blocker_(class|summary)' \
+    'keeper\.runtime_blocker_class\s*===\s*[\x27"][a-z_]+[\x27"]' \
     dashboard/src 2>/dev/null || true
 )
 if [[ -n "$flat_blocker_matches" ]]; then
@@ -159,7 +181,10 @@ done
 # Allowlist filter.
 allowlist_lines=$(grep -vE '^\s*(#|$)' "$ALLOWLIST_FILE" || true)
 unmatched_violations=()
-for v in "${violations[@]}"; do
+# `${violations[@]:-}` guards against `set -u` failing when no signal
+# matched (clean run) — bash treats an empty array as unbound otherwise.
+for v in "${violations[@]:-}"; do
+  [[ -z "$v" ]] && continue
   path_line=$(echo "$v" | sed -E 's/^§9-[0-9]+ [^:]+://' | cut -d: -f1,2)
   if grep -Fxq "$path_line" <<< "$allowlist_lines"; then
     continue
@@ -174,7 +199,8 @@ if [[ -n "$allowlist_lines" ]]; then
   while IFS= read -r entry; do
     [[ -z "$entry" ]] && continue
     found=0
-    for v in "${violations[@]}"; do
+    for v in "${violations[@]:-}"; do
+      [[ -z "$v" ]] && continue
       path_line=$(echo "$v" | sed -E 's/^§9-[0-9]+ [^:]+://' | cut -d: -f1,2)
       if [[ "$path_line" == "$entry" ]]; then
         found=1
@@ -206,5 +232,6 @@ if (( ${#stale_allowlist[@]} > 0 )); then
   exit 2
 fi
 
-echo "RFC-0135 §9 SSOT guard: clean (${#violations[@]} allowlisted violation(s))"
+violations_count=${#violations[@]}
+echo "RFC-0135 §9 SSOT guard: clean (${violations_count} allowlisted violation(s))"
 exit 0

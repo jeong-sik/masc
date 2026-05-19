@@ -370,6 +370,25 @@ let yojson_field name j =
   | _ -> None
 ;;
 
+let yojson_string_field name j =
+  match yojson_field name j with
+  | Some (`String s) -> Some s
+  | _ -> None
+;;
+
+let string_contains ~sub text =
+  let text_len = String.length text in
+  let sub_len = String.length sub in
+  let rec loop idx =
+    if idx + sub_len > text_len
+    then false
+    else if String.sub text idx sub_len = sub
+    then true
+    else loop (idx + 1)
+  in
+  sub_len = 0 || loop 0
+;;
+
 let test_public_names_stable_order () =
   (* public_names returns all LLM-native surface names in stable order. *)
   let names = Alias.public_names () in
@@ -419,6 +438,27 @@ let test_bash_schema_uses_command_field () =
     | _ -> []
   in
   Alcotest.(check (list string)) "Bash requires 'command'" [ "command" ] required
+;;
+
+let test_bash_schema_guides_public_frontdoor () =
+  let schema = Option.get (Alias.public_input_schema "Bash") in
+  let props = Option.get (yojson_field "properties" schema) in
+  let command = Option.get (yojson_field "command" props) in
+  let description = Option.get (yojson_string_field "description" command) in
+  List.iter
+    (fun (label, needle) ->
+       Alcotest.(check bool)
+         label
+         true
+         (string_contains ~sub:needle description))
+    [ "Bash command schema names public front door", "public Bash front door"
+    ; "Bash command schema blocks keeper tool names", "Do not call keeper_*"
+    ; "Bash command schema blocks masc tool names", "masc_* tool names"
+    ; "Bash command schema routes file observation", "use Read or Grep first"
+    ; "Bash command schema routes workflow tools", "visible task/board/PR tools"
+    ; "Bash command schema asks for cwd", "Always set cwd"
+    ; "Bash command schema blocks command substitution", "command substitution"
+    ]
 ;;
 
 let test_read_schema_uses_file_path () =
@@ -823,6 +863,10 @@ let () =
             "Bash schema uses 'command' field"
             `Quick
             test_bash_schema_uses_command_field
+        ; Alcotest.test_case
+            "Bash schema guides public front door"
+            `Quick
+            test_bash_schema_guides_public_frontdoor
         ; Alcotest.test_case
             "Read schema uses 'file_path' field"
             `Quick

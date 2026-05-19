@@ -30,6 +30,7 @@ type hook_accumulator =
   ; mutable requested_tool_names_seen : string list
   ; mutable receipt_tool_contract_result :
       Keeper_execution_receipt.tool_contract_result
+  ; mutable contract_violation_retries : int
   }
 
 (** Immutable snapshot of hook outputs after OAS execution completes. *)
@@ -46,6 +47,7 @@ type hook_outputs =
   ; out_requested_tool_names_seen : string list
   ; out_receipt_tool_contract_result :
       Keeper_execution_receipt.tool_contract_result
+  ; out_contract_violation_retries : int
   }
 
 let freeze (acc : hook_accumulator) : hook_outputs =
@@ -60,6 +62,7 @@ let freeze (acc : hook_accumulator) : hook_outputs =
   ; out_requested_tool_names = acc.requested_tool_names
   ; out_requested_tool_names_seen = acc.requested_tool_names_seen
   ; out_receipt_tool_contract_result = acc.receipt_tool_contract_result
+  ; out_contract_violation_retries = acc.contract_violation_retries
   }
 ;;
 
@@ -228,6 +231,7 @@ let prepare_agent_setup
     ; requested_tool_names_seen = []
     ; receipt_tool_contract_result =
         Keeper_execution_receipt.Contract_unknown
+    ; contract_violation_retries = 0
     }
   in
   let agent_ref : Agent_sdk.Agent.t option ref = ref None in
@@ -1459,6 +1463,36 @@ let prepare_agent_setup
                           retrying — that is the intended judgment-escalation path."
                          computed_surface.per_call_turn
                          computed_surface.per_call_max_turns)
+                  else ctx
+                in
+                (* Contract violation retry feedback: when a previous
+                   Agent.run attempt was rejected for not calling
+                   required tools, inject explicit guidance naming the
+                   satisfying tools so the model knows what to do. *)
+                let ctx =
+                  if acc.contract_violation_retries > 0
+                  then
+                    let satisfying_tools =
+                      Keeper_agent_tool_surface
+                      .generic_required_tool_candidate_names
+                        ~has_current_task:(keeper_has_owned_active_task ())
+                        ~turn_affordances
+                        ~allowed_tool_names:computed_surface.all_allowed
+                    in
+                    let preview =
+                      satisfying_tools
+                      |> List.filteri (fun i _ -> i < 8)
+                      |> String.concat ", "
+                    in
+                    append_ctx
+                      ctx
+                      (Printf.sprintf
+                         "[CONTRACT VIOLATION RETRY] Your previous Agent.run \
+                          attempt was rejected because you did not call a \
+                          required tool. You MUST call one of these tools NOW: \
+                          %s. Do NOT respond with text only, do NOT substitute \
+                          status or read-only tools."
+                         preview)
                   else ctx
                 in
                 if computed_surface.is_warning_zone

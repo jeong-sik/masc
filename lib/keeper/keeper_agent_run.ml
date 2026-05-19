@@ -617,97 +617,156 @@ let run_turn
              (match !initial_tool_surface_blocker_ref with
             | Some err -> Error err
             | None ->
+              let call_run_named ~initial_messages =
+                let bridge_timeout_s =
+                  Keeper_llm_bridge.with_hitl_approval_headroom timeout_s
+                in
+                Keeper_llm_bridge.run_with_timeout_and_fallback
+                  ~timeout_s:bridge_timeout_s
+                  (fun () ->
+                          Keeper_turn_driver.run_named
+                            ~cascade_name:cascade_name_string
+                            ~base_path:config.base_path
+                            ~keeper_name:meta.name
+                    ?provider_filter
+                    ~require_tool_choice_support
+                    ~require_tool_support
+                    ~goal:user_message
+                    ~priority
+                    ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+                    ~system_prompt:turn_system_prompt
+                    ~tools
+                    ~compact_ratio:meta.compaction.ratio_gate
+                    ~oas_auto_context_overflow_retry:true
+                    ~initial_messages
+                    ~hooks
+                    ~context_reducer:reducer
+                   ~summarizer:Keeper_summarizer.keeper_summarizer
+                   ~memory
+                   ~runtime_manifest_context
+                   ~runtime_manifest_append:
+                     (Keeper_runtime_manifest.append_best_effort
+                        ~site:"cascade_runtime"
+                        config)
+                   ~runtime_manifest_required_tool_names:
+                     acc.tool_surface.required_tool_names
+                      (* Keepers use turn-level retry for transient errors but benefit
+              from OAS per-call retry for validation errors (malformed tool
+              args). retry_on_validation_error=true lets OAS re-prompt the
+              LLM with structured feedback instead of wasting a full turn.
+              retry_on_recoverable_tool_error remains false — tool-level
+              errors are handled by MASC's consecutive failure guardrail. *)
+                    ~tool_retry_policy:
+                      { Agent_sdk.Tool_retry_policy.max_retries = 2
+                      ; retry_on_validation_error = true
+                      ; retry_on_recoverable_tool_error = false
+                      ; feedback_style =
+                          Agent_sdk.Tool_retry_policy.Structured_tool_result
+                      }
+                    ~required_tool_satisfaction:(fun call ->
+                      Keeper_tool_disclosure
+                      .required_tool_satisfaction_for_turn
+                        ~required_tool_names:acc.tool_surface.required_tool_names
+                        call)
+                    ~max_turns
+                    ~max_idle_turns
+                    ?stream_idle_timeout_s
+                    ~temperature
+                    ~max_tokens
+                    ?max_cost_usd
+                    ?wait_timeout_sec:admission_wait_timeout_sec
+                    ~accept:
+                      Keeper_tool_disclosure.response_has_text_or_tool_progress
+                    ?guardrails
+                    ?on_event
+                    ?on_yield
+                    ?on_resume
+                    ~agent_ref
+                    ~proof_ref
+                    ?contract
+                    ?cli_transport_overrides
+                    ~allowed_paths:oas_allowed_paths
+                    ~cache_system_prompt:true
+                    ~yield_on_tool
+                    ~checkpoint_dir:session_dir
+                    ~context_injector
+                    ~context:shared_context
+                    ?slot_id:(Keeper_config.keeper_slot_id meta.name)
+                    ~approval:
+                      (Governance_pipeline.to_oas_approval_callback
+                         ~config
+                         ~governance_level:(Env_config_core.governance_level ())
+                         ~keeper_name:meta.name
+                         ~meta
+                         ?clock:(Eio_context.get_clock_opt ())
+                         ())
+                    ~enable_thinking:(Keeper_config.keeper_enable_thinking ())
+                      (* exit_condition removed with mutation_boundary — OAS runs to
+             natural completion (max_turns or model end_turn). *)
+                    ?oas_checkpoint:resume_oas_checkpoint
+                    ?event_bus
+                    ?per_provider_timeout_s
+                    ())
+              in
               (match
-                 let bridge_timeout_s =
-                   Keeper_llm_bridge.with_hitl_approval_headroom timeout_s
+                 let first_attempt =
+                   match call_run_named ~initial_messages:history_messages with
+                   | Error
+                       (Agent_sdk.Error.Agent
+                          (Agent_sdk.Error.CompletionContractViolation
+                             { reason = violation_reason; _ }))
+                     when acc.contract_violation_retries < 1 ->
+                     (* Contract violation retry (max 1 per turn): the
+                        model did not call a required tool. Build a
+                        feedback message naming satisfying tools and
+                        re-invoke Agent.run so the model sees why it
+                        was rejected. The context builder in
+                        keeper_run_tools injects additional guidance
+                        because [contract_violation_retries > 0]. *)
+                     acc.contract_violation_retries <-
+                       acc.contract_violation_retries + 1;
+                     let satisfying_tools =
+                       Keeper_agent_tool_surface
+                       .generic_required_tool_candidate_names
+                         ~has_current_task:
+                           (Option.is_some
+                              (owned_active_task_id_for_meta
+                                 ~config ~meta:acc.meta))
+                         ~turn_affordances
+                         ~allowed_tool_names:
+                           acc.tool_surface.required_tool_candidate_names
+                     in
+                     let retry_feedback =
+                       Printf.sprintf
+                         "[CONTRACT VIOLATION] Your previous response was \
+                          rejected: %s. You MUST call one of these tools: \
+                          %s. Do NOT respond with text only."
+                         violation_reason
+                         (String.concat ", " satisfying_tools)
+                     in
+                     (* Append violation feedback as a User message so the
+                        model sees why its response was rejected. *)
+                     let retry_messages =
+                       history_messages
+                       @ [ { Agent_sdk.Types.role = User
+                           ; content =
+                               [ Agent_sdk.Types.Text retry_feedback ]
+                           ; name = None
+                           ; tool_call_id = None
+                           ; metadata = []
+                           }
+                         ]
+                     in
+                     Log.Keeper.info
+                       "keeper:%s contract violation retry #%d (reason: %s)"
+                       meta.name
+                       acc.contract_violation_retries
+                       violation_reason;
+                     call_run_named ~initial_messages:retry_messages
+                   | other -> other
                  in
-                 Keeper_llm_bridge.run_with_timeout_and_fallback
-                   ~timeout_s:bridge_timeout_s
-                   (fun () ->
-                           Keeper_turn_driver.run_named
-                             ~cascade_name:cascade_name_string
-                             ~base_path:config.base_path
-                             ~keeper_name:meta.name
-                     ?provider_filter
-                     ~require_tool_choice_support
-                     ~require_tool_support
-                     ~goal:user_message
-                     ~priority
-                     ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-                     ~system_prompt:turn_system_prompt
-                     ~tools
-                     ~compact_ratio:meta.compaction.ratio_gate
-                     ~oas_auto_context_overflow_retry:true
-                     ~initial_messages:history_messages
-                     ~hooks
-                     ~context_reducer:reducer
-                    ~summarizer:Keeper_summarizer.keeper_summarizer
-                    ~memory
-                    ~runtime_manifest_context
-                    ~runtime_manifest_append:
-                      (Keeper_runtime_manifest.append_best_effort
-                         ~site:"cascade_runtime"
-                         config)
-                    ~runtime_manifest_required_tool_names:
-                      acc.tool_surface.required_tool_names
-                       (* Keepers use turn-level retry for transient errors but benefit
-               from OAS per-call retry for validation errors (malformed tool
-               args). retry_on_validation_error=true lets OAS re-prompt the
-               LLM with structured feedback instead of wasting a full turn.
-               retry_on_recoverable_tool_error remains false — tool-level
-               errors are handled by MASC's consecutive failure guardrail. *)
-                     ~tool_retry_policy:
-                       { Agent_sdk.Tool_retry_policy.max_retries = 2
-                       ; retry_on_validation_error = true
-                       ; retry_on_recoverable_tool_error = false
-                       ; feedback_style =
-                           Agent_sdk.Tool_retry_policy.Structured_tool_result
-                       }
-                     ~required_tool_satisfaction:(fun call ->
-                       Keeper_tool_disclosure
-                       .required_tool_satisfaction_for_turn
-                         ~required_tool_names:acc.tool_surface.required_tool_names
-                         call)
-                     ~max_turns
-                     ~max_idle_turns
-                     ?stream_idle_timeout_s
-                     ~temperature
-                     ~max_tokens
-                     ?max_cost_usd
-                     ?wait_timeout_sec:admission_wait_timeout_sec
-                     ~accept:
-                       Keeper_tool_disclosure.response_has_text_or_tool_progress
-                     ?guardrails
-                     ?on_event
-                     ?on_yield
-                     ?on_resume
-                     ~agent_ref
-                     ~proof_ref
-                     ?contract
-                     ?cli_transport_overrides
-                     ~allowed_paths:oas_allowed_paths
-                     ~cache_system_prompt:true
-                     ~yield_on_tool
-                     ~checkpoint_dir:session_dir
-                     ~context_injector
-                     ~context:shared_context
-                     ?slot_id:(Keeper_config.keeper_slot_id meta.name)
-                     ~approval:
-                       (Governance_pipeline.to_oas_approval_callback
-                          ~config
-                          ~governance_level:(Env_config_core.governance_level ())
-                          ~keeper_name:meta.name
-                          ~meta
-                          ?clock:(Eio_context.get_clock_opt ())
-                          ())
-                     ~enable_thinking:(Keeper_config.keeper_enable_thinking ())
-                       (* exit_condition removed with mutation_boundary — OAS runs to
-              natural completion (max_turns or model end_turn). *)
-                     ?oas_checkpoint:resume_oas_checkpoint
-                     ?event_bus
-                     ?per_provider_timeout_s
-                     ())
-             with
+                 first_attempt
+               with
                | Error e -> Error e
                | Ok result ->
                  let post_turn_t0 = Time_compat.now () in

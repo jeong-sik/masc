@@ -28,6 +28,7 @@ type hook_accumulator =
   ; mutable requested_tool_names_seen : string list
   ; mutable receipt_tool_contract_result :
       Keeper_execution_receipt.tool_contract_result
+  ; mutable contract_violation_retries : int
   }
 
 (** Immutable snapshot of hook outputs after OAS execution completes. *)
@@ -44,6 +45,7 @@ type hook_outputs =
   ; out_requested_tool_names_seen : string list
   ; out_receipt_tool_contract_result :
       Keeper_execution_receipt.tool_contract_result
+  ; out_contract_violation_retries : int
   }
 
 val freeze : hook_accumulator -> hook_outputs

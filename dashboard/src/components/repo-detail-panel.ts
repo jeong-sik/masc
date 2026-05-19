@@ -9,6 +9,7 @@ import { LoadingState, ErrorState, EmptyState } from './common/feedback-state'
 import { selectedRepoId, syncRepository, deleteRepository, type Repository, type RepoStatus } from './repo-sidebar'
 import { requestConfirm } from './common/confirm-dialog'
 import { StatusBadge as CommonStatusBadge } from './common/status-badge'
+import { unixSecondsToDate } from '../lib/format-time'
 import { Trash2, GitBranch, Clock, Calendar, Folder, Link, Shield, RefreshCw } from 'lucide-preact'
 
 // ── Branch type ──────────────────────────────────────────
@@ -117,7 +118,7 @@ const REPO_STATUS_LABEL: Record<RepoStatus, string> = {
 export function formatDate(value: string | number | null): string {
   if (value === null || value === '') return '--'
   try {
-    const d = typeof value === 'number' ? new Date(value * 1000) : new Date(value)
+    const d = typeof value === 'number' ? unixSecondsToDate(value) : new Date(value)
     if (Number.isNaN(d.getTime())) return String(value)
     return d.toLocaleString('ko-KR', {
       year: 'numeric',

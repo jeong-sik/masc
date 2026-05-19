@@ -20,7 +20,7 @@ import {
 import { replaceRoute, route } from '../router'
 import { TELEMETRY_AUTO_REFRESH_MS } from '../config/constants'
 import { TELEMETRY_SOURCE_META, telemetrySourceMeta } from '../config/telemetry-sources'
-import { formatElapsedCompact } from '../lib/format-time'
+import { formatElapsedCompact, unixSecondsToDate } from '../lib/format-time'
 import { formatAutoRefreshLabel, setupVisibleAutoRefresh } from '../lib/auto-refresh'
 import { isAbortError } from '../lib/async-state'
 import { Btn } from './btn'
@@ -136,7 +136,7 @@ function entryTimestamp(e: TelemetryEntry): number {
 
 function formatTs(ts: number): string {
   if (ts === 0) return '-'
-  const d = new Date(ts * 1000)
+  const d = unixSecondsToDate(ts)
   return d.toLocaleString('ko-KR', {
     month: '2-digit', day: '2-digit',
     hour: '2-digit', minute: '2-digit', second: '2-digit',

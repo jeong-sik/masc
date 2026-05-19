@@ -18,6 +18,7 @@ import { SurfaceCard } from '../common/card'
 import { TimeAgo } from '../common/time-ago'
 import { showToast } from '../common/toast'
 import { currentCanonicalDashboardActor } from '../../lib/dashboard-session-actor'
+import { unixSecondsToDate } from '../../lib/format-time'
 
 type QueueFilter = 'open' | 'resolved' | 'all'
 
@@ -57,7 +58,7 @@ function resolvedQuery(filter: QueueFilter): boolean | undefined {
 }
 
 function queueTimestamp(entry: BoardModerationQueueEntry): string {
-  return entry.flagged_at_iso ?? new Date(entry.flagged_at * 1000).toISOString()
+  return entry.flagged_at_iso ?? unixSecondsToDate(entry.flagged_at).toISOString()
 }
 
 function QueueRow({

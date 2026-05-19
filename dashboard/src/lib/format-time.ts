@@ -18,6 +18,11 @@ export function normalizeTimestampMs(ts: number): number {
   return ts < UNIX_MS_THRESHOLD ? ts * 1000 : ts
 }
 
+/** Convert unix-seconds timestamp to Date. SSOT for the `new Date(ts * 1000)` pattern. */
+export function unixSecondsToDate(ts: number): Date {
+  return new Date(ts * 1000)
+}
+
 export function formatRelativeAgeMs(ageMs: number): string {
   return formatRelativeSec(Math.max(0, Math.round(ageMs / 1000)))
 }
@@ -85,7 +90,7 @@ export function formatTimeAgo(ts: string | number): string {
 
 /** Format unix timestamp (seconds) as "MM. DD. HH:MM" in ko-KR locale. */
 export function formatTimestampKo(ts: number): string {
-  return new Date(ts * 1000).toLocaleString('ko-KR', {
+  return unixSecondsToDate(ts).toLocaleString('ko-KR', {
     month: '2-digit',
     day: '2-digit',
     hour: '2-digit',
@@ -97,7 +102,7 @@ export function formatTimestampKo(ts: number): string {
 
 /** Format unix-seconds timestamp as "HH:MM:SS" (24h, ko-KR). */
 export function formatTimeHms(tsUnixSec: number): string {
-  return new Date(tsUnixSec * 1000).toLocaleTimeString('ko-KR', {
+  return unixSecondsToDate(tsUnixSec).toLocaleTimeString('ko-KR', {
     hour: '2-digit', minute: '2-digit', second: '2-digit',
   })
 }

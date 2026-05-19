@@ -29,6 +29,7 @@ import type {
 import { fleetCompositeSnapshot } from '../composite-signals'
 import { dispatchOperatorAction } from '../operator-store'
 import { showToast } from './common/toast'
+import { unixSecondsToDate } from '../lib/format-time'
 import { TextInput } from './common/input'
 import {
   displayState,
@@ -1035,7 +1036,7 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
       <header class="flex flex-wrap items-baseline gap-3 border-b border-[var(--color-border-default)] p-3">
         <h2 class="text-sm font-semibold text-[var(--color-fg-muted)]">Fleet 통합 (KSM × KTC × KDP × KCL × KMC × KCB)</h2>
         <span class="text-xs text-[var(--color-fg-muted)]0">
-          키퍼 ${data.count}명 · ${new Date(data.generated_at * 1000).toLocaleTimeString()} 업데이트
+          키퍼 ${data.count}명 · ${unixSecondsToDate(data.generated_at).toLocaleTimeString()} 업데이트
         </span>
         <${TextInput}
           type="search"

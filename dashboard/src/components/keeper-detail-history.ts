@@ -1,6 +1,7 @@
 import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
 import { formatPct1 } from '../lib/format-number'
+import { unixSecondsToDate } from '../lib/format-time'
 import { ActionButton } from './common/button'
 import { requestConfirm } from './common/confirm-dialog'
 import {
@@ -30,7 +31,7 @@ export function MonoBadge({ children }: { children: unknown }) {
 
 function formatCheckpointTime(timestamp: number): string {
   if (!Number.isFinite(timestamp) || timestamp <= 0) return '-'
-  return new Date(timestamp * 1000).toLocaleString('ko-KR', {
+  return unixSecondsToDate(timestamp).toLocaleString('ko-KR', {
     hour12: false,
   })
 }

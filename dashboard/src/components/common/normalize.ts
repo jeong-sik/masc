@@ -2,6 +2,7 @@
 // Single source of truth — all dashboard modules import from here.
 
 import { isRecord } from '../../lib/type-guards'
+import { unixSecondsToDate } from '../../lib/format-time'
 export { isRecord }
 
 export function asString(value: unknown): string | undefined
@@ -178,5 +179,5 @@ export function hasRouteContext(context: MutableRouteContext): boolean {
 export function toIsoTimestamp(value: unknown): string | undefined {
   if (typeof value === 'string' && value.trim() !== '') return value
   if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return undefined
-  return new Date(value * 1000).toISOString()
+  return unixSecondsToDate(value).toISOString()
 }

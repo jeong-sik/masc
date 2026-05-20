@@ -29,6 +29,12 @@ type semaphore_wait_timeout = {
 (** Global turn slot cap. Safety ceiling for ALL keeper turns. *)
 val keeper_turn_throttle_limit : int
 
+(** Raw configured value used for {!keeper_turn_throttle_limit}, when supplied. *)
+val keeper_turn_throttle_raw_value : string option
+
+(** Source for {!keeper_turn_throttle_limit}: [env], [boot_override], or [default]. *)
+val keeper_turn_throttle_source : string
+
 val turn_semaphore : Eio.Semaphore.t
 val autonomous_turn_semaphore : Eio.Semaphore.t
 val reactive_turn_semaphore : Eio.Semaphore.t

@@ -27,7 +27,7 @@ import type {
 
 // --- Data fetchers ---
 
-export function normalizeAgentStatus(value: unknown): Agent['status'] {
+function normalizeAgentStatus(value: unknown): Agent['status'] {
   const raw = typeof value === 'string' ? value.trim().toLowerCase() : ''
   if (
     raw === 'active'
@@ -44,7 +44,7 @@ export function normalizeAgentStatus(value: unknown): Agent['status'] {
   return undefined
 }
 
-export function normalizeTaskStatus(value: unknown): Task['status'] {
+function normalizeTaskStatus(value: unknown): Task['status'] {
   const raw = typeof value === 'string' ? value.trim().toLowerCase() : ''
   if (
     raw === 'todo'
@@ -167,7 +167,7 @@ export function normalizeMessage(raw: unknown): Message | null {
   }
 }
 
-export function normalizeExecutionTone(value: unknown): DashboardExecutionQueueItem['severity'] {
+function normalizeExecutionTone(value: unknown): DashboardExecutionQueueItem['severity'] {
   const raw = typeof value === 'string' ? value.toLowerCase() : ''
   if (raw === 'ok' || raw === 'warn' || raw === 'bad') return raw
   return undefined
@@ -193,7 +193,7 @@ export function normalizeExecutionSummary(raw: unknown): DashboardExecutionSumma
   }
 }
 
-export function normalizeExecutionHandoff(raw: unknown): DashboardExecutionHandoff | null {
+function normalizeExecutionHandoff(raw: unknown): DashboardExecutionHandoff | null {
   if (!isRecord(raw)) return null
   const surface = asString(raw.surface)
   const label = asString(raw.label)
@@ -841,7 +841,7 @@ export function normalizeRecommendedAction(raw: unknown): OperatorRecommendedAct
   }
 }
 
-export function messageSortKey(message: Message): number {
+function messageSortKey(message: Message): number {
   if (typeof message.seq === 'number' && Number.isFinite(message.seq)) return message.seq
   const parsed = Date.parse(message.timestamp ?? '')
   return Number.isNaN(parsed) ? 0 : parsed
@@ -867,7 +867,7 @@ export function mergeMessages(current: Message[], incoming: Message[]): Message[
     .slice(-500)
 }
 
-export function normalizeBuildIdentity(raw: unknown): ServerStatus['build'] | undefined {
+function normalizeBuildIdentity(raw: unknown): ServerStatus['build'] | undefined {
   if (!isRecord(raw)) return undefined
   const releaseVersion = asString(raw.release_version)
   const startedAt = toIsoTimestamp(raw.started_at)

@@ -13,6 +13,26 @@ export type StatusSection =
   | 'feature-health'
   | 'cognition'
 
+// Monitor sidebar exposes 4 keeper-facing lanes; the remaining sections are
+// reachable only via deep links or hidden diagnostic routes. The same flag
+// lives on each entry's `hidden: true` in navigation.ts — this Set mirrors
+// that classification so the dispatcher and future grouped layouts can ask
+// without re-reading the nav config. Source of truth stays in navigation.ts.
+const MONITOR_LANE_SECTIONS: ReadonlySet<StatusSection> = new Set<StatusSection>([
+  'agents',
+  'fleet-health',
+  'runtime',
+  'observatory',
+])
+
+export function isMonitorLane(section: StatusSection): boolean {
+  return MONITOR_LANE_SECTIONS.has(section)
+}
+
+export function isHiddenDiagnostic(section: StatusSection): boolean {
+  return !MONITOR_LANE_SECTIONS.has(section)
+}
+
 const LazyAgentsUnified = lazy(async () => ({
   default: (await import('./agents-unified')).AgentsUnified,
 }))

@@ -348,7 +348,13 @@ let compact_if_needed_typed
        frequency. Kind label is a closed 2-value vocabulary (no Printexc-
        style unbounded label) — see iter 21 / PR #15788 for the same
        pattern. The repaired messages also carry [was_fabricated=true] plus
-       bounded provenance under [Keeper_context_core.pair_repair_metadata_key]. *)
+       bounded provenance under [Keeper_context_core.pair_repair_metadata_key].
+
+       WORKAROUND-CARRYOVER: tracked by docs/rfc/RFC-0144-workaround-sunset-keeper-dedup-carryover.md
+       §3 Cluster B (tool_call_pair_fabrication, PR #15792). Counter measures
+       a Repair / Sanitize anti-pattern (read-side fabrication) and does not
+       fix it. Root fix: write-time tool_call/tool_result pair validation at
+       the LLM response boundary. *)
     let bump_pair_repair kind count =
       if count > 0
       then

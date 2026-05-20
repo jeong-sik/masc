@@ -544,6 +544,10 @@ let metric_keeper_compactions = "masc_keeper_compactions_total"
 let metric_keeper_compaction_ratio_change = "masc_keeper_compaction_ratio_change"
 let metric_keeper_compaction_saved_tokens = "masc_keeper_compaction_saved_tokens_total"
 
+(* WORKAROUND-CARRYOVER: tracked by docs/rfc/RFC-0144-workaround-sunset-keeper-dedup-carryover.md
+   §3 Cluster B (tool_call_pair_fabrication, PR #15792). Counter is alarm-only;
+   underlying repair function is in keeper_context_core.ml. Root fix: write-time
+   tool_call/tool_result pair validation at the LLM response boundary. *)
 let metric_keeper_compaction_pair_repair_fabrications =
   "masc_keeper_compaction_pair_repair_fabrications_total"
 ;;
@@ -604,7 +608,13 @@ let metric_keeper_compact_audit_retention_parse =
 (* V17 burst visibility: per-drain-call counter and bucketed batch-size
    counter for [keeper_compact_audit] subscriber. Labels for bucket are
    closed-vocab {"0"|"1_9"|"10_49"|"50_99"|"100_499"|"500_plus"} to
-   avoid cardinality explosion. *)
+   avoid cardinality explosion.
+
+   WORKAROUND-CARRYOVER: tracked by docs/rfc/RFC-0144-workaround-sunset-keeper-dedup-carryover.md
+   §3 Cluster B (compact_audit_drain_burst, PR #15808). Counter is alarm-only;
+   underlying drain loop is in keeper_compact_audit.ml. Root fix: backpressure
+   signal propagation from subscriber to producer (drain interval dynamic
+   adjustment or producer-side throttle bounding inflight events). *)
 let metric_keeper_compact_audit_drain_batches =
   "masc_keeper_compact_audit_drain_batches_total"
 ;;

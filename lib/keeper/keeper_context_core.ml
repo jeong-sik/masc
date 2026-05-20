@@ -485,6 +485,13 @@ let repair_orphan_tool_result_messages_with_stats
 let repair_orphan_tool_result_messages messages =
   fst (repair_orphan_tool_result_messages_with_stats messages)
 
+(* WORKAROUND-CARRYOVER: tracked by docs/rfc/RFC-0144-workaround-sunset-keeper-dedup-carryover.md
+   §3 Cluster B (tool_call_pair_fabrication, PR #15792). This read-side repair
+   downgrades broken tool_call/tool_result pairs to plain text after the fact
+   (Repair / Sanitize anti-pattern). Root fix: write-time pair validation at the
+   LLM response boundary — reject malformed pairs at write time instead of
+   fabricating downgrades on read. Sunset criteria in RFC-0144 §4 (30-day
+   rolling fabrication delta = 0 + replacement RFC merged). *)
 let repair_broken_tool_call_pairs_with_stats
     (messages : Agent_sdk.Types.message list)
     : Agent_sdk.Types.message list * tool_pair_repair_stats =

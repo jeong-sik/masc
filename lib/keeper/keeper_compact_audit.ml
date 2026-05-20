@@ -525,7 +525,15 @@ let spawn_subscriber
        counter so operators can see lag building during 9-keeper
        compaction storms before JSONL writes fall behind. The streak ref
        is scoped to this fiber closure (per-subscription isolation) so
-       different subscribers don't share spike-dedup state. *)
+       different subscribers don't share spike-dedup state.
+
+       WORKAROUND-CARRYOVER: tracked by docs/rfc/RFC-0144-workaround-sunset-keeper-dedup-carryover.md
+       §3 Cluster B (compact_audit_drain_burst, PR #15808). Counter +
+       streak WARN are alarm-only; the underlying burst comes from an
+       unbounded producer. Root fix: backpressure signal propagation from
+       this subscriber to [Agent_sdk_metrics_bridge] (drain interval
+       dynamic adjustment or producer-side throttle bounding inflight
+       events to a configured ceiling). *)
     let over_threshold_streak = ref 0 in
     let batch_size_bucket_label size =
       (* Closed-vocabulary bucket vocabulary. Boundaries reflect the

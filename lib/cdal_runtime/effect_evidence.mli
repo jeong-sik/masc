@@ -81,3 +81,11 @@ val make
 
 val to_json : t -> Yojson.Safe.t
 val of_json : Yojson.Safe.t -> (t, string) result
+
+(** [json_kind_name j] returns a short label for the JSON kind ([null],
+    [bool], [int], [intlit], [float], [string], [object], [array],
+    [tuple], [variant]).  Pure, side-effect-free; used by sibling
+    [Mode_enforcer] for kind-discriminating parse-error messages so the
+    sub-library keeps a single inline copy (RFC-0056 leaf isolation
+    forbids reaching for [Json_util.kind_name] in [masc_core]). *)
+val json_kind_name : Yojson.Safe.t -> string

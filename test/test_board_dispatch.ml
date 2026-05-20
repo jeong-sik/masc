@@ -384,6 +384,44 @@ let test_add_and_get_comments () =
       | Ok comments ->
           Alcotest.(check bool) "has comment" true (List.length comments >= 1)
 
+let test_comment_persists_post_reply_count () =
+  let post =
+    match
+      Board_dispatch.create_post ~author:"automation-author"
+        ~content:"automation post for reply_count persistence"
+        ~post_kind:Board.Automation_post ()
+    with
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+    | Ok post -> post
+  in
+  let post_id = Board.Post_id.to_string post.id in
+  (match
+     Board_dispatch.add_comment ~post_id ~author:"automation-commenter"
+       ~content:"automation/direct comment reply" ()
+   with
+   | Error e -> Alcotest.fail (Board.show_board_error e)
+   | Ok _ -> ());
+  let persisted_reply_count =
+    Board.persist_path ()
+    |> Fs_compat.load_jsonl
+    |> List.find_map (fun json ->
+      match Safe_ops.json_string_opt "id" json with
+      | Some id when String.equal id post_id ->
+        Some (Safe_ops.json_int ~default:(-1) "reply_count" json)
+      | _ -> None)
+  in
+  Alcotest.(check (option int))
+    "post snapshot reply_count updated with comment append"
+    (Some 1)
+    persisted_reply_count;
+  Board.reset_global_for_test ();
+  Board_dispatch.reset_for_test ();
+  Board_dispatch.init_jsonl ();
+  match Board_dispatch.get_post ~post_id with
+  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Ok fetched ->
+    Alcotest.(check int) "reply_count survives restart" 1 fetched.reply_count
+
 let test_get_post_and_comments_atomic () =
   match
     Board_dispatch.create_post ~author:"atomic-author"
@@ -1245,6 +1283,8 @@ let () =
     ];
     "comments", [
       Alcotest.test_case "add and get" `Quick (with_eio test_add_and_get_comments);
+      Alcotest.test_case "comment persists post reply_count" `Quick
+        (with_eio test_comment_persists_post_reply_count);
       Alcotest.test_case "get_post_and_comments atomic" `Quick
         (with_eio test_get_post_and_comments_atomic);
       Alcotest.test_case "get_post_and_comments missing post" `Quick

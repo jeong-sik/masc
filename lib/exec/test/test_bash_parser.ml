@@ -263,6 +263,39 @@ let test_double_quote_rg_pattern () =
      | _ -> assert false)
   | _ -> assert false
 
+let test_double_quote_with_escaped_regex_pipe () =
+  (* [\|] inside double quotes is literal regex payload for rg/grep,
+     not a shell pipeline.  Keeping it in the typed parser lets the
+     keeper safe-read fallback use normal argv validation. *)
+  match Bash.parse_string {|rg -n "ghost\|task" lib/|} with
+  | Parsed.Parsed (Shell_ir.Simple s) ->
+    assert (Bin.to_string s.bin = "rg");
+    (match s.args with
+     | [
+         Shell_ir.Lit "-n";
+         Shell_ir.Lit {|ghost\|task|};
+         Shell_ir.Lit "lib/";
+       ] -> ()
+     | _ -> assert false)
+  | _ -> assert false
+
+let test_word_with_double_quoted_suffix () =
+  (* Bash treats [--include="*.ml"] as one argv item.  The unquoted
+     prefix is inert option text; the quoted suffix carries the glob
+     literal without opening the unquoted glob surface. *)
+  match Bash.parse_string {|grep -rn "exec_semantic" lib/ --include="*.ml"|} with
+  | Parsed.Parsed (Shell_ir.Simple s) ->
+    assert (Bin.to_string s.bin = "grep");
+    (match s.args with
+     | [
+         Shell_ir.Lit "-rn";
+         Shell_ir.Lit "exec_semantic";
+         Shell_ir.Lit "lib/";
+         Shell_ir.Lit "--include=*.ml";
+       ] -> ()
+     | _ -> assert false)
+  | _ -> assert false
+
 let test_double_quote_with_dollar_rejected () =
   (* Variable expansion is subset-excluded at the A1 layer — any '$'
      inside "..." breaks the lex so Parse_error surfaces rather than
@@ -326,6 +359,8 @@ let () =
   test_double_quoted_empty ();
   test_double_quote_with_pipe_metachar ();
   test_double_quote_rg_pattern ();
+  test_double_quote_with_escaped_regex_pipe ();
+  test_word_with_double_quoted_suffix ();
   test_double_quote_with_dollar_rejected ();
   test_double_quote_with_backslash_rejected ();
   test_double_quote_with_backtick_rejected ();

@@ -182,9 +182,36 @@ let run_result_of_yojson (json : Yojson.Safe.t) :
     } in
     Ok run_result
   with
-  | Yojson.Json_error msg -> Error ("invalid worker helper run_result JSON: " ^ msg)
-  | Type_error (msg, _) -> Error ("invalid worker helper run_result JSON: " ^ msg)
-  | Failure msg -> Error msg
+  (* Three distinct failure modes — the previous form returned the same
+     "invalid worker helper run_result JSON" string for both syntactic
+     and type-mismatch errors, and a bare [msg] (no context label) for
+     [Failure].  Operators reading the masc-mcp log now see which class
+     of failure occurred:
+
+       - [Yojson.Json_error]  → input not parseable as JSON at all
+       - [Type_error]         → JSON parsed but a [member]/[to_string]/
+                                [to_int] kind-check failed
+       - [Failure]            → numeric parse or other [failwith] from
+                                downstream helpers (now context-labelled)
+
+     [Eio.Cancel.Cancelled] is intentionally not in this list and so
+     propagates without being caught (RFC-0106).  The closed
+     exception list is safer than [with _ ->] for the same reason. *)
+  | Yojson.Json_error msg ->
+      Error
+        (Printf.sprintf
+           "worker helper run_result: JSON syntax error (%s)"
+           msg)
+  | Type_error (msg, _) ->
+      Error
+        (Printf.sprintf
+           "worker helper run_result: JSON shape mismatch (%s)"
+           msg)
+  | Failure msg ->
+      Error
+        (Printf.sprintf
+           "worker helper run_result: parse step raised Failure (%s)"
+           msg)
 
 let success_json (run_result : Worker_container_types.run_result) =
   `Assoc [ ("ok", run_result_to_yojson run_result) ]

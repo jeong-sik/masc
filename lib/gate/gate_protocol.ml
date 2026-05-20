@@ -122,6 +122,9 @@ let inbound_of_json json =
     }
   with
   | Yojson.Json_error e -> Error ("invalid json: " ^ e)
+  (* RFC-0106 — cancellation MUST propagate; the catch-all here
+     would otherwise classify a fiber cancel as a "parse error". *)
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn -> Error ("parse error: " ^ Printexc.to_string exn)
 
 let outbound_to_json out =

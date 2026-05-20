@@ -1365,7 +1365,7 @@ let test_full_health_refresh_timeout_is_independent_from_shell_budget () =
   let interval_sec, timeout_sec =
     Server_routes_http_runtime.For_testing.full_health_refresh_timing ()
   in
-  Alcotest.(check float 0.001) "full health timeout uses dedicated budget"
+  Alcotest.(check (float 0.001)) "full health timeout uses dedicated budget"
     Env_config_runtime.Dashboard.full_health_refresh_timeout_sec
     timeout_sec;
   Alcotest.(check bool) "full health timeout is below shell full budget" true

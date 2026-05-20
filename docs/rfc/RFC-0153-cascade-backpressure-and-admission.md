@@ -65,7 +65,7 @@ let rec try_cascade candidates ... =
 | 그 중 사유 = `candidates_filtered_after_cycles` | 123/123 (100%) — **downstream symptom** |
 | 그 중 메시지 = `max_execution_time_s 300s` | 138 중 57이 정확히 300.0s 동률 — **real root** |
 | cascade_exhausted at minute peak (glm-three 05-16) | 02:34 = 19/min, 02:27 = 18/min |
-| `client_capacity_full` 폭증 (2026-05-19~20) | 486건/2일 (이전 0) — **신규 회귀, 별도 트리아지** |
+| `client_capacity_full` 폭증 (2026-05-19~20) | 486건/2일 (이전 0) — 기존 `Cascade_client_capacity` (per-URL, ollama 등) 백프레셔 *작동 중* signal. regression 아닐 가능성 큼 — §4.2 layer matrix 참조 |
 | 회복 방식 | 100% 사용자 수동 `update_keeper resumed` (최근 paused_since = 18137s) |
 | auto-resume 작동 | 사실상 비활성 (`failure_ratio` 게이트 즉시 차단) |
 
@@ -216,6 +216,33 @@ val with_admission :
 | `cascade_runtime.ml:638,660,709` | 검토 후 결정 | runtime 측 entry point — caller에 따라 결정 |
 
 > 기존 `Admission_queue` (turn-level, lib/cascade/cascade_error_classify.ml `Admission_queue_*` variant) 와 명확히 구분하기 위해 module 이름을 `cascade_tier_admission` 로 명명.
+
+#### 4.2.1 기존 admission/capacity layer 와의 관계 (post-B.1 정리)
+
+`Cascade_tier_admission` 은 *신규 layer*. 기존 코드베이스에 *유사 의도*의 module이 4개 존재 — 같은 추상으로 잘못 흡수하지 말 것.
+
+| Module | 단위 | 동기 | 호출 site | 작동 방식 |
+|---|---|---|---|---|
+| `Cascade_throttle` (기존) | per-URL | llama-server `/slots` Discovery — server-reported capacity | 자동 (Discovery loop) | server-side slot 수치 미러링 |
+| `Cascade_client_capacity` (기존, @since 0.9.6) | **per-URL endpoint** | ollama 등 slot 개념 없는 server 보호 — 같은 GPU 동시 hammer 방지 | `keeper_turn_driver.acquire_client_capacity_slot` (try_cascade 안) | `MASC_CLIENT_CAPACITY` env 로 register, `try_acquire` → `None` 시 cascade 가 next candidate (no queueing) |
+| `Admission_queue_*` variants (기존) | turn-level | error classification — provider 가 admission queue 거부 신호 보낼 때 | `cascade_error_classify.ml` 안 | error→retry 정책 분기 |
+| **`Cascade_tier_admission`** (NEW, B.1) | **per-tier-group** | tier 전체 동시성 cap — 같은 tier 안 여러 endpoint 합산 admission | (B.2 wire-in 예정) `try_cascade` *outer wrap* | `with_admission` → `Capacity_full` signal emit, cascade 가 next tier |
+
+핵심 차이:
+- `Cascade_client_capacity` = **endpoint(URL) 1개당 동시 N개**. 한 endpoint 가 saturated 면 *같은 tier 안 다른 endpoint* 시도 가능.
+- `Cascade_tier_admission` = **tier-group 전체 동시 N개**. tier 가 saturated 면 *그 tier 전체 skip*, next tier 로.
+
+호출 site 순서 (B.2 wire-in 시):
+```
+try_cascade
+  └── [outer] Cascade_tier_admission.with_admission ~tier_id ~admission_policy
+        └── per-candidate loop
+              └── [inner] acquire_client_capacity_slot candidate  (기존)
+                    └── HTTP call
+```
+Outer 가 tier 단위 reject → cascade 가 next tier. Inner 가 endpoint 단위 reject → 같은 tier 안 next endpoint. *직교*.
+
+§1.2 의 `client_capacity_full` 폭증 (486건/2일) 은 **inner layer (기존) 가 백프레셔 작동 중인 신호** — 본 RFC novel layer 와 무관. *RFC-0088 §1 "telemetry-as-fix" 의 inverse*: counter 가 emit 되는 것이 fix 작동의 증거. regression 으로 트리아지 *하지 말 것*.
 
 **cascade.toml 스키마 확장**:
 
@@ -467,7 +494,7 @@ Phase B/C/E는 세 framework 모두 안 함. **완화**: tower::limit::Concurren
 2. Phase A "남은 turn deadline" 어디서 가져오나? `keeper_turn_cascade_budget` 확인 필요.
 3. Phase B semaphore fiber 단위 vs process 단위? Eio.Semaphore는 fiber-local.
 4. Phase C K=2 (SRE 권장) 적합? — 첫 deploy K=4 보수적, 1주 후 K=2.
-5. 신규 회귀 `client_capacity_full` 486건/2일이 본 RFC와 관련 있나? — 별도 트리아지.
+5. ~~신규 회귀 `client_capacity_full` 486건/2일이 본 RFC와 관련 있나?~~ — **RESOLVED (§4.2.1 layer matrix)**: regression 아님. 기존 `Cascade_client_capacity` (per-URL) 백프레셔 작동 신호. 별도 트리아지 불필요.
 6. Phase E 데이터 기반 의사결정에 필요한 metric — Phase A signal 분포 + Phase B 거부율 + Phase C reject ratio. 6개월 데이터.
 7. Phase B nested cascade audit — 실제 코드에 nested cascade가 있나? Phase B prerequisite.
 8. D.1 fixed ladder의 단계(1m→5m→25m→1h)가 masc-mcp keeper turn 주기 (5-15분 compaction)에 맞는가? — 미세 조정.

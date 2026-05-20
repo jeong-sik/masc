@@ -168,10 +168,6 @@ module Local_runtime = struct
     | None -> Env_config_core.masc_http_base_url () ^ "/mcp"
 end
 
-(** Backward-compatible alias so existing [Env_config.Llama] references
-    continue to compile without changes. *)
-module Llama = Local_runtime
-
 module Ollama = struct
   let server_url =
     get_string ~default:Masc_network_defaults.ollama_default_url "OLLAMA_SERVER_URL"

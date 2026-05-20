@@ -154,4 +154,4 @@ val fetch_models_at :
 
 val fetch_models : unit -> (string * string list, string) Result.t
 (** Convenience wrapper over {!fetch_models_at} using
-    {!Env_config.Llama.server_url} as the base URL. *)
+    {!Env_config.Local_runtime.server_url} as the base URL. *)

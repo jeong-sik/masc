@@ -4,6 +4,7 @@ import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
 import { navigate } from '../router'
 import { formatPct1 } from '../lib/format-number'
+import { assertExhaustive } from '../lib/exhaustive'
 import { Card } from './common/card'
 import { SectionCap } from './common/section-cap'
 import { MermaidGraph } from './common/mermaid-graph'
@@ -73,9 +74,9 @@ function railTitle(rail: HarnessRailKey): string {
     case 'pre_compact':
       return '압축 전 상태'
     case 'handoff':
-    default:
       return '세대 교체'
   }
+  return assertExhaustive(rail, 'HarnessRailKey')
 }
 
 function railEventAt(data: HarnessHealthData, rail: HarnessRailKey): number | null {
@@ -85,9 +86,9 @@ function railEventAt(data: HarnessHealthData, rail: HarnessRailKey): number | nu
     case 'pre_compact':
       return data.overview.pre_compact_last_event_at
     case 'handoff':
-    default:
       return data.overview.handoff_last_event_at
   }
+  return assertExhaustive(rail, 'HarnessRailKey')
 }
 
 function activeRail(data: HarnessHealthData): HarnessRailKey | null {
@@ -113,6 +114,11 @@ function flowNodeLabel(title: string, status: RailStatus, detail: string, freshn
   return escapeMermaidLabel(`${title}<br/>${railStatusLabel(status)}<br/>${detail}<br/>최근 ${freshness}`)
 }
 
+// See harness-health-sections.ts comment above railStatusLabel for why
+// the `idle: default:` pattern is preserved on RailStatus consumers
+// despite the FSM exhaustive-match anti-pattern: wire data arrives via
+// type assertion at the API boundary, so the default is load-bearing
+// until a `membershipParse<RailStatus>` boundary parser RFC lands.
 function flowStatusClass(status: RailStatus): string {
   switch (status) {
     case 'healthy':

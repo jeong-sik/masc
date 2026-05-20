@@ -19,6 +19,55 @@ include Keeper_turn_driver_helpers
 
 include Keeper_turn_driver_provider_attempt
 
+let keeper_cascade_tier_admission = Cascade_tier_admission.create ()
+
+let cascade_tier_admission_policy_of_priority priority =
+  match
+    Llm_provider.Request_priority.resolve priority
+    |> Llm_provider.Request_priority.to_string
+    |> String.lowercase_ascii
+  with
+  | "background" -> Cascade_tier_admission.Bypass
+  | _ -> Cascade_tier_admission.Required
+
+let with_keeper_cascade_tier_admission
+    ?(admission = keeper_cascade_tier_admission)
+    ?(enabled = Env_config_keeper.CascadeSaturationSignal.enabled ())
+    ~tier_id
+    ~admission_policy
+    f =
+  if enabled
+  then
+    Cascade_tier_admission.with_admission admission ~tier_id
+      ~admission_policy f
+  else
+    Ok (f ())
+
+let cascade_tier_admission_blocked_decision signal =
+  `Assoc
+    [
+      ("blocker", `String "cascade_tier_admission_full");
+      ("signal", Cascade_saturation_signal.to_yojson signal);
+    ]
+
+let emit_cascade_tier_admission_signal_metric ~cascade_name signal =
+  Prometheus.inc_counter
+    Keeper_metrics.metric_keeper_cascade_saturation_signal
+    ~labels:
+      [
+        ( label_kind,
+          Cascade_saturation_signal.(kind signal |> kind_to_string) );
+        (label_cascade, provider_label cascade_name);
+      ]
+    ()
+
+let release_client_capacity_quietly = function
+  | None -> ()
+  | Some release ->
+      (match release () with
+       | () -> ()
+       | exception _ -> ())
+
 (* ================================================================ *)
 (* Facade-only: run_named, run_model_by_label, and MASC tool bridges  *)
 (* ================================================================ *)
@@ -502,6 +551,10 @@ let run_named
   let queue_priority =
     Option.value priority ~default:Llm_provider.Request_priority.Proactive
   in
+  let tier_admission_policy =
+    cascade_tier_admission_policy_of_priority queue_priority
+  in
+  let tier_admission_id = cascade_name in
   (* MASC-driven cascade FSM: try each provider, decide on failure.
      Extracted to [Keeper_turn_driver_try_provider.run_try_provider] via
      explicit [try_provider_ctx] record (RFC-0051 PR-3a). *)
@@ -754,6 +807,29 @@ let run_named
       ~decision:(client_capacity_full_decision ~capacity_key)
       Keeper_runtime_manifest.Pre_dispatch_blocked
   in
+  let emit_tier_admission_blocked_manifest signal =
+    emit_runtime_manifest
+      ~status:"blocked"
+      ~decision:(cascade_tier_admission_blocked_decision signal)
+      Keeper_runtime_manifest.Pre_dispatch_blocked
+  in
+  let slot_full_last_err ~is_last last_err =
+    match
+      Cascade_fsm.decide
+        ~accept_on_exhaustion:false
+        ~is_last
+        Cascade_fsm.Slot_full
+    with
+    | Cascade_fsm.Try_next { last_err = Some err }
+    | Cascade_fsm.Exhausted { last_err = Some err } ->
+      Some err
+    | Cascade_fsm.Try_next { last_err = None }
+    | Cascade_fsm.Exhausted { last_err = None } ->
+      last_err
+    | Cascade_fsm.Accept _
+    | Cascade_fsm.Accept_on_exhaustion _ ->
+      last_err
+  in
   let rec try_cascade
       ?(on_success = fun ~provider_key:_ -> ())
       ?resume_checkpoint ?per_provider_timeout_s remaining last_err =
@@ -888,23 +964,7 @@ let run_named
           cascade_name
           runtime_candidate_label
           capacity_key;
-        let slot_last_err =
-          match
-            Cascade_fsm.decide
-              ~accept_on_exhaustion:false
-              ~is_last
-              Cascade_fsm.Slot_full
-          with
-          | Cascade_fsm.Try_next { last_err = Some err }
-          | Cascade_fsm.Exhausted { last_err = Some err } ->
-            Some err
-          | Cascade_fsm.Try_next { last_err = None }
-          | Cascade_fsm.Exhausted { last_err = None } ->
-            last_err
-          | Cascade_fsm.Accept _
-          | Cascade_fsm.Accept_on_exhaustion _ ->
-            last_err
-        in
+        let slot_last_err = slot_full_last_err ~is_last last_err in
         try_cascade ~on_success ?resume_checkpoint ?per_provider_timeout_s
           rest slot_last_err
       | (`No_client_capacity | `Acquired _) as capacity_slot ->
@@ -964,8 +1024,11 @@ let run_named
         Cascade_legacy_runner.record_attempt_terminal capture
           ~model_id:runtime_candidate_label ~latency_ms ~error
       in
-      let (result, checkpoint_after, liveness_success_sample, attempt_latency_ms) =
-        Eio.Switch.run (fun provider_attempt_sw ->
+      let attempt_with_admission =
+        with_keeper_cascade_tier_admission
+          ~tier_id:tier_admission_id
+          ~admission_policy:tier_admission_policy
+          (fun () -> Eio.Switch.run (fun provider_attempt_sw ->
           Option.iter
             (fun release -> Eio.Switch.on_release provider_attempt_sw release)
             capacity_release;
@@ -1043,8 +1106,28 @@ let run_named
               ~exception_kind:status
               attempt_latency_ms;
             record_attempt_terminal ~error:(Some error) attempt_latency_ms;
-            Printexc.raise_with_backtrace exn bt)
+            Printexc.raise_with_backtrace exn bt))
       in
+      match attempt_with_admission with
+      | Error signal ->
+        release_client_capacity_quietly capacity_release;
+        emit_tier_admission_blocked_manifest signal;
+        emit_cascade_tier_admission_signal_metric ~cascade_name signal;
+        record_cascade_attempt candidate ~outcome:(`Failure "tier_admission_full") ();
+        Cascade_legacy_runner.record_fallback_event capture
+          ~from_model:runtime_candidate_label
+          ~to_model:runtime_candidate_label
+          ~reason:"tier_admission_full";
+        Log.Misc.info
+          "[cascade-fallback] cascade %s: %s skipped because tier admission \
+           %s is full, trying next"
+          cascade_name
+          runtime_candidate_label
+          tier_admission_id;
+        let slot_last_err = slot_full_last_err ~is_last last_err in
+        try_cascade ~on_success ?resume_checkpoint ?per_provider_timeout_s
+          rest slot_last_err
+      | Ok (result, checkpoint_after, liveness_success_sample, attempt_latency_ms) ->
       let record_accepted_liveness_sample () =
         match liveness_success_sample with
         | None -> ()
@@ -1489,4 +1572,10 @@ module For_testing = struct
   let missing_required_tool_names_after_lane_by_name =
     missing_required_tool_names_after_lane_by_name
   let success_selected_model_raw = success_selected_model_raw
+  let cascade_tier_admission_policy_of_priority =
+    cascade_tier_admission_policy_of_priority
+  let with_cascade_tier_admission_for_testing
+      ~admission ~enabled ~tier_id ~admission_policy f =
+    with_keeper_cascade_tier_admission ~admission ~enabled ~tier_id
+      ~admission_policy f
 end

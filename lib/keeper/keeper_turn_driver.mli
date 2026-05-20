@@ -255,4 +255,16 @@ module For_testing : sig
     string list
 
   val success_selected_model_raw : Cascade_runtime_candidate.t -> string option
+
+  val cascade_tier_admission_policy_of_priority :
+    Llm_provider.Request_priority.t ->
+    Cascade_tier_admission.admission_policy
+
+  val with_cascade_tier_admission_for_testing :
+    admission:Cascade_tier_admission.t ->
+    enabled:bool ->
+    tier_id:string ->
+    admission_policy:Cascade_tier_admission.admission_policy ->
+    (unit -> 'a) ->
+    ('a, Cascade_saturation_signal.t) result
 end

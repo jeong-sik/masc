@@ -1389,10 +1389,13 @@ let test_full_health_refresh_timeout_preserves_last_snapshot () =
   in
   Server_routes_http_runtime.For_testing.mark_full_health_snapshot_error timeout_error;
   let after = Server_routes_http_runtime.make_health_response_json request in
-  Alcotest.(check string) "timeout marks snapshot error" "error"
+  Alcotest.(check string) "timeout marks snapshot stale" "stale"
     (after |> member "full_health_snapshot" |> member "status" |> to_string);
   Alcotest.(check bool) "timeout marks timed out component" true
     (after |> member "full_health_snapshot" |> member "component_timed_out"
+     |> to_bool);
+  Alcotest.(check bool) "timeout keeps last-good marker" true
+    (after |> member "full_health_snapshot" |> member "last_good_available"
      |> to_bool);
   Alcotest.(check string) "timeout error is surfaced" (Printexc.to_string timeout_error)
     (after |> member "full_health_snapshot" |> member "error" |> to_string);
@@ -1403,6 +1406,28 @@ let test_full_health_refresh_timeout_preserves_last_snapshot () =
   Alcotest.(check string) "timeout preserves previous heavy fields"
     (Yojson.Safe.to_string before_reaction_ledger)
     (after |> member "keeper_reaction_ledger" |> Yojson.Safe.to_string)
+
+let test_full_health_cold_refresh_timeout_is_timeout_not_error () =
+  Server_routes_http_runtime.For_testing.reset_full_health_snapshot ();
+  let request = Httpun.Request.create `GET "/health?full=1" in
+  let timeout_error =
+    Failure
+      "refresh_timeout label=full_health_snapshot phase=refresh timeout_s=16.0 \
+       elapsed_s=17.0"
+  in
+  Server_routes_http_runtime.For_testing.mark_full_health_snapshot_error timeout_error;
+  let after = Server_routes_http_runtime.make_health_response_json request in
+  let open Yojson.Safe.Util in
+  Alcotest.(check string) "cold timeout status" "timeout"
+    (after |> member "full_health_snapshot" |> member "status" |> to_string);
+  Alcotest.(check bool) "cold timeout marks metadata timeout" true
+    (after |> member "full_health_snapshot" |> member "component_timed_out"
+     |> to_bool);
+  Alcotest.(check bool) "cold timeout has no last good" false
+    (after |> member "full_health_snapshot" |> member "last_good_available"
+     |> to_bool);
+  Alcotest.(check bool) "cold timeout marks component timeout" true
+    (after |> member "cdal" |> member "component_timed_out" |> to_bool)
 
 let test_health_response_survives_deleted_cwd () =
   with_temp_dir "health-deleted-cwd" (fun dir ->
@@ -2965,6 +2990,9 @@ let () =
           Alcotest.test_case
             "full health refresh timeout preserves last snapshot" `Quick
             test_full_health_refresh_timeout_preserves_last_snapshot;
+          Alcotest.test_case
+            "full health cold refresh timeout is timeout" `Quick
+            test_full_health_cold_refresh_timeout_is_timeout_not_error;
           Alcotest.test_case "health response survives deleted cwd" `Quick
             test_health_response_survives_deleted_cwd;
           Alcotest.test_case "readiness false before init" `Quick

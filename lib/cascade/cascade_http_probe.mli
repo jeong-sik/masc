@@ -27,20 +27,6 @@
 
     @since 0.9.8 *)
 
-(** {1 URL classification} *)
-
-(** [is_ollama_url url] mirrors the heuristic in
-    {!Cascade_client_capacity.looks_like_ollama}: any URL whose
-    host:port substring contains [:11434].  Re-exported here so
-    callers do not have to depend on both modules.
-
-    Prefer {!register_url} + {!is_registered} for new code: substring
-    matching misclassifies non-ollama servers running on :11434 and
-    misses ollama servers on non-default ports.  The {!Http_probe}
-    adapter no longer consults this function — it uses the registry
-    below. *)
-val is_ollama_url : string -> bool
-
 (** {1 Explicit URL registry}
 
     The {!Http_probe} adapter only fires against URLs that callers
@@ -86,9 +72,10 @@ val cached_capacity : ?now:float -> string -> Cascade_throttle.capacity_info opt
     Default [timeout_s] is [0.5] seconds; pass an explicit
     [?timeout_s] argument to override per-call.
 
-    Caller is responsible for picking [url]s that look like ollama
-    (use {!is_ollama_url}); calling on a non-ollama URL will fail
-    with a network error and return [None].
+    Caller is responsible for picking registered ollama-native [url]s
+    (use {!register_url} + {!is_registered} at the caller boundary);
+    calling on a non-ollama URL will fail with a network error and
+    return [None].
 
     The HTTP error path is intentionally silent — failed probes
     must never break the cascade, only deny the optimisation. *)
@@ -103,9 +90,8 @@ val try_probe
 
 (** {1 Probing many URLs} *)
 
-(** [refresh_many ~sw ~net urls] runs {!try_probe} on every URL in
-    [urls] that {!is_ollama_url} accepts and is not already covered
-    by a fresh cache entry.  Probes run sequentially in the
+(** [refresh_many ~sw ~net urls] runs {!try_probe} on every registered URL in
+    [urls] that is not already covered by a fresh cache entry.  Probes run sequentially in the
     caller's fiber; aggregate latency is bounded by [N * timeout_s]
     where [N] is the number of probes actually issued.
 

@@ -78,6 +78,17 @@ type RefreshTask =
   | 'operatorSnapshot'
   | 'operatorRoomDigest'
 
+// Monitor data ownership is partitioned by section. Two tiers:
+//   Tier 1 — visible lanes (agents / fleet-health / runtime / observatory)
+//            each declare their own view-aware or static refresh plan.
+//   Tier 2 — hidden diagnostic sections (cascade-config / doctor /
+//            transport-health / feature-health) share an identical light
+//            fallback plan. Their mounted panels own telemetry polling, so
+//            route visits only need to refresh namespace/mission context.
+//   Outliers — `journey` (execution only) and `cognition` (4-source plan
+//            with autoresearch) keep dedicated branches above.
+const HIDDEN_DIAGNOSTIC_FALLBACK_PLAN: readonly RefreshTask[] = ['namespaceTruth', 'missionSnapshot']
+
 export function refreshPlanForRoute(routeState: Pick<RouteState, 'tab' | 'params'>): RefreshTask[] {
   switch (routeState.tab) {
     case 'overview':
@@ -110,7 +121,9 @@ export function refreshPlanForRoute(routeState: Pick<RouteState, 'tab' | 'params
         // Mounted fleet-health panels own telemetry/tool/governance polling.
         return ['namespaceTruth']
       }
-      return ['namespaceTruth', 'missionSnapshot']
+      // Hidden diagnostic sections fall through here. See the
+      // HIDDEN_DIAGNOSTIC_FALLBACK_PLAN definition above for the tier split.
+      return [...HIDDEN_DIAGNOSTIC_FALLBACK_PLAN]
     case 'command':
       if (routeState.params.view === 'inspector') {
         return ['inspector']

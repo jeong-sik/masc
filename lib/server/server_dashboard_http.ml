@@ -516,17 +516,22 @@ let compact_receipt_tool_surface_json =
   Server_dashboard_compact_receipt_json.compact_receipt_tool_surface_json
 ;;
 
+(* RFC-0142 PR-5: lift the silent [| _ -> None] catch-all through
+   [Json_field.{float,assoc} |> to_option] so Wrong_shape becomes
+   structurally distinct from Field_absent. Caller semantics
+   unchanged: both legacy and new shapes return [None] on missing
+   key or mismatched JSON variant. [Json_field.float] accepts both
+   [`Float] and [`Int] (returning [float_of_int i]), matching the
+   legacy 2-arm match. *)
+
 let json_number key json =
-  match json_member key json with
-  | `Float value -> Some value
-  | `Int value -> Some (float_of_int value)
-  | _ -> None
+  Json_field.float json key |> Json_field.to_option
 ;;
 
 let json_assoc key json =
-  match json_member key json with
-  | `Assoc _ as value -> Some value
-  | _ -> None
+  Json_field.assoc json key
+  |> Json_field.to_option
+  |> Option.map (fun fields -> `Assoc fields)
 ;;
 
 let string_has_prefix ~prefix value =

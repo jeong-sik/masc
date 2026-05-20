@@ -407,7 +407,7 @@ describe('IdeContextLens', () => {
         file: 'lib/keeper/keeper_exec_ide.ml',
         line: '22',
         surface: 'LSP',
-        label: 'This expression has type string but an int wa...',
+        label: 'This expression has type string but an int was …',
         source_id: 'diagnostic-22-ocamllsp-type-0',
       },
     })

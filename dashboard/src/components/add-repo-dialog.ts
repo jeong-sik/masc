@@ -3,8 +3,8 @@
 
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
-import { get, post } from '../api/core'
-import { normalizeCredentialsResponse } from '../api/credentials'
+import { post } from '../api/core'
+import { fetchCredentials } from '../api/credentials'
 import { showToast } from './common/toast'
 import { fetchRepositories, showAddRepoDialog } from './repo-sidebar'
 import { X } from 'lucide-preact'
@@ -58,8 +58,7 @@ function closeAddRepoDialog(): void {
 async function loadCredentials(): Promise<void> {
   credentialsLoading.value = true
   try {
-    const raw = await get<unknown>('/api/v1/credentials')
-    const creds = normalizeCredentialsResponse(raw)
+    const creds = await fetchCredentials()
     credentialsResource.value = creds
       .map(c => ({ id: c.id, name: c.name || c.username }))
       .filter(opt => opt.id && opt.name)

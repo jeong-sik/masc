@@ -42,6 +42,7 @@ export function coerceCredentialType(raw: unknown): CredentialType {
   return 'github'
 }
 
+import { get } from './core'
 import { isRecord } from '../lib/type-guards'
 export { isRecord }
 
@@ -57,6 +58,11 @@ export function parseCredentialState(raw: unknown): CredentialState | null {
         : null,
     reason: typeof raw.reason === 'string' ? raw.reason : null,
   }
+}
+
+export async function fetchCredentials(): Promise<Credential[]> {
+  const data = await get<unknown>('/api/v1/credentials')
+  return normalizeCredentialsResponse(data)
 }
 
 export function normalizeCredentialsResponse(data: unknown): Credential[] {

@@ -1,0 +1,233 @@
+import { describe, expect, it } from 'vitest'
+
+import type { Keeper } from '../types'
+import type { KeeperRuntimeTraceResponse } from '../api/keeper'
+import type { KeeperCompositeSnapshot } from '../api/schemas/keeper-composite'
+import { deriveKeeperRuntimeProjection } from './keeper-runtime-projection'
+
+const NOW_MS = Date.parse('2026-05-21T00:10:00Z')
+
+function keeper(overrides: Partial<Keeper> = {}): Keeper {
+  return {
+    name: 'sangsu',
+    status: 'active',
+    phase: 'Running',
+    keepalive_running: true,
+    ...overrides,
+  } as Keeper
+}
+
+function composite(overrides: Partial<KeeperCompositeSnapshot> = {}): KeeperCompositeSnapshot {
+  const base = {
+    keeper: 'sangsu',
+    correlation_id: 'corr-1',
+    run_id: 'run-1',
+    ts: 1,
+    phase: 'running',
+    turn_phase: 'idle',
+    decision: { stage: 'idle' },
+    cascade: { state: 'idle' },
+    compaction: { stage: 'idle' },
+    circuit_breaker: { state: 'closed' },
+    measurement: { captured: true },
+    invariants: {
+      phase_turn_alignment: true,
+      no_cascade_before_measurement: true,
+      compaction_atomicity: true,
+      event_priority_monotone: true,
+      phase_derivation_agreement: true,
+    },
+    fsm_guard_violations: 0,
+    phase_diagnosis: {
+      current_phase: 'Running',
+      derived_phase: 'Running',
+      can_execute_turn: true,
+      conditions: {
+        launch_pending: false,
+        fiber_alive: true,
+        heartbeat_healthy: true,
+        turn_healthy: true,
+        context_within_budget: true,
+        context_handoff_needed: false,
+        compaction_active: false,
+        handoff_active: false,
+        operator_paused: false,
+        stop_requested: false,
+        restart_budget_remaining: true,
+        backoff_elapsed: true,
+        guardrail_triggered: false,
+        drain_complete: false,
+        context_overflow: false,
+        compact_retry_exhausted: false,
+        terminal_failure_latched: false,
+      },
+      determining_condition: 'running_fiber_alive',
+      rows: [],
+    },
+    is_live: false,
+    last_outcome: null,
+    execution: {
+      latest_receipt_present: true,
+      recorded_at: '2026-05-21T00:00:00Z',
+      outcome: 'receipt_done',
+      terminal_reason_code: 'completed',
+      operator_disposition: 'pass',
+      operator_disposition_reason: 'healthy',
+      model_used: null,
+      stop_reason: 'completed',
+      tool_contract_result: 'satisfied_execution',
+      duration_ms: 1000,
+      error: null,
+      cascade: null,
+      tool_surface: null,
+    },
+    runtime_attention: {
+      state: 'ok',
+      needs_attention: false,
+      blocked: false,
+      fiber_stop_requested: false,
+      reason: null,
+      raw_phase: 'running',
+      is_live: false,
+      source: 'execution_receipt',
+    },
+    recommended_actions: [],
+  } as KeeperCompositeSnapshot
+  return { ...base, ...overrides } as KeeperCompositeSnapshot
+}
+
+function runtimeTrace(overrides: Partial<KeeperRuntimeTraceResponse> = {}): KeeperRuntimeTraceResponse {
+  const base = {
+    keeper: 'sangsu',
+    trace_id: 'trace-1',
+    turn_id: 7,
+    manifest_path: '/tmp/manifest.jsonl',
+    manifest_path_present: true,
+    manifest_total_rows: 6,
+    manifest_returned_rows: 6,
+    receipt_returned_rows: 1,
+    turn_identity: { requested_keeper_turn_id: 7 },
+    provider_attempts: {},
+    event_bus: {},
+    memory: {},
+    runtime_lens: {
+      turn_clock: {
+        keeper_turn_id: 7,
+        terminal_event_present: true,
+        terminal_event: 'turn_finished',
+        max_oas_turn_count: 3,
+      },
+      axes: {},
+      swimlanes: {},
+      gaps: [],
+    },
+    linked_artifacts: { receipts: [], checkpoints: [], tool_call_logs: [] },
+    manifest_rows: [],
+    receipts: [],
+    health: 'ok',
+    stale_reason: null,
+  } as unknown as KeeperRuntimeTraceResponse
+  return { ...base, ...overrides } as KeeperRuntimeTraceResponse
+}
+
+describe('deriveKeeperRuntimeProjection', () => {
+  it('couples heartbeat, context, social, fiber, stop, trace, tool, and FSM lanes', () => {
+    const projection = deriveKeeperRuntimeProjection({
+      keeper: keeper({
+        last_heartbeat: '2026-05-21T00:00:00Z',
+        context_ratio: 0.97,
+        runtime_warning_ctx_ratio: 0.95,
+        social_model_recognized: false,
+      }),
+      composite: composite({
+        phase: 'failing',
+        turn_phase: 'executing',
+        decision: { stage: 'tool_required' },
+        cascade: { state: 'degraded_retry' },
+        compaction: { stage: 'idle' },
+        circuit_breaker: { state: 'closed' },
+        execution: {
+          ...composite().execution!,
+          tool_contract_result: 'missing_required_tool_use',
+        },
+      }),
+      runtimeTrace: runtimeTrace(),
+      runtimeResolution: {
+        warnings: ['Runtime build commit differs from server repo HEAD.'],
+        source_mismatch: true,
+      },
+      nowMs: NOW_MS,
+    })
+
+    expect(projection.headline).toBe('조치 필요')
+    expect(projection.heartbeat.stale).toBe(true)
+    expect(projection.context.breach).toBe(true)
+    expect(projection.socialModel.recognized).toBe(false)
+    expect(projection.fiberAlive.alive).toBe(true)
+    expect(projection.toolContract).toBe('missing_required_tool_use')
+    expect(projection.fsmLanes.map(lane => lane.axis)).toEqual(['KSM', 'KTC', 'KDP', 'KCL', 'KMC', 'KCB'])
+    expect(projection.signals.map(signal => signal.kind)).toEqual([
+      'operational_state',
+      'ksm_phase',
+      'heartbeat',
+      'context_ratio',
+      'social_model',
+      'fiber_alive',
+      'stop_requested',
+      'runtime_trace',
+      'runtime_warning',
+      'tool_contract',
+      'fsm_raw_lanes',
+    ])
+    expect(projection.synchronizationDetail).toContain('hb stale')
+    expect(projection.synchronizationDetail).toContain('ctx breach')
+    expect(projection.synchronizationDetail).toContain('social unrecognized')
+    expect(projection.synchronizationDetail).toContain('fiber alive')
+    expect(projection.synchronizationDetail).toContain('stop clear')
+    expect(projection.synchronizationDetail).toContain('tool missing_required_tool_use')
+    expect(projection.synchronizationDetail).toContain('KSM failing')
+  })
+
+  it('lets stop requests dominate the coupled headline and tone', () => {
+    const projection = deriveKeeperRuntimeProjection({
+      keeper: keeper(),
+      composite: composite({
+        runtime_attention: {
+          ...composite().runtime_attention!,
+          fiber_stop_requested: true,
+        },
+      }),
+      nowMs: NOW_MS,
+    })
+
+    expect(projection.stopRequested).toBe(true)
+    expect(projection.headline).toBe('종료 신호')
+    expect(projection.tone).toBe('bad')
+  })
+
+  it('does not turn a stale execution receipt tool contract into current attention', () => {
+    const projection = deriveKeeperRuntimeProjection({
+      keeper: keeper(),
+      composite: composite({
+        is_live: true,
+        turn_phase: 'executing',
+        execution: {
+          ...composite().execution!,
+          tool_contract_result: 'needs_execution_progress',
+        },
+        runtime_attention: {
+          ...composite().runtime_attention!,
+          execution_current: false,
+          stale_execution_receipt: true,
+          is_live: true,
+        },
+      }),
+      runtimeTrace: runtimeTrace(),
+      nowMs: NOW_MS,
+    })
+
+    expect(projection.signals.find(signal => signal.kind === 'tool_contract')?.contributesToAttention).toBe(false)
+    expect(projection.headline).toBe('턴 진행 중')
+    expect(projection.tone).toBe('ok')
+  })
+})

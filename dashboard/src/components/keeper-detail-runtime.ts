@@ -4,17 +4,12 @@
 
 import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
-// RFC-0135 PR-5: detail panel and roster card derive blocker conditioning
-// through the same typed `KeeperOperationalState` SSOT (PR-1 #16576), so
-// `현재 차단 / 이전 차단` decisions cannot diverge between the two
-// surfaces. The `runtime_attention.blocked / needs_attention` signals
-// represent *live-execution* attention (`execution_current && blocked`,
-// see `lib/server/server_dashboard_http.ml:1114`), which is orthogonal to
-// the blocker-class-vs-stale-execution axis and stays inline below.
-import { deriveKeeperOperationalState } from '../lib/keeper-operational-state'
-import { deriveFiberAlive } from '../lib/keeper-fiber-alive'
 import { formatPct1 } from '../lib/format-number'
-import { formatDuration } from '../lib/format-time'
+import {
+  compactToken,
+  deriveKeeperRuntimeProjection,
+  type KeeperRuntimeProjectionRuntimeInput,
+} from '../lib/keeper-runtime-projection'
 import { ActionButton } from './common/button'
 import { CollapsibleSection } from './common/collapsible'
 import { DistributionBars, type DistributionItem } from './common/distribution-bars'
@@ -81,18 +76,7 @@ function SignalRow({ label, value, title }: { label: string; value: string | num
   `
 }
 
-interface KeeperLiveTruthRuntimeInput {
-  status?: string | null
-  warnings?: string[]
-  source_mismatch?: boolean
-  server_repo_path?: { path?: string | null } | null
-  server_repo_git_commit?: string | null
-  workspace_git_commit?: string | null
-  build?: {
-    commit?: string | null
-    started_at?: string | null
-  } | null
-}
+type KeeperLiveTruthRuntimeInput = KeeperRuntimeProjectionRuntimeInput
 
 export interface KeeperLiveTruthRow {
   label: string
@@ -110,82 +94,6 @@ export interface KeeperLiveTruthSummary {
   runtimeRepoLabel: string | null
 }
 
-function compactToken(value: string | null | undefined, fallback = 'unknown'): string {
-  const text = value?.trim()
-  return text ? text : fallback
-}
-
-function shortCommit(value: string | null | undefined): string | null {
-  const text = value?.trim()
-  return text ? text.slice(0, 10) : null
-}
-
-// Backend `turn_phase` SSOT = `Keeper_composite_observer.turn_phase_to_string`
-// (lib/keeper/keeper_composite_observer.ml:149-157), which emits exactly 7
-// strings: idle / prompting / routing / executing / compacting / finalizing
-// / exhausted. Only "idle" classifies as idle; the other 6 are active.
-// Empty/missing turn_phase also degrades to idle (no active turn signal).
-//
-// The previous version also matched `"stable"` and `"offline"` here.
-// Those are *different axis* vocabularies (`"stable"` belongs to
-// `KeeperCompositePhase`, `"offline"` belongs to keeper linked-state),
-// never emitted into the `turn_phase` slot. Removing them tightens this
-// classifier to the actual backend vocabulary and surfaces noun-collision
-// bugs instead of silently absorbing them.
-function isIdleTurnPhase(value: string | null | undefined): boolean {
-  const normalized = value?.trim().toLowerCase()
-  return !normalized || normalized === 'idle' || normalized === 'unknown'
-}
-
-function runtimeWarningList(runtimeResolution: KeeperLiveTruthRuntimeInput | null | undefined): string[] {
-  if (!runtimeResolution) return []
-  const warnings = Array.isArray(runtimeResolution.warnings)
-    ? runtimeResolution.warnings.filter((warning): warning is string => warning.trim() !== '')
-    : []
-  if (runtimeResolution.source_mismatch && warnings.length === 0) {
-    return ['Runtime source mismatch detected.']
-  }
-  return warnings
-}
-
-function terminalEventLabel(trace: KeeperRuntimeTraceResponse | null): {
-  value: string
-  detail: string
-  tone: StatusChipTone
-} {
-  if (!trace) {
-    return {
-      value: 'trace unavailable',
-      detail: 'runtime_trace evidence not loaded',
-      tone: 'neutral',
-    }
-  }
-  const clock = trace.runtime_lens.turn_clock
-  const keeperTurn = clock.keeper_turn_id ?? trace.turn_identity.requested_keeper_turn_id ?? trace.turn_id
-  const turnLabel = keeperTurn == null ? 'turn unknown' : `turn #${keeperTurn}`
-  const terminal = clock.terminal_event_present ? compactToken(clock.terminal_event, 'terminal present') : 'terminal missing'
-  const gapCount = trace.runtime_lens.gaps.length
-  const terminalTone: StatusChipTone =
-    gapCount > 0
-      ? 'warn'
-      : !clock.terminal_event_present
-        ? 'warn'
-        : terminal === 'turn_finished'
-          ? 'ok'
-          : 'info'
-  const detailParts = [
-    `oas ${clock.max_oas_turn_count ?? '-'}`,
-    `manifest ${clock.manifest_total_rows}`,
-    `health ${compactToken(trace.health)}`,
-    gapCount > 0 ? `${gapCount} lens gap${gapCount === 1 ? '' : 's'}` : 'no lens gaps',
-  ]
-  return {
-    value: `${turnLabel} ${terminal === 'turn_finished' ? 'finished' : terminal}`,
-    detail: detailParts.join(' · '),
-    tone: terminalTone,
-  }
-}
-
 export function deriveKeeperLiveTruth({
   keeper,
   compositeSnapshot,
@@ -197,108 +105,53 @@ export function deriveKeeperLiveTruth({
   runtimeTrace: KeeperRuntimeTraceResponse | null
   runtimeResolution?: KeeperLiveTruthRuntimeInput | null
 }): KeeperLiveTruthSummary {
-  const linkedState = linkedRuntimeState(keeper)
-  // RFC-0135 Goal-2 closeout: turn phase, display summary and phase are
-  // now per-variant axes on the typed `KeeperOperationalState`, so this
-  // surface no longer keeps its own composite-vs-flat fallback chain.
-  const opState = deriveKeeperOperationalState({
+  const projection = deriveKeeperRuntimeProjection({
     keeper,
     composite: compositeSnapshot,
+    runtimeTrace,
+    runtimeResolution,
+    linkedState: linkedRuntimeState(keeper),
   })
-  const turnPhase = compactToken(opState.turnPhase)
-  // Typed SSOT (lib/keeper-fiber-alive.ts) — preserves provenance instead of
-  // collapsing four semantically distinct signals into one OR-chain.
-  const fiberAlive = deriveFiberAlive({
-    keeper,
-    composite: compositeSnapshot,
-    linkedState,
-  }).alive
-  const activeTurn = compositeSnapshot?.is_live === true || !isIdleTurnPhase(opState.turnPhase)
 
+  const opState = projection.opState
+  const fiberAlive = projection.fiberAlive.alive
   const stuckByBlockerClass = opState.kind === 'stuck'
   const staleBlocker = opState.kind === 'running' ? opState.staleBlocker : null
   const attention = opState.attention
-  const blocked = stuckByBlockerClass || attention !== 'clean'
-  const stopRequested =
-    compositeSnapshot?.runtime_attention?.fiber_stop_requested === true
-    || compositeSnapshot?.phase_diagnosis?.conditions.stop_requested === true
-  const traceEvidence = terminalEventLabel(runtimeTrace)
-  const warnings = runtimeWarningList(runtimeResolution)
-  const headline =
-    stopRequested
-      ? '종료 신호'
-      : blocked
-        ? '조치 필요'
-        : fiberAlive && activeTurn
-          ? '턴 진행 중'
-          : fiberAlive
-            ? '대기 중'
-            : runtimeTrace
-              ? '실행 미확인'
-              : '증거 부족'
-  const tone: StatusChipTone =
-    stopRequested
-      ? 'bad'
-      : blocked || warnings.length > 0
-        ? 'warn'
-        : fiberAlive && activeTurn
-          ? 'ok'
-          : fiberAlive
-            ? 'neutral'
-            : runtimeTrace
-              ? 'warn'
-              : 'neutral'
-
-  const idleLabel =
-    typeof compositeSnapshot?.idle_seconds === 'number'
-      ? `${formatDuration(compositeSnapshot.idle_seconds)} idle`
-      : typeof keeper.last_turn_ago_s === 'number'
-        ? `${formatDuration(keeper.last_turn_ago_s)} since turn`
-        : 'idle age unknown'
-  const runtimeReason = compactToken(opState.displaySummary, 'no blocker reason')
-  const toolContract = compactToken(compositeSnapshot?.execution?.tool_contract_result ?? null, 'tool contract unknown')
+  const blocked = projection.blocked
+  const traceEvidence = projection.traceEvidence
   // guardCount / invariantFailed have moved to FsmHub mode='detail' — they
   // are rendered on the dedicated FSM lane strip directly under this panel
   // and no longer need to be projected as a row here.
-  const runtimeCommit =
-    shortCommit(runtimeResolution?.server_repo_git_commit)
-    ?? shortCommit(runtimeResolution?.build?.commit)
-  const workspaceCommit = shortCommit(runtimeResolution?.workspace_git_commit)
-  const runtimeBuildLabel = runtimeCommit
-    ? workspaceCommit && workspaceCommit !== runtimeCommit
-      ? `${runtimeCommit} vs workspace ${workspaceCommit}`
-      : runtimeCommit
-    : null
-  const runtimeRepoLabel = runtimeResolution?.server_repo_path?.path
-    ? runtimeResolution.server_repo_path.path.split('/').slice(-2).join('/')
-    : null
-
-  // RFC-0046 §4.3 partial closure (2026-05-19): the FSM row used to duplicate
-  // FsmHub mode='detail' (KSM/KTC/KDP/KCL/KMC/breaker lanes rendered directly
-  // below this panel). Dropping it here makes FsmHub the sole on-screen
-  // consumer of the composite invariant/guard axes. The remaining rows cover
-  // axes FsmHub does not (roster/linked runtime, idle-since label, terminal
-  // trace event, runtime_attention reason).
+  // The dedicated `동기화` row is the coupled projection: heartbeat/context/
+  // social/fiber/stop/trace/tool/FSM lanes move as one derived object while
+  // FsmHub still renders raw lanes below this panel.
   const fiberLabel = fiberAlive ? 'fiber alive' : 'fiber not proven'
-  const liveTurnLabel = activeTurn ? `${turnPhase} live` : 'no live turn'
+  const liveTurnLabel = projection.activeTurn ? `${projection.turnPhase} live` : 'no live turn'
   return {
-    headline,
-    tone,
-    runtimeWarnings: warnings,
-    runtimeBuildLabel,
-    runtimeRepoLabel,
+    headline: projection.headline,
+    tone: projection.tone,
+    runtimeWarnings: projection.runtimeWarnings,
+    runtimeBuildLabel: projection.runtimeBuildLabel,
+    runtimeRepoLabel: projection.runtimeRepoLabel,
     rows: [
+      {
+        label: '동기화',
+        value: projection.synchronizationLabel,
+        detail: projection.synchronizationDetail,
+        tone: projection.tone,
+      },
       {
         label: '런타임',
         value: fiberLabel,
-        detail: `roster ${keeper.status} · linked ${linkedState}`,
+        detail: `roster ${keeper.status} · linked ${projection.linkedState} · ${projection.fiberAlive.source}`,
         tone: fiberAlive ? 'ok' : 'warn',
       },
       {
         label: '현재 턴',
         value: liveTurnLabel,
-        detail: `${compositeSnapshot ? (compositeSnapshot.is_live === true ? 'is_live=true' : 'is_live=false') : 'is_live=unknown'} · ${turnPhase} · ${idleLabel}`,
-        tone: activeTurn ? 'ok' : 'neutral',
+        detail: `${compositeSnapshot ? (compositeSnapshot.is_live === true ? 'is_live=true' : 'is_live=false') : 'is_live=unknown'} · ${projection.turnPhase} · ${projection.idleLabel}`,
+        tone: projection.activeTurn ? 'ok' : 'neutral',
       },
       {
         label: '최신 증거',
@@ -321,8 +174,8 @@ export function deriveKeeperLiveTruth({
             ? compactToken(compositeSnapshot?.runtime_attention?.state, 'blocked')
             : 'none',
         detail: staleBlocker !== null
-          ? `${runtimeReason} · ${toolContract} · 이전 차단: ${staleBlocker}`
-          : `${runtimeReason} · ${toolContract}`,
+          ? `${projection.runtimeReason} · ${projection.toolContract} · 이전 차단: ${staleBlocker}`
+          : `${projection.runtimeReason} · ${projection.toolContract}`,
         tone: blocked ? 'warn' : 'ok',
       },
     ],

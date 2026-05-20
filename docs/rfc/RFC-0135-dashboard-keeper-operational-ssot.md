@@ -270,10 +270,23 @@ PR-1 머지 후 PR-2~7 은 모두 같은 SSOT 호출자이므로 **동시 진행
   - `monitoring-runtime.ts` 는 `opState.phase` 를 읽고, band 계산도 같은 `opState` 인스턴스를 공유.
 - **테스트**: `keeper-operational-state.test.ts` 에 non-running variant turnPhase, displaySummary precedence, phase terminal override 케이스 추가. `keeper-detail-runtime` / `monitoring-runtime` focused tests 로 consumer 회귀 확인.
 
-이로써 HTML audit 의 Goal-2 명시 범위는 helper-level centralization 이 아니라 typed-state 공통 axis 로 닫힌다. 남은 external OR (`heartbeatStale`, `contextBreach`, `socialModelRecognized`) 는 Goal-2 명시 범위 밖의 monitoring band 신호다.
+이로써 HTML audit 의 Goal-2 명시 범위는 helper-level centralization 이 아니라 typed-state 공통 axis 로 닫힌다. Goal-2 이후 남은 external OR (`heartbeatStale`, `contextBreach`, `socialModelRecognized`) 는 typed variant arm 자체가 아니라 runtime projection layer 의 입력 신호로 다룬다.
+
+### Follow-up / 2026-05-21 — runtime organism projection
+
+- **흡수 대상**: `heartbeat stale`, `context ratio breach`, `social_model_recognized`, `fiberAlive`, `stopRequested`, `runtime trace`, `runtime warnings`, `execution.tool_contract_result`, FsmHub raw composite lanes.
+- **이전 패턴**:
+  - `monitoring-runtime.ts` 가 heartbeat/context/social/KSM phase 를 local OR-chain 으로 합류.
+  - `keeper-detail-runtime.ts` 가 fiber/stop/trace/warning/tool-contract 를 별도 derive.
+  - FsmHub raw lanes 는 아래 패널에서만 소비되어 live-truth headline 과 monitoring band 의 attention 판단과 같은 projection 으로 묶이지 않음.
+- **이후 패턴**: `dashboard/src/lib/keeper-runtime-projection.ts` 가 `KeeperRuntimeProjection` 을 생성하고, detail live-truth + monitoring band 가 같은 projection 을 소비한다. 이 projection 은 `KeeperOperationalState` 를 대체하지 않고 감싼다: typed operational state 는 core lifecycle/blocker axis, runtime projection 은 주변 생체 신호와 raw FSM lanes 를 한 tick 의 동기화된 operator view 로 결합한다.
+- **display rule**: detail live-truth 는 `동기화` row 에 projection headline/detail 을 노출하고, FsmHub 는 raw lanes 의 원본 상세 표시를 계속 담당한다. 따라서 raw truth 를 숨기지 않고 coupled summary 만 추가한다.
+- **stale receipt rule**: `runtime_attention.execution_current=false` 또는 `stale_execution_receipt=true` 이면 `execution.tool_contract_result` 는 sync detail 에 남기되 current attention 으로 승격하지 않는다.
+- **테스트**: `keeper-runtime-projection.test.ts` 가 listed signal 전체의 signal-kind set, headline/tone priority, stale receipt gating 을 검증한다. `monitoring-runtime.test.ts` 와 `keeper-detail-runtime.test.ts` 는 consumer 가 projection 을 통해 같은 attention/hint/sync row 를 읽는지 검증한다.
 
 ## §12 변경 이력
 
 - 2026-05-19 vincent — 초안 작성, 3 사례 기반 root-cause 정리, PR 시퀀스 §5.
 - 2026-05-20 vincent (via claude-code) — §13 추가, Goal-2 `attention` axis 흡수 + 후속 axes 후보 명시. audit B3 closure.
 - 2026-05-21 vincent (via codex) — Goal-2 잔여 `turnPhase`, `displaySummary`, `phase` 를 `KeeperOperationalState` 공통 axis 로 흡수.
+- 2026-05-21 vincent (via codex) — runtime organism projection 추가. heartbeat/context/social/fiber/stop/trace/warning/tool/FSM lanes 를 한 projection 으로 결합하고 detail/monitoring consumer 를 전환.

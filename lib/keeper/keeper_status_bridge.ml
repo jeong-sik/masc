@@ -157,21 +157,6 @@ let blocker_class_of_string (reason : string) : blocker_class option =
   let trimmed = String.trim reason in
   if trimmed = ""
   then None
-  else if
-    String_util.contains_substring_ci trimmed "capacity_exhausted"
-    || String_util.contains_substring_ci trimmed "capacity exhausted"
-    || String_util.contains_substring_ci trimmed "slot full"
-    || String_util.contains_substring_ci trimmed "client capacity"
-  then Some Capacity_exhausted
-  else if
-    String_util.contains_substring_ci
-      trimmed
-      "turn outcome ambiguous after committed mutating tool call(s)"
-  then
-    Some
-      (if String_util.contains_substring_ci trimmed "turn wall-clock timeout"
-       then Ambiguous_post_commit_timeout
-       else Ambiguous_post_commit_failure)
   else if String_util.contains_substring_ci trimmed "cascade_exhausted"
   then (
     let reason =
@@ -189,6 +174,22 @@ let blocker_class_of_string (reason : string) : blocker_class option =
       else Other_detail trimmed
     in
     Some (Cascade_exhausted reason))
+  else if
+    String_util.contains_substring_ci trimmed "capacity_exhausted"
+    || String_util.contains_substring_ci trimmed "capacity exhausted"
+    || String_util.contains_substring_ci trimmed "capacity_backpressure"
+    || String_util.contains_substring_ci trimmed "slot full"
+    || String_util.contains_substring_ci trimmed "client capacity"
+  then Some Capacity_exhausted
+  else if
+    String_util.contains_substring_ci
+      trimmed
+      "turn outcome ambiguous after committed mutating tool call(s)"
+  then
+    Some
+      (if String_util.contains_substring_ci trimmed "turn wall-clock timeout"
+       then Ambiguous_post_commit_timeout
+       else Ambiguous_post_commit_failure)
   else if String_util.contains_substring_ci trimmed "admission queue wait timeout"
   then Some Admission_queue_wait_timeout
   else if String_util.contains_substring_ci trimmed "autonomous turn slot wait timeout"
@@ -281,11 +282,6 @@ type runtime_blocker_surface =
 
 let runtime_blocker_class_label ?(summary = "") cls =
   match cls with
-  | Capacity_exhausted -> "capacity_exhausted"
-  | Cascade_exhausted (Other_detail detail)
-    when Keeper_error_classify.message_looks_like_capacity_backpressure detail
-         || Keeper_error_classify.message_looks_like_capacity_backpressure summary ->
-      "capacity_exhausted"
   | _ -> blocker_class_to_string cls
 
 let is_timeout_budget_blocker_class blocker_class =
@@ -301,11 +297,6 @@ let runtime_blocker_surface_of_typed_class ?(summary = "") (cls : blocker_class)
   let summary =
     match cls with
     | Capacity_exhausted ->
-      if summary = ""
-      then "Provider or client capacity backpressure blocked this keeper turn."
-      else summary
-    | Cascade_exhausted (Other_detail _)
-      when String.equal str "capacity_exhausted" ->
       if summary = ""
       then "Provider or client capacity backpressure blocked this keeper turn."
       else summary

@@ -129,7 +129,7 @@ let of_failure ?(post_commit_ambiguous = false) ?(tool_call_count = 0) ~raw_erro
     | Some (Keeper_turn_driver.Oas_timeout_budget _) ->
       make ~source:"typed_error" "oas_timeout_budget"
     | Some (Keeper_turn_driver.Capacity_backpressure _) ->
-      make ~source:"typed_error" "capacity_exhausted"
+      make ~source:"typed_error" "capacity_backpressure"
     | Some (Keeper_turn_driver.Turn_timeout _) ->
       make ~source:"typed_error" "turn_wall_clock_timeout"
     | _ ->

@@ -1,14 +1,51 @@
 ---
 rfc: "0143"
 title: "keeper_cascade_profile Typed Catalog Query Result"
-status: Draft
+status: Active
 created: 2026-05-20
-updated: 2026-05-20
+updated: 2026-05-21
 author: vincent
 supersedes: []
 superseded_by: null
-related: ["0088", "0141"]
-implementation_prs: []
+related: ["0088", "0141", "0142", "0148", "0154"]
+implementation_prs: [16860]
+---
+
+## Progress audit (2026-05-21)
+
+Status promoted Draft → Active. The §4 PR-1 bridge phase shipped;
+PR-2/3/4/5 batch migrations remain.
+
+| Phase | PR | Scope | Merged |
+|-------|-----|------|--------|
+| PR-1 (bridge) | #16860 | `catalog_metadata_query` typed bridge alongside existing `catalog_metadata_result` (string error → typed `Unavailable` translation via Otoml message inspection) + unit tests | 2026-05-20 |
+
+### Pending
+
+| Phase | Scope | 25+ caller batch |
+|-------|------|------------------|
+| PR-2 | `keeper_cascade_profile.ml` self-migration (6 sites batch A) | self |
+| PR-3 | `lib/keeper/` callers batch B (8 files: keeper_runtime / keeper_exec_preflight / keeper_status_bridge / keeper_unified_turn / keeper_persona_authoring / keeper_turn_up_args / keeper_turn_cascade_budget_routing / keeper_world_observation) | external keeper |
+| PR-4 | `lib/cascade/` + dashboard + server batch C (5 files) | cross-domain |
+| PR-5 | `catalog_metadata_result` deletion + `silent-failure-ratchet` regenerate (`error_result_silence` drops by 6 minimum) | API removal + closure |
+
+### Transitional API note
+
+§4 PR-1 explicitly tolerates string-match translation (Otoml error
+message → typed `Unavailable` variant) as a *time-boxed*
+transitional. PR-5 removes that path once all callers migrated. The
+audit script (#17123) will not flag this string-match site because
+it lives in the bridge module, not at the caller boundary.
+
+### Related RFC
+
+- **RFC-0141** (TOML Field Resolution, Active 2026-05-21): sister
+  typed-Otoml RFC. Same audit cohort.
+- **RFC-0142** (cascade_error_classify, Active 2026-05-21): adjacent
+  cascade-side typed JSON RFC.
+- **RFC-0148 / RFC-0154**: closed-sum cohort. Caller migrations in
+  PR-2/3/4 can reuse the typed-variant shapes those RFCs produced.
+
 ---
 
 # RFC-0143 — keeper_cascade_profile Typed Catalog Query Result

@@ -25,9 +25,19 @@ let with_stubbed_git_probe f =
   Lib.Server_dashboard_http.clear_git_rev_parse_short_cache_for_tests ();
   Lib.Server_dashboard_http.set_git_rev_parse_short_probe_hook_for_tests
     (fun _ -> Some "test");
+  Lib.Server_dashboard_http.set_git_upstream_status_probe_hook_for_tests
+    (fun _ ->
+      Some
+        { branch = Some "runtime-capacity-fix-live-20260521"
+        ; upstream_ref = Some "origin/main"
+        ; upstream_head_commit = Some "upstream"
+        ; ahead_count = Some 0
+        ; behind_count = Some 3
+        });
   Fun.protect
     ~finally:(fun () ->
       Lib.Server_dashboard_http.clear_git_rev_parse_short_probe_hook_for_tests ();
+      Lib.Server_dashboard_http.clear_git_upstream_status_probe_hook_for_tests ();
       Lib.Server_dashboard_http.clear_git_rev_parse_short_cache_for_tests ())
     f
 
@@ -212,6 +222,21 @@ let test_dashboard_tools_projection () =
          with
          | `Null | `Bool _ -> true
          | _ -> false);
+      check int "deployment state upstream behind count" 3
+        (deployment_state |> member "upstream" |> member "behind_count" |> to_int);
+      check bool "deployment state behind check surfaced" true
+        (deployment_state
+         |> member "checks"
+         |> member "server_repo_behind_upstream"
+         |> to_bool);
+      check bool "runtime upstream drift warning surfaced" true
+        (runtime_resolution
+         |> member "warnings"
+         |> to_list
+         |> List.exists (function
+           | `String warning ->
+             contains_substring ~needle:"behind origin/main by 3 commit" warning
+           | _ -> false));
       let stub_probe () =
         Atomic.set runtime_probe_calls (Atomic.get runtime_probe_calls + 1);
         `Assoc

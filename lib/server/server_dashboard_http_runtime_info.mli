@@ -13,7 +13,7 @@
     a [module Runtime = ...] alias inside
     [test/test_dashboard_cache].
 
-    External surface (13 entries):
+    External surface (15 entries + one test record type):
     - {b runtime resolution + HTTP routes}
       ({!runtime_resolution_json},
       {!dashboard_runtime_probe_http_json},
@@ -30,6 +30,10 @@
       {!clear_git_rev_parse_short_probe_hook_for_tests},
       {!clear_git_rev_parse_short_cache_for_tests},
       {!seed_git_rev_parse_short_cache_for_tests}).
+    - {b upstream tracking-ref test seams}
+      ({!git_upstream_status},
+      {!set_git_upstream_status_probe_hook_for_tests},
+      {!clear_git_upstream_status_probe_hook_for_tests}).
 
     Internal helpers stay private at this boundary:
     local string/list helpers, runtime probe cache state,
@@ -139,3 +143,22 @@ val seed_git_rev_parse_short_cache_for_tests :
 (** Seeds the cache with [(dir, value, refreshed_at)]
     so the next {!git_rev_parse_short} call against
     [dir] reads the seeded value (subject to TTL). *)
+
+type git_upstream_status = {
+  branch : string option;
+  upstream_ref : string option;
+  upstream_head_commit : string option;
+  ahead_count : int option;
+  behind_count : int option;
+}
+(** Local tracking-ref status for the server checkout.  This deliberately
+    uses only already-fetched refs such as [@{upstream}] and does not perform
+    network access. *)
+
+val set_git_upstream_status_probe_hook_for_tests :
+  (string -> git_upstream_status option) -> unit
+(** Installs a test-only hook for upstream tracking-ref probes. *)
+
+val clear_git_upstream_status_probe_hook_for_tests : unit -> unit
+(** Removes the hook installed by
+    {!set_git_upstream_status_probe_hook_for_tests}. *)

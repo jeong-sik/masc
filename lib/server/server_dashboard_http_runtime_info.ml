@@ -222,25 +222,152 @@ let opt_commit_equal left right =
   | _ -> None
 ;;
 
+let opt_int_json = function
+  | None -> `Null
+  | Some value -> `Int value
+;;
+
+type git_upstream_status =
+  { branch : string option
+  ; upstream_ref : string option
+  ; upstream_head_commit : string option
+  ; ahead_count : int option
+  ; behind_count : int option
+  }
+
+let empty_git_upstream_status =
+  { branch = None
+  ; upstream_ref = None
+  ; upstream_head_commit = None
+  ; ahead_count = None
+  ; behind_count = None
+  }
+;;
+
+let git_upstream_status_probe_hook_for_tests :
+  (string -> git_upstream_status option) option Atomic.t
+  =
+  Atomic.make None
+;;
+
+let set_git_upstream_status_probe_hook_for_tests hook =
+  Atomic.set git_upstream_status_probe_hook_for_tests (Some hook)
+;;
+
+let clear_git_upstream_status_probe_hook_for_tests () =
+  Atomic.set git_upstream_status_probe_hook_for_tests None
+;;
+
+let git_probe_trimmed dir args =
+  let argv = [ "git"; "-C"; dir; "--no-optional-locks" ] @ args in
+  let raw_source = String.concat " " (List.map Filename.quote argv) in
+  match
+    Masc_exec.Exec_gate.run_argv_with_status
+      ~actor:(Masc_exec.Agent_id.of_string "system/runtime_info")
+      ~raw_source
+      ~summary:"dashboard runtime git upstream probe"
+      ~timeout_sec:git_rev_parse_short_probe_timeout_sec
+      argv
+  with
+  | Unix.WEXITED 0, output -> trim_to_option output
+  | _ -> None
+;;
+
+let parse_ahead_behind raw =
+  match
+    raw
+    |> String.trim
+    |> String.split_on_char '\t'
+    |> List.concat_map (String.split_on_char ' ')
+    |> List.filter (fun part -> String.trim part <> "")
+  with
+  | [ ahead; behind ] ->
+    (match int_of_string_opt ahead, int_of_string_opt behind with
+     | Some ahead, Some behind -> Some (ahead, behind)
+     | _ -> None)
+  | _ -> None
+;;
+
+let git_upstream_status path =
+  match Atomic.get git_upstream_status_probe_hook_for_tests with
+  | Some hook -> hook path
+  | None ->
+    (match trim_to_option path with
+     | None -> None
+     | Some dir when not (Sys.file_exists dir) -> None
+     | Some dir ->
+       let branch =
+         git_probe_trimmed dir [ "rev-parse"; "--abbrev-ref"; "HEAD" ]
+       in
+       let upstream_ref =
+         git_probe_trimmed
+           dir
+           [ "rev-parse"; "--abbrev-ref"; "--symbolic-full-name"; "@{upstream}" ]
+       in
+       let upstream_head_commit =
+         git_probe_trimmed dir [ "rev-parse"; "--short"; "@{upstream}" ]
+       in
+       let ahead_count, behind_count =
+         match
+           git_probe_trimmed
+             dir
+             [ "rev-list"; "--left-right"; "--count"; "HEAD...@{upstream}" ]
+         with
+         | Some raw ->
+           (match parse_ahead_behind raw with
+            | Some (ahead, behind) -> Some ahead, Some behind
+            | None -> None, None)
+         | None -> None, None
+       in
+       if branch = None
+          && upstream_ref = None
+          && upstream_head_commit = None
+          && ahead_count = None
+          && behind_count = None
+       then None
+       else
+         Some
+           { branch; upstream_ref; upstream_head_commit; ahead_count; behind_count })
+;;
+
 let deployment_state_json
       ~(build : Build_identity.t)
       ~server_repo_commit
       ~workspace_commit
       ~resolved_base_commit
+      ~upstream_status
       ~source_mismatch
   =
   let binary_commit_known = Option.is_some build.binary_commit in
   let deployed_matches_server_repo =
     opt_commit_equal build.commit server_repo_commit
   in
+  let deployed_matches_upstream =
+    opt_commit_equal build.commit upstream_status.upstream_head_commit
+  in
   let deployed_matches_runtime_repo =
     opt_commit_equal build.commit build.repo_head_commit
+  in
+  let built_matches_upstream =
+    opt_commit_equal build.binary_commit upstream_status.upstream_head_commit
   in
   let built_matches_runtime_repo =
     opt_commit_equal build.binary_commit build.repo_head_commit
   in
+  let server_repo_behind_upstream =
+    match upstream_status.behind_count with
+    | Some count -> count > 0
+    | None -> false
+  in
+  let upstream_diverged =
+    server_repo_behind_upstream
+    ||
+    match deployed_matches_upstream, built_matches_upstream with
+    | Some false, _ | _, Some false -> true
+    | _ -> false
+  in
   let status =
-    if source_mismatch
+    if source_mismatch || upstream_diverged
     then "diverged"
     else if not binary_commit_known
     then "unproven"
@@ -255,6 +382,15 @@ let deployment_state_json
     ; "status", `String status
     ; "operator_action_required", `Bool (String.equal status "diverged")
     ; "binary_commit_known", `Bool binary_commit_known
+    ; ( "upstream"
+      , `Assoc
+          [ "branch", opt_string_json upstream_status.branch
+          ; "ref", opt_string_json upstream_status.upstream_ref
+          ; "head_commit", opt_string_json upstream_status.upstream_head_commit
+          ; "ahead_count", opt_int_json upstream_status.ahead_count
+          ; "behind_count", opt_int_json upstream_status.behind_count
+          ; "source", `String "local_tracking_ref"
+          ] )
     ; ( "merged"
       , `Assoc
           [ "commit", opt_string_json server_repo_commit
@@ -290,8 +426,11 @@ let deployment_state_json
     ; ( "checks"
       , `Assoc
           [ "deployed_matches_merged", opt_bool_json deployed_matches_server_repo
+          ; "deployed_matches_upstream", opt_bool_json deployed_matches_upstream
           ; "deployed_matches_runtime_repo", opt_bool_json deployed_matches_runtime_repo
+          ; "built_matches_upstream", opt_bool_json built_matches_upstream
           ; "built_matches_runtime_repo", opt_bool_json built_matches_runtime_repo
+          ; "server_repo_behind_upstream", `Bool server_repo_behind_upstream
           ; "source_mismatch", `Bool source_mismatch
           ] )
     ]
@@ -498,6 +637,11 @@ let runtime_resolution_json (config : Coord.config) =
   let runtime_commit_known = Option.is_some runtime_commit in
   let server_repo_path = Build_identity.repo_root () in
   let server_repo_commit = Option.bind server_repo_path git_rev_parse_short in
+  let upstream_status =
+    server_repo_path
+    |> Option.bind (fun path -> git_upstream_status path)
+    |> Option.value ~default:empty_git_upstream_status
+  in
   let workspace_commit = git_rev_parse_short config.workspace_path in
   let resolved_base_commit = git_rev_parse_short config.base_path in
   let base_path_input =
@@ -590,6 +734,30 @@ let runtime_resolution_json (config : Coord.config) =
       :: acc
     else acc
   in
+  let add_upstream_drift_warning acc =
+    match upstream_status.behind_count, upstream_status.upstream_head_commit with
+    | Some behind, Some upstream when behind > 0 ->
+      let deployed =
+        Option.value ~default:"unknown" build.commit
+      in
+      let branch =
+        Option.value ~default:"detached" upstream_status.branch
+      in
+      let upstream_ref =
+        Option.value ~default:"upstream" upstream_status.upstream_ref
+      in
+      Printf.sprintf
+        "Server source branch %s is behind %s by %d commit(s); running commit \
+         %s differs from upstream %s. Fetch/build/restart from current main \
+         before trusting runtime proof."
+        branch
+        upstream_ref
+        behind
+        deployed
+        upstream
+      :: acc
+    | _ -> acc
+  in
   let add_server_workspace_mismatch_warning acc =
     if server_workspace_mismatch
     then (
@@ -655,6 +823,7 @@ let runtime_resolution_json (config : Coord.config) =
     []
     |> add_source_mismatch_warning
     |> add_binary_commit_unknown_warning
+    |> add_upstream_drift_warning
     |> add_server_workspace_mismatch_warning
     |> add_prompt_dir_mismatch_warning
     |> add_signal_warning
@@ -694,7 +863,7 @@ let runtime_resolution_json (config : Coord.config) =
       ; "build", Build_identity.to_yojson build
       ; ( "deployment_state"
         , deployment_state_json ~build ~server_repo_commit ~workspace_commit
-            ~resolved_base_commit ~source_mismatch )
+            ~resolved_base_commit ~upstream_status ~source_mismatch )
       ]
       @ Server_routes_http_runtime.keeper_fleet_runtime_resolution_fields () )
 ;;

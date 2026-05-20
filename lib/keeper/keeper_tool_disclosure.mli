@@ -205,6 +205,15 @@ val required_tool_satisfaction_for_turn
   -> Agent_sdk.Completion_contract.tool_call
   -> (unit, string) result
 
+(** Extract OAS completion-contract satisfying-tool hints from an error reason.
+
+    OAS v0.196.4 appends a line shaped like
+    ["Satisfying tools for this contract: [keeper_board_post, masc_broadcast]"].
+    Keeper recovery prompts consume this so retry guidance does not lose the
+    provider-side violation detail. Returns [] when the reason has no hint or
+    the hint is empty. *)
+val satisfying_tools_from_contract_violation_reason : string -> string list
+
 (** Project a tool name to its [tool_progress_class]. *)
 val classify_tool_progress : string -> tool_progress_class
 

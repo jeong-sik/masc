@@ -192,6 +192,32 @@ let test_satisfying_tools_for_turn_computes_from_affordances () =
   check (list string) "unknown affordance yields empty" [] empty
 ;;
 
+let test_contract_violation_reason_extracts_oas_satisfying_tools () =
+  let reason =
+    "required tool contract unsatisfied: model called [masc_status], but no call \
+     satisfied the required-tool predicate\n\
+     Satisfying tools for this contract: [keeper_board_post, masc_broadcast]"
+  in
+  check
+    (list string)
+    "extract OAS satisfying tools"
+    [ "keeper_board_post"; "masc_broadcast" ]
+    (KTD.satisfying_tools_from_contract_violation_reason reason);
+  check
+    (list string)
+    "dedupe and trim"
+    [ "keeper_board_post"; "masc_broadcast" ]
+    (KTD.satisfying_tools_from_contract_violation_reason
+       "Satisfying tools for this contract: [ keeper_board_post, masc_broadcast, \
+        keeper_board_post ]");
+  check
+    (list string)
+    "missing hint"
+    []
+    (KTD.satisfying_tools_from_contract_violation_reason
+       "required tool contract unsatisfied: model called []")
+;;
+
 let () =
   run
     "keeper_unified_required_tools"
@@ -220,6 +246,10 @@ let () =
             "satisfying_tools_for_turn computes from affordances"
             `Quick
             test_satisfying_tools_for_turn_computes_from_affordances
+        ; test_case
+            "contract violation reason extracts OAS satisfying tools"
+            `Quick
+            test_contract_violation_reason_extracts_oas_satisfying_tools
         ] )
     ]
 ;;

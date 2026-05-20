@@ -540,6 +540,27 @@ let required_tool_satisfaction_for_turn
   | _ -> required_tool_satisfaction_for_required_names ~satisfying_tools ~required_tool_names call
 ;;
 
+let parse_tool_csv text =
+  text
+  |> String.split_on_char ','
+  |> List.map String.trim
+  |> List.filter (fun tool -> tool <> "")
+  |> Keeper_types.dedupe_keep_order
+;;
+
+let satisfying_tools_from_contract_violation_reason reason =
+  let marker = "Satisfying tools for this contract: [" in
+  match String_util.find_substring reason marker with
+  | None -> []
+  | Some marker_start ->
+    let tools_start = marker_start + String.length marker in
+    (match String_util.find_substring ~pos:tools_start reason "]" with
+     | None -> []
+     | Some tools_end ->
+       String.sub reason tools_start (tools_end - tools_start)
+       |> parse_tool_csv)
+;;
+
 let classify_tool_progress name =
   if is_keeper_observation_alias name
   then Passive_status

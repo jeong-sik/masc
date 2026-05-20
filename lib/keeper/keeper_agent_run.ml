@@ -731,23 +731,40 @@ let run_turn
                      acc.contract_violation_retries <-
                        acc.contract_violation_retries + 1;
                      let satisfying_tools =
-                       Keeper_agent_tool_surface
-                       .generic_required_tool_candidate_names
-                         ~has_current_task:
-                           (Option.is_some
-                              (owned_active_task_id_for_meta
-                                 ~config ~meta:acc.meta))
-                         ~turn_affordances
-                         ~allowed_tool_names:
-                           acc.tool_surface.required_tool_candidate_names
+                       let local_tools =
+                         Keeper_agent_tool_surface
+                         .generic_required_tool_candidate_names
+                           ~has_current_task:
+                             (Option.is_some
+                                (owned_active_task_id_for_meta
+                                   ~config ~meta:acc.meta))
+                           ~turn_affordances
+                           ~allowed_tool_names:
+                             acc.tool_surface.required_tool_candidate_names
+                       in
+                       let oas_tools =
+                         Keeper_tool_disclosure
+                         .satisfying_tools_from_contract_violation_reason
+                           violation_reason
+                       in
+                       Keeper_types.dedupe_keep_order (oas_tools @ local_tools)
+                     in
+                     let retry_action =
+                       match satisfying_tools with
+                       | [] ->
+                         "No currently visible tool can satisfy this contract; \
+                          emit a concise blocker instead."
+                       | tools ->
+                         Printf.sprintf
+                           "You MUST call one of these tools: %s."
+                           (String.concat ", " tools)
                      in
                      let retry_feedback =
                        Printf.sprintf
                          "[CONTRACT VIOLATION] Your previous response was \
-                          rejected: %s. You MUST call one of these tools: \
-                          %s. Do NOT respond with text only."
+                          rejected: %s. %s Do NOT respond with text only."
                          violation_reason
-                         (String.concat ", " satisfying_tools)
+                         retry_action
                      in
                      (* Append violation feedback as a User message so the
                         model sees why its response was rejected. *)

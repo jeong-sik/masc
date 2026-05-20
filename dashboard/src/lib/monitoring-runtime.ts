@@ -1,9 +1,10 @@
 import type { Agent, Keeper, PipelineStage } from '../types'
 import type { KeeperCompositeSnapshot } from '../api/schemas/keeper-composite'
-import { keeperRuntimeBlockerHint } from './keeper-runtime-display'
-import { ATTENTION_PHASES } from './keeper-predicates'
 import { parseAgentStatus } from './agent-status'
-import { deriveKeeperOperationalState, type KeeperOperationalState } from './keeper-operational-state'
+import {
+  deriveKeeperRuntimeProjection,
+  type KeeperRuntimeProjection,
+} from './keeper-runtime-projection'
 
 export type RuntimeBand = 'active' | 'attention' | 'paused' | 'offline'
 
@@ -36,13 +37,6 @@ interface MonitoringEvidence {
   phase: PhaseMeta | null
   stage: StageMeta | null
 }
-
-// 5-minute threshold for the monitoring band "attention" gate — distinct
-// from config/constants.HEARTBEAT_STALE_MS (120s) which is the SSE
-// connection liveness check. This longer window avoids false "attention"
-// badges during brief heartbeat gaps that the SSE reconnect handles.
-const MONITORING_BAND_STALE_MS = 5 * 60 * 1000
-const DEFAULT_CONTEXT_ATTENTION_RATIO = 0.95
 
 const UNKNOWN_PHASE_META: PhaseMeta = {
   key: 'unknown',
@@ -155,28 +149,10 @@ export function keeperPhaseForDisplay(
   keeper: Keeper,
   composite: KeeperCompositeSnapshot | null = null,
 ): string | null {
-  return deriveKeeperOperationalState({ keeper, composite }).phase
+  return deriveKeeperRuntimeProjection({ keeper, composite }).opState.phase
 }
 
-function isHeartbeatStale(keeper: Keeper): boolean {
-  if (!keeper.last_heartbeat) return false
-  const ts = Date.parse(keeper.last_heartbeat)
-  if (Number.isNaN(ts)) return false
-  return Date.now() - ts > MONITORING_BAND_STALE_MS
-}
-
-function contextAttentionRatio(keeper: Keeper): number {
-  const value = keeper.runtime_warning_ctx_ratio
-  return typeof value === 'number' && Number.isFinite(value)
-    ? value
-    : DEFAULT_CONTEXT_ATTENTION_RATIO
-}
-
-function keeperBand(
-  keeper: Keeper,
-  opState: KeeperOperationalState,
-  phaseKey: string,
-): RuntimeBand {
+function keeperBand(projection: KeeperRuntimeProjection): RuntimeBand {
   // RFC-0135 §13 Goal-1 (audit B1, 2026-05-20): paused / offline / stuck
   // routing collapsed into the typed sum SSOT. The two prior local
   // checks
@@ -184,49 +160,26 @@ function keeperBand(
   //   - `lifecycleKey === 'offline' | 'unbooted' | 'stopped'
   //      || OFFLINE_PHASES.has(phaseKey)` (string-set lifecycle/phase
   //      bypass)
-  // were strict subsets of `opState.kind === 'paused'` and
-  // `opState.kind === 'offline'`; routing via `deriveKeeperOperational
-  // State` removes the parallel derivation entirely.
-  if (opState.kind === 'paused') return 'paused'
-  if (opState.kind === 'offline') return 'offline'
-  // RFC-0135 PR-12: live blocker → typed state's `stuck` variant.
-  // RFC-0135 §13 Goal-2: `opState.attention !== 'clean'` is the
-  // typed-axis form of the previously-external `runtime_attention`
-  // OR-合流 (composite.runtime_attention.{blocked, needs_attention}).
-  // Both are SSOT-internal axes — `keeperBand` no longer derives them.
-  const blockerOrBackendAttention =
-    opState.kind === 'stuck' || opState.attention !== 'clean'
-  // The remaining axes (KSM phase `ATTENTION_PHASES`, heartbeat
-  // staleness, context-ratio breach, social model recognition) are
-  // **external** to the typed SSOT today — RFC-0135 §13 lists them as
-  // axis-extension candidates (`phase`, `heartbeatStale`,
-  // `contextBreach`, `socialModelRecognized`). Until those land, this
-  // OR remains, but each axis is now an explicit standalone gate so a
-  // future PR can lift them one-by-one without touching the typed-sum
-  // arms.
-  const ksmPhaseAttention = ATTENTION_PHASES.has(phaseKey)
-  const externalSignal =
-    keeper.social_model_recognized === false
-    || isHeartbeatStale(keeper)
-    || (typeof keeper.context_ratio === 'number'
-        && keeper.context_ratio >= contextAttentionRatio(keeper))
-  if (blockerOrBackendAttention || ksmPhaseAttention || externalSignal) {
+  // were strict subsets of `projection.opState.kind === 'paused'` and
+  // `projection.opState.kind === 'offline'`; routing through the runtime
+  // projection keeps monitoring aligned with detail live-truth.
+  if (projection.opState.kind === 'paused') return 'paused'
+  if (projection.opState.kind === 'offline') return 'offline'
+  if (projection.signals.some(signal => signal.contributesToAttention)) {
     return 'attention'
   }
   return 'active'
 }
 
-function keeperHint(keeper: Keeper, band: RuntimeBand, stage: StageMeta): string | null {
-  const runtimeBlocker = keeperRuntimeBlockerHint(keeper)
-  if (runtimeBlocker) return runtimeBlocker
-  if (keeper.social_model_recognized === false) {
-    return '미인식 대화 모델 설정이 감지됐습니다.'
-  }
+function keeperHint(
+  keeper: Keeper,
+  projection: KeeperRuntimeProjection,
+  band: RuntimeBand,
+  stage: StageMeta,
+): string | null {
+  const signalHint = projection.signals.find(signal => signal.contributesToAttention && signal.hint !== null)?.hint
+  if (signalHint) return signalHint
   if (band === 'paused') return '운영자가 멈춰 둔 상태입니다.'
-  if (isHeartbeatStale(keeper)) return '오래 응답이 없어 실제 상태 확인이 필요합니다.'
-  if (typeof keeper.context_ratio === 'number' && keeper.context_ratio >= contextAttentionRatio(keeper)) {
-    return `컨텍스트 사용량이 ${Math.round(keeper.context_ratio * 100)}%입니다.`
-  }
   if (band === 'attention') return stage.description
   if (band === 'offline' && keeper.generation === 0 && (keeper.turn_count ?? 0) === 0) {
     return '아직 부팅된 적 없는 등록 런타임입니다.'
@@ -239,16 +192,16 @@ export function summarizeKeeperMonitoring(
   keeper: Keeper,
   composite: KeeperCompositeSnapshot | null = null,
 ): KeeperMonitoringSummary {
-  const opState = deriveKeeperOperationalState({ keeper, composite })
-  const phaseKey = opState.phase ?? 'unknown'
+  const projection = deriveKeeperRuntimeProjection({ keeper, composite })
+  const phaseKey = projection.opState.phase ?? 'unknown'
   const stage = stageMeta(normalizeStage(keeper.pipeline_stage))
-  const band = BAND_META[keeperBand(keeper, opState, phaseKey)]
+  const band = BAND_META[keeperBand(projection)]
 
   return {
     band,
     phase: phaseMeta(phaseKey),
     stage,
-    hint: keeperHint(keeper, band.key, stage),
+    hint: keeperHint(keeper, projection, band.key, stage),
   }
 }
 

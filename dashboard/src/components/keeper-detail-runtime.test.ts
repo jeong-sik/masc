@@ -755,6 +755,8 @@ describe('RuntimeLensSection', () => {
     })
 
     expect(summary.headline).toBe('조치 필요')
+    expect(summary.rows.find(row => row.label === '동기화')?.detail).toContain('tool needs_execution_progress')
+    expect(summary.rows.find(row => row.label === '동기화')?.detail).toContain('KSM running')
     expect(summary.rows.find(row => row.label === '런타임')?.value).toBe('fiber alive')
     expect(summary.rows.find(row => row.label === '현재 턴')?.value).toBe('no live turn')
     expect(summary.rows.find(row => row.label === '최신 증거')?.value).toBe('turn #7 finished')
@@ -766,6 +768,8 @@ describe('RuntimeLensSection', () => {
   })
 
   it('keeps previous receipt blockers out of the current live-turn summary', () => {
+    const trace = runtimeTraceFixture()
+    trace.runtime_lens.gaps = []
     const summary = deriveKeeperLiveTruth({
       keeper: {
         name: 'sangsu',
@@ -798,7 +802,7 @@ describe('RuntimeLensSection', () => {
           live_turn_last_progress_at: 1_778_688_699,
         },
       }),
-      runtimeTrace: runtimeTraceFixture(),
+      runtimeTrace: trace,
       runtimeResolution: null,
     })
 

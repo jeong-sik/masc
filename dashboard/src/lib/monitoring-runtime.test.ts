@@ -196,4 +196,50 @@ describe('summarizeKeeperMonitoring', () => {
       expect(summary.band.key).toBe('attention')
     })
   })
+
+  it('routes heartbeat/context/social attention through the runtime projection', () => {
+    const summary = summarizeKeeperMonitoring({
+      name: 'keeper-organism',
+      status: 'idle',
+      phase: 'Running',
+      last_heartbeat: '1970-01-01T00:00:00Z',
+      context_ratio: 0.99,
+      social_model_recognized: false,
+    } as Keeper)
+
+    expect(summary.band.key).toBe('attention')
+    expect(summary.hint).toBe('오래 응답이 없어 실제 상태 확인이 필요합니다.')
+  })
+
+  it('routes current tool-contract attention through the runtime projection', () => {
+    const compositeToolAttention = {
+      keeper: 'keeper-tool',
+      phase: 'running',
+      turn_phase: 'idle',
+      decision: { stage: 'idle' },
+      cascade: { state: 'idle' },
+      compaction: { stage: 'idle' },
+      circuit_breaker: { state: 'closed' },
+      is_live: false,
+      execution: {
+        tool_contract_result: 'missing_required_tool_use',
+      },
+      runtime_attention: {
+        blocked: false,
+        needs_attention: false,
+        execution_current: true,
+        stale_execution_receipt: false,
+      },
+    } as unknown as Parameters<typeof summarizeKeeperMonitoring>[1] extends infer C ? C : never
+    const summary = summarizeKeeperMonitoring({
+      name: 'keeper-tool',
+      status: 'idle',
+      phase: 'Running',
+      last_heartbeat: new Date().toISOString(),
+      keepalive_running: true,
+    } as Keeper, compositeToolAttention)
+
+    expect(summary.band.key).toBe('attention')
+    expect(summary.hint).toBe('도구 계약 결과가 missing_required_tool_use입니다.')
+  })
 })

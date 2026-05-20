@@ -186,10 +186,21 @@ let load_toml_in_memory ~emit_telemetry config_path =
    in-memory [Yojson.Safe.t] view for internal consumers. *)
 let load_catalog_source_impl ~emit_telemetry path =
   try load_toml_in_memory ~emit_telemetry path with
-  | Sys_error msg -> Error msg
+  (* All four arms now name the cascade source path so the operator
+     reading the error knows *which* cascade.toml failed.  The bare
+     [Sys_error msg] previously emitted only the OCaml stdlib message
+     (often "permission denied" or "is a directory") with no file
+     identification — same string regardless of which cascade file
+     was being loaded. *)
+  | Sys_error msg ->
+    Error (Printf.sprintf "cascade source IO error (path=%s): %s" path msg)
   | Unix.Unix_error (err, fn, arg) ->
-    Error (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message err))
-  | Yojson.Json_error msg -> Error (Printf.sprintf "JSON error: %s" msg)
+    Error
+      (Printf.sprintf
+         "cascade source Unix error (path=%s): %s(%s): %s"
+         path fn arg (Unix.error_message err))
+  | Yojson.Json_error msg ->
+    Error (Printf.sprintf "cascade source JSON error (path=%s): %s" path msg)
   | End_of_file ->
     (* [Fs_compat.load_file_unix] reads [in_channel_length] first, then
        [really_input_string len]. If the file is truncated between the

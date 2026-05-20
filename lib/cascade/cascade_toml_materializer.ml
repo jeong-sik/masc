@@ -438,7 +438,16 @@ let render_toml_file_to_json_string toml_path =
     let content = Fs_compat.load_file toml_path in
     render_toml_string_to_json_string content
   with
-  | Sys_error msg -> Error msg
+  (* Name the source path: the bare [Sys_error msg] previously gave
+     only "no such file or directory" / "permission denied" with no
+     file identification.  Callers (cascade routing config, fallback
+     materialization) need to know *which* TOML failed so they can
+     hand the operator a specific path to check. *)
+  | Sys_error msg ->
+    Error
+      (Printf.sprintf
+         "cascade TOML file IO error (path=%s): %s"
+         toml_path msg)
 ;;
 
 let render_toml_to_json_string ~config_path =

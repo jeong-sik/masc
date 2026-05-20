@@ -1478,6 +1478,8 @@
 
 (include stanzas/test_keeper_production_readiness_gate.inc)
 
+(include stanzas/test_keeper_turn_driver_exhaustion_log_source.inc)
+
 (include stanzas/test_cdal_ledger_health_10115.inc)
 
 (include stanzas/test_cdal_runtime_health_15748.inc)

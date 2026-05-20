@@ -1442,7 +1442,7 @@ let run_keeper_cycle
                         meta.name
                         (Some failure_reason);
                       match
-                        sync_keeper_paused_state ~config ~meta:updated_meta ~paused:true
+                        sync_keeper_paused_state ~config ~meta:updated_meta ~paused:true ()
                       with
                       | Ok paused_meta ->
                         let approval_id =

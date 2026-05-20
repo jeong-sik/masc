@@ -57,6 +57,12 @@ let oas_timeout_guard_sec = 15.0
 
 let min_oas_timeout_budget_sec = 15.0
 
+let next_auto_resume_after_sec previous =
+  Keeper_supervisor_types.next_auto_resume_after_sec
+    ~initial_sec:Env_config.KeeperSupervisor.auto_resume_initial_sec
+    ~max_sec:Env_config.KeeperSupervisor.auto_resume_max_sec
+    previous
+
 type oas_timeout_budget_resolution = {
   effective_timeout_sec : float;
   adaptive_timeout_sec : float;
@@ -500,6 +506,7 @@ let pause_keeper_for_overflow
     {
       meta with
       paused = true;
+      auto_resume_after_sec = next_auto_resume_after_sec meta.auto_resume_after_sec;
       updated_at = now_iso ();
     }
   in
@@ -557,13 +564,21 @@ let pause_keeper_for_overflow
   paused_meta
 
 let sync_keeper_paused_state
+    ?(auto_resume = false)
     ~(config : Coord.config)
     ~(meta : keeper_meta)
-    ~(paused : bool) : (keeper_meta, string) result =
+    ~(paused : bool)
+    () : (keeper_meta, string) result =
+  let auto_resume_after_sec =
+    if paused && auto_resume then
+      next_auto_resume_after_sec meta.auto_resume_after_sec
+    else meta.auto_resume_after_sec
+  in
   let synced_meta =
     {
       meta with
       paused;
+      auto_resume_after_sec;
       updated_at = now_iso ();
     }
   in
@@ -670,7 +685,14 @@ let make_post_turn_resilience_executor
       (Some
          (Keeper_registry.Provider_runtime_error
             { code; detail; provider_id = None; http_status = None }));
-    match sync_keeper_paused_state ~config ~meta:latest_meta ~paused:true with
+    match
+      sync_keeper_paused_state
+        ~auto_resume:true
+        ~config
+        ~meta:latest_meta
+        ~paused:true
+        ()
+    with
     | Ok paused_meta ->
         on_paused paused_meta;
         Ok ()
@@ -814,7 +836,7 @@ let enqueue_partial_commit_continue_gate
       match decision with
       | Agent_sdk.Hooks.Approve
       | Agent_sdk.Hooks.Edit _ ->
-        (match sync_keeper_paused_state ~config ~meta:latest_meta ~paused:false with
+        (match sync_keeper_paused_state ~config ~meta:latest_meta ~paused:false () with
          | Ok resumed_meta ->
              Keeper_registry.set_failure_reason ~base_path:config.base_path meta.name None;
              Keeper_registry.reset_turn_failures ~base_path:config.base_path meta.name;
@@ -830,7 +852,7 @@ let enqueue_partial_commit_continue_gate
                ~labels:[("keeper", meta.name); ("site", Keeper_cascade_sync_failure_site.(to_label Resume_sync))]
                ()
       | Agent_sdk.Hooks.Reject reason ->
-        (match sync_keeper_paused_state ~config ~meta:latest_meta ~paused:true with
+        (match sync_keeper_paused_state ~config ~meta:latest_meta ~paused:true () with
          | Ok paused_meta ->
              Keeper_registry.set_failure_reason
                ~base_path:config.base_path meta.name

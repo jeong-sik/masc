@@ -205,11 +205,16 @@ val pause_keeper_for_overflow :
     paused meta. *)
 
 val sync_keeper_paused_state :
+  ?auto_resume:bool ->
   config:Coord.config ->
   meta:keeper_meta ->
   paused:bool ->
+  unit ->
   (keeper_meta, string) result
 (** Persist paused/resumed state before mutating the live registry/phase.
+    [auto_resume] means the pause is supervisor-recoverable and should receive
+    the standard exponential auto-resume backoff.
+
     Returns [Error] when disk sync fails so callers can surface the failure
     instead of silently diverging runtime vs persisted state. *)
 

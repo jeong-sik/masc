@@ -150,9 +150,11 @@ val resolved_max_context_for_turn : meta:Keeper_types.keeper_meta -> string list
     Returns [Error] when disk sync fails so callers can surface the failure
     instead of silently diverging runtime vs persisted state. *)
 val sync_keeper_paused_state
-  :  config:Coord.config
+  :  ?auto_resume:bool
+  -> config:Coord.config
   -> meta:Keeper_types.keeper_meta
   -> paused:bool
+  -> unit
   -> (Keeper_types.keeper_meta, string) result
 
 (** Required-tool contract failures are persistent keeper/provider contract

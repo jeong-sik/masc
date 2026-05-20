@@ -16,6 +16,13 @@ let gate_kind_of_livelock_reason ~keeper_name reason =
     Keeper_livelock_state.Attempts_exhausted
 ;;
 
+let next_auto_resume_after_sec previous =
+  Keeper_supervisor_types.next_auto_resume_after_sec
+    ~initial_sec:Env_config.KeeperSupervisor.auto_resume_initial_sec
+    ~max_sec:Env_config.KeeperSupervisor.auto_resume_max_sec
+    previous
+;;
+
 let record_escalation_log ~keeper_name ~keeper_turn_id ~turn_id ~reason_string ~gate_kind =
   match Keeper_livelock_state.record_block ~keeper:keeper_name ~gate_kind () with
   | `First ->
@@ -78,6 +85,7 @@ let persist_turn_livelock_pause
   let updated =
     { meta with
       paused = true
+    ; auto_resume_after_sec = next_auto_resume_after_sec meta.auto_resume_after_sec
     ; updated_at = Keeper_types.now_iso ()
     ; runtime = { meta.runtime with last_blocker = Some blocker }
     }

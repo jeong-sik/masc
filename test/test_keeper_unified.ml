@@ -5697,6 +5697,11 @@ let test_run_keeper_cycle_livelock_block_returns_error () =
          (match Masc_mcp.Keeper_types.read_meta config meta.name with
           | Ok (Some persisted) ->
             check bool "livelock persists paused keeper" true persisted.paused;
+            check
+              bool
+              "livelock pause marks auto-resumable"
+              true
+              (Option.is_some persisted.auto_resume_after_sec);
             (match persisted.runtime.last_blocker with
              | Some blocker ->
                check
@@ -6095,7 +6100,7 @@ let test_sync_keeper_paused_state_surfaces_write_failure_without_mutating_regist
        let keepers_path = Filename.concat masc_root "keepers" in
        let oc = open_out_bin keepers_path in
        close_out oc;
-       match UT.sync_keeper_paused_state ~config ~meta ~paused:true with
+       match UT.sync_keeper_paused_state ~config ~meta ~paused:true () with
        | Ok _ -> fail "expected paused-state sync failure"
        | Error msg ->
          check

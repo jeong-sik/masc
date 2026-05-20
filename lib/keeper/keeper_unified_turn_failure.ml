@@ -66,6 +66,7 @@ let record_failure_and_maybe_escalate
           ~config
           ~meta:pause_meta
           ~paused:true
+          ()
       with
       | Ok _ ->
         if cascade_auto_paused

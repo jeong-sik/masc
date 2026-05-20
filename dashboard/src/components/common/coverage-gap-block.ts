@@ -14,20 +14,47 @@ export type CoverageErrorHint = {
   href: string
 }
 
+// Substring vocabulary mirrors backend SSOT in
+// `lib/keeper_disk_pressure.ml` (`is_disk_exhaustion_text`) so the
+// dashboard reaches the same classification the runtime already acts on.
+// Add new patterns here only when (a) backend has a matching typed
+// detector, and (b) there is a canonical RFC describing the operator
+// remediation.
+const FD_EXHAUSTION_NEEDLES = [
+  'too many open files',
+  'enfile',
+  'emfile',
+] as const
+
+const DISK_EXHAUSTION_NEEDLES = [
+  'no space left on device',
+  'enospc',
+  'disk quota exceeded',
+  'quota exceeded',
+  'disk full',
+  'not enough space',
+] as const
+
 export function classifyCoverageError(error: string | null | undefined): CoverageErrorHint | null {
   if (!error) return null
   const lower = error.toLowerCase()
   // RFC-0097: keeper-sandbox container reuse — root fix for the 2026-05-16
   // ENFILE storm that drove Docker_spawn_throttle + container reuse.
-  if (
-    lower.includes('too many open files')
-    || lower.includes('enfile')
-    || lower.includes('emfile')
-  ) {
+  if (FD_EXHAUSTION_NEEDLES.some(needle => lower.includes(needle))) {
     return {
       reason: 'fd_exhaustion',
       label: 'FD exhaustion — see RFC-0097',
       href: 'https://github.com/jeong-sik/masc-mcp/blob/main/docs/rfc/RFC-0097-keeper-sandbox-container-reuse.md',
+    }
+  }
+  // RFC-0122: keeper disk pressure circuit breaker — mirrors backend
+  // detector at `lib/keeper_disk_pressure.ml:55` which trips spawn slot
+  // admission on these substrings.
+  if (DISK_EXHAUSTION_NEEDLES.some(needle => lower.includes(needle))) {
+    return {
+      reason: 'disk_exhaustion',
+      label: 'Disk pressure — see RFC-0122',
+      href: 'https://github.com/jeong-sik/masc-mcp/blob/main/docs/rfc/RFC-0122-keeper-disk-pressure.md',
     }
   }
   return null

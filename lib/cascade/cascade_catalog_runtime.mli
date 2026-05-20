@@ -134,13 +134,15 @@ val resolve_named_providers_strict :
 
 type secondary_resolution = {
   providers : Llm_provider.Provider_config.t list;
+  tiered_providers : Cascade_catalog_runtime_named_providers.tiered_provider list;
   secondary_resolver :
     int -> Llm_provider.Provider_config.t ->
     Llm_provider.Provider_config.t option;
 }
-(** Providers resolved from a named cascade plus an index-aware secondary
-    lookup derived from the same ordered entries. The resolver is pure
-    over this snapshot and does not re-read or re-rotate catalog state. *)
+(** Providers resolved from a named cascade plus their admission tier
+    identities and an index-aware secondary lookup derived from the same
+    ordered entries. The resolver is pure over this snapshot and does
+    not re-read or re-rotate catalog state. *)
 
 val resolve_named_providers_strict_with_secondary_resolver :
   ?sw:Eio.Switch.t ->

@@ -199,6 +199,14 @@ let test_keeper_policy_proactive_required () =
   | A.Required -> ()
   | A.Bypass -> Alcotest.fail "proactive keeper turns must require admission"
 
+let test_keeper_policy_interactive_required () =
+  match
+    KTD.cascade_tier_admission_policy_of_priority
+      Llm_provider.Request_priority.Interactive
+  with
+  | A.Required -> ()
+  | A.Bypass -> Alcotest.fail "interactive keeper turns must require admission"
+
 let test_keeper_policy_background_bypass () =
   match
     KTD.cascade_tier_admission_policy_of_priority
@@ -235,7 +243,7 @@ let test_keeper_wire_enabled_rejects_at_capacity () =
 let test_keeper_wire_disabled_is_passthrough () =
   let t = A.create ~default_max_inflight:0 () in
   let ran = ref false in
-  let outcome =
+  let admission_result =
     KTD.with_cascade_tier_admission_for_testing
       ~admission:t
       ~enabled:false
@@ -246,13 +254,17 @@ let test_keeper_wire_disabled_is_passthrough () =
          "ok")
   in
   bool_check "attempt ran when flag disabled" true !ran;
-  check (result string signal_testable) "disabled flag passthrough" (Ok "ok") outcome;
+  check
+    (result string signal_testable)
+    "disabled flag passthrough"
+    (Ok "ok")
+    admission_result;
   int_check "disabled path did not touch counter" 0
     (A.current_inflight t ~tier_id:"keeper-turn")
 
 let test_keeper_wire_bypass_policy_is_passthrough () =
   let t = A.create ~default_max_inflight:0 () in
-  let outcome =
+  let admission_result =
     KTD.with_cascade_tier_admission_for_testing
       ~admission:t
       ~enabled:true
@@ -260,7 +272,11 @@ let test_keeper_wire_bypass_policy_is_passthrough () =
       ~admission_policy:A.Bypass
       (fun () -> 7)
   in
-  check (result int signal_testable) "bypass policy passthrough" (Ok 7) outcome;
+  check
+    (result int signal_testable)
+    "bypass policy passthrough"
+    (Ok 7)
+    admission_result;
   int_check "bypass path did not touch counter" 0
     (A.current_inflight t ~tier_id:"keeper-turn")
 
@@ -299,6 +315,8 @@ let suite =
     ( "keeper-wire",
       [ test_case "proactive maps to Required" `Quick
           test_keeper_policy_proactive_required;
+        test_case "interactive maps to Required" `Quick
+          test_keeper_policy_interactive_required;
         test_case "background maps to Bypass" `Quick
           test_keeper_policy_background_bypass;
         test_case "enabled path rejects at capacity" `Quick

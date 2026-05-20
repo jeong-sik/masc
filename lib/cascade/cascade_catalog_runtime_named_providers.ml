@@ -18,12 +18,17 @@ let candidate_key_of_cfg (cfg : Llm_provider.Provider_config.t) =
       cfg.headers,
       cfg.supports_tool_choice_override )
 
+type tiered_provider = {
+  provider_cfg : Llm_provider.Provider_config.t;
+  tier_id : string;
+}
+
 let direct_candidate_providers (profile : profile_snapshot) =
   List.map
     (fun (candidate : candidate_runtime) -> candidate.provider_cfg)
     profile.candidates
 
-let direct_candidate_providers_ordered_by_entries
+let direct_candidates_ordered_by_entries
     (profile : profile_snapshot)
     (ordered_entries : Cascade_config_loader.weighted_entry list) =
   match profile.candidates with
@@ -52,7 +57,7 @@ let direct_candidate_providers_ordered_by_entries
         match Hashtbl.find_opt index model_string with
         | Some q when not (Queue.is_empty q) ->
             let candidate = Queue.pop q in
-            Some candidate.provider_cfg
+            Some candidate
         | _ -> None
       in
       let ordered =
@@ -62,7 +67,31 @@ let direct_candidate_providers_ordered_by_entries
           ordered_entries
       in
       if List.length ordered = List.length candidates then ordered
-      else direct_candidate_providers profile
+      else profile.candidates
+
+let direct_candidate_providers_ordered_by_entries
+    (profile : profile_snapshot)
+    (ordered_entries : Cascade_config_loader.weighted_entry list) =
+  direct_candidates_ordered_by_entries profile ordered_entries
+  |> List.map (fun (candidate : candidate_runtime) -> candidate.provider_cfg)
+
+let tier_id_for_candidate (profile : profile_snapshot) _candidate =
+  profile.name
+
+let tiered_provider_of_candidate
+    profile
+    (candidate : candidate_runtime)
+    : tiered_provider =
+  {
+    provider_cfg = candidate.provider_cfg;
+    tier_id = tier_id_for_candidate profile candidate;
+  }
+
+let tiered_providers_of_ordered_entries ~(profile : profile_snapshot)
+    ~cascade_name:_
+    (ordered_entries : Cascade_config_loader.weighted_entry list) =
+  direct_candidates_ordered_by_entries profile ordered_entries
+  |> List.map (tiered_provider_of_candidate profile)
 
 let provider_configs_of_ordered_entries ~(profile : profile_snapshot)
     ~cascade_name:_
@@ -186,6 +215,7 @@ let resolve_named_providers_strict ?sw ?net ?clock ?provider_filter
 
 type secondary_resolution = {
   providers : Llm_provider.Provider_config.t list;
+  tiered_providers : tiered_provider list;
   secondary_resolver :
     int ->
     Llm_provider.Provider_config.t ->
@@ -224,13 +254,17 @@ let resolve_named_providers_strict_with_secondary_resolver ?sw ?net ?clock
       in
       let parsed_pairs =
         let direct_pairs =
-          direct_candidate_providers_ordered_by_entries profile
-            ordered_entries
-          |> List.map (fun cfg -> (cfg, None))
+          tiered_providers_of_ordered_entries ~profile
+            ~cascade_name:normalized ordered_entries
+          |> List.map (fun tiered -> (tiered, None))
         in
         direct_pairs
       in
-      let primaries = List.map fst parsed_pairs in
+      let primaries =
+        List.map
+          (fun (tiered, _) -> tiered.provider_cfg)
+          parsed_pairs
+      in
       (match
          Cascade_config.apply_provider_filter_strict ~provider_filter
            ~label:normalized primaries
@@ -247,7 +281,7 @@ let resolve_named_providers_strict_with_secondary_resolver ?sw ?net ?clock
          let filtered_pairs =
            parsed_pairs
            |> List.filter (fun (primary, _) ->
-                  provider_filter_allows primary)
+                  provider_filter_allows primary.provider_cfg)
            |> List.map (fun (primary, secondary) ->
                   let secondary =
                     match secondary with
@@ -256,7 +290,12 @@ let resolve_named_providers_strict_with_secondary_resolver ?sw ?net ?clock
                   in
                   (primary, secondary))
          in
-         let providers = List.map fst filtered_pairs in
+         let tiered_providers = List.map fst filtered_pairs in
+         let providers =
+           List.map
+             (fun tiered -> tiered.provider_cfg)
+             tiered_providers
+         in
          if providers = [] then (
            Cascade_metrics.on_resolve_failure ~cascade:normalized
              ~reason:"no_callable_providers";
@@ -273,12 +312,12 @@ let resolve_named_providers_strict_with_secondary_resolver ?sw ?net ?clock
              else
                let indexed_primary, secondary = slots.(provider_index) in
                if
-                 candidate_key_of_cfg indexed_primary
+                 candidate_key_of_cfg indexed_primary.provider_cfg
                  = candidate_key_of_cfg primary
                then secondary
                else None
            in
-           Ok { providers; secondary_resolver })
+           Ok { providers; tiered_providers; secondary_resolver })
 
 (* Deprecated compatibility hook for RFC-0027 PR-9b dual-track resolution.
    Declarative cascade execution now carries typed [Provider_config]

@@ -1362,7 +1362,7 @@ let test_health_response_full_query_uses_snapshot_cache () =
      | _ -> false)
 
 let test_full_health_refresh_timeout_is_independent_from_shell_budget () =
-  let interval_sec, timeout_sec =
+  let interval_sec, timeout_sec, ttl_sec =
     Server_routes_http_runtime.For_testing.full_health_refresh_timing ()
   in
   Alcotest.(check (float 0.001)) "full health timeout uses dedicated budget"
@@ -1371,7 +1371,9 @@ let test_full_health_refresh_timeout_is_independent_from_shell_budget () =
   Alcotest.(check bool) "full health timeout is below shell full budget" true
     (timeout_sec < Env_config_runtime.Dashboard.shell_timeout_sec);
   Alcotest.(check bool) "full health interval exceeds timeout" true
-    (interval_sec > timeout_sec)
+    (interval_sec > timeout_sec);
+  Alcotest.(check bool) "snapshot ttl covers refresh interval" true
+    (ttl_sec >= interval_sec *. 2.0)
 
 let test_full_health_refresh_timeout_preserves_last_snapshot () =
   Server_routes_http_runtime.For_testing.reset_full_health_snapshot ();

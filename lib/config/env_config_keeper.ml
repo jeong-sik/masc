@@ -842,6 +842,18 @@ module CascadeSaturationSignal = struct
     get_bool ~default:false "MASC_CASCADE_SATURATION_SIGNAL_ENABLED"
 end
 
+(** {1 Cascade Tier Admission (RFC-0153 Phase B.2)}
+
+    Runtime kill switch for per-tier inflight admission in the main keeper
+    cascade path. Default on: RFC-0153 Phase B.2 is intended to prevent
+    keeper stampedes before provider dispatch. Operators can set the flag
+    false as an emergency rollback without also disabling the additive Phase
+    A.2 saturation-signal metric. *)
+module CascadeTierAdmission = struct
+  let enabled () =
+    Feature_flag_registry.get_bool "MASC_CASCADE_TIER_ADMISSION_ENABLED"
+end
+
 (** {1 Cascade Runtime Overrides}
 
     Runtime-only narrowing of the MASC cascade provider set. The underlying

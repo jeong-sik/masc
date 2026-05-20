@@ -1006,8 +1006,6 @@ type full_health_snapshot = {
   stale_since_ts : float option;
 }
 
-let full_health_snapshot_ttl_sec = 2.0
-
 let full_health_snapshot_mu = Stdlib.Mutex.create ()
 let full_health_snapshot = ref None
 let full_health_refresh_in_flight = ref false
@@ -1030,6 +1028,10 @@ let full_health_critical_failure_threshold =
 
 let full_health_refresh_interval_sec =
   Float.max 30.0 (full_health_refresh_timeout_sec +. 5.0)
+;;
+
+let full_health_snapshot_ttl_sec =
+  Float.max 60.0 (full_health_refresh_interval_sec *. 2.0)
 ;;
 
 let with_full_health_snapshot_lock f =
@@ -1373,7 +1375,9 @@ module For_testing = struct
   let mark_full_health_snapshot_error = mark_full_health_snapshot_error
 
   let full_health_refresh_timing () =
-    (full_health_refresh_interval_sec, full_health_refresh_timeout_sec)
+    ( full_health_refresh_interval_sec,
+      full_health_refresh_timeout_sec,
+      full_health_snapshot_ttl_sec )
 end
 
 let full_health_requested request =

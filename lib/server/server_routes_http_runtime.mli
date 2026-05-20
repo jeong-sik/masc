@@ -222,8 +222,8 @@ module For_testing : sig
   val mark_full_health_snapshot_error : exn -> unit
   (** Records a failed background refresh without recomputing the snapshot. *)
 
-  val full_health_refresh_timing : unit -> float * float
-  (** Returns [(interval_sec, timeout_sec)] for the full-health refresh loop. *)
+  val full_health_refresh_timing : unit -> float * float * float
+  (** Returns [(interval_sec, timeout_sec, ttl_sec)] for full-health refresh. *)
 end
 
 val keeper_fleet_runtime_resolution_fields : unit -> (string * Yojson.Safe.t) list

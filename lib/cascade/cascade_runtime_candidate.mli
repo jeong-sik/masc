@@ -12,7 +12,7 @@ type context_window_hint =
   ; is_local_model : bool
   }
 
-val of_provider_config : Llm_provider.Provider_config.t -> t
+val of_provider_config : ?tier_id:string -> Llm_provider.Provider_config.t -> t
 val of_provider_configs : Llm_provider.Provider_config.t list -> t list
 
 val runtime_url_of_label : string -> string option
@@ -44,6 +44,7 @@ val context_window_hint_of_labels : string list -> context_window_hint
 val threshold_multipliers_of_runtime_id : string -> float * float
 
 val health_key : t -> string
+val tier_id : t -> string
 val model_health_key : t -> string
 val health_keys : t -> string list
 val provider_label : t -> string

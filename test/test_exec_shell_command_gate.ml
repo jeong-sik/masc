@@ -337,7 +337,12 @@ let test_lower_typed_single_stage () =
     }
   in
   match
-    Gate.lower_typed_pipeline ~stages:[ stage ] ~sandbox:Gate.host_sandbox ()
+    Gate.lower_typed_pipeline
+      ~stages:[ stage ]
+      ~allowlist
+      ~path_policy:Gate.allow_all_paths
+      ~sandbox:Gate.host_sandbox
+      ()
   with
   | Gate.Allow context ->
     Alcotest.(check int) "stage count" 1 (Gate.stage_count context);
@@ -374,6 +379,8 @@ let test_lower_typed_three_stage_matches_raw () =
               ; make_stage "sort" []
               ; make_stage "head" [ "-20" ]
               ]
+      ~allowlist
+      ~path_policy:Gate.allow_all_paths
       ~sandbox:Gate.host_sandbox
       ()
   in
@@ -404,12 +411,60 @@ let test_lower_typed_three_stage_matches_raw () =
 
 let test_lower_typed_empty_is_cannot_parse () =
   match
-    Gate.lower_typed_pipeline ~stages:[] ~sandbox:Gate.host_sandbox ()
+    Gate.lower_typed_pipeline
+      ~stages:[]
+      ~allowlist
+      ~path_policy:Gate.allow_all_paths
+      ~sandbox:Gate.host_sandbox
+      ()
   with
   | Gate.Cannot_parse { reason = Gate.Parse_error } -> ()
   | other ->
     Alcotest.failf
       "empty typed pipeline must yield Cannot_parse parse_error, got %s"
+      (Gate.verdict_tag other)
+;;
+
+let test_lower_typed_applies_allowlist_policy () =
+  match
+    Gate.lower_typed_pipeline
+      ~stages:[ make_stage "rg" [ "foo" ]; make_stage "evil_cmd" [] ]
+      ~allowlist
+      ~path_policy:Gate.allow_all_paths
+      ~sandbox:Gate.host_sandbox
+      ()
+  with
+  | Gate.Reject
+      { reason = Gate.Pipeline_segment_disallowed { stage = 2; bin = "evil_cmd" }
+      ; _
+      } -> ()
+  | other ->
+    Alcotest.failf
+      "expected typed pipeline allowlist reject, got %s"
+      (Gate.verdict_tag other)
+;;
+
+let test_lower_typed_applies_path_policy () =
+  let classify ~raw_path =
+    if raw_path = "/etc/shadow" then `Deny "shadow not allowed" else `Allow
+  in
+  match
+    Gate.lower_typed_pipeline
+      ~stages:[ make_stage "cat" [ "/etc/shadow" ] ]
+      ~allowlist
+      ~path_policy:{ Gate.classify = Some classify }
+      ~sandbox:Gate.host_sandbox
+      ()
+  with
+  | Gate.Reject
+      { reason =
+          Gate.Path_outside_policy
+            { stage = 1; raw_path = "/etc/shadow"; diagnostic = "shadow not allowed" }
+      ; _
+      } -> ()
+  | other ->
+    Alcotest.failf
+      "expected typed pipeline path-policy reject, got %s"
       (Gate.verdict_tag other)
 ;;
 
@@ -772,6 +827,14 @@ let () =
             "empty typed input is Cannot_parse"
             `Quick
             test_lower_typed_empty_is_cannot_parse
+        ; Alcotest.test_case
+            "typed lowering applies allowlist policy"
+            `Quick
+            test_lower_typed_applies_allowlist_policy
+        ; Alcotest.test_case
+            "typed lowering applies path policy"
+            `Quick
+            test_lower_typed_applies_path_policy
         ; Alcotest.test_case
             "policy-aware typed gate shares raw policy surface"
             `Quick

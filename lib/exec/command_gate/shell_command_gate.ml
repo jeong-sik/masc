@@ -422,15 +422,12 @@ let gate_typed ?caller:_ ~ir ~allowlist ~path_policy ~sandbox () : verdict =
   | Ok stages -> apply_policy ~allowlist ~path_policy ~sandbox ~stages
 ;;
 
-let lower_typed_pipeline ?caller:_ ~stages ~sandbox () : verdict =
+let lower_typed_pipeline ?caller:_ ~stages ~allowlist ~path_policy ~sandbox ()
+    : verdict =
   (* See note on [gate] — [caller] is API-shape-only for now. *)
   match stages with
   | [] -> Cannot_parse { reason = Parse_error }
-  | _ ->
-    let stages = stages_with_sandbox ~sandbox stages in
-    (match make_context ~stages with
-     | None -> Cannot_parse { reason = Parse_error }
-     | Some context -> Allow context)
+  | _ -> apply_policy ~allowlist ~path_policy ~sandbox ~stages
 ;;
 
 let caller_tag = function

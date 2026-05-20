@@ -73,7 +73,7 @@ describe('DashboardSurfaceTabs', () => {
     overviewTab.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }))
 
     expect(document.activeElement).toBe(monitorTab)
-    expect(navigate).toHaveBeenCalledWith('monitoring', { section: 'runtime' })
+    expect(navigate).toHaveBeenCalledWith('monitoring', { section: 'agents' })
   })
 
   it('jumps to the last surface on End', () => {

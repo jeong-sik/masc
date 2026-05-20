@@ -18,9 +18,6 @@ type tool_effect_class =
   | External_effect
   | Shell_dynamic
 
-(** Backward-compatible alias for [tool_effect_class]. *)
-type mutation_class = tool_effect_class
-
 type violation_kind =
   | Mutating_in_diagnose
   | External_in_draft
@@ -85,9 +82,6 @@ val register_tool_class : string -> tool_effect_class -> unit
     Accepted values: "read_only", "workspace", "workspace_mutating",
     "local_mutation", "external", "external_effect", "shell_dynamic". *)
 val tool_effect_class_of_string : string -> tool_effect_class option
-
-(** Backward-compatible alias for [tool_effect_class_of_string]. *)
-val mutation_class_of_string : string -> mutation_class option
 
 (** Derive a [Tool.descriptor] from the builtin registry for a given tool name.
     Returns [None] for unknown tools.

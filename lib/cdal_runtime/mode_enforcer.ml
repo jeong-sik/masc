@@ -4,9 +4,6 @@ type tool_effect_class =
   | External_effect
   | Shell_dynamic
 
-(* Backward-compatible alias. *)
-type mutation_class = tool_effect_class
-
 (* Kind-name helper for parse-error diagnostics.  [lib/cdal_runtime/] is
    intentionally decoupled from [masc_core] (RFC-OAS-011 producer-side
    isolation), so [Json_util.kind_name] is not reachable without breaking
@@ -327,9 +324,6 @@ let tool_effect_class_of_string = function
   | "shell_dynamic" -> Some Shell_dynamic
   | _ -> None
 ;;
-
-(* Backward-compatible alias *)
-let mutation_class_of_string = tool_effect_class_of_string
 
 (* ── Builtin descriptor derivation ─────────────────────────────── *)
 

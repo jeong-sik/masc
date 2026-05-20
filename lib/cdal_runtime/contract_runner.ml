@@ -120,7 +120,7 @@ let run
         |> List.filter_map (fun (t : Tool.t) ->
           match t.descriptor with
           | Some d ->
-            Option.bind d.Tool.mutation_class Mode_enforcer.mutation_class_of_string
+            Option.bind d.Tool.mutation_class Mode_enforcer.tool_effect_class_of_string
             |> Option.map (fun cls -> t.schema.name, cls)
           | None -> None)
       in

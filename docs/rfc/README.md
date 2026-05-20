@@ -109,7 +109,7 @@ implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body �
 | 0067 | Goal-Scope Observation→Claim Atomicity | Draft | 44c383150 2026-05-11 | 구 RFC-0057 — collision 해결 (#14672) |
 | 0068 | Typed `Keeper_turn_disposition` (operator-facing closed sum) | Draft | (pending #14692) | 구 RFC-0047 — collision 해결 |
 | 0069 | Awareness Channel Split | Active | f762e88a2 2026-04-30 | 구 awareness-channel-split.md (PR-1.7) — PR-1.7a 머지 #12129, PR-1.7b/c 미완 |
-| 0070 | Keeper Sandbox Runtime — Pure/Edge Separation | Draft | (pending #14714) | depends on RFC-0036 Phase A, extends RFC-0006 Phase B-2 |
+| 0070 | Keeper Sandbox Runtime — Pure/Edge Separation | Active | (this PR) 2026-05-21 | depends on RFC-0036 Phase A, extends RFC-0006 Phase B-2. §2 G1-G5 goal plan (deterministic ID / typed daemon errors / JSON-format probe / cleanup state machine / mockable executor). **16 implementation_prs 머지**: initial 15 PR batch (#14714..#14989, 2026-05-12 sprint) + #16666 (`Sandbox_error closed sum per §2 G2`, 2026-05-19). Per-goal Phase→PR table 은 sprint author 책임 (audit boundary). Status promoted Draft → Active. |
 | 0071 | Exhaustive Match Sweep Codemod — Eliminate N-of-M `_ -> false/None` Anti-Pattern | Draft | #14881 2026-05-12 | body written by this PR; lib/core/dune reference (#14888) realized. Related RFC-0042, RFC-0068. |
 | 0072 | Type-encoded keeper sub-FSM transitions (cascade + turn_phase) | Draft | 2026-05-12 | follows PR #14887 + #14893 decision-axis precedent. |
 | 0073 | Tool Readiness Probe — Typed Precondition + Runtime Gap Disclosure | Draft | (this PR) | Tool readiness package — RFC-0073/0074/0075/0076 coordinated. |

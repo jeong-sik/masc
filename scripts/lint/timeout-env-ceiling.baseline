@@ -1,0 +1,4 @@
+# Distinct MASC_*_TIMEOUT* env var names in lib/ (production).
+# Regenerated 2026-05-20T18:06:45Z.
+# RFC-0138 §7 acceptance ceiling — see scripts/lint/timeout-env-ceiling.sh.
+57

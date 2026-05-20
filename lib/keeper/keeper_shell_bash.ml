@@ -1028,7 +1028,7 @@ let handle_keeper_bash
       Keeper_metrics.metric_keeper_shell_bash_failures
       ~labels:[("keeper", meta.name); ("site", "gh_pr_native_tool")]
       ();
-    Log.Keeper.warn
+    Log.Keeper.info
       "keeper_bash gh pr command routed to native tool: keeper=%s rule=%s cmd=%s"
       meta.name hint.rule_id cmd_for_log;
     Yojson.Safe.to_string
@@ -1049,7 +1049,7 @@ let handle_keeper_bash
       Keeper_metrics.metric_keeper_shell_bash_failures
       ~labels:[("keeper", meta.name); ("site", "tool_invoked_as_shell")]
       ();
-    Log.Keeper.warn
+    Log.Keeper.info
       "keeper_bash direct tool command blocked: keeper=%s tool=%s cmd=%s"
       meta.name tool_name cmd_for_log;
     Yojson.Safe.to_string
@@ -1427,7 +1427,7 @@ let handle_keeper_bash
           ; ("shape_block", bash_shape_block_tag block)
           ]
         ();
-      Log.Keeper.warn
+      Log.Keeper.info
         "keeper_bash command-shape blocked: keeper=%s block=%s cmd=%s"
         meta.name (bash_shape_block_tag block) cmd_for_log;
       bash_shape_block_result ~cmd ~cmd_for_log ~env_snapshot:env_snap block

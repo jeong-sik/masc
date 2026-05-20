@@ -57,6 +57,79 @@ let make_meta ~name =
   | Ok m -> m
   | Error e -> fail ("meta_of_json failed: " ^ e)
 
+let expected_initial_auto_resume_after_sec () =
+  Keeper_supervisor_types.next_auto_resume_after_sec
+    ~initial_sec:Env_config.KeeperSupervisor.auto_resume_initial_sec
+    ~max_sec:Env_config.KeeperSupervisor.auto_resume_max_sec
+    None
+
+let check_initial_auto_resume label actual =
+  check
+    (option (float 0.1))
+    label
+    (expected_initial_auto_resume_after_sec ())
+    actual
+
+let test_overflow_pause_marks_auto_resumable () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun _sw ->
+  let base_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_dir) (fun () ->
+    let config = Coord.default_config base_dir in
+    ignore (Coord.init config ~agent_name:(Some "operator"));
+    let meta = make_meta ~name:"overflow-auto-resume-9733" in
+    (match Keeper_types.write_meta ~force:true config meta with
+     | Ok () -> ()
+     | Error e -> fail ("seed failed: " ^ e));
+    ignore (Keeper_registry.register ~base_path:base_dir meta.name meta);
+    let paused =
+      Keeper_turn_cascade_budget.pause_keeper_for_overflow
+        ~config
+        ~meta
+        ~reason:"test-overflow"
+    in
+    check bool "overflow pause returned paused=true" true paused.paused;
+    check_initial_auto_resume
+      "overflow pause gets initial auto_resume_after_sec"
+      paused.auto_resume_after_sec;
+    let persisted =
+      match Keeper_types.read_meta config meta.name with
+      | Ok (Some m) -> m
+      | Ok None -> fail "expected persisted meta"
+      | Error e -> fail ("read_meta failed: " ^ e)
+    in
+    check_initial_auto_resume
+      "persisted overflow pause gets initial auto_resume_after_sec"
+      persisted.auto_resume_after_sec)
+
+let test_sync_pause_auto_resume_flag_sets_backoff () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun _sw ->
+  let base_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_dir) (fun () ->
+    let config = Coord.default_config base_dir in
+    ignore (Coord.init config ~agent_name:(Some "operator"));
+    let meta = make_meta ~name:"sync-auto-resume-9733" in
+    (match Keeper_types.write_meta ~force:true config meta with
+     | Ok () -> ()
+     | Error e -> fail ("seed failed: " ^ e));
+    ignore (Keeper_registry.register ~base_path:base_dir meta.name meta);
+    match
+      Keeper_turn_cascade_budget.sync_keeper_paused_state_with_resume_policy
+        ~config
+        ~meta
+        ~paused:true
+        ~resume_policy:Keeper_supervisor_pause_policy.Auto_resume_with_backoff
+    with
+    | Error e -> fail ("sync pause failed: " ^ e)
+    | Ok paused ->
+      check bool "sync pause returned paused=true" true paused.paused;
+      check_initial_auto_resume
+        "sync pause gets initial auto_resume_after_sec"
+        paused.auto_resume_after_sec)
+
 (* Race: overflow fiber observed unpaused at version N, decides
    to pause; heartbeat fiber bumps to version N+1 with new
    joined_room_ids; overflow fiber attempts write with stale
@@ -224,6 +297,10 @@ let () =
     [
       ( "pause-resume-merge",
         [
+          test_case "overflow pause marks auto-resumable" `Quick
+            test_overflow_pause_marks_auto_resumable;
+          test_case "sync pause auto-resume policy sets backoff" `Quick
+            test_sync_pause_auto_resume_flag_sets_backoff;
           test_case "pause: caller wins, heartbeat retained" `Quick
             test_pause_caller_wins_heartbeat_disk_wins;
           test_case "resume: caller wins, heartbeat retained" `Quick

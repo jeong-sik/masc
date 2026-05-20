@@ -5737,6 +5737,11 @@ let test_run_keeper_cycle_livelock_block_returns_error () =
          (match Masc_mcp.Keeper_types.read_meta config meta.name with
           | Ok (Some persisted) ->
             check bool "livelock persists paused keeper" true persisted.paused;
+            check
+              bool
+              "livelock pause marks auto-resumable"
+              true
+              (Option.is_some persisted.auto_resume_after_sec);
             (match persisted.runtime.last_blocker with
              | Some blocker ->
                check

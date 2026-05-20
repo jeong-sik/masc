@@ -14,7 +14,9 @@ export function routeWantsRefreshTarget(
     case 'operator':
       return routeState.tab === 'command' && routeState.params.view !== 'inspector'
     case 'activity':
-      return routeState.tab === 'monitoring' && routeState.params.section === 'observatory'
+      return routeState.tab === 'monitoring'
+        && routeState.params.section === 'observatory'
+        && (routeState.params.view === 'activity' || routeState.params.view === 'graph')
   }
 }
 
@@ -26,8 +28,12 @@ function routeWantsExecution(routeState: Pick<RouteState, 'tab' | 'params'>): bo
   if (routeState.tab !== 'monitoring') return false
 
   const section = routeState.params.section
-  if (section === 'observatory' || section === 'journey' || section === 'agents' || section === 'cognition') {
+  if (section === 'journey' || section === 'agents' || section === 'cognition') {
     return true
+  }
+
+  if (section === 'observatory') {
+    return routeState.params.view === 'live'
   }
 
   return section === 'fleet-health' && routeState.params.view === 'comparison'

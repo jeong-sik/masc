@@ -99,17 +99,17 @@ describe('connectors navigation (Phase 7, post-2026-04-30 merge)', () => {
 })
 
 describe('monitoring navigation labels', () => {
-  it('uses the four-section Monitor IA labels', () => {
+  it('uses keeper-operations first Monitor IA labels', () => {
     const sections = visibleSectionItemsForTab('monitoring')
     const labelFor = (id: string) => sections.find(item => item.id === id)?.label
 
-    expect(labelFor('runtime')).toBe('Live Runtime')
-    expect(labelFor('agents')).toBe('Agent Observatory')
-    expect(labelFor('fleet-health')).toBe('System Telemetry')
-    expect(labelFor('observatory')).toBe('Activity Timeline')
-    expect(labelFor('transport-health')).toBe('Transport Health')
-    expect(labelFor('feature-health')).toBe('Feature Flags')
-    expect(labelFor('cognition')).toBe('Keeper Cognition')
+    expect(labelFor('agents')).toBe('Keeper Operations')
+    expect(labelFor('fleet-health')).toBe('Tool Monitor')
+    expect(labelFor('runtime')).toBe('Cascade & Runtime')
+    expect(labelFor('observatory')).toBe('Evidence Timeline')
+    expect(labelFor('transport-health')).toBeUndefined()
+    expect(labelFor('feature-health')).toBeUndefined()
+    expect(labelFor('cognition')).toBeUndefined()
     expect(labelFor('journey')).toBeUndefined()
   })
 
@@ -118,9 +118,10 @@ describe('monitoring navigation labels', () => {
     const descriptions = Object.fromEntries(sections.map(item => [item.id, item.description]))
 
     expect(descriptions).toMatchObject({
-      runtime: 'Provider health and runtime diagnostics.',
-      agents: 'Live roster with fleet state capsules.',
-      'fleet-health': 'System signals for tools and governance.',
+      agents: 'Attention-first keeper operations.',
+      'fleet-health': 'Tool quality and governance signals.',
+      runtime: 'Cascade and provider health.',
+      observatory: 'Activity and runtime evidence.',
     })
 
     for (const item of sections) {
@@ -137,25 +138,31 @@ describe('monitoring navigation labels', () => {
     expect(ids).not.toContain('sessions')
   })
 
-  it('surfaces fleet-health as consolidated monitoring section (Phase 1)', () => {
+  it('surfaces four primary Monitor lanes and keeps diagnostics routeable', () => {
     const sections = visibleSectionItemsForTab('monitoring')
+    const allSections = sectionItemsForTab('monitoring')
     const ids = sections.map(item => item.id)
+    const allIds = allSections.map(item => item.id)
 
-    expect(defaultParamsForTab('monitoring')).toEqual({ section: 'runtime' })
+    expect(defaultParamsForTab('monitoring')).toEqual({ section: 'agents' })
     expect(ids).toEqual([
-      'runtime', 'cascade-config', 'agents', 'fleet-health',
-      'doctor', 'transport-health', 'feature-health', 'observatory', 'cognition',
+      'agents', 'fleet-health', 'runtime', 'observatory',
     ])
+    expect(ids).toContain('agents')
     expect(ids).toContain('fleet-health')
     expect(ids).toContain('runtime')
-    expect(ids).toContain('cascade-config')
-    expect(ids).toContain('agents')
-    expect(ids).toContain('doctor')
-    expect(ids).toContain('transport-health')
-    expect(ids).toContain('feature-health')
     expect(ids).toContain('observatory')
-    expect(ids).toContain('cognition')
+    expect(allIds).toContain('cascade-config')
+    expect(allIds).toContain('doctor')
+    expect(allIds).toContain('transport-health')
+    expect(allIds).toContain('feature-health')
+    expect(allIds).toContain('cognition')
     expect(ids).not.toContain('journey')
+    expect(ids).not.toContain('cascade-config')
+    expect(ids).not.toContain('doctor')
+    expect(ids).not.toContain('transport-health')
+    expect(ids).not.toContain('feature-health')
+    expect(ids).not.toContain('cognition')
     // Legacy sections removed in Phase 1
     expect(ids).not.toContain('live')
     expect(ids).not.toContain('git-graph')
@@ -171,24 +178,28 @@ describe('monitoring navigation labels', () => {
     expect(ids).not.toContain('governance')
   })
 
-  it('puts the operator story first before drill-down status surfaces', () => {
+  it('puts keeper operations first before tool, runtime, and evidence lanes', () => {
     const sections = visibleSectionItemsForTab('monitoring')
-    expect(sections[0]?.id).toBe('runtime')
-    expect(sections[1]?.id).toBe('cascade-config')
-    expect(sections[2]?.id).toBe('agents')
-    expect(sections[3]?.id).toBe('fleet-health')
-    expect(sections[4]?.id).toBe('doctor')
-    expect(sections[5]?.id).toBe('transport-health')
-    expect(sections[6]?.id).toBe('feature-health')
-    expect(sections[7]?.id).toBe('observatory')
-    expect(sections[8]?.id).toBe('cognition')
+    expect(sections.map(section => section.id)).toEqual([
+      'agents',
+      'fleet-health',
+      'runtime',
+      'observatory',
+    ])
   })
 
   it('keeps diagnostic monitoring routes available but hidden from the sidebar', () => {
     const sections = sectionItemsForTab('monitoring')
     const hiddenIds = sections.filter(item => item.hidden).map(item => item.id)
 
-    expect(hiddenIds).toEqual(['journey'])
+    expect(hiddenIds).toEqual([
+      'cascade-config',
+      'doctor',
+      'transport-health',
+      'feature-health',
+      'journey',
+      'cognition',
+    ])
   })
 
   it('monitoring sidebar labels are unique (no overloaded term like "런타임")', () => {

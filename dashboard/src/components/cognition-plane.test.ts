@@ -73,7 +73,7 @@ describe('CognitionPlane', () => {
     await flushUi()
 
     expect(container.textContent).toContain('Keeper')
-    expect(container.textContent).toContain('Agent Observatory')
+    expect(container.textContent).toContain('Keeper Operations')
     expect(container.querySelector('[data-testid="agents-unified"]')).toBeNull()
     expect(container.querySelector('[data-testid="keeper-token-stats"]')).toBeNull()
     expect(container.querySelector('[data-section="agents"]')).not.toBeNull()

@@ -40,7 +40,7 @@ describe('DashboardMain solo mode', () => {
 
     render(h(DashboardMain, {}), container)
 
-    await waitFor(() => expect(document.title).toBe('MASC · Live Runtime'))
+    await waitFor(() => expect(document.title).toBe('MASC · Cascade & Runtime'))
     expect(container.querySelector('[data-testid="dashboard-widget-solo-bar"]')).not.toBeNull()
     expect(container.querySelector('[aria-label="Active observability filters"]')).not.toBeNull()
   })

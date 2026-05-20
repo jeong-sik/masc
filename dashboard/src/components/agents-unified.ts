@@ -1,5 +1,6 @@
-// MASC Dashboard — Unified Agents Tab
-// Absorbs: agent-roster + execution + keeper-roster + FSM hub into one view with chip toggle.
+// MASC Dashboard — Keeper Operations
+// Absorbs: agent-roster + execution + keeper-roster + FSM hub into one
+// operator-first board. Cognition stays available through keeper detail links.
 
 import { html } from 'htm/preact'
 import { useState } from 'preact/hooks'
@@ -33,9 +34,9 @@ const activeView = computed<AgentsView>(() => {
 })
 
 const CHIPS: { id: AgentsView; label: string; description: string }[] = [
-  { id: 'all', label: '전체', description: '에이전트와 키퍼를 한 목록에서 봅니다.' },
-  { id: 'agents', label: '에이전트', description: '키퍼가 연결되지 않은 일반 에이전트만 봅니다.' },
-  { id: 'keepers', label: '키퍼', description: '키퍼만 따로 봅니다.' },
+  { id: 'all', label: 'Keeper Ops', description: '키퍼와 일반 에이전트를 attention-first 운영 목록으로 봅니다.' },
+  { id: 'agents', label: 'Agents', description: '키퍼가 연결되지 않은 일반 에이전트만 봅니다.' },
+  { id: 'keepers', label: 'Keepers', description: '키퍼만 따로 봅니다.' },
   { id: 'fsm', label: 'FSM', description: '키퍼 composite FSM lifecycle 상태를 봅니다.' },
 ]
 
@@ -107,14 +108,14 @@ export function AgentsUnified() {
 
       ${currentView !== 'fsm' ? html`
         <div class="monitor-muted-panel flex flex-wrap items-center gap-2 px-4 py-3 text-xs text-[var(--color-fg-muted)]">
-          <span class="text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">이 화면 밖</span>
-          <span>cached 조율 스냅샷, 이벤트 로그, 도구 품질, 거버넌스</span>
+          <span class="text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">related lane</span>
+          <span>도구 품질, 거버넌스, 이벤트 로그는 Tool Monitor에서 봅니다.</span>
           <${RouteLink}
             tab="monitoring"
             params=${{ section: 'fleet-health' }}
             class="inline-flex shrink-0 items-center justify-center rounded-[var(--r-0)] border border-[var(--accent-20)] bg-[var(--accent-10)] px-3 py-1.5 text-xs font-medium text-[var(--color-fg-secondary)] transition-colors hover:bg-[var(--accent-20)]"
           >
-            플릿 텔레메트리 열기
+            Tool Monitor 열기
           <//>
         </div>
       ` : null}

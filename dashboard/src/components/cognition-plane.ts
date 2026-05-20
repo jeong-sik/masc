@@ -112,8 +112,8 @@ function CognitionOverview() {
         params=${{ section: 'agents' }}
         class="min-w-0 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] p-3 transition-colors hover:border-[var(--color-border-strong)] hover:bg-[var(--color-bg-elevated)] md:col-span-2"
       >
-        <div class="text-sm font-semibold text-text-strong">Agent Observatory</div>
-        <div class="mt-1 text-xs text-text-muted">Roster, keepers, and FSM views live in one agent surface.</div>
+        <div class="text-sm font-semibold text-text-strong">Keeper Operations</div>
+        <div class="mt-1 text-xs text-text-muted">Roster, keepers, cognition entry points, and FSM views live in one operations surface.</div>
       <//>
     </section>
   `

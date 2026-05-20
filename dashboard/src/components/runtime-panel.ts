@@ -117,6 +117,54 @@ function CascadeConfigCanonicalLink() {
   `
 }
 
+function HiddenDiagnosticsLinks() {
+  const links = [
+    {
+      label: 'Transport diagnostics',
+      detail: 'SSE/gRPC/WebSocket/WebRTC connection freshness.',
+      section: 'transport-health',
+    },
+    {
+      label: 'Doctor',
+      detail: 'Sidecar, base-path, and config diagnostics.',
+      section: 'doctor',
+    },
+    {
+      label: 'Feature cleanup',
+      detail: 'Feature flag rollout, inactive, and deprecated states.',
+      section: 'feature-health',
+    },
+  ]
+  return html`
+    <section
+      class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3"
+      aria-label="Hidden diagnostics"
+    >
+      <div class="flex flex-col gap-3">
+        <div>
+          <div class="text-sm font-semibold text-text-strong">Diagnostics</div>
+          <div class="mt-1 max-w-2xl text-xs leading-relaxed text-text-muted">
+            These are routeable support surfaces, not primary Monitor lanes. Use them when a keeper-facing runtime incident points at infrastructure or stale rollout state.
+          </div>
+        </div>
+        <div class="grid gap-2 md:grid-cols-3">
+          ${links.map(link => html`
+            <${RouteLink}
+              key=${link.section}
+              tab="monitoring"
+              params=${{ section: link.section }}
+              class="min-w-0 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-3 py-2 transition-colors hover:border-[var(--color-border-strong)] hover:bg-[var(--color-bg-elevated)]"
+            >
+              <span class="block text-xs font-semibold text-text-strong">${link.label}</span>
+              <span class="mt-1 block text-2xs leading-relaxed text-text-muted">${link.detail}</span>
+            <//>
+          `)}
+        </div>
+      </div>
+    </section>
+  `
+}
+
 export function RuntimePanel() {
   const view = activeView.value
   const costView = costDiagnosticView(view)
@@ -145,6 +193,7 @@ export function RuntimePanel() {
         : html`
             <${OasHealthChip} />
             <${CascadeConfigCanonicalLink} />
+            <${HiddenDiagnosticsLinks} />
             <${CollapsibleSection} id="runtime-details-providers" title="런타임">
               <${RuntimeMonitor} />
             <//>

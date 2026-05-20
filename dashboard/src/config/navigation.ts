@@ -97,9 +97,9 @@ export const DASHBOARD_SURFACES: DashboardNavGroup[] = [
     id: 'monitoring',
     label: 'Monitor',
     icon: 'monitoring',
-    description: 'Fleet storylines and runtime telemetry',
+    description: 'Keeper operations, tools, cascade, and evidence',
     defaultTab: 'monitoring',
-    defaultParams: { section: 'runtime' },
+    defaultParams: { section: 'agents' },
     tabs: ['monitoring'],
   },
   {
@@ -173,46 +173,56 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
   cockpit: [],
   monitoring: [
     {
+      id: 'agents',
+      label: 'Keeper Operations',
+      description: 'Attention-first keeper operations.',
+      params: { section: 'agents' },
+    },
+    {
+      id: 'fleet-health',
+      label: 'Tool Monitor',
+      description: 'Tool quality and governance signals.',
+      params: { section: 'fleet-health' },
+    },
+    {
       id: 'runtime',
-      label: 'Live Runtime',
-      description: 'Provider health and runtime diagnostics.',
+      label: 'Cascade & Runtime',
+      description: 'Cascade and provider health.',
       params: { section: 'runtime' },
+    },
+    {
+      id: 'observatory',
+      label: 'Evidence Timeline',
+      description: 'Activity and runtime evidence.',
+      params: { section: 'observatory' },
     },
     {
       id: 'cascade-config',
       label: 'Cascade Config',
       description: 'Cascade providers, models and rules.',
       params: { section: 'cascade-config' },
-    },
-    {
-      id: 'agents',
-      label: 'Agent Observatory',
-      description: 'Live roster with fleet state capsules.',
-      params: { section: 'agents' },
-    },
-    {
-      id: 'fleet-health',
-      label: 'System Telemetry',
-      description: 'System signals for tools and governance.',
-      params: { section: 'fleet-health' },
+      hidden: true,
     },
     {
       id: 'doctor',
       label: 'Doctor',
       description: 'Sidecar and config doctor diagnostics.',
       params: { section: 'doctor' },
+      hidden: true,
     },
     {
       id: 'transport-health',
       label: 'Transport Health',
       description: 'SSE/gRPC/WebSocket/WebRTC transport state.',
       params: { section: 'transport-health' },
+      hidden: true,
     },
     {
       id: 'feature-health',
       label: 'Feature Flags',
       description: 'Feature flag rollout and health snapshot.',
       params: { section: 'feature-health' },
+      hidden: true,
     },
     {
       id: 'journey',
@@ -222,20 +232,6 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       hidden: true,
     },
     {
-      id: 'observatory',
-      // Renamed from 'Observatory' to disambiguate from 'Agent Observatory'
-      // (sibling section id=agents). Sidebar-label uniqueness is enforced by
-      // navigation.test.ts; the canonical section id remains 'observatory'.
-      label: 'Activity Timeline',
-      description: 'Live collaboration and investigative timelines.',
-      params: { section: 'observatory' },
-      // RFC-MASC-006 Phase 2b: 3-track timeline (events + tool-calls + metric)
-      // + cross-signal readout + ObservatoryActivityPanels (cascade waterfall,
-      // keeper phase timeline, derived analyses) are wired. Promoted to main
-      // nav 2026-05-17. Legacy redirects (monitoring:activity, monitoring:live)
-      // still resolve here.
-    },
-    {
       id: 'cognition',
       // Distinguish from sibling labels in Monitor sidebar; the section id
       // (used in URLs, deep links from KeeperCognitionInspector, and the
@@ -243,6 +239,7 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       label: 'Keeper Cognition',
       description: 'Keeper cognition drill-down.',
       params: { section: 'cognition' },
+      hidden: true,
       // Surface wiring complete: 7-view FilterChips (overview, keeper,
       // token-stats, decisions, memory, episodes, autoresearch) + deep-link
       // navigate target from KeeperCognitionInspector. Promoted to main nav

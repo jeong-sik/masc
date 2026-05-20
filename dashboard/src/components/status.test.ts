@@ -4,12 +4,12 @@ import { normalizeStatusSection, sectionLabel, type StatusSection } from "./stat
 
 describe("sectionLabel", () => {
   it.each([
-    ["observatory", "Observatory"],
+    ["observatory", "Evidence Timeline"],
     ["journey", "Journey"],
-    ["runtime", "Runtime"],
-    ["fleet-health", "Fleet Health"],
-    ["cognition", "Cognition"],
-    ["agents", "Agents"],
+    ["runtime", "Cascade & Runtime"],
+    ["fleet-health", "Tool Monitor"],
+    ["cognition", "Keeper Cognition"],
+    ["agents", "Keeper Operations"],
   ] as [StatusSection, string][])("maps %s to %s", (section, expected) => {
     expect(sectionLabel(section)).toBe(expected)
   })
@@ -17,8 +17,8 @@ describe("sectionLabel", () => {
 
 describe("normalizeStatusSection", () => {
   it("falls back to the monitoring default section", () => {
-    expect(normalizeStatusSection("memory-subsystems")).toBe("runtime")
-    expect(normalizeStatusSection("unknown")).toBe("runtime")
-    expect(normalizeStatusSection(undefined)).toBe("runtime")
+    expect(normalizeStatusSection("memory-subsystems")).toBe("agents")
+    expect(normalizeStatusSection("unknown")).toBe("agents")
+    expect(normalizeStatusSection(undefined)).toBe("agents")
   })
 })

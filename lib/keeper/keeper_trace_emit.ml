@@ -57,7 +57,13 @@ let emit_transition
       "event", `String (SM.event_to_string event);
       "prev_phase", `String (SM.phase_to_string prev_phase);
       "new_phase", `String (SM.phase_to_string new_phase);
+<<<<<<< HEAD
       "conditions_after", SMJ.conditions_to_json conditions_after;
+||||||| parent of bd1d311d4d (fix(keeper): update state machine json callers)
+      "conditions_after", SM.conditions_to_json conditions_after;
+=======
+      "conditions_after", SM_json.conditions_to_json conditions_after;
+>>>>>>> bd1d311d4d (fix(keeper): update state machine json callers)
       "restart_count", `Int restart_count;
     ] in
     let path = trace_path ~base_path ~keeper_name in

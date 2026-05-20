@@ -276,8 +276,10 @@ let canonical_events : (string * SM.event) list =
             };
         } );
     ("CompactionStarted", SM.Compaction_started);
-    ( "CompactionCompleted",
+    ( "CompactionCompletedWithSavings",
       SM.Compaction_completed { before_tokens = 100_000; after_tokens = 50_000 } );
+    ( "CompactionCompletedNoSavings",
+      SM.Compaction_completed { before_tokens = 50_000; after_tokens = 50_000 } );
     ("CompactionFailed", SM.Compaction_failed { reason = "test" });
     ("HandoffStarted", SM.Handoff_started);
     ( "HandoffCompleted",

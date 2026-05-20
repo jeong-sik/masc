@@ -425,13 +425,30 @@ let can_transition ~from_phase ~to_phase =
       | Draining
       | Paused
       | Restarting ) ) -> false
-  (* Paused -> Running (resume) | Draining (stop) | Stopped (remove)
-     | Crashed (fiber can die while keeper is paused)
+  (* Paused -> Running (resume) | latent states exposed by resume
+     (Failing/Overflowed/HandingOff/Restarting/Offline) | Draining (stop)
+     | Stopped (remove) | Crashed (fiber can die while keeper is paused)
      | Compacting (operator invoked masc_keeper_compact on paused keeper
-     to clear an overflow-induced pause) *)
-  | Paused, (Running | Compacting | Draining | Stopped | Crashed) -> true
-  | Paused, (Offline | Failing | Overflowed | HandingOff | Paused | Restarting)
-    -> false
+     to clear an overflow-induced pause).
+
+     Operator_resume only clears [operator_paused]; it intentionally does not
+     erase already-observed launch, health, overflow, handoff, or restart conditions.
+     If one of those latches still derives a non-running phase, accepting the
+     transition lets the registry commit the resume intent and surface the real
+     blocker instead of rejecting the event and leaving the keeper permanently
+     paused. *)
+  | ( Paused
+    , ( Running
+      | Failing
+      | Overflowed
+      | Compacting
+      | HandingOff
+      | Draining
+      | Stopped
+      | Crashed
+      | Offline
+      | Restarting ) ) -> true
+  | Paused, Paused -> false
   (* Crashed -> Restarting (backoff done). Dead is covered by the global
      hard-stop/budget terminal transition above. *)
   | Crashed, Restarting -> true

@@ -330,7 +330,7 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
           let conditions_json =
             match registry_entry with
             | Some entry ->
-                Keeper_state_machine.conditions_to_json entry.conditions
+                Keeper_state_machine_json.conditions_to_json entry.conditions
             | None -> `Null
           in
           let sandbox_last_error =

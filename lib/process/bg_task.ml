@@ -288,34 +288,42 @@ let trim_buffer_to_ring buf base_offset =
     base_offset + drop_len
   end
 
+(* RFC-0145 §5 PR-2 (narrow): typed [drain_outcome] sum replaces
+   the previous [bool] return.  The two outcomes that used to be
+   collapsed under [true] — clean EOF vs read-side error fallback
+   — are now distinct constructors, and [Drain_error] carries the
+   typed cause ([Drain_unix_error] errno vs [Drain_other_exn]
+   arbitrary exception).  Observer/counter wiring inside the
+   function is unchanged (counter behavior is out of scope for
+   this PR); the typed sum just makes the read-side failure mode
+   visible to callers at the type level so future PRs can refine
+   reap semantics without re-walking call-sites blindly. *)
+type drain_read_error =
+  | Drain_unix_error of Unix.error
+  | Drain_other_exn of exn
+
+type drain_outcome =
+  | Drain_ok
+  | Drain_eof
+  | Drain_error of drain_read_error
+
 (* [drain_fd_to_buf ~fd_kind buf fd] reads every byte currently
-   available on [fd] without blocking. Returns [true] if EOF was
-   observed.
+   available on [fd] without blocking.
 
-   The previous implementation collapsed every non-EAGAIN/EINTR
-   exception into a permissive [true] (EOF), silently misreporting
-   genuine read errors (EBADF, EIO, ENOMEM, ENOSPC, …) as clean
-   close.  This typed split:
+   - [Drain_ok]:  no bytes immediately readable (EAGAIN /
+     EWOULDBLOCK), or [select] returned an empty readable set.
+     Equivalent to the previous [false] return.
+   - [Drain_eof]: [Unix.read] returned [0] (peer closed cleanly).
+     Equivalent to the previous [true] return.
+   - [Drain_error e]: an unexpected read-side failure occurred.
+     The previous implementation also returned [true] for these
+     to preserve reap semantics (caller advances [stdout_eof] /
+     [stderr_eof]); callers in this PR mirror that behavior via
+     [drain_outcome_is_eof].  Refining the reap policy per
+     [drain_read_error] constructor is a separate RFC.
 
-   - Re-raises [Eio.Cancel.Cancelled] so cancellation propagates
-     through the enclosing switch.
-   - Splits [Unix.Unix_error] (anything that isn't EAGAIN /
-     EWOULDBLOCK / EINTR) into a distinct arm: tick the
-     drain-failure counter with [error_kind = "unix_error"] and a
-     bounded warn naming the [errno].  EBADF/EIO/ENOMEM are the
-     most likely realistic failure modes here and are forensically
-     valuable.
-   - Final arm: any other exception ticks with
-     [error_kind = "other"] and a bounded warn carrying
-     [Printexc.to_string] in the log body only (closed-vocab
-     label).
-
-   Returning [true] in the failure arms preserves the existing
-   operational behavior (the caller advances [stdout_eof] /
-   [stderr_eof] and eventually closes the FD).  This is a
-   deliberate conservative choice — flipping it to [false] would
-   change reap semantics and belongs in a future RFC, not in this
-   visibility patch. *)
+   [Eio.Cancel.Cancelled] is re-raised so cancellation propagates
+   through the enclosing switch. *)
 let drain_fd_to_buf ~fd_kind buf fd =
   let chunk = Bytes.create 4096 in
   let rec loop () =
@@ -324,12 +332,13 @@ let drain_fd_to_buf ~fd_kind buf fd =
         let r, _, _ = Unix.select [ fd ] [] [] 0.0 in
         r)
     in
-    if readable = [] then false
+    if readable = [] then Drain_ok
     else
       match Unix.read fd chunk 0 (Bytes.length chunk) with
-      | 0 -> true
+      | 0 -> Drain_eof
       | n -> Buffer.add_subbytes buf chunk 0 n; loop ()
-      | exception Unix.Unix_error ((Unix.EAGAIN | Unix.EWOULDBLOCK), _, _) -> false
+      | exception Unix.Unix_error ((Unix.EAGAIN | Unix.EWOULDBLOCK), _, _) ->
+          Drain_ok
       | exception Unix.Unix_error (Unix.EINTR, _, _) -> loop ()
       | exception (Eio.Cancel.Cancelled _ as e) -> raise e
       | exception Unix.Unix_error (errno, fn, _) ->
@@ -337,15 +346,24 @@ let drain_fd_to_buf ~fd_kind buf fd =
             "bg_task drain_fd_to_buf %s Unix_error in %s: %s"
             fd_kind fn (Unix.error_message errno);
           observe_drain_failure ~fd_kind ~err_kind:"unix_error";
-          true
+          Drain_error (Drain_unix_error errno)
       | exception exn ->
           Log.Misc.warn
             "bg_task drain_fd_to_buf %s unexpected exception: %s"
             fd_kind (Printexc.to_string exn);
           observe_drain_failure ~fd_kind ~err_kind:"other";
-          true
+          Drain_error (Drain_other_exn exn)
   in
   loop ()
+
+(* Reap-policy adapter: preserves the previous [bool] semantics
+   ([true] = stop reading this FD).  Defined as an exhaustive
+   [match] so adding a new [drain_outcome] constructor is a
+   compile error here, forcing a per-site reap decision. *)
+let drain_outcome_is_eof = function
+  | Drain_ok -> false
+  | Drain_eof -> true
+  | Drain_error _ -> true
 
 (* Called under [registry_mu]. Drains pipes, reaps if exited, kills
    on timeout. *)
@@ -354,8 +372,9 @@ let poll_state st =
   else begin
     if not st.stdout_eof then begin
       let eof =
-        drain_fd_to_buf ~fd_kind:"stdout"
-          st.stdout_buf st.handle.stdout_fd
+        drain_outcome_is_eof
+          (drain_fd_to_buf ~fd_kind:"stdout"
+             st.stdout_buf st.handle.stdout_fd)
       in
       st.stdout_base_offset <-
         trim_buffer_to_ring st.stdout_buf st.stdout_base_offset;
@@ -363,8 +382,9 @@ let poll_state st =
     end;
     if not st.stderr_eof then begin
       let eof =
-        drain_fd_to_buf ~fd_kind:"stderr"
-          st.stderr_buf st.handle.stderr_fd
+        drain_outcome_is_eof
+          (drain_fd_to_buf ~fd_kind:"stderr"
+             st.stderr_buf st.handle.stderr_fd)
       in
       st.stderr_base_offset <-
         trim_buffer_to_ring st.stderr_buf st.stderr_base_offset;

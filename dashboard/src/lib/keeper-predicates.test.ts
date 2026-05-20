@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import type { Keeper } from '../types/core'
 import {
   isKeeperCrashed,
+  isCrashedPhase,
   isKeeperPaused,
   isKeeperOffline,
   isKeeperRunningExcludingRestarting,
@@ -76,6 +77,26 @@ describe('isKeeperCrashed — audit A1 (2026-05-19)', () => {
   })
   it('undefined phase ⇒ NOT crashed', () => {
     expect(isKeeperCrashed(k())).toBe(false)
+  })
+})
+
+describe('isCrashedPhase — SSE-safe casing checker', () => {
+  it.each(['Crashed', 'crashed', 'Dead', 'dead', 'Zombie', 'zombie'])(
+    'phase=%s ⇒ crashed',
+    (phase) => {
+      expect(isCrashedPhase(phase)).toBe(true)
+    },
+  )
+  it.each(['Running', 'running', 'Paused', 'Failing', 'Offline', 'Restarting'])(
+    'phase=%s ⇒ NOT crashed',
+    (phase) => {
+      expect(isCrashedPhase(phase)).toBe(false)
+    },
+  )
+  it('null/undefined ⇒ NOT crashed', () => {
+    expect(isCrashedPhase(null)).toBe(false)
+    expect(isCrashedPhase(undefined)).toBe(false)
+    expect(isCrashedPhase('')).toBe(false)
   })
 })
 

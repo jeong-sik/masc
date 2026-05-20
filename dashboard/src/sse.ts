@@ -15,6 +15,7 @@ import {
 } from './journal-entry'
 import { appendLiveToolCall } from './components/session-trace/session-trace-live-store'
 import { appendAuditEntry } from './live-store'
+import { isCrashedPhase } from './lib/keeper-predicates'
 import { dashboardBearerToken } from './api/core'
 import { parseSSEMessage } from './schemas/sse'
 import { asNumber } from './components/common/normalize'
@@ -544,7 +545,7 @@ function handleEvent(event: SSEEvent): void {
         'keepers',
         'keeper_phase_changed',
         {
-          severity: (['failing', 'crashed', 'dead'].includes((event.new_phase ?? '').toLowerCase())) ? 'error' : 'info',
+          severity: isCrashedPhase(event.new_phase) ? 'error' : 'info',
           source: event.source,
           narrativeText: `${actorLabel(event.name ?? agent)}의 상태가 ${event.prev_phase ?? '?'}에서 ${event.new_phase ?? '?'}로 전이되었습니다`,
         },

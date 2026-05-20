@@ -2,6 +2,7 @@ import { html } from 'htm/preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import { Activity, AlertTriangle, Bell, Radio, Users, X } from 'lucide-preact'
 import type { JournalEntry, Keeper, Task } from '../types'
+import { isKeeperCrashed } from '../lib/keeper-predicates'
 import { dashboardWsOnlyEnabled } from '../dashboard-ws-cutover'
 import {
   dashboardWsConnected,
@@ -180,7 +181,7 @@ function countKeeperAttention(keeperInput: readonly Keeper[]): number {
     // boundary. Comparing typed phase tokens here means crashed keepers
     // actually get counted as attention rather than silently slipping
     // past an axis-confused string match.
-    return keeper.phase === 'Crashed' || keeper.phase === 'Dead' || keeper.phase === 'Zombie'
+    return isKeeperCrashed(keeper)
   }).length
 }
 

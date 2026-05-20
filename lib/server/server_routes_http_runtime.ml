@@ -676,6 +676,11 @@ let keeper_fleet_safety_health_json
              (fun (keeper, error) ->
                `Assoc [ ("keeper", `String keeper); ("error", `String error) ])
              autoboot_scan.read_errors) )
+    ; "keeper_turn_throttle_limit", `Int Keeper_keepalive.keeper_turn_throttle_limit
+    ; "keeper_turn_throttle_source", `String Keeper_keepalive.keeper_turn_throttle_source
+    ; "keeper_turn_throttle_env", `String "MASC_KEEPER_AUTOBOOT_MAX"
+    ; ( "keeper_turn_throttle_raw_value"
+      , json_string_opt Keeper_keepalive.keeper_turn_throttle_raw_value )
     ; "running_keeper_fiber_count", `Int phase_counts.running
     ; "healthy_running_keeper_fiber_count", `Int phase_counts.running
     ; "failing_keeper_fiber_count", `Int phase_counts.failing

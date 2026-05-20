@@ -49,13 +49,23 @@ type semaphore_wait_timeout =
 (* RFC-0085 PR-11 — Dropped the [~deprecated] fallback; the typo legacy
    env MASC_KEEPER_AUTOBOT_MAX is no longer recognised. Operators
    must set MASC_KEEPER_AUTOBOOT_MAX. *)
+type int_env_snapshot =
+  { value : int
+  ; raw_value : string option
+  ; source : string
+  }
+
 let int_of_env_default ~primary ~default ~min_v ~max_v =
-  match Sys.getenv_opt primary with
-  | None -> default
-  | Some raw when String.trim raw = "" -> default
-  | Some raw ->
-    let v = Option.value ~default (int_of_string_opt (String.trim raw)) in
-    Keeper_config.clamp_int v ~min_v ~max_v
+  let raw_value = Env_config_core.raw_value_opt primary in
+  let value =
+    match raw_value with
+    | None -> default
+    | Some raw when String.trim raw = "" -> default
+    | Some raw ->
+      let v = Option.value ~default (int_of_string_opt (String.trim raw)) in
+      Keeper_config.clamp_int v ~min_v ~max_v
+  in
+  { value; raw_value; source = Config_boot_overrides.source primary }
 ;;
 
 (* Global turn slot cap across autonomous + reactive pools.
@@ -65,7 +75,7 @@ let int_of_env_default ~primary ~default ~min_v ~max_v =
    only enforced floor is [min_v:1] (0 = deadlock). The previous [max_v:20]
    cap was a typo-defence boilerplate, not an architectural ceiling, and
    forced operator raise-cycles every time the fleet grew. Removed. *)
-let keeper_turn_throttle_limit =
+let keeper_turn_throttle_snapshot =
   int_of_env_default
     ~primary:"MASC_KEEPER_AUTOBOOT_MAX"
     ~default:32
@@ -73,6 +83,9 @@ let keeper_turn_throttle_limit =
     ~max_v:max_int
 ;;
 
+let keeper_turn_throttle_limit = keeper_turn_throttle_snapshot.value
+let keeper_turn_throttle_raw_value = keeper_turn_throttle_snapshot.raw_value
+let keeper_turn_throttle_source = keeper_turn_throttle_snapshot.source
 let turn_semaphore = Eio.Semaphore.make keeper_turn_throttle_limit
 
 (* 2026-05-05 fleet-stuck diagnosis: when a peer holds the semaphore

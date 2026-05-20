@@ -39,6 +39,12 @@ val keeper_turn_throttle_limit : int
 (** Runtime keeper turn concurrency limit derived from
     [MASC_KEEPER_AUTOBOOT_MAX]. *)
 
+val keeper_turn_throttle_raw_value : string option
+(** Raw configured value used for {!keeper_turn_throttle_limit}, when supplied. *)
+
+val keeper_turn_throttle_source : string
+(** Source for {!keeper_turn_throttle_limit}: [env], [boot_override], or [default]. *)
+
 val proactive_skip_reason_metric : string
 (** Canonical Prometheus metric name for the proactive-scheduler
     skip-reason counter.  Labels: [("keeper", <name>); ("reason",

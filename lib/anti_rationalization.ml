@@ -181,13 +181,26 @@ let parse_excuse_patterns_json (json : Yojson.Safe.t)
             Error (Printf.sprintf "String too long (max %d chars)" max_excuse_pattern_len)
           else validate ((pat, reason) :: acc) rest
         | item :: _ ->
+          (* [Yojson.Safe.to_string] could dump an entire malformed
+             entry (potentially MB of payload if someone pasted a JSON
+             blob into the config).  [Json_util.excerpt] caps at 160
+             chars + appends "..."  so the warn line emitted by
+             [load_excuse_patterns] stays bounded. *)
           Error
             (Printf.sprintf
-               "Invalid pattern entry: expected [string, string], got %s"
-               (Yojson.Safe.to_string item))
+               "Invalid pattern entry at index %d: expected [string, string], got %s"
+               (List.length acc)
+               (Json_util.excerpt item))
       in
       validate [] items)
-  | _ -> Error "Expected JSON array of [pattern, reason] pairs"
+  | other ->
+    (* Bind the actual JSON kind so [load_excuse_patterns]' warn line
+       tells operators wrong-type ([`Assoc] / [`String]) apart from
+       null / wrong-shape bugs without re-parsing the offending file. *)
+    Error
+      (Printf.sprintf
+         "parse_excuse_patterns_json: expected JSON array of [pattern, reason] pairs, got %s"
+         (Json_util.kind_name other))
 ;;
 
 (** Load excuse patterns from config/excuse_patterns.json.

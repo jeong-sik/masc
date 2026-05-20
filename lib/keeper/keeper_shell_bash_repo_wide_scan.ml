@@ -128,10 +128,12 @@ let git_log_all_is_repo_wide args =
     else
       let has_output_limit arg =
         let t = arg.text in
-        (* -N (bare number flag like -30) *)
+        (* -N (bare number flag like -30).  See the matching
+           [int_of_string_opt] below for the rationale: option-typed
+           parse replaces exception-as-control-flow. *)
         (t <> "" && t.[0] = '-' && t <> "-" && t <> "--"
          && let digits = String.sub t 1 (String.length t - 1) in
-            try let _ = int_of_string digits in true with _ -> false)
+            Option.is_some (int_of_string_opt digits))
         (* -n N handled below: "-n" followed by a number *)
         || String.equal t "-n"
         || String.starts_with ~prefix:"--max-count" t
@@ -142,8 +144,15 @@ let git_log_all_is_repo_wide args =
           if String.equal arg.text "-n" then
             match rest with
             | n :: _ ->
-              (try let _ = int_of_string n.text in true
-               with _ -> check_limit rest)
+              (* [int_of_string_opt] removes the exception-as-control-flow
+                 pattern that previously masked the parse-failure branch.
+                 The old [try ... with _ -> _] form would have silently
+                 swallowed any exception raised by future refactors of the
+                 [int_of_string] call (and violated RFC-0106 if it ever
+                 became cancellable).  Option-typed parse is total. *)
+              (match int_of_string_opt n.text with
+               | Some _ -> true
+               | None -> check_limit rest)
             | [] -> false
           else if has_output_limit arg then true
           else check_limit rest

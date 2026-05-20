@@ -23,6 +23,7 @@ let fd_needles =
   ; "file descriptor"
   ; "os error 24"
   ; "execve: too many open files"
+  ; "fd leak"
   ]
 
 let disk_needles =
@@ -56,13 +57,22 @@ let classify_string s =
   else if any_match s timeout_needles then Timeout
   else Other s
 
-let classify_exn = function
-  | Unix.Unix_error ((Unix.EMFILE | Unix.ENFILE), _, _) -> Fd_exhaustion
+(* Use the [try raise exn with] idiom — matching on [Unix.Unix_error]
+   directly under `function` trips masc_core's `-w +4` (fragile match)
+   because [Unix.error] is a closed sum that warning 4 watches.  The
+   exception-handler form sidesteps that: exception constructors are
+   extensible, so warning 4 does not apply, and the typed errno arms
+   stay one-per-line for clarity. *)
+let classify_exn exn =
+  try raise exn with
+  | Unix.Unix_error (Unix.EMFILE, _, _) -> Fd_exhaustion
+  | Unix.Unix_error (Unix.ENFILE, _, _) -> Fd_exhaustion
   | Unix.Unix_error (Unix.ENOSPC, _, _) -> Disk_exhaustion
-  | Unix.Unix_error ((Unix.EACCES | Unix.EPERM), _, _) -> Permission_denied
+  | Unix.Unix_error (Unix.EACCES, _, _) -> Permission_denied
+  | Unix.Unix_error (Unix.EPERM, _, _) -> Permission_denied
   | Unix.Unix_error (Unix.ECONNREFUSED, _, _) -> Connection_refused
   | Unix.Unix_error (Unix.ETIMEDOUT, _, _) -> Timeout
-  | exn -> classify_string (Printexc.to_string exn)
+  | _ -> classify_string (Printexc.to_string exn)
 
 let to_short_tag = function
   | Fd_exhaustion -> "fd_exhaustion"

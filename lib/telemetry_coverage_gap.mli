@@ -23,6 +23,7 @@ val record :
   ?keeper_name:string ->
   ?trace_id:string ->
   ?error:string ->
+  ?exn:exn ->
   unit ->
   unit
 (** Append one [masc.telemetry_coverage_gap.v1] JSONL row to the
@@ -35,7 +36,20 @@ val record :
     fields — when omitted (or empty after trim) the JSON value
     is rendered as [`Null] rather than the empty string so
     downstream consumers can distinguish "missing" from
-    "deliberately blank". *)
+    "deliberately blank".
+
+    [exn] is the RFC-0154 typed path: when present, [record] calls
+    [System_error_class.classify_exn] internally to derive
+    [error_class] (errno match → typed variant) and uses
+    [Printexc.to_string exn] as the raw [error] string unless an
+    explicit [error] argument is also supplied. When [exn] is absent
+    but [error] is present, [classify_string] runs over [error] for
+    the typed tag. When both are absent, [error_class] is [`Null].
+
+    The wire row carries an [error_class] field alongside the existing
+    [error] field — readers should prefer the typed tag and fall back
+    to substring matching on [error] (RFC-0154 §4 backward compat
+    window). *)
 
 val read_recent :
   masc_root:string ->

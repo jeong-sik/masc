@@ -1169,6 +1169,86 @@ let test_keeper_bash_safe_cd_fallback_executes_scoped_read () =
      |> Json.to_string
      |> fun output -> String_util.contains_substring output "marker.ml")
 
+let test_keeper_bash_safe_pwd_fallback_executes_scoped_ls () =
+  with_eio_fs @@ fun () ->
+  let base_path, config = make_config () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  Keeper_registry.clear ();
+  let meta = make_readonly_meta "fallback-pwd-ls" in
+  let playground = Filename.concat base_path (playground_path_of meta.name) in
+  ensure_dir playground;
+  ignore (Fs_compat.save_file_atomic (Filename.concat playground "marker.txt") "ok");
+  let raw =
+    Keeper_exec_shell.handle_keeper_bash
+      ~turn_sandbox_factory:None
+      ~turn_sandbox_factory_git:None ~exec_cache:None
+      ~config ~meta
+      ~args:(`Assoc [ "cmd", `String "pwd && ls -la"; "cwd", `String playground ])
+      ()
+  in
+  let json = Yojson.Safe.from_string raw in
+  Alcotest.(check bool) "pwd && ls fallback succeeds" true
+    (json |> Json.member "ok" |> Json.to_bool);
+  Alcotest.(check bool) "ls output is preserved" true
+    (json
+     |> Json.member "output"
+     |> Json.to_string
+     |> fun output -> String_util.contains_substring output "marker.txt")
+
+let test_keeper_bash_safe_pwd_fallback_executes_head_pipeline () =
+  with_eio_fs @@ fun () ->
+  let base_path, config = make_config () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  Keeper_registry.clear ();
+  let meta = make_readonly_meta "fallback-pwd-find" in
+  let playground = Filename.concat base_path (playground_path_of meta.name) in
+  let lib_dir = Filename.concat playground "lib" in
+  ensure_dir lib_dir;
+  ignore (Fs_compat.save_file_atomic (Filename.concat lib_dir "marker.ml") "ok");
+  let raw =
+    Keeper_exec_shell.handle_keeper_bash
+      ~turn_sandbox_factory:None
+      ~turn_sandbox_factory_git:None ~exec_cache:None
+      ~config ~meta
+      ~args:
+        (`Assoc
+           [ ( "cmd"
+             , `String
+                 "pwd && find lib -maxdepth 1 -name \"marker.ml\" 2>/dev/null | head -20"
+             )
+           ; ("cwd", `String playground)
+           ])
+      ()
+  in
+  let json = Yojson.Safe.from_string raw in
+  Alcotest.(check bool) "pwd && find | head fallback succeeds" true
+    (json |> Json.member "ok" |> Json.to_bool);
+  Alcotest.(check bool) "find output is preserved" true
+    (json
+     |> Json.member "output"
+     |> Json.to_string
+     |> fun output -> String_util.contains_substring output "marker.ml")
+
+let test_keeper_bash_pwd_fallback_does_not_unblock_writes () =
+  with_eio_fs @@ fun () ->
+  let base_path, config = make_config () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  Keeper_registry.clear ();
+  let meta = make_readonly_meta "fallback-pwd-unsafe" in
+  let playground = Filename.concat base_path (playground_path_of meta.name) in
+  ensure_dir playground;
+  let raw =
+    Keeper_exec_shell.handle_keeper_bash
+      ~turn_sandbox_factory:None
+      ~turn_sandbox_factory_git:None ~exec_cache:None
+      ~config ~meta
+      ~args:(`Assoc [ "cmd", `String "pwd && rm -rf /"; "cwd", `String playground ])
+      ()
+  in
+  let json = Yojson.Safe.from_string raw in
+  Alcotest.(check bool) "unsafe right side remains blocked" false
+    (json |> Json.member "ok" |> Json.to_bool)
+
 let test_keeper_bash_single_repo_root_recovers_top_level_find () =
   with_eio_fs @@ fun () ->
   let base_path, config = make_config () in
@@ -2117,6 +2197,12 @@ let () =
         test_keeper_bash_safe_fallback_works_for_write_enabled_keeper;
       Alcotest.test_case "safe cd fallback executes scoped read" `Quick
         test_keeper_bash_safe_cd_fallback_executes_scoped_read;
+      Alcotest.test_case "safe pwd fallback executes scoped ls" `Quick
+        test_keeper_bash_safe_pwd_fallback_executes_scoped_ls;
+      Alcotest.test_case "safe pwd fallback executes head pipeline" `Quick
+        test_keeper_bash_safe_pwd_fallback_executes_head_pipeline;
+      Alcotest.test_case "safe pwd fallback does not unblock writes" `Quick
+        test_keeper_bash_pwd_fallback_does_not_unblock_writes;
       Alcotest.test_case "single repo root recovers top-level find" `Quick
         test_keeper_bash_single_repo_root_recovers_top_level_find;
       Alcotest.test_case "double repo prefix gets public Bash recovery plan" `Quick

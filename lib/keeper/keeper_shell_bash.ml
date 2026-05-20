@@ -404,22 +404,46 @@ let safe_read_head_pipeline_fallback_of_command cmd =
       in
       primary_rewrite
 
+let safe_pwd_read_fallback_of_command cmd =
+  match find_unquoted_logic_op Logic_and cmd with
+  | None -> None
+  | Some split ->
+    let left = String.sub cmd 0 split |> String.trim in
+    let right =
+      String.sub cmd (split + 2) (String.length cmd - split - 2) |> String.trim
+    in
+    if not (String.equal left "pwd" || String.equal left "pwd -P")
+    then None
+    else
+      match safe_read_primary_rewrite right with
+      | Some _ as rewrite -> rewrite
+      | None ->
+        (match safe_read_head_pipeline_fallback_of_command right with
+         | Some _ as rewrite -> rewrite
+         | None ->
+           (match strip_trailing_dev_null_redirect right with
+            | Some stripped -> safe_read_primary_rewrite stripped
+            | None -> None))
+
 let safe_read_fallback_of_command ~write_enabled:_ ~stderr_dev_null_stripped cmd =
   match safe_read_or_echo_fallback_of_command cmd with
   | Some _ as rewrite -> rewrite
   | None ->
-    (match safe_read_head_pipeline_fallback_of_command cmd with
+    (match safe_pwd_read_fallback_of_command cmd with
      | Some _ as rewrite -> rewrite
      | None ->
-       (match safe_cd_read_fallback_of_command cmd with
+       (match safe_read_head_pipeline_fallback_of_command cmd with
         | Some _ as rewrite -> rewrite
         | None ->
-          (match strip_trailing_dev_null_redirect cmd with
-           | Some primary_cmd -> safe_read_primary_rewrite primary_cmd
+          (match safe_cd_read_fallback_of_command cmd with
+           | Some _ as rewrite -> rewrite
            | None ->
-             if stderr_dev_null_stripped
-             then safe_read_primary_rewrite cmd
-             else None)))
+             (match strip_trailing_dev_null_redirect cmd with
+              | Some primary_cmd -> safe_read_primary_rewrite primary_cmd
+              | None ->
+                if stderr_dev_null_stripped
+                then safe_read_primary_rewrite cmd
+                else None))))
 
 let shape_block_allowed_by_active_validator ~write_enabled cmd = function
   | Pipe_or_redirect when write_enabled ->

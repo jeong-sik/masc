@@ -266,7 +266,7 @@ let validate_writable_path ~(agent_name : string) config path =
       Ok canonical_path
     else
       Error (System (System_error.IoError (Printf.sprintf
-        "Write restricted to allowed sandboxes for agent %s. \
+        "path_outside_sandbox: Write restricted to allowed sandboxes for agent %s. \
          Expected path prefix: %s (or /.worktrees/ for server ops). \
          Got: %s. Cross-agent playground writes are blocked — write \
          under your own playground only. Call masc_status if you are \
@@ -636,7 +636,10 @@ let handle_code_shell ~tool_name ~start_time ctx args =
   if String.equal command "" then Tool_result.error ~tool_name ~start_time "command parameter required"
   else
     match validate_code_shell_command command with
-    | Error reason -> Tool_result.error ~tool_name ~start_time reason
+    | Error reason ->
+        Tool_result.error ~tool_name ~start_time
+          ~failure_class:(Some Tool_result.Workflow_rejection)
+          reason
     | Ok () ->
         (* Validate cwd if provided *)
         let cwd_result =

@@ -57,8 +57,6 @@ let rec try_cascade candidates ... =
 
 ### 1.2 런타임 증거 — 14일치 측정 (`<base-path>/.masc/cascade_audit/2026-05/`)
 
-이 RFC의 로컬 측정은 `--base-path=/Users/dancer/me` 실행에서 수집했다.
-
 | 분류 | 건수 / 비율 |
 |---|---|
 | 전체 attempt | 8917 / 14일 |

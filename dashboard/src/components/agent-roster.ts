@@ -436,16 +436,19 @@ function countAgentsByStatus(
 export function countRuntimeKinds(
   agentList: Agent[],
   keeperList: Keeper[],
-): { agents: number; keepers: number; totalRuntimes: number } {
+): { agents: number; keepers: number; pausedKeepers: number; totalRuntimes: number } {
   const runtimeKeepers = runtimeBackedKeepers(keeperList)
   const rosterAgents = buildAgentRoster(agentList, runtimeKeepers)
   const keeperLookup = buildKeeperRuntimeLookup(runtimeKeepers)
-  const keeperCount = scopeAgentsByKeeperFilter(rosterAgents, runtimeKeepers, 'keeper-only', keeperLookup).length
+  const allKeepers = scopeAgentsByKeeperFilter(rosterAgents, runtimeKeepers, 'keeper-only', keeperLookup)
+  const pausedKeepers = allKeepers.filter(a => isKeeperPaused(a.keeper)).length
+  const runningKeepers = allKeepers.length - pausedKeepers
   const agentCount = scopeAgentsByKeeperFilter(rosterAgents, runtimeKeepers, 'agent-only', keeperLookup).length
 
   return {
     agents: agentCount,
-    keepers: keeperCount,
+    keepers: runningKeepers,
+    pausedKeepers,
     totalRuntimes: rosterAgents.length,
   }
 }
@@ -496,15 +499,18 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
 
   // Derive runtime kind counts from memoized roster (avoids duplicate buildAgentRoster call)
   const liveRuntimeCounts = useMemo(() => {
-    const keeperCount = scopeAgentsByKeeperFilter(rosterAgents, runtimeKeeperList, 'keeper-only', keeperRuntimeLookup).length
+    const allKeepers = scopeAgentsByKeeperFilter(rosterAgents, runtimeKeeperList, 'keeper-only', keeperRuntimeLookup)
+    const pausedCount = allKeepers.filter(a => isKeeperPaused(a.keeper)).length
+    const runningCount = allKeepers.length - pausedCount
     const agentCount = scopeAgentsByKeeperFilter(rosterAgents, runtimeKeeperList, 'agent-only', keeperRuntimeLookup).length
-    return { agents: agentCount, keepers: keeperCount, totalRuntimes: rosterAgents.length }
+    return { agents: agentCount, keepers: runningCount, pausedKeepers: pausedCount, totalRuntimes: rosterAgents.length }
   }, [rosterAgents, runtimeKeeperList, keeperRuntimeLookup])
 
   const runtimeCounts = resolveRuntimeCounts({
     executionLoaded: executionLoaded.value,
     agentsCount: liveRuntimeCounts.agents,
     keepersCount: liveRuntimeCounts.keepers,
+    pausedKeepersCount: liveRuntimeCounts.pausedKeepers,
     namespaceTruthCounts: namespaceTruth.value?.root.counts,
     namespaceTruthConfiguredKeepers: namespaceTruth.value?.root.configured_keepers,
     shellCounts: shellCounts.value,
@@ -621,10 +627,11 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
     title: FILTER_META[key].description,
   }))
   const liveKeepers = runtimeCounts.live.keepers
+  const livePausedKeepers = runtimeCounts.live.pausedKeepers
   const configuredKeepers = runtimeCounts.configured.keepers
-  const configuredKeeperDelta = Math.max(0, configuredKeepers - liveKeepers)
+  const configuredKeeperDelta = Math.max(0, configuredKeepers - liveKeepers - livePausedKeepers)
   const scopeLabel = keeperFilter === 'keeper-only'
-    ? `키퍼 활성 ${liveKeepers}개 / 설정 ${configuredKeepers}개`
+    ? `키퍼 활성 ${liveKeepers}개${livePausedKeepers > 0 ? ` / 일시정지 ${livePausedKeepers}개` : ''} / 설정 ${configuredKeepers}개`
     : keeperFilter === 'agent-only'
       ? `일반 에이전트 ${runtimeCounts.live.agents}개`
       : `에이전트/키퍼 활성 ${runtimeCounts.live.totalRuntimes}개 / 설정 ${runtimeCounts.configured.totalRuntimes}개`

@@ -231,6 +231,7 @@ describe('countRuntimeKinds', () => {
     expect(result).toEqual({
       agents: 0,
       keepers: 1,
+      pausedKeepers: 0,
       totalRuntimes: 1,
     })
   })
@@ -258,6 +259,7 @@ describe('countRuntimeKinds', () => {
     expect(result).toEqual({
       agents: 0,
       keepers: 1,
+      pausedKeepers: 0,
       totalRuntimes: 1,
     })
   })
@@ -286,6 +288,7 @@ describe('countRuntimeKinds', () => {
     expect(result).toEqual({
       agents: 0,
       keepers: 1,
+      pausedKeepers: 0,
       totalRuntimes: 1,
     })
   })
@@ -310,6 +313,7 @@ describe('countRuntimeKinds', () => {
     expect(result).toEqual({
       agents: 1,
       keepers: 1,
+      pausedKeepers: 0,
       totalRuntimes: 2,
     })
   })

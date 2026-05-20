@@ -12,6 +12,7 @@ export type ConfiguredCountSource = 'namespace-truth' | 'shell' | 'none'
 export interface LiveRuntimeView {
   agents: number
   keepers: number
+  pausedKeepers: number
   tasks: number
   totalRuntimes: number
   available: boolean
@@ -33,6 +34,7 @@ interface ResolveRuntimeCountsOptions {
   executionLoaded: boolean
   agentsCount: number
   keepersCount: number
+  pausedKeepersCount?: number
   tasksCount?: number
   namespaceTruthCounts?: DashboardNamespaceTruthResponse['root']['counts']
   namespaceTruthConfiguredKeepers?: number
@@ -120,6 +122,7 @@ export function resolveRuntimeCounts({
   executionLoaded,
   agentsCount,
   keepersCount,
+  pausedKeepersCount = 0,
   tasksCount = 0,
   namespaceTruthCounts,
   namespaceTruthConfiguredKeepers,
@@ -128,10 +131,12 @@ export function resolveRuntimeCounts({
 }: ResolveRuntimeCountsOptions): RuntimeCounts {
   const liveAgents = normalizeCount(agentsCount)
   const liveKeepers = normalizeCount(keepersCount)
+  const livePausedKeepers = normalizeCount(pausedKeepersCount)
   const liveTasks = normalizeCount(tasksCount)
   const live: LiveRuntimeView = {
     agents: liveAgents,
     keepers: liveKeepers,
+    pausedKeepers: livePausedKeepers,
     tasks: liveTasks,
     totalRuntimes: liveAgents + liveKeepers,
     available: executionLoaded,
@@ -186,9 +191,16 @@ export function formatActiveOverConfigured(
   counts: Pick<RuntimeCounts, 'live' | 'configured'>,
   kind: 'keeper' | 'runtime' = 'keeper',
 ): string {
-  const active = kind === 'keeper' ? counts.live.keepers : counts.live.totalRuntimes
-  const configured = kind === 'keeper' ? counts.configured.keepers : counts.configured.totalRuntimes
-  return `활성 ${active} / 설정 ${configured}`
+  if (kind === 'keeper') {
+    const running = counts.live.keepers
+    const paused = counts.live.pausedKeepers
+    const configured = counts.configured.keepers
+    const parts = [`활성 ${running}`]
+    if (paused > 0) parts.push(`일시정지 ${paused}`)
+    parts.push(`설정 ${configured}`)
+    return parts.join(' / ')
+  }
+  return `활성 ${counts.live.totalRuntimes} / 설정 ${counts.configured.totalRuntimes}`
 }
 
 interface ExecutionFallbackStateOptions {

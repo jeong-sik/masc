@@ -74,7 +74,7 @@ vi.mock('../namespace-truth-store', () => ({
 }))
 vi.mock('../runtime-counts', () => ({
   resolveRuntimeCounts: vi.fn(() => ({
-    live: { agents: 0, keepers: 0, tasks: 0, totalRuntimes: 0, available: false },
+    live: { agents: 0, keepers: 0, pausedKeepers: 0, tasks: 0, totalRuntimes: 0, available: false },
     configured: { keepers: 0, totalRuntimes: 0, source: 'none' },
     source: 'unknown',
   })),
@@ -88,7 +88,7 @@ const mockResolveRuntimeCounts = vi.mocked(resolveRuntimeCounts)
 const runtimeCounts = (
   overrides: Partial<ReturnType<typeof resolveRuntimeCounts>>,
 ): ReturnType<typeof resolveRuntimeCounts> => ({
-  live: { agents: 0, keepers: 0, tasks: 0, totalRuntimes: 0, available: false },
+  live: { agents: 0, keepers: 0, pausedKeepers: 0, tasks: 0, totalRuntimes: 0, available: false },
   configured: { keepers: 0, totalRuntimes: 0, source: 'none' },
   source: 'unknown',
   ...overrides,
@@ -166,7 +166,7 @@ describe('AgentsUnified', () => {
 
   it('shows runtime truth banner when a configured baseline is known', () => {
     mockResolveRuntimeCounts.mockReturnValue(runtimeCounts({
-      live: { agents: 3, keepers: 2, tasks: 0, totalRuntimes: 5, available: true },
+      live: { agents: 3, keepers: 2, pausedKeepers: 0, tasks: 0, totalRuntimes: 5, available: true },
       configured: { keepers: 4, totalRuntimes: 7, source: 'namespace-truth' },
       source: 'execution',
     }))
@@ -179,7 +179,7 @@ describe('AgentsUnified', () => {
 
   it('shows runtime truth banner without delta when live equals configured', () => {
     mockResolveRuntimeCounts.mockReturnValue(runtimeCounts({
-      live: { agents: 3, keepers: 2, tasks: 0, totalRuntimes: 5, available: true },
+      live: { agents: 3, keepers: 2, pausedKeepers: 0, tasks: 0, totalRuntimes: 5, available: true },
       configured: { keepers: 2, totalRuntimes: 5, source: 'namespace-truth' },
       source: 'execution',
     }))
@@ -190,7 +190,7 @@ describe('AgentsUnified', () => {
 
   it('hides runtime truth banner when no configured baseline is available', () => {
     mockResolveRuntimeCounts.mockReturnValue(runtimeCounts({
-      live: { agents: 3, keepers: 2, tasks: 0, totalRuntimes: 5, available: true },
+      live: { agents: 3, keepers: 2, pausedKeepers: 0, tasks: 0, totalRuntimes: 5, available: true },
       configured: { keepers: 0, totalRuntimes: 0, source: 'none' },
       source: 'execution',
     }))

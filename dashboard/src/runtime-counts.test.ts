@@ -17,7 +17,7 @@ describe('resolveRuntimeCounts', () => {
       namespaceTruthConfiguredKeepers: 5,
       shellCounts: { agents: 1, keepers: 1, tasks: 4 },
     })).toEqual({
-      live: { agents: 0, keepers: 0, tasks: 0, totalRuntimes: 0, available: false },
+      live: { agents: 0, keepers: 0, pausedKeepers: 0, tasks: 0, totalRuntimes: 0, available: false },
       configured: { keepers: 5, totalRuntimes: 5, source: 'namespace-truth' },
       source: 'project-snapshot',
     })
@@ -31,7 +31,7 @@ describe('resolveRuntimeCounts', () => {
       shellCounts: { agents: 4, keepers: 1, tasks: 9 },
       shellConfiguredKeepers: 3,
     })).toEqual({
-      live: { agents: 0, keepers: 0, tasks: 0, totalRuntimes: 0, available: false },
+      live: { agents: 0, keepers: 0, pausedKeepers: 0, tasks: 0, totalRuntimes: 0, available: false },
       configured: { keepers: 3, totalRuntimes: 5, source: 'shell' },
       source: 'shell',
     })
@@ -46,7 +46,7 @@ describe('resolveRuntimeCounts', () => {
       shellCounts: { agents: 6, keepers: 1, tasks: 9, total_runtimes: 8 },
       shellConfiguredKeepers: 7,
     })).toEqual({
-      live: { agents: 0, keepers: 0, tasks: 0, totalRuntimes: 0, available: false },
+      live: { agents: 0, keepers: 0, pausedKeepers: 0, tasks: 0, totalRuntimes: 0, available: false },
       configured: { keepers: 7, totalRuntimes: 8, source: 'shell' },
       source: 'shell',
     })
@@ -59,7 +59,7 @@ describe('resolveRuntimeCounts', () => {
       keepersCount: 0,
       namespaceTruthCounts: { agents: 2, keepers: 3, tasks: 12 },
     })).toEqual({
-      live: { agents: 0, keepers: 0, tasks: 0, totalRuntimes: 0, available: false },
+      live: { agents: 0, keepers: 0, pausedKeepers: 0, tasks: 0, totalRuntimes: 0, available: false },
       configured: { keepers: 3, totalRuntimes: 5, source: 'namespace-truth' },
       source: 'project-snapshot',
     })
@@ -74,7 +74,7 @@ describe('resolveRuntimeCounts', () => {
       namespaceTruthCounts: { agents: 2, keepers: 3, tasks: 12 },
       namespaceTruthConfiguredKeepers: 5,
     })).toEqual({
-      live: { agents: 2, keepers: 3, tasks: 1, totalRuntimes: 5, available: true },
+      live: { agents: 2, keepers: 3, pausedKeepers: 0, tasks: 1, totalRuntimes: 5, available: true },
       configured: { keepers: 5, totalRuntimes: 5, source: 'namespace-truth' },
       source: 'execution',
     })
@@ -90,7 +90,7 @@ describe('resolveRuntimeCounts', () => {
       shellCounts: { agents: 13, keepers: 12, tasks: 103, total_runtimes: 25 },
       shellConfiguredKeepers: 14,
     })).toEqual({
-      live: { agents: 0, keepers: 12, tasks: 0, totalRuntimes: 12, available: false },
+      live: { agents: 0, keepers: 12, pausedKeepers: 0, tasks: 0, totalRuntimes: 12, available: false },
       configured: { keepers: 14, totalRuntimes: 14, source: 'namespace-truth' },
       source: 'partial',
     })
@@ -104,7 +104,7 @@ describe('resolveRuntimeCounts', () => {
       namespaceTruthCounts: { agents: 2, keepers: 3, tasks: 12 },
       namespaceTruthConfiguredKeepers: 4,
     })).toEqual({
-      live: { agents: 0, keepers: 0, tasks: 0, totalRuntimes: 0, available: true },
+      live: { agents: 0, keepers: 0, pausedKeepers: 0, tasks: 0, totalRuntimes: 0, available: true },
       configured: { keepers: 4, totalRuntimes: 5, source: 'namespace-truth' },
       source: 'project-snapshot',
     })
@@ -121,7 +121,7 @@ describe('resolveRuntimeCounts', () => {
       namespaceTruthCounts: { agents: 0, keepers: 16, tasks: 0 },
       namespaceTruthConfiguredKeepers: 16,
     })).toEqual({
-      live: { agents: 0, keepers: 2, tasks: 0, totalRuntimes: 2, available: true },
+      live: { agents: 0, keepers: 2, pausedKeepers: 0, tasks: 0, totalRuntimes: 2, available: true },
       configured: { keepers: 16, totalRuntimes: 16, source: 'namespace-truth' },
       source: 'execution',
     })
@@ -133,7 +133,7 @@ describe('resolveRuntimeCounts', () => {
       agentsCount: 0,
       keepersCount: 0,
     })).toEqual({
-      live: { agents: 0, keepers: 0, tasks: 0, totalRuntimes: 0, available: false },
+      live: { agents: 0, keepers: 0, pausedKeepers: 0, tasks: 0, totalRuntimes: 0, available: false },
       configured: { keepers: 0, totalRuntimes: 0, source: 'none' },
       source: 'unknown',
     })
@@ -173,15 +173,23 @@ describe('configuredCountSourceLabel', () => {
 describe('formatActiveOverConfigured', () => {
   it('formats keeper counts as "활성 N / 설정 M"', () => {
     const counts = {
-      live: { agents: 0, keepers: 2, tasks: 0, totalRuntimes: 2, available: true },
+      live: { agents: 0, keepers: 2, pausedKeepers: 0, tasks: 0, totalRuntimes: 2, available: true },
       configured: { keepers: 16, totalRuntimes: 16, source: 'namespace-truth' as const },
     }
     expect(formatActiveOverConfigured(counts, 'keeper')).toBe('활성 2 / 설정 16')
   })
 
+  it('includes paused count in keeper formatting when paused keepers exist', () => {
+    const counts = {
+      live: { agents: 0, keepers: 4, pausedKeepers: 3, tasks: 0, totalRuntimes: 4, available: true },
+      configured: { keepers: 24, totalRuntimes: 24, source: 'namespace-truth' as const },
+    }
+    expect(formatActiveOverConfigured(counts, 'keeper')).toBe('활성 4 / 일시정지 3 / 설정 24')
+  })
+
   it('formats runtime totals as "활성 N / 설정 M"', () => {
     const counts = {
-      live: { agents: 3, keepers: 2, tasks: 0, totalRuntimes: 5, available: true },
+      live: { agents: 3, keepers: 2, pausedKeepers: 0, tasks: 0, totalRuntimes: 5, available: true },
       configured: { keepers: 16, totalRuntimes: 20, source: 'namespace-truth' as const },
     }
     expect(formatActiveOverConfigured(counts, 'runtime')).toBe('활성 5 / 설정 20')
@@ -189,7 +197,7 @@ describe('formatActiveOverConfigured', () => {
 
   it('defaults kind to "keeper" when omitted', () => {
     const counts = {
-      live: { agents: 0, keepers: 0, tasks: 0, totalRuntimes: 0, available: false },
+      live: { agents: 0, keepers: 0, pausedKeepers: 0, tasks: 0, totalRuntimes: 0, available: false },
       configured: { keepers: 0, totalRuntimes: 0, source: 'none' as const },
     }
     expect(formatActiveOverConfigured(counts)).toBe('활성 0 / 설정 0')

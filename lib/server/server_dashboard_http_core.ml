@@ -366,6 +366,13 @@ let json_assoc_string_opt key json =
   | _ -> None
 ;;
 
+let json_assoc_int_opt key json =
+  match json_assoc_field_opt key json with
+  | Some (`Int value) -> Some value
+  | Some (`Float value) -> Some (int_of_float value)
+  | _ -> None
+;;
+
 let projection_diagnostics_fields json =
   match json_assoc_field_opt "projection_diagnostics" json with
   | Some (`Assoc fields) -> fields
@@ -1173,6 +1180,10 @@ let dashboard_general_agent_count =
   Server_dashboard_http_core_entities.dashboard_general_agent_count
 ;;
 
+let dashboard_general_agent_count_light =
+  Server_dashboard_http_core_entities.dashboard_general_agent_count_light
+;;
+
 let provider_capacity_json = Server_dashboard_http_core_entities.provider_capacity_json
 
 (* #10544: light mode is meant to skip the heavy belief/tension evaluation
@@ -1459,20 +1470,36 @@ let dashboard_shell_payload_json
     let status_json, status_ms =
       measure_ms "status" (fun () -> dashboard_shell_status_json config)
     in
-    let agents, agents_ms =
-      measure_ms "agents" (fun () -> dashboard_agents_safe config)
+    let general_agents, agents_ms =
+      if light
+      then measure_ms "agents" (fun () -> dashboard_general_agent_count_light config)
+      else (
+        let agents, agents_ms =
+          measure_ms "agents" (fun () -> dashboard_agents_safe config)
+        in
+        dashboard_general_agent_count agents, agents_ms)
     in
-    let general_agents = dashboard_general_agent_count agents in
     let tasks, tasks_ms = measure_ms "tasks" (fun () -> dashboard_tasks_safe config) in
-    let active_keepers, keepers_ms =
-      measure_ms "keepers" (fun () -> running_keeper_count config)
-    in
     let configured_keepers, configured_keepers_ms =
       measure_ms "configured_keepers" (fun () -> keeper_count config)
     in
     let meta_cognition_r = ref (`Null, 0) in
     let config_resolution_r = ref (`Null, 0) in
     let runtime_resolution_r = ref (`Null, 0) in
+    let active_keepers, keepers_ms =
+      if light
+      then (
+        let runtime_resolution_json, runtime_resolution_ms =
+          measure_json_projection "runtime_resolution" (fun () ->
+            Server_dashboard_http_runtime_info.light_runtime_resolution_json config)
+        in
+        runtime_resolution_r := (runtime_resolution_json, runtime_resolution_ms);
+        ( Option.value
+            ~default:0
+            (json_assoc_int_opt "keeper_fibers" runtime_resolution_json)
+        , 0 ))
+      else measure_ms "keepers" (fun () -> running_keeper_count config)
+    in
     if light
     then
       meta_cognition_r

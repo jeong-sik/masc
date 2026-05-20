@@ -465,13 +465,17 @@ const errorPanelOpen = signal(false)
 export function ErrorCounterBadge() {
   const count = unacknowledgedCount.value
   const open = errorPanelOpen.value
+  const label = count > 0
+    ? `${count} unacknowledged dashboard errors`
+    : 'No dashboard errors'
 
   return html`
     <div class="relative" role="status">
       <button
         type="button"
         class="flex items-center gap-1.5 cursor-pointer rounded-[var(--r-1)] px-1 py-0.5 transition-colors hover:bg-[var(--color-bg-elevated)] ${count > 0 ? 'text-[var(--color-status-err)]' : 'text-[var(--color-fg-muted)]'}"
-        title=${count > 0 ? `${count} unacknowledged errors` : 'No errors'}
+        title=${label}
+        aria-label=${label}
         onClick=${() => { errorPanelOpen.value = !errorPanelOpen.value }}
         aria-expanded=${open}
         aria-haspopup="true"
@@ -702,17 +706,17 @@ function HealthIndicator({ collapsed }: { collapsed?: boolean }) {
 
   if (!live) {
     dotClass = 'bg-[var(--color-status-err)]'
-    label = 'Offline'
+    label = 'Transport offline'
   } else if (!snap) {
     dotClass = 'bg-[var(--color-fg-muted)]'
-    label = missionLoading.value ? 'Loading' : 'Idle'
+    label = missionLoading.value ? 'Mission loading' : 'Mission idle'
   } else if (blockers > 0 || attentionCount > 0) {
     dotClass = 'bg-[var(--color-status-warn)]'
     const total = blockers + attentionCount
-    label = `Attention ${total}`
+    label = `Mission attention ${total}`
   } else {
     dotClass = 'bg-[var(--color-status-ok)]'
-    label = 'Healthy'
+    label = 'Mission healthy'
   }
 
   const attentionLines = attentionCount > 0 ? summarizeAttentionPreview(attentionQueue) : []

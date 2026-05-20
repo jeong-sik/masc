@@ -2,6 +2,7 @@ module Types = Masc_domain
 
 module Lib = Masc_mcp
 module Auth = Masc_mcp.Auth
+module Coord = Masc_mcp.Coord
 
 open Alcotest
 
@@ -796,6 +797,68 @@ let test_shell_snapshot_wire_light_variant_bypasses_snapshot () =
     (json |> member "wire_sentinel" = `Null);
   Lib.Dashboard_snapshot.reset_for_test ()
 
+let test_dashboard_shell_light_includes_runtime_health_ssot () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  let json =
+    Lib.Server_dashboard_http_core.dashboard_shell_http_json ~light:true config
+  in
+  let open Yojson.Safe.Util in
+  let runtime_resolution = json |> member "runtime_resolution" in
+  let keeper_fibers = runtime_resolution |> member "keeper_fibers" |> to_int in
+  Alcotest.(check bool)
+    "light shell exposes runtime_resolution object"
+    true
+    (match runtime_resolution with
+     | `Assoc _ -> true
+     | _ -> false);
+  Alcotest.(check int)
+    "light shell keeper count follows runtime health keeper_fibers"
+    keeper_fibers
+    (json |> member "counts" |> member "keepers" |> to_int);
+  Alcotest.(check bool)
+    "light shell exposes fleet safety"
+    true
+    (match runtime_resolution |> member "keeper_fleet_safety" with
+     | `Assoc _ -> true
+     | _ -> false);
+  Alcotest.(check bool)
+    "light shell exposes fd accountant"
+    true
+    (match runtime_resolution |> member "fd_accountant" with
+     | `Assoc _ -> true
+     | _ -> false)
+
+let test_dashboard_shell_light_counts_agents_from_summary_fields () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  ignore (Coord.init config ~agent_name:None);
+  let write_agent ~name ~agent_type ~status =
+    let path =
+      Filename.concat (Coord.agents_dir config) (Coord.safe_filename name ^ ".json")
+    in
+    Coord.write_json
+      config
+      path
+      (`Assoc
+        [ "name", `String name
+        ; "agent_type", `String agent_type
+        ; "status", `String status
+        ; "capabilities", `List []
+        ; "joined_at", `String "2026-05-20T00:00:00Z"
+        ; "last_seen", `String "2026-05-20T00:00:00Z"
+        ])
+  in
+  write_agent ~name:"codex-active" ~agent_type:"codex" ~status:"active";
+  write_agent ~name:"keeper-active" ~agent_type:"keeper" ~status:"busy";
+  write_agent ~name:"codex-inactive" ~agent_type:"codex" ~status:"inactive";
+  let json =
+    Lib.Server_dashboard_http_core.dashboard_shell_http_json ~light:true config
+  in
+  let open Yojson.Safe.Util in
+  Alcotest.(check int)
+    "light shell counts active non-keeper agents from summary fields"
+    1
+    (json |> member "counts" |> member "agents" |> to_int)
+
 (* RFC-0138 Phase 3 Step 2 — /tools and /telemetry/summary wire tests.
 
    Cover the new selector matrix on
@@ -963,6 +1026,10 @@ let () =
             test_shell_snapshot_wire_falls_back_when_empty;
           test_case "RFC-0138 shell wire light variant bypasses snapshot" `Quick
             test_shell_snapshot_wire_light_variant_bypasses_snapshot;
+          test_case "light shell carries runtime health SSOT" `Quick
+            test_dashboard_shell_light_includes_runtime_health_ssot;
+          test_case "light shell counts agents from summary fields" `Quick
+            test_dashboard_shell_light_counts_agents_from_summary_fields;
           test_case "RFC-0138 tools wire returns snapshot when actor omitted" `Quick
             test_tools_snapshot_wire_returns_snapshot_when_actor_omitted;
           test_case "RFC-0138 telemetry_summary wire returns snapshot" `Quick

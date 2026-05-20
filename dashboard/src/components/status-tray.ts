@@ -239,12 +239,12 @@ export function summarizeStatusTray(input: StatusTrayInput): StatusTraySummary {
         label: 'Client',
         value: silent
           ? heartbeatFresh ? pongLatency : 'silent'
-          : `${input.wsEventCount60s}/60s`,
+          : `${input.wsEventCount60s} deltas/min`,
         detail: silent
           ? heartbeatFresh
             ? `client WS channel is idle; heartbeat pong ${Math.floor(pongAgeMs / 1000)}s ago`
             : 'client WS channel is open but no recent event or heartbeat pong has arrived'
-          : `last event ${Math.floor(silentMs / 1000)}s ago`,
+          : `last applied route delta ${Math.floor(silentMs / 1000)}s ago`,
       }
     }
   } else {
@@ -403,7 +403,7 @@ function PopoverContent({
             <div class="mt-0.5 text-sm font-semibold tabular-nums">${summary.counts.reconnectCount}</div>
           </div>
           <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1.5">
-            <div class="font-mono text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">WS events</div>
+            <div class="font-mono text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">WS deltas</div>
             <div class="mt-0.5 text-sm font-semibold tabular-nums">${summary.counts.wsEventCount60s}/60s</div>
           </div>
         </div>

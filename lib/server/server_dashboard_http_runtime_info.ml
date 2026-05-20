@@ -515,7 +515,8 @@ let runtime_resolution_json (config : Coord.config) =
     |> Option.value ~default:config.workspace_path
   in
   let prompt_markdown_dir =
-    Prompt_registry.get_markdown_dir () |> Option.value ~default:""
+    Prompt_registry.get_markdown_dir ()
+    |> Option.value ~default:(Config_dir_resolver.prompts_dir ())
   in
   let expected_prompt_dir = Config_dir_resolver.prompts_dir () in
   let prompt_dir_mismatch =
@@ -696,6 +697,88 @@ let runtime_resolution_json (config : Coord.config) =
             ~resolved_base_commit ~source_mismatch )
       ]
       @ Server_routes_http_runtime.keeper_fleet_runtime_resolution_fields () )
+;;
+
+let light_runtime_resolution_json (config : Coord.config) =
+  let build = Build_identity.current () in
+  let base_path_input =
+    Env_config_core.base_path_source_opt ()
+    |> Option.map snd
+    |> Option.value ~default:config.workspace_path
+  in
+  let prompt_markdown_dir =
+    Prompt_registry.get_markdown_dir ()
+    |> Option.value ~default:(Config_dir_resolver.prompts_dir ())
+  in
+  let server_repo_path = Build_identity.repo_root () in
+  let server_workspace_mismatch =
+    match server_repo_path with
+    | Some path ->
+      not
+        (same_normalized_path path config.workspace_path
+         || same_normalized_path path config.base_path)
+    | None -> false
+  in
+  let fleet_fields =
+    Server_routes_http_runtime.keeper_fleet_runtime_resolution_light_fields ()
+  in
+  let fleet_safety =
+    match List.assoc_opt "keeper_fleet_safety" fleet_fields with
+    | Some ((`Assoc _) as json) -> Some json
+    | _ -> None
+  in
+  let fleet_warning =
+    match fleet_safety with
+    | Some (`Assoc fields) ->
+      let status =
+        match List.assoc_opt "status" fields with
+        | Some (`String status) -> status
+        | _ -> "unknown"
+      in
+      let operator_action_required =
+        match List.assoc_opt "operator_action_required" fields with
+        | Some (`Bool value) -> value
+        | _ -> false
+      in
+      (not (String.equal status "ok")) || operator_action_required
+    | _ -> false
+  in
+  let warnings =
+    []
+    |> (fun acc ->
+         if server_workspace_mismatch
+         then
+           "Server binary checkout differs from dashboard workspace/base path."
+           :: acc
+         else acc)
+    |> (fun acc ->
+         if fleet_warning
+         then "Keeper fleet safety is degraded; inspect keeper_fleet_safety." :: acc
+         else acc)
+    |> List.rev
+  in
+  let status = if warnings = [] then "ready" else "warn" in
+  `Assoc
+    ( [ "status", `String status
+      ; "warnings", `List (List.map (fun warning -> `String warning) warnings)
+      ; "base_path", path_item_json ~source:"input" base_path_input
+      ; "workspace_path", path_item_json ~source:"workspace" config.workspace_path
+      ; "resolved_base_path", path_item_json ~source:"resolved_base" config.base_path
+      ; "data_root", path_item_json ~source:"runtime_data" (Coord.masc_root_dir config)
+      ; "prompt_markdown_dir", path_item_json ~source:"prompt_registry" prompt_markdown_dir
+      ; ( "server_repo_path"
+        , match server_repo_path with
+          | Some path -> path_item_json ~source:"server_binary" path
+          | None ->
+            `Assoc
+              [ "path", `Null; "exists", `Bool false; "source", `String "server_binary" ] )
+      ; "source_mismatch", `Bool false
+      ; "server_workspace_mismatch", `Bool server_workspace_mismatch
+      ; "diagnostics", `List []
+      ; ("keeper_runtime", Keeper_runtime_resolved.(current () |> to_yojson))
+      ; "build", Build_identity.to_yojson build
+      ]
+      @ fleet_fields )
 ;;
 
 (* 30-second TTL chosen to match the dashboard frontend's natural refresh

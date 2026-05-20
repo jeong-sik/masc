@@ -62,7 +62,17 @@ let bool_arg_opt args key =
 let int_arg_opt args key =
   match U.member key args with
   | `Int value -> Some value
-  | `Intlit raw -> Some (Option.value ~default:0 (Stdlib.int_of_string_opt raw))
+  (* [`Intlit raw] only appears for integers too large for the native
+     [int] domain (63-bit on 64-bit platforms).  The previous
+     implementation collapsed parse failure to [Some 0], which silently
+     corrupted overflow into a defined "zero" value — a Workaround
+     Rejection Bar §2 violation (unknown → permissive default).  By
+     composing [int_of_string_opt] into [Option.t] directly, an
+     overflow surfaces as [None], the same shape callers already
+     handle for "field missing" — no silent zero.  Small [`Intlit]
+     payloads (rare; values just above [max_int] depending on
+     platform) round-trip cleanly. *)
+  | `Intlit raw -> Stdlib.int_of_string_opt raw
   | _ -> None
 
 (* ================================================================ *)

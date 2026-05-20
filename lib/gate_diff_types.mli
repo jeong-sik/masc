@@ -190,5 +190,29 @@ val typed_advisor_log_enabled : unit -> bool
     the documented truthy values: [1], [true], [TRUE], [yes], [on],
     [log].  Default off — the typed-validation parity-measurement
     counters do not increment until an operator opts in.  Phase C
-    will flip authority via a separate [MASC_BASH_TYPED_AUTHORITY]
-    flag in a follow-up PR. *)
+    flips authority via the separate {!typed_authority_enabled}
+    flag below; advisor logging remains independent so operators
+    can keep parity counters running after authority is enabled. *)
+
+val typed_authority_enabled : unit -> bool
+(** RFC-0092 Phase C authority opt-in — predicate-only stage of PR-4.
+    Returns [true] iff the [MASC_BASH_TYPED_AUTHORITY] environment
+    variable is set to one of the documented truthy values: [1],
+    [true], [TRUE], [yes], [on].  Default off — *no behavior change
+    while unset*.  When set, downstream callers (planned:
+    [keeper_shell_bash]) treat the typed {!Shell_ir_validator} verdict
+    as authoritative for [Allow]/[Reject] cases and fall back to the
+    legacy substring gate on [Cannot_parse], per RFC-0092 §4.3.  This
+    predicate is the SSOT operators flip; consumers must not read
+    [Sys.getenv] directly for this flag.
+
+    Distinct from {!typed_advisor_log_enabled}: the advisor flag gates
+    *measurement* (parity counters), the authority flag gates
+    *decision*.  An operator may run with advisor on + authority off
+    (Phase B observation) or advisor off + authority on (Phase C
+    after parity criterion met); the two flags are independent
+    booleans by design.
+
+    Truthy-value set is intentionally narrower than the advisor flag
+    (no [log] alias) because [log] only makes sense for measurement,
+    not decisions. *)

@@ -327,3 +327,19 @@ let last_stage_bin context =
 ;;
 
 let is_pipeline context = List.length context.stage_bins > 1
+
+(* RFC-0092 Phase C authority — facade-side predicate.
+
+   This sub-library cannot depend on [masc_mcp.gate_diff_types]
+   (which lives in the root masc_mcp library and would introduce a
+   cycle), so the env read is duplicated here.  The truthy-value set
+   must stay byte-for-byte identical to [Gate_diff_types.
+   typed_authority_enabled] — both predicates are the single
+   operator-facing SSOT for [MASC_BASH_TYPED_AUTHORITY] and divergence
+   would silently break the authority flip.  If a future RFC promotes
+   the predicate to a shared dep, delete this copy. *)
+let is_authoritative () =
+  match Sys.getenv_opt "MASC_BASH_TYPED_AUTHORITY" with
+  | Some ("1" | "true" | "TRUE" | "yes" | "on") -> true
+  | _ -> false
+;;

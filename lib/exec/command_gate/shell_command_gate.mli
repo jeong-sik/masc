@@ -187,3 +187,28 @@ val too_complex_reason_tag : too_complex_reason -> string
 val stage_count : parsed_context -> int
 val last_stage_bin : parsed_context -> string option
 val is_pipeline : parsed_context -> bool
+
+(** {1 Authority flag (RFC-0092 Phase C)} *)
+
+val is_authoritative : unit -> bool
+(** [is_authoritative ()] returns [true] iff the
+    [MASC_BASH_TYPED_AUTHORITY] environment variable is set to one of
+    the documented truthy values: [1], [true], [TRUE], [yes], [on].
+    Default off — no behavior change while unset.
+
+    This is the facade-side mirror of
+    [Masc_mcp.Gate_diff_types.typed_authority_enabled].  Both
+    predicates intentionally share the same truthy-value set; the
+    duplication exists because this sub-library
+    ([masc_exec_command_gate]) cannot depend on the root [masc_mcp]
+    library without introducing a cycle.
+
+    Consumers outside the keeper boundary (Phase 1 facade callers
+    listed in the {!caller} sum) should prefer this predicate;
+    consumers inside the root [masc_mcp] library should use
+    [Masc_mcp.Gate_diff_types.typed_authority_enabled].  Both return
+    the same bool at any given env-var state.
+
+    Predicate-only stage: this PR does not change facade behavior
+    when the flag is on — the authority decision-arm wiring lands in
+    a follow-up so risk stays measurable. *)

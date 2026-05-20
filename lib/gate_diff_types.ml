@@ -195,3 +195,16 @@ let typed_advisor_log_enabled () =
   match Sys.getenv_opt "MASC_BASH_TYPED_ADVISOR" with
   | Some ("1" | "true" | "TRUE" | "yes" | "on" | "log") -> true
   | _ -> false
+
+(* RFC-0092 Phase C authority — predicate-only stage of PR-4.
+
+   Default off; no behavior change while unset.  Read each call (not
+   lazy) so operators can flip the env var mid-process for ops drills
+   and rollback without restarting the keeper fleet — same property
+   the advisor predicate has.  The narrower truthy set (no "log"
+   alias) is intentional: "log" only makes sense for measurement, not
+   decisions. *)
+let typed_authority_enabled () =
+  match Sys.getenv_opt "MASC_BASH_TYPED_AUTHORITY" with
+  | Some ("1" | "true" | "TRUE" | "yes" | "on") -> true
+  | _ -> false

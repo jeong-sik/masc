@@ -21,6 +21,8 @@ let contains_forbidden_shell_chars cmd =
       | _ -> false)
     cmd
 
+let has_strict_shell_metachar = contains_forbidden_shell_chars
+
 (** Top-level gh CLI commands allowed. Commands not in this list are
     rejected at the allowlist gate. *)
 let gh_allowed_commands =
@@ -214,7 +216,7 @@ let extract_gh_command_pair cmd =
 let validate_gh_command ?(allowed_orgs = []) cmd =
   let trimmed = String.trim cmd in
   if trimmed = "" then Error "gh command must not be empty"
-  else if contains_forbidden_shell_chars trimmed then
+  else if has_strict_shell_metachar trimmed then
     Error
       "Blocked: chaining/redirect in gh command. Use a single subcommand. \
        Good: cmd='pr list --state open'. Bad: cmd='pr list && echo done'."

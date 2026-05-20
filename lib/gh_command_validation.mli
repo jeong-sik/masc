@@ -11,8 +11,7 @@
     that grades a command as R0 (read-only), R1 (reversible mutation),
     or R2 (irreversible) for the operator-approval flow.
 
-    Internal helpers ([forbidden_shell_chars],
-    [contains_forbidden_shell_chars], [gh_allowed_commands],
+    Internal helpers ([forbidden_shell_chars], [gh_allowed_commands],
     [gh_irreversible_ops], [gh_reversible_mutations],
     [gh_graphql_r2_mutations], [gh_blocked_operations],
     [gh_api_destructive_patterns], [gh_graphql_destructive_mutations],
@@ -59,6 +58,10 @@ val validate_gh_command :
 
     [allowed_orgs] is consulted only when the command carries an
     explicit [--repo OWNER/REPO]; [[]] disables that check. *)
+
+val has_strict_shell_metachar : string -> bool
+(** Shared scanner for the legacy single-command allowlist gate. It rejects
+    shell chaining, pipe, redirect, substitution, and control characters. *)
 
 val extract_gh_repo_owner : string -> string option
 (** Returns the [OWNER] portion of an explicit [--repo OWNER/REPO]

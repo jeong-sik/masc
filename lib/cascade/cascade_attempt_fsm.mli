@@ -151,3 +151,17 @@ val resolve_provider_api_key_env_name :
 
 val provider_auth_hint_marker : string
 val openai_compat_not_found_hint_marker : string
+
+(** {1 Saturation-signal metric labels and provider sanitiser} *)
+
+val label_kind : string
+(** Prometheus label key for the saturation-signal kind. *)
+
+val label_cascade : string
+(** Prometheus label key for the cascade name. *)
+
+val provider_label : string -> string
+(** Sanitise an upstream-supplied provider string into a Prometheus
+    label value; empty/blank inputs emit a callstack-tagged warning
+    via {!Prometheus.metric_cascade_attempt_empty_provider_label} and
+    fall back to a fixed placeholder. *)

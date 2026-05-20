@@ -2369,9 +2369,13 @@ let test_handle_request_resources_templates_rejects_invalid_cursor () =
   in
   let response = Mcp_eio.handle_request ~clock ~sw state request in
   Alcotest.(check int) "invalid params code" (-32602) (error_code_exn response);
-  Alcotest.(check string) "invalid cursor error"
-    "Invalid params: cursor is invalid"
-    (error_message_exn response);
+  let msg = error_message_exn response in
+  Alcotest.(check bool)
+    "invalid cursor error preserves contract label" true
+    (contains_substring msg "Invalid params: cursor");
+  Alcotest.(check bool)
+    "invalid cursor error names received string" true
+    (contains_substring msg "not-base64");
   cleanup_dir base_path
 
 let test_handle_request_prompts_list_rejects_invalid_cursor () =
@@ -2393,9 +2397,13 @@ let test_handle_request_prompts_list_rejects_invalid_cursor () =
   in
   let response = Mcp_eio.handle_request ~clock ~sw state request in
   Alcotest.(check int) "invalid params code" (-32602) (error_code_exn response);
-  Alcotest.(check string) "invalid cursor error"
-    "Invalid params: cursor is invalid"
-    (error_message_exn response);
+  let msg = error_message_exn response in
+  Alcotest.(check bool)
+    "invalid cursor error preserves contract label" true
+    (contains_substring msg "Invalid params: cursor");
+  Alcotest.(check bool)
+    "invalid cursor error names received string" true
+    (contains_substring msg "bad-cursor");
   cleanup_dir base_path
 
 let test_handle_request_prompts_list_non_empty () =

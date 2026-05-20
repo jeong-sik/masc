@@ -1259,7 +1259,7 @@ let keeper_config_json (config : Coord.config) (name : string)
         | None -> "offline"
       in
       let state_diagram =
-        Keeper_state_machine.phase_to_mermaid
+        Keeper_state_machine_mermaid.phase_to_mermaid
           ~current:(Option.value ~default:Keeper_state_machine.Offline current_phase)
       in
       let decision_pipeline_diagram =

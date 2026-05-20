@@ -2,7 +2,7 @@ open Alcotest
 module SM = Masc_mcp.Keeper_state_machine
 
 (** Returns all lines of the Mermaid output for a given current phase. *)
-let mermaid_lines phase = SM.phase_to_mermaid ~current:phase |> String.split_on_char '\n'
+let mermaid_lines phase = Masc_mcp.Keeper_state_machine_mermaid.phase_to_mermaid ~current:phase |> String.split_on_char '\n'
 
 (** Returns true if [needle] appears as a substring of [haystack]. *)
 let string_contains haystack needle =
@@ -28,8 +28,8 @@ let test_mermaid_header () =
 let test_mermaid_all_phases_appear () =
   List.iter
     (fun phase ->
-       let diagram = SM.phase_to_mermaid ~current:phase in
-       let id = SM.phase_to_mermaid_id phase in
+       let diagram = Masc_mcp.Keeper_state_machine_mermaid.phase_to_mermaid ~current:phase in
+       let id = Masc_mcp.Keeper_state_machine_mermaid.phase_to_mermaid_id phase in
        check
          bool
          (Printf.sprintf "phase %s appears in diagram" id)
@@ -52,7 +52,7 @@ let test_mermaid_active_class () =
   List.iter
     (fun phase ->
        let lines = mermaid_lines phase in
-       let id = SM.phase_to_mermaid_id phase in
+       let id = Masc_mcp.Keeper_state_machine_mermaid.phase_to_mermaid_id phase in
        let cls = class_lines_for lines id in
        check
          int
@@ -74,7 +74,7 @@ let test_mermaid_buffer_class () =
   List.iter
     (fun phase ->
        let lines = mermaid_lines phase in
-       let id = SM.phase_to_mermaid_id phase in
+       let id = Masc_mcp.Keeper_state_machine_mermaid.phase_to_mermaid_id phase in
        let cls = class_lines_for lines id in
        check
          int
@@ -94,7 +94,7 @@ let test_mermaid_terminal_class () =
   List.iter
     (fun phase ->
        let lines = mermaid_lines phase in
-       let id = SM.phase_to_mermaid_id phase in
+       let id = Masc_mcp.Keeper_state_machine_mermaid.phase_to_mermaid_id phase in
        let cls = class_lines_for lines id in
        check
          int

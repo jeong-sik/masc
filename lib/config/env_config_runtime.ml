@@ -787,13 +787,9 @@ module Dashboard = struct
 
       Caps a single [/health?full=1] cache refresh attempt in
       [Server_routes_http_runtime.start_full_health_snapshot_refresh_loop].
-      Default 8s preserves the pre-extraction literal at
-      [server_routes_http_runtime.ml:807]. The effective value is then
-      clamped to be at least [shell_timeout_sec] so the full-health
-      refresh budget never undershoots the dashboard shell render
-      budget (the test
-      [test_full_health_refresh_budget_tracks_shell_budget] enforces
-      this).  Floor 1s prevents degenerate operator overrides. *)
+      Default 8s keeps this proactive refresh independent from the
+      dashboard shell render timeout. Floor 1s prevents degenerate
+      operator overrides. *)
   let full_health_refresh_timeout_sec =
     Float.max 1.0
       (get_float ~default:8.0 "MASC_FULL_HEALTH_REFRESH_TIMEOUT_SEC")

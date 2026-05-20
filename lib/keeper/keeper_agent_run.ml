@@ -1950,52 +1950,15 @@ let run_turn
        coverage-gap helper is still called so the gap surface keeps
        working; the difference is the caller now sees the failure too. *)
        let receipt_append_outcome : (unit, string) result =
-         try
-           Keeper_execution_receipt.append config receipt;
-           append_receipt_manifest
-             ~site:"receipt_appended"
-             Keeper_runtime_manifest.Receipt_appended;
-           Ok ()
-         with
-         | Eio.Cancel.Cancelled _ as e -> raise e
-         | exn ->
-           let err_msg = Printexc.to_string exn in
-           Prometheus.inc_counter
-             Keeper_metrics.metric_keeper_dispatch_event_failures
-             ~labels:[ "keeper", meta.name; "site", "receipt_append" ]
-             ();
-           Log.Keeper.warn
-             "keeper:%s execution_receipt append failed: %s"
-             meta.name
-             err_msg;
-           (try
-              let masc_root = Coord.masc_root_dir config in
-              Telemetry_coverage_gap.record
-                ~masc_root
-                ~source:"execution_receipt"
-                ~producer:"keeper_agent_run.execution_receipt"
-                ~durable_store:
-                  (Filename.concat
-                     (Filename.concat (Filename.concat masc_root "keepers") meta.name)
-                     "execution-receipts")
-                ~dashboard_surface:"/api/v1/dashboard/execution-trust"
-                ~stale_reason:"execution_receipt_append_failed"
-                ~keeper_name:meta.name
-                ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-                ~error:err_msg
-                ()
-            with
-            | Eio.Cancel.Cancelled _ as e -> raise e
-            | gap_exn ->
-              Prometheus.inc_counter
-                Keeper_metrics.metric_keeper_dispatch_event_failures
-                ~labels:[ "keeper", meta.name; "site", "coverage_gap_append" ]
-                ();
-              Log.Keeper.warn
-                "keeper:%s execution_receipt coverage gap append failed: %s"
-                meta.name
-                (Printexc.to_string gap_exn));
-           Error err_msg
+         Keeper_agent_run_receipt_append.append_with_coverage_gap
+           ~config
+           ~receipt
+           ~keeper_name:meta.name
+           ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+           ~on_appended:(fun () ->
+             append_receipt_manifest
+               ~site:"receipt_appended"
+               Keeper_runtime_manifest.Receipt_appended)
        in
        (* Phase 5: wire goal/task/board with keeper tool results.
           Link execution artifacts to the current task if one exists.

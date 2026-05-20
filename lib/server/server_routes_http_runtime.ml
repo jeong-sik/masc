@@ -1021,8 +1021,7 @@ let full_health_refresh_requested = ref false
    bookkeeping. *)
 let full_health_consecutive_failures = ref 0
 let full_health_refresh_timeout_sec =
-  Float.max Env_config_runtime.Dashboard.full_health_refresh_timeout_sec
-    Env_config_runtime.Dashboard.shell_timeout_sec
+  Env_config_runtime.Dashboard.full_health_refresh_timeout_sec
 ;;
 
 let full_health_critical_failure_threshold =

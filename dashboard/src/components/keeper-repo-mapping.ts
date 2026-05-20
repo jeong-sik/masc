@@ -17,8 +17,8 @@ import { ErrorState, LoadingState } from './common/feedback-state'
 import {
   credentialStateBadgeClass,
   credentialStateLabel,
-  githubLoginCommand,
 } from './credential-settings'
+import { githubLoginCommand } from '../api/credentials'
 import type { Keeper } from '../types'
 
 // ── Types ────────────────────────────────────────────────

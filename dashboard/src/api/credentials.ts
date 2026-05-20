@@ -42,7 +42,7 @@ export function coerceCredentialType(raw: unknown): CredentialType {
   return 'github'
 }
 
-import { get } from './core'
+import { get, post, del } from './core'
 import { isRecord } from '../lib/type-guards'
 export { isRecord }
 
@@ -63,6 +63,51 @@ export function parseCredentialState(raw: unknown): CredentialState | null {
 export async function fetchCredentials(): Promise<Credential[]> {
   const data = await get<unknown>('/api/v1/credentials')
   return normalizeCredentialsResponse(data)
+}
+
+export async function createCredential(payload: CredentialCreatePayload): Promise<void> {
+  await post('/api/v1/credentials', buildCredentialCreateRequest(payload))
+}
+
+export async function deleteCredential(id: string): Promise<void> {
+  await del(`/api/v1/credentials/${encodeURIComponent(id)}`)
+}
+
+// --- Helpers ---
+
+export function sanitizeOptionalString(value: string | null | undefined): string | null {
+  const trimmed = value?.trim() ?? ''
+  return trimmed === '' ? null : trimmed
+}
+
+function shellQuote(value: string): string {
+  return `'${value.split("'").join("'\\''")}'`
+}
+
+export function githubLoginCommand(ghConfigDir: string | null | undefined): string | null {
+  const dir = sanitizeOptionalString(ghConfigDir)
+  if (!dir) return null
+  return `GH_CONFIG_DIR=${shellQuote(dir)} gh auth login --hostname github.com --git-protocol https --web --clipboard`
+}
+
+export function buildCredentialCreateRequest(payload: CredentialCreatePayload): Record<string, unknown> {
+  const ghConfigDir = sanitizeOptionalString(payload.gh_config_dir)
+  const sshKeyPath = sanitizeOptionalString(payload.ssh_key_path)
+  const gpgKeyId = sanitizeOptionalString(payload.gpg_key_id)
+  const oauthMethod =
+    payload.type === 'github'
+      ? payload.oauth_method === 'with_token' ? 'with_token' : 'web'
+      : 'web'
+  return {
+    id: payload.id.trim(),
+    cred_type: payload.type,
+    username: (payload.username || payload.name).trim(),
+    gh_config_dir: ghConfigDir,
+    ssh_key_path: sshKeyPath,
+    gpg_key_id: gpgKeyId,
+    oauth_method: oauthMethod,
+    token: oauthMethod === 'with_token' ? sanitizeOptionalString(payload.token) : null,
+  }
 }
 
 export function normalizeCredentialsResponse(data: unknown): Credential[] {

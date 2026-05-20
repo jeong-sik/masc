@@ -1,6 +1,7 @@
-// RuntimePanel — Phase 4 runtime section with FilterChips toggle.
-// Wraps OasHealthChip, RuntimeMonitor, PrometheusMetrics,
-// VerificationSpecsPanel with view switching.
+// RuntimePanel — Monitor "Cascade & Runtime" lane.
+// Renders OasHealthChip / RuntimeMonitor / PrometheusMetrics /
+// VerificationSpecsPanel / CascadeInspector inline, and delegates the four
+// telemetry views to TelemetryPanel (cost / audit / heuristics / stress).
 //
 // Progressive-disclosure default view (density reduction, 2026-04):
 //   Signal layer     — OasHealthChip always expanded (summary StatCells)
@@ -8,14 +9,17 @@
 //   Raw layer        — Prometheus metrics, Formal specs via CollapsibleSection (closed)
 // NN/g progressive disclosure: respect working-memory limits, defer detail.
 //
-// Explicit drill-down via FilterChips remains unchanged:
+// Explicit drill-down via FilterChips, split into two strips (PR #17014):
+//   Primary strip   — default · providers · inspector
+//   Advanced strip  — cost · audit · heuristics · stress · prometheus · verification
+//                     (the first four are spread from TELEMETRY_VIEW_CHIPS,
+//                      owned by telemetry-panel.ts; PR #17044 / #17052)
+//
+// Per-view dispatch:
 //   default      — Signal strip + collapsed diagnostic/raw accordions
 //   providers    — OAS health chip + runtime monitor only
-//   cost         — model/keeper cost and latency only
-//   audit        — dashboard audit ledger
-//   heuristics   — heuristic firing log + coverage by module
-//   stress       — agent stress events
-//   inspector    — cascade strategy trace/provider health drill-down
+//   inspector    — cascade strategy trace / provider health drill-down
+//   cost / audit / heuristics / stress — TelemetryPanel → CostDashboard
 //   prometheus   — raw Prometheus metrics only
 //   verification — formal specs only
 // Pattern: mirrors fleet-health-panel.ts (unidirectional flow via URL).

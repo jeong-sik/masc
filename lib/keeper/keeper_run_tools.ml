@@ -53,28 +53,9 @@ let freeze = Keeper_run_tools_hook_accumulator.freeze
 let merge_requested_tool_names_seen = Keeper_run_tools_hook_accumulator.merge_requested_tool_names_seen
 let record_requested_tool_names = Keeper_run_tools_hook_accumulator.record_requested_tool_names
 
-let task_scope_tool_names =
-  [ "masc_transition"
-  ; "keeper_task_done"
-  ; "keeper_task_submit_for_verification"
-  ; "keeper_task_force_done"
-  ; "keeper_task_force_release"
-  ]
-;;
-
-let json_string_opt name = function
-  | `Assoc fields ->
-    (match List.assoc_opt name fields with
-     | Some (`String value) when String.trim value <> "" -> Some (String.trim value)
-     | _ -> None)
-  | _ -> None
-;;
-
-let task_id_scope_of_tool_input ~tool_name input =
-  if List.mem tool_name task_scope_tool_names
-  then json_string_opt "task_id" input
-  else None
-;;
+let task_scope_tool_names = Keeper_run_tools_task_scope.task_scope_tool_names
+let json_string_opt = Keeper_run_tools_task_scope.json_string_opt
+let task_id_scope_of_tool_input = Keeper_run_tools_task_scope.task_id_scope_of_tool_input
 
 type tool_search_hit_partition = Tool_search.tool_search_hit_partition =
   { visible_core_hits : (string * float) list

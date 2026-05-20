@@ -20,13 +20,34 @@ module Keeper_name = struct
   let equal = String.equal
 end
 
+(* Bounded preview for id validation error messages — these ids
+   originate from external requests / config / JSON; full dump risks
+   log spam on bad input. 32 bytes matches the pattern from iter#83
+   [decode_global_id] (#16903) and iter#84 [Ids.Trace_id]. *)
+let preview_id s =
+  if String.length s <= 32 then s
+  else Printf.sprintf "%s… (%d bytes total)" (String.sub s 0 32) (String.length s)
+;;
+
 module Trace_id = struct
   type t = string
   let is_valid s =
     s <> "." && s <> ".." && Keeper_name.is_valid s
   let of_string s =
     if is_valid s then Ok s
-    else Error "Invalid trace_id"
+    else (
+      (* Branch on specific failure so operators see which constraint
+         rejected the input rather than the bare label.  Order matches
+         [is_valid]'s short-circuit evaluation. *)
+      let reason =
+        if String.equal s "." then "reserved name '.'"
+        else if String.equal s ".." then "reserved name '..'"
+        else if String.length s = 0 then "empty string"
+        else if String.length s > 64
+        then Printf.sprintf "length %d exceeds 64" (String.length s)
+        else "contains characters outside [A-Za-z0-9_-]"
+      in
+      Error (Printf.sprintf "Invalid trace_id %S: %s" (preview_id s) reason))
   let to_string s = s
   let equal = String.equal
 end
@@ -36,7 +57,9 @@ module Task_id = struct
   let is_valid s = String.length s > 0
   let of_string s =
     if is_valid s then Ok s
-    else Error "Invalid task_id"
+    else
+      Error
+        (Printf.sprintf "Invalid task_id %S: empty string" (preview_id s))
   let to_string s = s
   let equal = String.equal
 end

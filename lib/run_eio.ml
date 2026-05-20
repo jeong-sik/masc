@@ -107,11 +107,18 @@ let write_run config (run : run_record) =
 let read_run config task_id : (run_record, string) result =
   let path = run_json_path config task_id in
   if not (path_exists config path) then
-    Error (Printf.sprintf "Run not found for task %s" task_id)
+    Error (Printf.sprintf "Run not found for task %s (expected at %s)" task_id path)
   else
     match run_record_of_json (read_json config path) with
     | Some r -> Ok r
-    | None -> Error "Failed to parse run.json"
+    | None ->
+      Error
+        (Printf.sprintf
+           "Failed to parse run.json at %s (task %s) — file exists but \
+            run_record_of_json returned None; check schema drift or \
+            truncated write"
+           path
+           task_id)
 
 (** Initialize run for task *)
 let init config ~task_id ~agent_name : (run_record, string) result =

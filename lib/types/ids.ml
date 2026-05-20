@@ -227,9 +227,27 @@ let make_global_id ~type_ id =
   Base64.encode_string raw
 
 let decode_global_id s =
+  (* Truncate the input preview to bound log size when [s] is large
+     (callers receive arbitrary strings from external systems). 32 bytes
+     is enough to identify the shape (type prefix, length class) without
+     dumping a full malicious payload into the error path. *)
+  let preview =
+    if String.length s <= 32 then s
+    else Printf.sprintf "%s… (%d bytes total)" (String.sub s 0 32) (String.length s)
+  in
   match Base64.decode s with
   | Ok decoded -> (
       match String.split_on_char ':' decoded with
       | type_ :: rest -> Ok (type_, String.concat ":" rest)
-      | _ -> Error "Invalid global ID format")
-  | Error _ -> Error "Invalid base64"
+      | _ ->
+        Error
+          (Printf.sprintf
+             "Invalid global ID format: decoded %S missing 'type:id' separator (input %S)"
+             decoded
+             preview))
+  | Error (`Msg b64_msg) ->
+    Error
+      (Printf.sprintf
+         "Invalid base64: %s (input %S)"
+         b64_msg
+         preview)

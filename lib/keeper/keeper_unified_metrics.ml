@@ -194,6 +194,8 @@ let append_decision_record
               ("context_ratio", `Float observation.context_ratio);
               ("unclaimed_task_count", `Int observation.unclaimed_task_count);
               ("claimable_task_count", `Int observation.claimable_task_count);
+              ( "provider_capacity_blocked_task_count",
+                `Int observation.provider_capacity_blocked_task_count );
               ( "claim_blocked_task_count",
                 `Int
                   (max 0

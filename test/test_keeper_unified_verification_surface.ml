@@ -18,6 +18,7 @@ let base_observation : WO.world_observation =
     economic_pressure = AE.Normal;
     unclaimed_task_count = 0;
     claimable_task_count = 0;
+    provider_capacity_blocked_task_count = 0;
     failed_task_count = 0;
     pending_verification_count = 0;
     backlog_updated_since_last_scheduled_autonomous = false;
@@ -134,6 +135,21 @@ let test_task_claim_present_for_claimable_backlog () =
   check bool "task_claim present for matched backlog" true
     (List.mem "task_claim" affordances)
 
+let test_task_claim_suppressed_for_provider_blocked_backlog () =
+  let obs =
+    {
+      base_observation with
+      unclaimed_task_count = 3;
+      claimable_task_count = 1;
+      provider_capacity_blocked_task_count = 1;
+    }
+  in
+  let affordances = UM.observed_affordances_of_observation obs in
+  check bool "task_claim absent while provider capacity blocks work" false
+    (List.mem "task_claim" affordances);
+  check bool "provider capacity affordance present" true
+    (List.mem "provider_capacity_blocked" affordances)
+
 let test_janitor_discovery_sources_do_not_force_task_claim () =
   let meta =
     {
@@ -184,6 +200,19 @@ let test_backlog_trigger_split () =
   check bool "matched backlog trigger is explicit" true
     (List.mem "claimable_task" triggers)
 
+let test_provider_capacity_blocked_trigger () =
+  let obs =
+    {
+      base_observation with
+      unclaimed_task_count = 3;
+      claimable_task_count = 1;
+      provider_capacity_blocked_task_count = 1;
+    }
+  in
+  let triggers = UM.observed_triggers_of_observation obs in
+  check bool "provider capacity trigger is explicit" true
+    (List.mem "provider_capacity_blocked_backlog" triggers)
+
 let test_pending_verification_trigger_for_keeper () =
   let meta = { minimal_meta with mention_targets = [ "scholar" ] } in
   let obs = { base_observation with pending_verification_count = 5 } in
@@ -220,12 +249,17 @@ let () =
           test_case "affordance: task claim present for claimable backlog" `Quick
             test_task_claim_present_for_claimable_backlog;
           test_case
+            "affordance: provider block suppresses task claim"
+            `Quick test_task_claim_suppressed_for_provider_blocked_backlog;
+          test_case
             "affordance: janitor discovery sources do not force task claim"
             `Quick test_janitor_discovery_sources_do_not_force_task_claim;
           test_case "affordance: unclaimed discovery source keeps task claim"
             `Quick test_unclaimed_discovery_source_keeps_task_claim;
           test_case "trigger: absolute and matched backlog split" `Quick
             test_backlog_trigger_split;
+          test_case "trigger: provider capacity blocked backlog" `Quick
+            test_provider_capacity_blocked_trigger;
           test_case "trigger: keeper sees pending_verification" `Quick
             test_pending_verification_trigger_for_keeper;
           test_case

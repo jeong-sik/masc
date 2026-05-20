@@ -46,12 +46,35 @@ let test_handle_post_valid_json () =
   | _ ->
       Alcotest.fail "expected Json_response"
 
+let contains_substring ~needle haystack =
+  let n = String.length needle in
+  let h = String.length haystack in
+  if n = 0 || n > h then n = 0
+  else (
+    let rec scan i =
+      if i + n > h then false
+      else if String.sub haystack i n = needle then true
+      else scan (i + 1)
+    in
+    scan 0)
+;;
+
 let test_handle_post_invalid_json () =
   let body = "not valid json" in
   let (response, _session) = SH.handle_post ~body () in
   match response with
-  | SH.Error_response (code, _msg) ->
-      Alcotest.(check int) "400 error" 400 code
+  | SH.Error_response (code, msg) ->
+      Alcotest.(check int) "400 error" 400 code;
+      (* The message must name itself as a JSON failure so operators
+         scanning logs can distinguish from other 400 paths (batch
+         rejection, internal validation, etc.). *)
+      Alcotest.(check bool) "msg labels itself 'Invalid JSON'" true
+        (contains_substring ~needle:"Invalid JSON" msg);
+      (* The message must carry the Yojson parser detail (position or
+         token reason) so the operator can locate the malformation
+         without re-running with debug logs. *)
+      Alcotest.(check bool) "msg longer than the bare label" true
+        (String.length msg > String.length "Invalid JSON")
   | _ ->
       Alcotest.fail "expected Error_response"
 

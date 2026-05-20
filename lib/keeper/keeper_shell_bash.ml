@@ -5,6 +5,7 @@ open Keeper_shell_bash_shape_ir
 open Keeper_shell_bash_shape_messages
 open Keeper_shell_bash_task_state
 open Keeper_shell_bash_words
+module Exec_shell_gate = Masc_exec_command_gate.Shell_command_gate
 module Task_probe = Keeper_shell_bash_task_probe
 module Shape_classifier = Keeper_shell_bash_shape_classifier
 
@@ -748,6 +749,44 @@ let typed_docker_sandbox_target ~turn_sandbox_factory ~meta ~cwd =
     in
     Ok (Masc_exec.Sandbox_target.docker ~image ~runner)
 
+let typed_gate_allowlist_policy mode : Exec_shell_gate.allowlist_policy =
+  let allowed_commands =
+    match mode with
+    | Keeper_tool_bash_input.Dev_full -> Dev_exec_allowlist.dev
+    | Keeper_tool_bash_input.Readonly -> Dev_exec_allowlist.readonly
+  in
+  { allowed_commands; allow_pipes = true; redirect_allowed = true }
+;;
+
+let typed_gate_sandbox target : Exec_shell_gate.sandbox_context = { target }
+
+let typed_gate_error_json ~cmd_for_log ~cwd verdict =
+  let verdict_tag = Exec_shell_gate.verdict_tag verdict in
+  let reason_tag, diagnostic =
+    match verdict with
+    | Exec_shell_gate.Reject { reason; diagnostic; _ } ->
+      Exec_shell_gate.reject_reason_tag reason, diagnostic
+    | Exec_shell_gate.Cannot_parse { reason } ->
+      ( Exec_shell_gate.parse_reason_tag reason
+      , "typed Shell IR could not be parsed by the command gate" )
+    | Exec_shell_gate.Too_complex { reason } ->
+      ( Exec_shell_gate.too_complex_reason_tag reason
+      , "typed Shell IR is too complex for the command gate" )
+    | Exec_shell_gate.Allow _ ->
+      "allow", "typed Shell IR gate unexpectedly returned allow in failure path"
+  in
+  error_json
+    ~fields:
+      [ "typed", `Bool true
+      ; "cmd", `String cmd_for_log
+      ; "cwd", `String cwd
+      ; "shell_ir_gate", `String verdict_tag
+      ; "shell_ir_gate_reason", `String reason_tag
+      ; "failure_class", `String "policy_rejection"
+      ]
+    diagnostic
+;;
+
 let handle_keeper_bash_typed
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
       ~(config : Coord.config)
@@ -847,29 +886,40 @@ let handle_keeper_bash_typed
               ~fields:[ "typed", `Bool true; "cmd", `String cmd_for_log; "cwd", `String cwd ]
               (typed_validation_error_text e)
           | Ok ir ->
-            let path_validation =
-              match
-                Keeper_task_worktree_lazy.ensure_command_existing_dirs
-                  ~config ~meta ~cwd ~cmd
-              with
-              | Error e -> Error e
-              | Ok () ->
-                Worker_dev_tools.validate_command_paths
-                  ~keeper_id:meta.name
-                  ~base_path:root
-                  ~workdir:cwd
-                  cmd
+            let gate_verdict =
+              Exec_shell_gate.gate_typed
+                ~caller:Exec_shell_gate.Keeper_shell_bash
+                ~ir
+                ~allowlist:(typed_gate_allowlist_policy mode)
+                ~path_policy:Exec_shell_gate.allow_all_paths
+                ~sandbox:(typed_gate_sandbox dispatch_sandbox)
+                ()
             in
-            (match path_validation with
-             | Error e -> error_json ~fields:[ "blocked_cmd", `String cmd_for_log ] e
-             | Ok () ->
+            (match gate_verdict with
+             | Exec_shell_gate.Allow gate_context ->
+               let path_validation =
+                 match
+                   Keeper_task_worktree_lazy.ensure_command_existing_dirs
+                     ~config ~meta ~cwd ~cmd
+                 with
+                 | Error e -> Error e
+                 | Ok () ->
+                   Worker_dev_tools.validate_command_paths
+                     ~keeper_id:meta.name
+                     ~base_path:root
+                     ~workdir:cwd
+                     cmd
+               in
+               (match path_validation with
+                | Error e -> error_json ~fields:[ "blocked_cmd", `String cmd_for_log ] e
+                | Ok () ->
                let env_snap =
                  Cancel_safe.protect
                    ~on_exn:(fun _ -> None)
                    (fun () -> Some (Exec_core.snapshot_env ~cwd))
                in
                let t0 = Unix.gettimeofday () in
-               let result = Masc_exec.Exec_dispatch.dispatch ir in
+               let result = Masc_exec.Exec_dispatch.dispatch gate_context.ast in
                let elapsed_ms =
                  elapsed_duration_ms
                    ~start_time:t0
@@ -888,13 +938,19 @@ let handle_keeper_bash_typed
                     ~extra:
                       [ "cwd", `String cwd
                       ; "typed", `Bool true
+                      ; "shell_ir_gate", `String "allow"
+                      ; "shell_ir_stage_count", `Int (Exec_shell_gate.stage_count gate_context)
                       ; "execution_time_ms", `Int elapsed_ms
                       ; "timeout_sec", `Float timeout_sec
                       ]
                     ~status:result.status
                     ~output
                     ~env_snapshot:env_snap
-                    ())))
+                    ()))
+             | Exec_shell_gate.Reject _
+             | Exec_shell_gate.Cannot_parse _
+             | Exec_shell_gate.Too_complex _ ->
+               typed_gate_error_json ~cmd_for_log ~cwd gate_verdict))
 
 let handle_keeper_bash
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)

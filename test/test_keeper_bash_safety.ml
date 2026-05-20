@@ -960,6 +960,10 @@ let test_keeper_bash_typed_exec_runs_via_shell_ir () =
     (json |> Json.member "ok" |> Json.to_bool);
   Alcotest.(check bool) "typed flag" true
     (json |> Json.member "typed" |> Json.to_bool);
+  Alcotest.(check string) "typed gate" "allow"
+    (json |> Json.member "shell_ir_gate" |> Json.to_string);
+  Alcotest.(check int) "typed gate stage count" 1
+    (json |> Json.member "shell_ir_stage_count" |> Json.to_int);
   Alcotest.(check bool) "output from native argv" true
     (json
      |> Json.member "output"
@@ -1003,6 +1007,10 @@ let test_keeper_bash_typed_pipeline_runs_via_shell_ir () =
     (json |> Json.member "ok" |> Json.to_bool);
   Alcotest.(check bool) "typed flag" true
     (json |> Json.member "typed" |> Json.to_bool);
+  Alcotest.(check string) "typed gate" "allow"
+    (json |> Json.member "shell_ir_gate" |> Json.to_string);
+  Alcotest.(check int) "typed gate stage count" 2
+    (json |> Json.member "shell_ir_stage_count" |> Json.to_int);
   Alcotest.(check bool) "wc sees piped stdin" true
     (json
      |> Json.member "output"

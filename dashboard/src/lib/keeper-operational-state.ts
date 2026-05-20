@@ -45,6 +45,8 @@ import { toKeeperPhase } from '../keeper-store-normalize'
 import type {
   KeeperCompositeSnapshot,
 } from '../api/schemas/keeper-composite'
+import { deriveBlockerReason } from './keeper-blocker-reason'
+import { keeperDisplayStatus } from './keeper-runtime-display'
 
 export type OfflineCause = 'unbooted' | 'shutdown' | 'crashed' | 'dead' | 'unknown'
 export type PausedCause = 'operator' | 'supervisor' | 'auto_recover' | 'unknown'
@@ -68,6 +70,22 @@ export type StuckReason = KeeperRuntimeBlockerClass | 'fiber_dead' | 'unknown'
 //   clean            — neither set, no orange edge on dashboard
 export type KeeperAttention = 'blocked' | 'needs_attention' | 'clean'
 
+export type KeeperTurnPhase =
+  | PipelineStage
+  | 'prompting'
+  | 'routing'
+  | 'executing'
+  | 'finalizing'
+  | 'exhausted'
+  | (string & {})
+
+export interface KeeperOperationalAxes {
+  readonly attention: KeeperAttention
+  readonly turnPhase: KeeperTurnPhase
+  readonly displaySummary: string | null
+  readonly phase: KeeperPhase | null
+}
+
 // RFC-0135 §10 Goal-2 (audit 2026-05-19): backend `runtime_attention`
 // axis is *orthogonal* to operational kind — a running keeper can have
 // `attention='needs_attention'`, a stuck keeper can have its attention
@@ -76,15 +94,13 @@ export type KeeperAttention = 'blocked' | 'needs_attention' | 'clean'
 // `opState.kind === 'stuck'` with a separately-derived attention axis
 // (forming an external axis-pair the typed sum couldn't enforce).
 export type KeeperOperationalState =
-  | { readonly kind: 'offline'; readonly attention: KeeperAttention; readonly cause: OfflineCause }
-  | { readonly kind: 'paused'; readonly attention: KeeperAttention; readonly cause: PausedCause }
-  | { readonly kind: 'stuck'; readonly attention: KeeperAttention; readonly reason: StuckReason }
+  | (KeeperOperationalAxes & { readonly kind: 'offline'; readonly cause: OfflineCause })
+  | (KeeperOperationalAxes & { readonly kind: 'paused'; readonly cause: PausedCause })
+  | (KeeperOperationalAxes & { readonly kind: 'stuck'; readonly reason: StuckReason })
   | {
       readonly kind: 'running'
-      readonly attention: KeeperAttention
-      readonly turnPhase: string
       readonly staleBlocker: KeeperRuntimeBlockerClass | null
-    }
+    } & KeeperOperationalAxes
 
 export interface DeriveInputs {
   readonly keeper: Keeper
@@ -94,15 +110,15 @@ export interface DeriveInputs {
 export function deriveKeeperOperationalState(
   { keeper, composite }: DeriveInputs,
 ): KeeperOperationalState {
-  // RFC-0135 §10 Goal-2: attention is now an axis on every variant so
-  // callers don't need to OR-merge it externally. Computed once here.
-  const attentionAxis = computeKeeperAttention(composite)
+  // RFC-0135 §10 Goal-2: these axes are now present on every variant so
+  // callers don't need to keep parallel composite/flat fallback chains.
+  const axes = computeKeeperOperationalAxes(keeper, composite)
 
   if (isPaused(keeper)) {
-    return { kind: 'paused', attention: attentionAxis, cause: derivePausedCause(keeper) }
+    return { kind: 'paused', ...axes, cause: derivePausedCause(keeper) }
   }
   if (isOffline(keeper, composite)) {
-    return { kind: 'offline', attention: attentionAxis, cause: deriveOfflineCause(keeper) }
+    return { kind: 'offline', ...axes, cause: deriveOfflineCause(keeper) }
   }
 
   const blockerClass = keeper.runtime_blocker_class ?? null
@@ -115,19 +131,30 @@ export function deriveKeeperOperationalState(
     || attention?.stale_execution_receipt === true
 
   if (blockerClass !== null && !explicitlyStale) {
-    return { kind: 'stuck', attention: attentionAxis, reason: blockerClass }
+    return { kind: 'stuck', ...axes, reason: blockerClass }
   }
 
   if (composite !== null && compositeFiberKnownDead(composite)) {
-    return { kind: 'stuck', attention: attentionAxis, reason: 'fiber_dead' }
+    return { kind: 'stuck', ...axes, reason: 'fiber_dead' }
   }
 
-  const turnPhase = composite?.turn_phase ?? keeper.pipeline_stage ?? 'idle'
   // A blocker that *was* recorded but is now explicitly stale gets
   // surfaced as informational context, not a headline.
   const staleBlocker =
     explicitlyStale && blockerClass !== null ? blockerClass : null
-  return { kind: 'running', attention: attentionAxis, turnPhase, staleBlocker }
+  return { kind: 'running', ...axes, staleBlocker }
+}
+
+function computeKeeperOperationalAxes(
+  keeper: Keeper,
+  composite: KeeperCompositeSnapshot | null,
+): KeeperOperationalAxes {
+  return {
+    attention: computeKeeperAttention(composite),
+    turnPhase: deriveKeeperTurnPhase(keeper, composite) ?? 'unknown',
+    displaySummary: deriveKeeperDisplayReason(keeper, composite),
+    phase: deriveKeeperOperationalPhase(keeper, composite),
+  }
 }
 
 function isPaused(k: Keeper): boolean {
@@ -311,14 +338,7 @@ export function deriveKeeperDisplayReason(
   keeper: Pick<Keeper, 'runtime_blocker_summary' | 'attention_reason'>,
   composite: KeeperCompositeSnapshot | null,
 ): string | null {
-  const trim = (raw: unknown): string | null =>
-    typeof raw === 'string' && raw.trim().length > 0 ? raw : null
-  return (
-    trim(composite?.runtime_attention?.reason)
-    ?? trim(keeper.runtime_blocker_summary)
-    ?? trim(keeper.attention_reason)
-    ?? null
-  )
+  return deriveBlockerReason({ keeper, composite }).reason
 }
 
 // RFC-0135 PR-14b — turn-phase SSOT (Goal-2b typed-state expansion).
@@ -345,7 +365,7 @@ export function deriveKeeperDisplayReason(
 export function deriveKeeperTurnPhase(
   keeper: Pick<Keeper, 'pipeline_stage'>,
   composite: KeeperCompositeSnapshot | null,
-): string | null {
+): KeeperTurnPhase | null {
   const compositeTurn = composite?.turn_phase
   if (typeof compositeTurn === 'string' && compositeTurn.length > 0) return compositeTurn
   const flatStage: PipelineStage | undefined = keeper.pipeline_stage
@@ -377,4 +397,21 @@ export function derivePreferredPhase(
     if (narrowed !== null) return narrowed
   }
   return toKeeperPhase(keeper.phase)
+}
+
+function deriveKeeperOperationalPhase(
+  keeper: Keeper,
+  composite: KeeperCompositeSnapshot | null,
+): KeeperPhase | null {
+  const lifecycleKey = keeperDisplayStatus(keeper)
+  const lifecyclePhase = toKeeperPhase(lifecycleKey)
+  if (
+    lifecyclePhase === 'Paused'
+    || lifecyclePhase === 'Stopped'
+    || lifecyclePhase === 'Offline'
+    || lifecyclePhase === 'Dead'
+  ) {
+    return lifecyclePhase
+  }
+  return derivePreferredPhase(keeper, composite) ?? lifecyclePhase
 }

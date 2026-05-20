@@ -172,6 +172,79 @@ let test_gate_decision_vocabulary () =
   check bool "approval rejects" true
     (KG.gate_decision_is_rejection KG.Gate_approval_required)
 
+let test_gate_rejection_log_severity_splits_repeats () =
+  KG.For_testing.reset_gate_rejection_log_counts ();
+  Fun.protect
+    ~finally:KG.For_testing.reset_gate_rejection_log_counts
+    (fun () ->
+      let next () =
+        KG.For_testing.record_gate_rejection_log_severity
+          ~keeper_name:"test_keeper"
+          ~stage:"keeper_deny"
+          ~tool_name:"dangerous_tool"
+          ~reason_code:"keeper_deny"
+          ()
+      in
+      check string "first rejection is warn" "warn"
+        (KG.gate_rejection_log_severity_to_string (next ()));
+      (match next () with
+       | KG.Gate_rejection_repeat_info 2 -> ()
+       | severity ->
+         failf "expected second rejection info/2, got %s"
+           (KG.gate_rejection_log_severity_to_string severity));
+      (match next () with
+       | KG.Gate_rejection_repeat_debug 3 -> ()
+       | severity ->
+         failf "expected third rejection debug/3, got %s"
+           (KG.gate_rejection_log_severity_to_string severity)))
+
+let test_gate_rejection_log_severity_keys_by_rejection () =
+  KG.For_testing.reset_gate_rejection_log_counts ();
+  Fun.protect
+    ~finally:KG.For_testing.reset_gate_rejection_log_counts
+    (fun () ->
+      let record ?reason_key ~tool_name () =
+        KG.For_testing.record_gate_rejection_log_severity
+          ?reason_key
+          ~keeper_name:"test_keeper"
+          ~stage:"destructive_guard"
+          ~tool_name
+          ~reason_code:"destructive_guard"
+          ()
+      in
+      let first = record ~reason_key:"rm -rf" ~tool_name:"shell_exec" () in
+      let repeat = record ~reason_key:"rm -rf" ~tool_name:"shell_exec" () in
+      let different_tool =
+        record ~reason_key:"rm -rf" ~tool_name:"keeper_bash" ()
+      in
+      let different_reason =
+        record ~reason_key:"chmod 777" ~tool_name:"shell_exec" ()
+      in
+      check string "first key warns" "warn"
+        (KG.gate_rejection_log_severity_to_string first);
+      check string "same key repeats as info" "info"
+        (KG.gate_rejection_log_severity_to_string repeat);
+      check string "different tool has own first warn" "warn"
+        (KG.gate_rejection_log_severity_to_string different_tool);
+      check string "different reason has own first warn" "warn"
+        (KG.gate_rejection_log_severity_to_string different_reason))
+
+let test_gate_rejection_planner_alternative () =
+  let streak =
+    KG.For_testing.planner_alternative_for_gate
+      ~stage:"streak_gate" ~tool_name:"keeper_fs_read"
+  in
+  check bool "includes structured field" true
+    (contains_substring streak "planner_alternative=");
+  check bool "names retry alternative" true
+    (contains_substring streak "keeper_stay_silent");
+  let destructive =
+    KG.For_testing.planner_alternative_for_gate
+      ~stage:"destructive_guard" ~tool_name:"shell_exec"
+  in
+  check bool "destructive suggests safe command" true
+    (contains_substring destructive "safe read-only command")
+
 (* ----------------------------------------------------------------- *)
 (* Individual guard tests                                              *)
 (* ----------------------------------------------------------------- *)
@@ -498,6 +571,12 @@ let () = run "Keeper_guards" [
     test_case "pre-tool gate output preserves source" `Quick
       test_render_pre_tool_gate_output_preserves_source;
     test_case "gate decision vocabulary" `Quick test_gate_decision_vocabulary;
+    test_case "gate rejection log severity splits repeats" `Quick
+      test_gate_rejection_log_severity_splits_repeats;
+    test_case "gate rejection log severity keys by rejection" `Quick
+      test_gate_rejection_log_severity_keys_by_rejection;
+    test_case "gate rejection planner alternative" `Quick
+      test_gate_rejection_planner_alternative;
   ];
   "deny_guard", [
     test_case "blocks denied tool" `Quick test_deny_guard_blocks;

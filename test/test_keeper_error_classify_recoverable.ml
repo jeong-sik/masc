@@ -347,6 +347,18 @@ let test_server_error_502_is_recoverable () =
   | None ->
     fail "ServerError 502 should be recoverable (trigger cascade rotation)"
 
+let test_server_error_524_is_recoverable_rotation_not_transient_retry () =
+  let err =
+    Agent_sdk.Error.Api
+      (Retry.ServerError { status = 524; message = "a timeout occurred" })
+  in
+  check bool "524 not same-cascade transient" false (KEC.is_transient_network_error err);
+  match KEC.recoverable_cascade_failure_reason err with
+  | Some reason ->
+    check string "524 -> server_error" "server_error" (KEC.degraded_retry_reason_to_string reason)
+  | None ->
+    fail "ServerError 524 should remain recoverable through degraded rotation"
+
 let test_auth_error_is_recoverable () =
   (* 401/403 auth errors: the current cascade's credentials are invalid.
      A different cascade with different credentials may succeed. *)
@@ -468,6 +480,8 @@ let () =
             test_server_error_503_is_recoverable;
           test_case "ServerError 502 is recoverable" `Quick
             test_server_error_502_is_recoverable;
+          test_case "ServerError 524 is rotation recoverable but not transient retry" `Quick
+            test_server_error_524_is_recoverable_rotation_not_transient_retry;
           test_case "AuthError is recoverable" `Quick
             test_auth_error_is_recoverable;
           test_case "hard quota keeps hard_quota label" `Quick

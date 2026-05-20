@@ -1,8 +1,10 @@
 (** See [dashboard_snapshot.mli] for the public contract.
 
-    This is the Phase 3 prototype landing for RFC-0138.  Only the
-    storage primitive + bootstrap path are implemented in this PR;
-    handler wiring lands in a follow-up. *)
+    RFC-0138 Phase 3 implementation.  The refresh fiber populates all
+    four projections ([shell], [tools], [namespace_truth],
+    [telemetry_summary]) and publishes via the lock-free atomic
+    [slot].  Handler wiring lives in [Server_dashboard_shell_snapshot]
+    (renamed to [Server_dashboard_snapshot_select] in #16761). *)
 
 type t = {
   generated_at : float;
@@ -60,10 +62,12 @@ let bootstrap ~(config : Coord.config) : t =
         (Printexc.to_string exn);
       `Null
   in
-  (* namespace_truth requires Eio context; the bootstrap path runs on
-     whatever fiber called it.  Until handler wire lands, surface a
-     null placeholder so the snapshot type is total — the refresh
-     fiber will replace it on first interval. *)
+  (* namespace_truth requires Eio context and cached refs; the
+     bootstrap path is synchronous on the request fiber and cannot
+     access them safely.  Bootstrap leaves it [`Null]; the refresh
+     fiber populates the slot from
+     [Server_dashboard_http_namespace_truth.namespace_truth_snapshot_from_caches]
+     on its first interval (~2s after server start). *)
   let namespace_truth = `Null in
   let t =
     {
@@ -87,13 +91,14 @@ let current_or_bootstrap ~config =
   | None -> bootstrap ~config
 ;;
 
-(* RFC-0138 Phase 3 Step 3: refresh loop now optionally accepts the
-   server_state so it can populate [namespace_truth] from the cached
-   refs that [Server_dashboard_http_namespace_truth.namespace_truth_snapshot_from_caches]
+(* RFC-0138 Phase 3: refresh loop optionally accepts [~state] so it
+   can populate [namespace_truth] from the cached refs that
+   [Server_dashboard_http_namespace_truth.namespace_truth_snapshot_from_caches]
    exposes.  That function reads only process-local refs (no PG I/O,
-   no fiber timeouts), so it is safe in a background fiber — moving
-   the read here is what retires the 6 MASC_NAMESPACE_TRUTH_*_TIMEOUT_S
-   env knobs from the request path (Step 4). *)
+   no fiber timeouts), so it is safe in a background fiber.  Moving
+   the read here is what allowed Step 4 (#16752) to retire the four
+   [MASC_NAMESPACE_TRUTH_*_TIMEOUT_S] env knobs from the request
+   path. *)
 let refresh_loop
       ~sw:_ ~clock ~config ?state ~interval_sec ()
   =

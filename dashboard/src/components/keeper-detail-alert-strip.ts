@@ -247,14 +247,18 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
   const pausedRuntimeBlocker = isPaused && runtimeBlockerClass != null
   const attentionReasonText = attentionReasonLabel(attentionReason, isPaused)
   const nextHumanActionText = nextHumanActionLabel(nextHumanAction)
-  // Suppress "다음 액션" when it duplicates the visible "주의 사유" line
-  // above (e.g. runtime_blocked + inspect_runtime_blocker render as
-  // "런타임 근거 확인 필요" / "런타임 근거 확인"). If attentionReasonText
-  // is null (paused suppresses the reason line) we keep next_human_action
-  // visible so the operator still sees what to do.
-  const suppressDuplicateNextAction =
+  // Suppress action-lines that duplicate the visible "주의 사유" line
+  // above. The dedupe is keyed on the (attention_reason, next_action)
+  // pair so it applies to both `next_human_action` (the immediate
+  // operator instruction) and `trust.latest_next_action` (the per-turn
+  // "권장 조치" follow-up suggestion), since the backend draws both
+  // from the same NextHumanAction wire vocabulary. If attentionReasonText
+  // is null (paused suppresses the reason line) we keep both visible so
+  // the operator still sees what to do.
+  const duplicatesAttentionReason = (action: string | null): boolean =>
     attentionReasonText !== null
-    && isAttentionPairDuplicate(attentionReason, nextHumanAction)
+    && isAttentionPairDuplicate(attentionReason, action)
+  const suppressDuplicateNextAction = duplicatesAttentionReason(nextHumanAction)
   const sandboxTarget = keeper.sandbox_target?.trim() || keeper.sandbox_profile?.trim() || null
   const persistedPolicyCount = keeper.approval_policy_effective?.persisted_rules
   const goalLinkedTasks = keeper.goal_progress?.linked_task_count
@@ -276,6 +280,17 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
   const latestTerminalReason = keeper.trust?.latest_terminal_reason ?? null
   const latestTerminalCode = latestTerminalReason?.code?.trim() || null
   const latestTerminalSummary = latestTerminalReason?.summary?.trim() || null
+  // Hide "종료 코드" when it references a past *success* turn while the
+  // current stop_cause is a terminal failure -- that is the
+  // "정지 원인 · turn_timeout / 종료 코드 · success" time-axis mix the
+  // ckpt-2 follow-up addresses. Both-failure pairs (e.g. turn_timeout +
+  // turn_wall_clock_timeout) stay visible since they describe the same
+  // failure surface from different observability layers.
+  const suppressStaleLatestTerminal =
+    latestTerminalCode !== null
+    && stopCause !== null
+    && isTurnTerminalFailureCode(stopCause.code)
+    && !isTurnTerminalFailureCode(latestTerminalCode)
   const latestNextAction = keeper.trust?.latest_next_action?.trim() || null
   const operatorDispositionReason = keeper.trust?.operator_disposition_reason?.trim() || null
   const shouldShowOperatorDispositionReason =
@@ -526,10 +541,10 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
         ${stopCause && isTurnTerminalFailureCode(stopCause.code)
           ? html`<span><strong class="text-[var(--color-fg-secondary)]">정지 원인</strong> · ${stopCause.code}${stopCause.summary ? html` · <${SyntheticAwareText} text=${stopCause.summary} />` : null}</span>`
           : null}
-        ${latestTerminalCode && latestTerminalCode !== stopCause?.code
+        ${latestTerminalCode && latestTerminalCode !== stopCause?.code && !suppressStaleLatestTerminal
           ? html`<span><strong class="text-[var(--color-fg-secondary)]">종료 코드</strong> · ${latestTerminalCode}${latestTerminalSummary ? html` · <${SyntheticAwareText} text=${latestTerminalSummary} />` : null}</span>`
           : null}
-        ${latestNextAction
+        ${latestNextAction && !duplicatesAttentionReason(latestNextAction)
           ? html`<span title=${latestNextAction}><strong class="text-[var(--color-fg-secondary)]">권장 조치</strong> · ${nextHumanActionLabel(latestNextAction)}</span>`
           : null}
         ${shouldShowOperatorDispositionReason && operatorDispositionReason

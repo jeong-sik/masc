@@ -39,7 +39,9 @@ cp config/tool_policy.toml "$tmp/.masc/config/tool_policy.toml"
 
 log="$tmp/boot.log"
 echo "smoke: booting $BINARY on :$PORT under $tmp"
-"$BINARY" --base-path "$tmp" --port "$PORT" >"$log" 2>&1 &
+MASC_BASE_PATH="$tmp" \
+MASC_BASE_PATH_INPUT="$tmp" \
+  "$BINARY" --base-path "$tmp" --port "$PORT" >"$log" 2>&1 &
 PID=$!
 
 # Poll for either a FATAL line or the listening line. Bound by BOOT_WAIT_SEC.
@@ -70,7 +72,10 @@ esac
 
 # --- README ↔ CLI subcommand drift -------------------------------------------
 help_txt="$tmp/help.txt"
-TERM=dumb "$BINARY" --help=plain >"$help_txt" 2>/dev/null || true
+MASC_BASE_PATH="$tmp" \
+MASC_BASE_PATH_INPUT="$tmp" \
+TERM=dumb \
+  "$BINARY" --help=plain >"$help_txt" 2>/dev/null || true
 
 # cmdliner Cmd.group prints subcommands under the "COMMANDS" section, with
 # 7-space indent (subcommand name) followed by deeper indent (description).

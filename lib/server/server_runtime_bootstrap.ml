@@ -1534,11 +1534,13 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
         (Printexc.to_string exn));
 
   (* 3. Start serving -- /health responds before init completes *)
+  let addr_label = Printf.sprintf "%s:%d" config.host config.port in
   match http_mode with
   | `H2_only ->
-    Server_bootstrap_http.serve_h2 ~sw ~clock ~socket ~h2_request_handler ~h2_error_handler
+    Server_bootstrap_http.serve_h2 ~sw ~clock ~socket ~addr_label
+      ~h2_request_handler ~h2_error_handler
   | `H1_only ->
-    Server_bootstrap_http.serve ~sw ~clock ~socket ~request_handler
+    Server_bootstrap_http.serve ~sw ~clock ~socket ~addr_label ~request_handler
   | `Auto ->
-    Server_bootstrap_http.serve_auto ~sw ~clock ~socket ~request_handler ~h2_request_handler
-      ~h2_error_handler
+    Server_bootstrap_http.serve_auto ~sw ~clock ~socket ~addr_label
+      ~request_handler ~h2_request_handler ~h2_error_handler

@@ -45,28 +45,35 @@ val serve :
   sw:Eio.Switch.t ->
   clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   socket:[> [> `Generic ] Eio.Net.listening_socket_ty ] Eio.Resource.t ->
+  addr_label:string ->
   request_handler:(Eio.Net.Sockaddr.stream -> Httpun.Reqd.t Gluten.Reqd.t -> unit) ->
   unit
-(** [serve ~sw ~clock ~socket ~request_handler] runs the HTTP/1.1
-    accept loop until the switch is cancelled.  Errors are logged
-    via {!Log.Misc.warn} and the connection closed; the loop
-    continues. *)
+(** [serve ~sw ~clock ~socket ~addr_label ~request_handler] runs the
+    HTTP/1.1 accept loop until the switch is cancelled.  Errors are
+    logged via {!Log.Misc.warn} and the connection closed; the loop
+    continues.  [addr_label] (e.g. ["0.0.0.0:8080"]) is embedded in
+    every error log line as [[h1 <addr_label>]] so operators can
+    identify which listener emitted the line when a process runs
+    multiple HTTP servers. *)
 
 val serve_h2 :
   sw:Eio.Switch.t ->
   clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   socket:[> [> `Generic ] Eio.Net.listening_socket_ty ] Eio.Resource.t ->
+  addr_label:string ->
   h2_request_handler:(Eio.Net.Sockaddr.stream -> H2.Reqd.t -> unit) ->
   h2_error_handler:
     (Eio.Net.Sockaddr.stream -> ?request:H2.Request.t -> H2.Server_connection.error -> (H2.Headers.t -> H2.Body.Writer.t) -> unit) ->
   unit
 (** [serve_h2] is the HTTP/2 variant — cleartext h2c, no ALPN.
-    Used when the operator explicitly enables H2 via env. *)
+    Used when the operator explicitly enables H2 via env.
+    [addr_label] is embedded as [[h2 <addr_label>]] in error logs. *)
 
 val serve_auto :
   sw:Eio.Switch.t ->
   clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   socket:[> [> `Generic ] Eio.Net.listening_socket_ty ] Eio.Resource.t ->
+  addr_label:string ->
   request_handler:(Eio.Net.Sockaddr.stream -> Httpun.Reqd.t Gluten.Reqd.t -> unit) ->
   h2_request_handler:(Eio.Net.Sockaddr.stream -> H2.Reqd.t -> unit) ->
   h2_error_handler:
@@ -75,4 +82,5 @@ val serve_auto :
 (** [serve_auto] inspects the first request bytes and dispatches
     to either the HTTP/1.1 or HTTP/2 handler.  Used as the
     default serve loop so existing HTTP/1.1 clients keep working
-    while H2-capable clients can upgrade. *)
+    while H2-capable clients can upgrade.  [addr_label] is
+    embedded as [[auto <addr_label>]] in error logs. *)

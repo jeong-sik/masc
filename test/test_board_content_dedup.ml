@@ -125,6 +125,18 @@ let create_post_or_fail ~author ~content =
   | Ok post -> post
   | Error e -> Alcotest.fail (Board.show_board_error e)
 
+let create_automation_post_or_fail ?meta_json ~author ~content () =
+  match
+    Board_dispatch.create_post
+      ~author
+      ~content
+      ~post_kind:Board.Automation_post
+      ?meta_json
+      ()
+  with
+  | Ok post -> post
+  | Error e -> Alcotest.fail (Board.show_board_error e)
+
 let add_comment_or_fail ~post_id ~author ~content ?parent_id () =
   match Board_dispatch.add_comment ~post_id ~author ~content ?parent_id () with
   | Ok comment -> comment
@@ -210,6 +222,91 @@ let test_comment_parent_is_part_of_dedup_key () =
           (Board.Comment_id.to_string top_level.id)
           (Board.Comment_id.to_string reply.id)))
 
+let keeper_board_meta = `Assoc [ "source", `String "keeper_board_post" ]
+
+let test_status_only_automation_posts_roll_up_by_task () =
+  let first =
+    create_automation_post_or_fail
+      ~meta_json:keeper_board_meta
+      ~author:"lifecycle-worker-4"
+      ~content:"Task-370 claimed and worktree ready. Investigating codebase."
+      ()
+  in
+  let second =
+    create_automation_post_or_fail
+      ~meta_json:keeper_board_meta
+      ~author:"lifecycle-worker-4"
+      ~content:"Task-370: Actually investigating codebase now."
+      ()
+  in
+  let post_id = Board.Post_id.to_string first.id in
+  Alcotest.(check string)
+    "status-only update returns existing post id"
+    post_id
+    (Board.Post_id.to_string second.id);
+  let updated =
+    match Board_dispatch.get_post ~post_id with
+    | Ok post -> post
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+  in
+  Alcotest.(check string)
+    "rolled post stores latest status body"
+    "Task-370: Actually investigating codebase now."
+    updated.content;
+  let posts = Board_dispatch.list_posts () in
+  let same_author_posts =
+    posts
+    |> List.filter (fun (post : Board.post) ->
+         String.equal
+           "lifecycle-worker-4"
+           (Board.Agent_id.to_string post.author))
+  in
+  Alcotest.(check int) "only one status post remains" 1 (List.length same_author_posts)
+
+let test_status_rollup_preserves_proof_posts () =
+  let first =
+    create_automation_post_or_fail
+      ~meta_json:keeper_board_meta
+      ~author:"lifecycle-worker-4"
+      ~content:"Task-370 claimed and worktree ready. Investigating codebase."
+      ()
+  in
+  let proof =
+    create_automation_post_or_fail
+      ~meta_json:keeper_board_meta
+      ~author:"lifecycle-worker-4"
+      ~content:
+        "Task-370 verified. Tests passed: scripts/dune-local.sh build \
+         test/test_board_content_dedup.exe. PR #123."
+      ()
+  in
+  Alcotest.(check bool)
+    "proof-bearing update creates a separate post"
+    true
+    (not
+       (String.equal
+          (Board.Post_id.to_string first.id)
+          (Board.Post_id.to_string proof.id)))
+
+let test_status_rollup_requires_automation_post () =
+  let first =
+    create_post_or_fail
+      ~author:"human-status"
+      ~content:"Task-370 claimed and worktree ready. Investigating codebase."
+  in
+  let second =
+    create_post_or_fail
+      ~author:"human-status"
+      ~content:"Task-370: Actually investigating codebase now."
+  in
+  Alcotest.(check bool)
+    "human status-looking posts are not rolled up"
+    true
+    (not
+       (String.equal
+          (Board.Post_id.to_string first.id)
+          (Board.Post_id.to_string second.id)))
+
 let () =
   Alcotest.run "board_content_dedup"
     [ ( "exact dedup",
@@ -227,5 +324,13 @@ let () =
             (with_eio test_different_author_creates_separate_post)
         ; Alcotest.test_case "comment parent participates in dedup" `Quick
             (with_eio test_comment_parent_is_part_of_dedup_key)
+        ; Alcotest.test_case "human status posts do not roll up" `Quick
+            (with_eio test_status_rollup_requires_automation_post)
+        ] )
+    ; ( "status rollup",
+        [ Alcotest.test_case "automation status posts roll up by task" `Quick
+            (with_eio test_status_only_automation_posts_roll_up_by_task)
+        ; Alcotest.test_case "proof posts stay separate" `Quick
+            (with_eio test_status_rollup_preserves_proof_posts)
         ] )
     ]

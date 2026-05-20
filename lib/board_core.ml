@@ -437,9 +437,202 @@ let validate_sub_board_post_policy_unlocked store ~author_id ~hearth =
 type create_post_outcome =
   | Fresh_post of post
   | Dedup_hit of post
+  | Rolled_up_post of post
 
 let post_of_create_post_outcome = function
-  | Fresh_post post | Dedup_hit post -> post
+  | Fresh_post post | Dedup_hit post | Rolled_up_post post -> post
+;;
+
+let status_rollup_window_sec = 6. *. 60. *. 60.
+let max_status_rollup_body_length = 600
+
+let json_assoc_string_opt key = function
+  | Some (`Assoc fields) ->
+    (match List.assoc_opt key fields with
+     | Some (`String value) ->
+       let value = String.trim value in
+       if String.equal value "" then None else Some value
+     | _ -> None)
+  | _ -> None
+;;
+
+let contains_substring haystack needle =
+  let haystack = String.lowercase_ascii haystack in
+  let needle = String.lowercase_ascii needle in
+  let hay_len = String.length haystack in
+  let needle_len = String.length needle in
+  if needle_len = 0
+  then true
+  else if needle_len > hay_len
+  then false
+  else (
+    let rec loop idx =
+      if idx + needle_len > hay_len
+      then false
+      else if String.equal (String.sub haystack idx needle_len) needle
+      then true
+      else loop (idx + 1)
+    in
+    loop 0)
+;;
+
+let contains_any_substring text needles =
+  List.exists (contains_substring text) needles
+;;
+
+let is_task_id_char = function
+  | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '-' | '_' -> true
+  | _ -> false
+;;
+
+let task_id_from_text text =
+  let marker = "task-" in
+  let marker_len = String.length marker in
+  let len = String.length text in
+  let lower = String.lowercase_ascii text in
+  let rec loop idx =
+    if idx + marker_len > len
+    then None
+    else if String.equal (String.sub lower idx marker_len) marker
+    then (
+      let stop = ref (idx + marker_len) in
+      while !stop < len && is_task_id_char text.[!stop] do
+        Stdlib.incr stop
+      done;
+      if !stop > idx + marker_len
+      then Some (String.sub lower idx (!stop - idx))
+      else loop (idx + 1))
+    else loop (idx + 1)
+  in
+  loop 0
+;;
+
+let status_rollup_task_id ~title ~body ~meta_json =
+  match
+    List.find_map
+      (fun key -> json_assoc_string_opt key meta_json)
+      [ "task_id"; "current_task_id"; "claimed_task_id"; "task" ]
+  with
+  | Some task_id -> Some (String.lowercase_ascii task_id)
+  | None ->
+    (match task_id_from_text body with
+     | Some _ as task_id -> task_id
+     | None -> task_id_from_text title)
+;;
+
+let status_only_terms =
+  [ "claimed"
+  ; "claiming"
+  ; "worktree ready"
+  ; "worktree exists"
+  ; "investigating"
+  ; "checking"
+  ; "scanning"
+  ; "starting"
+  ; "started"
+  ; "beginning"
+  ; "in progress"
+  ; "progress update"
+  ; "continuing"
+  ; "classifying"
+  ; "triaging"
+  ; "reviewing"
+  ; "preparing"
+  ; "backlog"
+  ]
+;;
+
+let proof_or_handoff_terms =
+  [ "blocked"
+  ; "blocker"
+  ; "cannot"
+  ; "stuck"
+  ; "error"
+  ; "exception"
+  ; "failed"
+  ; "failure"
+  ; "timeout"
+  ; "crash"
+  ; "root cause"
+  ; "evidence"
+  ; "verified"
+  ; "verification"
+  ; "tests passed"
+  ; "test passed"
+  ; "tests failed"
+  ; "test failed"
+  ; "gh pr"
+  ; "pr #"
+  ; "pull request"
+  ; "commit "
+  ; "changed files"
+  ; "repro"
+  ; "reproduction"
+  ; "handoff"
+  ; "ready for review"
+  ; "ready for pr"
+  ; "done"
+  ; "completed"
+  ; "fixed"
+  ; "merged"
+  ]
+;;
+
+let is_status_rollup_candidate ~post_kind ~title ~body ~meta_json =
+  match post_kind with
+  | Human_post | System_post -> false
+  | Automation_post ->
+    String.length body <= max_status_rollup_body_length
+    && Option.is_some (status_rollup_task_id ~title ~body ~meta_json)
+    && contains_any_substring body status_only_terms
+    && not (contains_any_substring body proof_or_handoff_terms)
+;;
+
+let find_status_rollup_target_unlocked
+      store
+      ~author_id
+      ~hearth
+      ~visibility
+      ~task_id
+      ~now
+  =
+  Hashtbl.fold
+    (fun _ (post : post) acc ->
+       let same_author =
+         String.equal (Agent_id.to_string post.author) (Agent_id.to_string author_id)
+       in
+       let same_hearth = Option.equal String.equal post.hearth hearth in
+       let same_task =
+         match
+           status_rollup_task_id
+             ~title:post.title
+             ~body:post.body
+             ~meta_json:post.meta_json
+         with
+         | Some existing_task_id -> String.equal existing_task_id task_id
+         | None -> false
+       in
+       let recent =
+         Stdlib.Float.compare (now -. post.updated_at) status_rollup_window_sec <= 0
+       in
+       if
+         same_author
+         && same_hearth
+         && post.visibility = visibility
+         && same_task
+         && recent
+         && is_status_rollup_candidate
+              ~post_kind:post.post_kind
+              ~title:post.title
+              ~body:post.body
+              ~meta_json:post.meta_json
+       then (
+         match acc with
+         | Some current when current.updated_at >= post.updated_at -> acc
+         | _ -> Some post)
+       else acc)
+    store.posts
+    None
 ;;
 
 let create_post_with_outcome
@@ -547,36 +740,89 @@ let create_post_with_outcome
              with
             | Error e -> Error e
             | Ok () ->
-              if !(store.post_count) >= Limits.max_posts
-              then
-                Error
-                  (Capacity_exceeded
-                     { current = !(store.post_count); max = Limits.max_posts })
-              else
-                let now = Time_compat.now () in
-                let post =
-                  { id = Post_id.generate ()
-                  ; author = author_id
-                  ; title = normalized_title
-                  ; body = normalized_body
-                  ; content = normalized_body
-                  ; post_kind = normalized_kind
-                  ; meta_json = normalized_meta
-                  ; visibility
-                  ; created_at = now
-                  ; updated_at = now
-                  ; expires_at
-                  ; votes_up = 0
-                  ; votes_down = 0
-                  ; reply_count = 0
-                  ; hearth
-                  ; thread_id
-                  }
-                in
-                Hashtbl.add store.posts (Post_id.to_string post.id) post;
-                Stdlib.incr store.post_count;
-                invalidate_post_caches store;
-                Ok (`Fresh post)))
+              let now = Time_compat.now () in
+              let create_fresh () =
+                if !(store.post_count) >= Limits.max_posts
+                then
+                  Error
+                    (Capacity_exceeded
+                       { current = !(store.post_count); max = Limits.max_posts })
+                else
+                  let post =
+                    { id = Post_id.generate ()
+                    ; author = author_id
+                    ; title = normalized_title
+                    ; body = normalized_body
+                    ; content = normalized_body
+                    ; post_kind = normalized_kind
+                    ; meta_json = normalized_meta
+                    ; visibility
+                    ; created_at = now
+                    ; updated_at = now
+                    ; expires_at
+                    ; votes_up = 0
+                    ; votes_down = 0
+                    ; reply_count = 0
+                    ; hearth
+                    ; thread_id
+                    }
+                  in
+                  Hashtbl.add store.posts (Post_id.to_string post.id) post;
+                  Stdlib.incr store.post_count;
+                  invalidate_post_caches store;
+                  Ok (`Fresh post)
+              in
+              let rollup_task_id =
+                if
+                  is_status_rollup_candidate
+                    ~post_kind:normalized_kind
+                    ~title:normalized_title
+                    ~body:normalized_body
+                    ~meta_json:normalized_meta
+                then
+                  status_rollup_task_id
+                    ~title:normalized_title
+                    ~body:normalized_body
+                    ~meta_json:normalized_meta
+                else None
+              in
+              (match rollup_task_id with
+               | Some task_id ->
+                 (match
+                    find_status_rollup_target_unlocked
+                      store
+                      ~author_id
+                      ~hearth
+                      ~visibility
+                      ~task_id
+                      ~now
+                  with
+                  | Some existing ->
+                    let updated =
+                      { existing with
+                        title = normalized_title
+                      ; body = normalized_body
+                      ; content = normalized_body
+                      ; post_kind = normalized_kind
+                      ; meta_json = normalized_meta
+                      ; updated_at = now
+                      ; expires_at
+                      }
+                    in
+                    let existing_id = Post_id.to_string existing.id in
+                    Hashtbl.replace store.posts existing_id updated;
+                    mark_dirty_post store existing_id;
+                    invalidate_post_caches store;
+                    Log.BoardLog.info
+                      "status-rollup: updated automation progress post \
+                       author=%s task_id=%s existing_id=%s body_len=%d"
+                      author_str
+                      task_id
+                      existing_id
+                      (String.length normalized_body);
+                    Ok (`Rolled_up (updated, posts_jsonl_unlocked store))
+                  | None -> create_fresh ())
+               | None -> create_fresh ())))
       in
       (* Agent Economy: earn credits for board post.  Moved OUTSIDE
      [with_lock] because [Agent_economy.earn] does its own disk I/O
@@ -587,7 +833,9 @@ let create_post_with_outcome
      post itself is already in the store and on disk.
 
      Dedup hits skip both [append_post] (avoids duplicate JSONL post id)
-     and [Agent_economy.earn] (avoids granting extra credits for retries). *)
+     and [Agent_economy.earn] (avoids granting extra credits for retries).
+     Rolled-up progress posts rewrite the existing post snapshot without
+     creating a new post or granting credits. *)
       match board_result with
       | Ok (`Fresh post) ->
         with_persist_lock store (fun () -> append_post post);
@@ -602,6 +850,9 @@ let create_post_with_outcome
          | Ok _ -> ()
          | Error msg -> Log.BoardLog.warn "economy earn (post): %s" msg);
         Ok (Fresh_post post)
+      | Ok (`Rolled_up (post, posts_jsonl)) ->
+        with_persist_lock store (fun () -> save_posts_jsonl posts_jsonl);
+        Ok (Rolled_up_post post)
       | Ok (`Dedup_hit existing) -> Ok (Dedup_hit existing)
       | Error _ as e -> e)
 ;;

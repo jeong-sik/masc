@@ -63,10 +63,10 @@ let of_exn ?detail exn =
   | Stdlib.Not_found ->
       Not_found { what = default_detail () }
   | Failure msg ->
-      let d = Option.value detail ~default:msg in
+      let d = match detail with Some d -> d | None -> msg in
       Internal_error { detail = d; exn = Some exn }
   | Sys_error msg ->
-      let d = Option.value detail ~default:msg in
+      let d = match detail with Some d -> d | None -> msg in
       Internal_error { detail = d; exn = Some exn }
   | Unix.Unix_error (Unix.EACCES, _, path) ->
       let p = if path = "" then default_detail () else path in

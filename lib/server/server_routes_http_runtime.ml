@@ -1004,6 +1004,7 @@ type full_health_snapshot = {
   duration_ms : int;
   error : string option;
   stale_since_ts : float option;
+  last_good_available : bool;
 }
 
 let full_health_snapshot_mu = Stdlib.Mutex.create ()
@@ -1064,7 +1065,8 @@ let full_health_cached_field_names =
 let full_health_field_is_cached name =
   List.exists (String.equal name) full_health_cached_field_names
 
-let full_health_component_placeholder ?error ~status component =
+let full_health_component_placeholder ?error ?(component_timed_out = false) ~status
+    component =
   let error_fields =
     match error with
     | Some error -> [ ("error", `String error) ]
@@ -1074,32 +1076,40 @@ let full_health_component_placeholder ?error ~status component =
     ([
        ("component", `String component);
        ("status", `String status);
-       ("component_timed_out", `Bool false);
+       ("component_timed_out", `Bool component_timed_out);
      ]
      @ error_fields)
 
-let full_health_placeholder_fields ?error ?(status = "warming") () =
+let full_health_placeholder_fields ?error ?(component_timed_out = false)
+    ?(status = "warming") () =
   [
     ( "feature_flags",
-      full_health_component_placeholder ?error ~status "feature_flags" );
+      full_health_component_placeholder ?error ~component_timed_out ~status
+        "feature_flags" );
     ("keeper_fibers", `Int 0);
     ( "keeper_fd_pressure",
-      full_health_component_placeholder ?error ~status "keeper_fd_pressure" );
+      full_health_component_placeholder ?error ~component_timed_out ~status
+        "keeper_fd_pressure" );
     ( "fd_accountant",
-      full_health_component_placeholder ?error ~status "fd_accountant" );
+      full_health_component_placeholder ?error ~component_timed_out ~status
+        "fd_accountant" );
     ( "keeper_fleet_safety",
-      full_health_component_placeholder ?error ~status "keeper_fleet_safety" );
+      full_health_component_placeholder ?error ~component_timed_out ~status
+        "keeper_fleet_safety" );
     ( "keeper_reaction_ledger",
-      full_health_component_placeholder ?error ~status "keeper_reaction_ledger" );
+      full_health_component_placeholder ?error ~component_timed_out ~status
+        "keeper_reaction_ledger" );
     ( "paused_keepers",
       `Assoc
         [
           ("status", `String status);
           ("count", `Int 0);
           ("names", `List []);
-          ("component_timed_out", `Bool false);
+          ("component_timed_out", `Bool component_timed_out);
         ] );
-    ("cdal", full_health_component_placeholder ?error ~status "cdal");
+    ( "cdal",
+      full_health_component_placeholder ?error ~component_timed_out ~status
+        "cdal" );
     ("keeper_config_parse_error_count", `Int 0);
     ("keeper_config_parse_errors", `List []);
     ("keeper_config_unknown_key_count", `Int 0);
@@ -1137,6 +1147,7 @@ let compute_full_health_snapshot ?(listener = "http/1.1") request =
       duration_ms = duration_ms ~started_at ~finished_at;
       error = None;
       stale_since_ts = None;
+      last_good_available = true;
     }
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -1149,6 +1160,7 @@ let compute_full_health_snapshot ?(listener = "http/1.1") request =
         duration_ms = duration_ms ~started_at ~finished_at;
         error = Some error;
         stale_since_ts = Some finished_at;
+        last_good_available = false;
       }
 
 let store_full_health_snapshot snapshot =
@@ -1172,19 +1184,22 @@ let full_health_refresh_timeout_error error =
 let mark_full_health_snapshot_error exn =
   let now = Unix.gettimeofday () in
   let error = Printexc.to_string exn in
+  let timed_out = full_health_refresh_timeout_error error in
   with_full_health_snapshot_lock (fun () ->
       (* Partial degradation: preserve the last successful snapshot's
          per-component [fields] and overwrite only the [error] /
          [stale_since_ts] / refresh-bookkeeping signals.  If we have
          no prior snapshot (warm path on cold boot), fall back to the
          all-error placeholder so the field set stays well-typed. *)
-      let preserved_fields, prior_stale_since =
+      let preserved_fields, preserved_computed_at, preserved_duration_ms,
+          prior_stale_since, last_good_available =
         match !full_health_snapshot with
-        | Some s when Option.is_none s.error ->
-            (* Previous snapshot was clean — keep its component
-               fields, this is a fresh failure so [stale_since_ts]
-               starts at [now]. *)
-            (s.fields, None)
+        | Some s when s.last_good_available ->
+            (* A last-good payload exists — keep its component fields
+               and preserve [computed_at] so [snapshot_age_ms]
+               remains the age of the payload rather than the age of
+               the failed refresh attempt. *)
+            (s.fields, s.computed_at, s.duration_ms, s.stale_since_ts, true)
         | Some s ->
             (* Previous snapshot was already an error placeholder —
                keep whatever [fields] it had (which may itself be
@@ -1192,11 +1207,24 @@ let mark_full_health_snapshot_error exn =
                success) and DO NOT overwrite the [stale_since_ts]
                timestamp.  This pins [stale_since_ts] to the FIRST
                failure of the current outage. *)
-            (s.fields, s.stale_since_ts)
+            ( s.fields,
+              s.computed_at,
+              s.duration_ms,
+              s.stale_since_ts,
+              s.last_good_available )
         | None ->
             (* Cold boot — no prior snapshot.  Fall back to the
-               original all-error placeholder behaviour. *)
-            (full_health_placeholder_fields ~error ~status:"error" (), None)
+               original placeholder shape, but classify refresh
+               timeouts as [timeout] instead of generic [error] so
+               operators can distinguish "no last-good payload yet"
+               from a stale last-good fallback. *)
+            let status = if timed_out then "timeout" else "error" in
+            ( full_health_placeholder_fields ~error
+                ~component_timed_out:timed_out ~status (),
+              now,
+              0,
+              None,
+              false )
       in
       let stale_since_ts =
         match prior_stale_since with
@@ -1207,10 +1235,11 @@ let mark_full_health_snapshot_error exn =
         Some
           {
             fields = preserved_fields;
-            computed_at = now;
-            duration_ms = 0;
+            computed_at = preserved_computed_at;
+            duration_ms = preserved_duration_ms;
             error = Some error;
             stale_since_ts;
+            last_good_available;
           };
       full_health_refresh_in_flight := false;
       full_health_refresh_started_at := None;
@@ -1261,6 +1290,8 @@ let full_health_snapshot_metadata ~now ~refresh_in_flight ~refresh_started_at
     | Some snapshot ->
         let status =
           match snapshot.error with
+          | Some _ when snapshot.last_good_available -> "stale"
+          | Some error when full_health_refresh_timeout_error error -> "timeout"
           | Some _ -> "error"
           | None when snapshot_is_stale ~now snapshot -> "stale"
           | None -> "ready"
@@ -1294,6 +1325,7 @@ let full_health_snapshot_metadata ~now ~refresh_in_flight ~refresh_started_at
         `Int (int_of_float (full_health_refresh_timeout_sec *. 1000.)) );
       ("component_timed_out", `Bool component_timed_out);
       ("error", error);
+      ("last_good_available", `Bool (Option.fold ~none:false ~some:(fun s -> s.last_good_available) snapshot));
       (* [stale_since_ts] is the wall-clock of the FIRST failure of
          the current outage; null when the snapshot is fresh.
          Consumers should prefer this over [computed_at_unix] for

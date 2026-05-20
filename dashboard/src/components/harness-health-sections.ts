@@ -5,6 +5,7 @@ import { useMemo } from 'preact/hooks'
 import { useSignal } from '@preact/signals'
 import { navigate } from '../router'
 import { formatTimeAgo, formatTimestampKo } from '../lib/format-time'
+import { assertExhaustive } from '../lib/exhaustive'
 import { SurfaceCard } from './common/card'
 import { CopyIdButton } from './common/copy-id-button'
 import { TextInput } from './common/input'
@@ -102,6 +103,16 @@ export function filterHandoffEvents(
 
 // ── Helper functions ──
 
+// RailStatus consumers below intentionally retain `case 'idle': default:`
+// pattern. Reason: data.overview.evaluator_status etc. arrive via
+// `get<HarnessHealthData>('/api/v1/dashboard/harness-health')` — a type
+// assertion, not a typed parse — so wire drift (older OCaml backend
+// emitting a novel status) reaches these helpers with a value the type
+// system promised wouldn't occur. The defensive default is load-bearing
+// for prod render safety. Fixing properly requires a boundary parser
+// (`membershipParse<RailStatus>` at load site) so a future RFC can flip
+// these to `assertExhaustive`. Existing tests at lines 92, 118, 296 lock
+// this contract via `'unknown' as any`.
 export function railStatusLabel(status: RailStatus): string {
   switch (status) {
     case 'healthy':
@@ -223,9 +234,9 @@ export function railFreshness(data: HarnessHealthData, rail: 'evaluator' | 'pre_
     case 'pre_compact':
       return freshnessLabel(data.overview.pre_compact_last_event_at, '기록 없음')
     case 'handoff':
-    default:
       return freshnessLabel(data.overview.handoff_last_event_at, '기록 없음')
   }
+  return assertExhaustive(rail, 'HarnessRail')
 }
 
 // ── Small components ──

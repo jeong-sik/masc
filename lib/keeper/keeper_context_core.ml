@@ -212,75 +212,12 @@ let message_to_json = Message_json.message_to_json
 let message_of_json = Message_json.message_of_json
 let text_of_history_jsonl_json = Message_json.text_of_history_jsonl_json
 
-let tool_use_ids_of_message (msg : Agent_sdk.Types.message) : string list =
-  List.filter_map
-    (function
-      | Agent_sdk.Types.ToolUse { id; _ } -> Some id
-      (* Only [ToolUse] carries a tool-use id; other blocks contribute none. *)
-      | Agent_sdk.Types.Text _
-      | Agent_sdk.Types.Thinking _
-      | Agent_sdk.Types.RedactedThinking _
-      | Agent_sdk.Types.ToolResult _
-      | Agent_sdk.Types.Image _
-      | Agent_sdk.Types.Document _
-      | Agent_sdk.Types.Audio _ -> None)
-    msg.content
-
-let tool_result_ids_of_message (msg : Agent_sdk.Types.message) : string list =
-  List.filter_map
-    (function
-      | Agent_sdk.Types.ToolResult { tool_use_id; _ } -> Some tool_use_id
-      (* Only [ToolResult] carries a tool_use_id reference; others contribute none. *)
-      | Agent_sdk.Types.Text _
-      | Agent_sdk.Types.Thinking _
-      | Agent_sdk.Types.RedactedThinking _
-      | Agent_sdk.Types.ToolUse _
-      | Agent_sdk.Types.Image _
-      | Agent_sdk.Types.Document _
-      | Agent_sdk.Types.Audio _ -> None)
-    msg.content
-
-let has_tool_result_block (msg : Agent_sdk.Types.message) : bool =
-  List.exists
-    (function
-      | Agent_sdk.Types.ToolResult _ -> true
-      (* Only [ToolResult] qualifies; other blocks are not tool-result evidence. *)
-      | Agent_sdk.Types.Text _
-      | Agent_sdk.Types.Thinking _
-      | Agent_sdk.Types.RedactedThinking _
-      | Agent_sdk.Types.ToolUse _
-      | Agent_sdk.Types.Image _
-      | Agent_sdk.Types.Document _
-      | Agent_sdk.Types.Audio _ -> false)
-    msg.content
-
-(** Trim messages to at most [max_count] while preserving ToolUse/ToolResult
-    pairing.  Drops from the front.  If the drop point lands on a
-    ToolResult whose ToolUse would be the last dropped message, advance
-    the drop by 1 so the orphan ToolResult is also removed (pair stays
-    together on the dropped side).  This may yield fewer than [max_count]
-    messages but never creates orphans.
-
-    Root cause of recurring "unexpected tool_use_id" errors: the previous
-    implementation used [List.filteri (fun i _ -> i >= drop)] which splits
-    on message index, breaking mid-pair boundaries. *)
-let trim_messages_preserving_pairs
-    (messages : Agent_sdk.Types.message list) ~(max_count : int)
-    : Agent_sdk.Types.message list =
-  let n = List.length messages in
-  if n <= max_count then messages
-  else
-    let drop = n - max_count in
-    (* If the first kept message would be an orphan ToolResult,
-       drop it too so the pair stays together on the removed side. *)
-    let effective_drop =
-      match List.nth_opt messages drop with
-      | Some msg when has_tool_result_block msg ->
-        (* Advance drop to skip the orphan ToolResult *)
-        drop + 1
-      | _ -> drop
-    in
-    List.filteri (fun i _ -> i >= effective_drop) messages
+(* Tool use/result pair invariants extracted to
+   [Keeper_context_tool_message_pairs] (godfile decomp). *)
+let tool_use_ids_of_message = Keeper_context_tool_message_pairs.tool_use_ids_of_message
+let tool_result_ids_of_message = Keeper_context_tool_message_pairs.tool_result_ids_of_message
+let has_tool_result_block = Keeper_context_tool_message_pairs.has_tool_result_block
+let trim_messages_preserving_pairs = Keeper_context_tool_message_pairs.trim_messages_preserving_pairs
 
 let tool_result_text_of_block
     ~(tool_use_id : string)

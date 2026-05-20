@@ -435,8 +435,8 @@ let resolve_sandbox_root_git_cwd ~(config : Coord.config) ~(meta : keeper_meta) 
           (Printf.sprintf
              "sandbox root cannot run git/gh: mount point %s is not a git repository and \
               no sandbox git clones exist under repos/. First clone a repo with \
-              keeper_shell op=git_clone path=\"repos/<repo>\", then retry with \
-              cwd=\"repos/<repo>\" or cwd=\"repos/<repo>/.worktrees/<task>\"."
+              the visible clone tool, then retry with cwd=\"repos/<repo>\" or \
+              cwd=\"repos/<repo>/.worktrees/<task>\"."
              host_root) )
     | example_repo :: _ as many ->
       (* #10680: keeper-executor-agent saw 17 events / 5min in a single
@@ -461,12 +461,9 @@ let resolve_sandbox_root_git_cwd ~(config : Coord.config) ~(meta : keeper_meta) 
           (Printf.sprintf
              "sandbox root cannot run git/gh: mount point %s is not a git repository and \
               multiple sandbox repos exist. Set cwd explicitly before retrying. Example \
-              next call: Bash { \"command\": %S, \"cwd\": %S }. Legacy internal form: \
-              keeper_bash { \"cmd\": %S, \"cwd\": %S }. Available repos: %s. Do not \
-              retry the same cmd from sandbox root."
+              next call: Bash { \"command\": %S, \"cwd\": %S }. Available repos: %s. \
+              Do not retry the same cmd from sandbox root."
              host_root
-             suggested_cmd
-             suggested_cwd
              suggested_cmd
              suggested_cwd
              (String.concat ", " many)) )))

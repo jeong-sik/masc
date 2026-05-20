@@ -919,11 +919,10 @@ let handle_keeper_shell
          ; "op", `String op
          ; "error", `String "keeper_shell_bash_deprecated"
          ; "hint", `String
-             "keeper_shell is now structured-only and no longer executes \
-              op=bash. Use Bash or keeper_bash for command execution; use \
-              keeper_shell only for structured ops such as rg, ls, cat, \
-              git_status, git_log, git_diff, git_clone, and gh."
-         ; "suggested_tool", `String "keeper_bash"
+             "The structured shell no longer executes op=bash. Use the public \
+              Bash tool for command execution; use Grep and Read for search and \
+              file inspection when they are visible."
+         ; "suggested_tool", `String "Bash"
          ; "suggested_public_tool", `String "Bash"
          ; "supported_ops",
              `List

@@ -473,51 +473,44 @@ let shell_rewrite_plan ?(confidence = "medium") ~next_tool ~next_args ~instructi
     () =
   { next_tool; next_args; instruction; reason; confidence }
 
-let keeper_shell_rewrite_args op fields = ("op", `String op) :: fields
-
 let command_block_recovery_plan ~cmd:_ reason hint =
   match reason with
   | Worker_dev_tools.Command_not_allowed name when String_util.equals_ci name "gh" ->
     Some
       (shell_rewrite_plan
          ~confidence:"high"
-         ~next_tool:"keeper_shell"
-         ~next_args:
-           (keeper_shell_rewrite_args "gh" [ "cmd", `String "pr list --state open" ])
+         ~next_tool:"keeper_pr_list"
+         ~next_args:[ "state", `String "open" ]
          ~instruction:hint
-         ~reason:"gh_requires_structured_shell_op"
+         ~reason:"gh_requires_native_pr_tool"
          ())
   | Worker_dev_tools.Command_not_allowed _ ->
     Some
       (shell_rewrite_plan
-         ~next_tool:"keeper_shell"
+         ~next_tool:"Grep"
          ~next_args:
-           (keeper_shell_rewrite_args
-              "rg"
-              [ "pattern", `String "SEARCH_TERM"; "path", `String "SCOPED_PATH" ])
+           [ "pattern", `String "SEARCH_TERM"; "path", `String "SCOPED_PATH" ]
          ~instruction:hint
-         ~reason:"command_not_allowed_use_structured_op"
+         ~reason:"command_not_allowed_use_visible_search_tool"
          ())
   | Chain_or_redirect | Pipes_not_allowed ->
     Some
       (shell_rewrite_plan
          ~confidence:"high"
-         ~next_tool:"keeper_shell"
+         ~next_tool:"Grep"
          ~next_args:
-           (keeper_shell_rewrite_args
-              "rg"
-              [ "pattern", `String "SEARCH_TERM"; "path", `String "SCOPED_PATH" ])
+           [ "pattern", `String "SEARCH_TERM"; "path", `String "SCOPED_PATH" ]
          ~instruction:hint
-         ~reason:"shell_shape_requires_structured_op"
+         ~reason:"shell_shape_requires_visible_search_tool"
          ())
   | Injection | Process_substitution ->
     Some
       (shell_rewrite_plan
-         ~next_tool:"keeper_shell"
+         ~next_tool:"Bash"
          ~next_args:
-           (keeper_shell_rewrite_args
-              "rg"
-              [ "pattern", `String "DISCOVERY_TERM"; "path", `String "SCOPED_PATH" ])
+           [ "command", `String "DISCOVERY_COMMAND_WITHOUT_SUBSTITUTION"
+           ; "cwd", `String "REPO_OR_WORKTREE_CWD"
+           ]
          ~instruction:hint
          ~reason:"shell_injection_requires_discovery_first"
          ())
@@ -525,24 +518,24 @@ let command_block_recovery_plan ~cmd:_ reason hint =
     Some
       (shell_rewrite_plan
          ~confidence:"high"
-         ~next_tool:"keeper_bash"
-         ~next_args:[ "cmd", `String "scripts/dune-local.sh build <target>" ]
+         ~next_tool:"Bash"
+         ~next_args:[ "command", `String "scripts/dune-local.sh build <target>" ]
          ~instruction:hint
          ~reason:"dune_must_use_local_wrapper"
          ())
   | Unsafe_redirect ->
     Some
       (shell_rewrite_plan
-         ~next_tool:"keeper_fs_edit"
-         ~next_args:[ "path", `String "FILE_PATH"; "content", `String "CONTENT" ]
+         ~next_tool:"Write"
+         ~next_args:[ "file_path", `String "FILE_PATH"; "content", `String "CONTENT" ]
          ~instruction:hint
          ~reason:"redirect_requires_file_edit_tool"
          ())
   | Empty_command ->
     Some
       (shell_rewrite_plan
-         ~next_tool:"keeper_shell"
-         ~next_args:(keeper_shell_rewrite_args "ls" [ "path", `String "." ])
+         ~next_tool:"Bash"
+         ~next_args:[ "command", `String "ls ." ]
          ~instruction:hint
          ~reason:"empty_command_requires_explicit_op"
          ())
@@ -572,9 +565,14 @@ let bash_shape_block_result ~cmd ~cmd_for_log ~env_snapshot block =
                  | Gh_pr_checks -> Some "keeper_pr_status"
                  | _ when Task_probe.looks_like_discovery cmd ->
                    Some "keeper_tasks_list"
-                 | Pipe_or_redirect -> Some "keeper_shell"
-                 | Repo_wide_scan -> Some "keeper_shell"
-                 | Chaining | Substitution -> None);
+                 | Pipe_or_redirect when command_looks_like_search_pipeline cmd ->
+                   Some "Grep"
+                 | Pipe_or_redirect -> Some "Bash"
+                 | Repo_wide_scan
+                   when command_looks_like_repo_wide_git_log_grep cmd ->
+                   Some "Bash"
+                 | Repo_wide_scan -> Some "Grep"
+                 | Chaining | Substitution -> Some "Bash");
             })
        ~extra:
          ([
@@ -584,6 +582,123 @@ let bash_shape_block_result ~cmd ~cmd_for_log ~env_snapshot block =
             "execution_time_ms", `Int 0;
           ]
           @ recovery_extra)
+       ~env_snapshot
+       ())
+
+let strip_wrapping_single_or_double_quotes value =
+  let len = String.length value in
+  if len >= 2
+     && ((Char.equal value.[0] '"' && Char.equal value.[len - 1] '"')
+         || (Char.equal value.[0] '\'' && Char.equal value.[len - 1] '\''))
+  then String.sub value 1 (len - 2)
+  else value
+
+let rec strip_leading_dot_slash value =
+  if String.length value >= 2
+     && Char.equal value.[0] '.'
+     && Char.equal value.[1] '/'
+  then strip_leading_dot_slash (String.sub value 2 (String.length value - 2))
+  else value
+
+let path_suffix_under ~prefix path =
+  let prefix = Keeper_alerting_path.strip_trailing_slashes prefix in
+  let path = Keeper_alerting_path.strip_trailing_slashes path in
+  if String.equal path prefix
+  then Some ""
+  else (
+    let prefix_with_sep = prefix ^ "/" in
+    if String.starts_with ~prefix:prefix_with_sep path
+    then
+      Some
+        (String.sub path (String.length prefix_with_sep)
+           (String.length path - String.length prefix_with_sep))
+    else None)
+
+let keeper_sandbox_relative_cwd ~(config : Coord.config) ~(meta : keeper_meta) ~cwd =
+  let root = Keeper_alerting_path.project_root_of_config config in
+  let sandbox_root =
+    Filename.concat root (Keeper_sandbox.allowed_root_rel_of_meta ~meta)
+    |> Keeper_alerting_path.normalize_path_for_check_stripped
+  in
+  let cwd = Keeper_alerting_path.normalize_path_for_check_stripped cwd in
+  path_suffix_under ~prefix:sandbox_root cwd
+
+let normalized_relative_path_token value =
+  value
+  |> String.trim
+  |> strip_wrapping_single_or_double_quotes
+  |> strip_leading_dot_slash
+  |> Keeper_alerting_path.strip_trailing_slashes
+
+let doubled_cwd_relative_path_plan ~(config : Coord.config) ~(meta : keeper_meta) ~cwd
+      ~cmd =
+  match keeper_sandbox_relative_cwd ~config ~meta ~cwd with
+  | None | Some "" -> None
+  | Some cwd_rel ->
+    let cwd_rel = Keeper_alerting_path.strip_trailing_slashes cwd_rel in
+    Worker_dev_tools.existing_dir_path_values cmd
+    |> List.find_map (fun raw_path ->
+      let path = normalized_relative_path_token raw_path in
+      match path_suffix_under ~prefix:cwd_rel path with
+      | None -> None
+      | Some suffix ->
+        let corrected_path = if suffix = "" then "." else suffix in
+        let corrected_cmd =
+          String_util.replace_substring ~needle:raw_path ~by:corrected_path cmd
+        in
+        let hint =
+          Printf.sprintf
+            "The command path %S already includes cwd %S, so Bash resolves it as \
+             %S/%S. Retry with Bash { \"command\": %S, \"cwd\": %S }, or keep \
+             command=%S and set cwd to the sandbox root. Do not combine both."
+            raw_path
+            cwd_rel
+            cwd_rel
+            raw_path
+            corrected_cmd
+            cwd_rel
+            cmd
+        in
+        Some
+          (shell_rewrite_plan
+             ~confidence:"high"
+             ~next_tool:"Bash"
+             ~next_args:[ "command", `String corrected_cmd; "cwd", `String cwd_rel ]
+             ~instruction:hint
+             ~reason:"cwd_path_prefix_duplicated"
+             ()))
+
+let doubled_cwd_relative_path_result ~cmd ~cmd_for_log ~cwd ~plan ~env_snapshot =
+  let rule_id = "keeper_bash_cwd_path_prefix_duplicated" in
+  Yojson.Safe.to_string
+    (Exec_core.blocked_result_json
+       ~cmd
+       ~error:"keeper_bash_cwd_path_prefix_duplicated"
+       ~reason:
+         "A relative command path repeats the current cwd prefix, which would \
+          make Bash look under cwd/cwd instead of the intended directory."
+       ~hint:plan.instruction
+       ~alternatives:
+         [
+           "Remove the repeated cwd prefix from the command path.";
+           "Or set cwd to the sandbox root and keep the repos/REPO/... path.";
+         ]
+       ~diag:
+         (Some
+            {
+              Exec_core.rule_id;
+              explanation =
+                "The shell cwd and a command path carry the same sandbox-relative \
+                 repo prefix.";
+              rewrite = Some plan.instruction;
+              tool_suggestion = Some plan.next_tool;
+            })
+       ~extra:
+         ([ "execution_time_ms", `Int 0
+          ; "cmd", `String cmd_for_log
+          ; "cwd", `String cwd
+          ]
+          @ recovery_plan_extra ~rule_id plan)
        ~env_snapshot
        ())
 
@@ -1315,6 +1430,15 @@ let handle_keeper_bash
       else (base_profile, base_network_mode, false)
     in
     let sandbox_root = Keeper_sandbox.allowed_root_rel_of_meta ~meta in
+    match doubled_cwd_relative_path_plan ~config ~meta ~cwd ~cmd:validation_cmd with
+    | Some plan ->
+      doubled_cwd_relative_path_result
+        ~cmd
+        ~cmd_for_log
+        ~cwd
+        ~plan
+        ~env_snapshot:env_snap
+    | None ->
     match keeper_bash_shape_block cmd with
     | Some block when
       Option.is_none safe_read_fallback
@@ -1382,17 +1506,17 @@ let handle_keeper_bash
            ~reason:
              "git checkout/switch/branch mutations require a write-enabled preset \
               (Coding/Delivery/Full) and a keeper-owned sandbox repo or \
-              worktree. Clone into your sandbox first \
-              (keeper_shell op=git_clone), then create or enter a worktree \
-              under repos/<repo>/.worktrees/<task>."
+              worktree. Clone into your sandbox with the visible clone tool, \
+              then create or enter a worktree under \
+              repos/<repo>/.worktrees/<task>."
            ~hint:(Printf.sprintf
                     "Use cwd=%srepos/REPO/.worktrees/TASK"
                     sandbox_root)
            ~alternatives:
              [ Printf.sprintf
-                 "Clone the repo first: keeper_shell op=git_clone, then use cwd=%srepos/REPO/.worktrees/TASK."
+                 "Clone the repo first with the visible clone tool, then use cwd=%srepos/REPO/.worktrees/TASK."
                  sandbox_root
-             ; "Use keeper_shell op=git op_cmd='branch -a' to list available branches."
+             ; "Use Bash command='git branch -a' with cwd set to the repo to list available branches."
              ]
            ~retryability:Exec_core.Operator_required
            ~diag:
@@ -1401,7 +1525,7 @@ let handle_keeper_bash
                         "git checkout/switch/branch mutations need a write-enabled preset and a sandbox clone."
                     ; rewrite =
                         Some (Printf.sprintf
-                          "First: keeper_shell op=git_clone. Then: set cwd=%srepos/REPO/.worktrees/TASK"
+                          "First clone the repo with the visible clone tool. Then set cwd=%srepos/REPO/.worktrees/TASK"
                           sandbox_root)
                     ; tool_suggestion = None })
            ~extra:[ "cmd", `String cmd_for_log; "execution_time_ms", `Int 0 ]
@@ -1418,7 +1542,7 @@ let handle_keeper_bash
              "This command modifies state (git push/commit, make deploy, etc.). \
               A write-enabled preset (Coding/Delivery/Full) is required."
            ~alternatives:
-             [ "Read-only alternatives: use keeper_bash for git log, git diff, git status."
+             [ "Read-only alternatives: use Bash for git log, git diff, git status."
              ; "If you need write access, ask the operator to assign a Coding/Delivery/Full preset."
              ]
            ~retryability:Exec_core.Operator_required
@@ -1445,11 +1569,11 @@ let handle_keeper_bash
            ~error:"write_outside_playground_blocked"
            ~reason:
              (Printf.sprintf
-                "Write operations (git push/commit, make deploy, etc.) \
+                 "Write operations (git push/commit, make deploy, etc.) \
                  must run with cwd inside your keeper-owned sandbox clone \
                  or one of its worktrees under %srepos/<repo>/.worktrees/. \
-                 Open a sandbox clone first with keeper_shell op=git_clone \
-                 if needed, then use masc_worktree_create and set cwd to \
+                 Open a sandbox clone first with the visible clone tool if \
+                 needed, then use masc_worktree_create and set cwd to \
                  the returned worktree path."
                 sandbox_root)
            ~hint:(Printf.sprintf
@@ -1458,10 +1582,10 @@ let handle_keeper_bash
                     sandbox_root)
            ~alternatives:
              [ Printf.sprintf
-                 "Clone into your sandbox: keeper_shell op=git_clone, then cd to %srepos/REPO/."
+                 "Clone into your sandbox with the visible clone tool, then set cwd to %srepos/REPO/."
                  sandbox_root
              ; "Create a worktree inside your sandbox with masc_worktree_create."
-             ; "Use keeper_bash with a cwd pointing to your sandbox worktree."
+             ; "Use Bash with a cwd pointing to your sandbox worktree."
              ]
            ~retryability:Exec_core.Operator_required
            ~diag:
@@ -1470,7 +1594,7 @@ let handle_keeper_bash
                         "Write operations must run inside the keeper sandbox. The current cwd is outside the sandbox root."
                     ; rewrite =
                         Some (Printf.sprintf
-                          "Clone into sandbox: keeper_shell op=git_clone, then set cwd=%srepos/REPO/.worktrees/TASK"
+                          "Clone into sandbox with the visible clone tool, then set cwd=%srepos/REPO/.worktrees/TASK"
                           sandbox_root)
                     ; tool_suggestion = None })
            ~extra:[ "cmd", `String cmd_for_log; "cwd", `String cwd; "execution_time_ms", `Int 0 ]
@@ -1554,16 +1678,20 @@ let handle_keeper_bash
           match reason with
           | Worker_dev_tools.Command_not_allowed name
             when String_util.equals_ci name "gh" ->
-            "`gh` is not allowed via keeper_bash. Use keeper_shell with \
-             op=\"gh\" (e.g. keeper_shell op=gh cmd=\"pr list --state open\")."
+            "`gh` is not allowed through raw Bash in this context. Use the \
+             dedicated keeper_pr_* tool when the task is about PRs; otherwise \
+             retry only with a visible GitHub tool or a Bash command allowed by \
+             the active policy."
           | Chain_or_redirect | Pipes_not_allowed | Unsafe_redirect ->
-            "Use separate tool calls instead of chaining. Call keeper_bash once per command."
+            "Use separate tool calls instead of chaining. Call Bash once per command."
           | Direct_dune_invocation ->
             "Use scripts/dune-local.sh instead of bare dune so local builds share the machine-wide lock."
           | Injection | Process_substitution ->
-            "Avoid shell metacharacters. Use keeper_shell with a specific op (rg, find, ls) instead."
+            "Avoid shell metacharacters. Run the discovery command first, then \
+             pass the literal result to the next visible tool."
           | Command_not_allowed _ ->
-            "Check the command for blocked patterns. Use keeper_shell for structured ops (rg, ls, find)."
+            "Check the command for blocked patterns. Use Grep, Read, or one \
+             scoped Bash command depending on the active schema."
           | Empty_command -> "Provide a non-empty command string."
         in
         let hint =
@@ -1575,11 +1703,11 @@ let handle_keeper_bash
           match reason with
           | Worker_dev_tools.Command_not_allowed name
             when String_util.equals_ci name "gh" ->
-            [ "Use keeper_shell with op=\"gh\" for GitHub CLI operations."
-            ; "Example: keeper_shell op=gh cmd=\"pr list --state open\"."
+            [ "Use keeper_pr_list / keeper_pr_status for PR operations when visible."
+            ; "For non-PR GitHub reads, use a single policy-allowed Bash command with --repo OWNER/REPO."
             ]
           | Chain_or_redirect | Pipes_not_allowed | Unsafe_redirect ->
-            [ "Break the pipeline into separate keeper_bash calls."
+            [ "Break the pipeline into separate Bash calls."
             ; "Save intermediate output to a file, then process it in the next call."
             ]
           | Direct_dune_invocation ->
@@ -1587,16 +1715,16 @@ let handle_keeper_bash
             ; "Do not run bare dune build/test/exec in local agent shells."
             ]
           | Injection | Process_substitution ->
-            [ "Use keeper_shell with a specific op (rg, find, ls) for structured queries."
+            [ "Run the discovery command first, then reuse the literal output."
             ; "Avoid $(...) and backtick substitution in commands."
             ]
           | Command_not_allowed _ ->
-            [ "Use keeper_shell for structured ops (rg, ls, find)."
+            [ "Use Grep for searches, Read for one file, or Bash for one allowed command."
             ; "Check if the command is available under a different name or op."
             ]
           | Empty_command ->
             [ "Provide a non-empty command string."
-            ; "Example: keeper_bash cmd='ls -la lib/'."
+            ; "Example: Bash command='ls -la lib/' cwd='repos/REPO'."
             ]
         in
         let alternatives =

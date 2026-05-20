@@ -627,7 +627,7 @@ let command_treats_plain_args_as_content = function
   | _ -> false
 ;;
 
-let path_validation_tokens tokens =
+let path_argument_tokens tokens =
   match tokens with
   | [] -> []
   | command :: args ->
@@ -760,7 +760,7 @@ let existing_dir_path_values cmd =
           loop false (token.value :: acc) rest
         | None -> loop false acc rest)
   in
-  tokens |> path_validation_tokens |> loop false []
+  tokens |> path_argument_tokens |> loop false []
 ;;
 
 let validate_command_paths ?keeper_id ?base_path ?workdir cmd =
@@ -832,15 +832,16 @@ let validate_command_paths ?keeper_id ?base_path ?workdir cmd =
                 | Error _ as err -> err)
             | None -> validate_path_tokens ~command_name false rest)
       in
-      let validate_token_stream tokens =
+      let validate_path_argument_tokens tokens path_tokens =
         let command_name =
           match tokens with
           | command :: _ -> Filename.basename command.value
           | [] -> ""
         in
-        tokens
-        |> path_validation_tokens
-        |> validate_path_tokens ~command_name false
+        validate_path_tokens ~command_name false path_tokens
+      in
+      let validate_token_stream tokens =
+        validate_path_argument_tokens tokens (path_argument_tokens tokens)
       in
       let path_token_of_literal value =
         { value; quoted = false; escaped = false; globbed = false; braced = false }
@@ -891,14 +892,14 @@ let validate_command_paths ?keeper_id ?base_path ?workdir cmd =
           loop stages
       in
       let legacy_tokens = tokenize_path_args cmd in
-      let legacy_path_tokens = path_validation_tokens legacy_tokens in
+      let legacy_path_tokens = path_argument_tokens legacy_tokens in
       let legacy_needs_syntax_sensitive_gate =
         List.exists
           (fun token -> token_has_unsafe_rewrite_syntax token || token.globbed)
           legacy_path_tokens
       in
       if legacy_needs_syntax_sensitive_gate
-      then validate_token_stream legacy_tokens
+      then validate_path_argument_tokens legacy_tokens legacy_path_tokens
       else (
         match Masc_exec_bash_parser.Bash.parse_string cmd with
         | Masc_exec.Parsed.Parsed shell_ir ->

@@ -65,14 +65,25 @@ const activeView = computed<RuntimeView>(() => {
   return isRuntimeView(v) ? v : 'default'
 })
 
-const VIEW_CHIPS: Array<{ key: RuntimeView; label: string }> = [
+// Primary chips answer the keeper-facing question "can my tools run through
+// which cascade, and why did the routing decision come out this way?"
+// Default, providers (runtime health), and inspector (cascade decisions) are
+// the views an operator opens during normal use.
+const PRIMARY_VIEW_CHIPS: Array<{ key: RuntimeView; label: string }> = [
   { key: 'default', label: '전체' },
   { key: 'providers', label: '런타임' },
+  { key: 'inspector', label: '검사기' },
+]
+
+// Advanced chips are infra/billing telemetry and formal-verification views.
+// Useful for post-mortems and audits, not for daily keeper triage. They stay
+// reachable via the same chip strip below for now; a follow-up may move
+// cost/audit/heuristics/stress into a dedicated telemetry-panel surface.
+const ADVANCED_VIEW_CHIPS: Array<{ key: RuntimeView; label: string }> = [
   { key: 'cost', label: '비용 / 지연' },
   { key: 'audit', label: '감사' },
   { key: 'heuristics', label: '휴리스틱' },
   { key: 'stress', label: '스트레스' },
-  { key: 'inspector', label: '검사기' },
   { key: 'prometheus', label: '메트릭' },
   { key: 'verification', label: '형식검증' },
 ]
@@ -171,11 +182,24 @@ export function RuntimePanel() {
 
   return html`
     <div class="flex flex-col gap-4">
-      <${FilterChips}
-        chips=${VIEW_CHIPS}
-        value=${view}
-        onChange=${updateViewParam}
-      />
+      <div class="flex flex-col gap-2">
+        <${FilterChips}
+          chips=${PRIMARY_VIEW_CHIPS}
+          value=${view}
+          onChange=${updateViewParam}
+          aria-label="Primary runtime views"
+        />
+        <div class="flex items-center gap-2 text-2xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">
+          <span>고급 / 진단</span>
+          <span class="h-px flex-1 bg-[var(--color-border-divider)]" aria-hidden="true"></span>
+        </div>
+        <${FilterChips}
+          chips=${ADVANCED_VIEW_CHIPS}
+          value=${view}
+          onChange=${updateViewParam}
+          aria-label="Advanced runtime views"
+        />
+      </div>
       <div class="grid gap-4">
         ${view === 'providers'
           ? html`

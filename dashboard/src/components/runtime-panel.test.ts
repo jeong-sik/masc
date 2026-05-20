@@ -161,14 +161,19 @@ describe('RuntimePanel', () => {
     await flushUi()
 
     const chips = container.querySelectorAll('[data-testid="chip"]')
+    // Chips are split across two FilterChips strips (Primary then Advanced)
+    // with a divider between them. Total count and label set unchanged; the
+    // positional order now reflects the Primary[default, providers, inspector]
+    // → Advanced[cost, audit, heuristics, stress, prometheus, verification]
+    // layout.
     expect(chips.length).toBe(9)
     expect(chips[0]?.textContent).toBe('전체')
     expect(chips[1]?.textContent).toBe('런타임')
-    expect(chips[2]?.textContent).toBe('비용 / 지연')
-    expect(chips[3]?.textContent).toBe('감사')
-    expect(chips[4]?.textContent).toBe('휴리스틱')
-    expect(chips[5]?.textContent).toBe('스트레스')
-    expect(chips[6]?.textContent).toBe('검사기')
+    expect(chips[2]?.textContent).toBe('검사기')
+    expect(chips[3]?.textContent).toBe('비용 / 지연')
+    expect(chips[4]?.textContent).toBe('감사')
+    expect(chips[5]?.textContent).toBe('휴리스틱')
+    expect(chips[6]?.textContent).toBe('스트레스')
     expect(chips[7]?.textContent).toBe('메트릭')
     expect(chips[8]?.textContent).toBe('형식검증')
   })

@@ -16,6 +16,8 @@
  (wrapped false)
  (flags (:standard -w +4))
  (libraries
+  eio
   yojson
   agent_sdk
-  masc_core))
+  masc_core
+  masc_log))

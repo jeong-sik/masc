@@ -87,8 +87,17 @@ let parse_list parser field_name = function
               | Error msg, _ | _, Error msg -> Error msg)
             (Ok []) items
           |> Result.map List.rev
-      | _ -> Error ("Missing " ^ field_name))
-  | _ -> Error "Invalid response payload"
+      | Some other ->
+          Error
+            (Printf.sprintf
+               "Field %S has wrong type: expected JSON array, got %s"
+               field_name (Json_util.kind_name other))
+      | None -> Error ("Missing " ^ field_name))
+  | other ->
+      Error
+        (Printf.sprintf
+           "Invalid response payload: expected JSON object, got %s"
+           (Json_util.kind_name other))
 
 let tool_result_of_response response =
   match response_result response with

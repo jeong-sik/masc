@@ -1,14 +1,61 @@
 ---
 rfc: "0131"
 title: "Shell Command Gate facade — multi-caller IR-first validation"
-status: Draft
+status: Active
 created: 2026-05-19
-updated: 2026-05-19 (status note + §10 revised PR slicing added)
+updated: 2026-05-21
 author: vincent
 supersedes: []
 superseded_by: null
 related: ["0054", "0089", "0091", "0092", "0126"]
 implementation_prs: [16335,16340,16346,16433,16527,16532,16542]
+---
+
+## Progress audit (2026-05-21)
+
+Status promoted Draft → Active. The seven PRs already listed in
+`implementation_prs` map to §10 phases as follows; PR-3/PR-4 caller
+adoption (tool_code_write / keeper_shell_bash) and PR-6 legacy purge
+remain.
+
+| §10 Phase | Merged PR | Scope |
+|-----------|-----------|------|
+| PR-1a | #16335 | `Shell_command_gate` caller partition tag (facade scaffold) |
+| PR-1b | #16340 | reject nested pipelines |
+| PR-1c | #16346 | `?redirect_allowed` policy flag |
+| PR-2 prep | #16433 | `worker_dev_tools` pass-through `?caller` |
+| PR-2 | #16527 | `Keeper_shell_bash` caller adoption |
+| PR-3 | #16532 | shell_command_gate caller × verdict telemetry counter |
+| PR-5 | #16542 | per-caller authority knob + parallel emit |
+
+The §10 PR-3 / PR-4 / PR-6 plan slots are not yet matched 1-to-1:
+
+- §10 PR-3 (worker_dev_tools caller adoption) — landed in #16433 as
+  "PR-2 prep" rather than the spec-time PR-3.
+- §10 PR-4 (tool_code_write caller adoption) — **not landed**. Spec
+  expected parallel adoption alongside worker_dev_tools.
+- §10 PR-6 (legacy purge) — **not landed**. Prerequisite (§10 PR-5
+  stable 7+ days with zero incidents) is in-flight; #16542 merged
+  2026-05-19 so the soak window has not yet elapsed.
+
+### Pending work
+
+| Phase | Trigger |
+|-------|---------|
+| §10 PR-4 — `tool_code_write` caller adoption | parallel to PR-2 (already merged); blocking factor unclear from commit log |
+| §10 PR-6 — legacy purge | PR-5 (#16542) +7 days stable + zero incidents → earliest 2026-05-26 |
+
+### Related RFC
+
+- **RFC-0092** (Keeper shell-bash typed validation, Phase A advisor
+  done): RFC-0131 §4.5 composes via callback. RFC-0092 Phase B/C/D
+  still pending.
+- **RFC-0141** (TOML Field Resolution, Active 2026-05-21),
+  **RFC-0142** (cascade_error_classify decomp, Active 2026-05-21),
+  **RFC-0148** (Tool_error, Implemented), **RFC-0154**
+  (System_error_class, Implemented): closed-sum + typed-boundary
+  cohort.
+
 ---
 
 # RFC-0131 — Shell Command Gate facade

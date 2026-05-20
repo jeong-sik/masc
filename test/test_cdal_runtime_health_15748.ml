@@ -118,6 +118,13 @@ let member_int key json =
     Alcotest.failf "expected int field %s, got %s" key (Yojson.Safe.to_string other)
 ;;
 
+let member_bool key json =
+  match Yojson.Safe.Util.member key json with
+  | `Bool value -> value
+  | other ->
+    Alcotest.failf "expected bool field %s, got %s" key (Yojson.Safe.to_string other)
+;;
+
 let list_field key json =
   match Yojson.Safe.Util.member key json with
   | `List values -> values
@@ -310,6 +317,53 @@ let test_recent_incomplete_proof_store_is_in_flight () =
     (member_int "stale_incomplete_run_dirs" (nested "completeness" proof_store))
 ;;
 
+let test_proof_scan_limit_caps_recent_run_walk () =
+  with_temp_dir @@ fun dir ->
+  let base_dir = Filename.concat dir "cdal_verdicts" in
+  let proof_root = Filename.concat dir ".oas" in
+  let now = Time_compat.now () in
+  ignore
+    (write_ledger_row
+       ~base_dir
+       ~mtime:now
+       (`Assoc [ "_task_id", `String "task-15748"; "run_id", `String "run-task" ]));
+  for i = 0 to 29 do
+    make_proof_run
+      ~mtime:(now -. 100.0)
+      ~manifest:true
+      ~contract:true
+      proof_root
+      (Printf.sprintf "cdal-%013d-complete" (1000 + i))
+  done;
+  make_proof_run
+    ~mtime:(now -. 1000.0)
+    proof_root
+    "cdal-9999999999999-stale-incomplete";
+  let json =
+    H.snapshot_json
+      ~base_dir
+      ~proof_root
+      ~now
+      ~stale_age_seconds:600.0
+      ~recent_limit:20
+      ~proof_scan_limit:5
+      ~stale_incomplete_run_seconds:300.0
+      ()
+  in
+  Alcotest.(check string)
+    "writer_status"
+    "proof_store_incomplete"
+    (member_string "writer_status" json);
+  let completeness = nested "completeness" (nested "proof_store" json) in
+  Alcotest.(check int) "entries seen" 31 (member_int "run_dir_entries_seen" completeness);
+  Alcotest.(check bool) "scan truncated" true (member_bool "scan_truncated" completeness);
+  Alcotest.(check int) "run dirs scanned" 5 (member_int "run_dirs_scanned" completeness);
+  Alcotest.(check int)
+    "stale incomplete run count"
+    1
+    (member_int "stale_incomplete_run_dirs" completeness)
+;;
+
 let test_dormant_writer_status () =
   with_temp_dir @@ fun dir ->
   let base_dir = Filename.concat dir "cdal_verdicts" in
@@ -407,6 +461,10 @@ let () =
             "recent incomplete proof store is in flight"
             `Quick
             test_recent_incomplete_proof_store_is_in_flight
+        ; Alcotest.test_case
+            "proof scan limit caps recent run walk"
+            `Quick
+            test_proof_scan_limit_caps_recent_run_walk
         ; Alcotest.test_case "dormant" `Quick test_dormant_writer_status
         ; Alcotest.test_case
             "alternate proof stores ignore home .oas"

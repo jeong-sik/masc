@@ -105,6 +105,43 @@ let take n xs =
   loop n [] xs
 ;;
 
+let all_digits value =
+  let rec loop i =
+    i = String.length value
+    || match value.[i] with
+       | '0' .. '9' -> loop (i + 1)
+       | _ -> false
+  in
+  not (String.equal value "") && loop 0
+;;
+
+let cdal_run_id_timestamp run_id =
+  match String.split_on_char '-' run_id with
+  | "cdal" :: ts :: _ when all_digits ts -> Some ts
+  | _ -> None
+;;
+
+let compare_numeric_string left right =
+  match Int.compare (String.length left) (String.length right) with
+  | 0 -> String.compare left right
+  | cmp -> cmp
+;;
+
+let compare_run_id_recent_first left right =
+  match cdal_run_id_timestamp left, cdal_run_id_timestamp right with
+  | Some left_ts, Some right_ts ->
+      let cmp = compare_numeric_string right_ts left_ts in
+      if cmp = 0 then String.compare left right else cmp
+  | Some _, None -> -1
+  | None, Some _ -> 1
+  | None, None -> String.compare left right
+;;
+
+let bounded_recent_run_ids ~scan_limit run_ids =
+  let scan_limit = max 0 scan_limit in
+  run_ids |> List.sort compare_run_id_recent_first |> take scan_limit
+;;
+
 let proof_root_default () = Proof_store.default_config.root
 
 let proof_root_candidates configured_root =
@@ -127,11 +164,14 @@ let proof_completeness_json
       ?(stale_incomplete_grace_seconds = 300.0)
       config
   =
+  let scan_limit = max 0 scan_limit in
   let proofs_dir = Proof_store.proofs_dir config in
   if not (is_dir proofs_dir)
   then
     `Assoc
       [ "scan_limit", `Int scan_limit
+      ; "run_dir_entries_seen", `Int 0
+      ; "scan_truncated", `Bool false
       ; "run_dirs_scanned", `Int 0
       ; "completed_run_dirs", `Int 0
       ; "incomplete_run_dirs", `Int 0
@@ -146,8 +186,11 @@ let proof_completeness_json
       try Sys.readdir proofs_dir |> Array.to_list with
       | Sys_error _ -> []
     in
+    let run_dir_entries_seen = List.length run_ids in
+    let scan_truncated = run_dir_entries_seen > scan_limit in
+    let bounded_run_ids = bounded_recent_run_ids ~scan_limit run_ids in
     let run_infos =
-      run_ids
+      bounded_run_ids
       |> List.filter (fun run_id -> is_dir (proof_run_dir config ~run_id))
       |> List.filter_map (fun run_id ->
         match run_latest_mtime config ~run_id with
@@ -181,6 +224,8 @@ let proof_completeness_json
       run_infos;
     `Assoc
       [ "scan_limit", `Int scan_limit
+      ; "run_dir_entries_seen", `Int run_dir_entries_seen
+      ; "scan_truncated", `Bool scan_truncated
       ; "run_dirs_scanned", `Int (List.length run_infos)
       ; "completed_run_dirs", `Int !completed
       ; "incomplete_run_dirs", `Int !incomplete

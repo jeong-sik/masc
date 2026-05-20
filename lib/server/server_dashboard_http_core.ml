@@ -1374,17 +1374,20 @@ let is_dashboard_cache_timeout_json = function
   | _ -> false
 ;;
 
-type shell_projection_timing =
+module Shell_projection_trace = Server_dashboard_shell_projection_trace
+
+type shell_projection_timing = Shell_projection_trace.shell_projection_timing =
   { projection_label : string
   ; projection_ms : int
   }
 
 type shell_projection_trace_status =
+  Shell_projection_trace.shell_projection_trace_status =
   | Shell_trace_running
   | Shell_trace_finished
   | Shell_trace_failed
 
-type shell_projection_trace =
+type shell_projection_trace = Shell_projection_trace.shell_projection_trace =
   { trace_light : bool
   ; trace_started_at : float
   ; mutable trace_status : shell_projection_trace_status
@@ -1394,6 +1397,7 @@ type shell_projection_trace =
   }
 
 type shell_projection_trace_snapshot =
+  Shell_projection_trace.shell_projection_trace_snapshot =
   { snapshot_status : shell_projection_trace_status
   ; snapshot_light : bool
   ; snapshot_elapsed_ms : int
@@ -1402,133 +1406,17 @@ type shell_projection_trace_snapshot =
   ; snapshot_finished_at : float option
   }
 
-let shell_projection_trace_mu = Stdlib.Mutex.create ()
-
-let shell_projection_traces : (string, shell_projection_trace) Hashtbl.t =
-  Hashtbl.create 16
-;;
-
-let shell_trace_status_string = function
-  | Shell_trace_running -> "running"
-  | Shell_trace_finished -> "finished"
-  | Shell_trace_failed -> "failed"
-;;
-
-let shell_projection_timing_top timings =
-  timings
-  |> List.sort (fun left right -> compare right.projection_ms left.projection_ms)
-  |> List.filteri (fun idx _ -> idx < 5)
-;;
-
-let shell_projection_timing_json timing =
-  `Assoc [ "label", `String timing.projection_label; "ms", `Int timing.projection_ms ]
-;;
-
-let shell_projection_timing_log timings =
-  match shell_projection_timing_top timings with
-  | [] -> "none"
-  | top ->
-    top
-    |> List.map (fun timing ->
-      Printf.sprintf "%s=%dms" timing.projection_label timing.projection_ms)
-    |> String.concat ","
-;;
-
-let shell_projection_trace_start ~cache_key ~light =
-  let trace =
-    { trace_light = light
-    ; trace_started_at = Unix.gettimeofday ()
-    ; trace_status = Shell_trace_running
-    ; trace_active = []
-    ; trace_completed = []
-    ; trace_finished_at = None
-    }
-  in
-  Stdlib.Mutex.protect shell_projection_trace_mu (fun () ->
-    Hashtbl.replace shell_projection_traces cache_key trace);
-  trace
-;;
-
-let shell_projection_trace_start_projection trace label =
-  Stdlib.Mutex.protect shell_projection_trace_mu (fun () ->
-    if not (List.mem label trace.trace_active)
-    then trace.trace_active <- label :: trace.trace_active)
-;;
-
-let shell_projection_trace_finish_projection trace label elapsed_ms =
-  Stdlib.Mutex.protect shell_projection_trace_mu (fun () ->
-    trace.trace_active
-    <- List.filter (fun active -> not (String.equal active label)) trace.trace_active;
-    trace.trace_completed
-    <- { projection_label = label; projection_ms = elapsed_ms }
-       :: List.filter
-            (fun timing -> not (String.equal timing.projection_label label))
-            trace.trace_completed)
-;;
-
-let shell_projection_trace_finish ?(clear_active = true) trace status =
-  Stdlib.Mutex.protect shell_projection_trace_mu (fun () ->
-    trace.trace_status <- status;
-    trace.trace_finished_at <- Some (Unix.gettimeofday ());
-    if clear_active then trace.trace_active <- [])
-;;
-
-let shell_projection_trace_snapshot cache_key =
-  Stdlib.Mutex.protect shell_projection_trace_mu (fun () ->
-    match Hashtbl.find_opt shell_projection_traces cache_key with
-    | None -> None
-    | Some trace ->
-      let now_ts = Unix.gettimeofday () in
-      let finished_at = trace.trace_finished_at in
-      let elapsed_until = Option.value finished_at ~default:now_ts in
-      Some
-        { snapshot_status = trace.trace_status
-        ; snapshot_light = trace.trace_light
-        ; snapshot_elapsed_ms =
-            int_of_float ((elapsed_until -. trace.trace_started_at) *. 1000.0)
-        ; snapshot_active = trace.trace_active
-        ; snapshot_completed = trace.trace_completed
-        ; snapshot_finished_at = finished_at
-        })
-;;
-
-let shell_projection_trace_diagnostics cache_key =
-  match shell_projection_trace_snapshot cache_key with
-  | None ->
-    [ "projection_timing_status", `String "none"
-    ; "projection_timing_active", `List []
-    ; "projection_timing_top", `List []
-    ]
-  | Some snapshot ->
-    [ ( "projection_timing_status"
-      , `String (shell_trace_status_string snapshot.snapshot_status) )
-    ; "projection_timing_light", `Bool snapshot.snapshot_light
-    ; "projection_timing_elapsed_ms", `Int snapshot.snapshot_elapsed_ms
-    ; ( "projection_timing_active"
-      , `List (List.rev snapshot.snapshot_active |> List.map (fun label -> `String label))
-      )
-    ; ( "projection_timing_top"
-      , `List
-          (shell_projection_timing_top snapshot.snapshot_completed
-           |> List.map shell_projection_timing_json) )
-    ; ( "projection_timing_finished_at"
-      , match snapshot.snapshot_finished_at with
-        | Some ts -> `Float ts
-        | None -> `Null )
-    ]
-;;
-
-let shell_projection_trace_log cache_key =
-  match shell_projection_trace_snapshot cache_key with
-  | None -> "none", "none", "none", 0
-  | Some snapshot ->
-    ( shell_trace_status_string snapshot.snapshot_status
-    , (match List.rev snapshot.snapshot_active with
-       | [] -> "none"
-       | active -> String.concat "," active)
-    , shell_projection_timing_log snapshot.snapshot_completed
-    , snapshot.snapshot_elapsed_ms )
-;;
+let shell_trace_status_string = Shell_projection_trace.status_string
+let shell_projection_timing_top = Shell_projection_trace.timing_top
+let shell_projection_timing_json = Shell_projection_trace.timing_json
+let shell_projection_timing_log = Shell_projection_trace.timing_log
+let shell_projection_trace_start = Shell_projection_trace.start
+let shell_projection_trace_start_projection = Shell_projection_trace.start_projection
+let shell_projection_trace_finish_projection = Shell_projection_trace.finish_projection
+let shell_projection_trace_finish = Shell_projection_trace.finish
+let shell_projection_trace_snapshot = Shell_projection_trace.snapshot
+let shell_projection_trace_diagnostics = Shell_projection_trace.diagnostics
+let shell_projection_trace_log = Shell_projection_trace.log
 
 (* Closed mapping from internal projection labels to Server_timing phases.
    Total over the label set actually emitted by [dashboard_shell_payload_json];

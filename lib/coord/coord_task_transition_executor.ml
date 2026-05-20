@@ -1,4 +1,9 @@
-(** Build the persisted task/backlog shape for task lifecycle transitions. *)
+(** Extract task lifecycle transition executor
+    
+    This module was extracted from [Coord_task] as part of #16078.
+    It owns the pure backlog-shape construction for task lifecycle
+    transitions: normalizing tasks before status changes, computing
+    release counters, and building the persisted backlog update. *)
 
 open Masc_domain
 

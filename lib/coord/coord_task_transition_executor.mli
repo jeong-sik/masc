@@ -1,8 +1,12 @@
-(** Build the persisted task/backlog shape for task lifecycle transitions.
+(** Extract task lifecycle transition executor
 
-    This module owns the mutation plan that sits between
-    {!Coord_task_lifecycle.decide} and the storage/event side effects in
-    {!Coord_task.transition_task_r}. *)
+    This module was extracted from [Coord_task] as part of #16078.
+    It owns the pure backlog-shape construction for task lifecycle
+    transitions: normalizing tasks before status changes, computing
+    release counters, and building the persisted backlog update.
+
+    It sits between {!Coord_task_lifecycle.decide} and the
+    storage/event side effects in {!Coord_task.transition_task_r}. *)
 
 type transition_backlog_update =
   { backlog : Masc_domain.backlog

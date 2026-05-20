@@ -22,6 +22,7 @@
 type submit_request_spec =
   { criteria : Verification.criterion list
   ; output : Yojson.Safe.t
+  ; cdal_verdict : Cdal_types.contract_verdict option
   ; request_kind : string
   ; request_summary : string
   ; next_action : string
@@ -48,6 +49,32 @@ let deliverable_claims_completion ~task_id deliverable =
         normalized
       || String.starts_with ~prefix:"completed" normalized)
 
+let latest_cdal_verdict ~task_id =
+  Cdal_verdict_gate.lookup_latest_verdict
+    ~warn_on_missing:false
+    ~task_id
+    ()
+
+let cdal_verdict_payload ~task_id = function
+  | None -> `Null
+  | Some verdict ->
+    (match Cdal_types.contract_verdict_to_json verdict with
+     | `Assoc fields -> `Assoc (("task_id", `String task_id) :: fields)
+     | other -> other)
+
+let cdal_verdict_payload_of_request_output = function
+  | `Assoc fields -> List.assoc_opt "cdal_verdict" fields
+  | _ -> None
+
+let persisted_cdal_verdict_payload ~base_path ~task_id ~verification_id
+    ~fallback =
+  match Verification.load_request base_path verification_id with
+  | Ok request when String.equal request.Verification.task_id task_id ->
+    (match cdal_verdict_payload_of_request_output request.output with
+     | Some payload -> payload
+     | None -> fallback)
+  | Ok _ | Error _ -> fallback
+
 let submit_request_spec ~(config : Coord.config) ~(task : Masc_domain.task)
     ~assignee ~evidence_refs =
   let request_kind, request_summary, next_action, board_type, board_title, board_content =
@@ -71,6 +98,8 @@ let submit_request_spec ~(config : Coord.config) ~(task : Masc_domain.task)
           Printf.sprintf "Verification requested for task %s (%s) by %s"
             task.id task.title assignee )
   in
+  let cdal_verdict = latest_cdal_verdict ~task_id:task.id in
+  let cdal_verdict_json = cdal_verdict_payload ~task_id:task.id cdal_verdict in
   let criteria = List.map (fun s -> Verification.Custom s)
     (match task.contract with
      | Some c -> c.completion_contract
@@ -82,10 +111,12 @@ let submit_request_spec ~(config : Coord.config) ~(task : Masc_domain.task)
       ("request_kind", `String request_kind);
       ("request_summary", `String request_summary);
       ("next_action", `String next_action);
+      ("cdal_verdict", cdal_verdict_json);
     ]
   in
   { criteria
   ; output
+  ; cdal_verdict
   ; request_kind
   ; request_summary
   ; next_action
@@ -135,6 +166,13 @@ let create_submit_request ~(config : Coord.config)
 let notify_submit_for_verification ~(config : Coord.config)
     ~(task : Masc_domain.task) ~assignee ~verification_id ~evidence_refs =
   let spec = submit_request_spec ~config ~task ~assignee ~evidence_refs in
+  let cdal_verdict_json =
+    persisted_cdal_verdict_payload
+      ~base_path:config.Coord.base_path
+      ~task_id:task.id
+      ~verification_id
+      ~fallback:(cdal_verdict_payload ~task_id:task.id spec.cdal_verdict)
+  in
   let meta_json = `Assoc [
     ("type", `String spec.board_type);
     ("task_id", `String task.id);
@@ -144,6 +182,7 @@ let notify_submit_for_verification ~(config : Coord.config)
     ("criteria", `List (List.map Verification.criterion_to_yojson spec.criteria));
     ("request_kind", `String spec.request_kind);
     ("next_action", `String spec.next_action);
+    ("cdal_verdict", cdal_verdict_json);
   ] in
   let () =
     match Board_dispatch.create_post
@@ -168,6 +207,7 @@ let notify_submit_for_verification ~(config : Coord.config)
     ("verification_id", `String verification_id);
     ("worker", `String assignee);
     ("evidence_refs", `List (List.map (fun s -> `String s) evidence_refs));
+    ("cdal_verdict", cdal_verdict_json);
     ("timestamp", `Float (Time_compat.now ()));
   ]);
   ()

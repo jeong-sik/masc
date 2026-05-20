@@ -2266,6 +2266,9 @@ let test_namespace_truth_adaptive_timeout_contracts () =
   check bool "shell fiber uses adaptive timeout" true
     (file_contains_pattern "lib/server/server_dashboard_http_namespace_truth.ml"
        "shell_timeout_s");
+  check bool "async shell refresh timeout waits beyond shell render timeout" true
+    (file_contains_pattern "lib/server/server_dashboard_http_namespace_truth.ml"
+       "Env_config_runtime.Dashboard.shell_timeout_sec\n  +. namespace_truth_cold_safety_margin_s");
   check bool "namespace-truth warm timeout is a named constant" true
     (file_contains_pattern "lib/server/server_dashboard_http_namespace_truth.ml"
        "let warm_timeout_s");

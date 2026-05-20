@@ -1009,14 +1009,21 @@ let add_comment_with_status
                       store.posts
                       post_key
                       { post with reply_count = post.reply_count + 1; updated_at = now };
+                    mark_dirty_post store post_key;
+                    mark_dirty_comment store (Comment_id.to_string comment.id);
                     record_comment_timestamp ~author:author_str ~now;
                     invalidate_post_caches store;
                     invalidate_comment_caches store;
-                    Ok (`Fresh comment)))))
+                    Ok (`Fresh (comment, posts_jsonl_unlocked store))))))
             in
             match board_result with
-            | Ok (`Fresh comment) ->
-              with_persist_lock store (fun () -> append_comment comment);
+            | Ok (`Fresh (comment, posts_jsonl)) ->
+              with_persist_lock store (fun () ->
+                append_comment comment;
+                save_posts_jsonl posts_jsonl);
+              with_lock store (fun () ->
+                mark_dirty_post store (Post_id.to_string comment.post_id);
+                mark_dirty_comment store (Comment_id.to_string comment.id));
               Ok (comment, `Fresh)
             | Ok (`Dedup_hit existing) -> Ok (existing, `Dedup)
             | Error _ as e -> e)))

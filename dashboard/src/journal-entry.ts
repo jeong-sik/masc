@@ -22,6 +22,11 @@ export function normalizeJournalSeverity(value: string | null | undefined): Jour
 }
 
 export function normalizeJournalSource(value: string | null | undefined): JournalSource {
+  // Anti-pattern §2 escape: the prior default arm silently coerced
+  // unrecognized values to `'sse'`, classifying malformed wire data as a
+  // normal SSE event. Mirror `normalizeJournalSeverity`'s explicit
+  // `'unknown'` variant so downstream filters/UI can tell when a journal
+  // record arrived with a source we cannot parse.
   switch ((value ?? '').trim().toLowerCase()) {
     case 'structured':
       return 'structured'
@@ -29,8 +34,10 @@ export function normalizeJournalSource(value: string | null | undefined): Journa
       return 'legacy_stderr'
     case 'legacy_traceln':
       return 'legacy_traceln'
-    default:
+    case 'sse':
       return 'sse'
+    default:
+      return 'unknown'
   }
 }
 

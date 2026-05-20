@@ -95,8 +95,16 @@ let flatten_ir : SI.t -> flatten_result = function
             | SI.Simple s -> s
             | SI.Pipeline _ ->
               (* Unreachable: nested check above already excluded
-                 pipeline-of-pipeline shapes. *)
-              assert false)
+                 pipeline-of-pipeline shapes. [invalid_arg] (not
+                 [assert false]) per the convention in
+                 keeper_turn_fsm.ml:284 — operators reading a crash
+                 dump see *which* caller invariant was violated
+                 without cross-referencing line numbers. *)
+              invalid_arg
+                "Shell_command_gate.flatten_ir: caller invariant — \
+                 nested-pipeline pre-check above already excluded \
+                 SI.Pipeline from this map but SI.Pipeline reached \
+                 the second pass")
           stages
       in
       Flat_pipeline simples

@@ -94,7 +94,7 @@ function TimeAxis({ windowStart, windowEnd }: { windowStart: number; windowEnd: 
   const tickCount = 6
   const ticks = Array.from({ length: tickCount + 1 }, (_, i) => {
     const t = windowStart + (span * i) / tickCount
-    return { t, pct: (i / tickCount) * 100 }
+    return { t, index: i }
   })
 
   const formatTick = (t: number) => {
@@ -106,11 +106,15 @@ function TimeAxis({ windowStart, windowEnd }: { windowStart: number; windowEnd: 
   }
 
   return html`
-    <div class="relative h-6 border-b border-card-border text-3xs text-text-dim font-mono">
+    <div class="grid grid-cols-7 gap-1 border-b border-card-border px-1 pb-1 text-3xs text-text-dim font-mono">
       ${ticks.map(tick => html`
         <span
-          class="absolute top-0 -translate-x-1/2 whitespace-nowrap"
-          style="left: ${tick.pct}%;"
+          class="min-w-0 truncate ${
+            tick.index === 0 ? 'text-left'
+              : tick.index === tickCount ? 'text-right'
+              : 'text-center'
+          }"
+          title=${formatTick(tick.t)}
         >
           ${formatTick(tick.t)}
         </span>
@@ -124,7 +128,7 @@ function TimeAxis({ windowStart, windowEnd }: { windowStart: number; windowEnd: 
 function RangeSelector() {
   const current = currentTimeRangeFilter() ?? DEFAULT_RANGE
   return html`
-    <div class="inline-flex items-center gap-0.5 rounded-[var(--r-1)] border border-card-border p-0.5 text-2xs">
+    <div class="flex flex-wrap items-center gap-0.5 rounded-[var(--r-1)] border border-card-border p-0.5 text-2xs">
       ${TIME_RANGE_PRESETS.map((preset: TimeRangePreset) => html`
         <button
           type="button"
@@ -151,7 +155,7 @@ function ViewSelector({
   onSelect: (view: ObservatoryView) => void
 }) {
   return html`
-    <div class="inline-flex items-center gap-0.5 rounded-[var(--r-1)] border border-card-border p-0.5 text-2xs">
+    <div class="flex flex-wrap items-center gap-0.5 rounded-[var(--r-1)] border border-card-border p-0.5 text-2xs">
       ${([
         { key: 'timeline', label: 'Timeline' },
         { key: 'activity', label: 'Activity Graph' },
@@ -278,11 +282,10 @@ export function Observatory() {
   }, [activeView, currentKeeperFilter(), currentTimeRangeFilter(), refreshTick.value, observatoryRefreshVersion.value])
 
   const data = state.value
-  const hasTrackData = data.events.length > 0 || data.hourlyTrend.length > 0
 
   return html`
     <div class="flex flex-col gap-5">
-      <div class="flex items-center justify-between">
+      <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div class="flex flex-col gap-0.5">
           <h3 class="text-sm font-semibold text-text-strong">Evidence Timeline</h3>
           <p class="text-2xs text-text-dim">
@@ -292,6 +295,7 @@ export function Observatory() {
                   · ${timeRangeLabel(currentTimeRangeFilter() ?? DEFAULT_RANGE)}
                   · ${data.totalMatchingEvents} events
                   ${data.truncatedEvents ? ` · showing ${data.events.length}` : ''}
+                  ${data.loading ? ' · loading' : ''}
                   ${liveMode.value ? ' · 30s 자동 갱신' : ''}
                 `
               : activeView === 'activity'
@@ -299,7 +303,7 @@ export function Observatory() {
                 : 'Live stream'}
           </p>
         </div>
-        <div class="flex items-center gap-2">
+        <div class="flex flex-wrap items-center gap-2">
           <${ViewSelector}
             current=${activeView}
             onSelect=${updateObservatoryView}
@@ -349,8 +353,6 @@ export function Observatory() {
               <${LazyObservatoryActivityPanels} />
             <//>
           `
-        : !hasTrackData && data.loading
-        ? html`<${LoadingState}>관찰소 데이터 불러오는 중...<//>`
         : html`
             <div class="flex flex-col gap-2 rounded-[var(--r-1)] border border-card-border bg-card/30 p-4">
               <${TimeAxis} windowStart=${data.windowStart} windowEnd=${data.windowEnd} />

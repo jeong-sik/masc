@@ -1,14 +1,47 @@
 ---
 rfc: "0132"
 title: "Redaction SSOT — `runtime` boundary-label private type"
-status: Draft
+status: Implemented
 created: 2026-05-19
-updated: 2026-05-20
+updated: 2026-05-21
 author: claude-cron-loop (vincent)
 supersedes: []
 superseded_by: null
 related: ["0085", "0088", "0089", "0126", "0131"]
-implementation_prs: [16531,16536,16537]
+implementation_prs: [16531, 16536, 16537]
+---
+
+## Implementation summary (2026-05-21)
+
+All three §4 phases shipped:
+
+| Phase | PR | Scope | Merged |
+|-------|-----|------|--------|
+| PR-1 | #16531 | `lib/types_boundary/boundary_redaction.{ml,mli}` SSOT module introduction (< 100 LoC, no caller change) | 2026-05-19 |
+| PR-2 | #16536 | Codemod across ~23 sites — Group A inline literals + Group B local constants → `Boundary_redaction.to_string` | 2026-05-19 |
+| PR-3 | #16537 | `scripts/lint/no-runtime-literal-outside-boundary-redaction.sh` + Fundamental Check workflow job — compile-time inline-literal rejection | 2026-05-19 |
+
+§5 acceptance conditions all hold:
+
+- ✅ Compiler-enforced SSOT — new emit sites without `Boundary_redaction`
+  fail the lint at CI time (PR-3 wired into
+  `.github/workflows/fundamental-check.yml` as
+  `no-runtime-literal-outside-boundary-redaction`).
+- ✅ 23-site changeset landed under PR-2 without invoking the optional
+  PR-2a/2b split.
+- ✅ Misclassification risk addressed in PR-2 body per-site table
+  (reviewed at merge time).
+
+### Related RFC
+
+- **RFC-0089** (String Classifier to Typed Variant, Implemented):
+  same parse-don't-validate discipline applied to a different
+  string surface (substring matcher vs literal-as-label).
+- **RFC-0126** (Silent fallback discipline, Active): the lint stack
+  pattern that PR-3 followed.
+- **RFC-0131** (Shell Command Gate facade, Active): adjacent typed-
+  surface RFC from the same audit week.
+
 ---
 
 # RFC-0132 — Redaction SSOT for `"runtime"` boundary label

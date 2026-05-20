@@ -147,7 +147,16 @@ let evict_expired_entries t now =
     !evicted_clients)
   |> List.iter (fun c ->
        try Piaf.Client.shutdown c
-       with _ -> () (* shutdown is best-effort; pool already dropped the ref *))
+       with
+       | Eio.Cancel.Cancelled _ as e -> raise e
+       | _ -> ()
+       (* Shutdown is best-effort; the pool already dropped the ref so
+          a Piaf-level error here cannot leak a client.  But
+          [Eio.Cancel.Cancelled] must propagate so the enclosing fiber
+          honors structured-concurrency cancellation (RFC-0106) — the
+          previous bare [with _ -> ()] silently swallowed Cancelled,
+          letting a dying fiber finish iterating clients instead of
+          unwinding promptly. *))
 
 let start_eviction_fiber t =
   Eio.Fiber.fork ~sw:t.sw (fun () ->
@@ -242,7 +251,15 @@ let count_idle t =
 let release t key client ~close_only =
   let now =
     try Eio.Time.now (Eio.Stdenv.clock t.env)
-    with _ -> 0.0  (* if clock is gone we're tearing down anyway *)
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | _ -> 0.0
+    (* If the clock effect raises a non-Cancel exception we are in a
+       teardown/shutdown shape and 0.0 is a safe fallback — the only
+       use of [now] below is for the [last_used] field on a parked
+       entry which will get evicted on the next tick.  But Cancelled
+       must propagate per RFC-0106 so the surrounding fiber unwinds
+       instead of parking a client during a structured cancellation. *)
   in
   let should_park =
     not close_only

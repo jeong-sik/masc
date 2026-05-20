@@ -163,6 +163,10 @@ val make_health_json :
     [running_keeper_fiber_count] / [healthy_running_keeper_fiber_count] from
     [failing_keeper_fiber_count] and [executable_keeper_fiber_count] because
     the FSM intentionally allows [Failing] keepers to finish or attempt turns.
+    The matching [*_names] fields expose the named keepers behind each count,
+    and [blocked_keeper_names] / [reaction_capacity_shortfall_names] name the
+    current autoboot-enabled keepers not contributing to healthy running
+    capacity so operators do not have to correlate system logs by hand.
     It reports [blocked] when autoboot-enabled keepers exist but no executable
     fiber remains, and [degraded] when executable fibers remain but healthy
     running capacity is zero, below the safety margin, or below

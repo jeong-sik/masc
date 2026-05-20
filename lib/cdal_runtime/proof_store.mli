@@ -44,6 +44,11 @@ val append_tool_trace
 (** Write a raw evidence artifact. *)
 val write_evidence : config -> run_id:string -> ref_id:string -> Yojson.Safe.t -> unit
 
+(** Recent proof-store write/init errors captured for runtime health.
+    The legacy write APIs intentionally return [unit], so this exposes
+    swallowed filesystem failures without changing every caller contract. *)
+val recent_write_errors : unit -> string list
+
 (** Construct a [proof-store://] artifact reference. *)
 val make_ref : run_id:string -> subpath:string -> Cdal_proof.artifact_ref
 

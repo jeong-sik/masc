@@ -179,6 +179,9 @@ let proof_completeness_json
       ; "missing_manifest_run_dirs", `Int 0
       ; "missing_contract_run_dirs", `Int 0
       ; "stale_incomplete_grace_seconds", `Float stale_incomplete_grace_seconds
+      ; "sample_incomplete_run_ids", `List []
+      ; "sample_missing_manifest_run_ids", `List []
+      ; "sample_missing_contract_run_ids", `List []
       ; "sample_stale_incomplete_run_ids", `List []
       ]
   else (
@@ -205,7 +208,13 @@ let proof_completeness_json
     let stale_incomplete = ref 0 in
     let missing_manifest = ref 0 in
     let missing_contract = ref 0 in
+    let incomplete_samples = ref [] in
+    let missing_manifest_samples = ref [] in
+    let missing_contract_samples = ref [] in
     let stale_samples = ref [] in
+    let add_sample ref_ run_id =
+      if List.length !ref_ < 5 then ref_ := run_id :: !ref_
+    in
     List.iter
       (fun (run_id, mtime) ->
          let has_manifest = file_exists (Proof_store.manifest_path config ~run_id) in
@@ -214,13 +223,20 @@ let proof_completeness_json
          then incr completed
          else (
            incr incomplete;
-           if not has_manifest then incr missing_manifest;
-           if not has_contract then incr missing_contract;
+           add_sample incomplete_samples run_id;
+           if not has_manifest
+           then (
+             incr missing_manifest;
+             add_sample missing_manifest_samples run_id);
+           if not has_contract
+           then (
+             incr missing_contract;
+             add_sample missing_contract_samples run_id);
            let run_age_seconds = max 0.0 (now -. mtime) in
            if run_age_seconds > stale_incomplete_grace_seconds
            then (
              incr stale_incomplete;
-             if List.length !stale_samples < 5 then stale_samples := run_id :: !stale_samples)))
+             add_sample stale_samples run_id)))
       run_infos;
     `Assoc
       [ "scan_limit", `Int scan_limit
@@ -233,6 +249,12 @@ let proof_completeness_json
       ; "missing_manifest_run_dirs", `Int !missing_manifest
       ; "missing_contract_run_dirs", `Int !missing_contract
       ; "stale_incomplete_grace_seconds", `Float stale_incomplete_grace_seconds
+      ; ( "sample_incomplete_run_ids"
+        , `List (List.rev_map (fun run_id -> `String run_id) !incomplete_samples) )
+      ; ( "sample_missing_manifest_run_ids"
+        , `List (List.rev_map (fun run_id -> `String run_id) !missing_manifest_samples) )
+      ; ( "sample_missing_contract_run_ids"
+        , `List (List.rev_map (fun run_id -> `String run_id) !missing_contract_samples) )
       ; ( "sample_stale_incomplete_run_ids"
         , `List (List.rev_map (fun run_id -> `String run_id) !stale_samples) )
       ])
@@ -276,6 +298,7 @@ let proof_store_root_json
     then "stale_incomplete_runs"
     else status_of_latest ~stale_age_seconds ~exists ~age_seconds
   in
+  let recent_write_errors = Proof_store.recent_write_errors () in
   `Assoc
     [ "root", `String root
     ; "proofs_dir", `String proofs_dir
@@ -285,6 +308,9 @@ let proof_store_root_json
     ; "age_seconds", float_opt_to_json age_seconds
     ; "status", `String status
     ; "completeness", completeness
+    ; ( "recent_write_errors"
+      , `List (List.map (fun message -> `String message) recent_write_errors) )
+    ; "recent_write_error_count", `Int (List.length recent_write_errors)
     ]
 ;;
 

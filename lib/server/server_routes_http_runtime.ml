@@ -550,6 +550,9 @@ type keeper_phase_counts =
   { running : int
   ; failing : int
   ; executable : int
+  ; running_names : string list
+  ; failing_names : string list
+  ; executable_names : string list
   }
 
 let keeper_phase_counts ?base_path () =
@@ -560,11 +563,26 @@ let keeper_phase_counts ?base_path () =
             if Keeper_state_machine.can_execute_turn entry.phase then acc.executable + 1
             else acc.executable
           in
+          let executable_names =
+            if Keeper_state_machine.can_execute_turn entry.phase
+            then entry.name :: acc.executable_names
+            else acc.executable_names
+          in
           match entry.phase with
           | Keeper_state_machine.Running ->
-            { acc with running = acc.running + 1; executable }
+            { acc with
+              running = acc.running + 1
+            ; executable
+            ; running_names = entry.name :: acc.running_names
+            ; executable_names
+            }
           | Keeper_state_machine.Failing ->
-            { acc with failing = acc.failing + 1; executable }
+            { acc with
+              failing = acc.failing + 1
+            ; executable
+            ; failing_names = entry.name :: acc.failing_names
+            ; executable_names
+            }
           | Keeper_state_machine.Offline
           | Keeper_state_machine.Overflowed
           | Keeper_state_machine.Compacting
@@ -575,8 +593,20 @@ let keeper_phase_counts ?base_path () =
           | Keeper_state_machine.Crashed
           | Keeper_state_machine.Restarting
           | Keeper_state_machine.Dead
-          | Keeper_state_machine.Zombie -> { acc with executable })
-       { running = 0; failing = 0; executable = 0 }
+          | Keeper_state_machine.Zombie -> { acc with executable; executable_names })
+       { running = 0
+       ; failing = 0
+       ; executable = 0
+       ; running_names = []
+       ; failing_names = []
+       ; executable_names = []
+       }
+  |> fun counts ->
+  { counts with
+    running_names = sorted_unique_strings counts.running_names
+  ; failing_names = sorted_unique_strings counts.failing_names
+  ; executable_names = sorted_unique_strings counts.executable_names
+  }
 
 let keeper_fleet_safety_health_json
     ?bootable_names:bootable_names_override
@@ -652,6 +682,18 @@ let keeper_fleet_safety_health_json
       reaction_capacity_shortfall_count
     else 0
   in
+  let blocked_names =
+    let rec take_names remaining acc = function
+      | [] -> List.rev acc
+      | _ when remaining <= 0 -> List.rev acc
+      | name :: rest -> take_names (remaining - 1) (name :: acc) rest
+    in
+    let running = phase_counts.running_names in
+    autoboot_scan.autoboot_names
+    |> List.filter (fun name -> not (List.mem name running))
+    |> sorted_unique_strings
+    |> take_names blocked_count []
+  in
   let blocker =
     if no_executable_keeper_fibers then Some "no_executable_keeper_fibers"
     else if no_running_fibers then Some "no_healthy_running_keeper_fibers"
@@ -680,8 +722,20 @@ let keeper_fleet_safety_health_json
     ; "healthy_running_keeper_fiber_count", `Int phase_counts.running
     ; "failing_keeper_fiber_count", `Int phase_counts.failing
     ; "executable_keeper_fiber_count", `Int phase_counts.executable
+    ; ( "running_keeper_fiber_names"
+      , `List (List.map (fun name -> `String name) phase_counts.running_names) )
+    ; ( "healthy_running_keeper_fiber_names"
+      , `List (List.map (fun name -> `String name) phase_counts.running_names) )
+    ; ( "failing_keeper_fiber_names"
+      , `List (List.map (fun name -> `String name) phase_counts.failing_names) )
+    ; ( "executable_keeper_fiber_names"
+      , `List (List.map (fun name -> `String name) phase_counts.executable_names) )
     ; "effective_reaction_capacity_count", `Int phase_counts.running
     ; "executable_reaction_capacity_count", `Int phase_counts.executable
+    ; ( "effective_reaction_capacity_names"
+      , `List (List.map (fun name -> `String name) phase_counts.running_names) )
+    ; ( "executable_reaction_capacity_names"
+      , `List (List.map (fun name -> `String name) phase_counts.executable_names) )
     ; "target_reaction_capacity_count", `Int target_count
     ; "minimum_running_fibers", `Int minimum_running_fibers
     ; "no_running_fibers", `Bool no_running_fibers
@@ -697,6 +751,9 @@ let keeper_fleet_safety_health_json
     ; "paused_autoboot_enabled_keeper_count", `Int paused_autoboot_count
     ; "blocked_count", `Int blocked_count
     ; "blocked_keepers", `Int blocked_count
+    ; "blocked_keeper_names", `List (List.map (fun name -> `String name) blocked_names)
+    ; ( "reaction_capacity_shortfall_names"
+      , `List (List.map (fun name -> `String name) blocked_names) )
     ; ( "operator_action_required"
       , `Bool
           (no_executable_keeper_fibers

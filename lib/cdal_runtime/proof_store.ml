@@ -42,9 +42,35 @@ let manifest_path config ~run_id =
   Filename.concat (run_dir config ~run_id) "manifest.json"
 ;;
 
+let recent_write_errors_ref : string list Atomic.t = Atomic.make []
+
+let remember_write_error message =
+  let rec loop () =
+    let current = Atomic.get recent_write_errors_ref in
+    let next =
+      let rec take remaining acc = function
+        | [] -> List.rev acc
+        | _ when remaining <= 0 -> List.rev acc
+        | value :: rest -> take (remaining - 1) (value :: acc) rest
+      in
+      let deduped =
+        message :: List.filter (fun value -> not (String.equal value message)) current
+      in
+      take 16 [] deduped
+    in
+    if not (Atomic.compare_and_set recent_write_errors_ref current next) then loop ()
+  in
+  loop ()
+;;
+
+let recent_write_errors () = List.rev (Atomic.get recent_write_errors_ref)
+
 let log_error context = function
   | Ok () -> ()
-  | Error err -> Printf.eprintf "[proof_store] %s: %s\n%!" context (Error.to_string err)
+  | Error err ->
+    let message = Printf.sprintf "%s: %s" context (Error.to_string err) in
+    remember_write_error message;
+    Printf.eprintf "[proof_store] %s\n%!" message
 ;;
 
 let init_run config ~run_id =

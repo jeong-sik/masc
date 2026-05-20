@@ -50,23 +50,32 @@ export function deriveBudgetGaugeState(keeper: Keeper): BudgetGaugeState | null 
   return { used, max, ratio, tone, remaining }
 }
 
+// Exhaustive-by-design assertion. If [BudgetGaugeState['tone']] gains a
+// new variant, tsc fails here with "Type 'X' is not assignable to type
+// 'never'" instead of silently routing the new tone through the prior
+// `case 'ok': default:` collapse. TypeScript-side mirror of the OCaml
+// anti-pattern-#4 fix in PR #16747 (FSM exhaustive match).
+function assertExhaustive(value: never, context: string): never {
+  throw new Error(`assertExhaustive: unexpected ${context} value: ${String(value)}`)
+}
+
 // Tone-to-CSS helper
 function toneColor(tone: BudgetGaugeState['tone']): string {
   switch (tone) {
     case 'bad':  return 'var(--bad-light)'
     case 'warn': return 'var(--color-status-warn)'
-    case 'ok':
-    default:     return 'var(--color-status-ok)'
+    case 'ok':   return 'var(--color-status-ok)'
   }
+  return assertExhaustive(tone, 'BudgetGaugeState.tone')
 }
 
 function toneLabel(tone: BudgetGaugeState['tone']): string {
   switch (tone) {
     case 'bad':  return '예산 초과 위험'
     case 'warn': return '예산 경고'
-    case 'ok':
-    default:     return '예산 양호'
+    case 'ok':   return '예산 양호'
   }
+  return assertExhaustive(tone, 'BudgetGaugeState.tone')
 }
 
 // ── Per-keeper row ────────────────────────────────────────────────────────

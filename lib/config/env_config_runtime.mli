@@ -86,10 +86,6 @@ module Relay : sig
   val target_agent : string
 end
 
-module Cli : sig
-  val default_agent : string
-end
-
 (** {1 Spawn} *)
 
 module Spawn : sig

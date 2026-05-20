@@ -14,9 +14,9 @@ the categorization roadmap. Newly-added typed getters in
 `lib/config/env_config_*.ml` must carry nearby `@category` and
 `@ops_class` tags; existing knobs remain in the backfill lane.
 
-**Total**: 399 unique knobs across 9 modules.
+**Total**: 381 unique knobs across 9 modules.
 
-**Typed getter classification**: 26/237 tagged (`operator`: 26, `algorithm`: 0, `unclassified`: 211).
+**Typed getter classification**: 26/236 tagged (`operator`: 26, `algorithm`: 0, `unclassified`: 210).
 
 ## Env_config_core (30 knobs; typed classification 0/7)
 
@@ -224,127 +224,126 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_OAS_BRIDGE_TIMEOUT_DEFAULT_SEC` | string_literal | n/a | n/a | 136 |  |
 | `MASC_OPERATOR_JUDGE_TIMEOUT_SEC` | string_literal | n/a | n/a | 124 | #9629: Each caller may also honour a legacy env var name from before the SSOT migration.  When present, the legacy na... |
 
-## Env_config_runtime (119 knobs; typed classification 3/96)
+## Env_config_runtime (118 knobs; typed classification 3/95)
 
 | Env var | Kind | Category | Ops class | Line | Doc |
 |---|---|---|---|---|---|
-| `MASC_AGENT_RATE_BURST` | typed:int | unclassified | unclassified | 630 | Per-agent burst capacity. Default: 50. |
-| `MASC_AGENT_RATE_LIMIT` | typed:float | unclassified | unclassified | 627 | Per-agent requests per second. Default: 20. |
-| `MASC_AGENT_TRANSPORT` | string_literal | n/a | n/a | 343 | Agent transport type variant (e.g. "grpc", "http", "ws"). |
-| `MASC_APPROVAL_JANITOR_ENABLED` | typed:bool | unclassified | unclassified | 446 | Enable the periodic approval_janitor sweep fiber.  Default: true. Set MASC_APPROVAL_JANITOR_ENABLED=false to disable ... |
-| `MASC_APPROVAL_JANITOR_INTERVAL_SEC` | typed:float | unclassified | unclassified | 454 | Sweep interval in seconds.  Default: 60s (every minute). Operators tolerate up to a minute of "approval still pending... |
-| `MASC_BOARD_BACKEND` | string_literal | n/a | n/a | 517 | Board backend type as a typed selector (e.g. "jsonl", "pg"). |
-| `MASC_BOARD_FLUSH_INTERVAL_SEC` | typed:float | unclassified | unclassified | 513 | Flush interval for board persistence (seconds). Default: 30. |
-| `MASC_BRIEFING_CACHE_TTL_SEC` | typed:float | unclassified | unclassified | 884 | Dashboard mission briefing cache TTL (seconds). Default: 300 (5 min). |
+| `MASC_AGENT_RATE_BURST` | typed:int | unclassified | unclassified | 623 | Per-agent burst capacity. Default: 50. |
+| `MASC_AGENT_RATE_LIMIT` | typed:float | unclassified | unclassified | 620 | Per-agent requests per second. Default: 20. |
+| `MASC_AGENT_TRANSPORT` | string_literal | n/a | n/a | 336 | Agent transport type variant (e.g. "grpc", "http", "ws"). |
+| `MASC_APPROVAL_JANITOR_ENABLED` | typed:bool | unclassified | unclassified | 439 | Enable the periodic approval_janitor sweep fiber.  Default: true. Set MASC_APPROVAL_JANITOR_ENABLED=false to disable ... |
+| `MASC_APPROVAL_JANITOR_INTERVAL_SEC` | typed:float | unclassified | unclassified | 447 | Sweep interval in seconds.  Default: 60s (every minute). Operators tolerate up to a minute of "approval still pending... |
+| `MASC_BOARD_BACKEND` | string_literal | n/a | n/a | 510 | Board backend type as a typed selector (e.g. "jsonl", "pg"). |
+| `MASC_BOARD_FLUSH_INTERVAL_SEC` | typed:float | unclassified | unclassified | 506 | Flush interval for board persistence (seconds). Default: 30. |
+| `MASC_BRIEFING_CACHE_TTL_SEC` | typed:float | unclassified | unclassified | 877 | Dashboard mission briefing cache TTL (seconds). Default: 300 (5 min). |
 | `MASC_CACHE_MAX_ENTRIES` | typed:int | unclassified | unclassified | 74 | Maximum total number of cache entries (default 1000) |
 | `MASC_CACHE_MAX_ENTRY_SIZE` | typed:int | unclassified | unclassified | 70 | Maximum size of a single cache entry value in bytes (default 100KB) |
-| `MASC_CANCELLATION_CLEANUP_SEC` | typed:float | unclassified | unclassified | 896 | Cancellation token cleanup interval (seconds). Default: 300 (5 min). |
-| `MASC_CANCELLATION_TOKEN_MAX_AGE_SEC` | typed:float | unclassified | unclassified | 207 | Token cleanup max age (seconds) |
-| `MASC_CDAL_ENABLED` | feature_flag | n/a | n/a | 369 | Enable contract-driven proof capture. Default: true. |
-| `MASC_CDAL_GATE_ENABLED` | feature_flag | n/a | n/a | 373 | Block task completion when CDAL verdict is Violated/Inconclusive. Default: false. |
-| `MASC_CDAL_VERDICT_LOOKUP_LIMIT` | typed:int | unclassified | unclassified | 380 | Max verdicts to scan when looking up the latest verdict by task_id. Beyond this limit, older entries are silently ski... |
+| `MASC_CANCELLATION_CLEANUP_SEC` | typed:float | unclassified | unclassified | 889 | Cancellation token cleanup interval (seconds). Default: 300 (5 min). |
+| `MASC_CANCELLATION_TOKEN_MAX_AGE_SEC` | typed:float | unclassified | unclassified | 200 | Token cleanup max age (seconds) |
+| `MASC_CDAL_ENABLED` | feature_flag | n/a | n/a | 362 | Enable contract-driven proof capture. Default: true. |
+| `MASC_CDAL_GATE_ENABLED` | feature_flag | n/a | n/a | 366 | Block task completion when CDAL verdict is Violated/Inconclusive. Default: false. |
+| `MASC_CDAL_VERDICT_LOOKUP_LIMIT` | typed:int | unclassified | unclassified | 373 | Max verdicts to scan when looking up the latest verdict by task_id. Beyond this limit, older entries are silently ski... |
 | `MASC_CLAIM_TTL_SECONDS` | typed:float | unclassified | unclassified | 97 | Maximum time a task can stay Claimed/InProgress without agent heartbeat before being auto-released back to Todo (seco... |
-| `MASC_CLI_AGENT` | typed:string | unclassified | unclassified | 132 | {1 CLI Configuration} |
-| `MASC_COORD_GIT_LOCAL_OP_TIMEOUT_SEC` | typed:float | unclassified | unclassified | 1009 | Budget (seconds) for local-only git operations under [Masc_exec.Exec_gate.run_argv*] in {!Coord_git} and {!Coord_work... |
-| `MASC_DASHBOARD_CTX_COMPACTING` | typed:float | unclassified | unclassified | 734 |  |
-| `MASC_DASHBOARD_CTX_HANDOFF_IMMINENT` | typed:float | unclassified | unclassified | 730 | Keeper context-ratio lifecycle thresholds. Higher ratio = closer to context limit = more urgency. |
-| `MASC_DASHBOARD_CTX_PREPARING` | typed:float | unclassified | unclassified | 732 |  |
-| `MASC_DASHBOARD_EXECUTION_TIMEOUT_SEC` | typed:float | unclassified | unclassified | 773 | Execution surface compute timeout (light + parameterized). Wraps two [Dashboard_cache.get_or_compute_with_timeout] si... |
-| `MASC_DASHBOARD_EXECUTION_TRUST_TIMEOUT_SEC` | typed:float | unclassified | unclassified | 787 | Execution-trust surface compute timeout. Wraps [Dashboard_cache.get_or_compute_with_timeout] at [server_dashboard_htt... |
-| `MASC_DASHBOARD_KEEPER_ACTION_STALE_SEC` | typed:float | unclassified | unclassified | 725 | Keeper action-age threshold (seconds). Default: 3600 (1 hour). |
-| `MASC_DASHBOARD_MISSION_TIMEOUT_SEC` | typed:float | unclassified | unclassified | 797 | Mission card compute timeout. Wraps three [Dashboard_cache.get_or_compute_with_timeout] sites at [server_dashboard_ht... |
-| `MASC_DASHBOARD_RENDER_TIMEOUT_SEC` | typed:float | unclassified | unclassified | 830 | Maximum wall-clock for a single dashboard render ([Dashboard_execution.json_render]). Wraps the entire render pipelin... |
-| `MASC_DASHBOARD_SHELL_LIGHT_TIMEOUT_SEC` | typed:float | unclassified | unclassified | 817 | Shell render compute timeout (light path). Default 8s. Must remain strictly less than [shell_timeout_sec] so the spli... |
-| `MASC_DASHBOARD_SHELL_PREWARM_OUTER_TIMEOUT_SEC` | typed:float | unclassified | unclassified | 762 |  |
-| `MASC_DASHBOARD_SHELL_PREWARM_TIMEOUT_SEC` | typed:float | unclassified | unclassified | 757 | Dashboard shell-cache pre-warm timeouts. The pre-warm fires once on server bootstrap. It is wrapped in two nested tim... |
-| `MASC_DASHBOARD_SHELL_TIMEOUT_SEC` | typed:float | unclassified | unclassified | 806 | Shell render compute timeout (full path). Used by [Dashboard_cache.get_or_compute_with_timeout] for the full shell re... |
-| `MASC_DASHBOARD_SIGNAL_LIVE_SEC` | typed:float | unclassified | unclassified | 721 | Duration (seconds) for a signal to count as "live". Default: 300 (5 min). |
-| `MASC_DASHBOARD_SIGNAL_QUIET_SEC` | typed:float | unclassified | unclassified | 717 | Duration (seconds) for borderline "quiet" warning. Default: 600 (10 min). |
-| `MASC_DASHBOARD_SIGNAL_STALE_SEC` | typed:float | unclassified | unclassified | 713 | Duration (seconds) after which a signal is considered stale. Default: 1200 (20 min). |
+| `MASC_COORD_GIT_LOCAL_OP_TIMEOUT_SEC` | typed:float | unclassified | unclassified | 1002 | Budget (seconds) for local-only git operations under [Masc_exec.Exec_gate.run_argv*] in {!Coord_git} and {!Coord_work... |
+| `MASC_DASHBOARD_CTX_COMPACTING` | typed:float | unclassified | unclassified | 727 |  |
+| `MASC_DASHBOARD_CTX_HANDOFF_IMMINENT` | typed:float | unclassified | unclassified | 723 | Keeper context-ratio lifecycle thresholds. Higher ratio = closer to context limit = more urgency. |
+| `MASC_DASHBOARD_CTX_PREPARING` | typed:float | unclassified | unclassified | 725 |  |
+| `MASC_DASHBOARD_EXECUTION_TIMEOUT_SEC` | typed:float | unclassified | unclassified | 766 | Execution surface compute timeout (light + parameterized). Wraps two [Dashboard_cache.get_or_compute_with_timeout] si... |
+| `MASC_DASHBOARD_EXECUTION_TRUST_TIMEOUT_SEC` | typed:float | unclassified | unclassified | 780 | Execution-trust surface compute timeout. Wraps [Dashboard_cache.get_or_compute_with_timeout] at [server_dashboard_htt... |
+| `MASC_DASHBOARD_KEEPER_ACTION_STALE_SEC` | typed:float | unclassified | unclassified | 718 | Keeper action-age threshold (seconds). Default: 3600 (1 hour). |
+| `MASC_DASHBOARD_MISSION_TIMEOUT_SEC` | typed:float | unclassified | unclassified | 790 | Mission card compute timeout. Wraps three [Dashboard_cache.get_or_compute_with_timeout] sites at [server_dashboard_ht... |
+| `MASC_DASHBOARD_RENDER_TIMEOUT_SEC` | typed:float | unclassified | unclassified | 823 | Maximum wall-clock for a single dashboard render ([Dashboard_execution.json_render]). Wraps the entire render pipelin... |
+| `MASC_DASHBOARD_SHELL_LIGHT_TIMEOUT_SEC` | typed:float | unclassified | unclassified | 810 | Shell render compute timeout (light path). Default 8s. Must remain strictly less than [shell_timeout_sec] so the spli... |
+| `MASC_DASHBOARD_SHELL_PREWARM_OUTER_TIMEOUT_SEC` | typed:float | unclassified | unclassified | 755 |  |
+| `MASC_DASHBOARD_SHELL_PREWARM_TIMEOUT_SEC` | typed:float | unclassified | unclassified | 750 | Dashboard shell-cache pre-warm timeouts. The pre-warm fires once on server bootstrap. It is wrapped in two nested tim... |
+| `MASC_DASHBOARD_SHELL_TIMEOUT_SEC` | typed:float | unclassified | unclassified | 799 | Shell render compute timeout (full path). Used by [Dashboard_cache.get_or_compute_with_timeout] for the full shell re... |
+| `MASC_DASHBOARD_SIGNAL_LIVE_SEC` | typed:float | unclassified | unclassified | 714 | Duration (seconds) for a signal to count as "live". Default: 300 (5 min). |
+| `MASC_DASHBOARD_SIGNAL_QUIET_SEC` | typed:float | unclassified | unclassified | 710 | Duration (seconds) for borderline "quiet" warning. Default: 600 (10 min). |
+| `MASC_DASHBOARD_SIGNAL_STALE_SEC` | typed:float | unclassified | unclassified | 706 | Duration (seconds) after which a signal is considered stale. Default: 1200 (20 min). |
 | `MASC_DECISION_TTL_SEC` | typed:float | unclassified | unclassified | 62 | Default TTL for pending decisions (seconds, default 1 hour) |
 | `MASC_EXECUTOR_DOMAIN_COUNT` | typed:int | Concurrency | operator | 86 | Shared executor worker-domain count override. Env: [MASC_EXECUTOR_DOMAIN_COUNT]. Default: unset, use {!Domain_pool}'s... |
-| `MASC_FULL_HEALTH_CRITICAL_FAILURE_THRESHOLD` | typed:int | unclassified | unclassified | 857 | Number of consecutive [/health?full=1] cache-refresh failures that must accumulate before [masc_full_health_refresh_c... |
-| `MASC_FULL_HEALTH_REFRESH_TIMEOUT_SEC` | typed:float | unclassified | unclassified | 845 | Full-health snapshot proactive refresh timeout (seconds). Caps a single [/health?full=1] cache refresh attempt in [Se... |
-| `MASC_FULL_SURFACE` | feature_flag | n/a | n/a | 550 | Full tool surface override. Default: false. Re-readable within the process; callers should still document the effecti... |
-| `MASC_GOAL_JANITOR_AUTO_STAGNATE_DAYS` | typed:int | unclassified | unclassified | 423 | Stagnate threshold (days) for auto-generated goals.  Default: 7. Auto-generated = title suffix [" (auto)"] from [Keep... |
-| `MASC_GOAL_JANITOR_ENABLED` | typed:bool | unclassified | unclassified | 409 | Enable the periodic goal_janitor sweep fiber.  Default: true. Set MASC_GOAL_JANITOR_ENABLED=false to disable when deb... |
-| `MASC_GOAL_JANITOR_INTERVAL_SEC` | typed:float | unclassified | unclassified | 415 | Sweep interval in seconds.  Default: 3600 (1 hour). Goal stagnation is measured in days, so the cadence does not need... |
-| `MASC_GRPC_ENABLED` | feature_flag | n/a | n/a | 318 | Whether gRPC transport is enabled. Default: true. Accessor-shaped reader; listener lifecycle is still decided at boot. |
-| `MASC_GRPC_PORT` | string_literal | n/a | n/a | 314 | gRPC server port. Default: 8936. |
-| `MASC_GRPC_TARGET` | string_literal | n/a | n/a | 322 | gRPC client target address. Derived from grpc_port when unset. |
-| `MASC_HTTP_AUTH_STRICT` | feature_flag | n/a | n/a | 351 | Whether OpenAI-compatible endpoint is enabled. Default: false. |
-| `MASC_JANITOR_INTERVAL_SEC` | typed:float | unclassified | unclassified | 912 | Bootstrap janitor tick interval (seconds). Drives the SSE/session/ rate-limit/webrtc reaper loop in [server_bootstrap... |
-| `MASC_KEEPER_BOOTSTRAP_WINDOW_SEC` | typed:float | unclassified | unclassified | 888 | Keeper world observation bootstrap window (seconds). Default: 300 (5 min). |
-| `MASC_KEEPER_MAX_TURN_WATCHDOG_TIMEOUT_SEC` | typed:float | unclassified | unclassified | 478 | {1 Keeper Max-Turn Watchdog (RFC-0109 P4)} Opt-in keeper-level wall-clock watchdog. Default disabled — opt-in via [... |
+| `MASC_FULL_HEALTH_CRITICAL_FAILURE_THRESHOLD` | typed:int | unclassified | unclassified | 850 | Number of consecutive [/health?full=1] cache-refresh failures that must accumulate before [masc_full_health_refresh_c... |
+| `MASC_FULL_HEALTH_REFRESH_TIMEOUT_SEC` | typed:float | unclassified | unclassified | 838 | Full-health snapshot proactive refresh timeout (seconds). Caps a single [/health?full=1] cache refresh attempt in [Se... |
+| `MASC_FULL_SURFACE` | feature_flag | n/a | n/a | 543 | Full tool surface override. Default: false. Re-readable within the process; callers should still document the effecti... |
+| `MASC_GOAL_JANITOR_AUTO_STAGNATE_DAYS` | typed:int | unclassified | unclassified | 416 | Stagnate threshold (days) for auto-generated goals.  Default: 7. Auto-generated = title suffix [" (auto)"] from [Keep... |
+| `MASC_GOAL_JANITOR_ENABLED` | typed:bool | unclassified | unclassified | 402 | Enable the periodic goal_janitor sweep fiber.  Default: true. Set MASC_GOAL_JANITOR_ENABLED=false to disable when deb... |
+| `MASC_GOAL_JANITOR_INTERVAL_SEC` | typed:float | unclassified | unclassified | 408 | Sweep interval in seconds.  Default: 3600 (1 hour). Goal stagnation is measured in days, so the cadence does not need... |
+| `MASC_GRPC_ENABLED` | feature_flag | n/a | n/a | 311 | Whether gRPC transport is enabled. Default: true. Accessor-shaped reader; listener lifecycle is still decided at boot. |
+| `MASC_GRPC_PORT` | string_literal | n/a | n/a | 307 | gRPC server port. Default: 8936. |
+| `MASC_GRPC_TARGET` | string_literal | n/a | n/a | 315 | gRPC client target address. Derived from grpc_port when unset. |
+| `MASC_HTTP_AUTH_STRICT` | feature_flag | n/a | n/a | 344 | Whether OpenAI-compatible endpoint is enabled. Default: false. |
+| `MASC_JANITOR_INTERVAL_SEC` | typed:float | unclassified | unclassified | 905 | Bootstrap janitor tick interval (seconds). Drives the SSE/session/ rate-limit/webrtc reaper loop in [server_bootstrap... |
+| `MASC_KEEPER_BOOTSTRAP_WINDOW_SEC` | typed:float | unclassified | unclassified | 881 | Keeper world observation bootstrap window (seconds). Default: 300 (5 min). |
+| `MASC_KEEPER_MAX_TURN_WATCHDOG_TIMEOUT_SEC` | typed:float | unclassified | unclassified | 471 | {1 Keeper Max-Turn Watchdog (RFC-0109 P4)} Opt-in keeper-level wall-clock watchdog. Default disabled — opt-in via [... |
 | `MASC_KEEPER_ZOMBIE_THRESHOLD_SEC` | typed:float | unclassified | unclassified | 10 | Threshold for keeper agents (longer grace period, default 1 hour) |
-| `MASC_LABEL_QUIET_THRESHOLD_SEC` | typed:float | unclassified | unclassified | 876 | Dashboard label "quiet" threshold (seconds). Default: 300 (5 min). |
-| `MASC_LABEL_STUCK_THRESHOLD_SEC` | typed:float | unclassified | unclassified | 880 | Dashboard label "stuck" threshold (seconds). Default: 900 (15 min). |
-| `MASC_LIST_PAGE_SIZE` | typed:int | unclassified | unclassified | 555 | Tool list page size, clamped to [10, 1024]. Default: 512. Re-readable within the process; not a guarantee of shell-le... |
-| `MASC_LLAMA_MAX_TOKENS` | typed:int | unclassified | unclassified | 172 | Upper bound for local runtime requests. Callers may request less, but never more than this cap. Falls back to MASC_LL... |
-| `MASC_LOCAL_MAX_TOKENS` | typed:int | unclassified | unclassified | 170 | Upper bound for local runtime requests. Callers may request less, but never more than this cap. Falls back to MASC_LL... |
-| `MASC_LOCAL_RUNTIME_COOLDOWN_SEC` | string_literal | n/a | n/a | 661 | Local runtime cooldown (seconds). |
-| `MASC_LOCAL_RUNTIME_DEBUG` | feature_flag | n/a | n/a | 657 | Enable local runtime debug logging. Default: false. |
-| `MASC_LOCAL_WORKER_HEARTBEAT_SEC` | typed:int | unclassified | unclassified | 667 | Local worker heartbeat interval (seconds). Default: 60. |
-| `MASC_LOCAL_WORKER_MAX_TOKENS` | typed:int | unclassified | unclassified | 664 | Local worker max tokens per request. Default: 1024. |
+| `MASC_LABEL_QUIET_THRESHOLD_SEC` | typed:float | unclassified | unclassified | 869 | Dashboard label "quiet" threshold (seconds). Default: 300 (5 min). |
+| `MASC_LABEL_STUCK_THRESHOLD_SEC` | typed:float | unclassified | unclassified | 873 | Dashboard label "stuck" threshold (seconds). Default: 900 (15 min). |
+| `MASC_LIST_PAGE_SIZE` | typed:int | unclassified | unclassified | 548 | Tool list page size, clamped to [10, 1024]. Default: 512. Re-readable within the process; not a guarantee of shell-le... |
+| `MASC_LLAMA_MAX_TOKENS` | typed:int | unclassified | unclassified | 165 | Upper bound for local runtime requests. Callers may request less, but never more than this cap. Falls back to MASC_LL... |
+| `MASC_LOCAL_MAX_TOKENS` | typed:int | unclassified | unclassified | 163 | Upper bound for local runtime requests. Callers may request less, but never more than this cap. Falls back to MASC_LL... |
+| `MASC_LOCAL_RUNTIME_COOLDOWN_SEC` | string_literal | n/a | n/a | 654 | Local runtime cooldown (seconds). |
+| `MASC_LOCAL_RUNTIME_DEBUG` | feature_flag | n/a | n/a | 650 | Enable local runtime debug logging. Default: false. |
+| `MASC_LOCAL_WORKER_HEARTBEAT_SEC` | typed:int | unclassified | unclassified | 660 | Local worker heartbeat interval (seconds). Default: 60. |
+| `MASC_LOCAL_WORKER_MAX_TOKENS` | typed:int | unclassified | unclassified | 657 | Local worker max tokens per request. Default: 1024. |
 | `MASC_LOCK_EXPIRY_WARNING_SEC` | typed:float | unclassified | unclassified | 26 | Lock expiry warning threshold (seconds before expiry) |
 | `MASC_LOCK_TIMEOUT_SEC` | typed:float | unclassified | unclassified | 22 | Default lock timeout (seconds) |
-| `MASC_MEMORY_OAS_DEFAULT_IMPORTANCE` | typed:int | unclassified | unclassified | 683 | Default importance for OAS-stored memories, clamped to [1, 10]. Default: 5. |
-| `MASC_MESSAGE_MAX_COUNT` | typed:int | unclassified | unclassified | 260 | Maximum number of message files to retain per room (default 200). Oldest messages (by filename sort) are deleted when... |
-| `MASC_METRICS_FLUSH_SEC` | typed:float | unclassified | unclassified | 868 | Tool metrics flush interval (seconds). Default: 300 (5 min). |
-| `MASC_OAS_SSE_DRAIN_INTERVAL_SEC` | typed:float | unclassified | unclassified | 675 | SSE drain interval (seconds). Default: 2.0. |
-| `MASC_OPENAI_COMPAT` | feature_flag | n/a | n/a | 348 | Whether OpenAI-compatible endpoint is enabled. Default: false. |
+| `MASC_MEMORY_OAS_DEFAULT_IMPORTANCE` | typed:int | unclassified | unclassified | 676 | Default importance for OAS-stored memories, clamped to [1, 10]. Default: 5. |
+| `MASC_MESSAGE_MAX_COUNT` | typed:int | unclassified | unclassified | 253 | Maximum number of message files to retain per room (default 200). Oldest messages (by filename sort) are deleted when... |
+| `MASC_METRICS_FLUSH_SEC` | typed:float | unclassified | unclassified | 861 | Tool metrics flush interval (seconds). Default: 300 (5 min). |
+| `MASC_OAS_SSE_DRAIN_INTERVAL_SEC` | typed:float | unclassified | unclassified | 668 | SSE drain interval (seconds). Default: 2.0. |
+| `MASC_OPENAI_COMPAT` | feature_flag | n/a | n/a | 341 | Whether OpenAI-compatible endpoint is enabled. Default: false. |
 | `MASC_ORCHESTRATOR_AGENT` | typed:string | unclassified | unclassified | 109 | Orchestrator agent name |
 | `MASC_ORCHESTRATOR_INTERVAL` | typed:float | unclassified | unclassified | 105 | Orchestrator check interval (seconds) |
 | `MASC_ORCHESTRATOR_MIN_PRIORITY` | typed:int | unclassified | unclassified | 112 |  |
 | `MASC_ORCHESTRATOR_TIMEOUT` | typed:int | unclassified | unclassified | 115 |  |
-| `MASC_PROC_MIN_CONFIDENCE` | typed:float | unclassified | unclassified | 530 | Minimum confidence for crystallization, clamped to [0, 1]. Default: 0.7. |
-| `MASC_PROC_MIN_EVIDENCE` | typed:int | unclassified | unclassified | 526 | Minimum evidence count for crystallization. Default: 3. |
-| `MASC_PROVIDER_RUN_TTL_SEC` | typed:float | unclassified | unclassified | 900 | Provider run finished TTL (seconds). Default: 3600 (1 hour). |
-| `MASC_PUBLIC_TOOLS_EXTRA` | string_literal | n/a | n/a | 589 | Extra public tools (comma-separated names). |
-| `MASC_PULSE_MAX_CONSUMER_FAILURES` | typed:int | unclassified | unclassified | 537 | Max consecutive consumer failures before recovery. Default: 3. |
-| `MASC_RATE_BURST` | typed:int | unclassified | unclassified | 624 | Burst capacity. Default: 150. |
-| `MASC_RATE_LIMIT` | typed:float | unclassified | unclassified | 621 | Requests per second. Default: 100. |
-| `MASC_RATE_LIMIT_BUCKET_TTL_SEC` | typed:int | unclassified | unclassified | 926 | Rate-limit bucket staleness TTL (seconds). Buckets with no traffic for this long are reaped by the janitor loop. Defa... |
+| `MASC_PROC_MIN_CONFIDENCE` | typed:float | unclassified | unclassified | 523 | Minimum confidence for crystallization, clamped to [0, 1]. Default: 0.7. |
+| `MASC_PROC_MIN_EVIDENCE` | typed:int | unclassified | unclassified | 519 | Minimum evidence count for crystallization. Default: 3. |
+| `MASC_PROVIDER_RUN_TTL_SEC` | typed:float | unclassified | unclassified | 893 | Provider run finished TTL (seconds). Default: 3600 (1 hour). |
+| `MASC_PUBLIC_TOOLS_EXTRA` | string_literal | n/a | n/a | 582 | Extra public tools (comma-separated names). |
+| `MASC_PULSE_MAX_CONSUMER_FAILURES` | typed:int | unclassified | unclassified | 530 | Max consecutive consumer failures before recovery. Default: 3. |
+| `MASC_RATE_BURST` | typed:int | unclassified | unclassified | 617 | Burst capacity. Default: 150. |
+| `MASC_RATE_LIMIT` | typed:float | unclassified | unclassified | 614 | Requests per second. Default: 100. |
+| `MASC_RATE_LIMIT_BUCKET_TTL_SEC` | typed:int | unclassified | unclassified | 919 | Rate-limit bucket staleness TTL (seconds). Buckets with no traffic for this long are reaped by the janitor loop. Defa... |
 | `MASC_RELAY_TARGET_AGENT` | typed:string | unclassified | unclassified | 125 | {1 Relay Configuration} |
-| `MASC_REPO_SYNC_INTERVAL_SEC` | typed:float | unclassified | unclassified | 918 | Repository auto-sync interval (seconds). The repo_sync fiber in [server_bootstrap_loops] wakes at this cadence to fet... |
-| `MASC_SESSION_LIVE_TURN_WINDOW_SEC` | typed:float | unclassified | unclassified | 872 | Team session live turn window (seconds). Default: 300 (5 min). |
+| `MASC_REPO_SYNC_INTERVAL_SEC` | typed:float | unclassified | unclassified | 911 | Repository auto-sync interval (seconds). The repo_sync fiber in [server_bootstrap_loops] wakes at this cadence to fet... |
+| `MASC_SESSION_LIVE_TURN_WINDOW_SEC` | typed:float | unclassified | unclassified | 865 | Team session live turn window (seconds). Default: 300 (5 min). |
 | `MASC_SESSION_MAX_AGE_SEC` | typed:float | unclassified | unclassified | 34 | Maximum session age before cleanup (seconds) |
 | `MASC_SESSION_RATE_LIMIT_WINDOW_SEC` | typed:float | unclassified | unclassified | 38 | Rate limit window (seconds) |
-| `MASC_SIDECAR_CONTROL_TIMEOUT_SEC` | typed:float | unclassified | unclassified | 952 | Subprocess timeout (seconds) for sidecar control commands — [stop], [tail], and similar quick housekeeping operatio... |
-| `MASC_SIDECAR_RECONCILE_BACKOFF_SEC` | typed:float | unclassified | unclassified | 940 | Backoff window (seconds) between repeated same-generation [running + unavailable] start dispatches. Default: 30 (matc... |
-| `MASC_SIDECAR_SCHEMA_TIMEOUT_SEC` | typed:float | unclassified | unclassified | 968 | Subprocess timeout (seconds) for sidecar Python schema generation. Wraps [Process_eio.run_argv_with_status] at [serve... |
-| `MASC_SLOT_YIELD_ENABLED` | feature_flag | n/a | n/a | 489 | Release LLM slot during tool execution so other agents can use it. Default: false. Set MASC_SLOT_YIELD_ENABLED=true t... |
-| `MASC_SMART_HB_BASE_INTERVAL_SEC` | typed:float | unclassified | unclassified | 691 | Base heartbeat interval (seconds), clamped [5, 300]. Default: 30. |
-| `MASC_SMART_HB_IDLE_MULTIPLIER` | typed:float | unclassified | unclassified | 696 | Idle multiplier for interval, clamped [1, 10]. Default: 3. |
-| `MASC_SMART_HB_IDLE_THRESHOLD_SEC` | typed:float | unclassified | unclassified | 701 | Idle threshold (seconds) before multiplier kicks in, clamped [60, 3600]. Default: 300. |
-| `MASC_SPAWN_CODING_TIMEOUT_SEC` | typed:float | unclassified | unclassified | 146 | Extended timeout for coding mode (seconds). Default 2 hours. |
-| `MASC_SPAWN_GRACE_PERIOD_SEC` | typed:float | unclassified | unclassified | 150 | Grace period before timeout — sends SIGTERM for checkpoint opportunity (seconds). |
-| `MASC_SPAWN_TIMEOUT_SEC` | typed:float | unclassified | unclassified | 142 | Default spawn timeout for agent processes (seconds). Used by spawn.ml, spawn_eio.ml, and tool_relay.ml. Higher value ... |
-| `MASC_SSE_BUFFER_TTL_SEC` | typed:float | unclassified | unclassified | 892 | SSE buffer TTL (seconds). Default: 300 (5 min). |
-| `MASC_STALLED_SESSION_THRESHOLD_SEC` | typed:float | unclassified | unclassified | 904 | Operator digest stalled session threshold (seconds). Default: 300 (5 min). |
-| `MASC_STARTUP_WATCHDOG_SEC` | typed:float | unclassified | unclassified | 362 | Startup watchdog timeout, clamped to [30, 600]. Default: 240. Re-readable within the process, but operationally a boo... |
+| `MASC_SIDECAR_CONTROL_TIMEOUT_SEC` | typed:float | unclassified | unclassified | 945 | Subprocess timeout (seconds) for sidecar control commands — [stop], [tail], and similar quick housekeeping operatio... |
+| `MASC_SIDECAR_RECONCILE_BACKOFF_SEC` | typed:float | unclassified | unclassified | 933 | Backoff window (seconds) between repeated same-generation [running + unavailable] start dispatches. Default: 30 (matc... |
+| `MASC_SIDECAR_SCHEMA_TIMEOUT_SEC` | typed:float | unclassified | unclassified | 961 | Subprocess timeout (seconds) for sidecar Python schema generation. Wraps [Process_eio.run_argv_with_status] at [serve... |
+| `MASC_SLOT_YIELD_ENABLED` | feature_flag | n/a | n/a | 482 | Release LLM slot during tool execution so other agents can use it. Default: false. Set MASC_SLOT_YIELD_ENABLED=true t... |
+| `MASC_SMART_HB_BASE_INTERVAL_SEC` | typed:float | unclassified | unclassified | 684 | Base heartbeat interval (seconds), clamped [5, 300]. Default: 30. |
+| `MASC_SMART_HB_IDLE_MULTIPLIER` | typed:float | unclassified | unclassified | 689 | Idle multiplier for interval, clamped [1, 10]. Default: 3. |
+| `MASC_SMART_HB_IDLE_THRESHOLD_SEC` | typed:float | unclassified | unclassified | 694 | Idle threshold (seconds) before multiplier kicks in, clamped [60, 3600]. Default: 300. |
+| `MASC_SPAWN_CODING_TIMEOUT_SEC` | typed:float | unclassified | unclassified | 139 | Extended timeout for coding mode (seconds). Default 2 hours. |
+| `MASC_SPAWN_GRACE_PERIOD_SEC` | typed:float | unclassified | unclassified | 143 | Grace period before timeout — sends SIGTERM for checkpoint opportunity (seconds). |
+| `MASC_SPAWN_TIMEOUT_SEC` | typed:float | unclassified | unclassified | 135 | Default spawn timeout for agent processes (seconds). Used by spawn.ml, spawn_eio.ml, and tool_relay.ml. Higher value ... |
+| `MASC_SSE_BUFFER_TTL_SEC` | typed:float | unclassified | unclassified | 885 | SSE buffer TTL (seconds). Default: 300 (5 min). |
+| `MASC_STALLED_SESSION_THRESHOLD_SEC` | typed:float | unclassified | unclassified | 897 | Operator digest stalled session threshold (seconds). Default: 300 (5 min). |
+| `MASC_STARTUP_WATCHDOG_SEC` | typed:float | unclassified | unclassified | 355 | Startup watchdog timeout, clamped to [30, 600]. Default: 240. Re-readable within the process, but operationally a boo... |
 | `MASC_TEMPO_DEFAULT_INTERVAL_SEC` | typed:float | unclassified | unclassified | 54 | Default polling interval (seconds) |
 | `MASC_TEMPO_MAX_INTERVAL_SEC` | typed:float | unclassified | unclassified | 50 | Maximum polling interval (seconds) - for idle tempo |
 | `MASC_TEMPO_MIN_INTERVAL_SEC` | typed:float | unclassified | unclassified | 46 | Minimum polling interval (seconds) - for urgent tempo |
-| `MASC_TIMEOUT_GCLOUD_AUTH_SEC` | typed:float | unclassified | unclassified | 251 | gcloud auth token fetch (used by a2a_tools, model_client, keeper_alerting) |
-| `MASC_TOOL_DESCRIPTION_BUDGET` | string_literal | n/a | n/a | 577 | Tool description budget (max chars). None = unlimited. |
-| `MASC_TOOL_READONLY_RETRY_LIMIT` | typed:int | unclassified | unclassified | 585 | Read-only tool retry limit. Default: 2. |
-| `MASC_TOOL_TIMEOUT_BOARD_SEC` | typed:int | Timeouts | operator | 572 | Board write outer MCP tool-call timeout, clamped to [5, 300] seconds. Default: 90 seconds (#10569). @category Timeout... |
-| `MASC_TOOL_TIMEOUT_DEFAULT_SEC` | typed:int | Timeouts | operator | 564 | Default outer MCP tool-call timeout, clamped to [5, 300] seconds. Board writes have a separate timeout below so opera... |
-| `MASC_USE_H2` | string_literal | n/a | n/a | 337 | HTTP mode: typed variant for "auto", "h2_only", "h1_only". |
-| `MASC_VERIFICATION_FSM_ENABLED` | feature_flag | n/a | n/a | 386 | Enable AwaitingVerification state and cross-agent approval. Default: false. |
-| `MASC_VERIFICATION_TIMEOUT_CHECK_INTERVAL_SEC` | typed:float | unclassified | unclassified | 396 | Interval for verification timeout check fiber (seconds). Default: 60. Issue #7549. |
-| `MASC_VERIFICATION_TIMEOUT_DEADLINE_SEC` | typed:float | unclassified | unclassified | 391 | Maximum time a task may remain AwaitingVerification before surfacing an operator-visible timeout. Default: 24h. |
-| `MASC_WEBRTC_ENABLED` | feature_flag | n/a | n/a | 333 | Whether WebRTC transport is enabled. Default: true. Accessor-shaped reader; listener lifecycle is still decided at boot. |
-| `MASC_WEB_SEARCH_CACHE_TTL_SEC` | typed:float | unclassified | unclassified | 605 |  |
-| `MASC_WEB_SEARCH_FALLBACKS` | string_literal | n/a | n/a | 598 |  |
-| `MASC_WEB_SEARCH_PROVIDER` | string_literal | n/a | n/a | 592 |  |
-| `MASC_WEB_SEARCH_PROVIDER_ORDER` | string_literal | n/a | n/a | 595 |  |
-| `MASC_WEB_SEARCH_RATE_LIMIT_MAX_CALLS` | typed:int | unclassified | unclassified | 613 |  |
-| `MASC_WEB_SEARCH_RATE_LIMIT_WINDOW_SEC` | typed:float | unclassified | unclassified | 609 |  |
-| `MASC_WEB_SEARCH_TIMEOUT_SEC` | typed:int | unclassified | unclassified | 601 |  |
-| `MASC_WS_ENABLED` | feature_flag | n/a | n/a | 329 | Whether WebSocket transport is enabled. Default: true. Accessor-shaped reader; listener lifecycle is still decided at... |
-| `MASC_WS_PORT` | string_literal | n/a | n/a | 325 | WebSocket server port. Default: 8937. |
+| `MASC_TIMEOUT_GCLOUD_AUTH_SEC` | typed:float | unclassified | unclassified | 244 | gcloud auth token fetch (used by a2a_tools, model_client, keeper_alerting) |
+| `MASC_TOOL_DESCRIPTION_BUDGET` | string_literal | n/a | n/a | 570 | Tool description budget (max chars). None = unlimited. |
+| `MASC_TOOL_READONLY_RETRY_LIMIT` | typed:int | unclassified | unclassified | 578 | Read-only tool retry limit. Default: 2. |
+| `MASC_TOOL_TIMEOUT_BOARD_SEC` | typed:int | Timeouts | operator | 565 | Board write outer MCP tool-call timeout, clamped to [5, 300] seconds. Default: 90 seconds (#10569). @category Timeout... |
+| `MASC_TOOL_TIMEOUT_DEFAULT_SEC` | typed:int | Timeouts | operator | 557 | Default outer MCP tool-call timeout, clamped to [5, 300] seconds. Board writes have a separate timeout below so opera... |
+| `MASC_USE_H2` | string_literal | n/a | n/a | 330 | HTTP mode: typed variant for "auto", "h2_only", "h1_only". |
+| `MASC_VERIFICATION_FSM_ENABLED` | feature_flag | n/a | n/a | 379 | Enable AwaitingVerification state and cross-agent approval. Default: false. |
+| `MASC_VERIFICATION_TIMEOUT_CHECK_INTERVAL_SEC` | typed:float | unclassified | unclassified | 389 | Interval for verification timeout check fiber (seconds). Default: 60. Issue #7549. |
+| `MASC_VERIFICATION_TIMEOUT_DEADLINE_SEC` | typed:float | unclassified | unclassified | 384 | Maximum time a task may remain AwaitingVerification before surfacing an operator-visible timeout. Default: 24h. |
+| `MASC_WEBRTC_ENABLED` | feature_flag | n/a | n/a | 326 | Whether WebRTC transport is enabled. Default: true. Accessor-shaped reader; listener lifecycle is still decided at boot. |
+| `MASC_WEB_SEARCH_CACHE_TTL_SEC` | typed:float | unclassified | unclassified | 598 |  |
+| `MASC_WEB_SEARCH_FALLBACKS` | string_literal | n/a | n/a | 591 |  |
+| `MASC_WEB_SEARCH_PROVIDER` | string_literal | n/a | n/a | 585 |  |
+| `MASC_WEB_SEARCH_PROVIDER_ORDER` | string_literal | n/a | n/a | 588 |  |
+| `MASC_WEB_SEARCH_RATE_LIMIT_MAX_CALLS` | typed:int | unclassified | unclassified | 606 |  |
+| `MASC_WEB_SEARCH_RATE_LIMIT_WINDOW_SEC` | typed:float | unclassified | unclassified | 602 |  |
+| `MASC_WEB_SEARCH_TIMEOUT_SEC` | typed:int | unclassified | unclassified | 594 |  |
+| `MASC_WS_ENABLED` | feature_flag | n/a | n/a | 322 | Whether WebSocket transport is enabled. Default: true. Accessor-shaped reader; listener lifecycle is still decided at... |
+| `MASC_WS_PORT` | string_literal | n/a | n/a | 318 | WebSocket server port. Default: 8937. |
 | `MASC_ZOMBIE_CLEANUP_INTERVAL_SEC` | typed:float | unclassified | unclassified | 14 | Cleanup loop interval (seconds) |
 | `MASC_ZOMBIE_THRESHOLD_SEC` | typed:float | unclassified | unclassified | 6 | Threshold for considering a resource as zombie (seconds) |
 
@@ -369,96 +368,79 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_KEEPER_SANDBOX_TMPFS_SIZE` | typed:string | unclassified | unclassified | 37 |  |
 | `MASC_KEEPER_SHELL_TIMEOUT_DEFAULT_SEC` | string_literal | n/a | n/a | 177 |  |
 
-## Env_config_snapshot (88 knobs; typed classification 0/0)
+## Env_config_snapshot (71 knobs; typed classification 0/0)
 
 | Env var | Kind | Category | Ops class | Line | Doc |
 |---|---|---|---|---|---|
-| `MASC_A2A_DELEGATION_TIMEOUT_SEC` | string_literal | n/a | n/a | 805 |  |
 | `MASC_ALLOW_ANONYMOUS_MUTATIONS` | string_literal | n/a | n/a | 29 |  |
-| `MASC_ASSETS_DIR` | string_literal | n/a | n/a | 683 |  |
-| `MASC_BASE_PATH_RESOLUTION_SOURCE` | string_literal | n/a | n/a | 687 |  |
-| `MASC_BASE_PATH_STRICT` | string_literal | n/a | n/a | 689 |  |
-| `MASC_BENCHMARK_RESULTS_DIR` | string_literal | n/a | n/a | 231 |  |
-| `MASC_CHANNEL_GATE_DEDUP_MAX_ENTRIES` | string_literal | n/a | n/a | 305 |  |
-| `MASC_CHANNEL_GATE_DEDUP_TTL_SEC` | string_literal | n/a | n/a | 307 |  |
-| `MASC_CHANNEL_GATE_MAX_CONTENT_LENGTH` | string_literal | n/a | n/a | 309 |  |
-| `MASC_CHANNEL_GATE_SLOW_MS` | string_literal | n/a | n/a | 311 |  |
-| `MASC_CIRCUIT_COOLDOWN` | string_literal | n/a | n/a | 321 |  |
-| `MASC_CIRCUIT_FAILURE_WINDOW_SEC` | string_literal | n/a | n/a | 323 |  |
-| `MASC_CIRCUIT_THRESHOLD` | string_literal | n/a | n/a | 325 |  |
-| `MASC_DASHBOARD_CACHE_MAX_ENTRIES` | string_literal | n/a | n/a | 233 |  |
-| `MASC_DASHBOARD_EXECUTION_REFRESH_TIMEOUT_S` | string_literal | n/a | n/a | 241 |  |
-| `MASC_DASHBOARD_TRANSPORT_HEALTH_TIMEOUT_S` | string_literal | n/a | n/a | 269 |  |
-| `MASC_DECISION_AUDIT_RING_CAPACITY` | string_literal | n/a | n/a | 343 |  |
-| `MASC_DECISION_LAYER_LEVEL` | string_literal | n/a | n/a | 345 |  |
-| `MASC_DISCORD_STATUS_STALE_SEC` | string_literal | n/a | n/a | 313 |  |
-| `MASC_DRIFT_COSINE_WEIGHT` | string_literal | n/a | n/a | 222 |  |
-| `MASC_DRIFT_JACCARD_WEIGHT` | string_literal | n/a | n/a | 221 |  |
-| `MASC_DRIFT_THRESHOLD` | string_literal | n/a | n/a | 220 |  |
-| `MASC_ECONOMY_ENABLED` | string_literal | n/a | n/a | 392 |  |
-| `MASC_ECONOMY_FRUGAL_THRESHOLD` | string_literal | n/a | n/a | 394 |  |
-| `MASC_ECONOMY_HUSTLE_THRESHOLD` | string_literal | n/a | n/a | 396 |  |
-| `MASC_ECONOMY_INITIAL_BALANCE` | string_literal | n/a | n/a | 398 |  |
-| `MASC_ECONOMY_REPUTATION_MULTIPLIER` | string_literal | n/a | n/a | 400 |  |
-| `MASC_ECONOMY_REWARD_BOARD_POST` | string_literal | n/a | n/a | 402 |  |
-| `MASC_ECONOMY_REWARD_MENTION_RESPONSE` | string_literal | n/a | n/a | 404 |  |
-| `MASC_ECONOMY_REWARD_TASK_DONE` | string_literal | n/a | n/a | 406 |  |
-| `MASC_ECONOMY_REWARD_UPVOTE` | string_literal | n/a | n/a | 408 |  |
-| `MASC_FILE_LOCK_MAX_ENTRIES` | string_literal | n/a | n/a | 414 |  |
-| `MASC_FILE_LOCK_STALE_SEC` | string_literal | n/a | n/a | 416 |  |
+| `MASC_ASSETS_DIR` | string_literal | n/a | n/a | 635 |  |
+| `MASC_BASE_PATH_RESOLUTION_SOURCE` | string_literal | n/a | n/a | 639 |  |
+| `MASC_BASE_PATH_STRICT` | string_literal | n/a | n/a | 641 |  |
+| `MASC_BENCHMARK_RESULTS_DIR` | string_literal | n/a | n/a | 217 |  |
+| `MASC_CHANNEL_GATE_DEDUP_TTL_SEC` | string_literal | n/a | n/a | 291 |  |
+| `MASC_CHANNEL_GATE_MAX_CONTENT_LENGTH` | string_literal | n/a | n/a | 293 |  |
+| `MASC_DASHBOARD_CACHE_MAX_ENTRIES` | string_literal | n/a | n/a | 219 |  |
+| `MASC_DASHBOARD_EXECUTION_REFRESH_TIMEOUT_S` | string_literal | n/a | n/a | 227 |  |
+| `MASC_DASHBOARD_TRANSPORT_HEALTH_TIMEOUT_S` | string_literal | n/a | n/a | 255 |  |
+| `MASC_DECISION_AUDIT_RING_CAPACITY` | string_literal | n/a | n/a | 309 |  |
+| `MASC_DECISION_LAYER_LEVEL` | string_literal | n/a | n/a | 311 |  |
+| `MASC_DISCORD_STATUS_STALE_SEC` | string_literal | n/a | n/a | 295 |  |
+| `MASC_DRIFT_COSINE_WEIGHT` | string_literal | n/a | n/a | 208 |  |
+| `MASC_DRIFT_JACCARD_WEIGHT` | string_literal | n/a | n/a | 207 |  |
+| `MASC_DRIFT_THRESHOLD` | string_literal | n/a | n/a | 206 |  |
+| `MASC_ECONOMY_ENABLED` | string_literal | n/a | n/a | 358 |  |
+| `MASC_ECONOMY_FRUGAL_THRESHOLD` | string_literal | n/a | n/a | 360 |  |
+| `MASC_ECONOMY_HUSTLE_THRESHOLD` | string_literal | n/a | n/a | 362 |  |
+| `MASC_ECONOMY_INITIAL_BALANCE` | string_literal | n/a | n/a | 364 |  |
+| `MASC_ECONOMY_REPUTATION_MULTIPLIER` | string_literal | n/a | n/a | 366 |  |
+| `MASC_ECONOMY_REWARD_BOARD_POST` | string_literal | n/a | n/a | 368 |  |
+| `MASC_ECONOMY_REWARD_MENTION_RESPONSE` | string_literal | n/a | n/a | 370 |  |
+| `MASC_ECONOMY_REWARD_TASK_DONE` | string_literal | n/a | n/a | 372 |  |
+| `MASC_ECONOMY_REWARD_UPVOTE` | string_literal | n/a | n/a | 374 |  |
 | `MASC_GRPC_STREAM_MAX_BUFFER` | string_literal | n/a | n/a | 82 |  |
-| `MASC_GUARD_PENALTY_BETA` | string_literal | n/a | n/a | 214 |  |
-| `MASC_HEBBIAN_DECAY` | string_literal | n/a | n/a | 224 |  |
-| `MASC_HEBBIAN_RATE` | string_literal | n/a | n/a | 223 |  |
+| `MASC_GUARD_PENALTY_BETA` | string_literal | n/a | n/a | 200 |  |
+| `MASC_HEBBIAN_DECAY` | string_literal | n/a | n/a | 210 |  |
+| `MASC_HEBBIAN_RATE` | string_literal | n/a | n/a | 209 |  |
 | `MASC_HTTP_HOST` | string_literal | n/a | n/a | 21 |  |
 | `MASC_HTTP_MAX_CONNECTIONS` | string_literal | n/a | n/a | 22 |  |
-| `MASC_IMESSAGE_STATUS_STALE_SEC` | string_literal | n/a | n/a | 315 |  |
-| `MASC_KEEPER_AUTONOMOUS_CONCURRENCY` | string_literal | n/a | n/a | 521 |  |
-| `MASC_KEEPER_AUTONOMOUS_MAX_TOKENS` | string_literal | n/a | n/a | 172 |  |
-| `MASC_KEEPER_BOARD_LIST_CACHE_TTL_S` | string_literal | n/a | n/a | 486 |  |
+| `MASC_IMESSAGE_STATUS_STALE_SEC` | string_literal | n/a | n/a | 297 |  |
+| `MASC_KEEPER_AUTONOMOUS_CONCURRENCY` | string_literal | n/a | n/a | 473 |  |
+| `MASC_KEEPER_AUTONOMOUS_MAX_TOKENS` | string_literal | n/a | n/a | 166 |  |
 | `MASC_KEEPER_COMPACT_MAX_MESSAGES` | string_literal | n/a | n/a | 157 |  |
 | `MASC_KEEPER_COMPACT_MAX_TOKENS` | string_literal | n/a | n/a | 159 |  |
 | `MASC_KEEPER_COMPACT_RATIO` | string_literal | n/a | n/a | 155 |  |
-| `MASC_KEEPER_COST_GATE_USD` | string_literal | n/a | n/a | 161 |  |
-| `MASC_KEEPER_LLM_RERANK_CASCADE` | string_literal | n/a | n/a | 587 |  |
-| `MASC_KEEPER_MAX_TOOL_ROUNDS` | string_literal | n/a | n/a | 170 |  |
-| `MASC_KEEPER_PROACTIVE_SIMILARITY` | string_literal | n/a | n/a | 180 |  |
-| `MASC_KEEPER_PROACTIVE_TEMP_HIGH` | string_literal | n/a | n/a | 178 |  |
-| `MASC_KEEPER_PROACTIVE_TEMP_LOW` | string_literal | n/a | n/a | 174 |  |
-| `MASC_KEEPER_PROACTIVE_TEMP_MID` | string_literal | n/a | n/a | 176 |  |
-| `MASC_KEEPER_RULE_GUARDRAIL_CONTEXT_MIN` | string_literal | n/a | n/a | 198 |  |
-| `MASC_KEEPER_RULE_GUARDRAIL_GOAL_ALIGNMENT_MAX` | string_literal | n/a | n/a | 194 |  |
-| `MASC_KEEPER_RULE_GUARDRAIL_REPETITION` | string_literal | n/a | n/a | 192 |  |
-| `MASC_KEEPER_RULE_GUARDRAIL_RESPONSE_ALIGNMENT_MAX` | string_literal | n/a | n/a | 196 |  |
-| `MASC_KEEPER_RULE_PLAN_GOAL_ALIGNMENT_MAX` | string_literal | n/a | n/a | 188 |  |
-| `MASC_KEEPER_RULE_PLAN_RESPONSE_ALIGNMENT_MAX` | string_literal | n/a | n/a | 190 |  |
-| `MASC_KEEPER_RULE_REFLECT_REPETITION` | string_literal | n/a | n/a | 186 |  |
-| `MASC_KEEPER_TOOL_AFFINITY_K` | string_literal | n/a | n/a | 591 |  |
-| `MASC_KEEPER_TOOL_AFFINITY_LOOKBACK_DAYS` | string_literal | n/a | n/a | 593 |  |
-| `MASC_KEEPER_TOOL_COST_MAX_USD` | string_literal | n/a | n/a | 163 |  |
-| `MASC_KEEPER_TOOL_DECAY_TURNS` | string_literal | n/a | n/a | 595 |  |
-| `MASC_KEEPER_TURN_LIVELOCK_MAX_ATTEMPTS` | string_literal | n/a | n/a | 547 |  |
-| `MASC_KEEPER_TURN_LIVELOCK_STUCK_AFTER_SEC` | string_literal | n/a | n/a | 549 |  |
-| `MASC_KEEPER_UNIFIED_MAX_TOKENS` | string_literal | n/a | n/a | 166 |  |
-| `MASC_KEEPER_UNIFIED_MAX_TURNS` | string_literal | n/a | n/a | 168 |  |
-| `MASC_KEEPER_UNIFIED_TEMP` | string_literal | n/a | n/a | 165 |  |
-| `MASC_LOCK_WARN_MS` | string_literal | n/a | n/a | 225 |  |
-| `MASC_MAX_WRITE_SIZE_BYTES` | string_literal | n/a | n/a | 821 |  |
-| `MASC_OTEL_ENABLED` | string_literal | n/a | n/a | 781 |  |
-| `MASC_PLACEHOLDER_TOOLS_ENABLED` | string_literal | n/a | n/a | 823 |  |
-| `MASC_SEARXNG_URL` | string_literal | n/a | n/a | 835 |  |
-| `MASC_SHUTDOWN_CLEANUP_TIMEOUT` | string_literal | n/a | n/a | 729 |  |
-| `MASC_SHUTDOWN_DRAIN_TIMEOUT` | string_literal | n/a | n/a | 731 |  |
-| `MASC_SHUTDOWN_FORCE_TIMEOUT` | string_literal | n/a | n/a | 733 |  |
-| `MASC_SHUTDOWN_NOTIFY_DELAY` | string_literal | n/a | n/a | 735 |  |
-| `MASC_SSE_STREAM_CAPACITY` | string_literal | n/a | n/a | 761 |  |
+| `MASC_KEEPER_LLM_RERANK_CASCADE` | string_literal | n/a | n/a | 539 |  |
+| `MASC_KEEPER_RULE_GUARDRAIL_CONTEXT_MIN` | string_literal | n/a | n/a | 184 |  |
+| `MASC_KEEPER_RULE_GUARDRAIL_GOAL_ALIGNMENT_MAX` | string_literal | n/a | n/a | 180 |  |
+| `MASC_KEEPER_RULE_GUARDRAIL_REPETITION` | string_literal | n/a | n/a | 178 |  |
+| `MASC_KEEPER_RULE_GUARDRAIL_RESPONSE_ALIGNMENT_MAX` | string_literal | n/a | n/a | 182 |  |
+| `MASC_KEEPER_RULE_PLAN_GOAL_ALIGNMENT_MAX` | string_literal | n/a | n/a | 174 |  |
+| `MASC_KEEPER_RULE_PLAN_RESPONSE_ALIGNMENT_MAX` | string_literal | n/a | n/a | 176 |  |
+| `MASC_KEEPER_RULE_REFLECT_REPETITION` | string_literal | n/a | n/a | 172 |  |
+| `MASC_KEEPER_TOOL_AFFINITY_K` | string_literal | n/a | n/a | 543 |  |
+| `MASC_KEEPER_TOOL_AFFINITY_LOOKBACK_DAYS` | string_literal | n/a | n/a | 545 |  |
+| `MASC_KEEPER_TOOL_COST_MAX_USD` | string_literal | n/a | n/a | 161 |  |
+| `MASC_KEEPER_TOOL_DECAY_TURNS` | string_literal | n/a | n/a | 547 |  |
+| `MASC_KEEPER_TURN_LIVELOCK_MAX_ATTEMPTS` | string_literal | n/a | n/a | 499 |  |
+| `MASC_KEEPER_TURN_LIVELOCK_STUCK_AFTER_SEC` | string_literal | n/a | n/a | 501 |  |
+| `MASC_KEEPER_UNIFIED_MAX_TOKENS` | string_literal | n/a | n/a | 164 |  |
+| `MASC_KEEPER_UNIFIED_TEMP` | string_literal | n/a | n/a | 163 |  |
+| `MASC_LOCK_WARN_MS` | string_literal | n/a | n/a | 211 |  |
+| `MASC_OTEL_ENABLED` | string_literal | n/a | n/a | 733 |  |
+| `MASC_PLACEHOLDER_TOOLS_ENABLED` | string_literal | n/a | n/a | 771 |  |
+| `MASC_SEARXNG_URL` | string_literal | n/a | n/a | 783 |  |
+| `MASC_SHUTDOWN_CLEANUP_TIMEOUT` | string_literal | n/a | n/a | 681 |  |
+| `MASC_SHUTDOWN_DRAIN_TIMEOUT` | string_literal | n/a | n/a | 683 |  |
+| `MASC_SHUTDOWN_FORCE_TIMEOUT` | string_literal | n/a | n/a | 685 |  |
+| `MASC_SHUTDOWN_NOTIFY_DELAY` | string_literal | n/a | n/a | 687 |  |
+| `MASC_SSE_STREAM_CAPACITY` | string_literal | n/a | n/a | 713 |  |
 | `MASC_STRUCTURED_STATE` | string_literal | n/a | n/a | 147 |  |
-| `MASC_TEST_ALLOW_BASE_PATH_OVERRIDE` | string_literal | n/a | n/a | 797 |  |
-| `MASC_TEST_ALLOW_CONFIG_PATH_OVERRIDE` | string_literal | n/a | n/a | 799 |  |
+| `MASC_TEST_ALLOW_BASE_PATH_OVERRIDE` | string_literal | n/a | n/a | 749 |  |
+| `MASC_TEST_ALLOW_CONFIG_PATH_OVERRIDE` | string_literal | n/a | n/a | 751 |  |
 | `MASC_TLA_TRACE` | string_literal | n/a | n/a | 149 |  |
-| `MASC_WORKER_RUNTIME_BACKEND` | string_literal | n/a | n/a | 867 |  |
-| `MASC_WORKER_RUNTIME_DOCKER_IMAGE` | string_literal | n/a | n/a | 869 |  |
-| `MASC_WORKER_RUNTIME_HOST_MCP_BASE_URL` | string_literal | n/a | n/a | 871 |  |
+| `MASC_WORKER_RUNTIME_BACKEND` | string_literal | n/a | n/a | 815 |  |
+| `MASC_WORKER_RUNTIME_DOCKER_IMAGE` | string_literal | n/a | n/a | 817 |  |
+| `MASC_WORKER_RUNTIME_HOST_MCP_BASE_URL` | string_literal | n/a | n/a | 819 |  |
 | `MASC_WS_CLIENT_BUFFER_LIMIT_BYTES` | string_literal | n/a | n/a | 89 |  |
 | `MASC_WS_SLICE_INDEX_ENABLED` | string_literal | n/a | n/a | 92 |  |
 

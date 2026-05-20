@@ -125,13 +125,6 @@ module Relay = struct
     get_string ~default:"auto" "MASC_RELAY_TARGET_AGENT"
 end
 
-(** {1 CLI Configuration} *)
-
-module Cli = struct
-  let default_agent =
-    get_string ~default:"auto" "MASC_CLI_AGENT"
-end
-
 (** {1 Spawn Configuration} *)
 
 module Spawn = struct

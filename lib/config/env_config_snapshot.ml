@@ -158,27 +158,13 @@ let keeper_execution_entries =
       "Max messages before compaction";
     entry ~default:"4000" "MASC_KEEPER_COMPACT_MAX_TOKENS"
       "Max tokens before compaction (0=disabled)";
-    entry ~default:"0.10" "MASC_KEEPER_COST_GATE_USD"
-      "Legacy keeper cost gate (unused by unified turn cost guard)";
     entry ~default:"0" "MASC_KEEPER_TOOL_COST_MAX_USD"
       "Unified turn accumulated cost ceiling (USD, 0=disabled)";
     entry ~default:"0.4" "MASC_KEEPER_UNIFIED_TEMP" "Unified turn temperature";
     entry ~default:"131072" "MASC_KEEPER_UNIFIED_MAX_TOKENS"
       "Unified turn max output tokens";
-    entry ~default:"20" "MASC_KEEPER_UNIFIED_MAX_TURNS"
-      "Unified turn max tool loops";
-    entry ~default:"3" "MASC_KEEPER_MAX_TOOL_ROUNDS"
-      "Max tool loop rounds per turn";
     entry ~default:"4000" "MASC_KEEPER_AUTONOMOUS_MAX_TOKENS"
       "Autonomous execution max tokens";
-    entry ~default:"0.55" "MASC_KEEPER_PROACTIVE_TEMP_LOW"
-      "Proactive temperature (low urgency)";
-    entry ~default:"0.75" "MASC_KEEPER_PROACTIVE_TEMP_MID"
-      "Proactive temperature (mid urgency)";
-    entry ~default:"0.9" "MASC_KEEPER_PROACTIVE_TEMP_HIGH"
-      "Proactive temperature (high urgency)";
-    entry ~default:"0.72" "MASC_KEEPER_PROACTIVE_SIMILARITY"
-      "Proactive similarity threshold";
   ]
 
 let keeper_guardrail_entries =
@@ -302,34 +288,14 @@ let cancellation_entries =
 
 let channel_gate_entries =
   [
-    entry ~default:"(none)" "MASC_CHANNEL_GATE_DEDUP_MAX_ENTRIES"
-      "Dedup table max entries (clamped 100-100000)";
     entry ~default:"(none)" "MASC_CHANNEL_GATE_DEDUP_TTL_SEC"
       "Dedup TTL (seconds, clamped 10-3600)";
     entry ~default:"(none)" "MASC_CHANNEL_GATE_MAX_CONTENT_LENGTH"
       "Max content length (clamped 100-16000)";
-    entry ~default:"(none)" "MASC_CHANNEL_GATE_SLOW_MS"
-      "Slow threshold in ms (clamped 250-120000)";
     entry ~default:"30" "MASC_DISCORD_STATUS_STALE_SEC"
       "Discord status stale threshold (seconds)";
     entry ~default:"30" "MASC_IMESSAGE_STATUS_STALE_SEC"
       "iMessage status stale threshold (seconds)";
-  ]
-
-let circuit_breaker_entries =
-  [
-    entry ~default:"(none)" "MASC_CIRCUIT_COOLDOWN"
-      "Cooldown before half-open retry (seconds)";
-    entry ~default:"(none)" "MASC_CIRCUIT_FAILURE_WINDOW_SEC"
-      "Failure counting window (seconds)";
-    entry ~default:"(none)" "MASC_CIRCUIT_THRESHOLD"
-      "Failure threshold before circuit opens";
-  ]
-
-let cli_entries =
-  [
-    entry ~default:"auto" "MASC_CLI_AGENT"
-      "CLI default agent name";
   ]
 
 let compaction_entries =
@@ -409,14 +375,6 @@ let economy_entries =
       "Reward for receiving an upvote";
   ]
 
-let file_lock_entries =
-  [
-    entry ~default:"(none)" "MASC_FILE_LOCK_MAX_ENTRIES"
-      "Maximum concurrent lock entries (clamped 64-4096)";
-    entry ~default:"(none)" "MASC_FILE_LOCK_STALE_SEC"
-      "Stale lock entry timeout (seconds, clamped 60-7200)";
-  ]
-
 let internal_timer_entries =
   [
     entry ~default:"300.0" "MASC_BRIEFING_CACHE_TTL_SEC"
@@ -479,12 +437,6 @@ let keeper_alert_entries =
       "Slack webhook fanout (feature flag)";
     entry ~sensitive:true ~default:"(none)" "MASC_KEEPER_ALERT_SLACK_WEBHOOK_URL"
       "Slack webhook URL for alerts (empty=disabled)";
-  ]
-
-let keeper_board_entries =
-  [
-    entry ~default:"(none)" "MASC_KEEPER_BOARD_LIST_CACHE_TTL_S"
-      "Keeper board list cache TTL (seconds, floor 0)";
   ]
 
 let keeper_bootstrap_entries =
@@ -802,8 +754,6 @@ let test_entries =
 
 let timeout_entries =
   [
-    entry ~default:"300" "MASC_A2A_DELEGATION_TIMEOUT_SEC"
-      "A2A task delegation timeout (seconds)";
     entry ~default:"100" "MASC_EVENT_BUFFER_SIZE"
       "A2A event buffer size per subscription";
     entry ~default:"30.0" "MASC_SSE_KEEPALIVE_SEC"
@@ -818,8 +768,6 @@ let tool_entries =
       "Include hidden/developer tools in tool list (feature flag)";
     entry ~default:"512" "MASC_LIST_PAGE_SIZE"
       "Tool list page size (clamped 10-1024)";
-    entry ~default:"(none)" "MASC_MAX_WRITE_SIZE_BYTES"
-      "Maximum write size in bytes (1MB)";
     entry ~default:"(none)" "MASC_PLACEHOLDER_TOOLS_ENABLED"
       "Enable placeholder tool exposure";
     entry ~default:"(none)" "MASC_PUBLIC_TOOLS_EXTRA"
@@ -891,10 +839,10 @@ let all_categories () =
     category "transport" transport_entries;
     category "storage" (storage_entries @ cache_entries @ memory_entries @ board_entries);
     category "runtime"
-      (runtime_entries @ cli_entries @ relay_entries @ task_entries
+      (runtime_entries @ relay_entries @ task_entries
        @ message_gc_entries @ pulse_entries @ internal_timer_entries
        @ timeout_entries @ sse_entries @ telemetry_entries
-       @ circuit_breaker_entries @ tool_entries);
+       @ tool_entries);
     category "rate_limiting" rate_limiting_entries;
     category "inference"
       (inference_entries @ model_routing_entries @ oas_sse_entries
@@ -902,7 +850,7 @@ let all_categories () =
     category "keeper"
       (keeper_entries @ keeper_alert_entries @ keeper_bootstrap_entries
        @ keeper_keepalive_entries @ keeper_metrics_entries
-       @ keeper_board_entries @ docker_playground_entries
+       @ docker_playground_entries
        @ keeper_sandbox_entries);
     category "keeper_execution"
       (keeper_execution_entries @ compaction_entries @ decision_entries
@@ -917,7 +865,7 @@ let all_categories () =
       (operator_entries @ orchestrator_entries @ smart_heartbeat_entries);
     category "channel" channel_gate_entries;
     category "process"
-      (shutdown_entries @ spawn_entries @ file_lock_entries
+      (shutdown_entries @ spawn_entries
        @ cancellation_entries @ zombie_cleanup_entries @ lock_entries
        @ procedural_memory_entries);
     category "worker" (worker_entries @ worker_runtime_entries);

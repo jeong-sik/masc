@@ -130,5 +130,6 @@
    (re_export unix)
    (re_export uri)
    (re_export uuidm)
+   (re_export otoml)
    (re_export yojson)
    (re_export zstd)))

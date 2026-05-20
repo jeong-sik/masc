@@ -4,6 +4,7 @@
  (name repo_manager)
  (public_name masc_mcp.repo_manager)
  (modules
+   field_resolution
    repo_manager_types
    repo_store_lookup
    repo_store

@@ -1,7 +1,7 @@
 ---
 id: RFC-0083
 title: Dashboard system-actor convention typed unification
-status: draft
+status: Draft
 created: 2026-05-15
 authors: ["@yousleepwhen"]
 related: ["RFC-0077"]

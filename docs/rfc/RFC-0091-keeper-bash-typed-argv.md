@@ -1,7 +1,7 @@
 ---
 rfc: "0091"
 title: "Keeper bash tool: cmd string → typed Argv schema (lexer/validator 박멸)"
-status: Draft
+status: Active
 created: 2026-05-17
 updated: 2026-05-20
 author: vincent

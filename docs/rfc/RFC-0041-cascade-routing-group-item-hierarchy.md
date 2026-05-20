@@ -1,5 +1,5 @@
 ---
-status: draft
+status: Draft
 last_verified: 2026-05-08
 code_refs:
   - lib/keeper/keeper_cascade_profile.ml

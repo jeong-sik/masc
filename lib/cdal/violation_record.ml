@@ -64,7 +64,12 @@ let of_json_list (json : Yojson.Safe.t) : (t list, string) result =
          | Error e -> Error e)
     in
     parse [] items
-  | _ -> Error "expected JSON array of violation records"
+  | other ->
+    Error
+      (Printf.sprintf
+         "violation_record.of_json_list: expected JSON array of violation \
+          records (kind=%s)"
+         (Json_util.kind_name other))
 ;;
 
 let minimum_required_mode (v : t) : Masc_mcp_cdal_runtime.Execution_mode.t =

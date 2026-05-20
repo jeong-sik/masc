@@ -17,17 +17,30 @@
 import { html } from 'htm/preact'
 import { CostDashboard, type CostView } from './cost-dashboard'
 
-const TELEMETRY_VIEW_SET: ReadonlySet<CostView> = new Set<CostView>([
-  'cost',
-  'audit',
-  'heuristics',
-  'stress',
-])
+// Telemetry-panel handles only the four "infra/billing/audit" subkeys of
+// CostView (CostView itself includes `decisions`, which this panel does
+// NOT render). Extract narrows the closed set so callers spreading
+// TELEMETRY_VIEW_CHIPS into RuntimeView-typed strips stay sound.
+export type TelemetryView = Extract<CostView, 'cost' | 'audit' | 'heuristics' | 'stress'>
 
-export function isTelemetryView(view: string): view is CostView {
-  return TELEMETRY_VIEW_SET.has(view as CostView)
+// Single SSOT for the four telemetry chip definitions. Host components
+// import this list to render the Advanced chip strip — the labels live
+// next to the dispatch logic instead of being duplicated in runtime-panel.
+export const TELEMETRY_VIEW_CHIPS: ReadonlyArray<{ key: TelemetryView; label: string }> = [
+  { key: 'cost', label: '비용 / 지연' },
+  { key: 'audit', label: '감사' },
+  { key: 'heuristics', label: '휴리스틱' },
+  { key: 'stress', label: '스트레스' },
+]
+
+const TELEMETRY_VIEW_SET: ReadonlySet<TelemetryView> = new Set<TelemetryView>(
+  TELEMETRY_VIEW_CHIPS.map(chip => chip.key),
+)
+
+export function isTelemetryView(view: string): view is TelemetryView {
+  return TELEMETRY_VIEW_SET.has(view as TelemetryView)
 }
 
-export function TelemetryPanel({ view }: { view: CostView }) {
+export function TelemetryPanel({ view }: { view: TelemetryView }) {
   return html`<${CostDashboard} view=${view} />`
 }

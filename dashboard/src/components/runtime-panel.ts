@@ -29,7 +29,7 @@ import { OasHealthChip } from './oas-health-chip'
 import { RuntimeMonitor } from './runtime-monitor'
 import { PrometheusMetrics } from './prometheus-metrics'
 import { VerificationSpecsPanel } from './verification-specs-panel'
-import { TelemetryPanel, isTelemetryView } from './telemetry-panel'
+import { TelemetryPanel, isTelemetryView, TELEMETRY_VIEW_CHIPS } from './telemetry-panel'
 import { CascadeInspector } from './cascade-inspector'
 import { RouteLink } from './common/route-link'
 
@@ -75,15 +75,13 @@ const PRIMARY_VIEW_CHIPS: Array<{ key: RuntimeView; label: string }> = [
   { key: 'inspector', label: '검사기' },
 ]
 
-// Advanced chips are infra/billing telemetry and formal-verification views.
-// Useful for post-mortems and audits, not for daily keeper triage. They stay
-// reachable via the same chip strip below for now; a follow-up may move
-// cost/audit/heuristics/stress into a dedicated telemetry-panel surface.
+// Advanced chips are infra/billing telemetry plus the raw / formal layers.
+// The first four chips (cost / audit / heuristics / stress) are owned by
+// telemetry-panel.ts — both their labels and their dispatch live there.
+// The remaining two (prometheus / verification) stay inline because
+// runtime-panel still renders them directly.
 const ADVANCED_VIEW_CHIPS: Array<{ key: RuntimeView; label: string }> = [
-  { key: 'cost', label: '비용 / 지연' },
-  { key: 'audit', label: '감사' },
-  { key: 'heuristics', label: '휴리스틱' },
-  { key: 'stress', label: '스트레스' },
+  ...TELEMETRY_VIEW_CHIPS,
   { key: 'prometheus', label: '메트릭' },
   { key: 'verification', label: '형식검증' },
 ]

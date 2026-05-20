@@ -756,6 +756,21 @@ let repo_top_relative_read_path raw =
     then Some path
     else None
 
+let git_read_only_command_needs_repo_cwd cmd =
+  match shell_words_with_boundaries cmd |> strip_command_wrappers with
+  | bin :: subcmd :: _ when String.equal (command_name bin.text) "git" ->
+    (not (Worker_dev_tools.is_write_operation cmd))
+    && List.mem (String.lowercase_ascii subcmd.text)
+         [ "status"
+         ; "log"
+         ; "diff"
+         ; "show"
+         ; "rev-parse"
+         ; "describe"
+         ; "merge-base"
+         ]
+  | _ -> false
+
 let single_repo_cwd_for_top_relative_read
       ~(config : Coord.config)
       ~(meta : keeper_meta)
@@ -783,7 +798,7 @@ let single_repo_cwd_for_top_relative_read
       (match keeper_sandbox_repo_names ~config ~meta with
        | [ repo_name ] ->
          let repo_root = Filename.concat (Filename.concat sandbox_root "repos") repo_name in
-         let wants_repo_root =
+         let wants_repo_top_path =
            Worker_dev_tools.existing_dir_path_values cmd
            |> List.exists (fun raw_path ->
              match repo_top_relative_read_path raw_path with
@@ -792,7 +807,12 @@ let single_repo_cwd_for_top_relative_read
                (not (safe_file_exists (Filename.concat sandbox_root rel)))
                && safe_file_exists (Filename.concat repo_root rel))
          in
-         if wants_repo_root then Some repo_root else None
+         let wants_git_repo_root =
+           git_read_only_command_needs_repo_cwd cmd
+           && safe_file_exists (Filename.concat repo_root ".git")
+           && not (safe_file_exists (Filename.concat sandbox_root ".git"))
+         in
+         if wants_repo_top_path || wants_git_repo_root then Some repo_root else None
        | [] | _ :: _ :: _ -> None)
 
 let typed_docker_image (meta : keeper_meta) =

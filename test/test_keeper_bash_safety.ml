@@ -201,6 +201,12 @@ let rec ensure_dir path =
     if parent <> path then ensure_dir parent;
     Unix.mkdir path 0o755)
 
+let run_shell_ok ~cwd cmd =
+  let full = Printf.sprintf "cd %s && %s" (Filename.quote cwd) cmd in
+  match Sys.command full with
+  | 0 -> ()
+  | code -> Alcotest.failf "command failed with code %d: %s" code full
+
 let test_playground_path_structure () =
   (* playground_path_of_keeper returns relative path ending with / *)
   Alcotest.(check string) "cheolsu"
@@ -1336,6 +1342,108 @@ let test_keeper_bash_single_repo_root_recovers_top_level_find () =
      |> Json.to_string
      |> fun output -> String_util.contains_substring output "marker.ml")
 
+let test_keeper_bash_single_repo_root_recovers_git_status () =
+  with_eio_fs @@ fun () ->
+  let base_path, config = make_config () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  Keeper_registry.clear ();
+  let meta = make_readonly_meta "single-repo-git-status" in
+  let playground = Filename.concat base_path (playground_path_of meta.name) in
+  let repo_root = Filename.concat playground "repos/masc-mcp" in
+  ensure_dir repo_root;
+  run_shell_ok ~cwd:repo_root "git init -q";
+  let raw =
+    Keeper_exec_shell.handle_keeper_bash
+      ~turn_sandbox_factory:None
+      ~turn_sandbox_factory_git:None ~exec_cache:None
+      ~config ~meta
+      ~args:
+        (`Assoc
+          [ ("cmd", `String "git status --short")
+          ; ("cwd", `String playground)
+          ])
+      ()
+  in
+  let json = Yojson.Safe.from_string raw in
+  Alcotest.(check bool) "git status succeeds from selected repo cwd" true
+    (json |> Json.member "ok" |> Json.to_bool);
+  Alcotest.(check string) "execution cwd is the single repo root"
+    (Unix.realpath repo_root)
+    (json |> Json.member "cwd" |> Json.to_string |> Unix.realpath)
+
+let test_keeper_bash_single_repo_root_recovers_git_log () =
+  with_eio_fs @@ fun () ->
+  let base_path, config = make_config () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  Keeper_registry.clear ();
+  let meta = make_readonly_meta "single-repo-git-log" in
+  let playground = Filename.concat base_path (playground_path_of meta.name) in
+  let repo_root = Filename.concat playground "repos/masc-mcp" in
+  ensure_dir repo_root;
+  run_shell_ok ~cwd:repo_root "git init -q";
+  ignore
+    (Fs_compat.save_file_atomic
+       (Filename.concat repo_root "marker.txt")
+       "ok\n");
+  run_shell_ok ~cwd:repo_root "git add marker.txt";
+  run_shell_ok ~cwd:repo_root
+    "git -c user.email=keeper@example.invalid -c user.name=keeper commit -qm initial";
+  let raw =
+    Keeper_exec_shell.handle_keeper_bash
+      ~turn_sandbox_factory:None
+      ~turn_sandbox_factory_git:None ~exec_cache:None
+      ~config ~meta
+      ~args:
+        (`Assoc
+          [ ("cmd", `String "git log --oneline -5")
+          ; ("cwd", `String playground)
+          ])
+      ()
+  in
+  let json = Yojson.Safe.from_string raw in
+  Alcotest.(check bool) "git log succeeds from selected repo cwd" true
+    (json |> Json.member "ok" |> Json.to_bool);
+  Alcotest.(check string) "execution cwd is the single repo root"
+    (Unix.realpath repo_root)
+    (json |> Json.member "cwd" |> Json.to_string |> Unix.realpath);
+  Alcotest.(check bool) "git log output is preserved" true
+    (json
+     |> Json.member "output"
+     |> Json.to_string
+     |> fun output -> String_util.contains_substring output "initial")
+
+let test_keeper_bash_single_repo_git_cwd_not_guessed_for_multiple_repos () =
+  with_eio_fs @@ fun () ->
+  let base_path, config = make_config () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  Keeper_registry.clear ();
+  let meta = make_readonly_meta "multi-repo-git-status" in
+  let playground = Filename.concat base_path (playground_path_of meta.name) in
+  let repo_a = Filename.concat playground "repos/masc-mcp" in
+  let repo_b = Filename.concat playground "repos/oas" in
+  ensure_dir repo_a;
+  ensure_dir repo_b;
+  run_shell_ok ~cwd:repo_a "git init -q";
+  run_shell_ok ~cwd:repo_b "git init -q";
+  let raw =
+    Keeper_exec_shell.handle_keeper_bash
+      ~turn_sandbox_factory:None
+      ~turn_sandbox_factory_git:None ~exec_cache:None
+      ~config ~meta
+      ~args:
+        (`Assoc
+          [ ("cmd", `String "git status --short")
+          ; ("cwd", `String playground)
+          ])
+      ()
+  in
+  let json = Yojson.Safe.from_string raw in
+  Alcotest.(check bool) "ambiguous repo cwd stays failed" false
+    (json |> Json.member "ok" |> Json.to_bool);
+  Alcotest.(check string) "execution cwd remains playground"
+    (Unix.realpath playground)
+    (json |> Json.member "cwd" |> Json.to_string |> Unix.realpath)
+
 let test_keeper_bash_blocks_doubled_repo_prefix_with_public_alias_plan () =
   with_eio_fs @@ fun () ->
   let base_path, config = make_config () in
@@ -2283,6 +2391,12 @@ let () =
         test_keeper_bash_pwd_fallback_does_not_unblock_writes;
       Alcotest.test_case "single repo root recovers top-level find" `Quick
         test_keeper_bash_single_repo_root_recovers_top_level_find;
+      Alcotest.test_case "single repo root recovers git status" `Quick
+        test_keeper_bash_single_repo_root_recovers_git_status;
+      Alcotest.test_case "single repo root recovers git log" `Quick
+        test_keeper_bash_single_repo_root_recovers_git_log;
+      Alcotest.test_case "single repo git cwd is not guessed for multiple repos" `Quick
+        test_keeper_bash_single_repo_git_cwd_not_guessed_for_multiple_repos;
       Alcotest.test_case "double repo prefix gets public Bash recovery plan" `Quick
         test_keeper_bash_blocks_doubled_repo_prefix_with_public_alias_plan;
       Alcotest.test_case "safe rg fallback allows escaped regex pipe" `Quick

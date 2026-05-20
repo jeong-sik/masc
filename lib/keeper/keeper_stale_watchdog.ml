@@ -197,15 +197,17 @@ let provider_auth_failure ~code ~detail =
          "permission denied";
        ]
 
+(* RFC-0154 PR-2: substring vocabulary lives in
+   [System_error_class.classify_string] now.  [contains_any_ci] /
+   helper is kept for [provider_auth_failure] etc. *)
 let fd_exhaustion_failure detail =
-  contains_any_ci detail
-    [
-      "too many open files";
-      "file descriptor";
-      "fd leak";
-      "os error 24";
-      "emfile";
-    ]
+  match System_error_class.classify_string detail with
+  | System_error_class.Fd_exhaustion -> true
+  | System_error_class.Disk_exhaustion
+  | System_error_class.Permission_denied
+  | System_error_class.Connection_refused
+  | System_error_class.Timeout
+  | System_error_class.Other _ -> false
 
 let failure_reason_batch_root_cause
     (reason : Keeper_registry.failure_reason) : batch_root_cause option =

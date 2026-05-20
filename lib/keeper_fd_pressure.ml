@@ -94,16 +94,20 @@ let contains haystack needle =
   String_util.contains_substring haystack needle
 ;;
 
+(* RFC-0154 PR-2: substring vocabulary lives in
+   [System_error_class.classify_string] now.  Local [contains] /
+   [lowercase] helpers remain for other call sites in this module.
+
+   Wrapper preserved for external callers; mirrors the previous boolean
+   semantics by checking the typed classification result. *)
 let is_fd_exhaustion_text detail =
-  List.exists
-    (contains detail)
-    [ "too many open files"
-    ; "emfile"
-    ; "enfile"
-    ; "file descriptor"
-    ; "os error 24"
-    ; "execve: too many open files"
-    ]
+  match System_error_class.classify_string detail with
+  | System_error_class.Fd_exhaustion -> true
+  | System_error_class.Disk_exhaustion
+  | System_error_class.Permission_denied
+  | System_error_class.Connection_refused
+  | System_error_class.Timeout
+  | System_error_class.Other _ -> false
 ;;
 
 let cooldown_sec () =

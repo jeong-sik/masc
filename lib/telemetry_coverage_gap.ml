@@ -11,8 +11,31 @@ let string_opt_json = function
   | Some value when String.trim value <> "" -> `String value
   | _ -> `Null
 
+(* RFC-0154: derive (raw_error, error_class) from the optional [exn] /
+   [error] inputs.  When both are present, [error] wins for the wire
+   value (caller's explicit string is authoritative) while [exn] is
+   still used for the typed errno match.  When only [error] is given,
+   [classify_string] runs over it for the typed tag. *)
+let derive_error_and_class ~error ~exn =
+  match exn, error with
+  | Some e, Some explicit ->
+      let cls = System_error_class.classify_exn e in
+      (Some explicit, Some cls)
+  | Some e, None ->
+      let cls = System_error_class.classify_exn e in
+      (Some (Printexc.to_string e), Some cls)
+  | None, Some s ->
+      let cls = System_error_class.classify_string s in
+      (Some s, Some cls)
+  | None, None -> (None, None)
+
+let class_json = function
+  | None -> `Null
+  | Some cls -> `String (System_error_class.to_short_tag cls)
+
 let record ~masc_root ~source ~producer ~durable_store ~dashboard_surface
-    ~stale_reason ?keeper_name ?trace_id ?error () =
+    ~stale_reason ?keeper_name ?trace_id ?error ?exn () =
+  let raw_error, error_class = derive_error_and_class ~error ~exn in
   Prometheus.inc_counter Prometheus.metric_telemetry_coverage_gap
     ~labels:[
       ("source", source);
@@ -35,7 +58,8 @@ let record ~masc_root ~source ~producer ~durable_store ~dashboard_surface
         ("stale_reason", `String stale_reason);
         ("keeper_name", string_opt_json keeper_name);
         ("trace_id", string_opt_json trace_id);
-        ("error", string_opt_json error);
+        ("error", string_opt_json raw_error);
+        ("error_class", class_json error_class);
       ]
   in
   Dated_jsonl.append store json

@@ -403,17 +403,17 @@ let agent_json_needs_repair = function
       | Some _ -> false)
   | _ -> false
 
+(* RFC-0154 PR-2: substring vocabulary lives in
+   [System_error_class.classify_string] now.  Wrapper preserved for the
+   one local [read_agent_with_repair] caller below. *)
 let is_fd_pressure_text detail =
-  let detail = String.lowercase_ascii detail in
-  List.exists
-    (fun needle -> String_util.contains_substring detail needle)
-    [ "too many open files"
-    ; "emfile"
-    ; "enfile"
-    ; "file descriptor"
-    ; "os error 24"
-    ; "execve: too many open files"
-    ]
+  match System_error_class.classify_string detail with
+  | System_error_class.Fd_exhaustion -> true
+  | System_error_class.Disk_exhaustion
+  | System_error_class.Permission_denied
+  | System_error_class.Connection_refused
+  | System_error_class.Timeout
+  | System_error_class.Other _ -> false
 ;;
 
 let read_agent_with_repair config path =

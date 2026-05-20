@@ -52,16 +52,17 @@ let contains haystack needle =
   String_util.contains_substring_ci haystack needle
 ;;
 
+(* RFC-0154 PR-2: substring vocabulary lives in
+   [System_error_class.classify_string] now.  Wrapper preserved for
+   external callers; mirrors the previous boolean semantics. *)
 let is_disk_exhaustion_text detail =
-  List.exists
-    (contains detail)
-    [ "no space left on device"
-    ; "enospc"
-    ; "disk quota exceeded"
-    ; "quota exceeded"
-    ; "disk full"
-    ; "not enough space"
-    ]
+  match System_error_class.classify_string detail with
+  | System_error_class.Disk_exhaustion -> true
+  | System_error_class.Fd_exhaustion
+  | System_error_class.Permission_denied
+  | System_error_class.Connection_refused
+  | System_error_class.Timeout
+  | System_error_class.Other _ -> false
 ;;
 
 let is_disk_exhaustion_exn = function

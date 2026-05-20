@@ -7,7 +7,7 @@
 
 open Alcotest
 
-module S = Masc_mcp.System_error_class
+module S = System_error_class
 
 let tag = testable Fmt.string String.equal
 

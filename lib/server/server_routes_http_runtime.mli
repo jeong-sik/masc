@@ -238,6 +238,12 @@ val keeper_fleet_runtime_resolution_fields : unit -> (string * Yojson.Safe.t) li
     shell can show the same backpressure source as [/health] without scraping
     Prometheus. *)
 
+val keeper_fleet_runtime_resolution_light_fields :
+  unit -> (string * Yojson.Safe.t) list
+(** Like {!keeper_fleet_runtime_resolution_fields}, but omits the
+    reaction-ledger JSONL scan for the [/api/v1/dashboard/shell?light=true]
+    header hot path. *)
+
 val health_handler : Httpun.Request.t -> Httpun.Reqd.t -> unit
 (** [health_handler request reqd] writes {!make_health_response_json} as the
     response body. *)

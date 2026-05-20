@@ -99,8 +99,8 @@ export function computeBeaconView(args: {
   }
   return {
     state: 'green',
-    label: `Client WS · open · ${args.eventCount60s} events / 60s`,
-    title: `Client WS mode active. Last event ${Math.floor(silentMs / 1000)}s ago.`,
+    label: `Client WS · open · ${args.eventCount60s} deltas / 60s`,
+    title: `Client WS mode active. Last applied route delta ${Math.floor(silentMs / 1000)}s ago. Heartbeats are shown separately when route deltas are idle.`,
   }
 }
 

@@ -92,6 +92,53 @@ let dashboard_message_json (message : Masc_domain.message) =
 let dashboard_tasks_safe config = Coord.get_tasks_safe config
 let dashboard_agents_safe config = Coord.get_active_agents config
 
+let json_assoc_string_opt key = function
+  | `Assoc fields ->
+    (match List.assoc_opt key fields with
+     | Some (`String value) -> Some value
+     | _ -> None)
+  | _ -> None
+;;
+
+let active_agent_summary_json json =
+  match json_assoc_string_opt "status" json with
+  | Some status ->
+    (match String.lowercase_ascii (String.trim status) with
+     | "active" | "busy" | "listening" ->
+       let agent_type =
+         json_assoc_string_opt "agent_type" json
+         |> Option.value ~default:"unknown"
+         |> String.trim
+         |> String.lowercase_ascii
+       in
+       Some agent_type
+     | "inactive" -> None
+     | _ -> None)
+  | None -> None
+;;
+
+let dashboard_general_agent_count_light config =
+  if not (Coord.root_is_initialized config)
+  then 0
+  else
+    Coord.list_dir config (Coord.agents_dir config)
+    |> List.fold_left
+         (fun count name ->
+           if name = ""
+              || String.contains name '/'
+              || not (Filename.check_suffix name ".json")
+           then count
+           else (
+             let path = Filename.concat (Coord.agents_dir config) name in
+             match Coord.read_json_result config path with
+             | Ok json ->
+               (match active_agent_summary_json json with
+                | Some agent_type when not (String.equal agent_type "keeper") -> count + 1
+                | Some _ | None -> count)
+             | Error _ -> count))
+         0
+;;
+
 let dashboard_messages_safe config ~since_seq ~limit =
   Coord.get_messages_raw config ~since_seq ~limit
 ;;

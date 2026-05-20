@@ -48,6 +48,12 @@ val runtime_resolution_json : Coord.config -> Yojson.Safe.t
     Reached unqualified through the
     [Server_dashboard_http_core] cascade consumer. *)
 
+val light_runtime_resolution_json : Coord.config -> Yojson.Safe.t
+(** Renders the cheap runtime/fleet subset used by
+    [/api/v1/dashboard/shell?light=true].  This keeps the shell health strip
+    aligned with [/health] fleet safety without running git probes or other
+    heavy runtime-resolution checks on the header hot path. *)
+
 (** {1 Dashboard HTTP routes} *)
 
 val dashboard_runtime_probe_http_json :

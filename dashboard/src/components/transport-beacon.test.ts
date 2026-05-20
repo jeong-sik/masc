@@ -91,7 +91,7 @@ describe('computeBeaconView', () => {
       eventCount60s: 12,
     }))
     expect(view.state).toBe('green')
-    expect(view.label).toContain('12 events / 60s')
+    expect(view.label).toContain('12 deltas / 60s')
     expect(view.title).toContain('Client WS mode')
   })
 

@@ -40,12 +40,6 @@ module Tempo : sig
   val default_interval_seconds : float
 end
 
-(** {1 Decision TTL} *)
-
-module Decision : sig
-  val ttl_seconds : float
-end
-
 (** {1 Cache} *)
 
 module Cache : sig
@@ -112,10 +106,6 @@ module Ollama : sig
   val default_model : string
 end
 
-module Glm : sig
-  val server_url : string
-end
-
 (** {1 Cancellation tokens} *)
 
 module Cancellation : sig
@@ -129,12 +119,6 @@ module Voice : sig
   val default_port : int
   val http_request_timeout_sec : float
   val audio_test_tone_timeout_sec : float
-end
-
-(** {1 Subsystem timeout defaults} *)
-
-module Timeout : sig
-  val gcloud_auth_sec : float
 end
 
 (** {1 Message GC} *)
@@ -297,17 +281,6 @@ module Rate_bucket : sig
   (** Per-agent requests per second ([MASC_AGENT_RATE_LIMIT], default [20.0]). *)
   val agent_burst : int
   (** Per-agent burst capacity ([MASC_AGENT_RATE_BURST], default [50]). *)
-end
-
-(** {1 Per-agent rate limit bucket}
-
-    Lower-rate token bucket applied per bearer token.  Configured via
-    [MASC_AGENT_RATE_LIMIT] (req/s, default 30) and [MASC_AGENT_RATE_BURST]
-    (burst, default 60). *)
-
-module Agent_rate_bucket : sig
-  val rate : float
-  val burst : int
 end
 
 (** {1 Worker / local runtime} *)

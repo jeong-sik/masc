@@ -11591,12 +11591,12 @@ let () =
                        { status = 522
                        ; message = "Connection timed out"
                        }))))
-        ; test_case "ServerError 524 (Cloudflare gateway timeout) detected" `Quick
+        ; test_case "ServerError 524 short-circuits same-cascade transient retry" `Quick
           (fun () ->
             check
               bool
-              "524 cloudflare timeout is transient"
-              true
+              "524 cloudflare timeout is not same-cascade transient"
+              false
               (EC.is_transient_network_error
                  (Agent_sdk.Error.Api
                     (ServerError

@@ -5,24 +5,6 @@
     annotations bound to file + line ranges, plus code regions extracted
     from Keeper tool_calls. *)
 
-(* Local kind-name helper for parse-error diagnostics.  [lib/ide/] does
-   not depend on [masc_core], so we inline the kind-name discrimination
-   rather than import [Json_util.kind_name] (RFC-0056 leaf-isolation
-   invariant).  The 8 cases below mirror the closed set of
-   [Yojson.Safe.t] variants — exhaustive by construction. *)
-let json_kind_name = function
-  | `Null -> "null"
-  | `Bool _ -> "bool"
-  | `Int _ -> "int"
-  | `Intlit _ -> "intlit"
-  | `Float _ -> "float"
-  | `String _ -> "string"
-  | `Assoc _ -> "object"
-  | `List _ -> "array"
-  | `Tuple _ -> "tuple"
-  | `Variant _ -> "variant"
-;;
-
 type annotation_kind =
   | Comment
   | Decision

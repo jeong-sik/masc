@@ -153,7 +153,7 @@ val public_alias_guidance_for_internal_call
 val claim_context_tool_names : string list
 
 (** Canonical names of completion tools (Task_done variants,
-    Stay_silent, Cancel_task, etc.). *)
+    Stay_silent, Deliver, etc.). *)
 val completion_tool_names : string list
 
 val is_claim_tool_name : string -> bool

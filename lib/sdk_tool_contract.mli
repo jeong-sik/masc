@@ -1,9 +1,8 @@
-(** Sdk_tool_contract — typed MASC SDK tool aliases over the
+(** Sdk_tool_contract — typed MASC SDK tool projections over the
     canonical MCP operation set.
 
-    Each {!type-sdk_tool_binding} declares a public-facing tool name
-    (e.g. [masc_list_tasks]) plus the canonical MCP operation it
-    routes to ([masc_tasks]) and the per-argument
+    Each {!type-sdk_tool_binding} declares an SDK-facing tool name
+    plus the canonical MCP operation it routes to and the per-argument
     {!type-arg_source} mapping that translates SDK input JSON into
     canonical operation arguments. The runtime resolves SDK calls
     via {!resolve_requested_tool_call}.
@@ -41,8 +40,8 @@ type sdk_tool_binding = {
 (** {1 Catalog} *)
 
 val sdk_bindings : sdk_tool_binding list
-(** Canonical SDK alias table. The single source of truth for which
-    SDK names exist and how they map to MCP operations. *)
+(** Canonical SDK projection table. The single source of truth for
+    SDK names that need argument projection before dispatch. *)
 
 val sdk_binding_by_name : string -> sdk_tool_binding option
 
@@ -68,9 +67,9 @@ val resolve_requested_tool_call :
   (string * Yojson.Safe.t, string) result
 (** Translate an SDK tool call into the canonical MCP operation:
 
-    - When [requested_name] is not an SDK alias, returns
+    - When [requested_name] is not an SDK projection, returns
       [Ok (requested_name, arguments)] unchanged.
-    - When it is an SDK alias, validates [arguments] against the
+    - When it is an SDK projection, validates [arguments] against the
       binding's [input_schema] and projects them through
       [arg_bindings] into the canonical-operation argument shape.
     - [Error msg] surfaces schema validation failures verbatim. *)
@@ -102,7 +101,7 @@ val param_type_of_schema : Yojson.Safe.t -> Agent_sdk.Types.param_type
 (** {1 Discovery payload} *)
 
 val sdk_alias_json : sdk_tool_binding -> Yojson.Safe.t
-(** Project a single binding to the dashboard alias descriptor
+(** Project a single binding to the dashboard SDK-tool descriptor
     ([name] / [description] / [canonicalOperationId] /
     [inputSchema] / [argumentMapping] / [staticArguments] /
     [injectAgentName]). *)

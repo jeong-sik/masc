@@ -21,7 +21,6 @@ Do not assume access to any other MASC tool from this endpoint."
 let managed_agent_instructions =
   "MASC managed-agent profile exposes the internal agent control surface. \
 Prefer canonical task-control tools such as masc_status, masc_tasks, masc_claim_next, masc_transition, and masc_plan_set_task. \
-Managed aliases that remain listed on this endpoint are compatibility helpers, not the recommended control plane. \
 Do not assume that the public /mcp surface and the managed-agent surface have the same inventory."
 
 let managed_agent_passthrough_tool_names =
@@ -30,9 +29,6 @@ let managed_agent_passthrough_tool_names =
          not
            (List.mem name
              [
-                "masc_status";
-                "masc_tasks";
-                "masc_transition";
                 "masc_a2a_delegate";
               ]))
 
@@ -268,11 +264,7 @@ let custom_tool_titles : (string * string) list = [
   ("masc_keeper_compact", "Compact Keeper Context");
   ("masc_keeper_clear", "Clear Keeper Context");
   ("masc_keeper_create_from_persona", "Create Keeper from Persona");
-  (* SDK aliases *)
-  ("masc_list_tasks", "List Tasks");
-  ("masc_room_status", "Project Status");
-  ("masc_release_task", "Release Task");
-  ("masc_cancel_task", "Cancel Task");
+  (* SDK projections *)
   ("masc_claim_next", "Claim Next Task");
   (* Misc *)
   ("masc_cleanup_zombies", "Clean Up Zombie Agents");

@@ -164,7 +164,7 @@ let test_risk_low_status () =
     "low" (Gp.risk_level_to_string risk)
 
 let test_risk_low_list () =
-  let risk = Gp.assess_risk ~tool_name:"masc_list_tasks" ~input:no_args in
+  let risk = Gp.assess_risk ~tool_name:"masc_tasks" ~input:no_args in
   Alcotest.(check string) "list is low"
     "low" (Gp.risk_level_to_string risk)
 

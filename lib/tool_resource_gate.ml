@@ -273,7 +273,6 @@ let classify_masc_tool (tool : Tool_name.Masc.t) =
   | Board_vote -> Board_write
   | Add_task
   | Batch_add_tasks
-  | Cancel_task
   | Claim_next
   | Deliver
   | Dispatch_plan
@@ -291,7 +290,6 @@ let classify_masc_tool (tool : Tool_name.Masc.t) =
   | Plan_init
   | Plan_set_task
   | Plan_update
-  | Release_task
   | Reset
   | Tool_grant
   | Tool_revoke
@@ -329,13 +327,11 @@ let classify_masc_tool (tool : Tool_name.Masc.t) =
   | Board_sub_board_list
   | Check
   | Config
-  | Coord_status
   | Coordination_fsm_snapshot
   | Dashboard
   | Get_metrics
   | Goal_list
   | Goal_review
-  | List_tasks
   | Mcp_session
   | Messages
   | Operation_status

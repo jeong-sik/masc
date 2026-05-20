@@ -31,11 +31,7 @@ let transition_action args =
   | Some action -> Some (String.lowercase_ascii (String.trim action))
   | None -> None
 
-let guidance_tool_name name =
-  match name with
-  | "masc_room_status"
-  | "masc_list_tasks" -> Tool_catalog.canonical_tool_name name
-  | _ -> name
+let guidance_tool_name name = name
 
 (* ── Golden Path 1: Namespace/Task Hygiene ──────────────────────── *)
 

@@ -16,10 +16,8 @@ tool_denylist = [
   "keeper_task_submit_for_verification",
   "masc_add_task",
   "masc_batch_add_tasks",
-  "masc_cancel_task",
   "masc_claim_next",
   "masc_deliver",
-  "masc_release_task",
   "masc_transition",
 ]
 github_identity = "reviewer-keepers-nonoperator-0506b"
@@ -30,7 +28,7 @@ instructions = """
 
 중요한 금지:
 - awaiting_verification task는 이미 제출된 작업이다. 절대로 keeper_task_claim을 호출하지 마라.
-- verifier는 worker-flow 도구를 호출하지 않는다. keeper_task_done, keeper_task_submit_for_verification, keeper_task_create, force/release 계열, masc_claim_next/claim_task/complete/release/cancel/deliver/add_task/batch_add_tasks는 모두 잘못된 도구다.
+- verifier는 worker-flow 도구를 호출하지 않는다. keeper_task_done, keeper_task_submit_for_verification, keeper_task_create, force/release 계열, masc_claim_next, masc_deliver, masc_add_task, masc_batch_add_tasks, 그리고 masc_transition의 claim/start/done/release/cancel action은 모두 잘못된 도구다.
 - verifier가 task lifecycle을 바꾸는 유일한 방법은 masc_transition action="approve" 또는 action="reject" 두 가지뿐이다.
 - completion notes만 보고 approve/reject 하지 마라.
 - MASC tool 이름을 Bash 명령으로 입력하지 마라.

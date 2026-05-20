@@ -208,7 +208,6 @@ let inferred_effect_domain_of_typed_tool_name = function
   | TN.Masc TM.Board_sub_board_update
   | TN.Masc TM.Board_vote
   | TN.Masc TM.Broadcast
-  | TN.Masc TM.Cancel_task
   | TN.Masc TM.Claim_next
   | TN.Masc TM.Cleanup_zombies
   | TN.Masc TM.Gc
@@ -218,7 +217,6 @@ let inferred_effect_domain_of_typed_tool_name = function
   | TN.Masc TM.Heartbeat
   | TN.Masc TM.Join
   | TN.Masc TM.Leave
-  | TN.Masc TM.List_tasks
   | TN.Masc TM.Note_add
   | TN.Masc TM.Operation_pause
   | TN.Masc TM.Operation_start
@@ -229,9 +227,7 @@ let inferred_effect_domain_of_typed_tool_name = function
   | TN.Masc TM.Plan_init
   | TN.Masc TM.Plan_set_task
   | TN.Masc TM.Plan_update
-  | TN.Masc TM.Release_task
   | TN.Masc TM.Reset
-  | TN.Masc TM.Coord_status
   | TN.Masc TM.Resume
   | TN.Masc TM.Tool_admin_update
   | TN.Masc TM.Tool_grant
@@ -384,13 +380,11 @@ let tool_group_of_typed_tool_name = function
       | TM.Approval_get
       | TM.Batch_add_tasks
       | TM.Broadcast
-      | TM.Cancel_task
       | TM.Check
       | TM.Claim_next
       | TM.Cleanup_zombies
       | TM.Config
       | TM.Coordination_fsm_snapshot
-      | TM.Coord_status
       | TM.Dashboard
       | TM.Deliver
       | TM.Dispatch_plan
@@ -404,7 +398,6 @@ let tool_group_of_typed_tool_name = function
       | TM.Heartbeat
       | TM.Join
       | TM.Leave
-      | TM.List_tasks
       | TM.Mcp_session
       | TM.Messages
       | TM.Note_add
@@ -417,7 +410,6 @@ let tool_group_of_typed_tool_name = function
       | TM.Operator_digest
       | TM.Operator_snapshot
       | TM.Pause
-      | TM.Release_task
       | TM.Reset
       | TM.Resume
       | TM.Spawn

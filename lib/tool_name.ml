@@ -284,7 +284,6 @@ module Masc = struct
     | Board_sub_board_update
     | Board_vote
     | Broadcast
-    | Cancel_task
     | Check
     | Claim_next
     | Cleanup_zombies
@@ -308,7 +307,6 @@ module Masc = struct
     | Heartbeat
     | Join
     | Leave
-    | List_tasks
     | Messages
     | Note_add
     | Operation_pause
@@ -325,9 +323,7 @@ module Masc = struct
     | Plan_init
     | Plan_set_task
     | Plan_update
-    | Release_task
     | Reset
-    | Coord_status
     | Status
     | Task_history
     | Tasks
@@ -388,7 +384,6 @@ module Masc = struct
     | Board_sub_board_update -> "masc_board_sub_board_update"
     | Board_vote -> "masc_board_vote"
     | Broadcast -> "masc_broadcast"
-    | Cancel_task -> "masc_cancel_task"
     | Check -> "masc_check"
     | Claim_next -> "masc_claim_next"
     | Cleanup_zombies -> "masc_cleanup_zombies"
@@ -419,7 +414,6 @@ module Masc = struct
     | Heartbeat -> "masc_heartbeat"
     | Join -> "masc_join"
     | Leave -> "masc_leave"
-    | List_tasks -> "masc_list_tasks"
     | Messages -> "masc_messages"
     | Note_add -> "masc_note_add"
     | Operation_pause -> "masc_operation_pause"
@@ -436,9 +430,7 @@ module Masc = struct
     | Plan_init -> "masc_plan_init"
     | Plan_set_task -> "masc_plan_set_task"
     | Plan_update -> "masc_plan_update"
-    | Release_task -> "masc_release_task"
     | Reset -> "masc_reset"
-    | Coord_status -> "masc_room_status"
     | Status -> "masc_status"
     | Task_history -> "masc_task_history"
     | Tasks -> "masc_tasks"
@@ -500,7 +492,6 @@ module Masc = struct
     | "masc_board_sub_board_list" -> Some Board_sub_board_list
     | "masc_board_sub_board_update" -> Some Board_sub_board_update
     | "masc_broadcast" -> Some Broadcast
-    | "masc_cancel_task" -> Some Cancel_task
     | "masc_check" -> Some Check
     | "masc_claim_next" -> Some Claim_next
     | "masc_cleanup_zombies" -> Some Cleanup_zombies
@@ -531,7 +522,6 @@ module Masc = struct
     | "masc_heartbeat" -> Some Heartbeat
     | "masc_join" -> Some Join
     | "masc_leave" -> Some Leave
-    | "masc_list_tasks" -> Some List_tasks
     | "masc_messages" -> Some Messages
     | "masc_note_add" -> Some Note_add
     | "masc_operation_pause" -> Some Operation_pause
@@ -548,9 +538,7 @@ module Masc = struct
     | "masc_plan_init" -> Some Plan_init
     | "masc_plan_set_task" -> Some Plan_set_task
     | "masc_plan_update" -> Some Plan_update
-    | "masc_release_task" -> Some Release_task
     | "masc_reset" -> Some Reset
-    | "masc_room_status" -> Some Coord_status
     | "masc_status" -> Some Status
     | "masc_task_history" -> Some Task_history
     | "masc_tasks" -> Some Tasks

@@ -300,14 +300,11 @@ let static_tag_of_tool_name (tool : Tool_name.t) : module_tag option =
   | Tool_name.Masc m ->
     let open Tool_name.Masc in
     match m with
-    | Cancel_task
     | Dispatch_plan
-    | List_tasks
     | Operation_pause
     | Operation_start
     | Operation_status
-    | Operation_stop
-    | Release_task -> None
+    | Operation_stop -> None
     | Add_task
     | Batch_add_tasks
     | Claim_next
@@ -358,7 +355,6 @@ let static_tag_of_tool_name (tool : Tool_name.t) : module_tag option =
     | Start
     | Who -> Some Mod_inline
     | Check
-    | Coord_status
     | Coordination_fsm_snapshot
     | Goal_list
     | Goal_review

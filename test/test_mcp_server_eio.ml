@@ -835,16 +835,22 @@ let test_handle_request_tools_list_managed_profile () =
                         | _ -> None)
                    |> List.filter_map (function `String s -> Some s | _ -> None)
                  in
-                 Alcotest.(check bool) "has managed room status alias" true
+                 Alcotest.(check bool) "has canonical managed status" true
+                   (List.mem "masc_status" names);
+                 Alcotest.(check bool) "has canonical managed tasks" true
+                   (List.mem "masc_tasks" names);
+                 Alcotest.(check bool) "has canonical managed transition" true
+                   (List.mem "masc_transition" names);
+                 Alcotest.(check bool) "omits managed room status alias" false
                    (List.mem "masc_room_status" names);
-                 Alcotest.(check bool) "has managed list tasks alias" true
+                 Alcotest.(check bool) "omits managed list tasks alias" false
                    (List.mem "masc_list_tasks" names);
+                 Alcotest.(check bool) "omits managed release alias" false
+                   (List.mem "masc_release_task" names);
+                 Alcotest.(check bool) "omits managed cancel alias" false
+                   (List.mem "masc_cancel_task" names);
                  Alcotest.(check bool) "hides managed claim alias" false
                    (List.mem "masc_claim_task" names);
-                 Alcotest.(check bool) "omits raw masc_status" false
-                   (List.mem "masc_status" names);
-                 Alcotest.(check bool) "omits raw masc_transition" false
-                   (List.mem "masc_transition" names);
                  Alcotest.(check bool) "omits managed voice agent" false
                    (List.mem "masc_voice_agent" names);
                  Alcotest.(check bool) "omits managed voice speak" false

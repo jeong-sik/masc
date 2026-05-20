@@ -157,7 +157,7 @@ let path_syntax_blocked_message token =
     to_message (Path_syntax_blocked { token = token.Path_words.value; hint }))
 ;;
 
-let tokenize_path_args = Path_words.of_command
+let path_words_of_command = Path_words.of_command
 ;;
 
 let token_value_is_redirect_to_dev_null token =
@@ -367,7 +367,7 @@ let path_argument_tokens tokens =
 ;;
 
 let existing_dir_path_values cmd =
-  let tokens = tokenize_path_args cmd in
+  let tokens = path_words_of_command cmd in
   let command_name =
     match tokens with
     | command :: _ -> Filename.basename command.Path_words.value
@@ -524,23 +524,23 @@ let validate_command_paths ?keeper_id ?base_path ?workdir cmd =
           in
           loop stages
       in
-      let legacy_tokens = tokenize_path_args cmd in
-      let legacy_path_tokens = path_argument_tokens legacy_tokens in
-      let legacy_needs_syntax_sensitive_gate =
+      let command_words = path_words_of_command cmd in
+      let command_path_words = path_argument_tokens command_words in
+      let command_needs_syntax_sensitive_gate =
         List.exists
           (fun token -> token_has_unsafe_rewrite_syntax token || token.Path_words.globbed)
-          legacy_path_tokens
+          command_path_words
       in
-      if legacy_needs_syntax_sensitive_gate
-      then validate_path_argument_tokens legacy_tokens legacy_path_tokens
+      if command_needs_syntax_sensitive_gate
+      then validate_path_argument_tokens command_words command_path_words
       else (
         match Masc_exec_bash_parser.Bash.parse_string cmd with
         | Masc_exec.Parsed.Parsed shell_ir ->
           (match validate_parsed_shell_ir shell_ir with
            | Some result -> result
-           | None -> validate_token_stream legacy_tokens)
+           | None -> validate_token_stream command_words)
         | Masc_exec.Parsed.Parse_error _
         | Masc_exec.Parsed.Parse_aborted _
         | Masc_exec.Parsed.Too_complex _ ->
-          validate_token_stream legacy_tokens)
+          validate_token_stream command_words)
 ;;

@@ -18,7 +18,6 @@ val command_allows_safe_globbed_path : string -> bool
 val token_glob_is_limited_to_basename : path_token -> bool
 val path_token_error_hint : path_token -> string
 val path_syntax_blocked_message : path_token -> string
-val tokenize_path_args : string -> path_token list
 val token_value_is_redirect_to_dev_null : path_token -> bool
 val token_value_is_redirect_op : path_token -> bool
 val command_pattern_arg_flags : string -> (string * bool) list

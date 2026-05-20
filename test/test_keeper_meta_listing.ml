@@ -579,7 +579,7 @@ proactive_idle_sec = 120
 proactive_cooldown_sec = 240
 work_discovery_sources = ["awaiting_verification_tasks"]
 per_provider_timeout = 120.0
-tool_denylist = ["keeper_task_claim", "masc_claim_next", "masc_claim_task"]
+tool_denylist = ["keeper_task_claim", "masc_claim_next", "masc_transition"]
 
 [keeper.tool_access]
 kind = "preset"
@@ -666,7 +666,7 @@ also_allow = ["masc_tasks", "masc_transition"]
           check
             (list string)
             "tool denylist resynced"
-            [ "keeper_task_claim"; "masc_claim_next"; "masc_claim_task" ]
+            [ "keeper_task_claim"; "masc_claim_next"; "masc_transition" ]
             meta.tool_denylist
       | Ok None -> fail "keeper meta missing after keeper_up update"
       | Error e -> fail ("read_meta failed: " ^ e))

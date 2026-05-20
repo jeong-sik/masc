@@ -856,7 +856,7 @@ let test_handle_request_tools_list_managed_profile () =
    | _ -> Alcotest.fail "response not an object");
   cleanup_dir base_path
 
-let test_handle_request_tools_call_managed_profile_sdk_alias_claim () =
+let test_handle_request_tools_call_managed_profile_rejects_hidden_claim_alias () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   Mcp_eio.set_net (Eio.Stdenv.net env);
@@ -898,10 +898,11 @@ let test_handle_request_tools_call_managed_profile_sdk_alias_claim () =
       ~mcp_session_id:sid state request
   in
   let response_text = Yojson.Safe.to_string response in
-  Alcotest.(check bool) "claim response mentions task" true
-    (contains_substring response_text "task-001");
-  Alcotest.(check bool) "claim response mentions claimed" true
-    (contains_substring response_text "claimed");
+  Alcotest.(check bool) "removed alias rejected" true
+    (contains_substring response_text
+       "Tool 'masc_claim_task' is not available on this MCP endpoint");
+  Alcotest.(check bool) "response is method not found" true
+    (contains_substring response_text "Method not found");
   cleanup_dir base_path
 
 let test_handle_request_tools_call_transition_claim_guidance () =
@@ -2956,8 +2957,8 @@ let eio_tests = [
     test_handle_request_jsonrpc_response_returns_null;
   "reject non-operator tool on operator profile", `Quick,
   test_handle_request_tools_call_operator_profile_rejects_non_operator;
-  "handle tools/call managed profile sdk alias claim", `Quick,
-    test_handle_request_tools_call_managed_profile_sdk_alias_claim;
+  "handle tools/call managed profile rejects hidden claim alias", `Quick,
+    test_handle_request_tools_call_managed_profile_rejects_hidden_claim_alias;
   "handle tools/call transition claim guidance", `Quick,
     test_handle_request_tools_call_transition_claim_guidance;
   "handle tools/call transition done guidance", `Quick,

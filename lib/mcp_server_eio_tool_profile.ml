@@ -271,9 +271,6 @@ let custom_tool_titles : (string * string) list = [
   (* SDK aliases *)
   ("masc_list_tasks", "List Tasks");
   ("masc_room_status", "Project Status");
-  ("masc_claim_task", "Claim Task");
-  ("masc_set_current_task", "Bind Current Task");
-  ("masc_complete_task", "Complete Task");
   ("masc_release_task", "Release Task");
   ("masc_cancel_task", "Cancel Task");
   ("masc_claim_next", "Claim Next Task");

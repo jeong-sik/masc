@@ -22,7 +22,7 @@ let test_workflow_guide_tools_exist () =
     "masc_start"; "masc_join"; "masc_status";
     "masc_claim"; "masc_claim_next"; "masc_transition";
     "masc_add_task"; "masc_batch_add_tasks";
-    "masc_plan_set_task"; "masc_set_current_task";
+    "masc_plan_set_task";
     "masc_heartbeat"; "masc_broadcast";
     "masc_worktree_create"; "masc_init";
     "masc_operator_digest";

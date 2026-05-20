@@ -253,15 +253,6 @@ let explicit_metadata : (string * metadata) list =
     ( "masc_list_tasks",
       hidden_active ~canonical_name:"masc_tasks" ~replacement:"masc_tasks"
         "Managed-agent compatibility alias. Prefer masc_tasks for canonical backlog reads." );
-    ( "masc_claim_task",
-      hidden_active ~canonical_name:"masc_transition" ~replacement:"masc_transition"
-        "Managed-agent compatibility alias for masc_transition(action=claim)." );
-    ( "masc_set_current_task",
-      hidden_active ~canonical_name:"masc_plan_set_task" ~replacement:"masc_plan_set_task"
-        "Managed-agent compatibility alias that binds current_task. Prefer masc_plan_set_task." );
-    ( "masc_complete_task",
-      hidden_active ~canonical_name:"masc_transition" ~replacement:"masc_transition"
-        "Managed-agent compatibility alias for masc_transition(action=done)." );
     ( "masc_release_task",
       hidden_active ~canonical_name:"masc_transition" ~replacement:"masc_transition"
         "Managed-agent compatibility alias for masc_transition(action=release)." );

@@ -254,10 +254,9 @@ let test_verifier_config_hides_worker_lifecycle_tools () =
           "masc_batch_add_tasks";
           "masc_cancel_task";
           "masc_claim_next";
-          "masc_claim_task";
-          "masc_complete_task";
           "masc_deliver";
           "masc_release_task";
+          "masc_transition";
         ]
 
 (** Write a temporary TOML file, run load_keeper_toml, clean up. *)

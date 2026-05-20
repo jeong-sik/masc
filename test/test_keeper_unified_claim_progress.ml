@@ -29,7 +29,7 @@ let contains_substring haystack needle =
   needle_len = 0 || loop 0
 ;;
 
-let test_claim_tool_classification_covers_masc_claim_task () =
+let test_claim_tool_classification_covers_supported_claim_tools () =
   check
     bool
     "keeper claim is claim tool"
@@ -42,8 +42,8 @@ let test_claim_tool_classification_covers_masc_claim_task () =
     (KTD.is_claim_tool_name "masc_claim_next");
   check
     bool
-    "masc claim task is claim tool"
-    true
+    "removed claim task alias is not claim tool"
+    false
     (KTD.is_claim_tool_name "masc_claim_task");
   check
     bool
@@ -286,9 +286,9 @@ let () =
     "keeper_unified_claim_progress"
     [ ( "claim_progress"
       , [ test_case
-            "claim tool classification covers masc claim task"
+            "claim tool classification covers supported claim tools"
             `Quick
-            test_claim_tool_classification_covers_masc_claim_task
+            test_claim_tool_classification_covers_supported_claim_tools
         ; test_case
             "initial claim counts as contract progress"
             `Quick

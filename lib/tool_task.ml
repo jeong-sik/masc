@@ -1101,7 +1101,6 @@ let dispatch ?agent_tool_names ctx ~name ~args : Tool_result.t option =
   match name with
   | "masc_add_task" -> Some (handle_add_task ~tool_name:name ~start_time:start ctx args)
   | "masc_batch_add_tasks" -> Some (handle_batch_add_tasks ~tool_name:name ~start_time:start ctx args)
-  | "masc_claim_task" -> Some (handle_claim ?agent_tool_names ~tool_name:name ~start_time:start ctx args)
   | "masc_claim_next" -> Some (handle_claim_next ?agent_tool_names ~tool_name:name ~start_time:start ctx args)
   | "masc_transition" -> Some (handle_transition ?agent_tool_names ~tool_name:name ~start_time:start ctx args)
   | "masc_update_priority" -> Some (handle_update_priority ~tool_name:name ~start_time:start ctx args)

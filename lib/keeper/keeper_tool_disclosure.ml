@@ -360,7 +360,7 @@ let public_alias_guidance_for_internal_call
 ;;
 
 let claim_context_tool_names : string list =
-  Tool_name.[ Masc Claim_next; Masc Claim_task; Keeper Task_claim ]
+  Tool_name.[ Masc Claim_next; Keeper Task_claim ]
   |> List.map Tool_name.to_string
 ;;
 
@@ -375,7 +375,6 @@ let completion_tool_names : string list =
      2026-04-27 00:17-00:58 UTC, idle_seconds 28-40h, claimable_count 44-46). *)
   Tool_name.
     [ Masc Cancel_task
-    ; Masc Complete_task
     ; Masc Deliver
     ; Masc Release_task
     ; Keeper Stay_silent
@@ -390,7 +389,7 @@ let completion_tool_names : string list =
 let is_claim_tool_name name =
   let name = canonical_tool_name name in
   match Tool_name.of_string name with
-  | Some (Keeper Task_claim) | Some (Masc Claim_next) | Some (Masc Claim_task) -> true
+  | Some (Keeper Task_claim) | Some (Masc Claim_next) -> true
   | _ -> false
 ;;
 

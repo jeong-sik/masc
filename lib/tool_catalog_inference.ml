@@ -210,9 +210,7 @@ let inferred_effect_domain_of_typed_tool_name = function
   | TN.Masc TM.Broadcast
   | TN.Masc TM.Cancel_task
   | TN.Masc TM.Claim_next
-  | TN.Masc TM.Claim_task
   | TN.Masc TM.Cleanup_zombies
-  | TN.Masc TM.Complete_task
   | TN.Masc TM.Gc
   | TN.Masc TM.Goal_transition
   | TN.Masc TM.Goal_upsert
@@ -235,7 +233,6 @@ let inferred_effect_domain_of_typed_tool_name = function
   | TN.Masc TM.Reset
   | TN.Masc TM.Coord_status
   | TN.Masc TM.Resume
-  | TN.Masc TM.Set_current_task
   | TN.Masc TM.Tool_admin_update
   | TN.Masc TM.Tool_grant
   | TN.Masc TM.Tool_revoke
@@ -390,9 +387,7 @@ let tool_group_of_typed_tool_name = function
       | TM.Cancel_task
       | TM.Check
       | TM.Claim_next
-      | TM.Claim_task
       | TM.Cleanup_zombies
-      | TM.Complete_task
       | TM.Config
       | TM.Coordination_fsm_snapshot
       | TM.Coord_status
@@ -425,7 +420,6 @@ let tool_group_of_typed_tool_name = function
       | TM.Release_task
       | TM.Reset
       | TM.Resume
-      | TM.Set_current_task
       | TM.Spawn
       | TM.Start
       | TM.Status

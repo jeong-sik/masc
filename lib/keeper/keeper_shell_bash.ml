@@ -1020,7 +1020,7 @@ let handle_keeper_bash
          ; "error", `String "gh_pr_create_requires_keeper_pr_create"
          ; workflow_rejection_field
          ; "reason", `String
-             "keeper_bash cannot bypass the PR creation approval and audit policy"
+             "Bash cannot bypass the PR creation approval and audit policy"
          ; "hint", `String
              "Use keeper_pr_create with draft=true so governance approval and PR lifecycle markers are enforced."
          ; "cmd", `String cmd_for_log
@@ -1811,9 +1811,8 @@ let handle_keeper_bash
                            ("cwd", `String cwd);
                            ( "hint",
                              `String
-                               "Task running in background. Poll with \
-                                keeper_bash_output or stop with \
-                                keeper_bash_kill." );
+                               "Task running in background. Poll or stop it with the \
+                                background output/kill tools shown in your active schema." );
                          ])
                  | Error (Bg_task.Spawn_failed e) ->
                      error_json
@@ -2043,12 +2042,11 @@ let handle_keeper_bash
                               ("execution_time_ms", `Int elapsed_ms);
                               ( "hint",
                                 `String
-                                  (Printf.sprintf
+                                 (Printf.sprintf
                                      "Command exceeded \
                                       MASC_BLOCKING_BUDGET_MS=%d. Still \
-                                      running in background; poll with \
-                                      keeper_bash_output or stop with \
-                                      keeper_bash_kill."
+                                      running in background; poll or stop it with the \
+                                      background output/kill tools shown in your active schema."
                                      budget_ms) );
                             ])
                       | Masc_exec.Exec_run.Spawn_error

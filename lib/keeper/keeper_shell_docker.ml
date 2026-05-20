@@ -73,7 +73,8 @@ let credential_preflight_failure_json ~keeper_name ~message =
          , `String
              "The keeper GitHub credential bundle is unavailable or stale. \
               Re-materialize the selected bundle via dashboard or gh auth login \
-              into that bundle before retrying git/gh keeper_bash commands." )
+              into that bundle before retrying git/gh through the visible Bash \
+              or PR tools." )
        ])
 ;;
 

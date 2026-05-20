@@ -61,7 +61,7 @@ let test_hint_at_threshold () =
   let r3 = CB.maybe_enrich_error ~keeper_name:"t2" ~error_msg:"path_not_found: /c" in
   check bool "3rd: HAS hint" true (contains r3 "CIRCUIT BREAKER");
   check bool "mentions playground" true (contains r3 "playground");
-  check bool "mentions ls" true (contains r3 "keeper_shell op=ls")
+  check bool "mentions public Bash ls" true (contains r3 "Bash with command='ls")
 
 let test_reset_on_success () =
   CB.record_success ~keeper_name:"t3";

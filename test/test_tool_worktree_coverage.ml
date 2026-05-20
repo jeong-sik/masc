@@ -365,8 +365,8 @@ let test_dispatch_worktree_create_reports_missing_sandbox_clone () =
     let msg = result.legacy_message in
     if not (contains "missing_sandbox_clone:" msg) then
       fail (Printf.sprintf "expected missing_sandbox_clone in: %s" msg);
-    if not (contains "keeper_shell op=git_clone" msg) then
-      fail (Printf.sprintf "expected keeper_shell git_clone hint in: %s" msg)
+    if not (contains "visible clone/worktree tool" msg) then
+      fail (Printf.sprintf "expected public clone/worktree hint in: %s" msg)
 
 let test_dispatch_worktree_create_auto_provisions_workspace_repo () =
   let base_path = temp_dir () in
@@ -648,8 +648,8 @@ let test_dispatch_worktree_create_and_remove_use_docker_keeper_lane () =
         (contains docker_visible_worktree msg);
       check bool "message hides host docker worktree path" false
         (contains docker_worktree msg);
-      check bool "message tells keeper to pass cwd to keeper_bash" true
-        (contains "keeper_bash cwd=" msg);
+      check bool "message tells keeper to pass cwd to public Bash" true
+        (contains "Bash cwd=" msg);
       check bool "docker sandbox clone created" true
         (Sys.file_exists docker_clone);
       check bool "docker worktree created" true

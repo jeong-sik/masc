@@ -21,7 +21,7 @@ let test_path_not_found () =
   in
   Alcotest.(check bool) "mentions ls hint" true
     (try
-       ignore (Str.search_forward (Str.regexp_string "keeper_shell op=ls") action 0);
+       ignore (Str.search_forward (Str.regexp_string "Bash with command='ls") action 0);
        true
      with Not_found -> false);
   Alcotest.(check bool) "mentions playground" true
@@ -43,7 +43,7 @@ let test_path_not_allowed () =
 
 let test_cwd_not_directory () =
   r "cwd guidance"
-    "The cwd is not a directory. Omit cwd to use your default playground root, or create/repair the repo worktree first (keeper_shell op=git_clone, then git_worktree/masc_worktree_create for repos/<repo>/.worktrees/<task>)."
+    "The cwd is not a directory. Omit cwd to use your default playground root, or create/repair the repo worktree first with the visible clone/worktree tool, then masc_worktree_create for repos/<repo>/.worktrees/<task>."
     (actionable_path_action_for_class
        ~playground:pg ~raw_path:"foo" CB.Cwd_not_directory)
 

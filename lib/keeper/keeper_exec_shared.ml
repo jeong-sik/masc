@@ -55,8 +55,8 @@ let actionable_path_action_for_class
     match cls with
     | Path_not_found ->
       Printf.sprintf
-        "File does not exist. Run `keeper_shell op=ls path=%s` first to see available \
-         files."
+        "File does not exist. Use Bash with command='ls %s' first to see available \
+         files, or use a visible file-listing tool if one is present."
         playground
     | Path_not_allowed ->
       Printf.sprintf
@@ -65,8 +65,8 @@ let actionable_path_action_for_class
         playground
     | Cwd_not_directory ->
       "The cwd is not a directory. Omit cwd to use your default playground root, or \
-       create/repair the repo worktree first (keeper_shell op=git_clone, then \
-       git_worktree/masc_worktree_create for repos/<repo>/.worktrees/<task>)."
+       create/repair the repo worktree first with the visible clone/worktree tool, then \
+       masc_worktree_create for repos/<repo>/.worktrees/<task>."
     | Shell_exit_nonzero | Other ->
       Printf.sprintf "Check the path. Your playground: %s" playground)
 ;;

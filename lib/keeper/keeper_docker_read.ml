@@ -215,7 +215,8 @@ let read_file_in_container ?turn_sandbox_factory ~config ~(meta : keeper_meta) ~
       Error
         (Printf.sprintf
            "docker_cat_failed: path_is_directory: %s (keeper_fs_read requires a file, \
-            not a directory; use keeper_shell op=ls for directory listings)"
+            not a directory; use Bash command='ls <path>' or a visible file-listing \
+            tool for directory listings)"
            host_path)
     else
       run_command_in_container ?turn_sandbox_factory ~config ~meta

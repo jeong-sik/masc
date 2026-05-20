@@ -198,9 +198,9 @@ let nudge_message_text ~streak ~progress_class =
     Printf.sprintf
       ("ACTION REQUIRED — REQUIRED TOOL LOOP DETECTED: You have failed %d"
        ^^ " consecutive actionable turns without satisfying the required"
-       ^^ " keeper-tool contract (%s). This turn MUST emit a real keeper"
-       ^^ " tool call that advances the active goal/task, such as"
-       ^^ " keeper_shell, keeper_fs_read, keeper_board_post,"
+       ^^ " keeper-tool contract (%s). This turn MUST emit a real tool call"
+       ^^ " from the active schema that advances the active goal/task, such as"
+       ^^ " Bash/Read/Write when listed, keeper_board_post,"
        ^^ " keeper_board_comment, keeper_task_claim, or keeper_task_done."
        ^^ " If no action is actually possible, call keeper_stay_silent only"
        ^^ " with a typed no-work proof instead of returning plain text or"
@@ -212,8 +212,9 @@ let nudge_message_text ~streak ~progress_class =
        ^^ " consecutive turns using only read-only or status tools without any"
        ^^ " execution or completion action. This violates the keeper turn"
        ^^ " contract. You MUST call an execution or completion tool this turn"
-       ^^ " (e.g. keeper_task_done, keeper_task_claim, keeper_shell,"
-       ^^ " keeper_board_post with a concrete update, or another write tool)."
+       ^^ " (e.g. keeper_task_done, keeper_task_claim, Bash/Write when"
+       ^^ " listed, keeper_board_post with a concrete update, or another"
+       ^^ " write tool)."
        ^^ " Do not call read-only tools again without first taking an action.")
       streak
 

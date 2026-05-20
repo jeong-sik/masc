@@ -270,8 +270,8 @@ let validate_read_path ~agent_name config path =
                 (System (System_error.IoError
                    (Printf.sprintf
                       "keeper playground tree %S does not exist; cannot \
-                       validate cross-keeper containment. Clone via \
-                       keeper_shell op=git_clone to provision your \
+                       validate cross-keeper containment. Use the visible \
+                       clone/worktree tool to provision your \
                        playground first. See #6527/#6637."
                       playground_tree_rel)))
         with

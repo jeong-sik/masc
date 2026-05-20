@@ -11,7 +11,7 @@ let shell_tools : Masc_domain.tool_schema list =
          automatically — use 'repos/X' or 'mind/X'. Never include host paths like \
          '.masc/playground/your-name/repos/X' in path or cwd. Use cwd to target an \
          explicit allowed directory or cloned repo. find REQUIRES pattern param (e.g. \
-         pattern=\"*.ml\"). No generic bash execution: use Bash/keeper_bash for command \
+         pattern=\"*.ml\"). No generic bash execution: use Bash for command \
          execution. git_clone: clone a repo into your sandbox repos/ lane (url \
          required). gh op: run a gh CLI subcommand with cmd=\"<subcommand>\" (e.g. \
          cmd=\"pr list --state open\"). Requires an active claimed task/current_task_id \

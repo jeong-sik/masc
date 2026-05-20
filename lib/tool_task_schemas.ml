@@ -59,7 +59,7 @@ Example: masc_add_task({title: 'Fix login bug', goal_id: 'g-123', priority: 1, d
             ("required_tools", `Assoc [
               ("type", `String "array");
               ("items", `Assoc [ ("type", `String "string") ]);
-              ("description", `String "Tool names required to claim this task, e.g. keeper_bash or masc_code_git.");
+              ("description", `String "Tool names required to claim this task, e.g. Bash or masc_code_git.");
             ]);
             ("required_evidence", `Assoc [ ("type", `String "array"); ("items", `Assoc [ ("type", `String "string") ]) ]);
             ("inspect_gate_evidence", `Assoc [ ("type", `String "array"); ("items", `Assoc [ ("type", `String "string") ]) ]);
@@ -119,7 +119,7 @@ Example: masc_batch_add_tasks({tasks: [{title: 'Task A', goal_id: 'g-123', prior
                   ("required_tools", `Assoc [
                     ("type", `String "array");
                     ("items", `Assoc [ ("type", `String "string") ]);
-                    ("description", `String "Tool names required to claim this task, e.g. keeper_bash or masc_code_git.");
+                    ("description", `String "Tool names required to claim this task, e.g. Bash or masc_code_git.");
                   ]);
                   ("required_evidence", `Assoc [ ("type", `String "array"); ("items", `Assoc [ ("type", `String "string") ]) ]);
                   ("inspect_gate_evidence", `Assoc [ ("type", `String "array"); ("items", `Assoc [ ("type", `String "string") ]) ]);

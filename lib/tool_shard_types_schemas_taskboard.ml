@@ -277,7 +277,7 @@ let taskboard_tools : Masc_domain.tool_schema list =
                                   ; ( "description"
                                     , `String
                                         "Tool names required to claim this task, e.g. \
-                                         keeper_bash or masc_code_git." )
+                                         Bash or masc_code_git." )
                                   ] )
                             ; ( "required_evidence"
                               , `Assoc

@@ -223,6 +223,9 @@ type paused_keeper_scan = {
   read_errors : (string * string) list;
 }
 
+let empty_paused_keeper_scan =
+  { names = []; autoboot_enabled_names = []; details = []; read_errors = [] }
+
 let sorted_unique_strings values = List.sort_uniq String.compare values
 
 let json_float_opt = function
@@ -297,7 +300,7 @@ let running_paused_keeper_names () =
        if e.meta.paused then Some e.name else None)
   |> sorted_unique_strings
 
-let durable_paused_keeper_scan config =
+let durable_paused_keeper_scan ?(include_details = true) config =
   (* NDT-OK: HTTP health snapshots report wall-clock pause age; state transitions remain ledger-driven. *)
   let now = Unix.gettimeofday () in
   Keeper_types.keeper_names config
@@ -313,13 +316,20 @@ let durable_paused_keeper_scan config =
                  (if autoboot_enabled then meta.name :: acc.autoboot_enabled_names
                   else acc.autoboot_enabled_names);
                details =
-                 paused_keeper_detail_json ~now ~name:meta.name ~autoboot_enabled meta
-                 :: acc.details;
+                 (if include_details
+                  then
+                    paused_keeper_detail_json
+                      ~now
+                      ~name:meta.name
+                      ~autoboot_enabled
+                      meta
+                    :: acc.details
+                  else acc.details);
              }
          | Ok (Some _) | Ok None -> acc
          | Error err ->
              { acc with read_errors = (name, err) :: acc.read_errors })
-       { names = []; autoboot_enabled_names = []; details = []; read_errors = [] }
+       empty_paused_keeper_scan
   |> fun scan ->
   {
     names = sorted_unique_strings scan.names;
@@ -339,13 +349,7 @@ let durable_paused_keeper_scan config =
     read_errors = List.sort (fun (a, _) (b, _) -> String.compare a b) scan.read_errors;
   }
 
-let paused_keepers_health_json () =
-  let running_names = running_paused_keeper_names () in
-  let durable_scan =
-    match current_server_state_opt () with
-    | Some state -> durable_paused_keeper_scan state.Mcp_server.room_config
-    | None -> { names = []; autoboot_enabled_names = []; details = []; read_errors = [] }
-  in
+let paused_keepers_health_json_of_scan ~running_names durable_scan =
   let names = sorted_unique_strings (running_names @ durable_scan.names) in
   `Assoc [
     ("count", `Int (List.length names));
@@ -368,10 +372,153 @@ let paused_keepers_health_json () =
            durable_scan.read_errors) );
   ]
 
+let paused_keepers_health_json () =
+  let running_names = running_paused_keeper_names () in
+  let durable_scan =
+    match current_server_state_opt () with
+    | Some state -> durable_paused_keeper_scan state.Mcp_server.room_config
+    | None -> empty_paused_keeper_scan
+  in
+  paused_keepers_health_json_of_scan ~running_names durable_scan
+
 type autoboot_keeper_scan = {
   autoboot_names : string list;
   read_errors : (string * string) list;
 }
+
+let empty_autoboot_keeper_scan = { autoboot_names = []; read_errors = [] }
+
+type keeper_fleet_meta_scan = {
+  paused_scan : paused_keeper_scan;
+  autoboot_scan : autoboot_keeper_scan;
+  bootable_names : string list;
+}
+
+let sort_paused_keeper_details details =
+  List.sort
+    (fun left right ->
+      let name = function
+        | `Assoc fields -> (
+          match List.assoc_opt "name" fields with
+          | Some (`String value) -> value
+          | _ -> "" )
+        | _ -> ""
+      in
+      String.compare (name left) (name right))
+    details
+
+let keeper_fleet_meta_scan ?(include_paused_details = true) config =
+  (* The dashboard light shell needs fleet counts on every header refresh.
+     Keep this as a single pass over keeper meta so it does not repeat the
+     paused, autoboot, and bootable scans on the hot path. *)
+  let now = Unix.gettimeofday () in
+  let configured_names = Keeper_types.configured_keeper_names config in
+  let all_names =
+    sorted_unique_strings (configured_names @ Keeper_types.keeper_names config)
+  in
+  let is_configured name = List.exists (String.equal name) configured_names in
+  let scan =
+    all_names
+    |> List.fold_left
+         (fun acc name ->
+           let add_autoboot acc name =
+             {
+               acc with
+               autoboot_scan =
+                 {
+                   acc.autoboot_scan with
+                   autoboot_names = name :: acc.autoboot_scan.autoboot_names;
+                 };
+             }
+           in
+           let add_bootable acc name =
+             if is_configured name then { acc with bootable_names = name :: acc.bootable_names }
+             else acc
+           in
+           match Keeper_types.read_meta config name with
+           | Ok (Some meta) ->
+             let autoboot_enabled = effective_autoboot_enabled name meta in
+             let acc = if autoboot_enabled then add_autoboot acc meta.name else acc in
+             let acc =
+               if (not meta.paused) && autoboot_enabled
+               then add_bootable acc meta.name
+               else acc
+             in
+             if meta.paused
+             then
+               {
+                 acc with
+                 paused_scan =
+                   {
+                     acc.paused_scan with
+                     names = meta.name :: acc.paused_scan.names;
+                     autoboot_enabled_names =
+                       (if autoboot_enabled
+                        then meta.name :: acc.paused_scan.autoboot_enabled_names
+                        else acc.paused_scan.autoboot_enabled_names);
+                     details =
+                       (if include_paused_details
+                        then
+                          paused_keeper_detail_json
+                            ~now
+                            ~name:meta.name
+                            ~autoboot_enabled
+                            meta
+                          :: acc.paused_scan.details
+                        else acc.paused_scan.details);
+                   };
+               }
+             else acc
+           | Ok None ->
+             if Keeper_meta_store.declarative_autoboot_enabled_by_default name
+             then add_autoboot acc name |> fun acc -> add_bootable acc name
+             else acc
+           | Error err ->
+             (* Preserve the existing conservative behavior: unreadable meta is
+                still counted as autoboot/bootable so the operator sees a
+                degraded fleet instead of a silently shrinking target. *)
+             let acc = add_autoboot acc name |> fun acc -> add_bootable acc name in
+             {
+               acc with
+               paused_scan =
+                 {
+                   acc.paused_scan with
+                   read_errors = (name, err) :: acc.paused_scan.read_errors;
+                 };
+               autoboot_scan =
+                 {
+                   acc.autoboot_scan with
+                   read_errors = (name, err) :: acc.autoboot_scan.read_errors;
+                 };
+             })
+         {
+           paused_scan = empty_paused_keeper_scan;
+           autoboot_scan = empty_autoboot_keeper_scan;
+           bootable_names = [];
+         }
+  in
+  {
+    paused_scan =
+      {
+        names = sorted_unique_strings scan.paused_scan.names;
+        autoboot_enabled_names =
+          sorted_unique_strings scan.paused_scan.autoboot_enabled_names;
+        details = sort_paused_keeper_details scan.paused_scan.details;
+        read_errors =
+          List.sort
+            (fun (a, _) (b, _) -> String.compare a b)
+            scan.paused_scan.read_errors;
+      };
+    autoboot_scan =
+      {
+        autoboot_names = sorted_unique_strings scan.autoboot_scan.autoboot_names;
+        read_errors =
+          List.sort
+            (fun (a, _) (b, _) -> String.compare a b)
+            scan.autoboot_scan.read_errors;
+      };
+    bootable_names = sorted_unique_strings scan.bootable_names;
+  }
 
 let autoboot_enabled_keeper_scan config =
   sorted_unique_strings (Keeper_types.configured_keeper_names config @ Keeper_types.keeper_names config)
@@ -391,7 +538,7 @@ let autoboot_enabled_keeper_scan config =
                autoboot_names = name :: acc.autoboot_names;
                read_errors = (name, err) :: acc.read_errors;
              })
-       { autoboot_names = []; read_errors = [] }
+       empty_autoboot_keeper_scan
   |> fun scan ->
   {
     autoboot_names = sorted_unique_strings scan.autoboot_names;
@@ -430,21 +577,29 @@ let keeper_phase_counts ?base_path () =
           | Keeper_state_machine.Zombie -> { acc with executable })
        { running = 0; failing = 0; executable = 0 }
 
-let keeper_fleet_safety_health_json ~phase_counts ~paused_keepers_json =
+let keeper_fleet_safety_health_json
+    ?bootable_names:bootable_names_override
+    ?autoboot_scan:autoboot_scan_override
+    ~phase_counts
+    ~paused_keepers_json
+    () =
   let bootable_names, autoboot_scan =
-    match current_server_state_opt () with
-    | Some state ->
+    match (bootable_names_override, autoboot_scan_override) with
+    | Some bootable_names, Some autoboot_scan -> (bootable_names, autoboot_scan)
+    | _ -> (
+      match current_server_state_opt () with
+      | Some state ->
         (try
-           ( Keeper_runtime.bootable_keeper_names state.Mcp_server.room_config,
-             autoboot_enabled_keeper_scan state.Mcp_server.room_config )
+           ( Keeper_runtime.bootable_keeper_names state.Mcp_server.room_config
+           , autoboot_enabled_keeper_scan state.Mcp_server.room_config )
          with
          | Eio.Cancel.Cancelled _ as exn -> raise exn
          | exn ->
-             Log.Keeper.warn
-               "health: failed to compute bootable keeper names: %s"
-               (Printexc.to_string exn);
-             ([], { autoboot_names = []; read_errors = [] }))
-    | None -> ([], { autoboot_names = []; read_errors = [] })
+           Log.Keeper.warn
+             "health: failed to compute bootable keeper names: %s"
+             (Printexc.to_string exn);
+           ([], empty_autoboot_keeper_scan))
+      | None -> ([], empty_autoboot_keeper_scan))
   in
   let bootable_count = List.length bootable_names in
   let target_count = List.length autoboot_scan.autoboot_names in
@@ -618,13 +773,31 @@ let current_room_base_path_opt () =
   | Some state -> Some state.Mcp_server.room_config.base_path
   | None -> None
 
-let keeper_fleet_runtime_resolution_base_fields ?(include_reaction_ledger = true) () =
+let keeper_fleet_runtime_resolution_base_fields
+    ?meta_scan
+    ?(include_reaction_ledger = true)
+    () =
   let base_path = current_room_base_path_opt () in
   let phase_counts = keeper_phase_counts ?base_path () in
   let keeper_fibers = phase_counts.running in
-  let paused_keepers_json = paused_keepers_health_json () in
+  let paused_keepers_json =
+    match meta_scan with
+    | Some scan ->
+      paused_keepers_health_json_of_scan
+        ~running_names:(running_paused_keeper_names ())
+        scan.paused_scan
+    | None -> paused_keepers_health_json ()
+  in
   let fleet_safety =
-    keeper_fleet_safety_health_json ~phase_counts ~paused_keepers_json
+    match meta_scan with
+    | Some scan ->
+      keeper_fleet_safety_health_json
+        ~bootable_names:scan.bootable_names
+        ~autoboot_scan:scan.autoboot_scan
+        ~phase_counts
+        ~paused_keepers_json
+        ()
+    | None -> keeper_fleet_safety_health_json ~phase_counts ~paused_keepers_json ()
   in
   let fields =
     [ "keeper_fibers", `Int keeper_fibers
@@ -668,7 +841,19 @@ let keeper_fleet_runtime_resolution_fields () =
 ;;
 
 let keeper_fleet_runtime_resolution_light_fields () =
-  keeper_fleet_runtime_resolution_base_fields ~include_reaction_ledger:false ()
+  let meta_scan =
+    match current_server_state_opt () with
+    | Some state ->
+      Some
+        (keeper_fleet_meta_scan
+           ~include_paused_details:false
+           state.Mcp_server.room_config)
+    | None -> None
+  in
+  keeper_fleet_runtime_resolution_base_fields
+    ?meta_scan
+    ~include_reaction_ledger:false
+    ()
   @ [ "fd_accountant", fd_accountant_snapshot_json () ]
 ;;
 
@@ -761,7 +946,7 @@ let make_health_json ?(listener = "http/1.1") request =
     ("fd_accountant", fd_accountant_snapshot_json ());
     ( "keeper_fleet_safety"
     , keeper_fleet_safety_health_json ~phase_counts
-        ~paused_keepers_json );
+        ~paused_keepers_json () );
     ("keeper_reaction_ledger", reaction_ledger_json);
     (* Paused-keeper visibility: a keeper with [meta.paused = true] does not
        run turns, and auto-paused keepers may no longer have a live registry

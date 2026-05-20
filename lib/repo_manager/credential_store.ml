@@ -70,29 +70,23 @@ let credential_of_toml toml id =
   let* cred_type_str = Otoml.find_result toml Otoml.get_string (path "type") in
   let* cred_type = credential_type_of_string cred_type_str in
   let* username = Otoml.find_result toml Otoml.get_string (path "username") in
-  let gh_config_dir =
-    match Otoml.find_result toml Otoml.get_string (path "gh_config_dir") with
-    | Ok dir -> Some dir
-    | Error _ -> None
+  (* RFC-0141 PR-3: lift optional fields through [Field_resolution] so a
+     wrong-type value in [credentials.toml] surfaces as [Error] instead of
+     being silenced into [None]. *)
+  let optional_string field =
+    match Field_resolution.resolve_string toml (path field) with
+    | Present v -> Ok (Some v)
+    | Missing -> Ok None
+    | Type_mismatch { path; expected; message } ->
+      Error
+        (Printf.sprintf "TOML field %s: expected %s (%s)"
+           (String.concat "." path) expected message)
   in
-  let ssh_key_path =
-    match Otoml.find_result toml Otoml.get_string (path "ssh_key_path") with
-    | Ok path -> Some path
-    | Error _ -> None
-  in
-  let gpg_key_id =
-    match Otoml.find_result toml Otoml.get_string (path "gpg_key_id") with
-    | Ok id -> Some id
-    | Error _ -> None
-  in
+  let* gh_config_dir = optional_string "gh_config_dir" in
+  let* ssh_key_path = optional_string "ssh_key_path" in
+  let* gpg_key_id = optional_string "gpg_key_id" in
   let state = credential_state_of_toml toml id in
-  let token_sha256_prefix =
-    match
-      Otoml.find_result toml Otoml.get_string (path "token_sha256_prefix")
-    with
-    | Ok s -> Some s
-    | Error _ -> None
-  in
+  let* token_sha256_prefix = optional_string "token_sha256_prefix" in
   Ok
     {
       id;

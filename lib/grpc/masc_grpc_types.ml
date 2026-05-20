@@ -15,22 +15,29 @@ module P = Masc_proto.Masc_coordination.Masc.Coordination.V1
 (** Serialize a protobuf message to a binary string. *)
 let encode to_proto msg = Ocaml_protoc_plugin.Writer.contents (to_proto msg)
 
-(** Deserialize a protobuf message from a binary string. *)
-let decode_result from_proto bytes =
+(** Deserialize a protobuf message from a binary string.
+
+    [type_name] identifies the protobuf message type being decoded
+    (e.g. "JoinRequest", "ToolCallResponse"). It is embedded in the
+    error message so operators see which message type failed instead
+    of a context-free "protobuf decode error: ..." line. *)
+let decode_result ~type_name from_proto bytes =
   let reader = Ocaml_protoc_plugin.Reader.create bytes in
   match from_proto reader with
   | Ok v -> Ok v
   | Error e ->
     Error
       (Printf.sprintf
-         "protobuf decode error: %s"
+         "protobuf decode error: %s: %s"
+         type_name
          (Ocaml_protoc_plugin.Result.show_error e))
 ;;
 
 (** Deserialize a protobuf message from a binary string.
-    Raises [Invalid_argument] on parse error. *)
-let decode from_proto bytes =
-  match decode_result from_proto bytes with
+    Raises [Invalid_argument] on parse error. The exception payload
+    includes [type_name] so the bare backtrace is operator-actionable. *)
+let decode ~type_name from_proto bytes =
+  match decode_result ~type_name from_proto bytes with
   | Ok v -> v
   | Error msg -> invalid_arg msg
 ;;
@@ -104,7 +111,7 @@ module JoinRequest = struct
     }
 
   let of_bytes_result bytes =
-    match decode_result P.JoinRequest.from_proto bytes with
+    match decode_result ~type_name:"JoinRequest" P.JoinRequest.from_proto bytes with
     | Ok p ->
       Ok
         ({ agent_name = p.agent_name
@@ -137,7 +144,7 @@ module JoinResponse = struct
     }
 
   let of_bytes bytes =
-    let p = decode P.JoinResponse.from_proto bytes in
+    let p = decode ~type_name:"JoinResponse" P.JoinResponse.from_proto bytes in
     { success = p.success
     ; message = p.message
     ; session_id = p.session_id
@@ -163,7 +170,7 @@ module LeaveRequest = struct
     }
 
   let of_bytes_result bytes =
-    match decode_result P.LeaveRequest.from_proto bytes with
+    match decode_result ~type_name:"LeaveRequest" P.LeaveRequest.from_proto bytes with
     | Ok p -> Ok ({ agent_name = p.agent_name; session_id = p.session_id } : t)
     | Error _ as err -> err
   ;;
@@ -188,7 +195,7 @@ module LeaveResponse = struct
     }
 
   let of_bytes bytes =
-    let p = decode P.LeaveResponse.from_proto bytes in
+    let p = decode ~type_name:"LeaveResponse" P.LeaveResponse.from_proto bytes in
     { success = p.success; message = p.message }
   ;;
 
@@ -208,7 +215,7 @@ module HeartbeatPing = struct
     }
 
   let of_bytes_result bytes =
-    match decode_result P.HeartbeatPing.from_proto bytes with
+    match decode_result ~type_name:"HeartbeatPing" P.HeartbeatPing.from_proto bytes with
     | Ok p ->
       Ok
         ({ agent_name = p.agent_name
@@ -246,7 +253,7 @@ module HeartbeatAck = struct
     }
 
   let of_bytes bytes =
-    let p = decode P.HeartbeatAck.from_proto bytes in
+    let p = decode ~type_name:"HeartbeatAck" P.HeartbeatAck.from_proto bytes in
     { timestamp_ms = p.timestamp_ms
     ; active_agent_count = p.active_agent_count
     ; pending_task_count = p.pending_task_count
@@ -276,7 +283,7 @@ module SubscribeRequest = struct
     }
 
   let of_bytes_result bytes =
-    match decode_result P.SubscribeRequest.from_proto bytes with
+    match decode_result ~type_name:"SubscribeRequest" P.SubscribeRequest.from_proto bytes with
     | Ok p ->
       Ok
         ({ agent_name = p.agent_name
@@ -317,7 +324,7 @@ module Event = struct
     }
 
   let of_bytes bytes =
-    let p = decode P.Event.from_proto bytes in
+    let p = decode ~type_name:"Event" P.Event.from_proto bytes in
     { seq = p.seq
     ; event_type = p.event_type
     ; source_agent = p.source_agent
@@ -349,7 +356,7 @@ module ToolCallRequest = struct
     }
 
   let of_bytes_result bytes =
-    match decode_result P.ToolCallRequest.from_proto bytes with
+    match decode_result ~type_name:"ToolCallRequest" P.ToolCallRequest.from_proto bytes with
     | Ok p ->
       Ok
         ({ agent_name = p.agent_name
@@ -387,7 +394,7 @@ module ToolCallResponse = struct
     }
 
   let of_bytes bytes =
-    let p = decode P.ToolCallResponse.from_proto bytes in
+    let p = decode ~type_name:"ToolCallResponse" P.ToolCallResponse.from_proto bytes in
     { success = p.success
     ; result_json = p.result_json
     ; error_message = p.error_message
@@ -416,7 +423,7 @@ module BroadcastRequest = struct
     }
 
   let of_bytes_result bytes =
-    match decode_result P.BroadcastRequest.from_proto bytes with
+    match decode_result ~type_name:"BroadcastRequest" P.BroadcastRequest.from_proto bytes with
     | Ok p ->
       Ok ({ agent_name = p.agent_name; message = p.message; mentions = p.mentions } : t)
     | Error _ as err -> err
@@ -442,7 +449,7 @@ module BroadcastResponse = struct
     }
 
   let of_bytes bytes =
-    let p = decode P.BroadcastResponse.from_proto bytes in
+    let p = decode ~type_name:"BroadcastResponse" P.BroadcastResponse.from_proto bytes in
     { success = p.success; seq = p.seq }
   ;;
 
@@ -462,7 +469,7 @@ module StatusResponse = struct
     }
 
   let of_bytes bytes =
-    let p = decode P.StatusResponse.from_proto bytes in
+    let p = decode ~type_name:"StatusResponse" P.StatusResponse.from_proto bytes in
     { agents = List.map agent_info_of_proto p.agents
     ; tasks = List.map task_info_of_proto p.tasks
     ; message_count = p.message_count
@@ -491,7 +498,7 @@ module LspRequest = struct
     }
 
   let of_bytes_result bytes =
-    match decode_result P.LspRequest.from_proto bytes with
+    match decode_result ~type_name:"LspRequest" P.LspRequest.from_proto bytes with
     | Ok p ->
       Ok
         ({ language_id = p.language_id
@@ -528,7 +535,7 @@ module LspResponse = struct
     }
 
   let of_bytes_result bytes =
-    match decode_result P.LspResponse.from_proto bytes with
+    match decode_result ~type_name:"LspResponse" P.LspResponse.from_proto bytes with
     | Ok p ->
       Ok
         ({ jsonrpc_response_json = p.jsonrpc_response_json

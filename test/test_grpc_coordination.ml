@@ -417,14 +417,25 @@ let test_protobuf_binary_format () =
   Alcotest.(check bool) "not JSON" true (String.length bytes = 0 || bytes.[0] <> '{')
 ;;
 
+(* These tests verify two things:
+   1. The error message starts with "protobuf decode error:" so log
+      aggregators that bucket on this prefix keep working.
+   2. The message embeds the *specific protobuf type name* that failed
+      to decode, so operators can identify the wire boundary without
+      reading the stack trace. The type_name parameter on
+      [Masc_grpc_types.decode_result] makes this an enforced contract. *)
 let test_join_request_invalid_bytes_result () =
   match T.JoinRequest.of_bytes_result malformed_protobuf with
   | Ok _ -> Alcotest.fail "expected decode failure"
   | Error msg ->
     Alcotest.(check bool)
-      "error mentions decode"
+      "error keeps 'protobuf decode error:' prefix"
       true
-      (String.starts_with ~prefix:"protobuf decode error:" msg)
+      (String.starts_with ~prefix:"protobuf decode error:" msg);
+    Alcotest.(check bool)
+      "error names the failing protobuf type (JoinRequest)"
+      true
+      (String_util.contains_substring msg"JoinRequest")
 ;;
 
 let test_tool_call_request_invalid_bytes_result () =
@@ -432,9 +443,13 @@ let test_tool_call_request_invalid_bytes_result () =
   | Ok _ -> Alcotest.fail "expected decode failure"
   | Error msg ->
     Alcotest.(check bool)
-      "error mentions decode"
+      "error keeps 'protobuf decode error:' prefix"
       true
-      (String.starts_with ~prefix:"protobuf decode error:" msg)
+      (String.starts_with ~prefix:"protobuf decode error:" msg);
+    Alcotest.(check bool)
+      "error names the failing protobuf type (ToolCallRequest)"
+      true
+      (String_util.contains_substring msg"ToolCallRequest")
 ;;
 
 let test_lsp_request_invalid_bytes_result () =
@@ -442,9 +457,13 @@ let test_lsp_request_invalid_bytes_result () =
   | Ok _ -> Alcotest.fail "expected decode failure"
   | Error msg ->
     Alcotest.(check bool)
-      "error mentions decode"
+      "error keeps 'protobuf decode error:' prefix"
       true
-      (String.starts_with ~prefix:"protobuf decode error:" msg)
+      (String.starts_with ~prefix:"protobuf decode error:" msg);
+    Alcotest.(check bool)
+      "error names the failing protobuf type (LspRequest)"
+      true
+      (String_util.contains_substring msg"LspRequest")
 ;;
 
 let test_lsp_response_invalid_bytes_result () =
@@ -452,9 +471,13 @@ let test_lsp_response_invalid_bytes_result () =
   | Ok _ -> Alcotest.fail "expected decode failure"
   | Error msg ->
     Alcotest.(check bool)
-      "error mentions decode"
+      "error keeps 'protobuf decode error:' prefix"
       true
-      (String.starts_with ~prefix:"protobuf decode error:" msg)
+      (String.starts_with ~prefix:"protobuf decode error:" msg);
+    Alcotest.(check bool)
+      "error names the failing protobuf type (LspResponse)"
+      true
+      (String_util.contains_substring msg"LspResponse")
 ;;
 
 let test_join_handler_invalid_bytes_raise_grpc_status () =

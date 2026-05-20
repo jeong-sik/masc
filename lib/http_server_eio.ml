@@ -720,6 +720,15 @@ let run ~sw ~net ~clock config routes =
       effective_host config.port config.host;
   Printf.printf "   Graceful shutdown: SIGTERM/SIGINT supported\n%!";
 
+  (* Stable listener identity. Embedded in every error log below so
+     operators can tell which listener emitted the line when the
+     process runs multiple HTTP servers (HTTP/1.1 here vs HTTP/2 in
+     http_server_h2.ml vs admin/health sub-servers). The protocol tag
+     "h1" mirrors the "h2" tag used by http_server_h2.ml. *)
+  let listener_tag =
+    Printf.sprintf "h1 %s:%d" effective_host config.port
+  in
+
   let initial_backoff_s = 0.05 in
   let max_backoff_s = 1.0 in
   let backoff_s = ref initial_backoff_s in
@@ -749,8 +758,8 @@ let run ~sw ~net ~clock config routes =
                try Eio.Flow.close flow with
                | Eio.Cancel.Cancelled _ as e -> raise e
                | exn ->
-                 Log.Http.warn "[http-eio] flow close failed: %s"
-                   (Printexc.to_string exn));
+                 Log.Http.warn "[%s] flow close failed: %s"
+                   listener_tag (Printexc.to_string exn));
              try
                Httpun_eio.Server.create_connection_handler
                  ~sw:conn_sw
@@ -761,12 +770,13 @@ let run ~sw ~net ~clock config routes =
              with
              | Eio.Cancel.Cancelled _ as e -> raise e
              | exn ->
-               Log.Http.error "Connection error: %s" (Printexc.to_string exn)))
+               Log.Http.error "[%s] connection error: %s"
+                 listener_tag (Printexc.to_string exn)))
        with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
          if is_cancelled exn then raise exn;
          let delay = !backoff_s in
-         Log.Http.error "Accept error: %s (backoff %.2fs)"
-           (Printexc.to_string exn) delay;
+         Log.Http.error "[%s] accept error: %s (backoff %.2fs)"
+           listener_tag (Printexc.to_string exn) delay;
          Eio.Time.sleep clock delay;
          bump_backoff ());
       accept_loop ()
@@ -774,8 +784,8 @@ let run ~sw ~net ~clock config routes =
       if is_cancelled exn then ()
       else
         let delay = !backoff_s in
-        Log.Http.error "Accept loop error: %s (backoff %.2fs)"
-          (Printexc.to_string exn) delay;
+        Log.Http.error "[%s] accept loop error: %s (backoff %.2fs)"
+          listener_tag (Printexc.to_string exn) delay;
         Eio.Time.sleep clock delay;
         bump_backoff ();
         accept_loop ()

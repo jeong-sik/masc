@@ -124,6 +124,14 @@ let cascade_exhausted_failure_reason_of_raw_error ~detail raw_error =
          ; provider_id = None
          ; http_status = None
          })
+  | Some (Cascade_error_classify.Capacity_backpressure { detail = capacity_detail; _ }) ->
+    Some
+      (Keeper_registry.Provider_runtime_error
+         { code = "capacity_exhausted"
+         ; detail = capacity_detail
+         ; provider_id = None
+         ; http_status = None
+         })
   | Some
       ( Cascade_error_classify.Resumable_cli_session _
       | Cascade_error_classify.No_tool_capable_provider _

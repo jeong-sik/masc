@@ -98,13 +98,15 @@ let test_capacity_backpressure_text_maps () =
 let test_capacity_backpressure_sdk_error_maps () =
   let err =
     Owne.sdk_error_of_masc_internal_error
-      (Owne.Cascade_exhausted
+      (Owne.Capacity_backpressure
          {
            cascade_name = Owne.cascade_name_of_string "strict_tool_candidates";
-           reason = KT.Other_detail "slot full, cascading to next provider";
+           source = Owne.Client_capacity;
+           detail = "client capacity key glm is full";
+           retry_after_sec = None;
          })
   in
-  check_capacity_class "slot-full structured SDK error"
+  check_capacity_class "typed capacity structured SDK error"
     (B.blocker_class_of_sdk_error err)
 
 let test_capacity_backpressure_runtime_surface_maps_legacy_cascade () =

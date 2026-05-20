@@ -19,10 +19,22 @@ type provider_rejection = {
   reason : string;
 }
 
+type capacity_backpressure_source =
+  | Provider_capacity
+  | Client_capacity
+  | Tier_admission
+  | Cascade_slot
+
 type masc_internal_error =
   | Cascade_exhausted of {
       cascade_name : cascade_name;
       reason : Keeper_types.cascade_exhaustion_reason;
+    }
+  | Capacity_backpressure of {
+      cascade_name : cascade_name;
+      source : capacity_backpressure_source;
+      detail : string;
+      retry_after_sec : float option;
     }
   | Resumable_cli_session of {
       cascade_name : cascade_name;
@@ -78,6 +90,9 @@ val masc_internal_error_to_json : masc_internal_error -> Yojson.Safe.t
 val summary_of_masc_internal_error : masc_internal_error -> string option
 (** Operator-facing concise summary for structured errors where the raw JSON
     payload is too noisy for dashboard cards. *)
+
+val capacity_backpressure_source_to_string :
+  capacity_backpressure_source -> string
 
 val sdk_error_of_masc_internal_error : masc_internal_error -> Agent_sdk.Error.sdk_error
 (** Convert a [masc_internal_error] to an SDK error, bumping the

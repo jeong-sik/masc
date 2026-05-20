@@ -28,6 +28,17 @@ let make_cascade_exhausted reason =
     (Owne.Cascade_exhausted
        { cascade_name = cascade_name "test_cascade"; reason })
 
+let make_capacity_backpressure ?(source = Owne.Client_capacity)
+    ?(detail = "client capacity key glm is full") () =
+  Owne.sdk_error_of_masc_internal_error
+    (Owne.Capacity_backpressure
+       {
+         cascade_name = cascade_name "test_cascade";
+         source;
+         detail;
+         retry_after_sec = None;
+       })
+
 let make_no_tool_capable () =
   Owne.sdk_error_of_masc_internal_error
     (Owne.No_tool_capable_provider
@@ -60,14 +71,27 @@ let test_slot_full_other_detail_is_capacity_backpressure () =
   in
   check bool "slot full is auto-recoverable" true
     (KEC.is_auto_recoverable_turn_error err);
-  check bool "slot full remains cascade_exhausted" true
+  check bool "legacy slot full remains cascade_exhausted" true
     (KEC.is_cascade_exhausted_error err);
   match KEC.recoverable_cascade_failure_reason err with
   | Some reason ->
-    check string "slot full -> capacity_exhausted" "capacity_exhausted"
+    check string "legacy slot full -> capacity_exhausted" "capacity_exhausted"
       (KEC.degraded_retry_reason_to_string reason)
   | None ->
     fail "slot full should be capacity-backpressure recoverable"
+
+let test_typed_capacity_backpressure_is_not_cascade_exhausted () =
+  let err = make_capacity_backpressure () in
+  check bool "typed capacity is auto-recoverable" true
+    (KEC.is_auto_recoverable_turn_error err);
+  check bool "typed capacity is not cascade_exhausted" false
+    (KEC.is_cascade_exhausted_error err);
+  match KEC.recoverable_cascade_failure_reason err with
+  | Some reason ->
+    check string "typed capacity -> capacity_exhausted" "capacity_exhausted"
+      (KEC.degraded_retry_reason_to_string reason)
+  | None ->
+    fail "typed capacity backpressure should be recoverable as capacity"
 
 let test_provider_capacity_exhausted_is_capacity_backpressure () =
   let err =
@@ -422,6 +446,8 @@ let () =
             test_other_detail_generic_recoverable;
           test_case "slot full Other_detail is capacity backpressure" `Quick
             test_slot_full_other_detail_is_capacity_backpressure;
+          test_case "typed capacity backpressure is not cascade exhausted" `Quick
+            test_typed_capacity_backpressure_is_not_cascade_exhausted;
           test_case "provider CapacityExhausted is capacity backpressure" `Quick
             test_provider_capacity_exhausted_is_capacity_backpressure;
           test_case "All_providers_failed is recoverable" `Quick

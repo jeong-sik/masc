@@ -197,6 +197,8 @@ let is_auto_recoverable_cascade_exhausted_error (err : Agent_sdk.Error.sdk_error
       Keeper_turn_driver.message_looks_like_cli_wrapped_hard_quota detail
       || Keeper_turn_driver.message_looks_like_cli_wrapped_max_turns detail
       || message_looks_like_capacity_backpressure detail
+  | Some (Keeper_turn_driver.Capacity_backpressure _) ->
+      true
   | Some (Keeper_turn_driver.Cascade_exhausted _) ->
       false
   | Some (Keeper_turn_driver.No_tool_capable_provider _)
@@ -215,6 +217,7 @@ let is_resumable_cli_session_error (err : Agent_sdk.Error.sdk_error) : bool =
   match Keeper_turn_driver.classify_masc_internal_error err with
   | Some (Keeper_turn_driver.Resumable_cli_session _) -> true
   | Some (Keeper_turn_driver.Cascade_exhausted _)
+  | Some (Keeper_turn_driver.Capacity_backpressure _)
   | Some (Keeper_turn_driver.No_tool_capable_provider _)
   | Some (Keeper_turn_driver.Accept_rejected _)
   | Some (Keeper_turn_driver.Admission_queue_timeout _)
@@ -335,6 +338,8 @@ let degraded_retry_after_recoverable_error
         local_recovery_retry Oas_timeout_budget
     | Some (Keeper_turn_driver.Turn_timeout _) ->
         local_recovery_retry Turn_timeout
+    | Some (Keeper_turn_driver.Capacity_backpressure _) ->
+        local_recovery_retry Capacity_exhausted
     | Some
         (Keeper_turn_driver.Cascade_exhausted
            { reason = Keeper_types.Candidates_filtered_after_cycles; _ }) ->
@@ -379,6 +384,8 @@ let recoverable_cascade_failure_reason (err : Agent_sdk.Error.sdk_error) =
         Some Oas_timeout_budget
     | Some (Keeper_turn_driver.Turn_timeout _) ->
         Some Turn_timeout
+    | Some (Keeper_turn_driver.Capacity_backpressure _) ->
+        Some Capacity_exhausted
     | Some
         (Keeper_turn_driver.Cascade_exhausted
            { reason = Keeper_types.Candidates_filtered_after_cycles; _ }) ->
@@ -668,6 +675,7 @@ let is_auto_recoverable_turn_error (err : Agent_sdk.Error.sdk_error) : bool =
 let should_warn_keeper_cycle_failed (err : Agent_sdk.Error.sdk_error) : bool =
   match Keeper_turn_driver.classify_masc_internal_error err with
   | Some (Keeper_turn_driver.Oas_timeout_budget _) -> true
+  | Some (Keeper_turn_driver.Capacity_backpressure _) -> true
   | Some (Keeper_turn_driver.Cascade_exhausted _)
   | Some (Keeper_turn_driver.Resumable_cli_session _)
   | Some (Keeper_turn_driver.No_tool_capable_provider _)
@@ -710,6 +718,7 @@ let is_ambiguous_side_effect_error (err : Agent_sdk.Error.sdk_error) : bool =
       | Agent_sdk.Error.A2a _ -> false)
   (* All other MASC-internal classifications are unambiguous failures. *)
   | Some (Keeper_turn_driver.Cascade_exhausted _)
+  | Some (Keeper_turn_driver.Capacity_backpressure _)
   | Some (Keeper_turn_driver.No_tool_capable_provider _)
   | Some (Keeper_turn_driver.Accept_rejected _)
   | Some (Keeper_turn_driver.Resumable_cli_session _)
@@ -888,6 +897,7 @@ let is_cascade_exhausted_error (err : Agent_sdk.Error.sdk_error) : bool =
   | Some (Keeper_turn_driver.Resumable_cli_session _)
   | Some (Keeper_turn_driver.No_tool_capable_provider _)
   | Some (Keeper_turn_driver.Accept_rejected _) -> true
+  | Some (Keeper_turn_driver.Capacity_backpressure _)
   | Some (Keeper_turn_driver.Admission_queue_timeout _)
   | Some (Keeper_turn_driver.Admission_queue_rejected _)
   | Some (Keeper_turn_driver.Oas_timeout_budget _)

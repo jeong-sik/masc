@@ -1038,6 +1038,10 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
             Option.value
               ~default:reason
               (Keeper_turn_driver.summary_of_masc_internal_error err)
+        | Some (Keeper_turn_driver.Capacity_backpressure _ as err) ->
+            Option.value
+              ~default:reason
+              (Keeper_turn_driver.summary_of_masc_internal_error err)
         | Some (Keeper_turn_driver.No_tool_capable_provider _ as err) -> (
             match Keeper_turn_driver.summary_of_masc_internal_error err with
             | Some summary -> summary
@@ -1057,6 +1061,7 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
             | Keeper_turn_driver.Admission_queue_timeout _
             | Keeper_turn_driver.Admission_queue_rejected _
             | Keeper_turn_driver.Resumable_cli_session _
+            | Keeper_turn_driver.Capacity_backpressure _
             | Keeper_turn_driver.No_tool_capable_provider _) ->
             true
         | Some _ | None -> false)

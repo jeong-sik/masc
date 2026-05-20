@@ -224,6 +224,7 @@ let blocker_class_of_sdk_error (err : Agent_sdk.Error.sdk_error) : blocker_class
   | Some Keeper_error_classify.Capacity_exhausted -> Some Capacity_exhausted
   | _ ->
   match Keeper_turn_driver.classify_masc_internal_error err with
+  | Some (Keeper_turn_driver.Capacity_backpressure _) -> Some Capacity_exhausted
   | Some (Keeper_turn_driver.Cascade_exhausted { reason; _ }) ->
     Some (Cascade_exhausted reason)
   | Some (Keeper_turn_driver.Resumable_cli_session { detail; _ }) ->
@@ -313,6 +314,8 @@ let runtime_blocker_surface_of_typed_class ?(summary = "") (cls : blocker_class)
       then cascade_exhaustion_summary reason
       else (
         match Keeper_turn_driver.classify_masc_internal_error_of_string summary with
+        | Some (Keeper_turn_driver.Capacity_backpressure _) ->
+          "Provider or client capacity backpressure blocked this keeper turn."
         | Some (Keeper_turn_driver.Cascade_exhausted { reason = structured_reason; _ }) ->
           let reason =
             match structured_reason with

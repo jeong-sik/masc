@@ -15,7 +15,7 @@ function post(
   line?: number | null,
   filePath?: string | null,
 ): AnchoredThreadProducerInput {
-  return { id, created_at_iso: ts_iso, author_identity: keeper, line, filePath }
+  return { id, created_at: ts_iso, author_identity: keeper, line, filePath }
 }
 
 beforeEach(() => {
@@ -71,7 +71,7 @@ describe('bridgePostsToTrace — RFC-0028 PR-δ anchored-thread producer', () =>
     expect(keeperTraceState.value.events.length).toBe(0)
   })
 
-  it('skips posts with malformed created_at_iso (NaN-guard)', () => {
+  it('skips posts with malformed created_at (NaN-guard)', () => {
     bridgePostsToTrace(
       [
         post('bad', 'not-a-date', 'scholar'),

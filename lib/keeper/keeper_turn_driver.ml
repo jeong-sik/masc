@@ -22,13 +22,19 @@ include Keeper_turn_driver_provider_attempt
 let keeper_cascade_tier_admission = Cascade_tier_admission.create ()
 
 let cascade_tier_admission_policy_of_priority priority =
-  match
-    Llm_provider.Request_priority.resolve priority
-    |> Llm_provider.Request_priority.to_string
-    |> String.lowercase_ascii
-  with
-  | "background" -> Cascade_tier_admission.Bypass
-  | _ -> Cascade_tier_admission.Required
+  (* RFC-0126: exhaustive typed match over Llm_provider.Request_priority.t
+     instead of the previous string-classifier (`to_string |> match`) so that
+     future variants in the upstream agent_sdk surface as a compile error
+     here rather than silently routing through a permissive default.
+     Semantics: only [Background] (P2 heartbeat / status ticks) bypasses
+     tier admission per Cascade_tier_admission.mli side-task starvation
+     defence; main-path priorities all require admission.  [Unspecified]
+     is unreachable after [resolve] (it maps to [Proactive]) but the arm
+     keeps the match exhaustive without a catch-all. *)
+  match Llm_provider.Request_priority.resolve priority with
+  | Background -> Cascade_tier_admission.Bypass
+  | Resume | Interactive | Proactive | Unspecified ->
+      Cascade_tier_admission.Required
 
 let with_keeper_cascade_tier_admission
     ?(admission = keeper_cascade_tier_admission)

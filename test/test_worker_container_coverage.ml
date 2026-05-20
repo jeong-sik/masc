@@ -21,6 +21,26 @@ let worker_usage ?cost_usd ~input_tokens ~output_tokens () :
     cost_usd;
   }
 
+let find_tool name tools =
+  List.find (fun (t : Agent_sdk.Tool.t) -> String.equal t.schema.name name) tools
+
+let rec cleanup_path path =
+  if Sys.file_exists path then
+    match Unix.lstat path with
+    | { Unix.st_kind = Unix.S_DIR; _ } ->
+      Array.iter
+        (fun child -> cleanup_path (Filename.concat path child))
+        (Sys.readdir path);
+      Unix.rmdir path
+    | _ -> Unix.unlink path
+
+let explicit_events config =
+  Telemetry_eio.read_all_events config
+  |> List.filter (fun (record : Telemetry_eio.event_record) ->
+         match record.event with
+         | Telemetry_eio.Agent_joined _ -> false
+         | _ -> true)
+
 let test_parse_text_tool_calls_single () =
   let content =
     {|mcp__masc__masc_keeper_msg(name="keeper-alpha", message="[local64-smoke-01] manager decide online for hybrid smoke")|}
@@ -79,6 +99,57 @@ let test_mcp_endpoint_url_does_not_leak_token () =
     in
     check string "mcp url stays clean" "http://127.0.0.1:8935/mcp" url)
 
+let test_local_shell_failure_class_reaches_tool_called () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Process_eio.reset_for_testing ();
+  Process_eio.init ~cwd_default:(Eio.Stdenv.cwd env)
+    ~proc_mgr:(Eio.Stdenv.process_mgr env) ~clock:(Eio.Stdenv.clock env);
+  let base_dir = Filename.temp_file "worker_container_telemetry_" "" in
+  Sys.remove base_dir;
+  Unix.mkdir base_dir 0o755;
+  Fun.protect
+    ~finally:(fun () ->
+      Process_eio.reset_for_testing ();
+      cleanup_path base_dir)
+    (fun () ->
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "owner"));
+      let tools =
+        match
+          Worker_container.build_local_shell_tools
+            ~room_config:(Some config)
+            ~worker_name:"local-worker-test"
+            ~workdir:base_dir
+        with
+        | Ok tools -> tools
+        | Error err -> failf "expected local shell tools: %s" err
+      in
+      let shell = find_tool "shell_exec" tools in
+      (match
+         Agent_sdk.Tool.execute shell
+           (`Assoc [ "command", `String "rm -rf /" ])
+       with
+       | Error _ -> ()
+       | Ok _ -> fail "blocked shell command should fail");
+      match
+        explicit_events config
+        |> List.find_opt (fun (record : Telemetry_eio.event_record) ->
+               match record.event with
+               | Telemetry_eio.Tool_called r ->
+                 String.equal r.tool_name "shell_exec" && not r.success
+               | _ -> false)
+      with
+      | Some { Telemetry_eio.event = Telemetry_eio.Tool_called r; _ } ->
+        check (option string) "error_kind"
+          (Some "command_blocked")
+          (Option.map Telemetry_eio.error_kind_to_string r.error_kind);
+        check (option string) "failure_class"
+          (Some "workflow_rejection")
+          (Option.map Tool_result.tool_failure_class_to_string r.failure_class)
+      | Some _ -> fail "expected Tool_called"
+      | None -> fail "missing failed shell_exec telemetry")
+
 let () =
   run "Worker_runtime"
     [
@@ -94,5 +165,7 @@ let () =
             test_merge_usage_sums_costs_when_both_present;
           test_case "mcp endpoint url does not leak token" `Quick
             test_mcp_endpoint_url_does_not_leak_token;
+          test_case "local shell failure_class reaches telemetry" `Quick
+            test_local_shell_failure_class_reaches_tool_called;
         ] );
     ]

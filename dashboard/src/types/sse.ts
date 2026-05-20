@@ -81,7 +81,11 @@ export type SSEEventType =
   | 'oas:masc:audit_event'
 
 export type JournalSeverity = 'debug' | 'info' | 'warn' | 'error' | 'unknown'
-export type JournalSource = 'structured' | 'legacy_stderr' | 'legacy_traceln' | 'sse'
+// Closed set of journal sources. `'unknown'` is a first-class variant
+// (mirroring JournalSeverity) so that `normalizeJournalSource` can fail
+// loud on unrecognized wire data instead of silently coercing it to
+// `'sse'`. Source of truth: see `normalizeJournalSource` in journal-entry.ts.
+export type JournalSource = 'structured' | 'legacy_stderr' | 'legacy_traceln' | 'sse' | 'unknown'
 
 // --- Attribution envelope ---
 // Structured verdict metadata for gate decisions. Emitted alongside existing

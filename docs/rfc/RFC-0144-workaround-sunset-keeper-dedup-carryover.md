@@ -53,6 +53,15 @@ PR #16470 retry dedup applies uniformly to *all* tool retry failures. Its root-f
 - Per-tool failure rate root fixes (each tool's `error_kind` traces back to the table above).
 - `lib/keeper/keeper_tool_retry_state.ml` `Threshold_silence` semantics — once root rate drops, threshold trips disappear and the dedup becomes inert.
 
+### Cluster B carryovers (added 2026-05-20)
+
+2026-05-20 audit에서 sub-agent triage가 `audit-requested INTENTIONAL`로 면죄했으나 main 에이전트 sample-verify 시 워크어라운드로 재분류된 두 PR. 메모리 `feedback_subagent_pr_body_self_justification_must_be_traced` 신규 등록.
+
+| 추가 항목 | PR | 시그니처 | Override 부여 | removal target |
+|---|---|---|---|---|
+| `tool_call_pair_fabrication` counter | masc-mcp#15792 | Repair / Sanitize | Counter retroactive sunset | RFC-0145 §5 PR-1 머지 후 |
+| `compact_audit_drain_burst` counter | masc-mcp#15808 | Telemetry-as-fix | Counter retroactive sunset | RFC-0145 §5 PR-2 머지 후 |
+
 ## 4. Sunset criteria
 
 ### Per-`error_kind` sunset (PR #16389)

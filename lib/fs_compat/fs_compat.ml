@@ -470,9 +470,16 @@ let mkdir_p (path : string) : unit =
 
 (** Parse pre-read string lines as JSONL.
     Use when lines come from [Keeper_memory.read_file_tail_lines] or
-    other non-file sources.  Logs malformed lines with [source] tag. *)
+    other non-file sources.  Logs malformed lines with [source] tag.
+
+    Matches [fold_jsonl]'s line-tracking semantics: [line_no] is
+    1-based, increments only on non-blank lines so it tracks the
+    {b printed} JSONL row number an operator would see in [cat -n].
+    Aligns with the file-level diagnostic at line 559 ("line %d") so
+    a malformed log from either path uses the same coordinate system. *)
 let parse_jsonl_lines ~(source : string) (lines : string list) : Yojson.Safe.t list * int =
   let malformed = ref 0 in
+  let line_no = ref 0 in
   let parsed =
     List.filter_map
       (fun line ->
@@ -480,11 +487,16 @@ let parse_jsonl_lines ~(source : string) (lines : string list) : Yojson.Safe.t l
          if String.equal trimmed ""
          then None
          else (
+           incr line_no;
            match Yojson.Safe.from_string trimmed with
            | json -> Some json
            | exception Yojson.Json_error msg ->
              incr malformed;
-             Stdlib.Printf.eprintf "[fs_compat] malformed JSONL (%s): %s\n%!" source msg;
+             Stdlib.Printf.eprintf
+               "[fs_compat] malformed JSONL (%s) line %d: %s\n%!"
+               source
+               !line_no
+               msg;
              None))
       lines
   in

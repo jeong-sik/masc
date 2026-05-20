@@ -73,12 +73,13 @@ let print_startup_banner
   then Printf.printf "   POST /webrtc/offer, /webrtc/answer → WebRTC signaling\n%!"
 ;;
 
-let on_connection_release conn_sw ~mode flow =
+let on_connection_release conn_sw ~mode ~listener_tag flow =
   Eio.Switch.on_release conn_sw (fun () ->
     Transport_metrics.record_http_connection_closed ~mode;
     try Eio.Flow.close flow with
     | Eio.Cancel.Cancelled _ as e -> raise e
-    | exn -> Log.Misc.warn "flow close: %s" (Printexc.to_string exn))
+    | exn ->
+      Log.Misc.warn "[%s] flow close: %s" listener_tag (Printexc.to_string exn))
 ;;
 
 let register_listener_lifecycle ~sw ~mode =
@@ -92,8 +93,13 @@ let register_listener_lifecycle ~sw ~mode =
   mark_stopped
 ;;
 
-let serve ~sw ~clock ~socket ~request_handler =
+let serve ~sw ~clock ~socket ~addr_label ~request_handler =
   let mode = "h1" in
+  (* Stable listener identity. Mirrors the [h1 host:port]/[h2 host:port]
+     tag introduced in http_server_eio.ml / http_server_h2.ml so error
+     log lines name *which* listener emitted them when a process runs
+     multiple HTTP servers. *)
+  let listener_tag = Printf.sprintf "%s %s" mode addr_label in
   let mark_stopped = register_listener_lifecycle ~sw ~mode in
   let is_cancelled exn =
     match exn with
@@ -109,7 +115,7 @@ let serve ~sw ~clock ~socket ~request_handler =
       Transport_metrics.record_http_accept_latency ~mode accept_latency;
       Eio.Fiber.fork ~sw (fun () ->
         Eio.Switch.run (fun conn_sw ->
-          on_connection_release conn_sw ~mode flow;
+          on_connection_release conn_sw ~mode ~listener_tag flow;
           try
             let conn_handler =
               Httpun_eio.Server.create_connection_handler
@@ -132,7 +138,9 @@ let serve ~sw ~clock ~socket ~request_handler =
             conn_handler client_addr flow
           with
           | Eio.Cancel.Cancelled _ as e -> raise e
-          | exn -> Log.Misc.error "Connection error: %s" (Printexc.to_string exn)));
+          | exn ->
+            Log.Misc.error "[%s] connection error: %s"
+              listener_tag (Printexc.to_string exn)));
       accept_loop 0.05
     with
     | Eio.Cancel.Cancelled _ as e ->
@@ -144,24 +152,27 @@ let serve ~sw ~clock ~socket ~request_handler =
       else (
         let error = Printexc.to_string exn in
         Transport_metrics.record_http_accept_error ~mode ~error;
-        Log.Misc.error "Accept error: %s" error;
+        Log.Misc.error "[%s] accept error: %s" listener_tag error;
         (try Eio.Time.sleep clock backoff_s with
          | Eio.Cancel.Cancelled _ as e -> raise e
-         | exn -> Log.Misc.warn "backoff sleep: %s" (Printexc.to_string exn));
+         | exn ->
+           Log.Misc.warn "[%s] backoff sleep: %s"
+             listener_tag (Printexc.to_string exn));
         accept_loop (Float.min 2.0 (backoff_s *. 1.5)))
   in
   accept_loop 0.05
 ;;
 
-let serve_h2 ~sw ~clock ~socket ~h2_request_handler ~h2_error_handler =
+let serve_h2 ~sw ~clock ~socket ~addr_label ~h2_request_handler ~h2_error_handler =
   let mode = "h2" in
+  let listener_tag = Printf.sprintf "%s %s" mode addr_label in
   let mark_stopped = register_listener_lifecycle ~sw ~mode in
   let is_cancelled exn =
     match exn with
     | Eio.Cancel.Cancelled _ -> true
     | _ -> false
   in
-  Log.Server.info "HTTP/2 h2c mode activated (MASC_USE_H2=1)";
+  Log.Server.info "[%s] h2c mode activated (MASC_USE_H2=1)" listener_tag;
   let rec accept_loop backoff_s =
     try
       let accept_start = Unix.gettimeofday () in
@@ -171,7 +182,7 @@ let serve_h2 ~sw ~clock ~socket ~h2_request_handler ~h2_error_handler =
       Transport_metrics.record_http_accept_latency ~mode accept_latency;
       Eio.Fiber.fork ~sw (fun () ->
         Eio.Switch.run (fun conn_sw ->
-          on_connection_release conn_sw ~mode flow;
+          on_connection_release conn_sw ~mode ~listener_tag flow;
           try
             H2_eio.Server.create_connection_handler
               ~sw:conn_sw
@@ -181,7 +192,9 @@ let serve_h2 ~sw ~clock ~socket ~h2_request_handler ~h2_error_handler =
               flow
           with
           | Eio.Cancel.Cancelled _ as e -> raise e
-          | exn -> Log.Misc.error "[h2] Connection error: %s" (Printexc.to_string exn)));
+          | exn ->
+            Log.Misc.error "[%s] connection error: %s"
+              listener_tag (Printexc.to_string exn)));
       accept_loop 0.05
     with
     | Eio.Cancel.Cancelled _ as e ->
@@ -193,10 +206,12 @@ let serve_h2 ~sw ~clock ~socket ~h2_request_handler ~h2_error_handler =
       else (
         let error = Printexc.to_string exn in
         Transport_metrics.record_http_accept_error ~mode ~error;
-        Log.Misc.error "[h2] Accept error: %s" error;
+        Log.Misc.error "[%s] accept error: %s" listener_tag error;
         (try Eio.Time.sleep clock backoff_s with
          | Eio.Cancel.Cancelled _ as e -> raise e
-         | exn -> Log.Misc.warn "[h2] backoff sleep: %s" (Printexc.to_string exn));
+         | exn ->
+           Log.Misc.warn "[%s] backoff sleep: %s"
+             listener_tag (Printexc.to_string exn));
         accept_loop (Float.min 2.0 (backoff_s *. 1.5)))
   in
   accept_loop 0.05
@@ -206,18 +221,26 @@ let serve_h2 ~sw ~clock ~socket ~h2_request_handler ~h2_error_handler =
     Each connection is peeked (MSG_PEEK) to inspect the first bytes
     before dispatching to httpun-eio or h2-eio.  The peek is
     non-destructive, so both libraries read the socket normally. *)
-let serve_auto ~sw ~clock ~socket ~request_handler ~h2_request_handler ~h2_error_handler =
+let serve_auto ~sw ~clock ~socket ~addr_label ~request_handler ~h2_request_handler ~h2_error_handler =
   let mode = "auto" in
+  let listener_tag = Printf.sprintf "%s %s" mode addr_label in
   let mark_stopped = register_listener_lifecycle ~sw ~mode in
   let is_cancelled exn =
     match exn with
     | Eio.Cancel.Cancelled _ -> true
     | _ -> false
   in
-  Log.Server.info "HTTP auto-detect mode: HTTP/1.1 + HTTP/2 h2c on same port";
+  Log.Server.info "[%s] HTTP auto-detect mode: HTTP/1.1 + HTTP/2 h2c on same port"
+    listener_tag;
   let h2_count = Atomic.make 0 in
   let h1_count = Atomic.make 0 in
   let stats_logged = Atomic.make false in
+  let log_stats () =
+    Log.Server.info "[%s] stats: h2=%d h1=%d"
+      listener_tag
+      (Atomic.get h2_count)
+      (Atomic.get h1_count)
+  in
   let rec accept_loop backoff_s =
     try
       let accept_start = Unix.gettimeofday () in
@@ -227,7 +250,7 @@ let serve_auto ~sw ~clock ~socket ~request_handler ~h2_request_handler ~h2_error
       Transport_metrics.record_http_accept_latency ~mode accept_latency;
       Eio.Fiber.fork ~sw (fun () ->
         Eio.Switch.run (fun conn_sw ->
-          on_connection_release conn_sw ~mode flow;
+          on_connection_release conn_sw ~mode ~listener_tag flow;
           try
             match Http_protocol_detect.detect flow with
             | Ok Http_protocol_detect.Http2 ->
@@ -259,38 +282,33 @@ let serve_auto ~sw ~clock ~socket ~request_handler ~h2_request_handler ~h2_error
                     Httpun.Body.Writer.close body)
               in
               conn_handler client_addr flow
-            | Error msg -> Log.Misc.debug "[auto] protocol detect skipped: %s" msg
+            | Error msg ->
+              Log.Misc.debug "[%s] protocol detect skipped: %s" listener_tag msg
           with
           | Eio.Cancel.Cancelled _ as e -> raise e
-          | exn -> Log.Misc.error "[auto] Connection error: %s" (Printexc.to_string exn)));
+          | exn ->
+            Log.Misc.error "[%s] connection error: %s"
+              listener_tag (Printexc.to_string exn)));
       accept_loop 0.05
     with
     | Eio.Cancel.Cancelled _ as e ->
-      if Atomic.compare_and_set stats_logged false true
-      then
-        Log.Server.info
-          "[auto] stats: h2=%d h1=%d"
-          (Atomic.get h2_count)
-          (Atomic.get h1_count);
+      if Atomic.compare_and_set stats_logged false true then log_stats ();
       mark_stopped ();
       raise e
     | exn ->
       if is_cancelled exn
       then (
-        if Atomic.compare_and_set stats_logged false true
-        then
-          Log.Server.info
-            "[auto] stats: h2=%d h1=%d"
-            (Atomic.get h2_count)
-            (Atomic.get h1_count);
+        if Atomic.compare_and_set stats_logged false true then log_stats ();
         mark_stopped ())
       else (
         let error = Printexc.to_string exn in
         Transport_metrics.record_http_accept_error ~mode ~error;
-        Log.Misc.error "[auto] Accept error: %s" error;
+        Log.Misc.error "[%s] accept error: %s" listener_tag error;
         (try Eio.Time.sleep clock backoff_s with
          | Eio.Cancel.Cancelled _ as e -> raise e
-         | exn -> Log.Misc.warn "[auto] backoff sleep: %s" (Printexc.to_string exn));
+         | exn ->
+           Log.Misc.warn "[%s] backoff sleep: %s"
+             listener_tag (Printexc.to_string exn));
         accept_loop (Float.min 2.0 (backoff_s *. 1.5)))
   in
   accept_loop 0.05

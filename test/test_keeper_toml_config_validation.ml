@@ -185,6 +185,16 @@ let test_verifier_config_hides_worker_lifecycle_tools () =
         "verifier blocks instead of rejecting inaccessible GitHub artifacts"
         true
         (contains ~needle:"GitHub/main artifact에 접근할 수 없으면 reject 대신 blocker" instructions);
+      check
+        bool
+        "verifier instructions avoid hidden Bash implementation name"
+        false
+        (contains ~needle:"keeper_bash" instructions);
+      check
+        bool
+        "verifier instructions avoid hidden shell implementation name"
+        false
+        (contains ~needle:"keeper_shell" instructions);
       let preset =
         match defaults.tool_preset with
         | Some raw -> (
@@ -393,6 +403,24 @@ let contains ~needle haystack =
       if String.sub haystack i nlen = needle then found := true
     done;
   !found
+
+let test_base_config_avoids_hidden_shell_tool_names () =
+  let project_root = Masc_test_deps.find_project_root () in
+  let path = Filename.concat project_root "config/keepers/base.toml" in
+  match KTP.load_keeper_toml path with
+  | Error e -> fail (Printf.sprintf "base.toml: %s" e)
+  | Ok (_loaded_name, defaults) ->
+      let instructions = Option.value ~default:"" defaults.instructions in
+      check
+        bool
+        "base instructions avoid hidden Bash implementation name"
+        false
+        (contains ~needle:"keeper_bash" instructions);
+      check
+        bool
+        "base instructions avoid hidden shell implementation name"
+        false
+        (contains ~needle:"keeper_shell" instructions)
 
 let test_cascade_name_rejects_unknown () =
   let result =
@@ -1004,6 +1032,10 @@ let () =
           test_case "committed keepers can do PR work" `Quick
             (fun () ->
               with_repo_config_dir test_committed_keepers_are_pr_work_capable);
+          test_case "base instructions avoid hidden shell names" `Quick
+            (fun () ->
+              with_repo_config_dir
+                test_base_config_avoids_hidden_shell_tool_names);
           test_case "verifier hides worker lifecycle tools" `Quick
             (fun () ->
               with_repo_config_dir

@@ -42,7 +42,7 @@ let docker_exec_failure_message_internal
       && String_util.contains_substring output "No such file or directory"
     then
       " hint=cwd_not_directory: create or repair the sandbox repo/worktree first \
-       (keeper_shell op=git_clone, then git_worktree/masc_worktree_create for \
+       with the visible clone/worktree tool, then masc_worktree_create for \
        repos/<repo>/.worktrees/<task>)."
     else ""
   in

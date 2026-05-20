@@ -44,7 +44,7 @@ type deterministic_reason =
   | Completion_contract_violation
       (** keeper completion contract (e.g. require_tool_use) failed. *)
   | Keeper_shell_op_required
-      (** raw keeper_bash rejected; caller must use keeper_shell op=*. *)
+      (** Raw Bash rejected because a structured visible tool/native workflow is required. *)
   | Workflow_rejection_blocked
       (** typed workflow_rejection failure class — handled by a
           separate counter in [Keeper_tools_oas], but still considered

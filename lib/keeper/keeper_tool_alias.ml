@@ -220,7 +220,7 @@ let bash_public_schema =
         "run_in_background"
         "boolean"
         "Default false. When true, returns immediately with background_task_id; poll \
-         output via keeper_bash_output, stop via keeper_bash_kill."
+         or stop it with the background output/kill tools shown in your active schema."
     ]
 ;;
 

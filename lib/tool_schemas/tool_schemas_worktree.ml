@@ -12,9 +12,9 @@ MASC infers the repo from the task's repo/path evidence, or uses the \
 sole clone when exactly one clone exists. If repo_name matches a \
 workspace git repo under your base_path, MASC auto-provisions the \
 sandbox clone on demand; otherwise clone the target repo first with \
-keeper_shell op=git_clone. Ambiguous multi-repo tasks fail instead of \
+the visible clone/worktree tool. Ambiguous multi-repo tasks fail instead of \
 picking a clone arbitrarily. The success response returns a keeper-visible \
-Path; pass it as keeper_bash cwd instead of constructing cd commands. After work, create \
+Path; pass it as Bash cwd instead of constructing cd commands. After work, create \
 a PR then call \
 masc_worktree_remove.";
     input_schema = `Assoc [

@@ -152,31 +152,32 @@ let readonly_shell_token_match tokens =
 let readonly_hint_of_category = function
   | "chaining" ->
       "`&&`, `||`, and `;` chaining are blocked in readonly shell. \
-       Issue one command per keeper_bash call, or use a dedicated \
-       keeper_shell sub-op: git_log, git_status, git_diff, \
-       git_worktree, find, ls, rg, head, tail, wc, tree, cat, pwd. \
-       Good: keeper_bash cmd='git status'. \
-       Bad: keeper_bash cmd='git status && git log -1'."
+       Issue one command per Bash call, or use visible read/search \
+       aliases such as Read and Grep. \
+       Good: Bash command='git status'. \
+       Bad: Bash command='git status && git log -1'."
   | "redirect" ->
       "Redirects (`>`, `>>`, `| tee`) are blocked in readonly shell. \
-       Use keeper_fs_edit to write files, or keeper_bash with the \
-       coding preset for write operations. \
-       Good: keeper_fs_edit path=notes.md content='...'. \
+       Use Write/Edit when a file must change, or Bash only when the \
+       active policy exposes a write-capable Bash surface. \
+       Good: Write file_path='notes.md' content='...'. \
        Bad: command='echo hi > notes.md'."
   | "git_write" ->
-      "Use keeper_bash with coding preset for git write operations. \
-       Good: keeper_bash cmd='git add lib/foo.ml'. \
-       Bad: keeper_bash cmd='git commit -m x' without write access \
+      "Use Bash only when the active policy exposes write-capable command \
+       execution for git writes. \
+       Good: Bash command='git add lib/foo.ml'. \
+       Bad: Bash command='git commit -m x' without write access \
        does not accept git write commands)."
   | "package_install" ->
-      "Package installation requires keeper_bash with coding preset. \
-       Good: keeper_bash cmd='opam install -y eio'. \
-       Bad: keeper_bash cmd='opam install eio' without write access \
+      "Package installation requires a write-capable Bash surface. \
+       Good: Bash command='opam install -y eio'. \
+       Bad: Bash command='opam install eio' without write access \
        does not accept package installs)."
   | "destructive" ->
-      "Use keeper_bash for write operations, not readonly shell. \
-       Good: keeper_bash cmd='rm .tmp/scratch.log'. \
-       Bad: keeper_bash cmd='rm -rf .tmp/' (readonly shell does \
+      "Use Bash only when the active policy exposes write-capable command \
+       execution, not readonly shell. \
+       Good: Bash command='rm .tmp/scratch.log'. \
+       Bad: Bash command='rm -rf .tmp/' (readonly shell does \
        not accept destructive commands)."
   | _ -> "This operation is not allowed in readonly shell."
 
@@ -191,8 +192,8 @@ let diagnosis_of_readonly_category category =
                 "&&, ||, and ; chain multiple commands; the readonly shell \
                  validates one command per call."
             ; rewrite =
-                Some "Split into two calls: keeper_bash cmd='git status' \
-                      then keeper_bash cmd='git log -1'."
+                Some "Split into two calls: Bash command='git status' \
+                      then Bash command='git log -1'."
             ; tool_suggestion = None }
   | "redirect" ->
       Some { Exec_core.rule_id = "readonly_redirect_blocked"
@@ -200,15 +201,15 @@ let diagnosis_of_readonly_category category =
                 "> and >> modify the filesystem; readonly shell forbids writes."
             ; rewrite = None
             ; tool_suggestion =
-                Some "keeper_fs_edit" }
+                Some "Write" }
   | "git_write" ->
       Some { Exec_core.rule_id = "readonly_git_write_blocked"
             ; explanation =
                 "git commit/push/checkout modify state; readonly shell only \
                  allows read-only git subcommands (log, diff, status, show)."
             ; rewrite =
-                Some "Use keeper_bash with coding preset: keeper_bash \
-                      cmd='git add lib/foo.ml && git commit -m \"msg\"'."
+                Some "Use a write-capable Bash surface: Bash \
+                      command='git add lib/foo.ml'. Commit in a second Bash call."
             ; tool_suggestion = None }
   | "package_install" ->
       Some { Exec_core.rule_id = "readonly_package_install_blocked"
@@ -216,8 +217,8 @@ let diagnosis_of_readonly_category category =
                 "opam install / npm install mutate the global environment; \
                  readonly shell forbids package mutations."
             ; rewrite =
-                Some "Use keeper_bash with coding preset: keeper_bash \
-                      cmd='opam install -y eio'."
+                Some "Use a write-capable Bash surface: Bash \
+                      command='opam install -y eio'."
             ; tool_suggestion = None }
   | "destructive" ->
       Some { Exec_core.rule_id = "readonly_destructive_blocked"
@@ -225,8 +226,8 @@ let diagnosis_of_readonly_category category =
                 "rm, curl -o, and similar destructive commands modify or \
                  delete state; readonly shell forbids them."
             ; rewrite =
-                Some "Use keeper_bash with coding preset: keeper_bash \
-                      cmd='rm .tmp/scratch.log'."
+                Some "Use a write-capable Bash surface: Bash \
+                      command='rm .tmp/scratch.log'."
             ; tool_suggestion = None }
   | _ -> None
 
@@ -238,8 +239,8 @@ let diagnosis_of_block_reason reason =
                 "Pipe | and chain && or ; combine multiple commands; the \
                  keeper validates one command per call."
             ; rewrite =
-                Some "Split into two keeper_bash calls, or use keeper_shell \
-                      with a specific op (rg, ls, find)."
+                Some "Split into two Bash calls, or use visible Read/Grep \
+                      tools for file inspection and search."
             ; tool_suggestion = None }
   | Worker_dev_tools.Pipes_not_allowed ->
       Some { Exec_core.rule_id = "command_pipe_blocked"
@@ -248,7 +249,7 @@ let diagnosis_of_block_reason reason =
                  validation in the keeper security model."
             ; rewrite =
                 Some "Run the first command, then pipe the output into \
-                      the second keeper_bash call."
+                      the second Bash call."
             ; tool_suggestion = None }
   | Worker_dev_tools.Direct_dune_invocation ->
       Some { Exec_core.rule_id = "direct_dune_blocked"
@@ -257,13 +258,13 @@ let diagnosis_of_block_reason reason =
                  concurrent local builds that exhaust host file descriptors."
             ; rewrite =
                 Some "Run scripts/dune-local.sh build <target> from the repo root."
-            ; tool_suggestion = Some "keeper_bash" }
+            ; tool_suggestion = Some "Bash" }
   | Worker_dev_tools.Unsafe_redirect ->
       Some { Exec_core.rule_id = "command_redirect_blocked"
             ; explanation =
                 "> and >> redirect output to files; use a dedicated write tool."
             ; rewrite = None
-            ; tool_suggestion = Some "keeper_fs_edit" }
+            ; tool_suggestion = Some "Write" }
   | Worker_dev_tools.Injection ->
       Some { Exec_core.rule_id = "command_injection_blocked"
             ; explanation =
@@ -271,7 +272,7 @@ let diagnosis_of_block_reason reason =
                  commands; they are blocked for safety."
             ; rewrite =
                 Some "Compute the value first, then pass it as a literal \
-                      argument in a second keeper_bash call."
+                      argument in a second Bash call."
             ; tool_suggestion = None }
   | Worker_dev_tools.Process_substitution ->
       Some { Exec_core.rule_id = "command_process_subst_blocked"
@@ -289,12 +290,12 @@ let diagnosis_of_block_reason reason =
                   "'%s' is not on the allowed command list for this preset."
                   name
             ; rewrite = None
-            ; tool_suggestion = Some "keeper_shell" }
+            ; tool_suggestion = None }
   | Worker_dev_tools.Empty_command ->
       Some { Exec_core.rule_id = "command_empty"
             ; explanation = "The command string is empty."
             ; rewrite =
-                Some "Provide a command: keeper_bash cmd='ls -la lib/'."
+                Some "Provide a command: Bash command='ls -la lib/'."
             ; tool_suggestion = None }
 
 let process_status_is_timeout = function

@@ -41,7 +41,7 @@ let gh_repo_context_error
   }
 
 let gh_claim_first_hint =
-  "Call keeper_task_claim with {} first to bind an active task before using keeper_shell op=gh."
+  "Call keeper_task_claim with {} first to bind an active task before using GitHub PR tools."
 
 (* ── JSON serialization ───────────────────────────────────── *)
 

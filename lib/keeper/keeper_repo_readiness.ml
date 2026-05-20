@@ -134,7 +134,7 @@ let inspect
       ]
   else if not (safe_is_dir clone_path) && not workspace_discovery then
     common_fields "missing_clone" false
-      "Clone the repo into sandbox repos/ first with keeper_shell op=git_clone, then create a worktree."
+      "Clone the repo into sandbox repos/ first with the visible clone/worktree tool, then create a worktree."
       [
         "exists", `Bool false;
         "is_git_repo", `Bool false;
@@ -199,7 +199,7 @@ let inspect
          common_fields "ambiguous_workspace_repo" false
            (Printf.sprintf
               "Multiple workspace repos named %s exist under %s. Use \
-               keeper_shell op=git_clone explicitly or disambiguate repo_name."
+               the visible clone/worktree tool explicitly or disambiguate repo_name."
               derived_repo_name project_root)
            [
              "exists", `Bool false;
@@ -210,7 +210,7 @@ let inspect
            ]
      | [] ->
          common_fields "missing_clone" false
-           "Clone the repo into sandbox repos/ first with keeper_shell op=git_clone, then create a worktree."
+           "Clone the repo into sandbox repos/ first with the visible clone/worktree tool, then create a worktree."
            [
              "exists", `Bool false;
              "is_git_repo", `Bool false;
@@ -272,7 +272,7 @@ let inspect
       let state, ok, next_action =
         if not status.ok then
           "status_failed", false,
-          "Run keeper_shell op=git_status in this repo; repair git status before starting work."
+          "Run Bash with command='git status --short' in this repo; repair git status before starting work."
         else if not has_origin then
           "missing_origin", false,
           "Set or reclone origin before worktree creation; latest cannot be verified without origin."

@@ -14,7 +14,7 @@ MASC 기본 소양 — 모든 keeper의 공통 행동 기반. persona instructio
 3. PR 생성 흐름: 코드 작업 완료 후 keeper_pr_create draft=true로 PR을 연다. 이어서 keeper_task_submit_for_verification으로 검증을 요청한다. Ready 전환은 사용자/verifier 권한이다.
 4. Task 상태 조회: keeper_tasks_list 또는 masc_tasks를 사용한다. .task.json, task-*.json, .masc, backlog JSON을 find/grep/rg/ls로 찾지 않는다.
 5. Task lifecycle 변경: masc_transition으로 claim/start/done/cancel/release/approve/reject를 호출한다. expected_version으로 CAS 충돌을 회피한다.
-6. Bash 규칙: keeper_bash 호출 시 shell quote, glob, brace expansion을 쓰지 않는다. 경로 인자는 plain path. keeper_bash_command_shape_blocked 또는 workflow_rejection을 받으면 변형 재시도 대신 typed tool (keeper_tasks_list, masc_code_* 등)로 전환한다.
+6. Bash 규칙: `Bash`가 노출된 경우 한 번에 하나의 직접 명령만 실행한다. shell quote, glob, brace expansion을 쓰지 않는다. 경로 인자는 plain path. command shape block 또는 workflow_rejection을 받으면 Bash 변형 재시도 대신 active schema에 보이는 typed tool (keeper_tasks_list, masc_code_* 등)로 전환한다.
 7. 협업: 다중 keeper 환경에서는 masc_broadcast (전체 공지) 또는 masc_messages (1:1)로 소통한다. 특정 keeper 호출은 @mention. 진행 상태는 masc_heartbeat로 유지한다.
 """
 

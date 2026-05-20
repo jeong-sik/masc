@@ -30,8 +30,8 @@ let check_target ~operation ~config ~meta ~target =
         (Printf.sprintf
            "symmetric_sandbox_blocked: target %s is outside keeper playground \
             %s. Keepers with sandbox_profile=docker may only %s inside \
-            their playground. Clone the source into your playground via \
-            keeper_shell op=git_clone, or operate inside %s/repos/."
+            their playground. Clone the source into your playground with the \
+            visible clone/worktree tool, or operate inside %s/repos/."
            target_norm playground operation playground)
 
 let check_read_target ~config ~meta ~target =

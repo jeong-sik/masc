@@ -7287,9 +7287,9 @@ let test_prompt_guides_shell_existence_checks_to_structured_tools () =
     (contains_substring sys "2>/dev/null && echo");
   check
     bool
-    "shell existence checks use keeper_shell ls"
+    "shell existence checks use public aliases"
     true
-    (contains_substring sys "Use `keeper_shell op=ls`");
+    (contains_substring sys "Use `Read`, `Grep`, or one plain `Bash` command");
   check
     bool
     "keeper bash hint forbids shell existence tests"
@@ -7308,9 +7308,9 @@ let test_prompt_guides_bash_globs_to_structured_tools () =
     (contains_substring sys "find repos/REPO/lib -name nickname*");
   check
     bool
-    "bash globs use keeper_shell find"
+    "bash globs use public search tools"
     true
-    (contains_substring sys "keeper_shell op=find pattern=glob path=dir/path");
+    (contains_substring sys "Use Grep or `masc_code_search file_pattern=glob`");
   check
     bool
     "bash globs can use masc code search"

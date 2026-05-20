@@ -1155,7 +1155,7 @@ let handle_keeper_shell
               ; "error", `String "gh_command_shape_unsupported"
               ; "reason", `String reason
               ; "hint", `String
-                 "keeper_shell op=gh only accepts one simple gh command. \
+                 "GitHub shell bridge only accepts one simple gh command. \
                    Avoid pipelines, redirects, env prefixes, and shell \
                    control syntax."
               ])
@@ -1207,7 +1207,7 @@ let handle_keeper_shell
           gh_base ~ok:false ~cwd:"" ~command:(gh_cmd_display parsed_cmd)
             [ "error", `String error
             ; "reason", `String
-                "keeper_shell op=gh cannot bypass the dedicated PR workflow tools"
+                "raw gh cannot bypass the dedicated PR workflow tools"
             ; "required_tool", `String required_tool
             ; "hint", `String hint
             ]

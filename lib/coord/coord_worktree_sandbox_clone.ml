@@ -117,12 +117,11 @@ let missing_sandbox_clone_error ~agent_name ~repos_dir ~repo_name =
       let rel = Printf.sprintf "repos/%s" name in
       ( rel,
         Printf.sprintf
-          "keeper_shell op=git_clone url=\"https://github.com/<org>/%s.git\" path=\"%s\""
+          "use the visible clone/worktree tool to clone https://github.com/<org>/%s.git into %s"
           name rel )
     | _ ->
       ( "repos/<repo>",
-        "keeper_shell op=git_clone url=\"https://github.com/<org>/<repo>.git\" \
-         path=\"repos/<repo>\"" )
+        "use the visible clone/worktree tool to clone https://github.com/<org>/<repo>.git into repos/<repo>" )
   in
   System (System_error.IoError
     (Printf.sprintf
@@ -136,8 +135,8 @@ let workspace_repo_not_found_error ~agent_name ~repos_dir ~repo_name
     (Printf.sprintf
        "missing_sandbox_clone: no sandbox git clone found for agent %s under %s \
         and no workspace git repo named %s was found under %s. Recovery: \
-        keeper_shell op=git_clone url=\"https://github.com/<org>/%s.git\" \
-        path=\"repos/%s\""
+        use the visible clone/worktree tool to clone https://github.com/<org>/%s.git \
+        into repos/%s"
        agent_name repos_dir repo_name search_root repo_name repo_name))
 
 let workspace_repo_ambiguous_error ~repo_name ~search_root ~matches =
@@ -145,7 +144,7 @@ let workspace_repo_ambiguous_error ~repo_name ~search_root ~matches =
     (Printf.sprintf
        "ambiguous_workspace_repo: found multiple git repos named %s under %s: \
         [%s]. Auto-provision is blocked until the repo is disambiguated; use \
-        keeper_shell op=git_clone explicitly."
+        the visible clone/worktree tool explicitly."
        repo_name search_root (String.concat ", " matches)))
 
 let partial_clone_error ~clone_path ~msg =

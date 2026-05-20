@@ -36,7 +36,7 @@ val gh_repo_context_error :
   gh_repo_context_error
 
 (** Common hint instructing the keeper to call [keeper_task_claim] before
-    using [keeper_shell op=gh]. *)
+    using GitHub PR tools. *)
 val gh_claim_first_hint : string
 
 (** Render a [gh_repo_context_error] as the canonical
@@ -44,7 +44,7 @@ val gh_claim_first_hint : string
 val gh_repo_context_error_json :
   op:string -> cmd_display:string -> gh_repo_context_error -> string
 
-(** Resolve the active task's repo context for [keeper_shell op=gh].
+(** Resolve the active task's repo context for GitHub PR tools.
     Falls back to a sandbox context when [meta.current_task_id] is
     [None]; otherwise validates the task's worktree and origin slug. *)
 val resolve_gh_repo_context :

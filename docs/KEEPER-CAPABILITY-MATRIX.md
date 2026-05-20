@@ -10,7 +10,10 @@ code_refs:
 
 Keepers do not receive the full public MCP surface.
 They get keeper-native tools plus `masc_*` tools that are executable without
-MCP runtime/session context.
+MCP runtime/session context. This matrix names internal handler IDs for
+implementation/audit purposes; model-facing prompts and recovery hints must use
+the exact active schema names, such as the public `Bash` alias when it is
+listed.
 Triage and trigger detection run on each heartbeat using the proactive idle/cooldown settings.
 
 Autoresearch/research tools are enabled through keeper tool-surface configuration
@@ -35,7 +38,7 @@ Notes:
 - The `voice` shard still exists, but it is no longer part of the default keeper surface. The historical weather shard is retired from `Tool_shard`.
 - The old governance petition/case tools were retired from the callable tool surface. Governance-style participation now uses board discussion/vote paths plus dashboard governance/audit read models.
 - Write-capable tools such as `keeper_fs_edit` and code mutation tools are present in the keeper surface; preset/policy and eval gates decide whether a keeper may execute the mutation.
-- `keeper_shell` is structured-only (`pwd`, `ls`, `cat`, `rg`, `find`, `head`, `tail`, `wc`, `tree`, `git_status`, `git_log`, `git_diff`, `git_worktree`, `git_clone`, `gh`). Raw command execution lives in `Bash`/`keeper_bash`.
+- `keeper_shell` is structured-only (`pwd`, `ls`, `cat`, `rg`, `find`, `head`, `tail`, `wc`, `tree`, `git_status`, `git_log`, `git_diff`, `git_worktree`, `git_clone`, `gh`). Raw command execution is model-facing as `Bash` when that alias is listed, backed internally by `keeper_bash`.
 - Code mutation uses `masc_code_{write,edit,delete,shell,git}` in addition to the `coding` shard above.
 
 ## Tool Surface
@@ -96,7 +99,7 @@ BoardActivity, IdleTimeout, MetricsAnomaly, StrategicReview.
 | 목표 / 계획 lifecycle | `masc_goal_list`, `masc_goal_upsert`, `masc_goal_transition`, `masc_goal_verify`, `masc_coordination_fsm_snapshot`; `masc_goal_review` is legacy compatibility, not feature-proof evidence |
 | 코드 작성 / 수정 | `masc_worktree_create` -> `masc_code_write` / `masc_code_edit` / `masc_code_git` |
 | 테스트 실행 | `masc_code_shell` (worktree `cwd` required) |
-| GitHub PR / 이슈 작업 | `keeper_preflight_check`, `keeper_pr_list`, `keeper_pr_status`, `keeper_pr_create` (draft-only), plus `keeper_shell op=gh` when repo context is bound |
+| GitHub PR / 이슈 작업 | `keeper_preflight_check`, `keeper_pr_list`, `keeper_pr_status`, `keeper_pr_create` (draft-only). Structured `gh` routing is an internal/fallback path when repo context is bound, not prompt guidance unless that exact tool is listed |
 
 The goal lifecycle surface is configured as the `masc.goal` policy group and is
 routed to `dispatch`, `coding`, `research`, and `delivery` presets. Social and

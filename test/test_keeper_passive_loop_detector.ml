@@ -12,6 +12,9 @@ module P = Masc_mcp.Prometheus
 
 let setup () = PLD.reset_all_for_test ()
 
+let check_absent label needle text =
+  check bool label false (Re.execp (Re.compile (Re.str needle)) text)
+
 (* ── Tests ──────────────────────────────────────────────────────────── *)
 
 let test_initial_streak_zero () =
@@ -117,7 +120,10 @@ let test_required_tool_nudge_mentions_real_tool_call () =
       check bool "nudge names required tool loop" true
         (Re.execp (Re.compile (Re.str "REQUIRED TOOL LOOP")) msg);
       check bool "nudge requires real keeper tool" true
-        (Re.execp (Re.compile (Re.str "real keeper tool call")) msg)
+        (Re.execp (Re.compile (Re.str "real tool call")) msg);
+      check_absent "nudge avoids keeper_shell" "keeper_shell" msg;
+      check_absent "nudge avoids keeper_bash" "keeper_bash" msg;
+      check_absent "nudge avoids keeper_fs_read" "keeper_fs_read" msg
 
 let test_execution_resets_streak () =
   Eio_main.run @@ fun _env ->
@@ -283,7 +289,10 @@ let test_nudge_message_contains_streak_count () =
        passive turns have accumulated. *)
     check bool "nudge text contains 'completed 5'" true
       (let re = Re.compile (Re.str "completed 5") in
-       Re.execp re text)
+       Re.execp re text);
+    check_absent "passive nudge avoids keeper_shell" "keeper_shell" text;
+    check_absent "passive nudge avoids keeper_bash" "keeper_bash" text;
+    check_absent "passive nudge avoids keeper_fs_read" "keeper_fs_read" text
 
 let () =
   run "keeper_passive_loop_detector" [

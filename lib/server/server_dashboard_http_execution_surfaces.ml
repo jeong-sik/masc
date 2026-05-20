@@ -16,20 +16,43 @@ let warm_shell_cache (state : Mcp_server.server_state) =
     ~finally:(fun () -> Atomic.set shell_warming false)
     (fun () ->
        let t0 = Time_compat.now () in
-       try
-         let cache_key = dashboard_shell_cache_key state.Mcp_server.room_config in
-         let compute () = dashboard_shell_payload_json state.Mcp_server.room_config in
-         let result =
-           match state.Mcp_server.clock with
-           | Some clock ->
-             Dashboard_cache.get_or_compute_with_timeout
-               cache_key
-               ~ttl:15.0
-               ~clock
-               ~timeout_sec:shell_prewarm_timeout_s
-               compute
-           | None -> Dashboard_cache.get_or_compute cache_key ~ttl:15.0 compute
+       let cache_shell_payload ~light =
+         let cache_key =
+           dashboard_shell_cache_key ~light state.Mcp_server.room_config
          in
+         let compute () =
+           dashboard_shell_payload_json ~light state.Mcp_server.room_config
+         in
+         match state.Mcp_server.clock with
+         | Some clock ->
+           Dashboard_cache.get_or_compute_with_timeout
+             cache_key
+             ~ttl:15.0
+             ~clock
+             ~timeout_sec:shell_prewarm_timeout_s
+             compute
+         | None -> Dashboard_cache.get_or_compute cache_key ~ttl:15.0 compute
+       in
+       (try
+          let light_result = cache_shell_payload ~light:true in
+          if is_dashboard_cache_timeout_json light_result
+          then
+            Log.Dashboard.warn
+              "light shell cache pre-warm timed out during compute (%.0fs)"
+              shell_prewarm_timeout_s
+          else (
+            Atomic.set last_good_shell_light light_result;
+            Log.Dashboard.info
+              "light shell cache pre-warmed (%.1fms)"
+              ((Time_compat.now () -. t0) *. 1000.0))
+        with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | exn ->
+          Log.Dashboard.warn
+            "light shell cache pre-warm failed: %s"
+            (Printexc.to_string exn));
+       try
+         let result = cache_shell_payload ~light:false in
          if is_dashboard_cache_timeout_json result
          then
            Log.Dashboard.warn

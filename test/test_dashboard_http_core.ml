@@ -323,6 +323,85 @@ let test_dashboard_shell_http_json_prefers_last_good_while_prewarming () =
       check int "last-good counts reused" 7
         (json |> member "counts" |> member "agents" |> to_int))
 
+let test_dashboard_shell_http_json_records_light_last_good () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  let original_light_last_good =
+    Atomic.get Lib.Server_dashboard_http.last_good_shell_light
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      Lib.Dashboard_cache.invalidate_all ();
+      Atomic.set
+        Lib.Server_dashboard_http.last_good_shell_light
+        original_light_last_good)
+    (fun () ->
+      Lib.Dashboard_cache.invalidate_all ();
+      Atomic.set Lib.Server_dashboard_http.last_good_shell_light (`Assoc []);
+      let json =
+        Lib.Server_dashboard_http_core.dashboard_shell_http_json ~light:true config
+      in
+      let cached = Atomic.get Lib.Server_dashboard_http.last_good_shell_light in
+      let open Yojson.Safe.Util in
+      check bool "light last-good populated" true (cached = json);
+      check bool "cached payload is light shell" true
+        (cached
+         |> member "projection_diagnostics"
+         |> member "light"
+         |> to_bool))
+
+let test_dashboard_shell_http_json_prefers_light_last_good_while_prewarming () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  let original_warmed = Atomic.get Lib.Server_dashboard_http.shell_warmed in
+  let original_warming = Atomic.get Lib.Server_dashboard_http.shell_warming in
+  let original_last_good = Atomic.get Lib.Server_dashboard_http.last_good_shell in
+  let original_light_last_good =
+    Atomic.get Lib.Server_dashboard_http.last_good_shell_light
+  in
+  let full_last_good =
+    `Assoc
+      [
+        ("status", `Assoc [("project", `String "full-room")]);
+        ("counts", `Assoc [("agents", `Int 9)]);
+      ]
+  in
+  let light_last_good =
+    `Assoc
+      [
+        ("status", `Assoc [("project", `String "light-room")]);
+        ("counts", `Assoc [("agents", `Int 2)]);
+        ("projection_diagnostics", `Assoc [("light", `Bool true)]);
+      ]
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      Atomic.set Lib.Server_dashboard_http.shell_warmed original_warmed;
+      Atomic.set Lib.Server_dashboard_http.shell_warming original_warming;
+      Atomic.set Lib.Server_dashboard_http.last_good_shell original_last_good;
+      Atomic.set
+        Lib.Server_dashboard_http.last_good_shell_light
+        original_light_last_good)
+    (fun () ->
+      Atomic.set Lib.Server_dashboard_http.shell_warmed false;
+      Atomic.set Lib.Server_dashboard_http.shell_warming true;
+      Atomic.set Lib.Server_dashboard_http.last_good_shell full_last_good;
+      Atomic.set Lib.Server_dashboard_http.last_good_shell_light light_last_good;
+      let json =
+        Lib.Server_dashboard_http_core.dashboard_shell_http_json
+          ~request:(request "/api/v1/dashboard/shell?light=1")
+          ~light:true
+          config
+      in
+      let open Yojson.Safe.Util in
+      check string "light last-good project reused" "light-room"
+        (json |> member "status" |> member "project" |> to_string);
+      check int "light last-good counts reused" 2
+        (json |> member "counts" |> member "agents" |> to_int);
+      check bool "light diagnostics preserved" true
+        (json
+         |> member "projection_diagnostics"
+         |> member "light"
+         |> to_bool))
+
 let test_operator_snapshot_default_route_hydrates_first_success () =
   let source = read_file "lib/server/server_dashboard_http_core.ml" in
   check bool "operator snapshot uses first-success cache helper" true
@@ -990,6 +1069,10 @@ let () =
             test_dashboard_shell_http_json_uses_bootstrap_payload_while_prewarming;
           test_case "shell reuses last good payload while prewarming" `Quick
             test_dashboard_shell_http_json_prefers_last_good_while_prewarming;
+          test_case "shell records light last good payload" `Quick
+            test_dashboard_shell_http_json_records_light_last_good;
+          test_case "shell reuses light last good payload while prewarming" `Quick
+            test_dashboard_shell_http_json_prefers_light_last_good_while_prewarming;
           test_case "operator snapshot hydrates on first default request" `Quick
             test_operator_snapshot_default_route_hydrates_first_success;
           test_case "operator snapshot default route exposes provenance" `Quick

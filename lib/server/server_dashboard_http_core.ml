@@ -64,6 +64,8 @@ let shell_warming = Server_dashboard_http_core_cache.shell_warming
 let _shell_warming = Server_dashboard_http_core_cache._shell_warming
 let last_good_shell = Server_dashboard_http_core_cache.last_good_shell
 let _last_good_shell = Server_dashboard_http_core_cache._last_good_shell
+let last_good_shell_light = Server_dashboard_http_core_cache.last_good_shell_light
+let _last_good_shell_light = Server_dashboard_http_core_cache._last_good_shell_light
 let with_dashboard_timeout = Server_dashboard_http_core_cache.with_dashboard_timeout
 let cache_partition_segment = Server_dashboard_http_core_cache.cache_partition_segment
 let dashboard_cache_key = Server_dashboard_http_core_cache.dashboard_cache_key
@@ -1275,10 +1277,24 @@ let dashboard_shell_bootstrap_json (config : Coord.config) : Yojson.Safe.t =
          ]
 ;;
 
-let dashboard_shell_last_good_opt () =
-  match Atomic.get last_good_shell with
-  | `Assoc [] -> None
-  | json -> Some json
+let dashboard_shell_last_good_with_source ~light () =
+  let full_last_good () =
+    match Atomic.get last_good_shell with
+    | `Assoc [] -> None
+    | json -> Some (json, "last_good")
+  in
+  if light
+  then (
+    match Atomic.get last_good_shell_light with
+    | `Assoc [] -> full_last_good ()
+    | json -> Some (json, "last_good_light"))
+  else full_last_good ()
+;;
+
+let remember_dashboard_shell_last_good ~light json =
+  if light
+  then Atomic.set last_good_shell_light json
+  else Atomic.set last_good_shell json
 ;;
 
 let is_dashboard_cache_timeout_json = function
@@ -1669,8 +1685,8 @@ let dashboard_shell_http_json
     | None -> Eio_context.get_clock_opt ()
   in
   let fallback_payload_with_source () =
-    match dashboard_shell_last_good_opt () with
-    | Some json -> json, "last_good"
+    match dashboard_shell_last_good_with_source ~light () with
+    | Some (json, source) -> json, source
     | None -> dashboard_shell_bootstrap_json config, "bootstrap"
   in
   let fallback_payload () =
@@ -1734,7 +1750,9 @@ let dashboard_shell_http_json
       in
       if is_dashboard_cache_timeout_json computed
       then timeout_fallback_payload (dashboard_shell_timeout_for ~light)
-      else computed)
+      else (
+        remember_dashboard_shell_last_good ~light computed;
+        computed))
   in
   match request with
   | None -> payload

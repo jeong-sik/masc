@@ -30,6 +30,9 @@ include Keeper_shell_ops
 module For_testing = struct
   let elapsed_duration_ms = Keeper_shell_bash.For_testing.elapsed_duration_ms
 
+  let validate_keeper_bash_coding_with_allowlist =
+    Keeper_shell_bash.For_testing.validate_keeper_bash_coding_with_allowlist
+
   let keeper_bash_shape_block_tag =
     Keeper_shell_bash.For_testing.keeper_bash_shape_block_tag
 

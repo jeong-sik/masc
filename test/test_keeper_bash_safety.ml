@@ -366,6 +366,41 @@ let test_keeper_bash_shape_uses_shell_ir_for_quoted_literals () =
     (Some "substitution")
     (block_tag "echo $(complex-substitution)")
 
+let test_keeper_bash_raw_coding_gate_uses_exec_shell_gate () =
+  let validate_gate ?allow_pipes cmd =
+    Keeper_exec_shell.For_testing.validate_keeper_bash_coding_with_allowlist
+      ?allow_pipes
+      ~allowed_commands:Masc_mcp.Worker_dev_tools.dev_allowed_commands
+      cmd
+  in
+  Alcotest.(check bool) "quoted pipe remains one stage" true
+    (is_ok (validate_gate ~allow_pipes:false "rg 'foo|bar' lib"));
+  Alcotest.(check bool) "real pipe allowed when policy allows pipes" true
+    (is_ok (validate_gate "rg foo lib | head -20"));
+  (match validate_gate ~allow_pipes:false "rg foo lib | head -20" with
+   | Error Masc_mcp.Worker_dev_tools.Pipes_not_allowed -> ()
+   | Error other ->
+     Alcotest.failf
+       "expected Pipes_not_allowed, got %s"
+       (Masc_mcp.Worker_dev_tools.block_reason_to_string other)
+   | Ok () -> Alcotest.fail "expected pipe rejection");
+  (match validate_gate "git status | dune build" with
+   | Error Masc_mcp.Worker_dev_tools.Direct_dune_invocation -> ()
+   | Error other ->
+     Alcotest.failf
+       "expected Direct_dune_invocation, got %s"
+       (Masc_mcp.Worker_dev_tools.block_reason_to_string other)
+   | Ok () -> Alcotest.fail "expected direct dune rejection");
+  Alcotest.(check bool) "dev-null redirect is allowed" true
+    (is_ok (validate_gate "rg foo lib 2> /dev/null"));
+  (match validate_gate "cat < /etc/passwd" with
+   | Error Masc_mcp.Worker_dev_tools.Unsafe_redirect -> ()
+   | Error other ->
+     Alcotest.failf
+       "expected Unsafe_redirect, got %s"
+       (Masc_mcp.Worker_dev_tools.block_reason_to_string other)
+   | Ok () -> Alcotest.fail "expected unsafe redirect rejection")
+
 let test_keeper_bash_shell_ir_parse_failure_shape_fallback_is_quote_aware () =
   let block_tag =
     Keeper_exec_shell.For_testing.shell_ir_parse_failure_shape_block_tag
@@ -2167,6 +2202,8 @@ let () =
         test_keeper_bash_timeout_floor_is_not_sub_io_latency;
       Alcotest.test_case "shape guard parses quoted metachar literals" `Quick
         test_keeper_bash_shape_uses_shell_ir_for_quoted_literals;
+      Alcotest.test_case "raw coding gate uses exec Shell IR gate" `Quick
+        test_keeper_bash_raw_coding_gate_uses_exec_shell_gate;
       Alcotest.test_case "Shell IR parse-failure shape fallback is quote-aware"
         `Quick
         test_keeper_bash_shell_ir_parse_failure_shape_fallback_is_quote_aware;

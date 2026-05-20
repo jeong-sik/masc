@@ -6,6 +6,7 @@ open Keeper_shell_bash_shape_messages
 open Keeper_shell_bash_task_state
 open Keeper_shell_bash_words
 module Exec_shell_gate = Masc_exec_command_gate.Shell_command_gate
+module Command_syntax = Worker_dev_tools_command_syntax
 module Task_probe = Keeper_shell_bash_task_probe
 module Shape_classifier = Keeper_shell_bash_shape_classifier
 
@@ -42,6 +43,97 @@ let shell_ir_parse_failure_shape_block =
 ;;
 let keeper_bash_shape_block = Shape_classifier.keeper_bash_shape_block
 
+let keeper_gate_allowlist_policy
+      ?(allow_pipes = true)
+      ~(allowed_commands : string list)
+      ()
+  : Exec_shell_gate.allowlist_policy =
+  { allowed_commands; allow_pipes; redirect_allowed = true }
+;;
+
+let keeper_gate_context_has_direct_dune (context : Exec_shell_gate.parsed_context) =
+  List.exists (String.equal "dune") context.Exec_shell_gate.stage_bins
+;;
+
+let keeper_gate_block_reason_of_reject
+      (reason : Exec_shell_gate.reject_reason)
+  : Worker_dev_tools.block_reason =
+  match reason with
+  | Command_not_in_allowlist { bin }
+  | Pipeline_segment_disallowed { bin; _ } -> Command_not_allowed bin
+  | Pipes_not_allowed _ -> Pipes_not_allowed
+  | Redirect_disallowed_in_caller _
+  | Path_outside_policy _ -> Unsafe_redirect
+;;
+
+let keeper_gate_block_reason_of_too_complex
+      (reason : Exec_shell_gate.too_complex_reason)
+  : Worker_dev_tools.block_reason =
+  match reason with
+  | Unsupported_construct `Proc_subst -> Process_substitution
+  | Unsupported_construct `Redirect -> Unsafe_redirect
+  | Unsupported_nested_pipeline
+  | Unsupported_construct
+      ( `Heredoc
+      | `Here_string
+      | `Cmd_subst
+      | `Subshell
+      | `Arith_expansion
+      | `Control_flow
+      | `Logic_op
+      | `Function_def
+      | `Glob_brace
+      | `Background
+      | `Unknown_construct _ ) -> Injection
+;;
+
+let validate_keeper_bash_coding_with_allowlist
+      ?(allow_pipes = true)
+      ~(allowed_commands : string list)
+      cmd
+  =
+  let trimmed = String.trim cmd in
+  if String.equal trimmed ""
+  then Error Worker_dev_tools.Empty_command
+  else if Command_syntax.has_coding_shell_injection_metachar trimmed
+  then Error Worker_dev_tools.Injection
+  else if Command_syntax.has_process_substitution trimmed
+  then Error Worker_dev_tools.Process_substitution
+  else if Command_syntax.has_unsafe_redirection trimmed
+  then Error Worker_dev_tools.Unsafe_redirect
+  else if Command_syntax.invokes_direct_dune trimmed
+  then Error Worker_dev_tools.Direct_dune_invocation
+  else (
+    match
+      Exec_shell_gate.gate
+        ~caller:Exec_shell_gate.Keeper_shell_bash
+        ~raw:trimmed
+        ~allowlist:(keeper_gate_allowlist_policy ~allow_pipes ~allowed_commands ())
+        ~path_policy:Exec_shell_gate.allow_all_paths
+        ~sandbox:Exec_shell_gate.host_sandbox
+        ()
+    with
+    | Allow context ->
+      if keeper_gate_context_has_direct_dune context
+      then Error Worker_dev_tools.Direct_dune_invocation
+      else Ok ()
+    | Reject { context; reason; _ } ->
+      (match reason with
+       | Pipes_not_allowed _ -> Error Worker_dev_tools.Pipes_not_allowed
+       | _ when keeper_gate_context_has_direct_dune context ->
+         Error Worker_dev_tools.Direct_dune_invocation
+       | _ -> Error (keeper_gate_block_reason_of_reject reason))
+    | Cannot_parse _ -> Error Worker_dev_tools.Injection
+    | Too_complex { reason } -> Error (keeper_gate_block_reason_of_too_complex reason))
+;;
+
+let validate_keeper_bash_coding cmd =
+  validate_keeper_bash_coding_with_allowlist
+    ~allow_pipes:true
+    ~allowed_commands:Worker_dev_tools.dev_allowed_commands
+    cmd
+;;
+
 type safe_read_fallback = {
   primary_cmd : string;
   cwd_override : string option;
@@ -55,8 +147,7 @@ let safe_read_primary_rewrite primary_cmd =
     then None
     else (
       match
-        Worker_dev_tools.validate_command_coding_with_allowlist
-          ~caller:Shell_command_gate.Keeper_shell_bash
+        validate_keeper_bash_coding_with_allowlist
           ~allow_pipes:false
           ~allowed_commands:Worker_dev_tools.dev_allowed_commands
           primary_cmd
@@ -351,11 +442,7 @@ let safe_read_fallback_of_command ~write_enabled:_ ~stderr_dev_null_stripped cmd
 
 let shape_block_allowed_by_active_validator ~write_enabled cmd = function
   | Pipe_or_redirect when write_enabled ->
-    (match
-       Worker_dev_tools.validate_command_coding
-         ~caller:Shell_command_gate.Keeper_shell_bash
-         cmd
-     with
+    (match validate_keeper_bash_coding cmd with
      | Ok () -> true
      | Error _ -> false)
   | Gh_pr_checks | Chaining | Substitution | Repo_wide_scan | Pipe_or_redirect ->
@@ -363,6 +450,8 @@ let shape_block_allowed_by_active_validator ~write_enabled cmd = function
 
 module For_testing = struct
   let elapsed_duration_ms = elapsed_duration_ms
+  let validate_keeper_bash_coding_with_allowlist =
+    validate_keeper_bash_coding_with_allowlist
 
   let keeper_bash_shape_block_tag cmd =
     Option.map bash_shape_block_tag (keeper_bash_shape_block cmd)
@@ -699,8 +788,7 @@ let single_repo_cwd_for_top_relative_read
   then None
   else
     match
-      Worker_dev_tools.validate_command_coding_with_allowlist
-        ~caller:Shell_command_gate.Keeper_shell_bash
+      validate_keeper_bash_coding_with_allowlist
         ~allow_pipes:false
         ~allowed_commands:Worker_dev_tools.dev_allowed_commands
         cmd
@@ -1653,13 +1741,10 @@ let handle_keeper_bash
       (* Local execution path: full validation applies *)
       let validate =
         if write_enabled
-        then
-          Worker_dev_tools.validate_command_coding
-            ~caller:Shell_command_gate.Keeper_shell_bash
+        then validate_keeper_bash_coding
         else if Option.is_some safe_read_fallback
         then
-          Worker_dev_tools.validate_command_coding_with_allowlist
-            ~caller:Shell_command_gate.Keeper_shell_bash
+          validate_keeper_bash_coding_with_allowlist
             ~allow_pipes:false
             ~allowed_commands:Worker_dev_tools.dev_allowed_commands
         else

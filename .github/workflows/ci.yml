@@ -832,6 +832,9 @@ jobs:
       - name: Run dashboard agent-status SSOT lint (RFC-0139 §10)
         run: bash scripts/lint/dashboard-ssot-agent-status.sh
 
+      - name: Run cross-language variant sync checker
+        run: bash scripts/check-variants.sh
+
       - name: Setup OCaml toolchain
         uses: ./.github/actions/setup-ocaml-toolchain
 

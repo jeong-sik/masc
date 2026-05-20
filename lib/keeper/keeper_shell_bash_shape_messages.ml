@@ -31,8 +31,8 @@ let bash_shape_block_reason = function
     "Bash accepts one direct command. Pipes and redirects such as |, 2>&1, \
      2&1, >/dev/null, <, and | head are blocked before execution."
   | Chaining ->
-    "Bash accepts one command per call. Chaining with &&, ||, ;, or \
-     newlines is blocked before execution."
+    "Bash accepts one foreground command per call. Chaining/background \
+     control with &&, ||, &, ;, or newlines is blocked before execution."
   | Substitution ->
     "Command substitution is blocked before execution. Compute values in a \
      separate tool call and pass literal arguments."
@@ -63,8 +63,8 @@ let bash_shape_block_hint ~cmd = function
     "Do not prepend cd ... && to search commands. Pass the target repo or \
      worktree in the Grep path, or use Bash cwd with a single command."
   | Chaining ->
-    "Split the work into separate Bash calls and use the cwd argument instead \
-     of cd chaining."
+    "Split the work into separate foreground Bash calls and use the cwd \
+     argument instead of cd chaining or shell backgrounding."
   | Substitution ->
     "Run the discovery command first, then use its literal result in a second \
      Bash call."

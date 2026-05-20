@@ -96,9 +96,8 @@ let command_looks_like_task_state_discovery cmd =
 
 let task_state_shell_hint =
   "Do not inspect task state by guessing .masc/backlog.json or repo-local \
-   backlog/task files from keeper_bash. Use keeper_tasks_list for \
-   task/backlog state and keeper_context_status for current_task_id/sandbox \
-   paths."
+   backlog/task files from Bash. Use keeper_tasks_list for task/backlog state \
+   and keeper_context_status for current_task_id/sandbox paths."
 
 let task_state_shell_alternatives =
   [ "keeper_tasks_list include_done=false"

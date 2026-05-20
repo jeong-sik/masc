@@ -474,15 +474,15 @@ let test_keeper_bash_repo_wide_scan_hints_use_structured_tools () =
     (match tag with Some "repo_wide_scan" -> true | _ -> false);
   (match hint cmd with
    | Some msg ->
-     Alcotest.(check bool) "git history hint points to git_log" true
-       (String_util.contains_substring msg "keeper_shell op=git_log");
+     Alcotest.(check bool) "git history hint points to Bash git log" true
+       (String_util.contains_substring msg "Bash command=\"git log");
      Alcotest.(check bool) "git history hint mentions grep" true
        (String_util.contains_substring msg "grep=<term>")
    | None -> Alcotest.fail "expected repo-wide git log hint");
   (match hint {|rg "add_comment" repos/ --include '*.ml' --include '*.mli' -l|} with
    | Some msg ->
-     Alcotest.(check bool) "rg hint points to structured rg" true
-       (String_util.contains_substring msg "keeper_shell op=rg");
+     Alcotest.(check bool) "rg hint points to Grep" true
+       (String_util.contains_substring msg "Use Grep");
      Alcotest.(check bool) "rg hint discourages repos root" true
        (String_util.contains_substring msg "Do not scan repos/")
    | None -> Alcotest.fail "expected repo-wide rg hint")
@@ -1153,6 +1153,46 @@ let test_keeper_bash_single_repo_root_recovers_top_level_find () =
      |> Json.to_string
      |> fun output -> String_util.contains_substring output "marker.ml")
 
+let test_keeper_bash_blocks_doubled_repo_prefix_with_public_alias_plan () =
+  with_eio_fs @@ fun () ->
+  let base_path, config = make_config () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  Keeper_registry.clear ();
+  let meta = make_readonly_meta "double-prefix-bash" in
+  let playground = Filename.concat base_path (playground_path_of meta.name) in
+  let repo_root = Filename.concat playground "repos/masc-mcp" in
+  ensure_dir (Filename.concat repo_root ".worktrees");
+  let raw =
+    Keeper_exec_shell.handle_keeper_bash
+      ~turn_sandbox_factory:None
+      ~turn_sandbox_factory_git:None ~exec_cache:None
+      ~config ~meta
+      ~args:
+        (`Assoc
+          [
+            ("cmd", `String "ls repos/masc-mcp/.worktrees/");
+            ("cwd", `String repo_root);
+          ])
+      ()
+  in
+  let json = Yojson.Safe.from_string raw in
+  let recovery_plan = Json.member "recovery_plan" json in
+  let next_args = Json.member "next_args" recovery_plan in
+  Alcotest.(check bool) "double-prefix is blocked before exec" false
+    (json |> Json.member "ok" |> Json.to_bool);
+  Alcotest.(check (option string))
+    "double-prefix error"
+    (Some "keeper_bash_cwd_path_prefix_duplicated")
+    (parse_error_field raw);
+  Alcotest.(check string) "required next tool uses public alias" "Bash"
+    (Json.member "required_next_tool" json |> Json.to_string);
+  Alcotest.(check string) "rewritten command removes duplicated repo prefix"
+    "ls .worktrees"
+    (Json.member "command" next_args |> Json.to_string);
+  Alcotest.(check string) "rewritten cwd remains repo-relative"
+    "repos/masc-mcp"
+    (Json.member "cwd" next_args |> Json.to_string)
+
 let test_keeper_bash_safe_rg_fallback_allows_escaped_regex_pipe () =
   with_eio_fs @@ fun () ->
   let base_path, config = make_config () in
@@ -1650,12 +1690,12 @@ let test_keeper_shell_bash_op_is_deprecated () =
   (match parse_hint raw with
    | None -> Alcotest.fail ("expected hint field, got: " ^ raw)
    | Some hint ->
-     Alcotest.(check bool) "hint points to keeper_bash" true
-       (String_util.contains_substring hint "keeper_bash");
      Alcotest.(check bool) "hint points to Bash alias" true
        (String_util.contains_substring hint "Bash");
-     Alcotest.(check bool) "hint keeps keeper_shell structured" true
-       (String_util.contains_substring hint "structured ops"))
+     Alcotest.(check bool) "hint avoids internal keeper_bash" false
+       (String_util.contains_substring hint "keeper_bash");
+     Alcotest.(check bool) "hint avoids internal keeper_shell" false
+       (String_util.contains_substring hint "keeper_shell"))
 
 let test_keeper_shell_bash_op_does_not_execute () =
   with_eio_fs @@ fun () ->
@@ -2029,6 +2069,8 @@ let () =
         test_keeper_bash_safe_cd_fallback_executes_scoped_read;
       Alcotest.test_case "single repo root recovers top-level find" `Quick
         test_keeper_bash_single_repo_root_recovers_top_level_find;
+      Alcotest.test_case "double repo prefix gets public Bash recovery plan" `Quick
+        test_keeper_bash_blocks_doubled_repo_prefix_with_public_alias_plan;
       Alcotest.test_case "safe rg fallback allows escaped regex pipe" `Quick
         test_keeper_bash_safe_rg_fallback_allows_escaped_regex_pipe;
       Alcotest.test_case "safe dev-null redirect executes scoped grep" `Quick

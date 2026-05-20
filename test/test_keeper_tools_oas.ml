@@ -1220,7 +1220,7 @@ let test_workflow_rejection_recovery_fields_mark_loop () =
 
 let test_deterministic_recovery_plan_fields_promote_next_tool () =
   let raw =
-    {|{"ok":false,"error":"command_blocked","recovery_plan":{"kind":"structured_tool_rewrite","next_tool":"keeper_shell","next_args":{"op":"rg","path":"lib"},"instruction":"Use keeper_shell op=rg.","reason":"shell_shape_requires_structured_op","confidence":"high","do_not_retry_same_args":true}}|}
+    {|{"ok":false,"error":"command_blocked","recovery_plan":{"kind":"structured_tool_rewrite","next_tool":"Grep","next_args":{"pattern":"term","path":"lib"},"instruction":"Use Grep with a scoped path.","reason":"shell_shape_requires_visible_search_tool","confidence":"high","do_not_retry_same_args":true}}|}
   in
   let fields = Keeper_tools_oas.deterministic_recovery_plan_fields raw in
   let normalized =
@@ -1230,14 +1230,14 @@ let test_deterministic_recovery_plan_fields_promote_next_tool () =
       raw
   in
   let json = parse normalized in
-  check string "required next tool" "keeper_shell" (json_string "required_next_tool" json);
+  check string "required next tool" "Grep" (json_string "required_next_tool" json);
   let plan = Yojson.Safe.Util.member "recovery_plan" json in
-  check string "plan next tool" "keeper_shell" (json_string "next_tool" plan);
+  check string "plan next tool" "Grep" (json_string "next_tool" plan);
   check
     string
-    "plan op"
-    "rg"
-    Yojson.Safe.Util.(member "next_args" plan |> member "op" |> to_string)
+    "plan pattern"
+    "term"
+    Yojson.Safe.Util.(member "next_args" plan |> member "pattern" |> to_string)
 ;;
 
 let test_workflow_rejection_same_args_short_circuits_after_first_failure () =

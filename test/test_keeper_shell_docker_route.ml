@@ -1206,8 +1206,8 @@ let test_sandbox_root_git_cwd_zero_repo_blocks_before_exec () =
   | Some msg ->
     Alcotest.(check bool) "mentions no sandbox clones" true
       (contains_substring msg "no sandbox git clones");
-    Alcotest.(check bool) "mentions git_clone recovery" true
-      (contains_substring msg "keeper_shell op=git_clone");
+    Alcotest.(check bool) "mentions clone recovery" true
+      (contains_substring msg "visible clone tool");
     Alcotest.(check bool) "mentions cwd recovery" true
       (contains_substring msg "cwd=\"repos/<repo>\"")
 
@@ -1558,12 +1558,13 @@ let test_bash_blocks_validator_safe_pipe_redirect_with_recovery_plan () =
     (parse_string_field raw "error");
   Alcotest.(check string)
     "required next tool"
-    "keeper_shell"
+    "Bash"
     (Json.member "required_next_tool" json |> Json.to_string);
   Alcotest.(check string)
-    "recovery op"
-    "head"
-    Yojson.Safe.Util.(recovery_plan |> member "next_args" |> member "op" |> to_string);
+    "recovery command placeholder"
+    "PRIMARY_COMMAND_WITHOUT_PIPE_OR_REDIRECT"
+    Yojson.Safe.Util.(
+      recovery_plan |> member "next_args" |> member "command" |> to_string);
   Alcotest.(check bool) "docker was not invoked" false
     (Sys.file_exists log_path)
 
@@ -1694,16 +1695,16 @@ let test_bash_search_pipeline_exposes_structured_recovery_plan () =
     (parse_string_field raw "shape_block");
   Alcotest.(check string)
     "required_next_tool"
-    "keeper_shell"
+    "Grep"
     (Json.member "required_next_tool" json |> Json.to_string);
   Alcotest.(check string)
     "recovery next tool"
-    "keeper_shell"
+    "Grep"
     (Json.member "next_tool" recovery_plan |> Json.to_string);
   Alcotest.(check string)
-    "recovery op"
-    "rg"
-    (Json.member "op" next_args |> Json.to_string);
+    "recovery pattern"
+    "SEARCH_TERM"
+    (Json.member "pattern" next_args |> Json.to_string);
   Alcotest.(check bool)
     "same args retry forbidden"
     true

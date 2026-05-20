@@ -94,9 +94,8 @@ let looks_like_discovery cmd =
 
 let hint =
   "Do not inspect task state by guessing .masc/backlog.json or repo-local \
-   backlog/task files from keeper_bash. Use keeper_tasks_list for \
-   task/backlog state and keeper_context_status for current_task_id/sandbox \
-   paths."
+   backlog/task files from Bash. Use keeper_tasks_list for task/backlog state \
+   and keeper_context_status for current_task_id/sandbox paths."
 ;;
 
 let alternatives =

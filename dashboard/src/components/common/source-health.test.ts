@@ -57,6 +57,7 @@ describe('coverageGapDisplay', () => {
           { label: 'trace', value: 'trace-tool-call-gap' },
         ],
         error: 'append denied',
+        errorClass: null,
       },
     })
   })
@@ -108,7 +109,28 @@ describe('coverageGapDisplay', () => {
           { label: 'trace', value: 'NEW-trace' },
         ],
         error: 'NEW-error',
+        errorClass: null,
       },
     })
+  })
+
+  it('threads backend error_class through structured.errorClass (RFC-0154 PR-3)', () => {
+    const display = coverageGapDisplay({
+      source: 'tool_call_io',
+      coverage_gap_count: 1,
+      coverage_gaps: [
+        {
+          source: 'tool_call_io',
+          producer: 'p',
+          durable_store: 's',
+          dashboard_surface: 'd',
+          stale_reason: 'tool_call_io_append_failed',
+          trace_id: 't',
+          error: 'Sys_error: too many open files',
+          error_class: 'fd_exhaustion',
+        },
+      ],
+    })
+    expect(display?.structured.errorClass).toBe('fd_exhaustion')
   })
 })

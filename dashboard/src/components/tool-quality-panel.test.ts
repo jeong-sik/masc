@@ -10,6 +10,8 @@ import {
   rateColorVar,
   toolMatchesSearch,
 } from './tool-quality-panel'
+import { errorHintFromClass, errorHintFromGap } from './common/coverage-gap-block'
+import type { CoverageGapDisplay } from './common/source-health'
 
 vi.setConfig({
   testTimeout: 40000,
@@ -497,6 +499,65 @@ describe('classifyCoverageError', () => {
     expect(classifyCoverageError('connection refused')).toBeNull()
     expect(classifyCoverageError('append denied')).toBeNull()
     expect(classifyCoverageError('permission denied')).toBeNull()
+  })
+})
+
+describe('errorHintFromClass (RFC-0154 PR-3 typed lookup)', () => {
+  it('returns null for absent / unknown / empty class', () => {
+    expect(errorHintFromClass(null)).toBeNull()
+    expect(errorHintFromClass(undefined)).toBeNull()
+    expect(errorHintFromClass('')).toBeNull()
+    expect(errorHintFromClass('unknown_class_name')).toBeNull()
+  })
+
+  it('looks up RFC-0097 hint for fd_exhaustion', () => {
+    const hint = errorHintFromClass('fd_exhaustion')
+    expect(hint?.reason).toBe('fd_exhaustion')
+    expect(hint?.href).toContain('RFC-0097')
+  })
+
+  it('looks up RFC-0122 hint for disk_exhaustion', () => {
+    const hint = errorHintFromClass('disk_exhaustion')
+    expect(hint?.reason).toBe('disk_exhaustion')
+    expect(hint?.href).toContain('RFC-0122')
+  })
+})
+
+describe('errorHintFromGap (RFC-0154 PR-3 cascading resolver)', () => {
+  const buildDisplay = (
+    errorClass: string | null,
+    error: string | null,
+  ): CoverageGapDisplay => ({
+    count: 1,
+    summary: 'coverage gaps 1: x',
+    details: [],
+    structured: {
+      reason: 'x',
+      fields: [],
+      error,
+      errorClass,
+    },
+  })
+
+  it('prefers typed errorClass lookup over substring matching', () => {
+    // Typed says disk; substring says fd — typed must win.
+    const hint = errorHintFromGap(buildDisplay('disk_exhaustion', 'too many open files'))
+    expect(hint?.reason).toBe('disk_exhaustion')
+  })
+
+  it('falls back to substring matching when errorClass is absent (v1 wire row)', () => {
+    const hint = errorHintFromGap(buildDisplay(null, 'too many open files'))
+    expect(hint?.reason).toBe('fd_exhaustion')
+  })
+
+  it('falls back to substring matching when errorClass is unknown', () => {
+    const hint = errorHintFromGap(buildDisplay('future_class', 'ENOSPC'))
+    expect(hint?.reason).toBe('disk_exhaustion')
+  })
+
+  it('returns null when both typed and substring paths miss', () => {
+    expect(errorHintFromGap(buildDisplay(null, 'completely unrelated'))).toBeNull()
+    expect(errorHintFromGap(buildDisplay('other', 'completely unrelated'))).toBeNull()
   })
 })
 

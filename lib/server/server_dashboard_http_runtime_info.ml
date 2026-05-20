@@ -288,6 +288,10 @@ let parse_ahead_behind raw =
   | _ -> None
 ;;
 
+let git_default_origin_head dir =
+  git_probe_trimmed dir [ "symbolic-ref"; "--short"; "refs/remotes/origin/HEAD" ]
+;;
+
 let git_upstream_status path =
   match Atomic.get git_upstream_status_probe_hook_for_tests with
   | Some hook -> hook path
@@ -300,24 +304,32 @@ let git_upstream_status path =
          git_probe_trimmed dir [ "rev-parse"; "--abbrev-ref"; "HEAD" ]
        in
        let upstream_ref =
-         git_probe_trimmed
-           dir
-           [ "rev-parse"; "--abbrev-ref"; "--symbolic-full-name"; "@{upstream}" ]
-       in
-       let upstream_head_commit =
-         git_probe_trimmed dir [ "rev-parse"; "--short"; "@{upstream}" ]
-       in
-       let ahead_count, behind_count =
          match
            git_probe_trimmed
              dir
-             [ "rev-list"; "--left-right"; "--count"; "HEAD...@{upstream}" ]
+             [ "rev-parse"; "--abbrev-ref"; "--symbolic-full-name"; "@{upstream}" ]
          with
-         | Some raw ->
-           (match parse_ahead_behind raw with
-            | Some (ahead, behind) -> Some ahead, Some behind
-            | None -> None, None)
+         | Some upstream -> Some upstream
+         | None -> git_default_origin_head dir
+       in
+       let upstream_head_commit =
+         Option.bind upstream_ref (fun ref_name ->
+           git_probe_trimmed dir [ "rev-parse"; "--short"; ref_name ])
+       in
+       let ahead_count, behind_count =
+         match upstream_ref with
          | None -> None, None
+         | Some ref_name ->
+           (match
+              git_probe_trimmed
+                dir
+                [ "rev-list"; "--left-right"; "--count"; "HEAD..." ^ ref_name ]
+            with
+            | Some raw ->
+              (match parse_ahead_behind raw with
+               | Some (ahead, behind) -> Some ahead, Some behind
+               | None -> None, None)
+            | None -> None, None)
        in
        if branch = None
           && upstream_ref = None

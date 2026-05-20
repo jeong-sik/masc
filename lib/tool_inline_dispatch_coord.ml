@@ -92,7 +92,7 @@ let handle_start ~tool_name ~start_time (ctx : context) : tool_result option =
         let _msg = Coord.join active_config ~agent_name ~capabilities:[] () in
         Ok ()
       with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-        let msg = Stdlib.Printexc.to_string exn in
+        let msg = Tool_error.to_string (Tool_error.of_exn exn) in
         if String.length msg > 0 then Error msg else Error "join failed"
     in
     match join_result with

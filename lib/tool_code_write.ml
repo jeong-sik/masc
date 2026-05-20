@@ -449,7 +449,7 @@ let handle_code_write ~tool_name ~start_time ctx args =
           ("agent", `String ctx.agent_name);
         ]
       with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-        Tool_result.error ~tool_name ~start_time (Printf.sprintf "Write failed: %s" (Stdlib.Printexc.to_string exn))
+        Tool_result.error ~tool_name ~start_time (Printf.sprintf "Write failed: %s" (Tool_error.to_string (Tool_error.of_exn exn)))
   end
 
 (* Handler: masc_code_edit — Replace old_string with new_string in a file *)
@@ -579,7 +579,7 @@ let handle_code_edit ~tool_name ~start_time ctx args =
             ]
           end
         with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-          Tool_result.error ~tool_name ~start_time (Printf.sprintf "Edit failed: %s" (Stdlib.Printexc.to_string exn))
+          Tool_result.error ~tool_name ~start_time (Printf.sprintf "Edit failed: %s" (Tool_error.to_string (Tool_error.of_exn exn)))
       end
   end
 

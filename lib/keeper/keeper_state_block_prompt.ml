@@ -17,5 +17,6 @@ let instruction_text =
   String.concat "\n"
     [
       "For non-direct keeper turns, end every response with a [STATE]...[/STATE] block unless a more specific turn-level output guard says continuity is runtime-managed:";
+      Printf.sprintf "State block template: %s." field_summary;
       template_text;
     ]

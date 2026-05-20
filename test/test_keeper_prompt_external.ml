@@ -112,6 +112,28 @@ let test_system_prompt_includes_continuity_contract () =
         "constitution still present" true
         (contains_substring prompt "PR merge rules"))
 
+let test_system_prompt_includes_state_block_template_anchor () =
+  with_repo_root_cwd (fun () ->
+      Lib.Keeper_prompt_external.reset_cache ();
+      let prompt =
+        Lib.Keeper_prompt.build_keeper_system_prompt
+          ~goal:"verify prompt anchors"
+          ~short_goal:"keep state template anchored"
+          ~mid_goal:"avoid noisy recovery fallback"
+          ~long_goal:"keep continuity prompt stable"
+          ~will:"maintain coherent identity"
+          ~needs:"runtime truth"
+          ~desires:"observable progress"
+          ~instructions:""
+          ()
+      in
+      Alcotest.(check bool)
+        "state block template anchor present" true
+        (contains_substring prompt "State block template");
+      Alcotest.(check bool)
+        "normal prompt does not need recovery fallback" false
+        (contains_substring prompt "Recovery guard"))
+
 let test_missing_returns_none () =
   with_repo_root_cwd (fun () ->
       Lib.Keeper_prompt_external.reset_cache ();
@@ -174,6 +196,9 @@ let () =
             test_loads_continuity_contract;
           Alcotest.test_case "system prompt includes continuity_contract"
             `Quick test_system_prompt_includes_continuity_contract;
+          Alcotest.test_case
+            "system prompt includes state block template anchor" `Quick
+            test_system_prompt_includes_state_block_template_anchor;
           Alcotest.test_case "missing returns None" `Quick
             test_missing_returns_none;
           Alcotest.test_case "second lookup uses cache" `Quick

@@ -7,11 +7,6 @@ module Namespace_truth_support = Server_dashboard_http_namespace_truth_support
 
 let namespace_truth_shell_refreshing : bool Atomic.t = Atomic.make false
 
-let float_of_env_default_with_legacy ~canonical ~legacy ~default ~min_v ~max_v =
-  match Sys.getenv_opt canonical with
-  | Some _ -> float_of_env_default canonical ~default ~min_v ~max_v
-  | None -> float_of_env_default legacy ~default ~min_v ~max_v
-
 (* RFC-0138 Phase 3 Step 4 — fallback timeouts are now hard-coded
    module constants.  Step 3 (#16738) wired /project-snapshot through
    [Dashboard_snapshot], so this fallback path is taken at most once

@@ -275,11 +275,6 @@ val effective_scheduled_autonomous_cooldown :
   base_cooldown:int -> since_last:int ->
   ?consecutive_noop_count:int -> unit -> int
 
-(** Backward-compatible alias for the pre-rename helper name. *)
-val effective_proactive_cooldown :
-  base_cooldown:int -> since_last:int ->
-  ?consecutive_noop_count:int -> unit -> int
-
 val provider_cooldown_remaining_sec_for_cascade :
   cascade_name:Keeper_cascade_profile.runtime_name -> int option
 

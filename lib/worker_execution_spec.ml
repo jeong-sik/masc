@@ -128,7 +128,15 @@ let of_yojson (json : Yojson.Safe.t) =
        with
        | Yojson.Json_error msg -> Error ("worker execution spec JSON error: " ^ msg)
        | Type_error (msg, _) -> Error ("worker execution spec type error: " ^ msg)
-       | Failure msg -> Error msg)
+       (* Context-label the bare Failure so the operator reading the log
+          can tell a worker-spec parse failure apart from any other
+          [failwith] / [int_of_string] failure that bubbles up from
+          downstream helpers. *)
+       | Failure msg ->
+           Error
+             (Printf.sprintf
+                "worker execution spec: parse step raised Failure (%s)"
+                msg))
   | other ->
       Error
         (Printf.sprintf "worker execution spec must be a JSON object, got %s: %s"

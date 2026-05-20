@@ -151,3 +151,52 @@ val normalize_keeper_runtime_declared_name : ?config_path:string -> string -> st
 val models_key : string -> string
 val temperature_key : string -> string
 val max_tokens_key : string -> string
+
+(** {1 RFC-0143 Phase 1 — typed catalog query bridge}
+
+    Distinguishes the three control-flow origins of an unavailable
+    catalog so callers can decide what to do about each instead of
+    collapsing them into [Error _ -> false] / [Error _ -> []].
+
+    The bridge runs alongside the legacy [catalog_metadata_result]
+    (a [('a, string) result]) so call sites can migrate in batches.
+    Per RFC-0143 §4, the legacy API is removed in PR-5 once no
+    callers remain. *)
+
+(** Catalog metadata record returned by the bridge. Mirrors the
+    fields the legacy [catalog_metadata_result] already returned;
+    exposed here so the typed query is callable from outside the
+    module. *)
+type catalog_metadata = {
+  qualified_names : string list;
+  public_names : string list;
+  keeper_assignable_names : string list;
+  system_qualified_names : string list;
+  system_names : string list;
+  fallback_hints : (string * string) list;
+}
+
+type catalog_unavailable_reason =
+  | Catalog_path_not_resolved
+  | Catalog_load_failed of string
+  | Catalog_metadata_invalid of string
+
+type 'a catalog_query_result =
+  | Catalog_ok of 'a
+  | Catalog_unavailable of {
+      reason : catalog_unavailable_reason;
+      message : string;
+    }
+
+val catalog_unavailable_reason_to_string : catalog_unavailable_reason -> string
+(** Short bounded-cardinality token suitable for log lines and
+    [cascade_catalog_unavailable_count{reason=…}] metric labels. *)
+
+val catalog_metadata_query
+  :  ?config_path:string
+  -> unit
+  -> catalog_metadata catalog_query_result
+(** Typed alternative to [catalog_metadata_result]. The
+    [Catalog_unavailable] payload carries both the typed [reason]
+    (suitable for routing logic and metric labels) and the original
+    [message] (suitable for operator-facing logs). *)

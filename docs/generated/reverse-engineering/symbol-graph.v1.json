@@ -12,6 +12,15 @@
     ],
     "manifest": "docs/design/lsp-symbol-graph-exporter.md",
     "check_command": "scripts/ide/export-symbol-graph --check",
+    "live_lsp_prereq_command": "scripts/ide/export-symbol-graph --doctor-live-lsp",
+    "required_live_lsp_executables": {
+      "ocaml": [
+        "ocaml-lsp-server"
+      ],
+      "typescript": [
+        "typescript-language-server"
+      ]
+    },
     "emit_command": "scripts/ide/export-symbol-graph --emit > docs/generated/reverse-engineering/symbol-graph.v1.json",
     "live_lsp_invoked": false,
     "notes": "Initial task-387 snapshot is a base-commit-bound static seed from base_commit. display_range values are not current-main coordinates. Later exporter PRs should replace static ranges with live LSP responses."
@@ -698,6 +707,11 @@
       "code": "base_commit_bound_static_ranges",
       "reason": "Static display ranges are valid only for base_commit 22f3665e5218 and may drift as main changes; they must not be treated as current-main coordinates.",
       "follow_up": "Refresh the artifact through the read-only exporter before using line ranges for refactor execution."
+    },
+    {
+      "code": "live_lsp_prerequisites_not_part_of_static_check",
+      "reason": "The static seed validator proves schema and path/test ownership only. Live export also requires local language-server executables, checked separately by scripts/ide/export-symbol-graph --doctor-live-lsp.",
+      "follow_up": "Install or pin ocaml-lsp-server and typescript-language-server before replacing static ranges with live LSP documentSymbol/references responses."
     },
     {
       "code": "call_edges_curated",

@@ -1,14 +1,67 @@
 ---
 rfc: "0154"
 title: "System_error_class typed SSOT — close substring-classifier loop across backend + telemetry + dashboard"
-status: Draft
+status: Implemented
 created: 2026-05-20
-updated: 2026-05-20
+updated: 2026-05-21
 author: vincent
 supersedes: []
 superseded_by: null
 related: ["0042", "0088", "0097", "0105", "0122", "0142", "0148", "0149"]
-implementation_prs: []
+implementation_prs: [17064, 17073, 17072, 17078]
+---
+
+## Implementation summary (2026-05-21)
+
+All four spec phases shipped within 24 hours of body merge (#17059):
+
+| Phase | PR | Scope | Merged |
+|-------|-----|------|--------|
+| PR-1 | #17064 | `lib/system_error_class.{ml,mli}` (later relocated to `lib/core/`) + 21 Alcotest cases | 2026-05-20 |
+| PR-3 | #17073 | Dashboard `errorHintFromGap` cascading resolver (typed first, substring fallback) + 12 new vitest cases | 2026-05-20 |
+| PR-4 | #17072 | Schema v2 cutover runbook (`docs/runbooks/RFC-0154-system-error-class-schema-v2-cutover.md`, 182 lines) | 2026-05-20 |
+| PR-2 | #17078 | `Telemetry_coverage_gap.record` typed signature (`?exn:exn`) + wire `error_class` field + 4 inline matcher → SSOT delegation + module promotion to `lib/core/` | pending |
+
+The phased rollout reached the post-condition described in §3: *one
+classification, one wire tag, one dashboard lookup table*.
+
+### Variance from spec
+
+- **PR-2 caller migration count**: §3.2 anticipated all 13 callers to
+  pass `~exn:e` explicitly. Implementation made `~exn` *optional* and
+  kept all 13 callers on the existing `~error:string` signature —
+  every row still receives an `error_class` derived from
+  `classify_string`, so the spec post-condition holds without
+  touching the callers. Explicit `~exn` migration remains available
+  for callers that need errno precision; not required for correctness.
+- **Module location**: §3.1 placed the SSOT at `lib/system_error_class.ml`.
+  Implementation discovered that `lib/coord/` (sub-library `masc_coord`)
+  needed access for the fourth inline matcher consolidation, so PR-2
+  moved the module to `lib/core/system_error_class.ml` where every
+  sub-library can depend on it.
+- **§4 wire schema v2 cutoff (14-day)**: Active. PR-4 runbook owns the
+  cutover; the post-soak sunset PR removes the dashboard's
+  `classifyCoverageError` substring fallback once 0 v1-only rows are
+  observed for 7 days.
+
+### Workaround Rejection Bar — closeout audit
+
+All four merged PRs cleared the 7-item checklist in their bodies. The
+resulting `lib/core/system_error_class.ml` is a closed-sum typed SSOT
+with `Other of string` as the parse-don't-validate escape hatch — no
+`_ -> false` catch-all in any of the four wrapper sites
+(`is_fd_exhaustion_text`, `is_disk_exhaustion_text`,
+`is_fd_pressure_text`, `fd_exhaustion_failure`), so a new variant
+forces a compile-time match at every call site.
+
+The dashboard half mirrors this: `ERROR_CLASS_HINTS` is a `Record`
+dictionary keyed by `to_short_tag`, and `errorHintFromClass` falls
+back to `null` for unknown classes rather than guessing.
+
+The 5-PR Tool Monitor UX sprint that surfaced this consolidation
+(#17015, #17022, #17031, #17042, #17051) ends here — the
+substring-classifier loop is closed.
+
 ---
 
 # RFC-0154 — System_error_class typed SSOT

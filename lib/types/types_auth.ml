@@ -39,12 +39,23 @@ let agent_role_of_string = function
 
 let agent_role_to_yojson role = `String (agent_role_to_string role)
 
-let agent_role_of_yojson = function
-  | `String s -> agent_role_of_string s
-  | _ -> Error "Expected string for agent_role"
-
 let all_agent_roles = [ Worker; Admin ]
 let valid_agent_role_strings = List.map agent_role_to_string all_agent_roles
+
+let agent_role_of_yojson = function
+  | `String s -> agent_role_of_string s
+  | other ->
+    (* Bind the actual JSON kind we received so operators can tell a
+       wrong-type bug ([`Int 1] / [`Bool true]) apart from a wrong-shape
+       bug ([`Assoc] containing a [role] field by mistake).  The
+       previous ["Expected string for agent_role"] message identified
+       neither the contract nor the offender. *)
+    Error
+      (Printf.sprintf
+         "agent_role_of_yojson: expected JSON string (one of %s), got %s"
+         (String.concat " | "
+            (List.map (Printf.sprintf "%S") valid_agent_role_strings))
+         (Json_util.kind_name other))
 
 (** Agent credential - used for token-based auth *)
 type agent_credential = {

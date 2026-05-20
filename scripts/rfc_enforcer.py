@@ -17,12 +17,21 @@
 --check-ledger-monotonic mode: ensure docs/rfc/.next-number is greater than
   every RFC-NNNN-*.md file currently present in the checkout.
 
+--check-tree-collisions mode: scan the head-side tree directly for groups of
+  >1 RFC-NNNN-*.md files sharing the same NNNN. `--check-numbering` is
+  PR-scoped (base→head diff) and cannot catch the race where two PRs branch
+  from the same base, each adds the same NNNN, and they merge sequentially —
+  each diff sees the other RFC as absent on base and passes. The head-side
+  scan rejects post-merge collisions unless all-but-one of the colliding
+  files carry the `extends: "NNNN"` frontmatter opt-in.
+
 Usage:
     python scripts/rfc_enforcer.py --check docs/rfc/
     python scripts/rfc_enforcer.py --check docs/rfc/ --strict
     python scripts/rfc_enforcer.py --check-numbering \
         --base-ref origin/main --head-ref HEAD
     python scripts/rfc_enforcer.py --check-ledger-monotonic
+    python scripts/rfc_enforcer.py --check-tree-collisions
 
 Exit codes:
     0 — all checks pass
@@ -295,6 +304,65 @@ def check_ledger_monotonic(rfc_dir: Path) -> List[Violation]:
     return violations
 
 
+def check_tree_collisions(rfc_dir: Path) -> List[Violation]:
+    """Detect RFC number collisions in the current head-side tree.
+
+    `check_numbering` is PR-scoped: it diffs base→head and rejects a NNNN
+    that already exists on base. Two PRs that branch from the same base,
+    each add the same NNNN, and merge sequentially each see the other RFC
+    as absent on base — both pass, then collide in head.
+
+    This scan groups RFC files in `rfc_dir` by number and reports any
+    group of size >1 unless all-but-one entries carry `extends: "NNNN"`
+    frontmatter opt-in (multi-phase RFC pattern, per docs/rfc/README §정책).
+    """
+    violations: List[Violation] = []
+    if not rfc_dir.exists():
+        return violations
+
+    by_number: dict = {}
+    for rfc_file in sorted(rfc_dir.glob("RFC-*.md")):
+        m = _RFC_FILENAME_RE.match(rfc_file.name)
+        if m is None:
+            continue
+        by_number.setdefault(m.group(1), []).append(rfc_file)
+
+    for number in sorted(by_number.keys()):
+        files = by_number[number]
+        if len(files) <= 1:
+            continue
+        opt_in_count = 0
+        for f in files:
+            try:
+                content = f.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            for match in _FRONTMATTER_EXTENDS_RE.finditer(content):
+                if match.group(1) == number:
+                    opt_in_count += 1
+                    break
+        if opt_in_count < len(files) - 1:
+            file_names = ", ".join(sorted(f.name for f in files))
+            violations.append(
+                Violation(
+                    files[0],
+                    0,
+                    "RFC_TREE_NUMBER_COLLISION",
+                    (
+                        f"RFC-{number} has {len(files)} files in tree but "
+                        f"only {opt_in_count} carry `extends: \"{number}\"` "
+                        f"frontmatter opt-in: {file_names}. Yield the late-"
+                        "merged RFC: allocate a fresh number via "
+                        "scripts/rfc-allocate-next.sh and renumber. For "
+                        "intentional multi-phase additions add explicit "
+                        f"`extends: \"{number}\"` frontmatter."
+                    ),
+                )
+            )
+
+    return violations
+
+
 def check_numbering(base_ref: str, head_ref: str, pr_body: str) -> List[Violation]:
     """Return collision violations for RFC numbers added in this PR."""
     violations: List[Violation] = []
@@ -354,6 +422,15 @@ def main() -> int:
         "--check-ledger-monotonic",
         action="store_true",
         help="Check that docs/rfc/.next-number is above every existing RFC number",
+    )
+    parser.add_argument(
+        "--check-tree-collisions",
+        action="store_true",
+        help=(
+            "Scan head-side tree for >1 RFC-NNNN-*.md files sharing NNNN "
+            "(catches post-merge collisions that PR-scoped --check-numbering "
+            "misses across same-base sibling PRs)"
+        ),
     )
     parser.add_argument(
         "--rfc-dir",
@@ -416,6 +493,17 @@ def main() -> int:
             print()
             return 1
         print("RFC ledger: monotonic.")
+        return 0
+
+    if args.check_tree_collisions:
+        violations = check_tree_collisions(args.rfc_dir)
+        if violations:
+            print(f"Found {len(violations)} RFC tree collision(s):\n")
+            for v in violations:
+                print(v.format())
+            print()
+            return 1
+        print("RFC tree: no number collisions.")
         return 0
 
     if args.check is None:

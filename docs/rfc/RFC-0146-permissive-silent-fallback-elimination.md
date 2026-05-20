@@ -1,5 +1,5 @@
 ---
-rfc: "0145"
+rfc: "0146"
 title: "Permissive-Silent-Fallback Elimination"
 status: Draft
 created: 2026-05-20
@@ -9,9 +9,19 @@ supersedes: []
 superseded_by: null
 related: ["0088", "0109"]
 implementation_prs: []
+renumbered_from: "0145"
 ---
 
-# RFC-0145 — Permissive-Silent-Fallback Elimination
+# RFC-0146 — Permissive-Silent-Fallback Elimination
+
+> **Renumbered 2026-05-20**: 본 RFC 는 원래 RFC-0145 (PR #16780, merged
+> `0ef361c9ee`) 로 작성되었으나, 15초 선행 머지된 PR #16779 (`RFC-0145 —
+> Keeper Agent Run — Stage Decomposition`, merged `efee48d37c`) 와 번호
+> 충돌. 선행 머지 우선 — 본 RFC 가 후행 PR 이므로 0146 으로 yield.
+> 본 충돌은 enforcer `--check-numbering` 의 PR-scoped diff 가 동일 base
+> 에서 출발한 두 PR 의 head-side collision 을 못 잡은 hole 의 결과 —
+> 본 PR 에서 head-side tree scan 추가로 재발 차단.
+
 
 ## 1. Motivation
 

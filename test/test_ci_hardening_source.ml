@@ -249,6 +249,15 @@ let test_ci_sync_and_asset_contracts () =
   check bool "branch protection watchdog uses audit token" true
     (file_contains_pattern ".github/workflows/branch-protection-watchdog.yml"
        "BRANCH_PROTECTION_AUDIT_TOKEN");
+  check bool "branch protection watchdog fails clearly without audit token" true
+    (file_contains_pattern ".github/workflows/branch-protection-watchdog.yml"
+       "Branch protection watchdog missing audit token");
+  check bool "branch protection watchdog rejects default token fallback" true
+    (file_not_contains_pattern ".github/workflows/branch-protection-watchdog.yml"
+       "|| github.token");
+  check bool "branch protection watchdog documents default token limitation" true
+    (file_contains_pattern ".github/workflows/branch-protection-watchdog.yml"
+       "default GITHUB_TOKEN cannot read branch protection");
   check bool "branch protection watchdog runs fail-closed checker" true
     (file_contains_pattern ".github/workflows/branch-protection-watchdog.yml"
        "bash scripts/ci/check-main-branch-protection.sh");

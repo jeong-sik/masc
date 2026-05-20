@@ -148,6 +148,33 @@ jobs:
           BASE: ${{ github.event.pull_request.base.ref && format('origin/{0}', github.event.pull_request.base.ref) || '' }}
         run: bash scripts/lint/godfile-size-regression.sh
 
+  ignore-without-comment-new:
+    name: ignore() justification (new sites)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Install ripgrep
+        run: sudo apt-get install -y -qq ripgrep
+      - name: Run lint
+        run: |
+          bash scripts/ci/check-ignore-without-comment-diff.sh \
+            --base "${{ github.event.pull_request.base.sha }}" \
+            --head HEAD
+
+  magic-number-advisory:
+    name: Magic number repetition (advisory)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ripgrep
+        run: sudo apt-get install -y -qq ripgrep
+      - name: Run lint
+        run: bash scripts/lint-magic-number.sh
+
   yaml-syntax:
     name: Workflow YAML syntax
     runs-on: ubuntu-latest

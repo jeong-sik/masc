@@ -1116,6 +1116,34 @@ let test_on_tool_error_workflow_rejection_logs_warn_without_callback_failure () 
   | None -> fail "expected workflow rejection to be logged as keeper WARN"
 ;;
 
+let test_on_tool_error_egress_blocked_logs_policy_warn_without_callback_failure
+    () =
+  let keeper = "callback-on-tool-egress-blocked-keeper" in
+  let hooks = make_test_hooks keeper in
+  let hook = require_hook "on_tool_error" hooks.on_tool_error in
+  let before = lifecycle_callback_failure_count ~keeper ~callback:"on_tool_error" in
+  let before_seq = latest_log_seq () in
+  let error =
+    {|{"ok":false,"error":"egress_blocked","attempted":"localhost","allowed":["*.github.com"]}|}
+  in
+  check_continue
+    "on_tool_error egress blocked"
+    (hook (Agent_sdk.Hooks.OnToolError { tool_name = "Bash"; error }));
+  let after = lifecycle_callback_failure_count ~keeper ~callback:"on_tool_error" in
+  check
+    (float 0.001)
+    "egress blocked does not increment callback failures"
+    0.0
+    (after -. before);
+  match
+    find_keeper_log_since
+      ~since_seq:before_seq
+      ~message_substring:("keeper:" ^ keeper ^ " tool_policy_rejection: Bash")
+  with
+  | Some entry -> check string "log level" "WARN" (Log.level_to_string entry.level)
+  | None -> fail "expected egress block to be logged as keeper policy WARN"
+;;
+
 let test_on_tool_error_blob_workflow_rejection_logs_warn_without_callback_failure
     () =
   let keeper = "callback-on-tool-blob-workflow-rejection-keeper" in
@@ -1773,6 +1801,10 @@ let () =
             "on_tool_error workflow rejection logs warn"
             `Quick
             test_on_tool_error_workflow_rejection_logs_warn_without_callback_failure
+        ; test_case
+            "on_tool_error egress block logs policy warn"
+            `Quick
+            test_on_tool_error_egress_blocked_logs_policy_warn_without_callback_failure
         ; test_case
             "on_tool_error blob workflow rejection logs warn"
             `Quick

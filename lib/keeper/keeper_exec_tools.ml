@@ -232,13 +232,20 @@ let failure_class_of_tool_result_payload payload =
       ~context:"Keeper_exec_tools.failure_class_of_tool_result_payload"
       payload
   with
-  | Ok json -> Safe_ops.json_string_opt "failure_class" json
+  | Ok json ->
+    (match Safe_ops.json_string_opt "failure_class" json with
+     | Some _ as failure_class -> failure_class
+     | None ->
+       (match Safe_ops.json_string_opt "error" json with
+        | Some "egress_blocked" -> Some "policy_rejection"
+        | Some _
+        | None -> None))
   | Error _ -> None
 ;;
 
 let should_apply_circuit_breaker_to_failure_payload payload =
   match failure_class_of_tool_result_payload payload with
-  | Some "workflow_rejection" -> false
+  | Some ("policy_rejection" | "workflow_rejection") -> false
   | Some _
   | None -> true
 ;;

@@ -88,7 +88,20 @@ let failure_class_of_tool_error_json json =
   in
   match direct with
   | Some _ -> direct
-  | None -> nested
+  | None ->
+    (match nested with
+     | Some _ -> nested
+     | None ->
+       let direct_error = Safe_ops.json_string_opt "error" json in
+       let nested_error =
+         match Yojson.Safe.Util.member "detail" json with
+         | `Assoc _ as detail -> Safe_ops.json_string_opt "error" detail
+         | _ -> None
+       in
+       match direct_error, nested_error with
+       | Some "egress_blocked", _
+       | _, Some "egress_blocked" -> Some "policy_rejection"
+       | _ -> None)
 
 let failure_class_of_tool_error_text error =
   try

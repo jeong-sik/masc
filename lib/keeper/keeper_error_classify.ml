@@ -665,6 +665,21 @@ let is_auto_recoverable_turn_error (err : Agent_sdk.Error.sdk_error) : bool =
   || is_resumable_cli_session_error err
   || is_auto_recoverable_cascade_exhausted_error err
 
+let should_warn_keeper_cycle_failed (err : Agent_sdk.Error.sdk_error) : bool =
+  match Keeper_turn_driver.classify_masc_internal_error err with
+  | Some (Keeper_turn_driver.Oas_timeout_budget _) -> true
+  | Some (Keeper_turn_driver.Cascade_exhausted _)
+  | Some (Keeper_turn_driver.Resumable_cli_session _)
+  | Some (Keeper_turn_driver.No_tool_capable_provider _)
+  | Some (Keeper_turn_driver.Accept_rejected _)
+  | Some (Keeper_turn_driver.Admission_queue_timeout _)
+  | Some (Keeper_turn_driver.Admission_queue_rejected _)
+  | Some (Keeper_turn_driver.Turn_timeout _)
+  | Some (Keeper_turn_driver.Max_tokens_ceiling_violation _)
+  | Some (Keeper_turn_driver.Ambiguous_post_commit _)
+  | None ->
+    false
+
 let ambiguous_side_effect_error_prefix =
   "turn outcome ambiguous after committed mutating tool call(s)"
 

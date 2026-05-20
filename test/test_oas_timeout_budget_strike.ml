@@ -4,6 +4,7 @@ module KH = Keeper_heartbeat_loop
 module KFP = Keeper_failure_policy
 module KK = Keeper_keepalive
 module KTD = Keeper_turn_driver
+module EC = Keeper_error_classify
 
 let with_reset keeper f =
   KK.reset_budget_exhaustion ~keeper_name:keeper;
@@ -68,6 +69,20 @@ let oas_timeout_budget_error ~phase =
        ; min_required_sec = 15.0
        ; phase
        })
+
+let turn_timeout_error () =
+  KTD.sdk_error_of_masc_internal_error (KTD.Turn_timeout { elapsed_sec = 600.0 })
+
+let test_cycle_failed_log_level_is_policy_aware () =
+  Alcotest.(check bool)
+    "oas timeout budget cycle failure is warn"
+    true
+    (EC.should_warn_keeper_cycle_failed
+       (oas_timeout_budget_error ~phase:"cascade_attempt_watchdog"));
+  Alcotest.(check bool)
+    "turn wall-clock timeout remains error"
+    false
+    (EC.should_warn_keeper_cycle_failed (turn_timeout_error ()))
 
 let test_strike_limit_routes_through_policy_without_keeper_death () =
   let err = oas_timeout_budget_error ~phase:"stream_idle:streaming_thinking" in
@@ -146,6 +161,8 @@ let () =
         Alcotest.test_case "reset clears" `Quick test_reset_clears;
         Alcotest.test_case "strike limit soft-backoffs without crash" `Quick
           test_strike_limit_is_soft_backoff;
+        Alcotest.test_case "cycle failure log level is policy-aware" `Quick
+          test_cycle_failed_log_level_is_policy_aware;
         Alcotest.test_case "strike limit uses policy, not keeper death" `Quick
           test_strike_limit_routes_through_policy_without_keeper_death;
         Alcotest.test_case "capacity phase routes to provider tuning" `Quick

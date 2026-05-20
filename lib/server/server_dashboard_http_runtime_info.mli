@@ -155,6 +155,11 @@ type git_upstream_status = {
     uses only already-fetched refs such as [@{upstream}] and does not perform
     network access. *)
 
+val git_upstream_status : string -> git_upstream_status option
+(** Returns local tracking-ref status for [path].  Detached checkouts fall back
+    to [refs/remotes/origin/HEAD] when [@{upstream}] is unavailable, still
+    without fetching from the network. *)
+
 val set_git_upstream_status_probe_hook_for_tests :
   (string -> git_upstream_status option) -> unit
 (** Installs a test-only hook for upstream tracking-ref probes. *)

@@ -21,6 +21,41 @@ let cleanup_dir dir =
   in
   rm dir
 
+let write_file path contents =
+  let oc = open_out_bin path in
+  Fun.protect ~finally:(fun () -> close_out oc) @@ fun () ->
+  output_string oc contents
+
+let process_status_to_string = function
+  | Unix.WEXITED code -> Printf.sprintf "exit %d" code
+  | Unix.WSIGNALED signal -> Printf.sprintf "signal %d" signal
+  | Unix.WSTOPPED signal -> Printf.sprintf "stopped %d" signal
+
+let read_all ic =
+  let buf = Buffer.create 256 in
+  (try
+     while true do
+       Buffer.add_string buf (input_line ic);
+       Buffer.add_char buf '\n'
+     done
+   with
+   | End_of_file -> ());
+  Buffer.contents buf
+
+let run_git_exn repo args =
+  let argv = Array.of_list ("git" :: "-C" :: repo :: args) in
+  let ic = Unix.open_process_args_in "git" argv in
+  let output = read_all ic in
+  match Unix.close_process_in ic with
+  | Unix.WEXITED 0 -> String.trim output
+  | status ->
+    Alcotest.failf
+      "git -C %s %s failed (%s): %s"
+      repo
+      (String.concat " " args)
+      (process_status_to_string status)
+      output
+
 let with_stubbed_git_probe f =
   Lib.Server_dashboard_http.clear_git_rev_parse_short_cache_for_tests ();
   Lib.Server_dashboard_http.set_git_rev_parse_short_probe_hook_for_tests
@@ -58,6 +93,51 @@ let with_dashboard_eio f =
   Eio.Switch.run @@ fun sw ->
   Lib.Cascade_legacy_runner.start_actor_if_needed ~sw;
   f ()
+
+let test_git_upstream_status_uses_origin_head_for_detached_checkout () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      with_dashboard_eio @@ fun () ->
+      ignore (run_git_exn dir [ "init"; "-q"; "-b"; "main" ]);
+      let readme = Filename.concat dir "README.md" in
+      write_file readme "one\n";
+      ignore (run_git_exn dir [ "add"; "README.md" ]);
+      ignore
+        (run_git_exn
+           dir
+           [ "-c"; "user.email=test@example.invalid"
+           ; "-c"; "user.name=Test"
+           ; "commit"; "-q"; "-m"; "initial"
+           ]);
+      let first_commit = run_git_exn dir [ "rev-parse"; "--short"; "HEAD" ] in
+      write_file readme "one\ntwo\n";
+      ignore (run_git_exn dir [ "add"; "README.md" ]);
+      ignore
+        (run_git_exn
+           dir
+           [ "-c"; "user.email=test@example.invalid"
+           ; "-c"; "user.name=Test"
+           ; "commit"; "-q"; "-m"; "second"
+           ]);
+      let origin_main = run_git_exn dir [ "rev-parse"; "--short"; "HEAD" ] in
+      ignore (run_git_exn dir [ "update-ref"; "refs/remotes/origin/main"; "HEAD" ]);
+      ignore
+        (run_git_exn
+           dir
+           [ "symbolic-ref"; "refs/remotes/origin/HEAD"; "refs/remotes/origin/main" ]);
+      ignore (run_git_exn dir [ "checkout"; "-q"; first_commit ]);
+      match Lib.Server_dashboard_http.git_upstream_status dir with
+      | None -> Alcotest.fail "expected upstream status for detached checkout"
+      | Some status ->
+        check (option string) "detached branch surfaced" (Some "HEAD") status.branch;
+        check (option string) "fallback upstream ref" (Some "origin/main")
+          status.upstream_ref;
+        check (option string) "fallback upstream head" (Some origin_main)
+          status.upstream_head_commit;
+        check (option int) "detached checkout behind origin/main" (Some 1)
+          status.behind_count)
 
 let contains_substring ~needle haystack =
   let needle_len = String.length needle in
@@ -530,6 +610,8 @@ let () =
       ("projection", [
            test_case "full inventory + usage summary" `Quick
              test_dashboard_tools_projection;
+           test_case "detached checkout uses origin HEAD fallback" `Quick
+             test_git_upstream_status_uses_origin_head_for_detached_checkout;
            test_case "tool usage surfaces coverage gap" `Quick
              test_dashboard_tools_usage_surfaces_coverage_gap;
            test_case "tool usage store failure records coverage gap" `Quick

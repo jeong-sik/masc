@@ -8323,13 +8323,12 @@ let test_degraded_retry_slot_phase_allows_oas_timeout_local_recovery () =
 ;;
 
 let max_execution_time_cascade_exhausted_error () =
+  let detail = "Agent execution exceeded max_execution_time_s (276.561292)" in
   Masc_mcp.Keeper_turn_driver.sdk_error_of_masc_internal_error
     (Masc_mcp.Keeper_turn_driver.Cascade_exhausted
        {
          cascade_name = oas_error_cascade_name "strict_tool_candidates";
-         reason =
-           Keeper_types.Other_detail
-             "Agent execution exceeded max_execution_time_s (276.561292)";
+         reason = Keeper_types.cascade_exhaustion_reason_from_message detail;
        })
 ;;
 

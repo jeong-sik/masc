@@ -358,6 +358,27 @@ let on_reject_verification ~(config : Coord.config)
     notify_reject_verification ~task_id ~verifier ~verification_id ~reason;
     Ok ()
 
+let awaiting_verification_deadline
+      ~(submitted_at : string)
+      ~(deadline : string option)
+  =
+  match deadline with
+  | Some deadline ->
+    (match Masc_domain.parse_iso8601_opt deadline with
+     | Some deadline_ts -> Some ("deadline", deadline, deadline_ts)
+     | None -> None)
+  | None ->
+    (match Masc_domain.parse_iso8601_opt submitted_at with
+     | Some submitted_ts ->
+       let deadline_ts =
+         submitted_ts +. Env_config_runtime.Verification.timeout_deadline_seconds ()
+       in
+       Some
+         ( "submitted_at_fallback"
+         , Masc_domain.iso8601_of_unix_seconds deadline_ts
+         , deadline_ts )
+     | None -> None)
+
 let check_timeouts ~(config : Coord.config) =
   if not (Env_config_runtime.Verification.fsm_enabled ()) then ()
   else
@@ -366,15 +387,22 @@ let check_timeouts ~(config : Coord.config) =
       let now = Time_compat.now () in
       List.iter (fun (task : Masc_domain.task) ->
         match task.task_status with
-        | Masc_domain.AwaitingVerification { assignee; verification_id; deadline = Some dl; _ } ->
-          (match Masc_domain.parse_iso8601_opt dl with
-           | Some deadline_ts when now > deadline_ts ->
+        | Masc_domain.AwaitingVerification
+            { assignee; verification_id; submitted_at; deadline } ->
+          (match awaiting_verification_deadline ~submitted_at ~deadline with
+           | Some (deadline_source, dl, deadline_ts)
+             when now > deadline_ts ->
+             let deadline_note =
+               match deadline_source with
+               | "deadline" -> dl
+               | _ -> Printf.sprintf "%s (derived from submitted_at)" dl
+             in
              let () =
                match Board_dispatch.create_post
                  ~author:"system"
                  ~content:(Printf.sprintf
                    "Verification timeout: task %s (%s) by %s — no verifier responded within deadline %s"
-                   task.id task.title assignee dl)
+                   task.id task.title assignee deadline_note)
                  ~title:(Printf.sprintf "Timeout: %s" task.title)
                  ~post_kind:Board.System_post
                  ~meta_json:(`Assoc [
@@ -382,7 +410,9 @@ let check_timeouts ~(config : Coord.config) =
                    ("task_id", `String task.id);
                    ("verification_id", `String verification_id);
                    ("assignee", `String assignee);
+                   ("submitted_at", `String submitted_at);
                    ("deadline", `String dl);
+                   ("deadline_source", `String deadline_source);
                  ])
                  ~visibility:Board.Internal
                  ~hearth:"verification"
@@ -399,6 +429,8 @@ let check_timeouts ~(config : Coord.config) =
                ("task_id", `String task.id);
                ("verification_id", `String verification_id);
                ("assignee", `String assignee);
+               ("deadline", `String dl);
+               ("deadline_source", `String deadline_source);
                ("timestamp", `Float now);
              ]);
              (* Transition the task out of AwaitingVerification so the next
@@ -407,8 +439,8 @@ let check_timeouts ~(config : Coord.config) =
                 cycle re-creates the same board entry. *)
              let cancel_reason =
                Printf.sprintf
-                 "verification deadline exceeded (assignee=%s, vrf=%s, deadline=%s)"
-                 assignee verification_id dl
+                 "verification deadline exceeded (assignee=%s, vrf=%s, deadline=%s, source=%s)"
+                 assignee verification_id dl deadline_source
              in
              (match
                 Coord.force_cancel_task_r
@@ -426,10 +458,11 @@ let check_timeouts ~(config : Coord.config) =
                   (Masc_domain.show_masc_error e))
            | Some _ -> ()
            | None -> ())
-        | Todo | Claimed _ | InProgress _ | AwaitingVerification { deadline = None; _ } | Done _ | Cancelled _ -> ()
+        | Todo | Claimed _ | InProgress _ | Done _ | Cancelled _ -> ()
       ) backlog.tasks
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->
       Log.Task.error "verification timeout check failed: %s"
         (Printexc.to_string exn)
+;;

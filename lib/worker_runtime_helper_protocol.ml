@@ -29,12 +29,31 @@ let option_to_yojson to_json = function
 
 open Result.Syntax
 
+(* Every parse error below now distinguishes between *Intlit overflow*
+   (the digits are syntactically a number but do not fit the target
+   numeric type) and *wrong-kind* (the JSON value is not a number at
+   all).  The previous form returned the same generic string for both,
+   forcing operators to guess which path failed when the payload came
+   back malformed from a remote worker. *)
+
 let int_option_of_yojson = function
   | `Null -> Ok None
   | `Int value -> Ok (Some value)
   | `Intlit value -> (
-      match int_of_string_opt value with Some v -> Ok (Some v) | None -> Error "invalid int option in worker helper payload")
-  | _ -> Error "invalid int option in worker helper payload"
+      match int_of_string_opt value with
+      | Some v -> Ok (Some v)
+      | None ->
+          Error
+            (Printf.sprintf
+               "int option in worker helper payload: intlit overflow \
+                (digits=%s, exceeds native int range)"
+               value))
+  | other ->
+      Error
+        (Printf.sprintf
+           "int option in worker helper payload: expected null|int|intlit \
+            (kind=%s)"
+           (Json_util.kind_name other))
 
 let float_option_of_yojson = function
   | `Null -> Ok None
@@ -43,12 +62,27 @@ let float_option_of_yojson = function
   | `Intlit value -> (
       match float_of_string_opt value with
       | Some f -> Ok (Some f)
-      | None -> Error "invalid float option in worker helper payload")
+      | None ->
+          Error
+            (Printf.sprintf
+               "float option in worker helper payload: intlit not parseable \
+                as float (digits=%s)"
+               value))
   | `String value -> (
       match float_of_string_opt value with
       | Some f -> Ok (Some f)
-      | None -> Error "invalid float option in worker helper payload")
-  | _ -> Error "invalid float option in worker helper payload"
+      | None ->
+          Error
+            (Printf.sprintf
+               "float option in worker helper payload: string not parseable \
+                as float (value=%s)"
+               value))
+  | other ->
+      Error
+        (Printf.sprintf
+           "float option in worker helper payload: expected \
+            null|float|int|intlit|string (kind=%s)"
+           (Json_util.kind_name other))
 
 let string_list_of_yojson = function
   | `List values ->
@@ -56,10 +90,20 @@ let string_list_of_yojson = function
         (fun value acc ->
           match (value, acc) with
           | `String s, Ok rest -> Ok (s :: rest)
-          | _, Ok _ -> Error "invalid string list in worker helper payload"
+          | other, Ok _ ->
+              Error
+                (Printf.sprintf
+                   "string list in worker helper payload: element is not a \
+                    string (kind=%s)"
+                   (Json_util.kind_name other))
           | _, Error msg -> Error msg)
         values (Ok [])
-  | _ -> Error "invalid string list in worker helper payload"
+  | other ->
+      Error
+        (Printf.sprintf
+           "string list in worker helper payload: expected JSON array \
+            (kind=%s)"
+           (Json_util.kind_name other))
 
 let api_response_to_yojson =
   option_to_yojson Llm_provider.Cache.response_to_json

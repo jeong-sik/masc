@@ -101,6 +101,11 @@ val sdk_error_to_provider_error :
 val provider_error_total_metric : string
 (** Prometheus counter for additive provider-error variant emission. *)
 
+val label_kind : string
+val label_cascade : string
+val provider_label : string -> string
+(** Shared Prometheus label helpers re-exported by {!Keeper_turn_driver}. *)
+
 val emit_provider_error_metric :
   cascade_name:Cascade_error_classify.cascade_name ->
   provider:string ->

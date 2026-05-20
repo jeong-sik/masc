@@ -17,7 +17,10 @@ import type { BoardPost } from '../../types/core'
 function stubEmptyConversationFetch(): void {
   vi.stubGlobal('fetch', vi.fn(async (url: string) => {
     if (url.startsWith('/api/v1/board')) {
-      return new Response(JSON.stringify([]), {
+      // `fetchBoard()` expects the v1 schema `{ posts: [...] }` shape
+      // (board.ts:707-712). Raw `[]` left `raw.posts` undefined and the
+      // rail never picked up the mocked thread; mocks updated to match.
+      return new Response(JSON.stringify({ posts: [] }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       })
@@ -222,7 +225,7 @@ describe('IdeConversationRail', () => {
   it('uses one replay cursor for thread, decision, and cascade rail items', async () => {
     const fetchMock = vi.fn(async (url: string) => {
       if (url.startsWith('/api/v1/board')) {
-        return new Response(JSON.stringify([
+        return new Response(JSON.stringify({ posts: [
           {
             id: 'thread-old',
             author: 'sangsu',
@@ -249,7 +252,7 @@ describe('IdeConversationRail', () => {
             created_at: '2026-05-05T10:03:00Z',
             updated_at: '2026-05-05T10:03:00Z',
           },
-        ]), { status: 200, headers: { 'Content-Type': 'application/json' } })
+        ] }), { status: 200, headers: { 'Content-Type': 'application/json' } })
       }
       if (url.startsWith('/api/v1/dashboard/keeper-decisions')) {
         return new Response(JSON.stringify({
@@ -331,7 +334,7 @@ describe('IdeConversationRail', () => {
     }
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url.startsWith('/api/v1/board')) {
-        return new Response(JSON.stringify([]), { status: 200, headers: { 'Content-Type': 'application/json' } })
+        return new Response(JSON.stringify({ posts: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } })
       }
       if (url.startsWith('/api/v1/dashboard/keeper-decisions')) {
         return new Response(JSON.stringify({
@@ -422,7 +425,7 @@ describe('IdeConversationRail', () => {
   it('focuses the editor line when a line-anchored board thread is clicked', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url.startsWith('/api/v1/board')) {
-        return new Response(JSON.stringify([{
+        return new Response(JSON.stringify({ posts: [{
           id: 'thread-line',
           author: 'scholar',
           title: 'Review lib/runtime.ml:42',
@@ -434,7 +437,7 @@ describe('IdeConversationRail', () => {
           comment_count: 2,
           created_at: '2026-05-05T10:00:00Z',
           updated_at: '2026-05-05T10:00:00Z',
-        }]), { status: 200, headers: { 'Content-Type': 'application/json' } })
+        }] }), { status: 200, headers: { 'Content-Type': 'application/json' } })
       }
       if (url.startsWith('/api/v1/dashboard/keeper-decisions')) {
         return new Response(JSON.stringify({ events: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } })
@@ -479,7 +482,7 @@ describe('IdeConversationRail', () => {
   it('renders route links for board thread code, planning, review, and keeper context', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url.startsWith('/api/v1/board')) {
-        return new Response(JSON.stringify([{
+        return new Response(JSON.stringify({ posts: [{
           id: 'thread-line',
           author: 'scholar',
           title: 'Review lib/runtime.ml:42',
@@ -491,7 +494,7 @@ describe('IdeConversationRail', () => {
           comment_count: 2,
           created_at: '2026-05-05T10:00:00Z',
           updated_at: '2026-05-05T10:00:00Z',
-        }]), { status: 200, headers: { 'Content-Type': 'application/json' } })
+        }] }), { status: 200, headers: { 'Content-Type': 'application/json' } })
       }
       if (url.startsWith('/api/v1/dashboard/keeper-decisions')) {
         return new Response(JSON.stringify({ events: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } })

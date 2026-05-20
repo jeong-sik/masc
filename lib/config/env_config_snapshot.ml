@@ -52,6 +52,12 @@ let runtime_entries =
       "Release LLM slot during tool execution (feature flag)";
     entry ~default:"true" Env_config_core.telemetry_enabled_env_key
       "Enable telemetry collection";
+    entry ~default:"30" "MASC_TELEMETRY_RETENTION_DAYS"
+      "Telemetry JSONL day-file retention days. Positive values override; \
+       non-positive disables retention.";
+    entry ~default:"52428800" "MASC_TELEMETRY_MAX_BYTES"
+      "Telemetry JSONL byte cap. Positive values override; non-positive \
+       disables byte-cap pruning.";
   ]
 
 let rate_limiting_entries =

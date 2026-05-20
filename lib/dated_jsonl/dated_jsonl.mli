@@ -8,11 +8,19 @@ type t
 (** Opaque handle.  Holds [base_dir] and the append mutex. *)
 
 val create :
-  base_dir:string -> ?mutex:Eio.Mutex.t -> ?retention_days:int -> unit -> t
+  base_dir:string ->
+  ?mutex:Eio.Mutex.t ->
+  ?retention_days:int ->
+  ?max_bytes:int ->
+  unit ->
+  t
 (** [create ~base_dir ()] builds a store rooted at [base_dir].
     An optional [mutex] can be injected to bypass the shared registry
     (useful for testing).  When [?retention_days] is positive, [append]
-    performs an opportunistic once-per-process-day prune of older day-files. *)
+    performs an opportunistic once-per-process-day prune of older day-files.
+    When [?max_bytes] is positive, [append] prunes oldest completed day-files
+    until the store is at or below the cap, while preserving the current
+    day-file. *)
 
 val base_dir : t -> string
 (** Return the base directory of this store. *)

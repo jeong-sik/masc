@@ -316,7 +316,15 @@ let with_unix_capture ?env ?cwd ?stdin_content ?(capture_stderr = false)
             cleanup ();
             on_error "stdout pipe unavailable during Unix fallback capture" ""
         | Some stdout_r ->
-            stdout_r_ref := None;
+            (* Do NOT null [stdout_r_ref] here. read/select below can raise
+               exceptions outside the narrow EAGAIN/EWOULDBLOCK/EINTR catch
+               (EBADF on racing close, ENFILE under host fd pressure, etc.);
+               the [exn] arm at the bottom of the [try] calls [cleanup ()]
+               which relies on [stdout_r_ref] still being [Some] to close
+               the pipe. Nulling here orphans the fd → host ENFILE storm
+               trigger (2026-05-19 01:26Z, 13:01Z). The ref is nulled on
+               the success path AFTER [close_quietly] below; [close_quietly]
+               is idempotent so double-close from cleanup is harmless. *)
             let rec waitpid_blocking () =
               try Unix.waitpid [] pid
               with
@@ -399,6 +407,7 @@ let with_unix_capture ?env ?cwd ?stdin_content ?(capture_stderr = false)
                      with Unix.Unix_error (Unix.EINTR, _, _) -> ())
             done;
             close_quietly stdout_r;
+            stdout_r_ref := None;
             let status =
               if !timed_out then Unix.WEXITED 124
               else

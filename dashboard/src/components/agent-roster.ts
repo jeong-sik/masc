@@ -225,22 +225,10 @@ const FILTER_META: Record<StatusFilter, { label: string; description: string }> 
     label: '전체 보기',
     description: '등록된 런타임 전체를 보여줍니다.',
   },
-  active: {
-    label: '가동중',
-    description: '운영자 개입 없이 흐름을 지켜봐도 되는 상태를 묶어 보여줍니다.',
-  },
-  attention: {
-    label: '주의 필요',
-    description: '응답 지연, 오류, 복구, 승계 등으로 상태 확인이 필요한 항목입니다.',
-  },
-  paused: {
-    label: '일시정지',
-    description: '운영자가 멈춰 둔 상태를 따로 모아 봅니다.',
-  },
-  offline: {
-    label: '오프라인',
-    description: '프로세스가 내려갔거나 아직 기동되지 않은 상태입니다.',
-  },
+  active: { label: runtimeBandMeta('active').label, description: runtimeBandMeta('active').description },
+  attention: { label: runtimeBandMeta('attention').label, description: runtimeBandMeta('attention').description },
+  paused: { label: runtimeBandMeta('paused').label, description: runtimeBandMeta('paused').description },
+  offline: { label: runtimeBandMeta('offline').label, description: runtimeBandMeta('offline').description },
 }
 
 /**

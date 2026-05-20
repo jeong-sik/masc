@@ -52,7 +52,7 @@ let emit_transition
       "event", `String (SM.event_to_string event);
       "prev_phase", `String (SM.phase_to_string prev_phase);
       "new_phase", `String (SM.phase_to_string new_phase);
-      "conditions_after", SM.conditions_to_json conditions_after;
+      "conditions_after", Keeper_state_machine_json.conditions_to_json conditions_after;
       "restart_count", `Int restart_count;
     ] in
     let path = trace_path ~base_path ~keeper_name in

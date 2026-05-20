@@ -109,7 +109,7 @@ let test_json_serializer_none () =
       ; http_status = None
       }
   in
-  let json = KSM.event_to_json ev in
+  let json = Masc_mcp.Keeper_state_machine_json.event_to_json ev in
   let s = Yojson.Safe.to_string json in
   (check bool)
     "JSON does not include provider_id when None"
@@ -128,7 +128,7 @@ let test_json_serializer_some () =
       ; http_status = Some 502
       }
   in
-  let json = KSM.event_to_json ev in
+  let json = Masc_mcp.Keeper_state_machine_json.event_to_json ev in
   let s = Yojson.Safe.to_string json in
   (check bool)
     "JSON includes provider_id when Some"

@@ -3,7 +3,7 @@ import { render } from 'preact'
 import { act } from 'preact/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ToolQualityResponse } from '../api/dashboard'
-import { filterTools, toolMatchesSearch } from './tool-quality-panel'
+import { classifyCoverageError, filterTools, toolMatchesSearch } from './tool-quality-panel'
 
 vi.setConfig({
   testTimeout: 40000,
@@ -372,6 +372,39 @@ describe('toolMatchesSearch', () => {
   it('returns false for non-matching substring', () => {
     expect(toolMatchesSearch(tool, 'xyz')).toBe(false)
     expect(toolMatchesSearch(tool, 'cascade')).toBe(false)
+  })
+})
+
+describe('classifyCoverageError', () => {
+  it('returns null for empty / missing input', () => {
+    expect(classifyCoverageError(null)).toBeNull()
+    expect(classifyCoverageError(undefined)).toBeNull()
+    expect(classifyCoverageError('')).toBeNull()
+  })
+
+  it('detects "Too many open files" → RFC-0097 fd_exhaustion hint', () => {
+    const hint = classifyCoverageError(
+      'Sys_error("Eio.Io Unix_error (Too many open files in system, \\"fstatat\\", \\"...\\")")',
+    )
+    expect(hint).not.toBeNull()
+    expect(hint?.reason).toBe('fd_exhaustion')
+    expect(hint?.href).toContain('RFC-0097')
+    expect(hint?.label).toMatch(/RFC-0097/)
+  })
+
+  it('detects raw ENFILE / EMFILE errno names', () => {
+    expect(classifyCoverageError('ENFILE: too many'))?.toMatchObject({ reason: 'fd_exhaustion' })
+    expect(classifyCoverageError('EMFILE on open'))?.toMatchObject({ reason: 'fd_exhaustion' })
+  })
+
+  it('is case-insensitive on the trigger pattern', () => {
+    expect(classifyCoverageError('TOO MANY OPEN FILES')?.reason).toBe('fd_exhaustion')
+  })
+
+  it('returns null for unrelated errors (disk full, network, etc.)', () => {
+    expect(classifyCoverageError('disk full')).toBeNull()
+    expect(classifyCoverageError('connection refused')).toBeNull()
+    expect(classifyCoverageError('append denied')).toBeNull()
   })
 })
 

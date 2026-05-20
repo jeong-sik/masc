@@ -1167,46 +1167,20 @@ let dispatch_recurring_keepalive
     otherwise any keeper with [current_task_id=Some _] is blocked
     from ever running a turn (discovered 2026-04-25 — 8/14 keepers
     frozen with claimed tasks). *)
-let smart_heartbeat_cycle_continues (d : Keeper_heartbeat_smart.decision) : bool =
-  match d with
-  | Keeper_heartbeat_smart.Skip_busy | Keeper_heartbeat_smart.Emit -> true
-  | Keeper_heartbeat_smart.Skip_idle _ -> false
+(* Visibility-gate primitives extracted to
+   [Keeper_heartbeat_visibility_gate] (godfile decomp). *)
+let smart_heartbeat_cycle_continues =
+  Keeper_heartbeat_visibility_gate.smart_heartbeat_cycle_continues
 ;;
 
-let cycle_continues_after_wake
-      (d : Keeper_heartbeat_smart.decision)
-      (outcome : Keeper_keepalive_signal.sleep_outcome)
-  : bool
-  =
-  match d, outcome with
-  | Keeper_heartbeat_smart.Skip_idle _, Keeper_keepalive_signal.Woken -> true
-  | _, _ -> smart_heartbeat_cycle_continues d
+let cycle_continues_after_wake = Keeper_heartbeat_visibility_gate.cycle_continues_after_wake
+
+let unobserved_visibility_idle_window_s =
+  Keeper_heartbeat_visibility_gate.unobserved_visibility_idle_window_s
 ;;
 
-let unobserved_visibility_idle_window_s = 900.0
-
-let visible_consumer_count () =
-  Sse.client_count_by_kind Sse.Observer + Sse.external_subscriber_count ()
-;;
-
-let visibility_gate_decision
-      ~(visible_consumers : int)
-      ~(has_pending_signal : bool)
-      ~(now : float)
-      ~(last_heartbeat_cycle_ts : float)
-      (decision : Keeper_heartbeat_smart.decision)
-  : Keeper_heartbeat_smart.decision
-  =
-  match decision with
-  | Keeper_heartbeat_smart.Emit
-    when visible_consumers <= 0
-         && (not has_pending_signal)
-         && last_heartbeat_cycle_ts > 0.0
-         && now -. last_heartbeat_cycle_ts < unobserved_visibility_idle_window_s ->
-    Keeper_heartbeat_smart.Skip_idle
-      (last_heartbeat_cycle_ts +. unobserved_visibility_idle_window_s)
-  | _ -> decision
-;;
+let visible_consumer_count = Keeper_heartbeat_visibility_gate.visible_consumer_count
+let visibility_gate_decision = Keeper_heartbeat_visibility_gate.visibility_gate_decision
 
 let run_smart_heartbeat_gate
       ~(config : Coord.config)

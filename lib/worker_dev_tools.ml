@@ -246,7 +246,7 @@ let validate_command_coding_with_allowlist
   let trimmed = String.trim cmd in
   if trimmed = ""
   then Error Empty_command
-  else if contains_forbidden_shell_chars_coding trimmed
+  else if has_coding_shell_injection_metachar trimmed
   then Error Injection
   else if has_process_substitution trimmed
   then Error Process_substitution

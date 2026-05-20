@@ -11,8 +11,8 @@
     that grades a command as R0 (read-only), R1 (reversible mutation),
     or R2 (irreversible) for the operator-approval flow.
 
-    Internal helpers ([forbidden_shell_chars], [gh_allowed_commands],
-    [gh_irreversible_ops], [gh_reversible_mutations],
+    Internal helpers ([gh_allowed_commands], [gh_irreversible_ops],
+    [gh_reversible_mutations],
     [gh_graphql_r2_mutations], [gh_blocked_operations],
     [gh_api_destructive_patterns], [gh_graphql_destructive_mutations],
     [extract_gh_api_method], [gh_api_graphql_is_destructive],

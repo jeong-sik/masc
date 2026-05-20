@@ -1,0 +1,76 @@
+name: Code Smell Ratchet
+
+# Monotone-decrease ratchet for the four metrics defined in
+# memory/masc-mcp-code-smell-report-2026-05-19.html §6:
+#   godfile, catch_all, contains_substring, ignore_calls
+#
+# PRs may decrease or hold counts; increases fail unless the PR body
+# carries the line `RATCHET-WAIVED: <reason>`.
+#
+# Baseline:    .ci/code-smell-baseline.json
+# Gate script: scripts/ci-code-smell-ratchet.sh
+# RFC:         docs/rfc/RFC-0136-code-smell-monotone-decrease-ratchet.md
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  ratchet:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Install ripgrep
+        run: sudo apt-get update && sudo apt-get install -y ripgrep
+
+      - name: Detect RATCHET-WAIVED label in PR body
+        id: waiver
+        if: github.event_name == 'pull_request'
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          if printf '%s' "$PR_BODY" | grep -qE '^RATCHET-WAIVED:'; then
+            echo "waived=1" >> "$GITHUB_OUTPUT"
+            echo "PR body carries RATCHET-WAIVED — gate will report but not fail."
+          else
+            echo "waived=0" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run ratchet --check
+        id: check
+        run: |
+          set +e
+          bash scripts/ci-code-smell-ratchet.sh --check
+          echo "rc=$?" >> "$GITHUB_OUTPUT"
+
+      - name: Enforce ratchet (fail unless waived)
+        if: github.event_name == 'pull_request'
+        run: |
+          rc="${{ steps.check.outputs.rc }}"
+          waived="${{ steps.waiver.outputs.waived }}"
+          if [ "$rc" != "0" ] && [ "$waived" != "1" ]; then
+            echo "Ratchet failed and PR body has no RATCHET-WAIVED: line. Failing."
+            exit 1
+          fi
+          if [ "$rc" != "0" ] && [ "$waived" = "1" ]; then
+            echo "Ratchet would fail, but RATCHET-WAIVED label present. Passing (must link a sunset RFC in body)."
+          fi
+          exit 0
+
+      - name: Fail push to main on regression (no waiver path on main)
+        if: github.event_name == 'push'
+        run: |
+          rc="${{ steps.check.outputs.rc }}"
+          if [ "$rc" != "0" ]; then
+            echo "main push regressed a code-smell metric — investigate or rebaseline via PR."
+            exit 1
+          fi
+          exit 0

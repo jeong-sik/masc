@@ -1,0 +1,9 @@
+{
+  "_comment": "Code-smell monotone-decrease ratchet baseline. Source: memory/masc-mcp-code-smell-report-2026-05-19.html §6 (Reproducibility commands). PRs may decrease or hold counts; increases fail unless PR body carries RATCHET-WAIVED: <reason>. Updated only on main via scripts/ci-code-smell-ratchet.sh --rebaseline.",
+  "godfile": 51,
+  "catch_all": 3843,
+  "contains_substring": 28,
+  "ignore_calls": 85,
+  "lastUpdated": "2026-05-20T02:04:40Z",
+  "lastUpdatedCommit": "5dc13230220db3f65f75db36f252e909cca41daf"
+}

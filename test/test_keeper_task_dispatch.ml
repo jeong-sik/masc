@@ -50,6 +50,16 @@ let with_env name value f =
     f
 ;;
 
+let with_temp_board_base dir f =
+  Fun.protect
+    ~finally:(fun () -> Board.reset_global_for_test ())
+    (fun () ->
+       with_env "MASC_BASE_PATH_INPUT" None (fun () ->
+         with_env "MASC_BASE_PATH" (Some dir) (fun () ->
+           Board.reset_global_for_test ();
+           f ())))
+;;
+
 let with_temp_data_dir f =
   let dir = Filename.temp_dir "test_keeper_task_cdal_" "" in
   let rec rm path =
@@ -227,6 +237,29 @@ let cdal_verdict_of_request (req : Verification.verification_request) =
   match req.output with
   | `Assoc fields -> List.assoc_opt "cdal_verdict" fields
   | _ -> None
+;;
+
+let string_field_exn ~context name fields =
+  match List.assoc_opt name fields with
+  | Some (`String value) -> value
+  | Some other ->
+    fail
+      (Printf.sprintf
+         "expected string field %s in %s, got %s"
+         name
+         context
+         (Yojson.Safe.to_string other))
+  | None -> fail (Printf.sprintf "expected string field %s in %s" name context)
+;;
+
+let cdal_verdict_run_id_exn ~context = function
+  | `Assoc fields -> string_field_exn ~context "run_id" fields
+  | other ->
+    fail
+      (Printf.sprintf
+         "expected cdal_verdict object in %s, got %s"
+         context
+         (Yojson.Safe.to_string other))
 ;;
 
 (* Temp directory setup following test_keeper_tools_oas.ml pattern.
@@ -2178,6 +2211,80 @@ let test_submit_for_verification_includes_cdal_verdict_payload () =
           | _ -> fail "expected keeper_task_submit_for_verification to succeed"))))
 ;;
 
+let test_notify_reuses_persisted_cdal_verdict_payload () =
+  ensure_rng ();
+  with_temp_data_dir (fun data_dir ->
+    with_temp_board_base data_dir (fun () ->
+      with_room (fun config ->
+        let contract = strict_contract ~verify_gate_evidence:[ "pr_url" ] () in
+        let _ =
+          Coord.add_task
+            ~contract
+            config
+            ~title:"Verification notify CDAL snapshot task"
+            ~priority:1
+            ~description:"should reuse persisted CDAL verdict for notifications"
+        in
+        let task = only_task config in
+        let task_id = task.id in
+        let verification_id = "vrf-notify-cdal-snapshot" in
+        Cdal_eval_v1.persist
+          ~task_id
+          (make_cdal_verdict ~run_id:"run-persisted-snapshot" ());
+        (match
+           Verification_protocol.create_submit_request
+             ~config
+             ~task
+             ~assignee:"worker-a"
+             ~verification_id
+             ~evidence_refs:[ "pr:https://github.com/jeong-sik/masc-mcp/pull/16486" ]
+         with
+         | Ok () -> ()
+         | Error msg -> fail ("create_submit_request failed: " ^ msg));
+        Cdal_eval_v1.persist
+          ~task_id
+          (make_cdal_verdict ~run_id:"run-newer-ledger-entry" ());
+        Verification_protocol.notify_submit_for_verification
+          ~config
+          ~task
+          ~assignee:"worker-a"
+          ~verification_id
+          ~evidence_refs:[ "pr:https://github.com/jeong-sik/masc-mcp/pull/16486" ];
+        let post =
+          Board_dispatch.list_posts ~hearth:"verification" ~limit:20 ()
+          |> List.find_opt (fun (post : Board.post) ->
+            match post.meta_json with
+            | Some (`Assoc fields) ->
+              (match List.assoc_opt "task_id" fields with
+               | Some (`String value) -> String.equal value task_id
+               | _ -> false)
+            | _ -> false)
+          |> function
+          | Some post -> post
+          | None -> fail "expected verification board post for task"
+        in
+        let meta_fields =
+          match post.meta_json with
+          | Some (`Assoc fields) -> fields
+          | Some other ->
+            fail
+              (Printf.sprintf
+                 "expected board meta object, got %s"
+                 (Yojson.Safe.to_string other))
+          | None -> fail "expected board meta"
+        in
+        let cdal_verdict =
+          match List.assoc_opt "cdal_verdict" meta_fields with
+          | Some payload -> payload
+          | None -> fail "expected cdal_verdict in board meta"
+        in
+        check
+          string
+          "notification reuses persisted cdal verdict"
+          "run-persisted-snapshot"
+          (cdal_verdict_run_id_exn ~context:"board meta" cdal_verdict))))
+;;
+
 (* Regression: keeper_task_done must map [result] onto the typed
    [handoff_context.summary] domain field, not just dump it into [notes]
    as an untyped blob. Previously a [result] sent by a keeper would be
@@ -2612,6 +2719,10 @@ let () =
             "includes task-scoped CDAL verdict payload"
             `Quick
             test_submit_for_verification_includes_cdal_verdict_payload
+        ; test_case
+            "notification reuses persisted CDAL verdict payload"
+            `Quick
+            test_notify_reuses_persisted_cdal_verdict_payload
         ; test_case
             "notes/pr_url map to typed handoff_context fields"
             `Quick

@@ -141,8 +141,15 @@ let handle_post ?session_id ~body ?request_handler () =
   in
 
   match json_result with
-  | Error _ ->
-      (Error_response (400, "Invalid JSON"), None)
+  | Error parse_msg ->
+      (* Include the parser's position-bearing message in the 400 response
+         body. Yojson.Json_error carries "at line N, char M: <reason>",
+         which is bounded by the parser regardless of body size — no info
+         leak to the same client that sent the malformed body. Without
+         this, operators staring at a 400 cannot tell apart "trailing
+         comma at char 487" from "body was a binary blob". *)
+      ( Error_response (400, Printf.sprintf "Invalid JSON: %s" parse_msg),
+        None )
 
   | Ok json ->
       (* Find or create session if session_id provided *)

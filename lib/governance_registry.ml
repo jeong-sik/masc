@@ -23,11 +23,24 @@ let validate_int_range ~min ~max key v =
   if v >= min && v <= max then Ok ()
   else Error (Printf.sprintf "%s must be in [%d, %d], got %d" key min max v)
 
+(* The four [deserialize_*] helpers are passed to [Runtime_params.register]
+   as [~deserialize] callbacks.  Their [Error] strings surface directly
+   in governance-dashboard validation failures — operators reading those
+   need not only *that* the JSON was wrong-shape but *what kind* they
+   actually sent, to correlate against the surface that produced the
+   misshapen value.  The previous one-word messages ("expected number",
+   "expected integer", "expected string", "expected boolean") discarded
+   the received kind. *)
+
 let deserialize_float json =
   match json with
   | `Float f -> Ok f
   | `Int i -> Ok (float_of_int i)
-  | _ -> Error "expected number"
+  | other ->
+      Error
+        (Printf.sprintf
+           "deserialize_float: expected JSON number (`Float or `Int), got %s"
+           (Json_util.kind_name other))
 
 let deserialize_int json =
   match json with
@@ -35,18 +48,28 @@ let deserialize_int json =
   | `Float f ->
       let i = Float.to_int f in
       if Float.equal (Float.of_int i) f then Ok i
-      else Error (Printf.sprintf "expected integer, got %g" f)
-  | _ -> Error "expected integer"
+      else Error (Printf.sprintf "deserialize_int: expected integer, got %g" f)
+  | other ->
+      Error
+        (Printf.sprintf
+           "deserialize_int: expected JSON integer (`Int or whole-valued `Float), got %s"
+           (Json_util.kind_name other))
 
 let deserialize_string json =
   match json with
   | `String s -> Ok s
-  | _ -> Error "expected string"
+  | other ->
+      Error
+        (Printf.sprintf "deserialize_string: expected JSON string, got %s"
+           (Json_util.kind_name other))
 
 let deserialize_bool json =
   match json with
   | `Bool b -> Ok b
-  | _ -> Error "expected boolean"
+  | other ->
+      Error
+        (Printf.sprintf "deserialize_bool: expected JSON boolean, got %s"
+           (Json_util.kind_name other))
 
 (* ── registration combinators ───────────────────────────────── *)
 

@@ -2234,6 +2234,14 @@
  (modules test_rfc_0085_pr4_tool_library_proof_store)
  (libraries alcotest ast_grep))
 
+; RFC-0085 PR-5 — Verify unified dispatch finaliser fires typed observers
+; and applies the result transformer (was unwired despite Alcotest.run).
+
+(test
+ (name test_rfc_0085_pr5_dispatch_emit)
+ (modules test_rfc_0085_pr5_dispatch_emit)
+ (libraries alcotest ast_grep masc_test_deps))
+
 ; RFC-0085 PR-8 — config_dir_resolver + tool_code_write env-derived
 ; path reads routed through Host_config.from_env; Env_config_core
 ; config_dir_opt + personas_dir_opt removed.

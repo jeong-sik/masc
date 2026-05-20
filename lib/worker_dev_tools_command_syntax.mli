@@ -1,4 +1,4 @@
-val contains_forbidden_shell_chars_coding : string -> bool
+val has_coding_shell_injection_metachar : string -> bool
 val contains_substring : string -> string -> bool
 val has_process_substitution : string -> bool
 (* [split_pipeline_segments] removed by RFC-0131 Phase 2 (Shell IR

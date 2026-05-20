@@ -29,7 +29,7 @@ let has_dangerous_ampersand cmd =
   check 0
 ;;
 
-let contains_forbidden_shell_chars_coding cmd =
+let has_coding_shell_injection_metachar cmd =
   String.exists
     (function
       | ';' | '`' | '$' | '\n' | '\r' -> true

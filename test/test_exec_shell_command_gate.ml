@@ -459,7 +459,7 @@ let test_too_complex_reason_tags_are_stable () =
 
 let test_backslash_pipe_in_double_quotes_diverges () =
   (* Corpus fixture: rg "a\|b"
-     Legacy: ok (forbidden_shell_chars_coding excludes \ and the
+     Legacy: ok (the coding shell injection precheck excludes \ and the
        quote-aware splitter does not see the inner |).
      IR: Cannot_parse Parse_error (lexer rejects \ in dq_body and
        classify_too_complex matches no single-char rule for this
@@ -482,7 +482,7 @@ let test_backslash_pipe_in_double_quotes_diverges () =
 
 let test_brace_expansion_is_too_complex_glob_brace () =
   (* Corpus fixture: ls {a,b}.txt
-     Legacy: ok (brace not in forbidden_shell_chars_coding).
+     Legacy: ok (brace not in the coding shell injection precheck).
      IR: Too_complex (Unsupported_construct `Glob_brace).
      Phase 0 PR-A2: new fixture covering classify_too_complex's
      [has "{" || has "}"] arm — previously no corpus row exercised

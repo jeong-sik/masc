@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.19.27] - 2026-05-20
+
+### Changed
+- Reduced local build friction by adding no-write/custom-output dependency
+  graph inspection and narrowing two structural tests away from the broad
+  `masc_test_deps` bundle.
+- Continued shell path/name cleanup by purging forbidden-character legacy
+  naming, reusing the path token scan for directory materialization, and
+  renaming the path argument token selector.
+- Trimmed dashboard dead surface area by removing unused components and common
+  UI modules.
+
+### Fixed
+- Repaired the tier-admission metric label export that broke the main build
+  after the cascade saturation wire-in.
+- Corrected dashboard runtime truth around paused Keeper counts, crashed-phase
+  SSOT handling, and tool-quality trend rendering.
+- Rolled up status-only board automation posts so board history stays readable.
+
 ## [0.19.26] - 2026-05-20
 
 ### Added

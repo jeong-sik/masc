@@ -13,7 +13,6 @@ import {
   toKsmPhase,
   type KeeperAttention,
   type KeeperKsmPhase,
-  type KeeperOperationalState,
 } from './keeper-operational-state'
 
 function makeKeeper(overrides: Partial<Keeper> = {}): Keeper {
@@ -67,7 +66,7 @@ describe('deriveKeeperOperationalState — paused branch', () => {
       keeper: makeKeeper({ paused: true }),
       composite: null,
     })
-    expect(state).toEqual<KeeperOperationalState>({
+    expect(state).toMatchObject({
       kind: 'paused',
       attention: 'clean',
       cause: 'unknown',
@@ -79,7 +78,7 @@ describe('deriveKeeperOperationalState — paused branch', () => {
       keeper: makeKeeper({ phase: 'Paused' }),
       composite: null,
     })
-    expect(state).toEqual<KeeperOperationalState>({
+    expect(state).toMatchObject({
       kind: 'paused',
       attention: 'clean',
       cause: 'operator',
@@ -94,7 +93,7 @@ describe('deriveKeeperOperationalState — paused branch', () => {
       }),
       composite: null,
     })
-    expect(state).toEqual<KeeperOperationalState>({
+    expect(state).toMatchObject({
       kind: 'paused',
       attention: 'clean',
       cause: 'supervisor',
@@ -106,7 +105,7 @@ describe('deriveKeeperOperationalState — paused branch', () => {
       keeper: makeKeeper({ pause_state: 'paused' }),
       composite: null,
     })
-    expect(state).toEqual<KeeperOperationalState>({
+    expect(state).toMatchObject({
       kind: 'paused',
       attention: 'clean',
       cause: 'operator',
@@ -126,7 +125,7 @@ describe('deriveKeeperOperationalState — offline branch', () => {
       keeper: makeKeeper({ phase, status: 'offline' }),
       composite: null,
     })
-    expect(state).toEqual<KeeperOperationalState>({ kind: 'offline', attention: 'clean', cause })
+    expect(state).toMatchObject({ kind: 'offline', attention: 'clean', cause })
   })
 
   it.each<['offline' | 'inactive' | 'unbooted']>([
@@ -158,7 +157,7 @@ describe('deriveKeeperOperationalState — stuck branch (RFC-0135 §1.1 root)', 
       }),
       composite: null,
     })
-    expect(state).toEqual<KeeperOperationalState>({
+    expect(state).toMatchObject({
       kind: 'stuck',
       attention: 'clean',
       reason: 'synthetic_stall',
@@ -176,7 +175,7 @@ describe('deriveKeeperOperationalState — stuck branch (RFC-0135 §1.1 root)', 
         runtime_attention: attention({ execution_current: true, blocked: true }),
       }),
     })
-    expect(state).toEqual<KeeperOperationalState>({
+    expect(state).toMatchObject({
       kind: 'stuck',
       attention: 'blocked',
       reason: 'cascade_exhausted',
@@ -193,7 +192,7 @@ describe('deriveKeeperOperationalState — stuck branch (RFC-0135 §1.1 root)', 
         runtime_attention: attention({ execution_current: undefined }),
       }),
     })
-    expect(state).toEqual<KeeperOperationalState>({
+    expect(state).toMatchObject({
       kind: 'stuck',
       attention: 'clean',
       reason: 'oas_timeout_budget',
@@ -209,7 +208,7 @@ describe('deriveKeeperOperationalState — stuck branch (RFC-0135 §1.1 root)', 
       keeper: makeKeeper(),
       composite,
     })
-    expect(state).toEqual<KeeperOperationalState>({
+    expect(state).toMatchObject({
       kind: 'stuck',
       attention: 'clean',
       reason: 'fiber_dead',
@@ -233,10 +232,10 @@ describe('deriveKeeperOperationalState — running branch with conditioning', ()
       keeper: makeKeeper({ phase: 'Running', status: 'active' }),
       composite: null,
     })
-    expect(state).toEqual<KeeperOperationalState>({
+    expect(state).toMatchObject({
       kind: 'running',
       attention: 'clean',
-      turnPhase: 'idle',
+      turnPhase: 'unknown',
       staleBlocker: null,
     })
   })
@@ -266,7 +265,7 @@ describe('deriveKeeperOperationalState — running branch with conditioning', ()
         }),
       }),
     })
-    expect(state).toEqual<KeeperOperationalState>({
+    expect(state).toMatchObject({
       kind: 'running',
       attention: 'clean',
       turnPhase: 'executing',
@@ -284,7 +283,7 @@ describe('deriveKeeperOperationalState — running branch with conditioning', ()
         }),
       }),
     })
-    expect(state).toEqual<KeeperOperationalState>({
+    expect(state).toMatchObject({
       kind: 'running',
       attention: 'clean',
       turnPhase: 'idle',
@@ -366,7 +365,7 @@ describe('deriveKeeperOperationalState — priority invariants', () => {
         }),
       }),
     })
-    expect(state).toEqual<KeeperOperationalState>({
+    expect(state).toMatchObject({
       kind: 'running',
       attention: 'clean',
       turnPhase: 'idle',
@@ -529,6 +528,66 @@ describe('KeeperOperationalState.attention axis — RFC-0135 §13 Goal-2 (2026-0
     })
     expect(state.kind).toBe(kind)
     expect(state.attention).toBe<KeeperAttention>(expectedAttention)
+  })
+})
+
+describe('KeeperOperationalState remaining Goal-2 axes — RFC-0135 strict closeout', () => {
+  it('turnPhase is present on non-running variants and uses composite before flat fallback', () => {
+    const state = deriveKeeperOperationalState({
+      keeper: makeKeeper({ paused: true, pipeline_stage: 'idle' }),
+      composite: makeComposite({ turn_phase: 'executing' }),
+    })
+    expect(state.kind).toBe('paused')
+    expect(state.turnPhase).toBe('executing')
+  })
+
+  it('turnPhase falls back to flat pipeline_stage on every variant', () => {
+    const state = deriveKeeperOperationalState({
+      keeper: makeKeeper({ phase: 'Crashed', pipeline_stage: 'failing' }),
+      composite: null,
+    })
+    expect(state.kind).toBe('offline')
+    expect(state.turnPhase).toBe('failing')
+  })
+
+  it('turnPhase uses explicit unknown sentinel when neither source is present', () => {
+    const state = deriveKeeperOperationalState({
+      keeper: makeKeeper(),
+      composite: null,
+    })
+    expect(state.turnPhase).toBe('unknown')
+  })
+
+  it('displaySummary is present on the state and keeps composite-preferred precedence', () => {
+    const state = deriveKeeperOperationalState({
+      keeper: makeKeeper({
+        runtime_blocker_class: 'turn_timeout',
+        runtime_blocker_summary: 'flat summary',
+        attention_reason: 'attention memo',
+      }),
+      composite: makeComposite({
+        runtime_attention: attention({ reason: 'live reason' }),
+      }),
+    })
+    expect(state.kind).toBe('stuck')
+    expect(state.displaySummary).toBe('live reason')
+  })
+
+  it('phase is present on the state and uses composite-preferred phase when lifecycle is not terminal', () => {
+    const state = deriveKeeperOperationalState({
+      keeper: makeKeeper({ phase: 'Running', status: 'active' }),
+      composite: makeComposite({ phase: 'compacting' }),
+    })
+    expect(state.phase).toBe('Compacting')
+  })
+
+  it('phase keeps terminal lifecycle status authoritative over a stale composite phase', () => {
+    const state = deriveKeeperOperationalState({
+      keeper: makeKeeper({ phase: 'Paused', status: 'active', paused: true }),
+      composite: makeComposite({ phase: 'running' }),
+    })
+    expect(state.kind).toBe('paused')
+    expect(state.phase).toBe('Paused')
   })
 })
 

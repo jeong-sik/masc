@@ -1,19 +1,9 @@
 import type { Agent, Keeper, PipelineStage } from '../types'
 import type { KeeperCompositeSnapshot } from '../api/schemas/keeper-composite'
-import { keeperDisplayStatus, keeperRuntimeBlockerHint } from './keeper-runtime-display'
-// RFC-0135 PR-2: phase casing SSOT — single source `toKeeperPhase` in
-// keeper-store-normalize. Local CANONICAL_PHASE_KEYS + normalizePhase
-// (previously lines 39-55, 159-180) duplicated BACKEND_PHASE_MAP +
-// PHASE_ID_MAP elsewhere; the three maps drifted independently.
-import { toKeeperPhase } from '../keeper-store-normalize'
+import { keeperRuntimeBlockerHint } from './keeper-runtime-display'
 import { ATTENTION_PHASES } from './keeper-predicates'
 import { parseAgentStatus } from './agent-status'
-// RFC-0135 PR-12 + PR-14d: route blocker visibility through the typed
-// SSOT (stale vs live distinction) and consume composite-preferred
-// phase via `derivePreferredPhase`. Previously
-// `keeperPhaseForDisplay` consumed only `keeper.phase`, ignoring
-// live phase emitted by composite SSE.
-import { derivePreferredPhase, deriveKeeperOperationalState } from './keeper-operational-state'
+import { deriveKeeperOperationalState, type KeeperOperationalState } from './keeper-operational-state'
 
 export type RuntimeBand = 'active' | 'attention' | 'paused' | 'offline'
 
@@ -165,23 +155,7 @@ export function keeperPhaseForDisplay(
   keeper: Keeper,
   composite: KeeperCompositeSnapshot | null = null,
 ): string | null {
-  const lifecycleKey = keeperDisplayStatus(keeper)
-  const lifecyclePhase = toKeeperPhase(lifecycleKey)
-  if (
-    lifecyclePhase === 'Paused'
-    || lifecyclePhase === 'Stopped'
-    || lifecyclePhase === 'Offline'
-    || lifecyclePhase === 'Dead'
-  ) {
-    return lifecyclePhase
-  }
-  // RFC-0135 PR-14d: composite-preferred phase before flat-record
-  // `keeper.phase`. The terminal-phase guard above intentionally
-  // ignores composite — once `keeperDisplayStatus` says paused/stopped/
-  // offline/dead, that's the authoritative answer (live composite
-  // phase from a previous SSE frame cannot override an operator-
-  // pinned terminal state).
-  return derivePreferredPhase(keeper, composite) ?? lifecyclePhase
+  return deriveKeeperOperationalState({ keeper, composite }).phase
 }
 
 function isHeartbeatStale(keeper: Keeper): boolean {
@@ -200,7 +174,7 @@ function contextAttentionRatio(keeper: Keeper): number {
 
 function keeperBand(
   keeper: Keeper,
-  composite: KeeperCompositeSnapshot | null,
+  opState: KeeperOperationalState,
   phaseKey: string,
 ): RuntimeBand {
   // RFC-0135 §13 Goal-1 (audit B1, 2026-05-20): paused / offline / stuck
@@ -213,7 +187,6 @@ function keeperBand(
   // were strict subsets of `opState.kind === 'paused'` and
   // `opState.kind === 'offline'`; routing via `deriveKeeperOperational
   // State` removes the parallel derivation entirely.
-  const opState = deriveKeeperOperationalState({ keeper, composite })
   if (opState.kind === 'paused') return 'paused'
   if (opState.kind === 'offline') return 'offline'
   // RFC-0135 PR-12: live blocker → typed state's `stuck` variant.
@@ -266,9 +239,10 @@ export function summarizeKeeperMonitoring(
   keeper: Keeper,
   composite: KeeperCompositeSnapshot | null = null,
 ): KeeperMonitoringSummary {
-  const phaseKey = keeperPhaseForDisplay(keeper, composite) ?? 'unknown'
+  const opState = deriveKeeperOperationalState({ keeper, composite })
+  const phaseKey = opState.phase ?? 'unknown'
   const stage = stageMeta(normalizeStage(keeper.pipeline_stage))
-  const band = BAND_META[keeperBand(keeper, composite, phaseKey)]
+  const band = BAND_META[keeperBand(keeper, opState, phaseKey)]
 
   return {
     band,

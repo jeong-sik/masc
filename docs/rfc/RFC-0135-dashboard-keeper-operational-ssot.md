@@ -3,12 +3,12 @@ rfc: "0135"
 title: "Dashboard Keeper Operational Surface — Typed SSOT"
 status: Draft
 created: 2026-05-19
-updated: 2026-05-20
+updated: 2026-05-21
 author: vincent
 supersedes: []
 superseded_by: null
 related: ["0004", "0029", "0088", "0133"]
-implementation_prs: [16573, 16576, 16593, 16600, 16606, 16611, 16615, 16619, 16623, 16626, 16632, 16638, 16662, 16663, 16672, 16680, 16683, 16685, 16687, 16689, 16691, 16695]
+implementation_prs: [16573, 16576, 16593, 16600, 16606, 16611, 16615, 16619, 16623, 16626, 16632, 16638, 16662, 16663, 16672, 16680, 16683, 16685, 16687, 16689, 16691, 16695, 17075]
 ---
 
 # RFC-0135: Dashboard Keeper Operational Surface — Typed SSOT
@@ -253,15 +253,27 @@ PR-1 머지 후 PR-2~7 은 모두 같은 SSOT 호출자이므로 **동시 진행
 - **테스트**: 4 variant 각각의 `attention` 값이 `composite.runtime_attention` 와 정확히 매핑되는지 검증 (clean/blocked/needs_attention × 4 variant = 12 case).
 - **B3 closure 증명**: `keeper-detail-runtime.ts` 의 `import { deriveKeeperAttention }` 사라짐 = SSOT 외부 axis 단일 callsite 의 완전 흡수.
 
-### 향후 흡수 후보 (audit Goal-2 잔여)
+### Goal-2 / 2026-05-21 — remaining axes strict closeout
 
-- `turnPhase: KeeperTurnPhase` (현재 running variant 만 가짐 → 모든 variant 로 일반화). composite preferred → flat fallback 의 SSOT 내부화.
-- `displaySummary: string | null` (`runtime_blocker_summary` 흡수). `keeper-detail-runtime.ts:256` 의 추가 fallback 제거 prereq.
-- `phase: KeeperPhase | null` (composite preferred SSOT 내부화). `lib/monitoring-runtime.ts:165 toKeeperPhase(keeper.phase) ?? lifecyclePhase` fallback 흡수.
+- **흡수 대상**: audit Goal-2 잔여 축 `turnPhase`, `displaySummary`, `phase`.
+- **이전 패턴**:
+  - `turnPhase` 는 running variant 에만 있었고, `keeper-detail-runtime.ts` 는 `deriveKeeperTurnPhase(keeper, composite)` 를 별도 호출.
+  - `displaySummary` 는 `deriveKeeperDisplayReason` / `deriveBlockerReason` helper 를 소비자가 직접 호출.
+  - `phase` 는 `monitoring-runtime.ts:keeperPhaseForDisplay` 에서 lifecycle terminal guard + `derivePreferredPhase` fallback 을 직접 조합.
+- **이후 패턴**: `KeeperOperationalState` 의 4 variant 모두 공통 `KeeperOperationalAxes` 를 보유:
+  - `attention: KeeperAttention`
+  - `turnPhase: KeeperTurnPhase` (composite preferred → flat `pipeline_stage` fallback → `unknown` sentinel)
+  - `displaySummary: string | null` (composite runtime attention reason → flat blocker summary → flat attention reason)
+  - `phase: KeeperPhase | null` (terminal lifecycle guard 보존, 그 외 composite preferred)
+- **consumer closure**:
+  - `keeper-detail-runtime.ts` 는 `opState.turnPhase` 와 `opState.displaySummary` 를 읽고 별도 fallback chain 을 제거.
+  - `monitoring-runtime.ts` 는 `opState.phase` 를 읽고, band 계산도 같은 `opState` 인스턴스를 공유.
+- **테스트**: `keeper-operational-state.test.ts` 에 non-running variant turnPhase, displaySummary precedence, phase terminal override 케이스 추가. `keeper-detail-runtime` / `monitoring-runtime` focused tests 로 consumer 회귀 확인.
 
-각 axis 는 별도 PR 로 stack. 모두 audit B-cluster 의 부분 closure 에 해당.
+이로써 HTML audit 의 Goal-2 명시 범위는 helper-level centralization 이 아니라 typed-state 공통 axis 로 닫힌다. 남은 external OR (`heartbeatStale`, `contextBreach`, `socialModelRecognized`) 는 Goal-2 명시 범위 밖의 monitoring band 신호다.
 
 ## §12 변경 이력
 
 - 2026-05-19 vincent — 초안 작성, 3 사례 기반 root-cause 정리, PR 시퀀스 §5.
 - 2026-05-20 vincent (via claude-code) — §13 추가, Goal-2 `attention` axis 흡수 + 후속 axes 후보 명시. audit B3 closure.
+- 2026-05-21 vincent (via codex) — Goal-2 잔여 `turnPhase`, `displaySummary`, `phase` 를 `KeeperOperationalState` 공통 axis 로 흡수.

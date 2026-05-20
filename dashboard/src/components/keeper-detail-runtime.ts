@@ -11,9 +11,8 @@ import { useEffect, useState } from 'preact/hooks'
 // represent *live-execution* attention (`execution_current && blocked`,
 // see `lib/server/server_dashboard_http.ml:1114`), which is orthogonal to
 // the blocker-class-vs-stale-execution axis and stays inline below.
-import { deriveKeeperOperationalState, deriveKeeperTurnPhase } from '../lib/keeper-operational-state'
+import { deriveKeeperOperationalState } from '../lib/keeper-operational-state'
 import { deriveFiberAlive } from '../lib/keeper-fiber-alive'
-import { deriveBlockerReason } from '../lib/keeper-blocker-reason'
 import { formatPct1 } from '../lib/format-number'
 import { formatDuration } from '../lib/format-time'
 import { ActionButton } from './common/button'
@@ -135,7 +134,7 @@ function shortCommit(value: string | null | undefined): string | null {
 // bugs instead of silently absorbing them.
 function isIdleTurnPhase(value: string | null | undefined): boolean {
   const normalized = value?.trim().toLowerCase()
-  return !normalized || normalized === 'idle'
+  return !normalized || normalized === 'idle' || normalized === 'unknown'
 }
 
 function runtimeWarningList(runtimeResolution: KeeperLiveTruthRuntimeInput | null | undefined): string[] {
@@ -199,13 +198,14 @@ export function deriveKeeperLiveTruth({
   runtimeResolution?: KeeperLiveTruthRuntimeInput | null
 }): KeeperLiveTruthSummary {
   const linkedState = linkedRuntimeState(keeper)
-  // RFC-0135 PR-14b: turn-phase SSOT. The 2-way fallback
-  // `compositeSnapshot?.turn_phase ?? keeper.pipeline_stage` is owned
-  // by `deriveKeeperTurnPhase` so the composite-preferred precedence
-  // can be reused by other consumers (the prior 3-way fallback was
-  // removed by PR-5; this PR finishes the move by moving the 2-way
-  // fallback itself into SSOT).
-  const turnPhase = compactToken(deriveKeeperTurnPhase(keeper, compositeSnapshot ?? null))
+  // RFC-0135 Goal-2 closeout: turn phase, display summary and phase are
+  // now per-variant axes on the typed `KeeperOperationalState`, so this
+  // surface no longer keeps its own composite-vs-flat fallback chain.
+  const opState = deriveKeeperOperationalState({
+    keeper,
+    composite: compositeSnapshot,
+  })
+  const turnPhase = compactToken(opState.turnPhase)
   // Typed SSOT (lib/keeper-fiber-alive.ts) — preserves provenance instead of
   // collapsing four semantically distinct signals into one OR-chain.
   const fiberAlive = deriveFiberAlive({
@@ -213,17 +213,8 @@ export function deriveKeeperLiveTruth({
     composite: compositeSnapshot,
     linkedState,
   }).alive
-  const activeTurn = compositeSnapshot?.is_live === true || !isIdleTurnPhase(compositeSnapshot?.turn_phase)
+  const activeTurn = compositeSnapshot?.is_live === true || !isIdleTurnPhase(opState.turnPhase)
 
-  // RFC-0135 PR-5 + PR-14a: blocker-class axis via typed
-  // `KeeperOperationalState` SSOT. RFC-0135 §10 Goal-2 (2026-05-20):
-  // attention is now a per-variant axis on `opState` itself rather
-  // than a separately-derived axis OR-merged here. The previous
-  // external OR-pair pattern (audit finding B3) is closed.
-  const opState = deriveKeeperOperationalState({
-    keeper,
-    composite: compositeSnapshot,
-  })
   const stuckByBlockerClass = opState.kind === 'stuck'
   const staleBlocker = opState.kind === 'running' ? opState.staleBlocker : null
   const attention = opState.attention
@@ -264,17 +255,7 @@ export function deriveKeeperLiveTruth({
       : typeof keeper.last_turn_ago_s === 'number'
         ? `${formatDuration(keeper.last_turn_ago_s)} since turn`
         : 'idle age unknown'
-  // Typed SSOT (lib/keeper-blocker-reason.ts) — preserves provenance
-  // (composite_runtime_attention | flat_runtime_blocker_summary |
-  // flat_attention_reason | none) instead of collapsing three
-  // semantically distinct sources into one OR-chain. Supersedes the
-  // PR-14c string-only `deriveKeeperDisplayReason` at this callsite;
-  // that helper stays in keeper-operational-state.ts for surfaces
-  // that don't need provenance.
-  const runtimeReason = compactToken(
-    deriveBlockerReason({ keeper, composite: compositeSnapshot }).reason,
-    'no blocker reason',
-  )
+  const runtimeReason = compactToken(opState.displaySummary, 'no blocker reason')
   const toolContract = compactToken(compositeSnapshot?.execution?.tool_contract_result ?? null, 'tool contract unknown')
   // guardCount / invariantFailed have moved to FsmHub mode='detail' — they
   // are rendered on the dedicated FSM lane strip directly under this panel

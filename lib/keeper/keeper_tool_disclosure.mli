@@ -234,7 +234,7 @@ val record_require_tool_use_violation
     actionable signal context does not apply. *)
 val actionable_tool_contract_violation_reason
   :  claim_context_allowed:bool
-  -> actionable_signal_context:bool
+  -> actionable_signal_context:Keeper_contract_classifier.actionable_signal_context
   -> tool_names:string list
   -> string option
 

@@ -4,6 +4,18 @@ module KAR = Masc_mcp.Keeper_agent_run
 module KCC = Masc_mcp.Keeper_contract_classifier
 module KTD = Masc_mcp.Keeper_tool_disclosure
 
+let unclaimed_task_context =
+  KCC.make_actionable_signal_context
+    ~tool_gate_required:false
+    ~actionable_signal:KCC.Has_unclaimed_tasks
+;;
+
+let no_actionable_context =
+  KCC.make_actionable_signal_context
+    ~tool_gate_required:false
+    ~actionable_signal:KCC.No_actionable_signal
+;;
+
 let contains_substring haystack needle =
   let hay_len = String.length haystack in
   let needle_len = String.length needle in
@@ -126,7 +138,7 @@ let test_actionable_tool_contract_allows_execution_tools () =
     None
     (KTD.actionable_tool_contract_violation_reason
        ~claim_context_allowed:true
-       ~actionable_signal_context:true
+       ~actionable_signal_context:unclaimed_task_context
        ~tool_names:[ "keeper_bash"; "masc_status" ]);
   check
     (option string)
@@ -134,12 +146,12 @@ let test_actionable_tool_contract_allows_execution_tools () =
     None
     (KTD.actionable_tool_contract_violation_reason
        ~claim_context_allowed:true
-       ~actionable_signal_context:true
+       ~actionable_signal_context:unclaimed_task_context
        ~tool_names:[ "keeper_board_comment" ]);
   (match
      KTD.actionable_tool_contract_violation_reason
        ~claim_context_allowed:false
-       ~actionable_signal_context:true
+       ~actionable_signal_context:unclaimed_task_context
        ~tool_names:[ "keeper_board_post"; "keeper_tasks_list" ]
    with
    | Some reason ->
@@ -155,7 +167,7 @@ let test_actionable_tool_contract_allows_execution_tools () =
     None
     (KTD.actionable_tool_contract_violation_reason
        ~claim_context_allowed:false
-       ~actionable_signal_context:true
+       ~actionable_signal_context:unclaimed_task_context
        ~tool_names:[ "masc_worktree_create" ]);
   check
     (option string)
@@ -163,7 +175,7 @@ let test_actionable_tool_contract_allows_execution_tools () =
     None
     (KTD.actionable_tool_contract_violation_reason
        ~claim_context_allowed:false
-       ~actionable_signal_context:true
+       ~actionable_signal_context:unclaimed_task_context
        ~tool_names:[ "keeper_pr_create" ]);
   check
     (option string)
@@ -171,7 +183,7 @@ let test_actionable_tool_contract_allows_execution_tools () =
     None
     (KTD.actionable_tool_contract_violation_reason
        ~claim_context_allowed:true
-       ~actionable_signal_context:false
+       ~actionable_signal_context:no_actionable_context
        ~tool_names:[])
 ;;
 
@@ -224,7 +236,7 @@ let test_stay_silent_requires_typed_no_work_proof_on_actionable_signal () =
   (match
      KTD.actionable_tool_contract_violation_reason
        ~claim_context_allowed:true
-       ~actionable_signal_context:true
+       ~actionable_signal_context:unclaimed_task_context
        ~tool_names:[ "keeper_stay_silent"; "keeper_tasks_list" ]
    with
    | Some reason ->
@@ -240,7 +252,7 @@ let test_stay_silent_requires_typed_no_work_proof_on_actionable_signal () =
     None
     (KTD.actionable_tool_contract_violation_reason
        ~claim_context_allowed:true
-       ~actionable_signal_context:true
+       ~actionable_signal_context:unclaimed_task_context
        ~tool_names:[ "keeper_board_comment"; "keeper_stay_silent" ]);
   check
     (option string)
@@ -248,7 +260,7 @@ let test_stay_silent_requires_typed_no_work_proof_on_actionable_signal () =
     None
     (KTD.actionable_tool_contract_violation_reason
        ~claim_context_allowed:false
-       ~actionable_signal_context:true
+       ~actionable_signal_context:unclaimed_task_context
        ~tool_names:[ "keeper_bash"; "keeper_stay_silent" ]);
   check
     (option string)
@@ -256,7 +268,7 @@ let test_stay_silent_requires_typed_no_work_proof_on_actionable_signal () =
     None
     (KTD.actionable_tool_contract_violation_reason
        ~claim_context_allowed:true
-       ~actionable_signal_context:false
+       ~actionable_signal_context:no_actionable_context
        ~tool_names:[ "keeper_stay_silent" ]);
   check
     bool
@@ -265,7 +277,7 @@ let test_stay_silent_requires_typed_no_work_proof_on_actionable_signal () =
     (Option.is_some
        (KTD.actionable_tool_contract_violation_reason
           ~claim_context_allowed:true
-          ~actionable_signal_context:true
+          ~actionable_signal_context:unclaimed_task_context
           ~tool_names:[ "keeper_tasks_list"; "masc_status" ]))
 ;;
 

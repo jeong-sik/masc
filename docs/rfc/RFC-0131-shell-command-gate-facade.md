@@ -25,27 +25,26 @@ Related:
 
 ---
 
-## Status note — 2026-05-19 author correction
+## Status note — 2026-05-21 purge update
 
 The original §1 below claimed no facade existed.  That was wrong.  A
-companion audit of `origin/main` after RFC submission found that
-`lib/shell_command_gate.{ml,mli}` **already exists** and is wired into
-two of the three callers:
+companion audit of `origin/main` after RFC submission found that a
+lib-root `Masc_mcp.Shell_command_gate` facade existed and had two callers.
+That transitional facade has now been retired by the purge: the SSOT is
+`Masc_exec_command_gate.Shell_command_gate`, and production callers route
+through that exec gate directly.
 
 ```
-$ rg "Shell_command_gate" lib/
-lib/tool_code_write.ml:106-107   parse + last_stage_bin (exit classifier)
-lib/worker_dev_tools.ml:536-564  parse + stage_bins + stage_count + validate_allowlist
-lib/shell_command_gate.ml(.mli)  the facade itself
+$ rg "Masc_mcp\\.Shell_command_gate|\\bShell_command_gate\\b" lib/ \
+    --glob '!lib/exec/command_gate/shell_command_gate.*'
+lib/tool_code_write.ml       Exec gate alias only
+lib/worker_dev_tools.ml      Exec gate alias only
+lib/keeper/keeper_shell_bash.ml  Exec gate alias only
 ```
 
-The facade exposes `parse`, `validate_allowlist ?allow_pipes`,
-`stage_count`, `last_stage_bin`, plus tag functions.  Test coverage
-exists at `test/test_shell_command_gate.ml`.
-
-So RFC-0131 is **not the first-mover for the facade**.  Its remaining
-contribution is the **extension** that promotes the existing facade to
-RFC-0131's full §4 contract:
+So RFC-0131 was **not the first-mover for the facade**.  Its remaining
+contribution became the **extension and purge** that promoted the exec gate
+to RFC-0131's full §4 contract:
 
 1. Add `caller` partition (currently unpartitioned) so telemetry can
    per-caller measure parity against the legacy fallback.
@@ -224,9 +223,9 @@ Each caller PR:
   from existing local state (no shared global).
 - Calls `Shell_command_gate.gate ...` and maps the verdict to the caller's
   existing error JSON (preserving wire shape).
-- **Parallel** to the existing legacy gate — both run, both decide independently
-  (legacy still authoritative). Disagreement is recorded as a typed
-  telemetry diff per caller.
+- During parity, this ran parallel to legacy gate decisions. That parity
+  shim is now retired; direct exec-gate verdicts are authoritative for the
+  adopted callers.
 
 This phase mirrors RFC-0092 Phase A (advisor) but applies it at the gate boundary
 instead of at the keeper_shell_bash boundary.
@@ -335,16 +334,15 @@ This RFC is **implemented** when:
 
 ## 10. Revised PR slicing (2026-05-19 update)
 
-Given the facade already exists (status note above), §6 rollout's PR-1
-is replaced by the following micro-PRs, each independently mergeable and
-behavior-preserving for existing callers (`Error _` wildcard patterns in
-`tool_code_write` and `worker_dev_tools` absorb new arms):
+The 2026-05-19 correction replaced §6 rollout's PR-1 with the following
+micro-PRs. The 2026-05-21 purge removes the old lib-root facade and keeps
+`Masc_exec_command_gate.Shell_command_gate` as the only shell-gate SSOT:
 
 | PR | Scope | Lines | Risk |
 |---|---|---|---|
-| PR-1a | Add `caller` partition tag + optional `?caller` arg to `validate_allowlist`. Backwards-compatible default. | ~40 | Low |
+| PR-1a | Add `caller` partition tag + optional `?caller` arg to the exec gate. Backwards-compatible default. | ~40 | Low |
 | PR-1b | Add `Unsupported_nested_pipeline` arm to `cannot_parse_kind`. Replace `simples_of_ir`'s `List.concat_map` with a fail-closed walker. | ~30 | Low |
-| PR-1c | Add `?redirect_allowed` flag to `validate_allowlist`. Default `true` preserves current behavior. | ~30 | Low |
+| PR-1c | Add `redirect_allowed` policy to the exec gate. Default `true` preserves current behavior. | ~30 | Low |
 | PR-2 | Wire `keeper_shell_bash.ml` to call `Shell_command_gate` directly for the validation block currently funneled through `Worker_dev_tools.validate_command_coding_with_allowlist`. Telemetry uses `~caller:Keeper_shell_bash`. | ~80 | Medium |
 | PR-3 | Telemetry counter exposure (`Legendary_counters.incr_shell_gate ~caller ~verdict`) + dashboard read. | ~120 | Low |
 | PR-4 | Per-caller parity measurement window (PR-1a + PR-3 prereq). | observation-only | None |

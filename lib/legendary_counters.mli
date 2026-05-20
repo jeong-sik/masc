@@ -70,7 +70,7 @@ val incr_typed_advisor : Shell_ir_validator.advisory -> unit
     operator running with the flag off pays zero cost. *)
 
 (** RFC-0131 — caller × verdict telemetry partition for the exec
-    Shell_command_gate facade.
+    shell command gate.
 
     Mirrors the [caller] tag defined in
     {!Masc_exec_command_gate.Shell_command_gate.caller}.  Callers that
@@ -148,8 +148,8 @@ type snapshot = {
   typed_advisor_allow : int;
   typed_advisor_reject : int;
   typed_advisor_cannot_parse : int;
-  (* RFC-0131 — caller × verdict partition for the exec
-     [Shell_command_gate] facade.  3 callers × 3 verdicts = 9
+  (* RFC-0131 — caller × verdict partition for the exec shell command
+     gate.  3 callers × 3 verdicts = 9
      buckets.  Field order matches [shell_gate_caller × shell_gate_verdict_kind]
      row-major.  See {!incr_shell_gate} for the increment surface. *)
   shell_gate_worker_dev_tools_allow : int;

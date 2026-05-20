@@ -1,7 +1,8 @@
-(** Phase 1 SSOT facade tests + Phase 0 baseline corpus driver.
+(** Exec shell gate SSOT tests + Phase 0 baseline corpus driver.
 
     SSOT: Shell IR Promotion Goal Plan - 2026-05-18, Phase 0 PR-A
-    (baseline corpus) and Phase 1 PR-1 (Shell_command_gate facade).
+    (baseline corpus) and Phase 1 PR-1
+    ([Masc_exec_command_gate.Shell_command_gate]).
 
     This file exercises three contracts:
 
@@ -9,10 +10,10 @@
        matches what {!test/fixtures/shell_gate/baseline.jsonl}
        records for each corpus row (Phase 0 - baseline pin).
     2. [Masc_mcp.Worker_dev_tools.validate_command_coding_with_allowlist]
-       legacy verdict also matches the recorded baseline so any future
+       adapter verdict also matches the recorded baseline so any future
        behavior change (Phase 2+) is visible as a corpus diff, not as
        a silent flip.
-    3. Phase 1 facade-specific Plan invariants that the JSONL corpus
+    3. Exec gate-specific Plan invariants that the JSONL corpus
        cannot express cleanly: quoted pipe single-stage shape, real
        3-stage pipeline ordering, nested pipeline rejection,
        typed-pipeline lowering through [lower_typed_pipeline]. *)

@@ -178,6 +178,30 @@ let test_cdal_task_id_falls_back_to_tool_target () =
     selected
 ;;
 
+let test_cdal_verdict_persist_requires_task_scope () =
+  let decision = Keeper_agent_run.For_testing.cdal_verdict_persist_decision None in
+  check
+    bool
+    "unscoped verdict is not written to task-gate ledger"
+    true
+    (match decision with
+     | `Skip_missing_task_scope -> true
+     | `Persist_task_scoped _ -> false)
+;;
+
+let test_cdal_verdict_persist_accepts_task_scope () =
+  let decision =
+    Keeper_agent_run.For_testing.cdal_verdict_persist_decision (Some "task-cdal")
+  in
+  check
+    bool
+    "task-scoped verdict is persisted"
+    true
+    (match decision with
+     | `Persist_task_scoped task_id -> String.equal task_id "task-cdal"
+     | `Skip_missing_task_scope -> false)
+;;
+
 let () =
   Alcotest.run
     "keeper_cdal_contract"
@@ -208,6 +232,14 @@ let () =
             "falls back to lifecycle tool target for verdict scope"
             `Quick
             test_cdal_task_id_falls_back_to_tool_target
+        ; test_case
+            "skips task-gate ledger when verdict has no task scope"
+            `Quick
+            test_cdal_verdict_persist_requires_task_scope
+        ; test_case
+            "persists task-gate ledger when verdict has task scope"
+            `Quick
+            test_cdal_verdict_persist_accepts_task_scope
         ] )
     ]
 ;;

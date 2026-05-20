@@ -12,6 +12,11 @@ let cdal_task_id_for_verdict ~(current_task_id : string option)
       tool_calls
 ;;
 
+let cdal_verdict_persist_decision = function
+  | Some task_id when String.trim task_id <> "" -> `Persist_task_scoped task_id
+  | _ -> `Skip_missing_task_scope
+;;
+
 let keeper_tool_names_for_outcome
       ~(allowed_tool_names : string list)
       ~(tool_calls : Keeper_agent_result.tool_call_detail list)

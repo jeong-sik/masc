@@ -260,6 +260,11 @@ module For_testing : sig
     -> string option
   (** Selects the task scope used for keeper-side CDAL verdict persistence. *)
 
+  val cdal_verdict_persist_decision
+    :  string option
+    -> [> `Persist_task_scoped of string | `Skip_missing_task_scope ]
+  (** Selects whether a keeper-side CDAL verdict may enter the task-gate ledger. *)
+
   val progress_keeper_tool_names_for_contract
     :  allowed_tool_names:string list
     -> actual_keeper_tool_names:string list

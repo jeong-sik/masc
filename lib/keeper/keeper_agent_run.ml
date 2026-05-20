@@ -22,6 +22,10 @@ let registry_progress_on_event = Turn_helpers.registry_progress_on_event
 let select_cdal_proof = Turn_helpers.select_cdal_proof
 
 let cdal_task_id_for_verdict = Contract_helpers.cdal_task_id_for_verdict
+let cdal_verdict_persist_decision =
+  Contract_helpers.cdal_verdict_persist_decision
+;;
+
 let progress_keeper_tool_names_for_contract =
   Contract_helpers.progress_keeper_tool_names_for_contract
 ;;
@@ -35,6 +39,7 @@ module For_testing = struct
   let registry_progress_on_event = registry_progress_on_event
   let select_cdal_proof = select_cdal_proof
   let cdal_task_id_for_verdict = cdal_task_id_for_verdict
+  let cdal_verdict_persist_decision = cdal_verdict_persist_decision
   let progress_keeper_tool_names_for_contract =
     progress_keeper_tool_names_for_contract
   ;;
@@ -1460,7 +1465,14 @@ let run_turn
                                 kind
                                 (Printexc.to_string exn)
                           in
-                          Cdal_eval_v1.persist ?task_id verdict;
+                          (match cdal_verdict_persist_decision task_id with
+                           | `Persist_task_scoped task_id ->
+                             Cdal_eval_v1.persist ~task_id verdict
+                           | `Skip_missing_task_scope ->
+                             Log.Keeper.debug
+                               "keeper:%s contract_verdict not persisted to task \
+                                gate ledger: missing task_id/current_task_id"
+                               meta.name);
                           Keeper_turn_telemetry.log_keeper_contract_verdict
                             ~keeper_name:meta.name
                             verdict;

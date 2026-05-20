@@ -39,8 +39,17 @@ let map_result_status (response : (Types.api_response, Error.sdk_error) result)
      | Types.Unknown _ -> Cdal_proof.Errored)
 ;;
 
-let finalize_during_exception capture_state ~result_status =
-  match Proof_capture.finalize capture_state ~result_status with
+let finalize_once finalized capture_state ~result_status =
+  match !finalized with
+  | Some proof -> proof
+  | None ->
+    let proof = Proof_capture.finalize capture_state ~result_status in
+    finalized := Some proof;
+    proof
+;;
+
+let finalize_during_exception finalized capture_state ~result_status =
+  match finalize_once finalized capture_state ~result_status with
   | _ -> ()
   | exception exn ->
     Printf.eprintf
@@ -103,53 +112,54 @@ let run
         ~capability_snapshot:capabilities
         ()
     in
-    let tool_classifications =
-      Agent.tools agent
-      |> Tool_set.to_list
-      |> List.filter_map (fun (t : Tool.t) ->
-        match t.descriptor with
-        | Some d ->
-          Option.bind d.Tool.mutation_class Mode_enforcer.mutation_class_of_string
-          |> Option.map (fun cls -> t.schema.name, cls)
-        | None -> None)
-    in
-    let enforcer_state =
-      Mode_enforcer.create
-        ~contract
-        ~effective_mode:mode_decision.effective_mode
-        ~tool_classifications
-        ()
-    in
-    Proof_capture.set_enforcer capture_state enforcer_state;
-    let enforcement_hooks = Mode_enforcer.hooks enforcer_state in
-    let proof_hooks = Proof_capture.hooks capture_state in
-    let user_hooks = (Agent.options agent).hooks in
-    let composed_hooks =
-      Hooks.compose
-        ~outer:enforcement_hooks
-        ~inner:(Hooks.compose ~outer:proof_hooks ~inner:user_hooks)
-    in
-    let opts = Agent.options agent in
-    let new_opts = { opts with hooks = composed_hooks } in
-    let config = (Agent.state agent).config in
-    let tools = Agent.tools agent |> Tool_set.to_list in
-    let context = Agent.context agent in
-    let net = Agent.net agent in
-    let new_agent = Agent.create ~net ~config ~tools ~context ~options:new_opts () in
-    let response =
-      try Agent.run ~sw ?clock new_agent prompt with
-      | Eio.Cancel.Cancelled _ as exn ->
-        finalize_during_exception capture_state ~result_status:Cancelled;
-        raise exn
-      | exn ->
-        finalize_during_exception capture_state ~result_status:Errored;
-        raise exn
-    in
-    (* Sync execution state back to the original agent so that
-       downstream checkpoint capture sees the post-run messages,
-       turn_count, and usage — not the pre-run empty state. *)
-    Agent.set_state agent (Agent.state new_agent);
-    let result_status = map_result_status response in
-    let proof = Proof_capture.finalize capture_state ~result_status in
-    { response; proof }
+    let finalized = ref None in
+    try
+      let tool_classifications =
+        Agent.tools agent
+        |> Tool_set.to_list
+        |> List.filter_map (fun (t : Tool.t) ->
+          match t.descriptor with
+          | Some d ->
+            Option.bind d.Tool.mutation_class Mode_enforcer.mutation_class_of_string
+            |> Option.map (fun cls -> t.schema.name, cls)
+          | None -> None)
+      in
+      let enforcer_state =
+        Mode_enforcer.create
+          ~contract
+          ~effective_mode:mode_decision.effective_mode
+          ~tool_classifications
+          ()
+      in
+      Proof_capture.set_enforcer capture_state enforcer_state;
+      let enforcement_hooks = Mode_enforcer.hooks enforcer_state in
+      let proof_hooks = Proof_capture.hooks capture_state in
+      let user_hooks = (Agent.options agent).hooks in
+      let composed_hooks =
+        Hooks.compose
+          ~outer:enforcement_hooks
+          ~inner:(Hooks.compose ~outer:proof_hooks ~inner:user_hooks)
+      in
+      let opts = Agent.options agent in
+      let new_opts = { opts with hooks = composed_hooks } in
+      let config = (Agent.state agent).config in
+      let tools = Agent.tools agent |> Tool_set.to_list in
+      let context = Agent.context agent in
+      let net = Agent.net agent in
+      let new_agent = Agent.create ~net ~config ~tools ~context ~options:new_opts () in
+      let response = Agent.run ~sw ?clock new_agent prompt in
+      (* Sync execution state back to the original agent so that
+         downstream checkpoint capture sees the post-run messages,
+         turn_count, and usage — not the pre-run empty state. *)
+      Agent.set_state agent (Agent.state new_agent);
+      let result_status = map_result_status response in
+      let proof = finalize_once finalized capture_state ~result_status in
+      { response; proof }
+    with
+    | Eio.Cancel.Cancelled _ as exn ->
+      finalize_during_exception finalized capture_state ~result_status:Cancelled;
+      raise exn
+    | exn ->
+      finalize_during_exception finalized capture_state ~result_status:Errored;
+      raise exn
 ;;

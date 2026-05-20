@@ -150,8 +150,42 @@ let labeled_verdict_of_json = function
         Ok { verdict; label; labeler; note; labeled_at }
       | Error e, _ -> Error (Printf.sprintf "verdict: %s" e)
       | _, Error e -> Error (Printf.sprintf "label: %s" e))
-    | _ -> Error "missing or invalid fields in labeled_verdict")
-  | _ -> Error "labeled_verdict: expected JSON object"
+    | _ ->
+      (* Field-by-field status so the operator reading the parse failure
+         sees exactly which field caused the wide-arm match to fall
+         through.  The 4-tuple match above requires:
+           - [verdict] present (any JSON value, parsed downstream)
+           - [label] / [labeler] / [labeled_at] present as [`String _]
+         Anything else lands here.  Naming each field's status avoids
+         the previous "missing or invalid" ambiguity which left
+         operators unable to tell a missing field from a wrong-type
+         field. *)
+      let verdict_status =
+        match List.assoc_opt "verdict" fields with
+        | Some _ -> "present"
+        | None -> "missing"
+      in
+      let string_field_status name =
+        match List.assoc_opt name fields with
+        | Some (`String _) -> "ok"
+        | Some other ->
+          Printf.sprintf "wrong-kind=%s" (Json_util.kind_name other)
+        | None -> "missing"
+      in
+      Error
+        (Printf.sprintf
+           "labeled_verdict: field status — verdict=%s, label=%s, \
+            labeler=%s, labeled_at=%s (label/labeler/labeled_at must be \
+            JSON strings; verdict accepts any JSON)"
+           verdict_status
+           (string_field_status "label")
+           (string_field_status "labeler")
+           (string_field_status "labeled_at")))
+  | other ->
+    Error
+      (Printf.sprintf
+         "labeled_verdict: expected JSON object, got %s"
+         (Json_util.kind_name other))
 
 let confusion_summary_to_json c =
   `Assoc

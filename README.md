@@ -400,7 +400,7 @@ raw `opam exec -- dune ...` 은 의도적인 CI-parity 점검 때만. 평소 개
 | [docs/PRODUCT-REVIEW.md](docs/PRODUCT-REVIEW.md) | promise 단계별 현재 자세 |
 | [docs/spec/SPEC-INDEX.md](docs/spec/SPEC-INDEX.md) | spec suite |
 | [ROADMAP.md](ROADMAP.md) | 버전 / 릴리즈 / 활성 트랙 |
-| [CHANGELOG.md](CHANGELOG.md) | 버전별 변경 로그 (현재 v0.19.25) |
+| [CHANGELOG.md](CHANGELOG.md) | 버전별 변경 로그 (현재 v0.19.26) |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | 기여 — 사실상 저자 self-discipline 문서 |
 | [llms.txt](llms.txt) / [llms-full.txt](llms-full.txt) | 언어모델용 압축 front door |
 

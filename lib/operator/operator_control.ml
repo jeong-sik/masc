@@ -577,12 +577,6 @@ let execute_keeper_action (ctx : 'a context) (request : action_request) =
 
 let execute_action (ctx : 'a context) (request : action_request) :
     (Yojson.Safe.t, string) result =
-  (* Canonicalize legacy action_type aliases before dispatch. *)
-  let request =
-    match request.action_type with
-    | "autonomy_tick" -> { request with action_type = "social_sweep" }
-    | _ -> request
-  in
   match request.action_type with
   | "broadcast" | "namespace_pause" | "namespace_resume" | "social_sweep"
   | "task_inject" | "github_identity_login_prepare" | "github_identity_status" ->
@@ -598,16 +592,14 @@ let execute_action (ctx : 'a context) (request : action_request) :
      legitimate validation failure as a runtime stub error. *)
   | other -> Error (Printf.sprintf "unsupported action_type: %s" other)
 
-(** All known action_types: available_actions plus legacy/unlisted ones. *)
+(** All known action_types: available_actions plus hidden canonical actions. *)
 let known_action_types =
   let from_registry =
     List.map
       (fun (a : Operator_pending_confirm.available_action) -> a.action_type)
       Operator_pending_confirm.available_actions
   in
-  (* autonomy_tick excluded: canonical_action_type maps it to social_sweep
-     before validate_request runs, so it never reaches here as-is.
-     Issue #8394: removed [team_turn] — team session execution surface is
+  (* Issue #8394: removed [team_turn] — team session execution surface is
      retired. *)
   from_registry @ [ "social_sweep" ]
 

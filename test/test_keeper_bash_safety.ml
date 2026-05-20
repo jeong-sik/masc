@@ -2003,6 +2003,19 @@ let test_bash_blocks_direct_masc_tool_command () =
     (String_util.contains_substring
        (Json.member "hint" json |> Json.to_string)
        "keeper_tasks_list tool");
+  Alcotest.(check (option string))
+    "required next tool"
+    (Some "keeper_tasks_list")
+    (Json.member "required_next_tool" json |> Json.to_string_option);
+  Alcotest.(check (option string))
+    "do not retry bash"
+    (Some "keeper_bash")
+    (Json.member "do_not_retry_tool" json |> Json.to_string_option);
+  let recovery_plan = Json.member "recovery_plan" json in
+  Alcotest.(check (option string))
+    "recovery plan points to tool"
+    (Some "keeper_tasks_list")
+    (Json.member "next_tool" recovery_plan |> Json.to_string_option);
   let raw =
     Keeper_exec_shell.handle_keeper_bash
       ~turn_sandbox_factory:None
@@ -2018,7 +2031,15 @@ let test_bash_blocks_direct_masc_tool_command () =
   Alcotest.(check bool)
     "non-visible tool-like command still blocked"
     false
-    (Json.member "tool_policy_visible" json |> Json.to_bool)
+    (Json.member "tool_policy_visible" json |> Json.to_bool);
+  Alcotest.(check (option string))
+    "non-visible still suppresses bash retry"
+    (Some "keeper_bash")
+    (Json.member "do_not_retry_tool" json |> Json.to_string_option);
+  Alcotest.(check (option string))
+    "non-visible does not require unavailable tool"
+    None
+    (Json.member "required_next_tool" json |> Json.to_string_option)
 
 let test_bash_blocks_gh_pr_list_with_native_pr_hint () =
   with_eio_fs @@ fun () ->

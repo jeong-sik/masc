@@ -1081,6 +1081,43 @@ let handle_keeper_bash
          ())
   in
   let direct_tool_command_block ~tool_policy_visible tool_name =
+    let hint =
+      if tool_policy_visible
+      then
+        Printf.sprintf
+          "%s is a MASC tool, not a shell command. Call the %s tool directly \
+           with JSON arguments instead of using Bash."
+          tool_name tool_name
+      else
+        Printf.sprintf
+          "%s looks like a MASC tool, not a shell command, but it is not \
+           visible in this keeper's tool policy. Do not run it through Bash; \
+           pick a visible tool or update the keeper tool policy."
+          tool_name
+    in
+    let recovery_extra =
+      if tool_policy_visible
+      then (
+        let plan =
+          shell_rewrite_plan
+            ~confidence:"high"
+            ~next_tool:tool_name
+            ~next_args:[]
+            ~instruction:hint
+            ~reason:"direct_tool_invoked_as_shell"
+            ()
+        in
+        recovery_plan_extra ~rule_id:"tool_invoked_as_shell_command" plan)
+      else
+        [ "do_not_retry_tool", `String "keeper_bash"
+        ; "do_not_retry_same_args", `Bool true
+        ; "recovery_rule_id", `String "tool_invoked_as_shell_command"
+        ; ( "operator_action"
+          , `String
+              "Expose the requested tool in this keeper's tool policy or pick \
+               one of the currently visible structured tools." )
+        ]
+    in
     Prometheus.inc_counter
       Keeper_metrics.metric_keeper_shell_bash_failures
       ~labels:[("keeper", meta.name); ("site", "tool_invoked_as_shell")]
@@ -1090,30 +1127,17 @@ let handle_keeper_bash
       meta.name tool_name cmd_for_log;
     Yojson.Safe.to_string
       (`Assoc
-         [ "ok", `Bool false
-         ; "error", `String "tool_invoked_as_shell_command"
-         ; workflow_rejection_field
-         ; "tool", `String tool_name
-         ; "cmd", `String cmd_for_log
-         ; "hint",
-           `String
-             (if tool_policy_visible
-              then
-                Printf.sprintf
-                  "%s is a MASC tool, not a shell command. Call the %s \
-                   tool directly with JSON arguments instead of using Bash."
-                  tool_name tool_name
-              else
-                Printf.sprintf
-                  "%s looks like a MASC tool, not a shell command, but it \
-                   is not visible in this keeper's tool policy. Do not run \
-                   it through Bash; pick a visible tool or update the keeper \
-                   tool policy."
-                  tool_name)
-         ; "suggested_tool", `String tool_name
-         ; "tool_policy_visible", `Bool tool_policy_visible
-         ; "retryable", `Bool true
-         ])
+         ([ "ok", `Bool false
+          ; "error", `String "tool_invoked_as_shell_command"
+          ; workflow_rejection_field
+          ; "tool", `String tool_name
+          ; "cmd", `String cmd_for_log
+          ; "hint", `String hint
+          ; "suggested_tool", `String tool_name
+          ; "tool_policy_visible", `Bool tool_policy_visible
+          ; "retryable", `Bool true
+          ]
+          @ recovery_extra))
   in
   let json_of_raw raw =
     match Yojson.Safe.from_string raw with

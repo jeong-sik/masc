@@ -51,15 +51,23 @@ let of_json = function
     let get_int k =
       match List.assoc_opt k fields with
       | Some (`Int i) -> Ok i
-      | Some _ -> Error (Printf.sprintf "Budget.of_json: %s not int" k)
-      | None -> Error (Printf.sprintf "Budget.of_json: missing %s" k)
+      | Some other ->
+        Error
+          (Printf.sprintf
+             "Budget.of_json: field %S has wrong type (expected int, got %s)"
+             k (Json_kind.name other))
+      | None -> Error (Printf.sprintf "Budget.of_json: missing field %S" k)
     in
     let get_float k =
       match List.assoc_opt k fields with
       | Some (`Float f) -> Ok f
       | Some (`Int i) -> Ok (float_of_int i)
-      | Some _ -> Error (Printf.sprintf "Budget.of_json: %s not float" k)
-      | None -> Error (Printf.sprintf "Budget.of_json: missing %s" k)
+      | Some other ->
+        Error
+          (Printf.sprintf
+             "Budget.of_json: field %S has wrong type (expected float or int, got %s)"
+             k (Json_kind.name other))
+      | None -> Error (Printf.sprintf "Budget.of_json: missing field %S" k)
     in
     (match get_int "tokens", get_int "turns", get_int "time_ms", get_float "cost_usd" with
      | Ok tokens, Ok turns, Ok time_ms, Ok cost_usd ->
@@ -68,4 +76,8 @@ let of_json = function
      | _, Error e, _, _
      | _, _, Error e, _
      | _, _, _, Error e -> Error e)
-  | _ -> Error "Budget.of_json: expected object"
+  | other ->
+    Error
+      (Printf.sprintf
+         "Budget.of_json: expected JSON object, got %s"
+         (Json_kind.name other))

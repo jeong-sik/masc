@@ -15,4 +15,8 @@ let to_json t = `Float t
 let of_json = function
   | `Float f -> Ok f
   | `Int i -> Ok (float_of_int i)
-  | _ -> Error "Timestamp.of_json: expected float or int"
+  | other ->
+    Error
+      (Printf.sprintf
+         "Timestamp.of_json: expected float or int, got %s"
+         (Json_kind.name other))

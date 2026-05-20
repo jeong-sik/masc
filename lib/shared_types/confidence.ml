@@ -25,4 +25,8 @@ let to_json t = `Float t
 let of_json = function
   | `Float f -> Ok (make f)
   | `Int i -> Ok (make (float_of_int i))
-  | _ -> Error "Confidence.of_json: expected float or int"
+  | other ->
+    Error
+      (Printf.sprintf
+         "Confidence.of_json: expected float or int, got %s"
+         (Json_kind.name other))

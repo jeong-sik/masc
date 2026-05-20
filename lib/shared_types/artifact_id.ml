@@ -83,4 +83,8 @@ let to_json t = `String t
 
 let of_json = function
   | `String s -> of_string s
-  | _ -> Error "Artifact_id.of_json: expected string"
+  | other ->
+    Error
+      (Printf.sprintf
+         "Artifact_id.of_json: expected string, got %s"
+         (Json_kind.name other))

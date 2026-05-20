@@ -244,6 +244,26 @@ let check_env env =
   loop env
 ;;
 
+let check_wrapper_target ~mode ~wrapper_name = function
+  | None -> Error (Empty_argv { executable = wrapper_name })
+  | Some target when is_allowed ~mode target -> Ok ()
+  | Some target -> Error (Executable_not_allowlisted { name = target; mode })
+;;
+
+let check_wrapper_exec_target ~mode ~executable ~argv =
+  match executable with
+  | "env" ->
+    check_wrapper_target
+      ~mode
+      ~wrapper_name:"env"
+      (Worker_dev_tools_command_syntax.command_after_env_prefix argv)
+  | "opam" -> (
+    match Worker_dev_tools_command_syntax.opam_exec_command_name argv with
+    | Some "opam" -> Ok ()
+    | target -> check_wrapper_target ~mode ~wrapper_name:"opam" target)
+  | _ -> Ok ()
+;;
+
 let check_exec ~mode ~executable ~argv ~cwd ~env =
   let ( let* ) = Result.bind in
   if not (is_allowed ~mode executable)
@@ -252,6 +272,7 @@ let check_exec ~mode ~executable ~argv ~cwd ~env =
     let* () =
       if argv = [] then Ok () else check_argv ~executable argv
     in
+    let* () = check_wrapper_exec_target ~mode ~executable ~argv in
     let* () = check_cwd cwd in
     let* () = check_env env in
     Ok ()

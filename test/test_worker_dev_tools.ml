@@ -364,6 +364,44 @@ let test_shell_exec_blocked_command () =
        (String.length msg > 0)
    | Ok _ -> Alcotest.fail "should reject rm -rf /")
 
+let test_shell_exec_blocks_env_wrapped_disallowed_command () =
+  let cases =
+    [
+      ("env rm -rf /", "rm");
+      ("env", "env");
+      ("opam exec -- rm -rf /", "rm");
+      ("env opam exec -- rm -rf /", "rm");
+      ("opam exec -- env rm -rf /", "rm");
+    ]
+  in
+  List.iter
+    (fun (cmd, blocked) ->
+      match Worker_dev_tools.validate_command cmd with
+      | Error (Worker_dev_tools.Command_not_allowed got) when String.equal got blocked -> ()
+      | Error reason ->
+        Alcotest.fail
+          ("wrong rejection for " ^ cmd ^ ": "
+           ^ Worker_dev_tools.block_reason_to_string reason)
+      | Ok () -> Alcotest.fail ("env command should be blocked: " ^ cmd))
+    cases
+
+let test_shell_exec_blocks_outside_path_arg () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let proc_mgr = Eio.Stdenv.process_mgr env in
+  let clock = Eio.Stdenv.clock env in
+  let tools = Worker_dev_tools.make_tools ~proc_mgr ~clock () in
+  let tool = find_tool "shell_exec" tools in
+  match Tool.execute tool (`Assoc [ "command", `String "cat /etc/passwd" ]) with
+  | Error { Agent_sdk.Types.message = msg; _ } ->
+    Alcotest.(check bool)
+      "mentions path outside whitelist"
+      true
+      (String_util.contains_substring_ci msg "outside")
+  | Ok { Agent_sdk.Types.content } ->
+    Alcotest.fail
+      ("shell_exec should block outside path before execution: " ^ content)
+
 let test_tool_exec_observer_bridges_to_telemetry () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -607,6 +645,10 @@ let () =
     "shell_exec", [
       Alcotest.test_case "echo hello" `Quick test_shell_exec_echo;
       Alcotest.test_case "blocked command" `Quick test_shell_exec_blocked_command;
+      Alcotest.test_case "env wrapper blocked command" `Quick
+        test_shell_exec_blocks_env_wrapped_disallowed_command;
+      Alcotest.test_case "outside path arg blocked" `Quick
+        test_shell_exec_blocks_outside_path_arg;
       Alcotest.test_case "observer bridges to telemetry" `Quick
         test_tool_exec_observer_bridges_to_telemetry;
       Alcotest.test_case "reject shell metacharacters" `Quick
@@ -719,6 +761,45 @@ let () =
             "env --chdir repos/masc-mcp -- dune build";
             "env -i -- DUNE_JOBS=1 dune build";
           ]);
+      Alcotest.test_case "blocks env-wrapped disallowed command" `Quick (fun () ->
+        List.iter
+          (fun cmd ->
+            match Worker_dev_tools.validate_command_coding cmd with
+            | Error (Worker_dev_tools.Command_not_allowed "rm") -> ()
+            | Error e ->
+              Alcotest.fail
+                ("wrong rejection for " ^ cmd ^ ": "
+                 ^ Worker_dev_tools.block_reason_to_string e)
+            | Ok () ->
+              Alcotest.fail ("should reject env-wrapped disallowed command: " ^ cmd))
+          [
+            "env rm -rf /";
+            "env -- rm -rf /";
+            "env FOO=bar rm -rf /";
+            "env opam exec -- rm -rf /";
+            "git status | env rm -rf /";
+          ]);
+      Alcotest.test_case "blocks standalone env dump" `Quick (fun () ->
+        match Worker_dev_tools.validate_command_coding "env" with
+        | Error (Worker_dev_tools.Command_not_allowed "env") -> ()
+        | Error e ->
+          Alcotest.fail
+            ("wrong rejection: " ^ Worker_dev_tools.block_reason_to_string e)
+        | Ok () -> Alcotest.fail "standalone env should be blocked");
+      Alcotest.test_case "allows env-wrapped allowed command" `Quick (fun () ->
+        List.iter
+          (fun cmd ->
+            match Worker_dev_tools.validate_command_coding cmd with
+            | Ok () -> ()
+            | Error e ->
+              Alcotest.fail
+                ("should allow env-wrapped allowed command " ^ cmd ^ ": "
+                 ^ Worker_dev_tools.block_reason_to_string e))
+          [
+            "env FOO=bar git status";
+            "env -- git status";
+            "env -i -- FOO=bar git status | head -5";
+          ]);
       Alcotest.test_case "blocks opam-exec direct dune" `Quick (fun () ->
         match
           Worker_dev_tools.validate_command_coding
@@ -742,6 +823,43 @@ let () =
             "opam exec --switch=default -- dune build";
             "opam exec --color never -- dune build";
           ]);
+      Alcotest.test_case "blocks opam-exec wrapped disallowed command" `Quick
+        (fun () ->
+           List.iter
+             (fun cmd ->
+               match Worker_dev_tools.validate_command_coding cmd with
+               | Error (Worker_dev_tools.Command_not_allowed "rm") -> ()
+               | Error e ->
+                 Alcotest.fail
+                   ("wrong rejection for " ^ cmd ^ ": "
+                    ^ Worker_dev_tools.block_reason_to_string e)
+               | Ok () ->
+                 Alcotest.fail
+                   ("should reject opam-exec wrapped disallowed command: " ^ cmd))
+             [
+               "opam exec -- rm -rf /";
+               "opam exec --switch default -- rm -rf /";
+               "opam exec -- env rm -rf /";
+               "env opam exec -- rm -rf /";
+               "git status | opam exec -- rm -rf /";
+             ]);
+      Alcotest.test_case "allows opam-exec wrapped allowed command" `Quick
+        (fun () ->
+           List.iter
+             (fun cmd ->
+               match Worker_dev_tools.validate_command_coding cmd with
+               | Ok () -> ()
+               | Error e ->
+                 Alcotest.fail
+                   ("should allow opam-exec wrapped allowed command " ^ cmd ^ ": "
+                    ^ Worker_dev_tools.block_reason_to_string e))
+             [
+               "opam exec -- git status";
+               "opam exec --switch default -- git status";
+               "env opam exec -- git status";
+               "opam exec -- env FOO=bar git status";
+               "opam exec -- git status | head -5";
+             ]);
       Alcotest.test_case "blocks semicolon" `Quick (fun () ->
         match Worker_dev_tools.validate_command_coding "ls; rm -rf /" with
         | Error _ -> ()

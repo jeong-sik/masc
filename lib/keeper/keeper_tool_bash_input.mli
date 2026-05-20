@@ -1,13 +1,12 @@
 (** Typed argv schema for the keeper_bash tool.
 
-    Introduced by RFC-0091 PR-1 (§5.1.1) to replace the legacy
+    Introduced by RFC-0091 PR-1 (§5.1.1) to replace the command-string
     [{cmd: string}] schema whose post-hoc lexer in [Worker_dev_tools]
     accounts for ~253 of the top-20 24h ERROR (single-site emission +
     4-layer amplification, see RFC-0091 §4).
 
-    The legacy lexer is preserved during PR-1 (one caller swap +
-    differential test) and removed in PR-2 (lexer 17-function purge,
-    callers fully migrated).
+    The former lexer migration path has closed; the typed boundary is now the
+    only accepted keeper_bash input shape.
 
     {2 Design constraints}
 
@@ -19,7 +18,7 @@
       shell metacharacters like [*], [?], [|], [&], [;], [>], [<],
       [`], [$] inside an argv token are *literal characters*, not
       shell operators.  This is the principal RFC-0091 progress: the
-      legacy lexer in [Worker_dev_tools] rejects [find . -name *.ml]
+      command-string lexer in [Worker_dev_tools] rejected [find . -name *.ml]
       with [path_syntax_blocked]; the typed schema accepts it because
       [*.ml] is a [find]-internal pattern, not a shell glob.
     - **Pipelines are explicit**.  [Pipeline.stages] enumerates each
@@ -77,7 +76,7 @@ val of_json : Yojson.Safe.t -> (bash_input, string) result
     [{executable, argv?, cwd?, env?}] for [Exec] or
     [{pipeline = [{executable, argv?}, ...], cwd?, env?}] for [Pipeline].
     [{stages = ...}] is accepted as an equivalent structured pipeline key.
-    Legacy [{cmd: string}] input is intentionally rejected here. *)
+    [{cmd: string}] input is intentionally rejected here. *)
 
 val validate : mode:allowlist_mode -> bash_input -> (unit, validation_error) result
 (** Run all structural checks against [input].  Returns [Ok ()] on
@@ -98,6 +97,6 @@ val to_shell_ir :
 val pp_validation_error : Format.formatter -> validation_error -> unit
 (** Human-readable formatter for {!validation_error}.  Stable across
     PR-1/PR-2 — callers may rely on the message structure for log
-    classification.  ERROR text intentionally lacks the legacy
+    classification.  ERROR text intentionally avoids the old
     "Path syntax blocked" prefix so the 4-layer log amplification
     is severed at PR-2 lexer deletion. *)

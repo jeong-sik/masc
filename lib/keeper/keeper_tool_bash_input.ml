@@ -169,8 +169,8 @@ let of_json (json : Yojson.Safe.t) =
     if Option.is_some (member fields "cmd")
     then
       Error
-        "legacy cmd string is not a typed keeper_bash input; provide \
-         executable/argv or pipeline stages"
+        "cmd string is not a typed keeper_bash input; provide executable/argv \
+         or pipeline stages"
     else Ok ()
   in
   let executable_present = Option.is_some (member fields "executable") in
@@ -202,7 +202,7 @@ let of_json (json : Yojson.Safe.t) =
    shell metacharacters ([;|&><`$*?]) are literal data, not operators.
    Only control characters that cannot survive process-boundary
    serialization are rejected.  See .mli "Design constraints" for the
-   rationale and contrast with the legacy lexer in [Worker_dev_tools]. *)
+   rationale and contrast with the command-string lexer in [Worker_dev_tools]. *)
 let shell_metachar_in_token token =
   String.exists
     (function

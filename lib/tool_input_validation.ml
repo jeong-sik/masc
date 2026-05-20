@@ -130,6 +130,22 @@ let schema_has_properties = function
   | _ -> false
 ;;
 
+let schema_disallows_additional_properties = function
+  | `Assoc fields ->
+    (match List.assoc_opt "additionalProperties" fields with
+     | Some (`Bool false) -> true
+     | _ -> false)
+  | _ -> false
+;;
+
+let schema_property_names = function
+  | `Assoc fields ->
+    (match List.assoc_opt "properties" fields with
+     | Some (`Assoc props) -> List.map fst props
+     | _ -> [])
+  | _ -> []
+;;
+
 let empty_tool_args = function
   | `Null | `Assoc [] -> true
   | _ -> false
@@ -178,6 +194,33 @@ let reject_validation ~name ~reason ~message =
     ; duration_ms = 0.0
     ; failure_class = Some Tool_result.Policy_rejection
     }
+;;
+
+let reject_additional_properties_if_closed ~name ~schema ~args =
+  if not (schema_disallows_additional_properties schema)
+  then None
+  else
+    match args with
+    | `Assoc fields ->
+      let allowed = schema_property_names schema in
+      let extras =
+        fields
+        |> List.filter_map (fun (key, _) ->
+          if List.mem key allowed then None else Some key)
+      in
+      if extras = []
+      then None
+      else
+        Some
+          (reject_validation
+             ~name
+             ~reason:"additional_properties"
+             ~message:
+               (Printf.sprintf
+                  "Tool '%s' received unsupported argument(s): %s"
+                  name
+                  (String.concat ", " extras)))
+    | _ -> None
 ;;
 
 let validation_exception_action ~name exn : Tool_dispatch.pre_hook_action =
@@ -256,6 +299,9 @@ let validation_action ?schema ~name ~args () : Tool_dispatch.pre_hook_action =
         in
         Option.map (validation_schema_of_json ~name:lookup_name) schema_opt
       in
+      (match reject_additional_properties_if_closed ~name ~schema ~args:prepared_args with
+       | Some reject -> reject
+       | None ->
       let hook = Agent_sdk.Tool_middleware.make_validation_hook ~lookup in
       (match hook ~name ~args:prepared_args with
     | Agent_sdk.Tool_middleware.Pass when not (Yojson.Safe.equal prepared_args args) ->
@@ -287,7 +333,7 @@ let validation_action ?schema ~name ~args () : Tool_dispatch.pre_hook_action =
              actual category instead of bucketing as "unclassified". *)
           failure_class = Some Tool_result.Policy_rejection
         }
-      )
+      ))
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn -> validation_exception_action ~name exn

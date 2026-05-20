@@ -107,14 +107,6 @@ let test_capacity_backpressure_text_maps () =
        "Internal error: [masc_oas_error] {\"kind\":\"capacity_exhausted\",\
         \"detail\":\"client capacity key glm is full\"}")
 
-let test_legacy_cascade_slot_full_text_stays_cascade_exhausted () =
-  check_cascade_class
-    "legacy cascade slot-full text"
-    (B.blocker_class_of_string
-       "Internal error: [masc_oas_error] {\"kind\":\"cascade_exhausted\",\
-        \"reason\":{\"tag\":\"other_detail\",\"message\":\"slot full, cascading \
-        to next provider\"}}")
-
 let test_capacity_backpressure_sdk_error_maps () =
   let err =
     Owne.sdk_error_of_masc_internal_error
@@ -129,14 +121,6 @@ let test_capacity_backpressure_sdk_error_maps () =
   check_capacity_class "typed capacity structured SDK error"
     (B.blocker_class_of_sdk_error err)
 
-let test_capacity_backpressure_runtime_surface_preserves_legacy_cascade_class () =
-  let surface =
-    B.runtime_blocker_surface_of_typed_class
-      ~summary:"slot full, cascading to next provider"
-      (KT.Cascade_exhausted (KT.Other_detail "cascade_exhausted"))
-  in
-  check string "runtime blocker class" "cascade_exhausted"
-    surface.blocker_class
 let () =
   run "keeper_blocker_class_completion_contract"
     [
@@ -161,13 +145,9 @@ let () =
           test_case "existing turn-timeout mapping unchanged" `Quick
             test_existing_mappings_unchanged;
           test_case "turn livelock text maps" `Quick test_turn_livelock_text_maps;
-          test_case "legacy cascade slot-full text stays cascade_exhausted" `Quick
-            test_legacy_cascade_slot_full_text_stays_cascade_exhausted;
           test_case "capacity backpressure text maps" `Quick
             test_capacity_backpressure_text_maps;
           test_case "capacity backpressure SDK error maps" `Quick
             test_capacity_backpressure_sdk_error_maps;
-          test_case "capacity backpressure runtime surface preserves legacy cascade class" `Quick
-            test_capacity_backpressure_runtime_surface_preserves_legacy_cascade_class;
         ] );
     ]

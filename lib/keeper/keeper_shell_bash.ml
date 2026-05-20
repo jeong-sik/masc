@@ -875,7 +875,7 @@ let handle_keeper_bash_typed
   then
     error_json
       ~fields:[ "typed", `Bool true ]
-      "typed keeper_bash does not support run_in_background yet; use legacy cmd or foreground typed exec"
+      "typed keeper_bash does not support run_in_background yet; run foreground typed exec/pipeline"
   else
     match Keeper_shell_shared.resolve_keeper_shell_write_cwd ~config ~meta ~args with
     | Error e -> error_json e

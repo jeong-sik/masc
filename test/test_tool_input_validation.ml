@@ -560,14 +560,17 @@ let check_param_type name expected params =
 
 let test_keeper_bash_schema_exposes_typed_boundary () =
   let params = Tool_bridge.params_of_json_schema keeper_bash_schema in
-  check_param_type "cmd" "string" params;
+  Alcotest.(check bool)
+    "cmd is absent from keeper_bash schema"
+    false
+    (Option.is_some (param_by_name "cmd" params));
   check_param_type "executable" "string" params;
   check_param_type "argv" "array" params;
   check_param_type "pipeline" "array" params;
   check_param_type "stages" "array" params;
   check_param_type "env" "object" params
 
-let test_validate_args_keeper_bash_accepts_legacy_cmd () =
+let test_validate_args_keeper_bash_rejects_cmd () =
   let args = `Assoc [ "cmd", `String "pwd" ] in
   match
     Tool_input_validation.validate_args
@@ -577,11 +580,12 @@ let test_validate_args_keeper_bash_accepts_legacy_cmd () =
       ()
   with
   | Ok forwarded ->
-    Alcotest.(check bool) "args unchanged" true (Yojson.Safe.equal args forwarded)
-  | Error result ->
     Alcotest.failf
-      "expected legacy keeper_bash cmd to pass validation, got %s"
-      (Yojson.Safe.to_string result.Tool_result.data)
+      "expected keeper_bash cmd input to be rejected, got %s"
+      (Yojson.Safe.to_string forwarded)
+  | Error result ->
+    let payload = Yojson.Safe.to_string result.Tool_result.data in
+    Alcotest.(check bool) "mentions cmd" true (string_contains payload "cmd")
 
 let test_validate_args_keeper_bash_accepts_typed_exec () =
   let args =
@@ -1047,8 +1051,8 @@ let () =
         test_registered_hook_keeper_board_post_accepts_sources_array;
       Alcotest.test_case "keeper_bash exposes typed boundary" `Quick
         test_keeper_bash_schema_exposes_typed_boundary;
-      Alcotest.test_case "keeper_bash accepts legacy cmd" `Quick
-        test_validate_args_keeper_bash_accepts_legacy_cmd;
+      Alcotest.test_case "keeper_bash rejects cmd" `Quick
+        test_validate_args_keeper_bash_rejects_cmd;
       Alcotest.test_case "keeper_bash accepts typed exec" `Quick
         test_validate_args_keeper_bash_accepts_typed_exec;
       Alcotest.test_case "keeper_bash accepts typed pipeline" `Quick

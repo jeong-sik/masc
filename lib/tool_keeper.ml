@@ -56,36 +56,39 @@ let empty_text_cache ~generation =
 
 let keeper_list_cache = Atomic.make (empty_text_cache ~generation:0)
 
-(* Env-var parse fallback observability: previously the [Some _ when ...] +
-   wildcard arm silently coalesced unparseable / negative / NaN values to
-   the per-caller default. Operators setting MASC_KEEPER_LIST_CACHE_TTL_S
-   with a unit suffix ("5s") or sign typo received default 2.0s with no
-   warning. We now log + bump a closed-vocabulary counter on the fallback
-   path while preserving the return value. *)
+(* Env-var parse fallback observability. RFC-0145 demonstration site:
+   replaces [Float.of_string_opt + wildcard fallback] with
+   [Parse_outcome.parse_safe Float.of_string], which makes the failure
+   branch a *typed* [`Other exn] payload rather than an opaque [None].
+
+   The Prometheus counter is retained per RFC-0145 §Override exemption:
+   the counter remains until the full 7-site migration is complete,
+   after which the counter itself is removed in the closeout PR. *)
 let cache_ttl_seconds env_var ~default =
   match Sys.getenv_opt env_var with
   | None -> default
   | Some raw ->
       let trimmed = String.trim raw in
-      (match Float.of_string_opt trimmed with
-       | Some value when Stdlib.Float.compare value 0.0 >= 0 -> value
-       | Some _ ->
-           Prometheus.inc_counter
-             Prometheus.metric_tool_keeper_cache_ttl_parse_failures
-             ~labels:[ ("env_var", env_var); ("reason", "negative_or_nan") ]
-             ();
-           Log.Keeper.warn
-             "cache_ttl_seconds: %s=%S negative or NaN; using default %.3fs"
-             env_var trimmed default;
+      let emit_failure reason =
+        Prometheus.inc_counter
+          Prometheus.metric_tool_keeper_cache_ttl_parse_failures
+          ~labels:[ ("env_var", env_var); ("reason", reason) ]
+          ();
+        Log.Keeper.warn
+          "cache_ttl_seconds: %s=%S parse failure (%s); using default %.3fs"
+          env_var trimmed reason default
+      in
+      (match Parse_outcome.parse_safe Float.of_string trimmed with
+       | Ok value when Stdlib.Float.compare value 0.0 >= 0 -> value
+       | Ok _ ->
+           emit_failure "negative_or_nan";
            default
-       | None ->
-           Prometheus.inc_counter
-             Prometheus.metric_tool_keeper_cache_ttl_parse_failures
-             ~labels:[ ("env_var", env_var); ("reason", "invalid_float") ]
-             ();
-           Log.Keeper.warn
-             "cache_ttl_seconds: %s=%S not a float; using default %.3fs"
-             env_var trimmed default;
+       | Error (`Json_parse_error _) ->
+           (* Float.of_string never raises Yojson errors; defensive arm. *)
+           emit_failure "invalid_float";
+           default
+       | Error (`Other _) ->
+           emit_failure "invalid_float";
            default)
 
 let keeper_list_cache_ttl_s () =

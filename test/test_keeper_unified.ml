@@ -5859,7 +5859,7 @@ let test_run_keeper_cycle_records_trajectory_source_contract () =
     "livelock block has durable terminal reason"
     true
     (source_file_contains
-       "lib/keeper/keeper_unified_turn.ml"
+       "lib/keeper/keeper_unified_turn_livelock_block.ml"
        "Printf.sprintf \"turn_livelock:%s\"")
 ;;
 
@@ -6007,7 +6007,7 @@ let test_run_keeper_cycle_surfaces_side_effect_failures_source_contract () =
     true
     (source_file_contains
        "lib/keeper/keeper_turn_helpers.ml"
-       "Keeper_registry.record_error ~base_path:config.base_path");
+       "Keeper_registry_error_recording.record ~base_path:config.base_path");
   check
     bool
     "trajectory finalize is not silently ignored"
@@ -6054,7 +6054,7 @@ let test_run_keeper_cycle_surfaces_side_effect_failures_source_contract () =
     "discovery helper guards keeper setup"
     true
     (source_file_contains
-       "lib/keeper/keeper_unified_turn.ml"
+       "lib/keeper/keeper_unified_turn_pre_dispatch.ml"
        "ensure_local_discovery_ready model_labels");
   check
     bool

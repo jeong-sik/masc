@@ -583,7 +583,10 @@ let test_health_and_ci_runner_diagnostics () =
        "(enabled_if (= %{env:MASC_INCLUDE_OPERATOR_CONTROL=true} \"true\"))")
 
 let test_release_truth_contracts () =
-  (* TODO: uncomment when Doc Truth CI job is wired (#9419 follow-up) *)
+  (* TODO: uncomment when ci.yml emits the exact strings "name: Doc Truth"
+     and `check "doc-truth"   "$DOC_TRUTH_RESULT"`. The doc-truth scope
+     output + scripts/check-doc-truth.sh are wired but the workflow
+     names/aggregator-string assertions below are not yet stable. *)
   (* check bool "ci workflow defines doc truth job" true
     (file_contains_pattern ".github/workflows/ci.yml" "name: Doc Truth");
   check bool "ci workflow exports doc truth scope output" true
@@ -665,7 +668,10 @@ let test_release_truth_contracts () =
   check bool "main nightly uses retrying dependency installer" true
     (file_contains_pattern ".github/workflows/main-nightly-health.yml"
        "uses: ./.github/actions/install-ocaml-deps");
-  (* TODO: uncomment when ci_core fanout comment is added (#9419 follow-up) *)
+  (* TODO: uncomment when ci.yml adds the exact comment
+     "Note: tla is intentionally NOT forced on by ci_core." near the
+     ci_core fanout (the fanout itself exists; only the documentation
+     comment is missing). *)
   (* check bool "ci core fanout intentionally excludes tla" true
     (file_contains_pattern ".github/workflows/ci.yml"
        "Note: tla is intentionally NOT forced on by ci_core."); *)

@@ -396,6 +396,10 @@ let parse_review_verdict_from_json (args : Yojson.Safe.t) : (verdict, string) re
     | other -> Error (sprintf "unexpected review verdict value: %s" other)
   with
   | Type_error (msg, _) -> Error (sprintf "review verdict JSON type error: %s" msg)
+  (* RFC-0106 — cancellation MUST propagate; the file's other parsers
+     (see line ~244) already do this, so the catch-all here was an
+     N-of-M omission within the same module. *)
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn -> Error (sprintf "review verdict JSON parse error: %s" (Printexc.to_string exn))
 ;;
 

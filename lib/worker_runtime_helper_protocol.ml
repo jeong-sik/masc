@@ -264,5 +264,12 @@ let parse_stdout (stdout : string) :
             Ok (Error { message; kind })
         | _ -> Error "worker helper stdout did not contain ok or error")
   with
-  | Failure msg -> Error msg
+  (* Context-label the bare Failure so the operator reading the log
+     can tell a parse_stdout failure apart from any other [failwith]
+     that bubbles up from a downstream helper. *)
+  | Failure msg ->
+      Error
+        (Printf.sprintf
+           "worker helper parse_stdout: parse step raised Failure (%s)"
+           msg)
   | Yojson.Json_error msg -> Error ("invalid worker helper JSON: " ^ msg)

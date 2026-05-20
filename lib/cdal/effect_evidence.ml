@@ -48,7 +48,12 @@ let of_json (json : Yojson.Safe.t) : t =
 let of_json_list (json : Yojson.Safe.t) : (t list, string) result =
   match json with
   | `List items -> Ok (List.map of_json items)
-  | _ -> Error "expected JSON array of effect evidence records"
+  | other ->
+    Error
+      (Printf.sprintf
+         "Effect_evidence.of_json_list: expected JSON array of effect evidence \
+          records, got %s"
+         (Json_util.kind_name other))
 ;;
 
 let any_source_path_present events = List.exists is_populated events

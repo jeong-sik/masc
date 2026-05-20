@@ -44,7 +44,7 @@
   test_auth_error_kind
   test_auth_error_kind_dashboard_fallback
   test_mcp_error_code
-  test_error_body_delegation
+  test_error_body_wire_shape
   test_session_lifecycle_event
   test_fd_accountant
   test_auth_login
@@ -364,7 +364,7 @@
   test_auth_error_kind
   test_auth_error_kind_dashboard_fallback
   test_mcp_error_code
-  test_error_body_delegation
+  test_error_body_wire_shape
   test_session_lifecycle_event
   test_fd_accountant
   test_auth_login

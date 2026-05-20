@@ -43,14 +43,11 @@ let mcp_headers = Server_mcp_transport_http_headers.mcp_headers
 
 let json_headers = Server_mcp_transport_http_headers.json_headers
 
-(* RFC-0098 — typed SSOT for transport-boundary error envelopes.
-   New code should call [respond_mcp_error] with the typed
-   [Mcp_error_code.t] variant; the per-code factories below remain
-   as [@@deprecated] thin delegations during the migration window. *)
+(* RFC-0098 — typed SSOT for transport-boundary error envelopes. *)
 
 (** Pure-JSON body builder shared by [respond_mcp_error] and
-    [mcp_internal_error_json]. Splitting it out makes the wire-shape
-    diffable and testable without instantiating an [Httpun.Reqd.t]. *)
+    SSE batch builders. Splitting it out makes the wire shape diffable
+    and testable without instantiating an [Httpun.Reqd.t]. *)
 let error_body ?(id = `Null) ?data ~(code : Mcp_error_code.t) msg :
     Yojson.Safe.t =
   let error_fields =
@@ -100,14 +97,10 @@ let respond_mcp_error ?(extra_headers = []) ?data ?id
   in
   safe_respond_with_string reqd response body
 
-(* RFC-0098 PR-4 — legacy [respond_mcp_auth_error] /
-   [respond_mcp_internal_error] / [mcp_internal_error_json] removed.
-   PR-3 (#15793) migrated all 10 in-tree callers to [respond_mcp_error
-   ~code:...] / [error_body ~code:...]. The wrappers carried no
-   semantics beyond delegation and are gone. [respond_not_ready] is
-   intentionally retained — it runs before [json_headers] /
-   [session_id] are available; widening [respond_mcp_error] to the
-   pre-runtime case is a separate concern. *)
+(* [respond_not_ready] is intentionally retained outside
+   [respond_mcp_error]: it runs before [json_headers] / [session_id]
+   are available. Widening [respond_mcp_error] to the pre-runtime case
+   is a separate concern. *)
 
 let respond_not_ready ~(deps : Server_mcp_transport_http_types.deps) request reqd =
   let origin = deps.get_origin request in
@@ -162,6 +155,3 @@ let respond_sse_rate_limited ~(deps : Server_mcp_transport_http_types.deps) ~ori
   in
   let response = Httpun.Response.create ~headers `Too_many_requests in
   safe_respond_with_string reqd response body
-
-(* RFC-0098 PR-4: [mcp_internal_error_json] removed.
-   Call [error_body ~code:Mcp_error_code.Internal_error ...] directly. *)

@@ -1,13 +1,8 @@
 (** Wire-shape assertions for [error_body] — the RFC-0098 SSOT.
 
-    Originally written at PR-2 to assert *parity* between legacy
-    [mcp_internal_error_json] and the new [error_body]. PR-4 removed
-    the legacy function entirely; what remains is the standalone
-    wire-shape contract for [error_body], plus a regression guard
-    pinning the JSON-RPC 2.0 §5.1 [["id": null]] compliance fix
-    introduced in PR-2.
-
-    File name retained to keep git-blame continuity across PR-2 → PR-4. *)
+    The tests pin the standalone JSON-RPC error-body contract and the
+    JSON-RPC 2.0 §5.1 [["id": null]] compliance fix introduced in
+    PR-2. *)
 
 open Alcotest
 module R = Masc_mcp.Server_mcp_transport_http_respond
@@ -106,7 +101,7 @@ let test_wire_byte_change_documented () =
        must include id:null per JSON-RPC 2.0 §5.1"
 
 let () =
-  Alcotest.run "Error_body_delegation"
+  Alcotest.run "Error_body_wire_shape"
     [
       ( "error_body wire shape",
         [

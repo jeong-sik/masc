@@ -104,6 +104,33 @@ let add_required_evidence_only_task config =
   | Some t -> t.id
   | None -> Alcotest.fail "new task not found after add_task"
 
+let add_placeholder_evidence_task config =
+  let existing_ids =
+    Coord.read_backlog config
+    |> fun backlog -> List.map (fun (t : Masc_domain.task) -> t.id) backlog.tasks
+  in
+  let contract : Masc_domain.task_contract = {
+    strict = true;
+    completion_contract = ["tests pass"];
+    required_tools = [];
+    required_evidence = ["completion_notes"];
+    inspect_gate_evidence = [];
+    verify_gate_evidence = ["pr_url_or_artifact_ref"];
+    links = { operation_id = None; session_id = None; autoresearch_loop_id = None };
+  } in
+  let _msg =
+    Coord.add_task ~contract config ~title:"placeholder evidence task"
+      ~priority:3 ~description:"placeholder evidence must not open verification"
+  in
+  let backlog = Coord.read_backlog config in
+  match
+    List.find_opt
+      (fun (t : Masc_domain.task) -> not (List.mem t.id existing_ids))
+      backlog.tasks
+  with
+  | Some t -> t.id
+  | None -> Alcotest.fail "new task not found after add_task"
+
 let claim_and_start config agent_name task_id =
   let _ = Coord.transition_task_r config ~agent_name ~task_id
     ~action:Masc_domain.Claim () in
@@ -263,6 +290,33 @@ let test_submit_prepare_failure_keeps_task_in_progress () =
           r.task_id = task_id)
       in
       Alcotest.(check int) "no orphan request" 0 (List.length reqs))
+
+let test_submit_rejects_placeholder_evidence_before_request () =
+  with_temp_config ~fsm_enabled:true (fun config ->
+    let task_id = add_placeholder_evidence_task config in
+    claim_and_start config "worker" task_id;
+    let prepare_called = ref false in
+    let result =
+      Coord.transition_task_r config ~agent_name:"worker"
+        ~task_id ~action:Masc_domain.Submit_for_verification
+        ~notes:"implementation complete"
+        ~prepare_verification_request:
+          (fun ~task:_ ~assignee:_ ~verification_id:_ ~evidence_refs:_ ->
+             prepare_called := true;
+             Ok ())
+        ()
+    in
+    match result with
+    | Ok _ -> Alcotest.fail "submit should reject placeholder-only evidence"
+    | Error e ->
+      Alcotest.(check bool) "prepare not called" false !prepare_called;
+      Alcotest.(check string) "status remains in_progress" "in_progress"
+        (status_string config task_id);
+      let msg = Masc_domain.show_masc_error e in
+      Alcotest.(check bool) "error mentions evidence" true
+        (Astring.String.is_infix
+           ~affix:"requires verification evidence"
+           msg))
 
 let test_submit_retry_records_request_created_backlog_orphan_policy () =
   with_temp_config ~fsm_enabled:true (fun config ->
@@ -980,6 +1034,8 @@ let () =
         `Quick test_submit_for_verification_from_claimed_moves_to_awaiting;
       Alcotest.test_case "submit prepare failure keeps task in_progress"
         `Quick test_submit_prepare_failure_keeps_task_in_progress;
+      Alcotest.test_case "submit rejects placeholder evidence before request"
+        `Quick test_submit_rejects_placeholder_evidence_before_request;
       Alcotest.test_case
         "submit retry records request-created backlog orphan policy"
         `Quick

@@ -78,6 +78,10 @@ let persist_turn_livelock_pause
   let updated =
     { meta with
       paused = true
+    ; auto_resume_after_sec =
+        Keeper_supervisor_pause_policy.auto_resume_after_sec_for_policy
+          meta
+          Keeper_supervisor_pause_policy.Auto_resume_with_backoff
     ; updated_at = Keeper_types.now_iso ()
     ; runtime = { meta.runtime with last_blocker = Some blocker }
     }

@@ -500,6 +500,10 @@ let pause_keeper_for_overflow
     {
       meta with
       paused = true;
+      auto_resume_after_sec =
+        Keeper_supervisor_pause_policy.auto_resume_after_sec_for_policy
+          meta
+          Keeper_supervisor_pause_policy.Auto_resume_with_backoff;
       updated_at = now_iso ();
     }
   in
@@ -695,7 +699,13 @@ let make_post_turn_resilience_executor
       (Some
          (Keeper_registry.Provider_runtime_error
             { code; detail; provider_id = None; http_status = None }));
-    match sync_keeper_paused_state ~config ~meta:latest_meta ~paused:true with
+    match
+      sync_keeper_paused_state_with_resume_policy
+        ~config
+        ~meta:latest_meta
+        ~paused:true
+        ~resume_policy:Keeper_supervisor_pause_policy.Auto_resume_with_backoff
+    with
     | Ok paused_meta ->
         on_paused paused_meta;
         Ok ()

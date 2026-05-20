@@ -2,7 +2,8 @@
 ; masc_mcp namespace. Stacked on Phase 1D (briefing_compactors).
 ;
 ; Dashboard_eval_feed is dependency-leaf: stdlib + Yojson + Agent_sdk
-; (external) + Json_util/Safe_ops (masc_core sub-library). 178+59 LoC,
+; (external) + Json_util/Safe_ops (masc_core sub-library) + Eio.Cancel
+; for cancellation re-raise (added 2026-05-20 with #16802). 178+59 LoC,
 ; fan-in 5 (3 lib + 1 test, all callers verified leaf-clean against
 ; the new sub-library boundary).
 ;
@@ -18,4 +19,6 @@
  (libraries
   yojson
   agent_sdk
+  eio
+  masc_log
   masc_core))

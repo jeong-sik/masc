@@ -1,4 +1,5 @@
 import type { KeeperCompositeSnapshot } from '../api/keeper'
+import { isCrashedPhase } from '../lib/keeper-predicates'
 import { unixSecondsToDate } from '../lib/format-time'
 
 import {
@@ -140,7 +141,7 @@ export function inferTransitionReason(field: string, from: string, to: string): 
     if (to === 'Compacting') return 'KSM 이 lifecycle 차원에서 compaction 진입'
     if (to === 'HandingOff') return '키퍼 인계 시작 — 다른 keeper 로 전환 준비'
     if (to === 'Failing') return '연속 실패 임계 도달 — 다음 fail 시 Crashed 가능'
-    if (to === 'Crashed' || to === 'Dead') return '비정상 종료 — restart 정책 확인'
+    if (isCrashedPhase(to)) return '비정상 종료 — restart 정책 확인'
   }
   if (field === 'KDP') {
     if (from === 'undecided' && to === 'guard_ok') return '안전 가드 모두 통과 — 도구 실행 단계로 진행'

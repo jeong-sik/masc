@@ -35,13 +35,18 @@ let load_error_to_string = function
 (* File I/O helpers                                                  *)
 (* ================================================================ *)
 
+(* [File_not_found] carries the original [Sys_error] message so the
+   operator log preserves *why* the read failed (permission denied,
+   bad path syntax, dangling symlink, ENOSPC on a temp probe, …)
+   rather than collapsing every cause to a single "not found" label.
+   The path itself is supplied by the caller via [Result.map_error]. *)
 type read_error =
-  | File_not_found
+  | File_not_found of string
   | Parse_error of string
 
 let read_json_file path =
   try Ok (Yojson.Safe.from_file path) with
-  | Sys_error _ -> Error File_not_found
+  | Sys_error msg -> Error (File_not_found msg)
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn -> Error (Parse_error (Printexc.to_string exn))
 ;;
@@ -63,7 +68,8 @@ let load
   let* manifest_json =
     read_json_file manifest_path
     |> Result.map_error (function
-      | File_not_found -> Manifest_not_found manifest_path
+      | File_not_found reason ->
+        Manifest_not_found (Printf.sprintf "%s (%s)" manifest_path reason)
       | Parse_error msg -> Manifest_parse_error msg)
   in
   let* manifest_proof =
@@ -87,7 +93,8 @@ let load
     let* contract_json =
       read_json_file contract_path
       |> Result.map_error (function
-        | File_not_found -> Contract_not_found contract_path
+        | File_not_found reason ->
+          Contract_not_found (Printf.sprintf "%s (%s)" contract_path reason)
         | Parse_error msg -> Contract_parse_error msg)
     in
     (* 4. Decode contract with Agent_sdk *)

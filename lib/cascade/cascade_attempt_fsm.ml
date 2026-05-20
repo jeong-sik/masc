@@ -895,7 +895,7 @@ let emit_sdk_provider_error_metric ~cascade_name ~provider err =
    semantics ("the 429 still happened, so cool down at least the
    default") are maintained centrally. *)
 (* [Provider.CapacityExhausted] is a typed signal that the provider rejected
-   the request for capacity reasons (slot full, model overloaded, region
+   the request for capacity reasons (capacity full, model overloaded, region
    throttled). One event is enough evidence to deprioritize the provider
    for the rest of the cycle — the same logic that justifies
    [sdk_error_soft_rate_limited]'s immediate-cooldown handling (see

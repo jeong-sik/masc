@@ -17,7 +17,6 @@ type provider_outcome =
   | Call_err of Llm_provider.Http_client.http_error [@tla.symbol "call_err"]
   | Accept_rejected of { response : Llm_provider.Types.api_response; reason : string }
       [@tla.symbol "accept_rejected"]
-  | Slot_full [@tla.symbol "slot_full"]
 [@@deriving tla]
 
 (** {1 Cascade decision — what to do next} *)
@@ -51,8 +50,7 @@ val decide :
     - [Accept_rejected _] on last + not exhaustion → [Exhausted]
     - [Accept_rejected _] on non-last → [Try_next]
     - [Call_err _] on cascadeable error → [Try_next]
-    - [Call_err _] on non-cascadeable error → [Exhausted]
-    - [Slot_full] → [Try_next] *)
+    - [Call_err _] on non-cascadeable error → [Exhausted] *)
 
 val decide_and_record :
   cascade_name:string ->
@@ -82,7 +80,7 @@ val format_exhausted_error :
 
 val provider_outcome_to_string : provider_outcome -> string
 (** Short label for a provider outcome: ["call-ok"], ["call-err"],
-    ["accept-rejected"], ["slot-full"]. *)
+    ["accept-rejected"]. *)
 
 val provider_outcome_option_to_string : provider_outcome option -> string
 (** Same as [provider_outcome_to_string] wrapped with ["some-"] or ["none"].

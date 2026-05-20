@@ -29,7 +29,7 @@
     - [Ordered]: strategy returned a non-empty candidate list; the caller
       proceeded with the FSM.
     - [Filtered_empty]: strategy filtered every candidate (e.g. every
-      provider in cooldown or slot-full); caller will backoff + retry.
+      provider in cooldown or capacity backpressure); caller will backoff + retry.
     - [Exhausted]: [Filtered_empty] on the last cycle, so the cascade
       gave up and returned the exhaustion error. *)
 type event_kind = Ordered | Filtered_empty | Exhausted

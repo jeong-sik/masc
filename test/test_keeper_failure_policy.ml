@@ -51,7 +51,6 @@ let test_operational_timeout_phase_aliases () =
       "stream_idle", Policy.Stream_idle Policy.Streaming_unknown;
       "max_execution_time", Policy.Wall_clock;
       "capacity_exhausted", Policy.Capacity_backpressure;
-      "slot-full", Policy.Capacity_backpressure;
     ]
   in
   List.iter

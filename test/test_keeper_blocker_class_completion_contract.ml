@@ -100,6 +100,13 @@ let test_turn_livelock_text_maps () =
       fail ("turn livelock mapped to " ^ KT.blocker_class_to_string other)
   | None -> fail "turn livelock returned None"
 
+let test_capacity_backpressure_text_maps () =
+  check_capacity_class
+    "capacity-exhausted text"
+    (B.blocker_class_of_string
+       "Internal error: [masc_oas_error] {\"kind\":\"capacity_exhausted\",\
+        \"detail\":\"client capacity key glm is full\"}")
+
 let test_legacy_cascade_slot_full_text_stays_cascade_exhausted () =
   check_cascade_class
     "legacy cascade slot-full text"
@@ -130,7 +137,6 @@ let test_capacity_backpressure_runtime_surface_preserves_legacy_cascade_class ()
   in
   check string "runtime blocker class" "cascade_exhausted"
     surface.blocker_class
-
 let () =
   run "keeper_blocker_class_completion_contract"
     [
@@ -157,6 +163,8 @@ let () =
           test_case "turn livelock text maps" `Quick test_turn_livelock_text_maps;
           test_case "legacy cascade slot-full text stays cascade_exhausted" `Quick
             test_legacy_cascade_slot_full_text_stays_cascade_exhausted;
+          test_case "capacity backpressure text maps" `Quick
+            test_capacity_backpressure_text_maps;
           test_case "capacity backpressure SDK error maps" `Quick
             test_capacity_backpressure_sdk_error_maps;
           test_case "capacity backpressure runtime surface preserves legacy cascade class" `Quick

@@ -474,10 +474,29 @@ describe('classifyCoverageError', () => {
     expect(classifyCoverageError('TOO MANY OPEN FILES')?.reason).toBe('fd_exhaustion')
   })
 
-  it('returns null for unrelated errors (disk full, network, etc.)', () => {
-    expect(classifyCoverageError('disk full')).toBeNull()
+  it('detects ENOSPC / disk-full → RFC-0122 disk_exhaustion hint', () => {
+    const hint = classifyCoverageError(
+      'Sys_error("Eio.Io Unix_error (No space left on device, \\"write\\", \\"...\\")")',
+    )
+    expect(hint).not.toBeNull()
+    expect(hint?.reason).toBe('disk_exhaustion')
+    expect(hint?.href).toContain('RFC-0122')
+    expect(hint?.label).toMatch(/RFC-0122/)
+  })
+
+  it('detects disk-pressure substrings shared with backend SSOT', () => {
+    // Mirrors lib/keeper_disk_pressure.ml `is_disk_exhaustion_text` vocabulary
+    expect(classifyCoverageError('disk full')?.reason).toBe('disk_exhaustion')
+    expect(classifyCoverageError('ENOSPC on append')?.reason).toBe('disk_exhaustion')
+    expect(classifyCoverageError('Disk quota exceeded')?.reason).toBe('disk_exhaustion')
+    expect(classifyCoverageError('quota exceeded')?.reason).toBe('disk_exhaustion')
+    expect(classifyCoverageError('not enough space available')?.reason).toBe('disk_exhaustion')
+  })
+
+  it('returns null for unrelated errors (network, permission, etc.)', () => {
     expect(classifyCoverageError('connection refused')).toBeNull()
     expect(classifyCoverageError('append denied')).toBeNull()
+    expect(classifyCoverageError('permission denied')).toBeNull()
   })
 })
 

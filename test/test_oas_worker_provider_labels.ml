@@ -133,6 +133,25 @@ let provider_timeout ?(is_last = false) ?configured provider_cfg =
     candidate
 ;;
 
+let provider_timeout_resolution ?(is_last = false) ?configured provider_cfg =
+  let candidate = Cascade_runtime_candidate.of_provider_config provider_cfg in
+  Cascade_runtime_candidate.effective_attempt_timeout_resolution
+    ~is_last
+    ~configured_timeout_s:configured
+    candidate
+;;
+
+let check_timeout_resolution label expected_timeout expected_source actual =
+  check_timeout_opt
+    (label ^ " timeout")
+    expected_timeout
+    actual.Cascade_runtime_candidate.timeout_s;
+  Alcotest.(check string)
+    (label ^ " source")
+    expected_source
+    actual.Cascade_runtime_candidate.source
+;;
+
 let test_provider_attempt_timeout_passes_claude_code_configured_timeout () =
   check_timeout_opt
     "claude_code configured attempt timeout passes through"
@@ -175,6 +194,30 @@ let test_provider_attempt_timeout_passes_final_configured_timeout () =
     (provider_timeout
        ~is_last:true
        ~configured:300.0
+       (make_openai_compat_provider_cfg ~base_url:"https://api.example.test/v1" ()))
+;;
+
+let test_provider_attempt_timeout_resolution_sources () =
+  check_timeout_resolution
+    "claude_code configured timeout"
+    (Some 300.0)
+    "configured_per_provider_timeout"
+    (provider_timeout_resolution ~configured:300.0 (make_claude_code_provider_cfg ()));
+  check_timeout_resolution
+    "ollama lifted configured timeout"
+    (Some local_runtime_timeout_floor_s)
+    "configured_lifted_to_local_runtime_floor"
+    (provider_timeout_resolution ~configured:60.0 (make_ollama_provider_cfg ()));
+  check_timeout_resolution
+    "ollama default timeout"
+    (Some local_runtime_timeout_floor_s)
+    "local_runtime_floor"
+    (provider_timeout_resolution (make_ollama_provider_cfg ()));
+  check_timeout_resolution
+    "openai compat unset timeout"
+    None
+    "unset_oas_default"
+    (provider_timeout_resolution
        (make_openai_compat_provider_cfg ~base_url:"https://api.example.test/v1" ()))
 ;;
 
@@ -240,6 +283,10 @@ let cases =
       "provider timeout passes final configured timeout"
       `Quick
       test_provider_attempt_timeout_passes_final_configured_timeout
+  ; Alcotest.test_case
+      "provider timeout resolution records bounded source labels"
+      `Quick
+      test_provider_attempt_timeout_resolution_sources
   ; Alcotest.test_case
       "cascade provider labels preserve registered openai_compat family"
       `Quick

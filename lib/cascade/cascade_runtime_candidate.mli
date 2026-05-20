@@ -54,6 +54,17 @@ val provider_label : t -> string
 val first_health_cooldown : t -> (string * string) option
 val has_recovery_evidence : t -> bool
 
+type attempt_timeout_resolution =
+  { timeout_s : float option
+  ; source : string
+  }
+
+val effective_attempt_timeout_resolution :
+  is_last:bool -> configured_timeout_s:float option -> t -> attempt_timeout_resolution
+(** Effective attempt timeout plus bounded source label for runtime manifests.
+    Source labels are policy provenance only; they must not expose concrete
+    provider or model identifiers. *)
+
 val effective_attempt_timeout_s :
   is_last:bool -> configured_timeout_s:float option -> t -> float option
 (** Effective attempt timeout passed to OAS for this candidate. Local runtime

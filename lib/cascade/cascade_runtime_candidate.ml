@@ -351,12 +351,40 @@ let has_recovery_evidence candidate =
 let local_runtime_attempt_timeout_floor_s =
   Cascade_attempt_liveness.bootstrap.attempt_wall_max
 
-let effective_attempt_timeout_s ~is_last:_ ~configured_timeout_s candidate =
+type attempt_timeout_resolution =
+  { timeout_s : float option
+  ; source : string
+  }
+
+let effective_attempt_timeout_resolution ~is_last:_ ~configured_timeout_s candidate =
   if Llm_provider.Provider_config.is_local candidate.provider_cfg then
     match configured_timeout_s with
-    | None -> Some local_runtime_attempt_timeout_floor_s
-    | Some timeout_s -> Some (Float.max timeout_s local_runtime_attempt_timeout_floor_s)
-  else configured_timeout_s
+    | None ->
+      { timeout_s = Some local_runtime_attempt_timeout_floor_s
+      ; source = "local_runtime_floor"
+      }
+    | Some timeout_s when timeout_s < local_runtime_attempt_timeout_floor_s ->
+      { timeout_s = Some local_runtime_attempt_timeout_floor_s
+      ; source = "configured_lifted_to_local_runtime_floor"
+      }
+    | Some timeout_s ->
+      { timeout_s = Some timeout_s
+      ; source = "configured_per_provider_timeout"
+      }
+  else
+    match configured_timeout_s with
+    | None -> { timeout_s = None; source = "unset_oas_default" }
+    | Some timeout_s ->
+      { timeout_s = Some timeout_s
+      ; source = "configured_per_provider_timeout"
+      }
+
+let effective_attempt_timeout_s ~is_last ~configured_timeout_s candidate =
+  (effective_attempt_timeout_resolution
+     ~is_last
+     ~configured_timeout_s
+     candidate)
+    .timeout_s
 
 let resolve_tool_lane_for_oas_tools
     ?agent_name

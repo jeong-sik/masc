@@ -389,6 +389,10 @@ let test_json_roundtrip () =
             ("provider_kind", `String "openai");
             ("model_id", `String "gpt-test");
             ("response_model", `String "gpt-test");
+            ("per_provider_timeout_s", `Float 12.5);
+            ("attempt_timeout_s", `Float 12.5);
+            ("attempt_timeout_source", `String "configured_per_provider_timeout");
+            ("attempt_watchdog_source", `String "liveness_observer_enforce");
       ])
       ~receipt_path:"/tmp/receipt.jsonl" ~checkpoint_path:"/tmp/checkpoint.json"
       ~tool_call_log_path:"/tmp/tool-calls.jsonl" ()
@@ -437,6 +441,22 @@ let test_json_roundtrip () =
         "manifest decision omits response model"
         false
         (json_has_key "response_model" emitted_decision);
+      Alcotest.(check bool)
+        "manifest decision omits retired per-provider timeout key"
+        false
+        (json_has_key "per_provider_timeout_s" emitted_decision);
+      Alcotest.(check bool)
+        "manifest decision preserves attempt timeout"
+        true
+        (json_has_key "attempt_timeout_s" emitted_decision);
+      Alcotest.(check bool)
+        "manifest decision preserves attempt timeout source"
+        true
+        (json_has_key "attempt_timeout_source" emitted_decision);
+      Alcotest.(check bool)
+        "manifest decision preserves attempt watchdog source"
+        true
+        (json_has_key "attempt_watchdog_source" emitted_decision);
       let retired_top_level_json =
         `Assoc
           [

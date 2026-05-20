@@ -1042,17 +1042,57 @@ let run_named
         | `Full _ -> None
       in
       Log.Misc.debug "cascade %s: trying %s (is_last=%b)" cascade_name runtime_candidate_label is_last;
-      let pp_timeout =
-        Cascade_runtime_candidate.effective_attempt_timeout_s
+      let timeout_resolution =
+        Cascade_runtime_candidate.effective_attempt_timeout_resolution
           ~is_last
           ~configured_timeout_s:per_provider_timeout_s
           candidate
+      in
+      let pp_timeout = timeout_resolution.timeout_s in
+      let liveness_mode = Cascade_attempt_liveness_config.current_mode () in
+      let liveness_observer_attached =
+        match liveness_mode with
+        | Cascade_attempt_liveness_config.Off -> false
+        | Cascade_attempt_liveness_config.Observe
+        | Cascade_attempt_liveness_config.Enforce ->
+          true
+      in
+      let attempt_watchdog_source =
+        match liveness_mode, liveness_observer_attached, pp_timeout with
+        | Cascade_attempt_liveness_config.Enforce, true, _ ->
+          "liveness_observer_enforce"
+        | Cascade_attempt_liveness_config.Observe, true, Some _ ->
+          "legacy_outer_wall_observe_liveness"
+        | Cascade_attempt_liveness_config.Observe, true, None ->
+          "oas_max_execution_time_observe_liveness"
+        | Cascade_attempt_liveness_config.Off, _, Some _ -> "legacy_outer_wall"
+        | Cascade_attempt_liveness_config.Off, _, None -> "oas_max_execution_time"
+        | Cascade_attempt_liveness_config.Enforce, false, Some _ -> "legacy_outer_wall"
+        | Cascade_attempt_liveness_config.Enforce, false, None ->
+          "oas_max_execution_time"
+      in
+      let liveness_budget_source =
+        if liveness_observer_attached then (
+          let resolved_budget =
+            Cascade_attempt_liveness_config.budget_for_candidate
+              ~candidate_key:Cascade_attempt_liveness_config.runtime_candidate_key
+          in
+          Some
+            (Cascade_attempt_liveness_config.budget_source_label
+               resolved_budget.source))
+        else
+          None
       in
       let attempt_started_at = Unix.gettimeofday () in
       let started_record =
         { started_provenance = provider_attempt_provenance
         ; started_is_last = is_last
         ; started_per_provider_timeout_s = pp_timeout
+        ; started_attempt_timeout_source = timeout_resolution.source
+        ; started_attempt_watchdog_source = attempt_watchdog_source
+        ; started_liveness_mode =
+            Cascade_attempt_liveness_config.mode_label liveness_mode
+        ; started_liveness_budget_source = liveness_budget_source
         }
       in
       let provider_attempt_finished_emitted = ref false in

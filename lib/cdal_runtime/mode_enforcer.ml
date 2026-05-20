@@ -7,6 +7,17 @@ type tool_effect_class =
 (* Backward-compatible alias. *)
 type mutation_class = tool_effect_class
 
+(* Kind-name helper for parse-error diagnostics.  [lib/cdal_runtime/] is
+   intentionally decoupled from [masc_core] (RFC-OAS-011 producer-side
+   isolation), so [Json_util.kind_name] is not reachable without breaking
+   the leaf-isolation invariant.  The sibling [Effect_evidence] module
+   in this same sub-library already exposes a [json_kind_name : Yojson.Safe.t
+   -> string] (line ~178); reuse it instead of inlining a second copy,
+   to keep the sub-library to a single SSOT for this diagnostic surface.
+   A yojson-only micro-leaf library (lib/shared_types/json_kind.ml,
+   noted in PR #16915) would lift this further once available. *)
+let json_kind_name = Effect_evidence.json_kind_name
+
 type violation_kind =
   | Mutating_in_diagnose
   | External_in_draft
@@ -29,7 +40,15 @@ let violation_kind_to_yojson v = `String (violation_kind_to_string v)
 
 let violation_kind_of_yojson = function
   | `String s -> violation_kind_of_string s
-  | j -> Error (Printf.sprintf "expected string, got %s" (Yojson.Safe.to_string j))
+  | other ->
+    (* Report kind only; the previous [Yojson.Safe.to_string j] form
+       inlined the full payload which can be arbitrarily large
+       (e.g. an [`Assoc] with nested arrays) and pollutes the error
+       string and any downstream log line. *)
+    Error
+      (Printf.sprintf
+         "violation_kind_of_yojson: expected JSON string (kind=%s)"
+         (json_kind_name other))
 ;;
 
 type violation =
@@ -68,8 +87,48 @@ let violation_of_yojson = function
         | Ok effective_mode, Ok violation_kind ->
           Ok { ts; tool_name; input_summary; effective_mode; violation_kind }
         | Error e, _ | _, Error e -> Error e)
-     | _ -> Error "missing or invalid fields in violation")
-  | _ -> Error "violation: expected JSON object"
+     | _ ->
+       (* Per-field status so the operator reading the parse failure
+          sees exactly which field caused the 5-tuple match to fall
+          through.  [ts] must be a [`Float]; [tool_name] /
+          [input_summary] must be [`String]; [effective_mode] and
+          [violation_kind] must be present (any JSON, parsed
+          downstream).  The previous "missing or invalid fields"
+          string conflated all of these into a single message. *)
+       let float_field_status name =
+         match List.assoc_opt name fields with
+         | Some (`Float _) -> "ok"
+         | Some other -> Printf.sprintf "wrong-kind=%s" (json_kind_name other)
+         | None -> "missing"
+       in
+       let string_field_status name =
+         match List.assoc_opt name fields with
+         | Some (`String _) -> "ok"
+         | Some other -> Printf.sprintf "wrong-kind=%s" (json_kind_name other)
+         | None -> "missing"
+       in
+       let presence_status name =
+         match List.assoc_opt name fields with
+         | Some _ -> "present"
+         | None -> "missing"
+       in
+       Error
+         (Printf.sprintf
+            "violation: field status — ts=%s, tool_name=%s, \
+             input_summary=%s, effective_mode=%s, violation_kind=%s \
+             (ts must be a JSON number; tool_name/input_summary must \
+             be JSON strings; effective_mode/violation_kind accept any \
+             JSON and are parsed downstream)"
+            (float_field_status "ts")
+            (string_field_status "tool_name")
+            (string_field_status "input_summary")
+            (presence_status "effective_mode")
+            (presence_status "violation_kind")))
+  | other ->
+    Error
+      (Printf.sprintf
+         "violation_of_yojson: expected JSON object (kind=%s)"
+         (json_kind_name other))
 ;;
 
 type token_snapshot =

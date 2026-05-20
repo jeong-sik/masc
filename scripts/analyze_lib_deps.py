@@ -6,20 +6,44 @@ fan-in/fan-out audit that prioritizes future sub-library extractions).
 
 Usage:
     python3 scripts/analyze_lib_deps.py [--json] [--cycles] [--clusters]
+    python3 scripts/analyze_lib_deps.py --json --no-write  # JSON to stdout
+    python3 scripts/analyze_lib_deps.py --json-out /tmp/graph.json
     python3 scripts/analyze_lib_deps.py --self-test   # regression guard
 """
 
+import argparse
+import json
 import re
 import sys
-import json
 from collections import defaultdict
 from pathlib import Path
+from typing import TypedDict
 
 ROOT = Path(__file__).resolve().parent.parent
 LIB_DIR = ROOT / "lib"
 
 # Sub-library directories (already extracted, skip these)
 SUB_LIBRARY_DIRS: set[str] = set()
+
+
+class DependencyStats(TypedDict):
+    total_modules: int
+    total_edges: int
+    avg_out_degree: float
+    top_importers: list[tuple[str, int]]
+    top_imported: list[tuple[str, int]]
+    leaf_count: int
+    root_count: int
+    roots_sample: list[str]
+
+
+class ClusterCandidate(TypedDict):
+    prefix: str
+    module_count: int
+    members: list[str]
+    internal_edges: int
+    external_dep_count: int
+    coupling_ratio: float
 
 
 def discover_sub_libraries() -> None:
@@ -262,7 +286,7 @@ def find_cycles(graph: dict[str, set[str]]) -> list[list[str]]:
 
 def compute_stats(
     graph: dict[str, set[str]],
-) -> dict[str, object]:
+) -> DependencyStats:
     """Compute dependency statistics."""
     in_degree: dict[str, int] = defaultdict(int)
     out_degree: dict[str, int] = {}
@@ -303,7 +327,7 @@ def compute_stats(
 def identify_clusters(
     graph: dict[str, set[str]],
     modules: dict[str, Path],
-) -> list[dict[str, object]]:
+) -> list[ClusterCandidate]:
     """Identify potential sub-library extraction candidates by prefix."""
     prefix_groups: dict[str, list[str]] = defaultdict(list)
 
@@ -316,7 +340,7 @@ def identify_clusters(
             prefix_groups[prefix].append(ocaml_name)
 
     # Filter to groups with 3+ modules
-    candidates = []
+    candidates: list[ClusterCandidate] = []
     for prefix, members in sorted(prefix_groups.items(), key=lambda x: -len(x[1])):
         if len(members) < 3:
             continue
@@ -344,6 +368,47 @@ def identify_clusters(
         })
 
     return sorted(candidates, key=lambda x: (-x["coupling_ratio"], -x["module_count"]))
+
+
+def graph_json(
+    *,
+    graph: dict[str, set[str]],
+    modules: dict[str, Path],
+    stats: DependencyStats,
+) -> dict[str, object]:
+    return {
+        "stats": {
+            "total_modules": stats["total_modules"],
+            "total_edges": stats["total_edges"],
+            "avg_out_degree": stats["avg_out_degree"],
+            "leaf_count": stats["leaf_count"],
+            "root_count": stats["root_count"],
+        },
+        "top_imported": stats["top_imported"],
+        "top_importers": stats["top_importers"],
+        "cycles": find_cycles(graph),
+        "clusters": identify_clusters(graph, modules),
+        "graph": {k: sorted(v) for k, v in graph.items()},
+    }
+
+
+def parse_args(argv: list[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Analyze dependency edges in the flat masc_mcp library."
+    )
+    parser.add_argument("--json", action="store_true",
+                        help="Write graph JSON to reports/lib-dependency-graph.json.")
+    parser.add_argument("--json-out", type=Path,
+                        help="Write graph JSON to this path instead of the default report path.")
+    parser.add_argument("--no-write", action="store_true",
+                        help="With --json, emit machine-readable JSON to stdout and do not write reports.")
+    parser.add_argument("--cycles", action="store_true",
+                        help="Print circular dependency summary in the human report.")
+    parser.add_argument("--clusters", action="store_true",
+                        help="Print extraction candidates in the human report.")
+    parser.add_argument("--self-test", action="store_true",
+                        help="Run analyzer self-test and exit.")
+    return parser.parse_args(argv)
 
 
 # Regression floor: the flat `masc_mcp` namespace has had 600+ modules for the
@@ -384,17 +449,24 @@ def run_self_test() -> int:
 
 
 def main() -> None:
-    args = set(sys.argv[1:])
+    args = parse_args(sys.argv[1:])
 
-    if "--self-test" in args:
+    if args.self_test:
         sys.exit(run_self_test())
 
     discover_sub_libraries()
+    modules = get_monolith_modules()
+    graph = build_dependency_graph(modules)
+    stats = compute_stats(graph)
+
+    if args.no_write and (args.json or args.json_out is not None):
+        print(json.dumps(graph_json(graph=graph, modules=modules, stats=stats), indent=2))
+        return
+
     print(f"Sub-libraries already extracted: {len(SUB_LIBRARY_DIRS)}")
     print(f"  {', '.join(sorted(SUB_LIBRARY_DIRS))}")
     print()
 
-    modules = get_monolith_modules()
     print(f"Flat-namespace modules (absorbed into masc_mcp): {len(modules)}")
 
     missing = [n for n, p in modules.items() if not p.exists()]
@@ -402,9 +474,6 @@ def main() -> None:
         print(f"  Missing .ml files: {len(missing)}")
 
     print()
-
-    graph = build_dependency_graph(modules)
-    stats = compute_stats(graph)
 
     print("=== Dependency Statistics ===")
     print(f"Total modules: {stats['total_modules']}")
@@ -424,7 +493,7 @@ def main() -> None:
         print(f"  {name}: {count} dependencies")
     print()
 
-    if "--cycles" in args or "--json" not in args:
+    if args.cycles or not (args.json or args.json_out is not None):
         cycles = find_cycles(graph)
         print("=== Circular Dependencies ===")
         print(f"Strongly connected components (cycles): {len(cycles)}")
@@ -432,7 +501,7 @@ def main() -> None:
             print(f"  SCC {i+1} ({len(scc)} modules): {', '.join(scc[:8])}{'...' if len(scc) > 8 else ''}")
         print()
 
-    if "--clusters" in args or "--json" not in args:
+    if args.clusters or not (args.json or args.json_out is not None):
         clusters = identify_clusters(graph, modules)
         print("=== Extraction Candidates (prefix-based, 3+ modules) ===")
         for c in clusters[:15]:
@@ -443,22 +512,9 @@ def main() -> None:
             )
         print()
 
-    if "--json" in args:
-        output = {
-            "stats": {
-                "total_modules": stats["total_modules"],
-                "total_edges": stats["total_edges"],
-                "avg_out_degree": stats["avg_out_degree"],
-                "leaf_count": stats["leaf_count"],
-                "root_count": stats["root_count"],
-            },
-            "top_imported": stats["top_imported"],
-            "top_importers": stats["top_importers"],
-            "cycles": find_cycles(graph),
-            "clusters": identify_clusters(graph, modules),
-            "graph": {k: sorted(v) for k, v in graph.items()},
-        }
-        json_path = ROOT / "reports" / "lib-dependency-graph.json"
+    if args.json or args.json_out is not None:
+        output = graph_json(graph=graph, modules=modules, stats=stats)
+        json_path = args.json_out or ROOT / "reports" / "lib-dependency-graph.json"
         json_path.parent.mkdir(parents=True, exist_ok=True)
         json_path.write_text(json.dumps(output, indent=2))
         print(f"Full graph written to {json_path}")

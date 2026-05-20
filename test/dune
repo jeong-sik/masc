@@ -2179,7 +2179,7 @@
 (test
  (name test_pr_i_2d_output_validation_transformer)
  (modules test_pr_i_2d_output_validation_transformer)
- (libraries masc_test_deps))
+ (libraries alcotest masc_mcp masc_mcp.tool_types))
 
 ; RFC-0084 PR-I-2.e — server_bootstrap_loops typed post-hook
 ; migration.  Last of 5 observer migrations.  Also pins the sum
@@ -2248,7 +2248,7 @@
 (test
  (name test_rfc_0085_pr5_dispatch_emit)
  (modules test_rfc_0085_pr5_dispatch_emit)
- (libraries alcotest ast_grep masc_test_deps))
+ (libraries alcotest ast_grep masc_mcp masc_mcp.tool_types unix))
 
 ; RFC-0085 PR-8 — config_dir_resolver + tool_code_write env-derived
 ; path reads routed through Host_config.from_env; Env_config_core

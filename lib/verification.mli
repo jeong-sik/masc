@@ -46,6 +46,8 @@ type verification_request = {
 
 val request_to_yojson : verification_request -> Yojson.Safe.t
 val request_of_yojson : Yojson.Safe.t -> (verification_request, string) result
+val request_status_is_actionable : request_status -> bool
+val request_is_actionable : verification_request -> bool
 
 (** {1 Evaluation} *)
 

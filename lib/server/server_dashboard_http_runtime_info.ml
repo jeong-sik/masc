@@ -650,8 +650,7 @@ let runtime_resolution_json (config : Coord.config) =
   let server_repo_path = Build_identity.repo_root () in
   let server_repo_commit = Option.bind server_repo_path git_rev_parse_short in
   let upstream_status =
-    server_repo_path
-    |> Option.bind (fun path -> git_upstream_status path)
+    Option.bind server_repo_path git_upstream_status
     |> Option.value ~default:empty_git_upstream_status
   in
   let workspace_commit = git_rev_parse_short config.workspace_path in

@@ -3,7 +3,13 @@ import { render } from 'preact'
 import { act } from 'preact/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ToolQualityResponse } from '../api/dashboard'
-import { classifyCoverageError, filterTools, toolMatchesSearch } from './tool-quality-panel'
+import {
+  classifyCoverageError,
+  filterTools,
+  pickAxisLabelIndices,
+  rateColorVar,
+  toolMatchesSearch,
+} from './tool-quality-panel'
 
 vi.setConfig({
   testTimeout: 40000,
@@ -46,6 +52,16 @@ const payloadWithCascadeBuckets = {
       success_pct: 100,
     },
   ],
+}
+
+const payloadWithHourlyTrend = {
+  ...payload,
+  hourly_trend: Array.from({ length: 24 }, (_, i) => ({
+    hour: `2026-05-20T${String(i).padStart(2, '0')}:00`,
+    calls: 100 + i * 5,
+    success: 90 + i * 4,
+    success_rate: 88 + (i % 6),
+  })),
 }
 
 const payloadWithCoverageGap = {
@@ -182,6 +198,63 @@ describe('ToolQualityPanel', () => {
 
     expect(container.textContent).toContain('캐스케이드별')
     expect(container.textContent).toContain('local_qwen3_27b_only')
+  })
+
+  it('renders the trend sparkline with multiple axis labels and bucket hit areas', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(okJson(payloadWithHourlyTrend))
+    vi.stubGlobal('fetch', fetchMock)
+    const { ToolQualityPanel } = await import('./tool-quality-panel')
+
+    await act(async () => {
+      render(html`<${ToolQualityPanel} />`, container)
+      await Promise.resolve()
+    })
+    await flushUi()
+
+    const svg = container.querySelector('[data-testid="trend-sparkline-svg"]')
+    expect(svg).not.toBeNull()
+    // 24 invisible bucket hit areas — one per hourly point — so hover is reliable
+    expect(container.querySelectorAll('[data-testid^="trend-bucket-"]').length).toBe(24)
+    // Axis labels: 4 timestamps for 24-point series (not just edges).
+    // pickAxisLabelIndices(24) → [0, 8, 16, 23] so we expect the corresponding
+    // hour strings to render. The `hour.slice(5)` formatting strips the year.
+    expect(container.textContent).toContain('5-20T00')
+    expect(container.textContent).toContain('5-20T23')
+    // Verify a middle-bucket hour label is also rendered (pickAxisLabelIndices(24) → [0, 8, 16, 23])
+    expect(container.textContent).toContain('5-20T08')
+    expect(container.textContent).toContain('5-20T16')
+  })
+
+  it('shows a tooltip when a trend bucket is hovered', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(okJson(payloadWithHourlyTrend))
+    vi.stubGlobal('fetch', fetchMock)
+    const { ToolQualityPanel } = await import('./tool-quality-panel')
+
+    await act(async () => {
+      render(html`<${ToolQualityPanel} />`, container)
+      await Promise.resolve()
+    })
+    await flushUi()
+
+    // Initially no tooltip
+    expect(container.querySelector('[data-testid="trend-tooltip"]')).toBeNull()
+
+    const bucket10 = container.querySelector('[data-testid="trend-bucket-10"]')
+    expect(bucket10).not.toBeNull()
+
+    await act(async () => {
+      bucket10?.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }))
+      await Promise.resolve()
+    })
+    await flushUi()
+
+    const tooltip = container.querySelector('[data-testid="trend-tooltip"]')
+    expect(tooltip).not.toBeNull()
+    // Hour 10 has success_rate = 88 + (10 % 6) = 92, calls = 100 + 10*5 = 150, success = 90 + 10*4 = 130 → fail=20
+    expect(tooltip?.textContent).toContain('2026-05-20T10:00')
+    expect(tooltip?.textContent).toContain('92.0%')
+    expect(tooltip?.textContent).toContain('150')
+    expect(tooltip?.textContent).toContain('20')
   })
 
   it('renders tool-quality coverage gap provenance', async () => {
@@ -405,6 +478,47 @@ describe('classifyCoverageError', () => {
     expect(classifyCoverageError('disk full')).toBeNull()
     expect(classifyCoverageError('connection refused')).toBeNull()
     expect(classifyCoverageError('append denied')).toBeNull()
+  })
+})
+
+describe('rateColorVar', () => {
+  it('returns ok tone for 95% and above', () => {
+    expect(rateColorVar(100)).toContain('status-ok')
+    expect(rateColorVar(95)).toContain('status-ok')
+  })
+
+  it('returns warn tone for 90% to <95%', () => {
+    expect(rateColorVar(94.9)).toContain('status-warn')
+    expect(rateColorVar(90)).toContain('status-warn')
+  })
+
+  it('returns err tone below 90%', () => {
+    expect(rateColorVar(89.9)).toContain('status-err')
+    expect(rateColorVar(0)).toContain('status-err')
+  })
+})
+
+describe('pickAxisLabelIndices', () => {
+  it('returns edges for very short series (≤2)', () => {
+    expect(pickAxisLabelIndices(2)).toEqual([0, 1])
+  })
+
+  it('returns only edges for short series (≤6)', () => {
+    expect(pickAxisLabelIndices(4)).toEqual([0, 3])
+    expect(pickAxisLabelIndices(6)).toEqual([0, 5])
+  })
+
+  it('returns 4 evenly-spaced indices for longer series', () => {
+    expect(pickAxisLabelIndices(24)).toEqual([0, 8, 16, 23])
+    expect(pickAxisLabelIndices(12)).toEqual([0, 4, 8, 11])
+  })
+
+  it('always includes both edges as first and last entries', () => {
+    for (const n of [7, 10, 24, 48, 100]) {
+      const indices = pickAxisLabelIndices(n)
+      expect(indices[0]).toBe(0)
+      expect(indices[indices.length - 1]).toBe(n - 1)
+    }
   })
 })
 

@@ -1,6 +1,6 @@
 import { html } from 'htm/preact'
 import { computed, signal } from '@preact/signals'
-import { useEffect } from 'preact/hooks'
+import { useEffect, useState } from 'preact/hooks'
 import { type ToolQualityResponse } from '../api/dashboard'
 import { TELEMETRY_AUTO_REFRESH_MS } from '../config/constants'
 import { formatAutoRefreshLabel, setupVisibleAutoRefresh } from '../lib/auto-refresh'
@@ -198,29 +198,45 @@ function ToolTable({
   `
 }
 
+// Tone classifier shared between trend header and tooltip — keeps the
+// thresholds in one place so a tooltip never disagrees with the headline.
+export function rateColorVar(rate: number): string {
+  if (rate >= 95) return 'var(--color-status-ok)'
+  if (rate >= 90) return 'var(--color-status-warn)'
+  return 'var(--color-status-err)'
+}
+
+// Pick ~4 evenly-spaced indices for x-axis labels, always including first
+// and last. For very short ranges (≤6 points), only the edges are shown.
+export function pickAxisLabelIndices(n: number): number[] {
+  if (n <= 2) return [0, n - 1]
+  if (n <= 6) return [0, n - 1]
+  return [0, Math.floor(n / 3), Math.floor((2 * n) / 3), n - 1]
+}
+
 function TrendSparkline({ points }: { points: HourlyPoint[] }) {
   if (points.length < 2) return null
+  // Hover state is component-local and ephemeral — useState (not signal) so
+  // it lives with the mount and is dropped on unmount without manual cleanup.
+  const [activeIdx, setActiveIdx] = useState<number | null>(null)
+
   const W = 200, H = 40, pad = 2
   const n = points.length
   const maxCalls = Math.max(...points.map(p => p.calls), 1)
 
-  // Success rate line
-  const rateLine = points.map((p, i) => {
-    const x = pad + (i / (n - 1)) * (W - 2 * pad)
-    const y = H - pad - (p.success_rate / 100) * (H - 2 * pad)
-    return `${x.toFixed(1)},${y.toFixed(1)}`
-  }).join(' ')
+  const xOf = (i: number) => pad + (i / (n - 1)) * (W - 2 * pad)
+  const yRate = (rate: number) => H - pad - (rate / 100) * (H - 2 * pad)
 
-  // Call volume bars
+  const rateLine = points.map((p, i) => `${xOf(i).toFixed(1)},${yRate(p.success_rate).toFixed(1)}`).join(' ')
+
   const barW = Math.max(1, ((W - 2 * pad) / n) * 0.6)
-  const bars = points.map((p, i) => {
-    const x = pad + (i / (n - 1)) * (W - 2 * pad) - barW / 2
-    const barH = (p.calls / maxCalls) * (H - 2 * pad)
-    return { x, y: H - pad - barH, w: barW, h: barH, failures: p.calls - p.success }
-  })
+  const colW = (W - 2 * pad) / n  // full-height invisible hit area per bucket
 
   const lastRate = points[points.length - 1]?.success_rate ?? 0
-  const lineColor = lastRate >= 95 ? 'var(--color-status-ok)' : lastRate >= 90 ? 'var(--color-status-warn)' : 'var(--color-status-err)'
+  const lineColor = rateColorVar(lastRate)
+
+  const active = activeIdx != null ? points[activeIdx] : null
+  const labelIndices = pickAxisLabelIndices(n)
 
   return html`
     <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3">
@@ -231,15 +247,97 @@ function TrendSparkline({ points }: { points: HourlyPoint[] }) {
           <span class="text-xs font-mono" style="color:${lineColor}">${lastRate.toFixed(1)}%</span>
         </div>
       </div>
-      <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded-[var(--r-1)] w-full" role="img" aria-label="성공률 추이 차트" style="background:var(--bg-deepest);">
-        ${bars.map(b => html`
-          <rect x="${b.x.toFixed(1)}" y="${b.y.toFixed(1)}" width="${b.w.toFixed(1)}" height="${b.h.toFixed(1)}" fill="${b.failures > 0 ? 'var(--bad-20)' : 'var(--ok-soft)'}" rx="0.5" />
-        `)}
-        <polyline points="${rateLine}" fill="none" stroke="${lineColor}" stroke-width="1.5"/>
-      </svg>
-      <div class="flex justify-between mt-1 text-3xs text-[var(--color-fg-disabled)] font-mono">
-        <span>${points[0]?.hour?.slice(5) ?? ''}</span>
-        <span>${points[points.length - 1]?.hour?.slice(5) ?? ''}</span>
+      <div class="relative">
+        <svg
+          viewBox="0 0 ${W} ${H}"
+          width="${W}"
+          height="${H}"
+          class="rounded-[var(--r-1)] w-full"
+          role="img"
+          aria-label="성공률 추이 차트 — ${n}시간 호버하면 시간별 상세"
+          data-testid="trend-sparkline-svg"
+          style="background:var(--bg-deepest);"
+          onMouseLeave=${() => setActiveIdx(null)}
+        >
+          <!-- 100% reference line so operators can read absolute rate, not just delta -->
+          <line x1="${pad}" y1="${pad.toFixed(1)}" x2="${W - pad}" y2="${pad.toFixed(1)}"
+            stroke="var(--color-border-default)" stroke-width="0.3" stroke-dasharray="1 1.5" />
+
+          ${points.map((p, i) => {
+            const x = xOf(i) - barW / 2
+            const barH = (p.calls / maxCalls) * (H - 2 * pad)
+            const y = H - pad - barH
+            const failures = p.calls - p.success
+            const isActive = i === activeIdx
+            return html`<rect
+              x="${x.toFixed(1)}" y="${y.toFixed(1)}"
+              width="${barW.toFixed(1)}" height="${barH.toFixed(1)}"
+              fill="${failures > 0 ? 'var(--bad-20)' : 'var(--ok-soft)'}"
+              opacity="${isActive ? '1' : '0.85'}"
+              rx="0.5" />`
+          })}
+
+          <polyline points="${rateLine}" fill="none" stroke="${lineColor}" stroke-width="1.5"/>
+
+          ${points.map((p, i) => {
+            const isActive = i === activeIdx
+            return html`<circle
+              cx="${xOf(i).toFixed(1)}" cy="${yRate(p.success_rate).toFixed(1)}"
+              r="${isActive ? '2.2' : '1.2'}"
+              fill="${lineColor}" />`
+          })}
+
+          ${activeIdx != null ? html`<line
+            x1="${xOf(activeIdx).toFixed(1)}" y1="${pad}"
+            x2="${xOf(activeIdx).toFixed(1)}" y2="${H - pad}"
+            stroke="${lineColor}" stroke-width="0.4" stroke-dasharray="1 1" opacity="0.55" />` : null}
+
+          <!-- Invisible hit areas — full column height per bucket so the
+               mouse target is the bucket region, not just the bar pixels. -->
+          ${points.map((_, i) => {
+            const x = xOf(i) - colW / 2
+            return html`<rect
+              x="${x.toFixed(1)}" y="0"
+              width="${colW.toFixed(1)}" height="${H}"
+              fill="transparent"
+              data-testid=${`trend-bucket-${i}`}
+              onMouseEnter=${() => setActiveIdx(i)}
+              style="cursor:crosshair" />`
+          })}
+        </svg>
+
+        ${active && activeIdx != null ? html`
+          <div
+            class="pointer-events-none absolute z-10 -translate-x-1/2 -translate-y-full -mt-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1 text-3xs font-mono shadow-lg whitespace-nowrap"
+            style="left:${((xOf(activeIdx) / W) * 100).toFixed(1)}%; top:0"
+            role="tooltip"
+            data-testid="trend-tooltip"
+          >
+            <div class="text-[var(--color-fg-primary)]">${active.hour}</div>
+            <div style="color:${rateColorVar(active.success_rate)}">${active.success_rate.toFixed(1)}%</div>
+            <div class="text-[var(--color-fg-disabled)]">
+              ${active.calls.toLocaleString()} calls · ${(active.calls - active.success).toLocaleString()} fail
+            </div>
+          </div>
+        ` : null}
+      </div>
+
+      <!-- Multiple x-axis labels (was: only start/end). Absolute positioning
+           inside a relative container so labels line up with their data point. -->
+      <div class="relative mt-1 h-3 text-3xs text-[var(--color-fg-disabled)] font-mono">
+        ${labelIndices.map(i => {
+          const xPct = (xOf(i) / W) * 100
+          // Edge labels get edge-anchored to avoid clipping outside the box.
+          const transform = i === 0
+            ? 'translateX(0)'
+            : i === n - 1
+              ? 'translateX(-100%)'
+              : 'translateX(-50%)'
+          return html`<span
+            class="absolute"
+            style="left:${xPct.toFixed(1)}%; transform:${transform}"
+          >${points[i]?.hour?.slice(5) ?? ''}</span>`
+        })}
       </div>
     </div>
   `

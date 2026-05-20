@@ -441,7 +441,14 @@ export function countRuntimeKinds(
   const rosterAgents = buildAgentRoster(agentList, runtimeKeepers)
   const keeperLookup = buildKeeperRuntimeLookup(runtimeKeepers)
   const allKeepers = scopeAgentsByKeeperFilter(rosterAgents, runtimeKeepers, 'keeper-only', keeperLookup)
-  const pausedKeepers = allKeepers.filter(a => isKeeperPaused(a.keeper)).length
+  // Hydrate the Keeper from the lookup before asking whether it is paused.
+  // Agent rows only carry `keeper_id`/`keeper_name`, not the full Keeper, so
+  // `a.keeper` was undefined here and `isKeeperPaused(undefined)` silently
+  // returned false, leaving the paused count stuck at 0.
+  const pausedKeepers = allKeepers.filter(a => {
+    const keeper = findKeeperRuntimeForAgent(a, keeperLookup)
+    return keeper ? isKeeperPaused(keeper) : false
+  }).length
   const runningKeepers = allKeepers.length - pausedKeepers
   const agentCount = scopeAgentsByKeeperFilter(rosterAgents, runtimeKeepers, 'agent-only', keeperLookup).length
 
@@ -500,7 +507,12 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
   // Derive runtime kind counts from memoized roster (avoids duplicate buildAgentRoster call)
   const liveRuntimeCounts = useMemo(() => {
     const allKeepers = scopeAgentsByKeeperFilter(rosterAgents, runtimeKeeperList, 'keeper-only', keeperRuntimeLookup)
-    const pausedCount = allKeepers.filter(a => isKeeperPaused(a.keeper)).length
+    // See countRuntimeKinds(): Agent rows expose only keeper identifiers, so
+    // `a.keeper` is undefined and isKeeperPaused needs the hydrated Keeper.
+    const pausedCount = allKeepers.filter(a => {
+      const keeper = findKeeperRuntimeForAgent(a, keeperRuntimeLookup)
+      return keeper ? isKeeperPaused(keeper) : false
+    }).length
     const runningCount = allKeepers.length - pausedCount
     const agentCount = scopeAgentsByKeeperFilter(rosterAgents, runtimeKeeperList, 'agent-only', keeperRuntimeLookup).length
     return { agents: agentCount, keepers: runningCount, pausedKeepers: pausedCount, totalRuntimes: rosterAgents.length }

@@ -387,7 +387,7 @@ let create_post ~author ~content ?title ?body ~post_kind ?meta_json
                  content = post.content; post_kind = post.post_kind;
                  hearth = post.hearth });
           Ok post
-      | Ok (Board.Dedup_hit post) -> Ok post
+      | Ok (Board.Dedup_hit post) | Ok (Board.Rolled_up_post post) -> Ok post
       | Error _ as err -> err)
 
 let get_post ~post_id =

@@ -209,14 +209,16 @@ val reaction_key
 type create_post_outcome =
   | Fresh_post of post
   | Dedup_hit of post
+  | Rolled_up_post of post
 
 (** Extract the post carried by {!create_post_outcome}. *)
 val post_of_create_post_outcome : create_post_outcome -> post
 
-(** Creates a post and preserves whether the operation was fresh or a
-    receive-side dedup hit.  Same validation and persistence semantics as
-    {!create_post}; fresh posts append JSONL + earn credits, dedup hits
-    return the existing post without those side effects. *)
+(** Creates a post and preserves whether the operation was fresh, a receive-side
+    dedup hit, or a status-only automation rollup.  Same validation and
+    persistence semantics as {!create_post}; fresh posts append JSONL + earn
+    credits, while dedup/rollup hits return the existing post without those
+    create-side effects. *)
 val create_post_with_outcome
   :  store
   -> author:string

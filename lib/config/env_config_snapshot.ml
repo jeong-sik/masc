@@ -310,8 +310,6 @@ let decision_entries =
       "Decision audit ring buffer capacity";
     entry ~default:"0" "MASC_DECISION_LAYER_LEVEL"
       "Decision layer level (0=off, 1=audit, 2+=extended)";
-    entry ~default:"3600.0" "MASC_DECISION_TTL_SEC"
-      "Default TTL for pending decisions (seconds, 1 hour)";
   ]
 
 let docker_playground_entries =
@@ -758,8 +756,6 @@ let timeout_entries =
       "A2A event buffer size per subscription";
     entry ~default:"30.0" "MASC_SSE_KEEPALIVE_SEC"
       "SSE keepalive interval (seconds, floor 1)";
-    entry ~default:"15.0" "MASC_TIMEOUT_GCLOUD_AUTH_SEC"
-      "gcloud auth token fetch timeout (seconds)";
   ]
 
 let tool_entries =

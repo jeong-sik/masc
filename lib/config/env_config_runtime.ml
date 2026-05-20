@@ -54,14 +54,6 @@ module Tempo = struct
     get_float ~default:300.0 "MASC_TEMPO_DEFAULT_INTERVAL_SEC"
 end
 
-(** {1 Decision Configuration} *)
-
-module Decision = struct
-  (** Default TTL for pending decisions (seconds, default 1 hour) *)
-  let ttl_seconds =
-    get_float ~default:3600.0 "MASC_DECISION_TTL_SEC"
-end
-
 (** {1 Cache Configuration} *)
 
 module Cache = struct
@@ -188,10 +180,6 @@ module Ollama = struct
     get_string ~default:"" "OLLAMA_DEFAULT_MODEL"
 end
 
-module Glm = struct
-  let server_url = Env_config_core.get_string ~default:"https://api.z.ai" "ZAI_BASE_URL"
-end
-
 (** {1 Cancellation Token Configuration} *)
 
 module Cancellation = struct
@@ -234,14 +222,6 @@ module Voice = struct
   let audio_test_tone_timeout_sec =
     Float.max 0.2
       (get_float ~default:2.0 "VOICE_AUDIO_TEST_TONE_TIMEOUT_SEC")
-end
-
-(** {1 Timeout Defaults} *)
-
-module Timeout = struct
-  (** gcloud auth token fetch (used by a2a_tools, model_client, keeper_alerting) *)
-  let gcloud_auth_sec =
-    get_float ~default:15.0 "MASC_TIMEOUT_GCLOUD_AUTH_SEC"
 end
 
 (** {1 Message GC Configuration} *)
@@ -621,25 +601,6 @@ module Rate_bucket = struct
 
   (** Per-agent burst capacity. Default: 50. *)
   let agent_burst = get_int ~default:50 "MASC_AGENT_RATE_BURST"
-end
-
-(** {1 Per-Agent Rate Limit Bucket Configuration}
-
-    A separate, lower-rate bucket applied per authenticated bearer token
-    (i.e. per agent identity).  This limits how many requests a single
-    agent can make regardless of how many different source IPs it uses,
-    complementing the IP-level {!Rate_bucket} above.
-
-    Configuration via environment:
-    - MASC_AGENT_RATE_LIMIT: requests per second per agent (default: 30)
-    - MASC_AGENT_RATE_BURST: burst capacity per agent (default: 60) *)
-
-module Agent_rate_bucket = struct
-  (** Requests per second per authenticated agent token. Default: 30. *)
-  let rate = get_float ~default:30.0 "MASC_AGENT_RATE_LIMIT"
-
-  (** Per-agent burst capacity. Default: 60. *)
-  let burst = get_int ~default:60 "MASC_AGENT_RATE_BURST"
 end
 
 (** {1 Worker / Local Runtime Configuration} *)

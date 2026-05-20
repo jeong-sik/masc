@@ -52,10 +52,20 @@ function latestCoverageGap(d: TelemetryFreshnessMetadata): TelemetryCoverageGap 
   return gaps[gaps.length - 1] ?? null
 }
 
+export type CoverageGapField = { label: string; value: string }
+
 export type CoverageGapDisplay = {
   count: number
   summary: string
   details: string[]
+  // Structured split of `details` so panels can render error text inside a
+  // collapsible block while keeping producer/store/surface/trace visible.
+  // `details` remains the flat SSOT for callers that just want strings.
+  structured: {
+    reason: string
+    fields: CoverageGapField[]
+    error: string | null
+  }
 }
 
 /** Build compact operator-visible coverage-gap details for freshness lines. */
@@ -76,9 +86,15 @@ export function coverageGapDisplay(d: TelemetryFreshnessMetadata): CoverageGapDi
     .filter((entry): entry is [string, string] => entry[1] != null)
     .map(([label, value]) => `${label} ${value}`)
 
+  const fields: CoverageGapField[] = rawDetails
+    .filter((entry): entry is [string, string] => entry[1] != null && entry[0] !== 'error')
+    .map(([label, value]) => ({ label, value }))
+  const errorValue = nonEmpty(gap?.error)
+
   return {
     count,
     summary: `coverage gaps ${count}: ${reason}`,
     details,
+    structured: { reason, fields, error: errorValue },
   }
 }

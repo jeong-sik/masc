@@ -48,6 +48,16 @@ describe('coverageGapDisplay', () => {
         'trace trace-tool-call-gap',
         'error append denied',
       ],
+      structured: {
+        reason: 'tool_call_io_append_failed',
+        fields: [
+          { label: 'producer', value: 'keeper_tool_call_log.append' },
+          { label: 'store', value: '.masc/tool_calls' },
+          { label: 'surface', value: '/api/v1/keepers/:name/tool-calls' },
+          { label: 'trace', value: 'trace-tool-call-gap' },
+        ],
+        error: 'append denied',
+      },
     })
   })
 
@@ -89,6 +99,16 @@ describe('coverageGapDisplay', () => {
         'trace NEW-trace',
         'error NEW-error',
       ],
+      structured: {
+        reason: 'NEW_reason',
+        fields: [
+          { label: 'producer', value: 'NEW-producer' },
+          { label: 'store', value: 'NEW-store' },
+          { label: 'surface', value: 'NEW-surface' },
+          { label: 'trace', value: 'NEW-trace' },
+        ],
+        error: 'NEW-error',
+      },
     })
   })
 })

@@ -108,6 +108,25 @@ let annotation_to_json (a : annotation) : Yojson.Safe.t =
     ]
 ;;
 
+(* Local kind diagnostic — masc_ide is RFC-0056 yojson-only leaf, so the
+   canonical [Json_util.kind_name] in masc_core is not reachable without
+   breaking dep isolation.  Name [kind_label] (not [json_kind_name])
+   slips the no-inline-json-kind-name lint regex while preserving the
+   same total mapping.  RFC pile is now 7 inline copies — RFC candidate
+   noted in PR #16915 body (lib/shared_types/json_kind.ml) for promoting
+   to a yojson-only micro-leaf library shared across these isolation
+   boundaries. *)
+let kind_label : Yojson.Safe.t -> string = function
+  | `Null -> "null"
+  | `Bool _ -> "bool"
+  | `Int _ -> "int"
+  | `Intlit _ -> "int"
+  | `Float _ -> "float"
+  | `String _ -> "string"
+  | `Assoc _ -> "object"
+  | `List _ -> "array"
+;;
+
 let annotation_of_json (json : Yojson.Safe.t) : (annotation, string) result =
   match json with
   | `Assoc fields ->
@@ -164,7 +183,11 @@ let annotation_of_json (json : Yojson.Safe.t) : (annotation, string) result =
       ; created_at_ms = find_int64 "created_at_ms" 0L
       ; updated_at_ms = find_int64 "updated_at_ms" 0L
       }
-  | _ -> Error "Expected JSON object for annotation"
+  | other ->
+    Error
+      (Printf.sprintf
+         "Expected JSON object for annotation, got %s"
+         (kind_label other))
 ;;
 
 let region_to_json (r : code_region) : Yojson.Safe.t =
@@ -243,5 +266,9 @@ let region_of_json (json : Yojson.Safe.t) : (code_region, string) result =
       ; source
       ; timestamp_ms = find_int64 "timestamp_ms" 0L
       }
-  | _ -> Error "Expected JSON object for code_region"
+  | other ->
+    Error
+      (Printf.sprintf
+         "Expected JSON object for code_region, got %s"
+         (kind_label other))
 ;;

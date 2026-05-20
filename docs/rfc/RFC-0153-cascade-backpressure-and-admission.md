@@ -55,7 +55,9 @@ let rec try_cascade candidates ... =
 | 동시 N개 cascade 요청의 tier 진입 제어 | 없음 — stampede 가능 |
 | "cascade exhausted" 로그 사이트 | ~1330 (all tiers failed), ~1153 (rejected by accept predicate) |
 
-### 1.2 런타임 증거 — 14일치 측정 (`~/me/.masc/cascade_audit/2026-05/`)
+### 1.2 런타임 증거 — 14일치 측정 (`<base-path>/.masc/cascade_audit/2026-05/`)
+
+이 RFC의 로컬 측정은 `--base-path=/Users/dancer/me` 실행에서 수집했다.
 
 | 분류 | 건수 / 비율 |
 |---|---|
@@ -416,9 +418,9 @@ Phase B/C/E는 세 framework 모두 안 함. **완화**: tower::limit::Concurren
 - `lib/cascade/cascade_error_classify.ml:22-25` — `Cascade_exhausted` (기존)
 
 ### 런타임 Evidence
-- `~/me/.masc/cascade_audit/2026-05/*.jsonl` — 14일치 8917 attempt
-- `~/me/.masc/logs/masc-mcp-glm-three-20260516T0152.log` — 02:34 peak 19/min stampede
-- `~/me/.masc/logs/masc-mcp-8935.log` — 03:22:47~48 sangsu 사건 사슬
+- `<base-path>/.masc/cascade_audit/2026-05/*.jsonl` — 14일치 8917 attempt
+- `<base-path>/.masc/logs/masc-mcp-glm-three-20260516T0152.log` — 02:34 peak 19/min stampede
+- `<base-path>/.masc/logs/masc-mcp-8935.log` — 03:22:47~48 sangsu 사건 사슬
 
 ### 관련 RFC
 - RFC-0009 / 0022 / 0042 / 0082 / 0088 / 0102 / 0127 / 0152

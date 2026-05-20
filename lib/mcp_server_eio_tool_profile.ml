@@ -395,7 +395,18 @@ let decode_cursor_offset = function
   | Some raw -> (
       match int_of_string_opt raw with
       | Some offset when offset >= 0 -> Ok offset
-      | _ -> Error "Invalid params: cursor must be a non-negative integer string")
+      | Some offset ->
+          Error
+            (Printf.sprintf
+               "Invalid params: cursor offset must be non-negative \
+                (parsed %d from %S)"
+               offset raw)
+      | None ->
+          Error
+            (Printf.sprintf
+               "Invalid params: cursor must be a non-negative integer \
+                string (could not parse %S as an integer)"
+               raw))
 
 let rec drop_list n = function
   | xs when n <= 0 -> xs
@@ -552,7 +563,25 @@ let page_items_with_cursor ~kind items cursor =
     | Some encoded -> (
         match decode_cursor ~kind encoded with
         | Some value when value >= 0 -> Ok value
-        | _ -> Error "Invalid params: cursor is invalid")
+        | Some value ->
+            Error
+              (Printf.sprintf
+                 "Invalid params: cursor decoded to negative offset %d \
+                  (kind=%S, encoded=%S)"
+                 value kind encoded)
+        | None ->
+            (* [decode_cursor] returns [None] for three different
+               failure modes (base64 decode failed / kind-prefix
+               mismatch / int_of_string_opt failed).  Promoting it to
+               [(int, string) result] is a separate change because it
+               is the second [decode_cursor] in the tree (the other
+               lives in [graphql_api]) and the [int option] contract
+               is exercised by both. *)
+            Error
+              (Printf.sprintf
+                 "Invalid params: cursor %S could not be decoded \
+                  (expected base64-encoded \"%s:<non-negative int>\")"
+                 encoded kind))
   in
   let rec drop n xs =
     match (n, xs) with

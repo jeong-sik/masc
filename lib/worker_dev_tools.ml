@@ -253,6 +253,8 @@ let validate_command_coding_with_allowlist
   then Error Process_substitution
   else if has_unsafe_redirection trimmed
   then Error Unsafe_redirect
+  else if invokes_direct_dune trimmed
+  then Error Direct_dune_invocation
   else (
     (* Legacy verdict — direct [Result] now that the legacy_segments
        fallback has been removed (env/opam are already in

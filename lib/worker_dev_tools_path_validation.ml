@@ -157,7 +157,7 @@ let path_syntax_blocked_message token =
     to_message (Path_syntax_blocked { token = token.Path_words.value; hint }))
 ;;
 
-let path_words_of_command = Path_words.of_command
+let path_word_stages_of_command = Path_words.stages
 ;;
 
 let token_value_is_redirect_to_dev_null token =
@@ -168,11 +168,12 @@ let token_value_is_redirect_to_dev_null token =
   || String.equal value ">>/dev/null"
   || String.equal value "2>>/dev/null"
   || String.equal value "1>>/dev/null"
+  || String.equal value "0</dev/null"
 ;;
 
 let token_value_is_redirect_op token =
   match token.Path_words.value with
-  | ">" | ">>" | "<" | "2>" | "2>>" | "1>" | "1>>" -> true
+  | ">" | ">>" | "<" | "2>" | "2>>" | "1>" | "1>>" | "0<" -> true
   | _ -> false
 ;;
 
@@ -367,35 +368,43 @@ let path_argument_tokens tokens =
 ;;
 
 let existing_dir_path_values cmd =
-  let tokens = path_words_of_command cmd in
-  let command_name =
-    match tokens with
-    | command :: _ -> Filename.basename command.Path_words.value
-    | [] -> ""
-  in
-  let rec loop expect_existing_dir acc = function
+  let rec loop ~command_name expect_existing_dir acc = function
     | [] -> List.rev acc
     | token :: rest ->
       if token.Path_words.value = ""
-      then loop expect_existing_dir acc rest
+      then loop ~command_name expect_existing_dir acc rest
       else if expect_existing_dir
-      then loop false (token.Path_words.value :: acc) rest
+      then loop ~command_name false (token.Path_words.value :: acc) rest
       else (
         match path_value_of_flagged_token token.Path_words.value with
         | Some value when inline_path_flag_requires_existing_dir token.Path_words.value ->
-          loop false (value :: acc) rest
-        | Some _ -> loop false acc rest
+          loop ~command_name false (value :: acc) rest
+        | Some _ -> loop ~command_name false acc rest
         | None when is_path_flag token.Path_words.value ->
-          loop (path_flag_requires_existing_dir token.Path_words.value) acc rest
+          loop
+            ~command_name
+            (path_flag_requires_existing_dir token.Path_words.value)
+            acc
+            rest
         | None
           when command_materializes_path_arg command_name
                && looks_like_path_token token.Path_words.value
                && not (token_has_unsafe_rewrite_syntax token)
                && not token.Path_words.globbed ->
-          loop false (token.Path_words.value :: acc) rest
-        | None -> loop false acc rest)
+          loop ~command_name false (token.Path_words.value :: acc) rest
+        | None -> loop ~command_name false acc rest)
   in
-  tokens |> path_argument_tokens |> loop false []
+  let values_for_stage tokens =
+    let command_name =
+      match tokens with
+      | command :: _ -> Filename.basename command.Path_words.value
+      | [] -> ""
+    in
+    tokens |> path_argument_tokens |> loop ~command_name false []
+  in
+  match path_word_stages_of_command cmd with
+  | Ok stages -> List.concat_map values_for_stage stages
+  | Error _ -> []
 ;;
 
 let validate_command_paths ?keeper_id ?base_path ?workdir cmd =
@@ -524,23 +533,48 @@ let validate_command_paths ?keeper_id ?base_path ?workdir cmd =
           in
           loop stages
       in
-      let command_words = path_words_of_command cmd in
-      let command_path_words = path_argument_tokens command_words in
-      let command_needs_syntax_sensitive_gate =
-        List.exists
-          (fun token -> token_has_unsafe_rewrite_syntax token || token.Path_words.globbed)
-          command_path_words
+      let validate_path_word_stages stages =
+        let rec loop = function
+          | [] -> Ok ()
+          | tokens :: rest ->
+            (match validate_token_stream tokens with
+             | Ok () -> loop rest
+             | Error _ as err -> err)
+        in
+        loop stages
       in
-      if command_needs_syntax_sensitive_gate
-      then validate_path_argument_tokens command_words command_path_words
-      else (
-        match Masc_exec_bash_parser.Bash.parse_string cmd with
-        | Masc_exec.Parsed.Parsed shell_ir ->
-          (match validate_parsed_shell_ir shell_ir with
-           | Some result -> result
-           | None -> validate_token_stream command_words)
-        | Masc_exec.Parsed.Parse_error _
-        | Masc_exec.Parsed.Parse_aborted _
-        | Masc_exec.Parsed.Too_complex _ ->
-          validate_token_stream command_words)
+      match path_word_stages_of_command cmd with
+      | Error _ ->
+        Error
+          (Keeper_path_check_error.(
+             to_message
+               (Path_syntax_blocked
+                  { token = cmd
+                  ; hint =
+                      Some
+                        "Unsupported shell quoting or escaping in path validation. \
+                         Use plain path arguments or structured tools."
+                  })))
+      | Ok command_word_stages ->
+        let command_needs_syntax_sensitive_gate =
+          List.exists
+            (fun words ->
+               words
+               |> path_argument_tokens
+               |> List.exists (fun token ->
+                 token_has_unsafe_rewrite_syntax token || token.Path_words.globbed))
+            command_word_stages
+        in
+        if command_needs_syntax_sensitive_gate
+        then validate_path_word_stages command_word_stages
+        else (
+          match Masc_exec_bash_parser.Bash.parse_string cmd with
+          | Masc_exec.Parsed.Parsed shell_ir ->
+            (match validate_parsed_shell_ir shell_ir with
+             | Some result -> result
+             | None -> validate_path_word_stages command_word_stages)
+          | Masc_exec.Parsed.Parse_error _
+          | Masc_exec.Parsed.Parse_aborted _
+          | Masc_exec.Parsed.Too_complex _ ->
+            validate_path_word_stages command_word_stages)
 ;;

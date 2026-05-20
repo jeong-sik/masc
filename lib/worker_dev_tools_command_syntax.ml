@@ -227,11 +227,25 @@ let is_safe_fd_redirect_token token =
   check '>' || check '<'
 ;;
 
+let redirect_op_allows_dev_null_sink token =
+  match String.lowercase_ascii token with
+  | ">" | "1>" | "2>" | ">>" | "1>>" | "2>>" | "<" | "0<" -> true
+  | _ -> false
+;;
+
 let has_unsafe_redirection cmd =
-  split_shell_tokens cmd
-  |> List.exists (fun token ->
-    (contains_substring token ">" || contains_substring token "<")
-    && not (is_safe_fd_redirect_token token))
+  let rec scan = function
+    | [] -> false
+    | token :: target :: rest
+      when redirect_op_allows_dev_null_sink token
+           && String.equal (strip_wrapping_quotes target) "/dev/null" ->
+      scan rest
+    | token :: rest ->
+      ((contains_substring token ">" || contains_substring token "<")
+       && not (is_safe_fd_redirect_token token))
+      || scan rest
+  in
+  scan (split_shell_tokens cmd)
 ;;
 
 let extract_command_name cmd =

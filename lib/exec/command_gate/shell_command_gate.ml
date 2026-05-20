@@ -23,6 +23,7 @@ type reject_reason =
   | Command_not_in_allowlist of { bin : string }
   | Pipeline_segment_disallowed of { stage : int; bin : string }
   | Pipes_not_allowed of { stages : int }
+  | Redirect_disallowed_in_caller of { stage : int }
   | Path_outside_policy of { stage : int; raw_path : string; diagnostic : string }
 
 type parse_reason =
@@ -52,6 +53,7 @@ type verdict =
 type allowlist_policy = {
   allowed_commands : string list;
   allow_pipes : bool;
+  redirect_allowed : bool;
 }
 
 type path_policy = {
@@ -148,21 +150,41 @@ let first_disallowed_stage ~allowed_commands stage_bins =
   scan 1 stage_bins
 ;;
 
-(* Extract every literal argument from a simple stage so the path
-   policy can be applied. [Var] and [Concat] are intentionally
-   skipped at Phase 1 — they cannot be statically classified without
-   the metadata layer that Plan Phase 5 introduces. *)
-let literal_args (simple : SI.simple) : string list =
-  List.filter_map
+let stage_has_file_redirect (simple : SI.simple) : bool =
+  List.exists
     (function
-      | SI.Lit s -> Some s
-      | SI.Var _ | SI.Concat _ -> None)
-    simple.SI.args
+      | Masc_exec.Redirect_scope.File _ -> true
+      | Masc_exec.Redirect_scope.Fd_to_fd _ -> false)
+    simple.SI.redirects
+;;
+
+(* Extract every literal path-bearing surface from a simple stage so
+   the path policy can be applied uniformly. [Var] and [Concat] are
+   intentionally skipped at Phase 1 — they cannot be statically
+   classified without the metadata layer that Plan Phase 5
+   introduces. *)
+let literal_path_surfaces (simple : SI.simple) : string list =
+  let argv =
+    List.filter_map
+      (function
+        | SI.Lit s -> Some s
+        | SI.Var _ | SI.Concat _ -> None)
+      simple.SI.args
+  in
+  let redirects =
+    List.filter_map
+      (function
+        | Masc_exec.Redirect_scope.File { target; _ } ->
+          Some (Masc_exec.Path_scope.raw target)
+        | Masc_exec.Redirect_scope.Fd_to_fd _ -> None)
+      simple.SI.redirects
+  in
+  argv @ redirects
 ;;
 
 (* Returns the first path-policy failure encountered, [None] if every
-   stage's literal arguments are accepted. Stage index is 1-based to
-   match the [Pipeline_segment_disallowed] convention. *)
+   stage's literal path-bearing surface is accepted. Stage index is
+   1-based to match the [Pipeline_segment_disallowed] convention. *)
 let first_path_failure ~(path_policy : path_policy) stages =
   match path_policy.classify with
   | None -> None
@@ -177,11 +199,20 @@ let first_path_failure ~(path_policy : path_policy) stages =
              | `Allow -> scan_args rest_args
              | `Deny diag -> Some (idx, raw, diag))
         in
-        (match scan_args (literal_args stage) with
+        (match scan_args (literal_path_surfaces stage) with
          | Some hit -> Some hit
          | None -> scan_stages (idx + 1) rest)
     in
     scan_stages 1 stages
+;;
+
+let first_file_redirect_stage stages =
+  let rec scan idx = function
+    | [] -> None
+    | stage :: rest ->
+      if stage_has_file_redirect stage then Some idx else scan (idx + 1) rest
+  in
+  scan 1 stages
 ;;
 
 let apply_policy ~(allowlist : allowlist_policy) ~(path_policy : path_policy)
@@ -225,15 +256,26 @@ let apply_policy ~(allowlist : allowlist_policy) ~(path_policy : path_policy)
          in
          Reject { context; reason; diagnostic }
        | None ->
-         (match first_path_failure ~path_policy stages with
-          | Some (stage_idx, raw_path, diagnostic) ->
+         (match
+            if allowlist.redirect_allowed then None else first_file_redirect_stage stages
+          with
+          | Some stage ->
             Reject
               { context
-              ; reason =
-                  Path_outside_policy { stage = stage_idx; raw_path; diagnostic }
-              ; diagnostic
+              ; reason = Redirect_disallowed_in_caller { stage }
+              ; diagnostic =
+                  Printf.sprintf "pipeline stage %d carries a file redirect" stage
               }
-          | None -> Allow context))
+          | None ->
+            (match first_path_failure ~path_policy stages with
+             | Some (stage_idx, raw_path, diagnostic) ->
+               Reject
+                 { context
+                 ; reason =
+                     Path_outside_policy { stage = stage_idx; raw_path; diagnostic }
+                 ; diagnostic
+                 }
+             | None -> Allow context)))
 ;;
 
 let parse_only_to_stages (parsed : SI.t PD.t) :
@@ -258,6 +300,16 @@ let gate ?caller:_ ~raw ~allowlist ~path_policy ~sandbox () : verdict =
      ignored-argument pattern is intentional: this iter establishes
      the API surface; PR-3 wires the counters. *)
   match parse_only_to_stages (Masc_exec_bash_parser.Bash.parse_string raw) with
+  | Error (`Cannot_parse reason) -> Cannot_parse { reason }
+  | Error (`Too_complex reason) -> Too_complex { reason }
+  | Ok stages -> apply_policy ~allowlist ~path_policy ~sandbox ~stages
+;;
+
+let gate_typed ?caller:_ ~ir ~allowlist ~path_policy ~sandbox () : verdict =
+  (* Typed callers have already crossed their schema boundary, so this
+     entrypoint intentionally skips Bash.parse_string while preserving
+     the same policy and verdict surface as [gate]. *)
+  match parse_only_to_stages (PD.Parsed ir) with
   | Error (`Cannot_parse reason) -> Cannot_parse { reason }
   | Error (`Too_complex reason) -> Too_complex { reason }
   | Ok stages -> apply_policy ~allowlist ~path_policy ~sandbox ~stages
@@ -291,6 +343,7 @@ let reject_reason_tag = function
   | Command_not_in_allowlist _ -> "command_not_in_allowlist"
   | Pipeline_segment_disallowed _ -> "pipeline_segment_disallowed"
   | Pipes_not_allowed _ -> "pipes_not_allowed"
+  | Redirect_disallowed_in_caller _ -> "redirect_disallowed_in_caller"
   | Path_outside_policy _ -> "path_outside_policy"
 ;;
 

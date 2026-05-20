@@ -800,6 +800,28 @@ let () =
              Alcotest.fail
                ("should allow /dev/null sink: "
                 ^ Worker_dev_tools.block_reason_to_string e));
+      Alcotest.test_case "allows spaced /dev/null fd sink through pipe" `Quick
+        (fun () ->
+           match
+             Worker_dev_tools.validate_command_coding
+               "rg \"task-317\" repos/masc-mcp/ --files-with-matches 2> /dev/null | head -5"
+           with
+           | Ok () -> ()
+           | Error e ->
+             Alcotest.fail
+               ("should allow spaced /dev/null sink: "
+                ^ Worker_dev_tools.block_reason_to_string e));
+      Alcotest.test_case "allows quoted spaced /dev/null fd sink" `Quick
+        (fun () ->
+           match
+             Worker_dev_tools.validate_command_coding
+               "rg \"task-317\" repos/masc-mcp/ --files-with-matches 2> \"/dev/null\""
+           with
+           | Ok () -> ()
+           | Error e ->
+             Alcotest.fail
+               ("should allow quoted spaced /dev/null sink: "
+                ^ Worker_dev_tools.block_reason_to_string e));
       Alcotest.test_case "single-command contract rejects pipe" `Quick (fun () ->
         match
           Worker_dev_tools.validate_command_coding_with_allowlist

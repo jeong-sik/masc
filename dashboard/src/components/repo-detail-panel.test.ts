@@ -140,10 +140,14 @@ describe('normalizeRepoStatus', () => {
     expect(normalizeRepoStatus(input)).toBe(expected)
   })
 
-  it('defaults to active for unknown or undefined input', () => {
-    expect(normalizeRepoStatus(undefined)).toBe('active')
-    expect(normalizeRepoStatus('unknown')).toBe('active')
-    expect(normalizeRepoStatus('')).toBe('active')
+  it("returns 'unknown' for unrecognized or missing input instead of coercing to 'active'", () => {
+    // Anti-pattern §2 escape: the previous default arm silently produced
+    // 'active' for any unrecognized status. 'unknown' now surfaces the
+    // malformed wire data so the UI renders an explicit warning state.
+    expect(normalizeRepoStatus(undefined)).toBe('unknown')
+    expect(normalizeRepoStatus('unknown')).toBe('unknown')
+    expect(normalizeRepoStatus('')).toBe('unknown')
+    expect(normalizeRepoStatus('garbled')).toBe('unknown')
   })
 })
 

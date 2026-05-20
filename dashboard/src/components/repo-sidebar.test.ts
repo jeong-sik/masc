@@ -15,9 +15,13 @@ describe("normalizeRepoStatus", () => {
   it("maps error", () => {
     expect(normalizeRepoStatus("error")).toBe("error")
   })
-  it("defaults unknown to active", () => {
-    expect(normalizeRepoStatus("unknown")).toBe("active")
-    expect(normalizeRepoStatus(undefined)).toBe("active")
+  it("returns 'unknown' for unrecognized strings instead of silently coercing to 'active'", () => {
+    // Anti-pattern §2 escape: prior behavior coerced any unrecognized
+    // status to 'active', silently hiding malformed wire data. The
+    // 'unknown' variant now surfaces it explicitly so the UI can warn.
+    expect(normalizeRepoStatus("unknown")).toBe("unknown")
+    expect(normalizeRepoStatus(undefined)).toBe("unknown")
+    expect(normalizeRepoStatus("garbled")).toBe("unknown")
   })
   it("is case-insensitive", () => {
     expect(normalizeRepoStatus("ACTIVE")).toBe("active")
@@ -50,12 +54,14 @@ describe("normalizeRepository", () => {
   it("returns null when id and name missing", () => {
     expect(normalizeRepository({})).toBeNull()
   })
-  it("builds minimal repo", () => {
+  it("builds minimal repo with 'unknown' status when wire data lacks status", () => {
+    // Status is now derived from the wire string; a missing field falls
+    // through to 'unknown' instead of being coerced to 'active'.
     const r = normalizeRepository({ id: "r1", name: "Repo" }) as Repository
     expect(r.id).toBe("r1")
     expect(r.name).toBe("Repo")
     expect(r.default_branch).toBe("main")
-    expect(r.status).toBe("active")
+    expect(r.status).toBe("unknown")
     expect(r.auto_sync).toBe(false)
     expect(r.sync_interval).toBe(300)
     expect(r.credential_id).toBeNull()

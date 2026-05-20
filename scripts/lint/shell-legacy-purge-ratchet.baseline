@@ -4,7 +4,7 @@
 # Scope: lib/ and test/
 # The long-term target for every row is 0. Cleanup PRs may lower these
 # counts; no PR may raise them.
-tokenize_path_args 4
+tokenize_path_args 3
 path_validation_tokens 4
 forbidden_shell_chars 13
 raw_keeper_bash_shape_block 0

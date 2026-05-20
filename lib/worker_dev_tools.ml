@@ -732,8 +732,9 @@ let path_validation_tokens tokens =
 ;;
 
 let existing_dir_path_values cmd =
+  let tokens = tokenize_path_args cmd in
   let command_name =
-    match tokenize_path_args cmd with
+    match tokens with
     | command :: _ -> Filename.basename command.value
     | [] -> ""
   in
@@ -759,7 +760,7 @@ let existing_dir_path_values cmd =
           loop false (token.value :: acc) rest
         | None -> loop false acc rest)
   in
-  cmd |> tokenize_path_args |> path_validation_tokens |> loop false []
+  tokens |> path_validation_tokens |> loop false []
 ;;
 
 let validate_command_paths ?keeper_id ?base_path ?workdir cmd =

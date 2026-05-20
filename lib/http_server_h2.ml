@@ -267,6 +267,15 @@ let run ~sw ~net ~clock config request_handler =
   Printf.printf "MASC MCP Server (HTTP/2) listening on http://%s:%d\n" config.host config.port;
   Printf.printf "   HTTP/2 multiplexing: unlimited SSE streams per connection\n%!";
 
+  (* Stable listener identity. Embedded in every error log below so
+     operators can tell which listener emitted the line when the
+     process runs multiple HTTP servers (HTTP/2 here vs HTTP/1.1 in
+     http_server_eio.ml vs admin/health sub-servers). Mirrors the
+     "h1" listener_tag pattern in http_server_eio.ml. *)
+  let listener_tag =
+    Printf.sprintf "h2 %s:%d" config.host config.port
+  in
+
   let initial_backoff_s = 0.05 in
   let max_backoff_s = 1.0 in
   let backoff_s = ref initial_backoff_s in
@@ -289,7 +298,8 @@ let run ~sw ~net ~clock config request_handler =
               try Eio.Flow.close flow with
               | Eio.Cancel.Cancelled _ as e -> raise e
               | exn ->
-                Log.Misc.error "[h2] flow close failed: %s" (Printexc.to_string exn)
+                Log.Misc.error "[%s] flow close failed: %s"
+                  listener_tag (Printexc.to_string exn)
             );
             try
               H2_eio.Server.create_connection_handler
@@ -301,14 +311,15 @@ let run ~sw ~net ~clock config request_handler =
             with
             | Eio.Cancel.Cancelled _ as e -> raise e
             | exn ->
-              Log.Http.error "Connection error: %s" (Printexc.to_string exn)
+              Log.Http.error "[%s] connection error: %s"
+                listener_tag (Printexc.to_string exn)
           )
         )
       with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
         if is_cancelled exn then raise exn;
         let delay = !backoff_s in
-        Log.Http.error "Accept error: %s (backoff %.2fs)"
-          (Printexc.to_string exn) delay;
+        Log.Http.error "[%s] accept error: %s (backoff %.2fs)"
+          listener_tag (Printexc.to_string exn) delay;
         Eio.Time.sleep clock delay;
         bump_backoff ());
       accept_loop ()
@@ -316,8 +327,8 @@ let run ~sw ~net ~clock config request_handler =
       if is_cancelled exn then ()
       else begin
         let delay = !backoff_s in
-        Log.Http.error "Accept loop error: %s (backoff %.2fs)"
-          (Printexc.to_string exn) delay;
+        Log.Http.error "[%s] accept loop error: %s (backoff %.2fs)"
+          listener_tag (Printexc.to_string exn) delay;
         Eio.Time.sleep clock delay;
         bump_backoff ();
         accept_loop ()

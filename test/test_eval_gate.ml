@@ -344,15 +344,15 @@ let test_guarded_execute_exception () =
 (* Test: JSON serialization                                          *)
 (* ================================================================ *)
 
-let test_gate_config_to_json () =
-  let json = Eval_gate.gate_config_to_json default_config in
+let test_gate_config_to_yojson () =
+  let json = Eval_gate.gate_config_to_yojson default_config in
   let open Yojson.Safe.Util in
   let max_cost = json |> member "max_cost_usd" |> to_float in
   Alcotest.(check (float 0.01)) "max_cost" 0.50 max_cost;
   let entropy = json |> member "entropy_threshold" |> to_int in
   Alcotest.(check int) "entropy threshold" 3 entropy
 
-let test_post_eval_to_json () =
+let test_post_eval_result_to_yojson () =
   let eval : Eval_gate.post_eval_result = {
     has_error = true;
     error_message = Some "test error";
@@ -360,7 +360,7 @@ let test_post_eval_to_json () =
     should_warn = false;
     warning = None;
   } in
-  let json = Eval_gate.post_eval_to_json eval in
+  let json = Eval_gate.post_eval_result_to_yojson eval in
   let open Yojson.Safe.Util in
   Alcotest.(check bool) "has_error json" true (json |> member "has_error" |> to_bool);
   Alcotest.(check string) "error msg json" "test error"
@@ -406,7 +406,8 @@ let () =
       Alcotest.test_case "exception handling" `Quick test_guarded_execute_exception;
     ]);
     ("json", [
-      Alcotest.test_case "gate_config_to_json" `Quick test_gate_config_to_json;
-      Alcotest.test_case "post_eval_to_json" `Quick test_post_eval_to_json;
+      Alcotest.test_case "gate_config_to_yojson" `Quick test_gate_config_to_yojson;
+      Alcotest.test_case "post_eval_result_to_yojson" `Quick
+        test_post_eval_result_to_yojson;
     ]);
   ]

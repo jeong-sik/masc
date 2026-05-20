@@ -9,7 +9,6 @@ type provider_outcome =
   | Call_err of Llm_provider.Http_client.http_error [@tla.symbol "call_err"]
   | Accept_rejected of { response : Llm_provider.Types.api_response; reason : string }
       [@tla.symbol "accept_rejected"]
-  | Slot_full [@tla.symbol "slot_full"]
 [@@deriving tla]
 
 type decision =
@@ -26,17 +25,6 @@ let decide ~accept_on_exhaustion ~is_last outcome =
   match outcome with
   | Call_ok resp ->
     Accept resp
-  | Slot_full ->
-    Try_next
-      {
-        last_err =
-          Some
-            (Llm_provider.Http_client.NetworkError
-               {
-                 message = "slot full, cascading to next provider";
-                 kind = Llm_provider.Http_client.Local_resource_exhaustion;
-               });
-      }
   | Accept_rejected { response; reason } ->
     if is_last && accept_on_exhaustion then
       Accept_on_exhaustion { response; reason }
@@ -100,7 +88,6 @@ let provider_outcome_to_string = function
   | Call_ok _ -> "call-ok"
   | Call_err _ -> "call-err"
   | Accept_rejected _ -> "accept-rejected"
-  | Slot_full -> "slot-full"
 
 let provider_outcome_option_to_string = function
   | Some outcome -> "some-" ^ provider_outcome_to_string outcome
@@ -122,7 +109,6 @@ let decide_and_record ~cascade_name ~accept_on_exhaustion ~is_last outcome =
    | Try_next _ ->
        let reason =
          match outcome with
-         | Slot_full -> "slot_full"
          | Accept_rejected _ -> "accept_rejected"
          | Call_err err ->
              if Cascade_health_filter.should_cascade_to_next err then

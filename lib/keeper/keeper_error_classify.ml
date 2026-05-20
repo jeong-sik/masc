@@ -175,8 +175,7 @@ let is_required_tool_contract_violation (err : Agent_sdk.Error.sdk_error) : bool
 
 let message_looks_like_capacity_backpressure detail =
   let lower = String.lowercase_ascii detail in
-  string_contains_substring ~needle:"slot full" lower
-  || string_contains_substring ~needle:"client capacity" lower
+  string_contains_substring ~needle:"client capacity" lower
   || string_contains_substring ~needle:"capacity_exhausted" lower
   || string_contains_substring ~needle:"capacity exhausted" lower
   || string_contains_substring ~needle:"local_resource_exhaustion" lower

@@ -4,9 +4,9 @@
 
     Without this helper, [Capacity_exhausted] events fall through to
     [record_failure] (threshold-based) instead of [record_soft_rate_limited]
-    (immediate). One slot-full event is sufficient evidence to deprioritize
-    a provider — the same reasoning [Cascade_health_tracker.soft_rate_limit_cooldown_sec]
-    documents for a 429.
+    (immediate). One capacity-exhausted event is sufficient evidence to
+    deprioritize a provider — the same reasoning
+    [Cascade_health_tracker.soft_rate_limit_cooldown_sec] documents for a 429.
 
     Closes §6 R2 (admission pre-check wiring) from the 2026-05-20
     consolidated state report. *)
@@ -23,7 +23,7 @@ let extract_testable =
   Alcotest.testable pp_extract ( = )
 
 let mk_capacity_exhausted ?retry_after ?(scope = Llm_provider.Error.CapacityProvider)
-    ?(affected = []) ?(detail = "slot full") () : ErrSdk.sdk_error =
+    ?(affected = []) ?(detail = "capacity exhausted") () : ErrSdk.sdk_error =
   ErrSdk.Provider
     (Llm_provider.Error.CapacityExhausted
        { scope; affected; retry_after; detail })

@@ -45,7 +45,7 @@ val metric_cascade_provider_health_score : string
 val metric_cascade_decisions : string
 
 (** Counter: cascade fallback transitions ([Try_next] outcomes).
-    Labels: [reason] in [call_err|slot_full|accept_rejected|health_filter]. *)
+    Labels: [reason] in [call_err|accept_rejected|health_filter]. *)
 val metric_cascade_fallbacks : string
 
 (** Counter: terminal exhaustion events emitted when a cascade has no further

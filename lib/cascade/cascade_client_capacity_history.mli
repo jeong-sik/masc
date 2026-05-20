@@ -4,7 +4,7 @@
     Phase A ({!Cascade_client_capacity}) introduced the process-local
     semaphore.  Phase D ({!Dashboard_cascade.client_capacity_json})
     exposed the *current* snapshot.  Operators still could not answer
-    "how often was the HTTP-probe slot full in the last hour?" — this
+    "how often was HTTP-probe capacity full in the last hour?" — this
     module fills that gap by recording every transition and surfacing
     recent events via {!snapshot}.
 
@@ -24,7 +24,7 @@
     @since 0.9.9 *)
 
 (** Event kind surfaced to the dashboard.  [Acquired] / [Released] are
-    self-explanatory; [Rejected_full] captures the "slot full, caller
+    self-explanatory; [Rejected_full] captures the "capacity full, caller
     moved on to the next candidate" case that operators use as the
     saturation signal. *)
 type event_kind = Acquired | Released | Rejected_full

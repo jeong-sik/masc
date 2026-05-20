@@ -111,8 +111,8 @@ let timeout_phase_of_label label =
     | "caller_budget" -> Some Caller_budget
     | "wall_clock" | "wall_clock_timeout" | "wall_exceeded" | "max_execution_time" ->
       Some Wall_clock
-    | "capacity_backpressure" | "capacity_exhausted" | "slot_full"
-    | "client_capacity" | "client_capacity_full" ->
+    | "capacity_backpressure" | "capacity_exhausted" | "client_capacity"
+    | "client_capacity_full" ->
       Some Capacity_backpressure
     | "unknown_timeout" -> Some Unknown_timeout
     | _ -> None

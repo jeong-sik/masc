@@ -69,10 +69,6 @@ let test_slot_full_other_detail_stays_legacy_cascade_exhausted () =
     make_cascade_exhausted
       (KT.Other_detail "slot full, cascading to next provider")
   in
-  check bool "slot full is auto-recoverable" true
-    (KEC.is_auto_recoverable_turn_error err);
-  check bool "legacy slot full remains cascade_exhausted" true
-    (KEC.is_cascade_exhausted_error err);
   match KEC.recoverable_cascade_failure_reason err with
   | Some reason ->
     check string "legacy slot full -> cascade_exhausted" "cascade_exhausted"

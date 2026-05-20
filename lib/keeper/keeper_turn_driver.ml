@@ -781,23 +781,6 @@ let run_named
       ~decision:(cascade_tier_admission_blocked_decision signal)
       Keeper_runtime_manifest.Pre_dispatch_blocked
   in
-  let slot_full_last_err ~is_last last_err =
-    match
-      Cascade_fsm.decide
-        ~accept_on_exhaustion:false
-        ~is_last
-        Cascade_fsm.Slot_full
-    with
-    | Cascade_fsm.Try_next { last_err = Some err }
-    | Cascade_fsm.Exhausted { last_err = Some err } ->
-      Some err
-    | Cascade_fsm.Try_next { last_err = None }
-    | Cascade_fsm.Exhausted { last_err = None } ->
-      last_err
-    | Cascade_fsm.Accept _
-    | Cascade_fsm.Accept_on_exhaustion _ ->
-      last_err
-  in
   let capacity_backpressure_source_of_http_error = function
     | Llm_provider.Http_client.NetworkError
         { kind = Llm_provider.Http_client.Local_resource_exhaustion; _ } ->
@@ -858,6 +841,18 @@ let run_named
     | None ->
       None
   in
+  let capacity_backpressure_of_pending = function
+    | Some (source, detail, retry_after_sec) ->
+      Some
+        (Capacity_backpressure
+           {
+             cascade_name = error_cascade_name;
+             source;
+             detail;
+             retry_after_sec;
+           })
+    | None -> None
+  in
   let capacity_backpressure_of_sdk_error sdk_err =
     match sdk_err with
     | Agent_sdk.Error.Provider
@@ -886,7 +881,7 @@ let run_named
   let rec try_cascade
       ?(on_success = fun ~provider_key:_ -> ())
       ?resume_checkpoint ?per_provider_timeout_s ?last_capacity_source
-      remaining last_err =
+      ?last_capacity_backpressure remaining last_err =
     match remaining with
     | [] ->
       let reason : Keeper_types.cascade_exhaustion_reason = match last_err with
@@ -966,8 +961,14 @@ let run_named
                  })
         | _ ->
           (match
-             capacity_backpressure_of_http_error
-               ?source:last_capacity_source last_err
+             match
+               capacity_backpressure_of_http_error
+                 ?source:last_capacity_source last_err
+             with
+             | Some _ as capacity_error -> capacity_error
+             | None ->
+               capacity_backpressure_of_pending
+                 last_capacity_backpressure
            with
            | Some capacity_error ->
              sdk_error_of_masc_internal_error capacity_error
@@ -999,10 +1000,10 @@ let run_named
               "cascade %s: skipping %s (provider_key=%s cooldown: %s)"
               cascade_name runtime_candidate_label runtime_candidate_label msg;
             try_cascade ~on_success ?resume_checkpoint ?per_provider_timeout_s
-              ?last_capacity_source rest last_err
+              ?last_capacity_source ?last_capacity_backpressure rest last_err
         | None ->
             try_cascade ~on_success ?resume_checkpoint ?per_provider_timeout_s
-              ?last_capacity_source rest last_err)
+              ?last_capacity_source ?last_capacity_backpressure rest last_err)
       else (
       (match health_cooldown with
        | Some (_blocked_health_key, msg) ->
@@ -1015,7 +1016,7 @@ let run_named
       match acquire_client_capacity_slot candidate with
       | `Full capacity_key ->
         emit_capacity_blocked_manifest ~capacity_key;
-        record_cascade_attempt candidate ~outcome:(`Failure "slot_full") ();
+        record_cascade_attempt candidate ~outcome:(`Failure "client_capacity_full") ();
         Cascade_legacy_runner.record_fallback_event capture
           ~from_model:runtime_candidate_label
           ~to_model:runtime_candidate_label
@@ -1026,9 +1027,13 @@ let run_named
           cascade_name
           runtime_candidate_label
           capacity_key;
-        let slot_last_err = slot_full_last_err ~is_last last_err in
+        let capacity_detail =
+          Printf.sprintf "client capacity key %s is full" capacity_key
+        in
         try_cascade ~on_success ?resume_checkpoint ?per_provider_timeout_s
-          ~last_capacity_source:Client_capacity rest slot_last_err
+          ~last_capacity_backpressure:
+            (Client_capacity, capacity_detail, None)
+          rest last_err
       | (`No_client_capacity | `Acquired _) as capacity_slot ->
       let capacity_release =
         match capacity_slot with
@@ -1187,9 +1192,13 @@ let run_named
           cascade_name
           runtime_candidate_label
           tier_admission_id;
-        let slot_last_err = slot_full_last_err ~is_last last_err in
+        let capacity_detail =
+          Printf.sprintf "tier admission %s is full" tier_admission_id
+        in
         try_cascade ~on_success ?resume_checkpoint ?per_provider_timeout_s
-          ~last_capacity_source:Tier_admission rest slot_last_err
+          ~last_capacity_backpressure:
+            (Tier_admission, capacity_detail, None)
+          rest last_err
       | Ok (result, checkpoint_after, liveness_success_sample, attempt_latency_ms) ->
       let record_accepted_liveness_sample () =
         match liveness_success_sample with
@@ -1388,8 +1397,7 @@ let run_named
                     [Cascade_fsm.provider_outcome] is flagged at compile time
                     instead of silently mapping to [None]. *)
                  | Cascade_fsm.Call_ok _
-                 | Cascade_fsm.Accept_rejected _
-                 | Cascade_fsm.Slot_full -> None
+                 | Cascade_fsm.Accept_rejected _ -> None
                in
                Cascade_fsm.Exhausted { last_err }
              else

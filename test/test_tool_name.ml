@@ -29,16 +29,16 @@ let all_masc : Tool_name.Masc.t list =
   ; Board_delete; Board_get; Board_hearths; Board_list; Board_post
   ; Board_profile; Board_search
   ; Board_stats; Board_vote; Broadcast; Cancel_task; Check; Claim_next
-  ; Claim_task; Cleanup_zombies; Coordination_fsm_snapshot; Code_delete
+  ; Cleanup_zombies; Coordination_fsm_snapshot; Code_delete
   ; Code_edit; Code_git; Code_read
-  ; Code_search; Code_shell; Code_symbols; Code_write; Complete_task
+  ; Code_search; Code_shell; Code_symbols; Code_write
   ; Dashboard; Deliver; Dispatch_plan
   ; Heartbeat; Join; Leave; List_tasks; Messages; Note_add
   ; Operation_pause; Operation_start; Operation_status; Operation_stop
   ; Operator_action; Operator_confirm; Operator_digest; Operator_snapshot
   ; Plan_clear_task; Plan_get; Plan_get_task; Plan_init; Plan_set_task
   ; Plan_update; Release_task; Reset; Coord_status
-  ; Set_current_task; Status; Task_history; Tasks; Tool_grant; Tool_help
+  ; Status; Task_history; Tasks; Tool_grant; Tool_help
   ; Tool_list; Tool_revoke; Transition; Update_priority; Web_search; Who
   ; Workflow_guide; Worktree_create; Worktree_list; Worktree_remove
   ; Approval_pending; Approval_get; Config; Gc; Get_metrics; Mcp_session

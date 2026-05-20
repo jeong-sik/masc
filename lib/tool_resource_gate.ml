@@ -275,8 +275,6 @@ let classify_masc_tool (tool : Tool_name.Masc.t) =
   | Batch_add_tasks
   | Cancel_task
   | Claim_next
-  | Claim_task
-  | Complete_task
   | Deliver
   | Dispatch_plan
   | Goal_transition
@@ -295,7 +293,6 @@ let classify_masc_tool (tool : Tool_name.Masc.t) =
   | Plan_update
   | Release_task
   | Reset
-  | Set_current_task
   | Tool_grant
   | Tool_revoke
   | Transition

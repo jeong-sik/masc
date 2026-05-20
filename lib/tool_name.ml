@@ -287,7 +287,6 @@ module Masc = struct
     | Cancel_task
     | Check
     | Claim_next
-    | Claim_task
     | Cleanup_zombies
     | Coordination_fsm_snapshot
     | Code_delete
@@ -298,7 +297,6 @@ module Masc = struct
     | Code_shell
     | Code_symbols
     | Code_write
-    | Complete_task
     | Dashboard
     | Deliver
     | Dispatch_plan
@@ -330,7 +328,6 @@ module Masc = struct
     | Release_task
     | Reset
     | Coord_status
-    | Set_current_task
     | Status
     | Task_history
     | Tasks
@@ -394,7 +391,6 @@ module Masc = struct
     | Cancel_task -> "masc_cancel_task"
     | Check -> "masc_check"
     | Claim_next -> "masc_claim_next"
-    | Claim_task -> "masc_claim_task"
     | Cleanup_zombies -> "masc_cleanup_zombies"
     | Coordination_fsm_snapshot -> "masc_coordination_fsm_snapshot"
     | Autoresearch_cycle -> "masc_autoresearch_cycle"
@@ -412,7 +408,6 @@ module Masc = struct
     | Code_shell -> "masc_code_shell"
     | Code_symbols -> "masc_code_symbols"
     | Code_write -> "masc_code_write"
-    | Complete_task -> "masc_complete_task"
     | Dashboard -> "masc_dashboard"
     | Deliver -> "masc_deliver"
     | Dispatch_plan -> "masc_dispatch_plan"
@@ -444,7 +439,6 @@ module Masc = struct
     | Release_task -> "masc_release_task"
     | Reset -> "masc_reset"
     | Coord_status -> "masc_room_status"
-    | Set_current_task -> "masc_set_current_task"
     | Status -> "masc_status"
     | Task_history -> "masc_task_history"
     | Tasks -> "masc_tasks"
@@ -509,7 +503,6 @@ module Masc = struct
     | "masc_cancel_task" -> Some Cancel_task
     | "masc_check" -> Some Check
     | "masc_claim_next" -> Some Claim_next
-    | "masc_claim_task" -> Some Claim_task
     | "masc_cleanup_zombies" -> Some Cleanup_zombies
     | "masc_coordination_fsm_snapshot" -> Some Coordination_fsm_snapshot
     | "masc_autoresearch_cycle" -> Some Autoresearch_cycle
@@ -527,7 +520,6 @@ module Masc = struct
     | "masc_code_shell" -> Some Code_shell
     | "masc_code_symbols" -> Some Code_symbols
     | "masc_code_write" -> Some Code_write
-    | "masc_complete_task" -> Some Complete_task
     | "masc_dashboard" -> Some Dashboard
     | "masc_deliver" -> Some Deliver
     | "masc_dispatch_plan" -> Some Dispatch_plan
@@ -559,7 +551,6 @@ module Masc = struct
     | "masc_release_task" -> Some Release_task
     | "masc_reset" -> Some Reset
     | "masc_room_status" -> Some Coord_status
-    | "masc_set_current_task" -> Some Set_current_task
     | "masc_status" -> Some Status
     | "masc_task_history" -> Some Task_history
     | "masc_tasks" -> Some Tasks

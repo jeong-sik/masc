@@ -79,7 +79,7 @@ let classify_actionable_signal_for_tools ~(allowed_tool_names : string list) o =
   in
   if
     o.unclaimed_task_count > 0
-    && has_any_tool [ "keeper_task_claim"; "masc_claim_next"; "masc_claim_task" ]
+    && has_any_tool [ "keeper_task_claim"; "masc_claim_next" ]
   then Has_unclaimed_tasks
   else if
     o.board_activity_count > 0

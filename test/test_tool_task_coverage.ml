@@ -1906,16 +1906,17 @@ let () = test "transition_claim_clears_stale_do_not_reclaim_reason" (fun () ->
     assert (Planning_eio.get_current_task ctx.config = Some "task-001"))
 )
 
-let () = test "dispatch_claim_task_uses_server_surface_not_payload_surface" (fun () ->
+let () = test "dispatch_transition_claim_uses_server_surface_not_payload_surface" (fun () ->
   let ctx = make_test_ctx () in
   add_task_requiring_tools ctx ~title:"Needs bash" [ "keeper_bash" ];
   match
     Tool_task.dispatch ~agent_tool_names:[ "masc_status" ] ctx
-      ~name:"masc_claim_task"
+      ~name:"masc_transition"
       ~args:
         (`Assoc
           [
             ("task_id", `String "task-001");
+            ("action", `String "claim");
             ("agent_tool_names", `List [ `String "keeper_bash" ]);
           ])
   with

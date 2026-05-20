@@ -36,7 +36,6 @@ type sdk_tool_binding = {
   description : string;
   input_schema : Yojson.Safe.t;
   arg_bindings : (string * arg_source) list;
-  discovery_hidden : bool;
 }
 
 (** {1 Catalog} *)
@@ -57,9 +56,8 @@ val core_remote_operation_names : string list
     capability inventory and the discovery wiring. *)
 
 val sdk_tool_schemas : Masc_domain.tool_schema list
-(** SDK-facing [Masc_domain.tool_schema] entries (excluding bindings
-    flagged [discovery_hidden]). Consumed by the public MCP
-    discovery endpoint. *)
+(** SDK-facing [Masc_domain.tool_schema] entries consumed by the
+    managed-agent MCP discovery endpoint. *)
 
 (** {1 Resolver} *)
 

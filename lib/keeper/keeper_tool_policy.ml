@@ -578,7 +578,7 @@ let is_verifier_meta (meta : keeper_meta) =
 let verifier_disallowed_task_mutation_tools =
   [ "keeper_task_claim"
   ; "masc_claim_next"
-  ; "masc_claim_task"
+  ; "masc_transition"
   ; "keeper_task_done"
   ; "keeper_task_submit_for_verification"
   ; "keeper_task_force_release"

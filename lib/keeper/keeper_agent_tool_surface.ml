@@ -234,7 +234,7 @@ let tools_for_gated_affordance = function
     [ "keeper_board_post"; "keeper_board_comment";
       "masc_keeper_msg"; "masc_broadcast" ]
   | Task_claim ->
-    [ "keeper_task_claim"; "masc_claim_next"; "masc_claim_task" ]
+    [ "keeper_task_claim"; "masc_claim_next" ]
   | Task_audit ->
     [ "keeper_tasks_audit"; "keeper_tasks_list"; "masc_tasks" ]
   | Task_verify ->
@@ -282,7 +282,7 @@ let preferred_tool_names_for_turn_affordances turn_affordances =
          [ "keeper_board_comment"; "keeper_board_post";
            "masc_keeper_msg"; "masc_broadcast" ]
        | Task_claim ->
-         [ "keeper_task_claim"; "masc_claim_next"; "masc_claim_task" ]
+         [ "keeper_task_claim"; "masc_claim_next" ]
        | Task_audit ->
          [ "keeper_tasks_audit" ]
        | Task_verify ->

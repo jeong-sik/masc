@@ -149,8 +149,7 @@ val canonical_tool_name_observed : string -> string
 val public_alias_guidance_for_internal_call
   :  visible_tool_names:string list -> string -> string option
 
-(** Canonical names of claim-context tools (Task_claim, Claim_next,
-    Claim_task). *)
+(** Canonical names of claim-context tools (Task_claim, Claim_next). *)
 val claim_context_tool_names : string list
 
 (** Canonical names of completion tools (Task_done variants,

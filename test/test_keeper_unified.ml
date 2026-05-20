@@ -9477,11 +9477,11 @@ let test_social_model_does_not_infer_comment_vote_as_board_comment () =
     routed.tools_used
 ;;
 
-let test_social_model_infers_masc_claim_task_from_tool_use () =
+let test_social_model_infers_masc_claim_next_from_tool_use () =
   let result =
     make_run_result
       ~text:""
-      ~tools:[ "masc_claim_task" ]
+      ~tools:[ "masc_claim_next" ]
       ~model:"test-model"
       ~input_tok:10
       ~output_tok:1
@@ -9505,7 +9505,7 @@ let test_social_model_infers_masc_claim_task_from_tool_use () =
     "transition reason"
     "tool_only:claim_task"
     (KSM.transition_reason_to_string transition_reason);
-  check (list string) "tool list preserved" [ "masc_claim_task" ] routed.tools_used
+  check (list string) "tool list preserved" [ "masc_claim_next" ] routed.tools_used
 ;;
 
 let test_social_model_magentic_ledger_silences_tool_only_turn () =
@@ -9553,12 +9553,12 @@ let test_social_model_magentic_ledger_silences_tool_only_turn () =
   check (list string) "tool list preserved" [ "masc_status" ] routed.tools_used
 ;;
 
-let test_social_model_magentic_ledger_tracks_masc_claim_task () =
+let test_social_model_magentic_ledger_tracks_masc_claim_next () =
   let meta = { minimal_meta with social_model = "magentic_ledger_v1" } in
   let result =
     make_run_result
       ~text:""
-      ~tools:[ "masc_claim_task" ]
+      ~tools:[ "masc_claim_next" ]
       ~model:"test-model"
       ~input_tok:10
       ~output_tok:1
@@ -9579,7 +9579,7 @@ let test_social_model_magentic_ledger_tracks_masc_claim_task () =
     "tool_only:claim_task"
     (KSM.transition_reason_to_string transition_reason);
   check string "visible response suppressed" "" routed.response_text;
-  check (list string) "tool list preserved" [ "masc_claim_task" ] routed.tools_used
+  check (list string) "tool list preserved" [ "masc_claim_next" ] routed.tools_used
 ;;
 
 let test_social_model_magentic_ledger_hides_nonvisible_tool_text () =
@@ -10234,7 +10234,7 @@ let test_tools_for_gated_affordance_covers_each_variant () =
   check
     (list string)
     "task claim affordance keeps active claim tools visible"
-    [ "keeper_task_claim"; "masc_claim_next"; "masc_claim_task" ]
+    [ "keeper_task_claim"; "masc_claim_next" ]
     (Surface.preferred_tool_names_for_turn_affordances [ "task_claim" ]);
   check
     bool
@@ -11497,17 +11497,17 @@ let () =
             `Quick
             test_social_model_does_not_infer_comment_vote_as_board_comment
         ; test_case
-            "social model infers masc claim task from tool use"
+            "social model infers masc claim next from tool use"
             `Quick
-            test_social_model_infers_masc_claim_task_from_tool_use
+            test_social_model_infers_masc_claim_next_from_tool_use
         ; test_case
             "magentic ledger silences tool-only turn"
             `Quick
             test_social_model_magentic_ledger_silences_tool_only_turn
         ; test_case
-            "magentic ledger tracks masc claim task"
+            "magentic ledger tracks masc claim next"
             `Quick
-            test_social_model_magentic_ledger_tracks_masc_claim_task
+            test_social_model_magentic_ledger_tracks_masc_claim_next
         ; test_case
             "magentic ledger hides non-visible tool text"
             `Quick

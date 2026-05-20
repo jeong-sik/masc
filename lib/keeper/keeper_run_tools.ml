@@ -55,8 +55,6 @@ let record_requested_tool_names = Keeper_run_tools_hook_accumulator.record_reque
 
 let task_scope_tool_names =
   [ "masc_transition"
-  ; "masc_claim_task"
-  ; "masc_complete_task"
   ; "masc_release_task"
   ; "masc_cancel_task"
   ; "keeper_task_done"

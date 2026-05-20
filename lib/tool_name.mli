@@ -114,7 +114,6 @@ module Masc : sig
     | Cancel_task
     | Check
     | Claim_next
-    | Claim_task
     | Cleanup_zombies
     | Coordination_fsm_snapshot
     | Code_delete
@@ -125,7 +124,6 @@ module Masc : sig
     | Code_shell
     | Code_symbols
     | Code_write
-    | Complete_task
     | Dashboard
     | Deliver
     | Dispatch_plan
@@ -157,7 +155,6 @@ module Masc : sig
     | Release_task
     | Reset
     | Coord_status
-    | Set_current_task
     | Status
     | Task_history
     | Tasks

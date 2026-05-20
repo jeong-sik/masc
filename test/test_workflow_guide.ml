@@ -158,18 +158,6 @@ let test_claim_next_alias () =
   let g = WG.next_steps ~tool_name:"masc_claim_next" ~success:true in
   check_has_tool g.next_steps "masc_worktree_create"
 
-let test_set_current_task_alias_matches_canonical () =
-  let alias_steps =
-    WG.next_steps ~tool_name:"masc_set_current_task" ~success:true
-    |> fun g -> List.map (fun (s : WG.step) -> s.tool) g.next_steps
-  in
-  let canonical_steps =
-    WG.next_steps ~tool_name:"masc_plan_set_task" ~success:true
-    |> fun g -> List.map (fun (s : WG.step) -> s.tool) g.next_steps
-  in
-  check (list string) "alias guidance matches canonical guidance"
-    canonical_steps alias_steps
-
 let test_complete_task_removed () =
   (* masc_complete_task was a ghost tool — it no longer routes to guidance *)
   let g = WG.next_steps ~tool_name:"masc_complete_task" ~success:true in
@@ -240,7 +228,7 @@ let test_next_steps_reference_real_tools () =
     "masc_claim"; "masc_claim_next";
     "masc_transition";
     "masc_add_task"; "masc_batch_add_tasks";
-    "masc_plan_set_task"; "masc_set_current_task";
+    "masc_plan_set_task";
     "masc_heartbeat"; "masc_broadcast";
     "masc_worktree_create"; "masc_init";
     "masc_operator_digest";
@@ -263,8 +251,6 @@ let () =
       test_case "join failure" `Quick test_join_failure;
       test_case "claim success" `Quick test_claim_success;
       test_case "plan_set_task success" `Quick test_plan_set_task_success;
-      test_case "set_current_task alias matches canonical" `Quick
-        test_set_current_task_alias_matches_canonical;
     ];
     "retired_paths", [
       test_case "operation_start removed" `Quick test_operation_start_removed;

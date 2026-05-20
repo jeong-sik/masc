@@ -715,9 +715,7 @@ let inspect_state ctx =
 
 let state_to_json st =
   `Assoc
-    [ "project_ready", `Bool st.room_set
-    ; "namespace_ready", `Bool st.room_set
-    ; "room_set", `Bool st.room_set
+    [ "room_set", `Bool st.room_set
     ; "joined", `Bool st.joined
     ; "task_claimed", `Bool st.task_claimed
     ; "current_task_set", `Bool st.current_task_set

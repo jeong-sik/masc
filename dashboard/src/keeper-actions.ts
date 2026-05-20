@@ -50,7 +50,10 @@ async function refreshDashboardState(): Promise<void> {
   try {
     await refreshDashboard({ force: true })
   } catch (err) {
-    console.warn('[keeper-runtime] dashboard refresh failed', err)
+    console.warn(
+      '[keeper-runtime] dashboard refresh failed',
+      err instanceof Error ? err.message : err,
+    )
   }
 }
 
@@ -136,7 +139,10 @@ export async function loadFullKeeperHistory(name: string): Promise<void> {
       // yet."  Logging surfaces the parse failure to DevTools while
       // normalizeStatusDetail still degrades gracefully (uses raw
       // text + null parsed).
-      console.warn('[keeper] masc_keeper_status response parse failed', { keeperName, err })
+      console.warn(
+        `[keeper] masc_keeper_status response parse failed for ${keeperName}:`,
+        err instanceof Error ? err.message : err,
+      )
       parsed = null
     }
     const detail = normalizeStatusDetail(keeperName, text, parsed)

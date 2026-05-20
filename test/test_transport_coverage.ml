@@ -702,7 +702,7 @@ let test_rest_generate_openapi_document () =
   let sdk_aliases =
     status_entry |> member "x-agent-sdk" |> member "aliases" |> to_list
   in
-  check bool "has sdk alias masc_room_status" true
+  check bool "status has no sdk alias masc_room_status" false
     (List.exists
        (fun row -> row |> member "name" |> to_string = "masc_room_status")
        sdk_aliases);

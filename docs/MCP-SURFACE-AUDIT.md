@@ -51,7 +51,7 @@ The key split is intentional:
 | Group | Public Discovery Path | Canonical Examples | Notes |
 |------|------------------------|--------------------|-------|
 | Canonical MCP tools | `tools/list` | `masc_start`, `masc_transition`, `masc_keeper_status`, `decision.create`, `experiment.start`, `trpg.dice.roll` | Default surface for normal clients |
-| Managed agent MCP | `/mcp/managed` | `masc_room_status`, `masc_list_tasks`, `masc_claim_next`, `masc_transition` | Internal managed-agent surface with listed SDK aliases plus curated passthrough tools; hidden call-only aliases are not supported |
+| Managed agent MCP | `/mcp/managed` | `masc_status`, `masc_tasks`, `masc_claim_next`, `masc_transition` | Internal managed-agent surface with canonical task-control tools plus curated passthrough tools; hidden call-only aliases are not supported |
 | Compatibility aliases | Deprecated and excluded from default `tools/list` | `masc_claim`, `experiment_start`, `masc_trpg_dice_roll` | Still callable for compatibility; not part of the truthful default inventory |
 | MCP prompts | `prompts/list`, `prompts/get` | `tool_help` | Explanation/help layer, not runtime prompt registry |
 | MCP resources | `resources/list/read` | `masc://status`, `masc://tasks`, `masc://tool-help-index` | Snapshot/read layer |

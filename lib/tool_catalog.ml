@@ -247,18 +247,6 @@ let explicit_metadata : (string * metadata) list =
       { masc_coordination_tool with required_permission = Some Masc_domain.CanOpenPortal } );
     ( "masc_portal_send",
       { masc_coordination_tool with required_permission = Some Masc_domain.CanSendPortal } );
-    ( "masc_room_status",
-      hidden_active ~canonical_name:"masc_status" ~replacement:"masc_status"
-        "Managed-agent compatibility alias. Prefer masc_status for canonical namespace state reads." );
-    ( "masc_list_tasks",
-      hidden_active ~canonical_name:"masc_tasks" ~replacement:"masc_tasks"
-        "Managed-agent compatibility alias. Prefer masc_tasks for canonical backlog reads." );
-    ( "masc_release_task",
-      hidden_active ~canonical_name:"masc_transition" ~replacement:"masc_transition"
-        "Managed-agent compatibility alias for masc_transition(action=release)." );
-    ( "masc_cancel_task",
-      hidden_active ~canonical_name:"masc_transition" ~replacement:"masc_transition"
-        "Managed-agent compatibility alias for masc_transition(action=cancel)." );
     (* masc_run_get, masc_run_list: migrated to Tool_spec.register (tool_run.ml) *)
     ("masc_execute_dry_run", readonly_tool);
     ( "masc_admin_cleanup",

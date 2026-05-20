@@ -28,20 +28,6 @@ let task_item_schema =
 let sdk_bindings : sdk_tool_binding list =
   [
     {
-      sdk_name = "masc_list_tasks";
-      canonical_operation = "masc_tasks";
-      description = "List all tasks in the MASC room with status, assignee, and priority. Use after joining a room to find available work or check what others are doing.";
-      input_schema = object_schema [];
-      arg_bindings = [];
-    };
-    {
-      sdk_name = "masc_room_status";
-      canonical_operation = "masc_status";
-      description = "Get the current MASC room status including agents and tasks.";
-      input_schema = object_schema [];
-      arg_bindings = [];
-    };
-    {
       sdk_name = "masc_add_task";
       canonical_operation = "masc_add_task";
       description = "Create a single new task in the MASC room backlog. Use when you identify work that any agent can pick up. Returns a task-XXX ID for tracking.";
@@ -82,40 +68,6 @@ let sdk_bindings : sdk_tool_binding list =
       description = "Claim the next available task automatically by priority order. Use when you are ready to work and any pending task is acceptable.";
       input_schema = object_schema [];
       arg_bindings = [ ("agent_name", Agent_name) ];
-    };
-    {
-      sdk_name = "masc_release_task";
-      canonical_operation = "masc_transition";
-      description =
-        "Release a claimed task back to pending for another worker.";
-      input_schema =
-        object_schema ~required:[ "task_id" ]
-          [ assoc_field "task_id" (string_prop "The task ID to release") ];
-      arg_bindings =
-        [
-          ("action", Static (json_string "release"));
-          ("agent_name", Agent_name);
-          ("task_id", Input_field "task_id");
-        ];
-    };
-    {
-      sdk_name = "masc_cancel_task";
-      canonical_operation = "masc_transition";
-      description =
-        "Cancel a task permanently when it should not be retried.";
-      input_schema =
-        object_schema ~required:[ "task_id" ]
-          [
-            assoc_field "task_id" (string_prop "The task ID to cancel");
-            assoc_field "reason" (string_prop "Optional cancellation reason");
-          ];
-      arg_bindings =
-        [
-          ("action", Static (json_string "cancel"));
-          ("agent_name", Agent_name);
-          ("task_id", Input_field "task_id");
-          ("reason", Input_field "reason");
-        ];
     };
     {
       sdk_name = "masc_broadcast";

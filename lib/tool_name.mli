@@ -111,7 +111,6 @@ module Masc : sig
     | Board_sub_board_update
     | Board_vote
     | Broadcast
-    | Cancel_task
     | Check
     | Claim_next
     | Cleanup_zombies
@@ -135,7 +134,6 @@ module Masc : sig
     | Heartbeat
     | Join
     | Leave
-    | List_tasks
     | Messages
     | Note_add
     | Operation_pause
@@ -152,9 +150,7 @@ module Masc : sig
     | Plan_init
     | Plan_set_task
     | Plan_update
-    | Release_task
     | Reset
-    | Coord_status
     | Status
     | Task_history
     | Tasks

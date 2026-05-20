@@ -252,10 +252,8 @@ let test_verifier_config_hides_worker_lifecycle_tools () =
           "keeper_task_submit_for_verification";
           "masc_add_task";
           "masc_batch_add_tasks";
-          "masc_cancel_task";
           "masc_claim_next";
           "masc_deliver";
-          "masc_release_task";
           "masc_transition";
         ]
 

@@ -98,9 +98,6 @@ let classify_actionable_signal_for_tools ~(allowed_tool_names : string list) o =
   then Has_discovered_work
   else No_actionable_signal
 
-let classify_actionable_signal_with_allowed_tools =
-  classify_actionable_signal_for_tools
-
 let make_actionable_signal_context ~tool_gate_required ~actionable_signal =
   if tool_gate_required
   then Turn_affordance_requires_tool

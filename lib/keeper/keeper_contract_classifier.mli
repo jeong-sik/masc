@@ -78,10 +78,6 @@ val classify_actionable_signal : world_observation -> actionable_signal
 val classify_actionable_signal_for_tools :
   allowed_tool_names:string list -> world_observation -> actionable_signal
 
-(** Backward-compatible alias for [classify_actionable_signal_for_tools]. *)
-val classify_actionable_signal_with_allowed_tools :
-  allowed_tool_names:string list -> world_observation -> actionable_signal
-
 (** [requires_tool_support_for_allowed_tools ~allowed_tool_names o] is true
     when [o] carries an actionable signal that can be satisfied by at least
     one tool in [allowed_tool_names]. Use this before provider routing so the

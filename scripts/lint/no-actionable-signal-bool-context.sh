@@ -6,12 +6,13 @@ patterns=(
   "actionable_signal_context:false"
   "actionable_signal_context:bool"
   "actionable_signal_context : bool"
+  "classify_actionable_signal_with_allowed_tools"
 )
 
 failed=0
 for pattern in "${patterns[@]}"; do
   if rg -n --fixed-strings "$pattern" lib test; then
-    echo "no-actionable-signal-bool-context: forbidden legacy bool context: $pattern" >&2
+    echo "no-actionable-signal-bool-context: forbidden legacy actionable signal marker: $pattern" >&2
     failed=1
   fi
 done

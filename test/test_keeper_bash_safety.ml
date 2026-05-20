@@ -984,6 +984,7 @@ let test_keeper_bash_typed_exec_runs_via_shell_ir () =
   let base_path, config = make_config () in
   Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
   Keeper_registry.clear ();
+  Masc_mcp.Legendary_counters.reset ();
   let meta = make_readonly_meta "typed-exec" in
   let playground = Filename.concat base_path (playground_path_of meta.name) in
   ensure_dir playground;
@@ -1011,6 +1012,9 @@ let test_keeper_bash_typed_exec_runs_via_shell_ir () =
     (json |> Json.member "shell_ir_gate" |> Json.to_string);
   Alcotest.(check int) "typed gate stage count" 1
     (json |> Json.member "shell_ir_stage_count" |> Json.to_int);
+  let counters = Masc_mcp.Legendary_counters.snapshot () in
+  Alcotest.(check int) "typed gate counter allow" 1
+    counters.shell_gate_keeper_shell_bash_allow;
   Alcotest.(check bool) "output from native argv" true
     (json
      |> Json.member "output"
@@ -1022,6 +1026,7 @@ let test_keeper_bash_typed_pipeline_runs_via_shell_ir () =
   let base_path, config = make_config () in
   Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
   Keeper_registry.clear ();
+  Masc_mcp.Legendary_counters.reset ();
   let meta = make_readonly_meta "typed-pipeline" in
   let playground = Filename.concat base_path (playground_path_of meta.name) in
   ensure_dir playground;
@@ -1058,6 +1063,9 @@ let test_keeper_bash_typed_pipeline_runs_via_shell_ir () =
     (json |> Json.member "shell_ir_gate" |> Json.to_string);
   Alcotest.(check int) "typed gate stage count" 2
     (json |> Json.member "shell_ir_stage_count" |> Json.to_int);
+  let counters = Masc_mcp.Legendary_counters.snapshot () in
+  Alcotest.(check int) "typed pipeline gate counter allow" 1
+    counters.shell_gate_keeper_shell_bash_allow;
   Alcotest.(check bool) "wc sees piped stdin" true
     (json
      |> Json.member "output"

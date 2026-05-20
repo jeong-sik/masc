@@ -1435,18 +1435,16 @@ let test_execute_tool_explicit_agent_name_not_overridden () =
   let resolve arguments =
     Masc_mcp.Mcp_server_eio_caller_identity.resolve ~config
       ~tool_name:"masc_join" ~arguments ~identity
-      ~cached_resolved_agent:(Some "persisted-stale-nickname")
-      ~mcp_session_id:(Some "mcp-explicit-agent-name-regression")
+      ~cached_resolved_agent:(Some "cached-stale-nickname")
       ~auth_token:None ~internal_keeper_runtime:false
       ~room_initialized:(fun () -> false)
-      ~read_mcp_session_agent:(fun () -> Some "persisted-stale-nickname")
       ~log_mcp_exn:(fun ~label:_ _ -> ())
   in
   let codex =
     resolve (`Assoc [ ("agent_name", `String "codex") ])
   in
   Alcotest.(check string)
-    "explicit legacy agent_name wins over stale cache"
+    "explicit agent_name wins over stale cache"
     "codex" codex.agent_name;
   let gemini =
     resolve (`Assoc [ ("_agent_name", `String "gemini"); ("agent_name", `String "codex") ])
@@ -1454,6 +1452,11 @@ let test_execute_tool_explicit_agent_name_not_overridden () =
   Alcotest.(check string)
     "internal _agent_name wins over legacy agent_name"
     "gemini" gemini.agent_name;
+  let cached = resolve (`Assoc []) in
+  Alcotest.(check string)
+    "cached session identity wins over generated fallback"
+    "cached-stale-nickname"
+    cached.agent_name;
 
   cleanup_dir base_path
 
@@ -1473,10 +1476,8 @@ let test_execute_tool_explicit_alias_reuses_joined_nickname () =
       ~tool_name:"masc_transition"
       ~arguments:(`Assoc [ ("agent_name", `String "alpha-agent") ])
       ~identity ~cached_resolved_agent:None
-      ~mcp_session_id:(Some "mcp-explicit-alias-reuse-regression")
       ~auth_token:None ~internal_keeper_runtime:false
       ~room_initialized:(fun () -> true)
-      ~read_mcp_session_agent:(fun () -> None)
       ~log_mcp_exn:(fun ~label:_ _ -> ())
   in
   Alcotest.(check string)
@@ -1781,11 +1782,10 @@ let test_execute_tool_http_auth_token_overrides_stale_argument_token () =
     Masc_mcp.Mcp_server_eio_caller_identity.resolve ~config
       ~tool_name:"masc_status"
       ~arguments:(`Assoc [ ("token", `String "stale-argument-token") ])
-      ~identity ~cached_resolved_agent:None ~mcp_session_id:None
+      ~identity ~cached_resolved_agent:None
       ~auth_token:(Some "http-auth-token")
       ~internal_keeper_runtime:false
       ~room_initialized:(fun () -> true)
-      ~read_mcp_session_agent:(fun () -> None)
       ~log_mcp_exn:(fun ~label:_ _ -> ())
   in
   Alcotest.(check (option string))
@@ -1806,10 +1806,9 @@ let test_execute_tool_legacy_argument_token_ignored_without_http_auth () =
     Masc_mcp.Mcp_server_eio_caller_identity.resolve ~config
       ~tool_name:"masc_status"
       ~arguments:(`Assoc [ ("token", `String "legacy-argument-token") ])
-      ~identity ~cached_resolved_agent:None ~mcp_session_id:None
+      ~identity ~cached_resolved_agent:None
       ~auth_token:None ~internal_keeper_runtime:false
       ~room_initialized:(fun () -> true)
-      ~read_mcp_session_agent:(fun () -> None)
       ~log_mcp_exn:(fun ~label:_ _ -> ())
   in
   Alcotest.(check (option string))
@@ -1831,10 +1830,8 @@ let test_execute_tool_without_mcp_session_uses_generated_identity () =
       ~tool_name:"masc_broadcast"
       ~arguments:(`Assoc [ ("message", `String "generated identity check") ])
       ~identity ~cached_resolved_agent:None
-      ~mcp_session_id:None
       ~auth_token:None ~internal_keeper_runtime:false
       ~room_initialized:(fun () -> true)
-      ~read_mcp_session_agent:(fun () -> None)
       ~log_mcp_exn:(fun ~label:_ _ -> ())
   in
   Alcotest.(check string)

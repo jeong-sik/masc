@@ -97,7 +97,7 @@ val create_state_eio :
 
     @param clock Eio time clock for Session_eio timeout operations
     @param sw Eio.Switch for structured concurrency
-    @param mcp_session_id Optional HTTP MCP session ID for agent_name persistence
+    @param mcp_session_id Optional HTTP MCP session ID for identity continuity
     @param state Server state
     @param request_str Raw JSON-RPC request string
     @return JSON response *)

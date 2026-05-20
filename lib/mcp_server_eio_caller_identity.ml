@@ -13,9 +13,6 @@ type t = {
 let silent_auth_token_error_kind err =
   Auth_error_kind.to_string (Auth_error_kind.classify err)
 
-let should_read_legacy_persisted_agent_name ~has_explicit_agent_name ~agent_name =
-  (not has_explicit_agent_name) && Agent_name_kind.is_ephemeral agent_name
-
 let caller_agent_name_from_arguments arguments =
   let nonempty_nonunknown key =
     match Safe_ops.json_string_opt key arguments with
@@ -74,8 +71,7 @@ let resolve_owner_keeper_identity config owner_name =
   in
   loop candidates
 
-let resolve_initial_agent_name ~identity ~cached_resolved_agent ~mcp_session_id
-    ~explicit_agent_name ~read_mcp_session_agent =
+let resolve_initial_agent_name ~identity ~cached_resolved_agent ~explicit_agent_name =
   let identity_session_prefix =
     let len = min 8 (String.length identity.Agent_identity.session_key) in
     if len = 0 then
@@ -94,10 +90,8 @@ let resolve_initial_agent_name ~identity ~cached_resolved_agent ~mcp_session_id
       | None ->
           if identity.Agent_identity.agent_name <> "" then
             identity.Agent_identity.agent_name
-          else (
-            match read_mcp_session_agent () with
-            | Some name -> name
-            | None -> generated_fallback_agent_name))
+          else
+            generated_fallback_agent_name)
 
 let resolve_auth_fallback_agent_name
     ~(config : Coord_utils_backend_setup.config)
@@ -166,14 +160,13 @@ let resolve_explicit_joined_alias ~config ~room_initialized ~log_mcp_exn
   else
     agent_name
 
-let resolve ~(config : Coord_utils_backend_setup.config) ~tool_name ~arguments ~identity ~cached_resolved_agent
-    ~mcp_session_id ~auth_token ~internal_keeper_runtime ~room_initialized
-    ~read_mcp_session_agent ~log_mcp_exn =
+let resolve ~(config : Coord_utils_backend_setup.config) ~tool_name ~arguments ~identity
+    ~cached_resolved_agent ~auth_token ~internal_keeper_runtime ~room_initialized
+    ~log_mcp_exn =
   let explicit_agent_name = caller_agent_name_from_arguments arguments in
   let has_explicit_agent_name = Option.is_some explicit_agent_name in
   let agent_name =
-    resolve_initial_agent_name ~identity ~cached_resolved_agent ~mcp_session_id
-      ~explicit_agent_name ~read_mcp_session_agent
+    resolve_initial_agent_name ~identity ~cached_resolved_agent ~explicit_agent_name
   in
   let token = auth_token in
   let verified_internal_keeper_runtime =
@@ -207,20 +200,6 @@ let resolve ~(config : Coord_utils_backend_setup.config) ~tool_name ~arguments ~
       Some (direct_call_block_message tool_name)
     else
       None
-  in
-  let persisted_agent_name () =
-    if should_read_legacy_persisted_agent_name ~has_explicit_agent_name ~agent_name
-    then read_mcp_session_agent ()
-    else None
-  in
-  let agent_name =
-    match persisted_agent_name () with
-    | Some persisted
-      when Nickname.is_generated_nickname persisted
-           && (not has_explicit_agent_name)
-           && not (Nickname.is_generated_nickname agent_name) ->
-        persisted
-    | _ -> agent_name
   in
   let agent_name =
     resolve_auth_fallback_agent_name ~config ~token ~has_explicit_agent_name

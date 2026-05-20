@@ -20,8 +20,8 @@ type context = {
   clock : float Eio.Time.clock_ty Eio.Resource.t;
   arguments : Yojson.Safe.t;
   mcp_session_id : string option;
-  write_mcp_session_agent : string -> unit;
-      (** Write agent name to MCP session file for HTTP persistence. *)
+  record_mcp_session_agent : string -> unit;
+      (** Record the resolved agent name for this MCP session. *)
   wait_for_message :
     Session.registry ->
     agent_name:string ->

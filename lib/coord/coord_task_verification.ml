@@ -86,6 +86,6 @@ let verification_submission_evidence_refs task ~notes handoff_context =
   let notes_refs =
     if notes_have_verification_artifact_ref notes then [ notes ] else []
   in
-  normalized_string_list (contract_refs @ handoff_refs @ summary_refs @ notes_refs)
+  Coord_state.normalized_string_list
+    (contract_refs @ handoff_refs @ summary_refs @ notes_refs)
   |> List.filter evidence_ref_has_verification_artifact_ref
-

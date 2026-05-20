@@ -699,7 +699,10 @@ let composite_config_drift_json ~config ~keeper_name =
 let composite_execution_receipt_json ~(config : Coord.config) ~keeper_name =
   let claim_scope = composite_claim_scope_json ~keeper_name in
   let config_drift = composite_config_drift_json ~config ~keeper_name in
-  match Keeper_execution_receipt.latest_json config keeper_name with
+  match
+    Keeper_execution_receipt.latest_json config keeper_name
+    |> Option.map Keeper_runtime_trust_snapshot.normalize_receipt_projection_json
+  with
   | None ->
     `Assoc
       [ "latest_receipt_present", `Bool false

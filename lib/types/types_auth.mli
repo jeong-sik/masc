@@ -58,8 +58,13 @@ val agent_role_to_yojson : agent_role -> Yojson.Safe.t
 (** Serialises as [\`String "worker"] / [\`String "admin"]. *)
 
 val agent_role_of_yojson : Yojson.Safe.t -> (agent_role, string) result
-(** Accepts only [\`String _]; non-string yields
-    [Error "Expected string for agent_role"]. *)
+(** Accepts only [\`String _].  Non-string inputs yield an [Error]
+    string that names both the contract (the set of accepted role
+    strings derived from {!valid_agent_role_strings}) and the
+    canonical {!Json_util.kind_name} of the value actually received
+    (e.g. ["int"] / ["object"] / ["null"]) so operators can
+    distinguish a wrong-type bug from a wrong-shape bug without
+    re-dumping the full payload. *)
 
 val valid_agent_role_strings : string list
 (** [["worker"; "admin"]] — used as the allowed-values set in

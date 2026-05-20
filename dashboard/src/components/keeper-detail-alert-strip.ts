@@ -212,7 +212,7 @@ function renderVerdict(verdict: KeeperVerdict) {
     case 'no_verdict':
       return toolContractEvidence
     default:
-      return assertNever(verdict.kind)
+      return assertNever(verdict)
   }
 }
 

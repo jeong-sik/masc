@@ -4,6 +4,11 @@
     conditions_to_json 재사용으로 14필드 전체 기록. *)
 
 module SM = Keeper_state_machine
+module SMJ = Keeper_state_machine_json
+(* SM owns the [conditions] record type; SMJ owns its JSON projection
+   (extracted to break a wrapping cycle between the state-machine core
+   and yojson surface code).  Two-line module rebind so callsites read
+   [SMJ.conditions_to_json] without re-importing the full path. *)
 
 (* This flag is queried from registry/test code that can run before an Eio
    scheduler exists, so it cannot depend on Eio.Lazy.  Use a plain
@@ -52,7 +57,7 @@ let emit_transition
       "event", `String (SM.event_to_string event);
       "prev_phase", `String (SM.phase_to_string prev_phase);
       "new_phase", `String (SM.phase_to_string new_phase);
-      "conditions_after", SM.conditions_to_json conditions_after;
+      "conditions_after", SMJ.conditions_to_json conditions_after;
       "restart_count", `Int restart_count;
     ] in
     let path = trace_path ~base_path ~keeper_name in

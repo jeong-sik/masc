@@ -17,6 +17,7 @@
 open Alcotest
 
 module KSM = Masc_mcp.Keeper_state_machine
+module KSM_json = Masc_mcp.Keeper_state_machine_json
 module R = Masc_mcp.Keeper_registry
 
 let test_fiber_terminated_carrier_none () =
@@ -109,7 +110,7 @@ let test_json_serializer_none () =
       ; http_status = None
       }
   in
-  let json = KSM.event_to_json ev in
+  let json = KSM_json.event_to_json ev in
   let s = Yojson.Safe.to_string json in
   (check bool)
     "JSON does not include provider_id when None"
@@ -128,7 +129,7 @@ let test_json_serializer_some () =
       ; http_status = Some 502
       }
   in
-  let json = KSM.event_to_json ev in
+  let json = KSM_json.event_to_json ev in
   let s = Yojson.Safe.to_string json in
   (check bool)
     "JSON includes provider_id when Some"

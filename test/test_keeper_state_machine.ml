@@ -10,6 +10,7 @@
 
 open Alcotest
 module SM = Masc_mcp.Keeper_state_machine
+module SM_json = Masc_mcp.Keeper_state_machine_json
 module Meas = Masc_mcp.Keeper_measurement
 module Guard = Masc_mcp.Keeper_guard
 module KSP = Test_keeper_state_machine_preconditions
@@ -2480,7 +2481,7 @@ let test_setclear_coverage () =
      If someone adds a new field to conditions but forgets to add it here,
      this check catches it by comparing against conditions_to_json output. *)
   let json_field_count =
-    match SM.conditions_to_json SM.default_conditions with
+    match SM_json.conditions_to_json SM.default_conditions with
     | `Assoc pairs -> List.length pairs
     | _ -> fail "conditions_to_json did not return Assoc"
   in

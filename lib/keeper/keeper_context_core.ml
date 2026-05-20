@@ -219,38 +219,19 @@ let tool_result_ids_of_message = Keeper_context_tool_message_pairs.tool_result_i
 let has_tool_result_block = Keeper_context_tool_message_pairs.has_tool_result_block
 let trim_messages_preserving_pairs = Keeper_context_tool_message_pairs.trim_messages_preserving_pairs
 
-let tool_result_text_of_block
-    ~(tool_use_id : string)
-    ~(content : string)
-    ~(json : Yojson.Safe.t option) : string =
-  let content = Inference_utils.sanitize_text_utf8 (String.trim content) in
-  if content <> "" then content
-  else
-    match json with
-    | Some value ->
-        (* Stringify json only when it fits the per-result cap. Larger
-           payloads collapse to a stub so a single orphan-repair pass
-           cannot inflate one Text block to multi-MB and trigger the same
-           escape-depth blow-up that motivated the artifact-store work
-           (see [tool_blob_store] and the tool-output-washing series). *)
-        let serialized = Yojson.Safe.to_string value in
-        let len = String.length serialized in
-        if len <= default_max_checkpoint_tool_result_chars then serialized
-        else
-          Printf.sprintf "[tool:json id:%s bytes:%d elided]" tool_use_id len
-    | None -> Printf.sprintf "[tool result %s]" tool_use_id
+(* Tool block text renderers extracted to
+   [Keeper_context_tool_text_block] (godfile decomp). Parent wrapper
+   injects [default_max_checkpoint_tool_result_chars] so the existing
+   surface (no [~max_chars] arg) stays byte-compatible for callers. *)
+let tool_result_text_of_block ~tool_use_id ~content ~json =
+  Keeper_context_tool_text_block.tool_result_text_of_block
+    ~tool_use_id
+    ~content
+    ~json
+    ~max_chars:default_max_checkpoint_tool_result_chars
+;;
 
-let tool_use_text_of_block
-    ~(tool_use_id : string)
-    ~(tool_name : string)
-    ~(input : Yojson.Safe.t) : string =
-  let tool_name = Inference_utils.sanitize_text_utf8 (String.trim tool_name) in
-  let tool_use_id = Inference_utils.sanitize_text_utf8 (String.trim tool_use_id) in
-  let tool_name =
-    if tool_name = "" then "unknown_tool" else tool_name
-  in
-  let input_json = Yojson.Safe.to_string input |> Inference_utils.sanitize_text_utf8 in
-  Printf.sprintf "[tool use %s %s input=%s]" tool_name tool_use_id input_json
+let tool_use_text_of_block = Keeper_context_tool_text_block.tool_use_text_of_block
 
 type tool_pair_repair_stats =
   { downgraded_tool_uses : int

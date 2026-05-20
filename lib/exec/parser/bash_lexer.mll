@@ -24,6 +24,14 @@ let word_char = [^ ' ' '\t' '\n' '\r' '|' '<' '>' '&' ';' '(' ')'
                    '\'' '"' '$' '`' '\\' '=' '{' '}' '!' '*' '?']
 let word = word_char+
 
+(* Prefix for a single shell word that continues with quoted literal
+   content, e.g. [--include="*.ml"].  This keeps common argv-shaped
+   options inside the typed parser without accepting glob metachars in
+   unquoted positions. *)
+let word_prefix_char = [^ ' ' '\t' '\n' '\r' '|' '<' '>' '&' ';' '(' ')'
+                          '\'' '"' '$' '`' '\\' '{' '}' '!' '*' '?']
+let word_prefix = word_prefix_char+
+
 (* Single-quote string: literal, no escape processing, no nested
    single quote allowed (bash semantics — there is no way to embed
    a single quote inside a '...' string).  Matched content becomes
@@ -34,22 +42,26 @@ let word = word_char+
 let sq_body = [^ '\'' '\n']*
 
 (* Double-quote string: A1 skeleton treats it as a literal whose body
-   excludes the four metachars bash would interpret inside "..." —
-   backslash escapes ('\"', '\\', '\$', '\`'), variable expansion ($FOO,
-   ${FOO}), command substitution (`cmd`, $(cmd)), and embedded newlines.
-   Any of those chars inside the body breaks the lex → Parse_error,
+   excludes the metachars bash would interpret inside "..." — variable
+   expansion ($FOO, ${FOO}), command substitution (`cmd`, $(cmd)), and
+   embedded newlines.  Backslash stays rejected except for [\|], which
+   is a common regex literal in rg/grep patterns and is still literal
+   under bash double quotes.  Any other excluded char inside the body
+   breaks the lex → Parse_error,
    which is the correct fail-closed behavior for the subset.  The most
    common caller shapes (rg "pattern", git commit -m "message",
    echo "hello world") have none of those chars and land as one WORD
    token, mirroring the single-quote rule's space-preservation guarantee.
    Upgrade path: later PR widens dq_body to support escape sequences by
    capturing in a sub-rule that unescapes into a Buffer. *)
-let dq_body = [^ '"' '\n' '\\' '$' '`']*
+let dq_char = [^ '"' '\n' '\\' '$' '`'] | "\\|"
+let dq_body = dq_char*
 
 rule token = parse
   | [' ' '\t']+    { token lexbuf }
   | '\n'           { incr_tokens (); Lexing.new_line lexbuf; token lexbuf }
   | '|'            { incr_tokens (); PIPE }
+  | (word_prefix as prefix) '"' (dq_body as s) '"' { incr_tokens (); WORD (prefix ^ s) }
   | '\'' (sq_body as s) '\'' { incr_tokens (); WORD s }
   | '"' (dq_body as s) '"' { incr_tokens (); WORD s }
   | word as w      { incr_tokens (); WORD w }

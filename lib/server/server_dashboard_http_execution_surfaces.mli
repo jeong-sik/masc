@@ -12,7 +12,7 @@
     [test/test_types.ml] for the
     lifecycle-event patcher family.
 
-    External surface (17 entries):
+    External surface (21 entries):
     - {b cache cells} ({!execution_cache},
       {!broadcast_namespace_truth_ref}) reached by
       [server_dashboard_http_namespace_truth] for
@@ -42,17 +42,22 @@
       [test/test_types] inline-aliases this module to
       assert every SSOT keeper-lifecycle event is
       handled (#8396).
+    - {b SSE-event row patchers}
+      ({!patch_keeper_row},
+      {!patch_surface_json_for_running_keepers}) —
+      pinned because [test/test_dashboard_execution]
+      tests their null-agent-shape tolerance directly
+      (test_patch_keeper_row_tolerates_null_agent_shape /
+      test_patch_surface_json_for_running_keepers_tolerates_null_agent).
 
     Internal helpers stay private at this boundary
-    (~15 internal lets — [shell_prewarm_timeout_s],
+    (~13 internal lets — [shell_prewarm_timeout_s],
     [_last_broadcast_hash] /
     [_broadcast_hash_mu] / [broadcast_cached_surface],
     [_transport_health_cache],
-    [keeper_agent_status_opt] / [patched_keeper_status]
-    / [patch_keeper_row] / [patch_keeper_rows]
-    SSE-event row patcher family,
-    [running_keeper_names] /
-    [patch_surface_json_for_running_keepers],
+    [keeper_agent_status_opt] / [patched_keeper_status],
+    [patch_keeper_rows] SSE-event row patcher helper,
+    [running_keeper_names],
     [patchexecution_cache_for_keeper] /
     [patch_operator_snapshot_cache_for_keeper],
     [transport_health_cache_diagnostics]). *)

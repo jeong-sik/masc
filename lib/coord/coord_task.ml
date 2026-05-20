@@ -20,18 +20,84 @@ let flatten_lock_result = function
   | Ok result -> result
   | Error e -> Error e
 
-let verification_submission_evidence_refs task handoff_context =
+let contains_substring_ci text needle =
+  let text = String.lowercase_ascii text in
+  let needle = String.lowercase_ascii needle in
+  let text_len = String.length text in
+  let needle_len = String.length needle in
+  let rec loop idx =
+    if needle_len = 0 then true
+    else if idx + needle_len > text_len then false
+    else if String.equal (String.sub text idx needle_len) needle then true
+    else loop (idx + 1)
+  in
+  loop 0
+
+let is_placeholder_verification_evidence value =
+  let value = value |> String.trim |> String.lowercase_ascii in
+  let placeholders =
+    [ ""; "-"; "draft"; "n/a"; "na"; "none"; "null"; "pending"; "tbd"; "todo"; "unknown" ]
+  in
+  List.mem value placeholders
+
+let text_has_verification_artifact_ref text =
+  let text = String.trim text in
+  let has_github_pull =
+    contains_substring_ci text "github.com/"
+    && contains_substring_ci text "/pull/"
+  in
+  let has_pr_shorthand =
+    contains_substring_ci text "#"
+    && (contains_substring_ci text "pr "
+        || contains_substring_ci text "pr:"
+        || contains_substring_ci text "pull request")
+  in
+  let has_explicit_artifact =
+    [ "artifact:"; "artifact://"; "file:"; "path:"; "commit:"; "branch:" ]
+    |> List.exists (contains_substring_ci text)
+  in
+  has_github_pull || has_pr_shorthand || has_explicit_artifact
+
+let evidence_ref_has_verification_artifact_ref value =
+  let value = String.trim value in
+  (not (is_placeholder_verification_evidence value))
+  && (text_has_verification_artifact_ref value
+      || contains_substring_ci value "github.com/"
+      || String.contains value '/'
+      || String.contains value '.')
+
+let notes_have_verification_artifact_ref notes =
+  let notes = String.trim notes in
+  (not (is_placeholder_verification_evidence notes))
+  && text_has_verification_artifact_ref notes
+
+let verification_evidence_error_message =
+  "submit_for_verification requires verification evidence: include pr_url \
+   for the draft PR, a PR # reference, or an explicit \
+   artifact/file/path/commit/branch reference in notes."
+
+let verification_submission_evidence_refs task ~notes handoff_context =
   let contract_refs =
     match task.contract with
     | Some c -> c.verify_gate_evidence @ c.required_evidence
     | None -> []
   in
-  let handoff_refs =
-    match handoff_context with
-    | Some (hc : Masc_domain.task_handoff_context) -> hc.evidence_refs
-    | None -> []
+  let handoff_refs, summary_refs =
+    match
+      match handoff_context with
+      | Some _ -> handoff_context
+      | None -> task.handoff_context
+    with
+    | Some (hc : Masc_domain.task_handoff_context) ->
+      ( hc.evidence_refs
+      , if notes_have_verification_artifact_ref hc.summary then [ hc.summary ] else [] )
+    | None -> ([], [])
   in
-  normalized_string_list (contract_refs @ handoff_refs)
+  let notes_refs =
+    if notes_have_verification_artifact_ref notes then [ notes ] else []
+  in
+  normalized_string_list (contract_refs @ handoff_refs @ summary_refs @ notes_refs)
+  |> List.filter evidence_ref_has_verification_artifact_ref
 
 let transition_task_r
       config
@@ -268,22 +334,31 @@ let transition_task_r
           | ( (Masc_domain.Submit_for_verification | Masc_domain.Submit_pr_evidence)
             , _
             , Masc_domain.AwaitingVerification { assignee; verification_id; _ }
-            , Some prepare ) ->
+            , prepare_opt ) ->
             let evidence_refs =
-              verification_submission_evidence_refs task handoff_context
+              verification_submission_evidence_refs task ~notes handoff_context
             in
-            (match prepare ~task ~assignee ~verification_id ~evidence_refs with
-             | Ok () -> Ok ()
-             | Error e ->
-               Error
-                 (Masc_domain.System
-                    (Masc_domain.System_error.IoError
-                       (Printf.sprintf
-                          "verification request creation failed before status transition \
-                           (task=%s vrf=%s): %s"
-                          task_id
-                          verification_id
-                          e))))
+            if evidence_refs = [] then
+              Error
+                (Masc_domain.Task
+                   (Masc_domain.Task_error.InvalidState
+                      verification_evidence_error_message))
+            else
+              (match prepare_opt with
+               | None -> Ok ()
+               | Some prepare ->
+                 (match prepare ~task ~assignee ~verification_id ~evidence_refs with
+                  | Ok () -> Ok ()
+                  | Error e ->
+                    Error
+                      (Masc_domain.System
+                         (Masc_domain.System_error.IoError
+                            (Printf.sprintf
+                               "verification request creation failed before status transition \
+                                (task=%s vrf=%s): %s"
+                               task_id
+                               verification_id
+                               e)))))
           | ( (Masc_domain.Submit_for_verification | Masc_domain.Submit_pr_evidence)
             , _
             , _

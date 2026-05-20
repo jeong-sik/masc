@@ -1987,7 +1987,11 @@ let test_done_redirects_default_contract_task_to_verification_fsm () =
          | None -> fail "expected default verification contract");
         let req = verification_request_by_task_id config ~task_id in
         check bool "criteria populated" true (req.criteria <> []);
-        check bool "evidence refs populated" true (evidence_refs_of_request req <> [])
+        check
+          (list string)
+          "evidence refs use concrete completion evidence"
+          [ "Implemented change and ran focused checks. commit:abc123" ]
+          (evidence_refs_of_request req)
       | _ -> fail "expected keeper_task_done to redirect into verification FSM"))
 ;;
 

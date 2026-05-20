@@ -144,15 +144,43 @@ let verification_submission_evidence_error ~notes ~handoff_context =
        for the draft PR, a PR # reference, or an explicit \
        artifact/file/path/commit/branch reference in notes."
 
-let verification_evidence_refs_for_task (task : Masc_domain.task) =
+let verification_evidence_error_message =
+  "submit_for_verification requires verification evidence: include pr_url \
+   for the draft PR, a PR # reference, or an explicit \
+   artifact/file/path/commit/branch reference in notes."
+
+let concrete_verification_evidence_refs ?(notes = "") ?handoff_context
+    (task : Masc_domain.task) =
   let contract_refs =
     match task.contract with
-    | Some contract -> contract.verify_gate_evidence
+    | Some contract -> contract.verify_gate_evidence @ contract.required_evidence
     | None -> []
   in
   let handoff_refs =
-    match task.handoff_context with
+    match
+      match handoff_context with
+      | Some _ -> handoff_context
+      | None -> task.handoff_context
+    with
     | Some handoff_context -> handoff_context.evidence_refs
     | None -> []
   in
-  non_empty_trimmed_strings (contract_refs @ handoff_refs)
+  let summary_refs =
+    match
+      match handoff_context with
+      | Some _ -> handoff_context
+      | None -> task.handoff_context
+    with
+    | Some handoff_context when notes_have_verification_artifact_ref handoff_context.summary ->
+      [ handoff_context.summary ]
+    | _ -> []
+  in
+  let notes_refs =
+    if notes_have_verification_artifact_ref notes then [ notes ] else []
+  in
+  contract_refs @ handoff_refs @ summary_refs @ notes_refs
+  |> non_empty_trimmed_strings
+  |> List.filter evidence_ref_has_verification_artifact_ref
+
+let verification_evidence_refs_for_task (task : Masc_domain.task) =
+  concrete_verification_evidence_refs task

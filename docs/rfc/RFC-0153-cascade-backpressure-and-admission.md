@@ -265,7 +265,33 @@ keeper_turn_driver.try_cascade
 
 세 옵션 모두 caller chain 5+ 곳에 전파. *B.2 시작 전* 별도 PR 로 plumbing 선행 필요. 본 RFC §11 Phased Rollout 의 B.2 단계를 *B.2.0 plumbing → B.2.1 wire-in* 으로 분할.
 
-**cascade.toml 스키마 확장**:
+#### 4.2.3 Actual implementation — PR #17013 (post-merge audit)
+
+PR #17013 (`feat(cascade): wire tier admission into keeper attempts`, merged 2026-05-20) 가 §4.2.2 의 plumbing prerequisite 을 *bypass* 하고 다른 접근으로 main 에 진입. RFC 와 drift 발생 — 본 sub-section 은 실제 구현 명문화.
+
+| 측면 | §4.2 원래 design | PR #17013 실제 구현 |
+|---|---|---|
+| Admission unit | per-tier-group (cascade.toml `[tier-group.X]`) | **per-cascade-name** (`tier_admission_id = cascade_name`) |
+| Capacity 설정 | cascade.toml `max_inflight = 8` per group | 단일 `Cascade_tier_admission.create ()` (default cap 8) |
+| Policy 결정 | caller site 매핑 (§4.2 본문 테이블) | **per-priority** (`cascade_tier_admission_policy_of_priority : Request_priority.t -> admission_policy`) — Proactive→Required, Background→Bypass |
+| Env flag | (별도) | A.2 와 공유: `MASC_CASCADE_SATURATION_SIGNAL_ENABLED` |
+
+**§4.2.2 plumbing 회피 메커니즘**: `cascade_name` 은 try_cascade entry point 에 이미 있는 식별자. resolver 가 flatten 한 provider 리스트는 *그대로* — admission 결정이 candidate-level 이 아니라 *cascade-call-level* 에서 이루어지므로 tier_id plumbing 불필요.
+
+**Trade-off**:
+- ✅ §4.2.2 의 5+ caller chain plumbing 부담 제거. wire-in 3 파일로 완료 (lib/keeper/keeper_turn_driver.{ml,mli} + test).
+- ⚠️ per-tier-group cap (RFC §4.2 의 원래 motivation) 미실현. 한 cascade_name 안 여러 tier-group 이 같은 counter 공유 → tier 간 *상호 starvation* 가능.
+- ⚠️ priority 분류가 cascade.toml tier 구조와 *직교* — 한 cascade_name 안 Proactive + Background 가 같은 admission counter 공유.
+- ⚠️ `MASC_CLIENT_CAPACITY` (§4.2.1 inner layer) 와 cap 값 정합성 검증 부재.
+
+**Future work**:
+- per-tier-group granularity 가 측정상 진짜 필요한지 6개월 데이터로 결정 (§5 Phase E).
+- 필요 시 §4.2.2 plumbing 의 3 옵션 중 (c) `Cascade_runtime_candidate.t.tier_id` 가 가장 저비용 (build site 한 곳만 변경).
+- cascade.toml `max_inflight` 스키마는 *deferred* — 우선 모든 cascade default 8 로 운영하며 saturation signal 분포 측정.
+
+§11 Phased Rollout 의 B.2 단계가 PR #17013 으로 *partial-fulfilled*. cascade.toml 스키마 + per-tier-group cap 는 future work.
+
+**cascade.toml 스키마 확장** (deferred per §4.2.3):
 
 ```toml
 [tier-group.strict_tool_candidates]

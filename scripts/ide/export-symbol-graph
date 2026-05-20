@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import json
 import pathlib
+import shutil
 import subprocess
 import sys
 from typing import Any
@@ -40,6 +41,10 @@ DENIED_METHODS = {
     "textDocument/formatting",
     "textDocument/rangeFormatting",
     "textDocument/codeAction",
+}
+LIVE_LSP_EXECUTABLES = {
+    "ocaml": ["ocaml-lsp-server"],
+    "typescript": ["typescript-language-server"],
 }
 
 
@@ -81,6 +86,54 @@ def collect_tests(data: dict[str, Any]) -> set[str]:
         for symbol in file_row.get("symbols", []):
             tests.update(symbol.get("tests", []))
     return tests
+
+
+def collect_languages(data: dict[str, Any]) -> set[str]:
+    languages: set[str] = set()
+    for file_row in data.get("files", []):
+        language = file_row.get("language")
+        if isinstance(language, str) and language:
+            languages.add(language)
+    return languages
+
+
+def live_lsp_prereq_report(data: dict[str, Any], *, artifact: pathlib.Path) -> dict[str, Any]:
+    languages = sorted(collect_languages(data))
+    commands: dict[str, list[dict[str, Any]]] = {}
+    ready = True
+    for language in languages:
+        required = LIVE_LSP_EXECUTABLES.get(language, [])
+        rows: list[dict[str, Any]] = []
+        for command in required:
+            found_path = shutil.which(command)
+            found = found_path is not None
+            ready = ready and found
+            rows.append(
+                {
+                    "command": command,
+                    "found": found,
+                    "path": found_path,
+                }
+            )
+        commands[language] = rows
+    source = data.get("source", {})
+    if not isinstance(source, dict):
+        source = {}
+    return {
+        "schema_version": "masc.symbol_graph.live_lsp_prereq.v1",
+        "artifact": str(artifact),
+        "artifact_schema_version": data.get("schema_version"),
+        "artifact_collection_mode": data.get("collection_mode"),
+        "artifact_live_lsp_invoked": source.get("live_lsp_invoked"),
+        "languages": languages,
+        "commands": commands,
+        "ready": ready,
+        "note": (
+            "This doctor checks local executable prerequisites only. It does not "
+            "call /api/v1/ide/lsp, open a WebSocket, spawn LSP servers, or mutate "
+            "the checked-in artifact."
+        ),
+    }
 
 
 def validate(data: dict[str, Any], root: pathlib.Path, *, check_current_ranges: bool) -> list[str]:
@@ -175,6 +228,12 @@ def main() -> int:
     parser.add_argument("--emit", action="store_true", help="validate and print canonical JSON to stdout")
     parser.add_argument("--write", action="store_true", help="validate and rewrite the artifact canonically")
     parser.add_argument(
+        "--doctor-live-lsp",
+        "--live-lsp-prereq-report",
+        action="store_true",
+        help="print a non-mutating JSON report for live LSP executable prerequisites",
+    )
+    parser.add_argument(
         "--strict-ranges",
         action="store_true",
         help="require display_range rows to fit the current checkout even when base_commit differs",
@@ -190,6 +249,10 @@ def main() -> int:
         data["base_commit"] = args.base_commit
     if args.generated_at:
         data["generated_at"] = args.generated_at
+
+    if args.doctor_live_lsp:
+        sys.stdout.write(dump_canonical(live_lsp_prereq_report(data, artifact=artifact)))
+        return 0
 
     current_head = git_short_head(root)
     base_commit = str(data.get("base_commit", ""))

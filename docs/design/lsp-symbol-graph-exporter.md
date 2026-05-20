@@ -140,6 +140,23 @@ pretend stale static line numbers are current-main coordinates. It does not
 call `/api/v1/ide/lsp`, does not add a runtime route, and does not mutate task,
 keeper, git, dashboard, or cache state.
 
+## Live LSP Prerequisites
+
+The static seed check is intentionally not a live exporter proof. To verify
+whether the local runner can attempt a future live export, run:
+
+```bash
+scripts/ide/export-symbol-graph --doctor-live-lsp
+```
+
+The doctor prints JSON for the languages present in the artifact and checks
+only executable availability, currently `ocaml-lsp-server` for OCaml files and
+`typescript-language-server` for TypeScript files. It does not call
+`/api/v1/ide/lsp`, open a WebSocket, spawn LSP servers, update
+`live_lsp_invoked`, or rewrite the checked-in artifact. Missing executables are
+an explicit live-export prerequisite blocker, not a reason to refresh
+`base_commit` or static line ranges from heuristics.
+
 To reproduce the seed payload as canonical JSON during a documentation PR:
 
 ```bash

@@ -6,7 +6,7 @@
 # 절대 $HOME 또는 ~/me 하드코딩 금지.
 #
 # Output: 13-row SLO table per Goal goal-board-live-issue-convergence-20260519.
-# Modes: --json (default), --table (human render via jq).
+# Modes: --json (default), --table (human render via jq), --offline (fixtures/CI).
 
 set -euo pipefail
 
@@ -39,12 +39,16 @@ readonly LOG_TODAY="$LOGS_DIR/system_log_${TODAY}.jsonl"
 WINDOW_HOURS=24
 OUTPUT_MODE=json
 DASHBOARD_HOST="http://127.0.0.1:8935"
+OFFLINE_MODE=0
+ANALYZER_TIMEOUT_SEC="${MASC_BOARD_SLO_ANALYZER_TIMEOUT_SEC:-8}"
+DASHBOARD_TIMEOUT_SEC="${MASC_BOARD_SLO_DASHBOARD_TIMEOUT_SEC:-5}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --window-hours) WINDOW_HOURS="$2"; shift 2 ;;
     --table) OUTPUT_MODE=table; shift ;;
     --json) OUTPUT_MODE=json; shift ;;
+    --offline) OFFLINE_MODE=1; shift ;;
     --dashboard-host) DASHBOARD_HOST="$2"; shift 2 ;;
     -h|--help)
       sed -n '2,12p' "$0"; exit 0 ;;
@@ -99,13 +103,39 @@ m_warn_error_window() {
   rg --count -e '"level":"(WARN|ERROR|WARNING)"' "$LOG_TODAY" || true
 }
 
+run_with_timeout() {
+  local timeout_sec="$1"
+  shift
+  local tmp
+  tmp="$(mktemp "${TMPDIR:-/tmp}/board-slo-extractor.XXXXXX")"
+  "$@" >"$tmp" 2>/dev/null &
+  local pid=$!
+  local elapsed=0
+  while kill -0 "$pid" 2>/dev/null; do
+    if [[ "$elapsed" -ge "$timeout_sec" ]]; then
+      kill "$pid" 2>/dev/null || true
+      wait "$pid" 2>/dev/null || true
+      rm -f "$tmp"
+      return 124
+    fi
+    sleep 1
+    elapsed=$((elapsed + 1))
+  done
+  local status=0
+  wait "$pid" || status=$?
+  cat "$tmp"
+  rm -f "$tmp"
+  return "$status"
+}
+
 m_tool_call_success_pct() {
+  [[ "$OFFLINE_MODE" -eq 0 ]] || { echo "null"; return; }
   # WORKAROUND: analyze-tool-call-quality.sh has no --json mode yet.
   # 근본 해결: 별도 PR로 두 analyze-* scripts에 --json 추가 후 단일 contract 호출로 교체.
   local script="$REPO_ROOT/scripts/analyze-tool-call-quality.sh"
   [[ -x "$script" ]] || { echo "null"; return; }
   local out failures total
-  out="$("$script" "$BASE_PATH" "$WINDOW_HOURS" 2>/dev/null || true)"
+  out="$(run_with_timeout "$ANALYZER_TIMEOUT_SEC" "$script" "$BASE_PATH" "$WINDOW_HOURS" || true)"
   failures="$(printf '%s\n' "$out" | rg -o '([0-9]+) failures' -r '$1' | head -1)"
   total="$(printf '%s\n' "$out" \
     | rg -o '[0-9]+ calls' -r '' \
@@ -116,20 +146,28 @@ m_tool_call_success_pct() {
 }
 
 m_bash_failure_pct() {
+  [[ "$OFFLINE_MODE" -eq 0 ]] || { echo "null"; return; }
   local script="$REPO_ROOT/scripts/analyze-keeper-bash-failures.sh"
   [[ -x "$script" ]] || { echo "null"; return; }
-  "$script" "$BASE_PATH" "$WINDOW_HOURS" 2>/dev/null \
-    | rg -o '[Ff]ailure[^0-9]*([0-9]+\.[0-9]+)' -r '$1' | head -1 || echo "null"
+  local out
+  out="$(run_with_timeout "$ANALYZER_TIMEOUT_SEC" "$script" "$BASE_PATH" "$WINDOW_HOURS" || true)"
+  printf '%s\n' "$out" | rg -o '[Ff]ailure[^0-9]*([0-9]+\.[0-9]+)' -r '$1' | head -1 || echo "null"
 }
 
 m_cascade_audit_failure_pct() {
   # Approximation: cascade_exhausted / cascade_attempt over window log.
   [[ -f "$LOG_TODAY" ]] || { echo "null"; return; }
-  local exh att
+  local exh att denom
   exh=$(rg --count 'cascade_exhausted' "$LOG_TODAY" 2>/dev/null || echo 0)
   att=$(rg --count 'cascade_attempt' "$LOG_TODAY" 2>/dev/null || echo 0)
-  if [[ "$att" -eq 0 ]]; then echo "null"; return; fi
-  awk -v e="$exh" -v a="$att" 'BEGIN { printf "%.2f", (e * 100.0) / a }'
+  denom="$att"
+  if [[ "$exh" -gt "$denom" ]]; then
+    # Some producers emit terminal exhaustion without a same-file attempt row.
+    # Keep the SLO percentage bounded while preserving the hard breach signal.
+    denom="$exh"
+  fi
+  if [[ "$denom" -eq 0 ]]; then echo "null"; return; fi
+  awk -v e="$exh" -v d="$denom" 'BEGIN { printf "%.2f", (e * 100.0) / d }'
 }
 
 m_docker_false_positive_24h() {
@@ -143,13 +181,14 @@ epoch_ms() {
 }
 
 m_dashboard_proof_endpoints() {
+  [[ "$OFFLINE_MODE" -eq 0 ]] || { echo "{}"; return; }
   local endpoints=(/health /health?full=1 /api/v1/dashboard/goals /api/v1/verification/summary)
   local out="{"
   local first=1
   for ep in "${endpoints[@]}"; do
     local code start end ms
     start=$(epoch_ms)
-    code=$(curl -sS --max-time 5 -o /dev/null -w '%{http_code}' "$DASHBOARD_HOST$ep" 2>/dev/null || echo "000")
+    code=$(curl -sS --max-time "$DASHBOARD_TIMEOUT_SEC" -o /dev/null -w '%{http_code}' "$DASHBOARD_HOST$ep" 2>/dev/null || echo "000")
     end=$(epoch_ms)
     ms=$(( end - start ))
     [[ $first -eq 1 ]] && first=0 || out+=","
@@ -160,6 +199,7 @@ m_dashboard_proof_endpoints() {
 }
 
 m_live_defect_issues() {
+  [[ "$OFFLINE_MODE" -eq 0 ]] || { echo "null"; return; }
   command -v gh >/dev/null || { echo "null"; return; }
   gh issue list --repo jeong-sik/masc-mcp --label live-defect --state open --json number 2>/dev/null \
     | jq 'length' || echo "null"

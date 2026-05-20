@@ -425,13 +425,32 @@ let can_transition ~from_phase ~to_phase =
       | Draining
       | Paused
       | Restarting ) ) -> false
-  (* Paused -> Running (resume) | Draining (stop) | Stopped (remove)
-     | Crashed (fiber can die while keeper is paused)
-     | Compacting (operator invoked masc_keeper_compact on paused keeper
-     to clear an overflow-induced pause) *)
-  | Paused, (Running | Compacting | Draining | Stopped | Crashed) -> true
-  | Paused, (Offline | Failing | Overflowed | HandingOff | Paused | Restarting)
-    -> false
+  (* Paused -> any non-terminal phase derive_phase can return.
+     Operator_resume flips [operator_paused=false]; the next derive_phase
+     consults priorities 0-10, any of which may fire if a latched condition
+     remained while paused (turn_healthy=false, context_overflow=true,
+     handoff_active=true, fiber_alive=false, ...). Matrix MUST admit every
+     phase derive_phase can produce — otherwise apply_event returns
+     Invalid_transition and the conditions update is discarded, leading
+     to silent livelock (Operator_resume can never escape Paused).
+     Incident: albini 2026-05-20T01:21Z, RFC-0072 follow-up.
+       Failing    <- !heartbeat_healthy OR !turn_healthy (P9) OR guardrail (P6)
+       Overflowed <- context_overflow && !compact_retry_exhausted (P8c)
+       HandingOff <- handoff_active (P8a)
+       Restarting <- !fiber_alive && restart_budget_remaining && backoff_elapsed (P4)
+       Offline    <- launch_pending && !fiber_alive (P2, edge case) *)
+  | ( Paused
+    , ( Running
+      | Compacting
+      | Draining
+      | Stopped
+      | Crashed
+      | Failing
+      | Overflowed
+      | HandingOff
+      | Restarting
+      | Offline ) ) -> true
+  | Paused, Paused -> false
   (* Crashed -> Restarting (backoff done). Dead is covered by the global
      hard-stop/budget terminal transition above. *)
   | Crashed, Restarting -> true

@@ -138,10 +138,7 @@ let handle_post_create ~tool_name ~start_time args =
              ~start_time
              (Printf.sprintf "Post created:\n%s" (Yojson.Safe.pretty_to_string json))
          | Error e ->
-           Tool_result.error
-             ~tool_name
-             ~start_time
-             (Printf.sprintf "%s" (Tool_board_format.board_error_to_string e))))
+           Tool_board_format.error_of_board_error ~tool_name ~start_time e))
 ;;
 
 let handle_post_list_uncached ~tool_name ~start_time args =
@@ -273,10 +270,7 @@ let handle_post_get ~tool_name ~start_time args =
       ~start_time
       (Printf.sprintf "Post %s no longer exists (deleted or expired)." post_id)
   | Error e ->
-    Tool_result.error
-      ~tool_name
-      ~start_time
-      (Printf.sprintf "%s" (Tool_board_format.board_error_to_string e))
+    Tool_board_format.error_of_board_error ~tool_name ~start_time e
   | Ok (post, comments) ->
     let post_str = Tool_board_format.format_post post in
     let comments_str =
@@ -333,8 +327,5 @@ let handle_comment_add ~tool_name ~start_time args =
         ~start_time
         (Printf.sprintf "Comment added:\n%s" (Yojson.Safe.pretty_to_string json))
     | Error e ->
-      Tool_result.error
-        ~tool_name
-        ~start_time
-        (Printf.sprintf "%s" (Tool_board_format.board_error_to_string e)))
+      Tool_board_format.error_of_board_error ~tool_name ~start_time e)
 ;;

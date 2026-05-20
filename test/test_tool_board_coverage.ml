@@ -39,6 +39,15 @@ let dispatch name args =
   let result = Tool_board.handle_tool name args in
   (result.success, Tool_result.message result)
 
+let dispatch_result name args = Tool_board.handle_tool name args
+
+let check_failure_class name expected result =
+  let actual =
+    Tool_result.failure_class result
+    |> Option.map Tool_result.tool_failure_class_to_string
+  in
+  Alcotest.(check (option string)) name expected actual
+
 let make_args pairs = `Assoc pairs
 
 let parse_create_response_json body =
@@ -1419,9 +1428,21 @@ let test_vote_not_found () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
-  let ok, body = dispatch "masc_board_vote"
-    (make_args [("post_id", `String "missing"); ("voter", `String "v"); ("direction", `String "up")]) in
-  Alcotest.(check bool) "vote on missing fails" false ok;
+  let result =
+    dispatch_result "masc_board_vote"
+      (make_args
+         [
+           ("post_id", `String "missing");
+           ("voter", `String "v");
+           ("direction", `String "up");
+         ])
+  in
+  let body = Tool_result.message result in
+  Alcotest.(check bool) "vote on missing fails" false result.success;
+  check_failure_class
+    "missing post vote is workflow rejection"
+    (Some "workflow_rejection")
+    result;
   Alcotest.(check bool) "has error" true (String.length body > 0)
 
 (** {2 Group 5: Comment} *)
@@ -1430,9 +1451,21 @@ let test_comment_add_missing_post () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
-  let ok, body = dispatch "masc_board_comment"
-    (make_args [("post_id", `String "missing"); ("content", `String "hi"); ("author", `String "a")]) in
-  Alcotest.(check bool) "comment on missing post fails" false ok;
+  let result =
+    dispatch_result "masc_board_comment"
+      (make_args
+         [
+           ("post_id", `String "missing");
+           ("content", `String "hi");
+           ("author", `String "a");
+         ])
+  in
+  let body = Tool_result.message result in
+  Alcotest.(check bool) "comment on missing post fails" false result.success;
+  check_failure_class
+    "missing post comment is workflow rejection"
+    (Some "workflow_rejection")
+    result;
   Alcotest.(check bool) "has error" true (String.length body > 0)
 
 let test_comment_add_missing_author_rejected () =
@@ -1463,6 +1496,27 @@ let test_comment_vote_missing () =
   let ok, body = dispatch "masc_board_comment_vote"
     (make_args [("comment_id", `String ""); ("voter", `String "v"); ("direction", `String "up")]) in
   Alcotest.(check bool) "empty comment_id fails" false ok;
+  Alcotest.(check bool) "error msg" true (String.length body > 0)
+
+let test_comment_vote_not_found () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let result =
+    dispatch_result "masc_board_comment_vote"
+      (make_args
+         [
+           ("comment_id", `String "missing-comment");
+           ("voter", `String "v");
+           ("direction", `String "up");
+         ])
+  in
+  let body = Tool_result.message result in
+  Alcotest.(check bool) "vote on missing comment fails" false result.success;
+  check_failure_class
+    "missing comment vote is workflow rejection"
+    (Some "workflow_rejection")
+    result;
   Alcotest.(check bool) "error msg" true (String.length body > 0)
 
 (** {2 Group 6: Search / Stats / Profile / Hearths} *)
@@ -1541,7 +1595,7 @@ let test_tools_count () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
-  Alcotest.(check int) "14 tool schemas" 14 (List.length Tool_board.tools)
+  Alcotest.(check int) "19 tool schemas" 19 (List.length Tool_board.tools)
 
 let test_tools_names_unique () =
   Eio_main.run @@ fun env ->
@@ -1849,6 +1903,8 @@ let () =
           Alcotest.test_case "comment anonymous author rejected" `Quick
             test_comment_add_anonymous_author_rejected;
           Alcotest.test_case "comment vote missing" `Quick test_comment_vote_missing;
+          Alcotest.test_case "comment vote not found" `Quick
+            test_comment_vote_not_found;
         ] );
       ( "search_stats",
         [

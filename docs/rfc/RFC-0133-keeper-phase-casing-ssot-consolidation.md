@@ -3,12 +3,12 @@ rfc: "0132"
 title: "Keeper Phase Casing SSOT Consolidation"
 status: Draft
 created: 2026-05-19
-updated: 2026-05-19
+updated: 2026-05-20
 author: vincent
 supersedes: []
 superseded_by: null
 related: ["0042", "0046", "0088"]
-implementation_prs: []
+implementation_prs: [16316]
 ---
 
 # RFC-0133 — Keeper Phase Casing SSOT Consolidation

@@ -8,7 +8,7 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0054", "0089", "0091", "0092", "0126"]
-implementation_prs: []
+implementation_prs: [16335,16340,16346,16433,16527,16532,16542]
 ---
 
 # RFC-0131 — Shell Command Gate facade

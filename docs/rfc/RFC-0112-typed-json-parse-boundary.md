@@ -3,12 +3,12 @@ rfc: "0112"
 title: "Typed JSON parse boundary — eliminate silent-drop fallback across read sites"
 status: Draft
 created: 2026-05-17
-updated: 2026-05-17
+updated: 2026-05-20
 author: vincent
 supersedes: []
 superseded_by: null
 related: ["0042", "0077", "0088", "0098"]
-implementation_prs: []
+implementation_prs: [15933]
 ---
 
 # RFC-0112: Typed JSON parse boundary — eliminate silent-drop fallback across read sites

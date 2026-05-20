@@ -3,12 +3,12 @@ rfc: "0106"
 title: "Cancel-safe try-with discipline (Eio.Cancel.Cancelled propagation)"
 status: Draft
 created: 2026-05-17
-updated: 2026-05-17
+updated: 2026-05-20
 author: vincent
 supersedes: []
 superseded_by: null
 related: ["0072", "0097", "0101"]
-implementation_prs: []
+implementation_prs: [15894,15904,15917,15919,15920,15925]
 ---
 
 # RFC-0106 — Cancel-safe try-with discipline

@@ -3,12 +3,12 @@ rfc: "0071"
 title: "Exhaustive Match Sweep Codemod — Eliminate N-of-M `_ -> false/None` Anti-Pattern"
 status: Draft
 created: 2026-05-12
-updated: 2026-05-12
+updated: 2026-05-20
 author: yousleepwhen
 supersedes: []
 superseded_by: null
 related: ["0042", "0068"]
-implementation_prs: []
+implementation_prs: [14881,14923,14930,14936,14942,14945,14965,14969,14974,14984,14987,14990,14997,15003,15006,15012]
 ---
 
 # RFC-0071: Exhaustive Match Sweep Codemod — Eliminate N-of-M `_ -> false/None` Anti-Pattern

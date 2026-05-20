@@ -3,12 +3,12 @@ rfc: "0078"
 title: "RFC Number Reservation Ledger + CI Collision Guard"
 status: Draft
 created: 2026-05-14
-updated: 2026-05-14
+updated: 2026-05-20
 author: vincent
 supersedes: []
 superseded_by: null
 related: ["0057", "0058"]
-implementation_prs: []
+implementation_prs: [15200]
 ---
 
 # RFC-0078: RFC Number Reservation Ledger + CI Collision Guard

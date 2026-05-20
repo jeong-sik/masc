@@ -3,12 +3,12 @@ rfc: "0095"
 title: "OpenAI-compat provider streaming wire-up"
 status: Draft
 created: 2026-05-17
-updated: 2026-05-17
+updated: 2026-05-20
 author: jeong-sik
 supersedes: []
 superseded_by: null
 related: ["0047", "0045", "0033", "0058"]
-implementation_prs: []
+implementation_prs: [15722,15725]
 ---
 
 # RFC-0095 — OpenAI-compat provider streaming wire-up

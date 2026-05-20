@@ -3,12 +3,12 @@ rfc: "0118"
 title: "KCT NoTerminalCascade S1 — typed Result at select_cascade boundary + Zombie mapping correction"
 status: Draft
 created: 2026-05-17
-updated: 2026-05-17
+updated: 2026-05-20
 author: vincent
 supersedes: []
 superseded_by: null
 related: ["0042", "0072", "0113", "0114", "0115", "0116", "0117"]
-implementation_prs: []
+implementation_prs: [15963]
 ---
 
 # RFC-0118: KCT NoTerminalCascade S1 — typed Result at select_cascade boundary + Zombie mapping correction

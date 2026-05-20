@@ -3,12 +3,12 @@ rfc: "0094"
 title: "Compact cooldown semantics split — typed write anchor vs check anchor"
 status: Draft
 created: 2026-05-17
-updated: 2026-05-17
+updated: 2026-05-20
 author: vincent
 supersedes: []
 superseded_by: null
 related: ["0088"]
-implementation_prs: []
+implementation_prs: [15716]
 ---
 
 # RFC-0094: Compact cooldown semantics split

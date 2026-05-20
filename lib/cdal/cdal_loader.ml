@@ -44,11 +44,20 @@ type read_error =
   | File_not_found of string
   | Parse_error of string
 
+(* Closed-list catch — [Yojson.Safe.from_file] documents [Sys_error]
+   for IO failure and [Yojson.Json_error] for parse failure; the prior
+   catch-all [exn -> ... Printexc.to_string exn] both flattened the
+   yojson message into a less-precise [Printexc] dump and silently
+   absorbed any *other* unexpected exception (an asyncio leak, an
+   OS-level [Out_of_memory], a malformed assertion in a downstream
+   patch).  Letting those propagate is safer than absorbing them
+   under the [Parse_error] label.  [Eio.Cancel.Cancelled] is
+   explicitly re-raised per RFC-0106. *)
 let read_json_file path =
   try Ok (Yojson.Safe.from_file path) with
   | Sys_error msg -> Error (File_not_found msg)
+  | Yojson.Json_error msg -> Error (Parse_error msg)
   | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn -> Error (Parse_error (Printexc.to_string exn))
 ;;
 
 (* ================================================================ *)

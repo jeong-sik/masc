@@ -94,7 +94,16 @@ let agent_status_of_yojson = function
       (match agent_status_of_string_opt s with
        | Some status -> Ok status
        | None -> Error ("Unknown agent status: " ^ s))
-  | _ -> Error "agent_status: expected string"
+  | other ->
+      (* Mirrors the [agent_role_of_yojson] shape introduced in iter#90
+         #16927 — non-string inputs name the kind actually received so
+         operators can distinguish wrong-type ([`Int]/[`Bool] from a
+         config drift) from wrong-shape ([`Assoc]/[`Null] from a schema
+         change mid-flight) without re-parsing the offending payload. *)
+      Error
+        (Printf.sprintf
+           "agent_status_of_yojson: expected JSON string, got %s"
+           (Json_util.kind_name other))
 
 (** Agent metadata - session identification and environment info *)
 type agent_meta = {

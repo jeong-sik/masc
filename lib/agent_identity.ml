@@ -120,7 +120,20 @@ let channel_of_yojson = function
       Ok (External (normalize_channel_label s))
   | `List [ `String "Unknown"; `String s ] ->
       Ok (External (normalize_channel_label s))
-  | _ -> Error "channel_of_yojson: expected string or tagged external variant"
+  | other ->
+      (* Accepted contract is one of:
+         - bare [`String "api" | "internal" | "telegram" | ... | "<freeform>"]
+         - tagged 2-tuple [`List [`String "External"|"Unknown"; `String _]]
+         Non-conforming inputs now name the kind we actually saw, so
+         operators chasing a misshapen [channel] field can tell a
+         wrong-type bug ([`Int] / [`Null]) apart from a wrong-shape
+         tagged variant ([`List] of wrong length / wrong leading tag)
+         by reading the kind alone — without re-dumping the payload. *)
+      Error
+        (Printf.sprintf
+           "channel_of_yojson: expected JSON string (e.g. \"api\" / \"telegram\") \
+            or 2-element tagged list [\"External\"|\"Unknown\"; <label>], got %s"
+           (Json_util.kind_name other))
 
 (** Agent identity - extracted from session/request context *)
 type t = {

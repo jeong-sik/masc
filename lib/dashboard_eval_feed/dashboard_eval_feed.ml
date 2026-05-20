@@ -124,7 +124,6 @@ let list_agents ~base_path =
          Sys.is_directory (Filename.concat dir name))
     |> List.sort String.compare
   with
-  | Eio.Cancel.Cancelled _ as e -> raise e
   | Sys_error msg ->
     Log.Dashboard.warn
       "[eval_feed.list_agents] eval directory unreadable at %s: %s"
@@ -141,7 +140,6 @@ let read_latest ~base_path ~agent_name ~limit =
       |> List.filter (fun f -> Filename.check_suffix f ".json")
       |> List.sort (fun a b -> String.compare b a)
     with
-    | Eio.Cancel.Cancelled _ as e -> raise e
     | Sys_error msg ->
       Log.Dashboard.warn
         "[eval_feed.read_latest] per-agent verdict directory unreadable for \

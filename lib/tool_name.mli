@@ -154,7 +154,6 @@ module Masc : sig
     | Plan_init
     | Plan_set_task
     | Plan_update
-    | Register_capabilities
     | Release_task
     | Reset
     | Coord_status

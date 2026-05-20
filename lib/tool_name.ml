@@ -327,7 +327,6 @@ module Masc = struct
     | Plan_init
     | Plan_set_task
     | Plan_update
-    | Register_capabilities
     | Release_task
     | Reset
     | Coord_status
@@ -442,7 +441,6 @@ module Masc = struct
     | Plan_init -> "masc_plan_init"
     | Plan_set_task -> "masc_plan_set_task"
     | Plan_update -> "masc_plan_update"
-    | Register_capabilities -> "masc_register_capabilities"
     | Release_task -> "masc_release_task"
     | Reset -> "masc_reset"
     | Coord_status -> "masc_room_status"
@@ -558,7 +556,6 @@ module Masc = struct
     | "masc_plan_init" -> Some Plan_init
     | "masc_plan_set_task" -> Some Plan_set_task
     | "masc_plan_update" -> Some Plan_update
-    | "masc_register_capabilities" -> Some Register_capabilities
     | "masc_release_task" -> Some Release_task
     | "masc_reset" -> Some Reset
     | "masc_room_status" -> Some Coord_status

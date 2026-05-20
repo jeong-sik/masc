@@ -617,7 +617,6 @@ Docker-style `{agent_type}-{adjective}-{animal}`:
 |------|------|
 | `masc_agents` | 에이전트 목록 (상태, 좀비 여부 포함) |
 | `masc_agent_update` | 에이전트 상태/능력 갱신 |
-| `masc_register_capabilities` | Deprecated compatibility alias. Use `masc_agent_update` for capability updates. |
 | `masc_find_by_capability` | 능력 기반 에이전트 검색 |
 | `masc_get_metrics` | 에이전트 성과 메트릭 |
 | `masc_agent_fitness` | 에이전트 적합도 평가 |

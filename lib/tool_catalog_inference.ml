@@ -231,7 +231,6 @@ let inferred_effect_domain_of_typed_tool_name = function
   | TN.Masc TM.Plan_init
   | TN.Masc TM.Plan_set_task
   | TN.Masc TM.Plan_update
-  | TN.Masc TM.Register_capabilities
   | TN.Masc TM.Release_task
   | TN.Masc TM.Reset
   | TN.Masc TM.Coord_status
@@ -423,7 +422,6 @@ let tool_group_of_typed_tool_name = function
       | TM.Operator_digest
       | TM.Operator_snapshot
       | TM.Pause
-      | TM.Register_capabilities
       | TM.Release_task
       | TM.Reset
       | TM.Resume

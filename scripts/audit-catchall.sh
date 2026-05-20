@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Classify `| _ -> ...` catch-all arms across the OCaml tree.
+# Classify OCaml catch-all arms across the tree.
 #
 # Motivation: the 2026-05-19 code-smell audit
 # (memory/masc-mcp-code-smell-report-2026-05-19.html, Hotspot #5)
@@ -8,9 +8,11 @@
 # §AI 안티패턴 §4 (FSM Sparse Match) and §AI 안티패턴 §2
 # (Unknown -> Permissive Default) cases.
 #
-# This script bucketises every arm by the right-hand-side shape so
+# This script bucketises anonymous `_` arms by the right-hand-side shape so
 # reviewers can ratchet-down the suspicious buckets without touching
-# the legitimate ones.
+# the legitimate ones. It can also classify bare lowercase catch-all
+# bindings (`| value -> ...`) by whether the RHS actually references
+# the binding.
 #
 # Categories (priority order — first match wins):
 #   error-path           raise / failwith / Error _ / Exit / Invalid_argument
@@ -24,10 +26,13 @@
 #   other                everything else — needs manual audit
 #
 # Output modes:
-#   default          per-category totals (stdout)
-#   --by-file        top files with per-category counts
-#   --uncategorised  dump every `other` arm with file:line:body
-#   --file <PATH>    dump a single file's arms grouped by category
+#   default              per-category totals for anonymous `_` arms
+#   --by-file            top files with anonymous `_` per-category counts
+#   --uncategorised      dump every anonymous `_` `other` arm with file:line:body
+#   --file <PATH>        dump a single file's anonymous `_` arms by category
+#   --binding-use        per-category totals for bare catch-all bindings
+#   --binding-use-by-file top files with binding-use counts
+#   --unused-binding     dump catch-all bindings whose RHS ignores the binding
 #
 # Treat the report as informational. The script always exits 0
 # unless `--strict` is given: in that case the `other` bucket must
@@ -52,6 +57,9 @@ while [[ $# -gt 0 ]]; do
     --by-file)       MODE="by-file"; shift ;;
     --uncategorised) MODE="uncategorised"; shift ;;
     --file)          MODE="single"; TARGET="$2"; shift 2 ;;
+    --binding-use)   MODE="binding-use"; shift ;;
+    --binding-use-by-file) MODE="binding-use-by-file"; shift ;;
+    --unused-binding) MODE="unused-binding"; shift ;;
     --strict)        STRICT=1; shift ;;
     -h|--help)
       sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'
@@ -69,6 +77,15 @@ done
 collect_arms() {
   rg -nP --with-filename '^\s*\| _ -> ' "$1" 2>/dev/null \
     | sed -E 's/^([^:]+:[0-9]+:)[[:space:]]*\| _ -> /\1/'
+}
+
+# Collect bare catch-all bindings as tab-separated
+# file, line, binding, body. This intentionally limits itself to single
+# lowercase/underscore identifiers so constructors and structured
+# patterns stay out of the audit.
+collect_binding_arms() {
+  rg -nP --with-filename '^\s*\|\s+(_|[a-z_][a-zA-Z0-9_]*)\s*->\s*' "$1" 2>/dev/null \
+    | perl -ne 'if (/^([^:]+):([0-9]+):\s*\|\s+(_|[a-z_][A-Za-z0-9_]*)\s*->\s*(.*)$/) { print "$1\t$2\t$3\t$4\n" }'
 }
 
 # Echo the category for one RHS body. Stdin = body.
@@ -119,6 +136,47 @@ classify_body() {
   '
 }
 
+binding_use_bucket() {
+  awk -F '\t' '
+    function trim(s) {
+      sub(/^[[:space:]]+/, "", s)
+      sub(/[[:space:]]+$/, "", s)
+      return s
+    }
+    function regex_escape(s) {
+      gsub(/[][\\.^$*+?(){}|]/, "\\\\&", s)
+      return s
+    }
+    {
+      binding = $3
+      body = trim($4)
+      if (binding == "_") {
+        print "anonymous"
+        next
+      }
+
+      if (body == "" || body == "(" || body == "begin") {
+        print "binding-body-multiline"
+        next
+      }
+
+      escaped = regex_escape(binding)
+      re = "(^|[^A-Za-z0-9_])" escaped "([^A-Za-z0-9_]|$)"
+      if (body ~ re) {
+        print "binding-used"
+        next
+      }
+
+      if (binding ~ /^_/) {
+        print "ignored-named-binding"
+        next
+      }
+
+      print "binding-unused"
+    }
+  '
+}
+
 case "$MODE" in
   totals)
     collect_arms "$TARGET" \
@@ -130,7 +188,7 @@ case "$MODE" in
   by-file)
     tmp="$(mktemp)"
     collect_arms "$TARGET" > "$tmp"
-    cut -d: -f1 "$tmp" | sort | uniq -c | sort -rn | head -20 \
+    cut -d: -f1 "$tmp" | sort | uniq -c | sort -rn | awk 'NR <= 20' \
       | while read -r count file; do
           per=$(awk -F: -v f="$file" '$1==f { for (i=3;i<=NF;i++) printf "%s%s", $i, (i==NF? "\n":":") }' "$tmp" \
                   | classify_body | sort | uniq -c | sort -rn | tr '\n' ' ')
@@ -155,6 +213,48 @@ case "$MODE" in
           cat=$(printf '%s\n' "$body" | classify_body)
           printf '%-20s %s\n' "$cat" "$line"
         done | sort
+    ;;
+
+  binding-use)
+    collect_binding_arms "$TARGET" \
+      | binding_use_bucket \
+      | sort | uniq -c | sort -rn
+    ;;
+
+  binding-use-by-file)
+    tmp="$(mktemp)"
+    collect_binding_arms "$TARGET" > "$tmp"
+    cut -f1 "$tmp" | sort | uniq -c | sort -rn | awk 'NR <= 20' \
+      | while read -r count file; do
+          per=$(awk -F '\t' -v f="$file" '$1==f { print }' "$tmp" \
+                  | binding_use_bucket | sort | uniq -c | sort -rn | tr '\n' ' ')
+          printf '%5d  %-60s  %s\n' "$count" "$file" "$per"
+        done
+    rm -f "$tmp"
+    ;;
+
+  unused-binding)
+    collect_binding_arms "$TARGET" \
+      | awk -F '\t' '
+          function trim(s) {
+            sub(/^[[:space:]]+/, "", s)
+            sub(/[[:space:]]+$/, "", s)
+            return s
+          }
+          function regex_escape(s) {
+            gsub(/[][\\.^$*+?(){}|]/, "\\\\&", s)
+            return s
+          }
+          {
+            binding = $3
+            body = trim($4)
+            if (binding == "_" || body == "" || body == "(" || body == "begin") next
+            escaped = regex_escape(binding)
+            re = "(^|[^A-Za-z0-9_])" escaped "([^A-Za-z0-9_]|$)"
+            if (body ~ re) next
+            printf "%s:%s:%s:%s\n", $1, $2, binding, body
+          }
+        '
     ;;
 esac
 

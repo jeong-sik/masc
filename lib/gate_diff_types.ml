@@ -1,14 +1,9 @@
-(** Gate diff types — shared type definitions for shell command safety
-    classification.
+(** Shell safety helper types shared by worker tool validation and keeper
+    logging.
 
-    Nominal variants for destructive command classification, legacy vs shadow
-    gate verdicts, and their diff.  Extracted from worker_dev_tools.ml so
-    that lightweight consumers (counters, telemetry) can reference the types
-    without pulling in the full command-validation tool surface.
-
-    Classification functions that depend on worker_dev_tools internals
-    (validate_command, shadow_parse_outcome) remain in worker_dev_tools.ml
-    and use these types via [Gate_diff_types.t].
+    This module owns only the destructive-command taxonomy and the dynamic
+    typed-shell feature predicates that are still live. The old legacy-vs-AST
+    shadow diff observer was removed once it stopped being an authority path.
 
     @since godsplit-safety — variant unification & godfile decomposition *)
 
@@ -43,9 +38,8 @@ type destructive_pattern = {
 }
 
 (* SSOT for destructive shell patterns. [Eval_gate.destructive_patterns]
-   and [classify_destructive] both derive from this list — drift
-   between the legacy gate and the shadow classifier is impossible by
-   construction.
+   and [classify_destructive] both derive from this list, so destructive
+   substring/tag drift is impossible by construction.
 
    Order matters: longer substrings come first so "rm -rf" matches
    before "rm -r" (both classify as Recursive_delete but the returned
@@ -89,104 +83,10 @@ let classify_destructive cmd : (destructive_class * string) option =
     if contains_sub_ci cmd pattern then Some (class_, pattern) else None)
     destructive_patterns
 
-(* ================================================================ *)
-(* Legacy and shadow verdicts                                        *)
-(* ================================================================ *)
-
-type legacy_verdict =
-  | Legacy_allow
-  | Legacy_reject_by_allowlist
-  | Legacy_reject_destructive of string
-      (** The matching substring from [Eval_gate.destructive_patterns],
-          NOT the description. *)
-
-(* Closed sum mirroring [Masc_exec.Parsed.t] sans the [Parsed _] AST
-   payload. Used as the typed dispatch value in [Legendary_counters]
-   so the per-reason histogram is exhaustive over the parser's full
-   variant surface. *)
-type parse_outcome_kind =
-  | Parsed_simple
-  | Parse_error
-  | Parse_aborted of Masc_exec.Parsed.reason_aborted
-  | Too_complex of Masc_exec.Parsed.reason_too_complex
-
-let reason_too_complex_to_tag (r : Masc_exec.Parsed.reason_too_complex) =
-  match r with
-  | `Heredoc -> "heredoc"
-  | `Here_string -> "here_string"
-  | `Cmd_subst -> "cmd_subst"
-  | `Proc_subst -> "proc_subst"
-  | `Subshell -> "subshell"
-  | `Arith_expansion -> "arith_expansion"
-  | `Control_flow -> "control_flow"
-  | `Logic_op -> "logic_op"
-  | `Function_def -> "function_def"
-  | `Glob_brace -> "glob_brace"
-  | `Background -> "background"
-  | `Redirect -> "redirect"
-  | `Unknown_construct s -> "unknown:" ^ s
-
-let reason_aborted_to_tag (r : Masc_exec.Parsed.reason_aborted) =
-  match r with
-  | `Timeout_50ms -> "timeout_50ms"
-  | `Depth_limit -> "depth_limit"
-  | `Token_limit_50k -> "token_limit_50k"
-
-let parse_outcome_kind_to_tag = function
-  | Parsed_simple -> "parsed_simple"
-  | Parse_error -> "parse_error"
-  | Parse_aborted r -> "parse_aborted:" ^ reason_aborted_to_tag r
-  | Too_complex r -> "too_complex:" ^ reason_too_complex_to_tag r
-
-type shadow_verdict =
-  | Shadow_allow
-  | Shadow_parse_unsupported of { kind : parse_outcome_kind }
-  | Shadow_deny_destructive of destructive_class * string
-
-(* ================================================================ *)
-(* Gate diff — comparison of legacy vs shadow verdicts               *)
-(* ================================================================ *)
-
-type gate_diff =
-  | Agree
-  | Legacy_allow_shadow_deny
-  | Legacy_deny_shadow_allow
-  | Shadow_cannot_parse
-
-let gate_diff_to_string = function
-  | Agree -> "agree"
-  | Legacy_allow_shadow_deny -> "legacy_allow_shadow_deny"
-  | Legacy_deny_shadow_allow -> "legacy_deny_shadow_allow"
-  | Shadow_cannot_parse -> "shadow_cannot_parse"
-
-let diff_of_verdicts ~legacy ~shadow : gate_diff =
-  match legacy, shadow with
-  | _, Shadow_parse_unsupported _ -> Shadow_cannot_parse
-  | Legacy_allow, Shadow_allow -> Agree
-  | Legacy_reject_by_allowlist, _ -> Agree
-  | Legacy_reject_destructive _, Shadow_deny_destructive _ -> Agree
-  | Legacy_allow, Shadow_deny_destructive _ -> Legacy_allow_shadow_deny
-  | Legacy_reject_destructive _, Shadow_allow -> Legacy_deny_shadow_allow
-
-let legacy_verdict_to_tag = function
-  | Legacy_allow -> "legacy_allow"
-  | Legacy_reject_by_allowlist -> "legacy_reject_by_allowlist"
-  | Legacy_reject_destructive _ -> "legacy_reject_destructive"
-
-let shadow_verdict_to_tag = function
-  | Shadow_allow -> "shadow_allow"
-  | Shadow_parse_unsupported _ -> "shadow_parse_unsupported"
-  | Shadow_deny_destructive _ -> "shadow_deny_destructive"
-
 (* Deterministic 12-hex-char digest of the command for log de-duplication. *)
 let cmd_hash_for_log (cmd : string) : string =
   let hex = Digest.to_hex (Digest.string cmd) in
   if String.length hex >= 12 then String.sub hex 0 12 else hex
-
-let shadow_diff_log_enabled () =
-  match Sys.getenv_opt "MASC_BASH_AST_SHADOW_LOG" with
-  | Some ("1" | "true" | "TRUE" | "yes" | "on" | "log") -> true
-  | _ -> false
 
 (* RFC-0092 Phase A advisor — typed parallel-validation log gate.
    Default off; operator opt-in for the parity-measurement window

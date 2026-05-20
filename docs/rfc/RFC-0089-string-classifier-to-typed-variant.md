@@ -13,7 +13,7 @@ implementation_prs:
   - 15523  # G4 keeper_checkpoint_store ENOENT
   - 15524  # G2 board author_kind + voter_kind
   - 15684  # keeper_path_check_error closed sum + emit-site routing
-  - 15699  # shadow-gate parse_outcome_kind
+  - 15699  # retired shadow parse-outcome typing
   - 15703  # eval gate destructive-pattern SSOT
   - 15704  # eval_gate evasion_kind
 ---

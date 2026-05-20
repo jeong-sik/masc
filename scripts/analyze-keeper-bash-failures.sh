@@ -21,11 +21,11 @@ TOOL_CALLS_DIR="${BASE_PATH}/.masc/tool_calls"
 LEGENDARY_BASH_COUNTERS_URL="${MASC_LEGENDARY_BASH_COUNTERS_URL:-}"
 if [ -z "$LEGENDARY_BASH_COUNTERS_URL" ]; then
   if [ -n "${MASC_HTTP_BASE_URL:-}" ]; then
-    LEGENDARY_BASH_COUNTERS_URL="${MASC_HTTP_BASE_URL%/}/api/v1/legendary_bash/shadow_counters"
+    LEGENDARY_BASH_COUNTERS_URL="${MASC_HTTP_BASE_URL%/}/api/v1/legendary_bash/counters"
   else
     MASC_COUNTER_HOST="${MASC_HOST:-127.0.0.1}"
     MASC_COUNTER_PORT="${MASC_HTTP_PORT:-${MASC_PORT:-8935}}"
-    LEGENDARY_BASH_COUNTERS_URL="http://${MASC_COUNTER_HOST}:${MASC_COUNTER_PORT}/api/v1/legendary_bash/shadow_counters"
+    LEGENDARY_BASH_COUNTERS_URL="http://${MASC_COUNTER_HOST}:${MASC_COUNTER_PORT}/api/v1/legendary_bash/counters"
   fi
 fi
 LEGENDARY_BASH_COUNTERS_TIMEOUT_SEC="${MASC_LEGENDARY_BASH_COUNTERS_TIMEOUT_SEC:-2}"
@@ -243,16 +243,12 @@ else
        + (n("shell_gate_keeper_shell_bash_reject") | tostring) + "\t"
        + (n("shell_gate_keeper_shell_bash_cannot_parse") | tostring)),
       "",
-      "gate_diff_bucket\tcount",
-      ("total\t" + (n("gate_diff_total") | tostring)),
-      ("agree\t" + (n("gate_diff_agree") | tostring)),
-      ("legacy_allow_shadow_deny\t" + (n("gate_diff_legacy_allow_shadow_deny") | tostring)),
-      ("legacy_deny_shadow_allow\t" + (n("gate_diff_legacy_deny_shadow_allow") | tostring)),
-      ("shadow_cannot_parse\t" + (n("gate_diff_shadow_cannot_parse") | tostring)),
+      "auto_bg_bucket\tcount",
+      ("observed\t" + (n("auto_bg_observed") | tostring)),
+      ("would_have_promoted\t" + (n("auto_bg_would_have_promoted") | tostring)),
       "",
-      "gate_diff_ratio\tvalue",
-      ("disagree_ratio\t" + ((.ratios.disagree_ratio // 0) | tostring)),
-      ("shadow_parse_coverage\t" + ((.ratios.shadow_parse_coverage // 0) | tostring))
+      "auto_bg_ratio\tvalue",
+      ("auto_bg_promotion_rate\t" + ((.ratios.auto_bg_promotion_rate // 0) | tostring))
     '
   fi
 fi

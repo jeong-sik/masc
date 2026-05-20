@@ -3,7 +3,7 @@ rfc: "0092"
 title: "Keeper shell-bash typed validation via Shell_ir.parse"
 status: Draft
 created: 2026-05-17
-updated: 2026-05-20
+updated: 2026-05-21
 author: vincent
 supersedes: []
 superseded_by: null
@@ -23,7 +23,7 @@ Related:
 - RFC-0087 (Tool dispatch path unification + legacy purge)
 - RFC-0089 (string classifier → typed variant)
 - Prerequisite PRs (open Drafts):
-  - PR #15699 (parse_outcome_kind typed downstream)
+  - PR #15699 (retired shadow-gate parse outcome downstream)
   - PR #15700 (legacy string aliases purge)
   - PR #15703 (destructive_patterns SSOT)
   - PR #15704 (evasion_kind typed)
@@ -44,11 +44,11 @@ but have **zero callers in `lib/keeper/`** (confirmed by
 and `keeper_hooks_oas.ml`, neither of which is on the keeper_bash
 validation path).
 
-The shadow gate (`Worker_dev_tools.classify_shadow`, flag-gated by
-`MASC_BASH_AST_SHADOW_LOG`) does run `Shell_ir`-equivalent parsing
-side-by-side but emits **observation only**: gate-diff counters
-(`Legendary_counters.incr_gate_diff` etc.) and structured log lines.
-The shadow verdict never drives a real allow/deny decision.
+The old shadow classifier in `Worker_dev_tools` used to run
+`Shell_ir`-equivalent parsing side-by-side, but it emitted observation
+only and never drove a real allow/deny decision. That observer has been
+retired; the remaining migration path is the explicit
+`Shell_ir_validator` typed advisor/authority flow.
 
 Why this matters:
 
@@ -60,11 +60,10 @@ Why this matters:
   designed to be the validation substrate but currently has no
   production caller — its only consumers are the codegen walker
   generator (`bin/gen_shell_ir_walkers.ml`) and its own tests.
-- The shadow gate has accumulated dead-launch infrastructure
-  (Tick 22 logger, parity counters) without a flip path. Recent PRs
-  #15699/#15700 closed the typed `parse_outcome_kind` downstream;
-  the *upstream* — making the shadow verdict authoritative for at
-  least one decision — remains undone.
+- The retired shadow gate accumulated dead-launch infrastructure
+  without a flip path. The current upstream task is making
+  `Shell_ir_validator` authoritative for at least one decision and then
+  removing the legacy substring path.
 
 ## 2. Goals
 
@@ -111,7 +110,7 @@ type advisory =
       diagnostic : string;
     }
   | Cannot_parse of {
-      kind : Gate_diff_types.parse_outcome_kind;
+      kind : cannot_parse_kind;
     }
 
 and reject_reason =
@@ -164,9 +163,7 @@ After ≥ 7 days at full authority with zero incident:
 
 1. Remove `Worker_dev_tools.validate_command` substring path.
 2. Remove `MASC_BASH_TYPED_AUTHORITY` flag — typed is unconditional.
-3. Remove `MASC_BASH_AST_SHADOW_LOG` flag and the Tick 22 shadow
-   logger — replaced by the always-on typed advisor.
-4. Compact `lib/keeper/keeper_shell_bash.ml` validation block from
+3. Compact `lib/keeper/keeper_shell_bash.ml` validation block from
    ~150 LoC to ~30 LoC by removing legacy branches.
 
 ### 4.5 What does *not* change
@@ -239,7 +236,7 @@ This RFC is accepted when:
 2. One keeper has run for 24h+ with the flag on and emitted at
    least 100 `typed_advisor_total` observations.
 3. Dashboard exposes the 5 counters and operators can grep the
-   `gate_diff_typed_advisor` log lines.
+   `typed_advisor` log lines.
 
 This RFC is *implemented* (Phase D done) when:
 

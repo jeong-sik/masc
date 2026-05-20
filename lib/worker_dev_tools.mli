@@ -4,8 +4,7 @@
     Surface composition:
 
     - {!Gate_diff_types} re-exported via [include] (line 13 of the .ml).
-      Provides [destructive_class], [legacy_verdict], [shadow_verdict],
-      [gate_diff] + their tag/diff helpers.
+      Provides [destructive_class] and command-log helper predicates.
     - {!Gh_command_validation} re-exported via [include] (line 712 of
       the .ml). Provides [gh_reversibility] + [gh] command validators.
     - This module's own surface: [block_reason] type, command-validation
@@ -14,10 +13,8 @@
 
     Internal helpers stay hidden: path resolution, character-class
     classifiers, pipeline tokenization, command-name extraction,
-    URL/credential redaction, [mkdir_p], the underlying file_read/
-    file_write/shell_exec tool builders, parser-reason tag helpers,
-    and the [classify_legacy] / [classify_shadow] private classifiers
-    used by {!diff_command}. *)
+    URL/credential redaction, [mkdir_p], and the underlying file_read/
+    file_write/shell_exec tool builders. *)
 
 include module type of Gate_diff_types
 
@@ -231,43 +228,6 @@ val make_readonly_tools
   -> ?on_exec:tool_exec_observer
   -> unit
   -> Agent_sdk.Tool.t list
-
-(** {1 Shadow AST gate observability} *)
-
-(** Parse [cmd] with {!Masc_exec_bash_parser.Bash.parse_string} and
-    return the typed outcome — primary classification surface.
-    Downstream histogram dispatch consumes the variant exhaustively
-    so adding a new {!Masc_exec.Parsed.reason_too_complex} arm is a
-    compile-time forcing function, not a silent "other"-bucket
-    landing.  Never raises; the parser catches every internal
-    exception. *)
-val shadow_parse_outcome_kind : string -> parse_outcome_kind
-
-(** Stable string rendering of {!shadow_parse_outcome_kind} — the
-    tag wording dashboards / runbook greps already track:
-
-    - ["parsed_simple"] — grammar accepts the command
-    - ["parse_error"] — Menhir/Lex error
-    - ["parse_aborted:<reason>"] — timeout/depth/token-limit
-    - ["too_complex:<reason>"] — recognised-but-unsupported construct
-
-    Computed via {!shadow_parse_outcome_kind} so the wording cannot
-    drift between this function and {!Legendary_counters}. *)
-val shadow_parse_outcome : string -> string
-
-(** Pair the supplied [legacy] verdict with the typed
-    {!shadow_parse_outcome_kind} for [cmd].  Polymorphic in [legacy] —
-    callers pass either the typed {!legacy_verdict} or the boolean
-    form used by older test sites.  Pure (no side effects); dashboards
-    consume the tuple to spot legacy/shadow drift without two parse
-    passes. *)
-val cross_check_command : legacy:'a -> string -> 'a * parse_outcome_kind
-
-(** Run both the legacy substring gate and the shadow AST gate on
-    [cmd], returning their reconciliation outcome alongside both
-    verdicts.  Wraps {!classify_legacy} / {!classify_shadow} (private)
-    and {!diff_of_verdicts} (Gate_diff_types). *)
-val diff_command : string -> gate_diff * legacy_verdict * shadow_verdict
 
 (** {1 Gh CLI cascade} *)
 

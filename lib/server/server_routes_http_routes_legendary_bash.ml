@@ -1,22 +1,20 @@
-(** Legendary Bash dark-launch observer HTTP surface.
+(** Legendary Bash observer HTTP surface.
 
     Exposes the in-process [Legendary_counters] snapshot and the
     [Bg_task.list] per-keeper task roster as public-read JSON endpoints
-    for dashboards and flip-decision tooling.  The counters themselves
-    are incremented only while the matching observer env flag is
+    for dashboards and operator tooling. The counters themselves
+    are incremented only while the matching observer/env path is
     enabled (see [LEGENDARY-BASH-RUNBOOK.md]); this endpoint is a
     zero-cost read.
 
-      GET /api/v1/legendary_bash/shadow_counters
+      GET /api/v1/legendary_bash/counters
       GET /api/v1/legendary_bash/bg_tasks/<keeper>
       GET /api/dashboard/keeper-shell/<keeper>
 
-    Response (200) for shadow_counters: JSON shape mirrors
+    Response (200) for counters: JSON shape mirrors
     [Legendary_counters.snapshot] field-for-field, plus a [ratios]
-    sibling object carrying the three derived flip-decision ratios
-    ([disagree_ratio], [shadow_parse_coverage],
-    [auto_bg_promotion_rate]) so consumers do not have to re-derive
-    them client-side.  See [legendary_counters.mli] for the stable
+    sibling object carrying [auto_bg_promotion_rate] so consumers do
+    not have to re-derive it client-side. See [legendary_counters.mli] for the stable
     contract and the [Derived ratios (SSOT)] runbook section for the
     operator interpretation.
 
@@ -35,7 +33,7 @@
     order, so [tasks.[i]] and [task_details.[i].task_id] agree.
     Unknown / quiet keepers legitimately return [count = 0,
     tasks = [], task_details = []] — the endpoint does not validate
-    keeper existence, mirroring [shadow_counters]' "zero-cost read"
+    keeper existence, mirroring [counters]' "zero-cost read"
     posture.
 
     [keeper-shell] is a read-only SSE bridge over the same
@@ -317,7 +315,7 @@ let handle_keeper_shell_stream ~sw ~clock request reqd ~keeper =
 
 let add_routes ~sw ~clock router =
   router
-  |> Http.Router.get "/api/v1/legendary_bash/shadow_counters"
+  |> Http.Router.get "/api/v1/legendary_bash/counters"
        (fun request reqd ->
          with_public_read
            (fun _state _req reqd ->

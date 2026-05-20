@@ -21,7 +21,7 @@ let wait_until ~timeout_s f =
 let test_empty_keeper_shape () =
   (* Quiet / unknown keeper legitimately returns count=0 and tasks=[].
      The endpoint does not gate on keeper existence — mirrors the
-     shadow_counters "zero-cost public read" posture. *)
+     counters endpoint's "zero-cost public read" posture. *)
   let json =
     Server_routes_http_routes_legendary_bash.bg_tasks_response
       ~keeper:"analyst"

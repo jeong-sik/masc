@@ -94,7 +94,7 @@ judgment call.
 | #15523 | G4 keeper_checkpoint_store ENOENT | 4 → 0 | merged |
 | #15524 | G2 board author_kind/voter_kind | partial | merged |
 | #15684 | post-RFC: keeper_path_check_error | n/a | merged |
-| #15699 | post-RFC: shadow-gate parse_outcome_kind | n/a | merged |
+| #15699 | post-RFC: retired shadow parse-outcome typing | n/a | merged |
 | #15703 | post-RFC: eval gate destructive-pattern SSOT | n/a | merged |
 | #15704 | post-RFC: eval_gate evasion_kind | n/a | merged |
 

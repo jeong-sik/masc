@@ -222,7 +222,7 @@ type verdict =
       reason : reject_reason;
       diagnostic : string;
     }
-  | Cannot_parse of { kind : Gate_diff_types.parse_outcome_kind }
+  | Cannot_parse of { kind : Shell_ir_validator.cannot_parse_kind }
   | Too_complex of {
       reason : Parsed.reason_too_complex;
       (** Closed sum from bash_subset; the caller decides whether to fall
@@ -323,7 +323,7 @@ rg "shell_ir_parse_failure_shape_block" lib/keeper/  # parse-failure-only helper
 - **String classifier (#2)**: This RFC removes 4 string classifiers (chars,
   splitter, path tokens, exit) in favor of typed AST consumption. Net direction
   is toward closed sum types (`Shell_ir`, `Parsed.reason_too_complex`,
-  `Gate_diff_types.parse_outcome_kind`).
+  `Shell_ir_validator.cannot_parse_kind`).
 - **N-of-M (#3)**: PR-2/3/4 adopt the facade across all three callers; the
   authority flip and legacy purge are gated by all-callers-ready criteria. No
   caller is left with the legacy path after Phase D.

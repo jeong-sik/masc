@@ -62,10 +62,7 @@ val advisory_tag : advisory -> string
 
 val cannot_parse_kind_tag : cannot_parse_kind -> string
 (** Stable snake_case sub-tag for the [Cannot_parse] arm.  Pinned
-    1:1 to the [too_complex_*] / [parse_*] field names in
-    {!Legendary_counters.snapshot} so a dashboard histogram of
-    typed-advisor bailouts can grep the same literals already used
-    by the substring-gate shadow counters:
+    for typed-advisor logs and dashboard histograms:
 
     {ul
       {- [Parse_error -> "parse_error"]}

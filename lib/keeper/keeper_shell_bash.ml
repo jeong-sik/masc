@@ -1290,51 +1290,6 @@ let handle_keeper_bash
        Log.Keeper.info
          "keeper_bash normalized stderr /dev/null redirect: keeper=%s cmd=%s"
          meta.name cmd_for_log);
-    (* Tick 22: dark-launch shadow logger.  Runs
-       [Worker_dev_tools.diff_command] side-by-side with the
-       live gate and emits a structured line for every non-[Agree]
-       outcome so operators can collect flip-blocker evidence
-       (Legacy_deny_shadow_allow) and inverted-gap cases
-       (Legacy_allow_shadow_deny) from real traffic without
-       changing any behavior.  Flag-gated by
-       [MASC_BASH_AST_SHADOW_LOG]; default off. *)
-    (if Worker_dev_tools.shadow_diff_log_enabled () then begin
-       let diff, legacy, shadow = Worker_dev_tools.diff_command cmd in
-       Legendary_counters.incr_gate_diff diff;
-       (* Histogram refinement of the Shadow_cannot_parse bucket —
-          per-reason counters let operators prioritise A1-PR-N
-          grammar expansion by construct frequency.  Typed dispatch
-          over the [parse_outcome_kind] payload of
-          [Shadow_parse_unsupported]; [classify_shadow] guarantees the
-          only kinds wrapped here are [Parse_error] / [Parse_aborted _]
-          / [Too_complex _].  A future divergence (e.g. wrapping
-          [Parsed_simple]) is a compile error rather than a silent
-          "other"-bucket landing. *)
-       (match shadow with
-        | Worker_dev_tools.Shadow_parse_unsupported { kind = Too_complex r } ->
-          Legendary_counters.incr_too_complex r
-        | Worker_dev_tools.Shadow_parse_unsupported { kind = Parse_error } ->
-          Legendary_counters.incr_too_complex_parse_error ()
-        | Worker_dev_tools.Shadow_parse_unsupported { kind = Parse_aborted r } ->
-          Legendary_counters.incr_too_complex_parse_aborted r
-        | Worker_dev_tools.Shadow_parse_unsupported { kind = Parsed_simple } ->
-          (* Unreachable by construction: [classify_shadow] yields
-             [Shadow_allow] for [Parsed_simple], not
-             [Shadow_parse_unsupported].  The arm exists so any future
-             change to [classify_shadow] forces a re-review here. *)
-          ()
-        | Shadow_allow | Shadow_deny_destructive _ -> ());
-       (match diff with
-        | Worker_dev_tools.Agree -> ()
-        | _ ->
-          Log.Keeper.info
-            "gate_diff_shadow keeper=%s cmd_hash=%s diff=%s legacy=%s shadow=%s"
-            meta.name
-            (Worker_dev_tools.cmd_hash_for_log cmd)
-            (Worker_dev_tools.gate_diff_to_string diff)
-            (Worker_dev_tools.legacy_verdict_to_tag legacy)
-            (Worker_dev_tools.shadow_verdict_to_tag shadow))
-     end);
     (* RFC-0092 Phase A — typed-validation advisor (behavior-neutral).
        Flag-gated; emits a structured log line + per-bucket counter so
        operators can measure parity vs the legacy substring gate

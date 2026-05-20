@@ -450,11 +450,11 @@ gate와 write/sandbox 정책도 그 경로에만 적용된다.
 
 #### 관찰 & 롤아웃
 
-dark-launch observer 두 개 (`MASC_BASH_AST_SHADOW_LOG`,
-`MASC_BASH_AUTO_BG_OBSERVE`)는 **기본 off**이며, operator가 flip 전
-prod 증거를 수집할 때 켠다. 로그 라인 포맷과 grep recipe, flip
-기준은 [`LEGENDARY-BASH-RUNBOOK.md`](./LEGENDARY-BASH-RUNBOOK.md)
-단일 문서를 따른다. env flag 전체 표는
+`MASC_BASH_AUTO_BG_OBSERVE`는 **기본 off**이며, operator가
+auto-background flip 전 prod 증거를 수집할 때 켠다. 로그 라인 포맷과
+grep recipe, flip 기준은
+[`LEGENDARY-BASH-RUNBOOK.md`](./LEGENDARY-BASH-RUNBOOK.md) 단일 문서를
+따른다. env flag 전체 표는
 [`ENV-CONTRACT.md §4`](./ENV-CONTRACT.md)에 정의되어 있다.
 
 ### 3.2 페르소나 로드 필드 (Profile-Loaded)

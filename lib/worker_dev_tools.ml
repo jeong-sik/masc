@@ -7,8 +7,8 @@
     file_read/file_write use OCaml stdlib (no Eio filesystem capability needed).
     shell_exec uses Eio.Process with fiber-based timeout.
 
-    Safety classification types (destructive_class, gate_diff, etc.) are
-    defined in [Gate_diff_types] and re-exported here for backward compat. *)
+    Destructive-command classification helpers are defined in
+    [Gate_diff_types] and re-exported here for backward compat. *)
 
 include Gate_diff_types
 module Paths = Worker_dev_tools_paths
@@ -802,81 +802,4 @@ let make_readonly_tools ~proc_mgr ~clock ?workdir ?on_exec () : Agent_sdk.Tool.t
   [ make_file_read ?workdir ?on_exec ()
   ; make_shell_exec_readonly ~workdir ~on_exec ~proc_mgr ~clock
   ]
-;;
-
-(* ================================================================ *)
-(* Tick 12 (P5, reduced scope) — shadow AST parse observation.      *)
-(*                                                                  *)
-(* The existing regex allowlist ([validate_command] above) remains  *)
-(* the authoritative gate.  This helper runs the typed bash parser  *)
-(* (Masc_exec.Parser.Bash.parse_string) in parallel and maps the    *)
-(* outcome to a coarse, stable tag string.  Callers that want to    *)
-(* build prod observability can log the tag alongside the regex     *)
-(* verdict; when the tag distribution has baked in (plan decision   *)
-(* point 2: "N=1000 prod 호출 무결 후 flag 전환"), the gate can    *)
-(* migrate in a follow-up without touching the regex layer.         *)
-(*                                                                  *)
-(* The helper never panics — the parser catches every Menhir/Lex    *)
-(* exception internally and surfaces them via Parsed.t.             *)
-(* ================================================================ *)
-
-(* Typed parser outcome — primary classification surface.  String
-   renderings exist only at log-emission boundaries via
-   [Gate_diff_types.parse_outcome_kind_to_tag].  Downstream histogram
-   dispatch (Legendary_counters) consumes the typed variant exhaustively
-   so a new [Parsed.reason_too_complex] arm is a compile-time forcing
-   function, not a silent "other"-bucket landing. *)
-let shadow_parse_outcome_kind (cmd : string) : parse_outcome_kind =
-  match Masc_exec_bash_parser.Bash.parse_string cmd with
-  | Masc_exec.Parsed.Parsed _ -> Parsed_simple
-  | Masc_exec.Parsed.Parse_error _ -> Parse_error
-  | Masc_exec.Parsed.Parse_aborted r -> Parse_aborted r
-  | Masc_exec.Parsed.Too_complex r -> Too_complex r
-;;
-
-(* Stable string rendering of the parse outcome — retained for log
-   emission and telemetry tags that already exist in operator
-   dashboards. Computes via the typed kind so the wording cannot
-   drift between this function and [Legendary_counters]. *)
-let shadow_parse_outcome (cmd : string) : string =
-  parse_outcome_kind_to_tag (shadow_parse_outcome_kind cmd)
-;;
-
-(* Legacy verdict ↔ shadow verdict cross-check.  Returns a tuple of
-   legacy allow/deny + shadow kind, so telemetry can spot "legacy
-   allows but shadow cannot parse" drift without needing two
-   separate call sites.  Intentionally side-effect free. *)
-let cross_check_command ~legacy cmd = legacy, shadow_parse_outcome_kind cmd
-
-(* Classification functions that depend on worker_dev_tools internals
-   (validate_command, shadow_parse_outcome_kind). Types come from
-   Gate_diff_types via [include Gate_diff_types] at the top. *)
-
-let classify_legacy cmd : legacy_verdict =
-  match validate_command cmd with
-  | Ok () ->
-    (match Eval_gate.detect_destructive cmd with
-     | Some (substring, _desc) -> Legacy_reject_destructive substring
-     | None -> Legacy_allow)
-  | Error _ -> Legacy_reject_by_allowlist
-;;
-
-let classify_shadow cmd : shadow_verdict =
-  (* Destructive classifier runs on the raw string regardless of
-     parser success — the substring catalogue does not need AST
-     structure. This keeps the shadow path meaningful on commands
-     the grammar has not yet upgraded to support. *)
-  match classify_destructive cmd with
-  | Some (cls, sub) -> Shadow_deny_destructive (cls, sub)
-  | None ->
-    (match shadow_parse_outcome_kind cmd with
-     | Parsed_simple -> Shadow_allow
-     | (Parse_error | Parse_aborted _ | Too_complex _) as kind ->
-       Shadow_parse_unsupported { kind })
-;;
-
-let diff_command cmd : gate_diff * legacy_verdict * shadow_verdict =
-  let legacy = classify_legacy cmd in
-  let shadow = classify_shadow cmd in
-  diff_of_verdicts ~legacy ~shadow, legacy, shadow
 ;;

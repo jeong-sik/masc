@@ -1,7 +1,7 @@
 (* Tick 13: typed destructive classification.
 
    Core covenant: every row in Eval_gate.destructive_patterns must
-   classify to exactly one destructive_class via the AST-shadow
+   classify to exactly one destructive_class via the shared typed
    mapping.  If Eval_gate adds a new pattern and Worker_dev_tools
    does not, this test fails loudly — preventing silent coverage
    drift between the regex allowlist and the typed classifier. *)

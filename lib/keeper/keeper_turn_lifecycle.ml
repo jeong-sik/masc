@@ -11,7 +11,11 @@ type tool_result = Keeper_types.tool_result
 let handle_keeper_down ctx args : tool_result =
   let requested_name = String.trim (get_string args "name" "") in
   if not (validate_name requested_name) then
-    (false, "invalid keeper name")
+    ( false,
+      Printf.sprintf
+        "invalid keeper name %S (must be non-empty and match \
+         [A-Za-z0-9._-]+; see Keeper_config.validate_name)"
+        requested_name )
   else
     let remove_meta = get_bool args "remove_meta" false in
     let remove_session = get_bool args "remove_session" false in

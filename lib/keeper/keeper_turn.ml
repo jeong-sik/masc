@@ -133,7 +133,11 @@ let preflight_keeper_msg ctx args : (unit, string) result =
   let name = get_string args "name" "" in
   let message = get_string args "message" "" in
   if not (validate_name name) then
-    Error "invalid keeper name"
+    Error
+      (Printf.sprintf
+         "invalid keeper name %S (must be non-empty and match \
+          [A-Za-z0-9._-]+; see Keeper_config.validate_name)"
+         name)
   else if message = "" then
     Error "message is required"
   else
@@ -142,16 +146,16 @@ let preflight_keeper_msg ctx args : (unit, string) result =
     | Error e -> Error e
     | Ok _ ->
     (match reject_legacy_model_args ~tool_name:"masc_keeper_msg" args with
-    | Error e -> Error ("" ^ e)
+    | Error e -> Error e
     | Ok () ->
     (match reject_removed_keeper_input_keys ~tool_name:"masc_keeper_msg" args with
-    | Error e -> Error ("" ^ e)
+    | Error e -> Error e
     | Ok () ->
     (match reject_removed_keeper_msg_input_keys ~tool_name:"masc_keeper_msg" args with
-    | Error e -> Error ("" ^ e)
+    | Error e -> Error e
     | Ok () ->
     match ensure_keeper_exists ~ctx ~name with
-    | Error e -> Error ("" ^ e)
+    | Error e -> Error e
     | Ok meta ->
       match resolve_turn_cascade_name meta with
       | Error e -> Error e
@@ -170,7 +174,7 @@ let preflight_keeper_msg ctx args : (unit, string) result =
             effective_model_labels_for_turn meta
         in
         match ensure_api_keys_for_labels effective_models with
-        | Error e -> Error ("" ^ e)
+        | Error e -> Error e
         | Ok () ->
           Keeper_turn_helpers.ensure_local_discovery_ready effective_models))))
 
@@ -187,7 +191,11 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
   let name = get_string args "name" "" in
   let message = get_string args "message" "" in
   if not (validate_name name) then
-    (false, "invalid keeper name")
+    ( false,
+      Printf.sprintf
+        "invalid keeper name %S (must be non-empty and match \
+         [A-Za-z0-9._-]+; see Keeper_config.validate_name)"
+        name )
   else if message = "" then
     (false, "message is required")
   else

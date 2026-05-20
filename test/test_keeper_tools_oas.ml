@@ -675,11 +675,12 @@ let test_error_result_logs_at_error_level () =
        ensure_read_repo_dir config meta;
        let tools = make_registered_tools ~config ~meta ~ctx_snapshot () in
        let tool = find_read_tool tools in
+       Keeper_tools_oas.reset_tool_retry_dedupe_for_testing ();
        let baseline = latest_log_seq () in
        (match
          Tool.execute
            tool
-            (read_args meta "missing-file-for-keeper-tools-oas.txt")
+            (read_args meta "log-level-only-missing-file-for-keeper-tools-oas.txt")
         with
         | Error _ -> ()
         | Ok _ -> fail "missing file should be surfaced as tool error");
@@ -1294,6 +1295,108 @@ let test_workflow_rejection_same_args_short_circuits_after_first_failure () =
        | Ok _ -> fail "same workflow rejection should be blocked before execution")
 ;;
 
+let test_workflow_rejection_scope_blocks_transition_variants () =
+  with_env "MASC_VERIFICATION_FSM_ENABLED" "true" (fun () ->
+    let meta =
+      make_test_meta
+        ~name:"test-keeper-workflow-scope"
+        ~allowed_paths:[ "*" ]
+        ()
+    in
+    let ctx_snapshot = make_test_ctx () in
+    let dir =
+      Filename.concat
+        (Filename.get_temp_dir_name ())
+        (Printf.sprintf "test_keeper_tools_workflow_scope_%d" (Random.int 100000))
+    in
+    let previous_dispatch = !(Keeper_exec_shared.tag_dispatch_fn) in
+    (try Unix.mkdir dir 0o755 with
+     | Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+    Fun.protect
+      ~finally:(fun () ->
+        Keeper_exec_shared.tag_dispatch_fn := previous_dispatch;
+        rm_rf dir)
+      (fun () ->
+         Eio_main.run
+         @@ fun env ->
+         Fs_compat.set_fs (Eio.Stdenv.fs env);
+         Keeper_exec_shared.tag_dispatch_fn := Keeper_tag_dispatch.dispatch;
+         let config = Coord.default_config dir in
+         ignore (Coord.init config ~agent_name:(Some meta.agent_name));
+         ignore
+           (Coord.add_task
+              config
+              ~title:"Needs verification evidence"
+              ~priority:1
+              ~description:"");
+         ignore (Coord.claim_task config ~agent_name:meta.agent_name ~task_id:"task-001");
+         let tools = make_registered_tools ~config ~meta ~ctx_snapshot () in
+         let transition = find_tool "masc_transition" tools in
+         let first_args =
+           `Assoc
+             [ "agent_name", `String meta.agent_name
+             ; "task_id", `String "task-001"
+             ; "action", `String "submit_for_verification"
+             ; "notes", `String "Implementation complete."
+             ]
+         in
+         (match Tool.execute transition first_args with
+          | Error { Agent_sdk.Types.message; _ } ->
+            let json = parse message in
+            check
+              string
+              "first rejection class"
+              "workflow_rejection"
+              (json_string "failure_class" json);
+            check
+              bool
+              "first rejection is not scope blocker"
+              false
+              (String.equal "workflow_rejection_open_loop_blocked" (json_string "error" json));
+            check
+              bool
+              "first rejection asks self correction"
+              true
+              (json_bool "self_correction_required" json)
+          | Ok _ -> fail "missing verification evidence should reject");
+         let variant_args =
+           `Assoc
+             [ "agent_name", `String meta.agent_name
+             ; "task_id", `String "task-001"
+             ; "action", `String "submit_for_verification"
+             ; "notes", `String "Still complete, no PR evidence."
+             ]
+         in
+         (match Tool.execute transition variant_args with
+          | Error { Agent_sdk.Types.message; _ } ->
+            let json = parse message in
+            check
+              string
+              "variant blocked by workflow scope"
+              "workflow_rejection_open_loop_blocked"
+              (json_string "error" json);
+            check bool "scope loop marked" true (json_bool "workflow_rejection_loop" json);
+            check
+              string
+              "scope retry skipped reason"
+              "deterministic_workflow_scope_blocked"
+              (json_string "retry_skipped_reason" json)
+          | Ok _ -> fail "same task/action missing-evidence variant should be blocked");
+         let corrected_args =
+           `Assoc
+             [ "agent_name", `String meta.agent_name
+             ; "task_id", `String "task-001"
+             ; "action", `String "submit_for_verification"
+             ; "notes", `String "Implementation complete with PR evidence."
+             ; "pr_url", `String "https://github.com/jeong-sik/masc-mcp/pull/12345"
+             ]
+         in
+         match Tool.execute transition corrected_args with
+         | Ok _ -> ()
+         | Error { Agent_sdk.Types.message; _ } ->
+           fail ("corrected evidence-bearing call should not be scope-blocked: " ^ message)))
+;;
+
 let test_normalize_failure_plain_text () =
   let raw = "tool keeper_bash failed (3/5): Unix_error(ENOENT)" in
   let normalized = Keeper_tools_oas.normalize_tool_result ~success:false raw in
@@ -1576,6 +1679,10 @@ let () =
             "workflow rejection same args stops after first failure"
             `Quick
             test_workflow_rejection_same_args_short_circuits_after_first_failure
+        ; test_case
+            "workflow rejection task/action variants stop after first failure"
+            `Quick
+            test_workflow_rejection_scope_blocks_transition_variants
         ; test_case
             "failure plain text wraps as error"
             `Quick

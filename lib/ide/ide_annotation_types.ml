@@ -5,6 +5,24 @@
     annotations bound to file + line ranges, plus code regions extracted
     from Keeper tool_calls. *)
 
+(* Local kind-name helper for parse-error diagnostics.  [lib/ide/] does
+   not depend on [masc_core], so we inline the kind-name discrimination
+   rather than import [Json_util.kind_name] (RFC-0056 leaf-isolation
+   invariant).  The 8 cases below mirror the closed set of
+   [Yojson.Safe.t] variants — exhaustive by construction. *)
+let json_kind_name = function
+  | `Null -> "null"
+  | `Bool _ -> "bool"
+  | `Int _ -> "int"
+  | `Intlit _ -> "intlit"
+  | `Float _ -> "float"
+  | `String _ -> "string"
+  | `Assoc _ -> "object"
+  | `List _ -> "array"
+  | `Tuple _ -> "tuple"
+  | `Variant _ -> "variant"
+;;
+
 type annotation_kind =
   | Comment
   | Decision
@@ -135,19 +153,22 @@ let annotation_of_json (json : Yojson.Safe.t) : (annotation, string) result =
       | Some (`String s) -> s
       | _ -> default
     in
+    (* [int_of_string_opt] / [Int64.of_string_opt] replace [try _ with _]
+       exception-as-control-flow.  Overflow and malformed digits both
+       resolve to the caller-supplied [default] without an exception
+       round-trip; this also closes the implicit catch-all that would
+       have swallowed any future non-Failure exception (e.g.
+       [Eio.Cancel.Cancelled] if these calls ever became cancellable;
+       RFC-0106).  Behavior is unchanged for the common case. *)
     let find_int key default =
       match List.assoc_opt key fields with
       | Some (`Int i) -> i
-      | Some (`Intlit s) ->
-        (try int_of_string s with
-         | _ -> default)
+      | Some (`Intlit s) -> Option.value ~default (int_of_string_opt s)
       | _ -> default
     in
     let find_int64 key default =
       match List.assoc_opt key fields with
-      | Some (`Intlit s) ->
-        (try Int64.of_string s with
-         | _ -> default)
+      | Some (`Intlit s) -> Option.value ~default (Int64.of_string_opt s)
       | Some (`Int i) -> Int64.of_int i
       | _ -> default
     in
@@ -217,19 +238,22 @@ let region_of_json (json : Yojson.Safe.t) : (code_region, string) result =
       | Some (`String s) -> s
       | _ -> default
     in
+    (* [int_of_string_opt] / [Int64.of_string_opt] replace [try _ with _]
+       exception-as-control-flow.  Overflow and malformed digits both
+       resolve to the caller-supplied [default] without an exception
+       round-trip; this also closes the implicit catch-all that would
+       have swallowed any future non-Failure exception (e.g.
+       [Eio.Cancel.Cancelled] if these calls ever became cancellable;
+       RFC-0106).  Behavior is unchanged for the common case. *)
     let find_int key default =
       match List.assoc_opt key fields with
       | Some (`Int i) -> i
-      | Some (`Intlit s) ->
-        (try int_of_string s with
-         | _ -> default)
+      | Some (`Intlit s) -> Option.value ~default (int_of_string_opt s)
       | _ -> default
     in
     let find_int64 key default =
       match List.assoc_opt key fields with
-      | Some (`Intlit s) ->
-        (try Int64.of_string s with
-         | _ -> default)
+      | Some (`Intlit s) -> Option.value ~default (Int64.of_string_opt s)
       | Some (`Int i) -> Int64.of_int i
       | _ -> default
     in

@@ -12,7 +12,7 @@
 // new `/api/v1/dashboard/keeper-costs` endpoint.
 
 import { html } from 'htm/preact'
-import { signal, computed } from '@preact/signals'
+import { computed } from '@preact/signals'
 import {
   fetchRuntimeModelMetrics,
   fetchKeeperCostMetrics,
@@ -30,9 +30,7 @@ import {
   type StressEvent,
   type AgentStressRow,
   type AuditEntry,
-  type AuditLedgerResponse,
   type KeeperDecision,
-  type KeeperDecisionsResponse,
   type DashboardFeedMetadata,
 } from '../api/dashboard'
 import { LoadingState, ErrorState } from './common/feedback-state'
@@ -54,6 +52,18 @@ import {
   auditRouteParams,
   auditLogRouteParams,
 } from './cost/cost-types'
+import {
+  type ModelLoadState,
+  viewMode,
+  modelState,
+  keeperState,
+  heuristicState,
+  stressState,
+  coverageState,
+  auditLedgerState,
+  keeperDecisionsState,
+  windowMinutes,
+} from './cost/cost-store'
 import { formatTokens, severityClass } from './cost/cost-formatters'
 import {
   severityBuckets,
@@ -82,56 +92,8 @@ export {
   summarizeAuditKinds,
 }
 
-type ModelLoadState =
-  | { status: 'idle' }
-  | { status: 'loading' }
-  | { status: 'loaded'; data: DashboardRuntimeModelMetric[]; latencyBuckets: LatencyBucket[]; windowMinutes: number }
-  | { status: 'error'; message: string }
-
-type KeeperLoadState =
-  | { status: 'idle' }
-  | { status: 'loading' }
-  | { status: 'loaded'; data: KeeperCostMetric[]; windowMinutes: number }
-  | { status: 'error'; message: string }
-
-type HeuristicLoadState =
-  | { status: 'idle' }
-  | { status: 'loading' }
-  | { status: 'loaded'; data: HeuristicEvent[]; limit: number; meta: DashboardFeedMetadata }
-  | { status: 'error'; message: string }
-
-type StressLoadState =
-  | { status: 'idle' }
-  | { status: 'loading' }
-  | { status: 'loaded'; events: StressEvent[]; board: AgentStressRow[]; limit: number; meta: DashboardFeedMetadata }
-  | { status: 'error'; message: string }
-
-type CoverageLoadState =
-  | { status: 'idle' }
-  | { status: 'loading' }
-  | { status: 'loaded'; data: HeuristicCoverage }
-  | { status: 'error'; message: string }
-
-type AuditLedgerLoadState =
-  | { status: 'idle' }
-  | { status: 'loading' }
-  | { status: 'loaded'; data: AuditLedgerResponse }
-  | { status: 'error'; message: string }
-
-type KeeperDecisionsLoadState =
-  | { status: 'idle' }
-  | { status: 'loading' }
-  | { status: 'loaded'; data: KeeperDecisionsResponse }
-  | { status: 'error'; message: string }
-
-const viewMode = signal<ViewMode>('model')
-const modelState = signal<ModelLoadState>({ status: 'idle' })
-const keeperState = signal<KeeperLoadState>({ status: 'idle' })
-const heuristicState = signal<HeuristicLoadState>({ status: 'idle' })
-const stressState = signal<StressLoadState>({ status: 'idle' })
-const coverageState = signal<CoverageLoadState>({ status: 'idle' })
-const auditLedgerState = signal<AuditLedgerLoadState>({ status: 'idle' })
-const keeperDecisionsState = signal<KeeperDecisionsLoadState>({ status: 'idle' })
+// Type definitions and signal SSOT live in `./cost/cost-store`. This file
+// stays focused on view logic + load functions that mutate them.
 function cleanRouteParam(value: string | undefined): string | null {
   const trimmed = value?.trim()
   return trimmed ? trimmed : null
@@ -154,7 +116,6 @@ const WINDOW_OPTIONS: Array<{ key: number; label: string }> = [
   { key: DEFAULT_WINDOW_MINUTES_24H, label: '24시간' },
 ]
 
-const windowMinutes = signal<number>(60)
 
 const COST_FOCUS_COCKPIT_TABS: Record<CostFocus, string> = {
   agent: 'ct-agt',

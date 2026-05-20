@@ -1484,15 +1484,24 @@ let prepare_agent_setup
                       |> List.filteri (fun i _ -> i < 8)
                       |> String.concat ", "
                     in
+                    let retry_action =
+                      if preview = ""
+                      then
+                        "No currently visible tool can satisfy this contract; \
+                         emit a concise blocker instead."
+                      else
+                        Printf.sprintf
+                          "You MUST call one of these tools NOW: %s."
+                          preview
+                    in
                     append_ctx
                       ctx
                       (Printf.sprintf
                          "[CONTRACT VIOLATION RETRY] Your previous Agent.run \
                           attempt was rejected because you did not call a \
-                          required tool. You MUST call one of these tools NOW: \
-                          %s. Do NOT respond with text only, do NOT substitute \
+                          required tool. %s Do NOT respond with text only, do NOT substitute \
                           status or read-only tools."
-                         preview)
+                         retry_action)
                   else ctx
                 in
                 if computed_surface.is_warning_zone

@@ -23,6 +23,13 @@ val readonly_hint_of_category : string -> string
     [command_blocked_readonly] errors. Exposed so unit tests can assert
     that each category carries a concrete example, not just a label. *)
 
+val diagnosis_of_block_reason :
+  Worker_dev_tools.block_reason -> Exec_core.diagnosis option
+(** Machine-parseable recovery diagnosis for a readonly/workflow block
+    reason. Kept on the facade because the shell executor is the public
+    entry point used by tests and callers; implementation lives in
+    [Keeper_shell_shared]. *)
+
 val gh_min_timeout_sec : float
 (** Minimum timeout_sec floor applied to gh op. Exposed so regression
     tests can lock the floor against drift back to sub-network-latency

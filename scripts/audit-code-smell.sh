@@ -9,6 +9,8 @@
 #   2. ignore() justification (scripts/lint-ignore-without-comment.sh)
 #   3. Magic number repetition (scripts/lint-magic-number.sh)
 #   4. Catch-all classification (scripts/audit-catchall.sh)
+#      - anonymous `_` RHS-shape buckets
+#      - bare binding catch-all usage buckets
 #
 # The wrapper produces a single Markdown-ish text report on stdout;
 # redirect to a dated path to keep an evidence trail:
@@ -92,6 +94,10 @@ if [[ -x "$SCRIPT_DIR/audit-catchall.sh" ]]; then
   bash "$SCRIPT_DIR/audit-catchall.sh" 2>/dev/null || true
   printf '```\n\n### Top files\n\n```\n'
   bash "$SCRIPT_DIR/audit-catchall.sh" --by-file 2>/dev/null | head -15 || true
+  printf '```\n\n### Binding use totals\n\n```\n'
+  bash "$SCRIPT_DIR/audit-catchall.sh" --binding-use 2>/dev/null || true
+  printf '```\n\n### Binding use top files\n\n```\n'
+  bash "$SCRIPT_DIR/audit-catchall.sh" --binding-use-by-file 2>/dev/null | head -15 || true
   printf '```\n\n'
   other_n=$(bash "$SCRIPT_DIR/audit-catchall.sh" 2>/dev/null | awk '$2 == "other" { print $1 }')
   other_n="${other_n:-0}"

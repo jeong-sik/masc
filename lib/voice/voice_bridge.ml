@@ -276,16 +276,20 @@ let rec retry_with_backoff ~clock ~attempt ~max_attempts ~backoff_sec operation 
 
 (** Make a single HTTP POST request to the Voice MCP server. *)
 let single_voice_mcp_call ~net:_ ~uri ~headers_list ~body_str =
+  let url_str = Uri.to_string uri in
   match
-    Masc_http_client.post_sync ~url:(Uri.to_string uri)
-      ~headers:headers_list ~body:body_str ()
+    Masc_http_client.post_sync ~url:url_str ~headers:headers_list ~body:body_str ()
   with
   | Ok (code, body) when code >= 200 && code < 300 ->
     (try Ok (Yojson.Safe.from_string body) with
      | Yojson.Json_error msg ->
-       Error (Printf.sprintf "Voice MCP: invalid JSON body: %s" msg))
+       Error
+         (Printf.sprintf
+            "Voice MCP: invalid JSON body from %s: %s"
+            url_str
+            msg))
   | Ok (code, body) ->
-    Error (Printf.sprintf "HTTP %d: %s" code body)
+    Error (Printf.sprintf "Voice MCP HTTP %d from %s: %s" code url_str body)
   | Error e ->
     (* RFC-0106: re-raise Eio.Cancel.Cancelled when the surrounding fiber
        was cancelled. Masc_http_client.post_sync delegates to a piaf pool
@@ -294,7 +298,8 @@ let single_voice_mcp_call ~net:_ ~uri ~headers_list ~body_str =
        loop in [call_voice_mcp_endpoint] would sleep and re-attempt
        instead of unwinding cancellation immediately. *)
     Eio.Fiber.check ();
-    Error (Printf.sprintf "Connection error: %s" e)
+    Error
+      (Printf.sprintf "Voice MCP connection error (POST %s): %s" url_str e)
 ;;
 
 (** Extract result from MCP response *)

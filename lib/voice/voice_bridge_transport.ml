@@ -104,23 +104,37 @@ let run_audio_http_request_to_file ~url ~headers ~body_json ~output_file =
            else (
              let detail =
                try read_file output_file with
-               | Sys_error _ -> "response too small"
+               | Sys_error msg ->
+                 Printf.sprintf "<could not read response body: %s>" msg
              in
              Error
                (Printf.sprintf
-                  "HTTP %d returned small audio payload (%d bytes): %s"
+                  "HTTP %d returned small audio payload (%d bytes) from %s: %s"
                   http_code
                   file_size
+                  url
                   detail)))
          else (
            let detail =
              try read_file output_file with
-             | Sys_error _ -> "request failed"
+             | Sys_error msg ->
+               Printf.sprintf "<could not read response body: %s>" msg
            in
-           Error (Printf.sprintf "HTTP %d: %s" http_code detail))
-       | Unix.WEXITED 28 -> Error "request timed out"
-       | Unix.WEXITED code -> Error (Printf.sprintf "curl exit %d" code)
-       | _ -> Error "curl process failed")
+           Error (Printf.sprintf "HTTP %d from %s: %s" http_code url detail))
+       | Unix.WEXITED 28 ->
+         Error
+           (Printf.sprintf
+              "request timed out (POST %s, %.0fs limit)"
+              url
+              Env_config_runtime.Voice.http_request_timeout_sec)
+       | Unix.WEXITED code ->
+         Error (Printf.sprintf "curl exit %d (POST %s)" code url)
+       | Unix.WSIGNALED signal ->
+         Error
+           (Printf.sprintf "curl killed by signal %d (POST %s)" signal url)
+       | Unix.WSTOPPED signal ->
+         Error
+           (Printf.sprintf "curl stopped by signal %d (POST %s)" signal url))
 ;;
 
 let speak_via_http_tts_to_file endpoint ~agent_id ~message ~voice ~model ~output_file =
@@ -169,15 +183,31 @@ let run_stt_multipart_request (req : Voice_runtime_overlay.stt_request) =
     (match Yojson.Safe.from_string body with
      | json -> Ok json
      | exception Yojson.Json_error msg ->
-       Error (Printf.sprintf "STT response parse error: %s" msg))
+       Error
+         (Printf.sprintf
+            "STT response parse error from %s: %s"
+            req.url
+            msg))
   | Unix.WEXITED 22 ->
     Error
       (Printf.sprintf
-         "STT HTTP error: %s"
+         "STT HTTP error from %s: %s"
+         req.url
          (if String.length body > 200 then String.sub body 0 200 else body))
-  | Unix.WEXITED 28 -> Error "STT request timed out"
-  | Unix.WEXITED code -> Error (Printf.sprintf "STT curl exit %d" code)
-  | _ -> Error "STT curl process failed"
+  | Unix.WEXITED 28 ->
+    Error
+      (Printf.sprintf
+         "STT request timed out (POST %s, %.0fs limit)"
+         req.url
+         Env_config_runtime.Voice.http_request_timeout_sec)
+  | Unix.WEXITED code ->
+    Error (Printf.sprintf "STT curl exit %d (POST %s)" code req.url)
+  | Unix.WSIGNALED signal ->
+    Error
+      (Printf.sprintf "STT curl killed by signal %d (POST %s)" signal req.url)
+  | Unix.WSTOPPED signal ->
+    Error
+      (Printf.sprintf "STT curl stopped by signal %d (POST %s)" signal req.url)
 ;;
 
 let transcribe_via_http_stt endpoint ~audio_file ~model =

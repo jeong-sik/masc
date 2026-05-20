@@ -117,8 +117,8 @@ let record_author_legacy_mismatch claim fields =
     [ensure_board_post_author] only consulted [agent_name] when the
     caller's [author] field was empty, so any LLM that wrote a non-blank
     [author] argument bypassed identity verification.
-    [canonicalize_board_actor_field] (board_comment, board_vote,
-    comment_vote) didn't consult [agent_name] at all.
+    Board comment/vote paths also canonicalised caller fields without
+    comparing them to [agent_name].
 
     Both paths now route through this helper, which compares the
     canonical form of the caller's claim against the canonical form
@@ -211,15 +211,6 @@ let enforce_caller_identity ~tool ~field ~agent_name arguments =
             in
             `Assoc fields))
   | _ -> arguments
-
-(** Backward-compatible aliases retained for direct callers (tests,
-    HTTP handlers).  New dispatch sites should call
-    {!enforce_caller_identity} with an explicit [tool] label. *)
-let canonicalize_board_actor_field ?(tool = "unknown") ?agent_name field
-    arguments =
-  enforce_caller_identity ~tool ~field
-    ~agent_name:(Option.value ~default:"" agent_name)
-    arguments
 
 let ensure_board_post_author ~agent_name arguments =
   enforce_caller_identity ~tool:"masc_board_post" ~field:"author"

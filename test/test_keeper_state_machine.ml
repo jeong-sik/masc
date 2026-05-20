@@ -262,6 +262,112 @@ let test_apply_operator_pause_resume () =
   check phase_t "-> Running" SM.Running tr2.new_phase
 ;;
 
+(** REGRESSION 2026-05-20T01:21:46Z (albini livelock).
+    Operator_resume from Paused with latched [!heartbeat_healthy] must
+    transition to Failing (derive_phase priority 9), not silently reject
+    with Invalid_transition.
+
+    Bug: can_transition Paused row admitted only
+    {Running, Compacting, Draining, Stopped, Crashed} but derive_phase
+    could produce Failing from latched health conditions. The matrix
+    rejected, apply_event discarded the conditions update, and
+    operator_paused remained true → livelock.
+
+    keeper "albini" sat in Paused turn 25 for 13h+ with
+    [keeper cycle skipped in non-executable phase=paused] repeating
+    until manual intervention. RFC-0072 follow-up. *)
+let test_regression_albini_paused_resume_unhealthy_2026_05_20 () =
+  let paused_unhealthy =
+    { running_conditions with
+      operator_paused = true
+    ; heartbeat_healthy = false
+    ; turn_healthy = true
+    }
+  in
+  check phase_t "starts at Paused" SM.Paused (SM.derive_phase paused_unhealthy);
+  let tr =
+    apply_ok
+      ~current_phase:SM.Paused
+      ~conditions:paused_unhealthy
+      ~event:SM.Operator_resume
+  in
+  check phase_t
+    "Paused + !heartbeat_healthy + Operator_resume -> Failing (P9)"
+    SM.Failing
+    tr.new_phase;
+  check bool
+    "operator_paused cleared"
+    false
+    tr.updated_conditions.operator_paused
+;;
+
+(** REGRESSION variant — turn_healthy latched (same livelock surface). *)
+let test_regression_paused_resume_turn_unhealthy () =
+  let paused_turn_unhealthy =
+    { running_conditions with
+      operator_paused = true
+    ; heartbeat_healthy = true
+    ; turn_healthy = false
+    }
+  in
+  check phase_t "starts at Paused" SM.Paused (SM.derive_phase paused_turn_unhealthy);
+  let tr =
+    apply_ok
+      ~current_phase:SM.Paused
+      ~conditions:paused_turn_unhealthy
+      ~event:SM.Operator_resume
+  in
+  check phase_t
+    "Paused + !turn_healthy + Operator_resume -> Failing"
+    SM.Failing
+    tr.new_phase
+;;
+
+(** REGRESSION variant — context_overflow latched while paused (overflow path). *)
+let test_regression_paused_resume_overflow () =
+  let paused_overflow =
+    { running_conditions with
+      operator_paused = true
+    ; context_overflow = true
+    ; compact_retry_exhausted = false (* not exhausted -> Overflowed, not Paused *)
+    }
+  in
+  (* operator_paused has higher priority than context_overflow in derive_phase,
+     so the keeper IS in Paused at rest. *)
+  check phase_t "starts at Paused" SM.Paused (SM.derive_phase paused_overflow);
+  let tr =
+    apply_ok
+      ~current_phase:SM.Paused
+      ~conditions:paused_overflow
+      ~event:SM.Operator_resume
+  in
+  check phase_t
+    "Paused + context_overflow + Operator_resume -> Overflowed (P8c)"
+    SM.Overflowed
+    tr.new_phase
+;;
+
+(** REGRESSION variant — handoff_active latched while paused. *)
+let test_regression_paused_resume_handoff () =
+  let paused_handoff =
+    { running_conditions with
+      operator_paused = true
+    ; handoff_active = true
+    }
+  in
+  check phase_t "starts at Paused" SM.Paused (SM.derive_phase paused_handoff);
+  let tr =
+    apply_ok
+      ~current_phase:SM.Paused
+      ~conditions:paused_handoff
+      ~event:SM.Operator_resume
+  in
+  check phase_t
+    "Paused + handoff_active + Operator_resume -> HandingOff (P8a)"
+    SM.HandingOff
+    tr.new_phase
+;;
+
 let test_apply_drain_lifecycle () =
   (* Running -> Draining -> Stopped *)
   let tr1 =
@@ -2534,6 +2640,22 @@ let () =
         ; test_case "compaction completed" `Quick test_apply_compaction_completed
         ; test_case "handoff lifecycle" `Quick test_apply_handoff_lifecycle
         ; test_case "pause/resume" `Quick test_apply_operator_pause_resume
+        ; test_case
+            "REGRESSION 2026-05-20 albini: Paused + !heartbeat + resume -> Failing"
+            `Quick
+            test_regression_albini_paused_resume_unhealthy_2026_05_20
+        ; test_case
+            "REGRESSION: Paused + !turn_healthy + resume -> Failing"
+            `Quick
+            test_regression_paused_resume_turn_unhealthy
+        ; test_case
+            "REGRESSION: Paused + context_overflow + resume -> Overflowed"
+            `Quick
+            test_regression_paused_resume_overflow
+        ; test_case
+            "REGRESSION: Paused + handoff_active + resume -> HandingOff"
+            `Quick
+            test_regression_paused_resume_handoff
         ; test_case "drain lifecycle" `Quick test_apply_drain_lifecycle
         ; test_case "drain + fiber death -> Crashed" `Quick test_apply_drain_fiber_death
         ; test_case

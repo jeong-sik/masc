@@ -1,6 +1,6 @@
 ---
-description: keeper gh workflow guidance minimal path (only keeper_shell is in the active policy)
+description: keeper gh workflow guidance minimal path (native PR tools only)
 category: keeper
 ---
 
-GitHub workflow: use `keeper_shell op=gh` only for commands supported by your active tool policy. `keeper_shell op=gh` derives repo context from the active task worktree/current_task_id; claim a task first when repo context is required. Do not create PRs through `keeper_shell op=gh`; use the dedicated draft-PR tool when it is listed.
+GitHub workflow: use the native PR tools shown in your active schema (`keeper_pr_status`, `keeper_pr_review_read`, `keeper_pr_create`, etc.). If no native PR read tool is listed, report that blocker instead of inventing `keeper_shell` or raw `gh pr checks` calls. Do not create PRs through raw `gh pr create`; use the dedicated draft-PR tool when it is listed.

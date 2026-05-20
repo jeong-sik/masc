@@ -487,6 +487,54 @@ let test_keeper_bash_repo_wide_scan_hints_use_structured_tools () =
        (String_util.contains_substring msg "Do not scan repos/")
    | None -> Alcotest.fail "expected repo-wide rg hint")
 
+let test_keeper_bash_repo_wide_recovery_plan_carries_native_args () =
+  let module Shape = Masc_mcp.Keeper_shell_bash_shape_messages in
+  let plan_exn cmd =
+    match Shape.bash_shape_block_recovery_plan ~cmd Shape.Repo_wide_scan with
+    | Some plan -> plan
+    | None -> Alcotest.fail ("expected recovery plan for " ^ cmd)
+  in
+  let next_arg_string plan key =
+    match List.assoc_opt key plan.Shape.next_args with
+    | Some (`String value) -> value
+    | Some other ->
+      Alcotest.fail
+        (Printf.sprintf
+           "expected next_args.%s string, got %s"
+           key
+           (Yojson.Safe.to_string other))
+    | None -> Alcotest.fail ("missing next_args." ^ key)
+  in
+  let git_plan =
+    plan_exn {|git log --oneline --all --grep="15731" 2>/dev/null | head -5|}
+  in
+  Alcotest.(check string) "git next tool" "Bash" git_plan.next_tool;
+  Alcotest.(check string)
+    "git command"
+    "git log --oneline -5 --grep='15731'"
+    (next_arg_string git_plan "command");
+  Alcotest.(check string)
+    "git cwd"
+    "REPO_OR_WORKTREE_CWD"
+    (next_arg_string git_plan "cwd");
+  let rg_plan = plan_exn {|rg TODO repos | head -20|} in
+  Alcotest.(check string) "rg next tool" "Grep" rg_plan.next_tool;
+  Alcotest.(check string) "rg pattern" "TODO" (next_arg_string rg_plan "pattern");
+  Alcotest.(check string)
+    "rg scoped path placeholder"
+    "repos/REPO/SCOPED_PATH"
+    (next_arg_string rg_plan "path");
+  let find_plan = plan_exn {|find repos -type f -name "*.ml" | head -30|} in
+  Alcotest.(check string) "find next tool" "Bash" find_plan.next_tool;
+  Alcotest.(check string)
+    "find command"
+    "find . -name '*.ml'"
+    (next_arg_string find_plan "command");
+  Alcotest.(check string)
+    "find cwd"
+    "REPO_OR_WORKTREE_CWD"
+    (next_arg_string find_plan "cwd")
+
 let test_docker_blocks_nested_docker_command () =
   with_eio_fs @@ fun () ->
   let base_path, config = make_config () in
@@ -2024,6 +2072,8 @@ let () =
         test_keeper_bash_blocks_repo_wide_scans;
       Alcotest.test_case "repo-wide scan hints use structured tools" `Quick
         test_keeper_bash_repo_wide_scan_hints_use_structured_tools;
+      Alcotest.test_case "repo-wide recovery plans carry native args" `Quick
+        test_keeper_bash_repo_wide_recovery_plan_carries_native_args;
       Alcotest.test_case "empty command blocked" `Quick test_empty_command;
       Alcotest.test_case "docker blocks nested docker command" `Quick
         test_docker_blocks_nested_docker_command;

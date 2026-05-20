@@ -12,6 +12,7 @@ import type {
   ServerStatus,
   BoardSortMode,
   Goal,
+  RefreshOptions,
   DashboardExecutionSessionBrief,
   DashboardExecutionQueueItem,
   DashboardExecutionWorkerSupportBrief,
@@ -48,7 +49,7 @@ import {
 import { groupByKey } from './components/common/collection'
 import { setArrayByKeyIfChanged } from './signal-utils'
 import { FetchScheduler } from './lib/fetch-scheduler'
-import { isRecord, asString, asNumber } from './components/common/normalize'
+import { isRecord, asString, asNumber, asStringArray } from './components/common/normalize'
 import { setCanonicalDashboardActor } from './lib/dashboard-session-actor'
 import { timeBoardRequest } from './board-metrics'
 import { namespaceTruth, namespaceTruthError, namespaceTruthInitializing } from './namespace-truth-signals'
@@ -509,10 +510,7 @@ export const staleKeepers: ReadonlySignal<Set<string>> = computed(() => {
 
 // --- Refresh orchestration ---
 
-interface RefreshOptions {
-  force?: boolean
-  light?: boolean
-}
+// RefreshOptions imported from types/core.ts (SSOT)
 
 // TTL values from config/constants.ts
 
@@ -587,22 +585,12 @@ export async function refreshDashboard(opts?: RefreshOptions): Promise<void> {
   return inflightDashboardRefresh
 }
 
-function normalizeStringList(raw: unknown): string[] {
-  if (Array.isArray(raw)) {
-    return raw.filter((value): value is string =>
-      typeof value === 'string' && value.trim() !== '',
-    )
-  }
-  if (typeof raw === 'string' && raw.trim() !== '') return [raw]
-  return []
-}
-
 function normalizeCoordinationFsmRefs(raw: unknown): DashboardCoordinationFsmRefs {
   const refsRecord = isRecord(raw) ? raw : {}
   return {
     goal_id: asString(refsRecord.goal_id) ?? null,
-    task_ids: normalizeStringList(refsRecord.task_ids),
-    post_ids: normalizeStringList(refsRecord.post_ids),
+    task_ids: asStringArray(refsRecord.task_ids),
+    post_ids: asStringArray(refsRecord.post_ids),
     agent_name: asString(refsRecord.agent_name) ?? null,
   }
 }

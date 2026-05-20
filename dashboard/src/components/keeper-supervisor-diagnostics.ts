@@ -5,7 +5,7 @@
 import { html } from 'htm/preact'
 import { formatPct, formatPct1 } from '../lib/format-number'
 import { signal } from '@preact/signals'
-import { formatTimeAgo } from '../lib/format-time'
+import { formatTimeAgo, SECONDS_PER_MINUTE, SECONDS_PER_HOUR } from '../lib/format-time'
 import { FilterChips } from './common/filter-chips'
 import { PanelCard } from './common/panel-card'
 import { ProgressBar } from './common/progress-bar'
@@ -145,7 +145,7 @@ export function SupervisorDiagnosticsPanel({ keeper }: { keeper: Keeper }) {
         ${typeof dead_eta_sec === 'number' && dead_eta_sec > 0 && dead_since == null ? html`
           <div class="flex items-center justify-between">
             <${MutedLabel}>종료 예상</${MutedLabel}>
-            <span class="text-2xs font-mono" style="color: ${budgetPct >= 50 ? 'var(--amber-bright)' : 'var(--color-fg-primary)'}">${dead_eta_sec >= 3600 ? (dead_eta_sec / 3600).toFixed(1) + 'h' : (dead_eta_sec / 60).toFixed(0) + 'm'} 후</span>
+            <span class="text-2xs font-mono" style="color: ${budgetPct >= 50 ? 'var(--amber-bright)' : 'var(--color-fg-primary)'}">${dead_eta_sec >= SECONDS_PER_HOUR ? (dead_eta_sec / SECONDS_PER_HOUR).toFixed(1) + 'h' : (dead_eta_sec / SECONDS_PER_MINUTE).toFixed(0) + 'm'} 후</span>
           </div>
         ` : null}
         ${last_failure_reason ? html`

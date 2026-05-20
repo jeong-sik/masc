@@ -8,6 +8,7 @@ import { TimeAgo } from '../common/time-ago'
 import { Markdown } from '../common/markdown'
 import { ProgressBar } from '../common/progress-bar'
 import { truncate } from '../../lib/truncate'
+import { asNullableString, asRecord, extractCodeLocation, type CodeLocation } from '../common/normalize'
 import { formatCost } from '../../lib/format-number'
 import { toolCategory, durationColor, formatDuration, formatArgs as sharedFormatArgs } from '../tool-call-shared'
 import { SectionHeader } from '../common/section-header'
@@ -149,10 +150,7 @@ function formatArgs(args: Record<string, unknown> | string): string {
   return sharedFormatArgs(args)
 }
 
-interface TraceCodeLocation {
-  readonly filePath: string
-  readonly line?: number
-}
+type TraceCodeLocation = CodeLocation
 
 type TraceRouteContextFields = Pick<
   IdeContextRouteContext,
@@ -174,33 +172,15 @@ type MutableTraceRouteContext = {
   -readonly [K in keyof TraceRouteContextFields]?: TraceRouteContextFields[K]
 }
 
-function stringField(value: unknown): string | null {
-  return typeof value === 'string' && value.trim() !== '' ? value.trim() : null
-}
-
 function stringishField(value: unknown): string | null {
-  if (typeof value === 'string') return stringField(value)
+  if (typeof value === 'string') return asNullableString(value)
   if (typeof value === 'number' && Number.isFinite(value)) return String(value)
   return null
 }
 
-function positiveLine(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 1
-    ? value
-    : undefined
-}
-
 function recordCodeLocation(value: Record<string, unknown>): TraceCodeLocation | null {
-  const filePath =
-    stringField(value.file_path)
-    ?? stringField(value.path)
-    ?? stringField(value.file)
-  if (filePath) {
-    return {
-      filePath,
-      line: positiveLine(value.line) ?? positiveLine(value.line_start) ?? positiveLine(value.lineno),
-    }
-  }
+  const direct = extractCodeLocation(value)
+  if (direct) return direct
 
   const input = value.input
   if (input && typeof input === 'object' && !Array.isArray(input)) {
@@ -227,10 +207,10 @@ function toolCallCodeRouteLink(event: UnifiedTraceEvent): IdeContextRouteLink | 
 
 export function traceRouteLinks(event: UnifiedTraceEvent): ReadonlyArray<IdeContextRouteLink> {
   const context: MutableTraceRouteContext = {}
-  mergeTraceRouteRecord(context, nestedRecord(event.detail.context))
-  mergeTraceRouteRecord(context, nestedRecord(event.detail.evidence_ref))
-  mergeTraceRouteRecord(context, nestedRecord(event.detail.tool_args))
-  mergeTraceRouteRecord(context, nestedRecord(event.detail.input))
+  mergeTraceRouteRecord(context, asRecord(event.detail.context))
+  mergeTraceRouteRecord(context, asRecord(event.detail.evidence_ref))
+  mergeTraceRouteRecord(context, asRecord(event.detail.tool_args))
+  mergeTraceRouteRecord(context, asRecord(event.detail.input))
   mergeTraceRouteRecord(context, event.detail, true)
 
   const parsedArgs = event.toolArgs ? parseJsonLikeData(event.toolArgs) : null
@@ -316,12 +296,6 @@ function mergeTraceRouteRecord(
   if (operationId && (overwrite || context.operationId === undefined)) context.operationId = operationId
   const workerRunId = firstStringish(record, ['worker_run_id', 'workerRunId'])
   if (workerRunId && (overwrite || context.workerRunId === undefined)) context.workerRunId = workerRunId
-}
-
-function nestedRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : null
 }
 
 function firstStringish(record: Record<string, unknown>, keys: ReadonlyArray<string>): string | null {

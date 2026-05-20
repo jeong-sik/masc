@@ -8,6 +8,7 @@ import { ErrorState, LoadingState } from './common/feedback-state'
 import { Select } from './common/select'
 import { TextInput } from './common/input'
 import { StatTile } from './common/stat-tile'
+import { isRecord } from './common/normalize'
 import { StatusChip } from './common/status-chip'
 import { TELEMETRY_AUTO_REFRESH_MS } from '../config/constants'
 import { formatAutoRefreshLabel, setupVisibleAutoRefresh } from '../lib/auto-refresh'
@@ -57,10 +58,6 @@ interface GovernanceToolEvents {
   window_minutes: number
   tool_rejections: ToolRejection[]
   approval_queue: ApprovalQueue
-}
-
-function isRecord(v: unknown): v is Record<string, unknown> {
-  return typeof v === 'object' && v !== null && !Array.isArray(v)
 }
 
 async function fetchGovernanceToolEvents(

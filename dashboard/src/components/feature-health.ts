@@ -3,6 +3,7 @@
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { useEffect } from 'preact/hooks'
+import { capitalize } from '../lib/format-string'
 import { get } from '../api/core'
 import { createAsyncResource, type AsyncResource } from '../lib/async-state'
 import { formatTimeAgo } from '../lib/format-time'
@@ -163,7 +164,7 @@ function FeatureItem({ item }: { item: FeatureHealthItem }) {
 }
 
 function CategorySection({ category, categoryData }: { category: string; categoryData: { total: number; enabled: number; features: FeatureHealthItem[] } }) {
-  const categoryLabel = category.charAt(0).toUpperCase() + category.slice(1)
+  const categoryLabel = capitalize(category)
   const enabledRatio = categoryData.total > 0 ? Math.round((categoryData.enabled / categoryData.total) * 100) : 0
 
   return html`

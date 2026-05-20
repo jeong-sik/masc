@@ -3,6 +3,7 @@
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { useEffect, useMemo } from 'preact/hooks'
+import { SECONDS_PER_HOUR } from '../../lib/format-time'
 import { fetchDashboardGoalDetail, fetchDashboardGoalsTree } from '../../api/dashboard'
 import {
   goalTreeData as treeData,
@@ -1229,7 +1230,7 @@ function GoalDetailPanel({
           <${DetailMetric} label="목표 검증" value=${selectedNode.pending_verification_count} tone=${selectedNode.pending_verification_count > 0 ? 'warn' : 'default'} />
           <${DetailMetric} label="인프라 위험" value=${selectedNode.infra_risk_count} tone=${selectedNode.infra_risk_count > 0 ? 'bad' : 'default'} />
           <${DetailMetric} label="연결 출처" value=${selectedNode.linkage_source} tone=${selectedNode.linkage_warning_count > 0 ? 'warn' : 'default'} />
-          <${DetailMetric} label="최근 활동" value=${selectedNode.stagnation_seconds > 0 ? `${Math.floor(selectedNode.stagnation_seconds / 3600)}h idle` : 'now'} tone=${selectedNode.badges.includes('stalled') ? 'warn' : 'default'} />
+          <${DetailMetric} label="최근 활동" value=${selectedNode.stagnation_seconds > 0 ? `${Math.floor(selectedNode.stagnation_seconds / SECONDS_PER_HOUR)}h idle` : 'now'} tone=${selectedNode.badges.includes('stalled') ? 'warn' : 'default'} />
         </div>
 
         <${GoalVerificationEvidencePanel} summary=${verificationSummary} />

@@ -40,3 +40,13 @@ export function formatCost(value: number | null | undefined, fallback = '--'): s
   if (value < 0.01) return `$${value.toFixed(4)}`
   return `$${value.toFixed(2)}`
 }
+
+/** Format millisecond duration as compact string: "3ms", "1.5s", "2.3m".
+ *  Returns fallback for null/NaN/undefined/negative. */
+export function formatMsCompact(ms: number | null | undefined, fallback = ''): string {
+  if (typeof ms !== 'number' || !Number.isFinite(ms) || ms < 0) return fallback
+  const rounded = Math.round(ms)
+  if (rounded < 1000) return `${rounded}ms`
+  if (rounded < 60_000) return `${(rounded / 1000).toFixed(1)}s`
+  return `${(rounded / 60_000).toFixed(1)}m`
+}

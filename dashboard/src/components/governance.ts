@@ -4,6 +4,7 @@ import { AlertTriangle } from 'lucide-preact'
 import { useEffect, useMemo } from 'preact/hooks'
 import type { GovernanceJudgeSummary, KeeperApprovalQueueItem, KeeperApprovalRule } from '../types'
 import { TELEMETRY_AUTO_REFRESH_MS } from '../config/constants'
+import { SECONDS_PER_DAY } from '../lib/format-time'
 import { formatAutoRefreshLabel, setupVisibleAutoRefresh } from '../lib/auto-refresh'
 import { Card } from './common/card'
 import type { KpiCellKind } from './kpi-shared'
@@ -80,7 +81,7 @@ function GovernanceSummaryStrip() {
   const judge = data?.judge
   const oldestAge = summary?.oldest_open_case_age_s
   const lastActivityAge = summary?.last_activity_age_s
-  const isStale = (oldestAge != null && oldestAge > 86400) || (lastActivityAge != null && lastActivityAge > 86400)
+  const isStale = (oldestAge != null && oldestAge > SECONDS_PER_DAY) || (lastActivityAge != null && lastActivityAge > SECONDS_PER_DAY)
   const judgmentCount = data?.judgments?.length ?? 0
   const approvalCount = data?.approval_queue?.length ?? summary?.needs_human_gate ?? 0
   const judgeOnlyLabel =

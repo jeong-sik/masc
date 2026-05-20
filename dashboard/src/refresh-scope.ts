@@ -1,6 +1,6 @@
 import type { RouteState } from './types'
 
-type RouteRefreshTarget = 'execution' | 'board' | 'operator' | 'activity'
+export type RouteRefreshTarget = 'execution' | 'board' | 'operator' | 'activity'
 
 export function routeWantsRefreshTarget(
   routeState: Pick<RouteState, 'tab' | 'params'>,

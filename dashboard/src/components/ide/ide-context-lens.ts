@@ -9,6 +9,7 @@ import type { AnchoredThread } from './anchored-thread-rail-store'
 import type { KeeperCursorOverlay } from './keeper-cursor-overlay'
 import type { RunActivityEvent } from './run-activity-store'
 import { focusIdeContextAnchor, normalizeIdeContextFilePath, normalizeIdeContextLine } from './ide-state'
+import { truncate } from '../../lib/truncate'
 
 type SurfaceStatus = 'linked' | 'quiet'
 
@@ -1274,7 +1275,3 @@ function cleanId(value: string | null | undefined): string | null {
   return trimmed ? trimmed : null
 }
 
-function truncate(value: string, maxLength: number): string {
-  if (value.length <= maxLength) return value
-  return `${value.slice(0, Math.max(0, maxLength - 3))}...`
-}

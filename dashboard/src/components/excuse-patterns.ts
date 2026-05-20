@@ -37,8 +37,9 @@ function handleSave(event: Event) {
     }).finally(() => {
       saving.value = false
     })
-  } catch (err: any) {
-    saveMessage.value = `잘못된 형식: ${err.message}`
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err)
+    saveMessage.value = `잘못된 형식: ${msg}`
   }
 }
 

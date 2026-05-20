@@ -1,4 +1,5 @@
 import type { KeeperCompositeSnapshot } from '../api/keeper'
+import { unixSecondsToDate } from '../lib/format-time'
 
 import {
   type CompositeObservation,
@@ -269,7 +270,7 @@ export function deriveTimeAxisTicks(
   const ticks: TimeAxisTick[] = []
   for (let ts = firstTick; ts <= spanEnd && ticks.length < maxTicks; ts += step) {
     if (ts <= spanStart) continue
-    ticks.push({ ts, label: formatter.format(new Date(ts * 1000)) })
+    ticks.push({ ts, label: formatter.format(unixSecondsToDate(ts)) })
   }
   return ticks
 }

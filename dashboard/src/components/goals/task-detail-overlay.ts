@@ -1,6 +1,7 @@
 // Task detail overlay — opens when clicking a task title in the kanban board
 
 import { html } from 'htm/preact'
+import type { VNode } from 'preact'
 import { useRef } from 'preact/hooks'
 import { Check, X, ArrowRight, Dot, UserPlus } from 'lucide-preact'
 import { DialogOverlay } from '../common/dialog'
@@ -44,7 +45,7 @@ function SectionTitle({ children }: { children: unknown }) {
 
 // -- Event timeline (inline, NormalizedTaskEvent shape) --------------
 
-function eventBadge(label: string): { icon: any; color: string } {
+function eventBadge(label: string): { icon: VNode; color: string } {
   switch (label) {
     case 'claim':
     case 'claimed': return { icon: html`<${UserPlus} size=${14} />`, color: 'text-accent-fg' }

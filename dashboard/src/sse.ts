@@ -17,6 +17,7 @@ import { appendLiveToolCall } from './components/session-trace/session-trace-liv
 import { appendAuditEntry } from './live-store'
 import { dashboardBearerToken } from './api/core'
 import { parseSSEMessage } from './schemas/sse'
+import { asNumber } from './components/common/normalize'
 import { RingBuffer } from './lib/ring-buffer'
 import { createSseTransport } from './transports/sse-transport'
 import type { Transport } from './transports/transport'
@@ -112,10 +113,6 @@ function projectedActorLabel(raw: string | undefined, displayName: string | unde
 
 function asString(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() !== '' ? value : undefined
-}
-
-function asNumber(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
 }
 
 function formatTaskNarrative(agent: string, taskId?: string, status?: string): string {

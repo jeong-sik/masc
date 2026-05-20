@@ -4,6 +4,7 @@ import { signal } from '@preact/signals'
 import { lastEvent } from '../sse'
 import type { SSEEvent } from '../types'
 import { FetchScheduler } from '../lib/fetch-scheduler'
+import { SECONDS_PER_MINUTE, SECONDS_PER_HOUR } from '../lib/format-time'
 import {
   fetchTransportHealth,
   decodeTransportHealthData,
@@ -156,9 +157,9 @@ export function formatFloat(value: number): string {
 }
 
 export function formatIdle(seconds: number): string {
-  if (seconds < 60) return `${Math.round(seconds)}s`
-  if (seconds < 3600) return `${Math.round(seconds / 60)}m`
-  return `${Math.round(seconds / 3600)}h`
+  if (seconds < SECONDS_PER_MINUTE) return `${Math.round(seconds)}s`
+  if (seconds < SECONDS_PER_HOUR) return `${Math.round(seconds / SECONDS_PER_MINUTE)}m`
+  return `${Math.round(seconds / SECONDS_PER_HOUR)}h`
 }
 
 export function compactId(value: string): string {

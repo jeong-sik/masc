@@ -9,6 +9,7 @@ import {
   PIXEL_TEMPLATES,
   type AvatarPalette,
 } from '../../config/avatar-palettes'
+import { trimText } from '../../lib/truncate'
 
 type AvatarSize = 'sm' | 'md' | 'lg' | 'xl'
 
@@ -70,13 +71,6 @@ function handleKeyActivate(onClick?: () => void) {
   }
 }
 
-function truncateWork(text: string | null | undefined, max = 20): string | null {
-  if (!text) return null
-  const clean = text.replace(/\s+/g, ' ').trim()
-  if (!clean) return null
-  return clean.length > max ? `${clean.slice(0, max - 1)}…` : clean
-}
-
 export function AgentAvatar({
   name,
   status,
@@ -110,7 +104,7 @@ export function AgentAvatar({
   }
 
   const dotClass = activityDotClass(activityAge ?? null)
-  const bubbleText = truncateWork(currentWork)
+  const bubbleText = trimText(currentWork, 20)
 
   const avatar = html`
     <div

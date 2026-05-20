@@ -1,5 +1,12 @@
 // MASC Dashboard — Core entity types (Agent, Task, Message, Board, Keeper)
 
+// --- Shared options ---
+
+export interface RefreshOptions {
+  force?: boolean
+  light?: boolean
+}
+
 // --- Core entities ---
 
 export interface Agent {

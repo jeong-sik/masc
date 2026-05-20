@@ -20,7 +20,7 @@ import {
 import { replaceRoute, route } from '../router'
 import { TELEMETRY_AUTO_REFRESH_MS } from '../config/constants'
 import { TELEMETRY_SOURCE_META, telemetrySourceMeta } from '../config/telemetry-sources'
-import { formatElapsedCompact } from '../lib/format-time'
+import { formatElapsedCompact, unixSecondsToDate } from '../lib/format-time'
 import { formatAutoRefreshLabel, setupVisibleAutoRefresh } from '../lib/auto-refresh'
 import { isAbortError } from '../lib/async-state'
 import { Btn } from './btn'
@@ -30,6 +30,7 @@ import { ringFocusClasses } from './common/ring'
 import { StatTile } from './common/stat-tile'
 import { coverageGapDisplay } from './common/source-health'
 import { TimeAgo } from './common/time-ago'
+import { asNullableString, asRecord, asStringArray } from './common/normalize'
 
 interface StoreSnapshot {
   keepers: number
@@ -135,29 +136,16 @@ function entryTimestamp(e: TelemetryEntry): number {
 
 function formatTs(ts: number): string {
   if (ts === 0) return '-'
-  const d = new Date(ts * 1000)
+  const d = unixSecondsToDate(ts)
   return d.toLocaleString('ko-KR', {
     month: '2-digit', day: '2-digit',
     hour: '2-digit', minute: '2-digit', second: '2-digit',
   })
 }
 
-function normalizeText(value: unknown): string | null {
-  return typeof value === 'string' && value.trim() !== '' ? value.trim() : null
-}
-
-function normalizeStringArray(value: unknown): string[] {
-  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string' && item.trim() !== '') : []
-}
-
 function recordField(value: unknown, key: string): unknown {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined
   return (value as Record<string, unknown>)[key]
-}
-
-function recordValue(value: unknown): Record<string, unknown> | null {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null
-  return value as Record<string, unknown>
 }
 
 function normalizeNumber(value: unknown): number | null {
@@ -170,7 +158,7 @@ function normalizeNumber(value: unknown): number | null {
 }
 
 function telemetrySourceFromRouteParam(value: unknown): TelemetrySource | '' {
-  const source = normalizeText(value)
+  const source = asNullableString(value)
   return source && source in TELEMETRY_SOURCE_META ? (source as TelemetrySource) : ''
 }
 
@@ -183,7 +171,7 @@ function uniqueStrings(values: Array<string | null | undefined>): string[] {
   const seen = new Set<string>()
   const result: string[] = []
   for (const value of values) {
-    const normalized = normalizeText(value)
+    const normalized = asNullableString(value)
     if (!normalized || seen.has(normalized)) continue
     seen.add(normalized)
     result.push(normalized)
@@ -198,9 +186,9 @@ function compactId(value: string | null | undefined, prefix: string): string | n
 
 function telemetryScopeBadges(entry: TelemetryEntry): string[] {
   return [
-    compactId(normalizeText(entry.session_id), 'S'),
-    compactId(normalizeText(entry.operation_id), 'OP'),
-    compactId(normalizeText(entry.worker_run_id), 'WR'),
+    compactId(asNullableString(entry.session_id), 'S'),
+    compactId(asNullableString(entry.operation_id), 'OP'),
+    compactId(asNullableString(entry.worker_run_id), 'WR'),
   ].filter((value): value is string => Boolean(value))
 }
 
@@ -208,10 +196,10 @@ function telemetryRouteFocusFromParams(
   params: Record<string, string | undefined>,
 ): TelemetryRouteFocus | null {
   const focus = {
-    sessionId: normalizeText(params.session_id),
-    operationId: normalizeText(params.operation_id),
-    workerRunId: normalizeText(params.worker_run_id),
-    query: normalizeText(params.q),
+    sessionId: asNullableString(params.session_id),
+    operationId: asNullableString(params.operation_id),
+    workerRunId: asNullableString(params.worker_run_id),
+    query: asNullableString(params.q),
   }
   return focus.sessionId || focus.operationId || focus.workerRunId || focus.query
     ? focus
@@ -241,14 +229,14 @@ function telemetryRouteFocusBadges(focus: TelemetryRouteFocus): ReadonlyArray<{ 
 }
 
 function telemetryToolName(entry: TelemetryEntry): string | null {
-  if (entry.source === 'tool_call_io') return normalizeText(entry.tool)
+  if (entry.source === 'tool_call_io') return asNullableString(entry.tool)
   if (entry.source === 'tool_usage' || entry.source === 'tool_metric' || entry.source === 'trajectory_tool_call') {
-    return normalizeText(entry.tool_name)
-      ?? normalizeText(recordField(entry.action_radius, 'tool_name'))
+    return asNullableString(entry.tool_name)
+      ?? asNullableString(recordField(entry.action_radius, 'tool_name'))
   }
   if (entry.source === 'execution_receipt') {
-    return normalizeStringArray(entry.canonical_tools)[0]
-      ?? normalizeText(recordField(entry.action_radius, 'tool_name'))
+    return asStringArray(entry.canonical_tools)[0]
+      ?? asNullableString(recordField(entry.action_radius, 'tool_name'))
   }
   return null
 }
@@ -261,37 +249,37 @@ function canonicalToolName(value: string | null): string | null {
     const segments = value.split('__')
     // segments: ['mcp', '<server>', '<tool>'] — take the last non-empty segment
     const tool = segments.length >= 3 ? segments[segments.length - 1] : value
-    return normalizeText(tool ?? value)
+    return asNullableString(tool ?? value)
   }
-  return normalizeText(value)
+  return asNullableString(value)
 }
 
 function telemetryPayloadRecord(entry: TelemetryEntry): Record<string, unknown> | null {
-  const direct = recordValue(entry.payload)
+  const direct = asRecord(entry.payload)
   if (direct) return direct
   if (Array.isArray(entry.payload)) {
-    return recordValue(entry.payload[1])
+    return asRecord(entry.payload[1])
   }
   return null
 }
 
 function telemetryPayloadKind(entry: TelemetryEntry): string | null {
-  if (Array.isArray(entry.payload)) return normalizeText(entry.payload[0])
-  return normalizeText(recordField(entry.payload, 'kind'))
-    ?? normalizeText(recordField(entry.payload, 'event_type'))
+  if (Array.isArray(entry.payload)) return asNullableString(entry.payload[0])
+  return asNullableString(recordField(entry.payload, 'kind'))
+    ?? asNullableString(recordField(entry.payload, 'event_type'))
 }
 
 function telemetryPayloadProviderParts(entry: TelemetryEntry): string[] {
   const payload = telemetryPayloadRecord(entry)
   if (!payload) return []
   return uniqueStrings([
-    normalizeText(recordField(payload, 'provider_kind')),
-    normalizeText(recordField(payload, 'provider')),
-    normalizeText(recordField(payload, 'model_id')),
-    normalizeText(recordField(payload, 'provider_model_id')),
-    normalizeText(recordField(payload, 'model')),
-    normalizeText(recordField(payload, 'base_url')),
-    normalizeText(recordField(payload, 'endpoint')),
+    asNullableString(recordField(payload, 'provider_kind')),
+    asNullableString(recordField(payload, 'provider')),
+    asNullableString(recordField(payload, 'model_id')),
+    asNullableString(recordField(payload, 'provider_model_id')),
+    asNullableString(recordField(payload, 'model')),
+    asNullableString(recordField(payload, 'base_url')),
+    asNullableString(recordField(payload, 'endpoint')),
   ])
 }
 
@@ -313,33 +301,33 @@ function telemetryTurn(entry: TelemetryEntry): number | null {
 
 function telemetryTurnActor(entry: TelemetryEntry): string | null {
   const payload = telemetryPayloadRecord(entry)
-  return normalizeText(entry.agent_name)
-    ?? normalizeText(recordField(payload, 'agent_name'))
-    ?? normalizeText(recordField(entry.runtime_contract, 'agent_name'))
-    ?? normalizeText(entry.keeper_name)
-    ?? normalizeText(recordField(entry.runtime_contract, 'keeper_name'))
-    ?? normalizeText(entry.keeper)
-    ?? normalizeText(entry.name)
-    ?? normalizeText(entry.caller)
-    ?? normalizeText(entry.agent)
+  return asNullableString(entry.agent_name)
+    ?? asNullableString(recordField(payload, 'agent_name'))
+    ?? asNullableString(recordField(entry.runtime_contract, 'agent_name'))
+    ?? asNullableString(entry.keeper_name)
+    ?? asNullableString(recordField(entry.runtime_contract, 'keeper_name'))
+    ?? asNullableString(entry.keeper)
+    ?? asNullableString(entry.name)
+    ?? asNullableString(entry.caller)
+    ?? asNullableString(entry.agent)
 }
 
 function telemetryRunScope(entry: TelemetryEntry): string | null {
   const payload = telemetryPayloadRecord(entry)
   const session =
-    normalizeText(entry.session_id)
-    ?? normalizeText(recordField(payload, 'session_id'))
-    ?? normalizeText(recordField(entry.runtime_contract, 'session_id'))
+    asNullableString(entry.session_id)
+    ?? asNullableString(recordField(payload, 'session_id'))
+    ?? asNullableString(recordField(entry.runtime_contract, 'session_id'))
   if (session) return `S:${session}`
   const operation =
-    normalizeText(entry.operation_id)
-    ?? normalizeText(recordField(payload, 'operation_id'))
-    ?? normalizeText(recordField(entry.runtime_contract, 'operation_id'))
+    asNullableString(entry.operation_id)
+    ?? asNullableString(recordField(payload, 'operation_id'))
+    ?? asNullableString(recordField(entry.runtime_contract, 'operation_id'))
   if (operation) return `OP:${operation}`
   const workerRun =
-    normalizeText(entry.worker_run_id)
-    ?? normalizeText(recordField(payload, 'worker_run_id'))
-    ?? normalizeText(recordField(entry.runtime_contract, 'worker_run_id'))
+    asNullableString(entry.worker_run_id)
+    ?? asNullableString(recordField(payload, 'worker_run_id'))
+    ?? asNullableString(recordField(entry.runtime_contract, 'worker_run_id'))
   if (workerRun) return `WR:${workerRun}`
   return null
 }
@@ -380,11 +368,11 @@ const FLEET_POLLING_OAS_EVENT_TYPES = new Set([
 ])
 
 function isFleetPollingEntry(entry: TelemetryEntry): boolean {
-  if (entry.source === 'keeper_metric' && normalizeText(entry.channel) === 'heartbeat') {
+  if (entry.source === 'keeper_metric' && asNullableString(entry.channel) === 'heartbeat') {
     return true
   }
   if (entry.source === 'oas_event') {
-    const eventType = normalizeText(entry.event_type) ?? normalizeText(entry.type)
+    const eventType = asNullableString(entry.event_type) ?? asNullableString(entry.type)
     if (eventType != null && FLEET_POLLING_OAS_EVENT_TYPES.has(eventType)) return true
   }
   return false
@@ -413,14 +401,14 @@ function entryGroupingDescriptor(entry: TelemetryEntry): {
   if (!tool || !NOISY_TOOL_NAMES.has(tool)) return null
 
   const scope =
-    normalizeText(entry.session_id)
-    ?? normalizeText(entry.operation_id)
-    ?? normalizeText(entry.worker_run_id)
-    ?? normalizeText(entry.keeper)
-    ?? normalizeText(entry.keeper_name)
-    ?? normalizeText(entry.name)
-    ?? normalizeText(entry.caller)
-    ?? normalizeText(entry.agent_name)
+    asNullableString(entry.session_id)
+    ?? asNullableString(entry.operation_id)
+    ?? asNullableString(entry.worker_run_id)
+    ?? asNullableString(entry.keeper)
+    ?? asNullableString(entry.keeper_name)
+    ?? asNullableString(entry.name)
+    ?? asNullableString(entry.caller)
+    ?? asNullableString(entry.agent_name)
     ?? 'global'
 
   return {
@@ -433,9 +421,9 @@ function entryGroupingDescriptor(entry: TelemetryEntry): {
 function entryPreview(e: TelemetryEntry): string {
   switch (e.source) {
     case 'keeper_metric': {
-      const name = normalizeText(e.name) ?? '-'
-      const channel = normalizeText(e.channel) ?? '-'
-      const tools = normalizeStringArray(e.tools_used)
+      const name = asNullableString(e.name) ?? '-'
+      const channel = asNullableString(e.channel) ?? '-'
+      const tools = asStringArray(e.tools_used)
       const toolCount = typeof e.tool_call_count === 'number' ? e.tool_call_count : tools.length
       return `${name} [${channel}] tools=${toolCount}`
     }
@@ -446,8 +434,8 @@ function entryPreview(e: TelemetryEntry): string {
         const detail = event[1] as Record<string, unknown> | undefined
         if (detail) {
           const parts = [
-            normalizeText(detail.agent_id as string),
-            normalizeText(detail.tool_name as string),
+            asNullableString(detail.agent_id as string),
+            asNullableString(detail.tool_name as string),
           ].filter(Boolean)
           return parts.length > 0 ? `${tag}: ${parts.join(' -> ')}` : tag
         }
@@ -456,31 +444,31 @@ function entryPreview(e: TelemetryEntry): string {
       return String(event ?? '')
     }
     case 'tool_call_io': {
-      const tool = normalizeText(e.tool) ?? ''
-      const keeper = normalizeText(e.keeper) ?? ''
+      const tool = asNullableString(e.tool) ?? ''
+      const keeper = asNullableString(e.keeper) ?? ''
       return `${keeper} -> ${tool}`
     }
     case 'trajectory_tool_call': {
       const tool = telemetryToolName(e) ?? '(unknown tool)'
       const keeper =
-        normalizeText(e.keeper_name)
-        ?? normalizeText(recordField(e.runtime_contract, 'keeper_name'))
-        ?? normalizeText(e.keeper)
+        asNullableString(e.keeper_name)
+        ?? asNullableString(recordField(e.runtime_contract, 'keeper_name'))
+        ?? asNullableString(e.keeper)
         ?? '(unknown keeper)'
       return `${keeper} -> ${tool}`
     }
     case 'tool_usage': {
-      const tool = normalizeText(e.tool_name) ?? ''
-      const caller = normalizeText(e.caller) ?? ''
+      const tool = asNullableString(e.tool_name) ?? ''
+      const caller = asNullableString(e.caller) ?? ''
       return `${caller || 'unknown'} -> ${tool}`
     }
     case 'oas_event': {
-      const eventType = normalizeText(e.event_type) ?? normalizeText(e.type) ?? '(unknown event_type)'
+      const eventType = asNullableString(e.event_type) ?? asNullableString(e.type) ?? '(unknown event_type)'
       const payloadKind = telemetryPayloadKind(e)
       const agentName = telemetryTurnActor(e)
-      const toolName = normalizeText(e.tool_name) ?? normalizeText(recordField(telemetryPayloadRecord(e), 'tool_name'))
+      const toolName = asNullableString(e.tool_name) ?? asNullableString(recordField(telemetryPayloadRecord(e), 'tool_name'))
       const turn = telemetryTurn(e)
-      const taskId = normalizeText(e.task_id)
+      const taskId = asNullableString(e.task_id)
       const parts = [
         payloadKind,
         agentName,
@@ -492,18 +480,18 @@ function entryPreview(e: TelemetryEntry): string {
       return parts.length > 0 ? `${eventType}: ${parts.join(' · ')}` : eventType
     }
     case 'execution_receipt': {
-      const keeper = normalizeText(e.keeper_name) ?? normalizeText(e.agent_name) ?? '(unknown keeper)'
-      const outcome = normalizeText(e.outcome) ?? normalizeText(e.operator_disposition) ?? '(no outcome)'
-      const reason = normalizeText(e.terminal_reason_code)
+      const keeper = asNullableString(e.keeper_name) ?? asNullableString(e.agent_name) ?? '(unknown keeper)'
+      const outcome = asNullableString(e.outcome) ?? asNullableString(e.operator_disposition) ?? '(no outcome)'
+      const reason = asNullableString(e.terminal_reason_code)
       return reason ? `${keeper} receipt ${outcome} (${reason})` : `${keeper} receipt ${outcome}`
     }
     case 'goal_event': {
-      const goal = normalizeText(e.goal_id) ?? '(unknown goal)'
-      const eventType = normalizeText(e.event_type) ?? '(unknown event_type)'
+      const goal = asNullableString(e.goal_id) ?? '(unknown goal)'
+      const eventType = asNullableString(e.event_type) ?? '(unknown event_type)'
       return `${goal} ${eventType}`
     }
     case 'tool_metric': {
-      const tool = normalizeText(e.tool_name) ?? ''
+      const tool = asNullableString(e.tool_name) ?? ''
       const dur = typeof e.duration_ms === 'number' ? e.duration_ms : null
       return `${tool} ${dur != null ? dur.toFixed(0) + 'ms' : ''}`
     }
@@ -553,9 +541,9 @@ function telemetryDisplayItemHaystack(item: TelemetryDisplayItem): string {
 }
 
 function telemetryEntryMatchesRouteFocus(entry: TelemetryEntry, focus: TelemetryRouteFocus): boolean {
-  if (focus.sessionId && normalizeText(entry.session_id) !== focus.sessionId) return false
-  if (focus.operationId && normalizeText(entry.operation_id) !== focus.operationId) return false
-  if (focus.workerRunId && normalizeText(entry.worker_run_id) !== focus.workerRunId) return false
+  if (focus.sessionId && asNullableString(entry.session_id) !== focus.sessionId) return false
+  if (focus.operationId && asNullableString(entry.operation_id) !== focus.operationId) return false
+  if (focus.workerRunId && asNullableString(entry.worker_run_id) !== focus.workerRunId) return false
   if (focus.query && !telemetryEntryHaystack(entry).toLowerCase().includes(focus.query.toLowerCase())) return false
   return true
 }

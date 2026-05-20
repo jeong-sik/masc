@@ -39,6 +39,8 @@ import { LoadingState, ErrorState } from './common/feedback-state'
 import { StatTile } from './common/stat-tile'
 import { FilterChips } from './common/filter-chips'
 import { formatCost, formatPct1 } from '../lib/format-number'
+import { unixSecondsToDate } from '../lib/format-time'
+import { DEFAULT_WINDOW_MINUTES_24H } from '../config/constants'
 import { replaceRoute, route } from '../router'
 import {
   type ViewMode,
@@ -149,7 +151,7 @@ const WINDOW_OPTIONS: Array<{ key: number; label: string }> = [
   { key: 30, label: '30분' },
   { key: 60, label: '1시간' },
   { key: 360, label: '6시간' },
-  { key: 1440, label: '24시간' },
+  { key: DEFAULT_WINDOW_MINUTES_24H, label: '24시간' },
 ]
 
 const windowMinutes = signal<number>(60)
@@ -645,7 +647,7 @@ function FeedSourceStrip({ meta }: { meta: DashboardFeedMetadata }) {
 
 function HeuristicLog({ events, limit, meta }: { events: HeuristicEvent[]; limit: number; meta: DashboardFeedMetadata }) {
   const fmtTime = (ts: number): string => {
-    const d = new Date(ts * 1000)
+    const d = unixSecondsToDate(ts)
     return d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
   }
 
@@ -696,7 +698,7 @@ function HeuristicLog({ events, limit, meta }: { events: HeuristicEvent[]; limit
 
 function StressBoard({ rows, events, limit, meta }: { rows: AgentStressRow[]; events: StressEvent[]; limit: number; meta: DashboardFeedMetadata }) {
   const fmtTime = (ts: number): string => {
-    const d = new Date(ts * 1000)
+    const d = unixSecondsToDate(ts)
     return d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
   }
 
@@ -1075,7 +1077,7 @@ function AuditLedgerBoard({ entries, count, focus, logId }: { entries: AuditEntr
 function KeeperDecisionsBoard({ events, limit, meta }: { events: KeeperDecision[]; limit: number; meta: DashboardFeedMetadata }) {
   const fmtTime = (ts: number | null): string => {
     if (ts == null) return '—'
-    const d = new Date(ts * 1000)
+    const d = unixSecondsToDate(ts)
     return d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
   }
 

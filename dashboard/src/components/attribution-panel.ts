@@ -20,6 +20,7 @@ import { ErrorState, LoadingState } from './common/feedback-state'
 import { EmptyState } from './common/empty-state'
 import { TextInput } from './common/input'
 import { highlightMatch } from '../lib/highlight-match'
+import { unixSecondsToDate } from '../lib/format-time'
 
 const POLL_INTERVAL_MS = 5_000
 const RECENT_LIMIT = 50
@@ -62,7 +63,7 @@ function originBadgeClass(origin: Attribution['origin']): string {
 }
 
 function formatTs(recordedAt: number): string {
-  const d = new Date(recordedAt * 1000)
+  const d = unixSecondsToDate(recordedAt)
   return d.toLocaleTimeString('ko-KR', { hour12: false })
 }
 

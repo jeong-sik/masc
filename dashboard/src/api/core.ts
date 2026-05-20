@@ -283,9 +283,7 @@ const DASHBOARD_BOOTSTRAP_WARM_PATHS = new Set([
   '/api/v1/dashboard/mission',
 ])
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
+import { isRecord } from '../lib/type-guards'
 
 interface ErrorResponseInfo {
   detail?: string

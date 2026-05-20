@@ -19,6 +19,7 @@ import {
 } from '../api/dashboard-cascade'
 import { LoadingState, ErrorState } from './common/feedback-state'
 import { TimeAgo } from './common/time-ago'
+import { formatMsCompact } from '../lib/format-number'
 
 // ── Module-level signals ──────────────────────────────────────────────────
 
@@ -86,8 +87,7 @@ export function cascadeKindTone(kind: string): {
 /** Normalise backoff_ms into a human-readable string. */
 export function formatBackoff(ms: number): string {
   if (ms <= 0) return '-'
-  if (ms < 1000) return `${ms}ms`
-  return `${(ms / 1000).toFixed(1)}s`
+  return formatMsCompact(ms)
 }
 
 /** Cap bar width at 100% based on the max candidates_in across visible events. */

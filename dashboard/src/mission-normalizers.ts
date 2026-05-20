@@ -1,4 +1,5 @@
-import { isRecord, asString, asNumber, asBoolean, extractArray } from './components/common/normalize'
+import { isRecord, asString, asNumber, asBoolean, extractArray, asStringArray } from './components/common/normalize'
+import { normalizePendingConfirmation } from './pending-confirm'
 import {
   normalizeAttentionItem,
   normalizeRecommendedAction,
@@ -64,42 +65,28 @@ function normalizeWorkerRunEvidence(raw: unknown): DashboardProofWorkerRunEviden
     proof_execution_mode: asString(raw.proof_execution_mode) ?? null,
     proof_evidence_count: asNumber(raw.proof_evidence_count),
     checkpoint_ref: asString(raw.checkpoint_ref) ?? null,
-    tool_trace_refs: extractArray(raw.tool_trace_refs)
-      .map(item => (typeof item === 'string' ? item.trim() : ''))
-      .filter(Boolean),
-    raw_evidence_refs: extractArray(raw.raw_evidence_refs)
-      .map(item => (typeof item === 'string' ? item.trim() : ''))
-      .filter(Boolean),
+    tool_trace_refs: asStringArray(raw.tool_trace_refs),
+    raw_evidence_refs: asStringArray(raw.raw_evidence_refs),
     worker_name: asString(raw.worker_name) ?? null,
     status: asString(raw.status) ?? null,
     mode: asString(raw.mode) ?? null,
     wait_mode: asString(raw.wait_mode) ?? null,
     trace_capability: asString(raw.trace_capability) ?? null,
     trace_validated: asBoolean(raw.trace_validated),
-    validation_failures: extractArray(raw.validation_failures)
-      .map(item => (typeof item === 'string' ? item.trim() : ''))
-      .filter(Boolean),
+    validation_failures: asStringArray(raw.validation_failures),
     success: asBoolean(raw.success),
     requested_worker_class: asString(raw.requested_worker_class) ?? null,
     requested_worker_size: asString(raw.requested_worker_size) ?? null,
     tool_surface_status: asString(raw.tool_surface_status) ?? null,
     tool_surface_source: asString(raw.tool_surface_source) ?? null,
-    tool_surface_names: extractArray(raw.tool_surface_names)
-      .map(item => (typeof item === 'string' ? item.trim() : ''))
-      .filter(Boolean),
-    tool_surface_masc_names: extractArray(raw.tool_surface_masc_names)
-      .map(item => (typeof item === 'string' ? item.trim() : ''))
-      .filter(Boolean),
-    tool_surface_shell_names: extractArray(raw.tool_surface_shell_names)
-      .map(item => (typeof item === 'string' ? item.trim() : ''))
-      .filter(Boolean),
+    tool_surface_names: asStringArray(raw.tool_surface_names),
+    tool_surface_masc_names: asStringArray(raw.tool_surface_masc_names),
+    tool_surface_shell_names: asStringArray(raw.tool_surface_shell_names),
     tool_surface_count: asNumber(raw.tool_surface_count),
     resolved_runtime: asString(raw.resolved_runtime) ?? null,
     resolved_model: asString(raw.resolved_model) ?? null,
     routing_reason: asString(raw.routing_reason) ?? null,
-    tool_names: extractArray(raw.tool_names)
-      .map(item => (typeof item === 'string' ? item.trim() : ''))
-      .filter(Boolean),
+    tool_names: asStringArray(raw.tool_names),
     tool_call_count: asNumber(raw.tool_call_count),
     output_preview: asString(raw.output_preview) ?? null,
     record_count: asNumber(raw.record_count),
@@ -108,9 +95,7 @@ function normalizeWorkerRunEvidence(raw: unknown): DashboardProofWorkerRunEviden
     stop_reason: asString(raw.stop_reason) ?? null,
     failure_reason: asString(raw.failure_reason) ?? null,
     error: asString(raw.error) ?? null,
-    evidence_refs: extractArray(raw.evidence_refs)
-      .map(item => (typeof item === 'string' ? item.trim() : ''))
-      .filter(Boolean),
+    evidence_refs: asStringArray(raw.evidence_refs),
     ts_iso: asString(raw.ts_iso) ?? null,
   }
 }
@@ -140,26 +125,14 @@ function normalizeSessionWorkerRuns(raw: unknown): DashboardMissionSessionWorker
     completed_success_count: asNumber(raw.completed_success_count),
     completed_failed_count: asNumber(raw.completed_failed_count),
     in_flight_count: asNumber(raw.in_flight_count),
-    in_flight_run_ids: extractArray(raw.in_flight_run_ids)
-      .map(item => (typeof item === 'string' ? item.trim() : ''))
-      .filter(Boolean),
-    in_flight_actor_names: extractArray(raw.in_flight_actor_names)
-      .map(item => (typeof item === 'string' ? item.trim() : ''))
-      .filter(Boolean),
+    in_flight_run_ids: asStringArray(raw.in_flight_run_ids),
+    in_flight_actor_names: asStringArray(raw.in_flight_actor_names),
     ready_worker_count: asNumber(raw.ready_worker_count),
-    ready_worker_names: extractArray(raw.ready_worker_names)
-      .map(item => (typeof item === 'string' ? item.trim() : ''))
-      .filter(Boolean),
-    delegate_ready_worker_names: extractArray(raw.delegate_ready_worker_names)
-      .map(item => (typeof item === 'string' ? item.trim() : ''))
-      .filter(Boolean),
-    blocked_worker_names: extractArray(raw.blocked_worker_names)
-      .map(item => (typeof item === 'string' ? item.trim() : ''))
-      .filter(Boolean),
+    ready_worker_names: asStringArray(raw.ready_worker_names),
+    delegate_ready_worker_names: asStringArray(raw.delegate_ready_worker_names),
+    blocked_worker_names: asStringArray(raw.blocked_worker_names),
     pending_worker_count: asNumber(raw.pending_worker_count),
-    pending_worker_names: extractArray(raw.pending_worker_names)
-      .map(item => (typeof item === 'string' ? item.trim() : ''))
-      .filter(Boolean),
+    pending_worker_names: asStringArray(raw.pending_worker_names),
     worker_readiness: extractArray(raw.worker_readiness)
       .map(normalizeWorkerReadiness)
       .filter((item): item is DashboardMissionWorkerReadiness => item !== null),
@@ -179,9 +152,7 @@ function normalizeKeeper(raw: unknown): OperatorKeeperSnapshot | null {
     status: asString(raw.status),
     context_ratio: asNumber(raw.context_ratio),
     generation: asNumber(raw.generation),
-    active_goal_ids: extractArray(raw.active_goal_ids)
-      .map(item => (typeof item === 'string' ? item.trim() : ''))
-      .filter(Boolean),
+    active_goal_ids: asStringArray(raw.active_goal_ids),
     last_autonomous_action_at: asString(raw.last_autonomous_action_at) ?? null,
     last_turn_ago_s: asNumber(raw.last_turn_ago_s),
     model: asString(raw.model),
@@ -192,21 +163,7 @@ function normalizeKeeper(raw: unknown): OperatorKeeperSnapshot | null {
   }
 }
 
-function normalizePendingConfirmation(raw: unknown): PendingConfirmation | null {
-  if (!isRecord(raw)) return null
-  const token = asString(raw.confirm_token) ?? asString(raw.token)
-  if (!token) return null
-  return {
-    confirm_token: token,
-    actor: asString(raw.actor),
-    action_type: asString(raw.action_type),
-    target_type: asString(raw.target_type),
-    target_id: asString(raw.target_id) ?? null,
-    delegated_tool: asString(raw.delegated_tool),
-    created_at: asString(raw.created_at),
-    preview: raw.preview,
-  }
-}
+// normalizePendingConfirmation imported from pending-confirm.ts (SSOT)
 
 function normalizeActionDescriptor(raw: unknown): OperatorActionDescriptor | null {
   if (!isRecord(raw)) return null
@@ -355,9 +312,7 @@ function normalizeBriefingSection(raw: unknown): DashboardMissionBriefingSection
       || asString(raw.evidence_quality) === 'missing'
         ? (asString(raw.evidence_quality) as DashboardMissionBriefingSection['evidence_quality'])
         : undefined,
-    evidence: extractArray(raw.evidence)
-      .map(item => (typeof item === 'string' ? item.trim() : ''))
-      .filter(Boolean),
+    evidence: asStringArray(raw.evidence),
   }
 }
 
@@ -399,9 +354,7 @@ export function normalizeMissionBriefing(raw: unknown): DashboardMissionBriefing
     summary: asString(root.summary) ?? null,
     model: asString(root.model) ?? null,
     ttl_sec: asNumber(root.ttl_sec),
-    criteria: extractArray(root.criteria)
-      .map(item => (typeof item === 'string' ? item.trim() : ''))
-      .filter(Boolean),
+    criteria: asStringArray(root.criteria),
     basis: {
       namespace: asString(basis.namespace) ?? null,
       crew_count: asNumber(basis.crew_count),

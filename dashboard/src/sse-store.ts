@@ -55,7 +55,7 @@ import { hydrateGoalTreeSnapshot } from './goal-tree-state'
 import { showToast } from './components/common/toast'
 import type { ErrorCode } from './types/error'
 import { route } from './router'
-import { routeWantsRefreshTarget } from './refresh-scope'
+import { routeWantsRefreshTarget, type RouteRefreshTarget } from './refresh-scope'
 import {
   PERIODIC_REFRESH_DEV_MS,
   PERIODIC_REFRESH_PROD_MS,
@@ -120,7 +120,7 @@ function scheduleRefresh(key: string, fn: () => void, delayMs = SSE_DEFAULT_DEBO
 // Simple events that map directly to a debounced refresh target.
 // Complex events (conditional logic, async imports) use named handlers below.
 
-type RefreshTarget = 'execution' | 'board' | 'operator' | 'activity'
+type RefreshTarget = RouteRefreshTarget
 
 interface SimpleRoute {
   target: RefreshTarget

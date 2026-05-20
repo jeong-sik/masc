@@ -1,4 +1,5 @@
 import type { GovernanceDecisionItem } from '../types'
+import { SECONDS_PER_HOUR, SECONDS_PER_DAY, SECONDS_PER_MINUTE } from '../lib/format-time'
 
 export type GovernanceFilter = 'open' | 'pending_ruling' | 'needs_human_gate' | 'executed' | 'blocked'
 
@@ -48,7 +49,7 @@ export function kindLabel(value: string): string {
 
 export function formatAgeSummary(seconds: number | null | undefined): string | null {
   if (seconds == null) return null
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}m`
-  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h`
-  return `${Math.floor(seconds / 86400)}d`
+  if (seconds < SECONDS_PER_HOUR) return `${Math.floor(seconds / SECONDS_PER_MINUTE)}m`
+  if (seconds < SECONDS_PER_DAY) return `${Math.floor(seconds / SECONDS_PER_HOUR)}h`
+  return `${Math.floor(seconds / SECONDS_PER_DAY)}d`
 }

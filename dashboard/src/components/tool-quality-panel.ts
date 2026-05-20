@@ -109,11 +109,8 @@ const successColor = computed(() => {
 // tool table later moves out of this panel.
 const toolSearchQuery = signal('')
 
-export function toolMatchesSearch(tool: Pick<ToolStat, 'name'>, query: string): boolean {
-  const q = query.trim().toLowerCase()
-  if (q === '') return true
-  return tool.name.toLowerCase().includes(q)
-}
+// Re-export from SSOT — identical logic in tool-metrics.ts
+export { toolMatchesSearch } from './tool-metrics'
 
 export function filterTools<T extends Pick<ToolStat, 'name'>>(tools: T[], query: string): T[] {
   const q = query.trim().toLowerCase()

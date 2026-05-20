@@ -9,6 +9,7 @@ import type {
   OperatorActionLogEntry,
   OperatorActionRequest,
   OperatorActionResult,
+  RefreshOptions,
 } from './types'
 import { registerOperatorRefresh } from './sse-store'
 import { UI_REFRESH_TTL_MS } from './config/constants'
@@ -27,10 +28,6 @@ import {
 import { normalizeOperatorSnapshot, normalizeOperatorDigest } from './operator-normalizers'
 
 let nextLogId = 1
-
-interface RefreshOptions {
-  force?: boolean
-}
 
 let snapshotRefreshInflight: Promise<void> | null = null
 let roomDigestRefreshInflight: Promise<void> | null = null

@@ -1,4 +1,5 @@
 import { signal } from '@preact/signals'
+import { isRecord } from '../common/normalize'
 
 export type KeeperPresenceStatus = 'active' | 'idle' | 'blocked'
 
@@ -177,10 +178,6 @@ function compareEntries(a: KeeperPresenceEntry, b: KeeperPresenceEntry): number 
   if (statusDelta !== 0) return statusDelta
   if (a.last_seen_ms !== b.last_seen_ms) return b.last_seen_ms - a.last_seen_ms
   return a.keeper_id.localeCompare(b.keeper_id)
-}
-
-function isRecord(value: unknown): value is UnknownRecord {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function hasNonEmptyString(record: UnknownRecord, key: string): boolean {

@@ -1,5 +1,6 @@
 import { html } from 'htm/preact'
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
+import { get } from '../../api/core'
 import { bridgePostsToTrace } from './anchored-thread-trace-bridge'
 import { bridgeCascadeEventsToTrace } from './cascade-hop-trace-bridge'
 import { bridgeDecisionsToTrace } from './decision-log-trace-bridge'
@@ -88,9 +89,7 @@ type ReplayRailItem =
 
 async function fetchBoardPosts(): Promise<ReadonlyArray<BoardPost>> {
   try {
-    const res = await fetch('/api/v1/board?limit=20&exclude_system=true&exclude_automation=true')
-    if (!res.ok) return EMPTY_POSTS
-    const data = await res.json()
+    const data = await get<unknown>('/api/v1/board?limit=20&exclude_system=true&exclude_automation=true')
     if (Array.isArray(data) && data.length > 0) return data as BoardPost[]
     return EMPTY_POSTS
   } catch {

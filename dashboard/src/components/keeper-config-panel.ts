@@ -12,7 +12,7 @@ import {
   updateKeeperCascade,
   type CascadeInvalidProfile,
 } from '../api/dashboard'
-import type { KeeperConfigUpdatePayload } from '../api/dashboard'
+import type { KeeperConfigUpdatePayload, SandboxProfile, SandboxNetworkMode, SharedMemoryScope } from '../api/dashboard'
 import type { GoalTreeNode, KeeperConfig, KeeperHookSlot } from '../types'
 import type { KeeperConfigLoadStatus } from './keeper-detail-source'
 import { formatTokens, formatPct, formatCost } from '../lib/format-number'
@@ -123,9 +123,6 @@ function buildPayload(draft: EditDraft, orig: KeeperConfig): KeeperConfigUpdateP
 }
 
 // Runtime config draft for sandbox/proactive/compaction/handoff inline editing
-export type SandboxProfile = 'local' | 'docker'
-export type SandboxNetworkMode = 'none' | 'inherit'
-export type SharedMemoryScope = 'disabled' | 'room'
 
 export type RuntimeDraft = {
   sandbox_profile: SandboxProfile

@@ -2,6 +2,7 @@ import { computed } from '@preact/signals'
 import { html } from 'htm/preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import { activeKeeperName } from '../../keeper-state'
+import { get } from '../../api/core'
 import { bridgeBdiSnapshotsToTrace } from './bdi-snapshot-trace-bridge'
 import { asBoolean, asNumber, asString, isRecord, toIsoTimestamp } from '../common/normalize'
 import { clearPins, headPinnedKeeper, pinKeeper } from './multi-keeper-pin-store'
@@ -128,9 +129,12 @@ export function normalizeKeeperBdiSnapshot(raw: unknown): KeeperBdiSnapshot | nu
 }
 
 async function fetchKeeperBdiSnapshot(keeperName: string, signal: AbortSignal): Promise<KeeperBdiSnapshot | null> {
-  const res = await fetch(`/api/v1/keepers/${encodeURIComponent(keeperName)}/bdi-snapshot`, { signal })
-  if (!res.ok) return null
-  return normalizeKeeperBdiSnapshot(await res.json())
+  try {
+    const raw = await get<unknown>(`/api/v1/keepers/${encodeURIComponent(keeperName)}/bdi-snapshot`, { signal })
+    return normalizeKeeperBdiSnapshot(raw)
+  } catch {
+    return null
+  }
 }
 
 function useInspectorKeeperPin(): InspectorKeeperPin | null {

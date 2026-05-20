@@ -1,5 +1,6 @@
 import { signal } from '@preact/signals'
 import { fetchIdeRegions, type IdeCodeRegion } from '../../api/ide'
+import { isRecord, asNullableString } from '../common/normalize'
 
 export interface CodeDocumentSource {
   readonly file_path: string | null
@@ -94,8 +95,8 @@ export function createCodeDocumentStore(
 
 function normalizeSource(source: unknown, maxLines: number): CodeDocumentSnapshot | null {
   if (!isRecord(source)) return null
-  const filePath = normalizeNonEmptyString(source.file_path)
-  const language = normalizeNonEmptyString(source.language)
+  const filePath = asNullableString(source.file_path)
+  const language = asNullableString(source.language)
   if (!filePath || !language || typeof source.content !== 'string') return null
 
   const content = source.content.replace(/\r\n?/g, '\n')
@@ -135,10 +136,3 @@ function normalizeMaxLines(value: number | undefined): number {
   return 5_000
 }
 
-function normalizeNonEmptyString(value: unknown): string | null {
-  return typeof value === 'string' && value.trim() !== '' ? value.trim() : null
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}

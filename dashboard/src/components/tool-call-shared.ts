@@ -2,6 +2,7 @@
 // and tool-call-timeline components.
 
 import { truncate } from '../lib/truncate'
+import { formatMsCompact } from '../lib/format-number'
 
 // ── Constants ────────────────────────────────────────────
 
@@ -83,12 +84,7 @@ export function toolCategory(name: string): ToolCategoryResult {
 }
 
 /** Format duration as human-readable string with unit. */
-export function formatDuration(ms: number): string {
-  const rounded = Math.round(ms)
-  if (rounded < 1000) return `${rounded}ms`
-  if (rounded < 60_000) return `${(rounded / 1000).toFixed(1)}s`
-  return `${(rounded / 60_000).toFixed(1)}m`
-}
+export const formatDuration = formatMsCompact
 
 /** Summarize a list of trajectory entries: total duration, success count, error count. */
 export function summarizeEntries(entries: Array<{ duration_ms?: number; error?: string | null }>): {

@@ -3,7 +3,7 @@
 
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
-import { authHeaders, get, post } from '../api/core'
+import { del, get, post } from '../api/core'
 import {
   coerceCredentialType,
   normalizeCredentialsResponse,
@@ -64,14 +64,7 @@ async function createCredential(payload: CredentialCreatePayload): Promise<void>
 }
 
 async function deleteCredential(id: string): Promise<void> {
-  const res = await fetch(`/api/v1/credentials/${encodeURIComponent(id)}`, {
-    method: 'DELETE',
-    headers: authHeaders(),
-  })
-  if (!res.ok) {
-    const text = await res.text().catch(() => '삭제 요청 실패')
-    throw new Error(text)
-  }
+  await del(`/api/v1/credentials/${encodeURIComponent(id)}`)
 }
 
 // ── Helpers ──────────────────────────────────────────────

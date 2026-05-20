@@ -6,6 +6,7 @@
 // Backend contract: see `docs/DOCTOR-ARCHITECTURE.md` "Backend endpoint" section.
 
 import { html } from 'htm/preact'
+import { capitalize } from '../lib/format-string'
 import { useSignal } from '@preact/signals'
 import { useEffect } from 'preact/hooks'
 import { get } from '../api/core'
@@ -105,7 +106,7 @@ function severityBandKind(code: number): BandKind {
 // for display; config kind renders as "설정".
 export function doctorHeading(entry: DoctorEntry): string {
   if (entry.kind === 'config') return '설정'
-  return entry.name.charAt(0).toUpperCase() + entry.name.slice(1)
+  return capitalize(entry.name)
 }
 
 // Aggregate breakdown string, e.g. "6건 진단 · 정상 3 · 경고 2 · 오류 1".

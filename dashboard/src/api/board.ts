@@ -1,6 +1,7 @@
 import { currentDashboardActor, get, post, del, put, withRetries, defaultBoardVoter } from './core'
 import { isRecord, asNullableString, asString, asNumber, asInt, asStringList } from '../components/common/normalize'
 import { asKeeperApprovalRiskLevel } from '../lib/governance-risk-level'
+import { normalizePendingConfirmation } from '../pending-confirm'
 import { timeBoardRequest } from '../board-metrics'
 import type {
   BoardActorIdentity, BoardPost, BoardComment, BoardReactionSummary,
@@ -11,7 +12,7 @@ import type {
   GovernanceDecisionItem, GovernanceExecutedRoute,
   GovernanceGuardrailState, GovernanceJudgeSummary, GovernanceJudgment,
   KeeperApprovalQueueItem,
-  GovernanceResolvedAction, GovernanceTimelineEvent, PendingConfirmation,
+  GovernanceResolvedAction, GovernanceTimelineEvent,
   SubBoard, SubBoardAccess,
 } from '../types'
 
@@ -45,21 +46,8 @@ export function asNullableIsoTimestamp(value: unknown): string | null {
   return null
 }
 
-export function normalizePendingConfirmation(raw: unknown): PendingConfirmation | null {
-  if (!isRecord(raw)) return null
-  const confirmToken = asString(raw.confirm_token ?? raw.token, '').trim()
-  if (!confirmToken) return null
-  return {
-    confirm_token: confirmToken,
-    actor: asNullableString(raw.actor) ?? undefined,
-    action_type: asNullableString(raw.action_type) ?? undefined,
-    target_type: asNullableString(raw.target_type) ?? undefined,
-    target_id: asNullableString(raw.target_id),
-    delegated_tool: asNullableString(raw.delegated_tool) ?? undefined,
-    created_at: asNullableIsoTimestamp(raw.created_at) ?? undefined,
-    preview: raw.preview,
-  }
-}
+// normalizePendingConfirmation re-exported from pending-confirm.ts (SSOT)
+export { normalizePendingConfirmation }
 
 export function normalizeKeeperApprovalQueueItem(raw: unknown): KeeperApprovalQueueItem | null {
   if (!isRecord(raw)) return null
@@ -412,9 +400,7 @@ function normalizeBoardPost(raw: unknown): BoardPost | null {
     || (raw.updated_at !== undefined ? toIsoTimestamp(raw.updated_at) : createdAt)
   const titleRaw = asString(raw.title, '').trim()
   const title = sanitizeBoardTitle(titleRaw, body)
-  const tags = Array.isArray(raw.tags)
-    ? raw.tags.filter((item): item is string => typeof item === 'string' && item.trim() !== '')
-    : []
+  const tags = asStringList(raw.tags)
   const reactions = Array.isArray(raw.reactions)
     ? raw.reactions
         .map(normalizeBoardReactionSummary)

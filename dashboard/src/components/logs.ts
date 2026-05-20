@@ -9,6 +9,7 @@ import type {
   ProviderLogTailResponse,
 } from '../api/dashboard.js'
 import { VirtualList } from './common/virtual-list'
+import { asRecord, asNullableString, mergeRouteRecord, hasRouteContext, type MutableRouteContext } from './common/normalize'
 import { TextInput } from './common/input'
 import { Select } from './common/select'
 import { Checkbox } from './common/checkbox'
@@ -18,7 +19,6 @@ import { StatusChip } from './common/status-chip'
 import {
   openIdeContextRouteLink,
   routeLinksForContext,
-  type IdeContextRouteContext,
   type IdeContextRouteLink,
 } from './ide/ide-context-lens'
 import type { LogsResponse } from '../api/schemas/logs'
@@ -93,30 +93,6 @@ type FailureEnvelope = {
   evidence_ref: Record<string, unknown> | null
 }
 
-interface LogCodeLocation {
-  readonly filePath: string
-  readonly line?: number
-}
-
-type LogRouteContextFields = Pick<
-  IdeContextRouteContext,
-  | 'filePath'
-  | 'line'
-  | 'goalId'
-  | 'taskId'
-  | 'boardPostId'
-  | 'commentId'
-  | 'prId'
-  | 'gitRef'
-  | 'logId'
-  | 'sessionId'
-  | 'operationId'
-  | 'workerRunId'
->
-type MutableLogRouteContext = {
-  -readonly [K in keyof LogRouteContextFields]?: LogRouteContextFields[K]
-}
-
 function normalizedLevel(entry: LogEntry): string {
   // RFC-0079: backend now emits a typed level via Log.Ring.entry_to_json.
   // The schema rejects rows without `level`, so the read-side fallback
@@ -187,104 +163,17 @@ function interpolateStructuredMessage(
   return rendered
 }
 
-function nestedRecord(value: unknown): Record<string, unknown> | null {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
-  return value as Record<string, unknown>
-}
-
-function nestedString(value: unknown): string | null {
-  if (typeof value !== 'string') return null
-  const trimmed = value.trim()
-  return trimmed === '' ? null : trimmed
-}
-
-function positiveLine(value: unknown): number | undefined {
-  if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 1) return value
-  if (typeof value !== 'string') return undefined
-  const trimmed = value.trim()
-  return /^[1-9]\d*$/.test(trimmed) ? Number.parseInt(trimmed, 10) : undefined
-}
-
-function idString(value: unknown): string | undefined {
-  const text = nestedString(value)
-  if (text) return text
-  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 1
-    ? String(value)
-    : undefined
-}
-
-function codeLocationFromRecord(record: Record<string, unknown> | null): LogCodeLocation | null {
-  if (!record) return null
-  const filePath =
-    nestedString(record.file_path)
-    ?? nestedString(record.path)
-    ?? nestedString(record.file)
-  if (filePath) {
-    return {
-      filePath,
-      line: positiveLine(record.line) ?? positiveLine(record.line_start) ?? positiveLine(record.lineno),
-    }
-  }
-  return null
-}
-
-function mergeLogRouteRecord(
-  context: MutableLogRouteContext,
-  record: Record<string, unknown> | null,
-  overwrite = false,
-): void {
-  if (!record) return
-  const location = codeLocationFromRecord(record)
-  if (location && (overwrite || context.filePath === undefined)) context.filePath = location.filePath
-  if (location?.line !== undefined && (overwrite || context.line === undefined)) context.line = location.line
-
-  const goalId = idString(record.goal_id)
-  if (goalId && (overwrite || context.goalId === undefined)) context.goalId = goalId
-  const taskId = idString(record.task_id)
-  if (taskId && (overwrite || context.taskId === undefined)) context.taskId = taskId
-  const boardPostId = idString(record.board_post_id) ?? idString(record.post_id)
-  if (boardPostId && (overwrite || context.boardPostId === undefined)) context.boardPostId = boardPostId
-  const commentId = idString(record.comment_id) ?? idString(record.reply_id) ?? idString(record.comment_number)
-  if (commentId && (overwrite || context.commentId === undefined)) context.commentId = commentId
-  const prId = idString(record.pr_id) ?? idString(record.pull_request) ?? idString(record.pr_number)
-  if (prId && (overwrite || context.prId === undefined)) context.prId = prId
-  const gitRef = idString(record.git_ref) ?? idString(record.commit) ?? idString(record.branch)
-  if (gitRef && (overwrite || context.gitRef === undefined)) context.gitRef = gitRef
-  const logId = idString(record.log_id)
-  if (logId && (overwrite || context.logId === undefined)) context.logId = logId
-  const sessionId = idString(record.session_id)
-  if (sessionId && (overwrite || context.sessionId === undefined)) context.sessionId = sessionId
-  const operationId = idString(record.operation_id)
-  if (operationId && (overwrite || context.operationId === undefined)) context.operationId = operationId
-  const workerRunId = idString(record.worker_run_id)
-  if (workerRunId && (overwrite || context.workerRunId === undefined)) context.workerRunId = workerRunId
-}
-
-function hasLogRouteContext(context: MutableLogRouteContext): boolean {
-  return context.filePath !== undefined
-    || context.goalId !== undefined
-    || context.taskId !== undefined
-    || context.boardPostId !== undefined
-    || context.commentId !== undefined
-    || context.prId !== undefined
-    || context.gitRef !== undefined
-    || context.logId !== undefined
-    || context.sessionId !== undefined
-    || context.operationId !== undefined
-    || context.workerRunId !== undefined
-}
-
 function failureEnvelope(entry: LogEntry): FailureEnvelope | null {
   const details = entryDetails(entry)
-  const envelope = nestedRecord(details?.failure_envelope)
+  const envelope = asRecord(details?.failure_envelope)
   if (!envelope) return null
 
-  const surface = nestedString(envelope.surface)
-  const entityKind = nestedString(envelope.entity_kind)
-  const causeCode = nestedString(envelope.cause_code)
-  const severity = nestedString(envelope.severity)
-  const summary = nestedString(envelope.summary)
-  const recoverability = nestedString(envelope.recoverability)
+  const surface = asNullableString(envelope.surface)
+  const entityKind = asNullableString(envelope.entity_kind)
+  const causeCode = asNullableString(envelope.cause_code)
+  const severity = asNullableString(envelope.severity)
+  const summary = asNullableString(envelope.summary)
+  const recoverability = asNullableString(envelope.recoverability)
 
   if (!surface || !entityKind || !causeCode || !severity || !summary || !recoverability) {
     return null
@@ -293,13 +182,13 @@ function failureEnvelope(entry: LogEntry): FailureEnvelope | null {
   return {
     surface,
     entity_kind: entityKind,
-    entity_id: nestedString(envelope.entity_id),
+    entity_id: asNullableString(envelope.entity_id),
     cause_code: causeCode,
     severity,
     summary,
     recoverability,
-    operator_action: nestedString(envelope.operator_action),
-    evidence_ref: nestedRecord(envelope.evidence_ref),
+    operator_action: asNullableString(envelope.operator_action),
+    evidence_ref: asRecord(envelope.evidence_ref),
   }
 }
 
@@ -354,15 +243,15 @@ export function summarizeLogWindow(entries: LogEntry[]): LogWindowSummary {
 
 export function logRouteLinks(entry: LogEntry): ReadonlyArray<IdeContextRouteLink> {
   const details = entryDetails(entry)
-  const failureEnvelopeRecord = nestedRecord(details?.failure_envelope)
-  const context: MutableLogRouteContext = {}
-  mergeLogRouteRecord(context, nestedRecord(details?.context))
-  mergeLogRouteRecord(context, nestedRecord(details?.evidence_ref))
-  mergeLogRouteRecord(context, nestedRecord(failureEnvelopeRecord?.evidence_ref))
-  mergeLogRouteRecord(context, nestedRecord(details?.tool_args))
-  mergeLogRouteRecord(context, nestedRecord(details?.input))
-  mergeLogRouteRecord(context, details, true)
-  if (!hasLogRouteContext(context)) return []
+  const failureEnvelopeRecord = asRecord(details?.failure_envelope)
+  const context: MutableRouteContext = {}
+  mergeRouteRecord(context, asRecord(details?.context))
+  mergeRouteRecord(context, asRecord(details?.evidence_ref))
+  mergeRouteRecord(context, asRecord(failureEnvelopeRecord?.evidence_ref))
+  mergeRouteRecord(context, asRecord(details?.tool_args))
+  mergeRouteRecord(context, asRecord(details?.input))
+  mergeRouteRecord(context, details, true)
+  if (!hasRouteContext(context)) return []
   return routeLinksForContext({
     ...context,
     surface: 'Log',

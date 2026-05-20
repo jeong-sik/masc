@@ -8,6 +8,7 @@ import { Table, type TableColumn } from './common/table'
 import { Drawer } from './common/drawer'
 import { CollapsibleSection } from './common/collapsible'
 import { fetchGoalLoopStatus } from '../api/goal-loop'
+import { formatMsCompact } from '../lib/format-number'
 import {
   GOAL_LOOP_PHASES,
   auditCatalogSummary,
@@ -57,7 +58,7 @@ function formatValue(value: unknown, format: MetricFormat): string {
       return displayValue(value)
     case 'duration_ms':
       if (typeof value === 'number' && Number.isFinite(value))
-        return value >= 1000 ? `${(value / 1000).toFixed(2)}s` : `${value.toFixed(0)}ms`
+        return formatMsCompact(value)
       return displayValue(value)
     case 'boolean':
       if (typeof value === 'boolean') return value ? 'yes' : 'no'

@@ -4,9 +4,9 @@ import {
   normalizeBranch,
   unwrapRepository,
   branchRows,
-  normalizeRepoStatus,
   formatDate,
 } from './repo-detail-panel'
+import { normalizeRepoStatus } from './repo-sidebar'
 import type { BranchInfo } from './repo-detail-panel'
 
 describe('normalizeBranch', () => {

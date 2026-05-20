@@ -1,5 +1,7 @@
 import { html } from 'htm/preact'
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
+import { get } from '../../api/core'
+import { asRecord } from '../common/normalize'
 import { keeperHueIndex } from '../../../design-system/headless-core/keeper-line-ownership'
 import type { IdeAnnotation } from '../../api/schemas/ide-annotations'
 import type { UnifiedDiffRow } from '../../api/workspace'
@@ -195,9 +197,7 @@ function mapApiEvent(event: ApiActivityEvent, roomId: string): RunActivityEvent 
 
 async function fetchActivityEvents(): Promise<ActivityFetchResult> {
   try {
-    const res = await fetch('/api/v1/activity/events?limit=50')
-    if (!res.ok) return { events: EMPTY_ACTIVITY, roomId: DEFAULT_ROOM_ID, ok: false }
-    const data: ApiActivityResponse = await res.json()
+    const data = await get<ApiActivityResponse>('/api/v1/activity/events?limit=50')
     const rawEvents = data.events
     if (!Array.isArray(rawEvents) || rawEvents.length === 0) {
       return { events: EMPTY_ACTIVITY, roomId: DEFAULT_ROOM_ID, ok: true }
@@ -223,12 +223,12 @@ function contextFromPayloadAndTags(
 function mergePayloadContext(next: MutableRunActivityContext, payload: unknown): void {
   if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) return
   const record = payload as Record<string, unknown>
-  mergeContextRecord(next, nestedRecord(record.context))
-  mergeContextRecord(next, nestedRecord(record.evidence_ref))
-  const failureEnvelope = nestedRecord(record.failure_envelope)
-  mergeContextRecord(next, nestedRecord(failureEnvelope?.evidence_ref))
-  mergeContextRecord(next, nestedRecord(record.tool_args))
-  mergeContextRecord(next, nestedRecord(record.input))
+  mergeContextRecord(next, asRecord(record.context))
+  mergeContextRecord(next, asRecord(record.evidence_ref))
+  const failureEnvelope = asRecord(record.failure_envelope)
+  mergeContextRecord(next, asRecord(failureEnvelope?.evidence_ref))
+  mergeContextRecord(next, asRecord(record.tool_args))
+  mergeContextRecord(next, asRecord(record.input))
   mergeContextRecord(next, record, true)
 }
 
@@ -273,12 +273,6 @@ function mergeContextRecord(
   if (operationId && (overwrite || next.operation_id === undefined)) next.operation_id = operationId
   const workerRunId = stringValue(record.worker_run_id)
   if (workerRunId && (overwrite || next.worker_run_id === undefined)) next.worker_run_id = workerRunId
-}
-
-function nestedRecord(value: unknown): Record<string, unknown> | null {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : null
 }
 
 function mergeTagContext(next: MutableRunActivityContext, rawTag: string): void {

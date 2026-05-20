@@ -1,13 +1,12 @@
 import type { Transport, TransportEvent, TransportOptions } from './transport'
+import { TRANSPORT_RETRY_BASE_MS, TRANSPORT_RETRY_MAX_MS } from '../config/constants'
 
-const DEFAULT_RETRY_BASE_MS = 1000
-const DEFAULT_RETRY_MAX_MS = 30000
-const DEFAULT_HEARTBEAT_MS = 30000
+const DEFAULT_HEARTBEAT_MS = 30_000
 
 export function createWebSocketTransport(url: string, opts: TransportOptions = {}): Transport {
   let ws: WebSocket | null = null
   let listeners: Array<(event: TransportEvent) => void> = []
-  let retryMs = opts.retryBaseMs ?? DEFAULT_RETRY_BASE_MS
+  let retryMs = opts.retryBaseMs ?? TRANSPORT_RETRY_BASE_MS
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null
   let heartbeatTimer: ReturnType<typeof setInterval> | null = null
   let connected = false
@@ -22,7 +21,7 @@ export function createWebSocketTransport(url: string, opts: TransportOptions = {
       ws = new WebSocket(url)
       ws.onopen = () => {
         connected = true
-        retryMs = opts.retryBaseMs ?? DEFAULT_RETRY_BASE_MS
+        retryMs = opts.retryBaseMs ?? TRANSPORT_RETRY_BASE_MS
         notify({ type: 'open' })
         const heartbeat = opts.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_MS
         if (heartbeat > 0) {
@@ -53,7 +52,7 @@ export function createWebSocketTransport(url: string, opts: TransportOptions = {
         }
         ws = null
         notify({ type: 'close' })
-        const maxMs = opts.retryMaxMs ?? DEFAULT_RETRY_MAX_MS
+        const maxMs = opts.retryMaxMs ?? TRANSPORT_RETRY_MAX_MS
         reconnectTimer = setTimeout(connect, Math.min(retryMs, maxMs))
         retryMs = Math.min(retryMs * 2, maxMs)
       }

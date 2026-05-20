@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef } from 'preact/hooks'
 import { DashedNotice } from './common/dashed-notice'
 import { TextInput } from './common/input'
 import { nowSecondsSignal, useNowSecondsTicker } from '../lib/now-signal'
+import { unixSecondsToDate } from '../lib/format-time'
 
 import {
   type CompositeObservation,
@@ -164,7 +165,7 @@ export function SwimlaneTimeline({
     ...(showSeconds ? { second: '2-digit' } : {}),
     hour12: false,
   })
-  const fmtAbs = (ts: number) => absFormatter.format(new Date(ts * 1000))
+  const fmtAbs = (ts: number) => absFormatter.format(unixSecondsToDate(ts))
   const laneDensity: Record<string, number> = {}
   let busiestLane = ''
   let busiestCount = 0

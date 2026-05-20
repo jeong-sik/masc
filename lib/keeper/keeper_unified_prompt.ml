@@ -221,8 +221,9 @@ let fallback_externalized_bullet key =
        diagnose what work exists, not just when the claim returns empty."
   else if String.equal key Keeper_prompt_names.turn_intent_claim_guidance_b then
     Some
-      "- Need GitHub or PR inspection via keeper_shell op=gh? Claim first. \
-       gh repo context is derived from your active task worktree/current_task_id."
+      "- Need GitHub or PR inspection? Claim first, then use the native PR \
+       tools shown in your active schema. Do not invent `keeper_shell` when \
+       it is not listed."
   else if String.equal key Keeper_prompt_names.turn_intent_board_activity_guidance then
     Some
       "- See board activity? Use the listed post_id. If the preview is \
@@ -245,12 +246,12 @@ let fallback_externalized_bullet key =
        keeper_tasks_list to inspect backlog state, diagnose missing work, \
        or verify task lifecycle. Never substitute Bash probes (ls/cat/find \
        against .masc/, backlog.json, or repo-local task files) for \
-       keeper_tasks_list — keeper_shell blocks those with \
+       keeper_tasks_list — the runtime blocks those with \
        `task_state_file_probe_blocked`.\n\
-       - Prefer keeper_task_claim before keeper_board_list or keeper_shell \
-       when you have no claimed task.\n\
-       - If you need keeper_shell op=gh, claim first so gh can derive repo \
-       context from your active task worktree/current_task_id."
+       - Prefer keeper_task_claim before keeper_board_list or passive \
+       file/search tools when you have no claimed task.\n\
+       - If you need PR/GitHub context, claim first and then use the native \
+       PR tools shown in your active schema."
   else None
 
 (** Load a turn-intent or user-prompt bullet from [config/prompts/].

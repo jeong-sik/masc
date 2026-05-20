@@ -39,24 +39,29 @@ call = "`keeper_broadcast` { message: \"note\" }"
 description = "share broadly in the namespace"
 
 [[hints]]
-name = "keeper_fs_read"
-call = "`keeper_fs_read` { path: \"path/to/file\" }"
-description = "read a file before editing or reporting"
+name = "Read"
+call = "`Read` { file_path: \"path/to/file\" }"
+description = "read one file before editing or reporting"
 
 [[hints]]
-name = "keeper_fs_edit"
-call = "`keeper_fs_edit` { path: \"path/to/file\", mode: \"patch\", old_string: \"...\", new_string: \"...\" }"
-description = "edit files inside the keeper workspace"
+name = "Edit"
+call = "`Edit` { file_path: \"path/to/file\", old_string: \"...\", new_string: \"...\" }"
+description = "patch an existing file inside the keeper workspace"
 
 [[hints]]
-name = "keeper_shell"
-call = "`keeper_shell` { op: \"gh\", cmd: \"pr view NUMBER --repo OWNER/REPO --json statusCheckRollup,mergeStateStatus,isDraft\" }"
-description = "inspect GitHub status without using gh pr checks, which exits non-zero for red CI"
+name = "Write"
+call = "`Write` { file_path: \"path/to/file\", content: \"full file content\" }"
+description = "create or overwrite a file inside the keeper workspace"
 
 [[hints]]
-name = "keeper_bash"
-call = "`keeper_bash` { cmd: \"single shell command\", cwd: \"repos/REPO\" }"
-description = "run one shell command in the keeper workspace; set cwd for git/gh and never use cd chaining, redirects, shell existence tests, gh pr checks, or Bash glob paths"
+name = "Grep"
+call = "`Grep` { pattern: \"regex\", path: \"repos/REPO/lib\", glob: \"*.ml\" }"
+description = "search files without Bash pipes, redirects, grep/head chains, or repo-wide scans"
+
+[[hints]]
+name = "Bash"
+call = "`Bash` { command: \"single shell command\", cwd: \"repos/REPO\" }"
+description = "run one shell command; set cwd for git, never type keeper_* names as commands, and never use cd chaining, redirects, pipes, gh pr checks, or Bash glob paths"
 
 [[hints]]
 name = "masc_web_search"

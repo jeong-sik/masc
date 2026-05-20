@@ -2385,6 +2385,21 @@ let test_prompt_includes_operational_tool_guidance () =
        "pair the passive read/search with an active tool call");
   check
     bool
+    "system prompt uses public Bash example"
+    true
+    (contains_substring sys "Bash { command: \"git log --oneline -5\"");
+  check
+    bool
+    "system prompt avoids keeper_shell rg recipe"
+    false
+    (contains_substring sys "keeper_shell op=rg");
+  check
+    bool
+    "system prompt avoids keeper_bash command recipe"
+    false
+    (contains_substring sys "keeper_bash { cmd:");
+  check
+    bool
     "raw gh PR creation not documented"
     false
     (contains_substring sys "open draft PRs after pushing")
@@ -2426,9 +2441,27 @@ let test_capabilities_prompt_distinguishes_sandbox_and_worktree () =
     (contains_substring prompt "default coding workspace");
   check
     bool
-    "git path documented via keeper_bash"
+    "git path documented via public Bash"
     true
-    (contains_substring prompt "keeper_bash cmd='git status'");
+    (contains_substring prompt "Bash command='git status --short'");
+  check
+    bool
+    "capabilities avoids hidden Bash backing name"
+    false
+    (contains_substring prompt "Use Bash/keeper_bash");
+  check
+    bool
+    "capabilities avoids internal keeper_bash examples"
+    false
+    (contains_substring prompt "keeper_bash examples:");
+  check
+    bool
+    "capabilities tells model not to invent hidden tools"
+    true
+    (contains_substring
+       prompt
+       "Do not call `keeper_bash` or `keeper_shell` unless the active schema \
+        literally lists that exact name");
   check
     bool
     "draft pr tool documented"
@@ -2451,11 +2484,10 @@ let test_capabilities_prompt_distinguishes_sandbox_and_worktree () =
     (contains_substring prompt "masc_code_git action=status/diff/log");
   check
     bool
-    "structured shell read ops are documented as passive"
+    "public read aliases are documented as passive"
     true
     (contains_substring prompt
-       "structured `keeper_shell` read ops (`rg`, `ls`, `cat`, `find`, \
-        `git_status`, `git_log`, `git_diff`)");
+       "Read/observe aliases are passive: Grep, Read");
   check
     bool
     "gh pr create path not documented"
@@ -2521,9 +2553,9 @@ let test_system_prompt_prefers_bash_and_gh_pr_lane () =
        "Use only the tool schemas currently shown to you by the runtime");
   check
     bool
-    "mentions gh identity as conditional route"
+    "mentions native PR route"
     true
-    (contains_substring sys "when keeper_shell op=gh is present");
+    (contains_substring sys "native PR tools use a keeper-scoped gh identity");
   check
     bool
     "does not advertise removed keeper_github"
@@ -2973,12 +3005,16 @@ let test_prompt_includes_claim_first_guidance () =
     true
     (contains_substring
        user
-       "Prefer keeper_task_claim before keeper_board_list or keeper_shell");
+       "Prefer keeper_task_claim before keeper_board_list or passive \
+        file/search tools");
   check
     bool
-    "user prompt explains gh requires claim first"
+    "user prompt explains PR context requires claim first"
     true
-    (contains_substring user "If you need keeper_shell op=gh, claim first")
+    (contains_substring
+       user
+       "If you need PR/GitHub context, claim first and then use the native PR \
+        tools")
 ;;
 
 let test_prompt_omits_claim_first_guidance_when_no_claimable_tasks () =
@@ -3116,7 +3152,7 @@ let test_work_discovery_nudge_uses_registered_keeper_tool_schemas () =
     bool
     "social guidance omits bash outside preset"
     false
-    (contains_substring social_guidance "`keeper_bash` { cmd:");
+    (contains_substring social_guidance "`Bash` { command:");
   check
     bool
     "social guidance omits worktree outside preset"
@@ -3124,8 +3160,13 @@ let test_work_discovery_nudge_uses_registered_keeper_tool_schemas () =
     (contains_substring social_guidance "`masc_worktree_create` { task_id:");
   check
     bool
-    "coding guidance includes bash schema"
+    "coding guidance includes public Bash schema"
     true
+    (contains_substring coding_guidance "`Bash` { command:");
+  check
+    bool
+    "coding guidance does not leak keeper_bash backing name"
+    false
     (contains_substring coding_guidance "`keeper_bash` { cmd:");
   check
     bool
@@ -3149,14 +3190,13 @@ let test_work_discovery_nudge_uses_registered_keeper_tool_schemas () =
     (source_file_contains "lib/keeper/keeper_agent_run.ml" "NO_TOOL_CHANNEL");
   check
     bool
-    "work discovery nudge warns gh needs claimed task"
+    "work discovery nudge uses native PR tools"
     true
     (contains_substring
        (Option.value
           ~default:""
           (Guidance.render_gh_workflow ~allowed_tool_names:coding_allowed))
-       "keeper_shell op=gh` derives repo context from the active task \
-        worktree/current_task_id");
+       "Inspect PR state with `keeper_pr_status`");
   check
     bool
     "unknown tool guard names server-managed public lifecycle tools"

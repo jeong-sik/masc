@@ -6,7 +6,7 @@
     same allowed-name set.
 
     The hint inventory and prose blocks live in config/prompts/:
-      - keeper.tool_hints.toml         — 17 hint records (loaded on first use via otoml)
+      - keeper.tool_hints.toml         — hint records (loaded on first use via otoml)
       - keeper.tool_preferred_header.md
       - keeper.tool_preferred_empty.md
       - keeper.tool_workflow_gh_full.md
@@ -126,29 +126,31 @@ let fallback_prose key =
   then
     Some
       "GitHub/code workflow: if you do not already hold a task, call \
-       `keeper_task_claim` first; `keeper_shell op=gh` derives repo context \
-       from the active task worktree/current_task_id. Then inspect with \
-       `keeper_shell op=gh`; if code change is needed, `masc_worktree_create` \
-       -> edit -> `keeper_bash` for `git add` / `git commit` / `git push` -> \
-       `keeper_pr_create` with `draft=true` -> \
-       `keeper_task_submit_for_verification` with notes and `pr_url`."
+       `keeper_task_claim` first; inspect PR state with `keeper_pr_status` or \
+       review context with `keeper_pr_review_read`. If code change is needed, \
+       `masc_worktree_create` -> edit -> `Bash` for `git add` / `git commit` \
+       / `git push` with `cwd` inside the worktree -> `keeper_pr_create` with \
+       `draft=true` -> `keeper_task_submit_for_verification` with notes and \
+       `pr_url`."
   else if String.equal key Keeper_prompt_names.tool_workflow_gh_no_pr
   then
     Some
       "GitHub/code workflow: if you do not already hold a task, call \
-       `keeper_task_claim` first; inspect with `keeper_shell op=gh`; if code \
-       change is needed, `masc_worktree_create` -> edit -> `keeper_bash` for \
-       `git add` / `git commit` / `git push`. Do not create PRs through \
-       `keeper_shell op=gh`; submit verification notes with the pushed branch \
+       `keeper_task_claim` first; inspect PR state with `keeper_pr_status` or \
+       review context with `keeper_pr_review_read`. If code change is needed, \
+       `masc_worktree_create` -> edit -> `Bash` for `git add` / `git commit` \
+       / `git push` with `cwd` inside the worktree. Do not create PRs through \
+       raw `gh pr create`; submit verification notes with the pushed branch \
        and request a dedicated draft-PR tool."
   else if String.equal key Keeper_prompt_names.tool_workflow_gh_minimal
   then
     Some
-      "GitHub workflow: use `keeper_shell op=gh` only for commands supported \
-       by your active tool policy. `keeper_shell op=gh` derives repo context \
-       from the active task worktree/current_task_id; claim a task first when \
-       repo context is required. Do not create PRs through `keeper_shell \
-       op=gh`; use the dedicated draft-PR tool when it is listed."
+      "GitHub workflow: use the native PR tools shown in your active schema \
+       (`keeper_pr_status`, `keeper_pr_review_read`, `keeper_pr_create`, etc.). \
+       If no native PR read tool is listed, report that blocker instead of \
+       inventing `keeper_shell` or raw `gh pr checks` calls. Do not create PRs \
+       through raw `gh pr create`; use the dedicated draft-PR tool when it is \
+       listed."
   else if String.equal key Keeper_prompt_names.tool_unknown_guard
   then
     Some
@@ -193,8 +195,18 @@ let allowed_lookup allowed_tool_names =
   tbl
 ;;
 
+let model_facing_name name =
+  match Keeper_tool_alias.public_name_for_internal name with
+  | Some public -> public
+  | None -> name
+;;
+
+let model_facing_allowed_tool_names allowed_tool_names =
+  allowed_tool_names |> List.map model_facing_name |> Keeper_types.dedupe_keep_order
+;;
+
 let allowed_hints ~allowed_tool_names =
-  let allowed = allowed_lookup allowed_tool_names in
+  let allowed = allowed_lookup (model_facing_allowed_tool_names allowed_tool_names) in
   List.filter
     (fun hint -> Hashtbl.mem allowed hint.name)
     (get_hint_inventory ()).hints
@@ -219,12 +231,14 @@ let render_preferred_tools ~allowed_tool_names =
 let has allowed_tool_names name = List.mem name allowed_tool_names
 
 let render_gh_workflow ~allowed_tool_names =
-  let has_shell = has allowed_tool_names "keeper_shell" in
-  let has_worktree = has allowed_tool_names "masc_worktree_create" in
-  let has_bash = has allowed_tool_names "keeper_bash" in
-  let has_verify = has allowed_tool_names "keeper_task_submit_for_verification" in
-  let has_pr_create = has allowed_tool_names "keeper_pr_create" in
-  match has_shell, has_worktree, has_bash, has_verify, has_pr_create with
+  let visible_tool_names = model_facing_allowed_tool_names allowed_tool_names in
+  let has_worktree = has visible_tool_names "masc_worktree_create" in
+  let has_bash = has visible_tool_names "Bash" in
+  let has_verify = has visible_tool_names "keeper_task_submit_for_verification" in
+  let has_pr_create = has visible_tool_names "keeper_pr_create" in
+  let has_pr_status = has visible_tool_names "keeper_pr_status" in
+  let has_pr_review_read = has visible_tool_names "keeper_pr_review_read" in
+  match has_pr_status || has_pr_review_read, has_worktree, has_bash, has_verify, has_pr_create with
   | true, true, true, true, true ->
     Some (load_prose Keeper_prompt_names.tool_workflow_gh_full)
   | true, true, true, true, false ->

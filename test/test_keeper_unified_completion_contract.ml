@@ -1,6 +1,25 @@
 open Alcotest
 
+module KCC = Masc_mcp.Keeper_contract_classifier
 module KTD = Masc_mcp.Keeper_tool_disclosure
+
+let unclaimed_task_context =
+  KCC.make_actionable_signal_context
+    ~tool_gate_required:false
+    ~actionable_signal:KCC.Has_unclaimed_tasks
+;;
+
+let board_activity_context =
+  KCC.make_actionable_signal_context
+    ~tool_gate_required:false
+    ~actionable_signal:KCC.Has_board_activity
+;;
+
+let tool_gate_context =
+  KCC.make_actionable_signal_context
+    ~tool_gate_required:true
+    ~actionable_signal:KCC.No_actionable_signal
+;;
 
 let contains_substring haystack needle =
   let hay_len = String.length haystack in
@@ -145,7 +164,7 @@ let test_actionable_tool_contract_flags_no_tools () =
   match
     KTD.actionable_tool_contract_violation_reason
       ~claim_context_allowed:true
-      ~actionable_signal_context:true
+      ~actionable_signal_context:unclaimed_task_context
       ~tool_names:[]
   with
   | Some reason ->
@@ -153,15 +172,36 @@ let test_actionable_tool_contract_flags_no_tools () =
       bool
       "reason mentions no keeper tools"
       true
-      (contains_substring reason "no keeper tools")
+      (contains_substring reason "no keeper tools");
+    check
+      bool
+      "reason preserves signal kind"
+      true
+      (contains_substring reason "has_unclaimed_tasks")
   | None -> fail "expected actionable no-tool violation"
+;;
+
+let test_actionable_tool_contract_preserves_turn_gate_context () =
+  match
+    KTD.actionable_tool_contract_violation_reason
+      ~claim_context_allowed:true
+      ~actionable_signal_context:tool_gate_context
+      ~tool_names:[]
+  with
+  | Some reason ->
+    check
+      bool
+      "reason preserves turn affordance gate"
+      true
+      (contains_substring reason "turn_affordance_requires_tool")
+  | None -> fail "expected tool-gate no-tool violation"
 ;;
 
 let test_actionable_tool_contract_flags_passive_only_tools () =
   match
     KTD.actionable_tool_contract_violation_reason
       ~claim_context_allowed:true
-      ~actionable_signal_context:true
+      ~actionable_signal_context:board_activity_context
       ~tool_names:[ "keeper_board_get"; "masc_status" ]
   with
   | Some reason ->
@@ -169,7 +209,12 @@ let test_actionable_tool_contract_flags_passive_only_tools () =
       bool
       "reason mentions passive tools"
       true
-      (contains_substring reason "passive status/read tools")
+      (contains_substring reason "passive status/read tools");
+    check
+      bool
+      "reason preserves board signal kind"
+      true
+      (contains_substring reason "has_board_activity")
   | None -> fail "expected actionable passive-only violation"
 ;;
 
@@ -178,7 +223,7 @@ let test_actionable_tool_contract_rejects_claim_context_when_already_claimed () 
     match
       KTD.actionable_tool_contract_violation_reason
         ~claim_context_allowed:false
-        ~actionable_signal_context:true
+        ~actionable_signal_context:unclaimed_task_context
         ~tool_names:[ "keeper_task_claim" ]
     with
     | Some reason ->
@@ -195,7 +240,7 @@ let test_actionable_tool_contract_rejects_claim_context_when_already_claimed () 
     None
     (KTD.actionable_tool_contract_violation_reason
        ~claim_context_allowed:true
-       ~actionable_signal_context:true
+       ~actionable_signal_context:unclaimed_task_context
        ~tool_names:[ "keeper_task_claim" ])
 ;;
 
@@ -204,7 +249,7 @@ let test_actionable_tool_contract_rejects_stay_silent_when_already_claimed () =
     match
       KTD.actionable_tool_contract_violation_reason
         ~claim_context_allowed:false
-        ~actionable_signal_context:true
+        ~actionable_signal_context:unclaimed_task_context
         ~tool_names
     with
     | Some reason ->
@@ -231,7 +276,7 @@ let test_actionable_tool_contract_rejects_stay_silent_when_already_claimed () =
     None
     (KTD.actionable_tool_contract_violation_reason
        ~claim_context_allowed:false
-       ~actionable_signal_context:true
+       ~actionable_signal_context:unclaimed_task_context
        ~tool_names:[ "keeper_task_done" ])
 ;;
 
@@ -279,6 +324,10 @@ let () =
             "actionable signal rejects no tools"
             `Quick
             test_actionable_tool_contract_flags_no_tools
+        ; test_case
+            "actionable signal preserves turn-gate context"
+            `Quick
+            test_actionable_tool_contract_preserves_turn_gate_context
         ; test_case
             "actionable signal rejects passive-only tools"
             `Quick

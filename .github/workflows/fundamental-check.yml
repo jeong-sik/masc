@@ -68,6 +68,16 @@ jobs:
       - name: Run lint
         run: bash scripts/lint/shell-legacy-purge-ratchet.sh
 
+  no-actionable-signal-bool-context:
+    name: No actionable signal bool context
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ripgrep
+        run: sudo apt-get install -y -qq ripgrep
+      - name: Run lint
+        run: bash scripts/lint/no-actionable-signal-bool-context.sh
+
   no-provider-name-hardcoding:
     name: Provider name hardcoding ratchet
     runs-on: ubuntu-latest

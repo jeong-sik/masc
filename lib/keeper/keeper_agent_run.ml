@@ -1056,24 +1056,31 @@ let run_turn
                        |> Keeper_contract_classifier.classify_actionable_signal_for_tools
                             ~allowed_tool_names:all_tool_names
                    in
-                   let actionable_signal_context =
+                   let tool_gate_required =
                      Keeper_agent_tool_surface
                      .turn_affordances_require_tool_gate_with_allowed
                        ~allowed_tool_names:all_tool_names
                        turn_affordances
-                     || Keeper_contract_classifier.is_actionable actionable_signal_kind
+                   in
+                   let actionable_signal_context =
+                     Keeper_contract_classifier.make_actionable_signal_context
+                       ~tool_gate_required
+                       ~actionable_signal:actionable_signal_kind
                    in
                    let actionable_tool_contract_violation_reason =
                      if
-                       actionable_signal_context
+                       Keeper_contract_classifier.is_actionable_signal_context
+                         actionable_signal_context
                        && progress_keeper_tool_names = []
                        && no_progress_success_tool_names <> []
                      then
                        Some
                          (Printf.sprintf
-                            "actionable keeper signal was present, but the model only \
-                             used idempotent setup tools that made no execution \
+                            "actionable keeper context (%s) was present, but the model \
+                             only used idempotent setup tools that made no execution \
                              progress: %s"
+                            (Keeper_contract_classifier.actionable_signal_context_label
+                               actionable_signal_context)
                             (String.concat ", " no_progress_success_tool_names))
                      else
                        Keeper_tool_disclosure.actionable_tool_contract_violation_reason

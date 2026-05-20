@@ -24,7 +24,7 @@ type operator_signal =
   }
 
 let event_type_of_event event =
-  match Keeper_state_machine.event_to_json event with
+  match Keeper_state_machine_json.event_to_json event with
   | `Assoc fields ->
     (match List.assoc_opt "type" fields with
      | Some (`String value) -> value
@@ -206,11 +206,11 @@ let to_json (r : transition_record) : Yojson.Safe.t =
       , match r.snapshot with
         | Some s -> Keeper_measurement.measurement_snapshot_to_json s
         | None -> `Null )
-    ; "events_fired", `List (List.map Keeper_state_machine.event_to_json r.events_fired)
-    ; "selected_event", Keeper_state_machine.event_to_json r.selected_event
+    ; "events_fired", `List (List.map Keeper_state_machine_json.event_to_json r.events_fired)
+    ; "selected_event", Keeper_state_machine_json.event_to_json r.selected_event
     ; "event_type", `String event_type
-    ; "prev_phase", Keeper_state_machine.phase_to_json r.prev_phase
-    ; "new_phase", Keeper_state_machine.phase_to_json r.new_phase
+    ; "prev_phase", Keeper_state_machine_json.phase_to_json r.prev_phase
+    ; "new_phase", Keeper_state_machine_json.phase_to_json r.new_phase
     ; "transition_outcome", `String r.transition_outcome
     ; "operator_signal", operator_signal_to_json operator_signal
     ; "wall_clock_at_decision", `Float r.wall_clock_at_decision

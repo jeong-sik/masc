@@ -344,12 +344,12 @@ val can_transition : from_phase:phase -> to_phase:phase -> bool
       re-enters an executable phase. *)
 val can_execute_turn : phase -> bool
 
-(** {1 JSON Serialization} *)
-
-val phase_to_json : phase -> Yojson.Safe.t
-val conditions_to_json : conditions -> Yojson.Safe.t
-val event_to_json : event -> Yojson.Safe.t
-val transition_result_to_json : transition_result -> Yojson.Safe.t
+(* JSON encoders moved to [Keeper_state_machine_json] (godfile decomp,
+   no reverse alias due to wrapped-library cycle).  Use:
+     Keeper_state_machine_json.{phase_to_json,
+                                conditions_to_json,
+                                event_to_json,
+                                transition_result_to_json} *)
 
 (** {1 Mermaid Visualization} *)
 

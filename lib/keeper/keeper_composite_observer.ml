@@ -618,7 +618,7 @@ let phase_diagnosis_to_json
     "current_phase", `String (Keeper_state_machine.phase_to_string current_phase);
     "derived_phase", `String (Keeper_state_machine.phase_to_string derived_phase);
     "can_execute_turn", `Bool (Keeper_state_machine.can_execute_turn derived_phase);
-    "conditions", Keeper_state_machine.conditions_to_json conditions;
+    "conditions", Keeper_state_machine_json.conditions_to_json conditions;
     "determining_condition",
       (match determining with
        | Some key -> `String key

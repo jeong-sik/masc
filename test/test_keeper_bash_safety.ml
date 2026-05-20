@@ -1625,37 +1625,40 @@ let test_keeper_bash_task_state_file_probe_uses_task_tools () =
   let _ = Coord.init config ~agent_name:(Some meta.name) in
   let playground = Filename.concat base_path (playground_path_of meta.name) in
   ensure_dir playground;
-  let raw =
-    Keeper_exec_shell.handle_keeper_bash
-      ~turn_sandbox_factory:None
-      ~turn_sandbox_factory_git:None ~exec_cache:None
-      ~config ~meta
-      ~args:
-        (`Assoc
-           [ ( "cmd"
-             , `String "cat repos/masc-mcp/.worktrees/task-362/.task.json"
-             )
-           ; ("cwd", `String playground)
-           ])
-      ()
+  let assert_autorouted label cmd =
+    let raw =
+      Keeper_exec_shell.handle_keeper_bash
+        ~turn_sandbox_factory:None
+        ~turn_sandbox_factory_git:None ~exec_cache:None
+        ~config ~meta
+        ~args:(`Assoc [ ("cmd", `String cmd); ("cwd", `String playground) ])
+        ()
+    in
+    let json = Yojson.Safe.from_string raw in
+    Alcotest.(check bool) (label ^ " succeeds via autoroute") true
+      (json |> Json.member "ok" |> Json.to_bool);
+    Alcotest.(check bool) (label ^ " is autorouted") true
+      (json |> Json.member "auto_routed" |> Json.to_bool);
+    Alcotest.(check string) (label ^ " autorouted to tasks list")
+      "keeper_tasks_list"
+      (json |> Json.member "auto_routed_to_tool" |> Json.to_string);
+    Alcotest.(check string) (label ^ " original error preserved")
+      "task_state_file_probe_blocked"
+      (json |> Json.member "original_error" |> Json.to_string);
+    Alcotest.(check bool) (label ^ " instruction points to keeper_tasks_list") true
+      (String_util.contains_substring
+         (json |> Json.member "instruction" |> Json.to_string)
+         "keeper_tasks_list");
+    Alcotest.(check (option string)) (label ^ " not returned as bash error") None
+      (parse_error_field raw)
   in
-  let json = Yojson.Safe.from_string raw in
-  Alcotest.(check bool) "task file probe succeeds via autoroute" true
-    (json |> Json.member "ok" |> Json.to_bool);
-  Alcotest.(check bool) "task file probe is autorouted" true
-    (json |> Json.member "auto_routed" |> Json.to_bool);
-  Alcotest.(check string) "autorouted to tasks list"
-    "keeper_tasks_list"
-    (json |> Json.member "auto_routed_to_tool" |> Json.to_string);
-  Alcotest.(check string) "original error preserved"
-    "task_state_file_probe_blocked"
-    (json |> Json.member "original_error" |> Json.to_string);
-  Alcotest.(check bool) "instruction points to keeper_tasks_list" true
-    (String_util.contains_substring
-       (json |> Json.member "instruction" |> Json.to_string)
-       "keeper_tasks_list");
-  Alcotest.(check (option string)) "not returned as bash error" None
-    (parse_error_field raw)
+  assert_autorouted
+    "worktree task file probe"
+    "cat repos/masc-mcp/.worktrees/task-362/.task.json";
+  assert_autorouted "bare task file probe" "cat .task.json";
+  assert_autorouted
+    "masc task file probe"
+    "cat .masc/task.json 2>/dev/null || echo no task"
 
 let test_keeper_bash_unrelated_task_json_is_not_task_state_probe () =
   with_eio_fs @@ fun () ->

@@ -15,12 +15,22 @@ let task_state_file_probe_command_names =
 
 let looks_like_task_state_path_token text =
   let text = String.lowercase_ascii text in
+  let bare_task_state_file =
+    match text with
+    | ".task.json" | "./.task.json" | "task.json" | "./task.json"
+    | "backlog.json" | "./backlog.json" | "current_task.json"
+    | "./current_task.json" ->
+      true
+    | _ -> false
+  in
   let scoped_masc = lowercase_contains text ".masc/" in
   let scoped_worktree = lowercase_contains text ".worktrees/" in
-  (scoped_worktree && lowercase_contains text ".task.json")
+  bare_task_state_file
+  || (scoped_worktree && lowercase_contains text ".task.json")
   ||
   (scoped_masc
    && (lowercase_contains text "backlog.json"
+       || lowercase_contains text "task.json"
        || lowercase_contains text "/tasks"
        || lowercase_contains text "current_task.json"))
 ;;

@@ -384,6 +384,70 @@ let catalog_metadata_result ?config_path () =
       | Error msg -> Error ("declarative cascade catalog invalid: " ^ msg)
       | Ok json -> catalog_metadata_of_materialized_json json)
 
+(* RFC-0143 Phase 1 bridge.
+
+   Distinguishes the three control-flow origins of an unavailable
+   catalog so callers (PR-2..PR-4) can decide what to do about each
+   without grepping the error string. The three branches mirror the
+   three Error sites in [catalog_metadata_result] above. *)
+type catalog_unavailable_reason =
+  | Catalog_path_not_resolved
+      (** The config-dir resolver returned no cascade.toml path.
+          Typical on first-boot installs before [masc init] runs. *)
+  | Catalog_load_failed of string
+      (** [Cascade_config_loader.load_catalog_source_for_diagnostics]
+          surfaced an I/O or TOML/JSON parse error. The string is the
+          loader's diagnostic, including any [Sys_error] / [Unix_error]
+          / [Yojson.Json_error] / [End_of_file] message. *)
+  | Catalog_metadata_invalid of string
+      (** The catalog loaded but its declarative metadata did not
+          materialize cleanly into the [catalog_metadata] record. *)
+
+type 'a catalog_query_result =
+  | Catalog_ok of 'a
+  | Catalog_unavailable of {
+      reason : catalog_unavailable_reason;
+      message : string;
+    }
+
+let catalog_unavailable_reason_to_string = function
+  | Catalog_path_not_resolved -> "path_not_resolved"
+  | Catalog_load_failed _ -> "load_failed"
+  | Catalog_metadata_invalid _ -> "metadata_invalid"
+;;
+
+(* Bridge: typed query alongside the legacy string-error
+   [catalog_metadata_result]. PR-1 of RFC-0143 introduces this
+   without migrating any callers. PR-2..PR-4 migrate the six
+   internal call sites (lines 399/408/413/433/494/489 in the
+   pre-migration file) one batch at a time; PR-5 deletes the
+   legacy [catalog_metadata_result] once no callers remain. *)
+let catalog_metadata_query ?config_path () =
+  let path_opt =
+    match config_path with
+    | Some path -> Some path
+    | None -> Config_dir_resolver.cascade_path_opt ()
+  in
+  match path_opt with
+  | None ->
+    Catalog_unavailable
+      {
+        reason = Catalog_path_not_resolved;
+        message = "cascade catalog path is not resolved";
+      }
+  | Some path -> (
+      match Cascade_config_loader.load_catalog_source_for_diagnostics path with
+      | Error msg ->
+        Catalog_unavailable
+          { reason = Catalog_load_failed msg; message = msg }
+      | Ok json -> (
+          match catalog_metadata_of_materialized_json json with
+          | Ok meta -> Catalog_ok meta
+          | Error msg ->
+            Catalog_unavailable
+              { reason = Catalog_metadata_invalid msg; message = msg }))
+;;
+
 let routed_query_target ?config_path raw =
   let trimmed = String.trim raw in
   match logical_use_of_string_opt trimmed with

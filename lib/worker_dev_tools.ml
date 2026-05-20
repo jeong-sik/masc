@@ -16,6 +16,7 @@ module Log_sanitize = Worker_dev_tools_log_sanitize
 module Command_syntax = Worker_dev_tools_command_syntax
 module Mutation_classifier = Worker_dev_tools_mutation_classifier
 module Path_validation = Worker_dev_tools_path_validation
+module Exec_shell_gate = Masc_exec_command_gate.Shell_command_gate
 
 open Command_syntax
 
@@ -203,39 +204,64 @@ let validate_command ?caller:_ cmd =
   validate_command_with_allowlist ~allowed_commands:dev_allowed_commands cmd
 ;;
 
-let first_disallowed_stage_bin ~allowed_commands stage_bins =
-  List.find_opt
-    (fun name -> not (List.exists (String.equal name) allowed_commands))
-    stage_bins
+let coding_allowlist_policy ?(allow_pipes = true) ~allowed_commands () :
+  Exec_shell_gate.allowlist_policy =
+  { allowed_commands; allow_pipes; redirect_allowed = true }
 ;;
 
-let validate_command_coding_parsed ~allow_pipes ~allowed_commands context =
-  let stage_bins = context.Shell_command_gate.stage_bins in
-  if (not allow_pipes) && Shell_command_gate.stage_count context > 1
-  then Error Pipes_not_allowed
-  else if List.exists (String.equal "dune") stage_bins
-  then Error Direct_dune_invocation
-  else (
-    match first_disallowed_stage_bin ~allowed_commands stage_bins with
-    | None -> Ok ()
-    | Some name -> Error (Command_not_allowed name))
+let coding_gate_context_has_direct_dune (context : Exec_shell_gate.parsed_context) =
+  List.exists (String.equal "dune") context.Exec_shell_gate.stage_bins
 ;;
 
-(* RFC-0131 PR-5 — facade reject_reason → block_reason wire-shape
-   mapping for the authority-flip path.  Exhaustive over the closed
-   sum {!Shell_command_gate.reject_reason}; a new variant on the
-   facade side forces an arm here at compile time.  Two arms collapse
-   onto [Command_not_allowed]: facade carries stage-index detail the
-   legacy [block_reason] did not expose, and the wire-shape contract
-   (RFC-0131 §4.3 "preserving wire shape") forbids widening
-   [block_reason] just for the flip path — PR-6 (legacy purge) is the
-   correct place to revisit the surface. *)
-let block_reason_of_reject : Shell_command_gate.reject_reason -> block_reason
-  = function
+let block_reason_of_exec_reject : Exec_shell_gate.reject_reason -> block_reason = function
   | Command_not_in_allowlist { bin } -> Command_not_allowed bin
   | Pipeline_segment_disallowed { bin; _ } -> Command_not_allowed bin
   | Pipes_not_allowed _ -> Pipes_not_allowed
-  | Redirect_disallowed_in_caller _ -> Unsafe_redirect
+  | Redirect_disallowed_in_caller _
+  | Path_outside_policy _ -> Unsafe_redirect
+;;
+
+let block_reason_of_exec_too_complex
+      (reason : Exec_shell_gate.too_complex_reason)
+  : block_reason =
+  match reason with
+  | Unsupported_construct `Proc_subst -> Process_substitution
+  | Unsupported_construct `Redirect -> Unsafe_redirect
+  | Unsupported_nested_pipeline
+  | Unsupported_construct
+      ( `Heredoc
+      | `Here_string
+      | `Cmd_subst
+      | `Subshell
+      | `Arith_expansion
+      | `Control_flow
+      | `Logic_op
+      | `Function_def
+      | `Glob_brace
+      | `Background
+      | `Unknown_construct _ ) -> Injection
+;;
+
+let legendary_caller_of_exec = function
+  | Exec_shell_gate.Worker_dev_tools -> Legendary_counters.Worker_dev_tools
+  | Exec_shell_gate.Tool_code_write -> Legendary_counters.Tool_code_write
+  | Exec_shell_gate.Keeper_shell_bash -> Legendary_counters.Keeper_shell_bash
+;;
+
+let legendary_verdict_of_exec = function
+  | Exec_shell_gate.Allow _ -> Legendary_counters.Allow
+  | Exec_shell_gate.Reject _ -> Legendary_counters.Reject
+  | Exec_shell_gate.Cannot_parse _ | Exec_shell_gate.Too_complex _ ->
+    Legendary_counters.Cannot_parse
+;;
+
+let record_exec_shell_gate ?caller verdict =
+  match caller with
+  | None -> ()
+  | Some c ->
+    Legendary_counters.incr_shell_gate
+      ~caller:(legendary_caller_of_exec c)
+      ~verdict:(legendary_verdict_of_exec verdict)
 ;;
 
 let validate_command_coding_with_allowlist
@@ -256,41 +282,29 @@ let validate_command_coding_with_allowlist
   else if invokes_direct_dune trimmed
   then Error Direct_dune_invocation
   else (
-    (* Legacy verdict — direct [Result] now that the legacy_segments
-       fallback has been removed (env/opam are already in
-       [dev_allowed_commands]; the redundant [`Use_legacy_segments]
-       branch and the regex segment validator were dropped — this PR).
-       Parse failures conservatively map to [Error Injection] —
-       unparseable input is treated as potentially unsafe. *)
-    let legacy_result =
-      match Shell_command_gate.parse ?caller trimmed with
-      | Ok context ->
-        validate_command_coding_parsed ~allow_pipes ~allowed_commands context
-      | Error _ -> Error Injection
+    let verdict =
+      Exec_shell_gate.gate
+        ?caller
+        ~raw:trimmed
+        ~allowlist:(coding_allowlist_policy ~allow_pipes ~allowed_commands ())
+        ~path_policy:Exec_shell_gate.allow_all_paths
+        ~sandbox:Exec_shell_gate.host_sandbox
+        ()
     in
-    match caller with
-    | None -> legacy_result
-    | Some c ->
-      (* RFC-0131 PR-5 — parallel facade call.  Emit is automatic via
-         [Legendary_counters.incr_shell_gate] inside
-         [Shell_command_gate.validate_allowlist] (RFC-0131 PR-3). *)
-      let facade_verdict =
-        Shell_command_gate.validate_allowlist
-          ~caller:c
-          ~allow_pipes
-          ~allowed_commands
-          trimmed
-      in
-      if Shell_gate_authority.authority_enabled c
-      then (
-        (* RFC-0131 §4.4 — facade verdict authoritative; legacy
-           fallback only on [Cannot_parse] (parser coverage gap, which
-           now itself yields [Error Injection]). *)
-        match facade_verdict with
-        | Allow _ -> Ok ()
-        | Reject { reason; _ } -> Error (block_reason_of_reject reason)
-        | Cannot_parse { kind = _ } -> legacy_result)
-      else legacy_result)
+    record_exec_shell_gate ?caller verdict;
+    match verdict with
+    | Allow context ->
+      if coding_gate_context_has_direct_dune context
+      then Error Direct_dune_invocation
+      else Ok ()
+    | Reject { context; reason; _ } ->
+      (match reason with
+       | Pipes_not_allowed _ -> Error Pipes_not_allowed
+       | _ when coding_gate_context_has_direct_dune context ->
+         Error Direct_dune_invocation
+       | _ -> Error (block_reason_of_exec_reject reason))
+    | Cannot_parse _ -> Error Injection
+    | Too_complex { reason } -> Error (block_reason_of_exec_too_complex reason))
 ;;
 
 (** Relaxed command validation for Coding/Full preset keepers.

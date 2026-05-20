@@ -231,15 +231,12 @@ Each caller PR:
 This phase mirrors RFC-0092 Phase A (advisor) but applies it at the gate boundary
 instead of at the keeper_shell_bash boundary.
 
-### 4.4 Authority flip (PR-5)
+### 4.4 Authority flip (retired by purge)
 
-When all three callers' agreement ratio ≥ 99.5 % over 7 days AND zero
-`disagree_legacy_reject_typed_allow` rows:
-
-- `MASC_SHELL_GATE_AUTHORITY=1` makes the facade verdict authoritative.
-- Legacy paths run as fallback only on `Cannot_parse` (parser coverage gap).
-- The flag is per-caller (`worker`, `code_write`, `keeper_bash`) to allow
-  staged rollback.
+The original plan used a per-caller env flag after a 7-day parity window.
+That temporary shim has been removed. The exec Shell gate is now the
+authoritative path for the adopted callers, and parser coverage gaps fail
+closed instead of falling back to a second string-derived verdict.
 
 ### 4.5 Typed argv input compatibility
 
@@ -294,8 +291,8 @@ rg "shell_ir_parse_failure_shape_block" lib/keeper/  # parse-failure-only helper
 | Caller adoption — worker_dev_tools | PR-2 | PR-1 merged | Revert PR (caller falls back to legacy) |
 | Caller adoption — tool_code_write | PR-3 | PR-1 merged (parallel to PR-2) | Revert PR |
 | Caller adoption — keeper_shell_bash | PR-4 | PR-1 merged (parallel to PR-2/3); composes with RFC-0092 Phase A | Revert PR |
-| Authority flip | PR-5 | All callers at ≥ 99.5 % parity for 7d | Unset `MASC_SHELL_GATE_AUTHORITY` |
-| Legacy purge | PR-6 | Phase 5 stable 7+ days, zero incidents | Revert (legacy code returns) |
+| Authority flip | retired | Replaced by direct exec-gate adoption | Revert caller PR |
+| Legacy purge | PR-6 | Exec gate adopted by callers | Revert (legacy code returns) |
 
 Total cost estimate: ~600 LoC new (facade + tests + 3 caller adapters) +
 ~800 LoC removed (splitters + tokenizers + scanners) = net ~200 LoC reduction.
@@ -311,7 +308,7 @@ This RFC is **accepted** when:
 This RFC is **implemented** when:
 
 1. All three callers are wired (PR-2/3/4 merged).
-2. Authority flip merged (PR-5) and stable for ≥ 7 days.
+2. Direct exec-gate authority is active for the adopted callers.
 3. Legacy purge merged (PR-6); acceptance grep checks pass (§4.6).
 4. `keeper_tool_policy_blocked + keeper_tool_execution_errors` per 72h is
    ≤ 4,000 (Doc #1 Pass 1 target) AND no shell-gate-related entry in the
@@ -351,8 +348,9 @@ behavior-preserving for existing callers (`Error _` wildcard patterns in
 | PR-2 | Wire `keeper_shell_bash.ml` to call `Shell_command_gate` directly for the validation block currently funneled through `Worker_dev_tools.validate_command_coding_with_allowlist`. Telemetry uses `~caller:Keeper_shell_bash`. | ~80 | Medium |
 | PR-3 | Telemetry counter exposure (`Legendary_counters.incr_shell_gate ~caller ~verdict`) + dashboard read. | ~120 | Low |
 | PR-4 | Per-caller parity measurement window (PR-1a + PR-3 prereq). | observation-only | None |
-| PR-5 | Authority flip per-caller via `MASC_SHELL_GATE_AUTHORITY=worker,code_write,keeper_bash`. | ~40 | Medium |
+| PR-5 | Retired: remove the temporary authority-flip shim once caller adoption is direct. | deletion | Low |
 | PR-6 | Legacy purge: remove `validate_command_coding_legacy_segments`, `first_token_basename (last_pipeline_segment ...)` fallback, and remaining string scanners per §4.6. | ~200 net removal | Medium |
 
 PR-1a–c can land in any order; PR-2 depends on PR-1a (for the caller
-tag); PR-5/PR-6 depend on PR-4 parity evidence.
+tag). The final purge path removes fallback authority shims rather than
+keeping a second string-derived verdict alive.

@@ -1749,7 +1749,7 @@ let handle_keeper_bash
             ~allowed_commands:Worker_dev_tools.dev_allowed_commands
         else
           Worker_dev_tools.validate_command
-            ~caller:Shell_command_gate.Keeper_shell_bash
+            ~caller:Exec_shell_gate.Keeper_shell_bash
       in
       match validate validation_cmd with
       | Error reason ->

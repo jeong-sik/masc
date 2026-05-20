@@ -1,8 +1,8 @@
 (** Legacy shell syntax helpers for Worker_dev_tools.
 
-    The authoritative Coding/Full gate is typed through Shell_command_gate,
-    but worker_dev_tools still keeps a small legacy lexer for strict mode,
-    fallback parsing, and path-token extraction. *)
+    The authoritative Coding/Full gate is typed through the exec
+    Shell_command_gate, but worker_dev_tools still keeps a small legacy lexer
+    for strict mode, direct-dune detection, and path-token extraction. *)
 
 (** Relaxed metacharacter set for Coding/Full preset keepers.
     Allows [|] (pipes) and fd-to-fd redirects like [2>&1].
@@ -48,11 +48,11 @@ let has_process_substitution cmd =
    [split_pipeline_segments] and its [pipeline_quote_state] helper were
    the legacy string-based pipeline splitter for the Coding/Full gate.
    [validate_command_coding_with_allowlist] now consumes the typed
-   pipeline produced by [Shell_command_gate.parse], so this string
-   splitter has no remaining caller in lib/, test/, or bin/.  Per
-   Phase 2 dedup it is removed outright; reintroducing a non-AST
-   pipeline splitter is explicitly out-of-scope and must be replaced
-   by extending the facade. *)
+   pipeline produced by [Masc_exec_command_gate.Shell_command_gate.gate],
+   so this string splitter has no remaining caller in lib/, test/, or
+   bin/.  Per Phase 2 dedup it is removed outright; reintroducing a
+   non-AST pipeline splitter is explicitly out-of-scope and must be
+   replaced by extending the exec facade. *)
 
 let split_shell_tokens cmd =
   String.split_on_char ' ' cmd

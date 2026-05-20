@@ -105,6 +105,7 @@ const REPO_STATUS_LABEL: Record<RepoStatus, string> = {
   active: '활성',
   paused: '일시정지',
   error: '오류',
+  unknown: '알 수 없음',
 }
 
 function InfoRow({

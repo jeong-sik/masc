@@ -1,6 +1,6 @@
 import { get, post, type GetOptions } from './core'
 
-export type RepoStatus = 'active' | 'paused' | 'error'
+export type RepoStatus = 'active' | 'paused' | 'error' | 'unknown'
 
 export interface Repository {
   id: string
@@ -17,12 +17,17 @@ export interface Repository {
 }
 
 export function normalizeRepoStatus(raw: string | undefined): RepoStatus {
+  // Anti-pattern §2 escape: previously the `default` arm coerced unknown
+  // statuses to `'active'`, silently hiding malformed wire data. Map only
+  // recognized strings to first-class statuses; anything else surfaces as
+  // `'unknown'` so the UI can render an explicit warning state instead of
+  // pretending the repo is healthy.
   switch (raw?.toLowerCase()) {
     case 'active': return 'active'
     case 'paused': return 'paused'
-    case 'cloning': return 'active'
+    case 'cloning': return 'active' // intermediate state, treated as active
     case 'error': return 'error'
-    default: return 'active'
+    default: return 'unknown'
   }
 }
 

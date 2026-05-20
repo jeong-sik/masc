@@ -3,7 +3,7 @@
  (name masc_log)
  (public_name masc_mcp.masc_log)
  (wrapped false)
- (modules log)
+ (modules log system_log_category)
  ; RFC-0071 §3.4 Phase 5 ratchet (warning 4)
  (flags (:standard -w +4))
  (libraries unix yojson time_compat eio fs_compat))

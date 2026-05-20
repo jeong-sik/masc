@@ -1,8 +1,6 @@
 (** Compact runtime-trust JSON + degraded snapshot row helpers,
     extracted from operator_control_snapshot.ml. *)
 
-module U = Yojson.Safe.Util
-
 (* Local copies of trivial helpers to avoid sibling -> parent cycle. *)
 let non_empty_trimmed_string_opt value =
   let trimmed = String.trim value in
@@ -84,4 +82,3 @@ let degraded_keeper_snapshot_row (meta : Keeper_types.keeper_meta) =
      @ degraded_keeper_runtime_identity_fields meta
      @ fd_fields)
 ;;
-

@@ -1263,17 +1263,12 @@ let permission_for_tool tool_name = Tool_permission_map.permission_for_tool tool
 let is_tool_auth_strict_enabled () = Env_config_core.tool_auth_strict ()
 
 (* #10205 finding 1: SSOT for the internal-tool prefix vocabulary.
-   Adding a new internal namespace (e.g. [foo.]) was previously a
-   two-predicate edit ([is_masc_tool_name] +
-   [is_protocol_canonical_tool_name]) glued by a [||] chain at the
-   call site.  Keep the prefixes in one list so the next addition
-   is a single edit; predicate identity does not matter to callers,
-   which only consume {!is_unmapped_internal_tool_name}.
-
-   Keeper runtime tools are NOT a prefix: a [keeper_*] prefix
-   alone is not enough to cross auth — the catalog must own the
-   tool.  That check stays separate. *)
-let internal_tool_prefixes = [ "masc_"; "decision."; "experiment."; "client." ]
+   Unmapped dotted game-view namespaces ([decision.], [experiment.], [client.])
+   were retired from the MCP front door; do not preserve them as implicit
+   strict-auth internals.  Keeper runtime tools are NOT a prefix: a [keeper_*]
+   prefix alone is not enough to cross auth — the catalog must own the tool.
+   That check stays separate. *)
+let internal_tool_prefixes = [ "masc_" ]
 
 let has_internal_tool_prefix tool_name =
   List.exists

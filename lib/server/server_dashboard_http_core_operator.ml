@@ -1,6 +1,10 @@
 (** Operator broadcast + cache state cluster for dashboard HTTP core,
     extracted from server_dashboard_http_core.ml. *)
 
+open Server_auth
+open Server_dashboard_http_cache
+open Dashboard_http_helpers
+
 let operator_actor_hint request =
   match agent_from_request request with
   | Some raw ->
@@ -64,4 +68,3 @@ let operator_refresh_interval_s =
 let operator_snapshot_extra () =
   [ "readonly_pool", Coord_utils.domain_local_pg_backend_diagnostics_json () ]
 ;;
-

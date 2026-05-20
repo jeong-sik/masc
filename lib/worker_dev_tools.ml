@@ -318,7 +318,6 @@ let command_allows_safe_globbed_path = Path_validation.command_allows_safe_globb
 let token_glob_is_limited_to_basename = Path_validation.token_glob_is_limited_to_basename
 let path_token_error_hint = Path_validation.path_token_error_hint
 let path_syntax_blocked_message = Path_validation.path_syntax_blocked_message
-let tokenize_path_args = Path_validation.tokenize_path_args
 let token_value_is_redirect_to_dev_null = Path_validation.token_value_is_redirect_to_dev_null
 let token_value_is_redirect_op = Path_validation.token_value_is_redirect_op
 let command_pattern_arg_flags = Path_validation.command_pattern_arg_flags

@@ -12,6 +12,7 @@ import { activeIdeFile, ideContextFocus } from './ide-state'
 import { clearTraces, keeperTraceState } from './keeper-trace-store'
 import { ideReplayUntilMs, setIdeReplayUntilMs } from './ide-replay-state'
 import { cursorOverlaySignal } from './keeper-cursor-overlay'
+import type { BoardPost } from '../../types/core'
 
 function stubEmptyConversationFetch(): void {
   vi.stubGlobal('fetch', vi.fn(async (url: string) => {
@@ -150,7 +151,7 @@ describe('IdeConversationRail', () => {
   })
 
   it('does not reanchor generic board posts when the active file changes', () => {
-    const posts = [{
+    const posts: BoardPost[] = [{
       id: 'thread-generic',
       author: 'sangsu',
       title: 'File-level note',

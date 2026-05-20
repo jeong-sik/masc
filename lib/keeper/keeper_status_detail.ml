@@ -96,10 +96,14 @@ let apply_tail_order order items =
 let resolve_status_target (ctx : _ context) args =
   let requested_name = effective_status_name ctx args in
   if not (validate_name requested_name) then
-    Error "invalid keeper name"
+    Error
+      (Printf.sprintf
+         "invalid keeper name %S (must be non-empty and match \
+          [A-Za-z0-9._-]+; see Keeper_config.validate_name)"
+         requested_name)
   else
     match read_meta_resolved ctx.config requested_name with
-    | Error e -> Error ("" ^ e)
+    | Error e -> Error e
     | Ok (Some (resolved_name, meta)) -> Ok (resolved_name, meta)
     | Ok None ->
         (match keeper_name_from_agent_name requested_name with

@@ -411,6 +411,7 @@ let keeper_fleet_meta_scan ?(include_paused_details = true) config =
   (* The dashboard light shell needs fleet counts on every header refresh.
      Keep this as a single pass over keeper meta so it does not repeat the
      paused, autoboot, and bootable scans on the hot path. *)
+  (* NDT-OK: request-boundary wall clock only for dashboard pause-age display. *)
   let now = Unix.gettimeofday () in
   let configured_names = Keeper_types.configured_keeper_names config in
   let all_names =

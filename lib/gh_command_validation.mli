@@ -33,7 +33,8 @@ type gh_reversibility =
       (** Read-only command; no mutation possible. *)
   | R1_Reversible
       (** Mutating command whose effect can be undone (PR/issue
-          merge or close, comment edit, label apply). *)
+          close, comment edit, label apply). PR ready/merge is
+          operator-only for agent safety. *)
   | R2_Irreversible
       (** Mutating command that destroys state [gh] cannot
           restore (repo / release / secret / ssh-key / auth /
@@ -90,10 +91,10 @@ val is_gh_dangerous_operation : string -> bool
     delete-or-transfer mutations). *)
 
 val is_gh_workflow_operation : string -> bool
-(** [true] iff the command is a normal workflow mutation
+(** [true] iff the command is a workflow mutation
     (pr merge / pr close / issue close / project close / api
-    /merge or state=closed). Legitimate for coding-preset keepers
-    but still gated for lower-privilege presets. *)
+    /merge or state=closed). PR ready/merge is additionally classified
+    as R2/operator-only so generic keeper gh cannot bypass draft gates. *)
 
 val is_gh_pr_merge : string -> bool
 (** [true] iff the command is specifically [gh pr merge ...]. *)

@@ -961,6 +961,18 @@ let () =
         | Error msg ->
           Alcotest.(check bool) "archive blocked" true
             (contains_substring msg "blocked for safety"));
+      Alcotest.test_case "rejects generic pr ready" `Quick (fun () ->
+        match Worker_dev_tools.validate_gh_command "pr ready 123" with
+        | Ok () -> Alcotest.fail "expected pr ready blocked"
+        | Error msg ->
+          Alcotest.(check bool) "ready blocked" true
+            (contains_substring msg "blocked for safety"));
+      Alcotest.test_case "rejects generic pr merge" `Quick (fun () ->
+        match Worker_dev_tools.validate_gh_command "pr merge 123 --squash" with
+        | Ok () -> Alcotest.fail "expected pr merge blocked"
+        | Error msg ->
+          Alcotest.(check bool) "merge blocked" true
+            (contains_substring msg "blocked for safety"));
       Alcotest.test_case "skips org check when allowed_orgs empty" `Quick (fun () ->
         match
           Worker_dev_tools.validate_gh_command ~allowed_orgs:[]
@@ -1065,10 +1077,6 @@ let () =
           (Worker_dev_tools.classify_gh_reversibility
              "pr create --title foo --body bar"
            = Worker_dev_tools.R1_Reversible));
-      Alcotest.test_case "R1: pr merge" `Quick (fun () ->
-        Alcotest.(check bool) "R1" true
-          (Worker_dev_tools.classify_gh_reversibility "pr merge 123 --squash"
-           = Worker_dev_tools.R1_Reversible));
       Alcotest.test_case "R1: issue close" `Quick (fun () ->
         Alcotest.(check bool) "R1" true
           (Worker_dev_tools.classify_gh_reversibility "issue close 456"
@@ -1093,6 +1101,14 @@ let () =
            = Worker_dev_tools.R1_Reversible));
 
       (* R2 — irreversible *)
+      Alcotest.test_case "R2: pr merge" `Quick (fun () ->
+        Alcotest.(check bool) "R2" true
+          (Worker_dev_tools.classify_gh_reversibility "pr merge 123 --squash"
+           = Worker_dev_tools.R2_Irreversible));
+      Alcotest.test_case "R2: pr ready" `Quick (fun () ->
+        Alcotest.(check bool) "R2" true
+          (Worker_dev_tools.classify_gh_reversibility "pr ready 123"
+           = Worker_dev_tools.R2_Irreversible));
       Alcotest.test_case "R2: repo delete" `Quick (fun () ->
         Alcotest.(check bool) "R2" true
           (Worker_dev_tools.classify_gh_reversibility "repo delete jeong-sik/foo"

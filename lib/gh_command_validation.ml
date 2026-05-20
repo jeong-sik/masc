@@ -32,13 +32,14 @@ let gh_allowed_commands =
     - [R0_Read]: no state mutation. gh view/list, api GET, status,
       search. Free to run; only org allowlist gate.
     - [R1_Reversible]: mutates state but recoverable via inverse op.
-      pr create/close/reopen/merge/ready/comment/edit, issue
+      pr create/close/reopen/comment/edit, issue
       create/close/reopen, label create/delete, run cancel. Allowed
       + caller is expected to emit an audit event.
     - [R2_Irreversible]: cannot be undone via a gh inverse op.
-      repo delete/archive/transfer/rename, release delete, secret
-      delete, auth logout/token, ssh-key delete, workflow disable,
-      api --method DELETE, graphql mutation delete*/remove*/transfer*.
+      pr merge/ready, repo delete/archive/transfer/rename, release
+      delete, secret delete, auth logout/token, ssh-key delete,
+      workflow disable, api --method DELETE, graphql mutation
+      delete*/remove*/transfer*.
       Must route through a structured keeper tool that carries
       operator-approval semantics. *)
 type gh_reversibility =
@@ -57,6 +58,7 @@ let string_of_gh_reversibility = function
     re-registrable but signing/deploy keys mid-CI break. *)
 let gh_irreversible_ops =
   [
+    ("pr",       ["merge"; "ready"]);
     ("repo",     ["delete"; "archive"; "transfer"; "rename"]);
     ("release",  ["delete"]);
     ("secret",   ["delete"; "remove"]);
@@ -73,8 +75,8 @@ let gh_irreversible_ops =
     Allowed via op=gh but callers should audit. *)
 let gh_reversible_mutations =
   [
-    ("pr",      ["create"; "close"; "reopen"; "merge"; "ready";
-                 "edit"; "comment"; "review"; "lock"; "unlock"]);
+    ("pr",      ["create"; "close"; "reopen"; "edit"; "comment";
+                 "review"; "lock"; "unlock"]);
     ("issue",   ["create"; "close"; "reopen"; "edit"; "comment";
                  "lock"; "unlock"; "develop"; "pin"; "unpin"]);
     ("label",   ["create"; "edit"; "delete"; "clone"]);
@@ -335,6 +337,11 @@ let classify_gh_reversibility cmd =
     to a generic message. *)
 let structured_tool_hint_for_r2 cmd =
   match extract_gh_command_pair cmd with
+  | (Some "pr", Some ("merge" | "ready")) ->
+    Some "Do not use generic gh for PR ready/merge on agent PRs. \
+          Use the environment-gated Approve Agent PR workflow after \
+          human review, then merge only after required checks are green \
+          and hard-stop labels are gone."
   | (Some "repo", Some ("delete" | "archive" | "transfer" | "rename")) ->
     Some "Use an operator-approved path: open a board post describing \
           the intent and wait for operator action. No keeper tool \

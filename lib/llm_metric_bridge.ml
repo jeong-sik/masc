@@ -290,8 +290,14 @@ let ms_invalid_reason = function
   | Ms_valid _ ->
     (* Unreachable — caller only invokes on invalid branches. The
        exhaustive match is preserved here so adding a new invalid
-       variant in [ms_duration] forces a compile error here too. *)
-    assert false
+       variant in [ms_duration] forces a compile error here too.
+       [invalid_arg] (not [assert false]) per the convention in
+       keeper_turn_fsm.ml:284 — operators reading a crash dump
+       see *which* caller invariant was violated without
+       cross-referencing line numbers. *)
+    invalid_arg
+      "Llm_metric_bridge.ms_invalid_reason: caller invariant — function \
+       only accepts Ms_invalid_* variants but received Ms_valid"
 
 let streaming_first_chunk_invalid_metric =
   Prometheus.metric_llm_provider_streaming_first_chunk_invalid

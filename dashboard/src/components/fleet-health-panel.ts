@@ -28,6 +28,7 @@ import {
   sharedToolQualityLoading,
 } from './fleet-data-core'
 import { coverageGapDisplay, freshnessText, sourceHealthClass } from './common/source-health'
+import { CoverageGapBlock } from './common/coverage-gap-block'
 
 type FleetHealthView = 'default' | 'event-log' | 'comparison' | 'tool-quality' | 'governance' | 'attribution' | 'keeper-health'
 
@@ -334,9 +335,8 @@ function ToolMonitorDefaultBoard() {
         ` : null}
 
         ${coverageGap ? html`
-          <div class="mt-3 grid gap-0.5 rounded-[var(--r-1)] border border-[var(--color-status-warn)]/40 bg-[var(--warn-10)] px-3 py-2 text-3xs text-[var(--color-status-warn)]">
-            <span>${coverageGap.summary}</span>
-            ${coverageGap.details.slice(0, 2).map(detail => html`<span class="font-mono break-all">${detail}</span>`)}
+          <div class="mt-3">
+            <${CoverageGapBlock} display=${coverageGap} />
           </div>
         ` : null}
       </div>

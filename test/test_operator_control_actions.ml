@@ -61,6 +61,7 @@ let test_task_inject_executes_immediately () =
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
       let config = Coord.default_config base_dir in
+      (* See test setup: room init side effect is the fixture under test. *)
       ignore (Coord.init config ~agent_name:(Some "operator"));
       let ctx = operator_ctx env sw config "operator" in
       let action_json =

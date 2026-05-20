@@ -516,7 +516,10 @@ let vote ~voter ~post_id ~direction =
        emit_board_sse_event
          (Post_voted { post_id; voter; direction })
    | Error e ->
-       Log.BoardLog.warn
+       (match e with
+        | Board_types.Post_not_found _ | Board_types.Comment_not_found _ ->
+            Log.BoardLog.info
+        | _ -> Log.BoardLog.warn)
          "board vote failed: post_id=%s voter=%s: %s"
          post_id voter (Board_types.show_board_error e));
   result
@@ -535,7 +538,10 @@ let vote_comment ~voter ~comment_id ~direction =
        emit_board_sse_event
          (Comment_voted { comment_id; voter; direction })
    | Error e ->
-       Log.BoardLog.warn
+       (match e with
+        | Board_types.Post_not_found _ | Board_types.Comment_not_found _ ->
+            Log.BoardLog.info
+        | _ -> Log.BoardLog.warn)
          "board vote_comment failed: comment_id=%s voter=%s: %s"
          comment_id voter (Board_types.show_board_error e));
   result
@@ -558,7 +564,10 @@ let toggle_reaction ~target_type ~target_id ~user_id ~emoji =
               reacted = toggled.reacted;
             })
    | Error e ->
-       Log.BoardLog.warn
+       (match e with
+        | Board_types.Post_not_found _ | Board_types.Comment_not_found _ ->
+            Log.BoardLog.info
+        | _ -> Log.BoardLog.warn)
          "board reaction failed: target=%s:%s user=%s emoji=%s: %s"
          (Board.reaction_target_type_to_string target_type)
          target_id user_id emoji (Board_types.show_board_error e));

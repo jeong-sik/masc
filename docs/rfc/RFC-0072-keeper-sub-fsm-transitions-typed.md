@@ -1,7 +1,7 @@
 ---
 rfc: "0072"
 title: "Type-encoded keeper sub-FSM transitions (cascade + turn_phase)"
-status: Draft
+status: Implemented
 created: 2026-05-12
 updated: 2026-05-20
 author: vincent

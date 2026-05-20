@@ -1,7 +1,7 @@
 ---
 rfc: "0089"
 title: "String Classifier to Typed Variant — direct replacement, no lint"
-status: Accepted
+status: Implemented
 created: 2026-05-15
 updated: 2026-05-17
 author: vincent

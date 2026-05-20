@@ -1,7 +1,7 @@
 ---
 rfc: "0086"
 title: "Keeper namespace bulk promotion to sub-library"
-status: Draft
+status: Implemented
 created: 2026-05-15
 updated: 2026-05-20
 author: vincent

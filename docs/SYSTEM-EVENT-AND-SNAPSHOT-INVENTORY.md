@@ -175,7 +175,7 @@ Source of accepted event names on the dashboard side: `dashboard/src/types/sse.t
 | Board and notification compatibility | `board_post`, `masc/board_post`, `board_comment`, `masc/board_comment`, `board_delete`, `masc/board_delete`, `post_created`, `comment_added`, `post_voted`, `comment_voted` |
 | Keeper direct SSE | `keeper_heartbeat`, `keeper_handoff`, `masc/keeper_handoff`, `keeper_compaction`, `masc/keeper_compaction`, `keeper_guardrail`, `masc/keeper_guardrail`, `keeper_phase_changed`, `keeper_composite_changed`, `keeper_tool_call`, `masc/keeper_tool_call`, `keeper_tool_skipped`, `keeper_turn_complete`, `masc/keeper_turn_complete` |
 | Approval / governance | `client_input_approved`, `client_input_rejected`, `client_input_updated`, `governance_param_changed`, `approval:pending`, `approval:resolved` |
-| OAS bridge | `oas:masc:autonomy:agent_selected`, `oas:masc:autonomy:agent_decision`, `oas:masc:autonomy:agent_action_executed`, `oas:masc:keeper:snapshot`, `oas:masc:keeper:lifecycle`, `oas:masc:trust_updated`, `oas:masc:reputation_changed`, `oas:agent_started`, `oas:agent_completed`, `oas:tool_called`, `oas:tool_completed`, `oas:turn_started`, `oas:turn_completed`, `oas:context_compacted`, `oas:task_state_changed`, `oas:masc:harness:verdict_recorded`, `oas:masc:harness:pre_compact`, `oas:masc:harness:handoff` |
+| OAS bridge | `oas:masc:keeper:snapshot`, `oas:masc:keeper:lifecycle`, `oas:agent_started`, `oas:agent_completed`, `oas:tool_called`, `oas:tool_completed`, `oas:turn_started`, `oas:turn_completed`, `oas:context_compacted`, `oas:task_state_changed`, `oas:masc:harness:verdict_recorded`, `oas:masc:harness:pre_compact`, `oas:masc:harness:handoff` |
 | Server-push snapshots | `room_truth_snapshot`, `namespace_truth_snapshot`, `execution_snapshot`, `operator_snapshot`, `operator_digest`, `transport_health_snapshot` |
 
 ### 2. OAS custom events published by MASC
@@ -189,13 +189,8 @@ These originate in `lib/oas_events.ml` and are later relayed by `oas_event_bridg
 | `masc:board_post` | board post created |
 | `masc:task_transition` | task state transition |
 | `masc:heartbeat_recovered` | agent recovered from timeout |
-| `masc:autonomy:agent_selected` | autonomy selector chose an agent |
-| `masc:autonomy:agent_decision` | autonomy decision chosen |
-| `masc:autonomy:agent_action_executed` | autonomy action executed |
 | `masc:keeper:snapshot` | keeper heartbeat snapshot |
 | `masc:keeper:lifecycle` | keeper lifecycle update |
-| `masc:trust_updated` | trust score changed |
-| `masc:reputation_changed` | reputation changed |
 | `masc:institution_episode` | institution episode recorded |
 | `masc:harness:verdict_recorded` | harness verdict persisted |
 | `masc:harness:pre_compact` | pre-compaction observation |

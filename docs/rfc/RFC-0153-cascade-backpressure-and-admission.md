@@ -3,12 +3,12 @@ rfc: "0153"
 title: "Cascade Backpressure & Tier Admission"
 status: Draft
 created: 2026-05-20
-updated: 2026-05-20
+updated: 2026-05-20 (post-merge audit: §6.8 + §4.2 admission_policy + §4.4 measurements)
 author: vincent
 supersedes: []
 superseded_by: null
 related: ["0009", "0022", "0042", "0082", "0088", "0102", "0127", "0152"]
-implementation_prs: []
+implementation_prs: ["#16965 (Phase A.1, merged 2026-05-20T12:25:11Z)"]
 ---
 
 # RFC-0153 — Cascade Backpressure & Tier Admission
@@ -175,11 +175,16 @@ match Cascade_saturation_signal.classify ~elapsed_ms ~cause with
 
 **외부 검증 부재**: Hermes/OpenClaw/OpenHands 모두 single-session 모델이라 tier-level admission semaphore *부재* (§7). MASC 멀티-keeper 동시성은 이 framework들보다 어려운 영역. Phase B는 novel design — TLA+ 검증 + incremental rollout 필수.
 
-**Module**:
+**Module** (updated per §6.8 attack #8 — admission_policy parameter):
 
 ```ocaml
 (* NEW: lib/cascade/cascade_tier_admission.ml *)
 type tier_id = string
+
+type admission_policy =
+  | Required          (* main keeper_turn path; semaphore acquire 강제 *)
+  | Bypass            (* side task (probe, memory summary, run_tools);
+                         semaphore 우회. starvation 방지 *)
 
 type t = {
   semaphores : (tier_id, Eio.Semaphore.t) Hashtbl.t;
@@ -189,10 +194,26 @@ type t = {
 val create : Cascade_config.t -> t
 
 val with_admission :
-  t -> tier_id:tier_id -> deadline_ms:int ->
+  t ->
+  tier_id:tier_id ->
+  deadline_ms:int ->
+  admission_policy:admission_policy ->  (* NEW (§6.8) *)
   (unit -> 'a) ->
   ('a, Cascade_saturation_signal.t) result
+(** [admission_policy = Bypass] 일 때 semaphore acquire 없이 즉시 진행.
+    side task가 production traffic에 의해 starve되지 않도록 *명시적*
+    분리 — default은 없음 (caller가 반드시 결정). *)
 ```
+
+**Caller policy 매핑** (Q7 audit 기반):
+
+| Caller | admission_policy | 근거 |
+|---|---|---|
+| `keeper_turn_driver.try_cascade` (main keeper turn) | `Required` | main production traffic; backpressure 의도 |
+| `keeper_stale_watchdog:692` (cascade health probe) | `Bypass` | probe가 production load 측정해야 함; semaphore에 묶이면 self-defeating |
+| `keeper_run_tools:757` (tool execution) | 검토 후 결정 | 일반적으로 main turn 내부 nested fiber — Phase B 시작 시 audit |
+| `keeper_memory_llm_summary:220` (memory summary) | `Bypass` | side task; production traffic에 양보 |
+| `cascade_runtime.ml:638,660,709` | 검토 후 결정 | runtime 측 entry point — caller에 따라 결정 |
 
 > 기존 `Admission_queue` (turn-level, lib/cascade/cascade_error_classify.ml `Admission_queue_*` variant) 와 명확히 구분하기 위해 module 이름을 `cascade_tier_admission` 로 명명.
 
@@ -235,6 +256,27 @@ let resume_backoff_ladder_sec = [|60; 300; 1500; 3600|]
 (* OpenClaw 패턴: 1m → 5m → 25m → 1h *)
 let billing_backoff_ladder_sec = [|18000; 86400|]  (* 5h → 24h *)
 ```
+
+**masc-mcp 실측 주기와의 정렬** (Q8 audit, 2026-05-20):
+
+| 항목 | 값 | 출처 |
+|---|---|---|
+| Keeper keepalive snapshot interval | 300s default (clamped [15, 3600]) | `lib/config/env_config_keeper.ml:191` |
+| Compaction cooldown | 15s default (이전 90s에서 축소) | `lib/keeper/keeper_config.ml:486` |
+| Proactive heartbeat interval | 30s | `lib/keeper/keeper_config.ml:484` comment |
+| Autonomous max turns/call | 10 default | `lib/keeper/keeper_runtime_resolved.ml:60` |
+| Reactive max turns/call | 30 default | 동일 |
+
+Ladder 단계별 의미:
+
+| 단계 | 절대 시간 | 상대 의미 |
+|---|---|---|
+| `60s` | 2 heartbeats | transient cooldown — 다음 cycle 시도 |
+| `300s` | 1 keepalive cycle | 1 turn skip 후 재시도 |
+| `1500s` | 5 keepalive cycles | sustained outage; 운영자 인지 시간 |
+| `3600s` | max cap | 자동 회복의 상한 (이후 manual 또는 escalation) |
+
+OpenClaw 패턴(1m→5m→25m→1h)이 masc-mcp의 5분 keepalive 주기에 자연 정렬됨. 미세 조정은 D.1 머지 후 2주 데이터로 검증.
 
 #### D.2 — EWMA Decay (deferred, 측정 게이트)
 
@@ -289,6 +331,31 @@ D.1 fixed ladder를 RFC-0152 enum의 *명세 채우기*로 위치 → 의미 확
 
 ### 6.7 공격 #7: MASC novel 영역의 무모성
 Phase B/C/E는 세 framework 모두 안 함. **완화**: tower::limit::ConcurrencyLimit (Rust) production validated 사례 존재 → novel은 sub-pattern 단위, full pattern은 아님. Phase B 시작 전 "framework들이 피한 사례" 추가 조사.
+
+### 6.8 공격 #8 (post-merge, Q7 audit 기반): Phase B 무차별 admission → side task starvation
+
+**증상**: Phase A.1 merge (PR #16965) 후 Q7 audit에서 `Cascade_catalog_runtime.resolve_named_providers_strict` 의 *4-5개 독립 entry point* 가 발견됨:
+- `keeper_turn_driver` (main keeper turn — main production traffic)
+- `keeper_stale_watchdog:692` (cascade health probe — *production이 saturated일 때 더 자주 호출되어야 함*)
+- `keeper_run_tools:757` (tool execution)
+- `keeper_memory_llm_summary:220` (memory summary — side task)
+- `cascade_runtime.ml:638,660,709` (runtime entry points)
+
+**공격**: Phase B의 admission semaphore가 위 entry point에 *무차별* 적용되면:
+1. watchdog probe가 production load에 막혀 *cascade health를 측정 못 함* (self-defeating)
+2. memory summary 같은 side task가 영원히 starve
+3. 최악의 경우: probe가 "unhealthy" 판단을 못 내려서 RFC-0127 의 fast-fail path가 작동 안 함 → RFC-0153 자체가 RFC-0127을 무력화
+
+**완화** (§4.2에 반영):
+- `with_admission` 시그니처에 `~admission_policy:[ \`Required | \`Bypass ]` 명시적 파라미터
+- main keeper_turn path만 `Required`
+- watchdog / memory_summary / 기타 side task는 `Bypass`
+- `keeper_run_tools` / `cascade_runtime` entry point는 Phase B 시작 시 case-by-case audit
+- TLA+ `NoNestedSameTierAdmission` invariant에 *bypass path는 acquire 카운터에 무영향* 명시
+
+**잔여 위험**: caller policy 매핑이 잘못되면 (예: main을 Bypass로 설정) backpressure 효과가 무력. 완화책으로 default 값 없이 *caller가 반드시 명시*하도록 시그니처 강제 + lint으로 매핑 검증.
+
+**왜 #8이 #2 (nested deadlock)와 다른가**: #2는 동일 caller의 nested cascade를 우려 (자기재귀 = OK, 별도 fiber = 위험). #8은 *별개의 caller chain*이 같은 자원을 요구하는 경합. #2는 TLA+로 검증, #8은 *policy enum 강제*로 검증.
 
 ## 7. 외부 시스템 비교
 

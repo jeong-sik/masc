@@ -54,9 +54,6 @@ interface MonitoringEvidence {
 const MONITORING_BAND_STALE_MS = 5 * 60 * 1000
 const DEFAULT_CONTEXT_ATTENTION_RATIO = 0.95
 
-// ATTENTION_PHASES now imported from keeper-predicates.ts (SSOT).
-// Previously defined locally — see RFC-0135 PR-SSOT.
-
 const UNKNOWN_PHASE_META: PhaseMeta = {
   key: 'unknown',
   label: '확인 필요',
@@ -73,7 +70,7 @@ const PHASE_LABELS: Record<string, PhaseMeta> = {
   Offline: { key: 'Offline', label: '오프라인', description: '런타임이 올라오지 않았거나 연결 정보가 없습니다.' },
   Running: { key: 'Running', label: '실행중', description: 'keeper_state_machine 기준으로 정상 실행 상태입니다.' },
   Failing: { key: 'Failing', label: '오류중', description: '최근 실행에서 오류를 감지했습니다.' },
-  Overflowed: { key: 'Overflowed', label: '컨텍스트 초과', description: '프롬프트가 runtime 컨텍스트 한도를 넘겨 자동 복구가 필요합니다.' },
+  Overflowed: { key: 'Overflowed', label: '컨텍스트초과', description: '프롬프트가 runtime 컨텍스트 한도를 넘겨 자동 복구가 필요합니다.' },
   Compacting: { key: 'Compacting', label: '압축중', description: '컨텍스트를 정리하는 중입니다.' },
   HandingOff: { key: 'HandingOff', label: '승계중', description: '새 세대로 넘기는 중입니다.' },
   Draining: { key: 'Draining', label: '종료중', description: '현재 작업을 마무리하는 중입니다.' },
@@ -82,6 +79,7 @@ const PHASE_LABELS: Record<string, PhaseMeta> = {
   Crashed: { key: 'Crashed', label: '비정상종료', description: 'fiber가 비정상적으로 종료되었습니다.' },
   Restarting: { key: 'Restarting', label: '재시작중', description: '복구를 시도하고 있습니다.' },
   Dead: { key: 'Dead', label: '종료', description: '재시도 budget이 소진된 종료 상태입니다.' },
+  Zombie: { key: 'Zombie', label: '좀비', description: 'fiber는 종료되었으나 런타임이 아직 정리하지 않은 상태입니다.' },
   active: { key: 'active', label: '실행중', description: '프로세스는 살아 있지만 state projection이 부족합니다.' },
   busy: { key: 'busy', label: '작업중', description: '프로세스는 살아 있고 현재 작업을 수행 중입니다.' },
   listening: { key: 'listening', label: '대기중', description: '프로세스는 살아 있고 입력을 기다리고 있습니다.' },

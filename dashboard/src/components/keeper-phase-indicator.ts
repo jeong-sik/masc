@@ -63,9 +63,6 @@ const PHASE_STYLES: Record<KeeperPhase, PhaseStyle> = {
   Zombie:     { label: '좀비',         color: 'var(--bad-light)',  bg: 'var(--bad-10)',    border: 'var(--bad-20)',     glow: STRONG_GLOW,   icon: '☠' },
 }
 
-// BUFFER_PHASES now imported from keeper-predicates.ts (SSOT).
-// Previously defined locally — see RFC-0135 PR-SSOT.
-
 function getPhaseStyle(phase: KeeperPhase | string | null | undefined): PhaseStyle {
   if (!phase) return PHASE_STYLES.Offline
   // Use the SSOT boundary parser (`toKeeperPhase`) instead of the raw

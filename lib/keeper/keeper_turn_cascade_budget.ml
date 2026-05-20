@@ -556,14 +556,22 @@ let pause_keeper_for_overflow
     meta.name reason;
   paused_meta
 
-let sync_keeper_paused_state
+let sync_keeper_paused_state_impl
+    ~(resume_policy : Keeper_supervisor_pause_policy.crash_pause_resume_policy option)
     ~(config : Coord.config)
     ~(meta : keeper_meta)
     ~(paused : bool) : (keeper_meta, string) result =
+  let auto_resume_after_sec =
+    match paused, resume_policy with
+    | true, Some policy ->
+      Keeper_supervisor_pause_policy.auto_resume_after_sec_for_policy meta policy
+    | _ -> meta.auto_resume_after_sec
+  in
   let synced_meta =
     {
       meta with
       paused;
+      auto_resume_after_sec;
       updated_at = now_iso ();
     }
   in
@@ -615,6 +623,23 @@ let sync_keeper_paused_state
                ~side_effect:"resume sync fiber wakeup"
                "registry entry missing after metadata update");
       Ok synced_meta
+
+let sync_keeper_paused_state ~(config : Coord.config) ~(meta : keeper_meta) ~paused
+  =
+  sync_keeper_paused_state_impl ~resume_policy:None ~config ~meta ~paused
+
+let sync_keeper_paused_state_with_resume_policy
+    ~(config : Coord.config)
+    ~(meta : keeper_meta)
+    ~(paused : bool)
+    ~(resume_policy : Keeper_supervisor_pause_policy.crash_pause_resume_policy)
+  : (keeper_meta, string) result
+  =
+  sync_keeper_paused_state_impl
+    ~resume_policy:(Some resume_policy)
+    ~config
+    ~meta
+    ~paused
 
 let current_keeper_meta ~(config : Coord.config) ~(fallback_meta : keeper_meta) =
   match Keeper_registry.get ~base_path:config.base_path fallback_meta.name with

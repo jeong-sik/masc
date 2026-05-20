@@ -793,69 +793,10 @@ let run_turn
            Trajectory.increment_turn is never called here — the keeper
            uses OAS Agent.run which manages its own internal call count.
            Consumers should treat turn=0 as "turn not tracked in keeper path". *)
-                 (match trajectory_acc with
-                  | Some acc ->
-                    let now = Time_compat.now () in
-                    let now_iso = Masc_domain.now_iso () in
-                    List.iter
-                      (function
-                        | Agent_sdk.Types.Thinking { content; _ } ->
-                          let entry : Trajectory.thinking_entry =
-                            { ts = now
-                            ; ts_iso = now_iso
-                            ; turn = acc.Trajectory.turn
-                            ; content
-                            ; content_length = String.length content
-                            ; redacted = false
-                            }
-                          in
-                          (try
-                             Trajectory.append_thinking
-                               ~masc_root:acc.Trajectory.masc_root
-                               ~keeper_name:acc.Trajectory.keeper_name
-                               ~trace_id:acc.Trajectory.trace_id
-                               entry
-                           with
-                           | Eio.Cancel.Cancelled _ as e -> raise e
-                           | exn ->
-                             Log.Keeper.error
-                               "keeper:%s thinking persist failed: %s"
-                               meta.name
-                               (Printexc.to_string exn);
-                             Prometheus.inc_counter
-                               Keeper_metrics.metric_keeper_thinking_persist_failures
-                               ~labels:[ "keeper", meta.name ]
-                               ())
-                        | Agent_sdk.Types.RedactedThinking _ ->
-                          let entry : Trajectory.thinking_entry =
-                            { ts = now
-                            ; ts_iso = now_iso
-                            ; turn = acc.Trajectory.turn
-                            ; content = "[redacted]"
-                            ; content_length = 0
-                            ; redacted = true
-                            }
-                          in
-                          (try
-                             Trajectory.append_thinking
-                               ~masc_root:acc.Trajectory.masc_root
-                               ~keeper_name:acc.Trajectory.keeper_name
-                               ~trace_id:acc.Trajectory.trace_id
-                               entry
-                           with
-                           | Eio.Cancel.Cancelled _ as e -> raise e
-                           | exn ->
-                             Log.Keeper.error
-                               "keeper:%s redacted thinking persist failed: %s"
-                               meta.name
-                               (Printexc.to_string exn);
-                             Prometheus.inc_counter
-                               Keeper_metrics.metric_keeper_thinking_persist_failures
-                               ~labels:[ "keeper", meta.name ]
-                               ())
-                        | _ -> ())
-                      result.response.content
-                  | None -> ());
+                 Keeper_agent_run_thinking_persist.persist
+                   ~trajectory_acc
+                   ~content:result.response.content
+                   ~keeper_name:meta.name;
                  let reported_tool_names =
                    List.filter_map
                      (function

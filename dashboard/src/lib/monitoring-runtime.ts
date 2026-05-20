@@ -6,6 +6,7 @@ import { keeperDisplayStatus, keeperRuntimeBlockerHint } from './keeper-runtime-
 // (previously lines 39-55, 159-180) duplicated BACKEND_PHASE_MAP +
 // PHASE_ID_MAP elsewhere; the three maps drifted independently.
 import { toKeeperPhase } from '../keeper-store-normalize'
+import { ATTENTION_PHASES } from './keeper-predicates'
 import { parseAgentStatus } from './agent-status'
 // RFC-0135 PR-12 + PR-14d: route blocker visibility through the typed
 // SSOT (stale vs live distinction) and consume composite-preferred
@@ -46,10 +47,15 @@ interface MonitoringEvidence {
   stage: StageMeta | null
 }
 
-const HEARTBEAT_STALE_MS = 5 * 60 * 1000
+// 5-minute threshold for the monitoring band "attention" gate — distinct
+// from config/constants.HEARTBEAT_STALE_MS (120s) which is the SSE
+// connection liveness check. This longer window avoids false "attention"
+// badges during brief heartbeat gaps that the SSE reconnect handles.
+const MONITORING_BAND_STALE_MS = 5 * 60 * 1000
 const DEFAULT_CONTEXT_ATTENTION_RATIO = 0.95
 
-const ATTENTION_PHASES = new Set<string>(['Failing', 'Overflowed', 'Compacting', 'HandingOff', 'Draining', 'Crashed', 'Restarting'])
+// ATTENTION_PHASES now imported from keeper-predicates.ts (SSOT).
+// Previously defined locally — see RFC-0135 PR-SSOT.
 
 const UNKNOWN_PHASE_META: PhaseMeta = {
   key: 'unknown',
@@ -184,7 +190,7 @@ function isHeartbeatStale(keeper: Keeper): boolean {
   if (!keeper.last_heartbeat) return false
   const ts = Date.parse(keeper.last_heartbeat)
   if (Number.isNaN(ts)) return false
-  return Date.now() - ts > HEARTBEAT_STALE_MS
+  return Date.now() - ts > MONITORING_BAND_STALE_MS
 }
 
 function contextAttentionRatio(keeper: Keeper): number {

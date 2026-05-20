@@ -15,6 +15,7 @@
 import { html } from 'htm/preact'
 import type { KeeperPhase } from '../types'
 import { toKeeperPhase } from '../keeper-store-normalize'
+import { BUFFER_PHASES } from '../lib/keeper-predicates'
 import { formatDuration } from '../lib/format-time'
 
 interface PhaseStyle {
@@ -62,7 +63,8 @@ const PHASE_STYLES: Record<KeeperPhase, PhaseStyle> = {
   Zombie:     { label: '좀비',         color: 'var(--bad-light)',  bg: 'var(--bad-10)',    border: 'var(--bad-20)',     glow: STRONG_GLOW,   icon: '☠' },
 }
 
-const BUFFER_PHASES = new Set<string>(['Failing', 'Overflowed', 'Compacting', 'HandingOff', 'Draining', 'Restarting'])
+// BUFFER_PHASES now imported from keeper-predicates.ts (SSOT).
+// Previously defined locally — see RFC-0135 PR-SSOT.
 
 function getPhaseStyle(phase: KeeperPhase | string | null | undefined): PhaseStyle {
   if (!phase) return PHASE_STYLES.Offline

@@ -171,6 +171,29 @@ const RUNNING_PHASES_EXCLUDING_RESTARTING: ReadonlySet<string> = new Set<string>
  *  to `running`. When `KeeperOperationalState` gains a dedicated
  *  `restarting` variant (RFC-0135 follow-up Goal-2), this predicate
  *  collapses to that check. */
+// RFC-0135 PR-SSOT: ATTENTION_PHASES — phases that indicate the keeper
+// needs operator attention (error, recovery, or transitional states).
+// Previously defined locally in monitoring-runtime.ts as a private Set
+// and partially duplicated as BUFFER_PHASES in keeper-phase-indicator.ts.
+// Both sites now import from here.
+export const ATTENTION_PHASES: ReadonlySet<string> = new Set<string>([
+  'Failing',
+  'Overflowed',
+  'Compacting',
+  'HandingOff',
+  'Draining',
+  'Crashed',
+  'Restarting',
+])
+
+// BUFFER_PHASES — subset of ATTENTION_PHASES used for visual pulse
+// animation in keeper-phase-indicator.ts. Excludes `Crashed` (terminal
+// failure gets a static badge, not a pulse). Derived from the SSOT so
+// adding a new attention phase auto-updates the animation gate.
+export const BUFFER_PHASES: ReadonlySet<string> = new Set<string>(
+  [...ATTENTION_PHASES].filter(p => p !== 'Crashed'),
+)
+
 export function isKeeperRunningExcludingRestarting(keeper: Keeper): boolean {
   const status = (keeper.status ?? '').toLowerCase()
   if (RUNNING_STATUS_TOKENS.has(status)) return true

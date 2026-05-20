@@ -10,7 +10,6 @@ import {
   coerceCredentialType,
   sanitizeOptionalString,
   githubLoginCommand,
-  buildCredentialCreateRequest,
   type Credential,
   type CredentialCreatePayload,
   type CredentialOauthMethod,

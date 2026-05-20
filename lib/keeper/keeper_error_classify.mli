@@ -111,6 +111,7 @@ val fallback_cascade_for_unavailable_profile :
     Status-code-aware rotation: raw API errors that are not wrapped in a MASC
     internal error are also classified when a different cascade may succeed:
     - [RateLimited] (non-hard-quota) → ["rate_limit"]
+    - [Overloaded] and Cloudflare 524 → ["capacity_backpressure"]
     - [ServerError] with status >= 500 → ["server_error"]
     - [AuthError] → ["auth_error"]
 

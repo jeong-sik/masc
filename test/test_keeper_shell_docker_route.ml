@@ -1052,6 +1052,38 @@ let test_docker_shell_missing_image_fails_before_run () =
     Alcotest.(check bool) "docker run skipped" false
       (contains_substring log "\nrun ")
 
+let test_bash_missing_image_is_policy_rejection () =
+  with_fake_docker fake_docker_missing_image_script @@ fun () ->
+  setup ~sandbox:Keeper_types.Docker
+  @@ fun ~config ~meta ~playground ->
+  let log_path = Filename.concat config.Coord.base_path "docker.log" in
+  with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "missing:test" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_CLEANUP_ENABLED" "false" @@ fun () ->
+  let raw =
+    Keeper_exec_shell.handle_keeper_bash
+      ~turn_sandbox_factory:None
+      ~turn_sandbox_factory_git:None
+      ~exec_cache:None
+      ~config
+      ~meta
+      ~args:(`Assoc [ ("cmd", `String "pwd"); ("cwd", `String playground) ])
+      ()
+  in
+  Alcotest.(check bool) "error mentions sandbox image" true
+    (response_mentions raw "error" "sandbox_image_missing");
+  Alcotest.(check (option string)) "missing image is operator policy blocker"
+    (Some "policy_rejection")
+    (parse_string_field raw "failure_class");
+  let log = read_file log_path in
+  Alcotest.(check bool) "image inspect attempted" true
+    (contains_substring log "image inspect missing:test");
+  Alcotest.(check bool) "docker run skipped" false
+    (contains_substring log "\nrun ")
+
 let test_docker_shell_mounts_masc_config_runtime_paths () =
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup ~sandbox:Keeper_types.Docker
@@ -1906,6 +1938,8 @@ let () =
             `Quick test_docker_shell_mounts_masc_config_runtime_paths;
           Alcotest.test_case "docker shell missing image fails before run" `Quick
             test_docker_shell_missing_image_fails_before_run;
+          Alcotest.test_case "keeper_bash missing image is policy rejection" `Quick
+            test_bash_missing_image_is_policy_rejection;
           Alcotest.test_case
             "missing playground bind source blocks before docker"
             `Quick test_bash_missing_playground_blocks_before_docker;

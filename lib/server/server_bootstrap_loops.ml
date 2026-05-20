@@ -335,9 +335,9 @@ let start_keeper_loops
   in
   (* Create and install the MASC-owned Event_bus alongside OAS's.
      MASC domain events (masc.broadcast, masc.heartbeat, masc.keeper.*,
-     masc.autonomy.*, masc.harness.*, masc.trust_updated, ...) publish
-     here per OAS event_bus.mli:103-107 boundary. Dashboard SSE consumers
-     see both channels as one stream — the relay translates masc.* →
+     masc.harness.*, ...) publish here per OAS event_bus.mli:103-107
+     boundary. Dashboard SSE consumers see both channels as one stream
+     — the relay translates masc.* →
      masc:* on the wire for backward compatibility. *)
   let masc_event_bus =
     Masc_event_bus_policy.create_bus Masc_event_bus_policy.masc_domain

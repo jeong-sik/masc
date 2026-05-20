@@ -58,6 +58,17 @@ val gate_decision_to_string : gate_decision -> string
 
 val gate_decision_is_rejection : gate_decision -> bool
 
+(** Log severity for repeated gate rejections.  The first sighting stays WARN;
+    repeated sightings downgrade so a bad plan does not flood WARN logs every
+    keeper cycle. *)
+type gate_rejection_log_severity =
+  | Gate_rejection_first_warn
+  | Gate_rejection_repeat_info of int
+  | Gate_rejection_repeat_debug of int
+
+val gate_rejection_log_severity_to_string :
+  gate_rejection_log_severity -> string
+
 (** Telemetry payload reported to the gate observer. *)
 type gate_decision_event =
   { stage : string
@@ -202,3 +213,19 @@ val build_chain :
   pre_tool_use_guard:
     (tool_name:string -> input:Yojson.Safe.t -> string option) ->
   Agent_sdk.Hooks.hooks
+
+module For_testing : sig
+  val reset_gate_rejection_log_counts : unit -> unit
+
+  val record_gate_rejection_log_severity :
+    ?reason_key:string ->
+    keeper_name:string ->
+    stage:string ->
+    tool_name:string ->
+    reason_code:string ->
+    unit ->
+    gate_rejection_log_severity
+
+  val planner_alternative_for_gate :
+    stage:string -> tool_name:string -> string
+end

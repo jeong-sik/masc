@@ -12,6 +12,8 @@ type deterministic_reason =
   | Completion_contract_violation
   | Keeper_shell_op_required
   | Workflow_rejection_blocked
+  | Git_ref_precondition_failed
+  | Git_command_usage_error
 
 let to_telemetry_key = function
   | Command_blocked -> "deterministic_error_command_blocked"
@@ -28,6 +30,9 @@ let to_telemetry_key = function
     "deterministic_error_completion_contract_violation"
   | Keeper_shell_op_required -> "deterministic_error_keeper_shell_op_required"
   | Workflow_rejection_blocked -> "deterministic_error_workflow_rejection_blocked"
+  | Git_ref_precondition_failed ->
+    "deterministic_error_git_ref_precondition_failed"
+  | Git_command_usage_error -> "deterministic_error_git_command_usage_error"
 ;;
 
 let to_string = function
@@ -49,6 +54,10 @@ let to_string = function
     "raw keeper_bash rejected; caller must use keeper_shell op=<verb>"
   | Workflow_rejection_blocked ->
     "typed workflow_rejection failure_class returned by the tool"
+  | Git_ref_precondition_failed ->
+    "git ref/precondition failure (missing ref, unknown revision, or no merge base)"
+  | Git_command_usage_error ->
+    "git command usage error; change flags or command shape before retrying"
 ;;
 
 (* ── JSON helpers ─────────────────────────────────────────────── *)
@@ -62,6 +71,17 @@ let assoc_string_opt key json =
   match assoc_field_opt key json with
   | Some (`String value) -> Some value
   | _ -> None
+;;
+
+let assoc_int_opt key json =
+  match assoc_field_opt key json with
+  | Some (`Int value) -> Some value
+  | _ -> None
+;;
+
+let starts_with ~prefix text =
+  let prefix_len = String.length prefix in
+  String.length text >= prefix_len && String.sub text 0 prefix_len = prefix
 ;;
 
 (* [error_or_detail key json] reads [key] at top level, falling back
@@ -124,6 +144,37 @@ let classify_error_code json =
   | None -> None
 ;;
 
+let classify_git_exit_128 json =
+  match assoc_int_opt "exit_code" json with
+  | Some 128 ->
+    let command =
+      assoc_string_opt "command" json
+      |> Option.map String.trim
+      |> Option.value ~default:""
+    in
+    let output =
+      assoc_string_opt "output" json
+      |> Option.map String.lowercase_ascii
+      |> Option.value ~default:""
+    in
+    if starts_with ~prefix:"git " command
+       && String_util.contains_substring output "no merge base"
+    then Some Git_ref_precondition_failed
+    else if starts_with ~prefix:"git " command
+            && String_util.contains_substring output "ambiguous argument"
+            && String_util.contains_substring output "unknown revision"
+    then Some Git_ref_precondition_failed
+    else if starts_with ~prefix:"git " command
+            && String_util.contains_substring output "unknown revision or path"
+    then Some Git_ref_precondition_failed
+    else if starts_with ~prefix:"git " command
+            && String_util.contains_substring output "fatal: unrecognized argument:"
+    then Some Git_command_usage_error
+    else None
+  | Some _
+  | None -> None
+;;
+
 let classify_path_check json =
   (* Some path-check failures surface as a discriminated [error] code
      directly; others nest the typed reason under
@@ -155,7 +206,10 @@ let classify (json : Yojson.Safe.t) : deterministic_reason option =
   | None ->
     (match classify_path_check json with
      | Some _ as v -> v
-     | None -> classify_error_code json)
+     | None ->
+       (match classify_error_code json with
+        | Some _ as v -> v
+        | None -> classify_git_exit_128 json))
 ;;
 
 let classify_raw (raw : string) : deterministic_reason option =

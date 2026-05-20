@@ -49,6 +49,14 @@ type deterministic_reason =
       (** typed workflow_rejection failure class — handled by a
           separate counter in [Keeper_tools_oas], but still considered
           deterministic so retry-skipped telemetry can be emitted. *)
+  | Git_ref_precondition_failed
+      (** git three-dot/ref precondition failed: missing ref, unknown
+          revision, ambiguous revision, or no merge base. Retrying the
+          same command is deterministic noise; verify/fetch refs or
+          change diff strategy first. *)
+  | Git_command_usage_error
+      (** git command-line usage is invalid, for example an unsupported
+          flag. Retrying the same command cannot succeed. *)
 
 (** Classify a raw tool-result JSON payload (as returned by
     [Keeper_exec_tools]) into a [deterministic_reason] when the
@@ -58,8 +66,8 @@ type deterministic_reason =
 
     Inputs are validated against a typed allow-list of [error] field
     values plus the orthogonal [failure_class:"workflow_rejection"]
-    marker — no substring matching, no [_ ->] catch-all that admits
-    new prefixes silently. *)
+    marker and a closed set of git exit-128 output patterns. There is
+    no [_ ->] catch-all that admits new prefixes silently. *)
 val classify : Yojson.Safe.t -> deterministic_reason option
 
 (** Convenience wrapper: parse [raw] as JSON then [classify]. Returns

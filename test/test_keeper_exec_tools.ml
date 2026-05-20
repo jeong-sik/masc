@@ -21,7 +21,7 @@ let cleanup_dir path =
   in
   try rm path with _ -> ()
 
-let make_meta ?(name = "keeper-exec-tools") ?tool_access () =
+let make_meta ?(name = "keeper-exec-tools") ?(policy_voice_enabled = false) ?tool_access () =
   let tool_access =
     match tool_access with
     | Some value -> value
@@ -37,6 +37,7 @@ let make_meta ?(name = "keeper-exec-tools") ?tool_access () =
           ("agent_name", `String name);
           ("trace_id", `String "keeper-exec-tools-trace");
           ("allowed_paths", `List [ `String "*" ]);
+          ("policy_voice_enabled", `Bool policy_voice_enabled);
           ( "tool_access",
             Masc_mcp.Keeper_types.tool_access_to_json tool_access );
         ])
@@ -257,6 +258,7 @@ let test_tool_not_allowed_reason_label_is_bounded () =
 let test_keeper_tools_list_json_uses_typed_groups () =
   let meta =
     make_meta
+      ~policy_voice_enabled:true
       ~tool_access:
         (Masc_mcp.Keeper_types.Custom
            [ "keeper_board_post";
@@ -564,7 +566,7 @@ let test_keeper_bash_shape_rejection_skips_circuit_breaker () =
       ignore (run ());
       let raw = run () in
       let json = Yojson.Safe.from_string raw in
-      check string "shape error" "keeper_bash_command_shape_blocked"
+      check string "task-state probe error" "task_state_file_probe_blocked"
         Yojson.Safe.Util.(member "error" json |> to_string);
       check string "failure class" "workflow_rejection"
         Yojson.Safe.Util.(member "failure_class" json |> to_string);
@@ -575,10 +577,22 @@ let test_keeper_bash_shape_rejection_skips_circuit_breaker () =
 
 let registered_dispatch_probe_tool = "test_keeper_registered_dispatch_probe"
 
+let probe_input_schema =
+  `Assoc [ ("type", `String "object"); ("properties", `Assoc []) ]
+
+let register_probe_schema tool_name =
+  Masc_mcp.Tool_dispatch.register_module_tag
+    ~schemas:
+      [ ({ name = tool_name
+         ; description = "test registered dispatch probe"
+         ; input_schema = probe_input_schema
+         }
+          : Masc_domain.tool_schema )
+      ]
+    ~tag:Masc_mcp.Tool_dispatch.Mod_misc
+
 let register_registered_dispatch_probe () =
-  Masc_mcp.Tool_dispatch.register_name_tag
-    ~tool_name:registered_dispatch_probe_tool
-    ~tag:Masc_mcp.Tool_dispatch.Mod_misc;
+  register_probe_schema registered_dispatch_probe_tool;
   Masc_mcp.Tool_dispatch.register
     ~tool_name:registered_dispatch_probe_tool
     ~handler:(fun ~name ~args:_ ->
@@ -594,9 +608,7 @@ let register_registered_dispatch_probe () =
 let workflow_rejection_probe_tool = "test_keeper_workflow_rejection_probe"
 
 let register_workflow_rejection_probe () =
-  Masc_mcp.Tool_dispatch.register_name_tag
-    ~tool_name:workflow_rejection_probe_tool
-    ~tag:Masc_mcp.Tool_dispatch.Mod_misc;
+  register_probe_schema workflow_rejection_probe_tool;
   Masc_mcp.Tool_dispatch.register
     ~tool_name:workflow_rejection_probe_tool
     ~handler:(fun ~name ~args:_ ->

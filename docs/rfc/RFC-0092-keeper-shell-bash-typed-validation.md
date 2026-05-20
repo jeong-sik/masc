@@ -150,11 +150,10 @@ dashboard exposes:
 
 When the criterion is met:
 
-1. Add a second flag `MASC_BASH_TYPED_AUTHORITY=1`.
-2. When set: typed advisor's `Reject` returns the JSON error; typed
+1. Typed advisor's `Reject` returns the JSON error; typed
    `Allow` proceeds; typed `Cannot_parse` falls back to legacy
    verdict (parser-coverage gap remains backward-compatible).
-3. Legacy gate continues to run *as a fallback*; the same counters
+2. Legacy gate continues to run *as a fallback*; the same counters
    keep flowing so we can detect regression.
 
 ### 4.4 Phase D — legacy purge
@@ -162,8 +161,7 @@ When the criterion is met:
 After ≥ 7 days at full authority with zero incident:
 
 1. Remove `Worker_dev_tools.validate_command` substring path.
-2. Remove `MASC_BASH_TYPED_AUTHORITY` flag — typed is unconditional.
-3. Compact `lib/keeper/keeper_shell_bash.ml` validation block from
+2. Compact `lib/keeper/keeper_shell_bash.ml` validation block from
    ~150 LoC to ~30 LoC by removing legacy branches.
 
 ### 4.5 What does *not* change
@@ -196,7 +194,7 @@ Per `software-development.md §워크어라운드 거부 기준`:
 |---|---|---|---|
 | A | RFC merged + `Shell_ir_validator` PR merged | Set `MASC_BASH_TYPED_ADVISOR=1` for a single keeper | Unset env var |
 | B | Phase A 1 keeper for 24h with no `disagree_legacy_reject_typed_allow` | Roll to fleet, observe 7 days | Unset env var |
-| C | Phase B criterion met | Set `MASC_BASH_TYPED_AUTHORITY=1` | Unset, falls back to advisor-only |
+| C | Phase B criterion met | Typed authority becomes unconditional | Revert PR |
 | D | Phase C 7+ days, zero incidents | Merge legacy purge PR | Revert PR |
 
 ## 7. Implementation PRs (planned, separate)
@@ -208,8 +206,7 @@ Per `software-development.md §워크어라운드 거부 기준`:
 - **PR-3**: Dashboard counter exposure in
   `lib/legendary_counters.ml` snapshot + `/api/v1/legendary_bash/...`
   route. ~80 LoC.
-- **PR-4**: Phase C authority flip behind
-  `MASC_BASH_TYPED_AUTHORITY`. ~50 LoC.
+- **PR-4**: Phase C authority flip. ~50 LoC.
 - **PR-5**: Phase D legacy purge.
 
 Each PR is incremental and reversible. Total cost estimate: ~400 LoC
@@ -241,7 +238,6 @@ This RFC is accepted when:
 This RFC is *implemented* (Phase D done) when:
 
 1. `Worker_dev_tools.validate_command` substring path removed.
-2. `MASC_BASH_TYPED_AUTHORITY` flag removed (unconditional).
-3. `keeper_shell_bash.ml` validation block ≤ 30 LoC.
-4. Zero `disagree_legacy_reject_typed_allow` rows over the prior
+2. `keeper_shell_bash.ml` validation block ≤ 30 LoC.
+3. Zero `disagree_legacy_reject_typed_allow` rows over the prior
    7 days at full authority.

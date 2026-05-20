@@ -68,7 +68,6 @@ Authoritative definitions live in `ENV-CONTRACT.md §4`.
 | `MASC_BLOCKING_BUDGET_MS` | `15000` | — | consumed by `AUTO_BG` and `AUTO_BG_OBSERVE` |
 | `MASC_BASH_AUTO_BG_OBSERVE` | off | — | dark-launch observer for P4 |
 | `MASC_BASH_TYPED_ADVISOR` | off | — | behavior-neutral typed-validation advisor counters/logs |
-| `MASC_BASH_TYPED_AUTHORITY` | off | — | typed-validation authority predicate for the remaining validation migration |
 
 ## Dark-Launch Observer: P4 Blocking Budget
 

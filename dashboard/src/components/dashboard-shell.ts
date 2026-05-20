@@ -147,11 +147,22 @@ export function ConnectionStatus() {
 
 type DashboardHealthChipTone = 'ok' | 'warn' | 'bad' | 'muted'
 
+interface DashboardHealthChipRoute {
+  tab: TabId
+  params: Record<string, string>
+}
+
 interface DashboardHealthChip {
   key: string
   label: string
   detail: string
   tone: DashboardHealthChipTone
+  // Optional drill-down route. When set, DashboardHealthStrip renders this
+  // chip as a RouteLink so operators can jump from "Source mismatch" /
+  // "Paused keepers N" / "Reaction ledger pending N" straight to the page
+  // that explains the signal. Chips without a route render as static spans
+  // (e.g. transport-offline — no view helps).
+  route?: DashboardHealthChipRoute
 }
 
 interface DashboardHealthInput {
@@ -326,6 +337,28 @@ function reactionLedgerHealthChip(
       `read_errors=${readErrors}`,
     ].join(', '),
     tone,
+    route: {
+      tab: 'monitoring',
+      params: { section: 'fleet-health', view: 'keeper-health' },
+    },
+  }
+}
+
+// Drill-down routes for each chip key. Centralized so the builder stays
+// readable and tests can audit the routing table separately. Returning
+// undefined keeps the chip as a static span (transport-offline,
+// execution-error: no view helps; hydrating/runtime-ok: nothing to drill).
+function chipRouteFor(key: string): DashboardHealthChipRoute | undefined {
+  switch (key) {
+    case 'source-mismatch':
+    case 'runtime-warning':
+      return { tab: 'monitoring', params: { section: 'runtime' } }
+    case 'paused-keepers':
+    case 'fleet-liveness-risk':
+    case 'no-keeper-rows':
+      return { tab: 'monitoring', params: { section: 'fleet-health' } }
+    default:
+      return undefined
   }
 }
 
@@ -408,7 +441,9 @@ export function dashboardHealthChips(input: DashboardHealthInput): DashboardHeal
     })
   }
 
-  return chips
+  // Attach drill-down routes via the central chipRouteFor() table. Chips
+  // that already carry an inline `route` (reaction-ledger) keep theirs.
+  return chips.map(chip => chip.route ? chip : { ...chip, route: chipRouteFor(chip.key) })
 }
 
 function healthChipClass(tone: DashboardHealthChipTone): string {
@@ -446,7 +481,16 @@ export function DashboardHealthStrip() {
       data-testid="dashboard-health-strip"
     >
       <span class="font-mono uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Health</span>
-      ${chips.map(chip => html`
+      ${chips.map(chip => chip.route ? html`
+        <${RouteLink}
+          key=${chip.key}
+          tab=${chip.route.tab}
+          params=${chip.route.params}
+          class=${`inline-flex min-h-6 items-center rounded-[var(--r-1)] border px-2 py-0.5 font-medium transition-opacity hover:opacity-80 ${healthChipClass(chip.tone)}`}
+          title=${chip.detail}
+          data-testid=${`dashboard-health-chip-${chip.key}`}
+        >${chip.label}<//>
+      ` : html`
         <span
           key=${chip.key}
           class=${`inline-flex min-h-6 items-center rounded-[var(--r-1)] border px-2 py-0.5 font-medium ${healthChipClass(chip.tone)}`}

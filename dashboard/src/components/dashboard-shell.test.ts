@@ -582,4 +582,88 @@ describe('dashboardHealthChips', () => {
     })])
     expect(chips[0]?.detail).toContain('pending=2')
   })
+
+  it('attaches drill-down routes so HEALTH chips deep-link operators to the right view', () => {
+    const chips = dashboardHealthChips({
+      connected: true,
+      counts: { keepers: 0, configured_keepers: 3 },
+      keepers: [{
+        name: 'keeper-a',
+        status: 'paused',
+        paused: true,
+      } as any],
+      runtimeResolution: {
+        status: 'warn',
+        warnings: [],
+        source_mismatch: true,
+        server_workspace_mismatch: false,
+      } as any,
+      executionError: null,
+      loading: false,
+    })
+
+    const byKey = Object.fromEntries(chips.map(c => [c.key, c]))
+
+    // source-mismatch → runtime resolution view
+    expect(byKey['source-mismatch']?.route).toEqual({
+      tab: 'monitoring',
+      params: { section: 'runtime' },
+    })
+    // paused-keepers → fleet-health (operator drills into the keeper list)
+    expect(byKey['paused-keepers']?.route).toEqual({
+      tab: 'monitoring',
+      params: { section: 'fleet-health' },
+    })
+    // no-keeper-rows → same fleet-health section (configured vs live diff)
+    expect(byKey['no-keeper-rows']?.route).toEqual({
+      tab: 'monitoring',
+      params: { section: 'fleet-health' },
+    })
+  })
+
+  it('leaves transport-offline and execution-error without routes (no useful drill-down)', () => {
+    const chips = dashboardHealthChips({
+      connected: false,
+      counts: null,
+      keepers: [],
+      runtimeResolution: null,
+      executionError: 'snapshot failed',
+      loading: false,
+    })
+
+    const byKey = Object.fromEntries(chips.map(c => [c.key, c]))
+    expect(byKey['transport-offline']?.route).toBeUndefined()
+    expect(byKey['execution-error']?.route).toBeUndefined()
+  })
+
+  it('routes the reaction-ledger chip to the reactivity monitor view', () => {
+    const chips = dashboardHealthChips({
+      connected: true,
+      counts: { keepers: 2, configured_keepers: 2 },
+      keepers: [],
+      runtimeResolution: {
+        status: 'ready',
+        warnings: [],
+        fleet_safety: {
+          keeper_reaction_ledger: {
+            status: 'degraded',
+            pending_stimulus_count: 2,
+            cursor_swept_stimulus_count: 0,
+            legacy_cursor_swept_stimulus_count: 0,
+            read_error_count: 0,
+            cursor_ack_count: 5,
+            operator_action_required: false,
+          },
+        },
+      } as any,
+      executionError: null,
+      loading: false,
+    })
+
+    const ledger = chips.find(c => c.key === 'reaction-ledger')
+    expect(ledger?.route).toEqual({
+      tab: 'monitoring',
+      params: { section: 'fleet-health', view: 'keeper-health' },
+    })
+  })
 })

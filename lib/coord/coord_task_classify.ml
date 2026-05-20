@@ -275,7 +275,7 @@ let required_tool_claim_guard config ~agent_name ?agent_tool_names task =
         (Masc_domain.Task
            (Masc_domain.Task_error.InvalidState
               (Printf.sprintf
-                 "Task %s requires tool(s) unavailable to %s: %s"
+                 "Workflow rejected: task %s requires tool(s) unavailable to %s: %s"
                  task.id
                  agent_name
                  (String.concat ", " missing)))))

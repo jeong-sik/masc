@@ -146,6 +146,35 @@ let no_eligible_action_for_claim_scope claim_goal_scope ~excluded_count =
       scope_hint
 ;;
 
+let missing_required_tools_for_claim_scope config ~agent_tool_names ~task_filter =
+  Coord.get_tasks_raw config
+  |> List.filter Coord_task_schedule.task_is_claim_pool_candidate
+  |> List.filter task_filter
+  |> List.concat_map (fun task ->
+       Coord_task_classify.missing_required_tools
+         ~allowed:agent_tool_names
+         (Coord_task_schedule.task_required_tools task))
+  |> List.sort_uniq String.compare
+;;
+
+let required_tool_workflow_rejection config ~agent_tool_names claim_goal_scope =
+  match claim_goal_scope.Keeper_runtime_contract.mode with
+  | "active_goal_ids" -> None
+  | _ -> (
+    match
+      missing_required_tools_for_claim_scope
+        config
+        ~agent_tool_names
+        ~task_filter:claim_goal_scope.Keeper_runtime_contract.task_filter
+    with
+    | [] -> None
+    | missing ->
+      Some
+        (Printf.sprintf
+           "Workflow rejected: this keeper lacks required execution/repo tool(s): %s. Route the task to a coding/verifier keeper or update required_tools."
+           (String.concat ", " missing)))
+;;
+
 let find_task_goal_id config task_id =
   Coord.get_tasks_raw config
   |> List.find_map (fun (task : Masc_domain.task) ->
@@ -384,10 +413,21 @@ let handle_keeper_task_tool
           else message
       | Coord.Claim_next_no_unclaimed -> "No unclaimed tasks. ACTION: Stop task-checking — nothing to claim."
       | Coord.Claim_next_no_eligible { excluded_count; _ } ->
+        let action =
+          match
+            required_tool_workflow_rejection
+              config
+              ~agent_tool_names
+              claim_goal_scope
+          with
+          | Some rejection -> rejection
+          | None ->
+            no_eligible_action_for_claim_scope claim_goal_scope ~excluded_count
+        in
         Printf.sprintf
           "No eligible tasks%s. %s"
           (claim_scope_context_suffix ~meta claim_goal_scope)
-          (no_eligible_action_for_claim_scope claim_goal_scope ~excluded_count)
+          action
       | Coord.Claim_next_error e -> Printf.sprintf "Error: %s" e
     in
     let claim_scope, claimed_task_fields =

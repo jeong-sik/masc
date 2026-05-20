@@ -266,7 +266,7 @@ let degraded_retry_reason_to_string = function
   | Cascade_candidates_filtered -> "cascade_candidates_filtered"
   | Required_tool_contract_violation -> "required_tool_contract_violation"
   | Cascade_exhausted -> "cascade_exhausted"
-  | Capacity_exhausted -> "capacity_exhausted"
+  | Capacity_exhausted -> "capacity_backpressure"
   | Rate_limit -> "rate_limit"
   | Server_error -> "server_error"
   | Auth_error -> "auth_error"
@@ -357,7 +357,7 @@ let degraded_retry_after_recoverable_error
         (Keeper_turn_driver.Cascade_exhausted
            { reason = Keeper_types.Other_detail detail; _ })
       when message_looks_like_capacity_backpressure detail ->
-        local_recovery_retry Capacity_exhausted
+        local_recovery_retry Cascade_exhausted
     | Some (Keeper_turn_driver.Cascade_exhausted _)
     | Some (Keeper_turn_driver.No_tool_capable_provider _)
     | Some (Keeper_turn_driver.Accept_rejected _)
@@ -403,7 +403,7 @@ let recoverable_cascade_failure_reason (err : Agent_sdk.Error.sdk_error) =
         (Keeper_turn_driver.Cascade_exhausted
            { reason = Keeper_types.Other_detail detail; _ })
       when message_looks_like_capacity_backpressure detail ->
-        Some Capacity_exhausted
+        Some Cascade_exhausted
     | Some (Keeper_turn_driver.Cascade_exhausted _) ->
         (* Generic cascade exhaustion: all candidates failed without a more
            specific reason. Treat as recoverable so declarative

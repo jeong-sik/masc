@@ -38,6 +38,19 @@ let check_capacity_class label cls_opt =
   | None ->
       fail (Printf.sprintf "%s returned None, expected Capacity_exhausted" label)
 
+let check_cascade_class label cls_opt =
+  match cls_opt with
+  | Some (KT.Cascade_exhausted _) -> ()
+  | Some other ->
+      let other_str = KT.blocker_class_to_string other in
+      fail
+        (Printf.sprintf
+           "%s mapped to %s, expected Cascade_exhausted"
+           label
+           other_str)
+  | None ->
+      fail (Printf.sprintf "%s returned None, expected Cascade_exhausted" label)
+
 let test_completion_contract_text_maps () =
   let msg = "Completion contract [require_tool_use] violated: actionable \
              keeper signal was present, but the model used \
@@ -87,9 +100,9 @@ let test_turn_livelock_text_maps () =
       fail ("turn livelock mapped to " ^ KT.blocker_class_to_string other)
   | None -> fail "turn livelock returned None"
 
-let test_capacity_backpressure_text_maps () =
-  check_capacity_class
-    "slot-full text"
+let test_legacy_cascade_slot_full_text_stays_cascade_exhausted () =
+  check_cascade_class
+    "legacy cascade slot-full text"
     (B.blocker_class_of_string
        "Internal error: [masc_oas_error] {\"kind\":\"cascade_exhausted\",\
         \"reason\":{\"tag\":\"other_detail\",\"message\":\"slot full, cascading \
@@ -109,13 +122,13 @@ let test_capacity_backpressure_sdk_error_maps () =
   check_capacity_class "typed capacity structured SDK error"
     (B.blocker_class_of_sdk_error err)
 
-let test_capacity_backpressure_runtime_surface_maps_legacy_cascade () =
+let test_capacity_backpressure_runtime_surface_preserves_legacy_cascade_class () =
   let surface =
     B.runtime_blocker_surface_of_typed_class
       ~summary:"slot full, cascading to next provider"
       (KT.Cascade_exhausted (KT.Other_detail "cascade_exhausted"))
   in
-  check string "runtime blocker class" "capacity_exhausted"
+  check string "runtime blocker class" "cascade_exhausted"
     surface.blocker_class
 
 let () =
@@ -142,11 +155,11 @@ let () =
           test_case "existing turn-timeout mapping unchanged" `Quick
             test_existing_mappings_unchanged;
           test_case "turn livelock text maps" `Quick test_turn_livelock_text_maps;
-          test_case "capacity backpressure text maps" `Quick
-            test_capacity_backpressure_text_maps;
+          test_case "legacy cascade slot-full text stays cascade_exhausted" `Quick
+            test_legacy_cascade_slot_full_text_stays_cascade_exhausted;
           test_case "capacity backpressure SDK error maps" `Quick
             test_capacity_backpressure_sdk_error_maps;
-          test_case "capacity backpressure runtime surface maps legacy cascade" `Quick
-            test_capacity_backpressure_runtime_surface_maps_legacy_cascade;
+          test_case "capacity backpressure runtime surface preserves legacy cascade class" `Quick
+            test_capacity_backpressure_runtime_surface_preserves_legacy_cascade_class;
         ] );
     ]

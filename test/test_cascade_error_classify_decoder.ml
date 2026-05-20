@@ -109,7 +109,7 @@ let test_roundtrip_bare_string_reason () =
 let test_roundtrip_capacity_backpressure () =
   let payload =
     `Assoc
-      [ ("kind", `String "capacity_exhausted")
+      [ ("kind", `String "capacity_backpressure")
       ; ("cascade_name", `String "primary")
       ; ("source", `String "client_capacity")
       ; ("detail", `String "client capacity key glm is full")

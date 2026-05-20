@@ -44,7 +44,7 @@ let test_stale_fleet_batch_blocker_class_roundtrip () =
 let test_capacity_exhausted_blocker_class_roundtrip () =
   let cls = KT.Capacity_exhausted in
   let label = KT.blocker_class_to_string cls in
-  check string "label" "capacity_exhausted" label;
+  check string "label" "capacity_backpressure" label;
   match MC.blocker_class_of_serialized_string label with
   | Some MC.Capacity_exhausted -> ()
   | Some _ -> fail "Capacity_exhausted label parsed as wrong class"

@@ -127,7 +127,7 @@ let cascade_exhausted_failure_reason_of_raw_error ~detail raw_error =
   | Some (Cascade_error_classify.Capacity_backpressure { detail = capacity_detail; _ }) ->
     Some
       (Keeper_registry.Provider_runtime_error
-         { code = "capacity_exhausted"
+         { code = "capacity_backpressure"
          ; detail = capacity_detail
          ; provider_id = None
          ; http_status = None

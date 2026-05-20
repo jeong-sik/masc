@@ -151,7 +151,7 @@ let masc_internal_error_to_json = function
     let cascade_name = cascade_name_to_string cascade_name in
     `Assoc
       [
-        ("kind", `String "capacity_exhausted");
+        ("kind", `String "capacity_backpressure");
         ("cascade_name", `String cascade_name);
         ("source", `String (capacity_backpressure_source_to_string source));
         ("detail", `String detail);
@@ -359,7 +359,7 @@ let () =
     ~help:
       "Total MASC-internal errors emitted as Agent_sdk.Error.Internal \
        payloads, classified by structured error kind. Labels: \
-       kind (cascade_exhausted | capacity_exhausted | resumable_cli_session | \
+       kind (cascade_exhausted | capacity_backpressure | resumable_cli_session | \
        no_tool_capable_provider | accept_rejected | \
        admission_queue_timeout | admission_queue_rejected | \
        turn_timeout | oas_timeout_budget | max_tokens_ceiling_violation | \
@@ -370,7 +370,7 @@ let () =
 
 let kind_of_masc_internal_error = function
   | Cascade_exhausted _ -> "cascade_exhausted"
-  | Capacity_backpressure _ -> "capacity_exhausted"
+  | Capacity_backpressure _ -> "capacity_backpressure"
   | Resumable_cli_session _ -> "resumable_cli_session"
   | No_tool_capable_provider _ -> "no_tool_capable_provider"
   | Accept_rejected _ -> "accept_rejected"
@@ -495,7 +495,7 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
                     })
              | None -> None)
           | None -> None)
-      | Some (`String "capacity_exhausted") -> (
+      | Some (`String ("capacity_backpressure" | "capacity_exhausted")) -> (
           match
             string_opt_of_assoc "cascade_name" json,
             string_opt_of_assoc "source" json,

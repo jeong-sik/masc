@@ -64,7 +64,7 @@ let test_other_detail_generic_recoverable () =
   | None ->
     fail "Generic Cascade_exhausted with Other_detail should be recoverable"
 
-let test_slot_full_other_detail_is_capacity_backpressure () =
+let test_slot_full_other_detail_stays_legacy_cascade_exhausted () =
   let err =
     make_cascade_exhausted
       (KT.Other_detail "slot full, cascading to next provider")
@@ -75,10 +75,10 @@ let test_slot_full_other_detail_is_capacity_backpressure () =
     (KEC.is_cascade_exhausted_error err);
   match KEC.recoverable_cascade_failure_reason err with
   | Some reason ->
-    check string "legacy slot full -> capacity_exhausted" "capacity_exhausted"
+    check string "legacy slot full -> cascade_exhausted" "cascade_exhausted"
       (KEC.degraded_retry_reason_to_string reason)
   | None ->
-    fail "slot full should be capacity-backpressure recoverable"
+    fail "slot full should be cascade-exhausted recoverable"
 
 let test_typed_capacity_backpressure_is_not_cascade_exhausted () =
   let err = make_capacity_backpressure () in
@@ -88,7 +88,7 @@ let test_typed_capacity_backpressure_is_not_cascade_exhausted () =
     (KEC.is_cascade_exhausted_error err);
   match KEC.recoverable_cascade_failure_reason err with
   | Some reason ->
-    check string "typed capacity -> capacity_exhausted" "capacity_exhausted"
+    check string "typed capacity -> capacity_backpressure" "capacity_backpressure"
       (KEC.degraded_retry_reason_to_string reason)
   | None ->
     fail "typed capacity backpressure should be recoverable as capacity"
@@ -106,8 +106,8 @@ let test_provider_capacity_exhausted_is_capacity_backpressure () =
   in
   match KEC.recoverable_cascade_failure_reason err with
   | Some reason ->
-    check string "Provider CapacityExhausted -> capacity_exhausted"
-      "capacity_exhausted"
+    check string "Provider CapacityExhausted -> capacity_backpressure"
+      "capacity_backpressure"
       (KEC.degraded_retry_reason_to_string reason)
   | None ->
     fail "Provider CapacityExhausted should be recoverable as capacity"
@@ -444,8 +444,8 @@ let () =
             test_auto_recoverable_cascade_exhausted_is_still_cascade_exhausted;
           test_case "Other_detail (non-quota) is recoverable" `Quick
             test_other_detail_generic_recoverable;
-          test_case "slot full Other_detail is capacity backpressure" `Quick
-            test_slot_full_other_detail_is_capacity_backpressure;
+          test_case "slot full Other_detail stays legacy cascade exhausted" `Quick
+            test_slot_full_other_detail_stays_legacy_cascade_exhausted;
           test_case "typed capacity backpressure is not cascade exhausted" `Quick
             test_typed_capacity_backpressure_is_not_cascade_exhausted;
           test_case "provider CapacityExhausted is capacity backpressure" `Quick

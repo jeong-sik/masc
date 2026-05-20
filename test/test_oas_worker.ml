@@ -1735,6 +1735,34 @@ let test_oas_worker_exec_build_applies_body_timeout () =
   | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
 ;;
 
+let is_missing_approval_callback_reject = function
+  | Agent_sdk.Hooks.Reject_without_callback -> true
+  | Agent_sdk.Hooks.Execute_without_callback -> false
+;;
+
+let test_oas_worker_exec_build_rejects_missing_approval_callback () =
+  let config =
+    Cascade_runner.default_config
+      ~name:"oas-worker-missing-approval-policy"
+      ~provider_cfg:(make_local_provider_cfg ())
+      ~system_prompt:"system"
+      ~tools:[ make_noop_tool () ]
+  in
+  Eio.Switch.run
+  @@ fun sw ->
+  match Cascade_runner.build ~sw ~net:(require_test_net ()) ~config with
+  | Ok agent ->
+    let policy =
+      (Agent_sdk.Agent.options agent).missing_approval_callback_policy
+    in
+    Alcotest.(check bool)
+      "missing approval callback policy rejects"
+      true
+      (is_missing_approval_callback_reject policy);
+    Agent_sdk.Agent.close agent
+  | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
+;;
+
 let test_oas_worker_exec_build_installs_ollama_kind_preserving_transport () =
   let provider_cfg =
     Llm_provider.Provider_config.make
@@ -1989,6 +2017,36 @@ let test_resume_propagates_approval () =
        let _ = cb ~tool_name:"x" ~input:`Null in
        Alcotest.(check bool) "callback identity preserved" true !approval_called
      | None -> ());
+    Agent_sdk.Agent.close agent
+  | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
+;;
+
+let test_resume_rejects_missing_approval_callback () =
+  let base_config =
+    Cascade_runner.default_config
+      ~name:"resume-missing-approval-policy"
+      ~provider_cfg:(make_local_provider_cfg ())
+      ~system_prompt:"system"
+      ~tools:[ make_noop_tool () ]
+  in
+  let checkpoint = make_checkpoint () in
+  Eio.Switch.run
+  @@ fun sw ->
+  match
+    Cascade_runner.resume_from_checkpoint
+      ~sw
+      ~net:(require_test_net ())
+      ~config:base_config
+      ~checkpoint
+  with
+  | Ok agent ->
+    let policy =
+      (Agent_sdk.Agent.options agent).missing_approval_callback_policy
+    in
+    Alcotest.(check bool)
+      "missing approval callback policy rejects through resume"
+      true
+      (is_missing_approval_callback_reject policy);
     Agent_sdk.Agent.close agent
   | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
 ;;
@@ -6080,6 +6138,10 @@ let () =
             `Quick
             test_oas_worker_exec_build_applies_body_timeout
         ; Alcotest.test_case
+            "oas_worker rejects missing approval callback"
+            `Quick
+            test_oas_worker_exec_build_rejects_missing_approval_callback
+        ; Alcotest.test_case
             "oas_worker installs native Ollama HTTP transport"
             `Quick
             test_oas_worker_exec_build_installs_ollama_kind_preserving_transport
@@ -6119,6 +6181,10 @@ let () =
             "resume propagates approval (no silent ApprovalRequired drift)"
             `Quick
             test_resume_propagates_approval
+        ; Alcotest.test_case
+            "resume rejects missing approval callback"
+            `Quick
+            test_resume_rejects_missing_approval_callback
         ; Alcotest.test_case
             "resume propagates slot_id"
             `Quick

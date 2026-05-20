@@ -75,7 +75,7 @@ let resolve_owner_keeper_identity config owner_name =
   loop candidates
 
 let resolve_initial_agent_name ~identity ~cached_resolved_agent ~mcp_session_id
-    ~explicit_agent_name ~read_mcp_session_agent ~read_term_session_agent =
+    ~explicit_agent_name ~read_mcp_session_agent =
   let identity_session_prefix =
     let len = min 8 (String.length identity.Agent_identity.session_key) in
     if len = 0 then
@@ -97,17 +97,7 @@ let resolve_initial_agent_name ~identity ~cached_resolved_agent ~mcp_session_id
           else (
             match read_mcp_session_agent () with
             | Some name -> name
-            | None ->
-                if Option.is_some mcp_session_id then
-                  generated_fallback_agent_name
-                else (
-                  match read_term_session_agent () with
-                  | Some name ->
-                      Log.Mcp.warn
-                        "[deprecated] agent name resolved via /tmp TERM file — migrate to \
-                         Agent_identity";
-                      name
-                  | None -> generated_fallback_agent_name)))
+            | None -> generated_fallback_agent_name))
 
 let resolve_auth_fallback_agent_name
     ~(config : Coord_utils_backend_setup.config)
@@ -178,12 +168,12 @@ let resolve_explicit_joined_alias ~config ~room_initialized ~log_mcp_exn
 
 let resolve ~(config : Coord_utils_backend_setup.config) ~tool_name ~arguments ~identity ~cached_resolved_agent
     ~mcp_session_id ~auth_token ~internal_keeper_runtime ~room_initialized
-    ~read_mcp_session_agent ~read_term_session_agent ~log_mcp_exn =
+    ~read_mcp_session_agent ~log_mcp_exn =
   let explicit_agent_name = caller_agent_name_from_arguments arguments in
   let has_explicit_agent_name = Option.is_some explicit_agent_name in
   let agent_name =
     resolve_initial_agent_name ~identity ~cached_resolved_agent ~mcp_session_id
-      ~explicit_agent_name ~read_mcp_session_agent ~read_term_session_agent
+      ~explicit_agent_name ~read_mcp_session_agent
   in
   let token = auth_token in
   let verified_internal_keeper_runtime =
@@ -220,16 +210,8 @@ let resolve ~(config : Coord_utils_backend_setup.config) ~tool_name ~arguments ~
   in
   let persisted_agent_name () =
     if should_read_legacy_persisted_agent_name ~has_explicit_agent_name ~agent_name
-    then
-      match read_mcp_session_agent () with
-      | Some n -> Some n
-      | None ->
-          if Option.is_some mcp_session_id then
-            None
-          else
-            read_term_session_agent ()
-    else
-      None
+    then read_mcp_session_agent ()
+    else None
   in
   let agent_name =
     match persisted_agent_name () with

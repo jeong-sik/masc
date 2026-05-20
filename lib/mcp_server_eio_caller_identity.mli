@@ -26,6 +26,5 @@ val resolve :
   internal_keeper_runtime:bool ->
   room_initialized:(unit -> bool) ->
   read_mcp_session_agent:(unit -> string option) ->
-  read_term_session_agent:(unit -> string option) ->
   log_mcp_exn:(label:string -> exn -> unit) ->
   t

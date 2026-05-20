@@ -200,26 +200,12 @@ let execute_tool_eio
        | Eio.Io _ as exn ->
          Log.Misc.warn "write_mcp_session_agent: %s" (Printexc.to_string exn))
   in
-  let read_term_session_agent () =
-    if Option.is_some mcp_session_id
-    then None
-    else (
-      match Sys.getenv_opt "TERM_SESSION_ID" with
-      | None -> None
-      | Some sid ->
-        let file = Filename.concat agent_runtime_root (Printf.sprintf ".masc_agent_%s" sid) in
-        (try
-           let name = Fs_compat.load_file file |> String.trim in
-           if name = "" then None else Some name
-         with
-         | Sys_error _ -> None))
-  in
   let caller_identity =
     Mcp_server_eio_caller_identity.resolve ~config ~tool_name:name ~arguments
       ~identity ~cached_resolved_agent ~mcp_session_id ~auth_token
       ~internal_keeper_runtime
       ~room_initialized:(fun () -> !room_init_cached)
-      ~read_mcp_session_agent ~read_term_session_agent ~log_mcp_exn
+      ~read_mcp_session_agent ~log_mcp_exn
   in
   let agent_name = caller_identity.agent_name in
   let token = caller_identity.token in
@@ -358,22 +344,6 @@ let execute_tool_eio
          with
          | Invalid_argument _ -> fallback
        in
-       let write_term_session_agent nickname =
-         if Option.is_some mcp_session_id
-         then ()
-         else (
-           match Sys.getenv_opt "TERM_SESSION_ID" with
-           | None -> ()
-           | Some sid ->
-             let file = Filename.concat agent_runtime_root (Printf.sprintf ".masc_agent_%s" sid) in
-             (try Fs_compat.save_file file nickname with
-              | Eio.Cancel.Cancelled _ as e -> raise e
-              | e ->
-                Log.Misc.error
-                  "Failed to write agent file %s: %s"
-                  file
-                  (Printexc.to_string e)))
-       in
        (* Auto-init/auto-join for better UX.
      - Auto-init only when auth is disabled (avoid side effects in secured rooms).
      - Auto-join when allowed by auth (and safe for token-based auth). *)
@@ -471,7 +441,6 @@ let execute_tool_eio
                 Log.Mcp.info "Auto-joined for %s: %s -> %s" name agent_name nickname;
                 (* Persist nickname so subsequent calls can use it. *)
                 write_mcp_session_agent nickname;
-                write_term_session_agent nickname;
                 let (_ : Session.session) =
                   Session.register registry ~agent_name:nickname
                 in

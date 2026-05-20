@@ -1440,7 +1440,6 @@ let test_execute_tool_explicit_agent_name_not_overridden () =
       ~auth_token:None ~internal_keeper_runtime:false
       ~room_initialized:(fun () -> false)
       ~read_mcp_session_agent:(fun () -> Some "persisted-stale-nickname")
-      ~read_term_session_agent:(fun () -> Some "term-stale-nickname")
       ~log_mcp_exn:(fun ~label:_ _ -> ())
   in
   let codex =
@@ -1478,7 +1477,6 @@ let test_execute_tool_explicit_alias_reuses_joined_nickname () =
       ~auth_token:None ~internal_keeper_runtime:false
       ~room_initialized:(fun () -> true)
       ~read_mcp_session_agent:(fun () -> None)
-      ~read_term_session_agent:(fun () -> None)
       ~log_mcp_exn:(fun ~label:_ _ -> ())
   in
   Alcotest.(check string)
@@ -1788,7 +1786,6 @@ let test_execute_tool_http_auth_token_overrides_stale_argument_token () =
       ~internal_keeper_runtime:false
       ~room_initialized:(fun () -> true)
       ~read_mcp_session_agent:(fun () -> None)
-      ~read_term_session_agent:(fun () -> None)
       ~log_mcp_exn:(fun ~label:_ _ -> ())
   in
   Alcotest.(check (option string))
@@ -1813,7 +1810,6 @@ let test_execute_tool_legacy_argument_token_ignored_without_http_auth () =
       ~auth_token:None ~internal_keeper_runtime:false
       ~room_initialized:(fun () -> true)
       ~read_mcp_session_agent:(fun () -> None)
-      ~read_term_session_agent:(fun () -> None)
       ~log_mcp_exn:(fun ~label:_ _ -> ())
   in
   Alcotest.(check (option string))
@@ -1822,28 +1818,29 @@ let test_execute_tool_legacy_argument_token_ignored_without_http_auth () =
     result.token;
   cleanup_dir base_path
 
-let test_execute_tool_mcp_session_ignores_term_persistence () =
+let test_execute_tool_without_mcp_session_uses_generated_identity () =
   let base_path = temp_dir () in
   let config = Masc_mcp.Coord.default_config base_path in
   let identity =
-    test_agent_identity ~uuid:"mcp-term-isolation-test" ~session_key:"mcpterm00"
+    test_agent_identity
+      ~uuid:"generated-identity-no-session-test"
+      ~session_key:"nosess00"
   in
   let result =
     Masc_mcp.Mcp_server_eio_caller_identity.resolve ~config
       ~tool_name:"masc_broadcast"
-      ~arguments:(`Assoc [ ("message", `String "term isolation check") ])
+      ~arguments:(`Assoc [ ("message", `String "generated identity check") ])
       ~identity ~cached_resolved_agent:None
-      ~mcp_session_id:(Some "mcp-term-isolation-regression")
+      ~mcp_session_id:None
       ~auth_token:None ~internal_keeper_runtime:false
       ~room_initialized:(fun () -> true)
       ~read_mcp_session_agent:(fun () -> None)
-      ~read_term_session_agent:(fun () -> Some "intruder-sage-tiger")
       ~log_mcp_exn:(fun ~label:_ _ -> ())
   in
-  Alcotest.(check bool)
-    "mcp session must not reuse TERM_SESSION_ID persisted nickname"
-    false
-    (String.equal "intruder-sage-tiger" result.agent_name);
+  Alcotest.(check string)
+    "generated fallback"
+    "agent-nosess00"
+    result.agent_name;
 
   cleanup_dir base_path
 
@@ -3013,7 +3010,8 @@ let eio_tests = [
     test_execute_tool_http_auth_token_overrides_stale_argument_token;
   "legacy argument token ignored without http auth", `Quick,
     test_execute_tool_legacy_argument_token_ignored_without_http_auth;
-  "mcp session ignores term persistence", `Quick, test_execute_tool_mcp_session_ignores_term_persistence;
+  "without mcp session uses generated identity", `Quick,
+    test_execute_tool_without_mcp_session_uses_generated_identity;
   (* Legacy governance convo room test removed *)
 ]
 

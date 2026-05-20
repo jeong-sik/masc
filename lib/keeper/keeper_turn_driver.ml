@@ -1322,7 +1322,12 @@ let run_named
               Cascade_legacy_runner.record_cascade ~keeper_name
                 ~cascade_name:error_cascade_name
                 ~outcome:`Failure ~observation:(Some observation) ();
-              Log.Misc.error "cascade %s exhausted: all tiers failed (last runtime=%s, error=%s)"
+              let log =
+                if sdk_error_is_required_tool_contract_violation sdk_err then
+                  Log.Misc.warn
+                else Log.Misc.error
+              in
+              log "cascade %s exhausted: all tiers failed (last runtime=%s, error=%s)"
                 cascade_name runtime_candidate_label (Agent_sdk.Error.to_string sdk_err);
               Error sdk_err
             (* [Accept] / [Accept_on_exhaustion] are reachable only from

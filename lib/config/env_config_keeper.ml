@@ -826,6 +826,22 @@ module KeeperTelemetry = struct
   let payload_telemetry_enabled () = get_bool ~default:false "MASC_PAYLOAD_TELEMETRY"
 end
 
+(** {1 Cascade Saturation Signal (RFC-0153 Phase A.2)}
+
+    Feature flag for typed [Cascade_saturation_signal.t] emission alongside
+    the existing string-based [timeout_source_label] classification in
+    [cascade_attempt_fsm.ml]. The signal is consumed by Phase B (tier
+    admission semaphore) and Phase C (adaptive throttling).
+
+    Default off. Phase A.2 emit is purely additive — it increments a new
+    Prometheus counter ([masc_keeper_cascade_saturation_signal_total])
+    with a typed [kind] label sourced from {!Cascade_saturation_signal.kind}.
+    No existing behaviour, wire format, or string label is altered. *)
+module CascadeSaturationSignal = struct
+  let enabled () =
+    get_bool ~default:false "MASC_CASCADE_SATURATION_SIGNAL_ENABLED"
+end
+
 (** {1 Cascade Runtime Overrides}
 
     Runtime-only narrowing of the MASC cascade provider set. The underlying

@@ -601,6 +601,15 @@ val metric_keeper_stale_termination_threshold_breached : string
 val metric_keeper_stale_termination_batch : string
 val metric_keeper_stale_broadcast_emit_failures : string
 val metric_keeper_oas_run_timeout : string
+
+val metric_keeper_cascade_saturation_signal : string
+(** RFC-0153 Phase A.2: typed [Cascade_saturation_signal.t] emission
+    counter. Labels: [kind] (from
+    {!Cascade_saturation_signal.kind_to_string}), [cascade] (cascade
+    name string). Gated by [MASC_CASCADE_SATURATION_SIGNAL_ENABLED]
+    in {!Env_config_keeper.CascadeSaturationSignal.enabled}. Phase B/C
+    are the consumers. *)
+
 val metric_keeper_tool_use_failure : string
 val metric_keeper_tool_not_allowed : string
 val metric_keeper_turn_gate_rejected_terminal : string

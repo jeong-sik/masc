@@ -812,8 +812,69 @@ let emit_oas_run_timeout_metric ~cascade_name ~provider:_ err =
         ()
   | _ -> ()
 
+(* RFC-0153 Phase A.2: when [MASC_CASCADE_SATURATION_SIGNAL_ENABLED] is
+   set, emit a typed [Cascade_saturation_signal.t] alongside the
+   existing string-based [timeout_source_label] metric. Phase A.2 is
+   additive — the counter is new ([metric_keeper_cascade_saturation_signal]),
+   no existing wire format or label is altered. Phase B (tier admission)
+   and Phase C (adaptive throttling) consume this counter to make
+   admission/throttle decisions.
+
+   The match below classifies the same [sdk_error] shape that
+   [timeout_source_label] classifies by substring, but emits a typed
+   [kind] from {!Cascade_saturation_signal.kind} instead. The substring
+   path is preserved for backwards-compatible label drift detection. *)
+let classify_saturation_signal_kind
+    (err : Agent_sdk.Error.sdk_error) :
+    Cascade_saturation_signal.kind option =
+  match err with
+  | Agent_sdk.Error.Api (Llm_provider.Retry.Timeout { message }) ->
+      if String_util.contains_substring_ci message "max_execution_time_s"
+      then Some Cascade_saturation_signal.K_time_cap_fired
+      else None
+  | Agent_sdk.Error.Provider (Llm_provider.Error.Timeout { detail; _ }) ->
+      if String_util.contains_substring_ci detail "max_execution_time_s"
+      then Some Cascade_saturation_signal.K_time_cap_fired
+      else None
+  | Agent_sdk.Error.Api (Llm_provider.Retry.RateLimited _) ->
+      Some Cascade_saturation_signal.K_provider_rate_limited
+  | Agent_sdk.Error.Api (Llm_provider.Retry.Overloaded _)
+  | Agent_sdk.Error.Api (Llm_provider.Retry.ServerError _)
+  | Agent_sdk.Error.Api (Llm_provider.Retry.AuthError _)
+  | Agent_sdk.Error.Api (Llm_provider.Retry.InvalidRequest _)
+  | Agent_sdk.Error.Api (Llm_provider.Retry.NotFound _)
+  | Agent_sdk.Error.Api (Llm_provider.Retry.ContextOverflow _)
+  | Agent_sdk.Error.Api (Llm_provider.Retry.NetworkError _)
+  | Agent_sdk.Error.Provider _
+  | Agent_sdk.Error.Agent _
+  | Agent_sdk.Error.Mcp _
+  | Agent_sdk.Error.Config _
+  | Agent_sdk.Error.Serialization _
+  | Agent_sdk.Error.Io _
+  | Agent_sdk.Error.Orchestration _
+  | Agent_sdk.Error.A2a _
+  | Agent_sdk.Error.Internal _ -> None
+
+let maybe_emit_cascade_saturation_signal ~cascade_name ~provider:_ err =
+  if Env_config_keeper.CascadeSaturationSignal.enabled () then
+    match classify_saturation_signal_kind err with
+    | None -> ()
+    | Some kind ->
+        let cascade_name_str =
+          provider_label (cascade_name_to_string cascade_name)
+        in
+        Prometheus.inc_counter
+          Keeper_metrics.metric_keeper_cascade_saturation_signal
+          ~labels:
+            [
+              (label_kind, Cascade_saturation_signal.kind_to_string kind);
+              (label_cascade, cascade_name_str);
+            ]
+          ()
+
 let emit_sdk_provider_error_metric ~cascade_name ~provider err =
   emit_oas_run_timeout_metric ~cascade_name ~provider err;
+  maybe_emit_cascade_saturation_signal ~cascade_name ~provider err;
   match sdk_error_to_provider_error ~provider err with
   | None -> None
   | Some provider_error ->

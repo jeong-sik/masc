@@ -1457,6 +1457,8 @@
 
 (include stanzas/test_cascade_saturation_signal.inc)
 
+(include stanzas/test_cascade_saturation_signal_phase_a2.inc)
+
 (include stanzas/test_cascade_catalog_runtime_yojson.inc)
 
 (include stanzas/test_oas_worker_named_liveness_integration.inc)

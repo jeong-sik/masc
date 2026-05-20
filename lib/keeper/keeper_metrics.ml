@@ -958,6 +958,16 @@ let metric_keeper_stale_broadcast_emit_failures =
 ;;
 
 let metric_keeper_oas_run_timeout = "masc_keeper_oas_run_timeout_total"
+
+(* RFC-0153 Phase A.2: typed Cascade_saturation_signal emission counter.
+   Incremented from cascade_attempt_fsm when MASC_CASCADE_SATURATION_SIGNAL_ENABLED
+   is set. Labels: [kind] from Cascade_saturation_signal.kind_to_string,
+   [cascade] from cascade_name_to_string. Phase A.2 is additive only —
+   no behaviour change. Phase B/C are the consumers. *)
+let metric_keeper_cascade_saturation_signal =
+  "masc_keeper_cascade_saturation_signal_total"
+;;
+
 let metric_keeper_tool_use_failure = "masc_keeper_tool_use_failure_total"
 let metric_keeper_tool_not_allowed = "masc_keeper_tool_not_allowed_total"
 

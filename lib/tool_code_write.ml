@@ -71,43 +71,24 @@ type code_shell_exit_status =
   | Shell_ok_expected_nonzero of string
   | Shell_error
 
-let first_token_basename segment =
-  let trimmed = String.trim segment in
-  if String.equal trimmed "" then None
-  else
-    let len = String.length trimmed in
-    let rec find_sep i =
-      if i >= len then len
-      else
-        match trimmed.[i] with
-        | ' ' | '\t' -> i
-        | _ -> find_sep (i + 1)
-    in
-    Some (Filename.basename (String.sub trimmed 0 (find_sep 0)))
+(* RFC-0131 Phase 2 (Shell IR Promotion Goal, 2026-05-18) — the local
+   string-splitter fallback ([first_token_basename] +
+   [last_pipeline_segment]) was the last in-module shell splitter in
+   [tool_code_write].  It existed to keep exit classification working
+   when [Shell_command_gate.parse] could not produce a typed AST.
 
-let last_pipeline_segment command =
-  let len = String.length command in
-  let last_start = ref 0 in
-  let in_single = ref false in
-  let in_double = ref false in
-  let escaped = ref false in
-  for i = 0 to len - 1 do
-    let c = command.[i] in
-    if !escaped then escaped := false
-    else
-      match c with
-      | '\\' when not !in_single -> escaped := true
-      | '\'' when not !in_double -> in_single := not !in_single
-      | '"' when not !in_single -> in_double := not !in_double
-      | '|' when (not !in_single) && not !in_double -> last_start := i + 1
-      | _ -> ()
-  done;
-  String.sub command !last_start (len - !last_start)
-
+   Phase 2 explicitly removes that fallback: the facade is the only
+   parse path.  When the parser cannot lift the command, the last-stage
+   binary name is genuinely unknown — we conservatively fall through to
+   [Shell_error] instead of silently re-deriving a name from a different
+   splitter.  This matches Phase 2's rule "이 PR 이후
+   lib/tool_code_write.ml 에는 shell splitter가 없어야 한다" and the
+   Plan's separation of parse / validation / exec / classify error
+   classes. *)
 let exit_status_command_name command =
   match Shell_command_gate.parse command with
   | Ok context -> Shell_command_gate.last_stage_bin context
-  | Error _ -> first_token_basename (last_pipeline_segment command)
+  | Error _ -> None
 
 let classify_code_shell_exit ~command code =
   match code with
@@ -116,7 +97,7 @@ let classify_code_shell_exit ~command code =
       match exit_status_command_name command with
       | Some ("rg" | "grep") -> Shell_ok_expected_nonzero "no_matches"
       | Some "diff" -> Shell_ok_expected_nonzero "differences"
-      | _ -> Shell_error)
+      | Some _ | None -> Shell_error)
   | _ -> Shell_error
 
 let git_common_root path =

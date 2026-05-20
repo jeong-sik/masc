@@ -59,60 +59,15 @@ let has_process_substitution cmd =
   contains_substring cmd "<(" || contains_substring cmd ">("
 ;;
 
-type pipeline_quote_state = Pipeline_no_quote | Pipeline_single | Pipeline_double
-
-let split_pipeline_segments cmd =
-  let len = String.length cmd in
-  let buf = Buffer.create len in
-  let push_segment segments =
-    let segment = Buffer.contents buf |> String.trim in
-    Buffer.clear buf;
-    segment :: segments
-  in
-  let rec loop quote escaped i segments =
-    if i >= len
-    then List.rev (push_segment segments)
-    else if escaped
-    then (
-      Buffer.add_char buf cmd.[i];
-      loop quote false (i + 1) segments)
-    else
-      match quote, cmd.[i] with
-      | Pipeline_single, '\'' ->
-        Buffer.add_char buf cmd.[i];
-        loop Pipeline_no_quote false (i + 1) segments
-      | Pipeline_single, _ ->
-        Buffer.add_char buf cmd.[i];
-        loop quote false (i + 1) segments
-      | Pipeline_double, '"' ->
-        Buffer.add_char buf cmd.[i];
-        loop Pipeline_no_quote false (i + 1) segments
-      | Pipeline_double, '\\' ->
-        Buffer.add_char buf cmd.[i];
-        loop quote true (i + 1) segments
-      | Pipeline_double, _ ->
-        Buffer.add_char buf cmd.[i];
-        loop quote false (i + 1) segments
-      | Pipeline_no_quote, '\'' ->
-        Buffer.add_char buf cmd.[i];
-        loop Pipeline_single false (i + 1) segments
-      | Pipeline_no_quote, '"' ->
-        Buffer.add_char buf cmd.[i];
-        loop Pipeline_double false (i + 1) segments
-      | Pipeline_no_quote, '\\' ->
-        Buffer.add_char buf cmd.[i];
-        loop quote true (i + 1) segments
-      | Pipeline_no_quote, '|' ->
-        loop Pipeline_no_quote false (i + 1) (push_segment segments)
-      | Pipeline_no_quote, _ ->
-        Buffer.add_char buf cmd.[i];
-        loop quote false (i + 1) segments
-  in
-  let segments = loop Pipeline_no_quote false 0 [] in
-  if List.exists (fun segment -> segment = "") segments
-  then Error "Pipes must separate complete allowed commands."
-  else Ok segments
-;;
+(* RFC-0131 Phase 2 (Shell IR Promotion Goal, 2026-05-18) —
+   [split_pipeline_segments] and its [pipeline_quote_state] helper were
+   the legacy string-based pipeline splitter for the Coding/Full gate.
+   [validate_command_coding_with_allowlist] now consumes the typed
+   pipeline produced by [Shell_command_gate.parse], so this string
+   splitter has no remaining caller in lib/, test/, or bin/.  Per
+   Phase 2 dedup it is removed outright; reintroducing a non-AST
+   pipeline splitter is explicitly out-of-scope and must be replaced
+   by extending the facade. *)
 
 let split_shell_tokens cmd =
   String.split_on_char ' ' cmd

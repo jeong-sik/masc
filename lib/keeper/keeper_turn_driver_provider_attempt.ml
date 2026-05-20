@@ -57,6 +57,10 @@ type provider_attempt_started_record =
   { started_provenance : provider_attempt_provenance
   ; started_is_last : bool
   ; started_per_provider_timeout_s : float option
+  ; started_attempt_timeout_source : string
+  ; started_attempt_watchdog_source : string
+  ; started_liveness_mode : string
+  ; started_liveness_budget_source : string option
   }
 
 type provider_attempt_finished_record =
@@ -77,6 +81,17 @@ let provider_attempt_started_decision record =
            match record.started_per_provider_timeout_s with
            | None -> `Null
            | Some timeout -> `Float timeout );
+         ( "attempt_timeout_s",
+           match record.started_per_provider_timeout_s with
+           | None -> `Null
+           | Some timeout -> `Float timeout );
+         ("attempt_timeout_source", `String record.started_attempt_timeout_source);
+         ("attempt_watchdog_source", `String record.started_attempt_watchdog_source);
+         ("liveness_mode", `String record.started_liveness_mode);
+         ( "liveness_budget_source",
+           match record.started_liveness_budget_source with
+           | None -> `Null
+           | Some source -> `String source );
        ])
 ;;
 

@@ -106,6 +106,10 @@ let test_provider_attempt_records_manifest_decision_contract () =
       { started_provenance = provenance
       ; started_is_last = false
       ; started_per_provider_timeout_s = Some 12.5
+      ; started_attempt_timeout_source = "configured_per_provider_timeout"
+      ; started_attempt_watchdog_source = "liveness_observer_enforce"
+      ; started_liveness_mode = "enforce"
+      ; started_liveness_budget_source = Some "bootstrap"
       }
   in
   check
@@ -124,6 +128,31 @@ let test_provider_attempt_records_manifest_decision_contract () =
     "started timeout"
     12.5
     (started |> member "per_provider_timeout_s" |> to_float);
+  check
+    (float 0.0)
+    "started public attempt timeout"
+    12.5
+    (started |> member "attempt_timeout_s" |> to_float);
+  check
+    string
+    "started timeout source"
+    "configured_per_provider_timeout"
+    (started |> member "attempt_timeout_source" |> to_string);
+  check
+    string
+    "started watchdog source"
+    "liveness_observer_enforce"
+    (started |> member "attempt_watchdog_source" |> to_string);
+  check
+    string
+    "started liveness mode"
+    "enforce"
+    (started |> member "liveness_mode" |> to_string);
+  check
+    string
+    "started liveness budget source"
+    "bootstrap"
+    (started |> member "liveness_budget_source" |> to_string);
   let finished =
     KRun.provider_attempt_finished_decision
       { finished_provenance = provenance

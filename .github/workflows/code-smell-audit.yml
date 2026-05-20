@@ -1,0 +1,29 @@
+name: Code Smell Audit
+
+on:
+  schedule:
+    - cron: "19 3 * * 1"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: code-smell-audit-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  audit:
+    name: Weekly audit-code-smell.sh
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ripgrep
+        run: sudo apt-get install -y -qq ripgrep
+      - name: Run audit
+        run: bash scripts/audit-code-smell.sh > code-smell-audit.md
+      - name: Upload audit artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: code-smell-audit
+          path: code-smell-audit.md

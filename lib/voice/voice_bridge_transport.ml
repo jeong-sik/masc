@@ -120,7 +120,19 @@ let run_audio_http_request_to_file ~url ~headers ~body_json ~output_file =
            Error (Printf.sprintf "HTTP %d: %s" http_code detail))
        | Unix.WEXITED 28 -> Error "request timed out"
        | Unix.WEXITED code -> Error (Printf.sprintf "curl exit %d" code)
-       | _ -> Error "curl process failed")
+       (* [Unix.process_status] is a closed sum of WEXITED / WSIGNALED
+          / WSTOPPED — the previous [| _ -> "curl process failed"]
+          discarded both the variant and the signal number, leaving
+          operators unable to distinguish OOM-kill (SIGKILL=9) /
+          deadline-kill (SIGTERM=15) / Ctrl-C (SIGINT=2) / pipe break
+          (SIGPIPE=13).  Naming both arms makes the dispatch typed
+          exhaustive and surfaces [sig_num] so [kill -l <n>] decodes
+          it.  Mirrors sibling pattern in
+          [lib/tool_local_runtime_http.ml:79-82]. *)
+       | Unix.WSIGNALED sig_num ->
+         Error (Printf.sprintf "TTS curl killed by signal %d" sig_num)
+       | Unix.WSTOPPED sig_num ->
+         Error (Printf.sprintf "TTS curl stopped by signal %d" sig_num))
 ;;
 
 let speak_via_http_tts_to_file endpoint ~agent_id ~message ~voice ~model ~output_file =
@@ -177,7 +189,13 @@ let run_stt_multipart_request (req : Voice_runtime_overlay.stt_request) =
          (if String.length body > 200 then String.sub body 0 200 else body))
   | Unix.WEXITED 28 -> Error "STT request timed out"
   | Unix.WEXITED code -> Error (Printf.sprintf "STT curl exit %d" code)
-  | _ -> Error "STT curl process failed"
+  (* See sibling TTS dispatch above (line ~121) for rationale: closed-sum
+     named arms over [Unix.process_status] expose the signal number
+     that the previous wildcard discarded. *)
+  | Unix.WSIGNALED sig_num ->
+    Error (Printf.sprintf "STT curl killed by signal %d" sig_num)
+  | Unix.WSTOPPED sig_num ->
+    Error (Printf.sprintf "STT curl stopped by signal %d" sig_num)
 ;;
 
 let transcribe_via_http_stt endpoint ~audio_file ~model =

@@ -183,6 +183,7 @@ let record_coverage_gap ~masc_root ~durable_store ~stale_reason ?caller
       ~dashboard_surface
       ~stale_reason
       ~error
+      ~exn
       ()
   with
   | Eio.Cancel.Cancelled _ as cancel -> raise cancel

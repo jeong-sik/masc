@@ -345,7 +345,7 @@ let record_runtime_mcp_trajectory_coverage_gap
       ~stale_reason
       ~keeper_name
       ~trace_id
-      ~error:(Printexc.to_string exn)
+      ~exn
       ()
   with
   | Eio.Cancel.Cancelled _ as e -> raise e

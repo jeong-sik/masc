@@ -174,7 +174,7 @@ describe('AgentsUnified', () => {
     expect(container.textContent).toContain('runtime truth')
     expect(container.textContent).toContain('활성 keeper 2')
     expect(container.textContent).toContain('설정 keeper 4')
-    expect(container.textContent).toContain('일시정지/미기동 2')
+    expect(container.textContent).toContain('미기동 2')
   })
 
   it('shows runtime truth banner without delta when live equals configured', () => {
@@ -185,7 +185,7 @@ describe('AgentsUnified', () => {
     }))
     render(h(AgentsUnified, null), container)
     expect(container.textContent).toContain('runtime truth')
-    expect(container.textContent).not.toContain('일시정지/미기동')
+    expect(container.textContent).not.toContain('미기동')
   })
 
   it('hides runtime truth banner when no configured baseline is available', () => {

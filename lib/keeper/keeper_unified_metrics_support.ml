@@ -491,6 +491,8 @@ let observed_triggers_of_observation
   if observation.pending_scope_messages <> [] then add "scope_message";
   if observation.unclaimed_task_count > 0 then add "new_unclaimed_task";
   if observation.claimable_task_count > 0 then add "claimable_task";
+  if observation.provider_capacity_blocked_task_count > 0 then
+    add "provider_capacity_blocked_backlog";
   if observation.failed_task_count > 0 then add "failed_task";
   let _ = meta in
   if observation.pending_verification_count > 0 then
@@ -568,7 +570,13 @@ let observed_affordances_of_observation
     | Some meta -> work_discovery_allows_task_audit meta
     | None -> true
   in
-  if observation.claimable_task_count > 0 && source_allows_task_claim then
+  if observation.provider_capacity_blocked_task_count > 0 then
+    add "provider_capacity_blocked";
+  if
+    observation.claimable_task_count > 0
+    && observation.provider_capacity_blocked_task_count = 0
+    && source_allows_task_claim
+  then
     add "task_claim";
   if observation.failed_task_count > 0 && source_allows_task_audit then
     add "task_audit";

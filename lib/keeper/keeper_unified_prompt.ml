@@ -374,6 +374,7 @@ let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
   let claim_tool_available = tool_allowed "keeper_task_claim" in
   let show_claim_guidance =
     observation.claimable_task_count > 0
+    && observation.provider_capacity_blocked_task_count = 0
     && Keeper_unified_metrics.work_discovery_allows_task_claim meta
     && claim_tool_available
     && not meta.paused
@@ -452,6 +453,7 @@ let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
   if
     observation.unclaimed_task_count > 0
     || observation.claimable_task_count > 0
+    || observation.provider_capacity_blocked_task_count > 0
     || observation.failed_task_count > 0
     || observation.active_agent_count > 0
   then (
@@ -469,6 +471,21 @@ let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
     then
       Buffer.add_string ubuf
         "- Claimable tasks for this keeper: 0\n";
+    let keeper_or_scope_blocked =
+      max 0
+        (observation.unclaimed_task_count
+         - observation.claimable_task_count)
+    in
+    if keeper_or_scope_blocked > 0 then
+      Buffer.add_string ubuf
+        (Printf.sprintf
+           "- Blocked by keeper/tool/goal scope: %d\n"
+           keeper_or_scope_blocked);
+    if observation.provider_capacity_blocked_task_count > 0 then
+      Buffer.add_string ubuf
+        (Printf.sprintf
+           "- Provider-capacity blocked claimable tasks: %d\n"
+           observation.provider_capacity_blocked_task_count);
     if observation.failed_task_count > 0 then
       Buffer.add_string ubuf
         (Printf.sprintf "- Failed tasks: %d\n" observation.failed_task_count);

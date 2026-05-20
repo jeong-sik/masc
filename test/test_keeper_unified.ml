@@ -251,6 +251,7 @@ let base_observation : WO.world_observation =
   ; economic_pressure = AE.Normal
   ; unclaimed_task_count = 0
   ; claimable_task_count = 0
+  ; provider_capacity_blocked_task_count = 0
   ; failed_task_count = 0
   ; pending_verification_count = 0
   ; backlog_updated_since_last_scheduled_autonomous = false
@@ -1265,6 +1266,41 @@ let test_provider_cooldown_blocks_scheduled_turn_when_work_is_ready () =
            | _ -> false)
          (first :: rest)
      | WO.Run _ -> false)
+;;
+
+let test_provider_capacity_blocked_backlog_count_requires_non_fail_open_cooldown () =
+  let default_meta =
+    Masc_mcp.Keeper_types.set_cascade_name
+      (Masc_mcp.Keeper_config.default_cascade_name ())
+      minimal_meta
+  in
+  let blocked =
+    WO.provider_capacity_blocked_task_count
+      ~provider_cooldown_remaining_sec:(fun ~cascade_name:_ -> Some 3599)
+      ~meta:default_meta
+      ~claimable_task_count:3
+      ()
+  in
+  check int "default cascade cooldown blocks claimable backlog" 3 blocked;
+  let healthy =
+    WO.provider_capacity_blocked_task_count
+      ~provider_cooldown_remaining_sec:(fun ~cascade_name:_ -> None)
+      ~meta:default_meta
+      ~claimable_task_count:3
+      ()
+  in
+  check int "healthy provider leaves backlog unblocked" 0 healthy;
+  let fail_open_meta =
+    Masc_mcp.Keeper_types.set_cascade_name "scoring" minimal_meta
+  in
+  let fail_open_blocked =
+    WO.provider_capacity_blocked_task_count
+      ~provider_cooldown_remaining_sec:(fun ~cascade_name:_ -> Some 3599)
+      ~meta:fail_open_meta
+      ~claimable_task_count:3
+      ()
+  in
+  check int "fallback-capable cascade is not counted as blocked" 0 fail_open_blocked
 ;;
 
 let test_provider_cooldown_keeps_scheduled_turn_open_when_fail_open_exists () =
@@ -2965,6 +3001,30 @@ let test_prompt_room_state_section () =
        | Not_found -> false
      in
      found)
+;;
+
+let test_prompt_surfaces_provider_capacity_blocked_backlog () =
+  let obs =
+    { base_observation with
+      unclaimed_task_count = 5
+    ; claimable_task_count = 3
+    ; provider_capacity_blocked_task_count = 3
+    ; active_agent_count = 5
+    }
+  in
+  let _sys, user =
+    UP.build_prompt ~base_path:"/test" ~meta:minimal_meta ~observation:obs ()
+  in
+  check
+    bool
+    "namespace exposes provider-capacity blocked backlog"
+    true
+    (contains_substring user "Provider-capacity blocked claimable tasks: 3");
+  check
+    bool
+    "provider-blocked backlog suppresses immediate claim guidance"
+    false
+    (contains_substring user "### Immediate Task Move")
 ;;
 
 let test_prompt_includes_claim_first_guidance () =
@@ -10976,6 +11036,10 @@ let () =
             `Quick
             test_provider_cooldown_blocks_scheduled_turn_when_work_is_ready
         ; test_case
+            "provider cooldown blocks claimable backlog count"
+            `Quick
+            test_provider_capacity_blocked_backlog_count_requires_non_fail_open_cooldown
+        ; test_case
             "provider cooldown keeps scheduled turn open when fail-open exists"
             `Quick
             test_provider_cooldown_keeps_scheduled_turn_open_when_fail_open_exists
@@ -11151,6 +11215,10 @@ let () =
             `Quick
             test_prompt_orders_stable_sections_before_reactive_sections
         ; test_case "room state section" `Quick test_prompt_room_state_section
+        ; test_case
+            "room state surfaces provider-capacity blocked backlog"
+            `Quick
+            test_prompt_surfaces_provider_capacity_blocked_backlog
         ; test_case
             "claim first guidance"
             `Quick

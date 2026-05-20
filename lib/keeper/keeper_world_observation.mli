@@ -70,6 +70,10 @@ type world_observation = {
   (** Number of unclaimed tasks this keeper can claim with its current tool
       surface. This is a matched subset of [unclaimed_task_count]. *)
 
+  provider_capacity_blocked_task_count : int;
+  (** Number of otherwise-claimable tasks currently held back by provider
+      capacity/cooldown when no fail-open cascade is available. *)
+
   failed_task_count : int;
   (** Number of failed/cancelled tasks in the room backlog. *)
 
@@ -278,6 +282,14 @@ val effective_proactive_cooldown :
 
 val provider_cooldown_remaining_sec_for_cascade :
   cascade_name:Keeper_cascade_profile.runtime_name -> int option
+
+val provider_capacity_blocked_task_count :
+  ?provider_cooldown_remaining_sec:
+    (cascade_name:Keeper_cascade_profile.runtime_name -> int option) ->
+  meta:Keeper_types.keeper_meta ->
+  claimable_task_count:int ->
+  unit ->
+  int
 
 val entropic_oscillation_interval_sec : int
 (** Minimum scheduled-autonomous silence before entropy injection can wake a

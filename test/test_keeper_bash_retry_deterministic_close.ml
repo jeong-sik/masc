@@ -151,6 +151,38 @@ let test_workflow_rejection_nested_under_detail () =
     raw
 ;;
 
+(* ── Deterministic — git exit 128 precondition/usage errors ───── *)
+
+let test_git_diff_no_merge_base_is_deterministic () =
+  let raw =
+    {|{"status":"error","exit_code":128,"output":"fatal: main...keeper-verifier-agent/task-259: no merge base\n","command":"git diff main...keeper-verifier-agent/task-259","agent":"keeper-verifier-agent"}|}
+  in
+  check_classify
+    ~name:"git diff no merge base"
+    ~expected:(Some D.Git_ref_precondition_failed)
+    raw
+;;
+
+let test_git_diff_unknown_revision_is_deterministic () =
+  let raw =
+    {|{"status":"error","exit_code":128,"output":"fatal: ambiguous argument 'origin/main...keeper-verifier-agent/task-314': unknown revision or path not in the working tree.\n","command":"git diff origin/main...keeper-verifier-agent/task-314","agent":"keeper-verifier-agent"}|}
+  in
+  check_classify
+    ~name:"git diff unknown revision"
+    ~expected:(Some D.Git_ref_precondition_failed)
+    raw
+;;
+
+let test_git_unrecognized_argument_is_deterministic () =
+  let raw =
+    {|{"status":"error","exit_code":128,"output":"fatal: unrecognized argument: --no-stat\n","command":"git show f2f396316 --no-stat","agent":"keeper-analyst-agent"}|}
+  in
+  check_classify
+    ~name:"git unrecognized argument"
+    ~expected:(Some D.Git_command_usage_error)
+    raw
+;;
+
 (* ── Negative — transient / runtime / shell exit ──────────────── *)
 
 let test_shell_exit_nonzero_is_transient () =
@@ -221,6 +253,8 @@ let test_to_string_non_empty_for_every_variant () =
     ; D.Completion_contract_violation
     ; D.Keeper_shell_op_required
     ; D.Workflow_rejection_blocked
+    ; D.Git_ref_precondition_failed
+    ; D.Git_command_usage_error
     ]
   in
   List.iter
@@ -284,6 +318,20 @@ let () =
             "failure_class_under_detail"
             `Quick
             test_workflow_rejection_nested_under_detail
+        ] )
+    ; ( "classify_git_exit_128"
+      , [ Alcotest.test_case
+            "git_diff_no_merge_base"
+            `Quick
+            test_git_diff_no_merge_base_is_deterministic
+        ; Alcotest.test_case
+            "git_diff_unknown_revision"
+            `Quick
+            test_git_diff_unknown_revision_is_deterministic
+        ; Alcotest.test_case
+            "git_unrecognized_argument"
+            `Quick
+            test_git_unrecognized_argument_is_deterministic
         ] )
     ; ( "negative_transient"
       , [ Alcotest.test_case

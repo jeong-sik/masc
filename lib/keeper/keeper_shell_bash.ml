@@ -1008,7 +1008,10 @@ let handle_keeper_bash
            ; tool_suggestion = Some "keeper_tasks_list"
            })
       ~extra:
-        ([ "cmd", `String cmd_for_log; "execution_time_ms", `Int 0 ]
+        ([ "cmd", `String cmd_for_log
+         ; "execution_time_ms", `Int 0
+         ; workflow_rejection_field
+         ]
          @ recovery_plan_extra ~rule_id:error plan)
       ()
   in

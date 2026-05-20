@@ -68,18 +68,51 @@ let to_json t =
     "prev_hash", prev;
   ]
 
+(* Local [kind_name] — [shared_audit] is a leaf library that cannot
+   depend on [masc_core.Json_util].  Same total mapping as the
+   canonical helper (lib/core/json_util.ml:149); duplicated rather
+   than introducing an upward dependency.  RFC candidate: extract a
+   shared sub-leaf module for json kind diagnostics. *)
+let kind_name : Yojson.Safe.t -> string = function
+  | `Null -> "null"
+  | `Bool _ -> "bool"
+  | `Int _ -> "int"
+  | `Intlit _ -> "int"
+  | `Float _ -> "float"
+  | `String _ -> "string"
+  | `Assoc _ -> "object"
+  | `List _ -> "array"
+
 let of_json = function
   | `Assoc fields ->
+    (* Distinguish *missing field* from *field present with wrong
+       kind* — audit-chain corruption forensics needs to know which.
+       Missing = upstream writer dropped the field (schema drift);
+       wrong-kind = payload corruption between write and read. *)
     let get_string k =
       match List.assoc_opt k fields with
       | Some (`String s) -> Ok s
-      | _ -> Error (Printf.sprintf "Envelope.of_json: missing or bad %s" k)
+      | Some other ->
+        Error
+          (Printf.sprintf
+             "Envelope.of_json: field %S has wrong type (expected \
+              string, got %s)"
+             k (kind_name other))
+      | None ->
+        Error (Printf.sprintf "Envelope.of_json: missing field %S" k)
     in
     let get_float k =
       match List.assoc_opt k fields with
       | Some (`Float f) -> Ok f
       | Some (`Int i) -> Ok (float_of_int i)
-      | _ -> Error (Printf.sprintf "Envelope.of_json: missing or bad %s" k)
+      | Some other ->
+        Error
+          (Printf.sprintf
+             "Envelope.of_json: field %S has wrong type (expected \
+              float or int, got %s)"
+             k (kind_name other))
+      | None ->
+        Error (Printf.sprintf "Envelope.of_json: missing field %S" k)
     in
     let get_payload () =
       match List.assoc_opt "payload" fields with
@@ -91,7 +124,12 @@ let of_json = function
       | Some `Null -> Ok None
       | Some (`String s) -> Ok (Some s)
       | None -> Ok None
-      | _ -> Error "Envelope.of_json: bad prev_hash"
+      | Some other ->
+        Error
+          (Printf.sprintf
+             "Envelope.of_json: bad prev_hash (expected string or \
+              null, got %s)"
+             (kind_name other))
     in
     (match
        get_string "id",
@@ -107,4 +145,8 @@ let of_json = function
      | _, _, Error e, _, _
      | _, _, _, Error e, _
      | _, _, _, _, Error e -> Error e)
-  | _ -> Error "Envelope.of_json: expected object"
+  | other ->
+    Error
+      (Printf.sprintf
+         "Envelope.of_json: expected JSON object, got %s"
+         (kind_name other))

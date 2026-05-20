@@ -202,6 +202,21 @@ let create_pending_verification_request config ~task_id =
   | Error msg -> failwith (Printf.sprintf "create_request failed: %s" msg)
 ;;
 
+let create_verification_request config ~task_id ~request_id =
+  match
+    Verification.create_request
+      ~base_path:config.Coord.base_path
+      ~task_id
+      ~output:`Null
+      ~criteria:[]
+      ~worker:"test-worker"
+      ~request_id
+      ()
+  with
+  | Ok req -> req
+  | Error msg -> failwith (Printf.sprintf "create_request failed: %s" msg)
+;;
+
 let verification_request_by_task_id config ~task_id =
   Verification.list_requests config.Coord.base_path
   |> List.find_opt (fun (req : Verification.verification_request) ->
@@ -237,6 +252,33 @@ let cdal_verdict_of_request (req : Verification.verification_request) =
   match req.output with
   | `Assoc fields -> List.assoc_opt "cdal_verdict" fields
   | _ -> None
+;;
+
+let awaiting_verification_task ~id ~title ~verification_id =
+  let now = Masc_domain.now_iso () in
+  ({ id
+   ; title
+   ; description = "verification routing regression"
+   ; task_status =
+       Masc_domain.AwaitingVerification
+         { assignee = "test-worker"
+         ; submitted_at = now
+         ; verification_id
+         ; deadline = None
+         }
+   ; priority = 1
+   ; files = []
+   ; created_at = now
+   ; created_by = None
+   ; worktree = None
+   ; goal_id = None
+   ; stage = None
+   ; contract = None
+   ; handoff_context = None
+   ; cycle_count = 0
+   ; do_not_reclaim_reason = None
+   }
+    : Masc_domain.task)
 ;;
 
 let string_field_exn ~context name fields =
@@ -2285,6 +2327,80 @@ let test_notify_reuses_persisted_cdal_verdict_payload () =
           (cdal_verdict_run_id_exn ~context:"board meta" cdal_verdict))))
 ;;
 
+let test_rejected_verification_request_is_not_counted_or_routed () =
+  with_room (fun config ->
+    let stale_verification_id = "vrf-stale-rejected" in
+    let pending_verification_id = "vrf-live-pending" in
+    let stale_task =
+      awaiting_verification_task
+        ~id:"task-stale"
+        ~title:"Stale rejected verification"
+        ~verification_id:stale_verification_id
+    in
+    let pending_task =
+      awaiting_verification_task
+        ~id:"task-pending"
+        ~title:"Live pending verification"
+        ~verification_id:pending_verification_id
+    in
+    Coord.write_backlog
+      config
+      { tasks = [ stale_task; pending_task ]
+      ; last_updated = Masc_domain.now_iso ()
+      ; version = 2
+      };
+    let _ =
+      create_verification_request
+        config
+        ~task_id:stale_task.id
+        ~request_id:stale_verification_id
+    in
+    let _ =
+      create_verification_request
+        config
+        ~task_id:pending_task.id
+        ~request_id:pending_verification_id
+    in
+    (match
+       Verification.submit_verdict
+         ~base_path:config.Coord.base_path
+         ~req_id:stale_verification_id
+         ~verifier:"test-verifier"
+         ~verdict:(Verification.Fail "needs rework")
+     with
+     | Ok _ -> ()
+     | Error msg -> failwith (Printf.sprintf "submit_verdict failed: %s" msg));
+    let meta =
+      { (make_test_meta ()) with
+        work_discovery_enabled = Some true
+      ; work_discovery_interval_sec = Some 0
+      ; work_discovery_sources = Some [ "awaiting_verification_tasks" ]
+      }
+    in
+    let obs =
+      Keeper_world_observation.observe_direct_keeper_msg
+        ~allowed_tool_names:None
+        ~config
+        ~meta
+    in
+    check int "only actionable pending request is counted" 1
+      obs.pending_verification_count;
+    let nudge =
+      Keeper_run_tools_work_discovery.make
+        ~config
+        ~get_meta:(fun () -> meta)
+        ()
+        ()
+    in
+    match nudge with
+    | None -> fail "expected work-discovery nudge for live pending request"
+    | Some text ->
+      check bool "pending task is routed" true
+        (contains_substring text pending_task.title);
+      check bool "rejected stale task is not routed" false
+        (contains_substring text stale_task.title))
+;;
+
 (* Regression: keeper_task_done must map [result] onto the typed
    [handoff_context.summary] domain field, not just dump it into [notes]
    as an untyped blob. Previously a [result] sent by a keeper would be
@@ -2723,6 +2839,10 @@ let () =
             "notification reuses persisted CDAL verdict payload"
             `Quick
             test_notify_reuses_persisted_cdal_verdict_payload
+        ; test_case
+            "rejected requests are not counted or routed"
+            `Quick
+            test_rejected_verification_request_is_not_counted_or_routed
         ; test_case
             "notes/pr_url map to typed handoff_context fields"
             `Quick

@@ -256,6 +256,13 @@ let request_of_yojson = function
            (Json_util.kind_name other)
            (Json_util.excerpt other))
 
+let request_status_is_actionable = function
+  | Pending | Assigned _ -> true
+  | Completed _ -> false
+
+let request_is_actionable (req : verification_request) =
+  request_status_is_actionable req.status
+
 (** ID generation — cryptographic random, 128-bit space.
 
     Prior implementation (#7544) combined [Time_compat.now ()] with

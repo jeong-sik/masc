@@ -29,6 +29,24 @@ let claim_goal_scope_filter ?agent_tool_names ~(config : Coord.config)
   scope.task_filter
 ;;
 
+let actionable_verification_request_ids ~(config : Coord.config) : string list =
+  Verification.list_requests config.Coord.base_path
+  |> List.filter Verification.request_is_actionable
+  |> List.map (fun (req : Verification.verification_request) -> req.id)
+;;
+
+let task_has_actionable_verification actionable_request_ids
+    (task : Masc_domain.task) =
+  match task.task_status with
+  | Masc_domain.AwaitingVerification { verification_id; _ } ->
+    List.exists (String.equal verification_id) actionable_request_ids
+  | Masc_domain.Todo
+  | Masc_domain.Claimed _
+  | Masc_domain.InProgress _
+  | Masc_domain.Done _
+  | Masc_domain.Cancelled _ -> false
+;;
+
 (** Read room backlog counts. *)
 let read_backlog_counts ~allowed_tool_names ~(config : Coord.config) ~(meta : keeper_meta)
   : int * int * int * int * bool
@@ -70,16 +88,10 @@ let read_backlog_counts ~allowed_tool_names ~(config : Coord.config) ~(meta : ke
       |> List.length
     in
     let pending_verification =
+      let actionable_request_ids = actionable_verification_request_ids ~config in
       List.length
         (List.filter
-           (fun (t : Masc_domain.task) ->
-              match t.task_status with
-              | Masc_domain.AwaitingVerification _ -> true
-              | Masc_domain.Todo
-              | Masc_domain.Claimed _
-              | Masc_domain.InProgress _
-              | Masc_domain.Done _
-              | Masc_domain.Cancelled _ -> false)
+           (task_has_actionable_verification actionable_request_ids)
            backlog.tasks)
     in
     let backlog_updated_since_last_scheduled_autonomous =

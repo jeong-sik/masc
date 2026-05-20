@@ -40,6 +40,12 @@ let backlog_task_section ~config ~meta ~predicate ~title =
     None
 ;;
 
+let actionable_verification_request_ids ~(config : Coord.config) : string list =
+  Verification.list_requests config.Coord.base_path
+  |> List.filter Verification.request_is_actionable
+  |> List.map (fun (req : Verification.verification_request) -> req.id)
+;;
+
 let section_for_source ~config ~(meta : Keeper_types.keeper_meta) source =
   match source with
   | "unclaimed_tasks" ->
@@ -51,13 +57,15 @@ let section_for_source ~config ~(meta : Keeper_types.keeper_meta) source =
         t.task_status = Masc_domain.Todo)
   | "awaiting_verification_tasks"
   | "verification_tasks" ->
+    let actionable_request_ids = actionable_verification_request_ids ~config in
     backlog_task_section
       ~config
       ~meta
       ~title:"Awaiting verification tasks"
       ~predicate:(fun (t : Masc_domain.task) ->
         match t.task_status with
-        | Masc_domain.AwaitingVerification _ -> true
+        | Masc_domain.AwaitingVerification { verification_id; _ } ->
+          List.exists (String.equal verification_id) actionable_request_ids
         | _ -> false)
   | "stale_tasks" ->
     Some

@@ -69,11 +69,15 @@ val select_telemetry_summary_json :
   Yojson.Safe.t
 (** RFC-0138 Phase 3 Step 2 — /api/v1/dashboard/telemetry/summary read
     path selector.  Returns [Dashboard_snapshot.current ()].telemetry_summary
-    when the refresh fiber has published.  Falls back to the
-    [Dashboard_cache.get_or_compute] + [Telemetry_unified.summary_json]
-    compute path (same logic the handler runs today) when the snapshot
-    slot is empty — bootstrap path is paid at most once per process
-    lifetime. *)
+    when the refresh fiber has published.  Falls back to a direct
+    [Telemetry_unified.summary_json] call when the snapshot slot is
+    empty — bootstrap path is paid at most once per process lifetime.
+
+    Step 5 (#16761) retired the prior [Dashboard_cache.get_or_compute]
+    wrapper around the fallback compute: the cache provided TTL +
+    single-flight dedup that the refresh-fiber publish path no longer
+    needs and the per-process once-only cold-start does not benefit
+    from. *)
 
 val select_project_snapshot_json :
   state:Mcp_server.server_state ->

@@ -51,12 +51,26 @@ jobs:
           scripts/opam-pin-external-deps.sh --with-compact-protocol
 
 
-      - name: Install libpq (macOS)
+      - name: Install native dependencies (macOS)
         if: runner.os == 'macOS'
         run: |
-          brew install libpq
-          echo "$(brew --prefix libpq)/bin" >> "$GITHUB_PATH"
-          echo "PKG_CONFIG_PATH=$(brew --prefix libpq)/lib/pkgconfig" >> "$GITHUB_ENV"
+          brew install libpq openssl@3
+
+          libpq_prefix="$(brew --prefix libpq)"
+          openssl_prefix="$(brew --prefix openssl@3)"
+
+          {
+            echo "$libpq_prefix/bin"
+            echo "$openssl_prefix/bin"
+          } >> "$GITHUB_PATH"
+
+          {
+            echo "PKG_CONFIG_PATH=$openssl_prefix/lib/pkgconfig:$libpq_prefix/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+            echo "CPATH=$openssl_prefix/include:${CPATH:-}"
+            echo "LIBRARY_PATH=$openssl_prefix/lib:${LIBRARY_PATH:-}"
+            echo "CPPFLAGS=-I$openssl_prefix/include ${CPPFLAGS:-}"
+            echo "LDFLAGS=-L$openssl_prefix/lib ${LDFLAGS:-}"
+          } >> "$GITHUB_ENV"
 
       - name: Refresh apt index
         if: runner.os == 'Linux'

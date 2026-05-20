@@ -240,10 +240,12 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       description: 'Keeper cognition drill-down.',
       params: { section: 'cognition' },
       hidden: true,
-      // Surface wiring complete: 7-view FilterChips (overview, keeper,
-      // token-stats, decisions, memory, episodes, autoresearch) + deep-link
-      // navigate target from KeeperCognitionInspector. Promoted to main nav
-      // 2026-05-17 — sidebar entry was the only missing piece.
+      // Hidden 2026-05-20: 7-view FilterChips (overview, keeper, token-stats,
+      // decisions, memory, episodes, autoresearch) and KeeperCognitionInspector
+      // deep links remain functional, but the sidebar entry is intentionally
+      // suppressed pending the cognition→keeper-detail Cognition section
+      // absorption (tracked in the Monitor IA review). The earlier 2026-05-17
+      // promotion was reverted by #16977 (Improve dashboard monitor IA).
     },
   ],
   command: [

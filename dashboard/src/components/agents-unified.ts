@@ -63,14 +63,16 @@ export function AgentsUnified() {
     executionLoaded: executionLoaded.value,
     agentsCount: liveRuntimeCounts.agents,
     keepersCount: liveRuntimeCounts.keepers,
+    pausedKeepersCount: liveRuntimeCounts.pausedKeepers,
     namespaceTruthCounts: namespaceTruth.value?.root.counts,
     namespaceTruthConfiguredKeepers: namespaceTruth.value?.root.configured_keepers,
     shellCounts: shellCounts.value,
     shellConfiguredKeepers: shellCounts.value?.configured_keepers,
   })
   const liveKeepers = runtimeCounts.live.keepers
+  const livePausedKeepers = runtimeCounts.live.pausedKeepers
   const configuredKeepers = runtimeCounts.configured.keepers
-  const configuredKeeperDelta = Math.max(0, configuredKeepers - liveKeepers)
+  const configuredKeeperDelta = Math.max(0, configuredKeepers - liveKeepers - livePausedKeepers)
   const sourceLabel = runtimeCountSourceLabel(runtimeCounts.source)
   function chipCount(id: AgentsView): number | null {
     if (id === 'all') return runtimeCounts.live.totalRuntimes
@@ -101,7 +103,7 @@ export function AgentsUnified() {
       ${runtimeCounts.configured.source !== 'none' ? html`
         <div class="monitor-muted-panel flex w-fit flex-wrap items-center gap-2 px-3 py-2 text-xs text-[var(--color-fg-muted)]">
           <span class="text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">runtime truth</span>
-          <span>활성 keeper ${liveKeepers} · 설정 keeper ${configuredKeepers}${configuredKeeperDelta > 0 ? html` · 일시정지/미기동 ${configuredKeeperDelta}` : ''}</span>
+          <span>활성 keeper ${liveKeepers}${livePausedKeepers > 0 ? html` · 일시정지 ${livePausedKeepers}` : ''} · 설정 keeper ${configuredKeepers}${configuredKeeperDelta > 0 ? html` · 미기동 ${configuredKeeperDelta}` : ''}</span>
           <span class="text-2xs text-[var(--color-fg-muted)]">source: ${sourceLabel}</span>
         </div>
       ` : null}

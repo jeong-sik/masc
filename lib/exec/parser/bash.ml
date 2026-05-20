@@ -8,7 +8,8 @@ let make_parse_error (lexbuf : Lexing.lexbuf) : Parsed.parse_error =
   let token = Lexing.lexeme lexbuf in
   { pos; token; expected = [] (* populated in later PR *) }
 
-let raw_to_simple (bin_str, args_str) : (Shell_ir.simple, Parsed.parse_error) result =
+let raw_to_simple (bin_str, args_str, redirects)
+    : (Shell_ir.simple, Parsed.parse_error) result =
   match Bin.of_string bin_str with
   | Error (`Unknown _) ->
     (* A0 guarantees Bin.of_string only errors on empty input.  That
@@ -22,7 +23,7 @@ let raw_to_simple (bin_str, args_str) : (Shell_ir.simple, Parsed.parse_error) re
       ; args
       ; env = []
       ; cwd = None
-      ; redirects = []
+      ; redirects
       ; sandbox = Sandbox_target.host ()
       }
 
@@ -36,7 +37,8 @@ let rec map_stages = function
         | Error e -> Error e
         | Ok tail -> Ok (simple :: tail)))
 
-let to_shell_ir (stages : (string * string list) list)
+let to_shell_ir
+      (stages : (string * string list * Redirect_scope.t list) list)
     : Shell_ir.t Parsed.t =
   match map_stages stages with
   | Error e -> Parsed.Parse_error e

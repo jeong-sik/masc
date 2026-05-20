@@ -1,9 +1,9 @@
-(* A1 bash subset lexer — minimal skeleton (simple command only).
+(* Bash subset lexer.
 
-   Current token set covers the A1-PR-1 grammar: unquoted WORD tokens
-   plus EOF.  Subsequent PRs extend to quoted strings, redirects, pipe,
-   env-prefix assignment, and subset guards (heredoc/$()/subshell that
-   mint Parsed.Too_complex).  See RFC v5 (docs/rfc/RFC-0005). *)
+   Current token set covers literal argv words, quote-preserving
+   words, pipelines, fd-to-fd redirects, and file redirect operators.
+   Unsupported shell forms still fail closed through Parsed.Too_complex
+   or Parse_error.  See RFC v5 (docs/rfc/RFC-0005). *)
 
 {
   open Bash_subset
@@ -17,11 +17,13 @@
   let get_tokens () = !token_count
 }
 
-(* The A1-PR-1 WORD class: printable ASCII minus shell metacharacters.
-   Follow-up PRs widen to quoted strings and split meta off into their
-   own tokens (PIPE, LESS, GREAT, EQUALS, ...). *)
+(* WORD class: printable ASCII minus shell metacharacters that the
+   parser must see structurally. *)
+let digit = ['0'-'9']
+let fd = digit+
+
 let word_char = [^ ' ' '\t' '\n' '\r' '|' '<' '>' '&' ';' '(' ')'
-                   '\'' '"' '$' '`' '\\' '=' '{' '}' '!' '*' '?']
+                   '\'' '"' '$' '`' '\\' '{' '}' '!' '*' '?']
 let word = word_char+
 
 (* Prefix for a single shell word that continues with quoted literal
@@ -41,7 +43,7 @@ let word_prefix = word_prefix_char+
    [Bin.of_string] / args list as one element. *)
 let sq_body = [^ '\'' '\n']*
 
-(* Double-quote string: A1 skeleton treats it as a literal whose body
+(* Double-quote string: the subset treats it as a literal whose body
    excludes the metachars bash would interpret inside "..." — variable
    expansion ($FOO, ${FOO}), command substitution (`cmd`, $(cmd)), and
    embedded newlines.  Backslash stays rejected except for [\|], which
@@ -61,6 +63,29 @@ rule token = parse
   | [' ' '\t']+    { token lexbuf }
   | '\n'           { incr_tokens (); Lexing.new_line lexbuf; token lexbuf }
   | '|'            { incr_tokens (); PIPE }
+  | (fd as src) ">&" (fd as dst)
+                    { incr_tokens (); FD_REDIRECT (int_of_string src, int_of_string dst) }
+  | ">&" (fd as dst)
+                    { incr_tokens (); FD_REDIRECT (1, int_of_string dst) }
+  | (fd as src) "<&" (fd as dst)
+                    { incr_tokens (); FD_REDIRECT (int_of_string src, int_of_string dst) }
+  | "<&" (fd as dst)
+                    { incr_tokens (); FD_REDIRECT (0, int_of_string dst) }
+  | (fd as fd) ">>"
+                    { incr_tokens (); FILE_REDIRECT_OP (int_of_string fd, Masc_exec.Redirect_scope.Append) }
+  | ">>"
+                    { incr_tokens (); FILE_REDIRECT_OP (1, Masc_exec.Redirect_scope.Append) }
+  | (fd as fd) ">"
+                    { incr_tokens (); FILE_REDIRECT_OP (int_of_string fd, Masc_exec.Redirect_scope.Write) }
+  | ">"
+                    { incr_tokens (); FILE_REDIRECT_OP (1, Masc_exec.Redirect_scope.Write) }
+  | (fd as fd) "<"
+                    { incr_tokens (); FILE_REDIRECT_OP (int_of_string fd, Masc_exec.Redirect_scope.Read) }
+  | "<"
+                    { incr_tokens (); FILE_REDIRECT_OP (0, Masc_exec.Redirect_scope.Read) }
+  | "/dev/null"    { incr_tokens (); DEV_NULL }
+  | '\'' "/dev/null" '\'' { incr_tokens (); DEV_NULL }
+  | '"' "/dev/null" '"' { incr_tokens (); DEV_NULL }
   | (word_prefix as prefix) '"' (dq_body as s) '"' { incr_tokens (); WORD (prefix ^ s) }
   | '\'' (sq_body as s) '\'' { incr_tokens (); WORD s }
   | '"' (dq_body as s) '"' { incr_tokens (); WORD s }

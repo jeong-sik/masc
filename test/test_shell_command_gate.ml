@@ -122,10 +122,10 @@ let test_parse_with_caller_matches_without () =
 (* RFC-0131 PR-1b/PR-1c — typed-IR nested pipeline and redirect policy.
 
    The current bash_subset grammar (see lib/exec/parser/bash.ml's
-   [to_shell_ir]) only emits non-nested pipelines and classifies redirects
-   as Too_complex `Redirect.  The tests below exercise the typed-IR entry
-   directly to pin both policy boundaries before typed argv lowering grows
-   those shapes. *)
+   [to_shell_ir]) emits non-nested pipelines plus a narrow redirect
+   subset: fd-to-fd redirects and explicit /dev/null file redirects.
+   General file targets still classify as Too_complex `Redirect. The
+   tests below pin both the typed-IR and raw-parser policy boundaries. *)
 
 let mk_bin name =
   match Masc_exec.Bin.of_string name with
@@ -208,6 +208,50 @@ let test_redirect_disallowed_tag_round_trip () =
     "tag"
     "redirect_disallowed_in_caller"
     (Gate.reject_reason_tag (Gate.Redirect_disallowed_in_caller { stage_index = 0 }))
+;;
+
+let test_raw_dev_null_redirect_rejected_when_disabled () =
+  match
+    Gate.validate_allowlist
+      ~redirect_allowed:false
+      ~allowed_commands:[ "rg" ]
+      "rg foo 2>/dev/null"
+  with
+  | Gate.Reject { reason = Gate.Redirect_disallowed_in_caller { stage_index = 0 }; _ } -> ()
+  | other ->
+    Alcotest.failf
+      "expected raw /dev/null redirect to obey redirect_allowed=false, got %s"
+      (Gate.decision_tag other)
+;;
+
+let test_raw_spaced_dev_null_redirect_rejected_when_disabled () =
+  match
+    Gate.validate_allowlist
+      ~redirect_allowed:false
+      ~allowed_commands:[ "rg" ]
+      "rg foo 2> /dev/null"
+  with
+  | Gate.Reject { reason = Gate.Redirect_disallowed_in_caller { stage_index = 0 }; _ } -> ()
+  | other ->
+    Alcotest.failf
+      "expected spaced raw /dev/null redirect to obey redirect_allowed=false, got %s"
+      (Gate.decision_tag other)
+;;
+
+let test_raw_fd_redirect_admitted_when_redirects_disabled () =
+  match
+    Gate.validate_allowlist
+      ~redirect_allowed:false
+      ~allowed_commands:[ "ls" ]
+      "ls 2>&1"
+  with
+  | Gate.Allow context ->
+    Alcotest.(check int) "stage count" 1 (Gate.stage_count context);
+    check_stage_bins "stage bins" [ "ls" ] context
+  | other ->
+    Alcotest.failf
+      "expected fd-to-fd redirect to remain allowed, got %s"
+      (Gate.decision_tag other)
 ;;
 
 let test_validate_allowlist_default_unchanged_with_explicit_true () =
@@ -311,6 +355,18 @@ let () =
             "tag round trip"
             `Quick
             test_redirect_disallowed_tag_round_trip
+        ; Alcotest.test_case
+            "raw /dev/null redirect rejected when ~redirect_allowed:false"
+            `Quick
+            test_raw_dev_null_redirect_rejected_when_disabled
+        ; Alcotest.test_case
+            "raw spaced /dev/null redirect rejected when ~redirect_allowed:false"
+            `Quick
+            test_raw_spaced_dev_null_redirect_rejected_when_disabled
+        ; Alcotest.test_case
+            "raw fd redirect allowed when ~redirect_allowed:false"
+            `Quick
+            test_raw_fd_redirect_admitted_when_redirects_disabled
         ; Alcotest.test_case
             "default behavior unchanged with explicit ~redirect_allowed:true"
             `Quick

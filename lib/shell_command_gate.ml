@@ -27,10 +27,9 @@ type reject_reason =
       (* RFC-0131 PR-1c.  A stage carries a file redirect (>, >>, <) but
          the caller passed [?redirect_allowed:false].  [stage_index] is
          0-based; for a single-stage command the index is always 0.
-         The bash_subset grammar currently classifies redirects as
-         [Too_complex `Redirect], so this arm is only reachable via the
-         typed-IR entry [parsed_context_of_shell_ir] (RFC-0131 PR-1b)
-         until the grammar grows redirect support. *)
+         The bash_subset grammar emits structural [File] redirects only
+         for the explicit /dev/null sink. General file targets still
+         classify as [Too_complex `Redirect]. *)
 
 type decision =
   | Allow of parsed_context

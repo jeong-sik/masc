@@ -1,10 +1,7 @@
-(** A1 bash parser smoke tests — skeleton coverage only.
+(** Bash parser smoke tests.
 
-    Today's grammar accepts only a single simple command (bin + lit
-    args, unquoted).  These tests lock in that behavior and the
-    fail-closed error surface.  Subsequent PRs add pipeline, redirect,
-    env-prefix, quote, and subset-guard productions and grow this
-    suite accordingly.
+    These tests lock in the accepted subset plus the fail-closed error
+    surface for unsupported shell constructs.
 
     The error arm uses [assert false] instead of the usual pattern
     so the lib-scope unsafe-pattern ratchet stays green (this test
@@ -38,6 +35,14 @@ let test_echo_message () =
     assert (Bin.to_string s.bin = "echo");
     assert (s.args = [ Shell_ir.Lit "hello" ])
   (* "echo hello must parse" *)
+  | _ -> assert false
+
+let test_dev_null_as_regular_arg () =
+  match Bash.parse_string "cat /dev/null" with
+  | Parsed.Parsed (Shell_ir.Simple s) ->
+    assert (Bin.to_string s.bin = "cat");
+    assert (s.args = [ Shell_ir.Lit "/dev/null" ]);
+    assert (s.redirects = [])
   | _ -> assert false
 
 let test_leading_whitespace_ignored () =
@@ -96,7 +101,7 @@ let test_logic_and_rejected () =
   | Parsed.Too_complex `Logic_op -> ()
   | _ -> assert false
 
-let test_redirect_rejected_in_skeleton () =
+let test_general_redirect_rejected () =
   match Bash.parse_string "echo hi > /tmp/out" with
   | Parsed.Too_complex `Redirect -> ()
   (* "> must classify as Redirect" *)
@@ -110,6 +115,52 @@ let test_redirect_append_rejected () =
 let test_input_redirect_rejected () =
   match Bash.parse_string "cat < /etc/hosts" with
   | Parsed.Too_complex `Redirect -> ()
+  | _ -> assert false
+
+let test_fd_redirect_parsed () =
+  match Bash.parse_string "ls 2>&1" with
+  | Parsed.Parsed (Shell_ir.Simple s) ->
+    (match s.redirects with
+     | [ Redirect_scope.Fd_to_fd { src = 2; dst = 1 } ] -> ()
+     | _ -> assert false)
+  | _ -> assert false
+
+let test_dev_null_redirect_parsed () =
+  match Bash.parse_string "rg foo 2>/dev/null" with
+  | Parsed.Parsed (Shell_ir.Simple s) ->
+    (match s.redirects with
+     | [ Redirect_scope.File { fd = 2; target; mode = Redirect_scope.Write } ] ->
+       assert (Path_scope.raw target = "/dev/null")
+     | _ -> assert false)
+  | _ -> assert false
+
+let test_spaced_dev_null_redirect_parsed () =
+  match Bash.parse_string "rg foo 2> /dev/null" with
+  | Parsed.Parsed (Shell_ir.Simple s) ->
+    (match s.redirects with
+     | [ Redirect_scope.File { fd = 2; target; mode = Redirect_scope.Write } ] ->
+       assert (Path_scope.raw target = "/dev/null")
+     | _ -> assert false)
+  | _ -> assert false
+
+let test_quoted_dev_null_redirect_parsed () =
+  match Bash.parse_string "rg foo 2> \"/dev/null\"" with
+  | Parsed.Parsed (Shell_ir.Simple s) ->
+    (match s.redirects with
+     | [ Redirect_scope.File { fd = 2; target; mode = Redirect_scope.Write } ] ->
+       assert (Path_scope.raw target = "/dev/null")
+     | _ -> assert false)
+  | _ -> assert false
+
+let test_pipeline_dev_null_redirect_preserved () =
+  match Bash.parse_string "rg foo 2>/dev/null | head -20" with
+  | Parsed.Parsed (Shell_ir.Pipeline [ Shell_ir.Simple s1; Shell_ir.Simple s2 ]) ->
+    assert (Bin.to_string s1.bin = "rg");
+    assert (Bin.to_string s2.bin = "head");
+    (match s1.redirects, s2.redirects with
+     | [ Redirect_scope.File { fd = 2; target; mode = Redirect_scope.Write } ], [] ->
+       assert (Path_scope.raw target = "/dev/null")
+     | _ -> assert false)
   | _ -> assert false
 
 let test_heredoc_rejected () =
@@ -296,6 +347,27 @@ let test_word_with_double_quoted_suffix () =
      | _ -> assert false)
   | _ -> assert false
 
+let test_word_metadata_preserves_quoted_path_and_pipeline () =
+  match Bash_words.stages "cat 'repos/foo.ml' | head -1" with
+  | Ok [ [ cat; path ]; [ head; limit ] ] ->
+    assert (cat.value = "cat");
+    assert (not cat.quoted);
+    assert (path.value = "repos/foo.ml");
+    assert path.quoted;
+    assert (not path.globbed);
+    assert (head.value = "head");
+    assert (limit.value = "-1")
+  | _ -> assert false
+
+let test_word_metadata_marks_globbed_path () =
+  match Bash_words.stages "ls repos/*.ml" with
+  | Ok [ [ ls; path ] ] ->
+    assert (ls.value = "ls");
+    assert (path.value = "repos/*.ml");
+    assert path.globbed;
+    assert (not path.quoted)
+  | _ -> assert false
+
 let test_double_quote_with_dollar_rejected () =
   (* Variable expansion is subset-excluded at the A1 layer — any '$'
      inside "..." breaks the lex so Parse_error surfaces rather than
@@ -332,15 +404,21 @@ let () =
   test_ls_single_command ();
   test_ls_with_args ();
   test_echo_message ();
+  test_dev_null_as_regular_arg ();
   test_leading_whitespace_ignored ();
   test_two_stage_pipeline ();
   test_three_stage_pipeline_with_args ();
   test_single_command_is_simple_not_pipeline ();
   test_logic_or_rejected ();
   test_logic_and_rejected ();
-  test_redirect_rejected_in_skeleton ();
+  test_general_redirect_rejected ();
   test_redirect_append_rejected ();
   test_input_redirect_rejected ();
+  test_fd_redirect_parsed ();
+  test_dev_null_redirect_parsed ();
+  test_spaced_dev_null_redirect_parsed ();
+  test_quoted_dev_null_redirect_parsed ();
+  test_pipeline_dev_null_redirect_preserved ();
   test_heredoc_rejected ();
   test_here_string_rejected ();
   test_cmd_subst_paren_rejected ();
@@ -361,6 +439,8 @@ let () =
   test_double_quote_rg_pattern ();
   test_double_quote_with_escaped_regex_pipe ();
   test_word_with_double_quoted_suffix ();
+  test_word_metadata_preserves_quoted_path_and_pipeline ();
+  test_word_metadata_marks_globbed_path ();
   test_double_quote_with_dollar_rejected ();
   test_double_quote_with_backslash_rejected ();
   test_double_quote_with_backtick_rejected ();

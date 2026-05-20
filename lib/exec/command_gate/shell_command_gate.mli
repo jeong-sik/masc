@@ -59,6 +59,7 @@ type reject_reason =
   | Command_not_in_allowlist of { bin : string }
   | Pipeline_segment_disallowed of { stage : int; bin : string }
   | Pipes_not_allowed of { stages : int }
+  | Redirect_disallowed_in_caller of { stage : int }
   | Path_outside_policy of { stage : int; raw_path : string; diagnostic : string }
 
 (** Parser failure modes that prevent any IR being formed. *)
@@ -108,18 +109,21 @@ type verdict =
   | Cannot_parse of { reason : parse_reason }
   | Too_complex of { reason : too_complex_reason }
 
-(** Allowlist policy. [allow_pipes = true] (default) keeps the
-    existing legacy behavior; [false] yields {!Pipes_not_allowed} for
-    any pipeline with two or more stages. *)
+(** Allowlist policy. [allow_pipes = true] keeps the existing legacy
+    behavior; [false] yields {!Pipes_not_allowed} for any pipeline with
+    two or more stages. [redirect_allowed = false] rejects file
+    redirects while still allowing fd-to-fd redirects such as [2>&1]. *)
 type allowlist_policy = {
   allowed_commands : string list;
   allow_pipes : bool;
+  redirect_allowed : bool;
 }
 
-(** Path policy applied to literal path arguments of every stage.
-    Phase 1 intentionally keeps the policy minimal — only an opt-in
-    classifier callback is consulted, so the facade itself does no
-    [Path_scope] decision-making and instead defers to the caller. *)
+(** Path policy applied to literal path arguments and file redirect
+    targets of every stage. Phase 1 intentionally keeps the policy
+    minimal — only an opt-in classifier callback is consulted, so the
+    facade itself does no [Path_scope] decision-making and instead
+    defers to the caller. *)
 type path_policy = {
   classify : (raw_path:string -> [ `Allow | `Deny of string ]) option;
 }
@@ -157,6 +161,19 @@ val gate
     can route to [Exec_dispatch] in Phase 4 without re-parsing.
     [?caller] is captured for the upcoming telemetry partition
     (RFC-0131 PR-3) and does not affect the verdict. *)
+
+val gate_typed
+  :  ?caller:caller
+  -> ir:Masc_exec.Shell_ir.t
+  -> allowlist:allowlist_policy
+  -> path_policy:path_policy
+  -> sandbox:sandbox_context
+  -> unit
+  -> verdict
+(** Policy-aware typed entrypoint for callers that already have a
+    {!Masc_exec.Shell_ir.t}. This bypasses raw Bash parsing but shares
+    the same allowlist, redirect, path-policy, sandbox, and nested
+    pipeline handling as {!gate}. *)
 
 val lower_typed_pipeline
   :  ?caller:caller

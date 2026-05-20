@@ -243,7 +243,6 @@ let custom_tool_titles : (string * string) list = [
   (* Agents *)
   ("masc_agents", "List Agent Details");
   ("masc_agent_update", "Update Agent Profile");
-  ("masc_register_capabilities", "Register Agent Capabilities");
   (* Heartbeat *)
   ("masc_heartbeat", "Send Heartbeat");
   (* Operations *)

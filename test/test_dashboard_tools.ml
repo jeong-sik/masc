@@ -300,15 +300,15 @@ let test_dashboard_tools_projection () =
       let public_tool = find_tool "masc_status" in
       let spawned_agent_tool = find_tool "masc_workflow_guide" in
       let local_worker_tool = find_tool "masc_worktree_create" in
-      let deprecated_alias_tool = find_tool "masc_register_capabilities" in
+      let removed_alias_tool = find_tool "masc_register_capabilities" in
       check bool "includes hidden tool" true (Option.is_some hidden_tool);
       check bool "includes public tool" true (Option.is_some public_tool);
       check bool "includes spawned agent tool" true
         (Option.is_some spawned_agent_tool);
       check bool "includes local worker tool" true
         (Option.is_some local_worker_tool);
-      check bool "includes deprecated alias tool" true
-        (Option.is_some deprecated_alias_tool);
+      check bool "omits removed register_capabilities alias" false
+        (Option.is_some removed_alias_tool);
       (match public_tool with
       | None -> ()
       | Some row ->

@@ -293,7 +293,6 @@ let classify_masc_tool (tool : Tool_name.Masc.t) =
   | Plan_init
   | Plan_set_task
   | Plan_update
-  | Register_capabilities
   | Release_task
   | Reset
   | Set_current_task

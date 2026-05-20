@@ -439,15 +439,10 @@ let test_masc_agents_schema () =
   | None -> Alcotest.fail "masc_agents not found"
   | Some _ -> ()
 
-let test_masc_register_capabilities_schema () =
+let test_masc_register_capabilities_removed () =
   match find_tool "masc_register_capabilities" with
-  | None -> Alcotest.fail "masc_register_capabilities not found"
-  | Some schema ->
-      match get_json_assoc "properties" schema.input_schema with
-      | Some props ->
-          Alcotest.(check bool) "has agent_name" true (List.mem_assoc "agent_name" props);
-          Alcotest.(check bool) "has capabilities" true (List.mem_assoc "capabilities" props)
-      | None -> Alcotest.fail "masc_register_capabilities missing properties"
+  | None -> ()
+  | Some _ -> Alcotest.fail "masc_register_capabilities should be removed"
 
 (* test_masc_find_by_capability_schema removed: tool pruned *)
 
@@ -901,7 +896,8 @@ let () =
     ];
     "agent_tools", [
       Alcotest.test_case "agents" `Quick test_masc_agents_schema;
-      Alcotest.test_case "register_capabilities" `Quick test_masc_register_capabilities_schema;
+      Alcotest.test_case "register_capabilities removed" `Quick
+        test_masc_register_capabilities_removed;
       (* find_by_capability removed: tool pruned *)
     ];
     "plan_tools", [

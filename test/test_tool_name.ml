@@ -37,7 +37,7 @@ let all_masc : Tool_name.Masc.t list =
   ; Operation_pause; Operation_start; Operation_status; Operation_stop
   ; Operator_action; Operator_confirm; Operator_digest; Operator_snapshot
   ; Plan_clear_task; Plan_get; Plan_get_task; Plan_init; Plan_set_task
-  ; Plan_update; Register_capabilities; Release_task; Reset; Coord_status
+  ; Plan_update; Release_task; Reset; Coord_status
   ; Set_current_task; Status; Task_history; Tasks; Tool_grant; Tool_help
   ; Tool_list; Tool_revoke; Transition; Update_priority; Web_search; Who
   ; Workflow_guide; Worktree_create; Worktree_list; Worktree_remove

@@ -322,8 +322,7 @@ let static_tag_of_tool_name (tool : Tool_name.t) : module_tag option =
     | Agent_card
     | Agent_update
     | Agents
-    | Get_metrics
-    | Register_capabilities -> Some Mod_agent
+    | Get_metrics -> Some Mod_agent
     | Autoresearch_cycle
     | Autoresearch_inject
     | Autoresearch_record_finding

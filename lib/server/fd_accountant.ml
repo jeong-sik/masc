@@ -67,9 +67,15 @@ let held_kinds_key : held_kind list Eio.Fiber.key = Eio.Fiber.create_key ()
 
 let held_kinds () =
   (* NDT-OK: fiber-local runtime state only prevents same-fiber slot
-     double-accounting; policy decisions stay outside this boundary. *)
+     double-accounting; policy decisions stay outside this boundary.
+     [Eio.Fiber.get] is normally a fiber-local HashMap lookup that
+     does not raise, but defend against future Eio changes with the
+     RFC-0106 standard split: Cancelled propagates so the fiber
+     unwinds; anything else falls back to the empty default. *)
   try Option.value ~default:[] (Eio.Fiber.get held_kinds_key)
-  with _ -> []
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | _ -> []
 
 let active_held_kinds () =
   List.filter (fun held -> Atomic.get held.active) (held_kinds ())
@@ -198,7 +204,15 @@ let read_fd_open () =
         (try
            let entries = Sys.readdir dir in
            Array.length entries
-         with _ -> try_dirs rest)
+         with
+         | Eio.Cancel.Cancelled _ as e -> raise e
+         | _ -> try_dirs rest)
+         (* [Sys.readdir] raising on a non-existent path is *expected*
+            (we are probing 3 platform-dependent candidates and the
+            first hit wins).  [Eio.Cancel.Cancelled] is not a probe
+            miss — the fiber is being cancelled and must unwind
+            instead of walking through the remaining candidates
+            (RFC-0106). *)
   in
   try_dirs candidates
 

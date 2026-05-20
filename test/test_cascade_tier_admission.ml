@@ -13,6 +13,9 @@ open Alcotest
 
 module A = Masc_mcp.Cascade_tier_admission
 module S = Masc_mcp.Cascade_saturation_signal
+module KTD = Masc_mcp.Keeper_turn_driver.For_testing
+
+let signal_testable = testable S.pp S.equal
 
 let int_check msg expected actual =
   check int msg expected actual
@@ -186,6 +189,81 @@ let test_tiers_are_independent () =
     (A.current_inflight t ~tier_id:"B");
   int_check "A released to 0" 0 (A.current_inflight t ~tier_id:"A")
 
+(* {1 Keeper turn driver wire-in} *)
+
+let test_keeper_policy_proactive_required () =
+  match
+    KTD.cascade_tier_admission_policy_of_priority
+      Llm_provider.Request_priority.Proactive
+  with
+  | A.Required -> ()
+  | A.Bypass -> Alcotest.fail "proactive keeper turns must require admission"
+
+let test_keeper_policy_background_bypass () =
+  match
+    KTD.cascade_tier_admission_policy_of_priority
+      Llm_provider.Request_priority.Background
+  with
+  | A.Bypass -> ()
+  | A.Required -> Alcotest.fail "background side tasks must bypass admission"
+
+let test_keeper_wire_enabled_rejects_at_capacity () =
+  let t = A.create ~default_max_inflight:1 () in
+  (match A.try_acquire t ~tier_id:"keeper-turn" with
+   | A.Granted _ -> ()
+   | A.Capacity_full _ -> Alcotest.fail "expected setup acquire to succeed");
+  let ran = ref false in
+  let result =
+    KTD.with_cascade_tier_admission_for_testing
+      ~admission:t
+      ~enabled:true
+      ~tier_id:"keeper-turn"
+      ~admission_policy:A.Required
+      (fun () ->
+         ran := true;
+         ())
+  in
+  bool_check "provider attempt not run at capacity" false !ran;
+  (match result with
+   | Ok () -> Alcotest.fail "expected tier admission rejection"
+   | Error (S.Inflight_capacity_full { tier_id; max_inflight }) ->
+       check string "tier id echoed" "keeper-turn" tier_id;
+       int_check "max inflight echoed" 1 max_inflight
+   | Error _ -> Alcotest.fail "wrong saturation signal");
+  A.release t ~tier_id:"keeper-turn"
+
+let test_keeper_wire_disabled_is_passthrough () =
+  let t = A.create ~default_max_inflight:0 () in
+  let ran = ref false in
+  let result =
+    KTD.with_cascade_tier_admission_for_testing
+      ~admission:t
+      ~enabled:false
+      ~tier_id:"keeper-turn"
+      ~admission_policy:A.Required
+      (fun () ->
+         ran := true;
+         "ok")
+  in
+  bool_check "attempt ran when flag disabled" true !ran;
+  check (result string signal_testable) "disabled flag passthrough" (Ok "ok") result;
+  int_check "disabled path did not touch counter" 0
+    (A.current_inflight t ~tier_id:"keeper-turn")
+
+let test_keeper_wire_bypass_policy_is_passthrough () =
+  let t = A.create ~default_max_inflight:0 () in
+  let result =
+    KTD.with_cascade_tier_admission_for_testing
+      ~admission:t
+      ~enabled:true
+      ~tier_id:"keeper-turn"
+      ~admission_policy:A.Bypass
+      (fun () -> 7)
+  in
+  check (result int signal_testable) "bypass policy passthrough" (Ok 7) result;
+  int_check "bypass path did not touch counter" 0
+    (A.current_inflight t ~tier_id:"keeper-turn")
+
 (* {1 driver} *)
 
 let suite =
@@ -218,6 +296,18 @@ let suite =
       ] );
     ( "isolation",
       [ test_case "tiers independent" `Quick test_tiers_are_independent ] );
+    ( "keeper-wire",
+      [ test_case "proactive maps to Required" `Quick
+          test_keeper_policy_proactive_required;
+        test_case "background maps to Bypass" `Quick
+          test_keeper_policy_background_bypass;
+        test_case "enabled path rejects at capacity" `Quick
+          test_keeper_wire_enabled_rejects_at_capacity;
+        test_case "disabled flag is passthrough" `Quick
+          test_keeper_wire_disabled_is_passthrough;
+        test_case "bypass policy is passthrough" `Quick
+          test_keeper_wire_bypass_policy_is_passthrough;
+      ] );
   ]
 
 let () = Alcotest.run "cascade_tier_admission" suite

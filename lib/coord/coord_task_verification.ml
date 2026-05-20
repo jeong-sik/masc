@@ -6,6 +6,8 @@
 
 open Masc_domain
 
+let normalized_string_list = Coord_state.normalized_string_list
+
 let flatten_lock_result = function
   | Ok result -> result
   | Error e -> Error e

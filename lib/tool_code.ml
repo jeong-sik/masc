@@ -514,7 +514,12 @@ let handle_code_symbols ~tool_name ~start_time ctx args =
               ] in
               Tool_result.ok ~tool_name ~start_time (Yojson.Safe.to_string response)
             with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-              Tool_result.error ~tool_name ~start_time (Printf.sprintf "Failed to read file: %s" (Stdlib.Printexc.to_string exn))
+              let err =
+                Tool_error.of_exn
+                  ~detail:(Printf.sprintf "Failed to read file: %s" (Stdlib.Printexc.to_string exn))
+                  exn
+              in
+              Tool_result.error ~tool_name ~start_time (Tool_error.to_string err)
           end
         end
   end

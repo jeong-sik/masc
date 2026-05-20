@@ -25,6 +25,7 @@ type docker_preflight =
   ; hardening_error : string option
   ; image_present : bool
   ; image_error : string option
+  ; failure_classes : string list
   ; required_commands : required_command_check list
   ; missing_commands : string list
   ; next_actions : string list

@@ -411,6 +411,70 @@ esac\n\
 printf 'unexpected docker invocation\\n' >&2\n\
 exit 2\n"
 
+let fake_docker_preflight_daemon_unavailable_script =
+  "#!/bin/sh\n\
+case \"$1\" in\n\
+  info)\n\
+    printf 'Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?\\n' >&2\n\
+    exit 1\n\
+    ;;\n\
+  image)\n\
+    if [ \"$2\" = \"inspect\" ] && [ \"$3\" = \"alpine:test\" ]; then\n\
+      printf '[]\\n'\n\
+      exit 0\n\
+    fi\n\
+    printf 'unexpected image inspect\\n' >&2\n\
+    exit 2\n\
+    ;;\n\
+  run)\n\
+    exit 0\n\
+    ;;\n\
+esac\n\
+printf 'unexpected docker invocation\\n' >&2\n\
+exit 2\n"
+
+let fake_docker_preflight_image_timeout_script =
+  "#!/bin/sh\n\
+case \"$1\" in\n\
+  info)\n\
+    printf '[]\\n'\n\
+    exit 0\n\
+    ;;\n\
+  image)\n\
+    printf 'process error: timeout after 5s\\n' >&2\n\
+    exit 124\n\
+    ;;\n\
+  run)\n\
+    printf 'run should not execute when image inspect times out\\n' >&2\n\
+    exit 2\n\
+    ;;\n\
+esac\n\
+printf 'unexpected docker invocation\\n' >&2\n\
+exit 2\n"
+
+let fake_docker_preflight_oci_mount_failure_script =
+  "#!/bin/sh\n\
+case \"$1\" in\n\
+  info)\n\
+    printf '[]\\n'\n\
+    exit 0\n\
+    ;;\n\
+  image)\n\
+    if [ \"$2\" = \"inspect\" ] && [ \"$3\" = \"alpine:test\" ]; then\n\
+      printf '[]\\n'\n\
+      exit 0\n\
+    fi\n\
+    printf 'missing image\\n' >&2\n\
+    exit 1\n\
+    ;;\n\
+  run)\n\
+    printf 'docker: Error response from daemon: failed to create shim task: OCI runtime create failed: error during container init: error mounting \"/host/path\" to rootfs at \"/container/path\": no such file or directory.\\n' >&2\n\
+    exit 1\n\
+    ;;\n\
+esac\n\
+printf 'unexpected docker invocation\\n' >&2\n\
+exit 2\n"
+
 let fake_docker_startup_preflight_script =
   "#!/bin/sh\n\
 log_file=${KEEPER_DOCKER_LOG:-}\n\
@@ -807,6 +871,8 @@ let test_docker_preflight_reports_ready_image () =
   | Some preflight ->
       Alcotest.(check bool) "preflight ok" true preflight.ok;
       Alcotest.(check bool) "image present" true preflight.image_present;
+      Alcotest.(check (list string)) "no failure classes" []
+        preflight.failure_classes;
       Alcotest.(check (list string)) "no missing commands" []
         preflight.missing_commands
 
@@ -822,6 +888,10 @@ let test_docker_preflight_surfaces_missing_image_actions () =
   | Some preflight ->
       Alcotest.(check bool) "preflight fails" false preflight.ok;
       Alcotest.(check bool) "image missing" false preflight.image_present;
+      Alcotest.(check bool) "failure class is image_missing" true
+        (List.mem "image_missing" preflight.failure_classes);
+      Alcotest.(check bool) "failure class is not image timeout" false
+        (List.mem "image_inspect_timeout" preflight.failure_classes);
       Alcotest.(check bool) "next actions mention build script" true
         (List.exists
            (fun action ->
@@ -833,6 +903,56 @@ let test_docker_preflight_surfaces_missing_image_actions () =
         (contains_substring
            (Keeper_sandbox_runtime.docker_preflight_failure_message preflight)
            "scripts/build-keeper-sandbox-image.sh")
+
+let test_docker_preflight_classifies_daemon_unavailable () =
+  with_fake_docker fake_docker_preflight_daemon_unavailable_script @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" "true" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
+  match Keeper_sandbox_runtime.docker_preflight ~timeout_sec:5.0 () with
+  | None -> Alcotest.fail "expected docker preflight report"
+  | Some preflight ->
+      Alcotest.(check bool) "preflight fails" false preflight.ok;
+      Alcotest.(check bool) "failure class is daemon unavailable" true
+        (List.mem "docker_daemon_unavailable" preflight.failure_classes);
+      Alcotest.(check bool) "not misclassified as image missing" false
+        (List.mem "image_missing" preflight.failure_classes)
+
+let test_docker_preflight_classifies_image_inspect_timeout () =
+  with_fake_docker fake_docker_preflight_image_timeout_script @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" "true" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
+  match Keeper_sandbox_runtime.docker_preflight ~timeout_sec:5.0 () with
+  | None -> Alcotest.fail "expected docker preflight report"
+  | Some preflight ->
+      Alcotest.(check bool) "preflight fails" false preflight.ok;
+      Alcotest.(check bool) "image absent after timeout" false preflight.image_present;
+      Alcotest.(check bool) "failure class is image inspect timeout" true
+        (List.mem "image_inspect_timeout" preflight.failure_classes);
+      Alcotest.(check bool) "not misclassified as image missing" false
+        (List.mem "image_missing" preflight.failure_classes)
+
+let test_docker_preflight_classifies_oci_mount_failure () =
+  with_fake_docker fake_docker_preflight_oci_mount_failure_script @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" "true" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
+  match Keeper_sandbox_runtime.docker_preflight ~timeout_sec:5.0 () with
+  | None -> Alcotest.fail "expected docker preflight report"
+  | Some preflight ->
+      Alcotest.(check bool) "preflight fails" false preflight.ok;
+      Alcotest.(check bool) "image inspect succeeded" true preflight.image_present;
+      Alcotest.(check bool) "failure class is OCI mount failure" true
+        (List.mem "oci_mount_failure" preflight.failure_classes);
+      Alcotest.(check bool) "not misclassified as image missing" false
+        (List.mem "image_missing" preflight.failure_classes)
 
 let test_startup_preflight_skips_required_command_inventory () =
   with_fake_docker fake_docker_startup_preflight_script @@ fun () ->
@@ -1184,6 +1304,12 @@ let run_tests ~clock () =
             test_docker_preflight_reports_ready_image;
           Alcotest.test_case "missing image surfaces remediation" `Quick
             test_docker_preflight_surfaces_missing_image_actions;
+          Alcotest.test_case "daemon unavailable has distinct failure class" `Quick
+            test_docker_preflight_classifies_daemon_unavailable;
+          Alcotest.test_case "image inspect timeout has distinct failure class" `Quick
+            test_docker_preflight_classifies_image_inspect_timeout;
+          Alcotest.test_case "OCI mount failure has distinct failure class" `Quick
+            test_docker_preflight_classifies_oci_mount_failure;
           Alcotest.test_case "startup skips command inventory" `Quick
             test_startup_preflight_skips_required_command_inventory;
         ] );

@@ -1067,20 +1067,33 @@ let stop_containers ?keeper_name ?container_kind ~base_path ~timeout_sec () =
    [Atomic.t float] + [Atomic.compare_and_set] means exactly one fiber wins
    the gate per [interval] window; losers see [None] and skip silently. *)
 let last_cleanup_at : float Atomic.t = Atomic.make 0.0
+let cleanup_failure_backoff_until : float Atomic.t = Atomic.make 0.0
+let cleanup_failure_backoff_sec = 1800.0
 
-let reset_last_cleanup_for_tests () = Atomic.set last_cleanup_at 0.0
+let reset_last_cleanup_for_tests () =
+  Atomic.set last_cleanup_at 0.0;
+  Atomic.set cleanup_failure_backoff_until 0.0
 
-let maybe_cleanup_stale_containers ~base_path ~timeout_sec () =
+let maybe_cleanup_stale_containers ?(now = Unix.gettimeofday ()) ~base_path
+    ~timeout_sec () =
   if not (Env_config_keeper.KeeperSandbox.cleanup_enabled ())
   then None
   else (
-    let now = Unix.gettimeofday () in
+    let backoff_until = Atomic.get cleanup_failure_backoff_until in
+    if now < backoff_until
+    then None
+    else
     let interval = Env_config_keeper.KeeperSandbox.cleanup_interval_sec () in
     let prev = Atomic.get last_cleanup_at in
     if now -. prev < interval
     then None
     else if Atomic.compare_and_set last_cleanup_at prev now
-    then Some (cleanup_stale_containers ~now ~base_path ~timeout_sec ())
+    then (
+      let result = cleanup_stale_containers ~now ~base_path ~timeout_sec () in
+      if result.errors <> [] then
+        Atomic.set cleanup_failure_backoff_until
+          (now +. cleanup_failure_backoff_sec);
+      Some result)
     else None)
 ;;
 

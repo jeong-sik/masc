@@ -477,6 +477,21 @@ esac\n\
 printf 'unexpected docker invocation\\n' >&2\n\
 exit 2\n"
 
+let fake_docker_cleanup_fail_script =
+  "#!/bin/sh\n\
+log_file=${KEEPER_DOCKER_LOG:-}\n\
+if [ -n \"$log_file\" ]; then\n\
+  printf '%s\\n' \"$*\" >> \"$log_file\"\n\
+fi\n\
+case \"$1\" in\n\
+  ps)\n\
+    printf 'docker daemon unavailable\\n' >&2\n\
+    exit 1\n\
+    ;;\n\
+esac\n\
+printf 'unexpected docker invocation\\n' >&2\n\
+exit 2\n"
+
 let test_sandbox_container_label_args_include_owner_scope () =
   let args =
     Keeper_sandbox_runtime.docker_label_args
@@ -736,6 +751,49 @@ let test_maybe_cleanup_stale_containers_runs_once_per_interval () =
     |> List.length
   in
   Alcotest.(check int) "only one docker ps cleanup spawn" 1 ps_count
+
+let test_maybe_cleanup_stale_containers_backs_off_after_failure () =
+  with_fake_docker fake_docker_cleanup_fail_script @@ fun () ->
+  let base = temp_dir () in
+  let log_path = Filename.concat base "docker.log" in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_sandbox_runtime.reset_last_cleanup_for_tests ();
+      cleanup_dir base)
+  @@ fun () ->
+  with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_CLEANUP_ENABLED" "true" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_CLEANUP_INTERVAL_SEC" "10" @@ fun () ->
+  Keeper_sandbox_runtime.reset_last_cleanup_for_tests ();
+  let first =
+    Keeper_sandbox_runtime.maybe_cleanup_stale_containers
+      ~now:1000.0 ~base_path:base ~timeout_sec:5.0 ()
+  in
+  (match first with
+   | Some result ->
+       Alcotest.(check bool) "first cleanup records daemon error" true
+         (result.errors <> [])
+   | None -> Alcotest.fail "expected first cleanup to run");
+  let skipped =
+    Keeper_sandbox_runtime.maybe_cleanup_stale_containers
+      ~now:1011.0 ~base_path:base ~timeout_sec:5.0 ()
+  in
+  Alcotest.(check bool) "failure backoff skips next interval" true
+    (Option.is_none skipped);
+  let after_backoff =
+    Keeper_sandbox_runtime.maybe_cleanup_stale_containers
+      ~now:2801.0 ~base_path:base ~timeout_sec:5.0 ()
+  in
+  Alcotest.(check bool) "cleanup runs after failure backoff" true
+    (Option.is_some after_backoff);
+  let ps_count =
+    read_file log_path
+    |> String.split_on_char '\n'
+    |> List.filter (String.starts_with ~prefix:"ps -aq ")
+    |> List.length
+  in
+  Alcotest.(check int) "backoff suppresses one docker ps cleanup spawn" 2
+    ps_count
 
 let test_docker_preflight_reports_ready_image () =
   with_fake_docker fake_docker_preflight_ok_script @@ fun () ->
@@ -1137,6 +1195,8 @@ let run_tests ~clock () =
             test_cleanup_stale_containers_removes_only_stale_masc_scope;
           Alcotest.test_case "cleanup CAS runs once per interval" `Quick
             test_maybe_cleanup_stale_containers_runs_once_per_interval;
+          Alcotest.test_case "cleanup failure activates backoff" `Quick
+            test_maybe_cleanup_stale_containers_backs_off_after_failure;
         ] );
     ]
 

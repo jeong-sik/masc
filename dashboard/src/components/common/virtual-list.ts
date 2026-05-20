@@ -84,7 +84,6 @@ export function VirtualList<T>({
       acc[i + 1] = (acc[i] ?? 0) + h
     }
     return acc
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dynamicMode, items, measureTick, estimatedItemHeight, getKey])
 
   useEffect(() => {

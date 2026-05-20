@@ -1,6 +1,7 @@
 import { html } from 'htm/preact'
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
-import { get } from '../../api/core'
+import { fetchBoard } from '../../api/board'
+import type { BoardPost } from '../../types/core'
 import { bridgePostsToTrace } from './anchored-thread-trace-bridge'
 import { bridgeCascadeEventsToTrace } from './cascade-hop-trace-bridge'
 import { bridgeDecisionsToTrace } from './decision-log-trace-bridge'
@@ -37,15 +38,8 @@ import {
   type IdeContextRouteLink,
 } from './ide-context-lens'
 
-export interface BoardPost {
-  readonly id: string
-  readonly title: string
-  readonly body: string
-  readonly author_identity: string
-  readonly votes: number
-  readonly comment_count: number
-  readonly created_at_iso: string
-  readonly hearth?: string | null
+function postAuthorId(post: BoardPost): string {
+  return post.author_identity?.id ?? post.author ?? '(unknown author)'
 }
 
 const KIND_LABEL: Record<ThreadKind, string> = {
@@ -89,9 +83,8 @@ type ReplayRailItem =
 
 async function fetchBoardPosts(): Promise<ReadonlyArray<BoardPost>> {
   try {
-    const data = await get<unknown>('/api/v1/board?limit=20&exclude_system=true&exclude_automation=true')
-    if (Array.isArray(data) && data.length > 0) return data as BoardPost[]
-    return EMPTY_POSTS
+    const { posts } = await fetchBoard(undefined, { excludeSystem: true, excludeAutomation: true })
+    return posts
   } catch {
     return EMPTY_POSTS
   }
@@ -310,7 +303,7 @@ export function replayRailItems(
   return [
     ...posts.map(post => ({
       source: 'thread' as const,
-      timestamp_ms: parseIsoToMs(post.created_at_iso),
+      timestamp_ms: parseIsoToMs(post.created_at),
       post,
     })),
     ...decisions.map((decision, index) => ({
@@ -342,14 +335,14 @@ function replayEventsForItems(items: ReadonlyArray<ReplayRailItem>): AuditReplay
 }
 
 function postToAnchoredThread(post: BoardPost): AnchoredThread | null {
-  const createdMs = parseIsoToMs(post.created_at_iso)
+  const createdMs = parseIsoToMs(post.created_at)
   if (!Number.isFinite(createdMs)) return null
   const anchor = anchorFromPost(post)
   if (!anchor) return null
   return {
     id: post.id,
     kind: boardKindFromPost(post),
-    author_keeper_id: post.author_identity || '(unknown author)',
+    author_keeper_id: postAuthorId(post),
     anchor,
     body: post.body || post.title || 'board thread',
     created_ms: createdMs,
@@ -362,8 +355,8 @@ function postToTraceInput(post: BoardPost) {
   const anchor = postToAnchoredThread(post)?.anchor ?? null
   return {
     id: post.id,
-    created_at_iso: post.created_at_iso,
-    author_identity: post.author_identity,
+    created_at: post.created_at,
+    author_identity: postAuthorId(post),
     filePath: anchor?.file_path ?? null,
     line: anchor?.line_start ?? null,
   }
@@ -433,13 +426,13 @@ function PostCard(
 ) {
   const kind = boardKindFromPost(post)
   const kindColor = KIND_TOKEN[kind]
-  const keeperSlot = keeperHueIndex(post.author_identity)
+  const keeperSlot = keeperHueIndex(postAuthorId(post))
   const keeperColor = `var(--color-keeper-${keeperSlot}-glow, var(--k-${keeperSlot}))`
-  const createdMs = parseIsoToMs(post.created_at_iso)
+  const createdMs = parseIsoToMs(post.created_at)
   const bodyText = post.body || post.title || ''
-  const entry = entries.find(e => e.keeper_id === post.author_identity)
+  const entry = entries.find(e => e.keeper_id === postAuthorId(post))
   const statusDot = entry ? PRESENCE_DOT[entry.status] : null
-  const cursor = overlay.cursors.get(post.author_identity)
+  const cursor = overlay.cursors.get(postAuthorId(post))
   const hasFocus = !!cursor && !!cursor.file_path && cursor.line >= 1
   const focusFile = hasFocus ? cursor.file_path.split('/').pop() : null
   const thread = postToAnchoredThread(post)
@@ -462,7 +455,7 @@ function PostCard(
             surface: KIND_LABEL[kind],
             label: bodyText || post.title || 'board thread',
             source_id: `thread-${post.id}`,
-            keeper_id: post.author_identity || undefined,
+            keeper_id: postAuthorId(post) || undefined,
           })
         }}
         style=${{
@@ -472,7 +465,7 @@ function PostCard(
       >
         <div class="ide-conversation-meta">
           <span style=${{ fontSize: 'var(--fs-11)', color: kindColor, letterSpacing: '0.05em' }}>${KIND_LABEL[kind]}</span>
-          <${KeeperBadge} id=${post.author_identity} variant="full" size="sm" />
+          <${KeeperBadge} id=${postAuthorId(post)} variant="full" size="sm" />
           ${statusDot ? html`
             <span
               role="status"
@@ -560,7 +553,7 @@ function conversationRouteLinks(
     operationId,
     workerRunId,
     telemetryQuery: logId ?? sessionId ?? operationId ?? workerRunId,
-    keeperId: post.author_identity || undefined,
+    keeperId: postAuthorId(post) || undefined,
     telemetry: Boolean(logId || sessionId || operationId || workerRunId),
   })
 }

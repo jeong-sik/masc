@@ -1,4 +1,5 @@
 module Types = Masc_domain
+module CT = Cdal_types
 
 (** Tests for keeper_task_claim and keeper_task_done tool dispatch. *)
 
@@ -47,6 +48,22 @@ let with_env name value f =
       | Some v -> Unix.putenv name v
       | None -> Unix.putenv name "")
     f
+;;
+
+let with_temp_data_dir f =
+  let dir = Filename.temp_dir "test_keeper_task_cdal_" "" in
+  let rec rm path =
+    if Sys.is_directory path
+    then (
+      Sys.readdir path |> Array.iter (fun name -> rm (Filename.concat path name));
+      Unix.rmdir path)
+    else Sys.remove path
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      try rm dir with
+      | _ -> ())
+    (fun () -> with_env "MASC_DATA_DIR" (Some dir) (fun () -> f dir))
 ;;
 
 let only_task config =
@@ -120,6 +137,35 @@ let strict_contract ?(verify_gate_evidence = []) () : Masc_domain.task_contract 
   }
 ;;
 
+let make_cdal_verdict ?(run_id = "test-submit-cdal-verdict")
+    ?(contract_id = "md5:test-submit-contract") () : CT.contract_verdict =
+  let basis_input =
+    Printf.sprintf
+      "%s|%s|%s"
+      contract_id
+      CT.loader_semantics_version_phase1
+      CT.schema_compat_mode_v1
+  in
+  let basis_hash = "md5:" ^ (Digest.string basis_input |> Digest.to_hex) in
+  let verdict_without_hash : CT.contract_verdict =
+    { run_id
+    ; contract_id
+    ; claim_scope = CT.claim_scope_phase1
+    ; judgment_basis_hash = basis_hash
+    ; judgment_hash = ""
+    ; loader_semantics_version = CT.loader_semantics_version_phase1
+    ; schema_compat_mode = CT.schema_compat_mode_v1
+    ; status = CT.Satisfied
+    ; findings = []
+    ; completeness_gaps = []
+    ; check_results = []
+    }
+  in
+  { verdict_without_hash with
+    judgment_hash = CT.compute_judgment_hash verdict_without_hash
+  }
+;;
+
 let contract_requiring_tools required_tools : Masc_domain.task_contract =
   { strict = false
   ; completion_contract = []
@@ -175,6 +221,12 @@ let evidence_refs_of_request (req : Verification.verification_request) =
          refs
      | _ -> [])
   | _ -> []
+;;
+
+let cdal_verdict_of_request (req : Verification.verification_request) =
+  match req.output with
+  | `Assoc fields -> List.assoc_opt "cdal_verdict" fields
+  | _ -> None
 ;;
 
 (* Temp directory setup following test_keeper_tools_oas.ml pattern.
@@ -2059,6 +2111,73 @@ let test_submit_for_verification_transitions_task () =
         | _ -> fail "expected keeper_task_submit_for_verification to succeed")))
 ;;
 
+let test_submit_for_verification_includes_cdal_verdict_payload () =
+  ensure_rng ();
+  with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
+    with_env "MASC_CDAL_GATE_ENABLED" (Some "false") (fun () ->
+      with_temp_data_dir (fun _data_dir ->
+        with_room (fun config ->
+          let meta = make_test_meta () in
+          let contract = strict_contract ~verify_gate_evidence:[ "pr_url" ] () in
+          let _ =
+            Coord.add_task
+              ~contract
+              config
+              ~title:"Verification submit CDAL payload task"
+              ~priority:1
+              ~description:"should carry CDAL verdict into verification payload"
+          in
+          let task_id = (only_task config).id in
+          let run_id = "run-submit-cdal-payload" in
+          let verdict = make_cdal_verdict ~run_id () in
+          Cdal_eval_v1.persist ~task_id verdict;
+          ignore (call_tool config meta "keeper_task_claim" (`Assoc []));
+          let result =
+            call_tool
+              config
+              meta
+              "keeper_task_submit_for_verification"
+              (`Assoc
+                  [ "task_id", `String task_id
+                  ; "notes", `String "tests pass locally"
+                  ; ( "pr_url"
+                    , `String "https://github.com/jeong-sik/masc-mcp/pull/16486" )
+                  ])
+          in
+          let json = parse_json result in
+          match Yojson.Safe.Util.member "ok" json with
+          | `Bool true ->
+            let request = verification_request_by_task_id config ~task_id in
+            (match cdal_verdict_of_request request with
+             | Some (`Assoc fields) ->
+               let string_field name =
+                 match List.assoc_opt name fields with
+                 | Some (`String value) -> value
+                 | Some other ->
+                   fail
+                     (Printf.sprintf
+                        "expected string field %s in cdal_verdict, got %s"
+                        name
+                        (Yojson.Safe.to_string other))
+                 | None ->
+                   fail
+                     (Printf.sprintf
+                        "expected string field %s in cdal_verdict"
+                        name)
+               in
+               check string "cdal task id" task_id (string_field "task_id");
+               check string "cdal run id" run_id (string_field "run_id");
+               check string "cdal status" "satisfied" (string_field "status")
+             | Some `Null -> fail "expected persisted cdal_verdict, got null"
+             | Some other ->
+               fail
+                 (Printf.sprintf
+                    "expected cdal_verdict object, got %s"
+                    (Yojson.Safe.to_string other))
+             | None -> fail "expected cdal_verdict in verification request output")
+          | _ -> fail "expected keeper_task_submit_for_verification to succeed"))))
+;;
+
 (* Regression: keeper_task_done must map [result] onto the typed
    [handoff_context.summary] domain field, not just dump it into [notes]
    as an untyped blob. Previously a [result] sent by a keeper would be
@@ -2489,6 +2608,10 @@ let () =
             "transitions task"
             `Quick
             test_submit_for_verification_transitions_task
+        ; test_case
+            "includes task-scoped CDAL verdict payload"
+            `Quick
+            test_submit_for_verification_includes_cdal_verdict_payload
         ; test_case
             "notes/pr_url map to typed handoff_context fields"
             `Quick

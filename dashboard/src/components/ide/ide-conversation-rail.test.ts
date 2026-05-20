@@ -75,39 +75,55 @@ describe('IdeConversationRail', () => {
     const threads = postsToAnchoredThreads([
       {
         id: 'thread-line',
+        author: 'scholar',
         title: 'Review lib/runtime.ml:42',
         body: 'question fn:run about this line',
-        author_identity: 'scholar',
+        content: 'question fn:run about this line',
+        tags: [],
+        author_identity: { kind: 'keeper', id: 'scholar', key: 'scholar', display_name: 'scholar', raw: 'scholar' },
         votes: 0,
         comment_count: 2,
-        created_at_iso: '2026-05-05T10:00:00Z',
+        created_at: '2026-05-05T10:00:00Z',
+        updated_at: '2026-05-05T10:00:00Z',
       },
       {
         id: 'thread-file',
+        author: 'sangsu',
         title: 'File-level note',
         body: 'looks good',
-        author_identity: 'sangsu',
+        content: 'looks good',
+        tags: [],
+        author_identity: { kind: 'keeper', id: 'sangsu', key: 'sangsu', display_name: 'sangsu', raw: 'sangsu' },
         votes: 1,
         comment_count: 0,
-        created_at_iso: '2026-05-05T10:01:00Z',
+        created_at: '2026-05-05T10:01:00Z',
+        updated_at: '2026-05-05T10:01:00Z',
       },
       {
         id: 'thread-windows-path',
+        author: 'scholar',
         title: 'Review ./lib\\runtime.ml:43',
         body: 'question about normalized file path',
-        author_identity: 'scholar',
+        content: 'question about normalized file path',
+        tags: [],
+        author_identity: { kind: 'keeper', id: 'scholar', key: 'scholar', display_name: 'scholar', raw: 'scholar' },
         votes: 0,
         comment_count: 1,
-        created_at_iso: '2026-05-05T10:02:00Z',
+        created_at: '2026-05-05T10:02:00Z',
+        updated_at: '2026-05-05T10:02:00Z',
       },
       {
         id: 'thread-absolute-path',
+        author: 'scholar',
         title: 'Review /workspace/lib/runtime.ml:44',
         body: 'should not anchor unsafe absolute paths',
-        author_identity: 'scholar',
+        content: 'should not anchor unsafe absolute paths',
+        tags: [],
+        author_identity: { kind: 'keeper', id: 'scholar', key: 'scholar', display_name: 'scholar', raw: 'scholar' },
         votes: 0,
         comment_count: 1,
-        created_at_iso: '2026-05-05T10:03:00Z',
+        created_at: '2026-05-05T10:03:00Z',
+        updated_at: '2026-05-05T10:03:00Z',
       },
     ])
 
@@ -136,12 +152,16 @@ describe('IdeConversationRail', () => {
   it('does not reanchor generic board posts when the active file changes', () => {
     const posts = [{
       id: 'thread-generic',
+      author: 'sangsu',
       title: 'File-level note',
       body: 'looks good',
-      author_identity: 'sangsu',
+      content: 'looks good',
+      tags: [],
+      author_identity: { kind: 'keeper', id: 'sangsu', key: 'sangsu', display_name: 'sangsu', raw: 'sangsu' },
       votes: 1,
       comment_count: 0,
-      created_at_iso: '2026-05-05T10:01:00Z',
+      created_at: '2026-05-05T10:01:00Z',
+      updated_at: '2026-05-05T10:01:00Z',
     }]
 
     expect(postsToAnchoredThreads(posts)).toEqual([])
@@ -153,12 +173,16 @@ describe('IdeConversationRail', () => {
     const items = replayRailItems(
       [{
         id: 'thread-old',
+        author: 'sangsu',
         title: 'old thread',
         body: 'thread body',
-        author_identity: 'sangsu',
+        content: 'thread body',
+        tags: [],
+        author_identity: { kind: 'keeper', id: 'sangsu', key: 'sangsu', display_name: 'sangsu', raw: 'sangsu' },
         votes: 0,
         comment_count: 0,
-        created_at_iso: '2026-05-05T10:00:00Z',
+        created_at: '2026-05-05T10:00:00Z',
+        updated_at: '2026-05-05T10:00:00Z',
       }],
       [{
         ts_unix: Date.UTC(2026, 4, 5, 10, 1, 0) / 1000,
@@ -200,21 +224,29 @@ describe('IdeConversationRail', () => {
         return new Response(JSON.stringify([
           {
             id: 'thread-old',
+            author: 'sangsu',
             title: 'old thread',
             body: 'old thread body',
-            author_identity: 'sangsu',
+            content: 'old thread body',
+            tags: [],
+            author_identity: { kind: 'keeper', id: 'sangsu', key: 'sangsu', display_name: 'sangsu', raw: 'sangsu' },
             votes: 0,
             comment_count: 0,
-            created_at_iso: '2026-05-05T10:00:00Z',
+            created_at: '2026-05-05T10:00:00Z',
+            updated_at: '2026-05-05T10:00:00Z',
           },
           {
             id: 'thread-new',
+            author: 'scholar',
             title: 'new thread',
             body: 'new thread body',
-            author_identity: 'scholar',
+            content: 'new thread body',
+            tags: [],
+            author_identity: { kind: 'keeper', id: 'scholar', key: 'scholar', display_name: 'scholar', raw: 'scholar' },
             votes: 0,
             comment_count: 0,
-            created_at_iso: '2026-05-05T10:03:00Z',
+            created_at: '2026-05-05T10:03:00Z',
+            updated_at: '2026-05-05T10:03:00Z',
           },
         ]), { status: 200, headers: { 'Content-Type': 'application/json' } })
       }
@@ -391,12 +423,16 @@ describe('IdeConversationRail', () => {
       if (url.startsWith('/api/v1/board')) {
         return new Response(JSON.stringify([{
           id: 'thread-line',
+          author: 'scholar',
           title: 'Review lib/runtime.ml:42',
           body: 'question fn:run about this line',
-          author_identity: 'scholar',
+          content: 'question fn:run about this line',
+          tags: [],
+          author_identity: { kind: 'keeper', id: 'scholar', key: 'scholar', display_name: 'scholar', raw: 'scholar' },
           votes: 0,
           comment_count: 2,
-          created_at_iso: '2026-05-05T10:00:00Z',
+          created_at: '2026-05-05T10:00:00Z',
+          updated_at: '2026-05-05T10:00:00Z',
         }]), { status: 200, headers: { 'Content-Type': 'application/json' } })
       }
       if (url.startsWith('/api/v1/dashboard/keeper-decisions')) {
@@ -444,12 +480,16 @@ describe('IdeConversationRail', () => {
       if (url.startsWith('/api/v1/board')) {
         return new Response(JSON.stringify([{
           id: 'thread-line',
+          author: 'scholar',
           title: 'Review lib/runtime.ml:42',
           body: 'question fn:run comment:comment-1 PR 15035 task:task-runtime goal:goal-runtime branch:feat/ide-routes log:turn-7',
-          author_identity: 'scholar',
+          content: 'question fn:run comment:comment-1 PR 15035 task:task-runtime goal:goal-runtime branch:feat/ide-routes log:turn-7',
+          tags: [],
+          author_identity: { kind: 'keeper', id: 'scholar', key: 'scholar', display_name: 'scholar', raw: 'scholar' },
           votes: 0,
           comment_count: 2,
-          created_at_iso: '2026-05-05T10:00:00Z',
+          created_at: '2026-05-05T10:00:00Z',
+          updated_at: '2026-05-05T10:00:00Z',
         }]), { status: 200, headers: { 'Content-Type': 'application/json' } })
       }
       if (url.startsWith('/api/v1/dashboard/keeper-decisions')) {

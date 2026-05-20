@@ -18,7 +18,7 @@ import { pushTrace } from './keeper-trace-store'
  *
  * Mapping (BoardPost → KeeperTraceEvent):
  *   id         ← post.id
- *   tsMs       ← Date.parse(post.created_at_iso) (NaN-guarded)
+ *   tsMs       ← Date.parse(post.created_at) (NaN-guarded)
  *   keeperName ← post.author_identity
  *   threadId   ← post.id (BoardPost is the thread itself for now)
  *   filePath   ← post.filePath when the caller has already resolved a safe
@@ -27,14 +27,14 @@ import { pushTrace } from './keeper-trace-store'
  *                board-thread file anchor; otherwise null so consumers fall
  *                back to the keeper-level no-line bucket per RFC §5
  *
- * NaN-guard rationale: a malformed `created_at_iso` would otherwise
+ * NaN-guard rationale: a malformed `created_at` would otherwise
  * propagate `NaN` into the store and break binary-search insertion. We
  * silently skip such posts — they cannot participate in replay either.
  */
 
 export interface AnchoredThreadProducerInput {
   readonly id: string
-  readonly created_at_iso: string
+  readonly created_at: string
   readonly author_identity: string
   readonly filePath?: string | null
   readonly line?: number | null
@@ -53,7 +53,7 @@ export function bridgePostsToTrace(
   const next = new Set(alreadyEmitted)
   for (const post of posts) {
     if (next.has(post.id)) continue
-    const tsMs = Date.parse(post.created_at_iso)
+    const tsMs = Date.parse(post.created_at)
     if (!Number.isFinite(tsMs)) continue
     pushTrace({
       id: post.id,

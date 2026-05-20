@@ -264,6 +264,93 @@ let test_submit_prepare_failure_keeps_task_in_progress () =
       in
       Alcotest.(check int) "no orphan request" 0 (List.length reqs))
 
+let test_submit_retry_records_request_created_backlog_orphan_policy () =
+  with_temp_config ~fsm_enabled:true (fun config ->
+    let task_id = add_strict_task config in
+    claim_and_start config "worker" task_id;
+    let orphan_request_id = "vrf-request-created-backlog-write-failed" in
+    ignore
+      (create_pending_request
+         config
+         ~task_id
+         ~worker:"worker"
+         ~request_id:orphan_request_id);
+    (* Simulates the observable orphan left when the verification request
+       was already persisted, but the following backlog status write failed
+       before the task left InProgress.  Current recovery policy is a retry
+       with a fresh verification request; the old request stays as audit
+       evidence instead of being mutated implicitly. *)
+    Alcotest.(check string)
+      "orphaned task still in progress"
+      "in_progress"
+      (status_string config task_id);
+    let retry_request_id = ref None in
+    (match
+       Coord.transition_task_r
+         config
+         ~agent_name:"worker"
+         ~task_id
+         ~action:Masc_domain.Submit_for_verification
+         ~prepare_verification_request:
+           (fun ~task:_ ~assignee ~verification_id ~evidence_refs ->
+             retry_request_id := Some verification_id;
+             match
+               Verification.create_request
+                 ~base_path:config.Coord.base_path
+                 ~task_id
+                 ~output:
+                   (`Assoc
+                     [ ( "evidence_refs"
+                       , `List (List.map (fun s -> `String s) evidence_refs) )
+                     ])
+                 ~criteria:[]
+                 ~worker:assignee
+                 ~request_id:verification_id
+                 ()
+             with
+             | Ok _ -> Ok ()
+             | Error e -> Error e)
+         ()
+     with
+     | Ok _ -> ()
+     | Error e -> Alcotest.fail ("submit retry failed: " ^ Masc_domain.show_masc_error e));
+    let new_request_id = verification_id_of_task config task_id in
+    Alcotest.(check bool)
+      "retry uses a fresh request id"
+      true
+      (not (String.equal new_request_id orphan_request_id));
+    Alcotest.(check (option string))
+      "prepare saw retry request id"
+      (Some new_request_id)
+      !retry_request_id;
+    let reqs =
+      Verification.list_requests config.Coord.base_path
+      |> List.filter (fun (r : Verification.verification_request) -> r.task_id = task_id)
+    in
+    Alcotest.(check int) "orphan plus retry request remain visible" 2 (List.length reqs);
+    Alcotest.(check bool)
+      "original orphan remains pending for audit"
+      true
+      (List.exists
+         (fun (r : Verification.verification_request) ->
+           String.equal r.id orphan_request_id
+           &&
+           match r.status with
+           | Pending -> true
+           | _ -> false)
+         reqs);
+    Alcotest.(check bool)
+      "retry request is pending"
+      true
+      (List.exists
+         (fun (r : Verification.verification_request) ->
+           String.equal r.id new_request_id
+           &&
+           match r.status with
+           | Pending -> true
+           | _ -> false)
+         reqs))
+
 (* Regression for the criteria ← completion_contract vs
    evidence_refs ← verify_gate_evidence split. Prior to the fix both
    sides pulled from verify_gate_evidence, so criteria ended up
@@ -893,6 +980,10 @@ let () =
         `Quick test_submit_for_verification_from_claimed_moves_to_awaiting;
       Alcotest.test_case "submit prepare failure keeps task in_progress"
         `Quick test_submit_prepare_failure_keeps_task_in_progress;
+      Alcotest.test_case
+        "submit retry records request-created backlog orphan policy"
+        `Quick
+        test_submit_retry_records_request_created_backlog_orphan_policy;
       Alcotest.test_case "submit splits criteria/evidence by contract field"
         `Quick test_submit_populates_criteria_from_completion_contract;
       Alcotest.test_case "submit carries required_evidence into verifier refs"

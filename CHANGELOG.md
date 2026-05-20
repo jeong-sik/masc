@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.19.26] - 2026-05-20
+
+### Added
+- RFC-0153 Phase A/B for cascade saturation: added the typed `Cascade_saturation_signal`, wired tier admission into keeper attempts, and emitted the new saturation metric.
+- RFC-0148 closed-sum `tool_error` module (7 variants) with codemod adoption at six LLM-facing sites.
+- RFC-0142 `Json_field` typed extraction helper for boundary parsing.
+- RFC-0141 `Field_resolution` typed TOML extractor in `repo_manager`.
+- RFC-0143 typed `catalog_metadata_query` bridge for `keeper_cascade_profile`.
+- RFC-0139 dashboard agent-status typed SSOT module.
+- RFC-0135 keeper-operational-state typed SSOT promotion across vocab outliers.
+- Typed `drain_outcome` sum for background tasks and a typed `validator_stage` enum in `exec_core` (RFC-0092 Cluster C).
+
+### Changed
+- Bumped the downstream OAS `agent_sdk` pin to `v0.196.4` and raised the dependency floor accordingly.
+- Promoted multiple permissive `_ ->` and string-keyed fallbacks to typed closed-sum splits (RFC-0070, RFC-0092, RFC-0093, RFC-0126 discipline).
+- Replaced raw try/with handlers with `int_of_string_opt`-style total parsers and named the JSON shape in `of_json` errors across several boundary sites.
+
+### Fixed
+- RFC-0106 cancel-safe discipline: propagate `Eio.Cancel.Cancelled` instead of swallowing it in `fd_accountant` and several N-of-M boundary sites.
+- `cdal_loader` boundary parsing: split `Yojson.Json_error` from the catch-all in `read_json_file` and preserve `Sys_error` reason in `File_not_found`.
+- `worker_helper` / `worker_runtime_helper_protocol`: labelled bare `Failure` handlers and split `run_result_of_yojson` failure modes.
+- `ide_annotation_types`: kind-aware parse errors with total integer parsers; exposed JSON shape in two `of_json` errors.
+- `cascade_http_probe`: log HTTP transport failures instead of returning silent `None`.
+- `mode_enforcer` / `anti_rationalization` / `eval_harness`: kind-aware boundary parse errors and bounded entry dumps.
+- Build break in `test_cascade_saturation_signal_phase_a2` from an `Unix.unsetenv` reference (no such stdlib function) and a wrong `Masc_mcp.Env_config_keeper` qualifier.
+
 ## [0.19.25] - 2026-05-17
 
 ### Added

@@ -3,4 +3,3 @@
 # Format: <needle> <repo-relative-path>
 # New files may not gain these legacy markers. Deletion PRs should remove
 # rows as they remove the corresponding markers.
-tokenize_path_args lib/worker_dev_tools.ml

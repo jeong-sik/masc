@@ -88,6 +88,16 @@ jobs:
       - name: Run lint
         run: bash scripts/lint/no-provider-name-hardcoding.sh --fail
 
+  no-tool-result-error-printexc:
+    name: RFC-0148 backsliding guard (no Tool_result.error + Printexc.to_string)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ripgrep
+        run: sudo apt-get install -y -qq ripgrep
+      - name: Run lint
+        run: bash scripts/lint/no-tool-result-error-printexc.sh
+
   no-runtime-literal-outside-boundary-redaction:
     name: Boundary redaction SSOT enforcement (RFC-0132 PR-3)
     runs-on: ubuntu-latest

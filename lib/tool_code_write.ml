@@ -604,7 +604,12 @@ let handle_code_delete ~tool_name ~start_time ctx args =
             ("agent", `String ctx.agent_name);
           ]
         with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-          Tool_result.error ~tool_name ~start_time (Printf.sprintf "Delete failed: %s" (Stdlib.Printexc.to_string exn))
+          let err =
+            Tool_error.of_exn
+              ~detail:(Printf.sprintf "Delete failed: %s" (Stdlib.Printexc.to_string exn))
+              exn
+          in
+          Tool_result.error ~tool_name ~start_time (Tool_error.to_string err)
       end
   end
 

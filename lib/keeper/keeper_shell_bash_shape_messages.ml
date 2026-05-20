@@ -1,4 +1,5 @@
 open Keeper_shell_bash_task_state
+open Keeper_shell_bash_words
 
 type bash_shape_block =
   | Gh_pr_checks
@@ -160,6 +161,164 @@ let recovery_plan_to_json plan =
 let plan ?(confidence = "medium") ~next_tool ~next_args ~instruction ~reason () =
   { next_tool; next_args; instruction; reason; confidence }
 
+type simple_command = {
+  bin_name : string;
+  args : string list;
+}
+
+let arg_literal = function
+  | Masc_exec.Shell_ir.Lit text -> Some text
+  | Masc_exec.Shell_ir.Concat _ | Masc_exec.Shell_ir.Var _ -> None
+
+let simple_command_of_shell_simple (simple : Masc_exec.Shell_ir.simple) =
+  let rec loop acc = function
+    | [] -> Some { bin_name = Masc_exec.Bin.to_string simple.bin; args = List.rev acc }
+    | arg :: rest ->
+      (match arg_literal arg with
+       | None -> None
+       | Some text -> loop (text :: acc) rest)
+  in
+  loop [] simple.args
+
+let parsed_simple_commands cmd =
+  let rec collect acc = function
+    | Masc_exec.Shell_ir.Simple simple ->
+      (match simple_command_of_shell_simple simple with
+       | Some command -> command :: acc
+       | None -> acc)
+    | Masc_exec.Shell_ir.Pipeline stages -> List.fold_left collect acc stages
+  in
+  match Masc_exec_bash_parser.Bash.parse_string cmd with
+  | Masc_exec.Parsed.Parsed ir -> List.rev (collect [] ir)
+  | Masc_exec.Parsed.Parse_error _
+  | Masc_exec.Parsed.Parse_aborted _
+  | Masc_exec.Parsed.Too_complex _ -> []
+
+let shell_word_simple_commands cmd =
+  let rec from_cmd cmd =
+    let words = shell_words_with_boundaries cmd in
+    let rec take_args = function
+      | [] -> []
+      | word :: _ when word.starts_command -> []
+      | word :: rest -> word.text :: take_args rest
+    in
+    let rec loop acc = function
+      | word :: rest when word.starts_command ->
+        let command_words = strip_command_wrappers (word :: rest) in
+        let acc =
+          match command_words with
+          | bin :: args ->
+            { bin_name = command_name bin.text; args = take_args args } :: acc
+          | [] -> acc
+        in
+        loop acc rest
+      | _ :: rest -> loop acc rest
+      | [] -> List.rev acc
+    in
+    let commands = loop [] words in
+    match shell_c_payload words with
+    | Some payload -> commands @ from_cmd payload
+    | None -> commands
+  in
+  from_cmd cmd
+
+let find_simple_command cmd predicate =
+  match List.find_opt predicate (parsed_simple_commands cmd) with
+  | Some command -> Some command
+  | None -> List.find_opt predicate (shell_word_simple_commands cmd)
+
+let option_consumes_value text =
+  Keeper_shell_bash_repo_wide_scan.option_consumes_next_arg text
+
+let positional_args args =
+  let rec loop acc = function
+    | [] -> List.rev acc
+    | arg :: _value :: rest when option_consumes_value arg -> loop acc rest
+    | arg :: rest when String.starts_with ~prefix:"--" arg -> loop acc rest
+    | arg :: rest when String.length arg > 1 && Char.equal arg.[0] '-' ->
+      loop acc rest
+    | arg :: rest -> loop (arg :: acc) rest
+  in
+  loop [] args
+
+let option_value ~name args =
+  let prefix = name ^ "=" in
+  let rec loop = function
+    | [] -> None
+    | arg :: rest when String.equal arg name ->
+      (match rest with
+       | value :: _ -> Some value
+       | [] -> None)
+    | arg :: _ when String.starts_with ~prefix arg ->
+      Some (String.sub arg (String.length prefix) (String.length arg - String.length prefix))
+    | _ :: rest -> loop rest
+  in
+  loop args
+
+let first_positional_or_placeholder ~placeholder args =
+  match positional_args args with
+  | value :: _ when String.trim value <> "" -> value
+  | [] | _ -> placeholder
+
+let repo_wide_rg_pattern cmd =
+  let is_rg command =
+    String.equal (command_name command.bin_name) "rg"
+  in
+  match find_simple_command cmd is_rg with
+  | Some { args; _ } -> Some (first_positional_or_placeholder ~placeholder:"SEARCH_TERM" args)
+  | None -> None
+
+let repo_wide_grep_pattern cmd =
+  let is_grep command =
+    match command_name command.bin_name with
+    | "grep" | "egrep" | "fgrep" -> true
+    | _ -> false
+  in
+  match find_simple_command cmd is_grep with
+  | Some { args; _ } -> Some (first_positional_or_placeholder ~placeholder:"SEARCH_TERM" args)
+  | None -> None
+
+let repo_wide_find_pattern cmd =
+  let is_find command = String.equal (command_name command.bin_name) "find" in
+  let rec find_name_arg = function
+    | [] -> None
+    | ("-name" | "-iname" | "-path") :: value :: _ -> Some value
+    | _ :: rest -> find_name_arg rest
+  in
+  match find_simple_command cmd is_find with
+  | Some { args; _ } ->
+    Some (Option.value (find_name_arg args) ~default:"FILE_GLOB")
+  | None -> None
+
+let repo_wide_git_log_grep cmd =
+  let is_git_log command =
+    match command_name command.bin_name, command.args with
+    | "git", subcmd :: _ -> String.equal subcmd "log"
+    | _ -> false
+  in
+  match find_simple_command cmd is_git_log with
+  | Some { args; _ } -> option_value ~name:"--grep" args
+  | None -> None
+
+let rg_scoped_path_placeholder cmd =
+  if lowercase_contains cmd " repos"
+  then "repos/REPO/SCOPED_PATH"
+  else "SCOPED_PATH"
+
+let shell_single_quote text =
+  let escaped =
+    text
+    |> String.split_on_char '\''
+    |> String.concat "'\\''"
+  in
+  "'" ^ escaped ^ "'"
+
+let bash_find_command pattern =
+  "find . -name " ^ shell_single_quote pattern
+
+let bash_git_log_grep_command grep =
+  "git log --oneline -5 --grep=" ^ shell_single_quote grep
+
 let bash_shape_block_recovery_plan ~cmd = function
   | _ when command_looks_like_task_state_discovery cmd ->
     Some
@@ -182,12 +341,18 @@ let bash_shape_block_recovery_plan ~cmd = function
          ~reason:"native_pr_status_tool_required"
          ())
   | Pipe_or_redirect when command_looks_like_search_pipeline cmd ->
+    let pattern =
+      repo_wide_rg_pattern cmd
+      |> Option.value
+           ~default:
+             (Option.value (repo_wide_grep_pattern cmd) ~default:"SEARCH_TERM")
+    in
     Some
       (plan
          ~confidence:"high"
          ~next_tool:"Grep"
          ~next_args:
-           [ "pattern", `String "SEARCH_TERM"
+           [ "pattern", `String pattern
            ; "path", `String "SCOPED_PATH"
            ; "glob", `String "*.ml"
            ]
@@ -196,12 +361,13 @@ let bash_shape_block_recovery_plan ~cmd = function
          ())
   | Pipe_or_redirect when
       command_looks_like_find_pipeline cmd || lowercase_contains cmd "find " ->
+    let pattern = Option.value (repo_wide_find_pattern cmd) ~default:"FILE_GLOB" in
     Some
       (plan
          ~confidence:"high"
          ~next_tool:"Bash"
          ~next_args:
-           [ "command", `String "find . -name FILE_GLOB"
+           [ "command", `String (bash_find_command pattern)
            ; "cwd", `String "SCOPED_REPO_OR_WORKTREE_CWD"
            ]
          ~instruction:(bash_shape_block_hint ~cmd Pipe_or_redirect)
@@ -219,12 +385,18 @@ let bash_shape_block_recovery_plan ~cmd = function
          ~reason:"pipe_or_redirect_blocked"
          ())
   | Chaining when command_looks_like_cd_chained_search cmd ->
+    let pattern =
+      repo_wide_rg_pattern cmd
+      |> Option.value
+           ~default:
+             (Option.value (repo_wide_grep_pattern cmd) ~default:"SEARCH_TERM")
+    in
     Some
       (plan
          ~confidence:"high"
          ~next_tool:"Grep"
          ~next_args:
-           [ "pattern", `String "SEARCH_TERM"
+           [ "pattern", `String pattern
            ; "path", `String "REPO_OR_WORKTREE_CWD/SCOPED_PATH"
            ; "glob", `String "*.ml"
            ]
@@ -255,25 +427,45 @@ let bash_shape_block_recovery_plan ~cmd = function
          ())
   | Repo_wide_scan ->
     if command_looks_like_repo_wide_git_log_grep cmd then
+      let grep = Option.value (repo_wide_git_log_grep cmd) ~default:"SEARCH_TERM" in
       Some
         (plan
            ~confidence:"high"
            ~next_tool:"Bash"
            ~next_args:
-             [ "command", `String "git log --oneline -5 --grep=SEARCH_TERM"
+             [ "command", `String (bash_git_log_grep_command grep)
              ; "cwd", `String "REPO_OR_WORKTREE_CWD"
              ]
            ~instruction:(bash_shape_block_hint ~cmd Repo_wide_scan)
            ~reason:"repo_wide_git_history_scan_blocked"
            ())
+    else if lowercase_contains cmd "find " then
+      let pattern = Option.value (repo_wide_find_pattern cmd) ~default:"FILE_GLOB" in
+      Some
+        (plan
+           ~confidence:"high"
+           ~next_tool:"Bash"
+           ~next_args:
+             [ "command", `String (bash_find_command pattern)
+             ; "cwd", `String "REPO_OR_WORKTREE_CWD"
+             ]
+           ~instruction:(bash_shape_block_hint ~cmd Repo_wide_scan)
+           ~reason:"repo_wide_find_scan_blocked"
+           ())
     else
+      let pattern =
+        repo_wide_rg_pattern cmd
+        |> Option.value
+             ~default:
+               (Option.value (repo_wide_grep_pattern cmd) ~default:"SEARCH_TERM")
+      in
       Some
         (plan
            ~confidence:"high"
            ~next_tool:"Grep"
            ~next_args:
-             [ "pattern", `String "SEARCH_TERM"
-             ; "path", `String "SCOPED_PATH"
+             [ "pattern", `String pattern
+             ; "path", `String (rg_scoped_path_placeholder cmd)
              ; "glob", `String "*.ml"
              ]
            ~instruction:(bash_shape_block_hint ~cmd Repo_wide_scan)

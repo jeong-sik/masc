@@ -47,19 +47,22 @@ val dashboard_namespace_truth_http_json :
     exists, composes the HTTP response from cached shell + proactive
     execution state immediately and forks a bounded shell refresh in
     the request switch (stale-while-revalidate).  The refresh timeout
-    is controlled by [MASC_NAMESPACE_TRUTH_SHELL_REFRESH_TIMEOUT_S]
-    (default 5.0s).
+    is 5.0s (module-level constant [namespace_truth_shell_refresh_timeout_s]
+    in the .ml).
 
     First seed: when no last-good shell exists yet, does one bounded
     synchronous shell attempt before composing shell + execution +
-    command summaries with per-fiber timeouts:
-
-    | Env var | Default | Used for |
-    | --- | --- | --- |
-    | [MASC_NAMESPACE_TRUTH_WARM_TIMEOUT_S] | 8.0s | base warm |
-    | [MASC_NAMESPACE_TRUTH_COLD_TIMEOUT_S] | 15.0s | base cold |
-    | [MASC_NAMESPACE_TRUTH_SHELL_FIBER_TIMEOUT_S] | 12.0s | shell warm cap |
-    | [MASC_NAMESPACE_TRUTH_COLD_SAFETY_MARGIN_S] | 4.0s | cold shell safety |
+    command summaries with per-fiber timeouts.  The four timeout
+    constants (warm 8.0s, cold 15.0s, shell-fiber cap 12.0s, cold
+    safety margin 4.0s) were previously tunable via
+    [MASC_NAMESPACE_TRUTH_*_TIMEOUT_S] env vars; RFC-0138 Phase 3
+    Step 4 (#16752) retired those knobs because Step 3 (#16738)
+    wired /project-snapshot through {!Dashboard_snapshot}, so this
+    fallback path is taken at most once per process lifetime
+    (cold-start before the refresh fiber's first publish) and no
+    longer carries steady-state load worth tuning.  See the
+    module-level [namespace_truth_*_timeout_s] bindings in the .ml
+    for the current values.
 
     Shell timeout (cold) = max(cold_timeout, shell_fiber + safety) —
     must exceed the inner cache timeout to avoid the double-timeout

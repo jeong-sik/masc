@@ -1,17 +1,25 @@
 ---
-rfc: "0144"
+rfc: "0145"
 title: "Keeper Agent Run — Stage Decomposition of run_turn Step 8"
 status: Draft
 created: 2026-05-19
-updated: 2026-05-19
+updated: 2026-05-20
 author: vincent
 supersedes: []
 superseded_by: null
 related: ["0051", "0056", "0085", "0136"]
 implementation_prs: []
+renumbered_from: "0144"
 ---
 
-# RFC-0144 — Keeper Agent Run Decomposition
+# RFC-0145 — Keeper Agent Run Decomposition
+
+> **Renumbered 2026-05-20**: 본 RFC 는 원래 RFC-0144 (PR #16773, merged
+> `bf142ff67f`) 로 작성되었으나, 동시 작성된 PR #16769 (`RFC-0144 —
+> Workaround Sunset Tracking for Keeper Dedup Carryovers`, merged
+> `99b14ac45f`) 와 번호 충돌. PR #16769 가 *선행 머지*, 본 RFC 가
+> *후행 머지* 이므로 본 RFC 를 RFC-0145 로 renumber. 메모리
+> `feedback_rfc_number_reservation_needed.md` recovery 패턴 적용.
 
 본 RFC는 `lib/keeper/keeper_agent_run.ml` (2103 LOC) 의 단일 함수 `run_turn` 내부 *Step 8 "Run Agent" body* (L424-L2103, ~1679 LOC) 를 *stage-typed sub-module* 들로 분해하는 설계 문서다.
 
@@ -77,7 +85,7 @@ L424-L2103 = **1679 LOC** 가 *single Step 8 closure*. 내부에 다음 *inline 
 
 [RFC-0136](RFC-0136-keeper-unified-turn-decomposition.md) (Active) 은 동일 패턴의 `keeper_unified_turn.ml` (1943 LOC) `run_keeper_cycle` 함수 분해. 6 sub-PR 머지 후 -302 LoC (-15.5%). PR-4-d/e 보류 (retry_loop body internal cohesion 으로 추출 어려움).
 
-RFC-0144 는 RFC-0136 의 *측정 + boundary 식별 + typed wrapper* 패턴 그대로 차용. 단 *Step 8 body 가 retry_loop body (610 LoC) 보다 2.75× 큰 (1679 LoC)* 만큼 sub-PR 수 더 많음.
+RFC-0145 는 RFC-0136 의 *측정 + boundary 식별 + typed wrapper* 패턴 그대로 차용. 단 *Step 8 body 가 retry_loop body (610 LoC) 보다 2.75× 큰 (1679 LoC)* 만큼 sub-PR 수 더 많음.
 
 ---
 
@@ -117,7 +125,7 @@ inline 주석 (`(* 8. Run Agent *)`, `(* Phase 0 *)`, `(* Phase 5 *)`) 는 *작�
 
 ### 3.3 RFC-0136 학습 적용
 
-| 학습 | RFC-0144 적용 |
+| 학습 | RFC-0145 적용 |
 |------|---------------|
 | typed boundary < 16 deps | **small typed wrapper 우선** — 각 sub-section 의 *낮은 deps 영역*만 추출 |
 | record destructuring 16-deps limit | **20+ deps 추출 거부** — boundary 재측정 후 분할 또는 보류 |

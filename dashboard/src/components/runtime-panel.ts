@@ -29,7 +29,7 @@ import { OasHealthChip } from './oas-health-chip'
 import { RuntimeMonitor } from './runtime-monitor'
 import { PrometheusMetrics } from './prometheus-metrics'
 import { VerificationSpecsPanel } from './verification-specs-panel'
-import { CostDashboard, type CostView } from './cost-dashboard'
+import { TelemetryPanel, isTelemetryView } from './telemetry-panel'
 import { CascadeInspector } from './cascade-inspector'
 import { RouteLink } from './common/route-link'
 
@@ -87,12 +87,6 @@ const ADVANCED_VIEW_CHIPS: Array<{ key: RuntimeView; label: string }> = [
   { key: 'prometheus', label: '메트릭' },
   { key: 'verification', label: '형식검증' },
 ]
-
-function costDiagnosticView(view: RuntimeView): CostView | null {
-  return view === 'cost' || view === 'audit' || view === 'heuristics' || view === 'stress'
-    ? view
-    : null
-}
 
 function updateViewParam(view: RuntimeView): void {
   replaceRoute(
@@ -178,7 +172,6 @@ function HiddenDiagnosticsLinks() {
 
 export function RuntimePanel() {
   const view = activeView.value
-  const costView = costDiagnosticView(view)
 
   return html`
     <div class="flex flex-col gap-4">
@@ -206,8 +199,8 @@ export function RuntimePanel() {
             <${OasHealthChip} />
             <${RuntimeMonitor} />
           `
-        : costView
-          ? html`<${CostDashboard} view=${costView} />`
+        : isTelemetryView(view)
+          ? html`<${TelemetryPanel} view=${view} />`
         : view === 'inspector'
           ? html`<${CascadeInspector} />`
         : view === 'prometheus'

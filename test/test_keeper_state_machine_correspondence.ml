@@ -55,6 +55,7 @@
 
 open Alcotest
 module SM = Masc_mcp.Keeper_state_machine
+module SM_json = Masc_mcp.Keeper_state_machine_json
 
 (* ── OCaml-side change-set computation ─────────────────────── *)
 
@@ -102,13 +103,13 @@ let ocaml_changed_fields (ev : SM.event) : string list =
   let after_t = SM.update_conditions base_t ev in
   let d_f =
     json_field_diff
-      (SM.conditions_to_json base_f)
-      (SM.conditions_to_json after_f)
+      (SM_json.conditions_to_json base_f)
+      (SM_json.conditions_to_json after_f)
   in
   let d_t =
     json_field_diff
-      (SM.conditions_to_json base_t)
-      (SM.conditions_to_json after_t)
+      (SM_json.conditions_to_json base_t)
+      (SM_json.conditions_to_json after_t)
   in
   List.sort_uniq String.compare (d_f @ d_t)
 
@@ -238,7 +239,7 @@ let load_spec_actions () =
     TLA+-only variables (e.g. [restart_count], owned by the supervisor
     layer rather than the FSM) are filtered out as out-of-scope. *)
 let conditions_field_names () : string list =
-  match SM.conditions_to_json SM.default_conditions with
+  match SM_json.conditions_to_json SM.default_conditions with
   | `Assoc fs -> List.map fst fs |> List.sort String.compare
   | _ ->
       Alcotest.fail "conditions_to_json did not return a JSON object"

@@ -18,10 +18,35 @@ type provider_rejection = {
   reason : string;
 }
 
+type capacity_backpressure_source =
+  | Provider_capacity
+  | Client_capacity
+  | Tier_admission
+  | Cascade_slot
+
+let capacity_backpressure_source_to_string = function
+  | Provider_capacity -> "provider_capacity"
+  | Client_capacity -> "client_capacity"
+  | Tier_admission -> "tier_admission"
+  | Cascade_slot -> "cascade_slot"
+
+let capacity_backpressure_source_of_string = function
+  | "provider_capacity" -> Some Provider_capacity
+  | "client_capacity" -> Some Client_capacity
+  | "tier_admission" -> Some Tier_admission
+  | "cascade_slot" -> Some Cascade_slot
+  | _ -> None
+
 type masc_internal_error =
   | Cascade_exhausted of {
       cascade_name : cascade_name;
       reason : Keeper_types.cascade_exhaustion_reason;
+    }
+  | Capacity_backpressure of {
+      cascade_name : cascade_name;
+      source : capacity_backpressure_source;
+      detail : string;
+      retry_after_sec : float option;
     }
   | Resumable_cli_session of {
       cascade_name : cascade_name;
@@ -121,6 +146,16 @@ let masc_internal_error_to_json = function
         ("kind", `String "cascade_exhausted");
         ("cascade_name", `String cascade_name);
         ("reason", Keeper_types.cascade_exhaustion_reason_to_json reason);
+      ]
+  | Capacity_backpressure { cascade_name; source; detail; retry_after_sec } ->
+    let cascade_name = cascade_name_to_string cascade_name in
+    `Assoc
+      [
+        ("kind", `String "capacity_exhausted");
+        ("cascade_name", `String cascade_name);
+        ("source", `String (capacity_backpressure_source_to_string source));
+        ("detail", `String detail);
+        ("retry_after_sec", Json_util.float_opt_to_json retry_after_sec);
       ]
   | Resumable_cli_session { cascade_name; detail; exit_code } ->
     let cascade_name = cascade_name_to_string cascade_name in
@@ -232,6 +267,19 @@ let summarize_provider_rejections rejections =
   | reasons -> String.concat "; " reasons
 
 let summary_of_masc_internal_error = function
+  | Capacity_backpressure { cascade_name; source; detail; retry_after_sec } ->
+      let retry_after =
+        match retry_after_sec with
+        | Some value -> Printf.sprintf "; retry_after=%.1fs" value
+        | None -> ""
+      in
+      Some
+        (Printf.sprintf
+           "Capacity backpressure blocked cascade %s; source=%s; detail=%s%s"
+           (cascade_name_to_string cascade_name)
+           (capacity_backpressure_source_to_string source)
+           detail
+           retry_after)
   | No_tool_capable_provider
       {
         cascade_name;
@@ -311,7 +359,7 @@ let () =
     ~help:
       "Total MASC-internal errors emitted as Agent_sdk.Error.Internal \
        payloads, classified by structured error kind. Labels: \
-       kind (cascade_exhausted | resumable_cli_session | \
+       kind (cascade_exhausted | capacity_exhausted | resumable_cli_session | \
        no_tool_capable_provider | accept_rejected | \
        admission_queue_timeout | admission_queue_rejected | \
        turn_timeout | oas_timeout_budget | max_tokens_ceiling_violation | \
@@ -322,6 +370,7 @@ let () =
 
 let kind_of_masc_internal_error = function
   | Cascade_exhausted _ -> "cascade_exhausted"
+  | Capacity_backpressure _ -> "capacity_exhausted"
   | Resumable_cli_session _ -> "resumable_cli_session"
   | No_tool_capable_provider _ -> "no_tool_capable_provider"
   | Accept_rejected _ -> "accept_rejected"
@@ -354,6 +403,7 @@ let kind_of_masc_internal_error = function
     some configurations and Grafana group-bys lose the row). *)
 let cascade_name_of_masc_internal_error = function
   | Cascade_exhausted { cascade_name; _ }
+  | Capacity_backpressure { cascade_name; _ }
   | Resumable_cli_session { cascade_name; _ }
   | No_tool_capable_provider { cascade_name; _ }
   | Admission_queue_timeout { cascade_name; _ }
@@ -445,6 +495,26 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
                     })
              | None -> None)
           | None -> None)
+      | Some (`String "capacity_exhausted") -> (
+          match
+            string_opt_of_assoc "cascade_name" json,
+            string_opt_of_assoc "source" json,
+            string_opt_of_assoc "detail" json
+          with
+          | Some cascade_name, Some source, Some detail ->
+            (match capacity_backpressure_source_of_string source with
+             | Some source ->
+               Some
+                 (Capacity_backpressure
+                    {
+                      cascade_name = cascade_name_of_string cascade_name;
+                      source;
+                      detail;
+                      retry_after_sec =
+                        float_opt_of_assoc "retry_after_sec" json;
+                    })
+             | None -> None)
+          | _ -> None)
       | Some (`String "resumable_cli_session") -> (
           match string_opt_of_assoc "cascade_name" json, string_opt_of_assoc "detail" json with
           | Some cascade_name, Some detail ->

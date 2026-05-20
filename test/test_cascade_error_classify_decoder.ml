@@ -106,6 +106,41 @@ let test_roundtrip_bare_string_reason () =
       reason
   | _ -> Alcotest.fail "expected Cascade_exhausted"
 
+let test_roundtrip_capacity_backpressure () =
+  let payload =
+    `Assoc
+      [ ("kind", `String "capacity_exhausted")
+      ; ("cascade_name", `String "primary")
+      ; ("source", `String "client_capacity")
+      ; ("detail", `String "client capacity key glm is full")
+      ; ("retry_after_sec", `Float 2.5)
+      ]
+  in
+  let decoded =
+    Classify.classify_masc_internal_error_of_string (wrap_masc_oas_error payload)
+  in
+  match decoded with
+  | Some
+      (Classify.Capacity_backpressure
+         { cascade_name; source; detail; retry_after_sec }) ->
+    Alcotest.(check string)
+      "cascade name preserved"
+      "primary"
+      (Classify.cascade_name_to_string cascade_name);
+    Alcotest.(check string)
+      "source preserved"
+      "client_capacity"
+      (Classify.capacity_backpressure_source_to_string source);
+    Alcotest.(check string)
+      "detail preserved"
+      "client capacity key glm is full"
+      detail;
+    Alcotest.(check (option (float 0.001)))
+      "retry_after preserved"
+      (Some 2.5)
+      retry_after_sec
+  | _ -> Alcotest.fail "expected Capacity_backpressure"
+
 (* --- schema-drift cases: must return None ---------------------------- *)
 
 let test_unknown_reason_tag_decodes_to_none () =
@@ -171,6 +206,8 @@ let () =
             test_roundtrip_structural_attempt_timeout
         ; Alcotest.test_case
             "bare string reason" `Quick test_roundtrip_bare_string_reason
+        ; Alcotest.test_case
+            "capacity backpressure" `Quick test_roundtrip_capacity_backpressure
         ] )
     ; ( "schema-drift → None"
       , [ Alcotest.test_case

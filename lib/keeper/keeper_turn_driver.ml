@@ -880,9 +880,95 @@ let run_named
     | Cascade_fsm.Accept_on_exhaustion _ ->
       last_err
   in
+  let capacity_backpressure_source_of_http_error = function
+    | Llm_provider.Http_client.NetworkError
+        { kind = Llm_provider.Http_client.Local_resource_exhaustion; _ } ->
+      Some Cascade_slot
+    | Llm_provider.Http_client.ProviderFailure
+        { kind = Llm_provider.Http_client.Capacity_exhausted _; _ } ->
+      Some Provider_capacity
+    | Llm_provider.Http_client.HttpError _
+    | Llm_provider.Http_client.NetworkError _
+    | Llm_provider.Http_client.TimeoutError _
+    | Llm_provider.Http_client.AcceptRejected _
+    | Llm_provider.Http_client.CliTransportRequired _
+    | Llm_provider.Http_client.ProviderTerminal _
+    | Llm_provider.Http_client.ProviderFailure _ ->
+      None
+  in
+  let capacity_backpressure_of_http_error ?source last_err =
+    match last_err with
+    | Some
+        (Llm_provider.Http_client.ProviderFailure
+           {
+             kind =
+               Llm_provider.Http_client.Capacity_exhausted
+                 { retry_after; _ };
+             message;
+           }) ->
+      Some
+        (Capacity_backpressure
+           {
+             cascade_name = error_cascade_name;
+             source =
+               Option.value source ~default:Provider_capacity;
+             detail = message;
+             retry_after_sec = retry_after;
+           })
+    | Some
+        (Llm_provider.Http_client.NetworkError
+           {
+             kind = Llm_provider.Http_client.Local_resource_exhaustion;
+             message;
+           }) ->
+      Some
+        (Capacity_backpressure
+           {
+             cascade_name = error_cascade_name;
+             source = Option.value source ~default:Cascade_slot;
+             detail = message;
+             retry_after_sec = None;
+           })
+    | Some
+        (Llm_provider.Http_client.HttpError _
+        | Llm_provider.Http_client.NetworkError _
+        | Llm_provider.Http_client.TimeoutError _
+        | Llm_provider.Http_client.AcceptRejected _
+        | Llm_provider.Http_client.CliTransportRequired _
+        | Llm_provider.Http_client.ProviderTerminal _
+        | Llm_provider.Http_client.ProviderFailure _)
+    | None ->
+      None
+  in
+  let capacity_backpressure_of_sdk_error sdk_err =
+    match sdk_err with
+    | Agent_sdk.Error.Provider
+        (Llm_provider.Error.CapacityExhausted { retry_after; detail; _ }) ->
+      Some
+        (sdk_error_of_masc_internal_error
+           (Capacity_backpressure
+              {
+                cascade_name = error_cascade_name;
+                source = Provider_capacity;
+                detail;
+                retry_after_sec = retry_after;
+              }))
+    | Agent_sdk.Error.Api _
+    | Agent_sdk.Error.Provider _
+    | Agent_sdk.Error.Agent _
+    | Agent_sdk.Error.Mcp _
+    | Agent_sdk.Error.Config _
+    | Agent_sdk.Error.Serialization _
+    | Agent_sdk.Error.Io _
+    | Agent_sdk.Error.Orchestration _
+    | Agent_sdk.Error.A2a _
+    | Agent_sdk.Error.Internal _ ->
+      None
+  in
   let rec try_cascade
       ?(on_success = fun ~provider_key:_ -> ())
-      ?resume_checkpoint ?per_provider_timeout_s remaining last_err =
+      ?resume_checkpoint ?per_provider_timeout_s ?last_capacity_source
+      remaining last_err =
     match remaining with
     | [] ->
       let reason : Keeper_types.cascade_exhaustion_reason = match last_err with
@@ -961,12 +1047,19 @@ let run_named
                    exit_code = resumable_cli_session_exit_code reason;
                  })
         | _ ->
-            sdk_error_of_masc_internal_error
-              (Cascade_exhausted
-                 {
-                   cascade_name = error_cascade_name;
-                   reason;
-                 })
+          (match
+             capacity_backpressure_of_http_error
+               ?source:last_capacity_source last_err
+           with
+           | Some capacity_error ->
+             sdk_error_of_masc_internal_error capacity_error
+           | None ->
+             sdk_error_of_masc_internal_error
+               (Cascade_exhausted
+                  {
+                    cascade_name = error_cascade_name;
+                    reason;
+                  }))
       in
       Error
         terminal_error
@@ -988,10 +1081,10 @@ let run_named
               "cascade %s: skipping %s (provider_key=%s cooldown: %s)"
               cascade_name runtime_candidate_label runtime_candidate_label msg;
             try_cascade ~on_success ?resume_checkpoint ?per_provider_timeout_s
-              rest last_err
+              ?last_capacity_source rest last_err
         | None ->
             try_cascade ~on_success ?resume_checkpoint ?per_provider_timeout_s
-              rest last_err)
+              ?last_capacity_source rest last_err)
       else (
       (match health_cooldown with
        | Some (_blocked_health_key, msg) ->
@@ -1017,7 +1110,7 @@ let run_named
           capacity_key;
         let slot_last_err = slot_full_last_err ~is_last last_err in
         try_cascade ~on_success ?resume_checkpoint ?per_provider_timeout_s
-          rest slot_last_err
+          ~last_capacity_source:Client_capacity rest slot_last_err
       | (`No_client_capacity | `Acquired _) as capacity_slot ->
       let capacity_release =
         match capacity_slot with
@@ -1178,7 +1271,7 @@ let run_named
           tier_admission_id;
         let slot_last_err = slot_full_last_err ~is_last last_err in
         try_cascade ~on_success ?resume_checkpoint ?per_provider_timeout_s
-          rest slot_last_err
+          ~last_capacity_source:Tier_admission rest slot_last_err
       | Ok (result, checkpoint_after, liveness_success_sample, attempt_latency_ms) ->
       let record_accepted_liveness_sample () =
         match liveness_success_sample with
@@ -1443,8 +1536,12 @@ let run_named
                 else
                   next_resume
               in
+              let last_capacity_source =
+                Option.bind new_err capacity_backpressure_source_of_http_error
+              in
               try_cascade
                 ?resume_checkpoint:retry_resume_checkpoint
+                ?last_capacity_source
                 (filter_provider_health_fail_open rest)
                 new_err
             | Cascade_fsm.Exhausted _ ->
@@ -1464,7 +1561,10 @@ let run_named
               in
               log "cascade %s exhausted: all tiers failed (last runtime=%s, error=%s)"
                 cascade_name runtime_candidate_label (Agent_sdk.Error.to_string sdk_err);
-              Error sdk_err
+              Error
+                (Option.value
+                   (capacity_backpressure_of_sdk_error sdk_err)
+                   ~default:sdk_err)
             (* [Accept] / [Accept_on_exhaustion] are reachable only from
                [Cascade_fsm.Call_ok] / [Accept_rejected] outcomes, but this
                branch handles a [Call_err] outcome so the FSM cannot return

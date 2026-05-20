@@ -136,6 +136,7 @@ let sdk_error_to_cascade_outcome (err : Agent_sdk.Error.sdk_error)
      through to the structured [match err with] below to derive the cascade
      outcome from the raw [sdk_error] payload. *)
   | Some (Cascade_error_classify.Cascade_exhausted _)
+  | Some (Cascade_error_classify.Capacity_backpressure _)
   | Some (Cascade_error_classify.No_tool_capable_provider _)
   | Some (Cascade_error_classify.Accept_rejected _)
   | Some (Cascade_error_classify.Admission_queue_timeout _)
@@ -950,6 +951,7 @@ let sdk_error_is_max_turns_exceeded (err : Agent_sdk.Error.sdk_error) : bool =
          { reason = Keeper_types.Other_detail detail; _ }) ->
       message_looks_like_cli_wrapped_max_turns detail
   | Some (Cascade_error_classify.Cascade_exhausted _)
+  | Some (Cascade_error_classify.Capacity_backpressure _)
   | Some (Cascade_error_classify.Resumable_cli_session _)
   | Some (Cascade_error_classify.No_tool_capable_provider _)
   | Some (Cascade_error_classify.Accept_rejected _)

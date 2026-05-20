@@ -244,6 +244,7 @@ let degraded_retry_bypasses_slot_phase_guard
       true
   | Some
       ( Keeper_turn_driver.Cascade_exhausted _
+      | Keeper_turn_driver.Capacity_backpressure _
       | Keeper_turn_driver.Resumable_cli_session _
       | Keeper_turn_driver.No_tool_capable_provider _
       | Keeper_turn_driver.Accept_rejected _

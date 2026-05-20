@@ -146,6 +146,7 @@ let is_oas_timeout_budget_error (err : Agent_sdk.Error.sdk_error) =
   | Some (Keeper_turn_driver.Oas_timeout_budget _) -> true
   | Some
       ( Keeper_turn_driver.Cascade_exhausted _
+      | Keeper_turn_driver.Capacity_backpressure _
       | Keeper_turn_driver.Resumable_cli_session _
       | Keeper_turn_driver.No_tool_capable_provider _
       | Keeper_turn_driver.Accept_rejected _
@@ -184,6 +185,7 @@ let oas_timeout_budget_policy_decision
             }))
   | Some
       ( Keeper_turn_driver.Cascade_exhausted _
+      | Keeper_turn_driver.Capacity_backpressure _
       | Keeper_turn_driver.Resumable_cli_session _
       | Keeper_turn_driver.No_tool_capable_provider _
       | Keeper_turn_driver.Accept_rejected _

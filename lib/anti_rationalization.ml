@@ -753,6 +753,7 @@ let review
               | Some (Keeper_turn_driver.No_tool_capable_provider _) -> true
               | Some
                   ( Keeper_turn_driver.Cascade_exhausted _
+                  | Keeper_turn_driver.Capacity_backpressure _
                   | Keeper_turn_driver.Resumable_cli_session _
                   | Keeper_turn_driver.Accept_rejected _
                   | Keeper_turn_driver.Admission_queue_timeout _

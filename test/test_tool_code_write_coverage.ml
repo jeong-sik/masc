@@ -417,6 +417,38 @@ let test_validate_code_shell_command_rejects_pipe_to_disallowed () =
   | Ok () ->
       fail "expected pipe-to-disallowed-command to be rejected by allowlist"
 
+let test_validate_code_shell_command_rejects_wrapped_disallowed () =
+  let cases =
+    [
+      "env rm -rf /";
+      "opam exec -- rm -rf /";
+      "env opam exec -- rm -rf /";
+      "opam exec -- env rm -rf /";
+    ]
+  in
+  List.iter
+    (fun command ->
+      match Tool_code_write.validate_code_shell_command command with
+      | Error reason ->
+          check bool ("wrapped target rejected: " ^ command) true
+            (msg_contains ~needle:"rm" reason)
+      | Ok () ->
+          fail ("expected wrapped disallowed target to be rejected: " ^ command))
+    cases
+
+let test_validate_code_shell_command_allows_wrapped_allowed () =
+  List.iter
+    (fun command ->
+      check (result unit string) ("wrapped allowed: " ^ command)
+        (Ok ())
+        (Tool_code_write.validate_code_shell_command command))
+    [
+      "env FOO=bar git status";
+      "opam exec -- git status";
+      "env opam exec -- git status";
+      "opam exec -- env FOO=bar git status";
+    ]
+
 let test_validate_code_shell_command_allows_dune_local_build () =
   check (result unit string) "dune-local build allowed" (Ok ())
     (Tool_code_write.validate_code_shell_command
@@ -506,6 +538,26 @@ let test_code_shell_command_shape_block_is_workflow_rejection () =
        result.legacy_message);
   check (option string) "command shape is workflow rejection"
     (Some "workflow_rejection")
+    (Option.map
+       Tool_result.tool_failure_class_to_string
+       (Tool_result.failure_class result))
+
+let test_code_shell_blocks_outside_path_arg () =
+  let ctx = make_ctx () in
+  let result =
+    dispatch_result_exn ctx ~name:"masc_code_shell"
+      ~args:
+        (`Assoc
+          [
+            ("command", `String "cat /etc/passwd");
+            ("timeout", `Int 5);
+          ])
+  in
+  check bool "outside path rejected" false result.success;
+  check bool "error mentions outside path" true
+    (msg_contains ~needle:"outside" result.legacy_message);
+  check (option string) "outside path is policy rejection"
+    (Some "policy_rejection")
     (Option.map
        Tool_result.tool_failure_class_to_string
        (Tool_result.failure_class result))
@@ -753,10 +805,9 @@ let test_code_shell_cross_agent_playground_is_policy_rejection () =
        Tool_result.tool_failure_class_to_string
        (Tool_result.failure_class result))
 
+let code_shell_repo_fixture = "lib/tool_code_write.ml"
+
 let test_code_shell_rg_exit_one_no_matches_is_success () =
-  with_temp_dir "tool-code-shell-rg" @@ fun dir ->
-  let fixture = Filename.concat dir "sample.ml" in
-  write_file fixture "let present = 1\n";
   let ctx = make_ctx () in
   let args =
     `Assoc
@@ -764,7 +815,7 @@ let test_code_shell_rg_exit_one_no_matches_is_success () =
         ( "command",
           `String
             (Printf.sprintf "rg __masc_code_shell_16015_no_match__ %s"
-               (Filename.quote fixture)) );
+               code_shell_repo_fixture) );
         ("timeout", `Int 5);
       ]
   in
@@ -776,9 +827,6 @@ let test_code_shell_rg_exit_one_no_matches_is_success () =
     (json_string_field "exit_semantics" msg)
 
 let test_code_shell_rg_quoted_regex_pipe_no_match_is_success () =
-  with_temp_dir "tool-code-shell-rg-regex-pipe" @@ fun dir ->
-  let fixture = Filename.concat dir "sample.ml" in
-  write_file fixture "let present = 1\n";
   let ctx = make_ctx () in
   let args =
     `Assoc
@@ -786,7 +834,7 @@ let test_code_shell_rg_quoted_regex_pipe_no_match_is_success () =
         ( "command",
           `String
             (Printf.sprintf "rg \"missing_one\\|missing_two\" %s -l"
-               (Filename.quote fixture)) );
+               code_shell_repo_fixture) );
         ("timeout", `Int 5);
       ]
   in
@@ -798,9 +846,6 @@ let test_code_shell_rg_quoted_regex_pipe_no_match_is_success () =
     (json_string_field "exit_semantics" msg)
 
 let test_code_shell_grep_exit_one_no_matches_is_success () =
-  with_temp_dir "tool-code-shell-grep" @@ fun dir ->
-  let fixture = Filename.concat dir "sample.txt" in
-  write_file fixture "present\n";
   let ctx = make_ctx () in
   let args =
     `Assoc
@@ -808,7 +853,7 @@ let test_code_shell_grep_exit_one_no_matches_is_success () =
         ( "command",
           `String
             (Printf.sprintf "grep __masc_code_shell_16015_no_match__ %s"
-               (Filename.quote fixture)) );
+               code_shell_repo_fixture) );
         ("timeout", `Int 5);
       ]
   in
@@ -820,9 +865,6 @@ let test_code_shell_grep_exit_one_no_matches_is_success () =
     (json_string_field "exit_semantics" msg)
 
 let test_code_shell_pipeline_grep_exit_one_no_matches_is_success () =
-  with_temp_dir "tool-code-shell-pipe-grep" @@ fun dir ->
-  let fixture = Filename.concat dir "sample.txt" in
-  write_file fixture "present\n";
   let ctx = make_ctx () in
   let args =
     `Assoc
@@ -830,7 +872,7 @@ let test_code_shell_pipeline_grep_exit_one_no_matches_is_success () =
         ( "command",
           `String
             (Printf.sprintf "cat %s 2>&1 | grep __masc_code_shell_no_match__"
-               (Filename.quote fixture)) );
+               code_shell_repo_fixture) );
         ("timeout", `Int 5);
       ]
   in
@@ -1110,6 +1152,10 @@ let () =
         test_validate_code_shell_command_allows_pipe;
       test_case "rejects pipe to disallowed command" `Quick
         test_validate_code_shell_command_rejects_pipe_to_disallowed;
+      test_case "rejects wrapped disallowed command" `Quick
+        test_validate_code_shell_command_rejects_wrapped_disallowed;
+      test_case "allows wrapped allowed command" `Quick
+        test_validate_code_shell_command_allows_wrapped_allowed;
       test_case "allows dune-local build" `Quick
         test_validate_code_shell_command_allows_dune_local_build;
       Alcotest.test_case "rejects direct dune" `Quick
@@ -1130,6 +1176,8 @@ let () =
         test_validate_code_shell_command_rejects_semicolon;
       test_case "command shape block is workflow rejection" `Quick
         test_code_shell_command_shape_block_is_workflow_rejection;
+      test_case "outside path arg is policy rejection" `Quick
+        test_code_shell_blocks_outside_path_arg;
       test_case "missing docker cwd reports worktree hint" `Quick
         test_code_shell_missing_docker_cwd_reports_worktree_hint;
       test_case "cross-agent playground cwd is policy rejection" `Quick

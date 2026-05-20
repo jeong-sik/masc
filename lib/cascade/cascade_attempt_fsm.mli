@@ -117,6 +117,22 @@ val emit_sdk_provider_error_metric :
 (** Convert and emit an SDK provider error. Returns the converted variant
     so callers/tests can assert the same decision without reparsing metrics. *)
 
+(** {1 Cascade saturation signal label SSOT (RFC-0153)}
+
+    Modules that emit to {!Keeper_metrics.metric_keeper_cascade_saturation_signal}
+    MUST reuse these labels and {!provider_label} so Prometheus sees one
+    coherent series across emitters (cascade FSM + keeper_turn_driver
+    Phase B.2 admission). *)
+
+val label_kind : string
+
+val label_cascade : string
+
+val provider_label : string -> string
+(** Sanitize a free-form label value before stamping it onto a Prometheus
+    counter. Empty values are remapped to a fixed placeholder and counted
+    on [metric_cascade_attempt_empty_provider_label] for root-cause tracing. *)
+
 val sdk_error_soft_rate_limited :
   Agent_sdk.Error.sdk_error -> float option option
 (** [Some (Some retry_after)] for non-quota 429 responses with a parsed

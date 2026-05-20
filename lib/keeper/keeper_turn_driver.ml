@@ -55,9 +55,10 @@ let emit_cascade_tier_admission_signal_metric ~cascade_name signal =
     Keeper_metrics.metric_keeper_cascade_saturation_signal
     ~labels:
       [
-        ( label_kind,
+        ( Cascade_attempt_fsm.label_kind,
           Cascade_saturation_signal.(kind signal |> kind_to_string) );
-        (label_cascade, provider_label cascade_name);
+        ( Cascade_attempt_fsm.label_cascade,
+          Cascade_attempt_fsm.provider_label cascade_name );
       ]
     ()
 

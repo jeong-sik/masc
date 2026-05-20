@@ -16,7 +16,12 @@ import {
   sharedToolQualityLoading,
 } from './fleet-data-core'
 import { route } from '../router'
-import { sourceHealthClass, freshnessText, coverageGapDisplay } from './common/source-health'
+import {
+  sourceHealthClass,
+  freshnessText,
+  coverageGapDisplay,
+  type CoverageGapDisplay,
+} from './common/source-health'
 
 const TOOL_QUALITY_WINDOW_HOURS = 24
 
@@ -219,9 +224,12 @@ function TrendSparkline({ points }: { points: HourlyPoint[] }) {
 
   return html`
     <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3">
-      <div class="flex items-center justify-between mb-1.5">
+      <div class="flex items-baseline justify-between mb-1.5 gap-2">
         <${Eyebrow}>성공률 추이</${Eyebrow}>
-        <span class="text-xs font-mono" style="color:${lineColor}">${lastRate.toFixed(1)}%</span>
+        <div class="flex items-baseline gap-1.5 leading-tight">
+          <span class="text-3xs text-[var(--color-fg-disabled)]">최근 1시간</span>
+          <span class="text-xs font-mono" style="color:${lineColor}">${lastRate.toFixed(1)}%</span>
+        </div>
       </div>
       <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded-[var(--r-1)] w-full" role="img" aria-label="성공률 추이 차트" style="background:var(--bg-deepest);">
         ${bars.map(b => html`
@@ -246,13 +254,58 @@ function KeeperRateBars({ keepers }: { keepers: KeeperStat[] }) {
         const textColor = k.success_pct >= 95 ? 'text-[var(--color-status-ok)]' : k.success_pct >= 90 ? 'text-[var(--color-status-warn)]' : 'text-[var(--bad-light)]'
         return html`
           <div class="flex items-center gap-2 text-2xs">
-            <span class="w-24 truncate text-[var(--color-fg-disabled)] font-mono" title=${k.name}>${k.name}</span>
+            <span class="w-40 truncate text-[var(--color-fg-disabled)] font-mono" title=${k.name}>${k.name}</span>
             <${ProgressBar} pct=${k.success_pct} size="sm" class=${fillClass} trackClass="flex-1 bg-[var(--bg-subtle)]" />
             <span class="w-12 text-right font-mono ${textColor}">${k.success_pct.toFixed(1)}%</span>
             <span class="w-10 text-right text-[var(--color-fg-disabled)]">${k.calls}</span>
           </div>
         `
       })}
+    </div>
+  `
+}
+
+/**
+ * Coverage-gap provenance block. The summary line stays visible (1-line warn)
+ * while the long Sys_error blob hides under a closed `<details>` to reclaim
+ * vertical real estate. Producer/store/surface/trace stay flat-rendered because
+ * those are the triage-actionable fields; `error` is the noisy one.
+ *
+ * Label spans use `${label + ' '}` (not adjacent siblings) so DOM textContent
+ * preserves "label value" as a contiguous substring — keeps existing
+ * text-search tests working without format-coupling.
+ */
+function CoverageGapBlock({ display }: { display: CoverageGapDisplay }) {
+  const { structured } = display
+  return html`
+    <div class="mt-1 grid gap-1 rounded-[var(--r-1)] border border-[var(--color-status-warn)]/30 bg-[var(--warn-10)]/30 px-2 py-1.5 text-3xs">
+      <div class="flex items-center gap-1.5 font-medium text-[var(--color-status-warn)]">
+        <span aria-hidden="true">⚠</span>
+        <span>${display.summary}</span>
+      </div>
+      ${structured.fields.length > 0 ? html`
+        <div class="grid gap-0.5 font-mono">
+          ${structured.fields.map(({ label, value }) => html`
+            <div class="flex items-baseline">
+              <span class="w-16 shrink-0 text-[var(--color-fg-disabled)] uppercase tracking-wide">${label + ' '}</span>
+              <span class="min-w-0 break-all text-[var(--color-fg-muted)]">${value}</span>
+            </div>
+          `)}
+        </div>
+      ` : null}
+      ${structured.error ? html`
+        <details class="group">
+          <summary class="flex items-baseline cursor-pointer list-none [&::-webkit-details-marker]:hidden font-mono">
+            <span class="w-16 shrink-0 uppercase tracking-wide text-[var(--color-fg-disabled)]">error </span>
+            <span class="min-w-0 flex-1 truncate text-[var(--color-fg-muted)] group-open:hidden">${structured.error}</span>
+            <span class="ml-2 shrink-0 text-[var(--color-fg-disabled)]" aria-hidden="true">
+              <span class="group-open:hidden">▸</span>
+              <span class="hidden group-open:inline">▾</span>
+            </span>
+          </summary>
+          <pre class="mt-1 ml-16 max-h-32 overflow-auto rounded-[var(--r-1)] bg-[var(--bg-deepest)] p-2 font-mono text-3xs leading-snug text-[var(--color-fg-muted)] whitespace-pre-wrap break-all">${structured.error}</pre>
+        </details>
+      ` : null}
     </div>
   `
 }
@@ -319,19 +372,16 @@ export function ToolQualityPanel() {
             <span class="mx-1" aria-hidden="true">·</span>
             <span>${(d.entry_count ?? d.total).toLocaleString()} rows</span>
           </div>
-          ${coverageGap ? html`
-            <div class="mt-1 grid gap-0.5 text-3xs text-[var(--color-status-warn)]">
-              <span>${coverageGap.summary}</span>
-              ${coverageGap.details.map(detail => html`<span class="font-mono break-all">${detail}</span>`)}
-            </div>
-          ` : null}
+          ${coverageGap ? html`<${CoverageGapBlock} display=${coverageGap} />` : null}
         </div>
-        <button
-          class="text-3xs px-2 py-0.5 rounded-[var(--r-1)] bg-[var(--bg-subtle)] text-[var(--color-fg-disabled)] hover:text-[var(--text)]"
-          onClick=${handleRefreshToolQualityClick}
-          aria-label="도구 품질 새로고침"
-        >새로고침</button>
-        <span class="text-3xs text-[var(--color-fg-disabled)]">${formatAutoRefreshLabel(TELEMETRY_AUTO_REFRESH_MS)}</span>
+        <div class="flex flex-col items-end gap-0.5 leading-tight shrink-0">
+          <button
+            class="text-3xs px-2 py-0.5 rounded-[var(--r-1)] bg-[var(--bg-subtle)] text-[var(--color-fg-disabled)] hover:text-[var(--text)]"
+            onClick=${handleRefreshToolQualityClick}
+            aria-label="도구 품질 새로고침"
+          >새로고침</button>
+          <span class="text-3xs text-[var(--color-fg-disabled)]">${formatAutoRefreshLabel(TELEMETRY_AUTO_REFRESH_MS)}</span>
+        </div>
       </div>
 
       <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">

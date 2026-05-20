@@ -1444,6 +1444,36 @@ let test_claim_skips_required_tools_without_access () =
     | None -> fail "expected fallback task to be claimed")
 ;;
 
+let test_board_only_claim_rejects_required_execution_tool_task () =
+  with_room (fun config ->
+    let meta =
+      make_meta_with_tools
+        [ "keeper_task_claim"; "keeper_board_post"; "keeper_board_comment" ]
+    in
+    let _ =
+      Coord.add_task
+        ~contract:(contract_requiring_tools [ "keeper_bash" ])
+        config
+        ~title:"Needs execution"
+        ~priority:1
+        ~description:"requires shell execution"
+    in
+    let result = call_tool config meta "keeper_task_claim" (`Assoc []) in
+    let json = parse_json result in
+    let message = Yojson.Safe.Util.(json |> member "result" |> to_string) in
+    check_no_task_claimed config meta;
+    check
+      bool
+      "workflow rejection"
+      true
+      (contains_substring message "Workflow rejected");
+    check
+      bool
+      "missing keeper_bash named"
+      true
+      (contains_substring message "keeper_bash"))
+;;
+
 let test_claim_allows_required_tools_with_access () =
   with_room (fun config ->
     let meta =
@@ -2642,6 +2672,10 @@ let () =
             "claim skips tasks requiring missing tools"
             `Quick
             test_claim_skips_required_tools_without_access
+        ; test_case
+            "board-only claim rejects task requiring execution tools"
+            `Quick
+            test_board_only_claim_rejects_required_execution_tool_task
         ; test_case
             "claim allows tasks requiring available tools"
             `Quick

@@ -6,5 +6,5 @@
 # counts; no PR may raise them.
 tokenize_path_args 4
 path_validation_tokens 4
-forbidden_shell_chars 22
+forbidden_shell_chars 15
 raw_keeper_bash_shape_block 0

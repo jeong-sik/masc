@@ -187,7 +187,7 @@ let validate_command_with_allowlist ~allowed_commands cmd =
   let trimmed = String.trim cmd in
   if trimmed = ""
   then Error Empty_command
-  else if contains_forbidden_shell_chars trimmed
+  else if Gh_command_validation.has_strict_shell_metachar trimmed
   then Error Chain_or_redirect
   else if invokes_direct_dune trimmed
   then Error Direct_dune_invocation

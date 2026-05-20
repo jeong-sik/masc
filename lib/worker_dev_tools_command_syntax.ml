@@ -4,20 +4,6 @@
     but worker_dev_tools still keeps a small legacy lexer for strict mode,
     fallback parsing, and path-token extraction. *)
 
-(* Mirror of [Gh_command_validation.forbidden_shell_chars].  Kept as a
-   list for docs/tests; the scan uses a closed pattern match below so the
-   per-byte check compiles to a jump table instead of an O(M) list walk
-   over [cmd]. *)
-let forbidden_shell_chars = [ ';'; '|'; '&'; '>'; '<'; '`'; '$'; '\n'; '\r' ]
-
-let contains_forbidden_shell_chars cmd =
-  String.exists
-    (function
-      | ';' | '|' | '&' | '>' | '<' | '`' | '$' | '\n' | '\r' -> true
-      | _ -> false)
-    cmd
-;;
-
 (** Relaxed metacharacter set for Coding/Full preset keepers.
     Allows [|] (pipes) and fd-to-fd redirects like [2>&1].
     Still blocks [;] [`] [$] and control chars.

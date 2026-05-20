@@ -1,5 +1,3 @@
-val forbidden_shell_chars : char list
-val contains_forbidden_shell_chars : string -> bool
 val forbidden_shell_chars_coding_base : char list
 val has_dangerous_ampersand : string -> bool
 val contains_forbidden_shell_chars_coding : string -> bool

@@ -119,9 +119,20 @@ let paused_meta_requires_reconcile_recovery (meta : keeper_meta) =
   | None -> false
 ;;
 
+let paused_meta_is_legacy_capacity_auto_pause (meta : keeper_meta) =
+  meta.paused
+  && Option.is_none meta.auto_resume_after_sec
+  &&
+  match meta.runtime.last_blocker with
+  | Some info -> info.klass = Capacity_exhausted
+  | None -> false
+;;
+
 let paused_meta_auto_resume_due ~now (meta : keeper_meta) =
   if (not meta.paused) || paused_meta_requires_reconcile_recovery meta
   then false
+  else if paused_meta_is_legacy_capacity_auto_pause meta
+  then true
   else
     match meta.auto_resume_after_sec with
     | None -> false

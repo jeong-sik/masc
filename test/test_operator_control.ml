@@ -129,6 +129,11 @@ let () =
           Alcotest.test_case "keeper up resumes auto-paused keeper" `Quick
             Test_operator_control_keeper.test_keeper_up_resumes_auto_paused_keeper;
           Alcotest.test_case
+            "legacy capacity pause without backoff is auto-recoverable"
+            `Quick
+            Test_operator_control_keeper
+            .test_legacy_capacity_pause_without_backoff_is_auto_recoverable;
+          Alcotest.test_case
             "keeper up keeps paused keeper behind continue gate" `Quick
             Test_operator_control_keeper
             .test_keeper_up_keeps_paused_keeper_with_continue_gate_blocker;

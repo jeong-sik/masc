@@ -1500,6 +1500,61 @@ let test_keeper_up_resumes_auto_paused_keeper () =
         (Option.is_none
            (Masc_mcp.Keeper_turn_livelock.current_state ~keeper:keeper_name)))
 
+let test_legacy_capacity_pause_without_backoff_is_auto_recoverable () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  let base_dir = temp_dir () in
+  let keeper_name = "legacy-capacity-paused-keeper" in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_registry.clear ();
+      Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "operator"));
+      let meta =
+        seed_keeper_meta_exn config keeper_name
+          ~goal:"Recover a legacy capacity pause"
+      in
+      let paused_with blocker =
+        {
+          meta with
+          paused = true;
+          auto_resume_after_sec = None;
+          runtime = { meta.runtime with last_blocker = blocker };
+        }
+      in
+      let legacy_capacity =
+        paused_with
+          (Some (Keeper_types.blocker_info_of_class
+                   ~detail:"legacy capacity pause"
+                   Keeper_types.Capacity_exhausted))
+      in
+      let operator_pause = paused_with None in
+      let continue_gate_pause =
+        paused_with
+          (Some (Keeper_types.blocker_info_of_class
+                   ~detail:"mutating tool timed out"
+                   Keeper_types.Ambiguous_post_commit_timeout))
+      in
+      let due meta =
+        Keeper_supervisor_types.paused_meta_auto_resume_due
+          ~now:1900000000.0 meta
+      in
+      Alcotest.(check bool)
+        "legacy capacity pause without backoff is recoverable"
+        true
+        (due legacy_capacity);
+      Alcotest.(check bool)
+        "operator pause without blocker stays manual"
+        false
+        (due operator_pause);
+      Alcotest.(check bool)
+        "continue-gated pause stays manual"
+        false
+        (due continue_gate_pause))
+
 let test_keeper_up_keeps_paused_keeper_with_continue_gate_blocker () =
   Eio_main.run @@ fun env ->
   ensure_fs env;

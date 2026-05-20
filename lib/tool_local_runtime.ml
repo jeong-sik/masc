@@ -52,7 +52,7 @@ let handle_models _ctx : tool_result =
             ( "result",
               `Assoc
                 [
-                  ("server_url", `String Env_config.Llama.server_url);
+                  ("server_url", `String Env_config.Local_runtime.server_url);
                   ("endpoint", `String url);
                   ("source", `String "llama.cpp /v1/models");
                   ("models", `List (List.map (fun m -> `String m) models));

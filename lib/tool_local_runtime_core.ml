@@ -216,4 +216,4 @@ let fetch_models_at base_url =
   | Unix.WSTOPPED sig_num ->
       Error (Printf.sprintf "llama models request stopped by signal %d" sig_num)
 
-let fetch_models () = fetch_models_at Env_config.Llama.server_url
+let fetch_models () = fetch_models_at Env_config.Local_runtime.server_url

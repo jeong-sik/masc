@@ -286,7 +286,7 @@ let run_bench ?model_id ?runtime_pool ~parallelism ~rounds ~prompt ~max_tokens
       Ok
         (`Assoc
           [
-            ("server_url", `String Env_config.Llama.server_url);
+            ("server_url", `String Env_config.Local_runtime.server_url);
             ("source", `String "oas_complete");
             ("model_id", string_opt_to_json model_id);
             ("runtime_pool", string_opt_to_json runtime_pool);

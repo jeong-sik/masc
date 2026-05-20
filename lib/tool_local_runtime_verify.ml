@@ -576,8 +576,8 @@ let runtime_verify_json_legacy ?runtime_pool ?expected_slots ?expected_ctx
     [
       ("checked_at", `String (Masc_domain.now_iso ()));
       ("runtime_pool", string_opt_to_json runtime_pool);
-      ("provider_base_url", `String Env_config.Llama.server_url);
-      ("slot_url", `String Env_config.Llama.server_url);
+      ("provider_base_url", `String Env_config.Local_runtime.server_url);
+      ("slot_url", `String Env_config.Local_runtime.server_url);
       ("provider_reachable", `Bool (provider_reachable && has_runtimes));
       ("slot_reachable", `Bool (slot_reachable && has_runtimes));
       ("chat_completion_compatible", `Bool true);

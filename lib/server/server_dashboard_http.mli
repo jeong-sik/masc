@@ -1,13 +1,14 @@
 (** Server_dashboard_http — Dashboard HTTP handlers (facade).
 
-    Cascade-includes 4 sub-modules so callers reach the
+    Cascade-includes 5 sub-modules so callers reach the
     dashboard surface through a single namespace:
     - {!Server_dashboard_http_core}
     - {!Server_dashboard_http_runtime_info}
     - {!Server_dashboard_http_execution_surfaces}
     - {!Server_dashboard_http_namespace_truth}
+    - {!Server_dashboard_http_memory_subsystems}
 
-    Plus 18 own helpers + 1 type — board / memory /
+    Plus 21 own helpers + 1 type — board / memory /
     governance / verification / planning / goals /
     keeper composite / fleet composite / operator
     action+confirm HTTP route entries.

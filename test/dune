@@ -1455,6 +1455,8 @@
 
 (include stanzas/test_cascade_attempt_fsm_response_pins.inc)
 
+(include stanzas/test_cascade_saturation_signal.inc)
+
 (include stanzas/test_cascade_catalog_runtime_yojson.inc)
 
 (include stanzas/test_oas_worker_named_liveness_integration.inc)

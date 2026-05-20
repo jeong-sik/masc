@@ -132,6 +132,33 @@ ensure_pr_is_draft() {
   fi
 }
 
+arm_agent_draft_guard_status() {
+  local pr_number="$1"
+  local pr_meta
+  local pr_url
+  local head_sha
+
+  pr_meta="$(
+    gh pr view "$pr_number" --repo "$repo" --json url,headRefOid \
+      --jq '.url + " " + .headRefOid'
+  )"
+  pr_url="${pr_meta% *}"
+  head_sha="${pr_meta##* }"
+
+  if [[ -z "$head_sha" || "$head_sha" == "$pr_url" ]]; then
+    echo "could not resolve PR #$pr_number head SHA for immediate draft guard status" >&2
+    exit 1
+  fi
+
+  gh api "repos/$repo/statuses/$head_sha" \
+    --method POST \
+    -f state=failure \
+    -f context="Draft Auto-Merge Guard" \
+    -f description="Agent PR requires Approve Agent PR before ready/merge" \
+    -f target_url="$pr_url" \
+    >/dev/null
+}
+
 repo=""
 base="main"
 title=""
@@ -248,6 +275,9 @@ if [[ ${#labels[@]} -gt 0 ]]; then
   gh api "repos/$repo/issues/$pr_number/labels" --method POST --input - <<< "$label_json" >/dev/null
   ensure_pr_is_draft "$pr_number" "label application"
 fi
+
+arm_agent_draft_guard_status "$pr_number"
+ensure_pr_is_draft "$pr_number" "guard status arming"
 
 pr_url="$(gh pr view "$pr_number" --repo "$repo" --json url --jq .url)"
 echo "PR: $pr_url"

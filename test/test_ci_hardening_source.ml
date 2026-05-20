@@ -505,7 +505,16 @@ let test_pr_automation_draft_guard_contracts () =
        "hard-stop label present");
   check bool "pr automation hard-stop participates in guarded decision" true
     (file_contains_pattern ".github/workflows/pr-automation.yml"
-       "presentHardStopLabels.length > 0")
+       "presentHardStopLabels.length > 0");
+  check bool "pr automation does not cancel in-flight guard runs" true
+    (file_contains_pattern ".github/workflows/pr-automation.yml"
+       "cancel-in-progress: false");
+  check bool "pr-open arms immediate draft guard status" true
+    (file_contains_pattern "scripts/pr-open.sh"
+       "arm_agent_draft_guard_status");
+  check bool "pr-open posts Draft Auto-Merge Guard failure status" true
+    (file_contains_pattern "scripts/pr-open.sh"
+       {|context="Draft Auto-Merge Guard"|})
 
 let test_health_and_ci_runner_diagnostics () =
   check bool "health snapshot records baseline source" true

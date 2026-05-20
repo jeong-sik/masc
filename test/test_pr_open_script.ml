@@ -91,6 +91,7 @@ let make_fake_gh dir =
 set -eu
 log_file="${FAKE_GH_LOG:?}"
 labels_file="${FAKE_GH_LABELS:?}"
+statuses_file="${FAKE_GH_STATUSES:-$labels_file.statuses}"
 draft_file="${FAKE_GH_DRAFT_STATE_FILE:-$labels_file.draft}"
 cmd1="${1:-}"
 cmd2="${2:-}"
@@ -114,6 +115,9 @@ case "${cmd1}:${cmd2}" in
       *"state,isDraft,mergeStateStatus,headRefOid,url"*)
         printf 'state=OPEN draft=%s mergeState=CLEAN head=abc123\nurl=https://github.com/example/test/pull/42\n' "$draft_state"
         ;;
+      *"url,headRefOid"*)
+        printf 'https://github.com/example/test/pull/42 abc123\n'
+        ;;
       *"state,isDraft"*)
         printf 'OPEN %s\n' "$draft_state"
         ;;
@@ -133,7 +137,15 @@ case "${cmd1}:${cmd2}" in
     printf 'true\n' >"$draft_file"
     ;;
   api:*)
-    cat >"$labels_file"
+    case "${2:-}" in
+      */statuses/*)
+        cat >>"$statuses_file"
+        printf '\n' >>"$statuses_file"
+        ;;
+      *)
+        cat >"$labels_file"
+        ;;
+    esac
     ;;
   label:list)
     printf '[]\n'
@@ -230,8 +242,13 @@ let test_script_runs_under_system_bash_without_watch () =
         (contains_substring stderr "mapfile: command not found");
       let log = read_file gh_log in
       check bool "creates draft PR" true (contains_substring log "pr create");
+      check bool "arms immediate draft guard status" true
+        (contains_substring log "api repos/example/test/statuses/abc123");
       check bool "skips watched checks with --no-watch" false
         (contains_substring log "pr checks");
+      check bool "sets draft guard status failure" true
+        (contains_substring (read_file (gh_labels ^ ".statuses"))
+           "Draft Auto-Merge Guard");
       let labels = read_file gh_labels in
       check bool "adds enhancement label for code changes" true
         (contains_substring labels "\"enhancement\"");

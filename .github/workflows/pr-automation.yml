@@ -24,7 +24,10 @@ permissions:
 # feature/ds-v2-dialog-anim-wiring, fix/ir3-checkpoint-error).
 concurrency:
   group: pr-automation-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
+  # Do not cancel in-flight guard runs. A burst of opened/labeled/ready events can
+  # otherwise leave only CANCELLED Draft Auto-Merge Guard checks during the short
+  # ready-to-merge window for agent PRs.
+  cancel-in-progress: false
 
 jobs:
   draft-automerge-guard:

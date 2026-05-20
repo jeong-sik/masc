@@ -71,35 +71,13 @@ let record_codex_cli_omission = Codex_omission_dedup.record_codex_cli_omission
     Explicit model-label execution must never silently substitute a
     discovery-only model. Callers are expected to validate labels
     before reaching this helper. *)
-type label_resolution_error = Invalid_model_label of string
+type label_resolution_error = Cascade_transport_label_resolution.label_resolution_error =
+  | Invalid_model_label of string
 
-let label_resolution_error_to_string = function
-  | Invalid_model_label label -> Printf.sprintf "invalid model label %S" label
-;;
-
-let label_resolution_error_to_sdk_error err =
-  Agent_sdk.Error.Config
-    (Agent_sdk.Error.InvalidConfig
-       { field = "model_label"; detail = label_resolution_error_to_string err })
-;;
-
-let resolve_provider_config_of_label (label : string)
-  : (Llm_provider.Provider_config.t, label_resolution_error) result
-  =
-  match Cascade_config.parse_model_string label with
-  | Some pc -> Ok pc
-  | None ->
-    Log.error
-      ~ctx:"oas_worker_exec"
-      "refusing unresolved explicit model label=%S; execution never falls back to \
-       discovery-only models"
-      label;
-    Error (Invalid_model_label label)
-;;
-
-let invalid_runtime_config field detail =
-  Agent_sdk.Error.Config (Agent_sdk.Error.InvalidConfig { field; detail })
-;;
+let label_resolution_error_to_string = Cascade_transport_label_resolution.label_resolution_error_to_string
+let label_resolution_error_to_sdk_error = Cascade_transport_label_resolution.label_resolution_error_to_sdk_error
+let resolve_provider_config_of_label = Cascade_transport_label_resolution.resolve_provider_config_of_label
+let invalid_runtime_config = Cascade_transport_label_resolution.invalid_runtime_config
 
 let cli_model_override = Cascade_transport_cli_config.cli_model_override
 

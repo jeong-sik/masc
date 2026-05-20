@@ -3,6 +3,9 @@ open Alcotest
 module KRun = Masc_mcp.Keeper_turn_driver
 module KP = Masc_mcp.Keeper_state_machine
 module UT = Masc_mcp.Keeper_unified_turn
+module Rotation_attempt = Masc_mcp.Keeper_unified_turn_rotation_attempt
+module Receipt = Masc_mcp.Keeper_execution_receipt
+module EC = Masc_mcp.Keeper_error_classify
 
 let test_turn_plan_phase_gate_records_typed_contract () =
   let open Yojson.Safe.Util in
@@ -150,6 +153,68 @@ let test_provider_attempt_records_manifest_decision_contract () =
   check string "finished error" "Eio.Time.Timeout" (finished |> member "error" |> to_string)
 ;;
 
+let test_rotation_attempt_builder_records_retry_decision () =
+  let retry : EC.degraded_retry =
+    { next_cascade = "tool_required_fallback"
+    ; fallback_reason = EC.Required_tool_contract_violation
+    }
+  in
+  let err = Agent_sdk.Error.Internal "forced tool-choice contract failure" in
+  let attempt =
+    Rotation_attempt.build
+      ~recorded_at:"2026-05-20T00:00:00Z"
+      ~slot_release_at_phase:Receipt.Retry_scheduled
+      ~productive_phase_elapsed_ms:1234
+      ~retry_phase_elapsed_ms:56
+      ~from_cascade:(Receipt.cascade_name_of_string "default")
+      ~retry
+      ~outcome:Receipt.Rotation_retry_scheduled
+      err
+  in
+  check
+    string
+    "from cascade"
+    "default"
+    (Receipt.cascade_name_to_string attempt.from_cascade);
+  check
+    string
+    "to cascade"
+    "tool_required_fallback"
+    (Receipt.cascade_name_to_string attempt.to_cascade);
+  check
+    string
+    "fallback reason"
+    "required_tool_contract_violation"
+    (EC.degraded_retry_reason_to_string attempt.reason);
+  check
+    string
+    "outcome"
+    "retry_scheduled"
+    (Receipt.cascade_rotation_outcome_to_string attempt.outcome);
+  check
+    (option string)
+    "slot release phase"
+    (Some "retry_scheduled")
+    (Option.map Receipt.slot_release_phase_to_string attempt.slot_release_at_phase);
+  check
+    (option int)
+    "productive phase ms"
+    (Some 1234)
+    attempt.productive_phase_elapsed_ms;
+  check (option int) "retry phase ms" (Some 56) attempt.retry_phase_elapsed_ms;
+  check
+    (option string)
+    "error kind"
+    (Some "internal")
+    (Option.map Receipt.error_kind_to_string attempt.error_kind);
+  check
+    (option string)
+    "error message"
+    (Some (Agent_sdk.Error.to_string err))
+    attempt.error_message;
+  check string "recorded at" "2026-05-20T00:00:00Z" attempt.recorded_at
+;;
+
 let () =
   run
     "keeper_unified_turn_pipeline_records"
@@ -162,6 +227,10 @@ let () =
             "provider attempt emits typed manifest records"
             `Quick
             test_provider_attempt_records_manifest_decision_contract
+        ; test_case
+            "rotation attempt builder records degraded retry decision"
+            `Quick
+            test_rotation_attempt_builder_records_retry_decision
         ] )
     ]
 ;;

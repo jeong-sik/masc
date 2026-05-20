@@ -218,7 +218,7 @@ export function summarizeStatusTray(input: StatusTrayInput): StatusTraySummary {
           value: 'closed',
           detail: input.wsLastError
             ? clip(input.wsLastError)
-            : 'client WS channel is not ready; server transport truth is in Transport Health',
+            : 'client WS channel is not ready; server transport truth is in Diagnostics > Transport',
         }
       }
     } else {

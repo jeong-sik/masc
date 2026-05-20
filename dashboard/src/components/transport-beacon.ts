@@ -1,7 +1,7 @@
 // Transport beacon — operator-facing signal for the SSE → WS cutover.
 //
 // Renders a single chip for the browser's client channel only. Server-wide
-// transport truth lives in the Transport Health panel backed by
+// transport truth lives in the hidden Diagnostics transport surface backed by
 // /api/v1/dashboard/transport-health.
 
 import { html } from 'htm/preact'
@@ -57,7 +57,7 @@ export function computeBeaconView(args: {
     return {
       state: 'gray',
       label: 'Client WS+SSE parallel',
-      title: 'Client channel parallel mode. Server transport truth is in Transport Health. Set VITE_DASHBOARD_WS_ONLY=true to cut over.',
+      title: 'Client channel parallel mode. Server transport truth is in Diagnostics > Transport. Set VITE_DASHBOARD_WS_ONLY=true to cut over.',
     }
   }
   if (!args.connected || !args.ready) {
@@ -73,7 +73,7 @@ export function computeBeaconView(args: {
     return {
       state: 'red',
       label: 'Client WS · disconnected',
-      title: 'Client WS cutover mode, but the browser socket is closed. Events will pause until reconnect. Server transport truth is in Transport Health.',
+      title: 'Client WS cutover mode, but the browser socket is closed. Events will pause until reconnect. Server transport truth is in Diagnostics > Transport.',
     }
   }
   const silentMs = args.now - args.lastEventAt

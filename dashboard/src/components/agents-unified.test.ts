@@ -134,7 +134,7 @@ describe('AgentsUnified', () => {
   it('switches to agents view via filter chips', async () => {
     render(h(AgentsUnified, null), container)
     const btn = Array.from(container.querySelectorAll('button')).find(
-      b => b.textContent?.includes('에이전트'),
+      b => b.textContent?.includes('Agents'),
     )
     expect(btn).not.toBeUndefined()
     await act(async () => {

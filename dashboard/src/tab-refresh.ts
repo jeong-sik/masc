@@ -84,12 +84,15 @@ export function refreshPlanForRoute(routeState: Pick<RouteState, 'tab' | 'params
       return ['shell', 'namespaceTruth', 'missionSnapshot', 'execution']
     case 'monitoring':
       if (routeState.params.section === 'observatory') {
-        return ['namespaceTruth', 'execution', 'missionSnapshot', 'observatory', 'activityGraph']
+        const view = routeState.params.view
+        if (view === 'activity' || view === 'graph') return ['namespaceTruth', 'activityGraph']
+        if (view === 'live') return ['namespaceTruth', 'execution', 'missionSnapshot']
+        return ['namespaceTruth', 'observatory']
       }
       if (routeState.params.section === 'journey') {
         return ['execution']
       }
-      if (routeState.params.section === 'agents') {
+      if (!routeState.params.section || routeState.params.section === 'agents') {
         return ['namespaceTruth', 'execution', 'missionSnapshot']
       }
       if (routeState.params.section === 'cognition') {

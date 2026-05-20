@@ -81,7 +81,17 @@ describe('RuntimePanel', () => {
 
     expect(container.textContent).toContain('OasHealthChip')
     expect(container.textContent).toContain('Open Cascade Config')
-    expect(container.querySelector('[data-testid="route-link"]')?.getAttribute('data-section')).toBe('cascade-config')
+    const routeLinks = Array.from(container.querySelectorAll('[data-testid="route-link"]'))
+      .map(link => link.getAttribute('data-section'))
+    expect(routeLinks).toEqual([
+      'cascade-config',
+      'transport-health',
+      'doctor',
+      'feature-health',
+    ])
+    expect(container.textContent).toContain('Diagnostics')
+    expect(container.textContent).toContain('Transport diagnostics')
+    expect(container.textContent).toContain('Feature cleanup')
     expect(container.textContent).not.toContain('CascadeConfigPanel')
     expect(container.textContent).toContain('RuntimeMonitor')
     expect(container.textContent).toContain('PrometheusMetrics')

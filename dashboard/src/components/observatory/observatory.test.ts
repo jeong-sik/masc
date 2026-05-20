@@ -15,9 +15,22 @@ const fetchToolQuality = vi.fn().mockResolvedValue({
   hourly_trend: [],
 })
 
+const routeSignal = signal<{ tab: string; params: Record<string, string>; postId: string | null }>({
+  tab: 'monitoring',
+  params: { section: 'observatory' },
+  postId: null,
+})
+
 vi.mock('../../api/dashboard', () => ({
   fetchTelemetry,
   fetchToolQuality,
+}))
+
+vi.mock('../../router', () => ({
+  route: routeSignal,
+  replaceRoute: (tab: string, params?: Record<string, string>) => {
+    routeSignal.value = { tab, params: params ?? {}, postId: null }
+  },
 }))
 
 vi.mock('../../observatory-filter-store', () => ({
@@ -75,12 +88,18 @@ async function flushUi(): Promise<void> {
   })
 }
 
+async function setRoute(params: Record<string, string>) {
+  const router = await import('../../router')
+  router.route.value = { tab: 'monitoring', params, postId: null }
+}
+
 describe('Observatory', () => {
   let container: HTMLDivElement
 
-  beforeEach(() => {
+  beforeEach(async () => {
     container = document.createElement('div')
     document.body.appendChild(container)
+    await setRoute({ section: 'observatory' })
     fetchTelemetry.mockClear()
     fetchToolQuality.mockClear()
     cursorPosition.value = null
@@ -104,15 +123,16 @@ describe('Observatory', () => {
     expect(fetchTelemetry).toHaveBeenCalledTimes(1)
     expect(fetchToolQuality).toHaveBeenCalledTimes(1)
     await waitFor(() => {
-      expect(container.textContent).toContain('activity-panels-stub')
+      expect(container.textContent).toContain('Evidence Timeline')
     })
+    expect(container.textContent).not.toContain('activity-panels-stub')
     expect(container.textContent).not.toContain('live-monitor-stub')
     expect(container.textContent).toContain('최근 1시간')
     expect(container.textContent).toContain('자동 갱신')
-    expect(container.textContent).toContain('hover any track for cross-signal readout')
+    expect(container.textContent).toContain('Timeline')
   }, 30000)
 
-  it('switches to live tab without rendering timeline panels', async () => {
+  it('switches to activity graph without rendering timeline tracks', async () => {
     const { Observatory, refreshObservatorySurface } = await import('./observatory')
 
     await act(async () => {
@@ -121,22 +141,23 @@ describe('Observatory', () => {
     })
     await flushUi()
 
-    const liveButton = Array.from(container.querySelectorAll('button'))
-      .find(button => button.textContent?.includes('라이브'))
+    const activityButton = Array.from(container.querySelectorAll('button'))
+      .find(button => button.textContent?.includes('Activity Graph'))
 
-    expect(liveButton).toBeTruthy()
+    expect(activityButton).toBeTruthy()
 
     await act(async () => {
-      liveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      activityButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
       await Promise.resolve()
     })
     await flushUi()
 
     await waitFor(() => {
-      expect(container.textContent).toContain('live-monitor-stub')
+      expect(container.textContent).toContain('activity-panels-stub')
     })
-    expect(container.textContent).not.toContain('activity-panels-stub')
-    expect(container.textContent).toContain('실시간 스트림과 에이전트 상태를 한곳에서 봅니다.')
+    const router = await import('../../router')
+    expect(router.route.value.params.view).toBe('activity')
+    expect(container.textContent).not.toContain('event-track')
 
     await act(async () => {
       refreshObservatorySurface()
@@ -146,5 +167,24 @@ describe('Observatory', () => {
 
     expect(fetchTelemetry).toHaveBeenCalledTimes(1)
     expect(fetchToolQuality).toHaveBeenCalledTimes(1)
+  }, 30000)
+
+  it('honors view=live route param without rendering timeline panels', async () => {
+    await setRoute({ section: 'observatory', view: 'live' })
+    const { Observatory } = await import('./observatory')
+
+    await act(async () => {
+      render(html`<${Observatory} />`, container)
+      await Promise.resolve()
+    })
+    await flushUi()
+
+    await waitFor(() => {
+      expect(container.textContent).toContain('live-monitor-stub')
+    })
+    expect(container.textContent).not.toContain('activity-panels-stub')
+    expect(container.textContent).toContain('Live stream')
+    expect(fetchTelemetry).not.toHaveBeenCalled()
+    expect(fetchToolQuality).not.toHaveBeenCalled()
   }, 30000)
 })

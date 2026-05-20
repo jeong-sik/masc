@@ -407,10 +407,36 @@ describe('AgentRoster live-only cards', () => {
 
     expect(container.textContent).toContain('live runtime output preview')
     expect(container.textContent).toContain('keeper_task_claim')
+    expect(container.textContent).toContain('Cognition')
+    expect(container.textContent).toContain('Tool Access')
+    expect(container.textContent).toContain('Runtime Trace')
     expect(container.textContent).not.toContain('stale mission preview')
     expect(container.textContent).not.toContain('stale keeper brief work')
     expect(container.textContent).not.toContain('stale_tool')
     expect(container.textContent).not.toContain('old blocker that should stay out of the roster')
+  })
+
+  it('renders the operations list with a selected detail pane', async () => {
+    agents.value = [
+      makeAgent({ name: 'alpha-agent', current_task: 'alpha task' }),
+      makeAgent({ name: 'beta-agent', current_task: 'beta task' }),
+    ]
+
+    await act(async () => {
+      render(html`<${AgentRoster} />`, container)
+    })
+    await flushUi()
+
+    const rows = container.querySelectorAll('[data-testid="keeper-operations-row"]')
+    expect(rows.length).toBe(2)
+    expect(container.querySelector('aside h3')?.textContent).toContain('alpha-agent')
+
+    await act(async () => {
+      ;(rows[1] as HTMLButtonElement).click()
+    })
+
+    expect(container.querySelector('aside h3')?.textContent).toContain('beta-agent')
+    expect(container.textContent).toContain('상세 열기')
   })
 
   it('uses heartbeat and full keeper model for cards when action/model fallbacks disagree', async () => {

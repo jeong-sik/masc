@@ -53,7 +53,7 @@ describe('widget solo routing', () => {
 
   it('labels the solo surface from the active section and view', () => {
     expect(widgetSoloLabelForRoute(routeState({ section: 'runtime', view: 'cost' }))).toEqual({
-      title: 'Live Runtime',
+      title: 'Cascade & Runtime',
       id: 'monitoring:runtime:cost',
     })
   })
@@ -67,7 +67,7 @@ describe('widget solo routing', () => {
     const bar = container.querySelector('[data-testid="dashboard-widget-solo-bar"]')
     const exit = container.querySelector('a[aria-label="Return to full dashboard"]')
 
-    expect(bar?.textContent).toContain('Live Runtime')
+    expect(bar?.textContent).toContain('Cascade & Runtime')
     expect(bar?.textContent).toContain('monitoring:runtime:cost')
     expect(exit?.getAttribute('href')).toBe('#monitoring?section=runtime&view=cost')
   })

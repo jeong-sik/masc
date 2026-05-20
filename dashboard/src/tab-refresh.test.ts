@@ -72,6 +72,11 @@ describe('refreshPlanForRoute', () => {
   it('uses the current monitoring sections', () => {
     expect(refreshPlanForRoute({
       tab: 'monitoring',
+      params: {},
+    })).toEqual(['namespaceTruth', 'execution', 'missionSnapshot'])
+
+    expect(refreshPlanForRoute({
+      tab: 'monitoring',
       params: { section: 'agents' },
     })).toEqual(['namespaceTruth', 'execution', 'missionSnapshot'])
 
@@ -88,7 +93,17 @@ describe('refreshPlanForRoute', () => {
     expect(refreshPlanForRoute({
       tab: 'monitoring',
       params: { section: 'observatory' },
-    })).toEqual(['namespaceTruth', 'execution', 'missionSnapshot', 'observatory', 'activityGraph'])
+    })).toEqual(['namespaceTruth', 'observatory'])
+
+    expect(refreshPlanForRoute({
+      tab: 'monitoring',
+      params: { section: 'observatory', view: 'activity' },
+    })).toEqual(['namespaceTruth', 'activityGraph'])
+
+    expect(refreshPlanForRoute({
+      tab: 'monitoring',
+      params: { section: 'observatory', view: 'live' },
+    })).toEqual(['namespaceTruth', 'execution', 'missionSnapshot'])
   })
 
   it('keeps the consolidated command surface hydrated for ops queue deep links', () => {
@@ -170,7 +185,7 @@ describe('refreshPlanForRoute', () => {
     })
   })
 
-  it('refreshes observatory by triggering both the track fetch and activity-derived panels', async () => {
+  it('refreshes observatory by triggering the timeline track fetch only', async () => {
     refreshForRoute({
       tab: 'monitoring',
       params: { section: 'observatory' },
@@ -178,6 +193,18 @@ describe('refreshPlanForRoute', () => {
 
     await waitFor(() => {
       expect(refreshObservatorySurface).toHaveBeenCalledTimes(1)
+      expect(refreshActivityGraph).not.toHaveBeenCalled()
+    })
+  })
+
+  it('refreshes the activity graph only on its explicit evidence lens', async () => {
+    refreshForRoute({
+      tab: 'monitoring',
+      params: { section: 'observatory', view: 'activity' },
+    })
+
+    await waitFor(() => {
+      expect(refreshObservatorySurface).not.toHaveBeenCalled()
       expect(refreshActivityGraph).toHaveBeenCalledTimes(1)
     })
   })
@@ -229,14 +256,14 @@ describe('refreshPlanForRoute', () => {
 // (sse-store.ts:232) and manual navigation hydrate the correct data.
 // -----------------------------------------------------------------------------
 describe('refreshPlanForRoute fleet-health view-aware branching', () => {
-  it('default view (no view param) hydrates general monitoring data', () => {
+  it('default Tool Monitor board stays light; mounted board owns tool polling', () => {
     expect(refreshPlanForRoute({
       tab: 'monitoring',
       params: { section: 'fleet-health' },
     })).toEqual(['namespaceTruth'])
   })
 
-  it('view=event-log hydrates general monitoring data', () => {
+  it('view=event-log keeps route refresh light; mounted evidence log owns polling', () => {
     expect(refreshPlanForRoute({
       tab: 'monitoring',
       params: { section: 'fleet-health', view: 'event-log' },

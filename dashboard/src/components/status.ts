@@ -1,6 +1,6 @@
-// MASC Dashboard — Status Surface (Phase 2+4: fleet-health + runtime unified)
-// Read-only observability surfaces: journey, agents, runtime, fleet-health,
-// plus hidden diagnostic observatory route.
+// MASC Dashboard — Status Surface
+// Monitor is keeper-operations first. Tool, cascade/runtime, evidence, and
+// hidden diagnostic/deep-link routes remain routeable through this dispatcher.
 
 import { html } from 'htm/preact'
 import { lazy, Suspense } from 'preact/compat'
@@ -51,15 +51,15 @@ function sectionFallback(label: string) {
 export function sectionLabel(section: StatusSection): string {
   switch (section) {
     case 'observatory':
-      return 'Observatory'
+      return 'Evidence Timeline'
     case 'journey':
       return 'Journey'
     case 'runtime':
-      return 'Runtime'
+      return 'Cascade & Runtime'
     case 'cascade-config':
       return 'Cascade Config'
     case 'fleet-health':
-      return 'Fleet Health'
+      return 'Tool Monitor'
     case 'doctor':
       return 'Doctor'
     case 'transport-health':
@@ -67,9 +67,9 @@ export function sectionLabel(section: StatusSection): string {
     case 'feature-health':
       return 'Feature Flags'
     case 'cognition':
-      return 'Cognition'
+      return 'Keeper Cognition'
     case 'agents':
-      return 'Agents'
+      return 'Keeper Operations'
   }
 }
 
@@ -111,7 +111,7 @@ export function normalizeStatusSection(section: string | undefined): StatusSecti
     || section === 'cognition'
     || section === 'agents'
   ) return section
-  return 'runtime'
+  return 'agents'
 }
 
 function currentSection(): StatusSection {

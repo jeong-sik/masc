@@ -1,6 +1,6 @@
 ---
 status: reference
-last_verified: 2026-05-15
+last_verified: 2026-05-20
 code_refs:
   - dashboard/src/config/navigation.ts
   - dashboard/src/components/status.ts
@@ -49,13 +49,16 @@ code_refs:
 - `overview`
   - `#overview`
 - `monitoring`
-  - `#monitoring?section=runtime`
-  - `#monitoring?section=agents`
-  - `#monitoring?section=goal-loop`
-  - `#monitoring?section=fleet-health`
+  - `#monitoring?section=agents` — Keeper Operations (default)
+  - `#monitoring?section=fleet-health` — Tool Monitor
+  - `#monitoring?section=runtime` — Cascade & Runtime
+  - `#monitoring?section=observatory` — Evidence Timeline
+  - `#monitoring?section=cascade-config` (hidden diagnostic)
+  - `#monitoring?section=doctor` (hidden diagnostic)
+  - `#monitoring?section=transport-health` (hidden diagnostic)
+  - `#monitoring?section=feature-health` (hidden diagnostic)
   - `#monitoring?section=journey` (hidden diagnostic)
-  - `#monitoring?section=observatory` (hidden diagnostic)
-  - `#monitoring?section=cognition` (hidden diagnostic)
+  - `#monitoring?section=cognition` (hidden deep link; keeper detail cognition path)
 - `command`
   - `#command?section=operations`
   - sub-view는 `view=ops|governance|safety|inspector|connectors` 로 분기한다.
@@ -104,6 +107,21 @@ code_refs:
 
 이 redirect는 router/navigation 호환성 계약이다. `surface-readiness`에는 legacy surface를 다시 등재하지 않는다.
 
+## Monitor IA Contract
+- Monitor default는 `#monitoring?section=agents` 이다.
+- visible Monitor sidebar는 네 개의 primary lane만 가진다.
+  - Keeper Operations: attention-first keeper/agent list and selected detail.
+  - Tool Monitor: compact tool operations board plus tool-quality, governance, attribution, and event-log lenses.
+  - Cascade & Runtime: provider/cascade health and advanced runtime sub-views.
+  - Evidence Timeline: default evidence track timeline with explicit Activity Graph and Live lenses.
+- `cascade-config`, `doctor`, `transport-health`, `feature-health`, `journey`, `cognition`은 routeable compatibility/diagnostic/deep-link surface로 남지만 primary sidebar에는 노출하지 않는다.
+- Keeper Cognition은 top-level Monitor sibling이 아니라 Keeper Operations의 selected keeper detail/deep-link path로 취급한다.
+- Keeper Operations selected detail은 `Cognition`, `Tool Access`, `Runtime Trace` lens를 통해 hidden/deep-link surfaces로 연결한다.
+- Tool Monitor default view는 full telemetry/full quality panels를 나란히 터뜨리지 않고 tool success, failures, attention tools, failure categories, and lane links만 먼저 보여준다.
+- Evidence Timeline default view는 Activity Graph card panels를 자동으로 붙이지 않는다. Activity Graph는 `#monitoring?section=observatory&view=activity`, Live는 `#monitoring?section=observatory&view=live`에서만 열린다.
+- Transport/Feature/Doctor 상세는 Monitor daily default가 아니라 diagnostics/admin 성격이다. Monitor에는 degraded badge나 diagnostic link만 노출한다.
+- Cascade & Runtime default view는 OAS/cascade signal을 먼저 보여주고 `transport-health`, `doctor`, `feature-health`를 hidden diagnostics link 묶음으로 노출한다.
+
 ## Canonical Read Models
 - `GET /api/v1/dashboard/shell`
   - overview + runtime shell metadata
@@ -113,8 +131,8 @@ code_refs:
   - goal navigator runtime status
 - `GET /api/v1/activity/graph`
   - observatory investigation graph
-- `GET /api/v1/dashboard/telemetry/summary`, `GET /api/v1/dashboard/telemetry?source=oas_event`
-  - fleet-health summary + durable OAS event replay used by the dashboard OAS runtime monitor
+- `GET /api/v1/dashboard/telemetry/summary`, `GET /api/v1/dashboard/telemetry?source=tool_call_io`
+  - Tool Monitor evidence-log lens and source freshness metadata
 - `GET /api/v1/dashboard/oas/telemetry/recent`, `GET /api/v1/dashboard/oas/telemetry/summary`
   - in-process OAS runtime-lane sample cache; payloads expose `dashboard_surface`, `source`, and `retention.durable_replay_surface` so operators can distinguish cache state from durable `oas_event` replay
 - `GET /api/v1/dashboard/memory-subsystems`

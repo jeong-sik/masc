@@ -1,14 +1,65 @@
 ---
 rfc: "0148"
 title: "Typed `tool_error` Variant for LLM-Facing Tool Failure Surface"
-status: Draft
+status: Implemented
 created: 2026-05-20
-updated: 2026-05-20
+updated: 2026-05-21
 author: vincent
 supersedes: []
 superseded_by: null
-related: ["0088", "0091", "0105"]
-implementation_prs: []
+related: ["0088", "0091", "0105", "0154"]
+implementation_prs: [16948, 16958]
+---
+
+## Implementation summary (2026-05-21)
+
+Both code phases shipped same-day as the RFC body:
+
+| Phase | PR | Scope | Merged |
+|-------|-----|------|--------|
+| PR-1 | #16948 | `lib/tool_error.{ml,mli}` 7-variant closed sum + `of_exn` mapping + 7 Alcotest cases | 2026-05-20 |
+| PR-2 | #16958 | 6 LLM-facing site codemod (`tool_library` 3 + `tool_code_write` 2 + `tool_inline_dispatch_coord` 1) + RFC §1.1 hallucination correction (audit-cited 8 sites → measured 6 sites with line-drift fixes) | 2026-05-20 |
+
+The closed-sum post-condition described in §2 (compile-time exhaustive
+match across all LLM-facing failure surfaces) holds — `rg
+'Tool_result\.error.*Printexc\.to_string' lib/tool_*.ml` returns zero
+hits as of this closeout.
+
+### Sister RFC
+
+RFC-0154 (`System_error_class` typed SSOT, Implemented 2026-05-21) is
+the operator-facing twin of this RFC. Together they cover:
+
+- **RFC-0148**: LLM-facing tool failure (7 variants — wire visible to
+  the model in `Tool_result.error.kind`).
+- **RFC-0154**: operator-facing OS error classification (6 variants —
+  wire visible to dashboard via `error_class` field on
+  `masc.telemetry_coverage_gap.v1`).
+
+The two share constructor names where the failure mode overlaps
+(`Resource_exhausted` here ↔ `Fd_exhaustion` / `Disk_exhaustion`
+there), but the variant sets are intentionally distinct because the
+two audiences (LLM vs operator) read different abstractions. Future
+RFCs that compose them should preserve that boundary.
+
+### §5 acceptance audit (closeout)
+
+1. ✅ Exhaustive zero — `rg 'Tool_result\.error.*Printexc\.to_string'
+   lib/tool_*.ml` returns 0 hits.
+2. ✅ Codemod helper — `Tool_error.of_exn` exhaustively maps
+   `Sys_error`, `Unix.Unix_error`, `Failure`, `Stdlib.Not_found`.
+3. ✅ Alcotest 7 cases — `test/test_tool_error.ml` covers all 7
+   variants + `Internal_error.exn` preservation case.
+4. ⏸ CI backsliding lint — *not landed*. Optional follow-up; the
+   compile-time exhaustiveness check on `Tool_error.t` already
+   prevents new `Failure msg` catch-alls from sneaking in *within*
+   the existing 6 surfaces. A repository-wide grep gate would catch
+   new surfaces being added with the old pattern; tracked as future
+   work, not blocking closeout.
+5. ⏸ LLM-side acceptance (1-week prod log review) — pending. To be
+   reported in a follow-up note when ≥7 days of production logs are
+   available.
+
 ---
 
 # RFC-0148: Typed `tool_error` Variant for LLM-Facing Tool Failure Surface

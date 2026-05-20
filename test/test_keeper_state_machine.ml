@@ -261,6 +261,36 @@ let test_apply_operator_pause_resume () =
   check phase_t "-> Running" SM.Running tr2.new_phase
 ;;
 
+let test_operator_resume_from_paused_commits_latent_blockers () =
+  let cases =
+    [ ( "unhealthy turn"
+      , { running_conditions with operator_paused = true; turn_healthy = false }
+      , SM.Failing )
+    ; ( "context overflow"
+      , { running_conditions with operator_paused = true; context_overflow = true }
+      , SM.Overflowed )
+    ; ( "handoff active"
+      , { running_conditions with operator_paused = true; handoff_active = true }
+      , SM.HandingOff )
+    ; ( "restart backoff elapsed"
+      , { SM.default_conditions with
+          operator_paused = true
+        ; restart_budget_remaining = true
+        ; backoff_elapsed = true
+        }
+      , SM.Restarting )
+    ]
+  in
+  List.iter
+    (fun (label, conditions, expected_phase) ->
+       let tr =
+         apply_ok ~current_phase:SM.Paused ~conditions ~event:SM.Operator_resume
+       in
+       check phase_t label expected_phase tr.new_phase;
+       check bool (label ^ " clears operator pause") false tr.updated_conditions.operator_paused)
+    cases
+;;
+
 let test_apply_drain_lifecycle () =
   (* Running -> Draining -> Stopped *)
   let tr1 =
@@ -703,6 +733,17 @@ let test_can_transition_paused_to_draining () =
     "-> Draining"
     true
     (SM.can_transition ~from_phase:SM.Paused ~to_phase:SM.Draining)
+;;
+
+let test_can_transition_paused_to_latent_buffer_states () =
+  List.iter
+    (fun to_phase ->
+       check
+         bool
+         ("Paused -> " ^ SM.phase_to_string to_phase)
+         true
+         (SM.can_transition ~from_phase:SM.Paused ~to_phase))
+    [ SM.Failing; SM.Overflowed; SM.HandingOff; SM.Restarting ]
 ;;
 
 let test_can_transition_paused_to_stopped () =
@@ -2533,6 +2574,10 @@ let () =
         ; test_case "compaction completed" `Quick test_apply_compaction_completed
         ; test_case "handoff lifecycle" `Quick test_apply_handoff_lifecycle
         ; test_case "pause/resume" `Quick test_apply_operator_pause_resume
+        ; test_case
+            "paused resume commits latent blockers"
+            `Quick
+            test_operator_resume_from_paused_commits_latent_blockers
         ; test_case "drain lifecycle" `Quick test_apply_drain_lifecycle
         ; test_case "drain + fiber death -> Crashed" `Quick test_apply_drain_fiber_death
         ; test_case
@@ -2621,6 +2666,10 @@ let () =
             test_can_transition_restarting_to_crashed
         ; test_case "Restarting -> Dead" `Quick test_can_transition_restarting_to_dead
         ; test_case "Paused -> Draining" `Quick test_can_transition_paused_to_draining
+        ; test_case
+            "Paused -> latent buffer states"
+            `Quick
+            test_can_transition_paused_to_latent_buffer_states
         ; test_case "Paused -> Stopped" `Quick test_can_transition_paused_to_stopped
         ; test_case
             "Running|Failing execute turns"

@@ -365,6 +365,13 @@ let test_keeper_bash_shape_uses_shell_ir_for_quoted_literals () =
   Alcotest.(check (option string)) "parse-failure fallback remains conservative"
     (Some "substitution")
     (block_tag "echo $(complex-substitution)")
+  ;
+  Alcotest.(check (option string)) "background operator blocks"
+    (Some "chaining")
+    (block_tag "sleep 10 &")
+  ;
+  Alcotest.(check (option string)) "quoted ampersand is data" None
+    (block_tag {|echo "a & b"|})
 
 let test_keeper_bash_shell_ir_parse_failure_shape_fallback_is_quote_aware () =
   let block_tag =
@@ -388,7 +395,12 @@ let test_keeper_bash_shell_ir_parse_failure_shape_fallback_is_quote_aware () =
     (Some "substitution")
     (block_tag {|echo "$(date)"|});
   Alcotest.(check (option string)) "single-quoted substitution is data" None
-    (block_tag {|echo '$(date) > out'|})
+    (block_tag {|echo '$(date) > out'|});
+  Alcotest.(check (option string)) "background operator still blocks"
+    (Some "chaining")
+    (block_tag "sleep 10 &");
+  Alcotest.(check (option string)) "quoted ampersand stays data" None
+    (block_tag {|printf "%s\n" "a & b"|})
 
 let test_stderr_dev_null_strip_preserves_post_background_redirect () =
   let strip =

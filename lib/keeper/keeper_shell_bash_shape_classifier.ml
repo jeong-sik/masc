@@ -77,6 +77,7 @@ let shell_ir_parse_failure_shape_block cmd =
   else if
     string_contains_substring scan_text "&&"
     || string_contains_substring scan_text "||"
+    || string_contains_char scan_text '&'
     || string_contains_char scan_text ';'
     || string_contains_char scan_text '\n'
     || string_contains_char scan_text '\r'

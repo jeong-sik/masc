@@ -353,15 +353,11 @@ val transition_result_to_json : transition_result -> Yojson.Safe.t
 
 (** {1 Mermaid Visualization} *)
 
-(** Maps a phase to its Mermaid diagram state identifier (capitalized).
-    Use this to reference states in generated Mermaid `class` directives. *)
-val phase_to_mermaid_id : phase -> string
-
-(** Generate a Mermaid stateDiagram-v2 string with the given phase
-    highlighted. The diagram visualizes the keeper phases and
-    distinguishes the current phase visually (green for active,
-    amber for buffer, gray for terminal). *)
-val phase_to_mermaid : current:phase -> string
+(* Mermaid rendering moved to [Keeper_state_machine_mermaid] (godfile
+   decomp). Use that module directly:
+     Keeper_state_machine_mermaid.phase_to_mermaid_id : phase -> string
+     Keeper_state_machine_mermaid.phase_to_mermaid : current:phase -> string
+   No reverse alias here: wrapped-library cycle blocked the alias. *)
 
 (** {1 Attribution envelope (Layer 1)}
 

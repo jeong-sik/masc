@@ -484,6 +484,7 @@ const TURN_TERMINAL_FAILURE_CODES = new Set<string>([
   'oas_timeout_budget',
   'oas_timeout_budget_loop',
   'turn_timeout',
+  'turn_wall_clock_timeout',
   'cascade_exhausted',
   'heartbeat_consecutive_failures',
   'turn_consecutive_failures',

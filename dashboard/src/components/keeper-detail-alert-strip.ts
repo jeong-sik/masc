@@ -51,61 +51,136 @@ function SyntheticAwareText({ text }: { text: string }) {
   `
 }
 
-// Backend `attention_reason` is set across three emit sites (verified by
-// `rg '"attention_reason".*\`String "' lib/`):
-//   - lib/keeper/keeper_status_bridge.ml:727-742 — six common reasons.
-//   - lib/keeper_fd_pressure.ml:190 — 'fd_pressure' when a keeper trips
-//     the fd-accountant watermark.
-//   - lib/dashboard/dashboard_goals.ml:44 —
-//     'runtime_trust_snapshot_unavailable' when the trust snapshot has
-//     not yet been computed.
-// The label map must cover every emit site; missing entries fall back to
-// the raw English token via `labels[reason] ?? reason`, leaving the
-// operator with no Korean label.
+// Backend emit sites for `attention_reason`:
+//   - lib/keeper/keeper_status_bridge.ml:727-742 (six common reasons)
+//   - lib/keeper_fd_pressure.ml:190 ('fd_pressure')
+//   - lib/dashboard/dashboard_goals.ml:44 ('runtime_trust_snapshot_unavailable')
+// Closed as const + Record<AttentionReason, string>. Adding a new label
+// without extending the union, or removing a union arm, fails typecheck
+// rather than silently producing a missing/extraneous Korean label. The
+// dual classification rule the labels map encodes is exhaustive over
+// the union; backend variants that drift past it surface via
+// warnUnknownAttentionToken instead of slipping through as a raw token.
+const ATTENTION_REASONS = [
+  'approval_pending',
+  'continue_gate_required',
+  'paused',
+  'paused_blocked',
+  'runtime_blocked',
+  'timeout_budget_exhausted',
+  'social_model_fallback',
+  'fd_pressure',
+  'runtime_trust_snapshot_unavailable',
+] as const
+type AttentionReason = typeof ATTENTION_REASONS[number]
+
+const ATTENTION_REASON_LABELS: Record<AttentionReason, string> = {
+  approval_pending: '승인 대기',
+  continue_gate_required: '계속 진행 승인 필요',
+  paused: '일시정지',
+  paused_blocked: '일시정지 원인 확인 필요',
+  runtime_blocked: '런타임 근거 확인 필요',
+  timeout_budget_exhausted: '타임아웃 예산 소진',
+  social_model_fallback: '소셜 모델 폴백',
+  fd_pressure: 'FD 임계치 초과',
+  runtime_trust_snapshot_unavailable: '런타임 신뢰 스냅샷 없음',
+}
+
+function isAttentionReason(s: string): s is AttentionReason {
+  return (ATTENTION_REASONS as readonly string[]).includes(s)
+}
+
 function attentionReasonLabel(reason: string | null, paused: boolean): string | null {
   if (!reason) return null
   if ((reason === 'paused' || reason === 'paused_blocked') && paused) return null
-  const labels: Record<string, string> = {
-    approval_pending: '승인 대기',
-    continue_gate_required: '계속 진행 승인 필요',
-    paused: '일시정지',
-    paused_blocked: '일시정지 원인 확인 필요',
-    runtime_blocked: '런타임 근거 확인 필요',
-    timeout_budget_exhausted: '타임아웃 예산 소진',
-    social_model_fallback: '소셜 모델 폴백',
-    fd_pressure: 'FD 임계치 초과',
-    runtime_trust_snapshot_unavailable: '런타임 신뢰 스냅샷 없음',
-  }
-  return labels[reason] ?? reason
+  if (isAttentionReason(reason)) return ATTENTION_REASON_LABELS[reason]
+  warnUnknownAttentionToken('attention_reason', reason)
+  return reason
 }
 
-// Backend `next_human_action` is set alongside `attention_reason` at the
-// same emit sites:
-//   - lib/keeper/keeper_status_bridge.ml:727-742 — seven common actions.
-//   - lib/keeper_fd_pressure.ml:191 — 'restore_fd_headroom' paired with
-//     the 'fd_pressure' attention_reason.
-//   - lib/dashboard/dashboard_goals.ml:45 — 'inspect_keeper_runtime_trust'
-//     paired with the 'runtime_trust_snapshot_unavailable' reason.
-// The label map below must cover every emit site so operators see a
-// Korean instruction instead of the raw English token.
+// Backend emit sites for `next_human_action` (paired 1:1 with the
+// corresponding `attention_reason`):
+//   - lib/keeper/keeper_status_bridge.ml:727-742 (seven common actions)
+//   - lib/keeper_fd_pressure.ml:191 ('restore_fd_headroom')
+//   - lib/dashboard/dashboard_goals.ml:45 ('inspect_keeper_runtime_trust')
+const NEXT_HUMAN_ACTIONS = [
+  'approve_or_reject_continue',
+  'inspect_blocker_before_resume',
+  'inspect_runtime_blocker',
+  'inspect_timeout_budget',
+  'resolve_approval',
+  'resume_or_review',
+  'review_social_model',
+  'restore_fd_headroom',
+  'inspect_keeper_runtime_trust',
+] as const
+type NextHumanAction = typeof NEXT_HUMAN_ACTIONS[number]
+
+const NEXT_HUMAN_ACTION_LABELS: Record<NextHumanAction, string> = {
+  approve_or_reject_continue: '계속 진행 승인 또는 거절',
+  inspect_blocker_before_resume: '원인 확인 후 재개',
+  inspect_runtime_blocker: '런타임 근거 확인',
+  inspect_timeout_budget: '타임아웃 예산 확인',
+  resolve_approval: '승인 요청 처리',
+  resume_or_review: '재개 또는 설정 검토',
+  review_social_model: '소셜 모델 설정 검토',
+  restore_fd_headroom: 'FD 여유 확보',
+  inspect_keeper_runtime_trust: '런타임 신뢰 스냅샷 확인',
+}
+
+function isNextHumanAction(s: string): s is NextHumanAction {
+  return (NEXT_HUMAN_ACTIONS as readonly string[]).includes(s)
+}
+
 function nextHumanActionLabel(action: string | null): string | null {
   if (!action) return null
-  const labels: Record<string, string> = {
-    approve_or_reject_continue: '계속 진행 승인 또는 거절',
-    inspect_blocker_before_resume: '원인 확인 후 재개',
-    inspect_runtime_blocker: '런타임 근거 확인',
-    inspect_timeout_budget: '타임아웃 예산 확인',
-    resolve_approval: '승인 요청 처리',
-    resume_or_review: '재개 또는 설정 검토',
-    review_social_model: '소셜 모델 설정 검토',
-    restore_fd_headroom: 'FD 여유 확보',
-    inspect_keeper_runtime_trust: '런타임 신뢰 스냅샷 확인',
+  if (isNextHumanAction(action)) return NEXT_HUMAN_ACTION_LABELS[action]
+  warnUnknownAttentionToken('next_human_action', action)
+  return action
+}
+
+// (attention_reason, next_human_action) pairs that surface the same
+// operator intent in two visually identical lines — e.g.
+//   주의 사유 · 런타임 근거 확인 필요
+//   다음 액션 · 런타임 근거 확인
+// Backend emits them as separate fields (lib/keeper/keeper_status_bridge.ml:727-742
+// and the fd_pressure / runtime_trust_snapshot peer sites), and we keep
+// the pairing here in dashboard so other consumers that *do* want both
+// (e.g. timeline reconstruction) are unaffected. Adding a new arm to
+// either union without considering the pair is safe — the predicate
+// just returns false and both lines render.
+const ATTENTION_PAIR_DUPLICATES: ReadonlyArray<readonly [AttentionReason, NextHumanAction]> = [
+  ['runtime_blocked', 'inspect_runtime_blocker'],
+  ['paused_blocked', 'inspect_blocker_before_resume'],
+  ['timeout_budget_exhausted', 'inspect_timeout_budget'],
+  ['runtime_trust_snapshot_unavailable', 'inspect_keeper_runtime_trust'],
+]
+const ATTENTION_PAIR_DUPLICATE_KEYS = new Set<string>(
+  ATTENTION_PAIR_DUPLICATES.map(([r, a]) => `${r}|${a}`),
+)
+function isAttentionPairDuplicate(reason: string | null, action: string | null): boolean {
+  if (!reason || !action) return false
+  return ATTENTION_PAIR_DUPLICATE_KEYS.has(`${reason}|${action}`)
+}
+
+// One-time warn per (kind, token) so dev consoles surface backend
+// variants that have no Korean label, without spamming on every render.
+const warnedAttentionTokens = new Set<string>()
+function warnUnknownAttentionToken(kind: 'attention_reason' | 'next_human_action', token: string) {
+  const key = `${kind}|${token}`
+  if (warnedAttentionTokens.has(key)) return
+  warnedAttentionTokens.add(key)
+  if (typeof console !== 'undefined') {
+    console.warn(`[keeper-detail-alert-strip] unknown ${kind}:`, token)
   }
-  return labels[action] ?? action
+}
+
+function assertNever(value: never): never {
+  throw new Error(`unreachable case: ${String(value)}`)
 }
 
 // Exhaustive render over `KeeperVerdict.kind`. Adding a new arm to
-// `KeeperVerdict` will fail typecheck on the unreachable assertion
+// `KeeperVerdict` will fail typecheck on the assertNever default
 // rather than silently falling through to a default render. The tool
 // contract result, when present, is always shown as scope-tagged
 // evidence ("도구 계약") attached to the verdict rather than as a
@@ -136,6 +211,8 @@ function renderVerdict(verdict: KeeperVerdict) {
       `
     case 'no_verdict':
       return toolContractEvidence
+    default:
+      return assertNever(verdict.kind)
   }
 }
 
@@ -170,6 +247,18 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
   const pausedRuntimeBlocker = isPaused && runtimeBlockerClass != null
   const attentionReasonText = attentionReasonLabel(attentionReason, isPaused)
   const nextHumanActionText = nextHumanActionLabel(nextHumanAction)
+  // Suppress action-lines that duplicate the visible "주의 사유" line
+  // above. The dedupe is keyed on the (attention_reason, next_action)
+  // pair so it applies to both `next_human_action` (the immediate
+  // operator instruction) and `trust.latest_next_action` (the per-turn
+  // "권장 조치" follow-up suggestion), since the backend draws both
+  // from the same NextHumanAction wire vocabulary. If attentionReasonText
+  // is null (paused suppresses the reason line) we keep both visible so
+  // the operator still sees what to do.
+  const duplicatesAttentionReason = (action: string | null): boolean =>
+    attentionReasonText !== null
+    && isAttentionPairDuplicate(attentionReason, action)
+  const suppressDuplicateNextAction = duplicatesAttentionReason(nextHumanAction)
   const sandboxTarget = keeper.sandbox_target?.trim() || keeper.sandbox_profile?.trim() || null
   const persistedPolicyCount = keeper.approval_policy_effective?.persisted_rules
   const goalLinkedTasks = keeper.goal_progress?.linked_task_count
@@ -191,6 +280,17 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
   const latestTerminalReason = keeper.trust?.latest_terminal_reason ?? null
   const latestTerminalCode = latestTerminalReason?.code?.trim() || null
   const latestTerminalSummary = latestTerminalReason?.summary?.trim() || null
+  // Hide "종료 코드" when it references a past *success* turn while the
+  // current stop_cause is a terminal failure -- that is the
+  // "정지 원인 · turn_timeout / 종료 코드 · success" time-axis mix the
+  // ckpt-2 follow-up addresses. Both-failure pairs (e.g. turn_timeout +
+  // turn_wall_clock_timeout) stay visible since they describe the same
+  // failure surface from different observability layers.
+  const suppressStaleLatestTerminal =
+    latestTerminalCode !== null
+    && stopCause !== null
+    && isTurnTerminalFailureCode(stopCause.code)
+    && !isTurnTerminalFailureCode(latestTerminalCode)
   const latestNextAction = keeper.trust?.latest_next_action?.trim() || null
   const operatorDispositionReason = keeper.trust?.operator_disposition_reason?.trim() || null
   const shouldShowOperatorDispositionReason =
@@ -435,16 +535,16 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
         ${attentionReason === 'approval_pending' && pendingApprovalTaskId
           ? html`<span><strong class="text-[var(--color-fg-secondary)]">작업</strong> · ${pendingApprovalTaskId}</span>`
           : null}
-        ${nextHumanActionText
+        ${nextHumanActionText && !suppressDuplicateNextAction
           ? html`<span><strong class="text-[var(--color-fg-secondary)]">다음 액션</strong> · ${nextHumanActionText}</span>`
           : null}
-        ${stopCause
+        ${stopCause && isTurnTerminalFailureCode(stopCause.code)
           ? html`<span><strong class="text-[var(--color-fg-secondary)]">정지 원인</strong> · ${stopCause.code}${stopCause.summary ? html` · <${SyntheticAwareText} text=${stopCause.summary} />` : null}</span>`
           : null}
-        ${latestTerminalCode && latestTerminalCode !== stopCause?.code
+        ${latestTerminalCode && latestTerminalCode !== stopCause?.code && !suppressStaleLatestTerminal
           ? html`<span><strong class="text-[var(--color-fg-secondary)]">종료 코드</strong> · ${latestTerminalCode}${latestTerminalSummary ? html` · <${SyntheticAwareText} text=${latestTerminalSummary} />` : null}</span>`
           : null}
-        ${latestNextAction
+        ${latestNextAction && !duplicatesAttentionReason(latestNextAction)
           ? html`<span title=${latestNextAction}><strong class="text-[var(--color-fg-secondary)]">권장 조치</strong> · ${nextHumanActionLabel(latestNextAction)}</span>`
           : null}
         ${shouldShowOperatorDispositionReason && operatorDispositionReason
@@ -465,7 +565,7 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
           ? html`<span><strong class="text-[var(--color-fg-secondary)]">사용 도구</strong> · ${usedTools.join(', ')}</span>`
           : null}
         ${unexpectedTools.length > 0
-          ? html`<span class="text-[var(--color-status-err)]"><strong>외부 도구</strong> · ${unexpectedTools.join(', ')}</span>`
+          ? html`<span class="text-[var(--color-status-err)]" title="키퍼 persona의 허용 도구 목록 외부에서 호출된 도구 — 계약 위반"><strong>허용 외 도구</strong> · ${unexpectedTools.join(', ')}</span>`
           : null}
         ${missingRequiredTools.length > 0
           ? html`<span class="text-[var(--color-status-err)]"><strong>누락</strong> · ${missingRequiredTools.join(', ')}</span>`

@@ -1797,13 +1797,13 @@ let test_execute_tool_http_auth_token_overrides_stale_argument_token () =
     result.token;
   cleanup_dir base_path
 
-let test_execute_tool_legacy_argument_token_still_authorizes_without_http_auth () =
+let test_execute_tool_legacy_argument_token_ignored_without_http_auth () =
   let base_path = temp_dir () in
   let config = Masc_mcp.Coord.default_config base_path in
   let identity =
     test_agent_identity
-      ~uuid:"legacy-token-fallback-test"
-      ~session_key:"legacy-token-fallback-session"
+      ~uuid:"legacy-token-ignored-test"
+      ~session_key:"legacy-token-ignored-session"
   in
   let result =
     Masc_mcp.Mcp_server_eio_caller_identity.resolve ~config
@@ -1817,8 +1817,8 @@ let test_execute_tool_legacy_argument_token_still_authorizes_without_http_auth (
       ~log_mcp_exn:(fun ~label:_ _ -> ())
   in
   Alcotest.(check (option string))
-    "legacy argument token remains fallback without HTTP auth"
-    (Some "legacy-argument-token")
+    "legacy argument token ignored without HTTP auth"
+    None
     result.token;
   cleanup_dir base_path
 
@@ -3011,8 +3011,8 @@ let eio_tests = [
     test_execute_tool_add_task_with_admin_token_without_join;
   "http auth token overrides stale argument token", `Quick,
     test_execute_tool_http_auth_token_overrides_stale_argument_token;
-  "legacy argument token still authorizes without http auth", `Quick,
-    test_execute_tool_legacy_argument_token_still_authorizes_without_http_auth;
+  "legacy argument token ignored without http auth", `Quick,
+    test_execute_tool_legacy_argument_token_ignored_without_http_auth;
   "mcp session ignores term persistence", `Quick, test_execute_tool_mcp_session_ignores_term_persistence;
   (* Legacy governance convo room test removed *)
 ]

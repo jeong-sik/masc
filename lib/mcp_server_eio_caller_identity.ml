@@ -179,22 +179,13 @@ let resolve_explicit_joined_alias ~config ~room_initialized ~log_mcp_exn
 let resolve ~(config : Coord_utils_backend_setup.config) ~tool_name ~arguments ~identity ~cached_resolved_agent
     ~mcp_session_id ~auth_token ~internal_keeper_runtime ~room_initialized
     ~read_mcp_session_agent ~read_term_session_agent ~log_mcp_exn =
-  let arg_get_string_opt key =
-    match Safe_ops.json_string_opt key arguments with
-    | Some "" -> None
-    | other -> other
-  in
   let explicit_agent_name = caller_agent_name_from_arguments arguments in
   let has_explicit_agent_name = Option.is_some explicit_agent_name in
   let agent_name =
     resolve_initial_agent_name ~identity ~cached_resolved_agent ~mcp_session_id
       ~explicit_agent_name ~read_mcp_session_agent ~read_term_session_agent
   in
-  let token =
-    match auth_token with
-    | Some _ as token -> token
-    | None -> arg_get_string_opt "token"
-  in
+  let token = auth_token in
   let verified_internal_keeper_runtime =
     internal_keeper_runtime
     &&

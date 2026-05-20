@@ -142,6 +142,14 @@ val sdk_error_cascade_fallback_class :
     operator-facing [top_level_reason] aggregation on typed causes instead of
     generic SDK/Internal wrapper strings. *)
 
+(** {1 Metric labels} *)
+
+val label_kind : string
+
+val label_cascade : string
+
+val provider_label : string -> string
+
 (** {1 Provider auth helpers} *)
 
 val resolve_provider_api_key_env_name :

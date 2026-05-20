@@ -1,5 +1,6 @@
 type t =
   { provider_cfg : Llm_provider.Provider_config.t
+  ; tier_id : string
   ; health_key : string
   ; model_health_key : string
   ; capacity_key : string
@@ -161,17 +162,23 @@ let capacity_key_of_config (cfg : Llm_provider.Provider_config.t) =
 let http_probe_url_of_config (cfg : Llm_provider.Provider_config.t) =
   Cascade_http_probe_url.of_provider_config cfg
 
-let of_provider_config provider_cfg =
+let default_tier_id_of_config provider_cfg =
+  provider_health_key_of_config provider_cfg
+
+let of_provider_config ?tier_id provider_cfg =
   let health_key = provider_health_key_of_config provider_cfg in
   let model_health_key = provider_model_health_key_of_config provider_cfg in
+  let tier_id = Option.value tier_id ~default:(default_tier_id_of_config provider_cfg) in
   { provider_cfg
+  ; tier_id
   ; health_key
   ; model_health_key
   ; capacity_key = capacity_key_of_config provider_cfg
   ; http_probe_url = http_probe_url_of_config provider_cfg
   }
 
-let of_provider_configs provider_cfgs = List.map of_provider_config provider_cfgs
+let of_provider_configs provider_cfgs =
+  List.map (fun provider_cfg -> of_provider_config provider_cfg) provider_cfgs
 
 let runtime_url_of_label label =
   match Provider_kind_resolver.resolve label with
@@ -303,6 +310,7 @@ let threshold_multipliers_of_runtime_id runtime_id =
   1.0, 1.0
 
 let health_key candidate = candidate.health_key
+let tier_id candidate = candidate.tier_id
 let model_health_key candidate = candidate.model_health_key
 let provider_label candidate =
   provider_label_of_model_label

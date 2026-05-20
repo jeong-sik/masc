@@ -311,6 +311,18 @@ module CascadeSaturationSignal : sig
       string label, or control-flow path. *)
 end
 
+(** {1 Cascade Tier Admission (RFC-0153 Phase B.2)} *)
+
+module CascadeTierAdmission : sig
+  val enabled : unit -> bool
+  (** [MASC_CASCADE_TIER_ADMISSION_ENABLED] flag. Default true.
+
+      When true, the main keeper cascade path enforces per-tier inflight
+      admission before provider dispatch. Set false only as an emergency
+      rollback; it is intentionally independent from Phase A.2 metric
+      emission. *)
+end
+
 (** {1 Cascade runtime overrides} *)
 
 module KeeperCascade : sig

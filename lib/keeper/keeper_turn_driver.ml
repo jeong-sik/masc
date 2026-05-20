@@ -38,7 +38,7 @@ let cascade_tier_admission_policy_of_priority priority =
 
 let with_keeper_cascade_tier_admission
     ?(admission = keeper_cascade_tier_admission)
-    ?(enabled = Env_config_keeper.CascadeSaturationSignal.enabled ())
+    ?(enabled = Env_config_keeper.CascadeTierAdmission.enabled ())
     ~tier_id
     ~admission_policy
     f =
@@ -74,6 +74,41 @@ let release_client_capacity_quietly = function
       (match release () with
        | () -> ()
        | exception _ -> ())
+
+let provider_config_identity_key (cfg : Llm_provider.Provider_config.t) =
+  Hashtbl.hash
+    ( Llm_provider.Provider_config.string_of_provider_kind cfg.kind,
+      cfg.model_id,
+      cfg.base_url,
+      cfg.request_path,
+      cfg.api_key,
+      cfg.headers,
+      cfg.supports_tool_choice_override )
+
+let runtime_candidates_of_tiered_providers tiered_providers provider_cfgs =
+  let tier_index = Hashtbl.create (List.length tiered_providers) in
+  List.iter
+    (fun (tiered : Cascade_catalog_runtime_named_providers.tiered_provider) ->
+       let key = provider_config_identity_key tiered.provider_cfg in
+       let queue =
+         match Hashtbl.find_opt tier_index key with
+         | Some queue -> queue
+         | None ->
+           let queue = Queue.create () in
+           Hashtbl.add tier_index key queue;
+           queue
+       in
+       Queue.add tiered.tier_id queue)
+    tiered_providers;
+  List.map
+    (fun provider_cfg ->
+       let tier_id =
+         match Hashtbl.find_opt tier_index (provider_config_identity_key provider_cfg) with
+         | Some queue when not (Queue.is_empty queue) -> Some (Queue.pop queue)
+         | _ -> None
+       in
+        Cascade_runtime_candidate.of_provider_config ?tier_id provider_cfg)
+    provider_cfgs
 
 (* ================================================================ *)
 (* Facade-only: run_named, run_model_by_label, and MASC tool bridges  *)
@@ -172,7 +207,10 @@ let run_named
     || keeper_internal_tools_require_materialized_runtime_surface
          ~keeper_name tools
   in
-  let configured_labels_result, candidate_cfgs_result, secondary_resolver =
+  let ( configured_labels_result,
+        candidate_cfgs_result,
+        tiered_providers_result,
+        secondary_resolver ) =
     let named_resolution =
       Cascade_catalog_runtime
       .resolve_named_providers_strict_with_secondary_resolver
@@ -183,6 +221,11 @@ let run_named
       | Ok resolution -> Ok resolution.providers
       | Error detail -> Error detail
     in
+    let tiered_providers_result =
+      match named_resolution with
+      | Ok resolution -> Ok resolution.tiered_providers
+      | Error detail -> Error detail
+    in
     let secondary_resolver =
       match named_resolution with
       | Ok resolution -> Some resolution.secondary_resolver
@@ -190,16 +233,17 @@ let run_named
     in
     ( Cascade_runtime.models_of_cascade_name_result runtime_cascade_name,
       candidate_cfgs_result,
+      tiered_providers_result,
       secondary_resolver )
   in
-  (match configured_labels_result, candidate_cfgs_result with
-   | Error detail, _ | _, Error detail ->
+  (match configured_labels_result, candidate_cfgs_result, tiered_providers_result with
+   | Error detail, _, _ | _, Error detail, _ | _, _, Error detail ->
        Log.Misc.error "cascade %s: %s" cascade_name detail;
        Error (cascade_catalog_error_to_sdk_error detail)
-   | Ok configured_labels, Ok candidate_cfgs ->
+   | Ok configured_labels, Ok candidate_cfgs, Ok tiered_providers ->
   let original_candidate_cfgs = candidate_cfgs in
   let original_candidates =
-    Cascade_runtime_candidate.of_provider_configs original_candidate_cfgs
+    runtime_candidates_of_tiered_providers tiered_providers original_candidate_cfgs
   in
   let tool_filtered_candidate_cfgs =
     filter_candidate_providers_for_tool_support
@@ -216,7 +260,7 @@ let run_named
   let original_candidate_count = List.length original_candidate_cfgs in
   let tool_filtered_candidate_count = List.length tool_filtered_candidate_cfgs in
   let tool_filtered_candidates =
-    Cascade_runtime_candidate.of_provider_configs tool_filtered_candidate_cfgs
+    runtime_candidates_of_tiered_providers tiered_providers tool_filtered_candidate_cfgs
   in
   let health_filtered_candidates =
     tool_filtered_candidates
@@ -561,7 +605,6 @@ let run_named
   let tier_admission_policy =
     cascade_tier_admission_policy_of_priority queue_priority
   in
-  let tier_admission_id = cascade_name in
   (* MASC-driven cascade FSM: try each provider, decide on failure.
      Extracted to [Keeper_turn_driver_try_provider.run_try_provider] via
      explicit [try_provider_ctx] record (RFC-0051 PR-3a). *)
@@ -929,6 +972,7 @@ let run_named
         terminal_error
     | candidate :: rest ->
       Eio_guard.fair_yield (); (* P0: keep fast-fail cascades scheduler-fair. *)
+      let tier_admission_id = Cascade_runtime_candidate.tier_id candidate in
       let health_cooldown =
         Cascade_runtime_candidate.first_health_cooldown candidate
       in
@@ -1035,7 +1079,8 @@ let run_named
         with_keeper_cascade_tier_admission
           ~tier_id:tier_admission_id
           ~admission_policy:tier_admission_policy
-          (fun () -> Eio.Switch.run (fun provider_attempt_sw ->
+          (fun () ->
+             Eio.Switch.run (fun provider_attempt_sw ->
           Option.iter
             (fun release -> Eio.Switch.on_release provider_attempt_sw release)
             capacity_release;

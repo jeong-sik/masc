@@ -75,6 +75,8 @@ type state = Cascade_catalog_runtime_cache.state =
 type secondary_resolution =
   Cascade_catalog_runtime_named_providers.secondary_resolution = {
   providers : Llm_provider.Provider_config.t list;
+  tiered_providers :
+    Cascade_catalog_runtime_named_providers.tiered_provider list;
   secondary_resolver :
     int ->
     Llm_provider.Provider_config.t ->

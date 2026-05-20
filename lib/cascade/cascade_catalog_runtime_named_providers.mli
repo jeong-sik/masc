@@ -24,8 +24,14 @@ val resolve_named_providers_strict :
   unit ->
   (Llm_provider.Provider_config.t list, string) result
 
+type tiered_provider = {
+  provider_cfg : Llm_provider.Provider_config.t;
+  tier_id : string;
+}
+
 type secondary_resolution = {
   providers : Llm_provider.Provider_config.t list;
+  tiered_providers : tiered_provider list;
   secondary_resolver :
     int ->
     Llm_provider.Provider_config.t ->

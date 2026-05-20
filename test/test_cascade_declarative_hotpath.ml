@@ -495,6 +495,51 @@ target = "tier-group.glm-coding-with-spark"
          "expected one provider config, got %d"
          (List.length cfgs))
 
+let test_runtime_resolution_preserves_tier_id () =
+  let toml =
+    {|
+[providers.ollama_cloud]
+protocol = "ollama-http"
+endpoint = "https://ollama.com"
+
+[providers.ollama_cloud.credentials]
+type = "env"
+key = "OLLAMA_CLOUD_API_KEY"
+
+[models.ollama-cloud-default]
+api-name = "glm-5.1"
+max-context = 128000
+tools-support = true
+streaming = true
+
+[ollama_cloud.ollama-cloud-default]
+
+[tier.ollama_cloud_primary]
+members = ["ollama_cloud.ollama-cloud-default"]
+strategy = "failover"
+
+[tier-group.glm-coding-with-spark]
+tiers = ["ollama_cloud_primary"]
+strategy = "failover"
+fallback = false
+|}
+  in
+  with_env "OLLAMA_CLOUD_API_KEY" "test-token" @@ fun () ->
+  with_temp_cascade_config toml @@ fun () ->
+  match
+    Masc_mcp.Cascade_catalog_runtime.resolve_named_providers_strict_with_secondary_resolver
+      ~cascade_name:"tier-group.glm-coding-with-spark"
+      ()
+  with
+  | Error err -> fail err
+  | Ok { tiered_providers = [ tiered ]; _ } ->
+    check string "tier id" "tier-group.glm-coding-with-spark" tiered.tier_id
+  | Ok resolution ->
+    fail
+      (Printf.sprintf
+         "expected one tiered provider, got %d"
+         (List.length resolution.tiered_providers))
+
 (* --- RFC-0058 Phase 8: partial parse --- *)
 
 (* Reproduces the 2026-05-17 keeper-skip incident: a stale [<ghost>.<m>]
@@ -780,6 +825,10 @@ let () =
           "runtime resolution uses direct declarative Provider_config"
           `Quick
           test_runtime_resolution_uses_direct_declarative_provider_config;
+        test_case
+          "runtime resolution preserves admission tier id"
+          `Quick
+          test_runtime_resolution_preserves_tier_id;
       ];
       "phase8_partial_parse",
       [

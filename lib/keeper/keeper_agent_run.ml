@@ -1278,20 +1278,37 @@ let run_turn
                     let latest_state_snapshot_sidecar_path =
                       Filename.concat session.session_dir "state-snapshot.latest.json"
                     in
+                    let state_snapshot_ts = Masc_domain.now_iso () in
+                    let state_snapshot_updated_at_unix = Time_compat.now () in
+                    let working_state =
+                      Keeper_working_state_projector.of_state_snapshot
+                        ~keeper_name:meta.name
+                        ~trace_id
+                        ~keeper_turn_id:manifest_keeper_turn_id
+                        ~updated_at_iso:state_snapshot_ts
+                        ~updated_at_unix:state_snapshot_updated_at_unix
+                        state_snapshot
+                    in
+                    let active_open_loop_count =
+                      Keeper_working_state.active_open_loop_count working_state
+                    in
                     let state_snapshot_payload =
                       `Assoc
                         [
                           ("schema_version", `Int 1);
-                          ("ts", `String (Masc_domain.now_iso ()));
+                          ("ts", `String state_snapshot_ts);
                           ("keeper_name", `String meta.name);
                           ("agent_name", `String meta.agent_name);
                           ("trace_id", `String trace_id);
                           ("generation", `Int generation);
                           ("keeper_turn_id", `Int manifest_keeper_turn_id);
                           ("oas_turn_count", `Int result.turns);
+                          ("active_open_loop_count", `Int active_open_loop_count);
                           ( "state_snapshot",
                             Keeper_memory_policy.keeper_state_snapshot_to_json
                               state_snapshot );
+                          ( "working_state",
+                            Keeper_working_state.to_json working_state );
                         ]
                     in
                     let state_snapshot_sidecar_saved =
@@ -1349,6 +1366,13 @@ let run_turn
                               `String latest_state_snapshot_sidecar_path );
                             ( "state_snapshot_sidecar_saved",
                               `Bool state_snapshot_sidecar_saved );
+                            ( "active_open_loop_count",
+                              `Int active_open_loop_count );
+                            ( "working_state_prompt_digest_ids",
+                              `List
+                                (List.map
+                                   (fun id -> `String id)
+                                   working_state.prompt_digest_ids) );
                             ( "source",
                               `String state_snapshot_source );
                           ])

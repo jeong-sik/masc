@@ -575,6 +575,53 @@ let test_sandbox_target_propagates_to_every_stage () =
       (Gate.verdict_tag other)
 ;;
 
+let context_of_gate raw =
+  let policy : Gate.allowlist_policy =
+    { allowed_commands = "dune" :: "dune-local.sh" :: "env" :: "opam" :: allowed
+    ; allow_pipes = true
+    ; redirect_allowed = true
+    }
+  in
+  match
+    Gate.gate
+      ~raw
+      ~allowlist:policy
+      ~path_policy:Gate.allow_all_paths
+      ~sandbox:Gate.host_sandbox
+      ()
+  with
+  | Gate.Allow context | Gate.Reject { context; _ } -> context
+  | other ->
+    Alcotest.failf
+      "expected parsed context for %S, got %s"
+      raw
+      (Gate.verdict_tag other)
+;;
+
+let test_direct_dune_context_detects_wrappers () =
+  List.iter
+    (fun raw ->
+      let context = context_of_gate raw in
+      Alcotest.(check bool)
+        ("direct dune detected: " ^ raw)
+        true
+        context.Gate.invokes_direct_dune)
+    [ "dune build"
+    ; "env DUNE_JOBS=1 dune build"
+    ; "env -- dune build"
+    ; "env -C repos/masc-mcp dune build"
+    ; "env --chdir repos/masc-mcp -- dune build"
+    ; "opam exec -- dune build"
+    ; "opam exec --switch default -- dune build"
+    ; "git status | env DUNE_JOBS=1 dune build"
+    ];
+  let wrapper_context = context_of_gate "scripts/dune-local.sh build" in
+  Alcotest.(check bool)
+    "dune-local wrapper is not direct dune"
+    false
+    wrapper_context.Gate.invokes_direct_dune
+;;
+
 let test_too_complex_reason_tags_are_stable () =
   (* Telemetry tags must not change shape without an intentional
      migration — downstream JSONL consumers depend on these. *)
@@ -755,6 +802,10 @@ let () =
             "sandbox target propagates to every stage"
             `Quick
             test_sandbox_target_propagates_to_every_stage
+        ; Alcotest.test_case
+            "direct dune wrappers are context metadata"
+            `Quick
+            test_direct_dune_context_detects_wrappers
         ] )
     ; ( "phase_1_telemetry"
       , [ Alcotest.test_case

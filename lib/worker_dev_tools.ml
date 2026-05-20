@@ -13,12 +13,9 @@
 include Gate_diff_types
 module Paths = Worker_dev_tools_paths
 module Log_sanitize = Worker_dev_tools_log_sanitize
-module Command_syntax = Worker_dev_tools_command_syntax
 module Mutation_classifier = Worker_dev_tools_mutation_classifier
 module Path_validation = Worker_dev_tools_path_validation
 module Exec_shell_gate = Masc_exec_command_gate.Shell_command_gate
-
-open Command_syntax
 
 (* --- Safety validation --- *)
 
@@ -185,16 +182,22 @@ let block_reason_to_string_with_allowlist ~allowed_commands = function
   | reason -> block_reason_to_string reason
 ;;
 
+let first_shell_word_command_name cmd =
+  match Masc_exec_bash_parser.Bash_words.stages cmd with
+  | Ok ((word :: _) :: _) -> Some (Filename.basename word.Masc_exec_bash_parser.Bash_words.value)
+  | Ok ([] :: _) | Ok [] | Error _ -> None
+;;
+
 let validate_command_with_allowlist ~allowed_commands cmd =
   let trimmed = String.trim cmd in
   if trimmed = ""
   then Error Empty_command
   else if Gh_command_validation.has_strict_shell_metachar trimmed
   then Error Chain_or_redirect
-  else if invokes_direct_dune trimmed
+  else if Exec_shell_gate.raw_invokes_direct_dune trimmed
   then Error Direct_dune_invocation
   else (
-    match extract_command_name trimmed with
+    match first_shell_word_command_name trimmed with
     | None -> Error Empty_command
     | Some name when List.mem name allowed_commands -> Ok ()
     | Some name -> Error (Command_not_allowed name))
@@ -207,10 +210,6 @@ let validate_command ?caller:_ cmd =
 let coding_allowlist_policy ?(allow_pipes = true) ~allowed_commands () :
   Exec_shell_gate.allowlist_policy =
   { allowed_commands; allow_pipes; redirect_allowed = true }
-;;
-
-let coding_gate_context_has_direct_dune (context : Exec_shell_gate.parsed_context) =
-  List.exists (String.equal "dune") context.Exec_shell_gate.stage_bins
 ;;
 
 let block_reason_of_exec_reject : Exec_shell_gate.reject_reason -> block_reason = function
@@ -226,12 +225,10 @@ let block_reason_of_exec_too_complex
   : block_reason =
   match reason with
   | Unsupported_construct `Proc_subst -> Process_substitution
-  | Unsupported_construct `Redirect -> Unsafe_redirect
+  | Unsupported_construct (`Heredoc | `Here_string | `Redirect) -> Unsafe_redirect
   | Unsupported_nested_pipeline
   | Unsupported_construct
-      ( `Heredoc
-      | `Here_string
-      | `Cmd_subst
+      ( `Cmd_subst
       | `Subshell
       | `Arith_expansion
       | `Control_flow
@@ -273,14 +270,6 @@ let validate_command_coding_with_allowlist
   let trimmed = String.trim cmd in
   if trimmed = ""
   then Error Empty_command
-  else if has_coding_shell_injection_metachar trimmed
-  then Error Injection
-  else if has_process_substitution trimmed
-  then Error Process_substitution
-  else if has_unsafe_redirection trimmed
-  then Error Unsafe_redirect
-  else if invokes_direct_dune trimmed
-  then Error Direct_dune_invocation
   else (
     let verdict =
       Exec_shell_gate.gate
@@ -294,13 +283,13 @@ let validate_command_coding_with_allowlist
     record_exec_shell_gate ?caller verdict;
     match verdict with
     | Allow context ->
-      if coding_gate_context_has_direct_dune context
+      if context.Exec_shell_gate.invokes_direct_dune
       then Error Direct_dune_invocation
       else Ok ()
     | Reject { context; reason; _ } ->
       (match reason with
        | Pipes_not_allowed _ -> Error Pipes_not_allowed
-       | _ when coding_gate_context_has_direct_dune context ->
+       | _ when context.Exec_shell_gate.invokes_direct_dune ->
          Error Direct_dune_invocation
        | _ -> Error (block_reason_of_exec_reject reason))
     | Cannot_parse _ -> Error Injection

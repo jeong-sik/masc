@@ -15,7 +15,6 @@ module Char = Stdlib.Char
 module Int = Stdlib.Int
 module Float = Stdlib.Float
 module Exec_shell_gate = Masc_exec_command_gate.Shell_command_gate
-module Command_syntax = Worker_dev_tools_command_syntax
 
 (** Code Write Tools — File write, edit, delete, shell, git for keeper agents.
 
@@ -67,10 +66,6 @@ let code_shell_allowlist_policy
   { allowed_commands; allow_pipes; redirect_allowed = true }
 ;;
 
-let code_shell_context_has_direct_dune (context : Exec_shell_gate.parsed_context) =
-  List.exists (String.equal "dune") context.Exec_shell_gate.stage_bins
-;;
-
 let code_shell_block_reason_of_reject
       (reason : Exec_shell_gate.reject_reason)
   : Worker_dev_tools.block_reason =
@@ -87,12 +82,10 @@ let code_shell_block_reason_of_too_complex
   : Worker_dev_tools.block_reason =
   match reason with
   | Unsupported_construct `Proc_subst -> Process_substitution
-  | Unsupported_construct `Redirect -> Unsafe_redirect
+  | Unsupported_construct (`Heredoc | `Here_string | `Redirect) -> Unsafe_redirect
   | Unsupported_nested_pipeline
   | Unsupported_construct
-      ( `Heredoc
-      | `Here_string
-      | `Cmd_subst
+      ( `Cmd_subst
       | `Subshell
       | `Arith_expansion
       | `Control_flow
@@ -111,14 +104,6 @@ let validate_code_shell_command_block_reason
   let trimmed = String.trim command in
   if String.equal trimmed ""
   then Error Worker_dev_tools.Empty_command
-  else if Command_syntax.has_coding_shell_injection_metachar trimmed
-  then Error Worker_dev_tools.Injection
-  else if Command_syntax.has_process_substitution trimmed
-  then Error Worker_dev_tools.Process_substitution
-  else if Command_syntax.has_unsafe_redirection trimmed
-  then Error Worker_dev_tools.Unsafe_redirect
-  else if Command_syntax.invokes_direct_dune trimmed
-  then Error Worker_dev_tools.Direct_dune_invocation
   else (
     match
       Exec_shell_gate.gate
@@ -130,13 +115,13 @@ let validate_code_shell_command_block_reason
         ()
     with
     | Allow context ->
-      if code_shell_context_has_direct_dune context
+      if context.Exec_shell_gate.invokes_direct_dune
       then Error Worker_dev_tools.Direct_dune_invocation
       else Ok ()
     | Reject { context; reason; _ } ->
       (match reason with
        | Pipes_not_allowed _ -> Error Worker_dev_tools.Pipes_not_allowed
-       | _ when code_shell_context_has_direct_dune context ->
+       | _ when context.Exec_shell_gate.invokes_direct_dune ->
          Error Worker_dev_tools.Direct_dune_invocation
        | _ -> Error (code_shell_block_reason_of_reject reason))
     | Cannot_parse _ -> Error Worker_dev_tools.Injection

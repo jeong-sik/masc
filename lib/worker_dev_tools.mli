@@ -63,18 +63,17 @@ val dev_allowed_commands : string list
     command outside the dev allowlist (rg / grep / dune-local.sh / git / ...).
     Bare [dune] is intentionally rejected; local agents must use
     [scripts/dune-local.sh] so builds share the host-wide lock.
-    [?caller] is accepted for call-site parity with the coding validators;
-    strict validation does not parse through the exec shell gate, so the
-    value is captured but does not affect the verdict. *)
+    Direct-dune wrapper detection is shared with the exec shell gate so
+    [env] and [opam exec] wrappers cannot bypass the lock policy. *)
 val validate_command
   :  ?caller:Masc_exec_command_gate.Shell_command_gate.caller
   -> string
   -> (unit, block_reason) result
 
 (** Relaxed validator for Coding/Full preset keepers.  Allows pipes
-    and fd redirects; still blocks shell injection, process
-    substitution, and unsafe redirects.  Validates every segment of
-    the pipeline against the dev allowlist. *)
+    and fd redirects; maps exec shell gate parser/policy verdicts back
+    to the stable {!block_reason} wire shape. Validates every segment
+    of the pipeline against the dev allowlist. *)
 val validate_command_coding
   :  ?caller:Masc_exec_command_gate.Shell_command_gate.caller
   -> string

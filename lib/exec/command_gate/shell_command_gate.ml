@@ -1,13 +1,10 @@
-(* Phase 1 SSOT facade — see shell_command_gate.mli for the contract.
+(* Exec shell gate SSOT — see shell_command_gate.mli for the contract.
 
    This module deliberately routes every raw command through one
    [Bash.parse_string] call and exposes the result as a closed
-   [verdict] sum type. It does not mutate or replace any existing
-   path; [Worker_dev_tools] and the lib-root [Shell_command_gate]
-   keep their current behavior. New callers should target this
-   module so Phase 2..7 of the Plan can retire the duplicate
-   string-scanning paths without coordinating across multiple
-   surfaces. *)
+   [verdict] sum type. New callers should target this module so shell
+   policy decisions share the same parsed context instead of re-deriving
+   command shape with caller-local string scanners. *)
 
 module SI = Masc_exec.Shell_ir
 module PD = Masc_exec.Parsed
@@ -38,6 +35,7 @@ type parsed_context = {
   ast : SI.t;
   stages : SI.simple list;
   stage_bins : string list;
+  invokes_direct_dune : bool;
 }
 
 type verdict =
@@ -126,12 +124,121 @@ let ast_of_stages = function
   | many -> Some (SI.Pipeline (List.map (fun s -> SI.Simple s) many))
 ;;
 
+let arg_literal = function
+  | SI.Lit s -> Some s
+  | SI.Var _ | SI.Concat _ -> None
+;;
+
+let basename_word word = Filename.basename word
+
+let is_env_assignment_word word =
+  match String.index_opt word '=' with
+  | Some idx ->
+    idx > 0
+    && not (String.contains (String.sub word 0 idx) '/')
+    && not (String.starts_with ~prefix:"-" word)
+  | None -> false
+;;
+
+let rec drop_env_assignments = function
+  | [] -> []
+  | word :: rest ->
+    if is_env_assignment_word word then drop_env_assignments rest else word :: rest
+;;
+
+let rec command_words_invoke_direct_dune = function
+  | [] -> false
+  | command :: args -> command_invokes_direct_dune command args
+
+and split_string_invokes_direct_dune text =
+  match Masc_exec_bash_parser.Bash_words.stages text with
+  | Error _ -> false
+  | Ok stages -> List.exists command_words_invoke_direct_dune (List.map (List.map (fun w -> w.Masc_exec_bash_parser.Bash_words.value)) stages)
+
+and env_args_invoke_direct_dune = function
+  | [] -> false
+  | word :: rest ->
+    if is_env_assignment_word word || word = "-" || word = "-i"
+       || word = "--ignore-environment" || word = "-0" || word = "--null"
+    then env_args_invoke_direct_dune rest
+    else if word = "--"
+    then command_words_invoke_direct_dune (drop_env_assignments rest)
+    else if word = "-S" || word = "--split-string"
+    then (
+      match rest with
+      | arg :: rest ->
+        split_string_invokes_direct_dune arg || env_args_invoke_direct_dune rest
+      | [] -> false)
+    else if String.starts_with ~prefix:"--split-string=" word
+    then
+      let prefix = "--split-string=" in
+      let arg =
+        String.sub word (String.length prefix) (String.length word - String.length prefix)
+      in
+      split_string_invokes_direct_dune arg
+    else if word = "-u" || word = "--unset" || word = "-C" || word = "--chdir"
+    then (
+      match rest with
+      | _ :: rest -> env_args_invoke_direct_dune rest
+      | [] -> false)
+    else if String.starts_with ~prefix:"-u" word
+            || String.starts_with ~prefix:"--unset=" word
+            || String.starts_with ~prefix:"--chdir=" word
+    then env_args_invoke_direct_dune rest
+    else command_words_invoke_direct_dune (word :: rest)
+
+and opam_exec_args_invoke_direct_dune = function
+  | sub :: rest when String.equal (basename_word sub) "exec" ->
+    let rec after_sentinel = function
+      | [] -> false
+      | "--" :: rest -> command_words_invoke_direct_dune rest
+      | _ :: rest -> after_sentinel rest
+    in
+    let rec without_sentinel = function
+      | [] -> false
+      | word :: rest ->
+        if is_env_assignment_word word
+        then without_sentinel rest
+        else if word = "--switch" || word = "--color" || word = "--root"
+                || word = "--cli"
+        then (
+          match rest with
+          | _ :: rest -> without_sentinel rest
+          | [] -> false)
+        else if String.starts_with ~prefix:"--switch=" word
+                || String.starts_with ~prefix:"--color=" word
+                || String.starts_with ~prefix:"--root=" word
+                || String.starts_with ~prefix:"--cli=" word
+                || String.starts_with ~prefix:"-" word
+        then without_sentinel rest
+        else command_words_invoke_direct_dune (word :: rest)
+    in
+    after_sentinel rest || without_sentinel rest
+  | _ -> false
+
+and command_invokes_direct_dune command args =
+  match basename_word command with
+  | "dune" -> true
+  | "env" -> env_args_invoke_direct_dune args
+  | "opam" -> opam_exec_args_invoke_direct_dune args
+  | _ -> false
+;;
+
+let stage_invokes_direct_dune (stage : SI.simple) =
+  let command = BIN.to_string stage.SI.bin in
+  let args = List.filter_map arg_literal stage.SI.args in
+  command_invokes_direct_dune command args
+;;
+
+let raw_invokes_direct_dune raw = split_string_invokes_direct_dune raw
+
 let make_context ~stages =
   match ast_of_stages stages with
   | None -> None
   | Some ast ->
     let stage_bins = List.map (fun s -> BIN.to_string s.SI.bin) stages in
-    Some { ast; stages; stage_bins }
+    let invokes_direct_dune = List.exists stage_invokes_direct_dune stages in
+    Some { ast; stages; stage_bins; invokes_direct_dune }
 ;;
 
 let bin_allowed ~(allowed_commands : string list) (bin : string) =

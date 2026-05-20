@@ -1,4 +1,4 @@
-(** Parse-once SSOT facade for shell command validation.
+(** Parse-once SSOT for shell command validation.
 
     Phase 1 of the Shell IR Promotion Goal Plan (2026-05-18). Lives
     in [lib/exec/command_gate/] as the [masc_exec_command_gate]
@@ -12,14 +12,9 @@
     one [verdict], which validation, telemetry, native dispatch, path
     validation, and exit classification all share.
 
-    Phase 1 contract — advisory only:
-
-    - [Worker_dev_tools.validate_command_coding_with_allowlist] keeps
-      its existing behavior. Callers that want the typed verdict use
-      [gate] or [lower_typed_pipeline] directly.
-    - Legacy [Lib.Shell_command_gate] (top-level lib/) remains in
-      place until Phase 2 retires the duplicate path; this module is
-      the SSOT new callers must target.
+    The lib-root [Masc_mcp.Shell_command_gate] transition facade has
+    been retired. Callers that need shell policy verdicts use [gate],
+    [gate_typed], or [lower_typed_pipeline] directly.
 
     Output verdict separates the four operational classes the Plan's
     Goal Tree distinguishes:
@@ -41,14 +36,10 @@
 
 (** Caller identity for telemetry partition.
 
-    Mirrors the [caller] tag added to the legacy
-    [Lib.Shell_command_gate] via RFC-0131 PR-1a (#16335, MERGED).
-    Currently the optional [?caller] arg on {!gate} and
-    {!lower_typed_pipeline} is captured but does not change behavior —
-    the field exists so the upcoming telemetry counter exposure
-    (RFC-0131 PR-3, Plan Phase 4 measurement window) can already emit
-    per-caller rows before the actual counter plumbing lands.  When
-    unset, the gate behaves identically to the pre-tag SSOT. *)
+    The optional [?caller] arg on {!gate}, {!gate_typed}, and
+    {!lower_typed_pipeline} is part of the stable caller/verdict
+    telemetry surface. The gate verdict itself is independent of the
+    caller tag. *)
 type caller =
   | Worker_dev_tools
   | Tool_code_write
@@ -81,7 +72,10 @@ type too_complex_reason =
   | Unsupported_construct of Masc_exec.Parsed.reason_too_complex
 
 (** Reusable parse context. [stages] is the ordered Simple list as
-    parsed; [stage_bins] is the binary name of each stage in order.
+    parsed; [stage_bins] is the binary name of each stage in order;
+    [invokes_direct_dune] is true when any stage directly runs [dune]
+    or wraps it through known transparent command runners such as
+    [env] or [opam exec].
     Invariants:
 
     - [stages <> []] always — empty input yields {!Cannot_parse},
@@ -94,6 +88,7 @@ type parsed_context = {
   ast : Masc_exec.Shell_ir.t;
   stages : Masc_exec.Shell_ir.simple list;
   stage_bins : string list;
+  invokes_direct_dune : bool;
 }
 
 (** Phase 1 verdict surface — four arms matching the Plan's typed
@@ -204,6 +199,14 @@ val too_complex_reason_tag : too_complex_reason -> string
 val stage_count : parsed_context -> int
 val last_stage_bin : parsed_context -> string option
 val is_pipeline : parsed_context -> bool
+
+val raw_invokes_direct_dune : string -> bool
+(** Returns [true] when a raw command string directly invokes [dune],
+    including through transparent wrappers handled by the exec gate
+    context classifier ([env], [env -S], and [opam exec]). This helper
+    is for compatibility call sites that must preserve legacy acceptance
+    of shell words outside the stricter Bash IR grammar while sharing
+    the same direct-dune policy classifier. *)
 
 (** {1 Authority flag (RFC-0092 Phase C)} *)
 

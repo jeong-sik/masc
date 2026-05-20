@@ -9,7 +9,6 @@
     Still blocks [;] [`] [$] and control chars.
     [&] is checked at pattern level: [>&] (redirect) is allowed,
     [&&] (chaining) and standalone [&] (background) are blocked. *)
-let forbidden_shell_chars_coding_base = [ ';'; '`'; '$'; '\n'; '\r' ]
 
 (** Returns [true] if [cmd] contains a dangerous [&] usage.
     [>&] in redirect context (e.g. [2>&1]) is safe; [&&] and standalone [&]

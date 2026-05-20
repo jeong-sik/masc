@@ -1,5 +1,3 @@
-val forbidden_shell_chars_coding_base : char list
-val has_dangerous_ampersand : string -> bool
 val contains_forbidden_shell_chars_coding : string -> bool
 val contains_substring : string -> string -> bool
 val has_process_substitution : string -> bool

@@ -213,6 +213,16 @@ val sync_keeper_paused_state :
     Returns [Error] when disk sync fails so callers can surface the failure
     instead of silently diverging runtime vs persisted state. *)
 
+val sync_keeper_paused_state_with_resume_policy :
+  config:Coord.config ->
+  meta:keeper_meta ->
+  paused:bool ->
+  resume_policy:Keeper_supervisor_pause_policy.crash_pause_resume_policy ->
+  (keeper_meta, string) result
+(** Like {!sync_keeper_paused_state}, but also applies [resume_policy] when
+    pausing so automatic pause paths can enter the supervisor self-healing
+    sweep instead of becoming an indefinite manual pause. *)
+
 val current_keeper_meta :
   config:Coord.config ->
   fallback_meta:keeper_meta ->

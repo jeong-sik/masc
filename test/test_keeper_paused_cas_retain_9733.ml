@@ -165,6 +165,60 @@ let test_resume_caller_wins_heartbeat_disk_wins () =
       "joined_room_ids = [r1; r3] (disk wins on heartbeat field)"
       ["r1"; "r3"] final.joined_room_ids)
 
+let test_pause_sync_sets_auto_resume_backoff () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun _sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_registry.clear ();
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "operator"));
+      let m0 =
+        let m = make_meta ~name:"auto-resume-pause-152" in
+        { m with paused = false; auto_resume_after_sec = None }
+      in
+      (match Keeper_types.write_meta ~force:true config m0 with
+       | Ok () -> ()
+       | Error e -> fail ("seed failed: " ^ e));
+      ignore (Keeper_registry.register ~base_path:base_dir m0.name m0);
+      let paused =
+        match
+          Keeper_turn_cascade_budget.sync_keeper_paused_state_with_resume_policy
+            ~config
+            ~meta:m0
+            ~paused:true
+            ~resume_policy:Keeper_supervisor_pause_policy.Auto_resume_with_backoff
+        with
+        | Ok paused -> paused
+        | Error e -> fail ("pause sync failed: " ^ e)
+      in
+      check bool "paused" true paused.paused;
+      let pause_delay =
+        match paused.auto_resume_after_sec with
+        | Some sec -> sec
+        | None -> fail "expected auto_resume_after_sec"
+      in
+      check bool "auto resume delay is positive" true (pause_delay > 0.0);
+      let persisted =
+        match Keeper_types.read_meta config m0.name with
+        | Ok (Some m) -> m
+        | Ok None -> fail "persisted meta missing"
+        | Error e -> fail ("persisted read failed: " ^ e)
+      in
+      check bool "persisted paused" true persisted.paused;
+      check bool "persisted auto resume delay" true
+        (persisted.auto_resume_after_sec = paused.auto_resume_after_sec);
+      match Keeper_registry.get ~base_path:base_dir m0.name with
+      | Some entry ->
+        check bool "registry paused" true entry.meta.paused;
+        check bool "registry auto resume delay" true
+          (entry.meta.auto_resume_after_sec = paused.auto_resume_after_sec)
+      | None -> fail "registry entry missing")
+
 let () =
   run "Keeper paused-field CAS retain (#9733)"
     [
@@ -174,5 +228,7 @@ let () =
             test_pause_caller_wins_heartbeat_disk_wins;
           test_case "resume: caller wins, heartbeat retained" `Quick
             test_resume_caller_wins_heartbeat_disk_wins;
+          test_case "pause: auto-resume policy persists backoff" `Quick
+            test_pause_sync_sets_auto_resume_backoff;
         ] );
     ]

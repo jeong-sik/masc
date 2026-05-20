@@ -62,10 +62,11 @@ let record_failure_and_maybe_escalate
         else updated_meta
       in
       match
-        Keeper_turn_cascade_budget.sync_keeper_paused_state
+        Keeper_turn_cascade_budget.sync_keeper_paused_state_with_resume_policy
           ~config
           ~meta:pause_meta
           ~paused:true
+          ~resume_policy:Keeper_supervisor_pause_policy.Auto_resume_with_backoff
       with
       | Ok _ ->
         if cascade_auto_paused

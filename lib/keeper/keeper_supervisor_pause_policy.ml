@@ -25,6 +25,14 @@ type crash_pause_resume_policy =
   | Manual_resume_required
   | Auto_resume_with_backoff
 
+let auto_resume_after_sec_for_policy meta = function
+  | Manual_resume_required -> None
+  | Auto_resume_with_backoff ->
+    let initial_sec = Env_config.KeeperSupervisor.auto_resume_initial_sec in
+    let max_sec = Env_config.KeeperSupervisor.auto_resume_max_sec in
+    next_auto_resume_after_sec ~initial_sec ~max_sec meta.auto_resume_after_sec
+;;
+
 let handle_crash_auto_pause
       ~publish_phase_lifecycle
       (ctx : _ context)
@@ -38,13 +46,8 @@ let handle_crash_auto_pause
   =
   (match read_meta ctx.config entry.name with
    | Ok (Some meta) ->
-     let initial_sec = Env_config.KeeperSupervisor.auto_resume_initial_sec in
-     let max_sec = Env_config.KeeperSupervisor.auto_resume_max_sec in
      let auto_resume_after_sec =
-       match resume_policy with
-       | Manual_resume_required -> None
-       | Auto_resume_with_backoff ->
-         next_auto_resume_after_sec ~initial_sec ~max_sec meta.auto_resume_after_sec
+       auto_resume_after_sec_for_policy meta resume_policy
      in
      let blocker_text =
        let existing =

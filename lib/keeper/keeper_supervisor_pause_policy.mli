@@ -18,6 +18,13 @@ type crash_pause_resume_policy =
   | Manual_resume_required
   | Auto_resume_with_backoff
 
+(** Resolve the persisted [auto_resume_after_sec] value for [resume_policy]
+    using the global keeper supervisor back-off knobs. *)
+val auto_resume_after_sec_for_policy
+  :  Keeper_types.keeper_meta
+  -> crash_pause_resume_policy
+  -> float option
+
 (** [handle_crash_auto_pause ~publish_phase_lifecycle ctx entry
       ~reason_tag ~metric_name ~lifecycle_detail ~log_message
       ~blocker_class ~resume_policy] persists [paused=true] on disk,

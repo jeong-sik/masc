@@ -45,25 +45,28 @@ let status_of_string = function
 let repository_of_toml toml id =
   let ( let* ) = Result.bind in
   let path field = ["repository"; id; field] in
+  (* RFC-0141 PR-2: Type_mismatch is propagated as Error instead of being
+     silenced into [Ok default]. Missing fields still fall back to default. *)
   let find_string_default field default =
-    match Otoml.find_result toml Otoml.get_string (path field) with
-    | Ok value -> Ok value
-    | Error _ -> Ok default
+    Field_resolution.resolve_string toml (path field)
+    |> Field_resolution.or_default ~default
   in
   let find_bool_default field default =
-    match Otoml.find_result toml Otoml.get_boolean (path field) with
-    | Ok value -> Ok value
-    | Error _ -> Ok default
+    Field_resolution.resolve_bool toml (path field)
+    |> Field_resolution.or_default ~default
   in
   let find_int64_default field default =
-    match Otoml.Helpers.find_integer_result toml (path field) with
-    | Ok value -> Ok (Int64.of_int value)
-    | Error _ -> Ok default
+    match Field_resolution.resolve_int toml (path field) with
+    | Present v -> Ok (Int64.of_int v)
+    | Missing -> Ok default
+    | Type_mismatch { path; expected; message } ->
+      Error
+        (Printf.sprintf "TOML field %s: expected %s (%s)"
+           (String.concat "." path) expected message)
   in
   let find_string_list_default field default =
-    match Otoml.Helpers.find_strings_result toml (path field) with
-    | Ok value -> Ok value
-    | Error _ -> Ok default
+    Field_resolution.resolve_strings toml (path field)
+    |> Field_resolution.or_default ~default
   in
   let* name = Otoml.find_result toml Otoml.get_string (path "name") in
   let* url = Otoml.find_result toml Otoml.get_string (path "url") in

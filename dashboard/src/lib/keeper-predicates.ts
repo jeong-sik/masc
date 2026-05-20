@@ -56,6 +56,18 @@ export function isKeeperCrashed(keeper: Keeper): boolean {
   return typeof phase === 'string' && CRASHED_PHASES.has(phase)
 }
 
+const CRASHED_PHASES_LOWERCASE: ReadonlySet<string> = new Set<string>(
+  [...CRASHED_PHASES].map(p => p.toLowerCase()),
+)
+
+/** Checks whether a phase string (any casing) represents a crashed state.
+ *  SSE events emit lowercase phase tokens; Keeper objects use PascalCase.
+ *  This normalizes both to the same SSOT set. */
+export function isCrashedPhase(phase: string | null | undefined): boolean {
+  if (typeof phase !== 'string') return false
+  return CRASHED_PHASES.has(phase) || CRASHED_PHASES_LOWERCASE.has(phase.toLowerCase())
+}
+
 /** Structural subset of `Keeper` accepted by `isKeeperOffline`.
  *  The predicate only reads `phase` and `status`, so callers that
  *  receive narrower snapshot shapes (e.g. `OperatorKeeperSnapshot`,

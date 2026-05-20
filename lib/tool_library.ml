@@ -219,7 +219,7 @@ let handle_read ~tool_name ~start_time _ctx args =
         try
           let content = In_channel.with_open_text path In_channel.input_all in
           Tool_result.ok ~tool_name ~start_time (sprintf "## %s\n\n%s" (Filename.basename path) content)
-        with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Tool_result.error ~tool_name ~start_time (sprintf "Read error: %s" (Stdlib.Printexc.to_string exn))
+        with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Tool_result.error ~tool_name ~start_time (sprintf "Read error: %s" (Tool_error.to_string (Tool_error.of_exn exn)))
   end
 
 (* Add document *)
@@ -282,7 +282,7 @@ verified_by: []
         Out_channel.with_open_text filepath (fun oc -> Out_channel.output_string oc full_content);
         let status = if Stdlib.Float.compare confidence 0.5 < 0 then "candidate (needs verification)" else "library" in
         Tool_result.ok ~tool_name ~start_time (sprintf "Document added to %s: %s" status filepath)
-      with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Tool_result.error ~tool_name ~start_time (sprintf "Write error: %s" (Stdlib.Printexc.to_string exn))
+      with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Tool_result.error ~tool_name ~start_time (sprintf "Write error: %s" (Tool_error.to_string (Tool_error.of_exn exn)))
     end
   end
 
@@ -321,7 +321,7 @@ let handle_promote ~tool_name ~start_time ctx args =
           Out_channel.with_open_text dest_path (fun oc -> Out_channel.output_string oc with_verifier);
           Sys.remove src_path;
           Tool_result.ok ~tool_name ~start_time (sprintf "Promoted to library: %s (confidence: %.2f)" dest_path new_confidence)
-        with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Tool_result.error ~tool_name ~start_time (sprintf "Promote error: %s" (Stdlib.Printexc.to_string exn))
+        with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Tool_result.error ~tool_name ~start_time (sprintf "Promote error: %s" (Tool_error.to_string (Tool_error.of_exn exn)))
   end
 
 (* Search documents *)

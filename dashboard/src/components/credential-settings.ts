@@ -3,10 +3,10 @@
 
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
-import { del, get, post } from '../api/core'
+import { del, post } from '../api/core'
 import {
+  fetchCredentials,
   coerceCredentialType,
-  normalizeCredentialsResponse,
   type Credential,
   type CredentialCreatePayload,
   type CredentialOauthMethod,
@@ -53,11 +53,6 @@ const addDraft = signal<CredentialCreatePayload>({
 })
 
 // ── API ──────────────────────────────────────────────────
-
-async function fetchCredentials(): Promise<Credential[]> {
-  const data = await get<unknown>('/api/v1/credentials')
-  return normalizeCredentialsResponse(data)
-}
 
 async function createCredential(payload: CredentialCreatePayload): Promise<void> {
   await post('/api/v1/credentials', buildCredentialCreateRequest(payload))

@@ -6,7 +6,7 @@ import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { get, post } from '../api/core'
 import {
-  normalizeCredentialsResponse,
+  fetchCredentials,
   type CredentialState,
   type CredentialType,
 } from '../api/credentials'
@@ -88,9 +88,8 @@ async function fetchRepositories(): Promise<RepositoryOption[]> {
   }))
 }
 
-async function fetchCredentials(): Promise<KeeperCredentialOption[]> {
-  const data = await get<unknown>('/api/v1/credentials')
-  return normalizeCredentialsResponse(data).filter(cred => cred.id !== '')
+async function fetchCredentialOptions(): Promise<KeeperCredentialOption[]> {
+  return (await fetchCredentials()).filter(cred => cred.id !== '')
 }
 
 async function fetchKeeperRepoMappings(): Promise<KeeperRepoMapping[]> {
@@ -226,7 +225,7 @@ export async function loadKeeperRepoMappings(options?: { force?: boolean }): Pro
   const loadCredentials = async () => {
     if (!force && credentialsState.value.status === 'loaded') return
     if (force) credentialsResource.reset()
-    await credentialsResource.load(() => fetchCredentials())
+    await credentialsResource.load(() => fetchCredentialOptions())
   }
 
   const loadMappings = async () => {

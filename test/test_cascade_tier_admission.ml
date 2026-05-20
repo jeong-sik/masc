@@ -235,7 +235,7 @@ let test_keeper_wire_enabled_rejects_at_capacity () =
 let test_keeper_wire_disabled_is_passthrough () =
   let t = A.create ~default_max_inflight:0 () in
   let ran = ref false in
-  let result =
+  let outcome =
     KTD.with_cascade_tier_admission_for_testing
       ~admission:t
       ~enabled:false
@@ -246,13 +246,13 @@ let test_keeper_wire_disabled_is_passthrough () =
          "ok")
   in
   bool_check "attempt ran when flag disabled" true !ran;
-  check (result string signal_testable) "disabled flag passthrough" (Ok "ok") result;
+  check (result string signal_testable) "disabled flag passthrough" (Ok "ok") outcome;
   int_check "disabled path did not touch counter" 0
     (A.current_inflight t ~tier_id:"keeper-turn")
 
 let test_keeper_wire_bypass_policy_is_passthrough () =
   let t = A.create ~default_max_inflight:0 () in
-  let result =
+  let outcome =
     KTD.with_cascade_tier_admission_for_testing
       ~admission:t
       ~enabled:true
@@ -260,7 +260,7 @@ let test_keeper_wire_bypass_policy_is_passthrough () =
       ~admission_policy:A.Bypass
       (fun () -> 7)
   in
-  check (result int signal_testable) "bypass policy passthrough" (Ok 7) result;
+  check (result int signal_testable) "bypass policy passthrough" (Ok 7) outcome;
   int_check "bypass path did not touch counter" 0
     (A.current_inflight t ~tier_id:"keeper-turn")
 

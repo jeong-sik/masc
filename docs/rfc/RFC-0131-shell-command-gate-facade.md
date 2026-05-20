@@ -270,7 +270,7 @@ rg "split_pipeline_segments" lib/        # count 0
 rg "tokenize_path_args"       lib/        # count 0
 rg "path_validation_tokens"   lib/        # count 0
 rg "forbidden_shell_chars"    lib/        # count 0
-rg "raw_keeper_bash_shape_block" lib/keeper/  # count 0 or parse-failure-only helper
+rg "shell_ir_parse_failure_shape_block" lib/keeper/  # parse-failure-only helper
 ```
 
 ## 5. Workaround-rejection compliance (per CLAUDE.md §워크어라운드 거부 기준)

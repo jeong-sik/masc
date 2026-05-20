@@ -47,7 +47,7 @@ let has_malformed_dev_null_redirect_token =
 ;;
 let command_has_repo_wide_scan = Repo_wide_scan.command_has_repo_wide_scan
 
-let quote_aware_shape_scan_text cmd =
+let shell_ir_shape_scan_text cmd =
   let len = String.length cmd in
   let buf = Buffer.create len in
   let add_space () = Buffer.add_char buf ' ' in
@@ -96,9 +96,9 @@ let quote_aware_shape_scan_text cmd =
   in
   loop No_quote false 0
 
-let raw_keeper_bash_shape_block cmd =
+let shell_ir_parse_failure_shape_block cmd =
   let cmd, _ = strip_stderr_dev_null_redirects cmd in
-  let scan_text = quote_aware_shape_scan_text cmd in
+  let scan_text = shell_ir_shape_scan_text cmd in
   let lower = String.lowercase_ascii scan_text in
   if string_contains_substring lower "gh pr checks"
   then Some Gh_pr_checks
@@ -125,7 +125,7 @@ let raw_keeper_bash_shape_block cmd =
 
 let keeper_bash_shape_block cmd =
   let cmd, _ = strip_stderr_dev_null_redirects cmd in
-  let scan_text = quote_aware_shape_scan_text cmd in
+  let scan_text = shell_ir_shape_scan_text cmd in
   if command_has_repo_wide_scan cmd
   then Some Repo_wide_scan
   else if has_malformed_dev_null_redirect_token scan_text
@@ -136,7 +136,7 @@ let keeper_bash_shape_block cmd =
   | Masc_exec.Parsed.Parse_error _
   | Masc_exec.Parsed.Parse_aborted _
   | Masc_exec.Parsed.Too_complex _ ->
-    raw_keeper_bash_shape_block cmd
+    shell_ir_parse_failure_shape_block cmd
 
 type safe_read_fallback = {
   primary_cmd : string;
@@ -439,8 +439,8 @@ module For_testing = struct
   let keeper_bash_shape_block_tag cmd =
     Option.map bash_shape_block_tag (keeper_bash_shape_block cmd)
 
-  let raw_keeper_bash_shape_block_tag cmd =
-    Option.map bash_shape_block_tag (raw_keeper_bash_shape_block cmd)
+  let shell_ir_parse_failure_shape_block_tag cmd =
+    Option.map bash_shape_block_tag (shell_ir_parse_failure_shape_block cmd)
 
   let strip_stderr_dev_null_redirects = strip_stderr_dev_null_redirects
 

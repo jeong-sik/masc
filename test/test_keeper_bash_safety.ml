@@ -366,8 +366,10 @@ let test_keeper_bash_shape_uses_shell_ir_for_quoted_literals () =
     (Some "substitution")
     (block_tag "echo $(complex-substitution)")
 
-let test_keeper_bash_raw_shape_fallback_is_quote_aware () =
-  let block_tag = Keeper_exec_shell.For_testing.raw_keeper_bash_shape_block_tag in
+let test_keeper_bash_shell_ir_parse_failure_shape_fallback_is_quote_aware () =
+  let block_tag =
+    Keeper_exec_shell.For_testing.shell_ir_parse_failure_shape_block_tag
+  in
   Alcotest.(check (option string)) "single-quoted redirect is data" None
     (block_tag "printf '%s\\n' '>>>'");
   Alcotest.(check (option string)) "double-quoted redirect is data" None
@@ -1968,8 +1970,9 @@ let () =
         test_keeper_bash_timeout_floor_is_not_sub_io_latency;
       Alcotest.test_case "shape guard parses quoted metachar literals" `Quick
         test_keeper_bash_shape_uses_shell_ir_for_quoted_literals;
-      Alcotest.test_case "raw shape fallback is quote-aware" `Quick
-        test_keeper_bash_raw_shape_fallback_is_quote_aware;
+      Alcotest.test_case "Shell IR parse-failure shape fallback is quote-aware"
+        `Quick
+        test_keeper_bash_shell_ir_parse_failure_shape_fallback_is_quote_aware;
       Alcotest.test_case "stderr devnull strip preserves post-background redirect"
         `Quick
         test_stderr_dev_null_strip_preserves_post_background_redirect;

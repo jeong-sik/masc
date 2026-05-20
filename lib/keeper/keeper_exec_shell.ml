@@ -33,8 +33,8 @@ module For_testing = struct
   let keeper_bash_shape_block_tag =
     Keeper_shell_bash.For_testing.keeper_bash_shape_block_tag
 
-  let raw_keeper_bash_shape_block_tag =
-    Keeper_shell_bash.For_testing.raw_keeper_bash_shape_block_tag
+  let shell_ir_parse_failure_shape_block_tag =
+    Keeper_shell_bash.For_testing.shell_ir_parse_failure_shape_block_tag
 
   let strip_stderr_dev_null_redirects =
     Keeper_shell_bash.For_testing.strip_stderr_dev_null_redirects

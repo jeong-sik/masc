@@ -60,6 +60,38 @@ export function classifyCoverageError(error: string | null | undefined): Coverag
   return null
 }
 
+// RFC-0154 PR-3: typed lookup keyed by backend short tag from
+// `System_error_class.to_short_tag`. Lookup-only — no substring matching.
+// This is the SSOT for "given a typed error class, what RFC should the
+// operator read". Add a new entry here only when the backend variant +
+// canonical RFC both exist.
+const ERROR_CLASS_HINTS: Record<string, CoverageErrorHint> = {
+  fd_exhaustion: {
+    reason: 'fd_exhaustion',
+    label: 'FD exhaustion — see RFC-0097',
+    href: 'https://github.com/jeong-sik/masc-mcp/blob/main/docs/rfc/RFC-0097-keeper-sandbox-container-reuse.md',
+  },
+  disk_exhaustion: {
+    reason: 'disk_exhaustion',
+    label: 'Disk pressure — see RFC-0122',
+    href: 'https://github.com/jeong-sik/masc-mcp/blob/main/docs/rfc/RFC-0122-keeper-disk-pressure.md',
+  },
+}
+
+export function errorHintFromClass(errorClass: string | null | undefined): CoverageErrorHint | null {
+  if (!errorClass) return null
+  return ERROR_CLASS_HINTS[errorClass] ?? null
+}
+
+// Cascading resolver — typed lookup first, substring fallback second.
+// Once RFC-0154 PR-2 ships (backend writes `error_class`), the typed path
+// satisfies every row; PR-4 removes the fallback once 0 v1-only rows are
+// observed for 7 days.
+export function errorHintFromGap(display: CoverageGapDisplay): CoverageErrorHint | null {
+  return errorHintFromClass(display.structured.errorClass)
+    ?? classifyCoverageError(display.structured.error)
+}
+
 /**
  * Coverage-gap provenance block. Shared by tool-quality-panel and
  * fleet-health-panel Operations view so the collapsible-error UX is the
@@ -79,7 +111,7 @@ export function classifyCoverageError(error: string | null | undefined): Coverag
  */
 export function CoverageGapBlock({ display }: { display: CoverageGapDisplay }) {
   const { structured } = display
-  const hint = classifyCoverageError(structured.error)
+  const hint = errorHintFromGap(display)
   return html`
     <div class="mt-1 grid gap-1 rounded-[var(--r-1)] border border-[var(--color-status-warn)]/30 bg-[var(--warn-10)]/30 px-2 py-1.5 text-3xs" data-testid="coverage-gap-block">
       <div class="flex items-center gap-1.5 font-medium text-[var(--color-status-warn)]">

@@ -2507,6 +2507,12 @@ export type TelemetryCoverageGap = {
   keeper_name?: string | null
   trace_id?: string | null
   error?: string | null
+  // RFC-0154 PR-2: backend-classified typed tag. Absent on v1 rows; present
+  // on v2 rows. Values are the short tags from `System_error_class.to_short_tag`
+  // ("fd_exhaustion" / "disk_exhaustion" / "permission_denied" /
+  // "connection_refused" / "timeout" / "other"). Consumers should fall back to
+  // substring matching on `error` when this field is null (legacy / pre-PR-2).
+  error_class?: string | null
 }
 
 function decodeDashboardSurfaceEnvelope(raw: unknown): DashboardSurfaceEnvelope | null {
@@ -2553,6 +2559,7 @@ function decodeTelemetryCoverageGap(raw: unknown): TelemetryCoverageGap | null {
     keeper_name: asNullableString(raw.keeper_name),
     trace_id: asNullableString(raw.trace_id),
     error: asNullableString(raw.error),
+    error_class: asNullableString(raw.error_class),
   }
 }
 

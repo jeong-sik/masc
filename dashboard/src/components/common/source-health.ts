@@ -65,6 +65,10 @@ export type CoverageGapDisplay = {
     reason: string
     fields: CoverageGapField[]
     error: string | null
+    // RFC-0154 PR-3: backend-classified short tag. Absent on v1 wire rows
+    // (pre-RFC-0154 PR-2 deployment); present on v2 rows. Consumers should
+    // prefer this typed lookup over substring matching on `error`.
+    errorClass: string | null
   }
 }
 
@@ -90,11 +94,12 @@ export function coverageGapDisplay(d: TelemetryFreshnessMetadata): CoverageGapDi
     .filter((entry): entry is [string, string] => entry[1] != null && entry[0] !== 'error')
     .map(([label, value]) => ({ label, value }))
   const errorValue = nonEmpty(gap?.error)
+  const errorClass = nonEmpty(gap?.error_class)
 
   return {
     count,
     summary: `coverage gaps ${count}: ${reason}`,
     details,
-    structured: { reason, fields, error: errorValue },
+    structured: { reason, fields, error: errorValue, errorClass },
   }
 }

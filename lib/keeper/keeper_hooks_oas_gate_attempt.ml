@@ -151,7 +151,7 @@ let record_pre_tool_gate_attempt
             ~stale_reason:stale_reason_trajectory_append
             ~keeper_name
             ~trace_id
-            ~error:(Printexc.to_string exn)
+            ~exn
             ())
         acc
         entry

@@ -689,7 +689,7 @@ let make_hooks
                  ~stale_reason:"trajectory_append_failed"
                  ~keeper_name
                  ~trace_id
-                 ~error:(Printexc.to_string exn)
+                 ~exn
                  ())
              acc
              entry);

@@ -126,7 +126,7 @@ let init ?cluster_name ~base_path () =
          ~durable_store:dir
          ~dashboard_surface:"/api/v1/keepers/:name/tool-calls"
          ~stale_reason:"tool_call_io_init_failed"
-         ~error:(Printexc.to_string exn)
+         ~exn
          ()
      with
      | Eio.Cancel.Cancelled _ as cancel -> raise cancel
@@ -180,6 +180,7 @@ let record_append_coverage_gap ~store ~keeper_name ~tool_name ?trace_id exn =
       ~keeper_name
       ?trace_id
       ~error:(Printf.sprintf "%s/%s: %s" keeper_name tool_name (Printexc.to_string exn))
+      ~exn
       ()
   with
   | Eio.Cancel.Cancelled _ as cancel -> raise cancel

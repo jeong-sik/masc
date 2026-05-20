@@ -166,14 +166,9 @@ let metric_runtime_ollama_probe_generate_skips =
 
 let metric_process_timeout = "masc_process_timeout_total"
 let metric_bg_task_sidecar_failures = "masc_bg_task_sidecar_failures_total"
-(* iter 30: typed split for [Bg_task.drain_fd_to_buf] silent error
-   swallow.  Previously every non-EAGAIN/EWOULDBLOCK/EINTR exception
-   was collapsed into a permissive EOF, hiding real read errors
-   (EBADF, EIO, ENOMEM, …).  Labels are closed-vocabulary:
-   [fd_kind = stdout | stderr] × [error_kind = unix_error | other],
-   cardinality 4. *)
-let metric_bg_task_drain_unexpected_errors =
-  "masc_bg_task_drain_unexpected_errors_total"
+(* RFC-0145 §6.2 PR-2 (predecessor #15883):
+   [masc_bg_task_drain_unexpected_errors_total] was removed alongside
+   the typed lift of [Bg_task.drain_fd_to_buf]. *)
 let metric_build_identity_probe_failures = "masc_build_identity_probe_failures_total"
 let metric_distributed_lock_acquire_failed = "masc_distributed_lock_acquire_failed_total"
 

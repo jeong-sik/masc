@@ -190,17 +190,11 @@ let register
     `Counter;
   Bg_task.set_sidecar_failure_observer (fun ~site _exn ->
     inc_counter metric_bg_task_sidecar_failures ~labels:[ "site", site ] ());
-  add
-    metric_bg_task_drain_unexpected_errors
-    "Total unexpected (non-EAGAIN/EWOULDBLOCK/EINTR/EOF) errors raised by \
-     Unix.read inside Bg_task.drain_fd_to_buf. Labeled by \
-     fd_kind=stdout|stderr and error_kind=unix_error|other. A non-zero \
-     rate indicates the previous silent-EOF fallback would have hidden a \
-     real read error and lost output between the error and process exit."
-    `Counter;
-  Bg_task.set_drain_failure_observer (fun ~fd_kind ~err_kind ->
-    inc_counter metric_bg_task_drain_unexpected_errors
-      ~labels:[ "fd_kind", fd_kind; "error_kind", err_kind ] ());
+  (* RFC-0145 §6.2 PR-2 (predecessor #15883):
+     [masc_bg_task_drain_unexpected_errors_total] was removed alongside
+     the typed lift of [Bg_task.drain_fd_to_buf]'s return value.  The
+     counter had been an alarm without a fix — read errors now surface
+     directly as a typed log line from [Bg_task.poll_state]. *)
   add
     metric_build_identity_probe_failures
     "Total build identity git probe failures. Labeled by \

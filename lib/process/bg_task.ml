@@ -101,28 +101,15 @@ let sidecar_failure_observer :
 let set_sidecar_failure_observer f =
   Atomic.set sidecar_failure_observer (Some f)
 
-(* Observer for unexpected (non-EAGAIN/EWOULDBLOCK/EINTR/EOF)
-   drain-pipe read errors.  Labels are closed-vocabulary:
-   [fd_kind = "stdout" | "stderr"] (call-site tagged) and
-   [err_kind = "unix_error" | "other"] (typed match arm).
-   Cardinality bound: 2 × 2 = 4.  See top-level Prometheus
-   module for the registered counter. *)
-let drain_failure_observer :
-    ((fd_kind:string -> err_kind:string -> unit) option) Atomic.t =
-  Atomic.make None
-
-let set_drain_failure_observer f =
-  Atomic.set drain_failure_observer (Some f)
-
-let observe_drain_failure ~fd_kind ~err_kind =
-  match Atomic.get drain_failure_observer with
-  | None -> ()
-  | Some observe ->
-      (try observe ~fd_kind ~err_kind with
-       | Eio.Cancel.Cancelled _ as e -> raise e
-       | observer_exn ->
-           Log.Misc.warn "bg_task drain observer failed: %s"
-             (Printexc.to_string observer_exn))
+(* RFC-0145 §5 PR-2 (predecessor #15883):
+   The previous [drain_failure_observer] / [observe_drain_failure]
+   pair fed a Prometheus counter [masc_bg_task_drain_unexpected_errors_total]
+   while the underlying drain loop continued to *return [true]*
+   (permissive EOF) on a read error.  Per RFC-0145 §6.2 the counter
+   is removed in the same per-site migration PR; the typed [drain_outcome]
+   surfaced from [drain_fd_to_buf] now carries the read error to the
+   caller, which logs it at the call site with the task identity in
+   scope.  The counter was an alarm, not a fix.  *)
 
 let observe_sidecar_failure ~site exn =
   match exn with
@@ -288,35 +275,43 @@ let trim_buffer_to_ring buf base_offset =
     base_offset + drop_len
   end
 
-(* [drain_fd_to_buf ~fd_kind buf fd] reads every byte currently
-   available on [fd] without blocking. Returns [true] if EOF was
-   observed.
+(* RFC-0145 §5 PR-2: typed drain outcome.
 
-   The previous implementation collapsed every non-EAGAIN/EINTR
-   exception into a permissive [true] (EOF), silently misreporting
-   genuine read errors (EBADF, EIO, ENOMEM, ENOSPC, …) as clean
-   close.  This typed split:
+   Previously [drain_fd_to_buf] returned [bool] (eof) and collapsed
+   read errors into [true] while a Prometheus counter served as the
+   only operator signal.  That shape matches CLAUDE.md signature #1
+   (Telemetry-as-Fix): the counter is an alarm, not a fix — the
+   caller had no way to distinguish "FD closed cleanly" from
+   "FD abandoned after a read error".
 
-   - Re-raises [Eio.Cancel.Cancelled] so cancellation propagates
-     through the enclosing switch.
-   - Splits [Unix.Unix_error] (anything that isn't EAGAIN /
-     EWOULDBLOCK / EINTR) into a distinct arm: tick the
-     drain-failure counter with [error_kind = "unix_error"] and a
-     bounded warn naming the [errno].  EBADF/EIO/ENOMEM are the
-     most likely realistic failure modes here and are forensically
-     valuable.
-   - Final arm: any other exception ticks with
-     [error_kind = "other"] and a bounded warn carrying
-     [Printexc.to_string] in the log body only (closed-vocab
-     label).
+   [drain_outcome] now exposes that distinction.  [Drain_eof_after_error]
+   is treated like EOF by the reap state machine (the FD is no longer
+   readable, so we advance to close) but the caller emits a typed
+   warn that names the syscall and errno alongside the task identity.
 
-   Returning [true] in the failure arms preserves the existing
-   operational behavior (the caller advances [stdout_eof] /
-   [stderr_eof] and eventually closes the FD).  This is a
-   deliberate conservative choice — flipping it to [false] would
-   change reap semantics and belongs in a future RFC, not in this
-   visibility patch. *)
-let drain_fd_to_buf ~fd_kind buf fd =
+   Cancellation continues to be re-raised, never absorbed. *)
+
+type drain_read_error =
+  | Drain_unix_error of Unix.error * string
+      (** Unix.Unix_error other than EAGAIN/EWOULDBLOCK/EINTR.
+          Payload is [(errno, syscall_name)].  EBADF/EIO/ENOMEM
+          are the realistic failure modes worth distinguishing. *)
+  | Drain_other_exn of exn
+      (** Any other exception that was not cancellation.
+          Cancellation is re-raised inside [drain_fd_to_buf]. *)
+
+type drain_outcome =
+  | Drain_continue
+      (** No data was available without blocking, or a partial chunk
+          was read.  The caller should poll again on the next tick. *)
+  | Drain_eof
+      (** Clean EOF: [Unix.read] returned 0. *)
+  | Drain_eof_after_error of drain_read_error
+      (** A read error occurred.  The caller advances the FD to EOF
+          (preserving reap semantics) but the typed error carries the
+          forensic signal. *)
+
+let drain_fd_to_buf buf fd =
   let chunk = Bytes.create 4096 in
   let rec loop () =
     let readable =
@@ -324,51 +319,65 @@ let drain_fd_to_buf ~fd_kind buf fd =
         let r, _, _ = Unix.select [ fd ] [] [] 0.0 in
         r)
     in
-    if readable = [] then false
+    if readable = [] then Drain_continue
     else
       match Unix.read fd chunk 0 (Bytes.length chunk) with
-      | 0 -> true
+      | 0 -> Drain_eof
       | n -> Buffer.add_subbytes buf chunk 0 n; loop ()
-      | exception Unix.Unix_error ((Unix.EAGAIN | Unix.EWOULDBLOCK), _, _) -> false
+      | exception Unix.Unix_error ((Unix.EAGAIN | Unix.EWOULDBLOCK), _, _) ->
+          Drain_continue
       | exception Unix.Unix_error (Unix.EINTR, _, _) -> loop ()
       | exception (Eio.Cancel.Cancelled _ as e) -> raise e
       | exception Unix.Unix_error (errno, fn, _) ->
-          Log.Misc.warn
-            "bg_task drain_fd_to_buf %s Unix_error in %s: %s"
-            fd_kind fn (Unix.error_message errno);
-          observe_drain_failure ~fd_kind ~err_kind:"unix_error";
-          true
+          Drain_eof_after_error (Drain_unix_error (errno, fn))
       | exception exn ->
-          Log.Misc.warn
-            "bg_task drain_fd_to_buf %s unexpected exception: %s"
-            fd_kind (Printexc.to_string exn);
-          observe_drain_failure ~fd_kind ~err_kind:"other";
-          true
+          Drain_eof_after_error (Drain_other_exn exn)
   in
   loop ()
 
 (* Called under [registry_mu]. Drains pipes, reaps if exited, kills
    on timeout. *)
-let poll_state st =
+let log_drain_read_error ~fd_kind ~task_id err =
+  match err with
+  | Drain_unix_error (errno, fn) ->
+      Log.Misc.warn
+        "bg_task drain %s task=%s Unix_error in %s: %s — advancing to EOF"
+        fd_kind task_id fn (Unix.error_message errno)
+  | Drain_other_exn exn ->
+      Log.Misc.warn
+        "bg_task drain %s task=%s unexpected exception: %s — advancing to EOF"
+        fd_kind task_id (Printexc.to_string exn)
+
+let consume_drain_outcome ~fd_kind ~task_id outcome =
+  match outcome with
+  | Drain_continue -> false
+  | Drain_eof -> true
+  | Drain_eof_after_error err ->
+      log_drain_read_error ~fd_kind ~task_id err;
+      true
+
+let poll_state ~task_id st =
   if st.closed then ()
   else begin
     if not st.stdout_eof then begin
-      let eof =
-        drain_fd_to_buf ~fd_kind:"stdout"
-          st.stdout_buf st.handle.stdout_fd
+      let outcome =
+        drain_fd_to_buf st.stdout_buf st.handle.stdout_fd
       in
       st.stdout_base_offset <-
         trim_buffer_to_ring st.stdout_buf st.stdout_base_offset;
-      st.stdout_eof <- eof
+      st.stdout_eof <-
+        consume_drain_outcome
+          ~fd_kind:"stdout" ~task_id outcome
     end;
     if not st.stderr_eof then begin
-      let eof =
-        drain_fd_to_buf ~fd_kind:"stderr"
-          st.stderr_buf st.handle.stderr_fd
+      let outcome =
+        drain_fd_to_buf st.stderr_buf st.handle.stderr_fd
       in
       st.stderr_base_offset <-
         trim_buffer_to_ring st.stderr_buf st.stderr_base_offset;
-      st.stderr_eof <- eof
+      st.stderr_eof <-
+        consume_drain_outcome
+          ~fd_kind:"stderr" ~task_id outcome
     end;
     (match st.status with
      | Some _ -> ()
@@ -398,7 +407,7 @@ let poll_state st =
 	  end
 
 let poll_all_states () =
-  Hashtbl.iter (fun _ st -> poll_state st) registry
+  Hashtbl.iter (fun task_id st -> poll_state ~task_id st) registry
 
 let live_task_count ?keeper () =
   Hashtbl.fold
@@ -546,7 +555,7 @@ let read tid ~since_stdout ~since_stderr =
   | None -> Error (Unknown_task tid)
   | Some st ->
       (try
-         with_reg (fun () -> poll_state st);
+         with_reg (fun () -> poll_state ~task_id:tid st);
          Ok
            {
              stdout_since =
@@ -573,7 +582,7 @@ let kill tid ~signal ~grace_sec =
   | Some st ->
       (try
          Process_eio.tree_kill ~pgid:st.handle.pgid ~signal ~grace_sec;
-         with_reg (fun () -> poll_state st);
+         with_reg (fun () -> poll_state ~task_id:tid st);
          (* Best-effort PID file cleanup: if poll_state did not
             observe EOF yet (slow-closing FDs), at least unlink the
             sidecar so the next reap cycle does not flag a live

@@ -1,0 +1,14 @@
+# Shell legacy purge ratchet file baseline.
+#
+# Format: <needle> <repo-relative-path>
+# New files may not gain these legacy markers. Deletion PRs should remove
+# rows as they remove the corresponding markers.
+tokenize_path_args lib/worker_dev_tools.ml
+path_validation_tokens lib/worker_dev_tools.ml
+forbidden_shell_chars lib/gh_command_validation.ml
+forbidden_shell_chars lib/gh_command_validation.mli
+forbidden_shell_chars lib/worker_dev_tools.ml
+forbidden_shell_chars lib/worker_dev_tools_command_syntax.ml
+forbidden_shell_chars lib/worker_dev_tools_command_syntax.mli
+forbidden_shell_chars test/fixtures/shell_gate/baseline.jsonl
+forbidden_shell_chars test/test_exec_shell_command_gate.ml

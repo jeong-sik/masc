@@ -453,7 +453,18 @@ let load_scenarios_from_file (path : string) : (scenario list, string) result =
           (match scenario_of_json json with
            | Ok s -> Ok [s]
            | Error e -> Error e)
-      | _ -> Error "Expected JSON array or object"
+      | other ->
+          (* Bind the received kind so operators reading the load
+             failure can distinguish a wrong-type bug ([`Null] from
+             an empty file, [`Int] / [`Bool] from a single-line typo)
+             from a wrong-shape bug ([`List] of non-objects which is
+             handled by the [`List items] arm above and surfaces a
+             different "Parse errors:" prefix). *)
+          Error
+            (Printf.sprintf
+               "load_scenarios_from_file: expected JSON array of scenarios \
+                or a single scenario object, got %s (path=%S)"
+               (Json_util.kind_name other) path)
     with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
       Error (Printf.sprintf "Failed to load scenarios: %s" (Printexc.to_string exn))
 

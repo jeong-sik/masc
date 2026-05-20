@@ -1,14 +1,77 @@
 ---
 rfc: "0142"
 title: "cascade_error_classify Decomposition + Typed JSON-Extraction Variant"
-status: Draft
+status: Active
 created: 2026-05-20
-updated: 2026-05-20
+updated: 2026-05-21
 author: vincent
 supersedes: []
 superseded_by: null
-related: ["0085", "0088"]
-implementation_prs: []
+related: ["0085", "0088", "0148", "0154"]
+implementation_prs: [16790, 16806, 16894, 16899]
+---
+
+## Progress audit (2026-05-21)
+
+Status promoted Draft → Active. Phase 1 of the four-phase plan has
+landed in part; Phase 2/3 remain.
+
+### Phase 1 — `Json_field` helper module
+
+| PR | Scope | Merged |
+|----|-------|--------|
+| #16790 | `lib/json/json_field.{ml,mli}` typed extractor (`Found` / `Field_absent` / `Wrong_shape`) + `to_option` / `log_wrong_shape` | 2026-05-19 |
+| #16806 | `telemetry_unified` string/bool field migration (Stack PR-3) | 2026-05-19 |
+| #16894 | `dashboard/dashboard_http_helpers` migration (PR-4) | 2026-05-20 |
+| #16899 | `server/server_dashboard_http_*` local helpers migration (PR-5) | 2026-05-20 |
+
+### Variance from spec
+
+- **PR sequencing collision**: numbering jumped #16790 → #16806 (Stack
+  PR-3) → #16894 (PR-4). Stack PR-2 is unlabeled in the commit log;
+  it appears subsumed into PR-3 or was never landed. Closeout will
+  resolve the numbering after Phase 2.
+- **`cascade_error_classify.ml` migration deferred**: Phase 1 spec
+  promised ~20 catch-alls in this file converted. Measured 2026-05-21:
+  4 `Json_field` usages / 33+ `| _ ->` catch-alls remain / file grew
+  to 939 LoC (vs spec-time 873 LoC). The Phase 1 migration landed on
+  the *other* call families (telemetry_unified, dashboard_http_helpers,
+  server_dashboard_http) but the originating godfile remains untouched.
+
+### Phase 2 — module split (not started)
+
+`cascade_error_classify.ml` 939 LoC is still a single file. The three
+target modules described in §4 Phase 2 do not exist:
+
+- `cascade_internal_error.ml(.mli)` — absent
+- `cascade_error_from_sdk.ml(.mli)` — absent
+- `cascade_codex_preflight.ml(.mli)` — absent
+
+### Phase 3 — reachability sweep (not started)
+
+`masc_internal_error` variant constructor reachability has not been
+audited. Phase 3 prerequisite (smaller Phase 2 modules) is not met.
+
+### Pending work
+
+The substantive RFC-0142 work — godfile decomposition + catch-all
+typed-conversion at the canonical site — is still ahead. The four
+merged PRs migrated *consumer* call families (telemetry_unified,
+dashboard, server) but not the *origin* module. Phase 2 PR sequence
+should start with `cascade_internal_error.ml` extraction; that will
+reduce `cascade_error_classify.ml` by ~300 LoC and unblock Phase 1
+migration of the remaining ~20 `Json_field`-eligible catch-alls on a
+smaller surface.
+
+### Related RFC
+
+- **RFC-0148** (Typed `tool_error` Variant for LLM-Facing Tool Failure
+  Surface, Implemented 2026-05-20): sister closed-sum migration. Phase
+  2 of RFC-0142 should reuse the variant shape pattern.
+- **RFC-0154** (System_error_class typed SSOT, Implemented 2026-05-21):
+  operator-facing closed-sum SSOT. The `Wrong_shape` diagnostic
+  affordance here is the same parse-don't-validate discipline.
+
 ---
 
 # RFC-0142 — cascade_error_classify Decomposition

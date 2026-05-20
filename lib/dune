@@ -206,6 +206,7 @@
   keeper_agent_prompt_metrics
   keeper_agent_tool_surface
   keeper_agent_run_contract_helpers
+  keeper_agent_run_task_link
   keeper_agent_result
   keeper_agent_error
   keeper_agent_memory_episode

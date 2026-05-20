@@ -1,5 +1,5 @@
 ---
-rfc: "0148"
+rfc: "0150"
 title: "Keeper Attention Signal — backend 단일 typed wire envelope"
 status: Draft
 created: 2026-05-20
@@ -11,7 +11,7 @@ related: ["0068", "0135"]
 implementation_prs: []
 ---
 
-# RFC-0148: Keeper Attention Signal — backend 단일 typed wire envelope
+# RFC-0150: Keeper Attention Signal — backend 단일 typed wire envelope
 
 ## §0 한 줄 요약
 

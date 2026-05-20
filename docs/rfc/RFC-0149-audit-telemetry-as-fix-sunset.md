@@ -1,4 +1,4 @@
-# RFC-0148 — Audit-Driven Telemetry-as-Fix Sunset (memory_recall · compact_negative_savings · cascade_resolve_live_warn)
+# RFC-0149 — Audit-Driven Telemetry-as-Fix Sunset (memory_recall · compact_negative_savings · cascade_resolve_live_warn)
 
 - **Status**: Active
 - **Created**: 2026-05-20
@@ -121,9 +121,9 @@ Caller sites:
 
 | Workaround | Removal target | Owner | Tracking |
 |---|---|---|---|
-| #16771 (memory recall counter+WARN) | RFC-0148 §3.1 implementation merged | TBD | This RFC |
-| #16778 (compact negative_savings counter) | RFC-0148 §3.2 implementation merged | TBD | This RFC |
-| #16787 (cascade resolve_live WARN-once) | RFC-0148 §3.3 implementation merged | TBD | This RFC |
+| #16771 (memory recall counter+WARN) | RFC-0149 §3.1 implementation merged | TBD | This RFC |
+| #16778 (compact negative_savings counter) | RFC-0149 §3.2 implementation merged | TBD | This RFC |
+| #16787 (cascade resolve_live WARN-once) | RFC-0149 §3.3 implementation merged | TBD | This RFC |
 
 No date pressure — the merged workarounds are observability-only and do not block production. They become *informational* (not load-bearing) once typed boundaries replace the silent paths.
 

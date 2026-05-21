@@ -400,8 +400,7 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
             | None ->
                 Error
                   (Printf.sprintf
-                     "invalid network_mode '%s' (allowed: none, inherit; \
-                     deprecated alias: host)"
+                     "invalid network_mode '%s' (allowed: none, inherit)"
                      raw))
         | None -> Ok ())
   in

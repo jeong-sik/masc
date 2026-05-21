@@ -53,8 +53,8 @@ let test_named_keeper_docker_defaults () =
           defaults.persona_name;
         check (option string) (name ^ " sandbox_profile") (Some "docker")
           (Option.map KTP.sandbox_profile_to_string defaults.sandbox_profile);
-        (* After the host→inherit alias migration, all three docker keepers
-           request [Network_inherit] so keeper_bash can dispatch git/gh. *)
+        (* Docker keepers request [Network_inherit] so keeper_bash can dispatch
+           git/gh. *)
         check (option string) (name ^ " network_mode") (Some "inherit")
           (Option.map KTP.network_mode_to_string defaults.network_mode);
         check (option string) (name ^ " github_identity")
@@ -941,26 +941,15 @@ let test_network_mode_rejects_unknown () =
   | Ok _ -> fail "network_mode=bogus should be rejected"
   | Error e ->
       let lowered = String.lowercase_ascii e in
-      let contains needle =
-        let nl = String.length needle in
-        let hl = String.length lowered in
-        let found = ref false in
-        if nl <= hl then
-          for i = 0 to hl - nl do
-            if String.sub lowered i nl = needle then found := true
-          done;
-        !found
-      in
       check bool "error mentions invalid network_mode" true
-        (contains "invalid network_mode");
-      check bool "error mentions deprecated alias" true
-        (contains "host")
+        (contains ~needle:"invalid network_mode" lowered);
+      check bool "error lists canonical values" true
+        (contains ~needle:"allowed: none, inherit" lowered)
 
-(** Accept [network_mode = "host"] as a deprecated alias for "inherit".
-    Ensures operators migrating from docker-run terminology are not
-    silently dropped to persona defaults.  The loader emits a warning and
-    the parsed value equals [Network_inherit]. *)
-let test_network_mode_accepts_host_alias () =
+(** Reject [network_mode = "host"] instead of treating it as an alias.
+    The closed network_mode enum is [none | inherit]; Docker's "--network host"
+    is an execution detail derived downstream from [Network_inherit]. *)
+let test_network_mode_rejects_host_alias () =
   let result =
     with_temp_toml
       "[keeper]\nname = \"hosttest\"\nsandbox_profile = \"docker\"\n\
@@ -968,10 +957,17 @@ let test_network_mode_accepts_host_alias () =
       KTP.load_keeper_toml
   in
   match result with
-  | Error e -> fail (Printf.sprintf "host alias should be accepted: %s" e)
-  | Ok (_loaded_name, defaults) ->
-      check (option string) "host alias maps to inherit" (Some "inherit")
-        (Option.map KTP.network_mode_to_string defaults.network_mode)
+  | Ok _ -> fail "network_mode=host should be rejected"
+  | Error e ->
+      let lowered = String.lowercase_ascii e in
+      check bool "error mentions invalid network_mode" true
+        (contains ~needle:"invalid network_mode" lowered);
+      check bool "error mentions raw host value" true
+        (contains ~needle:"'host'" lowered);
+      check bool "error lists canonical values" true
+        (contains ~needle:"allowed: none, inherit" lowered);
+      check bool "error does not mention deprecated alias" false
+        (contains ~needle:"deprecated alias" lowered)
 
 (** Regression: classify_toml_failure_reason must bucket raw error strings
     into a small cardinality set so the Prometheus label set stays bounded. *)
@@ -1079,8 +1075,8 @@ let () =
         [
           test_case "rejects unknown network_mode" `Quick
             test_network_mode_rejects_unknown;
-          test_case "accepts host as deprecated alias for inherit" `Quick
-            test_network_mode_accepts_host_alias;
+          test_case "rejects host network_mode alias" `Quick
+            test_network_mode_rejects_host_alias;
           test_case "classifies failures into bounded label set" `Quick
             test_classify_toml_failure_reason_buckets;
           test_case "surfaces typed config parse errors" `Quick

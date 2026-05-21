@@ -20,6 +20,7 @@ from typing import Any
 
 DEFAULT_ARTIFACT = pathlib.Path("docs/generated/reverse-engineering/symbol-graph.v1.json")
 SCHEMA_VERSION = "masc.symbol_graph.v1"
+CHANGED_SYMBOLS_SCHEMA_VERSION = "masc.symbol_graph.changed_symbols.v1"
 ALLOWED_METHODS = {
     "initialize",
     "initialized",
@@ -61,6 +62,21 @@ def git_short_head(root: pathlib.Path) -> str:
     ).strip()
 
 
+def git_changed_paths(root: pathlib.Path, *, base_ref: str, head_ref: str) -> list[str]:
+    output = subprocess.check_output(
+        [
+            "git",
+            "diff",
+            "--name-only",
+            "--diff-filter=AMR",
+            f"{base_ref}...{head_ref}",
+        ],
+        cwd=root,
+        text=True,
+    )
+    return [line.strip() for line in output.splitlines() if line.strip()]
+
+
 def load_json(path: pathlib.Path) -> dict[str, Any]:
     with path.open(encoding="utf-8") as handle:
         data = json.load(handle)
@@ -95,6 +111,134 @@ def collect_languages(data: dict[str, Any]) -> set[str]:
         if isinstance(language, str) and language:
             languages.add(language)
     return languages
+
+
+def lane_summary(lane: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "name": lane.get("name"),
+        "issue": lane.get("issue"),
+        "goal": lane.get("goal"),
+        "tasks": lane.get("tasks", []),
+        "guard_tests": lane.get("guard_tests", []),
+    }
+
+
+def collect_lanes_by_file(data: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
+    lanes_by_file: dict[str, list[dict[str, Any]]] = {}
+    for lane in data.get("lanes", []):
+        if not isinstance(lane, dict):
+            continue
+        summary = lane_summary(lane)
+        for path in lane.get("primary_files", []):
+            if isinstance(path, str):
+                lanes_by_file.setdefault(path, []).append(summary)
+    return lanes_by_file
+
+
+def collect_files_by_path(data: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    files_by_path: dict[str, dict[str, Any]] = {}
+    for file_row in data.get("files", []):
+        if not isinstance(file_row, dict):
+            continue
+        path = file_row.get("path")
+        if isinstance(path, str):
+            files_by_path[path] = file_row
+    return files_by_path
+
+
+def symbol_summary(symbol: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": symbol.get("id"),
+        "name": symbol.get("name"),
+        "kind": symbol.get("kind"),
+        "display_range": symbol.get("display_range"),
+        "wbs": symbol.get("wbs"),
+        "tests": symbol.get("tests", []),
+    }
+
+
+def normalize_changed_paths(changed_paths: list[str]) -> list[str]:
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for value in changed_paths:
+        path = repo_relative_path(value).as_posix()
+        if path in seen:
+            continue
+        normalized.append(path)
+        seen.add(path)
+    return normalized
+
+
+def changed_symbols_report(
+    data: dict[str, Any],
+    changed_paths: list[str],
+    *,
+    base_ref: str,
+    head_ref: str,
+) -> dict[str, Any]:
+    paths = normalize_changed_paths(changed_paths)
+    lanes_by_file = collect_lanes_by_file(data)
+    files_by_path = collect_files_by_path(data)
+    changed_files: list[dict[str, Any]] = []
+    missing_paths: list[str] = []
+
+    for path in paths:
+        file_row = files_by_path.get(path)
+        lanes = lanes_by_file.get(path, [])
+        if file_row is None:
+            missing_paths.append(path)
+            changed_files.append(
+                {
+                    "path": path,
+                    "in_symbol_graph": False,
+                    "language": None,
+                    "lanes": lanes,
+                    "symbols": [],
+                    "test_owners": [],
+                }
+            )
+            continue
+
+        symbols = [
+            symbol_summary(symbol)
+            for symbol in file_row.get("symbols", [])
+            if isinstance(symbol, dict)
+        ]
+        test_owners = file_row.get("test_owners", [])
+        if not isinstance(test_owners, list):
+            test_owners = []
+        changed_files.append(
+            {
+                "path": path,
+                "in_symbol_graph": True,
+                "language": file_row.get("language"),
+                "lanes": lanes,
+                "symbols": symbols,
+                "test_owners": test_owners,
+            }
+        )
+
+    omissions: list[dict[str, Any]] = []
+    if missing_paths:
+        omissions.append(
+            {
+                "code": "changed_file_not_in_symbol_graph",
+                "paths": missing_paths,
+            }
+        )
+
+    return {
+        "schema_version": CHANGED_SYMBOLS_SCHEMA_VERSION,
+        "artifact_schema_version": data.get("schema_version"),
+        "artifact_base_commit": data.get("base_commit"),
+        "repo": data.get("repo"),
+        "base_ref": base_ref,
+        "head_ref": head_ref,
+        "changed_path_count": len(paths),
+        "matched_file_count": len(paths) - len(missing_paths),
+        "changed_files": changed_files,
+        "omissions": omissions,
+    }
 
 
 def live_lsp_prereq_report(data: dict[str, Any], *, artifact: pathlib.Path) -> dict[str, Any]:
@@ -234,12 +378,19 @@ def main() -> int:
         help="print a non-mutating JSON report for live LSP executable prerequisites",
     )
     parser.add_argument(
+        "--changed-symbols",
+        action="store_true",
+        help="print a JSON impact report for files changed between --base-ref and --head-ref",
+    )
+    parser.add_argument(
         "--strict-ranges",
         action="store_true",
         help="require display_range rows to fit the current checkout even when base_commit differs",
     )
     parser.add_argument("--base-commit", help="override base_commit when used with --emit or --write")
     parser.add_argument("--generated-at", help="override generated_at when used with --emit or --write")
+    parser.add_argument("--base-ref", default="origin/main", help="base ref for --changed-symbols")
+    parser.add_argument("--head-ref", default="HEAD", help="head ref for --changed-symbols")
     args = parser.parse_args()
 
     root = repo_root()
@@ -262,6 +413,17 @@ def main() -> int:
         for error in errors:
             print(f"symbol graph error: {error}", file=sys.stderr)
         return 1
+
+    if args.changed_symbols:
+        changed_paths = git_changed_paths(root, base_ref=args.base_ref, head_ref=args.head_ref)
+        report = changed_symbols_report(
+            data,
+            changed_paths,
+            base_ref=args.base_ref,
+            head_ref=args.head_ref,
+        )
+        sys.stdout.write(dump_canonical(report))
+        return 0
 
     if args.emit:
         sys.stdout.write(dump_canonical(data))

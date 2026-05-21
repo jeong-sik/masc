@@ -32,9 +32,8 @@ let identity_group_file = "group"
 let identity_passwd_target = "/etc/passwd"
 let identity_group_target = "/etc/group"
 
-(* MUST match the literal in keeper_turn_sandbox_runtime.start_container's
-   trailing [ image; "sh"; "-lc"; <this> ] argv. *)
-let idle_startup_command = "trap : TERM INT; while :; do sleep 3600; done"
+(* MUST match the idle argv in keeper_turn_sandbox_runtime.start_container. *)
+let idle_startup_argv = [ "tail"; "-f"; "/dev/null" ]
 
 type t =
   { container_name : Keeper_container_name.t
@@ -49,7 +48,7 @@ type t =
   ; read_only_rootfs : bool
   ; tmpfs_mount : string
   ; workdir : string option
-  ; startup_command : string
+  ; startup_argv : string list
   ; labels : (string * string) list
   ; cap_drop_all : bool
   ; no_new_privileges : bool
@@ -158,7 +157,7 @@ let of_request
           Env_config_keeper.KeeperSandbox.read_only_rootfs_args () <> []
       ; tmpfs_mount = Env_config_keeper.KeeperSandbox.tmpfs_mount ()
       ; workdir = Some container_root
-      ; startup_command = idle_startup_command
+      ; startup_argv = idle_startup_argv
       ; labels =
           deterministic_labels
             ~base_path
@@ -186,7 +185,7 @@ let ulimits t = t.ulimits
 let read_only_rootfs t = t.read_only_rootfs
 let tmpfs_mount t = t.tmpfs_mount
 let workdir t = t.workdir
-let startup_command t = t.startup_command
+let startup_argv t = t.startup_argv
 let labels t = t.labels
 let cap_drop_all t = t.cap_drop_all
 let no_new_privileges t = t.no_new_privileges
@@ -223,7 +222,7 @@ let equal a b =
   && Bool.equal a.read_only_rootfs b.read_only_rootfs
   && String.equal a.tmpfs_mount b.tmpfs_mount
   && Option.equal String.equal a.workdir b.workdir
-  && String.equal a.startup_command b.startup_command
+  && List.equal String.equal a.startup_argv b.startup_argv
   && equal_pairs a.labels b.labels
   && Bool.equal a.cap_drop_all b.cap_drop_all
   && Bool.equal a.no_new_privileges b.no_new_privileges

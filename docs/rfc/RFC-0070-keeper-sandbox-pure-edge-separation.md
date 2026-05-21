@@ -144,7 +144,7 @@ Phase 4.1 prep audit (2026-05-12, iter 34 of cron `7493fe21`) enumerated **all 1
 
 | Caller | Site | Pattern | Lifetime | v1 Plan fit |
 |--------|------|---------|----------|-------------|
-| `keeper_turn_sandbox_runtime` | line 184 | `docker run -d --rm --name <n> ... sh -lc "trap : TERM INT; while :; do sleep 3600; done"` + `docker exec <n> <cmd>` × N + `docker rm -f <n>` | **session** (turn-scoped) | ❌ not representable |
+| `keeper_turn_sandbox_runtime` | line 184 | `docker run -d --rm --name <n> ... <image> tail -f /dev/null` + `docker exec <n> <cmd>` × N + `docker rm -f <n>` | **session** (turn-scoped) | ❌ not representable |
 | `keeper_shell_docker` | line 820 | `docker run --rm --name <n> <image> sh -lc <cmd>` | **named one-shot** | ⚠ partial (Plan has `container_name`, but caller treats name as observable identity) |
 | `keeper_sandbox_runtime` | line 838 | `docker run --rm --network none --entrypoint sh <image> -lc <script>` | **anonymous one-shot** | ✅ closest to v1 Plan |
 
@@ -276,7 +276,7 @@ The fields below were measured byte-for-byte against `keeper_turn_sandbox_runtim
 
 | Concern | Lives in | Why |
 |---------|----------|-----|
-| `container_name` (hash of turn_id‖attempt‖suffix), `image`, `startup_command`, `cap_drop_all`, `no_new_privileges`, `seccomp_profile` (the *choice*), `read_only_rootfs`, `tmpfs`, `workdir`, `user`, `network_mode`, `pids_limit`, `memory_limit`, `env_overrides` (4 hardcoded `HOME`/`USER`/`LOGNAME`/`SHELL` + `?extra_env`), `ulimits` | **Plan** (`of_request`, pure) | deterministic given the request inputs. (`pids_limit`/`memory_limit`/`ulimits` are read from `Env_config_keeper.KeeperSandbox.*` — config reads are stable per run, not the wall-clock/PID/random/daemon-I/O non-determinism the split targets.) |
+| `container_name` (hash of turn_id‖attempt‖suffix), `image`, `startup_argv`, `cap_drop_all`, `no_new_privileges`, `seccomp_profile` (the *choice*), `read_only_rootfs`, `tmpfs`, `workdir`, `user`, `network_mode`, `pids_limit`, `memory_limit`, `env_overrides` (4 hardcoded `HOME`/`USER`/`LOGNAME`/`SHELL` + `?extra_env`), `ulimits` | **Plan** (`of_request`, pure) | deterministic given the request inputs. (`pids_limit`/`memory_limit`/`ulimits` are read from `Env_config_keeper.KeeperSandbox.*` — config reads are stable per run, not the wall-clock/PID/random/daemon-I/O non-determinism the split targets.) |
 | `mounts` — the workspace volume (`-v host_root:container_root:rw`) **and** the identity mounts (`-v <host_root>/.docker-identity/passwd:/etc/passwd:ro`, `…/group:/etc/group:ro`) | **Plan** | the mount *args* are deterministic (path concat). Note: the identity mounts only *work* if the files exist — see `identity_files` below. |
 | `identity_files : (string * string) list` — the `(path, content)` pairs the edge must write before the mounts are valid: `(<host_root>/.docker-identity/passwd, "root:x:0:0:…\nkeeper:x:<uid>:<gid>:…\n")` and `(…/group, "root:x:0:\nkeeper:x:<gid>:\n")` | **Plan** | the *content* is deterministic given `uid`/`gid`; only *writing* it is I/O. The Plan describes what must exist; the edge materialises it. |
 | `labels` — the 7 **deterministic** labels: component (static), `base_path_hash` (MD5 of normalised `base_path`), keeper (`sanitize_label_value meta_name`), kind (`sanitize_label_value container_kind`), network (`sanitize_label_value network_label`, where `network_label` is derived from `network_mode`), turn_id, ttl_sec | **Plan** | pure string ops. |
@@ -303,7 +303,7 @@ type t  (** abstract — like Oneshot_plan; accessors below, no exposed record *
      read_only_rootfs : t -> bool
      tmpfs            : t -> string option
      workdir          : t -> string option
-     startup_command  : t -> string                      (* default: trap-and-sleep idle loop *)
+     startup_argv     : t -> string list                  (* default: ["tail"; "-f"; "/dev/null"] *)
      labels           : t -> (string * string) list      (* 7 deterministic labels; edge adds PID + started_at *)
      cap_drop_all     : t -> bool
      no_new_privileges : t -> bool
@@ -327,7 +327,7 @@ val of_request
   -> (t, plan_error) result
 ```
 
-Covers `keeper_turn_sandbox_runtime:184` (persistent session). The startup_command default is the existing trap-and-sleep idiom. The `Plan` represents *one container's lifetime*, NOT a single command — commands are issued via `Session.exec` (§3.2.3) against an already-started container.
+Covers `keeper_turn_sandbox_runtime:184` (persistent session). The startup argv is a direct idle process, not a shell command. The `Plan` represents *one container's lifetime*, NOT a single command — commands are issued via `Session.exec` (§3.2.3) against an already-started container.
 
 #### 3.1.3 Named one-shot — represented via Oneshot_plan extension
 

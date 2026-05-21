@@ -409,7 +409,7 @@ let run_detached_argv
   @ List.concat_map (fun v -> [ "-v"; v ]) (P.mounts plan)
   @ workdir_args (P.workdir plan)
   @ network_args
-  @ [ P.image plan; "sh"; "-lc"; P.startup_command plan ]
+  @ (P.image plan :: P.startup_argv plan)
 ;;
 
 let write_identity_files (plan : Keeper_sandbox_session_plan.t) =

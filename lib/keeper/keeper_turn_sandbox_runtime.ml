@@ -228,7 +228,7 @@ let start_container (t : t) ~(timeout_sec : float) =
                ~container_root:t.container_root
            @ identity_mounts
            @ network_args
-           @ [ image; "sh"; "-lc"; "trap : TERM INT; while :; do sleep 3600; done" ]
+           @ [ image; "tail"; "-f"; "/dev/null" ]
          in
          let st, out = run_argv_with_status_retry_eintr ~timeout_sec argv in
          (match st with

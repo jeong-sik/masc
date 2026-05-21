@@ -239,15 +239,13 @@ let run_pr_review_shell ~(config : Coord.config) ~(meta : keeper_meta)
         }
   else
     let root = Keeper_alerting_path.project_root_of_config config in
-    let host_cmd =
-      Printf.sprintf "cd %s && %s" (Filename.quote root) cmd
-    in
-    let argv = [ host_zsh; "-lc"; host_cmd ] in
+    let argv = [ host_zsh; "-lc"; cmd ] in
     let status, output =
       Masc_exec.Exec_gate.run_argv_with_status
         ~actor:`Keeper_shell
-        ~raw_source:(String.concat " " argv)
+        ~raw_source:(String.concat " " (List.map Filename.quote argv))
         ~summary:"keeper tool pr review host"
+        ~cwd:root
         ~timeout_sec
         argv
     in

@@ -19,8 +19,3 @@ val dispatch_simple :
     used by pipeline dispatch when a previous stage's stdout must be
     forwarded without dropping the stage's sandbox target.  [?timeout_sec]
     overrides the dispatch default. *)
-
-val native_dispatch_enabled : unit -> bool
-(** Check [MASC_BASH_NATIVE_DISPATCH] env var.
-    - [Some "0"] -> false (always bash fallback)
-    - unset or any other value -> true *)

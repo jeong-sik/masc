@@ -293,8 +293,10 @@ let claim_next_r
       ~agent_name
       ?agent_tool_names
       ?(exclude_task_ids = [])
-      ?(task_filter = fun _ -> true)
-      ?(admission_filter = fun ~active_tasks:_ _ -> true)
+      ?(task_filter : Masc_domain.task -> bool = fun _ -> true)
+      ?(admission_filter :
+         active_tasks:Masc_domain.task list -> Masc_domain.task -> bool =
+        fun ~active_tasks:_ _ -> true)
       ()
   =
   let exception Existing_claim of claim_next_result in

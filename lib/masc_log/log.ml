@@ -44,15 +44,6 @@ let level_of_string_opt s =
   | "error" -> Some Error
   | _ -> None
 
-(** Parse level from string, defaulting to [Info] on unrecognised input.
-    Kept for backward compatibility with existing callers.  When the
-    input comes from a user (env var, config), prefer
-    [level_of_string_opt] and warn on [None] so typos surface. *)
-let level_of_string s =
-  match level_of_string_opt s with
-  | Some lvl -> lvl
-  | None -> Info
-
 let protect ~default f =
   try f () with
   | Eio.Cancel.Cancelled _ as e -> raise e

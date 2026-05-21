@@ -334,46 +334,8 @@ let clear_meta_cognition_warm_flag = Server_dashboard_http_core_meta_cognition.c
 let schedule_meta_cognition_summary_warm = Server_dashboard_http_core_meta_cognition.schedule_meta_cognition_summary_warm
 let meta_cognition_summary_cached = Server_dashboard_http_core_meta_cognition.meta_cognition_summary_cached
 
-let dashboard_shell_paths_json (config : Coord.config) : Yojson.Safe.t =
-  Server_base_path_diagnostics.detect
-    ?input_base_path:((Host_config.from_env ()).base_path_raw)
-    ?env_masc_base_path:((Host_config.from_env ()).base_path_raw)
-    ~effective_base_path:config.base_path
-    ~effective_masc_root:(Coord.masc_root_dir config)
-    ()
-  |> Server_base_path_diagnostics.to_yojson
-;;
-
-let dashboard_shell_bootstrap_json (config : Coord.config) : Yojson.Safe.t =
-  let generated_at = Masc_domain.now_iso () in
-  let started_at = Unix.gettimeofday () in
-  `Assoc
-    [ "generated_at", `String generated_at
-    ; ( "status"
-      , `Assoc [ "project", `String "initializing"; "generated_at", `String generated_at ]
-      )
-    ; "paths", dashboard_shell_paths_json config
-    ; ( "counts"
-      , `Assoc
-          [ "agents", `Int 0
-          ; "tasks", `Int 0
-          ; "keepers", `Int 0
-          ; "total_runtimes", `Int 0
-          ] )
-    ; "configured_keepers", `Int 0
-    ; "providers", `Assoc []
-    ; "meta_cognition", `Null
-    ; "config_resolution", `Null
-    ; "runtime_resolution", `Null
-    ]
-  |> with_projection_diagnostics
-       ~surface:"shell"
-       ~started_at
-       ~extra:
-         [ "cache_state", `String "initializing"
-         ; "bootstrap_source", `String "shell_prewarm"
-         ]
-;;
+let dashboard_shell_paths_json = Server_dashboard_http_core_shell_bootstrap.dashboard_shell_paths_json
+let dashboard_shell_bootstrap_json = Server_dashboard_http_core_shell_bootstrap.dashboard_shell_bootstrap_json
 
 let dashboard_shell_last_good_with_source ~light () =
   let full_last_good () =

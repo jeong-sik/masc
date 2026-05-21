@@ -380,5 +380,4 @@ let internal_history_json_to_trajectory_line (json : Yojson.Safe.t)
            })
 
 let runtime_manifest_public_json row =
-  Keeper_runtime_manifest.to_json row
-  |> runtime_trace_public_json
+  Keeper_runtime_manifest.public_to_json row

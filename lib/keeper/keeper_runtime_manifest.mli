@@ -157,6 +157,8 @@ val make_for_context :
   t
 
 val to_json : t -> Yojson.Safe.t
+val public_to_json : t -> Yojson.Safe.t
+val public_projection_of_decision : Yojson.Safe.t -> Yojson.Safe.t
 val of_json : Yojson.Safe.t -> (t, string) result
 
 val execution_receipt_path_for_today :

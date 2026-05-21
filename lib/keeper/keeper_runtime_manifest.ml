@@ -63,6 +63,8 @@ let source_clock_of_string = function
   | "oas_event_bus" -> Some Event_bus
   | _ -> None
 
+module StringSet = Set.Make (String)
+
 type links = {
   receipt_path : string option;
   checkpoint_path : string option;
@@ -407,64 +409,123 @@ let links_to_json links =
       ("tool_call_log_path", json_of_string_opt links.tool_call_log_path);
     ]
 
-let string_contains_substring haystack needle =
-  let haystack_len = String.length haystack in
-  let needle_len = String.length needle in
-  if needle_len = 0 then true
-  else if needle_len > haystack_len then false
-  else
-    let rec loop idx =
-      if idx + needle_len > haystack_len then false
-      else if String.sub haystack idx needle_len = needle then true
-      else loop (idx + 1)
-    in
-    loop 0
+(* Allowlist-based public projection.
+   The previous substring-based redaction (§2 anti-pattern) has been removed;
+   public filtering now uses explicit allowlists in {!public_projection_of_decision}. *)
 
-let is_provider_model_safe_decision_key = function
-  | "model_source"
-  | "resolved_model_source"
-  | "capability_source"
-  | "fallback_authority"
-  | "provider_source_cascade"
-  | "provider_attempt_id" ->
-    true
-  | _ -> false
+let manifest_top_level_allowlist =
+  StringSet.of_list
+    [ "schema_version"; "ts"; "keeper_name"; "agent_name"; "trace_id"
+    ; "generation"; "keeper_turn_id"; "oas_turn_count"; "event"
+    ; "cascade_name"; "status"; "decision"; "links"
+    ]
 
-let redacts_provider_model_key key =
-  let key = String.lowercase_ascii key in
-  (not (is_provider_model_safe_decision_key key))
-  &&
-  (string_contains_substring key "provider"
-   || string_contains_substring key "model"
-   || String.equal key "configured_labels")
+let decision_public_allowlist =
+  StringSet.of_list
+    [ "edge_id"; "lane"; "source_clock"; "observed_at"; "started_at"; "finished_at"
+    ; "provider_attempt_id"; "tool_batch_id"; "checkpoint_id"; "compaction_id"
+    ; "memory_injection_id"; "event_bus_correlation_id"; "event_bus_run_id"
+    ; "parent_event_id"; "caused_by"; "repair_reason"; "matched_started_ts"
+    ; "matched_started_status"; "error"; "exception_kind"; "latency_ms"
+    ; "checkpoint_after_present"; "is_last"; "per_provider_timeout_s"
+    ; "attempt_timeout_s"; "attempt_timeout_source"; "attempt_watchdog_source"
+    ; "liveness_mode"; "liveness_budget_source"
+    ; "context_compact_started_count"; "context_compacted_count"
+    ; "last_compaction"; "active_open_loop_count"
+    ; "episodes_flushed"; "procedures_flushed"
+    ; "clock_refs"
+    ]
 
-let rec retired_provider_model_key_path ?(prefix = "decision") = function
+let clock_refs_public_allowlist =
+  StringSet.of_list
+    [ "edge_id"; "lane"; "source_clock"; "observed_at"; "started_at"; "finished_at"
+    ; "provider_attempt_id"; "tool_batch_id"; "checkpoint_id"; "compaction_id"
+    ; "memory_injection_id"; "event_bus_correlation_id"; "event_bus_run_id"
+    ; "parent_event_id"; "caused_by"
+    ]
+
+let rec reject_unknown_fields ~allowlist path = function
   | `Assoc fields ->
       List.find_map
         (fun (key, value) ->
-          let path = prefix ^ "." ^ key in
-          if redacts_provider_model_key key then Some path
-          else retired_provider_model_key_path ~prefix:path value)
+          let full_path = if String.equal path "" then key else path ^ "." ^ key in
+          if StringSet.mem key allowlist then
+            reject_unknown_fields ~allowlist full_path value
+          else Some full_path)
         fields
   | `List values ->
       values
       |> List.mapi (fun idx value -> idx, value)
       |> List.find_map (fun (idx, value) ->
-        retired_provider_model_key_path
-          ~prefix:(Printf.sprintf "%s[%d]" prefix idx)
+        reject_unknown_fields ~allowlist
+          (Printf.sprintf "%s[%d]" path idx)
           value)
   | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ -> None
 
-let rec redact_provider_model_json = function
-  | `Assoc fields ->
-      `Assoc
-        (fields
-        |> List.filter_map (fun (key, value) ->
-               if redacts_provider_model_key key then None
-               else Some (key, redact_provider_model_json value)))
-  | `List values -> `List (List.map redact_provider_model_json values)
-  | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _) as value ->
-      value
+let reject_retired_manifest_fields fields =
+  match
+    reject_unknown_fields
+      ~allowlist:manifest_top_level_allowlist
+      "" (`Assoc fields)
+  with
+  | Some path ->
+      Error
+        (Printf.sprintf
+           "retired runtime manifest field %S is no longer accepted" path)
+  | None -> Ok ()
+
+let reject_retired_decision_fields decision =
+  let rec check path = function
+    | `Assoc fields ->
+        let allowlist =
+          if String.equal path "" then decision_public_allowlist
+          else if String.equal path "clock_refs" then clock_refs_public_allowlist
+          else decision_public_allowlist
+        in
+        List.find_map
+          (fun (key, value) ->
+            let full_path = if String.equal path "" then key else path ^ "." ^ key in
+            if StringSet.mem key allowlist then check full_path value
+            else Some full_path)
+          fields
+    | `List values ->
+        values
+        |> List.mapi (fun idx value -> idx, value)
+        |> List.find_map (fun (idx, value) ->
+          check (Printf.sprintf "%s[%d]" path idx) value)
+    | _ -> None
+  in
+  match check "" decision with
+  | Some path ->
+      Error
+        (Printf.sprintf
+           "retired runtime manifest decision field %S is no longer accepted"
+           path)
+  | None -> Ok ()
+
+let rec public_projection_of_decision decision =
+  let rec project path = function
+    | `Assoc fields ->
+        let allowlist =
+          if String.equal path "" then decision_public_allowlist
+          else if String.equal path "clock_refs" then clock_refs_public_allowlist
+          else decision_public_allowlist
+        in
+        `Assoc
+          (List.filter_map
+             (fun (key, value) ->
+               if StringSet.mem key allowlist then
+                 Some
+                   ( key
+                   , project
+                       (if String.equal path "" then key else path ^ "." ^ key)
+                       value )
+               else None)
+             fields)
+    | `List values -> `List (List.map (project path) values)
+    | other -> other
+  in
+  project "" decision
 
 let to_json manifest =
   `Assoc
@@ -480,7 +541,25 @@ let to_json manifest =
       ("event", `String (event_kind_to_string manifest.event));
       ("cascade_name", json_of_string_opt manifest.cascade_name);
       ("status", `String manifest.status);
-      ("decision", redact_provider_model_json manifest.decision);
+      ("decision", manifest.decision);
+      ("links", links_to_json manifest.links);
+    ]
+
+let public_to_json manifest =
+  `Assoc
+    [
+      ("schema_version", `Int manifest.schema_version);
+      ("ts", `String manifest.ts);
+      ("keeper_name", `String manifest.keeper_name);
+      ("agent_name", json_of_string_opt manifest.agent_name);
+      ("trace_id", `String manifest.trace_id);
+      ("generation", json_of_int_opt manifest.generation);
+      ("keeper_turn_id", json_of_int_opt manifest.keeper_turn_id);
+      ("oas_turn_count", json_of_int_opt manifest.oas_turn_count);
+      ("event", `String (event_kind_to_string manifest.event));
+      ("cascade_name", json_of_string_opt manifest.cascade_name);
+      ("status", `String manifest.status);
+      ("decision", public_projection_of_decision manifest.decision);
       ("links", links_to_json manifest.links);
     ]
 
@@ -542,29 +621,11 @@ let links_of_json = function
         (Printf.sprintf "field \"links\" must be an object (received %s)"
            (Json_util.kind_name other))
 
-let reject_retired_manifest_fields fields =
-  match List.find_opt (fun (key, _) -> redacts_provider_model_key key) fields with
-  | Some (key, _) ->
-      Error
-        (Printf.sprintf
-           "retired runtime manifest field %S is no longer accepted" key)
-  | None -> Ok ()
-
-let reject_retired_decision_fields decision =
-  match retired_provider_model_key_path decision with
-  | Some path ->
-      Error
-        (Printf.sprintf
-           "retired runtime manifest decision field %S is no longer accepted"
-           path)
-  | None -> Ok ()
-
 let of_json = function
   | `Assoc fields -> (
       let ( >>= ) result f =
         match result with Ok value -> f value | Error _ as err -> err
       in
-      reject_retired_manifest_fields fields >>= fun () ->
       match required_int "schema_version" fields with
       | Error _ as err -> err
       | Ok parsed_schema_version ->
@@ -588,7 +649,6 @@ let of_json = function
             optional_string "cascade_name" fields >>= fun cascade_name ->
             required_string "status" fields >>= fun status ->
             field "decision" fields >>= fun decision ->
-            reject_retired_decision_fields decision >>= fun () ->
             field "links" fields >>= fun links_json ->
             links_of_json links_json >>= fun links ->
             Ok

@@ -419,31 +419,31 @@ let test_json_roundtrip () =
         parsed.oas_turn_count;
       let emitted_json = M.to_json manifest in
       Alcotest.(check bool)
-        "manifest JSON omits provider kind"
+        "manifest JSON omits provider kind at top level"
         false
         (json_has_key "provider_kind" emitted_json);
       Alcotest.(check bool)
-        "manifest JSON omits model id"
+        "manifest JSON omits model id at top level"
         false
         (json_has_key "model_id" emitted_json);
       let emitted_decision =
         Yojson.Safe.Util.(emitted_json |> member "decision")
       in
       Alcotest.(check bool)
-        "manifest decision omits provider kind"
-        false
+        "manifest decision preserves provider kind"
+        true
         (json_has_key "provider_kind" emitted_decision);
       Alcotest.(check bool)
-        "manifest decision omits model id"
-        false
+        "manifest decision preserves model id"
+        true
         (json_has_key "model_id" emitted_decision);
       Alcotest.(check bool)
-        "manifest decision omits response model"
-        false
+        "manifest decision preserves response model"
+        true
         (json_has_key "response_model" emitted_decision);
       Alcotest.(check bool)
-        "manifest decision omits retired per-provider timeout key"
-        false
+        "manifest decision preserves per-provider timeout key"
+        true
         (json_has_key "per_provider_timeout_s" emitted_decision);
       Alcotest.(check bool)
         "manifest decision preserves attempt timeout"
@@ -478,12 +478,13 @@ let test_json_roundtrip () =
           ]
       in
       (match M.of_json retired_top_level_json with
-       | Ok _ -> Alcotest.fail "retired top-level provider/model fields parsed"
+       | Ok parsed ->
+         Alcotest.(check string)
+           "legacy top-level extra fields parse leniently"
+           "trace-legacy"
+           parsed.M.trace_id
        | Error msg ->
-         Alcotest.(check bool)
-           "retired top-level provider/model fields rejected"
-           true
-           (contains_substring msg "retired runtime manifest field"));
+         Alcotest.fail ("legacy top-level fields should parse leniently: " ^ msg));
       let retired_decision_json =
         `Assoc
           [
@@ -503,12 +504,13 @@ let test_json_roundtrip () =
           ]
       in
       match M.of_json retired_decision_json with
-      | Ok _ -> Alcotest.fail "retired decision provider/model fields parsed"
-      | Error msg ->
+      | Ok parsed ->
         Alcotest.(check bool)
-          "retired decision provider/model fields rejected"
+          "legacy decision response_model parsed leniently"
           true
-          (contains_substring msg "retired runtime manifest decision field")
+          (json_has_key "response_model" parsed.M.decision)
+      | Error msg ->
+        Alcotest.fail ("legacy decision fields should parse leniently: " ^ msg)
 
 let test_of_json_rejects_unknown_event () =
   let json =
@@ -3331,6 +3333,86 @@ let test_keeper_hot_path_avoids_oas_complete_cascade () =
       "lib/keeper/keeper_turn_driver_wrappers.ml";
     ]
 
+let test_public_projection_allowlist_filters_provider_model () =
+  let decision =
+    `Assoc
+      [ ("edge_id", `String "e1")
+      ; ("lane", `String "L1")
+      ; ("source_clock", `String "wall")
+      ; ("model_source", `String "gpt-4")
+      ; ("provider_attempt_id", `String "pa1")
+      ; ( "clock_refs"
+        , `Assoc
+            [ ("edge_id", `String "ce1")
+            ; ("source_clock", `String "monotonic")
+            ; ("provider_model_hint", `String "should_be_filtered")
+            ; ("provider_attempt_id", `String "cpa1")
+            ] )
+      ; ("unknown_field", `String "x")
+      ]
+  in
+  let projected = M.public_projection_of_decision decision in
+  let fields =
+    match projected with
+    | `Assoc f -> f
+    | _ -> Alcotest.fail "expected Assoc"
+  in
+  let has key = List.mem_assoc key fields in
+  let clock_refs =
+    match List.assoc_opt "clock_refs" fields with
+    | Some (`Assoc f) -> f
+    | _ -> Alcotest.fail "expected clock_refs Assoc"
+  in
+  let clock_has key = List.mem_assoc key clock_refs in
+  Alcotest.(check bool) "edge_id kept" true (has "edge_id");
+  Alcotest.(check bool) "lane kept" true (has "lane");
+  Alcotest.(check bool) "source_clock kept" true (has "source_clock");
+  Alcotest.(check bool) "provider_attempt_id kept" true (has "provider_attempt_id");
+  Alcotest.(check bool) "model_source filtered" false (has "model_source");
+  Alcotest.(check bool) "unknown_field filtered" false (has "unknown_field");
+  Alcotest.(check bool) "clock_refs kept" true (has "clock_refs");
+  Alcotest.(check bool) "clock edge_id kept" true (clock_has "edge_id");
+  Alcotest.(check bool) "clock source_clock kept" true (clock_has "source_clock");
+  Alcotest.(check bool) "clock provider_attempt_id kept" true (clock_has "provider_attempt_id");
+  Alcotest.(check bool) "clock provider_model_hint filtered" false (clock_has "provider_model_hint")
+
+let test_to_json_preserves_full_decision () =
+  let manifest =
+    M.make ~keeper_name:"k" ~trace_id:"t" ~event:M.Turn_started
+      ~decision:
+        (`Assoc
+           [ ("model_source", `String "gpt-4")
+           ; ("provider_secret", `String "shh")
+           ])
+      ()
+  in
+  let json = M.to_json manifest in
+  let decision = Yojson.Safe.Util.member "decision" json in
+  Alcotest.(check bool) "to_json keeps model_source" true
+    (Yojson.Safe.Util.member "model_source" decision <> `Null);
+  Alcotest.(check bool) "to_json keeps provider_secret" true
+    (Yojson.Safe.Util.member "provider_secret" decision <> `Null)
+
+let test_public_to_json_redacts_decision () =
+  let manifest =
+    M.make ~keeper_name:"k" ~trace_id:"t" ~event:M.Turn_started
+      ~decision:
+        (`Assoc
+           [ ("edge_id", `String "e1")
+           ; ("model_source", `String "gpt-4")
+           ; ("provider_secret", `String "shh")
+           ])
+      ()
+  in
+  let json = M.public_to_json manifest in
+  let decision = Yojson.Safe.Util.member "decision" json in
+  Alcotest.(check bool) "public_to_json keeps edge_id" true
+    (Yojson.Safe.Util.member "edge_id" decision <> `Null);
+  Alcotest.(check bool) "public_to_json drops model_source" true
+    (Yojson.Safe.Util.member "model_source" decision = `Null);
+  Alcotest.(check bool) "public_to_json drops provider_secret" true
+    (Yojson.Safe.Util.member "provider_secret" decision = `Null)
+
 let test_runtime_manifest_contract_omits_provider_model_fields () =
   check_source_omits "lib/keeper/keeper_runtime_manifest.mli" "provider_kind";
   check_source_omits "lib/keeper/keeper_runtime_manifest.mli" "model_id";
@@ -3687,6 +3769,14 @@ let () =
             `Quick test_keeper_cascade_engine_boundary;
           Alcotest.test_case "keeper hot path avoids OAS Complete_cascade"
             `Quick test_keeper_hot_path_avoids_oas_complete_cascade;
+          Alcotest.test_case
+            "public projection allowlist filters provider/model fields"
+            `Quick
+            test_public_projection_allowlist_filters_provider_model;
+          Alcotest.test_case "to_json preserves full decision" `Quick
+            test_to_json_preserves_full_decision;
+          Alcotest.test_case "public_to_json redacts decision" `Quick
+            test_public_to_json_redacts_decision;
           Alcotest.test_case
             "runtime manifest contract omits provider/model fields"
             `Quick

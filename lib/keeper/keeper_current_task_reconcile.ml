@@ -155,7 +155,17 @@ let sync_current_task_id_from_backlog ~(config : Coord.config)
           | Some task_id -> Keeper_id.Task_id.to_string task_id
           | None -> "(cleared)")
          msg);
-    Log.Keeper.info
+    (* RFC-0142 / audit 2026-05-21 §10.2: this is the success path of a
+       routine drift correction, firing on every observed delta between
+       keeper_meta.current_task_id and backlog ownership.  Live measurement
+       on 5/21 captured 1,183 events/day across the fleet — none of them
+       individually actionable (the WARN branch above + the
+       [metric_keeper_write_meta_failures] counter already cover the
+       failure case).  Demoted to DEBUG so the high-volume verbose path
+       no longer drowns the INFO stream; raise back to INFO only if a
+       per-keeper thrash investigation needs structured timing without
+       a debug-level subscription. *)
+    Log.Keeper.debug
       "keeper:%s reconciled current_task_id=%s from backlog ownership"
       meta.name
       (match desired with

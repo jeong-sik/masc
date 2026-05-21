@@ -15,6 +15,7 @@ module Keeper_registry = Masc_mcp.Keeper_registry
 module Keeper_sandbox = Masc_mcp.Keeper_sandbox
 module Keeper_sandbox_factory = Masc_mcp.Keeper_sandbox_factory
 module Keeper_sandbox_runtime = Masc_mcp.Keeper_sandbox_runtime
+module Keeper_shell_command_semantics = Masc_mcp.Keeper_shell_command_semantics
 module Keeper_shell_docker = Masc_mcp.Keeper_shell_docker
 module Keeper_types = Masc_mcp.Keeper_types
 module Keeper_alerting_path = Masc_mcp.Keeper_alerting_path
@@ -1197,7 +1198,7 @@ let test_sandbox_root_git_cwd_zero_repo_blocks_before_exec () =
   setup ~sandbox:Keeper_types.Docker
   @@ fun ~config ~meta ~playground ->
   let cwd, error =
-    Keeper_shell_docker.resolve_sandbox_root_git_cwd ~config ~meta
+    Keeper_shell_command_semantics.resolve_sandbox_root_git_cwd ~config ~meta
       ~cwd:playground ~cmd:"git status"
   in
   Alcotest.(check string) "cwd remains sandbox root" playground cwd;
@@ -1218,7 +1219,7 @@ let test_sandbox_root_git_cwd_single_repo_auto_chdir () =
   ensure_dir repo;
   run_ok ~cwd:repo "git init -q";
   let cwd, error =
-    Keeper_shell_docker.resolve_sandbox_root_git_cwd ~config ~meta
+    Keeper_shell_command_semantics.resolve_sandbox_root_git_cwd ~config ~meta
       ~cwd:playground ~cmd:"git status"
   in
   let repo =
@@ -1239,7 +1240,7 @@ let test_sandbox_root_git_cwd_multi_repo_blocks_before_exec () =
   run_ok ~cwd:repo_a "git init -q";
   run_ok ~cwd:repo_b "git init -q";
   let cwd, error =
-    Keeper_shell_docker.resolve_sandbox_root_git_cwd ~config ~meta
+    Keeper_shell_command_semantics.resolve_sandbox_root_git_cwd ~config ~meta
       ~cwd:playground ~cmd:"gh pr list"
   in
   Alcotest.(check string) "cwd remains sandbox root" playground cwd;
@@ -1251,13 +1252,12 @@ let test_sandbox_root_git_cwd_multi_repo_blocks_before_exec () =
     Alcotest.(check bool) "mentions public Bash retry shape" true
       (contains_substring msg
          "Bash { \"command\": \"gh pr list\", \"cwd\": \"repos/alpha\" }");
-    Alcotest.(check bool) "keeps legacy keeper_bash retry shape" true
-      (contains_substring msg
-         "keeper_bash { \"cmd\": \"gh pr list\", \"cwd\": \"repos/alpha\" }");
+    Alcotest.(check bool) "legacy keeper_bash retry shape removed" false
+      (contains_substring msg "keeper_bash");
     Alcotest.(check bool) "lists beta too" true
       (contains_substring msg "alpha, beta")
 
-let test_sandbox_root_git_cwd_multi_repo_cd_hint_uses_command_repo () =
+let test_sandbox_root_git_cwd_cd_chain_is_not_interpreted () =
   setup ~sandbox:Keeper_types.Docker
   @@ fun ~config ~meta ~playground ->
   let repos = Filename.concat playground "repos" in
@@ -1269,21 +1269,15 @@ let test_sandbox_root_git_cwd_multi_repo_cd_hint_uses_command_repo () =
   run_ok ~cwd:repo_a "git init -q";
   run_ok ~cwd:repo_b "git init -q";
   let cwd, error =
-    Keeper_shell_docker.resolve_sandbox_root_git_cwd ~config ~meta
+    Keeper_shell_command_semantics.resolve_sandbox_root_git_cwd ~config ~meta
       ~cwd:playground
       ~cmd:"cd repos/masc-mcp/.worktrees/keeper-nick0cave-agent-task-236 && git status"
   in
   Alcotest.(check string) "cwd remains sandbox root" playground cwd;
-  match error with
-  | None -> Alcotest.fail "expected multi repo cwd guidance"
-  | Some msg ->
-    Alcotest.(check bool) "suggests stripped command" true
-      (contains_substring msg "\"command\": \"git status\"");
-    Alcotest.(check bool) "suggests command-selected worktree cwd" true
-      (contains_substring msg
-         "\"cwd\": \"repos/masc-mcp/.worktrees/keeper-nick0cave-agent-task-236\"");
-    Alcotest.(check bool) "does not suggest unrelated first repo" false
-      (contains_substring msg "\"cwd\": \"repos/grpc-direct\"")
+  Alcotest.(check (option string))
+    "unsupported logic chain is not interpreted as git cwd policy"
+    None
+    error
 
 let test_git_creds_skips_missing_ssh_auth_sock () =
   with_fake_docker fake_docker_echo_script @@ fun () ->
@@ -1529,7 +1523,7 @@ let test_bash_fake_docker_executes () =
   Alcotest.(check bool) "bash output includes fake docker stdout" true
     (response_mentions raw "output" "stdout:")
 
-let test_bash_blocks_validator_safe_pipe_redirect_with_recovery_plan () =
+let test_bash_allows_validator_safe_pipe_redirect_in_docker_route () =
   with_tool_policy_config @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
@@ -1548,24 +1542,15 @@ let test_bash_blocks_validator_safe_pipe_redirect_with_recovery_plan () =
           ])
       ()
   in
-  let json = Yojson.Safe.from_string raw in
-  let recovery_plan = Json.member "recovery_plan" json in
-  Alcotest.(check (option bool)) "safe pipeline is blocked" (Some false)
+  Alcotest.(check (option bool)) "safe pipeline is allowed" (Some true)
     (parse_bool_field raw "ok");
   Alcotest.(check (option string))
-    "shape-block error"
-    (Some "keeper_bash_command_shape_blocked")
-    (parse_string_field raw "error");
-  Alcotest.(check string)
-    "required next tool"
-    "Bash"
-    (Json.member "required_next_tool" json |> Json.to_string);
-  Alcotest.(check string)
-    "recovery command placeholder"
-    "PRIMARY_COMMAND_WITHOUT_PIPE_OR_REDIRECT"
-    Yojson.Safe.Util.(
-      recovery_plan |> member "next_args" |> member "command" |> to_string);
-  Alcotest.(check bool) "docker was not invoked" false
+    "safe pipeline routes through docker"
+    (Some "docker")
+    (parse_string_field raw "via");
+  Alcotest.(check bool) "bash output includes fake docker stdout" true
+    (response_mentions raw "output" "stdout:");
+  Alcotest.(check bool) "docker was invoked" true
     (Sys.file_exists log_path)
 
 let test_bash_rg_no_match_remains_successful_in_docker_route () =
@@ -1703,7 +1688,7 @@ let test_bash_search_pipeline_exposes_structured_recovery_plan () =
     (Json.member "next_tool" recovery_plan |> Json.to_string);
   Alcotest.(check string)
     "recovery pattern"
-    "SEARCH_TERM"
+    "TODO"
     (Json.member "pattern" next_args |> Json.to_string);
   Alcotest.(check bool)
     "same args retry forbidden"
@@ -1882,8 +1867,8 @@ let () =
             "docker keeper bash executes through fake docker"
             `Quick test_bash_fake_docker_executes;
           Alcotest.test_case
-            "docker keeper bash pipe redirects expose structured recovery"
-            `Quick test_bash_blocks_validator_safe_pipe_redirect_with_recovery_plan;
+            "docker keeper bash safe pipe redirect routes through docker"
+            `Quick test_bash_allows_validator_safe_pipe_redirect_in_docker_route;
           Alcotest.test_case
             "docker keeper bash rg no-match remains successful"
             `Quick test_bash_rg_no_match_remains_successful_in_docker_route;
@@ -1976,8 +1961,8 @@ let () =
             "sandbox-root git with multiple repos gives cwd correction"
             `Quick test_sandbox_root_git_cwd_multi_repo_blocks_before_exec;
           Alcotest.test_case
-            "sandbox-root git cd-chain hint uses command repo"
+            "sandbox-root git cd-chain is not interpreted by cwd policy"
             `Quick
-            test_sandbox_root_git_cwd_multi_repo_cd_hint_uses_command_repo;
+            test_sandbox_root_git_cwd_cd_chain_is_not_interpreted;
         ] );
     ]

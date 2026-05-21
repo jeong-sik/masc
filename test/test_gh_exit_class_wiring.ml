@@ -1,28 +1,37 @@
 (* test/test_gh_exit_class_wiring.ml
 
-   Verifies that the docker-sandbox JSON emission path calls
-   [Gh_exit_class.classify] for gh commands and increments the
-   matching [Legendary_counters] bucket, without touching counters
-   for non-gh commands. Covers only the helper surface — the docker
-   exec itself is out of scope for a unit test. *)
+   Verifies that the shared command-semantics predicate identifies gh
+   commands, and that the docker-sandbox JSON emission path consumes
+   that predicate to call [Gh_exit_class.classify] and increment the
+   matching [Legendary_counters] bucket. Covers only the helper surface
+   — the docker exec itself is out of scope for a unit test. *)
 
 module KSD = Masc_mcp.Keeper_shell_docker
+module KSC = Masc_mcp.Keeper_shell_command_semantics
 module LC = Masc_mcp.Legendary_counters
 module GEC = Masc_mcp.Gh_exit_class
 
 let test_cmd_targets_gh_positive () =
   Alcotest.(check bool) "gh pr list → true" true
-    (KSD.cmd_targets_gh "gh pr list");
-  Alcotest.(check bool) "cd /repo && gh pr view 1 → true" true
-    (KSD.cmd_targets_gh "cd /repo && gh pr view 1")
+    (KSC.cmd_targets_gh "gh pr list");
+  Alcotest.(check bool) "env-wrapped gh → true" true
+    (KSC.cmd_targets_gh "env GH_TOKEN=redacted gh pr view 1");
+  Alcotest.(check bool) "opam exec -- gh → true" true
+    (KSC.cmd_targets_gh "opam exec -- gh pr view 1")
 
 let test_cmd_targets_gh_negative () =
   Alcotest.(check bool) "git status → false" false
-    (KSD.cmd_targets_gh "git status");
+    (KSC.cmd_targets_gh "git status");
   Alcotest.(check bool) "ls -la → false" false
-    (KSD.cmd_targets_gh "ls -la");
+    (KSC.cmd_targets_gh "ls -la");
+  Alcotest.(check bool) "literal gh arg is not a command" false
+    (KSC.cmd_targets_gh "echo gh");
+  Alcotest.(check bool) "logic chain is not interpreted" false
+    (KSC.cmd_targets_gh "cd /repo && gh pr view 1");
+  Alcotest.(check bool) "opam exec option is not guessed" false
+    (KSC.cmd_targets_gh "opam exec --switch default gh pr view 1");
   Alcotest.(check bool) "empty → false" false
-    (KSD.cmd_targets_gh "")
+    (KSC.cmd_targets_gh "")
 
 let test_field_empty_for_non_gh () =
   LC.reset ();

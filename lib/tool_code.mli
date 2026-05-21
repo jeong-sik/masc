@@ -65,10 +65,8 @@ val agent_playground_rel :
   config:Coord.config ->
   agent_name:string ->
   string
-(** [agent_playground_rel ~config ~agent_name] returns the backend-scoped
-    keeper playground root relative to [config.base_path]. Docker keepers
-    resolve under [.masc/playground/docker/<keeper>/]; local keepers resolve
-    under [.masc/playground/<keeper>/]. *)
+(** [agent_playground_rel ~config ~agent_name] returns the keeper sandbox
+    root relative to [config.base_path], as defined by {!Keeper_sandbox}. *)
 
 val normalize_agent_relative_path :
   config:Coord.config ->
@@ -76,11 +74,10 @@ val normalize_agent_relative_path :
   string ->
   string
 (** [normalize_agent_relative_path ~config ~agent_name raw_path]
-    translates between three path forms:
+    translates between sandbox path forms:
 
-    + Container-side absolute paths
-      ([/home/keeper/playground/<keeper>/<rest>]) are rewritten
-      to host-side ([<base_path>/.masc/playground/docker/<keeper>/<rest>]).
+    + Sandbox-visible absolute paths are rewritten through
+      {!Keeper_sandbox.host_path_of_visible_path}.
     + Bundle-relative paths ([.masc/playground/.../<rest>]) are
       stripped to [<rest>] when redundant.
     + Doubled-prefix paths (host bundle absolute + own_bundle_rel

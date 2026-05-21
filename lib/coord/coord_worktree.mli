@@ -173,25 +173,9 @@ val ensure_sandbox_clone_ready :
     minimally — no full TOML library — to keep the dependency footprint
     small. *)
 
-val keeper_toml_path :
-  config:Coord_utils.config -> agent_name:string -> string
-(** Absolute path of [keepers/<agent_name>/keeper.toml] for [config]. *)
-
-val strip_inline_comment : string -> string
-(** Remove a trailing [#] comment from a TOML line, respecting quoted
-    strings. *)
-
-val unquote : string -> string
-(** Strip matching surrounding quotes from a TOML value, leaving unquoted
-    values unchanged. *)
-
-val keeper_uses_docker_sandbox :
-  config:Coord_utils.config -> agent_name:string -> bool
-(** [true] when the keeper's TOML has [sandbox_profile = "docker"]. *)
-
 val repos_dir_of_keeper : Coord_utils.config -> string -> string
-(** Per-keeper sandbox repo directory:
-    [<base_path>/repos/<agent_name>/]. *)
+(** Per-keeper sandbox repo directory, derived from the neutral sandbox
+    configuration contract. *)
 
 val rm_rf : string -> unit
 (** Recursively remove [path]; silently no-op when [path] is missing. *)

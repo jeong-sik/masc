@@ -81,6 +81,7 @@ let inject_run_detached response = Queue.add response run_detached_queue
 let run plan =
   match Queue.peek_opt run_queue with
   | Some (expected, response) when Keeper_sandbox_oneshot_plan.equal plan expected ->
+    (* fire-and-forget: matched FIFO head is intentionally consumed. *)
     ignore (Queue.pop run_queue);
     response
   | _ -> Error Keeper_docker_client.Daemon_unreachable
@@ -97,6 +98,7 @@ let exec ?user:_ ?workdir:_ ?stdin:_ ~container ~cmd () =
   | Some ((expected_c, expected_cmd), response)
     when Keeper_container_name.equal container expected_c
          && String.equal cmd expected_cmd ->
+    (* fire-and-forget: matched FIFO head is intentionally consumed. *)
     ignore (Queue.pop exec_queue);
     response
   | _ -> Error Keeper_docker_client.Daemon_unreachable
@@ -112,6 +114,7 @@ let labels_equal a b =
 let ps_query ~labels =
   match Queue.peek_opt ps_query_queue with
   | Some (expected, response) when labels_equal labels expected ->
+    (* fire-and-forget: matched FIFO head is intentionally consumed. *)
     ignore (Queue.pop ps_query_queue);
     response
   | _ -> Error Keeper_docker_client.Daemon_unreachable
@@ -119,6 +122,7 @@ let ps_query ~labels =
 let rm container =
   match Queue.peek_opt rm_queue with
   | Some (expected, response) when Keeper_container_name.equal container expected ->
+    (* fire-and-forget: matched FIFO head is intentionally consumed. *)
     ignore (Queue.pop rm_queue);
     response
   | _ -> Error Keeper_docker_client.Daemon_unreachable
@@ -135,6 +139,7 @@ let info_security_options () =
 let image_present ~image =
   match Queue.peek_opt image_present_queue with
   | Some (expected, response) when String.equal image expected ->
+    (* fire-and-forget: matched FIFO head is intentionally consumed. *)
     ignore (Queue.pop image_present_queue);
     response
   | _ -> Error Keeper_docker_client.Daemon_unreachable

@@ -108,10 +108,11 @@ let take n xs =
 
 let all_digits value =
   let rec loop i =
-    i = String.length value
-    || match value.[i] with
-       | '0' .. '9' -> loop (i + 1)
-       | _ -> false
+    if i = String.length value
+    then true
+    else (
+      let code = Char.code value.[i] in
+      code >= Char.code '0' && code <= Char.code '9' && loop (i + 1))
   in
   not (String.equal value "") && loop 0
 ;;

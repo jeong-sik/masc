@@ -20,7 +20,7 @@
         },
         {
           "file": "lib/cascade/cascade_transport.ml",
-          "value": 1442
+          "value": 1391
         },
         {
           "file": "lib/config/env_config_keeper.ml",
@@ -88,7 +88,7 @@
         },
         {
           "file": "lib/keeper/keeper_run_tools.ml",
-          "value": 1779
+          "value": 1818
         },
         {
           "file": "lib/keeper/keeper_runtime.ml",
@@ -160,7 +160,7 @@
         },
         {
           "file": "lib/server/server_dashboard_http_core.ml",
-          "value": 1453
+          "value": 1422
         },
         {
           "file": "lib/server/server_dashboard_http_keeper_api.ml",
@@ -212,7 +212,7 @@
         },
         {
           "file": "lib/worker_dev_tools.ml",
-          "value": 1330
+          "value": 1371
         }
       ]
     },
@@ -1646,7 +1646,7 @@
         },
         {
           "file": "lib/keeper/keeper_run_tools.ml",
-          "value": 8
+          "value": 9
         },
         {
           "file": "lib/keeper/keeper_runtime_config.ml",
@@ -2418,7 +2418,7 @@
         },
         {
           "file": "lib/server/server_dashboard_http_core.ml",
-          "value": 11
+          "value": 10
         },
         {
           "file": "lib/server/server_dashboard_http_delete_actions.ml",
@@ -3153,7 +3153,7 @@
       ]
     },
     "ignore_no_comment": {
-      "baseline": 75,
+      "baseline": 70,
       "scope": "scripts/lint-ignore-without-comment.sh --target lib",
       "files": [
         {
@@ -3223,10 +3223,6 @@
         {
           "file": "lib/keeper/keeper_current_task_reconcile.ml",
           "value": 2
-        },
-        {
-          "file": "lib/keeper/keeper_docker_client_mock.ml",
-          "value": 5
         },
         {
           "file": "lib/keeper/keeper_exec_board.ml",

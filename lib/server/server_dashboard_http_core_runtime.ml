@@ -19,7 +19,7 @@ let dashboard_runtime ?net ?mono_clock (config : Coord.config)
   let _ = config in
   match net, mono_clock with
   | Some net, Some mono_clock -> Some { net; mono_clock }
-  | _ -> None
+  | Some _, None | None, Some _ | None, None -> None
 ;;
 
 let run_dashboard_compute

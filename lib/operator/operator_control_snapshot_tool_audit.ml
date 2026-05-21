@@ -1,7 +1,10 @@
 (** Tool audit helpers (lightweight fallback + cached JSON) for operator
     control snapshot, extracted from operator_control_snapshot.ml. *)
 
-module U = Yojson.Safe.Util
+let option_to_json = Operator_pending_confirm.option_to_json
+let string_option_to_json = Operator_pending_confirm.string_option_to_json
+let merge_tool_name_lists = Operator_control_snapshot_tool_names.merge_tool_name_lists
+let collect_recent_tool_names = Operator_control_snapshot_tool_names.collect_recent_tool_names
 
 let lightweight_tool_audit_fallback_json (meta : Keeper_types.keeper_meta) =
   let last_autonomous = String.trim meta.runtime.last_autonomous_action_at in
@@ -25,6 +28,78 @@ let lightweight_tool_audit_fallback_json (meta : Keeper_types.keeper_meta) =
         then `String meta.updated_at
         else `Null )
     ]
+;;
+
+let recent_tool_names_from_files config keeper_name =
+  let decision_lines =
+    let path = Keeper_types.keeper_decision_log_path config keeper_name in
+    if Fs_compat.file_exists path
+    then Keeper_memory.read_file_tail_lines path ~max_bytes:120000 ~max_lines:120
+    else []
+  in
+  let metrics_lines =
+    let store = Keeper_types.keeper_metrics_store config keeper_name in
+    let dated = Dated_jsonl.read_recent_lines store 120 in
+    if dated <> []
+    then dated
+    else (
+      let path = Keeper_types.keeper_metrics_path config keeper_name in
+      Keeper_memory.read_file_tail_lines path ~max_bytes:120000 ~max_lines:120)
+  in
+  merge_tool_name_lists
+    (collect_recent_tool_names decision_lines)
+    (collect_recent_tool_names metrics_lines)
+;;
+
+let keeper_tool_audit_fields
+      ?(include_allowed_tools = true)
+      config
+      (meta : Keeper_types.keeper_meta)
+  =
+  let fallback_allowed =
+    if include_allowed_tools then Keeper_exec_tools.keeper_allowed_tool_names meta else []
+  in
+  let recent_tool_names = recent_tool_names_from_files config meta.name in
+  let last_autonomous = String.trim meta.runtime.last_autonomous_action_at in
+  let fallback_snapshot =
+    match
+      Keeper_exec_status_metrics.latest_tool_audit_snapshot_from_files
+        config
+        ~keeper_name:meta.name
+    with
+    | Some snapshot ->
+      { snapshot with
+        tool_audit_at =
+          (match snapshot.tool_audit_source, snapshot.tool_audit_at with
+           | Some _, None when last_autonomous <> "" -> Some last_autonomous
+           | Some _, None -> Some meta.updated_at
+           | _ -> snapshot.tool_audit_at)
+      }
+    | None ->
+      let has_runtime_activity =
+        last_autonomous <> ""
+        || meta.runtime.autonomous_turn_count > 0
+        || meta.runtime.autonomous_action_count > 0
+      in
+      { Keeper_exec_status_metrics.empty_tool_audit_snapshot with
+        latest_tool_call_count = (if has_runtime_activity then Some 0 else None)
+      ; tool_audit_source =
+          (if has_runtime_activity then Some "keeper_runtime_meta" else None)
+      ; tool_audit_at =
+          (if last_autonomous <> ""
+           then Some last_autonomous
+           else if has_runtime_activity
+           then Some meta.updated_at
+           else None)
+      }
+  in
+  ( fallback_allowed
+  , recent_tool_names
+  , fallback_snapshot.latest_tool_names
+  , fallback_snapshot.latest_tool_call_count
+  , fallback_snapshot.latest_action_source
+  , fallback_snapshot.tool_audit_source
+  , fallback_snapshot.tool_audit_at )
 ;;
 
 let cached_tool_audit_json

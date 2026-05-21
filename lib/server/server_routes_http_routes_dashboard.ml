@@ -113,106 +113,23 @@ let sync_keeper_cascade_meta ~(config : Coord.config) ~(name : string)
             | Error msg ->
                 Error ("write_meta failed after TOML update: " ^ msg)))
 
-let dashboard_dev_actor_name = "dashboard"
+(* Dashboard dev-token cluster extracted to
+   [Server_routes_http_dashboard_dev_token] (godfile decomp). *)
 
-let dashboard_dev_token_path base_path =
-  Filename.concat
-    (Filename.concat (Common.masc_dir_from_base_path ~base_path) "auth")
-    "dashboard.token"
+let dashboard_dev_actor_name = Server_routes_http_dashboard_dev_token.dashboard_dev_actor_name
+let dashboard_dev_token_path = Server_routes_http_dashboard_dev_token.dashboard_dev_token_path
+let legacy_dashboard_dev_token_path = Server_routes_http_dashboard_dev_token.legacy_dashboard_dev_token_path
+let remove_dashboard_dev_token_file_if_exists = Server_routes_http_dashboard_dev_token.remove_dashboard_dev_token_file_if_exists
 
-let legacy_dashboard_dev_token_path base_path =
-  Filename.concat
-    (Filename.concat (Common.masc_dir_from_base_path ~base_path) "auth")
-    "dashboard-dev.token"
-
-let remove_dashboard_dev_token_file_if_exists path =
-  if Fs_compat.file_exists path then
-    try Sys.remove path
-    with exn ->
-      Log.Server.warn
-        "dashboard dev-token cleanup skipped for %s: %s"
-        path (Printexc.to_string exn)
-
-type dashboard_dev_token_candidate =
+type dashboard_dev_token_candidate = Server_routes_http_dashboard_dev_token.dashboard_dev_token_candidate =
   | Reusable of string
   | Rotate
 
-let classify_dashboard_dev_token_candidate ~base_path raw :
-    (dashboard_dev_token_candidate, string) result =
-  let trimmed = String.trim raw in
-  if String.equal trimmed "" then
-    Ok Rotate
-  else
-    match Auth.resolve_agent_from_token base_path ~token:trimmed with
-    | Ok owner when String.equal owner dashboard_dev_actor_name ->
-        Ok (Reusable trimmed)
-    | Ok _owner ->
-        Ok Rotate
-    | Error (Masc_domain.Auth (Masc_domain.Auth_error.InvalidToken _ | Masc_domain.Auth_error.TokenExpired _ | Masc_domain.Auth_error.Unauthorized _)) ->
-        Ok Rotate
-    | Error err ->
-        Error (Masc_domain.masc_error_to_string err)
-
-let read_reusable_dashboard_dev_token ~base_path path :
-    (string option, string) result =
-  if not (Fs_compat.file_exists path) then
-    Ok None
-  else
-    try
-      match classify_dashboard_dev_token_candidate ~base_path
-              (Fs_compat.load_file path) with
-      | Ok (Reusable raw) -> Ok (Some raw)
-      | Ok Rotate -> Ok None
-      | Error msg -> Error msg
-    with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | exn ->
-        Log.Server.warn
-          "dashboard dev-token read skipped for %s: %s"
-          path (Printexc.to_string exn);
-        Ok None
-
-let persist_dashboard_dev_token ~base_path raw : (unit, string) result =
-  let token_path = dashboard_dev_token_path base_path in
-  let legacy_path = legacy_dashboard_dev_token_path base_path in
-  try
-    Auth.save_private_text_file token_path raw;
-    remove_dashboard_dev_token_file_if_exists legacy_path;
-    Ok ()
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn ->
-      Error (Printf.sprintf "persist dev-token: %s" (Printexc.to_string exn))
-
-let mint_dashboard_dev_token base_path : (string, string) result =
-  match
-    Auth.create_token base_path
-      ~agent_name:dashboard_dev_actor_name ~role:Masc_domain.Admin
-  with
-  | Ok (raw, _cred) ->
-      (match persist_dashboard_dev_token ~base_path raw with
-       | Ok () -> Ok raw
-       | Error msg -> Error msg)
-  | Error err ->
-      Error (Masc_domain.masc_error_to_string err)
-
-let ensure_dashboard_dev_token base_path : (string, string) result =
-  let token_path = dashboard_dev_token_path base_path in
-  let legacy_path = legacy_dashboard_dev_token_path base_path in
-  match read_reusable_dashboard_dev_token ~base_path token_path with
-  | Error msg -> Error msg
-  | Ok (Some raw) ->
-      remove_dashboard_dev_token_file_if_exists legacy_path;
-      Ok raw
-  | Ok None ->
-      (match read_reusable_dashboard_dev_token ~base_path legacy_path with
-       | Error msg -> Error msg
-       | Ok (Some raw) ->
-           (match persist_dashboard_dev_token ~base_path raw with
-            | Ok () -> Ok raw
-            | Error msg -> Error msg)
-       | Ok None -> mint_dashboard_dev_token base_path)
-
+let classify_dashboard_dev_token_candidate = Server_routes_http_dashboard_dev_token.classify_dashboard_dev_token_candidate
+let read_reusable_dashboard_dev_token = Server_routes_http_dashboard_dev_token.read_reusable_dashboard_dev_token
+let persist_dashboard_dev_token = Server_routes_http_dashboard_dev_token.persist_dashboard_dev_token
+let mint_dashboard_dev_token = Server_routes_http_dashboard_dev_token.mint_dashboard_dev_token
+let ensure_dashboard_dev_token = Server_routes_http_dashboard_dev_token.ensure_dashboard_dev_token
 (** Broadcast handler: parse JSON body, extract "message" string field, and
     relay via Coord.broadcast.  Error responses are encoded through Yojson so
     exception messages cannot break JSON framing via embedded quotes. *)

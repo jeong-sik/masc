@@ -1,9 +1,9 @@
 ---
 rfc: "0135"
 title: "Dashboard Keeper Operational Surface — Typed SSOT"
-status: Active
+status: Implemented
 created: 2026-05-19
-updated: 2026-05-21
+updated: 2026-05-22
 author: vincent
 supersedes: []
 superseded_by: null

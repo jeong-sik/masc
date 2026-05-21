@@ -4,7 +4,7 @@ type provider_error =
   | RateLimit of {
       retry_after : float option;
     }
-  | CapacityExhausted of {
+  | CapacityBackpressure of {
       scope : capacity_scope;
     }
   | AuthError
@@ -38,7 +38,7 @@ let scope_to_string = function
 
 let to_error_kind = function
   | RateLimit _ -> "rate_limit"
-  | CapacityExhausted _ -> "capacity_exhausted"
+  | CapacityBackpressure _ -> "capacity_backpressure"
   | AuthError -> "auth_error"
   | ServerError _ -> "server_error"
   | InvalidRequest _ -> "invalid_request"
@@ -66,10 +66,10 @@ let to_yojson = function
           ("retry_after", float_option_to_yojson retry_after);
           ("provider", `String public_runtime_provider_label);
         ]
-  | CapacityExhausted { scope } ->
+  | CapacityBackpressure { scope } ->
       `Assoc
         [
-          ("kind", `String "capacity_exhausted");
+          ("kind", `String "capacity_backpressure");
           ("scope", `String (scope_to_string scope));
           ("affected", string_list_to_yojson [ public_runtime_provider_label ]);
         ]
@@ -145,12 +145,12 @@ let affected_providers = function
   | CliWrappedResumableSession _
   | PermissionDenied _
   | ModelNotFound
-  | CapacityExhausted _ ->
+  | CapacityBackpressure _ ->
       [ public_runtime_provider_label ]
   | ServerError _ -> []
 
-let is_capacity_exhausted = function
-  | CapacityExhausted _ -> true
+let is_capacity_backpressure = function
+  | CapacityBackpressure _ -> true
   | RateLimit _
   | AuthError
   | ServerError _

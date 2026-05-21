@@ -664,16 +664,16 @@ let transient_http_status code =
   code = 408 || code = 409 || code = 425 || code = 429 || code >= 500
 
 let provider_capacity ?(scope = `Provider) _provider =
-  Some (Provider_error.CapacityExhausted { scope })
+  Some (Provider_error.CapacityBackpressure { scope })
 
-let retry_api_error_to_provider_error ~provider ~capacity_exhausted api_error =
+let retry_api_error_to_provider_error ~provider ~capacity_backpressure api_error =
   let provider = provider_label provider in
   match api_error with
   | Llm_provider.Retry.RateLimited { retry_after; _ } ->
-      if capacity_exhausted then provider_capacity provider
+      if capacity_backpressure then provider_capacity provider
       else Some (Provider_error.RateLimit { retry_after })
   | Llm_provider.Retry.Overloaded _ ->
-      if capacity_exhausted then provider_capacity provider
+      if capacity_backpressure then provider_capacity provider
       else Some (Provider_error.ServerError { code = 529; transient = true })
   | Llm_provider.Retry.ServerError { status; _ } ->
       Some
@@ -681,7 +681,7 @@ let retry_api_error_to_provider_error ~provider ~capacity_exhausted api_error =
            { code = status; transient = transient_http_status status })
   | Llm_provider.Retry.AuthError _ -> Some Provider_error.AuthError
   | Llm_provider.Retry.InvalidRequest { message } ->
-      if capacity_exhausted then provider_capacity provider
+      if capacity_backpressure then provider_capacity provider
       else Some (Provider_error.InvalidRequest { reason = message })
   | Llm_provider.Retry.NotFound { message } ->
       Some (Provider_error.InvalidRequest { reason = message })
@@ -689,7 +689,7 @@ let retry_api_error_to_provider_error ~provider ~capacity_exhausted api_error =
       provider_capacity ~scope:`Model provider
   | Llm_provider.Retry.NetworkError _
   | Llm_provider.Retry.Timeout _ ->
-      if capacity_exhausted then provider_capacity provider else None
+      if capacity_backpressure then provider_capacity provider else None
 
 let sdk_provider_error_to_provider_error = function
   | Llm_provider.Error.RateLimit { retry_after; _ } ->
@@ -698,7 +698,7 @@ let sdk_provider_error_to_provider_error = function
       Some (Provider_error.CliWrappedHardQuota { detail })
   | Llm_provider.Error.CapacityExhausted { scope; _ } ->
       Some
-        (Provider_error.CapacityExhausted
+        (Provider_error.CapacityBackpressure
            { scope = provider_error_capacity_scope scope })
   | Llm_provider.Error.AuthError _
   | Llm_provider.Error.MissingApiKey _ ->
@@ -723,7 +723,7 @@ let sdk_error_to_provider_error ~provider err =
   match err with
   | Agent_sdk.Error.Api api_err ->
       retry_api_error_to_provider_error ~provider
-        ~capacity_exhausted:(sdk_error_is_hard_quota err)
+        ~capacity_backpressure:(sdk_error_is_hard_quota err)
         api_err
   | Agent_sdk.Error.Provider provider_err ->
       sdk_provider_error_to_provider_error provider_err
@@ -752,7 +752,7 @@ let () =
     ()
 
 let provider_error_capacity_scope_label = function
-  | Provider_error.CapacityExhausted { scope } ->
+  | Provider_error.CapacityBackpressure { scope } ->
       Provider_error.scope_to_string scope
   | Provider_error.RateLimit _
   | Provider_error.AuthError
@@ -941,7 +941,7 @@ let emit_sdk_provider_error_metric ~cascade_name ~provider err =
    429 should already deprioritize the provider"). Threshold-counting via
    [record_failure] would burn 2 additional cascade attempts on a
    provider that has just declared it cannot serve. *)
-let sdk_error_capacity_exhausted_retry_after_s (err : Agent_sdk.Error.sdk_error)
+let sdk_error_capacity_backpressure_retry_after_s (err : Agent_sdk.Error.sdk_error)
   : float option option =
   match err with
   | Agent_sdk.Error.Provider

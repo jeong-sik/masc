@@ -37,7 +37,7 @@ type cascade_failure_class =
   | Network_error
   | Provider_timeout
   | Provider_terminal
-  | Provider_capacity_exhausted
+  | Provider_capacity_backpressure
   | Provider_hard_quota
   | Provider_capability_mismatch
   | Provider_cli_policy_invalid

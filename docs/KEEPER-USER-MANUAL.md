@@ -387,20 +387,21 @@ guardrail:
 
 ### 3.1.2 Legendary Bash 도구 표면
 
-`keeper_bash` 및 형제 도구(`keeper_bash_output`, `keeper_bash_kill`)는
-claude-code BashTool / BashOutput / KillShell 시맨틱을 OCaml + Eio로
-체화한 Legendary Bash 구현이다. 운영자 flag 매트릭스와 flip 절차는
+`keeper_bash`는 claude-code BashTool 시맨틱 중 현재 남은 foreground
+typed 실행 surface를 OCaml + Eio로 체화한 Legendary Bash 구현이다.
+운영자 flag 매트릭스와 flip 절차는
 [`LEGENDARY-BASH-RUNBOOK.md`](./LEGENDARY-BASH-RUNBOOK.md) 단일 문서가
 SSOT다. 여기서는 keeper 운영자 입장에서 알아야 할 호출 규약만 짧게
 정리한다.
 
 #### `keeper_bash`
 
-한 번 호출에 **하나의 명령**만 실행한다. `&&` / `||` / `;` 체이닝,
-리다이렉트(`>`, `>>`), command substitution, background operator는 사전
-gate에서 거부된다. 파이프라인은 active preset/validator가 모든 segment를
-허용하는 경우에만 통과할 수 있다. 필요한 경우 호출을 나눠 발행하고,
-검색/파일/히스토리는 `keeper_shell`의 구조화 op를 우선 사용한다.
+`keeper_bash`는 typed-only다. 단일 프로세스는 `executable`/`argv`,
+파이프라인은 `pipeline` 또는 `stages` 배열로 표현한다. `argv` 안의
+`|`, `>`, `&&`, `$()` 같은 문자는 shell syntax가 아니라 데이터다.
+실제 파이프는 `pipeline`/`stages`로만 표현한다. 필요한 경우 호출을
+나눠 발행하고, 검색/파일/히스토리는 `keeper_shell`의 구조화 op를 우선
+사용한다.
 
 `keeper_shell op=bash`는 지원하지 않는다. 실제 명령 실행은
 `Bash`/`keeper_bash`가 담당하고, Legendary Bash gate와 write/sandbox
@@ -408,10 +409,12 @@ gate에서 거부된다. 파이프라인은 active preset/validator가 모든 se
 
 | 필드 | 기본값 | 의미 |
 | --- | --- | --- |
-| `cmd` | 필수 | 실행할 단일 명령. 예: `dune build`, `rg foo lib/`. |
+| `executable` | 단일 실행 시 필수 | allowlist된 실행 파일 이름. 예: `rg`, `git`, `opam`. |
+| `argv` | `[]` | `executable`에 그대로 전달되는 인자 배열. |
+| `pipeline` / `stages` | 파이프라인 실행 시 필수 | 각 stage가 `executable`/`argv`를 갖는 명시적 Shell IR 파이프라인. |
+| `env` | `{}` | typed 환경 변수 바인딩. 키는 `[A-Za-z0-9_]+`, 값은 string. |
 | `cwd` | keeper playground | 허용된 경로 내에서만 지정 가능. `repos/X` 같은 상대 경로가 자동 해석된다. |
-| `timeout_sec` | 30 (최대 180) | 초 단위 타임아웃. `run_in_background=true`에서 `0`이면 무한. |
-| `run_in_background` | false | `true`이면 즉시 `background_task_id`와 함께 반환, 실제 실행은 백그라운드에서 계속된다. |
+| `timeout_sec` | 30 (최대 180) | foreground typed 실행의 초 단위 타임아웃. |
 
 응답 JSON에는 `status` / `stdout` / `stderr` 외에, 운영자 flag가 켜져
 있을 때만 다음 추가 필드가 포함된다. 세부 시맨틱은 RUNBOOK 참조.
@@ -421,40 +424,13 @@ gate에서 거부된다. 파이프라인은 active preset/validator가 모든 se
 - `verifiable_markers` — `MASC_BASH_VERIFIABLE_MARKERS`가 기본 on.
   `Test_pass {count}`, `Build_ok`, `Lint_clean` 등 verifier cascade가
   regex scraping 없이 소비할 수 있는 타입 마커.
-- `promoted` / `background_task_id` / `partial_output` —
-  `MASC_BASH_AUTO_BG=true` 상태에서 foreground 실행이 blocking budget
-  (`MASC_BLOCKING_BUDGET_MS`, 기본 15 000 ms)을 넘으면 자동으로 bg로
-  승격되어 삽입된다. 기본은 opt-in, flip 전 `AUTO_BG_OBSERVE` observer가
-  prod 데이터를 먼저 누적한다.
-
-#### 백그라운드 작업 생명주기
-
-`run_in_background=true`로 시작한 작업은 `keeper_bash_output`으로
-증분 폴링하고 `keeper_bash_kill`로 종료한다.
-
-`keeper_bash_output` 응답:
-
-- `stdout_since` / `stderr_since`에 누적 오프셋이 들어온다. 다음 폴링
-  호출에서 그 값을 다시 전달해 중복 읽기를 방지한다.
-- `closed=true`이면 프로세스가 종료된 뒤다. `exit`과 함께 고정된 최종
-  `semantic_exit`을 확인할 수 있다.
-- 현재 구현은 stderr를 stdout으로 병합하므로 stderr 측 커서는 대개 비어
-  있다.
-
-`keeper_bash_kill`:
-
-- 기본 SIGTERM → grace 2.0 s → SIGKILL 순서로 tree-kill한다. 프로세스
-  그룹 전체 (`-pgid`)를 대상으로 하므로 자식 fiber까지 함께 종료된다.
-- 이미 종료된 task에 대해서도 idempotent하게 안전하다.
-- `grace_sec`은 최대 30 초까지 조정 가능하다.
 
 #### 관찰 & 롤아웃
 
-dark-launch observer 두 개 (`MASC_BASH_AST_SHADOW_LOG`,
-`MASC_BASH_AUTO_BG_OBSERVE`)는 **기본 off**이며, operator가 flip 전
-prod 증거를 수집할 때 켠다. 로그 라인 포맷과 grep recipe, flip
-기준은 [`LEGENDARY-BASH-RUNBOOK.md`](./LEGENDARY-BASH-RUNBOOK.md)
-단일 문서를 따른다. env flag 전체 표는
+live observer는 shell gate counter와 semantic marker 계열만 남는다.
+로그 라인 포맷과 grep recipe, flip 기준은
+[`LEGENDARY-BASH-RUNBOOK.md`](./LEGENDARY-BASH-RUNBOOK.md) 단일 문서를
+따른다. env flag 전체 표는
 [`ENV-CONTRACT.md §4`](./ENV-CONTRACT.md)에 정의되어 있다.
 
 ### 3.2 페르소나 로드 필드 (Profile-Loaded)

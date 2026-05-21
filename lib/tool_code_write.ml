@@ -63,7 +63,7 @@ let code_shell_allowlist_policy
       ~(allowed_commands : string list)
       ()
   : Exec_shell_gate.allowlist_policy =
-  { allowed_commands; allow_pipes; redirect_allowed = true }
+  { allowed_commands; allow_pipes; redirect_allowed = false }
 ;;
 
 let validate_code_shell_command_block_reason

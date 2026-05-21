@@ -168,8 +168,8 @@ let block_reason_to_string = function
      use keeper_fs_edit."
   | Process_substitution -> "Process substitution (<(...) or >(...)) is not allowed."
   | Unsafe_redirect ->
-    "File redirects are not allowed. Only fd redirects like 2>&1 and \
-     /dev/null sinks like 2>/dev/null are permitted."
+    "Redirect syntax is not allowed in this shell surface. Consume stdout/stderr \
+     directly from the tool response, and use a dedicated write tool for files."
   | Pipes_not_allowed -> "Pipes are not allowed. Run one command per call."
   | Direct_dune_invocation ->
     "Direct `dune` is blocked in local agent shells because it bypasses \
@@ -405,8 +405,8 @@ let validate_command_coding_with_allowlist
 ;;
 
 (** Relaxed command validation for Coding/Full preset keepers.
-    Allows pipes and redirects; validates every command in the pipeline
-    against [dev_allowed_commands]. *)
+    Allows pipes; redirects remain blocked by the shell gate. Validates every
+    command in the pipeline against [dev_allowed_commands]. *)
 let validate_command_coding ?caller cmd =
   validate_command_coding_with_allowlist
     ?caller

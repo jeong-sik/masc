@@ -11,10 +11,11 @@ let split_wrapper_words cmd =
     words
     |> List.map (fun word -> word.Masc_exec_bash_parser.Bash_words.value)
     |> List.filter (fun token -> token <> "")
-  | Ok _ | Error _ ->
-    String.split_on_char ' ' cmd
-    |> List.map String.trim
+  | Ok (words :: _) ->
+    words
+    |> List.map (fun word -> word.Masc_exec_bash_parser.Bash_words.value)
     |> List.filter (fun token -> token <> "")
+  | Ok [] | Error _ -> []
 ;;
 let strip_wrapping_quotes token =
   let len = String.length token in

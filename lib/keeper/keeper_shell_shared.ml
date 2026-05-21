@@ -271,7 +271,8 @@ let diagnosis_of_block_reason reason =
   | Worker_dev_tools.Unsafe_redirect ->
       Some { Exec_core.rule_id = "command_redirect_blocked"
             ; explanation =
-                "> and >> redirect output to files; use a dedicated write tool."
+                "Redirect syntax changes process I/O outside the typed command \
+                 contract."
             ; rewrite = None
             ; tool_suggestion = Some "Write" }
   | Worker_dev_tools.Injection ->

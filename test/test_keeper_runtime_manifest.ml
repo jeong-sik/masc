@@ -1723,6 +1723,7 @@ let test_successful_provider_turn_links_runtime_artifacts () =
               M.Provider_attempt_finished;
               M.Checkpoint_saved;
               M.State_snapshot_sidecar_saved;
+              M.Working_state_sidecar_saved;
               M.Receipt_appended;
               M.Turn_finished;
             ];
@@ -1828,6 +1829,52 @@ let test_successful_provider_turn_links_runtime_artifacts () =
             "latest state sidecar exists"
             true
             (Sys.file_exists latest_state_path);
+          let working_row = require_manifest_event M.Working_state_sidecar_saved rows in
+          let working_path =
+            require_some "working state sidecar path"
+              (json_string_member_opt
+                 "working_state_sidecar_path"
+                 working_row.M.decision)
+          in
+          let latest_working_path =
+            require_some "latest working state sidecar path"
+              (json_string_member_opt
+                 "latest_working_state_sidecar_path"
+                 working_row.M.decision)
+          in
+          Alcotest.(check bool)
+            "working state sidecar exists"
+            true
+            (Sys.file_exists working_path);
+          Alcotest.(check string)
+            "working state sidecar uses keeper turn filename"
+            (Printf.sprintf "turn-%06d.json" keeper_turn_id)
+            (Filename.basename working_path);
+          let working_json = Yojson.Safe.from_file working_path in
+          Alcotest.(check int)
+            "working state sidecar keeper turn id"
+            keeper_turn_id
+            (json_int_member "keeper_turn_id" working_json);
+          Alcotest.(check int)
+            "working state sidecar OAS turn count"
+            result.turn_count
+            (json_int_member "oas_turn_count" working_json);
+          Alcotest.(check bool)
+            "latest working state sidecar exists"
+            true
+            (Sys.file_exists latest_working_path);
+          let working_state_json =
+            Yojson.Safe.Util.(working_json |> member "working_state")
+          in
+          Alcotest.(check string)
+            "working state vessel schema"
+            "keeper_working_state.v1"
+            (require_some "working state schema"
+               (json_string_member_opt "schema_version" working_state_json));
+          Alcotest.(check int)
+            "working state active count matches vessel"
+            (json_int_member "active_open_loop_count" working_json)
+            (json_list_length "active_loops" working_state_json);
           let status, api_json =
             Masc_mcp.Server_dashboard_http_keeper_api.keeper_runtime_trace_json
               config meta.name ~trace_id ~turn_id:keeper_turn_id ()
@@ -2246,6 +2293,7 @@ let test_wired_manifest_sites () =
           "Keeper_runtime_manifest.Context_compacted";
           "Keeper_runtime_manifest.Context_injected";
           "Keeper_runtime_manifest.State_snapshot_sidecar_saved";
+          "Keeper_runtime_manifest.Working_state_sidecar_saved";
           "Keeper_runtime_manifest.Checkpoint_loaded";
           "Keeper_runtime_manifest.Tool_surface_selected";
           "Keeper_runtime_manifest.Checkpoint_saved";
@@ -2253,6 +2301,8 @@ let test_wired_manifest_sites () =
           "Keeper_runtime_manifest.Turn_finished";
           "state-snapshots";
           "state-snapshot.latest.json";
+          "working-state";
+          "working-state.latest.json";
         ] );
       ( "lib/keeper/keeper_turn_driver.ml",
         [

@@ -1283,6 +1283,14 @@ let run_turn
                     let latest_state_snapshot_sidecar_path =
                       Filename.concat session.session_dir "state-snapshot.latest.json"
                     in
+                    let working_state_sidecar_path =
+                      Filename.concat
+                        (Filename.concat session.session_dir "working-state")
+                        (Printf.sprintf "turn-%06d.json" manifest_keeper_turn_id)
+                    in
+                    let latest_working_state_sidecar_path =
+                      Filename.concat session.session_dir "working-state.latest.json"
+                    in
                     let state_snapshot_ts = Masc_domain.now_iso () in
                     let state_snapshot_updated_at_unix = Time_compat.now () in
                     let working_state =
@@ -1312,6 +1320,23 @@ let run_turn
                           ( "state_snapshot",
                             Keeper_memory_policy.keeper_state_snapshot_to_json
                               state_snapshot );
+                          ( "working_state",
+                            Keeper_working_state.to_json working_state );
+                        ]
+                    in
+                    let working_state_payload =
+                      `Assoc
+                        [
+                          ("schema_version", `Int 1);
+                          ("ts", `String state_snapshot_ts);
+                          ("keeper_name", `String meta.name);
+                          ("agent_name", `String meta.agent_name);
+                          ("trace_id", `String trace_id);
+                          ("generation", `Int generation);
+                          ("keeper_turn_id", `Int manifest_keeper_turn_id);
+                          ("oas_turn_count", `Int result.turns);
+                          ("source", `String state_snapshot_source);
+                          ("active_open_loop_count", `Int active_open_loop_count);
                           ( "working_state",
                             Keeper_working_state.to_json working_state );
                         ]
@@ -1357,6 +1382,45 @@ let run_turn
                           ();
                         false
                     in
+                    let working_state_sidecar_saved =
+                      let sidecar_dir =
+                        Filename.dirname working_state_sidecar_path
+                      in
+                      (try Fs_compat.mkdir_p sidecar_dir with
+                       | exn ->
+                         Log.Keeper.warn
+                           "keeper:%s working state sidecar dir create failed: %s"
+                           meta.name
+                           (Printexc.to_string exn));
+                      match
+                        Fs_compat.save_file_atomic working_state_sidecar_path
+                          (Yojson.Safe.pretty_to_string working_state_payload)
+                      with
+                      | Ok () -> (
+                        match
+                          Fs_compat.save_file_atomic
+                            latest_working_state_sidecar_path
+                            (Yojson.Safe.pretty_to_string working_state_payload)
+                        with
+                        | Ok () -> true
+                        | Error e ->
+                          Log.Keeper.warn
+                            "keeper:%s latest working state sidecar save failed: %s"
+                            meta.name
+                            e;
+                          false)
+                      | Error e ->
+                        Log.Keeper.warn
+                          "keeper:%s working state sidecar save failed: %s"
+                          meta.name
+                          e;
+                        Prometheus.inc_counter
+                          Keeper_metrics.metric_keeper_checkpoint_failures
+                          ~labels:
+                            [ "keeper", meta.name; "site", "working_state_sidecar" ]
+                          ();
+                        false
+                    in
                     append_manifest ~site:"state_snapshot_sidecar"
                       ~keeper_turn_id:manifest_keeper_turn_id
                       ~oas_turn_count:result.turns
@@ -1382,6 +1446,31 @@ let run_turn
                               `String state_snapshot_source );
                           ])
                       Keeper_runtime_manifest.State_snapshot_sidecar_saved;
+                    append_manifest ~site:"working_state_sidecar"
+                      ~keeper_turn_id:manifest_keeper_turn_id
+                      ~oas_turn_count:result.turns
+                      ~status:
+                        (if working_state_sidecar_saved then "saved" else "error")
+                      ~decision:
+                        (`Assoc
+                          [
+                            ( "working_state_sidecar_path",
+                              `String working_state_sidecar_path );
+                            ( "latest_working_state_sidecar_path",
+                              `String latest_working_state_sidecar_path );
+                            ( "working_state_sidecar_saved",
+                              `Bool working_state_sidecar_saved );
+                            ( "active_open_loop_count",
+                              `Int active_open_loop_count );
+                            ( "working_state_prompt_digest_ids",
+                              `List
+                                (List.map
+                                   (fun id -> `String id)
+                                   working_state.prompt_digest_ids) );
+                            ( "source",
+                              `String state_snapshot_source );
+                          ])
+                      Keeper_runtime_manifest.Working_state_sidecar_saved;
                      receipt_response_text_present_ref := true;
                      let assistant_msg =
                        Agent_sdk.Types.make_message

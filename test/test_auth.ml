@@ -1290,7 +1290,6 @@ let test_authorize_retired_dotted_tool_prefixes_strict_denied () =
   let result =
     match create_result with
     | Ok (raw_token, _) ->
-      with_env "MASC_TOOL_AUTH_STRICT" "1" (fun () ->
         List.fold_left
           (fun acc tool_name ->
              match acc with
@@ -1307,7 +1306,7 @@ let test_authorize_retired_dotted_tool_prefixes_strict_denied () =
                 | Ok () -> fail ("unexpected allow: " ^ tool_name)
                 | Error e -> Error e))
           (Ok ())
-          retired_unlisted_tools)
+          retired_unlisted_tools
     | Error e -> Error e
   in
   cleanup_test_room dir;

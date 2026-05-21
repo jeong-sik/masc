@@ -263,28 +263,32 @@ let clock_edge_json ~idx ~provider_attempt_index row =
     [
       ( "edge_id",
         `String
-          (Option.value
-             (first_string_opt
-                [
-                  clock_string_non_empty row "edge_id";
-                  clock_string_non_empty row "event_id";
-                ])
-             ~default:(fallback_edge_id row idx)) );
+          (match
+             first_string_opt
+               [
+                 clock_string_non_empty row "edge_id";
+                 clock_string_non_empty row "event_id";
+               ]
+           with
+           | Some value -> value
+           | None -> fallback_edge_id row idx) );
       ( "lane",
         `String
-          (Option.value (clock_string_non_empty row "lane") ~default:(event_lane event)) );
+          (match clock_string_non_empty row "lane" with
+           | Some value -> value
+           | None -> event_lane event) );
       ("event", `String (Keeper_runtime_manifest.event_kind_to_string event));
       ("status", `String row.Keeper_runtime_manifest.status);
       ( "observed_at",
         `String
-          (Option.value
-             (clock_string_non_empty row "observed_at")
-             ~default:row.Keeper_runtime_manifest.ts) );
+          (match clock_string_non_empty row "observed_at" with
+           | Some value -> value
+           | None -> row.Keeper_runtime_manifest.ts) );
       ( "source_clock",
         `String
-          (Option.value
-             (clock_string_non_empty row "source_clock")
-             ~default:(event_source_clock event)) );
+          (match clock_string_non_empty row "source_clock" with
+           | Some value -> value
+           | None -> event_source_clock event) );
       ( "started_at",
         json_string_opt
           (first_string_opt [ clock_string row "started_at"; event_started_at row ]) );

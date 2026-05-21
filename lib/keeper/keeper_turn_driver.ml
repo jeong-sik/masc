@@ -1030,9 +1030,17 @@ let run_named
         let capacity_detail =
           Printf.sprintf "client capacity key %s is full" capacity_key
         in
+        (* Issue: capacity_backpressure telemetry gap — retry_after_sec was
+           always null for client_capacity sources.  Derive a sensible
+           default from the cascade backoff policy (cycle-1 = base = 500 ms)
+           so the scheduler can respect backpressure instead of spinning. *)
+        let retry_sec =
+          Some (float_of_int Cascade_strategy.default_cycle_policy.backoff_base_ms
+                /. 1000.0)
+        in
         try_cascade ~on_success ?resume_checkpoint ?per_provider_timeout_s
           ~last_capacity_backpressure:
-            (Client_capacity, capacity_detail, None)
+            (Client_capacity, capacity_detail, retry_sec)
           rest last_err
       | (`No_client_capacity | `Acquired _) as capacity_slot ->
       let capacity_release =

@@ -294,6 +294,7 @@ let claim_next_r
       ?agent_tool_names
       ?(exclude_task_ids = [])
       ?(task_filter = fun _ -> true)
+      ?(admission_filter = fun ~active_tasks:_ _ -> true)
       ()
   =
   let exception Existing_claim of claim_next_result in
@@ -363,6 +364,14 @@ let claim_next_r
                    })));
         let observe_legacy_release () = () in
         let released_task_id, working_tasks = None, backlog.tasks in
+        let active_admission_tasks =
+          List.filter
+            (fun (task : Masc_domain.task) ->
+               match task.task_status with
+               | Claimed _ | InProgress _ -> true
+               | _ -> false)
+            working_tasks
+        in
         (* Starvation prevention: Calculate effective priority
          Tasks waiting >24h get priority boost (-1 per 24h, min 1) *)
         let now = Time_compat.now () in
@@ -479,6 +488,15 @@ let claim_next_r
           required_tools_allowed_for_agent required_tools
           && not (receipt_blocks_task task)
         in
+        let admission_decisions = Hashtbl.create 16 in
+        let admission_allowed task =
+          match Hashtbl.find_opt admission_decisions task.id with
+          | Some allowed -> allowed
+          | None ->
+            let allowed = admission_filter ~active_tasks:active_admission_tasks task in
+            Hashtbl.replace admission_decisions task.id allowed;
+            allowed
+        in
         let required_tool_excluded =
           List.filter
             (fun (t : task) ->
@@ -501,11 +519,13 @@ let claim_next_r
                 ; "ts", `String (now_iso ())
                 ]);
         let effective_task_filter task =
-          task_filter task && required_tool_claim_allowed task
+          task_filter task && admission_allowed task && required_tool_claim_allowed task
         in
         let task_filter_excluded =
           List.filter
-            (fun (t : task) -> (not (List.mem t.id all_excluded)) && not (task_filter t))
+            (fun (t : task) ->
+               (not (List.mem t.id all_excluded))
+               && ((not (task_filter t)) || not (admission_allowed t)))
             unclaimed
         in
         let eligible_from candidates =

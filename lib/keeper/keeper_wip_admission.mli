@@ -12,12 +12,15 @@ type category =
 
 val category_to_string : category -> string
 val category_of_string : string -> category
+val title_category : string -> category
 
 type scope = {
   repo : string;
   goal_id : string option;
   category : category;
 }
+
+val scope_of_task : default_repo:string -> Masc_domain.task -> scope
 
 type caps = {
   max_global : int option;
@@ -32,6 +35,10 @@ type active_item = {
   id : string;
   scope : scope;
 }
+
+val task_is_active_wip : Masc_domain.task -> bool
+val active_item_of_task : default_repo:string -> Masc_domain.task -> active_item
+val active_items_of_tasks : default_repo:string -> Masc_domain.task list -> active_item list
 
 type reject_reason =
   | Global_cap

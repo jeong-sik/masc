@@ -224,6 +224,47 @@ let required_tool_workflow_rejection config ~agent_tool_names claim_goal_scope =
            (String.concat ", " missing)))
 ;;
 
+let wip_admission_default_repo config =
+  Keeper_alerting_path.project_root_of_config config |> Filename.basename
+;;
+
+let wip_admission_rejection_json
+      (task_id, (rejection : Keeper_wip_admission.rejection))
+  =
+  `Assoc
+    [ "task_id", `String task_id
+    ; "reason", `String (Keeper_wip_admission.reject_reason_to_string rejection.reason)
+    ; "current", `Int rejection.current
+    ; "limit", `Int rejection.limit
+    ; "scope_key", `String rejection.scope_key
+    ]
+;;
+
+let wip_admission_rejection_action = function
+  | [] -> None
+  | (task_id, (rejection : Keeper_wip_admission.rejection)) :: _ ->
+    Some
+      (Printf.sprintf
+         "WIP admission rejected task %s: %s current=%d limit=%d scope=%s. ACTION: finish/release existing WIP in this scope before claiming more."
+         task_id
+         (Keeper_wip_admission.reject_reason_to_string rejection.reason)
+         rejection.current
+         rejection.limit
+         rejection.scope_key)
+;;
+
+let wip_admission_result_fields rejections =
+  match rejections with
+  | [] -> []
+  | rejections ->
+    [ ( "wip_admission"
+      , `Assoc
+          [ "rejected_count", `Int (List.length rejections)
+          ; "rejections", `List (List.map wip_admission_rejection_json rejections)
+          ] )
+    ]
+;;
+
 let find_task_goal_id config task_id =
   Coord.get_tasks_raw config
   |> List.find_map (fun (task : Masc_domain.task) ->
@@ -425,10 +466,34 @@ let handle_keeper_task_tool
         ~meta
         ()
     in
+    let wip_default_repo = wip_admission_default_repo config in
+    let wip_rejections = ref [] in
+    let remember_wip_rejection task_id rejection =
+      if not (List.exists (fun (existing_id, _) -> String.equal existing_id task_id) !wip_rejections)
+      then wip_rejections := (task_id, rejection) :: !wip_rejections
+    in
+    let wip_admission_filter ~active_tasks task =
+      let active_items =
+        Keeper_wip_admission.active_items_of_tasks
+          ~default_repo:wip_default_repo
+          active_tasks
+      in
+      let scope =
+        Keeper_wip_admission.scope_of_task ~default_repo:wip_default_repo task
+      in
+      match Keeper_wip_admission.decide active_items ~scope with
+      | Keeper_wip_admission.Admit _ -> true
+      | Keeper_wip_admission.Reject rejection ->
+        remember_wip_rejection task.id rejection;
+        false
+    in
     let result =
       Coord.claim_next_r config ~agent_name:meta.agent_name ~agent_tool_names
-        ~task_filter:claim_goal_scope.task_filter ()
+        ~task_filter:claim_goal_scope.task_filter
+        ~admission_filter:wip_admission_filter
+        ()
     in
+    let wip_rejections = List.rev !wip_rejections in
     let auto_started_ok = ref false in
     (match result with
      | Coord.Claim_next_claimed { task_id; _ } ->
@@ -470,15 +535,18 @@ let handle_keeper_task_tool
           ; _
           } ->
         let action =
-          match
-            required_tool_workflow_rejection
-              config
-              ~agent_tool_names
-              claim_goal_scope
-          with
+          match wip_admission_rejection_action wip_rejections with
           | Some rejection -> rejection
           | None ->
-            no_eligible_action_for_claim_scope claim_goal_scope ~excluded_count
+            (match
+               required_tool_workflow_rejection
+                 config
+                 ~agent_tool_names
+                 claim_goal_scope
+             with
+             | Some rejection -> rejection
+             | None ->
+               no_eligible_action_for_claim_scope claim_goal_scope ~excluded_count)
         in
         Printf.sprintf
           "No eligible tasks%s. %s %s"
@@ -556,6 +624,7 @@ let handle_keeper_task_tool
             ("auto_started", `Bool !auto_started_ok);
           ]
          @ claimed_task_fields
+         @ wip_admission_result_fields wip_rejections
          @
          match accountability_warning with
          | Some warning -> [ ("routing_warning", `String warning) ]

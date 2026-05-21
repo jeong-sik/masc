@@ -1,6 +1,14 @@
+---
+title: Incremental Sub-Library Extraction from Flat masc_mcp Library
+rfc: 0056
+status: Active
+created: 2026-05-09
+implementation_prs: []
+---
+
 # RFC-0056 — Incremental Sub-Library Extraction from Flat masc_mcp Library
 
-Status: Draft · Phase 0 PoC included
+Status: Active · Phase 0 PoC included (frontmatter SSOT)
 Author: jeong-sik (with Claude Opus 4.7)
 Date: 2026-05-09
 Supersedes: —

@@ -1,6 +1,14 @@
+---
+title: Workaround Sunset Tracking for Keeper Dedup Carryovers
+rfc: 0144
+status: Active
+created: 2026-05-20
+implementation_prs: []
+---
+
 # RFC-0144 — Workaround Sunset Tracking for Keeper Dedup Carryovers
 
-- **Status**: Active
+- **Status**: Active (frontmatter SSOT)
 - **Created**: 2026-05-20
 - **Owner**: keeper observability
 - **Predecessors**: masc-mcp #16389, masc-mcp #16470

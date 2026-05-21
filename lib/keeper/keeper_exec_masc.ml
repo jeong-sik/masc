@@ -1,4 +1,5 @@
 open Keeper_exec_shared
+open Keeper_types
 
 (* Read-only masc_code_* tools (search, read, symbols) are path-bearing but
    should NOT go through the strict write resolver. The write resolver

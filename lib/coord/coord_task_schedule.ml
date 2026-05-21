@@ -369,7 +369,7 @@ let claim_next_r
             (fun (task : Masc_domain.task) ->
                match task.task_status with
                | Claimed _ | InProgress _ -> true
-               | _ -> false)
+               | Todo | AwaitingVerification _ | Done _ | Cancelled _ -> false)
             working_tasks
         in
         (* Starvation prevention: Calculate effective priority
@@ -489,7 +489,7 @@ let claim_next_r
           && not (receipt_blocks_task task)
         in
         let admission_decisions = Hashtbl.create 16 in
-        let admission_allowed task =
+        let admission_allowed (task : task) =
           match Hashtbl.find_opt admission_decisions task.id with
           | Some allowed -> allowed
           | None ->

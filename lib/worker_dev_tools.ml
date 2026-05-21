@@ -334,7 +334,7 @@ let command_context_with_allowlist ?caller ~allowed_commands cmd =
     | Allow context ->
       if context.Exec_shell_gate.direct_dune_seen
       then Error Direct_dune_invocation
-      else Ok ()
+      else Ok context
     | Reject { context; reason; _ } ->
       if context.Exec_shell_gate.direct_dune_seen
       then Error Direct_dune_invocation

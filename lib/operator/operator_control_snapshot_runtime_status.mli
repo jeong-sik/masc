@@ -1,5 +1,6 @@
 (** Runtime-status alignment helpers for operator control snapshots. *)
 
+val remote_confirm_ttl_seconds : float
 val runtime_status_from_live_signal : Yojson.Safe.t -> string option
 val health_state_allows_runtime_status_override : Yojson.Safe.t -> bool
 

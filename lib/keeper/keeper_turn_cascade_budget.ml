@@ -362,6 +362,7 @@ let cascade_reason_is_structural_attempt_timeout
   match reason with
   | Keeper_types.Structural_attempt_timeout _ -> true
   | Keeper_types.Connection_refused
+  | Keeper_types.Dns_failure
   | Keeper_types.No_providers_available
   | Keeper_types.All_providers_failed
   | Keeper_types.Candidates_filtered_after_cycles

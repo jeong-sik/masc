@@ -986,6 +986,12 @@ let run_named
             if kind = Llm_provider.Http_client.Connection_refused
                || String_util.contains_substring_ci message "connection refused" then
               Keeper_types.Connection_refused
+            else if kind = Llm_provider.Http_client.Dns_failure then
+              (* RFC-0142 PR-2: consume the typed [Dns_failure] kind directly
+                 instead of round-tripping the error message through the
+                 substring SSOT.  Closes ~50% of the historical
+                 [Other_detail "failed to resolve hostname: ..."] share. *)
+              Keeper_types.Dns_failure
             else if message_looks_like_cli_wrapped_max_turns message then
               Keeper_types.Max_turns_exceeded
             else

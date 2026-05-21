@@ -134,6 +134,13 @@ type usage_metrics = {
 
 type cascade_exhaustion_reason =
   | Connection_refused
+  | Dns_failure
+      (** RFC-0142 PR-2: typed surface for hostname-resolution failure.
+          Closes the dominant Other_detail share (50% live on 5/21,
+          "failed to resolve hostname: ...") by mapping the existing
+          [Llm_provider.Http_client.network_error_kind.Dns_failure] kind
+          directly to a typed cascade reason instead of routing through
+          the substring SSOT. *)
   | No_providers_available
   | All_providers_failed
   | Candidates_filtered_after_cycles

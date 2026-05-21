@@ -42,11 +42,6 @@ lib/autonomous/autonomous_bridge.ml,101,None,unclassified
 lib/autonomous/autonomous_executor.ml,25,None,unclassified
 lib/autonomous/stimulus.ml,38,None,unclassified
 lib/autonomous/wirein_helpers.ml,7,false,unclassified
-lib/autoresearch_knowledge.ml,42,None,unclassified
-lib/autoresearch/autoresearch_git.ml,204,None,unclassified
-lib/autoresearch/autoresearch_git.ml,213,false,unclassified
-lib/autoresearch/autoresearch_git.ml,260,false,unclassified
-lib/autoresearch/autoresearch_metric.ml,27,false,unclassified
 lib/backend/backend_types.ml,104,false,unclassified
 lib/backend/backend.ml,639,None,unclassified
 lib/backend/backend.ml,643,None,unclassified
@@ -239,9 +234,6 @@ lib/dashboard/dashboard_governance_judge.ml,416,None,unclassified
 lib/dashboard/dashboard_governance_judge.ml,480,None,unclassified
 lib/dashboard/dashboard_governance_judge.ml,496,None,unclassified
 lib/dashboard/dashboard_governance_judge.ml,689,None,unclassified
-lib/dashboard/dashboard_http_autoresearch.ml,195,None,unclassified
-lib/dashboard/dashboard_http_autoresearch.ml,461,false,unclassified
-lib/dashboard/dashboard_http_autoresearch.ml,474,false,unclassified
 lib/dashboard/dashboard_http_helpers.ml,78,None,unclassified
 lib/dashboard/dashboard_http_helpers.ml,143,None,unclassified
 lib/dashboard/dashboard_http_helpers.ml,153,None,unclassified

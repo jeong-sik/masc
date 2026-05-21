@@ -160,6 +160,7 @@ type usage_metrics = {
     and [Keeper_meta_contract.blocker_class]). *)
 type cascade_exhaustion_reason = Keeper_meta_contract.cascade_exhaustion_reason =
   | Connection_refused
+  | Dns_failure
   | No_providers_available
   | All_providers_failed
   | Candidates_filtered_after_cycles

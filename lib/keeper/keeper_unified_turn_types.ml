@@ -104,6 +104,7 @@ let cascade_exhaustion_reason_code
   =
   match reason with
   | Keeper_types.Connection_refused -> "cascade_exhausted_connection_refused"
+  | Keeper_types.Dns_failure -> "cascade_exhausted_dns_failure"
   | Keeper_types.No_providers_available -> "cascade_exhausted_no_providers_available"
   | Keeper_types.All_providers_failed -> "cascade_exhausted_all_providers_failed"
   | Keeper_types.Candidates_filtered_after_cycles ->

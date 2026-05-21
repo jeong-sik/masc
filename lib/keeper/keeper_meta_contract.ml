@@ -82,6 +82,16 @@ type scheduled_autonomous_runtime = proactive_runtime
 
 type cascade_exhaustion_reason =
   | Connection_refused
+  | Dns_failure
+    (** RFC-0142 PR-2 (2026-05-22): typed surface for the dominant Other_detail
+        message ["failed to resolve hostname: ..."] (50% live share on 5/21).
+        Producer-side typed signal already exists at
+        [Llm_provider.Http_client.network_error_kind] as [Dns_failure];
+        previously [keeper_turn_driver.ml]'s NetworkError branch only honoured
+        [Connection_refused] and let [Dns_failure] fall through the
+        string/substring SSOT, manifesting as [Other_detail "failed to resolve
+        hostname: ..."].  This variant closes that typed→string→typed
+        roundtrip without adding any new substring matcher. *)
   | No_providers_available
   | All_providers_failed
   | Candidates_filtered_after_cycles
@@ -196,6 +206,8 @@ let blocker_class_of_serialized_string = function
 let cascade_exhaustion_summary = function
   | Connection_refused ->
     "Cascade exhausted after provider failures; local runtime connection refused."
+  | Dns_failure ->
+    "Cascade exhausted; hostname resolution failed (DNS)."
   | No_providers_available -> "Cascade exhausted; no providers were available."
   | All_providers_failed -> "Cascade exhausted after all configured providers failed."
   | Candidates_filtered_after_cycles -> "Cascade exhausted after provider failures."
@@ -236,6 +248,7 @@ let blocker_class_continue_gate = function
 
 let cascade_exhaustion_reason_to_json = function
   | Connection_refused -> `String "connection_refused"
+  | Dns_failure -> `String "dns_failure"
   | No_providers_available -> `String "no_providers_available"
   | All_providers_failed -> `String "all_providers_failed"
   | Candidates_filtered_after_cycles -> `String "candidates_filtered_after_cycles"
@@ -247,6 +260,7 @@ let cascade_exhaustion_reason_to_json = function
 
 let cascade_exhaustion_reason_of_json = function
   | `String "connection_refused" -> Some Connection_refused
+  | `String "dns_failure" -> Some Dns_failure
   | `String "no_providers_available" -> Some No_providers_available
   | `String "all_providers_failed" -> Some All_providers_failed
   | `String "candidates_filtered_after_cycles" -> Some Candidates_filtered_after_cycles

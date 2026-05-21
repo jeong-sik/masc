@@ -979,6 +979,12 @@ let parse_error_field raw =
   |> Json.member "error"
   |> Json.to_string_option
 
+let check_safe_read_fallback_reason expected json =
+  Alcotest.(check (option string))
+    "safe read fallback reason"
+    (Some expected)
+    (json |> Json.member "safe_read_fallback_reason" |> Json.to_string_option)
+
 let test_keeper_bash_typed_exec_runs_via_shell_ir () =
   with_eio_fs @@ fun () ->
   let base_path, config = make_config () in
@@ -1121,6 +1127,7 @@ let test_keeper_bash_safe_dev_null_echo_fallback_executes_primary () =
   let json = Yojson.Safe.from_string raw in
   Alcotest.(check bool) "fallback command succeeds" true
     (json |> Json.member "ok" |> Json.to_bool);
+  check_safe_read_fallback_reason "or_echo" json;
   Alcotest.(check bool) "primary command ran" true
     (json
      |> Json.member "output"
@@ -1153,6 +1160,7 @@ let test_keeper_bash_safe_dev_null_redirect_executes_scoped_ls () =
   let json = Yojson.Safe.from_string raw in
   Alcotest.(check bool) "direct dev-null ls succeeds" true
     (json |> Json.member "ok" |> Json.to_bool);
+  check_safe_read_fallback_reason "stderr_dev_null_stripped" json;
   Alcotest.(check bool) "ls output is preserved" true
     (json
      |> Json.member "output"
@@ -1187,6 +1195,7 @@ let test_keeper_bash_safe_fallback_works_for_write_enabled_keeper () =
   let json = Yojson.Safe.from_string raw in
   Alcotest.(check bool) "write-enabled fallback command succeeds" true
     (json |> Json.member "ok" |> Json.to_bool);
+  check_safe_read_fallback_reason "or_echo" json;
   Alcotest.(check bool) "primary cat ran" true
     (json
      |> Json.member "output"
@@ -1218,6 +1227,7 @@ let test_keeper_bash_safe_cd_fallback_executes_scoped_read () =
   let json = Yojson.Safe.from_string raw in
   Alcotest.(check bool) "cd fallback command succeeds" true
     (json |> Json.member "ok" |> Json.to_bool);
+  check_safe_read_fallback_reason "cd_and_read" json;
   Alcotest.(check bool) "read command ran after cd" true
     (json
      |> Json.member "output"
@@ -1244,6 +1254,7 @@ let test_keeper_bash_safe_pwd_fallback_executes_scoped_ls () =
   let json = Yojson.Safe.from_string raw in
   Alcotest.(check bool) "pwd && ls fallback succeeds" true
     (json |> Json.member "ok" |> Json.to_bool);
+  check_safe_read_fallback_reason "pwd_and_read" json;
   Alcotest.(check bool) "ls output is preserved" true
     (json
      |> Json.member "output"
@@ -1278,6 +1289,7 @@ let test_keeper_bash_safe_pwd_fallback_executes_head_pipeline () =
   let json = Yojson.Safe.from_string raw in
   Alcotest.(check bool) "pwd && find | head fallback succeeds" true
     (json |> Json.member "ok" |> Json.to_bool);
+  check_safe_read_fallback_reason "pwd_head_pipeline" json;
   Alcotest.(check bool) "find output is preserved" true
     (json
      |> Json.member "output"
@@ -1402,6 +1414,7 @@ let test_keeper_bash_safe_rg_fallback_allows_escaped_regex_pipe () =
   let json = Yojson.Safe.from_string raw in
   Alcotest.(check bool) "rg fallback command succeeds" true
     (json |> Json.member "ok" |> Json.to_bool);
+  check_safe_read_fallback_reason "or_echo" json;
   Alcotest.(check bool) "fallback echo ran on no match" true
     (json
      |> Json.member "output"
@@ -1439,6 +1452,7 @@ let test_keeper_bash_safe_dev_null_redirect_executes_scoped_grep () =
   let json = Yojson.Safe.from_string raw in
   Alcotest.(check bool) "direct dev-null grep succeeds" true
     (json |> Json.member "ok" |> Json.to_bool);
+  check_safe_read_fallback_reason "stderr_dev_null_stripped" json;
   Alcotest.(check bool) "grep found scoped file" true
     (json
      |> Json.member "output"
@@ -1476,6 +1490,7 @@ let test_keeper_bash_safe_head_pipeline_executes_scoped_cat () =
   let json = Yojson.Safe.from_string raw in
   Alcotest.(check bool) "safe cat | head succeeds" true
     (json |> Json.member "ok" |> Json.to_bool);
+  check_safe_read_fallback_reason "head_pipeline" json;
   Alcotest.(check bool) "cat output is preserved" true
     (json
      |> Json.member "output"
@@ -1743,6 +1758,7 @@ let test_keeper_bash_safe_head_pipeline_executes_cd_scoped_grep () =
   let json = Yojson.Safe.from_string raw in
   Alcotest.(check bool) "safe grep | head succeeds" true
     (json |> Json.member "ok" |> Json.to_bool);
+  check_safe_read_fallback_reason "head_pipeline" json;
   Alcotest.(check bool) "grep output is preserved" true
     (json
      |> Json.member "output"
@@ -1787,6 +1803,7 @@ let test_keeper_bash_safe_head_pipeline_executes_scoped_find () =
   let json = Yojson.Safe.from_string raw in
   Alcotest.(check bool) "safe find | head succeeds" true
     (json |> Json.member "ok" |> Json.to_bool);
+  check_safe_read_fallback_reason "head_pipeline" json;
   let output = json |> Json.member "output" |> Json.to_string in
   Alcotest.(check bool) "find output includes ml file" true
     (String_util.contains_substring output "needle.ml");

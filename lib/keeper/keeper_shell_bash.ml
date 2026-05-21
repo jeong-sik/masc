@@ -119,12 +119,31 @@ let validate_keeper_bash_coding cmd =
     cmd
 ;;
 
+type safe_read_fallback_reason =
+  | Safe_read_or_echo
+  | Safe_read_cd_and_read
+  | Safe_read_head_pipeline
+  | Safe_read_pwd_and_read
+  | Safe_read_pwd_head_pipeline
+  | Safe_read_dev_null_redirect
+  | Safe_read_stderr_dev_null_stripped
+
+let safe_read_fallback_reason_tag = function
+  | Safe_read_or_echo -> "or_echo"
+  | Safe_read_cd_and_read -> "cd_and_read"
+  | Safe_read_head_pipeline -> "head_pipeline"
+  | Safe_read_pwd_and_read -> "pwd_and_read"
+  | Safe_read_pwd_head_pipeline -> "pwd_head_pipeline"
+  | Safe_read_dev_null_redirect -> "dev_null_redirect"
+  | Safe_read_stderr_dev_null_stripped -> "stderr_dev_null_stripped"
+
 type safe_read_fallback = {
   primary_cmd : string;
   cwd_override : string option;
+  reason : safe_read_fallback_reason;
 }
 
-let safe_read_primary_rewrite primary_cmd =
+let safe_read_primary_rewrite ~reason primary_cmd =
   match keeper_bash_shape_block primary_cmd with
   | Some _ -> None
   | None ->
@@ -137,8 +156,12 @@ let safe_read_primary_rewrite primary_cmd =
           ~allowed_commands:Worker_dev_tools.dev_allowed_commands
           primary_cmd
       with
-      | Ok () -> Some { primary_cmd; cwd_override = None }
+      | Ok () -> Some { primary_cmd; cwd_override = None; reason }
       | Error _ -> None)
+
+let with_safe_read_fallback_reason reason = function
+  | None -> None
+  | Some rewrite -> Some { rewrite with reason }
 
 type shell_logic_op =
   | Logic_and
@@ -280,7 +303,7 @@ let safe_read_or_echo_fallback_of_command cmd =
           let primary = String.trim left in
           if String.equal primary "" then None else Some primary
       in
-      Option.bind primary_cmd safe_read_primary_rewrite
+      Option.bind primary_cmd (safe_read_primary_rewrite ~reason:Safe_read_or_echo)
 
 let safe_cd_read_fallback_of_command cmd =
   match find_unquoted_logic_op Logic_and cmd with
@@ -297,8 +320,11 @@ let safe_cd_read_fallback_of_command cmd =
         String.sub left 3 (String.length left - 3)
         |> safe_relative_repos_cd_path
       in
-      match path, safe_read_primary_rewrite right with
-      | Some cwd_override, Some rewrite -> Some { rewrite with cwd_override = Some cwd_override }
+      match
+        path, safe_read_primary_rewrite ~reason:Safe_read_cd_and_read right
+      with
+      | Some cwd_override, Some rewrite ->
+        Some { rewrite with cwd_override = Some cwd_override }
       | _ -> None
 
 let split_unquoted_single_pipeline cmd =
@@ -375,14 +401,15 @@ let safe_read_head_pipeline_fallback_of_command cmd =
     then None
     else
       let primary_rewrite =
-        match safe_read_primary_rewrite primary with
+        match safe_read_primary_rewrite ~reason:Safe_read_head_pipeline primary with
         | Some _ as rewrite -> rewrite
         | None ->
           (match strip_trailing_dev_null_redirect primary with
-           | Some stripped -> safe_read_primary_rewrite stripped
+           | Some stripped ->
+             safe_read_primary_rewrite ~reason:Safe_read_head_pipeline stripped
            | None -> safe_cd_read_fallback_of_command primary)
       in
-      primary_rewrite
+      with_safe_read_fallback_reason Safe_read_head_pipeline primary_rewrite
 
 let safe_pwd_read_fallback_of_command cmd =
   match find_unquoted_logic_op Logic_and cmd with
@@ -395,14 +422,17 @@ let safe_pwd_read_fallback_of_command cmd =
     if not (String.equal left "pwd" || String.equal left "pwd -P")
     then None
     else
-      match safe_read_primary_rewrite right with
-      | Some _ as rewrite -> rewrite
+      match safe_read_primary_rewrite ~reason:Safe_read_pwd_and_read right with
+      | Some _ as rewrite ->
+        with_safe_read_fallback_reason Safe_read_pwd_and_read rewrite
       | None ->
         (match safe_read_head_pipeline_fallback_of_command right with
-         | Some _ as rewrite -> rewrite
+         | Some _ as rewrite ->
+           with_safe_read_fallback_reason Safe_read_pwd_head_pipeline rewrite
          | None ->
            (match strip_trailing_dev_null_redirect right with
-            | Some stripped -> safe_read_primary_rewrite stripped
+            | Some stripped ->
+              safe_read_primary_rewrite ~reason:Safe_read_pwd_and_read stripped
             | None -> None))
 
 let safe_read_fallback_of_command ~write_enabled:_ ~stderr_dev_null_stripped cmd =
@@ -419,10 +449,14 @@ let safe_read_fallback_of_command ~write_enabled:_ ~stderr_dev_null_stripped cmd
            | Some _ as rewrite -> rewrite
            | None ->
              (match strip_trailing_dev_null_redirect cmd with
-              | Some primary_cmd -> safe_read_primary_rewrite primary_cmd
+              | Some primary_cmd ->
+                safe_read_primary_rewrite ~reason:Safe_read_dev_null_redirect primary_cmd
               | None ->
                 if stderr_dev_null_stripped
-                then safe_read_primary_rewrite cmd
+                then
+                  safe_read_primary_rewrite
+                    ~reason:Safe_read_stderr_dev_null_stripped
+                    cmd
                 else None))))
 
 let shape_block_allowed_by_active_validator ~write_enabled cmd = function
@@ -1364,6 +1398,27 @@ let handle_keeper_bash
       safe_read_fallback_of_command ~write_enabled
         ~stderr_dev_null_stripped:stripped_stderr_dev_null cmd
     in
+    let () =
+      match safe_read_fallback with
+      | None -> ()
+      | Some fallback ->
+        Log.Keeper.info
+          "keeper_bash safe-read compatibility fallback selected: keeper=%s \
+           reason=%s cmd_hash=%s primary_hash=%s"
+          meta.name
+          (safe_read_fallback_reason_tag fallback.reason)
+          (Worker_dev_tools.cmd_hash_for_log cmd)
+          (Worker_dev_tools.cmd_hash_for_log fallback.primary_cmd)
+    in
+    let safe_read_fallback_extra =
+      match safe_read_fallback with
+      | None -> []
+      | Some fallback ->
+        [
+          ( "safe_read_fallback_reason",
+            `String (safe_read_fallback_reason_tag fallback.reason) );
+        ]
+    in
     let validation_cmd =
       match safe_read_fallback with
       | Some rewrite -> rewrite.primary_cmd
@@ -1407,15 +1462,17 @@ let handle_keeper_bash
            ~base_path:root
            ~keeper_name:meta.name
            ~cmd
-           ~extra:[
-             "cwd", `String cwd;
-             "execution_time_ms", `Int entry.duration_ms;
-             "cached", `Bool true;
-             "cache_age_ms",
-               `Int
-                 (int_of_float
-                    ((Unix.time () -. entry.cached_at) *. 1000.));
-           ]
+           ~extra:
+             (safe_read_fallback_extra
+              @ [
+                  "cwd", `String cwd;
+                  "execution_time_ms", `Int entry.duration_ms;
+                  "cached", `Bool true;
+                  ( "cache_age_ms",
+                    `Int
+                      (int_of_float
+                         ((Unix.time () -. entry.cached_at) *. 1000.)) );
+                ])
            ~status:st
            ~output:entry.output
            ~env_snapshot:env_snap
@@ -1434,17 +1491,20 @@ let handle_keeper_bash
           |> List.remove_assoc "cached"
           |> List.remove_assoc "cache_age_ms"
           |> List.remove_assoc "execution_time_ms"
+          |> List.remove_assoc "safe_read_fallback_reason"
         in
         Yojson.Safe.to_string
           (`Assoc
-            (fields @ [
-               "cached", `Bool true;
-               "cache_age_ms",
-                 `Int
-                   (int_of_float
-                      ((Unix.time () -. entry.cached_at) *. 1000.));
-               "execution_time_ms", `Int entry.duration_ms;
-             ]))
+            (fields
+             @ safe_read_fallback_extra
+             @ [
+                 "cached", `Bool true;
+                 ( "cache_age_ms",
+                   `Int
+                     (int_of_float
+                        ((Unix.time () -. entry.cached_at) *. 1000.)) );
+                 "execution_time_ms", `Int entry.duration_ms;
+               ]))
       | Ok _ | Error _ -> cached_result_json entry
     in
     let with_raw_json_exec_cache run =
@@ -1832,7 +1892,10 @@ let handle_keeper_bash
              ~hint
              ~alternatives
              ~diag
-             ~extra:([ "execution_time_ms", `Int 0 ] @ recovery_extra)
+             ~extra:
+               (safe_read_fallback_extra
+                @ [ "execution_time_ms", `Int 0 ]
+                @ recovery_extra)
              ~env_snapshot:env_snap
              ())
       | Ok () ->
@@ -1851,7 +1914,10 @@ let handle_keeper_bash
                validation_cmd
           in
           match path_validation with
-          | Error e -> error_json ~fields:["blocked_cmd", `String cmd_for_log] e
+          | Error e ->
+            error_json
+              ~fields:(safe_read_fallback_extra @ [ "blocked_cmd", `String cmd_for_log ])
+              e
           | Ok () ->
                if write_enabled
                   && Worker_dev_tools.is_write_operation validation_cmd then
@@ -1879,17 +1945,18 @@ let handle_keeper_bash
                        meta.name (Bg_task.task_id_to_string tid) cmd_for_log;
                      Yojson.Safe.to_string
                        (`Assoc
-                         [
-                           ("ok", `Bool true);
-                           ( "background_task_id",
-                             `String (Bg_task.task_id_to_string tid) );
-                           ("cmd", `String cmd);
-                           ("cwd", `String cwd);
-                           ( "hint",
-                             `String
-                               "Task running in background. Poll or stop it with the \
-                                background output/kill tools shown in your active schema." );
-                         ])
+                         ([
+                            ("ok", `Bool true);
+                            ( "background_task_id",
+                              `String (Bg_task.task_id_to_string tid) );
+                            ("cmd", `String cmd);
+                            ("cwd", `String cwd);
+                            ( "hint",
+                              `String
+                                "Task running in background. Poll or stop it with the \
+                                 background output/kill tools shown in your active schema." );
+                          ]
+                          @ safe_read_fallback_extra))
                  | Error (Bg_task.Spawn_failed e) ->
                      error_json
                        (Printf.sprintf "background spawn failed: %s" e)
@@ -1986,10 +2053,12 @@ let handle_keeper_bash
                               ~base_path:root
                               ~keeper_name:meta.name
                               ~cmd
-                              ~extra:[
-                                "cwd", `String cwd;
-                                "execution_time_ms", `Int elapsed_ms;
-                              ]
+                              ~extra:
+                                (safe_read_fallback_extra
+                                 @ [
+                                     "cwd", `String cwd;
+                                     "execution_time_ms", `Int elapsed_ms;
+                                   ])
                               ~status:st
                               ~output:out
                               ~env_snapshot:env_snap
@@ -2027,10 +2096,12 @@ let handle_keeper_bash
                         ~base_path:root
                         ~keeper_name:meta.name
                         ~cmd
-                        ~extra:[
-                          "cwd", `String cwd;
-                          "execution_time_ms", `Int elapsed_ms;
-                        ]
+                        ~extra:
+                          (safe_read_fallback_extra
+                           @ [
+                               "cwd", `String cwd;
+                               "execution_time_ms", `Int elapsed_ms;
+                             ])
                         ~status:st
                         ~output:out
                         ~env_snapshot:env_snap
@@ -2082,10 +2153,12 @@ let handle_keeper_bash
                              ~base_path:root
                              ~keeper_name:meta.name
                              ~cmd
-                             ~extra:[
-                               "cwd", `String cwd;
-                               "execution_time_ms", `Int elapsed_ms;
-                             ]
+                             ~extra:
+                               (safe_read_fallback_extra
+                                @ [
+                                    "cwd", `String cwd;
+                                    "execution_time_ms", `Int elapsed_ms;
+                                  ])
                              ~status:r.status
                              ~output:r.stdout
                              ~env_snapshot:env_snap
@@ -2103,28 +2176,29 @@ let handle_keeper_bash
                           cmd_for_log;
                         Yojson.Safe.to_string
                           (`Assoc
-                            [
-                              ("ok", `Bool false);
-                              ("promoted", `Bool true);
-                              ( "background_task_id",
-                                `String
-                                  (Bg_task.task_id_to_string p.task_id) );
-                              ("cmd", `String cmd);
-                              ("cwd", `String cwd);
-                              ("partial_output", `String p.partial_stdout);
-                              ( "bytes_dropped",
-                                `Int p.bytes_dropped_stdout );
-                              ("budget_ms", `Int budget_ms);
-                              ("execution_time_ms", `Int elapsed_ms);
-                              ( "hint",
-                                `String
-                                 (Printf.sprintf
-                                     "Command exceeded \
-                                      MASC_BLOCKING_BUDGET_MS=%d. Still \
-                                      running in background; poll or stop it with the \
-                                      background output/kill tools shown in your active schema."
-                                     budget_ms) );
-                            ])
+                            ([
+                               ("ok", `Bool false);
+                               ("promoted", `Bool true);
+                               ( "background_task_id",
+                                 `String
+                                   (Bg_task.task_id_to_string p.task_id) );
+                               ("cmd", `String cmd);
+                               ("cwd", `String cwd);
+                               ("partial_output", `String p.partial_stdout);
+                               ( "bytes_dropped",
+                                 `Int p.bytes_dropped_stdout );
+                               ("budget_ms", `Int budget_ms);
+                               ("execution_time_ms", `Int elapsed_ms);
+                               ( "hint",
+                                 `String
+                                  (Printf.sprintf
+                                      "Command exceeded \
+                                       MASC_BLOCKING_BUDGET_MS=%d. Still \
+                                       running in background; poll or stop it with the \
+                                       background output/kill tools shown in your active schema."
+                                      budget_ms) );
+                             ]
+                             @ safe_read_fallback_extra))
                       | Masc_exec.Exec_run.Spawn_error
                           (Bg_task.Spawn_failed e) ->
                         error_json

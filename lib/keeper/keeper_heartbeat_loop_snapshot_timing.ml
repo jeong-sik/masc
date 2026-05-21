@@ -72,8 +72,9 @@ let record_keepalive_stage_timing
       ~(t_recurring_end : float)
   : unit
   =
-  let timing =
-    { presence_ms = (t_presence_end -. t_presence_start) *. 1000.0
+  let timing : Keeper_keepalive_signal.stage_timing =
+    { Keeper_keepalive_signal.presence_ms =
+        (t_presence_end -. t_presence_start) *. 1000.0
     ; snapshot_ms = (t_snapshot_end -. t_snapshot_start) *. 1000.0
     ; board_ms = (t_board_end -. t_board_start) *. 1000.0
     ; turn_ms = (t_turn_end -. t_turn_start) *. 1000.0

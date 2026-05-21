@@ -70,6 +70,29 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
     then "selected"
     else "empty"
   in
+  let tool_lineage_matched_count =
+    match json_int_member_opt "matched_tool_call_count" runtime_proof with
+    | Some n -> n
+    | None -> 0
+  in
+  let tool_lineage_terminal_status =
+    if missing_required_tools <> [] then "missing_required_tool"
+    else if tool_lineage_matched_count > 0 then "verified"
+    else if scan.provider_finished_count > 0 then "executed"
+    else if scan.provider_started_count > 0 then "emitted"
+    else if
+      runtime_lens_event_count scan
+        Keeper_runtime_manifest.Provider_lane_resolved
+      > 0
+    then "materialized"
+    else if
+      runtime_lens_event_count scan
+        Keeper_runtime_manifest.Tool_surface_selected
+      > 0
+    then "visible"
+    else if requested_tools <> [] then "searched"
+    else "empty"
+  in
   `Assoc
     [
       ( "turn_clock",
@@ -202,6 +225,44 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
             ("claim_scope", claim_scope);
             ("config_drift", config_drift);
             ("runtime_proof", runtime_proof);
+            ( "tool_lineage",
+              `Assoc
+                [
+                  ( "searched_count",
+                    `Int (List.length requested_tools) );
+                  ( "visible_count",
+                    `Int
+                      (runtime_lens_event_count scan
+                         Keeper_runtime_manifest.Tool_surface_selected) );
+                  ( "materialized_count",
+                    `Int
+                      (runtime_lens_event_count scan
+                         Keeper_runtime_manifest.Provider_lane_resolved) );
+                  ("emitted_count", `Int scan.provider_started_count);
+                  ("executed_count", `Int scan.provider_finished_count);
+                  ( "verified_count",
+                    `Int tool_lineage_matched_count );
+                  ( "successful_count",
+                    `Int
+                      (match json_int_member_opt
+                               "successful_tool_call_count" runtime_proof
+                       with
+                       | Some n -> n
+                       | None -> 0) );
+                  ( "failed_count",
+                    `Int
+                      (match json_int_member_opt
+                               "failed_tool_call_count" runtime_proof
+                       with
+                       | Some n -> n
+                       | None -> 0) );
+                  ("requested_tools", json_string_list requested_tools);
+                  ("required_tools", json_string_list required_tools);
+                  ("materialized_tools", json_string_list materialized_tools);
+                  ( "missing_required_tools",
+                    json_string_list missing_required_tools );
+                  ("terminal_status", `String tool_lineage_terminal_status);
+                ] );
             ( "context",
               `Assoc
                 [
@@ -304,6 +365,17 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
                   ]
                 ~terminal_status:(runtime_lens_provider_terminal_status scan)
             );
+            ( "tool_lineage",
+              runtime_lens_swimlane_json scan gaps ~lane:"tool_lineage"
+                ~label:"Tool Lineage"
+                ~events:
+                  [
+                    Keeper_runtime_manifest.Tool_surface_selected;
+                    Keeper_runtime_manifest.Provider_lane_resolved;
+                    Keeper_runtime_manifest.Provider_attempt_started;
+                    Keeper_runtime_manifest.Provider_attempt_finished;
+                  ]
+                ~terminal_status:tool_lineage_terminal_status );
             ( "tool_runtime",
               runtime_lens_swimlane_json scan gaps ~lane:"tool_runtime"
                 ~label:"Tool Runtime"

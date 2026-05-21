@@ -187,7 +187,7 @@ let runtime_lens_gaps ~terminal_event_present ~claim_scope ~config_drift scan =
          add
            { code = "required_tool_not_materialized"
            ; severity = "bad"
-           ; lane = "tool_runtime"
+           ; lane = "tool_lineage"
            ; detail =
                Some
                  (Printf.sprintf "missing required tools: %s"
@@ -202,7 +202,7 @@ let runtime_lens_gaps ~terminal_event_present ~claim_scope ~config_drift scan =
          add
            { code = "provider_lane_unresolved"
            ; severity = "bad"
-           ; lane = "masc_policy_cascade"
+           ; lane = "tool_lineage"
            ; detail = Some "tool surface/provider attempt exists without provider_lane_resolved"
            }
            gaps
@@ -236,7 +236,7 @@ let runtime_lens_gaps ~terminal_event_present ~claim_scope ~config_drift scan =
          add
            { code = "provider_lane_unresolved"
            ; severity = "warn"
-           ; lane = "masc_policy_cascade"
+           ; lane = "tool_lineage"
            ; detail = Some "required tools exist but provider lane materialization is unknown"
            }
            gaps

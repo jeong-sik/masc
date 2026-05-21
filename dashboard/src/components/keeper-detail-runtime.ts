@@ -929,6 +929,7 @@ export function RuntimeLensSection({
   const lens = trace.runtime_lens
   const tool = lens.axes.tool_surface
   const lane = lens.axes.provider_lane
+  const toolLineage = lens.axes.tool_lineage
   const claim = lens.axes.claim_scope
   const drift = lens.axes.config_drift
   const proof = lens.axes.runtime_proof
@@ -941,6 +942,7 @@ export function RuntimeLensSection({
     lens.swimlanes.masc_policy_cascade,
     lens.swimlanes.oas_agent,
     lens.swimlanes.provider,
+    lens.swimlanes.tool_lineage,
     lens.swimlanes.tool_runtime,
     lens.swimlanes.memory_context,
   ]
@@ -954,6 +956,13 @@ export function RuntimeLensSection({
         <${SignalRow} label="tool required" value=${formatLensList(tool.required_tools)} />
         <${SignalRow} label="tool materialized" value=${formatLensList(tool.materialized_tools)} />
         <${SignalRow} label="tool missing" value=${formatLensList(tool.missing_required_tools)} />
+        <${SignalRow}
+          label="tool lineage"
+          value=${`${toolLineage.terminal_status} (${toolLineage.verified_count}/${toolLineage.executed_count}/${toolLineage.emitted_count}/${toolLineage.materialized_count}/${toolLineage.visible_count}/${toolLineage.searched_count})`}
+        />
+        <${SignalRow} label="tool lineage verified" value=${toolLineage.verified_count} />
+        <${SignalRow} label="tool lineage successful" value=${toolLineage.successful_count} />
+        <${SignalRow} label="tool lineage failed" value=${toolLineage.failed_count} />
         <${SignalRow} label="claim scope" value=${claim.present ? `${claim.mode ?? 'unknown'} / ${claim.status}` : 'not observed'} />
         <${SignalRow} label="claim excluded" value=${claim.excluded_count === null ? '-' : String(claim.excluded_count)} />
         <${SignalRow} label="claim goals" value=${formatLensList(claim.effective_goal_ids)} />

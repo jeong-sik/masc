@@ -762,6 +762,22 @@ export interface KeeperRuntimeLensRuntimeProofAxis {
   latest_at: string | null
 }
 
+export interface KeeperRuntimeLensToolLineageAxis {
+  searched_count: number
+  visible_count: number
+  materialized_count: number
+  emitted_count: number
+  executed_count: number
+  verified_count: number
+  successful_count: number
+  failed_count: number
+  requested_tools: string[]
+  required_tools: string[]
+  materialized_tools: string[]
+  missing_required_tools: string[]
+  terminal_status: string
+}
+
 export interface KeeperRuntimeLensContextAxis {
   context_injected_count: number
   context_compacted_event_count: number
@@ -785,6 +801,7 @@ export interface KeeperRuntimeLensAxes {
   claim_scope: KeeperRuntimeLensClaimScopeAxis
   config_drift: KeeperRuntimeLensConfigDriftAxis
   runtime_proof: KeeperRuntimeLensRuntimeProofAxis
+  tool_lineage: KeeperRuntimeLensToolLineageAxis
   context: KeeperRuntimeLensContextAxis
   memory: KeeperRuntimeLensMemoryAxis
 }
@@ -809,6 +826,7 @@ export interface KeeperRuntimeLensSwimlanes {
   masc_policy_cascade: KeeperRuntimeLensLane
   oas_agent: KeeperRuntimeLensLane
   provider: KeeperRuntimeLensLane
+  tool_lineage: KeeperRuntimeLensLane
   tool_runtime: KeeperRuntimeLensLane
   memory_context: KeeperRuntimeLensLane
 }
@@ -1119,6 +1137,25 @@ function parseRuntimeLensRuntimeProofAxis(raw: unknown): KeeperRuntimeLensRuntim
   }
 }
 
+function parseRuntimeLensToolLineageAxis(raw: unknown): KeeperRuntimeLensToolLineageAxis {
+  const obj = isRecord(raw) ? raw : {}
+  return {
+    searched_count: numberField(obj, 'searched_count'),
+    visible_count: numberField(obj, 'visible_count'),
+    materialized_count: numberField(obj, 'materialized_count'),
+    emitted_count: numberField(obj, 'emitted_count'),
+    executed_count: numberField(obj, 'executed_count'),
+    verified_count: numberField(obj, 'verified_count'),
+    successful_count: numberField(obj, 'successful_count'),
+    failed_count: numberField(obj, 'failed_count'),
+    requested_tools: stringListField(obj, 'requested_tools'),
+    required_tools: stringListField(obj, 'required_tools'),
+    materialized_tools: stringListField(obj, 'materialized_tools'),
+    missing_required_tools: stringListField(obj, 'missing_required_tools'),
+    terminal_status: stringField(obj, 'terminal_status') || 'unknown',
+  }
+}
+
 function parseRuntimeLensContextAxis(raw: unknown): KeeperRuntimeLensContextAxis {
   const obj = isRecord(raw) ? raw : {}
   return {
@@ -1142,6 +1179,7 @@ function parseRuntimeLensAxes(raw: unknown): KeeperRuntimeLensAxes {
     tool_surface: parseRuntimeLensToolSurfaceAxis(obj.tool_surface),
     provider_lane: parseRuntimeLensProviderLaneAxis(obj.provider_lane),
     provider_attempt: parseRuntimeLensProviderAttemptAxis(obj.provider_attempt),
+    tool_lineage: parseRuntimeLensToolLineageAxis(obj.tool_lineage),
     claim_scope: parseRuntimeLensClaimScopeAxis(obj.claim_scope),
     config_drift: parseRuntimeLensConfigDriftAxis(obj.config_drift),
     runtime_proof: parseRuntimeLensRuntimeProofAxis(obj.runtime_proof),
@@ -1181,6 +1219,7 @@ function parseRuntimeLensSwimlanes(raw: unknown): KeeperRuntimeLensSwimlanes {
     masc_policy_cascade: parseRuntimeLensLane(obj.masc_policy_cascade, 'masc_policy_cascade', 'MASC Cascade'),
     oas_agent: parseRuntimeLensLane(obj.oas_agent, 'oas_agent', 'OAS'),
     provider: parseRuntimeLensLane(obj.provider, 'provider', 'Provider'),
+    tool_lineage: parseRuntimeLensLane(obj.tool_lineage, 'tool_lineage', 'Tool Lineage'),
     tool_runtime: parseRuntimeLensLane(obj.tool_runtime, 'tool_runtime', 'Tool Runtime'),
     memory_context: parseRuntimeLensLane(obj.memory_context, 'memory_context', 'Memory/Context'),
   }

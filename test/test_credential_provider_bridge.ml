@@ -3,14 +3,13 @@
 
     This is the load-bearing helper consumed by
     {!Keeper_host_config_provider.resolve} when deciding whether to route a
-    keeper through the new {!Credential_store} or the legacy
-    {!Keeper_gh_env.keeper_binding} path.
+    keeper through the {!Credential_store}.
 
     Pinned scenarios:
 
-    1. No mapping for the keeper → [Ok []] (the bridge interprets this
-       as "use the legacy resolver"; an [Error] would falsely block
-       legacy keepers).
+    1. No mapping for the keeper → [Ok []] from the helper.  The host
+       config provider now interprets this as a fail-closed missing mapping
+       error rather than a legacy resolver fallback.
     2. Mapping with exactly one repo → [Ok [credential]].
     3. Mapping with several repos that share one credential → [Ok
        [credential]] (deduplicated; the bridge expects a single
@@ -133,7 +132,7 @@ let seed_repo ~base_path repo =
   | Error msg ->
       Alcotest.failf "seed repo %s: %s" repo.id msg
 
-(* --- 1. No mapping → Ok [] --- *)
+(* --- 1. No mapping → helper returns Ok [] --- *)
 
 let test_no_mapping_yields_empty_list () =
   with_temp_base_path (fun base_path ->

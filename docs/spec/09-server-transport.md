@@ -428,9 +428,7 @@ let make_routes ~port ~host ~sw ~clock =
 | `Worker` | 도구 호출, broadcast, task claim/complete |
 | `Observer` | 읽기 전용 (status, messages 조회) |
 
-`permission_for_tool` 함수가 각 MCP 도구명을 필요 권한으로 매핑한다. 매핑되지 않은 `masc_*` 도구는:
-- `MASC_TOOL_AUTH_STRICT=1` (기본값): `CanBroadcast` 이상 필요
-- `MASC_TOOL_AUTH_STRICT=0`: fail-open (레거시 호환)
+`permission_for_tool` 함수가 각 MCP 도구명을 필요 권한으로 매핑한다. 매핑되지 않은 내부 도구명은 `CanBroadcast` 이상을 요구하고, 매핑되지 않은 외부 도구명은 거부한다. 이 동작은 fail-closed 고정값이며 환경변수로 완화할 수 없다.
 
 ### 7.5 Admin 인증
 
@@ -762,7 +760,6 @@ sequenceDiagram
 | 환경변수 | 기본값 | 설명 |
 |---------|--------|------|
 | `MASC_HTTP_AUTH_STRICT` | non-loopback시 자동 | MCP 경로 토큰 인증 강제 |
-| `MASC_TOOL_AUTH_STRICT` | 1 | 미매핑 masc_* 도구에 Worker 이상 권한 요구 |
 | `MASC_ADMIN_TOKEN` | (미설정) | Admin API 토큰 |
 | `MASC_ALLOW_LEGACY_ACCEPT` | 0 | Accept 헤더 레거시 호환 |
 

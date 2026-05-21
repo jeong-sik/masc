@@ -95,13 +95,10 @@ val load_credential_of :
     [resolved_credential_stem]; the function then degenerates to a
     simple exact-match lookup with explicit error variants.
 
-    This replaces the silent fallback in {!load_credential_with_aliases}
+    This replaces the removed silent alias fallback
     where a stem of [sangsu] against a [ctx_agent_name] of
     [keeper-sangsu-agent] would return the bare-nickname credential and
-    perpetuate dual identity.  Callers that still need the legacy
-    behavior keep using {!load_credential_with_aliases}; new dispatcher
-    paths should adopt [load_credential_of] one site at a time
-    (RFC P2-b through P2-d). *)
+    perpetuate dual identity. *)
 
 val save_credential : string -> agent_credential -> unit
 

@@ -176,19 +176,12 @@ let metadata_of_binding (kb : Keeper_gh_env.keeper_binding) =
   | Some id -> base @ [ "github_identity", id ]
   | None -> base
 
-(* RFC-0019 PR-A — bridge to the multi-repo credential store
-   (#12304).  When a keeper has a [Keeper_repo_mapping] entry that
-   resolves to exactly one [Credential_store] credential we synthesise
-   a [Keeper_gh_env.keeper_binding] from that credential and reuse the
-   existing [compose_env]/[compose_ro_mounts_result] flow verbatim, preserving
-   every fail-closed semantics and warning the legacy path already
-   carries.  Keepers with no mapping fall through to [legacy_resolve]
-   exactly as before.
-
-   See [docs/rfc/RFC-0019-keeper-credential-unification.md] §4.2 and §5
-   (PR-A) for the rationale.  Per-repo dispatch for keepers with
-   multiple mapped credentials is delivered in PR-B; PR-A reports
-   such keepers as [Missing_bundle] with an actionable [path] field. *)
+(* RFC-0019 bridge to the multi-repo credential store.  A keeper must have a
+   [Keeper_repo_mapping] entry that resolves to exactly one
+   [Credential_store] credential.  The old host-config resolver fallback is
+   intentionally gone: a missing or unreadable mapping is a configuration
+   error, not permission to infer an identity from legacy keeper profile
+   fields. *)
 let count_resolve_outcome ~keeper_name ~source ~reason =
   Prometheus.inc_counter
     "keeper_credential_provider_resolve_total"
@@ -269,14 +262,6 @@ let bind_from_keeper_binding ?ssh_key_path ~keeper_name
                    kb.gh_config_dir
              }))
 
-let legacy_resolve ~config ~keeper_name =
-  match Keeper_gh_env.keeper_binding config ~keeper_name with
-  | Error reason ->
-      Error
-        (Keeper_credential_provider.Missing_bundle
-           { identity = keeper_name; path = reason })
-  | Ok kb -> bind_from_keeper_binding ~keeper_name kb ~extra_metadata:[]
-
 (* Synthesise a [Keeper_gh_env.keeper_binding] from a credential store
    record.  PR-A convention: [bundle_root = dirname gh_config_dir].  This
    matches the existing host bundle layout
@@ -323,6 +308,14 @@ let bind_from_credential ~keeper_name (cred : Repo_manager_types.credential) =
         (Keeper_credential_provider.Missing_bundle
            { identity = keeper_name; path = reason })
   | Ok kb ->
+      let kb =
+        match
+          (Keeper_types_profile.load_keeper_profile_defaults keeper_name)
+            .git_identity_mode
+        with
+        | Some "keeper_alias" -> { kb with git_identity_mode = "keeper_alias" }
+        | _ -> kb
+      in
       let ssh_key_path =
         match cred.ssh_key_path with
         | Some path ->
@@ -411,21 +404,34 @@ let resolve ~config ~identity:keeper_name =
       ~base_path:config.Coord.base_path ~keeper_id:keeper_name
   with
   | Error err ->
-      (* Mapping store unreadable — treat as infra error, not absence.
-         Fall through to legacy resolver so a corrupt
-         [keeper_repo_mappings.toml] does not break previously-working
-         keepers. *)
-      count_resolve_outcome ~keeper_name ~source:"legacy"
+      count_resolve_outcome ~keeper_name ~source:"credential_store"
         ~reason:"mapping_load_error";
-      Log.Keeper.warn
-        "%s: keeper_repo_mapping load error (%s); falling back to \
-         legacy host_config_provider resolver"
-        keeper_name err;
-      legacy_resolve ~config ~keeper_name
+      Error
+        (Keeper_credential_provider.Missing_bundle
+           { identity = keeper_name
+           ; path =
+               Printf.sprintf
+                 "keeper_repo_mappings.toml load error for keeper %s: %s. \
+                  Credential-store mapping is required; fix the TOML instead \
+                  of falling back to legacy host_config_provider identity."
+                 keeper_name err
+           })
   | Ok [] ->
-      count_resolve_outcome ~keeper_name ~source:"legacy"
-        ~reason:"no_mapping";
-      legacy_resolve ~config ~keeper_name
+      count_resolve_outcome ~keeper_name ~source:"credential_store"
+        ~reason:"missing_mapping";
+      Error
+        (Keeper_credential_provider.Missing_bundle
+           { identity = keeper_name
+           ; path =
+               Printf.sprintf
+                 "keeper %s has no credential mapping in %s. Add a \
+                  [mapping.%s] entry with credential_id or repositories; \
+                  legacy host_config_provider fallback has been removed."
+                 keeper_name
+                 (Config_dir_resolver.keeper_repo_mappings_toml_path
+                    ~base_path:config.Coord.base_path)
+                 keeper_name
+           })
   | Ok [cred] ->
       count_resolve_outcome ~keeper_name ~source:"credential_store"
         ~reason:"single_mapping";

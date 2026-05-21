@@ -74,11 +74,6 @@ let all_flags : flag list = [
     default = false; category = "tool";
     lifecycle = Active; since = "2.90.0" };
 
-  { env_name = Env_config_core.tool_auth_strict_env_key;
-    description = "Unknown masc_* tools require worker-level permission";
-    default = true; category = "tool";
-    lifecycle = Active; since = "2.100.0" };
-
   { env_name = Env_config_core.parse_warn_env_key;
     description = "Log JSON parse warnings";
     default = false; category = "tool";

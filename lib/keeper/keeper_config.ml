@@ -593,14 +593,75 @@ let default_keep_recent_tool_results = 2
 (** Default message-count floor for the tool-heavy compaction gate.
     Mirrors the prior global constant in [keeper_compact_policy.ml].
     Per-keeper override lives at [compaction_policy.tool_heavy_msg_threshold];
-    wired into [decide_compaction] by PR-B. *)
-let default_tool_heavy_msg_threshold = 40
+    wired into [decide_compaction] by PR-B.
+
+    Operator override (PR-C, this commit): [MASC_KEEPER_TOOL_HEAVY_MSG_THRESHOLD]
+    sets the global default that personas without an explicit value inherit.
+    Valid range [1, 10_000]; out-of-range or unparseable values warn and fall
+    back to the built-in default 40 (parse-correctness, not silent coercion —
+    mirrors [emergency_compact_ratio_threshold] in
+    [Keeper_compact_policy]). Read once at module init; restart required. *)
+let default_tool_heavy_msg_threshold : int =
+  let env_var = "MASC_KEEPER_TOOL_HEAVY_MSG_THRESHOLD" in
+  let default_value = 40 in
+  let min_valid = 1 in
+  let max_valid = 10_000 in
+  match Sys.getenv_opt env_var with
+  | None -> default_value
+  | Some raw ->
+    (match int_of_string_opt (String.trim raw) with
+     | None ->
+       Log.Keeper.warn
+         "[keeper_config] %s=%S is not a parseable int; falling back to default \
+          %d"
+         env_var raw default_value;
+       default_value
+     | Some parsed when parsed < min_valid || parsed > max_valid ->
+       Log.Keeper.warn
+         "[keeper_config] %s=%d out of range [%d, %d]; falling back to default \
+          %d"
+         env_var parsed min_valid max_valid default_value;
+       default_value
+     | Some parsed -> parsed)
 
 (** Default context-ratio floor for the tool-heavy compaction gate.
     Mirrors the prior global constant in [keeper_compact_policy.ml].
     Per-keeper override lives at [compaction_policy.tool_heavy_ratio_floor];
-    wired into [decide_compaction] by PR-B. *)
-let default_tool_heavy_ratio_floor = 0.15
+    wired into [decide_compaction] by PR-B.
+
+    Operator override (PR-C, this commit): [MASC_KEEPER_TOOL_HEAVY_RATIO_FLOOR]
+    sets the global default that personas without an explicit value inherit.
+    Valid range [0.0, 1.0); out-of-range, non-finite, or unparseable values
+    warn and fall back to the built-in default 0.15 (parse-correctness;
+    mirrors [emergency_compact_ratio_threshold]). Read once at module init. *)
+let default_tool_heavy_ratio_floor : float =
+  let env_var = "MASC_KEEPER_TOOL_HEAVY_RATIO_FLOOR" in
+  let default_value = 0.15 in
+  let min_valid = 0.0 in
+  let max_valid = 1.0 in
+  match Sys.getenv_opt env_var with
+  | None -> default_value
+  | Some raw ->
+    (match Float.of_string_opt (String.trim raw) with
+     | None ->
+       Log.Keeper.warn
+         "[keeper_config] %s=%S is not a parseable float; falling back to \
+          default %.2f"
+         env_var raw default_value;
+       default_value
+     | Some parsed when not (Float.is_finite parsed) ->
+       Log.Keeper.warn
+         "[keeper_config] %s=%s parsed to non-finite %f; falling back to \
+          default %.2f"
+         env_var raw parsed default_value;
+       default_value
+     | Some parsed when parsed < min_valid || parsed >= max_valid ->
+       Log.Keeper.warn
+         "[keeper_config] %s=%f out of range [%.2f, %.2f); falling back to \
+          default %.2f"
+         env_var parsed min_valid max_valid default_value;
+       default_value
+     | Some parsed -> parsed)
 
 (** Hard upper bound for operator-supplied [keep_recent_tool_results].
     Values above this likely indicate operator typos (e.g. 5000); we

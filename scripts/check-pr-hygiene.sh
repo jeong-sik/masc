@@ -91,6 +91,11 @@ done
 
 for commit in "${RANGE_COMMITS[@]}"; do
   parents_line="$(git rev-list --parents -n 1 "$commit")"
+  parent_count="$(awk '{print NF - 1}' <<<"$parents_line")"
+  if [[ "$parent_count" -gt 1 ]]; then
+    continue
+  fi
+
   parent="$(awk '{print $2}' <<<"$parents_line")"
   if [[ -n "$parent" ]]; then
     tree="$(git rev-parse "${commit}^{tree}")"
@@ -100,11 +105,6 @@ for commit in "${RANGE_COMMITS[@]}"; do
       echo "::error title=Empty commit detected::${commit} ${subject}"
       empty_failures=1
     fi
-  fi
-
-  parent_count="$(awk '{print NF - 1}' <<<"$parents_line")"
-  if [[ "$parent_count" -gt 1 ]]; then
-    continue
   fi
 
   patch_id="$(git show --format=medium --patch "$commit" | git patch-id --stable | awk 'NR == 1 { print $1; exit }')"

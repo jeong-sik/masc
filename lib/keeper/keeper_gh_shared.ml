@@ -1,9 +1,6 @@
 (* GH credential isolation — SSOT in Keeper_gh_env. *)
 let with_keeper_gh_env = Keeper_gh_env.with_env
 
-(* RFC-0084 host-config-cleanup-B — zsh binary path migration. *)
-let host_zsh = (Host_config.host ()).host_zsh
-
 (* ================================================================ *)
 (* GH entity cache (inlined from former keeper_gh_cache.ml).         *)
 (* In-memory cache of valid PR/issue numbers per repo, populated     *)
@@ -213,19 +210,13 @@ let fetch_entity_numbers
       (kind_path kind)
       (Keeper_tool_policy.gh_cache_fetch_page_size ())
   in
-  let raw =
-    Printf.sprintf
-      "gh api %s --jq %s"
-      (Filename.quote endpoint)
-      (Filename.quote (jq_filter kind))
-  in
-  let scoped = Keeper_gh_env.with_env config raw in
-  let argv = [ host_zsh; "-lc"; Printf.sprintf "%s 2>/dev/null" scoped ] in
+  let argv = [ "gh"; "api"; endpoint; "--jq"; jq_filter kind ] in
   match
     Masc_exec.Exec_gate.run_argv_with_status
       ~actor:`Coord_git
-      ~raw_source:(String.concat " " argv)
+      ~raw_source:(String.concat " " (List.map Filename.quote argv))
       ~summary:"keeper gh cache fetch"
+      ?env:(Keeper_gh_env.process_env config)
       ~timeout_sec:(Keeper_tool_policy.gh_cache_fetch_timeout_sec ())
       argv
   with

@@ -94,6 +94,20 @@ let with_env key value f =
       | None -> Unix.putenv key "")
     f
 
+let read_file path =
+  let ic = open_in_bin path in
+  Fun.protect ~finally:(fun () -> close_in ic) @@ fun () ->
+  really_input_string ic (in_channel_length ic)
+
+let contains_substring text needle =
+  let text_len = String.length text in
+  let needle_len = String.length needle in
+  let rec loop idx =
+    idx + needle_len <= text_len
+    && (String.sub text idx needle_len = needle || loop (idx + 1))
+  in
+  needle_len = 0 || loop 0
+
 let with_fake_gh script f =
   let dir = temp_dir () in
   let gh_path = Filename.concat dir "gh" in
@@ -190,6 +204,17 @@ let with_repo_context_test_env f =
   ensure_dir repo_dir;
   run_argv [ "git"; "-C"; repo_dir; "init"; "-q" ];
   f ~base ~config ~repo_dir
+
+let ensure_policy_config_loaded () =
+  match Keeper_tool_policy.policy_config_for_validation () with
+  | Some _ -> ()
+  | None -> (
+    match
+      Keeper_tool_policy.init_policy_config
+        ~base_path:(Masc_test_deps.find_project_root ())
+    with
+    | Ok () -> ()
+    | Error err -> Alcotest.fail ("init tool policy config: " ^ err))
 
 (* ================================================================ *)
 (* Read-only subcommands via cmd                                     *)
@@ -536,6 +561,84 @@ let test_repo_slug_of_task_worktree_infers_parent_config_for_container_gitdir ()
     (Keeper_gh_shared.repo_slug_of_task_worktree
        ~git_root:"/home/keeper/repos/project"
        ~worktree_cwd:worktree_dir)
+
+let test_gh_cache_fetch_uses_direct_argv () =
+  with_repo_context_test_env @@ fun ~base ~config ~repo_dir:_ ->
+  ensure_policy_config_loaded ();
+  let repo_slug = Printf.sprintf "example/direct-argv-%d" (Unix.getpid ()) in
+  let endpoint =
+    Printf.sprintf
+      "repos/%s/pulls?state=all&per_page=%d"
+      repo_slug
+      (Keeper_tool_policy.gh_cache_fetch_page_size ())
+  in
+  let gh_args_log = Filename.concat base "gh-args.log" in
+  let gh_env_log = Filename.concat base "gh-env.log" in
+  let script =
+    "#!/bin/sh\n\
+     printf '%s\\n' \"$*\" >> \"$GH_ARGS_LOG\"\n\
+     printf '%s\\n' \"${GH_CONFIG_DIR:-}\" >> \"$GH_ENV_LOG\"\n\
+     if [ \"$1\" = \"api\" ]; then\n\
+     \  printf '42\\n'\n\
+     \  exit 0\n\
+     fi\n\
+     printf 'unexpected gh: %s\\n' \"$*\" >&2\n\
+     exit 2\n"
+  in
+  with_fake_gh script @@ fun () ->
+  let captured = ref [] in
+  Fun.protect
+    ~finally:(fun () -> Exec_tap.disable ())
+    (fun () ->
+      Exec_tap.enable ~writer:(fun line -> captured := line :: !captured);
+      with_env "MASC_EXEC_GATE" "parallel" @@ fun () ->
+      with_env "GH_ARGS_LOG" gh_args_log @@ fun () ->
+      with_env "GH_ENV_LOG" gh_env_log @@ fun () ->
+      match
+        Keeper_gh_shared.validate_number ~config ~repo_slug
+          ~kind:Keeper_gh_shared.PR ~number:42
+      with
+      | `Valid ->
+        Alcotest.(check string)
+          "gh api direct argv"
+          (Printf.sprintf "api %s --jq .[] | .number" endpoint)
+          (String.trim (read_file gh_args_log));
+        Alcotest.(check bool)
+          "gh config dir is passed via env"
+          true
+          (String.trim (read_file gh_env_log) <> "");
+        let process_lines =
+          List.filter
+            (fun line ->
+               contains_substring line
+                 {|Process_eio.run_argv_with_status|})
+            !captured
+        in
+        Alcotest.(check bool)
+          "process execution recorded"
+          true
+          (process_lines <> []);
+        Alcotest.(check bool)
+          "direct gh argv recorded"
+          true
+          (List.exists
+             (fun line ->
+                contains_substring line
+                  (Printf.sprintf
+                     {|["gh","api","%s","--jq",".[] | .number"]|}
+                     endpoint))
+             process_lines);
+        Alcotest.(check bool)
+          "no shell wrapper in exec tap"
+          false
+          (List.exists
+             (fun line ->
+                List.exists
+                  (fun needle -> contains_substring line needle)
+                  [ "-lc"; "/bin/zsh"; "2>/dev/null" ])
+             !captured)
+      | `Invalid _ -> Alcotest.fail "expected valid cached PR number"
+      | `Unknown -> Alcotest.fail "expected gh cache to populate")
 
 let fake_docker_gh_script =
   "#!/bin/sh\n\
@@ -931,6 +1034,8 @@ let () =
             "worktree parent config survives container gitdir"
             `Quick
             test_repo_slug_of_task_worktree_infers_parent_config_for_container_gitdir;
+          Alcotest.test_case "gh cache fetch uses direct argv" `Quick
+            test_gh_cache_fetch_uses_direct_argv;
           Alcotest.test_case
             "keeper_shell gh without current task uses sandbox context"
             `Quick test_keeper_shell_gh_without_current_task_uses_sandbox_context;

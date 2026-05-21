@@ -101,6 +101,7 @@ let test_git_upstream_status_uses_origin_head_for_detached_checkout () =
     (fun () ->
       with_dashboard_eio @@ fun () ->
       ignore (run_git_exn dir [ "init"; "-q"; "-b"; "main" ]);
+      (* WORKAROUND: isolate this synthetic repo from host-level git hooks. *)
       ignore (run_git_exn dir [ "config"; "core.hooksPath"; "/dev/null" ]);
       let readme = Filename.concat dir "README.md" in
       write_file readme "one\n";

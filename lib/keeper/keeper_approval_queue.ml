@@ -695,12 +695,6 @@ let read_recent_audit ?base_path ?keeper_name ?(n = 20) () : Yojson.Safe.t list 
         [])
 ;;
 
-module For_testing = struct
-  let reset_audit_store () =
-    Stdlib.Mutex.protect audit_stores_mu (fun () -> Hashtbl.clear audit_stores)
-  ;;
-end
-
 let generate_id () = make_generated_id "appr"
 
 let normalized_input_hash (input : Yojson.Safe.t) =
@@ -708,13 +702,18 @@ let normalized_input_hash (input : Yojson.Safe.t) =
 ;;
 
 let first_cmd_token (cmd : string) =
-  cmd
-  |> String.trim
-  |> String.split_on_char ' '
-  |> List.find_map (fun token ->
-    let trimmed = String.trim token in
-    if trimmed = "" then None else Some trimmed)
+  match Masc_exec.Command_words.stages cmd with
+  | Ok ((token :: _) :: _) -> Some token.Masc_exec.Command_words.value
+  | Ok ([] :: _) | Ok [] | Error _ -> None
 ;;
+
+module For_testing = struct
+  let reset_audit_store () =
+    Stdlib.Mutex.protect audit_stores_mu (fun () -> Hashtbl.clear audit_stores)
+  ;;
+
+  let first_cmd_token = first_cmd_token
+end
 
 let action_key_of_input ~tool_name ~(input : Yojson.Safe.t) =
   match Safe_ops.json_string_opt "op" input with

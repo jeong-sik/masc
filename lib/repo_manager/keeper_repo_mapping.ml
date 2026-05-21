@@ -152,10 +152,9 @@ let filter_repos_by_mapping (mapping : keeper_repo_mapping)
     extracting each repository's [credential_id] into a unique list of
     [credential] records.
 
-    Returns [Ok []] when the keeper has no mapping.  This is the
-    backward-compatibility branch consumed by the credential provider
-    bridge (RFC-0019 PR-A): a keeper without a mapping continues to use
-    the legacy [Keeper_gh_env.keeper_binding] resolver.
+    Returns [Ok []] when the keeper has no mapping.  Absence remains distinct
+    from load/parse errors so callers can decide their own policy; strict
+    credential-provider dispatch treats this as a missing-mapping error.
 
     Repository IDs from the mapping are resolved against the loaded
     repositories; unknown repository IDs are ignored by this resolution path.

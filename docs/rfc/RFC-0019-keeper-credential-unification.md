@@ -141,8 +141,7 @@ let resolve ~config ~identity:keeper_name =
       (* simple case: 1 keeper, 1 credential *)
       bind_from_credential ~config ~keeper_name credential
   | [] ->
-      (* fallback: legacy keeper_types_profile.github_identity path *)
-      legacy_bind ~config ~keeper_name
+      Error (Missing_mapping { keeper_name; path = keeper_repo_mappings_path config })
   | many ->
       (* multi-credential keepers need per-repo resolution; the caller
          supplies repo context separately via resolve_for_repo *)
@@ -155,7 +154,7 @@ val resolve_for_repo
  -> (binding, error) result
 ```
 
-Backward-compat (Acceptance criterion #6): keepers with `profile.github_identity` set keep working through `legacy_bind`. The legacy path emits a deprecation metric so we can ramp-down.
+Strict resolution: keepers with only `profile.github_identity` no longer dispatch GitHub work through `Host_config_provider.resolve`; they must have a credential-store mapping.
 
 ### 4.3 Identity binding is `f(keeper, repo)`, not `f(keeper)` (P6)
 
@@ -205,14 +204,14 @@ This RFC lays out 4 PRs. Each is independently shippable, each ramps acceptance-
 
 ### PR-A — Bridge resolver (1-2 days; SAFE; non-functional bridge)
 
-**Goal**: make A read B's registry; backward compatible.
+**Goal**: make A read B's registry with strict credential-store ownership.
 
-- `lib/keeper/host_config_provider.ml`: add `Keeper_repo_mapping.credentials_for_keeper` lookup at top of `resolve`; fall back to legacy `keeper_types_profile.github_identity` when mapping is empty.
+- `lib/keeper/host_config_provider.ml`: add `Keeper_repo_mapping.credentials_for_keeper` lookup at top of `resolve`; missing or unreadable mappings fail closed instead of falling back to legacy `keeper_types_profile.github_identity`.
 - `lib/repo_manager/keeper_repo_mapping.ml`: expose `credentials_for_keeper` helper.
 - `lib/repo_manager/repo_manager_types.{ml,mli}`: add `state : credential_state` and `token_sha256_prefix : string option` fields with conservative defaults (`Unmaterialized`, `None`) so existing TOML files load. Preserve `to_yojson`/`of_yojson` symmetry (per memory `feedback_json-serializer-parser-key-symmetry`).
-- `test/test_credential_provider_bridge.ml` (new): keeper with mapping → reads from `Credential_store`. Keeper without mapping → reads legacy. Both succeed.
+- `test/test_credential_provider_bridge.ml` (new): keeper with mapping → reads from `Credential_store`. Keeper without mapping returns an empty helper result; `Keeper_host_config_provider.resolve` fails closed with an actionable missing-mapping error.
 
-**Acceptance**: legacy keepers unchanged. New keepers with mapping route through `Credential_store`. F-1 still untouched.
+**Acceptance**: unmapped keepers fail closed with an actionable mapping error. Keepers with mapping route through `Credential_store`. F-1 still untouched.
 
 ### PR-B — Materializer + dashboard provisioning (3-5 days; observable; closes user's symptom)
 
@@ -257,7 +256,7 @@ This RFC lays out 4 PRs. Each is independently shippable, each ramps acceptance-
 
 ## 6. Migration plan
 
-**No data migration needed for legacy keepers** (`profile.github_identity` set, no `keeper_repo_mapping`). PR-A's `legacy_bind` keeps them on the old path indefinitely. Deprecation date is left to a follow-up RFC; this RFC does not mandate a sunset.
+**Credential mapping is required for keeper GitHub dispatch** (`keeper_repo_mapping` or direct `credential_id`). The old `profile.github_identity` / root-bundle fallback is removed; unmapped keepers fail closed until an operator adds a mapping.
 
 **For keepers with both** (`profile.github_identity` AND `keeper_repo_mapping`): PR-A's resolver prefers the mapping. PR-D's manual update teaches operators to delete the obsolete `github_identity` field. A linter rule (`scripts/audit-keeper-credential-drift.sh` extended) flags the conflict.
 
@@ -310,7 +309,7 @@ A bash hook fires on `gh pr create` (or git push for PR-bound branches). It:
 
 | # | Risk | Mitigation |
 |---|---|---|
-| R1 | Legacy keepers break when `Credential_store` lookup fails | PR-A `legacy_bind` fallback + integration test |
+| R1 | Unmapped legacy keepers fail GitHub dispatch after fallback removal | Missing-mapping error names `keeper_repo_mappings.toml` and the required `[mapping.<keeper>]` entry; operators must migrate keepers to credential-store mappings |
 | R2 | Token-paste path leaks token via error message / log | PR-B test grep stdin/log/metric/audit for `gh[op]_[A-Za-z0-9_]{36+}` regex; assert 0 hits |
 | R3 | Materializer races with operator's manual `gh auth login` outside dashboard | PR-C 2-phase commit + filesystem lock during materialize |
 | R4 | F-1 gate false positive (multi-operator host shares same PAT) | PR-C audit metric distinguishes single- vs multi-operator detection by hash count uniqueness |

@@ -808,6 +808,8 @@ let () =
             "env rm -rf /";
             "env -- rm -rf /";
             "env FOO=bar rm -rf /";
+            "env -S 'rm -rf /'";
+            "env --split-string='rm -rf /'";
             "env opam exec -- rm -rf /";
             "git status | env rm -rf /";
           ]);
@@ -830,6 +832,8 @@ let () =
           [
             "env FOO=bar git status";
             "env -- git status";
+            "env -S 'git status'";
+            "env --split-string='git status'";
             "env -i -- FOO=bar git status | head -5";
           ]);
       Alcotest.test_case "blocks opam-exec direct dune" `Quick (fun () ->

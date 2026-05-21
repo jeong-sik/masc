@@ -405,8 +405,8 @@ let validate_command_coding_with_allowlist
 ;;
 
 (** Relaxed command validation for Coding/Full preset keepers.
-    Allows pipes and redirects; validates every command in the pipeline
-    against [dev_allowed_commands]. *)
+    Allows pipes; redirects remain blocked by the shell gate. Validates every
+    command in the pipeline against [dev_allowed_commands]. *)
 let validate_command_coding ?caller cmd =
   validate_command_coding_with_allowlist
     ?caller

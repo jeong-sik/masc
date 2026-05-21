@@ -34,6 +34,7 @@ validate_pr_body_file() {
   local path="$1"
   local missing=()
   local heading
+  local schema_errors=()
 
   if [[ ! -f "$path" ]]; then
     echo "body file not found: $path" >&2
@@ -44,6 +45,7 @@ validate_pr_body_file() {
     "## Summary" \
     "## Product impact" \
     "## Evidence" \
+    "## Direct evidence" \
     "## Review evidence" \
     "## Linked issue"
   do
@@ -56,6 +58,23 @@ validate_pr_body_file() {
     echo "body file is missing required PR hygiene sections:" >&2
     printf '  - %s\n' "${missing[@]}" >&2
     echo "expected headings from .github/pull_request_template.md" >&2
+    exit 1
+  fi
+
+  if ! grep -Eq '^[[:space:]]*schema_version:[[:space:]]*1([[:space:]]|$)' "$path"; then
+    schema_errors+=("schema_version: 1")
+  fi
+  if ! grep -Eq '^[[:space:]]*direct_ratio:[[:space:]]*([0-9]+/[0-9]+|n/a|N/A)([[:space:]]|$)' "$path"; then
+    schema_errors+=("direct_ratio: <direct>/<total> or n/a")
+  fi
+  if ! grep -Eq '^[[:space:]]*provenance:[[:space:]]*(direct|operator_proxy|mixed|n/a)([[:space:]]|$)' "$path"; then
+    schema_errors+=("provenance: direct|operator_proxy|mixed|n/a")
+  fi
+
+  if [[ ${#schema_errors[@]} -gt 0 ]]; then
+    echo "body file is missing required Direct evidence schema fields:" >&2
+    printf '  - %s\n' "${schema_errors[@]}" >&2
+    echo "expected a Direct evidence block with schema_version, direct_ratio, and provenance" >&2
     exit 1
   fi
 }

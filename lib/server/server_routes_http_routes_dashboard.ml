@@ -466,12 +466,11 @@ let rec add_routes ~sw ~clock router =
   |> Http.Router.get "/api/v1/dashboard/doctor" (fun request reqd ->
        with_public_read (fun _state req reqd ->
          let self_bin = Sys.argv.(0) in
-         let cmd =
-           Printf.sprintf "%s doctor all --json" (Filename.quote self_bin)
-         in
          try
            let buf, _status =
-             With_process.with_process_in cmd
+             With_process.with_process_args_in
+               self_bin
+               [| self_bin; "doctor"; "all"; "--json" |]
                (With_process.drain_to_buffer ~chunk:4096)
            in
            Http.Response.json

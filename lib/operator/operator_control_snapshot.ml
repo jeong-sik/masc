@@ -391,66 +391,8 @@ let _keeper_snapshot_max_concurrency =
 
 let _keeper_sem = Eio.Semaphore.make _keeper_snapshot_max_concurrency
 
-let compact_keeper_runtime_trust_json
-      ~(config : Coord.config)
-      ~(meta : Keeper_types.keeper_meta)
-  =
-  let runtime_trust =
-    if Keeper_fd_pressure.active ()
-    then Keeper_fd_pressure.degraded_trust_json ()
-    else Keeper_runtime_trust_snapshot.summary_json ~config ~meta
-  in
-  let member key = Yojson.Safe.Util.member key runtime_trust in
-  `Assoc
-    [ "disposition", member "disposition"
-    ; "disposition_reason", member "disposition_reason"
-    ; "operator_disposition", member "operator_disposition"
-    ; "operator_disposition_reason", member "operator_disposition_reason"
-    ; "needs_attention", member "needs_attention"
-    ; "attention_reason", member "attention_reason"
-    ; "next_human_action", member "next_human_action"
-    ; "execution_summary", member "execution"
-    ; "latest_terminal_reason", member "latest_terminal_reason"
-    ; "latest_next_action", member "latest_next_action"
-    ; "latest_causal_event", member "latest_causal_event"
-    ]
-;;
-
-let degraded_keeper_snapshot_row (meta : Keeper_types.keeper_meta) =
-  let runtime_trust = Keeper_fd_pressure.degraded_trust_json () in
-  let fd_fields = Keeper_fd_pressure.projection_fields () in
-  `Assoc
-    ([ "runtime_class", `String "keeper"
-     ; "pipeline_stage", `String "degraded"
-     ; "phase", `String "degraded"
-     ; "name", `String meta.name
-     ; "agent_name", `String meta.agent_name
-     ; ( "trace_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id) )
-     ; "goal", `String meta.goal
-     ; "short_goal", `String meta.short_goal
-     ; "mid_goal", `String meta.mid_goal
-     ; "long_goal", `String meta.long_goal
-     ; "status", `String "degraded"
-     ; "agent", `Null
-     ; "generation", `Int meta.runtime.generation
-     ; "turn_count", `Int meta.runtime.usage.total_turns
-     ; "paused", `Bool meta.paused
-     ; "keepalive_running", `Bool false
-     ; "last_model_used", `Null
-     ; "next_model_hint", `Null
-     ; ( "active_goal_ids"
-       , `List (List.map (fun goal_id -> `String goal_id) meta.active_goal_ids) )
-     ; "recent_activity", `List []
-     ; "runtime_trust", runtime_trust
-     ; "trust", runtime_trust
-     ; "diagnostic", Keeper_fd_pressure.degraded_projection_json ()
-     ; "updated_at", `String meta.updated_at
-     ; "created_at", `String meta.created_at
-     ]
-     @ degraded_keeper_runtime_identity_fields meta
-     @ fd_fields)
-;;
-
+let compact_keeper_runtime_trust_json = Operator_control_snapshot_trust.compact_keeper_runtime_trust_json
+let degraded_keeper_snapshot_row = Operator_control_snapshot_trust.degraded_keeper_snapshot_row
 let keepers_json
       ?keeper_names
       ?(include_recent_activity = false)

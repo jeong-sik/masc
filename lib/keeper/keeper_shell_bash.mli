@@ -15,6 +15,12 @@ val handle_keeper_bash :
 
 module For_testing : sig
   val elapsed_duration_ms : start_time:float -> end_time:float -> int
+  val validate_keeper_bash_coding_with_allowlist
+    :  ?allow_pipes:bool
+    -> allowed_commands:string list
+    -> string
+    -> (unit, Worker_dev_tools.block_reason) result
+
   val keeper_bash_shape_block_tag : string -> string option
   val shell_ir_parse_failure_shape_block_tag : string -> string option
   val strip_stderr_dev_null_redirects : string -> string * bool

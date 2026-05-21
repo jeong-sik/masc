@@ -63,34 +63,32 @@ val dev_allowed_commands : string list
     command outside the dev allowlist (rg / grep / dune-local.sh / git / ...).
     Bare [dune] is intentionally rejected; local agents must use
     [scripts/dune-local.sh] so builds share the host-wide lock.
-    [?caller] is accepted for call-site parity with the coding validators;
-    strict validation does not parse through {!Shell_command_gate}, so the
-    value is captured but does not affect the verdict. *)
+    Direct-dune wrapper detection is shared with the exec shell gate so
+    [env] and [opam exec] wrappers cannot bypass the lock policy. *)
 val validate_command
-  :  ?caller:Shell_command_gate.caller
+  :  ?caller:Masc_exec_command_gate.Shell_command_gate.caller
   -> string
   -> (unit, block_reason) result
 
 (** Relaxed validator for Coding/Full preset keepers.  Allows pipes
-    and fd redirects; still blocks shell injection, process
-    substitution, and unsafe redirects.  Validates every segment of
-    the pipeline against the dev allowlist. *)
+    and fd redirects; maps exec shell gate parser/policy verdicts back
+    to the stable {!block_reason} wire shape. Validates every segment
+    of the pipeline against the dev allowlist. *)
 val validate_command_coding
-  :  ?caller:Shell_command_gate.caller
+  :  ?caller:Masc_exec_command_gate.Shell_command_gate.caller
   -> string
   -> (unit, block_reason) result
-(** [?caller] is forwarded to {!Shell_command_gate.parse} via
+(** [?caller] is forwarded to
+    {!Masc_exec_command_gate.Shell_command_gate.gate} via
     {!validate_command_coding_with_allowlist} for the upcoming
-    telemetry partition (RFC-0131 PR-3).  Captured but does not affect
-    the verdict. *)
+    telemetry partition. *)
 
 (** Customizable variant of {!validate_command_coding} for callers that
     need a non-default allowlist.  [allow_pipes] defaults to [true];
     setting it to [false] yields {!Pipes_not_allowed} for any pipeline
-    longer than one segment.  [?caller] is forwarded to
-    {!Shell_command_gate.parse} for telemetry partition. *)
+    longer than one segment.  [?caller] partitions shell-gate telemetry. *)
 val validate_command_coding_with_allowlist
-  :  ?caller:Shell_command_gate.caller
+  :  ?caller:Masc_exec_command_gate.Shell_command_gate.caller
   -> ?allow_pipes:bool
   -> allowed_commands:string list
   -> string

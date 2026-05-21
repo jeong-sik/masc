@@ -6,16 +6,12 @@
     @since OAS integration Phase F *)
 
 let high_risk_actions =
-  [ "namespace_pause"; "room_pause"; "team_stop"; "team_task_inject";
-    "team_worker_spawn_batch"; "keeper_recover";
+  [ "namespace_pause"; "keeper_recover";
     "github_identity_login_prepare";
     "keeper_github_identity_login_prepare" ]
 
 let allowed_actions =
-  [ "broadcast"; "namespace_pause"; "room_pause"; "namespace_resume"; "room_resume"; "social_sweep";
-    "autonomy_tick";
-    "team_note"; "team_broadcast"; "team_task_inject";
-    "team_worker_spawn_batch"; "team_stop";
+  [ "broadcast"; "namespace_pause"; "namespace_resume"; "social_sweep";
     "github_identity_login_prepare"; "github_identity_status";
     "keeper_message"; "keeper_probe"; "keeper_recover";
     "keeper_github_identity_login_prepare"; "keeper_github_identity_status";

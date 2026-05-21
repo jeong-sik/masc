@@ -2,12 +2,10 @@
     plus the join-state resolver shared with the keeper
     onboarding path.
 
-    The .ml is 919 lines.  Only a small set of entries reach callers:
-    - {!resolve_join_state} and
-      {!should_read_legacy_persisted_agent_name} —
-      [test/test_mcp_server_eio.ml] exercises both to
-      verify the join-required + ephemeral-name fallback
-      decisions stay consistent across refactors.
+    Only a small set of entries reach callers:
+    - {!resolve_join_state} —
+      [test/test_mcp_server_eio.ml] exercises the join-required
+      decisions to keep alias handling consistent across refactors.
     - {!caller_agent_name_from_arguments} — isolates the
       HTTP [_agent_name] vs legacy [agent_name] precedence
       contract without running the full dispatcher.
@@ -47,27 +45,10 @@ val resolve_join_state :
     - [agent_name = "unknown"] → [false] (sentinel name).
     - Otherwise probes [check_join agent_name]; on miss,
       tries an alias chain via {!Agent_name_kind.is_ephemeral}
-      and the [base_path]-derived persisted name lookup.
+      and the [base_path]-derived identity aliases.
 
     [check_join] is injected so tests can drive the
     resolver against a deterministic registry. *)
-
-(** {1 Legacy ephemeral fallback} *)
-
-val should_read_legacy_persisted_agent_name :
-  has_explicit_agent_name:bool ->
-  agent_name:string ->
-  bool
-(** Returns [true] when the dispatcher should attempt to
-    recover an agent_name from the legacy persisted
-    sidecar (used by the operator surface during the
-    transition off the persisted name file).
-
-    Triggers iff the request did not pass [agent_name]
-    explicitly AND the resolved [agent_name] is in the
-    {b ephemeral} class ([_ephemeral_*] / unknown
-    sentinels).  Tested directly to keep the legacy /
-    explicit path split honest. *)
 
 val caller_agent_name_from_arguments : Yojson.Safe.t -> string option
 (** Returns the explicit caller identity carried in [tools/call]

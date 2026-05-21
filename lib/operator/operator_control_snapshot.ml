@@ -725,33 +725,7 @@ let _snapshot_recent_completed_limit () =
 
 (* sessions_json removed — team session cleanup. Sessions always return []. *)
 
-let room_json config =
-  let initialized = Coord.is_initialized config in
-  if not initialized
-  then
-    `Assoc
-      [ "initialized", `Bool false
-      ; "project", `String (Filename.basename config.base_path)
-      ]
-  else (
-    let state = Coord.read_state config in
-    let tempo = Tempo.get_tempo config in
-    let tasks = Coord.get_tasks_raw config in
-    let agents = Coord.get_agents_raw config in
-    `Assoc
-      [ "initialized", `Bool true
-      ; "cluster", `String (Env_config_core.cluster_name ())
-      ; "project", `String state.project
-      ; "paused", `Bool state.paused
-      ; "pause_reason", string_option_to_json state.pause_reason
-      ; "paused_by", string_option_to_json state.paused_by
-      ; "paused_at", string_option_to_json state.paused_at
-      ; "tempo_interval_s", `Float tempo.current_interval_s
-      ; "agent_count", `Int (List.length agents)
-      ; "task_count", `Int (List.length tasks)
-      ; "message_seq", `Int state.message_seq
-      ])
-;;
+let room_json = Operator_control_snapshot_room.room_json
 
 (* snapshot_view variant + parser extracted to
    [Operator_control_snapshot_view] (godfile decomp). *)

@@ -171,7 +171,7 @@ let () =
     | _ -> Unix.WEXITED 99, "", "unexpected;"
   in
   let docker_sandbox =
-    Masc_exec.Sandbox_target.docker ~image:"pipeline-status" ~runner:mock_runner
+    Masc_exec.Sandbox_target.docker ~image:"pipeline-status" ~runner:mock_runner ()
   in
   let simple bin =
     Simple
@@ -275,7 +275,7 @@ let () =
     (Unix.WEXITED 0, "mock_stdout", "mock_stderr")
   in
   let docker_sandbox =
-    Masc_exec.Sandbox_target.docker ~image:"test-image" ~runner:mock_runner
+    Masc_exec.Sandbox_target.docker ~image:"test-image" ~runner:mock_runner ()
   in
   let ir =
     Simple
@@ -314,7 +314,7 @@ let () =
     Unix.WEXITED 0, "stdout", "stderr"
   in
   let docker_sandbox =
-    Masc_exec.Sandbox_target.docker ~image:"redirect-image" ~runner:mock_runner
+    Masc_exec.Sandbox_target.docker ~image:"redirect-image" ~runner:mock_runner ()
   in
   let ir =
     Simple
@@ -348,7 +348,7 @@ let () =
     Unix.WEXITED 0, "stdout", "stderr"
   in
   let docker_sandbox =
-    Masc_exec.Sandbox_target.docker ~image:"redirect-image" ~runner:mock_runner
+    Masc_exec.Sandbox_target.docker ~image:"redirect-image" ~runner:mock_runner ()
   in
   let ir =
     Simple
@@ -385,7 +385,7 @@ let () =
     Unix.WEXITED 0, "stdout", "stderr"
   in
   let docker_sandbox =
-    Masc_exec.Sandbox_target.docker ~image:"redirect-image" ~runner:mock_runner
+    Masc_exec.Sandbox_target.docker ~image:"redirect-image" ~runner:mock_runner ()
   in
   let ir =
     Simple
@@ -428,7 +428,7 @@ let () =
     | _ -> Unix.WEXITED 2, "", "unexpected mock runner call"
   in
   let docker_sandbox =
-    Masc_exec.Sandbox_target.docker ~image:"pipeline-image" ~runner:mock_runner
+    Masc_exec.Sandbox_target.docker ~image:"pipeline-image" ~runner:mock_runner ()
   in
   let cwd = Some (Masc_exec.Path_scope.classify ~raw:"/tmp/pipeline" ~cwd:"/tmp/pipeline") in
   let stages =
@@ -459,8 +459,134 @@ let () =
   match List.rev !runner_calls with
   | [ ([ "printf"; "typed" ], Some first_cwd, None)
     ; ([ "wc"; "-c" ], Some second_cwd, Some "typed") ] ->
-      assert (first_cwd = "/tmp/pipeline");
-      assert (second_cwd = "/tmp/pipeline")
+	      assert (first_cwd = "/tmp/pipeline");
+	      assert (second_cwd = "/tmp/pipeline")
+	  | _ -> assert false
+
+(* --- dispatch_pipeline prefers Docker streaming pipeline runner --- *)
+
+let () =
+  with_eio @@ fun () ->
+  let open Masc_exec.Shell_ir in
+  let printf_bin = Masc_exec.Bin.of_string "printf" |> Result.get_ok in
+  let wc_bin = Masc_exec.Bin.of_string "wc" |> Result.get_ok in
+  let simple_runner_called = ref false in
+  let pipeline_runner_calls = ref [] in
+  let simple_runner ~stdin_content:_ ~argv:_ ~env:_ ~cwd:_ ~timeout_sec:_ =
+    simple_runner_called := true;
+    Unix.WEXITED 3, "", "simple runner should not be used"
+  in
+  let pipeline_runner ~stages ~timeout_sec:_ =
+    pipeline_runner_calls := stages :: !pipeline_runner_calls;
+    Unix.WEXITED 0, "5\n", "pipeline-stderr"
+  in
+  let docker_sandbox =
+    Masc_exec.Sandbox_target.docker
+      ~image:"pipeline-image"
+      ~runner:simple_runner
+      ~pipeline_runner
+      ()
+  in
+  let cwd =
+    Some
+      (Masc_exec.Path_scope.classify ~raw:"/tmp/pipeline" ~cwd:"/tmp/pipeline")
+  in
+  let stages =
+    [
+      Simple
+        {
+          bin = printf_bin;
+          args = [ Lit "typed" ];
+          env = [];
+          cwd;
+          redirects = [];
+          sandbox = docker_sandbox;
+        };
+      Simple
+        {
+          bin = wc_bin;
+          args = [ Lit "-c" ];
+          env = [];
+          cwd;
+          redirects = [];
+          sandbox = docker_sandbox;
+        };
+    ]
+  in
+  let result = Masc_exec.Exec_dispatch.dispatch (Pipeline stages) in
+  assert (not !simple_runner_called);
+  assert (result.status = Unix.WEXITED 0);
+  assert (String.trim result.stdout = "5");
+  assert (result.stderr = "pipeline-stderr");
+  match !pipeline_runner_calls with
+  | [ [ first; second ] ] ->
+      assert (first.Masc_exec.Sandbox_target.argv = [ "printf"; "typed" ]);
+      assert (second.Masc_exec.Sandbox_target.argv = [ "wc"; "-c" ]);
+      assert (first.cwd = Some "/tmp/pipeline");
+      assert (second.cwd = Some "/tmp/pipeline")
+  | _ -> assert false
+
+let () =
+  with_eio @@ fun () ->
+  let open Masc_exec.Shell_ir in
+  let printf_bin = Masc_exec.Bin.of_string "printf" |> Result.get_ok in
+  let wc_bin = Masc_exec.Bin.of_string "wc" |> Result.get_ok in
+  let dev_null =
+    Masc_exec.Path_scope.classify ~raw:"/dev/null" ~cwd:"/tmp"
+  in
+  let simple_runner_calls = ref [] in
+  let pipeline_runner_called = ref false in
+  let simple_runner ~stdin_content ~argv ~env:_ ~cwd:_ ~timeout_sec:_ =
+    simple_runner_calls := (argv, stdin_content) :: !simple_runner_calls;
+    match argv, stdin_content with
+    | [ "printf"; "typed" ], None -> Unix.WEXITED 0, "typed", "hidden"
+    | [ "wc"; "-c" ], Some "typed" -> Unix.WEXITED 0, "5\n", ""
+    | _ -> Unix.WEXITED 2, "", "unexpected mock runner call"
+  in
+  let pipeline_runner ~stages:_ ~timeout_sec:_ =
+    pipeline_runner_called := true;
+    Unix.WEXITED 3, "", "pipeline runner should not be used for redirects"
+  in
+  let docker_sandbox =
+    Masc_exec.Sandbox_target.docker
+      ~image:"pipeline-image"
+      ~runner:simple_runner
+      ~pipeline_runner
+      ()
+  in
+  let stages =
+    [
+      Simple
+        {
+          bin = printf_bin;
+          args = [ Lit "typed" ];
+          env = [];
+          cwd = None;
+          redirects =
+            [
+              Masc_exec.Redirect_scope.File
+                { fd = 2; target = dev_null; mode = Masc_exec.Redirect_scope.Write };
+            ];
+          sandbox = docker_sandbox;
+        };
+      Simple
+        {
+          bin = wc_bin;
+          args = [ Lit "-c" ];
+          env = [];
+          cwd = None;
+          redirects = [];
+          sandbox = docker_sandbox;
+        };
+    ]
+  in
+  let result = Masc_exec.Exec_dispatch.dispatch (Pipeline stages) in
+  assert (not !pipeline_runner_called);
+  assert (result.status = Unix.WEXITED 0);
+  assert (String.trim result.stdout = "5");
+  assert (result.stderr = "");
+  match List.rev !simple_runner_calls with
+  | [ ([ "printf"; "typed" ], None); ([ "wc"; "-c" ], Some "typed") ] -> ()
   | _ -> assert false
 
 (* --- dispatch_simple exception from runner is caught --- *)
@@ -473,7 +599,7 @@ let () =
     failwith "mock docker failure"
   in
   let docker_sandbox =
-    Masc_exec.Sandbox_target.docker ~image:"fail-image" ~runner:mock_runner
+    Masc_exec.Sandbox_target.docker ~image:"fail-image" ~runner:mock_runner ()
   in
   let ir =
     Simple

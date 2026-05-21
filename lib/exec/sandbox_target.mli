@@ -22,9 +22,20 @@ type runner =
   timeout_sec:float ->
   Unix.process_status * string * string
 
+type pipeline_stage = {
+  argv : string list;
+  env : string array;
+  cwd : string option;
+}
+
+type pipeline_runner =
+  stages:pipeline_stage list ->
+  timeout_sec:float ->
+  Unix.process_status * string * string
+
 type t =
   | Host
-  | Docker of { image : string; runner : runner }
+  | Docker of { image : string; runner : runner; pipeline_runner : pipeline_runner option }
 
 (** Default host target.  The dispatch path routes this directly to
     [Exec_gate]; no runner is carried. *)
@@ -33,6 +44,6 @@ val host : unit -> t
 (** Build a Docker target.  The caller (typically [lib/keeper]) supplies
     the runner closure; this keeps [lib/exec] from having to know about
     [Keeper_turn_sandbox_runtime] or any other keeper-side construct. *)
-val docker : image:string -> runner:runner -> t
+val docker : image:string -> runner:runner -> ?pipeline_runner:pipeline_runner -> unit -> t
 
 val pp : Format.formatter -> t -> unit

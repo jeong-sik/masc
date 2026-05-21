@@ -327,6 +327,43 @@ let test_keeper_bash_timeout_floor_is_not_sub_io_latency () =
        ~default:Masc_mcp.Keeper_shell_shared.io_timeout_sec
        args)
 
+let test_keeper_bash_load_bearing_timeout_floor () =
+  let check name args expected =
+    Alcotest.(check (float 0.001))
+      name
+      expected
+      (Masc_mcp.Keeper_shell_shared.keeper_bash_min_timeout_sec_for_args args)
+  in
+  check
+    "trivial command keeps native floor"
+    (`Assoc [ "executable", `String "echo"; "argv", `List [ `String "ok" ] ])
+    Keeper_exec_shell.keeper_bash_native_min_timeout_sec;
+  check
+    "git command uses tool dispatch floor"
+    (`Assoc
+       [ "executable", `String "git"
+       ; "argv", `List [ `String "log"; `String "--oneline"; `String "-5" ]
+       ])
+    Masc_mcp.Keeper_shell_shared.gh_min_timeout_sec;
+  check
+    "recursive grep uses tool dispatch floor"
+    (`Assoc
+       [ "executable", `String "grep"
+       ; "argv", `List [ `String "-rn"; `String "Yojson"; `String "." ]
+       ])
+    Masc_mcp.Keeper_shell_shared.gh_min_timeout_sec;
+  check
+    "pipeline inherits load-bearing floor"
+    (`Assoc
+       [ ( "pipeline"
+         , `List
+             [ `Assoc [ "executable", `String "rg"; "argv", `List [ `String "x" ] ]
+             ; `Assoc [ "executable", `String "head"; "argv", `List [ `String "-5" ] ]
+             ] )
+       ])
+    Masc_mcp.Keeper_shell_shared.gh_min_timeout_sec
+;;
+
 let test_nested_runtime_detector_ignores_git_commit_message () =
   Alcotest.(check bool)
     "quoted docker in git commit message is not a nested runtime"
@@ -895,6 +932,10 @@ let () =
             "keeper_bash timeout floor avoids 1s I/O failures"
             `Quick
             test_keeper_bash_timeout_floor_is_not_sub_io_latency
+        ; Alcotest.test_case
+            "keeper_bash load-bearing timeout floor"
+            `Quick
+            test_keeper_bash_load_bearing_timeout_floor
         ; Alcotest.test_case
             "nested runtime detector ignores commit messages"
             `Quick

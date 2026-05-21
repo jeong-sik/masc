@@ -1279,6 +1279,34 @@ let test_sandbox_root_git_cwd_cd_chain_is_not_interpreted () =
     None
     error
 
+let test_gh_repo_api_misuse_uses_shell_semantics () =
+  let check label expected cmd =
+    Alcotest.(check (option (pair string string)))
+      label
+      expected
+      (Keeper_shell_command_semantics.detect_gh_repo_flag_with_api_misuse cmd);
+    Alcotest.(check (option (pair string string)))
+      (label ^ " docker alias")
+      expected
+      (Keeper_shell_docker.detect_gh_repo_flag_with_api_misuse cmd)
+  in
+  check
+    "quoted repo arg"
+    (Some ("jeong-sik/masc-mcp", "repos/jeong-sik/masc-mcp/actions/runs"))
+    "gh --repo 'jeong-sik/masc-mcp' api repos/jeong-sik/masc-mcp/actions/runs";
+  check
+    "repo equals form"
+    (Some ("jeong-sik/masc-mcp", "repos/jeong-sik/masc-mcp/pulls"))
+    "gh --repo=jeong-sik/masc-mcp api repos/jeong-sik/masc-mcp/pulls";
+  check
+    "env prefix"
+    (Some ("jeong-sik/masc-mcp", "repos/jeong-sik/masc-mcp/issues"))
+    "env GH_TOKEN=redacted gh --repo jeong-sik/masc-mcp api repos/jeong-sik/masc-mcp/issues";
+  check
+    "subcommand repo flag is fine"
+    None
+    "gh pr view --repo jeong-sik/masc-mcp 17214"
+
 let test_git_creds_skips_missing_ssh_auth_sock () =
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup ~sandbox:Keeper_types.Docker
@@ -1964,5 +1992,9 @@ let () =
             "sandbox-root git cd-chain is not interpreted by cwd policy"
             `Quick
             test_sandbox_root_git_cwd_cd_chain_is_not_interpreted;
+          Alcotest.test_case
+            "gh --repo api misuse uses shell semantics"
+            `Quick
+            test_gh_repo_api_misuse_uses_shell_semantics;
         ] );
     ]

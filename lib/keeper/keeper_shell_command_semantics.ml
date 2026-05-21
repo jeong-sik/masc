@@ -93,6 +93,26 @@ let cmd_targets_git_or_gh cmd =
 let cmd_targets_gh cmd =
   effective_stages cmd |> List.exists (fun stage -> stage.bin = "gh")
 
+let repo_flag_value = function
+  | "--repo" -> None
+  | flag when String.starts_with ~prefix:"--repo=" flag ->
+    let value =
+      String.sub flag (String.length "--repo=") (String.length flag - String.length "--repo=")
+    in
+    if value = "" then None else Some value
+  | _ -> None
+
+let detect_gh_repo_flag_with_api_misuse cmd =
+  let scan_args = function
+    | "--repo" :: repo_arg :: "api" :: endpoint :: _ -> Some (repo_arg, endpoint)
+    | flag :: "api" :: endpoint :: _ ->
+      Option.map (fun repo_arg -> repo_arg, endpoint) (repo_flag_value flag)
+    | _ -> None
+  in
+  effective_stages cmd
+  |> List.find_map (fun stage ->
+       if stage.bin = "gh" then scan_args stage.args else None)
+
 let strip_simple_shell_quotes token =
   let len = String.length token in
   if

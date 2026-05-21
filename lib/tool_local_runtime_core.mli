@@ -83,8 +83,9 @@ val unique_preserve_order : string list -> string list
 (** Alias over {!Json_util.dedupe_keep_order}. *)
 
 val split_ws : string -> string list
-(** [split_ws text] splits on space, trims, and drops empties.
-    Used to tokenise cmdlines into argv-like lists. *)
+(** [split_ws text] returns argv-like literal words using the shared
+    bash-subset word parser, preserving quoted values.  Used to tokenise
+    cmdlines into argv-like lists for process discovery. *)
 
 val string_contains_substring : string -> string -> bool
 (** Alias over {!String_util.contains_substring} — case-

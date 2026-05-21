@@ -40,6 +40,7 @@ NEEDLES=(
   "keeper_shell_bash_words"
   "lowercase_shell_words"
   "String.split_on_char ' ' cmd"
+  "String.split_on_char ' ' config.command"
   "shell_words_prefix"
   "shell_words_with_boundaries"
   "strip_command_wrappers"

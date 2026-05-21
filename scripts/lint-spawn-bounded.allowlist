@@ -26,6 +26,11 @@ lib/bounded_proc/bounded_proc.ml:17
 lib/process/process_eio.ml:486
 lib/process/process_eio.ml:517
 
+# lib/process/process_eio.ml:866 — native pipeline stage spawn. Wrapped in
+# Eio.Time.with_timeout_exn + fresh Eio.Switch.run inside
+# run_argv_pipeline_with_status_split.
+lib/process/process_eio.ml:866
+
 # lib/server/lsp_process_manager.ml:178 — LSP child process. Lifetime is
 # bound to the LSP session switch; idle eviction handled by the LSP
 # manager itself. Bounded by session scope, not by per-call timeout.

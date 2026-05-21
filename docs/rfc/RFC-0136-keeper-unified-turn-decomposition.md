@@ -1,9 +1,9 @@
 ---
 rfc: "0136"
 title: "Keeper Unified Turn — Stage Decomposition of run_keeper_cycle"
-status: Active
+status: Implemented
 created: 2026-05-19
-updated: 2026-05-20
+updated: 2026-05-22
 author: vincent
 supersedes: []
 superseded_by: null

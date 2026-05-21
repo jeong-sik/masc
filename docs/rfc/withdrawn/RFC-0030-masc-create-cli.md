@@ -1,3 +1,12 @@
+---
+title: masc create CLI / API for Keeper, Cascade, Persona
+rfc: 0030
+status: Withdrawn
+created: 2026-05-05
+withdrawn_date: 2026-05-21
+withdrawn_reason: "Authoring CLI never implemented. masc-mcp uses MCP tools + dashboard for entity creation instead. Different entry point pattern adopted. Archived for history."
+---
+
 # RFC-0030 — `masc create` CLI / API for Keeper, Cascade, Persona
 
 - **Status**: Draft

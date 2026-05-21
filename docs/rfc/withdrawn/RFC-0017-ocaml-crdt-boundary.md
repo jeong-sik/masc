@@ -1,3 +1,12 @@
+---
+title: OCaml ↔ CRDT Boundary
+rfc: 0017
+status: Withdrawn
+created: 2026-04-29
+withdrawn_date: 2026-05-21
+withdrawn_reason: "Idea never materialized. Awareness channel work (RFC-0069 referenced as prerequisite) took different direction. No CRDT integration shipped. Archived for history."
+---
+
 # RFC 0017 — OCaml↔CRDT Boundary
 
 > Status: **Draft**

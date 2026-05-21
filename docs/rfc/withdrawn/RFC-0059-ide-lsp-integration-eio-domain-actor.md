@@ -1,3 +1,12 @@
+---
+title: IDE LSP Integration + Eio Domain/Actor Parallelism
+rfc: 0059
+status: Withdrawn
+created: 2026-05-09
+withdrawn_date: 2026-05-21
+withdrawn_reason: "IDE LSP work proceeded via separate RFC stream (RFC-0128 IDE diagnostics runbook). Eio domain/actor parallelism never integrated. Bundle ambition abandoned. Archived for history."
+---
+
 # RFC-0059 — IDE LSP Integration + Eio Domain/Actor Parallelism
 
 Status: Phase 1 Complete · Phase 2 PR-5 + PR-6 Complete (PR #14517 Actor mailbox, PR #14520 Domain pool, both merged 2026-05-11) — remaining work: PR-7 review of `Dashboard_cache` internals (see §10 Tier A Integration row T6)

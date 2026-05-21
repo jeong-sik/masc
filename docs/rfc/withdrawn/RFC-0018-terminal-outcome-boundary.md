@@ -1,3 +1,12 @@
+---
+title: Compile-time receipt enforcement at run_turn boundary
+rfc: 0018
+status: Withdrawn
+created: 2026-04-30
+withdrawn_date: 2026-05-21
+withdrawn_reason: "Cycle 5 runtime check + Result.Error promotion (lib/keeper/keeper_agent_run.ml:1290-1343) was deemed sufficient. Compile-time enforcement deemed over-engineering. Archived for history."
+---
+
 # RFC-0018: Compile-time receipt enforcement at `run_turn` boundary
 
 - **Status**: Draft

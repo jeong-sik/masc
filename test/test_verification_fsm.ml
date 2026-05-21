@@ -980,6 +980,31 @@ let force_deadline_past config task_id =
   in
   Coord.write_backlog config { backlog with tasks = new_tasks }
 
+let force_missing_deadline_submitted_at_past config task_id =
+  let backlog = Coord.read_backlog config in
+  let timeout = Env_config_runtime.Verification.timeout_deadline_seconds () in
+  let submitted_at =
+    Masc_domain.iso8601_of_unix_seconds
+      (Time_compat.now () -. timeout -. 3600.0)
+  in
+  let new_tasks =
+    List.map
+      (fun (t : Masc_domain.task) ->
+         if t.id <> task_id
+         then t
+         else
+           match t.task_status with
+           | Masc_domain.AwaitingVerification fields ->
+             { t with
+               task_status =
+                 Masc_domain.AwaitingVerification
+                   { fields with submitted_at; deadline = None }
+             }
+           | _ -> t)
+      backlog.tasks
+  in
+  Coord.write_backlog config { backlog with tasks = new_tasks }
+
 let test_check_timeouts_transitions_awaiting_to_cancelled () =
   with_temp_config ~fsm_enabled:true (fun config ->
     let task_id = add_strict_task config in
@@ -1001,6 +1026,33 @@ let test_check_timeouts_transitions_awaiting_to_cancelled () =
       Alcotest.(check bool)
         "reason mentions verification deadline" true
         (Astring.String.is_infix ~affix:"verification deadline" reason_str)
+    | _ -> Alcotest.fail "task is not Cancelled after check_timeouts")
+
+let test_check_timeouts_transitions_legacy_missing_deadline () =
+  with_temp_config ~fsm_enabled:true (fun config ->
+    let task_id = add_strict_task config in
+    claim_and_start config "worker" task_id;
+    (match
+       Coord.transition_task_r
+         config
+         ~agent_name:"worker"
+         ~task_id
+         ~action:Masc_domain.Submit_for_verification
+         ()
+     with
+     | Error e -> Alcotest.fail ("submit failed: " ^ Masc_domain.show_masc_error e)
+     | Ok _ -> ());
+    force_missing_deadline_submitted_at_past config task_id;
+    Verification_protocol.check_timeouts ~config;
+    Alcotest.(check string) "post-check status" "cancelled"
+      (status_string config task_id);
+    match get_task config task_id with
+    | Some { task_status = Masc_domain.Cancelled { reason; _ }; _ } ->
+      let reason_str = Option.value reason ~default:"" in
+      Alcotest.(check bool)
+        "reason records fallback source"
+        true
+        (Astring.String.is_infix ~affix:"source=submitted_at_fallback" reason_str)
     | _ -> Alcotest.fail "task is not Cancelled after check_timeouts")
 
 let test_check_timeouts_idempotent_after_cancel () =
@@ -1086,6 +1138,10 @@ let () =
     ("timeout_check", [
       Alcotest.test_case "check_timeouts transitions AwaitingVerification to Cancelled"
         `Quick test_check_timeouts_transitions_awaiting_to_cancelled;
+      Alcotest.test_case
+        "check_timeouts expires legacy AwaitingVerification without deadline"
+        `Quick
+        test_check_timeouts_transitions_legacy_missing_deadline;
       Alcotest.test_case "check_timeouts is idempotent after cancellation"
         `Quick test_check_timeouts_idempotent_after_cancel;
     ]);

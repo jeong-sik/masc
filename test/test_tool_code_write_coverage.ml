@@ -803,6 +803,129 @@ let test_code_edit_identical_replacement_missing_file_still_fails () =
   check bool "missing file remains failed" false ok;
   check bool "reports missing file" true (contains "File not found" msg)
 
+(* D8 — ambiguous-match (count > 1) error symmetrization.
+
+   Asymmetry before: count=0 branch surfaced sample lines; count>1 only
+   said "found N times" with no location, so the keeper had no signal
+   for how to add disambiguating context and retried the same prompt.
+   Fix: emit line number + ±2 context lines for each match (≤3). *)
+let test_code_edit_ambiguous_match_emits_line_numbers_and_context () =
+  let base_path = fresh_base_path () in
+  let config = make_config base_path in
+  let file_dir =
+    Filename.concat base_path
+      ".masc/playground/test-agent/repos/masc-mcp/lib"
+  in
+  mkdir_p file_dir;
+  let file = Filename.concat file_dir "demo_ambig.ml" in
+  (* Place "let value = 1" at lines 10 and 25, exactly. *)
+  let lines = Array.make 30 "" in
+  for i = 0 to 29 do
+    lines.(i) <- Printf.sprintf "comment line %d" (i + 1)
+  done;
+  lines.(9) <- "let value = 1";   (* 1-based line 10 *)
+  lines.(24) <- "let value = 1";  (* 1-based line 25 *)
+  let content = String.concat "\n" (Array.to_list lines) ^ "\n" in
+  write_file file content;
+  let ctx =
+    { Tool_code_write.config;
+      agent_name = "test-agent";
+    }
+  in
+  let args =
+    `Assoc
+      [
+        ("path", `String "repos/masc-mcp/lib/demo_ambig.ml");
+        ("old_string", `String "let value = 1");
+        ("new_string", `String "let value = 2");
+      ]
+  in
+  let ok, msg = dispatch_exn ctx ~name:"masc_code_edit" ~args in
+  check bool "ambiguous match is rejected" false ok;
+  check bool "still names the count" true
+    (contains "found 2 times" msg);
+  check bool "emits line 10 marker" true (contains "line 10" msg);
+  check bool "emits line 25 marker" true (contains "line 25" msg);
+  check bool "emits matches section header" true
+    (contains "Matches" msg);
+  check bool "includes surrounding context line 8" true
+    (contains "comment line 8" msg);
+  check bool "includes surrounding context line 27" true
+    (contains "comment line 27" msg)
+
+(* Regression: count = 0 branch must continue to surface up to 3 sample
+   lines for whitespace/indent recovery. *)
+let test_code_edit_not_found_still_emits_sample_lines () =
+  let base_path = fresh_base_path () in
+  let config = make_config base_path in
+  let file_dir =
+    Filename.concat base_path
+      ".masc/playground/test-agent/repos/masc-mcp/lib"
+  in
+  mkdir_p file_dir;
+  let file = Filename.concat file_dir "demo_notfound.ml" in
+  (* 3 lines all contain the trimmed first-line needle but with extra
+     leading whitespace so exact match fails. Needle must be ≥ 8 chars. *)
+  let content =
+    "  let configuration_value = 1\n\
+     \t\tlet configuration_value = 2\n\
+     prefix let configuration_value = 3\n"
+  in
+  write_file file content;
+  let ctx =
+    { Tool_code_write.config;
+      agent_name = "test-agent";
+    }
+  in
+  let args =
+    `Assoc
+      [
+        ("path", `String "repos/masc-mcp/lib/demo_notfound.ml");
+        ("old_string", `String "let configuration_value = 1");
+        ("new_string", `String "let configuration_value = 2");
+      ]
+  in
+  let ok, msg = dispatch_exn ctx ~name:"masc_code_edit" ~args in
+  check bool "exact match fails" false ok;
+  check bool "reports not found" true
+    (contains "old_string not found" msg);
+  check bool "surfaces first sample line" true
+    (contains "let configuration_value = 1" msg);
+  check bool "surfaces second sample line" true
+    (contains "let configuration_value = 2" msg)
+
+(* Regression: count = 1 happy path remains unchanged. *)
+let test_code_edit_single_match_still_replaces () =
+  let base_path = fresh_base_path () in
+  let config = make_config base_path in
+  let file_dir =
+    Filename.concat base_path
+      ".masc/playground/test-agent/repos/masc-mcp/lib"
+  in
+  mkdir_p file_dir;
+  let file = Filename.concat file_dir "demo_single.ml" in
+  let original = "let alpha = 1\nlet beta = 2\nlet gamma = 3\n" in
+  write_file file original;
+  let ctx =
+    { Tool_code_write.config;
+      agent_name = "test-agent";
+    }
+  in
+  let args =
+    `Assoc
+      [
+        ("path", `String "repos/masc-mcp/lib/demo_single.ml");
+        ("old_string", `String "let beta = 2");
+        ("new_string", `String "let beta = 22");
+      ]
+  in
+  let ok, msg = dispatch_exn ctx ~name:"masc_code_edit" ~args in
+  check bool "single match replaces" true ok;
+  check int "one replacement" 1 (json_int_field "replacements" msg);
+  let after = In_channel.with_open_bin file In_channel.input_all in
+  check string "file rewritten"
+    "let alpha = 1\nlet beta = 22\nlet gamma = 3\n" after
+
 let test_code_shell_missing_docker_cwd_reports_worktree_hint () =
   let base_path = fresh_base_path () in
   let config = make_config base_path in
@@ -1208,6 +1331,12 @@ let () =
         test_code_edit_identical_replacement_is_noop;
       test_case "identical replacement missing file still fails" `Quick
         test_code_edit_identical_replacement_missing_file_still_fails;
+      test_case "ambiguous match emits line numbers and context" `Quick
+        test_code_edit_ambiguous_match_emits_line_numbers_and_context;
+      test_case "not-found regression still emits sample lines" `Quick
+        test_code_edit_not_found_still_emits_sample_lines;
+      test_case "single-match success path unchanged" `Quick
+        test_code_edit_single_match_still_replaces;
     ]);
     ("validate_code_shell_command", [
       test_case "allows pipe with allowlisted segments" `Quick

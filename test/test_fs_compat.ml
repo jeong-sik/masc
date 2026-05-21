@@ -6,21 +6,11 @@
 
 open Alcotest
 
-let rec rm_rf (path : string) : unit =
-  if Sys.file_exists path
-  then
-    if Sys.is_directory path
-    then (
-      Sys.readdir path |> Array.iter (fun name -> rm_rf (Filename.concat path name));
-      Unix.rmdir path)
-    else Sys.remove path
-;;
-
 let with_tmp_dir (f : string -> unit) : unit =
   let tmp = Filename.temp_file "masc_fs_compat_" ".tmp" in
   Sys.remove tmp;
   Unix.mkdir tmp 0o755;
-  Fun.protect ~finally:(fun () -> rm_rf tmp) (fun () -> f tmp)
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree tmp) (fun () -> f tmp)
 ;;
 
 let test_mkdir_p_creates_nested_dirs () =
@@ -46,6 +36,34 @@ let test_mkdir_p_does_not_shell_inject () =
     "dangerous path exists"
     true
     (Sys.file_exists dangerous && Sys.is_directory dangerous)
+;;
+
+let test_remove_tree_does_not_shell_inject () =
+  Fs_compat.clear_fs ();
+  with_tmp_dir
+  @@ fun base ->
+  let marker = Filename.concat base "pwned" in
+  let dangerous = Filename.concat base ("dir;touch " ^ marker) in
+  Unix.mkdir dangerous 0o755;
+  Fs_compat.remove_tree dangerous;
+  check bool "target removed" false (Sys.file_exists dangerous);
+  (* If remove_tree used a shell (`rm -rf <path>`), this would create marker. *)
+  check bool "no shell side-effect file created" false (Sys.file_exists marker)
+;;
+
+let test_remove_tree_unlinks_symlink_without_following () =
+  Fs_compat.clear_fs ();
+  with_tmp_dir
+  @@ fun base ->
+  let target = Filename.concat base "target" in
+  let link = Filename.concat base "link" in
+  Unix.mkdir target 0o755;
+  Fs_compat.save_file (Filename.concat target "kept.txt") "kept";
+  Unix.symlink target link;
+  Fs_compat.remove_tree link;
+  check bool "symlink removed" false (Sys.file_exists link);
+  check bool "target directory preserved" true (Sys.file_exists target);
+  check string "target content preserved" "kept" (Fs_compat.load_file (Filename.concat target "kept.txt"))
 ;;
 
 let test_save_file_atomic_leaves_no_tmp_on_success () =
@@ -280,6 +298,13 @@ let () =
     [ ( "mkdir_p"
       , [ test_case "creates nested dirs" `Quick test_mkdir_p_creates_nested_dirs
         ; test_case "no shell injection" `Quick test_mkdir_p_does_not_shell_inject
+        ] )
+    ; ( "remove_tree"
+      , [ test_case "no shell injection" `Quick test_remove_tree_does_not_shell_inject
+        ; test_case
+            "unlinks symlink without following"
+            `Quick
+            test_remove_tree_unlinks_symlink_without_following
         ] )
     ; ( "save_file_atomic"
       , [ test_case

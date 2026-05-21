@@ -243,16 +243,25 @@ let test_load_minimal_toml_defaults () =
       | Ok repos ->
           Alcotest.failf "expected one repo, got %d" (List.length repos))
 
-let git_available () =
-  Sys.command "git --version >/dev/null 2>&1" = 0
+let run_git_quiet args =
+  let devnull = Unix.openfile "/dev/null" [ Unix.O_WRONLY ] 0 in
+  Fun.protect
+    ~finally:(fun () -> Unix.close devnull)
+    (fun () ->
+      let argv = Array.of_list ("git" :: args) in
+      try
+        let pid = Unix.create_process "git" argv Unix.stdin devnull devnull in
+        match Unix.waitpid [] pid with
+        | _, Unix.WEXITED code -> code
+        | _, (Unix.WSIGNALED _ | Unix.WSTOPPED _) -> 1
+      with
+      | Unix.Unix_error _ -> 1)
+
+let git_available () = run_git_quiet [ "--version" ] = 0
 
 let init_git_repo dir url =
-  ignore (Sys.command (Printf.sprintf "git init %s >/dev/null 2>&1" (Filename.quote dir)));
-  ignore
-    (Sys.command
-       (Printf.sprintf "git -C %s remote add origin %s >/dev/null 2>&1"
-          (Filename.quote dir)
-          (Filename.quote url)))
+  ignore (run_git_quiet [ "init"; dir ]);
+  ignore (run_git_quiet [ "-C"; dir; "remote"; "add"; "origin"; url ])
 
 let canonical_path path =
   try Unix.realpath path with Unix.Unix_error _ | Sys_error _ -> path

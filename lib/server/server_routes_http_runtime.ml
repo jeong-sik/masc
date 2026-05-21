@@ -49,6 +49,7 @@ let is_http_error_response = function
 (* server_start_time moved to [Server_routes_http_runtime_health_helpers]
    (godfile decomp). *)
 
+let server_start_time = Server_routes_http_runtime_health_helpers.server_start_time
 let configured_http_port () =
   Env_config_core.masc_http_port_int ()
 

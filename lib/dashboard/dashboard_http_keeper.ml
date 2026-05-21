@@ -35,48 +35,11 @@ let keeper_trust_json = Trust.keeper_trust_json
    moved to Dashboard_http_keeper_types (intra-library file split,
    2026-05-16). *)
 
-let execution_receipt_dir config keeper_name =
-  Filename.concat
-    (Filename.concat (Filename.concat (Coord.masc_root_dir config) "keepers")
-       keeper_name)
-    "execution-receipts"
-
-let execution_receipt_store_pattern config =
-  Filename.concat
-    (Filename.concat (Coord.masc_root_dir config) "keepers")
-    "*/execution-receipts"
-
-let count_execution_receipt_entries config keeper_names =
-  keeper_names
-  |> List.fold_left
-       (fun acc keeper_name ->
-         let dir = execution_receipt_dir config keeper_name in
-         if not (Sys.file_exists dir) then acc
-         else
-           acc
-           +
-           (match Dated_jsonl.create ~base_dir:dir () with
-            | store -> Dated_jsonl.count_entries store
-            | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-            | exception exn ->
-              Log.Dashboard.warn
-                "execution_trust receipt count failed for %s: %s"
-                dir
-                (Printexc.to_string exn);
-              0))
-       0
-
-(* max_ts_opt / latest_receipt_ts_of_keeper_rows / freshness_fields /
-   source_health_fields moved to Dashboard_http_keeper_types
-   (intra-library file split, 2026-05-16). *)
-
-let execution_receipt_coverage_gaps config =
-  Telemetry_coverage_gap.read_recent
-    ~masc_root:(Coord.masc_root_dir config)
-    ~n:50
-  |> List.filter (fun gap ->
-       String.equal execution_trust_source
-         (Safe_ops.json_string ~default:"" "source" gap))
+(* execution_receipt path/diagnostic helpers extracted to
+   [Dashboard_http_keeper_execution_receipt] (godfile decomp). *)
+let execution_receipt_store_pattern = Dashboard_http_keeper_execution_receipt.execution_receipt_store_pattern
+let count_execution_receipt_entries = Dashboard_http_keeper_execution_receipt.count_execution_receipt_entries
+let execution_receipt_coverage_gaps = Dashboard_http_keeper_execution_receipt.execution_receipt_coverage_gaps
 
 let keeper_names (config : Coord.config) =
   Keeper_types.keeper_names config

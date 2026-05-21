@@ -69,9 +69,8 @@ let terminal_marker_to_string = function
   | Tombstoned -> "tombstoned"
 ;;
 
-let is_terminal_status = function
-  | "aborted" | "skipped" | "tombstoned" -> true
-  | _ -> false
+let is_terminal_status status =
+  List.exists (String.equal status) [ "aborted"; "skipped"; "tombstoned" ]
 ;;
 
 let write_run_status config ~run_id ~status ?reason () =
@@ -190,11 +189,14 @@ let has_terminal_marker config ~run_id =
   else (
     match read_json_path path with
     | Error _ -> false
-    | Ok (`Assoc fields) ->
-      (match List.assoc_opt "status" fields with
-       | Some (`String status) -> is_terminal_status status
-       | _ -> false)
-    | Ok _ -> false)
+    | Ok json ->
+      (match json with
+       | `Assoc fields ->
+         (match List.assoc_opt "status" fields with
+          | Some (`String status) -> is_terminal_status status
+          | Some (`Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null)
+          | None -> false)
+       | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> false))
 ;;
 
 let read_json config ref_ =

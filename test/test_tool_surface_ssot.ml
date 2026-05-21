@@ -361,25 +361,10 @@ let test_system_internal_callable () =
   Alcotest.(check bool) "all system_internal callable" true (uncallable = [])
 
 let test_pruned_tools_registered_as_deprecated () =
-  (* Tools pruned from user-facing surfaces are registered as Deprecated
-     in explicit_metadata (#5039). They stay hidden from tools/list and
-     remain callable for in-flight sessions. Some may be fully removed
-     from surfaces when no backward compat is needed. *)
-  let deprecated_names =
-    List.map fst Tool_catalog.deprecated_tool_entries
-  in
-  List.iter
-    (fun name ->
-      Alcotest.(check bool) (name ^ " is Deprecated") true
-        (List.mem name deprecated_names);
-      Alcotest.(check bool) (name ^ " hidden") false
-        (Tool_catalog.is_visible name);
-      Alcotest.(check bool) (name ^ " callable") true
-        (Tool_catalog.allow_direct_call name))
-    [
-      "masc_webrtc_answer";
-      "masc_webrtc_offer";
-    ]
+  Alcotest.(check (list string))
+    "no deprecated-but-callable MCP tools"
+    []
+    (List.map fst Tool_catalog.deprecated_tool_entries)
 let test_workspace_mutating_canonical_used () =
   (* workspace_mutating_tool_names in tool_catalog_surfaces is the canonical list.
      Verify no empty or phantom entries. *)

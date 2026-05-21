@@ -290,10 +290,6 @@ let explicit_metadata : (string * metadata) list =
       destructive_tool );
     ( "masc_operation_pause",
       { default_metadata with destructive = Some false } );
-    (* WebRTC tools: deprecated as MCP tools but still used as HTTP
-       signaling endpoints in server_h2_gateway.ml — kept for now. *)
-    ("masc_webrtc_offer", deprecated "Pruned from all surfaces in #4999");
-    ("masc_webrtc_answer", deprecated "Pruned from all surfaces in #4999");
     ( "sidecar",
       {
         destructive_tool with

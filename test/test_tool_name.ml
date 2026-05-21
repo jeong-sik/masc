@@ -40,7 +40,7 @@ let all_masc : Tool_name.Masc.t list =
   ; Workflow_guide; Worktree_create; Worktree_list; Worktree_remove
   ; Approval_pending; Approval_get; Config; Gc; Get_metrics; Mcp_session
   ; Pause; Resume; Spawn; Start; Tool_admin_snapshot; Tool_admin_update
-  ; Tool_stats; Webrtc_answer; Webrtc_offer ]
+  ; Tool_stats ]
 
 let all_masc_keeper : Tool_name.Masc_keeper.t list =
   [ Clear; Compact; Create_from_persona; Down; List; Msg; Persona_audit; Repair

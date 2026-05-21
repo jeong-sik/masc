@@ -2262,6 +2262,10 @@ let test_wired_manifest_sites () =
           "client_capacity_full_decision";
           "client_capacity_full";
           "provider_attempt_started";
+          "required_lane_filtered_candidates";
+          "required_lane_filtered_candidate_count";
+          "required_tool_lane_unavailable";
+          "missing_required_tool_names_after_lane_by_name";
           "Keeper_runtime_manifest.Pre_dispatch_blocked";
           "Keeper_runtime_manifest.Provider_attempt_started";
           "Keeper_runtime_manifest.Provider_attempt_finished";

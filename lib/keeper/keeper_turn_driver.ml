@@ -180,8 +180,78 @@ let run_named
   let tool_filtered_candidates =
     runtime_candidates_of_tiered_providers tiered_providers tool_filtered_candidate_cfgs
   in
+  let required_lane_filtered_candidates, required_lane_provider_rejections =
+    match runtime_manifest_required_tool_names with
+    | [] -> tool_filtered_candidates, []
+    | required_tool_names ->
+      tool_filtered_candidates
+      |> List.fold_right
+           (fun candidate (kept, rejected) ->
+              let provider_label = Cascade_runtime_candidate.provider_label candidate in
+              let drop ~lane ~missing_required_tools ~materialized_tool_names =
+                let reason =
+                  Printf.sprintf
+                    "required_tool_lane_unavailable: provider=%s lane=%s \
+                     missing_required_tools=[%s] materialized_tools=[%s]"
+                    provider_label
+                    lane
+                    (String.concat ", " missing_required_tools)
+                    (String.concat ", " materialized_tool_names)
+                in
+                Log.Misc.info
+                  "cascade %s: pre-dispatch skipped provider=%s reason=%s"
+                  cascade_name
+                  provider_label
+                  reason;
+                kept, ({ reason } : Cascade_error_classify.provider_rejection) :: rejected
+              in
+              match
+                Cascade_runtime_candidate.resolve_tool_lane_for_oas_tools
+                  ?agent_name:(Cascade_oas_runner.keeper_agent_name_opt keeper_name)
+                  ~tool_requirement:`Required
+                  ~tools
+                  candidate
+              with
+              | Error err ->
+                drop
+                  ~lane:"unresolved"
+                  ~missing_required_tools:required_tool_names
+                  ~materialized_tool_names:
+                    [ "error=" ^ Agent_sdk.Error.to_string err ]
+              | Ok (effective_tools, runtime_mcp_policy) ->
+                let runtime_mcp_policy =
+                  match runtime_mcp_policy, String.trim keeper_name with
+                  | Some policy, keeper_name when keeper_name <> "" ->
+                    Cascade_runtime_candidate.runtime_mcp_policy_for_agent
+                      ~agent_name:(Keeper_types.keeper_agent_name keeper_name)
+                      candidate
+                      (Some policy)
+                  | _ -> runtime_mcp_policy
+                in
+                let materialized_tool_names =
+                  materialized_tool_names_after_lane
+                    ~effective_tools
+                    ~runtime_mcp_policy
+                in
+                let missing_required_tools =
+                  missing_required_tool_names_after_lane_by_name
+                    ~required_tool_names
+                    ~materialized_tool_names
+                in
+                if missing_required_tools = []
+                then candidate :: kept, rejected
+                else
+                  drop
+                    ~lane:
+                      (resolved_tool_lane_label
+                         ~effective_tools
+                         ~runtime_mcp_policy)
+                    ~missing_required_tools
+                    ~materialized_tool_names)
+           ([], [])
+  in
   let health_filtered_candidates =
-    tool_filtered_candidates
+    required_lane_filtered_candidates
     |> List.filter
          (fun candidate ->
             match Cascade_runtime_candidate.first_health_cooldown candidate with
@@ -193,9 +263,12 @@ let run_named
                 false)
   in
   let health_filtered_candidate_count = List.length health_filtered_candidates in
+  let required_lane_filtered_candidate_count =
+    List.length required_lane_filtered_candidates
+  in
   let dispatch_seed_candidates, health_cooldown_fail_open =
     fail_open_health_filtered_candidates
-      ~tool_filtered_candidates
+      ~tool_filtered_candidates:required_lane_filtered_candidates
       ~health_filtered_candidates
   in
   let local_endpoint_health =
@@ -401,13 +474,20 @@ let run_named
           ~keeper_name ?runtime_mcp_policy ~tools
           ~require_tool_choice_support ~require_tool_support
           original_candidates
+        @ required_lane_provider_rejections
       in
       let empty_candidate_classification =
-        classify_empty_candidates
-          ~require_tool_choice_support
-          ~require_tool_support
-          ~original_candidate_count
-          ~tool_filtered_candidate_count
+        if
+          runtime_manifest_required_tool_names <> []
+          && original_candidate_count > 0
+          && required_lane_filtered_candidate_count = 0
+        then Tool_capability_empty
+        else
+          classify_empty_candidates
+            ~require_tool_choice_support
+            ~require_tool_support
+            ~original_candidate_count
+            ~tool_filtered_candidate_count
       in
       let classification_code =
         empty_candidate_classification_code empty_candidate_classification
@@ -422,14 +502,16 @@ let run_named
       Log.Misc.error
         "cascade %s: %s; classification=%s configured_label_count=%d \
          original_candidate_count=%d tool_filtered_candidate_count=%d \
-         local_prefiltered_candidate_count=%d health_filtered_candidate_count=%d \
-         require_tool_choice_support=%b require_tool_support=%b"
+         required_lane_filtered_candidate_count=%d local_prefiltered_candidate_count=%d \
+         health_filtered_candidate_count=%d require_tool_choice_support=%b \
+         require_tool_support=%b"
         cascade_name
         exhaustion_summary
         classification_code
         configured_label_count
         original_candidate_count
         tool_filtered_candidate_count
+        required_lane_filtered_candidate_count
         local_prefiltered_candidate_count
         health_filtered_candidate_count
         require_tool_choice_support
@@ -479,6 +561,8 @@ let run_named
                     ("candidate_count", `Int original_candidate_count);
                     ( "tool_filtered_candidate_count",
                       `Int tool_filtered_candidate_count );
+                    ( "required_lane_filtered_candidate_count",
+                      `Int required_lane_filtered_candidate_count );
                     ( "local_prefiltered_candidate_count",
                       `Int local_prefiltered_candidate_count );
                     ( "unhealthy_local_endpoint_count",

@@ -33,6 +33,7 @@ type runtime_manifest_scan =
   ; mutable latest_pre_dispatch_blocked_row : Keeper_runtime_manifest.t option
   ; mutable context_injected_count : int
   ; mutable context_compacted_event_count : int
+  ; mutable active_open_loop_count : int option
   ; mutable provider_started_count : int
   ; mutable provider_finished_count : int
   ; mutable provider_terminal_row : Keeper_runtime_manifest.t option

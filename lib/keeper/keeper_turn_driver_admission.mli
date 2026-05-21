@@ -18,9 +18,7 @@ val cascade_tier_admission_blocked_decision :
   Cascade_saturation_signal.t -> Yojson.Safe.t
 
 val emit_cascade_tier_admission_signal_metric :
-  cascade_name:Keeper_turn_driver.cascade_name ->
-  Cascade_saturation_signal.t ->
-  unit
+  cascade_name:string -> Cascade_saturation_signal.t -> unit
 
 val release_client_capacity_quietly : (unit -> unit) option -> unit
 

@@ -1058,25 +1058,14 @@ let run_named
           true
       in
       let attempt_watchdog_source =
-        match liveness_mode, liveness_observer_attached, pp_timeout with
-        | Cascade_attempt_liveness_config.Enforce, true, _ ->
-          "liveness_observer_enforce"
-        | Cascade_attempt_liveness_config.Observe, true, Some _ ->
+        match liveness_mode, pp_timeout with
+        | Cascade_attempt_liveness_config.Enforce, _ -> "liveness_observer_enforce"
+        | Cascade_attempt_liveness_config.Observe, Some _ ->
           "legacy_outer_wall_observe_liveness"
-        | Cascade_attempt_liveness_config.Observe, true, None ->
+        | Cascade_attempt_liveness_config.Observe, None ->
           "oas_max_execution_time_observe_liveness"
-        | Cascade_attempt_liveness_config.Observe, false, Some _ ->
-          "legacy_outer_wall_observe_liveness"
-        | Cascade_attempt_liveness_config.Observe, false, None ->
-          "oas_max_execution_time_observe_liveness"
-        | Cascade_attempt_liveness_config.Off, _, Some _ -> "legacy_outer_wall"
-        | Cascade_attempt_liveness_config.Off, _, None -> "oas_max_execution_time"
-        | Cascade_attempt_liveness_config.Enforce, false, Some _ -> "legacy_outer_wall"
-        | Cascade_attempt_liveness_config.Enforce, false, None ->
-          "oas_max_execution_time"
-        | Cascade_attempt_liveness_config.Observe, false, Some _ -> "legacy_outer_wall"
-        | Cascade_attempt_liveness_config.Observe, false, None ->
-          "oas_max_execution_time"
+        | Cascade_attempt_liveness_config.Off, Some _ -> "legacy_outer_wall"
+        | Cascade_attempt_liveness_config.Off, None -> "oas_max_execution_time"
       in
       let liveness_budget_source =
         if liveness_observer_attached then (

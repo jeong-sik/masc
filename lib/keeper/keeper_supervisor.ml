@@ -815,114 +815,14 @@ let reconcile_keepalive_keepers (ctx : _ context) =
     (int_of_float ((Time_compat.now () -. t0) *. 1000.0))
 ;;
 
+(* Dead-tombstone cleanup extracted to
+   [Keeper_supervisor_cleanup_tombstone] (godfile decomp). publish_lifecycle is
+   injected explicitly to avoid sibling -> parent cycle. *)
 let cleanup_dead_tombstone (ctx : _ context) (entry : Keeper_registry.registry_entry) =
-  match read_meta ctx.config entry.name with
-  | Ok (Some meta) ->
-    let persisted_paused =
-      if meta.paused
-      then true
-      else (
-        (* #9733: dead tombstone cleanup writes [paused = true] —
-             cycle-owned field — while heartbeat fibers can still
-             update the same record's heartbeat-owned fields.  Use
-             the same merged-CAS retry as the resume + overflow-pause
-             paths so a parallel heartbeat write doesn't make this
-             write fail and leave the keeper unpaused on disk while
-             the supervisor proceeds to unregister it. *)
-        match
-          write_meta_with_merge
-            ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
-            ctx.config
-            { meta with paused = true }
-        with
-        | Ok () -> true
-        | Error err when is_version_conflict_error err ->
-          Prometheus.inc_counter
-            Keeper_metrics.metric_keeper_write_meta_failures
-            ~labels:[ "keeper", entry.name; "phase", "dead_cleanup_cas_race" ]
-            ();
-          Log.Keeper.warn
-            "%s: dead tombstone cleanup paused write lost CAS race after retries: %s"
-            entry.name
-            err;
-          false
-        | Error err ->
-          Prometheus.inc_counter
-            Keeper_metrics.metric_keeper_write_meta_failures
-            ~labels:[ "keeper", entry.name; "phase", "dead_cleanup" ]
-            ();
-          Log.Keeper.warn
-            "%s: dead tombstone cleanup paused write failed: %s"
-            entry.name
-            err;
-          false)
-    in
-    Keeper_registry.unregister ~base_path:ctx.config.base_path entry.name;
-    Keeper_tool_emission_hook.drop_keeper_accumulator entry.name;
-    if persisted_paused
-    then (
-      publish_lifecycle
-        ~event:
-          (Keeper_lifecycle_events.Custom_event
-             { verb = Keeper_lifecycle_events.Dead_cleaned; phase = None })
-        entry.name
-        "paused meta persisted"
-        ();
-      Log.Keeper.info "%s: dead tombstone cleaned up" entry.name)
-    else (
-      publish_lifecycle
-        ~event:
-          (Keeper_lifecycle_events.Custom_event
-             { verb = Keeper_lifecycle_events.Dead_cleaned; phase = None })
-        entry.name
-        "meta write failed, unregistered anyway"
-        ();
-      Log.Keeper.warn
-        "%s: dead tombstone unregistered despite meta write failure"
-        entry.name;
-      Prometheus.inc_counter
-        Keeper_metrics.metric_keeper_supervisor_cleanup_failures
-        ~labels:
-          [ "keeper", entry.name
-          ; ("site", Keeper_supervisor_cleanup_failure_site.(to_label Dead_tombstone_meta_write))
-          ]
-        ())
-  | Ok None ->
-    Keeper_registry.unregister ~base_path:ctx.config.base_path entry.name;
-    Keeper_tool_emission_hook.drop_keeper_accumulator entry.name;
-    publish_lifecycle
-      ~event:
-        (Keeper_lifecycle_events.Custom_event
-           { verb = Keeper_lifecycle_events.Dead_cleaned; phase = None })
-      entry.name
-      "meta missing"
-      ();
-    Log.Keeper.warn "%s: dead tombstone unregistered (meta missing)" entry.name;
-    Prometheus.inc_counter
-      Keeper_metrics.metric_keeper_supervisor_cleanup_failures
-      ~labels:
-        [ "keeper", entry.name
-        ; ("site", Keeper_supervisor_cleanup_failure_site.(to_label Dead_tombstone_meta_missing))
-        ]
-      ()
-  | Error err ->
-    Keeper_registry.unregister ~base_path:ctx.config.base_path entry.name;
-    Keeper_tool_emission_hook.drop_keeper_accumulator entry.name;
-    publish_lifecycle
-      ~event:
-        (Keeper_lifecycle_events.Custom_event
-           { verb = Keeper_lifecycle_events.Dead_cleaned; phase = None })
-      entry.name
-      (Printf.sprintf "meta read error: %s" err)
-      ();
-    Log.Keeper.warn "%s: dead tombstone unregistered (meta error: %s)" entry.name err;
-    Prometheus.inc_counter
-      Keeper_metrics.metric_keeper_supervisor_cleanup_failures
-      ~labels:
-        [ "keeper", entry.name
-        ; ("site", Keeper_supervisor_cleanup_failure_site.(to_label Dead_tombstone_meta_error))
-        ]
-      ()
+  Keeper_supervisor_cleanup_tombstone.cleanup_dead_tombstone
+    ~publish_lifecycle
+    ctx
+    entry
 ;;
 
 (** Cohort key from structured failure_reason ADT.

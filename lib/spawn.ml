@@ -440,9 +440,6 @@ let spawn ~agent_name ~prompt ?timeout_seconds ?working_dir () =
       cost_usd = None;
     })
 
-(** Spawn and wait for result (synchronous) *)
-let spawn_sync = spawn
-
 let int_opt_to_json = Json_util.int_opt_to_json
 let float_opt_to_json = Json_util.float_opt_to_json
 

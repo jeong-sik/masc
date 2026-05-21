@@ -568,6 +568,35 @@ let test_git_clone_routes_through_docker () =
     (response_mentions raw "path"
        (Filename.concat playground "repos/masc-mcp"))
 
+let test_turn_sandbox_file_write_uses_host_bind_mount () =
+  setup ~sandbox:Keeper_types.Docker
+  @@ fun ~config ~meta ~playground ->
+  let runtime = Keeper_turn_sandbox_runtime.create ~config ~meta ~turn_id:1 () in
+  let target = Filename.concat playground "nested/result.txt" in
+  (match
+     Keeper_turn_sandbox_runtime.overwrite_file
+       runtime
+       ~host_path:target
+       ~content:"alpha\n"
+       ~timeout_sec:1.0
+       ()
+   with
+   | Error msg -> Alcotest.fail msg
+   | Ok () -> ());
+  (match
+     Keeper_turn_sandbox_runtime.append_file
+       runtime
+       ~host_path:target
+       ~content:"beta\n"
+       ~timeout_sec:1.0
+       ()
+   with
+   | Error msg -> Alcotest.fail msg
+   | Ok () -> ());
+  Alcotest.(check string) "content written via bind-mounted host path"
+    "alpha\nbeta\n"
+    (Fs_compat.load_file target)
+
 let test_bash_routes_through_docker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "" @@ fun () ->
   setup ~sandbox:Keeper_types.Docker
@@ -2002,6 +2031,9 @@ let () =
             test_rg_no_match_remains_successful_in_docker_route;
           Alcotest.test_case "git_clone routes through docker" `Quick
             test_git_clone_routes_through_docker;
+          Alcotest.test_case
+            "turn sandbox file writes use bind-mounted host path"
+            `Quick test_turn_sandbox_file_write_uses_host_bind_mount;
           Alcotest.test_case
             "git-creds skips missing SSH_AUTH_SOCK"
             `Quick test_git_creds_skips_missing_ssh_auth_sock;

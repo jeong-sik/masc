@@ -3,6 +3,22 @@
 
 module U = Yojson.Safe.Util
 
+type tool_audit_fields =
+  string list
+  * string list
+  * string list
+  * int option
+  * string option
+  * string option
+  * string option
+
+let option_to_json f = function
+  | Some value -> f value
+  | None -> `Null
+;;
+
+let string_option_to_json = option_to_json (fun value -> `String value)
+
 let lightweight_tool_audit_fallback_json (meta : Keeper_types.keeper_meta) =
   let last_autonomous = String.trim meta.runtime.last_autonomous_action_at in
   let has_runtime_activity =
@@ -28,6 +44,11 @@ let lightweight_tool_audit_fallback_json (meta : Keeper_types.keeper_meta) =
 ;;
 
 let cached_tool_audit_json
+      ~(tool_audit_fields :
+          ?include_allowed_tools:bool ->
+          Coord.config ->
+          Keeper_types.keeper_meta ->
+          tool_audit_fields)
       ~lightweight
       (config : Coord.config)
       (meta : Keeper_types.keeper_meta)

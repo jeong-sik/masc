@@ -286,7 +286,13 @@ let keeper_tool_audit_fields
 ;;
 
 let lightweight_tool_audit_fallback_json = Operator_control_snapshot_tool_audit.lightweight_tool_audit_fallback_json
-let cached_tool_audit_json = Operator_control_snapshot_tool_audit.cached_tool_audit_json
+let cached_tool_audit_json ~lightweight config meta =
+  Operator_control_snapshot_tool_audit.cached_tool_audit_json
+    ~tool_audit_fields:keeper_tool_audit_fields
+    ~lightweight
+    config
+    meta
+;;
 let _keeper_snapshot_max_concurrency =
   match Sys.getenv_opt "MASC_KEEPER_SNAPSHOT_CONCURRENCY" with
   | Some s ->

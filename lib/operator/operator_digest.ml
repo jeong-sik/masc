@@ -122,11 +122,14 @@ let keeper_attention_severity ~reason ~runtime_blocker_class =
 
 let keeper_attention_summary ~(meta : Keeper_types.keeper_meta) ~reason
     ~runtime_blocker_summary =
-  let reason = Option.value ~default:"attention_required" reason in
-  match runtime_blocker_summary with
-  | Some summary ->
+  match reason, runtime_blocker_summary with
+  | Some reason, Some summary ->
       Printf.sprintf "%s needs operator attention: %s (%s)" meta.name reason summary
-  | None -> Printf.sprintf "%s needs operator attention: %s" meta.name reason
+  | Some reason, None ->
+      Printf.sprintf "%s needs operator attention: %s" meta.name reason
+  | None, Some summary ->
+      Printf.sprintf "%s needs operator attention (%s)" meta.name summary
+  | None, None -> Printf.sprintf "%s needs operator attention" meta.name
 
 let keeper_attention_projection config (meta : Keeper_types.keeper_meta) =
   let attention_fields = Keeper_status_bridge.attention_fields_json config meta in

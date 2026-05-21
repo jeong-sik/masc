@@ -141,7 +141,7 @@ let deprecated ?canonical_name ?replacement ?(allow_direct_call_when_hidden = fa
     requires_actor_binding = None;
   }
 
-let hidden_active ?canonical_name ?replacement ?(allow_direct_call_when_hidden = true)
+let hidden_active ?canonical_name ?replacement ?(allow_direct_call_when_hidden = false)
     ?(implementation_status = Real) reason =
   {
     visibility = Hidden;

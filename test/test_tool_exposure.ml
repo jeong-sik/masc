@@ -134,6 +134,26 @@ let () =
                   check bool (name ^ " should be hidden") false
                     (Tool_catalog.is_visible name))
                 hidden_names);
+          test_case "hidden active tools default direct-call closed" `Quick
+            (fun () ->
+              let hidden_names =
+                [
+                  "masc_admin_cleanup";
+                  "masc_admin_reset";
+                  "masc_gc_force";
+                  "masc_room_delete";
+                  "masc_force_leave";
+                  "masc_set_param";
+                  "masc_execute";
+                ]
+              in
+              List.iter
+                (fun name ->
+                  check bool (name ^ " should be hidden") false
+                    (Tool_catalog.is_visible name);
+                  check bool (name ^ " direct call blocked") false
+                    (Tool_catalog.allow_direct_call name))
+                hidden_names);
           test_case "hidden tools are visible with include_hidden" `Quick
             (fun () ->
               let hidden_names =

@@ -107,6 +107,20 @@ let test_regex_pipe_inside_quotes_keeps_no_match_semantics () =
   check string "semantic_status" "no_match"
     (get_string_field json "semantic_status")
 
+let test_pipeline_last_command_uses_shared_words () =
+  let json =
+    Masc_mcp.Exec_core.process_result_json
+      ~base_path:"/tmp"
+      ~keeper_name:"exec-core"
+      ~cmd:"printf foo | rg 'a|b'"
+      ~status:(Unix.WEXITED 1)
+      ~output:""
+      ()
+  in
+  check bool "ok" true (json |> member "ok" |> to_bool);
+  check string "semantic_status" "no_match"
+    (get_string_field json "semantic_status")
+
 let test_unknown_write_is_not_git_write () =
   let classification =
     Masc_mcp.Exec_core.classify_command ~cmd:"mkdir tmp/generated"
@@ -541,6 +555,21 @@ let test_failed_git_log_has_no_structured_output () =
      | `Null -> true
      | _ -> false)
 
+let test_pipeline_git_status_has_no_structured_output () =
+  let json =
+    Masc_mcp.Exec_core.process_result_json
+      ~base_path:"/tmp"
+      ~keeper_name:"p10-test"
+      ~cmd:"git status --porcelain | cat"
+      ~status:(Unix.WEXITED 0)
+      ~output:" M lib/foo.ml\n"
+      ()
+  in
+  check bool "no structured_output for git status pipeline" true
+    (match json |> member "structured_output" with
+     | `Null -> true
+     | _ -> false)
+
 let test_wc_structured () =
   let json =
     Masc_mcp.Exec_core.process_result_json
@@ -691,6 +720,8 @@ let () =
             test_missing_task_state_path_points_to_task_tools;
           test_case "quoted regex pipe keeps no-match semantics" `Quick
             test_regex_pipe_inside_quotes_keeps_no_match_semantics;
+          test_case "pipeline last command uses shared words" `Quick
+            test_pipeline_last_command_uses_shared_words;
           test_case "blocked json adds classification" `Quick
             test_blocked_json_adds_classification;
           test_case "unknown write is not git_write" `Quick
@@ -757,6 +788,8 @@ let () =
             test_failed_git_status_has_no_structured_output;
           test_case "failed git log has no structured_output" `Quick
             test_failed_git_log_has_no_structured_output;
+          test_case "git status pipeline has no structured_output" `Quick
+            test_pipeline_git_status_has_no_structured_output;
           test_case "wc -l produces lines count" `Quick
             test_wc_structured;
           test_case "git diff --stat produces summary counts" `Quick

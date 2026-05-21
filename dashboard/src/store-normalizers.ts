@@ -605,7 +605,21 @@ export function normalizeDashboardRuntimeResolution(
     build,
     keeper_runtime: normalizeKeeperRuntimeResolved(raw.keeper_runtime),
     fleet_safety: normalizeDashboardFleetSafetyHealth(raw),
+    fd_accountant: normalizeDashboardFdAccountant(raw.fd_accountant),
     cdal: normalizeDashboardCdalHealth(raw.cdal),
+  }
+}
+
+function normalizeDashboardFdAccountant(raw: unknown): DashboardRuntimeResolution['fd_accountant'] {
+  if (!isRecord(raw)) return null
+  const fdOpen = asNumber(raw.fd_open)
+  const fdLimit = asNumber(raw.fd_limit)
+  const pressureActive = asBoolean(raw.pressure_active)
+  if (fdOpen == null && fdLimit == null && pressureActive == null) return null
+  return {
+    fd_open: fdOpen ?? null,
+    fd_limit: fdLimit ?? null,
+    pressure_active: pressureActive ?? null,
   }
 }
 

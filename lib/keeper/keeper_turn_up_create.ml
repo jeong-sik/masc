@@ -504,6 +504,10 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
             Keeper_context_core.default_max_checkpoint_messages;
           keep_recent_tool_results =
             Keeper_config.default_keep_recent_tool_results;
+          tool_heavy_msg_threshold =
+            Keeper_config.default_tool_heavy_msg_threshold;
+          tool_heavy_ratio_floor =
+            Keeper_config.default_tool_heavy_ratio_floor;
         };
         auto_handoff;
         handoff_threshold;

@@ -21,6 +21,17 @@ type compaction_policy =
        (consumed by [Agent_sdk.Context_reducer.stub_tool_results
        ~keep_recent]).  Default 2; parsers clamp to
        [[0, Keeper_config.keep_recent_tool_results_max]]. *)
+  ; tool_heavy_msg_threshold : int
+    (* Per-keeper message-count floor for the tool-heavy compaction
+       gate.  Default {!Keeper_config.default_tool_heavy_msg_threshold}
+       (40); preserves prior global behavior in
+       [Keeper_compact_policy].  Heavy-tool keepers can lower this
+       to compact sooner without code change.  Wired by PR-B. *)
+  ; tool_heavy_ratio_floor : float
+    (* Per-keeper context-ratio floor for the tool-heavy compaction
+       gate.  Default
+       {!Keeper_config.default_tool_heavy_ratio_floor} (0.15);
+       preserves prior global behavior.  Wired by PR-B. *)
   }
 
 type proactive_policy =

@@ -6,6 +6,11 @@ type resolved_ref =
   ; path : string
   }
 
+type terminal_marker =
+  | Aborted
+  | Skipped
+  | Tombstoned
+
 open Result_syntax
 
 let env_non_empty key =
@@ -42,19 +47,72 @@ let manifest_path config ~run_id =
   Filename.concat (run_dir config ~run_id) "manifest.json"
 ;;
 
+let run_status_path config ~run_id =
+  Filename.concat (run_dir config ~run_id) "status.json"
+;;
+
 let log_error context = function
   | Ok () -> ()
   | Error err -> Printf.eprintf "[proof_store] %s: %s\n%!" context (Error.to_string err)
 ;;
 
-let init_run config ~run_id =
-  log_error "mkdir traces" (Fs_result.ensure_dir (traces_dir config ~run_id));
-  log_error "mkdir evidence" (Fs_result.ensure_dir (evidence_dir config ~run_id))
-;;
-
 let write_json context path json =
   let content = Yojson.Safe.pretty_to_string json ^ "\n" in
   log_error context (Fs_result.write_file path content)
+;;
+
+let status_marker_name = "cdal_proof_run_status"
+
+let terminal_marker_to_string = function
+  | Aborted -> "aborted"
+  | Skipped -> "skipped"
+  | Tombstoned -> "tombstoned"
+;;
+
+let is_terminal_status = function
+  | "aborted" | "skipped" | "tombstoned" -> true
+  | _ -> false
+;;
+
+let write_run_status config ~run_id ~status ?reason () =
+  let fields =
+    [ "schema_version", `Int 1
+    ; "marker", `String status_marker_name
+    ; "run_id", `String run_id
+    ; "status", `String status
+    ; "updated_at", `Float (Unix.gettimeofday ())
+    ]
+  in
+  let fields =
+    match reason with
+    | None -> fields
+    | Some value -> ("reason", `String value) :: fields
+  in
+  write_json "write run status" (run_status_path config ~run_id) (`Assoc fields)
+;;
+
+let init_run config ~run_id =
+  log_error "mkdir traces" (Fs_result.ensure_dir (traces_dir config ~run_id));
+  log_error "mkdir evidence" (Fs_result.ensure_dir (evidence_dir config ~run_id));
+  write_run_status config ~run_id ~status:"initialized" ()
+;;
+
+let run_has_manifest_and_contract config ~run_id =
+  Sys.file_exists (manifest_path config ~run_id)
+  && Sys.file_exists (contract_path config ~run_id)
+;;
+
+let write_finalized_marker config ~run_id =
+  write_run_status config ~run_id ~status:"finalized" ()
+;;
+
+let write_terminal_marker config ~run_id ~marker ~reason =
+  write_run_status
+    config
+    ~run_id
+    ~status:(terminal_marker_to_string marker)
+    ~reason
+    ()
 ;;
 
 let write_manifest config ~run_id proof =
@@ -123,6 +181,20 @@ let read_json_path path =
   let* content = Fs_result.read_file path |> map_error Error.to_string in
   try Ok (Yojson.Safe.from_string content) with
   | Yojson.Json_error msg -> Error (Printf.sprintf "JSON parse error in %s: %s" path msg)
+;;
+
+let has_terminal_marker config ~run_id =
+  let path = run_status_path config ~run_id in
+  if not (Sys.file_exists path)
+  then false
+  else (
+    match read_json_path path with
+    | Error _ -> false
+    | Ok (`Assoc fields) ->
+      (match List.assoc_opt "status" fields with
+       | Some (`String status) -> is_terminal_status status
+       | _ -> false)
+    | Ok _ -> false)
 ;;
 
 let read_json config ref_ =

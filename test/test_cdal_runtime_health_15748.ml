@@ -76,7 +76,14 @@ let make_proof_root ?mtime root =
   proofs_dir
 ;;
 
-let make_proof_run ?mtime ?(manifest = false) ?(contract = false) root run_id =
+let make_proof_run
+      ?mtime
+      ?terminal_marker
+      ?(manifest = false)
+      ?(contract = false)
+      root
+      run_id
+  =
   let proofs_dir = make_proof_root root in
   let run_dir = Filename.concat proofs_dir run_id in
   let traces_dir = Filename.concat run_dir "tool_traces" in
@@ -86,6 +93,14 @@ let make_proof_run ?mtime ?(manifest = false) ?(contract = false) root run_id =
   if manifest then write_file (Filename.concat run_dir "manifest.json") "{}\n";
   if contract then write_file (Filename.concat run_dir "contract.json") "{}\n";
   Option.iter
+    (fun marker ->
+       Masc_mcp_cdal_runtime.Proof_store.write_terminal_marker
+         { root }
+         ~run_id
+         ~marker
+         ~reason:"test_terminal_marker")
+    terminal_marker;
+  Option.iter
     (fun ts ->
        List.iter
          (fun path -> if Sys.file_exists path then Unix.utimes path ts ts)
@@ -94,6 +109,7 @@ let make_proof_run ?mtime ?(manifest = false) ?(contract = false) root run_id =
          ; evidence_dir
          ; Filename.concat run_dir "manifest.json"
          ; Filename.concat run_dir "contract.json"
+         ; Filename.concat run_dir "status.json"
          ];
        Unix.utimes proofs_dir ts ts)
     mtime
@@ -317,6 +333,49 @@ let test_recent_incomplete_proof_store_is_in_flight () =
     (member_int "stale_incomplete_run_dirs" (nested "completeness" proof_store))
 ;;
 
+let test_terminal_incomplete_proof_store_is_distinct () =
+  with_temp_dir @@ fun dir ->
+  let base_dir = Filename.concat dir "cdal_verdicts" in
+  let proof_root = Filename.concat dir ".oas" in
+  let now = Time_compat.now () in
+  ignore
+    (write_ledger_row
+       ~base_dir
+       ~mtime:now
+       (`Assoc [ "_task_id", `String "task-15748"; "run_id", `String "run-task" ]));
+  make_proof_run
+    ~mtime:(now -. 1000.0)
+    ~terminal_marker:Masc_mcp_cdal_runtime.Proof_store.Aborted
+    proof_root
+    "cdal-terminal-incomplete";
+  let json =
+    H.snapshot_json
+      ~base_dir
+      ~proof_root
+      ~now
+      ~stale_age_seconds:600.0
+      ~recent_limit:20
+      ~proof_scan_limit:20
+      ~stale_incomplete_run_seconds:300.0
+      ()
+  in
+  Alcotest.(check string) "writer_status" "active" (member_string "writer_status" json);
+  let proof_store = nested "proof_store" json in
+  Alcotest.(check string)
+    "proof store status"
+    "active"
+    (member_string "status" proof_store);
+  let completeness = nested "completeness" proof_store in
+  Alcotest.(check int)
+    "terminal incomplete run count"
+    1
+    (member_int "terminal_incomplete_run_dirs" completeness);
+  Alcotest.(check int)
+    "stale incomplete run count"
+    0
+    (member_int "stale_incomplete_run_dirs" completeness)
+;;
+
 let test_proof_scan_limit_caps_recent_run_walk () =
   with_temp_dir @@ fun dir ->
   let base_dir = Filename.concat dir "cdal_verdicts" in
@@ -461,6 +520,10 @@ let () =
             "recent incomplete proof store is in flight"
             `Quick
             test_recent_incomplete_proof_store_is_in_flight
+        ; Alcotest.test_case
+            "terminal incomplete proof store is distinct"
+            `Quick
+            test_terminal_incomplete_proof_store_is_distinct
         ; Alcotest.test_case
             "proof scan limit caps recent run walk"
             `Quick

@@ -88,6 +88,7 @@ let run_latest_mtime config ~run_id =
   [ stat_mtime run_dir
   ; stat_mtime (Proof_store.manifest_path config ~run_id)
   ; stat_mtime (proof_contract_path config ~run_id)
+  ; stat_mtime (Proof_store.run_status_path config ~run_id)
   ; stat_mtime traces_dir
   ; max_child_mtime traces_dir
   ; stat_mtime evidence_dir
@@ -176,10 +177,12 @@ let proof_completeness_json
       ; "completed_run_dirs", `Int 0
       ; "incomplete_run_dirs", `Int 0
       ; "stale_incomplete_run_dirs", `Int 0
+      ; "terminal_incomplete_run_dirs", `Int 0
       ; "missing_manifest_run_dirs", `Int 0
       ; "missing_contract_run_dirs", `Int 0
       ; "stale_incomplete_grace_seconds", `Float stale_incomplete_grace_seconds
       ; "sample_stale_incomplete_run_ids", `List []
+      ; "sample_terminal_incomplete_run_ids", `List []
       ]
   else (
     let run_ids =
@@ -203,15 +206,22 @@ let proof_completeness_json
     let completed = ref 0 in
     let incomplete = ref 0 in
     let stale_incomplete = ref 0 in
+    let terminal_incomplete = ref 0 in
     let missing_manifest = ref 0 in
     let missing_contract = ref 0 in
     let stale_samples = ref [] in
+    let terminal_samples = ref [] in
     List.iter
       (fun (run_id, mtime) ->
          let has_manifest = file_exists (Proof_store.manifest_path config ~run_id) in
          let has_contract = file_exists (proof_contract_path config ~run_id) in
          if has_manifest && has_contract
          then incr completed
+         else if Proof_store.has_terminal_marker config ~run_id
+         then (
+           incr terminal_incomplete;
+           if List.length !terminal_samples < 5
+           then terminal_samples := run_id :: !terminal_samples)
          else (
            incr incomplete;
            if not has_manifest then incr missing_manifest;
@@ -230,11 +240,14 @@ let proof_completeness_json
       ; "completed_run_dirs", `Int !completed
       ; "incomplete_run_dirs", `Int !incomplete
       ; "stale_incomplete_run_dirs", `Int !stale_incomplete
+      ; "terminal_incomplete_run_dirs", `Int !terminal_incomplete
       ; "missing_manifest_run_dirs", `Int !missing_manifest
       ; "missing_contract_run_dirs", `Int !missing_contract
       ; "stale_incomplete_grace_seconds", `Float stale_incomplete_grace_seconds
       ; ( "sample_stale_incomplete_run_ids"
         , `List (List.rev_map (fun run_id -> `String run_id) !stale_samples) )
+      ; ( "sample_terminal_incomplete_run_ids"
+        , `List (List.rev_map (fun run_id -> `String run_id) !terminal_samples) )
       ])
 ;;
 

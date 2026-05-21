@@ -3,7 +3,7 @@
 
 (* ── Phase ─────────────────────────────────────────────── *)
 
-type phase =
+type phase = Keeper_state_machine_phase.phase =
   | Offline
   | Running
   | Failing
@@ -18,55 +18,9 @@ type phase =
   | Dead
   | Zombie
 
-let phase_to_string = function
-  | Offline -> "offline"
-  | Running -> "running"
-  | Failing -> "failing"
-  | Overflowed -> "overflowed"
-  | Compacting -> "compacting"
-  | HandingOff -> "handing_off"
-  | Draining -> "draining"
-  | Paused -> "paused"
-  | Stopped -> "stopped"
-  | Crashed -> "crashed"
-  | Restarting -> "restarting"
-  | Dead -> "dead"
-  | Zombie -> "zombie"
-;;
-
-let phase_of_string = function
-  | "offline" -> Some Offline
-  | "running" -> Some Running
-  | "failing" -> Some Failing
-  | "overflowed" -> Some Overflowed
-  | "compacting" -> Some Compacting
-  | "handing_off" -> Some HandingOff
-  | "draining" -> Some Draining
-  | "paused" -> Some Paused
-  | "stopped" -> Some Stopped
-  | "crashed" -> Some Crashed
-  | "restarting" -> Some Restarting
-  | "dead" -> Some Dead
-  | "zombie" -> Some Zombie
-  | _ -> None
-;;
-
-let all_phases =
-  [ Offline
-  ; Running
-  ; Failing
-  ; Overflowed
-  ; Compacting
-  ; HandingOff
-  ; Draining
-  ; Paused
-  ; Stopped
-  ; Crashed
-  ; Restarting
-  ; Dead
-  ; Zombie
-  ]
-;;
+let phase_to_string = Keeper_state_machine_phase.phase_to_string
+let phase_of_string = Keeper_state_machine_phase.phase_of_string
+let all_phases = Keeper_state_machine_phase.all_phases
 
 (* ── Conditions ────────────────────────────────────────── *)
 

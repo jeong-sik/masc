@@ -356,6 +356,7 @@ let builtin_descriptor name : Tool.descriptor option =
       ; mutation_class = Some (effect_class_to_mutation_class cls)
       ; concurrency_class = Some (effect_class_to_concurrency_class cls)
       ; permission = Some (effect_class_to_permission cls)
+      ; evidence_role = None
       ; shell =
           (if cls = Shell_dynamic
            then

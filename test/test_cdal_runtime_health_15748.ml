@@ -346,6 +346,7 @@ let test_older_cdal_unscoped_rows_do_not_mark_current_writer_partial () =
            [ "_task_id", `String "task-new"
            ; "run_id", `String "cdal-3000-scoped-new"
            ]));
+  (* See: fixture helper returns the proofs dir, but this test only needs it created. *)
   ignore (make_proof_root proof_root);
   let json =
     H.snapshot_json

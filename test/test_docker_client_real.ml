@@ -419,13 +419,10 @@ let test_run_detached_argv_shape () =
   List.iter
     (fun m -> check bool (Printf.sprintf "mount %S present as -v arg" m) true (List.mem m argv))
     (Keeper_sandbox_session_plan.mounts plan);
-  check bool "ends with [image; sh; -lc; startup_command]" true
+  check bool "ends with [image] + startup_argv" true
     (ends_with
-       [ Keeper_sandbox_session_plan.image plan
-       ; "sh"
-       ; "-lc"
-       ; Keeper_sandbox_session_plan.startup_command plan
-       ]
+       (Keeper_sandbox_session_plan.image plan
+        :: Keeper_sandbox_session_plan.startup_argv plan)
        argv)
 ;;
 

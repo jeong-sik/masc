@@ -209,7 +209,7 @@ let symlink_masc ~config ~base_path ~agent_name ~worktree_path =
   then Ok ()
   else
     let source =
-      if Coord_worktree.keeper_uses_docker_sandbox ~config ~agent_name
+      if Keeper_sandbox_config.is_docker ~base_path:config.Coord.base_path ~agent_name
       then docker_masc_symlink_source ~config ~agent_name ~worktree_path
       else Ok masc_source
     in

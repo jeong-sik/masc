@@ -17,6 +17,7 @@
    env_config_snapshot
    env_config_snapshot_core
    feature_flag_registry
+   keeper_sandbox_config
    masc_network_defaults
    masc_time_constants
    playground_paths)
@@ -28,4 +29,4 @@
  ; itself an exhaustive match). The remaining catch-all (env_config_runtime.ml
  ; string scrutinee) is open-type and warning 4 ignores it.
  (flags (:standard -w +4))
- (libraries masc_core masc_log yojson uri ipaddr unix))
+ (libraries masc_core masc_log yojson otoml uri ipaddr unix))

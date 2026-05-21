@@ -1,18 +1,5 @@
 (** See cascade_http_probe.mli for documentation. *)
 
-(* ── URL classification ─────────────────────────────────────── *)
-
-(* Re-export the shared heuristic from [Masc_network_defaults].  Keeping
-   the symbol here preserves this module's public [.mli] surface while
-   eliminating the substring literal duplicated across cascade modules.
-
-   Substring-scan classification is unreliable: a vLLM server on :11434
-   matches; an ollama on a non-default port does not. The probe's
-   [Http_probe] adapter therefore consults an explicit registry instead
-   (see [registered_urls] below); [is_ollama_url] survives only as a
-   transitional helper for legacy callers in other modules. *)
-let is_ollama_url = Masc_network_defaults.is_ollama_url
-
 (* ── Explicit URL registry (replaces substring scan inside this module) ───
    Probes only fire against URLs that callers have explicitly registered,
    eliminating the [:11434] substring heuristic's false positives. The

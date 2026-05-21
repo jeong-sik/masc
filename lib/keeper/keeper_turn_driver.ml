@@ -1059,7 +1059,8 @@ let run_named
       in
       let attempt_watchdog_source =
         match liveness_mode, pp_timeout with
-        | Cascade_attempt_liveness_config.Enforce, _ -> "liveness_observer_enforce"
+        | Cascade_attempt_liveness_config.Enforce, _ ->
+          "liveness_observer_enforce"
         | Cascade_attempt_liveness_config.Observe, Some _ ->
           "legacy_outer_wall_observe_liveness"
         | Cascade_attempt_liveness_config.Observe, None ->

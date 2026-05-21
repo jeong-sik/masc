@@ -98,8 +98,8 @@ let with_timeout_observer f =
   let previous = Atomic.get Process_eio.process_timeout_observer_fn in
   let seen = ref [] in
   Atomic.set Process_eio.process_timeout_observer_fn
-    (fun ~program ~timeout_sec ~stage ->
-       seen := (program, timeout_sec, Process_eio.timeout_stage_to_string stage) :: !seen);
+    (fun ~program ~timeout_sec ~origin ->
+       seen := (program, timeout_sec, Timeout_origin.to_label origin) :: !seen);
   Fun.protect
     ~finally:(fun () ->
       Atomic.set Process_eio.process_timeout_observer_fn previous)

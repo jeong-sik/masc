@@ -135,55 +135,10 @@ let add_masc_authorization_header = Cascade_transport_authorization.add_masc_aut
 let codex_cli_can_auth_keeper_bound_runtime_mcp = Cascade_transport_auth_bridging.codex_cli_can_auth_keeper_bound_runtime_mcp
 let bridged_runtime_mcp_policy_for_agent = Cascade_transport_auth_bridging.bridged_runtime_mcp_policy_for_agent
 
-let runtime_mcp_policy_for_provider
-      ~(provider_cfg : Llm_provider.Provider_config.t)
-      ~(agent_name : string)
-      (policy_opt : Llm_provider.Llm_transport.runtime_mcp_policy option)
-  =
-  let agent_name =
-    let trimmed = String.trim agent_name in
-    if String.equal trimmed "" then None else Some trimmed
-  in
-  (* Dispatch by local tool-delivery policy, not by provider name
-     (RFC-0058 §2.4).  [requires_per_keeper_bridging] gates the
-     strip-and-bridge path. *)
-  let requires_per_keeper_bridging =
-    Provider_tool_support
-    .provider_requires_per_keeper_bridging_for_bound_actor_tools
-      provider_cfg
-  in
-  match policy_opt, requires_per_keeper_bridging, agent_name with
-  | Some policy, true, Some agent_name ->
-    (* Per-request HTTP headers are stripped and only MASC identity headers
-         plus the per-keeper [Authorization] header survive — so runtime MCP
-         tools still authenticate without leaking secrets via argv. *)
-    Some (bridged_runtime_mcp_policy_for_agent ~agent_name policy)
-  | Some policy, true, None ->
-    (* No agent_name to inject — preserve the legacy strip-all behavior.
-       Iter 38: tick a counter so a non-zero rate flags caller paths
-       that should be threading [agent_name] but aren't.  Strip-all
-       means auth-bearing headers (e.g. Authorization: Bearer ...)
-       disappear and runtime MCP tools run unauthenticated. *)
-    Cascade_metrics.on_runtime_mcp_legacy_strip ();
-    Some (runtime_mcp_policy_without_http_headers policy)
-  | Some policy, false, Some agent_name ->
-    Some (runtime_mcp_policy_with_masc_agent_name ~agent_name policy)
-  | Some policy, false, None -> Some policy
-  | None, _, _ -> None
-;;
-
-let cli_runtime_mcp_jsons
-      ~(base : string list)
-      (policy_opt : Llm_provider.Llm_transport.runtime_mcp_policy option)
-  =
-  let request_json =
-    match policy_opt with
-    | Some policy -> Option.to_list (cli_mcp_config_json_of_policy policy)
-    | None -> []
-  in
-  dedupe_preserve_order (base @ request_json)
-;;
-
+(* Provider-driven runtime MCP policy resolver extracted to
+   [Cascade_transport_runtime_policy_provider] (godfile decomp). *)
+let runtime_mcp_policy_for_provider = Cascade_transport_runtime_policy_provider.runtime_mcp_policy_for_provider
+let cli_runtime_mcp_jsons = Cascade_transport_runtime_policy_provider.cli_runtime_mcp_jsons
 let public_mcp_tool_names_of_oas_tools =
   Cascade_transport_mcp_tool_classifier.public_mcp_tool_names_of_oas_tools
 ;;

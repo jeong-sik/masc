@@ -381,7 +381,7 @@ let run_named
   let record_provider_health_error candidate = function
     | Provider_error.ServerError { code; _ } ->
       record_provider_health_result candidate ~success:false ~http_status:(Some code)
-    | Provider_error.CapacityExhausted _
+    | Provider_error.CapacityBackpressure _
     | Provider_error.RateLimit _
     | Provider_error.AuthError
     | Provider_error.InvalidRequest _
@@ -635,7 +635,7 @@ let run_named
           let http_status_of_provider_error = function
             | Some (Provider_error.ServerError { code; _ }) -> Some code
             | Some
-                (Provider_error.CapacityExhausted _
+                (Provider_error.CapacityBackpressure _
                 | Provider_error.RateLimit _
                 | Provider_error.AuthError
                 | Provider_error.InvalidRequest _
@@ -728,7 +728,7 @@ let run_named
         ~error_reason
         ()
     else
-      (* Capacity_exhausted shares the immediate-cooldown semantics of a
+      (* Capacity backpressure shares the immediate-cooldown semantics of a
          soft rate limit: one event is sufficient evidence that the
          provider cannot serve, so we reuse [record_soft_rate_limited]
          rather than counting toward the 3-failure threshold of
@@ -736,7 +736,7 @@ let run_named
          cooldown duration (clamped by
          [Cascade_health_tracker.soft_rate_limit_max_clamp_sec]). *)
       let immediate_cooldown_retry_after =
-        match sdk_error_capacity_exhausted_retry_after_s sdk_err with
+        match sdk_error_capacity_backpressure_retry_after_s sdk_err with
         | Some retry_after -> Some retry_after
         | None -> sdk_error_soft_rate_limited sdk_err
       in

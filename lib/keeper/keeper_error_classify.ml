@@ -253,7 +253,7 @@ type degraded_retry_reason =
   | Cascade_candidates_filtered
   | Required_tool_contract_violation
   | Cascade_exhausted
-  | Capacity_exhausted
+  | Capacity_backpressure
   | Rate_limit
   | Server_error
   | Auth_error
@@ -268,7 +268,7 @@ let degraded_retry_reason_to_string = function
   | Cascade_candidates_filtered -> "cascade_candidates_filtered"
   | Required_tool_contract_violation -> "required_tool_contract_violation"
   | Cascade_exhausted -> "cascade_exhausted"
-  | Capacity_exhausted -> "capacity_backpressure"
+  | Capacity_backpressure -> "capacity_backpressure"
   | Rate_limit -> "rate_limit"
   | Server_error -> "server_error"
   | Auth_error -> "auth_error"
@@ -341,7 +341,7 @@ let degraded_retry_after_recoverable_error
     | Some (Keeper_turn_driver.Turn_timeout _) ->
         local_recovery_retry Turn_timeout
     | Some (Keeper_turn_driver.Capacity_backpressure _) ->
-        local_recovery_retry Capacity_exhausted
+        local_recovery_retry Capacity_backpressure
     | Some
         (Keeper_turn_driver.Cascade_exhausted
            { reason = Keeper_types.Candidates_filtered_after_cycles; _ }) ->
@@ -387,7 +387,7 @@ let recoverable_cascade_failure_reason (err : Agent_sdk.Error.sdk_error) =
     | Some (Keeper_turn_driver.Turn_timeout _) ->
         Some Turn_timeout
     | Some (Keeper_turn_driver.Capacity_backpressure _) ->
-        Some Capacity_exhausted
+        Some Capacity_backpressure
     | Some
         (Keeper_turn_driver.Cascade_exhausted
            { reason = Keeper_types.Candidates_filtered_after_cycles; _ }) ->
@@ -450,7 +450,7 @@ let recoverable_cascade_failure_reason (err : Agent_sdk.Error.sdk_error) =
              (Llm_provider.Error.RateLimit _) ->
              Some Rate_limit
          | Agent_sdk.Error.Provider (Llm_provider.Error.CapacityExhausted _) ->
-             Some Capacity_exhausted
+             Some Capacity_backpressure
          | Agent_sdk.Error.Provider (Llm_provider.Error.HardQuota _) ->
              Some Hard_quota
          | Agent_sdk.Error.Provider (Llm_provider.Error.ServerError { code; transient; _ })

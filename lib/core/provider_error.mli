@@ -11,7 +11,7 @@ type provider_error =
   | RateLimit of {
       retry_after : float option;
     }
-  | CapacityExhausted of {
+  | CapacityBackpressure of {
       scope : capacity_scope;
     }
   | AuthError
@@ -47,4 +47,4 @@ val scope_to_string : capacity_scope -> string
 val to_error_kind : t -> string
 val to_yojson : t -> Yojson.Safe.t
 val affected_providers : t -> string list
-val is_capacity_exhausted : t -> bool
+val is_capacity_backpressure : t -> bool

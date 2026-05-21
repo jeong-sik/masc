@@ -86,11 +86,11 @@ val sdk_error_is_hard_quota : Agent_sdk.Error.sdk_error -> bool
 
 val retry_api_error_to_provider_error :
   provider:string ->
-  capacity_exhausted:bool ->
+  capacity_backpressure:bool ->
   Llm_provider.Retry.api_error ->
   Provider_error.t option
 (** Convert an SDK retry error into the additive provider-error contract.
-    [capacity_exhausted] is explicit so the production body classifier
+    [capacity_backpressure] is explicit so the production body classifier
     stays at this OAS boundary instead of moving into [Provider_error]. *)
 
 val sdk_error_to_provider_error :
@@ -139,9 +139,9 @@ val sdk_error_soft_rate_limited :
     [retry_after].  [Some None] when [retry_after] is absent.
     [None] for non-429 or hard-quota-429 errors. *)
 
-val sdk_error_capacity_exhausted_retry_after_s :
+val sdk_error_capacity_backpressure_retry_after_s :
   Agent_sdk.Error.sdk_error -> float option option
-(** [Some (Some retry_after)] for a [Provider.CapacityExhausted] error
+(** [Some (Some retry_after)] for a external provider capacity error
     carrying a parsed [retry_after].  [Some None] when [retry_after] is
     absent.  [None] for all other errors.  Mirrors
     {!sdk_error_soft_rate_limited} so [Cascade_health_tracker.record_soft_rate_limited]

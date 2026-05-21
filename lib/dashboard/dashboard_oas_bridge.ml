@@ -288,7 +288,7 @@ let record_response ~provider_id ~model_id ?total_duration_ms ?serialization_ms
        ?serialization_ms ?retry_count ~status response)
 
 let provider_error_capacity_scope_label = function
-  | Provider_error.CapacityExhausted { scope } ->
+  | Provider_error.CapacityBackpressure { scope } ->
       Provider_error.scope_to_string scope
   | Provider_error.RateLimit _
   | Provider_error.AuthError

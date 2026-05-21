@@ -788,7 +788,29 @@ let test_repeated_error_results_are_blocked () =
            bool
            "guardrail blocks repeated failures"
            true
-           (is_guardrail_message message)
+           (is_guardrail_message message);
+         (match Tool.execute tool args with
+          | Error { Agent_sdk.Types.message = repeated_message; _ } ->
+            let json = Yojson.Safe.from_string repeated_message in
+            let detail = Yojson.Safe.Util.member "detail" json in
+            check
+              string
+              "same-args guardrail marker"
+              "same_args_repeated_failure"
+              Yojson.Safe.Util.(member "guardrail" detail |> to_string);
+            check
+              int
+              "repeated guardrail block count"
+              2
+              Yojson.Safe.Util.(member "guardrail_repeat_count" detail |> to_int);
+            check
+              bool
+              "recovery plan is surfaced"
+              true
+              (match Yojson.Safe.Util.member "recovery_plan" detail with
+               | `Assoc _ -> true
+               | _ -> false)
+          | Ok _ -> fail "guardrail should keep blocking repeated payload")
        | Ok _ -> fail "guardrail should block the repeated failure")
 ;;
 

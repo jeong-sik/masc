@@ -82,6 +82,7 @@ let max_consecutive_failures = Env_config.KeeperToolExec.max_consecutive_tool_fa
 
 type failure_counts =
   { table : (string, int) Hashtbl.t
+  ; block_log_table : (string, int) Hashtbl.t
   ; workflow_table : (string, int) Hashtbl.t
   ; workflow_block_table : (string, workflow_rejection_block) Hashtbl.t
   ; mutex : Mutex.t
@@ -96,6 +97,7 @@ and workflow_rejection_block =
 
 let create_failure_counts () =
   { table = Hashtbl.create 16
+  ; block_log_table = Hashtbl.create 16
   ; workflow_table = Hashtbl.create 16
   ; workflow_block_table = Hashtbl.create 16
   ; mutex = Mutex.create ()
@@ -121,7 +123,20 @@ let failure_count_record_failure counts key =
 ;;
 
 let failure_count_reset counts key =
-  Mutex.protect counts.mutex (fun () -> Hashtbl.remove counts.table key)
+  Mutex.protect counts.mutex (fun () ->
+    Hashtbl.remove counts.table key;
+    Hashtbl.remove counts.block_log_table key)
+;;
+
+let failure_block_count_record counts key =
+  Mutex.protect counts.mutex (fun () ->
+    let next =
+      match Hashtbl.find_opt counts.block_log_table key with
+      | Some n -> n + 1
+      | None -> 1
+    in
+    Hashtbl.replace counts.block_log_table key next;
+    next)
 ;;
 
 (* MASC/OAS Error-Warn Reduction Goal 2026-05-18, P2 reducer:
@@ -227,7 +242,9 @@ let workflow_rejection_count_record counts key =
 ;;
 
 let workflow_rejection_count_reset counts =
-  Mutex.protect counts.mutex (fun () -> Hashtbl.clear counts.workflow_table)
+  Mutex.protect counts.mutex (fun () ->
+    Hashtbl.clear counts.workflow_table;
+    Hashtbl.clear counts.block_log_table)
 ;;
 
 let workflow_rejection_scope_block_get counts key =
@@ -723,21 +740,56 @@ let make_keeper_tool_handler
       let prior_fails = failure_count_get failure_counts key in
       if prior_fails >= max_consecutive_failures
       then (
+        let block_count = failure_block_count_record failure_counts key in
         Prometheus.inc_counter
           Keeper_metrics.metric_keeper_tools_oas_failures
           ~labels:[ "tool", name; "site", "blocked" ]
           ();
-        Log.Keeper.warn
-          "tool %s blocked after %d consecutive failures (same args)"
-          name
-          prior_fails;
+        (if block_count = 1 then
+           Log.Keeper.warn
+             "tool %s blocked after %d consecutive failures (same args)"
+             name
+             prior_fails
+         else
+           Log.Keeper.info
+             "tool %s repeated guardrail block suppressed to INFO \
+              (same args, block_count=%d)"
+             name
+             block_count);
         let msg =
           Printf.sprintf
             "This tool has failed %d times in a row with the same arguments. Try a \
-             different approach or different arguments."
+             different approach or different arguments. Do not retry the same tool \
+             payload."
             prior_fails
         in
-        let output_text = normalize_tool_result ~success:false msg in
+        let raw_result =
+          Yojson.Safe.to_string
+            (`Assoc
+                [ "ok", `Bool false
+                ; "error", `String msg
+                ; "failure_class", `String "policy_rejection"
+                ; "recoverable", `Bool true
+                ; "error_class", `String "deterministic"
+                ; "guardrail", `String "same_args_repeated_failure"
+                ; "guardrail_repeat_count", `Int block_count
+                ; ( "recovery_plan"
+                  , `Assoc
+                      [ ( "instruction"
+                        , `String
+                            "Change the arguments, inspect the previous error, or choose a \
+                             different allowed tool; do not call the same tool payload again."
+                        )
+                      ; ( "alternatives"
+                        , `List
+                            [ `String "change_arguments"
+                            ; `String "choose_different_tool"
+                            ; `String "inspect_previous_error"
+                            ] )
+                      ] )
+                ])
+        in
+        let output_text = normalize_tool_result ~success:false raw_result in
         Tool_result.error ~tool_name:name ~start_time:t0 output_text)
       else (
         match

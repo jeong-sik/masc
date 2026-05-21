@@ -51,42 +51,20 @@ let first_nonempty_line output =
 let add_unique acc item =
   if List.exists (String.equal item) acc then acc else acc @ [ item ]
 
-(* Shell command allowlist.  Keep this aligned with keeper_bash/dev shell so
-   safe coding probes do not fail only because they entered through
-   masc_code_shell.  Tool-specific extras are kept here. *)
-let allowed_shell_commands =
-  List.fold_left add_unique Dev_exec_allowlist.dev
-    [ "diff"; "patch"; "mkdir"; "ocamlfind"; "tsc" ]
-
-let code_shell_command_context command =
-  Worker_dev_tools.command_context_coding_with_allowlist
-    ~caller:Exec_shell_gate.Tool_code_write
-    ~allow_pipes:true
-    ~allowed_commands:allowed_shell_commands
-    command
-;;
-
-let validate_code_shell_command (command : string) : (unit, string) Result.t =
-  code_shell_command_context command
-  |> Result.map_error
-       (Worker_dev_tools.block_reason_to_string_with_allowlist
-          ~allowed_commands:allowed_shell_commands)
-  |> Result.map (fun _ -> ())
+let allowed_shell_commands = Tool_code_write_shell_validate.allowed_shell_commands
+let code_shell_command_context =
+  Tool_code_write_shell_validate.code_shell_command_context
+let validate_code_shell_command =
+  Tool_code_write_shell_validate.validate_code_shell_command
 
 type code_shell_exit_status =
+  Tool_code_write_shell_validate.code_shell_exit_status =
   | Shell_ok
   | Shell_ok_expected_nonzero of string
   | Shell_error
 
-let classify_code_shell_exit ~last_stage_bin code =
-  match code with
-  | 0 -> Shell_ok
-  | 1 -> (
-      match last_stage_bin with
-      | Some ("rg" | "grep") -> Shell_ok_expected_nonzero "no_matches"
-      | Some "diff" -> Shell_ok_expected_nonzero "differences"
-      | Some _ | None -> Shell_error)
-  | _ -> Shell_error
+let classify_code_shell_exit =
+  Tool_code_write_shell_validate.classify_code_shell_exit
 
 let shell_ir_with_default_cwd cwd ir =
   match cwd with

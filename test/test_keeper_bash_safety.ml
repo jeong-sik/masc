@@ -1963,12 +1963,12 @@ let test_keeper_shell_ls_recovers_doubled_playground_prefix () =
   Alcotest.(check string) "path normalized to repos root" repos
     (json |> Json.member "path" |> Json.to_string)
 
-let test_keeper_shell_bash_op_is_deprecated () =
+let test_keeper_shell_bash_op_is_unsupported () =
   with_eio_fs @@ fun () ->
   let base_path, config = make_config () in
   Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
   Keeper_registry.clear ();
-  let meta = make_readonly_meta "bash-deprecated" in
+  let meta = make_readonly_meta "bash-unsupported" in
   let raw =
     Keeper_exec_shell.handle_keeper_shell
       ~turn_sandbox_factory:None ~exec_cache:None
@@ -1978,17 +1978,12 @@ let test_keeper_shell_bash_op_is_deprecated () =
         ("command", `String "git status && git log --oneline -5");
       ])
   in
-  Alcotest.(check (option string)) "error is deprecation"
-    (Some "keeper_shell_bash_deprecated") (parse_error_field raw);
-  (match parse_hint raw with
-   | None -> Alcotest.fail ("expected hint field, got: " ^ raw)
-   | Some hint ->
-     Alcotest.(check bool) "hint points to Bash alias" true
-       (String_util.contains_substring hint "Bash");
-     Alcotest.(check bool) "hint avoids internal keeper_bash" false
-       (String_util.contains_substring hint "keeper_bash");
-     Alcotest.(check bool) "hint avoids internal keeper_shell" false
-       (String_util.contains_substring hint "keeper_shell"))
+  Alcotest.(check (option string)) "error is unsupported"
+    (Some "unsupported_op") (parse_error_field raw);
+  let json = Yojson.Safe.from_string raw in
+  let supported_ops = json |> Json.member "supported_ops" |> Json.to_list in
+  Alcotest.(check bool) "bash not supported" false
+    (List.mem (`String "bash") supported_ops)
 
 let test_keeper_shell_bash_op_does_not_execute () =
   with_eio_fs @@ fun () ->
@@ -2010,9 +2005,9 @@ let test_keeper_shell_bash_op_does_not_execute () =
         ("command", `String "touch should-not-exist");
       ])
   in
-  Alcotest.(check (option string)) "error is deprecation"
-    (Some "keeper_shell_bash_deprecated") (parse_error_field raw);
-  Alcotest.(check bool) "legacy bash op did not execute" false
+  Alcotest.(check (option string)) "error is unsupported"
+    (Some "unsupported_op") (parse_error_field raw);
+  Alcotest.(check bool) "bash op did not execute" false
     (Sys.file_exists marker)
 
 let test_git_write_classification () =
@@ -2431,8 +2426,8 @@ let () =
         test_keeper_shell_find_accepts_name_alias;
       Alcotest.test_case "doubled playground prefix auto-recovers" `Quick
         test_keeper_shell_ls_recovers_doubled_playground_prefix;
-      Alcotest.test_case "op=bash is deprecated" `Quick
-        test_keeper_shell_bash_op_is_deprecated;
+      Alcotest.test_case "op=bash is unsupported" `Quick
+        test_keeper_shell_bash_op_is_unsupported;
       Alcotest.test_case "op=bash does not execute" `Quick
         test_keeper_shell_bash_op_does_not_execute;
     ]);

@@ -62,6 +62,14 @@ type compaction_policy = {
         [Agent_sdk.Context_reducer.stub_tool_results ~keep_recent]
         during OAS context compaction.  See
         {!Keeper_meta_contract.compaction_policy} for full semantics. *)
+  tool_heavy_msg_threshold: int;
+    (** Per-keeper message-count floor for the tool-heavy compaction
+        gate.  See
+        {!Keeper_meta_contract.compaction_policy} for full semantics. *)
+  tool_heavy_ratio_floor: float;
+    (** Per-keeper context-ratio floor for the tool-heavy compaction
+        gate.  See
+        {!Keeper_meta_contract.compaction_policy} for full semantics. *)
 }
 
 type proactive_policy = {

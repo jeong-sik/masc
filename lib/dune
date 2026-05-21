@@ -287,7 +287,6 @@
   autoresearch_knowledge
   autoresearch_lineage
   tool_autoresearch_context
-  tool_autoresearch_schemas
   tool_autoresearch_registry
   tool_autoresearch_broadcast
   tool_autoresearch_cycle

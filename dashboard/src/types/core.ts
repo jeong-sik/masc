@@ -415,7 +415,6 @@ export const KEEPER_RUNTIME_BLOCKER_CLASSES = [
   'heartbeat_failures',
   'turn_failures',
   'exception',
-  'stale_fleet_batch',
   'awaiting_operator',
   'awaiting_sandbox_egress',
   'supervisor_paused',

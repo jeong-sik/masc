@@ -54,7 +54,6 @@ let non_overflow_classes_are_not_matched () =
     KT.No_tool_capable_provider;
     KT.Fiber_unresolved;
     KT.Stale_turn_timeout;
-    KT.Stale_fleet_batch;
     KT.Sdk_max_turns_exceeded;
     KT.Sdk_cost_budget_exceeded;
     KT.Sdk_unrecognized_stop_reason;

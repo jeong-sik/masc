@@ -1088,63 +1088,6 @@ let test_stale_storm_pause_skips_restart () =
       check bool "registry entry unregistered after storm pause"
         false (Reg.is_registered ~base_path:config.base_path name))
 
-let test_legacy_stale_fleet_batch_routes_to_restart_budget () =
-  Eio_main.run @@ fun env ->
-  ensure_fs env;
-  Eio.Switch.run @@ fun sw ->
-  let base_dir = temp_dir () in
-  Fun.protect
-    ~finally:(fun () ->
-      Reg.clear ();
-      Masc_mcp.Keeper_runtime.reset_test_state base_dir;
-      cleanup_dir base_dir)
-    (fun () ->
-      let config = Masc_mcp.Coord.default_config base_dir in
-      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "supervisor"));
-      let name = "legacy-stale-fleet-batch-keeper" in
-      let meta = make_meta name in
-      (match KT.write_meta config meta with
-       | Ok () -> ()
-       | Error err -> fail err);
-      let reg = Reg.register ~base_path:config.base_path name meta in
-      Eio.Promise.resolve reg.done_r (`Crashed "legacy stale fleet batch");
-      let max_restarts =
-        Masc_mcp.Runtime_params.get
-          Masc_mcp.Governance_registry.keeper_supervisor_max_restarts
-      in
-      Reg.restore_supervisor_state ~base_path:config.base_path name
-        ~restart_count:max_restarts ~last_restart_ts:0.0 ~crash_log:[];
-      Reg.set_failure_reason ~base_path:config.base_path name
-        (Some (Reg.Stale_fleet_batch { distinct_count = 3 }));
-      let baseline_dead =
-        Masc_mcp.Prometheus.metric_total
-          Masc_mcp.Keeper_metrics.metric_keeper_dead_total
-      in
-      let ctx : _ KT.context =
-        {
-          config;
-          agent_name = "supervisor";
-          sw;
-          clock = Eio.Stdenv.clock env;
-          proc_mgr = Some (Eio.Stdenv.process_mgr env);
-          net = Some (Eio.Stdenv.net env);
-        }
-      in
-      Sup.sweep_and_recover ctx;
-      let after_dead =
-        Masc_mcp.Prometheus.metric_total
-          Masc_mcp.Keeper_metrics.metric_keeper_dead_total
-      in
-      check (float 0.001) "legacy fleet batch follows restart/dead budget"
-        (baseline_dead +. 1.0) after_dead;
-      (match KT.read_meta config name with
-       | Ok (Some m) ->
-           check bool "meta.paused stays false for legacy fleet batch"
-             false m.paused
-       | Ok None -> fail "meta missing after legacy fleet batch"
-       | Error err -> fail ("read_meta failed: " ^ err));
-      ())
-
 let test_oas_timeout_budget_loop_pause_skips_restart () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
@@ -1888,8 +1831,6 @@ let () =
     "stale_storm_phase2", [
       test_case "Stale_termination_storm skips restart, persists paused, increments counter" `Quick
         test_stale_storm_pause_skips_restart;
-      test_case "legacy Stale_fleet_batch follows restart budget" `Quick
-        test_legacy_stale_fleet_batch_routes_to_restart_budget;
       test_case "Oas_timeout_budget_loop skips restart, persists paused, increments counter" `Quick
         test_oas_timeout_budget_loop_pause_skips_restart;
       test_case "unresolved watchdog-stopped budget loop is reaped" `Quick
@@ -2388,7 +2329,7 @@ let () =
            [Turn_consecutive_failures] / [Exception] / etc., and
            [watchdog_stop_pending] only restarts on
            [Stale_turn_timeout | Stale_termination_storm |
-           Stale_fleet_batch | Oas_timeout_budget_loop].  Recovery would set
+           Oas_timeout_budget_loop].  Recovery would set
            [fiber_stop=true] but the supervisor would never convert
            it into a crash/restart.  Pin the post-recovery cohort to
            [stale_turn_timeout] so this regression is caught. *)

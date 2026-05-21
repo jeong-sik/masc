@@ -25,7 +25,7 @@ export function asKeeperRuntimeBlockerClass(
 // Source of truth: `lib/keeper/keeper_meta_contract.ml:91 type blocker_class`
 //   + `blocker_class_to_string` (`lib/keeper/keeper_meta_contract.ml:137–164`).
 //
-// Backend emits exactly these 24 lowercase wire strings (verified by
+// Backend emits exactly these lowercase wire strings (verified by
 // `Keeper_synthetic_marker` audit, 2026-05-19). The list below is the
 // *frozen* mirror — keep it 1:1 with `keeper_meta_contract.ml`.
 //
@@ -63,7 +63,6 @@ const BACKEND_KEEPER_META_BLOCKER_CLASSES = [
   'stay_silent_loop',
   'fiber_unresolved',
   'stale_turn_timeout',
-  'stale_fleet_batch',
   'sdk_max_turns_exceeded',
   'sdk_token_budget_exceeded',
   'sdk_cost_budget_exceeded',

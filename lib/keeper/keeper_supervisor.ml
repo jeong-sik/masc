@@ -198,19 +198,16 @@ let launch_supervised_fiber
                       ~wakeup:reg.fiber_wakeup));
              (* Check if watchdog set a failure reason that should trigger
               crash recovery instead of a clean stop. When the stale
-              watchdog sets fiber_stop + Stale_turn_timeout, the heartbeat
+             watchdog sets fiber_stop + Stale_turn_timeout, the heartbeat
               loop exits normally but the supervisor must treat this as a
               crash so sweep_and_recover restarts the keeper. Storm and
-              budget-loop cohorts still route to auto-pause; legacy
-              Stale_fleet_batch remains a watchdog signal but no longer
-              pauses the keeper. *)
+              budget-loop cohorts still route to auto-pause. *)
              let watchdog_triggered =
                match Keeper_registry.get ~base_path meta.name with
                | Some e ->
                  (match e.last_failure_reason with
                   | Some (Keeper_registry.Stale_turn_timeout _)
                   | Some (Keeper_registry.Stale_termination_storm _)
-                  | Some (Keeper_registry.Stale_fleet_batch _)
                   | Some (Keeper_registry.Oas_timeout_budget_loop _) -> true
                   (* Other failure reasons are not stale-watchdog signals. *)
                   | Some (Keeper_registry.Heartbeat_consecutive_failures _)
@@ -1091,7 +1088,6 @@ let sweep_and_recover (ctx : _ context) =
            ( Keeper_registry.Heartbeat_consecutive_failures _
            | Keeper_registry.Turn_consecutive_failures _
            | Keeper_registry.Stale_turn_timeout _
-           | Keeper_registry.Stale_fleet_batch _
            | Keeper_registry.Provider_runtime_error _
            | Keeper_registry.Tool_required_unsatisfied _
            | Keeper_registry.Ambiguous_partial_commit _
@@ -1117,7 +1113,6 @@ let sweep_and_recover (ctx : _ context) =
     match entry.last_failure_reason with
     | Some (Keeper_registry.Stale_turn_timeout _)
     | Some (Keeper_registry.Stale_termination_storm _)
-    | Some (Keeper_registry.Stale_fleet_batch _)
     | Some (Keeper_registry.Oas_timeout_budget_loop _) -> true
     (* Other failure reasons are not stale-watchdog signals. *)
     | Some (Keeper_registry.Heartbeat_consecutive_failures _)
@@ -1148,7 +1143,6 @@ let sweep_and_recover (ctx : _ context) =
       match entry.last_failure_reason with
       | Some (Keeper_registry.Oas_timeout_budget_loop _) -> Some Oas_timeout_budget
       | Some (Keeper_registry.Stale_turn_timeout _)
-      | Some (Keeper_registry.Stale_fleet_batch _)
       | Some (Keeper_registry.Stale_termination_storm _) -> Some Stale_turn_timeout
       (* Non-watchdog failure reasons do not seed a watchdog blocker_class. *)
       | Some (Keeper_registry.Heartbeat_consecutive_failures _)

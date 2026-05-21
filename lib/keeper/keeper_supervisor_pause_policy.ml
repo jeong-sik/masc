@@ -213,7 +213,6 @@ let failure_reason_policy_decision
   | Some
       ( Keeper_registry.Heartbeat_consecutive_failures _
       | Keeper_registry.Turn_consecutive_failures _
-      | Keeper_registry.Stale_fleet_batch _
       | Keeper_registry.Provider_runtime_error _
       | Keeper_registry.Fiber_unresolved
       | Keeper_registry.Exception _ )

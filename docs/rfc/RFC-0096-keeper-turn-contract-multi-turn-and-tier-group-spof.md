@@ -22,14 +22,14 @@ implementation_prs: [15688]
 `#15319` (meta-issue, 자동 PR 금지로 잠금) 가 Agent Observatory
 2026-05-14 의 *표면상 7가지 다른 root* — `Completion contract violated`,
 `Cascade exhausted`, `Internal error [masc_oas_error]`,
-`stale_turn_timeout`, `stale_fleet_batch`, `api_error_invalid_request`,
+`stale_turn_timeout`, removed fleet-batch watchdog seal, `api_error_invalid_request`,
 "최근 활동 요약 없음" — 이 **단일 keeper turn 의 4 layer × 3 root** 임을
 `system_log` evidence + 코드 좌표로 매핑했다.
 
 본 RFC 는 그 매핑의 *Root #1* 과 *Root #3* 에 대한 design proposal 이다.
 Root #2 (cascade rotation cap + `alert_exhausted` broadcast spam)
 는 amplifier 이지 root 가 아니며, Root #1/#3 가 fix 되면 trigger 자체
-가 사라진다. Layer 4 (`stale_fleet_batch` watchdog seal) 는 visibility
+가 사라진다. Layer 4 (removed fleet-batch watchdog seal) 는 visibility
 의 결과 — 별도 RFC 가 필요 없다.
 
 현재 caller/context 좌표는 `lib/keeper/keeper_tool_disclosure.ml:466`
@@ -69,7 +69,7 @@ let required_tool_satisfaction call =
   유지. multi-lane 은 *기존 schema 의 다중 entry* 로 표현.
 - `Misc cascade exhausted` 메시지 텍스트 변경 — RFC-0089 의 typed
   variant 흐름에 따라 별도 PR 에서.
-- Dashboard `stale_fleet_batch` watchdog 로직 — Layer 4 visibility 의
+- Dashboard fleet-batch watchdog 로직 — Layer 4 visibility 의
   cleanup 은 root fix 후 자연스럽게 해소.
 - `operator_broadcast_required` 264 events/24h 별도 이슈 (#11083) —
   Root #1 fix 의 부수 효과로 감소 측정.
@@ -219,5 +219,5 @@ Schema 변경 없음. RFC-0086 의 keeper namespace bulk promotion 흐름
   enforcement window 한 축만 수정.
 - `cascade.toml` 의 schema 자체 변경 — multi-lane 은 *기존 schema 의
   다중 entry* 로 표현, schema 변경 없음.
-- watchdog `stale_fleet_batch` 의 별도 cleanup — root fix 의 부수 효과로
+- watchdog fleet-batch seal 의 별도 cleanup — root fix 의 부수 효과로
   해소되며 측정만 한다.

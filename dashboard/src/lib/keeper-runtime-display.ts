@@ -221,7 +221,6 @@ const runtimeBlockerLabels = {
   heartbeat_failures: '하트비트 실패',
   turn_failures: '턴 실패 반복',
   exception: '런타임 예외',
-  stale_fleet_batch: 'Fleet stale 배치',
   awaiting_operator: '운영자 조치 대기',
   awaiting_sandbox_egress: '샌드박스 egress 대기',
   supervisor_paused: 'Supervisor 일시정지',
@@ -305,9 +304,6 @@ export function keeperRuntimeBlockerHint(keeper: Keeper | null | undefined): str
   }
   if (blockerClass === 'exception') {
     return 'Keeper 런타임 예외가 기록되어 로그와 최근 turn 상태 확인이 필요합니다.'
-  }
-  if (blockerClass === 'stale_fleet_batch') {
-    return '여러 keeper가 같은 watchdog 창에서 stale로 종료되어 supervisor pause/backoff 상태 확인이 필요합니다.'
   }
   if (blockerClass === 'awaiting_operator') {
     return '진행을 위해 운영자의 승인, 결정, 또는 게이트 해제가 필요합니다.'

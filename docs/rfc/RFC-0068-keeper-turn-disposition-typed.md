@@ -31,7 +31,7 @@ disjoint.
 
 ```
 Healthy / Stale_turn_timeout_idle | _in_turn | _noop /
-Stale_termination_storm / Stale_fleet_batch / Oas_timeout_budget /
+Stale_termination_storm / Oas_timeout_budget /
 Heartbeat_failures / Turn_failures /
 Provider_runtime_error of string / Tool_required_unsatisfied of string /
 Ambiguous_partial_commit_* / Fiber_unresolved /
@@ -167,7 +167,6 @@ val of_termination_code : Keeper_turn_terminal_code.t -> t
     - [Tool_required_unsatisfied _] → [Required_tool_use_unsatisfied]
     - [Ambiguous_partial_commit_*] → [Post_commit_ambiguous]
     - [Stale_termination_storm]    → [Provider_error _]
-    - [Stale_fleet_batch]          → [Provider_error _]
     - [Fiber_unresolved]           → [Provider_error _]
     - [Exception_unhandled _]      → [Provider_error _]
     - [Sdk_error _]                → [Provider_error _]

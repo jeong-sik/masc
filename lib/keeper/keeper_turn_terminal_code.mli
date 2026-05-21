@@ -36,10 +36,6 @@ type t =
   | Stale_termination_storm
   (** [Keeper_registry.Stale_termination_storm]: cohort window
           escalation threshold reached. *)
-  | Stale_fleet_batch
-  (** [Keeper_registry.Stale_fleet_batch]: legacy fleet-batch wire value.
-      Current fleet-batch detection is observation-only; fresh watchdog kills
-      retain their per-keeper terminal code. *)
   | Oas_timeout_budget
   (** [Keeper_registry.Oas_timeout_budget_loop]: same keeper
           exhausted the OAS turn budget on consecutive cycles. *)

@@ -19,7 +19,7 @@ related:
 
 ## §0 Summary
 
-When a keeper's cascade exhausts (`cascade_exhausted` terminal reason), the supervisor stamps `keeper_meta.runtime.last_blocker = { klass: { name = "cascade_exhausted"; reason = "no_providers_available" }; detail = ... }`. **Six code paths** in `lib/keeper/` already assign `last_blocker = None` on normal turn-success paths (see §1.2 Axis C, corrected). They clear the latch on the *expected-path keepers* but **fail to fire on keepers exiting via `stale_*` diagnoses** (`stale_turn_timeout`, `stale_fleet_batch`), because those keepers never reach the success-path branches that hold the clears. The dashboard reads `last_blocker` for the "일시정지 / 런타임 차단" UI affordance, perpetuating the *appearance* of a paused keeper even when `paused = false`. Combined with the absence of a runtime endpoint behind the dashboard's *OVERRIDE* buttons and the append-only `last_proactive_preview` field, *some* keepers — those whose last turn died by stale diagnosis — are structurally unable to self-recover.
+When a keeper's cascade exhausts (`cascade_exhausted` terminal reason), the supervisor stamps `keeper_meta.runtime.last_blocker = { klass: { name = "cascade_exhausted"; reason = "no_providers_available" }; detail = ... }`. **Six code paths** in `lib/keeper/` already assign `last_blocker = None` on normal turn-success paths (see §1.2 Axis C, corrected). They clear the latch on the *expected-path keepers* but **fail to fire on keepers exiting via stale diagnoses** (`stale_turn_timeout` and the now-removed fleet-batch legacy diagnosis), because those keepers never reach the success-path branches that hold the clears. The dashboard reads `last_blocker` for the "일시정지 / 런타임 차단" UI affordance, perpetuating the *appearance* of a paused keeper even when `paused = false`. Combined with the absence of a runtime endpoint behind the dashboard's *OVERRIDE* buttons and the append-only `last_proactive_preview` field, *some* keepers — those whose last turn died by stale diagnosis — are structurally unable to self-recover.
 
 This RFC proposes:
 
@@ -69,7 +69,7 @@ Most recent receipt (`execution-receipts/2026-05/14.jsonl`):
 }
 ```
 
-Receipt produced 2026-05-14T00:00:42Z. At time of this RFC (~21h later), keeper is still listed as *Fleet stale 배치 / 런타임 차단 / stale_fleet_batch(distinct_count=6)* in the dashboard.
+Receipt produced 2026-05-14T00:00:42Z. At time of this RFC (~21h later), keeper is still listed under the removed fleet-batch legacy diagnosis in the dashboard.
 
 ### §1.2 The 3-axis investigation
 
@@ -95,8 +95,8 @@ The decision-grade block is **`last_blocker`**, not `paused`. The stamp path:
 
 1. Cascade exhausts → `receipt.terminal_reason_code = "cascade_exhausted"` (string; RFC-0042 typed-variant migration incomplete — wire format unchanged).
 2. `lib/keeper/keeper_execution_receipt.ml:475` derives `operator_disposition = "alert_exhausted"` by `String.equal`.
-3. `lib/keeper/keeper_supervisor.ml:1485` stamps `keeper_meta.runtime.last_blocker` with `klass = Stale_fleet_batch` (when ≥6 keepers fleet-wide) or `klass = Cascade_exhausted` (single keeper).
-4. Dashboard renders `last_blocker` as "일시정지 / 런타임 차단 / stale_fleet_batch(distinct_count=6)".
+3. `lib/keeper/keeper_supervisor.ml:1485` stamps `keeper_meta.runtime.last_blocker` with the removed fleet-batch legacy class (when ≥6 keepers fleet-wide) or `klass = Cascade_exhausted` (single keeper).
+4. Dashboard renders `last_blocker` as the removed fleet-batch legacy diagnosis.
 5. *(Corrected 2026-05-15)* Six code paths in `lib/keeper/` assign `last_blocker = None`:
    - `keeper_turn_up_create.ml:579` (turn creation)
    - `keeper_turn_up_update.ml:281` (turn update)
@@ -105,13 +105,13 @@ The decision-grade block is **`last_blocker`**, not `paused`. The stamp path:
    - `keeper_supervisor.ml:2071` (supervisor — auto_resume cleanup)
    - `keeper_supervisor.ml:2279` (supervisor — secondary cleanup)
 
-   The 2026-05-15 fleet measurement (server uptime 1 min → 5 min) shows `dict→null` transitions on 12/18 keepers within ~5 min, confirming these paths *do* fire on healthy turn cycles. The remaining 5 latched keepers (`glm-coding`, `imseonghan`, `janitor`, `qa-king`, `sangsu`) all carry `klass = stale_turn_timeout` or `stale_fleet_batch` — their last turn exited via stale diagnosis, which does *not* route through any of the six clear sites. The *real* defect is "stale-exit keepers skip the clear path", not "no clear path exists".
+   The 2026-05-15 fleet measurement (server uptime 1 min → 5 min) shows `dict→null` transitions on 12/18 keepers within ~5 min, confirming these paths *do* fire on healthy turn cycles. The remaining 5 latched keepers (`glm-coding`, `imseonghan`, `janitor`, `qa-king`, `sangsu`) all carry `klass = stale_turn_timeout` or the removed fleet-batch legacy class — their last turn exited via stale diagnosis, which does *not* route through any of the six clear sites. The *real* defect is "stale-exit keepers skip the clear path", not "no clear path exists".
 
 `auto_resume` (`lib/keeper/keeper_supervisor.ml:2026-2069`) is gated on `meta.paused = true`, which is *separate state*. Since `paused = false`, `auto_resume` is not even attempted — but the *appearance* of stuck persists because the dashboard surfaces `last_blocker`.
 
 ### §1.3 Why this matters
 
-In a fleet of 18 keepers, 6 became stuck (`distinct_count=6` in `stale_fleet_batch`) on the same cascade exhaustion. The 6-count threshold escalates from per-keeper to fleet-level pause, multiplying the operational impact. Manual recovery — `<base-path>/.masc/keepers/<keeper>.json` direct edit, server restart — is the only current mechanism, and it's not scriptable through the documented surface.
+In a fleet of 18 keepers, 6 became stuck under the removed fleet-batch legacy diagnosis on the same cascade exhaustion. The 6-count threshold escalates from per-keeper to fleet-level pause, multiplying the operational impact. Manual recovery — `<base-path>/.masc/keepers/<keeper>.json` direct edit, server restart — is the only current mechanism, and it's not scriptable through the documented surface.
 
 ## §2 Goals / Non-goals
 
@@ -244,7 +244,7 @@ Phase 1 was originally framed as the load-bearing change. The 2026-05-15 measure
 
 **State vars**:
 
-- `last_blocker ∈ {None, Some(Cascade_exhausted), Some(Stale_fleet_batch), Some(Other)}`
+- `last_blocker ∈ {None, Some(Cascade_exhausted), Some(Removed_fleet_batch_legacy), Some(Other)}`
 - `cascade_status ∈ {Healthy, Unhealthy, Unknown}`
 - `pending_probe ∈ BOOLEAN`
 - `paused ∈ BOOLEAN` (separate latch, for cross-axis composition)
@@ -355,7 +355,7 @@ Server restarted on RFC-0082's merge commit (`90e02e0ee0`). Fleet measurements:
 Of the 5 remaining latched keepers (`glm-coding`, `imseonghan`, `janitor`, `qa-king`, `sangsu`):
 
 - 1 carries `klass = stale_turn_timeout` (`active=625s` > `threshold=600s`)
-- 4 carry `klass = stale_fleet_batch` (mostly with `root_cause=stale_turn_timeout` and active times 2132–2167 s)
+- 4 carry the removed fleet-batch legacy class (mostly with `root_cause=stale_turn_timeout` and active times 2132–2167 s)
 
 All 5 share: `set_at = None` (no timestamp on the latch dict — legacy shape), `paused = false` (so dispatch is not gated), and `last_proactive_reason` in {`text_response`, `tools=[...]`, `require_tool_use` error} — *they are running turns*. Their *running* turns do not pass through any of the six clear sites. This is the real defect.
 

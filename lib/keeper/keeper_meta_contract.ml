@@ -122,10 +122,6 @@ type blocker_class =
         per-keeper meta read [last_blocker_class = null] for the
         majority cohort during a fleet stall (observed: 6/14 keepers
         in cohort=stale_turn_timeout, every meta showing null). *)
-  | Stale_fleet_batch
-    (** Legacy blocker class for pre-existing fleet-batch state. Current
-        fleet-batch detection is observation-only and should not stamp keeper
-        meta; stale keepers use their per-keeper watchdog blocker instead. *)
   | Sdk_max_turns_exceeded
   | Sdk_token_budget_exceeded
   | Sdk_cost_budget_exceeded
@@ -152,7 +148,6 @@ let blocker_class_to_string = function
   | Stay_silent_loop -> "stay_silent_loop"
   | Fiber_unresolved -> "fiber_unresolved"
   | Stale_turn_timeout -> "stale_turn_timeout"
-  | Stale_fleet_batch -> "stale_fleet_batch"
   | Sdk_max_turns_exceeded -> "sdk_max_turns_exceeded"
   | Sdk_token_budget_exceeded -> "sdk_token_budget_exceeded"
   | Sdk_cost_budget_exceeded -> "sdk_cost_budget_exceeded"
@@ -181,7 +176,6 @@ let blocker_class_of_serialized_string = function
   | "stay_silent_loop" -> Some Stay_silent_loop
   | "fiber_unresolved" -> Some Fiber_unresolved
   | "stale_turn_timeout" -> Some Stale_turn_timeout
-  | "stale_fleet_batch" -> Some Stale_fleet_batch
   | "sdk_max_turns_exceeded" -> Some Sdk_max_turns_exceeded
   | "sdk_token_budget_exceeded" -> Some Sdk_token_budget_exceeded
   | "sdk_cost_budget_exceeded" -> Some Sdk_cost_budget_exceeded
@@ -223,7 +217,6 @@ let blocker_class_continue_gate = function
   | Stay_silent_loop
   | Fiber_unresolved
   | Stale_turn_timeout
-  | Stale_fleet_batch
   | Sdk_max_turns_exceeded
   | Sdk_token_budget_exceeded
   | Sdk_cost_budget_exceeded

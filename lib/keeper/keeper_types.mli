@@ -183,7 +183,6 @@ type blocker_class = Keeper_meta_contract.blocker_class =
   | Stay_silent_loop
   | Fiber_unresolved
   | Stale_turn_timeout
-  | Stale_fleet_batch
   | Sdk_max_turns_exceeded
   | Sdk_token_budget_exceeded
   | Sdk_cost_budget_exceeded

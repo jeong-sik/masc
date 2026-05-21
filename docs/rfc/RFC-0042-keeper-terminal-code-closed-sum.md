@@ -55,7 +55,7 @@ Three observations from `lib/keeper/`:
 
 1. **Typed source exists**: `Keeper_registry.failure_reason` is a closed sum type with
    nine constructors (`Provider_runtime_error`, `Tool_required_unsatisfied`,
-   `Oas_timeout_budget_loop`, `Stale_turn_timeout`, `Stale_fleet_batch`,
+   `Oas_timeout_budget_loop`, `Stale_turn_timeout`,
    `Heartbeat_consecutive_failures`, `Turn_consecutive_failures`,
    `Ambiguous_partial_commit`, `Fiber_unresolved`, `Exception of _`).
 
@@ -160,7 +160,6 @@ type t =
   | Stale_turn_timeout_noop
       (** Keeper_registry.Stale_turn_timeout (Noop_failure_loop _) *)
   | Stale_termination_storm
-  | Stale_fleet_batch
   | Oas_timeout_budget
   | Heartbeat_failures
   | Turn_failures

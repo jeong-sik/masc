@@ -83,8 +83,8 @@ When step 1 takes nontrivial time (TCP retry, connection timeout), the turn's
 *total* wall clock approaches the watchdog's `idle_turn(360s)` threshold even
 if step 2/3 would have succeeded. Two consecutive `noop`-shaped failures from
 the same provider trigger `noop_failure_loop(noop=4)`; six keepers stuck on the
-same provider trigger `stale_fleet_batch(distinct_count=6)`. The supervisor
-then forces `crashed`.
+same provider used to trigger the removed fleet-batch legacy diagnosis. The
+supervisor then forces `crashed`.
 
 `lib/cascade/provider_health.ml` referenced by `cascade.toml` *does not
 exist*. The `[providers.X.healthcheck]` blocks (`enabled`, `endpoint`,

@@ -79,11 +79,6 @@ let test_failure_reason_to_string_oas_timeout_budget_loop () =
     "oas_timeout_budget_loop(count=3)"
     (failure_reason_to_string (Oas_timeout_budget_loop { count = 3 }))
 
-let test_failure_reason_to_string_stale_fleet_batch () =
-  r "Stale_fleet_batch includes distinct count"
-    "stale_fleet_batch(distinct_count=3)"
-    (failure_reason_to_string (Stale_fleet_batch { distinct_count = 3 }))
-
 let test_failure_reason_to_string_provider_runtime_error () =
   r "Provider_runtime_error includes terminal code"
     "provider_runtime_error(provider_error:kimi unicode crash)"
@@ -158,11 +153,6 @@ let test_oas_timeout_budget_loop_cohort_key () =
     (failure_reason_cohort_key
        (Some (Oas_timeout_budget_loop { count = 3 })))
 
-let test_stale_fleet_batch_cohort_key () =
-  r "Stale_fleet_batch cohort_key" "stale_fleet_batch"
-    (failure_reason_cohort_key
-       (Some (Stale_fleet_batch { distinct_count = 3 })))
-
 let test_terminal_failure_cohort_keys () =
   r "Provider_runtime_error cohort_key" "provider_runtime_error"
     (failure_reason_cohort_key
@@ -219,18 +209,6 @@ let test_stale_watchdog_replaces_prior_storm_label () =
   | Some reason ->
       r "replaces old storm with current kill class"
         "stale_turn_timeout(noop_failure_loop(noop=4))"
-        (failure_reason_to_string reason)
-  | None -> Alcotest.fail "expected stale reason"
-
-let test_stale_watchdog_replaces_prior_fleet_batch_label () =
-  let prior = Stale_fleet_batch { distinct_count = 8 } in
-  let kill_class =
-    In_turn_hung { active_seconds = 720.0; timeout_threshold = 600.0 }
-  in
-  match stale_watchdog_failure_reason ~prior:(Some prior) ~kill_class with
-  | Some reason ->
-      r "replaces old fleet batch with current kill class"
-        "stale_turn_timeout(in_turn_hung(active=720s threshold=600s))"
         (failure_reason_to_string reason)
   | None -> Alcotest.fail "expected stale reason"
 
@@ -421,8 +399,6 @@ let () =
             `Quick test_failure_reason_to_string_noop;
           Alcotest.test_case "Oas_timeout_budget_loop wraps" `Quick
             test_failure_reason_to_string_oas_timeout_budget_loop;
-          Alcotest.test_case "Stale_fleet_batch wraps" `Quick
-            test_failure_reason_to_string_stale_fleet_batch;
           Alcotest.test_case "Provider_runtime_error wraps" `Quick
             test_failure_reason_to_string_provider_runtime_error;
           Alcotest.test_case "Tool_required_unsatisfied wraps" `Quick
@@ -434,8 +410,6 @@ let () =
             `Quick test_cohort_key_collapses_subclasses;
           Alcotest.test_case "Oas_timeout_budget_loop cohort" `Quick
             test_oas_timeout_budget_loop_cohort_key;
-          Alcotest.test_case "Stale_fleet_batch cohort" `Quick
-            test_stale_fleet_batch_cohort_key;
           Alcotest.test_case "terminal failure cohorts" `Quick
             test_terminal_failure_cohort_keys;
         ] );
@@ -449,8 +423,6 @@ let () =
             test_stale_watchdog_replaces_prior_stale_timeout;
           Alcotest.test_case "replaces prior storm label" `Quick
             test_stale_watchdog_replaces_prior_storm_label;
-          Alcotest.test_case "replaces prior fleet batch label" `Quick
-            test_stale_watchdog_replaces_prior_fleet_batch_label;
         ] );
       ( "active_turn_staleness",
         [

@@ -83,7 +83,6 @@ let blocker_class_indicates_overflow (klass : blocker_class) : bool =
   | Stay_silent_loop
   | Fiber_unresolved
   | Stale_turn_timeout
-  | Stale_fleet_batch
   | Sdk_max_turns_exceeded
   | Sdk_cost_budget_exceeded
   | Sdk_unrecognized_stop_reason

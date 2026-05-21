@@ -219,7 +219,6 @@ let failure_reason_batch_root_cause
       Some Fd_exhaustion
   | Stale_turn_timeout _
   | Stale_termination_storm _
-  | Stale_fleet_batch _
   | Oas_timeout_budget_loop _
   | Provider_runtime_error _ ->
       Some Cascade_unhealthy

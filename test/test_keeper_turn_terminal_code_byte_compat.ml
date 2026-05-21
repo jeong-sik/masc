@@ -23,7 +23,6 @@ let oracle = function
   | Some (R.Tool_required_unsatisfied { code; _ }) -> code
   | Some (R.Oas_timeout_budget_loop _) -> "oas_timeout_budget"
   | Some (R.Stale_turn_timeout _) -> "stale_turn_timeout"
-  | Some (R.Stale_fleet_batch _) -> "stale_fleet_batch"
   | Some (R.Stale_termination_storm _) -> "stale_termination_storm"
   | Some (R.Heartbeat_consecutive_failures _) -> "heartbeat_failures"
   | Some (R.Turn_consecutive_failures _) -> "turn_failures"
@@ -54,8 +53,6 @@ let cases : (string * R.failure_reason option) list = [
     Some (R.Stale_turn_timeout (R.Noop_failure_loop { noop_count = 7 }));
   "Stale_termination_storm",
     Some (R.Stale_termination_storm { count = 4 });
-  "Stale_fleet_batch",
-    Some (R.Stale_fleet_batch { distinct_count = 6 });
   "Oas_timeout_budget_loop",
     Some (R.Oas_timeout_budget_loop { count = 2 });
   "Provider_runtime_error",

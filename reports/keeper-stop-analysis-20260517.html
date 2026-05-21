@@ -423,7 +423,7 @@ Keeper_stale_watchdog.fork_stale_watchdog
   |-- mid-turn no progress ---------------------------> Stale_turn_timeout
   |-- noop failure loop ------------------------------> Stale_turn_timeout
   |-- repeated terminations in window ----------------> Stale_termination_storm
-  |-- many keepers in same stale batch ---------------> Stale_fleet_batch
+  |-- many keepers in same stale batch ---------------> per-keeper stale diagnosis
   |-- pending OAS timeout budget ---------------------> Oas_timeout_budget_loop
   |
   v

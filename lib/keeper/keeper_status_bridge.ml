@@ -344,7 +344,6 @@ let runtime_blocker_surface_of_typed_class ?(summary = "") (cls : blocker_class)
     | Stay_silent_loop
     | Fiber_unresolved
     | Stale_turn_timeout
-    | Stale_fleet_batch
     | Sdk_max_turns_exceeded
     | Sdk_token_budget_exceeded
     | Sdk_cost_budget_exceeded
@@ -377,7 +376,6 @@ let runtime_blocker_surface_of_legacy_string reason cls =
   | Stay_silent_loop
   | Fiber_unresolved
   | Stale_turn_timeout
-  | Stale_fleet_batch
   | Sdk_max_turns_exceeded
   | Sdk_token_budget_exceeded
   | Sdk_cost_budget_exceeded
@@ -467,15 +465,6 @@ let runtime_blocker_surface_of_failure_reason (reason : Keeper_registry.failure_
                auto-paused before restart loop."
               count)
          Oas_timeout_budget)
-  | Keeper_registry.Stale_fleet_batch { distinct_count } ->
-    Some
-      (runtime_blocker_surface_of_typed_class
-         ~summary:
-           (Printf.sprintf
-              "Stale watchdog terminated %d distinct keeper(s) inside the fleet batch \
-               window; keeper was auto-paused before restart loop."
-              distinct_count)
-         Stale_fleet_batch)
   | Keeper_registry.Provider_runtime_error { code; detail } ->
     Some
       { blocker_class = "provider_runtime_error"

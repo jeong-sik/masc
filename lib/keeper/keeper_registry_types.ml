@@ -72,11 +72,6 @@ type failure_reason =
           persisting [meta.paused = true] instead so an operator must
           investigate the underlying cascade/provider/fd issue before
           resuming the keeper. *)
-  | Stale_fleet_batch of { distinct_count : int }
-  (** Legacy wire value for stale watchdog fleet-batch state. Current
-          fleet-batch detection is observation-only and must not create this
-          failure reason; if old runtime state still contains it, the
-          supervisor treats it like a restartable watchdog crash. *)
   | Oas_timeout_budget_loop of { count : int }
   (** Latched when the same keeper exhausts the OAS turn budget on
           consecutive cycles. This is a provider/cascade/runtime throughput
@@ -109,8 +104,6 @@ let failure_reason_to_string = function
     Printf.sprintf "stale_turn_timeout(%s)" (stale_kill_class_to_string cls)
   | Stale_termination_storm { count } ->
     Printf.sprintf "stale_termination_storm(count=%d)" count
-  | Stale_fleet_batch { distinct_count } ->
-    Printf.sprintf "stale_fleet_batch(distinct_count=%d)" distinct_count
   | Oas_timeout_budget_loop { count } ->
     Printf.sprintf "oas_timeout_budget_loop(count=%d)" count
   | Provider_runtime_error { code; detail; provider_id; http_status } ->
@@ -148,7 +141,6 @@ let failure_reason_cohort_key = function
   | Some (Turn_consecutive_failures _) -> "turn_failures"
   | Some (Stale_turn_timeout _) -> "stale_turn_timeout"
   | Some (Stale_termination_storm _) -> "stale_termination_storm"
-  | Some (Stale_fleet_batch _) -> "stale_fleet_batch"
   | Some (Oas_timeout_budget_loop _) -> "oas_timeout_budget_loop"
   | Some (Provider_runtime_error _) -> "provider_runtime_error"
   | Some (Tool_required_unsatisfied _) -> "tool_required_unsatisfied"
@@ -170,7 +162,6 @@ let stale_watchdog_failure_reason ~prior ~kill_class =
       | Exception _ ) -> prior
   | Some
       ( Stale_termination_storm _
-      | Stale_fleet_batch _
       | Stale_turn_timeout _
       | Fiber_unresolved )
   | None -> Some (Stale_turn_timeout kill_class)

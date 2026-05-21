@@ -1258,8 +1258,8 @@ describe('fetchKeeperConfig', () => {
         fiber_health: 'healthy',
         presence_keepalive: 'true',
         presence_keepalive_sec: '30',
-        runtime_blocker_class: 'stale_fleet_batch',
-        runtime_blocker_summary: 'Fleet batch paused after stale termination storm.',
+        runtime_blocker_class: 'stale_termination_storm',
+        runtime_blocker_summary: 'Stale termination storm paused this keeper.',
         runtime_blocker_continue_gate: 'false',
       },
       runtime_trust: {
@@ -1354,8 +1354,8 @@ describe('fetchKeeperConfig', () => {
     expect(result.sources.cascade_catalog_source_path).toBe('/tmp/config/cascade.toml')
     expect(result.metrics.total_cost_usd).toBe(0.12)
     expect(result.runtime.presence_keepalive_sec).toBe(30)
-    expect(result.runtime.runtime_blocker_class).toBe('stale_fleet_batch')
-    expect(result.runtime.runtime_blocker_summary).toBe('Fleet batch paused after stale termination storm.')
+    expect(result.runtime.runtime_blocker_class).toBe('stale_termination_storm')
+    expect(result.runtime.runtime_blocker_summary).toBe('Stale termination storm paused this keeper.')
     expect(result.active_goal_ids).toEqual(['goal-runtime'])
     expect(result.coordination.active_goal_ids).toEqual(['goal-runtime'])
     expect(result.coordination.active_goals[0]?.title).toBe('Ship runtime clarity')

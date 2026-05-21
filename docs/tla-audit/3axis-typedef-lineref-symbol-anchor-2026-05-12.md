@@ -18,7 +18,7 @@ iter 81's corpus survey (`docs/tla-audit/kml-r8-...md`) identified the biggest r
 | `keeper_registry.ml:76-81` — `type cascade_state = Cascade_idle \| ...` | `type cascade_state` at line **632** | **+556** | `keeper_registry.ml — type cascade_state` |
 | `keeper_registry.ml:234-244` — "declares 7 GADT transitions" (KeeperTurnCycle only) | the GADT `module Turn_phase_transition` (`type ('from, 'to_) t = ...`) is at ~line **243-246**; the RFC-0072-Phase-4 comment block above it at ~234 | ~0..+2 (roughly accurate, but a line range that can rot) | `keeper_registry.ml`'s `module Turn_phase_transition` (GADT-encoded turn_phase transitions) — symbol anchor; also softened "declares 7 GADT transitions" → "declares the cross-state transitions" (the OCaml comment there actually says "19 [valid pairs]" of the "7-variant [turn_phase] FSM" — the "7" in the spec was a description nit; left a precise count out rather than guess) |
 
-What lines 63-81 actually contain now: a `terminal_reason` variant block (`Stale_fleet_batch`, `Oas_timeout_budget_loop`, `Provider_runtime_error`, ...) — entirely unrelated to the 3-axis types. Confirmed stale.
+What lines 63-81 actually contain now: a `terminal_reason` variant block (`Oas_timeout_budget_loop`, `Provider_runtime_error`, ...) — entirely unrelated to the 3-axis types. Confirmed stale.
 
 ## Cross-checks (pass)
 

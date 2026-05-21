@@ -178,7 +178,7 @@ let process_directive ~agent_name directive =
     set_keeper_paused_state ~agent_name false
   | "wakeup" ->
     (* Auto-resume on wakeup: dashboard "깨우기" surfaces a single button,
-       but auto-pause (stale_fleet_batch / turn_timeout) silently persists
+       but auto-pause (turn_timeout / OAS budget loops) silently persists
        [meta.paused = true]. Without this branch, wakeup signals fiber_wakeup
        but the heartbeat loop honors paused state and skips — user clicks
        "깨우기" with no observable effect. Treat wakeup as a superset of
@@ -726,7 +726,6 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
                   Some
                     (( Keeper_registry.Stale_turn_timeout _
                      | Keeper_registry.Stale_termination_storm _
-                     | Keeper_registry.Stale_fleet_batch _
                      | Keeper_registry.Oas_timeout_budget_loop _ ) as reason)
               ; _
               } -> record_crash reason

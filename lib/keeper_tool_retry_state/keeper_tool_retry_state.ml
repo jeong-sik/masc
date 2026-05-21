@@ -2,15 +2,13 @@
 
    See the .mli for the rationale and the production system_log evidence
    that motivates this noise-dedupe layer. The module is intentionally
-   stdlib-only (Hashtbl + Mutex + String) so it can be linked into both
-   the main library and a standalone Alcotest executable without dragging
-   Eio in.
+   backed by the stdlib-only [Bounded_event_dedupe] state machine, so
+   it can be linked into both the main library and a standalone Alcotest
+   executable without dragging Eio in.
 
-   Threading: the in-memory [Hashtbl.t] is guarded by a single [Mutex.t].
-   All public entry points take and release the lock in a critical
-   section that performs only [Hashtbl] manipulation and integer
-   arithmetic; no allocations of caller-visible records happen while the
-   lock is held, so contention is bounded.
+   Threading: [Bounded_event_dedupe] guards the in-memory table with a
+   single [Mutex.t]. All public entry points perform only key creation
+   and integer state updates, so contention is bounded.
 
    Memory: there is no eviction policy. The set of distinct
    (tool_name, error_signature) fingerprints is bounded by
@@ -39,93 +37,23 @@ let default_silence_threshold = 5
    stable description (the high-signal portion). Variable payloads
    (timestamps, paths, request IDs) that follow are deliberately
    dropped from the fingerprint so the dedupe layer can converge. *)
-let normalize_length_cap = 80
-
-(* ── normalize ────────────────────────────────────────────────────
-
-   Total, idempotent projection of an arbitrary error string to a
-   stable fingerprint suffix. Steps:
-
-   1. Walk the bytes; whitespace runs (ASCII space, tab, CR, LF) are
-      collapsed to a single space. Leading whitespace is dropped.
-   2. ASCII letters [A]–[Z] are lowercased; non-ASCII bytes pass
-      through untouched.
-   3. After the walk, trailing whitespace is trimmed and the result
-      is truncated to [normalize_length_cap] bytes.
-
-   Pure stdlib (Buffer + Bytes + Char). No regex; no lossy regex was
-   considered because the plan explicitly forbids it. *)
-
-let is_ws c =
-  match c with
-  | ' ' | '\t' | '\r' | '\n' -> true
-  | _ -> false
-;;
-
-let lowercase_ascii c =
-  match c with
-  | 'A' .. 'Z' -> Char.chr (Char.code c + 32)
-  | _ -> c
-;;
+let normalize_length_cap = Bounded_event_dedupe.default_normalize_length_cap
 
 let normalize (raw : string) : string =
-  let n = String.length raw in
-  let buf = Buffer.create (min n normalize_length_cap) in
-  let prev_was_space = ref true (* drop leading whitespace *) in
-  let i = ref 0 in
-  while !i < n do
-    let c = String.unsafe_get raw !i in
-    if is_ws c
-    then (
-      if not !prev_was_space
-      then (
-        Buffer.add_char buf ' ';
-        prev_was_space := true))
-    else (
-      Buffer.add_char buf (lowercase_ascii c);
-      prev_was_space := false);
-    incr i
-  done;
-  let s = Buffer.contents buf in
-  let s =
-    (* trim trailing whitespace introduced by the walk above. The
-       collapse step preserves at most one trailing space when the
-       input ended on whitespace; strip it. *)
-    let len = String.length s in
-    if len > 0 && Char.equal (String.unsafe_get s (len - 1)) ' '
-    then String.sub s 0 (len - 1)
-    else s
-  in
-  if String.length s > normalize_length_cap
-  then String.sub s 0 normalize_length_cap
-  else s
+  Bounded_event_dedupe.normalize_signature
+    ~length_cap:normalize_length_cap
+    raw
 ;;
-
-type entry =
-  { mutable count : int
-  ; mutable silenced_emitted : bool
-        (* True once a [`Threshold_silence] outcome has been returned
-           for this entry, so subsequent calls return [`Repeated]
-           rather than re-firing the silence outcome. *)
-  }
-
-let make_entry () = { count = 0; silenced_emitted = false }
 
 (* Fingerprint key. [tool_name] and [error_signature] are concatenated
    with a null separator. The separator avoids the collision risk of
    [tool ^ signature] when a tool name happens to be a prefix of another
    tool name plus its signature. *)
 let key ~tool_name ~error_signature =
-  String.concat "\x00" [ tool_name; error_signature ]
+  Bounded_event_dedupe.key [ tool_name; error_signature ]
 ;;
 
-let state : (string, entry) Hashtbl.t = Hashtbl.create 32
-let mutex = Mutex.create ()
-
-let with_lock f =
-  Mutex.lock mutex;
-  Fun.protect ~finally:(fun () -> Mutex.unlock mutex) f
-;;
+let state = Bounded_event_dedupe.create ()
 
 let record
   ?(silence_threshold = default_silence_threshold)
@@ -142,26 +70,17 @@ let record
      here is intentional and documented. *)
   ignore attempt;
   let k = key ~tool_name ~error_signature in
-  with_lock (fun () ->
-    match Hashtbl.find_opt state k with
-    | None ->
-      let e = make_entry () in
-      e.count <- 1;
-      Hashtbl.replace state k e;
-      `First
-    | Some e ->
-      e.count <- e.count + 1;
-      if e.count >= silence_threshold && not e.silenced_emitted
-      then (
-        e.silenced_emitted <- true;
-        `Threshold_silence e.count)
-      else `Repeated e.count)
+  match Bounded_event_dedupe.record_threshold state ~key:k ~threshold:silence_threshold with
+  | Bounded_event_dedupe.First_threshold -> `First
+  | Bounded_event_dedupe.Repeated_threshold count -> `Repeated count
+  | Bounded_event_dedupe.Threshold { count; threshold = _ } ->
+    `Threshold_silence count
 ;;
 
-let reset_for_test () : unit = with_lock (fun () -> Hashtbl.clear state)
+let reset_for_test () : unit = Bounded_event_dedupe.reset state
 
 let cardinality () : int =
-  with_lock (fun () -> Hashtbl.length state)
+  Bounded_event_dedupe.cardinality state
 ;;
 
 let occurrence_count
@@ -170,8 +89,5 @@ let occurrence_count
   : int
   =
   let k = key ~tool_name ~error_signature in
-  with_lock (fun () ->
-    match Hashtbl.find_opt state k with
-    | None -> 0
-    | Some e -> e.count)
+  Bounded_event_dedupe.count state ~key:k
 ;;

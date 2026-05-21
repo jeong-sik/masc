@@ -493,26 +493,29 @@
    ;; extracted to lib/compaction_trigger/. 94+45 LoC, deps: stdlib +
    ;; Yojson + masc_log. Compaction trigger heuristic + JSON serializer.
    masc_mcp.compaction_trigger
+   ;; Bounded_event_dedupe — shared stdlib-only Hashtbl + Mutex +
+   ;; threshold-once state machine for keeper/task log-noise reducers.
+   masc_mcp.bounded_event_dedupe
    ;; Keeper_recording_error_state — typed dedupe state for
    ;; Keeper_registry.record_error log noise (MASC/OAS Error-Warn
-   ;; Reduction Goal §P6). Stdlib-only leaf so the standalone test
-   ;; executable can link in seconds without the main library.
+   ;; Reduction Goal §P6). Domain adapter over Bounded_event_dedupe so
+   ;; the standalone test executable can link in seconds without the
+   ;; main library.
    masc_mcp.keeper_recording_error_state
    ;; ETA-LIVELOCK (2026-05-19): typed escalation state for the
    ;; Keeper_turn_livelock dispatch-guard log noise (~15K ERROR/day
    ;; from 4 keepers re-blocking the same turn_id every ~30 s).
-   ;; Stdlib-only leaf; mirrors the keeper_recording_error_state
-   ;; pattern so the standalone alcotest builds without dragging
-   ;; the main library.
+   ;; Domain adapter over Bounded_event_dedupe so the standalone
+   ;; alcotest builds without dragging the main library.
    masc_mcp.keeper_livelock_state
    ;; IOTA-RETRY (2026-05-19): typed dedupe state for the
    ;; Keeper_tools_oas retry-loop ERROR log noise (12+ events from
    ;; 5+ tools in a 1000-line system_log sample — keeper_bash x4,
    ;; masc_worktree_create x2, keeper_pr_review_comment x2,
    ;; masc_transition x2, Bash x2). Single emit site at
-   ;; lib/keeper/keeper_tools_oas.ml:733. Stdlib-only leaf;
-   ;; mirrors the keeper_livelock_state pattern so the standalone
-   ;; alcotest builds in seconds without dragging the main library.
+   ;; lib/keeper/keeper_tools_oas.ml:733. Domain adapter over
+   ;; Bounded_event_dedupe so the standalone alcotest builds in seconds
+   ;; without dragging the main library.
    masc_mcp.keeper_tool_retry_state
    ;; LAMBDA-HOOK-ERROR (2026-05-19): typed dedupe state for the
    ;; Keeper_hooks_oas on_tool_error hook ERROR log noise (8 events
@@ -522,9 +525,8 @@
    ;; keeper_pr_review_comment, analyst × masc_transition). Single
    ;; emit site at lib/keeper/keeper_hooks_oas.ml:720. Sibling of
    ;; keeper_tool_retry_state with a (keeper, tool, signature) key.
-   ;; Stdlib-only leaf; mirrors the keeper_tool_retry_state pattern so
-   ;; the standalone alcotest builds in seconds without dragging the
-   ;; main library.
+   ;; Domain adapter over Bounded_event_dedupe so the standalone
+   ;; alcotest builds in seconds without dragging the main library.
    masc_mcp.keeper_tool_hook_error_state
    ;; RFC-0086 Phase 2.B prereq — Tool_catalog_surfaces (lib/ root, 554+103 LoC)
    ;; extracted to lib/tool_catalog_surfaces/. deps: Agent_sdk + stdlib only.

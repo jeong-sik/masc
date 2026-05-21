@@ -133,7 +133,10 @@ let get_switch_opt () =
      (e.g. test setup before [Eio_main.run]). In that case there is no
      fiber-local state to consult, so we fall through to the atomic. *)
   let from_fiber =
-    try Eio.Fiber.get sw_key with _ -> None
+    try Eio.Fiber.get sw_key
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | _ -> None
   in
   match from_fiber with
   | Some _ as some_sw -> some_sw

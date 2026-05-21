@@ -747,7 +747,7 @@ let test_snapshot_pending_confirm_summary_tracks_actor_scope () =
               [
                 ("actor", `String actor);
                 ("action_type", `String "namespace_pause");
-                ("target_type", `String "namespace");
+                ("target_type", `String "root");
               ])
         with
         | Ok _ -> ()
@@ -1241,7 +1241,7 @@ let test_digest_room_exposes_pending_confirm_attention () =
             [
               ("actor", `String "operator");
                ("action_type", `String "namespace_pause");
-               ("target_type", `String "namespace");
+               ("target_type", `String "root");
             ])
       in
       (match action_json with Ok _ -> () | Error err -> Alcotest.fail err);

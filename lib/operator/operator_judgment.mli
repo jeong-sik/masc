@@ -51,18 +51,12 @@ type record = {
 (** {1 target_type codec} *)
 
 val target_type_to_string : target_type -> string
-(** [Coord -> "root"].  Pinned literal — JSONL files persisted
-    under earlier process versions must continue to parse. *)
+(** [Coord -> "root"].  Pinned literal for the on-disk JSONL format. *)
 
 val target_type_of_string : string -> target_type option
-(** Accepts three legacy aliases for [Coord]:
-    [["root"]] / [["room"]] / [["namespace"]].  All three
-    decay to the same target type because the operator
-    judgment surface unified its naming over the
-    [namespace -> room -> root] migration arc.  A future
-    "drop legacy aliases" PR must touch this contract — the
-    aliases are part of the persisted-data backward-compat
-    seam. *)
+(** Accepts only the canonical [["root"]] target type for [Coord].
+    Historical [["room"]] / [["namespace"]] aliases are rejected at
+    the parse boundary. *)
 
 (** {1 JSON codec} *)
 

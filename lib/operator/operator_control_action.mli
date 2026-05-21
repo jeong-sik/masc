@@ -29,8 +29,7 @@ val judgment_write_json :
     {!Operator_judgment} entry parsed from [args].  Required fields:
 
     - [surface]: ["command.namespace"] or ["intervene"].
-    - [target_type]: any root alias (see
-      {!Operator_digest_types.is_root_alias}).
+    - [target_type]: ["root"].
     - [summary] (non-empty after trim).
 
     Optional: [target_id], [fresh_ttl_sec] (default 60s for

@@ -70,7 +70,7 @@ let test_task_inject_executes_immediately () =
             [
               ("actor", `String "operator");
               ("action_type", `String "task_inject");
-              ("target_type", `String "namespace");
+              ("target_type", `String "root");
               ( "payload",
                 `Assoc
                   [
@@ -100,7 +100,7 @@ let test_task_inject_executes_immediately () =
       let tasks = Coord.get_tasks_raw config in
       Alcotest.(check int) "task injected" 1 (List.length tasks))
 
-let test_digest_defaults_to_namespace_target () =
+let test_digest_defaults_to_root_target () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
   Eio.Switch.run @@ fun sw ->

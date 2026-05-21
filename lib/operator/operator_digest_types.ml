@@ -175,18 +175,13 @@ let summary_of_recommendations ~actor (items : recommended_action list) =
       ("authoritative", `Bool false);
     ]
 
-(** [is_root_alias v] is true when [v] matches the canonical "root" target
-    type or its backward-compat aliases "namespace"/"room". *)
-let is_root_alias value =
-  String.equal value "root"
-  || String.equal value "namespace"
-  || String.equal value "room"
+(** [is_root_target_type v] is true when [v] matches the canonical "root" target type. *)
+let is_root_target_type value = String.equal value "root"
 
 let normalize_digest_target_type value =
   match value with
   | Some raw ->
       let normalized = String.trim raw |> String.lowercase_ascii in
-      if is_root_alias normalized then Ok "root"
+      if is_root_target_type normalized then Ok "root"
       else Error "target_type must be root"
   | None -> Ok "root"
-

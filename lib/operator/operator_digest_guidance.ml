@@ -10,7 +10,7 @@ let normalize_target_type value =
   String.trim value |> String.lowercase_ascii
 
 let judgment_surface_for_target_type target_type =
-  if Operator_digest_types.is_root_alias target_type then Some "command.namespace"
+  if Operator_digest_types.is_root_target_type target_type then Some "command.namespace"
   else None
 
 let fresh_operator_judgment config ~target_type ~target_id =

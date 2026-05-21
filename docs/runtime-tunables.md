@@ -56,7 +56,7 @@ the categorization roadmap. Newly-added typed getters in
 
 | Env var | Kind | Category | Ops class | Line | Doc |
 |---|---|---|---|---|---|
-| `MASC_EXEC_TIMEOUT_DEFAULT_SEC` | string_literal | n/a | n/a | 169 |  |
+| `MASC_EXEC_TIMEOUT_DEFAULT_SEC` | string_literal | n/a | n/a | 162 |  |
 
 ## Env_config_governance (35 knobs; typed classification 0/25)
 
@@ -221,9 +221,9 @@ the categorization roadmap. Newly-added typed getters in
 
 | Env var | Kind | Category | Ops class | Line | Doc |
 |---|---|---|---|---|---|
-| `MASC_DASHBOARD_GOVERNANCE_JUDGE_TIMEOUT_SEC` | string_literal | n/a | n/a | 125 | #9629: Each caller may also honour a legacy env var name from before the SSOT migration.  When present, the legacy na... |
-| `MASC_OAS_BRIDGE_TIMEOUT_DEFAULT_SEC` | string_literal | n/a | n/a | 136 |  |
-| `MASC_OPERATOR_JUDGE_TIMEOUT_SEC` | string_literal | n/a | n/a | 124 | #9629: Each caller may also honour a legacy env var name from before the SSOT migration.  When present, the legacy na... |
+| `MASC_DASHBOARD_GOVERNANCE_JUDGE_TIMEOUT_SEC` | string_literal | n/a | n/a | 122 | #9629: Each caller may also honour a legacy env var name from before the SSOT migration.  When present, the legacy na... |
+| `MASC_OAS_BRIDGE_TIMEOUT_DEFAULT_SEC` | string_literal | n/a | n/a | 132 |  |
+| `MASC_OPERATOR_JUDGE_TIMEOUT_SEC` | string_literal | n/a | n/a | 121 | #9629: Each caller may also honour a legacy env var name from before the SSOT migration.  When present, the legacy na... |
 
 ## Env_config_runtime (116 knobs; typed classification 3/93)
 
@@ -365,7 +365,7 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_KEEPER_SANDBOX_REQUIRE_USERNS` | typed:bool | unclassified | unclassified | 57 |  |
 | `MASC_KEEPER_SANDBOX_SECCOMP_PROFILE` | typed:string | unclassified | unclassified | 51 |  |
 | `MASC_KEEPER_SANDBOX_TMPFS_SIZE` | typed:string | unclassified | unclassified | 37 |  |
-| `MASC_KEEPER_SHELL_TIMEOUT_DEFAULT_SEC` | string_literal | n/a | n/a | 180 |  |
+| `MASC_KEEPER_SHELL_TIMEOUT_DEFAULT_SEC` | string_literal | n/a | n/a | 186 |  |
 
 ## Env_config_snapshot (73 knobs; typed classification 0/0)
 

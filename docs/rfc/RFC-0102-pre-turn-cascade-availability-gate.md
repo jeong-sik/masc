@@ -1,9 +1,9 @@
 ---
 rfc: "0102"
 title: "Pre-turn cascade availability gate — reuse, not new surface"
-status: Draft
+status: Implemented
 created: 2026-05-17
-updated: 2026-05-20
+updated: 2026-05-22
 author: vincent
 supersedes: []
 superseded_by: null

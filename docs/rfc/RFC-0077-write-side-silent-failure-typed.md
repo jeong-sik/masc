@@ -1,9 +1,9 @@
 ---
 rfc: "0077"
 title: "Write-side silent failure — typed propagation"
-status: Draft
+status: Implemented
 created: 2026-05-14
-updated: 2026-05-20
+updated: 2026-05-22
 author: vincent
 supersedes: []
 superseded_by: null

@@ -1,7 +1,7 @@
 ---
 rfc: "0131"
 title: "Shell Command Gate facade — multi-caller IR-first validation"
-status: Draft
+status: Implemented
 created: 2026-05-19
 updated: 2026-05-19 (status note + §10 revised PR slicing added)
 author: vincent

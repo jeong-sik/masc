@@ -1,9 +1,9 @@
 ---
 rfc: "0080"
 title: "Tool registry SSOT — collapse 15-fold OR membership into typed Tool_name boundary"
-status: Draft
+status: Implemented
 created: 2026-05-14
-updated: 2026-05-20
+updated: 2026-05-22
 author: vincent
 supersedes: []
 superseded_by: null

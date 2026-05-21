@@ -1,5 +1,23 @@
 let contains_substring s needle = String_util.contains_substring s needle
 
+let sensitive_flags =
+  [ "--token"; "--password"; "--passwd"; "--auth-token"; "--api-key" ]
+;;
+
+let sensitive_assignment_markers =
+  [ ":_authToken="; "_authToken="; "token="; "password="; "passwd="; "api-key=" ]
+;;
+
+let shell_word_values cmd =
+  match Masc_exec_bash_parser.Bash_words.stages cmd with
+  | Error _ -> Error ()
+  | Ok stages ->
+    Ok
+      (stages
+       |> List.concat
+       |> List.map (fun (word : Masc_exec_bash_parser.Bash_words.word) -> word.value))
+;;
+
 let redact_url_credentials token =
   let redact_after_scheme token scheme =
     if String.starts_with ~prefix:scheme token
@@ -43,23 +61,18 @@ let redact_inline_secret_assignment token =
       | None -> token)
     else token
   in
-  token
-  |> fun t ->
-  redact_after t ":_authToken="
-  |> fun t ->
-  redact_after t "_authToken="
-  |> fun t ->
-  redact_after t "token="
-  |> fun t ->
-  redact_after t "password="
-  |> fun t -> redact_after t "passwd=" |> fun t -> redact_after t "api-key="
+  List.fold_left redact_after token sensitive_assignment_markers
 ;;
 
-let sanitize_command_for_log cmd =
-  let sensitive_flags =
-    [ "--token"; "--password"; "--passwd"; "--auth-token"; "--api-key" ]
-  in
-  let parts = String.split_on_char ' ' cmd in
+let command_has_sensitive_marker cmd =
+  let lower = String.lowercase_ascii cmd in
+  List.exists (fun flag -> contains_substring lower flag) sensitive_flags
+  || List.exists
+       (fun marker -> contains_substring lower (String.lowercase_ascii marker))
+       sensitive_assignment_markers
+;;
+
+let sanitize_parts parts =
   let rec redact prev_sensitive acc = function
     | [] -> String.concat " " (List.rev acc)
     | part :: rest ->
@@ -72,6 +85,13 @@ let sanitize_command_for_log cmd =
       redact next_sensitive (part :: acc) rest
   in
   redact false [] parts
+;;
+
+let sanitize_command_for_log cmd =
+  match shell_word_values cmd with
+  | Ok parts -> sanitize_parts parts
+  | Error () when command_has_sensitive_marker cmd -> "[REDACTED]"
+  | Error () -> cmd |> redact_url_credentials |> redact_inline_secret_assignment
 ;;
 
 let truncate_for_log ?(max_len = 240) s =

@@ -244,37 +244,8 @@ let ensure_keeper_sandbox_runtime ~timeout_sec =
   Keeper_sandbox_runtime.ensure_keeper_sandbox_runtime ~timeout_sec
 ;;
 
-(* #10855: keeper LLM (issue_king, masc-improver) hallucinated gh syntax
-   `gh --repo X api Y` (108 events / 24h, 2026-04-25→04-26). gh CLI
-   semantics: `--repo` is a subcommand flag (gh issue/pr/release/...),
-   not a global option, and `gh api` rejects it with "unknown flag: --repo".
-   Detect the misuse pre-exec so we can emit a self-correcting error
-   instead of letting the docker exec waste a turn surfacing gh's raw
-   error.  Same self-correcting-message pattern as #10869's multi-repo
-   sandbox blocker. *)
-let detect_gh_repo_flag_with_api_misuse cmd =
-  let strip_quotes s =
-    let len = String.length s in
-    if
-      len >= 2
-      && ((s.[0] = '\'' && s.[len - 1] = '\'') || (s.[0] = '"' && s.[len - 1] = '"'))
-    then String.sub s 1 (len - 2)
-    else s
-  in
-  let toks =
-    String.split_on_char ' ' (String.trim cmd)
-    |> List.filter (fun s -> s <> "")
-    |> List.map strip_quotes
-  in
-  if not (List.mem "gh" toks)
-  then None
-  else (
-    let rec scan = function
-      | "--repo" :: repo_arg :: "api" :: endpoint :: _ -> Some (repo_arg, endpoint)
-      | _ :: rest -> scan rest
-      | [] -> None
-    in
-    scan toks)
+let detect_gh_repo_flag_with_api_misuse =
+  Keeper_shell_command_semantics.detect_gh_repo_flag_with_api_misuse
 ;;
 
 (* Emit a ("gh_exit_class", "…") JSON field when [cmd] targets gh,

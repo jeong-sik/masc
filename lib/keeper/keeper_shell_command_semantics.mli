@@ -13,6 +13,10 @@ val cmd_targets_gh : string -> bool
 (** [true] only when the typed bash subset parser identifies an effective
     command stage whose executable is [gh]. *)
 
+val detect_gh_repo_flag_with_api_misuse : string -> (string * string) option
+(** Detect the invalid [gh --repo <repo> api <endpoint>] shape.  [--repo]
+    is a subcommand flag, not a [gh api] global option. *)
+
 val resolve_sandbox_root_git_cwd :
   config:Coord.config ->
   meta:Keeper_types.keeper_meta ->

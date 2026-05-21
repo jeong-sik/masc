@@ -13,6 +13,15 @@ let dedupe_tool_names names =
   dedupe_keep_order (names |> List.map String.trim |> List.filter (fun name -> name <> ""))
 ;;
 
+let shell_word_values cmd =
+  match Masc_exec_bash_parser.Bash_words.stages cmd with
+  | Error _ -> []
+  | Ok stages ->
+    stages
+    |> List.concat
+    |> List.map (fun (word : Masc_exec_bash_parser.Bash_words.word) -> word.value)
+;;
+
 (* ── Runtime-resolved tool names ─────────────────────────────── *)
 
 let keeper_internal_candidate_tool_names =
@@ -204,9 +213,7 @@ let gh_read_only_prefixes =
     [graphqlx ...] as the graphql subcommand.  User hard rule: "no
     string matching for classification". *)
 let is_gh_api_read_only (cmd_lower : string) : bool =
-  let tokens =
-    cmd_lower |> String.split_on_char ' ' |> List.filter (fun token -> token <> "")
-  in
+  let tokens = shell_word_values cmd_lower in
   match tokens with
   | "api" :: rest_after_api ->
     let is_graphql_subcommand =
@@ -257,13 +264,7 @@ let is_gh_api_read_only (cmd_lower : string) : bool =
 (** Extract the effective gh command string from keeper_shell op=gh input.
     [keeper_exec_shell] uses the [cmd] field. *)
 let normalize_gh_command (cmd : string) : string =
-  let tokens =
-    cmd
-    |> String.trim
-    |> String.split_on_char ' '
-    |> List.map String.trim
-    |> List.filter (fun token -> token <> "")
-  in
+  let tokens = shell_word_values cmd in
   let rec drop_leading_gh = function
     | token :: rest when String_util.equals_ci token "gh" -> drop_leading_gh rest
     | remaining -> remaining

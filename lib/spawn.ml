@@ -254,10 +254,29 @@ let build_prompt_args agent_name prompt =
   | Some config -> build_prompt_args_from_config config prompt
   | None -> []
 
-(** Parse command string into executable and arguments *)
+(** Parse a simple command string into executable and arguments.
+    Spawn is direct argv execution, so shell pipelines/redirects/env
+    prefixes are rejected instead of being flattened into argv. *)
 let parse_command cmd =
-  let parts = String.split_on_char ' ' cmd in
-  List.filter (fun s -> String.length s > 0) parts
+  let collect_lit_args args =
+    let rec loop acc = function
+      | [] -> Some (List.rev acc)
+      | Masc_exec.Shell_ir.Lit arg :: rest -> loop (arg :: acc) rest
+      | Masc_exec.Shell_ir.Concat _ :: _
+      | Masc_exec.Shell_ir.Var _ :: _ -> None
+    in
+    loop [] args
+  in
+  match Masc_exec_bash_parser.Bash.parse_string cmd with
+  | Masc_exec.Parsed.Parsed (Masc_exec.Shell_ir.Simple simple)
+    when simple.env = [] && simple.cwd = None && simple.redirects = [] ->
+    (match collect_lit_args simple.args with
+     | Some args -> Masc_exec.Bin.to_string simple.bin :: args
+     | None -> [])
+  | Masc_exec.Parsed.Parsed _
+  | Masc_exec.Parsed.Parse_error _
+  | Masc_exec.Parsed.Parse_aborted _
+  | Masc_exec.Parsed.Too_complex _ -> []
 
 let output_for_status ~(status : Unix.process_status) ~(stdout : string)
     ~(stderr : string) : string =

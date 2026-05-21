@@ -22,7 +22,7 @@ let test_digest_room_prefers_fresh_operator_judgment () =
             [
               ("action_kind", `String "pause_room");
               ("resolved_tool", `String "masc_operator_confirm");
-              ("target_type", `String "namespace");
+              ("target_type", `String "root");
               ("target_id", `Null);
               ("reason", `String "operator judge requires manual gate");
               ("payload_preview", `Assoc [ ("reason", `String "manual review") ]);
@@ -136,7 +136,7 @@ let test_operator_judgment_write_and_latest_roundtrip () =
             (`Assoc
               [
                 ("surface", `String "command.namespace");
-                ("target_type", `String "namespace");
+                ("target_type", `String "root");
                 ("summary", `String "Operator judge requests a human checkpoint.");
                 ("confidence", `Float 0.88);
                 ("fresh_ttl_sec", `Int 90);
@@ -151,7 +151,7 @@ let test_operator_judgment_write_and_latest_roundtrip () =
       let latest =
         match
           Operator_control.judgment_latest_json ctx
-            (`Assoc [ ("surface", `String "command.namespace"); ("target_type", `String "namespace") ])
+            (`Assoc [ ("surface", `String "command.namespace"); ("target_type", `String "root") ])
         with
         | Ok json -> json
         | Error err -> Alcotest.fail err
@@ -161,6 +161,44 @@ let test_operator_judgment_write_and_latest_roundtrip () =
       Alcotest.(check string) "latest summary"
         "Operator judge requests a human checkpoint."
         Yojson.Safe.Util.(latest |> member "judgment" |> member "summary" |> to_string))
+
+let test_operator_judgment_rejects_retired_target_type_aliases () =
+  Alcotest.(check bool)
+    "namespace no longer parses"
+    true
+    (Option.is_none (Operator_judgment.target_type_of_string "namespace"));
+  Alcotest.(check bool)
+    "room no longer parses"
+    true
+    (Option.is_none (Operator_judgment.target_type_of_string "room"));
+  Alcotest.(check (result string string))
+    "digest rejects namespace"
+    (Error "target_type must be root")
+    (Operator_digest_types.normalize_digest_target_type (Some "namespace"));
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "operator-judge"));
+      let ctx = operator_ctx env sw config "operator-judge" in
+      match
+        Operator_control.judgment_write_json ctx
+          (`Assoc
+            [
+              ("surface", `String "command.namespace");
+              ("target_type", `String "namespace");
+              ("summary", `String "Retired alias must be rejected.");
+            ])
+      with
+      | Ok _ -> Alcotest.fail "namespace target_type should be rejected"
+      | Error err ->
+          Alcotest.(check string)
+            "write rejects namespace"
+            "target_type must be root" err)
 
 let test_confirm_keeps_pending_token_when_delegated_action_fails () =
   Eio_main.run @@ fun env ->
@@ -183,7 +221,7 @@ let test_confirm_keeps_pending_token_when_delegated_action_fails () =
             ("trace_id", `String "trace-retry");
             ("actor", `String "operator");
             ("action_type", `String "missing_action_type");
-            ("target_type", `String "namespace");
+            ("target_type", `String "root");
             ("target_id", `Null);
             ("payload", `Assoc []);
             ("delegated_tool", `String "missing_operator_tool");

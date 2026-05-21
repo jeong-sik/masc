@@ -106,12 +106,16 @@ let () =
             `Quick
             Test_operator_control_judgment
             .test_operator_judgment_write_and_latest_roundtrip;
+          Alcotest.test_case
+            "operator judgment rejects retired target type aliases" `Quick
+            Test_operator_control_judgment
+            .test_operator_judgment_rejects_retired_target_type_aliases;
           Alcotest.test_case "task inject immediate flow" `Quick
             Test_operator_control_actions
             .test_task_inject_executes_immediately;
-          Alcotest.test_case "digest defaults to namespace target" `Quick
+          Alcotest.test_case "digest defaults to root target" `Quick
             Test_operator_control_actions
-            .test_digest_defaults_to_namespace_target;
+            .test_digest_defaults_to_root_target;
           Alcotest.test_case "operator action rejects legacy aliases" `Quick
             Test_operator_control_actions
             .test_operator_action_rejects_legacy_action_aliases;

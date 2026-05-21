@@ -10,14 +10,12 @@
     record so [Cascade_strategy.signal_ctx.capacity] can consult a
     single uniform view.
 
-    The counter is maintained by explicit [try_acquire] / release
-    pairs at the cascade call site.  No timeout, no queueing, no
-    blocking — if no permit is free, [try_acquire] returns [None] and
-    the strategy's capacity filter will have already skipped this
-    endpoint in its ordering.  Defense-in-depth: both the filter and
-    the acquire check the same counter, so a race between filter and
-    acquire simply yields a [None] that the cascade treats as typed
-    capacity backpressure before trying the next candidate.
+    The counter is maintained by explicit acquire / release pairs at
+    the cascade call site. [try_acquire] is non-blocking so cascades can
+    still try another candidate immediately. When every candidate is
+    saturated, [wait_acquire] gives the caller a bounded queue point at
+    the cascade layer instead of surfacing capacity as an immediate
+    terminal error.
 
     @since 0.9.6 *)
 
@@ -120,6 +118,21 @@ val try_acquire : string -> release option
     Disambiguate these two [None] cases via {!capacity}: if
     [capacity url = None] the URL is unregistered; otherwise it is
     full. *)
+
+val wait_acquire :
+  clock:_ Eio.Time.clock ->
+  timeout_sec:float ->
+  ?poll_interval_sec:float ->
+  string ->
+  release option
+(** Bounded acquire for a registered saturated endpoint. Polls
+    {!try_acquire} until a slot is obtained or [timeout_sec] elapses.
+    Returns [None] on timeout, unregistered URL, or non-positive timeout.
+
+    This deliberately lives in the cascade capacity module, not the
+    MASC-wide admission queue: the wait is per endpoint/capacity key and
+    only applies after the cascade has exhausted immediately available
+    alternatives. *)
 
 val is_registered : string -> bool
 (** [is_registered url] is [true] iff [url] has a declared capacity.

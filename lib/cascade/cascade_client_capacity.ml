@@ -72,9 +72,23 @@ let capacity url =
 
 type release = unit -> unit
 
-let try_acquire url =
+let record_rejected_full ~url ~active =
+  Cascade_client_capacity_history.record
+    {
+      ts = Unix.gettimeofday ();
+      key = url;
+      kind = Rejected_full;
+      active_after = active;
+    }
+
+type acquire_result =
+  | Acquired of release
+  | Full of int
+  | Unregistered
+
+let try_acquire_result ~record_rejected url =
   match lookup url with
-  | None -> None
+  | None -> Unregistered
   | Some e ->
     (* Optimistic CAS on the atomic counter.  Loop to retry when
        another fiber bumps the count between read and CAS. *)
@@ -82,13 +96,8 @@ let try_acquire url =
       let current = Atomic.get e.active in
       if current >= e.max_concurrent then begin
         (* Slot full: record for observability before returning. *)
-        Cascade_client_capacity_history.record {
-          ts = Unix.gettimeofday ();
-          key = url;
-          kind = Rejected_full;
-          active_after = current;
-        };
-        None
+        if record_rejected then record_rejected_full ~url ~active:current;
+        Full current
       end
       else if Atomic.compare_and_set e.active current (current + 1) then (
         Cascade_client_capacity_history.record {
@@ -111,10 +120,38 @@ let try_acquire url =
             }
           end
         in
-        Some release)
+        Acquired release)
       else attempt ()
     in
     attempt ()
+
+let try_acquire url =
+  match try_acquire_result ~record_rejected:true url with
+  | Acquired release -> Some release
+  | Full _
+  | Unregistered ->
+    None
+
+let wait_acquire ~clock ~timeout_sec ?(poll_interval_sec = 0.25) url =
+  if timeout_sec <= 0.0
+  then None
+  else (
+    let deadline = Eio.Time.now clock +. timeout_sec in
+    let poll_interval_sec = Float.max 0.01 poll_interval_sec in
+    let rec loop () =
+      match try_acquire_result ~record_rejected:false url with
+      | Acquired release -> Some release
+      | Unregistered -> None
+      | Full active ->
+        let remaining = deadline -. Eio.Time.now clock in
+        if remaining <= 0.0 then (
+          record_rejected_full ~url ~active;
+          None)
+        else (
+          Eio.Time.sleep clock (Float.min poll_interval_sec remaining);
+          loop ())
+    in
+    loop ())
 
 (* ── Env parsing ────────────────────────────────────────────────── *)
 

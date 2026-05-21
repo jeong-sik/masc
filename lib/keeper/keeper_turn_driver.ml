@@ -769,6 +769,20 @@ let run_named
       | Some release -> `Acquired (capacity_key, release)
       | None -> `Full capacity_key
   in
+  let wait_for_client_capacity_slot ~capacity_key =
+    match wait_timeout_sec, Eio_context.get_clock_opt () with
+    | Some timeout_sec, Some clock when timeout_sec > 0.0 ->
+      Log.Misc.info
+        "[cascade-capacity] waiting up to %.1fs for client capacity key %s"
+        timeout_sec
+        capacity_key;
+      (match
+         Cascade_client_capacity.wait_acquire ~clock ~timeout_sec capacity_key
+       with
+       | Some release -> `Acquired (capacity_key, release)
+       | None -> `Full capacity_key)
+    | _ -> `Full capacity_key
+  in
   let emit_capacity_blocked_manifest ~capacity_key =
     emit_runtime_manifest
       ~status:"blocked"
@@ -1013,7 +1027,13 @@ let run_named
              cascade_name runtime_candidate_label runtime_candidate_label msg
        | None -> ());
       let is_last = rest = [] in
-      match acquire_client_capacity_slot candidate with
+      let capacity_slot =
+        match acquire_client_capacity_slot candidate with
+        | `Full capacity_key when is_last ->
+          wait_for_client_capacity_slot ~capacity_key
+        | slot -> slot
+      in
+      match capacity_slot with
       | `Full capacity_key ->
         emit_capacity_blocked_manifest ~capacity_key;
         record_cascade_attempt candidate ~outcome:(`Failure "client_capacity_full") ();

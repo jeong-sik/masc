@@ -245,6 +245,53 @@ let test_client_capacity_acquire_release () =
        check int "active = 0 after release" 0 info.process_active
      | None -> fail "capacity disappeared after release")
 
+let test_client_capacity_wait_acquire_after_release () =
+  C.unregister_all ();
+  let url = "http://wait:11434" in
+  C.register ~url ~max_concurrent:1;
+  match C.try_acquire url with
+  | None -> fail "initial acquire should succeed"
+  | Some first_release ->
+    Eio_main.run (fun env ->
+      let clock = Eio.Stdenv.clock env in
+      Eio.Switch.run (fun sw ->
+        Eio.Fiber.fork ~sw (fun () ->
+          Eio.Time.sleep clock 0.02;
+          first_release ());
+        match
+          C.wait_acquire ~clock ~timeout_sec:1.0 ~poll_interval_sec:0.01 url
+        with
+        | None -> fail "wait_acquire should acquire after release"
+        | Some second_release ->
+          second_release ();
+          match C.capacity url with
+          | Some info -> check int "active = 0 after waited release" 0 info.process_active
+          | None -> fail "capacity disappeared after waited release"))
+
+let test_client_capacity_wait_acquire_timeout_records_single_rejection () =
+  C.unregister_all ();
+  CH.clear ();
+  let url = "http://wait-timeout:11434" in
+  C.register ~url ~max_concurrent:1;
+  match C.try_acquire url with
+  | None -> fail "initial acquire should succeed"
+  | Some release ->
+    CH.clear ();
+    let waited =
+      Eio_main.run (fun env ->
+        let clock = Eio.Stdenv.clock env in
+        C.wait_acquire ~clock ~timeout_sec:0.03 ~poll_interval_sec:0.01 url)
+    in
+    check bool "wait_acquire timed out" true (Option.is_none waited);
+    let events = CH.snapshot () in
+    check int "only terminal rejection recorded" 1 (List.length events);
+    (match events with
+     | [ event ] ->
+       check bool "event = Rejected_full" true (event.kind = CH.Rejected_full);
+       check int "active_after = 1" 1 event.active_after
+     | _ -> fail "expected exactly one terminal rejection event");
+    release ()
+
 let test_client_capacity_release_idempotent () =
   C.unregister_all ();
   C.register ~url:"http://y:11434" ~max_concurrent:1;
@@ -871,6 +918,10 @@ let () =
       test_case "register + query" `Quick test_client_capacity_register_query;
       test_case "acquire + release lifecycle" `Quick
         test_client_capacity_acquire_release;
+      test_case "wait acquire blocks until release" `Quick
+        test_client_capacity_wait_acquire_after_release;
+      test_case "wait acquire timeout records one rejection" `Quick
+        test_client_capacity_wait_acquire_timeout_records_single_rejection;
       test_case "release is idempotent" `Quick
         test_client_capacity_release_idempotent;
       test_case "declared generic endpoint capacity registers" `Quick

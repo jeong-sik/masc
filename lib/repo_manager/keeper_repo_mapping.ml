@@ -153,8 +153,8 @@ let filter_repos_by_mapping (mapping : keeper_repo_mapping)
     [credential] records.
 
     Returns [Ok []] when the keeper has no mapping.  Absence remains distinct
-    from load/parse errors so callers can decide their own policy; strict
-    credential-provider dispatch treats this as a missing-mapping error.
+    from load/parse errors so strict credential-provider dispatch can surface a
+    missing-mapping error.
 
     Repository IDs from the mapping are resolved against the loaded
     repositories; unknown repository IDs are ignored by this resolution path.
@@ -215,16 +215,16 @@ let credentials_for_keeper ~base_path ~keeper_id =
 
 let is_allowed ~keeper_id ~repository_id ~base_path =
   match lookup_mapping ~base_path keeper_id with
-  | Mapping_missing _ -> true
+  | Mapping_missing _ -> false
   | Mapping_load_error msg ->
       if not (Hashtbl.mem logged_mapping_errors keeper_id) then begin
         Hashtbl.add logged_mapping_errors keeper_id ();
         Log.Misc.warn
           "[KeeperRepoMapping] is_allowed: mapping load error for keeper %s \
-           — access control bypassed (error: %s)"
+           — access denied fail-closed (error: %s)"
           keeper_id msg
       end;
-      true
+      false
   | Mapping_found mapping ->
       List.exists
         (fun id -> String.equal id repository_id || String.equal id "*")
@@ -268,13 +268,13 @@ let save_mapping ~base_path mapping =
 
 let apply_mapping ~keeper_id ~base_path ~repositories =
   match lookup_mapping ~base_path keeper_id with
-  | Mapping_missing _ -> repositories
+  | Mapping_missing _ -> []
   | Mapping_load_error msg ->
       Log.Misc.warn
         "[KeeperRepoMapping] apply_mapping: mapping load error for \
-         keeper %s — returning unfiltered repositories (error: %s)"
+         keeper %s — returning no repositories fail-closed (error: %s)"
         keeper_id msg;
-      repositories
+      []
   | Mapping_found mapping ->
       filter_repos_by_mapping mapping repositories
 

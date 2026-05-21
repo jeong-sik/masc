@@ -34,6 +34,7 @@
  keeper_post_turn_wirein_failure_site
  atomic_orphan_size_class
  operator_control_context_snapshot
+ operator_control_snapshot_tool_names
  silent_dashboard_actor_outcome
  sse_jsonrpc_filter
  prometheus_format
@@ -112,6 +113,7 @@
  server_dashboard_http_keeper_runtime_lens_swimlane
  server_dashboard_http_keeper_runtime_lens_summaries
  server_dashboard_http_keeper_runtime_lens_gaps
+ server_dashboard_http_core_cache
  server_dashboard_http_core_entities
  dashboard_goal_loop
  dashboard_http_autoresearch
@@ -213,6 +215,7 @@
   keeper_agent_result
   keeper_agent_error
   keeper_agent_memory_episode
+  keeper_run_tools_hook_accumulator
   keeper_run_tools_search
   keeper_run_tools_work_discovery
   provider_runtime_projection
@@ -224,15 +227,19 @@
   cascade_agent_context
   cascade_health_tracker_config
   cascade_metrics_registry
+  cascade_transport_authorization
+  cascade_transport_label_resolution
   cascade_transport_cli_config
   keeper_oas_checkpoint
   keeper_cascade_engine
+  keeper_turn_driver_admission
   keeper_turn_driver_provider_attempt
   keeper_turn_driver
   keeper_turn_driver_helpers
   keeper_turn_driver_try_provider
   keeper_turn_driver_wrappers
   keeper_turn_cascade_budget_routing
+  keeper_unified_metrics_broadcast
   keeper_unified_metrics_json_support
   keeper_unified_metrics_support
   keeper_unified_turn_event_bus
@@ -258,6 +265,7 @@
   keeper_turn_lifecycle
   keeper_msg_async
   keeper_event_bus
+  keeper_heartbeat_loop_in_turn_pulse
   keeper_heartbeat_loop_observations
   keeper_supervisor_startup_helpers
   keeper_supervisor_alive_but_stuck

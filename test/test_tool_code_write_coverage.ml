@@ -89,6 +89,8 @@ let rec mkdir_p dir =
 let write_file path content =
   Out_channel.with_open_bin path (fun oc -> output_string oc content)
 
+let read_file path = In_channel.with_open_text path In_channel.input_all
+
 let write_executable path content =
   write_file path content;
   Unix.chmod path 0o755
@@ -727,10 +729,9 @@ let test_code_git_status_uses_direct_git_argv () =
   with_trimmed_env "PATH" (Some (fake_bin ^ ":" ^ old_path)) @@ fun () ->
   let ok, msg = dispatch_exn ctx ~name:"masc_code_git" ~args in
   check bool "status succeeds through fake git" true ok;
-  check string "git cwd" cwd
-    (String.trim (Stdlib.In_channel.read_all git_pwd_file));
+  check string "git cwd" cwd (String.trim (read_file git_pwd_file));
   check string "git argv stays literal" "status\n--short;touch\nowned"
-    (String.trim (Stdlib.In_channel.read_all git_argv_file));
+    (String.trim (read_file git_argv_file));
   check bool "shell was not invoked" false
     (msg_contains ~needle:"unexpected shell" msg)
 

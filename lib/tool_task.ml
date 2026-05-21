@@ -364,23 +364,78 @@ let active_goal_phases_for_agent ctx =
         meta.active_goal_ids
   | Ok None | Error _ -> []
 
-let format_no_eligible ctx excluded_count =
+let no_eligible_diagnostics_json
+      ~excluded_count
+      ~blocked_count
+      ~verification_blocked_count
+      ~scope_excluded_count
+      ~required_tool_excluded_count
+      ~explicit_excluded_count
+      ~claim_pool_candidate_count
+      ~receipt_required_tool_blocked
+      ~agent_tool_names_known
+  =
+  `Assoc
+    [ "excluded_count", `Int excluded_count
+    ; "blocked_count", `Int blocked_count
+    ; "verification_blocked_count", `Int verification_blocked_count
+    ; "scope_excluded_count", `Int scope_excluded_count
+    ; "required_tool_excluded_count", `Int required_tool_excluded_count
+    ; "explicit_excluded_count", `Int explicit_excluded_count
+    ; "claim_pool_candidate_count", `Int claim_pool_candidate_count
+    ; "receipt_required_tool_blocked", `Bool receipt_required_tool_blocked
+    ; "agent_tool_names_known", `Bool agent_tool_names_known
+    ]
+;;
+
+let no_eligible_blocker_summary
+      ~blocked_count
+      ~verification_blocked_count
+      ~scope_excluded_count
+      ~required_tool_excluded_count
+  =
+  Printf.sprintf
+    "diagnostics: goal_scope_or_filter=%d, required_tools=%d, verification=%d, \
+     blocked=%d."
+    scope_excluded_count
+    required_tool_excluded_count
+    verification_blocked_count
+    blocked_count
+;;
+
+let format_no_eligible
+      ctx
+      ~excluded_count
+      ~blocked_count
+      ~verification_blocked_count
+      ~scope_excluded_count
+      ~required_tool_excluded_count
+  =
+  let diagnostics =
+    no_eligible_blocker_summary
+      ~blocked_count
+      ~verification_blocked_count
+      ~scope_excluded_count
+      ~required_tool_excluded_count
+  in
   match active_goal_phases_for_agent ctx with
   | [] ->
       Printf.sprintf
         "No eligible tasks available (blocked/excluded: %d). This agent has no \
          active_goal_ids — every open task is out of scope. Operator should \
-         set active_goal_ids via masc_keeper_up."
+         set active_goal_ids via masc_keeper_up. %s"
         excluded_count
+        diagnostics
   | phases ->
       Printf.sprintf
         "No eligible tasks available (blocked/excluded: %d). active goal \
          phases: [%s]. NOTE: excluded ≠ completed. If every phase above is \
          'executing', the cause is goal-scope mismatch — open tasks are \
          scoped to a goal not in this agent's active_goal_ids — not goal \
-         completion."
+         completion. %s"
         excluded_count
         (String.concat ", " phases)
+        diagnostics
 
 let handle_claim_next ?agent_tool_names ~tool_name ~start_time ctx _args =
   if not (try Coord.is_agent_joined ctx.config ~agent_name:ctx.agent_name with Sys_error _ | Stdlib.Not_found -> false) then
@@ -403,8 +458,43 @@ let handle_claim_next ?agent_tool_names ~tool_name ~start_time ctx _args =
     |> Tool_result.ok ~tool_name ~start_time
   | Coord.Claim_next_no_unclaimed ->
     Tool_result.ok ~tool_name ~start_time "No unclaimed tasks available"
-  | Coord.Claim_next_no_eligible { excluded_count; _ } ->
-    Tool_result.ok ~tool_name ~start_time (format_no_eligible ctx excluded_count)
+  | Coord.Claim_next_no_eligible
+      { excluded_count
+      ; blocked_count
+      ; verification_blocked_count
+      ; scope_excluded_count
+      ; required_tool_excluded_count
+      ; explicit_excluded_count
+      ; claim_pool_candidate_count
+      ; receipt_required_tool_blocked
+      ; agent_tool_names_known
+      } ->
+    let message =
+      format_no_eligible
+        ctx
+        ~excluded_count
+        ~blocked_count
+        ~verification_blocked_count
+        ~scope_excluded_count
+        ~required_tool_excluded_count
+    in
+    let diagnostics =
+      no_eligible_diagnostics_json
+        ~excluded_count
+        ~blocked_count
+        ~verification_blocked_count
+        ~scope_excluded_count
+        ~required_tool_excluded_count
+        ~explicit_excluded_count
+        ~claim_pool_candidate_count
+        ~receipt_required_tool_blocked
+        ~agent_tool_names_known
+    in
+    let payload =
+      `Assoc [ "message", `String message; "diagnostics", diagnostics ]
+      |> Yojson.Safe.to_string
+    in
+    Tool_result.ok ~tool_name ~start_time (message ^ "\n" ^ payload)
   | Coord.Claim_next_error e ->
     Tool_result.error ~tool_name ~start_time (Printf.sprintf "Error: %s" e)
 

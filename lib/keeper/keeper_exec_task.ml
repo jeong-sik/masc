@@ -74,8 +74,23 @@ let parse_task_contract_arg args =
    [keeper_task_create_goal_open_limit]) lived here as introduced by
    #13981. *)
 
-let active_goal_scope_json ~(meta : keeper_meta) ?matched_goal_id
-    ?excluded_count ?effective_mode ?effective_goal_ids ?fallback_reason () =
+let active_goal_scope_json
+      ~(meta : keeper_meta)
+      ?matched_goal_id
+      ?excluded_count
+      ?blocked_count
+      ?verification_blocked_count
+      ?scope_excluded_count
+      ?required_tool_excluded_count
+      ?explicit_excluded_count
+      ?claim_pool_candidate_count
+      ?receipt_required_tool_blocked
+      ?agent_tool_names_known
+      ?effective_mode
+      ?effective_goal_ids
+      ?fallback_reason
+      ()
+  =
   let scoped = meta.active_goal_ids <> [] in
   let mode =
     match effective_mode with
@@ -106,6 +121,25 @@ let active_goal_scope_json ~(meta : keeper_meta) ?matched_goal_id
     | Some count -> fields @ [ ("excluded_count", `Int count) ]
     | None -> fields
   in
+  let int_fields =
+    [ "blocked_count", blocked_count
+    ; "verification_blocked_count", verification_blocked_count
+    ; "scope_excluded_count", scope_excluded_count
+    ; "required_tool_excluded_count", required_tool_excluded_count
+    ; "explicit_excluded_count", explicit_excluded_count
+    ; "claim_pool_candidate_count", claim_pool_candidate_count
+    ]
+    |> List.filter_map (fun (name, value) ->
+      Option.map (fun count -> name, `Int count) value)
+  in
+  let bool_fields =
+    [ "receipt_required_tool_blocked", receipt_required_tool_blocked
+    ; "agent_tool_names_known", agent_tool_names_known
+    ]
+    |> List.filter_map (fun (name, value) ->
+      Option.map (fun flag -> name, `Bool flag) value)
+  in
+  let fields = fields @ int_fields @ bool_fields in
   `Assoc fields
 ;;
 
@@ -144,6 +178,21 @@ let no_eligible_action_for_claim_scope claim_goal_scope ~excluded_count =
       "ACTION: Stop task-checking — blocked/excluded=%d.%s"
       excluded_count
       scope_hint
+;;
+
+let no_eligible_blocker_summary
+      ~blocked_count
+      ~verification_blocked_count
+      ~scope_excluded_count
+      ~required_tool_excluded_count
+  =
+  Printf.sprintf
+    "Diagnostics: goal_scope_or_filter=%d, required_tools=%d, verification=%d, \
+     blocked=%d."
+    scope_excluded_count
+    required_tool_excluded_count
+    verification_blocked_count
+    blocked_count
 ;;
 
 let missing_required_tools_for_claim_scope config ~agent_tool_names ~task_filter =
@@ -412,7 +461,14 @@ let handle_keeper_task_tool
           if !auto_started_ok then message ^ " Task auto-started — begin work now."
           else message
       | Coord.Claim_next_no_unclaimed -> "No unclaimed tasks. ACTION: Stop task-checking — nothing to claim."
-      | Coord.Claim_next_no_eligible { excluded_count; _ } ->
+      | Coord.Claim_next_no_eligible
+          { excluded_count
+          ; blocked_count
+          ; verification_blocked_count
+          ; scope_excluded_count
+          ; required_tool_excluded_count
+          ; _
+          } ->
         let action =
           match
             required_tool_workflow_rejection
@@ -425,9 +481,14 @@ let handle_keeper_task_tool
             no_eligible_action_for_claim_scope claim_goal_scope ~excluded_count
         in
         Printf.sprintf
-          "No eligible tasks%s. %s"
+          "No eligible tasks%s. %s %s"
           (claim_scope_context_suffix ~meta claim_goal_scope)
           action
+          (no_eligible_blocker_summary
+             ~blocked_count
+             ~verification_blocked_count
+             ~scope_excluded_count
+             ~required_tool_excluded_count)
       | Coord.Claim_next_error e -> Printf.sprintf "Error: %s" e
     in
     let claim_scope, claimed_task_fields =
@@ -455,8 +516,28 @@ let handle_keeper_task_tool
                       Json_util.string_opt_to_json released_task_id );
                   ] );
             ] )
-      | Coord.Claim_next_no_eligible { excluded_count } ->
-          ( active_goal_scope_json ~meta ~excluded_count
+      | Coord.Claim_next_no_eligible
+          { excluded_count
+          ; blocked_count
+          ; verification_blocked_count
+          ; scope_excluded_count
+          ; required_tool_excluded_count
+          ; explicit_excluded_count
+          ; claim_pool_candidate_count
+          ; receipt_required_tool_blocked
+          ; agent_tool_names_known
+          } ->
+          ( active_goal_scope_json
+              ~meta
+              ~excluded_count
+              ~blocked_count
+              ~verification_blocked_count
+              ~scope_excluded_count
+              ~required_tool_excluded_count
+              ~explicit_excluded_count
+              ~claim_pool_candidate_count
+              ~receipt_required_tool_blocked
+              ~agent_tool_names_known
               ~effective_mode:claim_goal_scope.mode
               ~effective_goal_ids:claim_goal_scope.effective_goal_ids
               ?fallback_reason:claim_goal_scope.fallback_reason ()

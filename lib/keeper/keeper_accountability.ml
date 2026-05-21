@@ -5,11 +5,11 @@
     explicit completion claims, then derives trust/risk summaries from
     deterministic evidence. *)
 
-type claim_kind =
+type claim_kind = Keeper_accountability_claim_types.claim_kind =
   | Task_commitment
   | Completion_claim
 
-type claim_status =
+type claim_status = Keeper_accountability_claim_types.claim_status =
   | Pending
   | Supported
   | Unsupported
@@ -57,33 +57,10 @@ let completion_claim_expiry_sec = 24.0 *. 3600.0
 let dedupe_window_sec = 3600.0
 let summary_window_days = 14
 
-let claim_kind_to_string = function
-  | Task_commitment -> "task_commitment"
-  | Completion_claim -> "completion_claim"
-;;
-
-let claim_kind_of_string = function
-  | "task_commitment" -> Some Task_commitment
-  | "completion_claim" -> Some Completion_claim
-  | _ -> None
-;;
-
-let claim_status_to_string = function
-  | Pending -> "pending"
-  | Supported -> "supported"
-  | Unsupported -> "unsupported"
-  | Expired -> "expired"
-  | Partial -> "partial"
-;;
-
-let claim_status_of_string = function
-  | "pending" -> Some Pending
-  | "supported" -> Some Supported
-  | "unsupported" -> Some Unsupported
-  | "expired" -> Some Expired
-  | "partial" -> Some Partial
-  | _ -> None
-;;
+let claim_kind_to_string = Keeper_accountability_claim_types.claim_kind_to_string
+let claim_kind_of_string = Keeper_accountability_claim_types.claim_kind_of_string
+let claim_status_to_string = Keeper_accountability_claim_types.claim_status_to_string
+let claim_status_of_string = Keeper_accountability_claim_types.claim_status_of_string
 
 let normalize_refs refs =
   refs

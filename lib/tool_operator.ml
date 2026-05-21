@@ -89,7 +89,7 @@ let snapshot_schema ~remote =
         ];
   }
 
-let digest_target_type_enums = [ `String "root"; `String "namespace" ]
+let digest_target_type_enums = [ `String "root" ]
 let judgment_surface_enums =
   [
     `String "command.namespace";

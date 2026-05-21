@@ -31,7 +31,7 @@ let target_type_to_string = function
   | Coord -> "root"
 
 let target_type_of_string = function
-  | "root" | "room" | "namespace" -> Some Coord
+  | "root" -> Some Coord
   | _ -> None
 
 let option_to_yojson = Json_util.option_to_yojson

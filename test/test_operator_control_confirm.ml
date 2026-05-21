@@ -28,7 +28,7 @@ let test_confirm_rejects_expired_token () =
                        ("trace_id", `String "ops_expired");
                        ("actor", `String "operator");
                        ("action_type", `String "namespace_pause");
-                       ("target_type", `String "namespace");
+                       ("target_type", `String "root");
                        ("target_id", `Null);
                        ("payload", `Assoc []);
                        ("delegated_tool", `String "masc_pause");

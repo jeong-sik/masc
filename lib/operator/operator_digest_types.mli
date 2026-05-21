@@ -84,10 +84,9 @@ val summary_of_recommendations :
 
 (** {1 Target type normalisation} *)
 
-(** [true] for canonical ["root"] and its backward-compat aliases
-    ["namespace"] and ["room"]. *)
-val is_root_alias : string -> bool
+(** [true] for the canonical ["root"] target type. *)
+val is_root_target_type : string -> bool
 
 (** Accepts [None] → [Ok "root"]; [Some raw] is trimmed + lowercased, then
-    checked via {!is_root_alias}. Otherwise [Error "target_type must be root"]. *)
+    checked via {!is_root_target_type}. Otherwise [Error "target_type must be root"]. *)
 val normalize_digest_target_type : string option -> (string, string) result

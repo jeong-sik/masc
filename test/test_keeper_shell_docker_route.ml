@@ -474,6 +474,10 @@ while [ \"$#\" -gt 0 ]; do\n\
   fi\n\
   shift\n\
 done\n\
+script=$(cat)\n\
+case \"$script\" in\n\
+  *rg*) exit 1 ;;\n\
+esac\n\
 if [ \"$1\" = \"rg\" ]; then\n\
   exit 1\n\
 fi\n\
@@ -506,8 +510,9 @@ while [ \"$#\" -gt 0 ]; do\n\
   fi\n\
   shift\n\
 done\n\
-if [ \"$1\" = \"bash\" ] && [ \"$2\" = \"-lc\" ]; then\n\
-  case \"$3\" in\n\
+if [ \"$1\" = \"bash\" ] && [ \"$2\" = \"-l\" ] && [ \"$3\" = \"-s\" ]; then\n\
+  script=$(cat)\n\
+  case \"$script\" in\n\
     *rg*) exit 1 ;;\n\
   esac\n\
 fi\n\
@@ -656,6 +661,7 @@ while [ \"$#\" -gt 0 ]; do\n\
   fi\n\
   shift\n\
 done\n\
+cat >/dev/null\n\
 printf 'stdout:%s\\n' \"$*\"\n\
 exit 0\n"
 
@@ -934,7 +940,7 @@ let test_bash_git_push_routes_through_git_creds_docker () =
   let log = read_file log_path in
   Alcotest.(check bool) "git push used docker run" true
     (contains_substring log "run --rm");
-  Alcotest.(check bool) "git push command preserved" true
+  Alcotest.(check bool) "git push command is not exposed in docker argv" false
     (contains_substring log "git push origin feature/proof");
   let root_gh_dir =
     Masc_mcp.Keeper_gh_env.root_gh_config_dir config

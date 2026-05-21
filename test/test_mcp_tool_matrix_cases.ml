@@ -27,7 +27,6 @@ type fixture = {
   mutable board_post_id : string option;
   mutable keeper_name : string option;
   mutable verification_id : string option;
-  mutable webrtc_offer_id : string option;
   mutable handover_id : string option;
   mutable library_topic : string option;
   mutable worktree_task_id : string option;
@@ -360,7 +359,6 @@ let make_fixture sw ~proc_mgr ~fs ~net ~mono_clock clock ~base_path init_mode =
       board_post_id = None;
       keeper_name = None;
       verification_id = None;
-      webrtc_offer_id = None;
       handover_id = None;
       library_topic = None;
       worktree_task_id = None;
@@ -702,7 +700,6 @@ let field_value fixture ~tool_name field_name schema =
       `Float 1.0
   | "timeout" when tool_name = "masc_listen" -> `Int 1
   | "interval" when tool_name = "masc_heartbeat_start" -> `Int 5
-  | "offer_id" -> `String (ensure_webrtc_offer fixture)
   | "ice_candidates" -> `List [ `String "candidate:tool-matrix" ]
   | "tool_name" -> `String "masc_status"
   | "subscription_id" -> `String "subscription-001"

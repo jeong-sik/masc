@@ -59,9 +59,6 @@ let extended_tools =
       "Search for symbols and patterns across the codebase.";
     make_schema "masc_code_read"
       "Read the contents of a source file.";
-    make_schema "masc_autoresearch_start"
-      "Start an automated research cycle.";
-
     make_schema "masc_worktree_create"
       "Create a new git worktree for an isolated branch.";
     make_schema "masc_worktree_list"
@@ -156,13 +153,6 @@ let test_synonym_code_read () =
     ~tools:extended_tools ~query:"read source file contents" ~k:3 in
   check bool "synonym: masc_code_read via 'read source'" true
     (has_tool "masc_code_read" result)
-
-let test_synonym_autoresearch_start () =
-  let result = Tool_prefilter.filter
-    ~tools:extended_tools ~query:"begin auto research" ~k:3 in
-  check bool "synonym: masc_autoresearch_start via 'begin research'" true
-    (has_tool "masc_autoresearch_start" result)
-
 
 let test_synonym_worktree_create () =
   let result = Tool_prefilter.filter
@@ -270,8 +260,6 @@ let () =
           test_case "claim_next via synonym" `Quick test_synonym_claim_next;
           test_case "code_search via synonym" `Quick test_synonym_code_search;
           test_case "code_read via synonym" `Quick test_synonym_code_read;
-          test_case "autoresearch_start via synonym" `Quick test_synonym_autoresearch_start;
-
           test_case "worktree_create via synonym" `Quick test_synonym_worktree_create;
           test_case "web_search via synonym" `Quick test_synonym_web_search;
         ] );

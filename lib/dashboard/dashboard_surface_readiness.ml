@@ -375,7 +375,6 @@ let all_entries =
       ~rationale:"Research-loop diagnostics retained under Lab."
       ~route_hash:"#lab?section=autoresearch"
       ~live_spotcheck:"/api/v1/autoresearch/loops"
-      ~tool_name:"masc_autoresearch_status"
       ()
   ; entry
       ~id:"lab.harness"

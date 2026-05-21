@@ -137,8 +137,9 @@ transport truth를 빠르게 분리하고 싶으면 먼저 `./benchmarks/quick-b
 
 ### Repo Synthesis
 
-repo-synthesis는 `masc_autoresearch_cycle` 내부에서 cycle system을 통해 dispatch된다.
-별도 front-door tool은 retired 되었다 (config.ml retired list 참조).
+repo-synthesis의 legacy `masc_autoresearch_cycle` entry path는 retired 되었다.
+새 front-door tool을 만들지 않고, command-plane truth surfaces와 proof/report
+artifacts를 읽는 방향으로만 유지한다.
 
 - read path:
   - dashboard는 `/api/v1/dashboard/repo-synthesis`와 proof/report artifact를 읽는 read-only surface

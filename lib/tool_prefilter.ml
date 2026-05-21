@@ -380,14 +380,6 @@ let synonyms : (string * string list) list =
     , [ "code shell"; "run code command"; "execute in code"; "code exec" ] )
   ; ( "masc_code_git"
     , [ "code git"; "git in code"; "code commit"; "code branch"; "code log" ] )
-  ; (* masc_autoresearch_* — automated research *)
-    ( "masc_autoresearch_start"
-    , [ "start research"; "begin research"; "auto research"; "autoresearch start" ] )
-  ; ( "masc_autoresearch_status"
-    , [ "research status"; "autoresearch status"; "research progress" ] )
-  ; "masc_autoresearch_stop", [ "stop research"; "cancel research"; "end autoresearch" ]
-  ; ( "masc_autoresearch_cycle"
-    , [ "research cycle"; "run cycle"; "autoresearch cycle"; "execute research" ] )
   ; (* masc_plan_* — project planning *)
     "masc_plan_get", [ "get plan"; "view plan"; "show plan"; "current plan"; "roadmap" ]
   ; ( "masc_plan_init"

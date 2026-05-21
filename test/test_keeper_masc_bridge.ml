@@ -153,7 +153,7 @@ let test_full_preset_exposes_masc () =
   (* Governance tools are no longer in raw_all_tool_schemas *)
   Alcotest.(check bool) "no masc_governance_status" false
     (List.mem "masc_governance_status" names);
-  Alcotest.(check bool) "has masc_autoresearch_cycle" true
+  Alcotest.(check bool) "hides masc_autoresearch_cycle" false
     (List.mem "masc_autoresearch_cycle" names);
   Alcotest.(check bool) "filters unsupported inline tool" false
     (List.mem "masc_who" names)

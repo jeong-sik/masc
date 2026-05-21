@@ -53,8 +53,7 @@ let all_schemas_extended =
     (all_schemas
     @ Tool_schemas_misc.schemas
     @ Keeper_types.schemas
-    @ Tool_local_runtime.schemas @ Tool_shard.schemas
-    @ Tool_autoresearch.schemas)
+    @ Tool_local_runtime.schemas @ Tool_shard.schemas)
   |> dedupe_schemas_by_name
 
 (** Get tool by name *)

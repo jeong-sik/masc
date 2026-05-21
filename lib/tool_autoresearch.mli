@@ -1,6 +1,6 @@
 
-(** Tool_autoresearch — public surface for the autoresearch
-    MCP tool family.
+(** Tool_autoresearch — internal runtime helpers for retired
+    autoresearch tool handlers.
 
     The .ml is a 613-line module that splits into three
     layers:
@@ -16,10 +16,11 @@
       same reason — {!Tool_autoresearch_cycle} is the other
       consumer and reaches them via [open
       Tool_autoresearch_broadcast].
-    - {b Tool dispatcher} (this module's only locally-defined
-      public surface): {!handle_start} kicks off a research
-      run, {!dispatch} routes every [masc_autoresearch_*]
-      tool name to its handler.
+    - {b Tool dispatcher}: {!handle_start} kicks off a research
+      run for dashboard/internal callers, and {!dispatch} remains
+      for in-process tests and follow-up deletion.  The
+      [masc_autoresearch_*] MCP/keeper tool family is no longer
+      registered as dispatchable.
 
     Many internal helpers stay private at this boundary
     ([persisted_summary_json], [resolve_loop_id],
@@ -49,13 +50,6 @@ type context = Tool_autoresearch_context.t
     dependency bundle as [Tool_autoresearch.context] without
     importing the source module.  Type identity is preserved
     — the two names are interchangeable. *)
-
-(** {1 Tool schemas} *)
-
-val schemas : Masc_domain.tool_schema list
-(** Re-export of {!Tool_autoresearch_schemas.schemas}.  The
-    list of tool schemas advertised to the MCP transport for
-    the [masc_autoresearch_*] family. *)
 
 (** {1 Public handlers} *)
 

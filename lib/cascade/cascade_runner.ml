@@ -740,7 +740,16 @@ let run
       error_response;
     Log.Misc.error "oas_worker %s: execution exception: %s\nBacktrace: %s"
       config.name (Printexc.to_string exn) bt;
-    Error (Agent_sdk.Error.Internal (Printf.sprintf "execution exception: %s" (Printexc.to_string exn))))
+    (* RFC-0159 Phase A: route via typed [Internal_unhandled_exception]
+       so the classifier can bucket the event under the typed kind
+       instead of falling through to [Reason_internal_error]. *)
+    Error
+      (Cascade_error_classify.sdk_error_of_masc_internal_error
+         (Cascade_error_classify.Internal_unhandled_exception
+            {
+              site = "cascade_runner.execute";
+              exn_repr = Printexc.to_string exn;
+            })))
 
 (* ================================================================ *)
 (* Convenience: run_with_masc_tools                                  *)

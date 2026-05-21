@@ -84,6 +84,24 @@ type masc_internal_error =
       tools : string list;
       original_error : string;
     }
+  (** RFC-0159 Phase A: typed substrate for raw [Agent_sdk.Error.Internal]
+      construction sites.  Before Phase A, three sites built [Internal]
+      with [Printexc.to_string exn] payloads that the classifier could
+      not parse, so all of them fell through to the [Reason_internal_error]
+      catch-all bucket.  These variants prefix the payload with the typed
+      [[masc_oas_error]] envelope so [classify_masc_internal_error] can
+      route them to dedicated kinds. *)
+  | Internal_unhandled_exception of {
+      site : string;
+      exn_repr : string;
+    }
+  | Internal_bridge_exception of {
+      caller : string;
+      exn_repr : string;
+    }
+  | Internal_contract_rejected of {
+      reason : string;
+    }
 
 val masc_internal_error_to_json : masc_internal_error -> Yojson.Safe.t
 

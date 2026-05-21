@@ -145,6 +145,11 @@ let sdk_error_to_cascade_outcome (err : Agent_sdk.Error.sdk_error)
   | Some (Cascade_error_classify.Oas_timeout_budget _)
   | Some (Cascade_error_classify.Max_tokens_ceiling_violation _)
   | Some (Cascade_error_classify.Ambiguous_post_commit _)
+  (* RFC-0159 Phase A: opaque internal failures fall through to the raw
+     sdk_error match below; they have no typed cascade-outcome mapping. *)
+  | Some (Cascade_error_classify.Internal_unhandled_exception _)
+  | Some (Cascade_error_classify.Internal_bridge_exception _)
+  | Some (Cascade_error_classify.Internal_contract_rejected _)
   | None -> (
   match err with
   | Agent_sdk.Error.Api api_err ->
@@ -993,7 +998,11 @@ let sdk_error_is_max_turns_exceeded (err : Agent_sdk.Error.sdk_error) : bool =
   | Some (Cascade_error_classify.Turn_timeout _)
   | Some (Cascade_error_classify.Oas_timeout_budget _)
   | Some (Cascade_error_classify.Max_tokens_ceiling_violation _)
-  | Some (Cascade_error_classify.Ambiguous_post_commit _) ->
+  | Some (Cascade_error_classify.Ambiguous_post_commit _)
+  (* RFC-0159 Phase A: opaque internal failures are not max-turns-exceeded. *)
+  | Some (Cascade_error_classify.Internal_unhandled_exception _)
+  | Some (Cascade_error_classify.Internal_bridge_exception _)
+  | Some (Cascade_error_classify.Internal_contract_rejected _) ->
       false
   | None -> (
       match err with

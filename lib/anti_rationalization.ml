@@ -761,7 +761,11 @@ let review
                   | Keeper_turn_driver.Turn_timeout _
                   | Keeper_turn_driver.Oas_timeout_budget _
                   | Keeper_turn_driver.Max_tokens_ceiling_violation _
-                  | Keeper_turn_driver.Ambiguous_post_commit _ )
+                  | Keeper_turn_driver.Ambiguous_post_commit _
+                  (* RFC-0159 Phase A: opaque internal failures. *)
+                  | Keeper_turn_driver.Internal_unhandled_exception _
+                  | Keeper_turn_driver.Internal_bridge_exception _
+                  | Keeper_turn_driver.Internal_contract_rejected _ )
               | None ->
                 false
             in

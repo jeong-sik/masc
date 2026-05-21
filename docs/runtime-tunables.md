@@ -51,7 +51,6 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_STORAGE_TYPE` | string_literal | n/a | n/a | 402 | SSOT for the MASC_STORAGE_TYPE env-var name (issue 8352). |
 | `MASC_TELEMETRY_ENABLED` | string_literal | n/a | n/a | 486 | SSOT for logging / observability env-var names (issue 8352). |
 | `MASC_TEST_ALLOW_HOME_BASE_PATH` | string_literal | n/a | n/a | 341 | #9903: production base-path safeguard for test executables. Without this, a test whose [MASC_BASE_PATH] override fail... |
-| `MASC_TOOL_AUTH_STRICT` | string_literal | n/a | n/a | 451 | SSOT for auth env-var names (issue 8352). |
 
 ## Env_config_exec_timeout (1 knobs; typed classification 0/0)
 

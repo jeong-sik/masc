@@ -173,6 +173,7 @@ val read_recent_audit :
 
 module For_testing : sig
   val reset_audit_store : unit -> unit
+  val first_cmd_token : string -> string option
 end
 
 (** {1 Submit & await} *)

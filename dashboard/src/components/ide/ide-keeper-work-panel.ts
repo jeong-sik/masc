@@ -295,15 +295,11 @@ function taskExecutionRouteContext(task: Task): {
     task.execution_links?.operation_id,
     task.contract?.links?.operation_id,
   )
-  const autoresearchLoopId = firstNonEmpty(
-    task.execution_links?.autoresearch_loop_id,
-    task.contract?.links?.autoresearch_loop_id,
-  )
   return {
     sessionId,
     operationId,
-    telemetryQuery: firstNonEmpty(operationId, sessionId, autoresearchLoopId),
-    hasTelemetry: Boolean(sessionId || operationId || autoresearchLoopId),
+    telemetryQuery: firstNonEmpty(operationId, sessionId),
+    hasTelemetry: Boolean(sessionId || operationId),
   }
 }
 

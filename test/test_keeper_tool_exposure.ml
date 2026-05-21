@@ -154,12 +154,6 @@ let test_voice_policy_disabled_hides_voice_tools () =
     voice_tools
 ;;
 
-let test_coding_preset_hides_autoresearch_tools () =
-  let meta = make_meta ~preset:Keeper_types.Coding () in
-  let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
-  check bool "hides autoresearch" false (has_any_prefix "masc_autoresearch_" tools)
-;;
-
 let test_custom_empty_blocks_all_tools () =
   let meta = make_meta ~tool_access:(Keeper_types.Custom []) () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
@@ -320,16 +314,6 @@ let test_legacy_pr_schemas_removed () =
     true
     (raw_schema_by_name "keeper_pr_workflow" = None);
   check bool "submit schema removed" true (raw_schema_by_name "keeper_pr_submit" = None)
-;;
-
-(* ============================================================
-   6. Autoresearch tools are retired from keeper presets
-   ============================================================ *)
-
-let test_research_preset_hides_autoresearch () =
-  let meta = make_meta ~preset:Keeper_types.Research () in
-  let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
-  check bool "hides autoresearch" false (has_any_prefix "masc_autoresearch_" tools)
 ;;
 
 (* ============================================================
@@ -500,7 +484,6 @@ let test_research_plus_also_allow_combined () =
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
   check bool "has board_get via also_allow" true (has_tool "keeper_board_get" tools);
   check bool "has shell access" true (has_tool "keeper_shell" tools);
-  check bool "hides autoresearch" false (has_any_prefix "masc_autoresearch_" tools);
   check bool "has board_post via also_allow" true (has_tool "keeper_board_post" tools);
   check bool "has read" true (has_tool "keeper_fs_read" tools)
 ;;
@@ -1253,10 +1236,6 @@ let () =
             `Quick
             test_voice_policy_disabled_hides_voice_tools
         ; test_case
-            "coding preset hides autoresearch tools"
-            `Quick
-            test_coding_preset_hides_autoresearch_tools
-        ; test_case
             "custom empty blocks all tools"
             `Quick
             test_custom_empty_blocks_all_tools
@@ -1312,12 +1291,6 @@ let () =
             "coding preset has keeper_bash and keeper_shell"
             `Quick
             test_coding_preset_has_keeper_bash
-        ] )
-    ; ( "autoresearch_tools"
-      , [ test_case
-            "research preset hides autoresearch"
-            `Quick
-            test_research_preset_hides_autoresearch
         ] )
     ; ( "mode_free_access"
       , [ test_case

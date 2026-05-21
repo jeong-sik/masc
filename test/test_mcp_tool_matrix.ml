@@ -24,18 +24,56 @@ let requested_tool_names () =
       | [] -> None
       | names -> Some names
 
-let quote = Filename.quote
-
 let read_file path =
   In_channel.with_open_bin path In_channel.input_all
 
+let path_entries () =
+  Sys.getenv_opt "PATH"
+  |> Option.value ~default:""
+  |> String.split_on_char ':'
+  |> List.filter (fun path -> path <> "")
+
+let find_executable name =
+  path_entries ()
+  |> List.find_map (fun dir ->
+         let path = Filename.concat dir name in
+         if Sys.file_exists path then
+           Some path
+         else
+           None)
+
 let timeout_command () =
-  if Sys.command "command -v timeout >/dev/null 2>&1" = 0 then
-    Some "timeout"
-  else if Sys.command "command -v gtimeout >/dev/null 2>&1" = 0 then
-    Some "gtimeout"
-  else
-    None
+  match find_executable "timeout" with
+  | Some path -> Some path
+  | None -> (
+      match find_executable "gtimeout" with
+      | Some path -> Some path
+      | None -> None)
+
+let run_process_capture prog argv =
+  let out_file = Filename.temp_file "mcp-tool-matrix-out" ".txt" in
+  let err_file = Filename.temp_file "mcp-tool-matrix-err" ".txt" in
+  let out_fd = Unix.openfile out_file [ Unix.O_WRONLY; Unix.O_TRUNC ] 0o600 in
+  let err_fd = Unix.openfile err_file [ Unix.O_WRONLY; Unix.O_TRUNC ] 0o600 in
+  let pid =
+    Fun.protect
+      ~finally:(fun () ->
+        Unix.close out_fd;
+        Unix.close err_fd)
+      (fun () -> Unix.create_process prog argv Unix.stdin out_fd err_fd)
+  in
+  let _, status = Unix.waitpid [] pid in
+  let code =
+    match status with
+    | Unix.WEXITED code -> code
+    | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> 255
+  in
+  let output =
+    String.concat "\n" [ read_file out_file; read_file err_file ]
+  in
+  Sys.remove out_file;
+  Sys.remove err_file;
+  (code, output)
 
 let tool_case_timeout_sec () =
   match Sys.getenv_opt "MCP_TOOL_MATRIX_CASE_TIMEOUT_SEC" with
@@ -55,6 +93,20 @@ let runner_path () =
       (Printf.sprintf
          "tool_matrix_case_runner.exe not found next to test executable (%s)"
          exe_dir)
+
+let case_command tool_name =
+  match timeout_command () with
+  | Some timeout ->
+      ( timeout,
+        [|
+          timeout;
+          "-k";
+          "1s";
+          Printf.sprintf "%ds" (tool_case_timeout_sec ());
+          runner_path ();
+          tool_name;
+        |] )
+  | None -> (runner_path (), [| runner_path (); tool_name |])
 
 let find_result_line output =
   output
@@ -114,26 +166,8 @@ let parse_case_result ~tool_name output =
                    tool_name raw) })
 
 let run_tool_case_process tool_name =
-  let out_file = Filename.temp_file "mcp-tool-matrix-out" ".txt" in
-  let err_file = Filename.temp_file "mcp-tool-matrix-err" ".txt" in
-  let timeout_prefix =
-    match timeout_command () with
-    | Some bin ->
-        Printf.sprintf "%s -k 1s %ds " bin (tool_case_timeout_sec ())
-    | None -> ""
-  in
-  let cmd =
-    Printf.sprintf "%s%s %s" timeout_prefix (quote (runner_path ())) (quote tool_name)
-  in
-  let wrapped =
-    Printf.sprintf "%s > %s 2> %s" cmd (quote out_file) (quote err_file)
-  in
-  let status = Sys.command wrapped in
-  let output =
-    String.concat "\n" [ read_file out_file; read_file err_file ]
-  in
-  Sys.remove out_file;
-  Sys.remove err_file;
+  let prog, argv = case_command tool_name in
+  let status, output = run_process_capture prog argv in
   let parsed = parse_case_result ~tool_name output in
   (match parsed.base_path with
   | Some path -> Cases.cleanup_dir path

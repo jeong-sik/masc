@@ -62,7 +62,6 @@ export interface TaskWorktreeInfo {
 interface TaskExecutionLinks {
   operation_id?: string | null
   session_id?: string | null
-  autoresearch_loop_id?: string | null
 }
 
 interface TaskContract {

@@ -16,9 +16,9 @@ let file_redirect fd mode =
 
 /* Bash subset grammar — Menhir LR(1).
 
-   Productions now cover simple commands, pipelines, fd-to-fd
-   redirects, and /dev/null file redirects. Subsequent PRs extend to:
-   - env prefix (FOO=bar cmd)
+   Productions now cover simple commands, pipelines, env prefixes
+   (recognized in bash.ml from leading WORD tokens), fd-to-fd redirects,
+   and /dev/null file redirects. Subsequent PRs extend to:
    - general file redirects beyond the explicit /dev/null sink
    - subset guards that mint Parsed.Too_complex rather than matching.
 

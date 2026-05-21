@@ -2,7 +2,6 @@
 
 import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
-import { navigate } from '../router'
 import { formatPct1 } from '../lib/format-number'
 import { assertExhaustive } from '../lib/exhaustive'
 import { Card } from './common/card'
@@ -284,11 +283,6 @@ export function HarnessHealth() {
                 class="rounded-[var(--r-1)] border border-[var(--color-border-default)] px-2.5 py-1 text-2xs text-[var(--color-fg-muted)] transition-colors hover:border-[var(--color-accent-fg)] hover:text-[var(--color-fg-primary)]"
                 onClick=${() => { void loadHarnessHealth() }}
               >새로고침</button>
-              <button
-                type="button"
-                class="rounded-[var(--r-1)] border border-[var(--color-border-default)] px-2.5 py-1 text-2xs text-[var(--color-fg-muted)] transition-colors hover:border-[var(--ok-30)] hover:text-[var(--color-fg-primary)]"
-                onClick=${() => navigate('lab', { section: 'autoresearch' })}
-              >오토리서치 보기</button>
             </div>
           </div>
 

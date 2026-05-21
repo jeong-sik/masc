@@ -3,7 +3,6 @@
 import { html } from 'htm/preact'
 import { useMemo } from 'preact/hooks'
 import { useSignal } from '@preact/signals'
-import { navigate } from '../router'
 import { formatTimeAgo, formatTimestampKo } from '../lib/format-time'
 import { assertExhaustive } from '../lib/exhaustive'
 import { SurfaceCard } from './common/card'
@@ -310,16 +309,11 @@ export function ScopePairing() {
           <div class="flex items-center justify-between gap-3">
             <div>
               <${SectionCap}>실험 루프<//>
-              <${ItemTitle} class="mt-1">오토리서치가 답하는 것</${ItemTitle}>
+              <${ItemTitle} class="mt-1">하네스가 답하는 것</${ItemTitle}>
             </div>
-            <button
-              type="button"
-              class="rounded-[var(--r-1)] border border-[var(--color-border-default)] px-2.5 py-1 text-2xs text-[var(--color-fg-muted)] transition-colors hover:border-[var(--ok-30)] hover:text-[var(--color-fg-primary)]"
-              onClick=${() => navigate('lab', { section: 'autoresearch' })}
-            >오토리서치 열기</button>
           </div>
           <div class="text-sm leading-loose text-[var(--color-fg-primary)]">
-            어떤 파일을 어떻게 바꿔 어떤 metric을 밀어 올리려는지, 그리고 cycle별 keep/discard가 어땠는지 봅니다.
+            evaluator와 장기 연속성 rail의 상태를 확인합니다.
           </div>
         </div>
       <//>

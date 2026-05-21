@@ -23,8 +23,6 @@ lib/audit_log.ml:498:Oas_events
 lib/auto_responder.ml:165:Oas_worker
 lib/auto_responder.ml:181:Oas_worker
 lib/auto_responder.ml:189:Oas_worker
-lib/autoresearch_codegen.ml:154:Oas_worker
-lib/autoresearch_codegen.ml:165:Oas_worker
 lib/cascade/cascade_attempt_liveness_observer.mli:25:Oas_worker_exec
 lib/cascade/cascade_attempt_liveness_observer.mli:30:Oas_worker_exec
 lib/cascade/cascade_strategy_trace.mli:10:Oas_worker_named

@@ -16,9 +16,6 @@ async function flushUi(): Promise<void> {
 async function loadPlane() {
   vi.resetModules()
   vi.doMock('../router', () => ({ route, navigate: navigateMock }))
-  vi.doMock('./autoresearch', () => ({
-    Autoresearch: () => html`<div data-testid="autoresearch">Autoresearch</div>`,
-  }))
   vi.doMock('./keeper-decisions-stream', () => ({
     KeeperDecisionsStream: () => html`<div data-testid="keeper-decisions-stream">KeeperDecisionsStream</div>`,
   }))
@@ -57,7 +54,6 @@ describe('CognitionPlane', () => {
     vi.restoreAllMocks()
     vi.resetModules()
     vi.doUnmock('../router')
-    vi.doUnmock('./autoresearch')
     vi.doUnmock('./keeper-decisions-stream')
     vi.doUnmock('./keeper-cognition-inspector')
     vi.doUnmock('./keeper-token-stats')

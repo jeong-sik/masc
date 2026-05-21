@@ -136,12 +136,53 @@ let ensure_github_identity_bundle ~config github_identity =
     \    oauth_token: ghp_fake_test_token_for_docker_route\n\
     \    user: test-user\n"
 
+let gh_config_dir_for_identity ~config github_identity =
+  let masc_dir = Filename.concat config.Coord.base_path Common.masc_dirname in
+  Filename.concat
+    (Filename.concat
+       (Filename.concat masc_dir "github-identities")
+       github_identity)
+    "gh"
+
+let seed_github_credential_mapping
+      ?(github_identity = Masc_mcp.Keeper_gh_env.root_github_identity)
+      ~config
+      ~keeper_name
+      ()
+  =
+  ensure_github_identity_bundle ~config github_identity;
+  let credential_id = "cred-" ^ keeper_name ^ "-" ^ github_identity in
+  let credential : Repo_manager_types.credential =
+    { id = credential_id
+    ; cred_type = Repo_manager_types.Github
+    ; username = github_identity
+    ; gh_config_dir = Some (gh_config_dir_for_identity ~config github_identity)
+    ; ssh_key_path = None
+    ; gpg_key_id = None
+    ; state = Repo_manager_types.Unmaterialized
+    ; token_sha256_prefix = None
+    }
+  in
+  (match Credential_store.add ~base_path:config.Coord.base_path credential with
+   | Ok _ -> ()
+   | Error msg when contains_substring msg "Credential already exists" -> ()
+   | Error msg -> Alcotest.failf "seed credential mapping: %s" msg);
+  let mapping : Repo_manager_types.keeper_repo_mapping =
+    { keeper_id = keeper_name
+    ; repository_ids = []
+    ; github_credential_id = Some credential_id
+    }
+  in
+  match Keeper_repo_mapping.save_mapping ~base_path:config.Coord.base_path mapping with
+  | Ok () -> ()
+  | Error msg -> Alcotest.failf "seed keeper repo mapping: %s" msg
+
 let with_keeper_identity_toml ~config ~keeper_name ~github_identity f =
   let masc_dir = Filename.concat config.Coord.base_path Common.masc_dirname in
   let config_dir = Filename.concat masc_dir "config" in
   let keepers_dir = Filename.concat config_dir "keepers" in
   ensure_dir keepers_dir;
-  ensure_github_identity_bundle ~config github_identity;
+  seed_github_credential_mapping ~github_identity ~config ~keeper_name ();
   write_file
     (Filename.concat keepers_dir (keeper_name ^ ".toml"))
     (Printf.sprintf
@@ -175,16 +216,20 @@ while [ \"$#\" -gt 0 ]; do\n\
   fi\n\
   shift\n\
 done\n\
-case \"$*\" in\n\
-  *\"gh repo view \"*missing/repo*\"--json nameWithOwner\"*)\n\
+stdin_payload=$(cat)\n\
+if [ -n \"$log_file\" ]; then\n\
+  printf 'stdin:%s\\n' \"$stdin_payload\" >> \"$log_file\"\n\
+fi\n\
+case \"$stdin_payload\" in\n\
+  *missing/repo*nameWithOwner*)\n\
     printf '%s\\n' \"GraphQL: Could not resolve to a Repository with the name 'missing/repo'. (repository)\"\n\
     exit 1\n\
     ;;\n\
-  *\"gh repo view \"*jeong-sik/masc-mcp*\"--json nameWithOwner\"*)\n\
+  *jeong-sik/masc-mcp*nameWithOwner*)\n\
     printf '%s\\n' '{\"nameWithOwner\":\"jeong-sik/masc-mcp\"}'\n\
     exit 0\n\
     ;;\n\
-  *\"--json isDraft,headRefName,labels\"*)\n\
+  *isDraft,headRefName,labels*)\n\
     if [ -n \"$KEEPER_FAKE_PR_VIEW_JSON\" ]; then\n\
       printf '%s\\n' \"$KEEPER_FAKE_PR_VIEW_JSON\"\n\
     else\n\
@@ -193,7 +238,7 @@ case \"$*\" in\n\
     exit 0\n\
     ;;\n\
 esac\n\
-printf 'stdout:%s\\n' \"$*\"\n\
+printf 'stdout:%s\\n' \"$stdin_payload\"\n\
 exit 0\n"
 
 let with_fake_docker f =
@@ -237,8 +282,7 @@ let setup_docker_review f =
     make_meta ~name:"reviewer" ~sandbox:Keeper_types.Docker ()
   in
   ensure_dir (Keeper_sandbox.host_root_abs_of_meta ~config meta);
-  ensure_github_identity_bundle ~config
-    Masc_mcp.Keeper_gh_env.root_github_identity;
+  seed_github_credential_mapping ~config ~keeper_name:meta.name ();
   f ~config ~meta
 
 let setup_local_review f =
@@ -391,8 +435,71 @@ let test_local_pr_review_host_uses_exec_gate_cwd () =
             process_lines);
        check bool "no cd wrapper in argv tap" false
          (List.exists (fun line -> contains_substring line "cd ") process_lines);
+       check bool "no shell -lc wrapper in argv tap" false
+         (List.exists (fun line -> contains_substring line "\"-lc\"") process_lines);
+       check bool "no shell pipe truncation in argv tap" false
+         (List.exists (fun line -> contains_substring line "head -c") process_lines);
        check bool "repo flag reached gh" true
          (contains_substring (read_file gh_args_log) "-R jeong-sik/masc-mcp"))
+
+let test_local_pr_review_comment_uses_argv_not_shell () =
+  setup_local_review @@ fun ~base ~config ~meta ->
+  let bin_dir = Filename.concat base "bin" in
+  let gh_args_log = Filename.concat base "gh-comment-args.log" in
+  ensure_dir bin_dir;
+  write_file
+    (Filename.concat bin_dir "gh")
+    "#!/bin/sh\n\
+     printf '%s\\n' \"$*\" >> \"$GH_ARGS_LOG\"\n\
+     if [ \"$1\" = \"pr\" ] && [ \"$2\" = \"review\" ]; then\n\
+     \  exit 0\n\
+     fi\n\
+     printf 'unexpected gh: %s\\n' \"$*\" >&2\n\
+     exit 2\n";
+  Unix.chmod (Filename.concat bin_dir "gh") 0o755;
+  let captured = ref [] in
+  Fun.protect
+    ~finally:(fun () -> Exec_tap.disable ())
+    (fun () ->
+       Exec_tap.enable ~writer:(fun line -> captured := line :: !captured);
+       with_env "GH_ARGS_LOG" gh_args_log @@ fun () ->
+       with_env "PATH"
+         (bin_dir ^ ":"
+          ^ Option.value ~default:"/usr/bin:/bin" (Sys.getenv_opt "PATH"))
+       @@ fun () ->
+       let raw =
+         KTPR.handle_keeper_pr_review_comment ~config ~meta
+           ~args:
+             (`Assoc
+               [ ("pr_number", `Int 13510)
+               ; ("body", `String "host comment body with * shell chars")
+               ; ("event", `String "COMMENT")
+               ])
+       in
+       check bool "comment ok" true (parse_field raw "ok" |> Json.to_bool);
+       let process_lines =
+         List.filter
+           (fun line ->
+              contains_substring line
+                "\"kind\":\"Process_eio.run_argv_with_status\"")
+           !captured
+       in
+       check bool "process execution recorded" true (process_lines <> []);
+       check bool "no shell -lc wrapper in mutation tap" false
+         (List.exists
+            (fun line -> contains_substring line "\"-lc\"")
+            process_lines);
+       check bool "comment body not embedded in argv" false
+         (List.exists
+            (fun line -> contains_substring line "host comment body")
+            process_lines);
+       let gh_args = read_file gh_args_log in
+       check bool "review subcommand used" true
+         (contains_substring gh_args "pr review 13510");
+       check bool "body-file used" true
+         (contains_substring gh_args "--body-file");
+       check bool "comment flag used" true
+         (contains_substring gh_args "--comment"))
 
 let test_read_routes_docker_and_injects_repo_flag () =
   with_fake_docker @@ fun () ->
@@ -442,9 +549,9 @@ let test_read_routes_docker_and_injects_repo_flag () =
   check bool "read used docker run" true
     (contains_substring log "run --rm");
   check bool "metadata command used gh pr view" true
-    (contains_substring log "gh pr view 13510");
+    (contains_substring log "'gh' 'pr' 'view' '13510'");
   check bool "diff command used gh pr diff" true
-    (contains_substring log "gh pr diff 13510");
+    (contains_substring log "'gh' 'pr' 'diff' '13510'");
   check bool "repo flag injected" true
     (contains_substring log "-R"
      && contains_substring log "jeong-sik/masc-mcp")
@@ -495,7 +602,7 @@ let test_comment_and_approve_route_through_docker () =
      | _ -> false);
   let log = read_file log_path in
   check bool "review comment used gh pr review" true
-    (contains_substring log "gh pr review 13510");
+    (contains_substring log "'gh' 'pr' 'review' '13510'");
   check bool "review comment uses body-file" true
     (contains_substring log "--body-file");
   check bool "review body is not in shell command" false
@@ -505,7 +612,7 @@ let test_comment_and_approve_route_through_docker () =
   check bool "approve event flag passed" true
     (contains_substring log "--approve");
   check bool "approve preflight read PR metadata" true
-    (contains_substring log "--json isDraft,headRefName,labels");
+    (contains_substring log "isDraft,headRefName,labels");
   check bool "repo flag injected for review mutation" true
     (contains_substring log "-R"
      && contains_substring log "jeong-sik/masc-mcp")
@@ -537,7 +644,7 @@ let test_approve_blocks_human_ready_pr_before_review () =
     (parse_nested_string_field raw "preflight" "reason");
   let log = read_file log_path in
   check bool "preflight used gh pr view" true
-    (contains_substring log "gh pr view 13510");
+    (contains_substring log "'gh' 'pr' 'view' '13510'");
   check bool "blocked before gh pr review approve" false
     (contains_substring log "--approve")
 
@@ -582,12 +689,12 @@ let test_comment_rejects_unresolved_explicit_repo_before_review () =
     (parse_string_field raw "output");
   let log = read_file log_path in
   check bool "repo preflight checked explicit target" true
-    (contains_substring log "gh repo view"
+    (contains_substring log "'gh' 'repo' 'view'"
      && contains_substring log "missing/repo");
   check bool "repo preflight blocks approve metadata lookup" false
     (contains_substring log "--json isDraft,headRefName,labels");
   check bool "repo preflight blocks review mutation" false
-    (contains_substring log "gh pr review 13510")
+    (contains_substring log "'gh' 'pr' 'review' '13510'")
 
 let test_reply_routes_through_docker_and_infers_repo () =
   with_fake_docker @@ fun () ->
@@ -621,7 +728,8 @@ let test_reply_routes_through_docker_and_infers_repo () =
     (contains_substring log "run --rm");
   check bool "reply used gh api endpoint with inferred repo" true
     (contains_substring log
-       "gh api repos/jeong-sik/masc-mcp/pulls/13510/comments/3192459689/replies");
+       "'gh' 'api' \
+        'repos/jeong-sik/masc-mcp/pulls/13510/comments/3192459689/replies'");
   check bool "reply body uses gh api file field" true
     (contains_substring log "-F" && contains_substring log "body=@");
   check bool "reply body is not in shell command" false
@@ -651,6 +759,8 @@ let () =
     "host_route", [
       test_case "host route uses Exec_gate cwd" `Quick
         test_local_pr_review_host_uses_exec_gate_cwd;
+      test_case "host comment uses argv without shell" `Quick
+        test_local_pr_review_comment_uses_argv_not_shell;
     ];
     "docker_route", [
       test_case "with_env restores cleared variables" `Quick

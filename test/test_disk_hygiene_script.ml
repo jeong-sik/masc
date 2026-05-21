@@ -5,8 +5,6 @@ let source_root () =
   | Some root when String.trim root <> "" -> root
   | _ -> Sys.getcwd ()
 
-let quote = Filename.quote
-
 let read_file path =
   In_channel.with_open_bin path In_channel.input_all
 
@@ -47,24 +45,47 @@ let contains_substring haystack needle =
   in
   nlen = 0 || loop 0
 
-let run_shell ?(env = []) ~cwd cmd =
-  let env_prefix =
-    env
-    |> List.map (fun (k, v) -> Printf.sprintf "%s=%s" k (quote v))
-    |> String.concat " "
-  in
-  let full =
-    if env_prefix = "" then
-      Printf.sprintf "cd %s && %s" (quote cwd) cmd
-    else
-      Printf.sprintf "cd %s && %s %s" (quote cwd) env_prefix cmd
-  in
+let env_array overrides =
+  let table = Hashtbl.create 64 in
+  Unix.environment ()
+  |> Array.iter (fun entry ->
+         match String.index_opt entry '=' with
+         | None -> ()
+         | Some idx ->
+             let key = String.sub entry 0 idx in
+             let value =
+               String.sub entry (idx + 1) (String.length entry - idx - 1)
+             in
+             Hashtbl.replace table key value);
+  List.iter (fun (key, value) -> Hashtbl.replace table key value) overrides;
+  Hashtbl.fold
+    (fun key value acc -> Printf.sprintf "%s=%s" key value :: acc)
+    table []
+  |> Array.of_list
+
+let run_process ?(env = []) ~cwd prog argv =
   let out = Filename.temp_file "disk-hygiene-out" ".txt" in
   let err = Filename.temp_file "disk-hygiene-err" ".txt" in
-  let wrapped =
-    Printf.sprintf "%s > %s 2> %s" full (quote out) (quote err)
+  let out_fd = Unix.openfile out [ Unix.O_WRONLY; Unix.O_TRUNC ] 0o600 in
+  let err_fd = Unix.openfile err [ Unix.O_WRONLY; Unix.O_TRUNC ] 0o600 in
+  let original_cwd = Sys.getcwd () in
+  let pid =
+    Fun.protect
+      ~finally:(fun () ->
+        Sys.chdir original_cwd;
+        Unix.close out_fd;
+        Unix.close err_fd)
+      (fun () ->
+        Sys.chdir cwd;
+        Unix.create_process_env prog argv (env_array env) Unix.stdin out_fd
+          err_fd)
   in
-  let code = Sys.command wrapped in
+  let _, status = Unix.waitpid [] pid in
+  let code =
+    match status with
+    | Unix.WEXITED code -> code
+    | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> 255
+  in
   let stdout = read_file out in
   let stderr = read_file err in
   Sys.remove out;
@@ -72,9 +93,13 @@ let run_shell ?(env = []) ~cwd cmd =
   (code, stdout, stderr)
 
 let init_repo dir =
-  ignore (run_shell ~cwd:dir "git init -q");
-  ignore (run_shell ~cwd:dir "git config user.email test@example.com");
-  ignore (run_shell ~cwd:dir "git config user.name tester")
+  ignore (run_process ~cwd:dir "git" [| "git"; "init"; "-q" |]);
+  ignore
+    (run_process ~cwd:dir "git"
+       [| "git"; "config"; "user.email"; "test@example.com" |]);
+  ignore
+    (run_process ~cwd:dir "git"
+       [| "git"; "config"; "user.name"; "tester" |])
 
 let copy_script ~repo_root rel_path =
   let src = Filename.concat (source_root ()) rel_path in
@@ -163,8 +188,7 @@ let test_disk_hygiene_fix_path () =
       in
       let script = Filename.concat repo_dir "scripts/disk-hygiene.sh" in
       let code1, stdout1, stderr1 =
-        run_shell ~cwd:repo_dir ~env
-          (Printf.sprintf "%s" (quote script))
+        run_process ~cwd:repo_dir ~env script [| script |]
       in
       check bool "warn-only run returns nonzero" true (code1 <> 0);
       check bool "reports dune cache warning" true
@@ -176,9 +200,13 @@ let test_disk_hygiene_fix_path () =
       check bool "stderr empty on report run" true (String.trim stderr1 = "");
 
       let code2, stdout2, stderr2 =
-        run_shell ~cwd:repo_dir ~env
-          (Printf.sprintf "%s --fix --reset-dune-cache --clean-extra-build-dirs"
-             (quote script))
+        run_process ~cwd:repo_dir ~env script
+          [|
+            script;
+            "--fix";
+            "--reset-dune-cache";
+            "--clean-extra-build-dirs";
+          |]
       in
       if code2 <> 0 then
         failf "disk hygiene fix failed (%d)\nstdout:\n%s\nstderr:\n%s"
@@ -229,7 +257,7 @@ let test_tla_check_cleans_generated_artifacts_by_default () =
       let env = [ ("PATH", path); ("TLC_DIR", tlc_dir) ] in
       let script = Filename.concat repo_dir "scripts/tla-check.sh" in
       let code, stdout, stderr =
-        run_shell ~cwd:repo_dir ~env (Printf.sprintf "%s" (quote script))
+        run_process ~cwd:repo_dir ~env script [| script |]
       in
       if code <> 0 then
         failf "tla-check failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout
@@ -268,7 +296,7 @@ let test_tla_check_respects_keep_tlc_artifacts () =
       in
       let script = Filename.concat repo_dir "scripts/tla-check.sh" in
       let code, stdout, stderr =
-        run_shell ~cwd:repo_dir ~env (Printf.sprintf "%s" (quote script))
+        run_process ~cwd:repo_dir ~env script [| script |]
       in
       if code <> 0 then
         failf "tla-check failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout

@@ -8,8 +8,44 @@ let make_parse_error (lexbuf : Lexing.lexbuf) : Parsed.parse_error =
   let token = Lexing.lexeme lexbuf in
   { pos; token; expected = [] (* populated in later PR *) }
 
+let is_env_name_start = function
+  | 'A' .. 'Z' | 'a' .. 'z' | '_' -> true
+  | _ -> false
+
+let is_env_name_char = function
+  | 'A' .. 'Z' | 'a' .. 'z' | '0' .. '9' | '_' -> true
+  | _ -> false
+
+let parse_env_assignment word =
+  match String.index_opt word '=' with
+  | None -> None
+  | Some 0 -> None
+  | Some idx ->
+    let name = String.sub word 0 idx in
+    if is_env_name_start name.[0]
+       && String.for_all is_env_name_char name
+    then (
+      let value =
+        String.sub word (idx + 1) (String.length word - idx - 1)
+      in
+      Some (name, Shell_ir.Lit value))
+    else None
+
+let split_env_prefix words =
+  let rec loop env = function
+    | [] -> Error { Parsed.pos = Lexing.dummy_pos; token = ""; expected = [ "command" ] }
+    | word :: rest ->
+      (match parse_env_assignment word with
+       | Some binding -> loop (binding :: env) rest
+       | None -> Ok (List.rev env, word, rest))
+  in
+  loop [] words
+
 let raw_to_simple (bin_str, args_str, redirects)
     : (Shell_ir.simple, Parsed.parse_error) result =
+  match split_env_prefix (bin_str :: args_str) with
+  | Error e -> Error e
+  | Ok (env, bin_str, args_str) -> (
   match Bin.of_string bin_str with
   | Error (`Unknown _) ->
     (* A0 guarantees Bin.of_string only errors on empty input.  That
@@ -21,11 +57,11 @@ let raw_to_simple (bin_str, args_str, redirects)
     Ok
       { Shell_ir.bin
       ; args
-      ; env = []
+      ; env
       ; cwd = None
       ; redirects
       ; sandbox = Sandbox_target.host ()
-      }
+      })
 
 let rec map_stages = function
   | [] -> Ok []
@@ -97,5 +133,6 @@ let parse_string (source : string) : Shell_ir.t Parsed.t =
     let raw = Bash_subset.command Bash_lexer.token lexbuf in
     to_shell_ir raw
   with
+  | Bash_lexer.Token_limit_exceeded -> Parsed.Parse_aborted `Token_limit_50k
   | Bash_subset.Error -> map_error_or_classify source lexbuf
   | Failure _ -> map_error_or_classify source lexbuf

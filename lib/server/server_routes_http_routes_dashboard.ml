@@ -1130,83 +1130,10 @@ let rec add_routes ~sw ~clock router =
 
   (* ── Agent API routes (extracted) ── *)
   |> Server_dashboard_http_agent_api.add_agent_api_routes
-  |> add_autoresearch_routes
+  |> add_keeper_cascade_routes
 
-(* ── Autoresearch routes ───────────────────────────────────────── *)
-
-and add_autoresearch_routes router =
+and add_keeper_cascade_routes router =
   router
-  (* Autoresearch loops list -- all active + persisted loops *)
-  |> Http.Router.get "/api/v1/autoresearch/loops" (fun request reqd ->
-       with_public_read (fun state req reqd ->
-         let base_path = state.Mcp_server.room_config.base_path in
-         let offset =
-           Server_utils.int_query_param req "offset" ~default:0
-           |> Server_utils.clamp ~min_v:0 ~max_v:1000000
-         in
-         let limit =
-           Server_utils.int_query_param req "limit" ~default:100
-           |> Server_utils.clamp ~min_v:1 ~max_v:1000
-         in
-         let json =
-           Dashboard_http_autoresearch.autoresearch_loops_json ~base_path ~offset ~limit ()
-         in
-         Http.Response.json ~compress:true ~request:req
-           (Yojson.Safe.to_string json) reqd
-       ) request reqd)
-
-  (* Autoresearch loops CSV export *)
-  |> Http.Router.get "/api/v1/autoresearch/loops/csv" (fun request reqd ->
-       with_public_read (fun state _req reqd ->
-         let base_path = state.Mcp_server.room_config.base_path in
-         let csv = Dashboard_http_autoresearch.autoresearch_loops_csv ~base_path in
-         let headers =
-           Httpun.Headers.of_list
-             [
-               ("content-type", "text/csv; charset=utf-8");
-               ("content-disposition", "attachment; filename=\"autoresearch_loops.csv\"");
-             ]
-         in
-         let response = Httpun.Response.create ~headers `OK in
-         Httpun.Reqd.respond_with_string reqd response csv
-       ) request reqd)
-
-  (* Autoresearch loop detail -- single loop with full cycle history *)
-  |> Http.Router.prefix_get "/api/v1/autoresearch/loops/" (fun request reqd ->
-       with_public_read (fun state req reqd ->
-         let base_path = state.Mcp_server.room_config.base_path in
-         let req_path = Http.Request.path req in
-         let prefix = "/api/v1/autoresearch/loops/" in
-         let loop_id =
-           String.trim
-             (String.sub req_path (String.length prefix)
-                (String.length req_path - String.length prefix))
-         in
-         if String.length loop_id = 0 then
-           Http.Response.json ~status:`Bad_request
-             {|{"error":"loop_id is required"}|} reqd
-         else
-           let history_limit =
-             Server_utils.int_query_param req "history_limit" ~default:100
-             |> Server_utils.clamp ~min_v:0 ~max_v:1000
-           in
-           match
-             Dashboard_http_autoresearch.autoresearch_loop_detail_json
-               ~base_path ~loop_id ~history_limit
-           with
-           | Ok json ->
-               Http.Response.json ~compress:true ~request:req
-                 (Yojson.Safe.to_string json) reqd
-           | Error msg ->
-               Http.Response.json ~status:`Not_found
-                 (Printf.sprintf {|{"error":"%s"}|} (String.escaped msg))
-                 reqd
-           | exception Invalid_argument msg ->
-               Http.Response.json ~status:`Not_found
-                 (Printf.sprintf {|{"error":"%s"}|} (String.escaped msg))
-               reqd
-       ) request reqd)
-
   (* ── Keeper cascade config API ──────────────────────────────── *)
 
   |> Http.Router.get "/api/v1/keeper/cascades" (fun request reqd ->

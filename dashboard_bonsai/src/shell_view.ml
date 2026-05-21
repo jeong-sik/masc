@@ -712,7 +712,6 @@ let nav ~(active : Route.t) =
     ; lnk Multimodal
     ; section "crypt"
     ; lnk Dead_keepers
-    ; lnk Archive_runs
     ]
 ;;
 

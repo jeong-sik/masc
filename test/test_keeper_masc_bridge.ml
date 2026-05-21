@@ -153,8 +153,6 @@ let test_full_preset_exposes_masc () =
   (* Governance tools are no longer in raw_all_tool_schemas *)
   Alcotest.(check bool) "no masc_governance_status" false
     (List.mem "masc_governance_status" names);
-  Alcotest.(check bool) "hides masc_autoresearch_cycle" false
-    (List.mem "masc_autoresearch_cycle" names);
   Alcotest.(check bool) "filters unsupported inline tool" false
     (List.mem "masc_who" names)
 
@@ -321,7 +319,7 @@ let test_tool_access_missing_defaults_standard_policy () =
   Alcotest.(check (list string)) "default keeps expected masc set"
     expected_legacy_masc_names legacy_masc_names;
   Alcotest.(check bool) "does not silently expand to full" false
-    (List.mem "masc_autoresearch_cycle" names)
+    (List.mem "masc_code_read" names)
 
 let test_read_meta_file_rejects_legacy_tool_keys () =
   let dir = temp_dir () in
@@ -591,8 +589,8 @@ let test_allowlist_gates_shard_tools () =
   Alcotest.(check bool) "has masc_status" true (List.mem "masc_status" names);
   Alcotest.(check bool) "has masc_tasks" true
     (List.mem "masc_tasks" names);
-  Alcotest.(check bool) "masc_autoresearch_cycle blocked by custom policy" false
-    (List.mem "masc_autoresearch_cycle" names)
+  Alcotest.(check bool) "masc_code_read blocked by custom policy" false
+    (List.mem "masc_code_read" names)
 
 let test_dispatch_unregistered () =
   let result =

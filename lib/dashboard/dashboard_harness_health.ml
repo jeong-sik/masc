@@ -856,9 +856,9 @@ let json ~(config : Coord.config) ?since ?until () =
     [ "generated_at", `Float (Time_compat.now ())
     ; ( "scope_note"
       , `String
-          "Autoresearch tracks the generator loop itself. The safety harness tracks \
-           supporting evaluator and long-running continuity rails, so these signals are \
-           related but not a direct keep/discard judge for each autoresearch cycle." )
+          "The safety harness tracks supporting evaluator and long-running continuity \
+           rails, so these signals are not a direct keep/discard judge for generator \
+           iterations." )
     ; ( "overview"
       , overview_json ~calibration ~recent_verdicts ~latest_pre_compact ~latest_handoff )
     ; "calibration", calibration

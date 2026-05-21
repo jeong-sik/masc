@@ -113,6 +113,7 @@ log_file="${FAKE_GH_LOG:?}"
 labels_file="${FAKE_GH_LABELS:?}"
 statuses_file="${FAKE_GH_STATUSES:-$labels_file.statuses}"
 draft_file="${FAKE_GH_DRAFT_STATE_FILE:-$labels_file.draft}"
+edit_body_file="${FAKE_GH_EDIT_BODY:-$labels_file.body}"
 cmd1="${1:-}"
 cmd2="${2:-}"
 printf '%s %s\n' "$cmd1" "$cmd2" >>"$log_file"
@@ -132,6 +133,11 @@ case "${cmd1}:${cmd2}" in
     args="$*"
     draft_state="$(cat "$draft_file" 2>/dev/null || printf 'true\n')"
     case "$args" in
+      *"body,commits,headRefName,baseRefName"*)
+        cat <<'JSON'
+{"body":"## Summary\nFake body\n","headRefName":"feature/macos-pr-open","baseRefName":"main","commits":[{"oid":"abcdef1234567890","messageHeadline":"feature commit","committedDate":"2026-05-21T00:00:00Z"}]}
+JSON
+        ;;
       *"state,isDraft,mergeStateStatus,headRefOid,url"*)
         printf 'state=OPEN draft=%s mergeState=CLEAN head=abc123\nurl=https://github.com/example/test/pull/42\n' "$draft_state"
         ;;
@@ -152,6 +158,9 @@ case "${cmd1}:${cmd2}" in
         fi
         ;;
     esac
+    ;;
+  pr:edit)
+    cat >"$edit_body_file"
     ;;
   pr:ready)
     printf 'true\n' >"$draft_file"
@@ -268,6 +277,13 @@ let test_script_runs_under_system_bash_without_watch () =
       check bool "sets draft guard status failure" true
         (contains_substring (read_file (gh_labels ^ ".statuses"))
            "Draft Auto-Merge Guard");
+      check bool "syncs commit lineage" true
+        (contains_substring log "pr edit");
+      let synced_body = read_file (gh_labels ^ ".body") in
+      check bool "writes commit lineage marker" true
+        (contains_substring synced_body "<!-- COMMIT-LINEAGE:START -->");
+      check bool "writes commit lineage commit subject" true
+        (contains_substring synced_body "feature commit");
       let labels = read_file gh_labels in
       check bool "adds enhancement label for code changes" true
         (contains_substring labels "\"enhancement\"");

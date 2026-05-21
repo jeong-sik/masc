@@ -160,6 +160,33 @@ let () =
 let () =
   with_eio @@ fun () ->
   let open Masc_exec.Shell_ir in
+  let sh_bin = Masc_exec.Bin.of_string "sh" |> Result.get_ok in
+  let host_sandbox = Masc_exec.Sandbox_target.host () in
+  let stage script =
+    Simple
+      {
+        bin = sh_bin;
+        args = [ Lit "-c"; Lit script ];
+        env = [];
+        cwd = None;
+        redirects = [];
+        sandbox = host_sandbox;
+      }
+  in
+  let result =
+    Masc_exec.Exec_dispatch.dispatch
+      (Pipeline
+         [
+           stage "echo left >&2; exit 7";
+           stage "echo right >&2; exit 3";
+         ])
+  in
+  assert (result.status = Unix.WEXITED 3);
+  assert (result.stderr = "left\nright\n")
+
+let () =
+  with_eio @@ fun () ->
+  let open Masc_exec.Shell_ir in
   let a_bin = Masc_exec.Bin.of_string "a" |> Result.get_ok in
   let b_bin = Masc_exec.Bin.of_string "b" |> Result.get_ok in
   let c_bin = Masc_exec.Bin.of_string "c" |> Result.get_ok in

@@ -750,6 +750,7 @@ let reconcile_fleet_capacity ctx =
   let target_count = List.length bootable_names in
   let phase_counts = fleet_supervisor_phase_counts ~base_path () in
   let shortfall = max 0 (target_count - phase_counts.running) in
+  (* NDT-OK: fleet capacity reconciliation uses wall-clock cooldown for live supervisor admission. *)
   let now = Unix.gettimeofday () in
   let sweep_sec = Runtime_params.get Governance_registry.keeper_supervisor_sweep_sec in
   let cooldown_seconds = Float.min 120.0 (Float.max 10.0 (sweep_sec *. 2.0)) in

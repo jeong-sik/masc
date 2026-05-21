@@ -75,6 +75,7 @@ type release = unit -> unit
 let record_rejected_full ~url ~active =
   Cascade_client_capacity_history.record
     {
+      (* NDT-OK: capacity rejection history is operator telemetry stamped at the runtime boundary. *)
       ts = Unix.gettimeofday ();
       key = url;
       kind = Rejected_full;

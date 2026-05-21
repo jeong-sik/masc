@@ -766,7 +766,11 @@ let authorize_same_origin_permission_request ~base_path ~permission ~endpoint re
           match resolve_agent_name_for_auth ~base_path request ~token with
           | Error err -> Error err
           | Ok agent_name_opt ->
-              let agent_name = Option.value ~default:"dashboard" agent_name_opt in
+              let agent_name =
+                match agent_name_opt with
+                | Some value -> value
+                | None -> "dashboard"
+              in
               if
                 auth_cfg.enabled && auth_cfg.require_token && token <> None
                 && agent_name_opt = None

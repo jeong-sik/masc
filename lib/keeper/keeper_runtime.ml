@@ -660,6 +660,153 @@ type keeper_bootstrap_stats = {
   recovering: int;
 }
 
+type fleet_supervisor_phase_counts = {
+  running : int;
+  failing : int;
+  executable : int;
+}
+
+let fleet_supervisor_phase_counts ~base_path () =
+  Keeper_registry.all ~base_path ()
+  |> List.fold_left
+       (fun acc (entry : Keeper_registry.registry_entry) ->
+          let executable =
+            if Keeper_state_machine.can_execute_turn entry.phase
+            then acc.executable + 1
+            else acc.executable
+          in
+          match entry.phase with
+          | Keeper_state_machine.Running ->
+            { acc with running = acc.running + 1; executable }
+          | Keeper_state_machine.Failing ->
+            { acc with failing = acc.failing + 1; executable }
+          | Keeper_state_machine.Offline
+          | Keeper_state_machine.Overflowed
+          | Keeper_state_machine.Compacting
+          | Keeper_state_machine.HandingOff
+          | Keeper_state_machine.Draining
+          | Keeper_state_machine.Paused
+          | Keeper_state_machine.Stopped
+          | Keeper_state_machine.Crashed
+          | Keeper_state_machine.Restarting
+          | Keeper_state_machine.Dead
+          | Keeper_state_machine.Zombie -> { acc with executable })
+       { running = 0; failing = 0; executable = 0 }
+
+let fleet_capacity_last_action_at : (string, float) Hashtbl.t =
+  Hashtbl.create 4
+
+let fleet_capacity_last_action_mu = Eio.Mutex.create ()
+
+let fleet_capacity_last_action base_path =
+  Eio_guard.with_mutex_ro fleet_capacity_last_action_mu (fun () ->
+    Hashtbl.find_opt fleet_capacity_last_action_at base_path)
+
+let record_fleet_capacity_action ~base_path ~ts =
+  Eio_guard.with_mutex fleet_capacity_last_action_mu (fun () ->
+    Hashtbl.replace fleet_capacity_last_action_at base_path ts)
+
+let is_keeper_start_candidate ~base_path name =
+  match Keeper_registry.get ~base_path name with
+  | None -> true
+  | Some entry ->
+    (match entry.phase with
+     | Keeper_state_machine.Stopped -> true
+     | Keeper_state_machine.Running
+     | Keeper_state_machine.Offline
+     | Keeper_state_machine.Failing
+     | Keeper_state_machine.Overflowed
+     | Keeper_state_machine.Compacting
+     | Keeper_state_machine.HandingOff
+     | Keeper_state_machine.Draining
+     | Keeper_state_machine.Paused
+     | Keeper_state_machine.Restarting
+     | Keeper_state_machine.Crashed
+     | Keeper_state_machine.Dead
+     | Keeper_state_machine.Zombie -> false)
+
+let fleet_capacity_start_candidate ctx ~name ~proactive_warmup_sec =
+  match load_or_materialize_boot_meta ctx name with
+  | Error err ->
+    Log.Keeper.warn
+      "fleet capacity supervisor: failed to load %s: %s"
+      name
+      err;
+    false
+  | Ok { meta; materialized = _ } ->
+    if meta.paused
+    then (
+      Log.Keeper.info
+        "fleet capacity supervisor: skip paused keeper %s"
+        meta.name;
+      false)
+    else (
+      Keeper_keepalive.start_keepalive ~proactive_warmup_sec ctx meta;
+      Keeper_registry.is_registered ~base_path:ctx.config.base_path meta.name)
+
+let reconcile_fleet_capacity ctx =
+  let base_path = ctx.config.base_path in
+  let bootable_names = bootable_keeper_names ctx.config in
+  let target_count = List.length bootable_names in
+  let phase_counts = fleet_supervisor_phase_counts ~base_path () in
+  let shortfall = max 0 (target_count - phase_counts.running) in
+  let now = Unix.gettimeofday () in
+  let sweep_sec = Runtime_params.get Governance_registry.keeper_supervisor_sweep_sec in
+  let cooldown_seconds = Float.min 120.0 (Float.max 10.0 (sweep_sec *. 2.0)) in
+  let decision =
+    Keeper_fleet_capacity_supervisor.tick
+      {
+        running_keeper_fiber_count = phase_counts.running;
+        target_reaction_capacity_count = target_count;
+        minimum_running_fibers = if target_count <= 1 then target_count else 2;
+        reaction_capacity_shortfall_count = shortfall;
+        admission_blocked_count = 0;
+        admission_queue_saturated_cap = 0;
+        disk_pressure_active = Keeper_disk_pressure.active ();
+        fd_pressure_active = Keeper_fd_pressure.active ();
+        cold_start_in_progress = false;
+        now;
+        last_action_at = fleet_capacity_last_action base_path;
+        cooldown_seconds;
+      }
+  in
+  match decision with
+  | Keeper_fleet_capacity_supervisor.Noop reason ->
+    Log.Keeper.debug
+      "fleet capacity supervisor: noop reason=%s running=%d target=%d"
+      (Keeper_fleet_capacity_supervisor.Noop_reason.to_string reason)
+      phase_counts.running
+      target_count
+  | Keeper_fleet_capacity_supervisor.Backpressure reason ->
+    Log.Keeper.warn
+      "fleet capacity supervisor: backpressure reason=%s running=%d target=%d"
+      (Keeper_fleet_capacity_supervisor.Backpressure_reason.to_string reason)
+      phase_counts.running
+      target_count
+  | Keeper_fleet_capacity_supervisor.Spawn { reason; suggested_keeper_count } ->
+    let candidates =
+      bootable_names
+      |> List.filter (is_keeper_start_candidate ~base_path)
+      |> take suggested_keeper_count
+    in
+    let proactive_warmup_sec = keeper_bootstrap_proactive_warmup_sec () in
+    let started =
+      candidates
+      |> List.filter (fun name ->
+        fleet_capacity_start_candidate ctx ~name ~proactive_warmup_sec)
+    in
+    if started <> []
+    then record_fleet_capacity_action ~base_path ~ts:now;
+    Log.Keeper.info
+      "fleet capacity supervisor: decision=spawn reason=%s requested=%d \
+       candidates=[%s] started=[%s] running=%d target=%d"
+      (Keeper_fleet_capacity_supervisor.Spawn_reason.to_string reason)
+      suggested_keeper_count
+      (String.concat ", " candidates)
+      (String.concat ", " started)
+      phase_counts.running
+      target_count
+
 let bootstrap_existing_keepers ctx : keeper_bootstrap_stats =
   if not Env_config.KeeperBootstrap.enabled then
     { scanned = 0; started = 0; stale = 0; recovering = 0 }
@@ -796,6 +943,14 @@ let start_supervisor_sweep ctx =
                ~labels:[("origin", "liveness_recovery")]
                ();
              Log.Keeper.error "liveness recovery scan failed: %s"
+               (Printexc.to_string exn));
+          (try reconcile_fleet_capacity ctx
+           with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+             Prometheus.inc_counter
+               Keeper_metrics.metric_keeper_supervisor_sweep_failures
+               ~labels:[("origin", "fleet_capacity")]
+               ();
+             Log.Keeper.error "fleet capacity supervisor failed: %s"
                (Printexc.to_string exn));
           (* #12838 Alive-but-stuck detector: emit a Prometheus counter
              (and a warn log) for keepers that are alive in every other

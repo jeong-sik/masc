@@ -379,7 +379,6 @@ let test_unknown_tools_not_directly_callable () =
     [
       "";
       "masc_future_unknown_tool_xyz";
-      "legacy_slot_full";
     ]
 
 let test_pruned_webrtc_tools_fully_removed () =

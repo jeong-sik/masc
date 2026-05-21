@@ -35,8 +35,6 @@ let with_eio_runtime f =
       Fs_compat.clear_fs ())
     f
 
-let quote = Filename.quote
-
 let with_env name value f =
   let previous = Sys.getenv_opt name in
   Unix.putenv name value;
@@ -47,22 +45,64 @@ let with_env name value f =
       | None -> Unix.putenv name "")
     f
 
-let run_ok ~cwd cmd =
-  let wrapped = Printf.sprintf "cd %s && %s > /dev/null 2>&1" (quote cwd) cmd in
-  let code = Sys.command wrapped in
-  if code <> 0 then failf "command failed (%d): %s" code cmd
+let read_file path =
+  In_channel.with_open_bin path In_channel.input_all
+
+let run_process ~cwd prog argv =
+  let out = Filename.temp_file "worktree-live-context-out" ".txt" in
+  let err = Filename.temp_file "worktree-live-context-err" ".txt" in
+  let out_fd = Unix.openfile out [ Unix.O_WRONLY; Unix.O_TRUNC ] 0o600 in
+  let err_fd = Unix.openfile err [ Unix.O_WRONLY; Unix.O_TRUNC ] 0o600 in
+  let original_cwd = Sys.getcwd () in
+  let pid =
+    Fun.protect
+      ~finally:(fun () ->
+        Sys.chdir original_cwd;
+        Unix.close out_fd;
+        Unix.close err_fd)
+      (fun () ->
+        Sys.chdir cwd;
+        Unix.create_process prog argv Unix.stdin out_fd err_fd)
+  in
+  let rec wait () =
+    try Unix.waitpid [] pid
+    with Unix.Unix_error (Unix.EINTR, _, _) -> wait ()
+  in
+  let _, status = wait () in
+  let code =
+    match status with
+    | Unix.WEXITED code -> code
+    | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> 255
+  in
+  let stdout = read_file out in
+  let stderr = read_file err in
+  Sys.remove out;
+  Sys.remove err;
+  (code, stdout, stderr)
+
+let run_process_ok ~cwd prog argv =
+  let code, stdout, stderr = run_process ~cwd prog argv in
+  if code <> 0 then
+    failf "command failed (%d): %s\nstdout:\n%s\nstderr:\n%s" code prog stdout
+      stderr
+
+let git_ok ~cwd args =
+  run_process_ok ~cwd "git" (Array.of_list ("git" :: args))
 
 let init_repo dir =
-  run_ok ~cwd:dir "git init -q";
-  run_ok ~cwd:dir "git config user.email test@example.com";
-  run_ok ~cwd:dir "git config user.name tester";
+  git_ok ~cwd:dir [ "init"; "-q" ];
+  git_ok ~cwd:dir [ "config"; "user.email"; "test@example.com" ];
+  git_ok ~cwd:dir [ "config"; "user.name"; "tester" ];
   write_file (Filename.concat dir ".gitignore") ".masc/\n";
   write_file (Filename.concat dir "sample.ml") "let value = 1\n";
   write_file (Filename.concat dir "other.ml") "let other = 1\n";
-  run_ok ~cwd:dir "git add .gitignore sample.ml other.ml && git -c core.hooksPath=/dev/null commit -q -m base"
+  git_ok ~cwd:dir [ "add"; ".gitignore"; "sample.ml"; "other.ml" ];
+  git_ok ~cwd:dir
+    [ "-c"; "core.hooksPath=/dev/null"; "commit"; "-q"; "-m"; "base" ]
 
 let test_capture_only_on_change () =
   with_temp_dir "worktree-live-context" (fun dir ->
+    with_eio_runtime (fun () ->
       init_repo dir;
       Wlc.clear_status_cache_for_tests ();
       check (option string) "clean repo produces no block" None
@@ -85,10 +125,11 @@ let test_capture_only_on_change () =
            true
          with Not_found -> false);
       check (option string) "same change not repeated" None
-        (Wlc.capture_change_block ~base_path:dir ~actor_key:"keeper-a"))
+        (Wlc.capture_change_block ~base_path:dir ~actor_key:"keeper-a")))
 
 let test_capture_distinguishes_new_changes () =
   with_temp_dir "worktree-live-context" (fun dir ->
+    with_eio_runtime (fun () ->
       init_repo dir;
       write_file (Filename.concat dir "sample.ml") "let value = 2\n";
       Wlc.clear_status_cache_for_tests ();
@@ -107,55 +148,57 @@ let test_capture_distinguishes_new_changes () =
                 (Str.regexp_string "other.ml")
                 block 0);
            true
-         with Not_found -> false))
+         with Not_found -> false)))
 
 let test_capture_change_block_in_eio_runtime () =
   with_temp_dir "worktree-live-context" (fun dir ->
+    with_eio_runtime (fun () ->
       init_repo dir;
       write_file (Filename.concat dir "sample.ml") "let value = 2\n";
       Wlc.clear_status_cache_for_tests ();
-      with_eio_runtime (fun () ->
-        let first = Wlc.capture_change_block ~base_path:dir ~actor_key:"keeper-a" in
-        check bool "changed repo produces block in eio" true (Option.is_some first);
-        check (option string) "same change not repeated in eio" None
-          (Wlc.capture_change_block ~base_path:dir ~actor_key:"keeper-a")))
+      let first = Wlc.capture_change_block ~base_path:dir ~actor_key:"keeper-a" in
+      check bool "changed repo produces block in eio" true (Option.is_some first);
+      check (option string) "same change not repeated in eio" None
+        (Wlc.capture_change_block ~base_path:dir ~actor_key:"keeper-a")))
 
 let test_current_status_lines_uses_short_cache_and_no_optional_locks () =
-  Wlc.clear_status_cache_for_tests ();
-  let calls = ref [] in
-  Wlc.set_git_capture_hook_for_tests (fun ~workdir:_ args ->
+  with_eio_runtime (fun () ->
+    Wlc.clear_status_cache_for_tests ();
+    let calls = ref [] in
+    Wlc.set_git_capture_hook_for_tests (fun ~workdir:_ args ->
       calls := args :: !calls;
       Some [ " M sample.ml" ]);
-  Fun.protect
-    ~finally:(fun () ->
-      Wlc.clear_git_capture_hook_for_tests ();
-      Wlc.clear_status_cache_for_tests ())
-    (fun () ->
-      let first = Wlc.current_status_lines ~repo_root:"/tmp/repo" in
-      let second = Wlc.current_status_lines ~repo_root:"/tmp/repo" in
-      check (list string) "first status" [ "M sample.ml" ] first;
-      check (list string) "second status" [ "M sample.ml" ] second;
-      check int "git status called once" 1 (List.length !calls);
-      check (list string) "git status args"
-        [ "--no-optional-locks"; "status"; "--porcelain"; "--untracked-files=no" ]
-        (List.hd !calls))
+    Fun.protect
+      ~finally:(fun () ->
+        Wlc.clear_git_capture_hook_for_tests ();
+        Wlc.clear_status_cache_for_tests ())
+      (fun () ->
+        let first = Wlc.current_status_lines ~repo_root:"/tmp/repo" in
+        let second = Wlc.current_status_lines ~repo_root:"/tmp/repo" in
+        check (list string) "first status" [ "M sample.ml" ] first;
+        check (list string) "second status" [ "M sample.ml" ] second;
+        check int "git status called once" 1 (List.length !calls);
+        check (list string) "git status args"
+          [ "--no-optional-locks"; "status"; "--porcelain"; "--untracked-files=no" ]
+          (List.hd !calls)))
 
 let test_current_status_lines_caches_clean_status () =
-  Wlc.clear_status_cache_for_tests ();
-  let calls = ref 0 in
-  Wlc.set_git_capture_hook_for_tests (fun ~workdir:_ _args ->
+  with_eio_runtime (fun () ->
+    Wlc.clear_status_cache_for_tests ();
+    let calls = ref 0 in
+    Wlc.set_git_capture_hook_for_tests (fun ~workdir:_ _args ->
       incr calls;
       Some []);
-  Fun.protect
-    ~finally:(fun () ->
-      Wlc.clear_git_capture_hook_for_tests ();
-      Wlc.clear_status_cache_for_tests ())
-    (fun () ->
-      check (list string) "first clean status" []
-        (Wlc.current_status_lines ~repo_root:"/tmp/repo");
-      check (list string) "second clean status" []
-        (Wlc.current_status_lines ~repo_root:"/tmp/repo");
-      check int "clean status is cached" 1 !calls)
+    Fun.protect
+      ~finally:(fun () ->
+        Wlc.clear_git_capture_hook_for_tests ();
+        Wlc.clear_status_cache_for_tests ())
+      (fun () ->
+        check (list string) "first clean status" []
+          (Wlc.current_status_lines ~repo_root:"/tmp/repo");
+        check (list string) "second clean status" []
+          (Wlc.current_status_lines ~repo_root:"/tmp/repo");
+        check int "clean status is cached" 1 !calls))
 
 let test_git_status_timeout_defaults_to_30_seconds () =
   with_env "MASC_WORKTREE_GIT_STATUS_TIMEOUT_SEC" "" (fun () ->

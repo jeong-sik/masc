@@ -115,16 +115,16 @@ let handle_get_mapping state keeper_id req reqd =
             (Yojson.Safe.to_string (mapping_json mapping))
             reqd
       | None ->
-          (* No mapping is intentionally treated as wildcard access for backward
-             compatibility with pre-repository keepers. *)
-          Http.Response.json ~compress:true ~request:req
+          Http.Response.json ~status:`Not_found ~request:req
             (Yojson.Safe.to_string
-               (mapping_json
-                  {
-                    Repo_manager_types.keeper_id;
-                    repository_ids = ["*"];
-                    github_credential_id = None;
-                  }))
+               (`Assoc
+                 [
+                   ("ok", `Bool false);
+                   ( "error",
+                     `String
+                       (Printf.sprintf "No mapping found for keeper: %s"
+                          keeper_id) );
+                 ]))
             reqd)
 
 let credential_type_label = function

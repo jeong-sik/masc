@@ -325,7 +325,6 @@
   test_exec_shell_command_gate
   test_shell_ir_validator
   test_typed_advisor_counters
-  test_typed_authority_flag
   test_auth_resolve_labels
   test_keeper_classifier_helper
   test_persona_tool_reachability
@@ -648,7 +647,6 @@
   test_exec_shell_command_gate
   test_shell_ir_validator
   test_typed_advisor_counters
-  test_typed_authority_flag
   test_auth_resolve_labels
   test_keeper_classifier_helper
   test_persona_tool_reachability
@@ -1138,6 +1136,7 @@
   test_keeper_safety_gates
   test_keeper_guards
   test_keeper_working_state
+  test_keeper_wip_admission
   test_eval_gate_evasion
   test_prompt_registry_defaults
   test_keeper_prompt_external

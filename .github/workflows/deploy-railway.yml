@@ -74,12 +74,12 @@ jobs:
 
       - name: Check shared library resolution
         run: |
-          docker run --rm masc-mcp-railway-smoke sh -lc '
+          docker run --rm -i masc-mcp-railway-smoke sh -s <<'SH'
             set -e
             out="$(ldd /app/masc-mcp)"
             printf "%s\n" "$out"
             ! printf "%s\n" "$out" | grep -q "not found"
-          '
+          SH
 
       - name: Smoke deployment image
         run: |

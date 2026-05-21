@@ -148,72 +148,13 @@ let first_nul_field output =
       let trimmed = String.trim output in
       if trimmed = "" then None else Some trimmed
 
-let keeper_toml_path ~config ~agent_name =
-  let keeper_name = Playground_paths.sanitize_keeper_name agent_name in
-  Filename.concat
-    (Filename.concat
-       (Filename.concat
-          (masc_dir_from_base_path ~base_path:config.base_path)
-          "config")
-       "keepers")
-    (keeper_name ^ ".toml")
-
-let strip_inline_comment line =
-  match String.index_opt line '#' with
-  | Some idx -> String.sub line 0 idx
-  | None -> line
-
-let unquote value =
-  let len = String.length value in
-  if len >= 2 && value.[0] = '"' && value.[len - 1] = '"'
-  then String.sub value 1 (len - 2)
-  else value
-
-let keeper_uses_docker_sandbox ~config ~agent_name =
-  let path = keeper_toml_path ~config ~agent_name in
-  if not (safe_file_exists path) then false
-  else
-    try
-      let lines =
-        Fs_compat.load_file path |> String.split_on_char '\n'
-      in
-      let rec loop in_keeper = function
-        | [] -> false
-        | raw_line :: rest ->
-            let line =
-              raw_line |> strip_inline_comment |> String.trim
-            in
-            if line = "" then loop in_keeper rest
-            else if String.length line > 0 && line.[0] = '[' then
-              loop (String.equal line "[keeper]") rest
-            else if
-              in_keeper
-              && String.starts_with ~prefix:"sandbox_profile" line
-            then
-              let value =
-                match String.index_opt line '=' with
-                | None -> ""
-                | Some idx ->
-                    String.sub line (idx + 1) (String.length line - idx - 1)
-                    |> String.trim
-                    |> unquote
-                    |> String.lowercase_ascii
-              in
-              String.equal value "docker"
-            else
-              loop in_keeper rest
-      in
-      loop false lines
-    with Sys_error _ -> false
-
 let repos_dir_of_keeper config agent_name =
-  let safe_name = Playground_paths.sanitize_keeper_name agent_name in
   let repos_rel =
-    if keeper_uses_docker_sandbox ~config ~agent_name then
-      Printf.sprintf "%s/docker/%s/repos/"
-        Playground_paths.all_playgrounds_prefix safe_name
-    else
-      Playground_paths.repos_path agent_name
+    Filename.concat
+      (Keeper_sandbox_config.host_root_rel_of_agent
+         ~base_path:config.base_path
+         ~agent_name)
+      "repos"
   in
   Filename.concat config.base_path repos_rel
 
@@ -224,33 +165,11 @@ let strip_trailing_slashes path =
   let len = loop (String.length path) in
   if len = String.length path then path else String.sub path 0 len
 
-let suffix_under ~prefix path =
-  let prefix = strip_trailing_slashes prefix in
-  let path = strip_trailing_slashes path in
-  if String.equal path prefix then Some ""
-  else
-    let prefix_with_sep = prefix ^ "/" in
-    if String.starts_with ~prefix:prefix_with_sep path then
-      Some
-        (String.sub path (String.length prefix_with_sep)
-           (String.length path - String.length prefix_with_sep))
-    else None
-
 let keeper_visible_worktree_path ~config ~agent_name ~host_path =
-  if not (keeper_uses_docker_sandbox ~config ~agent_name) then host_path
-  else
-    let safe_name = Playground_paths.sanitize_keeper_name agent_name in
-    let container_repos_dir =
-      Filename.concat
-        (Filename.concat
-           Env_config_keeper.DockerPlayground.container_playground_root
-           safe_name)
-        "repos"
-    in
-    match suffix_under ~prefix:(repos_dir_of_keeper config agent_name) host_path with
-    | Some "" -> container_repos_dir
-    | Some suffix -> Filename.concat container_repos_dir suffix
-    | None -> host_path
+  Keeper_sandbox_config.visible_path_of_host_path
+    ~base_path:config.base_path
+    ~agent_name
+    ~host_path
 
 let worktree_next_step keeper_path =
   Printf.sprintf

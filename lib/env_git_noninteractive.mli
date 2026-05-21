@@ -22,9 +22,6 @@ val env_pairs : string list
 val docker_args : string list
 (** Flattened ["-e"; "K=V"; ...] pairs for direct [docker run] argv. *)
 
-val docker_env_args : string list
-(** Backwards-compatible alias for {!docker_args}. *)
-
 val inject_into_environment : string array -> string array
 (** Prepend {!env_pairs} to [env], stripping any pre-existing entries
     with matching keys so the canonical value wins. Preserves the order of

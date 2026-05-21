@@ -31,9 +31,18 @@ type network_mode =
   | Network_inherit [@tla.symbol "Network_inherit"]
 [@@deriving tla]
 
-let sandbox_profile_to_string = function
-  | Local -> "local"
-  | Docker -> "docker"
+let sandbox_profile_to_config = function
+  | Local -> Keeper_sandbox_config.Local
+  | Docker -> Keeper_sandbox_config.Docker
+
+let sandbox_profile_of_config = function
+  | Keeper_sandbox_config.Local -> Local
+  | Keeper_sandbox_config.Docker -> Docker
+
+let sandbox_profile_to_string profile =
+  profile
+  |> sandbox_profile_to_config
+  |> Keeper_sandbox_config.sandbox_profile_to_string
 ;;
 
 let reserved_cascade_names =
@@ -44,40 +53,11 @@ let reserved_cascade_names =
 ;;
 
 (** Parse a sandbox profile string. Canonical values are ["local"] and
-    ["docker"]. Legacy names ["legacy_local"], ["docker_hardened"], and
-    ["docker_with_git"] are still accepted for backward compatibility
-    with existing keeper JSON/TOML; they map to the new variants and
-    [load_keeper_sandbox_profile_with_warning] below emits a warning. *)
+    ["docker"]. *)
 let sandbox_profile_of_string raw =
-  match String.trim (String.lowercase_ascii raw) with
-  | "local" -> Some Local
-  | "docker" -> Some Docker
-  (* Temporary compatibility layer — remove after all config/state files
-     have been migrated to the canonical names. Keep in ONE place so the
-     eventual removal is a single diff. *)
-  | "legacy_local" -> Some Local
-  | "docker_hardened" -> Some Docker
-  | "docker_with_git" -> Some Docker
-  | _ -> None
-;;
-
-(** Same as [sandbox_profile_of_string] but emits a warning when a
-    deprecated string is encountered. Call from the boundary that reads
-    keeper state/config files so operators see drift in the server log. *)
-let sandbox_profile_of_string_with_warning ~source raw =
-  let trimmed = String.trim (String.lowercase_ascii raw) in
-  (match trimmed with
-   | "legacy_local" | "docker_hardened" | "docker_with_git" ->
-     Log.Keeper.warn
-       "%s: sandbox_profile %S is deprecated, mapped to %S"
-       source
-       trimmed
-       (match trimmed with
-        | "legacy_local" -> "local"
-        | "docker_hardened" | "docker_with_git" -> "docker"
-        | _ -> trimmed)
-   | _ -> ());
-  sandbox_profile_of_string raw
+  raw
+  |> Keeper_sandbox_config.sandbox_profile_of_string
+  |> Option.map sandbox_profile_of_config
 ;;
 
 (* Issue #8467: Variant SSOT — adding a constructor to [sandbox_profile]
@@ -85,7 +65,7 @@ let sandbox_profile_of_string_with_warning ~source raw =
    [valid_sandbox_profile_strings] so [keeper_schema] picks it up via
    the mirror declared there. *)
 let all_sandbox_profiles = [ Local; Docker ]
-let valid_sandbox_profile_strings = List.map sandbox_profile_to_string all_sandbox_profiles
+let valid_sandbox_profile_strings = Keeper_sandbox_config.valid_sandbox_profile_strings
 
 let network_mode_to_string = function
   | Network_none -> "none"

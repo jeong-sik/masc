@@ -134,6 +134,32 @@ let test_channel_yojson_backward_compat () =
        (Agent_identity.channel_to_yojson
           (Agent_identity.External "  Custom-Edge  ")))
 
+let pp_archetype fmt archetype =
+  Format.fprintf fmt "%s" (Agent_identity.archetype_to_string archetype)
+
+let archetype = testable pp_archetype ( = )
+
+let test_archetype_parser_strict () =
+  check (option archetype) "canonical" (Some Agent_identity.Melchior)
+    (Agent_identity.archetype_of_string_opt "melchior");
+  check (option archetype) "alias" (Some Agent_identity.Casper)
+    (Agent_identity.archetype_of_string_opt "planner");
+  check (option archetype) "generalist explicit" (Some Agent_identity.Generalist)
+    (Agent_identity.archetype_of_string_opt "generalist");
+  check (option archetype) "unknown is drift" None
+    (Agent_identity.archetype_of_string_opt "planner-ish")
+
+let test_get_archetype_fallback_is_boundary_local () =
+  let base = Agent_identity.from_agent_name "archetype-agent" in
+  check archetype "known metadata" Agent_identity.Melchior
+    (Agent_identity.get_archetype
+       { base with Agent_identity.metadata = [ ("archetype", "tech") ] });
+  check archetype "unknown metadata fallback" Agent_identity.Generalist
+    (Agent_identity.get_archetype
+       { base with Agent_identity.metadata = [ ("archetype", "planner-ish") ] });
+  check archetype "missing metadata fallback" Agent_identity.Generalist
+    (Agent_identity.get_archetype base)
+
 let test_same_agent () =
   let id1 = Agent_identity.from_agent_name "agent-a" in
   let id2 = { id1 with Agent_identity.last_seen = Unix.gettimeofday () +. 100.0 } in
@@ -271,6 +297,9 @@ let () =
       test_case "channel_normalization" `Quick test_channel_normalization;
       test_case "channel_yojson_backward_compat" `Quick
         test_channel_yojson_backward_compat;
+      test_case "archetype_parser_strict" `Quick test_archetype_parser_strict;
+      test_case "get_archetype_fallback_is_boundary_local" `Quick
+        test_get_archetype_fallback_is_boundary_local;
       test_case "same_agent" `Quick test_same_agent;
       test_case "to_display_string" `Quick test_to_display_string;
       test_case "to_display_string_empty_session_key" `Quick test_to_display_string_empty_session_key;

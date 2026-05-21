@@ -8,7 +8,7 @@ module Types = Masc_domain
     3. SDK alias tools have consistent visibility with Tool_catalog
     4. Annotation overrides in Tool_catalog take precedence
     5. Public MCP surface is a valid subset of the full registry
-    6. Non-public tools remain callable via dispatch *)
+    6. Explicit system-internal tools remain callable via dispatch *)
 
 module Tool_catalog = Masc_mcp.Tool_catalog
 module Agent_tool_surfaces = Masc_mcp.Agent_tool_surfaces

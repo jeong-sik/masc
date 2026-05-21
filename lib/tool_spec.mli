@@ -90,6 +90,8 @@ val register : t -> unit
     - [Tool_dispatch.init_read_only_set] (if [is_read_only])
     - [Tool_dispatch.init_requires_join_set] (if [requires_join])
     - [Tool_catalog.register_metadata] (visibility, lifecycle, semantic flags)
+      while preserving existing optional catalog fields when the spec does not
+      override them.
 
     @raise Invalid_argument if [name] is empty. *)
 

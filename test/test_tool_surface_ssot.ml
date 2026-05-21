@@ -360,6 +360,28 @@ let test_system_internal_callable () =
       (String.concat ", " uncallable);
   Alcotest.(check bool) "all system_internal callable" true (uncallable = [])
 
+let test_unknown_tools_not_directly_callable () =
+  (* Removed legacy names must not survive as hidden-callable catalog fallbacks.
+     Hidden callability is only valid when a tool is explicitly registered or
+     belongs to a callable internal surface. *)
+  List.iter
+    (fun name ->
+      Alcotest.(check bool) (name ^ " not visible") false
+        (Tool_catalog.is_visible name);
+      Alcotest.(check bool) (name ^ " not directly callable") false
+        (Tool_catalog.allow_direct_call name);
+      Alcotest.(check bool) (name ^ " no explicit metadata") true
+        (Option.is_none (Tool_catalog.registered_metadata name));
+      Alcotest.(check bool) (name ^ " not system-internal") false
+        (Tool_catalog.is_on_surface Tool_catalog.System_internal name);
+      Alcotest.(check bool) (name ^ " not keeper-internal") false
+        (Tool_catalog.is_on_surface Tool_catalog.Keeper_internal name))
+    [
+      "";
+      "masc_future_unknown_tool_xyz";
+      "legacy_slot_full";
+    ]
+
 let test_pruned_webrtc_tools_fully_removed () =
   (* WebRTC signaling remains available through HTTP /webrtc/* endpoints,
      but the legacy MCP tool names are no longer retained as deprecated
@@ -373,6 +395,8 @@ let test_pruned_webrtc_tools_fully_removed () =
         (List.mem name deprecated_names);
       Alcotest.(check bool) (name ^ " not visible") false
         (Tool_catalog.is_visible name);
+      Alcotest.(check bool) (name ^ " not directly callable") false
+        (Tool_catalog.allow_direct_call name);
       Alcotest.(check bool) (name ^ " no explicit metadata") true
         (Option.is_none (Tool_catalog.registered_metadata name));
       Alcotest.(check bool) (name ^ " not on system surface") false
@@ -490,6 +514,8 @@ let () =
             test_system_internal_not_visible;
           Alcotest.test_case "System_internal callable" `Quick
             test_system_internal_callable;
+          Alcotest.test_case "unknown tools not directly callable" `Quick
+            test_unknown_tools_not_directly_callable;
           Alcotest.test_case "pruned webrtc tools fully removed" `Quick
             test_pruned_webrtc_tools_fully_removed;
         ] );

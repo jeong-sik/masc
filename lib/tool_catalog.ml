@@ -413,12 +413,13 @@ let metadata name =
           allow_direct_call_when_hidden = true;
           reason = Some "System-internal tool; callable but not listed in tools/list." }
       else
-        (* Non-public, non-explicit tools are internal: hidden from tools/list
-           but callable via tools/call (tool_allowed_in_profile uses include_hidden). *)
+        (* Unknown, non-explicit names are not implicitly internal.  Hidden
+           callability must come from an explicit surface or metadata entry so
+           removed legacy aliases cannot survive as callable catalog fallbacks. *)
         { default_metadata with
           visibility = Hidden;
-          allow_direct_call_when_hidden = true;
-          reason = Some "Internal tool; not on public MCP surface." }
+          allow_direct_call_when_hidden = false;
+          reason = Some "Unknown tool; not registered on a callable surface." }
   in
   let with_surface_visibility =
     if is_system_internal then

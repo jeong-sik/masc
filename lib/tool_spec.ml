@@ -135,27 +135,41 @@ let register (spec : t) =
     spec.allow_direct_call_when_hidden || is_system_internal
   in
   let existing = Tool_catalog.registered_metadata spec.name in
+  let preserve_optional value project =
+    match value with
+    | Some _ -> value
+    | None -> Option.bind existing project
+  in
   let requires_actor_binding =
     match spec.requires_actor_binding with
     | Some _ as value -> value
     | None when spec.requires_join -> Some true
     | None ->
         Option.bind existing (fun (meta : Tool_catalog.metadata) ->
-          meta.requires_actor_binding)
+            meta.requires_actor_binding)
   in
   Tool_catalog.register_metadata spec.name
     { Tool_catalog.visibility = effective_visibility;
       lifecycle = spec.lifecycle;
       implementation_status = spec.implementation_status;
-      canonical_name = spec.canonical_name;
-      replacement = spec.replacement;
-      reason = spec.reason;
+      canonical_name =
+        preserve_optional spec.canonical_name (fun (meta : Tool_catalog.metadata) ->
+            meta.canonical_name);
+      replacement =
+        preserve_optional spec.replacement (fun (meta : Tool_catalog.metadata) ->
+            meta.replacement);
+      reason =
+        preserve_optional spec.reason (fun (meta : Tool_catalog.metadata) -> meta.reason);
       allow_direct_call_when_hidden = effective_allow_direct;
       readonly = Some spec.is_read_only;
       destructive = Some spec.is_destructive;
       idempotent = Some spec.is_idempotent;
-      required_permission = spec.required_permission;
-      effect_domain = spec.effect_domain;
+      required_permission =
+        preserve_optional spec.required_permission (fun (meta : Tool_catalog.metadata) ->
+            meta.required_permission);
+      effect_domain =
+        preserve_optional spec.effect_domain (fun (meta : Tool_catalog.metadata) ->
+            meta.effect_domain);
       requires_actor_binding };
   (* 5. Handler binding — auto-register Direct/Shared into Tool_dispatch *)
   (match spec.handler_binding with

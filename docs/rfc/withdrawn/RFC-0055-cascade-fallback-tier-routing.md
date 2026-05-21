@@ -1,3 +1,13 @@
+---
+title: Cascade Fallback Chain Capability-Tier Routing
+rfc: 0055
+status: Withdrawn
+created: 2026-05-09
+withdrawn_date: 2026-05-21
+superseded_by: RFC-0058
+withdrawn_reason: "Self-declared superseded by RFC-0058 in original body (2026-05-11): RFC-0058 §1 Supersedes ledger explicitly absorbs the capability-tier routing concern via the declarative cascade config schema. Archived for history."
+---
+
 # RFC-0055: Cascade Fallback Chain Capability-Tier Routing
 
 **Status**: Superseded by RFC-0058 (declarative cascade config — RFC-0058 §1 / Supersedes ledger explicitly absorbs the capability-tier routing concern)  

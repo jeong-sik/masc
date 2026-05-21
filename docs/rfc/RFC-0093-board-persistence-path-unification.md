@@ -1,9 +1,9 @@
 ---
 rfc: "0093"
 title: "Board persistence — path unification (snapshot vs append)"
-status: Active
+status: Implemented
 created: 2026-05-17
-updated: 2026-05-20
+updated: 2026-05-22
 author: vincent
 supersedes: []
 superseded_by: null

@@ -646,14 +646,24 @@ const TERMINAL_REASON_CODE_LABELS: Record<string, string> = {
   registry_phase_missing: '레지스트리 phase 누락',
 }
 
+// Parameterized-prefix lookup for terminal reason codes that carry
+// a dynamic suffix after a colon (e.g. `api_error_server:503`).
+// The prefix is the known part; the suffix is opaque detail.
+const TERMINAL_REASON_PREFIX_LABELS: ReadonlyArray<{
+  readonly prefix: string
+  readonly label: string
+}> = [
+  { prefix: 'api_error_server:', label: 'API 서버 오류' },
+  { prefix: 'completion_contract_violation:', label: '완료 계약 위반' },
+]
+
 export function terminalReasonCodeLabel(value: string | null | undefined): string | null {
   if (!value) return null
   const exact = TERMINAL_REASON_CODE_LABELS[value]
   if (exact) return exact
-  // Parameterized prefixes: `api_error_server:<status>`,
-  // `completion_contract_violation:<detail>`.
-  if (value.startsWith('api_error_server:')) return 'API 서버 오류'
-  if (value.startsWith('completion_contract_violation:')) return '완료 계약 위반'
+  for (const { prefix, label } of TERMINAL_REASON_PREFIX_LABELS) {
+    if (value.startsWith(prefix)) return label
+  }
   return value
 }
 

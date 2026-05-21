@@ -63,6 +63,16 @@ ROOT="${ROOT%/}"
 worktrees_dirs=0
 worktree_entries=0
 top_holder_fd_count=0
+fanout_tmp="$(mktemp "${TMPDIR:-/tmp}/masc-docker-playground-fanout.XXXXXX")"
+holders_tmp=""
+
+cleanup_tmp() {
+  rm -f "$fanout_tmp"
+  if [ -n "$holders_tmp" ]; then
+    rm -f "$holders_tmp"
+  fi
+}
+trap cleanup_tmp EXIT
 
 if [ -d "$ROOT" ]; then
   for keeper_dir in "$ROOT"/*; do
@@ -73,11 +83,18 @@ if [ -d "$ROOT" ]; then
       [ -d "$repo_dir" ] || continue
       worktrees_dir="$repo_dir/.worktrees"
       [ -d "$worktrees_dir" ] || continue
+      repo_entries=0
       worktrees_dirs=$((worktrees_dirs + 1))
       for wt_path in "$worktrees_dir"/*; do
         [ -d "$wt_path" ] || continue
         worktree_entries=$((worktree_entries + 1))
+        repo_entries=$((repo_entries + 1))
       done
+      if [ "$repo_entries" -gt 0 ]; then
+        printf '%s %s %s %s\n' "$repo_entries" \
+          "$(basename "$keeper_dir")" "$(basename "$repo_dir")" "$worktrees_dir" \
+          >>"$fanout_tmp"
+      fi
     done
   done
 fi
@@ -87,6 +104,39 @@ echo "worktrees_dirs=$worktrees_dirs"
 echo "worktree_entries=$worktree_entries"
 echo "worktree_warn_threshold=$WORKTREE_WARN"
 echo "fd_warn_threshold=$FD_WARN"
+
+echo ""
+echo "Top worktree fanout by keeper/repo:"
+echo "worktree_fanout_columns=count keeper repo worktrees_dir"
+if [ -s "$fanout_tmp" ]; then
+  sort -rn "$fanout_tmp" | head -n "$LIMIT"
+else
+  echo "0 none none none"
+fi
+
+emit_top_fanout_action() {
+  [ -s "$fanout_tmp" ] || return 0
+  local top_fanout_line top_fanout_count top_fanout_keeper top_fanout_repo
+  local quoted_root quoted_keeper quoted_repo
+  top_fanout_line="$(sort -rn "$fanout_tmp" | head -n 1)"
+  set -- $top_fanout_line
+  top_fanout_count="${1:-0}"
+  top_fanout_keeper="${2:-}"
+  top_fanout_repo="${3:-}"
+  [ "$top_fanout_count" -gt 0 ] || return 0
+  [ -n "$top_fanout_keeper" ] || return 0
+  [ -n "$top_fanout_repo" ] || return 0
+  quoted_root="$(printf '%q' "$ROOT")"
+  quoted_keeper="$(printf '%q' "$top_fanout_keeper")"
+  quoted_repo="$(printf '%q' "$top_fanout_repo")"
+  echo "top_fanout_count=$top_fanout_count"
+  echo "top_fanout_keeper=$top_fanout_keeper"
+  echo "top_fanout_repo=$top_fanout_repo"
+  echo "top_fanout_cleanup_dry_run_command=scripts/cleanup-docker-playground-worktrees.sh --root $quoted_root --keeper $quoted_keeper --repo $quoted_repo --days 7"
+  echo "top_fanout_broken_dry_run_command=scripts/cleanup-docker-playground-worktrees.sh --root $quoted_root --keeper $quoted_keeper --repo $quoted_repo --days 7 --include-broken"
+}
+
+emit_top_fanout_action
 
 emit_hotspot_status() {
   local hotspot_status="ok"
@@ -125,7 +175,6 @@ fi
 echo ""
 echo "Top FD holders referencing root:"
 holders_tmp="$(mktemp "${TMPDIR:-/tmp}/masc-docker-playground-fd.XXXXXX")"
-trap 'rm -f "$holders_tmp"' EXIT
 if lsof -n -P +c 64 2>/dev/null \
   | awk -v root="$ROOT/" '
       NR > 1 {

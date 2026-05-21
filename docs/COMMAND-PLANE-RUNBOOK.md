@@ -206,6 +206,12 @@ count. Keep the script above as the default visibility path. Set a positive
 `MASC_KEEPER_HOST_FD_HOTSPOT_HEADROOM` only for a deliberately conservative
 operator session.
 
+The status script prints `Top worktree fanout by keeper/repo` and a
+`top_fanout_cleanup_dry_run_command=` for the largest keeper/repo bucket. Use
+that targeted dry-run first when `worktree_entries` is high but
+`top_holder_fd_count=0`; it separates broad playground pressure from an active
+Docker Desktop FD holder spike.
+
 For a broader host check, `scripts/nofile-status.sh` includes this same Docker
 playground section when `MASC_BASE_PATH` or `MASC_DOCKER_PLAYGROUND_ROOT` is
 set. Its `hotspot_status=warning` output is advisory: review the printed

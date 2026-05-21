@@ -298,8 +298,12 @@ let load ~base_path : (t, string) result =
         | _ :: _ -> Error (Printf.sprintf "in %s: %s" path (String.concat "; " all_errors))
         | [] ->
           (* Validate tool names against the keeper-facing policy surface.
-             Skip shard-backed groups because their members resolve from
-             [Tool_shard] at runtime. *)
+             [Static] tools resolve from the registry now; [Shard_ref] tools
+             resolve from [Tool_shard] at runtime — but we validate the shard
+             name exists at load time so stale [Shard_ref]s surface as
+             load-time warnings rather than per-resolution
+             "shard 'X' not found, returning empty" noise (observed
+             ~31k WARN/day from one stale ref). *)
           let unknown_tools =
             Hashtbl.fold (fun group_name (group : group_source) acc ->
               match group with
@@ -308,7 +312,14 @@ let load ~base_path : (t, string) result =
                     unresolved_tool_message ~label:(Printf.sprintf "groups.%s" group_name) ~name:t
                   ) tools
                   |> List.rev_append acc
-              | Shard_ref _ -> acc
+              | Shard_ref shard_name ->
+                  (match Tool_shard.get_shard shard_name with
+                   | Some _ -> acc
+                   | None ->
+                       Printf.sprintf
+                         "groups.%s: shard '%s' is not registered in Tool_shard"
+                         group_name shard_name
+                       :: acc)
             ) groups []
           in
           let unknown_masc_tools =
@@ -350,7 +361,11 @@ let resolve_group_source = function
     | Some shard ->
       shard.tools |> List.map (fun (t : Masc_domain.tool_schema) -> t.name)
     | None ->
-      Log.Keeper.warn "tool_policy_config: shard '%s' not found, returning empty" shard_name;
+      (* Missing shards are surfaced once per load by [load_config] via
+         [unknown_tools] (groups.X: shard 'Y' is not registered). The
+         runtime path stays silent — emitting a WARN per resolution
+         produced 31k+/day from a single stale ref and is the textbook
+         Log Dedup workaround (CLAUDE.md §1). *)
       []
 
 let resolve_group (config : t) (name : string) : string list option =

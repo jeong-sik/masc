@@ -46,7 +46,8 @@ let is_http_error_response = function
   | _ -> false
 
 (** Server start time for uptime calculation *)
-let server_start_time = Unix.gettimeofday ()
+(* server_start_time moved to [Server_routes_http_runtime_health_helpers]
+   (godfile decomp). *)
 
 let configured_http_port () =
   Env_config_core.masc_http_port_int ()
@@ -129,58 +130,14 @@ let agent_card_json request =
           ] );
     ]
 
-let health_path_diagnostics () =
-  match current_server_state_opt () with
-  | Some state ->
-      Server_base_path_diagnostics.detect
-        ?input_base_path:((Host_config.from_env ()).base_path_raw)
-        ?env_masc_base_path:((Host_config.from_env ()).base_path_raw)
-        ~effective_base_path:state.room_config.base_path
-        ~effective_masc_root:(Coord.masc_root_dir state.room_config)
-        ()
-  | None ->
-      let effective_base_path = default_base_path () in
-      let effective_masc_root = Common.masc_dir_from_base_path ~base_path:effective_base_path in
-      Server_base_path_diagnostics.detect
-        ?input_base_path:((Host_config.from_env ()).base_path_raw)
-        ?env_masc_base_path:((Host_config.from_env ()).base_path_raw)
-        ~effective_base_path ~effective_masc_root ()
-
-let health_uptime_secs () =
-  (* NDT-OK: /health exposes wall-clock process uptime for operators; no
-     persisted state transition or scheduler decision depends on this value. *)
-  int_of_float (Unix.gettimeofday () -. server_start_time)
-
-let health_uptime_string uptime_secs =
-  if uptime_secs < 60 then Printf.sprintf "%ds" uptime_secs
-  else if uptime_secs < 3600 then
-    Printf.sprintf "%dm %ds" (uptime_secs / 60) (uptime_secs mod 60)
-  else Printf.sprintf "%dh %dm" (uptime_secs / 3600) ((uptime_secs mod 3600) / 60)
-
-let protocol_json ~listener =
-  `Assoc
-    [
-      ("default", `String mcp_protocol_version_default);
-      ("listener", `String listener);
-      ( "supported",
-        `List (List.map (fun v -> `String v) mcp_protocol_versions) );
-    ]
-
-let quick_gc_json () =
-  (* Keep health probes cheap under live keeper load. [Gc.stat] can force a
-     full major-cycle sync across domains; [Gc.quick_stat] exposes the same
-     operator-facing counters without walking the heap. *)
-  let s = Gc.quick_stat () in
-  `Assoc
-    [
-      ("minor_collections", `Int s.minor_collections);
-      ("major_collections", `Int s.major_collections);
-      ("compactions", `Int s.compactions);
-      ("heap_words", `Int s.heap_words);
-      ("live_words", `Int s.live_words);
-      ("minor_heap_size", `Int (let c = Gc.get () in c.minor_heap_size));
-    ]
-
+(* /health probe building blocks (path diagnostics, uptime, protocol
+   negotiation, GC counters) extracted to
+   [Server_routes_http_runtime_health_helpers] (godfile decomp). *)
+let health_path_diagnostics = Server_routes_http_runtime_health_helpers.health_path_diagnostics
+let health_uptime_secs = Server_routes_http_runtime_health_helpers.health_uptime_secs
+let health_uptime_string = Server_routes_http_runtime_health_helpers.health_uptime_string
+let protocol_json = Server_routes_http_runtime_health_helpers.protocol_json
+let quick_gc_json = Server_routes_http_runtime_health_helpers.quick_gc_json
 let make_health_probe_fields ?(listener = "http/1.1") ?full_health_url
     ?(health_detail = "probe") request =
   let uptime_secs = health_uptime_secs () in

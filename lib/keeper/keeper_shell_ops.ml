@@ -912,24 +912,6 @@ let handle_keeper_shell
       error_json ~fields:[ "op", `String op ]
         (Printf.sprintf "Unknown git_worktree action '%s'. Use: list, add." other)
     end
-  | "bash" ->
-    Yojson.Safe.to_string
-      (`Assoc
-         [ "ok", `Bool false
-         ; "op", `String op
-         ; "error", `String "keeper_shell_bash_deprecated"
-         ; "hint", `String
-             "The structured shell no longer executes op=bash. Use the public \
-              Bash tool for command execution; use Grep and Read for search and \
-              file inspection when they are visible."
-         ; "suggested_tool", `String "Bash"
-         ; "suggested_public_tool", `String "Bash"
-         ; "supported_ops",
-             `List
-               (List.map
-                  (fun s -> `String s)
-                  Keeper_shell_shared.valid_shell_op_strings)
-         ])
   | "git_clone" ->
     (* Clone a repo into this keeper's playground repos directory.
        Sandboxed: always targets .masc/playground/<keeper_name>/repos/<repo_name>.

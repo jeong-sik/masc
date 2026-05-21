@@ -92,9 +92,9 @@ let test_completion_contract_violation () =
 ;;
 
 let test_keeper_shell_op_required () =
-  let raw = {|{"ok":false,"error":"keeper_shell_bash_deprecated"}|} in
+  let raw = {|{"ok":false,"error":"keeper_pr_create_requires_git_cwd"}|} in
   check_classify
-    ~name:"keeper_shell_bash_deprecated"
+    ~name:"keeper_pr_create_requires_git_cwd"
     ~expected:(Some D.Keeper_shell_op_required)
     raw
 ;;

@@ -60,8 +60,8 @@ let websocket_discovery_handler request reqd =
   in
   Http.Response.json body reqd
 
-let webrtc_signaling_handler ~tool_name signaling_fn request reqd =
-  with_tool_auth ~tool_name
+let webrtc_signaling_handler signaling_fn request reqd =
+  with_permission_auth ~permission:Masc_domain.CanBroadcast
     (fun _state _req reqd ->
       if not (Server_webrtc_transport.is_enabled ()) then
         Http.Response.json ~status:`Not_found
@@ -251,13 +251,9 @@ let add_routes ~port ~host router =
   |> Http.Router.add ~path:"/mcp/managed" ~methods:[`DELETE]
        ~handler:(handle_delete_mcp ~profile:Server_mcp_transport_http.Managed_agent)
   |> Http.Router.post "/webrtc/offer"
-       (webrtc_signaling_handler
-          ~tool_name:"masc_webrtc_offer"
-          Server_webrtc_transport.handle_offer_request)
+       (webrtc_signaling_handler Server_webrtc_transport.handle_offer_request)
   |> Http.Router.post "/webrtc/answer"
-       (webrtc_signaling_handler
-          ~tool_name:"masc_webrtc_answer"
-          Server_webrtc_transport.handle_answer_request)
+       (webrtc_signaling_handler Server_webrtc_transport.handle_answer_request)
   |> Http.Router.add ~path:"/graphql" ~methods:[`GET; `POST]
        ~handler:(fun request reqd ->
          with_read_auth (fun _state req reqd -> handle_graphql req reqd) request reqd)

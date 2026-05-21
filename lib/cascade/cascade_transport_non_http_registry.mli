@@ -11,6 +11,7 @@ val register_non_http_transport :
   kind:Llm_provider.Provider_config.provider_kind ->
   ctor:non_http_transport_ctor ->
   unit
+(** Register a constructor for a non-HTTP provider kind. *)
 
 val non_http_transport_of_provider :
   sw:Eio.Switch.t ->
@@ -20,3 +21,5 @@ val non_http_transport_of_provider :
     Cascade_transport_cli_overrides.cli_transport_overrides ->
   unit ->
   (Llm_provider.Llm_transport.t option, Agent_sdk.Error.sdk_error) result
+(** Resolve a provider config to a registered non-HTTP transport when one
+    exists; subprocess CLI kinds fail fast when no constructor is registered. *)

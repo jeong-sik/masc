@@ -17,9 +17,8 @@ module Float = Stdlib.Float
 
 (** Tool_misc — Miscellaneous operations (facade).
 
-    Dispatches to sub-modules:
-    - Tool_misc_transport: transport, websocket, webrtc handlers
-    - Tool_misc_admin: auth, config, tool inventory, feature flag handlers
+    Dispatches auth, config, tool inventory, and feature flag handlers to
+    [Tool_misc_admin].
 
     Retains: dashboard, verify_handoff, gc, cleanup_zombies,
     tool_stats, tool_help.

@@ -190,7 +190,7 @@ module Rest = struct
       #8615/#8670/#8682 SSOT parsers. *)
   let auth_mode_of_operation_opt = function
     | "masc_websocket_discovery" -> Some Public
-    | "masc_webrtc_offer" | "masc_webrtc_answer" -> Some Same_origin_or_bearer
+    | "webrtc_offer" | "webrtc_answer" -> Some Same_origin_or_bearer
     | "masc_broadcast"
     | "masc_operator_action"
     | "masc_operator_confirm" -> Some Bearer_required
@@ -227,8 +227,8 @@ module Rest = struct
       ("masc_operator_action", [ (POST, "/api/v1/operator/action") ]);
       ("masc_operator_confirm", [ (POST, "/api/v1/operator/confirm") ]);
       ("masc_websocket_discovery", [ (GET, "/ws") ]);
-      ("masc_webrtc_offer", [ (POST, "/webrtc/offer") ]);
-      ("masc_webrtc_answer", [ (POST, "/webrtc/answer") ]);
+      ("webrtc_offer", [ (POST, "/webrtc/offer") ]);
+      ("webrtc_answer", [ (POST, "/webrtc/answer") ]);
       ("masc_broadcast", [ (POST, "/api/v1/broadcast") ]);
       ("masc_agent_card", [ (GET, "/.well-known/agent.json") ]);
     ]
@@ -325,8 +325,8 @@ module Rest = struct
         [
           "masc_transport_status";
           "masc_websocket_discovery";
-          "masc_webrtc_offer";
-          "masc_webrtc_answer";
+          "webrtc_offer";
+          "webrtc_answer";
         ] );
       ( "tasks",
         [

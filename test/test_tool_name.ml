@@ -230,7 +230,7 @@ let test_is_keeper () =
 
 let test_shard_tools_parse () =
   let shard_names = [ "base"; "board"; "filesystem"; "shell"; "voice";
-                      "coding"; "pr"; "autoresearch"; "library" ] in
+                      "coding"; "pr"; "library" ] in
   let tool_names =
     List.concat_map (fun sn ->
       match Tool_shard.get_shard sn with

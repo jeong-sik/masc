@@ -160,8 +160,6 @@ let clamp_shell_timeout
   Safe_ops.json_float ~default "timeout_sec" args
   |> fun n -> max min_sec (min user_timeout_max_sec n)
 
-let lowercase_shell_words = Keeper_exec_shared.lowercase_shell_words
-
 let git_global_option_takes_value = function
   | "-c" | "-C" | "--exec-path" | "--git-dir" | "--work-tree"
   | "--namespace" | "--super-prefix" | "--config-env" -> true

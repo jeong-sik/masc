@@ -373,6 +373,7 @@ let docker_test_sandbox () =
     ~image:"typed-docker"
     ~runner:(fun ~stdin_content:_ ~argv:_ ~env:_ ~cwd:_ ~timeout_sec:_ ->
       Unix.WEXITED 0, "", "")
+    ()
 ;;
 
 let check_docker_sandbox label simple =

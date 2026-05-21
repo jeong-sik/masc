@@ -139,7 +139,6 @@ val merge_execution_links
   :  Masc_domain.task_execution_links
   -> ?session_id:string
   -> ?operation_id:string
-  -> ?autoresearch_loop_id:string
   -> unit
   -> Masc_domain.task_execution_links
 

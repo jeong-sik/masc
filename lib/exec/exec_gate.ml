@@ -42,7 +42,6 @@ let rollout_config : Approval_config.t =
         (`Coord_worktree, internal_git_admin_overlay);
         (`System_task_sandbox, internal_git_admin_overlay);
         (`System_notify, notify_overlay);
-        (`Autoresearch_git, internal_git_admin_overlay);
         (`Voice_bridge, internal_observer_overlay);
         (`Voice_bridge_core, internal_observer_overlay);
         (`System_graphql_client_eio, internal_observer_overlay);
@@ -57,7 +56,6 @@ let rollout_config : Approval_config.t =
         (`Coord_identity, internal_observer_overlay);
         (`Tool_local_runtime, internal_observer_overlay);
         (`Tool_local_runtime_bench, internal_observer_overlay);
-        (`Tool_autoresearch_cycle, internal_git_admin_overlay);
         (`Keeper_shell, internal_observer_overlay);
       ];
   }
@@ -256,3 +254,20 @@ let run_argv_with_stdin_and_status_split ~actor ~raw_source ~summary
         "",
         blocked_output ~summary ~raw_source ~reason ))
     ()
+
+let run_argv_pipeline_with_status_split ~actor ~raw_source ~summary
+    ?(timeout_sec = 60.0) stages =
+  let rec check_stages = function
+    | [] -> Ok ()
+    | ({ Process_eio.argv; env; cwd } : Process_eio.pipeline_stage) :: rest ->
+        with_verdict ~actor ~raw_source ~summary ~argv ?env ?cwd
+          ~on_allow:(fun () -> check_stages rest)
+          ~on_blocked:(fun reason -> Error reason)
+          ()
+  in
+  match check_stages stages with
+  | Ok () -> Process_eio.run_argv_pipeline_with_status_split ~timeout_sec stages
+  | Error reason ->
+      ( Unix.WEXITED 126,
+        "",
+        blocked_output ~summary ~raw_source ~reason )

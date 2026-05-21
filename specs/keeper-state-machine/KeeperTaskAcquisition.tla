@@ -33,7 +33,7 @@
 \*
 \* Producer paths.  There are two ways a task enters the system, and
 \* this spec's SubmitTask abstracts the common effect of both:
-\*   (a) backlog producer (supervisor / autoresearch / board posts) —
+\*   (a) backlog producer (supervisor / board posts) —
 \*       a task lands in [Coord.read_backlog] and shows up as a
 \*       [pending_*] item on the next [world_observation]; the keeper
 \*       claims it via the "turn" channel (= spec's AssignTask).

@@ -23,8 +23,7 @@ let with_tmp_base_dir f =
     Fun.protect
       ~finally:(fun () ->
         try
-          let cmd = Printf.sprintf "rm -rf %s" (Filename.quote base) in
-          ignore (Sys.command cmd)
+          Fs_compat.remove_tree base
         with _ -> ())
       (fun () -> f base)
   in

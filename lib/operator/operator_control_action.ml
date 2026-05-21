@@ -15,7 +15,7 @@ let normalize_judgment_surface value =
 
 let normalize_judgment_target_type value =
   let normalized = String.trim value |> String.lowercase_ascii in
-  if Operator_digest_types.is_root_alias normalized then
+  if Operator_digest_types.is_root_target_type normalized then
     Ok ("root", Operator_judgment.Coord)
   else Error "target_type must be root"
 
@@ -114,7 +114,7 @@ let canonical_action_type action_type = action_type
 
 let normalize_action_target_type target_type =
   let normalized = String.trim target_type |> String.lowercase_ascii in
-  if Operator_digest_types.is_root_alias normalized then Ok "root"
+  if Operator_digest_types.is_root_target_type normalized then Ok "root"
   else match normalized with
   | "keeper" as value -> Ok value
   | "" -> Ok ""

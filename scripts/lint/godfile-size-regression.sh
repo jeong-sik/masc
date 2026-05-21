@@ -48,14 +48,19 @@ cd "${ROOT}"
 violations=0
 
 # Absolute cap: any tracked .ml under lib/ or oas/lib/ exceeding the cap
-absolute_offenders=$(find lib oas/lib -type f -name '*.ml' \
-  -not -name '*_test.ml' \
-  -not -path '*/_build/*' 2>/dev/null \
-  | xargs -I{} sh -c '
-      lines=$(wc -l <"{}")
-      if [ "$lines" -gt '"${ABSOLUTE_CAP}"' ]; then echo "$lines {}"; fi
-    ' 2>/dev/null \
-  | sort -rn || true)
+absolute_offenders=$(
+  while IFS= read -r f; do
+    [[ -f "${f}" ]] || continue
+    lines=$(wc -l <"${f}")
+    if [[ "${lines}" -gt "${ABSOLUTE_CAP}" ]]; then
+      printf '%s %s\n' "${lines}" "${f}"
+    fi
+  done < <(
+    find lib oas/lib -type f -name '*.ml' \
+      -not -name '*_test.ml' \
+      -not -path '*/_build/*' 2>/dev/null
+  ) | sort -rn || true
+)
 
 if [[ -n "${absolute_offenders}" ]]; then
   echo "::error title=Absolute file-size cap exceeded::limit ${ABSOLUTE_CAP} lines"

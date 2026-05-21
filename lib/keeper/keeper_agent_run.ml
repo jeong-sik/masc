@@ -567,51 +567,15 @@ let run_turn
             }
             : Cascade_runner.cli_transport_overrides)
        in
-       (* Phase 0: wake-time payload telemetry (Option C baseline).
-       Entire block is dead code when MASC_PAYLOAD_TELEMETRY is unset.
-       Compute logic lives in [Keeper_wake_telemetry] for unit tests;
-       exceptions from the telemetry path never abort the LLM call. *)
-       let () =
-         if Env_config_keeper.KeeperTelemetry.payload_telemetry_enabled ()
-         then (
-           try
-             let sizes =
-               Keeper_wake_telemetry.compute_sizes
-                 ~system_prompt:turn_system_prompt
-                 ~tools
-                 ~history_messages
-                 ~user_message
-             in
-             let model_id =
-               match Keeper_model_labels.configured_model_labels_of_meta meta with
-               | m :: _ -> m
-               | [] -> "auto"
-             in
-             let _event : Dashboard_harness_health.wake_payload_event =
-               Dashboard_harness_health.record_wake_payload
-                 ~keeper_name:meta.name
-                 ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-                 ~turn_index:start_turn_count
-                 ~model_id
-                 ~context_window:max_context
-                 ~approx_body_bytes:sizes.approx_body_bytes
-                 ~system_prompt_bytes:sizes.system_prompt_bytes
-                 ~tool_defs_bytes:sizes.tool_defs_bytes
-                 ~messages_bytes:sizes.messages_bytes
-                 ~message_count:sizes.message_count
-                 ~role_counts:sizes.role_counts
-                 ~tool_count:sizes.tool_count
-                 ~has_compact_happened:pre_dispatch_compacted
-             in
-             ()
-           with
-           | Eio.Cancel.Cancelled _ as e -> raise e
-           | exn ->
-             Log.Harness.warn
-               "[wake_payload] telemetry failed keeper=%s: %s"
-               meta.name
-               (Printexc.to_string exn))
-       in
+       Keeper_agent_run_phase0_telemetry.record_if_enabled
+         ~meta
+         ~turn_system_prompt
+         ~tools
+         ~history_messages
+         ~user_message
+         ~start_turn_count
+         ~max_context
+         ~pre_dispatch_compacted;
        let turn_result =
          match pre_dispatch_checkpoint_error with
          | Some err -> Error err
@@ -714,84 +678,14 @@ let run_turn
                     ())
               in
               (match
-                 let first_attempt =
-                   match call_run_named ~initial_messages:history_messages with
-                   | Error
-                       (Agent_sdk.Error.Agent
-                          (Agent_sdk.Error.CompletionContractViolation
-                             { reason = violation_reason; violation_detail; _ }))
-                     when acc.contract_violation_retries < 1 ->
-                     (* Contract violation retry (max 1 per turn): the
-                        model did not call a required tool. Build a
-                        feedback message naming satisfying tools and
-                        re-invoke Agent.run so the model sees why it
-                        was rejected. The context builder in
-                        keeper_run_tools injects additional guidance
-                        because [contract_violation_retries > 0]. *)
-                     acc.contract_violation_retries <-
-                       acc.contract_violation_retries + 1;
-                     let satisfying_tools =
-                       let local_tools =
-                         Keeper_agent_tool_surface
-                         .generic_required_tool_candidate_names
-                           ~has_current_task:
-                             (Option.is_some
-                                (owned_active_task_id_for_meta
-                                   ~config ~meta:acc.meta))
-                           ~turn_affordances
-                           ~allowed_tool_names:
-                             acc.tool_surface.required_tool_candidate_names
-                       in
-                       let oas_tools =
-                         match violation_detail with
-                         | Some detail when detail.satisfying_tools <> [] ->
-                           detail.satisfying_tools
-                         | Some _ | None ->
-                           Keeper_tool_disclosure
-                           .satisfying_tools_from_contract_violation_reason
-                             violation_reason
-                       in
-                       Keeper_types.dedupe_keep_order (oas_tools @ local_tools)
-                     in
-                     let retry_action =
-                       match satisfying_tools with
-                       | [] ->
-                         "No currently visible tool can satisfy this contract; \
-                          emit a concise blocker instead."
-                       | tools ->
-                         Printf.sprintf
-                           "You MUST call one of these tools: %s."
-                           (String.concat ", " tools)
-                     in
-                     let retry_feedback =
-                       Printf.sprintf
-                         "[CONTRACT VIOLATION] Your previous response was \
-                          rejected: %s. %s Do NOT respond with text only."
-                         violation_reason
-                         retry_action
-                     in
-                     (* Append violation feedback as a User message so the
-                        model sees why its response was rejected. *)
-                     let retry_messages =
-                       history_messages
-                       @ [ { Agent_sdk.Types.role = User
-                           ; content =
-                               [ Agent_sdk.Types.Text retry_feedback ]
-                           ; name = None
-                           ; tool_call_id = None
-                           ; metadata = []
-                           }
-                         ]
-                     in
-                     Log.Keeper.info
-                       "keeper:%s contract violation retry #%d (reason: %s)"
-                       meta.name
-                       acc.contract_violation_retries
-                       violation_reason;
-                     call_run_named ~initial_messages:retry_messages
-                   | other -> other
-                 in
-                 first_attempt
+                 Keeper_agent_run_contract_retry.run_with_single_retry
+                   ~keeper_name:meta.name
+                   ~acc
+                   ~has_current_task:
+                     (Option.is_some (owned_active_task_id_for_meta ~config ~meta:acc.meta))
+                   ~turn_affordances
+                   ~history_messages
+                   ~call_run_named
                with
                | Error e -> Error e
                | Ok result ->
@@ -814,108 +708,27 @@ let run_turn
                  receipt_model_used_ref := Some model;
                  receipt_stop_reason_ref := Some result.stop_reason;
                  receipt_cascade_observation_ref := result.cascade_observation;
-                 (* Extract and persist thinking blocks to trajectory JSONL.
-           NOTE: turn = acc.turn stays at 0 in the keeper path because
-           Trajectory.increment_turn is never called here — the keeper
-           uses OAS Agent.run which manages its own internal call count.
-           Consumers should treat turn=0 as "turn not tracked in keeper path". *)
-                 (match trajectory_acc with
-                  | Some acc ->
-                    let now = Time_compat.now () in
-                    let now_iso = Masc_domain.now_iso () in
-                    List.iter
-                      (function
-                        | Agent_sdk.Types.Thinking { content; _ } ->
-                          let entry : Trajectory.thinking_entry =
-                            { ts = now
-                            ; ts_iso = now_iso
-                            ; turn = acc.Trajectory.turn
-                            ; content
-                            ; content_length = String.length content
-                            ; redacted = false
-                            }
-                          in
-                          (try
-                             Trajectory.append_thinking
-                               ~masc_root:acc.Trajectory.masc_root
-                               ~keeper_name:acc.Trajectory.keeper_name
-                               ~trace_id:acc.Trajectory.trace_id
-                               entry
-                           with
-                           | Eio.Cancel.Cancelled _ as e -> raise e
-                           | exn ->
-                             Log.Keeper.error
-                               "keeper:%s thinking persist failed: %s"
-                               meta.name
-                               (Printexc.to_string exn);
-                             Prometheus.inc_counter
-                               Keeper_metrics.metric_keeper_thinking_persist_failures
-                               ~labels:[ "keeper", meta.name ]
-                               ())
-                        | Agent_sdk.Types.RedactedThinking _ ->
-                          let entry : Trajectory.thinking_entry =
-                            { ts = now
-                            ; ts_iso = now_iso
-                            ; turn = acc.Trajectory.turn
-                            ; content = "[redacted]"
-                            ; content_length = 0
-                            ; redacted = true
-                            }
-                          in
-                          (try
-                             Trajectory.append_thinking
-                               ~masc_root:acc.Trajectory.masc_root
-                               ~keeper_name:acc.Trajectory.keeper_name
-                               ~trace_id:acc.Trajectory.trace_id
-                               entry
-                           with
-                           | Eio.Cancel.Cancelled _ as e -> raise e
-                           | exn ->
-                             Log.Keeper.error
-                               "keeper:%s redacted thinking persist failed: %s"
-                               meta.name
-                               (Printexc.to_string exn);
-                             Prometheus.inc_counter
-                               Keeper_metrics.metric_keeper_thinking_persist_failures
-                               ~labels:[ "keeper", meta.name ]
-                               ())
-                        | _ -> ())
-                      result.response.content
-                  | None -> ());
-                 let reported_tool_names =
-                   List.filter_map
-                     (function
-                       | Agent_sdk.Types.ToolUse { name; _ } -> Some name
-                       | _ -> None)
-                     result.response.content
-                 in
-                 reported_tool_names_ref := reported_tool_names;
-                 let tool_usage_after =
-                   Keeper_tool_disclosure.keeper_tool_usage_snapshot
+                 Keeper_agent_run_thinking_trajectory.persist_response_content
+                   ~keeper_name:meta.name
+                   ~trajectory_acc
+                   result.response.content;
+                 let tool_observation =
+                   Keeper_agent_run_tool_observation.analyze
                      ~base_path:config.base_path
                      ~keeper_name:meta.name
+                     ~requested_tool_names_seen:acc.requested_tool_names_seen
+                     ~tool_usage_before
+                     ~tool_calls:acc.tool_calls
+                     result.response.content
                  in
-                 let registry_observed_tool_names =
-                   Keeper_tool_disclosure.tool_usage_delta
-                     ~before:tool_usage_before
-                     ~after:tool_usage_after
+                 let reported_tool_names =
+                   tool_observation.reported_tool_names
                  in
-                 let hook_observed_tool_names =
-                   List.rev_map
-                     (fun (detail : tool_call_detail) -> detail.tool_name)
-                     acc.tool_calls
-                 in
+                 reported_tool_names_ref := reported_tool_names;
                  let observed_tool_names =
-                   Keeper_tool_disclosure.merge_observed_tool_names
-                     ~registry_observed_tool_names
-                     ~hook_observed_tool_names
+                   tool_observation.observed_tool_names
                  in
                  observed_tool_names_ref := observed_tool_names;
-                 let tool_names =
-                   Keeper_tool_disclosure.merge_reported_and_observed_tool_names
-                     ~reported_tool_names
-                     ~observed_tool_names
-                 in
                  (* RFC-0064: canonicalise observed tool names across all three
                     input surfaces (LLM-native public / MCP protocol /
                     already-internal) before the disclosure check. Without
@@ -932,13 +745,11 @@ let run_turn
                     single observed call does not produce multiple
                     counter samples (PR #14585 review #3). *)
                  let canonical_tool_names =
-                   List.map Keeper_tool_disclosure.canonical_tool_name_observed tool_names
+                   tool_observation.canonical_tool_names
                  in
                  canonical_tool_names_ref := canonical_tool_names;
                  let unexpected_tool_names =
-                   Keeper_tool_disclosure.unexpected_tool_names
-                     ~allowed_tool_names:acc.requested_tool_names_seen
-                     ~tool_names:canonical_tool_names
+                   tool_observation.unexpected_tool_names
                  in
                  unexpected_tool_names_ref := unexpected_tool_names;
                  (* Partial tolerance (#8471): when a turn mixes valid tool calls
@@ -950,49 +761,19 @@ let run_turn
           turn produced no valid work. See feedback memory
           feedback_tool-error-messages-teach-llm.md. *)
                  let valid_tool_calls_present =
-                   Keeper_tool_disclosure.has_valid_tool_call
-                     ~unexpected_tool_names
-                     ~tool_names:canonical_tool_names
+                   tool_observation.valid_tool_calls_present
                  in
                  if valid_tool_calls_present then acc.keeper_surface_tool_used <- true;
                  if unexpected_tool_names <> [] && not valid_tool_calls_present
                  then (
-                   let requested_preview =
-                     acc.requested_tool_names_seen
-                     |> List.filteri (fun i _ -> i < 8)
-                     |> String.concat ", "
-                   in
-                   let omitted =
-                     List.length acc.requested_tool_names_seen
-                     - min 8 (List.length acc.requested_tool_names_seen)
-                   in
-                   let requested_suffix =
-                     if omitted > 0 then Printf.sprintf " (+%d more)" omitted else ""
-                   in
-                   let reason =
-                     Printf.sprintf
-                       "keeper turn reported tool names outside selected turn surface: \
-                        unexpected=[%s] requested=[%s%s]"
-                       (String.concat ", " unexpected_tool_names)
-                       requested_preview
-                       requested_suffix
-                   in
                    acc.receipt_tool_contract_result <-
                      Keeper_execution_receipt.Contract_violated;
-                   Prometheus.inc_counter
-                     Keeper_metrics.metric_keeper_contract_violations
-                     ~labels:
-                       [ "keeper_name", meta.name
-                       ; "kind", "tool_surface_violation"
-                       ; "signal", "unexpected_tool_names"
-                       ]
-                     ();
-                   Log.Keeper.error
-                     "keeper:%s cascade=%s %s"
-                     meta.name
-                     (Keeper_types.cascade_name_of_meta meta)
-                     reason;
-                   Error (Agent_sdk.Error.Internal reason))
+                   Error
+                     (Keeper_agent_run_tool_surface_violation.to_sdk_error
+                        ~keeper_name:meta.name
+                        ~cascade_name:(Keeper_types.cascade_name_of_meta meta)
+                        ~requested_tool_names_seen:acc.requested_tool_names_seen
+                        ~unexpected_tool_names))
                  else (
                    let should_log_unexpected_tool_partial =
                      unexpected_tool_names <> []

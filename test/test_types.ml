@@ -257,7 +257,6 @@ let test_backlog_parse_live_shape_with_null_optional_nested_fields () =
                           [
                             ("operation_id", `Null);
                             ("session_id", `Null);
-                            ("autoresearch_loop_id", `Null);
                           ] );
                     ] );
               ];
@@ -292,9 +291,6 @@ let test_backlog_parse_live_shape_with_null_optional_nested_fields () =
              contract.links.operation_id;
            Alcotest.(check (option string)) "session_id null -> None" None
              contract.links.session_id;
-           Alcotest.(check (option string))
-             "autoresearch_loop_id null -> None" None
-             contract.links.autoresearch_loop_id;
            Alcotest.(check (list string)) "required_tools parsed"
              [ "keeper_bash" ] contract.required_tools)
 

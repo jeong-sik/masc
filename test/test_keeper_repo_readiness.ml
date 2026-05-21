@@ -101,12 +101,46 @@ let test_invalid_repo_name () =
   check bool "not ok" false (json_bool "ok" json);
   check string "state" "invalid_repo_name" (json_string "state" json)
 
-let run_ok ~cwd cmd =
-  let wrapped =
-    Printf.sprintf "cd %s && %s > /dev/null 2>&1" (Filename.quote cwd) cmd
+let read_file path =
+  In_channel.with_open_bin path In_channel.input_all
+
+let run_process ~cwd prog argv =
+  let out = Filename.temp_file "keeper-repo-readiness-out" ".txt" in
+  let err = Filename.temp_file "keeper-repo-readiness-err" ".txt" in
+  let out_fd = Unix.openfile out [ Unix.O_WRONLY; Unix.O_TRUNC ] 0o600 in
+  let err_fd = Unix.openfile err [ Unix.O_WRONLY; Unix.O_TRUNC ] 0o600 in
+  let original_cwd = Sys.getcwd () in
+  let pid =
+    Fun.protect
+      ~finally:(fun () ->
+        Sys.chdir original_cwd;
+        Unix.close out_fd;
+        Unix.close err_fd)
+      (fun () ->
+        Sys.chdir cwd;
+        Unix.create_process prog argv Unix.stdin out_fd err_fd)
   in
-  let code = Sys.command wrapped in
-  if code <> 0 then fail (Printf.sprintf "command failed (%d): %s" code cmd)
+  let _, status = Unix.waitpid [] pid in
+  let code =
+    match status with
+    | Unix.WEXITED code -> code
+    | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> 255
+  in
+  let stdout = read_file out in
+  let stderr = read_file err in
+  Sys.remove out;
+  Sys.remove err;
+  (code, stdout, stderr)
+
+let run_process_ok ~cwd prog argv =
+  let code, stdout, stderr = run_process ~cwd prog argv in
+  if code <> 0 then
+    fail
+      (Printf.sprintf "command failed (%d): %s\nstdout:\n%s\nstderr:\n%s" code
+         prog stdout stderr)
+
+let git_ok ~cwd args =
+  run_process_ok ~cwd "git" (Array.of_list ("git" :: args))
 
 let create_file_storm ~base_path ~count =
   for i = 0 to count - 1 do
@@ -132,11 +166,16 @@ let create_wide_workspace_storm ~base_path ~count =
 
 let init_git_repo path =
   mkdir_p path;
-  run_ok ~cwd:path "git init -q --initial-branch=main"
+  git_ok ~cwd:path [ "init"; "-q"; "--initial-branch=main" ]
 
 let set_workspace_origin_to_github ~repo =
-  run_ok ~cwd:repo
-    "git remote set-url origin https://github.com/jeong-sik/masc-mcp.git"
+  git_ok ~cwd:repo
+    [
+      "remote";
+      "set-url";
+      "origin";
+      "https://github.com/jeong-sik/masc-mcp.git";
+    ]
 
 let test_auto_provisionable_workspace_repo () =
   let base_path = temp_dir "masc-repo-readiness" in
@@ -144,21 +183,17 @@ let test_auto_provisionable_workspace_repo () =
   let repo = Filename.concat base_path "workspace/yousleepwhen/masc-mcp" in
   let remote = Filename.concat base_path ".remote-masc-mcp.git" in
   mkdir_p (Filename.dirname repo);
-  run_ok ~cwd:base_path
-    (Printf.sprintf "git init --bare -q --initial-branch=main %s"
-       (Filename.quote remote));
-  run_ok ~cwd:base_path
-    (Printf.sprintf "git clone -q %s %s"
-       (Filename.quote remote) (Filename.quote repo));
-  run_ok ~cwd:repo "git config user.email test@example.com";
-  run_ok ~cwd:repo "git config user.name Test";
+  git_ok ~cwd:base_path [ "init"; "--bare"; "-q"; "--initial-branch=main"; remote ];
+  git_ok ~cwd:base_path [ "clone"; "-q"; remote; repo ];
+  git_ok ~cwd:repo [ "config"; "user.email"; "test@example.com" ];
+  git_ok ~cwd:repo [ "config"; "user.name"; "Test" ];
   let readme = Filename.concat repo "README.md" in
   let oc = open_out readme in
   output_string oc "# readiness\n";
   close_out oc;
-  run_ok ~cwd:repo "git add README.md";
-  run_ok ~cwd:repo "git commit -q -m init";
-  run_ok ~cwd:repo "git push -q origin main";
+  git_ok ~cwd:repo [ "add"; "README.md" ];
+  git_ok ~cwd:repo [ "commit"; "-q"; "-m"; "init" ];
+  git_ok ~cwd:repo [ "push"; "-q"; "origin"; "main" ];
   set_workspace_origin_to_github ~repo;
   let config = Masc_mcp.Coord.default_config base_path in
   let meta = make_meta "keeper-one" in
@@ -184,21 +219,17 @@ let test_missing_clone_skips_workspace_discovery () =
   let repo = Filename.concat base_path "workspace/yousleepwhen/masc-mcp" in
   let remote = Filename.concat base_path ".remote-masc-mcp.git" in
   mkdir_p (Filename.dirname repo);
-  run_ok ~cwd:base_path
-    (Printf.sprintf "git init --bare -q --initial-branch=main %s"
-       (Filename.quote remote));
-  run_ok ~cwd:base_path
-    (Printf.sprintf "git clone -q %s %s"
-       (Filename.quote remote) (Filename.quote repo));
-  run_ok ~cwd:repo "git config user.email test@example.com";
-  run_ok ~cwd:repo "git config user.name Test";
+  git_ok ~cwd:base_path [ "init"; "--bare"; "-q"; "--initial-branch=main"; remote ];
+  git_ok ~cwd:base_path [ "clone"; "-q"; remote; repo ];
+  git_ok ~cwd:repo [ "config"; "user.email"; "test@example.com" ];
+  git_ok ~cwd:repo [ "config"; "user.name"; "Test" ];
   let readme = Filename.concat repo "README.md" in
   let oc = open_out readme in
   output_string oc "# readiness\n";
   close_out oc;
-  run_ok ~cwd:repo "git add README.md";
-  run_ok ~cwd:repo "git commit -q -m init";
-  run_ok ~cwd:repo "git push -q origin main";
+  git_ok ~cwd:repo [ "add"; "README.md" ];
+  git_ok ~cwd:repo [ "commit"; "-q"; "-m"; "init" ];
+  git_ok ~cwd:repo [ "push"; "-q"; "origin"; "main" ];
   set_workspace_origin_to_github ~repo;
   let config = Masc_mcp.Coord.default_config base_path in
   let meta = make_meta "keeper-one" in
@@ -221,21 +252,17 @@ let test_auto_provisionable_workspace_repo_after_file_storm () =
   let remote = Filename.concat base_path ".remote-masc-mcp.git" in
   create_file_storm ~base_path ~count:4005;
   mkdir_p (Filename.dirname repo);
-  run_ok ~cwd:base_path
-    (Printf.sprintf "git init --bare -q --initial-branch=main %s"
-       (Filename.quote remote));
-  run_ok ~cwd:base_path
-    (Printf.sprintf "git clone -q %s %s"
-       (Filename.quote remote) (Filename.quote repo));
-  run_ok ~cwd:repo "git config user.email test@example.com";
-  run_ok ~cwd:repo "git config user.name Test";
+  git_ok ~cwd:base_path [ "init"; "--bare"; "-q"; "--initial-branch=main"; remote ];
+  git_ok ~cwd:base_path [ "clone"; "-q"; remote; repo ];
+  git_ok ~cwd:repo [ "config"; "user.email"; "test@example.com" ];
+  git_ok ~cwd:repo [ "config"; "user.name"; "Test" ];
   let readme = Filename.concat repo "README.md" in
   let oc = open_out readme in
   output_string oc "# readiness\n";
   close_out oc;
-  run_ok ~cwd:repo "git add README.md";
-  run_ok ~cwd:repo "git commit -q -m init";
-  run_ok ~cwd:repo "git push -q origin main";
+  git_ok ~cwd:repo [ "add"; "README.md" ];
+  git_ok ~cwd:repo [ "commit"; "-q"; "-m"; "init" ];
+  git_ok ~cwd:repo [ "push"; "-q"; "origin"; "main" ];
   set_workspace_origin_to_github ~repo;
   let config = Masc_mcp.Coord.default_config base_path in
   let meta = make_meta "keeper-one" in
@@ -255,21 +282,17 @@ let test_auto_provisionable_workspace_repo_before_hidden_dir_storm () =
   let remote = Filename.concat base_path ".remote-masc-mcp.git" in
   create_hidden_dir_storm ~base_path ~count:4005;
   mkdir_p (Filename.dirname repo);
-  run_ok ~cwd:base_path
-    (Printf.sprintf "git init --bare -q --initial-branch=main %s"
-       (Filename.quote remote));
-  run_ok ~cwd:base_path
-    (Printf.sprintf "git clone -q %s %s"
-       (Filename.quote remote) (Filename.quote repo));
-  run_ok ~cwd:repo "git config user.email test@example.com";
-  run_ok ~cwd:repo "git config user.name Test";
+  git_ok ~cwd:base_path [ "init"; "--bare"; "-q"; "--initial-branch=main"; remote ];
+  git_ok ~cwd:base_path [ "clone"; "-q"; remote; repo ];
+  git_ok ~cwd:repo [ "config"; "user.email"; "test@example.com" ];
+  git_ok ~cwd:repo [ "config"; "user.name"; "Test" ];
   let readme = Filename.concat repo "README.md" in
   let oc = open_out readme in
   output_string oc "# readiness\n";
   close_out oc;
-  run_ok ~cwd:repo "git add README.md";
-  run_ok ~cwd:repo "git commit -q -m init";
-  run_ok ~cwd:repo "git push -q origin main";
+  git_ok ~cwd:repo [ "add"; "README.md" ];
+  git_ok ~cwd:repo [ "commit"; "-q"; "-m"; "init" ];
+  git_ok ~cwd:repo [ "push"; "-q"; "origin"; "main" ];
   set_workspace_origin_to_github ~repo;
   let config = Masc_mcp.Coord.default_config base_path in
   let meta = make_meta "keeper-one" in
@@ -289,21 +312,17 @@ let test_auto_provisionable_workspace_repo_before_wide_workspace_storm () =
   let remote = Filename.concat base_path ".remote-masc-mcp.git" in
   create_wide_workspace_storm ~base_path ~count:4005;
   mkdir_p (Filename.dirname repo);
-  run_ok ~cwd:base_path
-    (Printf.sprintf "git init --bare -q --initial-branch=main %s"
-       (Filename.quote remote));
-  run_ok ~cwd:base_path
-    (Printf.sprintf "git clone -q %s %s"
-       (Filename.quote remote) (Filename.quote repo));
-  run_ok ~cwd:repo "git config user.email test@example.com";
-  run_ok ~cwd:repo "git config user.name Test";
+  git_ok ~cwd:base_path [ "init"; "--bare"; "-q"; "--initial-branch=main"; remote ];
+  git_ok ~cwd:base_path [ "clone"; "-q"; remote; repo ];
+  git_ok ~cwd:repo [ "config"; "user.email"; "test@example.com" ];
+  git_ok ~cwd:repo [ "config"; "user.name"; "Test" ];
   let readme = Filename.concat repo "README.md" in
   let oc = open_out readme in
   output_string oc "# readiness\n";
   close_out oc;
-  run_ok ~cwd:repo "git add README.md";
-  run_ok ~cwd:repo "git commit -q -m init";
-  run_ok ~cwd:repo "git push -q origin main";
+  git_ok ~cwd:repo [ "add"; "README.md" ];
+  git_ok ~cwd:repo [ "commit"; "-q"; "-m"; "init" ];
+  git_ok ~cwd:repo [ "push"; "-q"; "origin"; "main" ];
   set_workspace_origin_to_github ~repo;
   let config = Masc_mcp.Coord.default_config base_path in
   let meta = make_meta "keeper-one" in

@@ -149,7 +149,7 @@ let save_file_unix (path : string) (content : string) : unit =
    pointing at the cache. This PR extends the fix to
    [append_file_unix] (and removes the now-dead [Append_fd_cache]
    module and [at_exit] hook) so the ~15 [append_file] callers
-   (autoresearch_storage, metrics_store_eio, memory_jsonl,
+   (metrics_store_eio, memory_jsonl,
    coord_utils_ops, board_core, keeper_chat_store, etc.) get the
    same guarantee.
 
@@ -447,6 +447,31 @@ let rmdir (path : string) : unit =
     ~path
     ~fallback:(fun () -> Unix.rmdir path)
     (fun fs -> Eio.Path.rmdir Eio.Path.(fs / path))
+;;
+
+let remove_tree_unix (path : string) : unit =
+  let rec remove path =
+    match Unix.lstat path with
+    | exception Unix.Unix_error (Unix.ENOENT, _, _) -> ()
+    | exception Unix.Unix_error (Unix.ENOTDIR, _, _) -> ()
+    | stat when stat.Unix.st_kind = Unix.S_DIR ->
+      Sys.readdir path
+      |> Array.iter (fun name -> remove (Filename.concat path name));
+      Unix.rmdir path
+    | _stat -> Sys.remove path
+  in
+  remove path
+;;
+
+let remove_tree (path : string) : unit =
+  let normalized = String.trim path in
+  if String.equal normalized "" || String.equal normalized "/" || String.equal normalized "."
+  then invalid_arg (Printf.sprintf "Fs_compat.remove_tree refuses unsafe path %S" path);
+  test_exec_home_guard ~op:"remove_tree" path;
+  with_fs_or_fallback
+    ~path
+    ~fallback:(fun () -> remove_tree_unix path)
+    (fun _fs -> Eio_unix.run_in_systhread (fun () -> remove_tree_unix path))
 ;;
 
 let realpath (path : string) : string =

@@ -27,7 +27,7 @@ require_bisect_reporter() {
     echo "opam is required to run coverage_percent.sh" >&2
     exit 127
   fi
-  if ! opam exec -- bash -lc 'command -v bisect-ppx-report >/dev/null 2>&1'; then
+  if ! opam exec -- bisect-ppx-report --help >/dev/null 2>&1; then
     cat >&2 <<'EOF'
 bisect-ppx-report is not installed in the active opam switch.
 
@@ -81,7 +81,8 @@ if ! $reuse_existing; then
 fi
 
 summary="$(
-  opam exec -- bash -lc "cd '$root_dir' && bisect-ppx-report summary --coverage-path '$coverage_dir'"
+  cd "$root_dir"
+  opam exec -- bisect-ppx-report summary --coverage-path "$coverage_dir"
 )"
 percent="$(
   printf '%s\n' "$summary" \

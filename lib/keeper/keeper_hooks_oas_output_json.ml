@@ -273,48 +273,10 @@ let command_candidates_of_tool_io ~tool_name ~input ~output_json =
   |> add_candidate (command_input_of_tool ~tool_name input)
   |> add_candidate (output_command_of_json output_json)
 
-let shell_words_prefix ?(max_words = 8) command =
-  let len = String.length command in
-  let buf = Buffer.create 32 in
-  let push acc =
-    if Buffer.length buf = 0 then acc
-    else
-      let word = Buffer.contents buf in
-      Buffer.clear buf;
-      word :: acc
-  in
-  let rec loop acc i in_single in_double escaped =
-    if i >= len || List.length acc >= max_words then List.rev (push acc)
-    else
-      let c = command.[i] in
-      if escaped then (
-        Buffer.add_char buf c;
-        loop acc (i + 1) in_single in_double false)
-      else
-        match c with
-        | '\\' when not in_single ->
-            loop acc (i + 1) in_single in_double true
-        | '\'' when not in_double ->
-            loop acc (i + 1) (not in_single) in_double false
-        | '"' when not in_single ->
-            loop acc (i + 1) in_single (not in_double) false
-        | ' ' | '\t' | '\r' | '\n' when (not in_single) && not in_double ->
-            let acc = push acc in
-            loop acc (i + 1) in_single in_double false
-        | _ ->
-            Buffer.add_char buf c;
-            loop acc (i + 1) in_single in_double false
-  in
-  loop [] 0 false false false
-
 let gh_argv_of_segment segment =
   match Keeper_gh_shared.parse_simple_gh_command segment with
   | Ok cmd -> Some (Keeper_gh_shared.gh_simple_command_argv cmd)
-  | Error _ ->
-      (match shell_words_prefix segment with
-       | bin :: args when String.equal (String.lowercase_ascii bin) "gh" ->
-           Some args
-       | _ -> None)
+  | Error _ -> None
 
 let gh_pr_review_action_of_command command =
   match gh_argv_of_segment command with

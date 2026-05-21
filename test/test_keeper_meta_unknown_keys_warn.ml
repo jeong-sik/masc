@@ -64,7 +64,7 @@ let fresh_tmpdir () =
   path
 
 let cleanup_tmpdir path =
-  ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote path)))
+  Fs_compat.remove_tree path
 
 let test_progress_updated_line_failure_is_observable () =
   let dir = fresh_tmpdir () in

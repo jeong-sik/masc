@@ -13,7 +13,6 @@ specs/boundary/CascadeStrategy.tla
 specs/boundary/KeeperRecoveryOrchestration.tla
 specs/boundary/KeeperTurnScheduler.tla
 specs/checkpoint-trim/CheckpointTrim.tla
-specs/closure/ContractClosure.tla
 specs/keeper-state-machine/KeeperConditionsGovernPhase.tla
 specs/keeper-state-machine/KeeperCounterCausality.tla
 specs/keeper-state-machine/KeeperDwellMonotone.tla

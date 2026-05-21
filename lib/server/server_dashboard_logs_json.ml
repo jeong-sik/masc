@@ -30,6 +30,7 @@ let build
       ~(config : Coord.config)
       ~limit
       ~level_filter
+      ~applied_level
       ~min_level
       ~module_filter
       ~since_seq
@@ -69,8 +70,7 @@ let build
          , `Assoc
              [ "limit", `Int limit
              ; "level", `String level_filter
-             ; ( "applied_level"
-               , `String (Log.level_to_string (Log.level_of_string level_filter)) )
+             ; "applied_level", `String (Log.level_to_string applied_level)
              ; "min_level", `Int min_level
              ; "module", `String module_filter
              ; "since_seq", option_int_json since_seq

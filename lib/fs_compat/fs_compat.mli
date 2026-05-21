@@ -78,6 +78,10 @@ val rename : string -> string -> unit
 (** Remove directory. *)
 val rmdir : string -> unit
 
+(** Remove a file, symlink, or directory tree without invoking a shell.
+    Missing paths are ignored.  Symlinks are unlinked, not followed. *)
+val remove_tree : string -> unit
+
 (** Get realpath. *)
 val realpath : string -> string
 

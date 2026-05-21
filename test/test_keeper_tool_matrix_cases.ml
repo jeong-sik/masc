@@ -399,11 +399,6 @@ let extra_guard_fragments_for_name = function
       [ "agent_name must match the authenticated agent";
         "no credential found" ]
   | "masc_auth_revoke" -> [ "no credential found" ]
-  | "masc_autoresearch_cycle"
-  | "masc_autoresearch_inject"
-  | "masc_autoresearch_status"
-  | "masc_autoresearch_stop" ->
-      [ "no autoresearch loop running" ]
   | "masc_board_migrate" -> [ "requires postgresql backend" ]
   | "masc_get_metrics" -> [ "no metrics found" ]
   | "masc_library_promote" -> [ "no candidate matching" ]

@@ -305,5 +305,3 @@ let digest_json ?actor ?target_type ?target_id:_target_id ?include_workers:_incl
             @ [ ("recent_reviews", recent_reviews) ]
             @ active_guidance))
     | _ -> Error "unsupported target_type"
-(* Note: normalize_digest_target_type accepts "root"/"namespace"/"room" and
-   returns canonical "root" — the match above only needs the canonical case. *)

@@ -540,6 +540,29 @@ let spawn_and_drain_both ?phase_ref ~sw pm ~cwd ?env ?stdin_source argv stdout_b
   | `Exited n -> Unix.WEXITED n
   | `Signaled n -> Unix.WSIGNALED n
 
+type pipeline_stage = {
+  argv : string list;
+  env : string array option;
+  cwd : string option;
+}
+
+let effective_cwd default_cwd = function
+  | None -> default_cwd
+  | Some dir -> Eio.Path.(default_cwd / dir)
+
+let unix_status_of_eio_status = function
+  | `Exited n -> Unix.WEXITED n
+  | `Signaled n -> Unix.WSIGNALED n
+
+let pipeline_status statuses =
+  List.fold_left
+    (fun acc status ->
+      match status with
+      | Unix.WEXITED 0 -> acc
+      | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> status)
+    (Unix.WEXITED 0)
+    statuses
+
 let run_argv ?(timeout_sec = default_timeout_sec) ?env (argv : string list) : string =
   Exec_tap.record ~kind:Exec_tap.Process_eio_run_argv ~argv ?env ();
   with_spawn_guard (fun () ->
@@ -758,6 +781,169 @@ let run_argv_with_status_split ?(timeout_sec = default_timeout_sec) ?env ?cwd
                     "",
                     process_error_output ~label
                       ~reason:(reason_of_exn_for_output exn) () )))
+
+let run_argv_pipeline_with_status_split ?(timeout_sec = default_timeout_sec)
+    (stages : pipeline_stage list) : Unix.process_status * string * string =
+  let fallback_buffered () =
+    let rec chain prev_stdout = function
+      | [] -> (Unix.WEXITED 0, prev_stdout, "")
+      | [ { argv; env; cwd } ] ->
+          run_unix_argv_with_stdin_and_status_split_fallback ~timeout_sec ?env
+            ?cwd ~stdin_content:prev_stdout argv
+      | { argv; env; cwd } :: rest ->
+          let status, stdout, stderr =
+            run_unix_argv_with_stdin_and_status_split_fallback ~timeout_sec
+              ?env ?cwd ~stdin_content:prev_stdout argv
+          in
+          let result_status, result_stdout, result_stderr = chain stdout rest in
+          let final_status = pipeline_status [ status; result_status ] in
+          (final_status, result_stdout, stderr ^ result_stderr)
+    in
+    match stages with
+    | [] -> (Unix.WEXITED 0, "", "")
+    | [ { argv; env; cwd } ] ->
+        run_unix_argv_with_status_split_fallback ~timeout_sec ?env ?cwd argv
+    | { argv; env; cwd } :: rest ->
+        let status, stdout, stderr =
+          run_unix_argv_with_status_split_fallback ~timeout_sec ?env ?cwd argv
+        in
+        let result_status, result_stdout, result_stderr = chain stdout rest in
+        let final_status = pipeline_status [ status; result_status ] in
+        (final_status, result_stdout, stderr ^ result_stderr)
+  in
+  with_spawn_guard (fun () ->
+      if not (is_initialized ()) then fallback_buffered ()
+      else
+        match get_proc_mgr (), get_clock (), get_cwd_default () with
+        | Error _, _, _ | _, Error _, _ | _, _, Error _ -> fallback_buffered ()
+        | Ok pm, Ok clk, Ok default_cwd ->
+            let label =
+              stages
+              |> List.map (fun stage ->
+                String.concat " " (List.map Filename.quote stage.argv))
+              |> String.concat " | "
+            in
+            let stdout_buf = Buffer.create default_buffer_size in
+            let phase_ref = ref Timeout_origin.Spawn in
+            let stderr_for_timeout = ref "" in
+            (try
+               Eio.Time.with_timeout_exn clk timeout_sec (fun () ->
+                   Eio.Switch.run (fun sw ->
+                       let final_stdout_r, final_stdout_w =
+                         Eio.Process.pipe ~sw pm
+                       in
+                       let links =
+                         List.init
+                           (max 0 (List.length stages - 1))
+                           (fun _ -> Eio.Process.pipe ~sw pm)
+                       in
+                       let stderr_pairs =
+                         List.map
+                           (fun _ -> Eio.Process.pipe ~sw pm)
+                           stages
+                       in
+                       let stderr_buffers =
+                         List.map
+                           (fun _ -> Buffer.create 256)
+                           stages
+                       in
+                       let procs =
+                         stages
+                         |> List.mapi (fun idx stage ->
+                           Exec_tap.record ~kind:Exec_tap.Process_eio_run_argv_with_status
+                             ~argv:stage.argv ?env:stage.env ?cwd:stage.cwd ();
+                           let stdin =
+                             if idx = 0 then None
+                             else Some (fst (List.nth links (idx - 1)))
+                           in
+                           let stdout =
+                             if idx = List.length stages - 1
+                             then final_stdout_w
+                             else snd (List.nth links idx)
+                           in
+                           let stderr = snd (List.nth stderr_pairs idx) in
+                           let proc =
+                             Eio.Process.spawn
+                               ~sw
+                               pm
+                               ~cwd:(effective_cwd default_cwd stage.cwd)
+                               ?env:stage.env
+                               ?stdin
+                               ~stdout
+                               ~stderr
+                               stage.argv
+                           in
+                           phase_ref := Timeout_origin.Command;
+                           proc)
+                       in
+                       Eio.Flow.close final_stdout_w;
+                       List.iter
+                         (fun (r, w) ->
+                           Eio.Flow.close r;
+                           Eio.Flow.close w)
+                         links;
+                       List.iter
+                         (fun (_r, w) -> Eio.Flow.close w)
+                         stderr_pairs;
+                       let drain_final_stdout () =
+                         Eio.Flow.copy final_stdout_r
+                           (Eio.Flow.buffer_sink stdout_buf);
+                         Eio.Flow.close final_stdout_r
+                       in
+                       let drain_stderr idx (r, _w) =
+                         let buf = List.nth stderr_buffers idx in
+                         Eio.Flow.copy r (Eio.Flow.buffer_sink buf);
+                         Eio.Flow.close r
+                       in
+                       let await_all () =
+                         List.map Eio.Process.await procs
+                         |> List.map unix_status_of_eio_status
+                       in
+                       let drain_all () =
+                         Eio.Fiber.all
+                           (drain_final_stdout
+                            :: List.mapi
+                                 (fun idx pair -> fun () ->
+                                   drain_stderr idx pair)
+                                 stderr_pairs)
+                       in
+                       let statuses, () = Eio.Fiber.pair await_all drain_all in
+                       let stderr =
+                         stderr_buffers
+                         |> List.map Buffer.contents
+                         |> String.concat ""
+                       in
+                       stderr_for_timeout := stderr;
+                       (pipeline_status statuses, Buffer.contents stdout_buf, stderr)))
+             with
+             | Eio.Time.Timeout ->
+                 Log.Misc.warn "[Process_eio] Timeout after %.0fs (%s): %s"
+                   timeout_sec (Timeout_origin.to_label !phase_ref) label;
+                 observe_process_timeout
+                   (match stages with [] -> [] | stage :: _ -> stage.argv)
+                   ~timeout_sec ~origin:!phase_ref;
+                 let stderr =
+                   if String.trim !stderr_for_timeout = "" then
+                     process_error_output ~label
+                       ~reason:(Printf.sprintf "timeout after %.0fs" timeout_sec)
+                       ()
+                   else !stderr_for_timeout
+                 in
+                 (Unix.WEXITED 124, Buffer.contents stdout_buf, stderr)
+             | Eio.Cancel.Cancelled _ as exn -> raise exn
+             | exn ->
+                 if should_retry_unix_fallback exn then (
+                   Log.Misc.warn
+                     "[Process_eio] pipeline bind error, retrying via Unix fallback: %s — %s"
+                     label (Printexc.to_string exn);
+                   fallback_buffered ())
+                 else (
+                   Log.Misc.error "[Process_eio] pipeline error: %s — %s" label
+                     (Printexc.to_string exn);
+                   ( Unix.WEXITED 127,
+                     "",
+                     process_error_output ~label
+                       ~reason:(reason_of_exn_for_output exn) () ))))
 
 let run_argv_with_status ?(timeout_sec = default_timeout_sec) ?env ?cwd
     (argv : string list) : Unix.process_status * string =

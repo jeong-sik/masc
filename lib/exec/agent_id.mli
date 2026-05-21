@@ -10,7 +10,6 @@ type t =
   | `Coord_worktree
   | `System_task_sandbox
   | `System_notify
-  | `Autoresearch_git
   | `Voice_bridge
   | `Voice_bridge_core
   | `System_graphql_client_eio
@@ -25,7 +24,6 @@ type t =
   | `Coord_identity
   | `Tool_local_runtime
   | `Tool_local_runtime_bench
-  | `Tool_autoresearch_cycle
   | `Keeper_shell
   | `Other_agent
   ]

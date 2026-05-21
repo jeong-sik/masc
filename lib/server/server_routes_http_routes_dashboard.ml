@@ -62,24 +62,11 @@ let oas_telemetry_limit_param req =
 
 let oas_telemetry_provider_param req = trimmed_query_param req "provider"
 
-let observe_worktree_status_sse_write writer event =
-  Telemetry_observe.observe_or_fail
-    ~kind:"dashboard_worktree_status_sse_write" (fun () ->
-      Httpun.Body.Writer.write_string writer event)
-
-let rec observe_worktree_status_sse_write_all writer = function
-  | [] -> Ok ()
-  | event :: rest ->
-      (match observe_worktree_status_sse_write writer event with
-       | Ok () -> observe_worktree_status_sse_write_all writer rest
-       | Error _ as err -> err)
-
-let observe_worktree_status_sse_close writer =
-  Telemetry_observe.observe_or_default
-    ~kind:"dashboard_worktree_status_sse_close"
-    ~default:() (fun () ->
-      Httpun.Body.Writer.close writer)
-
+(* worktree-status SSE writers extracted to
+   [Server_routes_http_routes_dashboard_sse_writers] (godfile decomp). *)
+let observe_worktree_status_sse_write = Server_routes_http_routes_dashboard_sse_writers.observe_worktree_status_sse_write
+let observe_worktree_status_sse_write_all = Server_routes_http_routes_dashboard_sse_writers.observe_worktree_status_sse_write_all
+let observe_worktree_status_sse_close = Server_routes_http_routes_dashboard_sse_writers.observe_worktree_status_sse_close
 (* sync_keeper_cascade_meta extracted to
    [Server_routes_http_routes_dashboard_cascade_meta] (godfile decomp). *)
 let sync_keeper_cascade_meta = Server_routes_http_routes_dashboard_cascade_meta.sync_keeper_cascade_meta
@@ -249,29 +236,39 @@ let rec add_routes ~sw ~clock router =
            | Some v -> v
            | None -> "DEBUG"
          in
-         let min_level =
-           Log.level_to_int (Log.level_of_string level_filter)
-         in
-         let since_seq =
-           match Server_utils.query_param req "since_seq" with
-           | None -> None
-           | Some _ ->
-               let seq = Server_utils.int_query_param req "since_seq" ~default:(-1) in
-               if seq < 0 then None else Some seq
-         in
-         let module_filter = match Server_utils.query_param req "module" with
-           | Some v -> v
-           | None -> ""
-         in
-         let entries =
-           Log.Ring.recent ~limit ~min_level ~module_filter ?since_seq ()
-         in
-         let json =
-           dashboard_logs_json ~config:state.Mcp_server.room_config ~limit
-             ~level_filter ~min_level ~module_filter ~since_seq entries
-         in
-         Http.Response.json ~compress:true ~request:req
-           (Yojson.Safe.to_string json) reqd
+         match Log.level_of_string_opt level_filter with
+         | None ->
+           let json =
+             `Assoc
+               [ "error", `String "invalid_log_level"
+               ; "message", `String "level must be one of debug, info, warn, warning, error"
+               ; "level", `String level_filter
+               ]
+           in
+           Http.Response.json ~status:`Bad_request ~compress:true ~request:req
+             (Yojson.Safe.to_string json) reqd
+         | Some applied_level ->
+           let min_level = Log.level_to_int applied_level in
+           let since_seq =
+             match Server_utils.query_param req "since_seq" with
+             | None -> None
+             | Some _ ->
+                 let seq = Server_utils.int_query_param req "since_seq" ~default:(-1) in
+                 if seq < 0 then None else Some seq
+           in
+           let module_filter = match Server_utils.query_param req "module" with
+             | Some v -> v
+             | None -> ""
+           in
+           let entries =
+             Log.Ring.recent ~limit ~min_level ~module_filter ?since_seq ()
+           in
+           let json =
+             dashboard_logs_json ~config:state.Mcp_server.room_config ~limit
+               ~level_filter ~applied_level ~min_level ~module_filter ~since_seq entries
+           in
+           Http.Response.json ~compress:true ~request:req
+             (Yojson.Safe.to_string json) reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/provider-logs" (fun request reqd ->
        with_public_read (fun _state req reqd ->
@@ -1130,83 +1127,10 @@ let rec add_routes ~sw ~clock router =
 
   (* ── Agent API routes (extracted) ── *)
   |> Server_dashboard_http_agent_api.add_agent_api_routes
-  |> add_autoresearch_routes
+  |> add_keeper_cascade_routes
 
-(* ── Autoresearch routes ───────────────────────────────────────── *)
-
-and add_autoresearch_routes router =
+and add_keeper_cascade_routes router =
   router
-  (* Autoresearch loops list -- all active + persisted loops *)
-  |> Http.Router.get "/api/v1/autoresearch/loops" (fun request reqd ->
-       with_public_read (fun state req reqd ->
-         let base_path = state.Mcp_server.room_config.base_path in
-         let offset =
-           Server_utils.int_query_param req "offset" ~default:0
-           |> Server_utils.clamp ~min_v:0 ~max_v:1000000
-         in
-         let limit =
-           Server_utils.int_query_param req "limit" ~default:100
-           |> Server_utils.clamp ~min_v:1 ~max_v:1000
-         in
-         let json =
-           Dashboard_http_autoresearch.autoresearch_loops_json ~base_path ~offset ~limit ()
-         in
-         Http.Response.json ~compress:true ~request:req
-           (Yojson.Safe.to_string json) reqd
-       ) request reqd)
-
-  (* Autoresearch loops CSV export *)
-  |> Http.Router.get "/api/v1/autoresearch/loops/csv" (fun request reqd ->
-       with_public_read (fun state _req reqd ->
-         let base_path = state.Mcp_server.room_config.base_path in
-         let csv = Dashboard_http_autoresearch.autoresearch_loops_csv ~base_path in
-         let headers =
-           Httpun.Headers.of_list
-             [
-               ("content-type", "text/csv; charset=utf-8");
-               ("content-disposition", "attachment; filename=\"autoresearch_loops.csv\"");
-             ]
-         in
-         let response = Httpun.Response.create ~headers `OK in
-         Httpun.Reqd.respond_with_string reqd response csv
-       ) request reqd)
-
-  (* Autoresearch loop detail -- single loop with full cycle history *)
-  |> Http.Router.prefix_get "/api/v1/autoresearch/loops/" (fun request reqd ->
-       with_public_read (fun state req reqd ->
-         let base_path = state.Mcp_server.room_config.base_path in
-         let req_path = Http.Request.path req in
-         let prefix = "/api/v1/autoresearch/loops/" in
-         let loop_id =
-           String.trim
-             (String.sub req_path (String.length prefix)
-                (String.length req_path - String.length prefix))
-         in
-         if String.length loop_id = 0 then
-           Http.Response.json ~status:`Bad_request
-             {|{"error":"loop_id is required"}|} reqd
-         else
-           let history_limit =
-             Server_utils.int_query_param req "history_limit" ~default:100
-             |> Server_utils.clamp ~min_v:0 ~max_v:1000
-           in
-           match
-             Dashboard_http_autoresearch.autoresearch_loop_detail_json
-               ~base_path ~loop_id ~history_limit
-           with
-           | Ok json ->
-               Http.Response.json ~compress:true ~request:req
-                 (Yojson.Safe.to_string json) reqd
-           | Error msg ->
-               Http.Response.json ~status:`Not_found
-                 (Printf.sprintf {|{"error":"%s"}|} (String.escaped msg))
-                 reqd
-           | exception Invalid_argument msg ->
-               Http.Response.json ~status:`Not_found
-                 (Printf.sprintf {|{"error":"%s"}|} (String.escaped msg))
-               reqd
-       ) request reqd)
-
   (* ── Keeper cascade config API ──────────────────────────────── *)
 
   |> Http.Router.get "/api/v1/keeper/cascades" (fun request reqd ->

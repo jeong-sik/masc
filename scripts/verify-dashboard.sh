@@ -136,11 +136,11 @@ check_json \
   "surface-readiness has canonical surface count" \
   "$BASE/api/v1/dashboard/surface-readiness" \
   "len(d.get('surfaces', []))" \
-  '^25$'
+  '^24$'
 check_json \
   "surface-readiness matches canonical surface ids" \
   "$BASE/api/v1/dashboard/surface-readiness" \
-  "sorted(s.get('id') for s in d.get('surfaces', [])) == sorted(['cockpit', 'overview', 'monitoring.runtime', 'monitoring.cascade-config', 'monitoring.agents', 'monitoring.fleet-health', 'monitoring.doctor', 'monitoring.transport-health', 'monitoring.feature-health', 'monitoring.journey', 'monitoring.observatory', 'monitoring.cognition', 'command.operations', 'connectors.connector-status', 'workspace.board', 'workspace.sub-boards', 'workspace.moderation', 'workspace.planning', 'workspace.repositories', 'workspace.verification', 'lab.tools', 'lab.autoresearch', 'lab.harness', 'code.ide-shell', 'logs'])" \
+  "sorted(s.get('id') for s in d.get('surfaces', [])) == sorted(['cockpit', 'overview', 'monitoring.runtime', 'monitoring.cascade-config', 'monitoring.agents', 'monitoring.fleet-health', 'monitoring.doctor', 'monitoring.transport-health', 'monitoring.feature-health', 'monitoring.journey', 'monitoring.observatory', 'monitoring.cognition', 'command.operations', 'connectors.connector-status', 'workspace.board', 'workspace.sub-boards', 'workspace.moderation', 'workspace.planning', 'workspace.repositories', 'workspace.verification', 'lab.tools', 'lab.harness', 'code.ide-shell', 'logs'])" \
   '^True$'
 check_json \
   "surface-readiness dropped retired surfaces" \
@@ -302,8 +302,6 @@ check_http "prompt registry 200" "$BASE/api/v1/prompts" "200"
 check_json "prompt registry exposes prompts" "$BASE/api/v1/prompts" "'prompts' in d" '^True$'
 check_http "excuse pattern config 200" "$BASE/api/v1/dashboard/config/excuse-patterns" "200"
 check_json "excuse pattern config exposes list" "$BASE/api/v1/dashboard/config/excuse-patterns" "len(d) >= 0" '^True$'
-check_http "autoresearch loops 200" "$BASE/api/v1/autoresearch/loops" "200"
-check_json "autoresearch loops exposes loops" "$BASE/api/v1/autoresearch/loops" "'loops' in d" '^True$'
 check_http "harness health 200" "$BASE/api/v1/dashboard/harness-health" "200"
 check_json "harness health exposes overview" "$BASE/api/v1/dashboard/harness-health" "'overview' in d" '^True$'
 

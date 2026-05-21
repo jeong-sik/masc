@@ -48,14 +48,12 @@
  prometheus_builtin_metrics_part4
  prometheus_builtin_metrics_part5
  prometheus_builtin_metrics
- prometheus_identity_metric_names
  prometheus_transport_metric_names
  prometheus_core_metric_names
  prometheus_cascade_metric_names
  prometheus_oas_metric_names
  prometheus_runtime_metric_names
  prometheus_policy_metric_names
- prometheus_identity_metric_names
  keeper_tool_call_log_context
  dashboard_http_keeper_metrics
  dashboard_http_keeper_detail
@@ -114,7 +112,6 @@
  server_dashboard_http_keeper_runtime_lens_gaps
  server_dashboard_http_core_entities
  dashboard_goal_loop
- dashboard_http_autoresearch
  dashboard_harness_health
  dashboard_worktree_status
  dashboard_goals
@@ -164,6 +161,7 @@
    keeper_host_config_provider
    keeper_in_container_login_provider
    keeper_gh_shared
+   keeper_gh_pr_review_cli
    keeper_tool_github_pr
    keeper_tool_pr_review
    keeper_activation_readiness
@@ -200,8 +198,9 @@
   keeper_turn_telemetry
   keeper_agent_prompt_metrics
   keeper_agent_tool_surface
-  keeper_agent_run_contract_helpers
-  keeper_agent_run_receipt_append
+  keeper_agent_run_phase0_telemetry keeper_agent_run_contract_retry
+  keeper_agent_run_contract_helpers keeper_agent_run_thinking_trajectory
+  keeper_agent_run_tool_observation keeper_agent_run_tool_surface_violation keeper_agent_run_receipt_append
   keeper_agent_result
   keeper_agent_error
   keeper_agent_memory_episode
@@ -284,13 +283,6 @@
   keeper_hooks_oas_pr_metrics
   keeper_hooks_oas_introspection
   keeper_tools_oas_markers
-  autoresearch_codegen
-  autoresearch_knowledge
-  autoresearch_lineage
-  tool_autoresearch_context
-  tool_autoresearch_registry
-  tool_autoresearch_broadcast
-  tool_autoresearch_cycle
   keeper_sandbox
   keeper_sandbox_control
   keeper_alerting_path
@@ -593,8 +585,6 @@
    ;; 2026-05-18). Advisory-only in Phase 1; new callers target this
    ;; module so Phase 2+ can retire lib-root duplicates.
    masc_mcp.masc_exec_command_gate
-   ;; Autoresearch leaf modules (types, serde, storage, metric, git, file)
-   masc_autoresearch
    ;; Board types (extracted sub-library — first step toward board isolation)
    masc_board
    ;; Random identifier helper — shared between masc_coord and masc_mcp

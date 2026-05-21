@@ -324,6 +324,56 @@ let test_interleaved_unscoped_rows_mark_current_writer_partial () =
     (member_bool "legacy_unscoped_only" task_scope)
 ;;
 
+let test_older_cdal_unscoped_rows_do_not_mark_current_writer_partial () =
+  with_temp_dir @@ fun dir ->
+  let base_dir = Filename.concat dir "cdal_verdicts" in
+  let proof_root = Filename.concat dir ".oas" in
+  ignore
+    (write_ledger_row
+       ~base_dir
+       (`Assoc
+           [ "_task_id", `String "task-old"
+           ; "run_id", `String "cdal-2000-scoped-old"
+           ]));
+  ignore
+    (write_ledger_row
+       ~base_dir
+       (`Assoc [ "run_id", `String "cdal-1000-unscoped-legacy" ]));
+  ignore
+    (write_ledger_row
+       ~base_dir
+       (`Assoc
+           [ "_task_id", `String "task-new"
+           ; "run_id", `String "cdal-3000-scoped-new"
+           ]));
+  (* See: fixture helper returns the proofs dir, but this test only needs it created. *)
+  ignore (make_proof_root proof_root);
+  let json =
+    H.snapshot_json
+      ~base_dir
+      ~proof_root
+      ~now:(Time_compat.now ())
+      ~stale_age_seconds:60.0
+      ~recent_limit:20
+      ()
+  in
+  Alcotest.(check string) "writer_status" "active" (member_string "writer_status" json);
+  let task_scope = nested "task_scope" json in
+  Alcotest.(check string) "task scope status" "present" (member_string "status" task_scope);
+  Alcotest.(check int)
+    "legacy unscoped rows"
+    1
+    (member_int "legacy_unscoped_rows" task_scope);
+  Alcotest.(check int)
+    "current writer missing task rows"
+    0
+    (member_int "current_writer_missing_task_scope_rows" task_scope);
+  Alcotest.(check bool)
+    "legacy-only marker"
+    true
+    (member_bool "legacy_unscoped_only" task_scope)
+;;
+
 let test_active_writer_status () =
   with_temp_dir @@ fun dir ->
   let base_dir = Filename.concat dir "cdal_verdicts" in
@@ -612,6 +662,10 @@ let () =
             "interleaved unscoped rows mark current writer partial"
             `Quick
             test_interleaved_unscoped_rows_mark_current_writer_partial
+        ; Alcotest.test_case
+            "older cdal unscoped rows do not mark current writer partial"
+            `Quick
+            test_older_cdal_unscoped_rows_do_not_mark_current_writer_partial
         ; Alcotest.test_case "active" `Quick test_active_writer_status
         ; Alcotest.test_case
             "stale incomplete proof store"

@@ -76,6 +76,16 @@ let audit_event_names ~base_path ~keeper_name =
   |> List.map (fun json ->
          Yojson.Safe.Util.(json |> member "event" |> to_string))
 
+let test_first_cmd_token_uses_shared_words () =
+  Alcotest.(check (option string))
+    "quoted command path preserved"
+    (Some "/tmp/bin/gh cli")
+    (AQ.For_testing.first_cmd_token {|"/tmp/bin/gh cli" pr list|});
+  Alcotest.(check (option string))
+    "malformed quote fails closed"
+    None
+    (AQ.For_testing.first_cmd_token {|"/tmp/bin/gh cli pr list|})
+
 let test_approval_queue_failure_metric_labels_site () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -1441,6 +1451,8 @@ let () =
         test_approval_queue_cancel_records_terminal_audit;
       Alcotest.test_case "failure observation labels site" `Quick
         test_approval_queue_failure_metric_labels_site;
+      Alcotest.test_case "first cmd token uses shared words" `Quick
+        test_first_cmd_token_uses_shared_words;
       Alcotest.test_case "background pending callback" `Quick
         test_background_pending_callback_and_keeper_lookup;
       Alcotest.test_case "background pending reuses existing entry" `Quick

@@ -11,8 +11,8 @@
 
     {1 Kind mapping}
 
-    Eight kinds, mirroring Preact + a [`Brass] extension retained for
-    Bonsai legacy callers (archive_runs, goals):
+	    Eight kinds, mirroring Preact + a [`Brass] extension retained for
+	    Bonsai legacy callers:
 
     - [`Neutral]: chromeless baseline, fg-secondary on bg-elevated.
     - [`Running]: accent-glow tint (matches `--color-accent-glow`).
@@ -20,11 +20,10 @@
     - [`Ok | `Warn | `Err | `Info | `Stalled]: status semantics with
       [rgb(var(--color-status-{kind}-glow) / 0.12)] translucent
       backgrounds (consume the glow tokens introduced in #11163).
-    - [`Brass]: Bonsai-only highlighted accent (used by archive_runs
-      "Completed" state). Uses [--color-accent-glow] triplet with
-      [--color-accent-fg] foreground. Not present in Preact reference;
-      retained here so the existing call sites (archive_runs_view,
-      goals_view) keep working without code churn.
+	    - [`Brass]: Bonsai-only highlighted accent. Uses
+	      [--color-accent-glow] triplet with [--color-accent-fg] foreground.
+	      Not present in Preact reference; retained for existing goals call
+	      sites.
 
     {1 Dot variant}
 
@@ -165,8 +164,8 @@ type kind =
   | `Brass
   ]
 
-(** Legacy color polyvar kept so existing callers (archive_runs_view,
-    goals_view, keepers_directory) compile unchanged. [`Bad] is the
+(** Legacy color polyvar kept so existing callers (goals_view,
+    keepers_directory) compile unchanged. [`Bad] is the
     historical name for [`Err]. *)
 type color =
   [ `Ok

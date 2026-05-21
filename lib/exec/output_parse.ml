@@ -422,13 +422,16 @@ let git_subcommand tokens =
   in
   loop tokens
 
+let command_words_for_parsing cmd =
+  match Command_words.stages cmd with
+  | Ok [ words ] ->
+      words
+      |> List.map (fun (word : Command_words.word) -> word.value)
+      |> List.filter (fun s -> s <> "")
+  | Ok [] | Ok (_ :: _ :: _) | Error _ -> []
+
 let classify_for_parsing ~cmd ~_output =
-  let tokens =
-    String.trim cmd
-    |> String.split_on_char ' '
-    |> List.map String.trim
-    |> List.filter (fun s -> s <> "")
-  in
+  let tokens = command_words_for_parsing cmd in
   match tokens with
   | [] -> None
   | bin :: rest ->

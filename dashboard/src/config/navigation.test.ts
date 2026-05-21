@@ -40,20 +40,18 @@ describe('code (IDE plane) navigation', () => {
 })
 
 describe('lab navigation', () => {
-  it('contains only research surfaces after Phase 1 reorg', () => {
+  it('contains lab support surfaces', () => {
     expect(defaultParamsForTab('lab')).toEqual({ section: 'tools' })
 
     const labSections = visibleSectionItemsForTab('lab')
 
     expect(labSections.map(item => item.id)).toEqual([
       'tools',
-      'autoresearch',
       'harness',
     ])
 
     expect(labSections.map(item => item.label)).toEqual([
       'Tools',
-      'Autoresearch',
       'Safety Harness',
     ])
   })

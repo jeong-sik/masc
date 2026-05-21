@@ -137,7 +137,7 @@ let test_inconclusive_mixed_gaps_rejects () =
 let with_temp_dir f =
   let dir = Filename.temp_dir "cdal_gate_test" "" in
   Fun.protect ~finally:(fun () ->
-    ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote dir)))
+    Fs_compat.remove_tree dir
   ) (fun () -> f dir)
 
 let write_verdict_jsonl ~base_dir ?task_id (verdict : CT.contract_verdict) =
@@ -145,7 +145,7 @@ let write_verdict_jsonl ~base_dir ?task_id (verdict : CT.contract_verdict) =
   let date_dir = Printf.sprintf "%04d-%02d"
     (today.tm_year + 1900) (today.tm_mon + 1) in
   let dir = Filename.concat base_dir date_dir in
-  ignore (Sys.command (Printf.sprintf "mkdir -p %s" (Filename.quote dir)));
+  Fs_compat.mkdir_p dir;
   let day_file = Printf.sprintf "%02d.jsonl" today.tm_mday in
   let path = Filename.concat dir day_file in
   let json = CT.contract_verdict_to_json verdict in

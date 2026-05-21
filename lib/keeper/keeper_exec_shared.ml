@@ -151,16 +151,6 @@ let with_registry_meta ~(keeper_name : string) ~(source_layer : string) f =
   | Some meta -> f meta
 ;;
 
-let lowercase_shell_words text =
-  text
-  |> String.map (function
-    | '\t' | '\r' | '\n' -> ' '
-    | c -> c)
-  |> String.lowercase_ascii
-  |> String.split_on_char ' '
-  |> List.filter (fun token -> token <> "")
-;;
-
 let assoc_override_string (key : string) (value : string) = function
   | `Assoc fields ->
     let kept_fields = List.filter (fun (k, _) -> k <> key) fields in

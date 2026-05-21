@@ -1,6 +1,6 @@
 (** Exception-safe subprocess stdout capture.
 
-    SSOT for the [Unix.open_process_*] + drain + close pattern.  Extracted
+    SSOT for the argv subprocess + drain + close pattern.  Extracted
     in the post-#8543 hardening (#8538) so every call site uses the same
     error-path close semantics.
 
@@ -24,17 +24,6 @@ let with_process_guard f = (Atomic.get process_guard).run f
 let close_best_effort ic =
   try let _ = (Unix.close_process_in ic : Unix.process_status) in ()
   with Unix.Unix_error _ | Sys_error _ | Failure _ -> ()
-
-let with_process_in cmd f =
-  with_process_guard (fun () ->
-      let ic = Unix.open_process_in cmd in
-      match f ic with
-      | result ->
-          let status = Unix.close_process_in ic in
-          (result, status)
-      | exception exn ->
-          close_best_effort ic;
-          raise exn)
 
 let with_process_args_in prog argv f =
   with_process_guard (fun () ->

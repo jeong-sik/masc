@@ -44,15 +44,6 @@ let level_of_string_opt s =
   | "error" -> Some Error
   | _ -> None
 
-(** Parse level from string, defaulting to [Info] on unrecognised input.
-    Kept for backward compatibility with existing callers.  When the
-    input comes from a user (env var, config), prefer
-    [level_of_string_opt] and warn on [None] so typos surface. *)
-let level_of_string s =
-  match level_of_string_opt s with
-  | Some lvl -> lvl
-  | None -> Info
-
 let protect ~default f =
   try f () with
   | Eio.Cancel.Cancelled _ as e -> raise e
@@ -826,7 +817,6 @@ module Cascade = Make(struct let name = "Cascade" end)
 module Memory = Make(struct let name = "Memory" end)
 module Mention = Make(struct let name = "Mention" end)
 module Misc = Make(struct let name = "Misc" end)
-module Autoresearch = Make(struct let name = "Autoresearch" end)
 module Identity = Make(struct let name = "Identity" end)
 module Institution = Make(struct let name = "Institution" end)
 module Pages = Make(struct let name = "Pages" end)

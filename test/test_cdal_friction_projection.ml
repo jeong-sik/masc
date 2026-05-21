@@ -346,7 +346,7 @@ let test_blocked_tool_counts () =
       (Filename.concat store.root "proofs")
       (Filename.concat run_id "evidence")
   in
-  ignore (Sys.command (Printf.sprintf "mkdir -p %s" dir));
+  mkdirp dir;
   let violations =
     `List
       [ `Assoc
@@ -432,7 +432,7 @@ let test_tripwire_fires () =
       (Filename.concat store.root "proofs")
       (Filename.concat run_id "evidence")
   in
-  ignore (Sys.command (Printf.sprintf "mkdir -p %s" dir));
+  mkdirp dir;
   (* 3 identical violations for "write" — threshold=2 should fire *)
   let v =
     `Assoc
@@ -466,7 +466,7 @@ let test_tripwire_below_threshold () =
       (Filename.concat store.root "proofs")
       (Filename.concat run_id "evidence")
   in
-  ignore (Sys.command (Printf.sprintf "mkdir -p %s" dir));
+  mkdirp dir;
   let v =
     `Assoc
       [ "ts", `Float 1.0

@@ -691,8 +691,12 @@ strategy = "failover"
 [tier.__safe_lane]
 # System-only baseline tier (RFC-0027 PR-4). Last-resort fallback
 # target that satisfies every capability profile. Not keeper-assignable.
+# Diversity invariant: __safe_lane MUST NOT share both members with tier.primary
+# (D11 fix 2026-05-21). When the dominant provider (GLM) degrades, primary and
+# __safe_lane must not fail in correlation — keep at least one non-GLM provider
+# from a different vendor family (codex_cli) to break the correlated failure path.
 keeper-assignable = false
-members = ["glm-coding.glm-flashx", "openai_compat.deepseek-v4-flash.for-keeper-turn"]
+members = ["codex_cli.codex-spark.for-keeper-turn", "openai_compat.deepseek-v4-flash.for-keeper-turn"]
 strategy = "failover"
 
 [tier.local_recovery]
@@ -805,9 +809,6 @@ target = "tier-group.governance"
 target = "tier-group.primary"
 
 [routes.verifier]
-target = "tier-group.primary"
-
-[routes.autoresearch]
 target = "tier-group.primary"
 
 [routes.adversarial_reviewer]

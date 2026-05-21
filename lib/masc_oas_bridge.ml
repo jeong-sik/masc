@@ -122,7 +122,7 @@ let run_safe ?(caller = default_caller) ~timeout_s fn =
     the per-caller timeout from [Env_config_oas_bridge] and labels
     the resulting Prometheus counter.  Replaces the seven hardcoded
     [run_safe ~timeout_s:N.N] literals scattered across the lib
-    tree.  The original tuned values for autoresearch / deep_review
+    tree.  The original tuned values for persona authoring / deep_review
     / anti_rationalization are preserved as per-caller defaults;
     the two fantasy 60s budgets ([auto_responder],
     [dashboard_provider_runs]) are raised to the global default

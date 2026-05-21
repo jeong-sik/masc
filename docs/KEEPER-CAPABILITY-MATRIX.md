@@ -15,9 +15,6 @@ implementation/audit purposes; model-facing prompts and recovery hints must use
 the exact active schema names, such as the public `Bash` alias when it is
 listed.
 Triage and trigger detection run on each heartbeat using the proactive idle/cooldown settings.
-The `masc_autoresearch_*` MCP/keeper tool family is retired; dashboard lab
-routes may still expose historical loop artifacts, but keepers must not receive
-autoresearch as a callable shard.
 
 ## Tool Shards
 
@@ -34,7 +31,6 @@ autoresearch as a callable shard.
 
 Notes:
 - The `voice` shard still exists, but it is no longer part of the default keeper surface. The historical weather shard is retired from `Tool_shard`.
-- The historical `autoresearch` shard and `masc_autoresearch_*` tool family are retired from `Tool_shard` and keeper model-tool exposure.
 - The old governance petition/case tools were retired from the callable tool surface. Governance-style participation now uses board discussion/vote paths plus dashboard governance/audit read models.
 - Write-capable tools such as `keeper_fs_edit` and code mutation tools are present in the keeper surface; preset/policy and eval gates decide whether a keeper may execute the mutation.
 - `keeper_shell` is structured-only (`pwd`, `ls`, `cat`, `rg`, `find`, `head`, `tail`, `wc`, `tree`, `git_status`, `git_log`, `git_diff`, `git_worktree`, `git_clone`, `gh`). Typed command execution is model-facing as `Bash` when that alias is listed, backed internally by `keeper_bash`.
@@ -107,8 +103,7 @@ messaging keepers keep board/task coordination without goal mutation access.
 ## Research Profile Additions
 
 Research-profile keepers use the active web, board, task, code, and goal
-surfaces. They do not receive `masc_autoresearch_*`; allowlists and preset
-selection must not resurrect retired autoresearch tools.
+surfaces.
 
 ## Safety Gates (applied to all keepers)
 

@@ -186,6 +186,58 @@ let run_argv_with_stdin_and_status_retry_eintr ~timeout_sec ~stdin_content argv 
     loop max_eintr_retries)
 ;;
 
+let run_argv_with_stdin_and_status_split_retry_eintr ~timeout_sec ~stdin_content argv =
+  let max_eintr_retries = 8 in
+  Docker_spawn_throttle.with_slot (fun () ->
+    let rec loop attempts_left =
+      let st, stdout, stderr =
+        Masc_exec.Exec_gate.run_argv_with_stdin_and_status_split
+          ~actor:`System_task_sandbox
+          ~raw_source:(String.concat " " argv)
+          ~summary:"keeper turn sandbox stdin command"
+          ~env:(Unix.environment ())
+          ~cwd:(Sys.getcwd ())
+          ~timeout_sec
+          ~stdin_content
+          argv
+      in
+      let out = output_for_status ~stdout ~stderr in
+      match st with
+      | Unix.WEXITED 127
+        when attempts_left > 0
+             && String_util.contains_substring_ci out "interrupted system call" ->
+        loop (attempts_left - 1)
+      | _ -> st, out
+    in
+    loop max_eintr_retries)
+;;
+
+let run_argv_pipeline_with_status_split_retry_eintr ~timeout_sec stages =
+  let max_eintr_retries = 8 in
+  Docker_spawn_throttle.with_slot (fun () ->
+    let rec loop attempts_left =
+      let st, stdout, stderr =
+        Masc_exec.Exec_gate.run_argv_pipeline_with_status_split
+          ~actor:`System_task_sandbox
+          ~raw_source:
+            (stages
+             |> List.map (fun stage -> String.concat " " stage.Process_eio.argv)
+             |> String.concat " | ")
+          ~summary:"keeper turn sandbox pipeline command"
+          ~timeout_sec
+          stages
+      in
+      let out = output_for_status ~stdout ~stderr in
+      match st with
+      | Unix.WEXITED 127
+        when attempts_left > 0
+             && String_util.contains_substring_ci out "interrupted system call" ->
+        loop (attempts_left - 1)
+      | _ -> st, stdout, stderr
+    in
+    loop max_eintr_retries)
+;;
+
 let start_container (t : t) ~(timeout_sec : float) =
   let image =
     match t.meta.sandbox_image with
@@ -401,6 +453,72 @@ let run_exec_with_status
   | Ok other -> Ok other
 ;;
 
+type exec_pipeline_stage = {
+  command_argv : string list;
+  cwd : string option;
+}
+
+let rewrite_command_argv (t : t) command_argv =
+  List.map
+    (fun arg ->
+      let rewritten =
+        Keeper_sandbox_runtime.rewrite_host_root_to_container_root
+          ~host_root:t.host_root
+          ~container_root:t.container_root
+          arg
+      in
+      if String.equal t.raw_host_root t.host_root
+      then rewritten
+      else
+        Keeper_sandbox_runtime.rewrite_host_root_to_container_root
+          ~host_root:t.raw_host_root
+          ~container_root:t.container_root
+          rewritten)
+    command_argv
+;;
+
+let docker_exec_pipeline_argv (t : t) ~container_name ~container_cwd command_argv =
+  Keeper_sandbox_runtime.docker_command_argv ()
+  @ [ "exec"; "-i"; "--user"; Printf.sprintf "%d:%d" t.uid t.gid; "-w"; container_cwd ]
+  @ Keeper_sandbox_runtime.docker_sandbox_env_args
+      ~base_path:t.config.base_path
+      ~container_root:t.container_root
+  @ (container_name :: rewrite_command_argv t command_argv)
+;;
+
+let run_exec_pipeline_with_status_once
+      (t : t)
+      ~(timeout_sec : float)
+      ~(cwd : string)
+      ~(stages : exec_pipeline_stage list)
+  =
+  match ensure_started t ~timeout_sec with
+  | Error _ as err -> err
+  | Ok container_name ->
+    let process_stages =
+      List.map
+        (fun { command_argv; cwd = stage_cwd } ->
+          let cwd = Option.value stage_cwd ~default:cwd in
+          let container_cwd = container_cwd_of_host t ~host_cwd:cwd in
+          let argv = docker_exec_pipeline_argv t ~container_name ~container_cwd command_argv in
+          { Process_eio.argv; env = Some (Unix.environment ()); cwd = Some (Sys.getcwd ()) })
+        stages
+    in
+    Ok (run_argv_pipeline_with_status_split_retry_eintr ~timeout_sec process_stages)
+;;
+
+let run_exec_pipeline_with_status t ~timeout_sec ~cwd ~stages =
+  match run_exec_pipeline_with_status_once t ~timeout_sec ~cwd ~stages with
+  | Error _ as err -> err
+  | Ok ((Unix.WEXITED 126 | Unix.WEXITED 127), stdout, stderr)
+    when container_missing_error (output_for_status ~stdout ~stderr) ->
+    t.state <- Not_started;
+    (match run_exec_pipeline_with_status_once t ~timeout_sec ~cwd ~stages with
+     | Ok _ as ok -> ok
+     | Error _ as err -> err)
+  | Ok other -> Ok other
+;;
+
 let run_command_with_status
       ?(ok_exit_codes = [ 0 ])
       (t : t)
@@ -443,19 +561,31 @@ let run_bash_with_status (t : t) ~(cwd : string) ~(cmd : string) ~(timeout_sec :
       cmd
   in
   let container_cwd = container_cwd_of_host t ~host_cwd:cwd in
-  let argv ~container_name =
+  let docker_exec_argv ~container_name =
     Keeper_sandbox_runtime.docker_command_argv ()
-    @ [ "exec"; "--user"; Printf.sprintf "%d:%d" t.uid t.gid; "-w"; container_cwd ]
+    @
+    [ "exec"
+    ; "-i"
+    ; "--user"
+    ; Printf.sprintf "%d:%d" t.uid t.gid
+    ; "-w"
+    ; container_cwd
+    ]
     @ Keeper_sandbox_runtime.docker_sandbox_env_args
         ~base_path:t.config.base_path
         ~container_root:t.container_root
-    @ [ container_name; "bash"; "-lc"; cmd ]
+    @ [ container_name; "bash"; "-l"; "-s" ]
   in
   match ensure_started t ~timeout_sec with
   | Error _ as err -> err
   | Ok container_name ->
-    let argv = argv ~container_name in
-    let st, out = run_argv_with_status_split_retry_eintr ~timeout_sec argv in
+    let argv = docker_exec_argv ~container_name in
+    let st, out =
+      run_argv_with_stdin_and_status_split_retry_eintr
+        ~timeout_sec
+        ~stdin_content:cmd
+        argv
+    in
     if container_missing_error out
     then (
       match st with
@@ -464,8 +594,12 @@ let run_bash_with_status (t : t) ~(cwd : string) ~(cmd : string) ~(timeout_sec :
         (match ensure_started t ~timeout_sec with
          | Error _ as err -> err
          | Ok container_name ->
-           let argv = argv ~container_name in
-           Ok (run_argv_with_status_split_retry_eintr ~timeout_sec argv))
+           let argv = docker_exec_argv ~container_name in
+           Ok
+             (run_argv_with_stdin_and_status_split_retry_eintr
+                ~timeout_sec
+                ~stdin_content:cmd
+                argv))
       | _ -> Ok (st, out))
     else Ok (st, out)
 ;;

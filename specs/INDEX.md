@@ -5,7 +5,7 @@ Edit the generator, not this file. Re-run: scripts/gen-tla-index.sh > specs/INDE
 
 # TLA+ Spec Index
 
-Generated: 2026-05-19T19:15:18Z (HEAD: b9c2f4d930)
+Generated: 2026-05-21T12:36:26Z (HEAD: e6fc69ecca)
 
 Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to refresh.
 
@@ -13,12 +13,12 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 
 | Metric | Value |
 |--------|-------|
-| Total .tla files | 100 |
-| Manual specs | 100 |
+| Total .tla files | 99 |
+| Manual specs | 99 |
 | TTrace (auto-generated) | 0 |
-| Directories | 19 |
-| Total .cfg files | 208 |
-| Buggy .cfg (bug-model pair) | 106 |
+| Directories | 18 |
+| Total .cfg files | 206 |
+| Buggy .cfg (bug-model pair) | 105 |
 
 `kind` column: **manual** = hand-authored spec; **ttrace** = TLC counterexample export (`*TTrace*` or trace marker in header). `cfg`/`buggy` columns count companion `.cfg` files. `invariants/properties` lists names per cfg label (`clean=...`, `buggy=...`). `source hash` is the tracked `.tla` blob fingerprint.
 
@@ -107,12 +107,6 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 |------|--------|------|-----|-------|-------------------------|---------------|
 | CheckpointTrim.tla | CheckpointTrim | manual | 2 | 1 | clean={inv:NoOrphan, inv:CapOk} buggy={inv:NoOrphan} | 3402b580acb9 |
 
-### specs/closure (1 specs)
-
-| File | Module | Kind | cfg | buggy | Invariants / Properties | Source Hash |
-|------|--------|------|-----|-------|-------------------------|---------------|
-| ContractClosure.tla | ContractClosure | manual | 2 | 1 | clean={inv:TypeOK, inv:ClosureIntegrity, prop:VerdictUnblocksFsm} buggy={inv:ClosureIntegrity} | d4121bf6a81c |
-
 ### specs/keeper-state-machine (36 specs)
 
 | File | Module | Kind | cfg | buggy | Invariants / Properties | Source Hash |
@@ -145,7 +139,7 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 | KeeperRolloverDecision.tla | KeeperRolloverDecision | manual | 2 | 1 | clean={inv:SignalGateOverflowOnly} buggy={inv:SignalGateOverflowOnly} | eb2aa357aa35 |
 | KeeperSocialModelMagenticLedger.tla | KeeperSocialModelMagenticLedger | manual | 2 | 1 | clean={inv:TypeOK, inv:ClassifyTypeOK, inv:StalledNeedsGoalOrFailure, prop:ProgressDominates, prop:ReactiveDominatesIdleTimeout, prop:StalledStickyWithGoal, prop:QuietWhenNoDrivers} buggy={inv:StalledNeedsGoalOrFailureMustHold} | 1dd4fa238ae4 |
 | KeeperStateMachine.tla | KeeperStateMachine | manual | 3 | 2 | clean={inv:TypeOK, prop:DeadIsForever, prop:StoppedIsForever, prop:ZombieIsForever, prop:BudgetNeverRevives, prop:RestartCountMonotonic, prop:RunningRequiresFiber, prop:StoppedRequiresDrain, prop:DeadRequiresNoBudget, prop:OfflineRequiresLaunchPending, prop:ZombieRequiresTerminalFailureLatched, prop:FailingResolves, prop:CrashedRestartsEventually, prop:DrainingResolves, prop:CompactingResolves, prop:HandoffResolves, prop:CompactionClearsOverflow, prop:OverflowedResolves} buggy={inv:TypeOK} overflow-buggy={inv:TypeOK} | 40501dfd5d9d |
-| KeeperTaskAcquisition.tla | KeeperTaskAcquisition | manual | 2 | 1 | clean={inv:TypeOK, inv:SafetyInvariant} buggy={inv:TypeOK, inv:SafetyInvariant} | b95151d42a81 |
+| KeeperTaskAcquisition.tla | KeeperTaskAcquisition | manual | 2 | 1 | clean={inv:TypeOK, inv:SafetyInvariant} buggy={inv:TypeOK, inv:SafetyInvariant} | 3048b7dd8605 |
 | KeeperToolSurface.tla | KeeperToolSurface | manual | 2 | 1 | clean={inv:SafetyInvariant} buggy={inv:SafetyInvariant} | de956772c1dc |
 | KeeperTraceSpec.tla | KeeperTraceSpec | manual | 2 | 1 | clean={inv:TypeOK, inv:RunningRequiresFiber, inv:OfflineRequiresLaunchPending, inv:StoppedRequiresDrain, inv:DeadRequiresNoBudget, inv:DerivePhaseAgreement, prop:RestartCountMonotonic, prop:BudgetNeverRevives, prop:TransitionMatrixAgreement} buggy={inv:TypeOK, inv:DerivePhaseAgreementMustHold} | 733248761720 |
 | KeeperTurnCycle.tla | KeeperTurnCycle | manual | 2 | 1 | clean={inv:TypeOK, inv:Safety, prop:Liveness} buggy={inv:SelectingRequiresToolPolicyMustHold} | 2e534fb9df8f |
@@ -159,7 +153,7 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 | File | Module | Kind | cfg | buggy | Invariants / Properties | Source Hash |
 |------|--------|------|-----|-------|-------------------------|---------------|
 | KeeperFiberLocalSwitch.tla | KeeperFiberLocalSwitch | manual | 2 | 1 | clean={inv:TypeOK, inv:SafetyInvariant, inv:ServerBindingAlwaysNone} buggy={inv:SafetyInvariant} | b833a9c5ae3c |
-| KeeperSwitchHierarchy.tla | KeeperSwitchHierarchy | manual | 2 | 1 | clean={inv:TypeOK, inv:SafetyInvariant} buggy={inv:SafetyInvariant} | 0cf543355b1b |
+| KeeperSwitchHierarchy.tla | KeeperSwitchHierarchy | manual | 2 | 1 | clean={inv:TypeOK, inv:SafetyInvariant} buggy={inv:SafetyInvariant} | 81b9787d0da6 |
 | Pool_no_double_close.tla | Pool_no_double_close | manual | 2 | 1 | clean={inv:TypeOK, inv:SafetyInvariant} buggy={inv:SafetyInvariant} | 4bd890fd0c19 |
 
 ### specs/keeper-turn-fsm (1 specs)

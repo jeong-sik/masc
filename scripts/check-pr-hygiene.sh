@@ -82,7 +82,7 @@ cleanup() {
 trap cleanup EXIT
 
 git rev-list --no-merges --max-count "$RECENT_MAIN" "$BASE_REF" | while read -r commit; do
-  patch_id="$(git show --format=medium --patch "$commit" | git patch-id --stable | awk '{print $1}')"
+  patch_id="$(git show --format=medium --patch "$commit" | git patch-id --stable | awk 'NR == 1 { print $1; exit }')"
   if [[ -n "$patch_id" ]]; then
     subject="$(git show -s --format=%s "$commit")"
     printf '%s\t%s\t%s\n' "$patch_id" "$commit" "$subject" >> "$BASE_PATCH_FILE"
@@ -90,7 +90,13 @@ git rev-list --no-merges --max-count "$RECENT_MAIN" "$BASE_REF" | while read -r 
 done
 
 for commit in "${RANGE_COMMITS[@]}"; do
-  parent="$(git rev-list --parents -n 1 "$commit" | awk '{print $2}')"
+  parents_line="$(git rev-list --parents -n 1 "$commit")"
+  parent_count="$(awk '{print NF - 1}' <<<"$parents_line")"
+  if [[ "$parent_count" -gt 1 ]]; then
+    continue
+  fi
+
+  parent="$(awk '{print $2}' <<<"$parents_line")"
   if [[ -n "$parent" ]]; then
     tree="$(git rev-parse "${commit}^{tree}")"
     parent_tree="$(git rev-parse "${parent}^{tree}")"
@@ -101,7 +107,7 @@ for commit in "${RANGE_COMMITS[@]}"; do
     fi
   fi
 
-  patch_id="$(git show --format=medium --patch "$commit" | git patch-id --stable | awk '{print $1}')"
+  patch_id="$(git show --format=medium --patch "$commit" | git patch-id --stable | awk 'NR == 1 { print $1; exit }')"
   [[ -z "$patch_id" ]] && continue
 
   seen_commit="$(awk -F '\t' -v patch="$patch_id" '$1 == patch { print $2; exit }' "$SEEN_PATCH_FILE")"

@@ -2,7 +2,7 @@ import { html } from 'htm/preact'
 import { render } from 'preact'
 import { act } from 'preact/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { AgentRoster, countRuntimeKinds, rosterStateNote } from './agent-roster'
+import { AgentRoster, countRuntimeKinds, rosterBlockerDisplay, rosterStateNote } from './agent-roster'
 import type { Agent, Keeper } from '../types'
 import type { KeeperCompositeSnapshot } from '../api/schemas/keeper-composite'
 import {
@@ -204,6 +204,44 @@ describe('rosterStateNote — RFC-0135 §1.1 typed-state conditioning', () => {
 
   it('null keeper returns null', () => {
     expect(rosterStateNote(null, null, null)).toBeNull()
+  })
+})
+
+describe('rosterBlockerDisplay', () => {
+  it('turns raw blocker code into an operator label and hint', () => {
+    const note = {
+      label: '현재 차단',
+      text: 'fiber_unresolved',
+      kind: 'fiber_unresolved',
+    }
+    const display = rosterBlockerDisplay(note, {
+      name: 'executor',
+      status: 'active',
+      runtime_blocker_class: 'fiber_unresolved',
+      runtime_blocker_summary: 'fiber_unresolved',
+    } as Keeper)
+
+    expect(display.cell).toBe('현재 차단: Fiber 미해결')
+    expect(display.detail).toBe('Keeper fiber가 종료 상태를 확정하지 못해 supervisor 확인이 필요합니다.')
+    expect(display.title).toContain('fiber_unresolved')
+  })
+
+  it('keeps real summary text instead of replacing it with the generic hint', () => {
+    const display = rosterBlockerDisplay(
+      {
+        label: '현재 차단',
+        text: 'cascade list 소진',
+        kind: 'cascade_exhausted',
+      },
+      {
+        name: 'echo',
+        status: 'active',
+        runtime_blocker_class: 'cascade_exhausted',
+      } as Keeper,
+    )
+
+    expect(display.cell).toBe('현재 차단: 캐스케이드 소진')
+    expect(display.detail).toBe('cascade list 소진')
   })
 })
 
@@ -441,6 +479,35 @@ describe('AgentRoster live-only cards', () => {
 
     expect(container.querySelector('aside h3')?.textContent).toContain('beta-agent')
     expect(container.textContent).toContain('상세 열기')
+  })
+
+  it('explains roster axes and renders blocker labels before raw codes', async () => {
+    agents.value = [
+      makeAgent({ name: 'keeper-executor-agent', status: 'active' }),
+    ]
+    keepers.value = [
+      {
+        name: 'executor',
+        agent_name: 'keeper-executor-agent',
+        status: 'active',
+        runtime_blocker_class: 'fiber_unresolved',
+        runtime_blocker_summary: 'fiber_unresolved',
+      } as Keeper,
+    ]
+
+    await act(async () => {
+      render(html`<${AgentRoster} keeperFilter="keeper-only" />`, container)
+    })
+    await flushUi()
+
+    const text = container.textContent ?? ''
+    expect(text).toContain('운영판정')
+    expect(text).toContain('현재 단계')
+    expect(text).toContain('차단 근거')
+    expect(text).toContain('점')
+    expect(text).toContain('파생')
+    expect(text).toContain('현재 차단: Fiber 미해결')
+    expect(text).toContain('Keeper fiber가 종료 상태를 확정하지 못해 supervisor 확인이 필요합니다.')
   })
 
   it('uses heartbeat and full keeper model for cards when action/model fallbacks disagree', async () => {

@@ -31,9 +31,6 @@ type spawn_config = {
   parse_output: string -> parsed_output;
     (** Parse CLI tool's raw output into structured result.
         Each CLI tool has a different JSON schema. *)
-  stdin_prompt: bool;
-    (** Whether prompt is passed via stdin (true) or CLI flag (false).
-        Deprecated: use [prompt_mode] instead. Kept for backward compat. *)
   mcp_mode: mcp_flag;
     (** How MCP tools are passed on the CLI. *)
   prompt_mode: prompt_flag;
@@ -171,7 +168,6 @@ let spawn_config_of_key key =
         working_dir = None;
         mcp_tools = masc_mcp_tools;
         parse_output = parse_claude_output;
-        stdin_prompt = true;
         mcp_mode = Mcp_joined "--allowedTools";
         prompt_mode = Prompt_stdin;
       }
@@ -183,7 +179,6 @@ let spawn_config_of_key key =
         working_dir = None;
         mcp_tools = masc_mcp_tools;
         parse_output = parse_gemini_output;
-        stdin_prompt = false;
         mcp_mode = Mcp_spread "--allowed-tools";
         prompt_mode = Prompt_flag "-p";
       }
@@ -195,7 +190,6 @@ let spawn_config_of_key key =
         working_dir = None;
         mcp_tools = masc_mcp_tools;
         parse_output = parse_raw_output;
-        stdin_prompt = true;
         mcp_mode = Mcp_none;
         prompt_mode = Prompt_stdin;
       }
@@ -207,7 +201,6 @@ let spawn_config_of_key key =
         working_dir = None;
         mcp_tools = masc_mcp_tools;
         parse_output = parse_raw_output;
-        stdin_prompt = true;
         mcp_mode = Mcp_none;
         prompt_mode = Prompt_stdin;
       }
@@ -329,7 +322,6 @@ let spawn ~agent_name ~prompt ?timeout_seconds ?working_dir () =
         working_dir;
         mcp_tools = [];
         parse_output = parse_raw_output;
-        stdin_prompt = true;
         mcp_mode = Mcp_none;
         prompt_mode = Prompt_stdin;
       }
@@ -362,7 +354,11 @@ let spawn ~agent_name ~prompt ?timeout_seconds ?working_dir () =
        positional query slot. Fixes gemini "Cannot use both a positional
        prompt and the --prompt (-p) flag together" error. (#5975) *)
     let cmd_args = base_args @ prompt_args @ mcp_args in
-    let stdin_content = if config.stdin_prompt then augmented_prompt else "" in
+    let stdin_content =
+      match config.prompt_mode with
+      | Prompt_stdin -> augmented_prompt
+      | Prompt_flag _ -> ""
+    in
     let cwd =
       match working_dir with
       | Some dir -> Some dir

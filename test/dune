@@ -31,7 +31,6 @@
  (names
   test_attribution
   test_attribution_tagged
-  test_autoresearch_result_bridge
   test_dashboard_attribution
   test_dashboard_oas_bridge
   test_masc_runtime_events
@@ -268,9 +267,6 @@
   test_tool_input_validation
   test_failure_learnings_10325
   test_agent_stress_emit_10341
-  test_autoresearch_codegen
-  test_autoresearch_oas_primitives
-  test_autoresearch_target_score
   test_cdal_conformance
   test_task_stage
   test_ocaml_north_star_task_lifecycle
@@ -354,7 +350,6 @@
  (modules
   test_attribution
   test_attribution_tagged
-  test_autoresearch_result_bridge
   test_dashboard_attribution
   test_dashboard_oas_bridge
   test_masc_runtime_events
@@ -589,9 +584,6 @@
   test_tool_input_validation
   test_failure_learnings_10325
   test_agent_stress_emit_10341
-  test_autoresearch_codegen
-  test_autoresearch_oas_primitives
-  test_autoresearch_target_score
   ; test_contract_risk removed (team session cleanup)
   ; test_contract_composer removed (team session cleanup)
   test_cdal_conformance
@@ -734,7 +726,6 @@
   test_dashboard_cache
   test_dashboard_execution
   test_dashboard_http_core
-  test_dashboard_autoresearch
   test_dashboard_harness_health
   test_eval_feed
   test_dashboard_tools
@@ -836,7 +827,6 @@
   test_masc_log_utc_filename_10392
   test_keeper_task_dispatch
   test_keeper_tag_dispatch
-  test_autoresearch_knowledge
   test_mcp_server_eio
   test_mcp_server_eio_call_tool
   test_mcp_server_eio_join_state
@@ -856,6 +846,7 @@
   test_vote_ts_preservation_10086
   test_board_karma_ledger
   test_task_dispatch
+  test_coord_task_lifecycle
   test_drift_guard_core
   test_verify_handoff_tool
   test_memory_horizon_classifier
@@ -962,7 +953,6 @@
   test_dashboard_cache
   test_dashboard_execution
   test_dashboard_http_core
-  test_dashboard_autoresearch
   test_dashboard_harness_health
   test_eval_feed
   test_dashboard_tools
@@ -1064,7 +1054,6 @@
   test_masc_log_utc_filename_10392
   test_keeper_task_dispatch
   test_keeper_tag_dispatch
-  test_autoresearch_knowledge
   test_mcp_server_eio
   test_mcp_server_eio_call_tool
   test_mcp_server_eio_join_state
@@ -1084,6 +1073,7 @@
   test_vote_ts_preservation_10086
   test_board_karma_ledger
   test_task_dispatch
+  test_coord_task_lifecycle
   test_drift_guard_core
   test_verify_handoff_tool
   test_memory_horizon_classifier

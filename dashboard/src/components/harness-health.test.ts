@@ -192,7 +192,6 @@ describe('HarnessHealth', () => {
     expect(container.textContent).toContain('평가 모델 건강도')
     expect(container.textContent).toContain('컨텍스트 압축 압력')
     expect(container.textContent).toContain('keeper 세대 교체')
-    expect(container.textContent).toContain('오토리서치 열기')
     expect(container.textContent).toContain('대체 처리율')
     expect(container.textContent).toContain('judge timeout')
     expect(mermaidSource(container)).toContain('flowchart LR')

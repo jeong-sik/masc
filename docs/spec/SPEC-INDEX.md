@@ -35,7 +35,7 @@ MASC (Multi-Agent Streaming Coordination)는 OCaml 5.x / Eio 기반 MCP 서버�
 
 ```mermaid
 graph TB
-    L6["Layer 6: Integration<br/>OAS bridge, autoresearch, research loop"]
+    L6["Layer 6: Integration<br/>OAS bridge, research loop"]
     L5["Layer 5: Surface<br/>dashboard, operator, TUI, web"]
     L4["Layer 4: Protocol<br/>MCP server, HTTP transport, gRPC, SSE"]
     L3["Layer 3: Engine<br/>chain, keeper, swarm"]

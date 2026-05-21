@@ -878,7 +878,6 @@ let guard_fragments_for_name name =
       (fun prefix -> string_starts_with ~prefix name)
       [
         "masc_a2a_";
-        "masc_autoresearch_";
         "masc_handover_";
         "masc_keeper_";
         "masc_local_runtime_";

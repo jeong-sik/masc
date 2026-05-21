@@ -5,8 +5,6 @@
 
     @since 0.1.0 *)
 
-val retired_front_door_schema_names : string list
-val filter_retired_front_door_schemas : Masc_domain.tool_schema list -> Masc_domain.tool_schema list
 val raw_schemas : Masc_domain.tool_schema list
 val all_schemas : Masc_domain.tool_schema list
 val all_schemas_extended : Masc_domain.tool_schema list

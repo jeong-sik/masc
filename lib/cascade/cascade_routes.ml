@@ -11,7 +11,6 @@ type logical_use = Cascade_ref.logical_use =
   | Operator_judge
   | Cross_verifier
   | Verifier
-  | Autoresearch
   | Adversarial_reviewer
   | Auto_responder
   | Routing
@@ -69,7 +68,6 @@ let spec_for_use : logical_use -> route_spec = function
   | Operator_judge -> route Operator_judge "operator_judge" []
   | Cross_verifier -> route Cross_verifier "cross_verifier" []
   | Verifier -> route Verifier "verifier" []
-  | Autoresearch -> route Autoresearch "autoresearch" []
   | Adversarial_reviewer -> route Adversarial_reviewer "adversarial_reviewer" []
   | Auto_responder -> route Auto_responder "auto_responder" []
   | Routing -> route Routing "routing" [ "routing_judge" ]
@@ -96,7 +94,6 @@ let all_logical_uses : logical_use list =
     Operator_judge;
     Cross_verifier;
     Verifier;
-    Autoresearch;
     Adversarial_reviewer;
     Auto_responder;
     Routing;

@@ -3,7 +3,6 @@ type t =
   | `Coord_worktree
   | `System_task_sandbox
   | `System_notify
-  | `Autoresearch_git
   | `Voice_bridge
   | `Voice_bridge_core
   | `System_graphql_client_eio
@@ -18,7 +17,6 @@ type t =
   | `Coord_identity
   | `Tool_local_runtime
   | `Tool_local_runtime_bench
-  | `Tool_autoresearch_cycle
   | `Keeper_shell
   | `Other_agent
   ]
@@ -28,7 +26,6 @@ let of_string = function
   | "coord/worktree" -> `Coord_worktree
   | "system/task_sandbox" -> `System_task_sandbox
   | "system/notify" -> `System_notify
-  | "autoresearch/git" -> `Autoresearch_git
   | "voice/bridge" -> `Voice_bridge
   | "voice/bridge_core" -> `Voice_bridge_core
   | "system/graphql_client_eio" -> `System_graphql_client_eio
@@ -43,7 +40,6 @@ let of_string = function
   | "coord/identity" -> `Coord_identity
   | "tool/local_runtime" -> `Tool_local_runtime
   | "tool/local_runtime_bench" -> `Tool_local_runtime_bench
-  | "tool/autoresearch_cycle" -> `Tool_autoresearch_cycle
   | "keeper/shell" -> `Keeper_shell
   | _ -> `Other_agent
 
@@ -52,7 +48,6 @@ let to_string = function
   | `Coord_worktree -> "coord/worktree"
   | `System_task_sandbox -> "system/task_sandbox"
   | `System_notify -> "system/notify"
-  | `Autoresearch_git -> "autoresearch/git"
   | `Voice_bridge -> "voice/bridge"
   | `Voice_bridge_core -> "voice/bridge_core"
   | `System_graphql_client_eio -> "system/graphql_client_eio"
@@ -67,6 +62,5 @@ let to_string = function
   | `Coord_identity -> "coord/identity"
   | `Tool_local_runtime -> "tool/local_runtime"
   | `Tool_local_runtime_bench -> "tool/local_runtime_bench"
-  | `Tool_autoresearch_cycle -> "tool/autoresearch_cycle"
   | `Keeper_shell -> "keeper/shell"
   | `Other_agent -> "other"

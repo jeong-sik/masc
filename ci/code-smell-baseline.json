@@ -3,7 +3,7 @@
   "_policy": "Current metric values must be <= baseline. Decreases should be committed as baseline updates.",
   "metrics": {
     "godfile_loc_1000plus": {
-      "baseline": 52,
+      "baseline": 51,
       "scope": "lib/**/*.ml excluding *_intf.ml, *_test.ml, _build; LoC >= 1000",
       "files": [
         {
@@ -16,11 +16,11 @@
         },
         {
           "file": "lib/cascade/cascade_attempt_fsm.ml",
-          "value": 1067
+          "value": 1070
         },
         {
           "file": "lib/cascade/cascade_transport.ml",
-          "value": 1391
+          "value": 1259
         },
         {
           "file": "lib/config/env_config_keeper.ml",
@@ -28,7 +28,7 @@
         },
         {
           "file": "lib/coord/coord_task.ml",
-          "value": 1161
+          "value": 1149
         },
         {
           "file": "lib/dashboard/dashboard_http_keeper.ml",
@@ -64,7 +64,7 @@
         },
         {
           "file": "lib/keeper/keeper_heartbeat_loop.ml",
-          "value": 1266
+          "value": 1240
         },
         {
           "file": "lib/keeper/keeper_hooks_oas.ml",
@@ -116,7 +116,7 @@
         },
         {
           "file": "lib/keeper/keeper_supervisor.ml",
-          "value": 1535
+          "value": 1362
         },
         {
           "file": "lib/keeper/keeper_tool_disclosure.ml",
@@ -160,7 +160,7 @@
         },
         {
           "file": "lib/server/server_dashboard_http_core.ml",
-          "value": 1422
+          "value": 1346
         },
         {
           "file": "lib/server/server_dashboard_http_keeper_api.ml",
@@ -175,12 +175,8 @@
           "value": 1341
         },
         {
-          "file": "lib/server/server_h2_gateway.ml",
-          "value": 1024
-        },
-        {
           "file": "lib/server/server_routes_http_routes_dashboard.ml",
-          "value": 1408
+          "value": 1233
         },
         {
           "file": "lib/server/server_routes_http_routes_sidecar.ml",
@@ -188,7 +184,7 @@
         },
         {
           "file": "lib/server/server_routes_http_runtime.ml",
-          "value": 1537
+          "value": 1611
         },
         {
           "file": "lib/server/server_runtime_bootstrap.ml",
@@ -200,7 +196,7 @@
         },
         {
           "file": "lib/tool_code_write.ml",
-          "value": 1134
+          "value": 1153
         },
         {
           "file": "lib/tool_keeper.ml",
@@ -212,12 +208,12 @@
         },
         {
           "file": "lib/worker_dev_tools.ml",
-          "value": 1371
+          "value": 1453
         }
       ]
     },
     "catch_all_arms": {
-      "baseline": 3253,
+      "baseline": 3217,
       "scope": "line-leading OCaml anonymous match arms: | _ ->",
       "files": [
         {
@@ -307,26 +303,6 @@
         {
           "file": "lib/autonomous/wirein_helpers.ml",
           "value": 1
-        },
-        {
-          "file": "lib/autoresearch_knowledge.ml",
-          "value": 5
-        },
-        {
-          "file": "lib/autoresearch.ml",
-          "value": 1
-        },
-        {
-          "file": "lib/autoresearch/autoresearch_git.ml",
-          "value": 4
-        },
-        {
-          "file": "lib/autoresearch/autoresearch_metric.ml",
-          "value": 1
-        },
-        {
-          "file": "lib/autoresearch/autoresearch_serde.ml",
-          "value": 4
         },
         {
           "file": "lib/backend/backend_types.ml",
@@ -557,8 +533,12 @@
           "value": 1
         },
         {
+          "file": "lib/cascade/cascade_transport_runtime_mcp_policy_of_tool_names.ml",
+          "value": 1
+        },
+        {
           "file": "lib/cascade/cascade_transport.ml",
-          "value": 15
+          "value": 14
         },
         {
           "file": "lib/cascade/cascade_trust_persist.ml",
@@ -889,10 +869,6 @@
           "value": 3
         },
         {
-          "file": "lib/dashboard/dashboard_http_autoresearch.ml",
-          "value": 9
-        },
-        {
           "file": "lib/dashboard/dashboard_http_helpers.ml",
           "value": 4
         },
@@ -1055,10 +1031,6 @@
         {
           "file": "lib/exec/egress_policy.ml",
           "value": 2
-        },
-        {
-          "file": "lib/exec/exec_dispatch.ml",
-          "value": 1
         },
         {
           "file": "lib/exec/exec_gate.ml",
@@ -1741,6 +1713,10 @@
           "value": 2
         },
         {
+          "file": "lib/keeper/keeper_supervisor_resume_reconcile_gate.ml",
+          "value": 1
+        },
+        {
           "file": "lib/keeper/keeper_supervisor_self_preservation.ml",
           "value": 1
         },
@@ -1750,7 +1726,7 @@
         },
         {
           "file": "lib/keeper/keeper_supervisor.ml",
-          "value": 7
+          "value": 6
         },
         {
           "file": "lib/keeper/keeper_task_worktree_lazy.ml",
@@ -1954,7 +1930,7 @@
         },
         {
           "file": "lib/keeper/keeper_wip_admission.ml",
-          "value": 2
+          "value": 3
         },
         {
           "file": "lib/keeper/keeper_working_state.ml",
@@ -2275,6 +2251,10 @@
         {
           "file": "lib/process/process_eio.ml",
           "value": 6
+        },
+        {
+          "file": "lib/process/timeout_origin.ml",
+          "value": 1
         },
         {
           "file": "lib/prometheus_hotpath.ml",
@@ -2733,10 +2713,6 @@
           "value": 23
         },
         {
-          "file": "lib/timeout_origin.ml",
-          "value": 1
-        },
-        {
           "file": "lib/tool_access_policy.ml",
           "value": 1
         },
@@ -2751,10 +2727,6 @@
         {
           "file": "lib/tool_assignment_telemetry.ml",
           "value": 3
-        },
-        {
-          "file": "lib/tool_autoresearch_cycle.ml",
-          "value": 1
         },
         {
           "file": "lib/tool_board_dispatch.ml",
@@ -3042,7 +3014,7 @@
         },
         {
           "file": "lib/worker_dev_tools.ml",
-          "value": 10
+          "value": 11
         },
         {
           "file": "lib/worker_execution_backend.ml",
@@ -3149,7 +3121,7 @@
       ]
     },
     "ignore_no_comment": {
-      "baseline": 70,
+      "baseline": 69,
       "scope": "scripts/lint-ignore-without-comment.sh --target lib",
       "files": [
         {
@@ -3350,10 +3322,6 @@
         },
         {
           "file": "lib/shutdown.ml",
-          "value": 1
-        },
-        {
-          "file": "lib/tool_autoresearch_cycle.ml",
           "value": 1
         },
         {

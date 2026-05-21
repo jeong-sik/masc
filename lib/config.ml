@@ -13,14 +13,6 @@ let dedupe_schemas (schemas : Masc_domain.tool_schema list) =
   in
   List.rev unique
 
-let retired_front_door_schema_names = []
-
-let filter_retired_front_door_schemas (schemas : Masc_domain.tool_schema list) =
-  List.filter
-    (fun (schema : Masc_domain.tool_schema) ->
-      not (List.mem schema.name retired_front_door_schema_names))
-    schemas
-
 let raw_all_tool_schemas : Masc_domain.tool_schema list =
   dedupe_schemas
     (Tools.raw_schemas
@@ -45,8 +37,7 @@ let raw_all_tool_schemas : Masc_domain.tool_schema list =
         another patch-local fix. *)
      @ Tool_shard.all_keeper_tool_schemas)
 
-let front_door_tool_schemas : Masc_domain.tool_schema list =
-  filter_retired_front_door_schemas raw_all_tool_schemas
+let front_door_tool_schemas : Masc_domain.tool_schema list = raw_all_tool_schemas
 
 (** Validate tool schemas at module initialization time.
     Logs warnings for: duplicate names, empty names/descriptions,

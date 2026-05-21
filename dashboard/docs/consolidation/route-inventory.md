@@ -30,7 +30,7 @@
 | `command` | `operations` |
 | `connectors` | `connector-status` |
 | `workspace` | `board`, `sub-boards`, `moderation`, `planning`, `repositories`, `verification` |
-| `lab` | `tools`, `autoresearch`, `harness` |
+| `lab` | `tools`, `harness` |
 | `code` | `ide-shell` |
 | `logs` | none |
 
@@ -62,15 +62,13 @@ led to the current route table.
 | tab-refresh.ts:73 | `planning` | if section === |
 | tab-refresh.ts:76 | `goals` | if section === |
 | tab-refresh.ts:79 | `board` | if section === |
-| tab-refresh.ts:84 | `autoresearch` | if section === |
 | tab-refresh.ts:87 | `harness` | if section === |
 | status.ts:26-29 | observatory, activity, runtime, telemetry, governance, memory-subsystems, fsm-hub, metrics, tool-quality, fleet | currentSection() union |
 | status.ts:40-63 | 동일 집합 | ternary chain 렌더 |
 | control.ts:14-17 | governance, connectors, inspector (fallback: intervene) | if section === |
 | work.ts:13-14 | board, planning, goals | isWorkSection guard |
-| lab.ts:11-15 | autoresearch, harness (fallback: tools) | if section === |
+| lab.ts:11-15 | harness (fallback: tools) | if section === |
 | ops/index.ts:386 | `intervene` | **useEffect hydration 조건** — 이름 변경 시 주의 |
-| sse-store.ts:245 | `autoresearch` | `tab === 'lab' && section === 'autoresearch'` SSE gate |
 | tool-full-inventory.ts:41,44 | `tools` | `tab === 'lab' && section === 'tools'` |
 | config/navigation.ts:282 | `sessions` → `agents` | 기존 redirect 패턴 (확장 대상) |
 | config/navigation.ts:302 | 전체 | section 매칭 로직 |

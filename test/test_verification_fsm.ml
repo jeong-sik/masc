@@ -64,7 +64,7 @@ let add_strict_task config =
     required_evidence = [];
     inspect_gate_evidence = [];
     verify_gate_evidence = ["output.json"];
-    links = { operation_id = None; session_id = None; autoresearch_loop_id = None };
+    links = { operation_id = None; session_id = None };
   } in
   let _msg = Coord.add_task ~contract config ~title
     ~priority:3 ~description:"needs verification" in
@@ -89,7 +89,7 @@ let add_required_evidence_only_task config =
     required_evidence = ["artifact://coverage.json"];
     inspect_gate_evidence = [];
     verify_gate_evidence = [];
-    links = { operation_id = None; session_id = None; autoresearch_loop_id = None };
+    links = { operation_id = None; session_id = None };
   } in
   let _msg =
     Coord.add_task ~contract config ~title:"required evidence only"
@@ -116,7 +116,7 @@ let add_placeholder_evidence_task config =
     required_evidence = ["completion_notes"];
     inspect_gate_evidence = [];
     verify_gate_evidence = ["pr_url_or_artifact_ref"];
-    links = { operation_id = None; session_id = None; autoresearch_loop_id = None };
+    links = { operation_id = None; session_id = None };
   } in
   let _msg =
     Coord.add_task ~contract config ~title:"placeholder evidence task"

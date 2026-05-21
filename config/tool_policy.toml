@@ -72,9 +72,6 @@ tools = ["keeper_pr_review_read", "keeper_pr_review_comment", "keeper_pr_review_
 [groups.coding_shard]
 shard = "coding"
 
-[groups.autoresearch]
-shard = "autoresearch"
-
 # Code-write tools (masc_code_write, masc_code_edit, etc.)
 [groups.coding]
 tools = ["masc_code_write", "masc_code_edit", "masc_code_delete", "masc_code_shell", "masc_code_git"]
@@ -235,13 +232,13 @@ masc_groups = ["essential", "goal", "coding"]
 # still flow through the risk-tiered approval gate in
 # [keeper_routine_allowlist.ml].
 [presets.research]
-groups = ["base", "filesystem", "filesystem_write", "library", "shell", "coordination", "board_core", "autoresearch", "coding_shard", "coding", "github", "github_review"]
+groups = ["base", "filesystem", "filesystem_write", "library", "shell", "coordination", "board_core", "coding_shard", "coding", "github", "github_review"]
 masc_groups = ["essential", "goal", "coordination", "coding"]
 
 # Delivery preset: research + coding for keepers that need to produce code changes.
 # Use for keepers whose goal involves PRs, issues, or code fixes.
 [presets.delivery]
-groups = ["base", "filesystem", "filesystem_write", "library", "shell", "coordination", "board_core", "autoresearch", "coding_shard", "coding", "github", "github_review", "voice"]
+groups = ["base", "filesystem", "filesystem_write", "library", "shell", "coordination", "board_core", "coding_shard", "coding", "github", "github_review", "voice"]
 masc_groups = ["essential", "goal", "coordination", "coding"]
 
 [presets.full]

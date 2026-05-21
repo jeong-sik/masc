@@ -173,7 +173,6 @@ let same_task_actor config left right =
 let normalize_execution_links (links : Masc_domain.task_execution_links) =
   { operation_id = trim_opt links.operation_id
   ; session_id = trim_opt links.session_id
-  ; autoresearch_loop_id = trim_opt links.autoresearch_loop_id
   }
 ;;
 
@@ -195,7 +194,7 @@ let empty_task_contract =
   ; required_evidence = []
   ; inspect_gate_evidence = []
   ; verify_gate_evidence = []
-  ; links = { operation_id = None; session_id = None; autoresearch_loop_id = None }
+  ; links = { operation_id = None; session_id = None }
   }
 ;;
 
@@ -335,7 +334,6 @@ let merge_execution_links
       (existing : Masc_domain.task_execution_links)
       ?session_id
       ?operation_id
-      ?autoresearch_loop_id
       ()
   =
   { session_id =
@@ -346,10 +344,6 @@ let merge_execution_links
       (match trim_opt operation_id with
        | Some _ as value -> value
        | None -> trim_opt existing.operation_id)
-  ; autoresearch_loop_id =
-      (match trim_opt autoresearch_loop_id with
-       | Some _ as value -> value
-       | None -> trim_opt existing.autoresearch_loop_id)
   }
 ;;
 

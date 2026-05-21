@@ -106,8 +106,6 @@ let test_default_shard_names () =
     (List.mem "governance" defaults);
   Alcotest.(check bool) "coding in defaults" true
     (List.mem "coding" defaults);
-  Alcotest.(check bool) "autoresearch opt-in" false
-    (List.mem "autoresearch" defaults);
   Alcotest.(check bool) "weather removed from defaults" false
     (List.mem "weather" defaults);
   (* voice still not in defaults: gated by policy_voice_enabled boolean *)
@@ -538,11 +536,6 @@ let () =
       Alcotest.test_case "voice" `Quick test_shard_voice_exists;
       Alcotest.test_case "unknown" `Quick test_shard_unknown;
       Alcotest.test_case "all count" `Quick test_all_shards_count;
-    ]);
-    ("autoresearch_shard", [
-      Alcotest.test_case "removed" `Quick (fun () ->
-        let s = Tool_shard.get_shard "autoresearch" in
-        Alcotest.(check bool) "not found" true (s = None));
     ]);
     ("default_shard_names", [
       Alcotest.test_case "defaults" `Quick test_default_shard_names;

@@ -345,7 +345,7 @@ let create_backend_eio ~sw cfg =
 (* #10919: per-call Backend init was producing 1745 inits / 2 days
    (~83 inits per server lifetime against an expected 1) plus 3490
    INFO log lines.  Hot callers — [Coord.default_config] from every
-   MCP tool dispatch, [tool_autoresearch_cycle] per cycle iteration,
+   MCP tool dispatch and [keeper_rollover] per rollover
    [keeper_rollover] per rollover — were paying both filesystem
    resolution and a fresh Backend handshake per invocation.
 

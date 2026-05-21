@@ -8,7 +8,6 @@
 // Out of scope for Phase 2a (deferred to 2b+):
 //   - Cross-signal hover cursor
 //   - Memory subsystems track (backend snapshot-only)
-//   - Autoresearch cycle track (RFC-MASC-007 hook)
 //   - Tool calls track, drill-down detail pane
 //   - SSE live streaming (current: polling per filter change)
 

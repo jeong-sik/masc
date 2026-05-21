@@ -1,14 +1,56 @@
 ---
 rfc: "0106"
 title: "Cancel-safe try-with discipline (Eio.Cancel.Cancelled propagation)"
-status: Draft
+status: Active
 created: 2026-05-17
-updated: 2026-05-20
+updated: 2026-05-21
 author: vincent
 supersedes: []
 superseded_by: null
-related: ["0072", "0097", "0101"]
-implementation_prs: [15894,15904,15917,15919,15920,15925]
+related: ["0072", "0097", "0101", "0126"]
+implementation_prs: [15894, 15904, 15917, 15919, 15920, 15925, 16949, 16951]
+---
+
+## Progress audit (2026-05-21)
+
+Status promoted Draft → Active. P0 (helper module + canary) shipped
+and P1 (high-risk subsystem violation fixes) is in flight; P2/P3/P4
+remain.
+
+| Phase | Status | Notes |
+|-------|--------|------|
+| P0 helper module + canary | ✅ | `lib/cancel_safe/cancel_safe.{ml,mli}` exists; 1-site canary migration landed across the first 6 implementation_prs |
+| P1 high-risk subsystem | ⏳ in flight | Recent batch: #16949 (`masc_http_client/pool` re-raise) + #16951 (`fd_accountant` re-raise) added two more violation fixes |
+| P2 observability / dashboard / governance callbacks | ❌ | not started |
+| P3 ppxlib AST lint | ❌ | `scripts/lint/cancel-guard-ast*` absent; only the regex variant exists |
+| P4 regex lint deprecation | ❌ | `scripts/lint-cancel-guard.sh` still active; deprecation blocked on P3 |
+
+### implementation_prs reconciliation
+
+Previous frontmatter listed 6 PRs from the initial P0+P1 batch
+(2026-05-17). #16949 and #16951 (2026-05-19) added two more P1
+violation fixes but were not appended. This audit fills the list to
+8 PRs so the audit script (#17123) and human readers see the
+complete cohort.
+
+### Pending
+
+- **P1 inventory** — RFC §3 calls for grep-driven PR ladder; current
+  audit does not enumerate the remaining `try ... with | _` catch-all
+  sites that swallow `Cancelled`. The original count is somewhere in
+  the iter-30..iter-33 audit log, not reproduced here.
+- **P2 callbacks** — no dedicated PR family yet.
+- **P3 ppxlib AST lint** — depends on `scripts/lint/exhaustive-guard.sh`
+  pattern (already AST-based) being generalised to try-with nodes.
+- **P4** — strictly downstream of P3.
+
+### Related RFC
+
+- **RFC-0126** (Silent fallback discipline, Active 2026-05-21): Phase 2b
+  of that RFC depends on the ppxlib AST infrastructure that P3 here
+  would land. Add to `related:` to make the bidirectional dependency
+  explicit.
+
 ---
 
 # RFC-0106 — Cancel-safe try-with discipline

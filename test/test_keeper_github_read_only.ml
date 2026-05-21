@@ -216,9 +216,20 @@ let test_prefixed_gh_command_normalization () =
     (match Keeper_gh_shared.extract_gh_target_number "gh pr view 123" with
      | Some (Keeper_gh_shared.PR, n) -> Some n
      | _ -> None);
+  Alcotest.(check (option int)) "quoted target number is parsed"
+    (Some 123)
+    (match Keeper_gh_shared.extract_gh_target_number "gh pr view '123'" with
+     | Some (Keeper_gh_shared.PR, n) -> Some n
+     | _ -> None);
   Alcotest.(check (option string)) "prefixed gh parser still finds mutation"
     (Some "pr")
     (match Keeper_gh_shared.gh_mutates_entity "gh pr merge 123" with
+     | Some Keeper_gh_shared.PR -> Some "pr"
+     | Some Keeper_gh_shared.Issue -> Some "issue"
+     | None -> None);
+  Alcotest.(check (option string)) "quoted mutation subcommand is parsed"
+    (Some "pr")
+    (match Keeper_gh_shared.gh_mutates_entity "gh pr 'merge' 123" with
      | Some Keeper_gh_shared.PR -> Some "pr"
      | Some Keeper_gh_shared.Issue -> Some "issue"
      | None -> None);

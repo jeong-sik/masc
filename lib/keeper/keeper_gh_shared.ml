@@ -64,14 +64,17 @@ let counter_misses = Atomic.make 0
 let counter_bypasses = Atomic.make 0
 let counter_fetch_errors = Atomic.make 0
 
+let shell_word_values cmd =
+  match Masc_exec_bash_parser.Bash_words.stages cmd with
+  | Error _ -> []
+  | Ok stages ->
+    stages
+    |> List.concat
+    |> List.map (fun (word : Masc_exec_bash_parser.Bash_words.word) -> word.value)
+;;
+
 let normalize_gh_command (cmd : string) : string =
-  let tokens =
-    cmd
-    |> String.trim
-    |> String.split_on_char ' '
-    |> List.map String.trim
-    |> List.filter (fun token -> token <> "")
-  in
+  let tokens = shell_word_values cmd in
   let rec drop_leading_gh = function
     | token :: rest when String_util.equals_ci token "gh" -> drop_leading_gh rest
     | remaining -> remaining
@@ -369,14 +372,7 @@ let gh_issue_number_subcmds =
 ;;
 
 let gh_words (cmd : string) : string list =
-  cmd
-  |> String.map (function
-    | '\t' | '\r' | '\n' -> ' '
-    | c -> c)
-  |> String.trim
-  |> String.lowercase_ascii
-  |> String.split_on_char ' '
-  |> List.filter (fun s -> s <> "")
+  shell_word_values cmd |> List.map String.lowercase_ascii
 ;;
 
 let gh_global_option_takes_value = function

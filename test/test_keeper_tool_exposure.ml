@@ -323,13 +323,13 @@ let test_legacy_pr_schemas_removed () =
 ;;
 
 (* ============================================================
-   6. Autoresearch tools are opt-in through research-capable presets
+   6. Autoresearch tools are retired from keeper presets
    ============================================================ *)
 
-let test_research_preset_has_autoresearch () =
+let test_research_preset_hides_autoresearch () =
   let meta = make_meta ~preset:Keeper_types.Research () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
-  check bool "has autoresearch" true (has_any_prefix "masc_autoresearch_" tools)
+  check bool "hides autoresearch" false (has_any_prefix "masc_autoresearch_" tools)
 ;;
 
 (* ============================================================
@@ -500,7 +500,7 @@ let test_research_plus_also_allow_combined () =
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
   check bool "has board_get via also_allow" true (has_tool "keeper_board_get" tools);
   check bool "has shell access" true (has_tool "keeper_shell" tools);
-  check bool "has autoresearch" true (has_any_prefix "masc_autoresearch_" tools);
+  check bool "hides autoresearch" false (has_any_prefix "masc_autoresearch_" tools);
   check bool "has board_post via also_allow" true (has_tool "keeper_board_post" tools);
   check bool "has read" true (has_tool "keeper_fs_read" tools)
 ;;
@@ -1315,9 +1315,9 @@ let () =
         ] )
     ; ( "autoresearch_tools"
       , [ test_case
-            "research preset has autoresearch"
+            "research preset hides autoresearch"
             `Quick
-            test_research_preset_has_autoresearch
+            test_research_preset_hides_autoresearch
         ] )
     ; ( "mode_free_access"
       , [ test_case

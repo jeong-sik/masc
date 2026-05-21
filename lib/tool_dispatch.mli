@@ -177,7 +177,6 @@ type module_tag =
   | Mod_control | Mod_agent_timeline | Mod_misc | Mod_suspend
   | Mod_library | Mod_keeper
   | Mod_inline
-  | Mod_autoresearch
   | Mod_shard
 
 val register_module_tag : schemas:Masc_domain.tool_schema list -> tag:module_tag -> unit

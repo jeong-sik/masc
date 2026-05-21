@@ -49,7 +49,6 @@ let string_of_tag (tag : Tool_dispatch.module_tag) : string =
   | Mod_task -> "task"
   | Mod_shard -> "shard"
   | Mod_plan -> "plan"
-  | Mod_autoresearch -> "autoresearch"
   | Mod_local_runtime -> "local_runtime"
   | Mod_worktree -> "worktree"
   | Mod_code -> "code"
@@ -151,17 +150,6 @@ let dispatch
               "tool '%s' belongs to the removed operator surface; keeper runtime stays \
                on OAS Agent.run"
               name))
-    | Mod_autoresearch ->
-      let ctx : Tool_autoresearch.context =
-        { base_path = config.base_path
-        ; agent_name = Some agent_name
-        ; start_operation = None
-        ; config = Some config
-        ; sw = Eio_context.get_switch_opt ()
-        ; clock = Eio_context.get_clock_opt ()
-        }
-      in
-      Tool_autoresearch.dispatch ctx ~name ~args
     (* ── Tier C: MCP-state-dependent ───────────────────────────── *)
     | Mod_inline when String.equal name "masc_approval_pending" ->
       let json = Keeper_approval_queue.list_pending_json () in

@@ -15,12 +15,15 @@ module Char = Stdlib.Char
 module Int = Stdlib.Int
 module Float = Stdlib.Float
 
-(** Tool_autoresearch — MCP tool dispatch for the Autoresearch loop.
+(** Tool_autoresearch — internal runtime helpers for the retired Autoresearch
+    MCP tool family.
 
     Inspired by Karpathy's autoresearch pattern: autonomous experiment cycles
     that generate hypotheses, measure metrics, and keep/discard changes via git.
 
-    Schemas are defined in {!Tool_autoresearch_schemas}.
+    Schemas used to live in {!Tool_autoresearch_schemas}, but
+    [masc_autoresearch_*] is no longer registered as a callable MCP/keeper
+    surface.
 
     @since 2.80.0 *)
 
@@ -30,7 +33,6 @@ open Tool_args
 include Tool_autoresearch_registry
 include Tool_autoresearch_broadcast
 type context = Tool_autoresearch_context.t
-let schemas = Tool_autoresearch_schemas.schemas
 
 type tool_result = bool * string
 
@@ -586,37 +588,6 @@ let dispatch (ctx : context) ~name ~args : Tool_result.t option =
       Some (wrap_dispatch_result ~name ~start (wrap_result (handle_search_findings ctx args)))
   | _ -> None
 
-(* ================================================================ *)
-(* Tool_spec registration                                           *)
-(* ================================================================ *)
-
-let tool_spec_system_internal =
-  [ "masc_autoresearch_search_findings"; "masc_autoresearch_status" ]
-
-let tool_required_permission = function
-  | "masc_autoresearch_status" ->
-      Some Masc_domain.CanReadState
-  | "masc_autoresearch_search_findings" ->
-      Some Masc_domain.CanReadState
-  | "masc_autoresearch_record_finding"
-  | "masc_autoresearch_start" | "masc_autoresearch_cycle"
-  | "masc_autoresearch_inject" | "masc_autoresearch_stop" ->
-      Some Masc_domain.CanAdmin
-  | _ -> None
-
-let () =
-  List.iter
-    (fun (s : Masc_domain.tool_schema) ->
-      let is_system = List.mem s.name tool_spec_system_internal in
-      Tool_spec.register
-        (Tool_spec.create
-           ~name:s.name
-           ~description:s.description
-           ~module_tag:Tool_dispatch.Mod_autoresearch
-           ~input_schema:s.input_schema
-           ~handler_binding:Tag_dispatch
-           ~visibility:(if is_system then Tool_catalog.Hidden else Tool_catalog.Default)
-           ~allow_direct_call_when_hidden:is_system
-           ?required_permission:(tool_required_permission s.name)
-           ()))
-    schemas
+(* The autoresearch runtime remains readable by dashboard/history code, but the
+   masc_autoresearch_* MCP/keeper tool family is retired and must not register
+   dispatchable Tool_spec entries. *)

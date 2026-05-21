@@ -156,21 +156,6 @@ let shard_taskboard : shard =
   }
 ;;
 
-(** Autoresearch tools available to keepers. *)
-let autoresearch_keeper_tools : Masc_domain.tool_schema list =
-  Tool_autoresearch_schemas.schemas
-;;
-
-let shard_autoresearch : shard =
-  { name = "autoresearch"
-  ; tools = autoresearch_keeper_tools
-  ; read_only_tools = []
-  ; removable = true
-  ; description =
-      "Autonomous experiment loop: start, cycle, status, inject, stop, findings"
-  }
-;;
-
 (** Per-agent shard overrides.  Read-modify-write is serialised by
     [agent_shards_mutex] so concurrent keeper setup calls cannot lose updates.
 
@@ -219,7 +204,6 @@ let all_shards : shard StringMap.t =
     ; shard_voice
     ; shard_library
     ; shard_taskboard
-    ; shard_autoresearch
     ]
 ;;
 

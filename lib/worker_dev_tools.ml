@@ -120,7 +120,7 @@ let command_blocked_hint ?allowed_commands name =
     | "ssh" | "scp" | "rsync" | "ftp" | "sftp" | "nc" ->
       Printf.sprintf
         " '%s' is a network primitive and is not permitted. Keeper network access goes \
-         through masc_web_search, masc_web_fetch, or masc_autoresearch_* tools."
+         through masc_web_search or masc_web_fetch tools."
         name
     | _ when looks_like_source_code name ->
       " This looks like source code, not a shell command — use masc_code_edit / \

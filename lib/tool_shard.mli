@@ -138,13 +138,6 @@ val execute : string -> Yojson.Safe.t -> (bool * Yojson.Safe.t)
 (** Execute tool_shard MCP tools (grant, revoke, list).
     Agent shard state is tracked in-memory per agent. *)
 
-val autoresearch_keeper_tools : Masc_domain.tool_schema list
-(** Autoresearch tools for keeper use.
-    (Earlier revisions excluded now-removed orchestration front doors.) *)
-
-val shard_autoresearch : shard
-(** Autoresearch shard: start, cycle, status, inject, stop. *)
-
 val coding_tools : Masc_domain.tool_schema list
 (** Coding shard tools (keeper_bash + worktree/code inspection).
     keeper_shell with op=gh provides GitHub CLI access.

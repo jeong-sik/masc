@@ -13,8 +13,7 @@ let dedupe_schemas (schemas : Masc_domain.tool_schema list) =
   in
   List.rev unique
 
-let retired_front_door_schema_names =
-  Tool_autoresearch.schemas |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
+let retired_front_door_schema_names = []
 
 let filter_retired_front_door_schemas (schemas : Masc_domain.tool_schema list) =
   List.filter
@@ -29,7 +28,6 @@ let raw_all_tool_schemas : Masc_domain.tool_schema list =
      @ Tool_board.tools
      @ Keeper_types.schemas
      @ Tool_local_runtime.schemas
-     @ Tool_autoresearch.schemas
      @ Tool_agent_timeline.schemas
      @ Tool_shard.schemas
      (* #9912 / #10101: every keeper-facing shard tool must reach the

@@ -2,7 +2,6 @@
 status: runbook
 last_verified: 2026-05-15
 code_refs:
-  - scripts/harness_keeper_campaign.sh
   - scripts/harness/workload/agent_swarm_live.sh
   - test/
 ---
@@ -79,7 +78,7 @@ Command Plane search-fabric benchmark는 제거되었다. `best_first_v1` synthe
 Phase 1 corpus는 `masc-mcp` 단일 repo다.
 
 - front door:
-  - `masc_autoresearch_cycle` (repo-synthesis is dispatched internally via the cycle system)
+  - none; the legacy `masc_autoresearch_cycle` path is retired
 - fairness:
   - same model
   - same time budget

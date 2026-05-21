@@ -249,13 +249,6 @@ module Masc = struct
     | Agent_update
     | Agent_card
     | Agents
-    | Autoresearch_cycle
-    | Autoresearch_inject
-    | Autoresearch_record_finding
-    | Autoresearch_search_findings
-    | Autoresearch_start
-    | Autoresearch_status
-    | Autoresearch_stop
     | Batch_add_tasks
     | Board_cleanup
     | Board_comment
@@ -381,13 +374,6 @@ module Masc = struct
     | Claim_next -> "masc_claim_next"
     | Cleanup_zombies -> "masc_cleanup_zombies"
     | Coordination_fsm_snapshot -> "masc_coordination_fsm_snapshot"
-    | Autoresearch_cycle -> "masc_autoresearch_cycle"
-    | Autoresearch_inject -> "masc_autoresearch_inject"
-    | Autoresearch_record_finding -> "masc_autoresearch_record_finding"
-    | Autoresearch_search_findings -> "masc_autoresearch_search_findings"
-    | Autoresearch_start -> "masc_autoresearch_start"
-    | Autoresearch_status -> "masc_autoresearch_status"
-    | Autoresearch_stop -> "masc_autoresearch_stop"
     | Code_delete -> "masc_code_delete"
     | Code_edit -> "masc_code_edit"
     | Code_git -> "masc_code_git"
@@ -488,13 +474,6 @@ module Masc = struct
     | "masc_claim_next" -> Some Claim_next
     | "masc_cleanup_zombies" -> Some Cleanup_zombies
     | "masc_coordination_fsm_snapshot" -> Some Coordination_fsm_snapshot
-    | "masc_autoresearch_cycle" -> Some Autoresearch_cycle
-    | "masc_autoresearch_inject" -> Some Autoresearch_inject
-    | "masc_autoresearch_record_finding" -> Some Autoresearch_record_finding
-    | "masc_autoresearch_search_findings" -> Some Autoresearch_search_findings
-    | "masc_autoresearch_start" -> Some Autoresearch_start
-    | "masc_autoresearch_status" -> Some Autoresearch_status
-    | "masc_autoresearch_stop" -> Some Autoresearch_stop
     | "masc_code_delete" -> Some Code_delete
     | "masc_code_edit" -> Some Code_edit
     | "masc_code_git" -> Some Code_git

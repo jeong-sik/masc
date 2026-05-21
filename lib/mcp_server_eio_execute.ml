@@ -647,18 +647,7 @@ let execute_tool_eio
                      if ok
                      then Tool_result.ok ~tool_name:name ~start_time msg
                      else Tool_result.error ~tool_name:name ~start_time msg)
-                 (* Mod_repair_loop removed: tools pruned *)
-                 | Mod_autoresearch ->
-                   let ctx : Tool_autoresearch.context =
-                     { base_path = config.base_path
-                     ; agent_name = Some agent_name
-                     ; start_operation = None
-                     ; config = Some config
-                     ; sw = Some sw
-                     ; clock = Some clock
-                     }
-                   in
-                   Tool_autoresearch.dispatch ctx ~name ~args:coerced_args
+                 (* Removed tool families are intentionally not dispatchable. *)
                  | Mod_shard ->
                    let ok, json = Tool_shard.execute name coerced_args in
                    let message = Yojson.Safe.to_string json in

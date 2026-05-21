@@ -79,6 +79,10 @@ val remote_schemas : Masc_domain.tool_schema list
     MCP clients.  Pinned at the .mli seam so dashboard / SDK
     consumers see a stable list ordering. *)
 
+val schemas : Masc_domain.tool_schema list
+(** Full operator tool schemas — consumed by keeper-local dispatchers
+    and schema coverage checks. *)
+
 val remote_tool_names : string list
 (** [List.map (fun s -> s.name) remote_schemas].  Pre-computed for
     O(1) membership checks in the auth gate. *)

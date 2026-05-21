@@ -173,10 +173,14 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - name: Install ripgrep
+        run: sudo apt-get install -y -qq ripgrep
       - name: Run lint
         env:
           BASE: ${{ github.event.pull_request.base.ref && format('origin/{0}', github.event.pull_request.base.ref) || '' }}
         run: bash scripts/lint/godfile-size-regression.sh
+      - name: Run RFC-0151 code-smell ratchet
+        run: bash scripts/code-smell/measure.sh
 
   ignore-without-comment-new:
     name: ignore() justification (new sites)

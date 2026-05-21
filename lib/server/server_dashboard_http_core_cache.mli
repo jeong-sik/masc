@@ -15,7 +15,7 @@ val with_dashboard_timeout :
 
 val cache_partition_segment : Coord.config -> string
 val dashboard_cache_key : Coord.config -> string -> string -> string
-val dashboard_mission_timeout_s : unit -> float
+val dashboard_mission_timeout_s : float
 val attach_projection_diagnostics : Yojson.Safe.t -> Yojson.Safe.t -> Yojson.Safe.t
 
 val projection_diagnostics_json :

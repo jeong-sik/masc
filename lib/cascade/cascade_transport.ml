@@ -1063,33 +1063,9 @@ let make_cli_argv_sanitizing_transport =
   Cascade_transport_cli_argv_sanitize.make_cli_argv_sanitizing_transport
 ;;
 
-(** Registry of non-HTTP transport constructors keyed by provider kind.
-    RFC-0058 §2.4: dispatch by registry lookup, not by closed-variant match.
-    Adding a CLI vendor with an existing protocol shape is a single
-    [register_non_http_transport] call (no edit to
-    {!non_http_transport_of_provider} or any match arm). Vendor SDKs themselves
-    remain in [agent_sdk] (Claude Code's leaked `client.ts` follows the same
-    precedent — Bedrock / Vertex / Foundry / firstParty all live behind a
-    dispatch table that selects one SDK package per env-keyed kind).
-
-    Each ctor takes ownership of [Process_eio.get_proc_mgr] so the registry's
-    value type stays a plain function (no row-polymorphic Eio mgr leaks into
-    the Hashtbl). *)
-type non_http_transport_ctor =
-  provider_cfg:Llm_provider.Provider_config.t
-  -> runtime_mcp_policy:Llm_provider.Llm_transport.runtime_mcp_policy option
-  -> cli_transport_overrides:cli_transport_overrides option
-  -> (Llm_provider.Llm_transport.t, Agent_sdk.Error.sdk_error) result
-
-let non_http_transport_registry
-  : (Llm_provider.Provider_config.provider_kind, non_http_transport_ctor) Hashtbl.t
-  =
-  Hashtbl.create 8
-;;
-
-let register_non_http_transport ~kind ~ctor =
-  Hashtbl.replace non_http_transport_registry kind ctor
-;;
+(* Non-HTTP transport registry + dispatcher extracted to
+   [Cascade_transport_non_http_registry] (godfile decomp). *)
+let register_non_http_transport = Cascade_transport_non_http_registry.register_non_http_transport
 
 let default_cli_transport_overrides = Cascade_transport_cli_overrides.default_cli_transport_overrides
 
@@ -1208,37 +1184,4 @@ let () =
     ~ctor:codex_cli_transport_ctor
 ;;
 
-let non_http_transport_of_provider
-      ~(sw : Eio.Switch.t)
-      ~(provider_cfg : Llm_provider.Provider_config.t)
-      ?runtime_mcp_policy
-      ?cli_transport_overrides
-      ()
-  : (Llm_provider.Llm_transport.t option, Agent_sdk.Error.sdk_error) result
-  =
-  let _ = sw in
-  match Hashtbl.find_opt non_http_transport_registry provider_cfg.kind with
-  | Some ctor ->
-    (match ctor ~provider_cfg ~runtime_mcp_policy ~cli_transport_overrides with
-     | Ok transport -> Ok (Some transport)
-     | Error _ as e -> e)
-  | None ->
-    (* Fail-fast for subprocess CLI kinds that have no registered ctor:
-       falling through to [Ok None] would route the request to the HTTP
-       lane, which cannot serve a CLI provider. HTTP-shaped providers
-       correctly return [Ok None]; they live behind a different transport
-       selector upstream. *)
-    if Llm_provider.Provider_config.is_subprocess_cli provider_cfg.kind
-    then
-      Error
-        (invalid_runtime_config
-           "non_http_transport_registry"
-           (Printf.sprintf
-              "no non-HTTP transport constructor registered for subprocess \
-               CLI kind %s — registry initializer (cascade_transport.ml \
-               top-level [let ()]) is out of sync with the \
-               Llm_provider.Provider_config.provider_kind variant"
-              (Llm_provider.Provider_config.string_of_provider_kind
-                 provider_cfg.kind)))
-    else Ok None
-;;
+let non_http_transport_of_provider = Cascade_transport_non_http_registry.non_http_transport_of_provider

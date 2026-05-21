@@ -76,12 +76,15 @@ let test_rejects_goal_cap () =
 
 let test_rejects_category_cap_across_repos () =
   let active =
-    [ item ~category:Admission.Refactor "repo-a" "one"
-    ; item ~category:Admission.Refactor "repo-b" "two"
-    ; item ~category:Admission.Refactor "repo-c" "three"
+    [ item ~goal_id:"goal-a" ~category:Admission.Refactor "repo-a" "one"
+    ; item ~goal_id:"goal-b" ~category:Admission.Refactor "repo-b" "two"
+    ; item ~goal_id:"goal-c" ~category:Admission.Refactor "repo-c" "three"
     ]
   in
-  match Admission.decide ~caps active ~scope:(scope ~category:Admission.Refactor "repo-d") with
+  match
+    Admission.decide ~caps active
+      ~scope:(scope ~goal_id:"goal-d" ~category:Admission.Refactor "repo-d")
+  with
   | Admission.Admit _ -> fail "expected category cap rejection"
   | Reject rejection ->
     check string "reason" "category_cap"

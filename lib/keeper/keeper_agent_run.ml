@@ -719,7 +719,7 @@ let run_turn
                    | Error
                        (Agent_sdk.Error.Agent
                           (Agent_sdk.Error.CompletionContractViolation
-                             { reason = violation_reason; _ }))
+                             { reason = violation_reason; violation_detail; _ }))
                      when acc.contract_violation_retries < 1 ->
                      (* Contract violation retry (max 1 per turn): the
                         model did not call a required tool. Build a
@@ -743,9 +743,13 @@ let run_turn
                              acc.tool_surface.required_tool_candidate_names
                        in
                        let oas_tools =
-                         Keeper_tool_disclosure
-                         .satisfying_tools_from_contract_violation_reason
-                           violation_reason
+                         match violation_detail with
+                         | Some detail when detail.satisfying_tools <> [] ->
+                           detail.satisfying_tools
+                         | Some _ | None ->
+                           Keeper_tool_disclosure
+                           .satisfying_tools_from_contract_violation_reason
+                             violation_reason
                        in
                        Keeper_types.dedupe_keep_order (oas_tools @ local_tools)
                      in
@@ -1093,6 +1097,7 @@ let run_turn
                        (Agent_sdk.Error.CompletionContractViolation
                           { contract = Agent_sdk.Completion_contract_id.Require_tool_use
                           ; reason
+                          ; violation_detail = None
                           })
                    in
                    let tool_contract_status ()

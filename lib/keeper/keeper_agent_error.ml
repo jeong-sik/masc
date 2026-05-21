@@ -195,7 +195,13 @@ let provider_error_terminal_reason_code
    Previously every Agent failure collapsed to "agent_error", mirroring
    the old Api behaviour. Memory: no-collapse-richer-enum-at-sdk-boundary. *)
 let agent_error_terminal_reason_code = function
-  | Agent_sdk.Error.CompletionContractViolation { contract; _ } ->
+  | Agent_sdk.Error.CompletionContractViolation
+      { contract; violation_detail = Some detail; _ } ->
+    Keeper_execution_receipt.encode_contract_violation_reason
+      ~called_tools:detail.called_tools
+      ~satisfying_tools:detail.satisfying_tools
+      (Agent_sdk.Completion_contract_id.to_string contract)
+  | Agent_sdk.Error.CompletionContractViolation { contract; violation_detail = None; _ } ->
     Printf.sprintf
       "completion_contract_violation:%s"
       (Agent_sdk.Completion_contract_id.to_string contract)

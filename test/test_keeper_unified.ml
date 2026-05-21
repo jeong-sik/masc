@@ -6433,6 +6433,7 @@ let required_tool_contract_violation_error () =
        ; reason =
            "required tool contract unsatisfied: tool_choice requested tool use, but the \
             model returned no ToolUse block"
+       ; violation_detail = None
        })
 ;;
 
@@ -7913,6 +7914,7 @@ let test_required_tool_contract_violation_detected () =
          ; reason =
              "required tool contract unsatisfied: tool_choice requested tool use, but \
               the model returned no ToolUse block"
+         ; violation_detail = None
          })
   in
   check
@@ -8025,6 +8027,7 @@ let test_auto_recoverable_turn_error_excludes_required_tool_contract_violation (
          ; reason =
              "required tool contract unsatisfied: tool_choice requested tool use, but \
               the model returned no ToolUse block"
+         ; violation_detail = None
          })
   in
   check

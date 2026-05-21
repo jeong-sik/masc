@@ -53,7 +53,10 @@ let json_int_opt = function
 let json_string_list values = `List (List.map (fun value -> `String value) values)
 ;;
 
-let json_contract_violation_detail = function
+let json_contract_violation_detail
+  (detail : Agent_sdk.Completion_contract_violation_detail.t option)
+  =
+  match detail with
   | None -> `Null
   | Some (detail : Agent_sdk.Completion_contract_violation_detail.t) ->
     `Assoc

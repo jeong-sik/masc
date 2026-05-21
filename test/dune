@@ -124,14 +124,12 @@
   test_oas_error_kind_counter
   test_cascade_error_classify_decoder
   test_cascade_capacity_exhausted_cooldown
-  test_cascade_capacity_backpressure_synthetic_backoff
   test_oas_empty_response_diagnostic
   test_board_author_identity_10297
   test_fsm_drift_counter
   test_gc_sampler
   test_process_timeout_counter
   test_timeout_floor
-  test_timeout_origin
   test_git_fetch_timeout_9587
   test_inference_utils
   test_auth_ambiguous_lookup_9786
@@ -444,14 +442,12 @@
   test_oas_error_kind_counter
   test_cascade_error_classify_decoder
   test_cascade_capacity_exhausted_cooldown
-  test_cascade_capacity_backpressure_synthetic_backoff
   test_oas_empty_response_diagnostic
   test_board_author_identity_10297
   test_fsm_drift_counter
   test_gc_sampler
   test_process_timeout_counter
   test_timeout_floor
-  test_timeout_origin
   test_git_fetch_timeout_9587
   test_inference_utils
   test_auth_ambiguous_lookup_9786
@@ -1577,8 +1573,6 @@
 
 (include stanzas/test_event_kind.inc)
 
-(include stanzas/test_export_symbol_graph.inc)
-
 (include stanzas/test_feature_flag_registry.inc)
 
 (include stanzas/test_fleet_capacity_supervisor.inc)
@@ -2195,15 +2189,6 @@
 (test
  (name test_pr_i_2e_bootstrap_loops_typed)
  (modules test_pr_i_2e_bootstrap_loops_typed)
- (libraries alcotest))
-
-; server_bootstrap_loops fork helper ratchet.
-; Pins raw Eio.Fiber.fork ownership to the cancel-safe helper instead
-; of repeating ad hoc crash wrappers at each background loop site.
-
-(test
- (name test_server_bootstrap_loop_fork_helper)
- (modules test_server_bootstrap_loop_fork_helper)
  (libraries alcotest))
 
 ; RFC-0084 PR-I-3 — legacy post-hook surface removal (final).

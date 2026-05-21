@@ -9,6 +9,121 @@ type health_status =
   | Healthy
   | Unhealthy of string
 
+type runtime_pressure_class =
+  | Client_capacity_full
+  | Tier_admission_full
+  | Provider_capacity
+  | Provider_dns_failure
+  | Provider_timeout
+  | Provider_error
+  | Oas_timeout_budget
+  | Turn_stale_timeout
+  | Keeper_liveness_failure
+  | Tool_contract_failure
+  | Runtime_failure
+
+let runtime_pressure_class_to_string = function
+  | Client_capacity_full -> "client_capacity_full"
+  | Tier_admission_full -> "tier_admission_full"
+  | Provider_capacity -> "provider_capacity"
+  | Provider_dns_failure -> "provider_dns_failure"
+  | Provider_timeout -> "provider_timeout"
+  | Provider_error -> "provider_error"
+  | Oas_timeout_budget -> "oas_timeout_budget"
+  | Turn_stale_timeout -> "turn_stale_timeout"
+  | Keeper_liveness_failure -> "keeper_liveness_failure"
+  | Tool_contract_failure -> "tool_contract_failure"
+  | Runtime_failure -> "runtime_failure"
+;;
+
+let runtime_pressure_class_of_label label =
+  match String.lowercase_ascii (String.trim label) with
+  | "client_capacity_full" | "client_capacity" -> Some Client_capacity_full
+  | "tier_admission_full" | "tier_admission" -> Some Tier_admission_full
+  | "provider_capacity" | "provider_capacity_full" | "capacity_backpressure" ->
+    Some Provider_capacity
+  | "provider_dns_failure" | "provider_dns" -> Some Provider_dns_failure
+  | "provider_timeout" -> Some Provider_timeout
+  | "provider_error" | "provider_runtime_error" -> Some Provider_error
+  | "oas_timeout_budget" | "oas_timeout_budget_loop" -> Some Oas_timeout_budget
+  | "turn_stale_timeout" | "stale_turn_timeout" -> Some Turn_stale_timeout
+  | "keeper_liveness_failure" | "heartbeat_failures" | "turn_failures" ->
+    Some Keeper_liveness_failure
+  | "tool_contract_failure" | "tool_required_unsatisfied" ->
+    Some Tool_contract_failure
+  | "runtime_failure" | "fiber_unresolved" | "exception" -> Some Runtime_failure
+  | _ -> None
+;;
+
+let provider_runtime_pressure_class ~code ~detail ~http_status =
+  let contains needle =
+    String_util.contains_substring_ci code needle
+    || String_util.contains_substring_ci detail needle
+  in
+  let http_is_any statuses =
+    match http_status with
+    | Some status -> List.mem status statuses
+    | None -> false
+  in
+  if
+    contains "client_capacity"
+    || contains "client capacity"
+    || contains "client_capacity_full"
+  then Client_capacity_full
+  else if
+    contains "tier_admission"
+    || contains "inflight_capacity_full"
+    || contains "strict_tool_candidates"
+    || contains "tier="
+  then Tier_admission_full
+  else if
+    contains "capacity_backpressure"
+    || contains "capacity exhausted"
+    || contains "capacity_exhausted"
+    || contains "rate limit"
+    || contains "rate_limited"
+    || contains "overloaded"
+    || http_is_any [ 429; 529 ]
+  then Provider_capacity
+  else if
+    contains "getaddrinfo"
+    || contains "dns"
+    || contains "enotfound"
+    || contains "nxdomain"
+    || contains "nodename nor servname"
+  then Provider_dns_failure
+  else if
+    contains "timeout"
+    || contains "timed out"
+    || contains "no_first_token"
+    || contains "inter_chunk_idle"
+    || contains "max_execution_time"
+    || contains "wall-clock timeout"
+    || http_is_any [ 408; 504; 524 ]
+  then Provider_timeout
+  else Provider_error
+;;
+
+let runtime_pressure_class_of_failure_reason = function
+  | Some (Keeper_registry.Oas_timeout_budget_loop _) -> Some Oas_timeout_budget
+  | Some (Keeper_registry.Provider_runtime_error { code; detail; http_status; _ }) ->
+    Some (provider_runtime_pressure_class ~code ~detail ~http_status)
+  | Some (Keeper_registry.Stale_turn_timeout _) -> Some Turn_stale_timeout
+  | Some
+      ( Keeper_registry.Heartbeat_consecutive_failures _
+      | Keeper_registry.Turn_consecutive_failures _ ) ->
+    Some Keeper_liveness_failure
+  | Some (Keeper_registry.Tool_required_unsatisfied _) -> Some Tool_contract_failure
+  | Some
+      ( Keeper_registry.Fiber_unresolved
+      | Keeper_registry.Exception _
+      | Keeper_registry.Stale_termination_storm _
+      | Keeper_registry.Stale_fleet_batch _
+      | Keeper_registry.Ambiguous_partial_commit _ ) ->
+    Some Runtime_failure
+  | None -> None
+;;
+
 (** Per-keeper, per-item health cache.
     Key: (keeper_name, item_id). Value: (status, timestamp). *)
 let health_cache : (string * string, health_status * float) Hashtbl.t = Hashtbl.create 16
@@ -95,6 +210,85 @@ let max_failed_allowed_for_cascade ~total =
   max 1 (total / 10)
 ;;
 
+type cascade_scan_acc =
+  { total : int
+  ; failed : int
+  ; failure_reasons : Keeper_registry.failure_reason option list
+  }
+
+let empty_cascade_scan_acc =
+  { total = 0; failed = 0; failure_reasons = [] }
+;;
+
+let dominant_runtime_pressure_class failure_reasons =
+  let counts = Hashtbl.create 8 in
+  List.iter
+    (fun reason ->
+       match runtime_pressure_class_of_failure_reason reason with
+       | None -> ()
+       | Some cls ->
+         let label = runtime_pressure_class_to_string cls in
+         let n =
+           match Hashtbl.find_opt counts label with
+           | Some n -> n
+           | None -> 0
+         in
+         Hashtbl.replace counts label (n + 1))
+    failure_reasons;
+  let ranked =
+    counts
+    |> Hashtbl.to_seq
+    |> List.of_seq
+    |> List.sort (fun (label_a, count_a) (label_b, count_b) ->
+      match compare count_b count_a with
+      | 0 -> String.compare label_a label_b
+      | n -> n)
+  in
+  match ranked with
+  | (label, _) :: _ -> Some label
+  | [] -> None
+;;
+
+let cascade_failure_reason acc =
+  match dominant_runtime_pressure_class acc.failure_reasons with
+  | Some label -> "failure_ratio:" ^ label
+  | None -> "failure_ratio"
+;;
+
+let scan_cascade_health ~base_path =
+  let entries = Keeper_registry.all ~base_path () in
+  let by_cascade = Hashtbl.create 8 in
+  List.iter
+    (fun (entry : Keeper_registry.registry_entry) ->
+       let cascade = Keeper_types.cascade_name_of_meta entry.meta in
+       let acc =
+         match Hashtbl.find_opt by_cascade cascade with
+         | Some acc -> acc
+         | None -> empty_cascade_scan_acc
+       in
+       let failed = is_terminal_unhealthy entry.phase in
+       let acc' =
+         { total = acc.total + 1
+         ; failed = acc.failed + if failed then 1 else 0
+         ; failure_reasons =
+             (if failed
+              then entry.last_failure_reason :: acc.failure_reasons
+              else acc.failure_reasons)
+         }
+       in
+       Hashtbl.replace by_cascade cascade acc')
+    entries;
+  Hashtbl.fold
+    (fun cascade acc rows ->
+       let healthy =
+         if acc.total <= 0 then true
+         else acc.failed <= max_failed_allowed_for_cascade ~total:acc.total
+       in
+       (cascade, healthy, acc) :: rows)
+    by_cascade
+    []
+;;
+
 (** Compute health per cascade from registry entries.
     Returns (cascade_name, is_healthy).
 
@@ -108,28 +302,8 @@ let max_failed_allowed_for_cascade ~total =
     Per-item health is updated via [record_item_result] after each
     turn. *)
 let check_cascade_health ~base_path =
-  let entries = Keeper_registry.all ~base_path () in
-  let by_cascade = Hashtbl.create 8 in
-  List.iter
-    (fun (entry : Keeper_registry.registry_entry) ->
-       let cascade = Keeper_types.cascade_name_of_meta entry.meta in
-       let total, failed =
-         match Hashtbl.find_opt by_cascade cascade with
-         | Some pair -> pair
-         | None -> 0, 0
-       in
-       let failed' = if is_terminal_unhealthy entry.phase then failed + 1 else failed in
-       Hashtbl.replace by_cascade cascade (total + 1, failed'))
-    entries;
-  Hashtbl.fold
-    (fun cascade (total, failed) acc ->
-       let healthy =
-         if total <= 0 then true
-         else failed <= max_failed_allowed_for_cascade ~total
-       in
-       (cascade, healthy) :: acc)
-    by_cascade
-    []
+  scan_cascade_health ~base_path
+  |> List.map (fun (cascade, healthy, _acc) -> cascade, healthy)
 ;;
 
 (* ------------------------------------------------------------------ *)
@@ -137,10 +311,12 @@ let check_cascade_health ~base_path =
 (* ------------------------------------------------------------------ *)
 
 let run_once ~base_path =
-  let results = check_cascade_health ~base_path in
+  let results = scan_cascade_health ~base_path in
   List.iter
-    (fun (cascade, healthy) ->
-       let status = if healthy then Healthy else Unhealthy "failure_ratio" in
+    (fun (cascade, healthy, acc) ->
+       let status =
+         if healthy then Healthy else Unhealthy (cascade_failure_reason acc)
+       in
        set_cascade_status ~cascade_name:cascade status)
     results
 ;;

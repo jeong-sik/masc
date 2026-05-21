@@ -13,6 +13,29 @@ type health_status =
   | Healthy
   | Unhealthy of string
 
+(** Runtime pressure classes used to explain an unhealthy cascade.
+    These labels are intentionally low-cardinality because they are
+    persisted into skip observations and surfaced in fleet diagnostics. *)
+type runtime_pressure_class =
+  | Client_capacity_full
+  | Tier_admission_full
+  | Provider_capacity
+  | Provider_dns_failure
+  | Provider_timeout
+  | Provider_error
+  | Oas_timeout_budget
+  | Turn_stale_timeout
+  | Keeper_liveness_failure
+  | Tool_contract_failure
+  | Runtime_failure
+
+val runtime_pressure_class_to_string : runtime_pressure_class -> string
+val runtime_pressure_class_of_label : string -> runtime_pressure_class option
+
+val runtime_pressure_class_of_failure_reason
+  :  Keeper_registry.failure_reason option
+  -> runtime_pressure_class option
+
 (** {1 Per-item health (RFC-0041)} *)
 
 (** [is_item_healthy ~keeper_name ~item_id] returns the cached health

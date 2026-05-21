@@ -316,8 +316,8 @@ let test_masc_goal_verify_schema () =
       | None -> Alcotest.fail "masc_goal_verify missing required field"
 
 let test_remote_operator_action_schema_is_strict () =
-  let check_schema label schema =
-  match get_json_assoc "properties" schema.input_schema with
+  let check_schema label input_schema =
+  match get_json_assoc "properties" input_schema with
   | Some props ->
       (match List.assoc_opt "action_type" props with
        | Some (`Assoc fields) ->
@@ -378,8 +378,16 @@ let test_remote_operator_action_schema_is_strict () =
     | Some schema -> schema
     | None -> Alcotest.failf "%s masc_operator_action schema not found" label
   in
-  check_schema "local" (find_operator_action Masc_mcp.Tool_operator.schemas "local");
-  check_schema "remote" (find_operator_action Masc_mcp.Tool_operator.remote_schemas "remote")
+  let remote_schema =
+    find_operator_action Masc_mcp.Tool_operator.remote_schemas "remote"
+  in
+  let local_input_schema =
+    match Masc_mcp.Tool_dispatch.lookup_schema "masc_operator_action" with
+    | Some input_schema -> input_schema
+    | None -> Alcotest.fail "local masc_operator_action schema not registered"
+  in
+  check_schema "local" local_input_schema;
+  check_schema "remote" remote_schema.input_schema
 
 let test_retired_front_door_tools_absent_from_schema_inventory () =
   let retired_tools =

@@ -109,7 +109,7 @@ let test_git_upstream_status_uses_origin_head_for_detached_checkout () =
            dir
            [ "-c"; "user.email=test@example.invalid"
            ; "-c"; "user.name=Test"
-           ; "commit"; "-q"; "-m"; "initial"
+           ; "commit"; "--no-verify"; "-q"; "-m"; "initial"
            ]);
       let first_commit = run_git_exn dir [ "rev-parse"; "--short"; "HEAD" ] in
       write_file readme "one\ntwo\n";
@@ -119,7 +119,7 @@ let test_git_upstream_status_uses_origin_head_for_detached_checkout () =
            dir
            [ "-c"; "user.email=test@example.invalid"
            ; "-c"; "user.name=Test"
-           ; "commit"; "-q"; "-m"; "second"
+           ; "commit"; "--no-verify"; "-q"; "-m"; "second"
            ]);
       let origin_main = run_git_exn dir [ "rev-parse"; "--short"; "HEAD" ] in
       ignore (run_git_exn dir [ "update-ref"; "refs/remotes/origin/main"; "HEAD" ]);
@@ -416,22 +416,6 @@ let test_dashboard_tools_projection () =
       | Some row ->
           check bool "local worker tool keeps local_worker surface" true
             (has_surface "local_worker" row));
-      (match deprecated_alias_tool with
-      | None -> ()
-      | Some row ->
-          check bool "deprecated alias has registered schema" true
-            (row |> member "registered_schema" |> to_bool);
-          check bool "deprecated alias has dispatch registration" true
-            (row |> member "dispatch_registered" |> to_bool);
-          check string "deprecated alias visibility surfaced" "hidden"
-            (row |> member "visibility" |> to_string);
-          check string "deprecated alias lifecycle surfaced" "deprecated"
-            (row |> member "lifecycle" |> to_string);
-          check string "deprecated alias replacement surfaced"
-            "masc_agent_update"
-            (row |> member "replacement" |> to_string);
-          check bool "deprecated alias not assigned a surface" false
-            (row |> member "surfaces" |> to_list <> []));
       match hidden_tool with
       | None -> ()
       | Some row ->

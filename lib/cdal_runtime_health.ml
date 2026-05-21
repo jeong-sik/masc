@@ -120,7 +120,7 @@ let all_digits value =
 let cdal_run_id_timestamp run_id =
   match String.split_on_char '-' run_id with
   | "cdal" :: ts :: _ when all_digits ts -> Some ts
-  | _ -> None
+  | _parts -> None
 ;;
 
 let compare_numeric_string left right =

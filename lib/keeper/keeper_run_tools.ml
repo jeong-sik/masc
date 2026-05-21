@@ -1697,7 +1697,7 @@ let prepare_agent_setup
                   ; tool_choice
                   ; tool_filter_override = Some tool_filter
                   }
-              | _ -> Agent_sdk.Hooks.Continue)
+              | _event -> Agent_sdk.Hooks.Continue)
       }
     in
     let hooks = Agent_sdk.Hooks.compose ~outer:before_turn_hook ~inner:base_hooks in

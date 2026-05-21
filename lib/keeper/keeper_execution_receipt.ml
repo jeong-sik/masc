@@ -7,39 +7,16 @@
    cancellation. The receipt record still stores the legacy string for
    JSON compatibility; consumers must go through these helpers so that
    Skipped/Cancelled/Error are not silently folded into one another. *)
-type outcome_kind =
-  [ `Ok
-  | `Skipped
-  | `Error
-  | `Cancelled
-  ]
+type outcome_kind = Keeper_execution_receipt_outcome_kind.outcome_kind
 
-let outcome_kind_to_string = function
-  | `Ok -> "ok"
-  | `Skipped -> "skipped"
-  | `Error -> "error"
-  | `Cancelled -> "cancelled"
-;;
-
-let outcome_kind_to_tla_receipt = function
-  | `Ok -> "receipt_done"
-  | `Skipped -> "receipt_skipped"
-  | `Error -> "receipt_failed"
-  | `Cancelled -> "receipt_cancelled"
-;;
-
-let outcome_kind_of_string = function
-  | "ok" | "receipt_done" -> Some `Ok
-  | "skipped" | "receipt_skipped" -> Some `Skipped
-  | "error" | "receipt_failed" -> Some `Error
-  | "cancelled" | "receipt_cancelled" -> Some `Cancelled
-  | _ -> None
-;;
-
-let outcome_kind_is_terminal_success = function
-  | `Ok | `Skipped -> true
-  | `Error | `Cancelled -> false
-;;
+let outcome_kind_to_string =
+  Keeper_execution_receipt_outcome_kind.outcome_kind_to_string
+let outcome_kind_to_tla_receipt =
+  Keeper_execution_receipt_outcome_kind.outcome_kind_to_tla_receipt
+let outcome_kind_of_string =
+  Keeper_execution_receipt_outcome_kind.outcome_kind_of_string
+let outcome_kind_is_terminal_success =
+  Keeper_execution_receipt_outcome_kind.outcome_kind_is_terminal_success
 
 type error_kind = Error_kind of string
 

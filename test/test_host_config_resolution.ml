@@ -63,10 +63,10 @@ let test_resolve_with_base_path () =
   | Ok t ->
     (check bool)
       "agent_runtime_root is base-path-relative \
-       (RFC-0084 §1.5 migration target for /tmp/.masc_agent_* 7 sites)"
+       (RFC-0084 §1.5 typed runtime root)"
       true
       (String.length t.agent_runtime_root > 0
-       && t.agent_runtime_root <> "/tmp/.masc_agent");
+       && String.starts_with ~prefix:"/tmp/test-masc/" t.agent_runtime_root);
     (check bool)
       "cred_root is base-path-relative when explicit base provided"
       true

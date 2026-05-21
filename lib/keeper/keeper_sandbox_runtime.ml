@@ -56,7 +56,75 @@ let run_docker_argv_with_status ~summary ~timeout_sec argv =
       argv)
 ;;
 
-let docker_info_security_options ~timeout_sec =
+type classified_error =
+  { message : string
+  ; failure_class : string
+  }
+
+let process_status_is_timeout = function
+  | Unix.WEXITED 124 -> true
+  | Unix.WEXITED _
+  | Unix.WSIGNALED _
+  | Unix.WSTOPPED _ ->
+    false
+;;
+
+let lower_contains output needle =
+  String_util.contains_substring (String.lowercase_ascii output) needle
+;;
+
+let output_looks_docker_daemon_unavailable output =
+  lower_contains output "cannot connect to the docker daemon"
+  || lower_contains output "is the docker daemon running"
+  || lower_contains output "docker daemon is not running"
+  || lower_contains output "connection refused"
+;;
+
+let output_looks_image_missing output =
+  lower_contains output "no such image"
+  || lower_contains output "no such object"
+;;
+
+let output_looks_timeout output =
+  lower_contains output "timeout after"
+  || lower_contains output "timed out"
+  || lower_contains output "i/o timeout"
+;;
+
+let docker_output_looks_oci_mount_failure output =
+  lower_contains output "oci runtime create failed"
+  || lower_contains output "error during container init"
+;;
+
+let classify_docker_runtime_failure ~status ~output =
+  if process_status_is_timeout status || output_looks_timeout output
+  then "docker_daemon_timeout"
+  else if output_looks_docker_daemon_unavailable output
+  then "docker_daemon_unavailable"
+  else "docker_runtime_error"
+;;
+
+let classify_image_inspect_failure ~status ~output =
+  if process_status_is_timeout status || output_looks_timeout output
+  then "image_inspect_timeout"
+  else if output_looks_docker_daemon_unavailable output
+  then "docker_daemon_unavailable"
+  else if output_looks_image_missing output
+  then "image_missing"
+  else "image_inspect_error"
+;;
+
+let classify_image_inventory_failure ~status ~output =
+  if process_status_is_timeout status || output_looks_timeout output
+  then "image_inventory_timeout"
+  else if docker_output_looks_oci_mount_failure output
+  then "oci_mount_failure"
+  else if output_looks_docker_daemon_unavailable output
+  then "docker_daemon_unavailable"
+  else "image_inventory_error"
+;;
+
+let docker_info_security_options_with_class ~timeout_sec =
   let argv =
     docker_command_argv () @ [ "info"; "--format"; "{{json .SecurityOptions}}" ]
   in
@@ -69,9 +137,12 @@ let docker_info_security_options ~timeout_sec =
   if st <> Unix.WEXITED 0
   then
     Error
-      (Printf.sprintf
-         "docker info failed while validating sandbox runtime: %s"
-         (Worker_dev_tools.truncate_for_log out))
+      { message =
+          Printf.sprintf
+            "docker info failed while validating sandbox runtime: %s"
+            (Worker_dev_tools.truncate_for_log out)
+      ; failure_class = classify_docker_runtime_failure ~status:st ~output:out
+      }
   else (
     try
       match Yojson.Safe.from_string (String.trim out) with
@@ -82,11 +153,24 @@ let docker_info_security_options ~timeout_sec =
       | `Null -> Ok []
       | _ ->
         Error
-          "docker info returned unexpected SecurityOptions payload while validating \
-           sandbox runtime"
+          { message =
+              "docker info returned unexpected SecurityOptions payload while validating \
+               sandbox runtime"
+          ; failure_class = "docker_info_format_error"
+          }
     with
     | Yojson.Json_error err ->
-      Error (Printf.sprintf "failed to parse docker info SecurityOptions JSON: %s" err))
+      Error
+        { message =
+            Printf.sprintf "failed to parse docker info SecurityOptions JSON: %s" err
+        ; failure_class = "docker_info_format_error"
+        })
+;;
+
+let docker_info_security_options ~timeout_sec =
+  match docker_info_security_options_with_class ~timeout_sec with
+  | Ok security_options -> Ok security_options
+  | Error classified -> Error classified.message
 ;;
 
 type required_command_check =
@@ -105,6 +189,7 @@ type docker_preflight =
   ; hardening_error : string option
   ; image_present : bool
   ; image_error : string option
+  ; failure_classes : string list
   ; required_commands : required_command_check list
   ; missing_commands : string list
   ; next_actions : string list
@@ -1097,9 +1182,13 @@ let maybe_cleanup_stale_containers ?(now = Unix.gettimeofday ()) ~base_path
     else None)
 ;;
 
-let docker_image_present ~image ~timeout_sec =
+let docker_image_present_with_class ~image ~timeout_sec =
   if String.trim image = ""
-  then Error "keeper sandbox docker image is not configured"
+  then
+    Error
+      { message = "keeper sandbox docker image is not configured"
+      ; failure_class = "image_config_missing"
+      }
   else (
     let argv = docker_command_argv () @ [ "image"; "inspect"; image ] in
     let st, out =
@@ -1112,10 +1201,19 @@ let docker_image_present ~image ~timeout_sec =
     then Ok ()
     else
       Error
-        (Printf.sprintf
-           "keeper sandbox image %s is not available locally: %s"
-           image
-           (Worker_dev_tools.truncate_for_log out)))
+        { message =
+            Printf.sprintf
+              "keeper sandbox image %s is not available locally: %s"
+              image
+              (Worker_dev_tools.truncate_for_log out)
+        ; failure_class = classify_image_inspect_failure ~status:st ~output:out
+        })
+;;
+
+let docker_image_present ~image ~timeout_sec =
+  match docker_image_present_with_class ~image ~timeout_sec with
+  | Ok () -> Ok ()
+  | Error classified -> Error classified.message
 ;;
 
 let ensure_keeper_sandbox_image_present ~image ~timeout_sec =
@@ -1129,7 +1227,7 @@ let ensure_keeper_sandbox_image_present ~image ~timeout_sec =
          docker_image_missing_next_action)
 ;;
 
-let docker_image_required_commands ~image ~timeout_sec =
+let docker_image_required_commands_with_class ~image ~timeout_sec =
   let script =
     let quoted = List.map Filename.quote required_commands |> String.concat " " in
     Printf.sprintf
@@ -1160,9 +1258,18 @@ let docker_image_required_commands ~image ~timeout_sec =
     Ok missing)
   else
     Error
-      (Printf.sprintf
-         "failed to inspect keeper sandbox image commands: %s"
-         (Worker_dev_tools.truncate_for_log out))
+      { message =
+          Printf.sprintf
+            "failed to inspect keeper sandbox image commands: %s"
+            (Worker_dev_tools.truncate_for_log out)
+      ; failure_class = classify_image_inventory_failure ~status:st ~output:out
+      }
+;;
+
+let docker_image_required_commands ~image ~timeout_sec =
+  match docker_image_required_commands_with_class ~image ~timeout_sec with
+  | Ok missing_commands -> Ok missing_commands
+  | Error classified -> Error classified.message
 ;;
 
 let docker_preflight_to_yojson (preflight : docker_preflight) =
@@ -1179,6 +1286,11 @@ let docker_preflight_to_yojson (preflight : docker_preflight) =
     ; option_field "hardening_error" preflight.hardening_error
     ; "image_present", `Bool preflight.image_present
     ; option_field "image_error" preflight.image_error
+    ; ( "failure_classes"
+      , `List
+          (List.map
+             (fun failure_class -> `String failure_class)
+             preflight.failure_classes) )
     ; ( "required_commands"
       , `List
           (List.map
@@ -1268,28 +1380,31 @@ let docker_preflight ~timeout_sec () =
   else (
     let timeout_sec = docker_preflight_timeout ~timeout_sec in
     let image = Env_config_keeper.KeeperSandbox.docker_image () in
-    let docker_runtime_ok, docker_runtime_error =
-      match docker_info_security_options ~timeout_sec with
-      | Ok _ -> true, None
-      | Error message -> false, Some message
+    let docker_runtime_ok, docker_runtime_error, docker_runtime_failure_class =
+      match docker_info_security_options_with_class ~timeout_sec with
+      | Ok _ -> true, None, None
+      | Error classified ->
+        false, Some classified.message, Some classified.failure_class
     in
     let hardening_ok, hardening_error =
       match ensure_keeper_sandbox_runtime ~timeout_sec with
       | Ok _ -> true, None
       | Error message -> false, Some message
     in
-    let image_present, image_error =
-      match docker_image_present ~image ~timeout_sec with
-      | Ok () -> true, None
-      | Error message -> false, Some message
+    let image_present, image_error, image_failure_class =
+      match docker_image_present_with_class ~image ~timeout_sec with
+      | Ok () -> true, None, None
+      | Error classified ->
+        false, Some classified.message, Some classified.failure_class
     in
-    let missing_commands, command_error =
+    let missing_commands, command_error, command_failure_class =
       if not image_present
-      then [], None
+      then [], None, None
       else (
-        match docker_image_required_commands ~image ~timeout_sec with
-        | Ok missing -> missing, None
-        | Error message -> [], Some message)
+        match docker_image_required_commands_with_class ~image ~timeout_sec with
+        | Ok missing -> missing, None, None
+        | Error classified ->
+          [], Some classified.message, Some classified.failure_class)
     in
     let required_commands =
       List.map
@@ -1321,6 +1436,16 @@ let docker_preflight ~timeout_sec () =
       | Some message, Some _ -> Some message
       | None, None -> None
     in
+    let failure_classes =
+      [ docker_runtime_failure_class
+      ; image_failure_class
+      ; command_failure_class
+      ; (if hardening_ok then None else Some "docker_hardening_error")
+      ; (if missing_commands = [] then None else Some "image_required_command_missing")
+      ]
+      |> List.filter_map (fun item -> item)
+      |> dedupe_keep_order
+    in
     Some
       { ok =
           docker_runtime_ok
@@ -1340,6 +1465,7 @@ let docker_preflight ~timeout_sec () =
       ; hardening_error
       ; image_present
       ; image_error
+      ; failure_classes
       ; required_commands
       ; missing_commands
       ; next_actions

@@ -1065,6 +1065,10 @@ let run_named
           "legacy_outer_wall_observe_liveness"
         | Cascade_attempt_liveness_config.Observe, true, None ->
           "oas_max_execution_time_observe_liveness"
+        | Cascade_attempt_liveness_config.Observe, false, Some _ ->
+          "legacy_outer_wall_observe_liveness"
+        | Cascade_attempt_liveness_config.Observe, false, None ->
+          "oas_max_execution_time_observe_liveness"
         | Cascade_attempt_liveness_config.Off, _, Some _ -> "legacy_outer_wall"
         | Cascade_attempt_liveness_config.Off, _, None -> "oas_max_execution_time"
         | Cascade_attempt_liveness_config.Enforce, false, Some _ -> "legacy_outer_wall"

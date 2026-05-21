@@ -125,12 +125,12 @@ val validate_writable_path :
 
 val validate_code_shell_command :
   string -> (unit, string) Result.t
-(** [validate_code_shell_command command] delegates to
-    {!Worker_dev_tools.validate_command_coding_with_allowlist}
-    with [~allow_pipes:true] and the pinned [Dev_exec_allowlist.dev]
-    surface plus tool-specific commands ([diff], [patch], [mkdir],
-    [ocamlfind], [tsc]).  Drift in the allowlist changes the keeper
-    sandbox surface — pinned at the contract seam. *)
+(** [validate_code_shell_command command] validates through
+    {!Masc_exec_command_gate.Shell_command_gate.gate} with
+    [~allow_pipes:true] and the pinned [Dev_exec_allowlist.dev] surface
+    plus tool-specific commands ([diff], [patch], [mkdir], [ocamlfind],
+    [tsc]).  Drift in the allowlist changes the keeper sandbox surface —
+    pinned at the contract seam. *)
 
 (** {1 Git clone validation} *)
 

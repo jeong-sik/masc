@@ -14,6 +14,7 @@ module String = Stdlib.String
 module Char = Stdlib.Char
 module Int = Stdlib.Int
 module Float = Stdlib.Float
+module Exec_shell_gate = Masc_exec_command_gate.Shell_command_gate
 
 (** Code Write Tools — File write, edit, delete, shell, git for keeper agents.
 
@@ -57,8 +58,78 @@ let allowed_shell_commands =
   List.fold_left add_unique Dev_exec_allowlist.dev
     [ "diff"; "patch"; "mkdir"; "ocamlfind"; "tsc" ]
 
+let code_shell_allowlist_policy
+      ?(allow_pipes = true)
+      ~(allowed_commands : string list)
+      ()
+  : Exec_shell_gate.allowlist_policy =
+  { allowed_commands; allow_pipes; redirect_allowed = true }
+;;
+
+let code_shell_block_reason_of_reject
+      (reason : Exec_shell_gate.reject_reason)
+  : Worker_dev_tools.block_reason =
+  match reason with
+  | Command_not_in_allowlist { bin }
+  | Pipeline_segment_disallowed { bin; _ } -> Command_not_allowed bin
+  | Pipes_not_allowed _ -> Pipes_not_allowed
+  | Redirect_disallowed_in_caller _
+  | Path_outside_policy _ -> Unsafe_redirect
+;;
+
+let code_shell_block_reason_of_too_complex
+      (reason : Exec_shell_gate.too_complex_reason)
+  : Worker_dev_tools.block_reason =
+  match reason with
+  | Unsupported_construct `Proc_subst -> Process_substitution
+  | Unsupported_construct (`Heredoc | `Here_string | `Redirect) -> Unsafe_redirect
+  | Unsupported_nested_pipeline
+  | Unsupported_construct
+      ( `Cmd_subst
+      | `Subshell
+      | `Arith_expansion
+      | `Control_flow
+      | `Logic_op
+      | `Function_def
+      | `Glob_brace
+      | `Background
+      | `Unknown_construct _ ) -> Injection
+;;
+
+let validate_code_shell_command_block_reason
+      ?(allow_pipes = true)
+      ~(allowed_commands : string list)
+      command
+  =
+  let trimmed = String.trim command in
+  if String.equal trimmed ""
+  then Error Worker_dev_tools.Empty_command
+  else (
+    match
+      Exec_shell_gate.gate
+        ~caller:Exec_shell_gate.Tool_code_write
+        ~raw:trimmed
+        ~allowlist:(code_shell_allowlist_policy ~allow_pipes ~allowed_commands ())
+        ~path_policy:Exec_shell_gate.allow_all_paths
+        ~sandbox:Exec_shell_gate.host_sandbox
+        ()
+    with
+    | Allow context ->
+      if context.Exec_shell_gate.invokes_direct_dune
+      then Error Worker_dev_tools.Direct_dune_invocation
+      else Ok ()
+    | Reject { context; reason; _ } ->
+      (match reason with
+       | Pipes_not_allowed _ -> Error Worker_dev_tools.Pipes_not_allowed
+       | _ when context.Exec_shell_gate.invokes_direct_dune ->
+         Error Worker_dev_tools.Direct_dune_invocation
+       | _ -> Error (code_shell_block_reason_of_reject reason))
+    | Cannot_parse _ -> Error Worker_dev_tools.Injection
+    | Too_complex { reason } -> Error (code_shell_block_reason_of_too_complex reason))
+;;
+
 let validate_code_shell_command (command : string) : (unit, string) Result.t =
-  Worker_dev_tools.validate_command_coding_with_allowlist
+  validate_code_shell_command_block_reason
     ~allow_pipes:true
     ~allowed_commands:allowed_shell_commands
     command
@@ -75,9 +146,9 @@ type code_shell_exit_status =
    string-splitter fallback ([first_token_basename] +
    [last_pipeline_segment]) was the last in-module shell splitter in
    [tool_code_write].  It existed to keep exit classification working
-   when [Shell_command_gate.parse] could not produce a typed AST.
+   when the Shell gate could not produce a typed AST.
 
-   Phase 2 explicitly removes that fallback: the facade is the only
+   Phase 2 explicitly removes that fallback: the exec facade is the only
    parse path.  When the parser cannot lift the command, the last-stage
    binary name is genuinely unknown — we conservatively fall through to
    [Shell_error] instead of silently re-deriving a name from a different
@@ -86,9 +157,21 @@ type code_shell_exit_status =
    Plan's separation of parse / validation / exec / classify error
    classes. *)
 let exit_status_command_name command =
-  match Shell_command_gate.parse command with
-  | Ok context -> Shell_command_gate.last_stage_bin context
-  | Error _ -> None
+  match
+    Exec_shell_gate.gate
+      ~caller:Exec_shell_gate.Tool_code_write
+      ~raw:command
+      ~allowlist:
+        (code_shell_allowlist_policy
+           ~allow_pipes:true
+           ~allowed_commands:allowed_shell_commands
+           ())
+      ~path_policy:Exec_shell_gate.allow_all_paths
+      ~sandbox:Exec_shell_gate.host_sandbox
+      ()
+  with
+  | Allow context -> Exec_shell_gate.last_stage_bin context
+  | Reject _ | Cannot_parse _ | Too_complex _ -> None
 
 let classify_code_shell_exit ~command code =
   match code with

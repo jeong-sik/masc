@@ -171,7 +171,8 @@ let keeper_bash_cmd_field =
       ; ( "description"
         , `String
             "Single command only. No chaining/control syntax or file redirects. \
-             Example: 'scripts/dune-local.sh build', 'rg pattern lib/'" )
+             Example: 'scripts/dune-local.sh build', 'git status --short'. For \
+             read-only search/listing, prefer keeper_shell/Grep when visible." )
       ] )
 ;;
 
@@ -180,15 +181,16 @@ let legacy_v0_description =
    accepted during the typed-argv migration; prefer executable/argv for one process \
    or pipeline/stages for explicit Shell IR pipelines. No chaining/control syntax \
    (&&, ||, ;), command substitution, background operators, or file redirects. Good: \
-   cmd='scripts/dune-local.sh build', executable='rg' argv=['pattern','lib/'], \
-   pipeline=[{executable='rg',...}, {executable='head',...}]. Bad: cmd='cd x && dune \
-   build', cmd='echo hi > out.txt'. Runs in the keeper sandbox by default; use cwd \
-   to target an explicit allowed directory. Paths resolve automatically — never \
+   cmd='scripts/dune-local.sh build', executable='git' argv=['status','--short'], \
+   pipeline=[{executable='git',...}, {executable='head',...}]. Bad: cmd='cd x && \
+   dune build', cmd='echo hi > out.txt'. Runs in the keeper sandbox by default; use \
+   cwd to target an explicit allowed directory. Paths resolve automatically — never \
    include host storage prefixes such as '.masc/playground/your-name/' in cwd. Use \
    'repos/X' instead. Sandbox root is NOT a git repository: git/gh calls require \
    cwd='repos/<REPO_NAME>' (or the worktree path under it). 'not a git repository' \
    or 'path_outside_sandbox' from the sandbox root means you forgot the cwd. For \
-   read-only ops use keeper_shell, for file edits use keeper_fs_edit. Set \
+   read-only search/listing use keeper_shell or Grep when visible; for file edits use \
+   keeper_fs_edit. Set \
    run_in_background=true for long-running tasks (returns background_task_id; poll \
    with keeper_bash_output, terminate with keeper_bash_kill)."
 ;;
@@ -197,15 +199,16 @@ let typed_v1_description =
   "Execute one command through the keeper_bash safety gates via typed argv. Use \
    executable/argv for one process, or pipeline/stages for explicit Shell IR \
    pipelines. The legacy 'cmd' string field is no longer accepted — shell \
-   metacharacters in argv are data, not syntax. Good: executable='rg' \
-   argv=['pattern','lib/'], pipeline=[{executable='rg',...}, \
+   metacharacters in argv are data, not syntax. Good: executable='git' \
+   argv=['status','--short'], pipeline=[{executable='git',...}, \
    {executable='head',...}]. Runs in the keeper sandbox by default; use cwd to \
    target an explicit allowed directory. Paths resolve automatically — never \
    include host storage prefixes such as '.masc/playground/your-name/' in cwd. Use \
    'repos/X' instead. Sandbox root is NOT a git repository: git/gh calls require \
    cwd='repos/<REPO_NAME>' (or the worktree path under it). 'not a git repository' \
    or 'path_outside_sandbox' from the sandbox root means you forgot the cwd. For \
-   read-only ops use keeper_shell, for file edits use keeper_fs_edit. Set \
+   read-only search/listing use keeper_shell or Grep when visible; for file edits use \
+   keeper_fs_edit. Set \
    run_in_background=true for long-running tasks (returns background_task_id; poll \
    with keeper_bash_output, terminate with keeper_bash_kill)."
 ;;

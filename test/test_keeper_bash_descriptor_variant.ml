@@ -124,6 +124,36 @@ let test_description_changes_with_variant () =
     (Astring.String.is_infix ~affix:"Good: cmd=" typed.description)
 ;;
 
+let test_descriptions_do_not_advertise_raw_search_scans () =
+  let tools_for variant =
+    Variant.coding_keeper_bridge_tools_for_variant ~variant
+    |> find_bash_schema
+  in
+  let legacy = tools_for Variant.Legacy_v0 in
+  let typed = tools_for Variant.Typed_v1 in
+  let combined =
+    String.concat
+      "\n"
+      [
+        legacy.description;
+        typed.description;
+        pp_json legacy.input_schema;
+        pp_json typed.input_schema;
+      ]
+  in
+  List.iter
+    (fun forbidden ->
+      Alcotest.(check bool)
+        ("descriptor omits " ^ forbidden)
+        false
+        (Astring.String.is_infix ~affix:forbidden combined))
+    [ "rg pattern lib/"; "executable='rg'"; "{executable='rg'" ];
+  Alcotest.(check bool)
+    "descriptor points read-only search to structured tools"
+    true
+    (Astring.String.is_infix ~affix:"keeper_shell or Grep" combined)
+;;
+
 let test_sibling_schemas_invariant_across_variants () =
   let legacy_tools =
     Variant.coding_keeper_bridge_tools_for_variant
@@ -160,6 +190,8 @@ let () =
         ; Alcotest.test_case "typed_v1 drops cmd" `Quick test_typed_v1_drops_cmd
         ; Alcotest.test_case "description changes with variant" `Quick
             test_description_changes_with_variant
+        ; Alcotest.test_case "descriptions avoid raw search scans" `Quick
+            test_descriptions_do_not_advertise_raw_search_scans
         ; Alcotest.test_case "sibling schemas invariant" `Quick
             test_sibling_schemas_invariant_across_variants
         ] )

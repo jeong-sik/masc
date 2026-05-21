@@ -47,7 +47,7 @@ Public tool examples:
   BAD:  Bash command="cd repos && ls"                   (chaining blocked)
   GOOD: Bash command="ls repos"
   BAD:  Bash command="find /home/keeper -name \"board\" 2>/dev/null" (quoted pattern + redirect blocked)
-  GOOD: Bash command="find . -maxdepth 3 -name board"
+  GOOD: keeper_shell op=find path=. pattern=board limit=50 when visible; otherwise Bash command="find . -maxdepth 3 -name board" cwd=repos/REPO
   BAD:  Bash command="find repos/masc-mcp/lib -name nickname*" (glob expansion blocked)
   GOOD: Grep pattern="nickname" path=repos/masc-mcp/lib glob="*.ml"
   BAD:  Bash command="rg -n \"foo\\|bar\" repos/masc-mcp/lib 2>/dev/null | head -20"
@@ -84,7 +84,7 @@ Public tool examples:
 File operations:
 - Read a specific file: Read (preferred for single files) when visible.
 - Search file contents: Grep with pattern=regex, path=dir/path (optional: type=ml, glob="*.ts") when visible.
-- Find files by name: prefer Grep for content, or one scoped Bash `find` without pipes/redirects when Bash is visible.
+- Find files by name: prefer `keeper_shell op=find` when visible; otherwise use Grep for content search, and use one scoped Bash `find` only as a last fallback with cwd set to the repo/worktree.
 - List directory contents: one scoped Bash `ls path` when Bash is visible.
 - Git history: Bash command="git log --oneline -10" with cwd inside the target repo/worktree.
 - Git status: Bash command="git status --short" with cwd inside the target repo/worktree.

@@ -256,3 +256,20 @@ let run_argv_with_stdin_and_status_split ~actor ~raw_source ~summary
         "",
         blocked_output ~summary ~raw_source ~reason ))
     ()
+
+let run_argv_pipeline_with_status_split ~actor ~raw_source ~summary
+    ?(timeout_sec = 60.0) stages =
+  let rec check_stages = function
+    | [] -> Ok ()
+    | ({ Process_eio.argv; env; cwd } : Process_eio.pipeline_stage) :: rest ->
+        with_verdict ~actor ~raw_source ~summary ~argv ?env ?cwd
+          ~on_allow:(fun () -> check_stages rest)
+          ~on_blocked:(fun reason -> Error reason)
+          ()
+  in
+  match check_stages stages with
+  | Ok () -> Process_eio.run_argv_pipeline_with_status_split ~timeout_sec stages
+  | Error reason ->
+      ( Unix.WEXITED 126,
+        "",
+        blocked_output ~summary ~raw_source ~reason )

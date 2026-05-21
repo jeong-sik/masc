@@ -92,6 +92,24 @@ let () =
   assert (stdout = "HELLO WORLD");
   assert (result.status = Unix.WEXITED 0)
 
+(* --- host pipeline streams between stages --- *)
+
+let () =
+  with_eio @@ fun () ->
+  let open Masc_exec.Shell_ir in
+  let yes_bin = Masc_exec.Bin.of_string "yes" |> Result.get_ok in
+  let head_bin = Masc_exec.Bin.of_string "head" |> Result.get_ok in
+  let host_sandbox = Masc_exec.Sandbox_target.host () in
+  let stages =
+    [
+      Simple { bin = yes_bin; args = []; env = []; cwd = None; redirects = []; sandbox = host_sandbox };
+      Simple { bin = head_bin; args = [Lit "-n"; Lit "1"]; env = []; cwd = None; redirects = []; sandbox = host_sandbox };
+    ]
+  in
+  let result = Masc_exec.Exec_dispatch.dispatch ~timeout_sec:2.0 (Pipeline stages) in
+  assert (String.trim result.stdout = "y");
+  assert (result.status <> Unix.WEXITED 124)
+
 (* --- dispatch pipeline exit code: last nonzero wins --- *)
 
 let () =

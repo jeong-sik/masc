@@ -82,3 +82,13 @@ val run_argv_with_stdin_and_status_split :
   string list ->
   (Unix.process_status * string * string)
 (** Typed gate in front of [Process_eio.run_argv_with_stdin_and_status_split]. *)
+
+val run_argv_pipeline_with_status_split :
+  actor:Agent_id.t ->
+  raw_source:string ->
+  summary:string ->
+  ?timeout_sec:float ->
+  Process_eio.pipeline_stage list ->
+  (Unix.process_status * string * string)
+(** Typed gate in front of [Process_eio.run_argv_pipeline_with_status_split].
+    Every stage is checked before any process is spawned. *)

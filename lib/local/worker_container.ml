@@ -330,6 +330,14 @@ let build_oas_mcp_tools ~sw ~auth_token ~session_id ~worker_name =
                }))
     listed_schemas
 
+let local_worker_failure_class_of_error_kind = function
+  | Worker_dev_tools.Path_blocked -> Tool_result.Policy_rejection
+  | Worker_dev_tools.Command_blocked -> Tool_result.Workflow_rejection
+  | Worker_dev_tools.File_read_error
+  | Worker_dev_tools.File_write_error
+  | Worker_dev_tools.Shell_error ->
+    Tool_result.Runtime_failure
+
 let build_local_shell_tools ~room_config ~worker_name ~workdir =
   match Process_eio.get_proc_mgr (), Process_eio.get_clock () with
   | Ok proc_mgr, Ok clock -> (
@@ -350,9 +358,12 @@ let build_local_shell_tools ~room_config ~worker_name ~workdir =
                     |> Telemetry_eio.error_kind_of_string)
                   error_kind
               in
+              let failure_class =
+                Option.map local_worker_failure_class_of_error_kind error_kind
+              in
               Telemetry_eio.track_tool_called ~fs config ~tool_name ~success
                 ~duration_ms ~agent_id:worker_name
-                ?error_kind:kind ?error_message ()
+                ?failure_class ?error_kind:kind ?error_message ()
             with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
               Log.LocalWorker.warn "telemetry error for %s/%s: %s"
                 worker_name tool_name (Printexc.to_string exn))

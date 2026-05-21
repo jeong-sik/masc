@@ -18,7 +18,7 @@ module type S = sig
     -> ?workdir:string
     -> ?stdin:string
     -> container:Keeper_container_name.t
-    -> cmd:string
+    -> command_argv:string list
     -> unit
     -> (Keeper_docker_response.exec_result, sandbox_error) result
 

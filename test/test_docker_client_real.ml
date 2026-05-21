@@ -92,14 +92,19 @@ let test_run_returns_typed_result () =
 ;;
 
 (* Phase 3b-iv.2.2 — exec is no longer a placeholder. It spawns
-   [docker exec <container> sh -lc <cmd>]. The test environment may
+   [docker exec <container> <command_argv>]. The test environment may
    or may not have a docker daemon, so we only assert the *typed*
    contract: either [Ok exec_result] (daemon present, command ran
    inside container even if it failed) or [Error Daemon_unreachable]
    (no daemon / CLI missing). Other [sandbox_error] variants are
    semantically out of scope for [exec] and must NOT surface. *)
 let test_exec_returns_typed_result () =
-  match Keeper_docker_client_real.exec ~container:(sample_container ()) ~cmd:"echo hi" () with
+  match
+    Keeper_docker_client_real.exec
+      ~container:(sample_container ())
+      ~command_argv:[ "echo"; "hi" ]
+      ()
+  with
   | Ok _ -> () (* daemon present *)
   | Error Keeper_docker_client.Daemon_unreachable -> () (* daemon / CLI missing *)
   | Error Keeper_docker_client.Cleanup_failed
@@ -120,8 +125,8 @@ let test_exec_argv_plain () =
   check
     (list string)
     "no user, no workdir"
-    [ "docker"; "exec"; Keeper_container_name.to_string c; "sh"; "-lc"; "ls -la" ]
-    (Keeper_docker_client_real.exec_argv ~container:c ~cmd:"ls -la" ())
+    [ "docker"; "exec"; Keeper_container_name.to_string c; "ls"; "-la" ]
+    (Keeper_docker_client_real.exec_argv ~container:c ~command_argv:[ "ls"; "-la" ] ())
 ;;
 
 let test_exec_argv_user_only () =
@@ -134,11 +139,13 @@ let test_exec_argv_user_only () =
     ; "--user"
     ; "1000:1000"
     ; Keeper_container_name.to_string c
-    ; "sh"
-    ; "-lc"
     ; "id"
     ]
-    (Keeper_docker_client_real.exec_argv ~user:(1000, 1000) ~container:c ~cmd:"id" ())
+    (Keeper_docker_client_real.exec_argv
+       ~user:(1000, 1000)
+       ~container:c
+       ~command_argv:[ "id" ]
+       ())
 ;;
 
 let test_exec_argv_workdir_only () =
@@ -146,8 +153,12 @@ let test_exec_argv_workdir_only () =
   check
     (list string)
     "workdir only → -w <dir>"
-    [ "docker"; "exec"; "-w"; "/work"; Keeper_container_name.to_string c; "sh"; "-lc"; "pwd" ]
-    (Keeper_docker_client_real.exec_argv ~workdir:"/work" ~container:c ~cmd:"pwd" ())
+    [ "docker"; "exec"; "-w"; "/work"; Keeper_container_name.to_string c; "pwd" ]
+    (Keeper_docker_client_real.exec_argv
+       ~workdir:"/work"
+       ~container:c
+       ~command_argv:[ "pwd" ]
+       ())
 ;;
 
 let test_exec_argv_user_and_workdir () =
@@ -162,15 +173,13 @@ let test_exec_argv_user_and_workdir () =
     ; "-w"
     ; "/work"
     ; Keeper_container_name.to_string c
-    ; "sh"
-    ; "-lc"
     ; "whoami"
     ]
     (Keeper_docker_client_real.exec_argv
        ~user:(1000, 1000)
        ~workdir:"/work"
        ~container:c
-       ~cmd:"whoami"
+       ~command_argv:[ "whoami" ]
        ())
 ;;
 
@@ -186,23 +195,29 @@ let test_exec_argv_stdin_only_emits_dash_i () =
     ; "exec"
     ; "-i"
     ; Keeper_container_name.to_string c
-    ; "sh"
-    ; "-lc"
-    ; "cat > /tmp/x"
+    ; "cat"
     ]
-    (Keeper_docker_client_real.exec_argv ~stdin:true ~container:c ~cmd:"cat > /tmp/x" ())
+    (Keeper_docker_client_real.exec_argv
+       ~stdin:true
+       ~container:c
+       ~command_argv:[ "cat" ]
+       ())
 ;;
 
 let test_exec_argv_stdin_false_omits_dash_i () =
   let c = sample_container () in
   let argv =
-    Keeper_docker_client_real.exec_argv ~stdin:false ~container:c ~cmd:"echo hi" ()
+    Keeper_docker_client_real.exec_argv
+      ~stdin:false
+      ~container:c
+      ~command_argv:[ "echo"; "hi" ]
+      ()
   in
   check bool "stdin=false ⇒ no -i" false (List.mem "-i" argv);
   check
     (list string)
     "stdin=false matches the plain shape"
-    [ "docker"; "exec"; Keeper_container_name.to_string c; "sh"; "-lc"; "echo hi" ]
+    [ "docker"; "exec"; Keeper_container_name.to_string c; "echo"; "hi" ]
     argv
 ;;
 
@@ -219,16 +234,15 @@ let test_exec_argv_user_workdir_stdin_full_order () =
     ; "/work"
     ; "-i"
     ; Keeper_container_name.to_string c
-    ; "sh"
-    ; "-lc"
-    ; "tee /tmp/x"
+    ; "tee"
+    ; "/tmp/x"
     ]
     (Keeper_docker_client_real.exec_argv
        ~user:(1000, 1000)
        ~workdir:"/work"
        ~stdin:true
        ~container:c
-       ~cmd:"tee /tmp/x"
+       ~command_argv:[ "tee"; "/tmp/x" ]
        ())
 ;;
 
@@ -236,7 +250,9 @@ let test_exec_argv_stdin_default_is_false () =
   (* Omitting [?stdin] altogether is the same as [~stdin:false]: the
      default is "no -i", because most exec calls don't pipe stdin. *)
   let c = sample_container () in
-  let argv = Keeper_docker_client_real.exec_argv ~container:c ~cmd:"echo hi" () in
+  let argv =
+    Keeper_docker_client_real.exec_argv ~container:c ~command_argv:[ "echo"; "hi" ] ()
+  in
   check bool "no ?stdin ⇒ no -i" false (List.mem "-i" argv)
 ;;
 

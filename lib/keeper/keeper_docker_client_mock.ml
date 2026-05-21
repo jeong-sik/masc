@@ -13,7 +13,7 @@ let run_queue
   = Queue.create ()
 
 let exec_queue
-  : ((Keeper_container_name.t * string)
+  : ((Keeper_container_name.t * string list)
      * (Keeper_docker_response.exec_result, Keeper_docker_client.sandbox_error) result)
       Queue.t
   = Queue.create ()
@@ -52,8 +52,8 @@ let run_detached_queue
 
 let inject_run plan response = Queue.add (plan, response) run_queue
 
-let inject_exec ~container ~cmd response =
-  Queue.add ((container, cmd), response) exec_queue
+let inject_exec ~container ~command_argv response =
+  Queue.add ((container, command_argv), response) exec_queue
 ;;
 
 let inject_ps_query ~labels response =
@@ -86,18 +86,18 @@ let run plan =
     response
   | _ -> Error Keeper_docker_client.Daemon_unreachable
 
-let exec ?user:_ ?workdir:_ ?stdin:_ ~container ~cmd () =
+let exec ?user:_ ?workdir:_ ?stdin:_ ~container ~command_argv () =
   (* [?user] / [?workdir] / [?stdin] shape the real [docker exec] argv
      (see {!Keeper_docker_client_real.exec_argv}) but do not affect the mocked
      response, so they are accepted and ignored for matching here —
-     the injection key stays [(container, cmd)]. When a caller (Phase
+     the injection key stays [(container, command_argv)]. When a caller (Phase
      4.1 [keeper_turn_sandbox_runtime] cutover) needs to assert the
      user/workdir/stdin threaded through, widen the injection key
      then; until then a narrower key keeps test setup minimal. *)
   match Queue.peek_opt exec_queue with
-  | Some ((expected_c, expected_cmd), response)
+  | Some ((expected_c, expected_argv), response)
     when Keeper_container_name.equal container expected_c
-         && String.equal cmd expected_cmd ->
+         && List.equal String.equal command_argv expected_argv ->
     (* fire-and-forget: matched FIFO head is intentionally consumed. *)
     ignore (Queue.pop exec_queue);
     response

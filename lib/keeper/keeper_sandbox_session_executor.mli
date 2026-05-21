@@ -47,7 +47,7 @@ module Make : functor (D : Keeper_docker_client.S) -> sig
     :  Keeper_sandbox_session_plan.t
     -> (t, Keeper_docker_client.sandbox_error) result
 
-  (** [exec t ~cmd] runs [cmd] inside the started container via
+  (** [exec t ~command_argv] runs [command_argv] inside the started container via
       [D.exec], threading the originating plan's [user] / [workdir]
       through as [D.exec]'s [?user] / [?workdir] (Phase 3e (b),
       #14947) so the command runs as the same uid:gid / cwd the
@@ -57,7 +57,7 @@ module Make : functor (D : Keeper_docker_client.S) -> sig
       [Error Keeper_docker_client.Daemon_unreachable]. *)
   val exec
     :  t
-    -> cmd:string
+    -> command_argv:string list
     -> (Keeper_docker_response.exec_result, Keeper_docker_client.sandbox_error) result
 
   (** [cleanup t] removes the container via [D.rm]. Calling it on an

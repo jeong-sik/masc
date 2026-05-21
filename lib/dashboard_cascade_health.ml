@@ -141,10 +141,3 @@ let provider_entry_to_json
      ]
      @ perf_fields)
 ;;
-
-(** Back-compat alias: older call sites may still reference the previous
-    serializer name.  Keeping it as a thin wrapper keeps the diff in
-    this PR focused on the health_json merge. *)
-let provider_info_to_json (info : Health.provider_info) : Yojson.Safe.t =
-  provider_entry_to_json ~declared:false info
-;;

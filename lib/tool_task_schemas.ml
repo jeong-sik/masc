@@ -69,7 +69,6 @@ Example: masc_add_task({title: 'Fix login bug', goal_id: 'g-123', priority: 1, d
               ("properties", `Assoc [
                 ("operation_id", `Assoc [ ("type", `String "string") ]);
                 ("session_id", `Assoc [ ("type", `String "string") ]);
-                ("autoresearch_loop_id", `Assoc [ ("type", `String "string") ]);
               ]);
             ]);
           ]);

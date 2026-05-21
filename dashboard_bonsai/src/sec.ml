@@ -4,8 +4,8 @@
     옮긴 것. 브라스 타이틀(uppercase Cinzel) + optional 이탈릭 서브카피
     + flex-grow hairline + optional 우측 메타(JetBrains Mono).
 
-    재사용: keepers_view / overview_view / goals_view / archive_runs_view
-    등 탭 내부 섹션 구분에 사용. 기존 탭은 각자 `section_h` 직접 CSS를
+	    재사용: keepers_view / overview_view / goals_view
+	    등 탭 내부 섹션 구분에 사용. 기존 탭은 각자 `section_h` 직접 CSS를
     갖고 있으나, 점진적으로 이 primitive로 수렴시킬 예정. *)
 
 open! Core

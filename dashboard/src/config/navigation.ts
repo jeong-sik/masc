@@ -39,7 +39,6 @@ type SurfaceSectionId =
   | 'verification'   // CDAL follow-up (#7531): Mission detail verification table
   // lab
   | 'tools'
-  | 'autoresearch'
   | 'harness'
   // code (Stage 5 IDE plane — shell only in PR-1, 4-pane content in PR-2+)
   | 'ide-shell'
@@ -240,8 +239,8 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       description: 'Keeper cognition drill-down.',
       params: { section: 'cognition' },
       hidden: true,
-      // Hidden 2026-05-20: 7-view FilterChips (overview, keeper, token-stats,
-      // decisions, memory, episodes, autoresearch) and KeeperCognitionInspector
+      // Hidden 2026-05-20: FilterChips (overview, keeper, token-stats,
+      // decisions, memory, episodes) and KeeperCognitionInspector
       // deep links remain functional, but the sidebar entry is intentionally
       // suppressed pending the cognition→keeper-detail Cognition section
       // absorption (tracked in the Monitor IA review). The earlier 2026-05-17
@@ -308,12 +307,6 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       label: 'Tools',
       description: 'Registered MCP tools across servers.',
       params: { section: 'tools' },
-    },
-    {
-      id: 'autoresearch',
-      label: 'Autoresearch',
-      description: 'Autonomous experiment loop state and history.',
-      params: { section: 'autoresearch' },
     },
     {
       id: 'harness',

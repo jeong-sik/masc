@@ -173,7 +173,6 @@ let test_builder_sites_wire_approval () =
     regex matches any argument value so callers may install
     auto_approve, reject_by_default, or a governance callback. *)
 let run_named_sites = [
-  "lib/autoresearch_codegen.ml";
   "lib/auto_responder.ml";
   "lib/tool_deep_review.ml";
   "lib/anti_rationalization.ml";

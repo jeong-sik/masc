@@ -1,6 +1,5 @@
 import { html } from 'htm/preact'
 import { navigate, route } from '../router'
-import { Autoresearch } from './autoresearch'
 import { FilterChips } from './common/filter-chips'
 import { KeeperDecisionsStream } from './keeper-decisions-stream'
 import { KeeperCognitionInspector } from './keeper-cognition-inspector'
@@ -15,7 +14,6 @@ type CognitionView =
   | 'decisions'
   | 'memory'
   | 'episodes'
-  | 'autoresearch'
 
 const COGNITION_VIEWS: CognitionView[] = [
   'overview',
@@ -24,7 +22,6 @@ const COGNITION_VIEWS: CognitionView[] = [
   'decisions',
   'memory',
   'episodes',
-  'autoresearch',
 ]
 
 const VIEW_CHIPS: Array<{ key: CognitionView; label: string; title?: string }> = [
@@ -34,7 +31,6 @@ const VIEW_CHIPS: Array<{ key: CognitionView; label: string; title?: string }> =
   { key: 'decisions', label: 'Decisions' },
   { key: 'memory', label: 'Memory' },
   { key: 'episodes', label: 'Episodes' },
-  { key: 'autoresearch', label: 'Autoresearch' },
 ]
 
 function currentView(): CognitionView {
@@ -85,11 +81,6 @@ const OVERVIEW_LINKS: Array<{
     label: 'Episodes',
     detail: 'Episode-focused memory view',
     params: { section: 'cognition', view: 'episodes' },
-  },
-  {
-    label: 'Autoresearch',
-    detail: 'Research loop diagnostics',
-    params: { section: 'cognition', view: 'autoresearch' },
   },
 ]
 
@@ -142,8 +133,6 @@ export function CognitionPlane() {
         <${MemorySubsystems} focus=${route.value.params.focus} />
       ` : view === 'episodes' ? html`
         <${MemorySubsystems} focus="episodes" />
-      ` : view === 'autoresearch' ? html`
-        <${Autoresearch} />
       ` : html`
         <${CognitionOverview} />
       `}

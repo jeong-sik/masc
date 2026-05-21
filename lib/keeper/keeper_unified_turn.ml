@@ -46,7 +46,7 @@ let run_keeper_cycle
 
      Action mapping (TLA+ -> OCaml):
        SubmitTask        external producers (operator, supervisor,
-                         autoresearch, board) populate
+                         board and supervisor producers populate
                          [observation.pending_*] before this function
                          is called.
        AssignTask        the channel decision below —

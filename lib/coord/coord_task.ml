@@ -1060,7 +1060,6 @@ let link_task_execution_artifacts_r
       ~task_id
       ?session_id
       ?operation_id
-      ?autoresearch_loop_id
       ()
   : string Masc_domain.masc_result
   =
@@ -1091,7 +1090,6 @@ let link_task_execution_artifacts_r
                      existing_contract.links
                      ?session_id
                      ?operation_id
-                     ?autoresearch_loop_id
                      ()
                }
                |> normalize_task_contract
@@ -1111,25 +1109,21 @@ let link_task_execution_artifacts_r
                }
              in
              write_backlog config new_backlog;
+             let execution_link_fields =
+               (match trim_opt session_id with
+                | Some session_id -> [ "session_id", `String session_id ]
+                | None -> [])
+               @
+               match trim_opt operation_id with
+               | Some operation_id -> [ "operation_id", `String operation_id ]
+               | None -> []
+             in
              emit_task_activity
                config
                ~agent_name:"system"
                ~task_id
                ~kind:(Event_kind.Task.to_string Event_kind.Task.Linked)
-               ~payload:
-                 (`Assoc
-                     ([ "task_id", `String task_id ]
-                      @ (match trim_opt session_id with
-                         | Some session_id -> [ "session_id", `String session_id ]
-                         | None -> [])
-                      @ (match trim_opt operation_id with
-                         | Some operation_id -> [ "operation_id", `String operation_id ]
-                         | None -> [])
-                      @
-                      match trim_opt autoresearch_loop_id with
-                      | Some autoresearch_loop_id ->
-                        [ "autoresearch_loop_id", `String autoresearch_loop_id ]
-                      | None -> []));
+               ~payload:(`Assoc ([ "task_id", `String task_id ] @ execution_link_fields));
              log_event
                config
                (`Assoc
@@ -1139,17 +1133,7 @@ let link_task_execution_artifacts_r
                     ; "task", `String task_id
                     ; "ts", `String (now_iso ())
                     ]
-                    @ (match trim_opt session_id with
-                       | Some session_id -> [ "session_id", `String session_id ]
-                       | None -> [])
-                    @ (match trim_opt operation_id with
-                       | Some operation_id -> [ "operation_id", `String operation_id ]
-                       | None -> [])
-                    @
-                    match trim_opt autoresearch_loop_id with
-                    | Some autoresearch_loop_id ->
-                      [ "autoresearch_loop_id", `String autoresearch_loop_id ]
-                    | None -> []));
+                    @ execution_link_fields));
              Ok (Printf.sprintf "Linked execution artifacts for %s" task_id))
       with
       | Eio.Cancel.Cancelled _ as e -> raise e

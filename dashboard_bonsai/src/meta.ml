@@ -1,11 +1,11 @@
 (** Meta strip primitive — MASC Design System 키–값 메타 strip.
 
-    탭 페이지에서 반복되는 `<key> <value>` 쌍 나열. 3 탭(Dead_keepers,
-    Goals, Archive_runs)이 거의 동일한 `.meta_strip + .meta_item + .meta_k
-    + .meta_v{,_blood,_ok,_brass}` 블록을 각자 정의하던 것을 하나로 통합.
+	    탭 페이지에서 반복되는 `<key> <value>` 쌍 나열. Dead_keepers와
+	    Goals가 거의 동일한 `.meta_strip + .meta_item + .meta_k
+	    + .meta_v{,_blood,_ok,_brass}` 블록을 각자 정의하던 것을 하나로 통합.
 
     `cell`은 value_color로 4색(기본/ok/brass/blood) 중 하나를 선택한다.
-    theme 토큰 변경 시 이 한 파일만 건드리면 3 탭이 함께 반영된다. *)
+	    theme 토큰 변경 시 이 한 파일만 건드리면 두 탭이 함께 반영된다. *)
 
 open! Core
 open! Bonsai_web

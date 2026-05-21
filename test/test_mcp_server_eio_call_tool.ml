@@ -82,7 +82,6 @@ let contract_requiring_tools required_tools : Masc_domain.task_contract =
       {
         operation_id = None;
         session_id = None;
-        autoresearch_loop_id = None;
       };
   }
 

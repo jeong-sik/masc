@@ -19,11 +19,6 @@ async function refreshObservatoryPanel(): Promise<void> {
   refreshObservatorySurface()
 }
 
-async function refreshAutoresearchLabSurface(): Promise<void> {
-  const { refreshAutoresearchSurface } = await import('./components/autoresearch')
-  await refreshAutoresearchSurface()
-}
-
 async function refreshHarnessLabSurface(): Promise<void> {
   const { refreshHarnessSurface } = await import('./components/harness-health')
   await refreshHarnessSurface()
@@ -69,7 +64,6 @@ type RefreshTask =
   | 'gitGraph'
   | 'board'
   | 'goals'
-  | 'autoresearch'
   | 'harness'
   | 'toolQuality'
   | 'inspector'
@@ -85,8 +79,8 @@ type RefreshTask =
 //            transport-health / feature-health) share an identical light
 //            fallback plan. Their mounted panels own telemetry polling, so
 //            route visits only need to refresh namespace/mission context.
-//   Outliers — `journey` (execution only) and `cognition` (4-source plan
-//            with autoresearch) keep dedicated branches above.
+//   Outliers — `journey` (execution only) and `cognition` keep dedicated
+//            branches above.
 const HIDDEN_DIAGNOSTIC_FALLBACK_PLAN: readonly RefreshTask[] = ['namespaceTruth', 'missionSnapshot']
 
 export function refreshPlanForRoute(routeState: Pick<RouteState, 'tab' | 'params'>): RefreshTask[] {
@@ -107,7 +101,7 @@ export function refreshPlanForRoute(routeState: Pick<RouteState, 'tab' | 'params
         return ['namespaceTruth', 'execution', 'missionSnapshot']
       }
       if (routeState.params.section === 'cognition') {
-        return ['namespaceTruth', 'execution', 'missionSnapshot', 'autoresearch']
+        return ['namespaceTruth', 'execution', 'missionSnapshot']
       }
       if (routeState.params.section === 'runtime' && routeState.params.view === 'inspector') {
         return ['cascadeInspector']
@@ -144,9 +138,6 @@ export function refreshPlanForRoute(routeState: Pick<RouteState, 'tab' | 'params
       }
       return []
     case 'lab':
-      if (routeState.params.section === 'autoresearch') {
-        return ['autoresearch']
-      }
       if (routeState.params.section === 'harness') {
         return ['harness']
       }
@@ -173,7 +164,6 @@ const REFRESHERS: Record<RefreshTask, (routeState: Pick<RouteState, 'tab' | 'par
   gitGraph: () => { void refreshGitGraphSurface() },
   board: () => { void refreshBoard() },
   goals: () => { void refreshGoals() },
-  autoresearch: () => { void refreshAutoresearchLabSurface() },
   harness: () => { void refreshHarnessLabSurface() },
   toolQuality: () => { void refreshToolQualityLabSurface() },
   inspector: () => {

@@ -83,7 +83,7 @@ Source: `ROADMAP.md` Short-term + `ARCHITECTURE-COMPLEXITY-ANALYSIS.md` Phase 2-
 | Item | Module | Est. lines | Status | Priority |
 |------|--------|-----------|--------|----------|
 | TRPG + protocol_game_view -> `masc-games` | tool_trpg, tool_protocol_game_view | 3,600+ | Not started | High |
-| risc + autoresearch + experiment -> `masc-experiments` | 3 tool modules | 2,700+ | Not started | High |
+| risc + experiment -> `masc-experiments` | 2 tool modules | TBD | Not started | High |
 | dune optional library separation | dune, lib/ | -- | Not started | Medium |
 | TRPG dm-keeper -> on-demand | keeper_autonomy | -- | Not started | Medium |
 | Test noise cleanup: 32 duplicate files | test/ | ~12K lines | Audit done | Medium |
@@ -180,7 +180,7 @@ lib/room/        lib/time_compat/ lib/types/
 | 새 패키지 | 포함 모듈 | Lines | 근거 |
 |-----------|----------|-------|------|
 | `masc-games` | tool_trpg, tool_protocol_game_view, trpg_*.ml | 3,600+ | Coordination과 완전 무관 |
-| `masc-experiments` | tool_risc, tool_autoresearch, tool_experiment | 2,700+ | 실험 잔재, optional로 전환 |
+| `masc-experiments` | tool_risc, tool_experiment | TBD | 실험 잔재, optional로 전환 |
 
 ### 구조 분할 대상
 

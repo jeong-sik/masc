@@ -21,7 +21,6 @@ type logical_use = Cascade_ref.logical_use =
   | Operator_judge
   | Cross_verifier
   | Verifier
-  | Autoresearch
   | Adversarial_reviewer
   | Auto_responder
   | Routing

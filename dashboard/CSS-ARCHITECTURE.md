@@ -298,10 +298,10 @@ on the design canvas context. As a result, all `components.html#xxx`
 anchor links from `preview/index.html` work correctly — they focus
 the first artboard slot of the matched section.
 
-Audited 21 anchor IDs (`ide-backbone, ide-tree, ide-edit, ide-pr,
+Audited 20 anchor IDs (`ide-backbone, ide-tree, ide-edit, ide-pr,
 ide-graph, ide-term, goal-zone, task-zone, account, board-zone, msgs,
 composer-v2, cascade, audit, safe-auto, cost, heur, keeper-v2,
-decisions, episodes, autoresearch`) — all present in cb-*.jsx and
+decisions, episodes`) — all present in cb-*.jsx and
 functional via HashBridge. **Do not assume "SPA = anchors broken"
 without checking HashBridge first.**
 

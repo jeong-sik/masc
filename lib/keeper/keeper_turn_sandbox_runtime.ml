@@ -443,7 +443,7 @@ let run_bash_with_status (t : t) ~(cwd : string) ~(cmd : string) ~(timeout_sec :
       cmd
   in
   let container_cwd = container_cwd_of_host t ~host_cwd:cwd in
-  let argv ~container_name =
+  let docker_exec_argv ~container_name =
     Keeper_sandbox_runtime.docker_command_argv ()
     @ [ "exec"; "--user"; Printf.sprintf "%d:%d" t.uid t.gid; "-w"; container_cwd ]
     @ Keeper_sandbox_runtime.docker_sandbox_env_args
@@ -454,7 +454,7 @@ let run_bash_with_status (t : t) ~(cwd : string) ~(cmd : string) ~(timeout_sec :
   match ensure_started t ~timeout_sec with
   | Error _ as err -> err
   | Ok container_name ->
-    let argv = argv ~container_name in
+    let argv = docker_exec_argv ~container_name in
     let st, out = run_argv_with_status_split_retry_eintr ~timeout_sec argv in
     if container_missing_error out
     then (
@@ -464,7 +464,7 @@ let run_bash_with_status (t : t) ~(cwd : string) ~(cmd : string) ~(timeout_sec :
         (match ensure_started t ~timeout_sec with
          | Error _ as err -> err
          | Ok container_name ->
-           let argv = argv ~container_name in
+           let argv = docker_exec_argv ~container_name in
            Ok (run_argv_with_status_split_retry_eintr ~timeout_sec argv))
       | _ -> Ok (st, out))
     else Ok (st, out)

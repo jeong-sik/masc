@@ -1,51 +1,51 @@
 {
   "stats": {
-    "total_modules": 1052,
-    "total_edges": 4409,
-    "avg_out_degree": 4.19,
-    "leaf_count": 266,
-    "root_count": 167
+    "total_modules": 1050,
+    "total_edges": 4413,
+    "avg_out_degree": 4.2,
+    "leaf_count": 267,
+    "root_count": 165
   },
   "top_imported": [
     [
       "Prometheus",
-      227
+      230
     ],
     [
       "Keeper_types",
-      217
+      221
     ],
     [
       "Coord",
-      193
+      192
     ],
     [
       "Keeper_metrics",
-      148
+      151
     ],
     [
       "Keeper_registry",
-      80
+      81
     ],
     [
       "Keeper_id",
-      63
+      64
     ],
     [
       "Keeper_state_machine",
-      57
-    ],
-    [
-      "Keeper_cascade_profile",
-      50
-    ],
-    [
-      "Tool_dispatch",
-      48
+      58
     ],
     [
       "Mcp_server",
+      50
+    ],
+    [
+      "Keeper_cascade_profile",
       48
+    ],
+    [
+      "Tool_dispatch",
+      47
     ],
     [
       "Keeper_config",
@@ -53,7 +53,7 @@
     ],
     [
       "Server_auth",
-      40
+      41
     ],
     [
       "Tool_catalog",
@@ -61,7 +61,7 @@
     ],
     [
       "Server_utils",
-      38
+      39
     ],
     [
       "Keeper_exec_context",
@@ -69,7 +69,7 @@
     ],
     [
       "Sse",
-      34
+      33
     ],
     [
       "Keeper_types_profile",
@@ -85,7 +85,7 @@
     ],
     [
       "Cascade_runtime",
-      31
+      29
     ]
   ],
   "top_importers": [
@@ -111,11 +111,11 @@
     ],
     [
       "Mcp_server_eio_execute",
-      44
+      43
     ],
     [
       "Keeper_supervisor",
-      39
+      40
     ],
     [
       "Server_dashboard_http_keeper_api",
@@ -131,11 +131,11 @@
     ],
     [
       "Server_routes_http_routes_dashboard",
-      36
+      35
     ],
     [
       "Keeper_heartbeat_loop",
-      33
+      34
     ],
     [
       "Mcp_server_eio_call_tool",
@@ -143,7 +143,7 @@
     ],
     [
       "Server_h2_gateway",
-      32
+      31
     ],
     [
       "Server_routes_http_runtime",
@@ -162,11 +162,11 @@
       28
     ],
     [
-      "Keeper_tools_oas",
-      26
+      "Server_dashboard_http_core",
+      28
     ],
     [
-      "Server_dashboard_http_core",
+      "Keeper_tools_oas",
       26
     ]
   ],
@@ -190,6 +190,7 @@
       "Cascade_transport_authorization",
       "Cascade_transport_mcp_policy_helpers",
       "Cascade_transport_mcp_tool_classifier",
+      "Cascade_transport_runtime_mcp_policy_of_tool_names",
       "Config",
       "Coord",
       "Dashboard",
@@ -383,7 +384,6 @@
       "Tool_run",
       "Tool_shard",
       "Tool_spec",
-      "Tool_suspend",
       "Tool_task",
       "Tool_telemetry",
       "Tools",
@@ -393,10 +393,6 @@
       "Voice_bridge",
       "Voice_session_manager",
       "Worktree_live_context"
-    ],
-    [
-      "Autoresearch",
-      "Autoresearch_codegen"
     ]
   ],
   "clusters": [
@@ -530,7 +526,7 @@
     },
     {
       "prefix": "cascade_transport",
-      "module_count": 11,
+      "module_count": 12,
       "members": [
         "Cascade_transport",
         "Cascade_transport_auth_bridging",
@@ -542,11 +538,12 @@
         "Cascade_transport_label_resolution",
         "Cascade_transport_mcp_policy_helpers",
         "Cascade_transport_mcp_tool_classifier",
+        "Cascade_transport_runtime_mcp_policy_of_tool_names",
         "Cascade_transport_runtime_policy_provider"
       ],
-      "internal_edges": 10,
+      "internal_edges": 11,
       "external_dep_count": 8,
-      "coupling_ratio": 0.556
+      "coupling_ratio": 0.579
     },
     {
       "prefix": "cascade_config",
@@ -633,24 +630,8 @@
       "coupling_ratio": 0.4
     },
     {
-      "prefix": "keeper_social",
-      "module_count": 7,
-      "members": [
-        "Keeper_social_model",
-        "Keeper_social_model_bdi_speech_v1",
-        "Keeper_social_model_magentic_ledger_fsm",
-        "Keeper_social_model_magentic_ledger_v1",
-        "Keeper_social_model_protocol",
-        "Keeper_social_model_registry",
-        "Keeper_social_model_types"
-      ],
-      "internal_edges": 5,
-      "external_dep_count": 8,
-      "coupling_ratio": 0.385
-    },
-    {
       "prefix": "server_dashboard",
-      "module_count": 42,
+      "module_count": 44,
       "members": [
         "Server_dashboard_cascade_profile_gate",
         "Server_dashboard_compact_receipt_json",
@@ -660,10 +641,12 @@
         "Server_dashboard_http_cache",
         "Server_dashboard_http_core",
         "Server_dashboard_http_core_cache",
+        "Server_dashboard_http_core_digest_refresh",
         "Server_dashboard_http_core_entities",
         "Server_dashboard_http_core_json",
         "Server_dashboard_http_core_meta_cognition",
         "Server_dashboard_http_core_operator",
+        "Server_dashboard_http_core_operator_digest_http",
         "Server_dashboard_http_core_operator_query",
         "Server_dashboard_http_core_runtime",
         "Server_dashboard_http_core_snapshot_refresh",
@@ -695,9 +678,66 @@
         "Server_dashboard_snapshot_select",
         "Server_dashboard_surface"
       ],
-      "internal_edges": 56,
+      "internal_edges": 60,
       "external_dep_count": 96,
-      "coupling_ratio": 0.368
+      "coupling_ratio": 0.385
+    },
+    {
+      "prefix": "keeper_social",
+      "module_count": 7,
+      "members": [
+        "Keeper_social_model",
+        "Keeper_social_model_bdi_speech_v1",
+        "Keeper_social_model_magentic_ledger_fsm",
+        "Keeper_social_model_magentic_ledger_v1",
+        "Keeper_social_model_protocol",
+        "Keeper_social_model_registry",
+        "Keeper_social_model_types"
+      ],
+      "internal_edges": 5,
+      "external_dep_count": 8,
+      "coupling_ratio": 0.385
+    },
+    {
+      "prefix": "keeper_hooks",
+      "module_count": 9,
+      "members": [
+        "Keeper_hooks_oas",
+        "Keeper_hooks_oas_cost_events",
+        "Keeper_hooks_oas_gate_attempt",
+        "Keeper_hooks_oas_idle",
+        "Keeper_hooks_oas_introspection",
+        "Keeper_hooks_oas_output_json",
+        "Keeper_hooks_oas_pr_metrics",
+        "Keeper_hooks_oas_response_metrics",
+        "Keeper_hooks_oas_types"
+      ],
+      "internal_edges": 9,
+      "external_dep_count": 17,
+      "coupling_ratio": 0.346
+    },
+    {
+      "prefix": "keeper_supervisor",
+      "module_count": 14,
+      "members": [
+        "Keeper_supervisor",
+        "Keeper_supervisor_alive_but_stuck",
+        "Keeper_supervisor_cleanup_failure_site",
+        "Keeper_supervisor_cleanup_tombstone",
+        "Keeper_supervisor_liveness_recovery",
+        "Keeper_supervisor_pause_policy",
+        "Keeper_supervisor_reconcile_keepalive",
+        "Keeper_supervisor_restart_noop",
+        "Keeper_supervisor_restore_reconcile_gate",
+        "Keeper_supervisor_resume_reconcile_gate",
+        "Keeper_supervisor_self_preservation",
+        "Keeper_supervisor_startup_helpers",
+        "Keeper_supervisor_supervise_keepalive",
+        "Keeper_supervisor_types"
+      ],
+      "internal_edges": 18,
+      "external_dep_count": 36,
+      "coupling_ratio": 0.333
     },
     {
       "prefix": "dashboard_keeper",
@@ -714,41 +754,6 @@
       "coupling_ratio": 0.333
     },
     {
-      "prefix": "tool_autoresearch",
-      "module_count": 4,
-      "members": [
-        "Tool_autoresearch_broadcast",
-        "Tool_autoresearch_context",
-        "Tool_autoresearch_cycle",
-        "Tool_autoresearch_registry"
-      ],
-      "internal_edges": 3,
-      "external_dep_count": 6,
-      "coupling_ratio": 0.333
-    },
-    {
-      "prefix": "keeper_supervisor",
-      "module_count": 13,
-      "members": [
-        "Keeper_supervisor",
-        "Keeper_supervisor_alive_but_stuck",
-        "Keeper_supervisor_cleanup_failure_site",
-        "Keeper_supervisor_cleanup_tombstone",
-        "Keeper_supervisor_liveness_recovery",
-        "Keeper_supervisor_pause_policy",
-        "Keeper_supervisor_reconcile_keepalive",
-        "Keeper_supervisor_restart_noop",
-        "Keeper_supervisor_restore_reconcile_gate",
-        "Keeper_supervisor_resume_reconcile_gate",
-        "Keeper_supervisor_self_preservation",
-        "Keeper_supervisor_startup_helpers",
-        "Keeper_supervisor_types"
-      ],
-      "internal_edges": 17,
-      "external_dep_count": 36,
-      "coupling_ratio": 0.321
-    },
-    {
       "prefix": "dashboard_cascade",
       "module_count": 10,
       "members": [
@@ -762,23 +767,6 @@
         "Dashboard_cascade_recommendations",
         "Dashboard_cascade_slo",
         "Dashboard_cascade_strategy_trace"
-      ],
-      "internal_edges": 8,
-      "external_dep_count": 17,
-      "coupling_ratio": 0.32
-    },
-    {
-      "prefix": "keeper_hooks",
-      "module_count": 8,
-      "members": [
-        "Keeper_hooks_oas",
-        "Keeper_hooks_oas_cost_events",
-        "Keeper_hooks_oas_gate_attempt",
-        "Keeper_hooks_oas_idle",
-        "Keeper_hooks_oas_output_json",
-        "Keeper_hooks_oas_pr_metrics",
-        "Keeper_hooks_oas_response_metrics",
-        "Keeper_hooks_oas_types"
       ],
       "internal_edges": 8,
       "external_dep_count": 17,
@@ -894,6 +882,25 @@
       "coupling_ratio": 0.267
     },
     {
+      "prefix": "keeper_shell",
+      "module_count": 10,
+      "members": [
+        "Keeper_shell_bash",
+        "Keeper_shell_bash_typed_input",
+        "Keeper_shell_command_semantics",
+        "Keeper_shell_docker",
+        "Keeper_shell_docker_exec_failure",
+        "Keeper_shell_docker_nested_runtime",
+        "Keeper_shell_docker_worktree_gitdir",
+        "Keeper_shell_gh_context",
+        "Keeper_shell_ops",
+        "Keeper_shell_shared"
+      ],
+      "internal_edges": 10,
+      "external_dep_count": 30,
+      "coupling_ratio": 0.25
+    },
+    {
       "prefix": "worker_runtime",
       "module_count": 4,
       "members": [
@@ -978,8 +985,8 @@
         "Server_routes_http_sidecar_paths"
       ],
       "internal_edges": 33,
-      "external_dep_count": 102,
-      "coupling_ratio": 0.244
+      "external_dep_count": 101,
+      "coupling_ratio": 0.246
     },
     {
       "prefix": "keeper_tool",
@@ -1011,6 +1018,28 @@
       "coupling_ratio": 0.241
     },
     {
+      "prefix": "keeper_heartbeat",
+      "module_count": 13,
+      "members": [
+        "Keeper_heartbeat_loop",
+        "Keeper_heartbeat_loop_board_events",
+        "Keeper_heartbeat_loop_dispatch_recurring",
+        "Keeper_heartbeat_loop_in_turn_pulse",
+        "Keeper_heartbeat_loop_observations",
+        "Keeper_heartbeat_loop_presence",
+        "Keeper_heartbeat_loop_scheduling",
+        "Keeper_heartbeat_loop_semaphore_timeout",
+        "Keeper_heartbeat_loop_snapshot_timing",
+        "Keeper_heartbeat_smart",
+        "Keeper_heartbeat_snapshot",
+        "Keeper_heartbeat_stimulus_intake",
+        "Keeper_heartbeat_visibility_gate"
+      ],
+      "internal_edges": 14,
+      "external_dep_count": 44,
+      "coupling_ratio": 0.241
+    },
+    {
       "prefix": "keeper_exec",
       "module_count": 15,
       "members": [
@@ -1033,25 +1062,6 @@
       "internal_edges": 20,
       "external_dep_count": 65,
       "coupling_ratio": 0.235
-    },
-    {
-      "prefix": "keeper_shell",
-      "module_count": 10,
-      "members": [
-        "Keeper_shell_bash",
-        "Keeper_shell_bash_typed_input",
-        "Keeper_shell_command_semantics",
-        "Keeper_shell_docker",
-        "Keeper_shell_docker_exec_failure",
-        "Keeper_shell_docker_nested_runtime",
-        "Keeper_shell_docker_worktree_gitdir",
-        "Keeper_shell_gh_context",
-        "Keeper_shell_ops",
-        "Keeper_shell_shared"
-      ],
-      "internal_edges": 9,
-      "external_dep_count": 30,
-      "coupling_ratio": 0.231
     },
     {
       "prefix": "keeper_unified",
@@ -1118,28 +1128,28 @@
         "Mcp_server_eio_types"
       ],
       "internal_edges": 20,
-      "external_dep_count": 77,
-      "coupling_ratio": 0.206
+      "external_dep_count": 76,
+      "coupling_ratio": 0.208
     },
     {
-      "prefix": "keeper_heartbeat",
+      "prefix": "operator_control",
       "module_count": 11,
       "members": [
-        "Keeper_heartbeat_loop",
-        "Keeper_heartbeat_loop_board_events",
-        "Keeper_heartbeat_loop_in_turn_pulse",
-        "Keeper_heartbeat_loop_observations",
-        "Keeper_heartbeat_loop_presence",
-        "Keeper_heartbeat_loop_scheduling",
-        "Keeper_heartbeat_loop_semaphore_timeout",
-        "Keeper_heartbeat_smart",
-        "Keeper_heartbeat_snapshot",
-        "Keeper_heartbeat_stimulus_intake",
-        "Keeper_heartbeat_visibility_gate"
+        "Operator_control",
+        "Operator_control_action",
+        "Operator_control_context_snapshot",
+        "Operator_control_snapshot",
+        "Operator_control_snapshot_identity_fields",
+        "Operator_control_snapshot_persistent_agents",
+        "Operator_control_snapshot_runtime_status",
+        "Operator_control_snapshot_tool_audit",
+        "Operator_control_snapshot_tool_names",
+        "Operator_control_snapshot_trust",
+        "Operator_control_snapshot_view"
       ],
-      "internal_edges": 11,
-      "external_dep_count": 44,
-      "coupling_ratio": 0.2
+      "internal_edges": 8,
+      "external_dep_count": 31,
+      "coupling_ratio": 0.205
     },
     {
       "prefix": "tool_inline",
@@ -1244,24 +1254,6 @@
       "coupling_ratio": 0.167
     },
     {
-      "prefix": "operator_control",
-      "module_count": 9,
-      "members": [
-        "Operator_control",
-        "Operator_control_action",
-        "Operator_control_context_snapshot",
-        "Operator_control_snapshot",
-        "Operator_control_snapshot_identity_fields",
-        "Operator_control_snapshot_runtime_status",
-        "Operator_control_snapshot_tool_audit",
-        "Operator_control_snapshot_tool_names",
-        "Operator_control_snapshot_trust"
-      ],
-      "internal_edges": 6,
-      "external_dep_count": 31,
-      "coupling_ratio": 0.162
-    },
-    {
       "prefix": "cascade_attempt",
       "module_count": 5,
       "members": [
@@ -1357,6 +1349,25 @@
       "coupling_ratio": 0.125
     },
     {
+      "prefix": "dashboard_http",
+      "module_count": 10,
+      "members": [
+        "Dashboard_http_helpers",
+        "Dashboard_http_keeper",
+        "Dashboard_http_keeper_detail",
+        "Dashboard_http_keeper_feeds",
+        "Dashboard_http_keeper_metrics",
+        "Dashboard_http_keeper_outcomes",
+        "Dashboard_http_keeper_trust",
+        "Dashboard_http_keeper_types",
+        "Dashboard_http_monitoring",
+        "Dashboard_http_tool_quality"
+      ],
+      "internal_edges": 6,
+      "external_dep_count": 60,
+      "coupling_ratio": 0.091
+    },
+    {
       "prefix": "keeper_agent",
       "module_count": 10,
       "members": [
@@ -1376,24 +1387,16 @@
       "coupling_ratio": 0.091
     },
     {
-      "prefix": "dashboard_http",
-      "module_count": 11,
+      "prefix": "server_h2",
+      "module_count": 3,
       "members": [
-        "Dashboard_http_autoresearch",
-        "Dashboard_http_helpers",
-        "Dashboard_http_keeper",
-        "Dashboard_http_keeper_detail",
-        "Dashboard_http_keeper_feeds",
-        "Dashboard_http_keeper_metrics",
-        "Dashboard_http_keeper_outcomes",
-        "Dashboard_http_keeper_trust",
-        "Dashboard_http_keeper_types",
-        "Dashboard_http_monitoring",
-        "Dashboard_http_tool_quality"
+        "Server_h2_gateway",
+        "Server_h2_gateway_helpers",
+        "Server_h2_gateway_routes_extra"
       ],
-      "internal_edges": 6,
-      "external_dep_count": 61,
-      "coupling_ratio": 0.09
+      "internal_edges": 3,
+      "external_dep_count": 35,
+      "coupling_ratio": 0.079
     },
     {
       "prefix": "tool_task",
@@ -1421,18 +1424,6 @@
       ],
       "internal_edges": 1,
       "external_dep_count": 12,
-      "coupling_ratio": 0.077
-    },
-    {
-      "prefix": "server_h2",
-      "module_count": 3,
-      "members": [
-        "Server_h2_gateway",
-        "Server_h2_gateway_helpers",
-        "Server_h2_gateway_routes_extra"
-      ],
-      "internal_edges": 3,
-      "external_dep_count": 36,
       "coupling_ratio": 0.077
     },
     {
@@ -1697,31 +1688,6 @@
       "Masc_oas_bridge",
       "Spawn",
       "Tool_name"
-    ],
-    "Autoresearch": [
-      "Autoresearch_codegen",
-      "Cascade_runtime",
-      "Keeper_cascade_profile"
-    ],
-    "Autoresearch_codegen": [
-      "Agent_sdk_response",
-      "Approval_callbacks",
-      "Autoresearch",
-      "Cascade_inference",
-      "Cascade_runner",
-      "Cascade_runtime",
-      "Keeper_cascade_profile",
-      "Keeper_turn_driver",
-      "Masc_oas_bridge"
-    ],
-    "Autoresearch_knowledge": [
-      "Graphql_client"
-    ],
-    "Autoresearch_lineage": [],
-    "Autoresearch_result_bridge": [
-      "Attribution",
-      "Autoresearch",
-      "Verification"
     ],
     "Backend_mutex_metrics": [
       "Prometheus"
@@ -2015,7 +1981,6 @@
     ],
     "Cascade_runner": [
       "Cascade_agent_context",
-      "Cascade_error_classify",
       "Cascade_legacy_runner",
       "Cascade_transport",
       "Dashboard_oas_bridge",
@@ -2072,7 +2037,6 @@
     "Cascade_toml_materializer": [],
     "Cascade_transport": [
       "Auth",
-      "Auth_resolve",
       "Cascade_transport_auth_bridging",
       "Cascade_transport_authorization",
       "Cascade_transport_cli_argv_sanitize",
@@ -2081,6 +2045,7 @@
       "Cascade_transport_label_resolution",
       "Cascade_transport_mcp_policy_helpers",
       "Cascade_transport_mcp_tool_classifier",
+      "Cascade_transport_runtime_mcp_policy_of_tool_names",
       "Cascade_transport_runtime_policy_provider",
       "Inference_utils",
       "Provider_tool_support",
@@ -2108,6 +2073,11 @@
       "Cascade_transport_authorization"
     ],
     "Cascade_transport_mcp_tool_classifier": [
+      "Tool_catalog"
+    ],
+    "Cascade_transport_runtime_mcp_policy_of_tool_names": [
+      "Auth",
+      "Auth_resolve",
       "Tool_catalog"
     ],
     "Cascade_transport_runtime_policy_provider": [
@@ -2378,9 +2348,6 @@
       "Dashboard_yjs",
       "Eval_calibration",
       "Keeper_types"
-    ],
-    "Dashboard_http_autoresearch": [
-      "Autoresearch"
     ],
     "Dashboard_http_helpers": [
       "Dashboard",
@@ -3503,10 +3470,12 @@
       "Keeper_failure_policy",
       "Keeper_fd_pressure",
       "Keeper_heartbeat_loop_board_events",
+      "Keeper_heartbeat_loop_dispatch_recurring",
       "Keeper_heartbeat_loop_in_turn_pulse",
       "Keeper_heartbeat_loop_presence",
       "Keeper_heartbeat_loop_scheduling",
       "Keeper_heartbeat_loop_semaphore_timeout",
+      "Keeper_heartbeat_loop_snapshot_timing",
       "Keeper_heartbeat_smart",
       "Keeper_heartbeat_snapshot",
       "Keeper_heartbeat_visibility_gate",
@@ -3514,7 +3483,6 @@
       "Keeper_keepalive_signal",
       "Keeper_memory",
       "Keeper_metrics",
-      "Keeper_recurring",
       "Keeper_registry",
       "Keeper_registry_event_queue",
       "Keeper_state_machine",
@@ -3531,6 +3499,13 @@
       "Keeper_metrics",
       "Keeper_types",
       "Keeper_world_observation",
+      "Prometheus"
+    ],
+    "Keeper_heartbeat_loop_dispatch_recurring": [
+      "Coord",
+      "Keeper_metrics",
+      "Keeper_recurring",
+      "Keeper_types",
       "Prometheus"
     ],
     "Keeper_heartbeat_loop_in_turn_pulse": [
@@ -3580,6 +3555,13 @@
       "Keeper_world_observation",
       "Prometheus"
     ],
+    "Keeper_heartbeat_loop_snapshot_timing": [
+      "Keeper_heartbeat_snapshot",
+      "Keeper_keepalive_signal",
+      "Keeper_metrics",
+      "Keeper_types",
+      "Prometheus"
+    ],
     "Keeper_heartbeat_smart": [],
     "Keeper_heartbeat_snapshot": [
       "Cascade_events",
@@ -3626,6 +3608,7 @@
     "Keeper_hooks_oas": [
       "Coord",
       "Keeper_guards",
+      "Keeper_hooks_oas_introspection",
       "Keeper_memory_policy",
       "Keeper_metrics",
       "Keeper_registry",
@@ -3661,6 +3644,7 @@
       "Keeper_tool_policy",
       "Tool_name"
     ],
+    "Keeper_hooks_oas_introspection": [],
     "Keeper_hooks_oas_output_json": [
       "Keeper_gh_shared",
       "Keeper_hooks_oas_types",
@@ -4355,6 +4339,7 @@
       "Keeper_metrics",
       "Keeper_sandbox_containment",
       "Keeper_sandbox_factory",
+      "Keeper_shell_command_semantics",
       "Keeper_shell_docker",
       "Keeper_shell_gh_context",
       "Keeper_shell_shared",
@@ -4507,6 +4492,7 @@
       "Keeper_supervisor_restore_reconcile_gate",
       "Keeper_supervisor_resume_reconcile_gate",
       "Keeper_supervisor_self_preservation",
+      "Keeper_supervisor_supervise_keepalive",
       "Keeper_supervisor_types",
       "Keeper_tool_emission_hook",
       "Keeper_turn_livelock",
@@ -4608,6 +4594,16 @@
       "Keeper_types_profile",
       "Prometheus"
     ],
+    "Keeper_supervisor_supervise_keepalive": [
+      "Coord",
+      "Keeper_execution",
+      "Keeper_lifecycle_events",
+      "Keeper_metrics",
+      "Keeper_registry",
+      "Keeper_state_machine",
+      "Keeper_types",
+      "Prometheus"
+    ],
     "Keeper_supervisor_types": [
       "Keeper_registry",
       "Keeper_state_machine",
@@ -4633,7 +4629,6 @@
       "Tool_plan",
       "Tool_run",
       "Tool_shard",
-      "Tool_suspend",
       "Tool_task",
       "Tool_worktree"
     ],
@@ -5732,7 +5727,6 @@
       "Tool_plan",
       "Tool_run",
       "Tool_shard",
-      "Tool_suspend",
       "Tool_task",
       "Tool_telemetry",
       "Tool_worktree"
@@ -5901,16 +5895,24 @@
       "Keeper_types",
       "Keeper_types_profile",
       "Operator_control_snapshot_identity_fields",
+      "Operator_control_snapshot_persistent_agents",
       "Operator_control_snapshot_runtime_status",
       "Operator_control_snapshot_tool_audit",
       "Operator_control_snapshot_tool_names",
       "Operator_control_snapshot_trust",
+      "Operator_control_snapshot_view",
       "Tempo"
     ],
     "Operator_control_snapshot_identity_fields": [
       "Keeper_cascade_profile",
       "Keeper_types",
       "Operator_pending_confirm"
+    ],
+    "Operator_control_snapshot_persistent_agents": [
+      "Dashboard_cache",
+      "Keeper_exec_status",
+      "Keeper_id",
+      "Keeper_types"
     ],
     "Operator_control_snapshot_runtime_status": [
       "Keeper_exec_status",
@@ -5936,6 +5938,7 @@
       "Keeper_runtime_trust_snapshot",
       "Keeper_types"
     ],
+    "Operator_control_snapshot_view": [],
     "Operator_digest": [
       "Coord",
       "Failure_envelope",
@@ -6297,10 +6300,12 @@
       "Server_auth",
       "Server_base_path_diagnostics",
       "Server_dashboard_http_core_cache",
+      "Server_dashboard_http_core_digest_refresh",
       "Server_dashboard_http_core_entities",
       "Server_dashboard_http_core_json",
       "Server_dashboard_http_core_meta_cognition",
       "Server_dashboard_http_core_operator",
+      "Server_dashboard_http_core_operator_digest_http",
       "Server_dashboard_http_core_operator_query",
       "Server_dashboard_http_core_runtime",
       "Server_dashboard_http_core_snapshot_refresh",
@@ -6314,6 +6319,12 @@
     "Server_dashboard_http_core_cache": [
       "Coord",
       "Dashboard"
+    ],
+    "Server_dashboard_http_core_digest_refresh": [
+      "Mcp_server",
+      "Operator_control",
+      "Proactive_refresh",
+      "Server_dashboard_http_runtime_support"
     ],
     "Server_dashboard_http_core_entities": [
       "Build_identity",
@@ -6335,6 +6346,14 @@
       "Dashboard_http_helpers",
       "Server_auth",
       "Server_dashboard_http_cache"
+    ],
+    "Server_dashboard_http_core_operator_digest_http": [
+      "Dashboard_cache",
+      "Mcp_server",
+      "Operator_control",
+      "Server_auth",
+      "Server_dashboard_http_runtime_support",
+      "Server_utils"
     ],
     "Server_dashboard_http_core_operator_query": [
       "Coord",
@@ -6578,7 +6597,6 @@
       "Coord",
       "Credits_dashboard",
       "Dashboard_branches",
-      "Dashboard_http_autoresearch",
       "Dashboard_oas_bridge",
       "Dashboard_operator_nudges",
       "Dashboard_rooms",
@@ -6837,7 +6855,6 @@
       "Dashboard_feature_health",
       "Dashboard_goal_loop",
       "Dashboard_harness_health",
-      "Dashboard_http_autoresearch",
       "Dashboard_http_tool_quality",
       "Dashboard_keeper_feature_proof",
       "Dashboard_nav_event",
@@ -7186,26 +7203,6 @@
     ],
     "Tool_assignment_telemetry": [
       "Prometheus"
-    ],
-    "Tool_autoresearch_broadcast": [
-      "Autoresearch",
-      "Sse"
-    ],
-    "Tool_autoresearch_context": [
-      "Coord"
-    ],
-    "Tool_autoresearch_cycle": [
-      "Autoresearch",
-      "Autoresearch_knowledge",
-      "Autoresearch_lineage",
-      "Coord",
-      "Memory_oas_bridge",
-      "Tool_autoresearch_broadcast",
-      "Tool_autoresearch_context",
-      "Tool_autoresearch_registry"
-    ],
-    "Tool_autoresearch_registry": [
-      "Autoresearch"
     ],
     "Tool_board": [],
     "Tool_board_cache": [],
@@ -7625,12 +7622,6 @@
       "Tool_catalog",
       "Tool_dispatch"
     ],
-    "Tool_suspend": [
-      "Coord",
-      "Tool_catalog",
-      "Tool_dispatch",
-      "Tool_spec"
-    ],
     "Tool_task": [
       "Anti_rationalization",
       "Auth",
@@ -7702,7 +7693,6 @@
       "Tool_local_runtime",
       "Tool_run",
       "Tool_shard",
-      "Tool_suspend",
       "Tool_task"
     ],
     "Transport": [

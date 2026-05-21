@@ -88,7 +88,7 @@ describe('refreshPlanForRoute', () => {
     expect(refreshPlanForRoute({
       tab: 'monitoring',
       params: { section: 'cognition' },
-    })).toEqual(['namespaceTruth', 'execution', 'missionSnapshot', 'autoresearch'])
+    })).toEqual(['namespaceTruth', 'execution', 'missionSnapshot'])
 
     expect(refreshPlanForRoute({
       tab: 'monitoring',
@@ -133,11 +133,6 @@ describe('refreshPlanForRoute', () => {
       tab: 'workspace',
       params: { section: 'repositories', view: 'graph' },
     })).toEqual(['gitGraph'])
-
-    expect(refreshPlanForRoute({
-      tab: 'lab',
-      params: { section: 'autoresearch' },
-    })).toEqual(['autoresearch'])
 
     expect(refreshPlanForRoute({
       tab: 'lab',

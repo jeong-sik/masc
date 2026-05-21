@@ -13,7 +13,7 @@ open Virtual_dom.Vdom
 
 (** SPEC kinds (8 total). Mirrors Preact [PillKind] = neutral |
     running | paused | ok | warn | err | info | stalled, plus
-    Bonsai-only [`Brass] for archive_runs "Completed" state. *)
+    Bonsai-only [`Brass]. *)
 type kind =
   [ `Neutral
   | `Running
@@ -26,8 +26,8 @@ type kind =
   | `Brass
   ]
 
-(** Legacy color polyvar kept for backwards compatibility with
-    archive_runs_view, goals_view, keepers_directory. New code should
+(** Legacy color polyvar kept for backwards compatibility with goals_view,
+    keepers_directory. New code should
     use [~kind] directly. [`Bad] maps to [`Err]. *)
 type color =
   [ `Ok

@@ -208,7 +208,6 @@ module Cascade : LOGGER
 module Memory : LOGGER
 module Mention : LOGGER
 module Misc : LOGGER
-module Autoresearch : LOGGER
 module Identity : LOGGER
 module Institution : LOGGER
 module Pages : LOGGER

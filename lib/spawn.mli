@@ -77,12 +77,6 @@ val spawn :
   ?timeout_seconds:int -> ?working_dir:string -> unit ->
   spawn_result
 
-(** Deprecated alias for {!spawn}. *)
-val spawn_sync :
-  agent_name:string -> prompt:string ->
-  ?timeout_seconds:int -> ?working_dir:string -> unit ->
-  spawn_result
-
 (** {1 Result Formatting} *)
 
 val int_opt_to_json : int option -> Yojson.Safe.t

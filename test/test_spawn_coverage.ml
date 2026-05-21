@@ -643,15 +643,6 @@ let test_result_to_string_has_output () =
      with Not_found -> false)
 
 (* ============================================================
-   spawn_sync alias Tests
-   ============================================================ *)
-
-let test_spawn_sync_is_spawn () =
-  (* Just verify spawn_sync is the same function as spawn (alias test) *)
-  let _ : (agent_name:string -> prompt:string -> ?timeout_seconds:int -> ?working_dir:string -> unit -> Spawn.spawn_result) = Spawn.spawn_sync in
-  ()
-
-(* ============================================================
    Test Runners
    ============================================================ *)
 
@@ -761,8 +752,5 @@ let () =
       test_case "failure" `Quick test_result_to_string_failure;
       test_case "has elapsed" `Quick test_result_to_string_has_elapsed;
       test_case "has output" `Quick test_result_to_string_has_output;
-    ];
-    "spawn_sync", [
-      test_case "alias" `Quick test_spawn_sync_is_spawn;
     ];
   ]

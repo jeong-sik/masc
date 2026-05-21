@@ -62,24 +62,11 @@ let oas_telemetry_limit_param req =
 
 let oas_telemetry_provider_param req = trimmed_query_param req "provider"
 
-let observe_worktree_status_sse_write writer event =
-  Telemetry_observe.observe_or_fail
-    ~kind:"dashboard_worktree_status_sse_write" (fun () ->
-      Httpun.Body.Writer.write_string writer event)
-
-let rec observe_worktree_status_sse_write_all writer = function
-  | [] -> Ok ()
-  | event :: rest ->
-      (match observe_worktree_status_sse_write writer event with
-       | Ok () -> observe_worktree_status_sse_write_all writer rest
-       | Error _ as err -> err)
-
-let observe_worktree_status_sse_close writer =
-  Telemetry_observe.observe_or_default
-    ~kind:"dashboard_worktree_status_sse_close"
-    ~default:() (fun () ->
-      Httpun.Body.Writer.close writer)
-
+(* worktree-status SSE writers extracted to
+   [Server_routes_http_routes_dashboard_sse_writers] (godfile decomp). *)
+let observe_worktree_status_sse_write = Server_routes_http_routes_dashboard_sse_writers.observe_worktree_status_sse_write
+let observe_worktree_status_sse_write_all = Server_routes_http_routes_dashboard_sse_writers.observe_worktree_status_sse_write_all
+let observe_worktree_status_sse_close = Server_routes_http_routes_dashboard_sse_writers.observe_worktree_status_sse_close
 (* sync_keeper_cascade_meta extracted to
    [Server_routes_http_routes_dashboard_cascade_meta] (godfile decomp). *)
 let sync_keeper_cascade_meta = Server_routes_http_routes_dashboard_cascade_meta.sync_keeper_cascade_meta

@@ -178,6 +178,18 @@ arm_agent_draft_guard_status() {
     >/dev/null
 }
 
+sync_commit_lineage() {
+  local pr_number="$1"
+  local sync_script="$script_dir/pr-sync-body.sh"
+
+  if [[ ! -x "$sync_script" ]]; then
+    echo "commit-lineage sync script not executable: $sync_script" >&2
+    exit 1
+  fi
+
+  "$sync_script" "$repo" "$pr_number" >/dev/null
+}
+
 repo=""
 base="main"
 title=""
@@ -201,6 +213,8 @@ done
 require_cmd git
 require_cmd gh
 require_cmd jq
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 load_changed_files() {
   local range="$1"
@@ -297,6 +311,8 @@ fi
 
 arm_agent_draft_guard_status "$pr_number"
 ensure_pr_is_draft "$pr_number" "guard status arming"
+sync_commit_lineage "$pr_number"
+ensure_pr_is_draft "$pr_number" "commit lineage sync"
 
 pr_url="$(gh pr view "$pr_number" --repo "$repo" --json url --jq .url)"
 echo "PR: $pr_url"

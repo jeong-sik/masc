@@ -5,7 +5,8 @@
     file modifications).
 
     file_read/file_write use OCaml stdlib (no Eio filesystem capability needed).
-    shell_exec uses Eio.Process with fiber-based timeout.
+    shell_exec validates commands locally and routes execution through
+    Exec_gate.
 
     Safety classification helpers are defined in [Shell_safety_types]
     and re-exported here for backward compat. *)
@@ -1108,7 +1109,7 @@ let attribution_of_validation ~cmd (result : (unit, block_reason) result) : Attr
 let make_shell_exec_with_allowlist
       ~workdir
       ~on_exec
-      ~proc_mgr
+      ~proc_mgr:_
       ~clock
       ~allowed_commands
       ~description
@@ -1213,61 +1214,56 @@ let make_shell_exec_with_allowlist
                      ~error_message:message
                      (tool_error ~recoverable:true message))
                  (fun () ->
-                    let buf = Buffer.create 1024 in
-                    let wrapped_command =
+                    let cwd =
                       match workdir with
-                      | Some dir when String.trim dir <> "" ->
-                        Printf.sprintf "cd %s && %s" (Filename.quote dir) command
-                      | _ -> command
+                      | Some dir when String.trim dir <> "" -> Some dir
+                      | Some _ | None -> None
+                    in
+                    let argv = [ (Host_config.host ()).host_sh; "-c"; command ] in
+                    let raw_source =
+                      String.concat " " (List.map Filename.quote argv)
                     in
                     let result =
                       try
                         let status, output =
                           Fd_accountant.with_slot ~kind:Sandbox_exec (fun () ->
-                            Eio.Time.with_timeout_exn clock timeout (fun () ->
-                              Eio.Switch.run
-                              @@ fun sw ->
-                              let stdout_r, stdout_w =
-                                Eio.Process.pipe ~sw proc_mgr
-                              in
-                              let proc =
-                                Eio.Process.spawn
-                                  ~sw
-                                  proc_mgr
-                                  ~stdout:stdout_w
-                                  [ "sh"; "-c"; wrapped_command ^ " 2>&1" ]
-                              in
-                              Eio.Flow.close stdout_w;
-                              (try
-                                 Eio.Flow.copy stdout_r (Eio.Flow.buffer_sink buf);
-                                 Eio.Flow.close stdout_r
-                               with
-                               | Eio.Cancel.Cancelled _ as e ->
-                                 (try Eio.Flow.close stdout_r with
-                                  | Eio.Cancel.Cancelled _ as ce -> raise ce
-                                  | _ -> ());
-                                 raise e);
-                              let status = Eio.Process.await proc in
-                              status, Buffer.contents buf))
+                            Masc_exec.Exec_gate.run_argv_with_status
+                              ~actor:`Tool_local_runtime
+                              ~raw_source
+                              ~summary:"worker shell_exec command execution"
+                              ~timeout_sec:timeout
+                              ?cwd
+                              argv)
                         in
                         match status with
-                        | `Exited 0 -> Ok { Agent_sdk.Types.content = output }
-                        | `Exited code ->
+                        | Unix.WEXITED 0 -> Ok { Agent_sdk.Types.content = output }
+                        | Unix.WEXITED 124 ->
+                          tool_error
+                            ~recoverable:true
+                            (Printf.sprintf
+                               "Timeout after %.0fs: %s\n%s"
+                               timeout
+                               command
+                               output)
+                        | Unix.WEXITED code ->
                           tool_error (Printf.sprintf "Exit code %d:\n%s" code output)
-                        | `Signaled sig_num ->
+                        | Unix.WSIGNALED sig_num ->
                           tool_error
                             ~recoverable:(sig_num = Sys.sigterm)
                             (Printf.sprintf "Killed by signal %d:\n%s" sig_num output)
+                        | Unix.WSTOPPED sig_num ->
+                          tool_error
+                            ~recoverable:true
+                            (Printf.sprintf "Stopped by signal %d:\n%s" sig_num output)
                       with
                       | Eio.Time.Timeout ->
-                        let output = Buffer.contents buf in
                         tool_error
                           ~recoverable:true
                           (Printf.sprintf
                              "Timeout after %.0fs: %s\n%s"
                              timeout
                              command
-                             output)
+                             "")
                     in
                     record_result result)
              with

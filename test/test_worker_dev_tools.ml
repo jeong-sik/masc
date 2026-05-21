@@ -349,6 +349,42 @@ let test_shell_exec_echo () =
    | Error { Agent_sdk.Types.message = e; _ } ->
      Alcotest.fail (Printf.sprintf "expected Ok, got Error: %s" e))
 
+let test_shell_exec_uses_exec_gate_cwd () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let proc_mgr = Eio.Stdenv.process_mgr env in
+  let clock = Eio.Stdenv.clock env in
+  let workdir = Filename.temp_file "wdt_shell_exec_cwd_" "" in
+  Fun.protect
+    ~finally:(fun () ->
+      Exec_tap.disable ();
+      try cleanup_path workdir with _ -> ())
+    (fun () ->
+       Sys.remove workdir;
+       Unix.mkdir workdir 0o755;
+       let captured = ref [] in
+       Exec_tap.enable ~writer:(fun line -> captured := line :: !captured);
+       let tools = Worker_dev_tools.make_tools ~proc_mgr ~clock ~workdir () in
+       let tool = find_tool "shell_exec" tools in
+       match Tool.execute tool (`Assoc [ ("command", `String "pwd") ]) with
+       | Error { Agent_sdk.Types.message = e; _ } ->
+         Alcotest.fail (Printf.sprintf "shell_exec failed: %s" e)
+       | Ok { Agent_sdk.Types.content = output } ->
+         Alcotest.(check string) "pwd output" (workdir ^ "\n") output;
+         let process_line =
+           List.find_opt
+             (fun line ->
+                contains_substring
+                  line
+                  "\"kind\":\"Process_eio.run_argv_with_status\"")
+             !captured
+         in
+         (match process_line with
+          | None -> Alcotest.fail "shell_exec did not route through Exec_gate/Process_eio"
+          | Some line ->
+            Alcotest.(check bool) "cwd recorded" true (contains_substring line ("\"cwd\":\"" ^ workdir ^ "\""));
+            Alcotest.(check bool) "no cd wrapper" false (contains_substring line "cd ")))
+
 let test_shell_exec_blocked_command () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -644,6 +680,8 @@ let () =
     ];
     "shell_exec", [
       Alcotest.test_case "echo hello" `Quick test_shell_exec_echo;
+      Alcotest.test_case "uses Exec_gate cwd" `Quick
+        test_shell_exec_uses_exec_gate_cwd;
       Alcotest.test_case "blocked command" `Quick test_shell_exec_blocked_command;
       Alcotest.test_case "env wrapper blocked command" `Quick
         test_shell_exec_blocks_env_wrapped_disallowed_command;

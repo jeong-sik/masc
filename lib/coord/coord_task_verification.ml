@@ -5,6 +5,7 @@
     [transition_task_r] when validating submission/verification flows. *)
 
 open Masc_domain
+include Coord_state
 
 let flatten_lock_result = function
   | Ok result -> result

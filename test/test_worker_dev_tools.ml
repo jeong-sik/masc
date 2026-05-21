@@ -349,7 +349,7 @@ let test_shell_exec_echo () =
    | Error { Agent_sdk.Types.message = e; _ } ->
      Alcotest.fail (Printf.sprintf "expected Ok, got Error: %s" e))
 
-let test_shell_exec_uses_exec_gate_cwd () =
+let test_shell_exec_uses_shell_ir_dispatch_cwd () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let proc_mgr = Eio.Stdenv.process_mgr env in
@@ -382,7 +382,18 @@ let test_shell_exec_uses_exec_gate_cwd () =
          (match process_line with
           | None -> Alcotest.fail "shell_exec did not route through Exec_gate/Process_eio"
           | Some line ->
-            Alcotest.(check bool) "cwd recorded" true (contains_substring line ("\"cwd\":\"" ^ workdir ^ "\""));
+            Alcotest.(check bool)
+              "cwd recorded"
+              true
+              (contains_substring line ("\"cwd\":\"" ^ workdir ^ "\""));
+            Alcotest.(check bool)
+              "direct pwd argv"
+              true
+              (contains_substring line "\"argv\":[\"pwd\"]");
+            Alcotest.(check bool)
+              "no sh -c wrapper"
+              false
+              (contains_substring line "\"-c\"");
             Alcotest.(check bool) "no cd wrapper" false (contains_substring line "cd ")))
 
 let test_shell_exec_blocked_command () =
@@ -680,8 +691,8 @@ let () =
     ];
     "shell_exec", [
       Alcotest.test_case "echo hello" `Quick test_shell_exec_echo;
-      Alcotest.test_case "uses Exec_gate cwd" `Quick
-        test_shell_exec_uses_exec_gate_cwd;
+      Alcotest.test_case "uses Shell IR dispatch cwd" `Quick
+        test_shell_exec_uses_shell_ir_dispatch_cwd;
       Alcotest.test_case "blocked command" `Quick test_shell_exec_blocked_command;
       Alcotest.test_case "env wrapper blocked command" `Quick
         test_shell_exec_blocks_env_wrapped_disallowed_command;

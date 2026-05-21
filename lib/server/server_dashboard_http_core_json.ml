@@ -48,6 +48,9 @@ let operator_generated_at_iso json =
      | None -> Masc_domain.now_iso ())
 ;;
 
+let dashboard_request_timeout_s = Server_dashboard_http_core_cache.dashboard_request_timeout_s
+let operator_refresh_interval_s = Server_dashboard_http_core_operator.operator_refresh_interval_s
+
 let operator_cache_json ?cache_key ~scope json =
   let diagnostic_field key =
     match projection_diagnostics_field json key with

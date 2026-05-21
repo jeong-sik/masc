@@ -215,7 +215,7 @@ let host_pipeline_specs stages =
                { argv; env = resolve_host_env simple.env; cwd }
              in
              loop (stage :: acc) rest
-         | _ -> None)
+         | _unsupported -> None)
         [@warning "-4"]
     | Shell_ir.Pipeline _ :: _ -> None
   in

@@ -8,15 +8,11 @@
 val declared_permission_for_tool : string -> Masc_domain.permission option
 (** Tool_catalog-declared permission, when present. *)
 
-val legacy_permission_for_tool : string -> Masc_domain.permission option
-(** Compatibility fallback for tools that do not yet declare
-    [required_permission] in Tool_catalog metadata. *)
-
 val known_tool_names : string list
-(** Tool names covered by either Tool_catalog metadata or the legacy
-    fallback table. Useful for policy derivation that must include
-    permission-mapped tools even when they are not on a public surface. *)
+(** Tool names covered by either Tool_catalog metadata or the fallback table.
+    Useful for policy derivation that must include permission-mapped tools even
+    when they are not on a public surface. *)
 
 val permission_for_tool : string -> Masc_domain.permission option
 (** Effective required permission for a tool:
-    Tool_catalog metadata first, legacy fallback second. *)
+    Tool_catalog metadata first, fallback table second. *)

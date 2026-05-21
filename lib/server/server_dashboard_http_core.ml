@@ -219,70 +219,7 @@ let operator_digest_default_query = Server_dashboard_http_core_operator_query.op
 
 let start_operator_snapshot_refresh_loop = Server_dashboard_http_core_snapshot_refresh.start_operator_snapshot_refresh_loop
 
-let start_operator_digest_refresh_loop ~state ~sw ~clock =
-  let config = state.Mcp_server.room_config in
-  let proc_mgr = state.Mcp_server.proc_mgr in
-  let net, mono_clock = state_dashboard_runtime_caps state in
-  let compute () =
-    mark_cached_surface_attempt operator_digest_cache;
-    let started_at = Unix.gettimeofday () in
-    try
-      run_dashboard_compute
-        ~mode:Offloaded_readonly
-        ?net
-        ?mono_clock
-        ~sw
-        ~clock
-        ~config
-        (fun ~config ~sw ->
-           let ctx : _ Operator_control.context =
-             { config
-             ; agent_name = "dashboard"
-             ; sw
-             ; clock
-             ; proc_mgr
-             ; net = None
-             ; mcp_session_id = None
-             }
-           in
-           match
-             Operator_control.digest_json ~actor:"dashboard" ~target_type:"root" ctx
-           with
-           | Ok json ->
-             with_projection_diagnostics
-               ~surface:"operator_digest"
-               ~started_at
-               ~extra:(operator_snapshot_extra ())
-               json
-           | Error err ->
-             invalid_arg ("server_dashboard_http_core: operator digest failed: " ^ err))
-    with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | exn ->
-      mark_cached_surface_error operator_digest_cache exn;
-      raise exn
-  in
-  Proactive_refresh.start
-    ~sw
-    ~clock
-    ~config:
-      { (Proactive_refresh.default_config
-           ~label:"operator_digest"
-           ~interval_s:operator_refresh_interval_s)
-        with
-        timeout_s = operator_refresh_interval_s *. 0.8
-      ; on_error = Some (mark_cached_surface_error operator_digest_cache)
-      ; warm_delay_s = 150.0
-      }
-    ~compute
-    ~on_result:(fun json ->
-      mark_cached_surface_success operator_digest_cache json;
-      !operator_digest_broadcast_ref
-        (cached_surface_json operator_digest_cache
-         |> with_operator_digest_metadata
-              ~config
-              ~query:(operator_digest_default_query ())))
-;;
+let start_operator_digest_refresh_loop = Server_dashboard_http_core_digest_refresh.start_operator_digest_refresh_loop
 
 let operator_snapshot_http_json ~state ~sw ~clock request =
   let config = state.Mcp_server.room_config in

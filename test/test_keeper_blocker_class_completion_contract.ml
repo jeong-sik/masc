@@ -102,9 +102,9 @@ let test_turn_livelock_text_maps () =
 
 let test_capacity_backpressure_text_maps () =
   check_capacity_class
-    "capacity-exhausted text"
+    "capacity-backpressure text"
     (B.blocker_class_of_string
-       "Internal error: [masc_oas_error] {\"kind\":\"capacity_exhausted\",\
+       "Internal error: [masc_oas_error] {\"kind\":\"capacity_backpressure\",\
         \"detail\":\"client capacity key glm is full\"}")
 
 let test_legacy_cascade_slot_full_text_stays_cascade_exhausted () =

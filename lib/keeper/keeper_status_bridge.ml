@@ -158,8 +158,7 @@ let blocker_class_of_string (reason : string) : blocker_class option =
   if trimmed = ""
   then None
   else if
-    String_util.contains_substring_ci trimmed "capacity_exhausted"
-    || String_util.contains_substring_ci trimmed "capacity exhausted"
+    String_util.contains_substring_ci trimmed "capacity exhausted"
     || String_util.contains_substring_ci trimmed "capacity_backpressure"
     || String_util.contains_substring_ci trimmed "client capacity"
   then Some Capacity_exhausted

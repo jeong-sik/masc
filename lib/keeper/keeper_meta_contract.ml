@@ -167,7 +167,6 @@ let blocker_class_to_string = function
 let blocker_class_of_serialized_string = function
   | "cascade_exhausted" -> Some (Cascade_exhausted (Other_detail "cascade_exhausted"))
   | "capacity_backpressure" -> Some Capacity_exhausted
-  | "capacity_exhausted" -> Some Capacity_exhausted
   | "ambiguous_post_commit_timeout" -> Some Ambiguous_post_commit_timeout
   | "ambiguous_post_commit_failure" -> Some Ambiguous_post_commit_failure
   | "autonomous_slot_wait_timeout" -> Some Autonomous_slot_wait_timeout

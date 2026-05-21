@@ -214,6 +214,7 @@ let test_wait_observation_reason_labels () =
       "semaphore_wait_timeout";
       "peers_holding_slot";
       "channel_scheduled_autonomous";
+      "class_slot_wait_timeout";
     ]
     (Masc_mcp.Keeper_heartbeat_loop.semaphore_wait_observation_reasons
        ~kind:Masc_mcp.Keeper_heartbeat_loop.Semaphore_wait_timeout
@@ -225,6 +226,7 @@ let test_wait_observation_reason_labels () =
       "semaphore_wait_timeout";
       "phase_autonomous_queue_head";
       "channel_scheduled_autonomous";
+      "class_admission_queue_wait_timeout";
     ]
     (Masc_mcp.Keeper_heartbeat_loop.semaphore_wait_observation_reasons
        ~phase_label:"autonomous_queue_head"
@@ -308,6 +310,16 @@ let test_cascade_backpressure_reason_labels () =
     "cascade backpressure reasons"
     [ "cascade_backpressure"; "cascade_unhealthy"; "reason_failure_ratio_" ]
     (KHL.cascade_backpressure_observation_reasons ~reason:"Failure Ratio!");
+  Alcotest.(check (list string))
+    "provider dns cascade backpressure reasons"
+    [
+      "cascade_backpressure";
+      "cascade_unhealthy";
+      "class_provider_dns_failure";
+      "reason_failure_ratio_provider_dns_failure";
+    ]
+    (KHL.cascade_backpressure_observation_reasons
+       ~reason:"failure_ratio:provider_dns_failure");
   Alcotest.(check (list string))
     "cascade resilience backpressure reasons"
     [

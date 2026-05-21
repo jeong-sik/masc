@@ -1142,6 +1142,7 @@
   test_keeper_safety_gates
   test_keeper_guards
   test_keeper_working_state
+  test_keeper_wip_admission
   test_eval_gate_evasion
   test_prompt_registry_defaults
   test_keeper_prompt_external

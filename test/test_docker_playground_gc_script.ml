@@ -196,6 +196,42 @@ let test_status_warns_on_worktree_hotspot_when_lsof_fails () =
       (contains_substring stdout
          "top_fanout_cleanup_dry_run_command="))
 
+let test_status_cleanup_summary_surfaces_candidate_counts () =
+  with_temp_dir "docker-playground-status-cleanup-summary" (fun dir ->
+    let root = Filename.concat dir ".masc/playground/docker" in
+    let repo_dir = Filename.concat root "keeper-a/repos/masc-mcp" in
+    init_repo repo_dir;
+    mkdir_p (Filename.concat repo_dir ".worktrees");
+    let wt_path = Filename.concat repo_dir ".worktrees/stale-task" in
+    ignore
+      (run_shell_ok ~cwd:repo_dir
+         (Printf.sprintf "git worktree add -q -b stale-task %s" (quote wt_path)));
+    mark_path_old ~cwd:repo_dir wt_path;
+    let fake_bin = Filename.concat dir "bin" in
+    mkdir_p fake_bin;
+    write_executable (Filename.concat fake_bin "lsof") "#!/bin/sh\nexit 1\n";
+    let path =
+      Printf.sprintf "%s:%s" fake_bin
+        (Option.value ~default:"" (Sys.getenv_opt "PATH"))
+    in
+    let stdout, _ =
+      run_shell_ok ~env:[ "PATH", path ] ~cwd:(source_root ())
+        (Printf.sprintf
+           "%s --root %s --limit 5 --worktree-warn 1 --cleanup-summary \
+            --cleanup-days 1 --aggressive-cleanup-days 0"
+           (quote (status_script_path ()))
+           (quote root))
+    in
+    check bool "cleanup summary surfaced" true
+      (contains_substring stdout "Cleanup dry-run summary:");
+    check bool "root candidate count surfaced" true
+      (contains_substring stdout "cleanup_summary_candidates=1");
+    check bool "top fanout candidate count surfaced" true
+      (contains_substring stdout "top_fanout_cleanup_summary_candidates=1");
+    check bool "aggressive summary surfaced" true
+      (contains_substring stdout "aggressive_cleanup_summary_candidates=1");
+    check bool "dry-run does not remove worktree" true (Sys.file_exists wt_path))
+
 let test_dry_run_lists_stale_clean_worktree () =
   with_temp_dir "docker-playground-gc-dry-run" (fun dir ->
     let root = Filename.concat dir ".masc/playground/docker" in
@@ -316,6 +352,8 @@ let () =
             test_status_warns_on_fd_hotspot
         ; test_case "status warns on worktree hotspot when lsof fails" `Quick
             test_status_warns_on_worktree_hotspot_when_lsof_fails
+        ; test_case "status cleanup summary surfaces candidate counts" `Quick
+            test_status_cleanup_summary_surfaces_candidate_counts
         ; test_case "dry-run lists stale clean worktree" `Quick
             test_dry_run_lists_stale_clean_worktree
         ; test_case "recent checkout of old commit is not candidate" `Quick

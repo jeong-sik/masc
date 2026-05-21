@@ -48,11 +48,11 @@ module type S = sig
     -> ?workdir:string
     -> ?stdin:string
     -> container:Keeper_container_name.t
-    -> cmd:string
+    -> command_argv:string list
     -> unit
     -> (Keeper_docker_response.exec_result, sandbox_error) result
-  (** [exec ?user ?workdir ?stdin ~container ~cmd ()] runs [cmd]
-      inside an already-running [container] via [docker exec].
+  (** [exec ?user ?workdir ?stdin ~container ~command_argv ()] runs
+      [command_argv] inside an already-running [container] via [docker exec].
 
       - [?user] — [(uid, gid)], emitted as [--user uid:gid]. Omitted
         ⇒ docker uses the container image's [USER].
@@ -63,10 +63,9 @@ module type S = sig
         -i …` reads from the host process's stdin, which the gated
         spawn fills). Omitted ⇒ no [-i] flag and stdin is closed. RFC
         §3.2.1: the keeper-turn `overwrite_file` / `append_file` paths
-        write file content via `sh -lc 'mkdir -p … && cat > …'` with
-        the content piped on stdin; Phase 4.1-h surfaces that as a
-        first-class plan field so the Phase 4.1 caller cutover does
-        not need a parallel stdin-aware code path.
+        pipe content on stdin; Phase 4.1-h surfaces stdin as a
+        first-class plan field so callers do not need a parallel
+        stdin-aware code path.
 
       The trailing [unit] is required so OCaml can erase the leading
       optionals (warning 16) — all parameters are otherwise labeled.

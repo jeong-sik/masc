@@ -208,7 +208,7 @@ let ps_query ~labels:_ = placeholder
    [?stdin] is a [bool], not the content itself — the *content* is
    never part of the argv (it is piped on stdin by {!exec}), so the
    pure builder only needs to know whether to emit the [-i] flag. *)
-let exec_argv ?user ?workdir ?(stdin = false) ~container ~cmd () =
+let exec_argv ?user ?workdir ?(stdin = false) ~container ~command_argv () =
   let user_args =
     match user with
     | None -> []
@@ -224,12 +224,12 @@ let exec_argv ?user ?workdir ?(stdin = false) ~container ~cmd () =
   @ user_args
   @ workdir_args
   @ stdin_args
-  @ [ Keeper_container_name.to_string container; "sh"; "-lc"; cmd ]
+  @ (Keeper_container_name.to_string container :: command_argv)
 ;;
 
-let exec ?user ?workdir ?stdin ~container ~cmd () =
+let exec ?user ?workdir ?stdin ~container ~command_argv () =
   let argv =
-    exec_argv ?user ?workdir ~stdin:(Option.is_some stdin) ~container ~cmd ()
+    exec_argv ?user ?workdir ~stdin:(Option.is_some stdin) ~container ~command_argv ()
   in
   (* Gated spawn returns [(status, stdout, stderr)]; on spawn failure
      the status is synthesized as [WEXITED 127] (see 3b-iv.2.1 commit

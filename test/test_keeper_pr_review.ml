@@ -26,6 +26,19 @@ let with_env key value f =
       | None -> Unix.putenv key "")
     f
 
+let with_config_dir config_dir f =
+  let prior = Sys.getenv_opt "MASC_CONFIG_DIR" in
+  Fun.protect
+    ~finally:(fun () ->
+      (match prior with
+       | Some value -> Unix.putenv "MASC_CONFIG_DIR" value
+       | None -> Unix.putenv "MASC_CONFIG_DIR" "");
+      Config_dir_resolver.reset ())
+    (fun () ->
+      Unix.putenv "MASC_CONFIG_DIR" config_dir;
+      Config_dir_resolver.reset ();
+      f ())
+
 let temp_dir () =
   let dir = Filename.temp_file "keeper_pr_review_" "" in
   Unix.unlink dir;
@@ -122,6 +135,19 @@ let ensure_github_identity_bundle ~config github_identity =
     "github.com:\n\
     \    oauth_token: ghp_fake_test_token_for_docker_route\n\
     \    user: test-user\n"
+
+let with_keeper_identity_toml ~config ~keeper_name ~github_identity f =
+  let masc_dir = Filename.concat config.Coord.base_path Common.masc_dirname in
+  let config_dir = Filename.concat masc_dir "config" in
+  let keepers_dir = Filename.concat config_dir "keepers" in
+  ensure_dir keepers_dir;
+  ensure_github_identity_bundle ~config github_identity;
+  write_file
+    (Filename.concat keepers_dir (keeper_name ^ ".toml"))
+    (Printf.sprintf
+       "[keeper]\ngithub_identity = %S\ngit_identity_mode = \"github_identity\"\n"
+       github_identity);
+  with_config_dir config_dir f
 
 let fake_docker_echo_script =
   "#!/bin/sh\n\
@@ -300,7 +326,10 @@ let test_read_routes_docker_and_injects_repo_flag () =
   with_fake_docker @@ fun () ->
   setup_docker_review @@ fun ~config ~meta ->
   let log_path = Filename.concat config.Coord.base_path "docker.log" in
+  let configured_identity = "reviewer-gh" in
   with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
+  with_keeper_identity_toml ~config ~keeper_name:meta.name
+    ~github_identity:configured_identity @@ fun () ->
   let raw =
     KTPR.handle_keeper_pr_review_read ~config ~meta
       ~args:(`Assoc [ ("pr_number", `Int 13510) ])
@@ -316,11 +345,17 @@ let test_read_routes_docker_and_injects_repo_flag () =
     (Some "reviewer")
     (parse_nested_string_field raw "identity_attestation" "keeper");
   check (option string) "read attests effective identity"
-    (Some "root")
+    (Some configured_identity)
     (parse_nested_string_field raw "identity_attestation" "effective_github_identity");
+  check (option string) "read attests configured identity"
+    (Some configured_identity)
+    (parse_nested_string_field raw "identity_attestation" "configured_github_identity");
   check (option string) "read exposes credential identity"
-    (Some "root")
+    (Some configured_identity)
     (parse_nested_string_field raw "credential" "effective_github_identity");
+  check (option string) "read exposes configured credential identity"
+    (Some configured_identity)
+    (parse_nested_string_field raw "credential" "configured_github_identity");
   check bool "read omits credential state to avoid duplicate gh auth status"
     true
     (parse_field raw "credential"
@@ -364,6 +399,9 @@ let test_comment_and_approve_route_through_docker () =
   check (option string) "comment exposes credential identity"
     (Some "root")
     (parse_nested_string_field raw "credential" "effective_github_identity");
+  check (option string) "comment exposes no configured fallback identity"
+    None
+    (parse_nested_string_field raw "credential" "configured_github_identity");
   let raw =
     KTPR.handle_keeper_pr_review_comment ~config ~meta
       ~args:

@@ -18,7 +18,7 @@ let sample_plan () =
       ~turn_id:1
       ~attempt:0
       ~meta_name:"alice"
-      ~cmd:"echo hi"
+      ~command_argv:[ "echo"; "hi" ]
   with
   | Ok p -> p
   | Error _ -> failwith "test fixture"
@@ -83,7 +83,10 @@ let test_run_unmatched_plan_returns_daemon_unreachable () =
   let p2 =
     match
       Keeper_sandbox_oneshot_plan.of_request
-        ~turn_id:99 ~attempt:0 ~meta_name:"bob" ~cmd:"x"
+        ~turn_id:99
+        ~attempt:0
+        ~meta_name:"bob"
+        ~command_argv:[ "x" ]
     with
     | Ok p -> p
     | Error _ -> failwith "fix"
@@ -103,7 +106,10 @@ let test_run_fifo_order () =
   let p2 =
     match
       Keeper_sandbox_oneshot_plan.of_request
-        ~turn_id:2 ~attempt:0 ~meta_name:"bob" ~cmd:"y"
+        ~turn_id:2
+        ~attempt:0
+        ~meta_name:"bob"
+        ~command_argv:[ "y" ]
     with
     | Ok p -> p
     | Error _ -> failwith "fix"

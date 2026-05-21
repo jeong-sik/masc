@@ -25,7 +25,11 @@ let eio_test_case name speed f =
 
 let sample_plan () =
   match
-    Keeper_sandbox_oneshot_plan.of_request ~turn_id:1 ~attempt:0 ~meta_name:"alice" ~cmd:"echo hi"
+    Keeper_sandbox_oneshot_plan.of_request
+      ~turn_id:1
+      ~attempt:0
+      ~meta_name:"alice"
+      ~command_argv:[ "echo"; "hi" ]
   with
   | Ok p -> p
   | Error _ -> failwith "test fixture"
@@ -75,7 +79,7 @@ let sample_session_plan () =
 (* ── Each S function returns the typed placeholder ──────────── *)
 
 (* Phase 3b-iv.2.3 — run is no longer a placeholder. It spawns
-   [docker run --rm --name <name> <image> sh -lc <cmd>]. Same typed
+   [docker run --rm --name <name> <image> <command_argv>]. Same typed
    contract as [exec]: either [Ok exec_result] (daemon present) or
    [Error Daemon_unreachable] (daemon / CLI missing). No other
    [sandbox_error] variant is semantically valid for [run]. *)

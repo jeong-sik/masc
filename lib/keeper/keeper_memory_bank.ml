@@ -443,9 +443,30 @@ let progress_consolidation_summary ?summarizer ~trace_id ~count texts =
       | None -> fallback)
   | _ -> fallback
 
+(** Minimum group size that triggers consolidation, used for both
+    same-trace progress merging and cross-trace recurrence promotion.
+    Below this floor a "burst" is treated as noise and not promoted to
+    long-term storage. *)
+let consolidation_min_group_size = 3
+
+(** Priority assigned to consolidated long-term notes synthesized from
+    same-trace progress merges.  Lower than {!consolidation_recurrence_priority}
+    because a single-trace burst is weaker evidence than recurrence across
+    multiple traces. *)
+let consolidation_progress_priority = 90
+
+(** Priority assigned to consolidated long-term notes synthesized from
+    cross-trace text recurrence (the same normalised text appearing in
+    [consolidation_min_group_size]+ distinct traces).  Higher than
+    {!consolidation_progress_priority} — recurrence across traces is
+    stronger evidence than a within-trace burst. *)
+let consolidation_recurrence_priority = 95
+
 (** Consolidate memory notes before compaction.
-    1. Merge progress notes from same trace_id (3+ → single summary).
-    2. Promote recurring texts across trace_ids to long_term (priority 95).
+    1. Merge progress notes from same trace_id ({!consolidation_min_group_size}+
+       → single summary at {!consolidation_progress_priority}).
+    2. Promote recurring texts across trace_ids to long_term at
+       {!consolidation_recurrence_priority}.
     Returns a new row list with consolidated entries appended. *)
 let consolidate_memory_notes ?summarizer (rows : keeper_memory_row_raw list)
     : keeper_memory_row_raw list * int =
@@ -467,7 +488,7 @@ let consolidate_memory_notes ?summarizer (rows : keeper_memory_row_raw list)
     end)
     rows;
   Hashtbl.iter (fun tid group ->
-    if List.length group >= 3 then begin
+    if List.length group >= consolidation_min_group_size then begin
       let texts =
         List.map (fun (r : keeper_memory_row_raw) -> r.text) group
         |> List.sort_uniq String.compare
@@ -489,7 +510,7 @@ let consolidate_memory_notes ?summarizer (rows : keeper_memory_row_raw list)
         ("horizon", `String long_term_horizon);
         ("source", `String "progress_consolidation");
         ("schema_version", `Int keeper_memory_schema_version);
-        ("priority", `Int 90);
+        ("priority", `Int consolidation_progress_priority);
         ("text", `String summary_text);
         ("trace_id", `String tid);
         ("generation", `Int generation);
@@ -502,7 +523,7 @@ let consolidate_memory_notes ?summarizer (rows : keeper_memory_row_raw list)
         source = "progress_consolidation";
         generation;
         text = summary_text;
-        priority = 90;
+        priority = consolidation_progress_priority;
         ts_unix = now;
       } :: !consolidated;
       incr consolidated_count
@@ -524,7 +545,7 @@ let consolidate_memory_notes ?summarizer (rows : keeper_memory_row_raw list)
     end)
     rows;
   Hashtbl.iter (fun norm_text tids ->
-    if List.length tids >= 3 then begin
+    if List.length tids >= consolidation_min_group_size then begin
       (* Find the highest-priority original row for this text *)
       let best =
         List.fold_left (fun acc (row : keeper_memory_row_raw) ->
@@ -542,7 +563,7 @@ let consolidate_memory_notes ?summarizer (rows : keeper_memory_row_raw list)
           ("horizon", `String long_term_horizon);
           ("source", `String "cross_trace_recurrence");
           ("schema_version", `Int keeper_memory_schema_version);
-          ("priority", `Int 95);
+          ("priority", `Int consolidation_recurrence_priority);
           ("text", `String row.text);
           ("generation", `Int row.generation);
           ("recurring_across", `Int (List.length tids));
@@ -554,7 +575,7 @@ let consolidate_memory_notes ?summarizer (rows : keeper_memory_row_raw list)
           source = "cross_trace_recurrence";
           generation = row.generation;
           text = row.text;
-          priority = 95;
+          priority = consolidation_recurrence_priority;
           ts_unix = now;
         } :: !consolidated;
         incr consolidated_count

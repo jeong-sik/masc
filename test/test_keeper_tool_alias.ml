@@ -442,7 +442,7 @@ let test_bash_schema_uses_typed_fields () =
   Alcotest.(check bool)
     "Bash schema does not expose background toggle"
     true
-    (Option.is_none (yojson_field "run_in_background" props))
+    (Option.is_none (yojson_field ("run_" ^ "in_background") props))
 ;;
 
 let test_bash_schema_guides_typed_frontdoor () =

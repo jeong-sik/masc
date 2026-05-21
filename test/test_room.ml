@@ -1089,17 +1089,22 @@ let test_cleanup_zombies_removes_broken_agent_file () =
       false (Sys.file_exists path)
   )
 
-let test_fd_pressure_text_classification () =
+let test_fd_pressure_exn_classification () =
   Alcotest.(check bool)
-    "EMFILE text is resource pressure, not malformed JSON"
+    "EMFILE is resource pressure, not malformed JSON"
     true
-    (Coord.is_fd_pressure_text
-       {|[read_json_result] backend_get failed for agents:keeper.json:
-         Eio.Io Unix_error (Too many open files in system, "openat", "/tmp/keeper.json")|});
+    (Coord.is_fd_pressure_exn
+       (Unix.Unix_error (Unix.EMFILE, "openat", "/tmp/keeper.json")));
   Alcotest.(check bool)
-    "schema errors are not resource pressure"
+    "ENFILE is resource pressure, not malformed JSON"
+    true
+    (Coord.is_fd_pressure_exn
+       (Unix.Unix_error (Unix.ENFILE, "openat", "/tmp/keeper.json")));
+  Alcotest.(check bool)
+    "other Unix errors are not FD pressure"
     false
-    (Coord.is_fd_pressure_text "Types_core.agent.last_seen (last_seen=<missing>)")
+    (Coord.is_fd_pressure_exn
+       (Unix.Unix_error (Unix.ETIMEDOUT, "connect", "api")))
 
 let test_cleanup_zombies_preserves_non_json_files () =
   with_test_env (fun config ->
@@ -1932,7 +1937,7 @@ let () =
       Alcotest.test_case "cleanup spares recent keeper" `Quick test_cleanup_zombies_spares_recent_keeper;
       Alcotest.test_case "cleanup spares type keeper" `Quick test_cleanup_zombies_spares_type_keeper;
       Alcotest.test_case "cleanup removes broken agent file" `Quick test_cleanup_zombies_removes_broken_agent_file;
-      Alcotest.test_case "fd pressure text is not broken JSON" `Quick test_fd_pressure_text_classification;
+      Alcotest.test_case "fd pressure exn is not broken JSON" `Quick test_fd_pressure_exn_classification;
       Alcotest.test_case "cleanup preserves non-json files" `Quick test_cleanup_zombies_preserves_non_json_files;
     ];
 

@@ -602,7 +602,7 @@ let test_handle_request_tools_list () =
     false
     (List.mem "masc_board_search" names);
   Alcotest.(check bool)
-    "legacy experiment_start hidden from list"
+    "removed experiment_start absent from list"
     false
     (List.mem "experiment_start" names);
   Alcotest.(check bool)
@@ -1292,137 +1292,7 @@ let test_handle_request_tools_list_include_usage_metadata () =
        (match first_tool with `Assoc fields -> fields | _ -> []));
   cleanup_dir base_path
 
-let _test_execute_tool_trpg_flow () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  Mcp_eio.set_net (Eio.Stdenv.net env);
-  Mcp_eio.set_clock (Eio.Stdenv.clock env);
-  let clock = Eio.Stdenv.clock env in
-  Eio.Switch.run @@ fun sw ->
-
-  let base_path = temp_dir () in
-  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
-  let roll_result =
-    Mcp_eio.execute_tool_eio ~sw ~clock state
-      ~name:"masc_trpg_dice_roll"
-      ~arguments:
-        (`Assoc
-          [
-            ("room_id", `String "room-mcp-e2e");
-            ("actor_id", `String "pc-1");
-            ("action", `String "perception");
-            ("stat_value", `Int 12);
-            ("dc", `Int 10);
-            ("raw_d20", `Int 15);
-          ])
-  in
-  Alcotest.(check bool) "dice_roll success" true roll_result.Tool_result.success;
-
-  let turn_result =
-    Mcp_eio.execute_tool_eio ~sw ~clock state
-      ~name:"masc_trpg_turn_advance"
-      ~arguments:
-        (`Assoc
-          [
-            ("room_id", `String "room-mcp-e2e");
-            ("phase", `String "round");
-          ])
-  in
-  Alcotest.(check bool) "turn_advance success" true turn_result.Tool_result.success;
-
-  let stream_result =
-    Mcp_eio.execute_tool_eio ~sw ~clock state
-      ~name:"masc_trpg_stream"
-      ~arguments:(`Assoc [ ("room_id", `String "room-mcp-e2e") ])
-  in
-  Alcotest.(check bool) "stream success" true stream_result.Tool_result.success;
-  let stream_json = Yojson.Safe.from_string (Tool_result.message stream_result) in
-  let count = stream_json |> Yojson.Safe.Util.member "count" |> Yojson.Safe.Util.to_int in
-  Alcotest.(check bool) "stream has events" true (count >= 2);
-
-  let stream_dice_result =
-    Mcp_eio.execute_tool_eio ~sw ~clock state
-      ~name:"masc_trpg_stream"
-      ~arguments:
-        (`Assoc
-          [
-            ("room_id", `String "room-mcp-e2e");
-            ("event_type", `String "dice.rolled");
-          ])
-  in
-  Alcotest.(check bool) "stream event_type filter success" true stream_dice_result.Tool_result.success;
-  let stream_dice_json = Yojson.Safe.from_string (Tool_result.message stream_dice_result) in
-  let dice_count =
-    stream_dice_json |> Yojson.Safe.Util.member "count" |> Yojson.Safe.Util.to_int
-  in
-  Alcotest.(check int) "dice-only event count" 1 dice_count;
-
-  let roll_json = Yojson.Safe.from_string (Tool_result.message roll_result) in
-  let passed = roll_json |> Yojson.Safe.Util.member "roll" |> Yojson.Safe.Util.member "passed" |> Yojson.Safe.Util.to_bool in
-  Alcotest.(check bool) "roll passed" true passed;
-
-  cleanup_dir base_path
-
 (* Governance status tool is no longer dispatched *)
-
-let _test_execute_tool_trpg_validation () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  Mcp_eio.set_net (Eio.Stdenv.net env);
-  Mcp_eio.set_clock (Eio.Stdenv.clock env);
-  let clock = Eio.Stdenv.clock env in
-  Eio.Switch.run @@ fun sw ->
-
-  let base_path = temp_dir () in
-  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
-  let missing_result =
-    Mcp_eio.execute_tool_eio ~sw ~clock state
-      ~name:"masc_trpg_turn_advance"
-      ~arguments:(`Assoc [])
-  in
-  Alcotest.(check bool) "missing room_id fails" false missing_result.Tool_result.success;
-  Alcotest.(check bool)
-    "missing room_id message"
-    true
-    (contains_substring (Tool_result.message missing_result) "room_id is required");
-
-  let out_of_range_result =
-    Mcp_eio.execute_tool_eio ~sw ~clock state
-      ~name:"masc_trpg_dice_roll"
-      ~arguments:
-        (`Assoc
-          [
-            ("room_id", `String "room-mcp-e2e");
-            ("actor_id", `String "pc-1");
-            ("action", `String "perception");
-            ("stat_value", `Int 12);
-            ("dc", `Int 10);
-            ("raw_d20", `Int 21);
-          ])
-  in
-  Alcotest.(check bool) "raw_d20 out-of-range fails" false out_of_range_result.Tool_result.success;
-  Alcotest.(check bool)
-    "raw_d20 out-of-range message"
-    true
-    (contains_substring (Tool_result.message out_of_range_result) "raw_d20 must be between 1 and 20");
-
-  let bad_event_type_result =
-    Mcp_eio.execute_tool_eio ~sw ~clock state
-      ~name:"masc_trpg_stream"
-      ~arguments:
-        (`Assoc
-          [
-            ("room_id", `String "room-mcp-e2e");
-            ("event_type", `String "totally.invalid");
-          ])
-  in
-  Alcotest.(check bool) "invalid event_type fails" false bad_event_type_result.Tool_result.success;
-  Alcotest.(check bool)
-    "invalid event_type message"
-    true
-    (contains_substring (Tool_result.message bad_event_type_result) "invalid event_type");
-
-  cleanup_dir base_path
 
 let test_execute_tool_explicit_agent_name_not_overridden () =
   let base_path = temp_dir () in
@@ -1842,40 +1712,6 @@ let test_execute_tool_without_mcp_session_uses_generated_identity () =
   cleanup_dir base_path
 
 (* Legacy governance convo tools are stubs; room-scoped test removed *)
-
-let _test_handle_request_tools_call_trpg () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let clock = Eio.Stdenv.clock env in
-  Eio.Switch.run @@ fun sw ->
-
-  let base_path = temp_dir () in
-  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
-
-  let request = Yojson.Safe.to_string (`Assoc [
-    ("jsonrpc", `String "2.0");
-    ("id", `Int 9);
-    ("method", `String "tools/call");
-    ("params", `Assoc [
-      ("name", `String "trpg.dice.roll");
-      ("arguments", `Assoc [
-        ("room_id", `String "room-mcp-call");
-        ("actor_id", `String "pc-1");
-        ("action", `String "perception");
-        ("stat_value", `Int 9);
-        ("dc", `Int 8);
-        ("raw_d20", `Int 12);
-      ]);
-    ]);
-  ]) in
-
-  let response = Mcp_eio.handle_request ~clock ~sw state request in
-  (match response with
-  | `Assoc fields ->
-      Alcotest.(check bool) "has result" true (List.mem_assoc "result" fields)
-  | _ -> Alcotest.fail "response not an object");
-
-  cleanup_dir base_path
 
 let test_handle_request_invalid_json () =
   Eio_main.run @@ fun env ->

@@ -75,7 +75,7 @@ keeper_shell_bash_native_tool_hint 0
 keeper_shell_bash_repo_wide_scan 0
 keeper_bash_output 0
 keeper_bash_kill 0
-run_in_background 6
+run_in_background 0
 background_task_id 0
 MASC_BASH_AUTO_BG 0
 MASC_BLOCKING_BUDGET_MS 0

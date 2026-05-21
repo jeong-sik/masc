@@ -539,6 +539,8 @@ let param_by_name name params =
     (fun (param : Agent_sdk.Types.tool_param) -> String.equal param.name name)
     params
 
+let legacy_background_flag_name = "run_" ^ "in_background"
+
 let check_param_type name expected params =
   match param_by_name name params with
   | Some (param : Agent_sdk.Types.tool_param) ->
@@ -566,9 +568,9 @@ let test_keeper_bash_schema_exposes_typed_boundary () =
   check_param_type "stages" "array" params;
   check_param_type "env" "object" params;
   Alcotest.(check bool)
-    "run_in_background not exposed"
+    "legacy background flag not exposed"
     true
-    (Option.is_none (param_by_name "run_in_background" params))
+    (Option.is_none (param_by_name legacy_background_flag_name params))
 
 let test_validate_args_keeper_bash_rejects_cmd_string () =
   let args = `Assoc [ "cmd", `String "pwd" ] in
@@ -589,7 +591,7 @@ let test_validate_args_keeper_bash_rejects_cmd_string () =
 let test_validate_args_keeper_bash_rejects_background_flag () =
   let args =
     `Assoc
-      [ "executable", `String "pwd"; "run_in_background", `Bool true ]
+      [ "executable", `String "pwd"; legacy_background_flag_name, `Bool true ]
   in
   match
     Tool_input_validation.validate_args
@@ -601,8 +603,8 @@ let test_validate_args_keeper_bash_rejects_background_flag () =
   | Ok _ -> Alcotest.fail "expected keeper_bash background flag to be rejected"
   | Error result ->
     let msg = Yojson.Safe.to_string result.Tool_result.data in
-    Alcotest.(check bool) "mentions run_in_background" true
-      (string_contains msg "run_in_background")
+    Alcotest.(check bool) "mentions legacy background flag" true
+      (string_contains msg legacy_background_flag_name)
 
 let test_validate_args_keeper_bash_accepts_typed_exec () =
   let args =

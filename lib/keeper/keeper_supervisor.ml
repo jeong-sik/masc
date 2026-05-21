@@ -37,34 +37,8 @@ let committed_tools_of_ambiguous_blocker =
    either Custom_event (with optional phase context) or Phase_event,
    eliminating the [~phase:Stopped ~event:"crashed"] typo class
    originally addressed at runtime by #8572 / #8575. *)
-let publish_lifecycle
-      ~(event : Keeper_lifecycle_events.lifecycle_event)
-      keeper_name
-      detail
-      ()
-  =
-  let event_name = Keeper_lifecycle_events.lifecycle_event_to_string event in
-  let phase =
-    Option.map
-      Keeper_state_machine.phase_to_string
-      (Keeper_lifecycle_events.lifecycle_event_phase event)
-  in
-  (* #12798: record in the per-keeper lifecycle audit ring for dashboard. *)
-  Keeper_lifecycle_audit.record ~keeper_name ~event_name ~phase ~detail;
-  match Keeper_keepalive.get_bus () with
-  | Some bus -> Cascade_events.publish_keeper_lifecycle bus ~event ~keeper_name ~detail ()
-  | None -> ()
-;;
-
-(** Phase-event helper: the wire event name IS the phase name. *)
-let publish_phase_lifecycle ~phase keeper_name detail () =
-  publish_lifecycle
-    ~event:(Keeper_lifecycle_events.Phase_event phase)
-    keeper_name
-    detail
-    ()
-;;
-
+let publish_lifecycle = Keeper_supervisor_publish_lifecycle.publish_lifecycle
+let publish_phase_lifecycle = Keeper_supervisor_publish_lifecycle.publish_phase_lifecycle
 let fork_stale_watchdog = Keeper_stale_watchdog.fork_stale_watchdog
 
 (* ── Supervised fiber launch ─────────────────────────────── *)

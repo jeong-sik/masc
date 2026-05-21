@@ -698,6 +698,83 @@ let test_too_complex_reason_tags_are_stable () =
     (Gate.too_complex_reason_tag (Gate.Unsupported_construct `Cmd_subst))
 ;;
 
+let shell_gate_authority_env = "MASC_SHELL_GATE_AUTHORITY"
+
+let with_shell_gate_authority value f =
+  let prev = Sys.getenv_opt shell_gate_authority_env in
+  Unix.putenv shell_gate_authority_env value;
+  Fun.protect
+    ~finally:(fun () ->
+      match prev with
+      | None -> Unix.putenv shell_gate_authority_env ""
+      | Some v -> Unix.putenv shell_gate_authority_env v)
+    f
+;;
+
+let test_authority_empty_env_is_off_per_caller () =
+  with_shell_gate_authority "" (fun () ->
+    Alcotest.(check bool)
+      "worker off"
+      false
+      (Gate.is_authoritative_for Gate.Worker_dev_tools);
+    Alcotest.(check bool)
+      "code_write off"
+      false
+      (Gate.is_authoritative_for Gate.Tool_code_write);
+    Alcotest.(check bool)
+      "keeper_bash off"
+      false
+      (Gate.is_authoritative_for Gate.Keeper_shell_bash))
+;;
+
+let test_authority_explicit_caller_set () =
+  with_shell_gate_authority "worker, code_write" (fun () ->
+    Alcotest.(check bool)
+      "worker on"
+      true
+      (Gate.is_authoritative_for Gate.Worker_dev_tools);
+    Alcotest.(check bool)
+      "code_write on"
+      true
+      (Gate.is_authoritative_for Gate.Tool_code_write);
+    Alcotest.(check bool)
+      "keeper_bash remains off"
+      false
+      (Gate.is_authoritative_for Gate.Keeper_shell_bash))
+;;
+
+let test_authority_accepts_stable_aliases_case_insensitively () =
+  with_shell_gate_authority "Worker_Dev_Tools, Keeper_Shell_Bash" (fun () ->
+    Alcotest.(check bool)
+      "worker alias on"
+      true
+      (Gate.is_authoritative_for Gate.Worker_dev_tools);
+    Alcotest.(check bool)
+      "keeper alias on"
+      true
+      (Gate.is_authoritative_for Gate.Keeper_shell_bash);
+    Alcotest.(check bool)
+      "code_write absent"
+      false
+      (Gate.is_authoritative_for Gate.Tool_code_write))
+;;
+
+let test_authority_ignores_broad_truthy_values () =
+  with_shell_gate_authority "1,true,on,yes" (fun () ->
+    Alcotest.(check bool)
+      "worker remains off"
+      false
+      (Gate.is_authoritative_for Gate.Worker_dev_tools);
+    Alcotest.(check bool)
+      "code_write remains off"
+      false
+      (Gate.is_authoritative_for Gate.Tool_code_write);
+    Alcotest.(check bool)
+      "keeper_bash remains off"
+      false
+      (Gate.is_authoritative_for Gate.Keeper_shell_bash))
+;;
+
 (* {1 Phase 0 PR-A2 corpus extension — three new fixtures}
 
    The fixtures are also pinned by [test_corpus_pinned] above. These
@@ -875,6 +952,24 @@ let () =
             "too_complex reason tags stable"
             `Quick
             test_too_complex_reason_tags_are_stable
+        ] )
+    ; ( "phase_1_authority"
+      , [ Alcotest.test_case
+            "empty caller-set env stays off"
+            `Quick
+            test_authority_empty_env_is_off_per_caller
+        ; Alcotest.test_case
+            "explicit caller-set env enables only listed callers"
+            `Quick
+            test_authority_explicit_caller_set
+        ; Alcotest.test_case
+            "caller aliases are stable and case-insensitive"
+            `Quick
+            test_authority_accepts_stable_aliases_case_insensitively
+        ; Alcotest.test_case
+            "broad truthy values are ignored"
+            `Quick
+            test_authority_ignores_broad_truthy_values
         ] )
     ; ( "phase_0_pr_a2"
       , [ Alcotest.test_case

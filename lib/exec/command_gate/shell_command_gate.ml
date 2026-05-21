@@ -500,3 +500,27 @@ let is_authoritative () =
   | Some ("1" | "true" | "TRUE" | "yes" | "on") -> true
   | _ -> false
 ;;
+
+let authority_env_var = "MASC_SHELL_GATE_AUTHORITY"
+
+let authority_tokens () =
+  match Sys.getenv_opt authority_env_var with
+  | None -> []
+  | Some raw ->
+    raw
+    |> String.split_on_char ','
+    |> List.map (fun token -> String.lowercase_ascii (String.trim token))
+    |> List.filter (fun token -> token <> "")
+;;
+
+let authority_token_matches caller token =
+  match caller, token with
+  | Worker_dev_tools, ("worker" | "worker_dev_tools") -> true
+  | Tool_code_write, ("code_write" | "tool_code_write") -> true
+  | Keeper_shell_bash, ("keeper_bash" | "keeper_shell_bash") -> true
+  | _ -> false
+;;
+
+let is_authoritative_for caller =
+  List.exists (authority_token_matches caller) (authority_tokens ())
+;;

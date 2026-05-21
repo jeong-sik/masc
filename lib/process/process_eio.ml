@@ -129,6 +129,24 @@ let rec should_retry_unix_fallback = function
   | _ -> false
 [@@warning "-4"]
 
+(* Typed Eio [Connection_reset] match.  This fires when a downstream reader
+   (e.g. [head -20], [grep -m 1], [tail -n 5]) closes its stdin after
+   consuming enough bytes — the kernel returns [EPIPE] / [SIGPIPE] on the
+   next [writev] from the upstream pipe writer, and Eio surfaces it as
+   [Eio.Net.E (Connection_reset _)] wrapped in [Eio.Io].  Operationally
+   this is the *normal* termination of a piped command, not a failure;
+   the spawned process completed its work and exited cleanly while we
+   were still flushing.  Live measurement on 5/21: 39+ events/day of
+   plain [head -20] / [head -30] invocations logging this at ERROR.
+
+   Returns [true] for the downstream-closed-pipe case so callers can demote
+   the log severity.  Does not match Connection_failure (genuine reach
+   failure) or other [Eio.Net.error] variants. *)
+let is_downstream_pipe_closed = function
+  | Eio.Io (Eio.Net.E (Eio.Net.Connection_reset _), _) -> true
+  | _ -> false
+[@@warning "-4"]
+
 let close_quietly fd =
   try Unix.close fd with
   | Unix.Unix_error _ -> () (* intentional: best-effort cleanup *)
@@ -595,6 +613,18 @@ let run_argv ?(timeout_sec = default_timeout_sec) ?env (argv : string list) : st
                     "[Process_eio] argv bind error, retrying via Unix fallback: %s — %s"
                     label (Printexc.to_string exn);
                   run_unix_argv_fallback ~timeout_sec ?env argv
+                ) else if is_downstream_pipe_closed exn then (
+                  (* Downstream reader closed the pipe (head/tail/grep -m
+                     finished reading and exited).  Kernel returns EPIPE on
+                     the next write; Eio surfaces it as Net.Connection_reset.
+                     This is the normal termination of a piped command, not
+                     a failure — log at DEBUG so the operator-facing ERROR
+                     stream stays quiet. *)
+                  Log.Misc.debug
+                    "[Process_eio] argv pipe closed by reader: %s — %s"
+                    label (Printexc.to_string exn);
+                  process_error_output ~label
+                    ~reason:"pipe closed by reader" ()
                 ) else (
                   Log.Misc.error "[Process_eio] argv error: %s — %s" label
                     (Printexc.to_string exn);
@@ -635,6 +665,18 @@ let run_argv_with_stdin ?(timeout_sec = default_timeout_sec) ?env ~(stdin_conten
                     "[Process_eio] argv bind error, retrying via Unix fallback: %s — %s"
                     label (Printexc.to_string exn);
                   run_unix_argv_with_stdin_fallback ~timeout_sec ?env ~stdin_content argv
+                ) else if is_downstream_pipe_closed exn then (
+                  (* Downstream reader closed the pipe (head/tail/grep -m
+                     finished reading and exited).  Kernel returns EPIPE on
+                     the next write; Eio surfaces it as Net.Connection_reset.
+                     This is the normal termination of a piped command, not
+                     a failure — log at DEBUG so the operator-facing ERROR
+                     stream stays quiet. *)
+                  Log.Misc.debug
+                    "[Process_eio] argv pipe closed by reader: %s — %s"
+                    label (Printexc.to_string exn);
+                  process_error_output ~label
+                    ~reason:"pipe closed by reader" ()
                 ) else (
                   Log.Misc.error "[Process_eio] argv error: %s — %s" label
                     (Printexc.to_string exn);
@@ -700,6 +742,23 @@ let run_argv_with_stdin_and_status_split
                     label (Printexc.to_string exn);
                   run_unix_argv_with_stdin_and_status_split_fallback
                     ~timeout_sec ?env ?cwd ~stdin_content argv
+                ) else if is_downstream_pipe_closed exn then (
+                  (* Downstream reader closed the pipe (head/tail/grep -m
+                     finished reading and exited).  Kernel returns EPIPE on
+                     the next write; Eio surfaces it as Net.Connection_reset.
+                     This is the normal termination of a piped command, not
+                     a failure — log at DEBUG so the operator-facing ERROR
+                     stream stays quiet.  We keep the same exit-code shape
+                     (Unix.WEXITED 127) and [process_error_output] reason
+                     as the catch-all branch so caller-side decisions are
+                     unchanged; this is a logging-severity change only. *)
+                  Log.Misc.debug
+                    "[Process_eio] argv pipe closed by reader: %s — %s"
+                    label (Printexc.to_string exn);
+                  ( Unix.WEXITED 127,
+                    "",
+                    process_error_output ~label
+                      ~reason:"pipe closed by reader" () )
                 ) else (
                   Log.Misc.error "[Process_eio] argv error: %s — %s" label
                     (Printexc.to_string exn);
@@ -774,6 +833,23 @@ let run_argv_with_status_split ?(timeout_sec = default_timeout_sec) ?env ?cwd
                     label (Printexc.to_string exn);
                   run_unix_argv_with_status_split_fallback ~timeout_sec ?env
                     ?cwd argv
+                ) else if is_downstream_pipe_closed exn then (
+                  (* Downstream reader closed the pipe (head/tail/grep -m
+                     finished reading and exited).  Kernel returns EPIPE on
+                     the next write; Eio surfaces it as Net.Connection_reset.
+                     This is the normal termination of a piped command, not
+                     a failure — log at DEBUG so the operator-facing ERROR
+                     stream stays quiet.  We keep the same exit-code shape
+                     (Unix.WEXITED 127) and [process_error_output] reason
+                     as the catch-all branch so caller-side decisions are
+                     unchanged; this is a logging-severity change only. *)
+                  Log.Misc.debug
+                    "[Process_eio] argv pipe closed by reader: %s — %s"
+                    label (Printexc.to_string exn);
+                  ( Unix.WEXITED 127,
+                    "",
+                    process_error_output ~label
+                      ~reason:"pipe closed by reader" () )
                 ) else (
                   Log.Misc.error "[Process_eio] argv error: %s — %s" label
                     (Printexc.to_string exn);

@@ -95,6 +95,12 @@ val agent_card_json : Httpun.Request.t -> Yojson.Safe.t
     card served from [/.well-known/agent.json].  This route is public
     discovery metadata; mutable operations still require normal tool auth. *)
 
+(** {1 Runtime subsystem helpers} *)
+
+val cdal_health_json : unit -> Yojson.Safe.t
+(** [cdal_health_json ()] returns the CDAL health projection reused by
+    runtime-info routes and the full health response. *)
+
 (** {1 Health endpoints} *)
 
 val health_path_diagnostics :

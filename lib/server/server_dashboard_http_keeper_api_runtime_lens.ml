@@ -322,5 +322,11 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
                   ]
                 ~terminal_status:(runtime_lens_memory_terminal_status scan) );
           ] );
+      ( "clock_edges",
+        Server_dashboard_http_keeper_runtime_lens_clock_edges.runtime_lens_clock_edges_json
+          scan );
+      ( "clock_groups",
+        Server_dashboard_http_keeper_runtime_lens_clock_edges.runtime_lens_clock_groups_json
+          scan );
       ("gaps", `List (List.map runtime_lens_gap_json gaps));
     ]

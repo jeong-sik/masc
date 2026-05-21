@@ -104,6 +104,15 @@ let emit_runtime_manifest
               (Keeper_cascade_engine.manifest_fields ctx.cascade_engine
                @ [ ("decision", other) ]))
     in
+    let decision =
+      let decision = Option.value decision ~default:(`Assoc []) in
+      Some
+        (Keeper_runtime_manifest.with_clock_refs
+           ~clock_refs:
+             (Keeper_runtime_manifest.clock_refs_for_context manifest_ctx ~event
+                ())
+           decision)
+    in
     Keeper_runtime_manifest.make_for_context manifest_ctx ~event
       ~cascade_name:ctx.cascade_name ?status ?decision ()
     |> append

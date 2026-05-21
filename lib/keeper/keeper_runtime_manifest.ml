@@ -132,6 +132,145 @@ let safe_segment value =
   else
     sanitized
 
+let string_field_opt key value =
+  match value with
+  | Some value when String.trim value <> "" -> Some (key, `String value)
+  | Some _ | None -> None
+
+let clock_refs ?edge_id ?lane ?source_clock ?observed_at ?started_at
+    ?finished_at ?provider_attempt_id ?tool_batch_id ?checkpoint_id
+    ?compaction_id ?memory_injection_id ?event_bus_correlation_id
+    ?event_bus_run_id ?parent_event_id ?caused_by () =
+  `Assoc
+    (List.filter_map
+       (fun value -> value)
+       [
+         string_field_opt "edge_id" edge_id;
+         string_field_opt "lane" lane;
+         string_field_opt "source_clock" source_clock;
+         string_field_opt "observed_at" observed_at;
+         string_field_opt "started_at" started_at;
+         string_field_opt "finished_at" finished_at;
+         string_field_opt "provider_attempt_id" provider_attempt_id;
+         string_field_opt "tool_batch_id" tool_batch_id;
+         string_field_opt "checkpoint_id" checkpoint_id;
+         string_field_opt "compaction_id" compaction_id;
+         string_field_opt "memory_injection_id" memory_injection_id;
+         string_field_opt "event_bus_correlation_id" event_bus_correlation_id;
+         string_field_opt "event_bus_run_id" event_bus_run_id;
+         string_field_opt "parent_event_id" parent_event_id;
+         string_field_opt "caused_by" caused_by;
+       ])
+
+let clock_lane_of_event = function
+  | Turn_started
+  | Phase_gate_decided
+  | Pre_dispatch_blocked
+  | Receipt_appended
+  | Turn_finished ->
+    "keeper"
+  | Cascade_routed
+  | Provider_lane_resolved ->
+    "masc_policy_cascade"
+  | Provider_attempt_started
+  | Provider_attempt_finished ->
+    "provider"
+  | Tool_surface_selected -> "tool_runtime"
+  | Checkpoint_loaded
+  | State_snapshot_sidecar_saved
+  | Working_state_sidecar_saved
+  | Checkpoint_saved ->
+    "oas_agent"
+  | Context_injected
+  | Context_compacted
+  | Event_bus_correlated
+  | Memory_injected
+  | Memory_flushed ->
+    "memory_context"
+
+let turn_label ctx =
+  match ctx.manifest_keeper_turn_id with
+  | Some value -> string_of_int value
+  | None -> "unknown"
+
+let oas_turn_label = function
+  | Some value -> string_of_int value
+  | None -> "0"
+
+let context_edge_id ctx event =
+  Printf.sprintf "%s:keeper-%s:%s" ctx.manifest_trace_id (turn_label ctx)
+    (event_kind_to_string event)
+
+let context_tool_batch_id ctx ?oas_turn_count () =
+  Printf.sprintf "%s:keeper-%s:tool-batch-oas-%s"
+    ctx.manifest_trace_id (turn_label ctx) (oas_turn_label oas_turn_count)
+
+let context_checkpoint_id ctx ?oas_turn_count () =
+  Printf.sprintf "checkpoint:%s:oas-%s" ctx.manifest_trace_id
+    (oas_turn_label oas_turn_count)
+
+let context_compaction_id ctx =
+  Printf.sprintf "%s:keeper-%s:compaction-pre-dispatch"
+    ctx.manifest_trace_id (turn_label ctx)
+
+let context_memory_injection_id ctx ?oas_turn_count () =
+  Printf.sprintf "%s:keeper-%s:memory-oas-%s" ctx.manifest_trace_id
+    (turn_label ctx) (oas_turn_label oas_turn_count)
+
+let clock_refs_for_context ctx ~event ?oas_turn_count
+    ?event_bus_correlation_id ?event_bus_run_id ?parent_event_id ?caused_by () =
+  let tool_batch_id =
+    match event with
+    | Tool_surface_selected
+    | Provider_lane_resolved ->
+      Some (context_tool_batch_id ctx ?oas_turn_count ())
+    | _ -> None
+  in
+  let checkpoint_id =
+    match event with
+    | Checkpoint_loaded
+    | State_snapshot_sidecar_saved
+    | Working_state_sidecar_saved
+    | Checkpoint_saved ->
+      Some (context_checkpoint_id ctx ?oas_turn_count ())
+    | _ -> None
+  in
+  let compaction_id =
+    match event with
+    | Context_compacted
+    | Event_bus_correlated ->
+      Some (context_compaction_id ctx)
+    | _ -> None
+  in
+  let memory_injection_id =
+    match event with
+    | Memory_injected
+    | Memory_flushed ->
+      Some (context_memory_injection_id ctx ?oas_turn_count ())
+    | _ -> None
+  in
+  let source_clock =
+    match event with
+    | Event_bus_correlated -> "oas_event_bus"
+    | _ -> "wall"
+  in
+  clock_refs ~edge_id:(context_edge_id ctx event)
+    ~lane:(clock_lane_of_event event) ~source_clock ?tool_batch_id
+    ?checkpoint_id ?compaction_id ?memory_injection_id
+    ?event_bus_correlation_id ?event_bus_run_id ?parent_event_id ?caused_by ()
+
+let assoc_has_key key fields =
+  List.exists (fun (field, _) -> String.equal field key) fields
+
+let with_clock_refs ~clock_refs decision =
+  match clock_refs with
+  | `Assoc [] -> decision
+  | _ -> (
+    match decision with
+    | `Assoc fields when assoc_has_key "clock_refs" fields -> decision
+    | `Assoc fields -> `Assoc (fields @ [ ("clock_refs", clock_refs) ])
+    | other -> `Assoc [ ("decision", other); ("clock_refs", clock_refs) ])
+
 let make ?(ts = Masc_domain.now_iso ()) ~keeper_name ?agent_name ~trace_id
     ?generation ?keeper_turn_id ?oas_turn_count ~event ?cascade_name
     ?(status = "ok") ?(decision = `Assoc []) ?receipt_path ?checkpoint_path
@@ -190,18 +329,19 @@ let string_contains_substring haystack needle =
     in
     loop 0
 
-let is_provider_attempt_provenance_key = function
+let is_provider_model_safe_decision_key = function
   | "model_source"
   | "resolved_model_source"
   | "capability_source"
   | "fallback_authority"
-  | "provider_source_cascade" ->
+  | "provider_source_cascade"
+  | "provider_attempt_id" ->
     true
   | _ -> false
 
 let redacts_provider_model_key key =
   let key = String.lowercase_ascii key in
-  (not (is_provider_attempt_provenance_key key))
+  (not (is_provider_model_safe_decision_key key))
   &&
   (string_contains_substring key "provider"
    || string_contains_substring key "model"

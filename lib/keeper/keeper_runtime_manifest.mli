@@ -61,6 +61,38 @@ val event_kind_to_string : event_kind -> string
 val event_kind_of_string : string -> event_kind option
 val safe_segment : string -> string
 
+val clock_refs :
+  ?edge_id:string ->
+  ?lane:string ->
+  ?source_clock:string ->
+  ?observed_at:string ->
+  ?started_at:string ->
+  ?finished_at:string ->
+  ?provider_attempt_id:string ->
+  ?tool_batch_id:string ->
+  ?checkpoint_id:string ->
+  ?compaction_id:string ->
+  ?memory_injection_id:string ->
+  ?event_bus_correlation_id:string ->
+  ?event_bus_run_id:string ->
+  ?parent_event_id:string ->
+  ?caused_by:string ->
+  unit ->
+  Yojson.Safe.t
+
+val clock_refs_for_context :
+  turn_context ->
+  event:event_kind ->
+  ?oas_turn_count:int ->
+  ?event_bus_correlation_id:string ->
+  ?event_bus_run_id:string ->
+  ?parent_event_id:string ->
+  ?caused_by:string ->
+  unit ->
+  Yojson.Safe.t
+
+val with_clock_refs : clock_refs:Yojson.Safe.t -> Yojson.Safe.t -> Yojson.Safe.t
+
 val make :
   ?ts:string ->
   keeper_name:string ->

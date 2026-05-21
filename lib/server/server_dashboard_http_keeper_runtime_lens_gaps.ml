@@ -242,3 +242,7 @@ let runtime_lens_gaps ~terminal_event_present ~claim_scope ~config_drift scan =
            gaps
        else gaps)
   |> List.rev
+  |> fun gaps ->
+  gaps
+  @ Server_dashboard_http_keeper_runtime_lens_clock_edges.runtime_lens_clock_gaps
+      scan

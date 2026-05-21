@@ -92,6 +92,8 @@ function runtimeTrace(overrides: Partial<KeeperRuntimeTraceResponse> = {}): Keep
       },
       axes: {} as KeeperRuntimeTraceResponse['runtime_lens']['axes'],
       swimlanes: {} as KeeperRuntimeTraceResponse['runtime_lens']['swimlanes'],
+      clock_edges: [],
+      clock_groups: [],
       gaps: [],
     },
     linked_artifacts: {

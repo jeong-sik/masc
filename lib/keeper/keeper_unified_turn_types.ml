@@ -10,6 +10,10 @@ let json_of_string_opt = function
   | Some value -> `String value
 ;;
 
+let json_of_string_list values =
+  `List (List.map (fun value -> `String value) values)
+;;
+
 let turn_event_bus_manifest_decision
       (summary : Keeper_turn_cascade_budget.turn_event_bus_summary)
   =
@@ -40,6 +44,8 @@ let turn_event_bus_manifest_decision
       ("correlation_id", json_of_string_opt summary.correlation_id);
       ("run_id", json_of_string_opt summary.run_id);
       ("caused_by", json_of_string_opt summary.caused_by);
+      ("event_count", `Int summary.event_count);
+      ("payload_kinds", json_of_string_list summary.payload_kinds);
       ("overflow_imminent", overflow);
       ( "context_compact_started_count",
         `Int summary.context_compact_started_count );

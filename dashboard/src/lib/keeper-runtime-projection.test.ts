@@ -119,6 +119,8 @@ function runtimeTrace(overrides: Partial<KeeperRuntimeTraceResponse> = {}): Keep
       },
       axes: {},
       swimlanes: {},
+      clock_edges: [],
+      clock_groups: [],
       gaps: [],
     },
     linked_artifacts: { receipts: [], checkpoints: [], tool_call_logs: [] },

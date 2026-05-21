@@ -121,6 +121,13 @@ let append_runtime_manifest
     event =
   match runtime_manifest_context, runtime_manifest_append with
   | Some context, Some append ->
+      let decision =
+        Keeper_runtime_manifest.with_clock_refs
+          ~clock_refs:
+            (Keeper_runtime_manifest.clock_refs_for_context context ~event
+               ?oas_turn_count ())
+          decision
+      in
       let manifest =
         Keeper_runtime_manifest.make_for_context context ~event ?oas_turn_count
           ~status ~decision ()

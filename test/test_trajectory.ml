@@ -47,7 +47,7 @@ let with_tmpdir f =
   (try Unix.mkdir dir 0o755 with _ -> ());
   Fun.protect ~finally:(fun () ->
     (* Best effort cleanup *)
-    ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote dir)))
+    Fs_compat.remove_tree dir
   ) (fun () -> f dir)
 
 let test_create_accumulator () =
@@ -450,7 +450,7 @@ let test_read_entries_since () =
     let keeper = "test-keeper" in
     (* Create a trajectory file manually *)
     let traj_dir = Filename.concat masc_root (Printf.sprintf "trajectories/%s" keeper) in
-    ignore (Sys.command (Printf.sprintf "mkdir -p %s" (Filename.quote traj_dir)));
+    Fs_compat.mkdir_p traj_dir;
     let path = Filename.concat traj_dir "trace-100.jsonl" in
     let entry_json ts = Printf.sprintf
       {|{"ts":%.1f,"ts_iso":"2026-04-06T10:00:00Z","turn":1,"round":0,"tool_name":"keeper_bash","args":{},"result":"ok","duration_ms":100,"error":null,"cost_usd":0.001}|}
@@ -473,7 +473,7 @@ let test_read_entries_since_result_parses_gate_summary () =
     let masc_root = dir in
     let keeper = "test-keeper" in
     let traj_dir = Filename.concat masc_root (Printf.sprintf "trajectories/%s" keeper) in
-    ignore (Sys.command (Printf.sprintf "mkdir -p %s" (Filename.quote traj_dir)));
+    Fs_compat.mkdir_p traj_dir;
     let path = Filename.concat traj_dir "trace-101.jsonl" in
     let rows =
       [

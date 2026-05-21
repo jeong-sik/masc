@@ -1383,6 +1383,17 @@ let test_pr_review_action_metric_extracts_keeper_shell_approve () =
   check (option string) "approve route via" (Some "docker") event.route_via
 ;;
 
+let test_pr_review_action_metric_rejects_shell_pipeline () =
+  let event =
+    pr_review_event
+      ~tool_name:"keeper_bash"
+      ~input:(`Assoc [ "cmd", `String "gh pr review 13680 --approve | cat" ])
+      ~output_text:{|{"ok":true,"command":"gh pr review 13680 --approve | cat"}|}
+      ()
+  in
+  check (option reject) "pipeline rejected by typed parser" None event
+;;
+
 let pr_work_events ?route_via_fallback ~tool_name ~input ~output_text () =
   Hooks.For_testing.pr_work_action_metric_events_of_tool_io
     ~route_via_fallback
@@ -1847,6 +1858,10 @@ let () =
             "extracts keeper_shell approve"
             `Quick
             test_pr_review_action_metric_extracts_keeper_shell_approve
+        ; test_case
+            "rejects shell pipeline review action"
+            `Quick
+            test_pr_review_action_metric_rejects_shell_pipeline
         ] )
     ; ( "pr_work_action"
       , [ test_case

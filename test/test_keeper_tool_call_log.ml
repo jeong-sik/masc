@@ -28,7 +28,7 @@ let with_tmp_log f =
   Fun.protect
     ~finally:(fun () ->
       Keeper_tool_call_log.reset_for_testing ();
-      ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote dir))))
+      Fs_compat.remove_tree dir)
     (fun () -> f ())
 
 let with_tmp_log_dir f =
@@ -43,7 +43,7 @@ let with_tmp_log_dir f =
   Fun.protect
     ~finally:(fun () ->
       Keeper_tool_call_log.reset_for_testing ();
-      ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote dir))))
+      Fs_compat.remove_tree dir)
     (fun () -> f dir)
 
 let with_tmp_corrupt_tool_call_store f =
@@ -60,7 +60,7 @@ let with_tmp_corrupt_tool_call_store f =
   Fun.protect
     ~finally:(fun () ->
       Keeper_tool_call_log.reset_for_testing ();
-      ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote dir))))
+      Fs_compat.remove_tree dir)
     (fun () -> f ~dir ~masc_root)
 
 (* ── read_recent edge cases ─────────────────────────── *)

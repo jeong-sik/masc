@@ -113,10 +113,18 @@ let parse_bool_field raw field =
   Yojson.Safe.from_string raw |> Json.member field |> Json.to_bool_option
 
 let run_cmd argv =
-  let quoted = String.concat " " (List.map Filename.quote argv) in
-  match Sys.command quoted with
-  | 0 -> ()
-  | code -> Alcotest.failf "command failed (%d): %s" code quoted
+  match argv with
+  | [] -> invalid_arg "run_cmd: empty argv"
+  | prog :: args ->
+    let pid = Unix.create_process prog (Array.of_list argv) Unix.stdin Unix.stdout Unix.stderr in
+    (match Unix.waitpid [] pid with
+     | _, Unix.WEXITED 0 -> ()
+     | _, Unix.WEXITED code ->
+       Alcotest.failf "command failed (%d): %s" code (String.concat " " (prog :: args))
+     | _, Unix.WSIGNALED signal ->
+       Alcotest.failf "command signaled (%d): %s" signal (String.concat " " (prog :: args))
+     | _, Unix.WSTOPPED signal ->
+       Alcotest.failf "command stopped (%d): %s" signal (String.concat " " (prog :: args)))
 
 let write_executable path content =
   ignore (Fs_compat.save_file_atomic path content);

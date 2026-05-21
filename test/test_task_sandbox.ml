@@ -35,7 +35,7 @@ let make_temp_dir () =
        (Unix.getpid ()) !temp_counter (Random.int 999999))
   in
   if Sys.file_exists dir then
-    ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote dir)));
+    Fs_compat.remove_tree dir;
   Unix.mkdir dir 0o755;
   dir
 
@@ -47,7 +47,7 @@ let with_non_git_room f =
     (match saved_base with
      | Some v -> Unix.putenv "MASC_BASE_PATH" v
      | None -> Unix.putenv "MASC_BASE_PATH" "");
-    ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote dir)))
+    Fs_compat.remove_tree dir
   ) (fun () ->
     Unix.putenv "MASC_BASE_PATH" dir;
     let config = Coord.default_config dir in
@@ -144,7 +144,7 @@ let test_with_sandbox_fails_without_git () =
 let test_symlink_created_when_masc_exists () =
   let dir = make_temp_dir () in
   Fun.protect ~finally:(fun () ->
-    ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote dir)))
+    Fs_compat.remove_tree dir
   ) (fun () ->
     (* Create a fake .masc directory at "repo root" *)
     let masc_dir = Filename.concat dir Common.masc_dirname in
@@ -202,7 +202,7 @@ let seed_playground_clone ~base_path ~agent_name ~source_repo =
   let clone_path = Filename.concat repos_dir (Filename.basename source_repo) in
   Fs_compat.mkdir_p repos_dir;
   if Sys.file_exists clone_path then
-    ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote clone_path)));
+    Fs_compat.remove_tree clone_path;
   run_cmd (Printf.sprintf "git clone %s %s"
     (Filename.quote source_repo) (Filename.quote clone_path));
   clone_path
@@ -280,14 +280,14 @@ let make_meta_with_current_task ~name ~task_id =
 let with_lazy_worktree_fixture f =
   let base = make_temp_dir () in
   let dir = base in
-  ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote dir)));
+  Fs_compat.remove_tree dir;
   let saved_base = Sys.getenv_opt "MASC_BASE_PATH" in
   Fun.protect
     ~finally:(fun () ->
       (match saved_base with
        | Some v -> Unix.putenv "MASC_BASE_PATH" v
        | None -> Unix.putenv "MASC_BASE_PATH" "");
-      ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote dir))))
+      Fs_compat.remove_tree dir)
     (fun () ->
       Eio_main.run (fun env ->
         Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -378,14 +378,14 @@ let test_full_lifecycle () =
   let dir = base in
   let bare_dir = base ^ "-bare" in
   (* Remove the empty dir first since git clone wants a non-existent target *)
-  ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote dir)));
+  Fs_compat.remove_tree dir;
   let saved_base = Sys.getenv_opt "MASC_BASE_PATH" in
   Fun.protect ~finally:(fun () ->
     (match saved_base with
      | Some v -> Unix.putenv "MASC_BASE_PATH" v
      | None -> Unix.putenv "MASC_BASE_PATH" "");
-    ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote dir)));
-    ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote bare_dir)))
+    Fs_compat.remove_tree dir;
+    Fs_compat.remove_tree bare_dir
   ) (fun () ->
     Eio_main.run (fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -473,14 +473,14 @@ let test_full_lifecycle () =
 let test_create_infers_repo_from_task_file_evidence () =
   let base = make_temp_dir () in
   let dir = base in
-  ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote dir)));
+  Fs_compat.remove_tree dir;
   let saved_base = Sys.getenv_opt "MASC_BASE_PATH" in
   Fun.protect
     ~finally:(fun () ->
       (match saved_base with
        | Some v -> Unix.putenv "MASC_BASE_PATH" v
        | None -> Unix.putenv "MASC_BASE_PATH" "");
-      ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote dir))))
+      Fs_compat.remove_tree dir)
     (fun () ->
       Eio_main.run (fun env ->
         Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -554,14 +554,14 @@ let test_create_infers_repo_from_task_file_evidence () =
 let test_create_resolves_docker_visible_path_to_host_worktree () =
   let base = make_temp_dir () in
   let dir = base in
-  ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote dir)));
+  Fs_compat.remove_tree dir;
   let saved_base = Sys.getenv_opt "MASC_BASE_PATH" in
   Fun.protect
     ~finally:(fun () ->
       (match saved_base with
        | Some v -> Unix.putenv "MASC_BASE_PATH" v
        | None -> Unix.putenv "MASC_BASE_PATH" "");
-      ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote dir))))
+      Fs_compat.remove_tree dir)
     (fun () ->
       Eio_main.run (fun env ->
         Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -636,14 +636,14 @@ let test_create_resolves_docker_visible_path_to_host_worktree () =
 let test_create_fails_ambiguous_multi_repo_without_evidence () =
   let base = make_temp_dir () in
   let dir = base in
-  ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote dir)));
+  Fs_compat.remove_tree dir;
   let saved_base = Sys.getenv_opt "MASC_BASE_PATH" in
   Fun.protect
     ~finally:(fun () ->
       (match saved_base with
        | Some v -> Unix.putenv "MASC_BASE_PATH" v
        | None -> Unix.putenv "MASC_BASE_PATH" "");
-      ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote dir))))
+      Fs_compat.remove_tree dir)
     (fun () ->
       Eio_main.run (fun env ->
         Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -694,14 +694,14 @@ let test_create_fails_ambiguous_multi_repo_without_evidence () =
 let test_create_infers_repo_from_task_repo_mentions () =
   let base = make_temp_dir () in
   let dir = base in
-  ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote dir)));
+  Fs_compat.remove_tree dir;
   let saved_base = Sys.getenv_opt "MASC_BASE_PATH" in
   Fun.protect
     ~finally:(fun () ->
       (match saved_base with
        | Some v -> Unix.putenv "MASC_BASE_PATH" v
        | None -> Unix.putenv "MASC_BASE_PATH" "");
-      ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote dir))))
+      Fs_compat.remove_tree dir)
     (fun () ->
       Eio_main.run (fun env ->
         Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -806,14 +806,14 @@ let test_with_sandbox_lifecycle () =
   let base = make_temp_dir () in
   let dir = base in
   let bare_dir = base ^ "-bare" in
-  ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote dir)));
+  Fs_compat.remove_tree dir;
   let saved_base = Sys.getenv_opt "MASC_BASE_PATH" in
   Fun.protect ~finally:(fun () ->
     (match saved_base with
      | Some v -> Unix.putenv "MASC_BASE_PATH" v
      | None -> Unix.putenv "MASC_BASE_PATH" "");
-    ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote dir)));
-    ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote bare_dir)))
+    Fs_compat.remove_tree dir;
+    Fs_compat.remove_tree bare_dir
   ) (fun () ->
     Eio_main.run (fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -866,14 +866,14 @@ let test_with_sandbox_cleans_up_on_exception () =
   let base = make_temp_dir () in
   let dir = base in
   let bare_dir = base ^ "-bare" in
-  ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote dir)));
+  Fs_compat.remove_tree dir;
   let saved_base = Sys.getenv_opt "MASC_BASE_PATH" in
   Fun.protect ~finally:(fun () ->
     (match saved_base with
      | Some v -> Unix.putenv "MASC_BASE_PATH" v
      | None -> Unix.putenv "MASC_BASE_PATH" "");
-    ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote dir)));
-    ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote bare_dir)))
+    Fs_compat.remove_tree dir;
+    Fs_compat.remove_tree bare_dir
   ) (fun () ->
     Eio_main.run (fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);

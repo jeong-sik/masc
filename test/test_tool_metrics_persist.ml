@@ -24,7 +24,7 @@ let with_tmp_dir f =
   P.reset_for_testing ();
   Fun.protect ~finally:(fun () ->
     P.reset_for_testing ();
-    ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote dir)))
+    Fs_compat.remove_tree dir
   ) (fun () -> f dir)
 
 let test_enqueue_flush_restore () =

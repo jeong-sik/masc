@@ -1,30 +1,10 @@
-(** RFC-0091 PR-1 §5.1.4 differential observation test.
+(** Typed keeper_bash argv schema tests.
 
-    Exercises [Keeper_tool_bash_input.validate] on 8 representative
-    inputs and records the legacy [Worker_dev_tools.validate_command_paths]
-    verdict alongside (logged via [Printf.eprintf], not asserted).
-
-    The test asserts only the *typed* verdict — the legacy verdict is
-    observational because (a) RFC body's §4 audit predictions about
-    [path_syntax_blocked] coverage were partially wrong (probed during
-    PR-1: [find . -name *.ml] passes legacy [validate_command_paths]
-    despite the [*] glob token), and (b) PR-2 deletes the legacy lexer
-    entirely so its current verdicts are *expiring evidence* not invariant.
-
-    The observation logs are kept to make any actual divergence visible
-    to PR-2 author when migrating callers. *)
+    Exercises [Keeper_tool_bash_input.validate] on representative
+    structured inputs and asserts only the typed-schema verdict. *)
 
 open Masc_mcp
 module Bash_input = Keeper_tool_bash_input
-
-let legacy_verdict cmd =
-  match Worker_dev_tools.validate_command cmd with
-  | Error _ -> "legacy_vc=ERR"
-  | Ok () ->
-    (match Worker_dev_tools.validate_command_paths cmd with
-     | Ok () -> "legacy_vcp=OK"
-     | Error e -> Printf.sprintf "legacy_vcp=ERR(%s)" (String.sub e 0 (min 40 (String.length e))))
-;;
 
 let typed_ok input =
   match Bash_input.validate ~mode:Bash_input.Dev_full input with
@@ -50,7 +30,7 @@ let parse_json_error json =
 
 type case = {
   name : string;
-  legacy_cmd : string;
+  sample_cmd : string;
   typed : Bash_input.bash_input;
   expect_typed : bool;
   rationale : string;
@@ -58,31 +38,31 @@ type case = {
 
 let cases : case list =
   [ { name = "simple_rg"
-    ; legacy_cmd = "rg pattern lib/"
+    ; sample_cmd = "rg pattern lib/"
     ; typed = mk_exec "rg" [ "pattern"; "lib/" ]
     ; expect_typed = true
     ; rationale = "allowlisted executable + plain argv"
     }
   ; { name = "ls_flag"
-    ; legacy_cmd = "ls -la"
+    ; sample_cmd = "ls -la"
     ; typed = mk_exec "ls" [ "-la" ]
     ; expect_typed = true
     ; rationale = "short flag argv"
     }
   ; { name = "cat_path"
-    ; legacy_cmd = "cat README.md"
+    ; sample_cmd = "cat README.md"
     ; typed = mk_exec "cat" [ "README.md" ]
     ; expect_typed = true
     ; rationale = "relative path argv"
     }
   ; { name = "unknown_executable"
-    ; legacy_cmd = "unknown_cmd foo"
+    ; sample_cmd = "unknown_cmd foo"
     ; typed = mk_exec "unknown_cmd" [ "foo" ]
     ; expect_typed = false
     ; rationale = "executable not in dev allowlist"
     }
   ; { name = "find_glob_pattern"
-    ; legacy_cmd = "find . -name *.ml"
+    ; sample_cmd = "find . -name *.ml"
     ; typed = mk_exec "find" [ "."; "-name"; "*.ml" ]
     ; expect_typed = true
     ; rationale =
@@ -90,19 +70,19 @@ let cases : case list =
          not a shell glob; find handles its own pattern matching"
     }
   ; { name = "git_oneline"
-    ; legacy_cmd = "git log --oneline -5"
+    ; sample_cmd = "git log --oneline -5"
     ; typed = mk_exec "git" [ "log"; "--oneline"; "-5" ]
     ; expect_typed = true
     ; rationale = "multi-arg git invocation"
     }
   ; { name = "pwd_no_args"
-    ; legacy_cmd = "pwd"
+    ; sample_cmd = "pwd"
     ; typed = mk_exec "pwd" []
     ; expect_typed = true
     ; rationale = "zero-argv invocation"
     }
   ; { name = "argv_with_nul"
-    ; legacy_cmd = "echo foo"
+    ; sample_cmd = "echo foo"
     ; typed = mk_exec "echo" [ "foo\000bar" ]
     ; expect_typed = false
     ; rationale =
@@ -114,12 +94,10 @@ let cases : case list =
 
 let test_case case () =
   let typed = typed_ok case.typed in
-  let observed_legacy = legacy_verdict case.legacy_cmd in
   Printf.eprintf
-    "[differential] %s: cmd=%S | %s | typed=%s | %s\n"
+    "[typed_keeper_bash] %s: sample_cmd=%S | typed=%s | %s\n"
     case.name
-    case.legacy_cmd
-    observed_legacy
+    case.sample_cmd
     (if typed then "OK" else "ERR")
     case.rationale;
   Alcotest.(check bool)
@@ -277,7 +255,7 @@ let test_of_json_pipeline () =
   | Bash_input.Exec _ -> Alcotest.fail "expected Pipeline"
 ;;
 
-let test_of_json_rejects_legacy_cmd_only () =
+let test_of_json_rejects_cmd_string_only () =
   let msg =
     parse_json_error (`Assoc [ "cmd", `String "rg pattern lib/" ])
   in
@@ -287,7 +265,7 @@ let test_of_json_rejects_legacy_cmd_only () =
     (String_util.contains_substring_ci msg "typed keeper_bash input")
 ;;
 
-let test_of_json_rejects_legacy_cmd_with_exec () =
+let test_of_json_rejects_cmd_string_with_exec () =
   let msg =
     parse_json_error
       (`Assoc [ "cmd", `String "rg pattern lib/"; "executable", `String "rg" ])
@@ -480,7 +458,7 @@ let test_env_key_invalid () =
 ;;
 
 let suite =
-  ("RFC-0091 PR-1 differential",
+  ("typed keeper_bash argv schema",
     List.map
       (fun c -> Alcotest.test_case c.name `Quick (test_case c))
     cases
@@ -504,13 +482,13 @@ let suite =
       ; Alcotest.test_case "of_json_exec" `Quick test_of_json_exec
       ; Alcotest.test_case "of_json_pipeline" `Quick test_of_json_pipeline
       ; Alcotest.test_case
-          "of_json_rejects_legacy_cmd_only"
+          "of_json_rejects_cmd_string_only"
           `Quick
-          test_of_json_rejects_legacy_cmd_only
+          test_of_json_rejects_cmd_string_only
       ; Alcotest.test_case
-          "of_json_rejects_legacy_cmd_with_exec"
+          "of_json_rejects_cmd_string_with_exec"
           `Quick
-          test_of_json_rejects_legacy_cmd_with_exec
+          test_of_json_rejects_cmd_string_with_exec
       ; Alcotest.test_case
           "of_json_rejects_non_string_argv"
           `Quick
@@ -540,4 +518,4 @@ let suite =
       ])
 ;;
 
-let () = Alcotest.run "Keeper_tool_bash_input differential" [ suite ]
+let () = Alcotest.run "Keeper_tool_bash_input typed" [ suite ]

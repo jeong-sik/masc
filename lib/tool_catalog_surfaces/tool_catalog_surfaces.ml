@@ -68,8 +68,6 @@ let keeper_internal_tools =
        Dispatch still accepts it for backward compat. *)
     "keeper_shell"
   ; "keeper_bash"
-  ; "keeper_bash_output"
-  ; "keeper_bash_kill"
   ; "masc_worktree_create"
   ; "keeper_voice_speak"
   ; (* keeper_voice_listen is keeper-only; there is no public masc_voice_listen

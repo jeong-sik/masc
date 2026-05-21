@@ -25,8 +25,8 @@
     Workaround posture
     ──────────────────
     This is a *symptom suppression* layer. The root fix is to repair
-    the underlying error source (verifier sandbox docker, path-syntax
-    blocking, stale-turn timeouts, etc.). Once those are addressed,
+    the underlying error source (verifier sandbox docker, stale-turn
+    timeouts, etc.). Once those are addressed,
     [`First] outcomes alone should drop to baseline. The dedupe layer
     intentionally records first-emit at ERROR so a *new* category
     surfacing is not muffled. See [WORKAROUND-CARRYOVER] note in the
@@ -50,8 +50,6 @@
     visibility this module is designed to give. *)
 type error_kind =
   | Sandbox_docker (** ["sandbox docker exec failed ..."] family. *)
-  | Path_syntax_blocked
-      (** ["Path syntax blocked: ..."] keeper shell guard. *)
   | Stale_turn_timeout (** ["stale_turn_timeout(...)"] supervisor guard. *)
   | Fiber_unresolved (** ["fiber_unresolved"] sentinel from turn lifecycle. *)
   | Oas_timeout_budget (** ["oas_timeout_budget_loop(...)"] from OAS bridge. *)

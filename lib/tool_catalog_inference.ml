@@ -60,11 +60,7 @@ module TM = Tool_name.Masc
 module TMK = Tool_name.Masc_keeper
 
 let inferred_effect_domain_of_typed_tool_name = function
-  | TN.Keeper TK.Bash
-  | TN.Keeper TK.Bash_kill
-  | TN.Keeper TK.Shell ->
-      Some Main_worktree_write
-  | TN.Keeper TK.Bash_output
+  | TN.Keeper TK.Bash | TN.Keeper TK.Shell -> Some Main_worktree_write
   | TN.Keeper TK.Board_get
   | TN.Keeper TK.Board_list
   | TN.Keeper TK.Board_curation_read
@@ -300,9 +296,7 @@ let tool_group_of_typed_tool_name = function
   | TN.Keeper (TK.Bash | TK.Fs_edit | TK.Fs_read | TK.Ide_annotate | TK.Shell | TK.Write) ->
       Some Filesystem
   | TN.Keeper
-      ( TK.Bash_kill
-      | TK.Bash_output
-      | TK.Broadcast
+      ( TK.Broadcast
       | TK.Code_read
       | TK.Context_status
       | TK.Discovery

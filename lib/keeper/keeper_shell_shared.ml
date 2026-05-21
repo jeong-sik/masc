@@ -156,37 +156,37 @@ let readonly_shell_token_match tokens =
 
 (* Each branch ends with concrete Good:/Bad: examples so small-LLM keepers
    can self-correct without a retry loop. Prior form only named the
-   category, which left 57 command_blocked_readonly rejections on
-   2026-04-17/18 without a wire-level rewrite. See masc-mcp#8688. *)
+       category, which left 57 command_blocked_readonly rejections on
+       2026-04-17/18 without a wire-level rewrite. See masc-mcp#8688. *)
 let readonly_hint_of_category = function
   | "chaining" ->
       "`&&`, `||`, and `;` chaining are blocked in readonly shell. \
        Issue one command per Bash call, or use visible read/search \
        aliases such as Read and Grep. \
-       Good: Bash command='git status'. \
-       Bad: Bash command='git status && git log -1'."
+       Good: Bash executable='git' argv=['status']. \
+       Bad: raw shell text 'git status && git log -1'."
   | "redirect" ->
       "Redirects (`>`, `>>`, `| tee`) are blocked in readonly shell. \
        Use Write/Edit when a file must change, or Bash only when the \
        active policy exposes a write-capable Bash surface. \
        Good: Write file_path='notes.md' content='...'. \
-       Bad: command='echo hi > notes.md'."
+       Bad: raw shell text 'echo hi > notes.md'."
   | "git_write" ->
       "Use Bash only when the active policy exposes write-capable command \
        execution for git writes. \
-       Good: Bash command='git add lib/foo.ml'. \
-       Bad: Bash command='git commit -m x' without write access \
+       Good: Bash executable='git' argv=['add','lib/foo.ml']. \
+       Bad: raw shell text 'git commit -m x' without write access \
        does not accept git write commands)."
   | "package_install" ->
       "Package installation requires a write-capable Bash surface. \
-       Good: Bash command='opam install -y eio'. \
-       Bad: Bash command='opam install eio' without write access \
+       Good: Bash executable='opam' argv=['install','-y','eio']. \
+       Bad: raw shell text 'opam install eio' without write access \
        does not accept package installs)."
   | "destructive" ->
       "Use Bash only when the active policy exposes write-capable command \
        execution, not readonly shell. \
-       Good: Bash command='rm .tmp/scratch.log'. \
-       Bad: Bash command='rm -rf .tmp/' (readonly shell does \
+       Good: Bash executable='rm' argv=['.tmp/scratch.log']. \
+       Bad: raw shell text 'rm -rf .tmp/' (readonly shell does \
        not accept destructive commands)."
   | _ -> "This operation is not allowed in readonly shell."
 
@@ -201,8 +201,8 @@ let diagnosis_of_readonly_category category =
                 "&&, ||, and ; chain multiple commands; the readonly shell \
                  validates one command per call."
             ; rewrite =
-                Some "Split into two calls: Bash command='git status' \
-                      then Bash command='git log -1'."
+                Some "Split into two typed argv calls: Bash executable='git' \
+                      argv=['status'] then Bash executable='git' argv=['log','-1']."
             ; tool_suggestion = None }
   | "redirect" ->
       Some { Exec_core.rule_id = "readonly_redirect_blocked"
@@ -304,7 +304,7 @@ let diagnosis_of_block_reason reason =
       Some { Exec_core.rule_id = "command_empty"
             ; explanation = "The command string is empty."
             ; rewrite =
-                Some "Provide a command: Bash command='ls -la lib/'."
+                Some "Provide typed argv: Bash executable='ls' argv=['-la','lib/']."
             ; tool_suggestion = None }
 
 let process_status_is_timeout = function

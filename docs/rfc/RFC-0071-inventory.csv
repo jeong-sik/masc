@@ -313,7 +313,7 @@ lib/exec/risk_classifier.ml,46,false,unclassified
 lib/failure_envelope.ml,80,None,unclassified
 lib/failure_envelope.ml,146,None,unclassified
 lib/failure_envelope.ml,207,None,unclassified
-lib/gate_diff_types.ml,140,false,unclassified
+lib/shell_safety_types.ml,126,false,unclassified
 lib/gate/channel_gate_discord_state.ml,282,None,unclassified
 lib/gate/channel_gate_discord_state.ml,295,None,unclassified
 lib/gate/channel_gate_imessage_state.ml,298,None,unclassified
@@ -821,8 +821,6 @@ lib/server/server_routes_http_routes_channel_gate.ml,177,None,unclassified
 lib/server/server_routes_http_routes_credentials.ml,236,None,unclassified
 lib/server/server_routes_http_routes_dashboard.ml,70,None,unclassified
 lib/server/server_routes_http_routes_git_graph.ml,8,None,unclassified
-lib/server/server_routes_http_routes_legendary_bash.ml,243,None,unclassified
-lib/server/server_routes_http_routes_legendary_bash.ml,295,false,unclassified
 lib/server/server_routes_http_routes_provider_runs.ml,169,None,unclassified
 lib/server/server_routes_http_routes_provider_runs.ml,199,None,unclassified
 lib/server/server_routes_http_routes_provider_runs.ml,218,None,unclassified

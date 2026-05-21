@@ -26,6 +26,12 @@ let is_boundary_exempt ~tool_name ~input =
 let mk_cmd cmd =
   `Assoc [ ("op", `String "gh"); ("cmd", `String cmd) ]
 
+let mk_bash_exec executable argv =
+  `Assoc
+    [ "executable", `String executable
+    ; "argv", `List (List.map (fun arg -> `String arg) argv)
+    ]
+
 (* Legacy helpers for backward compat with older tests (not exercised;
    keeper_shell op=gh only accepts cmd, not args). *)
 let mk_args args =
@@ -404,7 +410,7 @@ let test_non_gh_tool () =
      classified as read-only even if the cmd looks like a gh read-only cmd *)
   Alcotest.(check bool) "keeper_bash is not affected"
     false
-    (is_ro ~tool_name:"keeper_bash" ~input:(mk_cmd "pr list"));
+    (is_ro ~tool_name:"keeper_bash" ~input:(mk_bash_exec "gh" [ "pr"; "list" ]));
   (* keeper_board_post is mutating (not read-only) but boundary-exempt *)
   Alcotest.(check bool) "keeper_board_post is not read-only"
     false
@@ -785,7 +791,9 @@ let test_masc_code_git_write_actions_bypass_boundary () =
 let test_keeper_bash_still_opens_boundary () =
   Alcotest.(check bool) "keeper_bash not exempt"
     false
-    (is_boundary_exempt ~tool_name:"keeper_bash" ~input:(mk_cmd "git status"))
+    (is_boundary_exempt
+       ~tool_name:"keeper_bash"
+       ~input:(mk_bash_exec "git" [ "status" ]))
 
 (* Regression: [masc_] prefix coordination aliases for [keeper_] prefix
    tools were missing from [is_main_worktree_boundary_exempt_with_input]

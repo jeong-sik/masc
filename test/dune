@@ -309,7 +309,6 @@
   test_keeper_state_machine_tla_correspondence
   test_keeper_lifecycle_hooks
   test_keeper_subprocess_registry
-  test_keeper_bg_task_cleanup
   test_keeper_social_model_magentic_ledger_fsm
   test_keeper_overflow_recovery
   test_telemetry_unified
@@ -327,9 +326,6 @@
   test_keeper_typed_labels
   test_shell_ir_typed_review_followup
   test_exec_shell_command_gate
-  test_shell_ir_validator
-  test_typed_advisor_counters
-  test_typed_authority_flag
   test_auth_resolve_labels
   test_keeper_classifier_helper
   test_persona_tool_reachability
@@ -636,7 +632,6 @@
   test_keeper_sub_fsm_guards
   test_keeper_cascade_tla_mirror
   test_keeper_subprocess_registry
-  test_keeper_bg_task_cleanup
   test_keeper_social_model_magentic_ledger_fsm
   test_keeper_overflow_recovery
   test_telemetry_unified
@@ -654,9 +649,6 @@
   test_keeper_typed_labels
   test_shell_ir_typed_review_followup
   test_exec_shell_command_gate
-  test_shell_ir_validator
-  test_typed_advisor_counters
-  test_typed_authority_flag
   test_auth_resolve_labels
   test_keeper_classifier_helper
   test_persona_tool_reachability
@@ -788,13 +780,9 @@
   test_board_ttl
   test_worker_dev_tools
   test_keeper_path_check_error
-  test_shadow_parse
   test_destructive_class
-  test_path_rewrite_validation
   test_board_content_dedup
-  test_gate_diff
   test_legendary_counters
-  test_legendary_bash_bg_tasks_route
   test_oas_integration
   test_memory_oas_5tier
   test_verifier_oas_bridge
@@ -1019,13 +1007,9 @@
   test_board_ttl
   test_worker_dev_tools
   test_keeper_path_check_error
-  test_shadow_parse
   test_destructive_class
-  test_gate_diff
-  test_path_rewrite_validation
   test_board_content_dedup
   test_legendary_counters
-  test_legendary_bash_bg_tasks_route
   test_oas_integration
   test_memory_oas_5tier
   test_verifier_oas_bridge

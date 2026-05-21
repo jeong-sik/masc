@@ -569,11 +569,10 @@ let start_keeper_loops
      Log.Server.error
        "subsystem orchestrator failed to start: %s"
        (Printexc.to_string exn));
-  (* RFC-0036 Phase A.3: register default keeper-lifecycle cleanup
-     hooks once during bootstrap. Both calls are Atomic-guarded
-     idempotent so re-bootstrapping (e.g. tests) is safe. *)
+  (* RFC-0036 Phase A.3: register default keeper-lifecycle cleanup hooks
+     once during bootstrap. The call is Atomic-guarded and idempotent so
+     re-bootstrapping (e.g. tests) is safe. *)
   Keeper_subprocess_registry.register_default_cleanup_hook ();
-  Keeper_bg_task_cleanup.register_default_cleanup_hook ();
   (* Build read-only tool surface shared by both judges. *)
   let judge_tool_names =
     List.map Tool_name.Masc.to_string Tool_name.Masc.[ Status; Tasks; Agents; Board_list ]

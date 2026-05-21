@@ -8,6 +8,7 @@ type t =
   { config : Coord.config
   ; meta : keeper_meta
   ; turn_id : int
+  ; raw_host_root : string
   ; host_root : string
   ; container_root : string
   ; uid : int
@@ -27,10 +28,15 @@ let create
       ~turn_id
       ()
   =
+  let raw_host_root =
+    Keeper_sandbox.host_root_abs_of_meta ~config meta
+    |> Keeper_alerting_path.strip_trailing_slashes
+  in
   { config
   ; meta
   ; turn_id
-  ; host_root = Keeper_sandbox.host_root_abs_of_meta ~config meta |> normalize_path
+  ; raw_host_root
+  ; host_root = raw_host_root |> normalize_path
   ; container_root =
       Keeper_sandbox.container_root meta.name
       |> Keeper_alerting_path.strip_trailing_slashes
@@ -305,6 +311,24 @@ let run_exec_with_status_once
   | Error _ as err -> err
   | Ok container_name ->
     let container_cwd = container_cwd_of_host t ~host_cwd:cwd in
+    let command_argv =
+      List.map
+        (fun arg ->
+           let rewritten =
+             Keeper_sandbox_runtime.rewrite_host_root_to_container_root
+               ~host_root:t.host_root
+               ~container_root:t.container_root
+               arg
+           in
+           if String.equal t.raw_host_root t.host_root
+           then rewritten
+           else
+             Keeper_sandbox_runtime.rewrite_host_root_to_container_root
+               ~host_root:t.raw_host_root
+               ~container_root:t.container_root
+               rewritten)
+        command_argv
+    in
     let argv =
       Keeper_sandbox_runtime.docker_command_argv ()
       @ [ "exec"; "--user"; Printf.sprintf "%d:%d" t.uid t.gid; "-w"; container_cwd ]

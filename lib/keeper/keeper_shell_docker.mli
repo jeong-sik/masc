@@ -82,6 +82,20 @@ val ensure_keeper_sandbox_runtime :
 (** Direct alias of [Keeper_sandbox_runtime.ensure_keeper_sandbox_runtime];
     returns the [--security-opt seccomp=...] argv fragment on success. *)
 
+val cmd_targets_gh : string -> bool
+(** [true] when the command targets the [gh] binary. Exposed for unit
+    tests that pin [gh_exit_class] wiring. *)
+
+val resolve_sandbox_root_git_cwd :
+  config:Coord.config ->
+  meta:Keeper_types.keeper_meta ->
+  cwd:string ->
+  cmd:string ->
+  string * string option
+(** Resolve a sandbox-root git/gh command to the single checked-out
+    repository when unambiguous; otherwise return an operator-visible
+    blocker explaining the missing or ambiguous repo context. *)
+
 (** [#10855] LLM hallucinated [gh --repo X api Y] (108 events / 24h).
     Returns [Some (repo_arg, endpoint)] when the misuse pattern is
     detected, [None] otherwise — caller emits a self-correcting

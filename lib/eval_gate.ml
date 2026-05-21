@@ -73,16 +73,16 @@ let tool_policy_of_config (config : gate_config) =
 (* ================================================================ *)
 
 (** Known destructive shell patterns — derived from the SSOT in
-    [Gate_diff_types.destructive_patterns].  Drops the typed class
+    [Shell_safety_types.destructive_patterns].  Drops the typed class
     field because [detect_destructive] only needs (substring, desc)
     for its return shape; callers that need the class go through
-    [Gate_diff_types.classify_destructive].  Sharing the source list
+    [Shell_safety_types.classify_destructive].  Sharing the source list
     means a new entry must update one place, not two. *)
 let destructive_patterns : (string * string) list =
   List.map
-    (fun { Gate_diff_types.pattern; description; class_ = _ } ->
+    (fun { Shell_safety_types.pattern; description; class_ = _ } ->
        pattern, description)
-    Gate_diff_types.destructive_patterns
+    Shell_safety_types.destructive_patterns
 
 (** Normalize a command string for pattern matching.
     Strips inline single/double quotes and collapses whitespace.
@@ -179,10 +179,10 @@ let evasion_indicators : evasion_indicator list = [
     This supplements [detect_destructive] by catching meta-patterns that
     normalization-based substring matching cannot handle.
 
-    Preserves the legacy [(pattern, description)] return shape for
-    callers that pattern-match on the substring (e.g. classify_legacy
-    in worker_dev_tools); the typed kind is available via
-    {!detect_evasion_typed} for new callers that need to discriminate. *)
+    Preserves the existing [(pattern, description)] return shape for
+    callers that render the matched substring. The typed kind is
+    available via {!detect_evasion_typed} for callers that need to
+    discriminate. *)
 let detect_evasion_typed (command : string) : evasion_indicator option =
   let cmd_lower = String.lowercase_ascii command in
   List.find_opt (fun { pattern; _ } ->

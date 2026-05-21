@@ -64,12 +64,11 @@ fatal: not a git repository (or any parent up to mount point /home/keeper/playgr
 Stopping at filesystem boundary (GIT_DISCOVERY_ACROSS_FILESYSTEM not set).
 ```
 
-Always set the tool `cwd` first. Do not put `cd ... && ...` inside the
-command string:
+Always set the tool `cwd` first. Do not encode `cd ... && ...` as shell text:
 
-- `Bash { command: "git status --short", cwd: "repos/<REPO_NAME>" }`
-- `Bash { command: "git log --oneline -5", cwd: "repos/<REPO_NAME>" }`
-- `Bash { command: "git diff", cwd: "repos/<REPO_NAME>/.worktrees/{your-name}-<task_id>" }`
+- `Bash { executable: "git", argv: ["status", "--short"], cwd: "repos/<REPO_NAME>" }`
+- `Bash { executable: "git", argv: ["log", "--oneline", "-5"], cwd: "repos/<REPO_NAME>" }`
+- `Bash { executable: "git", argv: ["diff"], cwd: "repos/<REPO_NAME>/.worktrees/{your-name}-<task_id>" }`
 
 When invoking Bash, supply `cwd: "repos/<REPO_NAME>"` (or the
 worktree path) instead of relying on the sandbox-root default cwd.  This

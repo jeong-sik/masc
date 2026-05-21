@@ -5,7 +5,6 @@ type deterministic_reason =
   | Command_shape_blocked
   | Task_state_probe_blocked
   | Destructive_operation_blocked
-  | Path_syntax_blocked
   | Path_outside_sandbox
   | Cwd_not_directory
   | Policy_blocked
@@ -22,7 +21,6 @@ let to_telemetry_key = function
     "deterministic_error_task_state_probe_blocked"
   | Destructive_operation_blocked ->
     "deterministic_error_destructive_operation_blocked"
-  | Path_syntax_blocked -> "deterministic_error_path_syntax_blocked"
   | Path_outside_sandbox -> "deterministic_error_path_outside_sandbox"
   | Cwd_not_directory -> "deterministic_error_cwd_not_directory"
   | Policy_blocked -> "deterministic_error_policy_blocked"
@@ -44,7 +42,6 @@ let to_string = function
     "raw shell task-state probe blocked; use keeper task/context tools"
   | Destructive_operation_blocked ->
     "destructive operation blocked (force push / rm -rf / push to main)"
-  | Path_syntax_blocked -> "path argument failed syntax check before execution"
   | Path_outside_sandbox -> "path argument outside keeper-allowed sandbox roots"
   | Cwd_not_directory -> "cwd argument is not a directory"
   | Policy_blocked -> "governance / preset policy rejected the call"
@@ -115,14 +112,11 @@ let reason_of_error_code = function
   | _ -> None
 ;;
 
-(* Path-prefixed sentinel string (no substring search): the keeper
-   path checker emits exactly these three prefixes via
-   [Keeper_path_check_error.error_prefix]. We compare the *full*
-   value of the [error] field — or, when the payload nests the
-   syntax in [detail.path_check.reason], that field — but we never
-   accept a partial match. *)
+(* Path-prefixed sentinel string (no substring search): path checks
+   compare the *full* value of the [error] field — or, when the
+   payload nests the reason in [detail.path_check.reason], that field
+   — but never accept a partial match. *)
 let path_check_reason_of_explicit = function
-  | "path_syntax_blocked" -> Some Path_syntax_blocked
   | "path_outside_sandbox" -> Some Path_outside_sandbox
   | "path_not_in_allowed_paths" -> Some Path_outside_sandbox
   | "cwd_not_directory" -> Some Cwd_not_directory

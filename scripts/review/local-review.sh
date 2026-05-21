@@ -370,7 +370,12 @@ EOF
 run_reviewer() {
   local prompt="$1"
   if [ -n "$REVIEW_COMMAND" ]; then
-    printf '%s' "$prompt" | bash -lc "$REVIEW_COMMAND"
+    local command_path="$TMP_DIR/review-command.sh"
+    local prompt_path="$TMP_DIR/review-prompt.txt"
+    printf '%s\n' "$REVIEW_COMMAND" > "$command_path"
+    chmod 600 "$command_path"
+    printf '%s' "$prompt" > "$prompt_path"
+    bash -l "$command_path" < "$prompt_path"
     return 0
   fi
   local request_json

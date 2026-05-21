@@ -341,6 +341,7 @@
   test_workspace_routes_keeper
   test_workspace_tree_exclusions
   test_provider_capability_matrix
+  test_provider_capability_required_action
   test_effect_evidence_source_path
   test_cognitive_gravity
   test_intentional_projection
@@ -663,6 +664,7 @@
   test_actionable_path_action
   test_stale_kill_class
   test_provider_capability_matrix
+  test_provider_capability_required_action
   test_provider_error
   test_keeper_synthetic_marker
   test_keeper_turn_fsm_wired_sites

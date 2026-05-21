@@ -60,6 +60,10 @@ val metric_cascade_routing_phase_overrides : string
     score decay for a provider. Labels: [provider_key]. *)
 val metric_cascade_server_error_skip_total : string
 
+(** Total required-tool candidates filtered before provider dispatch.
+    Labels: [provider], [missing_count]. *)
+val metric_cascade_pre_dispatch_required_tool_filtered : string
+
 (** Total cascade fallback_cascade cycles detected during [load_catalog].
     A cycle means a provider stall propagates through every cascade in the loop
     silently for 600s+ without escaping. Labels: [cascade] (the entry point of

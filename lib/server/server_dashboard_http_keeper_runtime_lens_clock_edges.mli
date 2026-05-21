@@ -5,6 +5,10 @@
     can add explicit [decision.clock_refs] over time and the projection will
     prefer those values. *)
 
+val clock_edge_jsons :
+  Server_dashboard_http_keeper_runtime_manifest_scan.runtime_manifest_scan ->
+  Yojson.Safe.t list
+
 val runtime_lens_clock_edges_json :
   Server_dashboard_http_keeper_runtime_manifest_scan.runtime_manifest_scan ->
   Yojson.Safe.t

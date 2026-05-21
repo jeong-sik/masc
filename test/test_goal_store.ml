@@ -185,6 +185,60 @@ let test_update_missing_goal_does_not_bump () =
   check int "version unchanged on missing update" before.version after.version;
   check string "updated_at unchanged on missing update" before.updated_at after.updated_at
 
+let test_stale_partial_write_preserves_existing_goals () =
+  with_room @@ fun config ->
+  let original_a =
+    {
+      (make_goal "goal-a" "original a") with
+      updated_at = "2026-05-21T00:00:00Z";
+    }
+  in
+  let original_b =
+    {
+      (make_goal "goal-b" "original b") with
+      updated_at = "2026-05-21T00:00:01Z";
+    }
+  in
+  Goal_store.write_state config
+    { version = 10; updated_at = "2026-05-21T00:00:01Z"; goals = [ original_a; original_b ] };
+  let stale_new_goal =
+    {
+      (make_goal "goal-new" "new from stale writer") with
+      updated_at = "2026-05-21T00:00:02Z";
+    }
+  in
+  Goal_store.write_state config
+    { version = 2; updated_at = "2026-05-21T00:00:02Z"; goals = [ stale_new_goal ] };
+  let after = Goal_store.read_state config in
+  let ids = after.goals |> List.map (fun goal -> goal.Goal_store.id) |> List.sort String.compare in
+  check (list string) "preserves existing and appends new goal"
+    [ "goal-a"; "goal-b"; "goal-new" ]
+    ids;
+  check bool "version advances past current" true (after.version > 10)
+
+let test_stale_partial_write_does_not_regress_newer_existing_goal () =
+  with_room @@ fun config ->
+  let current =
+    {
+      (make_goal "goal-a" "current title") with
+      updated_at = "2026-05-21T00:00:10Z";
+    }
+  in
+  Goal_store.write_state config
+    { version = 10; updated_at = "2026-05-21T00:00:10Z"; goals = [ current ] };
+  let stale =
+    {
+      (make_goal "goal-a" "stale title") with
+      updated_at = "2026-05-21T00:00:02Z";
+    }
+  in
+  Goal_store.write_state config
+    { version = 2; updated_at = "2026-05-21T00:00:02Z"; goals = [ stale ] };
+  let after = Goal_store.read_state config in
+  match after.goals with
+  | [ goal ] -> check string "keeps newer current row" "current title" goal.Goal_store.title
+  | _ -> fail "expected one preserved goal"
+
 let test_write_state_sanitizes_invalid_utf8_before_persisting () =
   with_room @@ fun config ->
   Safe_ops.reset_persistence_utf8_repair_stats_for_tests ();
@@ -233,5 +287,9 @@ let () =
             test_list_goals_filters_by_phase;
           test_case "missing update: no bump" `Quick
             test_update_missing_goal_does_not_bump;
+          test_case "stale partial write preserves existing goals" `Quick
+            test_stale_partial_write_preserves_existing_goals;
+          test_case "stale partial write keeps newer row" `Quick
+            test_stale_partial_write_does_not_regress_newer_existing_goal;
           test_case "write_state sanitizes invalid utf8" `Quick
             test_write_state_sanitizes_invalid_utf8_before_persisting ] ) ]

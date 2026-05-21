@@ -407,9 +407,61 @@ let read_state config =
   else
     default_state ()
 
-let write_state config state =
+let goal_is_newer ~(candidate : goal) ~(current : goal) =
+  String.compare candidate.updated_at current.updated_at >= 0
+
+let merge_stale_write ~current ~candidate =
+  let candidate_by_id = Hashtbl.create (max 16 (List.length candidate.goals)) in
+  List.iter
+    (fun goal -> Hashtbl.replace candidate_by_id goal.id goal)
+    candidate.goals;
+  let seen = Hashtbl.create (max 16 (List.length current.goals)) in
+  let merged_existing =
+    List.map
+      (fun current_goal ->
+        Hashtbl.replace seen current_goal.id ();
+        match Hashtbl.find_opt candidate_by_id current_goal.id with
+        | Some candidate_goal when goal_is_newer ~candidate:candidate_goal ~current:current_goal ->
+            candidate_goal
+        | Some _ | None -> current_goal)
+      current.goals
+  in
+  let appended =
+    candidate.goals
+    |> List.filter (fun goal -> not (Hashtbl.mem seen goal.id))
+  in
+  {
+    version = max current.version candidate.version + 1;
+    updated_at = Masc_domain.now_iso ();
+    goals = merged_existing @ appended;
+  }
+
+let preserve_against_stale_write config state =
+  let path = goals_path config in
+  if Coord.path_exists config path then
+    match state_of_yojson (Coord.read_json config path) with
+    | Ok current when current.version > state.version ->
+        Log.Misc.warn
+          "goal_store: preserving current goals against stale write \
+           current_version=%d candidate_version=%d current_goals=%d \
+           candidate_goals=%d"
+          current.version state.version (List.length current.goals)
+          (List.length state.goals);
+        merge_stale_write ~current ~candidate:state
+    | Ok _ | Error _ -> state
+  else
+    state
+
+let write_state_unlocked config state =
   ensure_dirs config;
   Coord.write_json config (goals_path config) (state_to_yojson state)
+
+let write_state config state =
+  ensure_dirs config;
+  let path = goals_path config in
+  Coord.with_file_lock config path (fun () ->
+      let state = preserve_against_stale_write config state in
+      write_state_unlocked config state)
 
 let now_ms () =
   int_of_float (Time_compat.now () *. 1000.0)
@@ -429,7 +481,7 @@ let update_state config f =
   Coord.with_file_lock config lock_path (fun () ->
       let state = read_state config in
       let next_state = f state in
-      write_state config next_state;
+      write_state_unlocked config next_state;
       next_state)
 
 let get_goal config ~goal_id =
@@ -451,7 +503,7 @@ let update_goal config ~goal_id f =
               goals = replace_goal state.goals updated_goal;
             }
           in
-          write_state config next_state;
+          write_state_unlocked config next_state;
           Ok updated_goal)
 
 let delete_goal config ~goal_id =

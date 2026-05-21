@@ -192,12 +192,14 @@ val read_state : Coord.config -> state
 
 val write_state : Coord.config -> state -> unit
 (** Atomic write of the canonical state to {!goals_path}.
-    Caller is responsible for serialising concurrent
-    writes — the internal mutators ({!update_goal},
-    {!delete_goal}, {!upsert_goal}, {!review_goal}) all
-    hold the file lock around their read-modify-write
-    block; raw users of {!write_state} (the test harness
-    only) should not race against them. *)
+    Takes the goal-store file lock.  When the on-disk state
+    has a newer [version] than the supplied state, [write_state]
+    preserves the newer on-disk goals and merges in any newer
+    or new rows from the supplied state instead of letting a
+    stale/partial writer truncate the store.  The internal
+    mutators ({!update_goal}, {!delete_goal}, {!upsert_goal},
+    {!review_goal}) perform their own locked read-modify-write
+    and are the preferred API for targeted changes. *)
 
 (** {1 Single-goal operations} *)
 

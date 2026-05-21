@@ -990,6 +990,22 @@ let () =
           (contains_substring redacted "secret-value");
         Alcotest.(check bool) "placeholder added" true
           (contains_substring redacted "--token [REDACTED]"));
+      Alcotest.test_case "redacts quoted sensitive flag values" `Quick (fun () ->
+        let redacted =
+          Worker_dev_tools.sanitize_command_for_log
+            "gh api --token 'secret value' /user"
+        in
+        Alcotest.(check bool) "quoted secret removed" false
+          (contains_substring redacted "secret value");
+        Alcotest.(check bool) "placeholder added" true
+          (contains_substring redacted "--token [REDACTED]"));
+      Alcotest.test_case "fail-closes malformed sensitive command" `Quick (fun () ->
+        let redacted =
+          Worker_dev_tools.sanitize_command_for_log
+            "gh api --token 'secret value"
+        in
+        Alcotest.(check string) "malformed sensitive command redacted"
+          "[REDACTED]" redacted);
     ];
     "validate_gh_command", [
       Alcotest.test_case "accepts allowed subcommand with no repo flag" `Quick (fun () ->

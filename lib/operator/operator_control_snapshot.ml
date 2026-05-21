@@ -4,37 +4,11 @@ include Operator_digest
 
 include Operator_control_context_snapshot
 
-let non_empty_trimmed_string_opt value =
-  let trimmed = String.trim value in
-  if trimmed = "" then None else Some trimmed
-;;
-
-let keeper_runtime_identity_fields (meta : Keeper_types.keeper_meta) =
-  let cascade_name = Keeper_types.cascade_name_of_meta meta in
-  let effective_cascade = Keeper_cascade_profile.resolve_live cascade_name in
-  [ "cascade_name", string_option_to_json (non_empty_trimmed_string_opt cascade_name)
-  ; "cascade_canonical", `String effective_cascade
-  ; "selected_cascade_canonical", `String effective_cascade
-  ; "primary_model", `Null
-  ; "active_model", `Null
-  ; "active_model_label", `Null
-  ; "last_model_used_label", `Null
-  ]
-;;
-
-let degraded_keeper_runtime_identity_fields (meta : Keeper_types.keeper_meta) =
-  let cascade_name = non_empty_trimmed_string_opt (Keeper_types.cascade_name_of_meta meta) in
-  let cascade_json = string_option_to_json cascade_name in
-  [ "cascade_name", cascade_json
-  ; "cascade_canonical", cascade_json
-  ; "selected_cascade_canonical", cascade_json
-  ; "primary_model", `Null
-  ; "active_model", `Null
-  ; "active_model_label", `Null
-  ; "last_model_used_label", `Null
-  ]
-;;
-
+(* Keeper runtime identity fields extracted to
+   [Operator_control_snapshot_identity_fields] (godfile decomp). *)
+let non_empty_trimmed_string_opt = Operator_control_snapshot_identity_fields.non_empty_trimmed_string_opt
+let keeper_runtime_identity_fields = Operator_control_snapshot_identity_fields.keeper_runtime_identity_fields
+let degraded_keeper_runtime_identity_fields = Operator_control_snapshot_identity_fields.degraded_keeper_runtime_identity_fields
 type action_result_status =
   | ActionOk
   | ActionError

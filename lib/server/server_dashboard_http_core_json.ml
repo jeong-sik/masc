@@ -70,8 +70,9 @@ let operator_cache_json ?cache_key ~scope json =
     ; "stale_age_ms", diagnostic_field "stale_age_ms"
     ; "request_cache_key", json_string_opt cache_key
     ; "request_cache_ttl_s", `Float 5.0
-    ; "request_timeout_s", `Float dashboard_request_timeout_s
-    ; "background_refresh_interval_s", `Float operator_refresh_interval_s
+    ; "request_timeout_s", `Float Server_dashboard_http_core_cache.dashboard_request_timeout_s
+    ; ( "background_refresh_interval_s"
+      , `Float Server_dashboard_http_core_operator.operator_refresh_interval_s )
     ; "policy", `String "cached_surface plus HTTP stale-while-revalidate"
     ]
 ;;

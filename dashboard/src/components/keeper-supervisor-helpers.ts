@@ -13,17 +13,24 @@ export const CRASH_CATEGORY_KEYS: readonly CrashCategory[] = [
   'other',
 ] as const
 
-/**
- * Classify a crash reason string into a coarse cohort.
- * `null`/`undefined`/empty → 'other'.
- * Matches existing prefix-based cohort assignment in CrashCohortBar.
- */
+// Known crash-reason prefixes emitted by the supervisor.
+// The backend constructs free-form strings like "heartbeat_timeout",
+// "turn_execution_failed", "fiber_crash", "Exception: …" — the prefix
+// determines the cohort. Kept as an explicit prefix→category map so new
+// prefixes require an entry here rather than falling through silently.
+const CRASH_PREFIX_MAP: ReadonlyArray<{ readonly prefix: string; readonly category: CrashCategory }> = [
+  { prefix: 'heartbeat', category: 'heartbeat' },
+  { prefix: 'turn', category: 'turn' },
+  { prefix: 'fiber', category: 'fiber' },
+  { prefix: 'exception', category: 'exception' },
+]
+
 export function categorizeCrashReason(reason: string | null | undefined): CrashCategory {
   if (!reason) return 'other'
-  if (reason.startsWith('heartbeat')) return 'heartbeat'
-  if (reason.startsWith('turn')) return 'turn'
-  if (reason.startsWith('fiber')) return 'fiber'
-  if (reason.startsWith('exception')) return 'exception'
+  const lower = reason.toLowerCase()
+  for (const { prefix, category } of CRASH_PREFIX_MAP) {
+    if (lower.startsWith(prefix)) return category
+  }
   return 'other'
 }
 

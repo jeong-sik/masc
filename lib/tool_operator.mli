@@ -71,6 +71,11 @@ val dispatch :
     safe-to-expose subset.  The full {!schemas} is consumed inside
     the keeper-bound dispatcher only. *)
 
+val schemas : Masc_domain.tool_schema list
+(** Full operator tool schemas — includes hidden/internal operator
+    control tools consumed by local keeper-bound dispatch surfaces and
+    schema coverage tests. *)
+
 val remote_schemas : Masc_domain.tool_schema list
 (** Operator-remote tool schemas — the subset advertised to remote
     MCP clients.  Pinned at the .mli seam so dashboard / SDK

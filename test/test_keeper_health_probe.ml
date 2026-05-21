@@ -4,7 +4,10 @@
    tests in test_keeper_supervisor.ml. *)
 
 module H = Masc_mcp.Keeper_health_probe
+module R = Masc_mcp.Keeper_registry
 module KSM = Masc_mcp.Keeper_state_machine
+
+let pressure_label_t = Alcotest.(option string)
 
 let pp_status fmt = function
   | H.Unknown -> Format.fprintf fmt "Unknown"
@@ -22,6 +25,30 @@ let status_eq a b =
 
 let status_t = Alcotest.testable pp_status status_eq
 
+let make_meta ?cascade_name name =
+  let fields =
+    [
+      ("name", `String name);
+      ("agent_name", `String name);
+      ("trace_id", `String ("trace-" ^ name));
+    ]
+  in
+  let fields =
+    match cascade_name with
+    | Some cascade_name -> ("cascade_name", `String cascade_name) :: fields
+    | None -> fields
+  in
+  match Masc_test_deps.meta_of_json_fixture (`Assoc fields) with
+  | Ok meta -> meta
+  | Error err -> Alcotest.fail ("make_meta failed: " ^ err)
+;;
+
+let pressure_label_of_failure_reason reason =
+  Option.map
+    H.runtime_pressure_class_to_string
+    (H.runtime_pressure_class_of_failure_reason (Some reason))
+;;
+
 let test_get_cascade_status_default_unknown () =
   Alcotest.check
     status_t
@@ -35,6 +62,127 @@ let test_check_cascade_health_all_healthy () =
   Sys.remove base_dir;
   let results = Masc_mcp.Keeper_health_probe.check_cascade_health ~base_path:base_dir in
   Alcotest.(check int) "empty registry = no cascades" 0 (List.length results)
+;;
+
+let test_runtime_pressure_classifier () =
+  Alcotest.check
+    pressure_label_t
+    "client capacity"
+    (Some "client_capacity_full")
+    (pressure_label_of_failure_reason
+       (R.Provider_runtime_error
+          { code = "capacity_backpressure"
+          ; detail = "source=client_capacity; all client slots full"
+          ; provider_id = None
+          ; http_status = None
+          }));
+  Alcotest.check
+    pressure_label_t
+    "tier admission"
+    (Some "tier_admission_full")
+    (pressure_label_of_failure_reason
+       (R.Provider_runtime_error
+          { code = "capacity_backpressure"
+          ; detail = "inflight_capacity_full tier=strict_tool_candidates"
+          ; provider_id = None
+          ; http_status = None
+          }));
+  Alcotest.check
+    pressure_label_t
+    "provider capacity"
+    (Some "provider_capacity")
+    (pressure_label_of_failure_reason
+       (R.Provider_runtime_error
+          { code = "provider_capacity_backpressure"
+          ; detail = "rate limit"
+          ; provider_id = Some "openai"
+          ; http_status = Some 429
+          }));
+  Alcotest.check
+    pressure_label_t
+    "provider dns"
+    (Some "provider_dns_failure")
+    (pressure_label_of_failure_reason
+       (R.Provider_runtime_error
+          { code = "provider_error"
+          ; detail = "getaddrinfo ENOTFOUND api.z.ai"
+          ; provider_id = Some "zai"
+          ; http_status = None
+          }));
+  Alcotest.check
+    pressure_label_t
+    "provider timeout"
+    (Some "provider_timeout")
+    (pressure_label_of_failure_reason
+       (R.Provider_runtime_error
+          { code = "provider_error"
+          ; detail = "inter_chunk_idle timeout"
+          ; provider_id = None
+          ; http_status = Some 504
+          }));
+  Alcotest.check
+    pressure_label_t
+    "provider error"
+    (Some "provider_error")
+    (pressure_label_of_failure_reason
+       (R.Provider_runtime_error
+          { code = "provider_error"
+          ; detail = "unexpected provider failure"
+          ; provider_id = None
+          ; http_status = Some 500
+          }));
+  Alcotest.check
+    pressure_label_t
+    "oas timeout"
+    (Some "oas_timeout_budget")
+    (pressure_label_of_failure_reason (R.Oas_timeout_budget_loop { count = 2 }))
+;;
+
+let test_run_once_records_specific_failure_ratio_reason () =
+  R.clear ();
+  let base_dir = Filename.temp_file "probe-pressure-" "" in
+  Sys.remove base_dir;
+  let cascade_name =
+    Printf.sprintf "probe-provider-dns-%d" (Unix.getpid ())
+  in
+  let register_crashed name reason =
+    let meta = make_meta ~cascade_name name in
+    (* See: fixture setup only needs the registry side effect. *)
+    ignore (R.register ~base_path:base_dir name meta);
+    R.set_failure_reason ~base_path:base_dir name (Some reason);
+    (* See: fixture setup only needs the terminal-event side effect. *)
+    ignore
+      (R.dispatch_event
+         ~base_path:base_dir
+         name
+         (KSM.Fiber_terminated
+            { outcome = "test"; provider_id = None; http_status = None }))
+  in
+  Fun.protect
+    ~finally:R.clear
+    (fun () ->
+       register_crashed
+         "provider-dns-a"
+         (R.Provider_runtime_error
+            { code = "provider_error"
+            ; detail = "getaddrinfo ENOTFOUND api.z.ai"
+            ; provider_id = Some "zai"
+            ; http_status = None
+            });
+       register_crashed
+         "provider-dns-b"
+         (R.Provider_runtime_error
+            { code = "provider_error"
+            ; detail = "getaddrinfo ENOTFOUND api.z.ai"
+            ; provider_id = Some "zai"
+            ; http_status = None
+            });
+       H.run_once ~base_path:base_dir;
+       Alcotest.check
+         status_t
+         "unhealthy reason carries dominant runtime pressure"
+         (H.Unhealthy "failure_ratio:provider_dns_failure")
+         (H.get_cascade_status ~cascade_name))
 ;;
 
 (* ------------------------------------------------------------------ *)
@@ -141,6 +289,14 @@ let () =
             "empty_registry_all_healthy"
             `Quick
             test_check_cascade_health_all_healthy
+        ; Alcotest.test_case
+            "runtime_pressure_classifier"
+            `Quick
+            test_runtime_pressure_classifier
+        ; Alcotest.test_case
+            "run_once_records_specific_failure_ratio_reason"
+            `Quick
+            test_run_once_records_specific_failure_ratio_reason
         ] )
     ; ( "phase_predicate"
       , [ Alcotest.test_case

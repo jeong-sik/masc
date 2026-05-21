@@ -4,6 +4,19 @@ type semaphore_wait_observation_kind =
   | Semaphore_wait_pending
   | Semaphore_wait_timeout
 
+let skip_reason_component raw =
+  let normalized = String.lowercase_ascii (String.trim raw) in
+  let mapped =
+    String.map
+      (function
+        | ('a' .. 'z' | '0' .. '9' | '_') as c -> c
+        | '-' -> '_'
+        | _ -> '_')
+      normalized
+  in
+  if String.equal mapped "" then "unknown" else mapped
+;;
+
 let semaphore_wait_observation_reasons ?phase_label ~kind ~channel () =
   let kind_reason =
     match kind with
@@ -15,10 +28,28 @@ let semaphore_wait_observation_reasons ?phase_label ~kind ~channel () =
     | Some phase -> "phase_" ^ phase
     | None -> "peers_holding_slot"
   in
-  [ kind_reason
-  ; wait_reason
-  ; "channel_" ^ Keeper_world_observation.channel_to_string channel
-  ]
+  let class_reason =
+    match kind with
+    | Semaphore_wait_pending -> None
+    | Semaphore_wait_timeout ->
+      let class_label =
+        match Option.map skip_reason_component phase_label with
+        | Some "autonomous_queue_head" -> "admission_queue_wait_timeout"
+        | Some "autonomous_slot" -> "autonomous_slot_wait_timeout"
+        | Some ("reactive_slot" | "turn_slot") -> "turn_slot_wait_timeout"
+        | Some _ | None -> "slot_wait_timeout"
+      in
+      Some ("class_" ^ class_label)
+  in
+  let base =
+    [ kind_reason
+    ; wait_reason
+    ; "channel_" ^ Keeper_world_observation.channel_to_string channel
+    ]
+  in
+  match class_reason with
+  | Some reason -> base @ [ reason ]
+  | None -> base
 ;;
 
 let record_semaphore_wait_observation
@@ -42,17 +73,28 @@ type cascade_backpressure_decision =
       reason : string;
     }
 
-let skip_reason_component raw =
-  let normalized = String.lowercase_ascii (String.trim raw) in
-  let mapped =
-    String.map
-      (function
-        | ('a' .. 'z' | '0' .. '9' | '_') as c -> c
-        | '-' -> '_'
-        | _ -> '_')
-      normalized
+let strip_prefix ~prefix value =
+  if String.starts_with ~prefix value
+  then
+    Some
+      (String.sub
+         value
+         (String.length prefix)
+         (String.length value - String.length prefix))
+  else None
+;;
+
+let cascade_backpressure_class_reason ~reason =
+  let component = skip_reason_component reason in
+  let label =
+    match strip_prefix ~prefix:"failure_ratio_" component with
+    | Some suffix -> suffix
+    | None -> component
   in
-  if String.equal mapped "" then "unknown" else mapped
+  match Keeper_health_probe.runtime_pressure_class_of_label label with
+  | Some cls ->
+    Some ("class_" ^ Keeper_health_probe.runtime_pressure_class_to_string cls)
+  | None -> None
 ;;
 
 let cascade_backpressure_observation_reasons ~reason =
@@ -61,10 +103,13 @@ let cascade_backpressure_observation_reasons ~reason =
     then "cascade_resilience"
     else "cascade_unhealthy"
   in
-  [ "cascade_backpressure"
-  ; category
-  ; "reason_" ^ skip_reason_component reason
-  ]
+  let base = [ "cascade_backpressure"; category ] in
+  let class_reasons =
+    match cascade_backpressure_class_reason ~reason with
+    | Some class_reason -> [ class_reason ]
+    | None -> []
+  in
+  base @ class_reasons @ [ "reason_" ^ skip_reason_component reason ]
 ;;
 
 let cascade_resilience_backpressure_reason

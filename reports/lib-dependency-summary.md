@@ -7,11 +7,11 @@
 
 | Metric | Current | Delta |
 | --- | --- | --- |
-| total_modules | 1054 | - |
-| total_edges | 4426 | - |
+| total_modules | 1056 | - |
+| total_edges | 4438 | - |
 | avg_out_degree | 4.2 | - |
 | scc_count | 1 | - |
-| largest_scc_size | 222 | - |
+| largest_scc_size | 224 | - |
 
 ## Room/Coordination Dependents
 
@@ -24,13 +24,13 @@
 | Rank | Module | Dependents |
 | --- | --- | --- |
 | 1 | Prometheus | 230 |
-| 2 | Keeper_types | 222 |
+| 2 | Keeper_types | 224 |
 | 3 | Coord | 193 |
 | 4 | Keeper_metrics | 151 |
 | 5 | Keeper_registry | 81 |
-| 6 | Keeper_id | 65 |
+| 6 | Keeper_id | 66 |
 | 7 | Keeper_state_machine | 59 |
-| 8 | Mcp_server | 50 |
+| 8 | Mcp_server | 51 |
 | 9 | Keeper_cascade_profile | 48 |
 | 10 | Tool_dispatch | 47 |
 
@@ -40,7 +40,7 @@
 | --- | --- | --- |
 | 1 | Server_bootstrap_loops | 76 |
 | 2 | Server_runtime_bootstrap | 58 |
-| 3 | Keeper_agent_run | 50 |
+| 3 | Keeper_agent_run | 51 |
 | 4 | Keeper_run_tools | 48 |
 | 5 | Keeper_unified_turn | 44 |
 | 6 | Mcp_server_eio_execute | 43 |

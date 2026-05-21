@@ -1,9 +1,9 @@
 {
   "stats": {
-    "total_modules": 1054,
-    "total_edges": 4426,
+    "total_modules": 1056,
+    "total_edges": 4438,
     "avg_out_degree": 4.2,
-    "leaf_count": 268,
+    "leaf_count": 267,
     "root_count": 165
   },
   "top_imported": [
@@ -13,7 +13,7 @@
     ],
     [
       "Keeper_types",
-      222
+      224
     ],
     [
       "Coord",
@@ -29,7 +29,7 @@
     ],
     [
       "Keeper_id",
-      65
+      66
     ],
     [
       "Keeper_state_machine",
@@ -37,7 +37,7 @@
     ],
     [
       "Mcp_server",
-      50
+      51
     ],
     [
       "Keeper_cascade_profile",
@@ -48,19 +48,19 @@
       47
     ],
     [
+      "Server_auth",
+      42
+    ],
+    [
       "Keeper_config",
       42
     ],
     [
-      "Server_auth",
-      41
+      "Server_utils",
+      40
     ],
     [
       "Tool_catalog",
-      39
-    ],
-    [
-      "Server_utils",
       39
     ],
     [
@@ -99,7 +99,7 @@
     ],
     [
       "Keeper_agent_run",
-      50
+      51
     ],
     [
       "Keeper_run_tools",
@@ -220,6 +220,7 @@
       "Keeper_agent_prompt_metrics",
       "Keeper_agent_result",
       "Keeper_agent_run",
+      "Keeper_agent_run_contract_retry",
       "Keeper_agent_run_phase0_telemetry",
       "Keeper_agent_run_receipt_append",
       "Keeper_agent_tool_surface",
@@ -290,6 +291,7 @@
       "Keeper_run_prompt",
       "Keeper_run_tools",
       "Keeper_run_tools_hook_accumulator",
+      "Keeper_run_tools_task_scope",
       "Keeper_run_tools_work_discovery",
       "Keeper_runtime_contract",
       "Keeper_runtime_manifest",
@@ -633,7 +635,7 @@
     },
     {
       "prefix": "server_dashboard",
-      "module_count": 44,
+      "module_count": 45,
       "members": [
         "Server_dashboard_cascade_profile_gate",
         "Server_dashboard_compact_receipt_json",
@@ -650,6 +652,7 @@
         "Server_dashboard_http_core_operator",
         "Server_dashboard_http_core_operator_digest_http",
         "Server_dashboard_http_core_operator_query",
+        "Server_dashboard_http_core_operator_snapshot_http",
         "Server_dashboard_http_core_runtime",
         "Server_dashboard_http_core_snapshot_refresh",
         "Server_dashboard_http_delete_actions",
@@ -680,9 +683,9 @@
         "Server_dashboard_snapshot_select",
         "Server_dashboard_surface"
       ],
-      "internal_edges": 60,
+      "internal_edges": 62,
       "external_dep_count": 96,
-      "coupling_ratio": 0.385
+      "coupling_ratio": 0.392
     },
     {
       "prefix": "keeper_social",
@@ -715,8 +718,8 @@
         "Keeper_hooks_oas_types"
       ],
       "internal_edges": 9,
-      "external_dep_count": 17,
-      "coupling_ratio": 0.346
+      "external_dep_count": 16,
+      "coupling_ratio": 0.36
     },
     {
       "prefix": "keeper_supervisor",
@@ -1324,6 +1327,27 @@
       "coupling_ratio": 0.143
     },
     {
+      "prefix": "keeper_agent",
+      "module_count": 12,
+      "members": [
+        "Keeper_agent_checkpoint_hygiene",
+        "Keeper_agent_error",
+        "Keeper_agent_memory_episode",
+        "Keeper_agent_prompt_metrics",
+        "Keeper_agent_result",
+        "Keeper_agent_run",
+        "Keeper_agent_run_contract_helpers",
+        "Keeper_agent_run_contract_retry",
+        "Keeper_agent_run_phase0_telemetry",
+        "Keeper_agent_run_receipt_append",
+        "Keeper_agent_run_turn_helpers",
+        "Keeper_agent_tool_surface"
+      ],
+      "internal_edges": 9,
+      "external_dep_count": 60,
+      "coupling_ratio": 0.13
+    },
+    {
       "prefix": "keeper_types",
       "module_count": 7,
       "members": [
@@ -1351,26 +1375,6 @@
       "internal_edges": 4,
       "external_dep_count": 28,
       "coupling_ratio": 0.125
-    },
-    {
-      "prefix": "keeper_agent",
-      "module_count": 11,
-      "members": [
-        "Keeper_agent_checkpoint_hygiene",
-        "Keeper_agent_error",
-        "Keeper_agent_memory_episode",
-        "Keeper_agent_prompt_metrics",
-        "Keeper_agent_result",
-        "Keeper_agent_run",
-        "Keeper_agent_run_contract_helpers",
-        "Keeper_agent_run_phase0_telemetry",
-        "Keeper_agent_run_receipt_append",
-        "Keeper_agent_run_turn_helpers",
-        "Keeper_agent_tool_surface"
-      ],
-      "internal_edges": 7,
-      "external_dep_count": 60,
-      "coupling_ratio": 0.104
     },
     {
       "prefix": "dashboard_http",
@@ -2863,6 +2867,7 @@
       "Coord",
       "Governance_pipeline",
       "Keeper_agent_memory_episode",
+      "Keeper_agent_run_contract_retry",
       "Keeper_agent_run_phase0_telemetry",
       "Keeper_agent_run_receipt_append",
       "Keeper_alerting_path",
@@ -2909,6 +2914,12 @@
     "Keeper_agent_run_contract_helpers": [
       "Keeper_agent_result",
       "Keeper_tool_disclosure"
+    ],
+    "Keeper_agent_run_contract_retry": [
+      "Keeper_agent_tool_surface",
+      "Keeper_run_tools",
+      "Keeper_tool_disclosure",
+      "Keeper_types"
     ],
     "Keeper_agent_run_phase0_telemetry": [
       "Dashboard_harness_health",
@@ -3659,7 +3670,6 @@
     ],
     "Keeper_hooks_oas_introspection": [],
     "Keeper_hooks_oas_output_json": [
-      "Keeper_gh_shared",
       "Keeper_hooks_oas_types",
       "Keeper_metrics",
       "Prometheus"
@@ -4141,7 +4151,10 @@
       "Keeper_tool_alias",
       "Keeper_types"
     ],
-    "Keeper_run_tools_task_scope": [],
+    "Keeper_run_tools_task_scope": [
+      "Keeper_id",
+      "Keeper_types"
+    ],
     "Keeper_run_tools_work_discovery": [
       "Coord",
       "Keeper_callback_failure",
@@ -6320,7 +6333,6 @@
       "Dashboard_mission",
       "Dashboard_mission_briefing",
       "Mcp_server",
-      "Operator_control",
       "Proactive_refresh",
       "Server_auth",
       "Server_base_path_diagnostics",
@@ -6332,6 +6344,7 @@
       "Server_dashboard_http_core_operator",
       "Server_dashboard_http_core_operator_digest_http",
       "Server_dashboard_http_core_operator_query",
+      "Server_dashboard_http_core_operator_snapshot_http",
       "Server_dashboard_http_core_runtime",
       "Server_dashboard_http_core_snapshot_refresh",
       "Server_dashboard_http_runtime_info",
@@ -6385,6 +6398,14 @@
       "Server_dashboard_http_core_cache",
       "Server_dashboard_http_core_json",
       "Server_dashboard_http_core_operator"
+    ],
+    "Server_dashboard_http_core_operator_snapshot_http": [
+      "Dashboard_cache",
+      "Mcp_server",
+      "Operator_control",
+      "Server_auth",
+      "Server_dashboard_http_runtime_support",
+      "Server_utils"
     ],
     "Server_dashboard_http_core_runtime": [
       "Coord",

@@ -733,6 +733,38 @@ let test_dashboard_shell_auth_json_reports_missing_token () =
   check string "missing token code surfaced" "missing_token"
     (auth |> member "auth_error_code" |> to_string)
 
+let test_dashboard_shell_snapshot_selector_injects_auth () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  Lib.Dashboard_snapshot.reset_for_test ();
+  Fun.protect
+    ~finally:Lib.Dashboard_snapshot.reset_for_test
+    (fun () ->
+       let snapshot =
+         Lib.Dashboard_snapshot.make_for_test
+           ~shell:
+             (`Assoc
+                [
+                  ("status", `Assoc [ ("project", `String "snapshot") ]);
+                  ("paths", `Assoc []);
+                ])
+           ~tools:`Null
+           ~namespace_truth:`Null
+           ~telemetry_summary:`Null
+       in
+       Lib.Dashboard_snapshot.publish_for_test snapshot;
+       let json =
+         Lib.Server_dashboard_snapshot_select.select_shell_json
+           ~request:(request "/api/v1/dashboard/shell")
+           config
+       in
+       let open Yojson.Safe.Util in
+       check string "snapshot payload preserved" "snapshot"
+         (json |> member "status" |> member "project" |> to_string);
+       check bool "snapshot selector injects auth" true
+         (match json |> member "auth" with
+          | `Assoc _ -> true
+          | _ -> false))
+
 let test_execution_actor_for_request_canonicalizes_token_owner () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
   let cfg =
@@ -1097,6 +1129,8 @@ let () =
             test_dashboard_shell_auth_json_canonicalizes_token_owner;
           test_case "shell auth reports missing token" `Quick
             test_dashboard_shell_auth_json_reports_missing_token;
+          test_case "shell snapshot selector injects auth" `Quick
+            test_dashboard_shell_snapshot_selector_injects_auth;
           test_case "execution actor canonicalizes token owner" `Quick
             test_execution_actor_for_request_canonicalizes_token_owner;
           test_case "verification verifier canonicalizes token owner" `Quick

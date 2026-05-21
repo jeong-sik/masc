@@ -42,7 +42,7 @@ let dispatch_timeout_sec = function
   | Some timeout_sec -> timeout_sec
   | None -> Env_config_exec_timeout.timeout_sec ~caller:Dispatch ()
 
-let dispatch_simple ?timeout_sec ?stdin_content (s : Shell_ir.simple) =
+let process_spec_of_simple (s : Shell_ir.simple) =
   let bin = Bin.to_string s.bin in
   let argv = bin :: List.map resolve_arg s.args in
   let env = resolve_env s.env in
@@ -51,6 +51,10 @@ let dispatch_simple ?timeout_sec ?stdin_content (s : Shell_ir.simple) =
     | None -> None
     | Some scope -> Some (Path_scope.raw scope)
   in
+  (argv, env, cwd)
+
+let dispatch_simple ?timeout_sec ?stdin_content (s : Shell_ir.simple) =
+  let argv, env, cwd = process_spec_of_simple s in
   let timeout_sec = dispatch_timeout_sec timeout_sec in
   match s.sandbox with
   | Host ->
@@ -85,13 +89,30 @@ let dispatch_simple ?timeout_sec ?stdin_content (s : Shell_ir.simple) =
   | Docker { runner; _ } ->
     (match runner ~stdin_content ~argv ~env ~cwd ~timeout_sec with
      | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-     | exception exn ->
-       { status = Unix.WEXITED 1; stdout = ""; stderr = Printexc.to_string exn }
-     | status, stdout, stderr -> { status; stdout; stderr })
+	     | exception exn ->
+	       { status = Unix.WEXITED 1; stdout = ""; stderr = Printexc.to_string exn }
+	     | status, stdout, stderr -> { status; stdout; stderr })
 
 (* --- pipeline + entry point (mutually recursive) --- *)
 
 let invalid_pipeline stderr = { status = Unix.WEXITED 1; stdout = ""; stderr }
+
+let host_pipeline_specs stages =
+  let rec loop acc = function
+    | [] -> Some (List.rev acc)
+    | Shell_ir.Simple simple :: rest ->
+        (match simple.sandbox with
+         | Host ->
+             let argv, env, cwd = process_spec_of_simple simple in
+             let stage : Process_eio.pipeline_stage =
+               { argv; env = Some env; cwd }
+             in
+             loop (stage :: acc) rest
+         | _ -> None)
+        [@warning "-4"]
+    | Shell_ir.Pipeline _ :: _ -> None
+  in
+  loop [] stages
 
 let rec dispatch_pipeline ?timeout_sec stages =
   match stages with
@@ -100,6 +121,23 @@ let rec dispatch_pipeline ?timeout_sec stages =
   | [ _ ] ->
       invalid_pipeline "single-stage pipeline not supported in native dispatch"
   | _ ->
+      (match host_pipeline_specs stages with
+       | Some specs ->
+           let raw_source =
+             specs
+             |> List.map (fun stage -> String.concat " " stage.Process_eio.argv)
+             |> String.concat " | "
+           in
+           let status, stdout, stderr =
+             Exec_gate.run_argv_pipeline_with_status_split
+               ~actor:`Tool_local_runtime
+               ~raw_source
+               ~summary:"exec dispatch pipeline"
+               ~timeout_sec:(dispatch_timeout_sec timeout_sec)
+               specs
+           in
+           { status; stdout; stderr }
+       | None ->
       let rec chain prev_stdout = function
         | [] ->
             { status = Unix.WEXITED 0; stdout = prev_stdout; stderr = "" }
@@ -130,6 +168,7 @@ let rec dispatch_pipeline ?timeout_sec stages =
            chain result.stdout rest
          | Pipeline _ ->
            invalid_pipeline "nested pipeline not supported in native dispatch" ))
+      )
 
 and dispatch ?timeout_sec (ir : Shell_ir.t) =
   match ir with

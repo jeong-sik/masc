@@ -221,170 +221,7 @@ let start_operator_snapshot_refresh_loop = Server_dashboard_http_core_snapshot_r
 
 let start_operator_digest_refresh_loop = Server_dashboard_http_core_digest_refresh.start_operator_digest_refresh_loop
 
-let operator_snapshot_http_json ~state ~sw ~clock request =
-  let config = state.Mcp_server.room_config in
-  let proc_mgr = state.Mcp_server.proc_mgr in
-  let net, mono_clock = state_dashboard_runtime_caps state in
-  let actor =
-    dashboard_actor_for_request ~base_path:config.base_path request
-  in
-  let view = query_param request "view" in
-  let default_summary_request =
-    actor = None
-    && query_param request "include_messages" = None
-    && query_param request "include_keepers" = None
-    &&
-    match view with
-    | None -> true
-    | Some raw -> String.equal (String.lowercase_ascii (String.trim raw)) "summary"
-  in
-  let compute_default_summary () =
-    let started_at = Unix.gettimeofday () in
-    run_dashboard_compute
-      ~mode:Offloaded_readonly
-      ?net
-      ?mono_clock
-      ~sw
-      ~clock
-      ~config
-      (fun ~config ~sw ->
-         let ctx : _ Operator_control.context =
-           { config
-           ; agent_name = "dashboard"
-           ; sw
-           ; clock
-           ; proc_mgr
-           ; net = None
-           ; mcp_session_id = None
-           }
-         in
-         Operator_control.snapshot_json
-           ~actor:"dashboard"
-           ~view:"summary"
-           ~include_messages:true
-           ~include_keepers:true
-           ~include_summary_fields:false
-           ~lightweight_summary:true
-           ctx)
-    |> with_projection_diagnostics
-         ~surface:"operator_snapshot"
-         ~started_at
-         ~extra:(operator_snapshot_extra ())
-  in
-  let default_cache_key =
-    dashboard_cache_key config "operator_snapshot" "default-summary"
-  in
-  if default_summary_request
-  then
-    cached_surface_or_first_success_json
-      operator_snapshot_cache
-      ~cache_key:default_cache_key
-      ~ttl:5.0
-      ~clock
-      ~timeout_sec:dashboard_request_timeout_s
-      compute_default_summary
-    |> with_operator_snapshot_metadata
-         ~config
-         ~cache_key:default_cache_key
-         ~query:(operator_snapshot_default_query ())
-  else (
-    let started_at = Unix.gettimeofday () in
-    let include_messages =
-      match query_param request "include_messages" with
-      | Some ("0" | "false" | "no") -> false
-      | _ -> true
-    in
-    let include_keepers =
-      match query_param request "include_keepers" with
-      | Some ("0" | "false" | "no") -> false
-      | _ -> true
-    in
-    let lightweight_summary =
-      match view with
-      | Some raw -> String.equal (String.lowercase_ascii (String.trim raw)) "summary"
-      | None -> false
-    in
-    let cache_key =
-      Printf.sprintf
-        "operator_snapshot:param:%s|%s|%b|%b|%b"
-        (Option.value ~default:"" actor)
-        (Option.value ~default:"" view)
-        include_messages
-        include_keepers
-        lightweight_summary
-    in
-    let query =
-      operator_snapshot_query_json
-        ~actor
-        ~view
-        ~include_messages
-        ~include_keepers
-        ~lightweight_summary
-        ~default_summary_request
-    in
-    let mode = if lightweight_summary then Inline_shared else Offloaded_readonly in
-    let compute () =
-      match
-        Eio.Time.with_timeout clock dashboard_request_timeout_s (fun () ->
-          Ok
-            (run_dashboard_compute
-               ~mode
-               ?net
-               ?mono_clock
-               ~sw
-               ~clock
-               ~config
-               (fun ~config ~sw ->
-                  let ctx : _ Operator_control.context =
-                    { config
-                    ; agent_name = Option.value ~default:"dashboard" actor
-                    ; sw
-                    ; clock
-                    ; proc_mgr
-                    ; net = state.Mcp_server.net
-                    ; mcp_session_id = None
-                    }
-                  in
-                  Operator_control.snapshot_json
-                    ?actor
-                    ?view
-                    ~include_messages
-                    ~include_keepers
-                    ~include_summary_fields:(not lightweight_summary)
-                    ~lightweight_summary
-                    ctx)))
-      with
-      | Ok json ->
-        with_projection_diagnostics
-          ~surface:"operator_snapshot"
-          ~started_at
-          ~extra:
-            [ "readonly_pool", Coord_utils.domain_local_pg_backend_diagnostics_json () ]
-          json
-      | Error `Timeout ->
-        `Assoc
-          [ "error", `String "timeout"
-          ; "message", `String "Operator snapshot timed out after 30s"
-         ; "generated_at", `String (Masc_domain.now_iso ())
-         ]
-    in
-    (* Tier-A perf: parameterized [/api/v1/dashboard/operator/snapshot]
-       requests previously bypassed the cache entirely — every keeper
-       filter / actor view triggered a fresh [run_dashboard_compute]
-       with a 30s timeout.  Under multi-tab dashboard load this was
-       the single largest dashboard-side compute fan-out.  Wrap with
-       a 5s SWR cache keyed on the full parameter tuple so rapid
-       polling (Bond-Web 3s default) hits the cache; mutations
-       continue to invalidate via the existing
-       [Coord_hooks.on_task_mutation_fn] path. *)
-    Dashboard_cache.get_or_compute_with_timeout
-      cache_key
-      ~ttl:5.0
-      ~clock
-      ~timeout_sec:dashboard_request_timeout_s
-      compute
-    |> with_operator_snapshot_metadata ~config ~cache_key ~query)
-;;
+let operator_snapshot_http_json = Server_dashboard_http_core_operator_snapshot_http.operator_snapshot_http_json
 
 let operator_digest_http_json = Server_dashboard_http_core_operator_digest_http.operator_digest_http_json
 
@@ -1065,6 +902,15 @@ let dashboard_shell_auth_json ~(request : Httpun.Request.t) (config : Coord.conf
     ]
 ;;
 
+let dashboard_shell_with_request_auth_json ~request (config : Coord.config) payload =
+  match payload with
+  | `Assoc fields ->
+    `Assoc
+      (("auth", dashboard_shell_auth_json ~request config)
+       :: List.remove_assoc "auth" fields)
+  | other -> other
+;;
+
 let dashboard_shell_http_json
       ?clock
       ?request
@@ -1156,11 +1002,5 @@ let dashboard_shell_http_json
   in
   match request with
   | None -> payload
-  | Some request ->
-    (match payload with
-     | `Assoc fields ->
-       `Assoc
-         (("auth", dashboard_shell_auth_json ~request config)
-          :: List.remove_assoc "auth" fields)
-     | other -> other)
+  | Some request -> dashboard_shell_with_request_auth_json ~request config payload
 ;;

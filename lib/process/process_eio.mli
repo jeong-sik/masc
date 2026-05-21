@@ -137,6 +137,20 @@ val run_argv_with_status_split :
 (** Like [run_argv_with_status], but returns
     [(status, stdout, stderr)] without combining stderr into stdout. *)
 
+type pipeline_stage = {
+  argv : string list;
+  env : string array option;
+  cwd : string option;
+}
+(** One argv-only process stage in a native pipeline. *)
+
+val run_argv_pipeline_with_status_split :
+  ?timeout_sec:float -> pipeline_stage list -> (Unix.process_status * string * string)
+(** Run host stages as a native pipeline. Adjacent stages are connected with
+    process pipes so intermediate stdout is streamed with backpressure rather
+    than buffered into OCaml strings. The returned stdout is the final stage's
+    stdout; stderr is captured from every stage in stage order. *)
+
 (** {1 Detached (background) spawn primitives — P2 foundation} *)
 
 type detached_handle = {

@@ -1,8 +1,16 @@
+---
+title: run_named closure decomposition
+rfc: 0051
+status: Active
+created: 2026-05-09
+implementation_prs: []
+---
+
 # RFC-0051 — `run_named` closure decomposition
 
 | 항목 | 값 |
 |---|---|
-| Status | Draft (design only) |
+| Status | Active (design only — frontmatter SSOT) |
 | Author | Claude Opus 4.7 (Vincent supervising) |
 | Created | 2026-05-09 |
 | Supersedes | — |

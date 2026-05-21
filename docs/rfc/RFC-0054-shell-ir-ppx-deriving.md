@@ -1,6 +1,14 @@
+---
+title: PPX for Typed Capability Substrate Phase 2 (codegen track)
+rfc: 0054
+status: Active
+created: 2026-05-09
+implementation_prs: []
+---
+
 # RFC-0054 — `[@@deriving shell_ir]` PPX for Typed Capability Substrate Phase 2
 
-Status: Draft · PPX track CLOSED 2026-05-09 (5/5 approaches fail) · codegen track ACTIVE (POC PASSED, see §6.1)
+Status: Active · PPX track CLOSED 2026-05-09 (5/5 approaches fail) · codegen track ACTIVE (POC PASSED, see §6.1)
 Author: jeong-sik (with Claude Opus 4.7)
 Date: 2026-05-09 (drafted) · 2026-05-09 (§5.3.1 + §5.3.3 + §6.1 amendments)
 Supersedes: —

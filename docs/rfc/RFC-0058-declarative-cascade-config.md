@@ -1,8 +1,19 @@
+---
+title: Declarative Cascade Configuration (v2)
+rfc: 0058
+status: Active
+created: 2026-05-09
+implementation_prs: []
+supersedes:
+  - RFC-0055
+  - RFC-0066
+---
+
 # RFC-0058: Declarative Cascade Configuration (v2)
 
 | Field | Value |
 |-------|-------|
-| Status | Draft |
+| Status | Active (frontmatter SSOT; absorbed RFC-0055/0066) |
 | Author | Vincent (architect), Claude (agent) |
 | Created | 2026-05-10 |
 | Updated | 2026-05-10 |

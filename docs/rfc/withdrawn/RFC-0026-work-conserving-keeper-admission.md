@@ -1,3 +1,12 @@
+---
+title: Retired MASC Admission Router (originally Work-Conserving Keeper Admission)
+rfc: 0026
+status: Withdrawn
+created: 2026-05-04
+withdrawn_date: 2026-05-21
+withdrawn_reason: "Body self-declares 'retired' — MASC-side provider/model admission router has been removed. Original 'work-conserving keeper admission' design abandoned. File and slug name diverged (file is work-conserving-keeper-admission.md but content describes retirement). Archived for history."
+---
+
 # RFC-0026: Retired MASC Admission Router
 
 Status: retired.

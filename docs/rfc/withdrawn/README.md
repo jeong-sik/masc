@@ -73,3 +73,20 @@ narrowed to 4 because body inspection revealed:
 
 Future batches will continue the same criteria + body inspection requirement.
 The active RFC count continues to shrink as ghost specs are honestly retired.
+
+## Batch C (annex from Phase 3a sweep) — 2026-05-21
+
+Third withdrawal — incidental finding during Phase 3a Active sweep
+(commits 1-4 frontmatter normalization). Body inspection revealed
+one RFC self-declared as retired.
+
+| RFC | Title | Withdrawn reason |
+|-----|-------|------------------|
+| 0026 | Retired MASC Admission Router (originally Work-Conserving Keeper Admission) | Body self-declares "retired" — MASC-side provider/model admission router has been removed. File/slug name diverged from content. |
+
+Note: original slug `work-conserving-keeper-admission` no longer reflects
+current state; body title was updated to "Retired MASC Admission Router"
+at some past point. File renamed via git mv to withdrawn/ preserves blame.
+
+Future batches will continue. The active RFC count continues to shrink
+as ghost specs are honestly retired.

@@ -210,7 +210,10 @@ let create ~sw ~env ?(config = default_config) () : t =
         all)
     in
     List.iter (fun e ->
-      try Piaf.Client.shutdown e.client with _ -> ()
+      try Piaf.Client.shutdown e.client
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | _ -> ()
     ) leftover);
   start_eviction_fiber t;
   t
@@ -276,12 +279,18 @@ let release t key client ~close_only =
         parked := true
       end);
     if not !parked then begin
-      (try Piaf.Client.shutdown client with _ -> ());
+      (try Piaf.Client.shutdown client
+       with
+       | Eio.Cancel.Cancelled _ as e -> raise e
+       | _ -> ());
       with_mu t (fun () ->
         t.counters.evict_count_total <- t.counters.evict_count_total + 1)
     end
   end else
-    try Piaf.Client.shutdown client with _ -> ()
+    try Piaf.Client.shutdown client
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | _ -> ()
 
 (* ── Public request API ────────────────────────────────────────── *)
 

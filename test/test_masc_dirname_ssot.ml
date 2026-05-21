@@ -38,15 +38,19 @@ let drain ic =
   loop []
 
 let rg_matching_files ~pattern ~paths =
-  let paths_quoted =
-    String.concat " " (List.map Filename.quote paths)
+  let argv =
+    Array.of_list
+      ([
+         "rg";
+         "--no-messages";
+         "-l";
+         "-e";
+         pattern;
+       ]
+      @ paths
+      @ [ "--glob"; "*.ml"; "--glob"; "*.mli" ])
   in
-  let cmd =
-    Printf.sprintf
-      "rg --no-messages -l -e %s %s --glob '*.ml' --glob '*.mli' || true"
-      (Filename.quote pattern) paths_quoted
-  in
-  let ic = Unix.open_process_in cmd in
+  let ic = Unix.open_process_args_in "rg" argv in
   let lines = drain ic in
   let _ = Unix.close_process_in ic in
   lines

@@ -224,14 +224,22 @@ let test_no_forgotten_git_askpass_literals () =
     | None -> Sys.getcwd ()
   in
   let lib_dir = Filename.concat root "lib" in
-  let cmd =
-    Printf.sprintf
-      "rg --no-messages -l 'GIT_ASKPASS|GIT_TERMINAL_PROMPT' %s \
-       --glob '!env_git_noninteractive.*' \
-       --glob '*.ml' --glob '*.mli' || true"
-      (Filename.quote lib_dir)
+  let argv =
+    [|
+      "rg";
+      "--no-messages";
+      "-l";
+      "GIT_ASKPASS|GIT_TERMINAL_PROMPT";
+      lib_dir;
+      "--glob";
+      "!env_git_noninteractive.*";
+      "--glob";
+      "*.ml";
+      "--glob";
+      "*.mli";
+    |]
   in
-  let ic = Unix.open_process_in cmd in
+  let ic = Unix.open_process_args_in "rg" argv in
   let rec drain acc =
     try drain (input_line ic :: acc)
     with End_of_file -> List.rev acc

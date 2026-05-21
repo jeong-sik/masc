@@ -234,6 +234,117 @@ let () =
    | Masc_exec.Sandbox_target.Docker { image; _ } ->
        assert (image = "test-image"))
 
+(* --- dispatch_simple applies supported redirects deterministically --- *)
+
+let () =
+  with_eio @@ fun () ->
+  let open Masc_exec.Shell_ir in
+  let bin = Masc_exec.Bin.of_string "echo" |> Result.get_ok in
+  let dev_null =
+    Masc_exec.Path_scope.classify ~raw:"/dev/null" ~cwd:"/tmp"
+  in
+  let mock_runner ~stdin_content:_ ~argv:_ ~env:_ ~cwd:_ ~timeout_sec:_ =
+    Unix.WEXITED 0, "stdout", "stderr"
+  in
+  let docker_sandbox =
+    Masc_exec.Sandbox_target.docker ~image:"redirect-image" ~runner:mock_runner
+  in
+  let ir =
+    Simple
+      {
+        bin;
+        args = [];
+        env = [];
+        cwd = None;
+        redirects =
+          [
+            Masc_exec.Redirect_scope.Fd_to_fd { src = 2; dst = 1 };
+            Masc_exec.Redirect_scope.File
+              { fd = 1; target = dev_null; mode = Masc_exec.Redirect_scope.Write };
+          ];
+        sandbox = docker_sandbox;
+      }
+  in
+  let result = Masc_exec.Exec_dispatch.dispatch ir in
+  assert (result.status = Unix.WEXITED 0);
+  assert (result.stdout = "stderr");
+  assert (result.stderr = "")
+
+let () =
+  with_eio @@ fun () ->
+  let open Masc_exec.Shell_ir in
+  let bin = Masc_exec.Bin.of_string "echo" |> Result.get_ok in
+  let dev_null =
+    Masc_exec.Path_scope.classify ~raw:"/dev/null" ~cwd:"/tmp"
+  in
+  let mock_runner ~stdin_content:_ ~argv:_ ~env:_ ~cwd:_ ~timeout_sec:_ =
+    Unix.WEXITED 0, "stdout", "stderr"
+  in
+  let docker_sandbox =
+    Masc_exec.Sandbox_target.docker ~image:"redirect-image" ~runner:mock_runner
+  in
+  let ir =
+    Simple
+      {
+        bin;
+        args = [];
+        env = [];
+        cwd = None;
+        redirects =
+          [
+            Masc_exec.Redirect_scope.File
+              { fd = 2; target = dev_null; mode = Masc_exec.Redirect_scope.Write };
+          ];
+        sandbox = docker_sandbox;
+      }
+  in
+  let result = Masc_exec.Exec_dispatch.dispatch ir in
+  assert (result.status = Unix.WEXITED 0);
+  assert (result.stdout = "stdout");
+  assert (result.stderr = "")
+
+(* --- dispatch_simple rejects unsupported redirects before spawning --- *)
+
+let () =
+  with_eio @@ fun () ->
+  let open Masc_exec.Shell_ir in
+  let bin = Masc_exec.Bin.of_string "echo" |> Result.get_ok in
+  let runner_called = ref false in
+  let unsupported_target =
+    Masc_exec.Path_scope.classify ~raw:"/tmp/exec-dispatch-out" ~cwd:"/tmp"
+  in
+  let mock_runner ~stdin_content:_ ~argv:_ ~env:_ ~cwd:_ ~timeout_sec:_ =
+    runner_called := true;
+    Unix.WEXITED 0, "stdout", "stderr"
+  in
+  let docker_sandbox =
+    Masc_exec.Sandbox_target.docker ~image:"redirect-image" ~runner:mock_runner
+  in
+  let ir =
+    Simple
+      {
+        bin;
+        args = [];
+        env = [];
+        cwd = None;
+        redirects =
+          [
+            Masc_exec.Redirect_scope.File
+              {
+                fd = 1;
+                target = unsupported_target;
+                mode = Masc_exec.Redirect_scope.Write;
+              };
+          ];
+        sandbox = docker_sandbox;
+      }
+  in
+  let result = Masc_exec.Exec_dispatch.dispatch ir in
+  assert (not !runner_called);
+  assert (result.status = Unix.WEXITED 1);
+  assert (result.stdout = "");
+  assert (String.length result.stderr > 0)
+
 (* --- dispatch_pipeline propagates stdin and sandbox runner --- *)
 
 let () =

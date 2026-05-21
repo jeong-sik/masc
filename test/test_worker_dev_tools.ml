@@ -893,6 +893,10 @@ let () =
       Alcotest.test_case "blocks push refspec to main" `Quick (fun () ->
         Alcotest.(check bool) "push refspec main" true
           (Worker_dev_tools.is_destructive_bash_operation "git push origin HEAD:main"));
+      Alcotest.test_case "blocks quoted push refspec to main" `Quick (fun () ->
+        Alcotest.(check bool) "quoted push refspec main" true
+          (Worker_dev_tools.is_destructive_bash_operation
+             "git push origin 'HEAD:main'"));
       Alcotest.test_case "blocks push refs heads main" `Quick (fun () ->
         Alcotest.(check bool) "push refs/heads/main" true
           (Worker_dev_tools.is_destructive_bash_operation "git push origin refs/heads/main"));
@@ -905,6 +909,9 @@ let () =
       Alcotest.test_case "blocks git reset --hard" `Quick (fun () ->
         Alcotest.(check bool) "reset hard" true
           (Worker_dev_tools.is_destructive_bash_operation "git reset --hard HEAD~1"));
+      Alcotest.test_case "blocks quoted git reset --hard" `Quick (fun () ->
+        Alcotest.(check bool) "quoted reset hard" true
+          (Worker_dev_tools.is_destructive_bash_operation "git reset '--hard' HEAD~1"));
       Alcotest.test_case "allows git reset (soft)" `Quick (fun () ->
         Alcotest.(check bool) "reset soft" false
           (Worker_dev_tools.is_destructive_bash_operation "git reset HEAD~1"));
@@ -950,6 +957,10 @@ let () =
         Alcotest.(check (option string)) "match-head-commit skipped" (Some "5934")
           (Worker_dev_tools.gh_pr_merge_target
              "pr merge --match-head-commit abc123 5934"));
+      Alcotest.test_case "skips quoted match-head-commit value" `Quick (fun () ->
+        Alcotest.(check (option string)) "quoted match-head-commit skipped" (Some "5934")
+          (Worker_dev_tools.gh_pr_merge_target
+             "pr merge --match-head-commit 'abc 123' 5934"));
     ];
     "sanitize_command_for_log", [
       Alcotest.test_case "redacts url credentials" `Quick (fun () ->
@@ -1032,6 +1043,13 @@ let () =
         match
           Worker_dev_tools.validate_gh_command ~allowed_orgs:["jeong-sik"]
             "pr view --repo jeong-sik/masc-mcp 123"
+        with
+        | Ok () -> ()
+        | Error msg -> Alcotest.failf "expected ok, got %s" msg);
+      Alcotest.test_case "allows quoted repo in allowed_orgs" `Quick (fun () ->
+        match
+          Worker_dev_tools.validate_gh_command ~allowed_orgs:["jeong-sik"]
+            "pr view --repo 'jeong-sik/masc-mcp' 123"
         with
         | Ok () -> ()
         | Error msg -> Alcotest.failf "expected ok, got %s" msg);
@@ -1133,6 +1151,11 @@ let () =
         Alcotest.(check bool) "R1" true
           (Worker_dev_tools.classify_gh_reversibility
              "api --method POST repos/jeong-sik/foo/issues"
+           = Worker_dev_tools.R1_Reversible));
+      Alcotest.test_case "R1: api quoted --method PATCH" `Quick (fun () ->
+        Alcotest.(check bool) "R1" true
+          (Worker_dev_tools.classify_gh_reversibility
+             "api --method 'PATCH' repos/jeong-sik/foo/issues/1"
            = Worker_dev_tools.R1_Reversible));
       Alcotest.test_case "R1: api with -f field (implicit POST)" `Quick (fun () ->
         Alcotest.(check bool) "R1" true

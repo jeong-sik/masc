@@ -1913,6 +1913,8 @@ let test_git_write_classification () =
     true (is_branch_switch "git checkout -b my-feature");
   Alcotest.(check bool) "switch is branch switch"
     true (is_branch_switch "git switch -c my-feature");
+  Alcotest.(check bool) "switch after quoted -C path is branch switch"
+    true (is_branch_switch "git -C 'repo dir' switch my-feature");
   (* git push: write op, allowed in playground *)
   Alcotest.(check bool) "push is write" true (is_write "git push origin my-branch");
   Alcotest.(check bool) "commit is write" true (is_write "git commit -m 'msg'");

@@ -315,30 +315,56 @@ let clock_edge_json ~idx ~provider_attempt_index row =
       ] );
     ]
 
+let edge_string key edge = json_string_member_opt key edge
+let edge_int key edge = json_int_member_opt key edge
+let edge_string_list key edge = json_string_list_member key edge
+
 let clock_edge_jsons scan =
   let provider_attempt_index = ref 0 in
-  scan.returned_rows
-  |> queue_to_list
-  |> List.mapi (fun idx row ->
-    let provider_index =
-      match row.Keeper_runtime_manifest.event with
-      | Keeper_runtime_manifest.Provider_attempt_started ->
-        incr provider_attempt_index;
-        !provider_attempt_index
-      | Keeper_runtime_manifest.Provider_attempt_finished ->
-        max 1 !provider_attempt_index
-      | _ -> max 1 !provider_attempt_index
-    in
-    clock_edge_json ~idx ~provider_attempt_index:provider_index row)
+  let edges =
+    scan.returned_rows
+    |> queue_to_list
+    |> List.mapi (fun idx row ->
+      let provider_index =
+        match row.Keeper_runtime_manifest.event with
+        | Keeper_runtime_manifest.Provider_attempt_started ->
+          incr provider_attempt_index;
+          !provider_attempt_index
+        | Keeper_runtime_manifest.Provider_attempt_finished ->
+          max 1 !provider_attempt_index
+        | _ -> max 1 !provider_attempt_index
+      in
+      clock_edge_json ~idx ~provider_attempt_index:provider_index row)
+  in
+  (* F7: DAG causality — build edge_id set once, then verify each edge's parent. *)
+  let edge_id_set =
+    edges
+    |> List.filter_map (fun edge -> edge_string "edge_id" edge)
+    |> List.fold_left (fun acc value ->
+         let value = String.trim value in
+         if value = "" then acc else value :: acc)
+         []
+  in
+  edges
+  |> List.map (fun edge ->
+       let parent_id = edge_string "parent_event_id" edge in
+       let causality_verified =
+         match parent_id with
+         | Some id when String.trim id <> "" -> List.mem id edge_id_set
+         | _ -> true
+       in
+       match edge with
+       | `Assoc fields ->
+         `Assoc
+           (fields
+            @ [ ("causality_verified", `Bool causality_verified)
+              ; ( "causality_driven",
+                  `Bool (edge_string "parent_event_id" edge <> None || edge_string "caused_by" edge <> None) )
+              ])
+       | other -> other)
 
 let runtime_lens_clock_edges_json scan =
   clock_edge_jsons scan |> fun edges -> `List edges
-
-let edge_string key edge = json_string_member_opt key edge
-
-let edge_int key edge = json_int_member_opt key edge
-
-let edge_string_list key edge = json_string_list_member key edge
 
 let add_unique value values =
   if List.mem value values then values else values @ [ value ]

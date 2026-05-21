@@ -97,3 +97,97 @@ let runtime_lens_memory_terminal_status scan =
     || scan.event_bus_count > 0
   then "context"
   else "empty"
+
+(** F8: lane mandatory event sets and terminal policy separation.
+
+    [finished] = the lane's terminal event is present.
+    [complete] = all mandatory events for the lane are present AND
+                 the terminal event is present (or the lane has no terminal).
+
+    This distinguishes "the turn ended" from "the lane fulfilled its contract". *)
+
+type lane_policy =
+  { lane : string
+  ; mandatory_events : Keeper_runtime_manifest.event_kind list
+  ; terminal_events : Keeper_runtime_manifest.event_kind list
+  }
+
+let lane_policies =
+  [ { lane = "keeper"
+    ; mandatory_events =
+        [ Keeper_runtime_manifest.Turn_started
+        ; Keeper_runtime_manifest.Turn_finished
+        ]
+    ; terminal_events = [ Keeper_runtime_manifest.Turn_finished ]
+    }
+  ; { lane = "provider"
+    ; mandatory_events =
+        [ Keeper_runtime_manifest.Provider_attempt_started
+        ; Keeper_runtime_manifest.Provider_attempt_finished
+        ]
+    ; terminal_events = [ Keeper_runtime_manifest.Provider_attempt_finished ]
+    }
+  ; { lane = "tool_runtime"
+    ; mandatory_events = [ Keeper_runtime_manifest.Tool_surface_selected ]
+    ; terminal_events = []
+    }
+  ; { lane = "masc_policy_cascade"
+    ; mandatory_events = [ Keeper_runtime_manifest.Cascade_routed ]
+    ; terminal_events = []
+    }
+  ; { lane = "oas_agent"
+    ; mandatory_events = [ Keeper_runtime_manifest.Checkpoint_saved ]
+    ; terminal_events =
+        [ Keeper_runtime_manifest.Checkpoint_saved
+        ; Keeper_runtime_manifest.State_snapshot_sidecar_saved
+        ]
+    }
+  ; { lane = "memory_context"
+    ; mandatory_events =
+        [ Keeper_runtime_manifest.Context_injected
+        ; Keeper_runtime_manifest.Memory_flushed
+        ]
+    ; terminal_events = [ Keeper_runtime_manifest.Memory_flushed ]
+    }
+  ]
+
+let lane_policy_for_lane lane =
+  List.find_opt (fun policy -> String.equal policy.lane lane) lane_policies
+
+let lane_mandatory_event_codes lane =
+  match lane_policy_for_lane lane with
+  | Some policy ->
+    List.map Keeper_runtime_manifest.event_kind_to_string policy.mandatory_events
+  | None -> []
+
+let lane_terminal_event_codes lane =
+  match lane_policy_for_lane lane with
+  | Some policy ->
+    List.map Keeper_runtime_manifest.event_kind_to_string policy.terminal_events
+  | None -> []
+
+let lane_mandatory_events_present scan lane =
+  match lane_policy_for_lane lane with
+  | Some policy ->
+    List.for_all
+      (fun event ->
+         runtime_lens_event_count scan event > 0)
+      policy.mandatory_events
+  | None -> true
+
+let lane_terminal_event_present scan lane =
+  match lane_policy_for_lane lane with
+  | Some policy ->
+    List.exists
+      (fun event ->
+         runtime_lens_event_count scan event > 0)
+      policy.terminal_events
+  | None -> true
+
+let runtime_lens_swimlane_completeness scan lane =
+  let finished = lane_terminal_event_present scan lane in
+  let complete = lane_mandatory_events_present scan lane && finished in
+  if complete then "complete"
+  else if finished then "finished"
+  else if lane_mandatory_events_present scan lane then "mandatory_present"
+  else "incomplete"

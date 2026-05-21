@@ -1413,13 +1413,10 @@ let sweep_and_recover (ctx : _ context) =
       | _ -> ());
     Eio_guard.yield_step sweep_names_ym);
   (* Phase 3.5: self-healing circuit breaker — auto-resume keepers that were
-     auto-paused and whose pause timer has elapsed.  Clearing [paused = false]
-     here lets Phase 4 (reconcile_keepalive_keepers) pick them up and restart
-     them on the same sweep.  Reconcile-gated pauses and intentional operator
-     pauses are skipped, but legacy timeout pauses with [last_blocker =
-     Turn_timeout] and no explicit [auto_resume_after_sec] use the initial
-     auto-resume backoff so capacity does not stay degraded forever after a
-     plain turn timeout. *)
+     auto-paused and whose explicit pause timer has elapsed.  Clearing
+     [paused = false] here lets Phase 4 (reconcile_keepalive_keepers) pick them
+     up and restart them on the same sweep.  Reconcile-gated pauses and
+     intentional operator pauses are skipped. *)
   Keeper_types.keeper_names ctx.config
   |> List.iter (fun name ->
     if Keeper_registry.is_running ~base_path name
@@ -1459,7 +1456,7 @@ let sweep_and_recover (ctx : _ context) =
            let resume_after_sec =
              Option.value
                ~default:0.0
-               (Keeper_supervisor_types.paused_meta_effective_auto_resume_after_sec meta)
+               meta.auto_resume_after_sec
            in
            let paused_ts =
              Coord_resilience.Time.parse_iso8601_opt meta.updated_at

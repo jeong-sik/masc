@@ -206,7 +206,7 @@ let test_operator_paused_only_does_not_start_sweep () =
     check bool "operator pause alone does not start sweep" false
       (KR.should_start_supervisor_sweep ~config ~stats))
 
-let test_turn_timeout_pause_without_explicit_policy_starts_sweep () =
+let test_turn_timeout_pause_without_explicit_policy_does_not_start_sweep () =
   with_temp_masc_dir ~keeper_names:[ "timeout-due" ] (fun config ->
     let now = Unix.time () in
     let timeout_blocker =
@@ -230,10 +230,9 @@ let test_turn_timeout_pause_without_explicit_policy_starts_sweep () =
     in
     check bool "timeout-paused keeper is not bootable yet" false
       (List.mem "timeout-due" (KR.bootable_keeper_names config));
-    check (list string) "timeout pause is implicitly auto-recoverable"
-      [ "timeout-due" ]
+    check (list string) "timeout pause is not auto-recoverable" []
       (KR.auto_recoverable_paused_keeper_names ~now config);
-    check bool "timeout pause starts supervisor sweep" true
+    check bool "timeout pause alone does not start supervisor sweep" false
       (KR.should_start_supervisor_sweep ~config ~stats))
 
 let () =
@@ -249,7 +248,7 @@ let () =
         test_due_auto_recoverable_paused_keeper_starts_sweep;
       test_case "operator-paused keeper alone does not start sweep" `Quick
         test_operator_paused_only_does_not_start_sweep;
-      test_case "timeout pause without explicit policy starts sweep" `Quick
-        test_turn_timeout_pause_without_explicit_policy_starts_sweep;
+      test_case "timeout pause without explicit policy does not start sweep" `Quick
+        test_turn_timeout_pause_without_explicit_policy_does_not_start_sweep;
     ];
   ]

@@ -311,6 +311,27 @@ let assoc_string key = function
 
 let has_task_scope json = Option.is_some (assoc_string "_task_id" json)
 
+let task_scope_counts recent =
+  let indexed = List.mapi (fun index row -> index, row) recent in
+  let latest_task_scoped_index =
+    List.fold_left
+      (fun acc (index, row) -> if has_task_scope row then Some index else acc)
+      None
+      indexed
+  in
+  List.fold_left
+    (fun (task_id_rows, legacy_unscoped_rows, current_unscoped_rows) (index, row) ->
+       if has_task_scope row
+       then task_id_rows + 1, legacy_unscoped_rows, current_unscoped_rows
+       else (
+         match latest_task_scoped_index with
+         | Some scoped_index when index < scoped_index ->
+           task_id_rows, legacy_unscoped_rows + 1, current_unscoped_rows
+         | _ -> task_id_rows, legacy_unscoped_rows, current_unscoped_rows + 1))
+    (0, 0, 0)
+    indexed
+;;
+
 let task_scope_json ?base_dir ?(recent_limit = Env_config_runtime.Cdal.verdict_lookup_limit ()) ()
   =
   let ledger = Cdal_verdict_gate.ledger_health_report ?base_dir () in
@@ -318,13 +339,15 @@ let task_scope_json ?base_dir ?(recent_limit = Env_config_runtime.Cdal.verdict_l
   try
     let recent = Dated_jsonl.read_recent store recent_limit in
     let recent_rows = List.length recent in
-    let task_id_rows = List.fold_left (fun n row -> if has_task_scope row then n + 1 else n) 0 recent in
+    let task_id_rows, legacy_unscoped_rows, current_unscoped_rows =
+      task_scope_counts recent
+    in
     let status =
       if recent_rows = 0
       then "missing_ledger"
       else if task_id_rows = 0
       then "missing_task_scope"
-      else if task_id_rows < recent_rows
+      else if current_unscoped_rows > 0
       then "partial_task_scope"
       else "present"
     in
@@ -335,8 +358,14 @@ let task_scope_json ?base_dir ?(recent_limit = Env_config_runtime.Cdal.verdict_l
       ; "recent_rows", `Int recent_rows
       ; "task_id_rows", `Int task_id_rows
       ; "missing_task_scope_rows", `Int missing_task_scope_rows
+      ; "legacy_unscoped_rows", `Int legacy_unscoped_rows
+      ; "current_writer_missing_task_scope_rows", `Int current_unscoped_rows
       ; "missing_task_scope", `Bool (recent_rows > 0 && missing_task_scope_rows > 0)
       ; "partial_task_scope", `Bool (task_id_rows > 0 && missing_task_scope_rows > 0)
+      ; "current_writer_missing_task_scope", `Bool (current_unscoped_rows > 0)
+      ; "legacy_unscoped_only"
+        , `Bool
+            (task_id_rows > 0 && legacy_unscoped_rows > 0 && current_unscoped_rows = 0)
       ]
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -346,8 +375,12 @@ let task_scope_json ?base_dir ?(recent_limit = Env_config_runtime.Cdal.verdict_l
       ; "recent_rows", `Int 0
       ; "task_id_rows", `Int 0
       ; "missing_task_scope_rows", `Int 0
+      ; "legacy_unscoped_rows", `Int 0
+      ; "current_writer_missing_task_scope_rows", `Int 0
       ; "missing_task_scope", `Bool false
       ; "partial_task_scope", `Bool false
+      ; "current_writer_missing_task_scope", `Bool false
+      ; "legacy_unscoped_only", `Bool false
       ; "error", `String (Printexc.to_string exn)
       ]
 ;;

@@ -263,6 +263,27 @@ let test_agent_completion_contract_violation () =
           (Agent_sdk.Error.CompletionContractViolation
              { contract = Agent_sdk.Completion_contract_id.Require_tool_use
              ; reason = "required tool contract unsatisfied"
+             ; violation_detail = None
+             })))
+;;
+
+let test_agent_completion_contract_violation_with_detail () =
+  check
+    string
+    "completion_contract_violation detail"
+    "completion_contract_violation:require_tool_use:called[keeper_board_list]:satisfying[keeper_board_post]"
+    (code
+       (mk_agent
+          (Agent_sdk.Error.CompletionContractViolation
+             { contract = Agent_sdk.Completion_contract_id.Require_tool_use
+             ; reason = "required tool contract unsatisfied"
+             ; violation_detail =
+                 Some
+                   { Agent_sdk.Completion_contract_violation_detail.called_tools =
+                       [ "keeper_board_list" ]
+                   ; satisfying_tools = [ "keeper_board_post" ]
+                   ; rejection_reasons = []
+                   }
              })))
 ;;
 
@@ -382,6 +403,7 @@ let test_all_agent_codes_distinct () =
            (Agent_sdk.Error.CompletionContractViolation
               { contract = Agent_sdk.Completion_contract_id.Require_tool_use
               ; reason = "x"
+              ; violation_detail = None
               }))
     ; code (mk_agent (Agent_sdk.Error.MaxTurnsExceeded { turns = 1; limit = 1 }))
     ; code (mk_agent (Agent_sdk.Error.ExitConditionMet { turn = 5 }))
@@ -417,6 +439,7 @@ let test_structured_required_tool_no_tool_call () =
          ; reason =
              "required tool contract unsatisfied: tool_choice requested tool use, but \
               the model returned no ToolUse block"
+         ; violation_detail = None
          })
   in
   let terminal = KT.of_failure ~raw_error:(Agent_sdk.Error.to_string err) err in
@@ -690,6 +713,10 @@ let () =
             "CompletionContractViolation"
             `Quick
             test_agent_completion_contract_violation
+        ; test_case
+            "CompletionContractViolation with detail"
+            `Quick
+            test_agent_completion_contract_violation_with_detail
         ; test_case "MaxTurnsExceeded" `Quick test_agent_max_turns_exceeded
         ; test_case "ExitConditionMet" `Quick test_agent_exit_condition_met
         ; test_case "UnrecognizedStopReason" `Quick test_agent_unrecognized_stop_reason

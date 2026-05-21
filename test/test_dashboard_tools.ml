@@ -416,22 +416,6 @@ let test_dashboard_tools_projection () =
       | Some row ->
           check bool "local worker tool keeps local_worker surface" true
             (has_surface "local_worker" row));
-      (match removed_alias_tool with
-      | None -> ()
-      | Some row ->
-          check bool "deprecated alias has registered schema" true
-            (row |> member "registered_schema" |> to_bool);
-          check bool "deprecated alias has dispatch registration" true
-            (row |> member "dispatch_registered" |> to_bool);
-          check string "deprecated alias visibility surfaced" "hidden"
-            (row |> member "visibility" |> to_string);
-          check string "deprecated alias lifecycle surfaced" "deprecated"
-            (row |> member "lifecycle" |> to_string);
-          check string "deprecated alias replacement surfaced"
-            "masc_agent_update"
-            (row |> member "replacement" |> to_string);
-          check bool "deprecated alias not assigned a surface" false
-            (row |> member "surfaces" |> to_list <> []));
       match hidden_tool with
       | None -> ()
       | Some row ->

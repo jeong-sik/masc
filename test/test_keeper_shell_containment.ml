@@ -137,6 +137,45 @@ let existing_path () =
   | Some value -> value
   | None -> "/usr/bin:/bin"
 
+let test_shell_command_available_uses_path_without_shell () =
+  let dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Exec_tap.disable ();
+      cleanup_dir dir)
+    (fun () ->
+       let tool_name = "probe;not-shell" in
+       write_executable
+         (Filename.concat dir tool_name)
+         "#!/bin/sh\nexit 0\n";
+       let captured = ref [] in
+       Exec_tap.enable ~writer:(fun line -> captured := line :: !captured);
+       with_env "PATH" dir @@ fun () ->
+       Alcotest.(check bool)
+         "probe found on PATH"
+         true
+         (Keeper_shell_shared.shell_command_available tool_name);
+       Alcotest.(check int) "no process execution" 0 (List.length !captured))
+
+let test_shell_command_available_rejects_empty_path_segment_cwd () =
+  let dir = temp_dir () in
+  let cwd = Sys.getcwd () in
+  Fun.protect
+    ~finally:(fun () ->
+      Sys.chdir cwd;
+      cleanup_dir dir)
+    (fun () ->
+       let tool_name = "cwd-only-probe" in
+       write_executable
+         (Filename.concat dir tool_name)
+         "#!/bin/sh\nexit 0\n";
+       Sys.chdir dir;
+       with_env "PATH" ":" @@ fun () ->
+       Alcotest.(check bool)
+         "empty PATH entry not cwd"
+         false
+         (Keeper_shell_shared.shell_command_available tool_name))
+
 let setup_task_with_worktree
       ~base
       ~config
@@ -565,6 +604,10 @@ let () =
     [
       ( "containment",
         [
+          Alcotest.test_case "shell command probe uses PATH without shell"
+            `Quick test_shell_command_available_uses_path_without_shell;
+          Alcotest.test_case "shell command probe skips empty PATH cwd"
+            `Quick test_shell_command_available_rejects_empty_path_segment_cwd;
           Alcotest.test_case "legacy keeper unaffected" `Quick
             test_legacy_keeper_unaffected;
           Alcotest.test_case "docker keeper blocks ls outside" `Quick

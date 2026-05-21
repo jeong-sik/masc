@@ -181,9 +181,9 @@ val run_argv_with_status_retry_eintr :
     call" output.  Other statuses are returned unchanged. *)
 
 val shell_command_available : string -> bool
-(** [command -v <name>] probe inside [/bin/sh -c], with
-    {!Env_config_exec_timeout.timeout_sec} budget for the
-    [Shell_probe] caller bucket. *)
+(** PATH executable probe for keeper shell read fallback selection.
+    This intentionally avoids [/bin/sh -c] and does not treat empty
+    PATH entries as the current directory. *)
 
 (** {1 Playground repo cache} *)
 

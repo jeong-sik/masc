@@ -387,17 +387,32 @@ let run_argv_with_status_retry_eintr ?cwd ~timeout_sec argv =
   in
   loop max_eintr_retries
 
-let shell_command_available name =
-  let probe =
-    Printf.sprintf "command -v %s >/dev/null 2>&1" (Filename.quote name)
-  in
-  match
-    run_argv_with_status_retry_eintr
-      ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Shell_probe ())
-      [ "/bin/sh"; "-c"; probe ]
+let executable_file path =
+  try
+    let st = Unix.stat path in
+    st.Unix.st_kind = Unix.S_REG
+    &&
+    (Unix.access path [ Unix.X_OK ];
+     true)
   with
-  | Unix.WEXITED 0, _ -> true
-  | _ -> false
+  | Unix.Unix_error _ | Sys_error _ -> false
+
+let path_has_executable name =
+  match Sys.getenv_opt "PATH" with
+  | None -> false
+  | Some path ->
+    path
+    |> String.split_on_char ':'
+    |> List.exists (fun dir ->
+      (* Do not mirror the shell's empty-PATH current-directory fallback
+         for keeper probes; only explicit directories are trusted. *)
+      dir <> "" && executable_file (Filename.concat dir name))
+
+let shell_command_available name =
+  let name = String.trim name in
+  if name = "" then false
+  else if String.contains name '/' then executable_file name
+  else path_has_executable name
 
 (** Write playground repo state cache after successful clone/pull.
     Reads git metadata from [repo_path] and upserts into

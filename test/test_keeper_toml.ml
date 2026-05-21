@@ -1893,7 +1893,7 @@ let test_unknown_toml_warning_key_cache_is_bounded () =
          [ "keeper.typo_field" ])
   done;
   let matching =
-    Atomic.get KTP.unknown_keeper_toml_warning_keys
+    KTP.current_unknown_keeper_toml_warning_keys ()
     |> List.filter (string_starts_with ~prefix)
   in
   check bool "warning cache stays bounded for this prefix" true

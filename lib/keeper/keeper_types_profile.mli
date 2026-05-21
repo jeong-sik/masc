@@ -92,6 +92,11 @@ val canonical_keeper_toml_key_names : string list
 val loader_level_keeper_toml_key_names : string list
 val detect_unknown_keeper_toml_keys : Keeper_toml_loader.toml_doc -> string list
 val unknown_keeper_toml_warning_key_limit : int
+
+val current_unknown_keeper_toml_warning_keys : unit -> string list
+(* Snapshot of the bounded WARN-key cache used by
+   warn_unknown_keeper_toml_keys_once. Test inspection of the bound. *)
+
 val take_warning_keys : int -> 'a list -> 'a list
 val normalize_unknown_keeper_toml_keys : string list -> string list
 val warn_unknown_keeper_toml_keys_once : path:string -> string list -> bool

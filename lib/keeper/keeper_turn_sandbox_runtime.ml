@@ -129,6 +129,38 @@ let run_argv_with_status_retry_eintr ~timeout_sec argv =
     loop max_eintr_retries)
 ;;
 
+let output_for_status ~(stdout : string) ~(stderr : string) =
+  match stdout, stderr with
+  | "", err -> err
+  | out, "" -> out
+  | out, err -> out ^ "\n" ^ err
+;;
+
+let run_argv_with_status_split_retry_eintr ~timeout_sec argv =
+  let max_eintr_retries = 8 in
+  Docker_spawn_throttle.with_slot (fun () ->
+    let rec loop attempts_left =
+      let st, stdout, stderr =
+        Masc_exec.Exec_gate.run_argv_with_status_split
+          ~actor:`System_task_sandbox
+          ~raw_source:(String.concat " " argv)
+          ~summary:"keeper turn sandbox command"
+          ~env:(Unix.environment ())
+          ~cwd:(Sys.getcwd ())
+          ~timeout_sec
+          argv
+      in
+      let out = output_for_status ~stdout ~stderr in
+      match st with
+      | Unix.WEXITED 127
+        when attempts_left > 0
+             && String_util.contains_substring_ci out "interrupted system call" ->
+        loop (attempts_left - 1)
+      | _ -> st, out
+    in
+    loop max_eintr_retries)
+;;
+
 let run_argv_with_stdin_and_status_retry_eintr ~timeout_sec ~stdin_content argv =
   let max_eintr_retries = 8 in
   Docker_spawn_throttle.with_slot (fun () ->
@@ -410,7 +442,32 @@ let run_bash_with_status (t : t) ~(cwd : string) ~(cmd : string) ~(timeout_sec :
       ~container_root:t.container_root
       cmd
   in
-  run_exec_with_status t ~timeout_sec ~cwd ~command_argv:[ "bash"; "-lc"; cmd ^ " 2>&1" ]
+  let container_cwd = container_cwd_of_host t ~host_cwd:cwd in
+  let argv ~container_name =
+    Keeper_sandbox_runtime.docker_command_argv ()
+    @ [ "exec"; "--user"; Printf.sprintf "%d:%d" t.uid t.gid; "-w"; container_cwd ]
+    @ Keeper_sandbox_runtime.docker_sandbox_env_args
+        ~base_path:t.config.base_path
+        ~container_root:t.container_root
+    @ [ container_name; "bash"; "-lc"; cmd ]
+  in
+  match ensure_started t ~timeout_sec with
+  | Error _ as err -> err
+  | Ok container_name ->
+    let argv = argv ~container_name in
+    let st, out = run_argv_with_status_split_retry_eintr ~timeout_sec argv in
+    if container_missing_error out
+    then (
+      match st with
+      | Unix.WEXITED (126 | 127) ->
+        t.state <- Not_started;
+        (match ensure_started t ~timeout_sec with
+         | Error _ as err -> err
+         | Ok container_name ->
+           let argv = argv ~container_name in
+           Ok (run_argv_with_status_split_retry_eintr ~timeout_sec argv))
+      | _ -> Ok (st, out))
+    else Ok (st, out)
 ;;
 
 let write_file_common

@@ -85,6 +85,12 @@ val keeper_bash_native_min_timeout_sec : float
     issue #5, 2026-05-20).  Keeping a separate native floor avoids
     penalising the host-side fast path for the Docker path's overhead. *)
 
+val keeper_bash_min_timeout_sec_for_args : Yojson.Safe.t -> float
+(** Minimum timeout_sec floor for a typed keeper_bash invocation.
+    Trivial native commands keep {!keeper_bash_native_min_timeout_sec}; git,
+    recursive scans, and local Dune wrapper invocations use the shared
+    Tool_dispatch floor. *)
+
 val git_meta_timeout_sec : float
 (** Ceiling for lightweight git metadata commands (rev-parse,
     log --oneline).  Default 5s, env:

@@ -17,18 +17,50 @@ let lowercase_contains haystack needle =
   loop 0
 
 let task_state_file_probe_command_names =
-  [ "cat"; "head"; "tail"; "ls"; "find"; "rg"; "grep"; "test"; "[" ]
+  [ "cat"
+  ; "head"
+  ; "tail"
+  ; "ls"
+  ; "find"
+  ; "rg"
+  ; "grep"
+  ; "jq"
+  ; "sed"
+  ; "awk"
+  ; "wc"
+  ; "stat"
+  ; "file"
+  ; "realpath"
+  ; "python"
+  ; "python3"
+  ; "node"
+  ; "test"
+  ; "["
+  ]
+
+let looks_like_masc_runtime_root_token text =
+  let text = String.lowercase_ascii (String.trim text) in
+  String.equal text ".masc" || String.equal text "./.masc"
 
 let looks_like_task_state_path_token text =
   let text = String.lowercase_ascii text in
   let scoped_masc = lowercase_contains text ".masc/" in
   let scoped_worktree = lowercase_contains text ".worktrees/" in
-  (scoped_worktree && lowercase_contains text ".task.json")
+  looks_like_masc_runtime_root_token text
+  || (scoped_worktree && lowercase_contains text ".task.json")
   ||
   (scoped_masc
    && (lowercase_contains text "backlog.json"
        || lowercase_contains text "/tasks"
        || lowercase_contains text "current_task.json"))
+
+let task_state_marker cmd =
+  lowercase_contains cmd "backlog"
+  || lowercase_contains cmd ".masc"
+  || lowercase_contains cmd "current_task"
+  || lowercase_contains cmd "task_state"
+  || lowercase_contains cmd "task-state"
+  || lowercase_contains cmd ".task.json"
 
 let rec command_mentions_task_state_file cmd =
   let words = shell_words_with_boundaries cmd in
@@ -79,20 +111,15 @@ let rec command_looks_like_task_state_http_probe cmd =
   | None -> false
 
 let command_looks_like_task_state_discovery cmd =
-  let task_state_marker =
-    lowercase_contains cmd "backlog"
-    || lowercase_contains cmd ".masc"
-    || (lowercase_contains cmd "task" && lowercase_contains cmd ".json")
-  in
   command_mentions_task_state_file cmd
   || command_looks_like_task_state_http_probe cmd
   ||
-  ((lowercase_contains cmd "find repos" || lowercase_contains cmd "find .")
-   && task_state_marker)
+  (Keeper_shell_bash_repo_wide_scan.command_has_repo_wide_scan cmd
+   && task_state_marker cmd)
   ||
-  (lowercase_contains cmd "rg "
-   && lowercase_contains cmd "repos"
-   && task_state_marker)
+  ((lowercase_contains cmd "rg " || lowercase_contains cmd "grep ")
+   && lowercase_contains cmd ".masc"
+   && task_state_marker cmd)
 
 let task_state_shell_hint =
   "Do not inspect task state by guessing .masc/backlog.json or repo-local \

@@ -1285,6 +1285,8 @@ let handle_keeper_bash
       task_state_file_probe_block ()
     | None when Task_probe.looks_like_http_probe cmd ->
       task_state_http_probe_block ()
+    | None when Task_probe.looks_like_discovery cmd ->
+      task_state_file_probe_block ()
     | None -> begin
     (if stripped_stderr_dev_null then
        Log.Keeper.info

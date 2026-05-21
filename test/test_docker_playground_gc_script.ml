@@ -226,10 +226,21 @@ let test_status_cleanup_summary_surfaces_candidate_counts () =
       (contains_substring stdout "Cleanup dry-run summary:");
     check bool "root candidate count surfaced" true
       (contains_substring stdout "cleanup_summary_candidates=1");
+    check bool "root projected count surfaced" true
+      (contains_substring stdout
+         "cleanup_summary_projected_worktree_entries=0");
     check bool "top fanout candidate count surfaced" true
       (contains_substring stdout "top_fanout_cleanup_summary_candidates=1");
+    check bool "top fanout projected count surfaced" true
+      (contains_substring stdout "top_fanout_cleanup_summary_projected_count=0");
     check bool "aggressive summary surfaced" true
       (contains_substring stdout "aggressive_cleanup_summary_candidates=1");
+    check bool "aggressive projected count surfaced" true
+      (contains_substring stdout
+         "aggressive_cleanup_summary_projected_worktree_entries=0");
+    check bool "top aggressive projected count surfaced" true
+      (contains_substring stdout
+         "top_fanout_aggressive_cleanup_summary_projected_count=0");
     check bool "dry-run does not remove worktree" true (Sys.file_exists wt_path))
 
 let test_dry_run_lists_stale_clean_worktree () =

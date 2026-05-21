@@ -2195,6 +2195,15 @@
  (modules test_pr_i_2e_bootstrap_loops_typed)
  (libraries alcotest))
 
+; server_bootstrap_loops fork helper ratchet.
+; Pins raw Eio.Fiber.fork ownership to the cancel-safe helper instead
+; of repeating ad hoc crash wrappers at each background loop site.
+
+(test
+ (name test_server_bootstrap_loop_fork_helper)
+ (modules test_server_bootstrap_loop_fork_helper)
+ (libraries alcotest))
+
 ; RFC-0084 PR-I-3 — legacy post-hook surface removal (final).
 ; Pins 0 references to register_post_hook / run_post_hooks across
 ; all of lib/, 0 declarations of legacy entries in the mli, and

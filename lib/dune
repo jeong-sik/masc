@@ -164,6 +164,7 @@
    keeper_host_config_provider
    keeper_in_container_login_provider
    keeper_gh_shared
+   keeper_gh_pr_review_cli
    keeper_tool_github_pr
    keeper_tool_pr_review
    keeper_activation_readiness

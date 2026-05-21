@@ -3,12 +3,12 @@ rfc: "0142"
 title: "cascade_error_classify Decomposition + Typed JSON-Extraction Variant"
 status: Active
 created: 2026-05-20
-updated: 2026-05-21
+updated: 2026-05-22
 author: vincent
 supersedes: []
 superseded_by: null
 related: ["0085", "0088", "0148", "0154"]
-implementation_prs: [16790, 16806, 16894, 16899]
+implementation_prs: [16790, 16806, 16894, 16899, 17474]
 ---
 
 ## Progress audit (2026-05-21)

@@ -244,6 +244,9 @@ let ensure_keeper_sandbox_runtime ~timeout_sec =
   Keeper_sandbox_runtime.ensure_keeper_sandbox_runtime ~timeout_sec
 ;;
 
+let cmd_targets_gh = Keeper_shell_command_semantics.cmd_targets_gh
+let resolve_sandbox_root_git_cwd = Keeper_shell_command_semantics.resolve_sandbox_root_git_cwd
+
 let detect_gh_repo_flag_with_api_misuse =
   Keeper_shell_command_semantics.detect_gh_repo_flag_with_api_misuse
 ;;

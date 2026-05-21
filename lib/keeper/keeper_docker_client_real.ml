@@ -258,18 +258,16 @@ let run plan =
     Keeper_container_name.to_string (Keeper_sandbox_oneshot_plan.container_name plan)
   in
   let image = Keeper_sandbox_oneshot_plan.image plan in
-  let command = Keeper_sandbox_oneshot_plan.command plan in
+  let command_argv = Keeper_sandbox_oneshot_plan.command_argv plan in
   let timeout_sec = Keeper_sandbox_oneshot_plan.timeout_budget_sec plan in
-  (* [docker run --rm --name <name> <image> sh -lc <cmd>].
+  (* [docker run --rm --name <name> <image> <command_argv>].
      [--rm] removes the container after exit (Phase 3b-iii default
      cleanup strategy — RFC §3.1's spec deferred a typed cleanup
-     policy to a follow-up RFC). [sh -lc] mirrors [exec]'s wrapping
-     so caller-passed [cmd] strings work identically across both
-     functions. *)
+     policy to a follow-up RFC). *)
   let argv =
     [ "docker"; "run"; "--rm"; "--name"; container_name ]
     @ Keeper_sandbox_runtime.docker_run_pull_never_args ()
-    @ [ image; "sh"; "-lc"; command ]
+    @ (image :: command_argv)
   in
   map_status_to_exec_result
     (gated_argv_with_status_split ~timeout_sec ~summary:"keeper docker run (oneshot)" argv)

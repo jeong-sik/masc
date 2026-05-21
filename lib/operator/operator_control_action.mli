@@ -63,20 +63,9 @@ type action_request = {
 (** Parsed operator action — output of {!action_request_of_args}. *)
 
 val canonical_action_type : string -> string
-(** [canonical_action_type t] applies the operator action-type alias
-    table:
-
-    | Input | Output |
-    | --- | --- |
-    | [autonomy_tick] | [social_sweep] |
-    | [room_pause] / [namespace_pause] | [namespace_pause] |
-    | [room_resume] / [namespace_resume] | [namespace_resume] |
-    | [keeper_msg] / [keeper_message] | [keeper_message] |
-    | other | passthrough |
-
-    Pinned at the contract seam — the [keeper_msg] -> [keeper_message]
-    rename and [autonomy_tick] -> [social_sweep] are the long-lived
-    operator-API legacy paths. *)
+(** [canonical_action_type t] is the remaining parser seam for
+    action-type normalization. Historical aliases are intentionally no
+    longer accepted here; callers must use canonical action types. *)
 
 val generate_confirm_token :
   clock:_ Eio.Time.clock -> Coord.config -> (string, string) result
@@ -107,10 +96,10 @@ val action_request_of_args :
   Yojson.Safe.t ->
   (action_request, string) result
 (** [action_request_of_args ?actor_hint ctx args] parses an
-    [action_request] from raw JSON.  Applies
-    {!canonical_action_type} to [action_type] and falls back to the
-    type-specific default target_type (see internal
-    [default_target_type_for]) when [args.target_type] is missing. *)
+    [action_request] from raw JSON.  Applies trim/lowercase
+    normalization to [action_type] and falls back to the type-specific
+    default target_type (see internal [default_target_type_for]) when
+    [args.target_type] is missing. *)
 
 val normalize_request_target_type :
   action_request -> (action_request, string) result

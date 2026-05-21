@@ -157,15 +157,15 @@ let matching_action target_type target_id actions =
 
 let incident_action_types kind =
   match kind with
-  | "spawn_failure_present" -> [ "team_task_inject" ]
+  | "spawn_failure_present" -> [ "task_inject" ]
   | "detached_actor_present"
   | "empty_note_turn_present"
   | "low_confidence_routing"
   | "routing_escalation_present" ->
-      [ "team_note" ]
-  | "planned_worker_without_turn" -> [ "team_worker_spawn_batch"; "team_note" ]
-  | "local64_role_gap" -> [ "team_worker_spawn_batch" ]
-  | "stalled_session" -> [ "team_stop" ]
+      [ "broadcast" ]
+  | "planned_worker_without_turn" -> [ "task_inject"; "broadcast" ]
+  | "local64_role_gap" -> [ "task_inject" ]
+  | "stalled_session" -> [ "namespace_pause" ]
   | "command_issue_pressure"
   | "command_routing_confidence"
   | "command_quality_per_token"

@@ -416,7 +416,7 @@ let test_dashboard_tools_projection () =
       | Some row ->
           check bool "local worker tool keeps local_worker surface" true
             (has_surface "local_worker" row));
-      (match deprecated_alias_tool with
+      (match removed_alias_tool with
       | None -> ()
       | Some row ->
           check bool "deprecated alias has registered schema" true

@@ -1358,6 +1358,25 @@ let () =
       (* The path validator now consumes Shell IR and validates literal
          path-bearing argv/redirect values. Syntax policy lives in the
          command gate; this suite keeps only containment behaviour here. *)
+      Alcotest.test_case "Shell IR outside literal path is blocked"
+        `Quick (fun () ->
+          let open Masc_exec.Shell_ir in
+          let bin = Masc_exec.Bin.of_string "cat" |> Result.get_ok in
+          let ir =
+            Simple
+              { bin
+              ; args = [ Lit "/etc/passwd" ]
+              ; env = []
+              ; cwd = None
+              ; redirects = []
+              ; sandbox = Masc_exec.Sandbox_target.host ()
+              }
+          in
+          match Worker_dev_tools.validate_shell_ir_paths ~workdir:"/tmp" ir with
+          | Error msg ->
+            Alcotest.(check bool) "outside path blocked" true
+              (contains_substring msg "outside allowed directories")
+          | Ok () -> Alcotest.fail "outside Shell IR literal path must be blocked");
       Alcotest.test_case "outside literal path is blocked"
         `Quick (fun () ->
           match Worker_dev_tools.validate_command_paths

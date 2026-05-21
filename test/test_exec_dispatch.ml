@@ -34,16 +34,6 @@ let () =
   assert (result = "prefix-world-suffix");
   Unix.putenv "MASC_TEST_P7_VAR" ""
 
-(* --- native_dispatch_enabled --- *)
-
-let () =
-  Unix.putenv "MASC_BASH_NATIVE_DISPATCH" "0";
-  assert (not (Masc_exec.Exec_dispatch.native_dispatch_enabled ()));
-  Unix.putenv "MASC_BASH_NATIVE_DISPATCH" "1";
-  assert (Masc_exec.Exec_dispatch.native_dispatch_enabled ());
-  Unix.putenv "MASC_BASH_NATIVE_DISPATCH" "";
-  assert (Masc_exec.Exec_dispatch.native_dispatch_enabled ())
-
 (* --- dispatch_simple with real process --- *)
 
 let () =

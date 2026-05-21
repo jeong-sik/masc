@@ -374,7 +374,7 @@ let record_exec_shell_gate ?caller verdict =
       ~verdict:(legendary_verdict_of_exec verdict)
 ;;
 
-let validate_command_coding_with_allowlist
+let command_context_coding_with_allowlist
       ?caller
       ?(allow_pipes = true)
       ~(allowed_commands : string list)
@@ -398,7 +398,10 @@ let validate_command_coding_with_allowlist
     | Allow context ->
       if context.Exec_shell_gate.direct_dune_seen
       then Error Direct_dune_invocation
-      else validate_wrapped_stages ~allowed_commands context.Exec_shell_gate.ast
+      else (
+        match validate_wrapped_stages ~allowed_commands context.Exec_shell_gate.ast with
+        | Ok () -> Ok context
+        | Error _ as err -> err)
     | Reject { context; reason; _ } ->
       (match reason with
        | Pipes_not_allowed _ -> Error Pipes_not_allowed
@@ -407,6 +410,15 @@ let validate_command_coding_with_allowlist
        | _ -> Error (block_reason_of_exec_reject reason))
     | Cannot_parse _ -> Error Injection
     | Too_complex { reason } -> Error (block_reason_of_exec_too_complex reason))
+;;
+
+let validate_command_coding_with_allowlist ?caller ?allow_pipes ~allowed_commands cmd =
+  command_context_coding_with_allowlist
+    ?caller
+    ?allow_pipes
+    ~allowed_commands
+    cmd
+  |> Result.map (fun _ -> ())
 ;;
 
 (** Relaxed command validation for Coding/Full preset keepers.
@@ -752,7 +764,7 @@ let existing_dir_path_values cmd =
   | Masc_exec.Parsed.Too_complex _ -> []
 ;;
 
-let validate_command_paths ?keeper_id ?base_path ?workdir cmd =
+let validate_shell_ir_paths ?keeper_id ?base_path ?workdir shell_ir =
   match workdir with
   | None -> Ok ()
   | Some _ ->
@@ -842,11 +854,16 @@ let validate_command_paths ?keeper_id ?base_path ?workdir cmd =
           in
           loop stages
       in
-      (match Masc_exec_bash_parser.Bash.parse_string cmd with
-       | Masc_exec.Parsed.Parsed shell_ir -> validate_parsed_shell_ir shell_ir
-       | Masc_exec.Parsed.Parse_error _
-       | Masc_exec.Parsed.Parse_aborted _
-       | Masc_exec.Parsed.Too_complex _ -> Ok ())
+      validate_parsed_shell_ir shell_ir
+;;
+
+let validate_command_paths ?keeper_id ?base_path ?workdir cmd =
+  match Masc_exec_bash_parser.Bash.parse_string cmd with
+  | Masc_exec.Parsed.Parsed shell_ir ->
+    validate_shell_ir_paths ?keeper_id ?base_path ?workdir shell_ir
+  | Masc_exec.Parsed.Parse_error _
+  | Masc_exec.Parsed.Parse_aborted _
+  | Masc_exec.Parsed.Too_complex _ -> Ok ()
 ;;
 
 (** Check if a command performs write/mutating operations.
@@ -1257,7 +1274,11 @@ let make_shell_exec_with_allowlist
               | Some dir when String.trim dir <> "" -> dir
               | Some _ | None -> Sys.getcwd ()
             in
-            (match validate_command_paths ~workdir:path_workdir command with
+            (match
+               validate_shell_ir_paths
+                 ~workdir:path_workdir
+                 context.Exec_shell_gate.ast
+             with
              | Error message ->
                Option.iter
                  (fun (f : tool_exec_observer) ->

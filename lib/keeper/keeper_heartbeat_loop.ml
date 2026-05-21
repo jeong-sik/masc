@@ -308,7 +308,10 @@ let cascade_backpressure_decision =
   Observations.cascade_backpressure_decision
 ;;
 
-type keepalive_scheduling_decision = {
+(* Keepalive scheduling decision (record + decide function) extracted to
+   [Keeper_heartbeat_loop_scheduling] (godfile decomp). The record type is
+   re-exported transparently so the .mli signature stays byte-identical. *)
+type keepalive_scheduling_decision = Keeper_heartbeat_loop_scheduling.keepalive_scheduling_decision = {
   turn_decision : Keeper_world_observation.keeper_cycle_decision;
   requested_should_run_turn : bool;
   cascade_backpressure : cascade_backpressure_decision;
@@ -318,52 +321,7 @@ type keepalive_scheduling_decision = {
   channel : string;
 }
 
-let decide_keepalive_scheduling
-      ?(cascade_resilience_of_name =
-        Keeper_exec_preflight.cascade_resilience_of_name)
-      ?(cascade_status_of_name =
-        fun ~cascade_name -> Keeper_health_probe.get_cascade_status ~cascade_name)
-      ~stop
-      ~meta
-      obs
-  =
-  let turn_decision = Keeper_world_observation.keeper_cycle_decision ~meta obs in
-  let requested_should_run_turn =
-    (not (Atomic.get stop)) && turn_decision.should_run
-  in
-  let cascade_name = cascade_name_of_meta meta in
-  let cascade_resilience = cascade_resilience_of_name cascade_name in
-  let cascade_backpressure =
-    cascade_backpressure_decision
-      ~cascade_resilience:(Some cascade_resilience)
-      ~should_run_turn:requested_should_run_turn
-      ~cascade_name
-      ~cascade_status:(cascade_status_of_name ~cascade_name)
-  in
-  let should_run_turn =
-    match cascade_backpressure with
-    | Cascade_admitted -> requested_should_run_turn
-    | Cascade_backpressured _ -> false
-  in
-  let verdict_reasons =
-    Keeper_world_observation.verdict_reasons_to_strings turn_decision.verdict
-  in
-  let admission_reasons =
-    match cascade_backpressure with
-    | Cascade_admitted -> verdict_reasons
-    | Cascade_backpressured { reason; _ } ->
-      cascade_backpressure_observation_reasons ~reason
-  in
-  let channel = Keeper_world_observation.channel_to_string turn_decision.channel in
-  { turn_decision
-  ; requested_should_run_turn
-  ; cascade_backpressure
-  ; should_run_turn
-  ; verdict_reasons
-  ; admission_reasons
-  ; channel
-  }
-;;
+let decide_keepalive_scheduling = Keeper_heartbeat_loop_scheduling.decide_keepalive_scheduling
 
 let record_cascade_backpressure_observation =
   Observations.record_cascade_backpressure_observation

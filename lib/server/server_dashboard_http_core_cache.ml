@@ -23,6 +23,11 @@ let _shell_warming = shell_warming
 let last_good_shell : Yojson.Safe.t Atomic.t = Atomic.make (`Assoc [])
 let _last_good_shell = last_good_shell
 
+(** Last-known-good light shell result for first-paint requests while
+    full shell pre-warm is still running. *)
+let last_good_shell_light : Yojson.Safe.t Atomic.t = Atomic.make (`Assoc [])
+let _last_good_shell_light = last_good_shell_light
+
 (** Wrap a dashboard computation with a configurable timeout.
     Returns a partial-response JSON on timeout instead of hanging. *)
 let with_dashboard_timeout ~clock compute =

@@ -130,11 +130,7 @@ let identity_attestation_fields ~(config : Coord.config) (meta : keeper_meta) =
                ]) );
       ]
 
-(* Both "pr_number" and "number" are accepted for schema-drift compat. *)
-let pr_number_of_args args =
-  let from_pr = Safe_ops.json_int ~default:0 "pr_number" args in
-  if from_pr <> 0 then from_pr
-  else Safe_ops.json_int ~default:0 "number" args
+let pr_number_of_args args = Safe_ops.json_int ~default:0 "pr_number" args
 
 type pr_review_exec_result =
   { status : Unix.process_status

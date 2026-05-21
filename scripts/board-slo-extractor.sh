@@ -33,6 +33,8 @@ readonly LOGS_DIR="$MASC_DIR/logs"
 readonly TASKS_FILE="$MASC_DIR/tasks/backlog.json"
 readonly POSTS_FILE="$MASC_DIR/board_posts.jsonl"
 readonly COMMENTS_FILE="$MASC_DIR/board_comments.jsonl"
+readonly TOOL_CALLS_DIR="$MASC_DIR/tool_calls"
+readonly DOCKER_PLAYGROUND_DIR="$MASC_DIR/playground/docker"
 readonly TODAY="$(date -u +%Y-%m-%d)"
 readonly LOG_TODAY="$LOGS_DIR/system_log_${TODAY}.jsonl"
 
@@ -40,7 +42,6 @@ WINDOW_HOURS=24
 OUTPUT_MODE=json
 DASHBOARD_HOST="http://127.0.0.1:8935"
 OFFLINE_MODE=0
-ANALYZER_TIMEOUT_SEC="${MASC_BOARD_SLO_ANALYZER_TIMEOUT_SEC:-8}"
 DASHBOARD_TIMEOUT_SEC="${MASC_BOARD_SLO_DASHBOARD_TIMEOUT_SEC:-5}"
 
 while [[ $# -gt 0 ]]; do
@@ -59,6 +60,41 @@ done
 readonly WINDOW_SEC=$(( WINDOW_HOURS * 3600 ))
 
 # --- metric primitives --------------------------------------------------------
+
+date_path_days_ago() {
+  local days_ago="$1"
+  date -u -v-"${days_ago}"d +%Y-%m/%d 2>/dev/null \
+    || date -u -d "-${days_ago} days" +%Y-%m/%d 2>/dev/null
+}
+
+date_ymd_days_ago() {
+  local days_ago="$1"
+  date -u -v-"${days_ago}"d +%Y-%m-%d 2>/dev/null \
+    || date -u -d "-${days_ago} days" +%Y-%m-%d 2>/dev/null
+}
+
+recent_dated_jsonl_files() {
+  local dir="$1"
+  local days=$(( (WINDOW_HOURS + 23) / 24 ))
+  local i rel file
+  for i in $(seq 0 "$days"); do
+    rel="$(date_path_days_ago "$i" || true)"
+    [[ -n "$rel" ]] || continue
+    file="$dir/$rel.jsonl"
+    [[ -f "$file" ]] && printf '%s\n' "$file"
+  done
+}
+
+recent_system_log_files() {
+  local days=$(( (WINDOW_HOURS + 23) / 24 ))
+  local i ymd file
+  for i in $(seq 0 "$days"); do
+    ymd="$(date_ymd_days_ago "$i" || true)"
+    [[ -n "$ymd" ]] || continue
+    file="$LOGS_DIR/system_log_${ymd}.jsonl"
+    [[ -f "$file" ]] && printf '%s\n' "$file"
+  done
+}
 
 m_open_backlog() {
   [[ -f "$TASKS_FILE" ]] || { echo "0"; return; }
@@ -99,81 +135,152 @@ m_high_churn_threads_48h() {
 
 m_warn_error_window() {
   [[ -f "$LOG_TODAY" ]] || { echo "0"; return; }
-  # level filter — accept WARN / ERROR / WARNING uppercase.
-  rg --count -e '"level":"(WARN|ERROR|WARNING)"' "$LOG_TODAY" || true
-}
-
-run_with_timeout() {
-  local timeout_sec="$1"
-  shift
-  local tmp
-  tmp="$(mktemp "${TMPDIR:-/tmp}/board-slo-extractor.XXXXXX")"
-  "$@" >"$tmp" 2>/dev/null &
-  local pid=$!
-  local elapsed=0
-  while kill -0 "$pid" 2>/dev/null; do
-    if [[ "$elapsed" -ge "$timeout_sec" ]]; then
-      kill "$pid" 2>/dev/null || true
-      wait "$pid" 2>/dev/null || true
-      rm -f "$tmp"
-      return 124
-    fi
-    sleep 1
-    elapsed=$((elapsed + 1))
-  done
-  local status=0
-  wait "$pid" || status=$?
-  cat "$tmp"
-  rm -f "$tmp"
-  return "$status"
+  jq -s '[.[] | select((.level // "") | test("^(WARN|ERROR|WARNING)$"))] | length' "$LOG_TODAY"
 }
 
 m_tool_call_success_pct() {
-  [[ "$OFFLINE_MODE" -eq 0 ]] || { echo "null"; return; }
-  # WORKAROUND: analyze-tool-call-quality.sh has no --json mode yet.
-  # 근본 해결: 별도 PR로 두 analyze-* scripts에 --json 추가 후 단일 contract 호출로 교체.
-  local script="$REPO_ROOT/scripts/analyze-tool-call-quality.sh"
-  [[ -x "$script" ]] || { echo "null"; return; }
-  local out failures total
-  out="$(run_with_timeout "$ANALYZER_TIMEOUT_SEC" "$script" "$BASE_PATH" "$WINDOW_HOURS" || true)"
-  failures="$(printf '%s\n' "$out" | rg -o '([0-9]+) failures' -r '$1' | head -1)"
-  total="$(printf '%s\n' "$out" \
-    | rg -o '[0-9]+ calls' -r '' \
-    | rg -o '[0-9]+' \
-    | awk 'BEGIN{s=0}{s+=$1}END{print s}')"
-  [[ -z "$failures" || -z "$total" || "$total" == "0" ]] && { echo "null"; return; }
-  awk -v f="$failures" -v t="$total" 'BEGIN { printf "%.2f", ((t - f) * 100.0) / t }'
+  [[ -d "$TOOL_CALLS_DIR" ]] || { echo "null"; return; }
+  local files=()
+  local file
+  while IFS= read -r file; do
+    files+=("$file")
+  done < <(recent_dated_jsonl_files "$TOOL_CALLS_DIR")
+  [[ "${#files[@]}" -gt 0 ]] || { echo "null"; return; }
+  jq -s --argjson cutoff "$(( $(date +%s) - WINDOW_SEC ))" '
+    def ts_epoch:
+      if (.ts | type) == "number" then .ts
+      elif (.ts | type) == "string" then (.ts | fromdateiso8601? // 0)
+      else 0 end;
+    [ .[] | select(ts_epoch >= $cutoff) ] as $rows
+    | ($rows | length) as $total
+    | if $total == 0 then empty
+      else
+        ([ $rows[]
+           | select(.success == true
+                    and ((if has("semantic_success") then .semantic_success else true end) != false))
+         ] | length) as $ok
+        | (($ok * 10000 / $total | floor) / 100)
+      end
+  ' "${files[@]}" 2>/dev/null || echo "null"
 }
 
 m_bash_failure_pct() {
-  [[ "$OFFLINE_MODE" -eq 0 ]] || { echo "null"; return; }
-  local script="$REPO_ROOT/scripts/analyze-keeper-bash-failures.sh"
-  [[ -x "$script" ]] || { echo "null"; return; }
-  local out
-  out="$(run_with_timeout "$ANALYZER_TIMEOUT_SEC" "$script" "$BASE_PATH" "$WINDOW_HOURS" || true)"
-  printf '%s\n' "$out" | rg -o '[Ff]ailure[^0-9]*([0-9]+\.[0-9]+)' -r '$1' | head -1 || echo "null"
+  [[ -d "$TOOL_CALLS_DIR" ]] || { echo "null"; return; }
+  local files=()
+  local file
+  while IFS= read -r file; do
+    files+=("$file")
+  done < <(recent_dated_jsonl_files "$TOOL_CALLS_DIR")
+  [[ "${#files[@]}" -gt 0 ]] || { echo "null"; return; }
+  jq -s --argjson cutoff "$(( $(date +%s) - WINDOW_SEC ))" '
+    def ts_epoch:
+      if (.ts | type) == "number" then .ts
+      elif (.ts | type) == "string" then (.ts | fromdateiso8601? // 0)
+      else 0 end;
+    def semantic_failed:
+      has("semantic_success") and .semantic_success == false;
+    [ .[] | select(ts_epoch >= $cutoff and .tool == "Bash") ] as $rows
+    | ($rows | length) as $total
+    | if $total == 0 then empty
+      else
+        ([ $rows[] | select(.success == false or semantic_failed) ] | length) as $fail
+        | (($fail * 10000 / $total | floor) / 100)
+      end
+  ' "${files[@]}" 2>/dev/null || echo "null"
 }
 
 m_cascade_audit_failure_pct() {
-  # Approximation: cascade_exhausted / cascade_attempt over window log.
-  [[ -f "$LOG_TODAY" ]] || { echo "null"; return; }
-  local exh att denom
-  exh=$(rg --count 'cascade_exhausted' "$LOG_TODAY" 2>/dev/null || echo 0)
-  att=$(rg --count 'cascade_attempt' "$LOG_TODAY" 2>/dev/null || echo 0)
-  denom="$att"
-  if [[ "$exh" -gt "$denom" ]]; then
-    # Some producers emit terminal exhaustion without a same-file attempt row.
-    # Keep the SLO percentage bounded while preserving the hard breach signal.
-    denom="$exh"
+  [[ -d "$LOGS_DIR" ]] || { echo "null"; return; }
+  local files=()
+  local file
+  while IFS= read -r file; do
+    files+=("$file")
+  done < <(recent_system_log_files)
+  if [[ "${#files[@]}" -eq 0 && -f "$LOG_TODAY" ]]; then
+    files=("$LOG_TODAY")
   fi
-  if [[ "$denom" -eq 0 ]]; then echo "null"; return; fi
-  awk -v e="$exh" -v d="$denom" 'BEGIN { printf "%.2f", (e * 100.0) / d }'
+  [[ "${#files[@]}" -gt 0 ]] || { echo "null"; return; }
+  jq -s --argjson cutoff "$(( $(date +%s) - WINDOW_SEC ))" '
+    def ts_epoch:
+      if (.ts | type) == "number" then .ts
+      elif (.ts | type) == "string" then (.ts | fromdateiso8601? // 0)
+      else 0 end;
+    [ .[]
+      | select(ts_epoch >= $cutoff)
+      | select((.details.event // .event // "") == "cascade_attempt_terminal")
+    ] as $rows
+    | ($rows | length) as $total
+    | if $total == 0 then empty
+      else
+        ([ $rows[] | select((.details.outcome // .outcome // "") == "failure") ] | length) as $fail
+        | (($fail * 10000 / $total | floor) / 100)
+      end
+  ' "${files[@]}" 2>/dev/null || echo "null"
 }
 
 m_docker_false_positive_24h() {
   [[ -f "$LOG_TODAY" ]] || { echo "0"; return; }
-  # sandbox_image_missing count from today's log.
-  rg --count 'sandbox_image_missing' "$LOG_TODAY" 2>/dev/null || echo 0
+  jq -s '[.[] | select(((.event // "") + " " + (.message // "")) | contains("sandbox_image_missing"))] | length' "$LOG_TODAY"
+}
+
+m_live_defect_signatures() {
+  [[ -f "$LOG_TODAY" ]] || {
+    jq -n '{
+      project_snapshot_timeout: 0,
+      process_eio_1s_timeout: 0,
+      process_eio_5s_timeout: 0,
+      sandbox_image_missing: 0,
+      host_fd_hotspot_budget_exhausted: 0,
+      docker_worktree_gitdir_prepared: 0,
+      docker_worktree_gitdir_restored: 0
+    }'
+    return
+  }
+  jq -s '
+    def msg: (.message // "");
+    {
+      project_snapshot_timeout:
+        ([.[] | select(msg | contains("project-snapshot async shell refresh timed out"))] | length),
+      process_eio_1s_timeout:
+        ([.[] | select(msg | test("\\[Process_eio\\] Timeout after 1s"))] | length),
+      process_eio_5s_timeout:
+        ([.[] | select(msg | test("\\[Process_eio\\] Timeout after 5s"))] | length),
+      sandbox_image_missing:
+        ([.[] | select(((.event // "") + " " + msg) | contains("sandbox_image_missing"))] | length),
+      host_fd_hotspot_budget_exhausted:
+        ([.[] | select(msg | contains("host_fd_hotspot_budget_exhausted"))] | length),
+      docker_worktree_gitdir_prepared:
+        ([.[] | select(msg | contains("docker worktree gitdir path") and contains("prepared"))] | length),
+      docker_worktree_gitdir_restored:
+        ([.[] | select(msg | contains("docker worktree gitdir path") and contains("restored"))] | length)
+    }' "$LOG_TODAY"
+}
+
+m_docker_playground_worktrees() {
+  local worktrees_dirs=0
+  local worktree_entries=0
+  if [[ -d "$DOCKER_PLAYGROUND_DIR" ]]; then
+    local keeper_dir repos_dir repo_dir worktrees_dir wt_path
+    for keeper_dir in "$DOCKER_PLAYGROUND_DIR"/*; do
+      [[ -d "$keeper_dir" ]] || continue
+      repos_dir="$keeper_dir/repos"
+      [[ -d "$repos_dir" ]] || continue
+      for repo_dir in "$repos_dir"/*; do
+        [[ -d "$repo_dir" ]] || continue
+        worktrees_dir="$repo_dir/.worktrees"
+        [[ -d "$worktrees_dir" ]] || continue
+        worktrees_dirs=$((worktrees_dirs + 1))
+        for wt_path in "$worktrees_dir"/*; do
+          [[ -d "$wt_path" ]] || continue
+          worktree_entries=$((worktree_entries + 1))
+        done
+      done
+    done
+  fi
+  jq -n \
+    --argjson worktrees_dirs "$worktrees_dirs" \
+    --argjson worktree_entries "$worktree_entries" \
+    '{worktrees_dirs: $worktrees_dirs, worktree_entries: $worktree_entries}'
 }
 
 epoch_ms() {
@@ -188,7 +295,8 @@ m_dashboard_proof_endpoints() {
   for ep in "${endpoints[@]}"; do
     local code start end ms
     start=$(epoch_ms)
-    code=$(curl -sS --max-time "$DASHBOARD_TIMEOUT_SEC" -o /dev/null -w '%{http_code}' "$DASHBOARD_HOST$ep" 2>/dev/null || echo "000")
+    code="$(curl -sS --max-time "$DASHBOARD_TIMEOUT_SEC" -o /dev/null -w '%{http_code}' "$DASHBOARD_HOST$ep" 2>/dev/null || true)"
+    [[ -n "$code" ]] || code="000"
     end=$(epoch_ms)
     ms=$(( end - start ))
     [[ $first -eq 1 ]] && first=0 || out+=","
@@ -223,6 +331,8 @@ emit_json() {
     --arg bash_failure_pct "$(m_bash_failure_pct)" \
     --arg cascade_audit_failure_pct "$(m_cascade_audit_failure_pct)" \
     --argjson docker_false_positive_24h "$(m_docker_false_positive_24h)" \
+    --argjson live_defect_signatures "$(m_live_defect_signatures)" \
+    --argjson docker_playground_worktrees "$(m_docker_playground_worktrees)" \
     --argjson dashboard_proof "$(m_dashboard_proof_endpoints)" \
     --arg live_defect_open "$(m_live_defect_issues)" \
     '{
@@ -242,6 +352,8 @@ emit_json() {
          bash_failure_pct: ($bash_failure_pct | tonumber? // null),
          cascade_audit_failure_pct: ($cascade_audit_failure_pct | tonumber? // null),
          docker_false_positive_24h: $docker_false_positive_24h,
+         live_defect_signatures: $live_defect_signatures,
+         docker_playground_worktrees: $docker_playground_worktrees,
          dashboard_proof: $dashboard_proof,
          live_defect_open: ($live_defect_open | tonumber? // null)
        }

@@ -49,6 +49,7 @@
   test_fd_accountant
   test_auth_login
   test_audit_log
+  test_system_log_category
   test_governance_anomaly
   test_http_negotiation
   test_mcp_h1_h2_admission_parity
@@ -368,6 +369,7 @@
   test_fd_accountant
   test_auth_login
   test_audit_log
+  test_system_log_category
   test_governance_anomaly
   test_http_negotiation
   test_mcp_h1_h2_admission_parity

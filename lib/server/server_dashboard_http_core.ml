@@ -64,6 +64,8 @@ let shell_warming = Server_dashboard_http_core_cache.shell_warming
 let _shell_warming = Server_dashboard_http_core_cache._shell_warming
 let last_good_shell = Server_dashboard_http_core_cache.last_good_shell
 let _last_good_shell = Server_dashboard_http_core_cache._last_good_shell
+let last_good_shell_light = Server_dashboard_http_core_cache.last_good_shell_light
+let _last_good_shell_light = Server_dashboard_http_core_cache._last_good_shell_light
 let with_dashboard_timeout = Server_dashboard_http_core_cache.with_dashboard_timeout
 let cache_partition_segment = Server_dashboard_http_core_cache.cache_partition_segment
 let dashboard_cache_key = Server_dashboard_http_core_cache.dashboard_cache_key
@@ -214,70 +216,17 @@ let dashboard_batch_json ?(compact = false) (config : Coord.config) : Yojson.Saf
     ]
 ;;
 
-let operator_actor_hint request =
-  match agent_from_request request with
-  | Some raw ->
-    let sanitized = sanitize_dashboard_actor_name raw in
-    if sanitized = "" then None else Some sanitized
-  | None -> None
-;;
-
-(* --- Operator proactive refresh ---
-   Default (no-param) requests are served from a background-refreshed ref.
-   Parameterized requests fall back to on-demand compute with SWR cache.
-
-   Using Proactive_refresh gives circuit breaker + exponential backoff on
-   repeated failures, matching the pattern used by execution and mission loops.
-
-   Interval: 10s (was 120s). Even if compute takes ~8s, the ref is updated
-   every ~18s worst-case, which is acceptable for dashboard SSE polling. *)
-
-(* Late-bound broadcast refs — set by server_dashboard_http.ml after
-   Sse module is in scope.  Same pattern as _broadcast_room_truth_ref. *)
-let operator_snapshot_broadcast_ref : (Yojson.Safe.t -> unit) ref =
-  ref (fun (_json : Yojson.Safe.t) -> ())
-;;
-
-let _operator_snapshot_broadcast_ref = operator_snapshot_broadcast_ref
-
-let operator_digest_broadcast_ref : (Yojson.Safe.t -> unit) ref =
-  ref (fun (_json : Yojson.Safe.t) -> ())
-;;
-
-let _operator_digest_broadcast_ref = operator_digest_broadcast_ref
-
-let operator_snapshot_cache =
-  create_cached_surface
-    (`Assoc
-        [ "status", `String "initializing"
-        ; "generated_at", `String (Masc_domain.now_iso ())
-        ])
-;;
-
-let _operator_snapshot_cache = operator_snapshot_cache
-
-let operator_digest_cache =
-  create_cached_surface
-    (`Assoc
-        [ "health", `String "initializing"
-        ; "generated_at", `String (Masc_domain.now_iso ())
-        ])
-;;
-
-let _operator_digest_cache = operator_digest_cache
-
-let operator_refresh_interval_s =
-  float_of_env_default
-    "MASC_OPERATOR_REFRESH_INTERVAL_S"
-    ~default:60.0
-    ~min_v:10.0
-    ~max_v:600.0
-;;
-
-let operator_snapshot_extra () =
-  [ "readonly_pool", Coord_utils.domain_local_pg_backend_diagnostics_json () ]
-;;
-
+let operator_actor_hint = Server_dashboard_http_core_operator.operator_actor_hint
+let operator_snapshot_broadcast_ref = Server_dashboard_http_core_operator.operator_snapshot_broadcast_ref
+let _operator_snapshot_broadcast_ref = Server_dashboard_http_core_operator._operator_snapshot_broadcast_ref
+let operator_digest_broadcast_ref = Server_dashboard_http_core_operator.operator_digest_broadcast_ref
+let _operator_digest_broadcast_ref = Server_dashboard_http_core_operator._operator_digest_broadcast_ref
+let operator_snapshot_cache = Server_dashboard_http_core_operator.operator_snapshot_cache
+let _operator_snapshot_cache = Server_dashboard_http_core_operator._operator_snapshot_cache
+let operator_digest_cache = Server_dashboard_http_core_operator.operator_digest_cache
+let _operator_digest_cache = Server_dashboard_http_core_operator._operator_digest_cache
+let operator_refresh_interval_s = Server_dashboard_http_core_operator.operator_refresh_interval_s
+let operator_snapshot_extra = Server_dashboard_http_core_operator.operator_snapshot_extra
 let json_string_opt = function
   | Some value -> `String value
   | None -> `Null
@@ -1275,10 +1224,24 @@ let dashboard_shell_bootstrap_json (config : Coord.config) : Yojson.Safe.t =
          ]
 ;;
 
-let dashboard_shell_last_good_opt () =
-  match Atomic.get last_good_shell with
-  | `Assoc [] -> None
-  | json -> Some json
+let dashboard_shell_last_good_with_source ~light () =
+  let full_last_good () =
+    match Atomic.get last_good_shell with
+    | `Assoc [] -> None
+    | json -> Some (json, "last_good")
+  in
+  if light
+  then (
+    match Atomic.get last_good_shell_light with
+    | `Assoc [] -> full_last_good ()
+    | json -> Some (json, "last_good_light"))
+  else full_last_good ()
+;;
+
+let remember_dashboard_shell_last_good ~light json =
+  if light
+  then Atomic.set last_good_shell_light json
+  else Atomic.set last_good_shell json
 ;;
 
 let is_dashboard_cache_timeout_json = function
@@ -1669,8 +1632,8 @@ let dashboard_shell_http_json
     | None -> Eio_context.get_clock_opt ()
   in
   let fallback_payload_with_source () =
-    match dashboard_shell_last_good_opt () with
-    | Some json -> json, "last_good"
+    match dashboard_shell_last_good_with_source ~light () with
+    | Some (json, source) -> json, source
     | None -> dashboard_shell_bootstrap_json config, "bootstrap"
   in
   let fallback_payload () =
@@ -1734,7 +1697,9 @@ let dashboard_shell_http_json
       in
       if is_dashboard_cache_timeout_json computed
       then timeout_fallback_payload (dashboard_shell_timeout_for ~light)
-      else computed)
+      else (
+        remember_dashboard_shell_last_good ~light computed;
+        computed))
   in
   match request with
   | None -> payload

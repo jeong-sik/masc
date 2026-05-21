@@ -22,22 +22,20 @@ let test_log_level_to_string () =
   check string "warn" "WARN" (Log.level_to_string Log.Warn);
   check string "error" "ERROR" (Log.level_to_string Log.Error)
 
-let test_log_level_of_string () =
-  check bool "debug" true (Log.level_of_string "DEBUG" = Log.Debug);
-  check bool "info" true (Log.level_of_string "INFO" = Log.Info);
-  check bool "warn" true (Log.level_of_string "WARN" = Log.Warn);
-  check bool "warning" true (Log.level_of_string "WARNING" = Log.Warn);
-  check bool "error" true (Log.level_of_string "ERROR" = Log.Error);
-  check bool "unknown" true (Log.level_of_string "unknown" = Log.Info); (* default *)
-  (* partial variant — None on unrecognised, Some on valid *)
+let test_log_level_of_string_opt () =
+  check bool "debug" true (Log.level_of_string_opt "DEBUG" = Some Log.Debug);
+  check bool "info" true (Log.level_of_string_opt "INFO" = Some Log.Info);
+  check bool "warn" true (Log.level_of_string_opt "WARN" = Some Log.Warn);
+  check bool "warning" true (Log.level_of_string_opt "WARNING" = Some Log.Warn);
+  check bool "error" true (Log.level_of_string_opt "ERROR" = Some Log.Error);
   check bool "opt garbage is None" true (Log.level_of_string_opt "debg" = None);
   check bool "opt valid is Some" true
     (Log.level_of_string_opt " DEBUG " = Some Log.Debug)
 
-let test_log_level_of_string_lowercase () =
-  check bool "debug lower" true (Log.level_of_string "debug" = Log.Debug);
-  check bool "info lower" true (Log.level_of_string "info" = Log.Info);
-  check bool "warn lower" true (Log.level_of_string "warn" = Log.Warn)
+let test_log_level_of_string_opt_lowercase () =
+  check bool "debug lower" true (Log.level_of_string_opt "debug" = Some Log.Debug);
+  check bool "info lower" true (Log.level_of_string_opt "info" = Some Log.Info);
+  check bool "warn lower" true (Log.level_of_string_opt "warn" = Some Log.Warn)
 
 let test_log_level_to_int () =
   check bool "debug < info" true (Log.level_to_int Log.Debug < Log.level_to_int Log.Info);
@@ -212,8 +210,8 @@ let () =
   run "Misc Coverage" [
     "log.level", [
       test_case "to_string" `Quick test_log_level_to_string;
-      test_case "of_string" `Quick test_log_level_of_string;
-      test_case "of_string lowercase" `Quick test_log_level_of_string_lowercase;
+      test_case "of_string_opt" `Quick test_log_level_of_string_opt;
+      test_case "of_string_opt lowercase" `Quick test_log_level_of_string_opt_lowercase;
       test_case "to_int ordering" `Quick test_log_level_to_int;
       test_case "event_class_to_string" `Quick test_log_event_class_to_string;
     ];

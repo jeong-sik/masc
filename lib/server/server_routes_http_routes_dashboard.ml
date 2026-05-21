@@ -236,29 +236,39 @@ let rec add_routes ~sw ~clock router =
            | Some v -> v
            | None -> "DEBUG"
          in
-         let min_level =
-           Log.level_to_int (Log.level_of_string level_filter)
-         in
-         let since_seq =
-           match Server_utils.query_param req "since_seq" with
-           | None -> None
-           | Some _ ->
-               let seq = Server_utils.int_query_param req "since_seq" ~default:(-1) in
-               if seq < 0 then None else Some seq
-         in
-         let module_filter = match Server_utils.query_param req "module" with
-           | Some v -> v
-           | None -> ""
-         in
-         let entries =
-           Log.Ring.recent ~limit ~min_level ~module_filter ?since_seq ()
-         in
-         let json =
-           dashboard_logs_json ~config:state.Mcp_server.room_config ~limit
-             ~level_filter ~min_level ~module_filter ~since_seq entries
-         in
-         Http.Response.json ~compress:true ~request:req
-           (Yojson.Safe.to_string json) reqd
+         match Log.level_of_string_opt level_filter with
+         | None ->
+           let json =
+             `Assoc
+               [ "error", `String "invalid_log_level"
+               ; "message", `String "level must be one of debug, info, warn, warning, error"
+               ; "level", `String level_filter
+               ]
+           in
+           Http.Response.json ~status:`Bad_request ~compress:true ~request:req
+             (Yojson.Safe.to_string json) reqd
+         | Some applied_level ->
+           let min_level = Log.level_to_int applied_level in
+           let since_seq =
+             match Server_utils.query_param req "since_seq" with
+             | None -> None
+             | Some _ ->
+                 let seq = Server_utils.int_query_param req "since_seq" ~default:(-1) in
+                 if seq < 0 then None else Some seq
+           in
+           let module_filter = match Server_utils.query_param req "module" with
+             | Some v -> v
+             | None -> ""
+           in
+           let entries =
+             Log.Ring.recent ~limit ~min_level ~module_filter ?since_seq ()
+           in
+           let json =
+             dashboard_logs_json ~config:state.Mcp_server.room_config ~limit
+               ~level_filter ~applied_level ~min_level ~module_filter ~since_seq entries
+           in
+           Http.Response.json ~compress:true ~request:req
+             (Yojson.Safe.to_string json) reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/provider-logs" (fun request reqd ->
        with_public_read (fun _state req reqd ->

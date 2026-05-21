@@ -6,6 +6,7 @@ val build
   :  config:Coord.config
   -> limit:int
   -> level_filter:string
+  -> applied_level:Log.level
   -> min_level:int
   -> module_filter:string
   -> since_seq:int option

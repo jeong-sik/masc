@@ -672,8 +672,8 @@ let test_masc_tool_admin_snapshot_schema () =
       | Some props ->
           Alcotest.(check bool) "has include_hidden" true
             (List.mem_assoc "include_hidden" props);
-          Alcotest.(check bool) "has include_deprecated" true
-            (List.mem_assoc "include_deprecated" props)
+          Alcotest.(check int) "admin snapshot property count" 1
+            (List.length props)
       | None -> Alcotest.fail "masc_tool_admin_snapshot missing properties"
 
 let test_masc_tool_admin_update_schema () =

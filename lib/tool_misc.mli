@@ -40,4 +40,4 @@ val web_search_simulate_for_test :
 val dispatch : context -> name:string -> args:Yojson.Safe.t -> Tool_result.t option
 
 val tool_inventory_json :
-  context -> include_hidden:bool -> include_deprecated:bool -> Yojson.Safe.t
+  context -> include_hidden:bool -> Yojson.Safe.t

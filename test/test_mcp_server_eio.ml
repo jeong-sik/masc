@@ -1205,43 +1205,6 @@ let test_handle_request_tools_list_include_hidden_metadata () =
 
   cleanup_dir base_path
 
-let test_handle_request_tools_list_include_deprecated_claim_alias_metadata () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let clock = Eio.Stdenv.clock env in
-  Eio.Switch.run @@ fun sw ->
-
-  let base_path = temp_dir () in
-  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
-  let request =
-    Yojson.Safe.to_string
-      (`Assoc
-        [
-          ("jsonrpc", `String "2.0");
-          ("id", `Int 219);
-          ("method", `String "tools/list");
-          ( "params",
-            `Assoc
-              [
-                ("include_deprecated", `Bool true);
-                ("names", `List [ `String "masc_transition" ]);
-              ] );
-        ])
-  in
-  let response = Mcp_eio.handle_request ~clock ~sw state request in
-  let tools = tools_from_response response in
-  let transition_tool = find_tool_exn tools "masc_transition" in
-  Alcotest.(check string) "transition lifecycle remains active" "active"
-    (tool_string_field transition_tool "lifecycle");
-  (match transition_tool with
-   | `Assoc fields ->
-       Alcotest.(check bool) "transition omits canonical alias metadata" false
-         (List.mem_assoc "canonicalName" fields);
-       Alcotest.(check bool) "transition omits replacement alias metadata" false
-         (List.mem_assoc "replacement" fields)
-   | _ -> Alcotest.fail "tool is not an object");
-  cleanup_dir base_path
-
 let _test_handle_request_tools_list_hides_internal_tool_by_default () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -2780,8 +2743,6 @@ let eio_tests = [
   "handle tools/list with placeholder flag", `Quick, test_handle_request_tools_list_with_placeholder_flag;
   "handle tools/list include hidden metadata", `Quick,
     test_handle_request_tools_list_include_hidden_metadata;
-  "handle tools/list include deprecated claim alias metadata", `Quick,
-    test_handle_request_tools_list_include_deprecated_claim_alias_metadata;
   (* execution_session_turn hide test removed — team session cleanup *)
   "handle tools/list include usage metadata", `Quick,
     test_handle_request_tools_list_include_usage_metadata;

@@ -200,7 +200,6 @@ let handle_list_tools_eio
       ?(profile = Full)
       ?names
       ?(include_hidden = false)
-      ?(include_deprecated = false)
       ?(include_usage = false)
       ?(include_keeper_internal = false)
       ?cursor
@@ -220,7 +219,6 @@ let handle_list_tools_eio
   let tools =
     TP.tool_schemas_for_profile
       ~include_hidden
-      ~include_deprecated
       ~include_keeper_internal
       state
       profile
@@ -660,7 +658,7 @@ let handle_request
               | "tools/list" ->
                 (match TP.requested_tool_list_params req.params with
                  | Error msg -> make_error_typed ~id Mcp_error_code.Invalid_params msg
-                 | Ok { names; include_hidden; include_deprecated; include_usage; cursor }
+                 | Ok { names; include_hidden; include_usage; cursor }
                    ->
                    let list_profile =
                      match profile with
@@ -671,7 +669,6 @@ let handle_request
                      ~profile:list_profile
                      ?names
                      ~include_hidden
-                     ~include_deprecated
                      ~include_usage
                      ~include_keeper_internal:internal_keeper_runtime
                      ?cursor

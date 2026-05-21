@@ -131,12 +131,11 @@ let handle_web_fetch ~tool_name ~start_time _ctx args =
 (* Public re-exports from sub-modules                               *)
 (* ================================================================ *)
 
-let tool_inventory_json ctx ~include_hidden ~include_deprecated =
+let tool_inventory_json ctx ~include_hidden =
   let admin_ctx : Tool_misc_admin.context =
     { config = ctx.config; agent_name = ctx.agent_name }
   in
   Tool_misc_admin.tool_inventory_json admin_ctx ~include_hidden
-    ~include_deprecated
 
 (* ================================================================ *)
 (* Dispatch (facade)                                                *)

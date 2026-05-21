@@ -335,7 +335,7 @@ let dispatch (ctx : context) ~(name : string) : Tool_result.t option =
       if String.equal (String.trim query) "" then
         Some (Tool_result.error ~tool_name:name ~start_time:start "query is required")
       else
-        let all_schemas = Config.visible_tool_schemas ~include_hidden:true ~include_deprecated:false () in
+        let all_schemas = Config.visible_tool_schemas ~include_hidden:true () in
         let payload = discover_tools_json ~query ~limit all_schemas in
         Some (Tool_result.ok ~tool_name:name ~start_time:start (Yojson.Safe.to_string payload))
 

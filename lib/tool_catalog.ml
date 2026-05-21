@@ -15,11 +15,11 @@ module Char = Stdlib.Char
 module Int = Stdlib.Int
 module Float = Stdlib.Float
 
-(** Tool_catalog — Visibility and lifecycle metadata for MCP tools.
+(** Tool_catalog — Visibility metadata for MCP tools.
 
     Central registry for tool access control:
     - Visibility: Default (public) vs Hidden (internal-only)
-    - Lifecycle: Active, Deprecated, Placeholder
+    - Implementation status: Real, Adapter, Simulation, Placeholder
     - Surface: Canonical per-surface tool name membership SSOT
 
     Sub-modules (private):
@@ -38,7 +38,6 @@ type visibility =
 
 type lifecycle =
   | Active
-  | Deprecated
 
 type implementation_status =
   | Real
@@ -121,24 +120,6 @@ let placeholder_tools_enabled () =
   match Sys.getenv_opt "MASC_PLACEHOLDER_TOOLS_ENABLED" with
   | Some "false" | Some "0" -> false
   | _ -> true
-
-let deprecated ?canonical_name ?replacement ?(allow_direct_call_when_hidden = false)
-    ?(implementation_status = Adapter) reason =
-  {
-    visibility = Hidden;
-    lifecycle = Deprecated;
-    implementation_status;
-    canonical_name;
-    replacement;
-    reason = Some reason;
-    allow_direct_call_when_hidden;
-    readonly = None;
-    destructive = None;
-    idempotent = None;
-    required_permission = None;
-    effect_domain = None;
-    requires_actor_binding = None;
-  }
 
 let hidden_active ?canonical_name ?replacement ?(allow_direct_call_when_hidden = true)
     ?(implementation_status = Real) reason =
@@ -469,14 +450,13 @@ let is_placeholder name =
   | Placeholder -> true
   | Real | Adapter | Simulation -> false
 
-let is_visible ?(include_hidden = false) ?(include_deprecated = false) name =
+let is_visible ?(include_hidden = false) name =
   let meta = metadata name in
-  match meta.visibility, meta.lifecycle with
-  | Hidden, _ when include_hidden -> true
-  | Hidden, _ when placeholder_tools_enabled () && is_placeholder name -> true
-  | Hidden, _ -> false
-  | Default, Deprecated -> include_deprecated
-  | Default, Active -> implementation_allows_public_visibility meta.implementation_status
+  match meta.visibility with
+  | Hidden when include_hidden -> true
+  | Hidden when placeholder_tools_enabled () && is_placeholder name -> true
+  | Hidden -> false
+  | Default -> implementation_allows_public_visibility meta.implementation_status
 
 let visibility_to_string = function
   | Default -> "default"
@@ -484,12 +464,6 @@ let visibility_to_string = function
 
 let lifecycle_to_string = function
   | Active -> "active"
-  | Deprecated -> "deprecated"
-
-(** Precomputed list of deprecated tools from explicit_metadata.
-    Static — computed once at module init. *)
-let deprecated_tool_entries : (string * metadata) list =
-  List.filter (fun (_name, meta) -> (=) meta.lifecycle Deprecated) explicit_metadata
 
 (* ================================================================ *)
 (* JSON metadata helpers                                            *)

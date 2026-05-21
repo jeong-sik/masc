@@ -216,11 +216,6 @@ let masc_tool_admin_snapshot_spec : tool_spec =
         ; p_description = "Include hidden tools in tool_inventory (default: true)"
         ; p_required = false
         }
-      ; { p_name = "include_deprecated"
-        ; p_type = T_bool { default = Some true }
-        ; p_description = "Include deprecated tools in tool_inventory (default: true)"
-        ; p_required = false
-        }
       ]
   ; additional_properties = false
   ; behavior_contract = []

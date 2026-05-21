@@ -729,7 +729,6 @@ let field_value fixture ~tool_name field_name schema =
   | "offset" -> `Int 0
   | "since_seq" -> `Int 0
   | "include_hidden" -> `Bool true
-  | "include_deprecated" -> `Bool true
   | "include_usage" -> `Bool true
   | "hearth" -> `String "tool-matrix"
   | "query" -> `String "tool matrix"

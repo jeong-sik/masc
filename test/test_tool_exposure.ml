@@ -44,7 +44,7 @@ let () =
             (fun () ->
               let all_schemas =
                 Config.visible_tool_schemas ~include_hidden:true
-                  ~include_deprecated:false ()
+                  ()
               in
               let schema_names =
                 List.map

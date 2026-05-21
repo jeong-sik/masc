@@ -66,19 +66,17 @@ val operator_remote_instructions : string
 
 val tool_schemas_for_profile :
   ?include_hidden:bool ->
-  ?include_deprecated:bool ->
   ?include_keeper_internal:bool ->
   Mcp_server.server_state ->
   tool_profile ->
   Masc_domain.tool_schema list
-(** [tool_schemas_for_profile ?include_hidden ?include_deprecated
-      ?include_keeper_internal state profile] returns the schema
+(** [tool_schemas_for_profile ?include_hidden ?include_keeper_internal
+      state profile] returns the schema
     list visible on [profile]:
 
     - [Full]: union of [Config.visible_tool_schemas] (gated by
-      [include_hidden]/[include_deprecated]) plus optional
-      keeper-internal tools when [include_keeper_internal = true],
-      deduped by name.
+      [include_hidden]) plus optional keeper-internal tools when
+      [include_keeper_internal = true], deduped by name.
     - [Managed_agent]: SDK tool contract +
       [managed_agent_passthrough_tool_names] subset.
     - [Operator_remote]: pinned [Tool_operator.remote_schemas].
@@ -110,9 +108,8 @@ val tool_annotations_for_profile :
   tool_profile -> string -> Yojson.Safe.t option
 (** [tool_annotations_for_profile profile tool_name] returns the
     MCP 2025-03-26 [annotations] object — [readOnlyHint],
-    [destructiveHint], [idempotentHint], [openWorldHint],
-    [deprecated], [successor], [deprecationReason] — derived from
-    {!Tool_catalog.metadata} with fallback to
+    [destructiveHint], [idempotentHint], [openWorldHint] — derived
+    from {!Tool_catalog.metadata} with fallback to
     {!Tool_dispatch.is_read_only} / [is_destructive] /
     [is_idempotent].
 
@@ -166,12 +163,11 @@ val maybe_assoc_field :
 type cursor_params = { cursor : string option }
 
 (** Parsed [tools/list] request params.  Concrete record because
-    callers destructure ([Ok { names; include_hidden;
-    include_deprecated; include_usage; cursor }]). *)
+    callers destructure ([Ok { names; include_hidden; include_usage;
+    cursor }]). *)
 type tools_list_params = {
   names : string list option;
   include_hidden : bool;
-  include_deprecated : bool;
   include_usage : bool;
   cursor : string option;
 }
@@ -188,8 +184,8 @@ val requested_tool_list_params :
   Yojson.Safe.t option -> (tools_list_params, string) result
 (** [requested_tool_list_params params] validates the
     [tools/list] payload.  Allowed keys: [_meta], [names],
-    [include_hidden], [include_deprecated], [include_usage],
-    [cursor].  Unknown keys / wrong types return [Error _]. *)
+    [include_hidden], [include_usage], [cursor].  Unknown keys /
+    wrong types return [Error _]. *)
 
 (** {1 Pagination dispatch} *)
 

@@ -101,11 +101,10 @@ val public_tool_schemas_from :
 
 val visible_public_tool_schemas_from :
   ?include_hidden:bool ->
-  ?include_deprecated:bool ->
   Masc_domain.tool_schema list ->
   Masc_domain.tool_schema list
 (** [public_tool_schemas_from] filtered through [Tool_catalog.is_visible].
-    Both inclusion flags default to [false]. *)
+    [include_hidden] defaults to [false]. *)
 
 val local_worker_tool_schemas :
   ?names:string list ->

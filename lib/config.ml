@@ -106,18 +106,18 @@ let raw_tool_name_set : (string, unit) Hashtbl.t =
 
 let is_raw_tool_name name = Hashtbl.mem raw_tool_name_set name
 
-let visible_tool_schemas ?(include_hidden = false) ?(include_deprecated = false) () :
+let visible_tool_schemas ?(include_hidden = false) () :
     Masc_domain.tool_schema list =
   Capability_registry.visible_public_tool_schemas_from ~include_hidden
-    ~include_deprecated front_door_tool_schemas
+    front_door_tool_schemas
 
-let surface_tool_schemas ?(include_hidden = false) ?(include_deprecated = false) () :
+let surface_tool_schemas ?(include_hidden = false) () :
     Masc_domain.tool_schema list =
-  visible_tool_schemas ~include_hidden ~include_deprecated ()
+  visible_tool_schemas ~include_hidden ()
   |> List.filter (fun (s : Masc_domain.tool_schema) ->
        Tool_scope.classify ~name:s.name = Tool_scope.Surface)
 
 let keeper_internal_tool_schemas () : Masc_domain.tool_schema list =
-  visible_tool_schemas ~include_hidden:true ~include_deprecated:true ()
+  visible_tool_schemas ~include_hidden:true ()
   |> List.filter (fun (s : Masc_domain.tool_schema) ->
        Tool_scope.classify ~name:s.name = Tool_scope.Keeper_internal)

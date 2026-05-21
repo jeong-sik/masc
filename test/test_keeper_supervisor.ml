@@ -1581,7 +1581,7 @@ let test_operator_pause_not_auto_resumed () =
         baseline_auto_resume after_auto_resume)
 
 (* Regression guard for #17063/#17067: [auto_resume_after_sec = None] is the
-   manual/operator pause contract.  A [Capacity_exhausted] blocker from old
+   manual/operator pause contract.  A [Capacity_backpressure] blocker from old
    persisted metadata must not be treated as an implicit auto-resume policy. *)
 let test_capacity_blocker_without_resume_policy_not_auto_resumed () =
   Eio_main.run @@ fun env ->
@@ -1616,7 +1616,7 @@ let test_capacity_blocker_without_resume_policy_not_auto_resumed () =
                 Some
                   (KT.blocker_info_of_class
                      ~detail:"capacity exhausted before explicit resume policy"
-                     KT.Capacity_exhausted);
+                     KT.Capacity_backpressure);
             };
         }
       in
@@ -1652,7 +1652,7 @@ let test_capacity_blocker_without_resume_policy_not_auto_resumed () =
            check bool "capacity blocker stays recorded for operator inspection"
              true
              (match m.runtime.last_blocker with
-              | Some info -> info.klass = KT.Capacity_exhausted
+              | Some info -> info.klass = KT.Capacity_backpressure
               | None -> false)
        | Ok None -> fail "meta missing"
        | Error err -> fail ("read_meta failed: " ^ err));

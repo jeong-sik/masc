@@ -227,14 +227,14 @@ let test_provider_failure_capacity_cascades () =
       }
   in
   Alcotest.(check bool)
-    "ProviderFailure Capacity_exhausted must cascade"
+    "ProviderFailure capacity backpressure must cascade"
     true
     (Oas_compat.Http_client.should_cascade err);
   match Oas_compat.Http_client.classify err with
-  | Provider_capacity_exhausted -> ()
+  | Provider_capacity_backpressure -> ()
   | _ ->
       Alcotest.fail
-        "Capacity_exhausted must classify as Provider_capacity_exhausted"
+        "ProviderFailure capacity must classify as Provider_capacity_backpressure"
 
 let test_provider_failure_hard_quota_cascades () =
   let err =
@@ -455,7 +455,7 @@ let () =
         ] );
       ( "ProviderFailure — typed provider-local skips cascade",
         [
-          Alcotest.test_case "Capacity_exhausted classify + cascade"
+          Alcotest.test_case "provider capacity classify + cascade"
             `Quick test_provider_failure_capacity_cascades;
           Alcotest.test_case "Hard_quota classify + cascade + message"
             `Quick test_provider_failure_hard_quota_cascades;

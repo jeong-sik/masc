@@ -1,8 +1,8 @@
-(** Pins the typed extraction of [Provider.CapacityExhausted] retry_after
+(** Pins typed extraction of provider capacity retry_after
     from an [Agent_sdk.Error.sdk_error] via
-    [Cascade_attempt_fsm.sdk_error_capacity_exhausted_retry_after_s].
+    [Cascade_attempt_fsm.sdk_error_capacity_backpressure_retry_after_s].
 
-    Without this helper, [Capacity_exhausted] events fall through to
+    Without this helper, external provider capacity events fall through to
     [record_failure] (threshold-based) instead of [record_soft_rate_limited]
     (immediate). One capacity-exhausted event is sufficient evidence to
     deprioritize a provider — the same reasoning
@@ -22,25 +22,25 @@ let pp_extract fmt = function
 let extract_testable =
   Alcotest.testable pp_extract ( = )
 
-let mk_capacity_exhausted ?retry_after ?(scope = Llm_provider.Error.CapacityProvider)
+let mk_capacity_backpressure ?retry_after ?(scope = Llm_provider.Error.CapacityProvider)
     ?(affected = []) ?(detail = "capacity exhausted") () : ErrSdk.sdk_error =
   ErrSdk.Provider
     (Llm_provider.Error.CapacityExhausted
        { scope; affected; retry_after; detail })
 
 let test_capacity_with_retry_after_extracted () =
-  let err = mk_capacity_exhausted ~retry_after:7.5 () in
+  let err = mk_capacity_backpressure ~retry_after:7.5 () in
   Alcotest.check extract_testable
-    "CapacityExhausted with retry_after=7.5 → Some(Some 7.5)"
+    "provider capacity with retry_after=7.5 → Some(Some 7.5)"
     (Some (Some 7.5))
-    (FSM.sdk_error_capacity_exhausted_retry_after_s err)
+    (FSM.sdk_error_capacity_backpressure_retry_after_s err)
 
 let test_capacity_without_retry_after_extracted () =
-  let err = mk_capacity_exhausted () in
+  let err = mk_capacity_backpressure () in
   Alcotest.check extract_testable
-    "CapacityExhausted without retry_after → Some(None)"
+    "provider capacity without retry_after → Some(None)"
     (Some None)
-    (FSM.sdk_error_capacity_exhausted_retry_after_s err)
+    (FSM.sdk_error_capacity_backpressure_retry_after_s err)
 
 let test_non_capacity_error_returns_none () =
   let err =
@@ -49,9 +49,9 @@ let test_non_capacity_error_returns_none () =
          { provider = "test"; retry_after = Some 3.0; detail = "" })
   in
   Alcotest.check extract_testable
-    "RateLimit is not CapacityExhausted → None"
+    "RateLimit is not provider capacity → None"
     None
-    (FSM.sdk_error_capacity_exhausted_retry_after_s err)
+    (FSM.sdk_error_capacity_backpressure_retry_after_s err)
 
 let test_hard_quota_returns_none () =
   let err =
@@ -60,35 +60,35 @@ let test_hard_quota_returns_none () =
          { provider = "test"; retry_after = Some 600.0; detail = "" })
   in
   Alcotest.check extract_testable
-    "HardQuota is not CapacityExhausted → None"
+    "HardQuota is not provider capacity → None"
     None
-    (FSM.sdk_error_capacity_exhausted_retry_after_s err)
+    (FSM.sdk_error_capacity_backpressure_retry_after_s err)
 
 let test_soft_rate_limited_helper_does_not_match_capacity () =
   (* Without the new helper, callers reaching only sdk_error_soft_rate_limited
-     would miss CapacityExhausted entirely — that's the bug this PR fixes.
+     would miss provider capacity entirely — that's the bug this PR fixes.
      This regression-pin keeps the two helpers semantically distinct. *)
-  let err = mk_capacity_exhausted ~retry_after:7.5 () in
+  let err = mk_capacity_backpressure ~retry_after:7.5 () in
   Alcotest.check extract_testable
-    "soft_rate_limited helper does NOT swallow CapacityExhausted"
+    "soft_rate_limited helper does NOT swallow provider capacity"
     None
     (FSM.sdk_error_soft_rate_limited err)
 
 let () =
-  Alcotest.run "cascade_capacity_exhausted_cooldown"
+  Alcotest.run "cascade_capacity_backpressure_cooldown"
     [ ( "typed extraction"
       , [ Alcotest.test_case
-            "CapacityExhausted with retry_after" `Quick
+            "provider capacity with retry_after" `Quick
             test_capacity_with_retry_after_extracted
         ; Alcotest.test_case
-            "CapacityExhausted without retry_after" `Quick
+            "provider capacity without retry_after" `Quick
             test_capacity_without_retry_after_extracted
         ; Alcotest.test_case
             "non-capacity error → None" `Quick test_non_capacity_error_returns_none
         ; Alcotest.test_case
             "HardQuota is distinct" `Quick test_hard_quota_returns_none
         ; Alcotest.test_case
-            "soft_rate_limited does not subsume CapacityExhausted"
+            "soft_rate_limited does not subsume provider capacity"
             `Quick
             test_soft_rate_limited_helper_does_not_match_capacity
         ] )

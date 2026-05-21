@@ -27,16 +27,16 @@ let check_completion_contract_class label cls_opt =
 
 let check_capacity_class label cls_opt =
   match cls_opt with
-  | Some KT.Capacity_exhausted -> ()
+  | Some KT.Capacity_backpressure -> ()
   | Some other ->
       let other_str = KT.blocker_class_to_string other in
       fail
         (Printf.sprintf
-           "%s mapped to %s, expected Capacity_exhausted"
+           "%s mapped to %s, expected Capacity_backpressure"
            label
            other_str)
   | None ->
-      fail (Printf.sprintf "%s returned None, expected Capacity_exhausted" label)
+      fail (Printf.sprintf "%s returned None, expected Capacity_backpressure" label)
 
 let check_cascade_class label cls_opt =
   match cls_opt with

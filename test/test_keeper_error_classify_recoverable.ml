@@ -89,7 +89,7 @@ let test_typed_capacity_backpressure_is_not_cascade_exhausted () =
   | None ->
     fail "typed capacity backpressure should be recoverable as capacity"
 
-let test_provider_capacity_exhausted_is_capacity_backpressure () =
+let test_provider_capacity_backpressure_is_recoverable () =
   let err =
     Agent_sdk.Error.Provider
       (Llm_provider.Error.CapacityExhausted
@@ -102,11 +102,11 @@ let test_provider_capacity_exhausted_is_capacity_backpressure () =
   in
   match KEC.recoverable_cascade_failure_reason err with
   | Some reason ->
-    check string "Provider CapacityExhausted -> capacity_backpressure"
+    check string "external provider capacity -> capacity_backpressure"
       "capacity_backpressure"
       (KEC.degraded_retry_reason_to_string reason)
   | None ->
-    fail "Provider CapacityExhausted should be recoverable as capacity"
+    fail "external provider capacity should be recoverable as capacity"
 
 let test_all_providers_failed_recoverable () =
   let err = make_cascade_exhausted KT.All_providers_failed in
@@ -456,8 +456,8 @@ let () =
             test_slot_full_other_detail_stays_legacy_cascade_exhausted;
           test_case "typed capacity backpressure is not cascade exhausted" `Quick
             test_typed_capacity_backpressure_is_not_cascade_exhausted;
-          test_case "provider CapacityExhausted is capacity backpressure" `Quick
-            test_provider_capacity_exhausted_is_capacity_backpressure;
+          test_case "provider capacity backpressure is recoverable" `Quick
+            test_provider_capacity_backpressure_is_recoverable;
           test_case "All_providers_failed is recoverable" `Quick
             test_all_providers_failed_recoverable;
           test_case "No_providers_available is recoverable" `Quick

@@ -56,11 +56,11 @@ let legacy_health_decision err =
 let typed_health_decision err =
   let error = OWN.sdk_error_to_provider_error ~provider:"anthropic" err in
   match error with
-  | Some (P.CapacityExhausted { scope = `Provider }) -> Hard_quota
+  | Some (P.CapacityBackpressure { scope = `Provider }) -> Hard_quota
   | Some (P.CliWrappedHardQuota _) -> Hard_quota
   | Some (P.RateLimit _) -> Soft_rate_limited
   | Some
-      ( P.CapacityExhausted { scope = `Model }
+      ( P.CapacityBackpressure { scope = `Model }
       | P.AuthError
       | P.ServerError _
       | P.InvalidRequest _
@@ -76,7 +76,7 @@ let test_rate_limit_maps_retry_after () =
     Retry.RateLimited { retry_after = Some 1.5; message = "too many requests" }
     |> OWN.retry_api_error_to_provider_error
          ~provider:" anthropic "
-         ~capacity_exhausted:false
+         ~capacity_backpressure:false
     |> expect_some
   in
   match error with
@@ -91,23 +91,23 @@ let test_rate_limit_maps_retry_after () =
   | _ -> fail "expected RateLimit"
 ;;
 
-let test_rate_limit_can_be_capacity_exhausted () =
+let test_rate_limit_can_be_capacity_backpressure () =
   let error =
     Retry.RateLimited { retry_after = None; message = "resource exhausted" }
     |> OWN.retry_api_error_to_provider_error
          ~provider:"claude_code:auto"
-         ~capacity_exhausted:true
+         ~capacity_backpressure:true
     |> expect_some
   in
   match error with
-  | P.CapacityExhausted { scope = `Provider } ->
+  | P.CapacityBackpressure { scope = `Provider } ->
     check (list string) "affected runtime lane" [ public_provider ] (P.affected_providers error);
-    check bool "capacity" true (P.is_capacity_exhausted error);
+    check bool "capacity" true (P.is_capacity_backpressure error);
     check_json
       "json"
       {|{"kind":"capacity_backpressure","scope":"provider","affected":["runtime"]}|}
       error
-  | _ -> fail "expected provider CapacityExhausted"
+  | _ -> fail "expected provider CapacityBackpressure"
 ;;
 
 let test_anthropic_invalid_request_specified_limit_body_pins_capacity () =
@@ -126,7 +126,7 @@ let test_anthropic_invalid_request_specified_limit_body_pins_capacity () =
     OWN.sdk_error_to_provider_error ~provider:"anthropic" sdk_error |> expect_some
   in
   match error with
-  | P.CapacityExhausted { scope = `Provider } ->
+  | P.CapacityBackpressure { scope = `Provider } ->
     check (list string) "affected runtime lane" [ public_provider ] (P.affected_providers error)
   | _ -> fail "expected specified-limit InvalidRequest to become capacity"
 ;;
@@ -144,21 +144,21 @@ let test_cli_hard_quota_wrapper_emits_capacity_variant () =
   in
   check bool "existing wrapper classifier" true (OWN.sdk_error_is_hard_quota sdk_error);
   match OWN.sdk_error_to_provider_error ~provider:"claude_code:auto" sdk_error with
-  | Some (P.CapacityExhausted { scope = `Provider } as error) ->
+  | Some (P.CapacityBackpressure { scope = `Provider } as error) ->
     check (list string) "affected runtime lane" [ public_provider ] (P.affected_providers error)
-  | Some error -> failf "expected CapacityExhausted, got %s" (P.to_error_kind error)
+  | Some error -> failf "expected CapacityBackpressure, got %s" (P.to_error_kind error)
   | None -> fail "expected provider_error"
 ;;
 
 let test_server_and_auth_errors_are_closed_variants () =
   let server =
     Retry.ServerError { status = 503; message = "overloaded" }
-    |> OWN.retry_api_error_to_provider_error ~provider:"openai" ~capacity_exhausted:false
+    |> OWN.retry_api_error_to_provider_error ~provider:"openai" ~capacity_backpressure:false
     |> expect_some
   in
   let auth =
     Retry.AuthError { message = "invalid key" }
-    |> OWN.retry_api_error_to_provider_error ~provider:"kimi" ~capacity_exhausted:false
+    |> OWN.retry_api_error_to_provider_error ~provider:"kimi" ~capacity_backpressure:false
     |> expect_some
   in
   match server, auth with
@@ -174,14 +174,14 @@ let test_non_capacity_invalid_request_preserves_reason () =
     Retry.InvalidRequest { message = reason }
     |> OWN.retry_api_error_to_provider_error
          ~provider:"anthropic"
-         ~capacity_exhausted:false
+         ~capacity_backpressure:false
     |> expect_some
   in
   match error with
   | P.InvalidRequest { reason = actual } ->
     check (list string) "affected runtime lane" [ public_provider ] (P.affected_providers error);
     check string "reason" reason actual;
-    check bool "not capacity" false (P.is_capacity_exhausted error)
+    check bool "not capacity" false (P.is_capacity_backpressure error)
   | _ -> fail "expected InvalidRequest"
 ;;
 
@@ -347,7 +347,7 @@ let () =
         ; test_case
             "rate limit can become capacity"
             `Quick
-            test_rate_limit_can_be_capacity_exhausted
+            test_rate_limit_can_be_capacity_backpressure
         ; test_case
             "Anthropic specified-limit body maps to capacity"
             `Quick

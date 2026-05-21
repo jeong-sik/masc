@@ -964,11 +964,6 @@ let make_write_enabled_meta name =
   | Ok meta -> meta
   | Error err -> Alcotest.fail ("make_write_enabled_meta failed: " ^ err)
 
-let parse_hint raw =
-  Yojson.Safe.from_string raw
-  |> Json.member "hint"
-  |> Json.to_string_option
-
 let parse_alternatives raw =
   match Yojson.Safe.from_string raw |> Json.member "alternatives" with
   | `List xs -> List.filter_map Json.to_string_option xs
@@ -1853,12 +1848,12 @@ let test_keeper_shell_ls_recovers_doubled_playground_prefix () =
   Alcotest.(check string) "path normalized to repos root" repos
     (json |> Json.member "path" |> Json.to_string)
 
-let test_keeper_shell_bash_op_is_deprecated () =
+let test_keeper_shell_bash_op_is_unsupported () =
   with_eio_fs @@ fun () ->
   let base_path, config = make_config () in
   Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
   Keeper_registry.clear ();
-  let meta = make_readonly_meta "bash-deprecated" in
+  let meta = make_readonly_meta "bash-unsupported" in
   let raw =
     Keeper_exec_shell.handle_keeper_shell
       ~turn_sandbox_factory:None ~exec_cache:None
@@ -1868,17 +1863,22 @@ let test_keeper_shell_bash_op_is_deprecated () =
         ("command", `String "git status && git log --oneline -5");
       ])
   in
-  Alcotest.(check (option string)) "error is deprecation"
-    (Some "keeper_shell_bash_deprecated") (parse_error_field raw);
-  (match parse_hint raw with
-   | None -> Alcotest.fail ("expected hint field, got: " ^ raw)
-   | Some hint ->
-     Alcotest.(check bool) "hint points to Bash alias" true
-       (String_util.contains_substring hint "Bash");
-     Alcotest.(check bool) "hint avoids internal keeper_bash" false
-       (String_util.contains_substring hint "keeper_bash");
-     Alcotest.(check bool) "hint avoids internal keeper_shell" false
-       (String_util.contains_substring hint "keeper_shell"))
+  let json = Yojson.Safe.from_string raw in
+  Alcotest.(check (option string)) "error is unsupported_op"
+    (Some "unsupported_op") (parse_error_field raw);
+  Alcotest.(check string) "op is still echoed" "bash"
+    (json |> Json.member "op" |> Json.to_string);
+  let supported_ops =
+    json |> Json.member "supported_ops" |> Json.to_list
+    |> List.filter_map Json.to_string_option
+  in
+  Alcotest.(check bool) "bash is not a structured shell op" false
+    (List.mem "bash" supported_ops);
+  Alcotest.(check bool) "no compatibility tool suggestion" true
+    (Option.is_none (json |> Json.member "suggested_tool" |> Json.to_string_option));
+  Alcotest.(check bool) "no compatibility public-tool suggestion" true
+    (Option.is_none
+       (json |> Json.member "suggested_public_tool" |> Json.to_string_option))
 
 let test_keeper_shell_bash_op_does_not_execute () =
   with_eio_fs @@ fun () ->
@@ -1900,8 +1900,8 @@ let test_keeper_shell_bash_op_does_not_execute () =
         ("command", `String "touch should-not-exist");
       ])
   in
-  Alcotest.(check (option string)) "error is deprecation"
-    (Some "keeper_shell_bash_deprecated") (parse_error_field raw);
+  Alcotest.(check (option string)) "error is unsupported_op"
+    (Some "unsupported_op") (parse_error_field raw);
   Alcotest.(check bool) "legacy bash op did not execute" false
     (Sys.file_exists marker)
 
@@ -2313,8 +2313,8 @@ let () =
         test_keeper_shell_find_accepts_name_alias;
       Alcotest.test_case "doubled playground prefix auto-recovers" `Quick
         test_keeper_shell_ls_recovers_doubled_playground_prefix;
-      Alcotest.test_case "op=bash is deprecated" `Quick
-        test_keeper_shell_bash_op_is_deprecated;
+      Alcotest.test_case "op=bash is unsupported" `Quick
+        test_keeper_shell_bash_op_is_unsupported;
       Alcotest.test_case "op=bash does not execute" `Quick
         test_keeper_shell_bash_op_does_not_execute;
     ]);

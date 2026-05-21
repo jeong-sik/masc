@@ -57,8 +57,8 @@ let count_substring src needle =
   loop 0 0
 
 (* The wiring uses [Keeper_cwd_response.to_yojson_response cwd_response]
-   for the dispatcher helper. Generic op=bash has been removed from
-   keeper_shell, so there should no longer be a separate bash cwd echo path. *)
+   for the dispatcher helper. Generic op=bash is not a keeper_shell op, so
+   there should be neither a runtime cwd echo path nor a compatibility branch. *)
 
 let test_render_docker_process_result_uses_cwd_response () =
   match find_source_path () with
@@ -84,10 +84,11 @@ let test_bash_op_has_no_runtime_cwd_field () =
   | None -> ()
   | Some path ->
     let src = read_source path in
-    check bool "legacy op=bash deprecation exists" true
+    let removed_error = "keeper_shell_" ^ "bash_" ^ "deprecated" in
+    check bool "op=bash compatibility branch removed" false
       (Astring.String.is_infix
-         ~affix:"keeper_shell_bash_deprecated" src);
-    check bool "legacy op=bash cwd_field removed" false
+         ~affix:removed_error src);
+    check bool "op=bash cwd_field removed" false
       (Astring.String.is_infix ~affix:"let cwd_field" src)
 
 let test_git_log_runtime_branch_uses_cwd_response () =
@@ -98,8 +99,8 @@ let test_git_log_runtime_branch_uses_cwd_response () =
     (* The git_log runtime branch builds its own cwd_response.
        Verify at least 2 distinct [cwd_response = Keeper_cwd_response.docker]
        constructions in the file (render_docker + git_log; the
-       generic op=bash branch is now a non-executing deprecation
-       response and no longer constructs cwd responses). *)
+       generic op=bash is unsupported and no longer constructs cwd
+       responses). *)
     let docker_ctor_uses =
       count_substring src "Keeper_cwd_response.docker ~host_cwd:cwd"
     in

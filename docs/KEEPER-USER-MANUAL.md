@@ -402,9 +402,9 @@ gate에서 거부된다. 파이프라인은 active preset/validator가 모든 se
 허용하는 경우에만 통과할 수 있다. 필요한 경우 호출을 나눠 발행하고,
 검색/파일/히스토리는 `keeper_shell`의 구조화 op를 우선 사용한다.
 
-`keeper_shell op=bash`는 더 이상 명령을 실행하지 않는 legacy/deprecated
-경로다. 실제 명령 실행은 `Bash`/`keeper_bash`가 담당하고, Legendary Bash
-gate와 write/sandbox 정책도 그 경로에만 적용된다.
+`keeper_shell op=bash`는 지원하지 않는다. 실제 명령 실행은
+`Bash`/`keeper_bash`가 담당하고, Legendary Bash gate와 write/sandbox
+정책도 그 경로에만 적용된다.
 
 | 필드 | 기본값 | 의미 |
 | --- | --- | --- |

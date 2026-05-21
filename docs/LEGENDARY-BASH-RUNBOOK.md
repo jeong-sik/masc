@@ -33,8 +33,7 @@ typed advisor counters, and background task roster endpoints.
   the structured-shell boundary around it.
 - `keeper_shell` is not a raw command execution surface. It owns structured ops
   such as `rg`, `ls`, `cat`, `git_status`, `git_log`, `git_diff`, `git_clone`,
-  and `gh`; `keeper_shell op=bash` is a deprecated non-executing compatibility
-  response.
+  and `gh`; `keeper_shell op=bash` is unsupported.
 - Does not cover: the cascade verifier itself or the approval layer for MCP
   tools. Those are separate surfaces.
 

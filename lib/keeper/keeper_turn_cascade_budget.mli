@@ -110,6 +110,44 @@ val oas_retry_budget_available_for_turn :
   remaining_turn_budget_s:float ->
   bool
 
+(** RFC-OAS-XXX (Team JJ §6) — typed retry admission decision.
+
+    Distinguishes "admission denied before any provider attempt"
+    from "provider attempt ran and OAS server timed out". The
+    existing call surface in [Keeper_unified_turn] emits
+    [Oas_timeout_budget] with [source="pre_retry_budget_unavailable"]
+    for the former case, which collapses both semantics into one
+    metric. This function exposes the typed decision so callers can
+    branch on the closed-sum reason. The matching error variant
+    ([Retry_admission_denied]) is RFC-deferred. *)
+
+type retry_admission_denial =
+  | Retry_budget_below_min of {
+      projected_usable_budget_s : float;
+      min_required_s : float;
+      remaining_turn_budget_s : float;
+      adaptive_timeout_s : float;
+      allow_wall_clock_retry_budget : bool;
+    }
+  | First_attempt_budget_below_min of {
+      projected_usable_budget_s : float;
+      min_required_s : float;
+      remaining_turn_budget_s : float;
+    }
+
+type attempt_kind = First_attempt | Retry_attempt
+
+val retry_admission_denial_to_yojson :
+  retry_admission_denial -> Yojson.Safe.t
+
+val decide_retry_admission_for_turn :
+  remaining_turn_budget_s:float ->
+  attempt_kind:attempt_kind ->
+  allow_wall_clock_retry_budget:bool ->
+  estimated_input_tokens:int ->
+  max_turns:int ->
+  (unit, retry_admission_denial) result
+
 val degraded_retry_slot_phase_budget_sec : float
 (** Maximum outer-slot hold time before degraded cascade rotation is
     suppressed. This is a guardrail for #12888: once the productive

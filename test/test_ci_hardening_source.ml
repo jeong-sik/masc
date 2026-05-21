@@ -2216,6 +2216,23 @@ let test_dashboard_doctor_route_process_contracts () =
     && file_not_contains_pattern "lib/server/server_routes_http_routes_dashboard.ml"
          {|doctor all --json|})
 
+let test_turn_sandbox_write_file_process_contracts () =
+  check bool "turn sandbox file writes use host fs, not shell subprocesses" true
+    (file_contains_pattern "lib/keeper/keeper_turn_sandbox_runtime.ml"
+       "Fs_compat.mkdir_p (Filename.dirname host_path)"
+    && file_contains_pattern "lib/keeper/keeper_turn_sandbox_runtime.ml"
+         "Fs_compat.append_file host_path content"
+    && file_contains_pattern "lib/keeper/keeper_turn_sandbox_runtime.ml"
+         {|[ Open_wronly; Open_creat; Open_trunc; Open_binary ]|}
+    && file_not_contains_pattern "lib/keeper/keeper_turn_sandbox_runtime.ml"
+         {|~command_argv:[ "python3"; "-c"; writer; mode; container_path ]|}
+    && file_not_contains_pattern "lib/keeper/keeper_turn_sandbox_runtime.ml"
+         "path.parent.mkdir(parents=True, exist_ok=True)"
+    && file_not_contains_pattern "lib/keeper/keeper_turn_sandbox_runtime.ml"
+         {|~command_argv:[ "sh"; "-lc"; shell_cmd ]|}
+    && file_not_contains_pattern "lib/keeper/keeper_turn_sandbox_runtime.ml"
+         "mkdir -p -- %s && cat %s %s")
+
 let test_oas_worker_capability_threading_contracts () =
   check bool "oas worker model-by-label accepts threaded sw capability" true
     (file_contains_pattern "lib/oas_worker.mli"
@@ -2711,6 +2728,8 @@ let () =
              test_worktree_list_contracts;
            test_case "dashboard doctor route process contracts" `Quick
              test_dashboard_doctor_route_process_contracts;
+           test_case "turn sandbox write file process contracts" `Quick
+             test_turn_sandbox_write_file_process_contracts;
            test_case "oas worker capability threading contracts" `Quick
              test_oas_worker_capability_threading_contracts;
            test_case "oas capacity restore contracts" `Quick

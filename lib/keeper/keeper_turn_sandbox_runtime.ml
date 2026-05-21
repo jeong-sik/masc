@@ -423,28 +423,27 @@ let write_file_common
   =
   match container_path_of_host t ~host_path with
   | Error _ as err -> err
-  | Ok container_path ->
-    let parent = Filename.dirname container_path in
-    let redirect = if append then ">>" else ">" in
-    let shell_cmd =
-      Printf.sprintf
-        "mkdir -p -- %s && cat %s %s"
-        (Filename.quote parent)
-        redirect
-        (Filename.quote container_path)
-    in
-    (match
-       run_exec_with_status
-         ~stdin_content:content
-         t
-         ~timeout_sec
-         ~cwd:t.host_root
-         ~command_argv:[ "sh"; "-lc"; shell_cmd ]
+  | Ok _ ->
+    ignore timeout_sec;
+    let host_path = normalize_path host_path in
+    (try
+       Fs_compat.mkdir_p (Filename.dirname host_path);
+       if append
+       then Fs_compat.append_file host_path content
+       else (
+         let oc =
+           Stdlib.open_out_gen
+             [ Open_wronly; Open_creat; Open_trunc; Open_binary ]
+             0o644
+             host_path
+         in
+         Fun.protect
+           ~finally:(fun () -> close_out_noerr oc)
+           (fun () -> output_string oc content));
+       Ok ()
      with
-     | Error _ as err -> err
-     | Ok (Unix.WEXITED 0, _out) -> Ok ()
-     | Ok (st, out) ->
-       Error (format_docker_exec_error ~head_program:"write_file" ~st ~out))
+     | Sys_error msg ->
+       Error (Printf.sprintf "write_file_failed: path=%s error=%s" host_path msg))
 ;;
 
 let overwrite_file t ~host_path ~content ~timeout_sec () =

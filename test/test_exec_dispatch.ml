@@ -112,8 +112,65 @@ let () =
 let () =
   with_eio @@ fun () ->
   let result = Masc_exec.Exec_dispatch.dispatch (Masc_exec.Shell_ir.Pipeline []) in
-  assert (result.status = Unix.WEXITED 0);
-  assert (result.stdout = "")
+  assert (result.status = Unix.WEXITED 1);
+  assert (result.stdout = "");
+  assert (result.stderr = "empty pipeline not supported in native dispatch")
+
+(* --- dispatch single-stage pipeline --- *)
+
+let () =
+  with_eio @@ fun () ->
+  let open Masc_exec.Shell_ir in
+  let bin = Masc_exec.Bin.of_string "echo" |> Result.get_ok in
+  let stage =
+    Simple
+      { bin
+      ; args = [ Lit "single" ]
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Masc_exec.Sandbox_target.host ()
+      }
+  in
+  let result = Masc_exec.Exec_dispatch.dispatch (Pipeline [ stage ]) in
+  assert (result.status = Unix.WEXITED 1);
+  assert (result.stdout = "");
+  assert (result.stderr = "single-stage pipeline not supported in native dispatch")
+
+(* --- dispatch nested pipeline --- *)
+
+let () =
+  with_eio @@ fun () ->
+  let open Masc_exec.Shell_ir in
+  let echo_bin = Masc_exec.Bin.of_string "echo" |> Result.get_ok in
+  let cat_bin = Masc_exec.Bin.of_string "cat" |> Result.get_ok in
+  let host_sandbox = Masc_exec.Sandbox_target.host () in
+  let echo_stage =
+    Simple
+      { bin = echo_bin
+      ; args = [ Lit "nested" ]
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = host_sandbox
+      }
+  in
+  let cat_stage =
+    Simple
+      { bin = cat_bin
+      ; args = []
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = host_sandbox
+      }
+  in
+  let result =
+    Masc_exec.Exec_dispatch.dispatch (Pipeline [ Pipeline [ echo_stage; cat_stage ]; cat_stage ])
+  in
+  assert (result.status = Unix.WEXITED 1);
+  assert (result.stdout = "");
+  assert (result.stderr = "nested pipeline not supported in native dispatch")
 
 (* --- dispatch_simple propagates sandbox runner (SND-05 regression) --- *)
 

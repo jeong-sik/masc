@@ -1574,6 +1574,8 @@
 
 (include stanzas/test_event_kind.inc)
 
+(include stanzas/test_export_symbol_graph.inc)
+
 (include stanzas/test_feature_flag_registry.inc)
 
 (include stanzas/test_fleet_capacity_supervisor.inc)

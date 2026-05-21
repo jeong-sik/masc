@@ -9,9 +9,8 @@
     [Log.Autoresearch.warn] and swallowed so a downstream SSE
     failure cannot interrupt the autoresearch loop.
 
-    {!Tool_autoresearch} re-exports both bindings via
-    [include Tool_autoresearch_broadcast]; {!Tool_autoresearch_cycle}
-    consumes them directly via [open Tool_autoresearch_broadcast]. *)
+    {!Tool_autoresearch_cycle} consumes them directly via
+    [open Tool_autoresearch_broadcast]. *)
 
 val broadcast_cycle_result :
   Autoresearch.loop_state ->

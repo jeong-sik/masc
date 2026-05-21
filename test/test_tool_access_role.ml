@@ -150,9 +150,6 @@ let test_permissions_promoted_to_metadata_ssot () =
       (* CP purge: masc_operator_action, masc_unit_list and other command-plane
          tool metadata expectations removed with deletion of lib/command_plane/. *)
       ("masc_worktree_create", Masc_domain.CanCreateWorktree);
-      ("masc_autoresearch_record_finding", Masc_domain.CanAdmin);
-      ("masc_autoresearch_search_findings", Masc_domain.CanReadState);
-      ("masc_autoresearch_status", Masc_domain.CanReadState);
       ("masc_agent_card", Masc_domain.CanReadState);
       ("masc_heartbeat", Masc_domain.CanBroadcast);
       ("masc_config", Masc_domain.CanReadState);

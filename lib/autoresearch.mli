@@ -239,4 +239,5 @@ val complete_if_finished : base_path:string -> loop_state -> loop_state
 val should_continue : loop_state -> bool
 val stop_loop : base_path:string -> ?reason:string -> string -> loop_state option
 val linked_status_json : base_path:string -> execution_link -> Yojson.Safe.t
+val persisted_summary_target_reached : persisted_summary -> bool
 val summary : loop_state -> Yojson.Safe.t

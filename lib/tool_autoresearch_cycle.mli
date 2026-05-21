@@ -1,10 +1,8 @@
 
 (** Tool_autoresearch_cycle — Core ratchet logic for the
-    [masc_autoresearch_cycle] tool.
+    archived autoresearch loop runtime.
 
-    Reachable from {!Tool_autoresearch.dispatch} via the
-    autoresearch tool registry.  Drives one iteration of an
-    active autoresearch loop:
+    Drives one iteration of an active autoresearch loop:
 
     + Resolve [loop_id] from args.
     + Read-acquire the loop registry; verify the loop is in

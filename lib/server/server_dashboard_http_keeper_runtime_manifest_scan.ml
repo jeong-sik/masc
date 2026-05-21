@@ -133,6 +133,10 @@ let update_runtime_manifest_scan scan row =
      scan.active_open_loop_count <-
        json_int_member_opt "active_open_loop_count"
          row.Keeper_runtime_manifest.decision
+   | Keeper_runtime_manifest.Working_state_sidecar_saved ->
+     scan.active_open_loop_count <-
+       json_int_member_opt "active_open_loop_count"
+         row.Keeper_runtime_manifest.decision
    | Keeper_runtime_manifest.Event_bus_correlated ->
      let decision = row.Keeper_runtime_manifest.decision in
      scan.event_bus_count <- scan.event_bus_count + 1;

@@ -1303,7 +1303,7 @@ let test_pr_review_action_metric_marks_structured_failure () =
     |> require_pr_review_event "failed approve"
   in
   check string "action fallback from input" "APPROVE" event.action;
-  check (option int) "number fallback" (Some 42) event.pr_number;
+  check (option int) "legacy number ignored" None event.pr_number;
   check bool "structured ok=false wins" false event.success
 ;;
 
@@ -1333,7 +1333,7 @@ let test_pr_review_action_metric_observes_invalid_output_json () =
     |> require_pr_review_event "invalid output json"
   in
   check string "action fallback from input" "COMMENT" event.action;
-  check (option int) "number fallback" (Some 7) event.pr_number;
+  check (option int) "legacy number ignored" None event.pr_number;
   check
     (float 0.001)
     "parse failure counted"

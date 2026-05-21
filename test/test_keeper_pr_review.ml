@@ -260,6 +260,15 @@ let test_social_preset_cannot_mutate_pr_reviews () =
     (KTPR.pr_review_mutation_preset_ok
        (Some Masc_mcp.Keeper_types.Social))
 
+let test_pr_number_of_args_uses_canonical_key_only () =
+  check int "canonical pr_number" 42
+    (KTPR.pr_number_of_args (`Assoc [ "pr_number", `Int 42 ]));
+  check int "legacy number ignored" 0
+    (KTPR.pr_number_of_args (`Assoc [ "number", `Int 42 ]));
+  check int "pr_number wins" 7
+    (KTPR.pr_number_of_args
+       (`Assoc [ "number", `Int 42; "pr_number", `Int 7 ]))
+
 let test_detects_rest_404 () =
   let sample =
     "failed to run git: HTTP 404: Not Found \
@@ -515,6 +524,10 @@ let () =
         test_research_preset_can_mutate_pr_reviews;
       test_case "social preset cannot mutate PR reviews" `Quick
         test_social_preset_cannot_mutate_pr_reviews;
+    ];
+    "args", [
+      test_case "pr_number is canonical" `Quick
+        test_pr_number_of_args_uses_canonical_key_only;
     ];
     "pr_not_found_in_output", [
       test_case "REST 404 (HTTP 404: Not Found)" `Quick test_detects_rest_404;

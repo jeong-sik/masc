@@ -62,19 +62,19 @@ run_keeper() {
     -e "EXPECTED_PLAYGROUND=$expected_playground" \
     -e "OTHER_KEEPER=$other" \
     "$image_tag" \
-    bash -lc '
-      set -euo pipefail
-      test "$(cat own.txt)" = "$EXPECTED_PLAYGROUND"
-      test ! -e "/workspace/$OTHER_KEEPER"
-      test "$(cat /tmp/keeper-creds/.config/gh/identity.txt)" = "$EXPECTED_IDENTITY"
-      test -e "/tmp/keeper-creds/.config/gh/${EXPECTED_IDENTITY%-gh}.txt"
-      test ! -e "/tmp/keeper-creds/.config/gh/${OTHER_KEEPER}.txt"
-      if (printf probe >/tmp/keeper-creds/.config/gh/write-probe) 2>/dev/null; then
-        printf "credential projection is writable\n" >&2
-        exit 21
-      fi
-      printf "ok\n" > write-ok.txt
-    ' >/dev/null
+    bash -l -s <<'BASH' >/dev/null
+set -euo pipefail
+test "$(cat own.txt)" = "$EXPECTED_PLAYGROUND"
+test ! -e "/workspace/$OTHER_KEEPER"
+test "$(cat /tmp/keeper-creds/.config/gh/identity.txt)" = "$EXPECTED_IDENTITY"
+test -e "/tmp/keeper-creds/.config/gh/${EXPECTED_IDENTITY%-gh}.txt"
+test ! -e "/tmp/keeper-creds/.config/gh/${OTHER_KEEPER}.txt"
+if (printf probe >/tmp/keeper-creds/.config/gh/write-probe) 2>/dev/null; then
+  printf "credential projection is writable\n" >&2
+  exit 21
+fi
+printf "ok\n" > write-ok.txt
+BASH
 
   test "$(cat "$playground/write-ok.txt")" = "ok"
 }

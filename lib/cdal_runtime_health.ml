@@ -320,8 +320,28 @@ let assoc_string key = function
 
 let has_task_scope json = Option.is_some (assoc_string "_task_id" json)
 
+let run_id_millis json =
+  match assoc_string "run_id" json with
+  | Some run_id ->
+    (match cdal_run_id_timestamp run_id with
+     | Some ts -> (try Some (Float.of_string ts) with Failure _ -> None)
+     | None -> None)
+  | None -> None
+;;
+
+let latest_scoped_run_millis recent =
+  List.fold_left
+    (fun acc row ->
+       if has_task_scope row
+       then max_float_opt acc (run_id_millis row)
+       else acc)
+    None
+    recent
+;;
+
 let task_scope_counts recent =
   let indexed = List.mapi (fun index row -> index, row) recent in
+  let latest_scoped_run_millis = latest_scoped_run_millis recent in
   let first_task_scoped_index =
     List.fold_left
       (fun acc (index, row) ->
@@ -336,10 +356,14 @@ let task_scope_counts recent =
        if has_task_scope row
        then task_id_rows + 1, legacy_unscoped_rows, current_unscoped_rows
        else (
-         match first_task_scoped_index with
-         | Some scoped_index when index < scoped_index ->
+         match latest_scoped_run_millis, run_id_millis row with
+         | Some latest_scoped, Some row_millis when row_millis <= latest_scoped ->
            task_id_rows, legacy_unscoped_rows + 1, current_unscoped_rows
-         | _ -> task_id_rows, legacy_unscoped_rows, current_unscoped_rows + 1))
+         | _ ->
+           (match first_task_scoped_index with
+            | Some scoped_index when index < scoped_index ->
+              task_id_rows, legacy_unscoped_rows + 1, current_unscoped_rows
+            | _ -> task_id_rows, legacy_unscoped_rows, current_unscoped_rows + 1)))
     (0, 0, 0)
     indexed
 ;;

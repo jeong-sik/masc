@@ -19,35 +19,9 @@ let keeper_agent_status = Keeper_heartbeat_loop_presence.keeper_agent_status
 let note_turn_failures_preserved_after_heartbeat = Keeper_heartbeat_loop_presence.note_turn_failures_preserved_after_heartbeat
 let sync_keeper_presence = Keeper_heartbeat_loop_presence.sync_keeper_presence
 
-let collect_keepalive_board_events
-      ~(ctx : _ context)
-      ~(meta_current : keeper_meta)
-      ~(proactive_warmup_elapsed : bool)
-  =
-  if not proactive_warmup_elapsed
-  then [], meta_current
-  else (
-    let pending_board_events =
-      try
-        let events, _new_count, _mention_count =
-          Keeper_world_observation.collect_board_events
-            ~base_path:ctx.config.base_path
-            ~meta:meta_current
-            ~continuity_summary:meta_current.continuity_summary
-        in
-        events
-      with
-      | Eio.Cancel.Cancelled _ as e -> raise e
-      | exn ->
-        Log.Keeper.warn "keepalive: board count query failed: %s" (Printexc.to_string exn);
-        Prometheus.inc_counter
-          Keeper_metrics.metric_keeper_heartbeat_failures
-          ~labels:[ "keeper", meta_current.name; "phase", "board_count_query" ]
-          ();
-        []
-    in
-    pending_board_events, meta_current)
-;;
+(* Pending board-event collection extracted to
+   [Keeper_heartbeat_loop_board_events] (godfile decomp). *)
+let collect_keepalive_board_events = Keeper_heartbeat_loop_board_events.collect_keepalive_board_events
 
 let in_turn_liveness_pulse_interval_sec =
   Keeper_heartbeat_loop_in_turn_pulse.in_turn_liveness_pulse_interval_sec

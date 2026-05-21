@@ -114,6 +114,30 @@ else
   echo "0 none none none"
 fi
 
+emit_top_fanout_action() {
+  [ -s "$fanout_tmp" ] || return 0
+  local top_fanout_line top_fanout_count top_fanout_keeper top_fanout_repo
+  local quoted_root quoted_keeper quoted_repo
+  top_fanout_line="$(sort -rn "$fanout_tmp" | head -n 1)"
+  set -- $top_fanout_line
+  top_fanout_count="${1:-0}"
+  top_fanout_keeper="${2:-}"
+  top_fanout_repo="${3:-}"
+  [ "$top_fanout_count" -gt 0 ] || return 0
+  [ -n "$top_fanout_keeper" ] || return 0
+  [ -n "$top_fanout_repo" ] || return 0
+  quoted_root="$(printf '%q' "$ROOT")"
+  quoted_keeper="$(printf '%q' "$top_fanout_keeper")"
+  quoted_repo="$(printf '%q' "$top_fanout_repo")"
+  echo "top_fanout_count=$top_fanout_count"
+  echo "top_fanout_keeper=$top_fanout_keeper"
+  echo "top_fanout_repo=$top_fanout_repo"
+  echo "top_fanout_cleanup_dry_run_command=scripts/cleanup-docker-playground-worktrees.sh --root $quoted_root --keeper $quoted_keeper --repo $quoted_repo --days 7"
+  echo "top_fanout_broken_dry_run_command=scripts/cleanup-docker-playground-worktrees.sh --root $quoted_root --keeper $quoted_keeper --repo $quoted_repo --days 7 --include-broken"
+}
+
+emit_top_fanout_action
+
 emit_hotspot_status() {
   local hotspot_status="ok"
   local hotspot_reasons=""

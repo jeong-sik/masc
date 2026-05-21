@@ -1005,6 +1005,7 @@ let test_health_json_surfaces_durable_paused_keepers () =
           let paused = json |> member "paused_keepers" in
           let fd_pressure = json |> member "keeper_fd_pressure" in
           let fd_accountant = json |> member "fd_accountant" in
+          let runtime_truth = json |> member "runtime_truth" in
           let fleet_safety = json |> member "keeper_fleet_safety" in
           let reaction_ledger = json |> member "keeper_reaction_ledger" in
           let durable_names =
@@ -1054,6 +1055,25 @@ let test_health_json_surfaces_durable_paused_keepers () =
           ignore (fd_accountant |> member "fd_open" |> to_int);
           ignore (fd_accountant |> member "fd_limit" |> to_int);
           ignore (fd_accountant |> member "pressure_active" |> to_bool);
+          Alcotest.(check string) "runtime truth schema"
+            "masc.runtime_truth.v1"
+            (runtime_truth |> member "schema" |> to_string);
+          Alcotest.(check string) "runtime truth source"
+            "running_process"
+            (runtime_truth |> member "source" |> to_string);
+          Alcotest.(check string) "runtime truth effective base path"
+            dir
+            (runtime_truth |> member "effective_base_path" |> to_string);
+          Alcotest.(check string) "runtime truth effective masc root"
+            (Filename.concat dir ".masc")
+            (runtime_truth |> member "effective_masc_root" |> to_string);
+          ignore (runtime_truth |> member "process_cwd" |> to_string);
+          ignore (runtime_truth |> member "executable_path" |> to_string);
+          ignore (runtime_truth |> member "executable_dir" |> to_string);
+          ignore (runtime_truth |> member "keeper_fibers" |> to_int);
+          ignore (runtime_truth |> member "fd_open" |> to_int);
+          ignore (runtime_truth |> member "fd_limit" |> to_int);
+          ignore (runtime_truth |> member "fd_pressure_active" |> to_bool);
           let fd_accountant_per_kind =
             fd_accountant |> member "per_kind" |> to_list
           in

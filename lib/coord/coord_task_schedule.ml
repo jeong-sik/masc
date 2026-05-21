@@ -293,8 +293,10 @@ let claim_next_r
       ~agent_name
       ?agent_tool_names
       ?(exclude_task_ids = [])
-      ?(task_filter = fun _ -> true)
-      ?(admission_filter = fun ~active_tasks:_ _ -> true)
+      ?(task_filter : Masc_domain.task -> bool = fun _ -> true)
+      ?(admission_filter :
+         active_tasks:Masc_domain.task list -> Masc_domain.task -> bool =
+        fun ~active_tasks:_ _ -> true)
       ()
   =
   let exception Existing_claim of claim_next_result in
@@ -518,7 +520,7 @@ let claim_next_r
                 ; "agent_tool_names_known", `Bool (Option.is_some agent_tool_names)
                 ; "ts", `String (now_iso ())
                 ]);
-        let effective_task_filter task =
+        let effective_task_filter (task : Masc_domain.task) =
           task_filter task && admission_allowed task && required_tool_claim_allowed task
         in
         let task_filter_excluded =

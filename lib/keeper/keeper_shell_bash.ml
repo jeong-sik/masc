@@ -166,11 +166,11 @@ let handle_keeper_bash_typed
               with
               | Error e -> Error e
               | Ok () ->
-                Worker_dev_tools.validate_command_paths
+                Worker_dev_tools.validate_shell_ir_paths
                   ~keeper_id:meta.name
                   ~base_path:root
                   ~workdir:cwd
-                  cmd
+                  ir
             in
             (match path_validation with
              | Error e -> error_json ~fields:[ "blocked_cmd", `String cmd_for_log ] e

@@ -208,7 +208,7 @@ let ps_query ~labels:_ = placeholder
    [?stdin] is a [bool], not the content itself — the *content* is
    never part of the argv (it is piped on stdin by {!exec}), so the
    pure builder only needs to know whether to emit the [-i] flag. *)
-let exec_argv ?user ?workdir ?(stdin = false) ~container ~cmd () =
+let exec_argv ?user ?workdir ?(stdin = false) ~container ~command_argv () =
   let user_args =
     match user with
     | None -> []
@@ -224,12 +224,12 @@ let exec_argv ?user ?workdir ?(stdin = false) ~container ~cmd () =
   @ user_args
   @ workdir_args
   @ stdin_args
-  @ [ Keeper_container_name.to_string container; "sh"; "-lc"; cmd ]
+  @ (Keeper_container_name.to_string container :: command_argv)
 ;;
 
-let exec ?user ?workdir ?stdin ~container ~cmd () =
+let exec ?user ?workdir ?stdin ~container ~command_argv () =
   let argv =
-    exec_argv ?user ?workdir ~stdin:(Option.is_some stdin) ~container ~cmd ()
+    exec_argv ?user ?workdir ~stdin:(Option.is_some stdin) ~container ~command_argv ()
   in
   (* Gated spawn returns [(status, stdout, stderr)]; on spawn failure
      the status is synthesized as [WEXITED 127] (see 3b-iv.2.1 commit
@@ -258,18 +258,16 @@ let run plan =
     Keeper_container_name.to_string (Keeper_sandbox_oneshot_plan.container_name plan)
   in
   let image = Keeper_sandbox_oneshot_plan.image plan in
-  let command = Keeper_sandbox_oneshot_plan.command plan in
+  let command_argv = Keeper_sandbox_oneshot_plan.command_argv plan in
   let timeout_sec = Keeper_sandbox_oneshot_plan.timeout_budget_sec plan in
-  (* [docker run --rm --name <name> <image> sh -lc <cmd>].
+  (* [docker run --rm --name <name> <image> <command_argv>].
      [--rm] removes the container after exit (Phase 3b-iii default
      cleanup strategy — RFC §3.1's spec deferred a typed cleanup
-     policy to a follow-up RFC). [sh -lc] mirrors [exec]'s wrapping
-     so caller-passed [cmd] strings work identically across both
-     functions. *)
+     policy to a follow-up RFC). *)
   let argv =
     [ "docker"; "run"; "--rm"; "--name"; container_name ]
     @ Keeper_sandbox_runtime.docker_run_pull_never_args ()
-    @ [ image; "sh"; "-lc"; command ]
+    @ (image :: command_argv)
   in
   map_status_to_exec_result
     (gated_argv_with_status_split ~timeout_sec ~summary:"keeper docker run (oneshot)" argv)
@@ -409,7 +407,7 @@ let run_detached_argv
   @ List.concat_map (fun v -> [ "-v"; v ]) (P.mounts plan)
   @ workdir_args (P.workdir plan)
   @ network_args
-  @ [ P.image plan; "sh"; "-lc"; P.startup_command plan ]
+  @ (P.image plan :: P.startup_argv plan)
 ;;
 
 let write_identity_files (plan : Keeper_sandbox_session_plan.t) =

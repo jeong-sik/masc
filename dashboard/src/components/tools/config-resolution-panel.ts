@@ -398,6 +398,33 @@ function KeeperRuntimePanel({ runtime }: { runtime: KeeperRuntimeResolved | null
   `
 }
 
+function RuntimeTruthPanel({ runtimeResolution }: { runtimeResolution: DashboardRuntimeResolution }) {
+  const fd = runtimeResolution.fd_accountant
+  const fleet = runtimeResolution.fleet_safety
+  const fdValue = fd
+    ? `${fd.fd_open ?? '--'} / ${fd.fd_limit ?? '--'}`
+    : '--'
+  const fdTone = fd?.pressure_active ? 'bad' : 'neutral'
+
+  return html`
+    <${ConfigCard} class="mb-4 px-4 py-4">
+      <div class="mb-3 flex flex-wrap items-center gap-2">
+        <div class="text-2xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">live runtime truth</div>
+        <${StatusChip} tone=${toneClass(runtimeResolution.status)}>${runtimeResolution.status}<//>
+        <${StatusChip} tone=${fdTone} uppercase=${false}>fd ${fdValue}<//>
+      </div>
+      <div class="grid gap-3 md:grid-cols-2">
+        <${RuntimeMetaRow} label="effective base" value=${runtimeResolution.resolved_base_path.path ?? '--'} />
+        <${RuntimeMetaRow} label="effective .masc" value=${runtimeResolution.data_root.path ?? '--'} />
+        <${RuntimeMetaRow} label="server repo" value=${runtimeResolution.server_repo_path?.path ?? '--'} />
+        <${RuntimeMetaRow} label="executable commit" value=${runtimeResolution.build.commit ?? '--'} />
+        <${RuntimeMetaRow} label="keeper fibers" value=${String(fleet?.keeper_fibers ?? '--')} />
+        <${RuntimeMetaRow} label="fd pressure" value=${fd?.pressure_active == null ? '--' : fd.pressure_active ? 'active' : 'clear'} />
+      </div>
+    <//>
+  `
+}
+
 function RuntimeProbePanel() {
   const state = useSignal<{
     data: DashboardRuntimeProbeResponse | null
@@ -635,6 +662,8 @@ export function ConfigResolutionPanel({
               <div class="mb-4">
                 <${WarningBlock} title="runtime warnings" warnings=${runtimeResolution.warnings} />
               </div>
+
+              <${RuntimeTruthPanel} runtimeResolution=${runtimeResolution} />
 
               <div class="grid gap-3 md:grid-cols-2">
                 <${ConfigRow} label="base path" item=${runtimeResolution.base_path} />

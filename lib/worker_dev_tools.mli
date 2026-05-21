@@ -91,14 +91,33 @@ val validate_command_coding_with_allowlist
   -> string
   -> (unit, block_reason) result
 
-(** When [workdir] is supplied, parse [cmd] through Shell IR and gate every
-    literal path-bearing argv/redirect value against the path allowlist.
+(** Variant of {!validate_command_coding_with_allowlist} for callers that need
+    to keep the authoritative Shell IR context for execution or follow-up
+    validation. *)
+val command_context_coding_with_allowlist
+  :  ?caller:Masc_exec_command_gate.Shell_command_gate.caller
+  -> ?allow_pipes:bool
+  -> allowed_commands:string list
+  -> string
+  -> (Masc_exec_command_gate.Shell_command_gate.parsed_context, block_reason) result
+
+(** When [workdir] is supplied, gate every literal path-bearing argv/redirect
+    value in [shell_ir] against the path allowlist.
     Values may stay under [workdir],
     [/tmp], the owning worktree repo root, or a registered repository path
     allowed by {!Keeper_repo_mapping} when both [keeper_id] and [base_path]
     are supplied. Returns [Error msg] with the rejected value when a path
     escapes the allowlist.
     Returns [Ok ()] unconditionally when [workdir = None]. *)
+val validate_shell_ir_paths
+  :  ?keeper_id:string
+  -> ?base_path:string
+  -> ?workdir:string
+  -> Masc_exec.Shell_ir.t
+  -> (unit, string) result
+
+(** Compatibility wrapper for legacy string call sites. Prefer
+    {!validate_shell_ir_paths} when the caller already has Shell IR. *)
 val validate_command_paths
   :  ?keeper_id:string
   -> ?base_path:string

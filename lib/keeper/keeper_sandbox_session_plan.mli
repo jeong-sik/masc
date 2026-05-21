@@ -103,8 +103,8 @@ type t
       [n = Env_config_keeper.KeeperSandbox.nofile_limit ()].
     - [pids_limit], [memory_limit], [tmpfs], [read_only_rootfs] —
       from [Env_config_keeper.KeeperSandbox.*].
-    - [startup_command] — the trap-and-sleep idle loop
-      ([trap : TERM INT; while :; do sleep 3600; done]).
+    - [startup_argv] — the direct idle process argv
+      (["tail"; "-f"; "/dev/null"]).
     - [seccomp_profile = Seccomp_default], [cap_drop_all = true],
       [no_new_privileges = true], [user = Some (uid, gid)],
       [image] / [container_root] / [network_mode] / [workdir = Some container_root]
@@ -148,7 +148,7 @@ val ulimits : t -> ulimit list
 val read_only_rootfs : t -> bool
 val tmpfs_mount : t -> string
 val workdir : t -> string option
-val startup_command : t -> string
+val startup_argv : t -> string list
 
 (** The 7 deterministic [(key, value)] label pairs. The edge appends
     [owner_pid] + [started_at] at spawn time. *)

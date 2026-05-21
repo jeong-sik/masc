@@ -5,10 +5,41 @@
     path-token normalization helpers plus explicit argv/word helpers for
     transparent wrappers such as [env] and [opam exec]. *)
 
-let split_on_space cmd =
-  String.split_on_char ' ' cmd
-  |> List.map String.trim
-  |> List.filter (fun token -> token <> "")
+let rec shell_ir_literal_text = function
+  | Masc_exec.Shell_ir.Lit text -> Some text
+  | Masc_exec.Shell_ir.Concat parts ->
+    let rec loop acc = function
+      | [] -> Some (String.concat "" (List.rev acc))
+      | part :: rest ->
+        (match shell_ir_literal_text part with
+         | Some text -> loop (text :: acc) rest
+         | None -> None)
+    in
+    loop [] parts
+  | Masc_exec.Shell_ir.Var _ -> None
+;;
+
+let argv_words_of_simple (simple : Masc_exec.Shell_ir.simple) =
+  let rec loop acc = function
+    | [] -> Some (List.rev acc)
+    | arg :: rest ->
+      (match shell_ir_literal_text arg with
+       | Some text -> loop (text :: acc) rest
+       | None -> None)
+  in
+  Option.map
+    (fun args -> Masc_exec.Bin.to_string simple.bin :: args)
+    (loop [] simple.Masc_exec.Shell_ir.args)
+;;
+
+let argv_words_of_split_string text =
+  match Masc_exec_bash_parser.Bash.parse_string text with
+  | Masc_exec.Parsed.Parsed (Masc_exec.Shell_ir.Simple simple) ->
+    argv_words_of_simple simple
+  | Masc_exec.Parsed.Parsed (Masc_exec.Shell_ir.Pipeline _)
+  | Masc_exec.Parsed.Parse_error _
+  | Masc_exec.Parsed.Parse_aborted _
+  | Masc_exec.Parsed.Too_complex _ -> None
 ;;
 
 let strip_wrapping_quotes token =
@@ -55,10 +86,11 @@ let rec command_after_env_prefix_tokens = function
     then (
       match rest with
       | arg :: rest -> (
-        match
-          command_after_env_prefix_tokens (split_on_space (strip_wrapping_quotes arg))
-        with
-        | Some _ as command -> command
+        match argv_words_of_split_string (strip_wrapping_quotes arg) with
+        | Some split_tokens -> (
+          match command_after_env_prefix_tokens split_tokens with
+          | Some _ as command -> command
+          | None -> command_after_env_prefix_tokens rest)
         | None -> command_after_env_prefix_tokens rest)
       | [] -> None)
     else if String.starts_with ~prefix:"--split-string=" token
@@ -67,7 +99,9 @@ let rec command_after_env_prefix_tokens = function
       let arg =
         String.sub token (String.length prefix) (String.length token - String.length prefix)
       in
-      command_after_env_prefix_tokens (split_on_space (strip_wrapping_quotes arg))
+      Option.bind
+        (argv_words_of_split_string (strip_wrapping_quotes arg))
+        command_after_env_prefix_tokens
     else if token = "-u" || token = "--unset" || token = "-C" || token = "--chdir"
     then (
       match rest with

@@ -1,14 +1,8 @@
 (* P7: Pipeline-Native Dispatch
    Execute Shell_ir.t directly via Exec_gate without going through
    /bin/bash.  Simple commands use argv-based spawn; pipelines chain
-   stdout->stdin across stages.
-
-   Controlled by [MASC_BASH_NATIVE_DISPATCH] env var:
-   - "1" (default): native dispatch for Simple, bash fallback for Pipeline
-   - "0": always fall back to bash
-
-   This module is the first step toward eliminating shell injection
-   entirely.  Pipeline support is limited to stdout->stdin chaining. *)
+   stdout->stdin across stages.  Pipeline support is limited to
+   stdout->stdin chaining. *)
 
 type dispatch_result = {
   status : Unix.process_status;
@@ -142,9 +136,3 @@ and dispatch ?timeout_sec (ir : Shell_ir.t) =
   match ir with
   | Shell_ir.Simple s -> dispatch_simple ?timeout_sec s
   | Pipeline stages -> dispatch_pipeline ?timeout_sec stages
-
-let native_dispatch_enabled () =
-  match Unix.getenv "MASC_BASH_NATIVE_DISPATCH" with
-  | exception Not_found -> true
-  | "0" -> false
-  | _ -> true

@@ -228,7 +228,7 @@ let start_container (t : t) ~(timeout_sec : float) =
                ~container_root:t.container_root
            @ identity_mounts
            @ network_args
-           @ [ image; "sh"; "-lc"; "trap : TERM INT; while :; do sleep 3600; done" ]
+           @ [ image; "tail"; "-f"; "/dev/null" ]
          in
          let st, out = run_argv_with_status_retry_eintr ~timeout_sec argv in
          (match st with
@@ -417,33 +417,31 @@ let write_file_common
       (t : t)
       ~(host_path : string)
       ~(content : string)
-      ~(timeout_sec : float)
+      ~timeout_sec:_
       ~(append : bool)
       ()
   =
   match container_path_of_host t ~host_path with
   | Error _ as err -> err
-  | Ok _ ->
+  | Ok _container_path ->
     ignore timeout_sec;
     let host_path = normalize_path host_path in
     (try
        Fs_compat.mkdir_p (Filename.dirname host_path);
        if append
        then Fs_compat.append_file host_path content
-       else (
-         let oc =
-           Stdlib.open_out_gen
-             [ Open_wronly; Open_creat; Open_trunc; Open_binary ]
-             0o644
-             host_path
-         in
-         Fun.protect
-           ~finally:(fun () -> close_out_noerr oc)
-           (fun () -> output_string oc content));
+       else Fs_compat.save_file host_path content;
        Ok ()
      with
-     | Sys_error msg ->
-       Error (Printf.sprintf "write_file_failed: path=%s error=%s" host_path msg))
+     | Eio.Cancel.Cancelled _ as e -> raise e
+     | Sys_error msg -> Error msg
+     | Unix.Unix_error (err, fn, arg) ->
+       Error
+         (Printf.sprintf
+            "%s%s%s"
+            (Unix.error_message err)
+            (if String.equal fn "" then "" else ": " ^ fn)
+            (if String.equal arg "" then "" else " " ^ arg)))
 ;;
 
 let overwrite_file t ~host_path ~content ~timeout_sec () =

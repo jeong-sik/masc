@@ -202,14 +202,7 @@ let start_managed_container
                       container_root;
                     ]
                     @ network_args
-                    @ [
-                      image;
-                      "sh";
-                      "-lc";
-                      Printf.sprintf
-                        "trap : TERM INT; while :; do sleep %d; done"
-                        (Env_config_sandbox.Cleanup.managed_sleep_sec ());
-                    ]
+                    @ [ image; "tail"; "-f"; "/dev/null" ]
                   in
                   (* Throttle the managed-container [docker run -d] just like
                      the per-call sandbox spawns (PR #15727). RFC-0097 calls

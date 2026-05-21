@@ -18,7 +18,7 @@ let sample_plan () =
       ~turn_id:1
       ~attempt:0
       ~meta_name:"alice"
-      ~cmd:"echo hi"
+      ~command_argv:[ "echo"; "hi" ]
   with
   | Ok p -> p
   | Error _ -> failwith "test fixture"
@@ -83,7 +83,10 @@ let test_run_unmatched_plan_returns_daemon_unreachable () =
   let p2 =
     match
       Keeper_sandbox_oneshot_plan.of_request
-        ~turn_id:99 ~attempt:0 ~meta_name:"bob" ~cmd:"x"
+        ~turn_id:99
+        ~attempt:0
+        ~meta_name:"bob"
+        ~command_argv:[ "x" ]
     with
     | Ok p -> p
     | Error _ -> failwith "fix"
@@ -103,7 +106,10 @@ let test_run_fifo_order () =
   let p2 =
     match
       Keeper_sandbox_oneshot_plan.of_request
-        ~turn_id:2 ~attempt:0 ~meta_name:"bob" ~cmd:"y"
+        ~turn_id:2
+        ~attempt:0
+        ~meta_name:"bob"
+        ~command_argv:[ "y" ]
     with
     | Ok p -> p
     | Error _ -> failwith "fix"
@@ -131,30 +137,35 @@ let test_run_fifo_order () =
 let test_exec_matches_injection () =
   setup ();
   let c = sample_container () in
-  Keeper_docker_client_mock.inject_exec ~container:c ~cmd:"ls -la"
+  Keeper_docker_client_mock.inject_exec ~container:c ~command_argv:[ "ls"; "-la" ]
     (Ok sample_exec_result);
-  match Keeper_docker_client_mock.exec ~container:c ~cmd:"ls -la" () with
+  match Keeper_docker_client_mock.exec ~container:c ~command_argv:[ "ls"; "-la" ] () with
   | Ok er -> check string "stdout" "ok" er.stdout
   | Error _ -> fail "expected Ok"
 
 let test_exec_unmatched_cmd () =
   setup ();
   let c = sample_container () in
-  Keeper_docker_client_mock.inject_exec ~container:c ~cmd:"ls -la"
+  Keeper_docker_client_mock.inject_exec ~container:c ~command_argv:[ "ls"; "-la" ]
     (Ok sample_exec_result);
-  match Keeper_docker_client_mock.exec ~container:c ~cmd:"different cmd" () with
+  match Keeper_docker_client_mock.exec ~container:c ~command_argv:[ "different"; "cmd" ] () with
   | Error Keeper_docker_client.Daemon_unreachable -> ()
-  | _ -> fail "expected miss on different cmd"
+  | _ -> fail "expected miss on different command argv"
 
 (* Phase 3e (b) — [exec] now takes [?user] / [?workdir]; the mock
-   ignores them for matching (key stays [(container, cmd)]). Passing
+   ignores them for matching (key stays [(container, command_argv)]). Passing
    them must not change which injection is consumed. *)
 let test_exec_ignores_user_workdir_for_matching () =
   setup ();
   let c = sample_container () in
-  Keeper_docker_client_mock.inject_exec ~container:c ~cmd:"id" (Ok sample_exec_result);
+  Keeper_docker_client_mock.inject_exec ~container:c ~command_argv:[ "id" ] (Ok sample_exec_result);
   match
-    Keeper_docker_client_mock.exec ~user:(1000, 1000) ~workdir:"/work" ~container:c ~cmd:"id" ()
+    Keeper_docker_client_mock.exec
+      ~user:(1000, 1000)
+      ~workdir:"/work"
+      ~container:c
+      ~command_argv:[ "id" ]
+      ()
   with
   | Ok er -> check string "stdout" "ok" er.stdout
   | Error _ -> fail "expected Ok — user/workdir must not affect matching"
@@ -165,12 +176,12 @@ let test_exec_ignores_user_workdir_for_matching () =
 let test_exec_ignores_stdin_for_matching () =
   setup ();
   let c = sample_container () in
-  Keeper_docker_client_mock.inject_exec ~container:c ~cmd:"cat > /tmp/x" (Ok sample_exec_result);
+  Keeper_docker_client_mock.inject_exec ~container:c ~command_argv:[ "cat" ] (Ok sample_exec_result);
   match
     Keeper_docker_client_mock.exec
       ~stdin:"hello world"
       ~container:c
-      ~cmd:"cat > /tmp/x"
+      ~command_argv:[ "cat" ]
       ()
   with
   | Ok er -> check string "stdout" "ok" er.stdout
@@ -180,14 +191,17 @@ let test_exec_ignores_stdin_for_matching () =
 let test_exec_ignores_all_three_optionals_together () =
   setup ();
   let c = sample_container () in
-  Keeper_docker_client_mock.inject_exec ~container:c ~cmd:"tee /tmp/x" (Ok sample_exec_result);
+  Keeper_docker_client_mock.inject_exec
+    ~container:c
+    ~command_argv:[ "tee"; "/tmp/x" ]
+    (Ok sample_exec_result);
   match
     Keeper_docker_client_mock.exec
       ~user:(1000, 1000)
       ~workdir:"/work"
       ~stdin:"payload"
       ~container:c
-      ~cmd:"tee /tmp/x"
+      ~command_argv:[ "tee"; "/tmp/x" ]
       ()
   with
   | Ok _ ->
@@ -306,7 +320,10 @@ let test_reset_clears_all_queues () =
   setup ();
   let c = sample_container () in
   Keeper_docker_client_mock.inject_run (sample_plan ()) (Ok sample_exec_result);
-  Keeper_docker_client_mock.inject_exec ~container:c ~cmd:"x" (Ok sample_exec_result);
+  Keeper_docker_client_mock.inject_exec
+    ~container:c
+    ~command_argv:[ "x" ]
+    (Ok sample_exec_result);
   Keeper_docker_client_mock.inject_ps_query ~labels:[] (Ok []);
   Keeper_docker_client_mock.inject_rm c (Ok ());
   Keeper_docker_client_mock.inject_info_security_options (Ok []);

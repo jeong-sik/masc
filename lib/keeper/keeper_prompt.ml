@@ -15,13 +15,50 @@ let exact_direct_mention_present ~(targets : string list) (content : string) :
     bool =
   Mention.any_mentioned ~targets content
 
+(* Compiled once to avoid recompilation on every constitution fallback. *)
+let re_state_block_instruction_var =
+  Re.(compile (str "{{state_block_instruction}}"))
+
+(* Fallback substitution for the [state_block_instruction] template variable on
+   the raw constitution template.  Used when [render_prompt_template] returns
+   [Error] (e.g. unrelated unresolved variable, malformed template) so the
+   "State block template" anchor still appears in the prompt — otherwise the
+   raw template surfaces a literal [{{state_block_instruction}}] placeholder
+   and [missing_critical_prompt_anchors] reports [state_block_template] missing,
+   triggering the recovery-guard warn loop observed in the keeper logs
+   (~51 emissions / restart, all with keeper_name=null because the constitution
+   path runs before the per-keeper context is bound). *)
+let substitute_state_block_instruction_fallback raw =
+  Re.replace_string re_state_block_instruction_var
+    ~by:Keeper_state_block_prompt.instruction_text raw
+
 let keeper_constitution () =
   match
     Prompt_registry.render_prompt_template Keeper_prompt_names.constitution
       [ ("state_block_instruction", Keeper_state_block_prompt.instruction_text) ]
   with
   | Ok value -> value
-  | Error _ -> Prompt_registry.get_prompt Keeper_prompt_names.constitution
+  | Error msg ->
+      (* Preserve the original Error path (the render error is still real, e.g.
+         a newly-introduced unresolved variable in the template) by emitting
+         the same counter + warn the world-prompt fallback below uses.  But
+         instead of returning the raw template with [{{state_block_instruction}}]
+         unsubstituted (the silent-fallback bug), substitute the single
+         variable we know about so the "State block template" anchor still
+         appears in the prompt.  Any *other* unresolved variables remain
+         visible as [{{name}}] placeholders, which is what the operator needs
+         to see in order to fix the template. *)
+      Prometheus.inc_counter
+        Keeper_metrics.metric_keeper_prompt_failures
+        ~labels:[("prompt", Keeper_prompt_names.constitution)]
+        ();
+      Log.Keeper.warn
+        "keeper_constitution: template render failed (%s), falling back to \
+         raw template with state_block_instruction substituted; other \
+         variables may still be unresolved"
+        msg;
+      substitute_state_block_instruction_fallback
+        (Prompt_registry.get_prompt Keeper_prompt_names.constitution)
 
 let critical_prompt_anchors =
   [ ("continuity", "<continuity>");

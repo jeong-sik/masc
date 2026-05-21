@@ -286,6 +286,7 @@
   test_tool_call_quality_benchmark
   test_keeper_prompt_metrics
   test_keeper_prompt_personality_field_aggregation
+  test_keeper_prompt_constitution_fallback
   test_keeper_reaction_ledger
   test_cache_metrics_wiring
   test_keeper_bash_descriptor_variant
@@ -609,6 +610,7 @@
   test_tool_call_quality_benchmark
   test_keeper_prompt_metrics
   test_keeper_prompt_personality_field_aggregation
+  test_keeper_prompt_constitution_fallback
   test_keeper_reaction_ledger
   test_cache_metrics_wiring
   test_keeper_bash_descriptor_variant
@@ -1254,7 +1256,6 @@
   test_tool_control_coverage
   test_tool_misc_coverage
   test_ag_ui_coverage
-  test_tool_suspend_coverage
   test_tool_code_coverage
   test_tool_code_write_coverage
   test_tool_code_read_containment
@@ -1314,7 +1315,6 @@
   test_tool_control_coverage
   test_tool_misc_coverage
   test_ag_ui_coverage
-  test_tool_suspend_coverage
   test_tool_code_coverage
   test_tool_code_write_coverage
   test_tool_code_read_containment

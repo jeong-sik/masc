@@ -833,6 +833,13 @@ let typed_gate_allowlist_policy mode : Exec_shell_gate.allowlist_policy =
 
 let typed_gate_sandbox target : Exec_shell_gate.sandbox_context = { target }
 
+let typed_gate_legendary_verdict_kind = function
+  | Exec_shell_gate.Allow _ -> Legendary_counters.Allow
+  | Exec_shell_gate.Reject _ -> Legendary_counters.Reject
+  | Exec_shell_gate.Cannot_parse _
+  | Exec_shell_gate.Too_complex _ -> Legendary_counters.Cannot_parse
+;;
+
 let typed_gate_error_json ~cmd_for_log ~cwd verdict =
   let verdict_tag = Exec_shell_gate.verdict_tag verdict in
   let reason_tag, diagnostic =
@@ -968,6 +975,9 @@ let handle_keeper_bash_typed
                 ~sandbox:(typed_gate_sandbox dispatch_sandbox)
                 ()
             in
+            Legendary_counters.incr_shell_gate
+              ~caller:Legendary_counters.Keeper_shell_bash
+              ~verdict:(typed_gate_legendary_verdict_kind gate_verdict);
             (match gate_verdict with
              | Exec_shell_gate.Allow gate_context ->
                let path_validation =
@@ -983,9 +993,9 @@ let handle_keeper_bash_typed
                      ~workdir:cwd
                      cmd
                in
-               (match path_validation with
-                | Error e -> error_json ~fields:[ "blocked_cmd", `String cmd_for_log ] e
-                | Ok () ->
+                (match path_validation with
+                 | Error e -> error_json ~fields:[ "blocked_cmd", `String cmd_for_log ] e
+                 | Ok () ->
                let env_snap =
                  Cancel_safe.protect
                    ~on_exn:(fun _ -> None)

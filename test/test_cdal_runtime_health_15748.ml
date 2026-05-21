@@ -240,11 +240,13 @@ let test_legacy_unscoped_rows_do_not_mark_current_writer_partial () =
   with_temp_dir @@ fun dir ->
   let base_dir = Filename.concat dir "cdal_verdicts" in
   let proof_root = Filename.concat dir ".oas" in
+  (* See fixture setup: the written ledger path is irrelevant here. *)
   ignore (write_ledger_row ~base_dir (`Assoc [ "run_id", `String "run-legacy" ]));
   ignore
     (write_ledger_row
        ~base_dir
        (`Assoc [ "_task_id", `String "task-15748"; "run_id", `String "run-task" ]));
+  (* See fixture setup: only the proof root side effect is asserted. *)
   ignore (make_proof_root proof_root);
   let json =
     H.snapshot_json
@@ -269,6 +271,56 @@ let test_legacy_unscoped_rows_do_not_mark_current_writer_partial () =
   Alcotest.(check bool)
     "legacy-only marker"
     true
+    (member_bool "legacy_unscoped_only" task_scope)
+;;
+
+let test_interleaved_unscoped_rows_mark_current_writer_partial () =
+  with_temp_dir @@ fun dir ->
+  let base_dir = Filename.concat dir "cdal_verdicts" in
+  let proof_root = Filename.concat dir ".oas" in
+  (* See fixture setup: the written ledger path is irrelevant here. *)
+  ignore
+    (write_ledger_row
+       ~base_dir
+       (`Assoc [ "_task_id", `String "task-old"; "run_id", `String "run-old" ]));
+  (* See fixture setup: the written ledger path is irrelevant here. *)
+  ignore (write_ledger_row ~base_dir (`Assoc [ "run_id", `String "run-no-task" ]));
+  (* See fixture setup: the written ledger path is irrelevant here. *)
+  ignore
+    (write_ledger_row
+       ~base_dir
+       (`Assoc [ "_task_id", `String "task-new"; "run_id", `String "run-new" ]));
+  (* See fixture setup: only the proof root side effect is asserted. *)
+  ignore (make_proof_root proof_root);
+  let json =
+    H.snapshot_json
+      ~base_dir
+      ~proof_root
+      ~now:(Time_compat.now ())
+      ~stale_age_seconds:60.0
+      ~recent_limit:20
+      ()
+  in
+  Alcotest.(check string)
+    "writer_status"
+    "partial_task_scope"
+    (member_string "writer_status" json);
+  let task_scope = nested "task_scope" json in
+  Alcotest.(check string)
+    "task scope status"
+    "partial_task_scope"
+    (member_string "status" task_scope);
+  Alcotest.(check int)
+    "legacy unscoped rows"
+    0
+    (member_int "legacy_unscoped_rows" task_scope);
+  Alcotest.(check int)
+    "current writer missing task rows"
+    1
+    (member_int "current_writer_missing_task_scope_rows" task_scope);
+  Alcotest.(check bool)
+    "legacy-only marker"
+    false
     (member_bool "legacy_unscoped_only" task_scope)
 ;;
 
@@ -556,6 +608,10 @@ let () =
             "legacy unscoped rows do not mark current writer partial"
             `Quick
             test_legacy_unscoped_rows_do_not_mark_current_writer_partial
+        ; Alcotest.test_case
+            "interleaved unscoped rows mark current writer partial"
+            `Quick
+            test_interleaved_unscoped_rows_mark_current_writer_partial
         ; Alcotest.test_case "active" `Quick test_active_writer_status
         ; Alcotest.test_case
             "stale incomplete proof store"

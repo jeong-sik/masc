@@ -313,9 +313,12 @@ let has_task_scope json = Option.is_some (assoc_string "_task_id" json)
 
 let task_scope_counts recent =
   let indexed = List.mapi (fun index row -> index, row) recent in
-  let latest_task_scoped_index =
+  let first_task_scoped_index =
     List.fold_left
-      (fun acc (index, row) -> if has_task_scope row then Some index else acc)
+      (fun acc (index, row) ->
+         match acc with
+         | Some _ -> acc
+         | None -> if has_task_scope row then Some index else None)
       None
       indexed
   in
@@ -324,7 +327,7 @@ let task_scope_counts recent =
        if has_task_scope row
        then task_id_rows + 1, legacy_unscoped_rows, current_unscoped_rows
        else (
-         match latest_task_scoped_index with
+         match first_task_scoped_index with
          | Some scoped_index when index < scoped_index ->
            task_id_rows, legacy_unscoped_rows + 1, current_unscoped_rows
          | _ -> task_id_rows, legacy_unscoped_rows, current_unscoped_rows + 1))

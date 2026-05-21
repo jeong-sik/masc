@@ -1330,6 +1330,15 @@ let test_authorize_tool_v2_known_keeper_tool_strict_worker_allowed () =
   | Ok () -> ()
   | Error e -> fail (Masc_domain.masc_error_to_string e)
 
+let test_authorize_tool_v2_unknown_internal_worker_allowed () =
+  let result =
+    Auth.authorize_tool_for_role ~agent_name:"worker_agent"
+      ~role:Masc_domain.Worker ~tool_name:"masc_unlisted_tool"
+  in
+  match result with
+  | Ok () -> ()
+  | Error e -> fail (Masc_domain.masc_error_to_string e)
+
 let test_authorize_tool_v2_unknown_keeper_prefix_strict_denied () =
   let result =
     Auth.authorize_tool_for_role ~agent_name:"keeper-analyst-agent"
@@ -1349,7 +1358,7 @@ let test_tool_auth_strict_env_cannot_disable_fail_closed () =
           ~role:Masc_domain.Worker ~tool_name:"external_totally_fake")
   in
   match result with
-  | Ok () -> fail "MASC_TOOL_AUTH_STRICT=0 must not fail-open unknown external tools"
+  | Ok () -> fail "MASC_TOOL_AUTH_STRICT=0 must deny unknown external tools"
   | Error (Masc_domain.Auth (Masc_domain.Auth_error.Forbidden _)) -> ()
   | Error e -> fail (Printf.sprintf "wrong error: %s" (Masc_domain.masc_error_to_string e))
 
@@ -1488,6 +1497,8 @@ let () =
         `Quick test_authorize_known_keeper_tool_strict_worker_allowed;
       test_case "strict v2 known keeper tool allows worker"
         `Quick test_authorize_tool_v2_known_keeper_tool_strict_worker_allowed;
+      test_case "strict v2 unknown internal tool allows worker"
+        `Quick test_authorize_tool_v2_unknown_internal_worker_allowed;
       test_case "strict v2 fake keeper prefix denied"
         `Quick test_authorize_tool_v2_unknown_keeper_prefix_strict_denied;
       test_case "tool auth strict env cannot disable fail-closed"

@@ -1350,14 +1350,12 @@ let resolve_role config ~agent_name ~token : (agent_role, masc_error) result =
 ;;
 
 let authorize_tool_for_role ~agent_name ~role ~tool_name : (unit, masc_error) result =
-  let policy = Tool_access_role.policy_for_role role in
-  if not (Tool_access_policy.allows_name policy tool_name)
-  then Error (Auth (Auth_error.Forbidden { agent = agent_name; action = tool_name }))
-  else (
-    (* Additional gate for unmapped tools. *)
-    match permission_for_tool tool_name with
-    | Some _ -> Ok () (* Mapped tool — policy already checked *)
-    | None ->
+  match permission_for_tool tool_name with
+  | Some perm ->
+      if has_permission role perm
+      then Ok ()
+      else Error (Auth (Auth_error.Forbidden { agent = agent_name; action = tool_name }))
+  | None ->
       if is_unmapped_internal_tool_name tool_name
       then
         (* Unmapped internal tool: require at least Worker *)
@@ -1370,11 +1368,11 @@ let authorize_tool_for_role ~agent_name ~role ~tool_name : (unit, masc_error) re
         Error
           (Auth
              (Auth_error.Forbidden
-                { agent = agent_name; action = "use unknown non-masc tool: " ^ tool_name }))))
+                { agent = agent_name; action = "use unknown non-masc tool: " ^ tool_name })))
 ;;
 
-(** Policy-based tool authorization.
-    Replaces authorize_tool with a single Tool_access_policy check.
+(** Role-based tool authorization.
+    Resolves the caller role and enforces the tool's required permission.
     Invalid/expired tokens are rejected (not silently downgraded).
 
     Tools not mapped by permission_for_tool are subject to additional

@@ -91,78 +91,16 @@ let merge_json_objects left right =
 ;;
 
 let action_log_path config = Filename.concat (operator_dir config) "action_log.jsonl"
-let remote_confirm_ttl_seconds = 900.0
 let iso_of_unix = Dashboard_utils.iso_of_unix
-
-let runtime_status_from_live_signal (agent_status_json : Yojson.Safe.t) =
-  let runtime_status =
-    match Keeper_exec_status.agent_status_text agent_status_json with
-    | ("active" | "busy" | "listening" | "idle") as status -> Some status
-    | _ -> None
-  in
-  let has_live_signal =
-    Keeper_exec_status.agent_runtime_has_live_signal agent_status_json
-  in
-  let is_zombie = Safe_ops.json_bool ~default:false "is_zombie" agent_status_json in
-  match runtime_status, has_live_signal, is_zombie with
-  | Some status, true, false -> Some status
-  | _ -> None
-;;
-
-let health_state_allows_runtime_status_override (diagnostic : Yojson.Safe.t) =
-  let kh =
-    Safe_ops.json_string ~default:"offline" "health_state" diagnostic
-    |> Keeper_exec_status.keeper_health_of_string
-  in
-  match kh with
-  | Keeper_types.KH_stale | KH_degraded | KH_zombie | KH_dead -> false
-  | KH_healthy | KH_idle | KH_offline -> true
-;;
-
-let align_keeper_runtime_status
-      ~(surface_status : string)
-      ~(diagnostic : Yojson.Safe.t)
-      ~(agent_status_json : Yojson.Safe.t)
-      ~(keepalive_running : bool)
-  : string
-  =
-  if not keepalive_running
-  then surface_status
-  else (
-    let normalized_surface = String.lowercase_ascii (String.trim surface_status) in
-    let runtime_status =
-      if health_state_allows_runtime_status_override diagnostic
-      then runtime_status_from_live_signal agent_status_json
-      else None
-    in
-    match normalized_surface, runtime_status with
-    | ("inactive" | "offline"), Some status -> status
-    | _ -> surface_status)
-;;
-
-let remote_client_type_of_context (ctx : 'a context) =
-  match ctx.mcp_session_id with
-  | Some _ -> "mcp_remote"
-  | None -> "local_api"
-;;
-
-let max_turns_override_source = function
-  | Some n
-    when n >= Keeper_runtime_resolved.max_turns_per_call_min
-         && n <= Keeper_runtime_resolved.max_turns_per_call_max -> "override"
-  | Some _ -> "override_invalid"
-  | None -> "env"
-;;
-
-let operator_server_profile_json =
-  `Assoc
-    [ "name", `String "operator_remote_v1"
-    ; "transport", `String "mcp_streamable_http"
-    ; "auth", `String "bearer_token"
-    ; "confirm_ttl_seconds", `Float remote_confirm_ttl_seconds
-    ; "curated_tool_count", `Int 4
-    ]
-;;
+(* remote_confirm_ttl_seconds + runtime-status alignment helpers
+   extracted to [Operator_control_snapshot_runtime_status] (godfile decomp). *)
+let remote_confirm_ttl_seconds = Operator_control_snapshot_runtime_status.remote_confirm_ttl_seconds
+let runtime_status_from_live_signal = Operator_control_snapshot_runtime_status.runtime_status_from_live_signal
+let health_state_allows_runtime_status_override = Operator_control_snapshot_runtime_status.health_state_allows_runtime_status_override
+let align_keeper_runtime_status = Operator_control_snapshot_runtime_status.align_keeper_runtime_status
+let remote_client_type_of_context = Operator_control_snapshot_runtime_status.remote_client_type_of_context
+let max_turns_override_source = Operator_control_snapshot_runtime_status.max_turns_override_source
+let operator_server_profile_json = Operator_control_snapshot_runtime_status.operator_server_profile_json
 
 let action_log_entry_to_yojson (entry : action_log_entry) =
   `Assoc

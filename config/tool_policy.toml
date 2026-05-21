@@ -144,12 +144,9 @@ tools = [
   "masc_keeper_msg_result",
   "masc_keeper_list",
   "masc_keeper_status",
-  "masc_goal_review",
 ]
 
 # Goal lifecycle: Goal Store + FSM proof surface.
-# `masc_goal_review` stays in dispatch as a legacy compatibility wrapper;
-# keepers that need feature-proof Goal work should use this group instead.
 [masc.goal]
 tools = [
   "masc_goal_list",

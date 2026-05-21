@@ -300,7 +300,6 @@ module Masc = struct
     | Deliver
     | Dispatch_plan
     | Goal_list
-    | Goal_review
     | Goal_transition
     | Goal_upsert
     | Goal_verify
@@ -407,7 +406,6 @@ module Masc = struct
     | Deliver -> "masc_deliver"
     | Dispatch_plan -> "masc_dispatch_plan"
     | Goal_list -> "masc_goal_list"
-    | Goal_review -> "masc_goal_review"
     | Goal_transition -> "masc_goal_transition"
     | Goal_upsert -> "masc_goal_upsert"
     | Goal_verify -> "masc_goal_verify"
@@ -515,7 +513,6 @@ module Masc = struct
     | "masc_deliver" -> Some Deliver
     | "masc_dispatch_plan" -> Some Dispatch_plan
     | "masc_goal_list" -> Some Goal_list
-    | "masc_goal_review" -> Some Goal_review
     | "masc_goal_transition" -> Some Goal_transition
     | "masc_goal_upsert" -> Some Goal_upsert
     | "masc_goal_verify" -> Some Goal_verify

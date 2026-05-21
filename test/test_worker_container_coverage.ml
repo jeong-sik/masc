@@ -114,6 +114,7 @@ let test_local_shell_failure_class_reaches_tool_called () =
       cleanup_path base_dir)
     (fun () ->
       let config = Coord.default_config base_dir in
+      (* See: initialization creates the temp telemetry store read below. *)
       ignore (Coord.init config ~agent_name:(Some "owner"));
       let tools =
         match

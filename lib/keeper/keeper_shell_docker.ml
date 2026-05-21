@@ -708,7 +708,7 @@ let run_docker_shell_command_with_status_internal
                             @ cred_mounts
                             @ cred_envs
                             @ identity_mounts
-                            @ [ image; "bash"; "-lc"; cmd ]
+                            @ [ image; "bash"; "-l"; "-s" ]
                           in
                           (try
                              let status, output =
@@ -718,13 +718,14 @@ let run_docker_shell_command_with_status_internal
                                    restore_gitdirs ())
                                @@ fun () ->
                                Docker_spawn_throttle.with_slot (fun () ->
-                                 Masc_exec.Exec_gate.run_argv_with_status
+                                 Masc_exec.Exec_gate.run_argv_with_stdin_and_status
                                    ~actor:`Keeper_shell
                                    ~raw_source:(String.concat " " argv)
                                    ~summary:"keeper docker command"
                                    ~env:(Unix.environment ())
                                    ~cwd:(Sys.getcwd ())
                                    ~timeout_sec
+                                   ~stdin_content:cmd
                                    argv)
                              in
                              if not (docker_command_semantic_success ~cmd ~status ~output)

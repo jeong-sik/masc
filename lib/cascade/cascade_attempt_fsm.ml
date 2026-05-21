@@ -974,6 +974,9 @@ let sdk_error_capacity_backpressure_retry_hint (err : Agent_sdk.Error.sdk_error)
   | Some (Cascade_error_classify.Oas_timeout_budget _)
   | Some (Cascade_error_classify.Max_tokens_ceiling_violation _)
   | Some (Cascade_error_classify.Ambiguous_post_commit _)
+  | Some (Cascade_error_classify.Internal_unhandled_exception _)
+  | Some (Cascade_error_classify.Internal_bridge_exception _)
+  | Some (Cascade_error_classify.Internal_contract_rejected _)
   | None -> None
 
 let sdk_error_soft_rate_limited (err : Agent_sdk.Error.sdk_error)

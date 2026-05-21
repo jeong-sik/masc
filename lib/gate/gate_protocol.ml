@@ -96,12 +96,7 @@ let inbound_of_json json =
       let raw = str "channel" in
       String.lowercase_ascii (String.trim raw)
     in
-    (* Prefer [destination_id]; fall back to legacy [keeper_name]. *)
-    let keeper_name =
-      let destination = str "destination_id" in
-      if destination <> "" then destination
-      else str "keeper_name"
-    in
+    let keeper_name = str "destination_id" in
     let metadata =
       match json |> member "metadata" with
       | `Assoc pairs ->
@@ -137,7 +132,6 @@ let outbound_to_json out =
           ("tokens_used", `Int s.tokens_used);
         ]
   in
-  (* Inbound still accepts [keeper_name] for backward compatibility. *)
   let base = [
     ("ok", `Bool true);
     ("destination_id", `String out.keeper_name);

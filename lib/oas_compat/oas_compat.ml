@@ -21,7 +21,7 @@ module Http_client = struct
             collapsed here because [should_cascade] only needs the
             terminality bit; consumers wanting the message extract it
             via the original [ProviderTerminal] match. *)
-    | Provider_capacity_exhausted
+    | Provider_capacity_backpressure
     | Provider_hard_quota
     | Provider_capability_mismatch
     | Provider_cli_policy_invalid
@@ -73,7 +73,7 @@ module Http_client = struct
   let classify_provider_failure_kind =
     let module H = Llm_provider.Http_client in
     function
-    | H.Capacity_exhausted _ -> Provider_capacity_exhausted
+    | H.Capacity_exhausted _ -> Provider_capacity_backpressure
     | H.Hard_quota _ -> Provider_hard_quota
     | H.Capability_mismatch _ -> Provider_capability_mismatch
     | H.Cli_policy_invalid _ -> Provider_cli_policy_invalid
@@ -194,7 +194,7 @@ module Http_client = struct
     | Cli_transport_required
     | Network_error
     | Provider_timeout
-    | Provider_capacity_exhausted
+    | Provider_capacity_backpressure
     | Provider_hard_quota
     | Provider_capability_mismatch
     | Provider_cli_policy_invalid

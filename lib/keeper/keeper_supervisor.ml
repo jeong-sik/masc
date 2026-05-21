@@ -538,210 +538,26 @@ let persona_profile_path_for_drift_check =
 let log_persona_drift_if_missing = Startup_helpers.log_persona_drift_if_missing
 
 let supervise_keepalive ~proactive_warmup_sec (ctx : _ context) (meta : keeper_meta) =
-  if Keeper_registry.is_registered ~base_path:ctx.config.base_path meta.name
-  then ()
-  else
-    match Keeper_registry.spawn_slots_decision ~base_path:ctx.config.base_path () with
-    | Error reason ->
-      Keeper_registry.record_spawn_slot_denied ~keeper_name:meta.name ~surface:"supervisor" reason;
-      publish_lifecycle
-        ~event:
-          (Keeper_lifecycle_events.Custom_event
-             { verb = Keeper_lifecycle_events.Admission_denied
-             ; phase = Some Keeper_state_machine.Offline
-             })
-        meta.name
-        (Keeper_registry.spawn_slot_denial_reason_to_detail reason)
-        ()
-    | Ok () -> (
-    log_persona_drift_if_missing ~base_path:ctx.config.base_path meta;
-    (* Register in Keeper_registry — single source of truth. *)
-    let reg =
-      Keeper_registry.register_offline ~base_path:ctx.config.base_path meta.name meta
-    in
-    (* Coord initialization *)
-    (try
-       if not (Coord_utils.is_initialized ctx.config)
-       then (
-         let (_init_msg : string) = Coord.init ctx.config ~agent_name:None in
-         ())
-     with
-     | Eio.Cancel.Cancelled _ as e -> raise e
-     | exn ->
-       Prometheus.inc_counter
-         Keeper_metrics.metric_keeper_room_init_failures
-         ~labels:[ "keeper", meta.name ]
-         ();
-       Log.Keeper.error "supervisor room init failed: %s" (Printexc.to_string exn));
-    let live_meta =
-      try
-        let synced = ensure_keeper_room_presence ctx.config meta in
-        (match write_meta ctx.config synced with
-         | Ok () -> ()
-         | Error msg ->
-           Prometheus.inc_counter
-             Keeper_metrics.metric_keeper_write_meta_failures
-             ~labels:[ "keeper", meta.name; "phase", "presence_sync" ]
-             ();
-           Log.Keeper.warn
-             "supervisor presence sync: write_meta failed for %s: %s"
-             meta.name
-             msg);
-        synced
-      with
-      | Eio.Cancel.Cancelled _ as e -> raise e
-      | exn ->
-        Prometheus.inc_counter
-          Keeper_metrics.metric_keeper_presence_sync_failures
-          ~labels:[ "keeper", meta.name ]
-          ();
-        Log.Keeper.error "supervisor presence sync failed: %s" (Printexc.to_string exn);
-        meta
-    in
-    Keeper_registry.update_meta ~base_path:ctx.config.base_path meta.name live_meta;
-    launch_supervised_fiber ~proactive_warmup_sec ctx live_meta reg;
-    publish_lifecycle
-      ~event:
-        (Keeper_lifecycle_events.Custom_event
-           { verb = Keeper_lifecycle_events.Started
-           ; phase = Some Keeper_state_machine.Running
-           })
-      meta.name
-      "supervised"
-      ())
+  Keeper_supervisor_supervise_keepalive.supervise_keepalive
+    ~publish_lifecycle
+    ~launch_supervised_fiber
+    ~proactive_warmup_sec
+    ctx
+    meta
 ;;
 
 let resume_keeper_after_reconcile_gate (ctx : _ context) (meta : keeper_meta) =
-  let latest_meta =
-    match read_meta ctx.config meta.name with
-    | Ok (Some latest) -> latest
-    | _ -> meta
-  in
-  let resumed_meta =
-    { latest_meta with
-      paused = false
-    ; updated_at = now_iso ()
-    ; runtime = { latest_meta.runtime with last_blocker = None }
-    }
-  in
-  (* #9733: same race shape as keeper_msg/overflow-pause/sync paths
-     already migrated by #10135 / #10145.  The supervisor reconcile
-     fiber clears [paused] and [runtime.last_blocker] (cycle-owned
-     fields); a heartbeat fiber bumping [joined_room_ids] /
-     [last_seen_seq_by_room] in parallel can still steal the CAS
-     write and silently leave the keeper paused while
-     [Keeper_registry.update_meta] applies the resume in-memory —
-     a registry/disk split that hides the failure. *)
-  (match
-     write_meta_with_merge
-       ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
-       ctx.config
-       resumed_meta
-   with
-   | Ok () -> ()
-   | Error err when is_version_conflict_error err ->
-     Prometheus.inc_counter
-       Keeper_metrics.metric_keeper_write_meta_failures
-       ~labels:[ "keeper", resumed_meta.name; "phase", "reconcile_resume_cas_race" ]
-       ();
-     Log.Keeper.warn
-       "%s: reconcile gate resume write_meta lost CAS race after retries: %s"
-       resumed_meta.name
-       err
-   | Error err ->
-     Prometheus.inc_counter
-       Keeper_metrics.metric_keeper_write_meta_failures
-       ~labels:[ "keeper", resumed_meta.name; "phase", "reconcile_resume" ]
-       ();
-     Log.Keeper.error
-       "%s: reconcile gate resume write_meta failed: %s"
-       resumed_meta.name
-       err);
-  Keeper_registry.update_meta
-    ~base_path:ctx.config.base_path
-    resumed_meta.name
-    resumed_meta;
-  Keeper_registry.set_failure_reason
-    ~base_path:ctx.config.base_path
-    resumed_meta.name
-    None;
-  Keeper_registry.reset_turn_failures ~base_path:ctx.config.base_path resumed_meta.name;
-  Keeper_turn_livelock.reset_keeper_livelock ~keeper:resumed_meta.name;
-  (* ETA-LIVELOCK: keep typed-escalation classifier aligned with the
-     resume path so the resumed keeper's first livelock block emits at
-     ERROR (not silently demoted to DEBUG from a previous lifetime). *)
-  Keeper_livelock_state.reset_for_keeper ~keeper:resumed_meta.name;
-  Keeper_registry.dispatch_event_unit
-    ~base_path:ctx.config.base_path
-    resumed_meta.name
-    Keeper_state_machine.Operator_resume;
-  match Keeper_registry.get ~base_path:ctx.config.base_path resumed_meta.name with
-  | Some entry when Option.is_none (Eio.Promise.peek entry.done_p) ->
-    (* tla-lint: allow-mutation: fiber signal — wake the keeper after operator resume *)
-    Atomic.set entry.fiber_wakeup true
-  | Some _ ->
-    Keeper_registry.unregister ~base_path:ctx.config.base_path resumed_meta.name;
-    supervise_keepalive ~proactive_warmup_sec:0 ctx resumed_meta
-  | None -> supervise_keepalive ~proactive_warmup_sec:0 ctx resumed_meta
+  Keeper_supervisor_resume_reconcile_gate.resume_keeper_after_reconcile_gate
+    ~supervise_keepalive
+    ctx
+    meta
 ;;
 
 let restore_reconcile_continue_gate (ctx : _ context) (meta : keeper_meta) =
-  let blocker_detail, blocker_klass =
-    match meta.runtime.last_blocker with
-    | Some info -> String.trim info.detail, Some info.klass
-    | None -> "", None
-  in
-  let committed_tools = committed_tools_of_ambiguous_blocker blocker_detail in
-  let failure_reason =
-    match blocker_klass with
-    | Some Ambiguous_post_commit_timeout ->
-      "ambiguous_partial_commit(post_commit_timeout)"
-    | Some Ambiguous_post_commit_failure ->
-      "ambiguous_partial_commit(post_commit_failure)"
-    | Some _ | None -> "ambiguous_partial_commit(post_commit_failure)"
-  in
-  let blocker = blocker_detail in
-  let input =
-    `Assoc
-      [ "kind", `String "reconcile_required"
-      ; "keeper_name", `String meta.name
-      ; "failure_reason", `String failure_reason
-      ; "error_detail", `String blocker
-      ; "committed_tools", `List (List.map (fun tool -> `String tool) committed_tools)
-      ]
-  in
-  let _approval_id =
-    Keeper_approval_queue.submit_pending
-      ~keeper_name:meta.name
-      ~tool_name:"keeper_continue_after_reconcile"
-      ~input
-      ~risk_level:Keeper_approval_queue.Critical
-      ~base_path:ctx.config.base_path
-      ~on_resolution:(fun decision ->
-        match decision with
-        | Agent_sdk.Hooks.Approve | Agent_sdk.Hooks.Edit _ ->
-          resume_keeper_after_reconcile_gate ctx meta;
-          Log.Keeper.info
-            "%s: restored reconcile continue gate approved; keeper resumed"
-            meta.name
-        | Agent_sdk.Hooks.Reject reason ->
-          Log.Keeper.warn
-            "%s: restored reconcile continue gate rejected; keeper remains paused (%s)"
-            meta.name
-            reason;
-          Prometheus.inc_counter
-            Keeper_metrics.metric_keeper_supervisor_cleanup_failures
-            ~labels:
-              [ "keeper", meta.name
-              ; ( "site"
-                , Keeper_supervisor_cleanup_failure_site.(to_label Reconcile_gate_rejected) )
-              ]
-            ())
-      ()
-  in
-  Log.Keeper.warn
-    "%s: restored reconcile continue gate from persisted paused meta"
-    meta.name
+  Keeper_supervisor_restore_reconcile_gate.restore_reconcile_continue_gate
+    ~supervise_keepalive
+    ctx
+    meta
 ;;
 
 (* ── Sweep and recover ───────────────────────────────────── *)
@@ -751,178 +567,24 @@ let restore_reconcile_continue_gate (ctx : _ context) (meta : keeper_meta) =
     and must NOT be re-launched by reconcile. Stopped entries with
     unresolved fibers (done_p = None) are also skipped — sweep will
     handle them once the fiber terminates. *)
+(* Phase 4 reconciliation extracted to
+   [Keeper_supervisor_reconcile_keepalive] (godfile decomp).
+   publish_lifecycle + supervise_keepalive injected to avoid cycle. *)
 let reconcile_keepalive_keepers (ctx : _ context) =
-  let base_path = ctx.config.base_path in
-  let names = Keeper_types.keepalive_keeper_names ctx.config in
-  Log.Keeper.debug
-    "reconcile_keepalive_keepers: started (candidates=%d)"
-    (List.length names);
-  let t0 = Time_compat.now () in
-  let reconcile_ym = Eio_guard.create_yield_meter () in
-  List.iter
-    (fun name ->
-       (match read_meta ctx.config name with
-        | Ok (Some meta) when not meta.paused ->
-          let dominated_by_sweep =
-            match Keeper_registry.get ~base_path meta.name with
-            | None -> false (* no entry = orphaned, reconcile OK *)
-            | Some e ->
-              (match e.phase with
-               | Keeper_state_machine.Running | Keeper_state_machine.Paused -> true
-               | Keeper_state_machine.Crashed
-               | Keeper_state_machine.Dead
-               | Keeper_state_machine.Zombie -> true
-               | Keeper_state_machine.Failing
-               | Keeper_state_machine.Overflowed
-               | Keeper_state_machine.Compacting
-               | Keeper_state_machine.HandingOff
-               | Keeper_state_machine.Draining
-               | Keeper_state_machine.Restarting -> true
-               | Keeper_state_machine.Offline -> false
-               | Keeper_state_machine.Stopped ->
-                 (* Stopped with unresolved fiber → sweep will clean up *)
-                 Eio.Promise.peek e.done_p = None)
-          in
-          if not dominated_by_sweep
-          then (
-            supervise_keepalive ~proactive_warmup_sec:0 ctx meta;
-            if Keeper_registry.is_running ~base_path meta.name
-            then (
-              publish_lifecycle
-                ~event:
-                  (Keeper_lifecycle_events.Custom_event
-                     { verb = Keeper_lifecycle_events.Reconciled
-                     ; phase = Some Keeper_state_machine.Running
-                     })
-                meta.name
-                "durable keeper"
-                ();
-              Log.Keeper.info "%s: reconciled durable keeper" meta.name))
-        | Ok (Some _meta) -> () (* paused, skip *)
-        | Ok None -> ()
-        | Error err ->
-          Prometheus.inc_counter
-            Keeper_metrics.metric_keeper_observation_query_failures
-            ~labels:
-              [ ("operation", Keeper_observation_query_operation.(to_label Reconcile_read_meta))
-              ]
-            ();
-          Log.Keeper.warn "reconcile: read_meta failed for %s: %s" name err);
-       Eio_guard.yield_step reconcile_ym)
-    names;
-  Log.Keeper.debug
-    "reconcile_keepalive_keepers: completed (elapsed_ms=%d)"
-    (int_of_float ((Time_compat.now () -. t0) *. 1000.0))
+  Keeper_supervisor_reconcile_keepalive.reconcile_keepalive_keepers
+    ~publish_lifecycle
+    ~supervise_keepalive
+    ctx
 ;;
 
+(* Dead-tombstone cleanup extracted to
+   [Keeper_supervisor_cleanup_tombstone] (godfile decomp). publish_lifecycle is
+   injected explicitly to avoid sibling -> parent cycle. *)
 let cleanup_dead_tombstone (ctx : _ context) (entry : Keeper_registry.registry_entry) =
-  match read_meta ctx.config entry.name with
-  | Ok (Some meta) ->
-    let persisted_paused =
-      if meta.paused
-      then true
-      else (
-        (* #9733: dead tombstone cleanup writes [paused = true] —
-             cycle-owned field — while heartbeat fibers can still
-             update the same record's heartbeat-owned fields.  Use
-             the same merged-CAS retry as the resume + overflow-pause
-             paths so a parallel heartbeat write doesn't make this
-             write fail and leave the keeper unpaused on disk while
-             the supervisor proceeds to unregister it. *)
-        match
-          write_meta_with_merge
-            ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
-            ctx.config
-            { meta with paused = true }
-        with
-        | Ok () -> true
-        | Error err when is_version_conflict_error err ->
-          Prometheus.inc_counter
-            Keeper_metrics.metric_keeper_write_meta_failures
-            ~labels:[ "keeper", entry.name; "phase", "dead_cleanup_cas_race" ]
-            ();
-          Log.Keeper.warn
-            "%s: dead tombstone cleanup paused write lost CAS race after retries: %s"
-            entry.name
-            err;
-          false
-        | Error err ->
-          Prometheus.inc_counter
-            Keeper_metrics.metric_keeper_write_meta_failures
-            ~labels:[ "keeper", entry.name; "phase", "dead_cleanup" ]
-            ();
-          Log.Keeper.warn
-            "%s: dead tombstone cleanup paused write failed: %s"
-            entry.name
-            err;
-          false)
-    in
-    Keeper_registry.unregister ~base_path:ctx.config.base_path entry.name;
-    Keeper_tool_emission_hook.drop_keeper_accumulator entry.name;
-    if persisted_paused
-    then (
-      publish_lifecycle
-        ~event:
-          (Keeper_lifecycle_events.Custom_event
-             { verb = Keeper_lifecycle_events.Dead_cleaned; phase = None })
-        entry.name
-        "paused meta persisted"
-        ();
-      Log.Keeper.info "%s: dead tombstone cleaned up" entry.name)
-    else (
-      publish_lifecycle
-        ~event:
-          (Keeper_lifecycle_events.Custom_event
-             { verb = Keeper_lifecycle_events.Dead_cleaned; phase = None })
-        entry.name
-        "meta write failed, unregistered anyway"
-        ();
-      Log.Keeper.warn
-        "%s: dead tombstone unregistered despite meta write failure"
-        entry.name;
-      Prometheus.inc_counter
-        Keeper_metrics.metric_keeper_supervisor_cleanup_failures
-        ~labels:
-          [ "keeper", entry.name
-          ; ("site", Keeper_supervisor_cleanup_failure_site.(to_label Dead_tombstone_meta_write))
-          ]
-        ())
-  | Ok None ->
-    Keeper_registry.unregister ~base_path:ctx.config.base_path entry.name;
-    Keeper_tool_emission_hook.drop_keeper_accumulator entry.name;
-    publish_lifecycle
-      ~event:
-        (Keeper_lifecycle_events.Custom_event
-           { verb = Keeper_lifecycle_events.Dead_cleaned; phase = None })
-      entry.name
-      "meta missing"
-      ();
-    Log.Keeper.warn "%s: dead tombstone unregistered (meta missing)" entry.name;
-    Prometheus.inc_counter
-      Keeper_metrics.metric_keeper_supervisor_cleanup_failures
-      ~labels:
-        [ "keeper", entry.name
-        ; ("site", Keeper_supervisor_cleanup_failure_site.(to_label Dead_tombstone_meta_missing))
-        ]
-      ()
-  | Error err ->
-    Keeper_registry.unregister ~base_path:ctx.config.base_path entry.name;
-    Keeper_tool_emission_hook.drop_keeper_accumulator entry.name;
-    publish_lifecycle
-      ~event:
-        (Keeper_lifecycle_events.Custom_event
-           { verb = Keeper_lifecycle_events.Dead_cleaned; phase = None })
-      entry.name
-      (Printf.sprintf "meta read error: %s" err)
-      ();
-    Log.Keeper.warn "%s: dead tombstone unregistered (meta error: %s)" entry.name err;
-    Prometheus.inc_counter
-      Keeper_metrics.metric_keeper_supervisor_cleanup_failures
-      ~labels:
-        [ "keeper", entry.name
-        ; ("site", Keeper_supervisor_cleanup_failure_site.(to_label Dead_tombstone_meta_error))
-        ]
-      ()
+  Keeper_supervisor_cleanup_tombstone.cleanup_dead_tombstone
+    ~publish_lifecycle
+    ctx
+    entry
 ;;
 
 (** Cohort key from structured failure_reason ADT.
@@ -1513,12 +1175,10 @@ let sweep_and_recover (ctx : _ context) =
       | _ -> ());
     Eio_guard.yield_step sweep_names_ym);
   (* Phase 3.5: self-healing circuit breaker — auto-resume keepers that were
-     auto-paused (have [auto_resume_after_sec = Some sec]) and whose pause
-     timer has elapsed.  Clearing [paused = false] here lets Phase 4
-     (reconcile_keepalive_keepers) pick them up and restart them on the same
-     sweep.  Reconcile-gated pauses (ambiguous commit timeouts) and
-     operator-initiated pauses ([auto_resume_after_sec = None]) are
-     intentionally skipped so they continue to require human action. *)
+     auto-paused and whose explicit pause timer has elapsed.  Clearing
+     [paused = false] here lets Phase 4 (reconcile_keepalive_keepers) pick them
+     up and restart them on the same sweep.  Reconcile-gated pauses and
+     intentional operator pauses are skipped. *)
   Keeper_types.keeper_names ctx.config
   |> List.iter (fun name ->
     if Keeper_registry.is_running ~base_path name
@@ -1555,7 +1215,11 @@ let sweep_and_recover (ctx : _ context) =
              ~labels:[ "keeper", name; "cascade", cascade_name ]
              ()
          | Keeper_health_probe.Unknown | Keeper_health_probe.Healthy ->
-           let resume_after_sec = Option.value ~default:0.0 meta.auto_resume_after_sec in
+           let resume_after_sec =
+             Option.value
+               ~default:0.0
+               meta.auto_resume_after_sec
+           in
            let paused_ts =
              Coord_resilience.Time.parse_iso8601_opt meta.updated_at
              |> Option.value ~default:0.0
@@ -1568,6 +1232,7 @@ let sweep_and_recover (ctx : _ context) =
              let resumed_meta =
                { meta with
                  paused = false
+               ; auto_resume_after_sec = Some resume_after_sec
                ; updated_at = now_iso ()
                ; runtime = { meta.runtime with last_blocker = None }
                }

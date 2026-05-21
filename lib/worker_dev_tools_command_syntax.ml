@@ -1,63 +1,45 @@
-(** Legacy shell syntax helpers for Worker_dev_tools.
+(** Shell word helpers for worker path and transparent-wrapper policy.
 
-    The authoritative Coding/Full gate is typed through Shell_command_gate,
-    but worker_dev_tools still keeps a small legacy lexer for strict mode,
-    fallback parsing, and path-token extraction. *)
+    Command-shape validation is owned by
+    [Masc_exec_command_gate.Shell_command_gate]. This module keeps only
+    path-token normalization helpers plus explicit argv/word helpers for
+    transparent wrappers such as [env] and [opam exec]. *)
 
-(** Relaxed metacharacter set for Coding/Full preset keepers.
-    Allows [|] (pipes) and fd-to-fd redirects like [2>&1].
-    Still blocks [;] [`] [$] and control chars.
-    [&] is checked at pattern level: [>&] (redirect) is allowed,
-    [&&] (chaining) and standalone [&] (background) are blocked. *)
+let rec shell_ir_literal_text = function
+  | Masc_exec.Shell_ir.Lit text -> Some text
+  | Masc_exec.Shell_ir.Concat parts ->
+    let rec loop acc = function
+      | [] -> Some (String.concat "" (List.rev acc))
+      | part :: rest ->
+        (match shell_ir_literal_text part with
+         | Some text -> loop (text :: acc) rest
+         | None -> None)
+    in
+    loop [] parts
+  | Masc_exec.Shell_ir.Var _ -> None
+;;
 
-(** Returns [true] if [cmd] contains a dangerous [&] usage.
-    [>&] in redirect context (e.g. [2>&1]) is safe; [&&] and standalone [&]
-    are command chaining/background operators. *)
-let has_dangerous_ampersand cmd =
-  let len = String.length cmd in
-  let rec check i =
-    if i >= len
-    then false
-    else if cmd.[i] <> '&'
-    then check (i + 1)
-    else if i > 0 && cmd.[i - 1] = '>'
-    then
-      (* Part of >& redirect syntax — safe *)
-      check (i + 1)
-    else true
+let argv_words_of_simple (simple : Masc_exec.Shell_ir.simple) =
+  let rec loop acc = function
+    | [] -> Some (List.rev acc)
+    | arg :: rest ->
+      (match shell_ir_literal_text arg with
+       | Some text -> loop (text :: acc) rest
+       | None -> None)
   in
-  check 0
+  Option.map
+    (fun args -> Masc_exec.Bin.to_string simple.bin :: args)
+    (loop [] simple.Masc_exec.Shell_ir.args)
 ;;
 
-let has_coding_shell_injection_metachar cmd =
-  String.exists
-    (function
-      | ';' | '`' | '$' | '\n' | '\r' -> true
-      | _ -> false)
-    cmd
-  || has_dangerous_ampersand cmd
-;;
-
-let contains_substring s needle = String_util.contains_substring s needle
-
-let has_process_substitution cmd =
-  contains_substring cmd "<(" || contains_substring cmd ">("
-;;
-
-(* RFC-0131 Phase 2 (Shell IR Promotion Goal, 2026-05-18) —
-   [split_pipeline_segments] and its [pipeline_quote_state] helper were
-   the legacy string-based pipeline splitter for the Coding/Full gate.
-   [validate_command_coding_with_allowlist] now consumes the typed
-   pipeline produced by [Shell_command_gate.parse], so this string
-   splitter has no remaining caller in lib/, test/, or bin/.  Per
-   Phase 2 dedup it is removed outright; reintroducing a non-AST
-   pipeline splitter is explicitly out-of-scope and must be replaced
-   by extending the facade. *)
-
-let split_shell_tokens cmd =
-  String.split_on_char ' ' cmd
-  |> List.map String.trim
-  |> List.filter (fun token -> token <> "")
+let argv_words_of_split_string text =
+  match Masc_exec_bash_parser.Bash.parse_string text with
+  | Masc_exec.Parsed.Parsed (Masc_exec.Shell_ir.Simple simple) ->
+    argv_words_of_simple simple
+  | Masc_exec.Parsed.Parsed (Masc_exec.Shell_ir.Pipeline _)
+  | Masc_exec.Parsed.Parse_error _
+  | Masc_exec.Parsed.Parse_aborted _
+  | Masc_exec.Parsed.Too_complex _ -> None
 ;;
 
 let strip_wrapping_quotes token =
@@ -84,67 +66,69 @@ let is_env_assignment token =
   | None -> false
 ;;
 
-let rec skip_env_assignments = function
+let rec skip_env_assignments_tokens = function
   | [] -> None
   | token :: rest ->
     let token = strip_wrapping_quotes token in
-    if is_env_assignment token then skip_env_assignments rest
-    else Some (basename_token token)
+    if is_env_assignment token then skip_env_assignments_tokens rest else Some (token :: rest)
 ;;
 
-let rec command_after_env_prefix = function
+let rec command_after_env_prefix_tokens = function
   | [] -> None
   | token :: rest ->
     let token = strip_wrapping_quotes token in
     if is_env_assignment token || token = "-" || token = "-i"
        || token = "--ignore-environment" || token = "-0" || token = "--null"
-    then command_after_env_prefix rest
-    else if token = "--" then skip_env_assignments rest
+    then command_after_env_prefix_tokens rest
+    else if token = "--"
+    then skip_env_assignments_tokens rest
     else if token = "-S" || token = "--split-string"
     then (
       match rest with
       | arg :: rest -> (
-        match command_after_env_prefix (split_shell_tokens (strip_wrapping_quotes arg)) with
-        | Some _ as command -> command
-        | None -> command_after_env_prefix rest)
+        match argv_words_of_split_string (strip_wrapping_quotes arg) with
+        | Some split_tokens -> (
+          match command_after_env_prefix_tokens split_tokens with
+          | Some _ as command -> command
+          | None -> command_after_env_prefix_tokens rest)
+        | None -> command_after_env_prefix_tokens rest)
       | [] -> None)
     else if String.starts_with ~prefix:"--split-string=" token
     then
       let prefix = "--split-string=" in
       let arg =
-        String.sub token (String.length prefix)
-          (String.length token - String.length prefix)
+        String.sub token (String.length prefix) (String.length token - String.length prefix)
       in
-      command_after_env_prefix (split_shell_tokens (strip_wrapping_quotes arg))
-    else if token = "-u" || token = "--unset" || token = "-C"
-            || token = "--chdir"
+      Option.bind
+        (argv_words_of_split_string (strip_wrapping_quotes arg))
+        command_after_env_prefix_tokens
+    else if token = "-u" || token = "--unset" || token = "-C" || token = "--chdir"
     then (
       match rest with
-      | _ :: rest -> command_after_env_prefix rest
+      | _ :: rest -> command_after_env_prefix_tokens rest
       | [] -> None)
     else if String.starts_with ~prefix:"-u" token
             || String.starts_with ~prefix:"--unset=" token
             || String.starts_with ~prefix:"--chdir=" token
-    then command_after_env_prefix rest
-    else Some (basename_token token)
+    then command_after_env_prefix_tokens rest
+    else Some (token :: rest)
 ;;
 
-let opam_exec_command_name rest =
+let opam_exec_command_tokens rest =
   match rest with
   | sub :: rest when String.equal (basename_token sub) "exec" ->
     let rec find_sentinel = function
       | [] -> None
-      | "--" :: token :: _ -> Some (basename_token token)
-      | "--" :: [] -> None
+      | "--" :: rest -> skip_env_assignments_tokens rest
       | _ :: rest -> find_sentinel rest
     in
     let rec find_command_without_sentinel = function
       | [] -> None
       | token :: rest ->
         let token = strip_wrapping_quotes token in
-        if is_env_assignment token then find_command_without_sentinel rest
-        else if token = "--switch" || token = "--color" || token = "--root"
-                || token = "--cli"
+        if is_env_assignment token
+        then find_command_without_sentinel rest
+        else if token = "--switch" || token = "--color" || token = "--root" || token = "--cli"
         then (
           match rest with
           | _ :: rest -> find_command_without_sentinel rest
@@ -155,113 +139,33 @@ let opam_exec_command_name rest =
                 || String.starts_with ~prefix:"--cli=" token
                 || String.starts_with ~prefix:"-" token
         then find_command_without_sentinel rest
-        else Some (basename_token token)
+        else Some (token :: rest)
     in
     (match find_sentinel rest with
      | Some _ as command -> command
      | None -> find_command_without_sentinel rest)
-  | [] -> Some "opam"
-  | _non_exec_subcommand :: _rest -> Some "opam"
+  | [] -> Some [ "opam" ]
+  | _non_exec_subcommand :: _rest -> Some [ "opam" ]
 ;;
 
-let segment_command_name segment =
-  match split_shell_tokens segment with
+let rec effective_command_name_from_tokens = function
   | [] -> None
   | token :: rest -> (
     match basename_token token with
-    | "env" -> command_after_env_prefix rest
-    | "opam" -> opam_exec_command_name rest
+    | "env" ->
+      Option.bind (command_after_env_prefix_tokens rest) effective_command_name_from_tokens
+    | "opam" ->
+      (match opam_exec_command_tokens rest with
+       | Some [ "opam" ] -> Some "opam"
+       | Some tokens -> effective_command_name_from_tokens tokens
+       | None -> None)
     | name -> Some name)
 ;;
 
-let invokes_direct_dune segment =
-  match segment_command_name segment with
-  | Some "dune" -> true
-  | _ -> false
+let command_after_env_prefix tokens =
+  Option.bind (command_after_env_prefix_tokens tokens) effective_command_name_from_tokens
 ;;
 
-let is_digits_only s start stop =
-  let rec loop i =
-    if i >= stop
-    then true
-    else if Char.code s.[i] >= Char.code '0' && Char.code s.[i] <= Char.code '9'
-    then loop (i + 1)
-    else false
-  in
-  loop start
-;;
-
-let is_safe_fd_redirect_token token =
-  let lower = String.lowercase_ascii token in
-  if
-    List.mem
-      lower
-      [ ">/dev/null"
-      ; "1>/dev/null"
-      ; "2>/dev/null"
-      ; ">>/dev/null"
-      ; "1>>/dev/null"
-      ; "2>>/dev/null"
-      ; "</dev/null"
-      ; "0</dev/null"
-      ]
-  then true
-  else
-  let len = String.length token in
-  let check op_char =
-    let rec find i =
-      if i + 1 >= len
-      then None
-      else if token.[i] = op_char && token.[i + 1] = '&'
-      then Some i
-      else find (i + 1)
-    in
-    match find 0 with
-    | None -> false
-    | Some op_idx ->
-      let rhs_start = op_idx + 2 in
-      (op_idx = 0 || is_digits_only token 0 op_idx)
-      && rhs_start < len
-      && is_digits_only token rhs_start len
-  in
-  check '>' || check '<'
-;;
-
-let redirect_op_allows_dev_null_sink token =
-  match String.lowercase_ascii token with
-  | ">" | "1>" | "2>" | ">>" | "1>>" | "2>>" | "<" | "0<" -> true
-  | _ -> false
-;;
-
-let has_unsafe_redirection cmd =
-  let rec scan = function
-    | [] -> false
-    | token :: target :: rest
-      when redirect_op_allows_dev_null_sink token
-           && String.equal (strip_wrapping_quotes target) "/dev/null" ->
-      scan rest
-    | token :: rest ->
-      ((contains_substring token ">" || contains_substring token "<")
-       && not (is_safe_fd_redirect_token token))
-      || scan rest
-  in
-  scan (split_shell_tokens cmd)
-;;
-
-let extract_command_name cmd =
-  let trimmed = String.trim cmd in
-  if trimmed = ""
-  then None
-  else (
-    let len = String.length trimmed in
-    let rec find_sep i =
-      if i >= len
-      then len
-      else (
-        match trimmed.[i] with
-        | ' ' | '\t' -> i
-        | _ -> find_sep (i + 1))
-    in
-    let token = String.sub trimmed 0 (find_sep 0) in
-    Some (Filename.basename token))
+let opam_exec_command_name tokens =
+  Option.bind (opam_exec_command_tokens tokens) effective_command_name_from_tokens
 ;;

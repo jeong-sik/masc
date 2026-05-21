@@ -6,8 +6,6 @@
 module Keeper : sig
   type t =
     | Bash
-    | Bash_kill
-    | Bash_output
     | Board_cleanup
     | Board_comment
     | Board_comment_vote
@@ -82,13 +80,6 @@ module Masc : sig
     | Agent_update
     | Agent_card
     | Agents
-    | Autoresearch_cycle
-    | Autoresearch_inject
-    | Autoresearch_record_finding
-    | Autoresearch_search_findings
-    | Autoresearch_start
-    | Autoresearch_status
-    | Autoresearch_stop
     | Batch_add_tasks
     | Board_cleanup
     | Board_comment
@@ -127,7 +118,6 @@ module Masc : sig
     | Deliver
     | Dispatch_plan
     | Goal_list
-    | Goal_review
     | Goal_transition
     | Goal_upsert
     | Goal_verify

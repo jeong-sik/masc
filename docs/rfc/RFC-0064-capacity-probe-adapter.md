@@ -1,8 +1,17 @@
+---
+title: Capacity Probe Adapter
+rfc: 0064
+status: Active
+created: 2026-05-10
+implementation_prs: []
+collision_note: "RFC-0064 number is used by two files (this + RFC-0064-two-surface-tool-alias.md). One must be renumbered — separate PR needed."
+---
+
 # RFC-0064: Capacity Probe Adapter
 
 | Field    | Value                                              |
 |----------|----------------------------------------------------|
-| Status   | Draft                                              |
+| Status   | Active (frontmatter SSOT; ⚠️ number collision)     |
 | Scope    | `lib/cascade/cascade_capacity_probe.ml` (new), `lib/keeper/` |
 | Conflict | None expected                                      |
 

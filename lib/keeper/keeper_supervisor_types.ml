@@ -119,6 +119,16 @@ let paused_meta_requires_reconcile_recovery (meta : keeper_meta) =
   | None -> false
 ;;
 
+let next_auto_resume_after_sec ~initial_sec ~max_sec previous =
+  if initial_sec <= 0.0
+  then None
+  else
+    Some
+      (match previous with
+       | None -> Float.min max_sec initial_sec
+       | Some prev -> Float.min max_sec (prev *. 2.0))
+;;
+
 let paused_meta_auto_resume_due ~now (meta : keeper_meta) =
   if (not meta.paused) || paused_meta_requires_reconcile_recovery meta
   then false
@@ -145,16 +155,6 @@ let active_supervision_keeper_count entries =
     (fun (e : Keeper_registry.registry_entry) ->
        e.phase = Keeper_state_machine.Running || e.phase = Keeper_state_machine.Crashed)
     entries
-;;
-
-let next_auto_resume_after_sec ~initial_sec ~max_sec previous =
-  if initial_sec <= 0.0
-  then None
-  else
-    Some
-      (match previous with
-       | None -> Float.min max_sec initial_sec
-       | Some prev -> Float.min max_sec (prev *. 2.0))
 ;;
 
 let liveness_recovery_backoff attempt =

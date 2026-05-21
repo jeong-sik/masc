@@ -57,7 +57,6 @@ let classify_path_check_prefix (error_msg : string) : error_class option =
   match Path_check_error.parse_prefix error_msg with
   | Some (Path_check_error.Cwd_not_directory _) -> Some Cwd_not_directory
   | Some (Path_check_error.Path_outside_whitelist _) -> Some Path_not_allowed
-  | Some (Path_check_error.Path_syntax_blocked _) -> Some Other
   | None -> None
 ;;
 

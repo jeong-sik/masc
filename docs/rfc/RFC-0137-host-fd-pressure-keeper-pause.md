@@ -1,14 +1,62 @@
 ---
 rfc: "0137"
 title: "Host FD pressure → Keeper pause (safety-net for Docker VM FD accumulation)"
-status: Draft
+status: Active
 created: 2026-05-19
-updated: 2026-05-20
+updated: 2026-05-21
 author: jeong-sik
 supersedes: []
 superseded_by: null
-related: ["0097", "0101"]
+related: ["0097", "0101", "0122"]
 implementation_prs: [16665]
+---
+
+## Progress audit (2026-05-21)
+
+Status promoted Draft → Active. PR-1 landed (squash-merged with the
+RFC body as #16665); PR-2 (poller) and PR-3 (Prometheus metric)
+remain.
+
+| §4 Phase | PR | Scope | Merged |
+|----------|-----|------|--------|
+| RFC body + PR-1 | #16665 | `keeper_fd_pressure.{ml,mli}` adds `engage_external` out-of-process trip path + tests (~60 LoC). PR squashed the RFC body and the PR-1 implementation together. | 2026-05-19 |
+
+### Squash-merge observation
+
+The audit script flagged this RFC because the single commit subject
+(`[RFC-0137] Host FD pressure …`) is neither `docs(rfc):` nor a
+plain `feat:`/`refactor:` prefix. The PR was squash-merged from a
+multi-commit branch where the first commit was the body and the
+second was `feat(keeper_fd_pressure): add engage_external for host
+FD pressure (RFC-0137 PR-1)`. The squashed surface obscures that
+both phases landed in the same merge.
+
+The `--exclude-body` filter (#17202) does *not* exclude this
+subject because the prefix is `[RFC-0137]` rather than `docs(rfc):`.
+That is by design — `[RFC-NNNN]` prefixes carry implementation work
+in this repo. Treat the count as a true positive of "PR-1 already
+landed, status not yet flipped".
+
+### Pending
+
+| §4 Phase | Scope | LoC | depends |
+|----------|------|-----|---------|
+| **PR-2** | `host_fd_pressure_poller.{ml,mli}` new module + wiring in `server_bootstrap_loops.ml` + tests | ~120 | PR-1 |
+| **PR-3 (optional)** | Prometheus metric `host_fd_pressure_*` registration | ~30 | PR-2 |
+
+PR-2 is the load-bearing follow-up (the actual host-FD poller is what
+detects Docker Desktop VM XPC pressure outside masc-mcp's nofile
+budget). PR-3 is the observability ratchet.
+
+### Related RFC
+
+- **RFC-0122** (Keeper disk pressure, Draft): the structural sibling
+  — both are *process-local fleet failure mode beyond FD* RFCs. The
+  shared `Resource_pressure.S` interface module proposed in RFC-0122
+  §3 P2 would unify the `engage_external` shape used here.
+- **RFC-0097** / **RFC-0101**: already in related — the in-process
+  FD discipline that RFC-0137 backstops.
+
 ---
 
 # RFC-0137 — Host FD pressure → Keeper pause

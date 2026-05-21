@@ -15,6 +15,8 @@ module Keeper_registry = Masc_mcp.Keeper_registry
 module Keeper_sandbox = Masc_mcp.Keeper_sandbox
 module Keeper_sandbox_factory = Masc_mcp.Keeper_sandbox_factory
 module Keeper_sandbox_runtime = Masc_mcp.Keeper_sandbox_runtime
+module Keeper_turn_sandbox_runtime = Masc_mcp.Keeper_turn_sandbox_runtime
+module Keeper_shell_command_semantics = Masc_mcp.Keeper_shell_command_semantics
 module Keeper_shell_docker = Masc_mcp.Keeper_shell_docker
 module Keeper_types = Masc_mcp.Keeper_types
 module Keeper_alerting_path = Masc_mcp.Keeper_alerting_path
@@ -284,6 +286,61 @@ let ensure_github_identity_bundle ~config github_identity =
   in
   write_fake_github_hosts gh_dir
 
+let gh_config_dir_for_identity ~config github_identity =
+  let masc_dir = Filename.concat config.Coord.base_path Common.masc_dirname in
+  Filename.concat
+    (Filename.concat
+       (Filename.concat masc_dir "github-identities")
+       github_identity)
+    "gh"
+
+let seed_github_credential_mapping
+    ?(github_identity = Masc_mcp.Keeper_gh_env.root_github_identity)
+    ~config
+    ~keeper_name
+    () =
+  let gh_config_dir = gh_config_dir_for_identity ~config github_identity in
+  write_fake_github_hosts gh_config_dir;
+  let credential_id = "cred-" ^ keeper_name ^ "-" ^ github_identity in
+  let credential : Repo_manager_types.credential =
+    {
+      id = credential_id;
+      cred_type = Repo_manager_types.Github;
+      username = github_identity;
+      gh_config_dir = Some gh_config_dir;
+      ssh_key_path = None;
+      gpg_key_id = None;
+      state = Repo_manager_types.Unmaterialized;
+      token_sha256_prefix = None;
+    }
+  in
+  (match Credential_store.add ~base_path:config.Coord.base_path credential with
+   | Ok _ -> ()
+   | Error msg when contains_substring msg "Credential already exists" -> ()
+   | Error msg -> Alcotest.failf "seed credential mapping: %s" msg);
+  let mapping : Repo_manager_types.keeper_repo_mapping =
+    {
+      keeper_id = keeper_name;
+      repository_ids = [];
+      github_credential_id = Some credential_id;
+    }
+  in
+  match
+    Keeper_repo_mapping.save_mapping ~base_path:config.Coord.base_path mapping
+  with
+  | Ok () -> ()
+  | Error msg -> Alcotest.failf "seed keeper repo mapping: %s" msg
+
+let seed_default_mapping_if_missing ~config ~keeper_name =
+  match
+    Keeper_repo_mapping.credentials_for_keeper
+      ~base_path:config.Coord.base_path
+      ~keeper_id:keeper_name
+  with
+  | Ok [] -> seed_github_credential_mapping ~config ~keeper_name ()
+  | Ok _ -> ()
+  | Error msg -> Alcotest.failf "read keeper credential mapping: %s" msg
+
 let parse_field raw field =
   Yojson.Safe.from_string raw |> Json.member field
 
@@ -512,6 +569,35 @@ let test_git_clone_routes_through_docker () =
     (response_mentions raw "path"
        (Filename.concat playground "repos/masc-mcp"))
 
+let test_turn_sandbox_file_write_uses_host_bind_mount () =
+  setup ~sandbox:Keeper_types.Docker
+  @@ fun ~config ~meta ~playground ->
+  let runtime = Keeper_turn_sandbox_runtime.create ~config ~meta ~turn_id:1 () in
+  let target = Filename.concat playground "nested/result.txt" in
+  (match
+     Keeper_turn_sandbox_runtime.overwrite_file
+       runtime
+       ~host_path:target
+       ~content:"alpha\n"
+       ~timeout_sec:1.0
+       ()
+   with
+   | Error msg -> Alcotest.fail msg
+   | Ok () -> ());
+  (match
+     Keeper_turn_sandbox_runtime.append_file
+       runtime
+       ~host_path:target
+       ~content:"beta\n"
+       ~timeout_sec:1.0
+       ()
+   with
+   | Error msg -> Alcotest.fail msg
+   | Ok () -> ());
+  Alcotest.(check string) "content written via bind-mounted host path"
+    "alpha\nbeta\n"
+    (Fs_compat.load_file target)
+
 let test_bash_routes_through_docker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "" @@ fun () ->
   setup ~sandbox:Keeper_types.Docker
@@ -614,7 +700,7 @@ let test_bash_git_creds_uses_oneshot_with_turn_runtime () =
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup ~sandbox:Keeper_types.Docker
   @@ fun ~config ~meta ~playground ->
-  ensure_github_identity_bundle ~config Masc_mcp.Keeper_gh_env.root_github_identity;
+  seed_github_credential_mapping ~config ~keeper_name:meta.name ();
   let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
   ensure_dir repo;
   run_ok ~cwd:repo "git init -q";
@@ -761,8 +847,7 @@ let test_bash_git_c_bare_worktrees_from_root_uses_single_repo () =
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup ~sandbox:Keeper_types.Docker
   @@ fun ~config ~meta ~playground ->
-  ensure_github_identity_bundle ~config
-    Masc_mcp.Keeper_gh_env.root_github_identity;
+  seed_github_credential_mapping ~config ~keeper_name:meta.name ();
   let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
   let worktree = Filename.concat repo ".worktrees/task-229" in
   ensure_dir worktree;
@@ -826,7 +911,7 @@ let test_bash_git_push_routes_through_git_creds_docker () =
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup_with_preset ~sandbox:Keeper_types.Docker ~preset:Keeper_types.Coding
   @@ fun ~config ~meta ~playground ->
-  ensure_github_identity_bundle ~config Masc_mcp.Keeper_gh_env.root_github_identity;
+  seed_github_credential_mapping ~config ~keeper_name:meta.name ();
   let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
   ensure_dir repo;
   run_ok ~cwd:repo "git init -q";
@@ -1155,8 +1240,9 @@ let test_docker_shell_mounts_masc_config_runtime_paths () =
     Alcotest.(check bool) "auth state not mounted" false
       (contains_substring line "/.masc/auth/")
 
-let run_git_creds_docker_shell ~config ~meta ~playground ~log_path =
-  ensure_github_identity_bundle ~config Masc_mcp.Keeper_gh_env.root_github_identity;
+let run_git_creds_docker_shell ~config ~(meta : Keeper_types.keeper_meta) ~playground
+    ~log_path =
+  seed_default_mapping_if_missing ~config ~keeper_name:meta.name;
   let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
   ensure_dir repo;
   if not (Sys.file_exists (Filename.concat repo ".git")) then
@@ -1197,7 +1283,7 @@ let test_sandbox_root_git_cwd_zero_repo_blocks_before_exec () =
   setup ~sandbox:Keeper_types.Docker
   @@ fun ~config ~meta ~playground ->
   let cwd, error =
-    Keeper_shell_docker.resolve_sandbox_root_git_cwd ~config ~meta
+    Keeper_shell_command_semantics.resolve_sandbox_root_git_cwd ~config ~meta
       ~cwd:playground ~cmd:"git status"
   in
   Alcotest.(check string) "cwd remains sandbox root" playground cwd;
@@ -1218,7 +1304,7 @@ let test_sandbox_root_git_cwd_single_repo_auto_chdir () =
   ensure_dir repo;
   run_ok ~cwd:repo "git init -q";
   let cwd, error =
-    Keeper_shell_docker.resolve_sandbox_root_git_cwd ~config ~meta
+    Keeper_shell_command_semantics.resolve_sandbox_root_git_cwd ~config ~meta
       ~cwd:playground ~cmd:"git status"
   in
   let repo =
@@ -1239,7 +1325,7 @@ let test_sandbox_root_git_cwd_multi_repo_blocks_before_exec () =
   run_ok ~cwd:repo_a "git init -q";
   run_ok ~cwd:repo_b "git init -q";
   let cwd, error =
-    Keeper_shell_docker.resolve_sandbox_root_git_cwd ~config ~meta
+    Keeper_shell_command_semantics.resolve_sandbox_root_git_cwd ~config ~meta
       ~cwd:playground ~cmd:"gh pr list"
   in
   Alcotest.(check string) "cwd remains sandbox root" playground cwd;
@@ -1251,13 +1337,12 @@ let test_sandbox_root_git_cwd_multi_repo_blocks_before_exec () =
     Alcotest.(check bool) "mentions public Bash retry shape" true
       (contains_substring msg
          "Bash { \"command\": \"gh pr list\", \"cwd\": \"repos/alpha\" }");
-    Alcotest.(check bool) "keeps legacy keeper_bash retry shape" true
-      (contains_substring msg
-         "keeper_bash { \"cmd\": \"gh pr list\", \"cwd\": \"repos/alpha\" }");
+    Alcotest.(check bool) "legacy keeper_bash retry shape removed" false
+      (contains_substring msg "keeper_bash");
     Alcotest.(check bool) "lists beta too" true
       (contains_substring msg "alpha, beta")
 
-let test_sandbox_root_git_cwd_multi_repo_cd_hint_uses_command_repo () =
+let test_sandbox_root_git_cwd_cd_chain_is_not_interpreted () =
   setup ~sandbox:Keeper_types.Docker
   @@ fun ~config ~meta ~playground ->
   let repos = Filename.concat playground "repos" in
@@ -1269,21 +1354,58 @@ let test_sandbox_root_git_cwd_multi_repo_cd_hint_uses_command_repo () =
   run_ok ~cwd:repo_a "git init -q";
   run_ok ~cwd:repo_b "git init -q";
   let cwd, error =
-    Keeper_shell_docker.resolve_sandbox_root_git_cwd ~config ~meta
+    Keeper_shell_command_semantics.resolve_sandbox_root_git_cwd ~config ~meta
       ~cwd:playground
       ~cmd:"cd repos/masc-mcp/.worktrees/keeper-nick0cave-agent-task-236 && git status"
   in
   Alcotest.(check string) "cwd remains sandbox root" playground cwd;
-  match error with
-  | None -> Alcotest.fail "expected multi repo cwd guidance"
-  | Some msg ->
-    Alcotest.(check bool) "suggests stripped command" true
-      (contains_substring msg "\"command\": \"git status\"");
-    Alcotest.(check bool) "suggests command-selected worktree cwd" true
-      (contains_substring msg
-         "\"cwd\": \"repos/masc-mcp/.worktrees/keeper-nick0cave-agent-task-236\"");
-    Alcotest.(check bool) "does not suggest unrelated first repo" false
-      (contains_substring msg "\"cwd\": \"repos/grpc-direct\"")
+  Alcotest.(check (option string))
+    "unsupported logic chain is not interpreted as git cwd policy"
+    None
+    error
+
+let test_cmd_prefix_uses_shell_semantics () =
+  let check label expected cmd =
+    Alcotest.(check string)
+      label
+      expected
+      (Keeper_shell_command_semantics.cmd_prefix cmd)
+  in
+  check "plain command" "git" "git status";
+  check "env wrapper" "gh" "env GH_TOKEN=redacted gh pr list";
+  check "opam wrapper" "dune" "opam exec -- dune runtest";
+  check
+    "unsupported shell shape falls back to original command"
+    "cd repos/masc-mcp && git status"
+    "cd repos/masc-mcp && git status"
+
+let test_gh_repo_api_misuse_uses_shell_semantics () =
+  let check label expected cmd =
+    Alcotest.(check (option (pair string string)))
+      label
+      expected
+      (Keeper_shell_command_semantics.detect_gh_repo_flag_with_api_misuse cmd);
+    Alcotest.(check (option (pair string string)))
+      (label ^ " docker alias")
+      expected
+      (Keeper_shell_docker.detect_gh_repo_flag_with_api_misuse cmd)
+  in
+  check
+    "quoted repo arg"
+    (Some ("jeong-sik/masc-mcp", "repos/jeong-sik/masc-mcp/actions/runs"))
+    "gh --repo 'jeong-sik/masc-mcp' api repos/jeong-sik/masc-mcp/actions/runs";
+  check
+    "repo equals form"
+    (Some ("jeong-sik/masc-mcp", "repos/jeong-sik/masc-mcp/pulls"))
+    "gh --repo=jeong-sik/masc-mcp api repos/jeong-sik/masc-mcp/pulls";
+  check
+    "env prefix"
+    (Some ("jeong-sik/masc-mcp", "repos/jeong-sik/masc-mcp/issues"))
+    "env GH_TOKEN=redacted gh --repo jeong-sik/masc-mcp api repos/jeong-sik/masc-mcp/issues";
+  check
+    "subcommand repo flag is fine"
+    None
+    "gh pr view --repo jeong-sik/masc-mcp 17214"
 
 let test_git_creds_skips_missing_ssh_auth_sock () =
   with_fake_docker fake_docker_echo_script @@ fun () ->
@@ -1359,6 +1481,8 @@ let test_git_creds_respects_keeper_alias_identity_mode () =
   with_keeper_identity_toml ~config ~keeper_name:meta.name
     ~github_identity:"anyang-keepers" ~git_identity_mode:"keeper_alias"
   @@ fun () ->
+  seed_github_credential_mapping ~config ~keeper_name:meta.name
+    ~github_identity:"anyang-keepers" ();
   let log_path = Filename.concat config.Coord.base_path "docker.log" in
   let line =
     run_git_creds_docker_shell ~config ~meta ~playground ~log_path
@@ -1375,6 +1499,8 @@ let test_git_creds_uses_github_identity_mode () =
   with_keeper_identity_toml ~config ~keeper_name:meta.name
     ~github_identity:"anyang-keepers" ~git_identity_mode:"github_identity"
   @@ fun () ->
+  seed_github_credential_mapping ~config ~keeper_name:meta.name
+    ~github_identity:"anyang-keepers" ();
   let log_path = Filename.concat config.Coord.base_path "docker.log" in
   let line =
     run_git_creds_docker_shell ~config ~meta ~playground ~log_path
@@ -1405,6 +1531,8 @@ let test_git_creds_mounts_only_selected_keeper_identity () =
     with_keeper_identity_toml ~config ~keeper_name:meta.name
       ~github_identity ~git_identity_mode:"github_identity"
     @@ fun () ->
+    seed_github_credential_mapping ~config ~keeper_name:meta.name
+      ~github_identity ();
     let log_path = Filename.concat config.Coord.base_path log_name in
     let line =
       run_git_creds_docker_shell ~config ~meta ~playground ~log_path
@@ -1467,7 +1595,7 @@ let test_git_clone_repairs_existing_docker_clone_checkout () =
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup ~sandbox:Keeper_types.Docker
   @@ fun ~config ~meta ~playground ->
-  ensure_github_identity_bundle ~config Masc_mcp.Keeper_gh_env.root_github_identity;
+  seed_github_credential_mapping ~config ~keeper_name:meta.name ();
   let source_repo = Filename.concat playground "source-masc-mcp" in
   ensure_dir source_repo;
   run_ok ~cwd:source_repo "git init -q -b main";
@@ -1529,7 +1657,7 @@ let test_bash_fake_docker_executes () =
   Alcotest.(check bool) "bash output includes fake docker stdout" true
     (response_mentions raw "output" "stdout:")
 
-let test_bash_blocks_validator_safe_pipe_redirect_with_recovery_plan () =
+let test_bash_allows_validator_safe_pipe_redirect_in_docker_route () =
   with_tool_policy_config @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
@@ -1548,24 +1676,15 @@ let test_bash_blocks_validator_safe_pipe_redirect_with_recovery_plan () =
           ])
       ()
   in
-  let json = Yojson.Safe.from_string raw in
-  let recovery_plan = Json.member "recovery_plan" json in
-  Alcotest.(check (option bool)) "safe pipeline is blocked" (Some false)
+  Alcotest.(check (option bool)) "safe pipeline is allowed" (Some true)
     (parse_bool_field raw "ok");
   Alcotest.(check (option string))
-    "shape-block error"
-    (Some "keeper_bash_command_shape_blocked")
-    (parse_string_field raw "error");
-  Alcotest.(check string)
-    "required next tool"
-    "Bash"
-    (Json.member "required_next_tool" json |> Json.to_string);
-  Alcotest.(check string)
-    "recovery command placeholder"
-    "PRIMARY_COMMAND_WITHOUT_PIPE_OR_REDIRECT"
-    Yojson.Safe.Util.(
-      recovery_plan |> member "next_args" |> member "command" |> to_string);
-  Alcotest.(check bool) "docker was not invoked" false
+    "safe pipeline routes through docker"
+    (Some "docker")
+    (parse_string_field raw "via");
+  Alcotest.(check bool) "bash output includes fake docker stdout" true
+    (response_mentions raw "output" "stdout:");
+  Alcotest.(check bool) "docker was invoked" true
     (Sys.file_exists log_path)
 
 let test_bash_rg_no_match_remains_successful_in_docker_route () =
@@ -1703,7 +1822,7 @@ let test_bash_search_pipeline_exposes_structured_recovery_plan () =
     (Json.member "next_tool" recovery_plan |> Json.to_string);
   Alcotest.(check string)
     "recovery pattern"
-    "SEARCH_TERM"
+    "TODO"
     (Json.member "pattern" next_args |> Json.to_string);
   Alcotest.(check bool)
     "same args retry forbidden"
@@ -1882,8 +2001,8 @@ let () =
             "docker keeper bash executes through fake docker"
             `Quick test_bash_fake_docker_executes;
           Alcotest.test_case
-            "docker keeper bash pipe redirects expose structured recovery"
-            `Quick test_bash_blocks_validator_safe_pipe_redirect_with_recovery_plan;
+            "docker keeper bash safe pipe redirect routes through docker"
+            `Quick test_bash_allows_validator_safe_pipe_redirect_in_docker_route;
           Alcotest.test_case
             "docker keeper bash rg no-match remains successful"
             `Quick test_bash_rg_no_match_remains_successful_in_docker_route;
@@ -1928,6 +2047,9 @@ let () =
             test_rg_no_match_remains_successful_in_docker_route;
           Alcotest.test_case "git_clone routes through docker" `Quick
             test_git_clone_routes_through_docker;
+          Alcotest.test_case
+            "turn sandbox file writes use bind-mounted host path"
+            `Quick test_turn_sandbox_file_write_uses_host_bind_mount;
           Alcotest.test_case
             "git-creds skips missing SSH_AUTH_SOCK"
             `Quick test_git_creds_skips_missing_ssh_auth_sock;
@@ -1976,8 +2098,16 @@ let () =
             "sandbox-root git with multiple repos gives cwd correction"
             `Quick test_sandbox_root_git_cwd_multi_repo_blocks_before_exec;
           Alcotest.test_case
-            "sandbox-root git cd-chain hint uses command repo"
+            "sandbox-root git cd-chain is not interpreted by cwd policy"
             `Quick
-            test_sandbox_root_git_cwd_multi_repo_cd_hint_uses_command_repo;
+            test_sandbox_root_git_cwd_cd_chain_is_not_interpreted;
+          Alcotest.test_case
+            "gh --repo api misuse uses shell semantics"
+            `Quick
+            test_gh_repo_api_misuse_uses_shell_semantics;
+          Alcotest.test_case
+            "history cmd_prefix uses shell semantics"
+            `Quick
+            test_cmd_prefix_uses_shell_semantics;
         ] );
     ]

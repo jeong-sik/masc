@@ -171,6 +171,62 @@ let command_mentions_github cmd =
   || String.starts_with ~prefix:"git push" (String.trim cmd)
 ;;
 
+let json_string_list_opt key fields =
+  match List.assoc_opt key fields with
+  | Some (`List values) ->
+    Some
+      (List.filter_map
+         (function
+           | `String value -> Some value
+           | _ -> None)
+         values)
+  | _ -> None
+;;
+
+let typed_bash_stage_class fields =
+  match List.assoc_opt "executable" fields with
+  | Some (`String executable) ->
+    let executable = String.lowercase_ascii (String.trim executable) in
+    if String.equal executable "docker" || String.equal executable "docker-compose"
+    then Docker
+    else if String.equal executable "gh"
+    then Github
+    else if String.equal executable "git"
+    then (
+      match json_string_list_opt "argv" fields with
+      (* STR-OK: typed keeper_bash JSON boundary maps git network subcommands to resource classes. *)
+      | Some (subcommand :: _)
+        when List.mem (String.lowercase_ascii subcommand) [ "clone"; "fetch"; "pull"; "push" ] ->
+        Github
+      | _ -> Shell)
+    else Shell
+  | _ -> Shell
+;;
+
+let typed_bash_args_class args =
+  let combine left right =
+    match left, right with
+    | Docker, _ | _, Docker -> Docker
+    | Github, _ | _, Github -> Github
+    | _ -> Shell
+  in
+  let rec stages_class = function
+    | [] -> Shell
+    | `Assoc fields :: rest -> combine (typed_bash_stage_class fields) (stages_class rest)
+    | _ :: rest -> stages_class rest
+  in
+  match args with
+  | `Assoc fields ->
+    let direct = typed_bash_stage_class fields in
+    let pipeline =
+      match List.assoc_opt "pipeline" fields, List.assoc_opt "stages" fields with
+      | Some (`List stages), _ | _, Some (`List stages) -> stages_class stages
+      | _ -> Shell
+    in
+    combine direct pipeline
+  | _ -> Shell
+;;
+
 type keeper_shell_op_classification =
   | Known_shell_op of resource_class
   | Unknown_shell_op of string
@@ -202,12 +258,7 @@ let classify_keeper_shell_op args =
 let classify_keeper_tool (tool : Tool_name.Keeper.t) args =
   let open Tool_name.Keeper in
   match tool with
-  | Tool_name.Keeper.Bash ->
-    let cmd = Option.value ~default:"" (json_string_opt "cmd" args) in
-    if command_mentions_docker cmd then Docker
-    else if command_mentions_github cmd then Github
-    else Shell
-  | Bash_kill | Bash_output -> Ungated
+  | Tool_name.Keeper.Bash -> typed_bash_args_class args
   | Shell -> classify_keeper_shell_op args
   | Pr_create | Pr_list | Pr_review_comment | Pr_review_read | Pr_review_reply | Pr_status ->
     Github
@@ -295,11 +346,6 @@ let classify_masc_tool (tool : Tool_name.Masc.t) =
   | Tool_revoke
   | Transition
   | Update_priority -> Coordination_write
-  | Autoresearch_cycle
-  | Autoresearch_inject
-  | Autoresearch_record_finding
-  | Autoresearch_start
-  | Autoresearch_stop
   | Agent_update
   | Broadcast
   | Cleanup_zombies
@@ -314,8 +360,6 @@ let classify_masc_tool (tool : Tool_name.Masc.t) =
   | Agents
   | Approval_get
   | Approval_pending
-  | Autoresearch_search_findings
-  | Autoresearch_status
   | Board_curation_read
   | Board_get
   | Board_hearths
@@ -331,7 +375,6 @@ let classify_masc_tool (tool : Tool_name.Masc.t) =
   | Dashboard
   | Get_metrics
   | Goal_list
-  | Goal_review
   | Mcp_session
   | Messages
   | Operation_status

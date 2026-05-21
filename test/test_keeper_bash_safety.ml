@@ -7,12 +7,10 @@
     4. Empty commands are rejected *)
 
 module Coord = Masc_mcp.Coord
-module Config_boot_overrides = Config_boot_overrides
 module Keeper_exec_shell = Masc_mcp.Keeper_exec_shell
 module Keeper_registry = Masc_mcp.Keeper_registry
 module Keeper_sandbox = Masc_mcp.Keeper_sandbox
 module Keeper_shell_docker = Masc_mcp.Keeper_shell_docker
-module Keeper_shell_words = Masc_mcp.Keeper_shell_bash_words
 module Keeper_types = Masc_mcp.Keeper_types
 module Json = Yojson.Safe.Util
 
@@ -35,7 +33,6 @@ let test_allowed_commands () =
     "cat README.md";
     "ls -la";
     "head -20 file.ml";
-    "wc -l lib/*.ml";
     "opam install eio";
   ] in
   List.iter (fun cmd ->
@@ -304,14 +301,6 @@ let with_eio_fs f =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   f ()
 
-let with_boot_override name value f =
-  let previous = Config_boot_overrides.get_opt name in
-  Config_boot_overrides.set name value;
-  Fun.protect ~finally:(fun () ->
-    match previous with
-    | Some v -> Config_boot_overrides.set name v
-    | None -> Config_boot_overrides.clear name) f
-
 let parse_error_field raw =
   Yojson.Safe.from_string raw
   |> Json.member "error"
@@ -337,257 +326,6 @@ let test_keeper_bash_timeout_floor_is_not_sub_io_latency () =
        ~min_sec:Keeper_exec_shell.keeper_bash_native_min_timeout_sec
        ~default:Masc_mcp.Keeper_shell_shared.io_timeout_sec
        args)
-
-let test_keeper_bash_shape_uses_shell_ir_for_quoted_literals () =
-  let block_tag = Keeper_exec_shell.For_testing.keeper_bash_shape_block_tag in
-  Alcotest.(check (option string)) "quoted angle brackets are data" None
-    (block_tag "echo '<tag>'");
-  Alcotest.(check (option string)) "quoted gh pr checks is data" None
-    (block_tag {|echo "run gh pr checks later"|});
-  Alcotest.(check (option string)) "real redirect blocks"
-    (Some "pipe_or_redirect")
-    (block_tag "cat < /tmp/x");
-  Alcotest.(check (option string)) "stderr dev-null redirect is normalized" None
-    (block_tag "ls repos/masc-mcp/.worktrees/ 2>/dev/null");
-  Alcotest.(check (option string)) "spaced stderr dev-null redirect is normalized" None
-    (block_tag "ls repos/masc-mcp/.worktrees/ 2> /dev/null");
-  Alcotest.(check (option string)) "stdout dev-null redirect still blocks"
-    (Some "pipe_or_redirect")
-    (block_tag "ls repos/masc-mcp/.worktrees/ >/dev/null");
-  Alcotest.(check (option string)) "malformed stderr redirect token blocks"
-    (Some "pipe_or_redirect")
-    (block_tag "ls repos/masc-mcp/.worktrees/ 2/dev/null");
-  Alcotest.(check (option string)) "quoted malformed redirect token is data" None
-    (block_tag {|echo "2/dev/null"|});
-  Alcotest.(check (option string)) "real gh pr checks blocks"
-    (Some "gh_pr_checks")
-    (block_tag "gh pr checks 15659 --repo jeong-sik/masc-mcp");
-  Alcotest.(check (option string)) "parse-failure fallback remains conservative"
-    (Some "substitution")
-    (block_tag "echo $(complex-substitution)")
-  ;
-  Alcotest.(check (option string)) "background operator blocks"
-    (Some "chaining")
-    (block_tag "sleep 10 &")
-  ;
-  Alcotest.(check (option string)) "quoted ampersand is data" None
-    (block_tag {|echo "a & b"|})
-
-let test_keeper_bash_shell_ir_parse_failure_shape_fallback_is_quote_aware () =
-  let block_tag =
-    Keeper_exec_shell.For_testing.shell_ir_parse_failure_shape_block_tag
-  in
-  Alcotest.(check (option string)) "single-quoted redirect is data" None
-    (block_tag "printf '%s\\n' '>>>'");
-  Alcotest.(check (option string)) "double-quoted redirect is data" None
-    (block_tag {|printf "%s\n" ">>>"|});
-  Alcotest.(check (option string)) "quoted gh pr checks is data" None
-    (block_tag {|echo "run gh pr checks later"|});
-  Alcotest.(check (option string)) "real redirect still blocks"
-    (Some "pipe_or_redirect")
-    (block_tag "cat < /tmp/x");
-  Alcotest.(check (option string)) "stderr dev-null redirect is normalized" None
-    (block_tag "ls repos/masc-mcp/.worktrees/ 2>/dev/null");
-  Alcotest.(check (option string)) "stderr dev-null prefix is not stripped from longer target"
-    (Some "pipe_or_redirect")
-    (block_tag "ls repos/masc-mcp/.worktrees/ 2>/dev/nullfile");
-  Alcotest.(check (option string)) "double-quoted substitution still blocks"
-    (Some "substitution")
-    (block_tag {|echo "$(date)"|});
-  Alcotest.(check (option string)) "single-quoted substitution is data" None
-    (block_tag {|echo '$(date) > out'|});
-  Alcotest.(check (option string)) "background operator still blocks"
-    (Some "chaining")
-    (block_tag "sleep 10 &");
-  Alcotest.(check (option string)) "quoted ampersand stays data" None
-    (block_tag {|printf "%s\n" "a & b"|})
-
-let test_stderr_dev_null_strip_preserves_post_background_redirect () =
-  let strip =
-    Keeper_exec_shell.For_testing.strip_stderr_dev_null_redirects
-  in
-  Alcotest.(check (pair string bool))
-    "pre-background redirect is normalized"
-    ("sleep 1 &", true)
-    (strip "sleep 1 2>/dev/null &");
-  Alcotest.(check (pair string bool))
-    "post-background redirect is preserved"
-    ("sleep 1 & 2>/dev/null", false)
-    (strip "sleep 1 & 2>/dev/null")
-
-let test_keeper_bash_task_state_hint_uses_task_tools () =
-  let hint = Keeper_exec_shell.For_testing.keeper_bash_shape_block_hint in
-  match hint {|cat .masc/backlog.json 2>/dev/null | head -20|} with
-  | Some msg ->
-    Alcotest.(check bool)
-      "hint points to keeper_tasks_list"
-      true
-      (String_util.contains_substring msg "keeper_tasks_list");
-    Alcotest.(check bool)
-      "hint names guessed backlog path"
-      true
-      (String_util.contains_substring msg ".masc/backlog.json")
-  | None -> Alcotest.fail "expected task-state shell hint"
-
-let test_keeper_bash_task_state_discovery_hint_uses_task_tools () =
-  let hint = Keeper_exec_shell.For_testing.keeper_bash_shape_block_hint in
-  match hint {|find repos -name "*.json" -path "*/task*" 2>/dev/null | head -20|} with
-  | Some msg ->
-    Alcotest.(check bool)
-      "hint points to keeper_tasks_list"
-      true
-      (String_util.contains_substring msg "keeper_tasks_list");
-    Alcotest.(check bool)
-      "hint rejects task files"
-      true
-      (String_util.contains_substring msg "backlog/task files")
-  | None -> Alcotest.fail "expected task-state discovery hint"
-
-let test_keeper_bash_blocks_repo_wide_scans () =
-  let block_tag = Keeper_exec_shell.For_testing.keeper_bash_shape_block_tag in
-  List.iter
-    (fun cmd ->
-      Alcotest.(check (option string))
-        ("repo-wide scan blocked: " ^ cmd)
-        (Some "repo_wide_scan")
-        (block_tag cmd))
-    [
-      {|grep -r "board_post" --include="*.ml" -l|};
-      {|find repos/ -type f -name "*.ml"|};
-      {|find . -type f -name "*.ml"|};
-      {|rg -l "keeper_board_post|board_post" repos/ --type ml|};
-      {|rg "board_post"|};
-      {|git log --all --oneline --grep board_post|};
-      {|bash -lc 'grep -ri "yojson" --include="*.ml" -l'|};
-    ];
-  List.iter
-    (fun cmd ->
-      Alcotest.(check (option string))
-        ("scoped scan allowed: " ^ cmd)
-        None
-        (block_tag cmd))
-    [
-      {|grep -r "board_post" lib|};
-      {|find lib -type f -name "*.ml"|};
-      {|rg -l "board_post" lib --type ml|};
-      {|rg --files lib|};
-      {|git log --oneline -20|};
-      {|git log --oneline -30 --all|};
-      {|git log --all -n 5|};
-      {|git log --all --max-count=10|};
-    ]
-
-let test_keeper_bash_repo_wide_scan_hints_use_structured_tools () =
-  let hint = Keeper_exec_shell.For_testing.keeper_bash_shape_block_hint in
-  let block_tag = Keeper_exec_shell.For_testing.keeper_bash_shape_block_tag in
-  let cmd = {|git log --oneline --all --grep="15731" 2>/dev/null | head -5|} in
-  let tag = block_tag cmd in
-  Alcotest.(check bool) "pipelined git log --all is repo_wide_scan" true
-    (match tag with Some "repo_wide_scan" -> true | _ -> false);
-  (match hint cmd with
-   | Some msg ->
-     Alcotest.(check bool) "git history hint points to Bash git log" true
-       (String_util.contains_substring msg "Bash command=\"git log");
-     Alcotest.(check bool) "git history hint mentions grep" true
-       (String_util.contains_substring msg "grep=<term>")
-   | None -> Alcotest.fail "expected repo-wide git log hint");
-  (match hint {|rg "add_comment" repos/ --include '*.ml' --include '*.mli' -l|} with
-   | Some msg ->
-     Alcotest.(check bool) "rg hint points to Grep" true
-       (String_util.contains_substring msg "Use Grep");
-     Alcotest.(check bool) "rg hint discourages repos root" true
-       (String_util.contains_substring msg "Do not scan repos/")
-   | None -> Alcotest.fail "expected repo-wide rg hint")
-
-let test_keeper_bash_repo_wide_recovery_plan_carries_native_args () =
-  let module Shape = Masc_mcp.Keeper_shell_bash_shape_messages in
-  let plan_exn cmd =
-    match Shape.bash_shape_block_recovery_plan ~cmd Shape.Repo_wide_scan with
-    | Some plan -> plan
-    | None -> Alcotest.fail ("expected recovery plan for " ^ cmd)
-  in
-  let next_arg_string plan key =
-    match List.assoc_opt key plan.Shape.next_args with
-    | Some (`String value) -> value
-    | Some other ->
-      Alcotest.fail
-        (Printf.sprintf
-           "expected next_args.%s string, got %s"
-           key
-           (Yojson.Safe.to_string other))
-    | None -> Alcotest.fail ("missing next_args." ^ key)
-  in
-  let git_plan =
-    plan_exn {|git log --oneline --all --grep="15731" 2>/dev/null | head -5|}
-  in
-  Alcotest.(check string) "git next tool" "Bash" git_plan.next_tool;
-  Alcotest.(check string)
-    "git command"
-    "git log --oneline -5 --grep='15731'"
-    (next_arg_string git_plan "command");
-  Alcotest.(check string)
-    "git cwd"
-    "REPO_OR_WORKTREE_CWD"
-    (next_arg_string git_plan "cwd");
-  let rg_plan = plan_exn {|rg TODO repos | head -20|} in
-  Alcotest.(check string) "rg next tool" "Grep" rg_plan.next_tool;
-  Alcotest.(check string) "rg pattern" "TODO" (next_arg_string rg_plan "pattern");
-  Alcotest.(check string)
-    "rg scoped path placeholder"
-    "repos/REPO/SCOPED_PATH"
-    (next_arg_string rg_plan "path");
-  let find_plan = plan_exn {|find repos -type f -name "*.ml" | head -30|} in
-  Alcotest.(check string) "find next tool" "Bash" find_plan.next_tool;
-  Alcotest.(check string)
-    "find command"
-    "find . -name '*.ml'"
-    (next_arg_string find_plan "command");
-  Alcotest.(check string)
-    "find cwd"
-    "REPO_OR_WORKTREE_CWD"
-    (next_arg_string find_plan "cwd")
-
-let test_docker_blocks_nested_docker_command () =
-  with_eio_fs @@ fun () ->
-  let base_path, config = make_config () in
-  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
-  Keeper_registry.clear ();
-  let meta = make_docker_meta "docker-nested" in
-  let raw =
-    Keeper_exec_shell.handle_keeper_bash
-      ~turn_sandbox_factory:None
-      ~turn_sandbox_factory_git:None ~exec_cache:None
-      ~config ~meta
-      ~args:(`Assoc [ ("cmd", `String "docker run --rm alpine true") ]) ()
-  in
-  match parse_error_field raw with
-  | Some err ->
-      Alcotest.(check bool) "mentions nested container block" true
-        (String_util.contains_substring err
-           "blocks nested container runtimes and host socket references")
-  | None ->
-      Alcotest.fail ("expected error json, got: " ^ raw)
-
-let test_docker_blocks_docker_socket_reference () =
-  with_eio_fs @@ fun () ->
-  let base_path, config = make_config () in
-  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
-  Keeper_registry.clear ();
-  let meta = make_docker_meta "docker-sock" in
-  let raw =
-    Keeper_exec_shell.handle_keeper_bash
-      ~turn_sandbox_factory:None
-      ~turn_sandbox_factory_git:None ~exec_cache:None
-      ~config ~meta
-      ~args:(`Assoc [ ("cmd", `String "cat /var/run/docker.sock") ]) ()
-  in
-  match parse_error_field raw with
-  | Some err ->
-      Alcotest.(check bool) "mentions socket block" true
-        (String_util.contains_substring err
-           "blocks nested container runtimes and host socket references")
-  | None ->
-      Alcotest.fail ("expected error json, got: " ^ raw)
 
 let test_nested_runtime_detector_ignores_git_commit_message () =
   Alcotest.(check bool)
@@ -670,216 +408,6 @@ let test_docker_nested_guard_blocks_path_prefixed_runtime () =
     (Keeper_shell_docker.command_uses_nested_container_runtime
        "/usr/bin/docker run --rm alpine true")
 
-let test_docker_blocks_raw_gh_pr_create () =
-  with_eio_fs @@ fun () ->
-  let base_path, config = make_config () in
-  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
-  Keeper_registry.clear ();
-  let meta = make_docker_meta "pr-create-block" in
-  let playground =
-    Filename.concat base_path (playground_path_of meta.name)
-  in
-  ensure_dir playground;
-  let raw =
-    Keeper_exec_shell.handle_keeper_bash
-      ~turn_sandbox_factory:None
-      ~turn_sandbox_factory_git:None ~exec_cache:None
-      ~config ~meta
-      ~args:
-        (`Assoc
-           [ ("cmd", `String "gh pr create --draft --title proof")
-           ; ("cwd", `String playground)
-           ])
-      ()
-  in
-  match parse_error_field raw with
-  | Some err ->
-      Alcotest.(check string) "direct gh pr create blocked"
-        "gh_pr_create_requires_keeper_pr_create" err
-  | None ->
-      Alcotest.fail ("expected gh pr create error json, got: " ^ raw)
-
-let test_docker_blocks_chained_gh_pr_create () =
-  with_eio_fs @@ fun () ->
-  let base_path, config = make_config () in
-  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
-  Keeper_registry.clear ();
-  let meta = make_docker_meta "pr-create-chain-block" in
-  let playground =
-    Filename.concat base_path (playground_path_of meta.name)
-  in
-  ensure_dir playground;
-  let raw =
-    Keeper_exec_shell.handle_keeper_bash
-      ~turn_sandbox_factory:None
-      ~turn_sandbox_factory_git:None ~exec_cache:None
-      ~config ~meta
-      ~args:
-        (`Assoc
-           [ ( "cmd"
-             , `String
-                 "cd repos/masc-mcp && gh pr create --draft --title proof"
-             )
-           ; ("cwd", `String playground)
-           ])
-      ()
-  in
-  match parse_error_field raw with
-  | Some err ->
-      Alcotest.(check string) "chained gh pr create blocked"
-        "gh_pr_create_requires_keeper_pr_create" err
-  | None ->
-      Alcotest.fail ("expected chained gh pr create error json, got: " ^ raw)
-
-let test_docker_blocks_newline_gh_pr_create () =
-  with_eio_fs @@ fun () ->
-  let base_path, config = make_config () in
-  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
-  Keeper_registry.clear ();
-  let meta = make_docker_meta "pr-create-newline-block" in
-  let playground =
-    Filename.concat base_path (playground_path_of meta.name)
-  in
-  ensure_dir playground;
-  let raw =
-    Keeper_exec_shell.handle_keeper_bash
-      ~turn_sandbox_factory:None
-      ~turn_sandbox_factory_git:None ~exec_cache:None
-      ~config ~meta
-      ~args:
-        (`Assoc
-           [ ( "cmd"
-             , `String
-                 "echo ok\ngh pr create --draft --title proof"
-             )
-           ; ("cwd", `String playground)
-           ])
-      ()
-  in
-  match parse_error_field raw with
-  | Some err ->
-      Alcotest.(check string) "newline gh pr create blocked"
-        "gh_pr_create_requires_keeper_pr_create" err
-  | None ->
-      Alcotest.fail ("expected newline gh pr create error json, got: " ^ raw)
-
-let test_docker_blocks_env_wrapped_gh_pr_create () =
-  with_eio_fs @@ fun () ->
-  let base_path, config = make_config () in
-  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
-  Keeper_registry.clear ();
-  let meta = make_docker_meta "pr-create-env-block" in
-  let playground =
-    Filename.concat base_path (playground_path_of meta.name)
-  in
-  ensure_dir playground;
-  let raw =
-    Keeper_exec_shell.handle_keeper_bash
-      ~turn_sandbox_factory:None
-      ~turn_sandbox_factory_git:None ~exec_cache:None
-      ~config ~meta
-      ~args:
-        (`Assoc
-           [ ( "cmd"
-             , `String
-                 "env GH_CONFIG_DIR=/tmp/gh gh pr create --draft --title proof"
-             )
-           ; ("cwd", `String playground)
-           ])
-      ()
-  in
-  match parse_error_field raw with
-  | Some err ->
-      Alcotest.(check string) "env-wrapped gh pr create blocked"
-        "gh_pr_create_requires_keeper_pr_create" err
-  | None ->
-      Alcotest.fail ("expected env-wrapped gh pr create error json, got: " ^ raw)
-
-let test_docker_blocks_command_wrapped_gh_pr_create () =
-  with_eio_fs @@ fun () ->
-  let base_path, config = make_config () in
-  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
-  Keeper_registry.clear ();
-  let meta = make_docker_meta "pr-create-command-block" in
-  let playground =
-    Filename.concat base_path (playground_path_of meta.name)
-  in
-  ensure_dir playground;
-  let raw =
-    Keeper_exec_shell.handle_keeper_bash
-      ~turn_sandbox_factory:None
-      ~turn_sandbox_factory_git:None ~exec_cache:None
-      ~config ~meta
-      ~args:
-        (`Assoc
-           [ ( "cmd"
-             , `String "command gh pr create --draft --title proof"
-             )
-           ; ("cwd", `String playground)
-           ])
-      ()
-  in
-  match parse_error_field raw with
-  | Some err ->
-      Alcotest.(check string) "command-wrapped gh pr create blocked"
-        "gh_pr_create_requires_keeper_pr_create" err
-  | None ->
-      Alcotest.fail
-        ("expected command-wrapped gh pr create error json, got: " ^ raw)
-
-let test_docker_allows_gh_pr_create_prose () =
-  with_eio_fs @@ fun () ->
-  let base_path, config = make_config () in
-  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
-  Keeper_registry.clear ();
-  let meta = make_docker_meta "pr-create-prose" in
-  let playground =
-    Filename.concat base_path (playground_path_of meta.name)
-  in
-  ensure_dir playground;
-  let raw =
-    Keeper_exec_shell.handle_keeper_bash
-      ~turn_sandbox_factory:None
-      ~turn_sandbox_factory_git:None ~exec_cache:None
-      ~config ~meta
-      ~args:
-        (`Assoc
-           [ ("cmd", `String "echo gh pr create")
-           ; ("cwd", `String playground)
-           ])
-      ()
-  in
-  Alcotest.(check bool) "prose mention is not PR-create policy block" false
-    (parse_error_field raw = Some "gh_pr_create_requires_keeper_pr_create")
-
-let test_docker_missing_seccomp_profile_fails_closed () =
-  with_eio_fs @@ fun () ->
-  let base_path, config = make_config () in
-  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
-  Keeper_registry.clear ();
-  let meta = make_docker_meta "missing-seccomp" in
-  with_boot_override "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE"
-    (Filename.concat base_path "missing-seccomp-profile.json")
-    (fun () ->
-      let raw =
-        Keeper_exec_shell.handle_keeper_bash
-          ~turn_sandbox_factory:None
-          ~turn_sandbox_factory_git:None ~exec_cache:None
-          ~config ~meta
-          ~args:(`Assoc [ ("cmd", `String "pwd") ]) ()
-      in
-      match parse_error_field raw with
-      | Some err ->
-          Alcotest.(check bool) "mentions missing seccomp profile" true
-            (String_util.contains_substring err
-               "sandbox seccomp profile not found")
-      | None ->
-          Alcotest.fail ("expected error json, got: " ^ raw))
-
-(** Path traversal: if cwd is canonicalized via realpath before the check,
-    ../traversal resolves to the actual target. This test verifies that
-    a canonicalized traversal path is correctly rejected.
-    In production, Unix.realpath on the cwd collapses ".." before comparison. *)
 let test_playground_guard_traversal () =
   let pg = "/project/.masc/playground/cheolsu" in
   (* After realpath, ".../cheolsu/repos/../../lib" becomes "/project/lib" *)
@@ -918,7 +446,7 @@ let make_write_enabled_meta name =
         ("name", `String name);
         ("agent_name", `String ("agent-" ^ name));
         ("trace_id", `String ("trace-" ^ name));
-        ("goal", `String "safe fallback write-enabled test");
+        ("goal", `String "write-enabled keeper bash test");
         ( "tool_access",
           Keeper_types.tool_access_to_json
             (Keeper_types.Preset
@@ -934,17 +462,7 @@ let parse_hint raw =
   |> Json.member "hint"
   |> Json.to_string_option
 
-let parse_alternatives raw =
-  match Yojson.Safe.from_string raw |> Json.member "alternatives" with
-  | `List xs -> List.filter_map Json.to_string_option xs
-  | _ -> []
-
-let parse_error_field raw =
-  Yojson.Safe.from_string raw
-  |> Json.member "error"
-  |> Json.to_string_option
-
-let test_keeper_bash_typed_exec_runs_via_shell_ir () =
+let test_keeper_bash_typed_process_runs_via_shell_ir () =
   with_eio_fs @@ fun () ->
   let base_path, config = make_config () in
   Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
@@ -1050,706 +568,6 @@ let test_keeper_bash_typed_docker_requires_factory () =
     then Alcotest.fail ("unexpected typed docker error: " ^ err)
   | None -> Alcotest.fail ("expected typed docker factory error, got: " ^ raw)
 
-let test_keeper_bash_safe_dev_null_echo_fallback_executes_primary () =
-  with_eio_fs @@ fun () ->
-  let base_path, config = make_config () in
-  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
-  Keeper_registry.clear ();
-  let meta = make_readonly_meta "fallback-ls" in
-  let playground = Filename.concat base_path (playground_path_of meta.name) in
-  let worktrees = Filename.concat playground "repos/masc-mcp/.worktrees" in
-  ensure_dir worktrees;
-  ignore (Fs_compat.save_file_atomic (Filename.concat worktrees "marker") "ok");
-  let raw =
-    Keeper_exec_shell.handle_keeper_bash
-      ~turn_sandbox_factory:None
-      ~turn_sandbox_factory_git:None ~exec_cache:None
-      ~config ~meta
-      ~args:
-        (`Assoc
-           [ ( "cmd"
-             , `String
-                 "ls repos/masc-mcp/.worktrees/ 2>/dev/null || echo \"no worktrees\""
-             )
-           ; ("cwd", `String playground)
-           ])
-      ()
-  in
-  let json = Yojson.Safe.from_string raw in
-  Alcotest.(check bool) "fallback command succeeds" true
-    (json |> Json.member "ok" |> Json.to_bool);
-  Alcotest.(check bool) "primary command ran" true
-    (json
-     |> Json.member "output"
-     |> Json.to_string
-     |> fun output -> String_util.contains_substring output "marker")
-
-let test_keeper_bash_safe_dev_null_redirect_executes_scoped_ls () =
-  with_eio_fs @@ fun () ->
-  let base_path, config = make_config () in
-  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
-  Keeper_registry.clear ();
-  let meta = make_readonly_meta "dev-null-ls" in
-  let playground = Filename.concat base_path (playground_path_of meta.name) in
-  let worktrees = Filename.concat playground "repos/masc-mcp/.worktrees" in
-  ensure_dir worktrees;
-  ignore (Fs_compat.save_file_atomic (Filename.concat worktrees "marker") "ok");
-  let raw =
-    Keeper_exec_shell.handle_keeper_bash
-      ~turn_sandbox_factory:None
-      ~turn_sandbox_factory_git:None ~exec_cache:None
-      ~config ~meta
-      ~args:
-        (`Assoc
-           [ ( "cmd"
-             , `String "ls repos/masc-mcp/.worktrees/ 2>/dev/null" )
-           ; ("cwd", `String playground)
-           ])
-      ()
-  in
-  let json = Yojson.Safe.from_string raw in
-  Alcotest.(check bool) "direct dev-null ls succeeds" true
-    (json |> Json.member "ok" |> Json.to_bool);
-  Alcotest.(check bool) "ls output is preserved" true
-    (json
-     |> Json.member "output"
-     |> Json.to_string
-     |> fun output -> String_util.contains_substring output "marker")
-
-let test_keeper_bash_safe_fallback_works_for_write_enabled_keeper () =
-  with_eio_fs @@ fun () ->
-  let base_path, config = make_config () in
-  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
-  Keeper_registry.clear ();
-  let meta = make_write_enabled_meta "fallback-coding" in
-  let playground = Filename.concat base_path (playground_path_of meta.name) in
-  let worktree = Filename.concat playground "repos/masc-mcp/.worktrees/task-362" in
-  ensure_dir worktree;
-  ignore (Fs_compat.save_file_atomic (Filename.concat worktree "status.json") "{}");
-  let raw =
-    Keeper_exec_shell.handle_keeper_bash
-      ~turn_sandbox_factory:None
-      ~turn_sandbox_factory_git:None ~exec_cache:None
-      ~config ~meta
-      ~args:
-        (`Assoc
-           [ ( "cmd"
-             , `String
-                 "cat repos/masc-mcp/.worktrees/task-362/status.json 2>/dev/null || echo \"NOT_FOUND\""
-             )
-           ; ("cwd", `String playground)
-           ])
-      ()
-  in
-  let json = Yojson.Safe.from_string raw in
-  Alcotest.(check bool) "write-enabled fallback command succeeds" true
-    (json |> Json.member "ok" |> Json.to_bool);
-  Alcotest.(check bool) "primary cat ran" true
-    (json
-     |> Json.member "output"
-     |> Json.to_string
-     |> fun output -> String_util.contains_substring output "{}")
-
-let test_keeper_bash_safe_cd_fallback_executes_scoped_read () =
-  with_eio_fs @@ fun () ->
-  let base_path, config = make_config () in
-  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
-  Keeper_registry.clear ();
-  let meta = make_readonly_meta "fallback-cd" in
-  let playground = Filename.concat base_path (playground_path_of meta.name) in
-  let lib_dir = Filename.concat playground "repos/masc-mcp/lib" in
-  ensure_dir lib_dir;
-  ignore (Fs_compat.save_file_atomic (Filename.concat lib_dir "marker.ml") "let x = 1");
-  let raw =
-    Keeper_exec_shell.handle_keeper_bash
-      ~turn_sandbox_factory:None
-      ~turn_sandbox_factory_git:None ~exec_cache:None
-      ~config ~meta
-      ~args:
-        (`Assoc
-           [ "cmd", `String "cd repos/masc-mcp && ls lib"
-           ; "cwd", `String playground
-           ])
-      ()
-  in
-  let json = Yojson.Safe.from_string raw in
-  Alcotest.(check bool) "cd fallback command succeeds" true
-    (json |> Json.member "ok" |> Json.to_bool);
-  Alcotest.(check bool) "read command ran after cd" true
-    (json
-     |> Json.member "output"
-     |> Json.to_string
-     |> fun output -> String_util.contains_substring output "marker.ml")
-
-let test_keeper_bash_safe_pwd_fallback_executes_scoped_ls () =
-  with_eio_fs @@ fun () ->
-  let base_path, config = make_config () in
-  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
-  Keeper_registry.clear ();
-  let meta = make_readonly_meta "fallback-pwd-ls" in
-  let playground = Filename.concat base_path (playground_path_of meta.name) in
-  ensure_dir playground;
-  ignore (Fs_compat.save_file_atomic (Filename.concat playground "marker.txt") "ok");
-  let raw =
-    Keeper_exec_shell.handle_keeper_bash
-      ~turn_sandbox_factory:None
-      ~turn_sandbox_factory_git:None ~exec_cache:None
-      ~config ~meta
-      ~args:(`Assoc [ "cmd", `String "pwd && ls -la"; "cwd", `String playground ])
-      ()
-  in
-  let json = Yojson.Safe.from_string raw in
-  Alcotest.(check bool) "pwd && ls fallback succeeds" true
-    (json |> Json.member "ok" |> Json.to_bool);
-  Alcotest.(check bool) "ls output is preserved" true
-    (json
-     |> Json.member "output"
-     |> Json.to_string
-     |> fun output -> String_util.contains_substring output "marker.txt")
-
-let test_keeper_bash_safe_pwd_fallback_executes_head_pipeline () =
-  with_eio_fs @@ fun () ->
-  let base_path, config = make_config () in
-  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
-  Keeper_registry.clear ();
-  let meta = make_readonly_meta "fallback-pwd-find" in
-  let playground = Filename.concat base_path (playground_path_of meta.name) in
-  let lib_dir = Filename.concat playground "lib" in
-  ensure_dir lib_dir;
-  ignore (Fs_compat.save_file_atomic (Filename.concat lib_dir "marker.ml") "ok");
-  let raw =
-    Keeper_exec_shell.handle_keeper_bash
-      ~turn_sandbox_factory:None
-      ~turn_sandbox_factory_git:None ~exec_cache:None
-      ~config ~meta
-      ~args:
-        (`Assoc
-           [ ( "cmd"
-             , `String
-                 "pwd && find lib -maxdepth 1 -name \"marker.ml\" 2>/dev/null | head -20"
-             )
-           ; ("cwd", `String playground)
-           ])
-      ()
-  in
-  let json = Yojson.Safe.from_string raw in
-  Alcotest.(check bool) "pwd && find | head fallback succeeds" true
-    (json |> Json.member "ok" |> Json.to_bool);
-  Alcotest.(check bool) "find output is preserved" true
-    (json
-     |> Json.member "output"
-     |> Json.to_string
-     |> fun output -> String_util.contains_substring output "marker.ml")
-
-let test_keeper_bash_pwd_fallback_does_not_unblock_writes () =
-  with_eio_fs @@ fun () ->
-  let base_path, config = make_config () in
-  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
-  Keeper_registry.clear ();
-  let meta = make_readonly_meta "fallback-pwd-unsafe" in
-  let playground = Filename.concat base_path (playground_path_of meta.name) in
-  ensure_dir playground;
-  let raw =
-    Keeper_exec_shell.handle_keeper_bash
-      ~turn_sandbox_factory:None
-      ~turn_sandbox_factory_git:None ~exec_cache:None
-      ~config ~meta
-      ~args:(`Assoc [ "cmd", `String "pwd && rm -rf /"; "cwd", `String playground ])
-      ()
-  in
-  let json = Yojson.Safe.from_string raw in
-  Alcotest.(check bool) "unsafe right side remains blocked" false
-    (json |> Json.member "ok" |> Json.to_bool)
-
-let test_keeper_bash_single_repo_root_recovers_top_level_find () =
-  with_eio_fs @@ fun () ->
-  let base_path, config = make_config () in
-  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
-  Keeper_registry.clear ();
-  let meta = make_readonly_meta "single-repo-find" in
-  let playground = Filename.concat base_path (playground_path_of meta.name) in
-  let repo_root = Filename.concat playground "repos/masc-mcp" in
-  let lib_dir = Filename.concat repo_root "lib" in
-  ensure_dir (Filename.concat repo_root ".git");
-  ensure_dir lib_dir;
-  ignore (Fs_compat.save_file_atomic (Filename.concat lib_dir "marker.ml") "let x = 1");
-  let raw =
-    Keeper_exec_shell.handle_keeper_bash
-      ~turn_sandbox_factory:None
-      ~turn_sandbox_factory_git:None ~exec_cache:None
-      ~config ~meta
-      ~args:(`Assoc [ "cmd", `String "find lib/ -name marker.ml" ])
-      ()
-  in
-  let json = Yojson.Safe.from_string raw in
-  Alcotest.(check bool) "sandbox-root find succeeds from the single repo" true
-    (json |> Json.member "ok" |> Json.to_bool);
-  Alcotest.(check string) "execution cwd is the single repo root"
-    (Unix.realpath repo_root)
-    (json |> Json.member "cwd" |> Json.to_string |> Unix.realpath);
-  Alcotest.(check bool) "find output includes repo-local file" true
-    (json
-     |> Json.member "output"
-     |> Json.to_string
-     |> fun output -> String_util.contains_substring output "marker.ml")
-
-let test_keeper_bash_blocks_doubled_repo_prefix_with_public_alias_plan () =
-  with_eio_fs @@ fun () ->
-  let base_path, config = make_config () in
-  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
-  Keeper_registry.clear ();
-  let meta = make_readonly_meta "double-prefix-bash" in
-  let playground = Filename.concat base_path (playground_path_of meta.name) in
-  let repo_root = Filename.concat playground "repos/masc-mcp" in
-  ensure_dir (Filename.concat repo_root ".worktrees");
-  let raw =
-    Keeper_exec_shell.handle_keeper_bash
-      ~turn_sandbox_factory:None
-      ~turn_sandbox_factory_git:None ~exec_cache:None
-      ~config ~meta
-      ~args:
-        (`Assoc
-          [
-            ("cmd", `String "ls repos/masc-mcp/.worktrees/");
-            ("cwd", `String repo_root);
-          ])
-      ()
-  in
-  let json = Yojson.Safe.from_string raw in
-  let recovery_plan = Json.member "recovery_plan" json in
-  let next_args = Json.member "next_args" recovery_plan in
-  Alcotest.(check bool) "double-prefix is blocked before exec" false
-    (json |> Json.member "ok" |> Json.to_bool);
-  Alcotest.(check (option string))
-    "double-prefix error"
-    (Some "keeper_bash_cwd_path_prefix_duplicated")
-    (parse_error_field raw);
-  Alcotest.(check string) "required next tool uses public alias" "Bash"
-    (Json.member "required_next_tool" json |> Json.to_string);
-  Alcotest.(check string) "rewritten command removes duplicated repo prefix"
-    "ls .worktrees"
-    (Json.member "command" next_args |> Json.to_string);
-  Alcotest.(check string) "rewritten cwd remains repo-relative"
-    "repos/masc-mcp"
-    (Json.member "cwd" next_args |> Json.to_string)
-
-let test_keeper_bash_safe_rg_fallback_allows_escaped_regex_pipe () =
-  with_eio_fs @@ fun () ->
-  let base_path, config = make_config () in
-  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
-  Keeper_registry.clear ();
-  let meta = make_readonly_meta "fallback-rg" in
-  let playground = Filename.concat base_path (playground_path_of meta.name) in
-  ensure_dir (Filename.concat playground "lib");
-  let raw =
-    Keeper_exec_shell.handle_keeper_bash
-      ~turn_sandbox_factory:None
-      ~turn_sandbox_factory_git:None ~exec_cache:None
-      ~config ~meta
-      ~args:
-        (`Assoc
-           [ ( "cmd"
-             , `String
-                 "rg -n \"ghost\\|task-321\\|task-323\\|task-324\" lib/ --type ml -l 2>/dev/null || echo \"no matches\""
-             )
-           ; ("cwd", `String playground)
-           ])
-      ()
-  in
-  let json = Yojson.Safe.from_string raw in
-  Alcotest.(check bool) "rg fallback command succeeds" true
-    (json |> Json.member "ok" |> Json.to_bool);
-  Alcotest.(check bool) "fallback echo ran on no match" true
-    (json
-     |> Json.member "output"
-     |> Json.to_string
-     |> fun output -> String_util.contains_substring output "no matches")
-
-let test_keeper_bash_safe_dev_null_redirect_executes_scoped_grep () =
-  with_eio_fs @@ fun () ->
-  let base_path, config = make_config () in
-  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
-  Keeper_registry.clear ();
-  let meta = make_readonly_meta "dev-null-grep" in
-  let playground = Filename.concat base_path (playground_path_of meta.name) in
-  let lib_dir = Filename.concat playground "repos/masc-mcp/lib" in
-  ensure_dir lib_dir;
-  ignore
-    (Fs_compat.save_file_atomic
-       (Filename.concat lib_dir "quoted_pipe.ml")
-       "let quoted_pipe = true\n");
-  let raw =
-    Keeper_exec_shell.handle_keeper_bash
-      ~turn_sandbox_factory:None
-      ~turn_sandbox_factory_git:None ~exec_cache:None
-      ~config ~meta
-      ~args:
-        (`Assoc
-           [ ( "cmd"
-             , `String
-                 "grep -Erl \"quoted.pipe|quoted_pipe|shell.*pipe|pipe.*valid\" repos/masc-mcp/lib/ 2>/dev/null"
-             )
-           ; ("cwd", `String playground)
-           ])
-      ()
-  in
-  let json = Yojson.Safe.from_string raw in
-  Alcotest.(check bool) "direct dev-null grep succeeds" true
-    (json |> Json.member "ok" |> Json.to_bool);
-  Alcotest.(check bool) "grep found scoped file" true
-    (json
-     |> Json.member "output"
-     |> Json.to_string
-     |> fun output -> String_util.contains_substring output "quoted_pipe.ml")
-
-let test_keeper_bash_safe_head_pipeline_executes_scoped_cat () =
-  with_eio_fs @@ fun () ->
-  let base_path, config = make_config () in
-  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
-  Keeper_registry.clear ();
-  let meta = make_readonly_meta "head-cat" in
-  let playground = Filename.concat base_path (playground_path_of meta.name) in
-  let repo_dir = Filename.concat playground "repos/masc-mcp/docs" in
-  ensure_dir repo_dir;
-  ignore
-    (Fs_compat.save_file_atomic
-       (Filename.concat repo_dir "notes.txt")
-       "first line\nsecond line\n");
-  let raw =
-    Keeper_exec_shell.handle_keeper_bash
-      ~turn_sandbox_factory:None
-      ~turn_sandbox_factory_git:None ~exec_cache:None
-      ~config ~meta
-      ~args:
-        (`Assoc
-           [ ( "cmd"
-             , `String
-                 "cat repos/masc-mcp/docs/notes.txt 2>/dev/null | head -1"
-             )
-           ; ("cwd", `String playground)
-           ])
-      ()
-  in
-  let json = Yojson.Safe.from_string raw in
-  Alcotest.(check bool) "safe cat | head succeeds" true
-    (json |> Json.member "ok" |> Json.to_bool);
-  Alcotest.(check bool) "cat output is preserved" true
-    (json
-     |> Json.member "output"
-     |> Json.to_string
-     |> fun output -> String_util.contains_substring output "first line")
-
-let test_keeper_bash_cat_dev_null_executes () =
-  with_eio_fs @@ fun () ->
-  let base_path, config = make_config () in
-  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
-  Keeper_registry.clear ();
-  let meta = make_readonly_meta "dev-null-cat" in
-  let playground = Filename.concat base_path (playground_path_of meta.name) in
-  ensure_dir playground;
-  let raw =
-    Keeper_exec_shell.handle_keeper_bash
-      ~turn_sandbox_factory:None
-      ~turn_sandbox_factory_git:None ~exec_cache:None
-      ~config ~meta
-      ~args:
-        (`Assoc
-           [ "cmd", `String "cat /dev/null"
-           ; "cwd", `String playground
-           ])
-      ()
-  in
-  let json = Yojson.Safe.from_string raw in
-  Alcotest.(check bool) "cat /dev/null succeeds" true
-    (json |> Json.member "ok" |> Json.to_bool);
-  Alcotest.(check string) "cat /dev/null output" ""
-    (json |> Json.member "output" |> Json.to_string)
-
-let test_keeper_bash_task_state_file_probe_uses_task_tools () =
-  with_eio_fs @@ fun () ->
-  let base_path, config = make_config () in
-  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
-  Keeper_registry.clear ();
-  let meta = make_readonly_meta "task-file-probe" in
-  let _ = Coord.init config ~agent_name:(Some meta.name) in
-  let playground = Filename.concat base_path (playground_path_of meta.name) in
-  ensure_dir playground;
-  let raw =
-    Keeper_exec_shell.handle_keeper_bash
-      ~turn_sandbox_factory:None
-      ~turn_sandbox_factory_git:None ~exec_cache:None
-      ~config ~meta
-      ~args:
-        (`Assoc
-           [ ( "cmd"
-             , `String "cat repos/masc-mcp/.worktrees/task-362/.task.json"
-             )
-           ; ("cwd", `String playground)
-           ])
-      ()
-  in
-  let json = Yojson.Safe.from_string raw in
-  Alcotest.(check bool) "task file probe succeeds via autoroute" true
-    (json |> Json.member "ok" |> Json.to_bool);
-  Alcotest.(check bool) "task file probe is autorouted" true
-    (json |> Json.member "auto_routed" |> Json.to_bool);
-  Alcotest.(check string) "autorouted to tasks list"
-    "keeper_tasks_list"
-    (json |> Json.member "auto_routed_to_tool" |> Json.to_string);
-  Alcotest.(check string) "original error preserved"
-    "task_state_file_probe_blocked"
-    (json |> Json.member "original_error" |> Json.to_string);
-  Alcotest.(check bool) "instruction points to keeper_tasks_list" true
-    (String_util.contains_substring
-       (json |> Json.member "instruction" |> Json.to_string)
-       "keeper_tasks_list");
-  Alcotest.(check (option string)) "not returned as bash error" None
-    (parse_error_field raw)
-
-let test_keeper_bash_unrelated_task_json_is_not_task_state_probe () =
-  with_eio_fs @@ fun () ->
-  let base_path, config = make_config () in
-  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
-  Keeper_registry.clear ();
-  let meta = make_readonly_meta "repo-task-json" in
-  let playground = Filename.concat base_path (playground_path_of meta.name) in
-  let src_dir = Filename.concat playground "src" in
-  ensure_dir src_dir;
-  let oc = open_out (Filename.concat src_dir ".task.json") in
-  Fun.protect
-    ~finally:(fun () -> close_out_noerr oc)
-    (fun () -> output_string oc "{\"local\":true}\n");
-  let raw =
-    Keeper_exec_shell.handle_keeper_bash
-      ~turn_sandbox_factory:None
-      ~turn_sandbox_factory_git:None ~exec_cache:None
-      ~config ~meta
-      ~args:
-        (`Assoc
-           [ ("cmd", `String "cat src/.task.json")
-           ; ("cwd", `String playground)
-           ])
-      ()
-  in
-  let json = Yojson.Safe.from_string raw in
-  Alcotest.(check bool) "unrelated .task.json read succeeds" true
-    (json |> Json.member "ok" |> Json.to_bool);
-  Alcotest.(check (option string)) "not treated as task-state probe" None
-    (parse_error_field raw)
-
-let test_keeper_bash_unrelated_current_task_json_is_not_task_state_probe () =
-  with_eio_fs @@ fun () ->
-  let base_path, config = make_config () in
-  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
-  Keeper_registry.clear ();
-  let meta = make_readonly_meta "repo-current-task-json" in
-  let playground = Filename.concat base_path (playground_path_of meta.name) in
-  let src_dir = Filename.concat playground "src" in
-  ensure_dir src_dir;
-  let oc = open_out (Filename.concat src_dir "current_task.json") in
-  Fun.protect
-    ~finally:(fun () -> close_out_noerr oc)
-    (fun () -> output_string oc "{\"local\":true}\n");
-  let raw =
-    Keeper_exec_shell.handle_keeper_bash
-      ~turn_sandbox_factory:None
-      ~turn_sandbox_factory_git:None ~exec_cache:None
-      ~config ~meta
-      ~args:
-        (`Assoc
-           [ ("cmd", `String "cat src/current_task.json")
-           ; ("cwd", `String playground)
-           ])
-      ()
-  in
-  let json = Yojson.Safe.from_string raw in
-  Alcotest.(check bool) "unrelated current_task.json read succeeds" true
-    (json |> Json.member "ok" |> Json.to_bool);
-  Alcotest.(check (option string)) "not treated as task-state probe" None
-    (parse_error_field raw)
-
-let test_keeper_bash_safe_fallback_does_not_unblock_repo_scan () =
-  with_eio_fs @@ fun () ->
-  let base_path, config = make_config () in
-  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
-  Keeper_registry.clear ();
-  let meta = make_readonly_meta "fallback-repo-scan" in
-  let playground = Filename.concat base_path (playground_path_of meta.name) in
-  ensure_dir (Filename.concat playground "repos");
-  let raw =
-    Keeper_exec_shell.handle_keeper_bash
-      ~turn_sandbox_factory:None
-      ~turn_sandbox_factory_git:None ~exec_cache:None
-      ~config ~meta
-      ~args:
-        (`Assoc
-           [ ( "cmd"
-             , `String
-                 "find repos/ -maxdepth 3 -name .worktrees 2>/dev/null || echo none"
-             )
-           ; ("cwd", `String playground)
-           ])
-      ()
-  in
-  let json = Yojson.Safe.from_string raw in
-  Alcotest.(check (option string)) "repo scan remains blocked"
-    (Some "keeper_bash_command_shape_blocked") (parse_error_field raw);
-  Alcotest.(check string) "shape block"
-    "repo_wide_scan"
-    (json |> Json.member "shape_block" |> Json.to_string)
-
-let test_keeper_bash_task_state_http_probe_uses_task_tools () =
-  with_eio_fs @@ fun () ->
-  let base_path, config = make_config () in
-  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
-  Keeper_registry.clear ();
-  let meta = make_write_enabled_meta "task-http-probe" in
-  let _ = Coord.init config ~agent_name:(Some meta.name) in
-  let playground = Filename.concat base_path (playground_path_of meta.name) in
-  ensure_dir playground;
-  let raw =
-    Keeper_exec_shell.handle_keeper_bash
-      ~turn_sandbox_factory:None
-      ~turn_sandbox_factory_git:None ~exec_cache:None
-      ~config ~meta
-      ~args:
-        (`Assoc
-           [ ( "cmd"
-             , `String
-                 "curl -s http://localhost:8080/api/tasks?status=awaiting_verification"
-             )
-           ; ("cwd", `String playground)
-           ])
-      ()
-  in
-  let json = Yojson.Safe.from_string raw in
-  Alcotest.(check bool) "localhost task probe succeeds via autoroute" true
-    (json |> Json.member "ok" |> Json.to_bool);
-  Alcotest.(check bool) "localhost task probe is autorouted" true
-    (json |> Json.member "auto_routed" |> Json.to_bool);
-  Alcotest.(check string) "autorouted to tasks list"
-    "keeper_tasks_list"
-    (json |> Json.member "auto_routed_to_tool" |> Json.to_string);
-  Alcotest.(check string) "original error preserved"
-    "task_state_http_probe_blocked"
-    (json |> Json.member "original_error" |> Json.to_string);
-  Alcotest.(check bool) "instruction points to keeper_tasks_list" true
-    (String_util.contains_substring
-       (json |> Json.member "instruction" |> Json.to_string)
-       "keeper_tasks_list");
-  Alcotest.(check (option string)) "not returned as bash error" None
-    (parse_error_field raw)
-
-let test_keeper_bash_echo_task_api_url_is_not_http_probe () =
-  with_eio_fs @@ fun () ->
-  let base_path, config = make_config () in
-  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
-  Keeper_registry.clear ();
-  let meta = make_readonly_meta "task-api-echo" in
-  let playground = Filename.concat base_path (playground_path_of meta.name) in
-  ensure_dir playground;
-  let raw =
-    Keeper_exec_shell.handle_keeper_bash
-      ~turn_sandbox_factory:None
-      ~turn_sandbox_factory_git:None ~exec_cache:None
-      ~config ~meta
-      ~args:
-        (`Assoc
-           [ ( "cmd"
-             , `String
-                 "echo http://localhost:8080/api/tasks?status=awaiting_verification"
-             )
-           ; ("cwd", `String playground)
-           ])
-      ()
-  in
-  let json = Yojson.Safe.from_string raw in
-  Alcotest.(check bool) "echo containing task API URL succeeds" true
-    (json |> Json.member "ok" |> Json.to_bool);
-  Alcotest.(check (option string)) "not treated as task HTTP probe" None
-    (parse_error_field raw)
-
-let test_keeper_bash_safe_head_pipeline_executes_cd_scoped_grep () =
-  with_eio_fs @@ fun () ->
-  let base_path, config = make_config () in
-  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
-  Keeper_registry.clear ();
-  let meta = make_readonly_meta "search-pipeline" in
-  let playground = Filename.concat base_path (playground_path_of meta.name) in
-  let lib_dir = Filename.concat playground "repos/masc-mcp/lib" in
-  ensure_dir lib_dir;
-  ignore
-    (Fs_compat.save_file_atomic
-       (Filename.concat lib_dir "exec_semantic.ml")
-       "let exec_semantic_marker = true\n");
-  let raw =
-    Keeper_exec_shell.handle_keeper_bash
-      ~turn_sandbox_factory:None
-      ~turn_sandbox_factory_git:None ~exec_cache:None
-      ~config ~meta
-      ~args:
-        (`Assoc
-           [ ( "cmd"
-             , `String
-                 "cd repos/masc-mcp && grep -rn \"exec_semantic\" lib/ --include=\"*.ml\" | head -40"
-             )
-           ; ("cwd", `String playground)
-           ])
-      ()
-  in
-  let json = Yojson.Safe.from_string raw in
-  Alcotest.(check bool) "safe grep | head succeeds" true
-    (json |> Json.member "ok" |> Json.to_bool);
-  Alcotest.(check bool) "grep output is preserved" true
-    (json
-     |> Json.member "output"
-     |> Json.to_string
-     |> fun output -> String_util.contains_substring output "exec_semantic_marker")
-
-let test_keeper_bash_safe_head_pipeline_executes_scoped_find () =
-  with_eio_fs @@ fun () ->
-  let base_path, config = make_config () in
-  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
-  Keeper_registry.clear ();
-  let meta = make_readonly_meta "find-pipeline" in
-  let playground = Filename.concat base_path (playground_path_of meta.name) in
-  let worktree =
-    Filename.concat playground
-      "repos/masc-mcp/.worktrees/keeper-umberto-agent-task-343"
-  in
-  ensure_dir worktree;
-  ignore
-    (Fs_compat.save_file_atomic
-       (Filename.concat worktree "needle.ml")
-       "let needle = true\n");
-  ignore
-    (Fs_compat.save_file_atomic
-       (Filename.concat worktree "needle.mli")
-       "val needle : bool\n");
-  let raw =
-    Keeper_exec_shell.handle_keeper_bash
-      ~turn_sandbox_factory:None
-      ~turn_sandbox_factory_git:None ~exec_cache:None
-      ~config ~meta
-      ~args:
-        (`Assoc
-           [ ( "cmd"
-             , `String
-                 "find repos/masc-mcp/.worktrees/keeper-umberto-agent-task-343 -name \"*.ml\" -o -name \"*.mli\" | head -30"
-             )
-           ; ("cwd", `String playground)
-           ])
-      ()
-  in
-  let json = Yojson.Safe.from_string raw in
-  Alcotest.(check bool) "safe find | head succeeds" true
-    (json |> Json.member "ok" |> Json.to_bool);
-  let output = json |> Json.member "output" |> Json.to_string in
-  Alcotest.(check bool) "find output includes ml file" true
-    (String_util.contains_substring output "needle.ml");
-  Alcotest.(check bool) "find output includes mli file" true
-    (String_util.contains_substring output "needle.mli")
-
 let test_keeper_shell_find_accepts_name_alias () =
   with_eio_fs @@ fun () ->
   let base_path, config = make_config () in
@@ -1810,12 +628,12 @@ let test_keeper_shell_ls_recovers_doubled_playground_prefix () =
   Alcotest.(check string) "path normalized to repos root" repos
     (json |> Json.member "path" |> Json.to_string)
 
-let test_keeper_shell_bash_op_is_deprecated () =
+let test_keeper_shell_bash_op_is_unsupported () =
   with_eio_fs @@ fun () ->
   let base_path, config = make_config () in
   Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
   Keeper_registry.clear ();
-  let meta = make_readonly_meta "bash-deprecated" in
+  let meta = make_readonly_meta "bash-unsupported" in
   let raw =
     Keeper_exec_shell.handle_keeper_shell
       ~turn_sandbox_factory:None ~exec_cache:None
@@ -1825,17 +643,12 @@ let test_keeper_shell_bash_op_is_deprecated () =
         ("command", `String "git status && git log --oneline -5");
       ])
   in
-  Alcotest.(check (option string)) "error is deprecation"
-    (Some "keeper_shell_bash_deprecated") (parse_error_field raw);
-  (match parse_hint raw with
-   | None -> Alcotest.fail ("expected hint field, got: " ^ raw)
-   | Some hint ->
-     Alcotest.(check bool) "hint points to Bash alias" true
-       (String_util.contains_substring hint "Bash");
-     Alcotest.(check bool) "hint avoids internal keeper_bash" false
-       (String_util.contains_substring hint "keeper_bash");
-     Alcotest.(check bool) "hint avoids internal keeper_shell" false
-       (String_util.contains_substring hint "keeper_shell"))
+  Alcotest.(check (option string)) "error is unsupported"
+    (Some "unsupported_op") (parse_error_field raw);
+  let json = Yojson.Safe.from_string raw in
+  let supported_ops = json |> Json.member "supported_ops" |> Json.to_list in
+  Alcotest.(check bool) "bash not supported" false
+    (List.mem (`String "bash") supported_ops)
 
 let test_keeper_shell_bash_op_does_not_execute () =
   with_eio_fs @@ fun () ->
@@ -1857,9 +670,9 @@ let test_keeper_shell_bash_op_does_not_execute () =
         ("command", `String "touch should-not-exist");
       ])
   in
-  Alcotest.(check (option string)) "error is deprecation"
-    (Some "keeper_shell_bash_deprecated") (parse_error_field raw);
-  Alcotest.(check bool) "legacy bash op did not execute" false
+  Alcotest.(check (option string)) "error is unsupported"
+    (Some "unsupported_op") (parse_error_field raw);
+  Alcotest.(check bool) "bash op did not execute" false
     (Sys.file_exists marker)
 
 let test_git_write_classification () =
@@ -1946,16 +759,17 @@ let test_rewrite_docker_container_paths_for_host_validation () =
   let host_repo = Filename.concat (Filename.concat host_root "repos") "masc-mcp" in
   let container_root = Keeper_sandbox.container_root meta.name in
   let input =
-    Printf.sprintf "cd %s/repos/masc-mcp && git log --oneline -5\n" container_root
+    Printf.sprintf "git -C %s/repos/masc-mcp log --oneline -5\n" container_root
   in
   Alcotest.(check bool) "raw container path is outside host workdir" true
     (is_error (Masc_mcp.Worker_dev_tools.validate_command_paths ~workdir:host_repo input));
+  ensure_dir host_repo;
   let rewritten =
     Keeper_shell_docker.rewrite_docker_command_paths_for_host_validation
       ~config ~meta input
   in
   Alcotest.(check string) "container root rewritten to host root for validation"
-    (Printf.sprintf "cd %s/repos/masc-mcp && git log --oneline -5\n" host_root)
+    (Printf.sprintf "git -C %s/repos/masc-mcp log --oneline -5\n" host_root)
     rewritten;
   Alcotest.(check bool) "rewritten path validates under host workdir" true
     (is_ok
@@ -1963,141 +777,25 @@ let test_rewrite_docker_container_paths_for_host_validation () =
 
 (* ── Negative / error-path tests (task-034) ──────────────────────── *)
 
-let test_bash_missing_cmd_field () =
+let test_bash_missing_typed_input_field () =
   with_eio_fs @@ fun () ->
   let base_path, config = make_config () in
   Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
   Keeper_registry.clear ();
-  let meta = make_docker_meta "missing-cmd" in
+  let meta = make_docker_meta "missing-typed-input" in
   let raw =
     Keeper_exec_shell.handle_keeper_bash
       ~turn_sandbox_factory:None
       ~turn_sandbox_factory_git:None ~exec_cache:None
       ~config ~meta
-      ~args:(`Assoc [ ("run_in_background", `Bool false) ]) ()
+      ~args:(`Assoc []) ()
   in
   match parse_error_field raw with
   | Some err ->
-      Alcotest.(check bool) "error mentions cmd is required" true
-        (String_util.contains_substring err "cmd is required")
+      Alcotest.(check bool) "error mentions typed input is required" true
+        (String_util.contains_substring err "typed keeper_bash input is required")
   | None ->
-      Alcotest.fail ("expected error json for missing cmd field, got: " ^ raw)
-
-let test_bash_blocks_direct_masc_tool_command () =
-  with_eio_fs @@ fun () ->
-  let base_path, config = make_config () in
-  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
-  Keeper_registry.clear ();
-  let meta = make_docker_meta "direct-tool-command" in
-  let raw =
-    Keeper_exec_shell.handle_keeper_bash
-      ~turn_sandbox_factory:None
-      ~turn_sandbox_factory_git:None ~exec_cache:None
-      ~config ~meta
-      ~args:(`Assoc [ ("cmd", `String "keeper_tasks_list") ]) ()
-  in
-  let json = Yojson.Safe.from_string raw in
-  Alcotest.(check (option string))
-    "error"
-    (Some "tool_invoked_as_shell_command")
-    (Json.member "error" json |> Json.to_string_option);
-  Alcotest.(check (option string))
-    "failure class"
-    (Some "workflow_rejection")
-    (Json.member "failure_class" json |> Json.to_string_option);
-  Alcotest.(check (option string))
-    "suggested tool"
-    (Some "keeper_tasks_list")
-    (Json.member "suggested_tool" json |> Json.to_string_option);
-  Alcotest.(check bool)
-    "hint says direct tool call"
-    true
-    (String_util.contains_substring
-       (Json.member "hint" json |> Json.to_string)
-       "keeper_tasks_list tool");
-  Alcotest.(check (option string))
-    "required next tool"
-    (Some "keeper_tasks_list")
-    (Json.member "required_next_tool" json |> Json.to_string_option);
-  Alcotest.(check (option string))
-    "do not retry bash"
-    (Some "keeper_bash")
-    (Json.member "do_not_retry_tool" json |> Json.to_string_option);
-  let recovery_plan = Json.member "recovery_plan" json in
-  Alcotest.(check (option string))
-    "recovery plan points to tool"
-    (Some "keeper_tasks_list")
-    (Json.member "next_tool" recovery_plan |> Json.to_string_option);
-  let raw =
-    Keeper_exec_shell.handle_keeper_bash
-      ~turn_sandbox_factory:None
-      ~turn_sandbox_factory_git:None ~exec_cache:None
-      ~config ~meta
-      ~args:(`Assoc [ ("cmd", `String "keeper_missing_from_policy") ]) ()
-  in
-  let json = Yojson.Safe.from_string raw in
-  Alcotest.(check (option string))
-    "tool-like command error"
-    (Some "tool_invoked_as_shell_command")
-    (Json.member "error" json |> Json.to_string_option);
-  Alcotest.(check bool)
-    "non-visible tool-like command still blocked"
-    false
-    (Json.member "tool_policy_visible" json |> Json.to_bool);
-  Alcotest.(check (option string))
-    "non-visible still suppresses bash retry"
-    (Some "keeper_bash")
-    (Json.member "do_not_retry_tool" json |> Json.to_string_option);
-  Alcotest.(check (option string))
-    "non-visible does not require unavailable tool"
-    None
-    (Json.member "required_next_tool" json |> Json.to_string_option)
-
-let test_bash_blocks_gh_pr_list_with_native_pr_hint () =
-  with_eio_fs @@ fun () ->
-  Alcotest.(check bool)
-    "prose is not a native PR command"
-    true
-    (Option.is_none
-       (Keeper_shell_words.cmd_gh_pr_native_subcommand "echo gh pr list"));
-  let base_path, config = make_config () in
-  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
-  Keeper_registry.clear ();
-  let meta = make_docker_meta "gh-pr-list-native-hint" in
-  let raw =
-    Keeper_exec_shell.handle_keeper_bash
-      ~turn_sandbox_factory:None
-      ~turn_sandbox_factory_git:None ~exec_cache:None
-      ~config ~meta
-      ~args:
-        (`Assoc
-           [ ( "cmd"
-             , `String
-                 "gh pr list --repo jeong-sik/masc-mcp --state open --limit 10"
-             )
-           ])
-      ()
-  in
-  let json = Yojson.Safe.from_string raw in
-  let diagnosis = Json.member "diagnosis" json in
-  Alcotest.(check (option string))
-    "error"
-    (Some "command_blocked")
-    (Json.member "error" json |> Json.to_string_option);
-  Alcotest.(check (option string))
-    "rule id"
-    (Some "gh_pr_list_requires_keeper_pr_list")
-    (Json.member "rule_id" diagnosis |> Json.to_string_option);
-  Alcotest.(check (option string))
-    "tool suggestion"
-    (Some "keeper_pr_list")
-    (Json.member "tool_suggestion" diagnosis |> Json.to_string_option);
-  Alcotest.(check bool)
-    "hint names native PR list tool"
-    true
-    (String_util.contains_substring
-       (Json.member "hint" json |> Json.to_string)
-       "keeper_pr_list")
+      Alcotest.fail ("expected error json for missing typed input field, got: " ^ raw)
 
 let test_shell_missing_op_field () =
   with_eio_fs @@ fun () ->
@@ -2141,162 +839,142 @@ let test_shell_unsupported_op () =
       Alcotest.fail ("expected error json for unsupported op, got: " ^ raw)
 
 let () =
-  Alcotest.run "Keeper bash safety" [
-    ("allowlist", [
-      Alcotest.test_case "allowed dev commands pass" `Quick test_allowed_commands;
-      Alcotest.test_case "dangerous commands blocked" `Quick test_blocked_commands;
-    ]);
-    ("metachar", [
-      Alcotest.test_case "shell metacharacters blocked" `Quick test_shell_metachar_blocked;
-    ]);
-    ("write_gate", [
-      Alcotest.test_case "write operations detected" `Quick test_write_ops_detected;
-      Alcotest.test_case "read operations pass" `Quick test_read_ops_pass;
-    ]);
-    ("playground_guard", [
-      Alcotest.test_case "playground path structure" `Quick test_playground_path_structure;
-      Alcotest.test_case "inside playground detected" `Quick test_playground_guard_inside;
-      Alcotest.test_case "outside playground rejected" `Quick test_playground_guard_outside;
-      Alcotest.test_case "trailing slash normalized" `Quick test_playground_guard_trailing_slash;
-      Alcotest.test_case "symlink escape rejected" `Quick test_playground_guard_symlink_escape;
-      Alcotest.test_case "cleanup does not follow symlinks" `Quick
-        test_cleanup_dir_does_not_follow_symlinks;
-      Alcotest.test_case "path traversal blocked after canonicalization" `Quick test_playground_guard_traversal;
-      Alcotest.test_case "git write classification" `Quick test_git_write_classification;
-    ]);
-    ("edge", [
-      Alcotest.test_case "elapsed duration preserves positive sub-ms" `Quick
-        test_keeper_bash_elapsed_duration_preserves_positive_sub_ms;
-      Alcotest.test_case "keeper_bash timeout floor avoids 1s I/O failures" `Quick
-        test_keeper_bash_timeout_floor_is_not_sub_io_latency;
-      Alcotest.test_case "shape guard parses quoted metachar literals" `Quick
-        test_keeper_bash_shape_uses_shell_ir_for_quoted_literals;
-      Alcotest.test_case "Shell IR parse-failure shape fallback is quote-aware"
-        `Quick
-        test_keeper_bash_shell_ir_parse_failure_shape_fallback_is_quote_aware;
-      Alcotest.test_case "stderr devnull strip preserves post-background redirect"
-        `Quick
-        test_stderr_dev_null_strip_preserves_post_background_redirect;
-      Alcotest.test_case "task-state shell paths get task-tool hint" `Quick
-        test_keeper_bash_task_state_hint_uses_task_tools;
-      Alcotest.test_case "task-state discovery gets task-tool hint" `Quick
-        test_keeper_bash_task_state_discovery_hint_uses_task_tools;
-      Alcotest.test_case "repo-wide scans blocked" `Quick
-        test_keeper_bash_blocks_repo_wide_scans;
-      Alcotest.test_case "repo-wide scan hints use structured tools" `Quick
-        test_keeper_bash_repo_wide_scan_hints_use_structured_tools;
-      Alcotest.test_case "repo-wide recovery plans carry native args" `Quick
-        test_keeper_bash_repo_wide_recovery_plan_carries_native_args;
-      Alcotest.test_case "empty command blocked" `Quick test_empty_command;
-      Alcotest.test_case "docker blocks nested docker command" `Quick
-        test_docker_blocks_nested_docker_command;
-      Alcotest.test_case "docker blocks docker socket reference" `Quick
-        test_docker_blocks_docker_socket_reference;
-      Alcotest.test_case "nested runtime detector ignores commit messages" `Quick
-        test_nested_runtime_detector_ignores_git_commit_message;
-      Alcotest.test_case "command substitution trips docker guard" `Quick
-        test_docker_nested_guard_blocks_command_substitution;
-      Alcotest.test_case "path-prefixed runtime trips docker guard" `Quick
-        test_docker_nested_guard_blocks_path_prefixed_runtime;
-      Alcotest.test_case "docker blocks raw gh pr create" `Quick
-        test_docker_blocks_raw_gh_pr_create;
-      Alcotest.test_case "docker blocks chained gh pr create" `Quick
-        test_docker_blocks_chained_gh_pr_create;
-      Alcotest.test_case "docker blocks newline gh pr create" `Quick
-        test_docker_blocks_newline_gh_pr_create;
-      Alcotest.test_case "docker blocks env-wrapped gh pr create" `Quick
-        test_docker_blocks_env_wrapped_gh_pr_create;
-      Alcotest.test_case "docker blocks command-wrapped gh pr create" `Quick
-        test_docker_blocks_command_wrapped_gh_pr_create;
-      Alcotest.test_case "docker allows gh pr create prose" `Quick
-        test_docker_allows_gh_pr_create_prose;
-      Alcotest.test_case "docker missing seccomp fails closed" `Quick
-        test_docker_missing_seccomp_profile_fails_closed;
-    ]);
-    ("typed_shell_ir", [
-      Alcotest.test_case "typed exec runs via Shell IR" `Quick
-        test_keeper_bash_typed_exec_runs_via_shell_ir;
-      Alcotest.test_case "typed pipeline runs via Shell IR" `Quick
-        test_keeper_bash_typed_pipeline_runs_via_shell_ir;
-      Alcotest.test_case "typed docker dispatch requires factory" `Quick
-        test_keeper_bash_typed_docker_requires_factory;
-    ]);
-    ("readonly_hints", [
-      Alcotest.test_case "safe dev-null echo fallback executes primary" `Quick
-        test_keeper_bash_safe_dev_null_echo_fallback_executes_primary;
-      Alcotest.test_case "safe dev-null redirect executes scoped ls" `Quick
-        test_keeper_bash_safe_dev_null_redirect_executes_scoped_ls;
-      Alcotest.test_case "safe fallback works for write-enabled keeper" `Quick
-        test_keeper_bash_safe_fallback_works_for_write_enabled_keeper;
-      Alcotest.test_case "safe cd fallback executes scoped read" `Quick
-        test_keeper_bash_safe_cd_fallback_executes_scoped_read;
-      Alcotest.test_case "safe pwd fallback executes scoped ls" `Quick
-        test_keeper_bash_safe_pwd_fallback_executes_scoped_ls;
-      Alcotest.test_case "safe pwd fallback executes head pipeline" `Quick
-        test_keeper_bash_safe_pwd_fallback_executes_head_pipeline;
-      Alcotest.test_case "safe pwd fallback does not unblock writes" `Quick
-        test_keeper_bash_pwd_fallback_does_not_unblock_writes;
-      Alcotest.test_case "single repo root recovers top-level find" `Quick
-        test_keeper_bash_single_repo_root_recovers_top_level_find;
-      Alcotest.test_case "double repo prefix gets public Bash recovery plan" `Quick
-        test_keeper_bash_blocks_doubled_repo_prefix_with_public_alias_plan;
-      Alcotest.test_case "safe rg fallback allows escaped regex pipe" `Quick
-        test_keeper_bash_safe_rg_fallback_allows_escaped_regex_pipe;
-      Alcotest.test_case "safe dev-null redirect executes scoped grep" `Quick
-        test_keeper_bash_safe_dev_null_redirect_executes_scoped_grep;
-      Alcotest.test_case "safe head pipeline executes scoped cat" `Quick
-        test_keeper_bash_safe_head_pipeline_executes_scoped_cat;
-      Alcotest.test_case "cat /dev/null executes" `Quick
-        test_keeper_bash_cat_dev_null_executes;
-      Alcotest.test_case "task-state file probe uses task tools" `Quick
-        test_keeper_bash_task_state_file_probe_uses_task_tools;
-      Alcotest.test_case "unrelated .task.json is normal file" `Quick
-        test_keeper_bash_unrelated_task_json_is_not_task_state_probe;
-      Alcotest.test_case "unrelated current_task.json is normal file" `Quick
-        test_keeper_bash_unrelated_current_task_json_is_not_task_state_probe;
-      Alcotest.test_case "safe fallback does not unblock repo scan" `Quick
-        test_keeper_bash_safe_fallback_does_not_unblock_repo_scan;
-      Alcotest.test_case "task-state localhost probe uses task tools" `Quick
-        test_keeper_bash_task_state_http_probe_uses_task_tools;
-      Alcotest.test_case "echo task API URL is normal output" `Quick
-        test_keeper_bash_echo_task_api_url_is_not_http_probe;
-      Alcotest.test_case "safe head pipeline executes cd-scoped grep" `Quick
-        test_keeper_bash_safe_head_pipeline_executes_cd_scoped_grep;
-      Alcotest.test_case "safe head pipeline executes scoped find" `Quick
-        test_keeper_bash_safe_head_pipeline_executes_scoped_find;
-      Alcotest.test_case "find accepts name alias" `Quick
-        test_keeper_shell_find_accepts_name_alias;
-      Alcotest.test_case "doubled playground prefix auto-recovers" `Quick
-        test_keeper_shell_ls_recovers_doubled_playground_prefix;
-      Alcotest.test_case "op=bash is deprecated" `Quick
-        test_keeper_shell_bash_op_is_deprecated;
-      Alcotest.test_case "op=bash does not execute" `Quick
-        test_keeper_shell_bash_op_does_not_execute;
-    ]);
-    ("rg_exit_code", [
-      Alcotest.test_case "rg exit semantics (0=ok, 1=ok, 2+=error)" `Quick test_rg_exit_code_semantics;
-    ]);
-    ("git_worktree_op", [
-      Alcotest.test_case "action normalization" `Quick test_git_worktree_action_normalization;
-      Alcotest.test_case "branch required for add" `Quick test_git_worktree_branch_required;
-    ]);
-    ("turn_runtime_paths", [
-      Alcotest.test_case "container paths rewrite to host paths" `Quick
-        test_rewrite_turn_runtime_paths_to_host;
-      Alcotest.test_case "unrelated paths remain unchanged" `Quick
-        test_rewrite_turn_runtime_paths_to_host_is_noop_without_container_path;
-      Alcotest.test_case "docker commands rewrite host paths to container paths" `Quick
-        test_rewrite_docker_host_paths_to_container;
-      Alcotest.test_case "docker container paths validate as host paths" `Quick
-        test_rewrite_docker_container_paths_for_host_validation;
-    ]);
-    ("negative_path", [
-      Alcotest.test_case "missing cmd field" `Quick test_bash_missing_cmd_field;
-      Alcotest.test_case "direct MASC tool command blocked" `Quick
-        test_bash_blocks_direct_masc_tool_command;
-      Alcotest.test_case "raw gh pr list suggests keeper_pr_list" `Quick
-        test_bash_blocks_gh_pr_list_with_native_pr_hint;
-      Alcotest.test_case "missing op field" `Quick test_shell_missing_op_field;
-      Alcotest.test_case "unsupported op" `Quick test_shell_unsupported_op;
-    ]);
-  ]
+  Alcotest.run
+    "Keeper bash safety"
+    [ ( "allowlist"
+      , [ Alcotest.test_case "allowed dev commands pass" `Quick test_allowed_commands
+        ; Alcotest.test_case "dangerous commands blocked" `Quick test_blocked_commands
+        ] )
+    ; ( "metachar"
+      , [ Alcotest.test_case
+            "shell metacharacters blocked"
+            `Quick
+            test_shell_metachar_blocked
+        ] )
+    ; ( "write_gate"
+      , [ Alcotest.test_case "write operations detected" `Quick test_write_ops_detected
+        ; Alcotest.test_case "read operations pass" `Quick test_read_ops_pass
+        ] )
+    ; ( "playground_guard"
+      , [ Alcotest.test_case
+            "playground path structure"
+            `Quick
+            test_playground_path_structure
+        ; Alcotest.test_case
+            "inside playground detected"
+            `Quick
+            test_playground_guard_inside
+        ; Alcotest.test_case
+            "outside playground rejected"
+            `Quick
+            test_playground_guard_outside
+        ; Alcotest.test_case
+            "trailing slash normalized"
+            `Quick
+            test_playground_guard_trailing_slash
+        ; Alcotest.test_case
+            "symlink escape rejected"
+            `Quick
+            test_playground_guard_symlink_escape
+        ; Alcotest.test_case
+            "cleanup does not follow symlinks"
+            `Quick
+            test_cleanup_dir_does_not_follow_symlinks
+        ; Alcotest.test_case
+            "path traversal blocked after canonicalization"
+            `Quick
+            test_playground_guard_traversal
+        ; Alcotest.test_case "git write classification" `Quick test_git_write_classification
+        ] )
+    ; ( "edge"
+      , [ Alcotest.test_case
+            "elapsed duration preserves positive sub-ms"
+            `Quick
+            test_keeper_bash_elapsed_duration_preserves_positive_sub_ms
+        ; Alcotest.test_case
+            "keeper_bash timeout floor avoids 1s I/O failures"
+            `Quick
+            test_keeper_bash_timeout_floor_is_not_sub_io_latency
+        ; Alcotest.test_case
+            "nested runtime detector ignores commit messages"
+            `Quick
+            test_nested_runtime_detector_ignores_git_commit_message
+        ; Alcotest.test_case
+            "command substitution trips docker guard"
+            `Quick
+            test_docker_nested_guard_blocks_command_substitution
+        ; Alcotest.test_case
+            "path-prefixed runtime trips docker guard"
+            `Quick
+            test_docker_nested_guard_blocks_path_prefixed_runtime
+        ] )
+    ; ( "typed_shell_ir"
+      , [ Alcotest.test_case
+            "typed process runs via Shell IR"
+            `Quick
+            test_keeper_bash_typed_process_runs_via_shell_ir
+        ; Alcotest.test_case
+            "typed pipeline runs via Shell IR"
+            `Quick
+            test_keeper_bash_typed_pipeline_runs_via_shell_ir
+        ; Alcotest.test_case
+            "typed docker dispatch requires factory"
+            `Quick
+            test_keeper_bash_typed_docker_requires_factory
+        ] )
+    ; ( "keeper_shell"
+      , [ Alcotest.test_case
+            "find accepts name alias"
+            `Quick
+            test_keeper_shell_find_accepts_name_alias
+        ; Alcotest.test_case
+            "doubled playground prefix auto-recovers"
+            `Quick
+            test_keeper_shell_ls_recovers_doubled_playground_prefix
+        ; Alcotest.test_case
+            "op=bash is unsupported"
+            `Quick
+            test_keeper_shell_bash_op_is_unsupported
+        ; Alcotest.test_case
+            "op=bash does not execute"
+            `Quick
+            test_keeper_shell_bash_op_does_not_execute
+        ] )
+    ; ( "rg_exit_code"
+      , [ Alcotest.test_case
+            "rg exit semantics (0=ok, 1=ok, 2+=error)"
+            `Quick
+            test_rg_exit_code_semantics
+        ] )
+    ; ( "git_worktree_op"
+      , [ Alcotest.test_case "action normalization" `Quick test_git_worktree_action_normalization
+        ; Alcotest.test_case "branch required for add" `Quick test_git_worktree_branch_required
+        ] )
+    ; ( "turn_runtime_paths"
+      , [ Alcotest.test_case
+            "container paths rewrite to host paths"
+            `Quick
+            test_rewrite_turn_runtime_paths_to_host
+        ; Alcotest.test_case
+            "unrelated paths remain unchanged"
+            `Quick
+            test_rewrite_turn_runtime_paths_to_host_is_noop_without_container_path
+        ; Alcotest.test_case
+            "docker commands rewrite host paths to container paths"
+            `Quick
+            test_rewrite_docker_host_paths_to_container
+        ; Alcotest.test_case
+            "docker container paths validate as host paths"
+            `Quick
+            test_rewrite_docker_container_paths_for_host_validation
+        ] )
+    ; ( "negative_path"
+      , [ Alcotest.test_case
+            "missing typed input field"
+            `Quick
+            test_bash_missing_typed_input_field
+        ; Alcotest.test_case "missing op field" `Quick test_shell_missing_op_field
+        ; Alcotest.test_case "unsupported op" `Quick test_shell_unsupported_op
+        ] )
+    ]
+;;

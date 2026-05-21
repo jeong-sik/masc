@@ -49,6 +49,7 @@
   test_fd_accountant
   test_auth_login
   test_audit_log
+  test_system_log_category
   test_governance_anomaly
   test_http_negotiation
   test_mcp_h1_h2_admission_parity
@@ -64,6 +65,7 @@
   test_pool_cascade_storm
   test_keeper_turn_disposition
   test_keeper_turn_terminal_disposition_field
+  test_d7_retry_admission_gate
   test_keeper_reconcile_state
   test_attempt_state
   test_actor_mailbox
@@ -121,12 +123,15 @@
   test_keeper_health_probe
   test_oas_error_kind_counter
   test_cascade_error_classify_decoder
-  test_cascade_capacity_exhausted_cooldown
+  test_cascade_capacity_backpressure_cooldown
+  test_cascade_capacity_backpressure_synthetic_backoff
   test_oas_empty_response_diagnostic
   test_board_author_identity_10297
   test_fsm_drift_counter
   test_gc_sampler
   test_process_timeout_counter
+  test_timeout_floor
+  test_timeout_origin
   test_git_fetch_timeout_9587
   test_inference_utils
   test_auth_ambiguous_lookup_9786
@@ -254,6 +259,7 @@
   test_keeper_fs_edit_patch
   test_keeper_docker_read
   test_keeper_path_ssot
+  test_keeper_sandbox_boundary_policy
   test_keeper_egress_audit
   test_keeper_github_read_only
   test_worktree_live_context
@@ -279,6 +285,8 @@
   test_tool_deep_review
   test_tool_call_quality_benchmark
   test_keeper_prompt_metrics
+  test_keeper_prompt_personality_field_aggregation
+  test_keeper_prompt_constitution_fallback
   test_keeper_reaction_ledger
   test_cache_metrics_wiring
   test_keeper_bash_descriptor_variant
@@ -304,7 +312,6 @@
   test_keeper_state_machine_tla_correspondence
   test_keeper_lifecycle_hooks
   test_keeper_subprocess_registry
-  test_keeper_bg_task_cleanup
   test_keeper_social_model_magentic_ledger_fsm
   test_keeper_overflow_recovery
   test_telemetry_unified
@@ -321,12 +328,7 @@
   test_telemetry_observe
   test_keeper_typed_labels
   test_shell_ir_typed_review_followup
-  test_shell_command_gate
-  test_shell_gate_authority
   test_exec_shell_command_gate
-  test_shell_ir_validator
-  test_typed_advisor_counters
-  test_typed_authority_flag
   test_auth_resolve_labels
   test_keeper_classifier_helper
   test_persona_tool_reachability
@@ -342,6 +344,7 @@
   test_workspace_routes_keeper
   test_workspace_tree_exclusions
   test_provider_capability_matrix
+  test_provider_capability_required_action
   test_effect_evidence_source_path
   test_cognitive_gravity
   test_intentional_projection
@@ -369,6 +372,7 @@
   test_fd_accountant
   test_auth_login
   test_audit_log
+  test_system_log_category
   test_governance_anomaly
   test_http_negotiation
   test_mcp_h1_h2_admission_parity
@@ -384,6 +388,7 @@
   test_pool_cascade_storm
   test_keeper_turn_disposition
   test_keeper_turn_terminal_disposition_field
+  test_d7_retry_admission_gate
   test_keeper_reconcile_state
   test_attempt_state
   test_actor_mailbox
@@ -439,12 +444,15 @@
   test_keeper_health_probe
   test_oas_error_kind_counter
   test_cascade_error_classify_decoder
-  test_cascade_capacity_exhausted_cooldown
+  test_cascade_capacity_backpressure_cooldown
+  test_cascade_capacity_backpressure_synthetic_backoff
   test_oas_empty_response_diagnostic
   test_board_author_identity_10297
   test_fsm_drift_counter
   test_gc_sampler
   test_process_timeout_counter
+  test_timeout_floor
+  test_timeout_origin
   test_git_fetch_timeout_9587
   test_inference_utils
   test_auth_ambiguous_lookup_9786
@@ -572,6 +580,7 @@
   test_keeper_fs_edit_patch
   test_keeper_docker_read
   test_keeper_path_ssot
+  test_keeper_sandbox_boundary_policy
   test_keeper_egress_audit
   test_keeper_github_read_only
   test_worktree_live_context
@@ -600,6 +609,8 @@
   test_tool_deep_review
   test_tool_call_quality_benchmark
   test_keeper_prompt_metrics
+  test_keeper_prompt_personality_field_aggregation
+  test_keeper_prompt_constitution_fallback
   test_keeper_reaction_ledger
   test_cache_metrics_wiring
   test_keeper_bash_descriptor_variant
@@ -628,7 +639,6 @@
   test_keeper_sub_fsm_guards
   test_keeper_cascade_tla_mirror
   test_keeper_subprocess_registry
-  test_keeper_bg_task_cleanup
   test_keeper_social_model_magentic_ledger_fsm
   test_keeper_overflow_recovery
   test_telemetry_unified
@@ -645,12 +655,7 @@
   test_telemetry_observe
   test_keeper_typed_labels
   test_shell_ir_typed_review_followup
-  test_shell_command_gate
-  test_shell_gate_authority
   test_exec_shell_command_gate
-  test_shell_ir_validator
-  test_typed_advisor_counters
-  test_typed_authority_flag
   test_auth_resolve_labels
   test_keeper_classifier_helper
   test_persona_tool_reachability
@@ -665,6 +670,7 @@
   test_actionable_path_action
   test_stale_kill_class
   test_provider_capability_matrix
+  test_provider_capability_required_action
   test_provider_error
   test_keeper_synthetic_marker
   test_keeper_turn_fsm_wired_sites
@@ -781,13 +787,9 @@
   test_board_ttl
   test_worker_dev_tools
   test_keeper_path_check_error
-  test_shadow_parse
   test_destructive_class
-  test_path_rewrite_validation
   test_board_content_dedup
-  test_gate_diff
   test_legendary_counters
-  test_legendary_bash_bg_tasks_route
   test_oas_integration
   test_memory_oas_5tier
   test_verifier_oas_bridge
@@ -914,6 +916,7 @@
   test_keeper_safety_gates
   test_keeper_guards
   test_keeper_working_state
+  test_keeper_wip_admission
   test_eval_gate_evasion
   test_prompt_registry_defaults
   test_keeper_prompt_external
@@ -1011,13 +1014,9 @@
   test_board_ttl
   test_worker_dev_tools
   test_keeper_path_check_error
-  test_shadow_parse
   test_destructive_class
-  test_gate_diff
-  test_path_rewrite_validation
   test_board_content_dedup
   test_legendary_counters
-  test_legendary_bash_bg_tasks_route
   test_oas_integration
   test_memory_oas_5tier
   test_verifier_oas_bridge
@@ -1142,6 +1141,8 @@
   test_http_protocol_detect
   test_keeper_safety_gates
   test_keeper_guards
+  test_keeper_working_state
+  test_keeper_wip_admission
   test_eval_gate_evasion
   test_prompt_registry_defaults
   test_keeper_prompt_external
@@ -1255,7 +1256,6 @@
   test_tool_control_coverage
   test_tool_misc_coverage
   test_ag_ui_coverage
-  test_tool_suspend_coverage
   test_tool_code_coverage
   test_tool_code_write_coverage
   test_tool_code_read_containment
@@ -1315,7 +1315,6 @@
   test_tool_control_coverage
   test_tool_misc_coverage
   test_ag_ui_coverage
-  test_tool_suspend_coverage
   test_tool_code_coverage
   test_tool_code_write_coverage
   test_tool_code_read_containment
@@ -1577,6 +1576,8 @@
 (include stanzas/test_env_config_voice_bridge_timeouts.inc)
 
 (include stanzas/test_event_kind.inc)
+
+(include stanzas/test_export_symbol_graph.inc)
 
 (include stanzas/test_feature_flag_registry.inc)
 
@@ -2194,6 +2195,15 @@
 (test
  (name test_pr_i_2e_bootstrap_loops_typed)
  (modules test_pr_i_2e_bootstrap_loops_typed)
+ (libraries alcotest))
+
+; server_bootstrap_loops fork helper ratchet.
+; Pins raw Eio.Fiber.fork ownership to the cancel-safe helper instead
+; of repeating ad hoc crash wrappers at each background loop site.
+
+(test
+ (name test_server_bootstrap_loop_fork_helper)
+ (modules test_server_bootstrap_loop_fork_helper)
  (libraries alcotest))
 
 ; RFC-0084 PR-I-3 — legacy post-hook surface removal (final).

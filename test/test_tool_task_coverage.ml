@@ -1535,6 +1535,12 @@ let () =
     in
     assert result.Tool_result.success;
     assert (str_contains result.Tool_result.legacy_message "No eligible tasks available");
+    let open Yojson.Safe.Util in
+    assert (result.Tool_result.data |> member "diagnostics"
+            |> member "required_tool_excluded_count" |> to_int
+            = 1);
+    assert (result.Tool_result.data |> member "diagnostics"
+            |> member "agent_tool_names_known" |> to_bool);
     assert_task_todo ctx;
     assert (Planning_eio.get_current_task ctx.config = None))
 

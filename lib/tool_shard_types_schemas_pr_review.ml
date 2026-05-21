@@ -8,7 +8,7 @@ let keeper_pr_review_tools : Masc_domain.tool_schema list =
     ; description =
         "Read PR metadata, diff, reviews, and comments. Returns title, body, changed \
          files, review threads, and truncated diff (max 64KB). Read-only. Pass the PR \
-         number as `pr_number` (preferred) or `number` (legacy alias)."
+         number as `pr_number`."
     ; input_schema =
         `Assoc
           [ "type", `String "object"
@@ -22,19 +22,10 @@ let keeper_pr_review_tools : Masc_domain.tool_schema list =
                 ; ( "pr_number"
                   , `Assoc
                       [ "type", `String "integer"
-                      ; "description", `String "PR number (preferred field name)"
-                      ] )
-                ; ( "number"
-                  , `Assoc
-                      [ "type", `String "integer"
-                      ; "description", `String "PR number (legacy alias for pr_number)"
+                      ; "description", `String "PR number"
                       ] )
                 ] )
-          ; (* No `required` for the number — the handler reads either
-         pr_number or number and emits a clear error if both are
-         missing. Schema-level required=[number] rejected callers
-         that learned the historical pr_number key. *)
-            "required", `List [ `String "repo" ]
+          ; "required", `List [ `String "repo"; `String "pr_number" ]
           ]
     }
   ; { name = "keeper_pr_review_comment"
@@ -42,8 +33,7 @@ let keeper_pr_review_tools : Masc_domain.tool_schema list =
         "Submit a PR review with optional inline comments. Events: COMMENT, APPROVE, \
          REQUEST_CHANGES. Requires research, delivery, coding, or full preset. Use \
          REQUEST_CHANGES for actionable blockers; use APPROVE only when the draft proof \
-         preflight permits it. Pass the PR number as `pr_number` (preferred) or `number` \
-         (legacy alias)."
+         preflight permits it. Pass the PR number as `pr_number`."
     ; input_schema =
         `Assoc
           [ "type", `String "object"
@@ -57,12 +47,7 @@ let keeper_pr_review_tools : Masc_domain.tool_schema list =
                 ; ( "pr_number"
                   , `Assoc
                       [ "type", `String "integer"
-                      ; "description", `String "PR number (preferred field name)"
-                      ] )
-                ; ( "number"
-                  , `Assoc
-                      [ "type", `String "integer"
-                      ; "description", `String "PR number (legacy alias for pr_number)"
+                      ; "description", `String "PR number"
                       ] )
                 ; ( "body"
                   , `Assoc
@@ -94,14 +79,14 @@ let keeper_pr_review_tools : Masc_domain.tool_schema list =
                       ; "description", `String "Line number for inline comment (optional)"
                       ] )
                 ] )
-          ; "required", `List [ `String "repo"; `String "body"; `String "event" ]
+          ; "required"
+            , `List [ `String "repo"; `String "pr_number"; `String "body"; `String "event" ]
           ]
     }
   ; { name = "keeper_pr_review_reply"
     ; description =
         "Reply to a specific PR review comment. Requires research, delivery, coding, or \
-         full preset. Pass the PR number as `pr_number` (preferred) or `number` (legacy \
-         alias)."
+         full preset. Pass the PR number as `pr_number`."
     ; input_schema =
         `Assoc
           [ "type", `String "object"
@@ -115,12 +100,7 @@ let keeper_pr_review_tools : Masc_domain.tool_schema list =
                 ; ( "pr_number"
                   , `Assoc
                       [ "type", `String "integer"
-                      ; "description", `String "PR number (preferred field name)"
-                      ] )
-                ; ( "number"
-                  , `Assoc
-                      [ "type", `String "integer"
-                      ; "description", `String "PR number (legacy alias for pr_number)"
+                      ; "description", `String "PR number"
                       ] )
                 ; ( "comment_id"
                   , `Assoc
@@ -133,7 +113,9 @@ let keeper_pr_review_tools : Masc_domain.tool_schema list =
                       ; "description", `String "Reply body text"
                       ] )
                 ] )
-          ; "required", `List [ `String "repo"; `String "comment_id"; `String "body" ]
+          ; "required"
+            , `List
+                [ `String "repo"; `String "pr_number"; `String "comment_id"; `String "body" ]
           ]
     }
   ]

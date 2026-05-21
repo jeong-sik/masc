@@ -400,8 +400,7 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
             | None ->
                 Error
                   (Printf.sprintf
-                     "invalid network_mode '%s' (allowed: none, inherit; \
-                     deprecated alias: host)"
+                     "invalid network_mode '%s' (allowed: none, inherit)"
                      raw))
         | None -> Ok ())
   in
@@ -678,6 +677,9 @@ let detect_unknown_keeper_toml_keys (doc : Keeper_toml_loader.toml_doc) =
 
 let unknown_keeper_toml_warning_key_limit = 256
 let unknown_keeper_toml_warning_keys : string list Atomic.t = Atomic.make []
+
+let current_unknown_keeper_toml_warning_keys () =
+  Atomic.get unknown_keeper_toml_warning_keys
 
 let rec take_warning_keys n keys =
   match n, keys with

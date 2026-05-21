@@ -69,9 +69,17 @@ let user_timeout_max_sec = env_float "MASC_KEEPER_USER_TIMEOUT_MAX_SEC" 180.0
 (* Floor for gh op timeout_sec. GitHub API + gh auth handshake is
    usually 3-10s; previous floors (1s, then 5s) produced 41
    gh_command_timed_out rejections in 2 days, every single one at
-   timeout_sec=5 (#8688). 15s keeps keepers from requesting a
-   sub-network-latency timeout without masking genuine hangs. *)
-let gh_min_timeout_sec = 15.0
+   timeout_sec=5 (#8688). [Timeout_floor.Tool_dispatch] keeps keepers
+   from requesting a sub-network-latency timeout without masking
+   genuine hangs. *)
+let gh_min_timeout_sec =
+  Timeout_floor.default_sec Timeout_floor.Tool_dispatch
+;;
+
+(* Public shell metadata timeout used by git-status helpers. The playground
+   repo-cache writer keeps its own copy in the lower-level coord module so
+   Coord_worktree can update the same cache without depending on this file. *)
+let git_meta_timeout_sec = env_float "MASC_KEEPER_GIT_META_TIMEOUT_SEC" 5.0
 
 (* Floor applied to caller-supplied [timeout_sec] for keeper_bash when
    the command runs through the *native* (non-Docker) executor.  The
@@ -81,14 +89,15 @@ let gh_min_timeout_sec = 15.0
    10-60s on top of the actual command — see runtime log issue #5
    (2026-05-20).  Keeping a separate native floor avoids penalising
    the host-side fast path for the Docker path's overhead. *)
-let keeper_bash_native_min_timeout_sec = 5.0
+let keeper_bash_native_min_timeout_sec =
+  Timeout_floor.default_sec Timeout_floor.Native_shell
+;;
 
-(* Public shell metadata timeout used by git-status helpers. The playground
-   repo-cache writer keeps its own copy in the lower-level coord module so
-   Coord_worktree can update the same cache without depending on this file. *)
-let git_meta_timeout_sec = env_float "MASC_KEEPER_GIT_META_TIMEOUT_SEC" 5.0
-
-let clamp_shell_timeout ?(min_sec = 1.0) ~default args =
+let clamp_shell_timeout
+      ?(min_sec = Timeout_floor.default_sec Timeout_floor.Native_shell)
+      ~default
+      args
+  =
   Safe_ops.json_float ~default "timeout_sec" args
   |> fun n -> max min_sec (min user_timeout_max_sec n)
 
@@ -147,37 +156,37 @@ let readonly_shell_token_match tokens =
 
 (* Each branch ends with concrete Good:/Bad: examples so small-LLM keepers
    can self-correct without a retry loop. Prior form only named the
-   category, which left 57 command_blocked_readonly rejections on
-   2026-04-17/18 without a wire-level rewrite. See masc-mcp#8688. *)
+       category, which left 57 command_blocked_readonly rejections on
+       2026-04-17/18 without a wire-level rewrite. See masc-mcp#8688. *)
 let readonly_hint_of_category = function
   | "chaining" ->
       "`&&`, `||`, and `;` chaining are blocked in readonly shell. \
        Issue one command per Bash call, or use visible read/search \
        aliases such as Read and Grep. \
-       Good: Bash command='git status'. \
-       Bad: Bash command='git status && git log -1'."
+       Good: Bash executable='git' argv=['status']. \
+       Bad: raw shell text 'git status && git log -1'."
   | "redirect" ->
       "Redirects (`>`, `>>`, `| tee`) are blocked in readonly shell. \
        Use Write/Edit when a file must change, or Bash only when the \
        active policy exposes a write-capable Bash surface. \
        Good: Write file_path='notes.md' content='...'. \
-       Bad: command='echo hi > notes.md'."
+       Bad: raw shell text 'echo hi > notes.md'."
   | "git_write" ->
       "Use Bash only when the active policy exposes write-capable command \
        execution for git writes. \
-       Good: Bash command='git add lib/foo.ml'. \
-       Bad: Bash command='git commit -m x' without write access \
+       Good: Bash executable='git' argv=['add','lib/foo.ml']. \
+       Bad: raw shell text 'git commit -m x' without write access \
        does not accept git write commands)."
   | "package_install" ->
       "Package installation requires a write-capable Bash surface. \
-       Good: Bash command='opam install -y eio'. \
-       Bad: Bash command='opam install eio' without write access \
+       Good: Bash executable='opam' argv=['install','-y','eio']. \
+       Bad: raw shell text 'opam install eio' without write access \
        does not accept package installs)."
   | "destructive" ->
       "Use Bash only when the active policy exposes write-capable command \
        execution, not readonly shell. \
-       Good: Bash command='rm .tmp/scratch.log'. \
-       Bad: Bash command='rm -rf .tmp/' (readonly shell does \
+       Good: Bash executable='rm' argv=['.tmp/scratch.log']. \
+       Bad: raw shell text 'rm -rf .tmp/' (readonly shell does \
        not accept destructive commands)."
   | _ -> "This operation is not allowed in readonly shell."
 
@@ -192,8 +201,8 @@ let diagnosis_of_readonly_category category =
                 "&&, ||, and ; chain multiple commands; the readonly shell \
                  validates one command per call."
             ; rewrite =
-                Some "Split into two calls: Bash command='git status' \
-                      then Bash command='git log -1'."
+                Some "Split into two typed argv calls: Bash executable='git' \
+                      argv=['status'] then Bash executable='git' argv=['log','-1']."
             ; tool_suggestion = None }
   | "redirect" ->
       Some { Exec_core.rule_id = "readonly_redirect_blocked"
@@ -262,7 +271,8 @@ let diagnosis_of_block_reason reason =
   | Worker_dev_tools.Unsafe_redirect ->
       Some { Exec_core.rule_id = "command_redirect_blocked"
             ; explanation =
-                "> and >> redirect output to files; use a dedicated write tool."
+                "Redirect syntax changes process I/O outside the typed command \
+                 contract."
             ; rewrite = None
             ; tool_suggestion = Some "Write" }
   | Worker_dev_tools.Injection ->
@@ -295,7 +305,7 @@ let diagnosis_of_block_reason reason =
       Some { Exec_core.rule_id = "command_empty"
             ; explanation = "The command string is empty."
             ; rewrite =
-                Some "Provide a command: Bash command='ls -la lib/'."
+                Some "Provide typed argv: Bash executable='ls' argv=['-la','lib/']."
             ; tool_suggestion = None }
 
 let process_status_is_timeout = function
@@ -378,17 +388,32 @@ let run_argv_with_status_retry_eintr ?cwd ~timeout_sec argv =
   in
   loop max_eintr_retries
 
-let shell_command_available name =
-  let probe =
-    Printf.sprintf "command -v %s >/dev/null 2>&1" (Filename.quote name)
-  in
-  match
-    run_argv_with_status_retry_eintr
-      ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Shell_probe ())
-      [ "/bin/sh"; "-c"; probe ]
+let executable_file path =
+  try
+    let st = Unix.stat path in
+    st.Unix.st_kind = Unix.S_REG
+    &&
+    (Unix.access path [ Unix.X_OK ];
+     true)
   with
-  | Unix.WEXITED 0, _ -> true
-  | _ -> false
+  | Unix.Unix_error _ | Sys_error _ -> false
+
+let path_has_executable name =
+  match Sys.getenv_opt "PATH" with
+  | None -> false
+  | Some path ->
+    path
+    |> String.split_on_char ':'
+    |> List.exists (fun dir ->
+      (* Do not mirror the shell's empty-PATH current-directory fallback
+         for keeper probes; only explicit directories are trusted. *)
+      dir <> "" && executable_file (Filename.concat dir name))
+
+let shell_command_available name =
+  let name = String.trim name in
+  if name = "" then false
+  else if String.contains name '/' then executable_file name
+  else path_has_executable name
 
 (** Write playground repo state cache after successful clone/pull.
     Reads git metadata from [repo_path] and upserts into
@@ -597,22 +622,14 @@ let resolve_keeper_shell_read_path
     in
     resolve_with_autocorrect resolver_path
 
-(* Docker/sandbox infrastructure delegated to Keeper_shell_docker.
-   Aliases retained for backward compatibility with callers that
-   reference Keeper_shell_shared.* directly (tests, doc refs). *)
+(* Sandbox infrastructure stays in Keeper_shell_docker; command-shape
+   interpretation stays in Keeper_shell_command_semantics. *)
 let effective_sandbox_profile = Keeper_shell_docker.effective_sandbox_profile
-let cmd_targets_git_or_gh = Keeper_shell_docker.cmd_targets_git_or_gh
-let cmd_targets_gh cmd =
-  let trimmed = String.trim cmd in
-  let first_word =
-    match String.index_opt trimmed ' ' with
-    | Some i -> String.sub trimmed 0 i
-    | None -> trimmed
-  in
-  String.equal first_word "gh"
+let cmd_targets_git_or_gh = Keeper_shell_command_semantics.cmd_targets_git_or_gh
+let cmd_targets_gh = Keeper_shell_command_semantics.cmd_targets_gh
 
 let ensure_keeper_sandbox_runtime = Keeper_shell_docker.ensure_keeper_sandbox_runtime
 let command_uses_nested_container_runtime = Keeper_shell_docker.command_uses_nested_container_runtime
 let run_docker_shell_command_with_status = Keeper_shell_docker.run_docker_shell_command_with_status
-let run_docker_with_git_bash = Keeper_shell_docker.run_docker_with_git_bash
-let run_docker_hardened_bash = Keeper_shell_docker.run_docker_hardened_bash
+let run_docker_credentialed_bash = Keeper_shell_docker.run_docker_credentialed_bash
+let run_docker_bash = Keeper_shell_docker.run_docker_bash

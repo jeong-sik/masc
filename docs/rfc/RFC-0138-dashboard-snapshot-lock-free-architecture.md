@@ -1,6 +1,14 @@
+---
+title: Dashboard Snapshot Lock-Free Immutable Architecture
+rfc: 0138
+status: Active
+created: 2026-05-19
+implementation_prs: []
+---
+
 # RFC-0138 — Dashboard Snapshot: Lock-Free Immutable Architecture (Phase 3 Root Fix)
 
-**Status**: Phase 3 in progress (Steps 1-3 merged; Steps 4-5 Draft PR)
+**Status**: Active — Phase 3 in progress (Steps 1-3 merged; Steps 4-5 Draft PR)
 **Author**: Vincent / Claude Opus 4.7
 **Date**: 2026-05-19 (last updated 2026-05-20)
 **Supersedes**: N/A

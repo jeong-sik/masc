@@ -16,6 +16,8 @@ import {
   fetchMemorySubsystems,
   fetchRuntimeProviders,
   fetchRuntimeModelMetrics,
+  fetchDashboardCacheStats,
+  fetchTelemetry,
   fetchTelemetrySummary,
   fetchTlcResults,
   fetchToolQuality,
@@ -566,6 +568,102 @@ describe('fetchToolQuality', () => {
 })
 
 describe('fetchTelemetrySummary', () => {
+  it('preserves telemetry envelope metadata', async () => {
+    const rawResponse = {
+      generated_at: '2026-05-14T00:00:00Z',
+      generated_at_iso: '2026-05-14T00:00:00Z',
+      dashboard_surface: '/api/v1/dashboard/telemetry',
+      source: 'telemetry_unified',
+      retention: { window_days: 7 },
+      query: { source: 'tool_metric', n: 100 },
+      count: 1,
+      total_matching_entries: 2,
+      truncated: true,
+      entries: [
+        {
+          source: 'tool_metric',
+          ts_unix: 1_775_709_000,
+          tool_name: 'mcp__masc__masc_status',
+        },
+      ],
+    }
+
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(rawResponse), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchTelemetry({ source: 'tool_metric', n: 100 })
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/dashboard/telemetry?source=tool_metric&n=100')
+    expect(result.dashboard_surface).toBe('/api/v1/dashboard/telemetry')
+    expect(result.source).toBe('telemetry_unified')
+    expect(result.retention).toMatchObject({ window_days: 7 })
+    expect(result.query).toMatchObject({ source: 'tool_metric', n: 100 })
+    expect(result.total_matching_entries).toBe(2)
+    expect(result.truncated).toBe(true)
+  })
+
+  it('decodes dashboard cache stats details', async () => {
+    const rawResponse = {
+      entries: 3,
+      fresh: 1,
+      stale: 1,
+      expired: 0,
+      ready_fresh: 1,
+      ready_stale: 1,
+      computing: 1,
+      max_entries: 500,
+      hits_total: 8,
+      misses_total: 2,
+      hit_ratio: 0.8,
+      timeout_circuit_open: 0,
+      timeout_circuit_tracked: 1,
+      entries_truncated_to: 50,
+      entry_details: [
+        {
+          key: 'telemetry:/Users/dancer/me/.masc:src=tool_metric:n=100',
+          kind: 'fresh',
+          ttl_remaining_ms: 750,
+          stale_remaining_ms: 10_000,
+        },
+        {
+          key: 'health:full',
+          kind: 'computing',
+          computing_for_ms: 12,
+          has_stale_fallback: true,
+        },
+      ],
+    }
+
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(rawResponse), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchDashboardCacheStats()
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/dashboard/cache-stats')
+    expect(result.hit_ratio).toBe(0.8)
+    expect(result.entry_details[0]).toMatchObject({
+      key: 'telemetry:/Users/dancer/me/.masc:src=tool_metric:n=100',
+      kind: 'fresh',
+      ttl_remaining_ms: 750,
+      stale_remaining_ms: 10_000,
+    })
+    expect(result.entry_details[1]).toMatchObject({
+      kind: 'computing',
+      computing_for_ms: 12,
+      has_stale_fallback: true,
+    })
+  })
+
   it('preserves per-source coverage gap rows', async () => {
     const rawResponse = {
       generated_at: '2026-05-14T00:00:00Z',

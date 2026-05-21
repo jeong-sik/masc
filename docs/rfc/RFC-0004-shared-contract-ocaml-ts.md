@@ -1,6 +1,14 @@
+---
+title: OCaml ↔ TypeScript shared contract — SSE + gRPC-web
+rfc: 0004
+status: Active
+created: 2026-04-17
+implementation_prs: []
+---
+
 # RFC-0004: OCaml ↔ TypeScript shared contract — SSE + gRPC-web
 
-**Status**: Draft
+**Status**: Active (frontmatter SSOT; Phase A0.1 completed 2026-05-17)
 **Date**: 2026-04-17
 **Scope**: masc-mcp OCaml server ↔ dashboard TypeScript contract boundary; SSE event stream, gRPC surface
 **One sentence**: masc-mcp 의 두 contract 표면(SSE, gRPC) 중 SSE 에는 atd 기반 OCaml→JSON Schema→Zod AST 파이프라인으로 SSOT 를 도입하고, gRPC 는 dashboard 소비 경로(Connect-RPC 또는 gRPC-web)를 여는 thin slice 로 시작한다.

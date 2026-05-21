@@ -20,12 +20,12 @@ module Make (D : Keeper_docker_client.S) = struct
     | Ok container_name -> Ok { container_name; plan }
     | Error err -> Error err
 
-  let exec t ~cmd =
+  let exec t ~command_argv =
     D.exec
       ?user:(Keeper_sandbox_session_plan.user t.plan)
       ?workdir:(Keeper_sandbox_session_plan.workdir t.plan)
       ~container:t.container_name
-      ~cmd
+      ~command_argv
       ()
 
   let cleanup t = D.rm t.container_name

@@ -1,27 +1,23 @@
 (** Typed argv schema for the keeper_bash tool.
 
-    Introduced by RFC-0091 PR-1 (§5.1.1) to replace the legacy
-    [{cmd: string}] schema whose post-hoc lexer in [Worker_dev_tools]
-    accounts for ~253 of the top-20 24h ERROR (single-site emission +
-    4-layer amplification, see RFC-0091 §4).
-
-    The legacy lexer is preserved during PR-1 (one caller swap +
-    differential test) and removed in PR-2 (lexer 17-function purge,
-    callers fully migrated).
+    Introduced by RFC-0091 PR-1 (§5.1.1) to replace raw
+    command-string parsing with a structured executable/argv boundary.
 
     {2 Design constraints}
 
-    - **No string parsing**.  Validation is membership against
+    - **No shell-string parsing**.  Validation is membership against
       {!Dev_exec_allowlist} plus structural checks on argv/cwd.
+      Allowlisted wrapper executables ([env], [opam exec]) are resolved
+      over explicit argv tokens and their effective target executable is
+      checked against the same allowlist.
     - **Execve-style argv semantics**.  Each token in [argv] is passed
       verbatim to the child process; the implementation invokes the
       executable directly (no [/bin/sh -c "..."] wrapping).  Therefore
       shell metacharacters like [*], [?], [|], [&], [;], [>], [<],
       [`], [$] inside an argv token are *literal characters*, not
-      shell operators.  This is the principal RFC-0091 progress: the
-      legacy lexer in [Worker_dev_tools] rejects [find . -name *.ml]
-      with [path_syntax_blocked]; the typed schema accepts it because
-      [*.ml] is a [find]-internal pattern, not a shell glob.
+      shell operators.  For example, the typed schema accepts
+      [find . -name *.ml] because [*.ml] is a [find]-internal pattern,
+      not a shell glob.
     - **Pipelines are explicit**.  [Pipeline.stages] enumerates each
       [exec_stage] separately; [|]-delimited strings are never parsed.
     - **Forbidden in argv tokens**: only control characters that
@@ -74,10 +70,12 @@ type validation_error =
 
 val of_json : Yojson.Safe.t -> (bash_input, string) result
 (** Parse the typed keeper_bash JSON boundary.  Accepts either
-    [{executable, argv?, cwd?, env?}] for [Exec] or
+    [{executable, argv?, cwd?, env?, timeout_sec?}] for [Exec] or
     [{pipeline = [{executable, argv?}, ...], cwd?, env?}] for [Pipeline].
     [{stages = ...}] is accepted as an equivalent structured pipeline key.
-    Legacy [{cmd: string}] input is intentionally rejected here. *)
+    [timeout_sec] is accepted at this layer and consumed by the caller. Raw
+    command-string fields and other unsupported fields are intentionally rejected
+    here. *)
 
 val validate : mode:allowlist_mode -> bash_input -> (unit, validation_error) result
 (** Run all structural checks against [input].  Returns [Ok ()] on
@@ -98,6 +96,6 @@ val to_shell_ir :
 val pp_validation_error : Format.formatter -> validation_error -> unit
 (** Human-readable formatter for {!validation_error}.  Stable across
     PR-1/PR-2 — callers may rely on the message structure for log
-    classification.  ERROR text intentionally lacks the legacy
-    "Path syntax blocked" prefix so the 4-layer log amplification
-    is severed at PR-2 lexer deletion. *)
+    classification.  ERROR text intentionally lacks the retired
+    path-tokenizer prefix so the 4-layer log amplification is severed
+    at PR-2 lexer deletion. *)

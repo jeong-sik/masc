@@ -71,8 +71,6 @@ let dedupe_tool_search_schemas schemas =
 let default_tool_search_schemas () =
   Tool_shard.all_keeper_tool_schemas @ [ keeper_tool_search_schema ]
   |> List.filter (fun (schema : Masc_domain.tool_schema) ->
-    not (String.starts_with ~prefix:"masc_autoresearch_" schema.name))
-  |> List.filter (fun (schema : Masc_domain.tool_schema) ->
     not (is_keeper_denied schema.name))
   |> dedupe_tool_search_schemas
 ;;
@@ -478,12 +476,6 @@ let execute_keeper_tool_call_with_outcome
               ~meta
               ~args
               ())
-       | "keeper_bash_output" ->
-         make_executed_tool_result
-           (Keeper_exec_shell.handle_keeper_bash_output ~config ~meta ~args)
-       | "keeper_bash_kill" ->
-         make_executed_tool_result
-           (Keeper_exec_shell.handle_keeper_bash_kill ~config ~meta ~args)
        | "keeper_shell" ->
          make_executed_tool_result
            (Keeper_exec_shell.handle_keeper_shell

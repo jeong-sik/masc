@@ -28,21 +28,31 @@ let test_classifies_host_local_bottlenecks () =
     "shell"
     (classify
        "keeper_bash"
-       ~args:(`Assoc [ "cmd", `String "dune build @check" ]));
+       ~args:
+         (`Assoc
+           [ "executable", `String "scripts/dune-local.sh"
+           ; "argv", `List [ `String "build"; `String "@check" ]
+           ]));
   check
     string
     "keeper_bash docker"
     "docker"
     (classify
        "keeper_bash"
-       ~args:(`Assoc [ "cmd", `String "docker ps" ]));
+       ~args:
+         (`Assoc
+           [ "executable", `String "docker"; "argv", `List [ `String "ps" ] ]));
   check
     string
     "keeper_bash gh"
     "github"
     (classify
        "keeper_bash"
-       ~args:(`Assoc [ "cmd", `String "gh pr checks --watch" ]));
+       ~args:
+         (`Assoc
+           [ "executable", `String "gh"
+           ; "argv", `List [ `String "pr"; `String "checks"; `String "--watch" ]
+           ]));
   check
     string
     "keeper_shell rg"
@@ -74,8 +84,6 @@ let test_classifies_host_local_bottlenecks () =
     "dashboard worktree gh lookup"
     "github"
     (classify ~is_read_only:true "dashboard_worktree_status.gh_pr_list");
-  check string "bash output bypasses gate" "ungated" (classify "keeper_bash_output");
-  check string "bash kill bypasses gate" "ungated" (classify "keeper_bash_kill");
   check string "worker shell_exec" "shell" (classify "shell_exec");
   check string "status stays ungated" "ungated" (classify ~is_read_only:true "masc_status")
 ;;
@@ -237,15 +245,21 @@ let test_mixed_24_keeper_burst_stays_bounded () =
              |> add_cases 4
                   ( shell
                   , "keeper_bash"
-                  , `Assoc [ "cmd", `String "echo shell" ] )
+                  , `Assoc [ "executable", `String "echo"; "argv", `List [ `String "shell" ] ] )
              |> add_cases 4
                   ( github
                   , "keeper_bash"
-                  , `Assoc [ "cmd", `String "gh pr list" ] )
+                  , `Assoc
+                      [ "executable", `String "gh"
+                      ; "argv", `List [ `String "pr"; `String "list" ]
+                      ] )
              |> add_cases 4
                   ( docker
                   , "keeper_bash"
-                  , `Assoc [ "cmd", `String "docker ps" ] )
+                  , `Assoc
+                      [ "executable", `String "docker"
+                      ; "argv", `List [ `String "ps" ]
+                      ] )
              |> add_cases 4
                   ( fs_write
                   , "masc_code_write"
@@ -287,58 +301,6 @@ let test_mixed_24_keeper_burst_stays_bounded () =
              [ shell; github; docker; fs_write; board; coord ])))
 ;;
 
-let test_remediation_tools_bypass_saturated_shell_lane () =
-  Eio_main.run (fun env ->
-    Fun.protect
-      ~finally:Gate.For_testing.reset
-      (fun () ->
-         Gate.For_testing.set_limits ~shell:1 ();
-         with_env "MASC_TOOL_GATE_WAIT_TIMEOUT_SEC" "0.05" (fun () ->
-           let clock = Eio.Stdenv.clock env in
-           let blocker_started, unblock_blocker = Eio.Promise.create () in
-           let release_blocker, resolve_release = Eio.Promise.create () in
-           Eio.Fiber.both
-             (fun () ->
-                let result =
-                  Gate.with_permit
-                    ~clock
-                    ~tool_name:"keeper_bash"
-                    ~arguments:(`Assoc [ "cmd", `String "sleep 1" ])
-                    ~is_read_only:false
-                    ~start_time:(Eio.Time.now clock)
-                    (fun () ->
-                       Eio.Promise.resolve unblock_blocker ();
-                       Eio.Promise.await release_blocker;
-                       Tool_result.quick_ok ~tool_name:"keeper_bash" "done")
-                in
-                check bool "blocking shell call completed" true result.success)
-             (fun () ->
-                Eio.Promise.await blocker_started;
-                let output =
-                  Gate.with_permit
-                    ~clock
-                    ~tool_name:"keeper_bash_output"
-                    ~arguments:(`Assoc [ "task_id", `String "bgt-test" ])
-                    ~is_read_only:false
-                    ~start_time:(Eio.Time.now clock)
-                    (fun () ->
-                       Tool_result.quick_ok ~tool_name:"keeper_bash_output" "out")
-                in
-                let kill =
-                  Gate.with_permit
-                    ~clock
-                    ~tool_name:"keeper_bash_kill"
-                    ~arguments:(`Assoc [ "task_id", `String "bgt-test" ])
-                    ~is_read_only:false
-                    ~start_time:(Eio.Time.now clock)
-                    (fun () ->
-                       Tool_result.quick_ok ~tool_name:"keeper_bash_kill" "killed")
-                in
-                Eio.Promise.resolve resolve_release ();
-                check bool "output bypassed saturated shell" true output.success;
-                check bool "kill bypassed saturated shell" true kill.success))))
-;;
-
 let () =
   run
     "Tool_resource_gate"
@@ -354,8 +316,6 @@ let () =
             test_24_keeper_shell_burst_stays_bounded
         ; test_case "mixed 24 keeper burst stays bounded" `Quick
             test_mixed_24_keeper_burst_stays_bounded
-        ; test_case "remediation tools bypass saturated shell lane" `Quick
-            test_remediation_tools_bypass_saturated_shell_lane
         ] )
     ]
 ;;

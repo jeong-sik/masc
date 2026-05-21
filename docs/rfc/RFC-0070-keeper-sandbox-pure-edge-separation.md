@@ -1,14 +1,55 @@
 ---
 rfc: "0070"
 title: "Keeper Sandbox Runtime — Pure/Edge Separation"
-status: Draft
+status: Active
 created: 2026-05-12
-updated: 2026-05-12
+updated: 2026-05-21
 author: yousleepwhen
 supersedes: []
 superseded_by: null
 related: ["0002", "0003", "0006", "0036"]
-implementation_prs: [14714, 14741, 14821, 14827, 14889, 14899, 14934, 14940, 14947, 14951, 14956, 14970, 14973, 14980, 14989]
+implementation_prs: [14714, 14741, 14821, 14827, 14889, 14899, 14934, 14940, 14947, 14951, 14956, 14970, 14973, 14980, 14989, 16666]
+---
+
+## Progress audit (2026-05-21)
+
+Status promoted Draft → Active. 16 implementation PRs landed against
+the §2 G1-G5 goal plan; per-goal completion mapping deferred to
+sprint author.
+
+### implementation_prs reconciliation
+
+Previous list ended at #14989 (15 PRs from the initial 2026-05-12
+sprint). PR #16666 (2026-05-19, `feat(keeper/sandbox): typed
+Sandbox_error closed sum per RFC-0070 §2 G2`) explicitly cites G2
+and is the only RFC-0070 commit since 2026-04-01. Added to the
+list for total 16.
+
+### Audit boundary
+
+The G1-G5 goal table (§2) does not enumerate phase-bound PR slots
+the way newer RFCs (e.g. RFC-0131, RFC-0142) do — the original
+work landed before the phase-slot convention solidified. A
+per-goal Phase→PR table requires reading each of the 16 merged PRs
+to classify which goal it advanced (G1 deterministic ID / G2 typed
+errors / G3 JSON-format probe / G4 cleanup state machine / G5
+mockable executor). That is sprint author territory, not a sweep
+audit responsibility.
+
+### Why Active, not Implemented
+
+- 16 PRs is consistent with all five goals having shipped at least
+  in part, but the per-goal verification work has not been done in
+  this audit.
+- `feature/RFC-0070-*` branches in the worktree list suggest some
+  follow-up is in flight (not enumerated here).
+- Implemented status requires explicit closeout commit confirming
+  G1-G5 acceptance criteria; that work belongs to the sprint
+  author.
+
+`Active` is the minimum honest update: the RFC has clearly moved
+past Draft, but Implemented is not yet defensible.
+
 ---
 
 # RFC-0070: Keeper Sandbox Runtime — Pure/Edge Separation
@@ -38,7 +79,7 @@ implementation_prs: [14714, 14741, 14821, 14827, 14889, 14899, 14934, 14940, 149
 - **v2.6 (2026-05-12, Phase 4.2/4.3 cutover gap analysis — measurement, iter 53)**: measured the two one-shot caller sites against `Sandbox_executor` + `Keeper_sandbox_oneshot_plan` + `Docker_client_real.run` as they stand today. Phase 4.2 is **bigger than the v2 table implied** and Phase 4.3 is **mis-scoped**:
   1. **`Keeper_sandbox_oneshot_plan` + `Docker_client_real.run` are minimal stubs (prereq `4.2-i`)** — the plan carries only `{ container_name; image; command; timeout_budget_sec }`; `Docker_client_real.run` builds `[docker; run; --rm; --name; <name>; <image>; sh; -lc; <cmd>]` with **zero hardening**. The real one-shot caller (`keeper_shell_docker.run_docker_shell_command_with_status`) builds the *full* hardened argv — `docker_label_args ~container_kind:"oneshot"`, `-i`, `--user uid:gid`, `docker_user_env_args`, `docker_nofile_args`, `read_only_rootfs_args`, `--tmpfs … --cap-drop=ALL --security-opt no-new-privileges`, seccomp args, `--pids-limit … --memory … -v host_root:container_root:rw --workdir container_cwd`, network args, identity mounts, then `[image; bash; -lc; cmd]` — i.e. the *same hardening* `keeper_turn_sandbox_runtime.start_container` applies, just `--rm` instead of `-d`. Cutting over to `Sandbox_executor.Make(Docker_client_real)` as-is would produce **unhardened containers — a security regression**. Fix: enrich `Keeper_sandbox_oneshot_plan` to the hardened shape (mirroring what 3e-e did for `Keeper_sandbox_session_plan` — labels / mounts / `identity_files` / `env_overrides` / `ulimits` / `user` / `workdir` / read-only-rootfs / tmpfs / pids/memory / cap-drop / no-new-privileges) and `Docker_client_real.run` to assemble the full argv (mirroring `run_detached_argv`). This is a sizeable prereq — call it `4.2-i` (analogous to 3e-e + 3e-a, one-shot side). Without it, 4.2 cannot land safely.
   2. **Actor mismatch (folded into `4.2-i`)** — `keeper_shell_docker`'s *keeper commands* spawn through `Exec_gate ~actor:Keeper_shell`, not `~actor:System_task_sandbox` (which is what `4.1-g` hardcoded into `Docker_client_real`, matching `keeper_turn_sandbox_runtime`'s current behaviour). `Keeper_shell` vs `System_task_sandbox` get different approval-policy treatment. So `Docker_client.S.run` needs to thread `~actor:Agent_id.t` (the `Sandbox_executor` functor passes it through; `4.1-g`'s hardcoded `System_task_sandbox` becomes the *default* the turn-path caller passes). Folded into `4.2-i` since it touches the same `run` surface. (Pre-existing inconsistency, surfaced here: `keeper_turn_sandbox_runtime` uses `System_task_sandbox` for *its* keeper commands while `keeper_shell_docker` uses `Keeper_shell` for *its* — both are keeper-issued commands; the cutover should preserve each caller's existing actor, not unify them in this RFC.)
-  3. **Git-creds variants out of 4.2 scope** — `keeper_shell_docker.run_docker_with_git_bash` / `run_docker_hardened_bash` resolve a `Host_config_provider.binding` (credential ro-mounts + envs), inject `-v …:ro` / `-e` args, and wrap the spawn in `Eio_guard.protect ~finally:restore_gitdirs` + `repair_container_worktree_gitdirs`. That is credential-brokering + gitdir-rewrite machinery beyond `Keeper_sandbox_oneshot_plan`'s remit, and it touches `lib/keeper/host_config_*` / `Credential_provider` — which per CLAUDE.md §agent_delegation needs its own RFC coverage. Decision: Phase 4.2 covers **only** the plain `run_docker_shell_command_with_status` path; the git-creds variants are explicitly deferred (a follow-up RFC, not RFC-0070).
+  3. **Credentialed variants out of 4.2 scope** — `keeper_shell_docker.run_docker_credentialed_bash` / `run_docker_bash` resolve a `Host_config_provider.binding` (credential ro-mounts + envs), inject `-v …:ro` / `-e` args, and wrap the spawn in `Eio_guard.protect ~finally:restore_gitdirs` + `repair_container_worktree_gitdirs`. That is credential-brokering + gitdir-rewrite machinery beyond `Keeper_sandbox_oneshot_plan`'s remit, and it touches `lib/keeper/host_config_*` / `Credential_provider` — which per CLAUDE.md §agent_delegation needs its own RFC coverage. Decision: Phase 4.2 covers **only** the plain `run_docker_shell_command_with_status` path; the credentialed variants are explicitly deferred (a follow-up RFC, not RFC-0070).
   4. **Phase 4.3 re-scoped (decision)** — `keeper_sandbox_runtime` around "838" is `docker_image_required_commands` (and sibling probes `docker_image_present`, the hardening probe): each is a `docker run --rm --network none --entrypoint sh <image> -lc <script>` *image-capability preflight*, structurally distinct from a sandboxed keeper command — no playground `-v` mount, `--entrypoint sh`, `--network none`, no `--user`, no labels, no seccomp. RFC v2's "anonymous one-shot semantics" mis-described these; they are *preflights*, not sandboxed command execution, and RFC-0070 §1's F-list (F1 wall-clock name, F2 silent-fail still_exists, F3 ps substring parse, F7 cleanup counter-as-fix) all concern *command execution*, not preflights. **Decision: image-capability preflights are out of RFC-0070's cutover scope.** Phase 4.3 is dropped from §4; if a future RFC wants a typed "preflight one-shot" shape it can introduce one — it is a different lifetime model (no playground, no identity, throwaway probe), not the "anonymous one-shot" v2 imagined.
 - **v2.7 (2026-05-12, `ps_query` implementation gap — measurement, iter 55)**: with all five Phase 4.1 prereqs shipped (3e-e #14970 / 3e-a #14973 / 3e-f #14980 / 4.1-g #14989 / 4.1-h #15001), tried to start the 4.1 cutover and found v2.5 decision C is **structurally blocked**: it specifies "caller-level `D.ps_query ~labels` liveness check after `Session.start`", but `Docker_client_real.ps_query` is still the `placeholder = Error Cleanup_failed` stub from Phase 3b-iv.2.0. Worse, when measured against `Docker_response.ps_record` and `Keeper_container_name`, **a real `ps_query` is type-level impossible today**:
   1. **`Keeper_container_name` is *derive-only*** — `mli` exposes `val derive : ~algo ~turn_id ~attempt ~suffix -> t` and `val to_string : t -> string`, but no `of_string` / `of_raw` / `make`. This is a deliberate invariant: the wire format `"masc-keeper-" ^ hex(digest)[0..31]` (per the module doc) flows *outward only* — no one can construct a `t` from an arbitrary string. Verified: zero `of_string` / `of_raw` / `make` / `unsafe_*` constructors in `Keeper_container_name`; zero call sites outside the test fixture that re-`derive`s with known inputs.
@@ -103,7 +144,7 @@ Phase 4.1 prep audit (2026-05-12, iter 34 of cron `7493fe21`) enumerated **all 1
 
 | Caller | Site | Pattern | Lifetime | v1 Plan fit |
 |--------|------|---------|----------|-------------|
-| `keeper_turn_sandbox_runtime` | line 184 | `docker run -d --rm --name <n> ... sh -lc "trap : TERM INT; while :; do sleep 3600; done"` + `docker exec <n> <cmd>` × N + `docker rm -f <n>` | **session** (turn-scoped) | ❌ not representable |
+| `keeper_turn_sandbox_runtime` | line 184 | `docker run -d --rm --name <n> ... <image> tail -f /dev/null` + `docker exec <n> <cmd>` × N + `docker rm -f <n>` | **session** (turn-scoped) | ❌ not representable |
 | `keeper_shell_docker` | line 820 | `docker run --rm --name <n> <image> sh -lc <cmd>` | **named one-shot** | ⚠ partial (Plan has `container_name`, but caller treats name as observable identity) |
 | `keeper_sandbox_runtime` | line 838 | `docker run --rm --network none --entrypoint sh <image> -lc <script>` | **anonymous one-shot** | ✅ closest to v1 Plan |
 
@@ -235,7 +276,7 @@ The fields below were measured byte-for-byte against `keeper_turn_sandbox_runtim
 
 | Concern | Lives in | Why |
 |---------|----------|-----|
-| `container_name` (hash of turn_id‖attempt‖suffix), `image`, `startup_command`, `cap_drop_all`, `no_new_privileges`, `seccomp_profile` (the *choice*), `read_only_rootfs`, `tmpfs`, `workdir`, `user`, `network_mode`, `pids_limit`, `memory_limit`, `env_overrides` (4 hardcoded `HOME`/`USER`/`LOGNAME`/`SHELL` + `?extra_env`), `ulimits` | **Plan** (`of_request`, pure) | deterministic given the request inputs. (`pids_limit`/`memory_limit`/`ulimits` are read from `Env_config_keeper.KeeperSandbox.*` — config reads are stable per run, not the wall-clock/PID/random/daemon-I/O non-determinism the split targets.) |
+| `container_name` (hash of turn_id‖attempt‖suffix), `image`, `startup_argv`, `cap_drop_all`, `no_new_privileges`, `seccomp_profile` (the *choice*), `read_only_rootfs`, `tmpfs`, `workdir`, `user`, `network_mode`, `pids_limit`, `memory_limit`, `env_overrides` (4 hardcoded `HOME`/`USER`/`LOGNAME`/`SHELL` + `?extra_env`), `ulimits` | **Plan** (`of_request`, pure) | deterministic given the request inputs. (`pids_limit`/`memory_limit`/`ulimits` are read from `Env_config_keeper.KeeperSandbox.*` — config reads are stable per run, not the wall-clock/PID/random/daemon-I/O non-determinism the split targets.) |
 | `mounts` — the workspace volume (`-v host_root:container_root:rw`) **and** the identity mounts (`-v <host_root>/.docker-identity/passwd:/etc/passwd:ro`, `…/group:/etc/group:ro`) | **Plan** | the mount *args* are deterministic (path concat). Note: the identity mounts only *work* if the files exist — see `identity_files` below. |
 | `identity_files : (string * string) list` — the `(path, content)` pairs the edge must write before the mounts are valid: `(<host_root>/.docker-identity/passwd, "root:x:0:0:…\nkeeper:x:<uid>:<gid>:…\n")` and `(…/group, "root:x:0:\nkeeper:x:<gid>:\n")` | **Plan** | the *content* is deterministic given `uid`/`gid`; only *writing* it is I/O. The Plan describes what must exist; the edge materialises it. |
 | `labels` — the 7 **deterministic** labels: component (static), `base_path_hash` (MD5 of normalised `base_path`), keeper (`sanitize_label_value meta_name`), kind (`sanitize_label_value container_kind`), network (`sanitize_label_value network_label`, where `network_label` is derived from `network_mode`), turn_id, ttl_sec | **Plan** | pure string ops. |
@@ -262,7 +303,7 @@ type t  (** abstract — like Oneshot_plan; accessors below, no exposed record *
      read_only_rootfs : t -> bool
      tmpfs            : t -> string option
      workdir          : t -> string option
-     startup_command  : t -> string                      (* default: trap-and-sleep idle loop *)
+     startup_argv     : t -> string list                  (* default: ["tail"; "-f"; "/dev/null"] *)
      labels           : t -> (string * string) list      (* 7 deterministic labels; edge adds PID + started_at *)
      cap_drop_all     : t -> bool
      no_new_privileges : t -> bool
@@ -286,7 +327,7 @@ val of_request
   -> (t, plan_error) result
 ```
 
-Covers `keeper_turn_sandbox_runtime:184` (persistent session). The startup_command default is the existing trap-and-sleep idiom. The `Plan` represents *one container's lifetime*, NOT a single command — commands are issued via `Session.exec` (§3.2.3) against an already-started container.
+Covers `keeper_turn_sandbox_runtime:184` (persistent session). The startup argv is a direct idle process, not a shell command. The `Plan` represents *one container's lifetime*, NOT a single command — commands are issued via `Session.exec` (§3.2.3) against an already-started container.
 
 #### 3.1.3 Named one-shot — represented via Oneshot_plan extension
 
@@ -497,7 +538,7 @@ v2 re-orders Phase 3-5 to gate Phase 4 cutover on Session API delivery. Phases 0
 | **4.1-i** *(v2.7 — new prereq)* | Real `Docker_client_real.ps_query` (replaces the placeholder `Error Cleanup_failed` at `docker_client_real.ml:53`). Three pieces: (1) `Keeper_container_name.of_string : string -> (t, parse_error) result` validating the wire-format regex `^masc-keeper-[0-9a-f]{32}$` — the derive-only invariant becomes derive + parse with the same regex enforcing both directions; (2) pure `Docker_response.parse_ps_record : string -> (ps_record, parse_error) result` + `parse_ps_output : string -> (ps_record list, parse_error) result` consuming `docker ps --format '{{json .}}'` newline-delimited JSON, with **fail-closed semantics** — any format-drift row makes the whole call `Error Probe_format_drift` (decision per v2.7 §4, no silent drop); (3) `ps_query` spawns `docker ps --format '{{json .}}' --filter label=k=v ...` via the 4.1-g gated helper, maps stdout through `parse_ps_output`. Mock untouched (already FIFO-correct). Prereq for Phase 4.1 (decision C liveness check) **and** Phase 3c.2 (cleanup-quarantine consumes `ps_record`). | Phase 3 (Real shipped) | MEDIUM — new `of_string` constructor + parser + `ps_query` impl | ⏳ pending |
 | **4.1** *(v2)* | Caller cutover `keeper_turn_sandbox_runtime` → `Sandbox_session_executor`: `start_container` → `Session.start` + caller-level `D.ps_query ~labels` liveness check (decision C); `run_exec_with_status_once` → `Session.exec` (`?stdin` via 4.1-h); `cleanup` → `Session.cleanup` + the existing `still_exists` probe kept caller-level until Phase 3c.2. Fixes F1 (deterministic container name via `Keeper_container_name.derive`). | Phase 3e-e + 3e-a + 3e-f + 4.1-g + 4.1-h + 4.1-i | MEDIUM | ⏳ pending |
 | **4.2-i** *(v2.6 — split from 4.2)* | Enrich `Keeper_sandbox_oneshot_plan` to the hardened shape (labels w/ `container_kind:"oneshot"` / mounts / `identity_files` / `env_overrides` / `ulimits` / `user` / `workdir` / read-only-rootfs / tmpfs / pids/memory / cap-drop / no-new-privileges — analogous to what 3e-e gave `Keeper_sandbox_session_plan`) **and** `Docker_client_real.run` to assemble the full `docker run --rm` argv from it (analogous to `run_detached_argv`) **and** `Docker_client.S.run` gains `~actor:Agent_id.t` (so the keeper-command caller passes `Keeper_shell` while the turn caller passes `System_task_sandbox`; `4.1-g`'s hardcoded value becomes the default). Without this, 4.2 would spawn **unhardened** containers. | Phase 3 + 4.1-g | MEDIUM — new plan fields + argv builder + `run` signature add | ⏳ pending |
-| **4.2** *(v2; scoped down in v2.6)* | Caller cutover `keeper_shell_docker.run_docker_shell_command_with_status` (plain path **only** — git-creds variants `run_docker_with_git_bash` / `run_docker_hardened_bash` deferred to a follow-up RFC; they touch `lib/keeper/host_config_*` / `Credential_provider`) → `Sandbox_executor.Make(Docker_client_real)`. Fixes F1 (deterministic name). | 4.2-i | MEDIUM | ⏳ pending |
+| **4.2** *(v2; scoped down in v2.6)* | Caller cutover `keeper_shell_docker.run_docker_shell_command_with_status` (plain path **only** — credentialed variants `run_docker_credentialed_bash` / `run_docker_bash` deferred to a follow-up RFC; they touch `lib/keeper/host_config_*` / `Credential_provider`) → `Sandbox_executor.Make(Docker_client_real)`. Fixes F1 (deterministic name). | 4.2-i | MEDIUM | ⏳ pending |
 | ~~**4.3** *(v2)*~~ | ~~Caller cutover `keeper_sandbox_runtime:838` → anonymous one-shot~~ — **dropped in v2.6**: the `:838` sites are `docker run --rm --network none --entrypoint sh <image> -lc <script>` *image-capability preflights*, not sandboxed keeper commands (no playground mount, no `--user`/labels/seccomp); RFC-0070's F-list concerns command execution, not preflights. Out of RFC-0070 cutover scope; a future RFC may introduce a typed "preflight one-shot" shape if wanted. | — | — | ❌ dropped (re-scoped, v2.6) |
 | **5** | Catch-all removal: remove or justify the 1 residual `try ... with _ -> None` site in `keeper_sandbox_control.ml` (`git_string_opt:306-308`; the 7 git/probe siblings were resolved by the exec_gate migration #14329/#14359 — see §1 F6). Where Phase 4 cutover touches the area, the compiler enforces the migration. | Phase 4.1 + 4.2 merged | LOW — mostly resolved; 1 residual site | ⏳ pending |
 

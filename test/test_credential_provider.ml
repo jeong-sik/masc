@@ -370,6 +370,35 @@ let test_compose_env_explicit_ssh_key () =
        true
      with Not_found -> false)
 
+let test_resolve_without_mapping_fails_closed () =
+  with_temp_base_path (fun base_path ->
+      let config = Masc_mcp.Coord.default_config base_path in
+      match HCP.resolve ~config ~identity:"keeper-unmapped" with
+      | Error (CP.Missing_bundle { identity; path }) ->
+          check string "identity" "keeper-unmapped" identity;
+          check bool "mentions missing mapping" true
+            (try
+               ignore
+                 (Str.search_forward
+                    (Str.regexp_string "no credential mapping")
+                    path
+                    0);
+               true
+             with Not_found -> false);
+          check bool "mentions removed fallback" true
+            (try
+               ignore
+                 (Str.search_forward
+                    (Str.regexp_string "legacy host_config_provider fallback has been removed")
+                    path
+                    0);
+               true
+             with Not_found -> false)
+      | Ok _ ->
+          fail
+            "unmapped keeper must not resolve through legacy host_config_provider"
+      | Error other -> failf "expected Missing_bundle, got %s" (CP.pp_error other))
+
 let seed_minimal_gh_bundle ~gh_config_dir =
   (* Write a minimal hosts.yml so Credential_materializer.verify_state
      does not immediately classify the bundle as Unmaterialized due to
@@ -689,6 +718,8 @@ let () =
         ] );
       ( "credential_store_bridge",
         [
+          test_case "missing mapping fails closed" `Quick
+            test_resolve_without_mapping_fails_closed;
           test_case "explicit ssh key is mounted" `Quick
             test_resolve_credential_store_mounts_explicit_ssh_key;
           test_case "conflicting keeper github_identity fails closed" `Quick

@@ -15,10 +15,9 @@ implementation/audit purposes; model-facing prompts and recovery hints must use
 the exact active schema names, such as the public `Bash` alias when it is
 listed.
 Triage and trigger detection run on each heartbeat using the proactive idle/cooldown settings.
-
-Autoresearch/research tools are enabled through keeper tool-surface configuration
-such as preset selection, shard assignment, and tool access, not through a
-`soul_profile` value.
+The `masc_autoresearch_*` MCP/keeper tool family is retired; dashboard lab
+routes may still expose historical loop artifacts, but keepers must not receive
+autoresearch as a callable shard.
 
 ## Tool Shards
 
@@ -31,14 +30,14 @@ such as preset selection, shard assignment, and tool access, not through a
 | **library** | `keeper_library_{search,read}` | 2 | Yes |
 | **taskboard** | `keeper_tasks_{list,audit}`, `keeper_task_{force_release,force_done,claim,done,submit_for_verification,create}`, `keeper_broadcast` | 9 | Yes |
 | **voice** | `keeper_voice_{speak,listen,agent,sessions,session_start,session_end}` | 6 | Yes |
-| **coding** | `keeper_bash{,_output,_kill}`, `keeper_preflight_check`, `keeper_pr_{list,status,create,review_read,review_comment,review_reply}`, `masc_{worktree_create,worktree_list,code_search,code_symbols,code_read}` | 15 | Yes |
-| **autoresearch** | `masc_autoresearch_{start,status,stop,inject,cycle,record_finding,search_findings}` | 7 | Yes |
+| **coding** | `keeper_bash`, `keeper_preflight_check`, `keeper_pr_{list,status,create,review_read,review_comment,review_reply}`, `masc_{worktree_create,worktree_list,code_search,code_symbols,code_read}` | 13 | Yes |
 
 Notes:
 - The `voice` shard still exists, but it is no longer part of the default keeper surface. The historical weather shard is retired from `Tool_shard`.
+- The historical `autoresearch` shard and `masc_autoresearch_*` tool family are retired from `Tool_shard` and keeper model-tool exposure.
 - The old governance petition/case tools were retired from the callable tool surface. Governance-style participation now uses board discussion/vote paths plus dashboard governance/audit read models.
 - Write-capable tools such as `keeper_fs_edit` and code mutation tools are present in the keeper surface; preset/policy and eval gates decide whether a keeper may execute the mutation.
-- `keeper_shell` is structured-only (`pwd`, `ls`, `cat`, `rg`, `find`, `head`, `tail`, `wc`, `tree`, `git_status`, `git_log`, `git_diff`, `git_worktree`, `git_clone`, `gh`). Raw command execution is model-facing as `Bash` when that alias is listed, backed internally by `keeper_bash`.
+- `keeper_shell` is structured-only (`pwd`, `ls`, `cat`, `rg`, `find`, `head`, `tail`, `wc`, `tree`, `git_status`, `git_log`, `git_diff`, `git_worktree`, `git_clone`, `gh`). Typed command execution is model-facing as `Bash` when that alias is listed, backed internally by `keeper_bash`.
 - Code mutation uses `masc_code_{write,edit,delete,shell,git}` in addition to the `coding` shard above.
 
 ## Tool Surface
@@ -96,7 +95,7 @@ BoardActivity, IdleTimeout, MetricsAnomaly, StrategicReview.
 | 최신 정보 / 외부 자료 확인 | `masc_web_search` (also exposed to model clients as `WebSearch`) |
 | 찬성 / 반대 신호 | `keeper_board_vote` |
 | 거버넌스 의견 제출 | retired as keeper tools; use board discussion/vote paths and governance dashboard read models |
-| 목표 / 계획 lifecycle | `masc_goal_list`, `masc_goal_upsert`, `masc_goal_transition`, `masc_goal_verify`, `masc_coordination_fsm_snapshot`; `masc_goal_review` is legacy compatibility, not feature-proof evidence |
+| 목표 / 계획 lifecycle | `masc_goal_list`, `masc_goal_upsert`, `masc_goal_transition`, `masc_goal_verify`, `masc_coordination_fsm_snapshot` |
 | 코드 작성 / 수정 | `masc_worktree_create` -> `masc_code_write` / `masc_code_edit` / `masc_code_git` |
 | 테스트 실행 | `masc_code_shell` (worktree `cwd` required) |
 | GitHub PR / 이슈 작업 | `keeper_preflight_check`, `keeper_pr_list`, `keeper_pr_status`, `keeper_pr_create` (draft-only). Structured `gh` routing is an internal/fallback path when repo context is bound, not prompt guidance unless that exact tool is listed |
@@ -107,13 +106,9 @@ messaging keepers keep board/task coordination without goal mutation access.
 
 ## Research Profile Additions
 
-When the `autoresearch` shard is allocated, these tools are added (any policy mode):
-
-| Source | Tools | Note |
-|--------|-------|------|
-| `Tool_shard.autoresearch_keeper_tools` | `masc_autoresearch_{start,status,stop,inject,cycle,record_finding,search_findings}` | Autoresearch suite |
-
-These overlap with `Tool_permissions.admin_tools` for `masc_autoresearch_start` and `masc_autoresearch_stop`. Keepers access them via shard allocation, not through the dispatch permission hook.
+Research-profile keepers use the active web, board, task, code, and goal
+surfaces. They do not receive `masc_autoresearch_*`; allowlists and preset
+selection must not resurrect retired autoresearch tools.
 
 ## Safety Gates (applied to all keepers)
 

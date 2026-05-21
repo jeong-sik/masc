@@ -15,13 +15,50 @@ let exact_direct_mention_present ~(targets : string list) (content : string) :
     bool =
   Mention.any_mentioned ~targets content
 
+(* Compiled once to avoid recompilation on every constitution fallback. *)
+let re_state_block_instruction_var =
+  Re.(compile (str "{{state_block_instruction}}"))
+
+(* Fallback substitution for the [state_block_instruction] template variable on
+   the raw constitution template.  Used when [render_prompt_template] returns
+   [Error] (e.g. unrelated unresolved variable, malformed template) so the
+   "State block template" anchor still appears in the prompt — otherwise the
+   raw template surfaces a literal [{{state_block_instruction}}] placeholder
+   and [missing_critical_prompt_anchors] reports [state_block_template] missing,
+   triggering the recovery-guard warn loop observed in the keeper logs
+   (~51 emissions / restart, all with keeper_name=null because the constitution
+   path runs before the per-keeper context is bound). *)
+let substitute_state_block_instruction_fallback raw =
+  Re.replace_string re_state_block_instruction_var
+    ~by:Keeper_state_block_prompt.instruction_text raw
+
 let keeper_constitution () =
   match
     Prompt_registry.render_prompt_template Keeper_prompt_names.constitution
       [ ("state_block_instruction", Keeper_state_block_prompt.instruction_text) ]
   with
   | Ok value -> value
-  | Error _ -> Prompt_registry.get_prompt Keeper_prompt_names.constitution
+  | Error msg ->
+      (* Preserve the original Error path (the render error is still real, e.g.
+         a newly-introduced unresolved variable in the template) by emitting
+         the same counter + warn the world-prompt fallback below uses.  But
+         instead of returning the raw template with [{{state_block_instruction}}]
+         unsubstituted (the silent-fallback bug), substitute the single
+         variable we know about so the "State block template" anchor still
+         appears in the prompt.  Any *other* unresolved variables remain
+         visible as [{{name}}] placeholders, which is what the operator needs
+         to see in order to fix the template. *)
+      Prometheus.inc_counter
+        Keeper_metrics.metric_keeper_prompt_failures
+        ~labels:[("prompt", Keeper_prompt_names.constitution)]
+        ();
+      Log.Keeper.warn
+        "keeper_constitution: template render failed (%s), falling back to \
+         raw template with state_block_instruction substituted; other \
+         variables may still be unresolved"
+        msg;
+      substitute_state_block_instruction_fallback
+        (Prompt_registry.get_prompt Keeper_prompt_names.constitution)
 
 let critical_prompt_anchors =
   [ ("continuity", "<continuity>");
@@ -173,20 +210,31 @@ let behavior_prompt_block name =
          ask the operator to restore the missing behavior prompt file."
         name
 
-let missing_personality_field field =
+let missing_personality_field_marker field =
+  (* F-3: per-field Prometheus counter retained (operator dashboards key on
+     specific field labels); WARN aggregation handled by caller so 3 missing
+     fields per cycle emit 1 WARN with structured field list instead of 3
+     separate WARNs. Pre-fix volume: ~666/24h (3 fields × 134 cycles + dups).
+     Post-fix worst case: ~134/24h with field list preserved in message. *)
   Prometheus.inc_counter
     Keeper_metrics.metric_keeper_prompt_failures
     ~labels:[("prompt", "personality/" ^ field)]
     ();
-  Log.Keeper.warn
-    "build_keeper_system_prompt: personality field %s is empty; rendering \
-     config-drift marker instead of generic in-source self-model text"
-    field;
   Printf.sprintf
     "Personality config drift: empty %s field. Preserve the keeper's \
      configured goal, persona, and runtime policy; ask the operator to \
      restore this self-model field."
     field
+
+let log_missing_personality_fields missing_fields =
+  match missing_fields with
+  | [] -> ()
+  | fields ->
+      Log.Keeper.warn
+        "build_keeper_system_prompt: personality fields empty: [%s]; \
+         rendering config-drift markers instead of generic in-source \
+         self-model text"
+        (String.concat ", " fields)
 
 let build_keeper_system_prompt
     ~goal ~short_goal ~mid_goal ~long_goal ~will ~needs ~desires
@@ -215,20 +263,21 @@ let build_keeper_system_prompt
       ~max_bytes:Keeper_config.prompt_render_max_bytes
       { will; needs; desires; instructions = "" }
   in
-  let will =
-    if rendered.will = "" then missing_personality_field "will"
-    else rendered.will
+  (* F-3: aggregate missing personality fields into a single WARN per
+     build_keeper_system_prompt call. Per-field Prometheus counters and the
+     in-prompt config-drift marker remain unchanged so dashboards and the
+     LLM-visible drift signal are preserved. *)
+  let missing_personality = ref [] in
+  let render_personality_field field value =
+    if value = "" then begin
+      missing_personality := field :: !missing_personality;
+      missing_personality_field_marker field
+    end else value
   in
-  let needs =
-    if rendered.needs = "" then
-      missing_personality_field "needs"
-    else rendered.needs
-  in
-  let desires =
-    if rendered.desires = "" then
-      missing_personality_field "desires"
-    else rendered.desires
-  in
+  let will = render_personality_field "will" rendered.will in
+  let needs = render_personality_field "needs" rendered.needs in
+  let desires = render_personality_field "desires" rendered.desires in
+  log_missing_personality_fields (List.rev !missing_personality);
   let custom =
     let s = String.trim instructions in
     if s = "" then ""

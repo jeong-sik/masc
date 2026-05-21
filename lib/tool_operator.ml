@@ -44,15 +44,6 @@ let strict_action_enums =
     `String "namespace_pause";
     `String "namespace_resume";
     `String "social_sweep";
-    (* Issue #8417: [task_inject] has a real handler in
-       [Operator_control.dispatch] (line 119) and is advertised by
-       [Operator_pending_confirm.available_actions] (line 253).  It
-       was previously grouped with the legacy aliases, so the remote
-       operator MCP surface and the LLM judge never saw it and
-       couldn't discover the capability. The remaining entries in
-       [legacy_action_alias_enums] are genuine aliases
-       ([keeper_msg]→[keeper_message], [room_pause]→[namespace_pause],
-       [room_resume]→[namespace_resume], [autonomy_tick]→[social_sweep]). *)
     `String "task_inject";
     `String "github_identity_login_prepare";
     `String "github_identity_status";
@@ -62,10 +53,6 @@ let strict_action_enums =
     `String "keeper_github_identity_login_prepare";
     `String "keeper_github_identity_status";
   ]
-
-let legacy_action_alias_enums =
-  [ `String "keeper_msg"; `String "room_pause"; `String "room_resume";
-    `String "autonomy_tick" ]
 
 let target_type_enums =
   [
@@ -156,9 +143,6 @@ let surface_audit_schema ~remote =
   }
 
 let action_schema ~remote =
-  let enum_values =
-    if remote then strict_action_enums else strict_action_enums @ legacy_action_alias_enums
-  in
   {
     name = "masc_operator_action";
     description =
@@ -178,7 +162,7 @@ let action_schema ~remote =
                   `Assoc
                     [
                       ("type", `String "string");
-                      ("enum", `List enum_values);
+                      ("enum", `List strict_action_enums);
                     ] );
                 ( "target_type",
                   `Assoc

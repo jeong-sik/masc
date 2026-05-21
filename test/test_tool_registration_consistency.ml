@@ -20,7 +20,7 @@ let all_schema_names =
 let test_workflow_guide_tools_exist () =
   let guide_tools = [
     "masc_start"; "masc_join"; "masc_status";
-    "masc_claim"; "masc_claim_next"; "masc_transition";
+    "masc_claim_next"; "masc_transition";
     "masc_add_task"; "masc_batch_add_tasks";
     "masc_plan_set_task";
     "masc_heartbeat"; "masc_broadcast";
@@ -129,19 +129,64 @@ let doc_path name =
 let repo_path relative =
   Filename.concat (repo_root ()) relative
 
+let is_markdown_file name =
+  Filename.check_suffix name ".md"
+
+let live_root_doc_names () =
+  Sys.readdir (Filename.concat (repo_root ()) "docs")
+  |> Array.to_list
+  |> List.filter is_markdown_file
+
 let test_docs_do_not_reintroduce_ghost_claim_surface () =
-  let allowed_claim_docs = [ "MCP-SURFACE-AUDIT.md" ] in
+  let allowed_removed_alias_docs = [ "MCP-SURFACE-AUDIT.md" ] in
   [ "MCP-SURFACE-AUDIT.md"; "QUICK-START.md" ]
   |> List.iter (fun name ->
          let contents = read_file (doc_path name) in
          if contains_substring contents "masc_task_list" then
            Alcotest.failf "doc %s reintroduces ghost tool masc_task_list" name;
          if contains_token contents "masc_claim"
-            && not (List.mem name allowed_claim_docs)
+            && not (List.mem name allowed_removed_alias_docs)
          then
            Alcotest.failf
-             "doc %s reintroduces normative masc_claim usage outside compatibility docs"
-             name)
+             "doc %s reintroduces deprecated masc_claim alias"
+             name;
+         if contains_substring contents "keep if compatibility matters"
+            || contains_substring contents "Still callable for compatibility"
+         then
+           Alcotest.failf "doc %s preserves legacy compatibility criteria" name)
+
+let test_live_docs_do_not_reintroduce_game_view_alias_lane () =
+  if Sys.file_exists (doc_path "GAME-VIEW-PROTOCOL.md") then
+    Alcotest.fail
+      "docs/GAME-VIEW-PROTOCOL.md reintroduces retired game-view protocol";
+  live_root_doc_names ()
+  |> List.filter (fun name -> name <> "MCP-SURFACE-AUDIT.md")
+  |> List.iter (fun name ->
+         let contents = read_file (doc_path name) in
+         List.iter
+           (fun marker ->
+             if contains_substring contents marker then
+               Alcotest.failf
+                 "doc %s reintroduces retired game-view alias lane marker %s"
+                 name
+                 marker)
+           [ "decision.create"
+           ; "decision.propose"
+           ; "decision.score"
+           ; "decision.vote"
+           ; "decision.finalize"
+           ; "experiment.define"
+           ; "experiment.start"
+           ; "experiment.observe"
+           ; "experiment.stop"
+           ; "experiment.report"
+           ; "trpg.scene"
+           ; "trpg.action"
+           ; "trpg.roll"
+           ; "trpg.tick"
+           ; "experiment_start"
+           ; "masc_trpg"
+           ])
 
 let test_front_door_surfaces_do_not_reintroduce_claim_alias () =
   (* CP purge: dashboard/src/components/command/ directory deleted with the
@@ -367,6 +412,8 @@ let () =
             test_workflow_guide_tools_exist;
           Alcotest.test_case "docs do not reintroduce ghost claim surface" `Quick
             test_docs_do_not_reintroduce_ghost_claim_surface;
+          Alcotest.test_case "live docs do not reintroduce game-view alias lane" `Quick
+            test_live_docs_do_not_reintroduce_game_view_alias_lane;
           Alcotest.test_case "front-door surfaces do not reintroduce claim alias" `Quick
             test_front_door_surfaces_do_not_reintroduce_claim_alias;
           Alcotest.test_case "benchmark scripts follow session contract" `Quick

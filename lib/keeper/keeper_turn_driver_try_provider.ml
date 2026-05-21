@@ -458,7 +458,7 @@ let run_try_provider
         Printexc.raise_with_backtrace exn bt
     in
     (match
-       Cascade_error_classify.with_codex_cli_preflight
+       Cascade_config_builder.with_codex_cli_preflight
          ~scope:(Printf.sprintf "cascade:%s/runtime" ctx.cascade_name)
          ~config
          ~goal:ctx.goal

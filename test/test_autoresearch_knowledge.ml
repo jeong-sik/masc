@@ -105,135 +105,8 @@ let test_base_path_isolation () =
        in_a);
   check int "base B stays isolated" 0 (List.length in_b)
 
-let make_ctx base_path : Tool_autoresearch.context =
-  {
-    base_path;
-    agent_name = Some "test-researcher";
-    start_operation = None;
-    config = None;
-    sw = None;
-    clock = None;
-  }
-
-let dispatch_json ctx ~name ~args =
-  match Tool_autoresearch.dispatch ctx ~name ~args with
-  | None -> fail ("dispatch missing for " ^ name)
-  | Some result when not result.success -> fail (name ^ " failed: " ^ result.legacy_message)
-  | Some result -> Yojson.Safe.from_string result.legacy_message
-
-let dispatch_error label ctx ~name ~args =
-  match Tool_autoresearch.dispatch ctx ~name ~args with
-  | None -> fail ("dispatch missing for " ^ name)
-  | Some result when result.success -> fail (name ^ " unexpectedly succeeded: " ^ result.legacy_message)
-  | Some result ->
-    let body = result.legacy_message in
-    let json = Yojson.Safe.from_string body in
-    let error =
-      Yojson.Safe.Util.(member "error" json |> to_string_option)
-    in
-    check bool (label ^ " error field present") true (Option.is_some error);
-    json
-
-let valid_record_fields evidence =
-  [
-    ("goal", `String "Validate autoresearch finding input");
-    ("hypothesis", `String "bad inputs should not persist findings");
-    ("evidence", `String evidence);
-    ("conclusion", `String "validation rejects malformed fields");
-  ]
-
-let test_record_and_search_dispatch () =
-  with_temp_base "autoresearch-knowledge-dispatch" @@ fun base_path ->
-  let ctx = make_ctx base_path in
-  let unique = "dispatch-token-autoresearch-findings" in
-  let record =
-    dispatch_json ctx ~name:"masc_autoresearch_record_finding"
-      ~args:
-        (`Assoc
-           [
-             ("goal", `String "Verify exposed autoresearch finding tool");
-             ("hypothesis", `String "dispatch can persist findings");
-             ("evidence", `String unique);
-             ("conclusion", `String "schema and dispatch are wired");
-             ("tags", `List [`String "dispatch"; `String "base-path"]);
-           ])
-  in
-  check bool "record dispatch ok" true
-    (Yojson.Safe.Util.(member "ok" record |> to_bool));
-  let search =
-    dispatch_json ctx ~name:"masc_autoresearch_search_findings"
-      ~args:(`Assoc [("query", `String unique); ("limit", `Int 5)])
-  in
-  check int "dispatch search count" 1
-    (Yojson.Safe.Util.(member "count" search |> to_int))
-
-let test_record_dispatch_rejects_invalid_input () =
-  with_temp_base "autoresearch-knowledge-invalid-record" @@ fun base_path ->
-  let ctx = make_ctx base_path in
-  let unique = "invalid-record-token-autoresearch-findings" in
-  let cases =
-    [
-      ( "blank required field",
-        `Assoc
-          [
-            ("goal", `String " ");
-            ("hypothesis", `String "bad inputs should not persist findings");
-            ("evidence", `String unique);
-            ("conclusion", `String "validation rejects malformed fields");
-          ] );
-      ( "invalid confidence",
-        `Assoc
-          (("confidence", `String "hihg") :: valid_record_fields unique) );
-      ( "non-string tag",
-        `Assoc
-          (("tags", `List [`String "ok"; `Int 1])
-           :: valid_record_fields unique) );
-      ( "negative cycle_start",
-        `Assoc
-          (("cycle_start", `Int (-1)) :: valid_record_fields unique) );
-      ( "reversed cycle range",
-        `Assoc
-          (("cycle_start", `Int 3)
-           :: ("cycle_end", `Int 1)
-           :: valid_record_fields unique) );
-    ]
-  in
-  List.iter
-    (fun (label, args) ->
-      ignore
-        (dispatch_error label ctx ~name:"masc_autoresearch_record_finding"
-           ~args))
-    cases;
-  let search =
-    dispatch_json ctx ~name:"masc_autoresearch_search_findings"
-      ~args:(`Assoc [("query", `String unique)])
-  in
-  check int "invalid records were not persisted" 0
-    (Yojson.Safe.Util.(member "count" search |> to_int))
-
-let test_search_dispatch_rejects_invalid_input () =
-  with_temp_base "autoresearch-knowledge-invalid-search" @@ fun base_path ->
-  let ctx = make_ctx base_path in
-  let cases =
-    [
-      ("blank query", `Assoc [("query", `String " ")]);
-      ("zero limit", `Assoc [("query", `String "x"); ("limit", `Int 0)]);
-      ("negative limit", `Assoc [("query", `String "x"); ("limit", `Int (-1))]);
-      ("too large limit", `Assoc [("query", `String "x"); ("limit", `Int 101)]);
-      ("non-numeric limit", `Assoc [("query", `String "x"); ("limit", `String "abc")]);
-      ("fractional limit", `Assoc [("query", `String "x"); ("limit", `String "1.5")]);
-    ]
-  in
-  List.iter
-    (fun (label, args) ->
-      ignore
-        (dispatch_error label ctx ~name:"masc_autoresearch_search_findings"
-           ~args))
-    cases
-
-let test_search_dispatch_limit_returns_recent_matches () =
+let test_search_limit_returns_recent_matches () =
   with_temp_base "autoresearch-knowledge-limit" @@ fun base_path ->
-  let ctx = make_ctx base_path in
   let unique = "limit-token-autoresearch-findings" in
   let record id =
     ignore
@@ -243,14 +116,9 @@ let test_search_dispatch_limit_returns_recent_matches () =
   record "fn-limit-1";
   record "fn-limit-2";
   record "fn-limit-3";
-  let search =
-    dispatch_json ctx ~name:"masc_autoresearch_search_findings"
-      ~args:(`Assoc [("query", `String unique); ("limit", `String "2")])
-  in
   let ids =
-    Yojson.Safe.Util.(
-      member "findings" search |> to_list
-      |> List.map (fun json -> member "id" json |> to_string))
+    Autoresearch_knowledge.search_findings ~base_path ~query:unique ~limit:2 ()
+    |> List.map (fun (finding : Autoresearch_knowledge.finding) -> finding.id)
   in
   check (list string) "most recent limited matches"
     ["fn-limit-3"; "fn-limit-2"] ids
@@ -299,13 +167,8 @@ let () =
       test_case "record and search roundtrip" `Quick test_record_and_search;
       test_case "search no match" `Quick test_search_no_match;
       test_case "base path isolation" `Quick test_base_path_isolation;
-      test_case "record/search dispatch" `Quick test_record_and_search_dispatch;
-      test_case "record dispatch rejects invalid input" `Quick
-        test_record_dispatch_rejects_invalid_input;
-      test_case "search dispatch rejects invalid input" `Quick
-        test_search_dispatch_rejects_invalid_input;
-      test_case "search dispatch limit returns recent matches" `Quick
-        test_search_dispatch_limit_returns_recent_matches;
+      test_case "search limit returns recent matches" `Quick
+        test_search_limit_returns_recent_matches;
     ];
     "lineage", [
       test_case "lineage contract normalizes finding tags" `Quick

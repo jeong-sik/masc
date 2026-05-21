@@ -24,8 +24,6 @@ module Float = Stdlib.Float
 module Keeper = struct
   type t =
     | Bash
-    | Bash_kill
-    | Bash_output
     | Board_cleanup
     | Board_comment
     | Board_comment_vote
@@ -85,8 +83,6 @@ module Keeper = struct
 
   let to_string = function
     | Bash -> "keeper_bash"
-    | Bash_kill -> "keeper_bash_kill"
-    | Bash_output -> "keeper_bash_output"
     | Board_cleanup -> "keeper_board_cleanup"
     | Board_comment -> "keeper_board_comment"
     | Board_comment_vote -> "keeper_board_comment_vote"
@@ -147,8 +143,6 @@ module Keeper = struct
 
   let of_string = function
     | "keeper_bash" -> Some Bash
-    | "keeper_bash_kill" -> Some Bash_kill
-    | "keeper_bash_output" -> Some Bash_output
     | "keeper_board_cleanup" -> Some Board_cleanup
     | "keeper_board_comment" -> Some Board_comment
     | "keeper_board_comment_vote" -> Some Board_comment_vote
@@ -255,13 +249,6 @@ module Masc = struct
     | Agent_update
     | Agent_card
     | Agents
-    | Autoresearch_cycle
-    | Autoresearch_inject
-    | Autoresearch_record_finding
-    | Autoresearch_search_findings
-    | Autoresearch_start
-    | Autoresearch_status
-    | Autoresearch_stop
     | Batch_add_tasks
     | Board_cleanup
     | Board_comment
@@ -300,7 +287,6 @@ module Masc = struct
     | Deliver
     | Dispatch_plan
     | Goal_list
-    | Goal_review
     | Goal_transition
     | Goal_upsert
     | Goal_verify
@@ -388,13 +374,6 @@ module Masc = struct
     | Claim_next -> "masc_claim_next"
     | Cleanup_zombies -> "masc_cleanup_zombies"
     | Coordination_fsm_snapshot -> "masc_coordination_fsm_snapshot"
-    | Autoresearch_cycle -> "masc_autoresearch_cycle"
-    | Autoresearch_inject -> "masc_autoresearch_inject"
-    | Autoresearch_record_finding -> "masc_autoresearch_record_finding"
-    | Autoresearch_search_findings -> "masc_autoresearch_search_findings"
-    | Autoresearch_start -> "masc_autoresearch_start"
-    | Autoresearch_status -> "masc_autoresearch_status"
-    | Autoresearch_stop -> "masc_autoresearch_stop"
     | Code_delete -> "masc_code_delete"
     | Code_edit -> "masc_code_edit"
     | Code_git -> "masc_code_git"
@@ -407,7 +386,6 @@ module Masc = struct
     | Deliver -> "masc_deliver"
     | Dispatch_plan -> "masc_dispatch_plan"
     | Goal_list -> "masc_goal_list"
-    | Goal_review -> "masc_goal_review"
     | Goal_transition -> "masc_goal_transition"
     | Goal_upsert -> "masc_goal_upsert"
     | Goal_verify -> "masc_goal_verify"
@@ -496,13 +474,6 @@ module Masc = struct
     | "masc_claim_next" -> Some Claim_next
     | "masc_cleanup_zombies" -> Some Cleanup_zombies
     | "masc_coordination_fsm_snapshot" -> Some Coordination_fsm_snapshot
-    | "masc_autoresearch_cycle" -> Some Autoresearch_cycle
-    | "masc_autoresearch_inject" -> Some Autoresearch_inject
-    | "masc_autoresearch_record_finding" -> Some Autoresearch_record_finding
-    | "masc_autoresearch_search_findings" -> Some Autoresearch_search_findings
-    | "masc_autoresearch_start" -> Some Autoresearch_start
-    | "masc_autoresearch_status" -> Some Autoresearch_status
-    | "masc_autoresearch_stop" -> Some Autoresearch_stop
     | "masc_code_delete" -> Some Code_delete
     | "masc_code_edit" -> Some Code_edit
     | "masc_code_git" -> Some Code_git
@@ -515,7 +486,6 @@ module Masc = struct
     | "masc_deliver" -> Some Deliver
     | "masc_dispatch_plan" -> Some Dispatch_plan
     | "masc_goal_list" -> Some Goal_list
-    | "masc_goal_review" -> Some Goal_review
     | "masc_goal_transition" -> Some Goal_transition
     | "masc_goal_upsert" -> Some Goal_upsert
     | "masc_goal_verify" -> Some Goal_verify

@@ -8,14 +8,6 @@
 let log_mcp_exn = Mcp_server_eio_helpers.log_mcp_exn
 let wait_for_message_eio = Mcp_server_eio_helpers.wait_for_message_eio
 
-(* RFC-0084 host-config-cleanup-D — agent runtime root migration.
-   Resolves the host runtime root once at module-init from the typed
-   [Host_config.agent_runtime_root] field; the 5 cross-process
-   agent-identity scratch files below reference the bound name so a
-   future PR can flip the typed surface to a base-path-relative
-   layout without touching this module's call sites. *)
-let agent_runtime_root = (Host_config.host ()).agent_runtime_root
-
 (* #10699 Family A — "Join required" surfaces 28 / 24h events for
    masc_transition + masc_claim_next while the underlying keeper had
    joined under its canonical name at boot via
@@ -96,12 +88,6 @@ let resolve_join_state ~room_initialized ~join_required ~agent_name ~base_path ~
       | Error _ -> false))
 ;;
 
-
-let should_read_legacy_persisted_agent_name ~has_explicit_agent_name ~agent_name =
-  Mcp_server_eio_caller_identity.should_read_legacy_persisted_agent_name
-    ~has_explicit_agent_name ~agent_name
-;;
-
 let caller_agent_name_from_arguments arguments =
   Mcp_server_eio_caller_identity.caller_agent_name_from_arguments arguments
 ;;
@@ -145,7 +131,7 @@ let execute_tool_eio
       ~arguments
   =
   (* clock parameter used for Session_eio.wait_for_message *)
-  (* mcp_session_id: HTTP MCP session ID for agent_name persistence across tool calls *)
+  (* mcp_session_id: HTTP MCP session ID for in-process identity continuity. *)
   let module U = Yojson.Safe.Util in
   (* Defensive: refresh Eio global context for downstream helpers that still
      consult the ambient switch/clock during a request. Tests may leave a
@@ -161,65 +147,23 @@ let execute_tool_eio
      Updated after auto-init succeeds. *)
   let room_init_cached = ref (Coord.is_initialized config) in
   (* Fix 4: Check resolved-name cache for fast identity resolution.
-     On 2nd+ call in the same MCP session, the cached name lets us skip
-     legacy /tmp file reads in the fallback paths below. *)
+     On 2nd+ call in the same MCP session, the cached name preserves the
+     nickname selected by the prior join without relying on sidecar files. *)
   let cached_resolved_agent =
     Option.bind mcp_session_id Agent_registry_eio.get_resolved_name
   in
   let identity = Agent_registry_eio.get_or_create_identity ?mcp_session_id arguments in
   Log.Mcp.debug "[Identity] %s" (Agent_identity.to_display_string identity);
-  (* Deprecated: /tmp file-based agent identity. Use Agent_identity system instead.
-     Kept for backward compat with pre-identity MCP clients. Remove when
-     deprecation log shows zero hits over a release cycle. *)
-  let read_mcp_session_agent () =
-    match mcp_session_id with
-    | None -> None
-    | Some sid ->
-      let file = Filename.concat agent_runtime_root (Printf.sprintf ".masc_agent_mcp_%s" sid) in
-      (try
-         let name = Fs_compat.load_file file |> String.trim in
-         if name = ""
-         then None
-         else (
-           Log.Mcp.warn
-             "[deprecated] agent name resolved via /tmp file for session %s — migrate to \
-              Agent_identity"
-             sid;
-           Some name)
-       with
-       | Sys_error _ | Eio.Io _ -> None)
-  in
-  (* Deprecated: write agent name to /tmp file. *)
-  let write_mcp_session_agent agent_name =
+  let record_mcp_session_agent agent_name =
     match mcp_session_id with
     | None -> ()
-    | Some sid ->
-      let file = Filename.concat agent_runtime_root (Printf.sprintf ".masc_agent_mcp_%s" sid) in
-      (try Fs_compat.save_file file agent_name with
-       | Sys_error msg -> Log.Misc.warn "write_mcp_session_agent: %s" msg
-       | Eio.Io _ as exn ->
-         Log.Misc.warn "write_mcp_session_agent: %s" (Printexc.to_string exn))
-  in
-  let read_term_session_agent () =
-    if Option.is_some mcp_session_id
-    then None
-    else (
-      match Sys.getenv_opt "TERM_SESSION_ID" with
-      | None -> None
-      | Some sid ->
-        let file = Filename.concat agent_runtime_root (Printf.sprintf ".masc_agent_%s" sid) in
-        (try
-           let name = Fs_compat.load_file file |> String.trim in
-           if name = "" then None else Some name
-         with
-         | Sys_error _ -> None))
+    | Some sid -> Agent_registry_eio.set_resolved_name sid agent_name
   in
   let caller_identity =
     Mcp_server_eio_caller_identity.resolve ~config ~tool_name:name ~arguments
-      ~identity ~cached_resolved_agent ~mcp_session_id ~auth_token
-      ~internal_keeper_runtime
+      ~identity ~cached_resolved_agent ~auth_token ~internal_keeper_runtime
       ~room_initialized:(fun () -> !room_init_cached)
-      ~read_mcp_session_agent ~read_term_session_agent ~log_mcp_exn
+      ~log_mcp_exn
   in
   let agent_name = caller_identity.agent_name in
   let token = caller_identity.token in
@@ -228,10 +172,8 @@ let execute_tool_eio
   in
   let owner_keeper_identity = caller_identity.owner_keeper_identity in
   let mode_gate_error = caller_identity.mode_gate_error in
-  (* Cache resolved agent_name for this session (Fix 4) *)
-  (match mcp_session_id with
-   | Some sid -> Agent_registry_eio.set_resolved_name sid agent_name
-   | None -> ());
+  (* Cache resolved agent_name for this session (Fix 4). *)
+  record_mcp_session_agent agent_name;
   let is_system_internal_tool =
     Tool_catalog.is_on_surface Tool_catalog.System_internal name
   in
@@ -358,22 +300,6 @@ let execute_tool_eio
          with
          | Invalid_argument _ -> fallback
        in
-       let write_term_session_agent nickname =
-         if Option.is_some mcp_session_id
-         then ()
-         else (
-           match Sys.getenv_opt "TERM_SESSION_ID" with
-           | None -> ()
-           | Some sid ->
-             let file = Filename.concat agent_runtime_root (Printf.sprintf ".masc_agent_%s" sid) in
-             (try Fs_compat.save_file file nickname with
-              | Eio.Cancel.Cancelled _ as e -> raise e
-              | e ->
-                Log.Misc.error
-                  "Failed to write agent file %s: %s"
-                  file
-                  (Printexc.to_string e)))
-       in
        (* Auto-init/auto-join for better UX.
      - Auto-init only when auth is disabled (avoid side effects in secured rooms).
      - Auto-join when allowed by auth (and safe for token-based auth). *)
@@ -469,9 +395,8 @@ let execute_tool_eio
                   extract_nickname_from_join_result ~fallback:agent_name join_result
                 in
                 Log.Mcp.info "Auto-joined for %s: %s -> %s" name agent_name nickname;
-                (* Persist nickname so subsequent calls can use it. *)
-                write_mcp_session_agent nickname;
-                write_term_session_agent nickname;
+                (* Remember nickname so subsequent calls in this MCP session can use it. *)
+                record_mcp_session_agent nickname;
                 let (_ : Session.session) =
                   Session.register registry ~agent_name:nickname
                 in
@@ -703,11 +628,6 @@ let execute_tool_eio
                      { Tool_misc.config; agent_name }
                      ~name
                      ~args:coerced_args
-                 | Mod_suspend ->
-                   Tool_suspend.dispatch
-                     { Tool_suspend.config; caller_agent = Some agent_name }
-                     ~name
-                     ~args:coerced_args
                  | Mod_library ->
                    Tool_library.dispatch
                      { Tool_library.agent_name }
@@ -722,18 +642,7 @@ let execute_tool_eio
                      if ok
                      then Tool_result.ok ~tool_name:name ~start_time msg
                      else Tool_result.error ~tool_name:name ~start_time msg)
-                 (* Mod_repair_loop removed: tools pruned *)
-                 | Mod_autoresearch ->
-                   let ctx : Tool_autoresearch.context =
-                     { base_path = config.base_path
-                     ; agent_name = Some agent_name
-                     ; start_operation = None
-                     ; config = Some config
-                     ; sw = Some sw
-                     ; clock = Some clock
-                     }
-                   in
-                   Tool_autoresearch.dispatch ctx ~name ~args:coerced_args
+                 (* Removed tool families are intentionally not dispatchable. *)
                  | Mod_shard ->
                    let ok, json = Tool_shard.execute name coerced_args in
                    let message = Yojson.Safe.to_string json in
@@ -751,7 +660,7 @@ let execute_tool_eio
                      ; clock
                      ; arguments = coerced_args
                      ; mcp_session_id
-                     ; write_mcp_session_agent
+                     ; record_mcp_session_agent
                      ; wait_for_message =
                          (fun registry ~agent_name ~timeout ->
                            wait_for_message_eio ~clock registry ~agent_name ~timeout)

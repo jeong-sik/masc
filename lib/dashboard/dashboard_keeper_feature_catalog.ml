@@ -148,19 +148,4 @@ let tool_features =
       next_action =
         "Exercise PR creation/status/review read-comment-reply with keeper credentials.";
     };
-    {
-      id = "autoresearch_tools";
-      label = "Autoresearch tools";
-      required_tools = [
-        "masc_autoresearch_start";
-        "masc_autoresearch_status";
-        "masc_autoresearch_cycle";
-        "masc_autoresearch_inject";
-        "masc_autoresearch_record_finding";
-        "masc_autoresearch_search_findings";
-        "masc_autoresearch_stop";
-      ];
-      next_action =
-        "Run an autoresearch loop and prove start/status/cycle/finding/stop paths.";
-    };
   ]

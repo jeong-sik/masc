@@ -3,3 +3,5 @@
 # Format: <needle> <repo-relative-path>
 # New files may not gain these legacy markers. Deletion PRs should remove
 # rows as they remove the corresponding markers.
+run_in_background test/test_keeper_tool_alias.ml
+run_in_background test/test_tool_input_validation.ml

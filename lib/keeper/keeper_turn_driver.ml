@@ -180,8 +180,73 @@ let run_named
   let tool_filtered_candidates =
     runtime_candidates_of_tiered_providers tiered_providers tool_filtered_candidate_cfgs
   in
+  let required_lane_filtered_candidates, required_lane_provider_rejections =
+    match runtime_manifest_required_tool_names with
+    | [] -> tool_filtered_candidates, []
+    | required_tool_names ->
+      List.fold_right
+        (fun candidate (kept, rejected) ->
+           let provider_label = Cascade_runtime_candidate.provider_label candidate in
+           let drop ~lane ~missing_required_tools ~materialized_tool_names =
+             let reason =
+               Printf.sprintf
+                 "required_tool_lane_unavailable: provider=%s lane=%s \
+                  missing_required_tools=[%s] materialized_tools=[%s]"
+                 provider_label
+                 lane
+                 (String.concat ", " missing_required_tools)
+                 (String.concat ", " materialized_tool_names)
+             in
+             Log.Misc.info
+               "cascade %s: pre-dispatch skipped provider=%s reason=%s"
+               cascade_name
+               provider_label
+               reason;
+             kept, ({ reason } : Cascade_error_classify.provider_rejection) :: rejected
+           in
+           match
+             Cascade_runtime_candidate.resolve_tool_lane_for_oas_tools
+               ?agent_name:(Cascade_oas_runner.keeper_agent_name_opt keeper_name)
+               ~tool_requirement:`Required
+               ~tools
+               candidate
+           with
+           | Error err ->
+             drop
+               ~lane:"unresolved"
+               ~missing_required_tools:required_tool_names
+               ~materialized_tool_names:[ "error=" ^ Agent_sdk.Error.to_string err ]
+           | Ok (effective_tools, runtime_mcp_policy) ->
+             let runtime_mcp_policy =
+               match runtime_mcp_policy, String.trim keeper_name with
+               | Some policy, keeper_name when keeper_name <> "" ->
+                 Cascade_runtime_candidate.runtime_mcp_policy_for_agent
+                   ~agent_name:(Keeper_types.keeper_agent_name keeper_name)
+                   candidate
+                   (Some policy)
+               | _ -> runtime_mcp_policy
+             in
+             let materialized_tool_names =
+               materialized_tool_names_after_lane ~effective_tools ~runtime_mcp_policy
+             in
+             let missing_required_tools =
+               missing_required_tool_names_after_lane_by_name
+                 ~required_tool_names
+                 ~materialized_tool_names
+             in
+             if missing_required_tools = []
+             then candidate :: kept, rejected
+             else
+               drop
+                 ~lane:
+                   (resolved_tool_lane_label ~effective_tools ~runtime_mcp_policy)
+                 ~missing_required_tools
+                 ~materialized_tool_names)
+        tool_filtered_candidates
+        ([], [])
+  in
   let health_filtered_candidates =
-    tool_filtered_candidates
+    required_lane_filtered_candidates
     |> List.filter
          (fun candidate ->
             match Cascade_runtime_candidate.first_health_cooldown candidate with
@@ -193,9 +258,12 @@ let run_named
                 false)
   in
   let health_filtered_candidate_count = List.length health_filtered_candidates in
+  let required_lane_filtered_candidate_count =
+    List.length required_lane_filtered_candidates
+  in
   let dispatch_seed_candidates, health_cooldown_fail_open =
     fail_open_health_filtered_candidates
-      ~tool_filtered_candidates
+      ~tool_filtered_candidates:required_lane_filtered_candidates
       ~health_filtered_candidates
   in
   let local_endpoint_health =
@@ -381,7 +449,7 @@ let run_named
   let record_provider_health_error candidate = function
     | Provider_error.ServerError { code; _ } ->
       record_provider_health_result candidate ~success:false ~http_status:(Some code)
-    | Provider_error.CapacityExhausted _
+    | Provider_error.CapacityBackpressure _
     | Provider_error.RateLimit _
     | Provider_error.AuthError
     | Provider_error.InvalidRequest _
@@ -401,13 +469,20 @@ let run_named
           ~keeper_name ?runtime_mcp_policy ~tools
           ~require_tool_choice_support ~require_tool_support
           original_candidates
+        @ required_lane_provider_rejections
       in
       let empty_candidate_classification =
-        classify_empty_candidates
-          ~require_tool_choice_support
-          ~require_tool_support
-          ~original_candidate_count
-          ~tool_filtered_candidate_count
+        if
+          runtime_manifest_required_tool_names <> []
+          && original_candidate_count > 0
+          && required_lane_filtered_candidate_count = 0
+        then Tool_capability_empty
+        else
+          classify_empty_candidates
+            ~require_tool_choice_support
+            ~require_tool_support
+            ~original_candidate_count
+            ~tool_filtered_candidate_count
       in
       let classification_code =
         empty_candidate_classification_code empty_candidate_classification
@@ -422,14 +497,16 @@ let run_named
       Log.Misc.error
         "cascade %s: %s; classification=%s configured_label_count=%d \
          original_candidate_count=%d tool_filtered_candidate_count=%d \
-         local_prefiltered_candidate_count=%d health_filtered_candidate_count=%d \
-         require_tool_choice_support=%b require_tool_support=%b"
+         required_lane_filtered_candidate_count=%d local_prefiltered_candidate_count=%d \
+         health_filtered_candidate_count=%d require_tool_choice_support=%b \
+         require_tool_support=%b"
         cascade_name
         exhaustion_summary
         classification_code
         configured_label_count
         original_candidate_count
         tool_filtered_candidate_count
+        required_lane_filtered_candidate_count
         local_prefiltered_candidate_count
         health_filtered_candidate_count
         require_tool_choice_support
@@ -479,6 +556,8 @@ let run_named
                     ("candidate_count", `Int original_candidate_count);
                     ( "tool_filtered_candidate_count",
                       `Int tool_filtered_candidate_count );
+                    ( "required_lane_filtered_candidate_count",
+                      `Int required_lane_filtered_candidate_count );
                     ( "local_prefiltered_candidate_count",
                       `Int local_prefiltered_candidate_count );
                     ( "unhealthy_local_endpoint_count",
@@ -635,7 +714,7 @@ let run_named
           let http_status_of_provider_error = function
             | Some (Provider_error.ServerError { code; _ }) -> Some code
             | Some
-                (Provider_error.CapacityExhausted _
+                (Provider_error.CapacityBackpressure _
                 | Provider_error.RateLimit _
                 | Provider_error.AuthError
                 | Provider_error.InvalidRequest _
@@ -728,17 +807,35 @@ let run_named
         ~error_reason
         ()
     else
-      (* Capacity_exhausted shares the immediate-cooldown semantics of a
+      (* Capacity backpressure shares the immediate-cooldown semantics of a
          soft rate limit: one event is sufficient evidence that the
          provider cannot serve, so we reuse [record_soft_rate_limited]
          rather than counting toward the 3-failure threshold of
          [record_failure]. The retry_after hint, when present, drives
          cooldown duration (clamped by
-         [Cascade_health_tracker.soft_rate_limit_max_clamp_sec]). *)
+         [Cascade_health_tracker.soft_rate_limit_max_clamp_sec]).
+
+         D12 root-fix: a MASC-internal [Capacity_backpressure]
+         classification with [retry_after_sec = None] previously fell
+         through to [record_failure] (3-failure threshold) and the
+         cascade rotated immediately onto the same degraded provider
+         within milliseconds.  Inject a typed synthetic backoff so the
+         cooldown path still applies; emit a warning so operators can
+         see that the upstream omitted the hint. *)
       let immediate_cooldown_retry_after =
-        match sdk_error_capacity_exhausted_retry_after_s sdk_err with
+        match sdk_error_capacity_backpressure_retry_after_s sdk_err with
         | Some retry_after -> Some retry_after
-        | None -> sdk_error_soft_rate_limited sdk_err
+        | None ->
+          (match sdk_error_capacity_backpressure_retry_hint sdk_err with
+           | Some (Cbr_explicit s) -> Some (Some s)
+           | Some (Cbr_synthetic_default s) ->
+             Log.Misc.warn
+               "cascade_capacity_backpressure: provider=%s retry_after_sec=null \
+                injecting synthetic backoff=%.1fs (error_kind=%s)"
+               provider_key s
+               (Cascade_health_tracker.error_kind_to_string error_kind);
+             Some (Some s)
+           | None -> sdk_error_soft_rate_limited sdk_err)
       in
       match immediate_cooldown_retry_after with
       | Some retry_after_s ->
@@ -984,6 +1081,14 @@ let run_named
         terminal_error
     | candidate :: rest ->
       Eio_guard.fair_yield (); (* P0: keep fast-fail cascades scheduler-fair. *)
+      (* Phase A: no provider snapshot is available yet, so the boundary returns
+         [Capability_unknown] and preserves routing. Later phases only swap in
+         a real snapshot producer at this call site. *)
+      ignore
+        (Provider_capability.decide_required_action
+           (Provider_capability.unknown
+              ~provider_name:(Cascade_runtime_candidate.provider_label candidate))
+           ~required_tools:runtime_manifest_required_tool_names);
       let tier_admission_id = Cascade_runtime_candidate.tier_id candidate in
       let health_cooldown =
         Cascade_runtime_candidate.first_health_cooldown candidate
@@ -1058,18 +1163,15 @@ let run_named
           true
       in
       let attempt_watchdog_source =
-        match liveness_mode, liveness_observer_attached, pp_timeout with
-        | Cascade_attempt_liveness_config.Enforce, true, _ ->
+        match liveness_mode, pp_timeout with
+        | Cascade_attempt_liveness_config.Enforce, _ ->
           "liveness_observer_enforce"
-        | Cascade_attempt_liveness_config.Observe, true, Some _ ->
+        | Cascade_attempt_liveness_config.Observe, Some _ ->
           "legacy_outer_wall_observe_liveness"
-        | Cascade_attempt_liveness_config.Observe, true, None ->
+        | Cascade_attempt_liveness_config.Observe, None ->
           "oas_max_execution_time_observe_liveness"
-        | Cascade_attempt_liveness_config.Off, _, Some _ -> "legacy_outer_wall"
-        | Cascade_attempt_liveness_config.Off, _, None -> "oas_max_execution_time"
-        | Cascade_attempt_liveness_config.Enforce, false, Some _ -> "legacy_outer_wall"
-        | Cascade_attempt_liveness_config.Enforce, false, None ->
-          "oas_max_execution_time"
+        | Cascade_attempt_liveness_config.Off, Some _ -> "legacy_outer_wall"
+        | Cascade_attempt_liveness_config.Off, None -> "oas_max_execution_time"
       in
       let liveness_budget_source =
         if liveness_observer_attached then (

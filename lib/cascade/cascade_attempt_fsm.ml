@@ -145,6 +145,11 @@ let sdk_error_to_cascade_outcome (err : Agent_sdk.Error.sdk_error)
   | Some (Cascade_error_classify.Oas_timeout_budget _)
   | Some (Cascade_error_classify.Max_tokens_ceiling_violation _)
   | Some (Cascade_error_classify.Ambiguous_post_commit _)
+  (* RFC-0159 Phase A: opaque internal failures fall through to the raw
+     sdk_error match below; they have no typed cascade-outcome mapping. *)
+  | Some (Cascade_error_classify.Internal_unhandled_exception _)
+  | Some (Cascade_error_classify.Internal_bridge_exception _)
+  | Some (Cascade_error_classify.Internal_contract_rejected _)
   | None -> (
   match err with
   | Agent_sdk.Error.Api api_err ->
@@ -504,8 +509,40 @@ let message_looks_like_terminal_provider_runtime_failure message =
   || (contains "error parsing sse message"
       && (contains "jsonrpc" || contains "jsonrpcmessage"))
 
+(* D6 fix: typed network-class terminals.
+
+   [Llm_provider.Retry.NetworkError] carries a structured
+   [Http_client.network_error_kind].  Pre-fix the classifier only inspected
+   the embedded [message] string, so a single endpoint outage materialised
+   as 3–5 retry events before cooldown.  Treating
+   [Connection_refused]/[Dns_failure] as terminal directly off the typed
+   variant collapses one outage to one event (~70% reduction of the
+   residual network-class storm).
+
+   The remaining [network_error_kind] arms ([Tls_error], [Timeout],
+   [Local_resource_exhaustion], [End_of_file], [Unknown]) are *not*
+   reclassified here: TLS/timeout/EOF can be transient and have separate
+   policy paths upstream, and [Local_resource_exhaustion] is the OS-level
+   class handled by [System_error_class]. *)
+let network_error_kind_is_terminal
+    (kind : Llm_provider.Http_client.network_error_kind) : bool =
+  match kind with
+  | Llm_provider.Http_client.Connection_refused -> true
+  | Llm_provider.Http_client.Dns_failure -> true
+  | Llm_provider.Http_client.Tls_error
+  | Llm_provider.Http_client.Timeout
+  | Llm_provider.Http_client.Local_resource_exhaustion
+  | Llm_provider.Http_client.End_of_file
+  | Llm_provider.Http_client.Unknown -> false
+
 let sdk_error_is_terminal_provider_runtime_failure
     (err : Agent_sdk.Error.sdk_error) : bool =
+  let direct_typed_network =
+    match err with
+    | Agent_sdk.Error.Api (Llm_provider.Retry.NetworkError { kind; _ }) ->
+        network_error_kind_is_terminal kind
+    | _ -> false
+  in
   let direct_api_message =
     match err with
     | Agent_sdk.Error.Api
@@ -521,7 +558,8 @@ let sdk_error_is_terminal_provider_runtime_failure
         message_looks_like_terminal_provider_runtime_failure message
     | _ -> false
   in
-  direct_api_message
+  direct_typed_network
+  || direct_api_message
   || message_looks_like_terminal_provider_runtime_failure
        (Agent_sdk.Error.to_string err)
 
@@ -626,16 +664,16 @@ let transient_http_status code =
   code = 408 || code = 409 || code = 425 || code = 429 || code >= 500
 
 let provider_capacity ?(scope = `Provider) _provider =
-  Some (Provider_error.CapacityExhausted { scope })
+  Some (Provider_error.CapacityBackpressure { scope })
 
-let retry_api_error_to_provider_error ~provider ~capacity_exhausted api_error =
+let retry_api_error_to_provider_error ~provider ~capacity_backpressure api_error =
   let provider = provider_label provider in
   match api_error with
   | Llm_provider.Retry.RateLimited { retry_after; _ } ->
-      if capacity_exhausted then provider_capacity provider
+      if capacity_backpressure then provider_capacity provider
       else Some (Provider_error.RateLimit { retry_after })
   | Llm_provider.Retry.Overloaded _ ->
-      if capacity_exhausted then provider_capacity provider
+      if capacity_backpressure then provider_capacity provider
       else Some (Provider_error.ServerError { code = 529; transient = true })
   | Llm_provider.Retry.ServerError { status; _ } ->
       Some
@@ -643,7 +681,7 @@ let retry_api_error_to_provider_error ~provider ~capacity_exhausted api_error =
            { code = status; transient = transient_http_status status })
   | Llm_provider.Retry.AuthError _ -> Some Provider_error.AuthError
   | Llm_provider.Retry.InvalidRequest { message } ->
-      if capacity_exhausted then provider_capacity provider
+      if capacity_backpressure then provider_capacity provider
       else Some (Provider_error.InvalidRequest { reason = message })
   | Llm_provider.Retry.NotFound { message } ->
       Some (Provider_error.InvalidRequest { reason = message })
@@ -651,7 +689,7 @@ let retry_api_error_to_provider_error ~provider ~capacity_exhausted api_error =
       provider_capacity ~scope:`Model provider
   | Llm_provider.Retry.NetworkError _
   | Llm_provider.Retry.Timeout _ ->
-      if capacity_exhausted then provider_capacity provider else None
+      if capacity_backpressure then provider_capacity provider else None
 
 let sdk_provider_error_to_provider_error = function
   | Llm_provider.Error.RateLimit { retry_after; _ } ->
@@ -660,7 +698,7 @@ let sdk_provider_error_to_provider_error = function
       Some (Provider_error.CliWrappedHardQuota { detail })
   | Llm_provider.Error.CapacityExhausted { scope; _ } ->
       Some
-        (Provider_error.CapacityExhausted
+        (Provider_error.CapacityBackpressure
            { scope = provider_error_capacity_scope scope })
   | Llm_provider.Error.AuthError _
   | Llm_provider.Error.MissingApiKey _ ->
@@ -685,7 +723,7 @@ let sdk_error_to_provider_error ~provider err =
   match err with
   | Agent_sdk.Error.Api api_err ->
       retry_api_error_to_provider_error ~provider
-        ~capacity_exhausted:(sdk_error_is_hard_quota err)
+        ~capacity_backpressure:(sdk_error_is_hard_quota err)
         api_err
   | Agent_sdk.Error.Provider provider_err ->
       sdk_provider_error_to_provider_error provider_err
@@ -714,7 +752,7 @@ let () =
     ()
 
 let provider_error_capacity_scope_label = function
-  | Provider_error.CapacityExhausted { scope } ->
+  | Provider_error.CapacityBackpressure { scope } ->
       Provider_error.scope_to_string scope
   | Provider_error.RateLimit _
   | Provider_error.AuthError
@@ -903,13 +941,43 @@ let emit_sdk_provider_error_metric ~cascade_name ~provider err =
    429 should already deprioritize the provider"). Threshold-counting via
    [record_failure] would burn 2 additional cascade attempts on a
    provider that has just declared it cannot serve. *)
-let sdk_error_capacity_exhausted_retry_after_s (err : Agent_sdk.Error.sdk_error)
+let sdk_error_capacity_backpressure_retry_after_s (err : Agent_sdk.Error.sdk_error)
   : float option option =
   match err with
   | Agent_sdk.Error.Provider
       (Llm_provider.Error.CapacityExhausted { retry_after; _ }) ->
     Some retry_after
   | _ -> None
+
+type capacity_backpressure_retry_hint =
+  | Cbr_explicit of float
+  | Cbr_synthetic_default of float
+
+let sdk_error_capacity_backpressure_retry_hint (err : Agent_sdk.Error.sdk_error)
+  : capacity_backpressure_retry_hint option =
+  match Cascade_error_classify.classify_masc_internal_error err with
+  | Some (Cascade_error_classify.Capacity_backpressure { retry_after_sec; _ }) ->
+    (match retry_after_sec with
+     | Some s when s > 0.0 -> Some (Cbr_explicit s)
+     | Some _ (* <= 0.0: treat as missing, fall back to synthetic *)
+     | None ->
+       Some
+         (Cbr_synthetic_default
+            Cascade_health_tracker.default_capacity_backpressure_backoff_sec))
+  | Some (Cascade_error_classify.Cascade_exhausted _)
+  | Some (Cascade_error_classify.Resumable_cli_session _)
+  | Some (Cascade_error_classify.No_tool_capable_provider _)
+  | Some (Cascade_error_classify.Accept_rejected _)
+  | Some (Cascade_error_classify.Admission_queue_timeout _)
+  | Some (Cascade_error_classify.Admission_queue_rejected _)
+  | Some (Cascade_error_classify.Turn_timeout _)
+  | Some (Cascade_error_classify.Oas_timeout_budget _)
+  | Some (Cascade_error_classify.Max_tokens_ceiling_violation _)
+  | Some (Cascade_error_classify.Ambiguous_post_commit _)
+  | Some (Cascade_error_classify.Internal_unhandled_exception _)
+  | Some (Cascade_error_classify.Internal_bridge_exception _)
+  | Some (Cascade_error_classify.Internal_contract_rejected _)
+  | None -> None
 
 let sdk_error_soft_rate_limited (err : Agent_sdk.Error.sdk_error)
   : float option option =
@@ -960,7 +1028,11 @@ let sdk_error_is_max_turns_exceeded (err : Agent_sdk.Error.sdk_error) : bool =
   | Some (Cascade_error_classify.Turn_timeout _)
   | Some (Cascade_error_classify.Oas_timeout_budget _)
   | Some (Cascade_error_classify.Max_tokens_ceiling_violation _)
-  | Some (Cascade_error_classify.Ambiguous_post_commit _) ->
+  | Some (Cascade_error_classify.Ambiguous_post_commit _)
+  (* RFC-0159 Phase A: opaque internal failures are not max-turns-exceeded. *)
+  | Some (Cascade_error_classify.Internal_unhandled_exception _)
+  | Some (Cascade_error_classify.Internal_bridge_exception _)
+  | Some (Cascade_error_classify.Internal_contract_rejected _) ->
       false
   | None -> (
       match err with

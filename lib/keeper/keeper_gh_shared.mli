@@ -68,10 +68,10 @@ val gh_not_found_hint :
   out:string ->
   (string * Yojson.Safe.t) list
 
-val max_gh_output_bytes : int
-
 val truncate_gh_output :
   string -> string * (string * Yojson.Safe.t) list
+(** Truncate large gh output using the runtime [gh_cache.max_output_bytes]
+    policy. *)
 
 (* ---- gh command parsers --------------------------------------- *)
 

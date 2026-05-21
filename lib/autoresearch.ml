@@ -479,6 +479,13 @@ let linked_status_json ~base_path (link : execution_link) =
       ("error", Json_util.string_opt_to_json error_message);
     ]
 
+let persisted_summary_target_reached (summary : persisted_summary) =
+  match summary.target_score with
+  | Some target when Float.is_finite summary.best_score && Float.is_finite target ->
+      if summary.lower_is_better then Stdlib.( <= ) summary.best_score target
+      else Stdlib.( >= ) summary.best_score target
+  | _ -> false
+
 (** Summary for status reporting. *)
 let summary (state : loop_state) =
   let recent = List.filteri (fun i _ -> i < 5) state.history in

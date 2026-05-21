@@ -79,15 +79,14 @@ let test_render_docker_process_result_uses_cwd_response () =
          ~affix:"Keeper_cwd_response.to_yojson_response"
          src)
 
-let test_bash_op_has_no_runtime_cwd_field () =
+let test_bash_op_has_no_special_runtime_branch () =
   match find_source_path () with
   | None -> ()
   | Some path ->
     let src = read_source path in
-    check bool "legacy op=bash deprecation exists" true
-      (Astring.String.is_infix
-         ~affix:"keeper_shell_bash_deprecated" src);
-    check bool "legacy op=bash cwd_field removed" false
+    check bool "legacy op=bash branch removed" false
+      (Astring.String.is_infix ~affix:"| \"bash\" ->" src);
+    check bool "legacy op=bash cwd_field absent" false
       (Astring.String.is_infix ~affix:"let cwd_field" src)
 
 let test_git_log_runtime_branch_uses_cwd_response () =
@@ -98,8 +97,8 @@ let test_git_log_runtime_branch_uses_cwd_response () =
     (* The git_log runtime branch builds its own cwd_response.
        Verify at least 2 distinct [cwd_response = Keeper_cwd_response.docker]
        constructions in the file (render_docker + git_log; the
-       generic op=bash branch is now a non-executing deprecation
-       response and no longer constructs cwd responses). *)
+       generic op=bash branch was removed and now falls through the
+       unsupported-op response, so it no longer constructs cwd responses). *)
     let docker_ctor_uses =
       count_substring src "Keeper_cwd_response.docker ~host_cwd:cwd"
     in
@@ -161,8 +160,8 @@ let () =
             "render_docker_process_result wires Cwd_response"
             `Quick
             test_render_docker_process_result_uses_cwd_response
-        ; test_case "op=bash has no runtime cwd field" `Quick
-            test_bash_op_has_no_runtime_cwd_field
+        ; test_case "op=bash has no special runtime branch" `Quick
+            test_bash_op_has_no_special_runtime_branch
         ; test_case
             "git_log runtime branch wires Cwd_response"
             `Quick test_git_log_runtime_branch_uses_cwd_response

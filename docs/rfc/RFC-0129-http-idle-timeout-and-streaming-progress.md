@@ -1,14 +1,50 @@
 ---
 rfc: "0129"
 title: "Cascade attempt idle-cap: kill the reserve_fraction band-aid"
-status: Draft
+status: Implemented
 created: 2026-05-18
-updated: 2026-05-18
+updated: 2026-05-21
 author: vincent
 supersedes: []
 superseded_by: null
-related: ["0107"]
+related: ["0107", "0121"]
 implementation_prs: [16084, 16158]
+---
+
+## Implementation summary (2026-05-21)
+
+Both §4 PRs landed within 24 hours of the RFC body and the §5
+acceptance soak window (24h post-PR-2) has long since elapsed.
+
+| §4 PR | Identity | Scope | Merged |
+|-------|----------|------|--------|
+| PR-1 (pool reference, non-gating) | #16084 | piaf idle-timeout API + unit tests in the connection pool layer. Commit subject reads `feat(config_dir_resolver): … (RFC-0121 PR-1/6)`; RFC-0129 §4.2 explicitly cross-claims this PR as its own PR-1 reference because the pool-layer idle-timeout fix and the RFC-0121 config_dir_resolver work landed in the same worktree | 2026-05-18 |
+| PR-2 (fleet fix — this RFC) | #16158 | `delete reserve_fraction band-aid` — the gating change. Removes the keeper-level workaround that the RFC body called out as the actual problem | 2026-05-18 |
+
+§5 acceptance (24h post-PR-2 observation window) elapsed 2026-05-19;
+no re-emergence of the symptoms PR-2 fixed.
+
+### Dual-RFC PR cross-reference
+
+#16084's commit subject mentions RFC-0121 only, but RFC-0129 §4.2
+absorbs it as PR-1. This is the same dual-listing pattern caught for
+#16189 across RFC-0126 / RFC-0127 (see #17160). Both RFCs retain the
+PR in their `implementation_prs` for bidirectional traceability.
+`related: ["0121"]` added so future readers can trace the
+config_dir_resolver overlap.
+
+### Status promotion rationale
+
+- §4 lists exactly two PRs (PR-1 reference + PR-2 fleet fix); both
+  merged.
+- §5 acceptance gate is observational, not implementation, and the
+  24h window has elapsed.
+- No follow-up phase outstanding.
+
+→ **Draft → Implemented** is the accurate status. Second
+audit-sweep RFC to land directly at Implemented (after RFC-0132
+#17187).
+
 ---
 
 # RFC-0129: Cascade attempt idle-cap — kill the reserve_fraction band-aid

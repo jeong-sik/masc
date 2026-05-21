@@ -111,10 +111,7 @@ let handle_keeper_shell
     in
     (* P16: Record execution in history for failure pattern detection *)
     let success = st = Unix.WEXITED 0 in
-    let cmd_prefix =
-      match String.split_on_char ' ' cmd with
-      | [] -> cmd | w :: _ -> w
-    in
+    let cmd_prefix = Keeper_shell_command_semantics.cmd_prefix cmd in
     let entry = Masc_exec.Bash_history.{
       ts = Unix.time ();
       cmd_hash = Masc_exec.Bash_history.cmd_hash cmd;
@@ -160,10 +157,7 @@ let handle_keeper_shell
   let render_completed_process_result ?cwd ~cmd ?(extra = []) st out =
     (* P16: Record execution in history for failure pattern detection *)
     let success = st = Unix.WEXITED 0 in
-    let cmd_prefix =
-      match String.split_on_char ' ' cmd with
-      | [] -> cmd | w :: _ -> w
-    in
+    let cmd_prefix = Keeper_shell_command_semantics.cmd_prefix cmd in
     let elapsed_ms =
       List.find_map (fun (k, v) ->
         if k = "execution_time_ms" then
@@ -912,24 +906,6 @@ let handle_keeper_shell
       error_json ~fields:[ "op", `String op ]
         (Printf.sprintf "Unknown git_worktree action '%s'. Use: list, add." other)
     end
-  | "bash" ->
-    Yojson.Safe.to_string
-      (`Assoc
-         [ "ok", `Bool false
-         ; "op", `String op
-         ; "error", `String "keeper_shell_bash_deprecated"
-         ; "hint", `String
-             "The structured shell no longer executes op=bash. Use the public \
-              Bash tool for command execution; use Grep and Read for search and \
-              file inspection when they are visible."
-         ; "suggested_tool", `String "Bash"
-         ; "suggested_public_tool", `String "Bash"
-         ; "supported_ops",
-             `List
-               (List.map
-                  (fun s -> `String s)
-                  Keeper_shell_shared.valid_shell_op_strings)
-         ])
   | "git_clone" ->
     (* Clone a repo into this keeper's playground repos directory.
        Sandboxed: always targets .masc/playground/<keeper_name>/repos/<repo_name>.

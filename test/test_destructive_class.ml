@@ -1,10 +1,10 @@
 (* Tick 13: typed destructive classification.
 
    Core covenant: every row in Eval_gate.destructive_patterns must
-   classify to exactly one destructive_class via the AST-shadow
-   mapping.  If Eval_gate adds a new pattern and Worker_dev_tools
-   does not, this test fails loudly — preventing silent coverage
-   drift between the regex allowlist and the typed classifier. *)
+   classify to exactly one destructive_class via the shared shell-safety
+   mapping.  If Eval_gate adds a new pattern and Worker_dev_tools does
+   not, this test fails loudly, preventing silent coverage drift between
+   the regex allowlist and the typed classifier. *)
 
 open Alcotest
 

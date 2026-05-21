@@ -23,12 +23,6 @@ module Float = Stdlib.Float
 
 open Tool_inline_dispatch_types
 
-(* RFC-0084 host-config-cleanup-D — agent runtime root migration.
-   Resolves the host runtime root once at module-init from the typed
-   [Host_config.agent_runtime_root] field; the 2 cross-process
-   agent-identity scratch files below reference the bound name. *)
-let agent_runtime_root = (Host_config.host ()).agent_runtime_root
-
 (** Argument extraction helpers bound to ctx.arguments. *)
 let arg_get_string ctx key default =
   Safe_ops.json_string ~default key ctx.arguments
@@ -223,19 +217,10 @@ let handle_join ~tool_name ~start_time (ctx : context) : tool_result option =
       with Invalid_argument _ -> agent_name
     in
     let _ = Session.register registry ~agent_name:nickname in
-    ctx.write_mcp_session_agent nickname;
-    Log.Misc.debug "[sid=%s] masc_join: saved nickname=%s to MCP session (original=%s)" sid nickname agent_name;
-    if Option.is_none mcp_session_id then begin
-      Log.Misc.warn "[sid=%s] [deprecated] writing agent name to /tmp file for TERM session — migrate to Agent_identity" sid;
-      let term_session_id = Option.value ~default:"default" (Sys.getenv_opt "TERM_SESSION_ID") in
-      let agent_file = Filename.concat agent_runtime_root (Printf.sprintf ".masc_agent_%s" term_session_id) in
-      (try
-        Fs_compat.save_file agent_file nickname
-      with
-      | Eio.Cancel.Cancelled _ as e -> raise e
-      | e ->
-        Log.Misc.error "[sid=%s] Failed to write agent file %s: %s" sid agent_file (Stdlib.Printexc.to_string e))
-    end;
+    ctx.record_mcp_session_agent nickname;
+    Log.Misc.debug
+      "[sid=%s] masc_join: recorded nickname=%s for MCP session (original=%s)"
+      sid nickname agent_name;
     let institution_welcome = match state.Mcp_server.fs with
       | Some fs ->
           (try Institution_eio.load_and_format_for_welcome ~fs config
@@ -296,7 +281,6 @@ let handle_leave ~tool_name ~start_time (ctx : context) : tool_result option =
   let agent_name = ctx.agent_name in
   let registry = ctx.registry in
   let state = ctx.state in
-  let mcp_session_id = ctx.mcp_session_id in
   let leave_event = `Assoc [
     ("type", `String "masc/agent_left");
     ("agent_name", `String agent_name);
@@ -306,9 +290,4 @@ let handle_leave ~tool_name ~start_time (ctx : context) : tool_result option =
   Mcp_server.sse_broadcast state leave_event;
   let result = Coord.leave config ~agent_name in
   Session.unregister registry ~agent_name;
-  if Option.is_none mcp_session_id then begin
-    let session_id = Option.value ~default:"default" (Sys.getenv_opt "TERM_SESSION_ID") in
-    let agent_file = Filename.concat agent_runtime_root (Printf.sprintf ".masc_agent_%s" session_id) in
-    Safe_ops.remove_file_logged ~context:"masc_leave" agent_file
-  end;
   Some (Tool_result.ok ~tool_name ~start_time result)

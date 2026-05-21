@@ -390,133 +390,6 @@ let test_loops_json_uses_state_file_mtime_for_updated_at () =
   check bool "updated_at falls back to state file mtime" true
     (abs_float (updated_at -. expected_mtime) < 0.001)
 
-let test_retry_loop_json_restores_missing_worktree () =
-  with_eio_test @@ fun () ->
-  with_clean_loops @@ fun () ->
-  with_temp_base @@ fun base_path ->
-  let repo_root = Filename.concat base_path "repo" in
-  init_git_repo repo_root;
-  let loop_id = "retry-loop" in
-  run_cmd_exn
-    (Printf.sprintf "git -C %s branch %s" (Filename.quote repo_root)
-       (Filename.quote (Lib.Autoresearch.managed_branch_name loop_id)));
-  let workdir = Lib.Autoresearch.managed_worktree_dir ~base_path loop_id in
-  let state =
-    Lib.Autoresearch.create_state
-      ~goal:"repair loop"
-      ~metric_fn:"echo 1"
-      ~model_model:"glm"
-      ~target_file:"README.md"
-      ~cycle_timeout_s:30.0
-      ~max_cycles:1
-      ~workdir:repo_root
-      ()
-  in
-  let state = { state with
-    loop_id; source_workdir = repo_root;
-    status = Lib.Autoresearch.Error;
-    error_message = Some "managed worktree missing";
-    workdir;
-    warnings = [ "source_workdir_dirty" ] } in
-  Lib.Autoresearch.save_state ~base_path state;
-  match
-    Lib.Dashboard_http_autoresearch.retry_loop_json ~base_path ~loop_id
-  with
-  | Error message -> failwith message
-  | Ok json ->
-      check bool "retry ok" true
-        Yojson.Safe.Util.(json |> member "ok" |> to_bool);
-      check string "retry action" "retry"
-        Yojson.Safe.Util.(json |> member "action" |> to_string);
-      check string "loop status" "running"
-        Yojson.Safe.Util.(json |> member "loop" |> member "status" |> to_string);
-      check bool "loop marked live" true
-        Yojson.Safe.Util.(json |> member "loop" |> member "live" |> to_bool);
-      check bool "worktree recreated" true (Sys.file_exists workdir);
-      check bool "active loop restored" true
-        (Lib.Autoresearch.with_loops_ro (fun () ->
-             Hashtbl.mem Lib.Autoresearch.active_loops loop_id))
-
-let test_delete_loop_json_removes_bundle_and_branch () =
-  with_eio_test @@ fun () ->
-  with_clean_loops @@ fun () ->
-  with_temp_base @@ fun base_path ->
-  let repo_root = Filename.concat base_path "repo" in
-  init_git_repo repo_root;
-  let loop_id = "delete-loop" in
-  run_cmd_exn
-    (Printf.sprintf "git -C %s branch %s" (Filename.quote repo_root)
-       (Filename.quote (Lib.Autoresearch.managed_branch_name loop_id)));
-  let workdir = Lib.Autoresearch.managed_worktree_dir ~base_path loop_id in
-  let state =
-    Lib.Autoresearch.create_state
-      ~goal:"delete loop"
-      ~metric_fn:"echo 1"
-      ~model_model:"glm"
-      ~target_file:"README.md"
-      ~cycle_timeout_s:30.0
-      ~max_cycles:1
-      ~workdir:repo_root
-      ()
-  in
-  let state = { state with
-    loop_id; source_workdir = repo_root;
-    status = Lib.Autoresearch.Error;
-    error_message = Some "managed worktree missing";
-    workdir } in
-  Lib.Autoresearch.save_state ~base_path state;
-  let link : Lib.Autoresearch.execution_link =
-    {
-      loop_id;
-      session_id = "session-delete";
-      operation_id = None;
-      task_id = None;
-      target_file = "README.md";
-      program_note = None;
-      created_by = None;
-      linked_at = Unix.gettimeofday ();
-    }
-  in
-  Lib.Autoresearch.save_execution_link ~base_path link;
-  match
-    Lib.Dashboard_http_autoresearch.delete_loop_json ~base_path ~loop_id ~requester_agent:None
-  with
-  | Error message -> failwith message
-  | Ok json ->
-      check bool "delete ok" true
-        Yojson.Safe.Util.(json |> member "ok" |> to_bool);
-      check string "delete action" "delete"
-        Yojson.Safe.Util.(json |> member "action" |> to_string);
-      check bool "bundle removed" false
-        (Sys.file_exists (Lib.Autoresearch.results_dir ~base_path loop_id));
-      check bool "session link removed" false
-        (Sys.file_exists
-           (Lib.Autoresearch.session_link_file ~base_path "session-delete"))
-
-let test_retry_loop_json_rejects_unsafe_loop_id () =
-  with_eio_test @@ fun () ->
-  with_clean_loops @@ fun () ->
-  with_temp_base @@ fun base_path ->
-  match
-    Lib.Dashboard_http_autoresearch.retry_loop_json
-      ~base_path ~loop_id:"../escape"
-  with
-  | Ok _ -> failwith "expected invalid loop_id to fail"
-  | Error message ->
-      check string "invalid retry loop_id" "invalid loop_id" message
-
-let test_delete_loop_json_rejects_unsafe_loop_id () =
-  with_eio_test @@ fun () ->
-  with_clean_loops @@ fun () ->
-  with_temp_base @@ fun base_path ->
-  match
-    Lib.Dashboard_http_autoresearch.delete_loop_json
-      ~base_path ~loop_id:"../escape" ~requester_agent:None
-  with
-  | Ok _ -> failwith "expected invalid loop_id to fail"
-  | Error message ->
-      check string "invalid delete loop_id" "invalid loop_id" message
-
 let test_linked_status_json_includes_task_id () =
   with_eio_test @@ fun () ->
   with_clean_loops @@ fun () ->
@@ -581,15 +454,7 @@ let () =
             test_loops_json_orders_live_then_recent;
           test_case "uses state file mtime for updated_at" `Quick
             test_loops_json_uses_state_file_mtime_for_updated_at;
-          test_case "retry restores missing worktree" `Quick
-            test_retry_loop_json_restores_missing_worktree;
-          test_case "delete removes bundle and branch" `Quick
-            test_delete_loop_json_removes_bundle_and_branch;
           test_case "linked status includes task id" `Quick
             test_linked_status_json_includes_task_id;
-          test_case "retry rejects unsafe loop id" `Quick
-            test_retry_loop_json_rejects_unsafe_loop_id;
-          test_case "delete rejects unsafe loop id" `Quick
-            test_delete_loop_json_rejects_unsafe_loop_id;
         ] );
     ]

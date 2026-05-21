@@ -200,9 +200,9 @@ let test_static_fields () =
     (Some (1234, 5678)) (Keeper_sandbox_session_plan.user p);
   check (option string) "workdir = container_root"
     (Some "/keeper/alice") (Keeper_sandbox_session_plan.workdir p);
-  check string "startup_command = idle loop"
-    "trap : TERM INT; while :; do sleep 3600; done"
-    (Keeper_sandbox_session_plan.startup_command p);
+  check (list string) "startup_argv = direct idle argv"
+    [ "tail"; "-f"; "/dev/null" ]
+    (Keeper_sandbox_session_plan.startup_argv p);
   (match Keeper_sandbox_session_plan.seccomp_profile p with
    | Keeper_sandbox_session_plan.Seccomp_default -> ()
    | _ -> fail "seccomp_profile should default to Seccomp_default");

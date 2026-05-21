@@ -715,9 +715,7 @@ let inspect_state ctx =
 
 let state_to_json st =
   `Assoc
-    [ "project_ready", `Bool st.room_set
-    ; "namespace_ready", `Bool st.room_set
-    ; "room_set", `Bool st.room_set
+    [ "room_set", `Bool st.room_set
     ; "joined", `Bool st.joined
     ; "task_claimed", `Bool st.task_claimed
     ; "current_task_set", `Bool st.current_task_set
@@ -790,8 +788,6 @@ let dispatch ctx ~name ~args : Tool_result.t option =
     Some (Coord_goals.handle_goal_list ~tool_name:name ~start_time ctx args)
   | "masc_goal_upsert" ->
     Some (Coord_goals.handle_goal_upsert ~tool_name:name ~start_time ctx args)
-  | "masc_goal_review" ->
-    Some (Coord_goals.handle_goal_review ~tool_name:name ~start_time ctx args)
   | "masc_goal_transition" ->
     Some (Coord_goals.handle_goal_transition ~tool_name:name ~start_time ctx args)
   | "masc_goal_verify" ->
@@ -840,8 +836,8 @@ let tool_required_permission = function
   | "masc_check"
   | "masc_coordination_fsm_snapshot"
   | "masc_goal_list" -> Some Masc_domain.CanReadState
-  | "masc_goal_upsert" | "masc_goal_review" | "masc_goal_transition" | "masc_goal_verify"
-    -> Some Masc_domain.CanBroadcast
+  | "masc_goal_upsert" | "masc_goal_transition" | "masc_goal_verify" ->
+    Some Masc_domain.CanBroadcast
   | "masc_heartbeat" -> Some Masc_domain.CanBroadcast
   | "masc_reset" -> Some Masc_domain.CanReset
   | _ -> None

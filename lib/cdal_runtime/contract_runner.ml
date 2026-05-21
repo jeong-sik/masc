@@ -100,7 +100,14 @@ let run
     Proof_store.init_run store ~run_id:proof.run_id;
     Proof_store.write_manifest store ~run_id:proof.run_id proof;
     Proof_store.write_contract store ~run_id:proof.run_id contract;
-    { response = Error (Error.Internal (Printf.sprintf "contract rejected: %s" reason))
+    (* RFC-0159 Phase A: emit typed [Internal_contract_rejected] via the
+       cdal_runtime-local substrate so the masc_mcp classifier routes
+       contract-rejection events to the dedicated kind instead of the
+       [Reason_internal_error] catch-all. *)
+    { response =
+        Error
+          (Internal_error_substrate.sdk_error_of
+             (Internal_error_substrate.Contract_rejected { reason }))
     ; proof
     }
   | Ok mode_decision ->

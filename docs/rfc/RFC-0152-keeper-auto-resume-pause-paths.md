@@ -1,6 +1,14 @@
+---
+title: Keeper Auto-Resume for All Pause Paths
+rfc: 0152
+status: Active
+created: 2026-05-20
+implementation_prs: []
+---
+
 # RFC-0152: Keeper Auto-Resume for All Pause Paths
 
-**Status**: Draft
+**Status**: Active (frontmatter SSOT)
 **Owner**: vincent (yousleepwhen)
 **Created**: 2026-05-20
 **Supersedes**: —

@@ -11,242 +11,17 @@ open Keeper_execution
 open Keeper_keepalive_signal
 module Observations = Keeper_heartbeat_loop_observations
 
-let effective_keepalive_meta
-      ~base_path
-      ~(fallback : keeper_meta)
-      ~(disk_meta_opt : keeper_meta option)
-  : keeper_meta
-  =
-  match disk_meta_opt with
-  | Some latest -> latest
-  | None ->
-    (match Keeper_registry.get ~base_path fallback.name with
-     | Some entry -> entry.meta
-     | None -> fallback)
-;;
+(* Presence/identity sync extracted to
+   [Keeper_heartbeat_loop_presence] (godfile decomp). *)
+let effective_keepalive_meta = Keeper_heartbeat_loop_presence.effective_keepalive_meta
+let repair_identity_drift_for_keepalive = Keeper_heartbeat_loop_presence.repair_identity_drift_for_keepalive
+let keeper_agent_status = Keeper_heartbeat_loop_presence.keeper_agent_status
+let note_turn_failures_preserved_after_heartbeat = Keeper_heartbeat_loop_presence.note_turn_failures_preserved_after_heartbeat
+let sync_keeper_presence = Keeper_heartbeat_loop_presence.sync_keeper_presence
 
-let repair_identity_drift_for_keepalive ~(ctx : _ context) (meta : keeper_meta)
-  : keeper_meta option
-  =
-  let expected_agent_name = keeper_agent_name meta.name in
-  if String.equal expected_agent_name meta.agent_name
-  then Some meta
-  else (
-    let previous_trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
-    let new_trace_id_raw = Keeper_identity.generate_trace_id () in
-    match Keeper_id.Trace_id.of_string new_trace_id_raw with
-    | Error err ->
-      Log.Keeper.error
-        "keepalive identity repair failed for %s: invalid trace_id %s (%s)"
-        meta.name
-        new_trace_id_raw
-        err;
-      Prometheus.inc_counter
-        Keeper_metrics.metric_keeper_heartbeat_failures
-        ~labels:[ "keeper", meta.name; "phase", "identity_repair" ]
-        ();
-      None
-    | Ok new_trace_id ->
-      let base_dir = session_base_dir ctx.config in
-      let _session =
-        Keeper_exec_context.create_session ~session_id:new_trace_id_raw ~base_dir
-      in
-      let repaired =
-        { meta with
-          agent_name = expected_agent_name
-        ; updated_at = now_iso ()
-        ; runtime =
-            { meta.runtime with
-              trace_id = new_trace_id
-            ; trace_history =
-                Json_util.dedupe_keep_order
-                  (previous_trace_id :: meta.runtime.trace_history)
-            ; generation = meta.runtime.generation + 1
-            }
-        }
-      in
-      (match write_meta ~force:true ctx.config repaired with
-       | Ok () ->
-         Log.Keeper.warn
-           "keepalive repaired identity drift for %s: %s -> %s"
-           meta.name
-           meta.agent_name
-           expected_agent_name;
-         Some repaired
-       | Error err ->
-         Prometheus.inc_counter
-           Keeper_metrics.metric_keeper_write_meta_failures
-           ~labels:[ "keeper", meta.name; "phase", "identity_repair" ]
-           ();
-         Log.Keeper.error
-           "keepalive identity repair failed for %s: write_meta failed: %s"
-           meta.name
-           err;
-         None))
-;;
-
-let keeper_agent_status (meta : keeper_meta) =
-  if meta.paused
-  then Masc_domain.Inactive
-  else (
-    match meta.current_task_id with
-    | Some _ -> Masc_domain.Busy
-    | None -> Masc_domain.Active)
-;;
-
-(** Preserve turn failure accounting when heartbeat recovers.
-
-    Heartbeat health and turn health are independent in the keeper FSM. A
-    successful heartbeat may recover [heartbeat_healthy], but it must not emit
-    [Turn_succeeded] or reset provider/tool failure counters. Otherwise a
-    cascade_exhausted turn can be erased by the next keepalive heartbeat before
-    auto-pause and diagnostics see the failure streak. *)
-let note_turn_failures_preserved_after_heartbeat ~(ctx : _ context) ~(meta : keeper_meta)
-  =
-  let turn_failures =
-    Keeper_registry.get_turn_failures ~base_path:ctx.config.base_path meta.name
-  in
-  if turn_failures > 0
-  then
-    Log.Keeper.debug
-      "heartbeat healthy for %s; preserving %d turn failure(s) until a real \
-       turn succeeds"
-      meta.name
-      turn_failures
-;;
-
-let sync_keeper_presence
-      ~(ctx : _ context)
-      ~(meta_current : keeper_meta)
-      ~(t_presence_start : float)
-      ~(consecutive_failures : int ref)
-      ~(last_successful_heartbeat_ts : float ref)
-      ~(work_as_hb : unit -> bool)
-      ~(max_silence : unit -> float)
-  : keeper_meta
-  =
-  let presence_fresh =
-    work_as_hb () && t_presence_start -. !last_successful_heartbeat_ts < max_silence ()
-  in
-  if presence_fresh
-  then (
-    Log.Keeper.debug
-      "presence sync skipped: fresh heartbeat %.0fs ago"
-      (t_presence_start -. !last_successful_heartbeat_ts);
-    Keeper_registry.dispatch_event_unit
-      ~base_path:ctx.config.base_path
-      meta_current.name
-      Keeper_state_machine.Heartbeat_ok;
-    note_turn_failures_preserved_after_heartbeat ~ctx ~meta:meta_current;
-    meta_current)
-  else (
-    try
-      let synced = ensure_keeper_room_presence ctx.config meta_current in
-      if synced.joined_room_ids = []
-      then (
-        incr consecutive_failures;
-        (* RFC-0001 Gate A: record failure streak *)
-        Agent_stress.record
-          { agent_name = meta_current.name
-          ; room_id =
-              (match meta_current.joined_room_ids with
-               | r :: _ -> r
-               | [] -> "")
-          ; kind = Failure_streak !consecutive_failures
-          ; timestamp = Unix.gettimeofday ()
-          };
-        Log.Keeper.warn
-          "room presence returned empty rooms (%d/%d)"
-          !consecutive_failures
-          (Keeper_heartbeat_snapshot.max_consecutive_heartbeat_failures ());
-        (* RFC-0002: dispatch heartbeat failure *)
-        Prometheus.inc_counter
-          Keeper_metrics.metric_keeper_heartbeat_failures
-          ~labels:[ "keeper", meta_current.name ]
-          ();
-        Keeper_registry.dispatch_event_unit
-          ~base_path:ctx.config.base_path
-          meta_current.name
-          (Keeper_state_machine.Heartbeat_failed
-             { consecutive = !consecutive_failures
-             ; max_allowed =
-                 Keeper_heartbeat_snapshot.max_consecutive_heartbeat_failures ()
-             }))
-      else (
-        consecutive_failures := 0;
-        last_successful_heartbeat_ts := Time_compat.now ();
-        (* RFC-0002: dispatch heartbeat success *)
-        Keeper_registry.dispatch_event_unit
-          ~base_path:ctx.config.base_path
-          meta_current.name
-          Keeper_state_machine.Heartbeat_ok;
-        Prometheus.inc_counter
-          Keeper_metrics.metric_keeper_heartbeat_successes
-          ~labels:[ "keeper", meta_current.name ]
-          ();
-        note_turn_failures_preserved_after_heartbeat ~ctx ~meta:meta_current);
-      match write_meta ctx.config synced with
-      | Ok () -> synced
-      | Error e ->
-        Prometheus.inc_counter
-          Keeper_metrics.metric_keeper_write_meta_failures
-          ~labels:[ "keeper", synced.name; "phase", "heartbeat" ]
-          ();
-        Log.Keeper.warn "write_meta failed (heartbeat): %s" e;
-        synced
-    with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | exn ->
-      incr consecutive_failures;
-      Prometheus.inc_counter
-        Keeper_metrics.metric_keeper_room_heartbeat_failures
-        ~labels:[ "keeper", meta_current.name ]
-        ();
-      Log.Keeper.error
-        "room heartbeat failed (%d/%d): %s"
-        !consecutive_failures
-        (Keeper_heartbeat_snapshot.max_consecutive_heartbeat_failures ())
-        (Printexc.to_string exn);
-      (* RFC-0002: dispatch heartbeat failure *)
-      Keeper_registry.dispatch_event_unit
-        ~base_path:ctx.config.base_path
-        meta_current.name
-        (Keeper_state_machine.Heartbeat_failed
-           { consecutive = !consecutive_failures
-           ; max_allowed = Keeper_heartbeat_snapshot.max_consecutive_heartbeat_failures ()
-           });
-      meta_current)
-;;
-
-let collect_keepalive_board_events
-      ~(ctx : _ context)
-      ~(meta_current : keeper_meta)
-      ~(proactive_warmup_elapsed : bool)
-  =
-  if not proactive_warmup_elapsed
-  then [], meta_current
-  else (
-    let pending_board_events =
-      try
-        let events, _new_count, _mention_count =
-          Keeper_world_observation.collect_board_events
-            ~base_path:ctx.config.base_path
-            ~meta:meta_current
-            ~continuity_summary:meta_current.continuity_summary
-        in
-        events
-      with
-      | Eio.Cancel.Cancelled _ as e -> raise e
-      | exn ->
-        Log.Keeper.warn "keepalive: board count query failed: %s" (Printexc.to_string exn);
-        Prometheus.inc_counter
-          Keeper_metrics.metric_keeper_heartbeat_failures
-          ~labels:[ "keeper", meta_current.name; "phase", "board_count_query" ]
-          ();
-        []
-    in
-    pending_board_events, meta_current)
-;;
+(* Pending board-event collection extracted to
+   [Keeper_heartbeat_loop_board_events] (godfile decomp). *)
+let collect_keepalive_board_events = Keeper_heartbeat_loop_board_events.collect_keepalive_board_events
 
 let in_turn_liveness_pulse_interval_sec =
   Keeper_heartbeat_loop_in_turn_pulse.in_turn_liveness_pulse_interval_sec
@@ -308,7 +83,10 @@ let cascade_backpressure_decision =
   Observations.cascade_backpressure_decision
 ;;
 
-type keepalive_scheduling_decision = {
+(* Keepalive scheduling decision (record + decide function) extracted to
+   [Keeper_heartbeat_loop_scheduling] (godfile decomp). The record type is
+   re-exported transparently so the .mli signature stays byte-identical. *)
+type keepalive_scheduling_decision = Keeper_heartbeat_loop_scheduling.keepalive_scheduling_decision = {
   turn_decision : Keeper_world_observation.keeper_cycle_decision;
   requested_should_run_turn : bool;
   cascade_backpressure : cascade_backpressure_decision;
@@ -318,52 +96,7 @@ type keepalive_scheduling_decision = {
   channel : string;
 }
 
-let decide_keepalive_scheduling
-      ?(cascade_resilience_of_name =
-        Keeper_exec_preflight.cascade_resilience_of_name)
-      ?(cascade_status_of_name =
-        fun ~cascade_name -> Keeper_health_probe.get_cascade_status ~cascade_name)
-      ~stop
-      ~meta
-      obs
-  =
-  let turn_decision = Keeper_world_observation.keeper_cycle_decision ~meta obs in
-  let requested_should_run_turn =
-    (not (Atomic.get stop)) && turn_decision.should_run
-  in
-  let cascade_name = cascade_name_of_meta meta in
-  let cascade_resilience = cascade_resilience_of_name cascade_name in
-  let cascade_backpressure =
-    cascade_backpressure_decision
-      ~cascade_resilience:(Some cascade_resilience)
-      ~should_run_turn:requested_should_run_turn
-      ~cascade_name
-      ~cascade_status:(cascade_status_of_name ~cascade_name)
-  in
-  let should_run_turn =
-    match cascade_backpressure with
-    | Cascade_admitted -> requested_should_run_turn
-    | Cascade_backpressured _ -> false
-  in
-  let verdict_reasons =
-    Keeper_world_observation.verdict_reasons_to_strings turn_decision.verdict
-  in
-  let admission_reasons =
-    match cascade_backpressure with
-    | Cascade_admitted -> verdict_reasons
-    | Cascade_backpressured { reason; _ } ->
-      cascade_backpressure_observation_reasons ~reason
-  in
-  let channel = Keeper_world_observation.channel_to_string turn_decision.channel in
-  { turn_decision
-  ; requested_should_run_turn
-  ; cascade_backpressure
-  ; should_run_turn
-  ; verdict_reasons
-  ; admission_reasons
-  ; channel
-  }
-;;
+let decide_keepalive_scheduling = Keeper_heartbeat_loop_scheduling.decide_keepalive_scheduling
 
 let record_cascade_backpressure_observation =
   Observations.record_cascade_backpressure_observation
@@ -587,117 +320,17 @@ let run_keeper_cycle_with_slot
     updated
 ;;
 
-let semaphore_wait_timeout_blocker_class
-      (timeout : Keeper_turn_slot.semaphore_wait_timeout)
-  =
-  match timeout.timeout_phase with
-  | Keeper_turn_slot.Autonomous_queue_head -> Keeper_types.Admission_queue_wait_timeout
-  | Keeper_turn_slot.Autonomous_slot -> Keeper_types.Autonomous_slot_wait_timeout
-  | Keeper_turn_slot.Reactive_slot | Keeper_turn_slot.Turn_slot ->
-    Keeper_types.Turn_timeout_after_queue_wait
+let semaphore_wait_timeout_blocker_class =
+  Keeper_heartbeat_loop_semaphore_timeout.semaphore_wait_timeout_blocker_class
 ;;
 
-let semaphore_wait_timeout_diagnostics
-      ~cascade_name
-      (timeout : Keeper_turn_slot.semaphore_wait_timeout)
-  =
-  let phase_label =
-    Keeper_turn_slot.semaphore_wait_phase_to_string timeout.timeout_phase
-  in
-  let queue_ahead_text =
-    match timeout.timeout_phase, timeout.timeout_queue_ahead with
-    | Keeper_turn_slot.Autonomous_queue_head, Some ahead ->
-      Printf.sprintf " queue_blocker=autonomous_fifo queue_ahead=%d" ahead
-    | Keeper_turn_slot.Autonomous_queue_head, None ->
-      " queue_blocker=autonomous_fifo queue_ahead=unknown"
-    | _, Some ahead -> Printf.sprintf " queue_ahead=%d" ahead
-    | _, None -> ""
-  in
-  let persisted_blocker =
-    Printf.sprintf
-      "skipped: semaphore wait > %.0fs phase=%s (cascade=%s%s queue_depth=%d \
-       autonomous_available=%d reactive_available=%d turn_available=%d)"
-      timeout.timeout_wait_sec
-      phase_label
-      cascade_name
-      queue_ahead_text
-      timeout.timeout_queue_depth
-      timeout.timeout_autonomous_available
-      timeout.timeout_reactive_available
-      timeout.timeout_turn_available
-  in
-  let log_diagnostic =
-    match timeout.timeout_phase with
-    | Keeper_turn_slot.Autonomous_queue_head ->
-      let ahead_text =
-        match timeout.timeout_queue_ahead with
-        | Some ahead -> string_of_int ahead
-        | None -> "unknown"
-      in
-      Printf.sprintf
-        "%s queue_head=[blocker=autonomous_fifo ahead=%s depth=%d]"
-        persisted_blocker
-        ahead_text
-        timeout.timeout_queue_depth
-    | Keeper_turn_slot.Autonomous_slot
-    | Keeper_turn_slot.Reactive_slot
-    | Keeper_turn_slot.Turn_slot ->
-      let holder_text =
-        match timeout.timeout_holders with
-        | [] -> "none"
-        | holders ->
-          holders
-          |> List.map (fun (name, age) -> Printf.sprintf "%s/%.0fs" name age)
-          |> String.concat ", "
-      in
-      Printf.sprintf "%s holders=[%s]" persisted_blocker holder_text
-  in
-  persisted_blocker, log_diagnostic
+let semaphore_wait_timeout_diagnostics =
+  Keeper_heartbeat_loop_semaphore_timeout.semaphore_wait_timeout_diagnostics
 ;;
 
-(** Handle semaphore wait timeout for legacy path. *)
-let handle_semaphore_wait_timeout
-      ~ctx
-      ~meta_after_triage
-      ~(turn_decision : Keeper_world_observation.keeper_cycle_decision)
-      (timeout : Keeper_turn_slot.semaphore_wait_timeout)
-  =
-  let phase_label =
-    Keeper_turn_slot.semaphore_wait_phase_to_string timeout.timeout_phase
-  in
-  record_semaphore_wait_observation
-    ~base_path:ctx.config.base_path
-    ~keeper_name:meta_after_triage.name
-    ~channel:turn_decision.channel
-    ~phase_label
-    ~kind:Semaphore_wait_timeout
-    ();
-  let persisted_blocker, log_diagnostic =
-    semaphore_wait_timeout_diagnostics
-      ~cascade_name:(cascade_name_of_meta meta_after_triage)
-      timeout
-  in
-  let blocker_class = semaphore_wait_timeout_blocker_class timeout in
-  Log.Keeper.warn "%s: skipping turn (%s)" meta_after_triage.name log_diagnostic;
-  Prometheus.inc_counter
-    Keeper_metrics.metric_keeper_semaphore_wait_timeout
-    ~labels:
-      [ "keeper", meta_after_triage.name
-      ; "channel", Keeper_world_observation.channel_to_string turn_decision.channel
-      ]
-    ();
-  Keeper_types.map_runtime
-    (fun rt ->
-       { rt with
-         last_blocker =
-           Some
-             (Keeper_meta_contract.blocker_info_of_class
-                ~detail:persisted_blocker
-                blocker_class)
-       })
-    meta_after_triage
+let handle_semaphore_wait_timeout =
+  Keeper_heartbeat_loop_semaphore_timeout.handle_semaphore_wait_timeout
 ;;
-
 let run_keepalive_unified_turn
       ~(ctx : _ context)
       ~(meta_after_triage : keeper_meta)
@@ -1008,54 +641,7 @@ let refresh_work_as_heartbeat
       consecutive_failures := 0))
 ;;
 
-let dispatch_recurring_keepalive
-      ~(ctx : _ context)
-      ~(meta_after_proactive : keeper_meta)
-      ~(now_ts : float)
-  : int
-  =
-  (* Recover from transient broadcast failures that previously
-     auto-disabled tasks via [dispatch_due]'s [max_failures] guard.
-     Without this call the keeper's heartbeat broadcasts stay silent
-     for the lifetime of the process, eventually triggering stale-kill
-     cascades.  See lib/keeper/keeper_recurring.ml for the cooldown rule. *)
-  let _reenabled =
-    Keeper_recurring.reenable_due_tasks ~keeper_name:meta_after_proactive.name ~now_ts
-  in
-  try
-    Keeper_recurring.dispatch_due
-      ~keeper_name:meta_after_proactive.name
-      ~now_ts
-      ~dispatch:(fun task action ->
-        match action with
-        | Keeper_recurring.Broadcast msg ->
-          (try
-             let _ =
-               Coord.broadcast
-                 ctx.config
-                 ~from_agent:meta_after_proactive.agent_name
-                 ~content:(Printf.sprintf "[loop:%s] %s" task.label msg)
-             in
-             Log.Keeper.info "[recurring] %s dispatched: %s" task.id task.label;
-             Ok ()
-           with
-           | exn ->
-             Log.Keeper.warn "[recurring] %s failed: %s" task.id (Printexc.to_string exn);
-             Prometheus.inc_counter
-               Keeper_metrics.metric_keeper_recurring_failures
-               ~labels:[ "task", task.id; "phase", "task_execution" ]
-               ();
-             Error (Printexc.to_string exn)))
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn ->
-    Log.Keeper.warn "[recurring] dispatch error: %s" (Printexc.to_string exn);
-    Prometheus.inc_counter
-      Keeper_metrics.metric_keeper_recurring_failures
-      ~labels:[ "task", "dispatch"; "phase", "dispatch_error" ]
-      ();
-    0
-;;
+let dispatch_recurring_keepalive = Keeper_heartbeat_loop_dispatch_recurring.dispatch_recurring_keepalive
 
 (** Whether a smart-heartbeat decision should allow the keepalive
     cycle to continue evaluating turns.
@@ -1241,67 +827,8 @@ let run_smart_heartbeat_gate
   cycle_continues_after_wake smart_hb_decision sleep_outcome
 ;;
 
-let maybe_write_heartbeat_snapshot
-      ~(ctx : _ context)
-      ~(meta_current : keeper_meta)
-      ~(now_ts : float)
-      ~(consecutive_hb_failures : int)
-      ~(last_snapshot_ts : float ref)
-      ~(snapshot_interval_sec : int)
-      ~(timing_ring : Keeper_keepalive_signal.stage_timing array)
-      ~(timing_filled : int)
-  : unit
-  =
-  if now_ts -. !last_snapshot_ts >= float_of_int snapshot_interval_sec
-  then (
-    (try
-       Keeper_heartbeat_snapshot.write_heartbeat_snapshot
-         ~ctx
-         ~meta_current
-         ~now_ts
-         ~consecutive_hb_failures
-         ~timing_ring
-         ~timing_filled
-     with
-     | Eio.Cancel.Cancelled _ as e -> raise e
-     | exn ->
-       Prometheus.inc_counter
-         Keeper_metrics.metric_keeper_snapshot_write_failures
-         ~labels:[ "keeper", meta_current.name ]
-         ();
-       Log.Keeper.error "heartbeat snapshot write failed: %s" (Printexc.to_string exn));
-    last_snapshot_ts := now_ts)
-;;
-
-let record_keepalive_stage_timing
-      ~(timing_ring : Keeper_keepalive_signal.stage_timing array)
-      ~(timing_cursor : int ref)
-      ~(timing_filled : int ref)
-      ~(ring_sz : int)
-      ~(t_presence_start : float)
-      ~(t_presence_end : float)
-      ~(t_snapshot_start : float)
-      ~(t_snapshot_end : float)
-      ~(t_board_start : float)
-      ~(t_board_end : float)
-      ~(t_turn_start : float)
-      ~(t_turn_end : float)
-      ~(t_recurring_start : float)
-      ~(t_recurring_end : float)
-  : unit
-  =
-  let timing =
-    { presence_ms = (t_presence_end -. t_presence_start) *. 1000.0
-    ; snapshot_ms = (t_snapshot_end -. t_snapshot_start) *. 1000.0
-    ; board_ms = (t_board_end -. t_board_start) *. 1000.0
-    ; turn_ms = (t_turn_end -. t_turn_start) *. 1000.0
-    ; recurring_ms = (t_recurring_end -. t_recurring_start) *. 1000.0
-    }
-  in
-  timing_ring.(!timing_cursor) <- timing;
-  timing_cursor := (!timing_cursor + 1) mod ring_sz;
-  if !timing_filled < ring_sz then incr timing_filled
-;;
+let maybe_write_heartbeat_snapshot = Keeper_heartbeat_loop_snapshot_timing.maybe_write_heartbeat_snapshot
+let record_keepalive_stage_timing = Keeper_heartbeat_loop_snapshot_timing.record_keepalive_stage_timing
 
 (* Spec navigation (OCaml -> TLA+) — plan §19 Cycle 27 anchor for
    B1 (Heartbeat).  Authoritative spec mirror is

@@ -1,8 +1,16 @@
+---
+title: CDAL × GOAL Integration Contract
+rfc: 0109
+status: Active
+created: 2026-05-17
+implementation_prs: []
+---
+
 # RFC-0109 — CDAL × GOAL Integration Contract
 
 | | |
 |---|---|
-| **Status** | Draft |
+| **Status** | Active (frontmatter SSOT) |
 | **Created** | 2026-05-17 |
 | **Authors** | claude (Anthropic Opus 4.7) |
 | **Reviewers** | (TBD) |

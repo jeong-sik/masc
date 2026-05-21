@@ -10,44 +10,13 @@ type dashboard_compute_mode =
   | Inline_shared
   | Offloaded_readonly
 
-let runtime_support = Server_dashboard_http_runtime_support.default ()
-
-(** Executor pool for CPU-heavy dashboard compute.
-    Pool reference is shared via [Executor_pool_ref] in masc_core. *)
-let set_executor_pool = Server_dashboard_http_runtime_support.set_executor_pool
-
-let dashboard_runtime ?net ?mono_clock (config : Coord.config)
-  : Server_dashboard_http_runtime_support.runtime option
-  =
-  let _ = config in
-  match net, mono_clock with
-  | Some net, Some mono_clock -> Some { net; mono_clock }
-  | _ -> None
-;;
-
-let run_dashboard_compute
-      ?(mode = Offloaded_readonly)
-      ?net
-      ?mono_clock
-      ~sw
-      ~clock
-      ~(config : Coord.config)
-      compute
-  =
-  let runtime = dashboard_runtime ?net ?mono_clock config in
-  Server_dashboard_http_runtime_support.run_dashboard_compute
-    runtime_support
-    ~mode
-    ?runtime
-    ~sw
-    ~clock
-    ~config
-    compute
-;;
-
-let state_dashboard_runtime_caps (state : Mcp_server.server_state) =
-  state.Mcp_server.net, state.Mcp_server.mono_clock
-;;
+(* Dashboard runtime helpers extracted to
+   [Server_dashboard_http_core_runtime] (godfile decomp). *)
+let runtime_support = Server_dashboard_http_core_runtime.runtime_support
+let set_executor_pool = Server_dashboard_http_core_runtime.set_executor_pool
+let dashboard_runtime = Server_dashboard_http_core_runtime.dashboard_runtime
+let run_dashboard_compute = Server_dashboard_http_core_runtime.run_dashboard_compute
+let state_dashboard_runtime_caps = Server_dashboard_http_core_runtime.state_dashboard_runtime_caps
 
 (* ================================================================ *)
 (* Dashboard Data (Batch API)                                       *)
@@ -64,6 +33,8 @@ let shell_warming = Server_dashboard_http_core_cache.shell_warming
 let _shell_warming = Server_dashboard_http_core_cache._shell_warming
 let last_good_shell = Server_dashboard_http_core_cache.last_good_shell
 let _last_good_shell = Server_dashboard_http_core_cache._last_good_shell
+let last_good_shell_light = Server_dashboard_http_core_cache.last_good_shell_light
+let _last_good_shell_light = Server_dashboard_http_core_cache._last_good_shell_light
 let with_dashboard_timeout = Server_dashboard_http_core_cache.with_dashboard_timeout
 let cache_partition_segment = Server_dashboard_http_core_cache.cache_partition_segment
 let dashboard_cache_key = Server_dashboard_http_core_cache.dashboard_cache_key
@@ -214,417 +185,41 @@ let dashboard_batch_json ?(compact = false) (config : Coord.config) : Yojson.Saf
     ]
 ;;
 
-let operator_actor_hint request =
-  match agent_from_request request with
-  | Some raw ->
-    let sanitized = sanitize_dashboard_actor_name raw in
-    if sanitized = "" then None else Some sanitized
-  | None -> None
-;;
+let operator_actor_hint = Server_dashboard_http_core_operator.operator_actor_hint
+let operator_snapshot_broadcast_ref = Server_dashboard_http_core_operator.operator_snapshot_broadcast_ref
+let _operator_snapshot_broadcast_ref = Server_dashboard_http_core_operator._operator_snapshot_broadcast_ref
+let operator_digest_broadcast_ref = Server_dashboard_http_core_operator.operator_digest_broadcast_ref
+let _operator_digest_broadcast_ref = Server_dashboard_http_core_operator._operator_digest_broadcast_ref
+let operator_snapshot_cache = Server_dashboard_http_core_operator.operator_snapshot_cache
+let _operator_snapshot_cache = Server_dashboard_http_core_operator._operator_snapshot_cache
+let operator_digest_cache = Server_dashboard_http_core_operator.operator_digest_cache
+let _operator_digest_cache = Server_dashboard_http_core_operator._operator_digest_cache
+let operator_refresh_interval_s = Server_dashboard_http_core_operator.operator_refresh_interval_s
+let operator_snapshot_extra = Server_dashboard_http_core_operator.operator_snapshot_extra
+let json_string_opt = Server_dashboard_http_core_json.json_string_opt
+let json_bool_opt = Server_dashboard_http_core_json.json_bool_opt
+let json_assoc_field_opt = Server_dashboard_http_core_json.json_assoc_field_opt
+let json_assoc_string_opt = Server_dashboard_http_core_json.json_assoc_string_opt
+let json_assoc_int_opt = Server_dashboard_http_core_json.json_assoc_int_opt
+let projection_diagnostics_fields = Server_dashboard_http_core_json.projection_diagnostics_fields
+let projection_diagnostics_field = Server_dashboard_http_core_json.projection_diagnostics_field
+let operator_generated_at_iso = Server_dashboard_http_core_json.operator_generated_at_iso
+let operator_cache_json = Server_dashboard_http_core_json.operator_cache_json
 
-(* --- Operator proactive refresh ---
-   Default (no-param) requests are served from a background-refreshed ref.
-   Parameterized requests fall back to on-demand compute with SWR cache.
+(* Operator query-JSON + envelope metadata helpers extracted to
+   [Server_dashboard_http_core_operator_query] (godfile decomp). *)
+let operator_retention_json = Server_dashboard_http_core_operator_query.operator_retention_json
+let operator_snapshot_query_json = Server_dashboard_http_core_operator_query.operator_snapshot_query_json
+let operator_digest_query_json = Server_dashboard_http_core_operator_query.operator_digest_query_json
+let with_operator_surface_metadata = Server_dashboard_http_core_operator_query.with_operator_surface_metadata
+let with_operator_snapshot_metadata = Server_dashboard_http_core_operator_query.with_operator_snapshot_metadata
+let with_operator_digest_metadata = Server_dashboard_http_core_operator_query.with_operator_digest_metadata
+let operator_snapshot_default_query = Server_dashboard_http_core_operator_query.operator_snapshot_default_query
+let operator_digest_default_query = Server_dashboard_http_core_operator_query.operator_digest_default_query
 
-   Using Proactive_refresh gives circuit breaker + exponential backoff on
-   repeated failures, matching the pattern used by execution and mission loops.
+let start_operator_snapshot_refresh_loop = Server_dashboard_http_core_snapshot_refresh.start_operator_snapshot_refresh_loop
 
-   Interval: 10s (was 120s). Even if compute takes ~8s, the ref is updated
-   every ~18s worst-case, which is acceptable for dashboard SSE polling. *)
-
-(* Late-bound broadcast refs — set by server_dashboard_http.ml after
-   Sse module is in scope.  Same pattern as _broadcast_room_truth_ref. *)
-let operator_snapshot_broadcast_ref : (Yojson.Safe.t -> unit) ref =
-  ref (fun (_json : Yojson.Safe.t) -> ())
-;;
-
-let _operator_snapshot_broadcast_ref = operator_snapshot_broadcast_ref
-
-let operator_digest_broadcast_ref : (Yojson.Safe.t -> unit) ref =
-  ref (fun (_json : Yojson.Safe.t) -> ())
-;;
-
-let _operator_digest_broadcast_ref = operator_digest_broadcast_ref
-
-let operator_snapshot_cache =
-  create_cached_surface
-    (`Assoc
-        [ "status", `String "initializing"
-        ; "generated_at", `String (Masc_domain.now_iso ())
-        ])
-;;
-
-let _operator_snapshot_cache = operator_snapshot_cache
-
-let operator_digest_cache =
-  create_cached_surface
-    (`Assoc
-        [ "health", `String "initializing"
-        ; "generated_at", `String (Masc_domain.now_iso ())
-        ])
-;;
-
-let _operator_digest_cache = operator_digest_cache
-
-let operator_refresh_interval_s =
-  float_of_env_default
-    "MASC_OPERATOR_REFRESH_INTERVAL_S"
-    ~default:60.0
-    ~min_v:10.0
-    ~max_v:600.0
-;;
-
-let operator_snapshot_extra () =
-  [ "readonly_pool", Coord_utils.domain_local_pg_backend_diagnostics_json () ]
-;;
-
-let json_string_opt = function
-  | Some value -> `String value
-  | None -> `Null
-;;
-
-let json_bool_opt = function
-  | Some value -> `Bool value
-  | None -> `Null
-;;
-
-let json_assoc_field_opt key = function
-  | `Assoc fields -> List.assoc_opt key fields
-  | _ -> None
-;;
-
-let json_assoc_string_opt key json =
-  match json_assoc_field_opt key json with
-  | Some (`String value) -> Some value
-  | _ -> None
-;;
-
-let json_assoc_int_opt key json =
-  match json_assoc_field_opt key json with
-  | Some (`Int value) -> Some value
-  | Some (`Float value) -> Some (int_of_float value)
-  | _ -> None
-;;
-
-let projection_diagnostics_fields json =
-  match json_assoc_field_opt "projection_diagnostics" json with
-  | Some (`Assoc fields) -> fields
-  | _ -> []
-;;
-
-let projection_diagnostics_field json key =
-  List.assoc_opt key (projection_diagnostics_fields json)
-;;
-
-let operator_generated_at_iso json =
-  match projection_diagnostics_field json "generated_at" with
-  | Some (`String value) -> value
-  | _ ->
-    (match json_assoc_string_opt "generated_at" json with
-     | Some value -> value
-     | None -> Masc_domain.now_iso ())
-;;
-
-let operator_cache_json ?cache_key ~scope json =
-  let diagnostic_field key =
-    match projection_diagnostics_field json key with
-    | Some value -> value
-    | None -> `Null
-  in
-  let cache_state =
-    match projection_diagnostics_field json "cache_state" with
-    | Some (`String value) -> value
-    | _ -> "request_swr_or_inline_compute"
-  in
-  `Assoc
-    [ "scope", `String scope
-    ; "cache_state", `String cache_state
-    ; "projection_surface", diagnostic_field "surface"
-    ; "last_success_at", diagnostic_field "last_success_at"
-    ; "last_attempt_at", diagnostic_field "last_attempt_at"
-    ; "last_error_at", diagnostic_field "last_error_at"
-    ; "stale_reason", diagnostic_field "stale_reason"
-    ; "stale_age_ms", diagnostic_field "stale_age_ms"
-    ; "request_cache_key", json_string_opt cache_key
-    ; "request_cache_ttl_s", `Float 5.0
-    ; "request_timeout_s", `Float dashboard_request_timeout_s
-    ; "background_refresh_interval_s", `Float operator_refresh_interval_s
-    ; "policy", `String "cached_surface plus HTTP stale-while-revalidate"
-    ]
-;;
-
-let operator_retention_json ~(config : Coord.config) ~scope ~producer =
-  `Assoc
-    [ "scope", `String scope
-    ; "coordination_root", `String config.base_path
-    ; "workspace_path", `String config.workspace_path
-    ; "producer", `String producer
-    ; "store_kind", `String "process_cache"
-    ; "cache_surface", `String "Server_dashboard_http_core.cached_surface"
-    ; "http_swr_ttl_s", `Float 5.0
-    ; "background_refresh_interval_s", `Float operator_refresh_interval_s
-    ; "request_timeout_s", `Float dashboard_request_timeout_s
-    ; ( "cache_policy"
-      , `String
-          "default route uses proactive cached_surface; parameterized route uses HTTP stale-while-revalidate"
-      )
-    ]
-;;
-
-let operator_snapshot_query_json ~actor ~view ~include_messages ~include_keepers
-    ~lightweight_summary ~default_summary_request =
-  let effective_view =
-    match view with
-    | Some value -> value
-    | None -> if default_summary_request then "summary" else "full"
-  in
-  `Assoc
-    [ "actor", json_string_opt actor
-    ; "view", json_string_opt view
-    ; "effective_actor", `String (Option.value ~default:"dashboard" actor)
-    ; "effective_view", `String effective_view
-    ; "include_messages", `Bool include_messages
-    ; "include_keepers", `Bool include_keepers
-    ; "lightweight_summary", `Bool lightweight_summary
-    ; "default_summary_request", `Bool default_summary_request
-    ]
-;;
-
-let operator_digest_query_json ~actor ~target_type ~target_id ~include_workers
-    ~effective_target_type ~default_namespace_request =
-  `Assoc
-    [ "actor", json_string_opt actor
-    ; "target_type", json_string_opt target_type
-    ; "target_id", json_string_opt target_id
-    ; "effective_target_type", `String effective_target_type
-    ; "include_workers", json_bool_opt include_workers
-    ; "default_namespace_request", `Bool default_namespace_request
-    ]
-;;
-
-let with_operator_surface_metadata
-    ~config
-    ?cache_key
-    ~dashboard_surface
-    ~source
-    ~scope
-    ~producer
-    ~query
-    json =
-  match json with
-  | `Assoc fields ->
-    let generated_at = operator_generated_at_iso json in
-    let metadata =
-      [ "dashboard_surface", `String dashboard_surface
-      ; "source", `String source
-      ; "generated_at_iso", `String generated_at
-      ; "retention", operator_retention_json ~config ~scope ~producer
-      ; "query", query
-      ; "cache", operator_cache_json ?cache_key ~scope json
-      ]
-    in
-    let metadata_keys =
-      [ "dashboard_surface"
-      ; "source"
-      ; "generated_at_iso"
-      ; "retention"
-      ; "query"
-      ; "cache"
-      ]
-    in
-    let fields =
-      List.filter (fun (key, _) -> not (List.mem key metadata_keys)) fields
-    in
-    `Assoc (metadata @ fields)
-  | other -> other
-;;
-
-let with_operator_snapshot_metadata ~config ?cache_key ~query json =
-  with_operator_surface_metadata
-    ~config
-    ?cache_key
-    ~dashboard_surface:"/api/v1/operator"
-    ~source:"operator_snapshot_read_model"
-    ~scope:"operator_snapshot"
-    ~producer:"Operator_control.snapshot_json"
-    ~query
-    json
-;;
-
-let with_operator_digest_metadata ~config ?cache_key ~query json =
-  with_operator_surface_metadata
-    ~config
-    ?cache_key
-    ~dashboard_surface:"/api/v1/operator/digest"
-    ~source:"operator_digest_read_model"
-    ~scope:"operator_digest"
-    ~producer:"Operator_control.digest_json"
-    ~query
-    json
-;;
-
-let operator_snapshot_default_query () =
-  operator_snapshot_query_json
-    ~actor:None
-    ~view:None
-    ~include_messages:true
-    ~include_keepers:true
-    ~lightweight_summary:true
-    ~default_summary_request:true
-;;
-
-let operator_digest_default_query () =
-  operator_digest_query_json
-    ~actor:None
-    ~target_type:None
-    ~target_id:None
-    ~include_workers:None
-    ~effective_target_type:"root"
-    ~default_namespace_request:true
-;;
-
-let start_operator_snapshot_refresh_loop ~state ~sw ~clock =
-  let config = state.Mcp_server.room_config in
-  let proc_mgr = state.Mcp_server.proc_mgr in
-  let net, mono_clock = state_dashboard_runtime_caps state in
-  let compute () =
-    mark_cached_surface_attempt operator_snapshot_cache;
-    let started_at = Unix.gettimeofday () in
-    try
-      run_dashboard_compute
-        ~mode:Offloaded_readonly
-        ?net
-        ?mono_clock
-        ~sw
-        ~clock
-        ~config
-        (fun ~config ~sw ->
-           let ctx : _ Operator_control.context =
-             { config
-             ; agent_name = "dashboard"
-             ; sw
-             ; clock
-             ; proc_mgr
-             ; net = None
-             ; mcp_session_id = None
-             }
-           in
-           let t_snapshot = Unix.gettimeofday () in
-           let json =
-             Operator_control.snapshot_json
-               ~actor:"dashboard"
-               ~view:"summary"
-               ~include_messages:true
-               ~include_keepers:true
-               ~include_summary_fields:false
-               ~lightweight_summary:true
-               ctx
-           in
-           let dt_snapshot = Unix.gettimeofday () -. t_snapshot in
-           let dt_total = Unix.gettimeofday () -. started_at in
-           if dt_total >= 5.0
-           then
-             Log.Dashboard.warn
-               "[operator_snapshot profile] total=%.1fs snapshot=%.1fs"
-               dt_total
-               dt_snapshot;
-           json
-           |> with_projection_diagnostics
-                ~surface:"operator_snapshot"
-                ~started_at
-                ~extra:(operator_snapshot_extra ()))
-    with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | exn ->
-      mark_cached_surface_error operator_snapshot_cache exn;
-      raise exn
-  in
-  Proactive_refresh.start
-    ~sw
-    ~clock
-    ~config:
-      { (Proactive_refresh.default_config
-           ~label:"operator_snapshot"
-           ~interval_s:operator_refresh_interval_s)
-        with
-        timeout_s = operator_refresh_interval_s *. 0.8
-      ; on_error = Some (mark_cached_surface_error operator_snapshot_cache)
-      ; warm_delay_s = 120.0
-      }
-    ~compute
-    ~on_result:(fun json ->
-      mark_cached_surface_success operator_snapshot_cache json;
-      !operator_snapshot_broadcast_ref
-        (cached_surface_json operator_snapshot_cache
-         |> with_operator_snapshot_metadata
-              ~config
-              ~query:(operator_snapshot_default_query ())))
-;;
-
-let start_operator_digest_refresh_loop ~state ~sw ~clock =
-  let config = state.Mcp_server.room_config in
-  let proc_mgr = state.Mcp_server.proc_mgr in
-  let net, mono_clock = state_dashboard_runtime_caps state in
-  let compute () =
-    mark_cached_surface_attempt operator_digest_cache;
-    let started_at = Unix.gettimeofday () in
-    try
-      run_dashboard_compute
-        ~mode:Offloaded_readonly
-        ?net
-        ?mono_clock
-        ~sw
-        ~clock
-        ~config
-        (fun ~config ~sw ->
-           let ctx : _ Operator_control.context =
-             { config
-             ; agent_name = "dashboard"
-             ; sw
-             ; clock
-             ; proc_mgr
-             ; net = None
-             ; mcp_session_id = None
-             }
-           in
-           match
-             Operator_control.digest_json ~actor:"dashboard" ~target_type:"root" ctx
-           with
-           | Ok json ->
-             with_projection_diagnostics
-               ~surface:"operator_digest"
-               ~started_at
-               ~extra:(operator_snapshot_extra ())
-               json
-           | Error err ->
-             invalid_arg ("server_dashboard_http_core: operator digest failed: " ^ err))
-    with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | exn ->
-      mark_cached_surface_error operator_digest_cache exn;
-      raise exn
-  in
-  Proactive_refresh.start
-    ~sw
-    ~clock
-    ~config:
-      { (Proactive_refresh.default_config
-           ~label:"operator_digest"
-           ~interval_s:operator_refresh_interval_s)
-        with
-        timeout_s = operator_refresh_interval_s *. 0.8
-      ; on_error = Some (mark_cached_surface_error operator_digest_cache)
-      ; warm_delay_s = 150.0
-      }
-    ~compute
-    ~on_result:(fun json ->
-      mark_cached_surface_success operator_digest_cache json;
-      !operator_digest_broadcast_ref
-        (cached_surface_json operator_digest_cache
-         |> with_operator_digest_metadata
-              ~config
-              ~query:(operator_digest_default_query ())))
-;;
+let start_operator_digest_refresh_loop = Server_dashboard_http_core_digest_refresh.start_operator_digest_refresh_loop
 
 let operator_snapshot_http_json ~state ~sw ~clock request =
   let config = state.Mcp_server.room_config in
@@ -791,124 +386,7 @@ let operator_snapshot_http_json ~state ~sw ~clock request =
     |> with_operator_snapshot_metadata ~config ~cache_key ~query)
 ;;
 
-let operator_digest_http_json ~state ~sw ~clock request =
-  let config = state.Mcp_server.room_config in
-  let net, mono_clock = state_dashboard_runtime_caps state in
-  let actor =
-    dashboard_actor_for_request ~base_path:config.base_path request
-  in
-  let target_type = query_param request "target_type" in
-  let target_id = query_param request "target_id" in
-  let include_workers =
-    match query_param request "include_workers" with
-    | Some ("0" | "false" | "no") -> Some false
-    | Some ("1" | "true" | "yes") -> Some true
-    | _ -> None
-  in
-  let namespace_target_type value =
-    match Option.map (fun raw -> String.lowercase_ascii (String.trim raw)) value with
-    | None -> true
-    | Some "root" | Some "namespace" | Some "room" -> true
-    | Some _ -> false
-  in
-  let effective_target_type = Option.value ~default:"root" target_type in
-  let default_namespace_request =
-    actor = None
-    && target_id = None
-    && include_workers = None
-    && namespace_target_type target_type
-  in
-  let query =
-    operator_digest_query_json
-      ~actor
-      ~target_type
-      ~target_id
-      ~include_workers
-      ~effective_target_type
-      ~default_namespace_request
-  in
-  if default_namespace_request
-  then
-    Ok
-      (cached_surface_json operator_digest_cache
-       |> with_operator_digest_metadata ~config ~query)
-  else (
-    let started_at = Unix.gettimeofday () in
-    let cache_key =
-      Printf.sprintf
-        "operator_digest:param:%s|%s|%s|%s|%s"
-        (Option.value ~default:"" actor)
-        effective_target_type
-        (Option.value ~default:"" target_id)
-        (match include_workers with
-         | None -> ""
-         | Some true -> "1"
-         | Some false -> "0")
-        ""
-    in
-    let compute () =
-      match
-        Eio.Time.with_timeout clock dashboard_request_timeout_s (fun () ->
-          Ok
-            (run_dashboard_compute
-               ~mode:Offloaded_readonly
-               ?net
-               ?mono_clock
-               ~sw
-               ~clock
-               ~config
-               (fun ~config ~sw ->
-                  let ctx : _ Operator_control.context =
-                    { config
-                    ; agent_name = Option.value ~default:"dashboard" actor
-                    ; sw
-                    ; clock
-                    ; proc_mgr = state.Mcp_server.proc_mgr
-                    ; net = state.Mcp_server.net
-                    ; mcp_session_id = None
-                    }
-                  in
-                  match
-                    Operator_control.digest_json
-                      ?actor
-                      ~target_type:effective_target_type
-                      ?target_id
-                      ?include_workers
-                      ctx
-                  with
-                  | Ok json -> json
-                  | Error err ->
-                    `Assoc
-                      [ "error", `String "validation_error"
-                      ; "message", `String err
-                      ; "generated_at", `String (Masc_domain.now_iso ())
-                      ])))
-      with
-      | Ok json ->
-        with_projection_diagnostics
-          ~surface:"operator_digest"
-          ~started_at
-          ~extra:
-            [ "readonly_pool", Coord_utils.domain_local_pg_backend_diagnostics_json () ]
-          json
-      | Error `Timeout ->
-        `Assoc
-          [ "error", `String "timeout"
-          ; "message", `String "Operator digest timed out after 30s"
-          ; "generated_at", `String (Masc_domain.now_iso ())
-          ]
-    in
-    (* See [operator_snapshot_http_json] above for the parameterized-cache
-       rationale.  Same 5s SWR window applies to operator/digest views. *)
-    Ok
-      (Dashboard_cache.get_or_compute_with_timeout
-         cache_key
-         ~ttl:5.0
-         ~clock
-         ~timeout_sec:dashboard_request_timeout_s
-         compute
-       |> with_operator_digest_metadata ~config ~cache_key ~query))
-;;
+let operator_digest_http_json = Server_dashboard_http_core_operator_digest_http.operator_digest_http_json
 
 (* --- Mission proactive refresh ----------------------------------------
    A background fiber recomputes the mission snapshot periodically.
@@ -1142,97 +620,21 @@ let dashboard_shell_timeout_for ~light =
    noise in the log. Give it its own cache with a longer TTL, and on a cold
    miss warm it in the background so the shell path never blocks on the
    initial full JSONL scan. *)
-(* Meta-cognition summary cache extracted to
-   [Server_dashboard_meta_cognition_cache] (godfile decomp). *)
-module Mc_cache = Server_dashboard_meta_cognition_cache
+(* Meta-cognition summary cache + dashboard shell cache key helpers extracted to
+   [Server_dashboard_http_core_meta_cognition] (godfile decomp). *)
+module Mc_cache = Server_dashboard_http_core_meta_cognition.Mc_cache
 
-let meta_cognition_summary_ttl = Mc_cache.summary_ttl
-let meta_cognition_summary_stale_for = Mc_cache.summary_stale_for
-let meta_cognition_summary_empty_json = Mc_cache.summary_empty_json
-
-let dashboard_shell_cache_prefix (config : Coord.config) =
-  Printf.sprintf "shell:coord=%s:" config.base_path
-;;
-
-let dashboard_shell_cache_key ?(light = false) (config : Coord.config) =
-  Printf.sprintf
-    "%sworkspace=%s:mode=%s"
-    (dashboard_shell_cache_prefix config)
-    config.workspace_path
-    (if light then "light" else "full")
-;;
-
-let meta_cognition_summary_key (config : Coord.config) =
-  dashboard_cache_key config "meta_cognition_summary" "dashboard_shell"
-;;
-
-let store_last_good_meta_cognition_summary = Mc_cache.store_last_good
-let find_last_good_meta_cognition_summary = Mc_cache.find_last_good
-let clear_meta_cognition_warm_flag = Mc_cache.clear_warm_flag
-
-let schedule_meta_cognition_summary_warm (config : Coord.config) =
-  let key = meta_cognition_summary_key config in
-  let compute () =
-    let json = Meta_cognition.summary_json config in
-    Mc_cache.store_last_good key json;
-    json
-  in
-  if Mc_cache.try_acquire_warm_slot key
-  then (
-    match Eio_context.get_switch_opt () with
-    | Some sw ->
-      Eio.Fiber.fork ~sw (fun () ->
-        Eio_guard.protect
-          ~finally:(fun () -> Mc_cache.clear_warm_flag key)
-          (fun () ->
-             try
-               Dashboard_cache.invalidate key;
-               ignore
-                 (Dashboard_cache.get_or_compute
-                    key
-                    ~ttl:Mc_cache.summary_ttl
-                    compute)
-               (* Drop cached shell payloads that were rendered while the
-                     meta-cognition summary was still warming. *);
-               Dashboard_cache.invalidate_prefix (dashboard_shell_cache_prefix config)
-             with
-             | Eio.Cancel.Cancelled _ as e -> raise e
-             | exn ->
-               Log.Server.warn
-                 "dashboard shell meta_cognition warm failed: %s"
-                 (Printexc.to_string exn)))
-    | None -> Mc_cache.clear_warm_flag key)
-;;
-
-let meta_cognition_summary_cached (config : Coord.config) : Yojson.Safe.t =
-  let key = meta_cognition_summary_key config in
-  let fallback =
-    match find_last_good_meta_cognition_summary key with
-    | Some json -> json
-    | None -> meta_cognition_summary_empty_json
-  in
-  let compute () =
-    let json = Meta_cognition.summary_json config in
-    store_last_good_meta_cognition_summary key json;
-    json
-  in
-  match Dashboard_cache.peek key with
-  | Some _ ->
-    let result =
-      Dashboard_cache.get_or_compute key ~ttl:meta_cognition_summary_ttl compute
-    in
-    if result = `Null then fallback else result
-  | None ->
-    (match find_last_good_meta_cognition_summary key with
-     | Some stale ->
-       Dashboard_cache.seed_stale_if_missing
-         key
-         ~stale_for:meta_cognition_summary_stale_for
-         stale
-     | None -> ());
-    schedule_meta_cognition_summary_warm config;
-    if fallback = meta_cognition_summary_empty_json then `Null else fallback
-;;
+let meta_cognition_summary_ttl = Server_dashboard_http_core_meta_cognition.meta_cognition_summary_ttl
+let meta_cognition_summary_stale_for = Server_dashboard_http_core_meta_cognition.meta_cognition_summary_stale_for
+let meta_cognition_summary_empty_json = Server_dashboard_http_core_meta_cognition.meta_cognition_summary_empty_json
+let dashboard_shell_cache_prefix = Server_dashboard_http_core_meta_cognition.dashboard_shell_cache_prefix
+let dashboard_shell_cache_key = Server_dashboard_http_core_meta_cognition.dashboard_shell_cache_key
+let meta_cognition_summary_key = Server_dashboard_http_core_meta_cognition.meta_cognition_summary_key
+let store_last_good_meta_cognition_summary = Server_dashboard_http_core_meta_cognition.store_last_good_meta_cognition_summary
+let find_last_good_meta_cognition_summary = Server_dashboard_http_core_meta_cognition.find_last_good_meta_cognition_summary
+let clear_meta_cognition_warm_flag = Server_dashboard_http_core_meta_cognition.clear_meta_cognition_warm_flag
+let schedule_meta_cognition_summary_warm = Server_dashboard_http_core_meta_cognition.schedule_meta_cognition_summary_warm
+let meta_cognition_summary_cached = Server_dashboard_http_core_meta_cognition.meta_cognition_summary_cached
 
 let dashboard_shell_paths_json (config : Coord.config) : Yojson.Safe.t =
   Server_base_path_diagnostics.detect
@@ -1275,10 +677,24 @@ let dashboard_shell_bootstrap_json (config : Coord.config) : Yojson.Safe.t =
          ]
 ;;
 
-let dashboard_shell_last_good_opt () =
-  match Atomic.get last_good_shell with
-  | `Assoc [] -> None
-  | json -> Some json
+let dashboard_shell_last_good_with_source ~light () =
+  let full_last_good () =
+    match Atomic.get last_good_shell with
+    | `Assoc [] -> None
+    | json -> Some (json, "last_good")
+  in
+  if light
+  then (
+    match Atomic.get last_good_shell_light with
+    | `Assoc [] -> full_last_good ()
+    | json -> Some (json, "last_good_light"))
+  else full_last_good ()
+;;
+
+let remember_dashboard_shell_last_good ~light json =
+  if light
+  then Atomic.set last_good_shell_light json
+  else Atomic.set last_good_shell json
 ;;
 
 let is_dashboard_cache_timeout_json = function
@@ -1669,8 +1085,8 @@ let dashboard_shell_http_json
     | None -> Eio_context.get_clock_opt ()
   in
   let fallback_payload_with_source () =
-    match dashboard_shell_last_good_opt () with
-    | Some json -> json, "last_good"
+    match dashboard_shell_last_good_with_source ~light () with
+    | Some (json, source) -> json, source
     | None -> dashboard_shell_bootstrap_json config, "bootstrap"
   in
   let fallback_payload () =
@@ -1734,7 +1150,9 @@ let dashboard_shell_http_json
       in
       if is_dashboard_cache_timeout_json computed
       then timeout_fallback_payload (dashboard_shell_timeout_for ~light)
-      else computed)
+      else (
+        remember_dashboard_shell_last_good ~light computed;
+        computed))
   in
   match request with
   | None -> payload

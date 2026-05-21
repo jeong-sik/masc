@@ -3,9 +3,9 @@
 
     Surface composition:
 
-    - {!Gate_diff_types} re-exported via [include] (line 13 of the .ml).
-      Provides [destructive_class], [legacy_verdict], [shadow_verdict],
-      [gate_diff] + their tag/diff helpers.
+    - {!Shell_safety_types} re-exported via [include] (line 13 of the .ml).
+      Provides [destructive_class], destructive pattern metadata, and
+      command-log hash helpers.
     - {!Gh_command_validation} re-exported via [include] (line 712 of
       the .ml). Provides [gh_reversibility] + [gh] command validators.
     - This module's own surface: [block_reason] type, command-validation
@@ -15,11 +15,9 @@
     Internal helpers stay hidden: path resolution, character-class
     classifiers, pipeline tokenization, command-name extraction,
     URL/credential redaction, [mkdir_p], the underlying file_read/
-    file_write/shell_exec tool builders, parser-reason tag helpers,
-    and the [classify_legacy] / [classify_shadow] private classifiers
-    used by {!diff_command}. *)
+    file_write/shell_exec tool builders, and parser-reason tag helpers. *)
 
-include module type of Gate_diff_types
+include module type of Shell_safety_types
 
 (** {1 Command validation} *)
 
@@ -50,11 +48,9 @@ val block_reason_to_string_with_allowlist :
     passes a narrower allowlist than {!validate_command_coding}; otherwise
     the generic hint can name commands that the caller still rejects. *)
 
-(** The default dev allowlist (cat, cargo, dune-local.sh, git, rg, …).  Used by
-    {!validate_command} internally; exposed so RFC-0092 Phase A's
-    typed advisor ({!Shell_ir_validator.advise}) can mirror the legacy
-    gate's allowlist for parity measurement.  Order is the source of
-    truth; do not re-sort without confirming the typed advisor
+(** The default dev allowlist (cat, cargo, dune-local.sh, git, rg, ...).  Used by
+    {!validate_command} internally and by the Shell IR coding gate.  Order is
+    the source of truth; do not re-sort without confirming all validation
     consumers are tolerant. *)
 val dev_allowed_commands : string list
 
@@ -63,46 +59,65 @@ val dev_allowed_commands : string list
     command outside the dev allowlist (rg / grep / dune-local.sh / git / ...).
     Bare [dune] is intentionally rejected; local agents must use
     [scripts/dune-local.sh] so builds share the host-wide lock.
-    [?caller] is accepted for call-site parity with the coding validators;
-    strict validation does not parse through {!Shell_command_gate}, so the
-    value is captured but does not affect the verdict. *)
+    [?caller] is accepted for call-site compatibility; strict validation
+    keeps the existing single-command wire shape. *)
 val validate_command
-  :  ?caller:Shell_command_gate.caller
+  :  ?caller:Masc_exec_command_gate.Shell_command_gate.caller
   -> string
   -> (unit, block_reason) result
 
-(** Relaxed validator for Coding/Full preset keepers.  Allows pipes
-    and fd redirects; still blocks shell injection, process
-    substitution, and unsafe redirects.  Validates every segment of
-    the pipeline against the dev allowlist. *)
+(** Relaxed validator for Coding/Full preset keepers.  The authoritative
+    verdict comes from {!Masc_exec_command_gate.Shell_command_gate.gate}:
+    parsed pipelines validate every stage against the dev allowlist,
+    redirects are rejected for the coding shell path, and parser
+    bailouts fail closed with the existing {!block_reason} wire shape. *)
 val validate_command_coding
-  :  ?caller:Shell_command_gate.caller
+  :  ?caller:Masc_exec_command_gate.Shell_command_gate.caller
   -> string
   -> (unit, block_reason) result
-(** [?caller] is forwarded to {!Shell_command_gate.parse} via
-    {!validate_command_coding_with_allowlist} for the upcoming
-    telemetry partition (RFC-0131 PR-3).  Captured but does not affect
-    the verdict. *)
+(** [?caller] is forwarded to {!Masc_exec_command_gate.Shell_command_gate.gate}
+    for telemetry partitioning.  It does not select a fallback: the
+    Shell IR facade verdict is authoritative for all callers. *)
 
 (** Customizable variant of {!validate_command_coding} for callers that
     need a non-default allowlist.  [allow_pipes] defaults to [true];
     setting it to [false] yields {!Pipes_not_allowed} for any pipeline
     longer than one segment.  [?caller] is forwarded to
-    {!Shell_command_gate.parse} for telemetry partition. *)
+    {!Masc_exec_command_gate.Shell_command_gate.gate} for telemetry partitioning. *)
 val validate_command_coding_with_allowlist
-  :  ?caller:Shell_command_gate.caller
+  :  ?caller:Masc_exec_command_gate.Shell_command_gate.caller
   -> ?allow_pipes:bool
   -> allowed_commands:string list
   -> string
   -> (unit, block_reason) result
 
-(** When [workdir] is supplied, gate every path-bearing token in [cmd]
-    against the shell path allowlist. Tokens may stay under [workdir],
+(** Variant of {!validate_command_coding_with_allowlist} for callers that need
+    to keep the authoritative Shell IR context for execution or follow-up
+    validation. *)
+val command_context_coding_with_allowlist
+  :  ?caller:Masc_exec_command_gate.Shell_command_gate.caller
+  -> ?allow_pipes:bool
+  -> allowed_commands:string list
+  -> string
+  -> (Masc_exec_command_gate.Shell_command_gate.parsed_context, block_reason) result
+
+(** When [workdir] is supplied, gate every literal path-bearing argv/redirect
+    value in [shell_ir] against the path allowlist.
+    Values may stay under [workdir],
     [/tmp], the owning worktree repo root, or a registered repository path
     allowed by {!Keeper_repo_mapping} when both [keeper_id] and [base_path]
-    are supplied. Returns [Error msg] with the rejected token (or a
-    path-rewrite-syntax reminder) when a token escapes the allowlist.
+    are supplied. Returns [Error msg] with the rejected value when a path
+    escapes the allowlist.
     Returns [Ok ()] unconditionally when [workdir = None]. *)
+val validate_shell_ir_paths
+  :  ?keeper_id:string
+  -> ?base_path:string
+  -> ?workdir:string
+  -> Masc_exec.Shell_ir.t
+  -> (unit, string) result
+
+(** Compatibility wrapper for legacy string call sites. Prefer
+    {!validate_shell_ir_paths} when the caller already has Shell IR. *)
 val validate_command_paths
   :  ?keeper_id:string
   -> ?base_path:string
@@ -110,13 +125,13 @@ val validate_command_paths
   -> string
   -> (unit, string) result
 
-(** Return path values in [cmd] that should have their containing sandbox
-    materialized before execution. This includes explicit existing-directory
+(** Return literal path values in [cmd] that should have their containing
+    sandbox materialized before execution. This includes explicit existing-directory
     requirements (for example [git -C <dir>] and [--work-tree=<dir>]) and
     path arguments to read/list/search commands such as [cat], [find], [ls],
     and [rg]. Callers may use this to repair an expected sandbox directory
     before delegating to {!validate_command_paths}; the validator remains
-    the authority for blocking unsafe syntax and out-of-sandbox paths. *)
+    the authority for out-of-sandbox paths. *)
 val existing_dir_path_values : string -> string list
 
 (** {1 Bash safety classifiers} *)
@@ -136,7 +151,7 @@ val is_git_branch_switch : string -> bool
 (** [true] iff [cmd] is destructive at the bash layer: [rm -rf],
     forced [git push --force] / [git reset --hard], [git clean -fd],
     or anything {!Eval_gate.detect_destructive} flags.  Distinct from
-    {!classify_destructive} (Gate_diff_types) which classifies the
+    {!classify_destructive} (Shell_safety_types) which classifies the
     *kind* of destruction; this returns a boolean for the bash gate. *)
 val is_destructive_bash_operation : string -> bool
 
@@ -164,6 +179,12 @@ val truncate_for_log : ?max_len:int -> string -> string
     operator-visible error string. *)
 val attribution_of_validation : cmd:string -> (unit, block_reason) result -> Attribution.t
 
+(** Effective [shell_exec] timeout after applying load-bearing timeout floors.
+    Caller-supplied short timeouts are preserved for trivial commands, but
+    git, recursive scans, and local Dune wrapper invocations are floored at the
+    shared [Tool_dispatch] timeout floor. *)
+val effective_shell_exec_timeout_sec : command:string -> requested:float -> float
+
 (** {1 OAS tool factories} *)
 
 (** Closed sum classifying the producer error categories emitted by the
@@ -188,8 +209,8 @@ val tool_exec_error_kind_to_string : tool_exec_error_kind -> string
     Receives the tool name, success flag, elapsed wall-clock duration,
     and (on failure) a categorized [error_kind] tag plus the
     operator-visible [error_message].  Both error fields are
-    [None] on success and on legacy failure paths that have not yet
-    been wired (the consumer should treat absence as
+    [None] on success and on failure paths that have not yet been
+    wired (the consumer should treat absence as
     [error_kind="unknown"] in metric labels).
 
     The categorized tags this module produces are:
@@ -233,43 +254,6 @@ val make_readonly_tools
   -> ?on_exec:tool_exec_observer
   -> unit
   -> Agent_sdk.Tool.t list
-
-(** {1 Shadow AST gate observability} *)
-
-(** Parse [cmd] with {!Masc_exec_bash_parser.Bash.parse_string} and
-    return the typed outcome — primary classification surface.
-    Downstream histogram dispatch consumes the variant exhaustively
-    so adding a new {!Masc_exec.Parsed.reason_too_complex} arm is a
-    compile-time forcing function, not a silent "other"-bucket
-    landing.  Never raises; the parser catches every internal
-    exception. *)
-val shadow_parse_outcome_kind : string -> parse_outcome_kind
-
-(** Stable string rendering of {!shadow_parse_outcome_kind} — the
-    tag wording dashboards / runbook greps already track:
-
-    - ["parsed_simple"] — grammar accepts the command
-    - ["parse_error"] — Menhir/Lex error
-    - ["parse_aborted:<reason>"] — timeout/depth/token-limit
-    - ["too_complex:<reason>"] — recognised-but-unsupported construct
-
-    Computed via {!shadow_parse_outcome_kind} so the wording cannot
-    drift between this function and {!Legendary_counters}. *)
-val shadow_parse_outcome : string -> string
-
-(** Pair the supplied [legacy] verdict with the typed
-    {!shadow_parse_outcome_kind} for [cmd].  Polymorphic in [legacy] —
-    callers pass either the typed {!legacy_verdict} or the boolean
-    form used by older test sites.  Pure (no side effects); dashboards
-    consume the tuple to spot legacy/shadow drift without two parse
-    passes. *)
-val cross_check_command : legacy:'a -> string -> 'a * parse_outcome_kind
-
-(** Run both the legacy substring gate and the shadow AST gate on
-    [cmd], returning their reconciliation outcome alongside both
-    verdicts.  Wraps {!classify_legacy} / {!classify_shadow} (private)
-    and {!diff_of_verdicts} (Gate_diff_types). *)
-val diff_command : string -> gate_diff * legacy_verdict * shadow_verdict
 
 (** {1 Gh CLI cascade} *)
 

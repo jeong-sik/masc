@@ -116,7 +116,7 @@ Minimal candidate shape:
   "success_count": 3,
   "failure_count": 1,
   "confidence": 0.75,
-  "applicable_tools": ["masc_task_claim", "masc_goal_review"],
+  "applicable_tools": ["masc_task_claim", "masc_goal_transition"],
   "promotion_state": "candidate",
   "risk_notes": ["requires repo write approval"]
 }

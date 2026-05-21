@@ -84,7 +84,7 @@ Pair with masc_workflow_guide for next-step recommendations.";
              `List
                (List.map (fun s -> `String s) assertion_kind_enum_strings));
           ]);
-          ("description", `String "List of state assertions to check. Each returns true/false with a fix hint if false. Canonical readiness key is 'room_set'; 'project_ready' and 'namespace_ready' are accepted aliases at the parser layer.");
+          ("description", `String "List of state assertions to check. Each returns true/false with a fix hint if false. Canonical readiness key is 'room_set'.");
         ]);
       ]);
       ("required", `List [`String "assertions"]);

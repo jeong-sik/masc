@@ -180,9 +180,22 @@ let is_required_tool_contract_violation (err : Agent_sdk.Error.sdk_error) : bool
 let message_looks_like_capacity_backpressure detail =
   let lower = String.lowercase_ascii detail in
   string_contains_substring ~needle:"client capacity" lower
-  || string_contains_substring ~needle:"capacity_exhausted" lower
   || string_contains_substring ~needle:"capacity exhausted" lower
   || string_contains_substring ~needle:"local_resource_exhaustion" lower
+
+let message_looks_like_gateway_backpressure detail =
+  let lower = String.lowercase_ascii detail in
+  string_contains_substring ~needle:"server error 524" lower
+  || string_contains_substring ~needle:"error code: 524" lower
+  || string_contains_substring ~needle:"status 524" lower
+  || string_contains_substring ~needle:"status=524" lower
+  || string_contains_substring ~needle:"cloudflare gateway timeout" lower
+
+(* 524 is Cloudflare's "origin responded too slowly" timeout. At keeper
+   orchestration level this means the current provider lane is saturated or
+   unhealthy enough that rotating/cooling it as backpressure is more useful
+   than lumping it into a generic server_error bucket. *)
+let is_gateway_backpressure_status status = status = 524
 
 let is_auto_recoverable_cascade_exhausted_error (err : Agent_sdk.Error.sdk_error) : bool =
   match Keeper_turn_driver.classify_masc_internal_error err with
@@ -199,6 +212,7 @@ let is_auto_recoverable_cascade_exhausted_error (err : Agent_sdk.Error.sdk_error
          { reason = Keeper_types.Other_detail detail; _ }) ->
       Keeper_turn_driver.message_looks_like_cli_wrapped_hard_quota detail
       || Keeper_turn_driver.message_looks_like_cli_wrapped_max_turns detail
+      || message_looks_like_gateway_backpressure detail
       || message_looks_like_capacity_backpressure detail
   | Some (Keeper_turn_driver.Capacity_backpressure _) ->
       true
@@ -213,6 +227,10 @@ let is_auto_recoverable_cascade_exhausted_error (err : Agent_sdk.Error.sdk_error
   | Some (Keeper_turn_driver.Oas_timeout_budget _)
   | Some (Keeper_turn_driver.Max_tokens_ceiling_violation _)
   | Some (Keeper_turn_driver.Ambiguous_post_commit _)
+  (* RFC-0159 Phase A: opaque internal failures. *)
+  | Some (Keeper_turn_driver.Internal_unhandled_exception _)
+  | Some (Keeper_turn_driver.Internal_bridge_exception _)
+  | Some (Keeper_turn_driver.Internal_contract_rejected _)
   | None ->
       false
 
@@ -229,6 +247,10 @@ let is_resumable_cli_session_error (err : Agent_sdk.Error.sdk_error) : bool =
   | Some (Keeper_turn_driver.Oas_timeout_budget _)
   | Some (Keeper_turn_driver.Max_tokens_ceiling_violation _)
   | Some (Keeper_turn_driver.Ambiguous_post_commit _)
+  (* RFC-0159 Phase A: opaque internal failures. *)
+  | Some (Keeper_turn_driver.Internal_unhandled_exception _)
+  | Some (Keeper_turn_driver.Internal_bridge_exception _)
+  | Some (Keeper_turn_driver.Internal_contract_rejected _)
   | None ->
       false
 
@@ -254,7 +276,7 @@ type degraded_retry_reason =
   | Cascade_candidates_filtered
   | Required_tool_contract_violation
   | Cascade_exhausted
-  | Capacity_exhausted
+  | Capacity_backpressure
   | Rate_limit
   | Server_error
   | Auth_error
@@ -269,7 +291,7 @@ let degraded_retry_reason_to_string = function
   | Cascade_candidates_filtered -> "cascade_candidates_filtered"
   | Required_tool_contract_violation -> "required_tool_contract_violation"
   | Cascade_exhausted -> "cascade_exhausted"
-  | Capacity_exhausted -> "capacity_backpressure"
+  | Capacity_backpressure -> "capacity_backpressure"
   | Rate_limit -> "rate_limit"
   | Server_error -> "server_error"
   | Auth_error -> "auth_error"
@@ -342,7 +364,7 @@ let degraded_retry_after_recoverable_error
     | Some (Keeper_turn_driver.Turn_timeout _) ->
         local_recovery_retry Turn_timeout
     | Some (Keeper_turn_driver.Capacity_backpressure _) ->
-        local_recovery_retry Capacity_exhausted
+        local_recovery_retry Capacity_backpressure
     | Some
         (Keeper_turn_driver.Cascade_exhausted
            { reason = Keeper_types.Candidates_filtered_after_cycles; _ }) ->
@@ -359,6 +381,11 @@ let degraded_retry_after_recoverable_error
     | Some
         (Keeper_turn_driver.Cascade_exhausted
            { reason = Keeper_types.Other_detail detail; _ })
+      when message_looks_like_gateway_backpressure detail ->
+        local_recovery_retry Capacity_backpressure
+    | Some
+        (Keeper_turn_driver.Cascade_exhausted
+           { reason = Keeper_types.Other_detail detail; _ })
       when message_looks_like_capacity_backpressure detail ->
         local_recovery_retry Cascade_exhausted
     | Some (Keeper_turn_driver.Cascade_exhausted _)
@@ -367,6 +394,11 @@ let degraded_retry_after_recoverable_error
     | Some (Keeper_turn_driver.Admission_queue_rejected _)
     | Some (Keeper_turn_driver.Max_tokens_ceiling_violation _)
     | Some (Keeper_turn_driver.Ambiguous_post_commit _)
+    (* RFC-0159 Phase A: opaque internal failures have no
+       local-recovery retry mapping. *)
+    | Some (Keeper_turn_driver.Internal_unhandled_exception _)
+    | Some (Keeper_turn_driver.Internal_bridge_exception _)
+    | Some (Keeper_turn_driver.Internal_contract_rejected _)
     | None ->
         None
 
@@ -388,7 +420,7 @@ let recoverable_cascade_failure_reason (err : Agent_sdk.Error.sdk_error) =
     | Some (Keeper_turn_driver.Turn_timeout _) ->
         Some Turn_timeout
     | Some (Keeper_turn_driver.Capacity_backpressure _) ->
-        Some Capacity_exhausted
+        Some Capacity_backpressure
     | Some
         (Keeper_turn_driver.Cascade_exhausted
            { reason = Keeper_types.Candidates_filtered_after_cycles; _ }) ->
@@ -402,6 +434,11 @@ let recoverable_cascade_failure_reason (err : Agent_sdk.Error.sdk_error) =
            { reason = Keeper_types.Other_detail detail; _ })
       when Keeper_turn_driver.message_looks_like_cli_wrapped_hard_quota detail ->
         Some Hard_quota
+    | Some
+        (Keeper_turn_driver.Cascade_exhausted
+           { reason = Keeper_types.Other_detail detail; _ })
+      when message_looks_like_gateway_backpressure detail ->
+        Some Capacity_backpressure
     | Some
         (Keeper_turn_driver.Cascade_exhausted
            { reason = Keeper_types.Other_detail detail; _ })
@@ -420,7 +457,12 @@ let recoverable_cascade_failure_reason (err : Agent_sdk.Error.sdk_error) =
     | Some (Keeper_turn_driver.Accept_rejected _)
     | Some (Keeper_turn_driver.Admission_queue_rejected _)
     | Some (Keeper_turn_driver.Max_tokens_ceiling_violation _)
-    | Some (Keeper_turn_driver.Ambiguous_post_commit _) ->
+    | Some (Keeper_turn_driver.Ambiguous_post_commit _)
+    (* RFC-0159 Phase A: typed [Internal_*] variants are not cascade-rotation
+       reasons; they expose previously-opaque raw exception payloads.  *)
+    | Some (Keeper_turn_driver.Internal_unhandled_exception _)
+    | Some (Keeper_turn_driver.Internal_bridge_exception _)
+    | Some (Keeper_turn_driver.Internal_contract_rejected _) ->
         None
     | None ->
         (* Status-code-aware cascade rotation: raw provider API errors that are
@@ -442,6 +484,11 @@ let recoverable_cascade_failure_reason (err : Agent_sdk.Error.sdk_error) =
         (match err with
          | Agent_sdk.Error.Api (Llm_provider.Retry.RateLimited _) ->
              Some Rate_limit
+         | Agent_sdk.Error.Api (Llm_provider.Retry.Overloaded _) ->
+             Some Capacity_backpressure
+         | Agent_sdk.Error.Api (Llm_provider.Retry.ServerError { status; _ })
+           when is_gateway_backpressure_status status ->
+             Some Capacity_backpressure
          | Agent_sdk.Error.Api (Llm_provider.Retry.ServerError { status; _ })
            when status >= 500 ->
              Some Server_error
@@ -451,9 +498,12 @@ let recoverable_cascade_failure_reason (err : Agent_sdk.Error.sdk_error) =
              (Llm_provider.Error.RateLimit _) ->
              Some Rate_limit
          | Agent_sdk.Error.Provider (Llm_provider.Error.CapacityExhausted _) ->
-             Some Capacity_exhausted
+             Some Capacity_backpressure
          | Agent_sdk.Error.Provider (Llm_provider.Error.HardQuota _) ->
              Some Hard_quota
+         | Agent_sdk.Error.Provider (Llm_provider.Error.ServerError { code; _ })
+           when is_gateway_backpressure_status code ->
+             Some Capacity_backpressure
          | Agent_sdk.Error.Provider (Llm_provider.Error.ServerError { code; transient; _ })
            when transient || code >= 500 ->
              Some Server_error
@@ -476,7 +526,6 @@ let recoverable_cascade_failure_reason (err : Agent_sdk.Error.sdk_error) =
          (* Sub-500 server errors (4xx already handled above for AuthError /
             RateLimited) are not classified as recoverable cascade failures. *)
          | Agent_sdk.Error.Api (Llm_provider.Retry.ServerError _)
-         | Agent_sdk.Error.Api (Llm_provider.Retry.Overloaded _)
          | Agent_sdk.Error.Api (Llm_provider.Retry.InvalidRequest _)
          | Agent_sdk.Error.Api (Llm_provider.Retry.NotFound _)
          | Agent_sdk.Error.Api (Llm_provider.Retry.ContextOverflow _)
@@ -688,6 +737,12 @@ let should_warn_keeper_cycle_failed (err : Agent_sdk.Error.sdk_error) : bool =
   | Some (Keeper_turn_driver.Turn_timeout _)
   | Some (Keeper_turn_driver.Max_tokens_ceiling_violation _)
   | Some (Keeper_turn_driver.Ambiguous_post_commit _)
+  (* RFC-0159 Phase A: opaque internal failures should not trigger the
+     keeper-cycle-failed WARN by themselves; the surrounding handler
+     already logs the exception detail. *)
+  | Some (Keeper_turn_driver.Internal_unhandled_exception _)
+  | Some (Keeper_turn_driver.Internal_bridge_exception _)
+  | Some (Keeper_turn_driver.Internal_contract_rejected _)
   | None ->
     false
 
@@ -729,7 +784,11 @@ let is_ambiguous_side_effect_error (err : Agent_sdk.Error.sdk_error) : bool =
   | Some (Keeper_turn_driver.Admission_queue_timeout _)
   | Some (Keeper_turn_driver.Turn_timeout _)
   | Some (Keeper_turn_driver.Oas_timeout_budget _)
-  | Some (Keeper_turn_driver.Max_tokens_ceiling_violation _) -> false
+  | Some (Keeper_turn_driver.Max_tokens_ceiling_violation _)
+  (* RFC-0159 Phase A: opaque internal failures are unambiguous failures. *)
+  | Some (Keeper_turn_driver.Internal_unhandled_exception _)
+  | Some (Keeper_turn_driver.Internal_bridge_exception _)
+  | Some (Keeper_turn_driver.Internal_contract_rejected _) -> false
 
 let reclassify_error_after_side_effect
     ~(tool_names : string list)
@@ -906,7 +965,11 @@ let is_cascade_exhausted_error (err : Agent_sdk.Error.sdk_error) : bool =
   | Some (Keeper_turn_driver.Oas_timeout_budget _)
   | Some (Keeper_turn_driver.Turn_timeout _)
   | Some (Keeper_turn_driver.Max_tokens_ceiling_violation _)
-  | Some (Keeper_turn_driver.Ambiguous_post_commit _) -> false
+  | Some (Keeper_turn_driver.Ambiguous_post_commit _)
+  (* RFC-0159 Phase A: opaque internal failures are not cascade exhaustion. *)
+  | Some (Keeper_turn_driver.Internal_unhandled_exception _)
+  | Some (Keeper_turn_driver.Internal_bridge_exception _)
+  | Some (Keeper_turn_driver.Internal_contract_rejected _) -> false
   | None -> false
 
 (** [true] when the rotation-cap fast-fail should fire for a

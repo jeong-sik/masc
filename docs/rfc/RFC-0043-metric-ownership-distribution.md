@@ -1,3 +1,11 @@
+---
+title: Distribute Prometheus metric ownership to domain modules
+rfc: 0043
+status: Active
+created: 2026-05-08
+implementation_prs: []
+---
+
 # RFC-0043: Distribute Prometheus metric ownership to domain modules
 
 - **Status**: Draft

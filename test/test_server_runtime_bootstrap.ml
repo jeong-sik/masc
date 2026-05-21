@@ -587,20 +587,6 @@ let test_storage_enforcement_fallback_reason () =
     "MASC_STORAGE_TYPE=memory requested; filesystem-only bootstrap enforced as filesystem"
     (Yojson.Safe.Util.(json |> member "fallback_reason" |> to_string))
 
-let test_default_oas_cascade_timeout_tracks_keeper_timeout () =
-  with_env "OAS_CASCADE_MODEL_TIMEOUT_SEC" None @@ fun () ->
-  with_env "MASC_KEEPER_OAS_TIMEOUT_SEC" (Some "300") @@ fun () ->
-  Server_runtime_bootstrap.ensure_default_oas_cascade_timeout_env ();
-  Alcotest.(check string) "derived timeout reserves room for fallbacks" "60"
-    (Sys.getenv "OAS_CASCADE_MODEL_TIMEOUT_SEC")
-
-let test_default_oas_cascade_timeout_keeps_explicit_override () =
-  with_env "OAS_CASCADE_MODEL_TIMEOUT_SEC" (Some "45") @@ fun () ->
-  with_env "MASC_KEEPER_OAS_TIMEOUT_SEC" (Some "300") @@ fun () ->
-  Server_runtime_bootstrap.ensure_default_oas_cascade_timeout_env ();
-  Alcotest.(check string) "explicit override wins" "45"
-    (Sys.getenv "OAS_CASCADE_MODEL_TIMEOUT_SEC")
-
 let test_bootstrap_base_path_config_root_copies_shared_seed_but_not_keepers () =
   with_temp_dir "startup-config-bootstrap" (fun dir ->
       let repo = Filename.concat dir "repo" in
@@ -1019,6 +1005,7 @@ let test_health_json_surfaces_durable_paused_keepers () =
           let paused = json |> member "paused_keepers" in
           let fd_pressure = json |> member "keeper_fd_pressure" in
           let fd_accountant = json |> member "fd_accountant" in
+          let runtime_truth = json |> member "runtime_truth" in
           let fleet_safety = json |> member "keeper_fleet_safety" in
           let reaction_ledger = json |> member "keeper_reaction_ledger" in
           let durable_names =
@@ -1068,6 +1055,25 @@ let test_health_json_surfaces_durable_paused_keepers () =
           ignore (fd_accountant |> member "fd_open" |> to_int);
           ignore (fd_accountant |> member "fd_limit" |> to_int);
           ignore (fd_accountant |> member "pressure_active" |> to_bool);
+          Alcotest.(check string) "runtime truth schema"
+            "masc.runtime_truth.v1"
+            (runtime_truth |> member "schema" |> to_string);
+          Alcotest.(check string) "runtime truth source"
+            "running_process"
+            (runtime_truth |> member "source" |> to_string);
+          Alcotest.(check string) "runtime truth effective base path"
+            dir
+            (runtime_truth |> member "effective_base_path" |> to_string);
+          Alcotest.(check string) "runtime truth effective masc root"
+            (Filename.concat dir ".masc")
+            (runtime_truth |> member "effective_masc_root" |> to_string);
+          ignore (runtime_truth |> member "process_cwd" |> to_string);
+          ignore (runtime_truth |> member "executable_path" |> to_string);
+          ignore (runtime_truth |> member "executable_dir" |> to_string);
+          ignore (runtime_truth |> member "keeper_fibers" |> to_int);
+          ignore (runtime_truth |> member "fd_open" |> to_int);
+          ignore (runtime_truth |> member "fd_limit" |> to_int);
+          ignore (runtime_truth |> member "fd_pressure_active" |> to_bool);
           let fd_accountant_per_kind =
             fd_accountant |> member "per_kind" |> to_list
           in
@@ -1117,6 +1123,63 @@ let test_health_json_surfaces_durable_paused_keepers () =
           Alcotest.(check bool) "health reaction ledger asks for operator action"
             true
             (reaction_ledger |> member "operator_action_required" |> to_bool)))
+
+let test_health_json_keeps_timeout_pause_without_policy_manual () =
+  with_temp_dir "health-timeout-paused-without-policy" (fun dir ->
+    let config_root = make_config_root dir in
+    with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
+    let previous_state = !Server_auth.server_state in
+    Config_dir_resolver.reset ();
+    Fun.protect
+      ~finally:(fun () ->
+        Server_auth.server_state := previous_state;
+        Config_dir_resolver.reset ())
+      (fun () ->
+        let state = Mcp_server.create_state ~base_path:dir in
+        Server_auth.server_state := Some state;
+        let config = state.Mcp_server.room_config in
+        let timeout_paused =
+          { (make_keeper_meta
+               ~name:"timeout-without-policy"
+               ~trace_id:"trace-timeout-without-policy"
+               ~paused:true
+               ())
+            with
+            auto_resume_after_sec = None;
+            runtime =
+              { (make_keeper_meta ()).runtime with
+                last_blocker =
+                  Some
+                    (Keeper_types.blocker_info_of_class
+                       ~detail:"turn_timeout"
+                       Keeper_types.Turn_timeout);
+              };
+          }
+        in
+        write_keeper_meta_exn config timeout_paused;
+        let request = Httpun.Request.create `GET "/health" in
+        let json = Server_routes_http_runtime.make_health_json request in
+        let open Yojson.Safe.Util in
+        let paused_details =
+          json |> member "paused_keepers" |> member "details" |> to_list
+        in
+        let detail =
+          paused_details
+          |> List.find (fun row ->
+               row |> member "name" |> to_string = "timeout-without-policy")
+        in
+        Alcotest.(check string) "pause kind" "operator_paused"
+          (detail |> member "pause_kind" |> to_string);
+        Alcotest.(check (option (float 0.0001))) "effective auto resume"
+          None
+          (detail |> member "auto_resume_after_sec" |> to_float_option);
+        Alcotest.(check (option (float 0.0001))) "persisted auto resume remains absent"
+          None
+          (detail |> member "persisted_auto_resume_after_sec" |> to_float_option);
+        Alcotest.(check bool) "auto resume source is absent" true
+          (Yojson.Safe.Util.member "auto_resume_source" detail = `Null);
+        Alcotest.(check string) "last blocker class" "turn_timeout"
+          (detail |> member "last_blocker_class" |> to_string)))
 
 let test_health_json_degrades_when_reaction_capacity_below_target () =
   with_temp_dir "health-reaction-capacity-below-target" (fun dir ->
@@ -1352,6 +1415,10 @@ let test_health_response_full_query_uses_snapshot_cache () =
   let refreshed = Server_routes_http_runtime.make_health_response_json request in
   Alcotest.(check string) "refreshed snapshot is ready" "ready"
     (refreshed |> member "full_health_snapshot" |> member "status" |> to_string);
+  Alcotest.(check bool) "ready snapshot has no stale reason" true
+    (refreshed |> member "full_health_snapshot" |> member "stale_reason" = `Null);
+  Alcotest.(check bool) "ready snapshot has no stale age" true
+    (refreshed |> member "full_health_snapshot" |> member "stale_age_ms" = `Null);
   Alcotest.(check bool) "refreshed full health keeps reaction ledger" true
     (match refreshed |> member "keeper_reaction_ledger" with
      | `Assoc _ -> true
@@ -1399,6 +1466,12 @@ let test_full_health_refresh_timeout_preserves_last_snapshot () =
      |> to_bool);
   Alcotest.(check string) "timeout error is surfaced" (Printexc.to_string timeout_error)
     (after |> member "full_health_snapshot" |> member "error" |> to_string);
+  Alcotest.(check string) "timeout stale reason" "last_good_refresh_timeout"
+    (after |> member "full_health_snapshot" |> member "stale_reason" |> to_string);
+  Alcotest.(check bool) "timeout stale age is surfaced" true
+    (match after |> member "full_health_snapshot" |> member "stale_age_ms" with
+     | `Int age -> age >= 0
+     | _ -> false);
   Alcotest.(check bool) "timeout records stale-since timestamp" true
     (match after |> member "full_health_snapshot" |> member "stale_since_ts" with
      | `Float _ | `Int _ -> true
@@ -1426,6 +1499,12 @@ let test_full_health_cold_refresh_timeout_is_timeout_not_error () =
   Alcotest.(check bool) "cold timeout has no last good" false
     (after |> member "full_health_snapshot" |> member "last_good_available"
      |> to_bool);
+  Alcotest.(check string) "cold timeout stale reason" "refresh_timeout"
+    (after |> member "full_health_snapshot" |> member "stale_reason" |> to_string);
+  Alcotest.(check bool) "cold timeout stale age is surfaced" true
+    (match after |> member "full_health_snapshot" |> member "stale_age_ms" with
+     | `Int age -> age >= 0
+     | _ -> false);
   Alcotest.(check bool) "cold timeout marks component timeout" true
     (after |> member "cdal" |> member "component_timed_out" |> to_bool)
 
@@ -2877,12 +2956,6 @@ let () =
             "storage enforcement fallback reason is visible"
             `Quick test_storage_enforcement_fallback_reason;
           Alcotest.test_case
-            "default OAS cascade timeout tracks keeper timeout"
-            `Quick test_default_oas_cascade_timeout_tracks_keeper_timeout;
-          Alcotest.test_case
-            "default OAS cascade timeout keeps explicit override"
-            `Quick test_default_oas_cascade_timeout_keeps_explicit_override;
-          Alcotest.test_case
             "bootstrap base-path config copies shared seed only"
             `Quick
             test_bootstrap_base_path_config_root_copies_shared_seed_but_not_keepers;
@@ -2969,6 +3042,9 @@ let () =
           Alcotest.test_case
             "health json surfaces durable paused keepers"
             `Quick test_health_json_surfaces_durable_paused_keepers;
+          Alcotest.test_case
+            "health json keeps timeout pause without policy manual"
+            `Quick test_health_json_keeps_timeout_pause_without_policy_manual;
           Alcotest.test_case
             "health json degrades when reaction capacity is below target"
             `Quick test_health_json_degrades_when_reaction_capacity_below_target;

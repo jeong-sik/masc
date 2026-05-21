@@ -77,24 +77,6 @@ let test_resolve_join_state_unknown_alias_stays_false () =
   in
   Alcotest.(check bool) "non-keeper input stays unjoined" false joined
 
-let test_should_read_legacy_persisted_agent_name () =
-  let should_read =
-    Masc_mcp.Mcp_server_eio_caller_identity
-    .should_read_legacy_persisted_agent_name
-  in
-  Alcotest.(check bool)
-    "ephemeral fallback reads legacy state"
-    true
-    (should_read ~has_explicit_agent_name:false ~agent_name:"agent-12345678");
-  Alcotest.(check bool)
-    "stable nickname skips legacy read"
-    false
-    (should_read ~has_explicit_agent_name:false ~agent_name:"codex-swift-fox");
-  Alcotest.(check bool)
-    "explicit agent name skips legacy read"
-    false
-    (should_read ~has_explicit_agent_name:true ~agent_name:"agent-12345678")
-
 let () =
   Alcotest.run
     "Mcp_server_eio_join_state"
@@ -114,8 +96,5 @@ let () =
         ; ( "resolve_join_state unknown alias stays false"
           , `Quick
           , test_resolve_join_state_unknown_alias_stays_false )
-        ; ( "legacy persisted agent read only for ephemeral names"
-          , `Quick
-          , test_should_read_legacy_persisted_agent_name )
         ] )
     ]

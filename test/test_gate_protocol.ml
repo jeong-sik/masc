@@ -69,7 +69,7 @@ let test_inbound_of_json_basic () =
       ("channel_user_id", `String "u1");
       ("channel_user_name", `String "alice");
       ("channel_room_id", `String "r1");
-      ("keeper_name", `String "luna");
+      ("destination_id", `String "luna");
       ("content", `String "hi");
       ("idempotency_key", `String "k1");
     ]
@@ -87,7 +87,7 @@ let test_inbound_of_json_normalizes_case () =
       ("channel_user_id", `String "u1");
       ("channel_user_name", `String "bob");
       ("channel_room_id", `String "r1");
-      ("keeper_name", `String "luna");
+      ("destination_id", `String "luna");
       ("content", `String "hello");
       ("idempotency_key", `String "k2");
     ]
@@ -103,7 +103,7 @@ let test_inbound_of_json_with_metadata () =
       ("channel_user_id", `String "u1");
       ("channel_user_name", `String "carol");
       ("channel_room_id", `String "r1");
-      ("keeper_name", `String "luna");
+      ("destination_id", `String "luna");
       ("content", `String "hey");
       ("idempotency_key", `String "k3");
       ("metadata", `Assoc [("x-channel-guild-id", `String "g1"); ("num", `Int 42)]);
@@ -136,7 +136,7 @@ let test_inbound_of_json_accepts_destination_id () =
   | Ok msg -> check string "destination_id maps to keeper_name" "luna" msg.keeper_name
   | Error e -> fail e
 
-let test_inbound_of_json_destination_id_wins_over_keeper_name () =
+let test_inbound_of_json_ignores_legacy_keeper_name_when_destination_id_present () =
   let json =
     `Assoc [
       ("channel", `String "discord");
@@ -151,10 +151,10 @@ let test_inbound_of_json_destination_id_wins_over_keeper_name () =
   in
   match Gate_protocol.inbound_of_json json with
   | Ok msg ->
-      check string "destination_id takes precedence" "new-name" msg.keeper_name
+      check string "destination_id is canonical" "new-name" msg.keeper_name
   | Error e -> fail e
 
-let test_inbound_of_json_keeper_name_still_works () =
+let test_inbound_of_json_rejects_legacy_keeper_name_only () =
   let json =
     `Assoc [
       ("channel", `String "discord");
@@ -168,7 +168,13 @@ let test_inbound_of_json_keeper_name_still_works () =
   in
   match Gate_protocol.inbound_of_json json with
   | Ok msg ->
-      check string "keeper_name alone still routes" "legacy-only" msg.keeper_name
+      check string "legacy keeper_name is not a destination" "" msg.keeper_name;
+      (match
+         Gate_protocol.validate ~max_content_length:4000 ~dedup_check:no_dedup msg
+       with
+       | Error Gate_protocol.Empty_keeper_name -> ()
+       | Ok () -> fail "legacy keeper_name-only payload should not validate"
+       | Error _ -> fail "expected Empty_keeper_name")
   | Error e -> fail e
 
 let test_outbound_emits_destination_id () =
@@ -247,8 +253,10 @@ let () =
           test_case "inbound with metadata" `Quick test_inbound_of_json_with_metadata;
           test_case "inbound invalid" `Quick test_inbound_of_json_invalid;
           test_case "inbound accepts destination_id" `Quick test_inbound_of_json_accepts_destination_id;
-          test_case "destination_id wins over keeper_name" `Quick test_inbound_of_json_destination_id_wins_over_keeper_name;
-          test_case "inbound keeper_name still works" `Quick test_inbound_of_json_keeper_name_still_works;
+          test_case "destination_id ignores legacy keeper_name" `Quick
+            test_inbound_of_json_ignores_legacy_keeper_name_when_destination_id_present;
+          test_case "inbound rejects legacy keeper_name only" `Quick
+            test_inbound_of_json_rejects_legacy_keeper_name_only;
           test_case "outbound emits destination_id" `Quick test_outbound_emits_destination_id;
           test_case "outbound roundtrip" `Quick test_outbound_to_json_roundtrip;
           test_case "error_json" `Quick test_error_json;

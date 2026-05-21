@@ -21,11 +21,11 @@ TOOL_CALLS_DIR="${BASE_PATH}/.masc/tool_calls"
 LEGENDARY_BASH_COUNTERS_URL="${MASC_LEGENDARY_BASH_COUNTERS_URL:-}"
 if [ -z "$LEGENDARY_BASH_COUNTERS_URL" ]; then
   if [ -n "${MASC_HTTP_BASE_URL:-}" ]; then
-    LEGENDARY_BASH_COUNTERS_URL="${MASC_HTTP_BASE_URL%/}/api/v1/legendary_bash/shadow_counters"
+    LEGENDARY_BASH_COUNTERS_URL="${MASC_HTTP_BASE_URL%/}/api/v1/legendary_bash/counters"
   else
     MASC_COUNTER_HOST="${MASC_HOST:-127.0.0.1}"
     MASC_COUNTER_PORT="${MASC_HTTP_PORT:-${MASC_PORT:-8935}}"
-    LEGENDARY_BASH_COUNTERS_URL="http://${MASC_COUNTER_HOST}:${MASC_COUNTER_PORT}/api/v1/legendary_bash/shadow_counters"
+    LEGENDARY_BASH_COUNTERS_URL="http://${MASC_COUNTER_HOST}:${MASC_COUNTER_PORT}/api/v1/legendary_bash/counters"
   fi
 fi
 LEGENDARY_BASH_COUNTERS_TIMEOUT_SEC="${MASC_LEGENDARY_BASH_COUNTERS_TIMEOUT_SEC:-2}"
@@ -89,7 +89,6 @@ def category:
   elif (combined | test("old_string not found"; "i")) then "edit_old_string_not_found"
   elif (combined | test("old_string found [0-9]+ times|Use replace_all=true"; "i")) then "edit_ambiguous_match"
   elif (combined | test("path_outside_sandbox|Write restricted to allowed sandboxes|Cross-agent playground"; "i")) then "path_outside_sandbox"
-  elif (combined | test("Path syntax blocked|shell quoting, globbing, brace expansion|Glob expansion|Brace expansion"; "i")) then "path_syntax_blocked"
   elif (combined | test("is a MASC tool, not a shell command|tool_invoked_as_shell_command|`?gh`? is NOT available in the keeper sandbox|Use keeper_pr_|For pull-request work use keeper_pr_"; "i")) then "wrong_tool_channel"
   elif (combined | test("command.*not.*allowed|not allowlisted|not in allowlist|not permitted by.*allowlist"; "i")) then "command_not_allowed"
   elif (combined | test("pipe_or_redirect|Bash accepts one direct command|keeper_bash accepts one direct command|keeper_bash_command_shape_blocked|2>/dev/null|2> /dev/null|2>>/dev/null|2>&1|\\| head|\\| grep|\\| sed|\\| python|&&|\\|\\|"; "i")) then "shape_block:pipe_or_redirect"
@@ -130,7 +129,6 @@ def category:
   elif (combined | test("old_string not found"; "i")) then "edit_old_string_not_found"
   elif (combined | test("old_string found [0-9]+ times|Use replace_all=true"; "i")) then "edit_ambiguous_match"
   elif (combined | test("path_outside_sandbox|Write restricted to allowed sandboxes|Cross-agent playground"; "i")) then "path_outside_sandbox"
-  elif (combined | test("Path syntax blocked|shell quoting, globbing, brace expansion|Glob expansion|Brace expansion"; "i")) then "path_syntax_blocked"
   elif (combined | test("is a MASC tool, not a shell command|tool_invoked_as_shell_command|`?gh`? is NOT available in the keeper sandbox|Use keeper_pr_|For pull-request work use keeper_pr_"; "i")) then "wrong_tool_channel"
   elif (combined | test("command.*not.*allowed|not allowlisted|not in allowlist|not permitted by.*allowlist"; "i")) then "command_not_allowed"
   elif (combined | test("pipe_or_redirect|Bash accepts one direct command|keeper_bash accepts one direct command|keeper_bash_command_shape_blocked|2>/dev/null|2> /dev/null|2>>/dev/null|2>&1|\\| head|\\| grep|\\| sed|\\| python|&&|\\|\\|"; "i")) then "shape_block:pipe_or_redirect"
@@ -224,11 +222,6 @@ else
     echo "url	${LEGENDARY_BASH_COUNTERS_URL}"
     echo "$COUNTERS_JSON" | jq -r '
       def n($key): (.[$key] // 0);
-      "typed_advisor_outcome\tcount",
-      ("allow\t" + (n("typed_advisor_allow") | tostring)),
-      ("reject\t" + (n("typed_advisor_reject") | tostring)),
-      ("cannot_parse\t" + (n("typed_advisor_cannot_parse") | tostring)),
-      "",
       "shell_gate_caller\tallow\treject\tcannot_parse",
       ("worker_dev_tools\t"
        + (n("shell_gate_worker_dev_tools_allow") | tostring) + "\t"
@@ -241,18 +234,7 @@ else
       ("keeper_shell_bash\t"
        + (n("shell_gate_keeper_shell_bash_allow") | tostring) + "\t"
        + (n("shell_gate_keeper_shell_bash_reject") | tostring) + "\t"
-       + (n("shell_gate_keeper_shell_bash_cannot_parse") | tostring)),
-      "",
-      "gate_diff_bucket\tcount",
-      ("total\t" + (n("gate_diff_total") | tostring)),
-      ("agree\t" + (n("gate_diff_agree") | tostring)),
-      ("legacy_allow_shadow_deny\t" + (n("gate_diff_legacy_allow_shadow_deny") | tostring)),
-      ("legacy_deny_shadow_allow\t" + (n("gate_diff_legacy_deny_shadow_allow") | tostring)),
-      ("shadow_cannot_parse\t" + (n("gate_diff_shadow_cannot_parse") | tostring)),
-      "",
-      "gate_diff_ratio\tvalue",
-      ("disagree_ratio\t" + ((.ratios.disagree_ratio // 0) | tostring)),
-      ("shadow_parse_coverage\t" + ((.ratios.shadow_parse_coverage // 0) | tostring))
+       + (n("shell_gate_keeper_shell_bash_cannot_parse") | tostring))
     '
   fi
 fi

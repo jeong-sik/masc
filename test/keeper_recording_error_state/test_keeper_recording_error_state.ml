@@ -22,16 +22,6 @@ let test_classify_sandbox_docker () =
      = S.Sandbox_docker)
 ;;
 
-let test_classify_path_syntax () =
-  check
-    bool
-    "Path syntax blocked → Path_syntax_blocked"
-    true
-    (S.classify_error
-       "Path syntax blocked: shell quoting, globbing, brace expansion ..."
-     = S.Path_syntax_blocked)
-;;
-
 let test_classify_stale_turn () =
   check
     bool
@@ -172,7 +162,7 @@ let test_record_distinct_errors_independent () =
 
 let test_record_ten_in_a_row () =
   reset ();
-  let err = "Path syntax blocked: shell quoting ..." in
+  let err = "fiber_unresolved" in
   let outcomes =
     List.init 10 (fun _ -> S.record ~keeper:"taskmaster" ~error:err)
   in
@@ -227,7 +217,6 @@ let () =
     "Keeper_recording_error_state"
     [ ( "classifier"
       , [ test_case "sandbox docker" `Quick test_classify_sandbox_docker
-        ; test_case "path syntax blocked" `Quick test_classify_path_syntax
         ; test_case "stale_turn_timeout" `Quick test_classify_stale_turn
         ; test_case "fiber_unresolved" `Quick test_classify_fiber_unresolved
         ; test_case "oas_timeout_budget" `Quick test_classify_oas_timeout

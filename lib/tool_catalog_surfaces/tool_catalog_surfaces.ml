@@ -68,8 +68,6 @@ let keeper_internal_tools =
        Dispatch still accepts it for backward compat. *)
     "keeper_shell"
   ; "keeper_bash"
-  ; "keeper_bash_output"
-  ; "keeper_bash_kill"
   ; "masc_worktree_create"
   ; "keeper_voice_speak"
   ; (* keeper_voice_listen is keeper-only; there is no public masc_voice_listen
@@ -166,7 +164,6 @@ let public_mcp_surface_tools =
   ; (* Planning *)
     "masc_goal_list"
   ; "masc_goal_upsert"
-  ; "masc_goal_review"
   ; "masc_goal_transition"
   ; "masc_goal_verify"
   ; "masc_coordination_fsm_snapshot"
@@ -242,7 +239,6 @@ let spawned_agent_surface_tools =
   ; "masc_messages"
   ; "masc_goal_list"
   ; "masc_goal_upsert"
-  ; "masc_goal_review"
   ; "masc_goal_transition"
   ; "masc_goal_verify"
   ; "masc_coordination_fsm_snapshot"
@@ -295,7 +291,6 @@ let local_worker_surface_tools =
   ; "masc_agent_card"
   ; "masc_goal_list"
   ; "masc_goal_upsert"
-  ; "masc_goal_review"
   ; "masc_goal_transition"
   ; "masc_goal_verify"
   ; "masc_coordination_fsm_snapshot"
@@ -339,7 +334,6 @@ let session_min_surface_tools =
   ; "masc_add_task"
   ; "masc_goal_list"
   ; "masc_goal_upsert"
-  ; "masc_goal_review"
   ; "masc_goal_transition"
   ; "masc_goal_verify"
   ; "masc_coordination_fsm_snapshot"
@@ -349,12 +343,7 @@ let session_min_surface_tools =
 ;;
 
 let admin_surface_tools =
-  [ "masc_autoresearch_cycle"
-  ; "masc_autoresearch_inject"
-  ; "masc_autoresearch_record_finding"
-  ; "masc_autoresearch_start"
-  ; "masc_autoresearch_stop"
-  ; "masc_tool_admin_update"
+  [ "masc_tool_admin_update"
   ; "masc_tool_grant"
   ; "masc_tool_revoke"
   ; "masc_tool_admin_snapshot"
@@ -415,9 +404,7 @@ let system_internal_surface_tools =
   ; (* Agent evaluation — system loop *)
     "masc_agent_fitness"
   ; (* Internal monitoring *)
-    "masc_autoresearch_search_findings"
-  ; "masc_autoresearch_status"
-  ; "masc_tool_stats"
+    "masc_tool_stats"
   ; "masc_surface_audit"
   ; (* Phase 2 addition *)
     "masc_get_metrics"

@@ -101,6 +101,8 @@ let test_git_upstream_status_uses_origin_head_for_detached_checkout () =
     (fun () ->
       with_dashboard_eio @@ fun () ->
       ignore (run_git_exn dir [ "init"; "-q"; "-b"; "main" ]);
+      (* See: local git templates may install hooks that block fixture commits. *)
+      ignore (run_git_exn dir [ "config"; "core.hooksPath"; "/dev/null" ]);
       let readme = Filename.concat dir "README.md" in
       write_file readme "one\n";
       ignore (run_git_exn dir [ "add"; "README.md" ]);
@@ -250,6 +252,10 @@ let test_dashboard_tools_projection () =
         (match runtime_resolution |> member "paused_keepers" with
          | `Int _ -> true
          | _ -> false);
+      check bool "runtime paused_keepers health surfaced" true
+        (match runtime_resolution |> member "paused_keepers_health" with
+         | `Assoc _ -> true
+         | _ -> false);
       check bool "runtime keeper fd pressure surfaced" true
         (match runtime_resolution |> member "keeper_fd_pressure" with
          | `Assoc _ -> true
@@ -271,6 +277,10 @@ let test_dashboard_tools_projection () =
          | _ -> false);
       check bool "runtime keeper reaction ledger surfaced" true
         (match runtime_resolution |> member "keeper_reaction_ledger" with
+         | `Assoc _ -> true
+         | _ -> false);
+      check bool "runtime cdal health surfaced" true
+        (match runtime_resolution |> member "cdal" with
          | `Assoc _ -> true
          | _ -> false);
       check bool "build started_at surfaced" true
@@ -416,22 +426,6 @@ let test_dashboard_tools_projection () =
       | Some row ->
           check bool "local worker tool keeps local_worker surface" true
             (has_surface "local_worker" row));
-      (match deprecated_alias_tool with
-      | None -> ()
-      | Some row ->
-          check bool "deprecated alias has registered schema" true
-            (row |> member "registered_schema" |> to_bool);
-          check bool "deprecated alias has dispatch registration" true
-            (row |> member "dispatch_registered" |> to_bool);
-          check string "deprecated alias visibility surfaced" "hidden"
-            (row |> member "visibility" |> to_string);
-          check string "deprecated alias lifecycle surfaced" "deprecated"
-            (row |> member "lifecycle" |> to_string);
-          check string "deprecated alias replacement surfaced"
-            "masc_agent_update"
-            (row |> member "replacement" |> to_string);
-          check bool "deprecated alias not assigned a surface" false
-            (row |> member "surfaces" |> to_list <> []));
       match hidden_tool with
       | None -> ()
       | Some row ->

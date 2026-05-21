@@ -190,38 +190,7 @@ let object_schema ?(required = []) properties =
 (* ── Public input schemas ─────────────────────────────────────────── *)
 
 let bash_public_schema =
-  object_schema
-    ~required:[ "command" ]
-    [ property
-        "command"
-        "string"
-        "The single shell command to execute through the public Bash front door. Do \
-         not call keeper_* or masc_* tool names here; use visible task/board/PR tools \
-         directly. For file reads or search, use Read or Grep first. No chaining (&&, \
-         ||, ;), pipes (|), redirects (>, >>), command substitution, or background \
-         operators. Always set cwd for multi-repo git/gh commands. Example: \
-         'scripts/dune-local.sh build test/test_keeper_tool_alias.exe'."
-    ; property
-        "cwd"
-        "string"
-        "Optional working directory. Use a playground-relative path such as \
-         'repos/<repo>' or 'repos/<repo>/.worktrees/<task>' when a sandbox \
-         contains multiple repositories."
-    ; property
-        "description"
-        "string"
-        "Optional short description of what the command does. Logged for observability."
-    ; property
-        "timeout"
-        "number"
-        "Timeout in seconds (default 30, max 180). For run_in_background=true, 0 \
-         disables the timeout."
-    ; property
-        "run_in_background"
-        "boolean"
-        "Default false. When true, returns immediately with background_task_id; poll \
-         or stop it with the background output/kill tools shown in your active schema."
-    ]
+  Tool_shard_types_schemas_bash.keeper_bash_schema.input_schema
 ;;
 
 let read_public_schema =
@@ -333,19 +302,7 @@ let public_input_schema = function
 (* ── Input translators ────────────────────────────────────────────── *)
 
 let translate_bash_input input =
-  match input with
-  | `Assoc fields ->
-    let out = ref [] in
-    List.iter
-      (fun (k, v) ->
-         match k with
-         | "command" -> out := ("cmd", v) :: !out
-         | "timeout" -> out := ("timeout_sec", v) :: !out
-         | "description" -> () (* dropped; logged elsewhere *)
-         | _ -> out := (k, v) :: !out)
-      fields;
-    `Assoc (List.rev !out)
-  | _ -> input
+  input
 ;;
 
 let translate_read_input input =

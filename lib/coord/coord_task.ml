@@ -874,8 +874,6 @@ let force_cancel_task_r config ~agent_name ~task_id ~reason ()
     ~force:true
     ()
 ;;
-
-(** Cancel a task - A2A compatible *)
 let cancel_task_r config ~agent_name ~task_id ~reason : string Masc_domain.masc_result =
   if not (is_initialized config)
   then Error (Masc_domain.System Masc_domain.System_error.NotInitialized)
@@ -1044,7 +1042,17 @@ type claim_next_result = Masc_domain.claim_next_result =
       ; message : string
       }
   | Claim_next_no_unclaimed
-  | Claim_next_no_eligible of { excluded_count : int }
+  | Claim_next_no_eligible of
+      { excluded_count : int
+      ; blocked_count : int
+      ; verification_blocked_count : int
+      ; scope_excluded_count : int
+      ; required_tool_excluded_count : int
+      ; explicit_excluded_count : int
+      ; claim_pool_candidate_count : int
+      ; receipt_required_tool_blocked : bool
+      ; agent_tool_names_known : bool
+      }
   | Claim_next_error of string
 
 let link_task_execution_artifacts_r

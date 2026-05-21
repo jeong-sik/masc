@@ -30,7 +30,7 @@ val normalize_command : string -> string
 
 val destructive_patterns : (string * string) list
 (** The canonical 19-entry substring pattern catalogue used by
-    [detect_destructive]. Exposed so the AST shadow classifier
+    [detect_destructive]. Exposed so the shell-safety classifier
     (see [Worker_dev_tools.classify_destructive]) can enforce
     a covenant that every pattern maps to a typed class. *)
 
@@ -99,11 +99,6 @@ val post_eval :
   duration_ms:int ->
   accumulated_cost:float ->
   post_eval_result
-
-(** {1 JSON serialization (legacy aliases)} *)
-
-val gate_config_to_json : gate_config -> Yojson.Safe.t
-val post_eval_to_json : post_eval_result -> Yojson.Safe.t
 
 (** {1 Guarded execution} *)
 

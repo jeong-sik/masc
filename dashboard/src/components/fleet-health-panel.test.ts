@@ -41,6 +41,11 @@ const fleetMock = vi.hoisted(() => {
   }
 })
 
+const storeMock = vi.hoisted(() => ({
+  shellRuntimeResolution: { value: null as any },
+  refreshShell: vi.fn(),
+}))
+
 function replaceRoute(tab: string, params?: Record<string, string>) {
   routeSignal.value = { tab, params: params ?? {}, postId: null }
   const query = new URLSearchParams(params ?? {}).toString()
@@ -67,6 +72,11 @@ vi.mock('./fleet-data-core', () => ({
   get sharedToolQualityError() { return fleetMock.sharedToolQualityError },
   refreshSharedToolQuality: fleetMock.refreshSharedToolQuality,
   cancelSharedToolQuality: fleetMock.cancelSharedToolQuality,
+}))
+
+vi.mock('../store', () => ({
+  get shellRuntimeResolution() { return storeMock.shellRuntimeResolution },
+  refreshShell: storeMock.refreshShell,
 }))
 
 // Mock child panels to avoid real fetch calls. Each renders a data-testid marker.
@@ -101,6 +111,8 @@ describe('FleetHealthPanel', () => {
     fleetMock.sharedToolQuality.value = fleetMock.sampleToolQuality
     fleetMock.sharedToolQualityLoading.value = false
     fleetMock.sharedToolQualityError.value = null
+    storeMock.shellRuntimeResolution.value = null
+    storeMock.refreshShell.mockClear()
     fleetMock.refreshSharedToolQuality.mockClear()
     fleetMock.cancelSharedToolQuality.mockClear()
   })
@@ -120,6 +132,113 @@ describe('FleetHealthPanel', () => {
     expect(screen.queryByTestId('tool-quality-panel')).toBeNull()
     expect(screen.queryByTestId('fleet-telemetry-panel')).toBeNull()
     expect(screen.queryByTestId('governance-monitor')).toBeNull()
+  })
+
+  it('renders runtime fleet and CDAL blocker drilldown on the operations board', () => {
+    storeMock.shellRuntimeResolution.value = {
+      status: 'ready',
+      warnings: [],
+      fleet_safety: {
+        keeper_fibers: 8,
+        paused_keepers: 3,
+        keeper_fleet_no_fibers: false,
+        keeper_fd_pressure: null,
+        keeper_reaction_ledger: null,
+        paused_keepers_health: {
+          count: 3,
+          names: ['analyst', 'base', 'sangsu'],
+          running_count: 0,
+          running_names: [],
+          durable_count: 3,
+          durable_names: ['analyst', 'base', 'sangsu'],
+          autoboot_enabled_count: 3,
+          autoboot_enabled_names: ['analyst', 'base', 'sangsu'],
+          read_error_count: 0,
+          read_errors: [],
+          details: [{
+            name: 'analyst',
+            autoboot_enabled: true,
+            pause_kind: 'auto_recoverable',
+            auto_resume_after_sec: 60,
+            persisted_auto_resume_after_sec: 60,
+            auto_resume_source: 'explicit',
+            paused_elapsed_sec: 12,
+            auto_resume_remaining_sec: 48,
+            last_blocker_class: 'turn_timeout',
+            last_blocker_detail: 'turn exceeded budget',
+            missing_pause_root_cause: false,
+          }],
+        },
+        keeper_fleet_safety: {
+          status: 'degraded',
+          reason: null,
+          blocker: 'reaction_capacity_below_target',
+          admission_blocked: null,
+          admission_blocked_keepers: null,
+          blocked_keepers: null,
+          blocked_count: null,
+          running_keeper_fiber_count: 8,
+          executable_keeper_fiber_count: 13,
+          effective_reaction_capacity_count: 8,
+          executable_reaction_capacity_count: 13,
+          target_reaction_capacity_count: 17,
+          reaction_capacity_shortfall_count: 9,
+          operator_action_required: true,
+          reaction_capacity_below_target: true,
+        },
+      },
+      cdal: {
+        writer_status: 'proof_store_incomplete',
+        operator_action_required: true,
+        proof_store_path_drift: false,
+        proof_store: {
+          root: '/Users/dancer/me/.oas',
+          proofs_dir: '/Users/dancer/me/.oas/proofs',
+          exists: true,
+          latest_activity_at: '2026-05-21T03:00:00Z',
+          latest_activity_unix: 1779332400,
+          age_seconds: 30,
+          status: 'stale_incomplete_runs',
+          completeness: {
+            scan_limit: 200,
+            run_dir_entries_seen: 200,
+            scan_truncated: false,
+            run_dirs_scanned: 200,
+            completed_run_dirs: 194,
+            incomplete_run_dirs: 6,
+            stale_incomplete_run_dirs: 3,
+            terminal_incomplete_run_dirs: 1,
+            missing_manifest_run_dirs: 6,
+            missing_contract_run_dirs: 6,
+            stale_incomplete_grace_seconds: 300,
+            sample_stale_incomplete_run_ids: ['cdal-stale-a'],
+            sample_terminal_incomplete_run_ids: ['cdal-abort-a'],
+          },
+        },
+        task_scope: {
+          status: 'present',
+          recent_limit: 500,
+          recent_rows: 500,
+          task_id_rows: 500,
+          missing_task_scope_rows: 0,
+          legacy_unscoped_rows: 0,
+          current_writer_missing_task_scope_rows: 0,
+          missing_task_scope: false,
+          partial_task_scope: false,
+          current_writer_missing_task_scope: false,
+          legacy_unscoped_only: false,
+        },
+      },
+    }
+
+    render(html`<${FleetHealthPanel} />`)
+
+    expect(storeMock.refreshShell).toHaveBeenCalledWith({ force: true })
+    expect(screen.getByTestId('runtime-blocker-board')).toBeTruthy()
+    expect(screen.getByText('8/17')).toBeTruthy()
+    expect(screen.getByText('analyst')).toBeTruthy()
+    expect(screen.getAllByText('proof_store_incomplete').length).toBeGreaterThan(0)
+    expect(screen.getByText(/cdal-stale-a/)).toBeTruthy()
   })
 
   it('renders TelemetryUnified alone for view=event-log', () => {

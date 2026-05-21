@@ -41,6 +41,10 @@ let () =
             "snapshot summary surfaces paused keeper runtime trust" `Quick
             Test_operator_control_snapshot
             .test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust;
+          Alcotest.test_case "digest room includes keeper runtime attention"
+            `Quick
+            Test_operator_control_snapshot
+            .test_digest_room_includes_keeper_runtime_attention;
           Alcotest.test_case
             "snapshot lightweight summary preserves receipt causal event" `Quick
             Test_operator_control_snapshot
@@ -108,6 +112,9 @@ let () =
           Alcotest.test_case "digest defaults to namespace target" `Quick
             Test_operator_control_actions
             .test_digest_defaults_to_namespace_target;
+          Alcotest.test_case "operator action rejects legacy aliases" `Quick
+            Test_operator_control_actions
+            .test_operator_action_rejects_legacy_action_aliases;
           Alcotest.test_case "confirm keeps token on delegated failure" `Quick
             Test_operator_control_judgment
             .test_confirm_keeps_pending_token_when_delegated_action_fails;

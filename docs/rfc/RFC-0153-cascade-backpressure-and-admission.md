@@ -1,14 +1,57 @@
 ---
 rfc: "0153"
 title: "Cascade Backpressure & Tier Admission"
-status: Draft
+status: Active
 created: 2026-05-20
-updated: 2026-05-20 (post-merge audit: §6.8 + §4.2 admission_policy + §4.4 measurements)
+updated: 2026-05-21
 author: vincent
 supersedes: []
 superseded_by: null
 related: ["0009", "0022", "0042", "0082", "0088", "0102", "0127", "0152"]
-implementation_prs: ["#16965 (Phase A.1, merged 2026-05-20T12:25:11Z)"]
+implementation_prs: [16965, 16988, 16991]
+---
+
+## Progress audit (2026-05-21)
+
+Status promoted Draft → Active. Phase A.1 + A.2 + B.1 landed
+within 36 hours of the RFC body; subsequent phases remain.
+
+| Phase | PR | Scope | Merged |
+|-------|-----|------|--------|
+| Phase A.1 | #16965 | typed `Cascade_saturation_signal` (additive only) | 2026-05-20 |
+| Phase A.2 | #16988 | wire typed saturation signal emission | 2026-05-20 |
+| Phase B.1 | #16991 | `cascade_tier_admission` module + tests | 2026-05-20 |
+
+### Frontmatter format normalization
+
+`implementation_prs` previously held a single freeform string
+(`"#16965 (Phase A.1, merged 2026-05-20T12:25:11Z)"`). The
+`docs/rfc/README.md` standard expects a list of bare integer PR
+numbers. This audit normalizes to `[16965, 16988, 16991]` so
+downstream tooling (the new `audit-rfc-closeout-lag.sh`) and human
+readers see a consistent shape across RFCs.
+
+### Pending — Phase B.2 and beyond
+
+The RFC body's phase plan beyond B.1 is not enumerated tightly
+enough in §4 to map remaining PR slots one-to-one from the commit
+log alone. Author input needed before `Implemented` status — the
+typical follow-ups for an admission-shaped RFC are:
+
+- B.2+ — wire the admission decision into the runtime path
+- C — saturation-driven backpressure into the caller
+- soak window before fast-fail removal
+
+Until those phases are explicitly enumerated and tracked, `Active`
+is the accurate status: a runnable typed signal + admission module
+exist, but the loop is not closed end-to-end.
+
+### Related RFC
+
+The closeout cohort that landed within the same week:
+- **RFC-0141 / RFC-0142 / RFC-0148 / RFC-0154** — closed-sum cohort
+- **RFC-0127** — cascade fast-fail provenance (already in related)
+
 ---
 
 # RFC-0153 — Cascade Backpressure & Tier Admission

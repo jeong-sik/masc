@@ -602,7 +602,7 @@ let test_handle_request_tools_list () =
     false
     (List.mem "masc_board_search" names);
   Alcotest.(check bool)
-    "legacy experiment_start hidden from list"
+    "removed experiment_start absent from list"
     false
     (List.mem "experiment_start" names);
   Alcotest.(check bool)
@@ -1292,137 +1292,7 @@ let test_handle_request_tools_list_include_usage_metadata () =
        (match first_tool with `Assoc fields -> fields | _ -> []));
   cleanup_dir base_path
 
-let _test_execute_tool_trpg_flow () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  Mcp_eio.set_net (Eio.Stdenv.net env);
-  Mcp_eio.set_clock (Eio.Stdenv.clock env);
-  let clock = Eio.Stdenv.clock env in
-  Eio.Switch.run @@ fun sw ->
-
-  let base_path = temp_dir () in
-  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
-  let roll_result =
-    Mcp_eio.execute_tool_eio ~sw ~clock state
-      ~name:"masc_trpg_dice_roll"
-      ~arguments:
-        (`Assoc
-          [
-            ("room_id", `String "room-mcp-e2e");
-            ("actor_id", `String "pc-1");
-            ("action", `String "perception");
-            ("stat_value", `Int 12);
-            ("dc", `Int 10);
-            ("raw_d20", `Int 15);
-          ])
-  in
-  Alcotest.(check bool) "dice_roll success" true roll_result.Tool_result.success;
-
-  let turn_result =
-    Mcp_eio.execute_tool_eio ~sw ~clock state
-      ~name:"masc_trpg_turn_advance"
-      ~arguments:
-        (`Assoc
-          [
-            ("room_id", `String "room-mcp-e2e");
-            ("phase", `String "round");
-          ])
-  in
-  Alcotest.(check bool) "turn_advance success" true turn_result.Tool_result.success;
-
-  let stream_result =
-    Mcp_eio.execute_tool_eio ~sw ~clock state
-      ~name:"masc_trpg_stream"
-      ~arguments:(`Assoc [ ("room_id", `String "room-mcp-e2e") ])
-  in
-  Alcotest.(check bool) "stream success" true stream_result.Tool_result.success;
-  let stream_json = Yojson.Safe.from_string (Tool_result.message stream_result) in
-  let count = stream_json |> Yojson.Safe.Util.member "count" |> Yojson.Safe.Util.to_int in
-  Alcotest.(check bool) "stream has events" true (count >= 2);
-
-  let stream_dice_result =
-    Mcp_eio.execute_tool_eio ~sw ~clock state
-      ~name:"masc_trpg_stream"
-      ~arguments:
-        (`Assoc
-          [
-            ("room_id", `String "room-mcp-e2e");
-            ("event_type", `String "dice.rolled");
-          ])
-  in
-  Alcotest.(check bool) "stream event_type filter success" true stream_dice_result.Tool_result.success;
-  let stream_dice_json = Yojson.Safe.from_string (Tool_result.message stream_dice_result) in
-  let dice_count =
-    stream_dice_json |> Yojson.Safe.Util.member "count" |> Yojson.Safe.Util.to_int
-  in
-  Alcotest.(check int) "dice-only event count" 1 dice_count;
-
-  let roll_json = Yojson.Safe.from_string (Tool_result.message roll_result) in
-  let passed = roll_json |> Yojson.Safe.Util.member "roll" |> Yojson.Safe.Util.member "passed" |> Yojson.Safe.Util.to_bool in
-  Alcotest.(check bool) "roll passed" true passed;
-
-  cleanup_dir base_path
-
 (* Governance status tool is no longer dispatched *)
-
-let _test_execute_tool_trpg_validation () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  Mcp_eio.set_net (Eio.Stdenv.net env);
-  Mcp_eio.set_clock (Eio.Stdenv.clock env);
-  let clock = Eio.Stdenv.clock env in
-  Eio.Switch.run @@ fun sw ->
-
-  let base_path = temp_dir () in
-  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
-  let missing_result =
-    Mcp_eio.execute_tool_eio ~sw ~clock state
-      ~name:"masc_trpg_turn_advance"
-      ~arguments:(`Assoc [])
-  in
-  Alcotest.(check bool) "missing room_id fails" false missing_result.Tool_result.success;
-  Alcotest.(check bool)
-    "missing room_id message"
-    true
-    (contains_substring (Tool_result.message missing_result) "room_id is required");
-
-  let out_of_range_result =
-    Mcp_eio.execute_tool_eio ~sw ~clock state
-      ~name:"masc_trpg_dice_roll"
-      ~arguments:
-        (`Assoc
-          [
-            ("room_id", `String "room-mcp-e2e");
-            ("actor_id", `String "pc-1");
-            ("action", `String "perception");
-            ("stat_value", `Int 12);
-            ("dc", `Int 10);
-            ("raw_d20", `Int 21);
-          ])
-  in
-  Alcotest.(check bool) "raw_d20 out-of-range fails" false out_of_range_result.Tool_result.success;
-  Alcotest.(check bool)
-    "raw_d20 out-of-range message"
-    true
-    (contains_substring (Tool_result.message out_of_range_result) "raw_d20 must be between 1 and 20");
-
-  let bad_event_type_result =
-    Mcp_eio.execute_tool_eio ~sw ~clock state
-      ~name:"masc_trpg_stream"
-      ~arguments:
-        (`Assoc
-          [
-            ("room_id", `String "room-mcp-e2e");
-            ("event_type", `String "totally.invalid");
-          ])
-  in
-  Alcotest.(check bool) "invalid event_type fails" false bad_event_type_result.Tool_result.success;
-  Alcotest.(check bool)
-    "invalid event_type message"
-    true
-    (contains_substring (Tool_result.message bad_event_type_result) "invalid event_type");
-
-  cleanup_dir base_path
 
 let test_execute_tool_explicit_agent_name_not_overridden () =
   let base_path = temp_dir () in
@@ -1435,19 +1305,16 @@ let test_execute_tool_explicit_agent_name_not_overridden () =
   let resolve arguments =
     Masc_mcp.Mcp_server_eio_caller_identity.resolve ~config
       ~tool_name:"masc_join" ~arguments ~identity
-      ~cached_resolved_agent:(Some "persisted-stale-nickname")
-      ~mcp_session_id:(Some "mcp-explicit-agent-name-regression")
+      ~cached_resolved_agent:(Some "cached-stale-nickname")
       ~auth_token:None ~internal_keeper_runtime:false
       ~room_initialized:(fun () -> false)
-      ~read_mcp_session_agent:(fun () -> Some "persisted-stale-nickname")
-      ~read_term_session_agent:(fun () -> Some "term-stale-nickname")
       ~log_mcp_exn:(fun ~label:_ _ -> ())
   in
   let codex =
     resolve (`Assoc [ ("agent_name", `String "codex") ])
   in
   Alcotest.(check string)
-    "explicit legacy agent_name wins over stale cache"
+    "explicit agent_name wins over stale cache"
     "codex" codex.agent_name;
   let gemini =
     resolve (`Assoc [ ("_agent_name", `String "gemini"); ("agent_name", `String "codex") ])
@@ -1455,6 +1322,11 @@ let test_execute_tool_explicit_agent_name_not_overridden () =
   Alcotest.(check string)
     "internal _agent_name wins over legacy agent_name"
     "gemini" gemini.agent_name;
+  let cached = resolve (`Assoc []) in
+  Alcotest.(check string)
+    "cached session identity wins over generated fallback"
+    "cached-stale-nickname"
+    cached.agent_name;
 
   cleanup_dir base_path
 
@@ -1474,11 +1346,8 @@ let test_execute_tool_explicit_alias_reuses_joined_nickname () =
       ~tool_name:"masc_transition"
       ~arguments:(`Assoc [ ("agent_name", `String "alpha-agent") ])
       ~identity ~cached_resolved_agent:None
-      ~mcp_session_id:(Some "mcp-explicit-alias-reuse-regression")
       ~auth_token:None ~internal_keeper_runtime:false
       ~room_initialized:(fun () -> true)
-      ~read_mcp_session_agent:(fun () -> None)
-      ~read_term_session_agent:(fun () -> None)
       ~log_mcp_exn:(fun ~label:_ _ -> ())
   in
   Alcotest.(check string)
@@ -1783,12 +1652,10 @@ let test_execute_tool_http_auth_token_overrides_stale_argument_token () =
     Masc_mcp.Mcp_server_eio_caller_identity.resolve ~config
       ~tool_name:"masc_status"
       ~arguments:(`Assoc [ ("token", `String "stale-argument-token") ])
-      ~identity ~cached_resolved_agent:None ~mcp_session_id:None
+      ~identity ~cached_resolved_agent:None
       ~auth_token:(Some "http-auth-token")
       ~internal_keeper_runtime:false
       ~room_initialized:(fun () -> true)
-      ~read_mcp_session_agent:(fun () -> None)
-      ~read_term_session_agent:(fun () -> None)
       ~log_mcp_exn:(fun ~label:_ _ -> ())
   in
   Alcotest.(check (option string))
@@ -1797,91 +1664,54 @@ let test_execute_tool_http_auth_token_overrides_stale_argument_token () =
     result.token;
   cleanup_dir base_path
 
-let test_execute_tool_legacy_argument_token_still_authorizes_without_http_auth () =
+let test_execute_tool_legacy_argument_token_ignored_without_http_auth () =
   let base_path = temp_dir () in
   let config = Masc_mcp.Coord.default_config base_path in
   let identity =
     test_agent_identity
-      ~uuid:"legacy-token-fallback-test"
-      ~session_key:"legacy-token-fallback-session"
+      ~uuid:"legacy-token-ignored-test"
+      ~session_key:"legacy-token-ignored-session"
   in
   let result =
     Masc_mcp.Mcp_server_eio_caller_identity.resolve ~config
       ~tool_name:"masc_status"
       ~arguments:(`Assoc [ ("token", `String "legacy-argument-token") ])
-      ~identity ~cached_resolved_agent:None ~mcp_session_id:None
+      ~identity ~cached_resolved_agent:None
       ~auth_token:None ~internal_keeper_runtime:false
       ~room_initialized:(fun () -> true)
-      ~read_mcp_session_agent:(fun () -> None)
-      ~read_term_session_agent:(fun () -> None)
       ~log_mcp_exn:(fun ~label:_ _ -> ())
   in
   Alcotest.(check (option string))
-    "legacy argument token remains fallback without HTTP auth"
-    (Some "legacy-argument-token")
+    "legacy argument token ignored without HTTP auth"
+    None
     result.token;
   cleanup_dir base_path
 
-let test_execute_tool_mcp_session_ignores_term_persistence () =
+let test_execute_tool_without_mcp_session_uses_generated_identity () =
   let base_path = temp_dir () in
   let config = Masc_mcp.Coord.default_config base_path in
   let identity =
-    test_agent_identity ~uuid:"mcp-term-isolation-test" ~session_key:"mcpterm00"
+    test_agent_identity
+      ~uuid:"generated-identity-no-session-test"
+      ~session_key:"nosess00"
   in
   let result =
     Masc_mcp.Mcp_server_eio_caller_identity.resolve ~config
       ~tool_name:"masc_broadcast"
-      ~arguments:(`Assoc [ ("message", `String "term isolation check") ])
+      ~arguments:(`Assoc [ ("message", `String "generated identity check") ])
       ~identity ~cached_resolved_agent:None
-      ~mcp_session_id:(Some "mcp-term-isolation-regression")
       ~auth_token:None ~internal_keeper_runtime:false
       ~room_initialized:(fun () -> true)
-      ~read_mcp_session_agent:(fun () -> None)
-      ~read_term_session_agent:(fun () -> Some "intruder-sage-tiger")
       ~log_mcp_exn:(fun ~label:_ _ -> ())
   in
-  Alcotest.(check bool)
-    "mcp session must not reuse TERM_SESSION_ID persisted nickname"
-    false
-    (String.equal "intruder-sage-tiger" result.agent_name);
+  Alcotest.(check string)
+    "generated fallback"
+    "agent-nosess00"
+    result.agent_name;
 
   cleanup_dir base_path
 
 (* Legacy governance convo tools are stubs; room-scoped test removed *)
-
-let _test_handle_request_tools_call_trpg () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let clock = Eio.Stdenv.clock env in
-  Eio.Switch.run @@ fun sw ->
-
-  let base_path = temp_dir () in
-  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
-
-  let request = Yojson.Safe.to_string (`Assoc [
-    ("jsonrpc", `String "2.0");
-    ("id", `Int 9);
-    ("method", `String "tools/call");
-    ("params", `Assoc [
-      ("name", `String "trpg.dice.roll");
-      ("arguments", `Assoc [
-        ("room_id", `String "room-mcp-call");
-        ("actor_id", `String "pc-1");
-        ("action", `String "perception");
-        ("stat_value", `Int 9);
-        ("dc", `Int 8);
-        ("raw_d20", `Int 12);
-      ]);
-    ]);
-  ]) in
-
-  let response = Mcp_eio.handle_request ~clock ~sw state request in
-  (match response with
-  | `Assoc fields ->
-      Alcotest.(check bool) "has result" true (List.mem_assoc "result" fields)
-  | _ -> Alcotest.fail "response not an object");
-
-  cleanup_dir base_path
 
 let test_handle_request_invalid_json () =
   Eio_main.run @@ fun env ->
@@ -3011,9 +2841,10 @@ let eio_tests = [
     test_execute_tool_add_task_with_admin_token_without_join;
   "http auth token overrides stale argument token", `Quick,
     test_execute_tool_http_auth_token_overrides_stale_argument_token;
-  "legacy argument token still authorizes without http auth", `Quick,
-    test_execute_tool_legacy_argument_token_still_authorizes_without_http_auth;
-  "mcp session ignores term persistence", `Quick, test_execute_tool_mcp_session_ignores_term_persistence;
+  "legacy argument token ignored without http auth", `Quick,
+    test_execute_tool_legacy_argument_token_ignored_without_http_auth;
+  "without mcp session uses generated identity", `Quick,
+    test_execute_tool_without_mcp_session_uses_generated_identity;
   (* Legacy governance convo room test removed *)
 ]
 

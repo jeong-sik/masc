@@ -240,27 +240,6 @@ let test_masc_goal_upsert_schema () =
             (List.mem_assoc "parent_goal_id" props)
       | None -> Alcotest.fail "masc_goal_upsert missing properties"
 
-let test_masc_goal_review_schema () =
-  match find_tool "masc_goal_review" with
-  | None -> Alcotest.fail "masc_goal_review not found"
-  | Some schema ->
-      (match get_json_assoc "properties" schema.input_schema with
-      | Some props ->
-          Alcotest.(check bool) "has goal_id" true
-            (List.mem_assoc "goal_id" props);
-          Alcotest.(check bool) "has outcome" true
-            (List.mem_assoc "outcome" props);
-          Alcotest.(check bool) "has new_horizon" true
-            (List.mem_assoc "new_horizon" props)
-      | None -> Alcotest.fail "masc_goal_review missing properties");
-      match get_json_list "required" schema.input_schema with
-      | Some reqs ->
-          Alcotest.(check bool) "goal_id required" true
-            (List.mem (`String "goal_id") reqs);
-          Alcotest.(check bool) "outcome required" true
-            (List.mem (`String "outcome") reqs)
-      | None -> Alcotest.fail "masc_goal_review missing required field"
-
 let test_masc_goal_transition_schema () =
   match find_tool "masc_goal_transition" with
   | None -> Alcotest.fail "masc_goal_transition not found"
@@ -316,57 +295,70 @@ let test_masc_goal_verify_schema () =
       | None -> Alcotest.fail "masc_goal_verify missing required field"
 
 let test_remote_operator_action_schema_is_strict () =
-  let schema =
-    match List.find_opt (fun schema -> schema.name = "masc_operator_action")
-            Masc_mcp.Tool_operator.remote_schemas with
-    | Some schema -> schema
-    | None -> Alcotest.fail "remote masc_operator_action schema not found"
-  in
+  let check_schema label schema =
   match get_json_assoc "properties" schema.input_schema with
   | Some props ->
       (match List.assoc_opt "action_type" props with
        | Some (`Assoc fields) ->
            (match List.assoc_opt "enum" fields with
             | Some (`List enums) ->
-                Alcotest.(check bool) "remote excludes team_turn" false
+                Alcotest.(check bool) (label ^ " excludes team_turn") false
                   (List.mem (`String "team_turn") enums);
                 (* Issue #8417: [task_inject] has a real handler +
                    approval contract; promoted into the strict enum so
                    remote operator callers and the LLM judge can
                    discover the capability. *)
-                Alcotest.(check bool) "remote includes task_inject" true
+                Alcotest.(check bool) (label ^ " includes task_inject") true
                   (List.mem (`String "task_inject") enums);
-                Alcotest.(check bool) "remote excludes keeper_msg" false
+                Alcotest.(check bool) (label ^ " excludes keeper_msg") false
                   (List.mem (`String "keeper_msg") enums);
-                Alcotest.(check bool) "remote excludes team_note" false
+                Alcotest.(check bool) (label ^ " excludes room_pause") false
+                  (List.mem (`String "room_pause") enums);
+                Alcotest.(check bool) (label ^ " excludes room_resume") false
+                  (List.mem (`String "room_resume") enums);
+                Alcotest.(check bool) (label ^ " excludes team_note") false
                   (List.mem (`String "team_note") enums);
-                Alcotest.(check bool) "remote excludes team_worker_spawn_batch" false
+                Alcotest.(check bool) (label ^ " excludes team_broadcast") false
+                  (List.mem (`String "team_broadcast") enums);
+                Alcotest.(check bool) (label ^ " excludes team_task_inject") false
+                  (List.mem (`String "team_task_inject") enums);
+                Alcotest.(check bool) (label ^ " excludes team_worker_spawn_batch") false
                   (List.mem (`String "team_worker_spawn_batch") enums);
-                Alcotest.(check bool) "remote includes social_sweep" true
+                Alcotest.(check bool) (label ^ " excludes team_stop") false
+                  (List.mem (`String "team_stop") enums);
+                Alcotest.(check bool) (label ^ " includes social_sweep") true
                   (List.mem (`String "social_sweep") enums);
-                Alcotest.(check bool) "remote excludes autonomy_tick alias" false
+                Alcotest.(check bool) (label ^ " excludes autonomy_tick alias") false
                   (List.mem (`String "autonomy_tick") enums);
-                Alcotest.(check bool) "remote includes keeper_probe" true
+                Alcotest.(check bool) (label ^ " includes keeper_probe") true
                   (List.mem (`String "keeper_probe") enums);
-                Alcotest.(check bool) "remote includes keeper_recover" true
+                Alcotest.(check bool) (label ^ " includes keeper_recover") true
                   (List.mem (`String "keeper_recover") enums);
-                Alcotest.(check bool) "remote includes keeper_message" true
+                Alcotest.(check bool) (label ^ " includes keeper_message") true
                   (List.mem (`String "keeper_message") enums);
                 Alcotest.(check bool)
-                  "remote includes github_identity_login_prepare" true
+                  (label ^ " includes github_identity_login_prepare") true
                   (List.mem (`String "github_identity_login_prepare") enums);
                 Alcotest.(check bool)
-                  "remote includes github_identity_status" true
+                  (label ^ " includes github_identity_status") true
                   (List.mem (`String "github_identity_status") enums);
                 Alcotest.(check bool)
-                  "remote includes keeper_github_identity_login_prepare" true
+                  (label ^ " includes keeper_github_identity_login_prepare") true
                   (List.mem (`String "keeper_github_identity_login_prepare") enums);
                 Alcotest.(check bool)
-                  "remote includes keeper_github_identity_status" true
+                  (label ^ " includes keeper_github_identity_status") true
                   (List.mem (`String "keeper_github_identity_status") enums)
-            | _ -> Alcotest.fail "remote action_type missing enum")
-       | _ -> Alcotest.fail "remote action_type missing")
-  | None -> Alcotest.fail "remote masc_operator_action missing properties"
+            | _ -> Alcotest.failf "%s action_type missing enum" label)
+       | _ -> Alcotest.failf "%s action_type missing" label)
+  | None -> Alcotest.failf "%s masc_operator_action missing properties" label
+  in
+  let find_operator_action schemas label =
+    match List.find_opt (fun schema -> schema.name = "masc_operator_action") schemas with
+    | Some schema -> schema
+    | None -> Alcotest.failf "%s masc_operator_action schema not found" label
+  in
+  check_schema "local" (find_operator_action Masc_mcp.Tool_operator.schemas "local");
+  check_schema "remote" (find_operator_action Masc_mcp.Tool_operator.remote_schemas "remote")
 
 let test_retired_front_door_tools_absent_from_schema_inventory () =
   let retired_tools =
@@ -379,6 +371,7 @@ let test_retired_front_door_tools_absent_from_schema_inventory () =
       "masc_surface_audit";
       "masc_operation_start";
       "masc_dispatch_tick";
+      "masc_goal_review";
     ]
   in
   List.iter
@@ -909,7 +902,6 @@ let () =
     "goal_tools", [
       Alcotest.test_case "goal_list" `Quick test_masc_goal_list_schema;
       Alcotest.test_case "goal_upsert" `Quick test_masc_goal_upsert_schema;
-      Alcotest.test_case "goal_review" `Quick test_masc_goal_review_schema;
       Alcotest.test_case "goal_transition" `Quick test_masc_goal_transition_schema;
       Alcotest.test_case "goal_verify" `Quick test_masc_goal_verify_schema;
     ];

@@ -146,6 +146,14 @@ EOF
     in
     check bool "worktree entries surfaced" true
       (contains_substring stdout "worktree_entries=2");
+    check bool "worktree fanout columns surfaced" true
+      (contains_substring stdout
+         "worktree_fanout_columns=count keeper repo worktrees_dir");
+    check bool "keeper fanout row surfaced" true
+      (contains_substring stdout "2 keeper-a masc-mcp");
+    check bool "top fanout cleanup command surfaced" true
+      (contains_substring stdout
+         "top_fanout_cleanup_dry_run_command=");
     check bool "top holder count surfaced" true
       (contains_substring stdout "top_holder_fd_count=2");
     check bool "warning surfaced" true
@@ -181,7 +189,59 @@ let test_status_warns_on_worktree_hotspot_when_lsof_fails () =
     check bool "worktree-only warning surfaced" true
       (contains_substring stdout "hotspot_status=warning");
     check bool "worktree reason surfaced" true
-      (contains_substring stdout "hotspot_reasons=worktree_entries"))
+      (contains_substring stdout "hotspot_reasons=worktree_entries");
+    check bool "fanout still surfaces on lsof failure" true
+      (contains_substring stdout "2 keeper-a masc-mcp");
+    check bool "top fanout action still surfaces on lsof failure" true
+      (contains_substring stdout
+         "top_fanout_cleanup_dry_run_command="))
+
+let test_status_cleanup_summary_surfaces_candidate_counts () =
+  with_temp_dir "docker-playground-status-cleanup-summary" (fun dir ->
+    let root = Filename.concat dir ".masc/playground/docker" in
+    let repo_dir = Filename.concat root "keeper-a/repos/masc-mcp" in
+    init_repo repo_dir;
+    mkdir_p (Filename.concat repo_dir ".worktrees");
+    let wt_path = Filename.concat repo_dir ".worktrees/stale-task" in
+    ignore
+      (run_shell_ok ~cwd:repo_dir
+         (Printf.sprintf "git worktree add -q -b stale-task %s" (quote wt_path)));
+    mark_path_old ~cwd:repo_dir wt_path;
+    let fake_bin = Filename.concat dir "bin" in
+    mkdir_p fake_bin;
+    write_executable (Filename.concat fake_bin "lsof") "#!/bin/sh\nexit 1\n";
+    let path =
+      Printf.sprintf "%s:%s" fake_bin
+        (Option.value ~default:"" (Sys.getenv_opt "PATH"))
+    in
+    let stdout, _ =
+      run_shell_ok ~env:[ "PATH", path ] ~cwd:(source_root ())
+        (Printf.sprintf
+           "%s --root %s --limit 5 --worktree-warn 1 --cleanup-summary \
+            --cleanup-days 1 --aggressive-cleanup-days 0"
+           (quote (status_script_path ()))
+           (quote root))
+    in
+    check bool "cleanup summary surfaced" true
+      (contains_substring stdout "Cleanup dry-run summary:");
+    check bool "root candidate count surfaced" true
+      (contains_substring stdout "cleanup_summary_candidates=1");
+    check bool "root projected count surfaced" true
+      (contains_substring stdout
+         "cleanup_summary_projected_worktree_entries=0");
+    check bool "top fanout candidate count surfaced" true
+      (contains_substring stdout "top_fanout_cleanup_summary_candidates=1");
+    check bool "top fanout projected count surfaced" true
+      (contains_substring stdout "top_fanout_cleanup_summary_projected_count=0");
+    check bool "aggressive summary surfaced" true
+      (contains_substring stdout "aggressive_cleanup_summary_candidates=1");
+    check bool "aggressive projected count surfaced" true
+      (contains_substring stdout
+         "aggressive_cleanup_summary_projected_worktree_entries=0");
+    check bool "top aggressive projected count surfaced" true
+      (contains_substring stdout
+         "top_fanout_aggressive_cleanup_summary_projected_count=0");
+    check bool "dry-run does not remove worktree" true (Sys.file_exists wt_path))
 
 let test_dry_run_lists_stale_clean_worktree () =
   with_temp_dir "docker-playground-gc-dry-run" (fun dir ->
@@ -303,6 +363,8 @@ let () =
             test_status_warns_on_fd_hotspot
         ; test_case "status warns on worktree hotspot when lsof fails" `Quick
             test_status_warns_on_worktree_hotspot_when_lsof_fails
+        ; test_case "status cleanup summary surfaces candidate counts" `Quick
+            test_status_cleanup_summary_surfaces_candidate_counts
         ; test_case "dry-run lists stale clean worktree" `Quick
             test_dry_run_lists_stale_clean_worktree
         ; test_case "recent checkout of old commit is not candidate" `Quick

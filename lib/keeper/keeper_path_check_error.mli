@@ -1,7 +1,7 @@
 (** Closed sum type for keeper path-check errors emitted by
     [worker_dev_tools] path validators.
 
-    Before this module, the same set of errors was rendered as ad-hoc
+    Before this module, path containment errors were rendered as ad-hoc
     [Printf.sprintf] strings at multiple emit sites and classified
     downstream via [String_util.contains_substring] grep — the
     classifier anti-pattern called out in #9521 and tracked as
@@ -20,14 +20,6 @@
       onto it without rewriting the spec mirror. *)
 
 type t =
-  | Path_syntax_blocked of
-      { token : string
-      ; hint : string option
-      }
-      (** Argv-role aware syntax rejection (quotes / globs / brace /
-          backslash on path-bearing argument). Emitted by
-          [validate_command_paths] when [token_has_unsafe_rewrite_syntax]
-          fires. *)
   | Path_outside_whitelist of
       { path : string
       ; for_keeper_command : bool

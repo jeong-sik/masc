@@ -300,7 +300,7 @@ let test_persisted_summary_nan_target_fail_closed () =
     }
   in
   check bool "nan lower-is-better target fails closed" false
-    (Lib.Tool_autoresearch.persisted_summary_target_reached summary)
+    (Lib.Autoresearch.persisted_summary_target_reached summary)
 
 let () =
   run "autoresearch_target_score"

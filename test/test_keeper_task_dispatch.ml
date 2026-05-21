@@ -526,6 +526,59 @@ let test_claim_returns_observation_fragment () =
         |> to_string))
 ;;
 
+let test_claim_reports_wip_admission_rejection () =
+  with_room (fun config ->
+    let meta = make_test_meta () in
+    let add_active idx =
+      let title = Printf.sprintf "fix: active WIP %d" idx in
+      let _ = Coord.add_task config ~title ~priority:1 ~description:"desc" in
+      set_task_status_by_title
+        config
+        ~title
+        ~task_status:
+          (Masc_domain.Claimed
+             { assignee = Printf.sprintf "other-%d" idx; claimed_at = "now" })
+    in
+    add_active 1;
+    add_active 2;
+    add_active 3;
+    let _ =
+      Coord.add_task
+        config
+        ~title:"fix: blocked by admission"
+        ~priority:1
+        ~description:"desc"
+    in
+    let result = call_tool config meta "keeper_task_claim" (`Assoc []) in
+    let json = parse_json result in
+    check
+      bool
+      "result mentions wip admission"
+      true
+      Yojson.Safe.Util.(
+        json |> member "result" |> to_string
+        |> Astring.String.is_infix ~affix:"WIP admission rejected task");
+    check
+      int
+      "rejected count"
+      1
+      Yojson.Safe.Util.(json |> member "wip_admission" |> member "rejected_count" |> to_int);
+    check
+      string
+      "reason"
+      "goal_cap"
+      Yojson.Safe.Util.(
+        json
+        |> member "wip_admission"
+        |> member "rejections"
+        |> index 0
+        |> member "reason"
+        |> to_string);
+    match task_by_title config "fix: blocked by admission" with
+    | { Masc_domain.task_status = Masc_domain.Todo; _ } -> ()
+    | _ -> fail "admission-rejected task must remain Todo")
+;;
+
 let test_claim_syncs_keeper_current_task_id () =
   with_room (fun config ->
     let meta = make_test_meta () in
@@ -744,7 +797,7 @@ let test_claim_next_preserves_existing_alias_owned_task () =
          (contains_substring message "already holds")
      | Coord.Claim_next_no_unclaimed ->
        fail "expected existing claim, got no_unclaimed"
-     | Coord.Claim_next_no_eligible { excluded_count } ->
+     | Coord.Claim_next_no_eligible { excluded_count; _ } ->
        fail
          (Printf.sprintf
             "expected existing claim, got no_eligible excluded=%d"
@@ -1244,8 +1297,25 @@ let test_claim_does_not_cross_goal_when_scoped_task_requires_missing_tool () =
     let result = call_tool config meta "keeper_task_claim" (`Assoc []) in
     let json = parse_json result in
     let message = Yojson.Safe.Util.(json |> member "result" |> to_string) in
+    let claim_scope = Yojson.Safe.Util.(json |> member "claim_scope") in
     check_no_task_claimed config meta;
     check_active_goal_scope_no_fallback json ~goal_id:scoped_goal.id;
+    check
+      int
+      "verification blocker count"
+      0
+      Yojson.Safe.Util.(claim_scope |> member "verification_blocked_count" |> to_int);
+    check
+      int
+      "required tool blocker count"
+      1
+      Yojson.Safe.Util.(
+        claim_scope |> member "required_tool_excluded_count" |> to_int);
+    check
+      int
+      "scope blocker count"
+      1
+      Yojson.Safe.Util.(claim_scope |> member "scope_excluded_count" |> to_int);
     check
       bool
       "message keeps active scope"
@@ -1333,8 +1403,25 @@ let test_claim_does_not_cross_goal_when_all_scoped_tasks_unavailable () =
     let result = call_tool config meta "keeper_task_claim" (`Assoc []) in
     let json = parse_json result in
     let message = Yojson.Safe.Util.(json |> member "result" |> to_string) in
+    let claim_scope = Yojson.Safe.Util.(json |> member "claim_scope") in
     check_no_task_claimed config meta;
     check_active_goal_scope_no_fallback json ~goal_id:scoped_goal.id;
+    check
+      int
+      "verification blocker count"
+      1
+      Yojson.Safe.Util.(claim_scope |> member "verification_blocked_count" |> to_int);
+    check
+      int
+      "scope blocker count"
+      1
+      Yojson.Safe.Util.(claim_scope |> member "scope_excluded_count" |> to_int);
+    check
+      int
+      "required tool blocker count"
+      0
+      Yojson.Safe.Util.(
+        claim_scope |> member "required_tool_excluded_count" |> to_int);
     check
       bool
       "message keeps active scope"
@@ -1433,8 +1520,25 @@ let test_claim_no_eligible_scoped_reports_scope_truth () =
     let result = call_tool config meta "keeper_task_claim" (`Assoc []) in
     let json = parse_json result in
     let message = Yojson.Safe.Util.(json |> member "result" |> to_string) in
+    let claim_scope = Yojson.Safe.Util.(json |> member "claim_scope") in
     check_no_task_claimed config meta;
     check_active_goal_scope_no_fallback json ~goal_id:scoped_goal.id;
+    check
+      int
+      "scope blocker count"
+      1
+      Yojson.Safe.Util.(claim_scope |> member "scope_excluded_count" |> to_int);
+    check
+      int
+      "required tool blocker count"
+      1
+      Yojson.Safe.Util.(
+        claim_scope |> member "required_tool_excluded_count" |> to_int);
+    check
+      bool
+      "required tool known surface"
+      true
+      Yojson.Safe.Util.(claim_scope |> member "agent_tool_names_known" |> to_bool);
     check
       bool
       "message avoids fallback search"
@@ -2707,6 +2811,10 @@ let () =
             "claim returns observation fragment"
             `Quick
             test_claim_returns_observation_fragment
+        ; test_case
+            "claim reports WIP admission rejection"
+            `Quick
+            test_claim_reports_wip_admission_rejection
         ; test_case
             "claim syncs keeper current_task_id"
             `Quick

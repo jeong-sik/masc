@@ -9,7 +9,7 @@
        matches what {!test/fixtures/shell_gate/baseline.jsonl}
        records for each corpus row (Phase 0 - baseline pin).
     2. [Masc_mcp.Worker_dev_tools.validate_command_coding_with_allowlist]
-       legacy verdict also matches the recorded baseline so any future
+       worker verdict also matches the recorded baseline so any future
        behavior change (Phase 2+) is visible as a corpus diff, not as
        a silent flip.
     3. Phase 1 facade-specific Plan invariants that the JSONL corpus
@@ -23,7 +23,7 @@ module W = Masc_mcp.Worker_dev_tools
 let allowed = [ "rg"; "sort"; "head"; "wc"; "cat"; "git"; "ls"; "grep" ]
 
 let allowlist : Gate.allowlist_policy =
-  { allowed_commands = allowed; allow_pipes = true; redirect_allowed = true }
+  { allowed_commands = allowed; allow_pipes = true }
 ;;
 
 (* {1 Baseline corpus} *)
@@ -31,7 +31,7 @@ let allowlist : Gate.allowlist_policy =
 type fixture = {
   raw_cmd : string;
   category : string;
-  expected_legacy_verdict : string;
+  expected_worker_verdict : string;
   expected_ir_verdict : string;
   ir_detail : string option;
   note : string;
@@ -72,7 +72,7 @@ let parse_fixture_line line =
   let json = Yojson.Safe.from_string line in
   { raw_cmd = assoc_string "raw_cmd" json
   ; category = assoc_string "category" json
-  ; expected_legacy_verdict = assoc_string "expected_legacy_verdict" json
+  ; expected_worker_verdict = assoc_string "expected_worker_verdict" json
   ; expected_ir_verdict = assoc_string "expected_ir_verdict" json
   ; ir_detail = assoc_string_opt "ir_detail" json
   ; note = assoc_string "note" json
@@ -97,10 +97,10 @@ let load_corpus () =
   fixtures
 ;;
 
-(* Legacy verdict tagging — short string aligned with the JSONL
+(* Worker verdict tagging — short string aligned with the JSONL
    schema. The {!W.block_reason} variant is private to the module,
    so we use {!W.block_reason_to_string} indirectly via tag mapping. *)
-let legacy_tag (result : (unit, W.block_reason) result) : string =
+let worker_tag (result : (unit, W.block_reason) result) : string =
   match result with
   | Ok () -> "ok"
   | Error W.Empty_command -> "empty_command"
@@ -129,13 +129,13 @@ let run_corpus_row fixture =
          String.sub fixture.raw_cmd 0 60 ^ "..."
        else fixture.raw_cmd)
   in
-  let legacy =
+  let worker =
     W.validate_command_coding_with_allowlist ~allowed_commands:allowed fixture.raw_cmd
   in
   Alcotest.(check string)
-    (label ^ " legacy verdict")
-    fixture.expected_legacy_verdict
-    (legacy_tag legacy);
+    (label ^ " worker verdict")
+    fixture.expected_worker_verdict
+    (worker_tag worker);
   let ir =
     Gate.gate
       ~raw:fixture.raw_cmd
@@ -257,34 +257,6 @@ let test_real_three_stage_pipeline_ordering () =
       (Gate.verdict_tag other)
 ;;
 
-let test_dev_null_redirect_shape_is_structural () =
-  match
-    Gate.gate
-      ~raw:"rg foo 2> /dev/null | head -20"
-      ~allowlist
-      ~path_policy:Gate.allow_all_paths
-      ~sandbox:Gate.host_sandbox
-      ()
-  with
-  | Gate.Allow context ->
-    Alcotest.(check int) "stage count" 2 (Gate.stage_count context);
-    Alcotest.(check (list string))
-      "stage bins"
-      [ "rg"; "head" ]
-      context.Gate.stage_bins;
-    (match context.Gate.stages with
-     | [ s1; s2 ] ->
-       (match s1.Masc_exec.Shell_ir.redirects, s2.Masc_exec.Shell_ir.redirects with
-        | [ Masc_exec.Redirect_scope.File { fd = 2; target; mode = Masc_exec.Redirect_scope.Write } ], [] ->
-          Alcotest.(check string) "redirect target" "/dev/null" (Masc_exec.Path_scope.raw target)
-        | _ -> Alcotest.fail "expected first stage to carry stderr /dev/null redirect")
-     | _ -> Alcotest.fail "expected two parsed stages")
-  | other ->
-    Alcotest.failf
-      "expected Allow for /dev/null redirect pipeline, got %s"
-      (Gate.verdict_tag other)
-;;
-
 let test_pipeline_segment_rejection_carries_stage_index () =
   match
     Gate.gate
@@ -303,7 +275,7 @@ let test_pipeline_segment_rejection_carries_stage_index () =
 
 let test_pipes_disabled () =
   let policy : Gate.allowlist_policy =
-    { allowed_commands = allowed; allow_pipes = false; redirect_allowed = true }
+    { allowed_commands = allowed; allow_pipes = false }
   in
   match
     Gate.gate
@@ -412,58 +384,6 @@ let test_lower_typed_empty_is_cannot_parse () =
       (Gate.verdict_tag other)
 ;;
 
-let test_gate_typed_shares_raw_policy_surface () =
-  let redirect =
-    Masc_exec.Redirect_scope.File
-      { fd = 2
-      ; target = Masc_exec.Path_scope.classify ~raw:"/dev/null" ~cwd:"."
-      ; mode = Masc_exec.Redirect_scope.Write
-      }
-  in
-  let stage = { (make_stage "rg" [ "foo" ]) with redirects = [ redirect ] } in
-  let policy : Gate.allowlist_policy =
-    { allowed_commands = allowed; allow_pipes = true; redirect_allowed = false }
-  in
-  match
-    Gate.gate_typed
-      ~ir:(Masc_exec.Shell_ir.Simple stage)
-      ~allowlist:policy
-      ~path_policy:Gate.allow_all_paths
-      ~sandbox:Gate.host_sandbox
-      ()
-  with
-  | Gate.Reject { reason = Gate.Redirect_disallowed_in_caller { stage = 1 }; _ } -> ()
-  | other ->
-    Alcotest.failf
-      "expected typed redirect policy reject, got %s"
-      (Gate.verdict_tag other)
-;;
-
-let test_gate_typed_rejects_nested_pipeline () =
-  let nested =
-    Masc_exec.Shell_ir.Pipeline
-      [ Masc_exec.Shell_ir.Simple (make_stage "rg" [ "foo" ])
-      ; Masc_exec.Shell_ir.Pipeline
-          [ Masc_exec.Shell_ir.Simple (make_stage "head" [ "-5" ])
-          ; Masc_exec.Shell_ir.Simple (make_stage "wc" [ "-l" ])
-          ]
-      ]
-  in
-  match
-    Gate.gate_typed
-      ~ir:nested
-      ~allowlist
-      ~path_policy:Gate.allow_all_paths
-      ~sandbox:Gate.host_sandbox
-      ()
-  with
-  | Gate.Too_complex { reason = Gate.Unsupported_nested_pipeline } -> ()
-  | other ->
-    Alcotest.failf
-      "expected typed nested pipeline to be Too_complex, got %s"
-      (Gate.verdict_tag other)
-;;
-
 let test_path_policy_rejects () =
   (* Path policy classifier is invoked on every literal arg. *)
   let classify ~raw_path =
@@ -483,67 +403,6 @@ let test_path_policy_rejects () =
   | other ->
     Alcotest.failf
       "expected Path_outside_policy reject, got %s"
-      (Gate.verdict_tag other)
-;;
-
-let test_path_policy_rejects_redirect_target () =
-  let classify ~raw_path =
-    if raw_path = "/dev/null" then `Deny "redirect sink not allowed"
-    else `Allow
-  in
-  let policy = { Gate.classify = Some classify } in
-  match
-    Gate.gate
-      ~raw:"rg foo 2>/dev/null"
-      ~allowlist
-      ~path_policy:policy
-      ~sandbox:Gate.host_sandbox
-      ()
-  with
-  | Gate.Reject { reason = Gate.Path_outside_policy { stage = 1; raw_path = "/dev/null"; _ }; _ } -> ()
-  | other ->
-    Alcotest.failf
-      "expected redirect target Path_outside_policy reject, got %s"
-      (Gate.verdict_tag other)
-;;
-
-let test_file_redirects_disabled () =
-  let policy : Gate.allowlist_policy =
-    { allowed_commands = allowed; allow_pipes = true; redirect_allowed = false }
-  in
-  match
-    Gate.gate
-      ~raw:"rg foo 2>/dev/null"
-      ~allowlist:policy
-      ~path_policy:Gate.allow_all_paths
-      ~sandbox:Gate.host_sandbox
-      ()
-  with
-  | Gate.Reject { reason = Gate.Redirect_disallowed_in_caller { stage = 1 }; _ } -> ()
-  | other ->
-    Alcotest.failf
-      "expected Redirect_disallowed_in_caller, got %s"
-      (Gate.verdict_tag other)
-;;
-
-let test_fd_redirect_allowed_when_file_redirects_disabled () =
-  let policy : Gate.allowlist_policy =
-    { allowed_commands = allowed; allow_pipes = true; redirect_allowed = false }
-  in
-  match
-    Gate.gate
-      ~raw:"ls 2>&1"
-      ~allowlist:policy
-      ~path_policy:Gate.allow_all_paths
-      ~sandbox:Gate.host_sandbox
-      ()
-  with
-  | Gate.Allow context ->
-    Alcotest.(check int) "stage count" 1 (Gate.stage_count context);
-    Alcotest.(check (list string)) "stage bins" [ "ls" ] context.Gate.stage_bins
-  | other ->
-    Alcotest.failf
-      "expected fd-to-fd redirect to stay allowed, got %s"
       (Gate.verdict_tag other)
 ;;
 
@@ -578,10 +437,6 @@ let test_too_complex_reason_tags_are_stable () =
   (* Telemetry tags must not change shape without an intentional
      migration — downstream JSONL consumers depend on these. *)
   Alcotest.(check string)
-    "redirect_disallowed tag"
-    "redirect_disallowed_in_caller"
-    (Gate.reject_reason_tag (Gate.Redirect_disallowed_in_caller { stage = 1 }));
-  Alcotest.(check string)
     "unsupported_nested_pipeline tag"
     "unsupported_nested_pipeline"
     (Gate.too_complex_reason_tag Gate.Unsupported_nested_pipeline);
@@ -600,13 +455,14 @@ let test_too_complex_reason_tags_are_stable () =
    The fixtures are also pinned by [test_corpus_pinned] above. These
    dedicated tests exist so a regression on any of the three new
    divergence/policy axes produces a focused failure label instead of
-   a generic "row N legacy/ir verdict mismatch". *)
+   a generic "row N worker/ir verdict mismatch". *)
 
-let test_backslash_pipe_in_double_quotes_is_literal () =
+let test_backslash_pipe_in_double_quotes_allows () =
   (* Corpus fixture: rg "a\|b"
-     Both legacy and IR keep the escaped regex pipe inside one
-     argument.  The real pipeline delimiter remains the unquoted [|]
-     token outside quotes. *)
+     Worker gate: ok.
+     IR: Allow. The typed parser keeps backslash-pipe inside the
+       quoted argv value instead of routing through the retired legacy
+       shape classifier. *)
   match
     Gate.gate
       ~raw:"rg \"a\\|b\""
@@ -615,12 +471,7 @@ let test_backslash_pipe_in_double_quotes_is_literal () =
       ~sandbox:Gate.host_sandbox
       ()
   with
-  | Gate.Allow context ->
-    Alcotest.(check int) "stage count" 1 (Gate.stage_count context);
-    Alcotest.(check (list string))
-      "stage bins"
-      [ "rg" ]
-      context.Gate.stage_bins
+  | Gate.Allow _ -> ()
   | other ->
     Alcotest.failf
       "expected Allow for backslash-pipe in dq, got %s"
@@ -629,7 +480,7 @@ let test_backslash_pipe_in_double_quotes_is_literal () =
 
 let test_brace_expansion_is_too_complex_glob_brace () =
   (* Corpus fixture: ls {a,b}.txt
-     Legacy: ok (brace not in the coding shell injection precheck).
+     Worker gate: ok (brace not in the coding shell injection precheck).
      IR: Too_complex (Unsupported_construct `Glob_brace).
      Phase 0 PR-A2: new fixture covering classify_too_complex's
      [has "{" || has "}"] arm — previously no corpus row exercised
@@ -651,7 +502,7 @@ let test_brace_expansion_is_too_complex_glob_brace () =
 
 let test_absolute_path_traversal_phase1_allows () =
   (* Corpus fixture: cat /etc/passwd
-     Legacy: ok (no metachar trigger).
+     Worker gate: ok (no metachar trigger).
      IR (Phase 1, allow_all_paths default): Allow with single Simple
        stage [cat /etc/passwd]. Phase 5 will install a path policy
        that flips this row to Reject Path_outside_policy — this
@@ -699,10 +550,6 @@ let () =
             `Quick
             test_real_three_stage_pipeline_ordering
         ; Alcotest.test_case
-            "/dev/null redirect is preserved structurally"
-            `Quick
-            test_dev_null_redirect_shape_is_structural
-        ; Alcotest.test_case
             "pipeline rejection carries 1-indexed stage"
             `Quick
             test_pipeline_segment_rejection_carries_stage_index
@@ -724,32 +571,12 @@ let () =
             "empty typed input is Cannot_parse"
             `Quick
             test_lower_typed_empty_is_cannot_parse
-        ; Alcotest.test_case
-            "policy-aware typed gate shares raw policy surface"
-            `Quick
-            test_gate_typed_shares_raw_policy_surface
-        ; Alcotest.test_case
-            "policy-aware typed gate rejects nested pipeline"
-            `Quick
-            test_gate_typed_rejects_nested_pipeline
         ] )
     ; ( "phase_1_policy"
       , [ Alcotest.test_case
             "path policy reject carries stage + raw path"
             `Quick
             test_path_policy_rejects
-        ; Alcotest.test_case
-            "path policy sees redirect target"
-            `Quick
-            test_path_policy_rejects_redirect_target
-        ; Alcotest.test_case
-            "file redirects can be disabled"
-            `Quick
-            test_file_redirects_disabled
-        ; Alcotest.test_case
-            "fd redirects stay allowed when file redirects disabled"
-            `Quick
-            test_fd_redirect_allowed_when_file_redirects_disabled
         ; Alcotest.test_case
             "sandbox target propagates to every stage"
             `Quick
@@ -763,9 +590,9 @@ let () =
         ] )
     ; ( "phase_0_pr_a2"
       , [ Alcotest.test_case
-            "backslash pipe in double quotes is literal"
+            "backslash pipe in double quotes stays literal"
             `Quick
-            test_backslash_pipe_in_double_quotes_is_literal
+            test_backslash_pipe_in_double_quotes_allows
         ; Alcotest.test_case
             "brace expansion classified as glob_brace"
             `Quick

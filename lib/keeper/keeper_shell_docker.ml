@@ -244,264 +244,11 @@ let ensure_keeper_sandbox_runtime ~timeout_sec =
   Keeper_sandbox_runtime.ensure_keeper_sandbox_runtime ~timeout_sec
 ;;
 
-let cmd_targets_git_or_gh cmd =
-  let trimmed = String.trim cmd in
-  let first_word =
-    match String.index_opt trimmed ' ' with
-    | Some i -> String.sub trimmed 0 i
-    | None -> trimmed
-  in
-  match first_word with
-  | "git" | "gh" -> true
-  | _ ->
-    (* Also detect git/gh after cd or other prefix commands.
-       LLMs frequently generate "cd <path> && gh pr view ..." which
-       has "cd" as the first word but the meaningful operation is
-       git/gh. *)
-    let tokens = String.split_on_char ' ' trimmed in
-    List.exists (fun tok -> tok = "git" || tok = "gh") tokens
-;;
+let cmd_targets_gh = Keeper_shell_command_semantics.cmd_targets_gh
+let resolve_sandbox_root_git_cwd = Keeper_shell_command_semantics.resolve_sandbox_root_git_cwd
 
-let cmd_targets_gh cmd =
-  let trimmed = String.trim cmd in
-  let first_word =
-    match String.index_opt trimmed ' ' with
-    | Some i -> String.sub trimmed 0 i
-    | None -> trimmed
-  in
-  if first_word = "gh"
-  then true
-  else (
-    (* Same "prefixed by cd ..." allowance as cmd_targets_git_or_gh,
-       but strict to gh for classification purposes. *)
-    let tokens = String.split_on_char ' ' trimmed in
-    List.exists (fun tok -> tok = "gh") tokens)
-;;
-
-let strip_simple_shell_quotes token =
-  let len = String.length token in
-  if
-    len >= 2
-    && ((token.[0] = '\'' && token.[len - 1] = '\'')
-        || (token.[0] = '"' && token.[len - 1] = '"'))
-  then String.sub token 1 (len - 2)
-  else token
-;;
-
-let bare_worktrees_path token =
-  let token = strip_simple_shell_quotes token in
-  String.equal token ".worktrees"
-  || String.equal token "./.worktrees"
-  || String.starts_with ~prefix:".worktrees/" token
-  || String.starts_with ~prefix:"./.worktrees/" token
-;;
-
-let git_c_path cmd =
-  let tokens =
-    String.split_on_char ' ' (String.trim cmd)
-    |> List.filter (fun s -> s <> "")
-    |> List.map strip_simple_shell_quotes
-  in
-  let rec scan_git_args = function
-    | "-C" :: path :: _ -> Some path
-    | "--" :: _ -> None
-    | option :: _ when String.starts_with ~prefix:"-C" option ->
-      let path =
-        String.sub option 2 (String.length option - 2) |> String.trim
-      in
-      if path = "" then None else Some path
-    | _ :: rest -> scan_git_args rest
-    | [] -> None
-  in
-  let rec scan = function
-    | "git" :: rest -> scan_git_args rest
-    | _ :: rest -> scan rest
-    | [] -> None
-  in
-  scan tokens
-;;
-
-let normalize_repos_path_token token =
-  let token = strip_simple_shell_quotes token |> String.trim in
-  let token =
-    if String.starts_with ~prefix:"./" token then
-      String.sub token 2 (String.length token - 2)
-    else token
-  in
-  match String.split_on_char '/' token with
-  | "repos" :: repo :: _ when Coord_worktree.safe_repo_name repo -> Some token
-  | _ -> None
-;;
-
-let cut_double_ampersand s =
-  let len = String.length s in
-  let rec loop i =
-    if i + 1 >= len then None
-    else if s.[i] = '&' && s.[i + 1] = '&' then
-      Some (String.sub s 0 i, String.sub s (i + 2) (len - i - 2))
-    else loop (i + 1)
-  in
-  loop 0
-;;
-
-let leading_cd_rewrite cmd =
-  let trimmed = String.trim cmd in
-  if not (String.starts_with ~prefix:"cd " trimmed) then None
-  else
-    match cut_double_ampersand trimmed with
-    | None -> None
-    | Some (cd_part, rest) ->
-      let path =
-        String.sub cd_part 3 (String.length cd_part - 3)
-        |> String.trim
-        |> normalize_repos_path_token
-      in
-      let rest = String.trim rest in
-      if rest = "" then None else Option.map (fun p -> (p, rest)) path
-;;
-
-let command_repos_path_hint cmd =
-  match leading_cd_rewrite cmd with
-  | Some (path, rest) -> Some (path, rest)
-  | None ->
-    let string_tokens () =
-      String.split_on_char ' ' (String.trim cmd)
-      |> List.filter (fun s -> s <> "")
-    in
-    let parsed_tokens () =
-      match Masc_exec_bash_parser.Bash.parse_string cmd with
-      | Masc_exec.Parsed.Parsed (Masc_exec.Shell_ir.Simple simple) ->
-        let bin = Masc_exec.Bin.to_string simple.bin in
-        let args =
-          simple.args
-          |> List.filter_map (function
-            | Masc_exec.Shell_ir.Lit arg -> Some arg
-            | Masc_exec.Shell_ir.Concat _ | Masc_exec.Shell_ir.Var _ -> None)
-        in
-        Some (bin :: args)
-      | Masc_exec.Parsed.Parsed (Masc_exec.Shell_ir.Pipeline _)
-      | Masc_exec.Parsed.Parse_error _
-      | Masc_exec.Parsed.Parse_aborted _
-      | Masc_exec.Parsed.Too_complex _ -> None
-    in
-    let tokens = Option.value (parsed_tokens ()) ~default:(string_tokens ()) in
-    tokens
-    |> List.find_map (fun token ->
-         match normalize_repos_path_token token with
-         | Some path -> Some (path, String.trim cmd)
-         | None -> None)
-;;
-
-let resolve_sandbox_root_git_cwd ~(config : Coord.config) ~(meta : keeper_meta) ~cwd ~cmd =
-  let host_root =
-    Keeper_sandbox.host_root_abs_of_meta ~config meta
-    |> Keeper_alerting_path.normalize_path_for_check
-    |> Keeper_alerting_path.strip_trailing_slashes
-  in
-  let cwd_normalized =
-    Keeper_alerting_path.normalize_path_for_check cwd
-    |> Keeper_alerting_path.strip_trailing_slashes
-  in
-  let repos_in_playground () =
-    let repos_dir = Filename.concat host_root "repos" in
-    if not (Sys.file_exists repos_dir && Sys.is_directory repos_dir)
-    then []
-    else (
-      try
-        Sys.readdir repos_dir
-        |> Array.to_list
-        |> List.filter (fun name ->
-          let p = Filename.concat repos_dir name in
-          try Sys.is_directory p && Sys.file_exists (Filename.concat p ".git") with
-          | Sys_error _ -> false)
-        |> List.sort compare
-      with
-      | Sys_error _ -> [])
-  in
-  if
-    cwd_normalized = host_root && cmd_targets_gh cmd && Keeper_gh_shared.has_repo_flag cmd
-  then cwd, None
-  else if cwd_normalized = host_root && cmd_targets_git_or_gh cmd
-  then (
-    let explicit_git_c_path = git_c_path cmd in
-    match explicit_git_c_path with
-    | Some path when not (bare_worktrees_path path) -> cwd, None
-    | _ -> (
-      match repos_in_playground () with
-    | [ single_repo ] ->
-      Filename.concat (Filename.concat host_root "repos") single_repo, None
-    | [] ->
-      ( cwd
-      , Some
-          (Printf.sprintf
-             "sandbox root cannot run git/gh: mount point %s is not a git repository and \
-              no sandbox git clones exist under repos/. First clone a repo with \
-              the visible clone tool, then retry with cwd=\"repos/<repo>\" or \
-              cwd=\"repos/<repo>/.worktrees/<task>\"."
-             host_root) )
-    | example_repo :: _ as many ->
-      (* #10680: keeper-executor-agent saw 17 events / 5min in a single
-         session (mcp_VHsjtow_92C_2a0o, 2026-04-26 08:00→08:06) where
-         the LLM read this descriptive error and still re-issued the
-         same bare git/gh in the next turn. Make the message
-         self-correcting: include the original cmd and the exact
-         next-call shape so the LLM can copy-paste rather than
-         re-derive the cwd convention from prose. *)
-      let suggested_cwd, suggested_cmd =
-        match command_repos_path_hint cmd with
-        | Some (path, rest) -> path, rest
-        | None -> "repos/" ^ example_repo, String.trim cmd
-      in
-      let suggested_cmd =
-        if String.length suggested_cmd > 120 then
-          String.sub suggested_cmd 0 117 ^ "..."
-        else suggested_cmd
-      in
-      ( cwd
-      , Some
-          (Printf.sprintf
-             "sandbox root cannot run git/gh: mount point %s is not a git repository and \
-              multiple sandbox repos exist. Set cwd explicitly before retrying. Example \
-              next call: Bash { \"command\": %S, \"cwd\": %S }. Available repos: %s. \
-              Do not retry the same cmd from sandbox root."
-             host_root
-             suggested_cmd
-             suggested_cwd
-             (String.concat ", " many)) )))
-  else cwd, None
-;;
-
-(* #10855: keeper LLM (issue_king, masc-improver) hallucinated gh syntax
-   `gh --repo X api Y` (108 events / 24h, 2026-04-25→04-26). gh CLI
-   semantics: `--repo` is a subcommand flag (gh issue/pr/release/...),
-   not a global option, and `gh api` rejects it with "unknown flag: --repo".
-   Detect the misuse pre-exec so we can emit a self-correcting error
-   instead of letting the docker exec waste a turn surfacing gh's raw
-   error.  Same self-correcting-message pattern as #10869's multi-repo
-   sandbox blocker. *)
-let detect_gh_repo_flag_with_api_misuse cmd =
-  let strip_quotes s =
-    let len = String.length s in
-    if
-      len >= 2
-      && ((s.[0] = '\'' && s.[len - 1] = '\'') || (s.[0] = '"' && s.[len - 1] = '"'))
-    then String.sub s 1 (len - 2)
-    else s
-  in
-  let toks =
-    String.split_on_char ' ' (String.trim cmd)
-    |> List.filter (fun s -> s <> "")
-    |> List.map strip_quotes
-  in
-  if not (List.mem "gh" toks)
-  then None
-  else (
-    let rec scan = function
-      | "--repo" :: repo_arg :: "api" :: endpoint :: _ -> Some (repo_arg, endpoint)
-      | _ :: rest -> scan rest
-      | [] -> None
-    in
-    scan toks)
+let detect_gh_repo_flag_with_api_misuse =
+  Keeper_shell_command_semantics.detect_gh_repo_flag_with_api_misuse
 ;;
 
 (* Emit a ("gh_exit_class", "…") JSON field when [cmd] targets gh,
@@ -509,7 +256,7 @@ let detect_gh_repo_flag_with_api_misuse cmd =
    append the returned list to their `Assoc payload unconditionally —
    it is empty for non-gh commands, so call sites keep their shape. *)
 let gh_exit_class_field ~cmd ~status ~output : (string * Yojson.Safe.t) list =
-  if not (cmd_targets_gh cmd)
+  if not (Keeper_shell_command_semantics.cmd_targets_gh cmd)
   then []
   else (
     let exit_code =
@@ -574,12 +321,13 @@ type docker_shell_result =
    This minimum applies only to the [docker run] path, not to
    [docker exec] against a warm container. *)
 let docker_run_min_timeout_sec =
-  let default = 20.0 in
+  let floor = Timeout_floor.Docker_run in
+  let default = Timeout_floor.default_sec floor in
   let raw =
     try float_of_string (Sys.getenv "MASC_KEEPER_DOCKER_RUN_MIN_TIMEOUT_SEC")
     with Not_found | Failure _ -> default
   in
-  Float.max 1.0 raw
+  Timeout_floor.clamp floor raw
 
 let docker_cleanup_rm_timeout_sec () =
   Env_config_sandbox.Shell_timeout.timeout_sec
@@ -698,7 +446,8 @@ let run_docker_shell_command_with_status_internal
             references")
     else
       let cwd, multi_repo_blocker =
-        resolve_sandbox_root_git_cwd ~config ~meta ~cwd ~cmd
+        Keeper_shell_command_semantics.resolve_sandbox_root_git_cwd
+          ~config ~meta ~cwd ~cmd
       in
       match multi_repo_blocker with
       | Some msg -> sandbox_error msg
@@ -848,7 +597,8 @@ let run_docker_shell_command_with_status_internal
                    | Error err -> sandbox_error err
                    | Ok () ->
                      let prepared_gitdirs =
-                       if git_creds_enabled && cmd_targets_git_or_gh cmd
+                       if git_creds_enabled
+                          && Keeper_shell_command_semantics.cmd_targets_git_or_gh cmd
                        then prepare_container_worktree_gitdirs ~host_root ~container_root
                        else 0
                      in
@@ -1028,7 +778,7 @@ let run_trusted_docker_shell_command_with_status =
   run_docker_shell_command_with_status_internal ~validate_command_paths:false
 ;;
 
-let run_docker_with_git_bash
+let run_docker_credentialed_bash
       ~(turn_sandbox_runtime : Keeper_turn_sandbox_runtime.t option)
       ~(config : Coord.config)
       ~(meta : keeper_meta)
@@ -1059,7 +809,8 @@ let run_docker_with_git_bash
     | Some blocked_json -> blocked_json
     | None ->
       let cwd, sandbox_root_git_blocker =
-        resolve_sandbox_root_git_cwd ~config ~meta ~cwd ~cmd
+        Keeper_shell_command_semantics.resolve_sandbox_root_git_cwd
+          ~config ~meta ~cwd ~cmd
       in
       (match sandbox_root_git_blocker with
        | Some message -> sandbox_error_json message
@@ -1124,7 +875,7 @@ let run_docker_with_git_bash
                          ~output:result.output))))))
 ;;
 
-let run_docker_hardened_bash
+let run_docker_bash
       ~(turn_sandbox_runtime : Keeper_turn_sandbox_runtime.t option)
       ~(config : Coord.config)
       ~(meta : keeper_meta)
@@ -1150,7 +901,8 @@ let run_docker_hardened_bash
       "sandbox_profile=docker blocks nested container runtimes and host socket references"
   else (
     let cwd, sandbox_root_git_blocker =
-      resolve_sandbox_root_git_cwd ~config ~meta ~cwd ~cmd
+      Keeper_shell_command_semantics.resolve_sandbox_root_git_cwd
+        ~config ~meta ~cwd ~cmd
     in
     match sandbox_root_git_blocker with
     | Some message -> sandbox_error_json message

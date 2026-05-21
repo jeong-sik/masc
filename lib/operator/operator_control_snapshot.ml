@@ -4,37 +4,11 @@ include Operator_digest
 
 include Operator_control_context_snapshot
 
-let non_empty_trimmed_string_opt value =
-  let trimmed = String.trim value in
-  if trimmed = "" then None else Some trimmed
-;;
-
-let keeper_runtime_identity_fields (meta : Keeper_types.keeper_meta) =
-  let cascade_name = Keeper_types.cascade_name_of_meta meta in
-  let effective_cascade = Keeper_cascade_profile.resolve_live cascade_name in
-  [ "cascade_name", string_option_to_json (non_empty_trimmed_string_opt cascade_name)
-  ; "cascade_canonical", `String effective_cascade
-  ; "selected_cascade_canonical", `String effective_cascade
-  ; "primary_model", `Null
-  ; "active_model", `Null
-  ; "active_model_label", `Null
-  ; "last_model_used_label", `Null
-  ]
-;;
-
-let degraded_keeper_runtime_identity_fields (meta : Keeper_types.keeper_meta) =
-  let cascade_name = non_empty_trimmed_string_opt (Keeper_types.cascade_name_of_meta meta) in
-  let cascade_json = string_option_to_json cascade_name in
-  [ "cascade_name", cascade_json
-  ; "cascade_canonical", cascade_json
-  ; "selected_cascade_canonical", cascade_json
-  ; "primary_model", `Null
-  ; "active_model", `Null
-  ; "active_model_label", `Null
-  ; "last_model_used_label", `Null
-  ]
-;;
-
+(* Keeper runtime identity fields extracted to
+   [Operator_control_snapshot_identity_fields] (godfile decomp). *)
+let non_empty_trimmed_string_opt = Operator_control_snapshot_identity_fields.non_empty_trimmed_string_opt
+let keeper_runtime_identity_fields = Operator_control_snapshot_identity_fields.keeper_runtime_identity_fields
+let degraded_keeper_runtime_identity_fields = Operator_control_snapshot_identity_fields.degraded_keeper_runtime_identity_fields
 type action_result_status =
   | ActionOk
   | ActionError
@@ -91,78 +65,16 @@ let merge_json_objects left right =
 ;;
 
 let action_log_path config = Filename.concat (operator_dir config) "action_log.jsonl"
-let remote_confirm_ttl_seconds = 900.0
 let iso_of_unix = Dashboard_utils.iso_of_unix
-
-let runtime_status_from_live_signal (agent_status_json : Yojson.Safe.t) =
-  let runtime_status =
-    match Keeper_exec_status.agent_status_text agent_status_json with
-    | ("active" | "busy" | "listening" | "idle") as status -> Some status
-    | _ -> None
-  in
-  let has_live_signal =
-    Keeper_exec_status.agent_runtime_has_live_signal agent_status_json
-  in
-  let is_zombie = Safe_ops.json_bool ~default:false "is_zombie" agent_status_json in
-  match runtime_status, has_live_signal, is_zombie with
-  | Some status, true, false -> Some status
-  | _ -> None
-;;
-
-let health_state_allows_runtime_status_override (diagnostic : Yojson.Safe.t) =
-  let kh =
-    Safe_ops.json_string ~default:"offline" "health_state" diagnostic
-    |> Keeper_exec_status.keeper_health_of_string
-  in
-  match kh with
-  | Keeper_types.KH_stale | KH_degraded | KH_zombie | KH_dead -> false
-  | KH_healthy | KH_idle | KH_offline -> true
-;;
-
-let align_keeper_runtime_status
-      ~(surface_status : string)
-      ~(diagnostic : Yojson.Safe.t)
-      ~(agent_status_json : Yojson.Safe.t)
-      ~(keepalive_running : bool)
-  : string
-  =
-  if not keepalive_running
-  then surface_status
-  else (
-    let normalized_surface = String.lowercase_ascii (String.trim surface_status) in
-    let runtime_status =
-      if health_state_allows_runtime_status_override diagnostic
-      then runtime_status_from_live_signal agent_status_json
-      else None
-    in
-    match normalized_surface, runtime_status with
-    | ("inactive" | "offline"), Some status -> status
-    | _ -> surface_status)
-;;
-
-let remote_client_type_of_context (ctx : 'a context) =
-  match ctx.mcp_session_id with
-  | Some _ -> "mcp_remote"
-  | None -> "local_api"
-;;
-
-let max_turns_override_source = function
-  | Some n
-    when n >= Keeper_runtime_resolved.max_turns_per_call_min
-         && n <= Keeper_runtime_resolved.max_turns_per_call_max -> "override"
-  | Some _ -> "override_invalid"
-  | None -> "env"
-;;
-
-let operator_server_profile_json =
-  `Assoc
-    [ "name", `String "operator_remote_v1"
-    ; "transport", `String "mcp_streamable_http"
-    ; "auth", `String "bearer_token"
-    ; "confirm_ttl_seconds", `Float remote_confirm_ttl_seconds
-    ; "curated_tool_count", `Int 4
-    ]
-;;
+(* remote_confirm_ttl_seconds + runtime-status alignment helpers
+   extracted to [Operator_control_snapshot_runtime_status] (godfile decomp). *)
+let remote_confirm_ttl_seconds = Operator_control_snapshot_runtime_status.remote_confirm_ttl_seconds
+let runtime_status_from_live_signal = Operator_control_snapshot_runtime_status.runtime_status_from_live_signal
+let health_state_allows_runtime_status_override = Operator_control_snapshot_runtime_status.health_state_allows_runtime_status_override
+let align_keeper_runtime_status = Operator_control_snapshot_runtime_status.align_keeper_runtime_status
+let remote_client_type_of_context = Operator_control_snapshot_runtime_status.remote_client_type_of_context
+let max_turns_override_source = Operator_control_snapshot_runtime_status.max_turns_override_source
+let operator_server_profile_json = Operator_control_snapshot_runtime_status.operator_server_profile_json
 
 let action_log_entry_to_yojson (entry : action_log_entry) =
   `Assoc
@@ -213,173 +125,10 @@ let recent_messages_json config =
 let merge_tool_name_lists = Operator_control_snapshot_tool_names.merge_tool_name_lists
 let tool_names_of_recent_json = Operator_control_snapshot_tool_names.tool_names_of_recent_json
 let collect_recent_tool_names = Operator_control_snapshot_tool_names.collect_recent_tool_names
-let recent_tool_names_from_files config keeper_name =
-  let decision_lines =
-    let path = Keeper_types.keeper_decision_log_path config keeper_name in
-    if Fs_compat.file_exists path
-    then Keeper_memory.read_file_tail_lines path ~max_bytes:120000 ~max_lines:120
-    else []
-  in
-  let metrics_lines =
-    let store = Keeper_types.keeper_metrics_store config keeper_name in
-    let dated = Dated_jsonl.read_recent_lines store 120 in
-    if dated <> []
-    then dated
-    else (
-      let path = Keeper_types.keeper_metrics_path config keeper_name in
-      Keeper_memory.read_file_tail_lines path ~max_bytes:120000 ~max_lines:120)
-  in
-  merge_tool_name_lists
-    (collect_recent_tool_names decision_lines)
-    (collect_recent_tool_names metrics_lines)
-;;
-
-let keeper_tool_audit_fields
-      ?(include_allowed_tools = true)
-      config
-      (meta : Keeper_types.keeper_meta)
-  =
-  let fallback_allowed =
-    if include_allowed_tools then Keeper_exec_tools.keeper_allowed_tool_names meta else []
-  in
-  let recent_tool_names = recent_tool_names_from_files config meta.name in
-  let last_autonomous = String.trim meta.runtime.last_autonomous_action_at in
-  let fallback_snapshot =
-    match
-      Keeper_exec_status_metrics.latest_tool_audit_snapshot_from_files
-        config
-        ~keeper_name:meta.name
-    with
-    | Some snapshot ->
-      { snapshot with
-        tool_audit_at =
-          (match snapshot.tool_audit_source, snapshot.tool_audit_at with
-           | Some _, None when last_autonomous <> "" -> Some last_autonomous
-           | Some _, None -> Some meta.updated_at
-           | _ -> snapshot.tool_audit_at)
-      }
-    | None ->
-      let has_runtime_activity =
-        last_autonomous <> ""
-        || meta.runtime.autonomous_turn_count > 0
-        || meta.runtime.autonomous_action_count > 0
-      in
-      { Keeper_exec_status_metrics.empty_tool_audit_snapshot with
-        latest_tool_call_count = (if has_runtime_activity then Some 0 else None)
-      ; tool_audit_source =
-          (if has_runtime_activity then Some "keeper_runtime_meta" else None)
-      ; tool_audit_at =
-          (if last_autonomous <> ""
-           then Some last_autonomous
-           else if has_runtime_activity
-           then Some meta.updated_at
-           else None)
-      }
-  in
-  ( fallback_allowed
-  , recent_tool_names
-  , fallback_snapshot.latest_tool_names
-  , fallback_snapshot.latest_tool_call_count
-  , fallback_snapshot.latest_action_source
-  , fallback_snapshot.tool_audit_source
-  , fallback_snapshot.tool_audit_at )
-;;
-
-let lightweight_tool_audit_fallback_json (meta : Keeper_types.keeper_meta) =
-  let last_autonomous = String.trim meta.runtime.last_autonomous_action_at in
-  let has_runtime_activity =
-    last_autonomous <> ""
-    || meta.runtime.autonomous_turn_count > 0
-    || meta.runtime.autonomous_action_count > 0
-  in
-  `Assoc
-    [ "allowed_tool_names", `List []
-    ; "recent_tool_names", `List []
-    ; "latest_tool_names", `List []
-    ; ("latest_tool_call_count", if has_runtime_activity then `Int 0 else `Null)
-    ; "latest_action_source", `Null
-    ; ( "tool_audit_source"
-      , if has_runtime_activity then `String "keeper_runtime_meta" else `Null )
-    ; ( "tool_audit_at"
-      , if last_autonomous <> ""
-        then `String last_autonomous
-        else if has_runtime_activity
-        then `String meta.updated_at
-        else `Null )
-    ]
-;;
-
-let cached_tool_audit_json
-      ~lightweight
-      (config : Coord.config)
-      (meta : Keeper_types.keeper_meta)
-  =
-  let base_hash = Digest.to_hex (Digest.string config.base_path) in
-  let cache_key = "kta:" ^ base_hash ^ ":" ^ meta.name in
-  if lightweight
-  then
-    Dashboard_cache.seed_stale_if_missing
-      cache_key
-      ~stale_for:120.0
-      (lightweight_tool_audit_fallback_json meta);
-  let ttl = if lightweight then 30.0 else 2.0 in
-  Dashboard_cache.get_or_compute cache_key ~ttl (fun () ->
-    let ( allowed_tool_names
-        , recent_tool_names
-        , latest_tool_names
-        , latest_tool_call_count
-        , latest_action_source
-        , tool_audit_source
-        , tool_audit_at )
-      =
-      if lightweight
-      then (
-        let ( _
-            , recent_tool_names
-            , latest_tool_names
-            , latest_tool_call_count
-            , latest_action_source
-            , tool_audit_source
-            , tool_audit_at )
-          =
-          keeper_tool_audit_fields ~include_allowed_tools:false config meta
-        in
-        ( []
-        , recent_tool_names
-        , latest_tool_names
-        , latest_tool_call_count
-        , latest_action_source
-        , tool_audit_source
-        , tool_audit_at ))
-      else keeper_tool_audit_fields config meta
-    in
-    `Assoc
-      [ "allowed_tool_names", `List (List.map (fun v -> `String v) allowed_tool_names)
-      ; "recent_tool_names", `List (List.map (fun v -> `String v) recent_tool_names)
-      ; "latest_tool_names", `List (List.map (fun v -> `String v) latest_tool_names)
-      ; "latest_tool_call_count", option_to_json (fun v -> `Int v) latest_tool_call_count
-      ; "latest_action_source", string_option_to_json latest_action_source
-      ; "tool_audit_source", string_option_to_json tool_audit_source
-      ; "tool_audit_at", string_option_to_json tool_audit_at
-      ])
-;;
-
-(* Concurrency cap for parallel keeper snapshot fibers.
-   Originally 4 to guard against memory bursts when many keepers are
-   processed simultaneously.  Live measurement via #8829 over 48 samples
-   showed this cap was the dominant cost, not the per-keeper I/O:
-
-       wait avg=1334ms max=4424ms   (queued on semaphore)
-       work avg=604ms  max=3088ms   (meta/agent/profile I/O + JSON)
-       ratio wait/work = 2.21x
-
-   Raising to 16 matches the current fleet size so no fiber queues on
-   the semaphore in the common case.  The original memory concern was
-   written when keepers were a new surface; modern machines absorb the
-   per-fiber JSON construction (~50 fields × 16 keepers ≈ a few MB)
-   without visible pressure.  Env-overridable via
-   [MASC_KEEPER_SNAPSHOT_CONCURRENCY] for operators on tight memory
-   envelopes (e.g. CI runners) who still want the old behaviour. *)
+let lightweight_tool_audit_fallback_json = Operator_control_snapshot_tool_audit.lightweight_tool_audit_fallback_json
+let recent_tool_names_from_files = Operator_control_snapshot_tool_audit.recent_tool_names_from_files
+let keeper_tool_audit_fields = Operator_control_snapshot_tool_audit.keeper_tool_audit_fields
+let cached_tool_audit_json = Operator_control_snapshot_tool_audit.cached_tool_audit_json
 let _keeper_snapshot_max_concurrency =
   match Sys.getenv_opt "MASC_KEEPER_SNAPSHOT_CONCURRENCY" with
   | Some s ->
@@ -391,66 +140,8 @@ let _keeper_snapshot_max_concurrency =
 
 let _keeper_sem = Eio.Semaphore.make _keeper_snapshot_max_concurrency
 
-let compact_keeper_runtime_trust_json
-      ~(config : Coord.config)
-      ~(meta : Keeper_types.keeper_meta)
-  =
-  let runtime_trust =
-    if Keeper_fd_pressure.active ()
-    then Keeper_fd_pressure.degraded_trust_json ()
-    else Keeper_runtime_trust_snapshot.summary_json ~config ~meta
-  in
-  let member key = Yojson.Safe.Util.member key runtime_trust in
-  `Assoc
-    [ "disposition", member "disposition"
-    ; "disposition_reason", member "disposition_reason"
-    ; "operator_disposition", member "operator_disposition"
-    ; "operator_disposition_reason", member "operator_disposition_reason"
-    ; "needs_attention", member "needs_attention"
-    ; "attention_reason", member "attention_reason"
-    ; "next_human_action", member "next_human_action"
-    ; "execution_summary", member "execution"
-    ; "latest_terminal_reason", member "latest_terminal_reason"
-    ; "latest_next_action", member "latest_next_action"
-    ; "latest_causal_event", member "latest_causal_event"
-    ]
-;;
-
-let degraded_keeper_snapshot_row (meta : Keeper_types.keeper_meta) =
-  let runtime_trust = Keeper_fd_pressure.degraded_trust_json () in
-  let fd_fields = Keeper_fd_pressure.projection_fields () in
-  `Assoc
-    ([ "runtime_class", `String "keeper"
-     ; "pipeline_stage", `String "degraded"
-     ; "phase", `String "degraded"
-     ; "name", `String meta.name
-     ; "agent_name", `String meta.agent_name
-     ; ( "trace_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id) )
-     ; "goal", `String meta.goal
-     ; "short_goal", `String meta.short_goal
-     ; "mid_goal", `String meta.mid_goal
-     ; "long_goal", `String meta.long_goal
-     ; "status", `String "degraded"
-     ; "agent", `Null
-     ; "generation", `Int meta.runtime.generation
-     ; "turn_count", `Int meta.runtime.usage.total_turns
-     ; "paused", `Bool meta.paused
-     ; "keepalive_running", `Bool false
-     ; "last_model_used", `Null
-     ; "next_model_hint", `Null
-     ; ( "active_goal_ids"
-       , `List (List.map (fun goal_id -> `String goal_id) meta.active_goal_ids) )
-     ; "recent_activity", `List []
-     ; "runtime_trust", runtime_trust
-     ; "trust", runtime_trust
-     ; "diagnostic", Keeper_fd_pressure.degraded_projection_json ()
-     ; "updated_at", `String meta.updated_at
-     ; "created_at", `String meta.created_at
-     ]
-     @ degraded_keeper_runtime_identity_fields meta
-     @ fd_fields)
-;;
-
+let compact_keeper_runtime_trust_json = Operator_control_snapshot_trust.compact_keeper_runtime_trust_json
+let degraded_keeper_snapshot_row = Operator_control_snapshot_trust.degraded_keeper_snapshot_row
 let keepers_json
       ?keeper_names
       ?(include_recent_activity = false)
@@ -1020,125 +711,7 @@ let keepers_json
   `Assoc [ "count", `Int (List.length rows); "items", `List rows ]
 ;;
 
-let persistent_agents_json ?keeper_names ?keeper_rows config =
-  let rows_from_keeper_rows names rows =
-    let wanted = List.sort_uniq String.compare names in
-    let wanted_tbl = Hashtbl.create (List.length wanted) in
-    List.iter (fun name -> Hashtbl.replace wanted_tbl name ()) wanted;
-    rows
-    |> List.filter_map (function
-      | `Assoc fields ->
-        (match List.assoc_opt "name" fields with
-         | Some (`String name) when Hashtbl.mem wanted_tbl name ->
-           let field_or_null key =
-             match List.assoc_opt key fields with
-             | Some value -> value
-             | None -> `Null
-           in
-           Some
-             (`Assoc
-                 [ "runtime_class", `String "keeper"
-                 ; "name", field_or_null "name"
-                 ; "agent_name", field_or_null "agent_name"
-                 ; "trace_id", field_or_null "trace_id"
-                 ; "goal", field_or_null "goal"
-                 ; "short_goal", field_or_null "short_goal"
-                 ; "mid_goal", field_or_null "mid_goal"
-                 ; "long_goal", field_or_null "long_goal"
-                 ; "status", field_or_null "status"
-                 ; "generation", field_or_null "generation"
-                 ; "turn_count", field_or_null "turn_count"
-                 ; "context_ratio", field_or_null "context_ratio"
-                 ; "context_tokens", field_or_null "context_tokens"
-                 ; "context_max", field_or_null "context_max"
-                 ; "context_source", field_or_null "context_source"
-                 ; "last_model_used", field_or_null "last_model_used"
-                 ; "active_model", field_or_null "active_model"
-                 ; "active_model_label", field_or_null "active_model_label"
-                 ; "last_model_used_label", field_or_null "last_model_used_label"
-                 ; "cascade_name", field_or_null "cascade_name"
-                 ; "cascade_canonical", field_or_null "cascade_canonical"
-                 ; ( "selected_cascade_canonical"
-                   , field_or_null "selected_cascade_canonical" )
-                 ; "primary_model", field_or_null "primary_model"
-                 ; "next_model_hint", field_or_null "next_model_hint"
-                 ; "active_goal_ids", field_or_null "active_goal_ids"
-                 ; "last_autonomous_action_at", field_or_null "last_autonomous_action_at"
-                 ; "autonomous_action_count", field_or_null "autonomous_action_count"
-                 ; "updated_at", field_or_null "updated_at"
-                 ; "created_at", field_or_null "created_at"
-                 ])
-         | _ -> None)
-      | _ -> None)
-  in
-  let rows =
-    match keeper_rows with
-    | Some rows ->
-      let names =
-        match keeper_names with
-        | Some names -> names
-        | None -> Keeper_types.persistent_agent_names config
-      in
-      rows_from_keeper_rows names rows
-    | None ->
-      let names =
-        match keeper_names with
-        | Some names -> names
-        | None -> Keeper_types.persistent_agent_names config
-      in
-      List.filter_map
-        (fun name ->
-           match Keeper_types.read_meta config name with
-           | Error _ | Ok None -> None
-           | Ok (Some meta) ->
-             let agent_json =
-               let cache_key = "kas:" ^ meta.agent_name in
-               Dashboard_cache.get_or_compute cache_key ~ttl:2.0 (fun () ->
-                 Keeper_exec_status.parse_agent_status config ~agent_name:meta.agent_name)
-             in
-             let agent_status =
-               match agent_json with
-               | `Assoc _ ->
-                 (match agent_json |> U.member "status" with
-                  | `String status -> status
-                  | _ -> "unknown")
-               | _ -> "unknown"
-             in
-             let context_snapshot = keeper_context_snapshot_of_meta config meta in
-             Some
-               (`Assoc
-                   ([ "runtime_class", `String "keeper"
-                    ; "name", `String meta.name
-                    ; "agent_name", `String meta.agent_name
-                    ; ( "trace_id"
-                      , `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id) )
-                    ; "goal", `String meta.goal
-                    ; "short_goal", `String meta.short_goal
-                    ; "mid_goal", `String meta.mid_goal
-                    ; "long_goal", `String meta.long_goal
-                    ; "status", `String agent_status
-                    ; "generation", `Int meta.runtime.generation
-                    ; "turn_count", `Int meta.runtime.usage.total_turns
-                    ; "last_model_used", `Null
-                    ; "active_model", `Null
-                    ; "next_model_hint", `Null
-                    ; ( "active_goal_ids"
-                      , `List
-                          (List.map (fun goal_id -> `String goal_id) meta.active_goal_ids)
-                      )
-                    ; ( "last_autonomous_action_at"
-                      , if String.trim meta.runtime.last_autonomous_action_at = ""
-                        then `Null
-                        else `String meta.runtime.last_autonomous_action_at )
-                    ; "autonomous_action_count", `Int meta.runtime.autonomous_action_count
-                    ; "updated_at", `String meta.updated_at
-                    ; "created_at", `String meta.created_at
-                    ]
-                    @ keeper_context_snapshot_fields context_snapshot)))
-        names
-  in
-  `Assoc [ "count", `Int (List.length rows); "items", `List rows ]
-;;
+let persistent_agents_json = Operator_control_snapshot_persistent_agents.persistent_agents_json
 
 let _snapshot_session_window_seconds () =
   Dashboard_http_helpers.operator_snapshot_session_window_seconds ()
@@ -1180,51 +753,19 @@ let room_json config =
       ])
 ;;
 
-type snapshot_view =
+(* snapshot_view variant + parser extracted to
+   [Operator_control_snapshot_view] (godfile decomp). *)
+type snapshot_view = Operator_control_snapshot_view.snapshot_view =
   | Summary
   | Sessions
   | Keepers
   | Messages
   | Full
 
-(* Issue #8471: Variant SSOT for [snapshot_view]. Adding a constructor
-   forces [snapshot_view_to_string] exhaustiveness AND extends
-   [valid_snapshot_view_strings]; the schema in [tool_operator.ml]
-   derives its enum from this list, so a new constructor flows
-   through automatically instead of silently dropping (as [Sessions]
-   did before this fix). *)
-let snapshot_view_to_string = function
-  | Summary -> "summary"
-  | Sessions -> "sessions"
-  | Keepers -> "keepers"
-  | Messages -> "messages"
-  | Full -> "full"
-;;
-
-let all_snapshot_views = [ Summary; Sessions; Keepers; Messages; Full ]
-let valid_snapshot_view_strings = List.map snapshot_view_to_string all_snapshot_views
-
-(* Sound partial parser — Some for canonical strings, None otherwise.
-   [parse_snapshot_view] below intentionally falls back to [Full] for
-   tool/HTTP back-compat; this opt variant exists for callers that
-   want to distinguish unknown input. *)
-let snapshot_view_of_string_opt raw =
-  match String.trim raw |> String.lowercase_ascii with
-  | "summary" -> Some Summary
-  | "sessions" -> Some Sessions
-  | "keepers" -> Some Keepers
-  | "messages" -> Some Messages
-  | "full" -> Some Full
-  | _ -> None
-;;
-
-let parse_snapshot_view = function
-  | Some raw ->
-    (match snapshot_view_of_string_opt raw with
-     | Some v -> v
-     | None -> Full)
-  | None -> Full
-;;
+let snapshot_view_to_string = Operator_control_snapshot_view.snapshot_view_to_string
+let valid_snapshot_view_strings = Operator_control_snapshot_view.valid_snapshot_view_strings
+let snapshot_view_of_string_opt = Operator_control_snapshot_view.snapshot_view_of_string_opt
+let parse_snapshot_view = Operator_control_snapshot_view.parse_snapshot_view
 
 (* Snapshot TTL cache with same-key deduplication (singleflight).
    When multiple fibers hit a cache miss for the same key concurrently,

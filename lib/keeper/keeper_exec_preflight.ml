@@ -1,8 +1,5 @@
 open Keeper_types
 
-(* RFC-0084 host-config-cleanup-B — zsh binary path migration. *)
-let host_zsh = (Host_config.host ()).host_zsh
-
 let json_string_field name json = Json_util.get_string json name
 
 let json_string_opt = function
@@ -11,6 +8,8 @@ let json_string_opt = function
 
 let json_string_list values =
   `List (List.map (fun value -> `String value) values)
+
+let quote_argv argv = String.concat " " (List.map Filename.quote argv)
 
 type cascade_resilience =
   { ok : bool
@@ -127,13 +126,14 @@ let handle_keeper_preflight_check
   in
   (* Check 1: gh auth status *)
   let () =
+    let argv = [ "gh"; "auth"; "status" ] in
     let st, out =
       Masc_exec.Exec_gate.run_argv_with_status
         ~actor:`Coord_git
-        ~raw_source:"/bin/zsh -lc gh auth status 2>&1"
+        ~raw_source:(quote_argv argv)
         ~summary:"keeper preflight gh auth status"
         ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Preflight ())
-        [ host_zsh; "-lc"; "gh auth status 2>&1" ]
+        argv
     in
     add_check "gh_auth" (st = Unix.WEXITED 0) out
   in
@@ -143,15 +143,16 @@ let handle_keeper_preflight_check
     if repo = "" then
       add_check "repo_access" true "(current project)"
     else
+      let argv =
+        [ "gh"; "repo"; "view"; repo; "--json"; "name,defaultBranchRef" ]
+      in
       let st, out =
         Masc_exec.Exec_gate.run_argv_with_status
           ~actor:`Coord_git
-          ~raw_source:(Printf.sprintf "/bin/zsh -lc gh repo view %s --json name,defaultBranchRef 2>&1" (Filename.quote repo))
+          ~raw_source:(quote_argv argv)
           ~summary:"keeper preflight gh repo view"
           ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Preflight ())
-          [ host_zsh; "-lc";
-            Printf.sprintf "gh repo view %s --json name,defaultBranchRef 2>&1"
-              (Filename.quote repo) ]
+          argv
       in
       let ok = st = Unix.WEXITED 0 in
       (* Extract default branch from JSON if available *)

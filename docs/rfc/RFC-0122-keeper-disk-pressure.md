@@ -3,12 +3,41 @@ rfc: "0122"
 title: "Keeper disk pressure — process-local fleet failure mode beyond FD"
 status: Draft
 created: 2026-05-17
-updated: 2026-05-20
+updated: 2026-05-21
 author: vincent
 supersedes: []
 superseded_by: null
-related: ["0042", "0097", "0101", "0103"]
+related: ["0042", "0097", "0101", "0103", "0148", "0154"]
 implementation_prs: [15975]
+---
+
+## Progress audit (2026-05-21)
+
+Status remains `Draft` — RFC body (P1) is the only phase landed.
+The §3 P2–P6 plan (Resource_pressure.S interface, Fd_pressure
+alias, probe staleness contract, env knob spec, telemetry counter)
+has not started. Verified 2026-05-21:
+
+- `rg "Resource_pressure" lib/` → 0 hits (P2 absent)
+- `keeper_disk_pressure.ml` cooldown env knob `MASC_KEEPER_DISK_PRESSURE_COOLDOWN_SEC`
+  already exists from pre-RFC commits (P5 partial, not via RFC-0122 PR)
+
+The backfill nature of this RFC (the pre-existing
+`lib/keeper_disk_pressure.ml` module was the trigger; the RFC body
+codified what already shipped) means Active promotion is not
+appropriate — no follow-up phase work has happened. Audit script
+(#17123) flag was a true positive in the body-only sense and a false
+positive for closeout-lag.
+
+### Related RFC update (the single substantive change in this audit)
+
+This audit appends RFC-0148 and RFC-0154 to `related:`. PR #17051
+(`dashboard: classify disk-pressure errors → RFC-0122 hint`,
+merged 2026-05-21 as part of the Tool Monitor UX sprint) now points
+into RFC-0122's `kind` surface from the dashboard side. The
+typed-error closed-sum cohort consumes RFC-0122's disk_exhaustion
+classification, so the cross-reference belongs in the frontmatter.
+
 ---
 
 # RFC-0122: Keeper disk pressure — process-local fleet failure mode beyond FD

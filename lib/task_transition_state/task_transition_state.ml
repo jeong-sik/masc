@@ -284,15 +284,10 @@ let default_silence_threshold : int = 10
 
 (* ── In-memory state ──────────────────────────────────────────────── *)
 
-(* Per-task entry: count of failures keyed by [family]. We use a
-   nested Hashtbl so [reset_for_task] is O(families-for-task). *)
-type per_task = (family, int) Hashtbl.t
+let state = Bounded_event_dedupe.create ~initial_capacity:64 ()
 
-let state_mutex : Stdlib.Mutex.t = Stdlib.Mutex.create ()
-let state : (string, per_task) Hashtbl.t = Hashtbl.create 64
-
-let with_lock (f : unit -> 'a) : 'a =
-  Stdlib.Mutex.protect state_mutex f
+let key ~task_id ~family =
+  Bounded_event_dedupe.key [ task_id; family_to_string family ]
 
 let record_invalid_state
     ?(silence_threshold = default_silence_threshold)
@@ -301,40 +296,26 @@ let record_invalid_state
     ()
     : record_outcome
   =
-  with_lock (fun () ->
-    let per_task =
-      match Hashtbl.find_opt state task_id with
-      | Some t -> t
-      | None ->
-        let t = Hashtbl.create 4 in
-        Hashtbl.replace state task_id t;
-        t
-    in
-    let prev = Option.value (Hashtbl.find_opt per_task family) ~default:0 in
-    let next = prev + 1 in
-    Hashtbl.replace per_task family next;
-    if next = 1
-    then `First
-    else if next = silence_threshold
-    then `Threshold_silence { count = next; silence_threshold }
-    else `Repeated next)
+  let key = key ~task_id ~family in
+  match Bounded_event_dedupe.record_threshold state ~key ~threshold:silence_threshold with
+  | Bounded_event_dedupe.First_threshold -> `First
+  | Bounded_event_dedupe.Repeated_threshold count -> `Repeated count
+  | Bounded_event_dedupe.Threshold { count; threshold } ->
+    `Threshold_silence { count; silence_threshold = threshold }
 
 let reset_for_task ~(task_id : string) : unit =
-  with_lock (fun () -> Hashtbl.remove state task_id)
+  List.iter
+    (fun family ->
+      let key = key ~task_id ~family in
+      Bounded_event_dedupe.remove state ~key)
+    all_families
 
 let reset_for_test () : unit =
-  with_lock (fun () -> Hashtbl.reset state)
+  Bounded_event_dedupe.reset state
 
 let cardinality () : int =
-  with_lock (fun () ->
-    Hashtbl.fold
-      (fun _task_id per_task acc -> acc + Hashtbl.length per_task)
-      state
-      0)
+  Bounded_event_dedupe.cardinality state
 
 let failure_count ~(task_id : string) ~(family : family) : int =
-  with_lock (fun () ->
-    match Hashtbl.find_opt state task_id with
-    | None -> 0
-    | Some per_task ->
-      Option.value (Hashtbl.find_opt per_task family) ~default:0)
+  let key = key ~task_id ~family in
+  Bounded_event_dedupe.count state ~key

@@ -29,7 +29,6 @@ type tool_group =
   | Masc_plan
   | Masc_worktree
   | Masc_code
-  | Masc_autoresearch
   | Masc_agent
   | Masc_core
 
@@ -50,7 +49,6 @@ let tool_group_to_string = function
   | Masc_plan -> "masc_plan"
   | Masc_worktree -> "masc_worktree"
   | Masc_code -> "masc_code"
-  | Masc_autoresearch -> "masc_autoresearch"
   | Masc_agent -> "masc_agent"
   | Masc_core -> "masc_core"
 
@@ -60,11 +58,7 @@ module TM = Tool_name.Masc
 module TMK = Tool_name.Masc_keeper
 
 let inferred_effect_domain_of_typed_tool_name = function
-  | TN.Keeper TK.Bash
-  | TN.Keeper TK.Bash_kill
-  | TN.Keeper TK.Shell ->
-      Some Main_worktree_write
-  | TN.Keeper TK.Bash_output
+  | TN.Keeper TK.Bash | TN.Keeper TK.Shell -> Some Main_worktree_write
   | TN.Keeper TK.Board_get
   | TN.Keeper TK.Board_list
   | TN.Keeper TK.Board_curation_read
@@ -126,9 +120,6 @@ let inferred_effect_domain_of_typed_tool_name = function
   | TN.Keeper TK.Voice_session_start
   | TN.Keeper TK.Voice_speak ->
       Some Masc_coordination
-  | TN.Masc TM.Autoresearch_inject
-  | TN.Masc TM.Autoresearch_start
-  | TN.Masc TM.Autoresearch_stop
   | TN.Masc TM.Deliver
   | TN.Masc TM.Dispatch_plan
   | TN.Masc TM.Operator_action
@@ -138,8 +129,6 @@ let inferred_effect_domain_of_typed_tool_name = function
   | TN.Masc TM.Agent_fitness
   | TN.Masc TM.Agent_card
   | TN.Masc TM.Agents
-  | TN.Masc TM.Autoresearch_search_findings
-  | TN.Masc TM.Autoresearch_status
   | TN.Masc TM.Board_get
   | TN.Masc TM.Board_curation_read
   | TN.Masc TM.Board_hearths
@@ -156,7 +145,6 @@ let inferred_effect_domain_of_typed_tool_name = function
   | TN.Masc TM.Dashboard
   | TN.Masc TM.Get_metrics
   | TN.Masc TM.Goal_list
-  | TN.Masc TM.Goal_review
   | TN.Masc TM.Mcp_session
   | TN.Masc TM.Messages
   | TN.Masc TM.Operation_status
@@ -193,8 +181,6 @@ let inferred_effect_domain_of_typed_tool_name = function
       Some Playground_write
   | TN.Masc TM.Add_task
   | TN.Masc TM.Agent_update
-  | TN.Masc TM.Autoresearch_cycle
-  | TN.Masc TM.Autoresearch_record_finding
   | TN.Masc TM.Batch_add_tasks
   | TN.Masc TM.Board_cleanup
   | TN.Masc TM.Board_comment
@@ -301,9 +287,7 @@ let tool_group_of_typed_tool_name = function
   | TN.Keeper (TK.Bash | TK.Fs_edit | TK.Fs_read | TK.Ide_annotate | TK.Shell | TK.Write) ->
       Some Filesystem
   | TN.Keeper
-      ( TK.Bash_kill
-      | TK.Bash_output
-      | TK.Broadcast
+      ( TK.Broadcast
       | TK.Code_read
       | TK.Context_status
       | TK.Discovery
@@ -363,15 +347,6 @@ let tool_group_of_typed_tool_name = function
       | TM.Code_symbols
       | TM.Code_write ) ->
       Some Masc_code
-  | TN.Masc
-      ( TM.Autoresearch_cycle
-      | TM.Autoresearch_inject
-      | TM.Autoresearch_record_finding
-      | TM.Autoresearch_search_findings
-      | TM.Autoresearch_start
-      | TM.Autoresearch_status
-      | TM.Autoresearch_stop ) ->
-      Some Masc_autoresearch
   | TN.Masc (TM.Agent_fitness | TM.Agent_update | TM.Agent_card | TM.Agents) ->
       Some Masc_agent
   | TN.Masc
@@ -391,7 +366,6 @@ let tool_group_of_typed_tool_name = function
       | TM.Gc
       | TM.Get_metrics
       | TM.Goal_list
-      | TM.Goal_review
       | TM.Goal_transition
       | TM.Goal_upsert
       | TM.Goal_verify

@@ -17,9 +17,9 @@
     force the tests through factory helpers without making the
     abstraction any richer.
 
-    [Tool_autoresearch] re-exports this type as
-    [Tool_autoresearch.context] for the public tool surface;
-    [Tool_autoresearch_cycle] consumes it directly. *)
+    [Tool_autoresearch_cycle] consumes this type directly. The
+    historical public context alias was removed with the retired
+    MCP dispatcher. *)
 
 type t = {
   base_path : string;

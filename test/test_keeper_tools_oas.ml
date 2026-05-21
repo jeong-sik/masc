@@ -5,7 +5,7 @@ open Agent_sdk
 open Alcotest
 open Masc_mcp
 
-let autoresearch_allowlist =
+let retired_autoresearch_allowlist =
   [ "masc_autoresearch_start"
   ; "masc_autoresearch_cycle"
   ; "masc_autoresearch_status"
@@ -924,20 +924,20 @@ let make_research_meta ?tool_access () : Keeper_types.keeper_meta =
   | Error e -> failwith (Printf.sprintf "make_research_meta failed: %s" e)
 ;;
 
-let test_research_keeper_has_autoresearch_tools () =
+let test_research_keeper_hides_autoresearch_tools () =
   let meta = make_research_meta () in
   let allowed = Keeper_exec_tools.keeper_allowed_tool_names meta in
   let has_cycle = List.mem "masc_autoresearch_cycle" allowed in
   let has_start = List.mem "masc_autoresearch_start" allowed in
   let has_status = List.mem "masc_autoresearch_status" allowed in
-  check bool "has cycle" true has_cycle;
-  check bool "has start" true has_start;
-  check bool "has status" true has_status
+  check bool "hides cycle" false has_cycle;
+  check bool "hides start" false has_start;
+  check bool "hides status" false has_status
 ;;
 
-let test_non_research_keeper_has_autoresearch () =
+let test_non_research_keeper_allowlist_hides_autoresearch () =
   let meta =
-    make_test_meta ~preset:Keeper_types.Minimal ~also_allow:autoresearch_allowlist ()
+    make_test_meta ~preset:Keeper_types.Minimal ~also_allow:retired_autoresearch_allowlist ()
   in
   let allowed = Keeper_exec_tools.keeper_allowed_tool_names meta in
   let has_any =
@@ -945,7 +945,7 @@ let test_non_research_keeper_has_autoresearch () =
       (fun n -> String.length n > 18 && String.sub n 0 18 = "masc_autoresearch_")
       allowed
   in
-  check bool "has autoresearch tools" true has_any
+  check bool "hides autoresearch tools" false has_any
 ;;
 
 let test_minimal_model_tools_hide_autoresearch_by_default () =
@@ -960,7 +960,7 @@ let test_minimal_model_tools_hide_autoresearch_by_default () =
   check bool "minimal model tools hide autoresearch" false has_any
 ;;
 
-let test_research_model_tools_include_autoresearch () =
+let test_research_model_tools_hide_autoresearch () =
   let meta = make_research_meta () in
   let tools = Keeper_exec_tools.keeper_allowed_model_tools meta in
   let has_cycle =
@@ -968,7 +968,7 @@ let test_research_model_tools_include_autoresearch () =
       (fun (t : Types_core.tool_schema) -> t.name = "masc_autoresearch_cycle")
       tools
   in
-  check bool "model tools have cycle" true has_cycle
+  check bool "model tools hide cycle" false has_cycle
 ;;
 
 let make_learned_meta () : Keeper_types.keeper_meta =
@@ -1724,21 +1724,21 @@ let () =
         ] )
     ; ( "research_profile"
       , [ test_case
-            "has autoresearch tools"
+            "hides autoresearch tools"
             `Quick
-            test_research_keeper_has_autoresearch_tools
+            test_research_keeper_hides_autoresearch_tools
         ; test_case
-            "allowlisted non-research has autoresearch"
+            "allowlisted non-research hides autoresearch"
             `Quick
-            test_non_research_keeper_has_autoresearch
+            test_non_research_keeper_allowlist_hides_autoresearch
         ; test_case
             "minimal model tools hide autoresearch"
             `Quick
             test_minimal_model_tools_hide_autoresearch_by_default
         ; test_case
-            "allowlisted model tools include autoresearch"
+            "research model tools hide autoresearch"
             `Quick
-            test_research_model_tools_include_autoresearch
+            test_research_model_tools_hide_autoresearch
         ] )
     ; ( "library_tools"
       , [ test_case

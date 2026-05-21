@@ -265,7 +265,9 @@ let () =
               check_group "masc_plan_get" "masc_plan";
               check_group "masc_worktree_list" "masc_worktree";
               check_group "masc_code_write" "masc_code";
-              check_group "masc_autoresearch_status" "masc_autoresearch";
+              check (option string) "retired autoresearch group" None
+                (Option.map Tool_catalog.tool_group_to_string
+                   (Tool_catalog.tool_group "masc_autoresearch_status"));
               check_group "masc_agents" "masc_agent";
               check_group "masc_status" "masc_core";
               check (option string) "unknown" None

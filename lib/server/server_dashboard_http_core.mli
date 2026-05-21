@@ -38,6 +38,7 @@ val operator_digest_cache : cached_surface
 val shell_warmed : bool Atomic.t
 val shell_warming : bool Atomic.t
 val last_good_shell : Yojson.Safe.t Atomic.t
+val last_good_shell_light : Yojson.Safe.t Atomic.t
 
 (** Late-bound broadcast callbacks — set by [Server_dashboard_http]
     after [Sse] module is in scope. *)

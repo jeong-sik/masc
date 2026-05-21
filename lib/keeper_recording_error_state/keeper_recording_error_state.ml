@@ -6,13 +6,12 @@
 (* Dedupe state for [Keeper_registry.record_error] noise.
 
    See [.mli] for the rationale. This module is intentionally stdlib-only
-   (Digest + Hashtbl + Mutex + String) so it can be linked into both the
+   (Digest + [Bounded_event_dedupe]) so it can be linked into both the
    main library and standalone unit tests without dragging Eio in.
 
-   Threading: the in-memory [Hashtbl.t] is guarded by a [Mutex.t]. All
-   public entry points take and release the lock; the lock is never held
-   across allocations of caller-visible records, so contention is
-   bounded.
+   Threading: [Bounded_event_dedupe] guards the in-memory table with a
+   [Mutex.t]. Public entry points perform only key creation and integer
+   state updates, so contention is bounded.
 
    Memory: there is no eviction policy. The MASC server lifetime is in
    the hour-to-day range; the number of distinct [(keeper, error)]
@@ -24,7 +23,6 @@
 
 type error_kind =
   | Sandbox_docker
-  | Path_syntax_blocked
   | Stale_turn_timeout
   | Fiber_unresolved
   | Oas_timeout_budget
@@ -37,7 +35,6 @@ type error_kind =
 
 let error_kind_to_string = function
   | Sandbox_docker -> "sandbox_docker"
-  | Path_syntax_blocked -> "path_syntax_blocked"
   | Stale_turn_timeout -> "stale_turn_timeout"
   | Fiber_unresolved -> "fiber_unresolved"
   | Oas_timeout_budget -> "oas_timeout_budget"
@@ -51,7 +48,6 @@ let error_kind_to_string = function
 
 let error_kind_of_string = function
   | "sandbox_docker" -> Some Sandbox_docker
-  | "path_syntax_blocked" -> Some Path_syntax_blocked
   | "stale_turn_timeout" -> Some Stale_turn_timeout
   | "fiber_unresolved" -> Some Fiber_unresolved
   | "oas_timeout_budget" -> Some Oas_timeout_budget
@@ -66,7 +62,6 @@ let error_kind_of_string = function
 
 let all_error_kinds =
   [ Sandbox_docker
-  ; Path_syntax_blocked
   ; Stale_turn_timeout
   ; Fiber_unresolved
   ; Oas_timeout_budget
@@ -82,9 +77,10 @@ let all_error_kinds =
 (* Substring-based classifier. Order matters: longer / more specific
    markers come first so a "state machine guard violation: expected_version
    mismatch" string is not silently re-classified as the second bucket.
-   Production samples (system_log_2026-05-16, 299 events) show the eight
-   buckets above cover ~95% of traffic; the remaining ~5% land in [Other]
-   and are good candidates for future arm promotion. *)
+   Production samples (system_log_2026-05-16, 299 events) showed the
+   promoted buckets covered ~95% of traffic before the legacy path-tokenizer
+   bucket was retired; remaining unmatched text lands in [Other] and is a
+   candidate for future arm promotion. *)
 let classify_error (err : string) : error_kind =
   let contains needle = String.length err >= String.length needle
     && (
@@ -99,8 +95,6 @@ let classify_error (err : string) : error_kind =
   in
   if contains "sandbox docker"
   then Sandbox_docker
-  else if contains "Path syntax blocked"
-  then Path_syntax_blocked
   else if contains "stale_turn_timeout"
   then Stale_turn_timeout
   else if contains "fiber_unresolved"
@@ -130,27 +124,16 @@ type record_outcome =
    a short, stable identifier with negligible collision risk across
    <1k cardinality. *)
 let fingerprint ~keeper ~error =
-  keeper ^ "|" ^ Digest.to_hex (Digest.string error)
+  Bounded_event_dedupe.key [ keeper; Digest.to_hex (Digest.string error) ]
 ;;
 
-let mu = Mutex.create ()
-let counts : (string, int) Hashtbl.t = Hashtbl.create 256
+let state = Bounded_event_dedupe.create ~initial_capacity:256 ()
 
 let record ~keeper ~error =
   let key = fingerprint ~keeper ~error in
-  Mutex.lock mu;
-  let outcome =
-    match Hashtbl.find_opt counts key with
-    | None ->
-      Hashtbl.add counts key 1;
-      `First
-    | Some n ->
-      let n' = n + 1 in
-      Hashtbl.replace counts key n';
-      `Repeated n'
-  in
-  Mutex.unlock mu;
-  outcome
+  match Bounded_event_dedupe.record state ~key with
+  | Bounded_event_dedupe.First -> `First
+  | Bounded_event_dedupe.Repeated count -> `Repeated count
 ;;
 
 let classify_outcome ~keeper ~error =
@@ -160,14 +143,9 @@ let classify_outcome ~keeper ~error =
 ;;
 
 let reset_for_test () =
-  Mutex.lock mu;
-  Hashtbl.reset counts;
-  Mutex.unlock mu
+  Bounded_event_dedupe.reset state
 ;;
 
 let cardinality () =
-  Mutex.lock mu;
-  let n = Hashtbl.length counts in
-  Mutex.unlock mu;
-  n
+  Bounded_event_dedupe.cardinality state
 ;;

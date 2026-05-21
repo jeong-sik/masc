@@ -81,7 +81,7 @@ let cached_tool_audit_json
             , tool_audit_source
             , tool_audit_at )
           =
-          keeper_tool_audit_fields ~include_allowed_tools:false config meta
+          tool_audit_fields ~include_allowed_tools:false config meta
         in
         ( []
         , recent_tool_names
@@ -90,7 +90,7 @@ let cached_tool_audit_json
         , latest_action_source
         , tool_audit_source
         , tool_audit_at ))
-      else keeper_tool_audit_fields config meta
+      else tool_audit_fields config meta
     in
     `Assoc
       [ "allowed_tool_names", `List (List.map (fun v -> `String v) allowed_tool_names)

@@ -264,6 +264,7 @@ let oas_descriptor_of_masc_tool name =
       mutation_class;
       concurrency_class;
       permission = Some permission;
+      evidence_role = None;
       shell = None;
       notes = [];
       examples = [];

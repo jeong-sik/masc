@@ -590,6 +590,18 @@ let normalize_continuity_compaction_cooldown_sec (v : int) : int =
     Preserves prior hardcoded behavior in [keeper_compact_policy.ml]. *)
 let default_keep_recent_tool_results = 2
 
+(** Default message-count floor for the tool-heavy compaction gate.
+    Mirrors the prior global constant in [keeper_compact_policy.ml].
+    Per-keeper override lives at [compaction_policy.tool_heavy_msg_threshold];
+    wired into [decide_compaction] by PR-B. *)
+let default_tool_heavy_msg_threshold = 40
+
+(** Default context-ratio floor for the tool-heavy compaction gate.
+    Mirrors the prior global constant in [keeper_compact_policy.ml].
+    Per-keeper override lives at [compaction_policy.tool_heavy_ratio_floor];
+    wired into [decide_compaction] by PR-B. *)
+let default_tool_heavy_ratio_floor = 0.15
+
 (** Hard upper bound for operator-supplied [keep_recent_tool_results].
     Values above this likely indicate operator typos (e.g. 5000); we
     log a warn and clamp back to the safe default so a typo does not

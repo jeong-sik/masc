@@ -40,7 +40,7 @@
     [snapshots_dir], [ensure_dirs], [default_state],
     [clamp_priority]). *)
 
-(** {1 Status / horizon / review variants} *)
+(** {1 Status / horizon variants} *)
 
 type goal_status =
   | Active
@@ -68,18 +68,6 @@ type horizon =
 
 val horizon_to_yojson : horizon -> Yojson.Safe.t
 
-type review_outcome =
-  | ReviewDone
-  | ReviewProgress
-  | ReviewBlocked
-  | ReviewDropped
-  (** Outcome supplied to {!review_goal}.  Each outcome
-      maps to a deterministic [(phase, priority_delta)]
-      transition: [ReviewDone] → [Completed],
-      [ReviewProgress] → [Executing] with priority bumped
-      up (lower number), [ReviewBlocked] → [Blocked] with
-      priority bumped down, [ReviewDropped] → [Dropped]. *)
-
 (** {1 Parsers (string → variant option)} *)
 
 val parse_horizon : string option -> horizon option
@@ -92,11 +80,6 @@ val parse_goal_status : string option -> goal_status option
 val parse_goal_phase : string option -> Goal_phase.t option
 (** Delegates to {!Goal_phase.parse}.  [None] passes
     through. *)
-
-val parse_review_outcome : string -> review_outcome option
-(** Case-insensitive, trim-tolerant.  Mandatory string
-    (no option wrap) — call sites already gated on
-    presence. *)
 
 (** {1 Phase ↔ legacy status bridge} *)
 
@@ -194,7 +177,7 @@ val write_state : Coord.config -> state -> unit
 (** Atomic write of the canonical state to {!goals_path}.
     Caller is responsible for serialising concurrent
     writes — the internal mutators ({!update_goal},
-    {!delete_goal}, {!upsert_goal}, {!review_goal}) all
+    {!delete_goal}, {!upsert_goal}) all
     hold the file lock around their read-modify-write
     block; raw users of {!write_state} (the test harness
     only) should not race against them. *)
@@ -257,20 +240,3 @@ val upsert_goal :
     - [phase] and legacy [status] disagree (when both are
       supplied and {!phase_of_goal_status} of [status] does
       not equal [phase]). *)
-
-(** {1 Review workflow} *)
-
-val review_goal :
-  Coord.config ->
-  goal_id:string ->
-  outcome:review_outcome ->
-  ?new_horizon:horizon ->
-  ?note:string ->
-  unit ->
-  (goal, string) result
-(** Applies the [(phase, priority_delta)] transition from
-    {!review_outcome}, optionally moves the goal across
-    horizons, and records the note + timestamp into
-    [last_review_note] / [last_review_at].  Clears
-    [active_verification_request_id] except when the new
-    phase is [Awaiting_verification]. *)

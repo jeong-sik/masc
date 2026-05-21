@@ -357,7 +357,6 @@ let static_tag_of_tool_name (tool : Tool_name.t) : module_tag option =
     | Check
     | Coordination_fsm_snapshot
     | Goal_list
-    | Goal_review
     | Goal_transition
     | Goal_upsert
     | Goal_verify

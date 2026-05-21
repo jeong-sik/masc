@@ -240,27 +240,6 @@ let test_masc_goal_upsert_schema () =
             (List.mem_assoc "parent_goal_id" props)
       | None -> Alcotest.fail "masc_goal_upsert missing properties"
 
-let test_masc_goal_review_schema () =
-  match find_tool "masc_goal_review" with
-  | None -> Alcotest.fail "masc_goal_review not found"
-  | Some schema ->
-      (match get_json_assoc "properties" schema.input_schema with
-      | Some props ->
-          Alcotest.(check bool) "has goal_id" true
-            (List.mem_assoc "goal_id" props);
-          Alcotest.(check bool) "has outcome" true
-            (List.mem_assoc "outcome" props);
-          Alcotest.(check bool) "has new_horizon" true
-            (List.mem_assoc "new_horizon" props)
-      | None -> Alcotest.fail "masc_goal_review missing properties");
-      match get_json_list "required" schema.input_schema with
-      | Some reqs ->
-          Alcotest.(check bool) "goal_id required" true
-            (List.mem (`String "goal_id") reqs);
-          Alcotest.(check bool) "outcome required" true
-            (List.mem (`String "outcome") reqs)
-      | None -> Alcotest.fail "masc_goal_review missing required field"
-
 let test_masc_goal_transition_schema () =
   match find_tool "masc_goal_transition" with
   | None -> Alcotest.fail "masc_goal_transition not found"
@@ -392,6 +371,7 @@ let test_retired_front_door_tools_absent_from_schema_inventory () =
       "masc_surface_audit";
       "masc_operation_start";
       "masc_dispatch_tick";
+      "masc_goal_review";
     ]
   in
   List.iter
@@ -922,7 +902,6 @@ let () =
     "goal_tools", [
       Alcotest.test_case "goal_list" `Quick test_masc_goal_list_schema;
       Alcotest.test_case "goal_upsert" `Quick test_masc_goal_upsert_schema;
-      Alcotest.test_case "goal_review" `Quick test_masc_goal_review_schema;
       Alcotest.test_case "goal_transition" `Quick test_masc_goal_transition_schema;
       Alcotest.test_case "goal_verify" `Quick test_masc_goal_verify_schema;
     ];

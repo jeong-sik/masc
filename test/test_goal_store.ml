@@ -6,7 +6,7 @@ module Types = Masc_domain
     which preserves [version], so successive deletes all landed at the same
     version. Replicas/snapshot consumers couldn't detect the change. This
     test asserts the version is bumped on every delete, matching
-    [refresh_all] / [review_goal]. *)
+    [refresh_all] / [upsert_goal]. *)
 
 open Alcotest
 open Masc_mcp

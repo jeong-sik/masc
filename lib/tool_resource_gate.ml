@@ -331,7 +331,6 @@ let classify_masc_tool (tool : Tool_name.Masc.t) =
   | Dashboard
   | Get_metrics
   | Goal_list
-  | Goal_review
   | Mcp_session
   | Messages
   | Operation_status

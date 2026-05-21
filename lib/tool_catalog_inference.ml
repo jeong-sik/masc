@@ -156,7 +156,6 @@ let inferred_effect_domain_of_typed_tool_name = function
   | TN.Masc TM.Dashboard
   | TN.Masc TM.Get_metrics
   | TN.Masc TM.Goal_list
-  | TN.Masc TM.Goal_review
   | TN.Masc TM.Mcp_session
   | TN.Masc TM.Messages
   | TN.Masc TM.Operation_status
@@ -391,7 +390,6 @@ let tool_group_of_typed_tool_name = function
       | TM.Gc
       | TM.Get_metrics
       | TM.Goal_list
-      | TM.Goal_review
       | TM.Goal_transition
       | TM.Goal_upsert
       | TM.Goal_verify

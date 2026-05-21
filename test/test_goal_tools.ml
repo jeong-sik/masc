@@ -338,40 +338,6 @@ let test_goal_upsert_rejects_malformed_verifier_policy_shape () =
     (contains_substring (Yojson.Safe.to_string error) "accepted verifier_policy shapes")
 ;;
 
-let test_goal_review_updates_status () =
-  with_room
-  @@ fun config ->
-  let goal, _kind =
-    match Goal_store.upsert_goal config ~title:"Review me" () with
-    | Ok payload -> payload
-    | Error msg -> fail msg
-  in
-  create_done_task config ~goal_id:goal.id ~title:"Review done task";
-  let reviewed =
-    Tool_coord.dispatch
-      (coord_ctx config)
-      ~name:"masc_goal_review"
-      ~args:
-        (`Assoc
-            [ "goal_id", `String goal.id
-            ; "outcome", `String "done"
-            ; "note", `String "completed from test"
-            ])
-  in
-  let reviewed_json =
-    match reviewed with
-    | Some result -> parse_json_result result
-    | None -> fail "masc_goal_review not handled"
-  in
-  let goal_json = Yojson.Safe.Util.member "goal" reviewed_json in
-  let status =
-    match Yojson.Safe.Util.member "status" goal_json with
-    | `String s -> s
-    | _ -> fail "status missing from goal review response"
-  in
-  check string "status updated to done" "done" status
-;;
-
 let test_goal_transition_verification_to_completion () =
   with_room
   @@ fun config ->
@@ -784,44 +750,16 @@ let test_goal_transition_approval_gate () =
      |> fun json -> get_string_field json "phase")
 ;;
 
-let test_goal_review_done_uses_transition_flow () =
+let test_goal_review_removed_from_dispatch () =
   with_room
   @@ fun config ->
-  let verifier_policy =
-    { Goal_verification.inherit_mode = Goal_verification.Extend
-    ; principals =
-        [ { kind = Goal_verification.Keeper
-          ; id = "keeper-alpha"
-          ; display_name = Some "keeper-alpha"
-          }
-        ]
-    ; required_verdicts = Some 1
-    }
-  in
-  let goal, _kind =
-    match Goal_store.upsert_goal config ~title:"Compat me" ~verifier_policy () with
-    | Ok payload -> payload
-    | Error msg -> fail msg
-  in
-  create_done_task config ~goal_id:goal.id ~title:"Compat done task";
-  let reviewed =
+  let result =
     Tool_coord.dispatch
       (coord_ctx config)
       ~name:"masc_goal_review"
-      ~args:(`Assoc [ "goal_id", `String goal.id; "outcome", `String "done" ])
+      ~args:(`Assoc [ "goal_id", `String "goal-legacy"; "outcome", `String "done" ])
   in
-  let reviewed_json =
-    match reviewed with
-    | Some result -> parse_json_result result
-    | None -> fail "masc_goal_review not handled"
-  in
-  check
-    string
-    "legacy done routes to awaiting_verification"
-    "awaiting_verification"
-    (reviewed_json
-     |> Yojson.Safe.Util.member "goal"
-     |> fun json -> get_string_field json "phase")
+  check bool "masc_goal_review removed" true (Option.is_none result)
 ;;
 
 let test_goal_completion_requires_linked_task () =
@@ -1022,11 +960,14 @@ let () =
             "upsert rejects malformed verifier policy shape"
             `Quick
             test_goal_upsert_rejects_malformed_verifier_policy_shape
-        ; test_case "review updates status" `Quick test_goal_review_updates_status
         ; test_case
             "transition verify complete"
             `Quick
             test_goal_transition_verification_to_completion
+        ; test_case
+            "goal review removed from dispatch"
+            `Quick
+            test_goal_review_removed_from_dispatch
         ; test_case
             "rejected verification retains evidence"
             `Quick
@@ -1036,10 +977,6 @@ let () =
             `Quick
             test_goal_transition_manual_reject_blocks_and_cancels_request
         ; test_case "approval gate" `Quick test_goal_transition_approval_gate
-        ; test_case
-            "review done compatibility"
-            `Quick
-            test_goal_review_done_uses_transition_flow
         ; test_case
             "completion requires linked task"
             `Quick

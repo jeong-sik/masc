@@ -16,7 +16,6 @@ let goal_phase_enum =
     "dropped";
   ]
 
-let goal_review_outcome_enum = [ "done"; "progress"; "blocked"; "dropped" ]
 let goal_transition_action_enum =
   [
     "request_complete";
@@ -122,27 +121,6 @@ Lifecycle status/phase fields are intentionally omitted here; use masc_goal_tran
                   ("verifier_policy", goal_verifier_policy_schema);
                   ("require_completion_approval", `Assoc [ ("type", `String "boolean") ]);
                 ] );
-            ("additionalProperties", `Bool false);
-          ];
-    };
-    {
-      name = "masc_goal_review";
-      description =
-        "Compatibility wrapper for legacy goal review flows. \
-Use masc_goal_transition / masc_goal_verify for the full Goal FSM and quorum verification.";
-      input_schema =
-        `Assoc
-          [
-            ("type", `String "object");
-            ( "properties",
-              `Assoc
-                [
-                  ("goal_id", `Assoc [ ("type", `String "string") ]);
-                  ("outcome", enum_schema goal_review_outcome_enum);
-                  ("new_horizon", enum_schema goal_horizon_enum);
-                  ("note", `Assoc [ ("type", `String "string") ]);
-                ] );
-            ("required", `List [ `String "goal_id"; `String "outcome" ]);
             ("additionalProperties", `Bool false);
           ];
     };

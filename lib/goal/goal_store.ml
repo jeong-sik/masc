@@ -85,25 +85,6 @@ let parse_snapshot_mode s =
   | "manual" -> Some SnapManual
   | _ -> None
 
-type review_outcome =
-  | ReviewDone
-  | ReviewProgress
-  | ReviewBlocked
-  | ReviewDropped
-
-let review_outcome_to_yojson = function
-  | ReviewDone -> `String "done"
-  | ReviewProgress -> `String "progress"
-  | ReviewBlocked -> `String "blocked"
-  | ReviewDropped -> `String "dropped"
-
-let review_outcome_of_yojson = function
-  | `String "done" -> Ok ReviewDone
-  | `String "progress" -> Ok ReviewProgress
-  | `String "blocked" -> Ok ReviewBlocked
-  | `String "dropped" -> Ok ReviewDropped
-  | j -> Error ("review_outcome_of_yojson: " ^ Yojson.Safe.to_string j)
-
 let clamp_priority p =
   max 1 (min 5 p)
 
@@ -371,14 +352,6 @@ let parse_refresh_mode s =
   | "daily" -> Some Daily
   | "weekly" -> Some Weekly
   | "monthly" -> Some Monthly
-  | _ -> None
-
-let parse_review_outcome s =
-  match normalize_lower s with
-  | "done" -> Some ReviewDone
-  | "progress" -> Some ReviewProgress
-  | "blocked" -> Some ReviewBlocked
-  | "dropped" -> Some ReviewDropped
   | _ -> None
 
 let goals_path config =
@@ -735,37 +708,6 @@ let refresh config ~mode =
     updated = !updated;
     snapshot_id = snapshot.snapshot_id;
   }
-
-let review_goal config ~goal_id ~(outcome : review_outcome) ?new_horizon ?note () =
-  let now = Masc_domain.now_iso () in
-  update_goal config ~goal_id (fun goal ->
-      let phase, priority =
-        match outcome with
-        | ReviewDone -> (Goal_phase.Completed, goal.priority)
-        | ReviewProgress -> (Goal_phase.Executing, max 1 (goal.priority - 1))
-        | ReviewBlocked -> (Goal_phase.Blocked, min 5 (goal.priority + 1))
-        | ReviewDropped -> (Goal_phase.Dropped, goal.priority)
-      in
-      {
-        goal with
-        phase;
-        status = goal_status_of_phase phase;
-        priority;
-        horizon = Option.value new_horizon ~default:goal.horizon;
-        last_review_note = note;
-        last_review_at = Some now;
-        active_verification_request_id =
-          (* Enumerate every [Goal_phase.t] variant. Mirrors the fix
-             applied to [normalize_goal] in PR #14790; this call site
-             was missed in that sweep. Only [Awaiting_verification]
-             retains the active request_id; all other phases clear it. *)
-          (match phase with
-          | Goal_phase.Awaiting_verification -> goal.active_verification_request_id
-          | Goal_phase.Executing | Goal_phase.Awaiting_approval
-          | Goal_phase.Blocked | Goal_phase.Paused
-          | Goal_phase.Completed | Goal_phase.Dropped -> None);
-        updated_at = now;
-      })
 
 let active_goals config =
   list_goals config ~status:Active ()

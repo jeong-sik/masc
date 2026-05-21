@@ -288,7 +288,6 @@ type goal_phase =
 - `masc_goal_upsert`: goal metadata + verifier policy 설정
 - `masc_goal_transition`: explicit Goal FSM action (`request_complete`, `pause`, `resume`, `operator_block`, `approve_completion`, ...)
 - `masc_goal_verify`: open verification request에 대한 1 principal 1 vote
-- `masc_goal_review`: legacy wrapper. 새 lifecycle / quorum flow의 정식 surface는 아님
 
 전이 요약:
 

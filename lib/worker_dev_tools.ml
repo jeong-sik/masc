@@ -192,12 +192,12 @@ let validate_command_name_with_allowlist ~allowed_commands = function
 ;;
 
 let strict_allowlist_policy ~allowed_commands : Exec_shell_gate.allowlist_policy =
-  { allowed_commands; allow_pipes = false; redirect_allowed = false }
+  { allowed_commands; allow_pipes = false }
 ;;
 
 let coding_allowlist_policy ?(allow_pipes = true) ~allowed_commands ()
   : Exec_shell_gate.allowlist_policy =
-  { allowed_commands; allow_pipes; redirect_allowed = false }
+  { allowed_commands; allow_pipes }
 ;;
 
 let rec shell_ir_literal_text = function

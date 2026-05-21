@@ -23,7 +23,7 @@ module W = Masc_mcp.Worker_dev_tools
 let allowed = [ "rg"; "sort"; "head"; "wc"; "cat"; "git"; "ls"; "grep" ]
 
 let allowlist : Gate.allowlist_policy =
-  { allowed_commands = allowed; allow_pipes = true; redirect_allowed = false }
+  { allowed_commands = allowed; allow_pipes = true }
 ;;
 
 (* {1 Baseline corpus} *)
@@ -275,7 +275,7 @@ let test_pipeline_segment_rejection_carries_stage_index () =
 
 let test_pipes_disabled () =
   let policy : Gate.allowlist_policy =
-    { allowed_commands = allowed; allow_pipes = false; redirect_allowed = false }
+    { allowed_commands = allowed; allow_pipes = false }
   in
   match
     Gate.gate

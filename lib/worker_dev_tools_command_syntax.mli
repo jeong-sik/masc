@@ -10,7 +10,3 @@ val opam_exec_command_name : string list -> string option
 (** Resolve the effective command name for argv words following an [opam]
     executable. [opam exec] targets are resolved recursively; non-exec opam
     subcommands resolve to [Some "opam"]. *)
-
-val segment_command_name : string -> string option
-(** Resolve the effective command name of a shell segment, including transparent
-    [env] and [opam exec] wrappers. *)

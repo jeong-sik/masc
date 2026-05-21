@@ -4,7 +4,9 @@
     CLI transport construction separate from the build/run orchestration in
     {!Cascade_runner}. *)
 
-type cli_transport_overrides =
+(* cli_transport_overrides type extracted to
+   [Cascade_transport_cli_overrides] (godfile decomp). *)
+type cli_transport_overrides = Cascade_transport_cli_overrides.cli_transport_overrides =
   { cwd : string option
   ; claude_mcp_config : string option
   ; claude_allowed_tools : string list option
@@ -12,14 +14,6 @@ type cli_transport_overrides =
   ; claude_max_turns : int option
   ; gemini_yolo : bool option
   ; cli_subprocess_idle_sec : float option
-    (* When [Some s], the CLI subprocess is aborted via SIGINT if no
-     stdout line arrives within [s] seconds. Currently honoured only
-     by [Json_stream_cli_transport_local], which calls
-     [Cli_common_subprocess.run_stream_lines] directly. The other CLI
-     transports (claude_code, gemini_cli, codex_cli) route through
-     agent_sdk [Transport_*_cli.create] whose configs do not yet
-     expose [stdout_idle_timeout_s]; an OAS upstream change is needed
-     to honour this field there. *)
   }
 
 (* OAS owns provider subprocess hard caps. This constant is a
@@ -1097,16 +1091,7 @@ let register_non_http_transport ~kind ~ctor =
   Hashtbl.replace non_http_transport_registry kind ctor
 ;;
 
-let default_cli_transport_overrides =
-  { cwd = None
-  ; claude_mcp_config = None
-  ; claude_allowed_tools = None
-  ; claude_permission_mode = None
-  ; claude_max_turns = None
-  ; gemini_yolo = None
-  ; cli_subprocess_idle_sec = None
-  }
-;;
+let default_cli_transport_overrides = Cascade_transport_cli_overrides.default_cli_transport_overrides
 
 let with_proc_mgr (f : mgr:_ -> Llm_provider.Llm_transport.t) =
   match Process_eio.get_proc_mgr () with

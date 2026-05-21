@@ -285,6 +285,61 @@ let ensure_github_identity_bundle ~config github_identity =
   in
   write_fake_github_hosts gh_dir
 
+let gh_config_dir_for_identity ~config github_identity =
+  let masc_dir = Filename.concat config.Coord.base_path Common.masc_dirname in
+  Filename.concat
+    (Filename.concat
+       (Filename.concat masc_dir "github-identities")
+       github_identity)
+    "gh"
+
+let seed_github_credential_mapping
+    ?(github_identity = Masc_mcp.Keeper_gh_env.root_github_identity)
+    ~config
+    ~keeper_name
+    () =
+  let gh_config_dir = gh_config_dir_for_identity ~config github_identity in
+  write_fake_github_hosts gh_config_dir;
+  let credential_id = "cred-" ^ keeper_name ^ "-" ^ github_identity in
+  let credential : Repo_manager_types.credential =
+    {
+      id = credential_id;
+      cred_type = Repo_manager_types.Github;
+      username = github_identity;
+      gh_config_dir = Some gh_config_dir;
+      ssh_key_path = None;
+      gpg_key_id = None;
+      state = Repo_manager_types.Unmaterialized;
+      token_sha256_prefix = None;
+    }
+  in
+  (match Credential_store.add ~base_path:config.Coord.base_path credential with
+   | Ok _ -> ()
+   | Error msg when contains_substring msg "Credential already exists" -> ()
+   | Error msg -> Alcotest.failf "seed credential mapping: %s" msg);
+  let mapping : Repo_manager_types.keeper_repo_mapping =
+    {
+      keeper_id = keeper_name;
+      repository_ids = [];
+      github_credential_id = Some credential_id;
+    }
+  in
+  match
+    Keeper_repo_mapping.save_mapping ~base_path:config.Coord.base_path mapping
+  with
+  | Ok () -> ()
+  | Error msg -> Alcotest.failf "seed keeper repo mapping: %s" msg
+
+let seed_default_mapping_if_missing ~config ~keeper_name =
+  match
+    Keeper_repo_mapping.credentials_for_keeper
+      ~base_path:config.Coord.base_path
+      ~keeper_id:keeper_name
+  with
+  | Ok [] -> seed_github_credential_mapping ~config ~keeper_name ()
+  | Ok _ -> ()
+  | Error msg -> Alcotest.failf "read keeper credential mapping: %s" msg
+
 let parse_field raw field =
   Yojson.Safe.from_string raw |> Json.member field
 
@@ -615,7 +670,7 @@ let test_bash_git_creds_uses_oneshot_with_turn_runtime () =
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup ~sandbox:Keeper_types.Docker
   @@ fun ~config ~meta ~playground ->
-  ensure_github_identity_bundle ~config Masc_mcp.Keeper_gh_env.root_github_identity;
+  seed_github_credential_mapping ~config ~keeper_name:meta.name ();
   let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
   ensure_dir repo;
   run_ok ~cwd:repo "git init -q";
@@ -762,8 +817,7 @@ let test_bash_git_c_bare_worktrees_from_root_uses_single_repo () =
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup ~sandbox:Keeper_types.Docker
   @@ fun ~config ~meta ~playground ->
-  ensure_github_identity_bundle ~config
-    Masc_mcp.Keeper_gh_env.root_github_identity;
+  seed_github_credential_mapping ~config ~keeper_name:meta.name ();
   let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
   let worktree = Filename.concat repo ".worktrees/task-229" in
   ensure_dir worktree;
@@ -827,7 +881,7 @@ let test_bash_git_push_routes_through_git_creds_docker () =
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup_with_preset ~sandbox:Keeper_types.Docker ~preset:Keeper_types.Coding
   @@ fun ~config ~meta ~playground ->
-  ensure_github_identity_bundle ~config Masc_mcp.Keeper_gh_env.root_github_identity;
+  seed_github_credential_mapping ~config ~keeper_name:meta.name ();
   let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
   ensure_dir repo;
   run_ok ~cwd:repo "git init -q";
@@ -1156,8 +1210,9 @@ let test_docker_shell_mounts_masc_config_runtime_paths () =
     Alcotest.(check bool) "auth state not mounted" false
       (contains_substring line "/.masc/auth/")
 
-let run_git_creds_docker_shell ~config ~meta ~playground ~log_path =
-  ensure_github_identity_bundle ~config Masc_mcp.Keeper_gh_env.root_github_identity;
+let run_git_creds_docker_shell ~config ~(meta : Keeper_types.keeper_meta) ~playground
+    ~log_path =
+  seed_default_mapping_if_missing ~config ~keeper_name:meta.name;
   let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
   ensure_dir repo;
   if not (Sys.file_exists (Filename.concat repo ".git")) then
@@ -1353,6 +1408,8 @@ let test_git_creds_respects_keeper_alias_identity_mode () =
   with_keeper_identity_toml ~config ~keeper_name:meta.name
     ~github_identity:"anyang-keepers" ~git_identity_mode:"keeper_alias"
   @@ fun () ->
+  seed_github_credential_mapping ~config ~keeper_name:meta.name
+    ~github_identity:"anyang-keepers" ();
   let log_path = Filename.concat config.Coord.base_path "docker.log" in
   let line =
     run_git_creds_docker_shell ~config ~meta ~playground ~log_path
@@ -1369,6 +1426,8 @@ let test_git_creds_uses_github_identity_mode () =
   with_keeper_identity_toml ~config ~keeper_name:meta.name
     ~github_identity:"anyang-keepers" ~git_identity_mode:"github_identity"
   @@ fun () ->
+  seed_github_credential_mapping ~config ~keeper_name:meta.name
+    ~github_identity:"anyang-keepers" ();
   let log_path = Filename.concat config.Coord.base_path "docker.log" in
   let line =
     run_git_creds_docker_shell ~config ~meta ~playground ~log_path
@@ -1399,6 +1458,8 @@ let test_git_creds_mounts_only_selected_keeper_identity () =
     with_keeper_identity_toml ~config ~keeper_name:meta.name
       ~github_identity ~git_identity_mode:"github_identity"
     @@ fun () ->
+    seed_github_credential_mapping ~config ~keeper_name:meta.name
+      ~github_identity ();
     let log_path = Filename.concat config.Coord.base_path log_name in
     let line =
       run_git_creds_docker_shell ~config ~meta ~playground ~log_path
@@ -1461,7 +1522,7 @@ let test_git_clone_repairs_existing_docker_clone_checkout () =
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup ~sandbox:Keeper_types.Docker
   @@ fun ~config ~meta ~playground ->
-  ensure_github_identity_bundle ~config Masc_mcp.Keeper_gh_env.root_github_identity;
+  seed_github_credential_mapping ~config ~keeper_name:meta.name ();
   let source_repo = Filename.concat playground "source-masc-mcp" in
   ensure_dir source_repo;
   run_ok ~cwd:source_repo "git init -q -b main";

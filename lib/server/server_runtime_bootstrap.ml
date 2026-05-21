@@ -28,17 +28,6 @@ let note_storage_enforcement_fallback ~requested ~effective =
   | Some reason -> Server_startup_state.note_fallback reason
   | None -> ()
 
-let ensure_default_oas_cascade_timeout_env () =
-  match Sys.getenv_opt "OAS_CASCADE_MODEL_TIMEOUT_SEC" |> Env_config_core.trim_opt with
-  | Some _ -> ()
-  | None ->
-      let keeper_oas_timeout_s = Env_config_keeper.KeeperKeepalive.oas_timeout_sec in
-      let derived_timeout_s =
-        Float.max 30.0 (Float.min 120.0 (keeper_oas_timeout_s /. 5.0))
-      in
-      Unix.putenv "OAS_CASCADE_MODEL_TIMEOUT_SEC"
-        (Printf.sprintf "%.0f" derived_timeout_s)
-
 let config_bootstrap_mode = Config_root_bootstrap.config_bootstrap_mode
 let bootstrap_base_path_config_root = Config_root_bootstrap.bootstrap_base_path_config_root
 let startup_config_resolution = Config_root_bootstrap.startup_config_resolution
@@ -103,7 +92,6 @@ let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
      stub (request returns Error). *)
   Option.iter Eio_context.set_env env;
   force_jsonl_fallback_env ();
-  ensure_default_oas_cascade_timeout_env ();
   Process_eio.init ~cwd_default:Eio.Path.(fs / base_path) ~proc_mgr ~clock;
   Exec_tap.install_from_env ();
   Unix.putenv

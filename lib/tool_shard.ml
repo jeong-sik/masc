@@ -168,9 +168,7 @@ let agent_shards : string list StringMap.t ref = ref StringMap.empty
 
 let agent_shards_mutex = Stdlib.Mutex.create ()
 
-(** Default shards for a new keeper.
-    Autoresearch is intentionally opt-in through the explicit shard or
-    a preset/tool policy group. *)
+(** Default shards for a new keeper. *)
 (* default_shard_names moved to Tool_shard_types
    (intra-library file split, 2026-05-16). *)
 

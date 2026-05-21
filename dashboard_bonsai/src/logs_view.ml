@@ -1955,10 +1955,9 @@ let render_response
                  | _ -> false)
              in
              Printf.sprintf "%02d" dead_n
-         in
-         nav_link Dead_keepers ~tail)
-      ; nav_link Archive_runs
-      ; (let chip name label =
+	         in
+	         nav_link Dead_keepers ~tail)
+	      ; (let chip name label =
            let fire () =
              Effect.of_sync_fun
                (fun () ->

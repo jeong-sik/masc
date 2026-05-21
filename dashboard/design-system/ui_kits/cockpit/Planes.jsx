@@ -125,12 +125,12 @@ function ObservePlane({ branch, keepers }) {
 }
 
 // ═════════════════════════════════════════════════════════════
-// COGNITION PLANE — K1 Keeper · K2 Decisions · K3 Episodes · K4 Autoresearch
+// COGNITION PLANE — K1 Keeper · K2 Decisions · K3 Episodes
 // ═════════════════════════════════════════════════════════════
 function CognitionPlane({ branch, keepers }) {
   return (
     <PlaneShell
-      title="Cognition" subtitle="Keeper Inspector · Decisions · Memory · Episodes · Autoresearch"
+      title="Cognition" subtitle="Keeper Inspector · Decisions · Memory · Episodes"
       popoutId="plane-cognition"
       branch={branch} keepers={keepers}
       tabs={[
@@ -141,9 +141,6 @@ function CognitionPlane({ branch, keepers }) {
         { id:"dc-mem",  label:"Memory · Entries",     render: () => <window.MemoryEntries/> },
         { id:"ep-card", label:"Episodes · Cards",     render: () => <window.EpisodeCards/> },
         { id:"ep-lrn",  label:"Episodes · Learnings", render: () => <window.EpisodeLearnings/> },
-        { id:"ar-lst",  label:"AR · Loops",           render: () => <window.ARLoopList/> },
-        { id:"ar-fnd",  label:"AR · Finding card",    render: () => <window.ARFindingCard/> },
-        { id:"ar-flw",  label:"AR · Flow",            render: () => <window.ARHypothesisFlow/> },
       ]}
     />
   );

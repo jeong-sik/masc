@@ -43,7 +43,7 @@ describe('filterAttributionEvents', () => {
         reason: 'budget exhausted',
       },
     }),
-    makeEvent({ gate: 'autoresearch', origin: 'nondet', outcome: { kind: 'passed' } }),
+    makeEvent({ gate: 'oas_completion', origin: 'nondet', outcome: { kind: 'passed' } }),
   ]
 
   it('returns the input reference when query is empty', () => {
@@ -62,7 +62,7 @@ describe('filterAttributionEvents', () => {
 
   it('matches by origin', () => {
     const result = filterAttributionEvents(events, 'nondet')
-    expect(result.map(r => r.attribution.gate)).toEqual(['verification', 'autoresearch'])
+    expect(result.map(r => r.attribution.gate)).toEqual(['verification', 'oas_completion'])
   })
 
   it('matches policy_failed reason', () => {

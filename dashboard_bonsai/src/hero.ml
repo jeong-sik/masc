@@ -6,8 +6,8 @@
     구조 유지. tail은 선택적 brass/blood suffix. sub는 italic
     EB Garamond 서브카피.
 
-    재사용: overview_view / goals_view / archive_runs_view /
-    dead_keepers_view / keepers_view 다섯 탭의 hero block 동일 패턴. *)
+	    재사용: overview_view / goals_view / dead_keepers_view /
+	    keepers_view 네 탭의 hero block 동일 패턴. *)
 
 open! Core
 open! Bonsai_web

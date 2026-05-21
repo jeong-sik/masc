@@ -217,7 +217,7 @@ val render_lesson_prompt_context :
     via {!Agent_sdk.Lesson_memory.retrieve_lessons} and renders
     them through {!Agent_sdk.Lesson_memory.render_prompt_context}
     for prompt injection.  Returns [None] when no lesson
-    matches; the caller ([tool_autoresearch_cycle.ml])
+    matches; callers
     branches on the [option] to decide whether to attach
     the block. *)
 

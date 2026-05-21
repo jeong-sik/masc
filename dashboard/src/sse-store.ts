@@ -204,12 +204,6 @@ function normalizeMascEventType(type: string): string {
   return type.startsWith('masc/') ? type.slice('masc/'.length) : type
 }
 
-const AUTORESEARCH_EVENTS = new Set([
-  'autoresearch_cycle',
-  'autoresearch_started',
-  'autoresearch_stopped',
-])
-
 /** Hydrate project-snapshot signals directly from SSE payload — zero HTTP fetch. */
 function handleNamespaceTruthSnapshot(payload: unknown): void {
   try {
@@ -322,10 +316,6 @@ async function refreshActiveRoute(): Promise<void> {
     _refreshOperatorFn?.()
     _refreshMissionFn?.()
   }
-}
-
-function activeAutoresearchRoute(): boolean {
-  return route.value.tab === 'lab' && route.value.params.section === 'autoresearch'
 }
 
 // --- SSE reconnection handler ---
@@ -467,12 +457,6 @@ export function routeServerPushEvent(event: SSEEvent): void {
 
   if (KEEPER_LIFECYCLE_EVENTS.has(normalizeMascEventType(event.type))) {
     handleKeeperLifecycle(event)
-  }
-
-  if (AUTORESEARCH_EVENTS.has(event.type) && activeAutoresearchRoute()) {
-    scheduleRefresh('autoresearch_route', () => {
-      void refreshActiveRoute()
-    }, SSE_DEFAULT_DEBOUNCE_MS)
   }
 
   if (

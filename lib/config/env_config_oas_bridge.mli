@@ -25,7 +25,6 @@
 type caller =
   | Auto_responder
   | Dashboard_provider_runs
-  | Autoresearch_codegen
   | Keeper_persona_authoring
   | Server_openai_compat
   | Tool_deep_review

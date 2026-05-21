@@ -29,7 +29,7 @@ Interactive recreation of the MASC single-pane cockpit. One HTML, React-driven, 
 
 ### Seed data
 - `data.js` — Phase 1 seed data (keepers, goals, tasks, events, providers, cascade)
-- `data-p2.js` — Phase 2 seed data (branches, nudges, board posts, messages, audit, costs, decisions, episodes, autoresearch — sourced from real `.masc/*` records)
+- `data-p2.js` — Phase 2 seed data (branches, nudges, board posts, messages, audit, costs, decisions, episodes — sourced from real `.masc/*` records)
 - `data-crew.js` — Phase 3 crew seed data (multi-keeper crew / Planes view)
 
 ### App shell
@@ -53,5 +53,5 @@ Interactive recreation of the MASC single-pane cockpit. One HTML, React-driven, 
 
 - Surfaces are grouped into shared JSX files (`Chrome.jsx`, `Panels.jsx`, `cb-group-*.jsx`) rather than one file per surface — related components share a file to keep the module count low.
 - All components publish themselves on `window` so Babel-compiled scripts can use them without explicit imports.
-- Seed data in `data.js`, `data-p2.js`, and `data-crew.js` mirrors real `.masc/` records (fleet IDs, goal IDs, board posts, decisions, autoresearch loops). For a per-component design library see `../../preview/components.html`.
+- Seed data in `data.js`, `data-p2.js`, and `data-crew.js` mirrors real `.masc/` records (fleet IDs, goal IDs, board posts, decisions). For a per-component design library see `../../preview/components.html`.
 - Consolidated from the previously parallel `dashboard/cockpit-kit/` standalone build on 2026-05-13. RFC 0013 references this directory as the migration source for the KpiStrip / Lifeline / Ticker production ports.

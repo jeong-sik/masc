@@ -311,7 +311,6 @@ function ExecutionLinksSection({ task }: { task: Task }) {
   const items = [
     ['session', links?.session_id],
     ['operation', links?.operation_id],
-    ['autoresearch', links?.autoresearch_loop_id],
   ].filter(([, value]) => Boolean(value))
 
   if (items.length === 0) return null

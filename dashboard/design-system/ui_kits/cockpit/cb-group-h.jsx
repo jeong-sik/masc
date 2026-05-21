@@ -1,6 +1,6 @@
 // preview/cb-group-h.jsx
 // Track 4 · COGNITION PLANE
-// K1 Keeper Inspector v2 · K2 Decisions/Memory · K3 Institution Episodes · K4 Autoresearch
+// K1 Keeper Inspector v2 · K2 Decisions/Memory · K3 Institution Episodes
 
 const P2h = window.MASC_P2;
 
@@ -283,132 +283,8 @@ function EpisodeLearnings() {
   );
 }
 
-// ═════════════════════════════════════════════════════════════════
-// K4 · AUTORESEARCH — DEPRECATED 2026-04-29 (audit PR #11523)
-//
-// This spec describes a research-finding model (hypothesis/evidence/
-// conclusion + confidence). Production uses a self-improvement loop
-// schema (cycle/keep/discard/best_score) — see:
-//   dashboard/src/api/schemas/autoresearch.ts
-//   dashboard/src/components/autoresearch.ts
-//
-// Different products. Reconciliation decision: production schema is
-// canonical; this preview spec is archived. Mockup retained for design
-// reference only (do not consume as implementation guidance).
-// ═════════════════════════════════════════════════════════════════
-
-function ARLoopList() {
-  const confCls = (c) => c >= 0.8 ? 'hi' : c >= 0.5 ? '' : c >= 0.35 ? 'lo' : 'vlo';
-  return (
-    <section aria-label={`Autoresearch loops · ${P2h.arLoops.filter(l=>l.status==='open').length} open · ${P2h.arLoops.filter(l=>l.status==='closed').length} closed`} style={{display:'flex',flexDirection:'column',gap:'6px'}}>
-      <div role="heading" aria-level={3} style={{padding:'4px 8px',background:'var(--color-bg-panel-alt)',border:'1px solid var(--color-border-strong)',fontFamily:'var(--font-mono)',fontSize:'var(--fs-9)',letterSpacing:'.12em',textTransform:'uppercase',color:'var(--color-fg-disabled)',display:'flex',gap:'8px'}}>
-        <span>autoresearch loops</span>
-        <span style={{marginLeft:'auto',color:'var(--color-accent-fg)'}}>{P2h.arLoops.filter(l=>l.status==='open').length} open · {P2h.arLoops.filter(l=>l.status==='closed').length} closed</span>
-      </div>
-      <div role="list" aria-label={`${P2h.arLoops.length} autoresearch loops`} style={{background:'var(--color-bg-page)'}}>
-        {P2h.arLoops.map(l => (
-          <div key={l.id} className="ar-row" role="listitem" aria-label={`${l.id} · ${l.topic} · owner ${l.owner}${l.branch ? ' · branch ' + l.branch : ''} · ${l.hypotheses}H ${l.evidences}E ${l.conclusions}C · ${l.status} · ${(l.confidence*100).toFixed(0)}% confidence`}>
-            <span className="id" aria-hidden="true">{l.id.slice(0,11)}</span>
-            <div aria-hidden="true" style={{display:'flex',flexDirection:'column',gap:'2px'}}>
-              <span className="topic">{l.topic}</span>
-              <span style={{fontFamily:'var(--font-mono)',fontSize:'var(--fs-10)',color:'var(--color-fg-disabled)'}}>
-                owner · {l.owner}
-                {l.branch && <span style={{color:'var(--color-fg-muted)'}}> · ⎇ {l.branch}</span>}
-                {' · '}{l.hypotheses}H · {l.evidences}E · {l.conclusions}C
-              </span>
-            </div>
-            <span className={`st ${l.status}`} aria-hidden="true">{l.status}</span>
-            <span className={`conf ${confCls(l.confidence)}`} aria-hidden="true">{(l.confidence*100).toFixed(0)}%</span>
-          </div>
-        ))}
-      </div>
-    </section>
-  );
-}
-
-function ARFindingCard() {
-  const [sel, setSel] = useState('f-001');
-  const f = P2h.findings.find(x => x.id === sel);
-  return (
-    <section aria-label="Autoresearch finding card" style={{display:'flex',flexDirection:'column',gap:'6px'}}>
-      <div role="tablist" aria-label="Select finding" style={{display:'flex',gap:'2px'}}>
-        {P2h.findings.map(x => (
-          <button key={x.id} type="button" role="tab" aria-selected={sel===x.id} aria-controls="ar-finding-panel" tabIndex={sel===x.id ? 0 : -1} onClick={() => setSel(x.id)}
-            style={{padding:'3px 10px',background: sel===x.id ? 'var(--color-accent-fg-dim)' : 'var(--color-bg-panel-alt)',border:'1px solid var(--color-border-strong)',color: sel===x.id ? 'var(--color-accent-fg)' : 'var(--color-fg-muted)',fontFamily:'var(--font-mono)',fontSize:'var(--fs-10)',cursor:'pointer'}}>
-            {x.id}
-          </button>
-        ))}
-      </div>
-      <article className="ar-find" id="ar-finding-panel" role="tabpanel" aria-label={`Finding ${f.id} · loop ${f.loop} · ${(f.confidence*100).toFixed(0)}% confidence`}>
-        <div className="hdr" aria-hidden="true">
-          <span className="id">{f.id}</span>
-          <span className="loop">loop · {f.loop}</span>
-          <span style={{fontFamily:'var(--font-mono)',fontSize:'var(--fs-10)',color:'var(--color-fg-disabled)'}}>{f.at.slice(11,19)}</span>
-          <span className="conf">{(f.confidence*100).toFixed(0)}% confidence</span>
-        </div>
-        <section aria-labelledby={`ar-${f.id}-hyp`}>
-          <SectionHeading title="hypothesis" level={4} id={`ar-${f.id}-hyp`} />
-          <div className="hy">{f.hypothesis}</div>
-        </section>
-        <section aria-labelledby={`ar-${f.id}-ev`}>
-          <SectionHeading title={`evidence (${f.evidence.length})`} level={4} id={`ar-${f.id}-ev`} />
-          <ul className="ev-list" role="list" style={{listStyle:'none', margin:0, padding:0}}>
-            {f.evidence.map((e, i) => <li key={i} className="ev">{e}</li>)}
-          </ul>
-        </section>
-        <section aria-labelledby={`ar-${f.id}-co`}>
-          <SectionHeading title="conclusion" level={4} id={`ar-${f.id}-co`} />
-          <div className="co">{f.conclusion}</div>
-        </section>
-      </article>
-    </section>
-  );
-}
-
-function ARHypothesisFlow() {
-  const loop = P2h.arLoops.find(l => l.id === 'ar-78d41e9c');
-  const finding = P2h.findings.find(f => f.loop === 'ar-78d41e9c');
-  return (
-    <section aria-label={`${loop.id} · ${loop.topic} · closed · ${(loop.confidence*100).toFixed(0)}% confidence`} style={{display:'flex',flexDirection:'column',gap:'6px'}}>
-      <div role="heading" aria-level={3} style={{padding:'4px 8px',background:'var(--color-bg-panel-alt)',border:'1px solid var(--color-border-strong)',fontFamily:'var(--font-mono)',fontSize:'var(--fs-9)',letterSpacing:'.12em',textTransform:'uppercase',color:'var(--color-fg-disabled)',display:'flex',gap:'8px'}}>
-        <span>{loop.id}</span>
-        <span style={{color:'var(--color-fg-muted)'}}>· {loop.topic}</span>
-        <span style={{marginLeft:'auto',color:'var(--ok-fg)'}}>closed · {(loop.confidence*100).toFixed(0)}% confidence</span>
-      </div>
-      <ol className="ar-flow" aria-label="Hypothesis to evidence to conclusion flow" style={{listStyle:'none', margin:0, padding:0}}>
-        <li className="step">
-          <div className="step-h" role="heading" aria-level={4}>
-            <span className="step-n" aria-hidden="true">1</span>
-            <span className="step-t">Hypothesis</span>
-          </div>
-          <div className="step-body">{finding.hypothesis}</div>
-        </li>
-        <li className="connector" aria-hidden="true">↓</li>
-        <li className="step">
-          <div className="step-h" role="heading" aria-level={4}>
-            <span className="step-n" aria-hidden="true">2</span>
-            <span className="step-t">Evidence ({finding.evidence.length} items)</span>
-          </div>
-          <ul role="list" style={{listStyle:'none', margin:0, padding:0}}>
-            {finding.evidence.map((e, i) => <li key={i} className="ev">{e}</li>)}
-          </ul>
-        </li>
-        <li className="connector" aria-hidden="true">↓</li>
-        <li className="step">
-          <div className="step-h" role="heading" aria-level={4}>
-            <span className="step-n" aria-hidden="true">3</span>
-            <span className="step-t">Conclusion</span>
-          </div>
-          <div className="ar-con">{finding.conclusion}</div>
-        </li>
-      </ol>
-    </section>
-  );
-}
-
 Object.assign(window, {
   KeeperBDIPanel, KeeperToolAccess, KeeperTokenStats,
   DecisionsStream, MemoryEntries,
   EpisodeCards, EpisodeLearnings,
-  ARLoopList, ARFindingCard, ARHypothesisFlow,
 });

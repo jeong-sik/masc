@@ -1060,7 +1060,6 @@ let link_task_execution_artifacts_r
       ~task_id
       ?session_id
       ?operation_id
-      ?autoresearch_loop_id
       ()
   : string Masc_domain.masc_result
   =
@@ -1091,7 +1090,6 @@ let link_task_execution_artifacts_r
                      existing_contract.links
                      ?session_id
                      ?operation_id
-                     ?autoresearch_loop_id
                      ()
                }
                |> normalize_task_contract
@@ -1124,12 +1122,7 @@ let link_task_execution_artifacts_r
                          | None -> [])
                       @ (match trim_opt operation_id with
                          | Some operation_id -> [ "operation_id", `String operation_id ]
-                         | None -> [])
-                      @
-                      match trim_opt autoresearch_loop_id with
-                      | Some autoresearch_loop_id ->
-                        [ "autoresearch_loop_id", `String autoresearch_loop_id ]
-                      | None -> []));
+                         | None -> []));
              log_event
                config
                (`Assoc
@@ -1144,12 +1137,7 @@ let link_task_execution_artifacts_r
                        | None -> [])
                     @ (match trim_opt operation_id with
                        | Some operation_id -> [ "operation_id", `String operation_id ]
-                       | None -> [])
-                    @
-                    match trim_opt autoresearch_loop_id with
-                    | Some autoresearch_loop_id ->
-                      [ "autoresearch_loop_id", `String autoresearch_loop_id ]
-                    | None -> []));
+                       | None -> []));
              Ok (Printf.sprintf "Linked execution artifacts for %s" task_id))
       with
       | Eio.Cancel.Cancelled _ as e -> raise e

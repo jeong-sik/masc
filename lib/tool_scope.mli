@@ -5,7 +5,7 @@
       humans via dashboard). These are the goal/board/task/broadcast +
       admin lifecycle/observability primitives.
     - [Keeper_internal]: tools that a keeper persona invokes during its
-      own work loop (code/web/worktree/autoresearch/plan/run/coord/inline
+      own work loop (code/web/worktree/plan/run/coord/inline
       helpers). These should not be reachable from the external MCP
       surface — only via the keeper dispatch table.
 

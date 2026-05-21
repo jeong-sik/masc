@@ -24,7 +24,7 @@ Scope:
 
 - Canonical behavior in this document is derived from code.
 - "Current host audit" is a dated snapshot of the machine inspected on 2026-04-09.
-- Primary runtime domains are `tasks`, `board`, `goals`, `governance`, `autoresearch`, and `keepers`.
+- Primary runtime domains are `tasks`, `board`, `goals`, `governance`, and `keepers`.
 - `team-sessions`, `local-workers`, `oas-runtime`, and `command-plane` are documented only as compatibility, historical, or execution-artifact lanes, not as the primary product concept.
 
 ## 1. Boot Inputs and Precedence
@@ -39,7 +39,7 @@ Scope:
 | `MASC_PERSONAS_DIR` | Explicit personas root override. | `Config_dir_resolver`, keeper/persona loading |
 | `MASC_STORAGE_TYPE` | Runtime backend selector. Only `filesystem` is active; PostgreSQL backend was removed. | bootstrap and backend setup |
 | `HOME` | Shell/user-home context for external tools and non-config artifact stores. | Host process environment |
-| `MASC_WORKSPACE_ROOT`, `ME_ROOT`, `DUNE_SOURCEROOT` | Workspace discovery, knowledge paths, `scripts/sb` resolution. | `Env_config_core`, `autoresearch_knowledge`, workspace paths |
+| `MASC_WORKSPACE_ROOT`, `ME_ROOT`, `DUNE_SOURCEROOT` | Workspace discovery, knowledge paths, `scripts/sb` resolution. | `Env_config_core`, workspace paths |
 | `MASC_HOST`, `MASC_HTTP_PORT`, `MASC_HTTP_BASE_URL` | Bind address and derived HTTP endpoint identity. | HTTP/bootstrap/provider routing |
 | `MASC_ADMIN_TOKEN` | Privileged endpoint auth. | server auth |
 
@@ -211,7 +211,6 @@ without mutating the parent environment.
 | Board | `<runtime_root>/board_posts.jsonl`, `board_comments.jsonl`, `board_votes.jsonl` |
 | Goals | `<runtime_root>/goals.json`, `goals_snapshots/`, `goals_scheduler_state.json` |
 | Governance | `<runtime_root>/governance.json`, `governance_v2/...` |
-| Autoresearch loops | `<runtime_root>/autoresearch/<loop_id>/` |
 | Control plane | `<runtime_root>/control-plane/` |
 | Operator lane | `<runtime_root>/operator/` |
 | Logs | `<runtime_root>/logs/` |
@@ -279,21 +278,7 @@ Compatibility note:
 - `governance_v2/petitions/` may still exist on disk, but petition-first governance is no longer the primary operating concept.
 - Some older governance reads still inspect `<runtime_root>/governance/judgments/`.
 
-### 3.5 Autoresearch
-
-- `<runtime_root>/autoresearch/<loop_id>/`
-  - `results.jsonl`
-  - `state.json`
-  - `swarm.json`
-  - `worktree/`
-- `<base-path>/.masc/autoresearch/findings/findings.jsonl`
-
-Important outlier:
-
-- The findings store should resolve from `MASC_BASE_PATH` or `HOME`, not from the room-config runtime root.
-- Legacy links from team-session artifacts to autoresearch loops may still exist.
-
-### 3.6 Keepers
+### 3.5 Keepers
 
 - `<runtime_root>/keepers/<name>.json`: keeper meta/state.
 - `<runtime_root>/keepers/<name>.decisions.jsonl`
@@ -434,7 +419,6 @@ Current host definitely has live filesystem data for:
 - board
 - goals
 - governance
-- autoresearch
 - keepers
 - command-plane and operator
 - auth

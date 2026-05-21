@@ -373,7 +373,6 @@
         <li><b>K1</b><a href="#k1">Keeper Inspector v2</a></li>
         <li><b>K2</b><a href="#k2">Decisions / Memory</a></li>
         <li><b>K3</b><a href="#k3">Institution Episodes</a></li>
-        <li><b>K4</b><a href="#k4">Autoresearch</a></li>
       </ol>
     </div>
   </nav>
@@ -806,31 +805,6 @@
         </div>
       </div>
 
-      <div class="zone" id="k4">
-        <div class="zhead">
-          <span class="zid">K4</span>
-          <h3 class="ztitle">Autoresearch Loops</h3>
-          <span class="zkind">cognition</span>
-        </div>
-        <p class="lead">Hypothesis → evidence → conclusion 루프 시각화. 6개 루프 + findings.</p>
-        <p class="lbl">Real data</p>
-        <p class="data">
-          <b>.masc/autoresearch/ar-*</b> · 6 loops (ar-02f4434c, ar-59ea0b30, ar-6940c7f5, ar-78d41e9c, ar-93ff2489, ar-aadab70d)<br/>
-          <b>.masc/autoresearch/findings/findings.jsonl</b><br/>
-          fields: <em>hypothesis</em>, <em>evidence</em>, <em>conclusion</em>, <em>confidence</em>
-        </p>
-        <p class="lbl">Variants</p>
-        <ul class="vars">
-          <li><span><b>A · Loop List</b>active/closed loop, status</span></li>
-          <li><span><b>B · Finding Card</b>hypothesis → evidence → conclusion 흐름</span></li>
-          <li><span><b>C · Confidence Tracker</b>loop별 confidence 변화</span></li>
-        </ul>
-        <div class="ide">
-          <p class="lbl">IDE Hook</p>
-          finding의 evidence(file:line, commit) → IDE에서 highlight.
-        </div>
-      </div>
-
     </div>
   </section>
 
@@ -876,7 +850,7 @@
         </tr>
         <tr class="parallel">
           <td>T4 ∥</td>
-          <td>Cognition (K1~K4)</td>
+          <td>Cognition (K1~K3)</td>
           <td class="mono">preview/<b>cb-group-h.jsx</b></td>
           <td class="mono">ui_kits/cockpit/<b>data-cog.js</b></td>
           <td>BDI from sangsu.json; decisions sample from sangsu.decisions.jsonl</td>

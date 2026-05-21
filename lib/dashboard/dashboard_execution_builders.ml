@@ -409,7 +409,7 @@ let task_operation_updated_at (task : Masc_domain.task) =
 let task_operation_links (task : Masc_domain.task) =
   match task.contract with
   | Some contract -> contract.links
-  | None -> { Masc_domain.operation_id = None; session_id = None; autoresearch_loop_id = None }
+  | None -> { Masc_domain.operation_id = None; session_id = None }
 
 let task_operation_id (task : Masc_domain.task) =
   let links = task_operation_links task in

@@ -8,7 +8,7 @@ import { KpiCell } from './kpi-cell'
 function sampleResponse() {
   return {
     generated_at: 1711440000,
-    scope_note: 'Autoresearch는 generator loop, Harness는 safety rail을 설명합니다.',
+    scope_note: 'Harness health explains safety rails and calibration loops.',
     overview: {
       evaluator_status: 'warning',
       pre_compact_status: 'healthy',

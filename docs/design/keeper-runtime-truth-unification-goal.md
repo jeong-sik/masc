@@ -347,9 +347,6 @@ Mapping:
 - Keeper approval queue projections, audit rows, and resolution broadcasts keep
   `selected_model` for compatibility but emit `null`; HITL policy and sandbox
   evidence remain visible.
-- Autoresearch cycle JSON and attribution evidence keep `model_used` only as a
-  compatibility key and emit `null`; legacy persisted strings are accepted and
-  normalized to the neutral `runtime` label on decode.
 - Channel Gate turn stats preserve duration/token metrics but collapse the
   legacy in-memory model slot to `runtime`; outbound wire JSON keeps
   `model_used` only as a compatibility key and emits `null`.

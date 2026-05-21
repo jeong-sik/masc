@@ -927,7 +927,18 @@ let make_keeper_tool_handler
               Keeper_metrics.metric_keeper_tools_oas_failures
               ~labels:[ "tool", name; "site", "error_result" ]
               ();
-            (match deterministic_reason, is_workflow_rejection with
+            (* Workflow rejections can arrive either through the
+               deterministic classifier or as a raw failure_class. Normalize
+               the WARN envelope so one root cause does not split across two
+               operator-visible signatures. *)
+            let unified_reason =
+              match deterministic_reason, is_workflow_rejection with
+              | Some _, _ -> deterministic_reason
+              | None, true ->
+                Some Keeper_tool_deterministic_error.Workflow_rejection_blocked
+              | None, false -> None
+            in
+            (match unified_reason, is_workflow_rejection with
              | Some reason, _ ->
                Log.Keeper.warn
                  "tool %s deterministic error (retry skipped, reason=%s): %s"
@@ -935,9 +946,13 @@ let make_keeper_tool_handler
                  (Keeper_tool_deterministic_error.to_telemetry_key reason)
                  detail
              | None, true ->
+               (* Unreachable by construction (see [unified_reason]
+                  above); kept for exhaustiveness. *)
                Log.Keeper.warn
-                 "tool %s returned workflow rejection: %s"
+                 "tool %s deterministic error (retry skipped, reason=%s): %s"
                  name
+                 (Keeper_tool_deterministic_error.to_telemetry_key
+                    Keeper_tool_deterministic_error.Workflow_rejection_blocked)
                  detail
              | None, false ->
                (* MASC/OAS Error-Warn Reduction Goal §P3 adjacency
@@ -1000,6 +1015,8 @@ let make_keeper_tool_handler
                       ; "site", "retry_threshold_silence"
                       ]
                     ()));
+            (* Preserve existing retry-skipped and counter semantics; only
+               the human-readable WARN envelope is unified above. *)
             (match deterministic_reason with
              | Some reason ->
                Prometheus.inc_counter

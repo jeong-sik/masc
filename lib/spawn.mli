@@ -33,7 +33,6 @@ type spawn_config = {
   working_dir : string option;
   mcp_tools : string list;
   parse_output : string -> parsed_output;
-  stdin_prompt : bool;
   mcp_mode : mcp_flag;
   prompt_mode : prompt_flag;
 }

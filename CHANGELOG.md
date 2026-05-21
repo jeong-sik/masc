@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.19.28] - 2026-05-21
+
+### Changed
+- Bumped `agent_sdk` (OAS) pin from `v0.196.7` to `v0.196.8` and SHA from
+  `609600d8` to `8ea10c7b` (origin/main HEAD). Picks up `feat(error): carry
+  completion contract violation detail` (#1660), `test(cascade): cover capacity
+  admission fast-fail` (#1659), and CLI/capabilities refactors (#1662, #1663).
+
 ## [0.19.27] - 2026-05-20
 
 ### Changed

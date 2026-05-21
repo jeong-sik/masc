@@ -1023,110 +1023,18 @@ module Json_stream_cli_transport_local = struct
   ;;
 end
 
-(** Wrap CLI transports in a per-call sub-switch.
-
-    agent_sdk's CLI subprocess helper binds stdout/stderr pipes to the
-    switch passed at transport construction time. Reusing a long-lived
-    keeper/server switch across many calls can therefore retain those pipe
-    resources until the outer switch exits. By instantiating the real CLI
-    transport inside a fresh sub-switch for each completion call, any
-    leftover pipe resources are deterministically released at the end of the
-    call even when the outer keeper lifetime is long-lived. *)
-let make_per_call_switch_transport
-      (factory : sw:Eio.Switch.t -> Llm_provider.Llm_transport.t)
-  : Llm_provider.Llm_transport.t
-  =
-  let with_call_switch f = Eio.Switch.run (fun sw -> f (factory ~sw)) in
-  { complete_sync =
-      (fun req -> with_call_switch (fun transport -> transport.complete_sync req))
-  ; complete_stream =
-      (fun ?on_telemetry:_ ~on_event req ->
-        with_call_switch (fun transport -> transport.complete_stream ~on_event req))
-  }
-;;
-
-(* CLI argv UTF-8 sanitization extracted to
-   [Cascade_transport_cli_argv_sanitize] (godfile decomp). *)
-let sanitize_runtime_mcp_server_for_cli =
-  Cascade_transport_cli_argv_sanitize.sanitize_runtime_mcp_server_for_cli
-;;
-
-let sanitize_runtime_mcp_policy_for_cli =
-  Cascade_transport_cli_argv_sanitize.sanitize_runtime_mcp_policy_for_cli
-;;
-
-let sanitize_cli_completion_request_for_argv =
-  Cascade_transport_cli_argv_sanitize.sanitize_cli_completion_request_for_argv
-;;
-
-let make_cli_argv_sanitizing_transport =
-  Cascade_transport_cli_argv_sanitize.make_cli_argv_sanitizing_transport
-;;
-
-(* Non-HTTP transport registry + dispatcher extracted to
-   [Cascade_transport_non_http_registry] (godfile decomp). *)
-let register_non_http_transport = Cascade_transport_non_http_registry.register_non_http_transport
-
-let default_cli_transport_overrides = Cascade_transport_cli_overrides.default_cli_transport_overrides
-
-let with_proc_mgr (f : mgr:_ -> Llm_provider.Llm_transport.t) =
-  match Process_eio.get_proc_mgr () with
-  | Error detail -> Error (invalid_runtime_config "proc_mgr" detail)
-  | Ok mgr -> Ok (f ~mgr)
-;;
-
-let claude_code_transport_ctor
-      ~(provider_cfg : Llm_provider.Provider_config.t)
-      ~runtime_mcp_policy:_
-      ~cli_transport_overrides
-  =
-  let overrides =
-    Option.value ~default:default_cli_transport_overrides cli_transport_overrides
-  in
-  let config =
-    { Llm_provider.Transport_claude_code.default_config with
-      model = cli_model_override provider_cfg.model_id
-    ; cwd = overrides.cwd
-    ; mcp_config = overrides.claude_mcp_config
-    ; allowed_tools = Option.value ~default:[] overrides.claude_allowed_tools
-    ; permission_mode = overrides.claude_permission_mode
-    ; max_turns = overrides.claude_max_turns
-    }
-  in
-  with_proc_mgr (fun ~mgr ->
-    make_per_call_switch_transport (fun ~sw ->
-      Llm_provider.Transport_claude_code.create ~sw ~mgr ~config))
-;;
-
-let gemini_cli_transport_ctor
-      ~(provider_cfg : Llm_provider.Provider_config.t)
-      ~runtime_mcp_policy:_
-      ~cli_transport_overrides
-  =
-  let overrides =
-    Option.value ~default:default_cli_transport_overrides cli_transport_overrides
-  in
-  let config =
-    { Llm_provider.Transport_gemini_cli.default_config with
-      model = cli_model_override provider_cfg.model_id
-    ; cwd = overrides.cwd
-    ; yolo = Option.value ~default:true overrides.gemini_yolo
-    }
-  in
-  with_proc_mgr (fun ~mgr ->
-    make_per_call_switch_transport (fun ~sw ->
-      Llm_provider.Transport_gemini_cli.create ~sw ~mgr ~config))
-;;
-
 let json_stream_cli_transport_ctor
       ~(provider_cfg : Llm_provider.Provider_config.t)
       ~runtime_mcp_policy
       ~cli_transport_overrides
   =
-  let cwd = Option.bind cli_transport_overrides (fun overrides -> overrides.cwd) in
+  let cwd =
+    Option.bind cli_transport_overrides (fun overrides ->
+      overrides.Cascade_transport_cli_overrides.cwd)
+  in
   let stdout_idle_timeout_s =
     Option.bind cli_transport_overrides (fun overrides ->
-      overrides.cli_subprocess_idle_sec)
+      overrides.Cascade_transport_cli_overrides.cli_subprocess_idle_sec)
   in
   let mcp_config_json = cli_runtime_mcp_jsons ~base:[] runtime_mcp_policy in
   let model = cli_model_for_provider_config provider_cfg in
@@ -1149,39 +1057,38 @@ let json_stream_cli_transport_ctor
     ; stdout_idle_timeout_s
     }
   in
-  with_proc_mgr (fun ~mgr ->
-    make_per_call_switch_transport (fun ~sw ->
-      Json_stream_cli_transport_local.create ~sw ~mgr ~config))
-;;
-
-let codex_cli_transport_ctor
-      ~provider_cfg:_
-      ~runtime_mcp_policy:_
-      ~cli_transport_overrides
-  =
-  let cwd = Option.bind cli_transport_overrides (fun overrides -> overrides.cwd) in
-  with_proc_mgr (fun ~mgr ->
-    make_cli_argv_sanitizing_transport
-      (make_per_call_switch_transport (fun ~sw ->
-         Llm_provider.Transport_codex_cli.create
-           ~sw
-           ~mgr
-           ~config:{ Llm_provider.Transport_codex_cli.default_config with cwd })))
+  match Process_eio.get_proc_mgr () with
+  | Error detail -> Error (invalid_runtime_config "proc_mgr" detail)
+  | Ok mgr ->
+    Ok
+      (Cascade_transport_cli_ctors.make_per_call_switch_transport (fun ~sw ->
+         Json_stream_cli_transport_local.create ~sw ~mgr ~config))
 ;;
 
 let () =
-  register_non_http_transport
-    ~kind:Llm_provider.Provider_config.Claude_code
-    ~ctor:claude_code_transport_ctor;
-  register_non_http_transport
-    ~kind:Llm_provider.Provider_config.Gemini_cli
-    ~ctor:gemini_cli_transport_ctor;
-  register_non_http_transport
+  Cascade_transport_non_http_registry.register_non_http_transport
     ~kind:Llm_provider.Provider_config.Kimi_cli
-    ~ctor:json_stream_cli_transport_ctor;
-  register_non_http_transport
-    ~kind:Llm_provider.Provider_config.Codex_cli
-    ~ctor:codex_cli_transport_ctor
+    ~ctor:json_stream_cli_transport_ctor
 ;;
 
+(* CLI transport constructors + per-call switch wrapping + ctor
+   registration extracted to [Cascade_transport_cli_ctors]
+   (godfile decomp). The sibling's top-level [let () = ...]
+   block registers the 4 ctors into
+   [Cascade_transport_non_http_registry] at module-load time. *)
+let make_per_call_switch_transport = Cascade_transport_cli_ctors.make_per_call_switch_transport
+
+(* CLI argv UTF-8 sanitization extracted to
+   [Cascade_transport_cli_argv_sanitize] (godfile decomp). *)
+let sanitize_runtime_mcp_server_for_cli =
+  Cascade_transport_cli_argv_sanitize.sanitize_runtime_mcp_server_for_cli
+;;
+
+let sanitize_runtime_mcp_policy_for_cli =
+  Cascade_transport_cli_argv_sanitize.sanitize_runtime_mcp_policy_for_cli
+;;
+
+let sanitize_cli_completion_request_for_argv =
+  Cascade_transport_cli_argv_sanitize.sanitize_cli_completion_request_for_argv
+;;
 let non_http_transport_of_provider = Cascade_transport_non_http_registry.non_http_transport_of_provider

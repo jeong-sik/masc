@@ -555,15 +555,13 @@ let unix_status_of_eio_status = function
   | `Signaled n -> Unix.WSIGNALED n
 
 let pipeline_status statuses =
-  match statuses with
-  | [] -> Unix.WEXITED 0
-  | last :: rest ->
-      List.fold_left
-        (fun acc status ->
-          match acc, status with
-          | Unix.WEXITED 0, _ -> status
-          | (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _ -> acc)
-        last rest
+  List.fold_left
+    (fun acc status ->
+      match status with
+      | Unix.WEXITED 0 -> acc
+      | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> status)
+    (Unix.WEXITED 0)
+    statuses
 
 let run_argv ?(timeout_sec = default_timeout_sec) ?env (argv : string list) : string =
   Exec_tap.record ~kind:Exec_tap.Process_eio_run_argv ~argv ?env ();
@@ -793,33 +791,25 @@ let run_argv_pipeline_with_status_split ?(timeout_sec = default_timeout_sec)
           run_unix_argv_with_stdin_and_status_split_fallback ~timeout_sec ?env
             ?cwd ~stdin_content:prev_stdout argv
       | { argv; env; cwd } :: rest ->
-          let status, stdout, _stderr =
+          let status, stdout, stderr =
             run_unix_argv_with_stdin_and_status_split_fallback ~timeout_sec
               ?env ?cwd ~stdin_content:prev_stdout argv
           in
           let result_status, result_stdout, result_stderr = chain stdout rest in
-          let final_status =
-            match status with
-            | Unix.WEXITED 0 -> result_status
-            | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> status
-          in
-          (final_status, result_stdout, result_stderr)
+          let final_status = pipeline_status [ status; result_status ] in
+          (final_status, result_stdout, stderr ^ result_stderr)
     in
     match stages with
     | [] -> (Unix.WEXITED 0, "", "")
     | [ { argv; env; cwd } ] ->
         run_unix_argv_with_status_split_fallback ~timeout_sec ?env ?cwd argv
     | { argv; env; cwd } :: rest ->
-        let status, stdout, _stderr =
+        let status, stdout, stderr =
           run_unix_argv_with_status_split_fallback ~timeout_sec ?env ?cwd argv
         in
         let result_status, result_stdout, result_stderr = chain stdout rest in
-        let final_status =
-          match status with
-          | Unix.WEXITED 0 -> result_status
-          | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> status
-        in
-        (final_status, result_stdout, result_stderr)
+        let final_status = pipeline_status [ status; result_status ] in
+        (final_status, result_stdout, stderr ^ result_stderr)
   in
   with_spawn_guard (fun () ->
       if not (is_initialized ()) then fallback_buffered ()

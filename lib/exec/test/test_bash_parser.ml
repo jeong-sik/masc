@@ -163,6 +163,57 @@ let test_pipeline_dev_null_redirect_preserved () =
      | _ -> assert false)
   | _ -> assert false
 
+let test_env_prefix_parsed () =
+  match Bash.parse_string "LC_ALL=C git status" with
+  | Parsed.Parsed (Shell_ir.Simple s) ->
+    assert (Bin.to_string s.bin = "git");
+    assert (s.args = [ Shell_ir.Lit "status" ]);
+    assert (s.env = [ "LC_ALL", Shell_ir.Lit "C" ])
+  | _ -> assert false
+
+let test_multiple_env_prefixes_preserve_order () =
+  match Bash.parse_string "A=1 B='two words' printenv A" with
+  | Parsed.Parsed (Shell_ir.Simple s) ->
+    assert (Bin.to_string s.bin = "printenv");
+    assert (s.args = [ Shell_ir.Lit "A" ]);
+    assert (s.env = [ "A", Shell_ir.Lit "1"; "B", Shell_ir.Lit "two words" ])
+  | _ -> assert false
+
+let test_env_assignment_after_bin_is_arg () =
+  match Bash.parse_string "echo LC_ALL=C" with
+  | Parsed.Parsed (Shell_ir.Simple s) ->
+    assert (Bin.to_string s.bin = "echo");
+    assert (s.args = [ Shell_ir.Lit "LC_ALL=C" ]);
+    assert (s.env = [])
+  | _ -> assert false
+
+let test_env_only_rejected () =
+  match Bash.parse_string "LC_ALL=C" with
+  | Parsed.Parse_error _ -> ()
+  | _ -> assert false
+
+let test_pipeline_env_prefixes_preserved_per_stage () =
+  match Bash.parse_string "LC_ALL=C printf hi | LANG=C wc -c" with
+  | Parsed.Parsed (Shell_ir.Pipeline [ Shell_ir.Simple s1; Shell_ir.Simple s2 ]) ->
+    assert (Bin.to_string s1.bin = "printf");
+    assert (Bin.to_string s2.bin = "wc");
+    assert (s1.env = [ "LC_ALL", Shell_ir.Lit "C" ]);
+    assert (s2.env = [ "LANG", Shell_ir.Lit "C" ]);
+    assert (s1.args = [ Shell_ir.Lit "hi" ]);
+    assert (s2.args = [ Shell_ir.Lit "-c" ])
+  | _ -> assert false
+
+let test_env_prefix_dispatch_overlay () =
+  match
+    Bash.parse_string
+      "MASC_SHELL_IR_ENV_PREFIX_TEST=ok printenv MASC_SHELL_IR_ENV_PREFIX_TEST"
+  with
+  | Parsed.Parsed ir ->
+    let result = Masc_exec.Exec_dispatch.dispatch ir in
+    assert (result.status = Unix.WEXITED 0);
+    assert (String.trim result.stdout = "ok")
+  | _ -> assert false
+
 let test_heredoc_rejected () =
   (* "<<" must out-rank single "<" — order check in classify_too_complex. *)
   match Bash.parse_string "cat <<EOF" with
@@ -425,6 +476,12 @@ let () =
   test_spaced_dev_null_redirect_parsed ();
   test_quoted_dev_null_redirect_parsed ();
   test_pipeline_dev_null_redirect_preserved ();
+  test_env_prefix_parsed ();
+  test_multiple_env_prefixes_preserve_order ();
+  test_env_assignment_after_bin_is_arg ();
+  test_env_only_rejected ();
+  test_pipeline_env_prefixes_preserved_per_stage ();
+  test_env_prefix_dispatch_overlay ();
   test_heredoc_rejected ();
   test_here_string_rejected ();
   test_cmd_subst_paren_rejected ();

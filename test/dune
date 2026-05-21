@@ -232,6 +232,9 @@
   test_exec_dispatch
   test_keeper_bash_safety
   test_keeper_bash_typed_input
+  test_keeper_shell_bash_cross_host_probe
+  test_keeper_shell_bash_cross_repo_discovery
+  test_keeper_shell_bash_layer_b_redirects
   test_hitl_approval
   test_approval_callback_wired
   test_keeper_discovered_tools
@@ -550,6 +553,9 @@
   test_exec_dispatch
   test_keeper_bash_safety
   test_keeper_bash_typed_input
+  test_keeper_shell_bash_cross_host_probe
+  test_keeper_shell_bash_cross_repo_discovery
+  test_keeper_shell_bash_layer_b_redirects
   test_hitl_approval
   test_approval_callback_wired
   test_keeper_discovered_tools

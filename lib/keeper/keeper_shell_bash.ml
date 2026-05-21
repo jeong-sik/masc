@@ -629,6 +629,76 @@ let doubled_cwd_relative_path_result ~cmd ~cmd_for_log ~cwd ~plan ~env_snapshot 
        ~env_snapshot
        ())
 
+(* P0-X redirect arm #3: cross-host probe ([find /home/...] or
+   [find /Users/...]) hits the sandbox boundary before the
+   command-shape pipeline because shape detection scopes path tokens
+   rather than absolute roots. This emitter mirrors
+   [doubled_cwd_relative_path_result] field-for-field, but routes the
+   keeper at [keeper_context_status] (the typed SSOT for current_task
+   / sandbox path lookup). The predicate
+   [Keeper_shell_bash_cross_repo_discovery.command_looks_like_cross_host_probe]
+   lives in the discovery module so it can be reused by other call
+   sites; the emitter itself stays here next to its sibling
+   precedent. *)
+let cross_host_probe_plan () =
+  let hint =
+    "The command walks an absolute host path (/home or /Users) from \
+     raw Bash. The keeper sandbox cannot reach those roots, and the \
+     current_task / sandbox-path lookup has a typed source of truth: \
+     call keeper_context_status instead of probing the host \
+     filesystem."
+  in
+  shell_rewrite_plan
+    ~confidence:"high"
+    ~next_tool:"keeper_context_status"
+    ~next_args:[]
+    ~instruction:hint
+    ~reason:"cross_host_probe_redirect"
+    ()
+
+let cross_host_probe_result ~cmd ~cmd_for_log ~cwd ~env_snapshot =
+  let rule_id = "keeper_bash_cross_host_probe_redirect" in
+  let plan = cross_host_probe_plan () in
+  Yojson.Safe.to_string
+    (Exec_core.blocked_result_json
+       ~cmd
+       ~error:"keeper_bash_cross_host_probe_redirect"
+       ~reason:
+         "A raw Bash command tried to probe an absolute host path \
+          (/home or /Users) outside the keeper sandbox. The sandbox \
+          cannot reach those roots; the current_task / sandbox-path \
+          lookup has a typed source of truth."
+       ~hint:plan.instruction
+       ~alternatives:
+         [
+           "Call keeper_context_status to read current_task and the \
+            sandbox path.";
+           "Use masc_worktree_list to enumerate worktrees instead of \
+            find on /home or /Users.";
+           "Use Grep with path=repos/REPO/SCOPED_PATH for scoped \
+            content search inside the sandbox.";
+         ]
+       ~diag:
+         (Some
+            {
+              Exec_core.rule_id;
+              explanation =
+                "Absolute host paths (/home, /Users) escape the keeper \
+                 sandbox and are blocked at the boundary. Use the \
+                 typed keeper_context_status tool for current_task \
+                 and sandbox path lookup.";
+              rewrite = Some plan.instruction;
+              tool_suggestion = Some plan.next_tool;
+            })
+       ~extra:
+         ([ "execution_time_ms", `Int 0
+          ; "cmd", `String cmd_for_log
+          ; "cwd", `String cwd
+          ]
+          @ recovery_plan_extra ~rule_id plan)
+       ~env_snapshot
+       ())
+
 (* Typed keeper_bash input projections extracted to
    [Keeper_shell_bash_typed_input] (godfile decomp). *)
 let has_typed_bash_input_key = Keeper_shell_bash_typed_input.has_typed_bash_input_key
@@ -1381,6 +1451,38 @@ let handle_keeper_bash
       else (base_profile, base_network_mode, false)
     in
     let sandbox_root = Keeper_sandbox.allowed_root_rel_of_meta ~meta in
+    (* P0-X redirect arm #3: cross-host probe with absolute /home or /Users
+       paths reaches sandbox boundary before shape detection (because the
+       shape pipeline scopes path tokens, not absolute roots). Short-circuit
+       here with a real structured emitter ([cross_host_probe_result]) that
+       mirrors the [doubled_cwd_relative_path_result] precedent. The
+       predicate lives in [Keeper_shell_bash_cross_repo_discovery] so it can
+       be reused by other call sites; the emitter stays here next to its
+       sibling. rule_id="keeper_bash_cross_host_probe_redirect",
+       next_tool="keeper_context_status" (typed SSOT for current_task /
+       sandbox path lookup). *)
+    if
+      Keeper_shell_bash_cross_repo_discovery
+      .command_looks_like_cross_host_probe validation_cmd
+    then begin
+      Prometheus.inc_counter
+        Keeper_metrics.metric_keeper_shell_bash_failures
+        ~labels:
+          [ ("keeper", meta.name)
+          ; ("site", "cross_host_probe_redirect")
+          ; ("shape_block", "repo_wide_discovery")
+          ]
+        ();
+      Log.Keeper.info
+        "keeper_bash cross_host_probe redirected: keeper=%s cmd=%s"
+        meta.name cmd_for_log;
+      cross_host_probe_result
+        ~cmd
+        ~cmd_for_log
+        ~cwd
+        ~env_snapshot:env_snap
+    end
+    else
     match doubled_cwd_relative_path_plan ~config ~meta ~cwd ~cmd:validation_cmd with
     | Some plan ->
       doubled_cwd_relative_path_result

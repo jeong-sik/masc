@@ -1,5 +1,6 @@
 open Keeper_shell_bash_task_state
 open Keeper_shell_bash_words
+open Keeper_shell_bash_cross_repo_discovery
 
 type bash_shape_block =
   | Gh_pr_checks
@@ -328,6 +329,38 @@ let bash_shape_block_recovery_plan ~cmd = function
          ~next_args:[ "include_done", `Bool false ]
          ~instruction:task_state_shell_hint
          ~reason:"task_state_tool_ssot"
+         ())
+  (* P0-X redirect arm #1: [find repos ... .worktrees] -> masc_worktree_list. *)
+  | _ when command_looks_like_worktree_discovery cmd ->
+    Some
+      (plan
+         ~confidence:"high"
+         ~next_tool:"masc_worktree_list"
+         ~next_args:[ "include_remote", `Bool false ]
+         ~instruction:repo_wide_discovery_shell_hint
+         ~reason:"worktree_discovery_tool_ssot"
+         ())
+  (* P0-X redirect arm #2: [rg/grep ... repos/] -> scoped Grep.
+     Caller is expected to scope [path] to a specific repo before
+     re-issuing; the placeholder makes that explicit. *)
+  | _ when command_looks_like_cross_repo_grep cmd ->
+    let pattern =
+      repo_wide_rg_pattern cmd
+      |> Option.value
+           ~default:
+             (Option.value (repo_wide_grep_pattern cmd) ~default:"SEARCH_TERM")
+    in
+    Some
+      (plan
+         ~confidence:"high"
+         ~next_tool:"Grep"
+         ~next_args:
+           [ "pattern", `String pattern
+           ; "path", `String "repos/REPO/SCOPED_PATH"
+           ; "glob", `String "*.ml"
+           ]
+         ~instruction:repo_wide_discovery_shell_hint
+         ~reason:"cross_repo_grep_scoped_redirect"
          ())
   | Gh_pr_checks ->
     Some

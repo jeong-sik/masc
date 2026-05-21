@@ -146,6 +146,11 @@ EOF
     in
     check bool "worktree entries surfaced" true
       (contains_substring stdout "worktree_entries=2");
+    check bool "worktree fanout columns surfaced" true
+      (contains_substring stdout
+         "worktree_fanout_columns=count keeper repo worktrees_dir");
+    check bool "keeper fanout row surfaced" true
+      (contains_substring stdout "2 keeper-a masc-mcp");
     check bool "top holder count surfaced" true
       (contains_substring stdout "top_holder_fd_count=2");
     check bool "warning surfaced" true
@@ -181,7 +186,9 @@ let test_status_warns_on_worktree_hotspot_when_lsof_fails () =
     check bool "worktree-only warning surfaced" true
       (contains_substring stdout "hotspot_status=warning");
     check bool "worktree reason surfaced" true
-      (contains_substring stdout "hotspot_reasons=worktree_entries"))
+      (contains_substring stdout "hotspot_reasons=worktree_entries");
+    check bool "fanout still surfaces on lsof failure" true
+      (contains_substring stdout "2 keeper-a masc-mcp"))
 
 let test_dry_run_lists_stale_clean_worktree () =
   with_temp_dir "docker-playground-gc-dry-run" (fun dir ->

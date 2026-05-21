@@ -1,6 +1,5 @@
 (** Autonomy_exec — external execution primitive for autonomy loops.
 
-    This module intentionally stays below any AutoResearch-specific policy.
     It provides argv-only process execution with timeout, bounded capture,
     env allowlisting, and optional wrapper prefixes for container/sandbox
     launchers such as Docker or Bubblewrap.

@@ -449,6 +449,31 @@ let rmdir (path : string) : unit =
     (fun fs -> Eio.Path.rmdir Eio.Path.(fs / path))
 ;;
 
+let remove_tree_unix (path : string) : unit =
+  let rec remove path =
+    match Unix.lstat path with
+    | exception Unix.Unix_error (Unix.ENOENT, _, _) -> ()
+    | exception Unix.Unix_error (Unix.ENOTDIR, _, _) -> ()
+    | stat when stat.Unix.st_kind = Unix.S_DIR ->
+      Sys.readdir path
+      |> Array.iter (fun name -> remove (Filename.concat path name));
+      Unix.rmdir path
+    | _stat -> Sys.remove path
+  in
+  remove path
+;;
+
+let remove_tree (path : string) : unit =
+  let normalized = String.trim path in
+  if String.equal normalized "" || String.equal normalized "/" || String.equal normalized "."
+  then invalid_arg (Printf.sprintf "Fs_compat.remove_tree refuses unsafe path %S" path);
+  test_exec_home_guard ~op:"remove_tree" path;
+  with_fs_or_fallback
+    ~path
+    ~fallback:(fun () -> remove_tree_unix path)
+    (fun _fs -> Eio_unix.run_in_systhread (fun () -> remove_tree_unix path))
+;;
+
 let realpath (path : string) : string =
   with_fs_or_fallback
     ~path

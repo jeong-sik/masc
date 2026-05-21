@@ -53,6 +53,7 @@ run_test() {
   local output
   local status=0
   output=$(
+    printf '%s\n' "$cmd" |
     docker run --rm -i \
       --user "$(id -u):$(id -g)" \
       --read-only \
@@ -66,7 +67,7 @@ run_test() {
       --workdir /workspace \
       "${extra_args[@]}" \
       "$image_tag" \
-      bash -lc "$cmd 2>&1"
+      bash -l -s 2>&1
   ) || status=$?
 
   if [[ "$expect_ok" == "true" && "$status" -eq 0 ]]; then

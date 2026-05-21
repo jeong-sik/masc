@@ -678,84 +678,14 @@ let run_turn
                     ())
               in
               (match
-                 let first_attempt =
-                   match call_run_named ~initial_messages:history_messages with
-                   | Error
-                       (Agent_sdk.Error.Agent
-                          (Agent_sdk.Error.CompletionContractViolation
-                             { reason = violation_reason; violation_detail; _ }))
-                     when acc.contract_violation_retries < 1 ->
-                     (* Contract violation retry (max 1 per turn): the
-                        model did not call a required tool. Build a
-                        feedback message naming satisfying tools and
-                        re-invoke Agent.run so the model sees why it
-                        was rejected. The context builder in
-                        keeper_run_tools injects additional guidance
-                        because [contract_violation_retries > 0]. *)
-                     acc.contract_violation_retries <-
-                       acc.contract_violation_retries + 1;
-                     let satisfying_tools =
-                       let local_tools =
-                         Keeper_agent_tool_surface
-                         .generic_required_tool_candidate_names
-                           ~has_current_task:
-                             (Option.is_some
-                                (owned_active_task_id_for_meta
-                                   ~config ~meta:acc.meta))
-                           ~turn_affordances
-                           ~allowed_tool_names:
-                             acc.tool_surface.required_tool_candidate_names
-                       in
-                       let oas_tools =
-                         match violation_detail with
-                         | Some detail when detail.satisfying_tools <> [] ->
-                           detail.satisfying_tools
-                         | Some _ | None ->
-                           Keeper_tool_disclosure
-                           .satisfying_tools_from_contract_violation_reason
-                             violation_reason
-                       in
-                       Keeper_types.dedupe_keep_order (oas_tools @ local_tools)
-                     in
-                     let retry_action =
-                       match satisfying_tools with
-                       | [] ->
-                         "No currently visible tool can satisfy this contract; \
-                          emit a concise blocker instead."
-                       | tools ->
-                         Printf.sprintf
-                           "You MUST call one of these tools: %s."
-                           (String.concat ", " tools)
-                     in
-                     let retry_feedback =
-                       Printf.sprintf
-                         "[CONTRACT VIOLATION] Your previous response was \
-                          rejected: %s. %s Do NOT respond with text only."
-                         violation_reason
-                         retry_action
-                     in
-                     (* Append violation feedback as a User message so the
-                        model sees why its response was rejected. *)
-                     let retry_messages =
-                       history_messages
-                       @ [ { Agent_sdk.Types.role = User
-                           ; content =
-                               [ Agent_sdk.Types.Text retry_feedback ]
-                           ; name = None
-                           ; tool_call_id = None
-                           ; metadata = []
-                           }
-                         ]
-                     in
-                     Log.Keeper.info
-                       "keeper:%s contract violation retry #%d (reason: %s)"
-                       meta.name
-                       acc.contract_violation_retries
-                       violation_reason;
-                     call_run_named ~initial_messages:retry_messages
-                   | other -> other
-                 in
-                 first_attempt
+                 Keeper_agent_run_contract_retry.run_with_single_retry
+                   ~keeper_name:meta.name
+                   ~acc
+                   ~has_current_task:
+                     (Option.is_some (owned_active_task_id_for_meta ~config ~meta:acc.meta))
+                   ~turn_affordances
+                   ~history_messages
+                   ~call_run_named
                with
                | Error e -> Error e
                | Ok result ->

@@ -49,6 +49,8 @@ import {
 } from '../runtime-counts'
 import {
   keeperActivityDisplay,
+  keeperRuntimeBlockerHint,
+  keeperRuntimeBlockerLabel,
 } from '../lib/keeper-runtime-display'
 // RFC-0135 PR-4: roster card derives its blocker note through the typed
 // KeeperOperationalState SSOT so the headline (`현재 차단` vs `이전 차단`
@@ -63,6 +65,8 @@ import type { KeeperCompositeSnapshot } from '../api/schemas/keeper-composite'
 import { fleetCompositeSnapshot } from '../composite-signals'
 
 type StatusFilter = 'all' | RuntimeBand
+
+type RosterStateNote = { label: string; text: string; kind?: string }
 
 function stageBadgeClass(stageKey: string): string {
   if (stageKey === 'tool_use') return 'border-[var(--info-border)] bg-[var(--accent-12)] text-[var(--color-accent-fg)]'
@@ -114,7 +118,7 @@ export function rosterStateNote(
   keeper: Keeper | null | undefined,
   composite: KeeperCompositeSnapshot | null,
   monitoringHint?: string | null,
-): { label: string; text: string; kind?: string } | null {
+): RosterStateNote | null {
   if (!keeper) return null
 
   const state = deriveKeeperOperationalState({ keeper, composite })
@@ -145,6 +149,47 @@ export function rosterStateNote(
   const hint = monitoringHint?.trim()
   if (hint) return { label: '상태 메모', text: hint }
   return null
+}
+
+function noteLooksLikeRawKind(note: RosterStateNote): boolean {
+  if (!note.kind) return false
+  return note.text === note.kind || note.text === `차단 종류: ${note.kind} (요약 메시지 없음)`
+}
+
+export function rosterBlockerDisplay(
+  note: RosterStateNote | null,
+  keeper: Keeper | null | undefined,
+): {
+  cell: string
+  detail: string
+  title: string
+  kindLabel: string | null
+  rawKind: string | null
+} {
+  if (!note) {
+    return {
+      cell: '-',
+      detail: '현재 차단 근거 없음',
+      title: '현재 차단 근거 없음',
+      kindLabel: null,
+      rawKind: null,
+    }
+  }
+
+  const kindLabel =
+    note.kind && keeper?.runtime_blocker_class === note.kind
+      ? keeperRuntimeBlockerLabel(keeper.runtime_blocker_class)
+      : null
+  const displayKind = kindLabel ?? note.kind ?? null
+  const cell = displayKind ? `${note.label}: ${displayKind}` : note.label
+  const runtimeHint = noteLooksLikeRawKind(note) ? keeperRuntimeBlockerHint(keeper) : null
+  const detail = runtimeHint ?? note.text
+  const rawKind = note.kind ?? null
+  const title = rawKind && kindLabel
+    ? `${cell} (${rawKind}) · ${detail}`
+    : `${cell} · ${detail}`
+
+  return { cell, detail, title, kindLabel, rawKind }
 }
 
 function registerKeeperLookup<T extends Pick<Keeper, 'keeper_id' | 'name' | 'agent_name'>>(
@@ -759,6 +804,9 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
     }
   })
   const selectedRow = rosterRows.find(row => row.key === selectedKey) ?? rosterRows[0] ?? null
+  const selectedBlockerDisplay = selectedRow
+    ? rosterBlockerDisplay(selectedRow.stateNote, selectedRow.keeperRuntime)
+    : null
 
   return html`
     <div class="agent-page flex w-full flex-col gap-5 px-0 py-1">
@@ -822,18 +870,25 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
 
       <div class="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
         <section class="monitor-surface-card monitor-surface-card-medium overflow-hidden" aria-label="Keeper operations list">
+          <div class="grid gap-2 border-b border-[var(--color-border-divider)] px-4 py-3 text-xs text-[var(--color-fg-muted)] lg:grid-cols-5">
+            <span><strong class="text-[var(--color-fg-secondary)]">운영판정</strong>은 필터용 요약입니다.</span>
+            <span><strong class="text-[var(--color-fg-secondary)]">현재 단계</strong>는 FSM/monitor phase입니다.</span>
+            <span><strong class="text-[var(--color-fg-secondary)]">차단 근거</strong>는 live/stale blocker 증거입니다.</span>
+            <span><strong class="text-[var(--color-fg-secondary)]">점</strong>은 활동/presence입니다. 흔들리면 방금 움직였습니다.</span>
+            <span><strong class="text-[var(--color-fg-secondary)]">파생</strong>은 keeper 런타임에서 만든 synthetic row입니다.</span>
+          </div>
           <div class="grid grid-cols-[minmax(180px,1.35fr)_minmax(90px,0.55fr)_minmax(150px,1fr)_minmax(150px,1fr)_minmax(120px,0.7fr)] gap-3 border-b border-[var(--color-border-divider)] px-4 py-2.5 text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)] max-lg:hidden">
             <span>Keeper</span>
-            <span>State</span>
-            <span>Now</span>
-            <span>Blocker</span>
-            <span>Tool</span>
+            <span>운영판정</span>
+            <span>현재 단계</span>
+            <span>차단 근거</span>
+            <span>최근 도구</span>
           </div>
 
           <div class="divide-y divide-[var(--color-border-divider)]">
             ${rosterRows.map(row => {
               const selected = selectedRow?.key === row.key
-              const blockerLabel = row.stateNote?.kind ?? row.stateNote?.label ?? '-'
+              const blockerDisplay = rosterBlockerDisplay(row.stateNote, row.keeperRuntime)
               const nowLabel =
                 row.fsmStageText
                 ?? row.monitoringEvidence?.phase?.label
@@ -875,17 +930,17 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
                   </span>
 
                   <span class="min-w-0 text-xs leading-snug text-[var(--color-fg-primary)]">
-                    <span class="block truncate lg:hidden text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Now</span>
+                    <span class="block truncate lg:hidden text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">현재 단계</span>
                     <span class="block truncate">${nowLabel}</span>
                   </span>
 
                   <span class="min-w-0 text-xs leading-snug text-[var(--color-fg-primary)]">
-                    <span class="block truncate lg:hidden text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Blocker</span>
-                    <span class="block truncate" title=${row.stateNote?.text ?? blockerLabel}>${blockerLabel}</span>
+                    <span class="block truncate lg:hidden text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">차단 근거</span>
+                    <span class="block truncate" title=${blockerDisplay.title}>${blockerDisplay.cell}</span>
                   </span>
 
                   <span class="min-w-0 text-xs leading-snug text-[var(--color-fg-primary)]">
-                    <span class="block truncate lg:hidden text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Tool</span>
+                    <span class="block truncate lg:hidden text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">최근 도구</span>
                     <span class="block truncate">${latestTool}</span>
                   </span>
                 </button>
@@ -945,11 +1000,14 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
                 <div class="rounded-[var(--r-1)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2.5">
                   <div class="flex flex-wrap items-center gap-2">
                     <span class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-status-warn)]">${selectedRow.stateNote.label}</span>
-                    ${selectedRow.stateNote.kind
-                      ? html`<span class="rounded-[var(--r-0)] border border-[var(--color-border-divider)] bg-[var(--color-bg-page)] px-2 py-0.5 text-3xs font-mono text-[var(--color-fg-primary)]">${selectedRow.stateNote.kind}</span>`
+                    ${selectedBlockerDisplay?.kindLabel
+                      ? html`<span class="rounded-[var(--r-0)] border border-[var(--color-border-divider)] bg-[var(--color-bg-page)] px-2 py-0.5 text-3xs text-[var(--color-fg-primary)]">${selectedBlockerDisplay.kindLabel}</span>`
+                      : null}
+                    ${selectedBlockerDisplay?.rawKind
+                      ? html`<span class="rounded-[var(--r-0)] border border-[var(--color-border-divider)] bg-[var(--color-bg-page)] px-2 py-0.5 text-3xs font-mono text-[var(--color-fg-muted)]">${selectedBlockerDisplay.rawKind}</span>`
                       : null}
                   </div>
-                  <p class="m-0 mt-1 text-xs leading-relaxed text-[var(--color-fg-primary)]">${selectedRow.stateNote.text}</p>
+                  <p class="m-0 mt-1 text-xs leading-relaxed text-[var(--color-fg-primary)]">${selectedBlockerDisplay?.detail}</p>
                 </div>
               ` : null}
 

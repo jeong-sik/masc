@@ -26,7 +26,7 @@ let setup_tmp_dir () =
 
 let cleanup_tmp_dir dir =
   (* Best-effort cleanup *)
-  ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote dir)))
+  Fs_compat.remove_tree dir
 
 (* ================================================================ *)
 (* oas_procedure_of_masc                                             *)

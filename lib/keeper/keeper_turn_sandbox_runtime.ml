@@ -186,6 +186,32 @@ let run_argv_with_stdin_and_status_retry_eintr ~timeout_sec ~stdin_content argv 
     loop max_eintr_retries)
 ;;
 
+let run_argv_with_stdin_and_status_split_retry_eintr ~timeout_sec ~stdin_content argv =
+  let max_eintr_retries = 8 in
+  Docker_spawn_throttle.with_slot (fun () ->
+    let rec loop attempts_left =
+      let st, stdout, stderr =
+        Masc_exec.Exec_gate.run_argv_with_stdin_and_status_split
+          ~actor:`System_task_sandbox
+          ~raw_source:(String.concat " " argv)
+          ~summary:"keeper turn sandbox stdin command"
+          ~env:(Unix.environment ())
+          ~cwd:(Sys.getcwd ())
+          ~timeout_sec
+          ~stdin_content
+          argv
+      in
+      let out = output_for_status ~stdout ~stderr in
+      match st with
+      | Unix.WEXITED 127
+        when attempts_left > 0
+             && String_util.contains_substring_ci out "interrupted system call" ->
+        loop (attempts_left - 1)
+      | _ -> st, out
+    in
+    loop max_eintr_retries)
+;;
+
 let start_container (t : t) ~(timeout_sec : float) =
   let image =
     match t.meta.sandbox_image with
@@ -445,17 +471,29 @@ let run_bash_with_status (t : t) ~(cwd : string) ~(cmd : string) ~(timeout_sec :
   let container_cwd = container_cwd_of_host t ~host_cwd:cwd in
   let docker_exec_argv ~container_name =
     Keeper_sandbox_runtime.docker_command_argv ()
-    @ [ "exec"; "--user"; Printf.sprintf "%d:%d" t.uid t.gid; "-w"; container_cwd ]
+    @
+    [ "exec"
+    ; "-i"
+    ; "--user"
+    ; Printf.sprintf "%d:%d" t.uid t.gid
+    ; "-w"
+    ; container_cwd
+    ]
     @ Keeper_sandbox_runtime.docker_sandbox_env_args
         ~base_path:t.config.base_path
         ~container_root:t.container_root
-    @ [ container_name; "bash"; "-lc"; cmd ]
+    @ [ container_name; "bash"; "-l"; "-s" ]
   in
   match ensure_started t ~timeout_sec with
   | Error _ as err -> err
   | Ok container_name ->
     let argv = docker_exec_argv ~container_name in
-    let st, out = run_argv_with_status_split_retry_eintr ~timeout_sec argv in
+    let st, out =
+      run_argv_with_stdin_and_status_split_retry_eintr
+        ~timeout_sec
+        ~stdin_content:cmd
+        argv
+    in
     if container_missing_error out
     then (
       match st with
@@ -465,7 +503,11 @@ let run_bash_with_status (t : t) ~(cwd : string) ~(cmd : string) ~(timeout_sec :
          | Error _ as err -> err
          | Ok container_name ->
            let argv = docker_exec_argv ~container_name in
-           Ok (run_argv_with_status_split_retry_eintr ~timeout_sec argv))
+           Ok
+             (run_argv_with_stdin_and_status_split_retry_eintr
+                ~timeout_sec
+                ~stdin_content:cmd
+                argv))
       | _ -> Ok (st, out))
     else Ok (st, out)
 ;;

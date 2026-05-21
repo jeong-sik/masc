@@ -20,6 +20,10 @@ let metric_cascade_providers_exhausted = "masc_cascade_providers_exhausted_total
 let metric_cascade_routing_phase_overrides = "masc_cascade_routing_phase_overrides_total"
 let metric_cascade_server_error_skip_total = "masc_cascade_server_error_skip_total"
 
+let metric_cascade_pre_dispatch_required_tool_filtered =
+  "masc_cascade_pre_dispatch_required_tool_filtered_total"
+;;
+
 let metric_cascade_fallback_cycle_detected_total =
   "masc_cascade_fallback_cycle_detected_total"
 ;;

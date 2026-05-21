@@ -104,12 +104,7 @@ val clamp_shell_timeout :
     [Timeout_floor.Native_shell]), and falls back to [default] when
     absent. *)
 
-(** {1 Word + git-token tokenization} *)
-
-val lowercase_shell_words : string -> string list
-(** Re-export of {!Keeper_exec_shared.lowercase_shell_words}.  Splits
-    [text] into space-separated tokens with [String.lowercase_ascii]
-    applied to each. *)
+(** {1 Git-token helpers} *)
 
 val git_global_option_takes_value : string -> bool
 (** [-c], [-C], [--exec-path], [--git-dir], [--work-tree],

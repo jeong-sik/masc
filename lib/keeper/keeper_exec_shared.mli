@@ -48,9 +48,6 @@ val missing_file_error_json
   -> error:string
   -> string
 
-(** Lowercase + collapse whitespace + split on space + drop blanks. *)
-val lowercase_shell_words : string -> string list
-
 (** Replace the [`Assoc] field [key] with [`String value], moving
     it to the front. Non-assoc values pass through unchanged. *)
 val assoc_override_string : string -> string -> Yojson.Safe.t -> Yojson.Safe.t

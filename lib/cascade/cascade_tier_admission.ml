@@ -95,11 +95,14 @@ let release t ~tier_id =
       Eio.Mutex.use_rw ts.mu ~protect:false (fun () ->
           if ts.inflight > 0 then ts.inflight <- ts.inflight - 1)
 
-(* Release that swallows its own exceptions. Used as a finally clause
-   so we never mask the primary exception path. Per masc-mcp
-   manifest §"finally는 예외를 내부 처리". *)
+(* Release that swallows its own non-cancellation exceptions. Used as a
+   finally clause so cleanup failures do not mask the primary exception
+   path, while Eio cancellation still propagates through structured
+   teardown. *)
 let release_quietly t ~tier_id =
-  try release t ~tier_id with _ -> ()
+  try release t ~tier_id with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | _ -> ()
 
 let with_admission t ~tier_id ~admission_policy f =
   match admission_policy with

@@ -82,6 +82,10 @@ let binding_json (binding : Keeper_gh_env.keeper_binding) =
   `Assoc
     [
       "effective_github_identity", `String binding.effective_github_identity;
+      ( "configured_github_identity",
+        match binding.github_identity with
+        | Some id -> `String id
+        | None -> `Null );
       ( "credential_scope",
         `String
           (Keeper_gh_env.credential_scope_to_string binding.credential_scope) );
@@ -122,6 +126,10 @@ let identity_attestation_fields ~(config : Coord.config) (meta : keeper_meta) =
                  "credential_binding_ok", `Bool true;
                  ( "effective_github_identity",
                    `String binding.effective_github_identity );
+                 ( "configured_github_identity",
+                   match binding.github_identity with
+                   | Some id -> `String id
+                   | None -> `Null );
                  ( "credential_scope",
                    `String
                      (Keeper_gh_env.credential_scope_to_string

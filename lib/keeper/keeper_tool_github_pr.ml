@@ -22,6 +22,10 @@ let binding_json (binding : Keeper_gh_env.keeper_binding) ~state =
   `Assoc
     [
       "effective_github_identity", `String binding.effective_github_identity;
+      ( "configured_github_identity",
+        match binding.github_identity with
+        | Some id -> `String id
+        | None -> `Null );
       ( "credential_scope",
         `String
           (Keeper_gh_env.credential_scope_to_string binding.credential_scope) );

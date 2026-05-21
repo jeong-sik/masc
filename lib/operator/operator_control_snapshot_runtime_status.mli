@@ -3,6 +3,7 @@
 val remote_confirm_ttl_seconds : float
 val runtime_status_from_live_signal : Yojson.Safe.t -> string option
 val health_state_allows_runtime_status_override : Yojson.Safe.t -> bool
+val remote_confirm_ttl_seconds : float
 
 val align_keeper_runtime_status :
      surface_status:string

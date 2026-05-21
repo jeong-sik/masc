@@ -382,7 +382,7 @@ let degraded_retry_after_recoverable_error
         (Keeper_turn_driver.Cascade_exhausted
            { reason = Keeper_types.Other_detail detail; _ })
       when message_looks_like_gateway_backpressure detail ->
-        local_recovery_retry Capacity_exhausted
+        local_recovery_retry Capacity_backpressure
     | Some
         (Keeper_turn_driver.Cascade_exhausted
            { reason = Keeper_types.Other_detail detail; _ })
@@ -438,7 +438,7 @@ let recoverable_cascade_failure_reason (err : Agent_sdk.Error.sdk_error) =
         (Keeper_turn_driver.Cascade_exhausted
            { reason = Keeper_types.Other_detail detail; _ })
       when message_looks_like_gateway_backpressure detail ->
-        Some Capacity_exhausted
+        Some Capacity_backpressure
     | Some
         (Keeper_turn_driver.Cascade_exhausted
            { reason = Keeper_types.Other_detail detail; _ })
@@ -485,10 +485,10 @@ let recoverable_cascade_failure_reason (err : Agent_sdk.Error.sdk_error) =
          | Agent_sdk.Error.Api (Llm_provider.Retry.RateLimited _) ->
              Some Rate_limit
          | Agent_sdk.Error.Api (Llm_provider.Retry.Overloaded _) ->
-             Some Capacity_exhausted
+             Some Capacity_backpressure
          | Agent_sdk.Error.Api (Llm_provider.Retry.ServerError { status; _ })
            when is_gateway_backpressure_status status ->
-             Some Capacity_exhausted
+             Some Capacity_backpressure
          | Agent_sdk.Error.Api (Llm_provider.Retry.ServerError { status; _ })
            when status >= 500 ->
              Some Server_error
@@ -503,7 +503,7 @@ let recoverable_cascade_failure_reason (err : Agent_sdk.Error.sdk_error) =
              Some Hard_quota
          | Agent_sdk.Error.Provider (Llm_provider.Error.ServerError { code; _ })
            when is_gateway_backpressure_status code ->
-             Some Capacity_exhausted
+             Some Capacity_backpressure
          | Agent_sdk.Error.Provider (Llm_provider.Error.ServerError { code; transient; _ })
            when transient || code >= 500 ->
              Some Server_error

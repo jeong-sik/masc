@@ -451,7 +451,7 @@ let claim_next_r
           | Some rid -> rid :: (blocked_ids @ exclude_task_ids)
           | None -> blocked_ids @ exclude_task_ids
         in
-        let receipt_blocks_task (task : task) =
+        let receipt_blocks_task (task : Masc_domain.task) =
           match agent_tool_names with
           | Some _ -> false
           | None ->
@@ -485,13 +485,13 @@ let claim_next_r
         let required_tools_allowed_for_agent =
           make_required_tools_predicate ?agent_tool_names ()
         in
-        let required_tool_claim_allowed (task : task) =
+        let required_tool_claim_allowed (task : Masc_domain.task) =
           let required_tools = task_required_tools task in
           required_tools_allowed_for_agent required_tools
           && not (receipt_blocks_task task)
         in
         let admission_decisions = Hashtbl.create 16 in
-        let admission_allowed (task : task) =
+        let admission_allowed (task : Masc_domain.task) =
           match Hashtbl.find_opt admission_decisions task.id with
           | Some allowed -> allowed
           | None ->

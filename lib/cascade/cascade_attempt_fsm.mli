@@ -152,7 +152,7 @@ val sdk_error_capacity_backpressure_retry_after_s :
 
 (** Typed extraction of the retry-after hint carried by a MASC-internal
     [Capacity_backpressure] classification.  The outer [Capacity_backpressure]
-    variant differs from {!sdk_error_capacity_exhausted_retry_after_s} which
+    variant differs from {!sdk_error_capacity_backpressure_retry_after_s} which
     targets the raw [Provider.CapacityExhausted] SDK error — both can flow
     through the same keeper turn driver but only the typed variant carries
     [retry_after_sec : float option]. *)

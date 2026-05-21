@@ -150,6 +150,27 @@ val sdk_error_capacity_exhausted_retry_after_s :
     via [record_failure] would burn additional cascade attempts on the
     same exhausted provider. *)
 
+(** Typed extraction of the retry-after hint carried by a MASC-internal
+    [Capacity_backpressure] classification.  The outer [Capacity_backpressure]
+    variant differs from {!sdk_error_capacity_exhausted_retry_after_s} which
+    targets the raw [Provider.CapacityExhausted] SDK error — both can flow
+    through the same keeper turn driver but only the typed variant carries
+    [retry_after_sec : float option]. *)
+type capacity_backpressure_retry_hint =
+  | Cbr_explicit of float
+    (** Upstream supplied [retry_after_sec = Some s]. *)
+  | Cbr_synthetic_default of float
+    (** Upstream omitted the hint ([retry_after_sec = None]); the consumer
+        injects {!Cascade_health_tracker.default_capacity_backpressure_backoff_sec}
+        to prevent immediate cascade re-rotation onto the same provider. *)
+
+val sdk_error_capacity_backpressure_retry_hint :
+  Agent_sdk.Error.sdk_error -> capacity_backpressure_retry_hint option
+(** [Some hint] when the error classifies as
+    [Cascade_error_classify.Capacity_backpressure], with [hint] indicating
+    whether the upstream hint was honored or a synthetic default injected.
+    [None] for any other classification. *)
+
 val sdk_error_is_max_turns_exceeded : Agent_sdk.Error.sdk_error -> bool
 
 val sdk_error_cascade_fallback_class :

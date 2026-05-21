@@ -34,6 +34,7 @@ readonly TASKS_FILE="$MASC_DIR/tasks/backlog.json"
 readonly POSTS_FILE="$MASC_DIR/board_posts.jsonl"
 readonly COMMENTS_FILE="$MASC_DIR/board_comments.jsonl"
 readonly TOOL_CALLS_DIR="$MASC_DIR/tool_calls"
+readonly DOCKER_PLAYGROUND_DIR="$MASC_DIR/playground/docker"
 readonly TODAY="$(date -u +%Y-%m-%d)"
 readonly LOG_TODAY="$LOGS_DIR/system_log_${TODAY}.jsonl"
 
@@ -222,6 +223,66 @@ m_docker_false_positive_24h() {
   jq -s '[.[] | select(((.event // "") + " " + (.message // "")) | contains("sandbox_image_missing"))] | length' "$LOG_TODAY"
 }
 
+m_live_defect_signatures() {
+  [[ -f "$LOG_TODAY" ]] || {
+    jq -n '{
+      project_snapshot_timeout: 0,
+      process_eio_1s_timeout: 0,
+      process_eio_5s_timeout: 0,
+      sandbox_image_missing: 0,
+      host_fd_hotspot_budget_exhausted: 0,
+      docker_worktree_gitdir_prepared: 0,
+      docker_worktree_gitdir_restored: 0
+    }'
+    return
+  }
+  jq -s '
+    def msg: (.message // "");
+    {
+      project_snapshot_timeout:
+        ([.[] | select(msg | contains("project-snapshot async shell refresh timed out"))] | length),
+      process_eio_1s_timeout:
+        ([.[] | select(msg | test("\\[Process_eio\\] Timeout after 1s"))] | length),
+      process_eio_5s_timeout:
+        ([.[] | select(msg | test("\\[Process_eio\\] Timeout after 5s"))] | length),
+      sandbox_image_missing:
+        ([.[] | select(((.event // "") + " " + msg) | contains("sandbox_image_missing"))] | length),
+      host_fd_hotspot_budget_exhausted:
+        ([.[] | select(msg | contains("host_fd_hotspot_budget_exhausted"))] | length),
+      docker_worktree_gitdir_prepared:
+        ([.[] | select(msg | contains("docker worktree gitdir path") and contains("prepared"))] | length),
+      docker_worktree_gitdir_restored:
+        ([.[] | select(msg | contains("docker worktree gitdir path") and contains("restored"))] | length)
+    }' "$LOG_TODAY"
+}
+
+m_docker_playground_worktrees() {
+  local worktrees_dirs=0
+  local worktree_entries=0
+  if [[ -d "$DOCKER_PLAYGROUND_DIR" ]]; then
+    local keeper_dir repos_dir repo_dir worktrees_dir wt_path
+    for keeper_dir in "$DOCKER_PLAYGROUND_DIR"/*; do
+      [[ -d "$keeper_dir" ]] || continue
+      repos_dir="$keeper_dir/repos"
+      [[ -d "$repos_dir" ]] || continue
+      for repo_dir in "$repos_dir"/*; do
+        [[ -d "$repo_dir" ]] || continue
+        worktrees_dir="$repo_dir/.worktrees"
+        [[ -d "$worktrees_dir" ]] || continue
+        worktrees_dirs=$((worktrees_dirs + 1))
+        for wt_path in "$worktrees_dir"/*; do
+          [[ -d "$wt_path" ]] || continue
+          worktree_entries=$((worktree_entries + 1))
+        done
+      done
+    done
+  fi
+  jq -n \
+    --argjson worktrees_dirs "$worktrees_dirs" \
+    --argjson worktree_entries "$worktree_entries" \
+    '{worktrees_dirs: $worktrees_dirs, worktree_entries: $worktree_entries}'
+}
+
 epoch_ms() {
   python3 -c 'import time; print(int(time.time()*1000))'
 }
@@ -270,6 +331,8 @@ emit_json() {
     --arg bash_failure_pct "$(m_bash_failure_pct)" \
     --arg cascade_audit_failure_pct "$(m_cascade_audit_failure_pct)" \
     --argjson docker_false_positive_24h "$(m_docker_false_positive_24h)" \
+    --argjson live_defect_signatures "$(m_live_defect_signatures)" \
+    --argjson docker_playground_worktrees "$(m_docker_playground_worktrees)" \
     --argjson dashboard_proof "$(m_dashboard_proof_endpoints)" \
     --arg live_defect_open "$(m_live_defect_issues)" \
     '{
@@ -289,6 +352,8 @@ emit_json() {
          bash_failure_pct: ($bash_failure_pct | tonumber? // null),
          cascade_audit_failure_pct: ($cascade_audit_failure_pct | tonumber? // null),
          docker_false_positive_24h: $docker_false_positive_24h,
+         live_defect_signatures: $live_defect_signatures,
+         docker_playground_worktrees: $docker_playground_worktrees,
          dashboard_proof: $dashboard_proof,
          live_defect_open: ($live_defect_open | tonumber? // null)
        }

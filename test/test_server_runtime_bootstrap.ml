@@ -1118,8 +1118,8 @@ let test_health_json_surfaces_durable_paused_keepers () =
             true
             (reaction_ledger |> member "operator_action_required" |> to_bool)))
 
-let test_health_json_surfaces_timeout_recoverable_paused_keeper () =
-  with_temp_dir "health-timeout-recoverable-paused-keeper" (fun dir ->
+let test_health_json_keeps_timeout_pause_without_policy_manual () =
+  with_temp_dir "health-timeout-paused-without-policy" (fun dir ->
     let config_root = make_config_root dir in
     with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
     let previous_state = !Server_auth.server_state in
@@ -1134,8 +1134,8 @@ let test_health_json_surfaces_timeout_recoverable_paused_keeper () =
         let config = state.Mcp_server.room_config in
         let timeout_paused =
           { (make_keeper_meta
-               ~name:"timeout-recoverable"
-               ~trace_id:"trace-timeout-recoverable"
+               ~name:"timeout-without-policy"
+               ~trace_id:"trace-timeout-without-policy"
                ~paused:true
                ())
             with
@@ -1160,18 +1160,18 @@ let test_health_json_surfaces_timeout_recoverable_paused_keeper () =
         let detail =
           paused_details
           |> List.find (fun row ->
-               row |> member "name" |> to_string = "timeout-recoverable")
+               row |> member "name" |> to_string = "timeout-without-policy")
         in
-        Alcotest.(check string) "pause kind" "timeout_recoverable"
+        Alcotest.(check string) "pause kind" "operator_paused"
           (detail |> member "pause_kind" |> to_string);
         Alcotest.(check (option (float 0.0001))) "effective auto resume"
-          (Some Env_config.KeeperSupervisor.auto_resume_initial_sec)
+          None
           (detail |> member "auto_resume_after_sec" |> to_float_option);
         Alcotest.(check (option (float 0.0001))) "persisted auto resume remains absent"
           None
           (detail |> member "persisted_auto_resume_after_sec" |> to_float_option);
-        Alcotest.(check string) "auto resume source" "implicit_timeout"
-          (detail |> member "auto_resume_source" |> to_string);
+        Alcotest.(check bool) "auto resume source is absent" true
+          (Yojson.Safe.Util.member "auto_resume_source" detail = `Null);
         Alcotest.(check string) "last blocker class" "turn_timeout"
           (detail |> member "last_blocker_class" |> to_string)))
 
@@ -3027,8 +3027,8 @@ let () =
             "health json surfaces durable paused keepers"
             `Quick test_health_json_surfaces_durable_paused_keepers;
           Alcotest.test_case
-            "health json surfaces timeout-recoverable paused keeper"
-            `Quick test_health_json_surfaces_timeout_recoverable_paused_keeper;
+            "health json keeps timeout pause without policy manual"
+            `Quick test_health_json_keeps_timeout_pause_without_policy_manual;
           Alcotest.test_case
             "health json degrades when reaction capacity is below target"
             `Quick test_health_json_degrades_when_reaction_capacity_below_target;

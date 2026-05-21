@@ -265,31 +265,20 @@ let pause_kind (meta : Keeper_types.keeper_meta) =
   if Keeper_supervisor_types.paused_meta_requires_reconcile_recovery meta then
     "reconcile_gated"
   else
-    match
-      meta.auto_resume_after_sec,
-      Keeper_supervisor_types.paused_meta_effective_auto_resume_after_sec meta
-    with
-    | Some _, _ -> "auto_recoverable"
-    | None, Some _ -> "timeout_recoverable"
-    | None, None -> "operator_paused"
+    match meta.auto_resume_after_sec with
+    | Some _ -> "auto_recoverable"
+    | None -> "operator_paused"
 
 let pause_auto_resume_source (meta : Keeper_types.keeper_meta) =
-  match
-    meta.auto_resume_after_sec,
-    Keeper_supervisor_types.paused_meta_effective_auto_resume_after_sec meta
-  with
-  | Some _, _ -> Some "explicit"
-  | None, Some _ -> Some "implicit_timeout"
-  | None, None -> None
+  match meta.auto_resume_after_sec with
+  | Some _ -> Some "explicit"
+  | None -> None
 
 let paused_keeper_detail_json ~now ~name ~(autoboot_enabled : bool)
     (meta : Keeper_types.keeper_meta) =
-  let effective_auto_resume_after_sec =
-    Keeper_supervisor_types.paused_meta_effective_auto_resume_after_sec meta
-  in
   let elapsed = pause_elapsed_sec now meta in
   let remaining =
-    match (effective_auto_resume_after_sec, elapsed) with
+    match (meta.auto_resume_after_sec, elapsed) with
     | Some resume_after, Some elapsed -> Some (max 0.0 (resume_after -. elapsed))
     | Some resume_after, None -> Some resume_after
     | None, _ -> None
@@ -299,7 +288,7 @@ let paused_keeper_detail_json ~now ~name ~(autoboot_enabled : bool)
     ("name", `String name);
     ("autoboot_enabled", `Bool autoboot_enabled);
     ("pause_kind", `String (pause_kind meta));
-    ("auto_resume_after_sec", json_float_opt effective_auto_resume_after_sec);
+    ("auto_resume_after_sec", json_float_opt meta.auto_resume_after_sec);
     ( "persisted_auto_resume_after_sec"
     , json_float_opt meta.auto_resume_after_sec );
     ("auto_resume_source", json_string_opt (pause_auto_resume_source meta));

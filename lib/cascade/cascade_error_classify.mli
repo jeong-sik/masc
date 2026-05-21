@@ -1,126 +1,35 @@
-(** Cascade_error_classify — masc_internal_error type, error conversion, codex CLI preflight.
+(** Cascade_error_classify — SDK error parser, substring classifier, and the
+    {!admission_wait_timeout_error} construction helper.
 
-    Extracted from oas_worker_named.ml (God file decomposition).
-    Defines the [masc_internal_error] variant type, JSON serialization,
-    SDK error conversion, error classification, and codex CLI prompt
-    preflight checks.
+    RFC-0142 Phase 2 PR-1: the [masc_internal_error] ADT, its JSON codec, the
+    Prometheus accounting, and the per-variant kind/cascade_name labels live in
+    {!Cascade_internal_error}.  This module [include]s that surface so callers
+    that reference [Cascade_error_classify.masc_internal_error],
+    [Cascade_error_classify.Cascade_exhausted], etc. continue to compile
+    unchanged.
 
-    This module is [include]d by {!Keeper_turn_driver}; all bindings are
-    re-exported by the facade.  @since God file decomposition *)
+    @since God file decomposition *)
 
-(** {1 MASC internal error type} *)
+(** {1 Re-exported [masc_internal_error] surface} *)
 
-type cascade_name = Keeper_cascade_profile.runtime_name
+include module type of Cascade_internal_error
 
-val cascade_name_of_string : string -> cascade_name
-val cascade_name_to_string : cascade_name -> string
+(** {1 Construction helpers} *)
 
-type provider_rejection = {
-  reason : string;
-}
+val admission_wait_timeout_error :
+  keeper_name:string ->
+  cascade_name:cascade_name ->
+  priority:Llm_provider.Request_priority.t ->
+  int ->
+  (string, Agent_sdk.Error.sdk_error) result
+(** Build an [Admission_queue_timeout] error from a wait duration in ms. *)
 
-type capacity_backpressure_source =
-  | Provider_capacity
-  | Client_capacity
-  | Tier_admission
-  | Cascade_slot
-
-type masc_internal_error =
-  | Cascade_exhausted of {
-      cascade_name : cascade_name;
-      reason : Keeper_types.cascade_exhaustion_reason;
-    }
-  | Capacity_backpressure of {
-      cascade_name : cascade_name;
-      source : capacity_backpressure_source;
-      detail : string;
-      retry_after_sec : float option;
-    }
-  | Resumable_cli_session of {
-      cascade_name : cascade_name;
-      detail : string;
-      exit_code : int option;
-    }
-  | No_tool_capable_provider of {
-      cascade_name : cascade_name;
-      configured_labels : string list;
-      required_tool_names : string list;
-      provider_rejections : provider_rejection list;
-    }
-  | Accept_rejected of {
-      scope : string;
-      model : string option;
-      reason : string;
-    }
-  | Admission_queue_timeout of {
-      keeper_name : string;
-      cascade_name : cascade_name;
-      wait_sec : float;
-    }
-  | Admission_queue_rejected of {
-      keeper_name : string;
-      reason : string;
-    }
-  | Turn_timeout of {
-      elapsed_sec : float;
-    }
-  | Oas_timeout_budget of {
-      budget_sec : float;
-      keeper_turn_timeout_sec : float;
-      estimated_input_tokens : int;
-      source : string;
-      remaining_turn_budget_sec : float option;
-      min_required_sec : float;
-      phase : string;
-    }
-  | Max_tokens_ceiling_violation of {
-      cascade_name : cascade_name;
-      requested_max_tokens : int;
-      provider_ceiling : int;
-      reason : string;
-    }
-  | Ambiguous_post_commit of {
-      is_timeout : bool;
-      tools : string list;
-      original_error : string;
-    }
-  (** RFC-0159 Phase A: typed substrate for raw [Agent_sdk.Error.Internal]
-      construction sites.  Before Phase A, three sites built [Internal]
-      with [Printexc.to_string exn] payloads that the classifier could
-      not parse, so all of them fell through to the [Reason_internal_error]
-      catch-all bucket.  These variants prefix the payload with the typed
-      [[masc_oas_error]] envelope so [classify_masc_internal_error] can
-      route them to dedicated kinds. *)
-  | Internal_unhandled_exception of {
-      site : string;
-      exn_repr : string;
-    }
-  | Internal_bridge_exception of {
-      caller : string;
-      exn_repr : string;
-    }
-  | Internal_contract_rejected of {
-      reason : string;
-    }
-
-val masc_internal_error_to_json : masc_internal_error -> Yojson.Safe.t
-
-val summary_of_masc_internal_error : masc_internal_error -> string option
-(** Operator-facing concise summary for structured errors where the raw JSON
-    payload is too noisy for dashboard cards. *)
-
-val capacity_backpressure_source_to_string :
-  capacity_backpressure_source -> string
-
-val sdk_error_of_masc_internal_error : masc_internal_error -> Agent_sdk.Error.sdk_error
-(** Convert a [masc_internal_error] to an SDK error, bumping the
-    [masc_oas_error_total] Prometheus counter with [kind] and
-    [cascade_name] labels. *)
+(** {1 Parsers} *)
 
 val classify_masc_internal_error :
   Agent_sdk.Error.sdk_error -> masc_internal_error option
 (** Parse an SDK error back into a [masc_internal_error] when it was
-    originally produced by [sdk_error_of_masc_internal_error].  Returns
+    originally produced by {!sdk_error_of_masc_internal_error}.  Returns
     [None] for errors that do not carry the [masc_oas_error] prefix. *)
 
 val classify_masc_internal_error_of_string :
@@ -134,21 +43,3 @@ val sdk_error_is_server_rejected_parse_error :
   Agent_sdk.Error.sdk_error -> bool
 (** [true] when the provider rejected the request body before processing it
     because the JSON/request payload could not be parsed. *)
-
-val kind_of_masc_internal_error : masc_internal_error -> string
-(** Short label for each variant, used as the [kind] Prometheus label. *)
-
-val cascade_name_of_masc_internal_error : masc_internal_error -> string
-(** Cascade name from the error payload, or ["unknown"] for variants that
-    fire outside cascade context. *)
-
-val masc_oas_error_total_metric : string
-(** Prometheus counter metric name for structured MASC OAS errors. *)
-
-val admission_wait_timeout_error :
-  keeper_name:string ->
-  cascade_name:cascade_name ->
-  priority:Llm_provider.Request_priority.t ->
-  int ->
-  (string, Agent_sdk.Error.sdk_error) result
-(** Build an [Admission_queue_timeout] error from a wait duration in ms. *)

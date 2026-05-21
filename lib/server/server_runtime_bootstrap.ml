@@ -474,7 +474,7 @@ let sync_bootable_keeper_credentials (state : Mcp_server.server_state) =
            keeper_name detail);
   (* #10440: write a short-form alias for each keeper so callers
      that look up by [agent_name=<keeper_name>] resolve directly
-     instead of falling through to legacy_credential_aliases.
+     instead of relying on runtime alias fallback.
      Without the alias, 8/14 keepers fail [load_credential] for the
      short-form lookup path (per the issue's evidence on the live
      fleet). *)

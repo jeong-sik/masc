@@ -35,11 +35,36 @@ let category_of_string value =
   | "" -> Other "other"
   | value -> Other value
 
+let title_category title =
+  let normalized = normalize title in
+  let stop =
+    [ String.index_opt normalized ':'
+    ; String.index_opt normalized '('
+    ; String.index_opt normalized ' '
+    ]
+    |> List.filter_map Fun.id
+    |> function
+    | [] -> String.length normalized
+    | positions -> List.fold_left min max_int positions
+  in
+  if stop <= 0 then Other "other" else String.sub normalized 0 stop |> category_of_string
+
 type scope = {
   repo : string;
   goal_id : string option;
   category : category;
 }
+
+let task_repo ~default_repo (task : Masc_domain.task) =
+  match task.worktree with
+  | Some { repo_name; _ } when normalize repo_name <> "" -> repo_name
+  | _ -> default_repo
+
+let scope_of_task ~default_repo (task : Masc_domain.task) =
+  { repo = task_repo ~default_repo task
+  ; goal_id = task.goal_id
+  ; category = title_category task.title
+  }
 
 type caps = {
   max_global : int option;
@@ -59,6 +84,22 @@ type active_item = {
   id : string;
   scope : scope;
 }
+
+let task_is_active_wip (task : Masc_domain.task) =
+  match task.task_status with
+  | Masc_domain.Claimed _ | Masc_domain.InProgress _ -> true
+  | Masc_domain.Todo
+  | Masc_domain.AwaitingVerification _
+  | Masc_domain.Done _
+  | Masc_domain.Cancelled _ -> false
+
+let active_item_of_task ~default_repo (task : Masc_domain.task) =
+  { id = task.id; scope = scope_of_task ~default_repo task }
+
+let active_items_of_tasks ~default_repo tasks =
+  tasks
+  |> List.filter task_is_active_wip
+  |> List.map (active_item_of_task ~default_repo)
 
 type reject_reason =
   | Global_cap

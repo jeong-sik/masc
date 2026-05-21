@@ -129,6 +129,38 @@ let run_argv_with_status_retry_eintr ~timeout_sec argv =
     loop max_eintr_retries)
 ;;
 
+let output_for_status ~(stdout : string) ~(stderr : string) =
+  match stdout, stderr with
+  | "", err -> err
+  | out, "" -> out
+  | out, err -> out ^ "\n" ^ err
+;;
+
+let run_argv_with_status_split_retry_eintr ~timeout_sec argv =
+  let max_eintr_retries = 8 in
+  Docker_spawn_throttle.with_slot (fun () ->
+    let rec loop attempts_left =
+      let st, stdout, stderr =
+        Masc_exec.Exec_gate.run_argv_with_status_split
+          ~actor:`System_task_sandbox
+          ~raw_source:(String.concat " " argv)
+          ~summary:"keeper turn sandbox command"
+          ~env:(Unix.environment ())
+          ~cwd:(Sys.getcwd ())
+          ~timeout_sec
+          argv
+      in
+      let out = output_for_status ~stdout ~stderr in
+      match st with
+      | Unix.WEXITED 127
+        when attempts_left > 0
+             && String_util.contains_substring_ci out "interrupted system call" ->
+        loop (attempts_left - 1)
+      | _ -> st, out
+    in
+    loop max_eintr_retries)
+;;
+
 let run_argv_with_stdin_and_status_retry_eintr ~timeout_sec ~stdin_content argv =
   let max_eintr_retries = 8 in
   Docker_spawn_throttle.with_slot (fun () ->
@@ -228,7 +260,7 @@ let start_container (t : t) ~(timeout_sec : float) =
                ~container_root:t.container_root
            @ identity_mounts
            @ network_args
-           @ [ image; "sh"; "-lc"; "trap : TERM INT; while :; do sleep 3600; done" ]
+           @ [ image; "tail"; "-f"; "/dev/null" ]
          in
          let st, out = run_argv_with_status_retry_eintr ~timeout_sec argv in
          (match st with
@@ -410,41 +442,62 @@ let run_bash_with_status (t : t) ~(cwd : string) ~(cmd : string) ~(timeout_sec :
       ~container_root:t.container_root
       cmd
   in
-  run_exec_with_status t ~timeout_sec ~cwd ~command_argv:[ "bash"; "-lc"; cmd ^ " 2>&1" ]
+  let container_cwd = container_cwd_of_host t ~host_cwd:cwd in
+  let argv ~container_name =
+    Keeper_sandbox_runtime.docker_command_argv ()
+    @ [ "exec"; "--user"; Printf.sprintf "%d:%d" t.uid t.gid; "-w"; container_cwd ]
+    @ Keeper_sandbox_runtime.docker_sandbox_env_args
+        ~base_path:t.config.base_path
+        ~container_root:t.container_root
+    @ [ container_name; "bash"; "-lc"; cmd ]
+  in
+  match ensure_started t ~timeout_sec with
+  | Error _ as err -> err
+  | Ok container_name ->
+    let argv = argv ~container_name in
+    let st, out = run_argv_with_status_split_retry_eintr ~timeout_sec argv in
+    if container_missing_error out
+    then (
+      match st with
+      | Unix.WEXITED (126 | 127) ->
+        t.state <- Not_started;
+        (match ensure_started t ~timeout_sec with
+         | Error _ as err -> err
+         | Ok container_name ->
+           let argv = argv ~container_name in
+           Ok (run_argv_with_status_split_retry_eintr ~timeout_sec argv))
+      | _ -> Ok (st, out))
+    else Ok (st, out)
 ;;
 
 let write_file_common
       (t : t)
       ~(host_path : string)
       ~(content : string)
-      ~(timeout_sec : float)
+      ~timeout_sec:_
       ~(append : bool)
       ()
   =
   match container_path_of_host t ~host_path with
   | Error _ as err -> err
-  | Ok container_path ->
-    let parent = Filename.dirname container_path in
-    let redirect = if append then ">>" else ">" in
-    let shell_cmd =
-      Printf.sprintf
-        "mkdir -p -- %s && cat %s %s"
-        (Filename.quote parent)
-        redirect
-        (Filename.quote container_path)
-    in
-    (match
-       run_exec_with_status
-         ~stdin_content:content
-         t
-         ~timeout_sec
-         ~cwd:t.host_root
-         ~command_argv:[ "sh"; "-lc"; shell_cmd ]
+  | Ok _container_path ->
+    let host_path = normalize_path host_path in
+    (try
+       Fs_compat.mkdir_p (Filename.dirname host_path);
+       if append
+       then Fs_compat.append_file host_path content
+       else Fs_compat.save_file host_path content;
+       Ok ()
      with
-     | Error _ as err -> err
-     | Ok (Unix.WEXITED 0, _out) -> Ok ()
-     | Ok (st, out) ->
-       Error (format_docker_exec_error ~head_program:"write_file" ~st ~out))
+     | Eio.Cancel.Cancelled _ as e -> raise e
+     | Sys_error msg -> Error msg
+     | Unix.Unix_error (err, fn, arg) ->
+       Error
+         (Printf.sprintf
+            "%s%s%s"
+            (Unix.error_message err)
+            (if String.equal fn "" then "" else ": " ^ fn)
+            (if String.equal arg "" then "" else " " ^ arg)))
 ;;
 
 let overwrite_file t ~host_path ~content ~timeout_sec () =

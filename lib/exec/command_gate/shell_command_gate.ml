@@ -51,7 +51,7 @@ type verdict =
 type allowlist_policy = {
   allowed_commands : string list;
   allow_pipes : bool;
-  redirect_allowed : bool;
+  
 }
 
 type path_policy = {
@@ -365,7 +365,7 @@ let apply_policy ~(allowlist : allowlist_policy) ~(path_policy : path_policy)
          Reject { context; reason; diagnostic }
        | None ->
          (match
-            if allowlist.redirect_allowed then None else first_redirect_stage stages
+            first_redirect_stage stages
           with
           | Some stage ->
             Reject

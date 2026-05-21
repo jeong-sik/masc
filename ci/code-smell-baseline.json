@@ -3,7 +3,7 @@
   "_policy": "Current metric values must be <= baseline. Decreases should be committed as baseline updates.",
   "metrics": {
     "godfile_loc_1000plus": {
-      "baseline": 53,
+      "baseline": 52,
       "scope": "lib/**/*.ml excluding *_intf.ml, *_test.ml, _build; LoC >= 1000",
       "files": [
         {
@@ -19,12 +19,8 @@
           "value": 1067
         },
         {
-          "file": "lib/cascade/cascade_error_classify.ml",
-          "value": 1002
-        },
-        {
           "file": "lib/cascade/cascade_transport.ml",
-          "value": 1442
+          "value": 1391
         },
         {
           "file": "lib/config/env_config_keeper.ml",
@@ -52,7 +48,7 @@
         },
         {
           "file": "lib/keeper/keeper_agent_run.ml",
-          "value": 2131
+          "value": 2220
         },
         {
           "file": "lib/keeper/keeper_approval_queue.ml",
@@ -68,7 +64,7 @@
         },
         {
           "file": "lib/keeper/keeper_heartbeat_loop.ml",
-          "value": 1465
+          "value": 1266
         },
         {
           "file": "lib/keeper/keeper_hooks_oas.ml",
@@ -92,7 +88,7 @@
         },
         {
           "file": "lib/keeper/keeper_run_tools.ml",
-          "value": 1779
+          "value": 1818
         },
         {
           "file": "lib/keeper/keeper_runtime.ml",
@@ -136,7 +132,7 @@
         },
         {
           "file": "lib/keeper/keeper_turn_driver.ml",
-          "value": 1806
+          "value": 1801
         },
         {
           "file": "lib/keeper/keeper_turn_slot.ml",
@@ -156,15 +152,15 @@
         },
         {
           "file": "lib/operator/operator_control_snapshot.ml",
-          "value": 1386
+          "value": 1298
         },
         {
           "file": "lib/server/server_bootstrap_loops.ml",
-          "value": 1242
+          "value": 1262
         },
         {
           "file": "lib/server/server_dashboard_http_core.ml",
-          "value": 1453
+          "value": 1422
         },
         {
           "file": "lib/server/server_dashboard_http_keeper_api.ml",
@@ -184,7 +180,7 @@
         },
         {
           "file": "lib/server/server_routes_http_routes_dashboard.ml",
-          "value": 1511
+          "value": 1408
         },
         {
           "file": "lib/server/server_routes_http_routes_sidecar.ml",
@@ -196,7 +192,7 @@
         },
         {
           "file": "lib/server/server_runtime_bootstrap.ml",
-          "value": 1451
+          "value": 1439
         },
         {
           "file": "lib/telemetry_unified.ml",
@@ -204,7 +200,7 @@
         },
         {
           "file": "lib/tool_code_write.ml",
-          "value": 1057
+          "value": 1134
         },
         {
           "file": "lib/tool_keeper.ml",
@@ -216,12 +212,12 @@
         },
         {
           "file": "lib/worker_dev_tools.ml",
-          "value": 1334
+          "value": 1371
         }
       ]
     },
     "catch_all_arms": {
-      "baseline": 3254,
+      "baseline": 3253,
       "scope": "line-leading OCaml anonymous match arms: | _ ->",
       "files": [
         {
@@ -443,6 +439,10 @@
         {
           "file": "lib/cascade/cascade_catalog_runtime_resolve.ml",
           "value": 2
+        },
+        {
+          "file": "lib/cascade/cascade_config_builder.ml",
+          "value": 1
         },
         {
           "file": "lib/cascade/cascade_config_loader.ml",
@@ -1646,7 +1646,7 @@
         },
         {
           "file": "lib/keeper/keeper_run_tools.ml",
-          "value": 8
+          "value": 9
         },
         {
           "file": "lib/keeper/keeper_runtime_config.ml",
@@ -1710,7 +1710,7 @@
         },
         {
           "file": "lib/keeper/keeper_shell_shared.ml",
-          "value": 8
+          "value": 7
         },
         {
           "file": "lib/keeper/keeper_social_model.ml",
@@ -2201,6 +2201,10 @@
           "value": 2
         },
         {
+          "file": "lib/operator/operator_control_snapshot_runtime_status.ml",
+          "value": 3
+        },
+        {
           "file": "lib/operator/operator_control_snapshot_tool_audit.ml",
           "value": 1
         },
@@ -2210,7 +2214,7 @@
         },
         {
           "file": "lib/operator/operator_control_snapshot.ml",
-          "value": 15
+          "value": 12
         },
         {
           "file": "lib/operator/operator_control.ml",
@@ -2414,7 +2418,7 @@
         },
         {
           "file": "lib/server/server_dashboard_http_core.ml",
-          "value": 11
+          "value": 10
         },
         {
           "file": "lib/server/server_dashboard_http_delete_actions.ml",
@@ -2537,6 +2541,10 @@
           "value": 1
         },
         {
+          "file": "lib/server/server_routes_http_dashboard_handlers.ml",
+          "value": 2
+        },
+        {
           "file": "lib/server/server_routes_http_dashboard_provider_logs.ml",
           "value": 2
         },
@@ -2570,7 +2578,7 @@
         },
         {
           "file": "lib/server/server_routes_http_routes_dashboard.ml",
-          "value": 2
+          "value": 1
         },
         {
           "file": "lib/server/server_routes_http_routes_git_graph.ml",
@@ -2747,10 +2755,6 @@
         {
           "file": "lib/tool_autoresearch_cycle.ml",
           "value": 1
-        },
-        {
-          "file": "lib/tool_autoresearch.ml",
-          "value": 12
         },
         {
           "file": "lib/tool_board_dispatch.ml",
@@ -3038,7 +3042,7 @@
         },
         {
           "file": "lib/worker_dev_tools.ml",
-          "value": 12
+          "value": 10
         },
         {
           "file": "lib/worker_execution_backend.ml",
@@ -3145,7 +3149,7 @@
       ]
     },
     "ignore_no_comment": {
-      "baseline": 75,
+      "baseline": 70,
       "scope": "scripts/lint-ignore-without-comment.sh --target lib",
       "files": [
         {
@@ -3215,10 +3219,6 @@
         {
           "file": "lib/keeper/keeper_current_task_reconcile.ml",
           "value": 2
-        },
-        {
-          "file": "lib/keeper/keeper_docker_client_mock.ml",
-          "value": 5
         },
         {
           "file": "lib/keeper/keeper_exec_board.ml",

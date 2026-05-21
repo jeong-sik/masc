@@ -393,11 +393,10 @@ type module_tag =
   | Mod_control | Mod_agent_timeline | Mod_misc | Mod_suspend
   | Mod_library | Mod_keeper
   | Mod_inline
-  | Mod_autoresearch
   | Mod_shard
 ```
 
-21개 variant (SSOT: `lib/tool_dispatch.mli`). 도구 이름으로 O(1) tag lookup 후, tag별로 적합한 모듈 컨텍스트를 지연 생성한다. Retired 모듈들(command_plane, team_session, voice, mdal, goals, heartbeat, encryption, auth, hat, audit, rate_limit, cost, social, vote, council, handover, relay, cache, tempo, portal, code_swarm, notifications, research, model_catalog, fire_task)은 tag 목록에서 제거됐다.
+19개 variant (SSOT: `lib/tool_dispatch.mli`). 도구 이름으로 O(1) tag lookup 후, tag별로 적합한 모듈 컨텍스트를 지연 생성한다. Retired 모듈들(command_plane, team_session, voice, mdal, goals, heartbeat, encryption, auth, hat, audit, rate_limit, cost, social, vote, council, handover, relay, cache, tempo, portal, code_swarm, notifications, research, autoresearch, model_catalog, fire_task)은 tag 목록에서 제거됐다.
 
 ### 4.4 Tool_result.t (structured)
 

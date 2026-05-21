@@ -845,6 +845,35 @@ let fd_accountant_snapshot_json () =
     ]
 ;;
 
+let runtime_truth_json ~build ~path_diagnostics ~keeper_fibers ~fd_accountant =
+  `Assoc
+    [ "schema", `String "masc.runtime_truth.v1"
+    ; "source", `String "running_process"
+    ; "effective_base_path", `String path_diagnostics.Server_base_path_diagnostics.effective_base_path
+    ; "effective_masc_root", `String path_diagnostics.effective_masc_root
+    ; "process_cwd", `String path_diagnostics.process_cwd
+    ; ( "input_base_path"
+      , Option.fold ~none:`Null ~some:(fun value -> `String value) path_diagnostics.input_base_path
+      )
+    ; ( "env_masc_base_path"
+      , Option.fold ~none:`Null ~some:(fun value -> `String value) path_diagnostics.env_masc_base_path
+      )
+    ; "runtime_repo_root", Option.fold ~none:`Null ~some:(fun value -> `String value) build.Build_identity.repo_root
+    ; "executable_path", `String build.executable_path
+    ; "executable_dir", `String build.executable_dir
+    ; "runtime_commit", Option.fold ~none:`Null ~some:(fun value -> `String value) build.commit
+    ; "runtime_commit_source", Option.fold ~none:`Null ~some:(fun value -> `String value) build.commit_source
+    ; "binary_commit", Option.fold ~none:`Null ~some:(fun value -> `String value) build.binary_commit
+    ; "binary_commit_source", Option.fold ~none:`Null ~some:(fun value -> `String value) build.binary_commit_source
+    ; "repo_head_commit", Option.fold ~none:`Null ~some:(fun value -> `String value) build.repo_head_commit
+    ; "repo_head_commit_source", Option.fold ~none:`Null ~some:(fun value -> `String value) build.repo_head_commit_source
+    ; "keeper_fibers", `Int keeper_fibers
+    ; "fd_open", fd_accountant |> Yojson.Safe.Util.member "fd_open"
+    ; "fd_limit", fd_accountant |> Yojson.Safe.Util.member "fd_limit"
+    ; "fd_pressure_active", fd_accountant |> Yojson.Safe.Util.member "pressure_active"
+    ]
+;;
+
 let keeper_fleet_runtime_resolution_fields () =
   keeper_fleet_runtime_resolution_base_fields ()
   @ [ "fd_accountant", fd_accountant_snapshot_json () ]
@@ -922,11 +951,13 @@ let make_health_json ?(listener = "http/1.1") request =
     else "none"
   in
   let key_paused_keepers = "paused_keepers" in
+  let path_diagnostics = health_path_diagnostics () in
   let base_path = current_room_base_path_opt () in
   let phase_counts = keeper_phase_counts ?base_path () in
   let keeper_fibers = phase_counts.running in
   let paused_keepers_json = paused_keepers_health_json () in
   let reaction_ledger_json = keeper_reaction_ledger_health_json () in
+  let fd_accountant_json = fd_accountant_snapshot_json () in
   Tool_args.ok_assoc [
     ("server", `String "masc-mcp");
     ("version", `String build.release_version);
@@ -936,7 +967,10 @@ let make_health_json ?(listener = "http/1.1") request =
     ("protocol", protocol_json ~listener);
     ("transport", transport_json request);
     ("http_listener", Transport_metrics.http_listener_json ());
-    ("paths", Server_base_path_diagnostics.to_yojson (health_path_diagnostics ()));
+    ("paths", Server_base_path_diagnostics.to_yojson path_diagnostics);
+    ( "runtime_truth"
+    , runtime_truth_json ~build ~path_diagnostics ~keeper_fibers
+        ~fd_accountant:fd_accountant_json );
     ("uptime", `String (health_uptime_string uptime_secs));
     ("sse_clients", `Int (Sse.client_count ()));
     ("startup", Server_startup_state.to_yojson ());
@@ -953,7 +987,7 @@ let make_health_json ?(listener = "http/1.1") request =
     ( "keeper_fd_pressure"
     , Keeper_fd_pressure.runtime_state_json ~active_keepers:keeper_fibers
         ~starting_keepers:0 ~requested_keepers:24 () );
-    ("fd_accountant", fd_accountant_snapshot_json ());
+    ("fd_accountant", fd_accountant_json);
     ( "keeper_fleet_safety"
     , keeper_fleet_safety_health_json ~phase_counts
         ~paused_keepers_json () );
@@ -1282,6 +1316,38 @@ let refresh_full_health_snapshot_sync ?(listener = "http/1.1") request =
 let snapshot_is_stale ~now snapshot =
   now -. snapshot.computed_at > full_health_snapshot_ttl_sec
 
+let full_health_snapshot_stale_reason ~now snapshot =
+  match snapshot with
+  | None -> None
+  | Some snapshot ->
+      (match snapshot.error with
+       | Some error
+         when snapshot.last_good_available
+              && full_health_refresh_timeout_error error ->
+           Some "last_good_refresh_timeout"
+       | Some _ when snapshot.last_good_available -> Some "last_good_refresh_error"
+       | Some error when full_health_refresh_timeout_error error ->
+           Some "refresh_timeout"
+       | Some _ -> Some "refresh_error"
+       | None when snapshot_is_stale ~now snapshot -> Some "ttl_expired"
+       | None -> None)
+
+let full_health_snapshot_stale_age_ms ~now snapshot =
+  let stale_started_at =
+    match snapshot with
+    | None -> None
+    | Some snapshot ->
+        (match snapshot.stale_since_ts with
+         | Some ts -> Some ts
+         | None when snapshot_is_stale ~now snapshot ->
+             Some (snapshot.computed_at +. full_health_snapshot_ttl_sec)
+         | None -> None)
+  in
+  match stale_started_at with
+  | None -> `Null
+  | Some started_at ->
+      `Int (max 0 (int_of_float ((now -. started_at) *. 1000.)))
+
 let full_health_snapshot_metadata ~now ~refresh_in_flight ~refresh_started_at
     ~refresh_requested snapshot =
   let component_timed_out =
@@ -1317,10 +1383,18 @@ let full_health_snapshot_metadata ~now ~refresh_in_flight ~refresh_started_at
           stale_since_ts_json,
           status )
   in
+  let stale_reason =
+    match full_health_snapshot_stale_reason ~now snapshot with
+    | Some reason -> `String reason
+    | None -> `Null
+  in
+  let stale_age_ms = full_health_snapshot_stale_age_ms ~now snapshot in
   `Assoc
     [
       ("status", `String status);
       ("snapshot_age_ms", snapshot_age_ms);
+      ("stale_reason", stale_reason);
+      ("stale_age_ms", stale_age_ms);
       ("computed_at_unix", computed_at);
       ("duration_ms", duration_ms);
       ("ttl_ms", `Int (int_of_float (full_health_snapshot_ttl_sec *. 1000.)));

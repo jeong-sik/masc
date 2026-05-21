@@ -123,7 +123,7 @@
   test_keeper_health_probe
   test_oas_error_kind_counter
   test_cascade_error_classify_decoder
-  test_cascade_capacity_exhausted_cooldown
+  test_cascade_capacity_backpressure_cooldown
   test_cascade_capacity_backpressure_synthetic_backoff
   test_oas_empty_response_diagnostic
   test_board_author_identity_10297
@@ -286,6 +286,7 @@
   test_tool_call_quality_benchmark
   test_keeper_prompt_metrics
   test_keeper_prompt_personality_field_aggregation
+  test_keeper_prompt_constitution_fallback
   test_keeper_reaction_ledger
   test_cache_metrics_wiring
   test_keeper_bash_descriptor_variant
@@ -443,7 +444,7 @@
   test_keeper_health_probe
   test_oas_error_kind_counter
   test_cascade_error_classify_decoder
-  test_cascade_capacity_exhausted_cooldown
+  test_cascade_capacity_backpressure_cooldown
   test_cascade_capacity_backpressure_synthetic_backoff
   test_oas_empty_response_diagnostic
   test_board_author_identity_10297
@@ -451,6 +452,7 @@
   test_gc_sampler
   test_process_timeout_counter
   test_timeout_floor
+  test_timeout_origin
   test_git_fetch_timeout_9587
   test_inference_utils
   test_auth_ambiguous_lookup_9786
@@ -608,6 +610,7 @@
   test_tool_call_quality_benchmark
   test_keeper_prompt_metrics
   test_keeper_prompt_personality_field_aggregation
+  test_keeper_prompt_constitution_fallback
   test_keeper_reaction_ledger
   test_cache_metrics_wiring
   test_keeper_bash_descriptor_variant
@@ -1254,7 +1257,6 @@
   test_tool_control_coverage
   test_tool_misc_coverage
   test_ag_ui_coverage
-  test_tool_suspend_coverage
   test_tool_code_coverage
   test_tool_code_write_coverage
   test_tool_code_read_containment
@@ -1314,7 +1316,6 @@
   test_tool_control_coverage
   test_tool_misc_coverage
   test_ag_ui_coverage
-  test_tool_suspend_coverage
   test_tool_code_coverage
   test_tool_code_write_coverage
   test_tool_code_read_containment

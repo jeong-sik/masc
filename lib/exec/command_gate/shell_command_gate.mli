@@ -106,12 +106,12 @@ type verdict =
 
 (** Allowlist policy. [allow_pipes = true] keeps the existing legacy
     behavior; [false] yields {!Pipes_not_allowed} for any pipeline with
-    two or more stages. [redirect_allowed = false] rejects all redirect
+    two or more stages. Redirects are always rejected, including fd-to-fd redirects such as
     syntax, including fd-to-fd redirects such as [2>&1]. *)
 type allowlist_policy = {
   allowed_commands : string list;
   allow_pipes : bool;
-  redirect_allowed : bool;
+  
 }
 
 (** Path policy applied to literal path arguments and file redirect

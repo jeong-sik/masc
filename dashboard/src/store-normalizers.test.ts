@@ -151,6 +151,23 @@ describe('normalizeDashboardRuntimeResolution fleet safety', () => {
     const result = normalizeDashboardRuntimeResolution(runtimeResolutionRaw())
 
     expect(result?.fleet_safety).toBeNull()
+    expect(result?.fd_accountant).toBeNull()
+  })
+
+  it('parses FD accountant facts for the runtime truth panel', () => {
+    const result = normalizeDashboardRuntimeResolution(runtimeResolutionRaw({
+      fd_accountant: {
+        fd_open: 42,
+        fd_limit: 1024,
+        pressure_active: false,
+      },
+    }))
+
+    expect(result?.fd_accountant).toEqual({
+      fd_open: 42,
+      fd_limit: 1024,
+      pressure_active: false,
+    })
   })
 
   it('parses optional health fleet-safety fields type-safely', () => {

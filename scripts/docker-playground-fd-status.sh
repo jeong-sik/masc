@@ -202,11 +202,31 @@ emit_cleanup_summary_fields() {
   done
 }
 
+emit_cleanup_projection() {
+  local prefix="$1"
+  local key="$2"
+  local total="$3"
+  local summary="$4"
+  local candidates projected
+  candidates="$(summary_field "$summary" candidates)"
+  if [ -z "$candidates" ]; then
+    candidates="0"
+  fi
+  if [ "$candidates" -ge "$total" ]; then
+    projected=0
+  else
+    projected=$((total - candidates))
+  fi
+  echo "${prefix}_${key}=$projected"
+}
+
 run_cleanup_summary() {
   local prefix="$1"
   local days="$2"
   local keeper="${3:-}"
   local repo="${4:-}"
+  local projection_key="${5:-}"
+  local projection_total="${6:-}"
   local cleanup_script
   local summary
   cleanup_script="$(cleanup_script_path)"
@@ -226,13 +246,17 @@ run_cleanup_summary() {
     return 0
   fi
   emit_cleanup_summary_fields "$prefix" "$days" "$summary"
+  if [ -n "$projection_key" ] && [ -n "$projection_total" ]; then
+    emit_cleanup_projection "$prefix" "$projection_key" "$projection_total" "$summary"
+  fi
 }
 
 emit_cleanup_summaries() {
   [ "$CLEANUP_SUMMARY" -eq 1 ] || return 0
   echo ""
   echo "Cleanup dry-run summary:"
-  run_cleanup_summary "cleanup_summary" "$CLEANUP_DAYS"
+  run_cleanup_summary "cleanup_summary" "$CLEANUP_DAYS" "" "" \
+    "projected_worktree_entries" "$worktree_entries"
   if [ -s "$fanout_tmp" ]; then
     local top_fanout_line top_fanout_count top_fanout_keeper top_fanout_repo
     top_fanout_line="$(sort -rn "$fanout_tmp" | head -n 1)"
@@ -242,11 +266,12 @@ emit_cleanup_summaries() {
     top_fanout_repo="${3:-}"
     if [ "$top_fanout_count" -gt 0 ] && [ -n "$top_fanout_keeper" ] && [ -n "$top_fanout_repo" ]; then
       run_cleanup_summary "top_fanout_cleanup_summary" "$CLEANUP_DAYS" \
-        "$top_fanout_keeper" "$top_fanout_repo"
+        "$top_fanout_keeper" "$top_fanout_repo" "projected_count" "$top_fanout_count"
     fi
   fi
   if [ -n "$AGGRESSIVE_CLEANUP_DAYS" ]; then
-    run_cleanup_summary "aggressive_cleanup_summary" "$AGGRESSIVE_CLEANUP_DAYS"
+    run_cleanup_summary "aggressive_cleanup_summary" "$AGGRESSIVE_CLEANUP_DAYS" "" "" \
+      "projected_worktree_entries" "$worktree_entries"
     if [ -s "$fanout_tmp" ]; then
       local top_fanout_line top_fanout_count top_fanout_keeper top_fanout_repo
       top_fanout_line="$(sort -rn "$fanout_tmp" | head -n 1)"
@@ -256,7 +281,8 @@ emit_cleanup_summaries() {
       top_fanout_repo="${3:-}"
       if [ "$top_fanout_count" -gt 0 ] && [ -n "$top_fanout_keeper" ] && [ -n "$top_fanout_repo" ]; then
         run_cleanup_summary "top_fanout_aggressive_cleanup_summary" \
-          "$AGGRESSIVE_CLEANUP_DAYS" "$top_fanout_keeper" "$top_fanout_repo"
+          "$AGGRESSIVE_CLEANUP_DAYS" "$top_fanout_keeper" "$top_fanout_repo" \
+          "projected_count" "$top_fanout_count"
       fi
     fi
   fi

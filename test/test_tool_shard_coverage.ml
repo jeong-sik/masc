@@ -540,46 +540,9 @@ let () =
       Alcotest.test_case "all count" `Quick test_all_shards_count;
     ]);
     ("autoresearch_shard", [
-      Alcotest.test_case "exists" `Quick (fun () ->
+      Alcotest.test_case "removed" `Quick (fun () ->
         let s = Tool_shard.get_shard "autoresearch" in
-        Alcotest.(check bool) "found" true (s <> None));
-      Alcotest.test_case "removable" `Quick (fun () ->
-        let s = Option.get (Tool_shard.get_shard "autoresearch") in
-        Alcotest.(check bool) "removable" true s.removable);
-      Alcotest.test_case "has no retired swarm front doors" `Quick (fun () ->
-        let tools = Tool_shard.autoresearch_keeper_tools in
-        let has_swarm =
-          List.exists (fun (t : Masc_domain.tool_schema) ->
-            t.name = "masc_autoresearch_swarm_start") tools
-        in
-        let has_repo_synthesis =
-          List.exists (fun (t : Masc_domain.tool_schema) ->
-            t.name = "masc_repo_synthesis_swarm_start") tools
-        in
-        Alcotest.(check bool) "no swarm_start" false has_swarm;
-        Alcotest.(check bool) "no repo synthesis swarm start" false
-          has_repo_synthesis);
-      Alcotest.test_case "has cycle" `Quick (fun () ->
-        let tools = Tool_shard.autoresearch_keeper_tools in
-        let has_cycle =
-          List.exists (fun (t : Masc_domain.tool_schema) ->
-            t.name = "masc_autoresearch_cycle") tools
-        in
-        let has_record =
-          List.exists (fun (t : Masc_domain.tool_schema) ->
-            t.name = "masc_autoresearch_record_finding") tools
-        in
-        let has_search =
-          List.exists (fun (t : Masc_domain.tool_schema) ->
-            t.name = "masc_autoresearch_search_findings") tools
-        in
-        Alcotest.(check bool) "has cycle" true has_cycle;
-        Alcotest.(check bool) "has record finding" true has_record;
-        Alcotest.(check bool) "has search findings" true has_search);
-      Alcotest.test_case "in defaults" `Quick (fun () ->
-        let defaults = Tool_shard.default_shard_names in
-        Alcotest.(check bool) "autoresearch opt-in"
-          false (List.mem "autoresearch" defaults));
+        Alcotest.(check bool) "not found" true (s = None));
     ]);
     ("default_shard_names", [
       Alcotest.test_case "defaults" `Quick test_default_shard_names;

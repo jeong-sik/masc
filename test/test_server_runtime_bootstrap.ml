@@ -1005,6 +1005,7 @@ let test_health_json_surfaces_durable_paused_keepers () =
           let paused = json |> member "paused_keepers" in
           let fd_pressure = json |> member "keeper_fd_pressure" in
           let fd_accountant = json |> member "fd_accountant" in
+          let runtime_truth = json |> member "runtime_truth" in
           let fleet_safety = json |> member "keeper_fleet_safety" in
           let reaction_ledger = json |> member "keeper_reaction_ledger" in
           let durable_names =
@@ -1054,6 +1055,25 @@ let test_health_json_surfaces_durable_paused_keepers () =
           ignore (fd_accountant |> member "fd_open" |> to_int);
           ignore (fd_accountant |> member "fd_limit" |> to_int);
           ignore (fd_accountant |> member "pressure_active" |> to_bool);
+          Alcotest.(check string) "runtime truth schema"
+            "masc.runtime_truth.v1"
+            (runtime_truth |> member "schema" |> to_string);
+          Alcotest.(check string) "runtime truth source"
+            "running_process"
+            (runtime_truth |> member "source" |> to_string);
+          Alcotest.(check string) "runtime truth effective base path"
+            dir
+            (runtime_truth |> member "effective_base_path" |> to_string);
+          Alcotest.(check string) "runtime truth effective masc root"
+            (Filename.concat dir ".masc")
+            (runtime_truth |> member "effective_masc_root" |> to_string);
+          ignore (runtime_truth |> member "process_cwd" |> to_string);
+          ignore (runtime_truth |> member "executable_path" |> to_string);
+          ignore (runtime_truth |> member "executable_dir" |> to_string);
+          ignore (runtime_truth |> member "keeper_fibers" |> to_int);
+          ignore (runtime_truth |> member "fd_open" |> to_int);
+          ignore (runtime_truth |> member "fd_limit" |> to_int);
+          ignore (runtime_truth |> member "fd_pressure_active" |> to_bool);
           let fd_accountant_per_kind =
             fd_accountant |> member "per_kind" |> to_list
           in
@@ -1395,6 +1415,10 @@ let test_health_response_full_query_uses_snapshot_cache () =
   let refreshed = Server_routes_http_runtime.make_health_response_json request in
   Alcotest.(check string) "refreshed snapshot is ready" "ready"
     (refreshed |> member "full_health_snapshot" |> member "status" |> to_string);
+  Alcotest.(check bool) "ready snapshot has no stale reason" true
+    (refreshed |> member "full_health_snapshot" |> member "stale_reason" = `Null);
+  Alcotest.(check bool) "ready snapshot has no stale age" true
+    (refreshed |> member "full_health_snapshot" |> member "stale_age_ms" = `Null);
   Alcotest.(check bool) "refreshed full health keeps reaction ledger" true
     (match refreshed |> member "keeper_reaction_ledger" with
      | `Assoc _ -> true
@@ -1442,6 +1466,12 @@ let test_full_health_refresh_timeout_preserves_last_snapshot () =
      |> to_bool);
   Alcotest.(check string) "timeout error is surfaced" (Printexc.to_string timeout_error)
     (after |> member "full_health_snapshot" |> member "error" |> to_string);
+  Alcotest.(check string) "timeout stale reason" "last_good_refresh_timeout"
+    (after |> member "full_health_snapshot" |> member "stale_reason" |> to_string);
+  Alcotest.(check bool) "timeout stale age is surfaced" true
+    (match after |> member "full_health_snapshot" |> member "stale_age_ms" with
+     | `Int age -> age >= 0
+     | _ -> false);
   Alcotest.(check bool) "timeout records stale-since timestamp" true
     (match after |> member "full_health_snapshot" |> member "stale_since_ts" with
      | `Float _ | `Int _ -> true
@@ -1469,6 +1499,12 @@ let test_full_health_cold_refresh_timeout_is_timeout_not_error () =
   Alcotest.(check bool) "cold timeout has no last good" false
     (after |> member "full_health_snapshot" |> member "last_good_available"
      |> to_bool);
+  Alcotest.(check string) "cold timeout stale reason" "refresh_timeout"
+    (after |> member "full_health_snapshot" |> member "stale_reason" |> to_string);
+  Alcotest.(check bool) "cold timeout stale age is surfaced" true
+    (match after |> member "full_health_snapshot" |> member "stale_age_ms" with
+     | `Int age -> age >= 0
+     | _ -> false);
   Alcotest.(check bool) "cold timeout marks component timeout" true
     (after |> member "cdal" |> member "component_timed_out" |> to_bool)
 

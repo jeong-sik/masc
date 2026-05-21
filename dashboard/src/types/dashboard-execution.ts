@@ -117,7 +117,14 @@ export interface DashboardRuntimeResolution {
   build: ServerBuildIdentity
   keeper_runtime: KeeperRuntimeResolved | null
   fleet_safety: DashboardFleetSafetyHealth | null
+  fd_accountant: DashboardFdAccountant | null
   cdal: DashboardCdalHealth | null
+}
+
+export interface DashboardFdAccountant {
+  fd_open: number | null
+  fd_limit: number | null
+  pressure_active: boolean | null
 }
 
 export interface DashboardFleetSafetyHealth {

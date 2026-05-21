@@ -23,7 +23,7 @@
       caller by design — RFC-0070 requires cancellation to remain
       observable rather than being absorbed into a typed error.
     - [exec] — wired: spawns
-      [docker exec <name> sh -lc <cmd>] via
+      [docker exec <name> <command_argv>] via
       [Process_eio.run_argv_with_status_split]. The semantic
       distinction vs [rm] matters: a non-zero exit *inside the
       container* is the *command's* result, returned as
@@ -37,7 +37,7 @@
       All other [WEXITED n] values surface as
       [Ok { exit_code = n; stdout; stderr }].
     - [run] — wired: spawns
-      [docker run --rm --name <name> <image> sh -lc <cmd>] via
+      [docker run --rm --name <name> <image> <command_argv>] via
       [Process_eio.run_argv_with_status_split], passing
       [Keeper_sandbox_oneshot_plan.timeout_budget_sec] as the
       [?timeout_sec] parameter. Status mapping is the same as [exec]
@@ -59,7 +59,7 @@
 
 include Keeper_docker_client.S
 
-(** [exec_argv ?user ?workdir ?stdin ~container ~cmd ()] is the pure
+(** [exec_argv ?user ?workdir ?stdin ~container ~command_argv ()] is the pure
     [docker exec] argv builder used by {!exec}. Exposed for unit-testing
     the argv shape (option presence, [--user] before [-w] before [-i]
     ordering) without spawning a daemon.
@@ -74,7 +74,7 @@ val exec_argv
   -> ?workdir:string
   -> ?stdin:bool
   -> container:Keeper_container_name.t
-  -> cmd:string
+  -> command_argv:string list
   -> unit
   -> string list
 

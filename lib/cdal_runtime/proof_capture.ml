@@ -36,7 +36,54 @@ type state =
   ; mutable pending_tool : pending_tool option
   ; mutable trace_count : int
   ; mutable enforcer : Mode_enforcer.state option
+  ; mutable terminal_recorded : bool
   }
+
+let pending_mutex = Stdlib.Mutex.create ()
+let pending_states : state list ref = ref []
+let at_exit_registered = ref false
+
+let with_pending_lock f =
+  Stdlib.Mutex.lock pending_mutex;
+  Fun.protect ~finally:(fun () -> Stdlib.Mutex.unlock pending_mutex) f
+;;
+
+let record_abort_marker st ~reason =
+  if not st.terminal_recorded
+  then (
+    Proof_store.write_terminal_marker
+      st.store
+      ~run_id:st.run_id
+      ~marker:Proof_store.Aborted
+      ~reason;
+    st.terminal_recorded <- true)
+;;
+
+let unregister_pending st =
+  with_pending_lock (fun () ->
+    pending_states := List.filter (fun pending -> pending != st) !pending_states)
+;;
+
+let abort_pending_at_exit () =
+  let pending =
+    with_pending_lock (fun () ->
+      let pending = !pending_states in
+      pending_states := [];
+      pending)
+  in
+  List.iter
+    (fun st -> record_abort_marker st ~reason:"process_exit_before_finalize")
+    pending
+;;
+
+let register_pending st =
+  with_pending_lock (fun () ->
+    if not !at_exit_registered
+    then (
+      at_exit abort_pending_at_exit;
+      at_exit_registered := true);
+    pending_states := st :: !pending_states)
+;;
 
 let generate_run_id () =
   let now = Unix.gettimeofday () in
@@ -60,7 +107,11 @@ let create ~store ~contract ~mode_decision ~capability_snapshot ?scope () =
   ; pending_tool = None
   ; trace_count = 0
   ; enforcer = None
+  ; terminal_recorded = false
   }
+  |> fun st ->
+  register_pending st;
+  st
 ;;
 
 let run_id st = st.run_id
@@ -281,6 +332,12 @@ let collect_evidence_refs st =
     List.rev !refs
 ;;
 
+let abort st ~reason =
+  complete_pending_tool st ~output:None ~error:(Some reason);
+  record_abort_marker st ~reason;
+  unregister_pending st
+;;
+
 let finalize st ~result_status =
   complete_pending_tool st ~output:None ~error:None;
   let now = Unix.gettimeofday () in
@@ -313,5 +370,15 @@ let finalize st ~result_status =
   in
   Proof_store.write_manifest st.store ~run_id:st.run_id proof;
   Proof_store.write_contract st.store ~run_id:st.run_id st.contract;
+  if Proof_store.run_has_manifest_and_contract st.store ~run_id:st.run_id
+  then Proof_store.write_finalized_marker st.store ~run_id:st.run_id
+  else
+    Proof_store.write_terminal_marker
+      st.store
+      ~run_id:st.run_id
+      ~marker:Proof_store.Aborted
+      ~reason:"finalize_missing_manifest_or_contract";
+  st.terminal_recorded <- true;
+  unregister_pending st;
   proof
 ;;

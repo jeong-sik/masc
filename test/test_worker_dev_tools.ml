@@ -349,7 +349,7 @@ let test_shell_exec_echo () =
    | Error { Agent_sdk.Types.message = e; _ } ->
      Alcotest.fail (Printf.sprintf "expected Ok, got Error: %s" e))
 
-let test_shell_exec_uses_exec_gate_cwd () =
+let test_shell_exec_uses_shell_ir_dispatch_cwd () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let proc_mgr = Eio.Stdenv.process_mgr env in
@@ -382,8 +382,35 @@ let test_shell_exec_uses_exec_gate_cwd () =
          (match process_line with
           | None -> Alcotest.fail "shell_exec did not route through Exec_gate/Process_eio"
           | Some line ->
-            Alcotest.(check bool) "cwd recorded" true (contains_substring line ("\"cwd\":\"" ^ workdir ^ "\""));
+            Alcotest.(check bool)
+              "cwd recorded"
+              true
+              (contains_substring line ("\"cwd\":\"" ^ workdir ^ "\""));
+            Alcotest.(check bool)
+              "direct pwd argv"
+              true
+              (contains_substring line "\"argv\":[\"pwd\"]");
+            Alcotest.(check bool)
+              "no sh -c wrapper"
+              false
+              (contains_substring line "\"-c\"");
             Alcotest.(check bool) "no cd wrapper" false (contains_substring line "cd ")))
+
+let test_shell_exec_timeout_floor_for_load_bearing_commands () =
+  let check command requested expected =
+    Alcotest.(check (float 0.001))
+      command
+      expected
+      (Worker_dev_tools.effective_shell_exec_timeout_sec ~command ~requested)
+  in
+  check "git status -sb" 5.0 15.0;
+  check "git branch -a" 5.0 15.0;
+  check "grep -rn \"timeout\" lib" 5.0 15.0;
+  check "find lib -name \"*.ml\" -type f" 5.0 15.0;
+  check "scripts/dune-local.sh build lib/cascade" 5.0 15.0;
+  check "echo hello" 5.0 5.0;
+  check "git status -sb" 30.0 30.0
+;;
 
 let test_shell_exec_blocked_command () =
   Eio_main.run @@ fun env ->
@@ -680,8 +707,10 @@ let () =
     ];
     "shell_exec", [
       Alcotest.test_case "echo hello" `Quick test_shell_exec_echo;
-      Alcotest.test_case "uses Exec_gate cwd" `Quick
-        test_shell_exec_uses_exec_gate_cwd;
+      Alcotest.test_case "uses Shell IR dispatch cwd" `Quick
+        test_shell_exec_uses_shell_ir_dispatch_cwd;
+      Alcotest.test_case "timeout floor for load-bearing commands" `Quick
+        test_shell_exec_timeout_floor_for_load_bearing_commands;
       Alcotest.test_case "blocked command" `Quick test_shell_exec_blocked_command;
       Alcotest.test_case "env wrapper blocked command" `Quick
         test_shell_exec_blocks_env_wrapped_disallowed_command;
@@ -1329,6 +1358,25 @@ let () =
       (* The path validator now consumes Shell IR and validates literal
          path-bearing argv/redirect values. Syntax policy lives in the
          command gate; this suite keeps only containment behaviour here. *)
+      Alcotest.test_case "Shell IR outside literal path is blocked"
+        `Quick (fun () ->
+          let open Masc_exec.Shell_ir in
+          let bin = Masc_exec.Bin.of_string "cat" |> Result.get_ok in
+          let ir =
+            Simple
+              { bin
+              ; args = [ Lit "/etc/passwd" ]
+              ; env = []
+              ; cwd = None
+              ; redirects = []
+              ; sandbox = Masc_exec.Sandbox_target.host ()
+              }
+          in
+          match Worker_dev_tools.validate_shell_ir_paths ~workdir:"/tmp" ir with
+          | Error msg ->
+            Alcotest.(check bool) "outside path blocked" true
+              (contains_substring msg "outside allowed directories")
+          | Ok () -> Alcotest.fail "outside Shell IR literal path must be blocked");
       Alcotest.test_case "outside literal path is blocked"
         `Quick (fun () ->
           match Worker_dev_tools.validate_command_paths

@@ -357,6 +357,10 @@ let bootstrap_server_state_blocking (state : Mcp_server.server_state) =
      Keeper autoboot and other bootstrap readers should see the canonical paths
      on their first pass, not rely on a later lazy migration task. *)
   migrate_legacy_keeper_dirs_blocking state;
+  (* [create_server_state] normally resets this after config bootstrap, but
+     direct state constructors used by tests and execute contexts can leave a
+     stale process-global config resolution in place. *)
+  Config_dir_resolver.reset ();
   let (_init_msg : string) = Coord.init state.room_config ~agent_name:None in
   audit_keeper_egress_policies state;
   Mcp_server.set_sse_callback state Sse.broadcast

@@ -19,35 +19,9 @@ let keeper_agent_status = Keeper_heartbeat_loop_presence.keeper_agent_status
 let note_turn_failures_preserved_after_heartbeat = Keeper_heartbeat_loop_presence.note_turn_failures_preserved_after_heartbeat
 let sync_keeper_presence = Keeper_heartbeat_loop_presence.sync_keeper_presence
 
-let collect_keepalive_board_events
-      ~(ctx : _ context)
-      ~(meta_current : keeper_meta)
-      ~(proactive_warmup_elapsed : bool)
-  =
-  if not proactive_warmup_elapsed
-  then [], meta_current
-  else (
-    let pending_board_events =
-      try
-        let events, _new_count, _mention_count =
-          Keeper_world_observation.collect_board_events
-            ~base_path:ctx.config.base_path
-            ~meta:meta_current
-            ~continuity_summary:meta_current.continuity_summary
-        in
-        events
-      with
-      | Eio.Cancel.Cancelled _ as e -> raise e
-      | exn ->
-        Log.Keeper.warn "keepalive: board count query failed: %s" (Printexc.to_string exn);
-        Prometheus.inc_counter
-          Keeper_metrics.metric_keeper_heartbeat_failures
-          ~labels:[ "keeper", meta_current.name; "phase", "board_count_query" ]
-          ();
-        []
-    in
-    pending_board_events, meta_current)
-;;
+(* Pending board-event collection extracted to
+   [Keeper_heartbeat_loop_board_events] (godfile decomp). *)
+let collect_keepalive_board_events = Keeper_heartbeat_loop_board_events.collect_keepalive_board_events
 
 let in_turn_liveness_pulse_interval_sec =
   Keeper_heartbeat_loop_in_turn_pulse.in_turn_liveness_pulse_interval_sec
@@ -667,54 +641,7 @@ let refresh_work_as_heartbeat
       consecutive_failures := 0))
 ;;
 
-let dispatch_recurring_keepalive
-      ~(ctx : _ context)
-      ~(meta_after_proactive : keeper_meta)
-      ~(now_ts : float)
-  : int
-  =
-  (* Recover from transient broadcast failures that previously
-     auto-disabled tasks via [dispatch_due]'s [max_failures] guard.
-     Without this call the keeper's heartbeat broadcasts stay silent
-     for the lifetime of the process, eventually triggering stale-kill
-     cascades.  See lib/keeper/keeper_recurring.ml for the cooldown rule. *)
-  let _reenabled =
-    Keeper_recurring.reenable_due_tasks ~keeper_name:meta_after_proactive.name ~now_ts
-  in
-  try
-    Keeper_recurring.dispatch_due
-      ~keeper_name:meta_after_proactive.name
-      ~now_ts
-      ~dispatch:(fun task action ->
-        match action with
-        | Keeper_recurring.Broadcast msg ->
-          (try
-             let _ =
-               Coord.broadcast
-                 ctx.config
-                 ~from_agent:meta_after_proactive.agent_name
-                 ~content:(Printf.sprintf "[loop:%s] %s" task.label msg)
-             in
-             Log.Keeper.info "[recurring] %s dispatched: %s" task.id task.label;
-             Ok ()
-           with
-           | exn ->
-             Log.Keeper.warn "[recurring] %s failed: %s" task.id (Printexc.to_string exn);
-             Prometheus.inc_counter
-               Keeper_metrics.metric_keeper_recurring_failures
-               ~labels:[ "task", task.id; "phase", "task_execution" ]
-               ();
-             Error (Printexc.to_string exn)))
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn ->
-    Log.Keeper.warn "[recurring] dispatch error: %s" (Printexc.to_string exn);
-    Prometheus.inc_counter
-      Keeper_metrics.metric_keeper_recurring_failures
-      ~labels:[ "task", "dispatch"; "phase", "dispatch_error" ]
-      ();
-    0
-;;
+let dispatch_recurring_keepalive = Keeper_heartbeat_loop_dispatch_recurring.dispatch_recurring_keepalive
 
 (** Whether a smart-heartbeat decision should allow the keepalive
     cycle to continue evaluating turns.
@@ -900,67 +827,8 @@ let run_smart_heartbeat_gate
   cycle_continues_after_wake smart_hb_decision sleep_outcome
 ;;
 
-let maybe_write_heartbeat_snapshot
-      ~(ctx : _ context)
-      ~(meta_current : keeper_meta)
-      ~(now_ts : float)
-      ~(consecutive_hb_failures : int)
-      ~(last_snapshot_ts : float ref)
-      ~(snapshot_interval_sec : int)
-      ~(timing_ring : Keeper_keepalive_signal.stage_timing array)
-      ~(timing_filled : int)
-  : unit
-  =
-  if now_ts -. !last_snapshot_ts >= float_of_int snapshot_interval_sec
-  then (
-    (try
-       Keeper_heartbeat_snapshot.write_heartbeat_snapshot
-         ~ctx
-         ~meta_current
-         ~now_ts
-         ~consecutive_hb_failures
-         ~timing_ring
-         ~timing_filled
-     with
-     | Eio.Cancel.Cancelled _ as e -> raise e
-     | exn ->
-       Prometheus.inc_counter
-         Keeper_metrics.metric_keeper_snapshot_write_failures
-         ~labels:[ "keeper", meta_current.name ]
-         ();
-       Log.Keeper.error "heartbeat snapshot write failed: %s" (Printexc.to_string exn));
-    last_snapshot_ts := now_ts)
-;;
-
-let record_keepalive_stage_timing
-      ~(timing_ring : Keeper_keepalive_signal.stage_timing array)
-      ~(timing_cursor : int ref)
-      ~(timing_filled : int ref)
-      ~(ring_sz : int)
-      ~(t_presence_start : float)
-      ~(t_presence_end : float)
-      ~(t_snapshot_start : float)
-      ~(t_snapshot_end : float)
-      ~(t_board_start : float)
-      ~(t_board_end : float)
-      ~(t_turn_start : float)
-      ~(t_turn_end : float)
-      ~(t_recurring_start : float)
-      ~(t_recurring_end : float)
-  : unit
-  =
-  let timing =
-    { presence_ms = (t_presence_end -. t_presence_start) *. 1000.0
-    ; snapshot_ms = (t_snapshot_end -. t_snapshot_start) *. 1000.0
-    ; board_ms = (t_board_end -. t_board_start) *. 1000.0
-    ; turn_ms = (t_turn_end -. t_turn_start) *. 1000.0
-    ; recurring_ms = (t_recurring_end -. t_recurring_start) *. 1000.0
-    }
-  in
-  timing_ring.(!timing_cursor) <- timing;
-  timing_cursor := (!timing_cursor + 1) mod ring_sz;
-  if !timing_filled < ring_sz then incr timing_filled
-;;
+let maybe_write_heartbeat_snapshot = Keeper_heartbeat_loop_snapshot_timing.maybe_write_heartbeat_snapshot
+let record_keepalive_stage_timing = Keeper_heartbeat_loop_snapshot_timing.record_keepalive_stage_timing
 
 (* Spec navigation (OCaml -> TLA+) — plan §19 Cycle 27 anchor for
    B1 (Heartbeat).  Authoritative spec mirror is

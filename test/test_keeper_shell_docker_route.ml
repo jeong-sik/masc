@@ -15,6 +15,7 @@ module Keeper_registry = Masc_mcp.Keeper_registry
 module Keeper_sandbox = Masc_mcp.Keeper_sandbox
 module Keeper_sandbox_factory = Masc_mcp.Keeper_sandbox_factory
 module Keeper_sandbox_runtime = Masc_mcp.Keeper_sandbox_runtime
+module Keeper_turn_sandbox_runtime = Masc_mcp.Keeper_turn_sandbox_runtime
 module Keeper_shell_command_semantics = Masc_mcp.Keeper_shell_command_semantics
 module Keeper_shell_docker = Masc_mcp.Keeper_shell_docker
 module Keeper_types = Masc_mcp.Keeper_types
@@ -567,6 +568,35 @@ let test_git_clone_routes_through_docker () =
   Alcotest.(check bool) "clone stays inside keeper repos" true
     (response_mentions raw "path"
        (Filename.concat playground "repos/masc-mcp"))
+
+let test_turn_sandbox_file_write_uses_host_bind_mount () =
+  setup ~sandbox:Keeper_types.Docker
+  @@ fun ~config ~meta ~playground ->
+  let runtime = Keeper_turn_sandbox_runtime.create ~config ~meta ~turn_id:1 () in
+  let target = Filename.concat playground "nested/result.txt" in
+  (match
+     Keeper_turn_sandbox_runtime.overwrite_file
+       runtime
+       ~host_path:target
+       ~content:"alpha\n"
+       ~timeout_sec:1.0
+       ()
+   with
+   | Error msg -> Alcotest.fail msg
+   | Ok () -> ());
+  (match
+     Keeper_turn_sandbox_runtime.append_file
+       runtime
+       ~host_path:target
+       ~content:"beta\n"
+       ~timeout_sec:1.0
+       ()
+   with
+   | Error msg -> Alcotest.fail msg
+   | Ok () -> ());
+  Alcotest.(check string) "content written via bind-mounted host path"
+    "alpha\nbeta\n"
+    (Fs_compat.load_file target)
 
 let test_bash_routes_through_docker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "" @@ fun () ->
@@ -1334,6 +1364,21 @@ let test_sandbox_root_git_cwd_cd_chain_is_not_interpreted () =
     None
     error
 
+let test_cmd_prefix_uses_shell_semantics () =
+  let check label expected cmd =
+    Alcotest.(check string)
+      label
+      expected
+      (Keeper_shell_command_semantics.cmd_prefix cmd)
+  in
+  check "plain command" "git" "git status";
+  check "env wrapper" "gh" "env GH_TOKEN=redacted gh pr list";
+  check "opam wrapper" "dune" "opam exec -- dune runtest";
+  check
+    "unsupported shell shape falls back to original command"
+    "cd repos/masc-mcp && git status"
+    "cd repos/masc-mcp && git status"
+
 let test_gh_repo_api_misuse_uses_shell_semantics () =
   let check label expected cmd =
     Alcotest.(check (option (pair string string)))
@@ -2003,6 +2048,9 @@ let () =
           Alcotest.test_case "git_clone routes through docker" `Quick
             test_git_clone_routes_through_docker;
           Alcotest.test_case
+            "turn sandbox file writes use bind-mounted host path"
+            `Quick test_turn_sandbox_file_write_uses_host_bind_mount;
+          Alcotest.test_case
             "git-creds skips missing SSH_AUTH_SOCK"
             `Quick test_git_creds_skips_missing_ssh_auth_sock;
           Alcotest.test_case
@@ -2057,5 +2105,9 @@ let () =
             "gh --repo api misuse uses shell semantics"
             `Quick
             test_gh_repo_api_misuse_uses_shell_semantics;
+          Alcotest.test_case
+            "history cmd_prefix uses shell semantics"
+            `Quick
+            test_cmd_prefix_uses_shell_semantics;
         ] );
     ]

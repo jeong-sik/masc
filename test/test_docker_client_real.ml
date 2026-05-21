@@ -25,7 +25,11 @@ let eio_test_case name speed f =
 
 let sample_plan () =
   match
-    Keeper_sandbox_oneshot_plan.of_request ~turn_id:1 ~attempt:0 ~meta_name:"alice" ~cmd:"echo hi"
+    Keeper_sandbox_oneshot_plan.of_request
+      ~turn_id:1
+      ~attempt:0
+      ~meta_name:"alice"
+      ~command_argv:[ "echo"; "hi" ]
   with
   | Ok p -> p
   | Error _ -> failwith "test fixture"
@@ -75,7 +79,7 @@ let sample_session_plan () =
 (* ── Each S function returns the typed placeholder ──────────── *)
 
 (* Phase 3b-iv.2.3 — run is no longer a placeholder. It spawns
-   [docker run --rm --name <name> <image> sh -lc <cmd>]. Same typed
+   [docker run --rm --name <name> <image> <command_argv>]. Same typed
    contract as [exec]: either [Ok exec_result] (daemon present) or
    [Error Daemon_unreachable] (daemon / CLI missing). No other
    [sandbox_error] variant is semantically valid for [run]. *)
@@ -92,14 +96,19 @@ let test_run_returns_typed_result () =
 ;;
 
 (* Phase 3b-iv.2.2 — exec is no longer a placeholder. It spawns
-   [docker exec <container> sh -lc <cmd>]. The test environment may
+   [docker exec <container> <command_argv>]. The test environment may
    or may not have a docker daemon, so we only assert the *typed*
    contract: either [Ok exec_result] (daemon present, command ran
    inside container even if it failed) or [Error Daemon_unreachable]
    (no daemon / CLI missing). Other [sandbox_error] variants are
    semantically out of scope for [exec] and must NOT surface. *)
 let test_exec_returns_typed_result () =
-  match Keeper_docker_client_real.exec ~container:(sample_container ()) ~cmd:"echo hi" () with
+  match
+    Keeper_docker_client_real.exec
+      ~container:(sample_container ())
+      ~command_argv:[ "echo"; "hi" ]
+      ()
+  with
   | Ok _ -> () (* daemon present *)
   | Error Keeper_docker_client.Daemon_unreachable -> () (* daemon / CLI missing *)
   | Error Keeper_docker_client.Cleanup_failed
@@ -120,8 +129,8 @@ let test_exec_argv_plain () =
   check
     (list string)
     "no user, no workdir"
-    [ "docker"; "exec"; Keeper_container_name.to_string c; "sh"; "-lc"; "ls -la" ]
-    (Keeper_docker_client_real.exec_argv ~container:c ~cmd:"ls -la" ())
+    [ "docker"; "exec"; Keeper_container_name.to_string c; "ls"; "-la" ]
+    (Keeper_docker_client_real.exec_argv ~container:c ~command_argv:[ "ls"; "-la" ] ())
 ;;
 
 let test_exec_argv_user_only () =
@@ -134,11 +143,13 @@ let test_exec_argv_user_only () =
     ; "--user"
     ; "1000:1000"
     ; Keeper_container_name.to_string c
-    ; "sh"
-    ; "-lc"
     ; "id"
     ]
-    (Keeper_docker_client_real.exec_argv ~user:(1000, 1000) ~container:c ~cmd:"id" ())
+    (Keeper_docker_client_real.exec_argv
+       ~user:(1000, 1000)
+       ~container:c
+       ~command_argv:[ "id" ]
+       ())
 ;;
 
 let test_exec_argv_workdir_only () =
@@ -146,8 +157,12 @@ let test_exec_argv_workdir_only () =
   check
     (list string)
     "workdir only → -w <dir>"
-    [ "docker"; "exec"; "-w"; "/work"; Keeper_container_name.to_string c; "sh"; "-lc"; "pwd" ]
-    (Keeper_docker_client_real.exec_argv ~workdir:"/work" ~container:c ~cmd:"pwd" ())
+    [ "docker"; "exec"; "-w"; "/work"; Keeper_container_name.to_string c; "pwd" ]
+    (Keeper_docker_client_real.exec_argv
+       ~workdir:"/work"
+       ~container:c
+       ~command_argv:[ "pwd" ]
+       ())
 ;;
 
 let test_exec_argv_user_and_workdir () =
@@ -162,15 +177,13 @@ let test_exec_argv_user_and_workdir () =
     ; "-w"
     ; "/work"
     ; Keeper_container_name.to_string c
-    ; "sh"
-    ; "-lc"
     ; "whoami"
     ]
     (Keeper_docker_client_real.exec_argv
        ~user:(1000, 1000)
        ~workdir:"/work"
        ~container:c
-       ~cmd:"whoami"
+       ~command_argv:[ "whoami" ]
        ())
 ;;
 
@@ -186,23 +199,29 @@ let test_exec_argv_stdin_only_emits_dash_i () =
     ; "exec"
     ; "-i"
     ; Keeper_container_name.to_string c
-    ; "sh"
-    ; "-lc"
-    ; "cat > /tmp/x"
+    ; "cat"
     ]
-    (Keeper_docker_client_real.exec_argv ~stdin:true ~container:c ~cmd:"cat > /tmp/x" ())
+    (Keeper_docker_client_real.exec_argv
+       ~stdin:true
+       ~container:c
+       ~command_argv:[ "cat" ]
+       ())
 ;;
 
 let test_exec_argv_stdin_false_omits_dash_i () =
   let c = sample_container () in
   let argv =
-    Keeper_docker_client_real.exec_argv ~stdin:false ~container:c ~cmd:"echo hi" ()
+    Keeper_docker_client_real.exec_argv
+      ~stdin:false
+      ~container:c
+      ~command_argv:[ "echo"; "hi" ]
+      ()
   in
   check bool "stdin=false ⇒ no -i" false (List.mem "-i" argv);
   check
     (list string)
     "stdin=false matches the plain shape"
-    [ "docker"; "exec"; Keeper_container_name.to_string c; "sh"; "-lc"; "echo hi" ]
+    [ "docker"; "exec"; Keeper_container_name.to_string c; "echo"; "hi" ]
     argv
 ;;
 
@@ -219,16 +238,15 @@ let test_exec_argv_user_workdir_stdin_full_order () =
     ; "/work"
     ; "-i"
     ; Keeper_container_name.to_string c
-    ; "sh"
-    ; "-lc"
-    ; "tee /tmp/x"
+    ; "tee"
+    ; "/tmp/x"
     ]
     (Keeper_docker_client_real.exec_argv
        ~user:(1000, 1000)
        ~workdir:"/work"
        ~stdin:true
        ~container:c
-       ~cmd:"tee /tmp/x"
+       ~command_argv:[ "tee"; "/tmp/x" ]
        ())
 ;;
 
@@ -236,7 +254,9 @@ let test_exec_argv_stdin_default_is_false () =
   (* Omitting [?stdin] altogether is the same as [~stdin:false]: the
      default is "no -i", because most exec calls don't pipe stdin. *)
   let c = sample_container () in
-  let argv = Keeper_docker_client_real.exec_argv ~container:c ~cmd:"echo hi" () in
+  let argv =
+    Keeper_docker_client_real.exec_argv ~container:c ~command_argv:[ "echo"; "hi" ] ()
+  in
   check bool "no ?stdin ⇒ no -i" false (List.mem "-i" argv)
 ;;
 
@@ -419,13 +439,10 @@ let test_run_detached_argv_shape () =
   List.iter
     (fun m -> check bool (Printf.sprintf "mount %S present as -v arg" m) true (List.mem m argv))
     (Keeper_sandbox_session_plan.mounts plan);
-  check bool "ends with [image; sh; -lc; startup_command]" true
+  check bool "ends with [image] + startup_argv" true
     (ends_with
-       [ Keeper_sandbox_session_plan.image plan
-       ; "sh"
-       ; "-lc"
-       ; Keeper_sandbox_session_plan.startup_command plan
-       ]
+       (Keeper_sandbox_session_plan.image plan
+        :: Keeper_sandbox_session_plan.startup_argv plan)
        argv)
 ;;
 

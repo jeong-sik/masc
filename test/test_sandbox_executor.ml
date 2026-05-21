@@ -18,7 +18,7 @@ let sample_plan ?(turn_id = 1) ?(meta_name = "alice") () =
       ~turn_id
       ~attempt:0
       ~meta_name
-      ~cmd:"echo hi"
+      ~command_argv:[ "echo"; "hi" ]
   with
   | Ok p -> p
   | Error _ -> failwith "test fixture"

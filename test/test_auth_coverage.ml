@@ -637,41 +637,6 @@ let test_permission_for_tool_operator_confirm () =
   | Some Masc_domain.CanBroadcast -> ()
   | _ -> fail "expected CanBroadcast"
 
-let test_permission_for_tool_autoresearch_status () =
-  match Auth.permission_for_tool "masc_autoresearch_status" with
-  | Some Masc_domain.CanReadState -> ()
-  | _ -> fail "expected CanReadState"
-
-let test_permission_for_tool_autoresearch_start () =
-  match Auth.permission_for_tool "masc_autoresearch_start" with
-  | Some Masc_domain.CanAdmin -> ()
-  | _ -> fail "expected CanAdmin"
-
-let test_permission_for_tool_autoresearch_record_finding () =
-  match Auth.permission_for_tool "masc_autoresearch_record_finding" with
-  | Some Masc_domain.CanAdmin -> ()
-  | _ -> fail "expected CanAdmin"
-
-let test_permission_for_tool_autoresearch_search_findings () =
-  match Auth.permission_for_tool "masc_autoresearch_search_findings" with
-  | Some Masc_domain.CanReadState -> ()
-  | _ -> fail "expected CanReadState"
-
-let test_permission_for_tool_autoresearch_cycle () =
-  match Auth.permission_for_tool "masc_autoresearch_cycle" with
-  | Some Masc_domain.CanAdmin -> ()
-  | _ -> fail "expected CanAdmin"
-
-let test_permission_for_tool_autoresearch_inject () =
-  match Auth.permission_for_tool "masc_autoresearch_inject" with
-  | Some Masc_domain.CanAdmin -> ()
-  | _ -> fail "expected CanAdmin"
-
-let test_permission_for_tool_autoresearch_stop () =
-  match Auth.permission_for_tool "masc_autoresearch_stop" with
-  | Some Masc_domain.CanAdmin -> ()
-  | _ -> fail "expected CanAdmin"
-
 let test_permission_for_tool_keeper_create_from_persona () =
   match Auth.permission_for_tool "masc_keeper_create_from_persona" with
   | Some Masc_domain.CanBroadcast -> ()
@@ -1152,20 +1117,6 @@ let () =
       test_case "surface_audit" `Quick test_permission_for_tool_surface_audit;
       test_case "operator_action" `Quick test_permission_for_tool_operator_action;
       test_case "operator_confirm" `Quick test_permission_for_tool_operator_confirm;
-      test_case "autoresearch_status" `Quick
-        test_permission_for_tool_autoresearch_status;
-      test_case "autoresearch_start" `Quick
-        test_permission_for_tool_autoresearch_start;
-      test_case "autoresearch_record_finding" `Quick
-        test_permission_for_tool_autoresearch_record_finding;
-      test_case "autoresearch_search_findings" `Quick
-        test_permission_for_tool_autoresearch_search_findings;
-      test_case "autoresearch_cycle" `Quick
-        test_permission_for_tool_autoresearch_cycle;
-      test_case "autoresearch_inject" `Quick
-        test_permission_for_tool_autoresearch_inject;
-      test_case "autoresearch_stop" `Quick
-        test_permission_for_tool_autoresearch_stop;
       test_case "keeper_create_from_persona" `Quick
         test_permission_for_tool_keeper_create_from_persona;
       test_case "set_param" `Quick test_permission_for_tool_set_param;

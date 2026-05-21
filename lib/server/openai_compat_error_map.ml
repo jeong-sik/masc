@@ -133,7 +133,7 @@ let of_provider_error (e : Agent_sdk.Error.provider_error) : t =
     ; openai_code =
         Some
           (Printf.sprintf
-             "provider_capacity_exhausted:%s"
+             "provider_capacity_backpressure:%s"
              (Llm_provider.Error.capacity_scope_to_string r.scope))
     ; message }
   | AuthError _ ->

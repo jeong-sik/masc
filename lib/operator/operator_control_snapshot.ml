@@ -711,125 +711,7 @@ let keepers_json
   `Assoc [ "count", `Int (List.length rows); "items", `List rows ]
 ;;
 
-let persistent_agents_json ?keeper_names ?keeper_rows config =
-  let rows_from_keeper_rows names rows =
-    let wanted = List.sort_uniq String.compare names in
-    let wanted_tbl = Hashtbl.create (List.length wanted) in
-    List.iter (fun name -> Hashtbl.replace wanted_tbl name ()) wanted;
-    rows
-    |> List.filter_map (function
-      | `Assoc fields ->
-        (match List.assoc_opt "name" fields with
-         | Some (`String name) when Hashtbl.mem wanted_tbl name ->
-           let field_or_null key =
-             match List.assoc_opt key fields with
-             | Some value -> value
-             | None -> `Null
-           in
-           Some
-             (`Assoc
-                 [ "runtime_class", `String "keeper"
-                 ; "name", field_or_null "name"
-                 ; "agent_name", field_or_null "agent_name"
-                 ; "trace_id", field_or_null "trace_id"
-                 ; "goal", field_or_null "goal"
-                 ; "short_goal", field_or_null "short_goal"
-                 ; "mid_goal", field_or_null "mid_goal"
-                 ; "long_goal", field_or_null "long_goal"
-                 ; "status", field_or_null "status"
-                 ; "generation", field_or_null "generation"
-                 ; "turn_count", field_or_null "turn_count"
-                 ; "context_ratio", field_or_null "context_ratio"
-                 ; "context_tokens", field_or_null "context_tokens"
-                 ; "context_max", field_or_null "context_max"
-                 ; "context_source", field_or_null "context_source"
-                 ; "last_model_used", field_or_null "last_model_used"
-                 ; "active_model", field_or_null "active_model"
-                 ; "active_model_label", field_or_null "active_model_label"
-                 ; "last_model_used_label", field_or_null "last_model_used_label"
-                 ; "cascade_name", field_or_null "cascade_name"
-                 ; "cascade_canonical", field_or_null "cascade_canonical"
-                 ; ( "selected_cascade_canonical"
-                   , field_or_null "selected_cascade_canonical" )
-                 ; "primary_model", field_or_null "primary_model"
-                 ; "next_model_hint", field_or_null "next_model_hint"
-                 ; "active_goal_ids", field_or_null "active_goal_ids"
-                 ; "last_autonomous_action_at", field_or_null "last_autonomous_action_at"
-                 ; "autonomous_action_count", field_or_null "autonomous_action_count"
-                 ; "updated_at", field_or_null "updated_at"
-                 ; "created_at", field_or_null "created_at"
-                 ])
-         | _ -> None)
-      | _ -> None)
-  in
-  let rows =
-    match keeper_rows with
-    | Some rows ->
-      let names =
-        match keeper_names with
-        | Some names -> names
-        | None -> Keeper_types.persistent_agent_names config
-      in
-      rows_from_keeper_rows names rows
-    | None ->
-      let names =
-        match keeper_names with
-        | Some names -> names
-        | None -> Keeper_types.persistent_agent_names config
-      in
-      List.filter_map
-        (fun name ->
-           match Keeper_types.read_meta config name with
-           | Error _ | Ok None -> None
-           | Ok (Some meta) ->
-             let agent_json =
-               let cache_key = "kas:" ^ meta.agent_name in
-               Dashboard_cache.get_or_compute cache_key ~ttl:2.0 (fun () ->
-                 Keeper_exec_status.parse_agent_status config ~agent_name:meta.agent_name)
-             in
-             let agent_status =
-               match agent_json with
-               | `Assoc _ ->
-                 (match agent_json |> U.member "status" with
-                  | `String status -> status
-                  | _ -> "unknown")
-               | _ -> "unknown"
-             in
-             let context_snapshot = keeper_context_snapshot_of_meta config meta in
-             Some
-               (`Assoc
-                   ([ "runtime_class", `String "keeper"
-                    ; "name", `String meta.name
-                    ; "agent_name", `String meta.agent_name
-                    ; ( "trace_id"
-                      , `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id) )
-                    ; "goal", `String meta.goal
-                    ; "short_goal", `String meta.short_goal
-                    ; "mid_goal", `String meta.mid_goal
-                    ; "long_goal", `String meta.long_goal
-                    ; "status", `String agent_status
-                    ; "generation", `Int meta.runtime.generation
-                    ; "turn_count", `Int meta.runtime.usage.total_turns
-                    ; "last_model_used", `Null
-                    ; "active_model", `Null
-                    ; "next_model_hint", `Null
-                    ; ( "active_goal_ids"
-                      , `List
-                          (List.map (fun goal_id -> `String goal_id) meta.active_goal_ids)
-                      )
-                    ; ( "last_autonomous_action_at"
-                      , if String.trim meta.runtime.last_autonomous_action_at = ""
-                        then `Null
-                        else `String meta.runtime.last_autonomous_action_at )
-                    ; "autonomous_action_count", `Int meta.runtime.autonomous_action_count
-                    ; "updated_at", `String meta.updated_at
-                    ; "created_at", `String meta.created_at
-                    ]
-                    @ keeper_context_snapshot_fields context_snapshot)))
-        names
-  in
-  `Assoc [ "count", `Int (List.length rows); "items", `List rows ]
-;;
+let persistent_agents_json = Operator_control_snapshot_persistent_agents.persistent_agents_json
 
 let _snapshot_session_window_seconds () =
   Dashboard_http_helpers.operator_snapshot_session_window_seconds ()
@@ -843,79 +725,21 @@ let _snapshot_recent_completed_limit () =
 
 (* sessions_json removed — team session cleanup. Sessions always return []. *)
 
-let room_json config =
-  let initialized = Coord.is_initialized config in
-  if not initialized
-  then
-    `Assoc
-      [ "initialized", `Bool false
-      ; "project", `String (Filename.basename config.base_path)
-      ]
-  else (
-    let state = Coord.read_state config in
-    let tempo = Tempo.get_tempo config in
-    let tasks = Coord.get_tasks_raw config in
-    let agents = Coord.get_agents_raw config in
-    `Assoc
-      [ "initialized", `Bool true
-      ; "cluster", `String (Env_config_core.cluster_name ())
-      ; "project", `String state.project
-      ; "paused", `Bool state.paused
-      ; "pause_reason", string_option_to_json state.pause_reason
-      ; "paused_by", string_option_to_json state.paused_by
-      ; "paused_at", string_option_to_json state.paused_at
-      ; "tempo_interval_s", `Float tempo.current_interval_s
-      ; "agent_count", `Int (List.length agents)
-      ; "task_count", `Int (List.length tasks)
-      ; "message_seq", `Int state.message_seq
-      ])
-;;
+let room_json = Operator_control_snapshot_room.room_json
 
-type snapshot_view =
+(* snapshot_view variant + parser extracted to
+   [Operator_control_snapshot_view] (godfile decomp). *)
+type snapshot_view = Operator_control_snapshot_view.snapshot_view =
   | Summary
   | Sessions
   | Keepers
   | Messages
   | Full
 
-(* Issue #8471: Variant SSOT for [snapshot_view]. Adding a constructor
-   forces [snapshot_view_to_string] exhaustiveness AND extends
-   [valid_snapshot_view_strings]; the schema in [tool_operator.ml]
-   derives its enum from this list, so a new constructor flows
-   through automatically instead of silently dropping (as [Sessions]
-   did before this fix). *)
-let snapshot_view_to_string = function
-  | Summary -> "summary"
-  | Sessions -> "sessions"
-  | Keepers -> "keepers"
-  | Messages -> "messages"
-  | Full -> "full"
-;;
-
-let all_snapshot_views = [ Summary; Sessions; Keepers; Messages; Full ]
-let valid_snapshot_view_strings = List.map snapshot_view_to_string all_snapshot_views
-
-(* Sound partial parser — Some for canonical strings, None otherwise.
-   [parse_snapshot_view] below intentionally falls back to [Full] for
-   tool/HTTP back-compat; this opt variant exists for callers that
-   want to distinguish unknown input. *)
-let snapshot_view_of_string_opt raw =
-  match String.trim raw |> String.lowercase_ascii with
-  | "summary" -> Some Summary
-  | "sessions" -> Some Sessions
-  | "keepers" -> Some Keepers
-  | "messages" -> Some Messages
-  | "full" -> Some Full
-  | _ -> None
-;;
-
-let parse_snapshot_view = function
-  | Some raw ->
-    (match snapshot_view_of_string_opt raw with
-     | Some v -> v
-     | None -> Full)
-  | None -> Full
-;;
+let snapshot_view_to_string = Operator_control_snapshot_view.snapshot_view_to_string
+let valid_snapshot_view_strings = Operator_control_snapshot_view.valid_snapshot_view_strings
+let snapshot_view_of_string_opt = Operator_control_snapshot_view.snapshot_view_of_string_opt
+let parse_snapshot_view = Operator_control_snapshot_view.parse_snapshot_view
 
 (* Snapshot TTL cache with same-key deduplication (singleflight).
    When multiple fibers hit a cache miss for the same key concurrently,

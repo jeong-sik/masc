@@ -740,16 +740,18 @@ let run
       error_response;
     Log.Misc.error "oas_worker %s: execution exception: %s\nBacktrace: %s"
       config.name (Printexc.to_string exn) bt;
-    (* RFC-0159 Phase A: route via typed [Internal_unhandled_exception]
-       so the classifier can bucket the event under the typed kind
-       instead of falling through to [Reason_internal_error]. *)
-    Error
-      (Cascade_error_classify.sdk_error_of_masc_internal_error
-         (Cascade_error_classify.Internal_unhandled_exception
-            {
-              site = "cascade_runner.execute";
-              exn_repr = Printexc.to_string exn;
-            })))
+    (* Keep the typed internal-error envelope, but construct it locally so
+       Cascade_runner does not depend on Cascade_error_classify. *)
+    let typed_internal_error =
+      "[masc_oas_error] "
+      ^ Yojson.Safe.to_string
+          (`Assoc
+            [ "kind", `String "internal_unhandled_exception"
+            ; "site", `String "cascade_runner.execute"
+            ; "exn_repr", `String (Printexc.to_string exn)
+            ])
+    in
+    Error (Agent_sdk.Error.Internal typed_internal_error))
 
 (* ================================================================ *)
 (* Convenience: run_with_masc_tools                                  *)

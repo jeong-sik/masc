@@ -35,7 +35,7 @@ val inject_run
 
 val inject_exec
   :  container:Keeper_container_name.t
-  -> cmd:string
+  -> command_argv:string list
   -> (Keeper_docker_response.exec_result, Keeper_docker_client.sandbox_error) result
   -> unit
 

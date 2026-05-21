@@ -166,11 +166,11 @@ let handle_keeper_bash_typed
               with
               | Error e -> Error e
               | Ok () ->
-                Worker_dev_tools.validate_command_paths
+                Worker_dev_tools.validate_shell_ir_paths
                   ~keeper_id:meta.name
                   ~base_path:root
                   ~workdir:cwd
-                  cmd
+                  ir
             in
             (match path_validation with
              | Error e -> error_json ~fields:[ "blocked_cmd", `String cmd_for_log ] e
@@ -229,7 +229,7 @@ let handle_keeper_bash
   =
   let timeout_sec =
     Keeper_shell_shared.clamp_shell_timeout
-      ~min_sec:Keeper_shell_shared.keeper_bash_native_min_timeout_sec
+      ~min_sec:(Keeper_shell_shared.keeper_bash_min_timeout_sec_for_args args)
       ~default:Keeper_shell_shared.io_timeout_sec
       args
   in

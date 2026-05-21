@@ -282,12 +282,12 @@
   keeper_hooks_oas_cost_events
   keeper_hooks_oas_idle
   keeper_hooks_oas_pr_metrics
+  keeper_hooks_oas_introspection
   keeper_tools_oas_markers
   autoresearch_codegen
   autoresearch_knowledge
   autoresearch_lineage
   tool_autoresearch_context
-  tool_autoresearch_schemas
   tool_autoresearch_registry
   tool_autoresearch_broadcast
   tool_autoresearch_cycle

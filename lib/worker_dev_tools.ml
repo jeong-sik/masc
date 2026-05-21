@@ -5,8 +5,8 @@
     file modifications).
 
     file_read/file_write use OCaml stdlib (no Eio filesystem capability needed).
-    shell_exec validates commands locally and routes execution through
-    Exec_gate.
+    shell_exec validates commands locally with the Shell IR gate and routes
+    supported commands through Shell IR dispatch.
 
     Safety classification helpers are defined in [Shell_safety_types]
     and re-exported here for backward compat. *)
@@ -120,7 +120,7 @@ let command_blocked_hint ?allowed_commands name =
     | "ssh" | "scp" | "rsync" | "ftp" | "sftp" | "nc" ->
       Printf.sprintf
         " '%s' is a network primitive and is not permitted. Keeper network access goes \
-         through masc_web_search, masc_web_fetch, or masc_autoresearch_* tools."
+         through masc_web_search or masc_web_fetch tools."
         name
     | _ when looks_like_source_code name ->
       " This looks like source code, not a shell command — use masc_code_edit / \
@@ -192,12 +192,12 @@ let validate_command_name_with_allowlist ~allowed_commands = function
 ;;
 
 let strict_allowlist_policy ~allowed_commands : Exec_shell_gate.allowlist_policy =
-  { allowed_commands; allow_pipes = false; redirect_allowed = false }
+  { allowed_commands; allow_pipes = false }
 ;;
 
 let coding_allowlist_policy ?(allow_pipes = true) ~allowed_commands ()
   : Exec_shell_gate.allowlist_policy =
-  { allowed_commands; allow_pipes; redirect_allowed = false }
+  { allowed_commands; allow_pipes }
 ;;
 
 let rec shell_ir_literal_text = function
@@ -316,7 +316,7 @@ let block_reason_of_exec_too_complex
       | `Unknown_construct _ ) -> Injection
 ;;
 
-let validate_command_with_allowlist ?caller ~allowed_commands cmd =
+let command_context_with_allowlist ?caller ~allowed_commands cmd =
   let trimmed = String.trim cmd in
   if trimmed = ""
   then Error Empty_command
@@ -334,13 +334,18 @@ let validate_command_with_allowlist ?caller ~allowed_commands cmd =
     | Allow context ->
       if context.Exec_shell_gate.direct_dune_seen
       then Error Direct_dune_invocation
-      else Ok ()
+      else Ok context
     | Reject { context; reason; _ } ->
       if context.Exec_shell_gate.direct_dune_seen
       then Error Direct_dune_invocation
       else Error (block_reason_of_exec_reject reason)
     | Cannot_parse _ -> Error Chain_or_redirect
     | Too_complex { reason } -> Error (block_reason_of_exec_too_complex reason))
+;;
+
+let validate_command_with_allowlist ?caller ~allowed_commands cmd =
+  command_context_with_allowlist ?caller ~allowed_commands cmd
+  |> Result.map (fun _ -> ())
 ;;
 
 let validate_command ?caller cmd =
@@ -369,7 +374,7 @@ let record_exec_shell_gate ?caller verdict =
       ~verdict:(legendary_verdict_of_exec verdict)
 ;;
 
-let validate_command_coding_with_allowlist
+let command_context_coding_with_allowlist
       ?caller
       ?(allow_pipes = true)
       ~(allowed_commands : string list)
@@ -393,7 +398,10 @@ let validate_command_coding_with_allowlist
     | Allow context ->
       if context.Exec_shell_gate.direct_dune_seen
       then Error Direct_dune_invocation
-      else validate_wrapped_stages ~allowed_commands context.Exec_shell_gate.ast
+      else (
+        match validate_wrapped_stages ~allowed_commands context.Exec_shell_gate.ast with
+        | Ok () -> Ok context
+        | Error _ as err -> err)
     | Reject { context; reason; _ } ->
       (match reason with
        | Pipes_not_allowed _ -> Error Pipes_not_allowed
@@ -402,6 +410,15 @@ let validate_command_coding_with_allowlist
        | _ -> Error (block_reason_of_exec_reject reason))
     | Cannot_parse _ -> Error Injection
     | Too_complex { reason } -> Error (block_reason_of_exec_too_complex reason))
+;;
+
+let validate_command_coding_with_allowlist ?caller ?allow_pipes ~allowed_commands cmd =
+  command_context_coding_with_allowlist
+    ?caller
+    ?allow_pipes
+    ~allowed_commands
+    cmd
+  |> Result.map (fun _ -> ())
 ;;
 
 (** Relaxed command validation for Coding/Full preset keepers.
@@ -747,7 +764,7 @@ let existing_dir_path_values cmd =
   | Masc_exec.Parsed.Too_complex _ -> []
 ;;
 
-let validate_command_paths ?keeper_id ?base_path ?workdir cmd =
+let validate_shell_ir_paths ?keeper_id ?base_path ?workdir shell_ir =
   match workdir with
   | None -> Ok ()
   | Some _ ->
@@ -837,11 +854,16 @@ let validate_command_paths ?keeper_id ?base_path ?workdir cmd =
           in
           loop stages
       in
-      (match Masc_exec_bash_parser.Bash.parse_string cmd with
-       | Masc_exec.Parsed.Parsed shell_ir -> validate_parsed_shell_ir shell_ir
-       | Masc_exec.Parsed.Parse_error _
-       | Masc_exec.Parsed.Parse_aborted _
-       | Masc_exec.Parsed.Too_complex _ -> Ok ())
+      validate_parsed_shell_ir shell_ir
+;;
+
+let validate_command_paths ?keeper_id ?base_path ?workdir cmd =
+  match Masc_exec_bash_parser.Bash.parse_string cmd with
+  | Masc_exec.Parsed.Parsed shell_ir ->
+    validate_shell_ir_paths ?keeper_id ?base_path ?workdir shell_ir
+  | Masc_exec.Parsed.Parse_error _
+  | Masc_exec.Parsed.Parse_aborted _
+  | Masc_exec.Parsed.Too_complex _ -> Ok ()
 ;;
 
 (** Check if a command performs write/mutating operations.
@@ -1106,6 +1128,94 @@ let attribution_of_validation ~cmd (result : (unit, block_reason) result) : Attr
       ~reason:(block_reason_to_string br)
 ;;
 
+let shell_ir_with_default_cwd cwd ir =
+  match cwd with
+  | None -> ir
+  | Some dir ->
+    let default_cwd = Masc_exec.Path_scope.classify ~raw:dir ~cwd:dir in
+    let rec map_ir = function
+      | Masc_exec.Shell_ir.Simple simple ->
+        let simple =
+          match simple.cwd with
+          | Some _ -> simple
+          | None -> { simple with cwd = Some default_cwd }
+        in
+        Masc_exec.Shell_ir.Simple simple
+      | Masc_exec.Shell_ir.Pipeline stages ->
+        Masc_exec.Shell_ir.Pipeline (List.map map_ir stages)
+    in
+    map_ir ir
+;;
+
+let output_for_dispatch_status ~(status : Unix.process_status) ~stdout ~stderr =
+  match status with
+  | Unix.WEXITED 0 -> stdout
+  | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> (
+    match stdout, stderr with
+    | "", err -> err
+    | out, "" -> out
+    | out, err -> out ^ "\n" ^ err)
+;;
+
+let simple_literal_argv (simple : Masc_exec.Shell_ir.simple) =
+  match simple_literal_args simple with
+  | None -> None
+  | Some args -> Some (Masc_exec.Bin.to_string simple.Masc_exec.Shell_ir.bin :: args)
+;;
+
+let has_flag_prefix ~prefix args =
+  List.exists (fun arg -> String.length arg >= String.length prefix
+                          && String.sub arg 0 (String.length prefix) = prefix)
+    args
+;;
+
+let is_recursive_scan_command bin args =
+  match bin with
+  | "find" -> true
+  | "rg" -> true
+  | "grep" ->
+    List.exists
+      (fun arg ->
+         String.length arg >= 2
+         && arg.[0] = '-'
+         && (String.contains arg 'r' || String.contains arg 'R'))
+      args
+  | _ -> false
+;;
+
+let shell_exec_simple_timeout_floor (simple : Masc_exec.Shell_ir.simple) =
+  let bin = Masc_exec.Bin.to_string simple.Masc_exec.Shell_ir.bin in
+  match simple_literal_argv simple with
+  | None -> None
+  | Some (_ :: args) ->
+    if String.equal bin "git"
+       || String.equal bin "dune-local.sh"
+       || has_flag_prefix ~prefix:"scripts/dune-local.sh" (bin :: args)
+       || is_recursive_scan_command bin args
+    then Some Timeout_floor.Tool_dispatch
+    else None
+  | Some [] -> None
+;;
+
+let rec shell_exec_timeout_floor = function
+  | Masc_exec.Shell_ir.Simple simple -> shell_exec_simple_timeout_floor simple
+  | Masc_exec.Shell_ir.Pipeline stages ->
+    List.find_map shell_exec_timeout_floor stages
+;;
+
+let effective_shell_exec_timeout_sec_for_context ~requested context =
+  match shell_exec_timeout_floor context.Exec_shell_gate.ast with
+  | None -> requested
+  | Some floor -> Timeout_floor.clamp floor requested
+;;
+
+let effective_shell_exec_timeout_sec ~command ~requested =
+  let requested = Float.min 120.0 requested in
+  match command_context_with_allowlist ~allowed_commands:dev_allowed_commands command with
+  | Error _ -> requested
+  | Ok context -> effective_shell_exec_timeout_sec_for_context ~requested context
+;;
+
 let make_shell_exec_with_allowlist
       ~workdir
       ~on_exec
@@ -1134,9 +1244,12 @@ let make_shell_exec_with_allowlist
        match Worker_tool_input.extract_string "command" input with
        | Error e -> tool_error e
        | Ok command ->
-         let validation = validate_command_with_allowlist ~allowed_commands command in
+         let command_context =
+           command_context_with_allowlist ~allowed_commands command
+         in
+         let validation = Result.map (fun _ -> ()) command_context in
          Dashboard_attribution.record (attribution_of_validation ~cmd:command validation);
-         (match validation with
+         (match command_context with
           | Error reason ->
             (* #13078: emit [command_blocked] telemetry so observers
                see validation failures.  Without this, the .mli's
@@ -1155,13 +1268,17 @@ let make_shell_exec_with_allowlist
                    ())
               on_exec;
             tool_error (block_reason_to_string reason)
-          | Ok () ->
+          | Ok context ->
             let path_workdir =
               match workdir with
               | Some dir when String.trim dir <> "" -> dir
               | Some _ | None -> Sys.getcwd ()
             in
-            (match validate_command_paths ~workdir:path_workdir command with
+            (match
+               validate_shell_ir_paths
+                 ~workdir:path_workdir
+                 context.Exec_shell_gate.ast
+             with
              | Error message ->
                Option.iter
                  (fun (f : tool_exec_observer) ->
@@ -1175,114 +1292,120 @@ let make_shell_exec_with_allowlist
                  on_exec;
                tool_error message
              | Ok () ->
-              let timeout =
-                Worker_tool_input.extract_float "timeout_s" input
-                |> Option.value ~default:30.0
-                   (* DET-OK: fixed policy default for absent shell timeout. *)
-                |> Float.min 120.0
-              in
-              (try
-               let started = Time_compat.now () in
-               let record_result ?error_message result =
-                 let duration_ms =
-                   int_of_float ((Time_compat.now () -. started) *. 1000.0)
-                 in
-                 Option.iter
-                   (fun (f : tool_exec_observer) ->
-                      let success = Result.is_ok result in
-                      if success
-                      then f ~tool_name:"shell_exec" ~success:true ~duration_ms ()
-                      else
-                        f
-                          ~tool_name:"shell_exec"
-                          ~success:false
-                          ~duration_ms
-                          ~error_kind:Shell_error
-                          ?error_message
-                          ())
-                   on_exec;
-                 result
+               let timeout =
+                 Worker_tool_input.extract_float "timeout_s" input
+                 |> Option.value ~default:30.0
+                    (* DET-OK: fixed policy default for absent shell timeout. *)
+                 |> Float.min 120.0
+                 |> fun requested ->
+                 effective_shell_exec_timeout_sec_for_context ~requested context
                in
-               Tool_resource_gate.with_permit_raw
-                 ~clock
-                 ~tool_name:"shell_exec"
-                 ~arguments:input
-                 ~is_read_only:false
-                 ~on_reject:(fun message ->
-                   let message = "tool_resource_gate_saturated: " ^ message in
-                   record_result
-                     ~error_message:message
-                     (tool_error ~recoverable:true message))
-                 (fun () ->
-                    let cwd =
-                      match workdir with
-                      | Some dir when String.trim dir <> "" -> Some dir
-                      | Some _ | None -> None
+               (try
+                  let started = Time_compat.now () in
+                  let record_result ?error_message result =
+                    let duration_ms =
+                      int_of_float ((Time_compat.now () -. started) *. 1000.0)
                     in
-                    let argv = [ (Host_config.host ()).host_sh; "-c"; command ] in
-                    let raw_source =
-                      String.concat " " (List.map Filename.quote argv)
-                    in
-                    let result =
-                      try
-                        let status, output =
-                          Fd_accountant.with_slot ~kind:Sandbox_exec (fun () ->
-                            Masc_exec.Exec_gate.run_argv_with_status
-                              ~actor:`Tool_local_runtime
-                              ~raw_source
-                              ~summary:"worker shell_exec command execution"
-                              ~timeout_sec:timeout
-                              ?cwd
-                              argv)
-                        in
-                        match status with
-                        | Unix.WEXITED 0 -> Ok { Agent_sdk.Types.content = output }
-                        | Unix.WEXITED 124 ->
-                          tool_error
-                            ~recoverable:true
-                            (Printf.sprintf
-                               "Timeout after %.0fs: %s\n%s"
-                               timeout
-                               command
-                               output)
-                        | Unix.WEXITED code ->
-                          tool_error (Printf.sprintf "Exit code %d:\n%s" code output)
-                        | Unix.WSIGNALED sig_num ->
-                          tool_error
-                            ~recoverable:(sig_num = Sys.sigterm)
-                            (Printf.sprintf "Killed by signal %d:\n%s" sig_num output)
-                        | Unix.WSTOPPED sig_num ->
-                          tool_error
-                            ~recoverable:true
-                            (Printf.sprintf "Stopped by signal %d:\n%s" sig_num output)
-                      with
-                      | Eio.Time.Timeout ->
-                        tool_error
-                          ~recoverable:true
-                          (Printf.sprintf
-                             "Timeout after %.0fs: %s\n%s"
-                             timeout
-                             command
-                             "")
-                    in
-                    record_result result)
-             with
-             | Eio.Cancel.Cancelled _ as e -> raise e
-             | exn ->
-               let duration_ms = 0 in
-               let exn_msg = Printexc.to_string exn in
-               Option.iter
-                 (fun (f : tool_exec_observer) ->
-                    f
-                      ~tool_name:"shell_exec"
-                      ~success:false
-                      ~duration_ms
-                      ~error_kind:Shell_error
-                      ~error_message:exn_msg
-                      ())
-                 on_exec;
-               tool_error (Printf.sprintf "Command failed: %s" exn_msg))))
-            )
+                    Option.iter
+                      (fun (f : tool_exec_observer) ->
+                         let success = Result.is_ok result in
+                         if success
+                         then f ~tool_name:"shell_exec" ~success:true ~duration_ms ()
+                         else
+                           f
+                             ~tool_name:"shell_exec"
+                             ~success:false
+                             ~duration_ms
+                             ~error_kind:Shell_error
+                             ?error_message
+                             ())
+                      on_exec;
+                    result
+                  in
+                  Tool_resource_gate.with_permit_raw
+                    ~clock
+                    ~tool_name:"shell_exec"
+                    ~arguments:input
+                    ~is_read_only:false
+                    ~on_reject:(fun message ->
+                      let message = "tool_resource_gate_saturated: " ^ message in
+                      record_result
+                        ~error_message:message
+                        (tool_error ~recoverable:true message))
+                    (fun () ->
+                       let cwd =
+                         match workdir with
+                         | Some dir when String.trim dir <> "" -> Some dir
+                         | Some _ | None -> None
+                       in
+                       let result =
+                         try
+                           let dispatch_result =
+                             Fd_accountant.with_slot ~kind:Sandbox_exec (fun () ->
+                               let dispatch_ir =
+                                 shell_ir_with_default_cwd
+                                   cwd
+                                   context.Exec_shell_gate.ast
+                               in
+                               Masc_exec.Exec_dispatch.dispatch
+                                 ~timeout_sec:timeout
+                                 dispatch_ir)
+                           in
+                           let output =
+                             output_for_dispatch_status
+                               ~status:dispatch_result.status
+                               ~stdout:dispatch_result.stdout
+                               ~stderr:dispatch_result.stderr
+                           in
+                           match dispatch_result.status with
+                           | Unix.WEXITED 0 -> Ok { Agent_sdk.Types.content = output }
+                           | Unix.WEXITED 124 ->
+                             tool_error
+                               ~recoverable:true
+                               (Printf.sprintf
+                                  "Timeout after %.0fs: %s\n%s"
+                                  timeout
+                                  command
+                                  output)
+                           | Unix.WEXITED code ->
+                             tool_error (Printf.sprintf "Exit code %d:\n%s" code output)
+                           | Unix.WSIGNALED sig_num ->
+                             tool_error
+                               ~recoverable:(sig_num = Sys.sigterm)
+                               (Printf.sprintf
+                                  "Killed by signal %d:\n%s"
+                                  sig_num
+                                  output)
+                           | Unix.WSTOPPED sig_num ->
+                             tool_error
+                               ~recoverable:true
+                               (Printf.sprintf
+                                  "Stopped by signal %d:\n%s"
+                                  sig_num
+                                  output)
+                         with
+                         | Eio.Time.Timeout ->
+                           tool_error
+                             ~recoverable:true
+                             (Printf.sprintf "Timeout after %.0fs: %s\n%s" timeout command "")
+                       in
+                       record_result result)
+                with
+                | Eio.Cancel.Cancelled _ as e -> raise e
+                | exn ->
+                  let duration_ms = 0 in
+                  let exn_msg = Printexc.to_string exn in
+                  Option.iter
+                    (fun (f : tool_exec_observer) ->
+                       f
+                         ~tool_name:"shell_exec"
+                         ~success:false
+                         ~duration_ms
+                         ~error_kind:Shell_error
+                         ~error_message:exn_msg
+                         ())
+                    on_exec;
+                  tool_error (Printf.sprintf "Command failed: %s" exn_msg)))))
 ;;
 
 let make_shell_exec ~workdir ~on_exec ~proc_mgr ~clock =
@@ -1295,8 +1418,8 @@ let make_shell_exec ~workdir ~on_exec ~proc_mgr ~clock =
     ~description:
       "Execute a shell command and return stdout+stderr. Timeout: 30s default, max 120s. \
        Use for: running tests, git commands, build tools, directory listing. Unlike \
-       file_read (single file), this handles approved CLI operations. Commands run in \
-       /bin/sh but shell control syntax is rejected."
+       file_read (single file), this handles approved CLI operations. Supported commands \
+       run through Shell IR native dispatch; shell control syntax is rejected."
     ()
 ;;
 

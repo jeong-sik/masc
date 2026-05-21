@@ -287,10 +287,9 @@ type module_tag =
   | Mod_run
   | Mod_compact
   | Mod_agent | Mod_task | Mod_room
-  | Mod_control | Mod_agent_timeline | Mod_misc | Mod_suspend
+  | Mod_control | Mod_agent_timeline | Mod_misc
   | Mod_library | Mod_keeper
   | Mod_inline
-  | Mod_autoresearch
   | Mod_shard
 
 let static_tag_of_tool_name (tool : Tool_name.t) : module_tag option =
@@ -317,13 +316,6 @@ let static_tag_of_tool_name (tool : Tool_name.t) : module_tag option =
     | Agent_update
     | Agents
     | Get_metrics -> Some Mod_agent
-    | Autoresearch_cycle
-    | Autoresearch_inject
-    | Autoresearch_record_finding
-    | Autoresearch_search_findings
-    | Autoresearch_start
-    | Autoresearch_status
-    | Autoresearch_stop -> Some Mod_autoresearch
     | Board_cleanup
     | Board_comment
     | Board_comment_vote

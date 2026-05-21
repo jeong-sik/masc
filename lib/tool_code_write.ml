@@ -58,80 +58,64 @@ let allowed_shell_commands =
   List.fold_left add_unique Dev_exec_allowlist.dev
     [ "diff"; "patch"; "mkdir"; "ocamlfind"; "tsc" ]
 
-let code_shell_allowlist_policy
-      ?(allow_pipes = true)
-      ~(allowed_commands : string list)
-      ()
-  : Exec_shell_gate.allowlist_policy =
-  { allowed_commands; allow_pipes; redirect_allowed = false }
-;;
-
-let validate_code_shell_command_block_reason
-      ?(allow_pipes = true)
-      ~(allowed_commands : string list)
-      command
-  =
-  Worker_dev_tools.validate_command_coding_with_allowlist
+let code_shell_command_context command =
+  Worker_dev_tools.command_context_coding_with_allowlist
     ~caller:Exec_shell_gate.Tool_code_write
-    ~allow_pipes
-    ~allowed_commands
+    ~allow_pipes:true
+    ~allowed_commands:allowed_shell_commands
     command
 ;;
 
 let validate_code_shell_command (command : string) : (unit, string) Result.t =
-  validate_code_shell_command_block_reason
-    ~allow_pipes:true
-    ~allowed_commands:allowed_shell_commands
-    command
+  code_shell_command_context command
   |> Result.map_error
        (Worker_dev_tools.block_reason_to_string_with_allowlist
           ~allowed_commands:allowed_shell_commands)
+  |> Result.map (fun _ -> ())
 
 type code_shell_exit_status =
   | Shell_ok
   | Shell_ok_expected_nonzero of string
   | Shell_error
 
-(* RFC-0131 Phase 2 (Shell IR Promotion Goal, 2026-05-18) — the local
-   string-splitter fallback ([first_token_basename] +
-   [last_pipeline_segment]) was the last in-module shell splitter in
-   [tool_code_write].  It existed to keep exit classification working
-   when the Shell gate could not produce a typed AST.
-
-   Phase 2 explicitly removes that fallback: the exec facade is the only
-   parse path.  When the parser cannot lift the command, the last-stage
-   binary name is genuinely unknown — we conservatively fall through to
-   [Shell_error] instead of silently re-deriving a name from a different
-   splitter.  This matches Phase 2's rule "이 PR 이후
-   lib/tool_code_write.ml 에는 shell splitter가 없어야 한다" and the
-   Plan's separation of parse / validation / exec / classify error
-   classes. *)
-let exit_status_command_name command =
-  match
-    Exec_shell_gate.gate
-      ~caller:Exec_shell_gate.Tool_code_write
-      ~raw:command
-      ~allowlist:
-        (code_shell_allowlist_policy
-           ~allow_pipes:true
-           ~allowed_commands:allowed_shell_commands
-           ())
-      ~path_policy:Exec_shell_gate.allow_all_paths
-      ~sandbox:Exec_shell_gate.host_sandbox
-      ()
-  with
-  | Allow context -> Exec_shell_gate.last_stage_bin context
-  | Reject _ | Cannot_parse _ | Too_complex _ -> None
-
-let classify_code_shell_exit ~command code =
+let classify_code_shell_exit ~last_stage_bin code =
   match code with
   | 0 -> Shell_ok
   | 1 -> (
-      match exit_status_command_name command with
+      match last_stage_bin with
       | Some ("rg" | "grep") -> Shell_ok_expected_nonzero "no_matches"
       | Some "diff" -> Shell_ok_expected_nonzero "differences"
       | Some _ | None -> Shell_error)
   | _ -> Shell_error
+
+let shell_ir_with_default_cwd cwd ir =
+  match cwd with
+  | None -> ir
+  | Some dir ->
+    let default_cwd = Masc_exec.Path_scope.classify ~raw:dir ~cwd:dir in
+    let rec map_ir = function
+      | Masc_exec.Shell_ir.Simple simple ->
+        let simple =
+          match simple.cwd with
+          | Some _ -> simple
+          | None -> { simple with cwd = Some default_cwd }
+        in
+        Masc_exec.Shell_ir.Simple simple
+      | Masc_exec.Shell_ir.Pipeline stages ->
+        Masc_exec.Shell_ir.Pipeline (List.map map_ir stages)
+    in
+    map_ir ir
+;;
+
+let output_for_dispatch_status ~(status : Unix.process_status) ~stdout ~stderr =
+  match status with
+  | Unix.WEXITED 0 -> stdout
+  | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> (
+    match stdout, stderr with
+    | "", err -> err
+    | out, "" -> out
+    | out, err -> out ^ "\n" ^ err)
+;;
 
 let git_common_root path =
   try
@@ -731,12 +715,14 @@ let handle_code_shell ~tool_name ~start_time ctx args =
 
   if String.equal command "" then Tool_result.error ~tool_name ~start_time "command parameter required"
   else
-    match validate_code_shell_command command with
+    match code_shell_command_context command with
     | Error reason ->
         Tool_result.error ~tool_name ~start_time
           ~failure_class:(Some Tool_result.Workflow_rejection)
-          reason
-    | Ok () ->
+          (Worker_dev_tools.block_reason_to_string_with_allowlist
+             ~allowed_commands:allowed_shell_commands
+             reason)
+    | Ok command_context ->
         (* Validate cwd if provided *)
         let cwd_result =
           if String.equal cwd "" then Ok None
@@ -758,27 +744,39 @@ let handle_code_shell ~tool_name ~start_time ctx args =
                | Some dir -> dir
                | None -> Sys.getcwd ()
              in
-             match Worker_dev_tools.validate_command_paths ~workdir:path_workdir command with
-             | Error reason ->
-                 Tool_result.error ~tool_name ~start_time
-                   ~failure_class:(Some Tool_result.Policy_rejection)
-                   reason
-             | Ok () ->
-                 let full_cmd = [(Host_config.host ()).host_sh; "-c"; command] in
-                 match
-                   Masc_exec.Exec_gate.run_argv_with_status
-                     ~actor:`Tool_local_runtime
-                     ~raw_source:(String.concat " " full_cmd)
-                     ~summary:"shell command execution"
-                     ~timeout_sec:safe_timeout
-                     ?cwd:cwd_opt
-                     full_cmd
-                 with
-                 | Unix.WEXITED code, output ->
-                     let exit_status = classify_code_shell_exit ~command code in
-                     let response_fields =
-                       [
-                         ( "status",
+	             match
+	               Worker_dev_tools.validate_shell_ir_paths
+	                 ~workdir:path_workdir
+	                 command_context.Exec_shell_gate.ast
+	             with
+	             | Error reason ->
+	                 Tool_result.error ~tool_name ~start_time
+	                   ~failure_class:(Some Tool_result.Policy_rejection)
+	                   reason
+	             | Ok () ->
+	                 match
+	                   Masc_exec.Exec_dispatch.dispatch
+	                     ~timeout_sec:safe_timeout
+	                     (shell_ir_with_default_cwd
+	                        cwd_opt
+	                        command_context.Exec_shell_gate.ast)
+	                 with
+	                 | { status = Unix.WEXITED code; stdout; stderr } ->
+	                     let output =
+	                       output_for_dispatch_status
+	                         ~status:(Unix.WEXITED code)
+	                         ~stdout
+	                         ~stderr
+	                     in
+	                     let exit_status =
+	                       classify_code_shell_exit
+	                         ~last_stage_bin:
+	                           (Exec_shell_gate.last_stage_bin command_context)
+	                         code
+	                     in
+	                     let response_fields =
+	                       [
+	                         ( "status",
                            `String (match exit_status with Shell_error -> "error" | _ -> "ok") );
                          ("exit_code", `Int code);
                          ("output", `String (truncate_output output));
@@ -795,12 +793,33 @@ let handle_code_shell ~tool_name ~start_time ctx args =
                      (match exit_status with
                       | Shell_ok | Shell_ok_expected_nonzero _ ->
                           fun msg -> Tool_result.ok ~tool_name ~start_time msg
-                      | Shell_error ->
-                          fun msg -> Tool_result.error ~tool_name ~start_time msg)
-                       (Yojson.Safe.pretty_to_string response)
-                 | _, output ->
-                     Tool_result.error ~tool_name ~start_time
-                       (Printf.sprintf "Command failed: %s" (truncate_output output)))
+	                       | Shell_error ->
+	                           fun msg -> Tool_result.error ~tool_name ~start_time msg)
+	                       (Yojson.Safe.pretty_to_string response)
+	                 | { status = Unix.WSIGNALED sig_num; stdout; stderr } ->
+	                     let output =
+	                       output_for_dispatch_status
+	                         ~status:(Unix.WSIGNALED sig_num)
+	                         ~stdout
+	                         ~stderr
+	                     in
+	                     Tool_result.error ~tool_name ~start_time
+	                       (Printf.sprintf
+	                          "Killed by signal %d: %s"
+	                          sig_num
+	                          (truncate_output output))
+	                 | { status = Unix.WSTOPPED sig_num; stdout; stderr } ->
+	                     let output =
+	                       output_for_dispatch_status
+	                         ~status:(Unix.WSTOPPED sig_num)
+	                         ~stdout
+	                         ~stderr
+	                     in
+	                     Tool_result.error ~tool_name ~start_time
+	                       (Printf.sprintf
+	                          "Stopped by signal %d: %s"
+	                          sig_num
+	                          (truncate_output output)))
 
 (* Handler: masc_code_git — Git operations *)
 let code_git_route_fields (ctx : context) =

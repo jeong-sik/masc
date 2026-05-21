@@ -17,13 +17,13 @@ module KP = Masc_mcp.Keeper_prompt
    Filters on the canonical aggregation prefix written by F-3. *)
 let aggregated_warn_lines ~before_seq () =
   let entries =
-    Masc_log.Ring.recent ?since_seq:before_seq
+    Log.Ring.recent ?since_seq:before_seq
       ~module_filter:"Keeper" ~order:`Oldest_first ()
   in
   List.filter_map
-    (fun (entry : Masc_log.Ring.entry) ->
+    (fun (entry : Log.Ring.entry) ->
       match entry.level with
-      | Masc_log.Warn ->
+      | Log.Warn ->
           if
             String.length entry.message >= 1
             && (try
@@ -39,7 +39,7 @@ let aggregated_warn_lines ~before_seq () =
     entries
 
 let latest_seq () =
-  match Masc_log.Ring.recent ~limit:1 () with
+  match Log.Ring.recent ~limit:1 () with
   | [] -> None
   | entry :: _ -> Some entry.seq
 

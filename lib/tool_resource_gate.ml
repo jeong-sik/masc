@@ -346,11 +346,6 @@ let classify_masc_tool (tool : Tool_name.Masc.t) =
   | Tool_revoke
   | Transition
   | Update_priority -> Coordination_write
-  | Autoresearch_cycle
-  | Autoresearch_inject
-  | Autoresearch_record_finding
-  | Autoresearch_start
-  | Autoresearch_stop
   | Agent_update
   | Broadcast
   | Cleanup_zombies
@@ -365,8 +360,6 @@ let classify_masc_tool (tool : Tool_name.Masc.t) =
   | Agents
   | Approval_get
   | Approval_pending
-  | Autoresearch_search_findings
-  | Autoresearch_status
   | Board_curation_read
   | Board_get
   | Board_hearths

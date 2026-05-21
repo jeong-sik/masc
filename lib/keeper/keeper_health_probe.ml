@@ -79,7 +79,7 @@ let provider_runtime_pressure_class ~code ~detail ~http_status =
   else if
     contains "capacity_backpressure"
     || contains "capacity exhausted"
-    || contains "capacity_exhausted"
+    || contains "capacity backpressure"
     || contains "rate limit"
     || contains "rate_limited"
     || contains "overloaded"

@@ -88,7 +88,7 @@ let test_non_positive_retry_after_falls_back_to_synthetic () =
 let test_non_capacity_backpressure_returns_none () =
   (* A Provider.RateLimit error is distinct — it must NOT be subsumed
      by the new helper.  The two helpers
-     (capacity_exhausted_retry_after_s vs capacity_backpressure_retry_hint)
+     (capacity_backpressure_retry_after_s vs capacity_backpressure_retry_hint)
      target different sdk_error shapes and must remain orthogonal. *)
   let err =
     Agent_sdk.Error.Provider

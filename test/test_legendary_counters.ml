@@ -285,6 +285,78 @@ let test_auto_bg_promotion_rate_math () =
   check_ratio "promotion_rate = 0.4"
     ~expected:0.4 (Legendary_counters.auto_bg_promotion_rate s)
 
+let test_shell_gate_summary_math () =
+  Legendary_counters.reset ();
+  Legendary_counters.incr_shell_gate
+    ~caller:Legendary_counters.Worker_dev_tools
+    ~verdict:Legendary_counters.Allow;
+  Legendary_counters.incr_shell_gate
+    ~caller:Legendary_counters.Worker_dev_tools
+    ~verdict:Legendary_counters.Allow;
+  Legendary_counters.incr_shell_gate
+    ~caller:Legendary_counters.Worker_dev_tools
+    ~verdict:Legendary_counters.Reject;
+  Legendary_counters.incr_shell_gate
+    ~caller:Legendary_counters.Worker_dev_tools
+    ~verdict:Legendary_counters.Cannot_parse;
+  let summary =
+    Legendary_counters.shell_gate_summary
+      (Legendary_counters.snapshot ())
+      Legendary_counters.Worker_dev_tools
+  in
+  Alcotest.(check int) "total" 4 summary.total;
+  Alcotest.(check int) "allow" 2 summary.allow;
+  Alcotest.(check int) "reject" 1 summary.reject;
+  Alcotest.(check int) "cannot_parse" 1 summary.cannot_parse;
+  check_ratio "parse_coverage"
+    ~expected:0.75
+    summary.parse_coverage;
+  check_ratio "reject_ratio" ~expected:0.25 summary.reject_ratio
+
+let json_at path json =
+  List.fold_left
+    (fun acc key -> Yojson.Safe.Util.member key acc)
+    json
+    path
+
+let test_shell_gate_summary_json () =
+  Legendary_counters.reset ();
+  Legendary_counters.incr_shell_gate
+    ~caller:Legendary_counters.Tool_code_write
+    ~verdict:Legendary_counters.Allow;
+  Legendary_counters.incr_shell_gate
+    ~caller:Legendary_counters.Tool_code_write
+    ~verdict:Legendary_counters.Reject;
+  Legendary_counters.incr_shell_gate
+    ~caller:Legendary_counters.Keeper_shell_bash
+    ~verdict:Legendary_counters.Cannot_parse;
+  let json =
+    Legendary_counters.snapshot_to_json_with_ratios
+      (Legendary_counters.snapshot ())
+  in
+  Alcotest.(check int)
+    "tool_code_write total"
+    2
+    Yojson.Safe.Util.(json_at [ "shell_gate"; "tool_code_write"; "total" ] json |> to_int);
+  Alcotest.(check int)
+    "keeper_shell_bash cannot_parse"
+    1
+    Yojson.Safe.Util.(
+      json_at [ "shell_gate"; "keeper_shell_bash"; "cannot_parse" ] json
+      |> to_int);
+  check_ratio
+    "tool_code_write parse coverage"
+    ~expected:1.0
+    Yojson.Safe.Util.(
+      json_at [ "shell_gate"; "tool_code_write"; "parse_coverage" ] json
+      |> to_float);
+  check_ratio
+    "keeper_shell_bash reject ratio"
+    ~expected:0.0
+    Yojson.Safe.Util.(
+      json_at [ "shell_gate"; "keeper_shell_bash"; "reject_ratio" ] json
+      |> to_float)
+
 let () =
   Alcotest.run "legendary_counters"
     [
@@ -327,5 +399,12 @@ let () =
             test_snapshot_to_json_with_ratios_shape;
           Alcotest.test_case "JSON with ratios sibling (populated)" `Quick
             test_snapshot_to_json_with_ratios_populated;
+        ] );
+      ( "shell_gate_summary",
+        [
+          Alcotest.test_case "per-caller summary math" `Quick
+            test_shell_gate_summary_math;
+          Alcotest.test_case "JSON exposes per-caller summaries" `Quick
+            test_shell_gate_summary_json;
         ] );
     ]

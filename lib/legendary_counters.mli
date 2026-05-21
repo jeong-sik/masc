@@ -87,6 +87,15 @@ type shell_gate_verdict_kind =
   | Reject
   | Cannot_parse
 
+type shell_gate_summary = {
+  total : int;
+  allow : int;
+  reject : int;
+  cannot_parse : int;
+  parse_coverage : float;
+  reject_ratio : float;
+}
+
 val incr_shell_gate
   :  caller:shell_gate_caller
   -> verdict:shell_gate_verdict_kind
@@ -208,13 +217,28 @@ val auto_bg_promotion_rate : snapshot -> float
     [MASC_BASH_AUTO_BG] default-flip decision ("is promotion rare
     enough to be tolerable?"). *)
 
+val shell_gate_summary : snapshot -> shell_gate_caller -> shell_gate_summary
+(** Caller-specific rollup of the exec shell gate counters.
+
+    [parse_coverage] is [(allow + reject) / total], where
+    [cannot_parse] includes parser failures and too-complex outcomes.
+    [reject_ratio] is [reject / total].  Both ratios return [0.0]
+    when [total = 0].  This is the per-caller authority-flip evidence
+    surface for [MASC_SHELL_GATE_AUTHORITY]. *)
+
+val shell_gate_summaries_to_json : snapshot -> Yojson.Safe.t
+(** Structured JSON object keyed by [worker_dev_tools],
+    [tool_code_write], and [keeper_shell_bash].  Each value contains
+    the corresponding {!shell_gate_summary}. *)
+
 val snapshot_to_json_with_ratios : snapshot -> Yojson.Safe.t
 (** Same flat field set as {!snapshot_to_json}, with an additional
     ["ratios"] sibling object containing the three derived ratios
     ({!disagree_ratio}, {!shadow_parse_coverage},
-    {!auto_bg_promotion_rate}).  Consumers that prefer server-computed
-    flip-decision math over client-side arithmetic should call this
-    helper; the flat fields remain a 1:1 mirror of {!snapshot} so
-    existing dashboards keep working.  All ratio values are finite
-    ([0.0] when the denominator is zero), so the output remains a
-    valid JSON document regardless of observer state. *)
+    {!auto_bg_promotion_rate}), plus a ["shell_gate"] sibling object
+    containing per-caller gate rollups.  Consumers that prefer
+    server-computed flip-decision math over client-side arithmetic
+    should call this helper; the flat fields remain a 1:1 mirror of
+    {!snapshot} so existing dashboards keep working.  All ratio values
+    are finite ([0.0] when the denominator is zero), so the output
+    remains a valid JSON document regardless of observer state. *)

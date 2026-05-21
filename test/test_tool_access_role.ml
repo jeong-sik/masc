@@ -11,7 +11,7 @@ open Alcotest
 open Masc_mcp
 
 (* ================================================================ *)
-(* Old system simulation (from legacy_permission_for_tool)           *)
+(* Old system simulation (from permission_for_tool fallback)         *)
 (* ================================================================ *)
 
 (** Simulate the old authorization logic:

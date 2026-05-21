@@ -42,7 +42,6 @@ let rollout_config : Approval_config.t =
         (`Coord_worktree, internal_git_admin_overlay);
         (`System_task_sandbox, internal_git_admin_overlay);
         (`System_notify, notify_overlay);
-        (`Autoresearch_git, internal_git_admin_overlay);
         (`Voice_bridge, internal_observer_overlay);
         (`Voice_bridge_core, internal_observer_overlay);
         (`System_graphql_client_eio, internal_observer_overlay);
@@ -57,7 +56,6 @@ let rollout_config : Approval_config.t =
         (`Coord_identity, internal_observer_overlay);
         (`Tool_local_runtime, internal_observer_overlay);
         (`Tool_local_runtime_bench, internal_observer_overlay);
-        (`Tool_autoresearch_cycle, internal_git_admin_overlay);
         (`Keeper_shell, internal_observer_overlay);
       ];
   }

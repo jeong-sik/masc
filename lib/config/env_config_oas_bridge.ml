@@ -4,8 +4,8 @@
     literals scattered across the lib tree.  Each caller is named so:
 
       1. its default is preserved when the original literal was a
-         deliberately-tuned value (autoresearch_codegen=120s,
-         tool_deep_review=180s, anti_rationalization=180s);
+         deliberately-tuned value (tool_deep_review=180s,
+         anti_rationalization=180s);
       2. the two old "fantasy" 60s budgets ([auto_responder],
          [dashboard_provider_runs]) get raised to [default_timeout_sec]
          (300s) — the original 60s did not match observed p50 latency
@@ -28,7 +28,6 @@
 type caller =
   | Auto_responder
   | Dashboard_provider_runs
-  | Autoresearch_codegen
   | Keeper_persona_authoring
   | Server_openai_compat
   | Tool_deep_review
@@ -43,7 +42,7 @@ type caller =
     fantasy budgets called out in #10094.  When the original literal
     was 120/180s on a path that intentionally needed more compute,
     we preserve the value so the fix does not regress
-    autoresearch / deep_review / anti_rationalization. *)
+    deep_review / anti_rationalization. *)
 let global_default_sec = 300.0
 
 (** Dashboard judges are background/advisory signal generators.  They run on the
@@ -57,7 +56,6 @@ let dashboard_judge_default_sec = 45.0
 let caller_key = function
   | Auto_responder -> "auto_responder"
   | Dashboard_provider_runs -> "dashboard_provider_runs"
-  | Autoresearch_codegen -> "autoresearch_codegen"
   | Keeper_persona_authoring -> "keeper_persona_authoring"
   | Server_openai_compat -> "server_openai_compat"
   | Tool_deep_review -> "tool_deep_review"
@@ -71,7 +69,6 @@ let caller_key = function
 let known_callers () =
   [ Auto_responder
   ; Dashboard_provider_runs
-  ; Autoresearch_codegen
   ; Keeper_persona_authoring
   ; Server_openai_compat
   ; Tool_deep_review
@@ -88,7 +85,7 @@ let known_default_sec = function
   | Auto_responder | Dashboard_provider_runs -> Some global_default_sec
   (* Preserved at original literal — these were tuned for the
      specific compute pattern of the caller. *)
-  | Autoresearch_codegen | Keeper_persona_authoring | Server_openai_compat -> Some 120.0
+  | Keeper_persona_authoring | Server_openai_compat -> Some 120.0
   | Tool_deep_review | Anti_rationalization -> Some 180.0
   (* #9629 moved both judges into this SSOT after Operator_judge inherited a
      too-short generic inference timeout.  Live dashboard evidence showed the
@@ -125,7 +122,6 @@ let legacy_per_caller_env_var = function
   | Governance_judge -> Some "MASC_DASHBOARD_GOVERNANCE_JUDGE_TIMEOUT_SEC"
   | Auto_responder
   | Dashboard_provider_runs
-  | Autoresearch_codegen
   | Keeper_persona_authoring
   | Server_openai_compat
   | Tool_deep_review

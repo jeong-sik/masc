@@ -253,7 +253,6 @@ let deprecated_logical_profile_names =
   ; "operator_judge"
   ; "cross_verifier"
   ; "verifier"
-  ; "autoresearch"
   ; "adversarial_reviewer"
   ; "auto_responder"
   ; "routing"

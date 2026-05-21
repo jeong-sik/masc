@@ -29,8 +29,6 @@ type caller =
   | Turn_sandbox              (** keeper_turn_sandbox_runtime (2/5s) *)
   | Turn_up                   (** keeper_turn_up_create / _update sandbox (15s) *)
   | Git_meta                  (** local git metadata (rev-parse, remote get-url) (10s) *)
-  | Autoresearch_git_meta     (** autoresearch local git metadata reads (10s) *)
-  | Autoresearch_git_mutation (** autoresearch local git mutations (30s) *)
   | Shell_probe               (** PATH probes via [command -v <name>] (2s) *)
   | Graphql                   (** Graphql_client.{request,query,mutate} HTTP calls (10s) *)
   | Http                      (** http_post_json_text_with_status probes (15s) *)
@@ -66,8 +64,6 @@ let caller_key = function
   | Turn_sandbox -> "turn_sandbox"
   | Turn_up -> "turn_up"
   | Git_meta -> "git_meta"
-  | Autoresearch_git_meta -> "autoresearch_git_meta"
-  | Autoresearch_git_mutation -> "autoresearch_git_mutation"
   | Shell_probe -> "shell_probe"
   | Graphql -> "graphql"
   | Http -> "http"
@@ -101,8 +97,6 @@ let known_callers () =
     Turn_sandbox;
     Turn_up;
     Git_meta;
-    Autoresearch_git_meta;
-    Autoresearch_git_mutation;
     Shell_probe;
     Graphql;
     Http;
@@ -135,8 +129,7 @@ let known_default_sec = function
   | Pr_review_post -> Some 30.0
   | Dispatch -> Some 120.0
   | Memory_audit -> Some 3.0
-  | Git_meta | Autoresearch_git_meta -> Some 10.0
-  | Autoresearch_git_mutation -> Some 30.0
+  | Git_meta -> Some 10.0
   (* Defaults for the new variants below preserve the literals each
      site previously held — see #10426 review (#13081) for the
      site-by-site mapping.  Operators can override via

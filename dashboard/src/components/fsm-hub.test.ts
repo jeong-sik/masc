@@ -589,7 +589,7 @@ describe('filterKeeperNames', () => {
     'keeper-planner-agent',
     'keeper-critic-agent',
     'keeper-router-agent',
-    'keeper-autoresearch-agent',
+    'keeper-research-agent',
     'governance-keeper',
   ]
 
@@ -614,7 +614,7 @@ describe('filterKeeperNames', () => {
   })
 
   it('matches substring that does not anchor on prefix', () => {
-    expect(filterKeeperNames(fleet, 'research')).toEqual(['keeper-autoresearch-agent'])
+    expect(filterKeeperNames(fleet, 'research')).toEqual(['keeper-research-agent'])
     expect(filterKeeperNames(fleet, 'governance')).toEqual(['governance-keeper'])
   })
 
@@ -632,7 +632,7 @@ describe('filterKeeperNames', () => {
       'keeper-planner-agent',
       'keeper-critic-agent',
       'keeper-router-agent',
-      'keeper-autoresearch-agent',
+      'keeper-research-agent',
     ])
   })
 

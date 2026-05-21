@@ -192,14 +192,6 @@ describe('cockpit entrypoint registry', () => {
       tab: 'monitoring',
       params: { section: 'runtime', view: 'heuristics', focus: 'log' },
     })
-    expect(cockpitTargetForParams({ mode: 'Cognition', tab: 'ar-fnd' })).toEqual({
-      tab: 'monitoring',
-      params: { section: 'cognition', view: 'autoresearch', focus: 'finding' },
-    })
-    expect(cockpitTargetForParams({ mode: 'Cognition', tab: 'ar-flow' })).toEqual({
-      tab: 'monitoring',
-      params: { section: 'cognition', view: 'autoresearch', focus: 'flow' },
-    })
     expect(cockpitTargetForParams({ mode: 'IDE', tab: 'pr-thread' })).toEqual({
       tab: 'code',
       params: { section: 'ide-shell', view: 'unified', focus: 'review' },

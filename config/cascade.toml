@@ -807,9 +807,6 @@ target = "tier-group.primary"
 [routes.verifier]
 target = "tier-group.primary"
 
-[routes.autoresearch]
-target = "tier-group.primary"
-
 [routes.adversarial_reviewer]
 target = "tier-group.primary"
 

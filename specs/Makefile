@@ -7,7 +7,6 @@
 #   make check-keeper       Keeper state machine only
 #   make check-ecosystem    MASC ecosystem only
 #   make check-boundary     Cross-domain boundary specs only
-#   make check-closure      Contract-closure specs (autoresearch<->verification<->FSM)
 #   make list               List all discoverable specs
 
 JAVA      ?= java
@@ -57,7 +56,7 @@ BUGGY_CFGS := $(shell find . -name '*-buggy*.cfg' | sort)
 clean_cfgs_in = $(shell find $(1) -name '*.cfg' ! -name '*-buggy*.cfg' | sort)
 buggy_cfgs_in = $(shell find $(1) -name '*-buggy*.cfg' | sort)
 
-.PHONY: check-all check-clean check-buggy check-bug-models check-keeper check-ecosystem check-boundary check-closure check-social check-others check-matrix-coverage list clean clean-artefacts
+.PHONY: check-all check-clean check-buggy check-bug-models check-keeper check-ecosystem check-boundary check-social check-others check-matrix-coverage list clean clean-artefacts
 
 clean: clean-artefacts
 
@@ -132,10 +131,6 @@ check-boundary: CLEAN_CFGS := $(call clean_cfgs_in,boundary/)
 check-boundary: BUGGY_CFGS := $(call buggy_cfgs_in,boundary/)
 check-boundary: check-all
 
-check-closure: CLEAN_CFGS := $(call clean_cfgs_in,closure/)
-check-closure: BUGGY_CFGS := $(call buggy_cfgs_in,closure/)
-check-closure: check-all
-
 # Sharding groups for CI matrix.  The four targets below partition the same
 # spec set that `check-all` walks; verified by the `check-matrix-coverage`
 # target which fails if anything drifts out of sync.  Tuning:
@@ -153,7 +148,7 @@ check-social: BUGGY_CFGS := $(foreach d,$(SOCIAL_DIRS),$(call buggy_cfgs_in,$(d)
 check-social: check-all
 
 OTHER_DIRS := admission-queue auth autonomous boundary bug-models cascade \
-              checkpoint-trim closure keeper-switch-hierarchy keeper-turn-fsm \
+              checkpoint-trim keeper-switch-hierarchy keeper-turn-fsm \
               multimodal resilience server-state shared task-lifecycle
 check-others: CLEAN_CFGS := $(foreach d,$(OTHER_DIRS),$(call clean_cfgs_in,$(d)/))
 check-others: BUGGY_CFGS := $(foreach d,$(OTHER_DIRS),$(call buggy_cfgs_in,$(d)/))

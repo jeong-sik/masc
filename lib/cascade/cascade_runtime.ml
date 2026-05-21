@@ -727,7 +727,7 @@ let local_urls_of_named_selection ~sw ~net selection =
    process-global active catalog ([lookup_active_profile]) and has no
    path-override entry point, so a non-default argument silently routed
    capacity probes to the wrong catalog. No caller actually passes the
-   override (see grep across lib/ — autoresearch_codegen / dashboard
+   override (see grep across lib/ — dashboard
    judges all omit it). Removing the parameter eliminates the footgun
    instead of preserving a misleading shim. If catalog-path override
    becomes a real requirement, plumb it through [resolve_named_providers]

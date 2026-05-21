@@ -138,9 +138,7 @@ OAS  ──does not know──→ MASC
   model-breakdown labels null or neutral. Operator control snapshots follow
   the same rule for keeper rows and context snapshots. Keeper approval queue
   dashboard rows, audit rows, and resolution broadcasts keep `selected_model`
-  as a compatibility key only and emit `null`. Autoresearch cycle JSON and
-  attribution evidence keep `model_used` as a compatibility key only and emit
-  `null`. Legacy keeper `models` inputs are rejected at TOML/meta parse
+  as a compatibility key only and emit `null`. Legacy keeper `models` inputs are rejected at TOML/meta parse
   boundaries rather than decoded into a neutral runtime label.
   Channel Gate turn stats follow the same rule: keeper response parsing keeps
   duration/token counts and collapses the legacy model slot to `runtime`, while

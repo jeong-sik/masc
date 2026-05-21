@@ -19,7 +19,6 @@ import type {
   OperatorGuidanceSummary,
   OperatorJudgment,
   OperatorKeeperSnapshot,
-  OperatorLinkedAutoresearch,
   OperatorReviewDecision,
   OperatorRecommendedAction,
   OperatorJudgeRuntime,
@@ -153,31 +152,6 @@ function normalizeOperatorJudgment(raw: unknown): OperatorJudgment | null {
   }
 }
 
-function normalizeLinkedAutoresearch(raw: unknown): OperatorLinkedAutoresearch | null {
-  if (!isRecord(raw)) return null
-  const loopId = asString(raw.loop_id)
-  const status = asString(raw.status)
-  if (!loopId && !status) return null
-  return {
-    loop_id: loopId ?? null,
-    session_id: asString(raw.session_id) ?? null,
-    status: status ?? null,
-    current_cycle: asNumber(raw.current_cycle) ?? undefined,
-    best_score: asNumber(raw.best_score) ?? null,
-    last_decision: asString(raw.last_decision) ?? null,
-    target_file: asString(raw.target_file) ?? null,
-    workdir: asString(raw.workdir) ?? null,
-    source_workdir: asString(raw.source_workdir) ?? null,
-    program_note: asString(raw.program_note) ?? null,
-    operation_id: asString(raw.operation_id) ?? null,
-    queued_hypothesis: asString(raw.queued_hypothesis) ?? null,
-    warnings: extractArray(raw.warnings)
-      .map(item => (typeof item === 'string' ? item.trim() : ''))
-      .filter(Boolean),
-    error: asString(raw.error) ?? null,
-  }
-}
-
 export function normalizeOperatorDigest(raw: unknown): OperatorDigest {
   const root = isRecord(raw) ? raw : {}
   return {
@@ -242,10 +216,6 @@ function normalizeSession(raw: unknown): OperatorSessionSnapshot | null {
     orchestration_state: isRecord(raw.orchestration_state) ? raw.orchestration_state : isRecord(statusBlock?.orchestration_state) ? statusBlock.orchestration_state : undefined,
     cascade_metrics: isRecord(raw.cascade_metrics) ? raw.cascade_metrics : isRecord(statusBlock?.cascade_metrics) ? statusBlock.cascade_metrics : undefined,
     report_paths: reportPaths,
-    linked_autoresearch:
-      normalizeLinkedAutoresearch(raw.linked_autoresearch)
-      ?? normalizeLinkedAutoresearch(statusBlock?.linked_autoresearch)
-      ?? null,
     session,
     recent_events: recentEvents,
   }

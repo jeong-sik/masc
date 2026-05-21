@@ -1,3 +1,13 @@
+---
+title: Dashboard Information Architecture Phase 2
+rfc: 0048
+status: Withdrawn
+created: 2026-05-08
+withdrawn_date: 2026-05-21
+superseded_by: RFC-0135
+withdrawn_reason: "RFC-0135 (Dashboard Keeper Operational SSOT — typed) supplanted the Phase 2 IA approach with a typed snapshot architecture. 25+ implementation commits absorbed the consolidation goal. Archived for history."
+---
+
 # RFC-0048 — Dashboard Information Architecture Phase 2
 
 Status: Draft

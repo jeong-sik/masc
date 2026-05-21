@@ -53,5 +53,23 @@ audit + activity decay + README cross-check):
 | 0059 | IDE LSP + Eio Domain/Actor | LSP via RFC-0128; Eio domain never integrated |
 | 0061 | Cache-invalidation broadcast envelope | Supplanted by RFC-0138 lock-free architecture |
 
-Future batches (Batch B onward) will follow the same criteria. The active RFC count
-will continue to shrink as ghost specs are honestly retired.
+## Batch B — 2026-05-21
+
+Second withdrawal batch. 4 RFCs archived after body-level inspection identified
+explicit `superseded_by` relationships. The original 8-candidate pool was
+narrowed to 4 because body inspection revealed:
+
+- RFC-0005 has open Phase 2-4 (still partial active)
+- RFC-0007 is stalled but has no successor (just stale, not superseded)
+- RFC-0008 has merged PR-1 (#10660) and RFC-0019 reconciliation (partial impl)
+- RFC-0019 is currently active (credential SSOT work in agent_delegation scope)
+
+| RFC | Title | superseded_by | Withdrawn reason summary |
+|-----|-------|---------------|--------------------------|
+| 0039 | Keeper Turn FSM streaming escape | RFC-0072 | Absorbed by 5-axis composite sub-FSM observer (KSM/KTC/KDP/KMC/KCL) |
+| 0048 | Dashboard IA Phase 2 | RFC-0135 | Typed snapshot architecture supplanted IA approach (25+ commits) |
+| 0055 | Cascade Fallback Chain Capability-Tier Routing | RFC-0058 | Self-declared superseded; §1 Supersedes ledger absorbed concern |
+| 0066 | Legacy *_models Catalog Purge | RFC-0058 | Self-positioned as closeout phase of RFC-0058 declarative cascade |
+
+Future batches will continue the same criteria + body inspection requirement.
+The active RFC count continues to shrink as ghost specs are honestly retired.

@@ -1,3 +1,13 @@
+---
+title: Legacy *_models Catalog Purge
+rfc: 0066
+status: Withdrawn
+created: 2026-05-11
+withdrawn_date: 2026-05-21
+superseded_by: RFC-0058
+withdrawn_reason: "Self-positioned as 'closeout phase' of RFC-0058 (declarative cascade config). The declarative 5-layer schema absorbed the legacy catalog purge goal. Issue #14624 root-cause tracker closed via RFC-0058 work. Archived for history."
+---
+
 # RFC-0066 — Legacy `*_models` Catalog Purge
 
 **Status**: Draft

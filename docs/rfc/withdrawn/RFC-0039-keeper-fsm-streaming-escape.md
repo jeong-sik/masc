@@ -1,3 +1,13 @@
+---
+title: Keeper Turn FSM — Streaming Escape & Cross-Axis Synchronization
+rfc: 0039
+status: Withdrawn
+created: 2026-05-07
+withdrawn_date: 2026-05-21
+superseded_by: RFC-0072
+withdrawn_reason: "RFC-0072 (keeper sub-FSM transitions typed — 4 축 닫힘) absorbed the streaming-escape concern as part of the unified sub-FSM observer (KSM/KTC/KDP/KMC/KCL). Single-axis spec replaced by 5-axis composite lifecycle. Archived for history."
+---
+
 # RFC-0039: Keeper Turn FSM — Streaming Escape & Cross-Axis Synchronization
 
 > **Status**: Draft

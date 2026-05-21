@@ -1065,6 +1065,15 @@ let dashboard_shell_auth_json ~(request : Httpun.Request.t) (config : Coord.conf
     ]
 ;;
 
+let dashboard_shell_with_request_auth_json ~request (config : Coord.config) payload =
+  match payload with
+  | `Assoc fields ->
+    `Assoc
+      (("auth", dashboard_shell_auth_json ~request config)
+       :: List.remove_assoc "auth" fields)
+  | other -> other
+;;
+
 let dashboard_shell_http_json
       ?clock
       ?request
@@ -1156,11 +1165,5 @@ let dashboard_shell_http_json
   in
   match request with
   | None -> payload
-  | Some request ->
-    (match payload with
-     | `Assoc fields ->
-       `Assoc
-         (("auth", dashboard_shell_auth_json ~request config)
-          :: List.remove_assoc "auth" fields)
-     | other -> other)
+  | Some request -> dashboard_shell_with_request_auth_json ~request config payload
 ;;

@@ -16,10 +16,17 @@ let select_shell_json
   else (
     match Dashboard_snapshot.current () with
     | Some snap ->
-      Server_timing.measure
-        timing_obj
-        (Server_timing.Custom "snapshot_read")
-        (fun () -> snap.shell)
+      let shell =
+        Server_timing.measure
+          timing_obj
+          (Server_timing.Custom "snapshot_read")
+          (fun () -> snap.shell)
+      in
+      (match request with
+       | None -> shell
+       | Some request ->
+         Server_dashboard_http_core.dashboard_shell_with_request_auth_json
+           ~request config shell)
     | None ->
       Server_dashboard_http_core.dashboard_shell_http_json
         ?clock ?request ~timing:timing_obj ~light config)

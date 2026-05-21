@@ -56,45 +56,8 @@ let record_requested_tool_names = Keeper_run_tools_hook_accumulator.record_reque
 let task_scope_tool_names = Keeper_run_tools_task_scope.task_scope_tool_names
 let json_string_opt = Keeper_run_tools_task_scope.json_string_opt
 let task_id_scope_of_tool_input = Keeper_run_tools_task_scope.task_id_scope_of_tool_input
-
-let first_some left right =
-  match left with
-  | Some _ -> left
-  | None -> right
-;;
-
-let current_task_id_of_meta (meta : Keeper_types.keeper_meta) =
-  Option.map Keeper_id.Task_id.to_string meta.current_task_id
-;;
-
-let task_id_scope_of_claim_output ~tool_name output_text =
-  if not (List.mem tool_name [ "keeper_task_claim"; "masc_claim_next" ])
-  then None
-  else (
-    let output_text =
-      match Tool_output.decode_from_oas output_text with
-      | Tool_output.Stored { preview; _ } -> preview
-      | Tool_output.Inline value -> value
-    in
-    try
-      match Yojson.Safe.from_string (Safe_ops.sanitize_text_utf8 output_text) with
-      | `Assoc fields ->
-        (match List.assoc_opt "result" fields with
-         | Some result ->
-           first_some (json_string_opt "task_id" result) (json_string_opt "task_id" (`Assoc fields))
-         | None -> json_string_opt "task_id" (`Assoc fields))
-      | _ -> None
-    with
-    | Yojson.Json_error _ -> None)
-;;
-
-let task_id_scope_of_tool_call ~tool_name ~input ~output_text ~meta =
-  first_some
-    (task_id_scope_of_tool_input ~tool_name input)
-    (first_some
-       (task_id_scope_of_claim_output ~tool_name output_text)
-       (current_task_id_of_meta meta))
-;;
+let task_id_scope_of_claim_output = Keeper_run_tools_task_scope.task_id_scope_of_claim_output
+let task_id_scope_of_tool_call = Keeper_run_tools_task_scope.task_id_scope_of_tool_call
 
 type tool_search_hit_partition = Tool_search.tool_search_hit_partition =
   { visible_core_hits : (string * float) list

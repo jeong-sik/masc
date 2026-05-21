@@ -89,7 +89,7 @@ let test_claim_next_hook_failure_is_observed () =
       (failure_metric_value ~site:"claim_next" ~agent_name:"claude")
   | Coord.Claim_next_no_unclaimed ->
     fail "claim_next unexpectedly found no unclaimed task"
-  | Coord.Claim_next_no_eligible { excluded_count } ->
+  | Coord.Claim_next_no_eligible { excluded_count; _ } ->
     failf "claim_next unexpectedly found no eligible task; excluded=%d"
       excluded_count
   | Coord.Claim_next_error msg ->

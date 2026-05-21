@@ -520,6 +520,21 @@ let claim_next_r
           | _ :: _ -> primary_eligible
           | [] -> eligible_from soft_unclaimed
         in
+        let explicit_excluded_count =
+          List.length exclude_task_ids
+          +
+          match released_task_id with
+          | Some _ -> 1
+          | None -> 0
+        in
+        let no_eligible_excluded_count =
+          List.length all_excluded
+          + List.length task_filter_excluded
+          + List.length required_tool_excluded
+        in
+        let receipt_required_tool_blocked =
+          List.exists receipt_blocks_task required_tool_excluded
+        in
         (* Helper: clear agent current_task and reset status after a legacy
          released_task_id path when no replacement task can be claimed. Delegates to
          [Coord_task.update_local_agent_state] so the agent-file write
@@ -563,10 +578,15 @@ let claim_next_r
             | None -> ());
            clear_agent_state_after_release ();
            Claim_next_no_eligible
-             { excluded_count =
-                 List.length all_excluded
-                 + List.length task_filter_excluded
-                 + List.length required_tool_excluded
+             { excluded_count = no_eligible_excluded_count
+             ; blocked_count = List.length blocked_todo
+             ; verification_blocked_count = List.length verification_blocked_todo
+             ; scope_excluded_count = List.length task_filter_excluded
+             ; required_tool_excluded_count = List.length required_tool_excluded
+             ; explicit_excluded_count
+             ; claim_pool_candidate_count = List.length unclaimed
+             ; receipt_required_tool_blocked
+             ; agent_tool_names_known = Option.is_some agent_tool_names
              }
          | _ :: _, task :: _ ->
            (* Claim this task *)
@@ -698,10 +718,21 @@ let claim_next config ~agent_name =
   | Claim_next_claimed { message; _ } -> message
   | Claim_next_no_unclaimed ->
     "No unclaimed tasks. ACTION: Stop task-checking — nothing to claim."
-  | Claim_next_no_eligible { excluded_count } ->
+  | Claim_next_no_eligible
+      { excluded_count
+      ; scope_excluded_count
+      ; required_tool_excluded_count
+      ; verification_blocked_count
+      ; _
+      } ->
     Printf.sprintf
-      "No eligible unclaimed tasks. ACTION: Stop task-checking — blocked/excluded=%d."
+      "No eligible unclaimed tasks. ACTION: Stop task-checking — \
+       blocked/excluded=%d (goal_scope_or_filter=%d, required_tools=%d, \
+       verification=%d)."
       excluded_count
+      scope_excluded_count
+      required_tool_excluded_count
+      verification_blocked_count
   | Claim_next_error e -> Printf.sprintf "Error: %s" e
 ;;
 

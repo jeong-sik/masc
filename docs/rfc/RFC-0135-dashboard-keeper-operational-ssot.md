@@ -1,14 +1,49 @@
 ---
 rfc: "0135"
 title: "Dashboard Keeper Operational Surface — Typed SSOT"
-status: Draft
+status: Active
 created: 2026-05-19
 updated: 2026-05-21
 author: vincent
 supersedes: []
 superseded_by: null
-related: ["0004", "0029", "0088", "0133"]
+related: ["0004", "0029", "0088", "0133", "0139"]
 implementation_prs: [16573, 16576, 16593, 16600, 16606, 16611, 16615, 16619, 16623, 16626, 16632, 16638, 16662, 16663, 16672, 16680, 16683, 16685, 16687, 16689, 16691, 16695, 17075]
+---
+
+## Progress audit (2026-05-21)
+
+Status promoted Draft → Active. 23 implementation PRs landed against
+the §10 9-PR phased rollout. This audit does *not* re-map each of
+the 23 PRs to its phase slot — the work is the largest active sprint
+in the repo (~25 commits referencing RFC-0135 since 2026-04-01, the
+top of `audit-rfc-closeout-lag.sh` output) and the sprint author is
+the right person to issue an authoritative Phase→PR table at the
+sprint closeout, not a sweep audit.
+
+The unambiguous observations made here:
+
+- 23 PRs is consistent with the §10 plan running past its original
+  9-PR scope (PR-1..PR-9 nominal + Goal-1 / Goal-2 / §13 attention
+  axis sub-PRs visible in the commit log, e.g. #16763 §13, #16772
+  Goal-1 keeperBand, #17075 Goal-2 remaining axes).
+- PR-9 CI guard lint `scripts/lint/dashboard-ssot-keeper-state.sh`
+  is wired (confirmed against origin/main `scripts/lint/` listing).
+- A parallel `feature/RFC-0135-goal2-remaining-axes` worktree
+  exists, indicating in-flight follow-up work — Draft is no longer
+  the accurate status, but Implemented cannot be claimed until the
+  sprint author closes out the Goal-2/§13 follow-ups.
+
+`Active` is the smallest defensible status change. The Phase→PR
+mapping table, §5 acceptance verification, and final
+Implemented/closeout flip remain author responsibilities.
+
+### Sister RFC
+
+- **RFC-0139** (Agent Status Vocabulary SSOT, Active 2026-05-21):
+  same audit cohort. RFC-0139 explicitly cites itself as
+  "RFC-0135 closure 후속". Bidirectional link added to `related:`.
+
 ---
 
 # RFC-0135: Dashboard Keeper Operational Surface — Typed SSOT

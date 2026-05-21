@@ -4573,7 +4573,7 @@ let test_codex_cli_prompt_preflight_uses_pipeline_context_window_fallback () =
       ~tools:[]
   in
   let huge_goal = String.make 600_000 'a' in
-  match Cascade_error_classify.codex_cli_prompt_preflight ~config ~goal:huge_goal with
+  match Cascade_config_builder.codex_cli_prompt_preflight ~config ~goal:huge_goal with
   | Some preflight ->
     Alcotest.(check bool) "argv limit hit" true preflight.hits_argv_limit;
     Alcotest.(check bool) "context limit hit" true preflight.hits_context_window;
@@ -4598,7 +4598,7 @@ let test_codex_cli_prompt_preflight_scales_retry_limit_for_argv_only_overflow ()
       ~tools:[]
   in
   let huge_goal = String.make 600_000 'a' in
-  match Cascade_error_classify.codex_cli_prompt_preflight ~config ~goal:huge_goal with
+  match Cascade_config_builder.codex_cli_prompt_preflight ~config ~goal:huge_goal with
   | Some preflight ->
     Alcotest.(check bool) "argv limit hit" true preflight.hits_argv_limit;
     Alcotest.(check bool) "context limit not hit" false preflight.hits_context_window;

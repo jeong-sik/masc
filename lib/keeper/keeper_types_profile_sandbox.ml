@@ -96,11 +96,6 @@ let network_mode_of_string raw =
   match String.trim (String.lowercase_ascii raw) with
   | "none" -> Some Network_none
   | "inherit" -> Some Network_inherit
-  | "host" ->
-    Log.Keeper.warn
-      "network_mode=\"host\" is a deprecated alias for \"inherit\"; \
-       update TOML to use \"inherit\"";
-    Some Network_inherit
   | _ -> None
 ;;
 

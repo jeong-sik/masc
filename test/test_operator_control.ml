@@ -108,6 +108,9 @@ let () =
           Alcotest.test_case "digest defaults to namespace target" `Quick
             Test_operator_control_actions
             .test_digest_defaults_to_namespace_target;
+          Alcotest.test_case "operator action rejects legacy aliases" `Quick
+            Test_operator_control_actions
+            .test_operator_action_rejects_legacy_action_aliases;
           Alcotest.test_case "confirm keeps token on delegated failure" `Quick
             Test_operator_control_judgment
             .test_confirm_keeps_pending_token_when_delegated_action_fails;

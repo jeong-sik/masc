@@ -19,7 +19,7 @@ type context = Tool_inline_dispatch_types.context = {
   clock : float Eio.Time.clock_ty Eio.Resource.t;
   arguments : Yojson.Safe.t;
   mcp_session_id : string option;
-  write_mcp_session_agent : string -> unit;
+  record_mcp_session_agent : string -> unit;
   wait_for_message :
     Session.registry ->
     agent_name:string ->

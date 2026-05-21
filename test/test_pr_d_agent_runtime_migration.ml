@@ -1,29 +1,15 @@
 open Alcotest
 
-(** RFC-0084 host-config-cleanup-D — agent runtime root migration.
+(** RFC-0084 host-config-cleanup-D — retired agent scratch-file runtime.
 
-    PR-D migrates the 7 cross-process agent-identity scratch-file
-    literals (`/tmp/.masc_agent[_mcp]_<sid>`) across 2 modules to
-    the typed [Host_config.agent_runtime_root] field:
-
-    - lib/mcp_server_eio_execute.ml (5 sites at 191, 210, 253, 331,
-      570 in PR-1 audit; lines may have shifted by ±N after PR-D's
-      module-init binding inserted earlier in the file)
-    - lib/tool_inline_dispatch_coord.ml (2 sites at 187, 267)
-
-    Each module has its own module-init binding because the modules
-    don't share a common ancestor other than [Host_config] itself.
-
-    Out of PR-D scope (intentional, separate follow-up cleanup):
-    - The [Sys.getenv_opt "TERM_SESSION_ID" |> Option.value
-      ~default:"default"] silent-collision issue documented in
-      03-hardcode-path-audit.md Top10 #5.  PR-D is a pure
-      typed-surface migration; the [default:"default"] fail-loud
-      conversion belongs in its own PR so its behaviour change
-      lands in isolation. *)
+    The old `/tmp/.masc_agent[_mcp]_<sid>` bridge was first moved behind
+    [Host_config.agent_runtime_root], then removed once
+    [Agent_registry_eio] owned MCP-session identity continuity.  This
+    ratchet keeps the old sidecar file surface from coming back in the
+    dispatcher modules. *)
 
 let pinned_tmp_agent_literal_count = 0
-let pinned_agent_runtime_root_binding_count = 2
+let pinned_agent_runtime_root_binding_count = 0
 
 let read_file path =
   match In_channel.with_open_text path In_channel.input_all with
@@ -73,7 +59,7 @@ let test_no_tmp_agent_literals_in_consumers () =
   in
   (check int)
     "literal occurrences of `/tmp/.masc_agent[_mcp]_<sid>` in the 2 \
-     consumer modules must be 0 after PR-D"
+     consumer modules must remain 0"
     pinned_tmp_agent_literal_count total
 ;;
 
@@ -83,8 +69,7 @@ let test_agent_runtime_root_binding_count () =
       ~needle:"Host_config.host ()"
   in
   (check int)
-    "Host_config.host invoked exactly once per \
-     consumer module (2 modules)"
+    "dispatcher modules no longer bind Host_config.agent_runtime_root"
     pinned_agent_runtime_root_binding_count occurrences
 ;;
 
@@ -99,7 +84,7 @@ let test_agent_runtime_root_field_value () =
 
 let () =
   run
-    "PR-D host-config-cleanup-D (agent runtime root)"
+    "agent scratch-file runtime ratchet"
     [ ( "pr-d-agent-runtime"
       , [ test_case "no-tmp-agent-literals-in-consumers" `Quick
             test_no_tmp_agent_literals_in_consumers

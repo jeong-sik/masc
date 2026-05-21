@@ -810,14 +810,14 @@ let () =
 ;;
 
 let () =
-  test "dispatch_check_project_ready_alias" (fun () ->
+  test "dispatch_check_room_set" (fun () ->
     let ctx = make_test_ctx () in
     let _ = Coord.init ctx.config ~agent_name:(Some "test-agent") in
     match
       Tool_coord.dispatch
         ctx
         ~name:"masc_check"
-        ~args:(`Assoc [ "assertions", `List [ `String "project_ready" ] ])
+        ~args:(`Assoc [ "assertions", `List [ `String "room_set" ] ])
     with
     | Some result ->
       assert result.success;

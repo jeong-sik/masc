@@ -29,7 +29,7 @@ type agent_state =
   }
 
 type assertion_kind =
-  | Room_set (* legacy alias: namespace_ready *)
+  | Room_set
   | Joined
   | Task_claimed
   | Current_task_set
@@ -50,7 +50,7 @@ let all_assertion_kinds =
 let valid_assertion_strings = List.map assertion_kind_to_string all_assertion_kinds
 
 let assertion_kind_of_string_lenient = function
-  | "room_set" | "namespace_ready" | "project_ready" -> Some Room_set
+  | "room_set" -> Some Room_set
   | "joined" -> Some Joined
   | "task_claimed" -> Some Task_claimed
   | "current_task_set" -> Some Current_task_set
@@ -101,9 +101,7 @@ let check_assertion st assertion =
 
 let state_to_json st =
   `Assoc
-    [ "project_ready", `Bool st.room_set
-    ; "namespace_ready", `Bool st.room_set
-    ; "room_set", `Bool st.room_set
+    [ "room_set", `Bool st.room_set
     ; "joined", `Bool st.joined
     ; "task_claimed", `Bool st.task_claimed
     ; "current_task_set", `Bool st.current_task_set
@@ -116,7 +114,7 @@ let handle_check ~(inspect_state : context -> agent_state) ~tool_name ~start_tim
   =
   let st = inspect_state ctx in
   let default_assertions =
-    [ "project_ready"; "joined"; "task_claimed"; "current_task_set"; "worktree_active" ]
+    [ "room_set"; "joined"; "task_claimed"; "current_task_set"; "worktree_active" ]
   in
   let assertions =
     match Yojson.Safe.Util.member "assertions" args with

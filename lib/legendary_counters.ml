@@ -220,7 +220,7 @@ type snapshot = {
   typed_advisor_allow : int;
   typed_advisor_reject : int;
   typed_advisor_cannot_parse : int;
-  (* RFC-0131 PR-3 — Shell_command_gate caller × verdict partition. *)
+  (* RFC-0131 PR-3: exec shell gate caller/verdict partition. *)
   shell_gate_worker_dev_tools_allow : int;
   shell_gate_worker_dev_tools_reject : int;
   shell_gate_worker_dev_tools_cannot_parse : int;

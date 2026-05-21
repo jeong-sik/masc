@@ -1393,6 +1393,15 @@ let test_keeper_required_tool_contracts () =
           "the review phase requires `keeper_shell` and"
      && file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
           "second required tool keeps approval mandatory");
+  check bool "taskboard schema documents PR required_tools preflight" true
+    (file_contains_pattern "lib/tool_shard_types_schemas_taskboard.ml"
+       "keeper_preflight_check"
+     && file_contains_pattern "lib/tool_shard_types_schemas_taskboard.ml"
+          "keeper_pr_create"
+     && file_contains_pattern "lib/tool_shard_types_schemas_taskboard.ml"
+          "keeper_pr_review_comment"
+     && file_contains_pattern "lib/tool_shard_types_schemas_taskboard.ml"
+          "claim_next routes them only to PR-capable");
   check bool "docker PR lifecycle prompt accepts brokered route proof" true
     (file_contains_pattern
        "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"

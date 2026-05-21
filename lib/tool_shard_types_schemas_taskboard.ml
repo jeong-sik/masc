@@ -277,7 +277,15 @@ let taskboard_tools : Masc_domain.tool_schema list =
                                   ; ( "description"
                                     , `String
                                         "Tool names required to claim this task, e.g. \
-                                         Bash or masc_code_git." )
+                                         Bash or masc_code_git. PR creation tasks \
+                                         should include keeper_preflight_check, \
+                                         keeper_bash, and keeper_pr_create so \
+                                         claim_next routes them only to PR-capable \
+                                         presets. PR review mutation tasks should \
+                                         include keeper_preflight_check, \
+                                         keeper_pr_review_read, and \
+                                         keeper_pr_review_comment or \
+                                         keeper_pr_review_reply." )
                                   ] )
                             ; ( "required_evidence"
                               , `Assoc

@@ -319,6 +319,18 @@ let bash_find_command pattern =
 let bash_git_log_grep_command grep =
   "git log --oneline -5 --grep=" ^ shell_single_quote grep
 
+(* D14: Map a native gh-pr subcommand to the closest typed keeper PR tool.
+   Used to redirect [gh pr <sub> ... || echo ...] (and other piped/redirected
+   gh-pr commands) from the generic Pipe_or_redirect catch-all to a typed
+   recovery plan — the [|| echo "{}"] fallback can be dropped because the
+   typed tool surfaces failures as structured data instead of stderr/exit. *)
+let gh_pr_native_subcommand_keeper_tool : gh_pr_native_subcommand -> string =
+  function
+  | Gh_pr_list -> "keeper_pr_list"
+  | Gh_pr_status -> "keeper_pr_status"
+  | Gh_pr_diff -> "keeper_pr_status"
+  | Gh_pr_review -> "keeper_pr_review_read"
+
 let bash_shape_block_recovery_plan ~cmd = function
   | _ when command_looks_like_task_state_discovery cmd ->
     Some
@@ -372,6 +384,30 @@ let bash_shape_block_recovery_plan ~cmd = function
            ]
          ~instruction:(bash_shape_block_hint ~cmd Pipe_or_redirect)
          ~reason:"find_head_rewrite"
+         ())
+  | Pipe_or_redirect when Option.is_some (cmd_gh_pr_native_subcommand cmd) ->
+    (* D14: [gh pr <sub> ... || echo "{}"] (and other piped/redirected gh-pr
+       commands) hit Pipe_or_redirect because the [|] / [||] / [>] tokens
+       trigger before the substring check for "gh pr checks". Route to the
+       typed keeper tool and drop the [|| echo "..."] failure-suppression
+       fallback — the typed tool returns structured success/error, so the
+       shell-style empty-JSON fallback is unnecessary. *)
+    let sub = Option.get (cmd_gh_pr_native_subcommand cmd) in
+    let next_tool = gh_pr_native_subcommand_keeper_tool sub in
+    Some
+      (plan
+         ~confidence:"high"
+         ~next_tool
+         ~next_args:
+           [ "pr", `String "NUMBER_FROM_COMMAND"
+           ; "repo", `String "OWNER/REPO_FROM_COMMAND"
+           ]
+         ~instruction:
+           ("Use "
+           ^ next_tool
+           ^ " directly. The typed tool returns structured success/error, so \
+              the `|| echo \"{}\"` fallback is unnecessary — drop it.")
+         ~reason:"gh_pipe_typed_redirect"
          ())
   | Pipe_or_redirect ->
     Some

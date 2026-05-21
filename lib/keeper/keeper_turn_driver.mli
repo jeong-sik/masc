@@ -84,6 +84,20 @@ type masc_internal_error =
       tools : string list;
       original_error : string;
     }
+  (** RFC-0159 Phase A: typed substrate for raw [Agent_sdk.Error.Internal]
+      construction sites previously routed to the [Reason_internal_error]
+      catch-all. *)
+  | Internal_unhandled_exception of {
+      site : string;
+      exn_repr : string;
+    }
+  | Internal_bridge_exception of {
+      caller : string;
+      exn_repr : string;
+    }
+  | Internal_contract_rejected of {
+      reason : string;
+    }
 
 val masc_internal_error_to_json : masc_internal_error -> Yojson.Safe.t
 

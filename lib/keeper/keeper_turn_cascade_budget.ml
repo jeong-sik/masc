@@ -252,7 +252,11 @@ let degraded_retry_bypasses_slot_phase_guard
       | Keeper_turn_driver.Admission_queue_rejected _
       | Keeper_turn_driver.Turn_timeout _
       | Keeper_turn_driver.Max_tokens_ceiling_violation _
-      | Keeper_turn_driver.Ambiguous_post_commit _ )
+      | Keeper_turn_driver.Ambiguous_post_commit _
+      (* RFC-0159 Phase A: Internal_* variants are not OAS-budget timeouts. *)
+      | Keeper_turn_driver.Internal_unhandled_exception _
+      | Keeper_turn_driver.Internal_bridge_exception _
+      | Keeper_turn_driver.Internal_contract_rejected _ )
   | None ->
     false
 

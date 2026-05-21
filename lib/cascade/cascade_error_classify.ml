@@ -96,6 +96,21 @@ type masc_internal_error =
       tools : string list;
       original_error : string;
     }
+  (* RFC-0159 Phase A: typed substrate for the three raw exception
+     construction sites previously emitting [Agent_sdk.Error.Internal
+     (Printexc.to_string exn)] payloads that the classifier could not
+     parse, falling through to the [Reason_internal_error] catch-all. *)
+  | Internal_unhandled_exception of {
+      site : string;
+      exn_repr : string;
+    }
+  | Internal_bridge_exception of {
+      caller : string;
+      exn_repr : string;
+    }
+  | Internal_contract_rejected of {
+      reason : string;
+    }
 
 let masc_internal_error_prefix = "[masc_oas_error] "
 
@@ -255,6 +270,26 @@ let masc_internal_error_to_json = function
         ("tools", string_list_json tools);
         ("original_error", `String original_error);
       ]
+  | Internal_unhandled_exception { site; exn_repr } ->
+    `Assoc
+      [
+        ("kind", `String "internal_unhandled_exception");
+        ("site", `String site);
+        ("exn_repr", `String exn_repr);
+      ]
+  | Internal_bridge_exception { caller; exn_repr } ->
+    `Assoc
+      [
+        ("kind", `String "internal_bridge_exception");
+        ("caller", `String caller);
+        ("exn_repr", `String exn_repr);
+      ]
+  | Internal_contract_rejected { reason } ->
+    `Assoc
+      [
+        ("kind", `String "internal_contract_rejected");
+        ("reason", `String reason);
+      ]
 
 let summarize_list ?(empty = "none") values =
   match values with
@@ -335,7 +370,10 @@ let summary_of_masc_internal_error = function
   | Admission_queue_timeout _
   | Admission_queue_rejected _
   | Turn_timeout _
-  | Ambiguous_post_commit _ -> None
+  | Ambiguous_post_commit _
+  | Internal_unhandled_exception _
+  | Internal_bridge_exception _
+  | Internal_contract_rejected _ -> None
 
 (* #9933: classify emitted [masc_oas_error] payloads by kind so
    dashboards and Grafana alerts can watch the fleet-wide rate per
@@ -363,7 +401,8 @@ let () =
        no_tool_capable_provider | accept_rejected | \
        admission_queue_timeout | admission_queue_rejected | \
        turn_timeout | oas_timeout_budget | max_tokens_ceiling_violation | \
-       ambiguous_post_commit), \
+       ambiguous_post_commit | internal_unhandled_exception | \
+       internal_bridge_exception | internal_contract_rejected), \
        cascade_name (originating cascade or \"unknown\" for \
        cascade-less variants)."
     ()
@@ -380,6 +419,9 @@ let kind_of_masc_internal_error = function
   | Oas_timeout_budget _ -> "oas_timeout_budget"
   | Max_tokens_ceiling_violation _ -> "max_tokens_ceiling_violation"
   | Ambiguous_post_commit _ -> "ambiguous_post_commit"
+  | Internal_unhandled_exception _ -> "internal_unhandled_exception"
+  | Internal_bridge_exception _ -> "internal_bridge_exception"
+  | Internal_contract_rejected _ -> "internal_contract_rejected"
 
 (** #10285: which cascade emitted this error.
 
@@ -415,7 +457,10 @@ let cascade_name_of_masc_internal_error = function
   | Admission_queue_rejected _
   | Turn_timeout _
   | Oas_timeout_budget _
-  | Ambiguous_post_commit _ -> "unknown"
+  | Ambiguous_post_commit _
+  | Internal_unhandled_exception _
+  | Internal_bridge_exception _
+  | Internal_contract_rejected _ -> "unknown"
 
 let sdk_error_of_masc_internal_error err =
   Prometheus.inc_counter masc_oas_error_total_metric
@@ -668,6 +713,24 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
               | _ -> []
             in
             Some (Ambiguous_post_commit { is_timeout; tools; original_error })
+          | _ -> None)
+      | Some (`String "internal_unhandled_exception") -> (
+          match string_opt_of_assoc "site" json,
+                string_opt_of_assoc "exn_repr" json
+          with
+          | Some site, Some exn_repr ->
+            Some (Internal_unhandled_exception { site; exn_repr })
+          | _ -> None)
+      | Some (`String "internal_bridge_exception") -> (
+          match string_opt_of_assoc "caller" json,
+                string_opt_of_assoc "exn_repr" json
+          with
+          | Some caller, Some exn_repr ->
+            Some (Internal_bridge_exception { caller; exn_repr })
+          | _ -> None)
+      | Some (`String "internal_contract_rejected") -> (
+          match string_opt_of_assoc "reason" json with
+          | Some reason -> Some (Internal_contract_rejected { reason })
           | _ -> None)
       | _ -> None)
   | _ -> None

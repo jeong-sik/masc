@@ -110,7 +110,13 @@ let run_safe ?(caller = default_caller) ~timeout_s fn =
     let bt = Printexc.get_backtrace () in
     Log.Misc.error "masc_oas_bridge: OAS execution error (caller=%s): %s\n%s"
       caller (Printexc.to_string exn) bt;
-    Error (Agent_sdk.Error.Internal (Printexc.to_string exn))
+    (* RFC-0159 Phase A: emit typed [Internal_bridge_exception] so the
+       classifier can route bridge-boundary failures off the
+       [Reason_internal_error] catch-all. *)
+    Error
+      (Cascade_error_classify.sdk_error_of_masc_internal_error
+         (Cascade_error_classify.Internal_bridge_exception
+            { caller; exn_repr = Printexc.to_string exn }))
 
 (** [run_with_caller ~caller fn] — single entry point that resolves
     the per-caller timeout from [Env_config_oas_bridge] and labels

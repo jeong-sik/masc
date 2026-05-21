@@ -58,6 +58,13 @@ let make_meta name : Masc_mcp.Keeper_types.keeper_meta =
   | Error err -> Alcotest.fail ("meta fixture failed: " ^ err)
 ;;
 
+let append_execution_receipt config keeper_name json =
+  let store =
+    Masc_mcp.Keeper_types_support.keeper_execution_receipt_store config keeper_name
+  in
+  Dated_jsonl.append store json
+;;
+
 let drop_value reason =
   P.metric_value_or_zero
     P.metric_persistence_read_drops
@@ -117,6 +124,57 @@ let test_snapshot_counts_malformed_decision_rows () =
          (drop_value invalid_payload -. before_invalid_payload))
 ;;
 
+let test_snapshot_projects_capacity_backpressure_receipt () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> remove_tree base_dir)
+    (fun () ->
+       with_env "MASC_BASE_PATH" base_dir
+       @@ fun () ->
+       let config = Masc_mcp.Coord.default_config base_dir in
+       let keeper_name = "runtime-trust-capacity-backpressure" in
+       let meta = make_meta keeper_name in
+       append_execution_receipt
+         config
+         keeper_name
+         (`Assoc
+             [ "schema", `String "keeper.execution_receipt.v1"
+             ; "recorded_at", `String "2026-05-20T17:32:38Z"
+             ; "keeper_name", `String keeper_name
+             ; "terminal_reason_code", `String "capacity_backpressure"
+             ; "outcome", `String "receipt_failed"
+             ; ( "error"
+               , `Assoc
+                   [ "kind", `String "internal"
+                   ; ( "message"
+                     , `String
+                         "Internal error: [masc_oas_error] \
+                          {\"kind\":\"capacity_backpressure\",\"source\":\"client_capacity\"}" )
+                   ] )
+             ; "ended_at", `String "2026-05-20T17:32:38Z"
+             ]);
+       let snapshot = K.snapshot_json ~config ~meta in
+       let open Yojson.Safe.Util in
+       Alcotest.(check string)
+         "latest terminal reason code normalized"
+         "capacity_backpressure"
+         (snapshot |> member "latest_terminal_reason" |> member "code" |> to_string);
+       let latest_receipt = snapshot |> member "latest_receipt" in
+       Alcotest.(check string)
+         "projected receipt code normalized"
+         "capacity_backpressure"
+         (latest_receipt |> member "terminal_reason_code" |> to_string);
+       Alcotest.(check bool)
+         "projected error message keeps canonical internal kind"
+         true
+         (String_util.contains_substring
+            (latest_receipt |> member "error" |> member "message" |> to_string)
+            "\"kind\":\"capacity_backpressure\""))
+;;
+
 let () =
   Alcotest.run
     "keeper_runtime_trust_snapshot"
@@ -125,6 +183,10 @@ let () =
             "malformed decision rows increment drop metrics"
             `Quick
             test_snapshot_counts_malformed_decision_rows
+        ; Alcotest.test_case
+            "capacity backpressure receipt projection is canonical"
+            `Quick
+            test_snapshot_projects_capacity_backpressure_receipt
         ] )
     ]
 ;;

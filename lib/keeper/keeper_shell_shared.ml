@@ -597,22 +597,14 @@ let resolve_keeper_shell_read_path
     in
     resolve_with_autocorrect resolver_path
 
-(* Docker/sandbox infrastructure delegated to Keeper_shell_docker.
-   Aliases retained for backward compatibility with callers that
-   reference Keeper_shell_shared.* directly (tests, doc refs). *)
+(* Sandbox infrastructure stays in Keeper_shell_docker; command-shape
+   interpretation stays in Keeper_shell_command_semantics. *)
 let effective_sandbox_profile = Keeper_shell_docker.effective_sandbox_profile
-let cmd_targets_git_or_gh = Keeper_shell_docker.cmd_targets_git_or_gh
-let cmd_targets_gh cmd =
-  let trimmed = String.trim cmd in
-  let first_word =
-    match String.index_opt trimmed ' ' with
-    | Some i -> String.sub trimmed 0 i
-    | None -> trimmed
-  in
-  String.equal first_word "gh"
+let cmd_targets_git_or_gh = Keeper_shell_command_semantics.cmd_targets_git_or_gh
+let cmd_targets_gh = Keeper_shell_command_semantics.cmd_targets_gh
 
 let ensure_keeper_sandbox_runtime = Keeper_shell_docker.ensure_keeper_sandbox_runtime
 let command_uses_nested_container_runtime = Keeper_shell_docker.command_uses_nested_container_runtime
 let run_docker_shell_command_with_status = Keeper_shell_docker.run_docker_shell_command_with_status
-let run_docker_with_git_bash = Keeper_shell_docker.run_docker_with_git_bash
-let run_docker_hardened_bash = Keeper_shell_docker.run_docker_hardened_bash
+let run_docker_credentialed_bash = Keeper_shell_docker.run_docker_credentialed_bash
+let run_docker_bash = Keeper_shell_docker.run_docker_bash

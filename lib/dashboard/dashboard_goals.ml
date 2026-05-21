@@ -75,6 +75,10 @@ let build_forest ~(config : Coord.config) ~goals ~tasks =
     keeper_metas
     |> List.map (fun (meta : Keeper_types.keeper_meta) -> meta.name)
     |> Keeper_execution_receipt.latest_json_by_keeper config
+    |> List.map (fun (keeper_name, receipt) ->
+           ( keeper_name,
+             Keeper_runtime_trust_snapshot.normalize_receipt_projection_json
+               receipt ))
   in
   let context =
     {
@@ -299,7 +303,11 @@ let goal_detail_json ~(config : Coord.config) ~goal_id :
                    let latest_receipt =
                      List.assoc_opt meta.name
                        (Keeper_execution_receipt.latest_json_by_keeper
-                          config node.linked_keeper_names)
+                          config node.linked_keeper_names
+                        |> List.map (fun (keeper_name, receipt) ->
+                               ( keeper_name,
+                                 Keeper_runtime_trust_snapshot
+                                 .normalize_receipt_projection_json receipt )))
                    in
                    let runtime_trust =
                      let snapshot =

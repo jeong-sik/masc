@@ -850,6 +850,32 @@ let () =
         with
         | Error _ -> ()
         | Ok () -> Alcotest.fail "should reject command outside custom allowlist");
+      Alcotest.test_case "caller telemetry records exec gate verdicts" `Quick (fun () ->
+        Legendary_counters.reset ();
+        let caller =
+          Masc_exec_command_gate.Shell_command_gate.Worker_dev_tools
+        in
+        let allow =
+          Worker_dev_tools.validate_command_coding_with_allowlist
+            ~caller
+            ~allowed_commands:["rg"]
+            "rg foo lib"
+        in
+        let reject =
+          Worker_dev_tools.validate_command_coding_with_allowlist
+            ~caller
+            ~allowed_commands:["rg"]
+            "sed -n '1,2p' lib/worker_dev_tools.ml"
+        in
+        Alcotest.(check bool) "allow result" true (Result.is_ok allow);
+        Alcotest.(check bool) "reject result" true (Result.is_error reject);
+        let snapshot = Legendary_counters.snapshot () in
+        Alcotest.(check int) "worker allow counter" 1
+          snapshot.shell_gate_worker_dev_tools_allow;
+        Alcotest.(check int) "worker reject counter" 1
+          snapshot.shell_gate_worker_dev_tools_reject;
+        Alcotest.(check int) "worker cannot_parse counter" 0
+          snapshot.shell_gate_worker_dev_tools_cannot_parse);
     ];
     "is_destructive_bash_operation", [
       Alcotest.test_case "blocks force push" `Quick (fun () ->

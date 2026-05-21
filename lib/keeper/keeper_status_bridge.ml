@@ -158,11 +158,10 @@ let blocker_class_of_string (reason : string) : blocker_class option =
   if trimmed = ""
   then None
   else if
-    String_util.contains_substring_ci trimmed "capacity_exhausted"
-    || String_util.contains_substring_ci trimmed "capacity exhausted"
+    String_util.contains_substring_ci trimmed "capacity exhausted"
     || String_util.contains_substring_ci trimmed "capacity_backpressure"
     || String_util.contains_substring_ci trimmed "client capacity"
-  then Some Capacity_exhausted
+  then Some Capacity_backpressure
   else if
     String_util.contains_substring_ci
       trimmed
@@ -221,10 +220,10 @@ let blocker_class_of_string (reason : string) : blocker_class option =
 
 let blocker_class_of_sdk_error (err : Agent_sdk.Error.sdk_error) : blocker_class option =
   match Keeper_error_classify.recoverable_cascade_failure_reason err with
-  | Some Keeper_error_classify.Capacity_exhausted -> Some Capacity_exhausted
+  | Some Keeper_error_classify.Capacity_backpressure -> Some Capacity_backpressure
   | _ ->
   match Keeper_turn_driver.classify_masc_internal_error err with
-  | Some (Keeper_turn_driver.Capacity_backpressure _) -> Some Capacity_exhausted
+  | Some (Keeper_turn_driver.Capacity_backpressure _) -> Some Capacity_backpressure
   | Some (Keeper_turn_driver.Cascade_exhausted { reason; _ }) ->
     Some (Cascade_exhausted reason)
   | Some (Keeper_turn_driver.Resumable_cli_session { detail; _ }) ->
@@ -295,7 +294,7 @@ let runtime_blocker_surface_of_typed_class ?(summary = "") (cls : blocker_class)
   let continue_gate = blocker_class_continue_gate cls in
   let summary =
     match cls with
-    | Capacity_exhausted ->
+    | Capacity_backpressure ->
       if summary = ""
       then "Provider or client capacity backpressure blocked this keeper turn."
       else summary
@@ -365,7 +364,7 @@ let runtime_blocker_surface_of_legacy_string reason cls =
      legacy string [reason] argument provides the fallback summary. *)
   | Ambiguous_post_commit_timeout
   | Ambiguous_post_commit_failure
-  | Capacity_exhausted
+  | Capacity_backpressure
   | Autonomous_slot_wait_timeout
   | Admission_queue_wait_timeout
   | Turn_timeout_after_queue_wait

@@ -41,7 +41,7 @@ type agent_state =
     pinned. *)
 type assertion_kind =
   | Room_set
-  (** Project root configured (legacy aliases: [namespace_ready], [project_ready]). *)
+  (** Project root configured. *)
   | Joined (** Agent has joined the project namespace. *)
   | Task_claimed (** Agent owns at least one claimed task. *)
   | Current_task_set (** [current_task] is set, fresh, and unambiguous. *)
@@ -65,17 +65,15 @@ val all_assertion_kinds : assertion_kind list
 val valid_assertion_strings : string list
 
 (** [assertion_kind_of_string_lenient s] parses an assertion
-    name leniently: in addition to the canonical
-    [assertion_kind_to_string] outputs, it accepts the legacy
-    aliases [namespace_ready] / [project_ready] (both -> [Room_set]).
+    name from the canonical [assertion_kind_to_string] outputs.
 
     Returns [None] for any other input — the {!handle_check}
     handler reports unknown assertions as a passing failure with
     a fix hint listing {!valid_assertion_strings}.
 
-    Adding a new alias requires touching this function explicitly;
-    .mli hides the alias set on purpose so a future "be more
-    lenient" PR must extend the contract. *)
+    Adding a new accepted string requires touching this function
+    explicitly; .mli hides the parse set on purpose so a future
+    compatibility PR must extend the contract. *)
 val assertion_kind_of_string_lenient : string -> assertion_kind option
 
 (** {1 Tool entry point} *)
@@ -90,9 +88,8 @@ val assertion_kind_of_string_lenient : string -> assertion_kind option
     - [args] is the raw JSON-RPC params.  Recognises an optional
       [assertions: [<string>...]] array; missing or non-list values
       fall back to the canonical defaults (the five
-      [project_ready / joined / task_claimed / current_task_set /
-      worktree_active] strings — note [project_ready] is the legacy
-      alias for [room_set]).  An empty list also falls back to
+      [room_set / joined / task_claimed / current_task_set /
+      worktree_active] strings.  An empty list also falls back to
       defaults so callers cannot accidentally pass nothing.
 
     {2 Return value}

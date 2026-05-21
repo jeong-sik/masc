@@ -5,6 +5,7 @@ open Keeper_shell_bash_shape_ir
 open Keeper_shell_bash_shape_messages
 open Keeper_shell_bash_task_state
 open Keeper_shell_bash_words
+module Exec_shell_gate = Masc_exec_command_gate.Shell_command_gate
 module Task_probe = Keeper_shell_bash_task_probe
 module Shape_classifier = Keeper_shell_bash_shape_classifier
 
@@ -41,6 +42,83 @@ let shell_ir_parse_failure_shape_block =
 ;;
 let keeper_bash_shape_block = Shape_classifier.keeper_bash_shape_block
 
+let keeper_gate_allowlist_policy
+      ?(allow_pipes = true)
+      ~(allowed_commands : string list)
+      ()
+  : Exec_shell_gate.allowlist_policy =
+  { allowed_commands; allow_pipes; redirect_allowed = true }
+;;
+
+let keeper_gate_block_reason_of_reject
+      (reason : Exec_shell_gate.reject_reason)
+  : Worker_dev_tools.block_reason =
+  match reason with
+  | Command_not_in_allowlist { bin }
+  | Pipeline_segment_disallowed { bin; _ } -> Command_not_allowed bin
+  | Pipes_not_allowed _ -> Pipes_not_allowed
+  | Redirect_disallowed_in_caller _
+  | Path_outside_policy _ -> Unsafe_redirect
+;;
+
+let keeper_gate_block_reason_of_too_complex
+      (reason : Exec_shell_gate.too_complex_reason)
+  : Worker_dev_tools.block_reason =
+  match reason with
+  | Unsupported_construct `Proc_subst -> Process_substitution
+  | Unsupported_construct (`Heredoc | `Here_string | `Redirect) -> Unsafe_redirect
+  | Unsupported_nested_pipeline
+  | Unsupported_construct
+      ( `Cmd_subst
+      | `Subshell
+      | `Arith_expansion
+      | `Control_flow
+      | `Logic_op
+      | `Function_def
+      | `Glob_brace
+      | `Background
+      | `Unknown_construct _ ) -> Injection
+;;
+
+let validate_keeper_bash_coding_with_allowlist
+      ?(allow_pipes = true)
+      ~(allowed_commands : string list)
+      cmd
+  =
+  let trimmed = String.trim cmd in
+  if String.equal trimmed ""
+  then Error Worker_dev_tools.Empty_command
+  else (
+    match
+      Exec_shell_gate.gate
+        ~caller:Exec_shell_gate.Keeper_shell_bash
+        ~raw:trimmed
+        ~allowlist:(keeper_gate_allowlist_policy ~allow_pipes ~allowed_commands ())
+        ~path_policy:Exec_shell_gate.allow_all_paths
+        ~sandbox:Exec_shell_gate.host_sandbox
+        ()
+    with
+    | Allow context ->
+      if context.Exec_shell_gate.invokes_direct_dune
+      then Error Worker_dev_tools.Direct_dune_invocation
+      else Ok ()
+    | Reject { context; reason; _ } ->
+      (match reason with
+       | Pipes_not_allowed _ -> Error Worker_dev_tools.Pipes_not_allowed
+       | _ when context.Exec_shell_gate.invokes_direct_dune ->
+         Error Worker_dev_tools.Direct_dune_invocation
+       | _ -> Error (keeper_gate_block_reason_of_reject reason))
+    | Cannot_parse _ -> Error Worker_dev_tools.Injection
+    | Too_complex { reason } -> Error (keeper_gate_block_reason_of_too_complex reason))
+;;
+
+let validate_keeper_bash_coding cmd =
+  validate_keeper_bash_coding_with_allowlist
+    ~allow_pipes:true
+    ~allowed_commands:Worker_dev_tools.dev_allowed_commands
+    cmd
+;;
+
 type safe_read_fallback = {
   primary_cmd : string;
   cwd_override : string option;
@@ -54,8 +132,7 @@ let safe_read_primary_rewrite primary_cmd =
     then None
     else (
       match
-        Worker_dev_tools.validate_command_coding_with_allowlist
-          ~caller:Shell_command_gate.Keeper_shell_bash
+        validate_keeper_bash_coding_with_allowlist
           ~allow_pipes:false
           ~allowed_commands:Worker_dev_tools.dev_allowed_commands
           primary_cmd
@@ -350,11 +427,7 @@ let safe_read_fallback_of_command ~write_enabled:_ ~stderr_dev_null_stripped cmd
 
 let shape_block_allowed_by_active_validator ~write_enabled cmd = function
   | Pipe_or_redirect when write_enabled ->
-    (match
-       Worker_dev_tools.validate_command_coding
-         ~caller:Shell_command_gate.Keeper_shell_bash
-         cmd
-     with
+    (match validate_keeper_bash_coding cmd with
      | Ok () -> true
      | Error _ -> false)
   | Gh_pr_checks | Chaining | Substitution | Repo_wide_scan | Pipe_or_redirect ->
@@ -362,6 +435,8 @@ let shape_block_allowed_by_active_validator ~write_enabled cmd = function
 
 module For_testing = struct
   let elapsed_duration_ms = elapsed_duration_ms
+  let validate_keeper_bash_coding_with_allowlist =
+    validate_keeper_bash_coding_with_allowlist
 
   let keeper_bash_shape_block_tag cmd =
     Option.map bash_shape_block_tag (keeper_bash_shape_block cmd)
@@ -698,8 +773,7 @@ let single_repo_cwd_for_top_relative_read
   then None
   else
     match
-      Worker_dev_tools.validate_command_coding_with_allowlist
-        ~caller:Shell_command_gate.Keeper_shell_bash
+      validate_keeper_bash_coding_with_allowlist
         ~allow_pipes:false
         ~allowed_commands:Worker_dev_tools.dev_allowed_commands
         cmd
@@ -747,6 +821,44 @@ let typed_docker_sandbox_target ~turn_sandbox_factory ~meta ~cwd =
       | Error err -> Unix.WEXITED 1, "", err
     in
     Ok (Masc_exec.Sandbox_target.docker ~image ~runner)
+
+let typed_gate_allowlist_policy mode : Exec_shell_gate.allowlist_policy =
+  let allowed_commands =
+    match mode with
+    | Keeper_tool_bash_input.Dev_full -> Dev_exec_allowlist.dev
+    | Keeper_tool_bash_input.Readonly -> Dev_exec_allowlist.readonly
+  in
+  { allowed_commands; allow_pipes = true; redirect_allowed = true }
+;;
+
+let typed_gate_sandbox target : Exec_shell_gate.sandbox_context = { target }
+
+let typed_gate_error_json ~cmd_for_log ~cwd verdict =
+  let verdict_tag = Exec_shell_gate.verdict_tag verdict in
+  let reason_tag, diagnostic =
+    match verdict with
+    | Exec_shell_gate.Reject { reason; diagnostic; _ } ->
+      Exec_shell_gate.reject_reason_tag reason, diagnostic
+    | Exec_shell_gate.Cannot_parse { reason } ->
+      ( Exec_shell_gate.parse_reason_tag reason
+      , "typed Shell IR could not be parsed by the command gate" )
+    | Exec_shell_gate.Too_complex { reason } ->
+      ( Exec_shell_gate.too_complex_reason_tag reason
+      , "typed Shell IR is too complex for the command gate" )
+    | Exec_shell_gate.Allow _ ->
+      "allow", "typed Shell IR gate unexpectedly returned allow in failure path"
+  in
+  error_json
+    ~fields:
+      [ "typed", `Bool true
+      ; "cmd", `String cmd_for_log
+      ; "cwd", `String cwd
+      ; "shell_ir_gate", `String verdict_tag
+      ; "shell_ir_gate_reason", `String reason_tag
+      ; "failure_class", `String "policy_rejection"
+      ]
+    diagnostic
+;;
 
 let handle_keeper_bash_typed
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
@@ -847,29 +959,40 @@ let handle_keeper_bash_typed
               ~fields:[ "typed", `Bool true; "cmd", `String cmd_for_log; "cwd", `String cwd ]
               (typed_validation_error_text e)
           | Ok ir ->
-            let path_validation =
-              match
-                Keeper_task_worktree_lazy.ensure_command_existing_dirs
-                  ~config ~meta ~cwd ~cmd
-              with
-              | Error e -> Error e
-              | Ok () ->
-                Worker_dev_tools.validate_command_paths
-                  ~keeper_id:meta.name
-                  ~base_path:root
-                  ~workdir:cwd
-                  cmd
+            let gate_verdict =
+              Exec_shell_gate.gate_typed
+                ~caller:Exec_shell_gate.Keeper_shell_bash
+                ~ir
+                ~allowlist:(typed_gate_allowlist_policy mode)
+                ~path_policy:Exec_shell_gate.allow_all_paths
+                ~sandbox:(typed_gate_sandbox dispatch_sandbox)
+                ()
             in
-            (match path_validation with
-             | Error e -> error_json ~fields:[ "blocked_cmd", `String cmd_for_log ] e
-             | Ok () ->
+            (match gate_verdict with
+             | Exec_shell_gate.Allow gate_context ->
+               let path_validation =
+                 match
+                   Keeper_task_worktree_lazy.ensure_command_existing_dirs
+                     ~config ~meta ~cwd ~cmd
+                 with
+                 | Error e -> Error e
+                 | Ok () ->
+                   Worker_dev_tools.validate_command_paths
+                     ~keeper_id:meta.name
+                     ~base_path:root
+                     ~workdir:cwd
+                     cmd
+               in
+               (match path_validation with
+                | Error e -> error_json ~fields:[ "blocked_cmd", `String cmd_for_log ] e
+                | Ok () ->
                let env_snap =
                  Cancel_safe.protect
                    ~on_exn:(fun _ -> None)
                    (fun () -> Some (Exec_core.snapshot_env ~cwd))
                in
                let t0 = Unix.gettimeofday () in
-               let result = Masc_exec.Exec_dispatch.dispatch ir in
+               let result = Masc_exec.Exec_dispatch.dispatch gate_context.ast in
                let elapsed_ms =
                  elapsed_duration_ms
                    ~start_time:t0
@@ -888,13 +1011,19 @@ let handle_keeper_bash_typed
                     ~extra:
                       [ "cwd", `String cwd
                       ; "typed", `Bool true
+                      ; "shell_ir_gate", `String "allow"
+                      ; "shell_ir_stage_count", `Int (Exec_shell_gate.stage_count gate_context)
                       ; "execution_time_ms", `Int elapsed_ms
                       ; "timeout_sec", `Float timeout_sec
                       ]
                     ~status:result.status
                     ~output
                     ~env_snapshot:env_snap
-                    ())))
+                    ()))
+             | Exec_shell_gate.Reject _
+             | Exec_shell_gate.Cannot_parse _
+             | Exec_shell_gate.Too_complex _ ->
+               typed_gate_error_json ~cmd_for_log ~cwd gate_verdict))
 
 let handle_keeper_bash
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
@@ -1370,9 +1499,8 @@ let handle_keeper_bash
        the selected root/keeper GitHub identity bundle read-only for the
        duration of this command. Disabled when
        MASC_KEEPER_SANDBOX_GIT_DISPATCH=false.
-       [git_creds_enabled] replaces the former Docker_with_git variant:
-       the external profile stays Docker; the dispatcher reads this flag
-       to choose between Keeper_shell_shared.run_docker_with_git_bash and Keeper_shell_shared.run_docker_hardened_bash. *)
+       The external profile stays Docker; the dispatcher reads this flag
+       to choose between the credentialed Docker path and plain Docker path. *)
     let sandbox_profile, sandbox_network_mode, git_creds_enabled =
       if base_profile = Docker
          && Env_config_keeper.KeeperSandbox.with_git_dispatch_enabled ()
@@ -1561,7 +1689,7 @@ let handle_keeper_bash
         Keeper_metrics.metric_keeper_bash_network_upgrade
         ~labels:[ ("keeper", meta.name); ("detected_tool", detected_tool) ]
         ();
-      Keeper_shell_shared.run_docker_with_git_bash
+      Keeper_shell_shared.run_docker_credentialed_bash
         ~turn_sandbox_runtime:
           (Keeper_sandbox_factory.resolve_opt
              turn_sandbox_factory_git ~cwd)
@@ -1571,7 +1699,7 @@ let handle_keeper_bash
         "DOCKER_EXEC: keeper=%s cwd=%s cmd=%s network=%s"
         meta.name cwd cmd_for_log (network_mode_to_string sandbox_network_mode);
       with_raw_json_exec_cache (fun () ->
-        Keeper_shell_shared.run_docker_hardened_bash
+        Keeper_shell_shared.run_docker_bash
           ~turn_sandbox_runtime:
             (Keeper_sandbox_factory.resolve_opt
                turn_sandbox_factory ~cwd)
@@ -1597,18 +1725,15 @@ let handle_keeper_bash
       (* Local execution path: full validation applies *)
       let validate =
         if write_enabled
-        then
-          Worker_dev_tools.validate_command_coding
-            ~caller:Shell_command_gate.Keeper_shell_bash
+        then validate_keeper_bash_coding
         else if Option.is_some safe_read_fallback
         then
-          Worker_dev_tools.validate_command_coding_with_allowlist
-            ~caller:Shell_command_gate.Keeper_shell_bash
+          validate_keeper_bash_coding_with_allowlist
             ~allow_pipes:false
             ~allowed_commands:Worker_dev_tools.dev_allowed_commands
         else
           Worker_dev_tools.validate_command
-            ~caller:Shell_command_gate.Keeper_shell_bash
+            ~caller:Exec_shell_gate.Keeper_shell_bash
       in
       match validate validation_cmd with
       | Error reason ->

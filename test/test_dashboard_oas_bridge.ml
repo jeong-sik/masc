@@ -329,7 +329,7 @@ let provider_error_count ~provider ~cascade ~kind ~capacity_scope counts =
 let test_provider_error_counts_group_and_filter () =
   setup ();
   let rate_limit = P.RateLimit { retry_after = Some 2.0 } in
-  let capacity = P.CapacityExhausted { scope = `Model } in
+  let capacity = P.CapacityBackpressure { scope = `Model } in
   DOB.record_provider_error ~cascade_name:"primary" ~provider_id:"anthropic" rate_limit;
   DOB.record_provider_error ~cascade_name:"primary" ~provider_id:"anthropic" rate_limit;
   DOB.record_provider_error ~cascade_name:"primary" ~provider_id:"ollama" rate_limit;
@@ -349,7 +349,7 @@ let test_provider_error_counts_group_and_filter () =
     provider_error_count
       ~provider:"runtime"
       ~cascade:"primary"
-      ~kind:"capacity_exhausted"
+      ~kind:"capacity_backpressure"
       ~capacity_scope:"model"
       all
   in

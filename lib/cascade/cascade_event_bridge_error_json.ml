@@ -289,7 +289,7 @@ let sdk_provider_error_fields error =
     ]
   | Llm_provider.Error.CapacityExhausted
       { scope; affected; retry_after; detail } ->
-    [ "variant", `String "capacity_exhausted"
+    [ "variant", `String "capacity_backpressure"
     ; "message", `String message
     ; "capacity_scope", `String (Llm_provider.Error.capacity_scope_to_string scope)
     ; "affected", json_string_list affected

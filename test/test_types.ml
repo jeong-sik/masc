@@ -1014,7 +1014,7 @@ let () =
     ];
     "assertion_kind_ssot", [
       (* Issue #8636: 3-way drift on masc_check assertion vocabulary —
-         schema enum (5), handler match (5 + namespace_ready alias),
+         schema enum (5), handler match (5 + deprecated alias),
          default fallback (4 — missing worktree_active). The fix
          introduces [Tool_coord.assertion_kind] variant + helpers and
          a cycle-safe schema mirror in Tool_schemas_coord_core. These
@@ -1042,12 +1042,12 @@ let () =
         Alcotest.(check (list string)) "schema mirror == SSOT"
           Masc_mcp.Tool_coord.valid_assertion_strings
           Tool_schemas_coord_core.assertion_kind_enum_strings);
-      Alcotest.test_case "lenient parser accepts namespace_ready alias" `Quick (fun () ->
+      Alcotest.test_case "parser accepts canonical room_set" `Quick (fun () ->
         let module C = Masc_mcp.Tool_coord in
-        match C.assertion_kind_of_string_lenient "namespace_ready" with
+        match C.assertion_kind_of_string_lenient "room_set" with
         | Some C.Room_set -> ()
-        | Some _ -> Alcotest.fail "alias should map to Room_set"
-        | None -> Alcotest.fail "alias should parse");
+        | Some _ -> Alcotest.fail "room_set should map to Room_set"
+        | None -> Alcotest.fail "room_set should parse");
       Alcotest.test_case "lenient parser rejects unknown" `Quick (fun () ->
         Alcotest.(check bool) "unknown -> None" true
           (Masc_mcp.Tool_coord.assertion_kind_of_string_lenient

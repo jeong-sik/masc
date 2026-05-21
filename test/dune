@@ -121,7 +121,7 @@
   test_keeper_health_probe
   test_oas_error_kind_counter
   test_cascade_error_classify_decoder
-  test_cascade_capacity_exhausted_cooldown
+  test_cascade_capacity_backpressure_cooldown
   test_oas_empty_response_diagnostic
   test_board_author_identity_10297
   test_fsm_drift_counter
@@ -254,6 +254,7 @@
   test_keeper_fs_edit_patch
   test_keeper_docker_read
   test_keeper_path_ssot
+  test_keeper_sandbox_boundary_policy
   test_keeper_egress_audit
   test_keeper_github_read_only
   test_worktree_live_context
@@ -321,8 +322,6 @@
   test_telemetry_observe
   test_keeper_typed_labels
   test_shell_ir_typed_review_followup
-  test_shell_command_gate
-  test_shell_gate_authority
   test_exec_shell_command_gate
   test_shell_ir_validator
   test_typed_advisor_counters
@@ -439,7 +438,7 @@
   test_keeper_health_probe
   test_oas_error_kind_counter
   test_cascade_error_classify_decoder
-  test_cascade_capacity_exhausted_cooldown
+  test_cascade_capacity_backpressure_cooldown
   test_oas_empty_response_diagnostic
   test_board_author_identity_10297
   test_fsm_drift_counter
@@ -572,6 +571,7 @@
   test_keeper_fs_edit_patch
   test_keeper_docker_read
   test_keeper_path_ssot
+  test_keeper_sandbox_boundary_policy
   test_keeper_egress_audit
   test_keeper_github_read_only
   test_worktree_live_context
@@ -645,8 +645,6 @@
   test_telemetry_observe
   test_keeper_typed_labels
   test_shell_ir_typed_review_followup
-  test_shell_command_gate
-  test_shell_gate_authority
   test_exec_shell_command_gate
   test_shell_ir_validator
   test_typed_advisor_counters
@@ -914,6 +912,7 @@
   test_keeper_safety_gates
   test_keeper_guards
   test_keeper_working_state
+  test_keeper_wip_admission
   test_eval_gate_evasion
   test_prompt_registry_defaults
   test_keeper_prompt_external
@@ -1142,6 +1141,8 @@
   test_http_protocol_detect
   test_keeper_safety_gates
   test_keeper_guards
+  test_keeper_working_state
+  test_keeper_wip_admission
   test_eval_gate_evasion
   test_prompt_registry_defaults
   test_keeper_prompt_external

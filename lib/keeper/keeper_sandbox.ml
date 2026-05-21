@@ -38,6 +38,15 @@ let backend_to_string = function
   | Local -> "local"
   | Docker -> "docker"
 
+let backend_of_config_agent ~(config : Coord.config) ~(agent_name : string) =
+  match
+    Keeper_sandbox_config.sandbox_profile_of_agent
+      ~base_path:config.Coord.base_path
+      ~agent_name
+  with
+  | Keeper_sandbox_config.Local -> Local
+  | Keeper_sandbox_config.Docker -> Docker
+
 let sandbox_id_of_name name =
   "keeper:" ^ Playground_paths.sanitize_keeper_name name
 
@@ -53,6 +62,16 @@ let host_root_rel_of_profile sandbox_profile name =
   host_root_rel_of_backend
     ~backend:(backend_of_profile sandbox_profile)
     name
+
+let host_root_rel_of_config_agent ~config ~agent_name =
+  Keeper_sandbox_config.host_root_rel_of_agent
+    ~base_path:config.Coord.base_path
+    ~agent_name
+
+let host_root_abs_of_config_agent ~config ~agent_name =
+  Keeper_sandbox_config.host_root_abs_of_agent
+    ~base_path:config.Coord.base_path
+    ~agent_name
 
 let host_root_rel_of_meta ~(meta : Keeper_types.keeper_meta) =
   host_root_rel_of_profile meta.sandbox_profile meta.name
@@ -71,9 +90,31 @@ let host_root_abs ~(config : Coord.config) name =
   Filename.concat config.base_path (host_root_rel name)
 
 let container_root name =
-  Filename.concat
-    Env_config_keeper.DockerPlayground.container_playground_root
-    (Playground_paths.sanitize_keeper_name name)
+  Keeper_sandbox_config.container_root_of_agent ~agent_name:name
+
+let host_path_of_visible_path ~config ~agent_name raw_path =
+  if Filename.is_relative raw_path
+  then raw_path
+  else
+    match backend_of_config_agent ~config ~agent_name with
+    | Local -> raw_path
+    | Docker ->
+        let container_prefix = container_root agent_name in
+        if String.equal raw_path container_prefix
+        then host_root_abs_of_config_agent ~config ~agent_name
+        else if String.starts_with ~prefix:(container_prefix ^ "/") raw_path
+        then (
+          let suffix =
+            String.sub
+              raw_path
+              (String.length container_prefix + 1)
+              (String.length raw_path - String.length container_prefix - 1)
+          in
+          Filename.concat
+            (host_root_abs_of_config_agent ~config ~agent_name)
+            suffix)
+        else
+          raw_path
 
 let keeper_visible_root_abs_of_meta ~(config : Coord.config)
     (meta : Keeper_types.keeper_meta) =

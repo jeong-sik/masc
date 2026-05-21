@@ -874,8 +874,6 @@ let force_cancel_task_r config ~agent_name ~task_id ~reason ()
     ~force:true
     ()
 ;;
-
-(** Cancel a task - A2A compatible *)
 let cancel_task_r config ~agent_name ~task_id ~reason : string Masc_domain.masc_result =
   if not (is_initialized config)
   then Error (Masc_domain.System Masc_domain.System_error.NotInitialized)

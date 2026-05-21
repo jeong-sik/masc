@@ -1151,6 +1151,12 @@ let test_runtime_trace_lens_summarizes_tool_axis () =
         (M.make ~ts:"2026-05-13T00:00:02Z" ~keeper_name
            ~trace_id ~keeper_turn_id ~event:M.Turn_finished ~status:"error"
            ());
+      append_manifest_or_fail config
+        (M.make ~ts:"2026-05-13T00:00:03Z" ~keeper_name
+           ~trace_id ~keeper_turn_id
+           ~event:M.State_snapshot_sidecar_saved ~status:"saved"
+           ~decision:(`Assoc [ ("active_open_loop_count", `Int 3) ])
+           ());
       let status, json =
         Masc_mcp.Server_dashboard_http_keeper_api.keeper_runtime_trace_json
           config keeper_name ~trace_id ~turn_id:keeper_turn_id ()
@@ -1177,6 +1183,7 @@ let test_runtime_trace_lens_summarizes_tool_axis () =
       in
       let claim_scope = Yojson.Safe.Util.(axes |> member "claim_scope") in
       let config_drift = Yojson.Safe.Util.(axes |> member "config_drift") in
+      let context = Yojson.Safe.Util.(axes |> member "context") in
       Alcotest.(check (list string))
         "lens requested tools"
         [ "read_file" ]
@@ -1221,6 +1228,10 @@ let test_runtime_trace_lens_summarizes_tool_axis () =
         "lens config drift surfaces missing keeper meta"
         "keeper_missing"
         Yojson.Safe.Util.(config_drift |> member "status" |> to_string);
+      Alcotest.(check int)
+        "lens active open loop count"
+        3
+        (json_int_member "active_open_loop_count" context);
       let api_manifest_rows =
         Yojson.Safe.Util.(json |> member "manifest_rows" |> to_list)
       in

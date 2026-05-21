@@ -545,6 +545,7 @@ describe('RuntimeLensSection', () => {
             checkpoint_loaded_count: 1,
             checkpoint_saved_count: 1,
             state_snapshot_sidecar_saved_count: 1,
+            active_open_loop_count: 2,
             last_compaction: null,
           },
           memory: {
@@ -722,6 +723,8 @@ describe('RuntimeLensSection', () => {
     expect(screen.getByText('keeper_bash, keeper_pr_create')).toBeInTheDocument()
     expect(screen.getByText('network proof')).toBeInTheDocument()
     expect(screen.getByText('inherit')).toBeInTheDocument()
+    expect(screen.getByText('working loops')).toBeInTheDocument()
+    expect(screen.getAllByText('2').length).toBeGreaterThan(0)
     expect(screen.getByText('provider attempts')).toBeInTheDocument()
     expect(screen.getAllByText('1/1').length).toBeGreaterThan(0)
     expect(screen.getByText('provider terminal')).toBeInTheDocument()

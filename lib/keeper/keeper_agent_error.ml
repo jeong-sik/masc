@@ -162,7 +162,7 @@ let provider_error_terminal_reason_code
     Printf.sprintf "provider_error_hard_quota:%s" provider
   | Llm_provider.Error.CapacityExhausted { scope; _ } ->
     Printf.sprintf
-      "provider_error_capacity_exhausted:%s"
+      "provider_error_capacity_backpressure:%s"
       (Llm_provider.Error.capacity_scope_to_string scope)
   | Llm_provider.Error.AuthError { provider; _ } ->
     Printf.sprintf "provider_error_auth:%s" provider
@@ -260,7 +260,7 @@ let provider_error_terminal_reason_code = function
   | Llm_provider.Error.HardQuota _ -> "provider_error_hard_quota"
   | Llm_provider.Error.CapacityExhausted { scope; _ } ->
     Printf.sprintf
-      "provider_error_capacity_exhausted:%s"
+      "provider_error_capacity_backpressure:%s"
       (Llm_provider.Error.capacity_scope_to_string scope)
   | Llm_provider.Error.AuthError _ -> "provider_error_auth"
   | Llm_provider.Error.ServerError { code; _ } ->

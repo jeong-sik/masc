@@ -72,27 +72,26 @@ Related:
 
 ---
 
-## Status note — 2026-05-19 author correction
+## Status note — 2026-05-21 purge update
 
 The original §1 below claimed no facade existed.  That was wrong.  A
-companion audit of `origin/main` after RFC submission found that
-`lib/shell_command_gate.{ml,mli}` **already exists** and is wired into
-two of the three callers:
+companion audit of `origin/main` after RFC submission found that a
+lib-root `Masc_mcp.Shell_command_gate` facade existed and had two callers.
+That transitional facade has now been retired by the purge: the SSOT is
+`Masc_exec_command_gate.Shell_command_gate`, and production callers route
+through that exec gate directly.
 
 ```
-$ rg "Shell_command_gate" lib/
-lib/tool_code_write.ml:106-107   parse + last_stage_bin (exit classifier)
-lib/worker_dev_tools.ml:536-564  parse + stage_bins + stage_count + validate_allowlist
-lib/shell_command_gate.ml(.mli)  the facade itself
+$ rg "Masc_mcp\\.Shell_command_gate|\\bShell_command_gate\\b" lib/ \
+    --glob '!lib/exec/command_gate/shell_command_gate.*'
+lib/tool_code_write.ml       Exec gate alias only
+lib/worker_dev_tools.ml      Exec gate alias only
+lib/keeper/keeper_shell_bash.ml  Exec gate alias only
 ```
 
-The facade exposes `parse`, `validate_allowlist ?allow_pipes`,
-`stage_count`, `last_stage_bin`, plus tag functions.  Test coverage
-exists at `test/test_shell_command_gate.ml`.
-
-So RFC-0131 is **not the first-mover for the facade**.  Its remaining
-contribution is the **extension** that promotes the existing facade to
-RFC-0131's full §4 contract:
+So RFC-0131 was **not the first-mover for the facade**.  Its remaining
+contribution became the **extension and purge** that promoted the exec gate
+to RFC-0131's full §4 contract:
 
 1. Add `caller` partition (currently unpartitioned) so telemetry can
    per-caller measure parity against the legacy fallback.
@@ -271,22 +270,19 @@ Each caller PR:
   from existing local state (no shared global).
 - Calls `Shell_command_gate.gate ...` and maps the verdict to the caller's
   existing error JSON (preserving wire shape).
-- **Parallel** to the existing legacy gate — both run, both decide independently
-  (legacy still authoritative). Disagreement is recorded as a typed
-  telemetry diff per caller.
+- During parity, this ran parallel to legacy gate decisions. That parity
+  shim is now retired; direct exec-gate verdicts are authoritative for the
+  adopted callers.
 
 This phase mirrors RFC-0092 Phase A (advisor) but applies it at the gate boundary
 instead of at the keeper_shell_bash boundary.
 
-### 4.4 Authority flip (PR-5)
+### 4.4 Authority flip (retired by purge)
 
-When all three callers' agreement ratio ≥ 99.5 % over 7 days AND zero
-`disagree_legacy_reject_typed_allow` rows:
-
-- `MASC_SHELL_GATE_AUTHORITY=1` makes the facade verdict authoritative.
-- Legacy paths run as fallback only on `Cannot_parse` (parser coverage gap).
-- The flag is per-caller (`worker`, `code_write`, `keeper_bash`) to allow
-  staged rollback.
+The original plan used a per-caller env flag after a 7-day parity window.
+That temporary shim has been removed. The exec Shell gate is now the
+authoritative path for the adopted callers, and parser coverage gaps fail
+closed instead of falling back to a second string-derived verdict.
 
 ### 4.5 Typed argv input compatibility
 
@@ -341,8 +337,8 @@ rg "shell_ir_parse_failure_shape_block" lib/keeper/  # parse-failure-only helper
 | Caller adoption — worker_dev_tools | PR-2 | PR-1 merged | Revert PR (caller falls back to legacy) |
 | Caller adoption — tool_code_write | PR-3 | PR-1 merged (parallel to PR-2) | Revert PR |
 | Caller adoption — keeper_shell_bash | PR-4 | PR-1 merged (parallel to PR-2/3); composes with RFC-0092 Phase A | Revert PR |
-| Authority flip | PR-5 | All callers at ≥ 99.5 % parity for 7d | Unset `MASC_SHELL_GATE_AUTHORITY` |
-| Legacy purge | PR-6 | Phase 5 stable 7+ days, zero incidents | Revert (legacy code returns) |
+| Authority flip | retired | Replaced by direct exec-gate adoption | Revert caller PR |
+| Legacy purge | PR-6 | Exec gate adopted by callers | Revert (legacy code returns) |
 
 Total cost estimate: ~600 LoC new (facade + tests + 3 caller adapters) +
 ~800 LoC removed (splitters + tokenizers + scanners) = net ~200 LoC reduction.
@@ -358,7 +354,7 @@ This RFC is **accepted** when:
 This RFC is **implemented** when:
 
 1. All three callers are wired (PR-2/3/4 merged).
-2. Authority flip merged (PR-5) and stable for ≥ 7 days.
+2. Direct exec-gate authority is active for the adopted callers.
 3. Legacy purge merged (PR-6); acceptance grep checks pass (§4.6).
 4. `keeper_tool_policy_blocked + keeper_tool_execution_errors` per 72h is
    ≤ 4,000 (Doc #1 Pass 1 target) AND no shell-gate-related entry in the
@@ -385,21 +381,21 @@ This RFC is **implemented** when:
 
 ## 10. Revised PR slicing (2026-05-19 update)
 
-Given the facade already exists (status note above), §6 rollout's PR-1
-is replaced by the following micro-PRs, each independently mergeable and
-behavior-preserving for existing callers (`Error _` wildcard patterns in
-`tool_code_write` and `worker_dev_tools` absorb new arms):
+The 2026-05-19 correction replaced §6 rollout's PR-1 with the following
+micro-PRs. The 2026-05-21 purge removes the old lib-root facade and keeps
+`Masc_exec_command_gate.Shell_command_gate` as the only shell-gate SSOT:
 
 | PR | Scope | Lines | Risk |
 |---|---|---|---|
-| PR-1a | Add `caller` partition tag + optional `?caller` arg to `validate_allowlist`. Backwards-compatible default. | ~40 | Low |
+| PR-1a | Add `caller` partition tag + optional `?caller` arg to the exec gate. Backwards-compatible default. | ~40 | Low |
 | PR-1b | Add `Unsupported_nested_pipeline` arm to `cannot_parse_kind`. Replace `simples_of_ir`'s `List.concat_map` with a fail-closed walker. | ~30 | Low |
-| PR-1c | Add `?redirect_allowed` flag to `validate_allowlist`. Default `true` preserves current behavior. | ~30 | Low |
+| PR-1c | Add `redirect_allowed` policy to the exec gate. Default `true` preserves current behavior. | ~30 | Low |
 | PR-2 | Wire `keeper_shell_bash.ml` to call `Shell_command_gate` directly for the validation block currently funneled through `Worker_dev_tools.validate_command_coding_with_allowlist`. Telemetry uses `~caller:Keeper_shell_bash`. | ~80 | Medium |
 | PR-3 | Telemetry counter exposure (`Legendary_counters.incr_shell_gate ~caller ~verdict`) + dashboard read. | ~120 | Low |
 | PR-4 | Per-caller parity measurement window (PR-1a + PR-3 prereq). | observation-only | None |
-| PR-5 | Authority flip per-caller via `MASC_SHELL_GATE_AUTHORITY=worker,code_write,keeper_bash`. | ~40 | Medium |
+| PR-5 | Retired: remove the temporary authority-flip shim once caller adoption is direct. | deletion | Low |
 | PR-6 | Legacy purge: remove `validate_command_coding_legacy_segments`, `first_token_basename (last_pipeline_segment ...)` fallback, and remaining string scanners per §4.6. | ~200 net removal | Medium |
 
 PR-1a–c can land in any order; PR-2 depends on PR-1a (for the caller
-tag); PR-5/PR-6 depend on PR-4 parity evidence.
+tag). The final purge path removes fallback authority shims rather than
+keeping a second string-derived verdict alive.

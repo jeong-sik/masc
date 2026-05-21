@@ -27,16 +27,16 @@ let check_completion_contract_class label cls_opt =
 
 let check_capacity_class label cls_opt =
   match cls_opt with
-  | Some KT.Capacity_exhausted -> ()
+  | Some KT.Capacity_backpressure -> ()
   | Some other ->
       let other_str = KT.blocker_class_to_string other in
       fail
         (Printf.sprintf
-           "%s mapped to %s, expected Capacity_exhausted"
+           "%s mapped to %s, expected Capacity_backpressure"
            label
            other_str)
   | None ->
-      fail (Printf.sprintf "%s returned None, expected Capacity_exhausted" label)
+      fail (Printf.sprintf "%s returned None, expected Capacity_backpressure" label)
 
 let check_cascade_class label cls_opt =
   match cls_opt with
@@ -102,9 +102,9 @@ let test_turn_livelock_text_maps () =
 
 let test_capacity_backpressure_text_maps () =
   check_capacity_class
-    "capacity-exhausted text"
+    "capacity-backpressure text"
     (B.blocker_class_of_string
-       "Internal error: [masc_oas_error] {\"kind\":\"capacity_exhausted\",\
+       "Internal error: [masc_oas_error] {\"kind\":\"capacity_backpressure\",\
         \"detail\":\"client capacity key glm is full\"}")
 
 let test_legacy_cascade_slot_full_text_stays_cascade_exhausted () =

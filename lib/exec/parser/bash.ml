@@ -10,11 +10,11 @@ let make_parse_error (lexbuf : Lexing.lexbuf) : Parsed.parse_error =
 
 let is_env_name_start = function
   | 'A' .. 'Z' | 'a' .. 'z' | '_' -> true
-  | _ -> false
+  | _other -> false
 
 let is_env_name_char = function
   | 'A' .. 'Z' | 'a' .. 'z' | '0' .. '9' | '_' -> true
-  | _ -> false
+  | _other -> false
 
 let parse_env_assignment word =
   match String.index_opt word '=' with

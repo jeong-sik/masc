@@ -1,9 +1,9 @@
 ---
 rfc: "0126"
 title: "Silent fallback discipline (typed split for option/result wildcard arms)"
-status: Active
+status: Implemented
 created: 2026-05-17
-updated: 2026-05-21
+updated: 2026-05-22
 author: vincent
 supersedes: []
 superseded_by: null

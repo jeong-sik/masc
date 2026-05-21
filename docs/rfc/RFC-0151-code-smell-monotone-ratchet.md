@@ -1,14 +1,14 @@
 ---
 rfc: "0151"
 title: "4-metric monotone-decrease ratchet for code-smell metrics"
-status: Draft
+status: Implemented
 created: 2026-05-20
-updated: 2026-05-20
+updated: 2026-05-22
 author: vincent
 supersedes: []
 superseded_by: null
 related: ["0085", "0088", "0126"]
-implementation_prs: []
+implementation_prs: [16929, 17316, 17336]
 ---
 
 # RFC-0151 — 4-metric monotone-decrease ratchet for code-smell metrics

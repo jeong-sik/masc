@@ -984,6 +984,14 @@ let run_named
         terminal_error
     | candidate :: rest ->
       Eio_guard.fair_yield (); (* P0: keep fast-fail cascades scheduler-fair. *)
+      (* Phase A: no provider snapshot is available yet, so the boundary returns
+         [Capability_unknown] and preserves routing. Later phases only swap in
+         a real snapshot producer at this call site. *)
+      ignore
+        (Provider_capability.decide_required_action
+           (Provider_capability.unknown
+              ~provider_name:(Cascade_runtime_candidate.provider_label candidate))
+           ~required_tools:runtime_manifest_required_tool_names);
       let tier_admission_id = Cascade_runtime_candidate.tier_id candidate in
       let health_cooldown =
         Cascade_runtime_candidate.first_health_cooldown candidate

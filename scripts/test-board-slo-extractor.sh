@@ -13,6 +13,9 @@ mkdir -p "$masc_dir/tasks" "$masc_dir/logs"
 now="$(date +%s)"
 old=$((now - 200000))
 today="$(date -u +%Y-%m-%d)"
+tool_month="$(date -u +%Y-%m)"
+tool_day="$(date -u +%d)"
+mkdir -p "$masc_dir/tool_calls/$tool_month"
 
 cat >"$masc_dir/tasks/backlog.json" <<JSON
 {
@@ -41,11 +44,19 @@ done
 printf '{"id":"comment-old","post_id":"old","created_at":%s}\n' "$old" >>"$masc_dir/board_comments.jsonl"
 
 cat >"$masc_dir/logs/system_log_${today}.jsonl" <<JSONL
-{"level":"WARN","event":"cascade_attempt"}
-{"level":"ERROR","event":"cascade_attempt sandbox_image_missing"}
-{"level":"WARNING","event":"cascade_exhausted"}
-{"level":"INFO","event":"cascade_attempt"}
-{"level":"INFO","event":"cascade_attempt"}
+{"ts":$now,"level":"WARN","details":{"event":"cascade_attempt_terminal","outcome":"success"}}
+{"ts":$now,"level":"ERROR","event":"sandbox_image_missing","details":{"event":"cascade_attempt_terminal","outcome":"failure"}}
+{"ts":$now,"level":"WARNING","details":{"event":"cascade_attempt_terminal","outcome":"success"}}
+{"ts":$now,"level":"INFO","details":{"event":"cascade_attempt_terminal","outcome":"success"}}
+{"ts":$old,"level":"INFO","details":{"event":"cascade_attempt_terminal","outcome":"failure"}}
+JSONL
+
+cat >"$masc_dir/tool_calls/$tool_month/$tool_day.jsonl" <<JSONL
+{"ts":$now,"tool":"keeper_board_post","success":true,"semantic_success":true,"duration_ms":10}
+{"ts":$now,"tool":"keeper_board_comment","success":true,"duration_ms":20}
+{"ts":$now,"tool":"Bash","success":true,"semantic_success":false,"duration_ms":30}
+{"ts":$now,"tool":"Bash","success":false,"semantic_success":false,"duration_ms":40}
+{"ts":$old,"tool":"Bash","success":true,"semantic_success":true,"duration_ms":50}
 JSONL
 
 json="$(MASC_BASE_PATH="$fixture" "$REPO_ROOT/scripts/board-slo-extractor.sh" --json --offline)"
@@ -63,6 +74,8 @@ check '.metrics.posts_window == 2'
 check '.metrics.comments_window == 20'
 check '.metrics.high_churn_threads_48h == 1'
 check '.metrics.warn_error_window == 3'
+check '.metrics.tool_call_success_pct == 50'
+check '.metrics.bash_failure_pct == 100'
 check '.metrics.cascade_audit_failure_pct == 25'
 check '.metrics.docker_false_positive_24h == 1'
 check '.metrics.dashboard_proof == {}'

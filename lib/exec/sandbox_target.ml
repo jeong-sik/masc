@@ -38,13 +38,24 @@ type runner =
   timeout_sec:float ->
   Unix.process_status * string * string
 
+type pipeline_stage = {
+  argv : string list;
+  env : string array;
+  cwd : string option;
+}
+
+type pipeline_runner =
+  stages:pipeline_stage list ->
+  timeout_sec:float ->
+  Unix.process_status * string * string
+
 type t =
   | Host
-  | Docker of { image : string; runner : runner }
+  | Docker of { image : string; runner : runner; pipeline_runner : pipeline_runner option }
 
 let host () : t = Host
 
-let docker ~image ~runner : t = Docker { image; runner }
+let docker ~image ~runner ?pipeline_runner () : t = Docker { image; runner; pipeline_runner }
 
 let pp fmt = function
   | Host -> Format.pp_print_string fmt "host"

@@ -222,87 +222,26 @@ let artifact_threshold_bytes =
   max 1024 (env_int "MASC_EXEC_ARTIFACT_THRESHOLD_BYTES" 16384)
 ;;
 
-type quote_state =
-  | No_quote
-  | Single_quote
-  | Double_quote
-
-let strip_wrapping_quotes token =
-  let len = String.length token in
-  if len >= 2
-  then (
-    match token.[0], token.[len - 1] with
-    | '\'', '\'' | '"', '"' -> String.sub token 1 (len - 2)
-    | _ -> token)
-  else token
+let command_word_stages cmd =
+  match Masc_exec.Command_words.stages cmd with
+  | Ok stages ->
+      List.map
+        (fun words ->
+           List.map (fun (word : Masc_exec.Command_words.word) -> word.value) words)
+        stages
+  | Error _ -> []
 ;;
-
-let split_shell_fragments ~separator text =
-  let fragments = ref [] in
-  let buf = Buffer.create (String.length text) in
-  let quote_state = ref No_quote in
-  let escaped = ref false in
-  let push_fragment () =
-    let fragment = Buffer.contents buf |> String.trim in
-    Buffer.clear buf;
-    if fragment <> "" then fragments := fragment :: !fragments
-  in
-  String.iter
-    (fun ch ->
-       if !escaped
-       then (
-         Buffer.add_char buf ch;
-         escaped := false)
-       else (
-         match !quote_state, ch with
-         | Single_quote, '\'' ->
-           Buffer.add_char buf ch;
-           quote_state := No_quote
-         | Single_quote, _ -> Buffer.add_char buf ch
-         | Double_quote, '"' ->
-           Buffer.add_char buf ch;
-           quote_state := No_quote
-         | Double_quote, '\\' ->
-           Buffer.add_char buf ch;
-           escaped := true
-         | Double_quote, _ -> Buffer.add_char buf ch
-         | No_quote, '\\' ->
-           Buffer.add_char buf ch;
-           escaped := true
-         | No_quote, '\'' ->
-           Buffer.add_char buf ch;
-           quote_state := Single_quote
-         | No_quote, '"' ->
-           Buffer.add_char buf ch;
-           quote_state := Double_quote
-         | No_quote, _ when separator ch -> push_fragment ()
-         | No_quote, _ -> Buffer.add_char buf ch))
-    text;
-  push_fragment ();
-  List.rev !fragments
-;;
-
-let split_words text =
-  split_shell_fragments
-    ~separator:(function
-      | ' ' | '\t' | '\r' | '\n' -> true
-      | _ -> false)
-    text
-  |> List.map strip_wrapping_quotes
-;;
-
-let pipeline_segments cmd = split_shell_fragments ~separator:(fun ch -> ch = '|') cmd
 
 let first_segment_tokens cmd =
-  match pipeline_segments cmd with
+  match command_word_stages cmd with
   | [] -> []
-  | segment :: _ -> split_words segment
+  | tokens :: _ -> tokens
 ;;
 
 let last_segment_tokens cmd =
-  match List.rev (pipeline_segments cmd) with
+  match List.rev (command_word_stages cmd) with
   | [] -> []
-  | segment :: _ -> split_words segment
+  | tokens :: _ -> tokens
 ;;
 
 let git_global_option_takes_value = function

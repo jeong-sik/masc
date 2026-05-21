@@ -60,7 +60,26 @@ let typed_docker_sandbox_target ~turn_sandbox_factory ~meta ~cwd =
       | Ok (status, output) -> status, output, ""
       | Error err -> Unix.WEXITED 1, "", err
     in
-    Ok (Masc_exec.Sandbox_target.docker ~image ~runner)
+    let pipeline_runner ~stages ~timeout_sec =
+      let stages =
+        List.map
+          (fun stage ->
+            { Keeper_turn_sandbox_runtime.command_argv = stage.Masc_exec.Sandbox_target.argv
+            ; cwd = stage.cwd
+            })
+          stages
+      in
+      match
+        Keeper_turn_sandbox_runtime.run_exec_pipeline_with_status
+          runtime
+          ~timeout_sec
+          ~cwd
+          ~stages
+      with
+      | Ok result -> result
+      | Error err -> Unix.WEXITED 1, "", err
+    in
+    Ok (Masc_exec.Sandbox_target.docker ~image ~runner ~pipeline_runner ())
 
 let typed_docker_runtime_failure_fields output =
   if String_util.contains_substring output "sandbox_image_missing"

@@ -14,8 +14,6 @@ let status_script_path () =
 let nofile_status_script_path () =
   Filename.concat (source_root ()) "scripts/nofile-status.sh"
 
-let quote = Filename.quote
-
 let read_file path = In_channel.with_open_bin path In_channel.input_all
 
 let write_file path content =
@@ -47,31 +45,60 @@ let with_temp_dir prefix f =
   Unix.mkdir dir 0o755;
   Fun.protect ~finally:(fun () -> rm_rf dir) (fun () -> f dir)
 
-let run_shell ?(env = []) ~cwd cmd =
-  let env_prefix =
-    env
-    |> List.map (fun (k, v) -> Printf.sprintf "%s=%s" k (quote v))
-    |> String.concat " "
-  in
-  let full =
-    if env_prefix = ""
-    then Printf.sprintf "cd %s && %s" (quote cwd) cmd
-    else Printf.sprintf "cd %s && %s %s" (quote cwd) env_prefix cmd
-  in
+let env_array overrides =
+  let table = Hashtbl.create 64 in
+  Unix.environment ()
+  |> Array.iter (fun entry ->
+         match String.index_opt entry '=' with
+         | None -> ()
+         | Some idx ->
+             let key = String.sub entry 0 idx in
+             let value =
+               String.sub entry (idx + 1) (String.length entry - idx - 1)
+             in
+             Hashtbl.replace table key value);
+  List.iter (fun (key, value) -> Hashtbl.replace table key value) overrides;
+  Hashtbl.fold
+    (fun key value acc -> Printf.sprintf "%s=%s" key value :: acc)
+    table []
+  |> Array.of_list
+
+let run_process ?(env = []) ~cwd prog argv =
   let out = Filename.temp_file "docker-playground-gc-out" ".txt" in
   let err = Filename.temp_file "docker-playground-gc-err" ".txt" in
-  let wrapped = Printf.sprintf "%s > %s 2> %s" full (quote out) (quote err) in
-  let code = Sys.command wrapped in
+  let out_fd = Unix.openfile out [ Unix.O_WRONLY; Unix.O_TRUNC ] 0o600 in
+  let err_fd = Unix.openfile err [ Unix.O_WRONLY; Unix.O_TRUNC ] 0o600 in
+  let original_cwd = Sys.getcwd () in
+  let pid =
+    Fun.protect
+      ~finally:(fun () ->
+        Sys.chdir original_cwd;
+        Unix.close out_fd;
+        Unix.close err_fd)
+      (fun () ->
+        Sys.chdir cwd;
+        Unix.create_process_env prog argv (env_array env) Unix.stdin out_fd
+          err_fd)
+  in
+  let _, status = Unix.waitpid [] pid in
+  let code =
+    match status with
+    | Unix.WEXITED code -> code
+    | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> 255
+  in
   let stdout = read_file out in
   let stderr = read_file err in
   Sys.remove out;
   Sys.remove err;
-  code, stdout, stderr
+  (code, stdout, stderr)
 
-let run_shell_ok ?(env = []) ~cwd cmd =
-  let code, stdout, stderr = run_shell ~env ~cwd cmd in
-  if code <> 0 then failf "command failed (%d): %s\n%s" code cmd stderr;
-  stdout, stderr
+let run_process_ok ?(env = []) ~cwd prog argv =
+  let code, stdout, stderr = run_process ~env ~cwd prog argv in
+  if code <> 0 then failf "command failed (%d): %s\n%s" code prog stderr;
+  (stdout, stderr)
+
+let git_ok ?(env = []) ~cwd args =
+  ignore (run_process_ok ~env ~cwd "git" (Array.of_list ("git" :: args)))
 
 let contains_substring haystack needle =
   let hlen = String.length haystack in
@@ -84,33 +111,32 @@ let contains_substring haystack needle =
 
 let init_repo repo_dir =
   mkdir_p repo_dir;
-  ignore (run_shell_ok ~cwd:repo_dir "git init -q");
-  ignore (run_shell_ok ~cwd:repo_dir "git config user.email test@example.com");
-  ignore (run_shell_ok ~cwd:repo_dir "git config user.name Test");
+  git_ok ~cwd:repo_dir [ "init"; "-q" ];
+  git_ok ~cwd:repo_dir [ "config"; "user.email"; "test@example.com" ];
+  git_ok ~cwd:repo_dir [ "config"; "user.name"; "Test" ];
   write_file (Filename.concat repo_dir "README.md") "base\n";
-  ignore (run_shell_ok ~cwd:repo_dir "git add README.md");
-  ignore
-    (run_shell_ok
-       ~env:
-         [ "GIT_AUTHOR_DATE", "2000-01-01T00:00:00Z"
-         ; "GIT_COMMITTER_DATE", "2000-01-01T00:00:00Z"
-         ]
-       ~cwd:repo_dir
-       "git commit -q -m init")
+  git_ok ~cwd:repo_dir [ "add"; "README.md" ];
+  git_ok
+    ~env:
+      [ ( "GIT_AUTHOR_DATE", "2000-01-01T00:00:00Z" )
+      ; ( "GIT_COMMITTER_DATE", "2000-01-01T00:00:00Z" )
+      ]
+    ~cwd:repo_dir
+    [ "commit"; "-q"; "-m"; "init" ]
 
 let mark_path_old ~cwd path =
-  ignore
-    (run_shell_ok ~cwd
-       (Printf.sprintf "touch -t 200001010000 %s" (quote path)))
+  ignore (run_process_ok ~cwd "touch" [| "touch"; "-t"; "200001010000"; path |])
 
 let test_scripts_are_syntax_valid () =
-  let cmd =
-    Printf.sprintf "bash -n %s && bash -n %s && bash -n %s"
-      (quote (cleanup_script_path ()))
-      (quote (status_script_path ()))
-      (quote (nofile_status_script_path ()))
-  in
-  ignore (run_shell_ok ~cwd:(source_root ()) cmd)
+  ignore
+    (run_process_ok ~cwd:(source_root ()) "bash"
+       [| "bash"; "-n"; cleanup_script_path () |]);
+  ignore
+    (run_process_ok ~cwd:(source_root ()) "bash"
+       [| "bash"; "-n"; status_script_path () |]);
+  ignore
+    (run_process_ok ~cwd:(source_root ()) "bash"
+       [| "bash"; "-n"; nofile_status_script_path () |])
 
 let test_status_warns_on_fd_hotspot () =
   with_temp_dir "docker-playground-status-hotspot" (fun dir ->
@@ -138,11 +164,19 @@ EOF
         (Option.value ~default:"" (Sys.getenv_opt "PATH"))
     in
     let stdout, _ =
-      run_shell_ok ~env:[ "PATH", path ] ~cwd:(source_root ())
-        (Printf.sprintf
-           "%s --root %s --limit 5 --worktree-warn 1 --fd-warn 2"
-           (quote (status_script_path ()))
-           (quote root))
+      run_process_ok ~env:[ ("PATH", path) ] ~cwd:(source_root ())
+        (status_script_path ())
+        [|
+          status_script_path ();
+          "--root";
+          root;
+          "--limit";
+          "5";
+          "--worktree-warn";
+          "1";
+          "--fd-warn";
+          "2";
+        |]
     in
     check bool "worktree entries surfaced" true
       (contains_substring stdout "worktree_entries=2");
@@ -178,11 +212,19 @@ let test_status_warns_on_worktree_hotspot_when_lsof_fails () =
         (Option.value ~default:"" (Sys.getenv_opt "PATH"))
     in
     let stdout, _ =
-      run_shell_ok ~env:[ "PATH", path ] ~cwd:(source_root ())
-        (Printf.sprintf
-           "%s --root %s --limit 5 --worktree-warn 1 --fd-warn 2"
-           (quote (status_script_path ()))
-           (quote root))
+      run_process_ok ~env:[ ("PATH", path) ] ~cwd:(source_root ())
+        (status_script_path ())
+        [|
+          status_script_path ();
+          "--root";
+          root;
+          "--limit";
+          "5";
+          "--worktree-warn";
+          "1";
+          "--fd-warn";
+          "2";
+        |]
     in
     check bool "lsof failure surfaced" true
       (contains_substring stdout "fd_holders=unavailable (lsof failed)");
@@ -204,8 +246,8 @@ let test_status_cleanup_summary_surfaces_candidate_counts () =
     mkdir_p (Filename.concat repo_dir ".worktrees");
     let wt_path = Filename.concat repo_dir ".worktrees/stale-task" in
     ignore
-      (run_shell_ok ~cwd:repo_dir
-         (Printf.sprintf "git worktree add -q -b stale-task %s" (quote wt_path)));
+      (git_ok ~cwd:repo_dir
+         [ "worktree"; "add"; "-q"; "-b"; "stale-task"; wt_path ]);
     mark_path_old ~cwd:repo_dir wt_path;
     let fake_bin = Filename.concat dir "bin" in
     mkdir_p fake_bin;
@@ -215,12 +257,22 @@ let test_status_cleanup_summary_surfaces_candidate_counts () =
         (Option.value ~default:"" (Sys.getenv_opt "PATH"))
     in
     let stdout, _ =
-      run_shell_ok ~env:[ "PATH", path ] ~cwd:(source_root ())
-        (Printf.sprintf
-           "%s --root %s --limit 5 --worktree-warn 1 --cleanup-summary \
-            --cleanup-days 1 --aggressive-cleanup-days 0"
-           (quote (status_script_path ()))
-           (quote root))
+      run_process_ok ~env:[ ("PATH", path) ] ~cwd:(source_root ())
+        (status_script_path ())
+        [|
+          status_script_path ();
+          "--root";
+          root;
+          "--limit";
+          "5";
+          "--worktree-warn";
+          "1";
+          "--cleanup-summary";
+          "--cleanup-days";
+          "1";
+          "--aggressive-cleanup-days";
+          "0";
+        |]
     in
     check bool "cleanup summary surfaced" true
       (contains_substring stdout "Cleanup dry-run summary:");
@@ -251,14 +303,12 @@ let test_dry_run_lists_stale_clean_worktree () =
     mkdir_p (Filename.concat repo_dir ".worktrees");
     let wt_path = Filename.concat repo_dir ".worktrees/stale-task" in
     ignore
-      (run_shell_ok ~cwd:repo_dir
-         (Printf.sprintf "git worktree add -q -b stale-task %s" (quote wt_path)));
+      (git_ok ~cwd:repo_dir
+         [ "worktree"; "add"; "-q"; "-b"; "stale-task"; wt_path ]);
     mark_path_old ~cwd:repo_dir wt_path;
     let stdout, _ =
-      run_shell_ok ~cwd:(source_root ())
-        (Printf.sprintf "%s --root %s --days 1 --repo masc-mcp"
-           (quote (cleanup_script_path ()))
-           (quote root))
+      run_process_ok ~cwd:(source_root ()) (cleanup_script_path ())
+        [| cleanup_script_path (); "--root"; root; "--days"; "1"; "--repo"; "masc-mcp" |]
     in
     check bool "candidate listed" true (contains_substring stdout "CANDID");
     check bool "dry-run reminder" true (contains_substring stdout "Pass --apply");
@@ -272,13 +322,11 @@ let test_recent_checkout_of_old_commit_is_not_candidate () =
     mkdir_p (Filename.concat repo_dir ".worktrees");
     let wt_path = Filename.concat repo_dir ".worktrees/recent-task" in
     ignore
-      (run_shell_ok ~cwd:repo_dir
-         (Printf.sprintf "git worktree add -q -b recent-task %s" (quote wt_path)));
+      (git_ok ~cwd:repo_dir
+         [ "worktree"; "add"; "-q"; "-b"; "recent-task"; wt_path ]);
     let stdout, _ =
-      run_shell_ok ~cwd:(source_root ())
-        (Printf.sprintf "%s --root %s --days 1 --repo masc-mcp"
-           (quote (cleanup_script_path ()))
-           (quote root))
+      run_process_ok ~cwd:(source_root ()) (cleanup_script_path ())
+        [| cleanup_script_path (); "--root"; root; "--days"; "1"; "--repo"; "masc-mcp" |]
     in
     check bool "candidate not listed" false (contains_substring stdout "CANDID");
     check bool "recent counted" true (contains_substring stdout "recent=1");
@@ -292,14 +340,21 @@ let test_apply_removes_stale_clean_worktree () =
     mkdir_p (Filename.concat repo_dir ".worktrees");
     let wt_path = Filename.concat repo_dir ".worktrees/stale-task" in
     ignore
-      (run_shell_ok ~cwd:repo_dir
-         (Printf.sprintf "git worktree add -q -b stale-task %s" (quote wt_path)));
+      (git_ok ~cwd:repo_dir
+         [ "worktree"; "add"; "-q"; "-b"; "stale-task"; wt_path ]);
     mark_path_old ~cwd:repo_dir wt_path;
     let stdout, _ =
-      run_shell_ok ~cwd:(source_root ())
-        (Printf.sprintf "%s --root %s --days 1 --repo masc-mcp --apply"
-           (quote (cleanup_script_path ()))
-           (quote root))
+      run_process_ok ~cwd:(source_root ()) (cleanup_script_path ())
+        [|
+          cleanup_script_path ();
+          "--root";
+          root;
+          "--days";
+          "1";
+          "--repo";
+          "masc-mcp";
+          "--apply";
+        |]
     in
     check bool "removed listed" true (contains_substring stdout "REMOVED");
     check bool "worktree removed" false (Sys.file_exists wt_path))
@@ -312,15 +367,22 @@ let test_apply_skips_dirty_worktree () =
     mkdir_p (Filename.concat repo_dir ".worktrees");
     let wt_path = Filename.concat repo_dir ".worktrees/dirty-task" in
     ignore
-      (run_shell_ok ~cwd:repo_dir
-         (Printf.sprintf "git worktree add -q -b dirty-task %s" (quote wt_path)));
+      (git_ok ~cwd:repo_dir
+         [ "worktree"; "add"; "-q"; "-b"; "dirty-task"; wt_path ]);
     write_file (Filename.concat wt_path "dirty.txt") "keep me\n";
     mark_path_old ~cwd:repo_dir wt_path;
     let stdout, _ =
-      run_shell_ok ~cwd:(source_root ())
-        (Printf.sprintf "%s --root %s --days 1 --repo masc-mcp --apply"
-           (quote (cleanup_script_path ()))
-           (quote root))
+      run_process_ok ~cwd:(source_root ()) (cleanup_script_path ())
+        [|
+          cleanup_script_path ();
+          "--root";
+          root;
+          "--days";
+          "1";
+          "--repo";
+          "masc-mcp";
+          "--apply";
+        |]
     in
     check bool "dirty listed" true (contains_substring stdout "DIRTY");
     check bool "dirty worktree retained" true (Sys.file_exists wt_path))
@@ -335,21 +397,34 @@ let test_include_broken_removes_old_non_git_directory () =
     write_file (Filename.concat broken_path "note.txt") "orphan\n";
     mark_path_old ~cwd:dir broken_path;
     let dry_stdout, _ =
-      run_shell_ok ~cwd:(source_root ())
-        (Printf.sprintf
-           "%s --root %s --days 1 --repo masc-mcp --include-broken"
-           (quote (cleanup_script_path ()))
-           (quote root))
+      run_process_ok ~cwd:(source_root ()) (cleanup_script_path ())
+        [|
+          cleanup_script_path ();
+          "--root";
+          root;
+          "--days";
+          "1";
+          "--repo";
+          "masc-mcp";
+          "--include-broken";
+        |]
     in
     check bool "broken candidate listed" true
       (contains_substring dry_stdout "BROKEN_CANDID");
     check bool "broken retained after dry-run" true (Sys.file_exists broken_path);
     let apply_stdout, _ =
-      run_shell_ok ~cwd:(source_root ())
-        (Printf.sprintf
-           "%s --root %s --days 1 --repo masc-mcp --include-broken --apply"
-           (quote (cleanup_script_path ()))
-           (quote root))
+      run_process_ok ~cwd:(source_root ()) (cleanup_script_path ())
+        [|
+          cleanup_script_path ();
+          "--root";
+          root;
+          "--days";
+          "1";
+          "--repo";
+          "masc-mcp";
+          "--include-broken";
+          "--apply";
+        |]
     in
     check bool "broken removed listed" true
       (contains_substring apply_stdout "BROKEN_REMOVED");

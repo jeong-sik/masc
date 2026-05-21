@@ -619,6 +619,18 @@ let make_config base_path : Masc_mcp.Coord.config =
   Unix.putenv "MASC_BASE_PATH" base_path;
   Masc_mcp.Coord.default_config base_path
 
+let run_git args =
+  let devnull = Unix.openfile "/dev/null" [ Unix.O_WRONLY ] 0 in
+  Fun.protect
+    ~finally:(fun () -> Unix.close devnull)
+    (fun () ->
+      let argv = Array.of_list ("git" :: args) in
+      try
+        let pid = Unix.create_process "git" argv Unix.stdin devnull devnull in
+        ignore (Unix.waitpid [] pid)
+      with
+      | Unix.Unix_error _ -> ())
+
 (* Ensure the base path exists as a real git repository so
    Tool_code.validate_path (which requires
    Coord_git.git_root ~base_path) can canonicalise against it.
@@ -638,18 +650,6 @@ let fresh_base_path () =
   (* Initialise a minimal git repository so validate_path has a
      canonical root. An empty `git init` plus an initial commit
      is sufficient; Coord_git.git_root walks up from base_path. *)
-  let run_git args =
-    let devnull = Unix.openfile "/dev/null" [ Unix.O_WRONLY ] 0 in
-    Fun.protect
-      ~finally:(fun () -> Unix.close devnull)
-      (fun () ->
-        let argv = Array.of_list ("git" :: args) in
-        try
-          let pid = Unix.create_process "git" argv Unix.stdin devnull devnull in
-          ignore (Unix.waitpid [] pid)
-        with
-        | Unix.Unix_error _ -> ())
-  in
   run_git [ "init"; "-b"; "main"; dir ];
   run_git [ "-C"; dir; "config"; "user.email"; "iter6@example.test" ];
   run_git [ "-C"; dir; "config"; "user.name"; "Iter6 Test" ];

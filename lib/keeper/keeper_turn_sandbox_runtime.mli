@@ -47,6 +47,21 @@ val run_exec_with_status :
     process status and merged output without applying success-code policy.
     This is the argv-level entrypoint used by Shell IR dispatch. *)
 
+type exec_pipeline_stage = {
+  command_argv : string list;
+  cwd : string option;
+}
+
+val run_exec_pipeline_with_status :
+  t ->
+  timeout_sec:float ->
+  cwd:string ->
+  stages:exec_pipeline_stage list ->
+  (Unix.process_status * string * string, string) result
+(** Execute [stages] as a streaming argv pipeline inside the turn-scoped
+    container. Each stage is a separate [docker exec -i] process and adjacent
+    stages are connected by host-side process pipes. *)
+
 val run_command :
   ?ok_exit_codes:int list ->
   t ->

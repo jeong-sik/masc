@@ -99,9 +99,9 @@ let bash_shape_block_alternatives ~cmd = function
     else if command_looks_like_find_pipeline cmd || lowercase_contains cmd "find "
     then
       [
-        "Bash command='find . -name \"*.ml\"' cwd='repos/REPO/.worktrees/TASK'";
-        "Bash command='find . -name \"*.mli\"' cwd='repos/REPO/.worktrees/TASK'";
-        "Bash command='find lib -name \"*.ml\"' cwd='repos/REPO'";
+        "keeper_shell op=find path=lib pattern=*.ml limit=50 when visible";
+        "keeper_shell op=find path=. pattern=*.mli limit=50 cwd=repos/REPO/.worktrees/TASK when visible";
+        "Bash command='find lib -name \"*.ml\"' cwd='repos/REPO' only if no structured search/listing tool is visible";
       ]
     else
       [
@@ -123,7 +123,8 @@ let bash_shape_block_alternatives ~cmd = function
       ]
   | Substitution ->
     [
-      "Bash command='rg --files lib' cwd='repos/REPO'";
+      "keeper_shell op=find path=lib pattern=* limit=100 when visible";
+      "Grep pattern=search-term path=lib";
       "Read file_path=path/from/previous-step";
     ]
   | Repo_wide_scan ->
@@ -138,12 +139,12 @@ let bash_shape_block_alternatives ~cmd = function
       [
         "Grep pattern=search-term path=repos/masc-mcp/lib glob=*.ml";
         "Grep pattern=search-term path=repos/oas/src glob=*.ml";
-        "Bash command='find lib -name \"*.ml\"' cwd='repos/REPO'";
+        "keeper_shell op=find path=lib pattern=*.ml limit=100 when visible";
       ]
     else
       [
         "Grep pattern=search-term path=lib";
-        "Bash command='find lib -name \"*.ml\"' cwd='repos/REPO'";
+        "keeper_shell op=find path=lib pattern=*.ml limit=100 when visible";
         "Bash command='git log --oneline -20' cwd='repos/REPO'";
       ]
 

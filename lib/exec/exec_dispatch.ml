@@ -110,6 +110,24 @@ let resolve_env env_bindings =
     env_bindings
   |> Array.of_list
 
+let env_key entry =
+  match String.index_opt entry '=' with
+  | None -> entry
+  | Some idx -> String.sub entry 0 idx
+
+let resolve_host_env = function
+  | [] -> None
+  | env_bindings ->
+      let overrides = resolve_env env_bindings |> Array.to_list in
+      let override_keys = List.map env_key overrides in
+      let inherited =
+        Unix.environment ()
+        |> Array.to_list
+        |> List.filter (fun entry ->
+          not (List.mem (env_key entry) override_keys))
+      in
+      Some (Array.of_list (inherited @ overrides))
+
 (* --- simple command execution --- *)
 
 (* Dispatch a simple command via the IR-carried Sandbox_target.
@@ -145,6 +163,7 @@ let dispatch_simple ?timeout_sec ?stdin_content (s : Shell_ir.simple) =
     match s.sandbox with
     | Host ->
       let raw_source = String.concat " " argv in
+      let host_env = resolve_host_env s.env in
       let run () =
         match stdin_content with
         | None ->
@@ -153,7 +172,7 @@ let dispatch_simple ?timeout_sec ?stdin_content (s : Shell_ir.simple) =
             ~raw_source
             ~summary:"exec dispatch simple"
             ~timeout_sec
-            ~env
+            ?env:host_env
             ?cwd
             argv
         | Some stdin_content ->
@@ -162,7 +181,7 @@ let dispatch_simple ?timeout_sec ?stdin_content (s : Shell_ir.simple) =
             ~raw_source
             ~summary:"exec dispatch simple stdin"
             ~timeout_sec
-            ~env
+            ?env:host_env
             ?cwd
             ~stdin_content
             argv
@@ -191,9 +210,9 @@ let host_pipeline_specs stages =
     | Shell_ir.Simple simple :: rest ->
         (match simple.sandbox with
          | Host when simple.redirects = [] ->
-             let argv, env, cwd = process_spec_of_simple simple in
+             let argv, _env, cwd = process_spec_of_simple simple in
              let stage : Process_eio.pipeline_stage =
-               { argv; env = Some env; cwd }
+               { argv; env = resolve_host_env simple.env; cwd }
              in
              loop (stage :: acc) rest
          | _ -> None)

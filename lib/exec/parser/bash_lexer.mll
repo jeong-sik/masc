@@ -8,12 +8,17 @@
 {
   open Bash_subset
 
-  (* Token budget — each lexeme increments a counter the parser
-     consults.  50k ceiling per RFC v5 plan; enforced at parse_string
-     level, not here (lexer only counts). *)
+  (* Token budget — each lexeme increments a counter.  The 50k ceiling
+     is enforced in the lexer so large inputs abort before Menhir builds
+     an oversized stage list. *)
   let token_count = ref 0
+  let token_limit = 50_000
+  exception Token_limit_exceeded
   let reset_tokens () = token_count := 0
-  let incr_tokens () = incr token_count
+  let incr_tokens () =
+    incr token_count;
+    if !token_count > token_limit then raise Token_limit_exceeded
+  ;;
   let get_tokens () = !token_count
 }
 

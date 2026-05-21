@@ -97,5 +97,6 @@ let parse_string (source : string) : Shell_ir.t Parsed.t =
     let raw = Bash_subset.command Bash_lexer.token lexbuf in
     to_shell_ir raw
   with
+  | Bash_lexer.Token_limit_exceeded -> Parsed.Parse_aborted `Token_limit_50k
   | Bash_subset.Error -> map_error_or_classify source lexbuf
   | Failure _ -> map_error_or_classify source lexbuf

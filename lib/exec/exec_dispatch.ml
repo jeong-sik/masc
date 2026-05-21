@@ -190,7 +190,7 @@ let host_pipeline_specs stages =
     | [] -> Some (List.rev acc)
     | Shell_ir.Simple simple :: rest ->
         (match simple.sandbox with
-         | Host ->
+         | Host when simple.redirects = [] ->
              let argv, env, cwd = process_spec_of_simple simple in
              let stage : Process_eio.pipeline_stage =
                { argv; env = Some env; cwd }

@@ -1074,6 +1074,9 @@ let run_named
         | Cascade_attempt_liveness_config.Enforce, false, Some _ -> "legacy_outer_wall"
         | Cascade_attempt_liveness_config.Enforce, false, None ->
           "oas_max_execution_time"
+        | Cascade_attempt_liveness_config.Observe, false, Some _ -> "legacy_outer_wall"
+        | Cascade_attempt_liveness_config.Observe, false, None ->
+          "oas_max_execution_time"
       in
       let liveness_budget_source =
         if liveness_observer_attached then (

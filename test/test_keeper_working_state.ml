@@ -108,6 +108,28 @@ let test_json_roundtrip () =
     check int "resolved count" 1 (List.length decoded.resolved_loops);
     check bool "valid" true (Result.is_ok (WS.validate decoded))
 
+let test_projector_maps_snapshot_items_to_active_loops () =
+  let snapshot =
+    { Masc_mcp.Keeper_memory_policy.empty_keeper_state_snapshot with
+      next_items = [ "finish PR"; " "; "finish PR" ]
+    ; open_questions = [ "check CI?" ]
+    }
+  in
+  let state =
+    Masc_mcp.Keeper_working_state_projector.of_state_snapshot
+      ~keeper_name:"keeper-a"
+      ~trace_id:"trace-1"
+      ~keeper_turn_id:7
+      ~updated_at_iso:"2026-05-21T02:00:00+09:00"
+      ~updated_at_unix:3.0
+      snapshot
+  in
+  check int "deduped active loop count" 2 (WS.active_open_loop_count state);
+  check (list string) "digest covers active loops"
+    (List.map (fun loop -> loop.WS.id) state.active_loops)
+    state.prompt_digest_ids;
+  check bool "valid projected state" true (Result.is_ok (WS.validate state))
+
 let () =
   run "Keeper_working_state"
     [
@@ -128,5 +150,7 @@ let () =
           test_case "active loop must appear in digest" `Quick
             test_validate_rejects_active_missing_from_digest;
           test_case "json roundtrip" `Quick test_json_roundtrip;
+          test_case "projector maps snapshot items to active loops" `Quick
+            test_projector_maps_snapshot_items_to_active_loops;
         ] );
     ]

@@ -50,11 +50,6 @@ lib/autonomous/autonomous_bridge.ml:101
 lib/autonomous/autonomous_executor.ml:25
 lib/autonomous/stimulus.ml:38
 lib/autonomous/wirein_helpers.ml:7
-lib/autoresearch_knowledge.ml:42
-lib/autoresearch/autoresearch_git.ml:204
-lib/autoresearch/autoresearch_git.ml:213
-lib/autoresearch/autoresearch_git.ml:260
-lib/autoresearch/autoresearch_metric.ml:27
 lib/backend/backend_types.ml:104
 lib/backend/backend.ml:639
 lib/backend/backend.ml:643
@@ -247,9 +242,6 @@ lib/dashboard/dashboard_governance_judge.ml:416
 lib/dashboard/dashboard_governance_judge.ml:480
 lib/dashboard/dashboard_governance_judge.ml:496
 lib/dashboard/dashboard_governance_judge.ml:689
-lib/dashboard/dashboard_http_autoresearch.ml:195
-lib/dashboard/dashboard_http_autoresearch.ml:461
-lib/dashboard/dashboard_http_autoresearch.ml:474
 lib/dashboard/dashboard_http_helpers.ml:78
 lib/dashboard/dashboard_http_helpers.ml:143
 lib/dashboard/dashboard_http_helpers.ml:153

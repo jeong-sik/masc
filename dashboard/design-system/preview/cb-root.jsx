@@ -239,12 +239,6 @@ function App() {
         <DCArtboard id="ep-learn" label="B · Learnings extraction (all episodes grouped)"  width={920}  height={420}><EpisodeLearnings/></DCArtboard>
       </DCSection>
 
-      <DCSection id="autoresearch" title="K4 · Autoresearch" subtitle="ar-* loops + findings.jsonl — hypothesis · evidence · conclusion · confidence">
-        <DCArtboard id="ar-list"  label="A · Loop list (6 loops, open / closed)"           width={1080} height={380}><ARLoopList/></DCArtboard>
-        <DCArtboard id="ar-find"  label="B · Finding card (select f-001/002/003)"          width={920}  height={500}><ARFindingCard/></DCArtboard>
-        <DCArtboard id="ar-flow"  label="C · Hypothesis → evidence → conclusion flow"      width={780}  height={480}><ARHypothesisFlow/></DCArtboard>
-      </DCSection>
-
     </DesignCanvas>
   );
 }

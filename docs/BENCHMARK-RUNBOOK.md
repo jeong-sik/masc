@@ -78,7 +78,7 @@ Command Plane search-fabric benchmark는 제거되었다. `best_first_v1` synthe
 Phase 1 corpus는 `masc-mcp` 단일 repo다.
 
 - front door:
-  - none; the legacy `masc_autoresearch_cycle` path is retired
+  - none; benchmark inputs are read from command-plane truth surfaces and artifacts
 - fairness:
   - same model
   - same time budget

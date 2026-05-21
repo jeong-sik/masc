@@ -158,30 +158,8 @@ let all_entries =
       ~tool_name:"masc_operator_snapshot"
       ()
   ; entry
-      ~id:"monitoring.runtime"
-      ~label:"Live Runtime"
-      ~exposure_status:"main"
-      ~hidden_from_nav:false
-      ~meets_main_gate:true
-      ~rationale:"Canonical runtime surface for cascade routing and provider health."
-      ~route_hash:"#monitoring?section=runtime"
-      ~live_spotcheck:"/api/v1/cascade/health"
-      ~tool_name:"masc_operator_snapshot"
-      ()
-  ; entry
-      ~id:"monitoring.cascade-config"
-      ~label:"Cascade Config"
-      ~exposure_status:"main"
-      ~hidden_from_nav:false
-      ~meets_main_gate:true
-      ~rationale:"Dedicated cascade.toml editor and diagnostics surface."
-      ~route_hash:"#monitoring?section=cascade-config"
-      ~live_spotcheck:"/api/v1/cascade/config"
-      ~tool_name:"masc_operator_snapshot"
-      ()
-  ; entry
       ~id:"monitoring.agents"
-      ~label:"Agent Observatory"
+      ~label:"Keeper Operations"
       ~exposure_status:"main"
       ~hidden_from_nav:false
       ~meets_main_gate:true
@@ -193,7 +171,7 @@ let all_entries =
       ()
   ; entry
       ~id:"monitoring.fleet-health"
-      ~label:"System Telemetry"
+      ~label:"Tool Monitor"
       ~exposure_status:"main"
       ~hidden_from_nav:false
       ~meets_main_gate:true
@@ -203,11 +181,44 @@ let all_entries =
       ~tool_name:"masc_operator_snapshot"
       ()
   ; entry
-      ~id:"monitoring.doctor"
-      ~label:"Doctor"
+      ~id:"monitoring.runtime"
+      ~label:"Cascade & Runtime"
       ~exposure_status:"main"
       ~hidden_from_nav:false
       ~meets_main_gate:true
+      ~rationale:"Canonical runtime surface for cascade routing and provider health."
+      ~route_hash:"#monitoring?section=runtime"
+      ~live_spotcheck:"/api/v1/cascade/health"
+      ~tool_name:"masc_operator_snapshot"
+      ()
+  ; entry
+      ~id:"monitoring.observatory"
+      ~label:"Evidence Timeline"
+      ~exposure_status:"main"
+      ~hidden_from_nav:false
+      ~meets_main_gate:true
+      ~rationale:"Live collaboration and investigation timeline promoted to Monitor."
+      ~route_hash:"#monitoring?section=observatory"
+      ~fixture_harness:"dune exec ./test/test_activity_graph.exe"
+      ~live_spotcheck:"/api/v1/activity/graph"
+      ()
+  ; entry
+      ~id:"monitoring.cascade-config"
+      ~label:"Cascade Config"
+      ~exposure_status:"diagnostic"
+      ~hidden_from_nav:true
+      ~meets_main_gate:false
+      ~rationale:"Dedicated cascade.toml editor and diagnostics surface."
+      ~route_hash:"#monitoring?section=cascade-config"
+      ~live_spotcheck:"/api/v1/cascade/config"
+      ~tool_name:"masc_operator_snapshot"
+      ()
+  ; entry
+      ~id:"monitoring.doctor"
+      ~label:"Doctor"
+      ~exposure_status:"diagnostic"
+      ~hidden_from_nav:true
+      ~meets_main_gate:false
       ~rationale:"Sidecar and config doctor diagnostics promoted to Monitor."
       ~route_hash:"#monitoring?section=doctor"
       ~live_spotcheck:"/api/v1/dashboard/doctor"
@@ -216,9 +227,9 @@ let all_entries =
   ; entry
       ~id:"monitoring.transport-health"
       ~label:"Transport Health"
-      ~exposure_status:"main"
-      ~hidden_from_nav:false
-      ~meets_main_gate:true
+      ~exposure_status:"diagnostic"
+      ~hidden_from_nav:true
+      ~meets_main_gate:false
       ~rationale:"Transport health read model for SSE, gRPC, WebSocket, and WebRTC."
       ~route_hash:"#monitoring?section=transport-health"
       ~live_spotcheck:"/api/v1/dashboard/transport-health"
@@ -227,9 +238,9 @@ let all_entries =
   ; entry
       ~id:"monitoring.feature-health"
       ~label:"Feature Flags"
-      ~exposure_status:"main"
-      ~hidden_from_nav:false
-      ~meets_main_gate:true
+      ~exposure_status:"diagnostic"
+      ~hidden_from_nav:true
+      ~meets_main_gate:false
       ~rationale:"Feature flag rollout and health snapshot promoted to Monitor."
       ~route_hash:"#monitoring?section=feature-health"
       ~live_spotcheck:"/api/v1/dashboard/feature-health"
@@ -248,22 +259,11 @@ let all_entries =
       ~tool_name:"masc_operator_snapshot"
       ()
   ; entry
-      ~id:"monitoring.observatory"
-      ~label:"Activity Timeline"
-      ~exposure_status:"main"
-      ~hidden_from_nav:false
-      ~meets_main_gate:true
-      ~rationale:"Live collaboration and investigation timeline promoted to Monitor."
-      ~route_hash:"#monitoring?section=observatory"
-      ~fixture_harness:"dune exec ./test/test_activity_graph.exe"
-      ~live_spotcheck:"/api/v1/activity/graph"
-      ()
-  ; entry
       ~id:"monitoring.cognition"
       ~label:"Keeper Cognition"
-      ~exposure_status:"main"
-      ~hidden_from_nav:false
-      ~meets_main_gate:true
+      ~exposure_status:"diagnostic"
+      ~hidden_from_nav:true
+      ~meets_main_gate:false
       ~rationale:"Keeper cognition and memory drill-down promoted to Monitor."
       ~route_hash:"#monitoring?section=cognition"
       ~live_spotcheck:"/api/v1/dashboard/memory-subsystems"
@@ -365,16 +365,6 @@ let all_entries =
       ~route_hash:"#lab?section=tools"
       ~live_spotcheck:"/api/v1/dashboard/tools"
       ~tool_name:"masc_surface_audit"
-      ()
-  ; entry
-      ~id:"lab.autoresearch"
-      ~label:"Autoresearch"
-      ~exposure_status:"lab"
-      ~hidden_from_nav:false
-      ~meets_main_gate:false
-      ~rationale:"Research-loop diagnostics retained under Lab."
-      ~route_hash:"#lab?section=autoresearch"
-      ~live_spotcheck:"/api/v1/autoresearch/loops"
       ()
   ; entry
       ~id:"lab.harness"

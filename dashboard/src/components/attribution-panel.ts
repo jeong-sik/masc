@@ -33,7 +33,6 @@ const KNOWN_GATES = [
   'keeper_fsm',
   'worker_dev_tools',
   'accountability',
-  'autoresearch',
   'oas_completion',
   'agent_lifecycle',
 ] as const

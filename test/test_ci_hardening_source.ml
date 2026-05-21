@@ -726,7 +726,7 @@ let test_oas_pin_source_contracts () =
     (file_contains_pattern "scripts/check-oas-pin.sh" "agent_sdk.cmxa");
   check bool "oas pin check validates llm provider native archive" true
     (file_contains_pattern "scripts/check-oas-pin.sh" "llm_provider.cmxa");
-  (* #13095: Metric_contract is consumed by autoresearch_metric.ml; if
+  (* #13095: Metric_contract is consumed by local OAS integrations; if
      check-oas-pin.sh stops verifying its cmi, a stale opam switch can
      pass the artifact gate and produce an incomprehensible build
      failure later in lib/. *)
@@ -2237,15 +2237,9 @@ let test_oas_capacity_restore_contracts () =
   check bool "governance judge selection is routed through cascade config" true
     (file_contains_pattern "lib/dashboard/dashboard_governance_judge.ml"
        "Keeper_cascade_profile.Governance_judge");
-  check bool "autoresearch background gating restores OAS capacity query" true
-    (file_contains_pattern "lib/autoresearch_codegen.ml"
-       "Cascade_runtime.local_capacity_for_selections ~sw ~net");
   check bool "cascade config no longer exposes legacy local capacity parser" true
     (file_not_contains_pattern "lib/cascade/cascade_config.mli"
-       "val local_capacity_for_selections");
-  check bool "autoresearch uses Eio context fallback for capacity probing" true
-    (file_contains_pattern "lib/autoresearch_codegen.ml"
-       "Eio_context.get_switch_opt (), Eio_context.get_net_opt ()")
+       "val local_capacity_for_selections")
 
 let test_dashboard_timeout_guard_contracts () =
   check bool "http transport health route uses cached dashboard helper" true

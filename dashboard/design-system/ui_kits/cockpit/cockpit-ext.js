@@ -20,8 +20,8 @@
     "feat/keeper-clarity": "runtime",
     "fix/dashboard-9712":  "dashboard",
     "wt/sangsu-smoke":     "viewer",
-    "ar-93ff2489":         "runtime",
-    "ar-aadab70d":         "mood",
+    "research/cascade-step2": "runtime",
+    "research/latency-tail":  "mood",
   };
 
   // Inject repo metadata into MASC_P2 once it exists.

@@ -217,7 +217,7 @@ Tracking issue: `#1012 v2.92.0 closeout: Product Portfolio Trim`
 
 Includes:
 
-- category review for TRPG, Voice, Autoresearch, MDAL, and RISC
+- category review for TRPG, Voice, MDAL, and RISC
 - explicit graduation criteria for Tier 2 promotion
 - archive decisions for stale or unowned surfaces
 

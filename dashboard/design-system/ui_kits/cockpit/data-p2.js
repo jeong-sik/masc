@@ -4,15 +4,15 @@
 window.MASC_P2 = (function () {
 
   // ─── IDE BACKBONE (branches + operator nudges) ──────────────────
-  // Branches seen in board posts + autoresearch + worktree records.
+  // Branches seen in board posts + worktree records.
   const branches = [
     { name: "main",                   ahead: 0, behind: 0,  status: "clean",   keepers: ["nick0cave","masc-improver","sangsu","qa-king","rama"], head: "da11b0632", tag: "PRIMARY" },
     { name: "release-0.42",           ahead: 0, behind: 3,  status: "clean",   keepers: ["nick0cave"],                                              head: "5a91c00f4", tag: "RELEASE" },
     { name: "feat/keeper-clarity",    ahead: 14,behind: 2,  status: "dirty",   keepers: ["masc-improver","sangsu"],                                 head: "918fd2c0a", tag: "FEATURE" },
     { name: "fix/dashboard-9712",     ahead: 2, behind: 1,  status: "dirty",   keepers: ["nick0cave"],                                              head: "51f062b9a", tag: "FIX" },
     { name: "wt/sangsu-smoke",        ahead: 7, behind: 5,  status: "stale",   keepers: ["sangsu"],                                                 head: "c0e814e21", tag: "WORKTREE" },
-    { name: "ar-93ff2489",            ahead: 1, behind: 18, status: "research",keepers: ["scholar","ramarama"],                                     head: "44a1b903d", tag: "AUTORESEARCH" },
-    { name: "ar-aadab70d",            ahead: 0, behind: 22, status: "research",keepers: ["ramarama"],                                               head: "8e221fc18", tag: "AUTORESEARCH" },
+    { name: "research/cascade-step2", ahead: 1, behind: 18, status: "research",keepers: ["scholar","ramarama"],                                     head: "44a1b903d", tag: "RESEARCH" },
+    { name: "research/latency-tail",  ahead: 0, behind: 22, status: "research",keepers: ["ramarama"],                                               head: "8e221fc18", tag: "RESEARCH" },
   ];
 
   // Operator-nudge log — humans don't drive, they kibitz from the side.
@@ -22,7 +22,7 @@ window.MASC_P2 = (function () {
     { id:"n-013b", at:"16:20:36Z", channel:"suggest",  to:["qa-king"],         body:"flake 재현 로그를 붙이고 retry window 고정",               ack:false },
     { id:"n-013", at:"16:14:02Z", channel:"approve",  to:["nick0cave"],       body:"PR #9712 backport approve",                                ack:true  },
     { id:"n-012", at:"15:51:27Z", channel:"reject",   to:["qa-king"],         body:"flake re-run 거부 — 실 실패로 처리",                       ack:true  },
-    { id:"n-011", at:"15:32:00Z", channel:"redirect", to:["rama","scholar"],  body:"cascade regression 보지 말고 ar-93ff2489 우선",            ack:true  },
+    { id:"n-011", at:"15:32:00Z", channel:"redirect", to:["rama","scholar"],  body:"cascade regression 원인 분석을 우선",                   ack:true  },
     { id:"n-010", at:"15:08:44Z", channel:"hint",     to:["taskmaster"],      body:"task-038 중복, cancel 해도 됨",                            ack:true  },
     { id:"n-009", at:"14:42:18Z", channel:"approve",  to:["masc-improver"],   body:"keeper.claim() 리팩터링 plan OK",                          ack:true  },
   ];
@@ -50,7 +50,7 @@ window.MASC_P2 = (function () {
     { id:"task-035", branch:"feat/keeper-clarity",    keeper:"masc-improver", title:"Refactor keeper.claim() for clarity",          status:"running",  goal:"goal-keeper-clarity",     age:"5m",  claim_age:"5m",  drift:false, tools:"keeper_edit" },
     { id:"task-027", branch:"main",                   keeper:"sangsu",        title:"또바로 PR 하기 검증",                          status:"pending",  goal:"goal-keeper-clarity",     age:"8m",  claim_age:"—",   drift:false, tools:"keeper_test" },
     { id:"task-026", branch:"wt/sangsu-smoke",        keeper:"qa-king",       title:"harness artifact cleanup",                    status:"fail",     goal:"goal-merge-blockers",     age:"12m", claim_age:"11m", drift:true,  tools:"keeper_bash" },
-    { id:"task-019", branch:"ar-93ff2489",            keeper:"ramarama",      title:"Cascade regression @step=2 — root cause",     status:"stalled",  goal:"goal-cascade-stability",  age:"22m", claim_age:"22m", drift:true,  tools:"keeper_read" },
+    { id:"task-019", branch:"research/cascade-step2", keeper:"ramarama",      title:"Cascade regression @step=2 — root cause",     status:"stalled",  goal:"goal-cascade-stability",  age:"22m", claim_age:"22m", drift:true,  tools:"keeper_read" },
     { id:"task-038", branch:"main",                   keeper:null,            title:"[DUP] keeper.claim() doc",                    status:"cancelled",goal:"goal-keeper-clarity",     age:"3h",  claim_age:"—",   drift:false, tools:"—" },
     { id:"task-040", branch:"main",                   keeper:"issue_king",    title:"PR #9712 regression — verify already merged", status:"done",     goal:"goal-merge-blockers",     age:"4h",  claim_age:"—",   drift:false, tools:"keeper_pr" },
     { id:"task-041", branch:"feat/keeper-clarity",    keeper:null,            title:"Backport keeper-clarity runbook to release",  status:"queued",   goal:"goal-keeper-clarity",     age:"—",   claim_age:"—",   drift:false, tools:"keeper_doc" },
@@ -117,7 +117,7 @@ window.MASC_P2 = (function () {
     { seq:294, room:"merge-blockers",from:"qa-king", kind:"broadcast", at:"16:31:17Z", body:"suite-merge-blockers · 3 FAIL / 47 PASS. flake suspected on test_cascade_retry.", mentions:[], state:null },
     { seq:293, room:"default", from:"taskmaster",    kind:"broadcast", at:"16:30:55Z", body:"task-038 was a duplicate of task-031. cancelled. open-task limit per-goal=3.", mentions:[], state:null },
     { seq:292, room:"default", from:"masc-improver", kind:"dm",        at:"16:30:18Z", body:"@sangsu plan for keeper.claim() — split decision tree from invocation. ok?", mentions:["sangsu"], state:null },
-    { seq:291, room:"cascade", from:"ramarama",      kind:"broadcast", at:"16:29:50Z", body:"cascade hit @step=2 — anthropic→moonshot, 1.24s. logging in ar-93ff2489.", mentions:[], state:null },
+    { seq:291, room:"cascade", from:"ramarama",      kind:"broadcast", at:"16:29:50Z", body:"cascade hit @step=2 — anthropic→moonshot, 1.24s. logging in research/cascade-step2.", mentions:[], state:null },
     { seq:290, room:"default", from:"scholar",       kind:"broadcast", at:"16:29:22Z", body:"verifier keeper still not in masc_keeper_status. cross_verifier flag blocking registration.", mentions:[], state:null },
     { seq:289, room:"default", from:"janitor",       kind:"broadcast", at:"16:28:30Z", body:"pruned 4 expired posts. board live count: 78.", mentions:[], state:null },
   ];
@@ -301,8 +301,8 @@ window.MASC_P2 = (function () {
     { id:"ramarama",      role:"Researcher",
       will:"가설은 evidence로만 닫는다.",
       needs:"reproducer, prior literature, baseline",
-      desires:"닫힌 hypothesis, 갱신된 ar-* loop",
-      short_goal:"cascade regression RC", mid_goal:"ar-93ff2489 close", long_goal:"autoresearch SOP",
+      desires:"닫힌 hypothesis, 갱신된 evidence note",
+      short_goal:"cascade regression RC", mid_goal:"research/cascade-step2 close", long_goal:"research SOP",
       cascade:"keeper_unified", tools_preset:"research", mention:["rama","ramarama","research"],
       sandbox:"docker", network:"inherit", auto_handoff:true, handoff_threshold:0.75,
       tokens:{in:410800, out:14200}, last_handoff:"15:32:00Z", room_seq:291,
@@ -342,37 +342,12 @@ window.MASC_P2 = (function () {
       learnings:["coupling 위치 식별 — invocation과 decision tree","리팩터링 후 measurable: lines, complexity, test cov"], outcome:"success" },
   ];
 
-  // K4 · AUTORESEARCH
-  const arLoops = [
-    { id:"ar-93ff2489", branch:"ar-93ff2489", topic:"Cascade regression @step=2",        status:"open",   confidence:0.62, hypotheses:3, evidences:14, conclusions:1, owner:"ramarama" },
-    { id:"ar-aadab70d", branch:"ar-aadab70d", topic:"Long-tail latency in keeper_unified",status:"open",   confidence:0.41, hypotheses:2, evidences:8,  conclusions:0, owner:"ramarama" },
-    { id:"ar-78d41e9c", branch:null,          topic:"keeper.claim() coupling cost",       status:"closed", confidence:0.88, hypotheses:1, evidences:6,  conclusions:1, owner:"masc-improver" },
-    { id:"ar-6940c7f5", branch:null,          topic:"verifier keeper registration gate",  status:"open",   confidence:0.55, hypotheses:2, evidences:4,  conclusions:0, owner:"scholar" },
-    { id:"ar-59ea0b30", branch:null,          topic:"board automation/direct heuristic",  status:"closed", confidence:0.91, hypotheses:1, evidences:7,  conclusions:1, owner:"janitor" },
-    { id:"ar-02f4434c", branch:null,          topic:"goal horizon classification drift",  status:"open",   confidence:0.30, hypotheses:1, evidences:2,  conclusions:0, owner:"scholar" },
-  ];
-
-  const findings = [
-    { id:"f-001", loop:"ar-93ff2489", at:"16:30:42Z", hypothesis:"cascade exhausts when primary's max_turns triggers fallback that has same model family",
-      evidence:["dec-1776922a — claude exited code 1 (max_turns 15)","ca-7f29 — 2 hops, both miss","heuristic.max_turns triggered ×3 in 30m"],
-      conclusion:"primary→fallback should swap model family, not retry within same provider",
-      confidence:0.78 },
-    { id:"f-002", loop:"ar-78d41e9c", at:"14:42:18Z", hypothesis:"keeper.claim() couples decision tree with side-effect invocation",
-      evidence:["c-08aff5c — sojin RCA on tool-matrix loop","masc-improver decision dec-1776917e","grep claim( = 14 hits"],
-      conclusion:"split into (a) candidacy scoring, (b) invoke + commit",
-      confidence:0.91 },
-    { id:"f-003", loop:"ar-59ea0b30", at:"11:02:00Z", hypothesis:"automation posts can be classified by absence of human author + presence of provenance",
-      evidence:["board_posts.jsonl — post_kind field exists in 100% of automation posts","janitor pruned 4 expired"],
-      conclusion:"adopt post_kind=automation|direct as canonical heuristic",
-      confidence:0.95 },
-  ];
-
   return {
     branches, nudges,
     goals, goalSnapshots,
     tasks, ledger, responsibility,
     boardPosts, boardComments, rooms, messages,
     cascadeAudit, auditEvents, safeAutonomy, costs, heuristics, stress,
-    keepersFull, decisions, memoryEntries, episodes, arLoops, findings,
+    keepersFull, decisions, memoryEntries, episodes,
   };
 })();

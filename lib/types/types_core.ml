@@ -493,7 +493,6 @@ type worktree_info = {
 type task_execution_links = {
   operation_id : string option; [@default None]
   session_id : string option; [@default None]
-  autoresearch_loop_id : string option; [@default None]
 } [@@deriving show, yojson { strict = false }]
 
 (** Task contract - persisted deterministic gate inputs *)
@@ -504,7 +503,7 @@ type task_contract = {
   required_evidence : string list; [@default []]
   inspect_gate_evidence : string list; [@default []]
   verify_gate_evidence : string list; [@default []]
-  links : task_execution_links; [@default { operation_id = None; session_id = None; autoresearch_loop_id = None }]
+  links : task_execution_links; [@default { operation_id = None; session_id = None }]
 } [@@deriving show, yojson { strict = false }]
 
 (** Handoff context persisted across release/reclaim cycles *)

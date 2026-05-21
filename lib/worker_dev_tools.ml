@@ -13,9 +13,12 @@
 include Gate_diff_types
 module Paths = Worker_dev_tools_paths
 module Log_sanitize = Worker_dev_tools_log_sanitize
+module Command_syntax = Worker_dev_tools_command_syntax
 module Mutation_classifier = Worker_dev_tools_mutation_classifier
 module Path_validation = Worker_dev_tools_path_validation
 module Exec_shell_gate = Masc_exec_command_gate.Shell_command_gate
+
+open Command_syntax
 
 (* --- Safety validation --- *)
 
@@ -182,10 +185,10 @@ let block_reason_to_string_with_allowlist ~allowed_commands = function
   | reason -> block_reason_to_string reason
 ;;
 
-let first_shell_word_command_name cmd =
-  match Masc_exec_bash_parser.Bash_words.stages cmd with
-  | Ok ((word :: _) :: _) -> Some (Filename.basename word.Masc_exec_bash_parser.Bash_words.value)
-  | Ok ([] :: _) | Ok [] | Error _ -> None
+let validate_command_name_with_allowlist ~allowed_commands = function
+  | None -> Error Empty_command
+  | Some name when List.mem name allowed_commands -> Ok ()
+  | Some name -> Error (Command_not_allowed name)
 ;;
 
 let validate_command_with_allowlist ~allowed_commands cmd =
@@ -196,11 +199,17 @@ let validate_command_with_allowlist ~allowed_commands cmd =
   then Error Chain_or_redirect
   else if Exec_shell_gate.raw_invokes_direct_dune trimmed
   then Error Direct_dune_invocation
-  else (
-    match first_shell_word_command_name trimmed with
-    | None -> Error Empty_command
-    | Some name when List.mem name allowed_commands -> Ok ()
-    | Some name -> Error (Command_not_allowed name))
+  else
+    match segment_command_name trimmed with
+    | Some _ as command ->
+      validate_command_name_with_allowlist ~allowed_commands command
+    | None ->
+      (* [env] without a target prints the ambient process environment.
+         Treat wrappers that do not resolve to a real command as blocked
+         instead of falling back to the allowlisted [env] binary. *)
+      (match extract_command_name trimmed with
+       | Some name -> Error (Command_not_allowed name)
+       | None -> Error Empty_command)
 ;;
 
 let validate_command ?caller:_ cmd =
@@ -210,6 +219,94 @@ let validate_command ?caller:_ cmd =
 let coding_allowlist_policy ?(allow_pipes = true) ~allowed_commands () :
   Exec_shell_gate.allowlist_policy =
   { allowed_commands; allow_pipes; redirect_allowed = true }
+;;
+
+let rec shell_ir_literal_text = function
+  | Masc_exec.Shell_ir.Lit text -> Some text
+  | Masc_exec.Shell_ir.Concat parts ->
+    let rec loop acc = function
+      | [] -> Some (String.concat "" (List.rev acc))
+      | part :: rest ->
+        (match shell_ir_literal_text part with
+         | Some text -> loop (text :: acc) rest
+         | None -> None)
+    in
+    loop [] parts
+  | Masc_exec.Shell_ir.Var _ -> None
+;;
+
+let simple_literal_args (simple : Masc_exec.Shell_ir.simple) =
+  let rec loop acc = function
+    | [] -> Some (List.rev acc)
+    | arg :: rest ->
+      (match shell_ir_literal_text arg with
+       | Some text -> loop (text :: acc) rest
+       | None -> None)
+  in
+  loop [] simple.Masc_exec.Shell_ir.args
+;;
+
+let validate_wrapper_target ~allowed_commands ~wrapper_name = function
+  | None -> Error (Command_not_allowed wrapper_name)
+  | Some "dune" -> Error Direct_dune_invocation
+  | Some name ->
+    validate_command_name_with_allowlist
+      ~allowed_commands
+      (Some name)
+;;
+
+let validate_env_wrapped_stage ~allowed_commands
+      (simple : Masc_exec.Shell_ir.simple)
+  =
+  let bin = Masc_exec.Bin.to_string simple.Masc_exec.Shell_ir.bin in
+  if not (String.equal bin "env")
+  then Ok ()
+  else
+    match simple_literal_args simple with
+    | None -> Error Injection
+    | Some args ->
+      validate_wrapper_target
+        ~allowed_commands
+        ~wrapper_name:"env"
+        (command_after_env_prefix args)
+;;
+
+let validate_opam_exec_wrapped_stage ~allowed_commands
+      (simple : Masc_exec.Shell_ir.simple)
+  =
+  let bin = Masc_exec.Bin.to_string simple.Masc_exec.Shell_ir.bin in
+  if not (String.equal bin "opam")
+  then Ok ()
+  else
+    match simple_literal_args simple with
+    | None -> Error Injection
+    | Some args ->
+      (match opam_exec_command_name args with
+       | Some "opam" -> Ok ()
+       | command ->
+         validate_wrapper_target
+           ~allowed_commands
+           ~wrapper_name:"opam"
+           command)
+;;
+
+let validate_wrapped_stages ~allowed_commands ast =
+  let rec loop = function
+    | Masc_exec.Shell_ir.Simple simple -> (
+      match validate_env_wrapped_stage ~allowed_commands simple with
+      | Ok () -> validate_opam_exec_wrapped_stage ~allowed_commands simple
+      | Error _ as error -> error)
+    | Masc_exec.Shell_ir.Pipeline stages ->
+      let rec loop_stages = function
+        | [] -> Ok ()
+        | stage :: rest ->
+          (match loop stage with
+           | Ok () -> loop_stages rest
+           | Error _ as error -> error)
+      in
+      loop_stages stages
+  in
+  loop ast
 ;;
 
 let block_reason_of_exec_reject : Exec_shell_gate.reject_reason -> block_reason = function
@@ -285,7 +382,7 @@ let validate_command_coding_with_allowlist
     | Allow context ->
       if context.Exec_shell_gate.invokes_direct_dune
       then Error Direct_dune_invocation
-      else Ok ()
+      else validate_wrapped_stages ~allowed_commands context.Exec_shell_gate.ast
     | Reject { context; reason; _ } ->
       (match reason with
        | Pipes_not_allowed _ -> Error Pipes_not_allowed
@@ -647,12 +744,32 @@ let make_shell_exec_with_allowlist
               on_exec;
             tool_error (block_reason_to_string reason)
           | Ok () ->
-            let timeout =
-              Worker_tool_input.extract_float "timeout_s" input
-              |> Option.value ~default:30.0
-              |> Float.min 120.0
+            let path_workdir =
+              match workdir with
+              | Some dir when String.trim dir <> "" -> dir
+              | Some _ | None -> Sys.getcwd ()
             in
-            (try
+            (match validate_command_paths ~workdir:path_workdir command with
+             | Error message ->
+               Option.iter
+                 (fun (f : tool_exec_observer) ->
+                    f
+                      ~tool_name:"shell_exec"
+                      ~success:false
+                      ~duration_ms:0
+                      ~error_kind:Path_blocked
+                      ~error_message:message
+                      ())
+                 on_exec;
+               tool_error message
+             | Ok () ->
+              let timeout =
+                Worker_tool_input.extract_float "timeout_s" input
+                |> Option.value ~default:30.0
+                   (* DET-OK: fixed policy default for absent shell timeout. *)
+                |> Float.min 120.0
+              in
+              (try
                let started = Time_compat.now () in
                let record_result ?error_message result =
                  let duration_ms =
@@ -758,6 +875,7 @@ let make_shell_exec_with_allowlist
                       ())
                  on_exec;
                tool_error (Printf.sprintf "Command failed: %s" exn_msg))))
+            )
 ;;
 
 let make_shell_exec ~workdir ~on_exec ~proc_mgr ~clock =

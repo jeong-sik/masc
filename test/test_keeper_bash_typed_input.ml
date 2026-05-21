@@ -169,6 +169,62 @@ let test_pipeline_stage_executable_check () =
     (typed_ok input)
 ;;
 
+let expect_not_allowlisted ~target input =
+  match Bash_input.validate ~mode:Bash_input.Dev_full input with
+  | Error (Bash_input.Executable_not_allowlisted { name; _ }) ->
+    Alcotest.(check string) "blocked target" target name
+  | Error error ->
+    Alcotest.failf
+      "expected Executable_not_allowlisted %S, got %a"
+      target
+      Bash_input.pp_validation_error
+      error
+  | Ok () -> Alcotest.failf "expected %S to be blocked" target
+;;
+
+let test_wrapper_exec_target_allowlist () =
+  List.iter
+    (fun input -> expect_not_allowlisted ~target:"rm" input)
+    [ mk_exec "env" [ "rm"; "-rf"; "/" ]
+    ; mk_exec "opam" [ "exec"; "--"; "rm"; "-rf"; "/" ]
+    ; mk_exec "env" [ "opam"; "exec"; "--"; "rm"; "-rf"; "/" ]
+    ; mk_exec "opam" [ "exec"; "--"; "env"; "rm"; "-rf"; "/" ]
+    ; Bash_input.Pipeline
+        { stages =
+            [ { executable = "rg"; argv = [ "pattern" ] }
+            ; { executable = "env"; argv = [ "rm"; "-rf"; "/" ] }
+            ]
+        ; cwd = None
+        ; env = []
+        }
+    ];
+  List.iter
+    (fun input ->
+      match Bash_input.validate ~mode:Bash_input.Dev_full input with
+      | Ok () -> ()
+      | Error error ->
+        Alcotest.failf
+          "expected wrapper target to be allowed, got %a"
+          Bash_input.pp_validation_error
+          error)
+    [ mk_exec "env" [ "git"; "status" ]
+    ; mk_exec "opam" [ "exec"; "--"; "git"; "status" ]
+    ; mk_exec "env" [ "opam"; "exec"; "--"; "git"; "status" ]
+    ; mk_exec "opam" [ "exec"; "--"; "env"; "FOO=bar"; "git"; "status" ]
+    ]
+;;
+
+let test_standalone_env_rejected () =
+  match Bash_input.validate ~mode:Bash_input.Dev_full (mk_exec "env" []) with
+  | Error (Bash_input.Empty_argv { executable = "env" }) -> ()
+  | Error error ->
+    Alcotest.failf
+      "expected standalone env to be rejected as empty wrapper, got %a"
+      Bash_input.pp_validation_error
+      error
+  | Ok () -> Alcotest.fail "standalone env should not be accepted"
+;;
+
 let test_of_json_exec () =
   let input =
     parse_json_exn
@@ -437,6 +493,14 @@ let suite =
           "pipeline_stage_executable_check"
           `Quick
           test_pipeline_stage_executable_check
+      ; Alcotest.test_case
+          "wrapper_exec_target_allowlist"
+          `Quick
+          test_wrapper_exec_target_allowlist
+      ; Alcotest.test_case
+          "standalone_env_rejected"
+          `Quick
+          test_standalone_env_rejected
       ; Alcotest.test_case "of_json_exec" `Quick test_of_json_exec
       ; Alcotest.test_case "of_json_pipeline" `Quick test_of_json_pipeline
       ; Alcotest.test_case

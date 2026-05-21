@@ -66,66 +66,16 @@ let code_shell_allowlist_policy
   { allowed_commands; allow_pipes; redirect_allowed = true }
 ;;
 
-let code_shell_block_reason_of_reject
-      (reason : Exec_shell_gate.reject_reason)
-  : Worker_dev_tools.block_reason =
-  match reason with
-  | Command_not_in_allowlist { bin }
-  | Pipeline_segment_disallowed { bin; _ } -> Command_not_allowed bin
-  | Pipes_not_allowed _ -> Pipes_not_allowed
-  | Redirect_disallowed_in_caller _
-  | Path_outside_policy _ -> Unsafe_redirect
-;;
-
-let code_shell_block_reason_of_too_complex
-      (reason : Exec_shell_gate.too_complex_reason)
-  : Worker_dev_tools.block_reason =
-  match reason with
-  | Unsupported_construct `Proc_subst -> Process_substitution
-  | Unsupported_construct (`Heredoc | `Here_string | `Redirect) -> Unsafe_redirect
-  | Unsupported_nested_pipeline
-  | Unsupported_construct
-      ( `Cmd_subst
-      | `Subshell
-      | `Arith_expansion
-      | `Control_flow
-      | `Logic_op
-      | `Function_def
-      | `Glob_brace
-      | `Background
-      | `Unknown_construct _ ) -> Injection
-;;
-
 let validate_code_shell_command_block_reason
       ?(allow_pipes = true)
       ~(allowed_commands : string list)
       command
   =
-  let trimmed = String.trim command in
-  if String.equal trimmed ""
-  then Error Worker_dev_tools.Empty_command
-  else (
-    match
-      Exec_shell_gate.gate
-        ~caller:Exec_shell_gate.Tool_code_write
-        ~raw:trimmed
-        ~allowlist:(code_shell_allowlist_policy ~allow_pipes ~allowed_commands ())
-        ~path_policy:Exec_shell_gate.allow_all_paths
-        ~sandbox:Exec_shell_gate.host_sandbox
-        ()
-    with
-    | Allow context ->
-      if context.Exec_shell_gate.invokes_direct_dune
-      then Error Worker_dev_tools.Direct_dune_invocation
-      else Ok ()
-    | Reject { context; reason; _ } ->
-      (match reason with
-       | Pipes_not_allowed _ -> Error Worker_dev_tools.Pipes_not_allowed
-       | _ when context.Exec_shell_gate.invokes_direct_dune ->
-         Error Worker_dev_tools.Direct_dune_invocation
-       | _ -> Error (code_shell_block_reason_of_reject reason))
-    | Cannot_parse _ -> Error Worker_dev_tools.Injection
-    | Too_complex { reason } -> Error (code_shell_block_reason_of_too_complex reason))
+  Worker_dev_tools.validate_command_coding_with_allowlist
+    ~caller:Exec_shell_gate.Tool_code_write
+    ~allow_pipes
+    ~allowed_commands
+    command
 ;;
 
 let validate_code_shell_command (command : string) : (unit, string) Result.t =
@@ -726,41 +676,54 @@ let handle_code_shell ~tool_name ~start_time ctx args =
                   ~command ())
          | Ok cwd_opt ->
              let safe_timeout = Float.of_int (max 5 (min 120 timeout)) in
-             let cmd_parts = ["sh"; "-c"; command] in
-             let full_cmd =
+             let path_workdir =
                match cwd_opt with
-               | None -> cmd_parts
-               | Some dir ->
-                   [ "sh"; "-c"; Printf.sprintf "cd %s && %s"
-                       (Filename.quote dir) command ]
+               | Some dir -> dir
+               | None -> Sys.getcwd ()
              in
-             match Masc_exec.Exec_gate.run_argv_with_status ~actor:`Tool_local_runtime ~raw_source:(String.concat " " full_cmd) ~summary:"shell command execution" ~timeout_sec:safe_timeout full_cmd with
-             | Unix.WEXITED code, output ->
-                 let exit_status = classify_code_shell_exit ~command code in
-                 let response_fields =
-                   [
-                     ( "status",
-                       `String (match exit_status with Shell_error -> "error" | _ -> "ok") );
-                     ("exit_code", `Int code);
-                     ("output", `String (truncate_output output));
-                     ("command", `String command);
-                     ("agent", `String ctx.agent_name);
-                   ]
-                   @
-                   match exit_status with
-                   | Shell_ok_expected_nonzero reason ->
-                       [ ("exit_semantics", `String reason) ]
-                   | Shell_ok | Shell_error -> []
-                 in
-                 let response = `Assoc response_fields in
-                 (match exit_status with
-                  | Shell_ok | Shell_ok_expected_nonzero _ ->
-                      fun msg -> Tool_result.ok ~tool_name ~start_time msg
-                  | Shell_error ->
-                      fun msg -> Tool_result.error ~tool_name ~start_time msg)
-                   (Yojson.Safe.pretty_to_string response)
-             | _, output ->
-                 Tool_result.error ~tool_name ~start_time (Printf.sprintf "Command failed: %s" (truncate_output output)))
+             match Worker_dev_tools.validate_command_paths ~workdir:path_workdir command with
+             | Error reason ->
+                 Tool_result.error ~tool_name ~start_time
+                   ~failure_class:(Some Tool_result.Policy_rejection)
+                   reason
+             | Ok () ->
+                 let full_cmd = [(Host_config.host ()).host_sh; "-c"; command] in
+                 match
+                   Masc_exec.Exec_gate.run_argv_with_status
+                     ~actor:`Tool_local_runtime
+                     ~raw_source:(String.concat " " full_cmd)
+                     ~summary:"shell command execution"
+                     ~timeout_sec:safe_timeout
+                     ?cwd:cwd_opt
+                     full_cmd
+                 with
+                 | Unix.WEXITED code, output ->
+                     let exit_status = classify_code_shell_exit ~command code in
+                     let response_fields =
+                       [
+                         ( "status",
+                           `String (match exit_status with Shell_error -> "error" | _ -> "ok") );
+                         ("exit_code", `Int code);
+                         ("output", `String (truncate_output output));
+                         ("command", `String command);
+                         ("agent", `String ctx.agent_name);
+                       ]
+                       @
+                       match exit_status with
+                       | Shell_ok_expected_nonzero reason ->
+                           [ ("exit_semantics", `String reason) ]
+                       | Shell_ok | Shell_error -> []
+                     in
+                     let response = `Assoc response_fields in
+                     (match exit_status with
+                      | Shell_ok | Shell_ok_expected_nonzero _ ->
+                          fun msg -> Tool_result.ok ~tool_name ~start_time msg
+                      | Shell_error ->
+                          fun msg -> Tool_result.error ~tool_name ~start_time msg)
+                       (Yojson.Safe.pretty_to_string response)
+                 | _, output ->
+                     Tool_result.error ~tool_name ~start_time
+                       (Printf.sprintf "Command failed: %s" (truncate_output output)))
 
 (* Handler: masc_code_git — Git operations *)
 let code_git_route_fields (ctx : context) =
@@ -820,20 +783,21 @@ let handle_code_git ~tool_name ~start_time ctx args =
             | Some cfg -> Keeper_tool_policy_config.clone_depth cfg
             | None -> 0
           in
-          let depth_flag =
-            if depth > 0 then Printf.sprintf " --depth %d" depth else ""
-          in
+          let depth_args = if depth > 0 then [ "--depth"; string_of_int depth ] else [] in
           let timeout = match get_policy_config ~base_path:ctx.config.Coord.base_path with
             | Some cfg -> Keeper_tool_policy_config.clone_timeout_sec cfg
             | None -> 120.0
           in
-          let cmd = ["sh"; "-c";
-                     Printf.sprintf "cd %s && git clone%s %s"
-                       (Filename.quote abs_cwd)
-                       depth_flag
-                       (Filename.quote clone_url)]
-          in
-          match Masc_exec.Exec_gate.run_argv_with_status ~actor:`Coord_git ~raw_source:(String.concat " " cmd) ~summary:"git clone" ~timeout_sec:timeout cmd with
+          let cmd = [ "git"; "clone" ] @ depth_args @ [ clone_url ] in
+          match
+            Masc_exec.Exec_gate.run_argv_with_status
+              ~actor:`Coord_git
+              ~raw_source:(String.concat " " cmd)
+              ~summary:"git clone"
+              ~timeout_sec:timeout
+              ~cwd:abs_cwd
+              cmd
+          with
           | Unix.WEXITED code, output ->
             let response =
               `Assoc
@@ -882,18 +846,22 @@ let handle_code_git ~tool_name ~start_time ctx args =
           (missing_cwd_error_json ctx ~cwd ~resolved_cwd:dir ~action ())
       | Ok cwd_opt ->
         let dir = match cwd_opt with Some d -> d | None -> "." in
-        let cmd = ["sh"; "-c";
-                   Printf.sprintf "cd %s && git %s %s"
-                     (Filename.quote dir)
-                     action
-                     (String.concat " " (List.map Filename.quote git_args))]
-        in
+        let cmd = "git" :: action :: git_args in
         let env_opt =
           if String.equal action "commit" then
             Some (Keeper_identity.git_env_for_keeper ~keeper_name:ctx.agent_name)
           else None
         in
-        match Masc_exec.Exec_gate.run_argv_with_status ~actor:`Coord_git ~raw_source:(String.concat " " cmd) ~summary:"git action execution" ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Shell ()) ?env:env_opt cmd with
+        match
+          Masc_exec.Exec_gate.run_argv_with_status
+            ~actor:`Coord_git
+            ~raw_source:(String.concat " " cmd)
+            ~summary:"git action execution"
+            ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Shell ())
+            ?env:env_opt
+            ~cwd:dir
+            cmd
+        with
         | Unix.WEXITED code, output ->
           let response =
             `Assoc

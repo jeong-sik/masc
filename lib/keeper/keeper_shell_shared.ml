@@ -69,9 +69,17 @@ let user_timeout_max_sec = env_float "MASC_KEEPER_USER_TIMEOUT_MAX_SEC" 180.0
 (* Floor for gh op timeout_sec. GitHub API + gh auth handshake is
    usually 3-10s; previous floors (1s, then 5s) produced 41
    gh_command_timed_out rejections in 2 days, every single one at
-   timeout_sec=5 (#8688). 15s keeps keepers from requesting a
-   sub-network-latency timeout without masking genuine hangs. *)
-let gh_min_timeout_sec = 15.0
+   timeout_sec=5 (#8688). [Timeout_floor.Tool_dispatch] keeps keepers
+   from requesting a sub-network-latency timeout without masking
+   genuine hangs. *)
+let gh_min_timeout_sec =
+  Timeout_floor.default_sec Timeout_floor.Tool_dispatch
+;;
+
+(* Public shell metadata timeout used by git-status helpers. The playground
+   repo-cache writer keeps its own copy in the lower-level coord module so
+   Coord_worktree can update the same cache without depending on this file. *)
+let git_meta_timeout_sec = env_float "MASC_KEEPER_GIT_META_TIMEOUT_SEC" 5.0
 
 (* Floor applied to caller-supplied [timeout_sec] for keeper_bash when
    the command runs through the *native* (non-Docker) executor.  The
@@ -81,14 +89,15 @@ let gh_min_timeout_sec = 15.0
    10-60s on top of the actual command — see runtime log issue #5
    (2026-05-20).  Keeping a separate native floor avoids penalising
    the host-side fast path for the Docker path's overhead. *)
-let keeper_bash_native_min_timeout_sec = 5.0
+let keeper_bash_native_min_timeout_sec =
+  Timeout_floor.default_sec Timeout_floor.Native_shell
+;;
 
-(* Public shell metadata timeout used by git-status helpers. The playground
-   repo-cache writer keeps its own copy in the lower-level coord module so
-   Coord_worktree can update the same cache without depending on this file. *)
-let git_meta_timeout_sec = env_float "MASC_KEEPER_GIT_META_TIMEOUT_SEC" 5.0
-
-let clamp_shell_timeout ?(min_sec = 1.0) ~default args =
+let clamp_shell_timeout
+      ?(min_sec = Timeout_floor.default_sec Timeout_floor.Native_shell)
+      ~default
+      args
+  =
   Safe_ops.json_float ~default "timeout_sec" args
   |> fun n -> max min_sec (min user_timeout_max_sec n)
 

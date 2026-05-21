@@ -318,12 +318,13 @@ type docker_shell_result =
    This minimum applies only to the [docker run] path, not to
    [docker exec] against a warm container. *)
 let docker_run_min_timeout_sec =
-  let default = 20.0 in
+  let floor = Timeout_floor.Docker_run in
+  let default = Timeout_floor.default_sec floor in
   let raw =
     try float_of_string (Sys.getenv "MASC_KEEPER_DOCKER_RUN_MIN_TIMEOUT_SEC")
     with Not_found | Failure _ -> default
   in
-  Float.max 1.0 raw
+  Timeout_floor.clamp floor raw
 
 let docker_cleanup_rm_timeout_sec () =
   Env_config_sandbox.Shell_timeout.timeout_sec

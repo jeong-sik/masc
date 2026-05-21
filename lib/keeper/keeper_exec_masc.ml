@@ -58,7 +58,7 @@ let keeper_masc_path_blocked
    agent-side handler [Tool_code.handle_code_read]). *)
 let handle_keeper_masc_code_read
       ~(config : Coord.config)
-      ~(meta : keeper_meta)
+      ~(meta : Keeper_types.keeper_meta)
       ~(args : Yojson.Safe.t)
   =
   let path = Safe_ops.json_string ~default:"" "path" args in

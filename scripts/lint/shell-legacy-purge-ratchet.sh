@@ -38,6 +38,7 @@ NEEDLES=(
   "command_has_repo_wide_scan"
   "Keeper_shell_bash_words"
   "keeper_shell_bash_words"
+  "String.split_on_char ' ' cmd"
   "shell_words_with_boundaries"
   "strip_command_wrappers"
   "cmd_gh_pr_native_subcommand"

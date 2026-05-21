@@ -20,13 +20,11 @@ let teardown () =
   in
   if Sys.file_exists tmp_dir then rm_rf tmp_dir
 
-let make_entry ~cmd ~success ~duration =
+let make_entry ?cmd_prefix ~cmd ~success ~duration () =
+  let cmd_prefix = Option.value cmd_prefix ~default:(String.trim cmd) in
   { BH.ts = Unix.time ();
     BH.cmd_hash = BH.cmd_hash cmd;
-    BH.cmd_prefix =
-      (* take first word as prefix *)
-      (match String.split_on_char ' ' cmd with
-       | [] -> cmd | w :: _ -> w);
+    BH.cmd_prefix = cmd_prefix;
     BH.semantic_kind = "Unknown";
     BH.duration_ms = duration;
     BH.success }
@@ -51,7 +49,7 @@ let test_healthy_history () =
   let dir = setup () in
   let entries =
     List.init 10 (fun i ->
-      make_entry ~cmd:("cmd" ^ string_of_int i) ~success:true ~duration:100)
+      make_entry ~cmd:("cmd" ^ string_of_int i) ~success:true ~duration:100 ())
   in
   append_entries dir "healthy" entries;
   let patterns = BH.failure_insight ~base_path:dir ~keeper_name:"healthy" in
@@ -61,10 +59,10 @@ let test_healthy_history () =
 let test_repeated_failure () =
   let dir = setup () in
   let entries = [
-    make_entry ~cmd:"npm test" ~success:true ~duration:500;
-    make_entry ~cmd:"npm test" ~success:false ~duration:200;
-    make_entry ~cmd:"npm test" ~success:false ~duration:200;
-    make_entry ~cmd:"npm test" ~success:false ~duration:200;
+    make_entry ~cmd:"npm test" ~cmd_prefix:"npm" ~success:true ~duration:500 ();
+    make_entry ~cmd:"npm test" ~cmd_prefix:"npm" ~success:false ~duration:200 ();
+    make_entry ~cmd:"npm test" ~cmd_prefix:"npm" ~success:false ~duration:200 ();
+    make_entry ~cmd:"npm test" ~cmd_prefix:"npm" ~success:false ~duration:200 ();
   ] in
   append_entries dir "stuck" entries;
   let patterns = BH.failure_insight ~base_path:dir ~keeper_name:"stuck" in
@@ -83,14 +81,14 @@ let test_high_failure_rate () =
   let dir = setup () in
   (* 6 failures out of 8 recent = 75% > 60% threshold *)
   let entries = [
-    make_entry ~cmd:"a" ~success:false ~duration:100;
-    make_entry ~cmd:"b" ~success:false ~duration:100;
-    make_entry ~cmd:"c" ~success:true  ~duration:100;
-    make_entry ~cmd:"d" ~success:false ~duration:100;
-    make_entry ~cmd:"e" ~success:false ~duration:100;
-    make_entry ~cmd:"f" ~success:true  ~duration:100;
-    make_entry ~cmd:"g" ~success:false ~duration:100;
-    make_entry ~cmd:"h" ~success:false ~duration:100;
+    make_entry ~cmd:"a" ~success:false ~duration:100 ();
+    make_entry ~cmd:"b" ~success:false ~duration:100 ();
+    make_entry ~cmd:"c" ~success:true  ~duration:100 ();
+    make_entry ~cmd:"d" ~success:false ~duration:100 ();
+    make_entry ~cmd:"e" ~success:false ~duration:100 ();
+    make_entry ~cmd:"f" ~success:true  ~duration:100 ();
+    make_entry ~cmd:"g" ~success:false ~duration:100 ();
+    make_entry ~cmd:"h" ~success:false ~duration:100 ();
   ] in
   append_entries dir "flaky" entries;
   let patterns = BH.failure_insight ~base_path:dir ~keeper_name:"flaky" in
@@ -110,9 +108,9 @@ let test_high_failure_rate () =
 let test_timeout_cluster () =
   let dir = setup () in
   let entries = [
-    make_entry ~cmd:"dune build" ~success:true ~duration:5000;
-    make_entry ~cmd:"dune build" ~success:false ~duration:35000;
-    make_entry ~cmd:"dune build" ~success:false ~duration:32000;
+    make_entry ~cmd:"dune build" ~cmd_prefix:"dune" ~success:true ~duration:5000 ();
+    make_entry ~cmd:"dune build" ~cmd_prefix:"dune" ~success:false ~duration:35000 ();
+    make_entry ~cmd:"dune build" ~cmd_prefix:"dune" ~success:false ~duration:32000 ();
   ] in
   append_entries dir "slow" entries;
   let patterns = BH.failure_insight ~base_path:dir ~keeper_name:"slow" in
@@ -130,9 +128,9 @@ let test_timeout_cluster () =
 let test_json_output () =
   let dir = setup () in
   let entries = [
-    make_entry ~cmd:"cargo test" ~success:false ~duration:100;
-    make_entry ~cmd:"cargo test" ~success:false ~duration:100;
-    make_entry ~cmd:"cargo test" ~success:false ~duration:100;
+    make_entry ~cmd:"cargo test" ~cmd_prefix:"cargo" ~success:false ~duration:100 ();
+    make_entry ~cmd:"cargo test" ~cmd_prefix:"cargo" ~success:false ~duration:100 ();
+    make_entry ~cmd:"cargo test" ~cmd_prefix:"cargo" ~success:false ~duration:100 ();
   ] in
   append_entries dir "json_test" entries;
   let patterns = BH.failure_insight ~base_path:dir ~keeper_name:"json_test" in

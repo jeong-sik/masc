@@ -520,7 +520,7 @@ let claim_next_r
                 ; "agent_tool_names_known", `Bool (Option.is_some agent_tool_names)
                 ; "ts", `String (now_iso ())
                 ]);
-        let effective_task_filter task =
+        let effective_task_filter (task : Masc_domain.task) =
           task_filter task && admission_allowed task && required_tool_claim_allowed task
         in
         let task_filter_excluded =

@@ -365,7 +365,7 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_KEEPER_SANDBOX_REQUIRE_USERNS` | typed:bool | unclassified | unclassified | 57 |  |
 | `MASC_KEEPER_SANDBOX_SECCOMP_PROFILE` | typed:string | unclassified | unclassified | 51 |  |
 | `MASC_KEEPER_SANDBOX_TMPFS_SIZE` | typed:string | unclassified | unclassified | 37 |  |
-| `MASC_KEEPER_SHELL_TIMEOUT_DEFAULT_SEC` | string_literal | n/a | n/a | 177 |  |
+| `MASC_KEEPER_SHELL_TIMEOUT_DEFAULT_SEC` | string_literal | n/a | n/a | 180 |  |
 
 ## Env_config_snapshot (73 knobs; typed classification 0/0)
 

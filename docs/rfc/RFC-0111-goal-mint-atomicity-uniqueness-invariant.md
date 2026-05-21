@@ -1,9 +1,9 @@
 ---
 rfc: "0111"
 title: "Goal mint atomicity — auto-goal uniqueness invariant at write boundary"
-status: Draft
+status: Implemented
 created: 2026-05-17
-updated: 2026-05-20
+updated: 2026-05-22
 author: vincent
 supersedes: []
 superseded_by: null

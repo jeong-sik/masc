@@ -1,9 +1,9 @@
 ---
 rfc: "0118"
 title: "KCT NoTerminalCascade S1 — typed Result at select_cascade boundary + Zombie mapping correction"
-status: Draft
+status: Implemented
 created: 2026-05-17
-updated: 2026-05-20
+updated: 2026-05-22
 author: vincent
 supersedes: []
 superseded_by: null

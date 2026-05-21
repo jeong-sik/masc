@@ -1,9 +1,9 @@
 ---
 rfc: "0123"
 title: "Briefing last_event fabrication — option-typed write boundary, sunset read-side sentinel"
-status: Draft
+status: Implemented
 created: 2026-05-17
-updated: 2026-05-20
+updated: 2026-05-22
 author: vincent
 supersedes: []
 superseded_by: null

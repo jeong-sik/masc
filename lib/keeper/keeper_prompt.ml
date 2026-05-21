@@ -173,20 +173,31 @@ let behavior_prompt_block name =
          ask the operator to restore the missing behavior prompt file."
         name
 
-let missing_personality_field field =
+let missing_personality_field_marker field =
+  (* F-3: per-field Prometheus counter retained (operator dashboards key on
+     specific field labels); WARN aggregation handled by caller so 3 missing
+     fields per cycle emit 1 WARN with structured field list instead of 3
+     separate WARNs. Pre-fix volume: ~666/24h (3 fields × 134 cycles + dups).
+     Post-fix worst case: ~134/24h with field list preserved in message. *)
   Prometheus.inc_counter
     Keeper_metrics.metric_keeper_prompt_failures
     ~labels:[("prompt", "personality/" ^ field)]
     ();
-  Log.Keeper.warn
-    "build_keeper_system_prompt: personality field %s is empty; rendering \
-     config-drift marker instead of generic in-source self-model text"
-    field;
   Printf.sprintf
     "Personality config drift: empty %s field. Preserve the keeper's \
      configured goal, persona, and runtime policy; ask the operator to \
      restore this self-model field."
     field
+
+let log_missing_personality_fields missing_fields =
+  match missing_fields with
+  | [] -> ()
+  | fields ->
+      Log.Keeper.warn
+        "build_keeper_system_prompt: personality fields empty: [%s]; \
+         rendering config-drift markers instead of generic in-source \
+         self-model text"
+        (String.concat ", " fields)
 
 let build_keeper_system_prompt
     ~goal ~short_goal ~mid_goal ~long_goal ~will ~needs ~desires
@@ -215,20 +226,21 @@ let build_keeper_system_prompt
       ~max_bytes:Keeper_config.prompt_render_max_bytes
       { will; needs; desires; instructions = "" }
   in
-  let will =
-    if rendered.will = "" then missing_personality_field "will"
-    else rendered.will
+  (* F-3: aggregate missing personality fields into a single WARN per
+     build_keeper_system_prompt call. Per-field Prometheus counters and the
+     in-prompt config-drift marker remain unchanged so dashboards and the
+     LLM-visible drift signal are preserved. *)
+  let missing_personality = ref [] in
+  let render_personality_field field value =
+    if value = "" then begin
+      missing_personality := field :: !missing_personality;
+      missing_personality_field_marker field
+    end else value
   in
-  let needs =
-    if rendered.needs = "" then
-      missing_personality_field "needs"
-    else rendered.needs
-  in
-  let desires =
-    if rendered.desires = "" then
-      missing_personality_field "desires"
-    else rendered.desires
-  in
+  let will = render_personality_field "will" rendered.will in
+  let needs = render_personality_field "needs" rendered.needs in
+  let desires = render_personality_field "desires" rendered.desires in
+  log_missing_personality_fields (List.rev !missing_personality);
   let custom =
     let s = String.trim instructions in
     if s = "" then ""

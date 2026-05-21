@@ -470,17 +470,25 @@ let handle_code_edit ~tool_name ~start_time ctx args =
       else begin
         try
           let content = Fs_compat.load_file abs_path in
-          (* Count occurrences *)
+          (* Count occurrences and capture byte positions of each match
+             so the ambiguous-match (count > 1) branch can emit line
+             numbers and snippets — mirrors the count = 0 branch which
+             surfaces sample lines, giving the keeper signal for how
+             to disambiguate (Evidence: 2026-05-21 60/60 "found 2
+             times" errors in 3 days with no line context). *)
           let count = ref 0 in
           let pos = ref 0 in
           let old_len = String.length old_string in
+          let match_positions = ref [] in
           while !pos <= String.length content - old_len do
             if String.equal (Stdlib.String.sub content !pos old_len) old_string then begin
               Stdlib.incr count;
+              match_positions := !pos :: !match_positions;
               pos := !pos + old_len
             end else
               Stdlib.incr pos
           done;
+          let match_positions = List.rev !match_positions in
 
           if String.equal old_string new_string then
             if !count > 0 then
@@ -529,9 +537,78 @@ let handle_code_edit ~tool_name ~start_time ctx args =
               in
               Tool_result.error ~tool_name ~start_time ("old_string not found in file." ^ hint)
           else if !count > 1 && not replace_all then
+            (* Ambiguous match. Mirror the count = 0 branch by surfacing
+               line numbers + ±2 context lines for up to 3 matches so the
+               keeper can pick disambiguating context for old_string,
+               instead of blindly retrying the same prompt.
+
+               Evidence: 2026-05-21 60/60 ambiguous-match errors / 3 days
+               with same prompt_fingerprint retried 5×, 3× — keeper had
+               no signal for *which* occurrence to widen. *)
+            let lines = Array.of_list (String.split_on_char '\n' content) in
+            (* Build (start_byte_offset, end_byte_offset_exclusive) for each
+               line so we can map a byte position to a 1-based line
+               number. End is exclusive of the trailing '\n'. *)
+            let line_offsets =
+              let acc = ref [] in
+              let cursor = ref 0 in
+              Array.iter (fun line ->
+                let len = String.length line in
+                acc := (!cursor, !cursor + len) :: !acc;
+                cursor := !cursor + len + 1 (* +1 for the '\n' *)
+              ) lines;
+              Array.of_list (List.rev !acc)
+            in
+            let line_of_pos p =
+              (* Linear scan is fine: lines is small relative to retries
+                 we are eliminating; this path is hit only on the error
+                 edge. *)
+              let n = Array.length line_offsets in
+              let found = ref 0 in
+              (try
+                for i = 0 to n - 1 do
+                  let (s, _) = line_offsets.(i) in
+                  if s > p then begin
+                    found := i - 1;
+                    raise Exit
+                  end
+                done;
+                found := n - 1
+              with Exit -> ());
+              if !found < 0 then 0 else !found
+            in
+            let sample_positions =
+              List.filteri (fun i _ -> i < 3) match_positions
+            in
+            let format_match pos =
+              let line_idx = line_of_pos pos in
+              let line_num = line_idx + 1 in
+              let from_idx = max 0 (line_idx - 2) in
+              let to_idx =
+                min (Array.length lines - 1) (line_idx + 2)
+              in
+              let buf = Buffer.create 128 in
+              Buffer.add_string buf
+                (Printf.sprintf "  match at line %d:" line_num);
+              for i = from_idx to to_idx do
+                let marker = if i = line_idx then ">" else " " in
+                Buffer.add_string buf
+                  (Printf.sprintf "\n    %s %d: %s"
+                     marker (i + 1) lines.(i))
+              done;
+              Buffer.contents buf
+            in
+            let hint =
+              match sample_positions with
+              | [] -> ""
+              | samples ->
+                "\nMatches (provide more surrounding context in \
+                 old_string to disambiguate, or pass replace_all=true):\n"
+                ^ String.concat "\n" (List.map format_match samples)
+            in
             Tool_result.error ~tool_name ~start_time (Printf.sprintf
-               "old_string found %d times. Use replace_all=true or provide more context"
-               !count)
+               "old_string found %d times. Use replace_all=true or provide more context%s"
+               !count hint)
           else begin
             (* Perform replacement *)
             let new_content =

@@ -88,6 +88,7 @@ let run_latest_mtime config ~run_id =
   [ stat_mtime run_dir
   ; stat_mtime (Proof_store.manifest_path config ~run_id)
   ; stat_mtime (proof_contract_path config ~run_id)
+  ; stat_mtime (Proof_store.run_status_path config ~run_id)
   ; stat_mtime traces_dir
   ; max_child_mtime traces_dir
   ; stat_mtime evidence_dir
@@ -176,10 +177,12 @@ let proof_completeness_json
       ; "completed_run_dirs", `Int 0
       ; "incomplete_run_dirs", `Int 0
       ; "stale_incomplete_run_dirs", `Int 0
+      ; "terminal_incomplete_run_dirs", `Int 0
       ; "missing_manifest_run_dirs", `Int 0
       ; "missing_contract_run_dirs", `Int 0
       ; "stale_incomplete_grace_seconds", `Float stale_incomplete_grace_seconds
       ; "sample_stale_incomplete_run_ids", `List []
+      ; "sample_terminal_incomplete_run_ids", `List []
       ]
   else (
     let run_ids =
@@ -203,15 +206,22 @@ let proof_completeness_json
     let completed = ref 0 in
     let incomplete = ref 0 in
     let stale_incomplete = ref 0 in
+    let terminal_incomplete = ref 0 in
     let missing_manifest = ref 0 in
     let missing_contract = ref 0 in
     let stale_samples = ref [] in
+    let terminal_samples = ref [] in
     List.iter
       (fun (run_id, mtime) ->
          let has_manifest = file_exists (Proof_store.manifest_path config ~run_id) in
          let has_contract = file_exists (proof_contract_path config ~run_id) in
          if has_manifest && has_contract
          then incr completed
+         else if Proof_store.has_terminal_marker config ~run_id
+         then (
+           incr terminal_incomplete;
+           if List.length !terminal_samples < 5
+           then terminal_samples := run_id :: !terminal_samples)
          else (
            incr incomplete;
            if not has_manifest then incr missing_manifest;
@@ -230,11 +240,14 @@ let proof_completeness_json
       ; "completed_run_dirs", `Int !completed
       ; "incomplete_run_dirs", `Int !incomplete
       ; "stale_incomplete_run_dirs", `Int !stale_incomplete
+      ; "terminal_incomplete_run_dirs", `Int !terminal_incomplete
       ; "missing_manifest_run_dirs", `Int !missing_manifest
       ; "missing_contract_run_dirs", `Int !missing_contract
       ; "stale_incomplete_grace_seconds", `Float stale_incomplete_grace_seconds
       ; ( "sample_stale_incomplete_run_ids"
         , `List (List.rev_map (fun run_id -> `String run_id) !stale_samples) )
+      ; ( "sample_terminal_incomplete_run_ids"
+        , `List (List.rev_map (fun run_id -> `String run_id) !terminal_samples) )
       ])
 ;;
 
@@ -298,6 +311,30 @@ let assoc_string key = function
 
 let has_task_scope json = Option.is_some (assoc_string "_task_id" json)
 
+let task_scope_counts recent =
+  let indexed = List.mapi (fun index row -> index, row) recent in
+  let first_task_scoped_index =
+    List.fold_left
+      (fun acc (index, row) ->
+         match acc with
+         | Some _ -> acc
+         | None -> if has_task_scope row then Some index else None)
+      None
+      indexed
+  in
+  List.fold_left
+    (fun (task_id_rows, legacy_unscoped_rows, current_unscoped_rows) (index, row) ->
+       if has_task_scope row
+       then task_id_rows + 1, legacy_unscoped_rows, current_unscoped_rows
+       else (
+         match first_task_scoped_index with
+         | Some scoped_index when index < scoped_index ->
+           task_id_rows, legacy_unscoped_rows + 1, current_unscoped_rows
+         | _ -> task_id_rows, legacy_unscoped_rows, current_unscoped_rows + 1))
+    (0, 0, 0)
+    indexed
+;;
+
 let task_scope_json ?base_dir ?(recent_limit = Env_config_runtime.Cdal.verdict_lookup_limit ()) ()
   =
   let ledger = Cdal_verdict_gate.ledger_health_report ?base_dir () in
@@ -305,13 +342,15 @@ let task_scope_json ?base_dir ?(recent_limit = Env_config_runtime.Cdal.verdict_l
   try
     let recent = Dated_jsonl.read_recent store recent_limit in
     let recent_rows = List.length recent in
-    let task_id_rows = List.fold_left (fun n row -> if has_task_scope row then n + 1 else n) 0 recent in
+    let task_id_rows, legacy_unscoped_rows, current_unscoped_rows =
+      task_scope_counts recent
+    in
     let status =
       if recent_rows = 0
       then "missing_ledger"
       else if task_id_rows = 0
       then "missing_task_scope"
-      else if task_id_rows < recent_rows
+      else if current_unscoped_rows > 0
       then "partial_task_scope"
       else "present"
     in
@@ -322,8 +361,14 @@ let task_scope_json ?base_dir ?(recent_limit = Env_config_runtime.Cdal.verdict_l
       ; "recent_rows", `Int recent_rows
       ; "task_id_rows", `Int task_id_rows
       ; "missing_task_scope_rows", `Int missing_task_scope_rows
+      ; "legacy_unscoped_rows", `Int legacy_unscoped_rows
+      ; "current_writer_missing_task_scope_rows", `Int current_unscoped_rows
       ; "missing_task_scope", `Bool (recent_rows > 0 && missing_task_scope_rows > 0)
       ; "partial_task_scope", `Bool (task_id_rows > 0 && missing_task_scope_rows > 0)
+      ; "current_writer_missing_task_scope", `Bool (current_unscoped_rows > 0)
+      ; "legacy_unscoped_only"
+        , `Bool
+            (task_id_rows > 0 && legacy_unscoped_rows > 0 && current_unscoped_rows = 0)
       ]
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -333,8 +378,12 @@ let task_scope_json ?base_dir ?(recent_limit = Env_config_runtime.Cdal.verdict_l
       ; "recent_rows", `Int 0
       ; "task_id_rows", `Int 0
       ; "missing_task_scope_rows", `Int 0
+      ; "legacy_unscoped_rows", `Int 0
+      ; "current_writer_missing_task_scope_rows", `Int 0
       ; "missing_task_scope", `Bool false
       ; "partial_task_scope", `Bool false
+      ; "current_writer_missing_task_scope", `Bool false
+      ; "legacy_unscoped_only", `Bool false
       ; "error", `String (Printexc.to_string exn)
       ]
 ;;

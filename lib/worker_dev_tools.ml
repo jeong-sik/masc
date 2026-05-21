@@ -764,6 +764,8 @@ let make_shell_exec_with_allowlist
                tool_error message
              | Ok () ->
               let timeout =
+                (* DET-OK: absent request timeout uses a fixed policy default;
+                   runtime nondeterminism is only in subprocess execution. *)
                 Worker_tool_input.extract_float "timeout_s" input
                 |> Option.value ~default:30.0
                 |> Float.min 120.0

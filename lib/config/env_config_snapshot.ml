@@ -28,8 +28,6 @@ let auth_entries =
       "Admin authentication token";
     entry ~default:"false" "MASC_ALLOW_ANONYMOUS_MUTATIONS"
       "Allow anonymous mutations (local dev only)";
-    entry ~default:"true" Env_config_core.tool_auth_strict_env_key
-      "Require auth for all tool calls";
     entry ~default:"false" "MASC_HTTP_AUTH_STRICT"
       "Require auth for HTTP endpoints";
     entry ~default:"production" Env_config_core.governance_level_env_key

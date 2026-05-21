@@ -1257,10 +1257,9 @@ let check_permission config ~agent_name ~token ~permission : (unit, masc_error) 
 
 let permission_for_tool tool_name = Tool_permission_map.permission_for_tool tool_name
 
-(** Strict tool auth mode:
-    - 0/false: legacy fail-open for unknown tools
-    - 1/true: unknown internal tools require at least worker-level permission *)
-let is_tool_auth_strict_enabled () = Env_config_core.tool_auth_strict ()
+(** Tool auth is always strict: unknown internal tools require at least
+    worker-level permission, and unknown external tools are denied. *)
+let is_tool_auth_strict_enabled () = true
 
 (* #10205 finding 1: SSOT for the internal-tool prefix vocabulary.
    Unmapped dotted game-view namespaces ([decision.], [experiment.], [client.])
@@ -1296,11 +1295,9 @@ let record_strict_unknown_tool_denial ~agent_name ~tool_name =
 let authorize_tool config ~agent_name ~token ~tool_name : (unit, masc_error) result =
   match permission_for_tool tool_name with
   | None ->
-    if not (is_tool_auth_strict_enabled ())
-    then Ok () (* Legacy fail-open *)
-    else if is_unmapped_internal_tool_name tool_name
+    if is_unmapped_internal_tool_name tool_name
     then
-      (* Conservative default in strict mode for unmapped internal tools. *)
+      (* Conservative default for unmapped internal tools. *)
       check_permission config ~agent_name ~token ~permission:CanBroadcast
     else (
       let () = record_strict_unknown_tool_denial ~agent_name ~tool_name in
@@ -1351,10 +1348,8 @@ let authorize_tool_for_role ~agent_name ~role ~tool_name : (unit, masc_error) re
   let policy = Tool_access_role.policy_for_role role in
   if not (Tool_access_policy.allows_name policy tool_name)
   then Error (Auth (Auth_error.Forbidden { agent = agent_name; action = tool_name }))
-  else if not (is_tool_auth_strict_enabled ())
-  then Ok () (* Non-strict: policy check is sufficient *)
   else (
-    (* Strict mode: additional gate for unmapped tools *)
+    (* Additional gate for unmapped tools. *)
     match permission_for_tool tool_name with
     | Some _ -> Ok () (* Mapped tool — policy already checked *)
     | None ->
@@ -1377,7 +1372,6 @@ let authorize_tool_for_role ~agent_name ~role ~tool_name : (unit, masc_error) re
     Replaces authorize_tool with a single Tool_access_policy check.
     Invalid/expired tokens are rejected (not silently downgraded).
 
-    Strict mode (MASC_TOOL_AUTH_STRICT, default=true):
     Tools not mapped by permission_for_tool are subject to additional
     checks — unmapped internal tools require at least Worker, and
     unmapped external tools are forbidden. *)

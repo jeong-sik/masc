@@ -1224,9 +1224,8 @@ let test_authorize_unknown_masc_tool_strict_worker_allowed () =
   let result =
     match create_result with
     | Ok (raw_token, _) ->
-        with_env "MASC_TOOL_AUTH_STRICT" "1" (fun () ->
-            Auth.authorize_tool dir ~agent_name:"worker_agent" ~token:(Some raw_token)
-              ~tool_name:"masc_unknown_tool")
+        Auth.authorize_tool dir ~agent_name:"worker_agent" ~token:(Some raw_token)
+          ~tool_name:"masc_unknown_tool"
     | Error e -> Error e
   in
   cleanup_test_room dir;
@@ -1245,9 +1244,8 @@ let test_authorize_unknown_non_masc_tool_strict_denied () =
   let result =
     match create_result with
     | Ok (raw_token, _) ->
-        with_env "MASC_TOOL_AUTH_STRICT" "1" (fun () ->
-            Auth.authorize_tool dir ~agent_name:"worker_agent" ~token:(Some raw_token)
-              ~tool_name:"external_unknown_tool")
+        Auth.authorize_tool dir ~agent_name:"worker_agent" ~token:(Some raw_token)
+          ~tool_name:"external_unknown_tool"
     | Error e -> Error e
   in
   cleanup_test_room dir;
@@ -1268,16 +1266,15 @@ let test_authorize_unknown_masc_prefix_strict_worker_allowed () =
   let result =
     match create_result with
     | Ok (raw_token, _) ->
-        with_env "MASC_TOOL_AUTH_STRICT" "1" (fun () ->
-            List.fold_left
-              (fun acc tool_name ->
-                 match acc with
-                 | Error _ as e -> e
-                 | Ok () ->
-                     Auth.authorize_tool dir ~agent_name:"worker_agent"
-                       ~token:(Some raw_token) ~tool_name)
-              (Ok ())
-              prefixes_with_unlisted_tool)
+        List.fold_left
+          (fun acc tool_name ->
+             match acc with
+             | Error _ as e -> e
+             | Ok () ->
+                 Auth.authorize_tool dir ~agent_name:"worker_agent"
+                   ~token:(Some raw_token) ~tool_name)
+          (Ok ())
+          prefixes_with_unlisted_tool
     | Error e -> Error e
   in
   cleanup_test_room dir;
@@ -1329,15 +1326,14 @@ let test_authorize_known_keeper_tool_strict_worker_allowed () =
   let result =
     match create_result with
     | Ok (raw_token, _) ->
-        with_env "MASC_TOOL_AUTH_STRICT" "1" (fun () ->
-            List.fold_left
-              (fun acc tool_name ->
-                 match acc with
-                 | Error _ as e -> e
-                 | Ok () ->
-                     Auth.authorize_tool dir ~agent_name:"keeper-analyst-agent"
-                       ~token:(Some raw_token) ~tool_name)
-              (Ok ()) keeper_strict_auth_regression_tools)
+        List.fold_left
+          (fun acc tool_name ->
+             match acc with
+             | Error _ as e -> e
+             | Ok () ->
+                 Auth.authorize_tool dir ~agent_name:"keeper-analyst-agent"
+                   ~token:(Some raw_token) ~tool_name)
+          (Ok ()) keeper_strict_auth_regression_tools
     | Error e -> Error e
   in
   cleanup_test_room dir;
@@ -1347,15 +1343,14 @@ let test_authorize_known_keeper_tool_strict_worker_allowed () =
 
 let test_authorize_tool_v2_known_keeper_tool_strict_worker_allowed () =
   let result =
-    with_env "MASC_TOOL_AUTH_STRICT" "1" (fun () ->
-        List.fold_left
-          (fun acc tool_name ->
-             match acc with
-             | Error _ as e -> e
-             | Ok () ->
-                 Auth.authorize_tool_for_role ~agent_name:"keeper-analyst-agent"
-                   ~role:Masc_domain.Worker ~tool_name)
-          (Ok ()) keeper_strict_auth_regression_tools)
+    List.fold_left
+      (fun acc tool_name ->
+         match acc with
+         | Error _ as e -> e
+         | Ok () ->
+             Auth.authorize_tool_for_role ~agent_name:"keeper-analyst-agent"
+               ~role:Masc_domain.Worker ~tool_name)
+      (Ok ()) keeper_strict_auth_regression_tools
   in
   match result with
   | Ok () -> ()
@@ -1363,12 +1358,24 @@ let test_authorize_tool_v2_known_keeper_tool_strict_worker_allowed () =
 
 let test_authorize_tool_v2_unknown_keeper_prefix_strict_denied () =
   let result =
-    with_env "MASC_TOOL_AUTH_STRICT" "1" (fun () ->
-        Auth.authorize_tool_for_role ~agent_name:"keeper-analyst-agent"
-          ~role:Masc_domain.Worker ~tool_name:"keeper_totally_fake")
+    Auth.authorize_tool_for_role ~agent_name:"keeper-analyst-agent"
+      ~role:Masc_domain.Worker ~tool_name:"keeper_totally_fake"
   in
   match result with
   | Ok () -> fail "unknown keeper_* prefix should not bypass strict auth"
+  | Error (Masc_domain.Auth (Masc_domain.Auth_error.Forbidden _)) -> ()
+  | Error e -> fail (Printf.sprintf "wrong error: %s" (Masc_domain.masc_error_to_string e))
+
+let test_tool_auth_strict_env_cannot_disable_fail_closed () =
+  let result =
+    with_env "MASC_TOOL_AUTH_STRICT" "0" (fun () ->
+        check bool "strict mode remains enabled" true
+          (Auth.is_tool_auth_strict_enabled ());
+        Auth.authorize_tool_for_role ~agent_name:"worker"
+          ~role:Masc_domain.Worker ~tool_name:"external_totally_fake")
+  in
+  match result with
+  | Ok () -> fail "MASC_TOOL_AUTH_STRICT=0 must not fail-open unknown external tools"
   | Error (Masc_domain.Auth (Masc_domain.Auth_error.Forbidden _)) -> ()
   | Error e -> fail (Printf.sprintf "wrong error: %s" (Masc_domain.masc_error_to_string e))
 
@@ -1511,6 +1518,8 @@ let () =
         `Quick test_authorize_tool_v2_known_keeper_tool_strict_worker_allowed;
       test_case "strict v2 fake keeper prefix denied"
         `Quick test_authorize_tool_v2_unknown_keeper_prefix_strict_denied;
+      test_case "tool auth strict env cannot disable fail-closed"
+        `Quick test_tool_auth_strict_env_cannot_disable_fail_closed;
       test_case "declared tool permission from Tool_spec"
         `Quick test_declared_tool_permission_from_tool_spec;
     ];

@@ -1,6 +1,14 @@
+---
+title: Audit-Driven Telemetry-as-Fix Sunset
+rfc: 0149
+status: Active
+created: 2026-05-20
+implementation_prs: []
+---
+
 # RFC-0149 — Audit-Driven Telemetry-as-Fix Sunset (memory_recall · compact_negative_savings · cascade_resolve_live_warn)
 
-- **Status**: Active
+- **Status**: Active (frontmatter SSOT)
 - **Created**: 2026-05-20
 - **Owner**: keeper observability + memory + cascade
 - **Predecessors**: masc-mcp #16771, #16778, #16787 (all MERGED to main 2026-05-19)

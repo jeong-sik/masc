@@ -1,8 +1,17 @@
+---
+title: Two-Surface Tool Alias — Replace 3-Tier Classification
+rfc: 0064
+status: Active
+created: 2026-05-11
+implementation_prs: []
+collision_note: "RFC-0064 number is used by two files (this + RFC-0064-capacity-probe-adapter.md). One must be renumbered — separate PR needed."
+---
+
 # RFC-0064: Two-Surface Tool Alias — Replace 3-Tier Classification
 
 | Field        | Value                                        |
 |-------------|----------------------------------------------|
-| Status      | Draft                                        |
+| Status      | Active (frontmatter SSOT; ⚠️ number collision)|
 | Author      | jeong-sik                                    |
 | Date        | 2026-05-11                                   |
 | Supersedes  | None                                         |

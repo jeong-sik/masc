@@ -1,6 +1,14 @@
+---
+title: Keeper Tool Selection Lifecycle - TLA+ Coverage Extension
+rfc: 0065
+status: Active
+created: 2026-05-11
+implementation_prs: []
+---
+
 # RFC-0065 — Keeper Tool Selection Lifecycle: TLA+ Coverage Extension
 
-**Status**: Draft
+**Status**: Active (frontmatter SSOT)
 **Author**: jeong-sik (with Claude Opus 4.7)
 **Date**: 2026-05-11
 **Supersedes**: —

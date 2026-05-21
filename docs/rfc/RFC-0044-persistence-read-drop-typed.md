@@ -1,6 +1,14 @@
+---
+title: Typed persistence read-drop reason + Result-based reads
+rfc: 0044
+status: Active
+created: 2026-05-08
+implementation_prs: []
+---
+
 # RFC-0044 — Typed persistence read-drop reason + Result-based reads
 
-Status: Draft
+Status: Active (frontmatter SSOT; root fix in RFC-0134)
 Author: jeong-sik
 Date: 2026-05-08
 Supersedes: —

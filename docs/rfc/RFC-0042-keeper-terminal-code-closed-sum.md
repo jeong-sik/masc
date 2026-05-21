@@ -1,3 +1,11 @@
+---
+title: Closed sum type for keeper turn terminal code
+rfc: 0042
+status: Active
+created: 2026-05-08
+implementation_prs: []
+---
+
 # RFC-0042: Closed sum type for keeper turn terminal code
 
 - **Status**: Draft

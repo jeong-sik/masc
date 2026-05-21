@@ -62,6 +62,18 @@ val soft_rate_limit_max_clamp_sec : float
 
     Env: [MASC_CASCADE_SOFT_RATE_LIMIT_MAX_CLAMP_SEC]. *)
 
+val default_capacity_backpressure_backoff_sec : float
+(** Synthetic typed backoff applied when an upstream [Capacity_backpressure]
+    error arrives with [retry_after_sec = None].  Without this, the cascade
+    rotates immediately onto the next candidate and frequently lands back
+    on the same degraded provider before any recovery window has elapsed.
+    Default 5.0 (5s) — shorter than {!soft_rate_limit_cooldown_sec} because
+    capacity backpressure is a short-window signal (peers usually recover
+    faster than 429-bearing providers), but non-zero so the cascade does
+    not immediately re-select the just-rejected provider.
+
+    Env: [MASC_CASCADE_CAPACITY_BACKPRESSURE_DEFAULT_BACKOFF_SEC]. *)
+
 val latency_ring_size : int
 (** Number of recent successful-call latencies retained per provider for
     percentile observation.  The ring buffer is per-provider; older

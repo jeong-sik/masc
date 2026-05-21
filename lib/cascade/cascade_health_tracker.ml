@@ -27,6 +27,9 @@ let soft_rate_limit_cooldown_sec =
 let soft_rate_limit_max_clamp_sec =
   Cascade_health_tracker_config.soft_rate_limit_max_clamp_sec
 
+let default_capacity_backpressure_backoff_sec =
+  Cascade_health_tracker_config.default_capacity_backpressure_backoff_sec
+
 let latency_ring_size = Cascade_health_tracker_config.latency_ring_size
 let confidence_ring_size = Cascade_health_tracker_config.confidence_ring_size
 let cost_ring_size = Cascade_health_tracker_config.cost_ring_size

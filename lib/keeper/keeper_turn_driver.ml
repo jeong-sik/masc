@@ -734,11 +734,29 @@ let run_named
          rather than counting toward the 3-failure threshold of
          [record_failure]. The retry_after hint, when present, drives
          cooldown duration (clamped by
-         [Cascade_health_tracker.soft_rate_limit_max_clamp_sec]). *)
+         [Cascade_health_tracker.soft_rate_limit_max_clamp_sec]).
+
+         D12 root-fix: a MASC-internal [Capacity_backpressure]
+         classification with [retry_after_sec = None] previously fell
+         through to [record_failure] (3-failure threshold) and the
+         cascade rotated immediately onto the same degraded provider
+         within milliseconds.  Inject a typed synthetic backoff so the
+         cooldown path still applies; emit a warning so operators can
+         see that the upstream omitted the hint. *)
       let immediate_cooldown_retry_after =
         match sdk_error_capacity_exhausted_retry_after_s sdk_err with
         | Some retry_after -> Some retry_after
-        | None -> sdk_error_soft_rate_limited sdk_err
+        | None ->
+          (match sdk_error_capacity_backpressure_retry_hint sdk_err with
+           | Some (Cbr_explicit s) -> Some (Some s)
+           | Some (Cbr_synthetic_default s) ->
+             Log.Misc.warn
+               "cascade_capacity_backpressure: provider=%s retry_after_sec=null \
+                injecting synthetic backoff=%.1fs (error_kind=%s)"
+               provider_key s
+               (Cascade_health_tracker.error_kind_to_string error_kind);
+             Some (Some s)
+           | None -> sdk_error_soft_rate_limited sdk_err)
       in
       match immediate_cooldown_retry_after with
       | Some retry_after_s ->

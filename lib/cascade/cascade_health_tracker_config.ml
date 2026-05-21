@@ -170,6 +170,15 @@ let soft_rate_limit_max_clamp_sec =
     ~default:120.0
     ()
 
+(** Synthetic backoff for [Capacity_backpressure] with no [retry_after_sec].
+    See {!Cascade_health_tracker_config.default_capacity_backpressure_backoff_sec}
+    for rationale. *)
+let default_capacity_backpressure_backoff_sec =
+  read_float_setting
+    ~primary:"MASC_CASCADE_CAPACITY_BACKPRESSURE_DEFAULT_BACKOFF_SEC"
+    ~default:5.0
+    ()
+
 let read_ring_size env_name =
   match Sys.getenv_opt env_name with
   | None -> 100

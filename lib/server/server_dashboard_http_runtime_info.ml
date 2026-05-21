@@ -875,6 +875,7 @@ let runtime_resolution_json (config : Coord.config) =
       ; ( "deployment_state"
         , deployment_state_json ~build ~server_repo_commit ~workspace_commit
             ~resolved_base_commit ~upstream_status ~source_mismatch )
+      ; "cdal", Server_routes_http_runtime.cdal_health_json ()
       ]
       @ Server_routes_http_runtime.keeper_fleet_runtime_resolution_fields () )
 ;;

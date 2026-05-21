@@ -822,6 +822,7 @@ let keeper_fleet_runtime_resolution_base_fields
   let fields =
     [ "keeper_fibers", `Int keeper_fibers
     ; "paused_keepers", `Int (paused_keeper_count paused_keepers_json)
+    ; "paused_keepers_health", paused_keepers_json
     ; "keeper_fleet_no_fibers", `Bool (bool_field "no_running_fibers" fleet_safety)
     ; ( "keeper_fd_pressure"
       , Keeper_fd_pressure.runtime_state_json ~active_keepers:keeper_fibers

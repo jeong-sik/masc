@@ -162,6 +162,50 @@ let test_no_backward_compat_alias_groups () =
   check bool "masc.core alias removed" false
     (contains_substring policy "[masc.core]")
 
+let test_load_warns_on_unregistered_shard_ref () =
+  (* Load succeeds (non-fatal validation) but a [Shard_ref] referencing a
+     shard name that [Tool_shard] does not know about must:
+     - not produce a runtime "shard X not found, returning empty" event
+     - yield an empty tool list when [resolve_group] is invoked on it.
+
+     This pins the root-fix for the autoresearch stale-ref WARN flood
+     (~31k/day) observed in
+     memory/reports-implementation-audit-2026-05-21.html §10. *)
+  with_temp_dir "tool-policy-shard-validation" @@ fun root ->
+  let config_dir = Filename.concat root "custom-config" in
+  mkdir_p config_dir;
+  let policy_path = Filename.concat config_dir "tool_policy.toml" in
+  let policy_body =
+    String.concat "\n"
+      [ {|[groups.base]|}
+      ; {|tools = ["masc_status"]|}
+      ; {|[groups.fake_shard]|}
+      ; {|shard = "definitely_not_registered_shard_xyz"|}
+      ; {|[presets.minimal]|}
+      ; {|groups = ["base"]|}
+      ; {|masc_groups = []|}
+      ; {|masc_tools = []|}
+      ; ""
+      ]
+  in
+  write_file policy_path policy_body;
+  with_env "MASC_CONFIG_DIR" (Some config_dir) @@ fun () ->
+  match KTPC.load ~base_path:"/tmp/unrelated" with
+  | Error msg ->
+      fail (Printf.sprintf "expected non-fatal load with stale shard ref: %s" msg)
+  | Ok cfg ->
+      (* Group exists; resolving it returns empty tool list. Critically, this
+         path no longer emits a per-resolution WARN — load_config surfaced the
+         shard name in its [unknown_tools] aggregate already. *)
+      (match KTPC.resolve_group cfg "fake_shard" with
+       | Some [] -> ()
+       | Some other ->
+           fail
+             (Printf.sprintf
+                "expected empty tool list for stale shard, got %d entries"
+                (List.length other))
+       | None -> fail "expected groups.fake_shard to be defined")
+
 (* ── preset_can_satisfy tests ───────────────────────────────── *)
 
 let load_config () =
@@ -247,6 +291,8 @@ let () =
             test_load_normalizes_legacy_fs_tool_names;
           test_case "no backward compat alias groups" `Quick
             test_no_backward_compat_alias_groups;
+          test_case "non-fatal load with unregistered shard ref" `Quick
+            test_load_warns_on_unregistered_shard_ref;
         ] );
       ( "preset_can_satisfy",
         [

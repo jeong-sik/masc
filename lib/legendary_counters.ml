@@ -129,6 +129,15 @@ type shell_gate_verdict_kind =
   | Reject
   | Cannot_parse
 
+type shell_gate_summary = {
+  total : int;
+  allow : int;
+  reject : int;
+  cannot_parse : int;
+  parse_coverage : float;
+  reject_ratio : float;
+}
+
 let incr_shell_gate ~caller ~verdict =
   let counter =
     match caller, verdict with
@@ -367,6 +376,52 @@ let auto_bg_promotion_rate (s : snapshot) : float =
     ~num:s.auto_bg_would_have_promoted
     ~den:s.auto_bg_observed
 
+let shell_gate_counts s = function
+  | Worker_dev_tools ->
+    ( s.shell_gate_worker_dev_tools_allow
+    , s.shell_gate_worker_dev_tools_reject
+    , s.shell_gate_worker_dev_tools_cannot_parse )
+  | Tool_code_write ->
+    ( s.shell_gate_tool_code_write_allow
+    , s.shell_gate_tool_code_write_reject
+    , s.shell_gate_tool_code_write_cannot_parse )
+  | Keeper_shell_bash ->
+    ( s.shell_gate_keeper_shell_bash_allow
+    , s.shell_gate_keeper_shell_bash_reject
+    , s.shell_gate_keeper_shell_bash_cannot_parse )
+
+let shell_gate_summary s caller =
+  let allow, reject, cannot_parse = shell_gate_counts s caller in
+  let total = allow + reject + cannot_parse in
+  {
+    total;
+    allow;
+    reject;
+    cannot_parse;
+    parse_coverage = safe_ratio ~num:(allow + reject) ~den:total;
+    reject_ratio = safe_ratio ~num:reject ~den:total;
+  }
+
+let shell_gate_summary_to_json (s : shell_gate_summary) : Yojson.Safe.t =
+  `Assoc [
+    ("total", `Int s.total);
+    ("allow", `Int s.allow);
+    ("reject", `Int s.reject);
+    ("cannot_parse", `Int s.cannot_parse);
+    ("parse_coverage", `Float s.parse_coverage);
+    ("reject_ratio", `Float s.reject_ratio);
+  ]
+
+let shell_gate_summaries_to_json s : Yojson.Safe.t =
+  `Assoc [
+    ( "worker_dev_tools",
+      shell_gate_summary_to_json (shell_gate_summary s Worker_dev_tools) );
+    ( "tool_code_write",
+      shell_gate_summary_to_json (shell_gate_summary s Tool_code_write) );
+    ( "keeper_shell_bash",
+      shell_gate_summary_to_json (shell_gate_summary s Keeper_shell_bash) );
+  ]
+
 let snapshot_to_json_with_ratios (s : snapshot) : Yojson.Safe.t =
   match snapshot_to_json s with
   | `Assoc fields ->
@@ -377,5 +432,6 @@ let snapshot_to_json_with_ratios (s : snapshot) : Yojson.Safe.t =
            ("shadow_parse_coverage", `Float (shadow_parse_coverage s));
            ("auto_bg_promotion_rate", `Float (auto_bg_promotion_rate s));
          ]);
+        ("shell_gate", shell_gate_summaries_to_json s);
       ])
   | other -> other

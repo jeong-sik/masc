@@ -265,6 +265,8 @@ def check_pr_axis_stale(
 
     for merged in recently_merged:
         merged_num = merged["number"]
+        if merged_num == pr_number:
+            continue
         merged_title = merged["title"]
         merged_files = {node["path"] for node in merged.get("files", {}).get("nodes", [])}
 

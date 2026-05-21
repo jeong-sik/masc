@@ -125,6 +125,73 @@ let () =
   let result = Masc_exec.Exec_dispatch.dispatch (Pipeline stages) in
   assert (result.status = Unix.WEXITED 1)
 
+let () =
+  with_eio @@ fun () ->
+  let open Masc_exec.Shell_ir in
+  let false_bin = Masc_exec.Bin.of_string "false" |> Result.get_ok in
+  let echo_bin = Masc_exec.Bin.of_string "echo" |> Result.get_ok in
+  let host_sandbox = Masc_exec.Sandbox_target.host () in
+  let stages =
+    [
+      Simple
+        {
+          bin = false_bin;
+          args = [];
+          env = [];
+          cwd = None;
+          redirects = [];
+          sandbox = host_sandbox;
+        };
+      Simple
+        {
+          bin = echo_bin;
+          args = [ Lit "recovered" ];
+          env = [];
+          cwd = None;
+          redirects = [];
+          sandbox = host_sandbox;
+        };
+    ]
+  in
+  let result = Masc_exec.Exec_dispatch.dispatch (Pipeline stages) in
+  assert (result.status = Unix.WEXITED 1);
+  assert (String.trim result.stdout = "recovered")
+
+let () =
+  with_eio @@ fun () ->
+  let open Masc_exec.Shell_ir in
+  let a_bin = Masc_exec.Bin.of_string "a" |> Result.get_ok in
+  let b_bin = Masc_exec.Bin.of_string "b" |> Result.get_ok in
+  let c_bin = Masc_exec.Bin.of_string "c" |> Result.get_ok in
+  let mock_runner ~stdin_content ~argv ~env:_ ~cwd:_ ~timeout_sec:_ =
+    match argv, stdin_content with
+    | [ "a" ], None -> Unix.WEXITED 7, "a-out", "a-err;"
+    | [ "b" ], Some "a-out" -> Unix.WEXITED 0, "b-out", "b-err;"
+    | [ "c" ], Some "b-out" -> Unix.WEXITED 3, "c-out", "c-err;"
+    | _ -> Unix.WEXITED 99, "", "unexpected;"
+  in
+  let docker_sandbox =
+    Masc_exec.Sandbox_target.docker ~image:"pipeline-status" ~runner:mock_runner
+  in
+  let simple bin =
+    Simple
+      {
+        bin;
+        args = [];
+        env = [];
+        cwd = None;
+        redirects = [];
+        sandbox = docker_sandbox;
+      }
+  in
+  let result =
+    Masc_exec.Exec_dispatch.dispatch
+      (Pipeline [ simple a_bin; simple b_bin; simple c_bin ])
+  in
+  assert (result.status = Unix.WEXITED 3);
+  assert (result.stdout = "c-out");
+  assert (result.stderr = "a-err;b-err;c-err;")
+
 (* --- dispatch empty pipeline --- *)
 
 let () =

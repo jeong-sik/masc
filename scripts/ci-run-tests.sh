@@ -327,7 +327,7 @@ run_with_timeout() {
   tail -n 0 -f "${TEST_LOG_FILE}" &
   ACTIVE_LOG_TAIL_PID=$!
 
-  bash -lc "${cmd}" >> "${TEST_LOG_FILE}" 2>&1 &
+  bash -s <<< "${cmd}" >> "${TEST_LOG_FILE}" 2>&1 &
   ACTIVE_CMD_PID=$!
   ACTIVE_CMD_PGID="$(
     ps -o pgid= -p "${ACTIVE_CMD_PID}" 2>/dev/null \

@@ -44,7 +44,11 @@ let resolve_env env_bindings =
    [Exec_gate] (no behavior change for non-keeper callers); the Docker
    case is wired up by [lib/keeper] using a closure over
    [Keeper_turn_sandbox_runtime]. *)
-let dispatch_simple ?stdin_content (s : Shell_ir.simple) =
+let dispatch_timeout_sec = function
+  | Some timeout_sec -> timeout_sec
+  | None -> Env_config_exec_timeout.timeout_sec ~caller:Dispatch ()
+
+let dispatch_simple ?timeout_sec ?stdin_content (s : Shell_ir.simple) =
   let bin = Bin.to_string s.bin in
   let argv = bin :: List.map resolve_arg s.args in
   let env = resolve_env s.env in
@@ -53,54 +57,61 @@ let dispatch_simple ?stdin_content (s : Shell_ir.simple) =
     | None -> None
     | Some scope -> Some (Path_scope.raw scope)
   in
-  let timeout_sec = Env_config_exec_timeout.timeout_sec ~caller:Dispatch () in
+  let timeout_sec = dispatch_timeout_sec timeout_sec in
   match s.sandbox with
   | Host ->
       let raw_source = String.concat " " argv in
-      (match
-         match stdin_content with
-         | None ->
-           Exec_gate.run_argv_with_status_split
-             ~actor:`Tool_local_runtime
-             ~raw_source
-             ~summary:"exec dispatch simple"
-             ~timeout_sec ~env ?cwd argv
-         | Some stdin_content ->
-           Exec_gate.run_argv_with_stdin_and_status_split
-             ~actor:`Tool_local_runtime
-             ~raw_source
-             ~summary:"exec dispatch simple stdin"
-             ~timeout_sec ~env ?cwd ~stdin_content argv
-       with
+      let run () =
+        match stdin_content with
+        | None ->
+          Exec_gate.run_argv_with_status_split
+            ~actor:`Tool_local_runtime
+            ~raw_source
+            ~summary:"exec dispatch simple"
+            ~timeout_sec
+            ~env
+            ?cwd
+            argv
+        | Some stdin_content ->
+          Exec_gate.run_argv_with_stdin_and_status_split
+            ~actor:`Tool_local_runtime
+            ~raw_source
+            ~summary:"exec dispatch simple stdin"
+            ~timeout_sec
+            ~env
+            ?cwd
+            ~stdin_content
+            argv
+      in
+      (match run () with
+       | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
        | exception exn ->
-           { status = Unix.WEXITED 1;
-             stdout = "";
-             stderr = Printexc.to_string exn }
-       | (status, stdout, stderr) ->
-           { status; stdout; stderr })
+         { status = Unix.WEXITED 1; stdout = ""; stderr = Printexc.to_string exn }
+       | status, stdout, stderr -> { status; stdout; stderr })
   | Docker { runner; _ } ->
-      (match runner ~stdin_content ~argv ~env ~cwd ~timeout_sec with
-       | exception exn ->
-           { status = Unix.WEXITED 1;
-             stdout = "";
-             stderr = Printexc.to_string exn }
-       | (status, stdout, stderr) ->
-           { status; stdout; stderr })
+    (match runner ~stdin_content ~argv ~env ~cwd ~timeout_sec with
+     | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+     | exception exn ->
+       { status = Unix.WEXITED 1; stdout = ""; stderr = Printexc.to_string exn }
+     | status, stdout, stderr -> { status; stdout; stderr })
 
 (* --- pipeline + entry point (mutually recursive) --- *)
 
-let rec dispatch_pipeline stages =
+let rec dispatch_pipeline ?timeout_sec stages =
   match stages with
   | [] ->
       { status = Unix.WEXITED 0; stdout = ""; stderr = "" }
-  | [ stage ] -> dispatch stage
+  | [ stage ] -> dispatch ?timeout_sec stage
   | _ ->
       let rec chain prev_stdout = function
         | [] ->
             { status = Unix.WEXITED 0; stdout = prev_stdout; stderr = "" }
-        | [ Shell_ir.Simple s ] -> dispatch_simple ~stdin_content:prev_stdout s
+        | [ Shell_ir.Simple s ] ->
+            dispatch_simple ?timeout_sec ~stdin_content:prev_stdout s
         | Shell_ir.Simple s :: rest ->
-            let stage_result = dispatch_simple ~stdin_content:prev_stdout s in
+            let stage_result =
+              dispatch_simple ?timeout_sec ~stdin_content:prev_stdout s
+            in
             let result = chain stage_result.stdout rest in
             let final_status =
               match stage_result.status with
@@ -117,20 +128,20 @@ let rec dispatch_pipeline stages =
       (match stages with
        | [] ->
            { status = Unix.WEXITED 0; stdout = ""; stderr = "" }
-       | first :: rest ->
-           (match first with
-            | Shell_ir.Simple s ->
-                let result = dispatch_simple s in
-                chain result.stdout rest
-            | Pipeline _ ->
-                { status = Unix.WEXITED 1;
-                  stdout = "";
-                  stderr = "nested pipeline not supported" }))
+       | first :: rest -> (
+         match first with
+         | Shell_ir.Simple s ->
+           let result = dispatch_simple ?timeout_sec s in
+           chain result.stdout rest
+         | Pipeline _ ->
+           { status = Unix.WEXITED 1;
+             stdout = "";
+             stderr = "nested pipeline not supported" }))
 
-and dispatch (ir : Shell_ir.t) =
+and dispatch ?timeout_sec (ir : Shell_ir.t) =
   match ir with
-  | Shell_ir.Simple s -> dispatch_simple s
-  | Pipeline stages -> dispatch_pipeline stages
+  | Shell_ir.Simple s -> dispatch_simple ?timeout_sec s
+  | Pipeline stages -> dispatch_pipeline ?timeout_sec stages
 
 let native_dispatch_enabled () =
   match Unix.getenv "MASC_BASH_NATIVE_DISPATCH" with

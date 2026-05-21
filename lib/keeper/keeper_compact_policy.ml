@@ -90,14 +90,18 @@ let emergency_compact_ratio_threshold : float =
   effective
 ;;
 
-(** Tool-heavy compaction thresholds.
-    When message count exceeds [tool_heavy_msg_threshold] AND context
-    ratio exceeds [tool_heavy_ratio_floor], trigger compaction to
-    stub old tool results. Prevents slow inference on local LLMs
-    when many tool calls accumulate without hitting other gates. *)
-let tool_heavy_msg_threshold = 40
+(* Tool-heavy compaction thresholds.  Per-keeper values live on
+   [meta.compaction.tool_heavy_msg_threshold] and
+   [meta.compaction.tool_heavy_ratio_floor]; defaults at
+   {!Keeper_config.default_tool_heavy_msg_threshold} (40) and
+   {!Keeper_config.default_tool_heavy_ratio_floor} (0.15).
 
-let tool_heavy_ratio_floor = 0.15
+   When message count exceeds the threshold AND context ratio exceeds
+   the floor, [decide_compaction] applies a Tool_heavy trigger that
+   bypasses the continuity-reflection cooldown, the same way the
+   emergency ratio gate does.  PR-A introduced the meta fields with
+   defaults preserving the prior global behavior; PR-B (this commit)
+   wires the meta values into the gate. *)
 
 type compaction_decision =
   | Applied of Compaction_trigger.t
@@ -130,6 +134,8 @@ let decide_compaction
       ~message_gate
       ~token_gate
       ~cooldown_sec
+      ~tool_heavy_msg_threshold
+      ~tool_heavy_ratio_floor
       ~last_continuity_update_ts
       ~last_proactive_ts
       ~now_ts
@@ -196,6 +202,8 @@ let compact_if_needed_typed
       ~message_gate
       ~token_gate
       ~cooldown_sec:meta.compaction.cooldown_sec
+      ~tool_heavy_msg_threshold:meta.compaction.tool_heavy_msg_threshold
+      ~tool_heavy_ratio_floor:meta.compaction.tool_heavy_ratio_floor
       ~last_continuity_update_ts:meta.runtime.last_continuity_update_ts
       ~last_proactive_ts:meta.runtime.proactive_rt.last_ts
       ~now_ts

@@ -877,12 +877,6 @@ lib/tool_agent.ml:337
 lib/tool_agent.ml:355
 lib/tool_assignment_telemetry.ml:113
 lib/tool_assignment_telemetry.ml:147
-lib/tool_autoresearch.ml:42
-lib/tool_autoresearch.ml:290
-lib/tool_autoresearch.ml:435
-lib/tool_autoresearch.ml:445
-lib/tool_autoresearch.ml:602
-lib/tool_autoresearch.ml:620
 lib/tool_board.ml:336
 lib/tool_board.ml:385
 lib/tool_board.ml:395

@@ -326,7 +326,6 @@
       "Tool_access_policy",
       "Tool_access_role",
       "Tool_agent_timeline",
-      "Tool_autoresearch",
       "Tool_autoresearch_broadcast",
       "Tool_autoresearch_context",
       "Tool_autoresearch_cycle",
@@ -458,18 +457,16 @@
     },
     {
       "prefix": "tool_autoresearch",
-      "module_count": 6,
+      "module_count": 4,
       "members": [
-        "Tool_autoresearch",
         "Tool_autoresearch_broadcast",
         "Tool_autoresearch_context",
         "Tool_autoresearch_cycle",
-        "Tool_autoresearch_registry",
-        "Tool_autoresearch_schemas"
+        "Tool_autoresearch_registry"
       ],
-      "internal_edges": 6,
-      "external_dep_count": 12,
-      "coupling_ratio": 0.333
+      "internal_edges": 3,
+      "external_dep_count": 5,
+      "coupling_ratio": 0.375
     },
     {
       "prefix": "dashboard_keeper",
@@ -1502,7 +1499,6 @@
       "Capability_registry",
       "Keeper_types",
       "Tool_agent_timeline",
-      "Tool_autoresearch",
       "Tool_board",
       "Tool_catalog",
       "Tool_local_runtime",
@@ -1685,7 +1681,6 @@
     ],
     "Dashboard_http_autoresearch": [
       "Autoresearch",
-      "Tool_autoresearch",
       "Tool_autoresearch_registry"
     ],
     "Dashboard_http_helpers": [
@@ -2500,7 +2495,6 @@
       "Keeper_alerting_path",
       "Keeper_exec_shared",
       "Keeper_types",
-      "Tool_autoresearch",
       "Tool_code",
       "Tool_dispatch",
       "Tool_result"
@@ -3455,7 +3449,6 @@
       "Prometheus",
       "Tool_agent",
       "Tool_agent_timeline",
-      "Tool_autoresearch",
       "Tool_code",
       "Tool_code_write",
       "Tool_control",
@@ -4222,7 +4215,6 @@
       "Session",
       "Tool_agent",
       "Tool_agent_timeline",
-      "Tool_autoresearch",
       "Tool_catalog",
       "Tool_code",
       "Tool_code_write",
@@ -5349,20 +5341,6 @@
     "Tool_assignment_telemetry": [
       "Prometheus"
     ],
-    "Tool_autoresearch": [
-      "Autoresearch",
-      "Autoresearch_knowledge",
-      "Coord",
-      "Provider_adapter",
-      "Tool_args",
-      "Tool_autoresearch_context",
-      "Tool_autoresearch_cycle",
-      "Tool_autoresearch_schemas",
-      "Tool_catalog",
-      "Tool_dispatch",
-      "Tool_result",
-      "Tool_spec"
-    ],
     "Tool_autoresearch_broadcast": [
       "Autoresearch",
       "Sse"
@@ -5384,7 +5362,6 @@
     "Tool_autoresearch_registry": [
       "Autoresearch"
     ],
-    "Tool_autoresearch_schemas": [],
     "Tool_board": [
       "Board",
       "Board_curation",
@@ -5756,7 +5733,6 @@
     "Tool_scope": [],
     "Tool_shard": [
       "Tool_args",
-      "Tool_autoresearch_schemas",
       "Tool_catalog",
       "Tool_code",
       "Tool_dispatch",
@@ -5829,7 +5805,6 @@
     ],
     "Tools": [
       "Keeper_types",
-      "Tool_autoresearch",
       "Tool_code",
       "Tool_code_write",
       "Tool_library",

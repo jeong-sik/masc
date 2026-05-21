@@ -872,12 +872,6 @@ lib/tool_agent.ml,337,None,unclassified
 lib/tool_agent.ml,355,None,unclassified
 lib/tool_assignment_telemetry.ml,113,None,unclassified
 lib/tool_assignment_telemetry.ml,147,None,unclassified
-lib/tool_autoresearch.ml,42,false,unclassified
-lib/tool_autoresearch.ml,290,None,unclassified
-lib/tool_autoresearch.ml,435,false,unclassified
-lib/tool_autoresearch.ml,445,None,unclassified
-lib/tool_autoresearch.ml,602,None,unclassified
-lib/tool_autoresearch.ml,620,None,unclassified
 lib/tool_board.ml,336,None,unclassified
 lib/tool_board.ml,385,None,unclassified
 lib/tool_board.ml,395,None,unclassified

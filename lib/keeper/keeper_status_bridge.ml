@@ -36,57 +36,21 @@ let effective_declarative_cascade_name
 ;;
 
 type override_field_detail =
+  Keeper_status_bridge_override.override_field_detail =
   { field : string
   ; default_value : Yojson.Safe.t
   ; live_value : Yojson.Safe.t
   }
 
-let override_field field ~default_value ~live_value = { field; default_value; live_value }
-
-let maybe_string_override field ?(normalize = fun value -> value) default live acc =
-  let default = Option.map normalize default in
-  match default with
-  | Some value when value <> live ->
-    override_field field ~default_value:(`String value) ~live_value:(`String live) :: acc
-  | _ -> acc
-;;
-
-let maybe_bool_override field default live acc =
-  match default with
-  | Some value when value <> live ->
-    override_field field ~default_value:(`Bool value) ~live_value:(`Bool live) :: acc
-  | _ -> acc
-;;
-
-let maybe_string_list_override field default live acc =
-  match default with
-  | Some authored when authored <> live ->
-    override_field
-      field
-      ~default_value:(string_list_to_json authored)
-      ~live_value:(string_list_to_json live)
-    :: acc
-  | _ -> acc
-;;
-
-let nonempty_string_list_override field default live acc =
-  if default <> [] && default <> live
-  then
-    override_field
-      field
-      ~default_value:(string_list_to_json default)
-      ~live_value:(string_list_to_json live)
-    :: acc
-  else acc
-;;
-
-let maybe_string_option_override field default live acc =
-  match default, live with
-  | Some authored, Some active when authored <> active ->
-    override_field field ~default_value:(`String authored) ~live_value:(`String active)
-    :: acc
-  | _ -> acc
-;;
+let override_field = Keeper_status_bridge_override.override_field
+let maybe_string_override = Keeper_status_bridge_override.maybe_string_override
+let maybe_bool_override = Keeper_status_bridge_override.maybe_bool_override
+let maybe_string_list_override =
+  Keeper_status_bridge_override.maybe_string_list_override
+let nonempty_string_list_override =
+  Keeper_status_bridge_override.nonempty_string_list_override
+let maybe_string_option_override =
+  Keeper_status_bridge_override.maybe_string_option_override
 
 let live_override_details (meta : keeper_meta) (defaults : keeper_profile_defaults)
   : override_field_detail list

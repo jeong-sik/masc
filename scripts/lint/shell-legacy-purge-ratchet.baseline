@@ -26,6 +26,7 @@ shell_word_simple_commands 0
 command_has_repo_wide_scan 0
 Keeper_shell_bash_words 0
 keeper_shell_bash_words 0
+String.split_on_char ' ' cmd 0
 shell_words_with_boundaries 0
 strip_command_wrappers 0
 cmd_gh_pr_native_subcommand 0

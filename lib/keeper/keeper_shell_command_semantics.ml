@@ -93,6 +93,11 @@ let cmd_targets_git_or_gh cmd =
 let cmd_targets_gh cmd =
   effective_stages cmd |> List.exists (fun stage -> stage.bin = "gh")
 
+let cmd_prefix cmd =
+  match effective_stages cmd with
+  | stage :: _ -> stage.bin
+  | [] -> String.trim cmd
+
 let repo_flag_value = function
   | "--repo" -> None
   | flag when String.starts_with ~prefix:"--repo=" flag ->

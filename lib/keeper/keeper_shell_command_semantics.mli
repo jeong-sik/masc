@@ -13,6 +13,11 @@ val cmd_targets_gh : string -> bool
 (** [true] only when the typed bash subset parser identifies an effective
     command stage whose executable is [gh]. *)
 
+val cmd_prefix : string -> string
+(** Prefix used for shell-history grouping. Uses the same typed bash subset
+    parser and effective-command wrapper handling as command-shape policy.
+    Unsupported command shapes fall back to the trimmed original command. *)
+
 val detect_gh_repo_flag_with_api_misuse : string -> (string * string) option
 (** Detect the invalid [gh --repo <repo> api <endpoint>] shape.  [--repo]
     is a subcommand flag, not a [gh api] global option. *)

@@ -1363,6 +1363,21 @@ let test_sandbox_root_git_cwd_cd_chain_is_not_interpreted () =
     None
     error
 
+let test_cmd_prefix_uses_shell_semantics () =
+  let check label expected cmd =
+    Alcotest.(check string)
+      label
+      expected
+      (Keeper_shell_command_semantics.cmd_prefix cmd)
+  in
+  check "plain command" "git" "git status";
+  check "env wrapper" "gh" "env GH_TOKEN=redacted gh pr list";
+  check "opam wrapper" "dune" "opam exec -- dune runtest";
+  check
+    "unsupported shell shape falls back to original command"
+    "cd repos/masc-mcp && git status"
+    "cd repos/masc-mcp && git status"
+
 let test_gh_repo_api_misuse_uses_shell_semantics () =
   let check label expected cmd =
     Alcotest.(check (option (pair string string)))
@@ -2089,5 +2104,9 @@ let () =
             "gh --repo api misuse uses shell semantics"
             `Quick
             test_gh_repo_api_misuse_uses_shell_semantics;
+          Alcotest.test_case
+            "history cmd_prefix uses shell semantics"
+            `Quick
+            test_cmd_prefix_uses_shell_semantics;
         ] );
     ]

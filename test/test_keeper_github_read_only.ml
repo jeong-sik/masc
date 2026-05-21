@@ -75,14 +75,15 @@ let rec ensure_dir path =
     Unix.mkdir path 0o755)
 
 let run_argv argv =
-  let command = String.concat " " (List.map Filename.quote argv) in
-  match Unix.system command with
-  | Unix.WEXITED 0 -> ()
-  | _ ->
+  match argv with
+  | [] -> invalid_arg "run_argv: empty argv"
+  | prog :: args ->
+    let pid = Unix.create_process prog (Array.of_list argv) Unix.stdin Unix.stdout Unix.stderr in
+    match Unix.waitpid [] pid with
+    | _, Unix.WEXITED 0 -> ()
+    | _ ->
     Alcotest.fail
-      (Printf.sprintf "command failed: %s\n%s"
-         (String.concat " " argv)
-         command)
+      (Printf.sprintf "command failed: %s" (String.concat " " (prog :: args)))
 
 let with_env key value f =
   let prior = Sys.getenv_opt key in

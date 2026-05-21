@@ -26,7 +26,7 @@ let with_temp_dir f =
   in
   mkdir_p base;
   Fun.protect
-    ~finally:(fun () -> ignore (Sys.command (Printf.sprintf "rm -rf %s" base)))
+    ~finally:(fun () -> Masc_mcp.Fs_compat.remove_tree base)
     (fun () -> f base)
 
 let write_file path content =

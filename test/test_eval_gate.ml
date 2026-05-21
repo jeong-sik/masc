@@ -11,7 +11,7 @@ let with_tmpdir f =
     (Printf.sprintf "test_eval_gate_%d" (Random.int 100000)) in
   (try Unix.mkdir dir 0o755 with _ -> ());
   Fun.protect ~finally:(fun () ->
-    ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote dir)))
+    Fs_compat.remove_tree dir
   ) (fun () -> f dir)
 
 let make_acc dir =

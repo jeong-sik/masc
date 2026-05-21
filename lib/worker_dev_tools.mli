@@ -160,6 +160,12 @@ val truncate_for_log : ?max_len:int -> string -> string
     operator-visible error string. *)
 val attribution_of_validation : cmd:string -> (unit, block_reason) result -> Attribution.t
 
+(** Effective [shell_exec] timeout after applying load-bearing timeout floors.
+    Caller-supplied short timeouts are preserved for trivial commands, but
+    git, recursive scans, and local Dune wrapper invocations are floored at the
+    shared [Tool_dispatch] timeout floor. *)
+val effective_shell_exec_timeout_sec : command:string -> requested:float -> float
+
 (** {1 OAS tool factories} *)
 
 (** Closed sum classifying the producer error categories emitted by the

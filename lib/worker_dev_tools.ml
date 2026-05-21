@@ -334,7 +334,7 @@ let command_context_with_allowlist ?caller ~allowed_commands cmd =
     | Allow context ->
       if context.Exec_shell_gate.direct_dune_seen
       then Error Direct_dune_invocation
-      else Ok ()
+      else Ok context
     | Reject { context; reason; _ } ->
       if context.Exec_shell_gate.direct_dune_seen
       then Error Direct_dune_invocation
@@ -1140,6 +1140,65 @@ let output_for_dispatch_status ~(status : Unix.process_status) ~stdout ~stderr =
     | out, err -> out ^ "\n" ^ err)
 ;;
 
+let simple_literal_argv (simple : Masc_exec.Shell_ir.simple) =
+  match simple_literal_args simple with
+  | None -> None
+  | Some args -> Some (Masc_exec.Bin.to_string simple.Masc_exec.Shell_ir.bin :: args)
+;;
+
+let has_flag_prefix ~prefix args =
+  List.exists (fun arg -> String.length arg >= String.length prefix
+                          && String.sub arg 0 (String.length prefix) = prefix)
+    args
+;;
+
+let is_recursive_scan_command bin args =
+  match bin with
+  | "find" -> true
+  | "rg" -> true
+  | "grep" ->
+    List.exists
+      (fun arg ->
+         String.length arg >= 2
+         && arg.[0] = '-'
+         && (String.contains arg 'r' || String.contains arg 'R'))
+      args
+  | _ -> false
+;;
+
+let shell_exec_simple_timeout_floor (simple : Masc_exec.Shell_ir.simple) =
+  let bin = Masc_exec.Bin.to_string simple.Masc_exec.Shell_ir.bin in
+  match simple_literal_argv simple with
+  | None -> None
+  | Some (_ :: args) ->
+    if String.equal bin "git"
+       || String.equal bin "dune-local.sh"
+       || has_flag_prefix ~prefix:"scripts/dune-local.sh" (bin :: args)
+       || is_recursive_scan_command bin args
+    then Some Timeout_floor.Tool_dispatch
+    else None
+  | Some [] -> None
+;;
+
+let rec shell_exec_timeout_floor = function
+  | Masc_exec.Shell_ir.Simple simple -> shell_exec_simple_timeout_floor simple
+  | Masc_exec.Shell_ir.Pipeline stages ->
+    List.find_map shell_exec_timeout_floor stages
+;;
+
+let effective_shell_exec_timeout_sec_for_context ~requested context =
+  match shell_exec_timeout_floor context.Exec_shell_gate.ast with
+  | None -> requested
+  | Some floor -> Timeout_floor.clamp floor requested
+;;
+
+let effective_shell_exec_timeout_sec ~command ~requested =
+  let requested = Float.min 120.0 requested in
+  match command_context_with_allowlist ~allowed_commands:dev_allowed_commands command with
+  | Error _ -> requested
+  | Ok context -> effective_shell_exec_timeout_sec_for_context ~requested context
+;;
+
 let make_shell_exec_with_allowlist
       ~workdir
       ~on_exec
@@ -1217,6 +1276,8 @@ let make_shell_exec_with_allowlist
                  |> Option.value ~default:30.0
                     (* DET-OK: fixed policy default for absent shell timeout. *)
                  |> Float.min 120.0
+                 |> fun requested ->
+                 effective_shell_exec_timeout_sec_for_context ~requested context
                in
                (try
                   let started = Time_compat.now () in

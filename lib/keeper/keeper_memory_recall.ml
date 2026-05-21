@@ -27,7 +27,7 @@ let read_file_tail_lines path ~max_bytes ~max_lines : string list =
     try
       let fd = Unix.openfile path [ Unix.O_RDONLY ] 0 in
       Fun.protect
-        ~finally:(fun () -> try Unix.close fd with _ -> ())
+        ~finally:(fun () -> try Unix.close fd with Unix.Unix_error _ -> ())
         (fun () ->
           let file_len = (Unix.LargeFile.fstat fd).Unix.LargeFile.st_size in
           let min_start =

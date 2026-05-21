@@ -73,7 +73,7 @@ let gh_command_ok ~gh_config_dir argv =
         full_argv
     in
     status_ok status
-  with _ ->
+  with Sys_error _ | Unix.Unix_error _ ->
     false
 
 let hosts_yml_has_oauth_token ~gh_config_dir =
@@ -92,7 +92,7 @@ let hosts_yml_has_oauth_token ~gh_config_dir =
            && String.trim
                 (String.sub trimmed plen (String.length trimmed - plen))
               <> "")
-    with Sys_error _ -> false
+    with Sys_error _ | Unix.Unix_error _ -> false
 
 let gh_auth_status_ok ~gh_config_dir =
   gh_command_ok ~gh_config_dir [ "auth"; "status" ]
@@ -183,7 +183,7 @@ let read_token_from_hosts_yml ~gh_config_dir =
              in
              Some (strip_value_decorations raw)
            else None)
-    with Sys_error _ -> None
+    with Sys_error _ | Unix.Unix_error _ -> None
 
 (** Compute the SHA-256 prefix of the [oauth_token] stored in
     [<gh_config_dir>/hosts.yml].  Returns [None] when the bundle has not
@@ -220,7 +220,7 @@ let read_operator_ambient_token () : string option =
       let token = String.trim stdout in
       if String.equal token "" then None else Some token
     else None
-  with _ -> None
+  with Sys_error _ | Unix.Unix_error _ -> None
 
 (** RFC-0019 PR-C §3.2 P1 — F-1 gate (permissive).
 
@@ -316,7 +316,7 @@ let relabel_hosts_yml ~gh_config_dir ~identity_label =
           lines
       in
       Fs_compat.save_file path (String.concat "\n" rewritten)
-    with Sys_error _ -> ()
+    with Sys_error _ | Unix.Unix_error _ -> ()
 
 (* RFC-0019 PR-B Slice 2 + §8 R3: refuse paths that escape via [..]
    segments.  Absolute or relative are both allowed; what is not allowed

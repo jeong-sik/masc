@@ -1,9 +1,9 @@
 ---
 rfc: "0153"
 title: "Cascade Backpressure & Tier Admission"
-status: Active
+status: Implemented
 created: 2026-05-20
-updated: 2026-05-21
+updated: 2026-05-22
 author: vincent
 supersedes: []
 superseded_by: null

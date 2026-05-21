@@ -1,9 +1,9 @@
 ---
 rfc: "0073"
 title: "Tool Readiness Probe — Typed Precondition + Runtime Gap Disclosure"
-status: Draft
+status: Implemented
 created: 2026-05-14
-updated: 2026-05-20
+updated: 2026-05-22
 author: vincent
 supersedes: []
 superseded_by: null

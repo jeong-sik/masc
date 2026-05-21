@@ -1,9 +1,9 @@
 ---
 rfc: "0140"
 title: "Dashboard Wire-Format Codec Layer"
-status: Draft
+status: Implemented
 created: 2026-05-19
-updated: 2026-05-20
+updated: 2026-05-22
 author: vincent
 supersedes: []
 superseded_by: null

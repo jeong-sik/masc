@@ -1,9 +1,9 @@
 ---
 rfc: "0122"
 title: "Keeper disk pressure — process-local fleet failure mode beyond FD"
-status: Draft
+status: Implemented
 created: 2026-05-17
-updated: 2026-05-21
+updated: 2026-05-22
 author: vincent
 supersedes: []
 superseded_by: null

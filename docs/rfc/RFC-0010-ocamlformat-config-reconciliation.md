@@ -1,9 +1,9 @@
 ---
 rfc: "0010"
 title: "ocamlformat config reconciliation"
-status: Draft
+status: Implemented
 created: 2026-05-12
-updated: 2026-05-20
+updated: 2026-05-22
 author: vincent
 supersedes: []
 superseded_by: null

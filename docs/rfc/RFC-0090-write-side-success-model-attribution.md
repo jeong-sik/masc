@@ -1,9 +1,9 @@
 ---
 rfc: "0090"
 title: "Write-side success-model attribution — finish N-of-M migration"
-status: Draft
+status: Implemented
 created: 2026-05-17
-updated: 2026-05-20
+updated: 2026-05-22
 author: vincent
 supersedes: []
 superseded_by: null

@@ -391,8 +391,72 @@ let test_local_pr_review_host_uses_exec_gate_cwd () =
             process_lines);
        check bool "no cd wrapper in argv tap" false
          (List.exists (fun line -> contains_substring line "cd ") process_lines);
+       check bool "no shell -lc wrapper in argv tap" false
+         (List.exists (fun line -> contains_substring line "\"-lc\"") process_lines);
+       check bool "no shell pipe truncation in argv tap" false
+         (List.exists (fun line -> contains_substring line "head -c") process_lines);
        check bool "repo flag reached gh" true
          (contains_substring (read_file gh_args_log) "-R jeong-sik/masc-mcp"))
+
+let test_local_pr_review_comment_uses_argv_not_shell () =
+  setup_local_review @@ fun ~base ~config ~meta ->
+  let bin_dir = Filename.concat base "bin" in
+  let gh_args_log = Filename.concat base "gh-comment-args.log" in
+  ensure_dir bin_dir;
+  write_file
+    (Filename.concat bin_dir "gh")
+    "#!/bin/sh\n\
+     printf '%s\\n' \"$*\" >> \"$GH_ARGS_LOG\"\n\
+     if [ \"$1\" = \"pr\" ] && [ \"$2\" = \"review\" ]; then\n\
+     \  exit 0\n\
+     fi\n\
+     printf 'unexpected gh: %s\\n' \"$*\" >&2\n\
+     exit 2\n";
+  Unix.chmod (Filename.concat bin_dir "gh") 0o755;
+  let captured = ref [] in
+  Fun.protect
+    ~finally:(fun () -> Exec_tap.disable ())
+    (fun () ->
+       Exec_tap.enable ~writer:(fun line -> captured := line :: !captured);
+       with_env "GH_ARGS_LOG" gh_args_log @@ fun () ->
+       with_env "PATH"
+         (bin_dir ^ ":"
+         ^ Option.value ~default:"/usr/bin:/bin" (Sys.getenv_opt "PATH"))
+       @@ fun () ->
+       let raw =
+         KTPR.handle_keeper_pr_review_comment ~config ~meta
+           ~args:
+             (`Assoc
+               [ ("pr_number", `Int 13510)
+               ; ("body", `String "host comment body with * shell chars")
+               ; ("event", `String "COMMENT")
+               ])
+       in
+       check bool "comment ok" true
+         (parse_field raw "ok" |> Json.to_bool);
+       let process_lines =
+         List.filter
+           (fun line ->
+             contains_substring line
+               "\"kind\":\"Process_eio.run_argv_with_status\"")
+           !captured
+       in
+       check bool "process execution recorded" true (process_lines <> []);
+       check bool "no shell -lc wrapper in mutation tap" false
+         (List.exists
+            (fun line -> contains_substring line "\"-lc\"")
+            process_lines);
+       check bool "comment body not embedded in argv" false
+         (List.exists
+            (fun line -> contains_substring line "host comment body")
+            process_lines);
+       let gh_args = read_file gh_args_log in
+       check bool "review subcommand used" true
+         (contains_substring gh_args "pr review 13510");
+       check bool "body-file used" true
+         (contains_substring gh_args "--body-file");
+       check bool "comment flag used" true
+         (contains_substring gh_args "--comment"))
 
 let test_read_routes_docker_and_injects_repo_flag () =
   with_fake_docker @@ fun () ->
@@ -651,6 +715,8 @@ let () =
     "host_route", [
       test_case "host route uses Exec_gate cwd" `Quick
         test_local_pr_review_host_uses_exec_gate_cwd;
+      test_case "host comment uses argv without shell" `Quick
+        test_local_pr_review_comment_uses_argv_not_shell;
     ];
     "docker_route", [
       test_case "with_env restores cleared variables" `Quick

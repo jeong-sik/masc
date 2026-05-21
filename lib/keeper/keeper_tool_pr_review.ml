@@ -5,9 +5,6 @@
 open Keeper_types
 open Keeper_exec_shared
 
-(* RFC-0084 host-config-cleanup-B — zsh binary path migration. *)
-let host_zsh = (Host_config.host ()).host_zsh
-
 (* Issue #8480: Variant SSOT for PR review event. Adding a new
    constructor forces compilation in [pr_review_event_to_string],
    [pr_review_event_of_string_opt], and [pr_review_event_to_gh_flag],
@@ -161,8 +158,12 @@ let effective_repo_slug ~(config : Coord.config) ~(repo : string)
     | Some slug -> Ok slug
     | None -> Error "Could not determine repository. Provide repo parameter."
 
-let repo_flag repo_slug =
-  Printf.sprintf " -R %s" (Filename.quote repo_slug)
+let quote_argv argv = String.concat " " (List.map Filename.quote argv)
+
+let repo_args repo_slug = [ "-R"; repo_slug ]
+
+let truncate_max ~max_bytes s =
+  if String.length s <= max_bytes then s else String.sub s 0 max_bytes
 
 let docker_pr_review_cwd ~(config : Coord.config) meta =
   let root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
@@ -216,9 +217,10 @@ let with_pr_review_body_file ~(config : Coord.config) ~(meta : keeper_meta) ~bod
       | Sys_error _ -> ())
     (fun () -> f command_path)
 
-let run_pr_review_shell ~(config : Coord.config) ~(meta : keeper_meta)
-    ~timeout_sec ~cmd =
+let run_pr_review_argv ~(config : Coord.config) ~(meta : keeper_meta)
+    ~timeout_sec ~summary ~argv =
   if meta.sandbox_profile = Docker then
+    let cmd = quote_argv argv in
     match
       Keeper_shell_shared.run_docker_shell_command_with_status
         ~config ~meta
@@ -239,12 +241,12 @@ let run_pr_review_shell ~(config : Coord.config) ~(meta : keeper_meta)
         }
   else
     let root = Keeper_alerting_path.project_root_of_config config in
-    let argv = [ host_zsh; "-lc"; cmd ] in
     let status, output =
       Masc_exec.Exec_gate.run_argv_with_status
         ~actor:`Keeper_shell
-        ~raw_source:(String.concat " " (List.map Filename.quote argv))
-        ~summary:"keeper tool pr review host"
+        ~raw_source:(quote_argv argv)
+        ~summary
+        ?env:(Keeper_gh_env.process_env config)
         ~cwd:root
         ~timeout_sec
         argv
@@ -284,14 +286,12 @@ let explicit_repo_unresolved_error ~(config : Coord.config) (meta : keeper_meta)
     ~repo_arg ~repo_slug ?pr_number ?event () =
   if String.trim repo_arg = "" then None
   else
-    let cmd =
-      Printf.sprintf "gh repo view %s --json nameWithOwner 2>&1"
-        repo_slug
-    in
+    let argv = [ "gh"; "repo"; "view"; repo_slug; "--json"; "nameWithOwner" ] in
     let result =
-      run_pr_review_shell ~config ~meta
+      run_pr_review_argv ~config ~meta
         ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Pr_review ())
-        ~cmd
+        ~summary:"keeper pr review repo resolve"
+        ~argv
     in
     if status_ok result.status then None
     else
@@ -387,17 +387,18 @@ let approve_preflight
     ~(meta : keeper_meta)
     ~pr_number
     ~repo_slug
-    ~repo_flag_arg
+    ~repo_args
   =
-  let cmd =
-    Printf.sprintf
-      "gh pr view %d%s --json isDraft,headRefName,labels 2>&1"
-      pr_number repo_flag_arg
+  let argv =
+    [ "gh"; "pr"; "view"; string_of_int pr_number ]
+    @ repo_args
+    @ [ "--json"; "isDraft,headRefName,labels" ]
   in
   let result =
-    run_pr_review_shell ~config ~meta
+    run_pr_review_argv ~config ~meta
       ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Pr_review ())
-      ~cmd
+      ~summary:"keeper pr review approve preflight"
+      ~argv
   in
   if not (status_ok result.status) then
     Error
@@ -472,32 +473,40 @@ let handle_keeper_pr_review_read
          with
          | Some error -> error
          | None ->
-             let repo_flag_arg = repo_flag repo_slug in
+                 let repo_argv = repo_args repo_slug in
              (* Get PR metadata *)
-             let meta_cmd =
-               Printf.sprintf
-                 "gh pr view %d%s --json title,body,state,files,reviews,comments,additions,deletions 2>&1"
-                 pr_number repo_flag_arg
+             let meta_argv =
+               [ "gh"; "pr"; "view"; string_of_int pr_number ]
+               @ repo_argv
+               @ [
+                   "--json";
+                   "title,body,state,files,reviews,comments,additions,deletions";
+                 ]
              in
              let meta_result =
-               run_pr_review_shell ~config ~meta
+               run_pr_review_argv ~config ~meta
                  ~timeout_sec:
                    (Env_config_exec_timeout.timeout_sec ~caller:Pr_review ())
-                 ~cmd:meta_cmd
+                 ~summary:"keeper pr review read metadata"
+                 ~argv:meta_argv
              in
              (* Get PR diff (truncated) *)
-             let diff_cmd =
-               Printf.sprintf "gh pr diff %d%s 2>&1 | head -c %d" pr_number
-                 repo_flag_arg Common.max_tool_output_bytes
+             let diff_argv =
+               [ "gh"; "pr"; "diff"; string_of_int pr_number ] @ repo_argv
              in
              let diff_result =
-               run_pr_review_shell ~config ~meta
+               run_pr_review_argv ~config ~meta
                  ~timeout_sec:
                    (Env_config_exec_timeout.timeout_sec ~caller:Pr_review ())
-                 ~cmd:diff_cmd
+                 ~summary:"keeper pr review read diff"
+                 ~argv:diff_argv
              in
              let diff_truncated =
-               String.length diff_result.output >= Common.max_tool_output_bytes
+               String.length diff_result.output > Common.max_tool_output_bytes
+             in
+             let diff_output =
+               truncate_max ~max_bytes:Common.max_tool_output_bytes
+                 diff_result.output
              in
              let meta_ok = status_ok meta_result.status in
              if
@@ -528,7 +537,7 @@ let handle_keeper_pr_review_read
                     ; "repo", `String repo_slug
                     ; "execution_via", `String meta_result.via
                     ; "metadata", `String meta_result.output
-                    ; "diff", `String diff_result.output
+                    ; "diff", `String diff_output
                     ; "diff_truncated", `Bool diff_truncated
                     ; "diff_status", `Bool (status_ok diff_result.status)
                     ]
@@ -580,12 +589,12 @@ let handle_keeper_pr_review_comment
              with
              | Some error -> error
              | None ->
-                 let repo_flag_arg = repo_flag repo_slug in
+                 let repo_argv = repo_args repo_slug in
                  let approve_preflight_result =
                    match event with
                    | Approve ->
                        approve_preflight
-                         ~config ~meta ~pr_number ~repo_slug ~repo_flag_arg
+                         ~config ~meta ~pr_number ~repo_slug ~repo_args:repo_argv
                        |> Result.map (fun json -> Some json)
                    | Comment | Request_changes -> Ok None
                  in
@@ -613,25 +622,26 @@ let handle_keeper_pr_review_comment
                       @ route_fields ~via:preflight_via meta
                       @ identity_attestation_fields ~config meta))
              | Ok approve_preflight_json ->
-                 (* Use gh pr review to create a review *)
                  let result =
                    with_pr_review_body_file ~config ~meta ~body
                    @@ fun body_file ->
-                   let cmd =
-                     Printf.sprintf
-                       "gh pr review %d%s --body-file %s %s 2>&1"
-                       pr_number
-                       repo_flag_arg
-                       (Filename.quote body_file)
-                       (pr_review_event_to_gh_flag event)
+                   let argv =
+                     [ "gh"; "pr"; "review"; string_of_int pr_number ]
+                     @ repo_argv
+                     @ [
+                         "--body-file";
+                         body_file;
+                         pr_review_event_to_gh_flag event;
+                       ]
                    in
-                   run_pr_review_shell
+                   run_pr_review_argv
                      ~config
                      ~meta
                      ~timeout_sec:
                        (Env_config_exec_timeout.timeout_sec
                           ~caller:Pr_review_post ())
-                     ~cmd
+                     ~summary:"keeper pr review mutate"
+                     ~argv
                  in
                  Log.Keeper.info
                    "pr_review_comment: pr=%d event=%s keeper=%s ok=%b"
@@ -696,17 +706,25 @@ let handle_keeper_pr_review_reply
                let result =
                  with_pr_review_body_file ~config ~meta ~body
                  @@ fun body_file ->
-                 let cmd =
-                   Printf.sprintf
-                     "gh api repos/%s/pulls/%d/comments/%d/replies -F body=@%s \
-                      2>&1"
-                     owner_repo pr_number comment_id (Filename.quote body_file)
+                 let endpoint =
+                   Printf.sprintf "repos/%s/pulls/%d/comments/%d/replies"
+                     owner_repo pr_number comment_id
                  in
-                 run_pr_review_shell ~config ~meta
+                 let argv =
+                   [
+                     "gh";
+                     "api";
+                     endpoint;
+                     "-F";
+                     "body=@" ^ body_file;
+                   ]
+                 in
+                 run_pr_review_argv ~config ~meta
                    ~timeout_sec:
                      (Env_config_exec_timeout.timeout_sec
                         ~caller:Pr_review_post ())
-                   ~cmd
+                   ~summary:"keeper pr review reply"
+                   ~argv
                in
                Log.Keeper.info
                  "pr_review_reply: pr=%d comment=%d keeper=%s ok=%b" pr_number

@@ -347,6 +347,16 @@ let parse_keeper_policy (json : Yojson.Safe.t) ~(keeper_name : string)
                    ~default:Keeper_config.default_keep_recent_tool_results
                    "keep_recent_tool_results"
                    json)
+          ; tool_heavy_msg_threshold =
+              Safe_ops.json_int
+                ~default:Keeper_config.default_tool_heavy_msg_threshold
+                "tool_heavy_msg_threshold"
+                json
+          ; tool_heavy_ratio_floor =
+              Safe_ops.json_float
+                ~default:Keeper_config.default_tool_heavy_ratio_floor
+                "tool_heavy_ratio_floor"
+                json
           }
       ; pp_auto_handoff
       ; pp_handoff_threshold

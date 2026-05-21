@@ -192,6 +192,16 @@ val normalize_continuity_compaction_cooldown_sec : int -> int
     behavior in [Keeper_compact_policy]. *)
 val default_keep_recent_tool_results : int
 
+(** Default message-count floor for the tool-heavy compaction gate.
+    Mirrors the prior global constant in [Keeper_compact_policy].
+    Wired into [decide_compaction] by PR-B. *)
+val default_tool_heavy_msg_threshold : int
+
+(** Default context-ratio floor for the tool-heavy compaction gate.
+    Mirrors the prior global constant in [Keeper_compact_policy].
+    Wired into [decide_compaction] by PR-B. *)
+val default_tool_heavy_ratio_floor : float
+
 (** Hard upper bound for operator-supplied
     [keep_recent_tool_results] (typo guard). *)
 val keep_recent_tool_results_max : int

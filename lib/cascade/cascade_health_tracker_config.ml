@@ -1,34 +1,7 @@
 (** Env-driven runtime configuration for {!Cascade_health_tracker}. *)
 
-(** One-time deprecation warning for legacy OAS_CASCADE_* env vars.
-    The cascade routing layer was migrated from OAS to MASC in v0.149.0
-    (see docs/rfc/RFC-OAS-006-weighted-cascade-routing.md + follow-ups);
-    the env var prefix stayed [OAS_CASCADE_*] by drift.  We accept both
-    during the transition and emit a one-shot warning per deprecated
-    key so operators can update their deployment config. *)
-let deprecation_warned : (string, unit) Hashtbl.t = Hashtbl.create 4
-
-let getenv_with_alias ~primary ?deprecated () =
+let read_float_setting ~primary ~default () =
   match Sys.getenv_opt primary with
-  | Some v -> Some v
-  | None ->
-      (match deprecated with
-       | None -> None
-       | Some dep ->
-           (match Sys.getenv_opt dep with
-            | Some _ as some ->
-                if not (Hashtbl.mem deprecation_warned dep)
-                then (
-                  Hashtbl.add deprecation_warned dep ();
-                  Log.Misc.warn
-                    "env var %s is deprecated; use %s (same semantics)"
-                    dep
-                    primary);
-                some
-            | None -> None))
-
-let read_float_setting ~primary ?deprecated ~default () =
-  match getenv_with_alias ~primary ?deprecated () with
   | None -> default
   | Some raw ->
       let trimmed = String.trim raw in
@@ -45,8 +18,8 @@ let read_float_setting ~primary ?deprecated ~default () =
               default;
             default)
 
-let read_int_setting ~primary ?deprecated ~default () =
-  match getenv_with_alias ~primary ?deprecated () with
+let read_int_setting ~primary ~default () =
+  match Sys.getenv_opt primary with
   | None -> default
   | Some raw ->
       let trimmed = String.trim raw in
@@ -69,7 +42,6 @@ let read_int_setting ~primary ?deprecated ~default () =
 let window_sec =
   read_float_setting
     ~primary:"MASC_CASCADE_HEALTH_WINDOW_SEC"
-    ~deprecated:"OAS_CASCADE_HEALTH_WINDOW_SEC"
     ~default:300.0
     ()
 
@@ -78,7 +50,6 @@ let window_sec =
 let cooldown_threshold =
   read_int_setting
     ~primary:"MASC_CASCADE_COOLDOWN_THRESHOLD"
-    ~deprecated:"OAS_CASCADE_COOLDOWN_THRESHOLD"
     ~default:3
     ()
 
@@ -89,7 +60,6 @@ let cooldown_threshold =
 let cooldown_sec =
   read_float_setting
     ~primary:"MASC_CASCADE_COOLDOWN_SEC"
-    ~deprecated:"OAS_CASCADE_COOLDOWN_SEC"
     ~default:30.0
     ()
 
@@ -142,7 +112,6 @@ let cooldown_config_for ~provider_key =
 let hard_quota_cooldown_sec =
   read_float_setting
     ~primary:"MASC_CASCADE_HARD_QUOTA_COOLDOWN_SEC"
-    ~deprecated:"OAS_CASCADE_HARD_QUOTA_COOLDOWN_SEC"
     ~default:3600.0
     ()
 
@@ -152,7 +121,6 @@ let hard_quota_cooldown_sec =
 let terminal_failure_cooldown_sec =
   read_float_setting
     ~primary:"MASC_CASCADE_TERMINAL_FAILURE_COOLDOWN_SEC"
-    ~deprecated:"OAS_CASCADE_TERMINAL_FAILURE_COOLDOWN_SEC"
     ~default:3600.0
     ()
 

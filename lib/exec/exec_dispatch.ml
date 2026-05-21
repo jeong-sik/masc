@@ -91,11 +91,14 @@ let dispatch_simple ?timeout_sec ?stdin_content (s : Shell_ir.simple) =
 
 (* --- pipeline + entry point (mutually recursive) --- *)
 
+let invalid_pipeline stderr = { status = Unix.WEXITED 1; stdout = ""; stderr }
+
 let rec dispatch_pipeline ?timeout_sec stages =
   match stages with
   | [] ->
-      { status = Unix.WEXITED 0; stdout = ""; stderr = "" }
-  | [ stage ] -> dispatch ?timeout_sec stage
+      invalid_pipeline "empty pipeline not supported in native dispatch"
+  | [ _ ] ->
+      invalid_pipeline "single-stage pipeline not supported in native dispatch"
   | _ ->
       let rec chain prev_stdout = function
         | [] ->
@@ -115,22 +118,18 @@ let rec dispatch_pipeline ?timeout_sec stages =
             in
             { result with status = final_status }
         | Pipeline _ :: _ ->
-            { status = Unix.WEXITED 1;
-              stdout = "";
-              stderr = "nested pipeline not supported in native dispatch" }
+            invalid_pipeline "nested pipeline not supported in native dispatch"
       in
       (match stages with
-       | [] ->
-           { status = Unix.WEXITED 0; stdout = ""; stderr = "" }
+       | [] | [ _ ] ->
+           invalid_pipeline "invalid pipeline arity in native dispatch"
        | first :: rest -> (
          match first with
          | Shell_ir.Simple s ->
            let result = dispatch_simple ?timeout_sec s in
            chain result.stdout rest
          | Pipeline _ ->
-           { status = Unix.WEXITED 1;
-             stdout = "";
-             stderr = "nested pipeline not supported" }))
+           invalid_pipeline "nested pipeline not supported in native dispatch" ))
 
 and dispatch ?timeout_sec (ir : Shell_ir.t) =
   match ir with

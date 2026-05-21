@@ -1,3 +1,12 @@
+---
+title: Three-Tier Config Disclosure (Basic / Advanced / Godmode)
+rfc: 0031
+status: Withdrawn
+created: 2026-05-05
+withdrawn_date: 2026-05-21
+withdrawn_reason: "Godmode tier never implemented. Env knob work proceeded in different direction (RFC-0138 §7 freeze + RFC-0125 bounded discipline). Tier UX abandoned. Archived for history."
+---
+
 # RFC-0031 — Three-Tier Config Disclosure (Basic / Advanced / Godmode)
 
 - **Status**: Draft

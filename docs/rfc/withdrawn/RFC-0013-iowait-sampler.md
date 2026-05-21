@@ -1,3 +1,12 @@
+---
+title: IO-wait Sampler
+rfc: 0013
+status: Withdrawn
+created: 2026-04-29
+withdrawn_date: 2026-05-21
+withdrawn_reason: "Self-declared deferred in original draft (PR-0.2.E). Parent plan (masc-ide-strategy) progressed in different direction; sampler never implemented. 180+ days without implementation commits. Archived for history."
+---
+
 # RFC 0013 — IO-wait Sampler (PR-0.2.E, deferred)
 
 - Status: Draft (deferred — see "Prerequisites")

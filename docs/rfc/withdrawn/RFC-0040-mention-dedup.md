@@ -1,3 +1,12 @@
+---
+title: Mention dedup at sender (broadcast-time)
+rfc: 0040
+status: Withdrawn
+created: 2026-05-07
+withdrawn_date: 2026-05-21
+withdrawn_reason: "Sender-side dedup approach abandoned. Receive-side dedup (RFC-0090 N-emit root, PR #15568) was selected as canonical path. Archived for history."
+---
+
 # RFC 0040 — Mention dedup at sender (broadcast-time)
 
 > Note: drafted as RFC-0036.v2 in loop-iter-8 (2026-05-07).  Renumbered

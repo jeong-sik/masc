@@ -1,3 +1,12 @@
+---
+title: Bounded Token Prediction (Distribution-based)
+rfc: 0028
+status: Withdrawn
+created: 2026-05-05
+withdrawn_date: 2026-05-21
+withdrawn_reason: "Distribution-based bounded prediction never implemented. lib/bounded.{ml,mli} exists but spec did not progress beyond audit response. Research idea. Archived for history."
+---
+
 # RFC-0028 — Bounded Token Prediction (Distribution-based)
 
 - **Status**: Draft

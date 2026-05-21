@@ -1,3 +1,12 @@
+---
+title: Kimi Coding API Provider (3-way Split Completion)
+rfc: 0023
+status: Withdrawn
+created: 2026-05-03
+withdrawn_date: 2026-05-21
+withdrawn_reason: "Kimi provider ships via provider_adapter.ml + transport_kimi_cli.ml without spec ratification. 3-way split design never adopted. No implementation commits in 180+ days. Archived for history."
+---
+
 # RFC-0023: Kimi Coding API Provider (3-way Split Completion)
 
 - **Status**: Draft

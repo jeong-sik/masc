@@ -1,3 +1,12 @@
+---
+title: Cache-invalidation broadcast envelope
+rfc: 0061
+status: Withdrawn
+created: 2026-05-09
+withdrawn_date: 2026-05-21
+withdrawn_reason: "Dashboard cache work proceeded via RFC-0138 lock-free immutable architecture, not broadcast envelope pattern. Original design supplanted. Archived for history."
+---
+
 # RFC 0061 — Cache-invalidation broadcast envelope
 
 - **Status**: Draft

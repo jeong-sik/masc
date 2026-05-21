@@ -41,6 +41,28 @@ let payload_role_of_string = function
   | "memory_store" -> Some Memory_store
   | _ -> None
 
+type source_clock =
+  | Wall
+  | Monotonic
+  | Logical
+  | Provider
+  | Event_bus
+
+let source_clock_to_string = function
+  | Wall -> "wall"
+  | Monotonic -> "monotonic"
+  | Logical -> "logical"
+  | Provider -> "provider"
+  | Event_bus -> "oas_event_bus"
+
+let source_clock_of_string = function
+  | "wall" -> Some Wall
+  | "monotonic" -> Some Monotonic
+  | "logical" -> Some Logical
+  | "provider" -> Some Provider
+  | "oas_event_bus" -> Some Event_bus
+  | _ -> None
+
 type links = {
   receipt_path : string option;
   checkpoint_path : string option;
@@ -170,7 +192,8 @@ let clock_refs ?edge_id ?lane ?source_clock ?observed_at ?started_at
        [
          string_field_opt "edge_id" edge_id;
          string_field_opt "lane" lane;
-         string_field_opt "source_clock" source_clock;
+         string_field_opt "source_clock"
+           (Option.map source_clock_to_string source_clock);
          string_field_opt "observed_at" observed_at;
          string_field_opt "started_at" started_at;
          string_field_opt "finished_at" finished_at;
@@ -275,8 +298,12 @@ let clock_refs_for_context ctx ~event ?oas_turn_count
   in
   let source_clock =
     match event with
-    | Event_bus_correlated -> "oas_event_bus"
-    | _ -> "wall"
+    | Event_bus_correlated -> Event_bus
+    | Provider_attempt_started
+    | Provider_attempt_finished -> Provider
+    | Context_injected
+    | Context_compacted -> Logical
+    | _ -> Wall
   in
   clock_refs ~edge_id:(context_edge_id ctx event)
     ~lane:(clock_lane_of_event event) ~source_clock ?tool_batch_id

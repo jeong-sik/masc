@@ -729,6 +729,10 @@ export interface KeeperRuntimeLensPayloadRoleAxis {
   counts: Record<string, number>
 }
 
+export interface KeeperRuntimeLensSourceClockAxis {
+  counts: Record<string, number>
+}
+
 export interface KeeperRuntimeLensClaimScopeAxis {
   present: boolean
   source: string
@@ -799,6 +803,7 @@ export interface KeeperRuntimeLensAxes {
   provider_attempt: KeeperRuntimeLensProviderAttemptAxis
   tool_lineage: KeeperRuntimeLensToolLineageAxis
   payload_role: KeeperRuntimeLensPayloadRoleAxis
+  source_clock: KeeperRuntimeLensSourceClockAxis
   claim_scope: KeeperRuntimeLensClaimScopeAxis
   config_drift: KeeperRuntimeLensConfigDriftAxis
   runtime_proof: KeeperRuntimeLensRuntimeProofAxis
@@ -1174,6 +1179,20 @@ function parseRuntimeLensPayloadRoleAxis(raw: unknown): KeeperRuntimeLensPayload
   return { counts }
 }
 
+function parseRuntimeLensSourceClockAxis(raw: unknown): KeeperRuntimeLensSourceClockAxis {
+  const obj = isRecord(raw) ? raw : {}
+  const counts: Record<string, number> = {}
+  if (isRecord(obj)) {
+    for (const key of Object.keys(obj)) {
+      const value = obj[key]
+      if (typeof value === 'number') {
+        counts[key] = value
+      }
+    }
+  }
+  return { counts }
+}
+
 function parseRuntimeLensClaimScopeAxis(raw: unknown): KeeperRuntimeLensClaimScopeAxis {
   const obj = isRecord(raw) ? raw : {}
   return {
@@ -1256,6 +1275,7 @@ function parseRuntimeLensAxes(raw: unknown): KeeperRuntimeLensAxes {
     provider_attempt: parseRuntimeLensProviderAttemptAxis(obj.provider_attempt),
     tool_lineage: parseRuntimeLensToolLineageAxis(obj.tool_lineage),
     payload_role: parseRuntimeLensPayloadRoleAxis(obj.payload_role),
+    source_clock: parseRuntimeLensSourceClockAxis(obj.source_clock),
     claim_scope: parseRuntimeLensClaimScopeAxis(obj.claim_scope),
     config_drift: parseRuntimeLensConfigDriftAxis(obj.config_drift),
     runtime_proof: parseRuntimeLensRuntimeProofAxis(obj.runtime_proof),

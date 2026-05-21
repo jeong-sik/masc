@@ -33,6 +33,7 @@ type runtime_manifest_scan =
   ; mutable latest_pre_dispatch_blocked_row : Keeper_runtime_manifest.t option
   ; mutable latest_tool_lineage_decision : Yojson.Safe.t option
   ; mutable payload_role_counts : (string, int) Hashtbl.t
+  ; mutable source_clock_counts : (string, int) Hashtbl.t
   ; mutable context_injected_count : int
   ; mutable context_compacted_event_count : int
   ; mutable active_open_loop_count : int option

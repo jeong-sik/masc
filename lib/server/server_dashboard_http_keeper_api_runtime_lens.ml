@@ -204,6 +204,11 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
                 (Hashtbl.fold
                    (fun role count acc -> (role, `Int count) :: acc)
                    scan.payload_role_counts []) );
+            ( "source_clock",
+              `Assoc
+                (Hashtbl.fold
+                   (fun clock count acc -> (clock, `Int count) :: acc)
+                   scan.source_clock_counts []) );
             ( "provider_attempt",
               `Assoc
                 [

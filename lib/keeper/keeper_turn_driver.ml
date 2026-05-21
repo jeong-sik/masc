@@ -722,6 +722,7 @@ let run_named
       Keeper_runtime_manifest.clock_refs
         ~edge_id:(provider_attempt_edge_id manifest_ctx event attempt_index)
         ~lane:"provider"
+        ~source_clock:Provider
         ~provider_attempt_id:
           (provider_attempt_id_for_context manifest_ctx attempt_index)
         ?parent_event_id ?caused_by ()
@@ -1232,7 +1233,7 @@ let run_named
         else
           None
       in
-      let attempt_started_at = Unix.gettimeofday () in
+      let attempt_started_at = Mtime_clock.now () in
       let started_record =
         { started_provenance = provider_attempt_provenance
         ; started_is_last = is_last
@@ -1316,7 +1317,7 @@ let run_named
           Eio.Switch.on_release provider_attempt_sw (fun () ->
             if not !provider_attempt_finished_emitted then
               let attempt_latency_ms =
-                (Unix.gettimeofday () -. attempt_started_at) *. 1000.0
+                (Int64.to_float (Mtime.Span.to_uint64_ns (Mtime.span attempt_started_at (Mtime_clock.now ()))) /. 1_000_000.)
               in
               Eio.Cancel.protect (fun () ->
                 emit_provider_attempt_finished_once
@@ -1343,7 +1344,7 @@ let run_named
           with
           | result, checkpoint_after, liveness_success_sample ->
             let attempt_latency_ms =
-              (Unix.gettimeofday () -. attempt_started_at) *. 1000.0
+              (Int64.to_float (Mtime.Span.to_uint64_ns (Mtime.span attempt_started_at (Mtime_clock.now ()))) /. 1_000_000.)
             in
             emit_provider_attempt_finished_once
               ~status:(provider_attempt_status_of_result result)
@@ -1372,7 +1373,7 @@ let run_named
           | exception exn ->
             let bt = Printexc.get_raw_backtrace () in
             let attempt_latency_ms =
-              (Unix.gettimeofday () -. attempt_started_at) *. 1000.0
+              (Int64.to_float (Mtime.Span.to_uint64_ns (Mtime.span attempt_started_at (Mtime_clock.now ()))) /. 1_000_000.)
             in
             let status, error = provider_attempt_status_and_error_of_exception exn in
             emit_provider_attempt_finished_once

@@ -65,6 +65,16 @@ type payload_role =
 val payload_role_to_string : payload_role -> string
 val payload_role_of_string : string -> payload_role option
 
+type source_clock =
+  | Wall
+  | Monotonic
+  | Logical
+  | Provider
+  | Event_bus
+
+val source_clock_to_string : source_clock -> string
+val source_clock_of_string : string -> source_clock option
+
 val schema_version : int
 val all_event_kinds : event_kind list
 val event_kind_to_string : event_kind -> string
@@ -74,7 +84,7 @@ val safe_segment : string -> string
 val clock_refs :
   ?edge_id:string ->
   ?lane:string ->
-  ?source_clock:string ->
+  ?source_clock:source_clock ->
   ?observed_at:string ->
   ?started_at:string ->
   ?finished_at:string ->

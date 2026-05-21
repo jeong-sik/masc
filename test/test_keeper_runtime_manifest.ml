@@ -2917,6 +2917,92 @@ let test_wired_manifest_sites () =
         ] );
     ]
 
+let test_source_clock_roundtrip () =
+  List.iter
+    (fun clock ->
+      let wire = M.source_clock_to_string clock in
+      Alcotest.(check (option string))
+        ("source_clock parses: " ^ wire) (Some wire)
+        (Option.map M.source_clock_to_string (M.source_clock_of_string wire)))
+    [ M.Wall; M.Monotonic; M.Logical; M.Provider; M.Event_bus ];
+  Alcotest.(check (option string))
+    "event_bus roundtrips through oas_event_bus wire"
+    (Some "oas_event_bus")
+    (Option.map M.source_clock_to_string (M.source_clock_of_string "oas_event_bus"));
+  Alcotest.(check (option string))
+    "unknown source_clock is rejected" None
+    (Option.map M.source_clock_to_string (M.source_clock_of_string "not_real"))
+
+let test_runtime_trace_lens_summarizes_source_clock_axis () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc_mcp.Coord.default_config base_dir in
+      let keeper_name = "runtime-lens-source-clock" in
+      let trace_id = "trace-runtime-lens-source-clock" in
+      let keeper_turn_id = 55 in
+      let with_clock_refs source_clock event status decision_extras =
+        M.make ~ts:"2026-05-13T00:00:00Z" ~keeper_name
+          ~trace_id ~keeper_turn_id ~event ~status
+          ~decision:
+            (`Assoc
+              ([
+                ( "clock_refs",
+                  `Assoc [ ("source_clock", `String source_clock) ] );
+              ] @ decision_extras))
+          ()
+      in
+      append_manifest_or_fail config
+        (with_clock_refs "wall" M.Turn_started "started" []);
+      append_manifest_or_fail config
+        (with_clock_refs "provider" M.Provider_attempt_started "started"
+           [ ("model_source", `String "named_cascade") ]);
+      append_manifest_or_fail config
+        (with_clock_refs "provider" M.Provider_attempt_finished "ok" []);
+      append_manifest_or_fail config
+        (with_clock_refs "monotonic" M.Context_injected "injected" []);
+      append_manifest_or_fail config
+        (with_clock_refs "logical" M.Context_compacted "compacted" []);
+      append_manifest_or_fail config
+        (with_clock_refs "oas_event_bus" M.Event_bus_correlated "observed"
+           [ ("context_compacted_count", `Int 1) ]);
+      append_manifest_or_fail config
+        (with_clock_refs "wall" M.Turn_finished "ok" []);
+      let status, json =
+        Masc_mcp.Server_dashboard_http_keeper_api.keeper_runtime_trace_json
+          config keeper_name ~trace_id ~turn_id:keeper_turn_id ()
+      in
+      Alcotest.(check string)
+        "source_clock lens status"
+        "ok"
+        (match status with `OK -> "ok" | `Not_found -> "not_found");
+      let source_clock_axis =
+        Yojson.Safe.Util.(
+          json |> member "runtime_lens" |> member "axes"
+          |> member "source_clock")
+      in
+      Alcotest.(check int)
+        "source_clock wall count"
+        2
+        (json_int_member "wall" source_clock_axis);
+      Alcotest.(check int)
+        "source_clock provider count"
+        2
+        (json_int_member "provider" source_clock_axis);
+      Alcotest.(check int)
+        "source_clock monotonic count"
+        1
+        (json_int_member "monotonic" source_clock_axis);
+      Alcotest.(check int)
+        "source_clock logical count"
+        1
+        (json_int_member "logical" source_clock_axis);
+      Alcotest.(check int)
+        "source_clock oas_event_bus count"
+        1
+        (json_int_member "oas_event_bus" source_clock_axis))
+
 let test_context_helper () =
   let ctx : M.turn_context =
     { manifest_keeper_name = "sangsu"
@@ -3494,6 +3580,8 @@ let () =
           Alcotest.test_case "unknown event rejected" `Quick
             test_of_json_rejects_unknown_event;
           Alcotest.test_case "safe path segment" `Quick test_safe_segment;
+          Alcotest.test_case "source_clock roundtrip" `Quick
+            test_source_clock_roundtrip;
           Alcotest.test_case "context helper" `Quick test_context_helper;
         ] );
       ( "append",
@@ -3534,6 +3622,10 @@ let () =
             "runtime trace lens groups context and memory swimlane"
             `Quick
             test_runtime_trace_lens_groups_context_memory_swimlane;
+          Alcotest.test_case
+            "runtime trace lens summarizes source_clock axis"
+            `Quick
+            test_runtime_trace_lens_summarizes_source_clock_axis;
           Alcotest.test_case
             "runtime trace lens derives clock edges"
             `Quick

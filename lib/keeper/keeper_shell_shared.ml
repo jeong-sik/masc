@@ -96,7 +96,7 @@ let keeper_bash_native_min_timeout_sec =
 let string_field name fields =
   match List.assoc_opt name fields with
   | Some (`String value) -> Some value
-  | _ -> None
+  | _other -> None
 ;;
 
 let string_list_field name fields =
@@ -105,9 +105,9 @@ let string_list_field name fields =
     List.filter_map
       (function
         | `String value -> Some value
-        | _ -> None)
+        | _other -> None)
       values
-  | _ -> []
+  | _other -> []
 ;;
 
 let arg_has_recursive_flag arg =
@@ -142,8 +142,8 @@ let rec keeper_bash_args_need_tool_dispatch_floor = function
      | Some (`List stages), _
      | _, Some (`List stages) ->
        List.exists keeper_bash_args_need_tool_dispatch_floor stages
-     | _ -> false)
-  | _ -> false
+     | _other -> false)
+  | _other -> false
 ;;
 
 let keeper_bash_min_timeout_sec_for_args args =

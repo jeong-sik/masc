@@ -1,14 +1,55 @@
 ---
 rfc: "0070"
 title: "Keeper Sandbox Runtime — Pure/Edge Separation"
-status: Draft
+status: Active
 created: 2026-05-12
-updated: 2026-05-12
+updated: 2026-05-21
 author: yousleepwhen
 supersedes: []
 superseded_by: null
 related: ["0002", "0003", "0006", "0036"]
-implementation_prs: [14714, 14741, 14821, 14827, 14889, 14899, 14934, 14940, 14947, 14951, 14956, 14970, 14973, 14980, 14989]
+implementation_prs: [14714, 14741, 14821, 14827, 14889, 14899, 14934, 14940, 14947, 14951, 14956, 14970, 14973, 14980, 14989, 16666]
+---
+
+## Progress audit (2026-05-21)
+
+Status promoted Draft → Active. 16 implementation PRs landed against
+the §2 G1-G5 goal plan; per-goal completion mapping deferred to
+sprint author.
+
+### implementation_prs reconciliation
+
+Previous list ended at #14989 (15 PRs from the initial 2026-05-12
+sprint). PR #16666 (2026-05-19, `feat(keeper/sandbox): typed
+Sandbox_error closed sum per RFC-0070 §2 G2`) explicitly cites G2
+and is the only RFC-0070 commit since 2026-04-01. Added to the
+list for total 16.
+
+### Audit boundary
+
+The G1-G5 goal table (§2) does not enumerate phase-bound PR slots
+the way newer RFCs (e.g. RFC-0131, RFC-0142) do — the original
+work landed before the phase-slot convention solidified. A
+per-goal Phase→PR table requires reading each of the 16 merged PRs
+to classify which goal it advanced (G1 deterministic ID / G2 typed
+errors / G3 JSON-format probe / G4 cleanup state machine / G5
+mockable executor). That is sprint author territory, not a sweep
+audit responsibility.
+
+### Why Active, not Implemented
+
+- 16 PRs is consistent with all five goals having shipped at least
+  in part, but the per-goal verification work has not been done in
+  this audit.
+- `feature/RFC-0070-*` branches in the worktree list suggest some
+  follow-up is in flight (not enumerated here).
+- Implemented status requires explicit closeout commit confirming
+  G1-G5 acceptance criteria; that work belongs to the sprint
+  author.
+
+`Active` is the minimum honest update: the RFC has clearly moved
+past Draft, but Implemented is not yet defensible.
+
 ---
 
 # RFC-0070: Keeper Sandbox Runtime — Pure/Edge Separation

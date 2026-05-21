@@ -400,6 +400,12 @@ let test_unterminated_double_quote_rejected () =
   | Parsed.Parse_error _ -> ()
   | _ -> assert false
 
+let test_token_limit_aborts () =
+  let many_words = List.init 50_001 (fun _ -> "x") in
+  match Bash.parse_string (String.concat " " many_words) with
+  | Parsed.Parse_aborted `Token_limit_50k -> ()
+  | _ -> assert false
+
 let () =
   test_ls_single_command ();
   test_ls_with_args ();
@@ -445,4 +451,5 @@ let () =
   test_double_quote_with_backslash_rejected ();
   test_double_quote_with_backtick_rejected ();
   test_unterminated_double_quote_rejected ();
+  test_token_limit_aborts ();
   print_endline "[test_bash_parser] all tests passed"

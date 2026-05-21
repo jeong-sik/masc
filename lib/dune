@@ -216,6 +216,7 @@
   keeper_agent_error
   keeper_agent_memory_episode
   keeper_run_tools_hook_accumulator
+  keeper_run_tools_task_scope
   keeper_run_tools_search
   keeper_run_tools_work_discovery
   provider_runtime_projection
@@ -240,6 +241,8 @@
   keeper_turn_driver_wrappers
   keeper_turn_cascade_budget_routing
   keeper_unified_metrics_broadcast
+  keeper_unified_metrics_failure
+  keeper_unified_metrics_result
   keeper_unified_metrics_json_support
   keeper_unified_metrics_support
   keeper_unified_turn_event_bus

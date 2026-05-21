@@ -11,6 +11,23 @@
 <!-- Tests, harness runs, screenshots, logs, or other proof. -->
 - If tool-call behavior or provider tool support changed: include replay-harness or `ToolCallContract` evidence.
 
+## Direct evidence
+
+<!--
+Agent PR evidence schema. Classify each proof stage by provenance:
+direct = keeper/agent performed it through its own tool surface;
+operator_proxy = a human/operator ran it for the agent;
+mixed = direct and operator_proxy stages both exist;
+n/a = not applicable for this PR.
+-->
+
+```yaml
+schema_version: 1
+direct_ratio: 0/0
+provenance: n/a
+stages: []
+```
+
 ## GOAL LOOP ACT checklist
 
 <!-- Complete this section for operational/runtime fixes. Leave unchecked items with a brief N/A reason. -->

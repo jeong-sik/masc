@@ -184,6 +184,20 @@ let message_looks_like_capacity_backpressure detail =
   || string_contains_substring ~needle:"capacity exhausted" lower
   || string_contains_substring ~needle:"local_resource_exhaustion" lower
 
+let message_looks_like_gateway_backpressure detail =
+  let lower = String.lowercase_ascii detail in
+  string_contains_substring ~needle:"server error 524" lower
+  || string_contains_substring ~needle:"error code: 524" lower
+  || string_contains_substring ~needle:"status 524" lower
+  || string_contains_substring ~needle:"status=524" lower
+  || string_contains_substring ~needle:"cloudflare gateway timeout" lower
+
+(* 524 is Cloudflare's "origin responded too slowly" timeout. At keeper
+   orchestration level this means the current provider lane is saturated or
+   unhealthy enough that rotating/cooling it as backpressure is more useful
+   than lumping it into a generic server_error bucket. *)
+let is_gateway_backpressure_status status = status = 524
+
 let is_auto_recoverable_cascade_exhausted_error (err : Agent_sdk.Error.sdk_error) : bool =
   match Keeper_turn_driver.classify_masc_internal_error err with
   | Some
@@ -199,6 +213,7 @@ let is_auto_recoverable_cascade_exhausted_error (err : Agent_sdk.Error.sdk_error
          { reason = Keeper_types.Other_detail detail; _ }) ->
       Keeper_turn_driver.message_looks_like_cli_wrapped_hard_quota detail
       || Keeper_turn_driver.message_looks_like_cli_wrapped_max_turns detail
+      || message_looks_like_gateway_backpressure detail
       || message_looks_like_capacity_backpressure detail
   | Some (Keeper_turn_driver.Capacity_backpressure _) ->
       true
@@ -367,6 +382,11 @@ let degraded_retry_after_recoverable_error
     | Some
         (Keeper_turn_driver.Cascade_exhausted
            { reason = Keeper_types.Other_detail detail; _ })
+      when message_looks_like_gateway_backpressure detail ->
+        local_recovery_retry Capacity_exhausted
+    | Some
+        (Keeper_turn_driver.Cascade_exhausted
+           { reason = Keeper_types.Other_detail detail; _ })
       when message_looks_like_capacity_backpressure detail ->
         local_recovery_retry Cascade_exhausted
     | Some (Keeper_turn_driver.Cascade_exhausted _)
@@ -418,6 +438,11 @@ let recoverable_cascade_failure_reason (err : Agent_sdk.Error.sdk_error) =
     | Some
         (Keeper_turn_driver.Cascade_exhausted
            { reason = Keeper_types.Other_detail detail; _ })
+      when message_looks_like_gateway_backpressure detail ->
+        Some Capacity_exhausted
+    | Some
+        (Keeper_turn_driver.Cascade_exhausted
+           { reason = Keeper_types.Other_detail detail; _ })
       when message_looks_like_capacity_backpressure detail ->
         Some Cascade_exhausted
     | Some (Keeper_turn_driver.Cascade_exhausted _) ->
@@ -460,6 +485,11 @@ let recoverable_cascade_failure_reason (err : Agent_sdk.Error.sdk_error) =
         (match err with
          | Agent_sdk.Error.Api (Llm_provider.Retry.RateLimited _) ->
              Some Rate_limit
+         | Agent_sdk.Error.Api (Llm_provider.Retry.Overloaded _) ->
+             Some Capacity_exhausted
+         | Agent_sdk.Error.Api (Llm_provider.Retry.ServerError { status; _ })
+           when is_gateway_backpressure_status status ->
+             Some Capacity_exhausted
          | Agent_sdk.Error.Api (Llm_provider.Retry.ServerError { status; _ })
            when status >= 500 ->
              Some Server_error
@@ -472,6 +502,9 @@ let recoverable_cascade_failure_reason (err : Agent_sdk.Error.sdk_error) =
              Some Capacity_exhausted
          | Agent_sdk.Error.Provider (Llm_provider.Error.HardQuota _) ->
              Some Hard_quota
+         | Agent_sdk.Error.Provider (Llm_provider.Error.ServerError { code; _ })
+           when is_gateway_backpressure_status code ->
+             Some Capacity_exhausted
          | Agent_sdk.Error.Provider (Llm_provider.Error.ServerError { code; transient; _ })
            when transient || code >= 500 ->
              Some Server_error
@@ -494,7 +527,6 @@ let recoverable_cascade_failure_reason (err : Agent_sdk.Error.sdk_error) =
          (* Sub-500 server errors (4xx already handled above for AuthError /
             RateLimited) are not classified as recoverable cascade failures. *)
          | Agent_sdk.Error.Api (Llm_provider.Retry.ServerError _)
-         | Agent_sdk.Error.Api (Llm_provider.Retry.Overloaded _)
          | Agent_sdk.Error.Api (Llm_provider.Retry.InvalidRequest _)
          | Agent_sdk.Error.Api (Llm_provider.Retry.NotFound _)
          | Agent_sdk.Error.Api (Llm_provider.Retry.ContextOverflow _)

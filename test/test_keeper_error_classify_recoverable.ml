@@ -347,7 +347,7 @@ let test_server_error_502_is_recoverable () =
   | None ->
     fail "ServerError 502 should be recoverable (trigger cascade rotation)"
 
-let test_server_error_524_is_recoverable_rotation_not_transient_retry () =
+let test_server_error_524_is_capacity_backpressure_rotation_not_transient_retry () =
   let err =
     Agent_sdk.Error.Api
       (Retry.ServerError { status = 524; message = "a timeout occurred" })
@@ -355,10 +355,24 @@ let test_server_error_524_is_recoverable_rotation_not_transient_retry () =
   check bool "524 not same-cascade transient" false (KEC.is_transient_network_error err);
   match KEC.recoverable_cascade_failure_reason err with
   | Some reason ->
-    check string "524 -> server_error" "server_error" (KEC.degraded_retry_reason_to_string reason)
+    check string "524 -> capacity_backpressure" "capacity_backpressure"
+      (KEC.degraded_retry_reason_to_string reason)
   | None ->
-    fail "ServerError 524 should remain recoverable through degraded rotation"
+    fail "ServerError 524 should be recoverable as capacity backpressure"
 
+let test_wrapped_524_is_capacity_backpressure () =
+  let err =
+    make_cascade_exhausted
+      (KT.Other_detail
+         "all tiers failed (last runtime=runtime, error=Server error 524: error \
+          code: 524)")
+  in
+  match KEC.recoverable_cascade_failure_reason err with
+  | Some reason ->
+    check string "wrapped 524 -> capacity_backpressure" "capacity_backpressure"
+      (KEC.degraded_retry_reason_to_string reason)
+  | None ->
+    fail "Wrapped ServerError 524 should be recoverable as capacity backpressure"
 let test_auth_error_is_recoverable () =
   (* 401/403 auth errors: the current cascade's credentials are invalid.
      A different cascade with different credentials may succeed. *)
@@ -480,8 +494,12 @@ let () =
             test_server_error_503_is_recoverable;
           test_case "ServerError 502 is recoverable" `Quick
             test_server_error_502_is_recoverable;
-          test_case "ServerError 524 is rotation recoverable but not transient retry" `Quick
-            test_server_error_524_is_recoverable_rotation_not_transient_retry;
+          test_case
+            "ServerError 524 is capacity backpressure but not transient retry"
+            `Quick
+            test_server_error_524_is_capacity_backpressure_rotation_not_transient_retry;
+          test_case "wrapped ServerError 524 is capacity backpressure" `Quick
+            test_wrapped_524_is_capacity_backpressure;
           test_case "AuthError is recoverable" `Quick
             test_auth_error_is_recoverable;
           test_case "hard quota keeps hard_quota label" `Quick

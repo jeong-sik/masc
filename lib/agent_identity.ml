@@ -395,17 +395,6 @@ let archetype_of_string_opt = function
   | "generalist" | "" -> Some Generalist
   | _ -> None
 
-(** Back-compat wrapper: callers that have no other recovery still
-    fall back to [Generalist] but a warning is logged so the typo /
-    drift becomes operator-visible. *)
-let archetype_of_string s =
-  match archetype_of_string_opt s with
-  | Some v -> v
-  | None ->
-      Log.Misc.warn
-        "archetype_of_string: unknown wire string %S → Generalist fallback (#8691)" s;
-      Generalist
-
 let archetype_emoji = function
   | Melchior -> "🔬"
   | Balthasar -> "🪞"
@@ -416,8 +405,15 @@ let archetype_emoji = function
 (** Get archetype from identity metadata *)
 let get_archetype identity =
   match List.assoc_opt "archetype" identity.metadata with
-  | Some s -> archetype_of_string s
   | None -> Generalist
+  | Some s -> (
+      match archetype_of_string_opt s with
+      | Some archetype -> archetype
+      | None ->
+          Log.Misc.warn
+            "get_archetype: unknown archetype metadata %S → Generalist fallback (#8691)"
+            s;
+          Generalist)
 
 (** Set archetype in identity metadata *)
 let set_archetype identity archetype =

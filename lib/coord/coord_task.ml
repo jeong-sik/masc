@@ -830,6 +830,7 @@ let release_task_r config ~agent_name ~task_id ?expected_version ?handoff_contex
     ()
 ;;
 
+(** Force-release a task regardless of assignee. Keeper privilege. *)
 let force_release_task_r config ~agent_name ~task_id ?handoff_context ()
   : string Masc_domain.masc_result
   =
@@ -843,6 +844,7 @@ let force_release_task_r config ~agent_name ~task_id ?handoff_context ()
     ()
 ;;
 
+(** Force-done a task regardless of assignee. Keeper privilege. *)
 let force_done_task_r config ~agent_name ~task_id ~notes ()
   : string Masc_domain.masc_result
   =
@@ -856,6 +858,10 @@ let force_done_task_r config ~agent_name ~task_id ~notes ()
     ()
 ;;
 
+(** Force-cancel a task regardless of assignee. System privilege.
+    Used by [Verification_protocol.check_timeouts] to expire
+    [AwaitingVerification] tasks whose verifier deadline has passed,
+    so the FSM does not stall and re-emit Timeout posts forever. *)
 let force_cancel_task_r config ~agent_name ~task_id ~reason ()
   : string Masc_domain.masc_result
   =
@@ -868,7 +874,6 @@ let force_cancel_task_r config ~agent_name ~task_id ~reason ()
     ~force:true
     ()
 ;;
-
 let cancel_task_r config ~agent_name ~task_id ~reason : string Masc_domain.masc_result =
   if not (is_initialized config)
   then Error (Masc_domain.System Masc_domain.System_error.NotInitialized)

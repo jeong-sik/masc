@@ -4,7 +4,8 @@
     here — it depends on a live ollama daemon and is covered by
     manual smoke tests.  The unit surface focuses on:
 
-    - URL classification ([is_ollama_url]);
+    - explicit URL registry ([register_url], [is_registered],
+      [Http_probe.can_probe]);
     - JSON parsing ([parse_response]);
     - cache lifecycle ([cached_capacity], [cache_size],
       [cache_clear]) with explicit [now] for deterministic TTL
@@ -14,23 +15,7 @@ open Alcotest
 module P = Masc_mcp.Cascade_http_probe
 module Throttle = Masc_mcp.Cascade_throttle
 
-(* ── URL classification ─────────────────────────────────────── *)
-
-let test_is_ollama_url_positive () =
-  check bool "127.0.0.1:11434 → ollama" true
-    (P.is_ollama_url "http://127.0.0.1:11434");
-  check bool "localhost:11434 → ollama" true
-    (P.is_ollama_url "http://localhost:11434/api");
-  check bool "remote:11434 → ollama" true
-    (P.is_ollama_url "https://gpu.example.com:11434/v1")
-
-let test_is_ollama_url_negative () =
-  check bool "no port → not ollama" false
-    (P.is_ollama_url "http://gemini.example.com");
-  check bool "wrong port → not ollama" false
-    (P.is_ollama_url "http://127.0.0.1:11435");
-  check bool "empty → not ollama" false
-    (P.is_ollama_url "")
+(* ── URL canonicalization ───────────────────────────────────── *)
 
 let test_normalize_loopback_base_url () =
   check string "localhost canonicalizes to IPv4 loopback"
@@ -167,9 +152,7 @@ let test_can_probe_rejects_substring_only_match () =
 
 let () =
   run "cascade_http_probe" [
-    "is_ollama_url", [
-      test_case "positive matches" `Quick test_is_ollama_url_positive;
-      test_case "negative cases" `Quick test_is_ollama_url_negative;
+    "URL canonicalization", [
       test_case "loopback base URL canonicalization" `Quick
         test_normalize_loopback_base_url;
     ];

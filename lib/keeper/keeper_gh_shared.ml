@@ -523,12 +523,6 @@ let gh_dangerous_command (cmd : string) : string option =
   | _ -> None
 ;;
 
-(** Truncate gh output to prevent context explosion.
-    65KB responses were observed causing 300s timeout via token overflow.
-    Retained for .mli backward compatibility; runtime limit comes from
-    [gh_cache.max_output_bytes] in tool_policy.toml. *)
-let max_gh_output_bytes = 8192
-
 let truncate_gh_output (out : string) : string * (string * Yojson.Safe.t) list =
   let max_bytes = Keeper_tool_policy.gh_cache_max_output_bytes () in
   let len = String.length out in

@@ -765,13 +765,13 @@ let handle_code_shell ~tool_name ~start_time ctx args =
 (* Handler: masc_code_git — Git operations *)
 let code_git_route_fields (ctx : context) =
   let sandbox_profile, route_via =
-    if
-      Coord_worktree.keeper_uses_docker_sandbox
-        ~config:ctx.config ~agent_name:ctx.agent_name
-    then
-      ("docker", "brokered")
-    else
-      ("local", "host")
+    match
+      Keeper_sandbox.backend_of_config_agent
+        ~config:ctx.config
+        ~agent_name:ctx.agent_name
+    with
+    | Keeper_sandbox.Docker -> "docker", "brokered"
+    | Keeper_sandbox.Local -> "local", "host"
   in
   [
     ("sandbox_profile", `String sandbox_profile);

@@ -100,11 +100,6 @@ val post_eval :
   accumulated_cost:float ->
   post_eval_result
 
-(** {1 JSON serialization (legacy aliases)} *)
-
-val gate_config_to_json : gate_config -> Yojson.Safe.t
-val post_eval_to_json : post_eval_result -> Yojson.Safe.t
-
 (** {1 Guarded execution} *)
 
 val guarded_execute :

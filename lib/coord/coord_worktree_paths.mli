@@ -41,16 +41,9 @@ val run_git_in_clone :
 val trim_output_detail : string -> string
 val first_nul_field : string -> string option
 
-val keeper_toml_path :
-  config:Coord_utils.config -> agent_name:string -> string
-val strip_inline_comment : string -> string
-val unquote : string -> string
-val keeper_uses_docker_sandbox :
-  config:Coord_utils.config -> agent_name:string -> bool
 val repos_dir_of_keeper : Coord_utils.config -> string -> string
 
 val strip_trailing_slashes : string -> string
-val suffix_under : prefix:string -> string -> string option
 
 val keeper_visible_worktree_path :
   config:Coord_utils.config -> agent_name:string -> host_path:string -> string

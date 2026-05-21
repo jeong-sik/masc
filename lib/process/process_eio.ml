@@ -23,28 +23,10 @@ type runtime = {
     after [init] has published the runtime on the main domain. *)
 let runtime_state : runtime option Atomic.t = Atomic.make None
 
-(** Stage at which an [Eio.Time.with_timeout_exn] budget was exhausted.
+(** Origin at which an [Eio.Time.with_timeout_exn] budget was exhausted.
 
-    [Slot_wait] is reserved for callers that wrap [run_argv*] with their
-    own slot/semaphore wait and want to attribute a timeout to slot
-    contention rather than to the subprocess itself; the [Process_eio]
-    layer never emits it directly because [with_timeout_exn] starts the
-    clock after slot acquisition.
-
-    [Spawn] fires if the timeout trips before the Eio process spawn call
-    or [Unix.create_process_env] returns — i.e. the
-    process creation syscall itself stalled (docker daemon backpressure,
-    container cold start during [docker run]).
-
-    [Command] fires once the child has been created and we are draining
-    pipes or awaiting exit — this is the “normal” timeout case where the
-    subprocess itself is slow. *)
-type timeout_stage = Slot_wait | Spawn | Command
-
-let timeout_stage_to_string = function
-  | Slot_wait -> "slot_wait"
-  | Spawn -> "spawn"
-  | Command -> "command"
+    The vocabulary is centralized in [Timeout_origin].  [Process_eio] only
+    emits [Slot_wait], [Spawn], and [Command] origins. *)
 
 (** Observability hook: invoked when an Eio process call hits its
     [timeout_sec] budget.  Default no-op so the lower [masc_process]
@@ -53,21 +35,21 @@ let timeout_stage_to_string = function
 
     Cardinality: callers should pass [program = Filename.basename argv0]
     (~10-20 distinct programs fleet-wide); [timeout_sec] is the per-call
-    budget (a few discrete values: 15.0, 60.0, ...); [stage] has
-    3 closed-variant labels (slot_wait | spawn | command) — total label
-    cardinality is bounded by [program × bucket × stage]. *)
+    budget (a few discrete values: 15.0, 60.0, ...); [origin] is restricted
+    to [Timeout_origin.process_origins] — total label cardinality is bounded
+    by [program × bucket × origin]. *)
 let process_timeout_observer_fn :
-    (program:string -> timeout_sec:float -> stage:timeout_stage -> unit) Atomic.t =
-  Atomic.make (fun ~program:_ ~timeout_sec:_ ~stage:_ -> ())
+    (program:string -> timeout_sec:float -> origin:Timeout_origin.t -> unit) Atomic.t =
+  Atomic.make (fun ~program:_ ~timeout_sec:_ ~origin:_ -> ())
 
 let argv_program = function
   | [] -> "<empty>"
   | prog :: _ -> Filename.basename prog
 
-let observe_process_timeout argv ~timeout_sec ~stage =
+let observe_process_timeout argv ~timeout_sec ~origin =
   try
     (Atomic.get process_timeout_observer_fn)
-      ~program:(argv_program argv) ~timeout_sec ~stage
+      ~program:(argv_program argv) ~timeout_sec ~origin
   with exn ->
     Log.Misc.warn "[Process_eio] timeout observer failed: %s"
       (Printexc.to_string exn)
@@ -434,7 +416,7 @@ let with_unix_capture ?env ?cwd ?stdin_content ?(capture_stderr = false)
                  [create_process_env] returns (see line above where
                  [deadline] is computed), so any timeout here is always
                  attributable to the running child. *)
-              observe_process_timeout argv ~timeout_sec ~stage:Command;
+              observe_process_timeout argv ~timeout_sec ~origin:Timeout_origin.Command;
             cleanup ();
             on_success status stdout stderr)
      with
@@ -509,7 +491,7 @@ let spawn_and_drain_stdout ?phase_ref ~sw pm ~cwd ?env ?stdin_source argv stdout
   (* spawn returned — any further timeout is attributable to the
      child, not to process creation.  Callers thread [phase_ref] so the
      timeout branches can label the metric accordingly. *)
-  Option.iter (fun r -> r := Command) phase_ref;
+  Option.iter (fun r -> r := Timeout_origin.Command) phase_ref;
   Eio.Flow.close stdout_w;
   (* Drain to EOF before await — pipe close is switch-managed on cancel. *)
   (try
@@ -538,7 +520,7 @@ let spawn_and_drain_both ?phase_ref ~sw pm ~cwd ?env ?stdin_source argv stdout_b
       ~stderr:stderr_w
       argv
   in
-  Option.iter (fun r -> r := Command) phase_ref;
+  Option.iter (fun r -> r := Timeout_origin.Command) phase_ref;
   Eio.Flow.close stdout_w;
   Eio.Flow.close stderr_w;
   (try
@@ -570,7 +552,7 @@ let run_argv ?(timeout_sec = default_timeout_sec) ?env (argv : string list) : st
         | Ok pm, Ok clk, Ok cwd ->
             let buf = Buffer.create default_buffer_size in
             let label = String.concat " " (List.map Filename.quote argv) in
-            let phase_ref = ref Spawn in
+            let phase_ref = ref Timeout_origin.Spawn in
             try
               Eio.Time.with_timeout_exn clk timeout_sec (fun () ->
                   Eio.Switch.run (fun sw ->
@@ -579,8 +561,8 @@ let run_argv ?(timeout_sec = default_timeout_sec) ?env (argv : string list) : st
             with
             | Eio.Time.Timeout ->
                 Log.Misc.warn "[Process_eio] Timeout after %.0fs (%s): %s"
-                  timeout_sec (timeout_stage_to_string !phase_ref) label;
-                observe_process_timeout argv ~timeout_sec ~stage:!phase_ref;
+                  timeout_sec (Timeout_origin.to_label !phase_ref) label;
+                observe_process_timeout argv ~timeout_sec ~origin:!phase_ref;
                 process_error_output ~label
                   ~reason:(Printf.sprintf "timeout after %.0fs" timeout_sec) ()
             | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -608,7 +590,7 @@ let run_argv_with_stdin ?(timeout_sec = default_timeout_sec) ?env ~(stdin_conten
             let buf = Buffer.create default_buffer_size in
             let label = String.concat " " (List.map Filename.quote argv) in
             let stdin_source = Eio.Flow.string_source stdin_content in
-            let phase_ref = ref Spawn in
+            let phase_ref = ref Timeout_origin.Spawn in
             try
               Eio.Time.with_timeout_exn clk timeout_sec (fun () ->
                   Eio.Switch.run (fun sw ->
@@ -619,8 +601,8 @@ let run_argv_with_stdin ?(timeout_sec = default_timeout_sec) ?env ~(stdin_conten
             with
             | Eio.Time.Timeout ->
                 Log.Misc.warn "[Process_eio] Timeout after %.0fs (%s): %s"
-                  timeout_sec (timeout_stage_to_string !phase_ref) label;
-                observe_process_timeout argv ~timeout_sec ~stage:!phase_ref;
+                  timeout_sec (Timeout_origin.to_label !phase_ref) label;
+                observe_process_timeout argv ~timeout_sec ~origin:!phase_ref;
                 process_error_output ~label
                   ~reason:(Printf.sprintf "timeout after %.0fs" timeout_sec) ()
             | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -661,7 +643,7 @@ let run_argv_with_stdin_and_status_split
             let stderr_buf = Buffer.create default_buffer_size in
             let label = String.concat " " (List.map Filename.quote argv) in
             let stdin_source = Eio.Flow.string_source stdin_content in
-            let phase_ref = ref Spawn in
+            let phase_ref = ref Timeout_origin.Spawn in
             try
               Eio.Time.with_timeout_exn clk timeout_sec (fun () ->
                   let unix_status =
@@ -675,8 +657,8 @@ let run_argv_with_stdin_and_status_split
             with
             | Eio.Time.Timeout ->
                 Log.Misc.warn "[Process_eio] Timeout after %.0fs (%s): %s"
-                  timeout_sec (timeout_stage_to_string !phase_ref) label;
-                observe_process_timeout argv ~timeout_sec ~stage:!phase_ref;
+                  timeout_sec (Timeout_origin.to_label !phase_ref) label;
+                observe_process_timeout argv ~timeout_sec ~origin:!phase_ref;
                 let timeout_status = Unix.WEXITED 124 in
                 let stdout = Buffer.contents stdout_buf in
                 let stderr = Buffer.contents stderr_buf in
@@ -735,7 +717,7 @@ let run_argv_with_status_split ?(timeout_sec = default_timeout_sec) ?env ?cwd
             let stdout_buf = Buffer.create default_buffer_size in
             let stderr_buf = Buffer.create 256 in
             let label = String.concat " " (List.map Filename.quote argv) in
-            let phase_ref = ref Spawn in
+            let phase_ref = ref Timeout_origin.Spawn in
             try
               Eio.Time.with_timeout_exn clk timeout_sec (fun () ->
                   let unix_status =
@@ -749,8 +731,8 @@ let run_argv_with_status_split ?(timeout_sec = default_timeout_sec) ?env ?cwd
             with
             | Eio.Time.Timeout ->
                 Log.Misc.warn "[Process_eio] Timeout after %.0fs (%s): %s"
-                  timeout_sec (timeout_stage_to_string !phase_ref) label;
-                observe_process_timeout argv ~timeout_sec ~stage:!phase_ref;
+                  timeout_sec (Timeout_origin.to_label !phase_ref) label;
+                observe_process_timeout argv ~timeout_sec ~origin:!phase_ref;
                 let timeout_status = Unix.WEXITED 124 in
                 let stdout = Buffer.contents stdout_buf in
                 let stderr = Buffer.contents stderr_buf in

@@ -25,35 +25,31 @@ val should_retry_unix_fallback : exn -> bool
 
 (** {1 Observability hook (#9632)} *)
 
-(** Stage at which a [run_argv*] timeout budget was exhausted.
+(** Origin at which a [run_argv*] timeout budget was exhausted.
 
-    - [Slot_wait] — reserved for callers that wrap [run_argv*] with their
+    - [Timeout_origin.Slot_wait] — reserved for callers that wrap [run_argv*] with their
       own slot/semaphore (e.g. [Docker_spawn_throttle.with_slot]) and want
       to attribute a timeout to slot contention.  Not emitted by
       [Process_eio] directly because [Eio.Time.with_timeout_exn] starts
       the clock after slot acquisition.
-    - [Spawn] — timeout fired before [Eio.Process.spawn] returned, i.e.
+    - [Timeout_origin.Spawn] — timeout fired before [Eio.Process.spawn] returned, i.e.
       process creation itself stalled (docker daemon backpressure, container
       cold start during [docker run]).
-    - [Command] — timeout fired after the child was created and while
+    - [Timeout_origin.Command] — timeout fired after the child was created and while
       draining pipes or awaiting exit; the normal “command was slow” case.
 
-    Closed sum so [lib/coord.ml] can label
-    [masc_process_timeout_total] without per-call string allocation. *)
-type timeout_stage = Slot_wait | Spawn | Command
-
-val timeout_stage_to_string : timeout_stage -> string
-(** [timeout_stage_to_string Slot_wait = "slot_wait"], etc.  Exposed so
-    log lines and Prometheus labels share one vocabulary. *)
+    The closed vocabulary lives in [Timeout_origin] so process timeouts,
+    LLM timeouts, dashboard refreshes, and health probes cannot drift into
+    separate stringly vocabularies. *)
 
 val process_timeout_observer_fn :
-  (program:string -> timeout_sec:float -> stage:timeout_stage -> unit) Atomic.t
+  (program:string -> timeout_sec:float -> origin:Timeout_origin.t -> unit) Atomic.t
 (** Hook fired from every [run_argv*] timeout branch.  Default no-op so
     [masc_process] carries no [Prometheus] dependency.  [lib/coord.ml]
     wires it at module load to emit [masc_process_timeout_total].
-    [program] is [Filename.basename argv0] (~10-20 distinct programs
-    fleet-wide); [stage] is a closed 3-variant label so the metric’s
-    total cardinality stays bounded by [program × bucket × stage]. *)
+    [program] is [Filename.basename argv0] (~10-20 distinct programs fleet-wide);
+    [origin] is one of {!Timeout_origin.process_origins}, so the metric’s
+    total cardinality stays bounded by [program × bucket × origin]. *)
 
 val argv_program : string list -> string
 (** [argv_program argv] returns [Filename.basename argv0] (or

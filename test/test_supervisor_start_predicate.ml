@@ -206,6 +206,36 @@ let test_operator_paused_only_does_not_start_sweep () =
     check bool "operator pause alone does not start sweep" false
       (KR.should_start_supervisor_sweep ~config ~stats))
 
+let test_turn_timeout_pause_without_explicit_policy_starts_sweep () =
+  with_temp_masc_dir ~keeper_names:[ "timeout-due" ] (fun config ->
+    let now = Unix.time () in
+    let timeout_blocker =
+      KT.blocker_info_of_class ~detail:"turn_timeout" KT.Turn_timeout
+    in
+    let meta =
+      { (make_meta
+           ~paused:true
+           ~updated_at:(iso_of_unix (now -. 7200.0))
+           "timeout-due")
+        with
+        runtime =
+          { (make_meta "timeout-due").runtime with
+            last_blocker = Some timeout_blocker;
+          };
+      }
+    in
+    write_meta_exn config meta;
+    let stats =
+      KR.{ scanned = 0; started = 0; stale = 0; recovering = 0 }
+    in
+    check bool "timeout-paused keeper is not bootable yet" false
+      (List.mem "timeout-due" (KR.bootable_keeper_names config));
+    check (list string) "timeout pause is implicitly auto-recoverable"
+      [ "timeout-due" ]
+      (KR.auto_recoverable_paused_keeper_names ~now config);
+    check bool "timeout pause starts supervisor sweep" true
+      (KR.should_start_supervisor_sweep ~config ~stats))
+
 let () =
   run "supervisor_start_predicate_10125" [
     "predicate", [
@@ -219,5 +249,7 @@ let () =
         test_due_auto_recoverable_paused_keeper_starts_sweep;
       test_case "operator-paused keeper alone does not start sweep" `Quick
         test_operator_paused_only_does_not_start_sweep;
+      test_case "timeout pause without explicit policy starts sweep" `Quick
+        test_turn_timeout_pause_without_explicit_policy_starts_sweep;
     ];
   ]

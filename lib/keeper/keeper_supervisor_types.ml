@@ -119,11 +119,40 @@ let paused_meta_requires_reconcile_recovery (meta : keeper_meta) =
   | None -> false
 ;;
 
+let next_auto_resume_after_sec ~initial_sec ~max_sec previous =
+  if initial_sec <= 0.0
+  then None
+  else
+    Some
+      (match previous with
+       | None -> Float.min max_sec initial_sec
+       | Some prev -> Float.min max_sec (prev *. 2.0))
+;;
+
+let paused_timeout_implicit_auto_resume_after_sec (meta : keeper_meta) =
+  if (not meta.paused) || paused_meta_requires_reconcile_recovery meta
+  then None
+  else (
+    match meta.auto_resume_after_sec, meta.runtime.last_blocker with
+    | None, Some { klass = Turn_timeout; _ } ->
+      next_auto_resume_after_sec
+        ~initial_sec:Env_config.KeeperSupervisor.auto_resume_initial_sec
+        ~max_sec:Env_config.KeeperSupervisor.auto_resume_max_sec
+        None
+    | Some _, _ | None, _ -> None)
+;;
+
+let paused_meta_effective_auto_resume_after_sec (meta : keeper_meta) =
+  match meta.auto_resume_after_sec with
+  | Some _ as explicit -> explicit
+  | None -> paused_timeout_implicit_auto_resume_after_sec meta
+;;
+
 let paused_meta_auto_resume_due ~now (meta : keeper_meta) =
   if (not meta.paused) || paused_meta_requires_reconcile_recovery meta
   then false
   else
-    match meta.auto_resume_after_sec with
+    match paused_meta_effective_auto_resume_after_sec meta with
     | None -> false
     | Some resume_after_sec ->
       (match Coord_resilience.Time.parse_iso8601_opt meta.updated_at with
@@ -145,16 +174,6 @@ let active_supervision_keeper_count entries =
     (fun (e : Keeper_registry.registry_entry) ->
        e.phase = Keeper_state_machine.Running || e.phase = Keeper_state_machine.Crashed)
     entries
-;;
-
-let next_auto_resume_after_sec ~initial_sec ~max_sec previous =
-  if initial_sec <= 0.0
-  then None
-  else
-    Some
-      (match previous with
-       | None -> Float.min max_sec initial_sec
-       | Some prev -> Float.min max_sec (prev *. 2.0))
 ;;
 
 let liveness_recovery_backoff attempt =

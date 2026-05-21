@@ -250,6 +250,10 @@ let test_dashboard_tools_projection () =
         (match runtime_resolution |> member "paused_keepers" with
          | `Int _ -> true
          | _ -> false);
+      check bool "runtime paused_keepers health surfaced" true
+        (match runtime_resolution |> member "paused_keepers_health" with
+         | `Assoc _ -> true
+         | _ -> false);
       check bool "runtime keeper fd pressure surfaced" true
         (match runtime_resolution |> member "keeper_fd_pressure" with
          | `Assoc _ -> true
@@ -271,6 +275,10 @@ let test_dashboard_tools_projection () =
          | _ -> false);
       check bool "runtime keeper reaction ledger surfaced" true
         (match runtime_resolution |> member "keeper_reaction_ledger" with
+         | `Assoc _ -> true
+         | _ -> false);
+      check bool "runtime cdal health surfaced" true
+        (match runtime_resolution |> member "cdal" with
          | `Assoc _ -> true
          | _ -> false);
       check bool "build started_at surfaced" true

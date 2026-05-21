@@ -10,6 +10,12 @@ import type { ToolQualityResponse } from '../api/dashboard'
 import { TELEMETRY_AUTO_REFRESH_MS } from '../config/constants'
 import { formatAutoRefreshLabel, setupVisibleAutoRefresh } from '../lib/auto-refresh'
 import { formatMsCompact, formatNumber } from '../lib/format-number'
+import { refreshShell, shellRuntimeResolution } from '../store'
+import type {
+  DashboardCdalHealth,
+  DashboardFleetSafetyHealth,
+  DashboardPausedKeeperDetail,
+} from '../types'
 import { FilterChips } from './common/filter-chips'
 import { RouteLink } from './common/route-link'
 import { StatTile } from './common/stat-tile'
@@ -274,6 +280,190 @@ function FailureCategoryList({ quality }: { quality: ToolQualityResponse | null 
   `
 }
 
+function countText(value: number | null | undefined): string {
+  return typeof value === 'number' && Number.isFinite(value) ? formatNumber(value) : '--'
+}
+
+function secondsText(value: number | null | undefined): string {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return '--'
+  if (value < 60) return `${Math.max(0, Math.round(value))}s`
+  if (value < 3600) return `${Math.round(value / 60)}m`
+  return `${Math.round(value / 3600)}h`
+}
+
+function compactList(values: string[], limit = 3): string {
+  if (values.length === 0) return '--'
+  const shown = values.slice(0, limit).join(', ')
+  return values.length > limit ? `${shown} +${values.length - limit}` : shown
+}
+
+function cdalTone(cdal: DashboardCdalHealth | null): 'crit' | 'warn' | 'ok' | undefined {
+  if (!cdal) return undefined
+  if (cdal.operator_action_required === true) return 'crit'
+  return cdal.writer_status === 'active' ? 'ok' : 'warn'
+}
+
+function pausedKindText(row: DashboardPausedKeeperDetail): string {
+  const parts = [
+    row.pause_kind ?? 'unknown',
+    row.last_blocker_class ? `blocker=${row.last_blocker_class}` : null,
+    row.auto_resume_source ? `resume=${row.auto_resume_source}` : null,
+  ].filter((part): part is string => part != null)
+  return parts.join(' · ')
+}
+
+function RuntimePausedKeeperTable({ fleetSafety }: { fleetSafety: DashboardFleetSafetyHealth | null }) {
+  const details = fleetSafety?.paused_keepers_health?.details ?? []
+  const readErrors = fleetSafety?.paused_keepers_health?.read_errors ?? []
+  if (details.length === 0 && readErrors.length === 0) {
+    return html`
+      <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-3 py-5 text-center text-2xs text-[var(--color-fg-muted)]">
+        No paused keeper detail rows.
+      </div>
+    `
+  }
+  return html`
+    <div class="overflow-x-auto rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)]">
+      <table class="w-full text-2xs" aria-label="Paused keeper blockers">
+        <thead>
+          <tr class="border-b border-[var(--color-border-default)] text-[var(--color-fg-muted)]">
+            <th scope="col" class="px-3 py-2 text-left font-medium">Keeper</th>
+            <th scope="col" class="px-3 py-2 text-left font-medium">Pause</th>
+            <th scope="col" class="px-3 py-2 text-right font-medium">Elapsed</th>
+            <th scope="col" class="px-3 py-2 text-right font-medium">Resume</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${details.map(row => html`
+            <tr class="border-b border-[var(--color-border-default)]/30 last:border-b-0">
+              <td class="px-3 py-2 font-mono text-[var(--color-fg-primary)]">${row.name}</td>
+              <td class="px-3 py-2 text-[var(--color-fg-secondary)]" title=${row.last_blocker_detail ?? undefined}>${pausedKindText(row)}</td>
+              <td class="px-3 py-2 text-right font-mono text-[var(--color-fg-muted)]">${secondsText(row.paused_elapsed_sec)}</td>
+              <td class="px-3 py-2 text-right font-mono text-[var(--color-fg-muted)]">${secondsText(row.auto_resume_remaining_sec)}</td>
+            </tr>
+          `)}
+          ${readErrors.map(row => html`
+            <tr class="border-b border-[var(--color-border-default)]/30 last:border-b-0">
+              <td class="px-3 py-2 font-mono text-[var(--bad-light)]">${row.keeper}</td>
+              <td class="px-3 py-2 text-[var(--bad-light)]" colspan="3">${row.error}</td>
+            </tr>
+          `)}
+        </tbody>
+      </table>
+    </div>
+  `
+}
+
+function RuntimeCdalBlock({ cdal }: { cdal: DashboardCdalHealth | null }) {
+  const proof = cdal?.proof_store
+  const completeness = proof?.completeness
+  const task = cdal?.task_scope
+  const staleSamples = completeness?.sample_stale_incomplete_run_ids ?? []
+  const terminalSamples = completeness?.sample_terminal_incomplete_run_ids ?? []
+  if (!cdal) {
+    return html`
+      <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-3 py-5 text-center text-2xs text-[var(--color-fg-muted)]">
+        CDAL runtime snapshot unavailable.
+      </div>
+    `
+  }
+  return html`
+    <div class="grid gap-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] p-3 text-2xs">
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <span class="font-mono text-[var(--color-fg-primary)]">${cdal.writer_status ?? 'unknown'}</span>
+        <${StatusChip}
+          label=${cdal.operator_action_required ? 'action' : 'ok'}
+          tone=${cdal.operator_action_required ? 'warn' : 'ok'}
+        />
+      </div>
+      <div class="grid gap-1 text-[var(--color-fg-muted)]">
+        <div class="flex justify-between gap-3">
+          <span>Proof store</span>
+          <span class="font-mono text-[var(--color-fg-secondary)]">${proof?.status ?? 'unknown'}</span>
+        </div>
+        <div class="flex justify-between gap-3">
+          <span>Incomplete</span>
+          <span class="font-mono text-[var(--color-fg-secondary)]">
+            ${countText(completeness?.incomplete_run_dirs)}
+            <span class="text-[var(--color-fg-disabled)]"> stale ${countText(completeness?.stale_incomplete_run_dirs)} · terminal ${countText(completeness?.terminal_incomplete_run_dirs)}</span>
+          </span>
+        </div>
+        <div class="flex justify-between gap-3">
+          <span>Task scope</span>
+          <span class="font-mono text-[var(--color-fg-secondary)]">
+            ${task?.status ?? 'unknown'}
+            <span class="text-[var(--color-fg-disabled)]"> missing ${countText(task?.missing_task_scope_rows)} · current ${countText(task?.current_writer_missing_task_scope_rows)}</span>
+          </span>
+        </div>
+        ${staleSamples.length > 0 ? html`
+          <div class="truncate" title=${staleSamples.join(', ')}>stale samples: <span class="font-mono text-[var(--color-fg-secondary)]">${compactList(staleSamples)}</span></div>
+        ` : null}
+        ${terminalSamples.length > 0 ? html`
+          <div class="truncate" title=${terminalSamples.join(', ')}>terminal samples: <span class="font-mono text-[var(--color-fg-secondary)]">${compactList(terminalSamples)}</span></div>
+        ` : null}
+      </div>
+    </div>
+  `
+}
+
+function RuntimeBlockerBoard() {
+  useEffect(() => {
+    void refreshShell({ force: true })
+  }, [])
+
+  const runtime = shellRuntimeResolution.value
+  const fleetSafety = runtime?.fleet_safety ?? null
+  const fleet = fleetSafety?.keeper_fleet_safety
+  const pausedHealth = fleetSafety?.paused_keepers_health
+  const cdal = runtime?.cdal ?? null
+  const effective = fleet?.effective_reaction_capacity_count ?? fleet?.running_keeper_fiber_count ?? fleetSafety?.keeper_fibers
+  const executable = fleet?.executable_reaction_capacity_count ?? fleet?.executable_keeper_fiber_count
+  const target = fleet?.target_reaction_capacity_count ?? fleet?.autoboot_enabled_keeper_count
+  const shortfall = fleet?.reaction_capacity_shortfall_count
+  const pausedCount = pausedHealth?.count ?? fleet?.paused_keeper_count ?? fleetSafety?.paused_keepers
+  const pausedNames = pausedHealth?.names ?? []
+  const capacityStatus = fleet?.status === 'blocked'
+    ? 'crit'
+    : fleet?.operator_action_required || fleet?.reaction_capacity_below_target
+      ? 'warn'
+      : fleet ? 'ok' : undefined
+
+  return html`
+    <section class="grid gap-3" data-testid="runtime-blocker-board">
+      <div class="grid grid-cols-1 gap-3 lg:grid-cols-3">
+        <${StatTile}
+          label="Reaction capacity"
+          value=${`${countText(effective)}/${countText(target)}`}
+          status=${capacityStatus}
+          delta=${{ direction: capacityStatus === 'ok' ? 'up' : 'down', text: `exec ${countText(executable)} · short ${countText(shortfall)}` }}
+        />
+        <${StatTile}
+          label="Paused keepers"
+          value=${countText(pausedCount)}
+          status=${pausedCount && pausedCount > 0 ? 'warn' : 'ok'}
+          delta=${{ direction: pausedCount && pausedCount > 0 ? 'down' : 'flat', text: compactList(pausedNames) }}
+        />
+        <${StatTile}
+          label="CDAL writer"
+          value=${cdal?.writer_status ?? '--'}
+          status=${cdalTone(cdal)}
+          delta=${{ direction: cdal?.operator_action_required ? 'down' : 'flat', text: cdal?.proof_store?.status ?? 'proof unknown' }}
+        />
+      </div>
+      <div class="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1.1fr)_minmax(18rem,0.9fr)]">
+        <div>
+          <div class="mb-2 text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Paused keeper blockers</div>
+          <${RuntimePausedKeeperTable} fleetSafety=${fleetSafety} />
+        </div>
+        <div>
+          <div class="mb-2 text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">CDAL blockers</div>
+          <${RuntimeCdalBlock} cdal=${cdal} />
+        </div>
+      </div>
+    </section>
+  `
+}
+
 function ToolMonitorDefaultBoard() {
   useEffect(() => {
     const controller = new AbortController()
@@ -368,6 +558,8 @@ function ToolMonitorDefaultBoard() {
           />
         </div>
       </div>
+
+      <${RuntimeBlockerBoard} />
 
       <div class="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.45fr)_minmax(18rem,0.8fr)]">
         <div class="min-w-0">

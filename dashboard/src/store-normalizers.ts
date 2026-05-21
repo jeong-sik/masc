@@ -9,10 +9,17 @@ import type {
   DashboardExecutionContinuityBrief,
   DashboardConfigResolution,
   DashboardConfigResolutionItem,
+  DashboardCdalHealth,
+  DashboardCdalProofCompleteness,
+  DashboardCdalProofStoreHealth,
+  DashboardCdalTaskScopeHealth,
   DashboardFleetPressureHealth,
   DashboardFleetSafetyHealth,
   DashboardKeeperReactionLedgerHealth,
   DashboardKeeperReactionLedgerPendingKeeper,
+  DashboardPausedKeeperDetail,
+  DashboardPausedKeeperReadError,
+  DashboardPausedKeepersHealth,
   DashboardRuntimeDiagnostic,
   DashboardRuntimeResolution,
   KeeperRuntimeResolved,
@@ -598,6 +605,81 @@ export function normalizeDashboardRuntimeResolution(
     build,
     keeper_runtime: normalizeKeeperRuntimeResolved(raw.keeper_runtime),
     fleet_safety: normalizeDashboardFleetSafetyHealth(raw),
+    cdal: normalizeDashboardCdalHealth(raw.cdal),
+  }
+}
+
+function normalizeDashboardPausedKeeperDetail(raw: unknown): DashboardPausedKeeperDetail | null {
+  if (!isRecord(raw)) return null
+  const name = asString(raw.name)
+  if (!name) return null
+  return {
+    name,
+    autoboot_enabled: asBoolean(raw.autoboot_enabled) ?? null,
+    pause_kind: asString(raw.pause_kind) ?? null,
+    auto_resume_after_sec: asNumber(raw.auto_resume_after_sec) ?? null,
+    persisted_auto_resume_after_sec: asNumber(raw.persisted_auto_resume_after_sec) ?? null,
+    auto_resume_source: asString(raw.auto_resume_source) ?? null,
+    paused_elapsed_sec: asNumber(raw.paused_elapsed_sec) ?? null,
+    auto_resume_remaining_sec: asNumber(raw.auto_resume_remaining_sec) ?? null,
+    last_blocker_class: asString(raw.last_blocker_class) ?? null,
+    last_blocker_detail: asString(raw.last_blocker_detail) ?? null,
+    missing_pause_root_cause: asBoolean(raw.missing_pause_root_cause) ?? null,
+  }
+}
+
+function normalizeDashboardPausedKeeperReadError(raw: unknown): DashboardPausedKeeperReadError | null {
+  if (!isRecord(raw)) return null
+  const keeper = asString(raw.keeper)
+  const error = asString(raw.error)
+  if (!keeper || !error) return null
+  return { keeper, error }
+}
+
+function normalizeDashboardPausedKeepersHealth(raw: unknown): DashboardPausedKeepersHealth | null {
+  if (!isRecord(raw)) return null
+  const details = (Array.isArray(raw.details) ? raw.details : [])
+    .map(normalizeDashboardPausedKeeperDetail)
+    .filter((item): item is DashboardPausedKeeperDetail => item !== null)
+  const readErrors = (Array.isArray(raw.read_errors) ? raw.read_errors : [])
+    .map(normalizeDashboardPausedKeeperReadError)
+    .filter((item): item is DashboardPausedKeeperReadError => item !== null)
+  const names = asStringArray(raw.names)
+  const runningNames = asStringArray(raw.running_names)
+  const durableNames = asStringArray(raw.durable_names)
+  const autobootEnabledNames = asStringArray(raw.autoboot_enabled_names)
+  const count = asNumber(raw.count)
+  const runningCount = asNumber(raw.running_count)
+  const durableCount = asNumber(raw.durable_count)
+  const autobootEnabledCount = asNumber(raw.autoboot_enabled_count)
+  const readErrorCount = asNumber(raw.read_error_count)
+  if (
+    count == null
+    && runningCount == null
+    && durableCount == null
+    && autobootEnabledCount == null
+    && readErrorCount == null
+    && names.length === 0
+    && runningNames.length === 0
+    && durableNames.length === 0
+    && autobootEnabledNames.length === 0
+    && details.length === 0
+    && readErrors.length === 0
+  ) {
+    return null
+  }
+  return {
+    count: count ?? null,
+    names,
+    running_count: runningCount ?? null,
+    running_names: runningNames,
+    durable_count: durableCount ?? null,
+    durable_names: durableNames,
+    autoboot_enabled_count: autobootEnabledCount ?? null,
+    autoboot_enabled_names: autobootEnabledNames,
+    details,
+    read_error_count: readErrorCount ?? null,
+    read_errors: readErrors,
   }
 }
 
@@ -782,6 +864,7 @@ function normalizeDashboardKeeperReactionLedgerHealth(
 function normalizeDashboardFleetSafetyHealth(raw: Record<string, unknown>): DashboardFleetSafetyHealth | null {
   const keeperFibers = asNumber(raw.keeper_fibers)
   const pausedKeepers = asNumber(raw.paused_keepers)
+  const pausedKeepersHealth = normalizeDashboardPausedKeepersHealth(raw.paused_keepers_health)
   const noFibers = asBoolean(raw.keeper_fleet_no_fibers)
   const fdPressure = normalizeDashboardFleetPressureHealth(raw.keeper_fd_pressure)
   const fleetSafety = normalizeDashboardFleetPressureHealth(raw.keeper_fleet_safety)
@@ -789,6 +872,7 @@ function normalizeDashboardFleetSafetyHealth(raw: Record<string, unknown>): Dash
   if (
     keeperFibers == null
     && pausedKeepers == null
+    && pausedKeepersHealth == null
     && noFibers == null
     && fdPressure == null
     && fleetSafety == null
@@ -799,10 +883,105 @@ function normalizeDashboardFleetSafetyHealth(raw: Record<string, unknown>): Dash
   return {
     keeper_fibers: keeperFibers ?? null,
     paused_keepers: pausedKeepers ?? null,
+    paused_keepers_health: pausedKeepersHealth,
     keeper_fleet_no_fibers: noFibers ?? null,
     keeper_fd_pressure: fdPressure,
     keeper_fleet_safety: fleetSafety,
     keeper_reaction_ledger: reactionLedger,
+  }
+}
+
+function normalizeDashboardCdalProofCompleteness(raw: unknown): DashboardCdalProofCompleteness | null {
+  if (!isRecord(raw)) return null
+  const incomplete = asNumber(raw.incomplete_run_dirs)
+  const stale = asNumber(raw.stale_incomplete_run_dirs)
+  const terminal = asNumber(raw.terminal_incomplete_run_dirs)
+  const samples = asStringArray(raw.sample_stale_incomplete_run_ids)
+  const terminalSamples = asStringArray(raw.sample_terminal_incomplete_run_ids)
+  if (incomplete == null && stale == null && terminal == null && samples.length === 0 && terminalSamples.length === 0) {
+    return null
+  }
+  return {
+    scan_limit: asNumber(raw.scan_limit) ?? null,
+    run_dir_entries_seen: asNumber(raw.run_dir_entries_seen) ?? null,
+    scan_truncated: asBoolean(raw.scan_truncated) ?? null,
+    run_dirs_scanned: asNumber(raw.run_dirs_scanned) ?? null,
+    completed_run_dirs: asNumber(raw.completed_run_dirs) ?? null,
+    incomplete_run_dirs: incomplete ?? null,
+    stale_incomplete_run_dirs: stale ?? null,
+    terminal_incomplete_run_dirs: terminal ?? null,
+    missing_manifest_run_dirs: asNumber(raw.missing_manifest_run_dirs) ?? null,
+    missing_contract_run_dirs: asNumber(raw.missing_contract_run_dirs) ?? null,
+    stale_incomplete_grace_seconds: asNumber(raw.stale_incomplete_grace_seconds) ?? null,
+    sample_stale_incomplete_run_ids: samples,
+    sample_terminal_incomplete_run_ids: terminalSamples,
+  }
+}
+
+function normalizeDashboardCdalProofStoreHealth(raw: unknown): DashboardCdalProofStoreHealth | null {
+  if (!isRecord(raw)) return null
+  const status = asString(raw.status) ?? null
+  const completeness = normalizeDashboardCdalProofCompleteness(raw.completeness)
+  if (status == null && completeness == null) return null
+  return {
+    root: asString(raw.root) ?? null,
+    proofs_dir: asString(raw.proofs_dir) ?? null,
+    exists: asBoolean(raw.exists) ?? null,
+    latest_activity_at: asString(raw.latest_activity_at) ?? null,
+    latest_activity_unix: asNumber(raw.latest_activity_unix) ?? null,
+    age_seconds: asNumber(raw.age_seconds) ?? null,
+    status,
+    completeness,
+  }
+}
+
+function normalizeDashboardCdalTaskScopeHealth(raw: unknown): DashboardCdalTaskScopeHealth | null {
+  if (!isRecord(raw)) return null
+  const status = asString(raw.status) ?? null
+  const recentRows = asNumber(raw.recent_rows)
+  const missingRows = asNumber(raw.missing_task_scope_rows)
+  const legacyRows = asNumber(raw.legacy_unscoped_rows)
+  const currentMissingRows = asNumber(raw.current_writer_missing_task_scope_rows)
+  if (status == null && recentRows == null && missingRows == null && legacyRows == null && currentMissingRows == null) {
+    return null
+  }
+  return {
+    status,
+    recent_limit: asNumber(raw.recent_limit) ?? null,
+    recent_rows: recentRows ?? null,
+    task_id_rows: asNumber(raw.task_id_rows) ?? null,
+    missing_task_scope_rows: missingRows ?? null,
+    legacy_unscoped_rows: legacyRows ?? null,
+    current_writer_missing_task_scope_rows: currentMissingRows ?? null,
+    missing_task_scope: asBoolean(raw.missing_task_scope) ?? null,
+    partial_task_scope: asBoolean(raw.partial_task_scope) ?? null,
+    current_writer_missing_task_scope: asBoolean(raw.current_writer_missing_task_scope) ?? null,
+    legacy_unscoped_only: asBoolean(raw.legacy_unscoped_only) ?? null,
+  }
+}
+
+function normalizeDashboardCdalHealth(raw: unknown): DashboardCdalHealth | null {
+  if (!isRecord(raw)) return null
+  const writerStatus = asString(raw.writer_status) ?? null
+  const operatorActionRequired = asBoolean(raw.operator_action_required) ?? null
+  const proofStore = normalizeDashboardCdalProofStoreHealth(raw.proof_store)
+  const taskScope = normalizeDashboardCdalTaskScopeHealth(raw.task_scope)
+  const proofStorePathDrift = asBoolean(raw.proof_store_path_drift) ?? null
+  if (
+    writerStatus == null
+    && operatorActionRequired == null
+    && proofStorePathDrift == null
+    && proofStore == null
+    && taskScope == null
+  ) {
+    return null
+  }
+  return {
+    writer_status: writerStatus,
+    operator_action_required: operatorActionRequired,
+    proof_store_path_drift: proofStorePathDrift,
+    proof_store: proofStore,
+    task_scope: taskScope,
   }
 }
 

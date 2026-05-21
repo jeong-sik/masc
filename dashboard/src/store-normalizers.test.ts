@@ -157,6 +157,31 @@ describe('normalizeDashboardRuntimeResolution fleet safety', () => {
     const result = normalizeDashboardRuntimeResolution(runtimeResolutionRaw({
       keeper_fibers: 1,
       paused_keepers: 3,
+      paused_keepers_health: {
+        count: 3,
+        names: ['analyst', 'base', 'sangsu'],
+        running_count: 0,
+        running_names: [],
+        durable_count: 3,
+        durable_names: ['analyst', 'base', 'sangsu'],
+        autoboot_enabled_count: 3,
+        autoboot_enabled_names: ['analyst', 'base', 'sangsu'],
+        details: [{
+          name: 'analyst',
+          autoboot_enabled: true,
+          pause_kind: 'timeout_recoverable',
+          auto_resume_after_sec: 60,
+          persisted_auto_resume_after_sec: null,
+          auto_resume_source: 'implicit_timeout',
+          paused_elapsed_sec: 12,
+          auto_resume_remaining_sec: 48,
+          last_blocker_class: 'turn_timeout',
+          last_blocker_detail: 'turn exceeded budget',
+          missing_pause_root_cause: false,
+        }],
+        read_error_count: 0,
+        read_errors: [],
+      },
       keeper_fleet_no_fibers: false,
       keeper_fd_pressure: {
         status: 'blocked',
@@ -209,6 +234,16 @@ describe('normalizeDashboardRuntimeResolution fleet safety', () => {
       keeper_fibers: 1,
       paused_keepers: 3,
       keeper_fleet_no_fibers: false,
+      paused_keepers_health: {
+        count: 3,
+        names: ['analyst', 'base', 'sangsu'],
+        details: [{
+          name: 'analyst',
+          pause_kind: 'timeout_recoverable',
+          auto_resume_source: 'implicit_timeout',
+          last_blocker_class: 'turn_timeout',
+        }],
+      },
       keeper_fd_pressure: {
         status: 'blocked',
         reason: 'fd_pressure',
@@ -247,6 +282,74 @@ describe('normalizeDashboardRuntimeResolution fleet safety', () => {
         legacy_cursor_swept_stimulus_count: 1,
         pending_stimulus_count: 0,
         read_error_count: 0,
+      },
+    })
+  })
+
+  it('parses CDAL proof and task-scope blocker fields', () => {
+    const result = normalizeDashboardRuntimeResolution(runtimeResolutionRaw({
+      cdal: {
+        writer_status: 'proof_store_incomplete',
+        operator_action_required: true,
+        proof_store_path_drift: false,
+        proof_store: {
+          root: '/Users/dancer/me/.oas',
+          proofs_dir: '/Users/dancer/me/.oas/proofs',
+          exists: true,
+          latest_activity_at: '2026-05-21T03:00:00Z',
+          latest_activity_unix: 1779332400,
+          age_seconds: 30,
+          status: 'stale_incomplete_runs',
+          completeness: {
+            scan_limit: 200,
+            run_dir_entries_seen: 200,
+            scan_truncated: false,
+            run_dirs_scanned: 200,
+            completed_run_dirs: 194,
+            incomplete_run_dirs: 6,
+            stale_incomplete_run_dirs: 3,
+            terminal_incomplete_run_dirs: 1,
+            missing_manifest_run_dirs: 6,
+            missing_contract_run_dirs: 6,
+            stale_incomplete_grace_seconds: 300,
+            sample_stale_incomplete_run_ids: ['cdal-stale-a'],
+            sample_terminal_incomplete_run_ids: ['cdal-abort-a'],
+          },
+        },
+        task_scope: {
+          status: 'partial_task_scope',
+          recent_limit: 500,
+          recent_rows: 500,
+          task_id_rows: 225,
+          missing_task_scope_rows: 275,
+          legacy_unscoped_rows: 270,
+          current_writer_missing_task_scope_rows: 5,
+          missing_task_scope: true,
+          partial_task_scope: true,
+          current_writer_missing_task_scope: true,
+          legacy_unscoped_only: false,
+        },
+      },
+    }))
+
+    expect(result?.cdal).toMatchObject({
+      writer_status: 'proof_store_incomplete',
+      operator_action_required: true,
+      proof_store: {
+        status: 'stale_incomplete_runs',
+        completeness: {
+          incomplete_run_dirs: 6,
+          stale_incomplete_run_dirs: 3,
+          terminal_incomplete_run_dirs: 1,
+          sample_stale_incomplete_run_ids: ['cdal-stale-a'],
+          sample_terminal_incomplete_run_ids: ['cdal-abort-a'],
+        },
+      },
+      task_scope: {
+        status: 'partial_task_scope',
+        legacy_unscoped_rows: 270,
+        current_writer_missing_task_scope_rows: 5,
+        current_writer_missing_task_scope: true,
       },
     })
   })

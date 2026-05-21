@@ -396,6 +396,22 @@ let test_shell_exec_uses_shell_ir_dispatch_cwd () =
               (contains_substring line "\"-c\"");
             Alcotest.(check bool) "no cd wrapper" false (contains_substring line "cd ")))
 
+let test_shell_exec_timeout_floor_for_load_bearing_commands () =
+  let check command requested expected =
+    Alcotest.(check (float 0.001))
+      command
+      expected
+      (Worker_dev_tools.effective_shell_exec_timeout_sec ~command ~requested)
+  in
+  check "git status -sb" 5.0 15.0;
+  check "git branch -a" 5.0 15.0;
+  check "grep -rn \"timeout\" lib" 5.0 15.0;
+  check "find lib -name \"*.ml\" -type f" 5.0 15.0;
+  check "scripts/dune-local.sh build lib/cascade" 5.0 15.0;
+  check "echo hello" 5.0 5.0;
+  check "git status -sb" 30.0 30.0
+;;
+
 let test_shell_exec_blocked_command () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -693,6 +709,8 @@ let () =
       Alcotest.test_case "echo hello" `Quick test_shell_exec_echo;
       Alcotest.test_case "uses Shell IR dispatch cwd" `Quick
         test_shell_exec_uses_shell_ir_dispatch_cwd;
+      Alcotest.test_case "timeout floor for load-bearing commands" `Quick
+        test_shell_exec_timeout_floor_for_load_bearing_commands;
       Alcotest.test_case "blocked command" `Quick test_shell_exec_blocked_command;
       Alcotest.test_case "env wrapper blocked command" `Quick
         test_shell_exec_blocks_env_wrapped_disallowed_command;

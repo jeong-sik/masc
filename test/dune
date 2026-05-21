@@ -1256,7 +1256,6 @@
   test_tool_control_coverage
   test_tool_misc_coverage
   test_ag_ui_coverage
-  test_tool_suspend_coverage
   test_tool_code_coverage
   test_tool_code_write_coverage
   test_tool_code_read_containment
@@ -1316,7 +1315,6 @@
   test_tool_control_coverage
   test_tool_misc_coverage
   test_ag_ui_coverage
-  test_tool_suspend_coverage
   test_tool_code_coverage
   test_tool_code_write_coverage
   test_tool_code_read_containment

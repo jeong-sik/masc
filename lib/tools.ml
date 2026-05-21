@@ -40,7 +40,6 @@ let raw_schemas : tool_schema list =
   @ Tool_schemas_worktree.schemas
   @ Tool_run.schemas
   @ Tool_task.schemas
-  @ Tool_suspend.schemas
   @ Tool_code.schemas
   @ Tool_code_write.schemas
   @ Tool_library.schemas

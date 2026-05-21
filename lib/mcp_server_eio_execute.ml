@@ -628,11 +628,6 @@ let execute_tool_eio
                      { Tool_misc.config; agent_name }
                      ~name
                      ~args:coerced_args
-                 | Mod_suspend ->
-                   Tool_suspend.dispatch
-                     { Tool_suspend.config; caller_agent = Some agent_name }
-                     ~name
-                     ~args:coerced_args
                  | Mod_library ->
                    Tool_library.dispatch
                      { Tool_library.agent_name }

@@ -110,21 +110,7 @@ type action_request = {
   payload : Yojson.Safe.t;
 }
 
-let canonical_action_type action_type =
-  match action_type with
-  | "autonomy_tick" -> "social_sweep"
-  | "room_pause" | "namespace_pause" -> "namespace_pause"
-  | "room_resume" | "namespace_resume" -> "namespace_resume"
-  | "social_sweep" -> "social_sweep"
-  | "keeper_msg" -> "keeper_message"
-  | "keeper_message" -> "keeper_message"
-  | "keeper_probe" -> "keeper_probe"
-  | "keeper_recover" -> "keeper_recover"
-  | "github_identity_login_prepare" -> "github_identity_login_prepare"
-  | "github_identity_status" -> "github_identity_status"
-  | "keeper_github_identity_login_prepare" -> "keeper_github_identity_login_prepare"
-  | "keeper_github_identity_status" -> "keeper_github_identity_status"
-  | other -> other
+let canonical_action_type action_type = action_type
 
 let normalize_action_target_type target_type =
   let normalized = String.trim target_type |> String.lowercase_ascii in

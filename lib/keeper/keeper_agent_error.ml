@@ -162,7 +162,7 @@ let provider_error_terminal_reason_code
     Printf.sprintf "provider_error_hard_quota:%s" provider
   | Llm_provider.Error.CapacityExhausted { scope; _ } ->
     Printf.sprintf
-      "provider_error_capacity_exhausted:%s"
+      "provider_error_capacity_backpressure:%s"
       (Llm_provider.Error.capacity_scope_to_string scope)
   | Llm_provider.Error.AuthError { provider; _ } ->
     Printf.sprintf "provider_error_auth:%s" provider
@@ -195,7 +195,13 @@ let provider_error_terminal_reason_code
    Previously every Agent failure collapsed to "agent_error", mirroring
    the old Api behaviour. Memory: no-collapse-richer-enum-at-sdk-boundary. *)
 let agent_error_terminal_reason_code = function
-  | Agent_sdk.Error.CompletionContractViolation { contract; _ } ->
+  | Agent_sdk.Error.CompletionContractViolation
+      { contract; violation_detail = Some detail; _ } ->
+    Keeper_execution_receipt.encode_contract_violation_reason
+      ~called_tools:detail.called_tools
+      ~satisfying_tools:detail.satisfying_tools
+      (Agent_sdk.Completion_contract_id.to_string contract)
+  | Agent_sdk.Error.CompletionContractViolation { contract; violation_detail = None; _ } ->
     Printf.sprintf
       "completion_contract_violation:%s"
       (Agent_sdk.Completion_contract_id.to_string contract)
@@ -260,7 +266,7 @@ let provider_error_terminal_reason_code = function
   | Llm_provider.Error.HardQuota _ -> "provider_error_hard_quota"
   | Llm_provider.Error.CapacityExhausted { scope; _ } ->
     Printf.sprintf
-      "provider_error_capacity_exhausted:%s"
+      "provider_error_capacity_backpressure:%s"
       (Llm_provider.Error.capacity_scope_to_string scope)
   | Llm_provider.Error.AuthError _ -> "provider_error_auth"
   | Llm_provider.Error.ServerError { code; _ } ->

@@ -63,10 +63,11 @@ val paused_meta_requires_reconcile_recovery : keeper_meta -> bool
 
 val paused_meta_auto_resume_due : now:float -> keeper_meta -> bool
 (** True when [meta] is an auto-paused keeper whose self-healing backoff has
-    elapsed.  Intentional/operator pauses ([auto_resume_after_sec = None])
-    and reconcile-gated pauses are excluded.  This pure predicate deliberately
-    does not inspect cascade health or approval queues; callers that can see
-    those runtime surfaces must still apply them before mutating state. *)
+    elapsed.  Intentional/operator pauses and reconcile-gated pauses are
+    excluded.  Only an explicit [auto_resume_after_sec] makes a paused keeper
+    auto-recoverable.  This pure predicate deliberately does not inspect cascade
+    health or approval queues; callers that can see those runtime surfaces must
+    still apply them before mutating state. *)
 
 val cohort_key_of_reason : Keeper_registry.failure_reason option -> string
 (** Map a structured failure_reason to a cohort key for self-preservation grouping. *)

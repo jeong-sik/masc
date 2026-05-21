@@ -5,10 +5,10 @@
 #   Pre-#9737 each keeper could hold two distinct credential files on
 #   disk: a bare-nickname file (sangsu.json) and a canonical wrapper
 #   file (keeper-sangsu-agent.json) with different bearer tokens. The
-#   load_credential_with_aliases first-hit dispatcher routed by alias
-#   and silently picked one identity per request, downstream of which
-#   was the 119-event silent_auth_token_resolve_error / token_mismatch
-#   burst documented in #10491 (P2-a).
+#   old credential alias fallback routed by alias and silently picked
+#   one identity per request, downstream of which was the 119-event
+#   silent_auth_token_resolve_error / token_mismatch burst documented
+#   in #10491 (P2-a).
 #
 #   #9737 (UUID-based identity Phase 3) reshaped on-disk state: name
 #   files become redirect stubs — {"redirect_to": "<uuid>.json"} —

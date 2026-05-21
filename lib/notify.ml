@@ -90,6 +90,11 @@ let focus_on_osascript () =
   | Some value -> is_truthy value
   | None -> false
 
+let shell_execute_clicks_enabled () =
+  match getenv_nonempty "MASC_NOTIFY_ALLOW_SHELL_EXECUTE" with
+  | Some value -> is_truthy value
+  | None -> false
+
 let render_focus_template template payload =
   let replace token value acc =
     String_util.replace_substring ~needle:token ~by:value acc
@@ -126,9 +131,12 @@ let escape_shell s =
 
 (** Build click focus command from env config *)
 let build_focus_command payload =
-  match getenv_nonempty "MASC_NOTIFY_FOCUS_CMD" with
-  | Some template -> Some (render_focus_template template payload)
-  | None ->
+  if not (shell_execute_clicks_enabled ()) then
+    None
+  else
+    match getenv_nonempty "MASC_NOTIFY_FOCUS_CMD" with
+    | Some template -> Some (render_focus_template template payload)
+    | None ->
       let focus_app = getenv_nonempty "MASC_NOTIFY_FOCUS_APP" in
       let tmux_session = getenv_nonempty "MASC_TMUX_SESSION" in
       if focus_app = None && tmux_session = None then
@@ -211,9 +219,10 @@ let send_via_terminal_notifier ~title ~subtitle ~message ~sound ~focus_cmd =
      "-message"; message;
      "-group"; "masc"]
     |> fun base -> if sound then base @ ["-sound"; "default"] else base
-    |> fun base -> match focus_cmd with
-      | Some cmd -> base @ ["-execute"; cmd]
-      | None -> base
+    |> fun base ->
+    match focus_cmd with
+    | Some cmd when shell_execute_clicks_enabled () -> base @ ["-execute"; cmd]
+    | Some _ | None -> base
   in
   run_argv_ignore argv
 

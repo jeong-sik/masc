@@ -68,6 +68,13 @@ let assoc_fields ~path (json : Yojson.Safe.t) =
 
 let member fields key = List.assoc_opt key fields
 
+let reject_unknown_fields ~path ~allowed fields =
+  let allowed key = List.exists (String.equal key) allowed in
+  match List.find_opt (fun (key, _) -> not (allowed key)) fields with
+  | None -> Ok ()
+  | Some (key, _) -> result_errorf "%s.%s is not a supported typed keeper_bash field" path key
+;;
+
 let required_string ~path fields key =
   match member fields key with
   | Some (`String value) -> Ok value
@@ -142,6 +149,7 @@ let parse_stage ~path_prefix ~index (value : Yojson.Safe.t) =
   let ( let* ) = Result.bind in
   let path = Printf.sprintf "%s[%d]" path_prefix index in
   let* fields = assoc_fields ~path value in
+  let* () = reject_unknown_fields ~path ~allowed:[ "executable"; "argv" ] fields in
   let* executable = required_string ~path fields "executable" in
   let* argv = optional_string_list ~path fields "argv" in
   Ok { executable; argv }
@@ -169,9 +177,15 @@ let of_json (json : Yojson.Safe.t) =
     if Option.is_some (member fields "cmd")
     then
       Error
-        "legacy cmd string is not a typed keeper_bash input; provide \
+        "cmd string is not a typed keeper_bash input; provide \
          executable/argv or pipeline stages"
     else Ok ()
+  in
+  let* () =
+    reject_unknown_fields
+      ~path:"$"
+      ~allowed:[ "executable"; "argv"; "pipeline"; "stages"; "cwd"; "env"; "timeout_sec" ]
+      fields
   in
   let executable_present = Option.is_some (member fields "executable") in
   let pipeline_value =
@@ -202,7 +216,7 @@ let of_json (json : Yojson.Safe.t) =
    shell metacharacters ([;|&><`$*?]) are literal data, not operators.
    Only control characters that cannot survive process-boundary
    serialization are rejected.  See .mli "Design constraints" for the
-   rationale and contrast with the legacy lexer in [Worker_dev_tools]. *)
+   rationale. *)
 let shell_metachar_in_token token =
   String.exists
     (function
@@ -244,6 +258,26 @@ let check_env env =
   loop env
 ;;
 
+let check_wrapper_target ~mode ~wrapper_name = function
+  | None -> Error (Empty_argv { executable = wrapper_name })
+  | Some target when is_allowed ~mode target -> Ok ()
+  | Some target -> Error (Executable_not_allowlisted { name = target; mode })
+;;
+
+let check_wrapper_exec_target ~mode ~executable ~argv =
+  match executable with
+  | "env" ->
+    check_wrapper_target
+      ~mode
+      ~wrapper_name:"env"
+      (Worker_dev_tools_command_syntax.command_after_env_prefix argv)
+  | "opam" -> (
+    match Worker_dev_tools_command_syntax.opam_exec_command_name argv with
+    | Some "opam" -> Ok ()
+    | target -> check_wrapper_target ~mode ~wrapper_name:"opam" target)
+  | _ -> Ok ()
+;;
+
 let check_exec ~mode ~executable ~argv ~cwd ~env =
   let ( let* ) = Result.bind in
   if not (is_allowed ~mode executable)
@@ -252,6 +286,7 @@ let check_exec ~mode ~executable ~argv ~cwd ~env =
     let* () =
       if argv = [] then Ok () else check_argv ~executable argv
     in
+    let* () = check_wrapper_exec_target ~mode ~executable ~argv in
     let* () = check_cwd cwd in
     let* () = check_env env in
     Ok ()

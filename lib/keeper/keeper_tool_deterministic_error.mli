@@ -33,8 +33,6 @@ type deterministic_reason =
       (** raw shell attempted to inspect task state files or guessed task APIs. *)
   | Destructive_operation_blocked
       (** force push / rm -rf / push to main detected. *)
-  | Path_syntax_blocked
-      (** path argument fails syntax check before execution. *)
   | Path_outside_sandbox
       (** path argument resolves outside the keeper's allowed roots. *)
   | Cwd_not_directory

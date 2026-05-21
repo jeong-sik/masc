@@ -168,10 +168,6 @@ module Local_runtime = struct
     | None -> Env_config_core.masc_http_base_url () ^ "/mcp"
 end
 
-(** Backward-compatible alias so existing [Env_config.Llama] references
-    continue to compile without changes. *)
-module Llama = Local_runtime
-
 module Ollama = struct
   let server_url =
     get_string ~default:Masc_network_defaults.ollama_default_url "OLLAMA_SERVER_URL"
@@ -787,12 +783,19 @@ module Dashboard = struct
 
       Caps a single [/health?full=1] cache refresh attempt in
       [Server_routes_http_runtime.start_full_health_snapshot_refresh_loop].
-      Default 8s keeps this proactive refresh independent from the
-      dashboard shell render timeout. Floor 1s prevents degenerate
-      operator overrides. *)
+      Default 20s (bumped from 8s) reduces F-6 fan-in tail: make_health_json
+      synchronously fans 17 components, and Team BBBB2 observed 27% tail
+      at 16s live override (307/24h timeouts). Bumping the floor default
+      to 20s is the bridge expected to drop tail to <10% (<50/24h).
+      Floor 1s prevents degenerate operator overrides.
+
+      WORKAROUND: This is a cap raise (§4 anti-pattern signature) accepted
+      as bridge until structural RFC lands (per-component health cache so
+      make_health_json no longer fans 17 sync calls per refresh).
+      Removal target: per-component health cache RFC (TBD). *)
   let full_health_refresh_timeout_sec =
     Float.max 1.0
-      (get_float ~default:8.0 "MASC_FULL_HEALTH_REFRESH_TIMEOUT_SEC")
+      (get_float ~default:20.0 "MASC_FULL_HEALTH_REFRESH_TIMEOUT_SEC")
 
   (** Number of consecutive [/health?full=1] cache-refresh failures
       that must accumulate before

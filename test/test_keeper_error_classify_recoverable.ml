@@ -64,21 +64,17 @@ let test_other_detail_generic_recoverable () =
   | None ->
     fail "Generic Cascade_exhausted with Other_detail should be recoverable"
 
-let test_slot_full_other_detail_is_capacity_backpressure () =
+let test_slot_full_other_detail_stays_legacy_cascade_exhausted () =
   let err =
     make_cascade_exhausted
       (KT.Other_detail "slot full, cascading to next provider")
   in
-  check bool "slot full is auto-recoverable" true
-    (KEC.is_auto_recoverable_turn_error err);
-  check bool "legacy slot full remains cascade_exhausted" true
-    (KEC.is_cascade_exhausted_error err);
   match KEC.recoverable_cascade_failure_reason err with
   | Some reason ->
-    check string "legacy slot full -> capacity_exhausted" "capacity_exhausted"
+    check string "legacy slot full -> cascade_exhausted" "cascade_exhausted"
       (KEC.degraded_retry_reason_to_string reason)
   | None ->
-    fail "slot full should be capacity-backpressure recoverable"
+    fail "slot full should be cascade-exhausted recoverable"
 
 let test_typed_capacity_backpressure_is_not_cascade_exhausted () =
   let err = make_capacity_backpressure () in
@@ -88,12 +84,12 @@ let test_typed_capacity_backpressure_is_not_cascade_exhausted () =
     (KEC.is_cascade_exhausted_error err);
   match KEC.recoverable_cascade_failure_reason err with
   | Some reason ->
-    check string "typed capacity -> capacity_exhausted" "capacity_exhausted"
+    check string "typed capacity -> capacity_backpressure" "capacity_backpressure"
       (KEC.degraded_retry_reason_to_string reason)
   | None ->
     fail "typed capacity backpressure should be recoverable as capacity"
 
-let test_provider_capacity_exhausted_is_capacity_backpressure () =
+let test_provider_capacity_backpressure_is_capacity_backpressure () =
   let err =
     Agent_sdk.Error.Provider
       (Llm_provider.Error.CapacityExhausted
@@ -106,8 +102,8 @@ let test_provider_capacity_exhausted_is_capacity_backpressure () =
   in
   match KEC.recoverable_cascade_failure_reason err with
   | Some reason ->
-    check string "Provider CapacityExhausted -> capacity_exhausted"
-      "capacity_exhausted"
+    check string "Provider CapacityExhausted -> capacity_backpressure"
+      "capacity_backpressure"
       (KEC.degraded_retry_reason_to_string reason)
   | None ->
     fail "Provider CapacityExhausted should be recoverable as capacity"
@@ -351,6 +347,32 @@ let test_server_error_502_is_recoverable () =
   | None ->
     fail "ServerError 502 should be recoverable (trigger cascade rotation)"
 
+let test_server_error_524_is_capacity_backpressure_rotation_not_transient_retry () =
+  let err =
+    Agent_sdk.Error.Api
+      (Retry.ServerError { status = 524; message = "a timeout occurred" })
+  in
+  check bool "524 not same-cascade transient" false (KEC.is_transient_network_error err);
+  match KEC.recoverable_cascade_failure_reason err with
+  | Some reason ->
+    check string "524 -> capacity_backpressure" "capacity_backpressure"
+      (KEC.degraded_retry_reason_to_string reason)
+  | None ->
+    fail "ServerError 524 should be recoverable as capacity backpressure"
+
+let test_wrapped_524_is_capacity_backpressure () =
+  let err =
+    make_cascade_exhausted
+      (KT.Other_detail
+         "all tiers failed (last runtime=runtime, error=Server error 524: error \
+          code: 524)")
+  in
+  match KEC.recoverable_cascade_failure_reason err with
+  | Some reason ->
+    check string "wrapped 524 -> capacity_backpressure" "capacity_backpressure"
+      (KEC.degraded_retry_reason_to_string reason)
+  | None ->
+    fail "Wrapped ServerError 524 should be recoverable as capacity backpressure"
 let test_auth_error_is_recoverable () =
   (* 401/403 auth errors: the current cascade's credentials are invalid.
      A different cascade with different credentials may succeed. *)
@@ -444,12 +466,12 @@ let () =
             test_auto_recoverable_cascade_exhausted_is_still_cascade_exhausted;
           test_case "Other_detail (non-quota) is recoverable" `Quick
             test_other_detail_generic_recoverable;
-          test_case "slot full Other_detail is capacity backpressure" `Quick
-            test_slot_full_other_detail_is_capacity_backpressure;
+          test_case "slot full Other_detail stays legacy cascade exhausted" `Quick
+            test_slot_full_other_detail_stays_legacy_cascade_exhausted;
           test_case "typed capacity backpressure is not cascade exhausted" `Quick
             test_typed_capacity_backpressure_is_not_cascade_exhausted;
           test_case "provider CapacityExhausted is capacity backpressure" `Quick
-            test_provider_capacity_exhausted_is_capacity_backpressure;
+            test_provider_capacity_backpressure_is_capacity_backpressure;
           test_case "All_providers_failed is recoverable" `Quick
             test_all_providers_failed_recoverable;
           test_case "No_providers_available is recoverable" `Quick
@@ -472,6 +494,12 @@ let () =
             test_server_error_503_is_recoverable;
           test_case "ServerError 502 is recoverable" `Quick
             test_server_error_502_is_recoverable;
+          test_case
+            "ServerError 524 is capacity backpressure but not transient retry"
+            `Quick
+            test_server_error_524_is_capacity_backpressure_rotation_not_transient_retry;
+          test_case "wrapped ServerError 524 is capacity backpressure" `Quick
+            test_wrapped_524_is_capacity_backpressure;
           test_case "AuthError is recoverable" `Quick
             test_auth_error_is_recoverable;
           test_case "hard quota keeps hard_quota label" `Quick

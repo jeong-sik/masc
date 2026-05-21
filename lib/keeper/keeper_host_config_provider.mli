@@ -1,11 +1,13 @@
 (** Keeper GitHub credential provider.
 
-    Resolves the keeper's explicit [github_identity] bundle, or the
-    MASC-owned [root] bundle when the keeper has no identity.  It mounts
-    only files from that selected bundle read-only into the dispatch
-    container and composes container-local GH/Git environment variables.
-    Operator ambient credentials ([GH_TOKEN], [GITHUB_TOKEN],
-    [~/.config/gh], [~/.ssh], keychain probes) are outside this contract.
+    Resolves a keeper through [keeper_repo_mappings.toml] and the credential
+    store.  Missing or unreadable mappings fail closed; legacy inference from
+    keeper profile [github_identity] or the MASC-owned [root] bundle is no
+    longer a runtime fallback.  It mounts only files from the selected
+    credential bundle read-only into the dispatch container and composes
+    container-local GH/Git environment variables.  Operator ambient credentials
+    ([GH_TOKEN], [GITHUB_TOKEN], [~/.config/gh], [~/.ssh], keychain probes) are
+    outside this contract.
 
     [finalize] and [tear_down] are noops here — the RO mount lifetime is
     the docker [run]. *)

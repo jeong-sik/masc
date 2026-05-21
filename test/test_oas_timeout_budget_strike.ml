@@ -108,7 +108,7 @@ let test_strike_limit_routes_through_policy_without_keeper_death () =
       decision.reason
 
 let test_capacity_phase_routes_to_provider_tuning () =
-  let err = oas_timeout_budget_error ~phase:"slot_full" in
+  let err = oas_timeout_budget_error ~phase:"capacity_backpressure" in
   match KH.oas_timeout_budget_policy_decision ~strikes:1 err with
   | None -> Alcotest.fail "expected OAS timeout budget policy decision"
   | Some decision ->

@@ -151,6 +151,19 @@ let test_masc_mcp_tools () =
     (List.mem "mcp__masc__masc_tool_revoke" Spawn.masc_mcp_tools);
   ()
 
+let test_parse_command_preserves_quoted_args () =
+  Alcotest.(check (list string)) "quoted arg preserved"
+    [ "claude"; "--output-format"; "json value"; "-p" ]
+    (Spawn.parse_command "claude --output-format 'json value' -p")
+
+let test_parse_command_rejects_shell_pipeline () =
+  Alcotest.(check (list string)) "pipeline rejected" []
+    (Spawn.parse_command "claude -p prompt | cat")
+
+let test_parse_command_rejects_malformed_quote () =
+  Alcotest.(check (list string)) "malformed quote rejected" []
+    (Spawn.parse_command "claude -p 'unterminated")
+
 let test_spawn_bare_ollama_rejected () =
   if Option.value ~default:"" (Sys.getenv_opt "OLLAMA_DEFAULT_MODEL") |> String.trim = ""
   then (
@@ -197,6 +210,12 @@ let tests = [
   Alcotest.test_case "result_to_string failure" `Quick test_result_to_string_failure;
   Alcotest.test_case "result_to_json" `Quick test_result_to_json;
   Alcotest.test_case "masc_mcp_tools populated" `Quick test_masc_mcp_tools;
+  Alcotest.test_case "parse_command preserves quoted args" `Quick
+    test_parse_command_preserves_quoted_args;
+  Alcotest.test_case "parse_command rejects shell pipeline" `Quick
+    test_parse_command_rejects_shell_pipeline;
+  Alcotest.test_case "parse_command rejects malformed quote" `Quick
+    test_parse_command_rejects_malformed_quote;
   Alcotest.test_case "bare ollama rejected" `Quick test_spawn_bare_ollama_rejected;
   Alcotest.test_case "spawn failure surfaces stderr" `Quick
     test_spawn_failure_surfaces_stderr;

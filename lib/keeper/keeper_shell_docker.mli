@@ -2,8 +2,8 @@
 
     Extracted from keeper_exec_shell.ml — Docker container
     lifecycle, sandbox profile resolution, and container
-    invocation. Pure infrastructure; command dispatch remains in
-    keeper_exec_shell.ml. *)
+    invocation. Pure infrastructure; generic command-shape policy lives
+    in [Keeper_shell_command_semantics]. *)
 
 (** Diagnostic label for a [Unix.process_status]:
     [exit=N] / [signal=N] / [stopped=N]. *)
@@ -82,19 +82,19 @@ val ensure_keeper_sandbox_runtime :
 (** Direct alias of [Keeper_sandbox_runtime.ensure_keeper_sandbox_runtime];
     returns the [--security-opt seccomp=...] argv fragment on success. *)
 
-val cmd_targets_git_or_gh : string -> bool
 val cmd_targets_gh : string -> bool
+(** [true] when the command targets the [gh] binary. Exposed for unit
+    tests that pin [gh_exit_class] wiring. *)
 
-(** Resolve raw [keeper_bash] git/gh commands launched from the sandbox
-    mount root. The mount root is not a git repository: a single cloned
-    repo is auto-selected, zero repos or multiple repos return a
-    self-correcting error that tells the keeper to set [cwd] explicitly. *)
 val resolve_sandbox_root_git_cwd :
   config:Coord.config ->
   meta:Keeper_types.keeper_meta ->
   cwd:string ->
   cmd:string ->
   string * string option
+(** Resolve a sandbox-root git/gh command to the single checked-out
+    repository when unambiguous; otherwise return an operator-visible
+    blocker explaining the missing or ambiguous repo context. *)
 
 (** [#10855] LLM hallucinated [gh --repo X api Y] (108 events / 24h).
     Returns [Some (repo_arg, endpoint)] when the misuse pattern is
@@ -138,7 +138,7 @@ type docker_shell_result =
     ([gh_min_timeout_sec = 15s], #8688) plus 5s headroom for image
     pull and container creation.  Operators can override via
     [MASC_KEEPER_DOCKER_RUN_MIN_TIMEOUT_SEC] (read once at module
-    load, floor 1s). *)
+    load, clamped to [Timeout_floor.Docker_run]). *)
 val docker_run_min_timeout_sec : float
 
 (** Run [cmd] inside the keeper Docker sandbox; clamps
@@ -169,10 +169,10 @@ val run_trusted_docker_shell_command_with_status :
   network_mode:Keeper_types.network_mode ->
   (docker_shell_result, string) result
 
-(** Run [cmd] inside the Docker sandbox with git credentials
+(** Run [cmd] inside the Docker sandbox with host credential bindings
     forwarded (Network_inherit). Returns the JSON envelope to
     surface to the LLM, including [gh_exit_class] when applicable. *)
-val run_docker_with_git_bash :
+val run_docker_credentialed_bash :
   turn_sandbox_runtime:Keeper_turn_sandbox_runtime.t option ->
   config:Coord.config ->
   meta:Keeper_types.keeper_meta ->
@@ -182,9 +182,9 @@ val run_docker_with_git_bash :
   unit ->
   string
 
-(** Run [cmd] inside the hardened Docker sandbox with the caller's
-    [network_mode] (no git creds). *)
-val run_docker_hardened_bash :
+(** Run [cmd] inside the Docker sandbox with the caller's
+    [network_mode] and no git credentials. *)
+val run_docker_bash :
   turn_sandbox_runtime:Keeper_turn_sandbox_runtime.t option ->
   config:Coord.config ->
   meta:Keeper_types.keeper_meta ->

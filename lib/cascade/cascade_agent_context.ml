@@ -174,6 +174,8 @@ let builder_without_approval
     |> Agent_sdk.Builder.with_provider config.provider
     |> Agent_sdk.Builder.with_tools config.tools
     |> Agent_sdk.Builder.with_guardrails guardrails
+    |> Agent_sdk.Builder.with_missing_approval_callback_policy
+         Agent_sdk.Hooks.Reject_without_callback
   in
   let builder =
     match config.stream_idle_timeout_s with
@@ -378,6 +380,8 @@ let prepare_resume ~(config : config) ~(checkpoint : Agent_sdk.Checkpoint.t)
     ; allowed_paths = config.allowed_paths
     ; description = config.description
     ; approval = config.approval
+    ; missing_approval_callback_policy =
+        Agent_sdk.Hooks.Reject_without_callback
     ; slot_id = config.slot_id
     ; runtime_mcp_policy = config.runtime_mcp_policy
     ; summarizer = config.summarizer

@@ -40,12 +40,10 @@ let pr_review_action_metric_event_of_tool_io
              action;
              pr_number =
                first_some
-                 (first_some
-                    (match output_json with
-                     | Some json -> json_int_opt "pr_number" json
-                     | None -> None)
-                    (json_int_opt "pr_number" input))
-                 (json_int_opt "number" input);
+                 (match output_json with
+                  | Some json -> json_int_opt "pr_number" json
+                  | None -> None)
+                 (json_int_opt "pr_number" input);
              comment_id = None;
              success;
              route_via;
@@ -71,12 +69,10 @@ let pr_review_action_metric_event_of_tool_io
           action = "REPLY";
           pr_number =
             first_some
-              (first_some
-                 (match output_json with
-                  | Some json -> json_int_opt "pr_number" json
-                  | None -> None)
-                 (json_int_opt "pr_number" input))
-              (json_int_opt "number" input);
+              (match output_json with
+               | Some json -> json_int_opt "pr_number" json
+               | None -> None)
+              (json_int_opt "pr_number" input);
           comment_id =
             first_some
               (match output_json with
@@ -426,4 +422,3 @@ let append_pr_work_action_metrics
            Dated_jsonl.append store
              (Inference_utils.sanitize_json_utf8 snapshot))
         events
-

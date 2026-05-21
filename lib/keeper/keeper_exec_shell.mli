@@ -80,27 +80,7 @@ val handle_keeper_bash :
 
 module For_testing : sig
   val elapsed_duration_ms : start_time:float -> end_time:float -> int
-  val keeper_bash_shape_block_tag : string -> string option
-  val shell_ir_parse_failure_shape_block_tag : string -> string option
-  val strip_stderr_dev_null_redirects : string -> string * bool
-  val keeper_bash_shape_block_hint : string -> string option
 end
-
-val handle_keeper_bash_output :
-  config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
-  args:Yojson.Safe.t ->
-  string
-(** Legendary Bash P2: poll pending stdout/stderr from a background
-    task spawned via [keeper_bash] with [run_in_background=true]. *)
-
-val handle_keeper_bash_kill :
-  config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
-  args:Yojson.Safe.t ->
-  string
-(** Legendary Bash P2: terminate a background task's process group
-    (SIGTERM → grace → SIGKILL). Idempotent. *)
 
 val handle_keeper_shell :
   turn_sandbox_factory:Keeper_sandbox_factory.t option ->

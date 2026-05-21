@@ -626,7 +626,7 @@ module Rest = struct
               ("version", `String Version.version);
               ( "description",
                 `String
-                  "Internal OAS export for MASC MCP agent control. Use x-mcp-operations for canonical MCP operation metadata and x-agent-sdk-tools for the current SDK-facing aliases." );
+                  "Internal OAS export for MASC MCP agent control. Use x-mcp-operations for canonical MCP operation metadata and x-agent-sdk-tools for the current SDK-facing projections." );
             ] );
         ( "servers",
           `List

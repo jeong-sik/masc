@@ -287,10 +287,9 @@ type module_tag =
   | Mod_run
   | Mod_compact
   | Mod_agent | Mod_task | Mod_room
-  | Mod_control | Mod_agent_timeline | Mod_misc | Mod_suspend
+  | Mod_control | Mod_agent_timeline | Mod_misc
   | Mod_library | Mod_keeper
   | Mod_inline
-  | Mod_autoresearch
   | Mod_shard
 
 let static_tag_of_tool_name (tool : Tool_name.t) : module_tag option =
@@ -300,20 +299,14 @@ let static_tag_of_tool_name (tool : Tool_name.t) : module_tag option =
   | Tool_name.Masc m ->
     let open Tool_name.Masc in
     match m with
-    | Cancel_task
-    | Complete_task
     | Dispatch_plan
-    | List_tasks
     | Operation_pause
     | Operation_start
     | Operation_status
-    | Operation_stop
-    | Release_task
-    | Set_current_task -> None
+    | Operation_stop -> None
     | Add_task
     | Batch_add_tasks
     | Claim_next
-    | Claim_task
     | Task_history
     | Tasks
     | Transition
@@ -322,15 +315,7 @@ let static_tag_of_tool_name (tool : Tool_name.t) : module_tag option =
     | Agent_card
     | Agent_update
     | Agents
-    | Get_metrics
-    | Register_capabilities -> Some Mod_agent
-    | Autoresearch_cycle
-    | Autoresearch_inject
-    | Autoresearch_record_finding
-    | Autoresearch_search_findings
-    | Autoresearch_start
-    | Autoresearch_status
-    | Autoresearch_stop -> Some Mod_autoresearch
+    | Get_metrics -> Some Mod_agent
     | Board_cleanup
     | Board_comment
     | Board_comment_vote
@@ -362,10 +347,8 @@ let static_tag_of_tool_name (tool : Tool_name.t) : module_tag option =
     | Start
     | Who -> Some Mod_inline
     | Check
-    | Coord_status
     | Coordination_fsm_snapshot
     | Goal_list
-    | Goal_review
     | Goal_transition
     | Goal_upsert
     | Goal_verify
@@ -461,8 +444,7 @@ let all_registered_names () =
    LLM can self-correct on the next turn. Jaccard works well for snake_case
    tool names because Text_similarity tokenizes on non-alphanumeric and
    captures shared morphemes via byte n-grams. The default min_score 0.4
-   excludes unrelated names while accepting near-misses like
-   masc_claim_task -> masc_claim_next (Jaccard >= 0.5). *)
+   excludes unrelated names while accepting close task-tool typos. *)
 let find_similar_names ?(limit = 3) ?(min_score = 0.4) ~query () =
   let candidates = all_registered_names () in
   let scored =

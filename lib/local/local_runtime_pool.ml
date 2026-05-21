@@ -238,7 +238,7 @@ let normalize_runtime_json json =
         }
 
 let default_runtime () =
-  let base_url = Env_config.Llama.server_url in
+  let base_url = Env_config.Local_runtime.server_url in
   {
     id = runtime_id_of_base_url base_url;
     base_url;
@@ -285,7 +285,7 @@ let current_fingerprint () =
   String.concat "||"
     [
       String.concat "," (Llm_provider.Discovery.endpoints_from_env ());
-      Env_config.Llama.server_url;
+      Env_config.Local_runtime.server_url;
       Option.value ~default:"" (Env_config.Local_runtime.worker_model_opt ());
       Option.value ~default:""
         (Env_config.Worker.local_runtime_cooldown_sec_opt ());

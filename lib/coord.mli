@@ -75,14 +75,14 @@ val process_timeout_metric : string
 (** Canonical Prometheus metric for [Process_eio] timeouts
     ([masc_process_timeout_total]).  Labels: [program] (argv0
     basename, e.g. ["git"], ["gh"]), [timeout_bucket] (configured budget
-    bucket, e.g. ["ge_15s_lt_60s"]), [stage] (closed 3-variant from
-    {!Process_eio.timeout_stage}: [slot_wait] | [spawn] | [command]).
+    bucket, e.g. ["ge_15s_lt_60s"]), [stage] (closed process origins from
+    {!Timeout_origin}: [slot_wait] | [spawn] | [command]).
     Exposed so tests and Grafana rules can pin the name. *)
 
 val record_process_timeout :
   program:string ->
   timeout_sec:float ->
-  stage:Process_eio.timeout_stage ->
+  origin:Timeout_origin.t ->
   unit
 (** Increment {!process_timeout_metric}.  Wired to
     {!Process_eio.process_timeout_observer_fn} at module load so every

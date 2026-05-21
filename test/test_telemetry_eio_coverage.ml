@@ -33,6 +33,42 @@ let cleanup_dir dir =
   in
   try rm dir with _ -> ()
 
+let with_env key value f =
+  let prior = Sys.getenv_opt key in
+  Unix.putenv key value;
+  let restore () =
+    match prior with
+    | Some old -> Unix.putenv key old
+    | None -> Unix.putenv key ""
+  in
+  match f () with
+  | result ->
+      restore ();
+      result
+  | exception exn ->
+      restore ();
+      raise exn
+
+let with_temp_dir f =
+  let dir = temp_dir () in
+  match f dir with
+  | result ->
+      cleanup_dir dir;
+      result
+  | exception exn ->
+      cleanup_dir dir;
+      raise exn
+
+let telemetry_dir base_dir =
+  Filename.concat (Filename.concat base_dir ".masc") "telemetry"
+
+let write_dated_file dir month day lines =
+  let month_dir = Filename.concat dir month in
+  Fs_compat.mkdir_p month_dir;
+  Fs_compat.append_file
+    (Filename.concat month_dir (day ^ ".jsonl"))
+    (String.concat "\n" lines ^ "\n")
+
 (* ============================================================
    event Type Tests
    ============================================================ *)
@@ -547,6 +583,48 @@ let test_summarize_tool_usage_reads_date_split_store_without_fs () =
       check int "usage count" 1 stats.count;
       check bool "telemetry available" true summary.telemetry_available)
 
+let test_track_applies_default_retention_days () =
+  with_env "MASC_TELEMETRY_RETENTION_DAYS" "" (fun () ->
+    with_env "MASC_TELEMETRY_MAX_BYTES" "0" (fun () ->
+      with_temp_dir (fun base_dir ->
+        Eio_main.run @@ fun env ->
+        Fs_compat.set_fs (Eio.Stdenv.fs env);
+        let config = Coord.default_config base_dir in
+        let telemetry_dir = telemetry_dir base_dir in
+        let old_file =
+          Filename.concat (Filename.concat telemetry_dir "2020-01") "01.jsonl"
+        in
+        write_dated_file telemetry_dir "2020-01" "01" [ {|{"old":true}|} ];
+        Telemetry_eio.track_agent_joined config ~agent_id:"retention-test" ();
+        check bool "old telemetry file pruned by default retention" false
+          (Sys.file_exists old_file))))
+
+let test_track_applies_telemetry_max_bytes () =
+  with_env "MASC_TELEMETRY_RETENTION_DAYS" "0" (fun () ->
+    with_env "MASC_TELEMETRY_MAX_BYTES" "120" (fun () ->
+      with_temp_dir (fun base_dir ->
+        Eio_main.run @@ fun env ->
+        Fs_compat.set_fs (Eio.Stdenv.fs env);
+        let config = Coord.default_config base_dir in
+        let telemetry_dir = telemetry_dir base_dir in
+        let old_file_1 =
+          Filename.concat (Filename.concat telemetry_dir "2020-01") "01.jsonl"
+        in
+        let old_file_2 =
+          Filename.concat (Filename.concat telemetry_dir "2020-01") "02.jsonl"
+        in
+        write_dated_file telemetry_dir "2020-01" "01"
+          [ Printf.sprintf {|{"payload":"%s"}|} (String.make 80 'a') ];
+        write_dated_file telemetry_dir "2020-01" "02"
+          [ Printf.sprintf {|{"payload":"%s"}|} (String.make 80 'b') ];
+        Telemetry_eio.track_agent_joined config ~agent_id:"max-bytes-test" ();
+        check bool "old telemetry file 1 pruned by max bytes" false
+          (Sys.file_exists old_file_1);
+        check bool "old telemetry file 2 pruned by max bytes" false
+          (Sys.file_exists old_file_2);
+        check int "current row remains readable" 1
+          (List.length (Telemetry_eio.read_all_events config)))))
+
 (* ============================================================
    Test Runners
    ============================================================ *)
@@ -620,5 +698,9 @@ let () =
     "store_reads", [
       test_case "summarize_tool_usage reads date-split store" `Quick
         test_summarize_tool_usage_reads_date_split_store_without_fs;
+      test_case "track applies default retention days" `Quick
+        test_track_applies_default_retention_days;
+      test_case "track applies telemetry max bytes" `Quick
+        test_track_applies_telemetry_max_bytes;
     ];
   ]

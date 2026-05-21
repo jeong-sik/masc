@@ -1,10 +1,6 @@
 (** See [.mli] for design notes. *)
 
 type t =
-  | Path_syntax_blocked of
-      { token : string
-      ; hint : string option
-      }
   | Path_outside_whitelist of
       { path : string
       ; for_keeper_command : bool
@@ -20,13 +16,6 @@ let append_hint base = function
 ;;
 
 let to_message = function
-  | Path_syntax_blocked { token = _; hint } ->
-    let base =
-      "Path syntax blocked: shell quoting, globbing, brace expansion, and \
-       backslash escapes are not allowed for path-bearing keeper commands. \
-       Use plain unquoted paths and explicit cwd."
-    in
-    append_hint base hint
   | Path_outside_whitelist { path; for_keeper_command = true } ->
     Printf.sprintf
       "Path blocked: %s (outside allowed directories for this keeper command)"
@@ -44,7 +33,6 @@ let to_message = function
 ;;
 
 let message_prefix = function
-  | Path_syntax_blocked _ -> "path syntax blocked:"
   | Path_outside_whitelist _ -> "path blocked:"
   | Cwd_not_directory _ -> "cwd_not_directory:"
 ;;
@@ -57,9 +45,7 @@ let starts_with_ci ~prefix s =
 
 let parse_prefix msg =
   let trimmed = String.trim msg in
-  if starts_with_ci ~prefix:"path syntax blocked:" trimmed
-  then Some (Path_syntax_blocked { token = ""; hint = None })
-  else if starts_with_ci ~prefix:"path blocked:" trimmed
+  if starts_with_ci ~prefix:"path blocked:" trimmed
   then Some (Path_outside_whitelist { path = ""; for_keeper_command = false })
   else if starts_with_ci ~prefix:"cwd_not_directory:" trimmed
   then Some (Cwd_not_directory { path = ""; hint = None })

@@ -82,6 +82,10 @@ let binding_json (binding : Keeper_gh_env.keeper_binding) =
   `Assoc
     [
       "effective_github_identity", `String binding.effective_github_identity;
+      ( "configured_github_identity",
+        match binding.github_identity with
+        | Some id -> `String id
+        | None -> `Null );
       ( "credential_scope",
         `String
           (Keeper_gh_env.credential_scope_to_string binding.credential_scope) );
@@ -122,6 +126,10 @@ let identity_attestation_fields ~(config : Coord.config) (meta : keeper_meta) =
                  "credential_binding_ok", `Bool true;
                  ( "effective_github_identity",
                    `String binding.effective_github_identity );
+                 ( "configured_github_identity",
+                   match binding.github_identity with
+                   | Some id -> `String id
+                   | None -> `Null );
                  ( "credential_scope",
                    `String
                      (Keeper_gh_env.credential_scope_to_string
@@ -130,11 +138,7 @@ let identity_attestation_fields ~(config : Coord.config) (meta : keeper_meta) =
                ]) );
       ]
 
-(* Both "pr_number" and "number" are accepted for schema-drift compat. *)
-let pr_number_of_args args =
-  let from_pr = Safe_ops.json_int ~default:0 "pr_number" args in
-  if from_pr <> 0 then from_pr
-  else Safe_ops.json_int ~default:0 "number" args
+let pr_number_of_args args = Safe_ops.json_int ~default:0 "pr_number" args
 
 type pr_review_exec_result =
   { status : Unix.process_status
@@ -235,15 +239,13 @@ let run_pr_review_shell ~(config : Coord.config) ~(meta : keeper_meta)
         }
   else
     let root = Keeper_alerting_path.project_root_of_config config in
-    let host_cmd =
-      Printf.sprintf "cd %s && %s" (Filename.quote root) cmd
-    in
-    let argv = [ host_zsh; "-lc"; host_cmd ] in
+    let argv = [ host_zsh; "-lc"; cmd ] in
     let status, output =
       Masc_exec.Exec_gate.run_argv_with_status
         ~actor:`Keeper_shell
-        ~raw_source:(String.concat " " argv)
+        ~raw_source:(String.concat " " (List.map Filename.quote argv))
         ~summary:"keeper tool pr review host"
+        ~cwd:root
         ~timeout_sec
         argv
     in

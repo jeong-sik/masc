@@ -1,9 +1,9 @@
-(** MASC Event_bus publishers for runtime/social events.
+(** MASC Event_bus publishers for runtime events.
 
     Publishes MASC coordination events (broadcasts, heartbeats, board
-    posts, task transitions, keeper lifecycle, trust/reputation) to the
-    MASC-owned Event_bus. Events follow dot-separated snake_case naming
-    per OAS Custom-name convention: [masc.broadcast], [masc.heartbeat],
+    posts, task transitions, keeper lifecycle, audit) to the MASC-owned
+    Event_bus. Events follow dot-separated snake_case naming per OAS
+    Custom-name convention: [masc.broadcast], [masc.heartbeat],
     [masc.keeper.lifecycle], ...
 
     The [bus] argument is accepted for backward compatibility but
@@ -60,66 +60,6 @@ let publish_task_transition (_bus : Agent_sdk.Event_bus.t) ~agent_name ~task_id
     ("timestamp", `Float (Time_compat.now ()));
   ] in
   masc_publish (Agent_sdk.Event_bus.mk_event (Custom ("masc.task_transition", payload)))
-
-(** {1 Autonomy Agent Lifecycle Events}
-
-    These three publishers were scaffolded in #1060 (OAS v0.23
-    integration, 2026-03-16) for the Thompson autonomy decision pipeline
-    but the producer side was never wired. They are kept (rather than
-    deleted like the truly-dead surfaces in #8857 [delete] tier)
-    because the Thompson autonomy area is still an open RFC. Tag with
-    @deprecated so consumers see the no-producer signal at compile time
-    if they try to subscribe; remove the annotations when a producer
-    finally lands. *)
-
-(** Publish an agent selection event (Thompson Sampling result).
-    Emitted after [select_agents_with_thompson] in keeper_heartbeat.
-    @deprecated Unused since #1060 (no producer wired). Tracked as
-    [mark scaffolding] tier of #8857; planned wiring in Thompson
-    autonomy RFC (open). *)
-let publish_agent_selected (_bus : Agent_sdk.Event_bus.t) ~agent_name ~trigger
-    ~thompson_score ~final_score =
-  let payload = `Assoc [
-    ("agent_name", `String agent_name);
-    ("trigger", `String trigger);
-    ("thompson_score", `Float thompson_score);
-    ("final_score", `Float final_score);
-    ("timestamp", `Float (Time_compat.now ()));
-  ] in
-  masc_publish
-    (Agent_sdk.Event_bus.mk_event (Custom ("masc.autonomy.agent_selected", payload)))
-
-(** Publish an agent action decision event (MODEL decision result).
-    Emitted after MODEL decides post/comment/upvote/skip.
-    @deprecated Unused since #1060 (no producer wired). Tracked as
-    [mark scaffolding] tier of #8857; planned wiring in Thompson
-    autonomy RFC (open). *)
-let publish_agent_decision (_bus : Agent_sdk.Event_bus.t) ~agent_name ~action
-    ~trigger_reason =
-  let payload = `Assoc [
-    ("agent_name", `String agent_name);
-    ("action", `String action);
-    ("trigger_reason", `String trigger_reason);
-    ("timestamp", `Float (Time_compat.now ()));
-  ] in
-  masc_publish
-    (Agent_sdk.Event_bus.mk_event (Custom ("masc.autonomy.agent_decision", payload)))
-
-(** Publish an action execution result event.
-    Emitted after an agent's action (post/comment/upvote) completes.
-    @deprecated Unused since #1060 (no producer wired). Tracked as
-    [mark scaffolding] tier of #8857; planned wiring in Thompson
-    autonomy RFC (open). *)
-let publish_agent_action_executed (_bus : Agent_sdk.Event_bus.t) ~agent_name
-    ~action ~success =
-  let payload = `Assoc [
-    ("agent_name", `String agent_name);
-    ("action", `String action);
-    ("success", `Bool success);
-    ("timestamp", `Float (Time_compat.now ()));
-  ] in
-  masc_publish
-    (Agent_sdk.Event_bus.mk_event (Custom ("masc.autonomy.agent_action_executed", payload)))
 
 (** {1 Keeper Snapshot Events} *)
 
@@ -242,40 +182,3 @@ let publish_audit_event ~id ~ts ~actor ~kind ?target ~summary ~severity
     ("payload", payload_json);
   ] in
   masc_publish (Agent_sdk.Event_bus.mk_event (Custom ("masc.audit_event", event_payload)))
-
-(** {1 Phase 4: Social Events}
-
-    These two publishers were scaffolded in #1060 (OAS v0.23
-    integration, 2026-03-16) for the Phase 4 social network feature
-    (trust + reputation between agents). The producer side was never
-    wired and Phase 4 has not shipped. Tagged @deprecated so consumers
-    see the no-producer signal at compile time; remove the annotations
-    when Phase 4 producers land. Tracked as [mark scaffolding] tier
-    of #8857. *)
-
-(** Publish a trust score update between two agents.
-    @deprecated Unused since #1060 (no producer wired). Tracked as
-    [mark scaffolding] tier of #8857; planned wiring with Phase 4
-    social network feature (open). *)
-let publish_trust_updated (_bus : Agent_sdk.Event_bus.t) ~agent_a ~agent_b ~trust_score =
-  let payload = `Assoc [
-    ("agent_a", `String agent_a);
-    ("agent_b", `String agent_b);
-    ("trust_score", `Float trust_score);
-    ("timestamp", `Float (Time_compat.now ()));
-  ] in
-  masc_publish (Agent_sdk.Event_bus.mk_event (Custom ("masc.trust_updated", payload)))
-
-(** Publish a reputation change event.
-    @deprecated Unused since #1060 (no producer wired). Tracked as
-    [mark scaffolding] tier of #8857; planned wiring with Phase 4
-    social network feature (open). *)
-let publish_reputation_changed (_bus : Agent_sdk.Event_bus.t) ~agent_name ~old_score ~new_score ~trend =
-  let payload = `Assoc [
-    ("agent_name", `String agent_name);
-    ("old_score", `Float old_score);
-    ("new_score", `Float new_score);
-    ("trend", `String trend);
-    ("timestamp", `Float (Time_compat.now ()));
-  ] in
-  masc_publish (Agent_sdk.Event_bus.mk_event (Custom ("masc.reputation_changed", payload)))

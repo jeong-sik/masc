@@ -88,7 +88,7 @@ let policy_validation_tool_names =
   ; "mcp__masc__masc_status"
   ; "masc_code_git"
   ; "extend_turns"
-  ; "masc_complete_task"
+  ; "masc_transition"
   ]
 
 let test_policy_validation_known_tools_resolve () =

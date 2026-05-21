@@ -285,7 +285,7 @@ let llama_snapshot binding =
   let discovered_models, status, available, note =
     let endpoint =
       binding_endpoint_url binding
-      |> Option.value ~default:Env_config_runtime.Llama.server_url
+      |> Option.value ~default:Env_config_runtime.Local_runtime.server_url
     in
     match Tool_local_runtime_core.fetch_models_at endpoint with
     | Ok (_url, models) -> (models, "online", true, None)

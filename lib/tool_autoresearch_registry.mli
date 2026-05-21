@@ -12,11 +12,9 @@
     awkward setter/getter pairs without making the storage any
     more abstract.
 
-    [active_loops] / [latest_loop_id] are re-exports of the
-    {!Autoresearch} state slot so [Tool_autoresearch] (which does
-    [include Tool_autoresearch_registry]) and
-    [Tool_autoresearch_cycle] (which does
-    [open Tool_autoresearch_registry]) can share a single name. *)
+    [active_loops] / [latest_loop_id] are aliases of the
+    {!Autoresearch} state slot so the archived cycle runtime and
+    dashboard readers share a single registry. *)
 
 val active_loops : (string, Autoresearch.loop_state) Stdlib.Hashtbl.t
 (** Re-export of [Autoresearch.active_loops]. The dashboard's

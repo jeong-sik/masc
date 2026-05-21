@@ -41,14 +41,14 @@ let test_stale_fleet_batch_blocker_class_roundtrip () =
   | Some _ -> fail "Stale_fleet_batch label parsed as wrong class"
   | None -> fail "Stale_fleet_batch label did not parse back"
 
-let test_capacity_exhausted_blocker_class_roundtrip () =
-  let cls = KT.Capacity_exhausted in
+let test_capacity_backpressure_blocker_class_roundtrip () =
+  let cls = KT.Capacity_backpressure in
   let label = KT.blocker_class_to_string cls in
-  check string "label" "capacity_exhausted" label;
+  check string "label" "capacity_backpressure" label;
   match MC.blocker_class_of_serialized_string label with
-  | Some MC.Capacity_exhausted -> ()
-  | Some _ -> fail "Capacity_exhausted label parsed as wrong class"
-  | None -> fail "Capacity_exhausted label did not parse back"
+  | Some MC.Capacity_backpressure -> ()
+  | Some _ -> fail "Capacity_backpressure label parsed as wrong class"
+  | None -> fail "Capacity_backpressure label did not parse back"
 
 let test_blocker_class_labels_are_distinct () =
   let tt = KT.blocker_class_to_string KT.Turn_timeout in
@@ -143,8 +143,8 @@ let () =
             test_oas_timeout_budget_blocker_class_roundtrip;
           test_case "Stale_fleet_batch roundtrip" `Quick
             test_stale_fleet_batch_blocker_class_roundtrip;
-          test_case "Capacity_exhausted roundtrip" `Quick
-            test_capacity_exhausted_blocker_class_roundtrip;
+          test_case "Capacity_backpressure roundtrip" `Quick
+            test_capacity_backpressure_blocker_class_roundtrip;
           test_case "labels are distinct" `Quick
             test_blocker_class_labels_are_distinct;
         ] );

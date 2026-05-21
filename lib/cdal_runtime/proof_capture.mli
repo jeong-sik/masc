@@ -29,6 +29,10 @@ val hooks : state -> Hooks.hooks
     return the assembled proof bundle. *)
 val finalize : state -> result_status:Cdal_proof.result_status -> Cdal_proof.t
 
+(** Mark an initialized run as terminal without a complete proof bundle.
+    Used by guards when a run cannot reach [finalize]. *)
+val abort : state -> reason:string -> unit
+
 val run_id : state -> string
 
 (** Attach an enforcer state for evidence enrichment at finalize time. *)

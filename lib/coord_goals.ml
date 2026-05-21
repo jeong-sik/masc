@@ -52,8 +52,6 @@ let goal_phase_strings =
   ]
 ;;
 
-let goal_review_outcome_strings = [ "done"; "progress"; "blocked"; "dropped" ]
-
 let goal_transition_action_strings =
   [ "request_complete"
   ; "approve_completion"
@@ -151,25 +149,6 @@ let goal_upsert_lifecycle_error ~tool_name ~start_time field =
        "masc_goal_upsert does not accept lifecycle field %s; use masc_goal_transition / \
         masc_goal_verify for goal lifecycle moves"
        field)
-;;
-
-let parse_optional_review_outcome args field =
-  match Yojson.Safe.Util.member field args with
-  | `Null -> Ok None
-  | `String raw when String.trim raw = "" -> Ok None
-  | `String raw ->
-    (match Goal_store.parse_review_outcome raw with
-     | Some outcome -> Ok (Some outcome)
-     | None ->
-       Error
-         (make_enum_field_error ~field ~allowed:goal_review_outcome_strings ~received:raw))
-  | json ->
-    Error
-      (make_type_field_error
-         ~field
-         ~constraint_violated:Type_string
-         ~expected:"string"
-         ~received:(Yojson.Safe.to_string json))
 ;;
 
 let parse_optional_priority args field =
@@ -927,73 +906,6 @@ let handle_goal_verify ~tool_name ~start_time (ctx : context) args : Tool_result
       [ { field = "decision"
         ; constraint_violated = Required
         ; message = "decision is required"
-        ; expected = Some "string"
-        ; received = None
-        }
-      ]
-;;
-
-let handle_goal_review ~tool_name ~start_time (ctx : context) args : Tool_result.t =
-  match
-    ( validate_string_required args "goal_id"
-    , parse_optional_review_outcome args "outcome"
-    , parse_optional_horizon args "new_horizon" )
-  with
-  | Error err, _, _ | _, Error err, _ | _, _, Error err ->
-    validation_error_result ~tool_name ~start_time [ err ]
-  | Ok goal_id, Ok (Some outcome), Ok new_horizon ->
-    let note = get_string_opt args "note" in
-    (match Goal_store.get_goal ctx.config ~goal_id with
-     | None -> error_result_typed ~tool_name ~start_time ~code:Not_found "goal not found"
-     | Some goal ->
-       (match goal.phase with
-        | Goal_phase.Awaiting_verification | Goal_phase.Awaiting_approval ->
-          error_result_typed
-            ~tool_name
-            ~start_time
-            ~code:Conflict
-            "masc_goal_review is ambiguous while verification or approval is pending; \
-             use masc_goal_transition / masc_goal_verify"
-        | _ ->
-          (match outcome with
-           | Goal_store.ReviewDone ->
-             handle_goal_transition
-               ~tool_name
-               ~start_time
-               ctx
-               (`Assoc
-                   [ "goal_id", `String goal_id
-                   ; "action", `String "request_complete"
-                   ; ( "actor"
-                     , Goal_verification.goal_principal_to_yojson
-                         { kind = Goal_verification.Operator
-                         ; id = ctx.agent_name
-                         ; display_name = Some ctx.agent_name
-                         } )
-                   ; ( "note"
-                     , match note with
-                       | Some value -> `String value
-                       | None -> `Null )
-                   ])
-           | Goal_store.ReviewProgress
-           | Goal_store.ReviewBlocked
-           | Goal_store.ReviewDropped ->
-             (match
-                Goal_store.review_goal ctx.config ~goal_id ~outcome ?new_horizon ?note ()
-              with
-              | Error msg -> error_result_typed ~tool_name ~start_time ~code:Not_found msg
-              | Ok goal ->
-                ok_result
-                  ~tool_name
-                  ~start_time
-                  [ "goal_id", `String goal.id; "goal", Goal_store.goal_to_yojson goal ]))))
-  | Ok _, Ok None, _ ->
-    validation_error_result
-      ~tool_name
-      ~start_time
-      [ { field = "outcome"
-        ; constraint_violated = Required
-        ; message = "outcome is required"
         ; expected = Some "string"
         ; received = None
         }

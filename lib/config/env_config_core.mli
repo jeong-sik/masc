@@ -174,9 +174,7 @@ val relay_calibration_enabled : unit -> bool
 (** {1 Auth} *)
 
 val admin_token_env_key : string
-val tool_auth_strict_env_key : string
 val admin_token_opt : unit -> string option
-val tool_auth_strict : unit -> bool
 
 (** {1 Git} *)
 

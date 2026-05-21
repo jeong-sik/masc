@@ -1735,6 +1735,34 @@ let test_oas_worker_exec_build_applies_body_timeout () =
   | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
 ;;
 
+let is_missing_approval_callback_reject = function
+  | Agent_sdk.Hooks.Reject_without_callback -> true
+  | Agent_sdk.Hooks.Execute_without_callback -> false
+;;
+
+let test_oas_worker_exec_build_rejects_missing_approval_callback () =
+  let config =
+    Cascade_runner.default_config
+      ~name:"oas-worker-missing-approval-policy"
+      ~provider_cfg:(make_local_provider_cfg ())
+      ~system_prompt:"system"
+      ~tools:[ make_noop_tool () ]
+  in
+  Eio.Switch.run
+  @@ fun sw ->
+  match Cascade_runner.build ~sw ~net:(require_test_net ()) ~config with
+  | Ok agent ->
+    let policy =
+      (Agent_sdk.Agent.options agent).missing_approval_callback_policy
+    in
+    Alcotest.(check bool)
+      "missing approval callback policy rejects"
+      true
+      (is_missing_approval_callback_reject policy);
+    Agent_sdk.Agent.close agent
+  | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
+;;
+
 let test_oas_worker_exec_build_installs_ollama_kind_preserving_transport () =
   let provider_cfg =
     Llm_provider.Provider_config.make
@@ -1989,6 +2017,36 @@ let test_resume_propagates_approval () =
        let _ = cb ~tool_name:"x" ~input:`Null in
        Alcotest.(check bool) "callback identity preserved" true !approval_called
      | None -> ());
+    Agent_sdk.Agent.close agent
+  | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
+;;
+
+let test_resume_rejects_missing_approval_callback () =
+  let base_config =
+    Cascade_runner.default_config
+      ~name:"resume-missing-approval-policy"
+      ~provider_cfg:(make_local_provider_cfg ())
+      ~system_prompt:"system"
+      ~tools:[ make_noop_tool () ]
+  in
+  let checkpoint = make_checkpoint () in
+  Eio.Switch.run
+  @@ fun sw ->
+  match
+    Cascade_runner.resume_from_checkpoint
+      ~sw
+      ~net:(require_test_net ())
+      ~config:base_config
+      ~checkpoint
+  with
+  | Ok agent ->
+    let policy =
+      (Agent_sdk.Agent.options agent).missing_approval_callback_policy
+    in
+    Alcotest.(check bool)
+      "missing approval callback policy rejects through resume"
+      true
+      (is_missing_approval_callback_reject policy);
     Agent_sdk.Agent.close agent
   | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
 ;;
@@ -4441,6 +4499,70 @@ let test_sdk_error_terminal_provider_runtime_detects_jsonrpc_sse_parse_storm () 
     (Keeper_turn_driver.sdk_error_is_terminal_provider_runtime_failure err)
 ;;
 
+(* D6: typed [NetworkError { kind = Connection_refused }] should classify
+   terminal off the variant — pre-fix it leaked into Generic + 3-5 retries
+   per outage. *)
+let test_sdk_error_terminal_provider_runtime_detects_typed_connection_refused () =
+  let err =
+    Agent_sdk.Error.Api
+      (Llm_provider.Retry.NetworkError
+         { message = "connect: connection refused"
+         ; kind = Llm_provider.Http_client.Connection_refused
+         })
+  in
+  Alcotest.(check bool)
+    "typed Connection_refused is terminal provider runtime"
+    true
+    (Keeper_turn_driver.sdk_error_is_terminal_provider_runtime_failure err)
+;;
+
+(* D6: typed [NetworkError { kind = Dns_failure }] — same network-class
+   semantics as Connection_refused. *)
+let test_sdk_error_terminal_provider_runtime_detects_typed_dns_failure () =
+  let err =
+    Agent_sdk.Error.Api
+      (Llm_provider.Retry.NetworkError
+         { message = "dns lookup failed: nxdomain"
+         ; kind = Llm_provider.Http_client.Dns_failure
+         })
+  in
+  Alcotest.(check bool)
+    "typed Dns_failure is terminal provider runtime"
+    true
+    (Keeper_turn_driver.sdk_error_is_terminal_provider_runtime_failure err)
+;;
+
+(* D6 regression guard: pre-existing message-based classification must
+   continue to match even when the typed variant is not network-class. *)
+let test_sdk_error_terminal_provider_runtime_preserves_message_path () =
+  let err =
+    Agent_sdk.Error.Api
+      (Llm_provider.Retry.InvalidRequest
+         { message = "provider CLI rejected the request (exit 1)" })
+  in
+  Alcotest.(check bool)
+    "provider cli rejected exit 1 (message path) stays terminal"
+    true
+    (Keeper_turn_driver.sdk_error_is_terminal_provider_runtime_failure err)
+;;
+
+(* D6 regression guard: a generic network error with an [Unknown] kind and
+   no terminal substring must remain non-terminal so retries continue to
+   apply where transient. *)
+let test_sdk_error_terminal_provider_runtime_ignores_unknown_network_error () =
+  let err =
+    Agent_sdk.Error.Api
+      (Llm_provider.Retry.NetworkError
+         { message = "transient socket hiccup"
+         ; kind = Llm_provider.Http_client.Unknown
+         })
+  in
+  Alcotest.(check bool)
+    "generic Unknown network error is not terminal"
+    false
+    (Keeper_turn_driver.sdk_error_is_terminal_provider_runtime_failure err)
+;;
+
 let test_codex_cli_prompt_preflight_uses_pipeline_context_window_fallback () =
   let provider_cfg = make_codex_cli_provider_cfg () in
   let config =
@@ -4451,7 +4573,7 @@ let test_codex_cli_prompt_preflight_uses_pipeline_context_window_fallback () =
       ~tools:[]
   in
   let huge_goal = String.make 600_000 'a' in
-  match Cascade_error_classify.codex_cli_prompt_preflight ~config ~goal:huge_goal with
+  match Cascade_config_builder.codex_cli_prompt_preflight ~config ~goal:huge_goal with
   | Some preflight ->
     Alcotest.(check bool) "argv limit hit" true preflight.hits_argv_limit;
     Alcotest.(check bool) "context limit hit" true preflight.hits_context_window;
@@ -4476,7 +4598,7 @@ let test_codex_cli_prompt_preflight_scales_retry_limit_for_argv_only_overflow ()
       ~tools:[]
   in
   let huge_goal = String.make 600_000 'a' in
-  match Cascade_error_classify.codex_cli_prompt_preflight ~config ~goal:huge_goal with
+  match Cascade_config_builder.codex_cli_prompt_preflight ~config ~goal:huge_goal with
   | Some preflight ->
     Alcotest.(check bool) "argv limit hit" true preflight.hits_argv_limit;
     Alcotest.(check bool) "context limit not hit" false preflight.hits_context_window;
@@ -4791,7 +4913,7 @@ let test_worker_build_agent_validation_retry_exhausted () =
   | Exit -> ()
 ;;
 
-let test_oas_worker_exec_run_exit_condition_result_returns_partial_success () =
+let test_oas_worker_exit_condition_result_returns_partial_success () =
   try
     Eio.Switch.run
     @@ fun sw ->
@@ -6080,6 +6202,10 @@ let () =
             `Quick
             test_oas_worker_exec_build_applies_body_timeout
         ; Alcotest.test_case
+            "oas_worker rejects missing approval callback"
+            `Quick
+            test_oas_worker_exec_build_rejects_missing_approval_callback
+        ; Alcotest.test_case
             "oas_worker installs native Ollama HTTP transport"
             `Quick
             test_oas_worker_exec_build_installs_ollama_kind_preserving_transport
@@ -6119,6 +6245,10 @@ let () =
             "resume propagates approval (no silent ApprovalRequired drift)"
             `Quick
             test_resume_propagates_approval
+        ; Alcotest.test_case
+            "resume rejects missing approval callback"
+            `Quick
+            test_resume_rejects_missing_approval_callback
         ; Alcotest.test_case
             "resume propagates slot_id"
             `Quick
@@ -6390,6 +6520,22 @@ let () =
             `Quick
             test_sdk_error_terminal_provider_runtime_detects_jsonrpc_sse_parse_storm
         ; Alcotest.test_case
+            "D6: terminal runtime detects typed Connection_refused"
+            `Quick
+            test_sdk_error_terminal_provider_runtime_detects_typed_connection_refused
+        ; Alcotest.test_case
+            "D6: terminal runtime detects typed Dns_failure"
+            `Quick
+            test_sdk_error_terminal_provider_runtime_detects_typed_dns_failure
+        ; Alcotest.test_case
+            "D6: terminal runtime preserves message-based path"
+            `Quick
+            test_sdk_error_terminal_provider_runtime_preserves_message_path
+        ; Alcotest.test_case
+            "D6: terminal runtime ignores generic Unknown network error"
+            `Quick
+            test_sdk_error_terminal_provider_runtime_ignores_unknown_network_error
+        ; Alcotest.test_case
             "worker build_agent installs retry policy"
             `Quick
             test_worker_build_agent_uses_default_internal_retry_policy
@@ -6408,7 +6554,7 @@ let () =
         ; Alcotest.test_case
             "exit_condition_result returns partial success"
             `Quick
-            test_oas_worker_exec_run_exit_condition_result_returns_partial_success
+            test_oas_worker_exit_condition_result_returns_partial_success
         ] )
     ; ( "keeper_checkpoint_boundary"
       , [ Alcotest.test_case

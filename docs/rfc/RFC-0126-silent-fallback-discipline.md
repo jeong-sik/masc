@@ -1,14 +1,72 @@
 ---
 rfc: "0126"
 title: "Silent fallback discipline (typed split for option/result wildcard arms)"
-status: Draft
+status: Active
 created: 2026-05-17
-updated: 2026-05-20
+updated: 2026-05-21
 author: vincent
 supersedes: []
 superseded_by: null
-related: ["0106", "0042", "0088"]
+related: ["0106", "0042", "0088", "0127"]
 implementation_prs: [15959, 16000, 16019, 16024, 16189]
+---
+
+## Progress audit (2026-05-21)
+
+Status promoted Draft → Active. Phase 0 (discipline document) +
+Phase 1 (migration canary) partial + Phase 2a (grep-based lint)
+landed; Phase 2b / 3 / 4 remain.
+
+| Phase | PR | Scope | Merged |
+|-------|-----|------|--------|
+| Phase 0 | #15959 | RFC body — silent fallback discipline | 2026-05-17 |
+| Phase 0+ | #16000 | RFC-0126 cascade fast-fail + termination provenance amendment | 2026-05-18 |
+| Phase 1 PR-1 | #16019 | cascade attempt provenance via keeper-meta slot | 2026-05-18 |
+| Phase 1 PR-2 | #16024 | provider health probe loop (Phase 3 wiring per RFC-0127) | 2026-05-18 |
+| Phase 1 (cross) | #16189 | RFC-0127 PR-1 provenance threading — typed carrier for `Fiber_terminated` + `Provider_runtime_error`. Listed here because §6.1.b absorbs the RFC-0127 work as Phase 1 canary | 2026-05-18 |
+
+Phase 2a in-place: `scripts/lint/no-unknown-permissive-default.sh`
+shipped with the canary PRs (commit search did not surface its
+introducing PR, treat as part of Phase 1 cluster).
+
+### Variance from spec
+
+- **Phase numbering overlap with RFC-0127**: #16189 is listed in
+  RFC-0127's `implementation_prs` as well. RFC-0126 §6.1.b explicitly
+  absorbs the RFC-0127 PR-1 work as Phase 1 canary, so the
+  cross-listing is intentional. Both RFCs retain the same PR for
+  bidirectional traceability.
+- **Phase 1 backlog § 6.1.b'**: the iter-49 closure noted "audit
+  Phase 0/1 의 masc-side fix-able 라벨 (C1, V01-V15, V17) 은 모두
+  처리 완료" — this audit does not re-verify that claim against
+  current main HEAD; trust the prior audit's labeling.
+
+### Pending — Phase 2b / 3 / 4
+
+- **Phase 2b** — ppxlib AST lint (RFC-0106 §3.3 dependency). Not
+  started. Hard dependency on RFC-0106 Phase 2 infrastructure.
+- **Phase 3** — codemod for residual sites. Cadence depends on
+  Phase 2b accuracy (AST surface more reliable than grep).
+- **Phase 4** — CI hard-fail. Final closure step.
+
+### Pending — Phase 1 OAS upstream
+
+§6.1.b' notes that labels **C2 / C3 / V16** require an OAS upstream
+PR before masc-side adaptation can land. RFC-0126 author flagged a
+sibling OAS RFC: `RFC-OAS-XYZ: Event_bus per-subscriber backpressure
+override + Memory.long_term_backend Result.t boundary`. Not yet
+filed in OAS repo.
+
+### Related RFC
+
+- **RFC-0127** (Cascade Fast-Fail + Fiber Termination Provenance,
+  Active): same Phase 1 cluster. #16189 dual-listed.
+- **RFC-0106** (Cancel-safe try-with discipline): Phase 2b
+  dependency.
+- **RFC-0141 / RFC-0142 / RFC-0148 / RFC-0154**: closed-sum +
+  parse-don't-validate cohort. Phase 3 codemod can reuse the typed
+  variant shapes those RFCs produced.
+
 ---
 
 # RFC-0126 — Silent fallback discipline

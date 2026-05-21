@@ -234,7 +234,7 @@ let tools_for_gated_affordance = function
     [ "keeper_board_post"; "keeper_board_comment";
       "masc_keeper_msg"; "masc_broadcast" ]
   | Task_claim ->
-    [ "keeper_task_claim"; "masc_claim_next"; "masc_claim_task" ]
+    [ "keeper_task_claim"; "masc_claim_next" ]
   | Task_audit ->
     [ "keeper_tasks_audit"; "keeper_tasks_list"; "masc_tasks" ]
   | Task_verify ->
@@ -282,7 +282,7 @@ let preferred_tool_names_for_turn_affordances turn_affordances =
          [ "keeper_board_comment"; "keeper_board_post";
            "masc_keeper_msg"; "masc_broadcast" ]
        | Task_claim ->
-         [ "keeper_task_claim"; "masc_claim_next"; "masc_claim_task" ]
+         [ "keeper_task_claim"; "masc_claim_next" ]
        | Task_audit ->
          [ "keeper_tasks_audit" ]
        | Task_verify ->
@@ -732,10 +732,6 @@ let tool_search_alias_entries =
   ; "masc_code_symbols", "코드 심볼 함수 클래스 정의"
   ; "masc_code_shell", "코드 명령어 쉘 실행"
   ; "masc_code_git", "깃 커밋 브랜치 로그 이력"
-  ; "masc_autoresearch_start", "자동연구 리서치 시작"
-  ; "masc_autoresearch_status", "자동연구 리서치 상태"
-  ; "masc_autoresearch_stop", "자동연구 리서치 중지"
-  ; "masc_autoresearch_cycle", "자동연구 리서치 사이클 실행"
   ; "masc_plan_get", "계획 플랜 마일스톤 로드맵 프로젝트 전략"
   ; "masc_plan_update", "계획 플랜 수정 업데이트"
   ; "masc_plan_init", "계획 플랜 초기화 생성"

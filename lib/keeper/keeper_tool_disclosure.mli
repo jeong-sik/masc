@@ -149,12 +149,11 @@ val canonical_tool_name_observed : string -> string
 val public_alias_guidance_for_internal_call
   :  visible_tool_names:string list -> string -> string option
 
-(** Canonical names of claim-context tools (Task_claim, Claim_next,
-    Claim_task). *)
+(** Canonical names of claim-context tools (Task_claim, Claim_next). *)
 val claim_context_tool_names : string list
 
 (** Canonical names of completion tools (Task_done variants,
-    Stay_silent, Cancel_task, etc.). *)
+    Stay_silent, Deliver, etc.). *)
 val completion_tool_names : string list
 
 val is_claim_tool_name : string -> bool
@@ -234,7 +233,7 @@ val record_require_tool_use_violation
     actionable signal context does not apply. *)
 val actionable_tool_contract_violation_reason
   :  claim_context_allowed:bool
-  -> actionable_signal_context:bool
+  -> actionable_signal_context:Keeper_contract_classifier.actionable_signal_context
   -> tool_names:string list
   -> string option
 

@@ -129,13 +129,39 @@ let telemetry_file config =
 let telemetry_store_cache : (string, Dated_jsonl.t) Hashtbl.t = Hashtbl.create 4
 let telemetry_store_cache_mu = Eio.Mutex.create ()
 
+let telemetry_retention_days_env = "MASC_TELEMETRY_RETENTION_DAYS"
+let telemetry_max_bytes_env = "MASC_TELEMETRY_MAX_BYTES"
+let default_telemetry_retention_days = 30
+let default_telemetry_max_bytes = 52_428_800
+
+let positive_int_env_with_default key ~default =
+  match Sys.getenv_opt key with
+  | None -> Some default
+  | Some raw ->
+    (match int_of_string_opt (String.trim raw) with
+     | Some value when value > 0 -> Some value
+     | Some _ -> None
+     | None -> Some default)
+
+let telemetry_retention_days () =
+  positive_int_env_with_default telemetry_retention_days_env
+    ~default:default_telemetry_retention_days
+
+let telemetry_max_bytes () =
+  positive_int_env_with_default telemetry_max_bytes_env
+    ~default:default_telemetry_max_bytes
+
 let get_telemetry_store config : Dated_jsonl.t =
   let base = Filename.concat (Coord_utils.masc_dir config) "telemetry" in
   Eio_guard.with_mutex telemetry_store_cache_mu (fun () ->
     match Hashtbl.find_opt telemetry_store_cache base with
     | Some store -> store
     | None ->
-      let store = Dated_jsonl.create ~base_dir:base () in
+      let retention_days = telemetry_retention_days () in
+      let max_bytes = telemetry_max_bytes () in
+      let store =
+        Dated_jsonl.create ~base_dir:base ?retention_days ?max_bytes ()
+      in
       Hashtbl.replace telemetry_store_cache base store;
       store)
 

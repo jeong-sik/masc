@@ -1,27 +1,6 @@
 open Keeper_types
 open Keeper_exec_shared
-
-let handle_keeper_autoresearch_tool
-      ~(config : Coord.config)
-      ~(meta : keeper_meta)
-      ~(name : string)
-      ~(args : Yojson.Safe.t)
-  =
-  let ctx : Tool_autoresearch.context =
-    { base_path = Keeper_alerting_path.project_root_of_config config
-    ; agent_name = Some meta.name
-    ; start_operation = None
-    ; config = Some config
-    ; sw = None
-    ; clock = None
-    }
-  in
-  match Tool_autoresearch.dispatch ctx ~name ~args with
-  | Some result ->
-      if result.success then Tool_result.message result
-      else tool_result_error_json result
-  | None -> error_json ~fields:[ "tool", `String name ] "unknown_autoresearch_tool"
-;;
+open Keeper_types
 
 (* Read-only masc_code_* tools (search, read, symbols) are path-bearing but
    should NOT go through the strict write resolver. The write resolver
@@ -80,7 +59,7 @@ let keeper_masc_path_blocked
    agent-side handler [Tool_code.handle_code_read]). *)
 let handle_keeper_masc_code_read
       ~(config : Coord.config)
-      ~(meta : keeper_meta)
+      ~(meta : Keeper_types.keeper_meta)
       ~(args : Yojson.Safe.t)
   =
   let path = Safe_ops.json_string ~default:"" "path" args in
@@ -216,15 +195,6 @@ let handle_registered_keeper_tool
   | None ->
     begin
       match Tool_dispatch.lookup_tag name with
-      | Some Tool_dispatch.Mod_autoresearch ->
-        (match
-           find_registry_meta ~keeper_name ~source_layer:"masc_path_resolver"
-         with
-         | None ->
-           Some
-             (error_json
-                (Printf.sprintf "keeper not found in registry: %s" keeper_name))
-         | Some meta -> Some (handle_keeper_autoresearch_tool ~config ~meta ~name ~args))
       | Some _ ->
         Some (handle_keeper_masc_tool ~config ~keeper_name ~name ~args)
       | None when Tool_dispatch.is_registered name ->

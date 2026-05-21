@@ -71,35 +71,13 @@ let record_codex_cli_omission = Codex_omission_dedup.record_codex_cli_omission
     Explicit model-label execution must never silently substitute a
     discovery-only model. Callers are expected to validate labels
     before reaching this helper. *)
-type label_resolution_error = Invalid_model_label of string
+type label_resolution_error = Cascade_transport_label_resolution.label_resolution_error =
+  | Invalid_model_label of string
 
-let label_resolution_error_to_string = function
-  | Invalid_model_label label -> Printf.sprintf "invalid model label %S" label
-;;
-
-let label_resolution_error_to_sdk_error err =
-  Agent_sdk.Error.Config
-    (Agent_sdk.Error.InvalidConfig
-       { field = "model_label"; detail = label_resolution_error_to_string err })
-;;
-
-let resolve_provider_config_of_label (label : string)
-  : (Llm_provider.Provider_config.t, label_resolution_error) result
-  =
-  match Cascade_config.parse_model_string label with
-  | Some pc -> Ok pc
-  | None ->
-    Log.error
-      ~ctx:"oas_worker_exec"
-      "refusing unresolved explicit model label=%S; execution never falls back to \
-       discovery-only models"
-      label;
-    Error (Invalid_model_label label)
-;;
-
-let invalid_runtime_config field detail =
-  Agent_sdk.Error.Config (Agent_sdk.Error.InvalidConfig { field; detail })
-;;
+let label_resolution_error_to_string = Cascade_transport_label_resolution.label_resolution_error_to_string
+let label_resolution_error_to_sdk_error = Cascade_transport_label_resolution.label_resolution_error_to_sdk_error
+let resolve_provider_config_of_label = Cascade_transport_label_resolution.resolve_provider_config_of_label
+let invalid_runtime_config = Cascade_transport_label_resolution.invalid_runtime_config
 
 let cli_model_override = Cascade_transport_cli_config.cli_model_override
 
@@ -131,264 +109,36 @@ let dedupe_preserve_order (items : string list) =
     items
 ;;
 
-let upsert_http_header ~key ~value headers =
-  let key_lc = String.lowercase_ascii key in
-  let retained =
-    List.filter
-      (fun (existing_key, _) ->
-         not (String.equal (String.lowercase_ascii existing_key) key_lc))
-      headers
-  in
-  (key, value) :: retained
+let upsert_http_header = Cascade_transport_authorization.upsert_http_header
+(* trim_nonempty + first_nonempty_env + runtime-MCP policy header helpers
+   extracted to [Cascade_transport_mcp_policy_helpers] (godfile decomp). *)
+let trim_nonempty = Cascade_transport_mcp_policy_helpers.trim_nonempty
+let first_nonempty_env = Cascade_transport_mcp_policy_helpers.first_nonempty_env
+let keeper_name_of_agent_name = Cascade_transport_authorization.keeper_name_of_agent_name
+
+let runtime_mcp_policy_with_masc_agent_name =
+  Cascade_transport_mcp_policy_helpers.runtime_mcp_policy_with_masc_agent_name
 ;;
 
-let trim_nonempty value =
-  match value with
-  | Some raw ->
-    let trimmed = String.trim raw in
-    if String.equal trimmed "" then None else Some trimmed
-  | None -> None
+let runtime_mcp_policy_without_http_headers =
+  Cascade_transport_mcp_policy_helpers.runtime_mcp_policy_without_http_headers
 ;;
 
-let first_nonempty_env names =
-  List.find_map (fun name -> Sys.getenv_opt name |> trim_nonempty) names
-;;
+let is_authorization_header = Cascade_transport_authorization.is_authorization_header
+let authorization_header_from_policy = Cascade_transport_authorization.authorization_header_from_policy
+let per_keeper_authorization_header = Cascade_transport_authorization.per_keeper_authorization_header
+let runtime_mcp_policy_uses_bound_actor_tools = Cascade_transport_authorization.runtime_mcp_policy_uses_bound_actor_tools
+let add_masc_authorization_header = Cascade_transport_authorization.add_masc_authorization_header
 
-let keeper_name_of_agent_name agent_name =
-  let prefix = "keeper-" in
-  let suffix = "-agent" in
-  let value = String.trim agent_name in
-  let vlen = String.length value in
-  let plen = String.length prefix in
-  let slen = String.length suffix in
-  if
-    vlen > plen + slen
-    && String.sub value 0 plen = prefix
-    && String.sub value (vlen - slen) slen = suffix
-  then Some (String.sub value plen (vlen - plen - slen))
-  else None
-;;
+(* Per-keeper authorization bridging extracted to
+   [Cascade_transport_auth_bridging] (godfile decomp). *)
+let codex_cli_can_auth_keeper_bound_runtime_mcp = Cascade_transport_auth_bridging.codex_cli_can_auth_keeper_bound_runtime_mcp
+let bridged_runtime_mcp_policy_for_agent = Cascade_transport_auth_bridging.bridged_runtime_mcp_policy_for_agent
 
-let runtime_mcp_policy_with_masc_agent_name
-      ?(include_internal_token = true)
-      ~(agent_name : string)
-      (policy : Llm_provider.Llm_transport.runtime_mcp_policy)
-  =
-  let agent_name = String.trim agent_name in
-  if String.equal agent_name ""
-  then policy
-  else (
-    let servers =
-      List.map
-        (function
-          | Llm_provider.Llm_transport.Http_server ({ name; headers; _ } as server)
-            when String.equal name "masc" ->
-            let headers =
-              upsert_http_header ~key:"x-masc-agent-name" ~value:agent_name headers
-            in
-            let headers =
-              if include_internal_token
-              then (
-                match
-                  ( first_nonempty_env [ "MASC_INTERNAL_MCP_TOKEN" ]
-                  , keeper_name_of_agent_name agent_name )
-                with
-                | Some token, Some _ ->
-                  upsert_http_header ~key:"x-masc-internal-token" ~value:token headers
-                | _ -> headers)
-              else headers
-            in
-            let headers =
-              match keeper_name_of_agent_name agent_name with
-              | Some keeper_name ->
-                upsert_http_header ~key:"x-masc-keeper-name" ~value:keeper_name headers
-              | None -> headers
-            in
-            Llm_provider.Llm_transport.Http_server { server with headers }
-          | server -> server)
-        policy.servers
-    in
-    { policy with servers })
-;;
-
-let runtime_mcp_policy_without_http_headers
-      (policy : Llm_provider.Llm_transport.runtime_mcp_policy)
-  =
-  let servers =
-    List.map
-      (function
-        | Llm_provider.Llm_transport.Http_server server ->
-          Llm_provider.Llm_transport.Http_server { server with headers = [] }
-        | server -> server)
-      policy.servers
-  in
-  { policy with servers }
-;;
-
-let is_authorization_header (key, value) =
-  String.equal (String.lowercase_ascii (String.trim key)) "authorization"
-  && String.starts_with ~prefix:"Bearer " (String.trim value)
-;;
-
-let authorization_header_from_policy
-      (policy : Llm_provider.Llm_transport.runtime_mcp_policy)
-  =
-  List.find_map
-    (function
-      | Llm_provider.Llm_transport.Http_server { name = "masc"; headers; _ } ->
-        List.find_opt is_authorization_header headers
-      (* Only the [Http_server] entry whose [name = "masc"] carries the
-         per-request Authorization header. Other named [Http_server]s and
-         [Stdio_server]s contribute no auth header on this lane. New
-         transport variants must re-decide explicitly. *)
-      | Llm_provider.Llm_transport.Http_server _
-      | Llm_provider.Llm_transport.Stdio_server _ -> None)
-    policy.servers
-;;
-
-let per_keeper_authorization_header ~agent_name =
-  match keeper_name_of_agent_name agent_name with
-  | None -> None
-  | Some _ ->
-    let base_path = Env_config_core.base_path () in
-    Auth.load_raw_token base_path ~agent_name
-    |> Option.map (fun raw -> "Authorization", "Bearer " ^ raw)
-;;
-
-let runtime_mcp_policy_uses_bound_actor_tools
-      (policy : Llm_provider.Llm_transport.runtime_mcp_policy)
-  =
-  List.exists Tool_catalog.requires_actor_binding policy.allowed_tool_names
-;;
-
-let add_masc_authorization_header
-      authorization_header
-      (policy : Llm_provider.Llm_transport.runtime_mcp_policy)
-  =
-  let servers =
-    List.map
-      (function
-        | Llm_provider.Llm_transport.Http_server ({ name = "masc"; headers; _ } as server)
-          ->
-          Llm_provider.Llm_transport.Http_server
-            { server with
-              headers =
-                upsert_http_header
-                  ~key:(fst authorization_header)
-                  ~value:(snd authorization_header)
-                  headers
-            }
-        | server -> server)
-      policy.servers
-  in
-  { policy with servers }
-;;
-
-let codex_cli_can_auth_keeper_bound_runtime_mcp ~agent_name policy =
-  runtime_mcp_policy_uses_bound_actor_tools policy
-  && Option.is_some (per_keeper_authorization_header ~agent_name)
-;;
-
-(* RFC-0058 §2.4 capability-driven projection.
-
-   Header lifecycle (in this order, no early exits):
-   1. [runtime_mcp_policy_without_http_headers] strips ALL HTTP headers
-      from every [Http_server] in the policy. This step is
-      unconditional — any inbound [Authorization] is gone before any
-      decision below.
-   2. [runtime_mcp_policy_with_masc_agent_name] re-injects only the
-      non-secret MASC identity headers.
-   3. The [Authorization] header is then sourced from one of two
-      branches:
-        - if [runtime_mcp_policy_uses_bound_actor_tools policy = true],
-          from [Auth.load_raw_token] via
-          [per_keeper_authorization_header ~agent_name];
-        - else, read from the *inbound* policy's [name = "masc"]
-          [Http_server] entry via [authorization_header_from_policy]
-          (which reads [policy.servers], not [stripped.servers], so it
-          recovers the MASC bearer that the caller provided).
-      When either branch yields [None], the returned policy carries no
-      [Authorization] header — there is no fall-through to the inbound
-      policy's non-masc headers, which were removed in step 1.
-
-   Invariant: this function is only reached from the dispatch site when the
-   provider-tool policy says per-keeper bridging is required, i.e. the runtime
-   cannot carry arbitrary per-request HTTP headers.  Body is intentionally
-   identical in semantics to the prior [codex_runtime_mcp_policy_for_agent] —
-   the rename removes the provider-name leak from the dispatch site without
-   altering behavior.
-
-   A future adapter with [requires_per_keeper_bridging = true] but
-   different transport semantics (e.g. native per-keeper header
-   injection) should be handled by an explicit dispatch arm at the
-   call site, not by adding a new flag parameter here — adding such
-   a flag now would introduce a code path no current provider exercises
-   and risks a silent header-preservation regression (see Copilot
-   review of PR #14885). *)
-let bridged_runtime_mcp_policy_for_agent ~agent_name policy =
-  let stripped =
-    runtime_mcp_policy_without_http_headers policy
-    |> runtime_mcp_policy_with_masc_agent_name ~include_internal_token:false ~agent_name
-  in
-  let authorization_header =
-    if runtime_mcp_policy_uses_bound_actor_tools policy
-    then per_keeper_authorization_header ~agent_name
-    else authorization_header_from_policy policy
-  in
-  match authorization_header with
-  | Some header -> add_masc_authorization_header header stripped
-  | None -> stripped
-;;
-
-let runtime_mcp_policy_for_provider
-      ~(provider_cfg : Llm_provider.Provider_config.t)
-      ~(agent_name : string)
-      (policy_opt : Llm_provider.Llm_transport.runtime_mcp_policy option)
-  =
-  let agent_name =
-    let trimmed = String.trim agent_name in
-    if String.equal trimmed "" then None else Some trimmed
-  in
-  (* Dispatch by local tool-delivery policy, not by provider name
-     (RFC-0058 §2.4).  [requires_per_keeper_bridging] gates the
-     strip-and-bridge path. *)
-  let requires_per_keeper_bridging =
-    Provider_tool_support
-    .provider_requires_per_keeper_bridging_for_bound_actor_tools
-      provider_cfg
-  in
-  match policy_opt, requires_per_keeper_bridging, agent_name with
-  | Some policy, true, Some agent_name ->
-    (* Per-request HTTP headers are stripped and only MASC identity headers
-         plus the per-keeper [Authorization] header survive — so runtime MCP
-         tools still authenticate without leaking secrets via argv. *)
-    Some (bridged_runtime_mcp_policy_for_agent ~agent_name policy)
-  | Some policy, true, None ->
-    (* No agent_name to inject — preserve the legacy strip-all behavior.
-       Iter 38: tick a counter so a non-zero rate flags caller paths
-       that should be threading [agent_name] but aren't.  Strip-all
-       means auth-bearing headers (e.g. Authorization: Bearer ...)
-       disappear and runtime MCP tools run unauthenticated. *)
-    Cascade_metrics.on_runtime_mcp_legacy_strip ();
-    Some (runtime_mcp_policy_without_http_headers policy)
-  | Some policy, false, Some agent_name ->
-    Some (runtime_mcp_policy_with_masc_agent_name ~agent_name policy)
-  | Some policy, false, None -> Some policy
-  | None, _, _ -> None
-;;
-
-let cli_runtime_mcp_jsons
-      ~(base : string list)
-      (policy_opt : Llm_provider.Llm_transport.runtime_mcp_policy option)
-  =
-  let request_json =
-    match policy_opt with
-    | Some policy -> Option.to_list (cli_mcp_config_json_of_policy policy)
-    | None -> []
-  in
-  dedupe_preserve_order (base @ request_json)
-;;
-
+(* Provider-driven runtime MCP policy resolver extracted to
+   [Cascade_transport_runtime_policy_provider] (godfile decomp). *)
+let runtime_mcp_policy_for_provider = Cascade_transport_runtime_policy_provider.runtime_mcp_policy_for_provider
+let cli_runtime_mcp_jsons = Cascade_transport_runtime_policy_provider.cli_runtime_mcp_jsons
 let public_mcp_tool_names_of_oas_tools =
   Cascade_transport_mcp_tool_classifier.public_mcp_tool_names_of_oas_tools
 ;;
@@ -418,95 +168,8 @@ let trim_nonempty_string raw =
   if String.equal trimmed "" then None else Some trimmed
 ;;
 
-let runtime_mcp_policy_of_tool_names
-      ?agent_name
-      ?(allow_keeper_internal = false)
-      (tool_names : string list)
-  : Llm_provider.Llm_transport.runtime_mcp_policy option
-  =
-  let tool_names = dedupe_preserve_order tool_names in
-  let has_keeper_internal =
-    List.exists (Tool_catalog.is_on_surface Tool_catalog.Keeper_internal) tool_names
-  in
-  if not (tool_names_are_runtime_mcp ~allow_keeper_internal tool_names)
-  then None
-  else (
-    let agent_name = Option.bind agent_name trim_nonempty_string in
-    let keeper_name = Option.bind agent_name keeper_name_of_agent_name in
-    let internal_keeper_token = first_nonempty_env [ "MASC_INTERNAL_MCP_TOKEN" ] in
-    if
-      has_keeper_internal
-      && (Option.is_none keeper_name || Option.is_none internal_keeper_token)
-    then None
-    else (
-      let masc_headers =
-        match keeper_name, internal_keeper_token with
-        | Some keeper_name, Some token ->
-          let agent_header =
-            match agent_name with
-            | Some agent_name -> [ "x-masc-agent-name", agent_name ]
-            | None -> []
-          in
-          Auth_resolve.emit_resolution_trace
-            ~cascade:"runtime_mcp_policy"
-            ~keeper_id:(Some keeper_name)
-            ~provider_label:"masc-mcp"
-            ~outcome:
-              (Ok { Auth_resolve.raw = token; source = Auth_resolve.Internal_keeper_env });
-          ("x-masc-internal-token", token)
-          :: ("x-masc-keeper-name", keeper_name)
-          :: agent_header
-        | _ ->
-          let env_token = first_nonempty_env [ "MASC_MCP_TOKEN" ] in
-          (* Phase A F1: when MASC_MCP_TOKEN is unset, fall back to the
-             per-keeper raw token at <base_path>/.masc/auth/<agent_name>.token.
-             This wires CLI-spawned subprocesses that callback to masc-mcp tools
-             but do not inherit the parent process env. *)
-          let per_keeper_token =
-            match env_token, agent_name with
-            | None, Some name ->
-              let base_path = Env_config_core.base_path () in
-              Auth.load_raw_token base_path ~agent_name:name
-            | _ -> None
-          in
-          let resolved : (Auth_resolve.token, Auth_resolve.auth_error) result =
-            match env_token, per_keeper_token with
-            | Some raw, _ -> Ok { Auth_resolve.raw; source = Auth_resolve.Mcp_bearer_env }
-            | None, Some raw ->
-              Ok { Auth_resolve.raw; source = Auth_resolve.Per_keeper_token_file }
-            | None, None ->
-              Error (Auth_resolve.Api_key_env_unset { var_name = "MASC_MCP_TOKEN" })
-          in
-          Auth_resolve.emit_resolution_trace
-            ~cascade:"runtime_mcp_policy"
-            ~keeper_id:keeper_name
-            ~provider_label:"masc-mcp"
-            ~outcome:resolved;
-          (match resolved with
-           | Ok { raw; _ } -> [ "Authorization", "Bearer " ^ raw ]
-           | Error _ -> [])
-      in
-      Some
-        { Llm_provider.Llm_transport.empty_runtime_mcp_policy with
-          servers =
-            [ Llm_provider.Llm_transport.Http_server
-                { name = "masc"
-                ; url = Env_config_runtime.Local_runtime.mcp_url ()
-                ; headers = masc_headers
-                }
-            ]
-        ; allowed_server_names = [ "masc" ]
-        ; allowed_tool_names = tool_names
-        ; strict = true
-        ; disable_builtin_tools = true
-        }))
-;;
-
-let public_mcp_runtime_policy_of_tool_names ?agent_name (tool_names : string list)
-  : Llm_provider.Llm_transport.runtime_mcp_policy option
-  =
-  runtime_mcp_policy_of_tool_names ?agent_name tool_names
-;;
+let runtime_mcp_policy_of_tool_names = Cascade_transport_runtime_mcp_policy_of_tool_names.runtime_mcp_policy_of_tool_names
+let public_mcp_runtime_policy_of_tool_names = Cascade_transport_runtime_mcp_policy_of_tool_names.public_mcp_runtime_policy_of_tool_names
 
 let provider_label = Cascade_transport_cli_config.provider_label
 

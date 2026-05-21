@@ -86,11 +86,11 @@ val sdk_error_is_hard_quota : Agent_sdk.Error.sdk_error -> bool
 
 val retry_api_error_to_provider_error :
   provider:string ->
-  capacity_exhausted:bool ->
+  capacity_backpressure:bool ->
   Llm_provider.Retry.api_error ->
   Provider_error.t option
 (** Convert an SDK retry error into the additive provider-error contract.
-    [capacity_exhausted] is explicit so the production body classifier
+    [capacity_backpressure] is explicit so the production body classifier
     stays at this OAS boundary instead of moving into [Provider_error]. *)
 
 val sdk_error_to_provider_error :
@@ -139,7 +139,7 @@ val sdk_error_soft_rate_limited :
     [retry_after].  [Some None] when [retry_after] is absent.
     [None] for non-429 or hard-quota-429 errors. *)
 
-val sdk_error_capacity_exhausted_retry_after_s :
+val sdk_error_capacity_backpressure_retry_after_s :
   Agent_sdk.Error.sdk_error -> float option option
 (** [Some (Some retry_after)] for a [Provider.CapacityExhausted] error
     carrying a parsed [retry_after].  [Some None] when [retry_after] is
@@ -149,6 +149,27 @@ val sdk_error_capacity_exhausted_retry_after_s :
     rejection is enough to deprioritize the provider, threshold-counting
     via [record_failure] would burn additional cascade attempts on the
     same exhausted provider. *)
+
+(** Typed extraction of the retry-after hint carried by a MASC-internal
+    [Capacity_backpressure] classification.  The outer [Capacity_backpressure]
+    variant differs from {!sdk_error_capacity_backpressure_retry_after_s} which
+    targets the raw [Provider.CapacityExhausted] SDK error — both can flow
+    through the same keeper turn driver but only the typed variant carries
+    [retry_after_sec : float option]. *)
+type capacity_backpressure_retry_hint =
+  | Cbr_explicit of float
+    (** Upstream supplied [retry_after_sec = Some s]. *)
+  | Cbr_synthetic_default of float
+    (** Upstream omitted the hint ([retry_after_sec = None]); the consumer
+        injects {!Cascade_health_tracker.default_capacity_backpressure_backoff_sec}
+        to prevent immediate cascade re-rotation onto the same provider. *)
+
+val sdk_error_capacity_backpressure_retry_hint :
+  Agent_sdk.Error.sdk_error -> capacity_backpressure_retry_hint option
+(** [Some hint] when the error classifies as
+    [Cascade_error_classify.Capacity_backpressure], with [hint] indicating
+    whether the upstream hint was honored or a synthetic default injected.
+    [None] for any other classification. *)
 
 val sdk_error_is_max_turns_exceeded : Agent_sdk.Error.sdk_error -> bool
 

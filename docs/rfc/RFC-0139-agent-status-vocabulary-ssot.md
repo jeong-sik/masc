@@ -1,14 +1,73 @@
 ---
 rfc: "0139"
 title: "Agent Status Vocabulary SSOT"
-status: Draft
+status: Active
 created: 2026-05-19
-updated: 2026-05-20
+updated: 2026-05-21
 author: vincent
 supersedes: []
 superseded_by: null
 related: ["0135"]
-implementation_prs: [16698, 16707, 16708, 16711, 16714]
+implementation_prs: [16698, 16707, 16708, 16711, 16714, 16755]
+---
+
+## Progress audit (2026-05-21)
+
+Status promoted Draft → Active. Phase 1 (agent-status) shipped with
+companion lint guard; Phase 2 (judge-status) and the full Phase 3
+lint surface remain.
+
+| Phase | PR | Scope | Merged |
+|-------|-----|------|--------|
+| Phase 0 | #16698 | RFC body | 2026-05-19 |
+| PR-1a | #16707 | `dashboard/src/lib/agent-status.ts` typed SSOT module | 2026-05-19 |
+| PR-1b | #16708 | `live-store.ts` migration to typed agent-status | 2026-05-19 |
+| PR-1c | #16711 | `ide-presence-strip.ts` uses `parseAgentStatus` | 2026-05-19 |
+| PR-1d | #16714 | `agentBand` routes via `parseAgentStatus` | 2026-05-19 |
+| PR-2 | #16755 | `scripts/lint/dashboard-ssot-agent-status.sh` lint guard + `isOfflineStatus` retirement from `keeper-predicates.ts` | 2026-05-19 |
+
+Phase 1 fully landed (module + 4 callsite migrations + lint guard +
+deprecated predicate retirement). Six PRs total.
+
+### §4 numbering reconciliation
+
+The §4 spec listed PR-1a / PR-1b / PR-1c / PR-1d with PR-1d as
+"lint gate + `isOfflineStatus` deprecation". The merged sequence
+split that into:
+
+- #16714 PR-1d → `agentBand` callsite (spec PR-1c continuation)
+- #16755 PR-2 → lint guard + predicate retirement (the spec PR-1d
+  scope, but renumbered to PR-2 because Phase 1 was treated as
+  complete after the callsite migrations)
+
+This is a labelling drift, not a scope drift. The implemented
+behaviour matches the spec.
+
+### Pending — Phase 2 (judge-status)
+
+`dashboard/src/lib/judge-status.ts` does not exist. RFC §4 Phase 2
+prescribes extracting `JudgeStatus` closed sum + predicates,
+migrating 3 callsites (`governance.ts`'s `'stale_visible' |
+'backoff'`). The judge vocabulary remains free-form. Phase 2 is
+independent of Phase 1 and can ship without affecting agent-status
+callers.
+
+### Pending — Phase 3 (full lint guard)
+
+The current lint guard (`scripts/lint/dashboard-ssot-agent-status.sh`)
+covers the agent-status vocabulary. The spec §4 Phase 3 also
+mirrored the RFC-0135 §9-1 keeper-state lint surface for judge.
+That mirror is pending — bundled with Phase 2.
+
+### Related RFC
+
+- **RFC-0135** (Dashboard Keeper Operational Surface — Typed SSOT,
+  Draft): the parallel typed-SSOT for keeper.status. Already in
+  related. RFC-0139 followed the same `as const` + `parseX` shape.
+- Cohort: **RFC-0141 / RFC-0142 / RFC-0148 / RFC-0154** — closed-sum
+  + parse-don't-validate cohort that landed within 2026-05-19~21.
+  Pattern reuse, not architectural dependency.
+
 ---
 
 # RFC-0139 — Agent Status Vocabulary SSOT

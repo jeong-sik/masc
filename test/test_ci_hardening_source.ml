@@ -514,7 +514,10 @@ let test_pr_automation_draft_guard_contracts () =
        "arm_agent_draft_guard_status");
   check bool "pr-open posts Draft Auto-Merge Guard failure status" true
     (file_contains_pattern "scripts/pr-open.sh"
-       {|context="Draft Auto-Merge Guard"|})
+       {|context="Draft Auto-Merge Guard"|});
+  check bool "pr-open syncs commit lineage after push" true
+    (file_contains_pattern "scripts/pr-open.sh"
+       {|sync_commit_lineage "$pr_number"|})
 
 let test_health_and_ci_runner_diagnostics () =
   check bool "health snapshot records baseline source" true
@@ -1393,6 +1396,15 @@ let test_keeper_required_tool_contracts () =
           "the review phase requires `keeper_shell` and"
      && file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
           "second required tool keeps approval mandatory");
+  check bool "taskboard schema documents PR required_tools preflight" true
+    (file_contains_pattern "lib/tool_shard_types_schemas_taskboard.ml"
+       "keeper_preflight_check"
+     && file_contains_pattern "lib/tool_shard_types_schemas_taskboard.ml"
+          "keeper_pr_create"
+     && file_contains_pattern "lib/tool_shard_types_schemas_taskboard.ml"
+          "keeper_pr_review_comment"
+     && file_contains_pattern "lib/tool_shard_types_schemas_taskboard.ml"
+          "claim_next routes them only to PR-capable");
   check bool "docker PR lifecycle prompt accepts brokered route proof" true
     (file_contains_pattern
        "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
@@ -2195,6 +2207,14 @@ let test_worktree_list_contracts () =
      file_not_contains_pattern "lib/tool_worktree.ml"
        {|"masc_worktree_remove"; "masc_worktree_list"|})
 
+let test_dashboard_doctor_route_process_contracts () =
+  check bool "dashboard doctor route uses argv process" true
+    (file_contains_pattern "lib/server/server_routes_http_routes_dashboard.ml"
+       "With_process.with_process_args_in"
+    && file_contains_pattern "lib/server/server_routes_http_routes_dashboard.ml"
+         {|[| self_bin; "doctor"; "all"; "--json" |]|}
+    && file_not_contains_pattern "lib/server/server_routes_http_routes_dashboard.ml"
+         {|doctor all --json|})
 
 let test_oas_worker_capability_threading_contracts () =
   check bool "oas worker model-by-label accepts threaded sw capability" true
@@ -2266,6 +2286,9 @@ let test_namespace_truth_adaptive_timeout_contracts () =
   check bool "shell fiber uses adaptive timeout" true
     (file_contains_pattern "lib/server/server_dashboard_http_namespace_truth.ml"
        "shell_timeout_s");
+  check bool "async shell refresh timeout waits beyond shell render timeout" true
+    (file_contains_pattern "lib/server/server_dashboard_http_namespace_truth.ml"
+       "Env_config_runtime.Dashboard.shell_timeout_sec\n  +. namespace_truth_cold_safety_margin_s");
   check bool "namespace-truth warm timeout is a named constant" true
     (file_contains_pattern "lib/server/server_dashboard_http_namespace_truth.ml"
        "let warm_timeout_s");
@@ -2686,6 +2709,8 @@ let () =
              test_http_cancel_response_contracts;
            test_case "worktree list contracts" `Quick
              test_worktree_list_contracts;
+           test_case "dashboard doctor route process contracts" `Quick
+             test_dashboard_doctor_route_process_contracts;
            test_case "oas worker capability threading contracts" `Quick
              test_oas_worker_capability_threading_contracts;
            test_case "oas capacity restore contracts" `Quick

@@ -1,331 +1,79 @@
 open Masc_mcp
+module LC = Legendary_counters
 
 let test_initial_zero () =
-  Legendary_counters.reset ();
-  let s = Legendary_counters.snapshot () in
-  Alcotest.(check int) "gate_diff_total" 0 s.gate_diff_total;
-  Alcotest.(check int) "gate_diff_agree" 0 s.gate_diff_agree;
+  LC.reset ();
+  let s = LC.snapshot () in
   Alcotest.(check int)
-    "gate_diff_legacy_allow_shadow_deny" 0 s.gate_diff_legacy_allow_shadow_deny;
-  Alcotest.(check int)
-    "gate_diff_legacy_deny_shadow_allow" 0 s.gate_diff_legacy_deny_shadow_allow;
-  Alcotest.(check int)
-    "gate_diff_shadow_cannot_parse" 0 s.gate_diff_shadow_cannot_parse;
-  Alcotest.(check int) "auto_bg_observed" 0 s.auto_bg_observed;
-  Alcotest.(check int)
-    "auto_bg_would_have_promoted" 0 s.auto_bg_would_have_promoted
+    "shell_gate_worker_dev_tools_allow"
+    0
+    s.shell_gate_worker_dev_tools_allow
+;;
 
-let test_gate_diff_buckets () =
-  Legendary_counters.reset ();
-  Legendary_counters.incr_gate_diff Gate_diff_types.Agree;
-  Legendary_counters.incr_gate_diff Gate_diff_types.Agree;
-  Legendary_counters.incr_gate_diff Gate_diff_types.Legacy_allow_shadow_deny;
-  Legendary_counters.incr_gate_diff Gate_diff_types.Legacy_deny_shadow_allow;
-  Legendary_counters.incr_gate_diff Gate_diff_types.Shadow_cannot_parse;
-  let s = Legendary_counters.snapshot () in
-  Alcotest.(check int) "total = 5" 5 s.gate_diff_total;
-  Alcotest.(check int) "agree = 2" 2 s.gate_diff_agree;
+let test_shell_gate_partition () =
+  LC.reset ();
+  LC.incr_shell_gate ~caller:LC.Worker_dev_tools ~verdict:LC.Allow;
+  LC.incr_shell_gate ~caller:LC.Tool_code_write ~verdict:LC.Reject;
+  LC.incr_shell_gate
+    ~caller:LC.Keeper_shell_bash
+    ~verdict:LC.Cannot_parse;
+  let s = LC.snapshot () in
   Alcotest.(check int)
-    "legacy_allow_shadow_deny = 1" 1 s.gate_diff_legacy_allow_shadow_deny;
+    "worker allow"
+    1
+    s.shell_gate_worker_dev_tools_allow;
   Alcotest.(check int)
-    "legacy_deny_shadow_allow = 1" 1 s.gate_diff_legacy_deny_shadow_allow;
+    "tool_code_write reject"
+    1
+    s.shell_gate_tool_code_write_reject;
   Alcotest.(check int)
-    "shadow_cannot_parse = 1" 1 s.gate_diff_shadow_cannot_parse
+    "keeper cannot_parse"
+    1
+    s.shell_gate_keeper_shell_bash_cannot_parse
+;;
 
-let test_auto_bg_observed () =
-  Legendary_counters.reset ();
-  Legendary_counters.incr_auto_bg_observed ~promoted_candidate:false;
-  Legendary_counters.incr_auto_bg_observed ~promoted_candidate:false;
-  Legendary_counters.incr_auto_bg_observed ~promoted_candidate:true;
-  let s = Legendary_counters.snapshot () in
-  Alcotest.(check int) "auto_bg_observed = 3" 3 s.auto_bg_observed;
-  Alcotest.(check int)
-    "auto_bg_would_have_promoted = 1" 1 s.auto_bg_would_have_promoted
+let test_gh_exit_class_partition () =
+  LC.reset ();
+  LC.incr_gh_exit_class Gh_exit_class.Ok_0;
+  LC.incr_gh_exit_class Gh_exit_class.Auth_failed;
+  LC.incr_gh_exit_class Gh_exit_class.Auth_failed;
+  let s = LC.snapshot () in
+  Alcotest.(check int) "ok = 1" 1 s.gh_exit_ok_0;
+  Alcotest.(check int) "auth_failed = 2" 2 s.gh_exit_auth_failed;
+  Alcotest.(check int) "network = 0" 0 s.gh_exit_network
+;;
 
 let test_snapshot_json_shape () =
-  Legendary_counters.reset ();
-  Legendary_counters.incr_gate_diff Gate_diff_types.Legacy_allow_shadow_deny;
-  Legendary_counters.incr_auto_bg_observed ~promoted_candidate:true;
+  LC.reset ();
+  LC.incr_shell_gate ~caller:LC.Keeper_shell_bash ~verdict:LC.Reject;
   let json =
-    Legendary_counters.snapshot_to_json (Legendary_counters.snapshot ())
+    LC.snapshot_to_json (LC.snapshot ())
   in
-  (* Serialize and check stable field presence. *)
   let s = Yojson.Safe.to_string json in
   Alcotest.(check bool)
-    "has gate_diff_total" true
-    (Astring.String.is_infix ~affix:"\"gate_diff_total\":1" s);
-  Alcotest.(check bool)
-    "has legacy_allow_shadow_deny" true
+    "has shell_gate_keeper_shell_bash_reject"
+    true
     (Astring.String.is_infix
-       ~affix:"\"gate_diff_legacy_allow_shadow_deny\":1" s);
-  Alcotest.(check bool)
-    "has auto_bg_would_have_promoted" true
-    (Astring.String.is_infix
-       ~affix:"\"auto_bg_would_have_promoted\":1" s)
+       ~affix:"\"shell_gate_keeper_shell_bash_reject\":1"
+       s)
+;;
 
 let test_reset () =
-  Legendary_counters.incr_gate_diff Gate_diff_types.Agree;
-  Legendary_counters.incr_auto_bg_observed ~promoted_candidate:true;
-  Legendary_counters.incr_too_complex `Redirect;
-  Legendary_counters.reset ();
-  let s = Legendary_counters.snapshot () in
-  Alcotest.(check int) "post-reset total" 0 s.gate_diff_total;
-  Alcotest.(check int) "post-reset auto_bg_observed" 0 s.auto_bg_observed;
-  Alcotest.(check int)
-    "post-reset would_have_promoted" 0 s.auto_bg_would_have_promoted;
-  Alcotest.(check int) "post-reset too_complex_redirect" 0 s.too_complex_redirect
-
-let test_too_complex_typed_dispatch () =
-  (* Typed [reason_too_complex] variants land in dedicated atoms.
-     A future addition to [Masc_exec.Parsed.reason_too_complex] forces
-     [Legendary_counters.incr_too_complex] (and this test) to be
-     updated at compile time — no silent "other" landing. *)
-  Legendary_counters.reset ();
-  Legendary_counters.incr_too_complex `Redirect;
-  Legendary_counters.incr_too_complex `Redirect;
-  Legendary_counters.incr_too_complex `Logic_op;
-  let s = Legendary_counters.snapshot () in
-  Alcotest.(check int) "redirect = 2" 2 s.too_complex_redirect;
-  Alcotest.(check int) "logic_op = 1" 1 s.too_complex_logic_op;
-  Alcotest.(check int) "other untouched" 0 s.too_complex_other
-
-let test_too_complex_each_variant_distinct () =
-  (* Three variants → three atoms.  Sanity check that the dispatch
-     table in [incr_too_complex] does not collapse distinct reasons
-     into the same bucket. *)
-  Legendary_counters.reset ();
-  Legendary_counters.incr_too_complex `Heredoc;
-  Legendary_counters.incr_too_complex `Here_string;
-  Legendary_counters.incr_too_complex `Cmd_subst;
-  let s = Legendary_counters.snapshot () in
-  Alcotest.(check int) "heredoc = 1" 1 s.too_complex_heredoc;
-  Alcotest.(check int) "here_string = 1" 1 s.too_complex_here_string;
-  Alcotest.(check int) "cmd_subst = 1" 1 s.too_complex_cmd_subst
-
-let test_too_complex_parse_error () =
-  (* [Parse_error] has its own dedicated entrypoint; must not collapse
-     into [too_complex_other]. *)
-  Legendary_counters.reset ();
-  Legendary_counters.incr_too_complex_parse_error ();
-  let s = Legendary_counters.snapshot () in
-  Alcotest.(check int) "parse_error = 1" 1 s.too_complex_parse_error;
-  Alcotest.(check int) "other still 0" 0 s.too_complex_other
-
-let test_too_complex_parse_aborted () =
-  (* All three [reason_aborted] variants collapse into the single
-     [too_complex_parse_aborted] atom — per-reason breakdown is a
-     follow-up metric-rename PR. *)
-  Legendary_counters.reset ();
-  Legendary_counters.incr_too_complex_parse_aborted `Timeout_50ms;
-  Legendary_counters.incr_too_complex_parse_aborted `Depth_limit;
-  let s = Legendary_counters.snapshot () in
-  Alcotest.(check int) "parse_aborted = 2" 2 s.too_complex_parse_aborted
-
-let test_too_complex_unknown_construct () =
-  (* [`Unknown_construct s] is the only [reason_too_complex] variant
-     carrying a payload string.  The string is intentionally discarded
-     at the counter boundary; all such counts land in
-     [too_complex_other], whose semantics is now "Unknown_construct
-     counter" rather than the previous "catch-all sink for
-     unrecognised tag strings". *)
-  Legendary_counters.reset ();
-  Legendary_counters.incr_too_complex (`Unknown_construct "some_future_variant");
-  Legendary_counters.incr_too_complex (`Unknown_construct "");
-  let s = Legendary_counters.snapshot () in
-  Alcotest.(check int) "other = 2" 2 s.too_complex_other
-
-let test_too_complex_json_shape () =
-  (* JSON field names remain a 1:1 mirror of the snapshot record —
-     dashboards / runbook greps consume by these literals. *)
-  Legendary_counters.reset ();
-  Legendary_counters.incr_too_complex `Redirect;
-  Legendary_counters.incr_too_complex `Arith_expansion;
-  let json =
-    Legendary_counters.snapshot_to_json (Legendary_counters.snapshot ())
-  in
-  let s = Yojson.Safe.to_string json in
-  Alcotest.(check bool) "has redirect" true
-    (Astring.String.is_infix ~affix:"\"too_complex_redirect\":1" s);
-  Alcotest.(check bool) "has arith_expansion" true
-    (Astring.String.is_infix ~affix:"\"too_complex_arith_expansion\":1" s);
-  Alcotest.(check bool) "has other (=0)" true
-    (Astring.String.is_infix ~affix:"\"too_complex_other\":0" s)
-
-let approx_eq ~eps a b = Float.abs (a -. b) <= eps
-
-let check_ratio name ~expected actual =
-  Alcotest.(check bool)
-    (Printf.sprintf "%s ≈ %.4f (got %.4f)" name expected actual)
-    true
-    (approx_eq ~eps:1e-9 expected actual)
-
-let test_ratios_zero_denominator () =
-  (* Observer off / fresh process: every ratio must return a finite 0.0,
-     not NaN / inf — shadow_counters JSON would fail to serialise
-     otherwise. *)
-  Legendary_counters.reset ();
-  let s = Legendary_counters.snapshot () in
-  check_ratio "disagree_ratio zero"
-    ~expected:0.0 (Legendary_counters.disagree_ratio s);
-  check_ratio "shadow_parse_coverage zero"
-    ~expected:0.0 (Legendary_counters.shadow_parse_coverage s);
-  check_ratio "auto_bg_promotion_rate zero"
-    ~expected:0.0 (Legendary_counters.auto_bg_promotion_rate s)
-
-let test_disagree_ratio_math () =
-  (* 10 total = 6 agree + 3 disagree (2 legacy_allow_shadow_deny +
-     1 legacy_deny_shadow_allow) + 1 shadow_cannot_parse.
-     disagree_ratio should count only the two *disagreement* buckets
-     — shadow_cannot_parse is its own category per the runbook. *)
-  Legendary_counters.reset ();
-  for _ = 1 to 6 do Legendary_counters.incr_gate_diff Gate_diff_types.Agree done;
-  for _ = 1 to 2 do
-    Legendary_counters.incr_gate_diff Gate_diff_types.Legacy_allow_shadow_deny
-  done;
-  Legendary_counters.incr_gate_diff Gate_diff_types.Legacy_deny_shadow_allow;
-  Legendary_counters.incr_gate_diff Gate_diff_types.Shadow_cannot_parse;
-  let s = Legendary_counters.snapshot () in
-  Alcotest.(check int) "total = 10" 10 s.gate_diff_total;
-  check_ratio "disagree_ratio = 3/10"
-    ~expected:0.3 (Legendary_counters.disagree_ratio s)
-
-let test_shadow_parse_coverage_math () =
-  (* 100 total, 3 shadow_cannot_parse → coverage 0.97.  Exactly the
-     runbook threshold for the MASC_BASH_AST_ONLY flip criterion. *)
-  Legendary_counters.reset ();
-  for _ = 1 to 97 do Legendary_counters.incr_gate_diff Gate_diff_types.Agree done;
-  for _ = 1 to 3 do
-    Legendary_counters.incr_gate_diff Gate_diff_types.Shadow_cannot_parse
-  done;
-  let s = Legendary_counters.snapshot () in
-  check_ratio "coverage = 0.97"
-    ~expected:0.97 (Legendary_counters.shadow_parse_coverage s)
-
-let test_shadow_parse_coverage_full () =
-  (* No parse failures → 1.0 (AST gate would parse everything
-     observed so far). *)
-  Legendary_counters.reset ();
-  for _ = 1 to 5 do Legendary_counters.incr_gate_diff Gate_diff_types.Agree done;
-  let s = Legendary_counters.snapshot () in
-  check_ratio "coverage = 1.0"
-    ~expected:1.0 (Legendary_counters.shadow_parse_coverage s)
-
-let test_snapshot_to_json_with_ratios_shape () =
-  (* Even with observers idle (all counters zero) the helper must
-     still produce a JSON object that round-trips as a string.  The
-     [ratios] sibling exists and carries three finite [0.0] entries,
-     so dashboards can blind-read without NaN/inf handling. *)
-  Legendary_counters.reset ();
-  let json =
-    Legendary_counters.snapshot_to_json_with_ratios
-      (Legendary_counters.snapshot ())
-  in
-  let s = Yojson.Safe.to_string json in
-  Alcotest.(check bool)
-    "flat field preserved"
-    true
-    (Astring.String.is_infix ~affix:"\"gate_diff_total\":0" s);
-  Alcotest.(check bool)
-    "ratios sibling present"
-    true
-    (Astring.String.is_infix ~affix:"\"ratios\":{" s);
-  Alcotest.(check bool)
-    "disagree_ratio finite 0.0"
-    true
-    (Astring.String.is_infix ~affix:"\"disagree_ratio\":0.0" s);
-  Alcotest.(check bool)
-    "shadow_parse_coverage finite 0.0"
-    true
-    (Astring.String.is_infix ~affix:"\"shadow_parse_coverage\":0.0" s);
-  Alcotest.(check bool)
-    "auto_bg_promotion_rate finite 0.0"
-    true
-    (Astring.String.is_infix ~affix:"\"auto_bg_promotion_rate\":0.0" s)
-
-let test_snapshot_to_json_with_ratios_populated () =
-  Legendary_counters.reset ();
-  (* 10 observations with 3 disagreements + 1 parse-bailout. *)
-  for _ = 1 to 6 do Legendary_counters.incr_gate_diff Gate_diff_types.Agree done;
-  for _ = 1 to 2 do
-    Legendary_counters.incr_gate_diff Gate_diff_types.Legacy_allow_shadow_deny
-  done;
-  Legendary_counters.incr_gate_diff Gate_diff_types.Legacy_deny_shadow_allow;
-  Legendary_counters.incr_gate_diff Gate_diff_types.Shadow_cannot_parse;
-  let json =
-    Legendary_counters.snapshot_to_json_with_ratios
-      (Legendary_counters.snapshot ())
-  in
-  let s = Yojson.Safe.to_string json in
-  (* disagree_ratio = 3/10 = 0.3.  Assert the exact float repr that
-     Yojson emits for 0.3 so regressions in the serializer are
-     caught.  The double-quoted affix also guards against accidental
-     string-vs-number type changes. *)
-  Alcotest.(check bool)
-    "disagree_ratio carries populated value"
-    true
-    (Astring.String.is_infix ~affix:"\"disagree_ratio\":0.3" s);
-  (* shadow_parse_coverage = 1 - 1/10 = 0.9 *)
-  Alcotest.(check bool)
-    "shadow_parse_coverage carries populated value"
-    true
-    (Astring.String.is_infix ~affix:"\"shadow_parse_coverage\":0.9" s)
-
-let test_auto_bg_promotion_rate_math () =
-  (* 10 observed, 4 would-have-promoted → 0.4.  Operator reads this
-     and decides whether raising MASC_BLOCKING_BUDGET_MS is warranted
-     before flipping MASC_BASH_AUTO_BG default. *)
-  Legendary_counters.reset ();
-  for _ = 1 to 6 do
-    Legendary_counters.incr_auto_bg_observed ~promoted_candidate:false
-  done;
-  for _ = 1 to 4 do
-    Legendary_counters.incr_auto_bg_observed ~promoted_candidate:true
-  done;
-  let s = Legendary_counters.snapshot () in
-  check_ratio "promotion_rate = 0.4"
-    ~expected:0.4 (Legendary_counters.auto_bg_promotion_rate s)
+  LC.incr_gh_exit_class Gh_exit_class.Network;
+  LC.reset ();
+  let s = LC.snapshot () in
+  Alcotest.(check int) "post-reset gh_network" 0 s.gh_exit_network
+;;
 
 let () =
-  Alcotest.run "legendary_counters"
-    [
-      ( "basic",
-        [
-          Alcotest.test_case "initial zero" `Quick test_initial_zero;
-          Alcotest.test_case "gate_diff buckets" `Quick test_gate_diff_buckets;
-          Alcotest.test_case "auto_bg observed" `Quick test_auto_bg_observed;
-          Alcotest.test_case "snapshot JSON shape" `Quick
-            test_snapshot_json_shape;
-          Alcotest.test_case "reset" `Quick test_reset;
-        ] );
-      ( "too_complex_histogram",
-        [
-          Alcotest.test_case "typed dispatch" `Quick
-            test_too_complex_typed_dispatch;
-          Alcotest.test_case "each variant distinct" `Quick
-            test_too_complex_each_variant_distinct;
-          Alcotest.test_case "parse_error dedicated bucket" `Quick
-            test_too_complex_parse_error;
-          Alcotest.test_case "parse_aborted dedicated bucket" `Quick
-            test_too_complex_parse_aborted;
-          Alcotest.test_case "unknown_construct → other" `Quick
-            test_too_complex_unknown_construct;
-          Alcotest.test_case "JSON shape" `Quick test_too_complex_json_shape;
-        ] );
-      ( "derived_ratios",
-        [
-          Alcotest.test_case "zero denominator returns 0.0" `Quick
-            test_ratios_zero_denominator;
-          Alcotest.test_case "disagree_ratio math" `Quick
-            test_disagree_ratio_math;
-          Alcotest.test_case "shadow_parse_coverage math" `Quick
-            test_shadow_parse_coverage_math;
-          Alcotest.test_case "shadow_parse_coverage full" `Quick
-            test_shadow_parse_coverage_full;
-          Alcotest.test_case "auto_bg_promotion_rate math" `Quick
-            test_auto_bg_promotion_rate_math;
-          Alcotest.test_case "JSON with ratios sibling (zero)" `Quick
-            test_snapshot_to_json_with_ratios_shape;
-          Alcotest.test_case "JSON with ratios sibling (populated)" `Quick
-            test_snapshot_to_json_with_ratios_populated;
-        ] );
+  Alcotest.run
+    "legendary_counters"
+    [ ( "basic"
+      , [ Alcotest.test_case "initial zero" `Quick test_initial_zero
+        ; Alcotest.test_case "shell gate partition" `Quick test_shell_gate_partition
+        ; Alcotest.test_case "gh exit class partition" `Quick test_gh_exit_class_partition
+        ; Alcotest.test_case "snapshot JSON shape" `Quick test_snapshot_json_shape
+        ; Alcotest.test_case "reset" `Quick test_reset
+        ] )
     ]
+;;

@@ -24,8 +24,6 @@ module Float = Stdlib.Float
 module Keeper = struct
   type t =
     | Bash
-    | Bash_kill
-    | Bash_output
     | Board_cleanup
     | Board_comment
     | Board_comment_vote
@@ -85,8 +83,6 @@ module Keeper = struct
 
   let to_string = function
     | Bash -> "keeper_bash"
-    | Bash_kill -> "keeper_bash_kill"
-    | Bash_output -> "keeper_bash_output"
     | Board_cleanup -> "keeper_board_cleanup"
     | Board_comment -> "keeper_board_comment"
     | Board_comment_vote -> "keeper_board_comment_vote"
@@ -147,8 +143,6 @@ module Keeper = struct
 
   let of_string = function
     | "keeper_bash" -> Some Bash
-    | "keeper_bash_kill" -> Some Bash_kill
-    | "keeper_bash_output" -> Some Bash_output
     | "keeper_board_cleanup" -> Some Board_cleanup
     | "keeper_board_comment" -> Some Board_comment
     | "keeper_board_comment_vote" -> Some Board_comment_vote
@@ -255,13 +249,6 @@ module Masc = struct
     | Agent_update
     | Agent_card
     | Agents
-    | Autoresearch_cycle
-    | Autoresearch_inject
-    | Autoresearch_record_finding
-    | Autoresearch_search_findings
-    | Autoresearch_start
-    | Autoresearch_status
-    | Autoresearch_stop
     | Batch_add_tasks
     | Board_cleanup
     | Board_comment
@@ -284,10 +271,8 @@ module Masc = struct
     | Board_sub_board_update
     | Board_vote
     | Broadcast
-    | Cancel_task
     | Check
     | Claim_next
-    | Claim_task
     | Cleanup_zombies
     | Coordination_fsm_snapshot
     | Code_delete
@@ -298,19 +283,16 @@ module Masc = struct
     | Code_shell
     | Code_symbols
     | Code_write
-    | Complete_task
     | Dashboard
     | Deliver
     | Dispatch_plan
     | Goal_list
-    | Goal_review
     | Goal_transition
     | Goal_upsert
     | Goal_verify
     | Heartbeat
     | Join
     | Leave
-    | List_tasks
     | Messages
     | Note_add
     | Operation_pause
@@ -327,11 +309,7 @@ module Masc = struct
     | Plan_init
     | Plan_set_task
     | Plan_update
-    | Register_capabilities
-    | Release_task
     | Reset
-    | Coord_status
-    | Set_current_task
     | Status
     | Task_history
     | Tasks
@@ -392,19 +370,10 @@ module Masc = struct
     | Board_sub_board_update -> "masc_board_sub_board_update"
     | Board_vote -> "masc_board_vote"
     | Broadcast -> "masc_broadcast"
-    | Cancel_task -> "masc_cancel_task"
     | Check -> "masc_check"
     | Claim_next -> "masc_claim_next"
-    | Claim_task -> "masc_claim_task"
     | Cleanup_zombies -> "masc_cleanup_zombies"
     | Coordination_fsm_snapshot -> "masc_coordination_fsm_snapshot"
-    | Autoresearch_cycle -> "masc_autoresearch_cycle"
-    | Autoresearch_inject -> "masc_autoresearch_inject"
-    | Autoresearch_record_finding -> "masc_autoresearch_record_finding"
-    | Autoresearch_search_findings -> "masc_autoresearch_search_findings"
-    | Autoresearch_start -> "masc_autoresearch_start"
-    | Autoresearch_status -> "masc_autoresearch_status"
-    | Autoresearch_stop -> "masc_autoresearch_stop"
     | Code_delete -> "masc_code_delete"
     | Code_edit -> "masc_code_edit"
     | Code_git -> "masc_code_git"
@@ -413,19 +382,16 @@ module Masc = struct
     | Code_shell -> "masc_code_shell"
     | Code_symbols -> "masc_code_symbols"
     | Code_write -> "masc_code_write"
-    | Complete_task -> "masc_complete_task"
     | Dashboard -> "masc_dashboard"
     | Deliver -> "masc_deliver"
     | Dispatch_plan -> "masc_dispatch_plan"
     | Goal_list -> "masc_goal_list"
-    | Goal_review -> "masc_goal_review"
     | Goal_transition -> "masc_goal_transition"
     | Goal_upsert -> "masc_goal_upsert"
     | Goal_verify -> "masc_goal_verify"
     | Heartbeat -> "masc_heartbeat"
     | Join -> "masc_join"
     | Leave -> "masc_leave"
-    | List_tasks -> "masc_list_tasks"
     | Messages -> "masc_messages"
     | Note_add -> "masc_note_add"
     | Operation_pause -> "masc_operation_pause"
@@ -442,11 +408,7 @@ module Masc = struct
     | Plan_init -> "masc_plan_init"
     | Plan_set_task -> "masc_plan_set_task"
     | Plan_update -> "masc_plan_update"
-    | Register_capabilities -> "masc_register_capabilities"
-    | Release_task -> "masc_release_task"
     | Reset -> "masc_reset"
-    | Coord_status -> "masc_room_status"
-    | Set_current_task -> "masc_set_current_task"
     | Status -> "masc_status"
     | Task_history -> "masc_task_history"
     | Tasks -> "masc_tasks"
@@ -508,19 +470,10 @@ module Masc = struct
     | "masc_board_sub_board_list" -> Some Board_sub_board_list
     | "masc_board_sub_board_update" -> Some Board_sub_board_update
     | "masc_broadcast" -> Some Broadcast
-    | "masc_cancel_task" -> Some Cancel_task
     | "masc_check" -> Some Check
     | "masc_claim_next" -> Some Claim_next
-    | "masc_claim_task" -> Some Claim_task
     | "masc_cleanup_zombies" -> Some Cleanup_zombies
     | "masc_coordination_fsm_snapshot" -> Some Coordination_fsm_snapshot
-    | "masc_autoresearch_cycle" -> Some Autoresearch_cycle
-    | "masc_autoresearch_inject" -> Some Autoresearch_inject
-    | "masc_autoresearch_record_finding" -> Some Autoresearch_record_finding
-    | "masc_autoresearch_search_findings" -> Some Autoresearch_search_findings
-    | "masc_autoresearch_start" -> Some Autoresearch_start
-    | "masc_autoresearch_status" -> Some Autoresearch_status
-    | "masc_autoresearch_stop" -> Some Autoresearch_stop
     | "masc_code_delete" -> Some Code_delete
     | "masc_code_edit" -> Some Code_edit
     | "masc_code_git" -> Some Code_git
@@ -529,19 +482,16 @@ module Masc = struct
     | "masc_code_shell" -> Some Code_shell
     | "masc_code_symbols" -> Some Code_symbols
     | "masc_code_write" -> Some Code_write
-    | "masc_complete_task" -> Some Complete_task
     | "masc_dashboard" -> Some Dashboard
     | "masc_deliver" -> Some Deliver
     | "masc_dispatch_plan" -> Some Dispatch_plan
     | "masc_goal_list" -> Some Goal_list
-    | "masc_goal_review" -> Some Goal_review
     | "masc_goal_transition" -> Some Goal_transition
     | "masc_goal_upsert" -> Some Goal_upsert
     | "masc_goal_verify" -> Some Goal_verify
     | "masc_heartbeat" -> Some Heartbeat
     | "masc_join" -> Some Join
     | "masc_leave" -> Some Leave
-    | "masc_list_tasks" -> Some List_tasks
     | "masc_messages" -> Some Messages
     | "masc_note_add" -> Some Note_add
     | "masc_operation_pause" -> Some Operation_pause
@@ -558,11 +508,7 @@ module Masc = struct
     | "masc_plan_init" -> Some Plan_init
     | "masc_plan_set_task" -> Some Plan_set_task
     | "masc_plan_update" -> Some Plan_update
-    | "masc_register_capabilities" -> Some Register_capabilities
-    | "masc_release_task" -> Some Release_task
     | "masc_reset" -> Some Reset
-    | "masc_room_status" -> Some Coord_status
-    | "masc_set_current_task" -> Some Set_current_task
     | "masc_status" -> Some Status
     | "masc_task_history" -> Some Task_history
     | "masc_tasks" -> Some Tasks

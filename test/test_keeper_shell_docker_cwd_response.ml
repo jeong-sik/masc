@@ -6,8 +6,7 @@
 
     Background: PR #11080 removed [sandbox_host_root] /
     [playground_path] from [execution_context], but sibling
-    [cwd] response fields in [run_docker_with_git_bash] /
-    [run_docker_hardened_bash] still echoed the host abs path.
+    [cwd] response fields in Docker bash routes still echoed the host abs path.
     PR-1 introduced [Keeper_cwd_response]; this PR (PR-2)
     replaces the four [("cwd", `String cwd)] literals with
     [Keeper_cwd_response.to_yojson_response]. This test pins

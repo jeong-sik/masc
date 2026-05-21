@@ -94,8 +94,9 @@ val clamp_shell_timeout :
   ?min_sec:float -> default:float -> Yojson.Safe.t -> float
 (** [clamp_shell_timeout ?min_sec ~default args] reads the
     optional [timeout_sec] field from [args], clamps it to
-    [\[min_sec, user_timeout_max_sec\]] (default [min_sec=1.0]),
-    and falls back to [default] when absent. *)
+    [\[min_sec, user_timeout_max_sec\]] (default:
+    [Timeout_floor.Native_shell]), and falls back to [default] when
+    absent. *)
 
 (** {1 Word + git-token tokenization} *)
 
@@ -180,9 +181,9 @@ val run_argv_with_status_retry_eintr :
     call" output.  Other statuses are returned unchanged. *)
 
 val shell_command_available : string -> bool
-(** [command -v <name>] probe inside [/bin/sh -c], with
-    {!Env_config_exec_timeout.timeout_sec} budget for the
-    [Shell_probe] caller bucket. *)
+(** PATH executable probe for keeper shell read fallback selection.
+    This intentionally avoids [/bin/sh -c] and does not treat empty
+    PATH entries as the current directory. *)
 
 (** {1 Playground repo cache} *)
 
@@ -230,7 +231,7 @@ val resolve_keeper_shell_read_path :
     fails.  Guards against playground-prefix doubling when both
     [cwd] and [path] independently include the playground prefix. *)
 
-(** {1 Docker dispatch aliases (re-exported from Keeper_shell_docker)} *)
+(** {1 Sandbox dispatch and command semantics} *)
 
 val effective_sandbox_profile :
   meta:Keeper_types.keeper_meta ->
@@ -239,11 +240,10 @@ val effective_sandbox_profile :
 (** Alias of {!Keeper_shell_docker.effective_sandbox_profile}. *)
 
 val cmd_targets_git_or_gh : string -> bool
-(** Alias of {!Keeper_shell_docker.cmd_targets_git_or_gh}. *)
+(** Command-semantics helper. Does not depend on the Docker backend. *)
 
 val cmd_targets_gh : string -> bool
-(** Local definition — first whitespace-separated word equals
-    ["gh"]. *)
+(** Command-semantics helper. Does not depend on the Docker backend. *)
 
 val ensure_keeper_sandbox_runtime :
   timeout_sec:float -> (string list, string) result
@@ -263,7 +263,7 @@ val run_docker_shell_command_with_status :
   (Keeper_shell_docker.docker_shell_result, string) result
 (** Alias of {!Keeper_shell_docker.run_docker_shell_command_with_status}. *)
 
-val run_docker_with_git_bash :
+val run_docker_credentialed_bash :
   turn_sandbox_runtime:Keeper_turn_sandbox_runtime.t option ->
   config:Coord.config ->
   meta:Keeper_types.keeper_meta ->
@@ -272,9 +272,9 @@ val run_docker_with_git_bash :
   cmd:string ->
   unit ->
   string
-(** Alias of {!Keeper_shell_docker.run_docker_with_git_bash}. *)
+(** Alias of {!Keeper_shell_docker.run_docker_credentialed_bash}. *)
 
-val run_docker_hardened_bash :
+val run_docker_bash :
   turn_sandbox_runtime:Keeper_turn_sandbox_runtime.t option ->
   config:Coord.config ->
   meta:Keeper_types.keeper_meta ->
@@ -283,4 +283,4 @@ val run_docker_hardened_bash :
   cmd:string ->
   network_mode:Keeper_types.network_mode ->
   string
-(** Alias of {!Keeper_shell_docker.run_docker_hardened_bash}. *)
+(** Alias of {!Keeper_shell_docker.run_docker_bash}. *)

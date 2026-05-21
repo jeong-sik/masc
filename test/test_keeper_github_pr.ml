@@ -232,6 +232,12 @@ let parse_string_field raw field =
 let parse_bool_field raw field =
   Yojson.Safe.from_string raw |> Json.member field |> Json.to_bool_option
 
+let parse_nested_string_field raw outer field =
+  Yojson.Safe.from_string raw
+  |> Json.member outer
+  |> Json.member field
+  |> Json.to_string_option
+
 let test_pr_list_argv_uses_repo_state_limit_json () =
   check (list string) "argv"
     [
@@ -359,6 +365,11 @@ let test_pr_create_routes_through_docker () =
   (match parse_string_field raw "via" with
    | Some via -> check string "pr create via docker" "docker" via
    | None -> Alcotest.failf "missing via in response: %s" raw);
+  check (option string) "pr create effective identity" (Some "root")
+    (parse_nested_string_field raw "credential" "effective_github_identity");
+  check (option string) "pr create configured identity omitted for root fallback"
+    None
+    (parse_nested_string_field raw "credential" "configured_github_identity");
   let log = read_file log_path in
   check bool "used docker run" true (contains_substring log "run --rm");
   check bool "uses gh pr create" true

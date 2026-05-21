@@ -393,11 +393,10 @@ type module_tag =
   | Mod_control | Mod_agent_timeline | Mod_misc | Mod_suspend
   | Mod_library | Mod_keeper
   | Mod_inline
-  | Mod_autoresearch
   | Mod_shard
 ```
 
-21개 variant (SSOT: `lib/tool_dispatch.mli`). 도구 이름으로 O(1) tag lookup 후, tag별로 적합한 모듈 컨텍스트를 지연 생성한다. Retired 모듈들(command_plane, team_session, voice, mdal, goals, heartbeat, encryption, auth, hat, audit, rate_limit, cost, social, vote, council, handover, relay, cache, tempo, portal, code_swarm, notifications, research, model_catalog, fire_task)은 tag 목록에서 제거됐다.
+19개 variant (SSOT: `lib/tool_dispatch.mli`). 도구 이름으로 O(1) tag lookup 후, tag별로 적합한 모듈 컨텍스트를 지연 생성한다. Retired 모듈들(command_plane, team_session, voice, mdal, goals, heartbeat, encryption, auth, hat, audit, rate_limit, cost, social, vote, council, handover, relay, cache, tempo, portal, code_swarm, notifications, research, autoresearch, model_catalog, fire_task)은 tag 목록에서 제거됐다.
 
 ### 4.4 Tool_result.t (structured)
 
@@ -639,7 +638,7 @@ type rate_limit_error = {
 | INV-TYPE-013 | `auth_config.enabled = false`이면 모든 도구 호출이 인가된다. 토큰 검증을 수행하지 않는다. | `check_permission` with `enabled = false` 테스트 |
 | INV-TYPE-014 | raw token은 저장하지 않는다. `agent_credential.token` 필드에는 SHA256 해시만 저장된다. | `create_token` 후 credential 파일 내용 검사 |
 | INV-TYPE-015 | initial admin(auth를 활성화한 에이전트)은 bootstrap grace로 모든 permission을 갖는다. | `check_permission` with initial_admin 테스트 |
-| INV-TYPE-016 | strict mode(`MASC_TOOL_AUTH_STRICT=true`, 기본값)에서 `permission_for_tool`에 매핑되지 않은 `masc_*` 도구는 최소 `CanBroadcast` 권한을 요구한다. | unmapped tool name 테스트 |
+| INV-TYPE-016 | `permission_for_tool`에 매핑되지 않은 내부 도구는 최소 `CanBroadcast` 권한을 요구하고, 매핑되지 않은 외부 도구는 거부한다. 이 fail-closed 동작은 환경변수로 완화할 수 없다. | unmapped tool name 테스트 |
 
 ### Serialization
 

@@ -719,7 +719,7 @@ let run_turn
                    | Error
                        (Agent_sdk.Error.Agent
                           (Agent_sdk.Error.CompletionContractViolation
-                             { reason = violation_reason; _ }))
+                             { reason = violation_reason; violation_detail; _ }))
                      when acc.contract_violation_retries < 1 ->
                      (* Contract violation retry (max 1 per turn): the
                         model did not call a required tool. Build a
@@ -743,9 +743,13 @@ let run_turn
                              acc.tool_surface.required_tool_candidate_names
                        in
                        let oas_tools =
-                         Keeper_tool_disclosure
-                         .satisfying_tools_from_contract_violation_reason
-                           violation_reason
+                         match violation_detail with
+                         | Some detail when detail.satisfying_tools <> [] ->
+                           detail.satisfying_tools
+                         | Some _ | None ->
+                           Keeper_tool_disclosure
+                           .satisfying_tools_from_contract_violation_reason
+                             violation_reason
                        in
                        Keeper_types.dedupe_keep_order (oas_tools @ local_tools)
                      in
@@ -1056,24 +1060,31 @@ let run_turn
                        |> Keeper_contract_classifier.classify_actionable_signal_for_tools
                             ~allowed_tool_names:all_tool_names
                    in
-                   let actionable_signal_context =
+                   let tool_gate_required =
                      Keeper_agent_tool_surface
                      .turn_affordances_require_tool_gate_with_allowed
                        ~allowed_tool_names:all_tool_names
                        turn_affordances
-                     || Keeper_contract_classifier.is_actionable actionable_signal_kind
+                   in
+                   let actionable_signal_context =
+                     Keeper_contract_classifier.make_actionable_signal_context
+                       ~tool_gate_required
+                       ~actionable_signal:actionable_signal_kind
                    in
                    let actionable_tool_contract_violation_reason =
                      if
-                       actionable_signal_context
+                       Keeper_contract_classifier.is_actionable_signal_context
+                         actionable_signal_context
                        && progress_keeper_tool_names = []
                        && no_progress_success_tool_names <> []
                      then
                        Some
                          (Printf.sprintf
-                            "actionable keeper signal was present, but the model only \
-                             used idempotent setup tools that made no execution \
+                            "actionable keeper context (%s) was present, but the model \
+                             only used idempotent setup tools that made no execution \
                              progress: %s"
+                            (Keeper_contract_classifier.actionable_signal_context_label
+                               actionable_signal_context)
                             (String.concat ", " no_progress_success_tool_names))
                      else
                        Keeper_tool_disclosure.actionable_tool_contract_violation_reason
@@ -1086,6 +1097,7 @@ let run_turn
                        (Agent_sdk.Error.CompletionContractViolation
                           { contract = Agent_sdk.Completion_contract_id.Require_tool_use
                           ; reason
+                          ; violation_detail = None
                           })
                    in
                    let tool_contract_status ()
@@ -1271,20 +1283,62 @@ let run_turn
                     let latest_state_snapshot_sidecar_path =
                       Filename.concat session.session_dir "state-snapshot.latest.json"
                     in
+                    let working_state_sidecar_path =
+                      Filename.concat
+                        (Filename.concat session.session_dir "working-state")
+                        (Printf.sprintf "turn-%06d.json" manifest_keeper_turn_id)
+                    in
+                    let latest_working_state_sidecar_path =
+                      Filename.concat session.session_dir "working-state.latest.json"
+                    in
+                    let state_snapshot_ts = Masc_domain.now_iso () in
+                    let state_snapshot_updated_at_unix = Time_compat.now () in
+                    let working_state =
+                      Keeper_working_state_projector.of_state_snapshot
+                        ~keeper_name:meta.name
+                        ~trace_id
+                        ~keeper_turn_id:manifest_keeper_turn_id
+                        ~updated_at_iso:state_snapshot_ts
+                        ~updated_at_unix:state_snapshot_updated_at_unix
+                        state_snapshot
+                    in
+                    let active_open_loop_count =
+                      Keeper_working_state.active_open_loop_count working_state
+                    in
                     let state_snapshot_payload =
                       `Assoc
                         [
                           ("schema_version", `Int 1);
-                          ("ts", `String (Masc_domain.now_iso ()));
+                          ("ts", `String state_snapshot_ts);
                           ("keeper_name", `String meta.name);
                           ("agent_name", `String meta.agent_name);
                           ("trace_id", `String trace_id);
                           ("generation", `Int generation);
                           ("keeper_turn_id", `Int manifest_keeper_turn_id);
                           ("oas_turn_count", `Int result.turns);
+                          ("active_open_loop_count", `Int active_open_loop_count);
                           ( "state_snapshot",
                             Keeper_memory_policy.keeper_state_snapshot_to_json
                               state_snapshot );
+                          ( "working_state",
+                            Keeper_working_state.to_json working_state );
+                        ]
+                    in
+                    let working_state_payload =
+                      `Assoc
+                        [
+                          ("schema_version", `Int 1);
+                          ("ts", `String state_snapshot_ts);
+                          ("keeper_name", `String meta.name);
+                          ("agent_name", `String meta.agent_name);
+                          ("trace_id", `String trace_id);
+                          ("generation", `Int generation);
+                          ("keeper_turn_id", `Int manifest_keeper_turn_id);
+                          ("oas_turn_count", `Int result.turns);
+                          ("source", `String state_snapshot_source);
+                          ("active_open_loop_count", `Int active_open_loop_count);
+                          ( "working_state",
+                            Keeper_working_state.to_json working_state );
                         ]
                     in
                     let state_snapshot_sidecar_saved =
@@ -1328,6 +1382,45 @@ let run_turn
                           ();
                         false
                     in
+                    let working_state_sidecar_saved =
+                      let sidecar_dir =
+                        Filename.dirname working_state_sidecar_path
+                      in
+                      (try Fs_compat.mkdir_p sidecar_dir with
+                       | exn ->
+                         Log.Keeper.warn
+                           "keeper:%s working state sidecar dir create failed: %s"
+                           meta.name
+                           (Printexc.to_string exn));
+                      match
+                        Fs_compat.save_file_atomic working_state_sidecar_path
+                          (Yojson.Safe.pretty_to_string working_state_payload)
+                      with
+                      | Ok () -> (
+                        match
+                          Fs_compat.save_file_atomic
+                            latest_working_state_sidecar_path
+                            (Yojson.Safe.pretty_to_string working_state_payload)
+                        with
+                        | Ok () -> true
+                        | Error e ->
+                          Log.Keeper.warn
+                            "keeper:%s latest working state sidecar save failed: %s"
+                            meta.name
+                            e;
+                          false)
+                      | Error e ->
+                        Log.Keeper.warn
+                          "keeper:%s working state sidecar save failed: %s"
+                          meta.name
+                          e;
+                        Prometheus.inc_counter
+                          Keeper_metrics.metric_keeper_checkpoint_failures
+                          ~labels:
+                            [ "keeper", meta.name; "site", "working_state_sidecar" ]
+                          ();
+                        false
+                    in
                     append_manifest ~site:"state_snapshot_sidecar"
                       ~keeper_turn_id:manifest_keeper_turn_id
                       ~oas_turn_count:result.turns
@@ -1342,10 +1435,42 @@ let run_turn
                               `String latest_state_snapshot_sidecar_path );
                             ( "state_snapshot_sidecar_saved",
                               `Bool state_snapshot_sidecar_saved );
+                            ( "active_open_loop_count",
+                              `Int active_open_loop_count );
+                            ( "working_state_prompt_digest_ids",
+                              `List
+                                (List.map
+                                   (fun id -> `String id)
+                                   working_state.prompt_digest_ids) );
                             ( "source",
                               `String state_snapshot_source );
                           ])
                       Keeper_runtime_manifest.State_snapshot_sidecar_saved;
+                    append_manifest ~site:"working_state_sidecar"
+                      ~keeper_turn_id:manifest_keeper_turn_id
+                      ~oas_turn_count:result.turns
+                      ~status:
+                        (if working_state_sidecar_saved then "saved" else "error")
+                      ~decision:
+                        (`Assoc
+                          [
+                            ( "working_state_sidecar_path",
+                              `String working_state_sidecar_path );
+                            ( "latest_working_state_sidecar_path",
+                              `String latest_working_state_sidecar_path );
+                            ( "working_state_sidecar_saved",
+                              `Bool working_state_sidecar_saved );
+                            ( "active_open_loop_count",
+                              `Int active_open_loop_count );
+                            ( "working_state_prompt_digest_ids",
+                              `List
+                                (List.map
+                                   (fun id -> `String id)
+                                   working_state.prompt_digest_ids) );
+                            ( "source",
+                              `String state_snapshot_source );
+                          ])
+                      Keeper_runtime_manifest.Working_state_sidecar_saved;
                      receipt_response_text_present_ref := true;
                      let assistant_msg =
                        Agent_sdk.Types.make_message

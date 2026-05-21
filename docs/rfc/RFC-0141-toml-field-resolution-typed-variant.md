@@ -1,14 +1,58 @@
 ---
 rfc: "0141"
 title: "TOML Field Resolution Typed Variant for repo_manager + credential subsystem"
-status: Draft
+status: Active
 created: 2026-05-20
-updated: 2026-05-20
+updated: 2026-05-21
 author: vincent
 supersedes: []
 superseded_by: null
-related: ["0088", "0126"]
-implementation_prs: []
+related: ["0088", "0126", "0142", "0148", "0154"]
+implementation_prs: [16837, 16887, 16889]
+---
+
+## Progress audit (2026-05-21)
+
+Status promoted Draft → Active. PR-1/2/3 of the five-PR phase plan
+landed within the §4 cadence; PR-4 and PR-5 remain.
+
+| Phase | PR | Scope | Merged |
+|-------|-----|------|--------|
+| PR-1 | #16837 | `lib/repo_manager/field_resolution.{ml,mli}` typed extractor + variant tests | 2026-05-19 |
+| PR-2 | #16887 | `repo_store.ml:48-67` 4-site migration | 2026-05-19 |
+| PR-3 | #16889 | `credential_store.ml:75-94` 4-site migration | 2026-05-19 |
+| **PR-4** | (pending) | `credential_materializer.ml` `try … with _` → typed exception matching | not landed |
+| **PR-5** | (pending) | silent-failure ratchet regenerate (`error_result_silence` ≥8 drop) | not landed |
+
+### Pending work — PR-4
+
+`lib/repo_manager/credential_materializer.ml` still contains five
+bare `try` blocks (lines 68 / 83 / 170 / 213 / 292) that swallow
+exceptions with `_ -> default`. The RFC §4 PR-4 prescription is to
+convert each to a concrete-exception match (`Unix.Unix_error _ |
+Otoml.Parse_error _`) while ensuring `Eio.Cancel.Cancelled`
+propagates unchanged. Until PR-4 lands, the typed variant introduced
+by PR-1 is not load-bearing on the materializer surface — the
+swallow-on-error path is still the dominant failure handling.
+
+### Pending work — PR-5
+
+Silent-failure ratchet (`scripts/silent-failure-ratchet.sh` if
+present, otherwise the equivalent in `scripts/audit-*`) has not been
+regenerated post-PR-2/3. The §7 acceptance metric —
+`error_result_silence` drops by ≥8,
+`exception_catchall_swallow` drops by ≥2 — is unverified.
+
+### Related RFC
+
+- **RFC-0142** (cascade_error_classify decomposition, Active 2026-05-21):
+  the sister Json_field migration. Same audit cohort.
+- **RFC-0148** (Tool_error closed sum, Implemented 2026-05-20),
+  **RFC-0154** (System_error_class typed SSOT, Implemented
+  2026-05-21): closed-sum variant pattern. PR-4's typed exception
+  matching here is the same parse-don't-validate discipline applied
+  to the OCaml `exn` boundary.
+
 ---
 
 # RFC-0141 — TOML Field Resolution Typed Variant

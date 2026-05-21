@@ -108,8 +108,7 @@ let test_provider_outcomes_parity () =
       "call_err_cascadeable";
       "call_err_terminal";
       "call_err_hard_quota";
-      "accept_rejected";
-      "slot_full" ]
+      "accept_rejected" ]
   in
   let covered o =
     if o = "call_err" then
@@ -192,13 +191,6 @@ let test_accept_rejected_on_last_maps_to_exhausted () =
         "B1 ResolveExhaustedNormal: OCaml decide(Accept_rejected, \
          is_last=true, accept_on_exhaustion=false) must yield \
          Exhausted (correspondence broken)"
-
-let test_slot_full_maps_to_try_next () =
-  (* B1 covers Slot_full under the same Try_next path. *)
-  let open Masc_mcp.Cascade_fsm in
-  match decide ~accept_on_exhaustion:false ~is_last:false Slot_full with
-  | Try_next _ -> ()
-  | _ -> Alcotest.fail "Slot_full must yield Try_next"
 
 let test_accept_on_exhaustion_terminal () =
   (* B1 has no explicit "accept_on_exhaustion" phase — it is folded
@@ -354,8 +346,6 @@ let () =
         test_call_err_cascadeable_maps_to_try_next;
       test_case "Accept_rejected on last tier → Exhausted (B1.ResolveExhaustedNormal — direct decide path)" `Quick
         test_accept_rejected_on_last_maps_to_exhausted;
-      test_case "Slot_full → Try_next" `Quick
-        test_slot_full_maps_to_try_next;
       test_case "Accept_on_exhaustion → terminal success" `Quick
         test_accept_on_exhaustion_terminal;
     ];

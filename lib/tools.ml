@@ -40,7 +40,6 @@ let raw_schemas : tool_schema list =
   @ Tool_schemas_worktree.schemas
   @ Tool_run.schemas
   @ Tool_task.schemas
-  @ Tool_suspend.schemas
   @ Tool_code.schemas
   @ Tool_code_write.schemas
   @ Tool_library.schemas
@@ -53,8 +52,7 @@ let all_schemas_extended =
     (all_schemas
     @ Tool_schemas_misc.schemas
     @ Keeper_types.schemas
-    @ Tool_local_runtime.schemas @ Tool_shard.schemas
-    @ Tool_autoresearch.schemas)
+    @ Tool_local_runtime.schemas @ Tool_shard.schemas)
   |> dedupe_schemas_by_name
 
 (** Get tool by name *)

@@ -64,11 +64,6 @@ let handle_agents ctx args =
   in
   Tool_result.quick_ok (Yojson.Safe.to_string json)
 
-(** Handle masc_register_capabilities *)
-let handle_register_capabilities ctx args =
-  let capabilities = get_string_list args "capabilities" in
-  Tool_result.quick_ok (Coord.register_capabilities ctx.config ~agent_name:ctx.agent_name ~capabilities)
-
 (** Handle masc_agent_update *)
 let handle_agent_update ctx args =
   let status = get_string_opt args "status" in
@@ -329,7 +324,6 @@ let handle_agent_card ctx args =
 let dispatch ctx ~name ~args =
   match name with
   | "masc_agents" -> Some (handle_agents ctx args)
-  | "masc_register_capabilities" -> Some (handle_register_capabilities ctx args)
   | "masc_agent_update" -> Some (handle_agent_update ctx args)
   | "masc_get_metrics" -> Some (handle_get_metrics ctx args)
   | "masc_agent_fitness" -> Some (handle_agent_fitness ctx args)
@@ -344,22 +338,18 @@ let schemas = Tool_schemas_agent.schemas
 
 let tool_spec_read_only =
   [ "masc_agents"; "masc_agent_card" ]
-let tool_spec_requires_join = [ "masc_register_capabilities" ]
+let tool_spec_requires_join = []
 
 let tool_required_permission = function
   | "masc_agents" | "masc_agent_fitness" | "masc_agent_card"
   | "masc_get_metrics" ->
       Some Masc_domain.CanReadState
-  | "masc_register_capabilities" | "masc_agent_update" ->
-      Some Masc_domain.CanBroadcast
+  | "masc_agent_update" -> Some Masc_domain.CanBroadcast
   | _ -> None
 
 let () =
   List.iter
     (fun (s : Masc_domain.tool_schema) ->
-      let deprecated_register_capabilities =
-        String.equal s.name "masc_register_capabilities"
-      in
       Tool_spec.register
         (Tool_spec.create
            ~name:s.name
@@ -370,25 +360,6 @@ let () =
            ~is_read_only:(List.mem s.name tool_spec_read_only)
            ~is_idempotent:(List.mem s.name tool_spec_read_only)
            ~requires_join:(List.mem s.name tool_spec_requires_join)
-           ~visibility:
-             (if deprecated_register_capabilities
-              then Tool_catalog.Hidden
-              else Tool_catalog.Default)
-           ~lifecycle:
-             (if deprecated_register_capabilities
-              then Tool_catalog.Deprecated
-              else Tool_catalog.Active)
-           ?replacement:
-             (if deprecated_register_capabilities
-              then Some "masc_agent_update"
-              else None)
-           ?reason:
-             (if deprecated_register_capabilities
-              then
-                Some
-                  "Deprecated compatibility alias. Use masc_agent_update with capabilities instead."
-              else None)
-           ~allow_direct_call_when_hidden:deprecated_register_capabilities
            ?required_permission:(tool_required_permission s.name)
            ()))
     schemas

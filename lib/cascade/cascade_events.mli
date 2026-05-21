@@ -1,12 +1,11 @@
-(** Cascade_events — MASC Event_bus publishers for runtime / social
-    events.
+(** Cascade_events — MASC Event_bus publishers for runtime events.
 
     Publishes MASC coordination events (broadcasts, heartbeats,
-    board posts, task transitions, keeper lifecycle, trust /
-    reputation) to the **MASC-owned** Event_bus.  Events follow
-    dot-separated snake_case naming per OAS Custom-name
-    convention: [masc.broadcast], [masc.heartbeat],
-    [masc.keeper.lifecycle], ...
+    board posts, task transitions, keeper lifecycle, audit) to the
+    **MASC-owned** Event_bus.  Events follow dot-separated
+    snake_case naming per OAS Custom-name convention:
+    [masc.broadcast], [masc.heartbeat], [masc.keeper.lifecycle],
+    ...
 
     The [bus] argument is accepted for backward compatibility
     but ignored — every publish routes to
@@ -118,39 +117,6 @@ val publish_keeper_dead :
     [detail]) so subscribers can filter on a stable topic and
     pull the structured fields directly. *)
 
-(** {1 Autonomy lifecycle (deprecated — no producer)} *)
-
-val publish_agent_selected :
-  Agent_sdk.Event_bus.t ->
-  agent_name:string ->
-  trigger:string ->
-  thompson_score:float ->
-  final_score:float ->
-  unit
-[@@deprecated "Unused since #1060 (no producer wired). Tracked \
-               as 'mark scaffolding' tier of #8857; planned \
-               wiring in Thompson autonomy RFC (open)."]
-
-val publish_agent_decision :
-  Agent_sdk.Event_bus.t ->
-  agent_name:string ->
-  action:string ->
-  trigger_reason:string ->
-  unit
-[@@deprecated "Unused since #1060 (no producer wired). Tracked \
-               as 'mark scaffolding' tier of #8857; planned \
-               wiring in Thompson autonomy RFC (open)."]
-
-val publish_agent_action_executed :
-  Agent_sdk.Event_bus.t ->
-  agent_name:string ->
-  action:string ->
-  success:bool ->
-  unit
-[@@deprecated "Unused since #1060 (no producer wired). Tracked \
-               as 'mark scaffolding' tier of #8857; planned \
-               wiring in Thompson autonomy RFC (open)."]
-
 (** {1 Audit Ledger Events} *)
 
 val publish_audit_event :
@@ -171,28 +137,3 @@ val publish_audit_event :
     via SSE without polling.
 
     Shape: [{id, ts, actor, kind, target?, summary, severity, payload?}]. *)
-
-(** {1 Phase 4 social (deprecated — no producer)} *)
-
-val publish_trust_updated :
-  Agent_sdk.Event_bus.t ->
-  agent_a:string ->
-  agent_b:string ->
-  trust_score:float ->
-  unit
-[@@deprecated "Unused since #1060 (no producer wired). Tracked \
-               as 'mark scaffolding' tier of #8857; planned \
-               wiring with Phase 4 social network feature \
-               (open)."]
-
-val publish_reputation_changed :
-  Agent_sdk.Event_bus.t ->
-  agent_name:string ->
-  old_score:float ->
-  new_score:float ->
-  trend:string ->
-  unit
-[@@deprecated "Unused since #1060 (no producer wired). Tracked \
-               as 'mark scaffolding' tier of #8857; planned \
-               wiring with Phase 4 social network feature \
-               (open)."]

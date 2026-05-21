@@ -128,7 +128,7 @@ The external surface is now collapsed to two variants:
 |----------------------|----------------------|-------|
 | `Legacy_local`       | `Local`              | Same semantics. Fs scoped to `<base_path>/.masc/playground/<keeper>/`. |
 | `Docker_hardened`    | `Docker`             | Same base semantics (hardened container with network=none). |
-| `Docker_with_git`    | `Docker` + per-command dispatch | No longer a profile. When `sandbox_profile=Docker` and the `keeper_bash` cmd's leading token is `git`/`gh`, the container is launched with network=inherit + gh/git credential mounts *for that one command*. Surfaced in response JSON as `git_creds_enabled: true`. |
+| `Docker_with_git`    | `Docker` + per-command dispatch | No longer a profile. When `sandbox_profile=Docker` and typed Bash targets `git`/`gh`, the container is launched with network=inherit + gh/git credential mounts *for that one command*. Surfaced in response JSON as `git_creds_enabled: true`. |
 
 The 3→2 containment matrix (section 3.3) now reads:
 

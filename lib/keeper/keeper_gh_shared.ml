@@ -1,9 +1,6 @@
 (* GH credential isolation — SSOT in Keeper_gh_env. *)
 let with_keeper_gh_env = Keeper_gh_env.with_env
 
-(* RFC-0084 host-config-cleanup-B — zsh binary path migration. *)
-let host_zsh = (Host_config.host ()).host_zsh
-
 (* ================================================================ *)
 (* GH entity cache (inlined from former keeper_gh_cache.ml).         *)
 (* In-memory cache of valid PR/issue numbers per repo, populated     *)
@@ -64,14 +61,17 @@ let counter_misses = Atomic.make 0
 let counter_bypasses = Atomic.make 0
 let counter_fetch_errors = Atomic.make 0
 
+let shell_word_values cmd =
+  match Masc_exec_bash_parser.Bash_words.stages cmd with
+  | Error _ -> []
+  | Ok stages ->
+    stages
+    |> List.concat
+    |> List.map (fun (word : Masc_exec_bash_parser.Bash_words.word) -> word.value)
+;;
+
 let normalize_gh_command (cmd : string) : string =
-  let tokens =
-    cmd
-    |> String.trim
-    |> String.split_on_char ' '
-    |> List.map String.trim
-    |> List.filter (fun token -> token <> "")
-  in
+  let tokens = shell_word_values cmd in
   let rec drop_leading_gh = function
     | token :: rest when String_util.equals_ci token "gh" -> drop_leading_gh rest
     | remaining -> remaining
@@ -210,19 +210,13 @@ let fetch_entity_numbers
       (kind_path kind)
       (Keeper_tool_policy.gh_cache_fetch_page_size ())
   in
-  let raw =
-    Printf.sprintf
-      "gh api %s --jq %s"
-      (Filename.quote endpoint)
-      (Filename.quote (jq_filter kind))
-  in
-  let scoped = Keeper_gh_env.with_env config raw in
-  let argv = [ host_zsh; "-lc"; Printf.sprintf "%s 2>/dev/null" scoped ] in
+  let argv = [ "gh"; "api"; endpoint; "--jq"; jq_filter kind ] in
   match
     Masc_exec.Exec_gate.run_argv_with_status
       ~actor:`Coord_git
-      ~raw_source:(String.concat " " argv)
+      ~raw_source:(String.concat " " (List.map Filename.quote argv))
       ~summary:"keeper gh cache fetch"
+      ?env:(Keeper_gh_env.process_env config)
       ~timeout_sec:(Keeper_tool_policy.gh_cache_fetch_timeout_sec ())
       argv
   with
@@ -369,14 +363,7 @@ let gh_issue_number_subcmds =
 ;;
 
 let gh_words (cmd : string) : string list =
-  cmd
-  |> String.map (function
-    | '\t' | '\r' | '\n' -> ' '
-    | c -> c)
-  |> String.trim
-  |> String.lowercase_ascii
-  |> String.split_on_char ' '
-  |> List.filter (fun s -> s <> "")
+  shell_word_values cmd |> List.map String.lowercase_ascii
 ;;
 
 let gh_global_option_takes_value = function
@@ -522,12 +509,6 @@ let gh_dangerous_command (cmd : string) : string option =
      | _ -> None)
   | _ -> None
 ;;
-
-(** Truncate gh output to prevent context explosion.
-    65KB responses were observed causing 300s timeout via token overflow.
-    Retained for .mli backward compatibility; runtime limit comes from
-    [gh_cache.max_output_bytes] in tool_policy.toml. *)
-let max_gh_output_bytes = 8192
 
 let truncate_gh_output (out : string) : string * (string * Yojson.Safe.t) list =
   let max_bytes = Keeper_tool_policy.gh_cache_max_output_bytes () in

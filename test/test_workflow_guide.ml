@@ -25,11 +25,6 @@ let check_has_precondition g expected =
     (Printf.sprintf "preconditions contain %s" expected)
     true (List.mem expected g.WG.preconditions)
 
-let check_lacks_precondition g unexpected =
-  check bool
-    (Printf.sprintf "preconditions omit %s" unexpected)
-    false (List.mem unexpected g.WG.preconditions)
-
 (* ── Golden Path 1: Coord/Task Hygiene ────────────────────────────── *)
 
 let test_start_success () =
@@ -47,8 +42,7 @@ let test_join_success () =
   let g = WG.next_steps ~tool_name:"masc_join" ~success:true in
   check_has_tool g.next_steps "masc_status";
   check_has_tool g.next_steps "masc_transition";
-  check_has_precondition g "project_ready";
-  check_lacks_precondition g "room_set"
+  check_has_precondition g "room_set"
 
 let test_join_failure () =
   let g = WG.next_steps ~tool_name:"masc_join" ~success:false in
@@ -158,18 +152,6 @@ let test_claim_next_alias () =
   let g = WG.next_steps ~tool_name:"masc_claim_next" ~success:true in
   check_has_tool g.next_steps "masc_worktree_create"
 
-let test_set_current_task_alias_matches_canonical () =
-  let alias_steps =
-    WG.next_steps ~tool_name:"masc_set_current_task" ~success:true
-    |> fun g -> List.map (fun (s : WG.step) -> s.tool) g.next_steps
-  in
-  let canonical_steps =
-    WG.next_steps ~tool_name:"masc_plan_set_task" ~success:true
-    |> fun g -> List.map (fun (s : WG.step) -> s.tool) g.next_steps
-  in
-  check (list string) "alias guidance matches canonical guidance"
-    canonical_steps alias_steps
-
 let test_complete_task_removed () =
   (* masc_complete_task was a ghost tool — it no longer routes to guidance *)
   let g = WG.next_steps ~tool_name:"masc_complete_task" ~success:true in
@@ -190,20 +172,17 @@ let test_transition_claim_call_guidance () =
   check_has_tool g.next_steps "masc_worktree_create";
   check bool "claim guidance omits plan_set_task" false
     (List.exists (fun (s : WG.step) -> s.tool = "masc_plan_set_task") g.next_steps);
-  check_has_precondition g "project_ready";
-  check_lacks_precondition g "room_set"
+  check_has_precondition g "room_set"
 
-let test_add_task_success_uses_project_ready () =
+let test_add_task_success_uses_room_set () =
   let g = WG.next_steps ~tool_name:"masc_add_task" ~success:true in
   check_has_tool g.next_steps "masc_transition";
-  check_has_precondition g "project_ready";
-  check_lacks_precondition g "room_set"
+  check_has_precondition g "room_set"
 
-let test_broadcast_success_uses_project_ready () =
+let test_broadcast_success_uses_room_set () =
   let g = WG.next_steps ~tool_name:"masc_broadcast" ~success:true in
   check_has_tool g.next_steps "masc_heartbeat";
-  check_has_precondition g "project_ready";
-  check_lacks_precondition g "room_set"
+  check_has_precondition g "room_set"
 
 let test_transition_done_call_guidance () =
   let g =
@@ -237,10 +216,10 @@ let check_tool_exists_in_schemas name =
 let test_next_steps_reference_real_tools () =
   let tools_to_check = [
     "masc_start"; "masc_join"; "masc_status";
-    "masc_claim"; "masc_claim_next";
+    "masc_claim_next";
     "masc_transition";
     "masc_add_task"; "masc_batch_add_tasks";
-    "masc_plan_set_task"; "masc_set_current_task";
+    "masc_plan_set_task";
     "masc_heartbeat"; "masc_broadcast";
     "masc_worktree_create"; "masc_init";
     "masc_operator_digest";
@@ -263,8 +242,6 @@ let () =
       test_case "join failure" `Quick test_join_failure;
       test_case "claim success" `Quick test_claim_success;
       test_case "plan_set_task success" `Quick test_plan_set_task_success;
-      test_case "set_current_task alias matches canonical" `Quick
-        test_set_current_task_alias_matches_canonical;
     ];
     "retired_paths", [
       test_case "operation_start removed" `Quick test_operation_start_removed;
@@ -276,8 +253,8 @@ let () =
       test_case "complete_task removed" `Quick test_complete_task_removed;
       test_case "transition generic is safe" `Quick test_transition_generic_is_safe;
       test_case "transition claim call guidance" `Quick test_transition_claim_call_guidance;
-      test_case "add_task uses project_ready" `Quick test_add_task_success_uses_project_ready;
-      test_case "broadcast uses project_ready" `Quick test_broadcast_success_uses_project_ready;
+      test_case "add_task uses room_set" `Quick test_add_task_success_uses_room_set;
+      test_case "broadcast uses room_set" `Quick test_broadcast_success_uses_room_set;
       test_case "transition done call guidance" `Quick test_transition_done_call_guidance;
       test_case "transition release call guidance" `Quick test_transition_release_call_guidance;
     ];

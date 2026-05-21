@@ -1,14 +1,59 @@
 ---
 rfc: "0125"
 title: "Bounded subprocess discipline: per-call Switch scope + Fiber.first timeout race"
-status: Draft
+status: Active
 created: 2026-05-17
-updated: 2026-05-20
+updated: 2026-05-21
 author: vincent
 supersedes: []
 superseded_by: null
-related: ["0072", "0097", "0101", "0106"]
-implementation_prs: [15940,15973]
+related: ["0072", "0097", "0101", "0106", "0107"]
+implementation_prs: [15940, 15958, 15964, 15973]
+---
+
+## Progress audit (2026-05-21)
+
+Status promoted Draft → Active. Four of the five §3 Phases reached
+terminal state (Closed / Out of scope); P5 is in a 30-day soak
+window before semaphore over-release removal.
+
+| Phase | PR | State | Notes |
+|-------|-----|-------|------|
+| Phase 0 RFC body | #15940 | merged | originally allocated as RFC-0109; the merged commit subjects keep that prefix |
+| P1 ratchet | #15958 | **Closed** | `scripts/lint-spawn-bounded.sh` + `.github/workflows/spawn-bounded-check.yml` + 5-site allowlist (~135 LoC) |
+| P2 keeper_docker default audit | — | **Closed — no action** | audit revealed `default_timeout_sec () = 2s` (typed Sandbox caller); both sites already bounded |
+| P3 cascade socket budget | — | **Out of scope** | blocked on `Agent_sdk` upstream + RFC-0107 D.2c (cascade-facing client migration) |
+| P4 supervisor watchdog | #15964 | **Closed** | opt-in `MASC_KEEPER_MAX_TURN_WATCHDOG_TIMEOUT_SEC`, reuses `In_turn_hung` (no new variant) |
+| P5 deprecation marker | #15973 | tracking | `force_release_holder_for` marked WORKAROUND; removal blocked on 30-day `metric_keeper_oas_timeout_budget_watchdog_termination` trend → 0 |
+
+### implementation_prs reconciliation
+
+Previous frontmatter listed `[15940, 15973]` — the RFC body and the
+P5 WORKAROUND marker, but not the actual P1 / P4 implementation PRs.
+This audit fills `[15940, 15958, 15964, 15973]` so the list reflects
+every PR that *moved a phase forward*. The commit subjects for
+#15958 and #15964 still read "RFC-0109" — they predate the
+collision-recovery renumber to RFC-0125 that masc-mcp #15970 noted in
+the index entry.
+
+### Pending — P5 sunset
+
+Removal of `Keeper_turn_slot.force_release_holder_for` (~50 LoC) is
+the only remaining work, and it is *gated on observation* rather than
+implementation. P5 closeout PR will land once
+`metric_keeper_oas_timeout_budget_watchdog_termination` has held at
+0 for 30 consecutive days after P4 (#15964) merge.
+
+P4 (#15964) merged 2026-05-17 → 30-day window earliest 2026-06-16.
+
+### Related RFC
+
+- **RFC-0107** (Outbound HTTP stack consolidation, Active): P3
+  blocker. RFC-0107 Phase D.2b/D.2c unblocks the cascade socket
+  budget revisit.
+- **RFC-0106** (Cancel-safe try-with discipline): adjacent
+  Fun.protect → Switch.on_release discussion in §Open questions.
+
 ---
 
 # RFC-0125 — Bounded subprocess discipline

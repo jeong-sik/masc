@@ -72,11 +72,6 @@ let category_for_tool_opt = function
   | "masc_broadcast" -> Some BroadcastLimit
   | "masc_add_task"
   | "masc_claim_next"
-  | "masc_claim_task"
-  | "masc_set_current_task"
-  | "masc_complete_task"
-  | "masc_release_task"
-  | "masc_cancel_task"
   | "masc_update_priority"
   | "masc_plan_set_task"
   | "masc_plan_clear_task"

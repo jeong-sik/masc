@@ -41,6 +41,8 @@ let test_method_flag_makes_mutating () =
     (Keeper_tool_registry.is_gh_api_read_only "api -x=delete repos/o/r");
   r "api --method=patch = mutating" false
     (Keeper_tool_registry.is_gh_api_read_only "api --method=patch repos/o/r");
+  r "api --method 'patch' = mutating" false
+    (Keeper_tool_registry.is_gh_api_read_only "api --method 'patch' repos/o/r");
   r "api -X GET = read-only (explicit GET)" true
     (Keeper_tool_registry.is_gh_api_read_only "api -x get repos/o/r")
 

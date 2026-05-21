@@ -572,7 +572,7 @@
           <div class="card">
             <h3>Task lifecycle</h3>
             <div class="sequence">
-              <div class="step"><div><strong>Add / claim</strong><span><code>masc_add_task</code>, <code>masc_claim_task</code>, <code>masc_claim_next</code> enter <code>Tool_task</code>, then Coord JSONL-backed operations.</span><span class="ref">lib/tool_task.mli:10-20, lib/task_dispatch.mli:1-21</span></div></div>
+              <div class="step"><div><strong>Add / claim</strong><span><code>masc_add_task</code>, <code>masc_claim_next</code>, <code>masc_transition</code> enter <code>Tool_task</code>, then Coord JSONL-backed operations.</span><span class="ref">lib/tool_task.mli:10-20, lib/task_dispatch.mli:1-21</span></div></div>
               <div class="step"><div><strong>Transition</strong><span><code>masc_transition</code> validates action and status, with verification/approval gates where enabled.</span><span class="ref">lib/tool_task.mli:17, lib/task_dispatch.mli:91-116</span></div></div>
               <div class="step"><div><strong>Verification</strong><span>Submit-for-verification, approve, reject, PR evidence, and anti-rationalization verdicts are task lifecycle side effects.</span><span class="ref">lib/tool_task.ml:350, :1268, :1326</span></div></div>
             </div>

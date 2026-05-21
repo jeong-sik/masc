@@ -6,8 +6,6 @@
 module Keeper : sig
   type t =
     | Bash
-    | Bash_kill
-    | Bash_output
     | Board_cleanup
     | Board_comment
     | Board_comment_vote
@@ -82,13 +80,6 @@ module Masc : sig
     | Agent_update
     | Agent_card
     | Agents
-    | Autoresearch_cycle
-    | Autoresearch_inject
-    | Autoresearch_record_finding
-    | Autoresearch_search_findings
-    | Autoresearch_start
-    | Autoresearch_status
-    | Autoresearch_stop
     | Batch_add_tasks
     | Board_cleanup
     | Board_comment
@@ -111,10 +102,8 @@ module Masc : sig
     | Board_sub_board_update
     | Board_vote
     | Broadcast
-    | Cancel_task
     | Check
     | Claim_next
-    | Claim_task
     | Cleanup_zombies
     | Coordination_fsm_snapshot
     | Code_delete
@@ -125,19 +114,16 @@ module Masc : sig
     | Code_shell
     | Code_symbols
     | Code_write
-    | Complete_task
     | Dashboard
     | Deliver
     | Dispatch_plan
     | Goal_list
-    | Goal_review
     | Goal_transition
     | Goal_upsert
     | Goal_verify
     | Heartbeat
     | Join
     | Leave
-    | List_tasks
     | Messages
     | Note_add
     | Operation_pause
@@ -154,11 +140,7 @@ module Masc : sig
     | Plan_init
     | Plan_set_task
     | Plan_update
-    | Register_capabilities
-    | Release_task
     | Reset
-    | Coord_status
-    | Set_current_task
     | Status
     | Task_history
     | Tasks

@@ -1,6 +1,14 @@
+---
+title: Workaround Sunset Tracking for Keeper Dedup Carryovers
+rfc: 0144
+status: Active
+created: 2026-05-20
+implementation_prs: []
+---
+
 # RFC-0144 — Workaround Sunset Tracking for Keeper Dedup Carryovers
 
-- **Status**: Active
+- **Status**: Active (frontmatter SSOT)
 - **Created**: 2026-05-20
 - **Owner**: keeper observability
 - **Predecessors**: masc-mcp #16389, masc-mcp #16470
@@ -37,7 +45,7 @@ PR #16389 `error_kind` arms map to known root work:
 | `error_kind` | 24h volume (2026-05-16) | Root issue / RFC | Status |
 |---|---|---|---|
 | `Sandbox_docker` | 142 | RFC-0097 container reuse + sandbox lifecycle | Phase 1 merged (PR #15728). Phase 2 outstanding. |
-| `Path_syntax_blocked` | 62 | RFC-0091 PR-2 typed argv (execve-style) | PR-1 merged; PR-2 evidence inventory complete (`feedback`/`project_rfc_0091_pr_2_evidence_inventory.md`). |
+| retired path-tokenizer diagnostic | 62 | RFC-0091 typed argv (execve-style) | Removed from `Keeper_recording_error_state`; no remaining production/test classifier arm. |
 | `Stale_turn_timeout` | 13 | TBD — keeper turn lifecycle timeout audit needed | Unassigned. |
 | `Oas_timeout_budget` | 5 | TBD — OAS budget enforcement RFC needed | Unassigned. |
 | `Fiber_unresolved` | 18 | TBD — Eio fiber cancellation audit | Unassigned. |
@@ -93,7 +101,7 @@ The retry-loop dedup in `keeper_tools_oas.ml` is eligible for removal when:
 System_log 30-day rolling baseline at this RFC's creation (2026-05-20, derived from `system_log_2026-05-16.jsonl`, single-day sample extrapolated):
 
 - `Sandbox_docker`: 142/day
-- `Path_syntax_blocked`: 62/day
+- retired path-tokenizer diagnostic: 62/day baseline, removed from active classifier arms
 - `Other`: 59/day
 - Sum of sub-threshold: ~36/day
 - Total `record_error` events: ~300/day

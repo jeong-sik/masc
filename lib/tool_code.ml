@@ -64,43 +64,14 @@ let normalize_path path =
 
 let agent_playground_rel ~(config : Coord.config) ~(agent_name : string)
     : string =
-  let sandbox_profile =
-    if Coord_worktree.keeper_uses_docker_sandbox ~config ~agent_name then
-      Keeper_types.Docker
-    else
-      Keeper_types.Local
-  in
-  Keeper_sandbox.host_root_rel_of_profile sandbox_profile agent_name
+  Keeper_sandbox.host_root_rel_of_config_agent ~config ~agent_name
 
 let normalize_agent_relative_path ~(config : Coord.config) ~(agent_name : string)
     (raw_path : string) : string =
   let trimmed = String.trim raw_path in
   let own_bundle_rel = agent_playground_rel ~config ~agent_name in
   let trimmed =
-    (* Docker containers mount the playground at
-       /home/keeper/playground/<keeper-name>/ but the host side validates
-       against <base_path>/.masc/playground/docker/<keeper-name>/.  When a
-       keeper runs inside Docker, masc_code_read returns container paths;
-       masc_code_edit must translate them back. *)
-    if not (Filename.is_relative trimmed) then begin
-      let container_prefix =
-        Filename.concat
-          Env_config_keeper.DockerPlayground.container_playground_root
-          (Playground_paths.sanitize_keeper_name agent_name)
-      in
-      if String.starts_with ~prefix:(container_prefix ^ "/") trimmed then begin
-        let suffix =
-          String.sub trimmed
-            (String.length container_prefix + 1)
-            (String.length trimmed - String.length container_prefix - 1)
-        in
-        Filename.concat
-          (Filename.concat config.Coord.base_path own_bundle_rel)
-          suffix
-      end else
-        trimmed
-    end else
-      trimmed
+    Keeper_sandbox.host_path_of_visible_path ~config ~agent_name trimmed
   in
   let trimmed =
     if Filename.is_relative trimmed
@@ -514,7 +485,12 @@ let handle_code_symbols ~tool_name ~start_time ctx args =
               ] in
               Tool_result.ok ~tool_name ~start_time (Yojson.Safe.to_string response)
             with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-              Tool_result.error ~tool_name ~start_time (Printf.sprintf "Failed to read file: %s" (Stdlib.Printexc.to_string exn))
+              let err =
+                Tool_error.of_exn
+                  ~detail:(Printf.sprintf "Failed to read file: %s" (Stdlib.Printexc.to_string exn))
+                  exn
+              in
+              Tool_result.error ~tool_name ~start_time (Tool_error.to_string err)
           end
         end
   end

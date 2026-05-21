@@ -16,7 +16,7 @@ module Tool_search = Keeper_run_tools_search
     OAS hooks (before_turn, on_tool_executed) cannot return values, so
     they write into this single mutable record during Agent.run execution.
     After execution completes, {!freeze} produces an immutable snapshot. *)
-type hook_accumulator =
+type hook_accumulator = Keeper_run_tools_hook_accumulator.hook_accumulator =
   { mutable meta : Keeper_types.keeper_meta
   ; mutable tool_calls : tool_call_detail list
   ; mutable current_turn : int
@@ -33,8 +33,7 @@ type hook_accumulator =
   ; mutable contract_violation_retries : int
   }
 
-(** Immutable snapshot of hook outputs after OAS execution completes. *)
-type hook_outputs =
+type hook_outputs = Keeper_run_tools_hook_accumulator.hook_outputs =
   { out_meta : Keeper_types.keeper_meta
   ; out_tool_calls : tool_call_detail list
   ; out_completion_contract : Keeper_tool_disclosure.completion_contract
@@ -50,57 +49,51 @@ type hook_outputs =
   ; out_contract_violation_retries : int
   }
 
-let freeze (acc : hook_accumulator) : hook_outputs =
-  { out_meta = acc.meta
-  ; out_tool_calls = acc.tool_calls
-  ; out_completion_contract = acc.completion_contract
-  ; out_required_tool_use_seen = acc.required_tool_use_seen
-  ; out_keeper_surface_tool_used = acc.keeper_surface_tool_used
-  ; out_discovered = acc.discovered
-  ; out_tool_overlay = acc.tool_overlay
-  ; out_tool_surface = acc.tool_surface
-  ; out_requested_tool_names = acc.requested_tool_names
-  ; out_requested_tool_names_seen = acc.requested_tool_names_seen
-  ; out_receipt_tool_contract_result = acc.receipt_tool_contract_result
-  ; out_contract_violation_retries = acc.contract_violation_retries
-  }
+let freeze = Keeper_run_tools_hook_accumulator.freeze
+let merge_requested_tool_names_seen = Keeper_run_tools_hook_accumulator.merge_requested_tool_names_seen
+let record_requested_tool_names = Keeper_run_tools_hook_accumulator.record_requested_tool_names
+
+let task_scope_tool_names = Keeper_run_tools_task_scope.task_scope_tool_names
+let json_string_opt = Keeper_run_tools_task_scope.json_string_opt
+let task_id_scope_of_tool_input = Keeper_run_tools_task_scope.task_id_scope_of_tool_input
+
+let first_some left right =
+  match left with
+  | Some _ -> left
+  | None -> right
 ;;
 
-let merge_requested_tool_names_seen ~seen requested =
-  Keeper_types.dedupe_keep_order (seen @ requested)
+let current_task_id_of_meta (meta : Keeper_types.keeper_meta) =
+  Option.map Keeper_id.Task_id.to_string meta.current_task_id
 ;;
 
-let record_requested_tool_names (acc : hook_accumulator) requested =
-  acc.requested_tool_names <- requested;
-  acc.requested_tool_names_seen <-
-    merge_requested_tool_names_seen ~seen:acc.requested_tool_names_seen requested
+let task_id_scope_of_claim_output ~tool_name output_text =
+  if not (List.mem tool_name [ "keeper_task_claim"; "masc_claim_next" ])
+  then None
+  else (
+    let output_text =
+      match Tool_output.decode_from_oas output_text with
+      | Tool_output.Stored { preview; _ } -> preview
+      | Tool_output.Inline value -> value
+    in
+    try
+      match Yojson.Safe.from_string (Safe_ops.sanitize_text_utf8 output_text) with
+      | `Assoc fields ->
+        (match List.assoc_opt "result" fields with
+         | Some result ->
+           first_some (json_string_opt "task_id" result) (json_string_opt "task_id" (`Assoc fields))
+         | None -> json_string_opt "task_id" (`Assoc fields))
+      | _ -> None
+    with
+    | Yojson.Json_error _ -> None)
 ;;
 
-let task_scope_tool_names =
-  [ "masc_transition"
-  ; "masc_claim_task"
-  ; "masc_complete_task"
-  ; "masc_release_task"
-  ; "masc_cancel_task"
-  ; "keeper_task_done"
-  ; "keeper_task_submit_for_verification"
-  ; "keeper_task_force_done"
-  ; "keeper_task_force_release"
-  ]
-;;
-
-let json_string_opt name = function
-  | `Assoc fields ->
-    (match List.assoc_opt name fields with
-     | Some (`String value) when String.trim value <> "" -> Some (String.trim value)
-     | _ -> None)
-  | _ -> None
-;;
-
-let task_id_scope_of_tool_input ~tool_name input =
-  if List.mem tool_name task_scope_tool_names
-  then json_string_opt "task_id" input
-  else None
+let task_id_scope_of_tool_call ~tool_name ~input ~output_text ~meta =
+  first_some
+    (task_id_scope_of_tool_input ~tool_name input)
+    (first_some
+       (task_id_scope_of_claim_output ~tool_name output_text)
+       (current_task_id_of_meta meta))
 ;;
 
 type tool_search_hit_partition = Tool_search.tool_search_hit_partition =
@@ -1197,12 +1190,12 @@ let prepare_agent_setup
             then "ok"
             else "ok_no_progress"
           in
-          let task_id = task_id_scope_of_tool_input ~tool_name input in
           (match Keeper_registry.get ~base_path:config.base_path meta.name with
            | Some entry ->
              acc.meta <- entry.meta;
              meta_ref := entry.meta
            | None -> ());
+          let task_id = task_id_scope_of_tool_call ~tool_name ~input ~output_text ~meta:acc.meta in
           acc.tool_calls
           <- { tool_name
              ; provider
@@ -1704,7 +1697,7 @@ let prepare_agent_setup
                   ; tool_choice
                   ; tool_filter_override = Some tool_filter
                   }
-              | _ -> Agent_sdk.Hooks.Continue)
+              | _event -> Agent_sdk.Hooks.Continue)
       }
     in
     let hooks = Agent_sdk.Hooks.compose ~outer:before_turn_hook ~inner:base_hooks in

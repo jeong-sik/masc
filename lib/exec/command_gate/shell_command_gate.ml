@@ -1,13 +1,10 @@
-(* Phase 1 SSOT facade — see shell_command_gate.mli for the contract.
+(* Exec shell gate SSOT — see shell_command_gate.mli for the contract.
 
    This module deliberately routes every raw command through one
    [Bash.parse_string] call and exposes the result as a closed
-   [verdict] sum type. It does not mutate or replace any existing
-   path; [Worker_dev_tools] and the lib-root [Shell_command_gate]
-   keep their current behavior. New callers should target this
-   module so Phase 2..7 of the Plan can retire the duplicate
-   string-scanning paths without coordinating across multiple
-   surfaces. *)
+   [verdict] sum type. New callers should target this module so shell
+   policy decisions share the same parsed context instead of re-deriving
+   command shape with caller-local string scanners. *)
 
 module SI = Masc_exec.Shell_ir
 module PD = Masc_exec.Parsed
@@ -23,6 +20,7 @@ type reject_reason =
   | Command_not_in_allowlist of { bin : string }
   | Pipeline_segment_disallowed of { stage : int; bin : string }
   | Pipes_not_allowed of { stages : int }
+  | Redirect_disallowed_in_caller of { stage : int }
   | Path_outside_policy of { stage : int; raw_path : string; diagnostic : string }
 
 type parse_reason =
@@ -37,6 +35,7 @@ type parsed_context = {
   ast : SI.t;
   stages : SI.simple list;
   stage_bins : string list;
+  direct_dune_seen : bool;
 }
 
 type verdict =
@@ -52,6 +51,7 @@ type verdict =
 type allowlist_policy = {
   allowed_commands : string list;
   allow_pipes : bool;
+  
 }
 
 type path_policy = {
@@ -124,12 +124,126 @@ let ast_of_stages = function
   | many -> Some (SI.Pipeline (List.map (fun s -> SI.Simple s) many))
 ;;
 
+let arg_literal = function
+  | SI.Lit s -> Some s
+  | SI.Var _ | SI.Concat _ -> None
+;;
+
+let basename_word word = Filename.basename word
+
+let is_env_assignment_word word =
+  match String.index_opt word '=' with
+  | Some idx ->
+    idx > 0
+    && not (String.contains (String.sub word 0 idx) '/')
+    && not (String.starts_with ~prefix:"-" word)
+  | None -> false
+;;
+
+let rec drop_env_assignments = function
+  | [] -> []
+  | word :: rest ->
+    if is_env_assignment_word word then drop_env_assignments rest else word :: rest
+;;
+
+let rec command_words_run_dune = function
+  | [] -> false
+  | command :: args -> command_runs_dune command args
+
+and split_string_runs_dune text =
+  match Masc_exec_bash_parser.Bash_words.stages text with
+  | Error _ -> false
+  | Ok stages ->
+    List.exists
+      command_words_run_dune
+      (List.map
+         (List.map (fun w -> w.Masc_exec_bash_parser.Bash_words.value))
+         stages)
+
+and env_args_run_dune = function
+  | [] -> false
+  | word :: rest ->
+    if is_env_assignment_word word || word = "-" || word = "-i"
+       || word = "--ignore-environment" || word = "-0" || word = "--null"
+    then env_args_run_dune rest
+    else if word = "--"
+    then command_words_run_dune (drop_env_assignments rest)
+    else if word = "-S" || word = "--split-string"
+    then (
+      match rest with
+      | arg :: rest ->
+        split_string_runs_dune arg || env_args_run_dune rest
+      | [] -> false)
+    else if String.starts_with ~prefix:"--split-string=" word
+    then
+      let prefix = "--split-string=" in
+      let arg =
+        String.sub word (String.length prefix) (String.length word - String.length prefix)
+      in
+      split_string_runs_dune arg
+    else if word = "-u" || word = "--unset" || word = "-C" || word = "--chdir"
+    then (
+      match rest with
+      | _ :: rest -> env_args_run_dune rest
+      | [] -> false)
+    else if String.starts_with ~prefix:"-u" word
+            || String.starts_with ~prefix:"--unset=" word
+            || String.starts_with ~prefix:"--chdir=" word
+    then env_args_run_dune rest
+    else command_words_run_dune (word :: rest)
+
+and opam_exec_args_run_dune = function
+  | sub :: rest when String.equal (basename_word sub) "exec" ->
+    let rec after_sentinel = function
+      | [] -> false
+      | "--" :: rest -> command_words_run_dune rest
+      | _ :: rest -> after_sentinel rest
+    in
+    let rec without_sentinel = function
+      | [] -> false
+      | word :: rest ->
+        if is_env_assignment_word word
+        then without_sentinel rest
+        else if word = "--switch" || word = "--color" || word = "--root"
+                || word = "--cli"
+        then (
+          match rest with
+          | _ :: rest -> without_sentinel rest
+          | [] -> false)
+        else if String.starts_with ~prefix:"--switch=" word
+                || String.starts_with ~prefix:"--color=" word
+                || String.starts_with ~prefix:"--root=" word
+                || String.starts_with ~prefix:"--cli=" word
+                || String.starts_with ~prefix:"-" word
+        then without_sentinel rest
+        else command_words_run_dune (word :: rest)
+    in
+    after_sentinel rest || without_sentinel rest
+  | _ -> false
+
+and command_runs_dune command args =
+  match basename_word command with
+  | "dune" -> true
+  | "env" -> env_args_run_dune args
+  | "opam" -> opam_exec_args_run_dune args
+  | _ -> false
+;;
+
+let stage_runs_dune (stage : SI.simple) =
+  let command = BIN.to_string stage.SI.bin in
+  let args = List.filter_map arg_literal stage.SI.args in
+  command_runs_dune command args
+;;
+
+let raw_runs_dune raw = split_string_runs_dune raw
+
 let make_context ~stages =
   match ast_of_stages stages with
   | None -> None
   | Some ast ->
     let stage_bins = List.map (fun s -> BIN.to_string s.SI.bin) stages in
-    Some { ast; stages; stage_bins }
+    let direct_dune_seen = List.exists stage_runs_dune stages in
+    Some { ast; stages; stage_bins; direct_dune_seen }
 ;;
 
 let bin_allowed ~(allowed_commands : string list) (bin : string) =
@@ -148,21 +262,37 @@ let first_disallowed_stage ~allowed_commands stage_bins =
   scan 1 stage_bins
 ;;
 
-(* Extract every literal argument from a simple stage so the path
-   policy can be applied. [Var] and [Concat] are intentionally
-   skipped at Phase 1 — they cannot be statically classified without
-   the metadata layer that Plan Phase 5 introduces. *)
-let literal_args (simple : SI.simple) : string list =
-  List.filter_map
-    (function
-      | SI.Lit s -> Some s
-      | SI.Var _ | SI.Concat _ -> None)
-    simple.SI.args
+let stage_has_redirect (simple : SI.simple) : bool =
+  simple.SI.redirects <> []
+;;
+
+(* Extract every literal path-bearing surface from a simple stage so
+   the path policy can be applied uniformly. [Var] and [Concat] are
+   intentionally skipped at Phase 1 — they cannot be statically
+   classified without the metadata layer that Plan Phase 5
+   introduces. *)
+let literal_path_surfaces (simple : SI.simple) : string list =
+  let argv =
+    List.filter_map
+      (function
+        | SI.Lit s -> Some s
+        | SI.Var _ | SI.Concat _ -> None)
+      simple.SI.args
+  in
+  let redirects =
+    List.filter_map
+      (function
+        | Masc_exec.Redirect_scope.File { target; _ } ->
+          Some (Masc_exec.Path_scope.raw target)
+        | Masc_exec.Redirect_scope.Fd_to_fd _ -> None)
+      simple.SI.redirects
+  in
+  argv @ redirects
 ;;
 
 (* Returns the first path-policy failure encountered, [None] if every
-   stage's literal arguments are accepted. Stage index is 1-based to
-   match the [Pipeline_segment_disallowed] convention. *)
+   stage's literal path-bearing surface is accepted. Stage index is
+   1-based to match the [Pipeline_segment_disallowed] convention. *)
 let first_path_failure ~(path_policy : path_policy) stages =
   match path_policy.classify with
   | None -> None
@@ -177,11 +307,20 @@ let first_path_failure ~(path_policy : path_policy) stages =
              | `Allow -> scan_args rest_args
              | `Deny diag -> Some (idx, raw, diag))
         in
-        (match scan_args (literal_args stage) with
+        (match scan_args (literal_path_surfaces stage) with
          | Some hit -> Some hit
          | None -> scan_stages (idx + 1) rest)
     in
     scan_stages 1 stages
+;;
+
+let first_redirect_stage stages =
+  let rec scan idx = function
+    | [] -> None
+    | stage :: rest ->
+      if stage_has_redirect stage then Some idx else scan (idx + 1) rest
+  in
+  scan 1 stages
 ;;
 
 let apply_policy ~(allowlist : allowlist_policy) ~(path_policy : path_policy)
@@ -225,15 +364,26 @@ let apply_policy ~(allowlist : allowlist_policy) ~(path_policy : path_policy)
          in
          Reject { context; reason; diagnostic }
        | None ->
-         (match first_path_failure ~path_policy stages with
-          | Some (stage_idx, raw_path, diagnostic) ->
+         (match
+            first_redirect_stage stages
+          with
+          | Some stage ->
             Reject
               { context
-              ; reason =
-                  Path_outside_policy { stage = stage_idx; raw_path; diagnostic }
-              ; diagnostic
+              ; reason = Redirect_disallowed_in_caller { stage }
+              ; diagnostic =
+                  Printf.sprintf "pipeline stage %d carries a redirect" stage
               }
-          | None -> Allow context))
+          | None ->
+            (match first_path_failure ~path_policy stages with
+             | Some (stage_idx, raw_path, diagnostic) ->
+               Reject
+                 { context
+                 ; reason =
+                     Path_outside_policy { stage = stage_idx; raw_path; diagnostic }
+                 ; diagnostic
+                 }
+             | None -> Allow context)))
 ;;
 
 let parse_only_to_stages (parsed : SI.t PD.t) :
@@ -258,6 +408,16 @@ let gate ?caller:_ ~raw ~allowlist ~path_policy ~sandbox () : verdict =
      ignored-argument pattern is intentional: this iter establishes
      the API surface; PR-3 wires the counters. *)
   match parse_only_to_stages (Masc_exec_bash_parser.Bash.parse_string raw) with
+  | Error (`Cannot_parse reason) -> Cannot_parse { reason }
+  | Error (`Too_complex reason) -> Too_complex { reason }
+  | Ok stages -> apply_policy ~allowlist ~path_policy ~sandbox ~stages
+;;
+
+let gate_typed ?caller:_ ~ir ~allowlist ~path_policy ~sandbox () : verdict =
+  (* Typed callers have already crossed their schema boundary, so this
+     entrypoint intentionally skips Bash.parse_string while preserving
+     the same policy and verdict surface as [gate]. *)
+  match parse_only_to_stages (PD.Parsed ir) with
   | Error (`Cannot_parse reason) -> Cannot_parse { reason }
   | Error (`Too_complex reason) -> Too_complex { reason }
   | Ok stages -> apply_policy ~allowlist ~path_policy ~sandbox ~stages
@@ -291,6 +451,7 @@ let reject_reason_tag = function
   | Command_not_in_allowlist _ -> "command_not_in_allowlist"
   | Pipeline_segment_disallowed _ -> "pipeline_segment_disallowed"
   | Pipes_not_allowed _ -> "pipes_not_allowed"
+  | Redirect_disallowed_in_caller _ -> "redirect_disallowed_in_caller"
   | Path_outside_policy _ -> "path_outside_policy"
 ;;
 
@@ -327,19 +488,3 @@ let last_stage_bin context =
 ;;
 
 let is_pipeline context = List.length context.stage_bins > 1
-
-(* RFC-0092 Phase C authority — facade-side predicate.
-
-   This sub-library cannot depend on [masc_mcp.gate_diff_types]
-   (which lives in the root masc_mcp library and would introduce a
-   cycle), so the env read is duplicated here.  The truthy-value set
-   must stay byte-for-byte identical to [Gate_diff_types.
-   typed_authority_enabled] — both predicates are the single
-   operator-facing SSOT for [MASC_BASH_TYPED_AUTHORITY] and divergence
-   would silently break the authority flip.  If a future RFC promotes
-   the predicate to a shared dep, delete this copy. *)
-let is_authoritative () =
-  match Sys.getenv_opt "MASC_BASH_TYPED_AUTHORITY" with
-  | Some ("1" | "true" | "TRUE" | "yes" | "on") -> true
-  | _ -> false
-;;

@@ -1,3 +1,11 @@
+---
+title: Keeper heartbeat — Event Layer / Policy Layer separation
+rfc: 0020
+status: Active
+created: 2026-04-30
+implementation_prs: []
+---
+
 # RFC-0020: Keeper heartbeat — Event Layer / Policy Layer separation
 
 - **Status**: Draft

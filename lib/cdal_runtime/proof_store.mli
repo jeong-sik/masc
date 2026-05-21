@@ -18,6 +18,11 @@ type resolved_ref =
   ; path : string
   }
 
+type terminal_marker =
+  | Aborted
+  | Skipped
+  | Tombstoned
+
 val default_config : config
 
 (** Directory containing all proof run bundles for [config]. *)
@@ -26,6 +31,28 @@ val proofs_dir : config -> string
 
 (** Create directory structure for a new run. *)
 val init_run : config -> run_id:string -> unit
+
+(** Path to status.json for a run. *)
+val run_status_path : config -> run_id:string -> string
+
+(** True when manifest.json and contract.json are both present. *)
+val run_has_manifest_and_contract : config -> run_id:string -> bool
+
+(** Write an explicit terminal marker for an initialized run that will not
+    produce a complete manifest/contract bundle. *)
+val write_terminal_marker
+  :  config
+  -> run_id:string
+  -> marker:terminal_marker
+  -> reason:string
+  -> unit
+
+(** Mark a run complete after manifest.json and contract.json have both
+    been written. Health still treats the files themselves as authoritative. *)
+val write_finalized_marker : config -> run_id:string -> unit
+
+(** True when status.json carries an explicit terminal marker. *)
+val has_terminal_marker : config -> run_id:string -> bool
 
 (** Write the 15-field proof manifest. *)
 val write_manifest : config -> run_id:string -> Cdal_proof.t -> unit

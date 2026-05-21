@@ -73,27 +73,6 @@ let schemas : tool_schema list = [
     ];
   };
   {
-    name = "masc_register_capabilities";
-    description = "Register your skill tags so other agents can discover you by capability.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("agent_name", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Your agent name");
-        ]);
-        ("capabilities", `Assoc [
-          ("type", `String "array");
-          ("items", `Assoc [("type", `String "string")]);
-          ("description", `String "List of your capabilities (e.g., ['typescript', 'testing'])");
-        ]);
-      ]);
-      ("required", `List [`String "agent_name"; `String "capabilities"]);
-      ("additionalProperties", `Bool false);
-    ];
-  };
-
-  {
     name = "masc_get_metrics";
     description = "Fetch raw performance metrics for an agent: task completion, timing, error rates, collaboration history.";
     input_schema = `Assoc [

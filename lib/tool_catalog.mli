@@ -33,7 +33,6 @@ type tool_group =
   | Masc_plan
   | Masc_worktree
   | Masc_code
-  | Masc_autoresearch
   | Masc_agent
   | Masc_core
 

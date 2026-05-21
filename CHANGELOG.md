@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.19.28] - 2026-05-21
+
+### Changed
+- Bumped `agent_sdk` (OAS) pin from `v0.196.7` to `v0.196.8` and SHA from
+  `609600d8` to `8ea10c7b` (origin/main HEAD). Picks up `feat(error): carry
+  completion contract violation detail` (#1660), `test(cascade): cover capacity
+  admission fast-fail` (#1659), and CLI/capabilities refactors (#1662, #1663).
+
 ## [0.19.27] - 2026-05-20
 
 ### Changed
@@ -32,7 +40,7 @@
 - Typed `drain_outcome` sum for background tasks and a typed `validator_stage` enum in `exec_core` (RFC-0092 Cluster C).
 
 ### Changed
-- Bumped the downstream OAS `agent_sdk` pin to `v0.196.4` and raised the dependency floor accordingly.
+- Bumped the downstream OAS `agent_sdk` pin to `v0.196.7` and raised the dependency floor accordingly.
 - Promoted multiple permissive `_ ->` and string-keyed fallbacks to typed closed-sum splits (RFC-0070, RFC-0092, RFC-0093, RFC-0126 discipline).
 - Replaced raw try/with handlers with `int_of_string_opt`-style total parsers and named the JSON shape in `of_json` errors across several boundary sites.
 
@@ -1341,10 +1349,10 @@ Aggregate of 185 commits since v0.14.0 (26 feat / 93 fix / 30 perf-refactor-obs-
   replaced by two: `local` runs on the host with filesystem scoped to the
   keeper playground; `docker` runs in the hardened container. Git credential
   mounting is no longer a separate profile — when `sandbox_profile=docker` and
-  `keeper_bash` cmd starts with `git`/`gh`, the dispatcher transparently
-  upgrades to network=inherit with gh/git credential mounts for that one
-  command. Response JSON carries `git_creds_enabled` so observers can tell
-  which path fired. Old profile strings still load via a compat layer that
+  typed Bash targets `git`/`gh`, the dispatcher transparently upgrades to
+  network=inherit with gh/git credential mounts for that one command. Response
+  JSON carries `git_creds_enabled` so observers can tell which path fired. Old
+  profile strings still load via a compat layer that
   warns and maps (`legacy_local→local`, `docker_hardened|docker_with_git→docker`);
   the compat arm is removable once state JSON/TOML files are migrated. See
   RFC-0006 §8 Addendum.

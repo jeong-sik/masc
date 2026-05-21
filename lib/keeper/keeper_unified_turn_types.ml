@@ -127,7 +127,7 @@ let cascade_exhausted_failure_reason_of_raw_error ~detail raw_error =
   | Some (Cascade_error_classify.Capacity_backpressure { detail = capacity_detail; _ }) ->
     Some
       (Keeper_registry.Provider_runtime_error
-         { code = "capacity_exhausted"
+         { code = "capacity_backpressure"
          ; detail = capacity_detail
          ; provider_id = None
          ; http_status = None
@@ -141,7 +141,13 @@ let cascade_exhausted_failure_reason_of_raw_error ~detail raw_error =
       | Cascade_error_classify.Turn_timeout _
       | Cascade_error_classify.Oas_timeout_budget _
       | Cascade_error_classify.Max_tokens_ceiling_violation _
-      | Cascade_error_classify.Ambiguous_post_commit _ )
+      | Cascade_error_classify.Ambiguous_post_commit _
+      (* RFC-0159 Phase A: typed [Internal_*] variants are not
+         cascade-exhaustion reasons; they map to opaque
+         internal-error events upstream. *)
+      | Cascade_error_classify.Internal_unhandled_exception _
+      | Cascade_error_classify.Internal_bridge_exception _
+      | Cascade_error_classify.Internal_contract_rejected _ )
   | None -> None
 ;;
 

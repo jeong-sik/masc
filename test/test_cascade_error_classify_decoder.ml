@@ -109,7 +109,7 @@ let test_roundtrip_bare_string_reason () =
 let test_roundtrip_capacity_backpressure () =
   let payload =
     `Assoc
-      [ ("kind", `String "capacity_exhausted")
+      [ ("kind", `String "capacity_backpressure")
       ; ("cascade_name", `String "primary")
       ; ("source", `String "client_capacity")
       ; ("detail", `String "client capacity key glm is full")
@@ -197,6 +197,93 @@ let test_malformed_reason_payload_decodes_to_none () =
     "malformed reason payload → None (no sentinel synthesized)"
     None decoded
 
+(* --- RFC-0159 Phase A: typed Internal_* substrate -------------------- *)
+
+(** [cascade_runner.execute] exception path round-trips to typed
+    [Internal_unhandled_exception] with the original site + exn_repr
+    preserved (no Reason_internal_error fall-through). *)
+let test_phase_a_unhandled_exception_roundtrip () =
+  let emitted =
+    Classify.sdk_error_of_masc_internal_error
+      (Classify.Internal_unhandled_exception
+         { site = "cascade_runner.execute"
+         ; exn_repr = "Failure(\"boom\")"
+         })
+  in
+  let decoded = Classify.classify_masc_internal_error emitted in
+  match decoded with
+  | Some (Classify.Internal_unhandled_exception { site; exn_repr }) ->
+    Alcotest.(check string) "site preserved" "cascade_runner.execute" site;
+    Alcotest.(check string) "exn_repr preserved" "Failure(\"boom\")" exn_repr;
+    Alcotest.(check string)
+      "kind"
+      "internal_unhandled_exception"
+      (Classify.kind_of_masc_internal_error
+         (Classify.Internal_unhandled_exception
+            { site = "cascade_runner.execute"
+            ; exn_repr = "Failure(\"boom\")"
+            }))
+  | _ -> Alcotest.fail "expected Internal_unhandled_exception"
+
+(** [masc_oas_bridge] exception path round-trips to typed
+    [Internal_bridge_exception] with caller + exn_repr preserved. *)
+let test_phase_a_bridge_exception_roundtrip () =
+  let emitted =
+    Classify.sdk_error_of_masc_internal_error
+      (Classify.Internal_bridge_exception
+         { caller = "auto_responder"
+         ; exn_repr = "Not_found"
+         })
+  in
+  let decoded = Classify.classify_masc_internal_error emitted in
+  match decoded with
+  | Some (Classify.Internal_bridge_exception { caller; exn_repr }) ->
+    Alcotest.(check string) "caller preserved" "auto_responder" caller;
+    Alcotest.(check string) "exn_repr preserved" "Not_found" exn_repr
+  | _ -> Alcotest.fail "expected Internal_bridge_exception"
+
+(** [contract_runner] rejection path round-trips to typed
+    [Internal_contract_rejected] with reason preserved.  Note that the
+    emission site for this variant lives in cdal_runtime (a separate
+    sub-library) but the wire-format payload is identical so the
+    classifier in masc_mcp parses it the same way. *)
+let test_phase_a_contract_rejected_roundtrip () =
+  let emitted =
+    Classify.sdk_error_of_masc_internal_error
+      (Classify.Internal_contract_rejected
+         { reason = "risk_class out of bounds" })
+  in
+  let decoded = Classify.classify_masc_internal_error emitted in
+  match decoded with
+  | Some (Classify.Internal_contract_rejected { reason }) ->
+    Alcotest.(check string)
+      "reason preserved"
+      "risk_class out of bounds"
+      reason
+  | _ -> Alcotest.fail "expected Internal_contract_rejected"
+
+(** The cdal_runtime substrate emits the same prefixed payload as the
+    masc_mcp classifier expects.  This pins the wire-format
+    compatibility so a drift between the two prefix strings is caught
+    at test time. *)
+let test_phase_a_cdal_substrate_wire_compat () =
+  let cdal_sdk_err =
+    Masc_mcp_cdal_runtime.Internal_error_substrate.sdk_error_of
+      (Masc_mcp_cdal_runtime.Internal_error_substrate.Contract_rejected
+         { reason = "guardrail tripped" })
+  in
+  let decoded = Classify.classify_masc_internal_error cdal_sdk_err in
+  match decoded with
+  | Some (Classify.Internal_contract_rejected { reason }) ->
+    Alcotest.(check string)
+      "cdal-emitted reason parsed by masc_mcp classifier"
+      "guardrail tripped"
+      reason
+  | _ ->
+    Alcotest.fail
+      "cdal_runtime substrate payload not recognized by masc_mcp \
+       classifier — prefix or kind drift"
+
 let () =
   Alcotest.run "cascade_error_classify_decoder"
     [ ( "round-trip"
@@ -220,5 +307,20 @@ let () =
             "malformed reason payload"
             `Quick
             test_malformed_reason_payload_decodes_to_none
+        ] )
+    ; ( "RFC-0159 Phase A typed Internal_* substrate"
+      , [ Alcotest.test_case
+            "Internal_unhandled_exception round-trip" `Quick
+            test_phase_a_unhandled_exception_roundtrip
+        ; Alcotest.test_case
+            "Internal_bridge_exception round-trip" `Quick
+            test_phase_a_bridge_exception_roundtrip
+        ; Alcotest.test_case
+            "Internal_contract_rejected round-trip" `Quick
+            test_phase_a_contract_rejected_roundtrip
+        ; Alcotest.test_case
+            "cdal_runtime substrate ↔ masc_mcp classifier wire-compat"
+            `Quick
+            test_phase_a_cdal_substrate_wire_compat
         ] )
     ]

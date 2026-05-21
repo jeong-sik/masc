@@ -12,12 +12,12 @@
 
     The counter is maintained by explicit [try_acquire] / release
     pairs at the cascade call site.  No timeout, no queueing, no
-    blocking — if no slot is free, [try_acquire] returns [None] and
+    blocking — if no permit is free, [try_acquire] returns [None] and
     the strategy's capacity filter will have already skipped this
     endpoint in its ordering.  Defense-in-depth: both the filter and
     the acquire check the same counter, so a race between filter and
-    acquire simply yields a [None] that the cascade treats as
-    [Slot_full] and tries the next candidate.
+    acquire simply yields a [None] that the cascade treats as typed
+    capacity backpressure before trying the next candidate.
 
     @since 0.9.6 *)
 
@@ -113,9 +113,9 @@ val try_acquire : string -> release option
     explicit control flow).  Returns [None] when:
     - [url] is not registered → unlimited, no counter maintained
       (caller should treat [None] as "no client cap, go ahead");
-    - [url] is registered and [process_available = 0] → slot full,
-      caller should treat [None] as [Slot_full] and try another
-      candidate.
+    - [url] is registered and [process_available = 0] → client capacity
+      unavailable; caller should treat [None] as typed backpressure and
+      try another candidate.
 
     Disambiguate these two [None] cases via {!capacity}: if
     [capacity url = None] the URL is unregistered; otherwise it is

@@ -137,8 +137,9 @@ transport truth를 빠르게 분리하고 싶으면 먼저 `./benchmarks/quick-b
 
 ### Repo Synthesis
 
-repo-synthesis는 `masc_autoresearch_cycle` 내부에서 cycle system을 통해 dispatch된다.
-별도 front-door tool은 retired 되었다 (config.ml retired list 참조).
+repo-synthesis의 legacy `masc_autoresearch_cycle` entry path는 retired 되었다.
+새 front-door tool을 만들지 않고, command-plane truth surfaces와 proof/report
+artifacts를 읽는 방향으로만 유지한다.
 
 - read path:
   - dashboard는 `/api/v1/dashboard/repo-synthesis`와 proof/report artifact를 읽는 read-only surface
@@ -205,6 +206,12 @@ runtime when `kern.maxfilesperproc` is merely near the current host-wide file
 count. Keep the script above as the default visibility path. Set a positive
 `MASC_KEEPER_HOST_FD_HOTSPOT_HEADROOM` only for a deliberately conservative
 operator session.
+
+The status script prints `Top worktree fanout by keeper/repo` and a
+`top_fanout_cleanup_dry_run_command=` for the largest keeper/repo bucket. Use
+that targeted dry-run first when `worktree_entries` is high but
+`top_holder_fd_count=0`; it separates broad playground pressure from an active
+Docker Desktop FD holder spike.
 
 For a broader host check, `scripts/nofile-status.sh` includes this same Docker
 playground section when `MASC_BASE_PATH` or `MASC_DOCKER_PLAYGROUND_ROOT` is

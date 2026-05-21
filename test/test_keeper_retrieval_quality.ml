@@ -210,13 +210,6 @@ let test_masc_code_search_en () =
   ignore (assert_retrieves ~label:"masc_code_en" idx
     "search the codebase for function definitions" "masc_code_search")
 
-(* masc_governance_status schema is unavailable after governance tool retirement.
-   Test replaced with autoresearch retrieval. *)
-let test_masc_autoresearch_kr () =
-  let idx = build_keeper_index () in
-  ignore (assert_retrieves ~label:"autoresearch_kr" idx
-    "자동연구 리서치 사이클" "masc_autoresearch_cycle")
-
 (* masc_plan_get is not retrievable via BM25 with Korean queries:
    "계획", "플랜" are common terms that produce no BM25 match against
    350+ tool descriptions, even with Korean aliases.
@@ -349,7 +342,6 @@ let () =
         [
           Alcotest.test_case "masc code search (kr)" `Quick test_masc_code_search_kr;
           Alcotest.test_case "masc code search (en)" `Quick test_masc_code_search_en;
-          Alcotest.test_case "masc autoresearch (kr)" `Quick test_masc_autoresearch_kr;
           Alcotest.test_case "masc worktree (kr)" `Quick test_masc_worktree_kr;
         ] );
       ( "discrimination",

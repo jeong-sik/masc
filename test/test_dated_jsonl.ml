@@ -247,6 +247,33 @@ let test_prune_zero_days () =
   let deleted = Dated_jsonl.prune store ~days:0 in
   check int "zero days prunes nothing" 0 deleted
 
+let test_max_bytes_prunes_oldest_completed_day_files () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir "dated_jsonl_max_bytes" in
+  let old_file_1 = Filename.concat (Filename.concat dir "2020-01") "01.jsonl" in
+  let old_file_2 = Filename.concat (Filename.concat dir "2020-01") "02.jsonl" in
+  write_dated_file dir "2020-01" "01"
+    [ Printf.sprintf {|{"payload":"%s"}|} (String.make 80 'a') ];
+  write_dated_file dir "2020-01" "02"
+    [ Printf.sprintf {|{"payload":"%s"}|} (String.make 80 'b') ];
+  let store = Dated_jsonl.create ~base_dir:dir ~max_bytes:120 () in
+  Dated_jsonl.append store (make_json 1);
+  check bool "oldest file removed" false (Sys.file_exists old_file_1);
+  check bool "second old file removed" false (Sys.file_exists old_file_2);
+  check (list int) "current day survives" [ 1 ]
+    (Dated_jsonl.read_recent store 10 |> List.map json_i)
+
+let test_max_bytes_preserves_current_day_file () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir "dated_jsonl_max_bytes_current" in
+  let store = Dated_jsonl.create ~base_dir:dir ~max_bytes:1 () in
+  Dated_jsonl.append store
+    (`Assoc [ ("payload", `String (String.make 128 'x')) ]);
+  check int "current file row survives tiny cap" 1
+    (List.length (Dated_jsonl.read_recent store 10))
+
 (* ── concurrent append safety ──────────────────────────── *)
 
 let test_concurrent_append () =
@@ -315,6 +342,10 @@ let () =
         [
           test_case "removes old files" `Quick test_prune;
           test_case "zero days safe" `Quick test_prune_zero_days;
+          test_case "max bytes prunes oldest completed day-files" `Quick
+            test_max_bytes_prunes_oldest_completed_day_files;
+          test_case "max bytes preserves current day-file" `Quick
+            test_max_bytes_preserves_current_day_file;
         ] );
       ( "concurrent",
         [

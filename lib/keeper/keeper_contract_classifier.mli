@@ -8,6 +8,11 @@ type actionable_signal =
       (** Caller observed neither tasks, board activity, nor
           discovered-work markers in the structured world snapshot. *)
 
+type actionable_signal_context = private
+  | No_actionable_signal_context
+  | Turn_affordance_requires_tool
+  | Keeper_world_signal of actionable_signal
+
 type contract_status =
   | Tool_surface_mismatch of { missing : string list }
   | Missing_required_tool_use
@@ -18,6 +23,7 @@ type contract_status =
   | Satisfied_execution
 
 val actionable_signal_label : actionable_signal -> string
+val actionable_signal_context_label : actionable_signal_context -> string
 val contract_status_label : contract_status -> string
 val pp_contract_status : Format.formatter -> contract_status -> unit
 
@@ -55,15 +61,11 @@ val of_keeper_world_observation :
     The precedence reflects the action ladder a keeper should
     descend: a claimable task is the highest-leverage move; engaging
     with board activity is next; discovery hints are the weakest
-    signal. The current heuristic at [keeper_agent_run.ml:2285-2298]
-    short-circuits as a single boolean and discards the precedence;
-    routing decisions made on top of [actionable_signal] can choose
-    differently for each variant.
+    signal.
 
     Boolean-compatible:
     [classify_actionable_signal o <> No_actionable_signal]
-    is the structured equivalent of the existing
-    [actionable_signal_context = true]. *)
+    is the structured equivalent of a required actionable context. *)
 val classify_actionable_signal : world_observation -> actionable_signal
 
 (** Like [classify_actionable_signal], but skips a candidate signal when
@@ -76,10 +78,6 @@ val classify_actionable_signal : world_observation -> actionable_signal
 val classify_actionable_signal_for_tools :
   allowed_tool_names:string list -> world_observation -> actionable_signal
 
-(** Backward-compatible alias for [classify_actionable_signal_for_tools]. *)
-val classify_actionable_signal_with_allowed_tools :
-  allowed_tool_names:string list -> world_observation -> actionable_signal
-
 (** [requires_tool_support_for_allowed_tools ~allowed_tool_names o] is true
     when [o] carries an actionable signal that can be satisfied by at least
     one tool in [allowed_tool_names]. Use this before provider routing so the
@@ -88,7 +86,14 @@ val classify_actionable_signal_with_allowed_tools :
 val requires_tool_support_for_allowed_tools :
   allowed_tool_names:string list -> world_observation -> bool
 
+val make_actionable_signal_context
+  :  tool_gate_required:bool
+  -> actionable_signal:actionable_signal
+  -> actionable_signal_context
+
 (** [is_actionable s] is [false] iff [s = No_actionable_signal].
     Provided so callers comparing the structured signal against the
     legacy boolean can do so without a manual pattern match. *)
 val is_actionable : actionable_signal -> bool
+
+val is_actionable_signal_context : actionable_signal_context -> bool

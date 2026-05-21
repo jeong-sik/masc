@@ -95,6 +95,8 @@ resolved config root는 별도 탐색 규칙을 가진다: `MASC_CONFIG_DIR` -> 
 | `LLAMA_DEFAULT_MODEL` | string | `explicit-model-required` | 로컬 기본 모델 |
 | `MASC_LOCAL_MAX_TOKENS` | int | 32768 | 로컬 LLM max_tokens 상한 (fallback: `MASC_LLAMA_MAX_TOKENS`) |
 | `MASC_CANCELLATION_TOKEN_MAX_AGE_SEC` | float | 3600.0 | 취소 토큰 최대 수명 |
+| `MASC_TELEMETRY_RETENTION_DAYS` | int | 30 | `.masc/telemetry/YYYY-MM/DD.jsonl` day-file retention. 양수는 override, 0 이하는 retention 비활성화 |
+| `MASC_TELEMETRY_MAX_BYTES` | int | 52428800 | `.masc/telemetry` byte cap. 오래된 완료 day-file부터 삭제하며 현재 day-file은 보존. 양수는 override, 0 이하는 cap 비활성화 |
 | `NEO4J_URI` | string | `bolt://turntable.proxy.rlwy.net:11490` | Neo4j 접속 URI |
 | `NEO4J_HTTP_URI` | string | `""` | Neo4j HTTP API URI |
 | `NEO4J_USER` | string | `"neo4j"` | Neo4j 사용자 |

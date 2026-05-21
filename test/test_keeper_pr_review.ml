@@ -26,6 +26,19 @@ let with_env key value f =
       | None -> Unix.putenv key "")
     f
 
+let with_config_dir config_dir f =
+  let prior = Sys.getenv_opt "MASC_CONFIG_DIR" in
+  Fun.protect
+    ~finally:(fun () ->
+      (match prior with
+       | Some value -> Unix.putenv "MASC_CONFIG_DIR" value
+       | None -> Unix.putenv "MASC_CONFIG_DIR" "");
+      Config_dir_resolver.reset ())
+    (fun () ->
+      Unix.putenv "MASC_CONFIG_DIR" config_dir;
+      Config_dir_resolver.reset ();
+      f ())
+
 let temp_dir () =
   let dir = Filename.temp_file "keeper_pr_review_" "" in
   Unix.unlink dir;
@@ -123,6 +136,19 @@ let ensure_github_identity_bundle ~config github_identity =
     \    oauth_token: ghp_fake_test_token_for_docker_route\n\
     \    user: test-user\n"
 
+let with_keeper_identity_toml ~config ~keeper_name ~github_identity f =
+  let masc_dir = Filename.concat config.Coord.base_path Common.masc_dirname in
+  let config_dir = Filename.concat masc_dir "config" in
+  let keepers_dir = Filename.concat config_dir "keepers" in
+  ensure_dir keepers_dir;
+  ensure_github_identity_bundle ~config github_identity;
+  write_file
+    (Filename.concat keepers_dir (keeper_name ^ ".toml"))
+    (Printf.sprintf
+       "[keeper]\ngithub_identity = %S\ngit_identity_mode = \"github_identity\"\n"
+       github_identity);
+  with_config_dir config_dir f
+
 let fake_docker_echo_script =
   "#!/bin/sh\n\
 log_file=${KEEPER_DOCKER_LOG:-}\n\
@@ -215,6 +241,18 @@ let setup_docker_review f =
     Masc_mcp.Keeper_gh_env.root_github_identity;
   f ~config ~meta
 
+let setup_local_review f =
+  with_eio_fs @@ fun () ->
+  let base = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  ensure_dir (Filename.concat base Common.masc_dirname);
+  run_ok ~cwd:base "git init -q";
+  run_ok ~cwd:base
+    "git remote add origin https://github.com/jeong-sik/masc-mcp.git";
+  let config = Coord.default_config base in
+  let meta = make_meta ~name:"reviewer" ~sandbox:Keeper_types.Local () in
+  f ~base ~config ~meta
+
 let parse_field raw field =
   Yojson.Safe.from_string raw |> Json.member field
 
@@ -260,6 +298,15 @@ let test_social_preset_cannot_mutate_pr_reviews () =
     (KTPR.pr_review_mutation_preset_ok
        (Some Masc_mcp.Keeper_types.Social))
 
+let test_pr_number_of_args_uses_canonical_key_only () =
+  check int "canonical pr_number" 42
+    (KTPR.pr_number_of_args (`Assoc [ "pr_number", `Int 42 ]));
+  check int "legacy number ignored" 0
+    (KTPR.pr_number_of_args (`Assoc [ "number", `Int 42 ]));
+  check int "pr_number wins" 7
+    (KTPR.pr_number_of_args
+       (`Assoc [ "number", `Int 42; "pr_number", `Int 7 ]))
+
 let test_detects_rest_404 () =
   let sample =
     "failed to run git: HTTP 404: Not Found \
@@ -287,11 +334,74 @@ let test_passes_through_unrelated_errors () =
   check bool "empty output not flagged" false
     (KTPR.pr_not_found_in_output "")
 
+let test_local_pr_review_host_uses_exec_gate_cwd () =
+  setup_local_review @@ fun ~base ~config ~meta ->
+  let bin_dir = Filename.concat base "bin" in
+  let gh_args_log = Filename.concat base "gh-args.log" in
+  let gh_pwd_log = Filename.concat base "gh-pwd.log" in
+  ensure_dir bin_dir;
+  write_file
+    (Filename.concat bin_dir "gh")
+    "#!/bin/sh\n\
+     printf '%s\\n' \"$PWD\" >> \"$GH_PWD_LOG\"\n\
+     printf '%s\\n' \"$*\" >> \"$GH_ARGS_LOG\"\n\
+     if [ \"$1\" = \"pr\" ] && [ \"$2\" = \"view\" ]; then\n\
+     \  printf '%s\\n' \
+     '{\"title\":\"T\",\"body\":\"B\",\"state\":\"OPEN\",\"files\":[],\"reviews\":[],\"comments\":[],\"additions\":1,\"deletions\":0}'\n\
+     \  exit 0\n\
+     fi\n\
+     if [ \"$1\" = \"pr\" ] && [ \"$2\" = \"diff\" ]; then\n\
+     \  printf '%s\\n' 'diff --git a/README.md b/README.md'\n\
+     \  exit 0\n\
+     fi\n\
+     printf 'unexpected gh: %s\\n' \"$*\" >&2\n\
+     exit 2\n";
+  Unix.chmod (Filename.concat bin_dir "gh") 0o755;
+  let captured = ref [] in
+  Fun.protect
+    ~finally:(fun () -> Exec_tap.disable ())
+    (fun () ->
+       Exec_tap.enable ~writer:(fun line -> captured := line :: !captured);
+       with_env "GH_ARGS_LOG" gh_args_log @@ fun () ->
+       with_env "GH_PWD_LOG" gh_pwd_log @@ fun () ->
+       with_env "PATH" (bin_dir ^ ":" ^ Option.value ~default:"/usr/bin:/bin" (Sys.getenv_opt "PATH")) @@ fun () ->
+       let raw =
+         KTPR.handle_keeper_pr_review_read ~config ~meta
+           ~args:(`Assoc [ ("pr_number", `Int 13510) ])
+       in
+       check (option string) "read via host" (Some "host")
+         (parse_string_field raw "via");
+       check bool "fake gh ran from project root" true
+         (read_file gh_pwd_log
+          |> String.split_on_char '\n'
+          |> List.filter (fun s -> String.trim s <> "")
+          |> List.for_all (fun path ->
+            String.equal (Unix.realpath path) (Unix.realpath base)));
+       let process_lines =
+         List.filter
+           (fun line ->
+              contains_substring line
+                "\"kind\":\"Process_eio.run_argv_with_status\"")
+           !captured
+       in
+       check bool "process execution recorded" true (process_lines <> []);
+       check bool "cwd recorded" true
+         (List.exists
+            (fun line -> contains_substring line ("\"cwd\":\"" ^ base ^ "\""))
+            process_lines);
+       check bool "no cd wrapper in argv tap" false
+         (List.exists (fun line -> contains_substring line "cd ") process_lines);
+       check bool "repo flag reached gh" true
+         (contains_substring (read_file gh_args_log) "-R jeong-sik/masc-mcp"))
+
 let test_read_routes_docker_and_injects_repo_flag () =
   with_fake_docker @@ fun () ->
   setup_docker_review @@ fun ~config ~meta ->
   let log_path = Filename.concat config.Coord.base_path "docker.log" in
+  let configured_identity = "reviewer-gh" in
   with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
+  with_keeper_identity_toml ~config ~keeper_name:meta.name
+    ~github_identity:configured_identity @@ fun () ->
   let raw =
     KTPR.handle_keeper_pr_review_read ~config ~meta
       ~args:(`Assoc [ ("pr_number", `Int 13510) ])
@@ -307,11 +417,17 @@ let test_read_routes_docker_and_injects_repo_flag () =
     (Some "reviewer")
     (parse_nested_string_field raw "identity_attestation" "keeper");
   check (option string) "read attests effective identity"
-    (Some "root")
+    (Some configured_identity)
     (parse_nested_string_field raw "identity_attestation" "effective_github_identity");
+  check (option string) "read attests configured identity"
+    (Some configured_identity)
+    (parse_nested_string_field raw "identity_attestation" "configured_github_identity");
   check (option string) "read exposes credential identity"
-    (Some "root")
+    (Some configured_identity)
     (parse_nested_string_field raw "credential" "effective_github_identity");
+  check (option string) "read exposes configured credential identity"
+    (Some configured_identity)
+    (parse_nested_string_field raw "credential" "configured_github_identity");
   check bool "read omits credential state to avoid duplicate gh auth status"
     true
     (parse_field raw "credential"
@@ -355,6 +471,9 @@ let test_comment_and_approve_route_through_docker () =
   check (option string) "comment exposes credential identity"
     (Some "root")
     (parse_nested_string_field raw "credential" "effective_github_identity");
+  check (option string) "comment exposes no configured fallback identity"
+    None
+    (parse_nested_string_field raw "credential" "configured_github_identity");
   let raw =
     KTPR.handle_keeper_pr_review_comment ~config ~meta
       ~args:
@@ -516,6 +635,10 @@ let () =
       test_case "social preset cannot mutate PR reviews" `Quick
         test_social_preset_cannot_mutate_pr_reviews;
     ];
+    "args", [
+      test_case "pr_number is canonical" `Quick
+        test_pr_number_of_args_uses_canonical_key_only;
+    ];
     "pr_not_found_in_output", [
       test_case "REST 404 (HTTP 404: Not Found)" `Quick test_detects_rest_404;
       test_case "GraphQL Could not resolve" `Quick
@@ -524,6 +647,10 @@ let () =
         test_detects_no_pull_requests_found;
       test_case "unrelated errors are not false positives" `Quick
         test_passes_through_unrelated_errors;
+    ];
+    "host_route", [
+      test_case "host route uses Exec_gate cwd" `Quick
+        test_local_pr_review_host_uses_exec_gate_cwd;
     ];
     "docker_route", [
       test_case "with_env restores cleared variables" `Quick

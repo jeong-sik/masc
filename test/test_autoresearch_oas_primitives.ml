@@ -320,53 +320,6 @@ let test_build_verify_downgrade_rewrites_history () =
     "discard"
     (Lib.Autoresearch.decision_to_string next_history_head.decision)
 
-let test_start_seeds_source_only_target_file_into_managed_worktree () =
-  with_temp_dir "masc_autoresearch_seed" @@ fun root ->
-  with_base_path root @@ fun () ->
-  with_eio @@ fun ~sw ~clock ->
-  with_clean_state @@ fun () ->
-  let repo = Filename.concat root "repo" in
-  Unix.mkdir repo 0o755;
-  init_git_repo repo;
-  let target_file = ".masc/keepers/admin-keeper/test_ar.py" in
-  let source_path = Filename.concat repo target_file in
-  write_file source_path "print('seeded')\n";
-  let ctx : Lib.Tool_autoresearch.context =
-    {
-      base_path = root;
-      agent_name = Some "test";
-      start_operation = None;
-
-      config = None;
-      sw = Some sw;
-      clock = Some clock;
-    }
-  in
-  match
-    Lib.Tool_autoresearch.dispatch ctx ~name:"masc_autoresearch_start"
-      ~args:
-        (`Assoc
-          [
-            ("goal", `String "Improve keeper helper");
-            ("metric_fn", `String "/usr/bin/printf 1.0");
-            ("target_file", `String target_file);
-            ("workdir", `String repo);
-            ("model_model", `String "test:dummy");
-            ("max_cycles", `Int 1);
-          ])
-  with
-  | None -> fail "dispatch returned None"
-  | Some result when not result.success -> fail result.legacy_message
-  | Some result -> let payload = result.legacy_message in
-      let open Yojson.Safe.Util in
-      let json = Yojson.Safe.from_string payload in
-      let managed_workdir = json |> member "workdir" |> to_string in
-      check bool "seed warning present" true
-        (json |> member "warnings" |> to_list
-         |> List.exists (fun value -> to_string value = "target_file_seeded_from_source"));
-      check string "seeded content preserved" "print('seeded')\n"
-        (Fs_compat.load_file (Filename.concat managed_workdir target_file))
-
 let test_resolve_target_file_path_reports_realpath_errors () =
   let missing_root =
     Filename.concat (temp_dir "masc_autoresearch_missing_root") "missing"
@@ -492,8 +445,6 @@ let () =
             test_cycle_reinjects_diff_guard_lesson;
           test_case "build verify downgrade rewrites history" `Quick
             test_build_verify_downgrade_rewrites_history;
-          test_case "start seeds source-only target file" `Quick
-            test_start_seeds_source_only_target_file_into_managed_worktree;
           test_case "resolve target file reports realpath errors" `Quick
             test_resolve_target_file_path_reports_realpath_errors;
           test_case "cycle restores ignored target after empty diff" `Quick

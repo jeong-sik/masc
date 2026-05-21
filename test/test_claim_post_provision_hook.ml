@@ -89,11 +89,39 @@ let test_claim_next_hook_failure_is_observed () =
       (failure_metric_value ~site:"claim_next" ~agent_name:"claude")
   | Coord.Claim_next_no_unclaimed ->
     fail "claim_next unexpectedly found no unclaimed task"
-  | Coord.Claim_next_no_eligible { excluded_count } ->
+  | Coord.Claim_next_no_eligible { excluded_count; _ } ->
     failf "claim_next unexpectedly found no eligible task; excluded=%d"
       excluded_count
   | Coord.Claim_next_error msg ->
     failf "claim_next unexpectedly failed: %s" msg
+
+let test_claim_next_admission_filter_blocks_claim () =
+  with_test_env @@ fun config ->
+  let _ = Coord.add_task config ~title:"admission gated" ~priority:1 ~description:"" in
+  let admission_calls = ref 0 in
+  let result =
+    Coord.claim_next_r
+      config
+      ~agent_name:"claude"
+      ~admission_filter:(fun ~active_tasks:_ task ->
+        incr admission_calls;
+        not (String.equal task.Masc_domain.id "task-001"))
+      ()
+  in
+  (match result with
+   | Coord.Claim_next_no_eligible { scope_excluded_count; claim_pool_candidate_count; _ } ->
+     check int "scope/admission excluded" 1 scope_excluded_count;
+     check int "claim pool count" 1 claim_pool_candidate_count
+   | Coord.Claim_next_claimed { task_id; _ } ->
+     failf "admission filter should block claim, got %s" task_id
+   | Coord.Claim_next_no_unclaimed ->
+     fail "expected no_eligible, got no_unclaimed"
+   | Coord.Claim_next_error msg ->
+     failf "claim_next unexpectedly failed: %s" msg);
+  check int "admission filter called once" 1 !admission_calls;
+  match Coord.get_tasks_raw config with
+  | [ { Masc_domain.task_status = Masc_domain.Todo; _ } ] -> ()
+  | _ -> fail "admission-filtered task must remain Todo"
 
 let test_hook_not_invoked_on_already_claimed () =
   with_test_env @@ fun config ->
@@ -121,6 +149,8 @@ let () =
             test_hook_failure_does_not_block_claim;
           test_case "observes claim_next hook failure" `Quick
             test_claim_next_hook_failure_is_observed;
+          test_case "admission filter blocks claim_next" `Quick
+            test_claim_next_admission_filter_blocks_claim;
           test_case "skips already-claimed repeat" `Quick
             test_hook_not_invoked_on_already_claimed;
         ] );

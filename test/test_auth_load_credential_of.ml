@@ -4,8 +4,8 @@
 
    Pins the 3 explicit branches that distinguish "credential missing"
    from "credential exists but its owner does not match the dispatcher
-   ctx" — the dual-identity surfacing semantic that
-   [load_credential_with_aliases] silently absorbs.
+   ctx" — the dual-identity surfacing semantic that the removed
+   runtime alias fallback used to silently absorb.
 
    Cases:
    1. resolved_credential_stem = ctx_agent_name, file exists -> Ok
@@ -46,7 +46,7 @@ let write_cred ~base ~agent_name ~token_hash =
   let path = Filename.concat agents_dir (agent_name ^ ".json") in
   let json =
     Printf.sprintf
-      "{\"agent_name\":%S,\"token\":%S,\"role\":\"agent\",\"created_at\":\"2026-04-26T00:00:00Z\"}"
+      "{\"agent_name\":%S,\"token\":%S,\"role\":\"worker\",\"created_at\":\"2026-04-26T00:00:00Z\"}"
       agent_name token_hash
   in
   let oc = open_out path in

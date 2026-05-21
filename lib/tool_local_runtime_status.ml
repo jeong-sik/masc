@@ -112,10 +112,10 @@ let runtime_status_json ?(include_models = true) () =
   in
   `Assoc
     [
-      ("server_url", `String Env_config.Llama.server_url);
+      ("server_url", `String Env_config.Local_runtime.server_url);
       ("endpoint",
        `String
-         (Env_config.Llama.server_url
+         (Env_config.Local_runtime.server_url
           ^ Masc_network_defaults.openai_models_path));
       ("source", `String "llama.cpp runtime");
       ("models", `List (List.map (fun model -> `String model) models));

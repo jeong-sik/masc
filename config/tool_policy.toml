@@ -22,10 +22,6 @@ tools = ["keeper_board_get", "keeper_board_post", "keeper_board_comment", "keepe
 [groups.board_extended]
 tools = ["keeper_board_stats", "keeper_board_search"]
 
-# Full board group: backward compat alias.
-[groups.board]
-tools = ["keeper_board_get", "keeper_board_post", "keeper_board_comment", "keeper_board_vote", "keeper_board_list", "keeper_board_curation_read", "keeper_board_curation_submit", "keeper_board_stats", "keeper_board_search"]
-
 # Coordination split: core (task lifecycle) vs extended (audit, force ops).
 [groups.coordination_core]
 tools = [
@@ -122,16 +118,6 @@ tools = [
   "masc_messages", "masc_broadcast",
 ]
 
-# Full core: backward compat alias (essential + coordination).
-[masc.core]
-tools = [
-  "masc_status", "masc_tasks", "masc_claim_next", "masc_transition",
-  "masc_add_task", "masc_batch_add_tasks", "masc_agents", "masc_dashboard",
-  "masc_agent_card", "masc_tool_help", "masc_web_search", "masc_web_fetch",
-  "masc_join", "masc_leave", "masc_who", "masc_heartbeat",
-  "masc_messages", "masc_broadcast",
-]
-
 [masc.dispatch]
 tools = [
   "masc_tasks",
@@ -144,12 +130,9 @@ tools = [
   "masc_keeper_msg_result",
   "masc_keeper_list",
   "masc_keeper_status",
-  "masc_goal_review",
 ]
 
 # Goal lifecycle: Goal Store + FSM proof surface.
-# `masc_goal_review` stays in dispatch as a legacy compatibility wrapper;
-# keepers that need feature-proof Goal work should use this group instead.
 [masc.goal]
 tools = [
   "masc_goal_list",

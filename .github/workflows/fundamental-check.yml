@@ -68,6 +68,26 @@ jobs:
       - name: Run lint
         run: bash scripts/lint/shell-legacy-purge-ratchet.sh
 
+  timeout-env-ceiling:
+    name: Timeout env knob ceiling ratchet (RFC-0138)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ripgrep
+        run: sudo apt-get install -y -qq ripgrep
+      - name: Run lint
+        run: bash scripts/lint/timeout-env-ceiling.sh
+
+  no-actionable-signal-bool-context:
+    name: No actionable signal bool context
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ripgrep
+        run: sudo apt-get install -y -qq ripgrep
+      - name: Run lint
+        run: bash scripts/lint/no-actionable-signal-bool-context.sh
+
   no-provider-name-hardcoding:
     name: Provider name hardcoding ratchet
     runs-on: ubuntu-latest
@@ -77,6 +97,16 @@ jobs:
         run: sudo apt-get install -y -qq ripgrep
       - name: Run lint
         run: bash scripts/lint/no-provider-name-hardcoding.sh --fail
+
+  no-tool-result-error-printexc:
+    name: RFC-0148 backsliding guard (no Tool_result.error + Printexc.to_string)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ripgrep
+        run: sudo apt-get install -y -qq ripgrep
+      - name: Run lint
+        run: bash scripts/lint/no-tool-result-error-printexc.sh
 
   no-runtime-literal-outside-boundary-redaction:
     name: Boundary redaction SSOT enforcement (RFC-0132 PR-3)
@@ -143,10 +173,14 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - name: Install ripgrep
+        run: sudo apt-get install -y -qq ripgrep
       - name: Run lint
         env:
           BASE: ${{ github.event.pull_request.base.ref && format('origin/{0}', github.event.pull_request.base.ref) || '' }}
         run: bash scripts/lint/godfile-size-regression.sh
+      - name: Run RFC-0151 code-smell ratchet
+        run: bash scripts/code-smell/measure.sh
 
   ignore-without-comment-new:
     name: ignore() justification (new sites)
@@ -187,6 +221,16 @@ jobs:
         run: python -m pip install --upgrade pip pyyaml
       - name: Run lint
         run: bash scripts/lint/yaml-syntax.sh
+
+  board-slo-extractor-fixture:
+    name: Board SLO extractor fixture
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install jq
+        run: sudo apt-get install -y -qq jq
+      - name: Run fixture test
+        run: bash scripts/test-board-slo-extractor.sh
 
   env-knob-classification:
     name: Env knob classification

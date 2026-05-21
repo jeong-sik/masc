@@ -8,6 +8,7 @@ type t =
   { config : Coord.config
   ; meta : keeper_meta
   ; turn_id : int
+  ; raw_host_root : string
   ; host_root : string
   ; container_root : string
   ; uid : int
@@ -27,10 +28,15 @@ let create
       ~turn_id
       ()
   =
+  let raw_host_root =
+    Keeper_sandbox.host_root_abs_of_meta ~config meta
+    |> Keeper_alerting_path.strip_trailing_slashes
+  in
   { config
   ; meta
   ; turn_id
-  ; host_root = Keeper_sandbox.host_root_abs_of_meta ~config meta |> normalize_path
+  ; raw_host_root
+  ; host_root = raw_host_root |> normalize_path
   ; container_root =
       Keeper_sandbox.container_root meta.name
       |> Keeper_alerting_path.strip_trailing_slashes
@@ -222,7 +228,7 @@ let start_container (t : t) ~(timeout_sec : float) =
                ~container_root:t.container_root
            @ identity_mounts
            @ network_args
-           @ [ image; "sh"; "-lc"; "trap : TERM INT; while :; do sleep 3600; done" ]
+           @ [ image; "tail"; "-f"; "/dev/null" ]
          in
          let st, out = run_argv_with_status_retry_eintr ~timeout_sec argv in
          (match st with
@@ -305,6 +311,24 @@ let run_exec_with_status_once
   | Error _ as err -> err
   | Ok container_name ->
     let container_cwd = container_cwd_of_host t ~host_cwd:cwd in
+    let command_argv =
+      List.map
+        (fun arg ->
+           let rewritten =
+             Keeper_sandbox_runtime.rewrite_host_root_to_container_root
+               ~host_root:t.host_root
+               ~container_root:t.container_root
+               arg
+           in
+           if String.equal t.raw_host_root t.host_root
+           then rewritten
+           else
+             Keeper_sandbox_runtime.rewrite_host_root_to_container_root
+               ~host_root:t.raw_host_root
+               ~container_root:t.container_root
+               rewritten)
+        command_argv
+    in
     let argv =
       Keeper_sandbox_runtime.docker_command_argv ()
       @ [ "exec"; "--user"; Printf.sprintf "%d:%d" t.uid t.gid; "-w"; container_cwd ]
@@ -393,34 +417,30 @@ let write_file_common
       (t : t)
       ~(host_path : string)
       ~(content : string)
-      ~(timeout_sec : float)
+      ~timeout_sec:_
       ~(append : bool)
       ()
   =
   match container_path_of_host t ~host_path with
   | Error _ as err -> err
-  | Ok container_path ->
-    let parent = Filename.dirname container_path in
-    let redirect = if append then ">>" else ">" in
-    let shell_cmd =
-      Printf.sprintf
-        "mkdir -p -- %s && cat %s %s"
-        (Filename.quote parent)
-        redirect
-        (Filename.quote container_path)
-    in
-    (match
-       run_exec_with_status
-         ~stdin_content:content
-         t
-         ~timeout_sec
-         ~cwd:t.host_root
-         ~command_argv:[ "sh"; "-lc"; shell_cmd ]
+  | Ok _container_path ->
+    let host_path = normalize_path host_path in
+    (try
+       Fs_compat.mkdir_p (Filename.dirname host_path);
+       if append
+       then Fs_compat.append_file host_path content
+       else Fs_compat.save_file host_path content;
+       Ok ()
      with
-     | Error _ as err -> err
-     | Ok (Unix.WEXITED 0, _out) -> Ok ()
-     | Ok (st, out) ->
-       Error (format_docker_exec_error ~head_program:"write_file" ~st ~out))
+     | Eio.Cancel.Cancelled _ as e -> raise e
+     | Sys_error msg -> Error msg
+     | Unix.Unix_error (err, fn, arg) ->
+       Error
+         (Printf.sprintf
+            "%s%s%s"
+            (Unix.error_message err)
+            (if String.equal fn "" then "" else ": " ^ fn)
+            (if String.equal arg "" then "" else " " ^ arg)))
 ;;
 
 let overwrite_file t ~host_path ~content ~timeout_sec () =

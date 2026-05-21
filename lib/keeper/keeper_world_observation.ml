@@ -770,8 +770,6 @@ let effective_scheduled_autonomous_cooldown
     max floor (int_of_float (float_of_int effective_base *. factor)))
 ;;
 
-let effective_proactive_cooldown = effective_scheduled_autonomous_cooldown
-
 let entropic_oscillation_interval_sec = 600
 let entropic_oscillation_probability_percent = 5
 

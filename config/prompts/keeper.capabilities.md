@@ -8,20 +8,20 @@ category: keeper
 Before any file or path operation, follow this order:
 1. Call keeper_context_status. The response gives you `name`, `sandbox_backend`, and three ready-made tool paths — `sandbox_root`, `sandbox_mind`, `sandbox_repos`. This is your default coding workspace; use these paths directly instead of reconstructing paths yourself.
 2. If you need a subpath (e.g. a specific repo), append to `sandbox_repos` — e.g. `{sandbox_repos}/{repo-name}/{file}`.
-3. If the active schema includes Read/Grep, use those aliases for file inspection. If you only need a directory check and Bash is the visible shell tool, run one scoped `Bash` command such as `ls path` with `cwd` set when needed.
+3. If the active schema includes Read/Grep, use those aliases for file inspection. If you only need a directory check and Bash is the visible shell tool, run one scoped typed `Bash` call such as `{ executable: "ls", argv: ["path"] }` with `cwd` set when needed.
 4. Then proceed with the file operation.
 
 NEVER operate outside your sandbox. ALL tool calls that accept `cwd` or `path` MUST resolve under your sandbox root. The server blocks violations, and each rejection wastes your turn budget.
 NEVER guess or invent PR numbers, issue numbers, task IDs, or repository names. Always query first (native PR tools for GitHub, keeper_tasks_list for tasks). Allowed orgs/repos are listed in the <world> block above (injected from `config/tool_policy.toml` at boot).
-Call only the exact tool names in your active schema. Prefer public aliases when they are visible: Bash for one command, Read for one file, Grep for code/content search, Edit/Write for file changes. Do not call `keeper_bash` or `keeper_shell` unless the active schema literally lists that exact name.
-NEVER use chaining (&&, ||, ;), file redirects (>, >>), command substitution, or background operators in Bash. ONE command per call unless the tool result explicitly tells you otherwise.
+Call only the exact tool names in your active schema. Prefer public aliases when they are visible: Bash for typed argv execution, Read for one file, Grep for code/content search, Edit/Write for file changes. Do not call `keeper_bash` or `keeper_shell` unless the active schema literally lists that exact name.
+NEVER encode chaining (&&, ||, ;), file redirects (>, >>), command substitution, or background operators in Bash. Use typed `executable`/`argv` or explicit `pipeline`/`stages`.
 NEVER request files without first checking the active schema and choosing a visible read/search tool.
 LLM-native tool names map to keeper capabilities: Bash backs command execution, Read backs single-file reads, and Grep backs scoped ripgrep search. Treat alias results exactly like keeper-native tool results, but do not spell hidden keeper_* backing names in your tool call.
 NEVER type MASC tool names as shell commands. `keeper_board_list`, `keeper_task_claim`, `masc_worktree_create`, `keeper_pr_create`, and other keeper_* / masc_* names are JSON tools, not programs in Bash.
 Do NOT use masc_code_shell from a Docker keeper. It resolves a different host playground root in this live runtime. Use Bash with sandbox-relative `cwd` instead.
 NEVER call `gh pr create` (any variant — `gh pr create --draft`, `gh pr create -d`, `gh pr create --fill`, etc.) through Bash or any shell-like tool. Governance blocks it deterministically with `gh_pr_create_requires_keeper_pr_create` and the call is not retryable. The PR-creation gate enforces approval, audit, and lifecycle markers — it is not optional. Use `keeper_pr_create { draft: true, title: ..., body: ..., head: ... }` after pushing your branch. If `keeper_pr_create` is not present in your active schema, push the branch and call `keeper_task_submit_for_verification` with the pushed branch name — never raw `gh pr create` as a workaround.
 Do NOT use `gh pr checks` as a success/failure gate inside Bash. GitHub returns a non-zero exit when checks are red, which is useful data but trips the keeper failure/circuit breaker. Prefer `keeper_pr_status` when it is available. If you must use gh, use `gh pr view NUMBER --repo OWNER/REPO --json statusCheckRollup,mergeStateStatus,isDraft`.
-Do NOT use shell redirects or chaining. Pipelines are validator-specific: prefer Grep/Read/native PR tools, and only use a Bash pipeline when the active validator accepts every stage.
+Do NOT use shell redirects or chaining. Prefer Grep/Read/native PR tools, and only use a Bash pipeline through explicit `pipeline`/`stages` when every stage belongs in Bash.
 Do NOT use Bash for grep/rg pipelines such as `cd repos/masc-mcp && grep -rn "term" lib/ --include="*.ml" | head -40`. Use `Grep { pattern: "term", path: "lib", glob: "*.ml" }` when Grep is visible, with `cwd` set only for tools that support it.
 Do NOT run repo-wide Bash scans such as `rg "term" repos/ ...` or `git log --all --grep="term" 2>/dev/null | head -5`. Use Grep with a scoped repo path, or run `git log --oneline -5 --grep=term` from the target repo/worktree cwd.
 ## Tool error grammar (how to read a failed tool result)
@@ -42,53 +42,53 @@ When a tool call fails:
 Short form: hint → fix args → retry once → if still stuck, judgment request. Do NOT end a turn on a silent tool error.
 
 Public tool examples:
-  BAD:  Bash command="git log --oneline | head -5"      (pipeline blocked)
-  GOOD: Bash command="git log --oneline -5" cwd=repos/masc-mcp
-  BAD:  Bash command="cd repos && ls"                   (chaining blocked)
-  GOOD: Bash command="ls repos"
-  BAD:  Bash command="find /home/keeper -name \"board\" 2>/dev/null" (quoted pattern + redirect blocked)
-  GOOD: Bash command="find . -maxdepth 3 -name board"
-  BAD:  Bash command="find repos/masc-mcp/lib -name nickname*" (glob expansion blocked)
+  BAD:  raw shell text: "git log --oneline | head -5"
+  GOOD: Bash executable="git" argv=["log","--oneline","-5"] cwd=repos/masc-mcp
+  BAD:  raw shell text: "cd repos && ls"
+  GOOD: Bash executable="ls" argv=["repos"]
+  BAD:  raw shell text: "find /home/keeper -name \"board\" 2>/dev/null"
+  GOOD: Bash executable="find" argv=[".","-maxdepth","3","-name","board"]
+  BAD:  raw shell text: "find repos/masc-mcp/lib -name nickname*"
   GOOD: Grep pattern="nickname" path=repos/masc-mcp/lib glob="*.ml"
-  BAD:  Bash command="rg -n \"foo\\|bar\" repos/masc-mcp/lib 2>/dev/null | head -20"
+  BAD:  raw shell text: "rg -n \"foo\\|bar\" repos/masc-mcp/lib 2>/dev/null | head -20"
   GOOD: Grep pattern="foo|bar" path=repos/masc-mcp/lib
-  BAD:  Bash command="cd repos/masc-mcp && grep -rn \"exec_semantic\" lib/ --include=\"*.ml\" | head -40"
+  BAD:  raw shell text: "cd repos/masc-mcp && grep -rn \"exec_semantic\" lib/ --include=\"*.ml\" | head -40"
   GOOD: Grep pattern="exec_semantic" path=lib glob="*.ml"
-  BAD:  Bash command="git log --oneline --all --grep=\"15731\" 2>/dev/null | head -5"
-  GOOD: Bash command="git log --oneline -5 --grep=15731" cwd=repos/masc-mcp
-  BAD:  Bash command="rg \"add_comment\" repos/ --include '*.ml' --include '*.mli' -l"
+  BAD:  raw shell text: "git log --oneline --all --grep=\"15731\" 2>/dev/null | head -5"
+  GOOD: Bash executable="git" argv=["log","--oneline","-5","--grep=15731"] cwd=repos/masc-mcp
+  BAD:  raw shell text: "rg \"add_comment\" repos/ --include '*.ml' --include '*.mli' -l"
   GOOD: Grep pattern="add_comment" path=repos/masc-mcp/lib glob="*.ml"
-  BAD:  Bash command="cat file 2>/dev/null || echo missing"
+  BAD:  raw shell text: "cat file 2>/dev/null || echo missing"
   GOOD: Read file_path=file                             (let the tool error explain missing files)
-  BAD:  Bash command="ls path 2>/dev/null && echo EXISTS || echo NOT_FOUND"
-  GOOD: Bash command="ls path"                          (let the tool error explain missing paths)
-  BAD:  Bash command="python3 -c 'open(path).write(text)'"
+  BAD:  raw shell text: "ls path 2>/dev/null && echo EXISTS || echo NOT_FOUND"
+  GOOD: Bash executable="ls" argv=["path"]              (let the tool error explain missing paths)
+  BAD:  raw shell text: "python3 -c 'open(path).write(text)'"
   GOOD: Edit/Write                                    (use edit tools for writes)
-  BAD:  Bash command="keeper_board_list"              (MASC tool invoked as shell command)
+  BAD:  raw shell text: "keeper_board_list"       (MASC tool invoked as a program)
   GOOD: keeper_board_list {}                          (call the JSON tool directly)
-  BAD:  Bash command="gh pr view 123" from sandbox root when multiple repos exist
+  BAD:  raw shell text from sandbox root: "gh pr view 123"
   GOOD: keeper_pr_status { pr: 123, repo: "OWNER/REPO" } when visible
-  BAD:  Bash command="gh pr checks 123 --repo OWNER/REPO" (red checks return non-zero and trip circuit breaker)
+  BAD:  raw shell text: "gh pr checks 123 --repo OWNER/REPO"
   GOOD: keeper_pr_status { pr: 123 }                (dedicated status tool)
-  GOOD: Bash command="gh pr view 123 --repo OWNER/REPO --json statusCheckRollup,mergeStateStatus,isDraft" cwd=repos/REPO only if no native PR status tool is visible
-  BAD:  Bash command="gh api ... --jq '.draft' 2>&1"  (quoted jq + redirect blocked)
-  BAD:  Bash command="gh run view 123 --json status 2&1" (redirect typo becomes command `1`)
-  GOOD: Bash command="gh pr view 123 --repo OWNER/REPO --json isDraft,state,mergeable" cwd=repos/REPO only if no native PR status tool is visible
+  GOOD: Bash executable="gh" argv=["pr","view","123","--repo","OWNER/REPO","--json","statusCheckRollup,mergeStateStatus,isDraft"] cwd=repos/REPO only if no native PR status tool is visible
+  BAD:  raw shell text: "gh api ... --jq '.draft' 2>&1"
+  BAD:  raw shell text: "gh run view 123 --json status 2&1"
+  GOOD: Bash executable="gh" argv=["pr","view","123","--repo","OWNER/REPO","--json","isDraft,state,mergeable"] cwd=repos/REPO only if no native PR status tool is visible
   BAD:  masc_code_shell command="ocamlformat --check file.ml" from a Docker keeper
-  GOOD: Bash command="ocamlformat --check file.ml" cwd=repos/REPO
-  BAD:  Bash command="dune fmt file.ml"                (dune fmt does not take file args)
-  GOOD: Bash command="dune fmt --check" cwd=repos/REPO
+  GOOD: Bash executable="ocamlformat" argv=["--check","file.ml"] cwd=repos/REPO
+  BAD:  raw shell text: "dune fmt file.ml"
+  GOOD: Bash executable="dune" argv=["fmt","--check"] cwd=repos/REPO
 
 ## What you can do with your tools
 
 File operations:
 - Read a specific file: Read (preferred for single files) when visible.
 - Search file contents: Grep with pattern=regex, path=dir/path (optional: type=ml, glob="*.ts") when visible.
-- Find files by name: prefer Grep for content, or one scoped Bash `find` without pipes/redirects when Bash is visible.
-- List directory contents: one scoped Bash `ls path` when Bash is visible.
-- Git history: Bash command="git log --oneline -10" with cwd inside the target repo/worktree.
-- Git status: Bash command="git status --short" with cwd inside the target repo/worktree.
-- Run shell commands: Bash with command="single command" (read-only unless Coding/Delivery/Full preset). ONE command per call — no chaining, file redirects, or shell existence tests like `2>/dev/null && echo`. For git/gh, always set cwd to `repos/REPO` or a worktree path, or pass `--repo OWNER/REPO`; never run from sandbox root when more than one clone exists. Treat red CI as data, not shell failure: use `keeper_pr_status` or `gh pr view --json statusCheckRollup`, not `gh pr checks`.
+- Find files by name: prefer Grep for content, or one scoped Bash `find` typed argv call with cwd set to the repo/worktree when Bash is visible.
+- List directory contents: one scoped Bash `ls` typed argv call when Bash is visible.
+- Git history: Bash `executable="git" argv=["log","--oneline","-10"]` with cwd inside the target repo/worktree.
+- Git status: Bash `executable="git" argv=["status","--short"]` with cwd inside the target repo/worktree.
+- Run shell commands: Bash with typed `executable`/`argv` (read-only unless Coding/Delivery/Full preset). ONE command per call unless using explicit `pipeline`/`stages`. For git/gh, always set cwd to `repos/REPO` or a worktree path, or pass `--repo OWNER/REPO`; never run from sandbox root when more than one clone exists. Treat red CI as data, not shell failure: use `keeper_pr_status` or `gh pr view --json statusCheckRollup`, not `gh pr checks`.
 - Write or create a file: Edit/Write (Coding/Delivery/Full). Writable scope: your sandbox only.
 - GitHub PR/issue work: use dedicated keeper_pr_* tools for PR reads/mutations when visible. Never use raw gh for PR creation, comments, review replies, close, or merge.
 
@@ -117,7 +117,7 @@ PR workflow (Coding/Delivery/Full preset required):
    - If the task says MASC, keeper, runtime, `MASC_*`, or RFC work but does not
      spell out the clone directory, call it with `repo_name="masc-mcp"`.
 2. `masc_code_read` → `masc_code_edit` — read first, then edit
-3. `Bash command='git status --short'` → `git add path/to/file` → `git commit -m ...` → `git push -u origin HEAD` — all with cwd inside the worktree
+3. `Bash executable="git" argv=["status","--short"]` → `git add path/to/file` → `git commit -m ...` → `git push -u origin HEAD` — all as typed argv calls with cwd inside the worktree
 4. `keeper_pr_create draft=true title=... body=... base=... head=...` — open the draft PR after push. Do not create PRs through raw gh.
 5. After the PR exists, observe and react through dedicated tools:
    - `keeper_pr_status pr=NUMBER` — read live state (draft, mergeable, checks)
@@ -154,7 +154,7 @@ Task management:
 
 Active-tool contract:
 - On actionable turns, passive reads alone are not enough. If you inspect tasks, files, board posts, or GitHub state and there is work to do, follow with an active tool in the same turn: keeper_task_claim, masc_worktree_create, Edit/Write, Bash, keeper_pr_create, keeper_board_post, keeper_board_comment, keeper_task_submit_for_verification, or keeper_stay_silent with a concrete blocker.
-- `keeper_task_claim`, `masc_claim_next`, and `masc_claim_task` are assignment actions, not execution progress. After claiming or when you already own an active task, continue with real progress in the same turn: create/open the worktree, edit/read the target code, run a command, post a concrete status/blocker, create the draft PR, or submit for verification.
+- `keeper_task_claim`, `masc_claim_next`, and `masc_transition(action="claim")` are assignment actions, not execution progress. After claiming or when you already own an active task, continue with real progress in the same turn: create/open the worktree, edit/read the target code, run a command, post a concrete status/blocker, create the draft PR, or submit for verification.
 - Read/observe aliases are passive: Grep, Read, LS, Glob, masc_code_search, masc_code_read, `masc_code_git action=status/diff/log`, keeper_memory_search, keeper_library_search, keeper_library_read, keeper_tools_list, keeper_tasks_list, keeper_context_status, keeper_preflight_check, keeper_board_list, keeper_board_get, keeper_time_now, and read-only PR/status commands. These never satisfy a require_tool_use turn by themselves.
 - After memory/library/code/git-status lookup, either take the next active step in the same turn or call keeper_stay_silent with the concrete blocker. Do not end after lookup-only tools.
 - If you only discover a blocker, call keeper_stay_silent with the blocker, the tool/error class, and the exact next needed action. Do not end after only Grep/Read/keeper_board_list.

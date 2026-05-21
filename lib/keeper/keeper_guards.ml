@@ -186,6 +186,81 @@ let gate_decision_is_rejection = function
   | Gate_override | Gate_approval_required -> true
   | Gate_continue -> false
 
+type gate_rejection_log_severity =
+  | Gate_rejection_first_warn
+  | Gate_rejection_repeat_info of int
+  | Gate_rejection_repeat_debug of int
+
+let gate_rejection_log_severity_to_string = function
+  | Gate_rejection_first_warn -> "warn"
+  | Gate_rejection_repeat_info _ -> "info"
+  | Gate_rejection_repeat_debug _ -> "debug"
+
+let gate_rejection_log_counts : (string * string * string * string, int) Hashtbl.t =
+  Hashtbl.create 64
+
+let gate_rejection_log_counts_mu = Mutex.create ()
+
+let reset_gate_rejection_log_counts () =
+  Mutex.protect gate_rejection_log_counts_mu (fun () ->
+    Hashtbl.clear gate_rejection_log_counts)
+
+let record_gate_rejection_log_severity ?reason_key
+    ~keeper_name ~stage ~tool_name ~reason_code () =
+  let reason_key = Option.value ~default:reason_code reason_key in
+  let key = (keeper_name, stage, tool_name, reason_key) in
+  Mutex.protect gate_rejection_log_counts_mu (fun () ->
+    let count =
+      match Hashtbl.find_opt gate_rejection_log_counts key with
+      | Some n -> n + 1
+      | None -> 1
+    in
+    Hashtbl.replace gate_rejection_log_counts key count;
+    match count with
+    | 1 -> Gate_rejection_first_warn
+    | 2 -> Gate_rejection_repeat_info count
+    | _ -> Gate_rejection_repeat_debug count)
+
+let planner_alternative_for_gate ~stage ~tool_name =
+  match stage with
+  | "streak_gate" ->
+    Printf.sprintf
+      "planner_alternative=\"stop retrying %s; choose a different tool, batch remaining work, or call keeper_stay_silent\""
+      tool_name
+  | "keeper_deny" ->
+    "planner_alternative=\"choose an allowed replacement tool, change plan, or request operator approval\""
+  | "cost_gate" ->
+    "planner_alternative=\"stop tool use, summarize progress, or request a budget increase before retrying\""
+  | "destructive_guard" ->
+    "planner_alternative=\"use a safe read-only command, narrow the path, or request operator approval\""
+  | _ ->
+    "planner_alternative=\"change plan, choose a different tool, or call keeper_stay_silent\""
+
+let log_gate_rejection ?reason_key ~keeper_name ~stage ~tool_name ~reason_code fmt =
+  Printf.ksprintf
+    (fun message ->
+       match
+         record_gate_rejection_log_severity ?reason_key
+           ~keeper_name ~stage ~tool_name ~reason_code ()
+       with
+       | Gate_rejection_first_warn -> Log.Keeper.warn "%s" message
+       | Gate_rejection_repeat_info count ->
+         Log.Keeper.info "%s repeat_count=%d %s"
+           message count (planner_alternative_for_gate ~stage ~tool_name)
+       | Gate_rejection_repeat_debug count ->
+         Log.Keeper.debug "%s repeat_count=%d %s"
+           message count (planner_alternative_for_gate ~stage ~tool_name))
+    fmt
+
+module For_testing = struct
+  let reset_gate_rejection_log_counts = reset_gate_rejection_log_counts
+
+  let record_gate_rejection_log_severity =
+    record_gate_rejection_log_severity
+
+  let planner_alternative_for_gate = planner_alternative_for_gate
+end
+
 type gate_decision_event = {
   stage : string;
   keeper_name : string;
@@ -456,7 +531,9 @@ let streak_guard
           Keeper_metrics.metric_keeper_guards_failures
           ~labels:[("keeper", keeper_name); ("site", "streak_gate")]
           ();
-        Log.Keeper.warn
+        log_gate_rejection
+          ~keeper_name ~stage:"streak_gate" ~tool_name
+          ~reason_code:"streak_gate"
           "keeper:%s streak_gate: %s called %d times consecutively, blocking"
           keeper_name tool_name new_count;
         broadcast_tool_skipped
@@ -497,7 +574,10 @@ let deny_guard
           Keeper_metrics.metric_keeper_guards_failures
           ~labels:[("keeper", keeper_name); ("site", "deny_list")]
           ();
-        Log.Keeper.warn "keeper:%s deny list: blocked %s"
+        log_gate_rejection
+          ~keeper_name ~stage:"keeper_deny" ~tool_name
+          ~reason_code:"keeper_deny"
+          "keeper:%s deny list: blocked %s"
           keeper_name tool_name;
         broadcast_tool_skipped
           ~keeper_name ~tool_name ~reason_code:"keeper_deny";
@@ -542,7 +622,9 @@ let cost_guard
            Keeper_metrics.metric_keeper_guards_failures
            ~labels:[("keeper", keeper_name); ("site", "cost_gate")]
            ();
-         Log.Keeper.warn
+         log_gate_rejection
+           ~keeper_name ~stage:"cost_gate" ~tool_name
+           ~reason_code:"cost_gate"
            "keeper:%s cost gate: $%.4f >= $%.4f limit, skipping %s"
            keeper_name accumulated_cost_usd limit tool_name;
          broadcast_tool_skipped
@@ -592,7 +674,9 @@ let destructive_guard
              Keeper_metrics.metric_keeper_guards_failures
              ~labels:[("keeper", keeper_name); ("site", "destructive_guard")]
              ();
-           Log.Keeper.warn
+           log_gate_rejection
+             ~keeper_name ~stage:"destructive_guard" ~tool_name
+             ~reason_code:"destructive_guard" ~reason_key:pattern
              "keeper:%s destructive pattern in %s: '%s' (%s)"
              keeper_name tool_name pattern desc;
            broadcast_tool_skipped

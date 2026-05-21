@@ -96,9 +96,16 @@ val read_json_opt : config -> string -> Yojson.Safe.t option
     pre-canonical-form) and needs rewriting. *)
 val agent_json_needs_repair : Yojson.Safe.t -> bool
 
-val is_fd_pressure_text : string -> bool
-(** [true] for OS/resource-pressure text that means an agent file could not be
-    opened, not that it is malformed. *)
+val is_fd_pressure_exn : exn -> bool
+(** [true] for typed OS/resource-pressure exceptions that mean an agent file
+    could not be opened, not that it is malformed. *)
+
+type read_agent_error =
+  | Agent_fd_pressure of exn
+  | Agent_read_error of string
+
+val read_agent_with_repair_result :
+  config -> string -> (agent, read_agent_error) result
 
 (** Read an agent JSON and rewrite it in canonical form when the
     [last_seen] repair predicate fires. *)

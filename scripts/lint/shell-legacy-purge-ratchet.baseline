@@ -1,10 +1,95 @@
 # Shell legacy purge ratchet baseline.
 #
 # Format: <needle> <max-hit-count>
-# Scope: lib/ and test/
+# Scope: lib/, test/, and config/prompts/
 # The long-term target for every row is 0. Cleanup PRs may lower these
 # counts; no PR may raise them.
 tokenize_path_args 0
 path_validation_tokens 0
 forbidden_shell_chars 0
 raw_keeper_bash_shape_block 0
+has_coding_shell_injection_metachar 0
+has_process_substitution 0
+has_unsafe_redirection 0
+has_dangerous_ampersand 0
+split_shell_tokens 0
+is_safe_fd_redirect_token 0
+invokes_direct_dune 0
+extract_command_name 0
+Shell_ir_validator 0
+typed_advisor 0
+MASC_BASH_TYPED 0
+shell_ir_shape_scan_text 0
+shell_ir_parse_failure_shape_block 0
+has_malformed_dev_null_redirect_token 0
+shell_word_simple_commands 0
+command_has_repo_wide_scan 0
+Keeper_shell_bash_words 0
+keeper_shell_bash_words 0
+String.split_on_char ' ' cmd 0
+shell_words_with_boundaries 0
+strip_command_wrappers 0
+cmd_gh_pr_native_subcommand 0
+cmd_contains_gh_pr_create 0
+find_unquoted_logic_op 0
+split_unquoted_single_pipeline 0
+literal_head_limit_is_safe 0
+strip_trailing_dev_null_redirect 0
+literal_echo_is_safe 0
+safe_cd_read_fallback 0
+safe_read_head_pipeline 0
+safe_read_or_echo_fallback 0
+gate_diff_shadow 0
+MASC_BASH_AST_SHADOW_LOG 0
+MASC_BASH_AST_ONLY 0
+diff_command 0
+legacy_verdict 0
+shadow_verdict 0
+shadow_parse_outcome 0
+incr_gate_diff 0
+incr_too_complex 0
+disagree_ratio 0
+shadow_parse_coverage 0
+Legacy_v0 0
+Typed_v1 0
+MASC_KEEPER_BASH_DESCRIPTOR_VARIANT 0
+keeper_bash_cmd_field 0
+coding_keeper_bridge_tools_for_variant 0
+Keeper_shell_bash_redirects 0
+Keeper_shell_bash_simple_commands 0
+Keeper_shell_bash_command_intent 0
+Keeper_shell_bash_task_probe 0
+Keeper_shell_bash_task_state 0
+Keeper_shell_bash_shape_messages 0
+Keeper_shell_bash_shape_ir 0
+Keeper_shell_bash_native_tool_hint 0
+Keeper_shell_bash_repo_wide_scan 0
+keeper_shell_bash_redirects 0
+keeper_shell_bash_simple_commands 0
+keeper_shell_bash_command_intent 0
+keeper_shell_bash_task_probe 0
+keeper_shell_bash_task_state 0
+keeper_shell_bash_shape_messages 0
+keeper_shell_bash_shape_ir 0
+keeper_shell_bash_native_tool_hint 0
+keeper_shell_bash_repo_wide_scan 0
+keeper_bash_output 0
+keeper_bash_kill 0
+run_in_background 0
+background_task_id 0
+MASC_BASH_AUTO_BG 0
+MASC_BLOCKING_BUDGET_MS 0
+auto_bg 0
+Exec_run 0
+exec_run 0
+Bash { command 0
+Bash command= 0
+Bash command=' 0
+Path syntax blocked 0
+Path_syntax_blocked 0
+path_syntax_blocked 0
+Worker_dev_tools_path_words 0
+worker_dev_tools_path_words 0
+Path_words 0
+path_token_error_hint 0
+path_syntax_blocked_message 0

@@ -53,7 +53,7 @@ let cleanup_zombies
   let scan_paths =
     try if Sys.file_exists agents_path then [ agents_path ] else [] with
     | Eio.Cancel.Cancelled _ as e -> raise e
-    | exn when is_fd_pressure_text (Printexc.to_string exn) ->
+    | exn when is_fd_pressure_exn exn ->
       Log.Gc.warn
         "cleanup_zombies: skipping scan while agent directory is unreadable due to FD pressure: %s"
         (Printexc.to_string exn);
@@ -68,7 +68,7 @@ let cleanup_zombies
       let names =
         try Some (Sys.readdir agents_path) with
         | Eio.Cancel.Cancelled _ as e -> raise e
-        | exn when is_fd_pressure_text (Printexc.to_string exn) ->
+        | exn when is_fd_pressure_exn exn ->
           Log.Gc.warn
             "cleanup_zombies: skipping directory %s while FD pressure is active: %s"
             agents_path
@@ -82,7 +82,7 @@ let cleanup_zombies
         Coord_query.safe_yield ();
         if Filename.check_suffix name ".json" then begin
           let path = Filename.concat agents_path name in
-          match read_agent_with_repair config path with
+          match read_agent_with_repair_result config path with
           | Ok agent
             when (not (List.exists (fun (n, _) -> n = agent.name) !zombie_entries)) &&
                  Coord_resilience.Zombie.is_zombie_for_agent
@@ -93,11 +93,12 @@ let cleanup_zombies
                    agent.last_seen ->
               zombie_entries := (agent.name, path) :: !zombie_entries
           | Ok _ -> () (* not a zombie, skip *)
-          | Error err when is_fd_pressure_text err ->
+          | Error (Agent_fd_pressure exn) ->
               Log.Gc.warn
                 "cleanup_zombies: skipping quarantine for %s because read failed under FD pressure: %s"
-                name err
-          | Error err ->
+                name
+                (Printexc.to_string exn)
+          | Error (Agent_read_error err) ->
               (* #7947: previously deleted the file outright, losing
                  current_task/meta with no postmortem trail.  Quarantine
                  to path.broken-<unix_ms> so operators can inspect the

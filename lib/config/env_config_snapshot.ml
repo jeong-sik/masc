@@ -28,8 +28,6 @@ let auth_entries =
       "Admin authentication token";
     entry ~default:"false" "MASC_ALLOW_ANONYMOUS_MUTATIONS"
       "Allow anonymous mutations (local dev only)";
-    entry ~default:"true" Env_config_core.tool_auth_strict_env_key
-      "Require auth for all tool calls";
     entry ~default:"false" "MASC_HTTP_AUTH_STRICT"
       "Require auth for HTTP endpoints";
     entry ~default:"production" Env_config_core.governance_level_env_key
@@ -52,6 +50,12 @@ let runtime_entries =
       "Release LLM slot during tool execution (feature flag)";
     entry ~default:"true" Env_config_core.telemetry_enabled_env_key
       "Enable telemetry collection";
+    entry ~default:"30" "MASC_TELEMETRY_RETENTION_DAYS"
+      "Telemetry JSONL day-file retention days. Positive values override; \
+       non-positive disables retention.";
+    entry ~default:"52428800" "MASC_TELEMETRY_MAX_BYTES"
+      "Telemetry JSONL byte cap. Positive values override; non-positive \
+       disables byte-cap pruning.";
   ]
 
 let rate_limiting_entries =

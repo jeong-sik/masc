@@ -48,7 +48,7 @@ let keeper_github_pr_tools : Masc_domain.tool_schema list =
   ; { name = "keeper_pr_status"
     ; description =
         "Read one GitHub PR status/details with keeper-scoped credentials. Runs \
-         credential preflight before gh. Pass pr_number (preferred) or number."
+         credential preflight before gh. Pass pr_number."
     ; input_schema =
         `Assoc
           [ "type", `String "object"
@@ -70,14 +70,10 @@ let keeper_github_pr_tools : Masc_domain.tool_schema list =
                 ; ( "pr_number"
                   , `Assoc
                       [ "type", `String "integer"
-                      ; "description", `String "PR number (preferred field name)"
-                      ] )
-                ; ( "number"
-                  , `Assoc
-                      [ "type", `String "integer"
-                      ; "description", `String "PR number (legacy alias for pr_number)"
+                      ; "description", `String "PR number"
                       ] )
                 ] )
+          ; "required", `List [ `String "pr_number" ]
           ]
     }
   ; { name = "keeper_pr_create"

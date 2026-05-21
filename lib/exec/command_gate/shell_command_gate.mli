@@ -12,14 +12,9 @@
     one [verdict], which validation, telemetry, native dispatch, path
     validation, and exit classification all share.
 
-    Phase 1 contract — advisory only:
-
-    - [Worker_dev_tools.validate_command_coding_with_allowlist] keeps
-      its existing behavior. Callers that want the typed verdict use
-      [gate] or [lower_typed_pipeline] directly.
-    - Legacy [Lib.Shell_command_gate] (top-level lib/) remains in
-      place until Phase 2 retires the duplicate path; this module is
-      the SSOT new callers must target.
+    The lib-root [Masc_mcp.Shell_command_gate] transition facade has
+    been retired. Callers that need shell policy verdicts use [gate],
+    [gate_typed], or [lower_typed_pipeline] directly.
 
     Output verdict separates the four operational classes the Plan's
     Goal Tree distinguishes:
@@ -41,14 +36,10 @@
 
 (** Caller identity for telemetry partition.
 
-    Mirrors the [caller] tag added to the legacy
-    [Lib.Shell_command_gate] via RFC-0131 PR-1a (#16335, MERGED).
-    Currently the optional [?caller] arg on {!gate} and
-    {!lower_typed_pipeline} is captured but does not change behavior —
-    the field exists so the upcoming telemetry counter exposure
-    (RFC-0131 PR-3, Plan Phase 4 measurement window) can already emit
-    per-caller rows before the actual counter plumbing lands.  When
-    unset, the gate behaves identically to the pre-tag SSOT. *)
+    The optional [?caller] arg on {!gate}, {!gate_typed}, and
+    {!lower_typed_pipeline} is part of the stable caller/verdict
+    telemetry surface. The gate verdict itself is independent of the
+    caller tag. *)
 type caller =
   | Worker_dev_tools
   | Tool_code_write
@@ -59,6 +50,7 @@ type reject_reason =
   | Command_not_in_allowlist of { bin : string }
   | Pipeline_segment_disallowed of { stage : int; bin : string }
   | Pipes_not_allowed of { stages : int }
+  | Redirect_disallowed_in_caller of { stage : int }
   | Path_outside_policy of { stage : int; raw_path : string; diagnostic : string }
 
 (** Parser failure modes that prevent any IR being formed. *)
@@ -80,7 +72,10 @@ type too_complex_reason =
   | Unsupported_construct of Masc_exec.Parsed.reason_too_complex
 
 (** Reusable parse context. [stages] is the ordered Simple list as
-    parsed; [stage_bins] is the binary name of each stage in order.
+    parsed; [stage_bins] is the binary name of each stage in order;
+    [direct_dune_seen] is true when any stage directly runs [dune]
+    or wraps it through known transparent command runners such as
+    [env] or [opam exec].
     Invariants:
 
     - [stages <> []] always — empty input yields {!Cannot_parse},
@@ -93,6 +88,7 @@ type parsed_context = {
   ast : Masc_exec.Shell_ir.t;
   stages : Masc_exec.Shell_ir.simple list;
   stage_bins : string list;
+  direct_dune_seen : bool;
 }
 
 (** Phase 1 verdict surface — four arms matching the Plan's typed
@@ -108,15 +104,18 @@ type verdict =
   | Cannot_parse of { reason : parse_reason }
   | Too_complex of { reason : too_complex_reason }
 
-(** Allowlist policy. [allow_pipes = true] (default) keeps the
-    existing legacy behavior; [false] yields {!Pipes_not_allowed} for
-    any pipeline with two or more stages. *)
+(** Allowlist policy. [allow_pipes = true] keeps the existing legacy
+    behavior; [false] yields {!Pipes_not_allowed} for any pipeline with
+    two or more stages. Redirects are always rejected, including fd-to-fd redirects such as
+    syntax, including fd-to-fd redirects such as [2>&1]. *)
 type allowlist_policy = {
   allowed_commands : string list;
   allow_pipes : bool;
+  
 }
 
-(** Path policy applied to literal path arguments of every stage.
+(** Path policy applied to literal path arguments and file redirect
+    targets of every stage.
     Phase 1 intentionally keeps the policy minimal — only an opt-in
     classifier callback is consulted, so the facade itself does no
     [Path_scope] decision-making and instead defers to the caller. *)
@@ -158,6 +157,19 @@ val gate
     [?caller] is captured for the upcoming telemetry partition
     (RFC-0131 PR-3) and does not affect the verdict. *)
 
+val gate_typed
+  :  ?caller:caller
+  -> ir:Masc_exec.Shell_ir.t
+  -> allowlist:allowlist_policy
+  -> path_policy:path_policy
+  -> sandbox:sandbox_context
+  -> unit
+  -> verdict
+(** Policy-aware typed entrypoint for callers that already have a
+    {!Masc_exec.Shell_ir.t}. This bypasses raw Bash parsing but shares
+    the same allowlist, redirect, path-policy, sandbox, and nested
+    pipeline handling as {!gate}. *)
+
 val lower_typed_pipeline
   :  ?caller:caller
   -> stages:Masc_exec.Shell_ir.simple list
@@ -187,28 +199,3 @@ val too_complex_reason_tag : too_complex_reason -> string
 val stage_count : parsed_context -> int
 val last_stage_bin : parsed_context -> string option
 val is_pipeline : parsed_context -> bool
-
-(** {1 Authority flag (RFC-0092 Phase C)} *)
-
-val is_authoritative : unit -> bool
-(** [is_authoritative ()] returns [true] iff the
-    [MASC_BASH_TYPED_AUTHORITY] environment variable is set to one of
-    the documented truthy values: [1], [true], [TRUE], [yes], [on].
-    Default off — no behavior change while unset.
-
-    This is the facade-side mirror of
-    [Masc_mcp.Gate_diff_types.typed_authority_enabled].  Both
-    predicates intentionally share the same truthy-value set; the
-    duplication exists because this sub-library
-    ([masc_exec_command_gate]) cannot depend on the root [masc_mcp]
-    library without introducing a cycle.
-
-    Consumers outside the keeper boundary (Phase 1 facade callers
-    listed in the {!caller} sum) should prefer this predicate;
-    consumers inside the root [masc_mcp] library should use
-    [Masc_mcp.Gate_diff_types.typed_authority_enabled].  Both return
-    the same bool at any given env-var state.
-
-    Predicate-only stage: this PR does not change facade behavior
-    when the flag is on — the authority decision-arm wiring lands in
-    a follow-up so risk stays measurable. *)

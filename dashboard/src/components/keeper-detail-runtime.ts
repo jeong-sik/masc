@@ -968,6 +968,7 @@ export function RuntimeLensSection({
         <${SignalRow} label="proof tools" value=${formatLensList(proof.tools)} />
         <${SignalRow} label="network proof" value=${formatLensList(proof.network_modes)} />
         <${SignalRow} label="context compaction" value=${formatRatioPair({ numerator: context.context_compacted_count, denominator: context.context_compact_started_count })} />
+        <${SignalRow} label="working loops" value=${context.active_open_loop_count} />
         <${SignalRow} label="memory flush" value=${formatIndependentCounters({ leftLabel: 'success', leftValue: memory.memory_flush_success_count, rightLabel: 'error', rightValue: memory.memory_flush_error_count })} />
         <${SignalRow} label="trace id" value=${compactToken(trace.trace_id)} />
         <${SignalRow}

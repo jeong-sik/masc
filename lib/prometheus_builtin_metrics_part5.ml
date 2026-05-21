@@ -393,6 +393,11 @@ let register
   add metric_cascade_strategy_decisions "Cascade strategy decisions by outcome." `Counter;
   add metric_cascade_capacity_events "Cascade capacity events by type." `Counter;
   add
+    metric_cascade_pre_dispatch_required_tool_filtered
+    "Required-tool candidates filtered before provider dispatch. Labels: [provider, \
+     missing_count]."
+    `Counter;
+  add
     metric_cascade_ttfb_seconds
     "Time from cascade attempt start to first non-Done chunk (TTFT). Labels: [cascade, \
      provider] where provider is a bounded public provider bucket."

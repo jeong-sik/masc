@@ -39,6 +39,16 @@ let with_env name value f =
 let read_file path =
   In_channel.with_open_bin path In_channel.input_all
 
+let contains_substring haystack needle =
+  let haystack_len = String.length haystack in
+  let needle_len = String.length needle in
+  let rec loop index =
+    if index + needle_len > haystack_len then false
+    else if String.sub haystack index needle_len = needle then true
+    else loop (index + 1)
+  in
+  needle_len = 0 || loop 0
+
 let write_file path content =
   Out_channel.with_open_bin path (fun oc -> output_string oc content)
 
@@ -139,6 +149,19 @@ masc_tools = ["keeper_fs_write", "keeper_fs_delete", "masc_status"]
       | Some KTPC.All_candidates -> fail "legacy preset should be explicit subset"
       | None -> fail "legacy preset missing")
 
+let test_no_backward_compat_alias_groups () =
+  let source_root = Masc_test_deps.find_project_root () in
+  let cfg =
+    match KTPC.load ~base_path:source_root with
+    | Ok cfg -> cfg
+    | Error msg -> fail (Printf.sprintf "config load failed: %s" msg)
+  in
+  check bool "groups.board alias removed" false
+    (List.mem "board" (KTPC.group_names cfg));
+  let policy = read_file (Filename.concat source_root "config/tool_policy.toml") in
+  check bool "masc.core alias removed" false
+    (contains_substring policy "[masc.core]")
+
 (* ── preset_can_satisfy tests ───────────────────────────────── *)
 
 let load_config () =
@@ -222,6 +245,8 @@ let () =
             test_load_anchors_resolution_to_base_path_over_cwd_candidate;
           test_case "normalizes legacy fs tool names" `Quick
             test_load_normalizes_legacy_fs_tool_names;
+          test_case "no backward compat alias groups" `Quick
+            test_no_backward_compat_alias_groups;
         ] );
       ( "preset_can_satisfy",
         [

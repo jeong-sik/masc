@@ -1,6 +1,14 @@
+---
+title: Keeper Detail FSM Hub as SSOT
+rfc: 0046
+status: Active
+created: 2026-05-08
+implementation_prs: []
+---
+
 # RFC-0046 — Keeper Detail FSM Hub as SSOT
 
-Status: Draft
+Status: Active (frontmatter SSOT; body header retained for historical authoring trail)
 Author: jeong-sik (with Claude Opus 4.7)
 Date: 2026-05-08
 Supersedes: —

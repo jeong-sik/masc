@@ -517,6 +517,8 @@ let vote ~voter ~post_id ~direction =
          (Post_voted { post_id; voter; direction })
    | Error e ->
        (match e with
+        | Board_types.Already_voted _ ->
+            Log.BoardLog.debug
         | Board_types.Post_not_found _ | Board_types.Comment_not_found _ ->
             Log.BoardLog.info
         | _ -> Log.BoardLog.warn)
@@ -539,6 +541,8 @@ let vote_comment ~voter ~comment_id ~direction =
          (Comment_voted { comment_id; voter; direction })
    | Error e ->
        (match e with
+        | Board_types.Already_voted _ ->
+            Log.BoardLog.debug
         | Board_types.Post_not_found _ | Board_types.Comment_not_found _ ->
             Log.BoardLog.info
         | _ -> Log.BoardLog.warn)

@@ -202,6 +202,144 @@ let oas_retry_budget_available_for_turn
        ~is_retry ~estimated_input_tokens
        ~max_turns ~remaining_turn_budget_s)
 
+(* RFC-OAS-XXX (Team JJ §6) POC, 2026-05-21
+   ------------------------------------------------------------------
+   Typed admission decision for an upcoming cascade attempt.
+
+   Background: 1077/24h [oas_timeout_budget] events, ~74% from retry
+   paths ([adaptive_*_retry] / [static_300s_*_retry]). The current
+   caller in [Keeper_unified_turn.ml:589-615] calls
+   [resolve_bounded_oas_timeout_budget_with_turn_budget] and, when it
+   returns [None] for a retry, *emits* an [Oas_timeout_budget] error
+   with [source="pre_retry_budget_unavailable"]. That collapses two
+   different failure semantics into one wire code:
+     (a) the cascade attempt never started because admission budget
+         was insufficient, and
+     (b) an actual provider attempt ran and the server timed out.
+   Mixing them inflates the [oas_timeout_budget] signature and hides
+   the retry-admission rate.
+
+   This function returns a typed admission decision. It does NOT
+   change emission semantics on its own — that requires a new
+   [masc_internal_error] variant ([Retry_admission_denied]) which is
+   surface-breaking and deferred to RFC. The gate is exposed so
+   callers can branch before invoking the attempt loop, and so that
+   a subsequent PR can swap the emission path without touching the
+   gate logic.
+
+   Anti-pattern self-check (software-development.md §workaround):
+   - Not telemetry-as-fix (§1): does not add a counter; returns a
+     typed Result that the caller must consume.
+   - Not string classifier (§2): closed-sum reason, no substring.
+   - Not N-of-M (§3): single SSOT function; the followup variant
+     change is the natural typed boundary expansion. *)
+
+type retry_admission_denial =
+  | Retry_budget_below_min of {
+      projected_usable_budget_s : float;
+      min_required_s : float;
+      remaining_turn_budget_s : float;
+      adaptive_timeout_s : float;
+      allow_wall_clock_retry_budget : bool;
+    }
+  | First_attempt_budget_below_min of {
+      projected_usable_budget_s : float;
+      min_required_s : float;
+      remaining_turn_budget_s : float;
+    }
+
+type attempt_kind = First_attempt | Retry_attempt
+
+let attempt_kind_is_retry = function
+  | First_attempt -> false
+  | Retry_attempt -> true
+
+let retry_admission_denial_to_yojson (d : retry_admission_denial) : Yojson.Safe.t =
+  match d with
+  | Retry_budget_below_min r ->
+    `Assoc
+      [
+        ("kind", `String "retry_budget_below_min");
+        ("projected_usable_budget_s", `Float r.projected_usable_budget_s);
+        ("min_required_s", `Float r.min_required_s);
+        ("remaining_turn_budget_s", `Float r.remaining_turn_budget_s);
+        ("adaptive_timeout_s", `Float r.adaptive_timeout_s);
+        ( "allow_wall_clock_retry_budget",
+          `Bool r.allow_wall_clock_retry_budget );
+      ]
+  | First_attempt_budget_below_min r ->
+    `Assoc
+      [
+        ("kind", `String "first_attempt_budget_below_min");
+        ("projected_usable_budget_s", `Float r.projected_usable_budget_s);
+        ("min_required_s", `Float r.min_required_s);
+        ("remaining_turn_budget_s", `Float r.remaining_turn_budget_s);
+      ]
+
+let decide_retry_admission_for_turn
+    ~(remaining_turn_budget_s : float)
+    ~(attempt_kind : attempt_kind)
+    ~(allow_wall_clock_retry_budget : bool)
+    ~(estimated_input_tokens : int)
+    ~(max_turns : int) : (unit, retry_admission_denial) result =
+  let runtime = Keeper_runtime_resolved.current () in
+  let adaptive_timeout_sec =
+    Keeper_runtime_resolved
+    .oas_timeout_for_estimated_input_tokens_with_turn_budget
+      ~estimated_input_tokens ~max_turns
+  in
+  let is_retry = attempt_kind_is_retry attempt_kind in
+  if is_retry then
+    let time_spent_in_turn =
+      runtime.turn_timeout_sec.value -. remaining_turn_budget_s
+    in
+    let usable_retry_budget = adaptive_timeout_sec -. time_spent_in_turn in
+    let usable_wall_clock_budget =
+      remaining_turn_budget_s -. oas_timeout_guard_sec
+    in
+    let projected_usable_budget_s =
+      if usable_retry_budget >= min_oas_timeout_budget_sec then
+        usable_retry_budget
+      else if allow_wall_clock_retry_budget then usable_wall_clock_budget
+      else usable_retry_budget
+    in
+    if remaining_turn_budget_s <= 0.0 then
+      Error
+        (Retry_budget_below_min
+           {
+             projected_usable_budget_s;
+             min_required_s = min_oas_timeout_budget_sec;
+             remaining_turn_budget_s;
+             adaptive_timeout_s = adaptive_timeout_sec;
+             allow_wall_clock_retry_budget;
+           })
+    else if usable_retry_budget >= min_oas_timeout_budget_sec then Ok ()
+    else if
+      allow_wall_clock_retry_budget
+      && usable_wall_clock_budget >= min_oas_timeout_budget_sec
+    then Ok ()
+    else
+      Error
+        (Retry_budget_below_min
+           {
+             projected_usable_budget_s;
+             min_required_s = min_oas_timeout_budget_sec;
+             remaining_turn_budget_s;
+             adaptive_timeout_s = adaptive_timeout_sec;
+             allow_wall_clock_retry_budget;
+           })
+  else
+    let usable_budget = remaining_turn_budget_s -. oas_timeout_guard_sec in
+    if usable_budget >= min_oas_timeout_budget_sec then Ok ()
+    else
+      Error
+        (First_attempt_budget_below_min
+           {
+             projected_usable_budget_s = usable_budget;
+             min_required_s = min_oas_timeout_budget_sec;
+             remaining_turn_budget_s;
+           })
+
 (* PR #13120 review: declared in [Env_config_keeper.KeeperRetryBackoff]
    so the env knob catalog generator at [bin/env_knob_catalog.ml]
    picks it up — that generator only scans [lib/config/env_config_*.ml],
@@ -252,7 +390,11 @@ let degraded_retry_bypasses_slot_phase_guard
       | Keeper_turn_driver.Admission_queue_rejected _
       | Keeper_turn_driver.Turn_timeout _
       | Keeper_turn_driver.Max_tokens_ceiling_violation _
-      | Keeper_turn_driver.Ambiguous_post_commit _ )
+      | Keeper_turn_driver.Ambiguous_post_commit _
+      (* RFC-0159 Phase A: Internal_* variants are not OAS-budget timeouts. *)
+      | Keeper_turn_driver.Internal_unhandled_exception _
+      | Keeper_turn_driver.Internal_bridge_exception _
+      | Keeper_turn_driver.Internal_contract_rejected _ )
   | None ->
     false
 

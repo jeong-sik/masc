@@ -19,6 +19,5 @@ val agent_card_action_enum_strings : string list
 val collaboration_format_enum_strings : string list
 
 (** Tool schemas: [masc_agents], [masc_agent_update],
-    [masc_agent_fitness], [masc_register_capabilities],
-    [masc_get_metrics], [masc_agent_card]. *)
+    [masc_agent_fitness], [masc_get_metrics], [masc_agent_card]. *)
 val schemas : Masc_domain.tool_schema list

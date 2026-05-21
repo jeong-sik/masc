@@ -19,7 +19,7 @@ module Float = Stdlib.Float
 
     Derived mechanically from Tool_permission_map.permission_for_tool, which
     already respects Tool_catalog-declared required_permission metadata before
-    falling back to legacy auth mappings.
+    falling back to auth fallback mappings.
 
     Each tool's required permission determines which role tier it belongs to:
     - Worker tier: CanReadState, CanJoin, CanLeave, CanAddTask, CanClaimTask,
@@ -67,9 +67,8 @@ let tools_for_required_role required_role =
    permission metadata, catalog surfaces) are module-init-frozen, so
    the result is constant for the program lifetime.
 
-   [policy_for_role Worker] is called per-request from
-   [Auth.authorize_tool_for_role]; rebuilding the same selector each
-   call was pure waste.
+   [policy_for_role Worker] is used by diagnostics and dashboard policy
+   views; rebuilding the same selector each call is pure waste.
 
    [lazy] (instead of eager [let]) defers evaluation until first call,
    so we read [Tool_permission_map.known_tool_names] *after* all module
@@ -96,20 +95,26 @@ let worker_only_tools () = Lazy.force worker_only_tools_lazy
 (* Role → Policy                                                     *)
 (* ================================================================ *)
 
-let admin_policy : Tool_access_policy.t =
-  { Tool_access_policy.allow = All; deny = Empty }
+let permissioned_tools_lazy =
+  lazy
+    (List.sort_uniq
+       String.compare
+       (Lazy.force admin_only_tools_lazy @ Lazy.force worker_only_tools_lazy))
+
+let admin_policy_lazy : Tool_access_policy.t Lazy.t =
+  lazy
+    {
+      Tool_access_policy.allow = Names (Lazy.force permissioned_tools_lazy);
+      deny = Empty;
+    }
 
 let worker_policy_lazy : Tool_access_policy.t Lazy.t =
   lazy
     {
-      Tool_access_policy.allow =
-        Diff
-          { base = All
-          ; exclude = Names (Lazy.force admin_only_tools_lazy)
-          };
+      Tool_access_policy.allow = Names (Lazy.force worker_only_tools_lazy);
       deny = Empty;
     }
 
 let policy_for_role : Masc_domain.agent_role -> Tool_access_policy.t = function
-  | Admin -> admin_policy
+  | Admin -> Lazy.force admin_policy_lazy
   | Worker -> Lazy.force worker_policy_lazy

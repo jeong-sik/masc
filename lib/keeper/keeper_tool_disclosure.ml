@@ -360,7 +360,7 @@ let public_alias_guidance_for_internal_call
 ;;
 
 let claim_context_tool_names : string list =
-  Tool_name.[ Masc Claim_next; Masc Claim_task; Keeper Task_claim ]
+  Tool_name.[ Masc Claim_next; Keeper Task_claim ]
   |> List.map Tool_name.to_string
 ;;
 
@@ -374,10 +374,7 @@ let completion_tool_names : string list =
      even though the LLM had decided no fit (sangsu/janitor/taskmaster on
      2026-04-27 00:17-00:58 UTC, idle_seconds 28-40h, claimable_count 44-46). *)
   Tool_name.
-    [ Masc Cancel_task
-    ; Masc Complete_task
-    ; Masc Deliver
-    ; Masc Release_task
+    [ Masc Deliver
     ; Keeper Stay_silent
     ; Keeper Task_done
     ; Keeper Task_force_done
@@ -390,7 +387,7 @@ let completion_tool_names : string list =
 let is_claim_tool_name name =
   let name = canonical_tool_name name in
   match Tool_name.of_string name with
-  | Some (Keeper Task_claim) | Some (Masc Claim_next) | Some (Masc Claim_task) -> true
+  | Some (Keeper Task_claim) | Some (Masc Claim_next) -> true
   | _ -> false
 ;;
 
@@ -642,18 +639,32 @@ let record_require_tool_use_violation
     ()
 ;;
 
+let actionable_signal_context_phrase = function
+  | Keeper_contract_classifier.No_actionable_signal_context -> None
+  | Keeper_contract_classifier.Turn_affordance_requires_tool ->
+      Some "actionable keeper tool gate (turn_affordance_requires_tool)"
+  | Keeper_contract_classifier.Keeper_world_signal signal ->
+      Some
+        (Printf.sprintf
+           "actionable keeper signal (%s)"
+           (Keeper_contract_classifier.actionable_signal_label signal))
+;;
+
 let actionable_tool_contract_violation_reason
       ~(claim_context_allowed : bool)
-      ~(actionable_signal_context : bool)
+      ~(actionable_signal_context :
+          Keeper_contract_classifier.actionable_signal_context)
       ~(tool_names : string list)
   : string option
   =
-  if not actionable_signal_context
-  then None
-  else (
+  match actionable_signal_context_phrase actionable_signal_context with
+  | None -> None
+  | Some context_phrase ->
     match tool_names with
     | [] ->
-      Some "actionable keeper signal was present, but the model called no keeper tools"
+      Some
+        (Printf.sprintf "%s was present, but the model called no keeper tools"
+           context_phrase)
     | names
       when List.exists
              (if claim_context_allowed
@@ -665,14 +676,16 @@ let actionable_tool_contract_violation_reason
            && not (List.exists is_owned_task_progress_tool_name names) ->
       Some
         (Printf.sprintf
-           "actionable keeper signal was present for an owned active task, but the model \
-            only used passive/claim/stay_silent tools without execution progress: %s"
+           "%s was present for an owned active task, but the model only used \
+            passive/claim/stay_silent tools without execution progress: %s"
+           context_phrase
            (String.concat ", " names))
     | names when List.exists is_stay_silent_tool_name names ->
       Some
         (Printf.sprintf
-           "actionable keeper signal was present, but the model used keeper_stay_silent \
-            without typed no-work proof: %s"
+           "%s was present, but the model used keeper_stay_silent without typed \
+            no-work proof: %s"
+           context_phrase
            (String.concat ", " names))
     | names
       when List.for_all
@@ -680,17 +693,18 @@ let actionable_tool_contract_violation_reason
              names ->
       Some
         (Printf.sprintf
-           "actionable keeper signal was present, but the model only used passive \
-            status/read tools: %s"
+           "%s was present, but the model only used passive status/read tools: %s"
+           context_phrase
            (String.concat ", " names))
     | names
       when (not claim_context_allowed) && List.for_all is_claim_context_tool_name names ->
       Some
         (Printf.sprintf
-           "actionable keeper signal was present, but the model only used claim/context \
-            tools without execution progress: %s"
+           "%s was present, but the model only used claim/context tools without execution \
+            progress: %s"
+           context_phrase
            (String.concat ", " names))
-    | _ -> None)
+    | _ -> None
 ;;
 
 let normalize_response_text ~(text : string) ~(tool_names : string list) ()

@@ -19,8 +19,8 @@ val credentials_for_keeper :
     keeper is allowed to access and looking up each repository's
     [credential_id] in the credential store.
 
-    Returns [Ok []] when the keeper has no mapping (backward-compatibility
-    signal consumed by the RFC-0019 PR-A credential provider bridge).
+    Returns [Ok []] when the keeper has no mapping, preserving a distinct
+    missing-mapping signal for strict credential-provider dispatch.
 
     Repository IDs from the mapping are resolved against the loaded
     repositories; unknown repository IDs are ignored by this resolution.
@@ -46,8 +46,8 @@ val apply_mapping :
   keeper_id:string -> base_path:string -> repositories:repository list -> repository list
 (** [apply_mapping ~keeper_id ~base_path ~repositories] filters the given
     repository list to only those accessible by [keeper_id].
-    When no mapping exists for the keeper, all repositories are returned
-    (backward compatibility). *)
+    When no mapping exists for the keeper, or mapping loading fails, no
+    repositories are returned. *)
 
 val repository_id_of_path :
   base_path:string -> path:string -> repository_id option

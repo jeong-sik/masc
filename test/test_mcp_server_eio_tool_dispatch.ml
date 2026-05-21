@@ -106,7 +106,7 @@ let test_execute_tool_tag_dispatch_respects_pre_hooks () =
       Alcotest.(check string) "blocked message returned" "blocked-by-pre-hook"
         (Tool_result.message hook_result))
 
-let test_execute_tool_autoresearch_uses_resolved_session_agent () =
+let test_execute_tool_autoresearch_is_retired () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   Mcp_eio.set_net (Eio.Stdenv.net env);
@@ -114,8 +114,6 @@ let test_execute_tool_autoresearch_uses_resolved_session_agent () =
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
-  let workdir_path = Filename.concat base_path "not-a-git-repo" in
-  Unix.mkdir workdir_path 0o755;
   Fun.protect
     ~finally:(fun () ->
       Tool_dispatch.clear_hooks ();
@@ -142,23 +140,12 @@ let test_execute_tool_autoresearch_uses_resolved_session_agent () =
       let start_result =
         Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
           ~name:"masc_autoresearch_start"
-          ~arguments:
-            (`Assoc
-              [
-                ("goal", `String "permission regression");
-                ("metric_fn", `String "echo");
-                ("target_file", `String "target.txt");
-                ("workdir", `String workdir_path);
-                ("model_model", `String "test:dummy");
-                ("max_cycles", `Int 1);
-              ])
+          ~arguments:(`Assoc [])
       in
-      Alcotest.(check bool) "start fails" false start_result.Tool_result.success;
-      (* Without the legacy Tool_permissions pre-hook, the call reaches
-         workdir validation which rejects non-git directories. *)
-      Alcotest.(check bool) "fails at workdir validation" true
+      Alcotest.(check bool) "start is retired" false start_result.Tool_result.success;
+      Alcotest.(check bool) "fails before autoresearch dispatch" true
         (contains_substring (Tool_result.message start_result)
-           "workdir is not inside a git repository"))
+           "not in current tool set"))
 
 let () =
   Alcotest.run "Mcp_server_eio_tool_dispatch"
@@ -169,8 +156,8 @@ let () =
           ( "execute tag dispatch respects pre-hooks",
             `Quick,
             test_execute_tool_tag_dispatch_respects_pre_hooks );
-          ( "execute autoresearch uses resolved session agent",
+          ( "execute autoresearch is retired",
             `Quick,
-            test_execute_tool_autoresearch_uses_resolved_session_agent );
+            test_execute_tool_autoresearch_is_retired );
         ] );
     ]

@@ -782,8 +782,8 @@ let test_resolve_with_policy_remembers_medium_allow () =
         AQ.submit_pending
           ~base_path
           ~keeper_name:"remember-keeper"
-          ~tool_name:"masc_claim_task"
-          ~input:(`Assoc [])
+          ~tool_name:"masc_transition"
+          ~input:(`Assoc [ ("action", `String "claim") ])
           ~risk_level:AQ.Medium
           ~on_resolution:(fun _ -> ())
           ()
@@ -855,8 +855,13 @@ let test_dashboard_resolve_and_delete_rules_use_room_base_path () =
       let id =
         AQ.submit_pending
           ~keeper_name:"dashboard-room-keeper"
-          ~tool_name:"masc_claim_task"
-          ~input:(`Assoc [ ("task_id", `String "task-room") ])
+          ~tool_name:"masc_transition"
+          ~input:
+            (`Assoc
+              [
+                ("action", `String "claim");
+                ("task_id", `String "task-room");
+              ])
           ~risk_level:AQ.Medium
           ~base_path:room_base
           ~on_resolution:(fun _ -> ())
@@ -924,8 +929,13 @@ let test_submit_pending_audit_uses_room_base_path () =
       ignore
         (AQ.submit_pending
            ~keeper_name
-           ~tool_name:"masc_claim_task"
-           ~input:(`Assoc [ ("task_id", `String "task-room-audit") ])
+           ~tool_name:"masc_transition"
+           ~input:
+             (`Assoc
+               [
+                 ("action", `String "claim");
+                 ("task_id", `String "task-room-audit");
+               ])
            ~risk_level:AQ.High
            ~base_path:room_base
            ~on_resolution:(fun _ -> ())
@@ -1168,8 +1178,8 @@ let test_callback_paranoid_medium_risk_uses_remembered_policy () =
         AQ.submit_pending
           ~base_path
           ~keeper_name:"remember-keeper"
-          ~tool_name:"masc_claim_task"
-          ~input:(`Assoc [])
+          ~tool_name:"masc_transition"
+          ~input:(`Assoc [ ("action", `String "claim") ])
           ~risk_level:AQ.Medium
           ~on_resolution:(fun _ -> ())
           ()
@@ -1191,7 +1201,11 @@ let test_callback_paranoid_medium_risk_uses_remembered_policy () =
           ~governance_level:"paranoid" ~keeper_name:"remember-keeper"
           ~config ()
       in
-      let decision = cb ~tool_name:"masc_claim_task" ~input:(`Assoc []) in
+      let decision =
+        cb
+          ~tool_name:"masc_transition"
+          ~input:(`Assoc [ ("action", `String "claim") ])
+      in
       match decision with
       | Agent_sdk.Hooks.Approve ->
           Alcotest.(check int) "remembered policy bypasses queue"

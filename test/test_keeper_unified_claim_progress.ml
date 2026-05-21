@@ -4,6 +4,18 @@ module KAR = Masc_mcp.Keeper_agent_run
 module KCC = Masc_mcp.Keeper_contract_classifier
 module KTD = Masc_mcp.Keeper_tool_disclosure
 
+let unclaimed_task_context =
+  KCC.make_actionable_signal_context
+    ~tool_gate_required:false
+    ~actionable_signal:KCC.Has_unclaimed_tasks
+;;
+
+let no_actionable_context =
+  KCC.make_actionable_signal_context
+    ~tool_gate_required:false
+    ~actionable_signal:KCC.No_actionable_signal
+;;
+
 let contains_substring haystack needle =
   let hay_len = String.length haystack in
   let needle_len = String.length needle in
@@ -17,7 +29,7 @@ let contains_substring haystack needle =
   needle_len = 0 || loop 0
 ;;
 
-let test_claim_tool_classification_covers_masc_claim_task () =
+let test_claim_tool_classification_covers_supported_claim_tools () =
   check
     bool
     "keeper claim is claim tool"
@@ -30,8 +42,8 @@ let test_claim_tool_classification_covers_masc_claim_task () =
     (KTD.is_claim_tool_name "masc_claim_next");
   check
     bool
-    "masc claim task is claim tool"
-    true
+    "removed claim task alias is not claim tool"
+    false
     (KTD.is_claim_tool_name "masc_claim_task");
   check
     bool
@@ -126,7 +138,7 @@ let test_actionable_tool_contract_allows_execution_tools () =
     None
     (KTD.actionable_tool_contract_violation_reason
        ~claim_context_allowed:true
-       ~actionable_signal_context:true
+       ~actionable_signal_context:unclaimed_task_context
        ~tool_names:[ "keeper_bash"; "masc_status" ]);
   check
     (option string)
@@ -134,12 +146,12 @@ let test_actionable_tool_contract_allows_execution_tools () =
     None
     (KTD.actionable_tool_contract_violation_reason
        ~claim_context_allowed:true
-       ~actionable_signal_context:true
+       ~actionable_signal_context:unclaimed_task_context
        ~tool_names:[ "keeper_board_comment" ]);
   (match
      KTD.actionable_tool_contract_violation_reason
        ~claim_context_allowed:false
-       ~actionable_signal_context:true
+       ~actionable_signal_context:unclaimed_task_context
        ~tool_names:[ "keeper_board_post"; "keeper_tasks_list" ]
    with
    | Some reason ->
@@ -155,7 +167,7 @@ let test_actionable_tool_contract_allows_execution_tools () =
     None
     (KTD.actionable_tool_contract_violation_reason
        ~claim_context_allowed:false
-       ~actionable_signal_context:true
+       ~actionable_signal_context:unclaimed_task_context
        ~tool_names:[ "masc_worktree_create" ]);
   check
     (option string)
@@ -163,7 +175,7 @@ let test_actionable_tool_contract_allows_execution_tools () =
     None
     (KTD.actionable_tool_contract_violation_reason
        ~claim_context_allowed:false
-       ~actionable_signal_context:true
+       ~actionable_signal_context:unclaimed_task_context
        ~tool_names:[ "keeper_pr_create" ]);
   check
     (option string)
@@ -171,7 +183,7 @@ let test_actionable_tool_contract_allows_execution_tools () =
     None
     (KTD.actionable_tool_contract_violation_reason
        ~claim_context_allowed:true
-       ~actionable_signal_context:false
+       ~actionable_signal_context:no_actionable_context
        ~tool_names:[])
 ;;
 
@@ -224,7 +236,7 @@ let test_stay_silent_requires_typed_no_work_proof_on_actionable_signal () =
   (match
      KTD.actionable_tool_contract_violation_reason
        ~claim_context_allowed:true
-       ~actionable_signal_context:true
+       ~actionable_signal_context:unclaimed_task_context
        ~tool_names:[ "keeper_stay_silent"; "keeper_tasks_list" ]
    with
    | Some reason ->
@@ -240,7 +252,7 @@ let test_stay_silent_requires_typed_no_work_proof_on_actionable_signal () =
     None
     (KTD.actionable_tool_contract_violation_reason
        ~claim_context_allowed:true
-       ~actionable_signal_context:true
+       ~actionable_signal_context:unclaimed_task_context
        ~tool_names:[ "keeper_board_comment"; "keeper_stay_silent" ]);
   check
     (option string)
@@ -248,7 +260,7 @@ let test_stay_silent_requires_typed_no_work_proof_on_actionable_signal () =
     None
     (KTD.actionable_tool_contract_violation_reason
        ~claim_context_allowed:false
-       ~actionable_signal_context:true
+       ~actionable_signal_context:unclaimed_task_context
        ~tool_names:[ "keeper_bash"; "keeper_stay_silent" ]);
   check
     (option string)
@@ -256,7 +268,7 @@ let test_stay_silent_requires_typed_no_work_proof_on_actionable_signal () =
     None
     (KTD.actionable_tool_contract_violation_reason
        ~claim_context_allowed:true
-       ~actionable_signal_context:false
+       ~actionable_signal_context:no_actionable_context
        ~tool_names:[ "keeper_stay_silent" ]);
   check
     bool
@@ -265,7 +277,7 @@ let test_stay_silent_requires_typed_no_work_proof_on_actionable_signal () =
     (Option.is_some
        (KTD.actionable_tool_contract_violation_reason
           ~claim_context_allowed:true
-          ~actionable_signal_context:true
+          ~actionable_signal_context:unclaimed_task_context
           ~tool_names:[ "keeper_tasks_list"; "masc_status" ]))
 ;;
 
@@ -274,9 +286,9 @@ let () =
     "keeper_unified_claim_progress"
     [ ( "claim_progress"
       , [ test_case
-            "claim tool classification covers masc claim task"
+            "claim tool classification covers supported claim tools"
             `Quick
-            test_claim_tool_classification_covers_masc_claim_task
+            test_claim_tool_classification_covers_supported_claim_tools
         ; test_case
             "initial claim counts as contract progress"
             `Quick

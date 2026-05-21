@@ -34,11 +34,6 @@ val json_headers :
     this module so a future "rebrand the json content type" change
     must touch one site. *)
 
-(* RFC-0098 PR-4: legacy [respond_mcp_auth_error] /
-   [respond_mcp_internal_error] removed. Use [respond_mcp_error
-   ~code:Mcp_error_code.Auth_error] / [~code:Mcp_error_code.Internal_error]
-   directly. *)
-
 val respond_not_ready :
   deps:Server_mcp_transport_http_types.deps ->
   Httpun.Request.t ->
@@ -89,9 +84,6 @@ val respond_sse_rate_limited :
     [sse_connection_rate_limited]; dashboards / log greps depend on
     the exact spelling. *)
 
-(* RFC-0098 PR-4: legacy [mcp_internal_error_json] removed. Use
-   [error_body ~code:Mcp_error_code.Internal_error ...] directly. *)
-
 val error_body :
   ?id:Yojson.Safe.t ->
   ?data:Yojson.Safe.t ->
@@ -107,8 +99,7 @@ val error_body :
     Defaults: [id = `Null] (per JSON-RPC 2.0 §5.1), no [data] field.
 
     Used internally by {!respond_mcp_error}; exposed here for callers
-    that build SSE batch frames (the {!mcp_internal_error_json}
-    use-case generalised to any {!Mcp_error_code.t}). *)
+    that build SSE batch frames with any {!Mcp_error_code.t}. *)
 
 val respond_mcp_error :
   ?extra_headers:(string * string) list ->
@@ -144,9 +135,5 @@ val respond_mcp_error :
     - [Backpressure_shed] adds [retry-after: 1].
 
     [extra_headers] are prepended; {!json_headers} append.  The
-    function never raises (uses the same safe_respond_with_string
-    helper as the legacy factories).
-
-    PR-1 (RFC-0098) introduces this SSOT in parallel with the legacy
-    four factories. PR-2 migrates the legacy factories to thin
-    delegations and marks them [@@deprecated]. *)
+    function never raises; response writes go through the module's
+    guarded response helper. *)

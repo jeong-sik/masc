@@ -256,6 +256,13 @@ let test_sandbox_live_probe_is_batched_for_dashboard () =
     check bool "slow docker probe is batched" true (elapsed_sec < 3.5);
     let per_keeper = Yojson.Safe.Util.(json |> member "per_keeper" |> to_list) in
     check int "docker keeper count" 4 (List.length per_keeper);
+    check bool "2s docker listing is not reported as a timeout" true
+      (List.for_all
+         (fun keeper ->
+           Yojson.Safe.Util.(
+             keeper |> member "sandbox_live" |> member "container_error")
+           = `Null)
+         per_keeper);
     check bool "playground repo git enrichment skipped" true
       (List.for_all
          (fun keeper ->

@@ -384,7 +384,7 @@ let build_default_config base_path =
   sync_test_base_path_env resolved_path;
   let backend_config = backend_config_for resolved_path in
   (* #10919: this factory is invoked per-tool-dispatch (8 call sites:
-     mcp_server_eio_call_tool, tool_autoresearch, inline_dispatch_coord,
+     mcp_server_eio_call_tool, inline_dispatch_coord,
      keeper_rollover, ...) — 1745 inits / 2 days = 3490 INFO events
      for what is conceptually a static config.  Demote the success
      path to DEBUG; the failure / fallback paths below stay at

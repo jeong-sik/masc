@@ -111,6 +111,21 @@ module For_testing = struct
   let board_sse_event_params = board_sse_event_params
 end
 
+let fork_logged_fiber ~sw ~on_error run =
+  Eio.Fiber.fork ~sw (fun () ->
+    try run () with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | exn -> on_error exn)
+;;
+
+let log_server_fiber_crash name exn =
+  Log.Server.error "%s fiber crashed: %s" name (Printexc.to_string exn)
+;;
+
+let log_dashboard_fiber_crash name exn =
+  Log.Dashboard.error "%s fiber crashed: %s" name (Printexc.to_string exn)
+;;
+
 let filteri_with_fair_yield f xs =
   let meter = Eio_guard.create_yield_meter ~interval:1 () in
   List.filteri
@@ -217,12 +232,12 @@ let start_keeper_loops
      Subsystem_health tracks liveness at module level (no init timing dependency). *)
   let fork_subsystem name f =
     Subsystem_health.register name;
-    Eio.Fiber.fork ~sw (fun () ->
-      try f () with
-      | Eio.Cancel.Cancelled _ as e -> raise e
-      | exn ->
+    fork_logged_fiber
+      ~sw
+      ~on_error:(fun exn ->
         Subsystem_health.mark_dead name;
         Log.Server.error "subsystem %s crashed: %s" name (Printexc.to_string exn))
+      f
   in
   let wait_for_lazy_startup () =
     (* Combines #10843 (per-task elapsed diagnostic, merged via #10854) with
@@ -335,9 +350,9 @@ let start_keeper_loops
   in
   (* Create and install the MASC-owned Event_bus alongside OAS's.
      MASC domain events (masc.broadcast, masc.heartbeat, masc.keeper.*,
-     masc.autonomy.*, masc.harness.*, masc.trust_updated, ...) publish
-     here per OAS event_bus.mli:103-107 boundary. Dashboard SSE consumers
-     see both channels as one stream — the relay translates masc.* →
+     masc.harness.*, ...) publish here per OAS event_bus.mli:103-107
+     boundary. Dashboard SSE consumers see both channels as one stream
+     — the relay translates masc.* →
      masc:* on the wire for backward compatibility. *)
   let masc_event_bus =
     Masc_event_bus_policy.create_bus Masc_event_bus_policy.masc_domain
@@ -387,7 +402,10 @@ let start_keeper_loops
     | None -> 200
   in
   Agent_sdk_metrics_bridge.start_sampler ~sw ~clock ~warn_threshold ();
-  Eio.Fiber.fork ~sw (fun () ->
+  fork_logged_fiber
+    ~sw
+    ~on_error:(log_dashboard_fiber_crash "keeper lifecycle listener")
+    (fun () ->
     let rec loop () =
       (try
          let events = Agent_sdk_metrics_bridge.drain keeper_lifecycle_sub in
@@ -569,11 +587,10 @@ let start_keeper_loops
      Log.Server.error
        "subsystem orchestrator failed to start: %s"
        (Printexc.to_string exn));
-  (* RFC-0036 Phase A.3: register default keeper-lifecycle cleanup
-     hooks once during bootstrap. Both calls are Atomic-guarded
-     idempotent so re-bootstrapping (e.g. tests) is safe. *)
+  (* RFC-0036 Phase A.3: register default keeper-lifecycle cleanup hooks
+     once during bootstrap. The call is Atomic-guarded and idempotent so
+     re-bootstrapping (e.g. tests) is safe. *)
   Keeper_subprocess_registry.register_default_cleanup_hook ();
-  Keeper_bg_task_cleanup.register_default_cleanup_hook ();
   (* Build read-only tool surface shared by both judges. *)
   let judge_tool_names =
     List.map Tool_name.Masc.to_string Tool_name.Masc.[ Status; Tasks; Agents; Board_list ]
@@ -975,10 +992,10 @@ let start_keeper_loops
 let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_state) =
   (* Metrics flush fiber: drains write queue every 500ms, batches file appends.
      Replaces the old mutex + synchronous file I/O pattern. *)
-  Eio.Fiber.fork ~sw (fun () ->
-    try Metrics_store_eio.start_flush_fiber ~clock with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | exn -> Log.Server.error "metrics_flush fiber crashed: %s" (Printexc.to_string exn));
+  fork_logged_fiber
+    ~sw
+    ~on_error:(log_server_fiber_crash "metrics_flush")
+    (fun () -> Metrics_store_eio.start_flush_fiber ~clock);
   Shutdown.register ~name:"metrics_flush" ~priority:30 Metrics_store_eio.flush_pending;
   (* RFC-0137 PR-2: host FD pressure poller. Watches sysmon's pressure state
      file at /tmp/masc-host-pressure.state every 1s; bridges WARN/CRIT into
@@ -1054,7 +1071,10 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
   (* Board_listener removed: filesystem-first principle.
      JSONL path emits SSE directly via Board_dispatch.emit_board_sse_event.
      PG path also uses Board_dispatch, making the pg_notify relay redundant. *)
-  Eio.Fiber.fork ~sw (fun () ->
+  fork_logged_fiber
+    ~sw
+    ~on_error:(log_server_fiber_crash "maintenance_cleanup")
+    (fun () ->
     let last_prune = ref (Unix.gettimeofday ()) in
     let rec loop () =
       Eio.Time.sleep clock Env_config_runtime.InternalTimers.janitor_interval_sec;
@@ -1188,7 +1208,10 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
     in
     loop ());
   (* Periodic repository sync: fetch repositories with auto_sync enabled. *)
-  Eio.Fiber.fork ~sw (fun () ->
+  fork_logged_fiber
+    ~sw
+    ~on_error:(log_server_fiber_crash "repo_sync")
+    (fun () ->
     let repo_sync_interval_sec =
       Env_config_runtime.InternalTimers.repo_sync_interval_sec
     in
@@ -1221,8 +1244,10 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
      The interval (2.0s) matches RFC-0138 §6 Q2: frontend polls /shell
      every 3s, so a 2s refresh keeps staleness bounded at 5s (2s + 3s)
      while leaving the compute path fully out of the request fiber. *)
-  Eio.Fiber.fork ~sw (fun () ->
-    try
+  fork_logged_fiber
+    ~sw
+    ~on_error:(log_server_fiber_crash "dashboard_snapshot refresh")
+    (fun () ->
       (* RFC-0138 Phase 3 Step 3: pass [~state] so refresh_loop can
          populate [namespace_truth] from the cached-refs path.
          That moves the 6 MASC_NAMESPACE_TRUTH_*_TIMEOUT_S knobs out
@@ -1230,13 +1255,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
          response (Step 4 retires the env knobs themselves). *)
       Dashboard_snapshot.refresh_loop
         ~sw ~clock ~config:state.room_config ~state
-        ~interval_sec:2.0 ()
-    with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | exn ->
-      Log.Server.error
-        "dashboard_snapshot refresh fiber crashed: %s"
-        (Printexc.to_string exn));
+        ~interval_sec:2.0 ());
   let resolved_base = state.room_config.base_path in
   let masc_dir = Coord.masc_root_dir state.room_config in
   resolved_base, masc_dir

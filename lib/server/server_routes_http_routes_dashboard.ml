@@ -80,221 +80,35 @@ let observe_worktree_status_sse_close writer =
     ~default:() (fun () ->
       Httpun.Body.Writer.close writer)
 
-let sync_keeper_cascade_meta ~(config : Coord.config) ~(name : string)
-    ~(cascade_name : string) : (bool, string) result =
-  let updated_at = Keeper_types.now_iso () in
-  match Keeper_types.read_meta config name with
-  | Error msg -> Error ("read_meta failed after TOML update: " ^ msg)
-  | Ok (Some meta) ->
-      let updated =
-        { (Keeper_types.set_cascade_name cascade_name meta) with updated_at }
-      in
-      (match Keeper_types.write_meta ~force:true config updated with
-       | Ok () ->
-           let registered =
-             Option.is_some
-               (Keeper_registry.get ~base_path:config.base_path name)
-           in
-           Keeper_registry.update_meta ~base_path:config.base_path name updated;
-           Ok registered
-       | Error msg -> Error ("write_meta failed after TOML update: " ^ msg))
-  | Ok None ->
-      (match Keeper_registry.get ~base_path:config.base_path name with
-       | None -> Ok false
-       | Some entry ->
-           let updated =
-             { (Keeper_types.set_cascade_name cascade_name entry.meta) with updated_at }
-           in
-           (match Keeper_types.write_meta ~force:true config updated with
-            | Ok () ->
-                Keeper_registry.update_meta ~base_path:config.base_path name
-                  updated;
-                Ok true
-            | Error msg ->
-                Error ("write_meta failed after TOML update: " ^ msg)))
+(* sync_keeper_cascade_meta extracted to
+   [Server_routes_http_routes_dashboard_cascade_meta] (godfile decomp). *)
+let sync_keeper_cascade_meta = Server_routes_http_routes_dashboard_cascade_meta.sync_keeper_cascade_meta
+(* Dashboard dev-token cluster extracted to
+   [Server_routes_http_dashboard_dev_token] (godfile decomp). *)
 
-let dashboard_dev_actor_name = "dashboard"
+let dashboard_dev_actor_name = Server_routes_http_dashboard_dev_token.dashboard_dev_actor_name
+let dashboard_dev_token_path = Server_routes_http_dashboard_dev_token.dashboard_dev_token_path
+let legacy_dashboard_dev_token_path = Server_routes_http_dashboard_dev_token.legacy_dashboard_dev_token_path
+let remove_dashboard_dev_token_file_if_exists = Server_routes_http_dashboard_dev_token.remove_dashboard_dev_token_file_if_exists
 
-let dashboard_dev_token_path base_path =
-  Filename.concat
-    (Filename.concat (Common.masc_dir_from_base_path ~base_path) "auth")
-    "dashboard.token"
-
-let legacy_dashboard_dev_token_path base_path =
-  Filename.concat
-    (Filename.concat (Common.masc_dir_from_base_path ~base_path) "auth")
-    "dashboard-dev.token"
-
-let remove_dashboard_dev_token_file_if_exists path =
-  if Fs_compat.file_exists path then
-    try Sys.remove path
-    with exn ->
-      Log.Server.warn
-        "dashboard dev-token cleanup skipped for %s: %s"
-        path (Printexc.to_string exn)
-
-type dashboard_dev_token_candidate =
+type dashboard_dev_token_candidate = Server_routes_http_dashboard_dev_token.dashboard_dev_token_candidate =
   | Reusable of string
   | Rotate
 
-let classify_dashboard_dev_token_candidate ~base_path raw :
-    (dashboard_dev_token_candidate, string) result =
-  let trimmed = String.trim raw in
-  if String.equal trimmed "" then
-    Ok Rotate
-  else
-    match Auth.resolve_agent_from_token base_path ~token:trimmed with
-    | Ok owner when String.equal owner dashboard_dev_actor_name ->
-        Ok (Reusable trimmed)
-    | Ok _owner ->
-        Ok Rotate
-    | Error (Masc_domain.Auth (Masc_domain.Auth_error.InvalidToken _ | Masc_domain.Auth_error.TokenExpired _ | Masc_domain.Auth_error.Unauthorized _)) ->
-        Ok Rotate
-    | Error err ->
-        Error (Masc_domain.masc_error_to_string err)
-
-let read_reusable_dashboard_dev_token ~base_path path :
-    (string option, string) result =
-  if not (Fs_compat.file_exists path) then
-    Ok None
-  else
-    try
-      match classify_dashboard_dev_token_candidate ~base_path
-              (Fs_compat.load_file path) with
-      | Ok (Reusable raw) -> Ok (Some raw)
-      | Ok Rotate -> Ok None
-      | Error msg -> Error msg
-    with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | exn ->
-        Log.Server.warn
-          "dashboard dev-token read skipped for %s: %s"
-          path (Printexc.to_string exn);
-        Ok None
-
-let persist_dashboard_dev_token ~base_path raw : (unit, string) result =
-  let token_path = dashboard_dev_token_path base_path in
-  let legacy_path = legacy_dashboard_dev_token_path base_path in
-  try
-    Auth.save_private_text_file token_path raw;
-    remove_dashboard_dev_token_file_if_exists legacy_path;
-    Ok ()
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn ->
-      Error (Printf.sprintf "persist dev-token: %s" (Printexc.to_string exn))
-
-let mint_dashboard_dev_token base_path : (string, string) result =
-  match
-    Auth.create_token base_path
-      ~agent_name:dashboard_dev_actor_name ~role:Masc_domain.Admin
-  with
-  | Ok (raw, _cred) ->
-      (match persist_dashboard_dev_token ~base_path raw with
-       | Ok () -> Ok raw
-       | Error msg -> Error msg)
-  | Error err ->
-      Error (Masc_domain.masc_error_to_string err)
-
-let ensure_dashboard_dev_token base_path : (string, string) result =
-  let token_path = dashboard_dev_token_path base_path in
-  let legacy_path = legacy_dashboard_dev_token_path base_path in
-  match read_reusable_dashboard_dev_token ~base_path token_path with
-  | Error msg -> Error msg
-  | Ok (Some raw) ->
-      remove_dashboard_dev_token_file_if_exists legacy_path;
-      Ok raw
-  | Ok None ->
-      (match read_reusable_dashboard_dev_token ~base_path legacy_path with
-       | Error msg -> Error msg
-       | Ok (Some raw) ->
-           (match persist_dashboard_dev_token ~base_path raw with
-            | Ok () -> Ok raw
-            | Error msg -> Error msg)
-       | Ok None -> mint_dashboard_dev_token base_path)
-
+let classify_dashboard_dev_token_candidate = Server_routes_http_dashboard_dev_token.classify_dashboard_dev_token_candidate
+let read_reusable_dashboard_dev_token = Server_routes_http_dashboard_dev_token.read_reusable_dashboard_dev_token
+let persist_dashboard_dev_token = Server_routes_http_dashboard_dev_token.persist_dashboard_dev_token
+let mint_dashboard_dev_token = Server_routes_http_dashboard_dev_token.mint_dashboard_dev_token
+let ensure_dashboard_dev_token = Server_routes_http_dashboard_dev_token.ensure_dashboard_dev_token
 (** Broadcast handler: parse JSON body, extract "message" string field, and
     relay via Coord.broadcast.  Error responses are encoded through Yojson so
     exception messages cannot break JSON framing via embedded quotes. *)
-let handle_broadcast state agent_name reqd body_str =
-  let reply ok error_opt =
-    let fields = [ ("ok", `Bool ok) ] in
-    let fields = match error_opt with
-      | Some msg -> fields @ [ ("error", `String msg) ]
-      | None -> fields
-    in
-    Http.Response.json (Yojson.Safe.to_string (`Assoc fields)) reqd
-  in
-  try
-    let json = Yojson.Safe.from_string body_str in
-    match Yojson.Safe.Util.member "message" json with
-    | `String message ->
-        let config = state.Mcp_server.room_config in
-        let _ = Coord.broadcast config ~from_agent:agent_name ~content:message in
-        reply true None
-    | `Null -> reply false (Some "missing required field: message")
-    | _ -> reply false (Some "field 'message' must be a string")
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | Yojson.Json_error msg -> reply false (Some ("invalid JSON: " ^ msg))
-  | e -> reply false (Some (Printexc.to_string e))
-
-let handle_dashboard_link_previews state req reqd body_str =
-  let respond_error message =
-    Http.Response.json ~status:`Bad_request ~request:req
-      (Yojson.Safe.to_string
-         (`Assoc
-           [
-             ("ok", `Bool false);
-             ("error", `String message);
-           ]))
-      reqd
-  in
-  try
-    let args = Yojson.Safe.from_string body_str in
-    match
-      Server_dashboard_http_link_preview.dashboard_link_previews_http_json
-        ~state ~args
-    with
-    | Ok json ->
-        Http.Response.json ~compress:true ~request:req
-          (Yojson.Safe.to_string json) reqd
-    | Error message -> respond_error message
-  with Yojson.Json_error message ->
-    respond_error ("invalid json: " ^ message)
-
-let handle_dashboard_task_history state req reqd =
-  let task_id =
-    match Server_utils.query_param req "task_id" with
-    | Some value -> String.trim value
-    | None -> ""
-  in
-  if task_id = "" then
-    Http.Response.json ~status:`Bad_request ~request:req
-      {|{"error":"task_id is required"}|} reqd
-  else
-    let limit =
-      Server_utils.int_query_param req "limit" ~default:50
-      |> Server_utils.clamp ~min_v:1 ~max_v:200
-    in
-    let json =
-      Tool_task.task_history_events_json state.Mcp_server.room_config ~task_id ~limit
-    in
-    Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
-
-let handle_dashboard_rooms state req reqd =
-  let limit =
-    Server_utils.int_query_param req "limit" ~default:50
-    |> Server_utils.clamp ~min_v:1 ~max_v:200
-  in
-  let me =
-    match trimmed_query_param req "me" with
-    | Some _ as value -> value
-    | None -> trimmed_query_param req "agent"
-  in
-  let json = Dashboard_rooms.json ~config:state.Mcp_server.room_config ?me ~limit () in
-  Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
-
+(* Dashboard request handlers extracted to
+   [Server_routes_http_dashboard_handlers] (godfile decomp). *)
+let handle_broadcast = Server_routes_http_dashboard_handlers.handle_broadcast
+let handle_dashboard_link_previews = Server_routes_http_dashboard_handlers.handle_dashboard_link_previews
+let handle_dashboard_task_history = Server_routes_http_dashboard_handlers.handle_dashboard_task_history
+let handle_dashboard_rooms = Server_routes_http_dashboard_handlers.handle_dashboard_rooms
 let rec add_routes ~sw ~clock router =
   router
   |> Http.Router.post "/api/v1/broadcast" (fun request reqd ->
@@ -652,12 +466,11 @@ let rec add_routes ~sw ~clock router =
   |> Http.Router.get "/api/v1/dashboard/doctor" (fun request reqd ->
        with_public_read (fun _state req reqd ->
          let self_bin = Sys.argv.(0) in
-         let cmd =
-           Printf.sprintf "%s doctor all --json" (Filename.quote self_bin)
-         in
          try
            let buf, _status =
-             With_process.with_process_in cmd
+             With_process.with_process_args_in
+               self_bin
+               [| self_bin; "doctor"; "all"; "--json" |]
                (With_process.drain_to_buffer ~chunk:4096)
            in
            Http.Response.json
@@ -1392,107 +1205,6 @@ and add_autoresearch_routes router =
                Http.Response.json ~status:`Not_found
                  (Printf.sprintf {|{"error":"%s"}|} (String.escaped msg))
                reqd
-       ) request reqd)
-
-  |> Http.Router.post "/api/v1/autoresearch/loops/retry" (fun request reqd ->
-       with_tool_auth ~tool_name:"masc_autoresearch_stop" (fun state req reqd ->
-         Http.Request.read_body_async reqd (fun body_str ->
-           try
-             let json = Yojson.Safe.from_string body_str in
-             match Safe_ops.json_string_opt "loop_id" json with
-             | None ->
-                 Http.Response.json ~status:`Bad_request ~request:req
-                   {|{"ok":false,"error":"invalid request: requires {\"loop_id\":\"...\"}"}|}
-                   reqd
-             | Some loop_id ->
-             let base_path = state.Mcp_server.room_config.base_path in
-             (match Dashboard_http_autoresearch.validate_loop_id loop_id with
-             | Error message ->
-                 Http.Response.json ~status:`Bad_request ~request:req
-                   (Printf.sprintf {|{"ok":false,"error":"%s"}|}
-                      (String.escaped message))
-                   reqd
-             | Ok () -> (
-                 match
-                   Dashboard_http_autoresearch.retry_loop_json ~base_path ~loop_id
-                 with
-                 | Ok result ->
-                     Http.Response.json ~compress:true ~request:req
-                       (Yojson.Safe.to_string result) reqd
-                 | Error message ->
-                     Http.Response.json ~status:`Bad_request ~request:req
-                       (Printf.sprintf {|{"ok":false,"error":"%s"}|}
-                          (String.escaped message))
-                       reqd))
-           with Yojson.Json_error _ ->
-             Http.Response.json ~status:`Bad_request ~request:req
-               {|{"ok":false,"error":"invalid request: requires {\"loop_id\":\"...\"}"}|}
-               reqd
-         )
-       ) request reqd)
-
-  |> Http.Router.post "/api/v1/autoresearch/loops/start" (fun request reqd ->
-       with_tool_auth ~tool_name:"masc_autoresearch_start" (fun state req reqd ->
-         Http.Request.read_body_async reqd (fun body_str ->
-           try
-             let args = Yojson.Safe.from_string body_str in
-             let base_path = state.Mcp_server.room_config.base_path in
-             (match
-               Dashboard_http_autoresearch.start_loop_json ~base_path ~args
-             with
-             | Ok result ->
-                 Http.Response.json ~compress:true ~request:req
-                   (Yojson.Safe.to_string result) reqd
-             | Error message ->
-                 Http.Response.json ~status:`Bad_request ~request:req
-                   (Yojson.Safe.to_string
-                      (`Assoc [("ok", `Bool false); ("error", `String message)]))
-                   reqd)
-           with Yojson.Json_error _ ->
-             Http.Response.json ~status:`Bad_request ~request:req
-               {|{"ok":false,"error":"invalid JSON body"}|}
-               reqd
-         )
-       ) request reqd)
-
-  |> Http.Router.post "/api/v1/autoresearch/loops/delete" (fun request reqd ->
-       with_tool_auth ~tool_name:"masc_autoresearch_stop" (fun state req reqd ->
-         Http.Request.read_body_async reqd (fun body_str ->
-           try
-             let json = Yojson.Safe.from_string body_str in
-             match Safe_ops.json_string_opt "loop_id" json with
-             | None ->
-                 Http.Response.json ~status:`Bad_request ~request:req
-                   {|{"ok":false,"error":"invalid request: requires {\"loop_id\":\"...\"}"}|}
-                   reqd
-             | Some loop_id ->
-             let base_path = state.Mcp_server.room_config.base_path in
-             (match Dashboard_http_autoresearch.validate_loop_id loop_id with
-             | Error message ->
-                 Http.Response.json ~status:`Bad_request ~request:req
-                   (Printf.sprintf {|{"ok":false,"error":"%s"}|}
-                      (String.escaped message))
-                   reqd
-             | Ok () -> (
-                 match
-                   Dashboard_http_autoresearch.delete_loop_json ~base_path
-                     ~loop_id
-                     ~requester_agent:
-                       (dashboard_actor_for_request ~base_path request)
-                 with
-                 | Ok result ->
-                     Http.Response.json ~compress:true ~request:req
-                       (Yojson.Safe.to_string result) reqd
-                 | Error message ->
-                     Http.Response.json ~status:`Not_found ~request:req
-                       (Printf.sprintf {|{"ok":false,"error":"%s"}|}
-                          (String.escaped message))
-                       reqd))
-           with Yojson.Json_error _ ->
-             Http.Response.json ~status:`Bad_request ~request:req
-               {|{"ok":false,"error":"invalid request: requires {\"loop_id\":\"...\"}"}|}
-               reqd
-         )
        ) request reqd)
 
   (* ── Keeper cascade config API ──────────────────────────────── *)

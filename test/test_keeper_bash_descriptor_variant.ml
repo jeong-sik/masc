@@ -1,21 +1,9 @@
-(** test_keeper_bash_descriptor_variant — RFC-0091 PR-3 gate.
+(** keeper_bash descriptor tests.
 
-    Asserts the two descriptor variants of the [keeper_bash] tool schema:
-
-    - [Legacy_v0] still advertises the [cmd] field, keeps the 4-branch
-      [oneOf] discriminator, and emits no top-level [required].
-    - [Typed_v1] removes [cmd] from [properties], drops the [cmd] branch
-      from [oneOf] (3 branches remain), and adds top-level
-      [required: ["executable"]].
-
-    Both variants share the same [keeper_bash_output] and
-    [keeper_bash_kill] schemas — only [keeper_bash] differs. The test
-    pins those invariants so future edits cannot reintroduce [cmd]
-    under the typed variant or accidentally drop it from the legacy
-    variant without an explicit RFC-tracked change. *)
+    Pins the single typed schema so raw [cmd] strings cannot return to the
+    public tool descriptor. *)
 
 open Masc_mcp
-module Variant = Tool_shard_types_schemas_bash
 
 let pp_json = Yojson.Safe.to_string
 
@@ -42,11 +30,11 @@ let one_of_required_names (input_schema : Yojson.Safe.t) =
   | Some (`List branches) ->
     List.map
       (fun branch ->
-        match assoc_field_opt branch "required" with
-        | Some (`List names) ->
-          List.map (function `String s -> s | _ -> "<non-string>") names
-          |> String.concat ","
-        | _ -> "<no-required>")
+         match assoc_field_opt branch "required" with
+         | Some (`List names) ->
+           List.map (function `String s -> s | _ -> "<non-string>") names
+           |> String.concat ","
+         | _ -> "<no-required>")
       branches
   | _ -> Alcotest.failf "oneOf missing or wrong shape: %s" (pp_json input_schema)
 ;;
@@ -60,108 +48,108 @@ let top_level_required (input_schema : Yojson.Safe.t) =
   | _ -> None
 ;;
 
-let test_legacy_v0_keeps_cmd () =
-  let tools =
-    Variant.coding_keeper_bridge_tools_for_variant
-      ~variant:Variant.Legacy_v0
-  in
-  let bash = find_bash_schema tools in
-  let props = property_names bash.input_schema in
-  Alcotest.(check bool) "legacy_v0: cmd present in properties" true
-    (List.mem "cmd" props);
-  Alcotest.(check bool) "legacy_v0: executable present in properties" true
-    (List.mem "executable" props);
-  let branches = one_of_required_names bash.input_schema in
-  Alcotest.(check int) "legacy_v0: 4 oneOf branches" 4 (List.length branches);
-  Alcotest.(check bool) "legacy_v0: cmd branch present" true (List.mem "cmd" branches);
-  Alcotest.(check (option string))
-    "legacy_v0: no top-level required" None
-    (top_level_required bash.input_schema)
+let bool_field (input_schema : Yojson.Safe.t) key =
+  match assoc_field_opt input_schema key with
+  | Some (`Bool value) -> Some value
+  | _ -> None
 ;;
 
-let test_typed_v1_drops_cmd () =
-  let tools =
-    Variant.coding_keeper_bridge_tools_for_variant
-      ~variant:Variant.Typed_v1
+let test_descriptor_is_typed_only () =
+  let bash =
+    Tool_shard_types_schemas_bash.coding_keeper_bridge_tools
+    |> find_bash_schema
   in
-  let bash = find_bash_schema tools in
   let props = property_names bash.input_schema in
-  Alcotest.(check bool) "typed_v1: cmd absent from properties" false
+  Alcotest.(check bool)
+    "cmd absent from properties"
+    false
     (List.mem "cmd" props);
-  Alcotest.(check bool) "typed_v1: executable present in properties" true
+  Alcotest.(check bool)
+    "executable present in properties"
+    true
     (List.mem "executable" props);
-  Alcotest.(check bool) "typed_v1: pipeline present in properties" true
+  Alcotest.(check bool)
+    "pipeline present in properties"
+    true
     (List.mem "pipeline" props);
-  Alcotest.(check bool) "typed_v1: stages present in properties" true
+  Alcotest.(check bool)
+    "stages present in properties"
+    true
     (List.mem "stages" props);
   let branches = one_of_required_names bash.input_schema in
-  Alcotest.(check int) "typed_v1: 3 oneOf branches (cmd dropped)" 3 (List.length branches);
-  Alcotest.(check bool) "typed_v1: cmd branch absent" false (List.mem "cmd" branches);
+  Alcotest.(check int) "3 oneOf branches" 3 (List.length branches);
+  Alcotest.(check bool) "cmd branch absent" false (List.mem "cmd" branches);
   Alcotest.(check (option string))
-    "typed_v1: top-level required = executable" (Some "executable")
+    "no top-level required; oneOf owns branch selection"
+    None
     (top_level_required bash.input_schema)
+  ;
+  Alcotest.(check (option bool))
+    "unknown top-level fields rejected"
+    (Some false)
+    (bool_field bash.input_schema "additionalProperties")
 ;;
 
-let test_description_changes_with_variant () =
-  let legacy =
-    Variant.coding_keeper_bridge_tools_for_variant
-      ~variant:Variant.Legacy_v0
+let test_description_does_not_advertise_cmd () =
+  let bash =
+    Tool_shard_types_schemas_bash.coding_keeper_bridge_tools
     |> find_bash_schema
   in
-  let typed =
-    Variant.coding_keeper_bridge_tools_for_variant
-      ~variant:Variant.Typed_v1
-    |> find_bash_schema
-  in
-  Alcotest.(check bool) "legacy_v0 description mentions cmd" true
-    (String.length legacy.description > 0
-     && Astring.String.is_infix ~affix:"Legacy cmd remains accepted" legacy.description);
-  Alcotest.(check bool) "typed_v1 description rejects cmd" true
+  Alcotest.(check bool)
+    "description mentions typed argv"
+    true
+    (Astring.String.is_infix ~affix:"typed argv" bash.description);
+  Alcotest.(check bool)
+    "description says legacy cmd is rejected"
+    true
     (Astring.String.is_infix
        ~affix:"legacy 'cmd' string field is no longer accepted"
-       typed.description);
-  Alcotest.(check bool) "typed_v1 description does NOT advertise cmd as field" false
-    (Astring.String.is_infix ~affix:"Good: cmd=" typed.description)
+       bash.description);
+  Alcotest.(check bool)
+    "description does not advertise cmd examples"
+    false
+    (Astring.String.is_infix ~affix:"cmd=" bash.description)
 ;;
 
-let test_sibling_schemas_invariant_across_variants () =
-  let legacy_tools =
-    Variant.coding_keeper_bridge_tools_for_variant
-      ~variant:Variant.Legacy_v0
+let test_descriptions_do_not_advertise_raw_search_scans () =
+  let bash =
+    Tool_shard_types_schemas_bash.coding_keeper_bridge_tools
+    |> find_bash_schema
   in
-  let typed_tools =
-    Variant.coding_keeper_bridge_tools_for_variant
-      ~variant:Variant.Typed_v1
+  let combined =
+    String.concat
+      "\n"
+      [ bash.description; pp_json bash.input_schema ]
   in
-  let by_name (name : string) tools =
-    List.find
-      (fun (t : Masc_domain.tool_schema) -> String.equal t.name name)
-      tools
-  in
-  let names = [ "keeper_bash_output"; "keeper_bash_kill" ] in
   List.iter
-    (fun name ->
-      let l = by_name name legacy_tools in
-      let t = by_name name typed_tools in
-      Alcotest.(check string)
-        (name ^ " description identical across variants")
-        l.description t.description;
-      Alcotest.(check string)
-        (name ^ " input_schema identical across variants")
-        (pp_json l.input_schema) (pp_json t.input_schema))
-    names
+    (fun forbidden ->
+       Alcotest.(check bool)
+         ("descriptor omits " ^ forbidden)
+         false
+         (Astring.String.is_infix ~affix:forbidden combined))
+    [ "rg pattern lib/"; "executable='rg'"; "{executable='rg'" ];
+  Alcotest.(check bool)
+    "descriptor points read-only search to structured tools"
+    true
+    (Astring.String.is_infix ~affix:"keeper_shell or Grep" combined)
 ;;
 
 let () =
   Alcotest.run
-    "keeper_bash_descriptor_variant"
-    [ ( "rfc-0091-pr-3"
-      , [ Alcotest.test_case "legacy_v0 keeps cmd" `Quick test_legacy_v0_keeps_cmd
-        ; Alcotest.test_case "typed_v1 drops cmd" `Quick test_typed_v1_drops_cmd
-        ; Alcotest.test_case "description changes with variant" `Quick
-            test_description_changes_with_variant
-        ; Alcotest.test_case "sibling schemas invariant" `Quick
-            test_sibling_schemas_invariant_across_variants
+    "keeper_bash_descriptor"
+    [ ( "typed_schema"
+      , [ Alcotest.test_case
+            "descriptor is typed only"
+            `Quick
+            test_descriptor_is_typed_only
+        ; Alcotest.test_case
+            "description does not advertise cmd"
+            `Quick
+            test_description_does_not_advertise_cmd
+        ; Alcotest.test_case
+            "descriptions avoid raw search scans"
+            `Quick
+            test_descriptions_do_not_advertise_raw_search_scans
         ] )
     ]
 ;;

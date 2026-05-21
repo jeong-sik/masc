@@ -14,6 +14,7 @@ module String = Stdlib.String
 module Char = Stdlib.Char
 module Int = Stdlib.Int
 module Float = Stdlib.Float
+module Exec_shell_gate = Masc_exec_command_gate.Shell_command_gate
 
 (** Code Write Tools — File write, edit, delete, shell, git for keeper agents.
 
@@ -57,48 +58,64 @@ let allowed_shell_commands =
   List.fold_left add_unique Dev_exec_allowlist.dev
     [ "diff"; "patch"; "mkdir"; "ocamlfind"; "tsc" ]
 
-let validate_code_shell_command (command : string) : (unit, string) Result.t =
-  Worker_dev_tools.validate_command_coding_with_allowlist
+let code_shell_command_context command =
+  Worker_dev_tools.command_context_coding_with_allowlist
+    ~caller:Exec_shell_gate.Tool_code_write
     ~allow_pipes:true
     ~allowed_commands:allowed_shell_commands
     command
+;;
+
+let validate_code_shell_command (command : string) : (unit, string) Result.t =
+  code_shell_command_context command
   |> Result.map_error
        (Worker_dev_tools.block_reason_to_string_with_allowlist
           ~allowed_commands:allowed_shell_commands)
+  |> Result.map (fun _ -> ())
 
 type code_shell_exit_status =
   | Shell_ok
   | Shell_ok_expected_nonzero of string
   | Shell_error
 
-(* RFC-0131 Phase 2 (Shell IR Promotion Goal, 2026-05-18) — the local
-   string-splitter fallback ([first_token_basename] +
-   [last_pipeline_segment]) was the last in-module shell splitter in
-   [tool_code_write].  It existed to keep exit classification working
-   when [Shell_command_gate.parse] could not produce a typed AST.
-
-   Phase 2 explicitly removes that fallback: the facade is the only
-   parse path.  When the parser cannot lift the command, the last-stage
-   binary name is genuinely unknown — we conservatively fall through to
-   [Shell_error] instead of silently re-deriving a name from a different
-   splitter.  This matches Phase 2's rule "이 PR 이후
-   lib/tool_code_write.ml 에는 shell splitter가 없어야 한다" and the
-   Plan's separation of parse / validation / exec / classify error
-   classes. *)
-let exit_status_command_name command =
-  match Shell_command_gate.parse command with
-  | Ok context -> Shell_command_gate.last_stage_bin context
-  | Error _ -> None
-
-let classify_code_shell_exit ~command code =
+let classify_code_shell_exit ~last_stage_bin code =
   match code with
   | 0 -> Shell_ok
   | 1 -> (
-      match exit_status_command_name command with
+      match last_stage_bin with
       | Some ("rg" | "grep") -> Shell_ok_expected_nonzero "no_matches"
       | Some "diff" -> Shell_ok_expected_nonzero "differences"
       | Some _ | None -> Shell_error)
   | _ -> Shell_error
+
+let shell_ir_with_default_cwd cwd ir =
+  match cwd with
+  | None -> ir
+  | Some dir ->
+    let default_cwd = Masc_exec.Path_scope.classify ~raw:dir ~cwd:dir in
+    let rec map_ir = function
+      | Masc_exec.Shell_ir.Simple simple ->
+        let simple =
+          match simple.cwd with
+          | Some _ -> simple
+          | None -> { simple with cwd = Some default_cwd }
+        in
+        Masc_exec.Shell_ir.Simple simple
+      | Masc_exec.Shell_ir.Pipeline stages ->
+        Masc_exec.Shell_ir.Pipeline (List.map map_ir stages)
+    in
+    map_ir ir
+;;
+
+let output_for_dispatch_status ~(status : Unix.process_status) ~stdout ~stderr =
+  match status with
+  | Unix.WEXITED 0 -> stdout
+  | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> (
+    match stdout, stderr with
+    | "", err -> err
+    | out, "" -> out
+    | out, err -> out ^ "\n" ^ err)
+;;
 
 let git_common_root path =
   try
@@ -470,17 +487,25 @@ let handle_code_edit ~tool_name ~start_time ctx args =
       else begin
         try
           let content = Fs_compat.load_file abs_path in
-          (* Count occurrences *)
+          (* Count occurrences and capture byte positions of each match
+             so the ambiguous-match (count > 1) branch can emit line
+             numbers and snippets — mirrors the count = 0 branch which
+             surfaces sample lines, giving the keeper signal for how
+             to disambiguate (Evidence: 2026-05-21 60/60 "found 2
+             times" errors in 3 days with no line context). *)
           let count = ref 0 in
           let pos = ref 0 in
           let old_len = String.length old_string in
+          let match_positions = ref [] in
           while !pos <= String.length content - old_len do
             if String.equal (Stdlib.String.sub content !pos old_len) old_string then begin
               Stdlib.incr count;
+              match_positions := !pos :: !match_positions;
               pos := !pos + old_len
             end else
               Stdlib.incr pos
           done;
+          let match_positions = List.rev !match_positions in
 
           if String.equal old_string new_string then
             if !count > 0 then
@@ -529,9 +554,78 @@ let handle_code_edit ~tool_name ~start_time ctx args =
               in
               Tool_result.error ~tool_name ~start_time ("old_string not found in file." ^ hint)
           else if !count > 1 && not replace_all then
+            (* Ambiguous match. Mirror the count = 0 branch by surfacing
+               line numbers + ±2 context lines for up to 3 matches so the
+               keeper can pick disambiguating context for old_string,
+               instead of blindly retrying the same prompt.
+
+               Evidence: 2026-05-21 60/60 ambiguous-match errors / 3 days
+               with same prompt_fingerprint retried 5×, 3× — keeper had
+               no signal for *which* occurrence to widen. *)
+            let lines = Array.of_list (String.split_on_char '\n' content) in
+            (* Build (start_byte_offset, end_byte_offset_exclusive) for each
+               line so we can map a byte position to a 1-based line
+               number. End is exclusive of the trailing '\n'. *)
+            let line_offsets =
+              let acc = ref [] in
+              let cursor = ref 0 in
+              Array.iter (fun line ->
+                let len = String.length line in
+                acc := (!cursor, !cursor + len) :: !acc;
+                cursor := !cursor + len + 1 (* +1 for the '\n' *)
+              ) lines;
+              Array.of_list (List.rev !acc)
+            in
+            let line_of_pos p =
+              (* Linear scan is fine: lines is small relative to retries
+                 we are eliminating; this path is hit only on the error
+                 edge. *)
+              let n = Array.length line_offsets in
+              let found = ref 0 in
+              (try
+                for i = 0 to n - 1 do
+                  let (s, _) = line_offsets.(i) in
+                  if s > p then begin
+                    found := i - 1;
+                    raise Exit
+                  end
+                done;
+                found := n - 1
+              with Exit -> ());
+              if !found < 0 then 0 else !found
+            in
+            let sample_positions =
+              List.filteri (fun i _ -> i < 3) match_positions
+            in
+            let format_match pos =
+              let line_idx = line_of_pos pos in
+              let line_num = line_idx + 1 in
+              let from_idx = max 0 (line_idx - 2) in
+              let to_idx =
+                min (Array.length lines - 1) (line_idx + 2)
+              in
+              let buf = Buffer.create 128 in
+              Buffer.add_string buf
+                (Printf.sprintf "  match at line %d:" line_num);
+              for i = from_idx to to_idx do
+                let marker = if i = line_idx then ">" else " " in
+                Buffer.add_string buf
+                  (Printf.sprintf "\n    %s %d: %s"
+                     marker (i + 1) lines.(i))
+              done;
+              Buffer.contents buf
+            in
+            let hint =
+              match sample_positions with
+              | [] -> ""
+              | samples ->
+                "\nMatches (provide more surrounding context in \
+                 old_string to disambiguate, or pass replace_all=true):\n"
+                ^ String.concat "\n" (List.map format_match samples)
+            in
             Tool_result.error ~tool_name ~start_time (Printf.sprintf
-               "old_string found %d times. Use replace_all=true or provide more context"
-               !count)
+               "old_string found %d times. Use replace_all=true or provide more context%s"
+               !count hint)
           else begin
             (* Perform replacement *)
             let new_content =
@@ -604,7 +698,12 @@ let handle_code_delete ~tool_name ~start_time ctx args =
             ("agent", `String ctx.agent_name);
           ]
         with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-          Tool_result.error ~tool_name ~start_time (Printf.sprintf "Delete failed: %s" (Stdlib.Printexc.to_string exn))
+          let err =
+            Tool_error.of_exn
+              ~detail:(Printf.sprintf "Delete failed: %s" (Stdlib.Printexc.to_string exn))
+              exn
+          in
+          Tool_result.error ~tool_name ~start_time (Tool_error.to_string err)
       end
   end
 
@@ -616,12 +715,14 @@ let handle_code_shell ~tool_name ~start_time ctx args =
 
   if String.equal command "" then Tool_result.error ~tool_name ~start_time "command parameter required"
   else
-    match validate_code_shell_command command with
+    match code_shell_command_context command with
     | Error reason ->
         Tool_result.error ~tool_name ~start_time
           ~failure_class:(Some Tool_result.Workflow_rejection)
-          reason
-    | Ok () ->
+          (Worker_dev_tools.block_reason_to_string_with_allowlist
+             ~allowed_commands:allowed_shell_commands
+             reason)
+    | Ok command_context ->
         (* Validate cwd if provided *)
         let cwd_result =
           if String.equal cwd "" then Ok None
@@ -638,52 +739,98 @@ let handle_code_shell ~tool_name ~start_time ctx args =
                   ~command ())
          | Ok cwd_opt ->
              let safe_timeout = Float.of_int (max 5 (min 120 timeout)) in
-             let cmd_parts = ["sh"; "-c"; command] in
-             let full_cmd =
+             let path_workdir =
                match cwd_opt with
-               | None -> cmd_parts
-               | Some dir ->
-                   [ "sh"; "-c"; Printf.sprintf "cd %s && %s"
-                       (Filename.quote dir) command ]
+               | Some dir -> dir
+               | None -> Sys.getcwd ()
              in
-             match Masc_exec.Exec_gate.run_argv_with_status ~actor:`Tool_local_runtime ~raw_source:(String.concat " " full_cmd) ~summary:"shell command execution" ~timeout_sec:safe_timeout full_cmd with
-             | Unix.WEXITED code, output ->
-                 let exit_status = classify_code_shell_exit ~command code in
-                 let response_fields =
-                   [
-                     ( "status",
-                       `String (match exit_status with Shell_error -> "error" | _ -> "ok") );
-                     ("exit_code", `Int code);
-                     ("output", `String (truncate_output output));
-                     ("command", `String command);
-                     ("agent", `String ctx.agent_name);
-                   ]
-                   @
-                   match exit_status with
-                   | Shell_ok_expected_nonzero reason ->
-                       [ ("exit_semantics", `String reason) ]
-                   | Shell_ok | Shell_error -> []
-                 in
-                 let response = `Assoc response_fields in
-                 (match exit_status with
-                  | Shell_ok | Shell_ok_expected_nonzero _ ->
-                      fun msg -> Tool_result.ok ~tool_name ~start_time msg
-                  | Shell_error ->
-                      fun msg -> Tool_result.error ~tool_name ~start_time msg)
-                   (Yojson.Safe.pretty_to_string response)
-             | _, output ->
-                 Tool_result.error ~tool_name ~start_time (Printf.sprintf "Command failed: %s" (truncate_output output)))
+	             match
+	               Worker_dev_tools.validate_shell_ir_paths
+	                 ~workdir:path_workdir
+	                 command_context.Exec_shell_gate.ast
+	             with
+	             | Error reason ->
+	                 Tool_result.error ~tool_name ~start_time
+	                   ~failure_class:(Some Tool_result.Policy_rejection)
+	                   reason
+	             | Ok () ->
+	                 match
+	                   Masc_exec.Exec_dispatch.dispatch
+	                     ~timeout_sec:safe_timeout
+	                     (shell_ir_with_default_cwd
+	                        cwd_opt
+	                        command_context.Exec_shell_gate.ast)
+	                 with
+	                 | { status = Unix.WEXITED code; stdout; stderr } ->
+	                     let output =
+	                       output_for_dispatch_status
+	                         ~status:(Unix.WEXITED code)
+	                         ~stdout
+	                         ~stderr
+	                     in
+	                     let exit_status =
+	                       classify_code_shell_exit
+	                         ~last_stage_bin:
+	                           (Exec_shell_gate.last_stage_bin command_context)
+	                         code
+	                     in
+	                     let response_fields =
+	                       [
+	                         ( "status",
+                           `String (match exit_status with Shell_error -> "error" | _ -> "ok") );
+                         ("exit_code", `Int code);
+                         ("output", `String (truncate_output output));
+                         ("command", `String command);
+                         ("agent", `String ctx.agent_name);
+                       ]
+                       @
+                       match exit_status with
+                       | Shell_ok_expected_nonzero reason ->
+                           [ ("exit_semantics", `String reason) ]
+                       | Shell_ok | Shell_error -> []
+                     in
+                     let response = `Assoc response_fields in
+                     (match exit_status with
+                      | Shell_ok | Shell_ok_expected_nonzero _ ->
+                          fun msg -> Tool_result.ok ~tool_name ~start_time msg
+	                       | Shell_error ->
+	                           fun msg -> Tool_result.error ~tool_name ~start_time msg)
+	                       (Yojson.Safe.pretty_to_string response)
+	                 | { status = Unix.WSIGNALED sig_num; stdout; stderr } ->
+	                     let output =
+	                       output_for_dispatch_status
+	                         ~status:(Unix.WSIGNALED sig_num)
+	                         ~stdout
+	                         ~stderr
+	                     in
+	                     Tool_result.error ~tool_name ~start_time
+	                       (Printf.sprintf
+	                          "Killed by signal %d: %s"
+	                          sig_num
+	                          (truncate_output output))
+	                 | { status = Unix.WSTOPPED sig_num; stdout; stderr } ->
+	                     let output =
+	                       output_for_dispatch_status
+	                         ~status:(Unix.WSTOPPED sig_num)
+	                         ~stdout
+	                         ~stderr
+	                     in
+	                     Tool_result.error ~tool_name ~start_time
+	                       (Printf.sprintf
+	                          "Stopped by signal %d: %s"
+	                          sig_num
+	                          (truncate_output output)))
 
 (* Handler: masc_code_git — Git operations *)
 let code_git_route_fields (ctx : context) =
   let sandbox_profile, route_via =
-    if
-      Coord_worktree.keeper_uses_docker_sandbox
-        ~config:ctx.config ~agent_name:ctx.agent_name
-    then
-      ("docker", "brokered")
-    else
-      ("local", "host")
+    match
+      Keeper_sandbox.backend_of_config_agent
+        ~config:ctx.config
+        ~agent_name:ctx.agent_name
+    with
+    | Keeper_sandbox.Docker -> "docker", "brokered"
+    | Keeper_sandbox.Local -> "local", "host"
   in
   [
     ("sandbox_profile", `String sandbox_profile);
@@ -732,20 +879,21 @@ let handle_code_git ~tool_name ~start_time ctx args =
             | Some cfg -> Keeper_tool_policy_config.clone_depth cfg
             | None -> 0
           in
-          let depth_flag =
-            if depth > 0 then Printf.sprintf " --depth %d" depth else ""
-          in
+          let depth_args = if depth > 0 then [ "--depth"; string_of_int depth ] else [] in
           let timeout = match get_policy_config ~base_path:ctx.config.Coord.base_path with
             | Some cfg -> Keeper_tool_policy_config.clone_timeout_sec cfg
             | None -> 120.0
           in
-          let cmd = ["sh"; "-c";
-                     Printf.sprintf "cd %s && git clone%s %s"
-                       (Filename.quote abs_cwd)
-                       depth_flag
-                       (Filename.quote clone_url)]
-          in
-          match Masc_exec.Exec_gate.run_argv_with_status ~actor:`Coord_git ~raw_source:(String.concat " " cmd) ~summary:"git clone" ~timeout_sec:timeout cmd with
+          let cmd = [ "git"; "clone" ] @ depth_args @ [ clone_url ] in
+          match
+            Masc_exec.Exec_gate.run_argv_with_status
+              ~actor:`Coord_git
+              ~raw_source:(String.concat " " cmd)
+              ~summary:"git clone"
+              ~timeout_sec:timeout
+              ~cwd:abs_cwd
+              cmd
+          with
           | Unix.WEXITED code, output ->
             let response =
               `Assoc
@@ -794,18 +942,22 @@ let handle_code_git ~tool_name ~start_time ctx args =
           (missing_cwd_error_json ctx ~cwd ~resolved_cwd:dir ~action ())
       | Ok cwd_opt ->
         let dir = match cwd_opt with Some d -> d | None -> "." in
-        let cmd = ["sh"; "-c";
-                   Printf.sprintf "cd %s && git %s %s"
-                     (Filename.quote dir)
-                     action
-                     (String.concat " " (List.map Filename.quote git_args))]
-        in
+        let cmd = "git" :: action :: git_args in
         let env_opt =
           if String.equal action "commit" then
             Some (Keeper_identity.git_env_for_keeper ~keeper_name:ctx.agent_name)
           else None
         in
-        match Masc_exec.Exec_gate.run_argv_with_status ~actor:`Coord_git ~raw_source:(String.concat " " cmd) ~summary:"git action execution" ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Shell ()) ?env:env_opt cmd with
+        match
+          Masc_exec.Exec_gate.run_argv_with_status
+            ~actor:`Coord_git
+            ~raw_source:(String.concat " " cmd)
+            ~summary:"git action execution"
+            ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Shell ())
+            ?env:env_opt
+            ~cwd:dir
+            cmd
+        with
         | Unix.WEXITED code, output ->
           let response =
             `Assoc

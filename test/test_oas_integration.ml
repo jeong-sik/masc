@@ -61,6 +61,16 @@ let json_assoc_field name fields =
   | Some (`Assoc values) -> values
   | _ -> Alcotest.failf "expected %s assoc" name
 
+let json_string_list_field name fields =
+  match List.assoc_opt name fields with
+  | Some (`List values) ->
+    List.filter_map
+      (function
+        | `String value -> Some value
+        | _ -> None)
+      values
+  | _ -> Alcotest.failf "expected %s string list" name
+
 let sse_data_json raw_event =
   let prefix = "data: " in
   let prefix_len = String.length prefix in
@@ -873,6 +883,42 @@ let test_agent_failed_preserves_agent_structured_error () =
   Alcotest.(check int) "detail limit" 1000
     (json_int_field "limit" detail_fields)
 
+let test_agent_failed_preserves_completion_contract_detail () =
+  let open Agent_sdk in
+  let payload_fields =
+    agent_failed_payload_fields
+      (Error.Agent
+         (Error.CompletionContractViolation
+            { contract = Completion_contract_id.Require_tool_use
+            ; reason = "required tool contract unsatisfied"
+            ; violation_detail =
+                Some
+                  { Agent_sdk.Completion_contract_violation_detail.called_tools =
+                      [ "keeper_board_list" ]
+                  ; satisfying_tools = [ "keeper_board_post" ]
+                  ; rejection_reasons = [ "keeper_board_list", "read-only" ]
+                  }
+            }))
+  in
+  let detail_fields = json_assoc_field "error_detail" payload_fields in
+  let violation_detail_fields = json_assoc_field "violation_detail" detail_fields in
+  Alcotest.(check string)
+    "error code"
+    "completion_contract_violation:require_tool_use:called[keeper_board_list]:satisfying[keeper_board_post]"
+    (json_string_field "error_code" payload_fields);
+  Alcotest.(check string)
+    "detail variant"
+    "completion_contract_violation"
+    (json_string_field "variant" detail_fields);
+  Alcotest.(check (list string))
+    "called_tools"
+    [ "keeper_board_list" ]
+    (json_string_list_field "called_tools" violation_detail_fields);
+  Alcotest.(check (list string))
+    "satisfying_tools"
+    [ "keeper_board_post" ]
+    (json_string_list_field "satisfying_tools" violation_detail_fields)
+
 let test_oas_log_bridge_turn_completed_summary () =
   Agent_sdk_log_bridge.install ();
   let before_seq =
@@ -1201,6 +1247,8 @@ let () =
         test_agent_failed_preserves_api_structured_error;
       Alcotest.test_case "agent_failed preserves agent structured error" `Quick
         test_agent_failed_preserves_agent_structured_error;
+      Alcotest.test_case "agent_failed preserves completion contract detail" `Quick
+        test_agent_failed_preserves_completion_contract_detail;
       Alcotest.test_case "oas log bridge adds turn completed summary" `Quick
         test_oas_log_bridge_turn_completed_summary;
       Alcotest.test_case "sse bridge logs turn completed with agent name" `Quick

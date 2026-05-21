@@ -7,18 +7,22 @@ module Namespace_truth_support = Server_dashboard_http_namespace_truth_support
 
 let namespace_truth_shell_refreshing : bool Atomic.t = Atomic.make false
 
-(* RFC-0138 Phase 3 Step 4 — fallback timeouts are now hard-coded
-   module constants.  Step 3 (#16738) wired /project-snapshot through
-   [Dashboard_snapshot], so this fallback path is taken at most once
-   per process lifetime (cold-start before the refresh fiber's first
-   publish).  The previous [MASC_NAMESPACE_TRUTH_*_TIMEOUT_S] env
-   knobs tuned a path that no longer carries steady-state load. *)
-let namespace_truth_shell_refresh_timeout_s = 5.0
+(* RFC-0138 Phase 3 Step 4 — fallback timeouts are now module constants. Step
+   3 (#16738) wired /project-snapshot through [Dashboard_snapshot], so request
+   paths use stale-while-revalidate after the first seed. The async refresh must
+   still exceed the inner dashboard shell timeout; otherwise a 5s outer timeout
+   cancels the shell render before its timeout fallback can log the active
+   projection labels (#16287). *)
+let namespace_truth_cold_safety_margin_s = 4.0
+
+let namespace_truth_shell_refresh_timeout_s =
+  Env_config_runtime.Dashboard.shell_timeout_sec
+  +. namespace_truth_cold_safety_margin_s
+
 let namespace_truth_warm_escape_s = 90.0
 let namespace_truth_warm_timeout_s = 8.0
 let namespace_truth_cold_timeout_s = 15.0
 let namespace_truth_shell_fiber_timeout_s = 12.0
-let namespace_truth_cold_safety_margin_s = 4.0
 
 let namespace_truth_bootstrap_shell_json () =
   let generated_at = Masc_domain.now_iso () in
@@ -74,10 +78,12 @@ let schedule_namespace_truth_shell_refresh ~sw ~clock config =
                  with
                  | Ok json -> json
                  | Error `Timeout ->
-                     Log.Dashboard.warn
-                       "project-snapshot async shell refresh timed out (%.1fs)"
-                       timeout_s;
-                     `Assoc []
+                   Log.Dashboard.warn
+                     "project-snapshot async shell refresh timed out \
+                      (outer=%.1fs shell=%.1fs)"
+                     timeout_s
+                     Env_config_runtime.Dashboard.shell_timeout_sec;
+                   `Assoc []
                in
                if result <> `Assoc [] && not (is_dashboard_cache_timeout_json result)
                then (

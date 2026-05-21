@@ -143,18 +143,6 @@ let test_classify_for_tools_no_actionable_when_no_tools () =
     KCC.No_actionable_signal
     (KCC.classify_actionable_signal_for_tools ~allowed_tool_names:allowed o)
 
-let test_classify_for_tools_alias_matches () =
-  let o = make_obs ~tasks:1 ~board:0 ~discovered:false in
-  let allowed = [ "keeper_task_claim" ] in
-  let direct =
-    KCC.classify_actionable_signal_for_tools ~allowed_tool_names:allowed o
-  in
-  let aliased =
-    KCC.classify_actionable_signal_with_allowed_tools ~allowed_tool_names:allowed
-      o
-  in
-  check_signal "alias matches direct" direct aliased
-
 let test_requires_tool_support_for_allowed_tools_true () =
   let o = make_obs ~tasks:1 ~board:0 ~discovered:false in
   check_bool "claimable task + claim tool requires tool-capable provider" true
@@ -214,8 +202,6 @@ let () =
             test_classify_for_tools_keeps_unclaimed_with_claim_tool;
           Alcotest.test_case "no matching tool → none" `Quick
             test_classify_for_tools_no_actionable_when_no_tools;
-          Alcotest.test_case "alias matches direct" `Quick
-            test_classify_for_tools_alias_matches;
           Alcotest.test_case "matching actionable signal requires tool support"
             `Quick test_requires_tool_support_for_allowed_tools_true;
           Alcotest.test_case

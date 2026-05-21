@@ -28,9 +28,6 @@ val schemas : Masc_domain.tool_schema list
 (** Handle masc_agents *)
 val handle_agents : context -> Yojson.Safe.t -> Tool_result.t
 
-(** Handle masc_register_capabilities *)
-val handle_register_capabilities : context -> Yojson.Safe.t -> Tool_result.t
-
 (** Handle masc_agent_update *)
 val handle_agent_update : context -> Yojson.Safe.t -> Tool_result.t
 

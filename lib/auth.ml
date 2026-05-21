@@ -177,15 +177,6 @@ let raw_token_file config agent_name =
   Filename.concat (auth_dir config) (agent_name ^ ".token")
 ;;
 
-(* Dashboard loopback dev-token was historically issued under
-   [dashboard-dev] while the UI defaults to [dashboard]. Keep the old
-   credential valid for [dashboard] requests so already-open browser
-   sessions survive restarts and token-file migration. *)
-let legacy_credential_aliases = function
-  | "dashboard" -> [ "dashboard-dev" ]
-  | _ -> []
-;;
-
 let load_credential_from_path config agent_name path : agent_credential option =
   if file_exists path
   then (
@@ -281,33 +272,6 @@ let load_credential config agent_name : agent_credential option =
       | _ -> load_credential_from_path_raw config agent_name file
     with
     | Sys_error _ | Yojson.Json_error _ -> None)
-;;
-
-let load_credential_with_aliases config agent_name : agent_credential option =
-  match load_credential config agent_name with
-  | Some _ as c -> c
-  | None ->
-    let aliases = legacy_credential_aliases agent_name in
-    let result = List.find_map (load_credential config) aliases in
-    (match result with
-     | Some cred ->
-       (* Observability for RFC P2-b: every silent alias-fallback hit
-              indicates a dual-identity caller (e.g. requested
-              [keeper-sangsu-agent] while only bare [sangsu] credential
-              exists, or vice versa). The fallback preserves availability
-              by routing to the legacy credential, but [cred.agent_name]
-              reveals the file the request was served from — different
-              from the requested name. P2-a's [load_credential_of]
-              surfaces this as [Credential_mismatch]; this warn measures
-              how often the legacy fallback is still load-bearing while
-              migrations are in flight. *)
-       Log.Auth.warn
-         "[identity_drift:alias_fallback] requested=%s resolved=%s aliases_tried=[%s]"
-         agent_name
-         cred.agent_name
-         (String.concat ";" aliases)
-     | None -> ());
-    result
 ;;
 
 type load_credential_error =
@@ -814,16 +778,15 @@ let missing_credential_error config ~agent_name ~token : masc_error =
 
 (** Verify a token.
 
-    Looks up the credential by exact [agent_name] match first. If that
-    misses, hard-coded legacy aliases (dashboard → dashboard-dev) are
-    accepted. Generated nicknames may also use a token owned by their
-    stable prefix, but only when the supplied token itself resolves to
-    that prefix. This keeps joined nickname continuity without letting an
-    unrelated bearer token impersonate another generated family. Keeper
-    transport aliases (keeper-<name>-agent) additionally accept an
-    existing stable keeper token even after an exact alias credential has
-    been bootstrapped, because these aliases are transport identity, not
-    separate runtime actors. *)
+    Looks up the credential by exact [agent_name] match only. Generated
+    nicknames may use a token owned by their stable prefix, but only when
+    the supplied token itself resolves to that prefix. This keeps joined
+    nickname continuity without letting an unrelated bearer token
+    impersonate another generated family. Keeper transport aliases
+    (keeper-<name>-agent) additionally accept an existing stable keeper
+    token even after an exact alias credential has been bootstrapped,
+    because these aliases are transport identity, not separate runtime
+    actors. *)
 let verify_token_owner_alias config ~agent_name ~token =
   match find_credential_by_token config ~token with
   | Ok owner when String.equal owner.agent_name (credential_agent_name agent_name) ->
@@ -844,13 +807,7 @@ let verify_token_owner_alias config ~agent_name ~token =
 ;;
 
 let verify_token config ~agent_name ~token : (agent_credential, masc_error) result =
-  let cred_opt =
-    match load_credential config agent_name with
-    | Some _ as c -> c
-    | None ->
-      legacy_credential_aliases agent_name |> List.find_map (load_credential config)
-  in
-  match cred_opt with
+  match load_credential config agent_name with
   | None -> verify_token_owner_alias config ~agent_name ~token
   | Some cred ->
     let token_hash = sha256_hash token in
@@ -1179,7 +1136,7 @@ let refresh_token config ~agent_name ~old_token
   match verify_token config ~agent_name ~token:old_token with
   | Error (Auth (Auth_error.TokenExpired _)) ->
     (* Allow refresh even if expired *)
-    (match load_credential_with_aliases config agent_name with
+    (match load_credential config agent_name with
      | None ->
        Error (Auth (Auth_error.Unauthorized ("No credential found for " ^ agent_name)))
      | Some old_cred -> create_token config ~agent_name ~role:old_cred.role)
@@ -1257,23 +1214,17 @@ let check_permission config ~agent_name ~token ~permission : (unit, masc_error) 
 
 let permission_for_tool tool_name = Tool_permission_map.permission_for_tool tool_name
 
-(** Strict tool auth mode:
-    - 0/false: legacy fail-open for unknown tools
-    - 1/true: unknown internal tools require at least worker-level permission *)
-let is_tool_auth_strict_enabled () = Env_config_core.tool_auth_strict ()
+(** Tool auth is always strict: unknown internal tools require at least
+    worker-level permission, and unknown external tools are denied. *)
+let is_tool_auth_strict_enabled () = true
 
 (* #10205 finding 1: SSOT for the internal-tool prefix vocabulary.
-   Adding a new internal namespace (e.g. [foo.]) was previously a
-   two-predicate edit ([is_masc_tool_name] +
-   [is_protocol_canonical_tool_name]) glued by a [||] chain at the
-   call site.  Keep the prefixes in one list so the next addition
-   is a single edit; predicate identity does not matter to callers,
-   which only consume {!is_unmapped_internal_tool_name}.
-
-   Keeper runtime tools are NOT a prefix: a [keeper_*] prefix
-   alone is not enough to cross auth — the catalog must own the
-   tool.  That check stays separate. *)
-let internal_tool_prefixes = [ "masc_"; "decision."; "experiment."; "client." ]
+   Unmapped dotted game-view namespaces ([decision.], [experiment.], [client.])
+   were retired from the MCP front door; do not preserve them as implicit
+   strict-auth internals.  Keeper runtime tools are NOT a prefix: a [keeper_*]
+   prefix alone is not enough to cross auth — the catalog must own the tool.
+   That check stays separate. *)
+let internal_tool_prefixes = [ "masc_" ]
 
 let has_internal_tool_prefix tool_name =
   List.exists
@@ -1301,11 +1252,9 @@ let record_strict_unknown_tool_denial ~agent_name ~tool_name =
 let authorize_tool config ~agent_name ~token ~tool_name : (unit, masc_error) result =
   match permission_for_tool tool_name with
   | None ->
-    if not (is_tool_auth_strict_enabled ())
-    then Ok () (* Legacy fail-open *)
-    else if is_unmapped_internal_tool_name tool_name
+    if is_unmapped_internal_tool_name tool_name
     then
-      (* Conservative default in strict mode for unmapped internal tools. *)
+      (* Conservative default for unmapped internal tools. *)
       check_permission config ~agent_name ~token ~permission:CanBroadcast
     else (
       let () = record_strict_unknown_tool_denial ~agent_name ~tool_name in
@@ -1353,16 +1302,12 @@ let resolve_role config ~agent_name ~token : (agent_role, masc_error) result =
 ;;
 
 let authorize_tool_for_role ~agent_name ~role ~tool_name : (unit, masc_error) result =
-  let policy = Tool_access_role.policy_for_role role in
-  if not (Tool_access_policy.allows_name policy tool_name)
-  then Error (Auth (Auth_error.Forbidden { agent = agent_name; action = tool_name }))
-  else if not (is_tool_auth_strict_enabled ())
-  then Ok () (* Non-strict: policy check is sufficient *)
-  else (
-    (* Strict mode: additional gate for unmapped tools *)
-    match permission_for_tool tool_name with
-    | Some _ -> Ok () (* Mapped tool — policy already checked *)
-    | None ->
+  match permission_for_tool tool_name with
+  | Some perm ->
+      if has_permission role perm
+      then Ok ()
+      else Error (Auth (Auth_error.Forbidden { agent = agent_name; action = tool_name }))
+  | None ->
       if is_unmapped_internal_tool_name tool_name
       then
         (* Unmapped internal tool: require at least Worker *)
@@ -1375,14 +1320,13 @@ let authorize_tool_for_role ~agent_name ~role ~tool_name : (unit, masc_error) re
         Error
           (Auth
              (Auth_error.Forbidden
-                { agent = agent_name; action = "use unknown non-masc tool: " ^ tool_name }))))
+                { agent = agent_name; action = "use unknown non-masc tool: " ^ tool_name })))
 ;;
 
-(** Policy-based tool authorization.
-    Replaces authorize_tool with a single Tool_access_policy check.
+(** Role-based tool authorization.
+    Resolves the caller role and enforces the tool's required permission.
     Invalid/expired tokens are rejected (not silently downgraded).
 
-    Strict mode (MASC_TOOL_AUTH_STRICT, default=true):
     Tools not mapped by permission_for_tool are subject to additional
     checks — unmapped internal tools require at least Worker, and
     unmapped external tools are forbidden. *)

@@ -12,13 +12,13 @@ module GEC = Masc_mcp.Gh_exit_class
 
 let test_cmd_targets_gh_positive () =
   Alcotest.(check bool) "gh pr list → true" true
-    (KSD.cmd_targets_gh "gh pr list");
-  Alcotest.(check bool) "cd /repo && gh pr view 1 → true" true
-    (KSD.cmd_targets_gh "cd /repo && gh pr view 1")
+    (KSD.cmd_targets_gh "gh pr list")
 
 let test_cmd_targets_gh_negative () =
   Alcotest.(check bool) "git status → false" false
     (KSD.cmd_targets_gh "git status");
+  Alcotest.(check bool) "cd /repo && gh pr view 1 → false" false
+    (KSD.cmd_targets_gh "cd /repo && gh pr view 1");
   Alcotest.(check bool) "ls -la → false" false
     (KSD.cmd_targets_gh "ls -la");
   Alcotest.(check bool) "empty → false" false

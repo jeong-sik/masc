@@ -121,7 +121,7 @@ let register
   add
     metric_cascade_fallbacks
     "Total cascade fallback events, labeled by \
-     reason=call_err|slot_full|accept_rejected|health_filter"
+     reason=call_err|accept_rejected|health_filter"
     `Counter;
   add
     metric_cascade_providers_exhausted

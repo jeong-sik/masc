@@ -164,9 +164,17 @@ let make_fixture sw ~proc_mgr ~fs ~net ~mono_clock clock ~base_path init_mode =
   { generic; config; meta; ctx_snapshot; tools }
 
 let find_tool fixture name =
-  List.find_opt
-    (fun (tool : Agent_sdk.Tool.t) -> String.equal tool.schema.name name)
-    fixture.tools
+  let by_name tool_name =
+    List.find_opt
+      (fun (tool : Agent_sdk.Tool.t) -> String.equal tool.schema.name tool_name)
+      fixture.tools
+  in
+  match by_name name with
+  | Some _ as found -> found
+  | None ->
+    (match Masc_mcp.Keeper_tool_alias.public_name_for_internal name with
+     | Some public -> by_name public
+     | None -> None)
 
 let ensure_sample_file fixture =
   let relative = "keeper-tool-matrix.txt" in
@@ -269,18 +277,7 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
         ]
   | "keeper_shell" -> `Assoc [ ("op", `String "pwd") ]
   | "keeper_bash" ->
-      `Assoc [ ("cmd", `String "pwd"); ("timeout_sec", `Float 5.0) ]
-  | "keeper_bash_output" ->
-      (* No live background task in test fixtures — handler returns
-         structured "no background task with id=..." error which the
-         expectation table accepts as a valid Bg_task surface. *)
-      `Assoc [ ("task_id", `String "bgt-matrix-fixture-0-0") ]
-  | "keeper_bash_kill" ->
-      `Assoc
-        [
-          ("task_id", `String "bgt-matrix-fixture-0-0");
-          ("grace_sec", `Float 0.5);
-        ]
+      `Assoc [ ("executable", `String "pwd"); ("timeout_sec", `Float 5.0) ]
   | "keeper_voice_speak" ->
       `Assoc [ ("message", `String "tool matrix hello") ]
   | "keeper_voice_listen" ->
@@ -395,13 +392,6 @@ let keeper_expectation_for_name name =
          the sample file is written at base_path. File-not-found in
          tests without a playground file is an acceptable outcome. *)
       Expect_success_or_guard [ "file not found" ]
-  | "keeper_bash_output" | "keeper_bash_kill" ->
-      (* Matrix fixtures never spawn a real background task, so the
-         only outcome is the handler's structured "no background task"
-         response. Bg_task.read returns Unknown_task; the keeper-side
-         handler maps it to error_json with this exact phrase. *)
-      Expect_success_or_guard
-        [ "no background task with id="; "already reaped" ]
   | _ -> Expect_success
 
 let extra_guard_fragments_for_name = function

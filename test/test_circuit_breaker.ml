@@ -35,13 +35,7 @@ let test_classify_typed_path_check_prefixes () =
          { path = "/etc/passwd"; for_keeper_command = true })
   in
   check bool "typed path blocked prefix" true
-    (CB.classify_error blocked_msg = CB.Path_not_allowed);
-  let syntax_msg =
-    PCE.to_message
-      (PCE.Path_syntax_blocked { token = "'quoted'"; hint = None })
-  in
-  check bool "typed syntax prefix keeps existing coarse class" true
-    (CB.classify_error syntax_msg = CB.Other)
+    (CB.classify_error blocked_msg = CB.Path_not_allowed)
 
 let test_classify_other () =
   check bool "other" true

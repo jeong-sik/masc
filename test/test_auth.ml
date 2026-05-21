@@ -521,7 +521,7 @@ let test_load_credential_missing_keeper_alias_stays_quiet () =
   check string "missing keeper alias emits no parse noise" ""
     (String.trim stderr_output)
 
-let test_verify_token_dashboard_legacy_alias_fallback () =
+let test_verify_token_rejects_dashboard_dev_legacy_alias () =
   let dir = setup_test_room () in
   let result =
     match Auth.create_token dir ~agent_name:"dashboard-dev" ~role:Masc_domain.Admin with
@@ -531,13 +531,11 @@ let test_verify_token_dashboard_legacy_alias_fallback () =
   in
   cleanup_test_room dir;
   match result with
-  | Ok cred ->
-      check string "legacy dashboard token owner" "dashboard-dev" cred.agent_name
+  | Ok cred -> fail (Printf.sprintf "unexpected credential owner: %s" cred.agent_name)
   | Error e ->
-      fail
-        (Printf.sprintf
-           "dashboard should accept legacy dashboard-dev credential: %s"
-           (Masc_domain.masc_error_to_string e))
+      let rendered = Masc_domain.masc_error_to_string e in
+      check bool "legacy dashboard-dev bearer rejected for dashboard" true
+        (contains_substring rendered "bearer token belongs to dashboard-dev")
 
 let test_save_raw_token_credential_uses_provided_token () =
   let dir = setup_test_room () in
@@ -1224,9 +1222,8 @@ let test_authorize_unknown_masc_tool_strict_worker_allowed () =
   let result =
     match create_result with
     | Ok (raw_token, _) ->
-        with_env "MASC_TOOL_AUTH_STRICT" "1" (fun () ->
-            Auth.authorize_tool dir ~agent_name:"worker_agent" ~token:(Some raw_token)
-              ~tool_name:"masc_unknown_tool")
+        Auth.authorize_tool dir ~agent_name:"worker_agent" ~token:(Some raw_token)
+          ~tool_name:"masc_unknown_tool"
     | Error e -> Error e
   in
   cleanup_test_room dir;
@@ -1245,9 +1242,8 @@ let test_authorize_unknown_non_masc_tool_strict_denied () =
   let result =
     match create_result with
     | Ok (raw_token, _) ->
-        with_env "MASC_TOOL_AUTH_STRICT" "1" (fun () ->
-            Auth.authorize_tool dir ~agent_name:"worker_agent" ~token:(Some raw_token)
-              ~tool_name:"external_unknown_tool")
+        Auth.authorize_tool dir ~agent_name:"worker_agent" ~token:(Some raw_token)
+          ~tool_name:"external_unknown_tool"
     | Error e -> Error e
   in
   cleanup_test_room dir;
@@ -1260,33 +1256,57 @@ let test_authorize_unknown_non_masc_tool_strict_denied () =
            ~agent_name:"worker_agent" ~tool_class:"external")
   | Error e -> fail (Printf.sprintf "wrong error: %s" (Masc_domain.masc_error_to_string e))
 
-let test_authorize_unknown_canonical_tool_strict_worker_allowed () =
-  (* #10205 finding 1: lock the [internal_tool_prefixes] vocabulary
-     (masc_, decision., experiment., client.) so a future refactor
-     that drops one silently is caught here.  Each prefix's
-     unmapped tool must pass strict-mode check for a Worker. *)
-  let prefixes_with_unlisted_tool = [
-    "masc_unlisted_tool";
-    "decision.unlisted_tool";
-    "experiment.unlisted_tool";
-    "client.unlisted_tool";
-  ] in
+let test_authorize_unknown_masc_prefix_strict_worker_allowed () =
+  let prefixes_with_unlisted_tool = [ "masc_unlisted_tool" ] in
   let dir = setup_test_room () in
   let _ = Auth.enable_auth dir ~require_token:true ~agent_name:"test-admin" in
   let create_result = Auth.create_token dir ~agent_name:"worker_agent" ~role:Masc_domain.Worker in
   let result =
     match create_result with
     | Ok (raw_token, _) ->
-        with_env "MASC_TOOL_AUTH_STRICT" "1" (fun () ->
-            List.fold_left
-              (fun acc tool_name ->
-                 match acc with
-                 | Error _ as e -> e
-                 | Ok () ->
-                     Auth.authorize_tool dir ~agent_name:"worker_agent"
-                       ~token:(Some raw_token) ~tool_name)
-              (Ok ())
-              prefixes_with_unlisted_tool)
+        List.fold_left
+          (fun acc tool_name ->
+             match acc with
+             | Error _ as e -> e
+             | Ok () ->
+                 Auth.authorize_tool dir ~agent_name:"worker_agent"
+                   ~token:(Some raw_token) ~tool_name)
+          (Ok ())
+          prefixes_with_unlisted_tool
+    | Error e -> Error e
+  in
+  cleanup_test_room dir;
+  match result with
+  | Ok () -> ()
+  | Error e -> fail (Masc_domain.masc_error_to_string e)
+
+let test_authorize_retired_dotted_tool_prefixes_strict_denied () =
+  let retired_unlisted_tools =
+    [ "decision.unlisted_tool"; "experiment.unlisted_tool"; "client.unlisted_tool" ]
+  in
+  let dir = setup_test_room () in
+  let _ = Auth.enable_auth dir ~require_token:true ~agent_name:"test-admin" in
+  let create_result = Auth.create_token dir ~agent_name:"worker_agent" ~role:Masc_domain.Worker in
+  let result =
+    match create_result with
+    | Ok (raw_token, _) ->
+        List.fold_left
+          (fun acc tool_name ->
+             match acc with
+             | Error _ as e -> e
+             | Ok () ->
+               (match
+                  Auth.authorize_tool
+                    dir
+                    ~agent_name:"worker_agent"
+                    ~token:(Some raw_token)
+                    ~tool_name
+                with
+                | Error (Masc_domain.Auth (Masc_domain.Auth_error.Forbidden _)) -> Ok ()
+                | Ok () -> fail ("unexpected allow: " ^ tool_name)
+                | Error e -> Error e))
+          (Ok ())
+          retired_unlisted_tools
     | Error e -> Error e
   in
   cleanup_test_room dir;
@@ -1303,15 +1323,14 @@ let test_authorize_known_keeper_tool_strict_worker_allowed () =
   let result =
     match create_result with
     | Ok (raw_token, _) ->
-        with_env "MASC_TOOL_AUTH_STRICT" "1" (fun () ->
-            List.fold_left
-              (fun acc tool_name ->
-                 match acc with
-                 | Error _ as e -> e
-                 | Ok () ->
-                     Auth.authorize_tool dir ~agent_name:"keeper-analyst-agent"
-                       ~token:(Some raw_token) ~tool_name)
-              (Ok ()) keeper_strict_auth_regression_tools)
+        List.fold_left
+          (fun acc tool_name ->
+             match acc with
+             | Error _ as e -> e
+             | Ok () ->
+                 Auth.authorize_tool dir ~agent_name:"keeper-analyst-agent"
+                   ~token:(Some raw_token) ~tool_name)
+          (Ok ()) keeper_strict_auth_regression_tools
     | Error e -> Error e
   in
   cleanup_test_room dir;
@@ -1321,15 +1340,23 @@ let test_authorize_known_keeper_tool_strict_worker_allowed () =
 
 let test_authorize_tool_v2_known_keeper_tool_strict_worker_allowed () =
   let result =
-    with_env "MASC_TOOL_AUTH_STRICT" "1" (fun () ->
-        List.fold_left
-          (fun acc tool_name ->
-             match acc with
-             | Error _ as e -> e
-             | Ok () ->
-                 Auth.authorize_tool_for_role ~agent_name:"keeper-analyst-agent"
-                   ~role:Masc_domain.Worker ~tool_name)
-          (Ok ()) keeper_strict_auth_regression_tools)
+    List.fold_left
+      (fun acc tool_name ->
+         match acc with
+         | Error _ as e -> e
+         | Ok () ->
+             Auth.authorize_tool_for_role ~agent_name:"keeper-analyst-agent"
+               ~role:Masc_domain.Worker ~tool_name)
+      (Ok ()) keeper_strict_auth_regression_tools
+  in
+  match result with
+  | Ok () -> ()
+  | Error e -> fail (Masc_domain.masc_error_to_string e)
+
+let test_authorize_tool_v2_unknown_internal_worker_allowed () =
+  let result =
+    Auth.authorize_tool_for_role ~agent_name:"worker_agent"
+      ~role:Masc_domain.Worker ~tool_name:"masc_unlisted_tool"
   in
   match result with
   | Ok () -> ()
@@ -1337,12 +1364,24 @@ let test_authorize_tool_v2_known_keeper_tool_strict_worker_allowed () =
 
 let test_authorize_tool_v2_unknown_keeper_prefix_strict_denied () =
   let result =
-    with_env "MASC_TOOL_AUTH_STRICT" "1" (fun () ->
-        Auth.authorize_tool_for_role ~agent_name:"keeper-analyst-agent"
-          ~role:Masc_domain.Worker ~tool_name:"keeper_totally_fake")
+    Auth.authorize_tool_for_role ~agent_name:"keeper-analyst-agent"
+      ~role:Masc_domain.Worker ~tool_name:"keeper_totally_fake"
   in
   match result with
   | Ok () -> fail "unknown keeper_* prefix should not bypass strict auth"
+  | Error (Masc_domain.Auth (Masc_domain.Auth_error.Forbidden _)) -> ()
+  | Error e -> fail (Printf.sprintf "wrong error: %s" (Masc_domain.masc_error_to_string e))
+
+let test_tool_auth_strict_env_cannot_disable_fail_closed () =
+  let result =
+    with_env "MASC_TOOL_AUTH_STRICT" "0" (fun () ->
+        check bool "strict mode remains enabled" true
+          (Auth.is_tool_auth_strict_enabled ());
+        Auth.authorize_tool_for_role ~agent_name:"worker"
+          ~role:Masc_domain.Worker ~tool_name:"external_totally_fake")
+  in
+  match result with
+  | Ok () -> fail "MASC_TOOL_AUTH_STRICT=0 must deny unknown external tools"
   | Error (Masc_domain.Auth (Masc_domain.Auth_error.Forbidden _)) -> ()
   | Error e -> fail (Printf.sprintf "wrong error: %s" (Masc_domain.masc_error_to_string e))
 
@@ -1424,8 +1463,8 @@ let () =
         test_verify_token_keeper_alias_archives_dual_identity_bare;
       test_case "load_credential missing keeper alias stays quiet" `Quick
         test_load_credential_missing_keeper_alias_stays_quiet;
-      test_case "verify_token dashboard legacy alias fallback" `Quick
-        test_verify_token_dashboard_legacy_alias_fallback;
+      test_case "verify_token rejects dashboard-dev legacy alias" `Quick
+        test_verify_token_rejects_dashboard_dev_legacy_alias;
       test_case "save_raw_token_credential uses provided token" `Quick
         test_save_raw_token_credential_uses_provided_token;
       test_case "save_raw_token_credential works in eio runtime" `Quick
@@ -1475,14 +1514,20 @@ let () =
         `Quick test_authorize_unknown_masc_tool_strict_worker_allowed;
       test_case "strict unknown non-masc tool denied"
         `Quick test_authorize_unknown_non_masc_tool_strict_denied;
-      test_case "strict unknown canonical tool allows worker"
-        `Quick test_authorize_unknown_canonical_tool_strict_worker_allowed;
+      test_case "strict unknown masc prefix allows worker"
+        `Quick test_authorize_unknown_masc_prefix_strict_worker_allowed;
+      test_case "strict retired dotted tool prefixes denied"
+        `Quick test_authorize_retired_dotted_tool_prefixes_strict_denied;
       test_case "strict known keeper tool allows worker"
         `Quick test_authorize_known_keeper_tool_strict_worker_allowed;
       test_case "strict v2 known keeper tool allows worker"
         `Quick test_authorize_tool_v2_known_keeper_tool_strict_worker_allowed;
+      test_case "strict v2 unknown internal tool allows worker"
+        `Quick test_authorize_tool_v2_unknown_internal_worker_allowed;
       test_case "strict v2 fake keeper prefix denied"
         `Quick test_authorize_tool_v2_unknown_keeper_prefix_strict_denied;
+      test_case "tool auth strict env cannot disable fail-closed"
+        `Quick test_tool_auth_strict_env_cannot_disable_fail_closed;
       test_case "declared tool permission from Tool_spec"
         `Quick test_declared_tool_permission_from_tool_spec;
     ];

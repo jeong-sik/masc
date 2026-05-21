@@ -768,15 +768,15 @@ let build_keeper_snapshot
   }
 
 (* The safe-autonomy screen renders one row per keeper. Its Docker probe is
-   intentionally much shorter than interactive sandbox-status calls, and the
+   intentionally shorter than interactive sandbox-status calls, and the
    fleet renderer batches the base-path-scoped container listing once per
    payload before filtering by keeper in memory.
 
-   Floor at 1.0s rather than 0.25s: [Process_eio] timeouts surface
-   through [Log.warn]-style sites that format duration with [%.0f],
-   which would render the 0.25s budget as "0s" and confuse operators
-   reading "command timed out after 0s".  1.0s produces a
-   self-explanatory diagnostic when Docker is genuinely slow.
+   Use the dashboard exec-timeout SSOT instead of a local 1s literal. A 1s
+   ceiling produced false-positive [Process_eio] warnings for routine
+   Docker listings on loaded macOS hosts, while the dashboard caller's 3s
+   default still keeps the hot path bounded and operator-tunable through
+   [MASC_EXEC_TIMEOUT_DASHBOARD_SEC].
 
    [Keeper_sandbox_runtime.list_containers] internally runs TWO
    sequential Docker commands (`docker ps` then `docker inspect`),
@@ -784,7 +784,11 @@ let build_keeper_snapshot
    fleet rather than once per keeper, a stalled Docker daemon costs about
    [2 * timeout_sec] per render instead of [2 * timeout_sec * keeper_count].
 *)
-let sandbox_live_probe_timeout_sec = 1.0
+let sandbox_live_probe_timeout_sec =
+  max 1.0
+    (Env_config_exec_timeout.timeout_sec
+       ~caller:Env_config_exec_timeout.Dashboard
+       ())
 
 let dashboard_sandbox_containers ~(config : Coord.config) keepers =
   if

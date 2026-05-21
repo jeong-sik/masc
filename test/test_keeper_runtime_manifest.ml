@@ -389,6 +389,10 @@ let test_json_roundtrip () =
             ("provider_kind", `String "openai");
             ("model_id", `String "gpt-test");
             ("response_model", `String "gpt-test");
+            ("per_provider_timeout_s", `Float 12.5);
+            ("attempt_timeout_s", `Float 12.5);
+            ("attempt_timeout_source", `String "configured_per_provider_timeout");
+            ("attempt_watchdog_source", `String "liveness_observer_enforce");
       ])
       ~receipt_path:"/tmp/receipt.jsonl" ~checkpoint_path:"/tmp/checkpoint.json"
       ~tool_call_log_path:"/tmp/tool-calls.jsonl" ()
@@ -437,6 +441,22 @@ let test_json_roundtrip () =
         "manifest decision omits response model"
         false
         (json_has_key "response_model" emitted_decision);
+      Alcotest.(check bool)
+        "manifest decision omits retired per-provider timeout key"
+        false
+        (json_has_key "per_provider_timeout_s" emitted_decision);
+      Alcotest.(check bool)
+        "manifest decision preserves attempt timeout"
+        true
+        (json_has_key "attempt_timeout_s" emitted_decision);
+      Alcotest.(check bool)
+        "manifest decision preserves attempt timeout source"
+        true
+        (json_has_key "attempt_timeout_source" emitted_decision);
+      Alcotest.(check bool)
+        "manifest decision preserves attempt watchdog source"
+        true
+        (json_has_key "attempt_watchdog_source" emitted_decision);
       let retired_top_level_json =
         `Assoc
           [
@@ -1131,6 +1151,12 @@ let test_runtime_trace_lens_summarizes_tool_axis () =
         (M.make ~ts:"2026-05-13T00:00:02Z" ~keeper_name
            ~trace_id ~keeper_turn_id ~event:M.Turn_finished ~status:"error"
            ());
+      append_manifest_or_fail config
+        (M.make ~ts:"2026-05-13T00:00:03Z" ~keeper_name
+           ~trace_id ~keeper_turn_id
+           ~event:M.State_snapshot_sidecar_saved ~status:"saved"
+           ~decision:(`Assoc [ ("active_open_loop_count", `Int 3) ])
+           ());
       let status, json =
         Masc_mcp.Server_dashboard_http_keeper_api.keeper_runtime_trace_json
           config keeper_name ~trace_id ~turn_id:keeper_turn_id ()
@@ -1157,6 +1183,7 @@ let test_runtime_trace_lens_summarizes_tool_axis () =
       in
       let claim_scope = Yojson.Safe.Util.(axes |> member "claim_scope") in
       let config_drift = Yojson.Safe.Util.(axes |> member "config_drift") in
+      let context = Yojson.Safe.Util.(axes |> member "context") in
       Alcotest.(check (list string))
         "lens requested tools"
         [ "read_file" ]
@@ -1201,6 +1228,10 @@ let test_runtime_trace_lens_summarizes_tool_axis () =
         "lens config drift surfaces missing keeper meta"
         "keeper_missing"
         Yojson.Safe.Util.(config_drift |> member "status" |> to_string);
+      Alcotest.(check int)
+        "lens active open loop count"
+        3
+        (json_int_member "active_open_loop_count" context);
       let api_manifest_rows =
         Yojson.Safe.Util.(json |> member "manifest_rows" |> to_list)
       in
@@ -1692,6 +1723,7 @@ let test_successful_provider_turn_links_runtime_artifacts () =
               M.Provider_attempt_finished;
               M.Checkpoint_saved;
               M.State_snapshot_sidecar_saved;
+              M.Working_state_sidecar_saved;
               M.Receipt_appended;
               M.Turn_finished;
             ];
@@ -1797,6 +1829,52 @@ let test_successful_provider_turn_links_runtime_artifacts () =
             "latest state sidecar exists"
             true
             (Sys.file_exists latest_state_path);
+          let working_row = require_manifest_event M.Working_state_sidecar_saved rows in
+          let working_path =
+            require_some "working state sidecar path"
+              (json_string_member_opt
+                 "working_state_sidecar_path"
+                 working_row.M.decision)
+          in
+          let latest_working_path =
+            require_some "latest working state sidecar path"
+              (json_string_member_opt
+                 "latest_working_state_sidecar_path"
+                 working_row.M.decision)
+          in
+          Alcotest.(check bool)
+            "working state sidecar exists"
+            true
+            (Sys.file_exists working_path);
+          Alcotest.(check string)
+            "working state sidecar uses keeper turn filename"
+            (Printf.sprintf "turn-%06d.json" keeper_turn_id)
+            (Filename.basename working_path);
+          let working_json = Yojson.Safe.from_file working_path in
+          Alcotest.(check int)
+            "working state sidecar keeper turn id"
+            keeper_turn_id
+            (json_int_member "keeper_turn_id" working_json);
+          Alcotest.(check int)
+            "working state sidecar OAS turn count"
+            result.turn_count
+            (json_int_member "oas_turn_count" working_json);
+          Alcotest.(check bool)
+            "latest working state sidecar exists"
+            true
+            (Sys.file_exists latest_working_path);
+          let working_state_json =
+            Yojson.Safe.Util.(working_json |> member "working_state")
+          in
+          Alcotest.(check string)
+            "working state vessel schema"
+            "keeper_working_state.v1"
+            (require_some "working state schema"
+               (json_string_member_opt "schema_version" working_state_json));
+          Alcotest.(check int)
+            "working state active count matches vessel"
+            (json_int_member "active_open_loop_count" working_json)
+            (json_list_length "active_loops" working_state_json);
           let status, api_json =
             Masc_mcp.Server_dashboard_http_keeper_api.keeper_runtime_trace_json
               config meta.name ~trace_id ~turn_id:keeper_turn_id ()
@@ -2215,6 +2293,7 @@ let test_wired_manifest_sites () =
           "Keeper_runtime_manifest.Context_compacted";
           "Keeper_runtime_manifest.Context_injected";
           "Keeper_runtime_manifest.State_snapshot_sidecar_saved";
+          "Keeper_runtime_manifest.Working_state_sidecar_saved";
           "Keeper_runtime_manifest.Checkpoint_loaded";
           "Keeper_runtime_manifest.Tool_surface_selected";
           "Keeper_runtime_manifest.Checkpoint_saved";
@@ -2222,6 +2301,8 @@ let test_wired_manifest_sites () =
           "Keeper_runtime_manifest.Turn_finished";
           "state-snapshots";
           "state-snapshot.latest.json";
+          "working-state";
+          "working-state.latest.json";
         ] );
       ( "lib/keeper/keeper_turn_driver.ml",
         [
@@ -2231,6 +2312,10 @@ let test_wired_manifest_sites () =
           "client_capacity_full_decision";
           "client_capacity_full";
           "provider_attempt_started";
+          "required_lane_filtered_candidates";
+          "required_lane_filtered_candidate_count";
+          "required_tool_lane_unavailable";
+          "missing_required_tool_names_after_lane_by_name";
           "Keeper_runtime_manifest.Pre_dispatch_blocked";
           "Keeper_runtime_manifest.Provider_attempt_started";
           "Keeper_runtime_manifest.Provider_attempt_finished";

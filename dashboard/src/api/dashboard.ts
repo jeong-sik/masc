@@ -2791,10 +2791,42 @@ export type TelemetryEntry = Record<string, unknown> & {
 
 export type TelemetryResponse = {
   generated_at: string
+  generated_at_iso?: string
+  dashboard_surface?: string
+  source?: string
+  retention?: Record<string, unknown>
+  query?: Record<string, unknown>
   count: number
   total_matching_entries?: number
   truncated?: boolean
   entries: TelemetryEntry[]
+}
+
+export type DashboardCacheEntryDetail = {
+  key: string
+  kind: string
+  ttl_remaining_ms?: number
+  stale_remaining_ms?: number
+  computing_for_ms?: number
+  has_stale_fallback?: boolean
+}
+
+export type DashboardCacheStatsResponse = {
+  entries: number
+  fresh: number
+  stale: number
+  expired: number
+  ready_fresh: number
+  ready_stale: number
+  computing: number
+  max_entries: number
+  hits_total: number
+  misses_total: number
+  hit_ratio: number
+  timeout_circuit_open: number
+  timeout_circuit_tracked: number
+  entries_truncated_to: number
+  entry_details: DashboardCacheEntryDetail[]
 }
 
 export type TelemetrySourceSummary = TelemetryFreshnessMetadata & {
@@ -2848,12 +2880,55 @@ function decodeTelemetryResponse(raw: unknown): TelemetryResponse | null {
   if (!generatedAt) return null
   return {
     generated_at: generatedAt,
+    generated_at_iso: asString(raw.generated_at_iso),
+    dashboard_surface: asString(raw.dashboard_surface),
+    source: asString(raw.source),
+    retention: isRecord(raw.retention) ? raw.retention : undefined,
+    query: isRecord(raw.query) ? raw.query : undefined,
     count: asNumber(raw.count, 0),
     total_matching_entries: asNumber(raw.total_matching_entries, asNumber(raw.count, 0)),
     truncated: asBoolean(raw.truncated, false),
     entries: asRecordArray(raw.entries)
       .map(decodeTelemetryEntry)
       .filter((entry): entry is TelemetryEntry => entry !== null),
+  }
+}
+
+function decodeDashboardCacheEntryDetail(raw: unknown): DashboardCacheEntryDetail | null {
+  if (!isRecord(raw)) return null
+  const key = asString(raw.key)
+  const kind = asString(raw.kind)
+  if (!key || !kind) return null
+  return {
+    key,
+    kind,
+    ttl_remaining_ms: asNumber(raw.ttl_remaining_ms),
+    stale_remaining_ms: asNumber(raw.stale_remaining_ms),
+    computing_for_ms: asNumber(raw.computing_for_ms),
+    has_stale_fallback: asBoolean(raw.has_stale_fallback),
+  }
+}
+
+function decodeDashboardCacheStatsResponse(raw: unknown): DashboardCacheStatsResponse | null {
+  if (!isRecord(raw)) return null
+  return {
+    entries: asNumber(raw.entries, 0),
+    fresh: asNumber(raw.fresh, 0),
+    stale: asNumber(raw.stale, 0),
+    expired: asNumber(raw.expired, 0),
+    ready_fresh: asNumber(raw.ready_fresh, 0),
+    ready_stale: asNumber(raw.ready_stale, 0),
+    computing: asNumber(raw.computing, 0),
+    max_entries: asNumber(raw.max_entries, 0),
+    hits_total: asNumber(raw.hits_total, 0),
+    misses_total: asNumber(raw.misses_total, 0),
+    hit_ratio: asNumber(raw.hit_ratio, 0),
+    timeout_circuit_open: asNumber(raw.timeout_circuit_open, 0),
+    timeout_circuit_tracked: asNumber(raw.timeout_circuit_tracked, 0),
+    entries_truncated_to: asNumber(raw.entries_truncated_to, 0),
+    entry_details: asRecordArray(raw.entry_details)
+      .map(decodeDashboardCacheEntryDetail)
+      .filter((entry): entry is DashboardCacheEntryDetail => entry !== null),
   }
 }
 
@@ -2925,6 +3000,15 @@ export function fetchTelemetrySummary(opts?: AbortableRequestOptions): Promise<T
     .then((raw) => {
       const decoded = decodeTelemetrySummaryResponse(raw)
       if (!decoded) throw new Error('유효하지 않은 telemetry summary payload')
+      return decoded
+    })
+}
+
+export function fetchDashboardCacheStats(opts?: AbortableRequestOptions): Promise<DashboardCacheStatsResponse> {
+  return get<Record<string, unknown>>('/api/v1/dashboard/cache-stats', { signal: opts?.signal })
+    .then((raw) => {
+      const decoded = decodeDashboardCacheStatsResponse(raw)
+      if (!decoded) throw new Error('유효하지 않은 dashboard cache stats payload')
       return decoded
     })
 }

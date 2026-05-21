@@ -5,17 +5,18 @@
     file modifications).
 
     file_read/file_write use OCaml stdlib (no Eio filesystem capability needed).
-    shell_exec uses Eio.Process with fiber-based timeout.
+    shell_exec validates commands locally with the Shell IR gate and routes
+    supported commands through Shell IR dispatch.
 
-    Safety classification types (destructive_class, gate_diff, etc.) are
-    defined in [Gate_diff_types] and re-exported here for backward compat. *)
+    Safety classification helpers are defined in [Shell_safety_types]
+    and re-exported here for backward compat. *)
 
-include Gate_diff_types
+include Shell_safety_types
 module Paths = Worker_dev_tools_paths
 module Log_sanitize = Worker_dev_tools_log_sanitize
 module Command_syntax = Worker_dev_tools_command_syntax
 module Mutation_classifier = Worker_dev_tools_mutation_classifier
-module Path_words = Worker_dev_tools_path_words
+module Exec_shell_gate = Masc_exec_command_gate.Shell_command_gate
 
 open Command_syntax
 
@@ -33,8 +34,8 @@ let tool_error ?(recoverable = false) message : Agent_sdk.Types.tool_result =
     commands and rejects shell control syntax to keep execution predictable.
 
     RFC-0091 PR-1: allowlist tables moved to {!Dev_exec_allowlist}.  These
-    bindings remain as in-module aliases until PR-2 deletes the legacy
-    string-cmd lexer entirely and all callers reference the typed schema. *)
+    bindings remain as in-module aliases until all callers reference
+    the shared allowlist module directly. *)
 let dev_allowed_commands = Dev_exec_allowlist.dev
 let readonly_allowed_commands = Dev_exec_allowlist.readonly
 
@@ -119,7 +120,7 @@ let command_blocked_hint ?allowed_commands name =
     | "ssh" | "scp" | "rsync" | "ftp" | "sftp" | "nc" ->
       Printf.sprintf
         " '%s' is a network primitive and is not permitted. Keeper network access goes \
-         through masc_web_search, masc_web_fetch, or masc_autoresearch_* tools."
+         through masc_web_search or masc_web_fetch tools."
         name
     | _ when looks_like_source_code name ->
       " This looks like source code, not a shell command — use masc_code_edit / \
@@ -167,8 +168,8 @@ let block_reason_to_string = function
      use keeper_fs_edit."
   | Process_substitution -> "Process substitution (<(...) or >(...)) is not allowed."
   | Unsafe_redirect ->
-    "File redirects are not allowed. Only fd redirects like 2>&1 and \
-     /dev/null sinks like 2>/dev/null are permitted."
+    "Redirect syntax is not allowed in this shell surface. Consume stdout/stderr \
+     directly from the tool response, and use a dedicated write tool for files."
   | Pipes_not_allowed -> "Pipes are not allowed. Run one command per call."
   | Direct_dune_invocation ->
     "Direct `dune` is blocked in local agent shells because it bypasses \
@@ -184,61 +185,196 @@ let block_reason_to_string_with_allowlist ~allowed_commands = function
   | reason -> block_reason_to_string reason
 ;;
 
-let validate_command_with_allowlist ~allowed_commands cmd =
-  let trimmed = String.trim cmd in
-  if trimmed = ""
-  then Error Empty_command
-  else if Gh_command_validation.has_strict_shell_metachar trimmed
-  then Error Chain_or_redirect
-  else if invokes_direct_dune trimmed
-  then Error Direct_dune_invocation
-  else (
-    match extract_command_name trimmed with
-    | None -> Error Empty_command
-    | Some name when List.mem name allowed_commands -> Ok ()
-    | Some name -> Error (Command_not_allowed name))
+let validate_command_name_with_allowlist ~allowed_commands = function
+  | None -> Error Empty_command
+  | Some name when List.mem name allowed_commands -> Ok ()
+  | Some name -> Error (Command_not_allowed name)
 ;;
 
-let validate_command ?caller:_ cmd =
-  validate_command_with_allowlist ~allowed_commands:dev_allowed_commands cmd
+let strict_allowlist_policy ~allowed_commands : Exec_shell_gate.allowlist_policy =
+  { allowed_commands; allow_pipes = false }
 ;;
 
-let first_disallowed_stage_bin ~allowed_commands stage_bins =
-  List.find_opt
-    (fun name -> not (List.exists (String.equal name) allowed_commands))
-    stage_bins
+let coding_allowlist_policy ?(allow_pipes = true) ~allowed_commands ()
+  : Exec_shell_gate.allowlist_policy =
+  { allowed_commands; allow_pipes }
 ;;
 
-let validate_command_coding_parsed ~allow_pipes ~allowed_commands context =
-  let stage_bins = context.Shell_command_gate.stage_bins in
-  if (not allow_pipes) && Shell_command_gate.stage_count context > 1
-  then Error Pipes_not_allowed
-  else if List.exists (String.equal "dune") stage_bins
-  then Error Direct_dune_invocation
-  else (
-    match first_disallowed_stage_bin ~allowed_commands stage_bins with
-    | None -> Ok ()
-    | Some name -> Error (Command_not_allowed name))
+let rec shell_ir_literal_text = function
+  | Masc_exec.Shell_ir.Lit text -> Some text
+  | Masc_exec.Shell_ir.Concat parts ->
+    let rec loop acc = function
+      | [] -> Some (String.concat "" (List.rev acc))
+      | part :: rest ->
+        (match shell_ir_literal_text part with
+         | Some text -> loop (text :: acc) rest
+         | None -> None)
+    in
+    loop [] parts
+  | Masc_exec.Shell_ir.Var _ -> None
 ;;
 
-(* RFC-0131 PR-5 — facade reject_reason → block_reason wire-shape
-   mapping for the authority-flip path.  Exhaustive over the closed
-   sum {!Shell_command_gate.reject_reason}; a new variant on the
-   facade side forces an arm here at compile time.  Two arms collapse
-   onto [Command_not_allowed]: facade carries stage-index detail the
-   legacy [block_reason] did not expose, and the wire-shape contract
-   (RFC-0131 §4.3 "preserving wire shape") forbids widening
-   [block_reason] just for the flip path — PR-6 (legacy purge) is the
-   correct place to revisit the surface. *)
-let block_reason_of_reject : Shell_command_gate.reject_reason -> block_reason
-  = function
+let simple_literal_args (simple : Masc_exec.Shell_ir.simple) =
+  let rec loop acc = function
+    | [] -> Some (List.rev acc)
+    | arg :: rest ->
+      (match shell_ir_literal_text arg with
+       | Some text -> loop (text :: acc) rest
+       | None -> None)
+  in
+  loop [] simple.Masc_exec.Shell_ir.args
+;;
+
+let validate_wrapper_target ~allowed_commands ~wrapper_name = function
+  | None -> Error (Command_not_allowed wrapper_name)
+  | Some "dune" -> Error Direct_dune_invocation
+  | Some name ->
+    validate_command_name_with_allowlist
+      ~allowed_commands
+      (Some name)
+;;
+
+let validate_env_wrapped_stage ~allowed_commands
+      (simple : Masc_exec.Shell_ir.simple)
+  =
+  let bin = Masc_exec.Bin.to_string simple.Masc_exec.Shell_ir.bin in
+  if not (String.equal bin "env")
+  then Ok ()
+  else
+    match simple_literal_args simple with
+    | None -> Error Injection
+    | Some args ->
+      validate_wrapper_target
+        ~allowed_commands
+        ~wrapper_name:"env"
+        (command_after_env_prefix args)
+;;
+
+let validate_opam_exec_wrapped_stage ~allowed_commands
+      (simple : Masc_exec.Shell_ir.simple)
+  =
+  let bin = Masc_exec.Bin.to_string simple.Masc_exec.Shell_ir.bin in
+  if not (String.equal bin "opam")
+  then Ok ()
+  else
+    match simple_literal_args simple with
+    | None -> Error Injection
+    | Some args ->
+      (match opam_exec_command_name args with
+       | Some "opam" -> Ok ()
+       | command ->
+         validate_wrapper_target
+           ~allowed_commands
+           ~wrapper_name:"opam"
+           command)
+;;
+
+let validate_wrapped_stages ~allowed_commands ast =
+  let rec loop = function
+    | Masc_exec.Shell_ir.Simple simple -> (
+      match validate_env_wrapped_stage ~allowed_commands simple with
+      | Ok () -> validate_opam_exec_wrapped_stage ~allowed_commands simple
+      | Error _ as error -> error)
+    | Masc_exec.Shell_ir.Pipeline stages ->
+      let rec loop_stages = function
+        | [] -> Ok ()
+        | stage :: rest ->
+          (match loop stage with
+           | Ok () -> loop_stages rest
+           | Error _ as error -> error)
+      in
+      loop_stages stages
+  in
+  loop ast
+;;
+
+let block_reason_of_exec_reject : Exec_shell_gate.reject_reason -> block_reason =
+  function
   | Command_not_in_allowlist { bin } -> Command_not_allowed bin
   | Pipeline_segment_disallowed { bin; _ } -> Command_not_allowed bin
   | Pipes_not_allowed _ -> Pipes_not_allowed
-  | Redirect_disallowed_in_caller _ -> Unsafe_redirect
+  | Redirect_disallowed_in_caller _
+  | Path_outside_policy _ -> Unsafe_redirect
 ;;
 
-let validate_command_coding_with_allowlist
+let block_reason_of_exec_too_complex
+      (reason : Exec_shell_gate.too_complex_reason)
+  : block_reason =
+  match reason with
+  | Unsupported_construct `Proc_subst -> Process_substitution
+  | Unsupported_construct (`Heredoc | `Here_string | `Redirect) -> Unsafe_redirect
+  | Unsupported_nested_pipeline
+  | Unsupported_construct
+      ( `Cmd_subst
+      | `Subshell
+      | `Arith_expansion
+      | `Control_flow
+      | `Logic_op
+      | `Function_def
+      | `Glob_brace
+      | `Background
+      | `Unknown_construct _ ) -> Injection
+;;
+
+let command_context_with_allowlist ?caller ~allowed_commands cmd =
+  let trimmed = String.trim cmd in
+  if trimmed = ""
+  then Error Empty_command
+  else (
+    let verdict =
+      Exec_shell_gate.gate
+        ?caller
+        ~raw:trimmed
+        ~allowlist:(strict_allowlist_policy ~allowed_commands)
+        ~path_policy:Exec_shell_gate.allow_all_paths
+        ~sandbox:Exec_shell_gate.host_sandbox
+        ()
+    in
+    match verdict with
+    | Allow context ->
+      if context.Exec_shell_gate.direct_dune_seen
+      then Error Direct_dune_invocation
+      else Ok context
+    | Reject { context; reason; _ } ->
+      if context.Exec_shell_gate.direct_dune_seen
+      then Error Direct_dune_invocation
+      else Error (block_reason_of_exec_reject reason)
+    | Cannot_parse _ -> Error Chain_or_redirect
+    | Too_complex { reason } -> Error (block_reason_of_exec_too_complex reason))
+;;
+
+let validate_command_with_allowlist ?caller ~allowed_commands cmd =
+  command_context_with_allowlist ?caller ~allowed_commands cmd
+  |> Result.map (fun _ -> ())
+;;
+
+let validate_command ?caller cmd =
+  validate_command_with_allowlist ?caller ~allowed_commands:dev_allowed_commands cmd
+;;
+
+let legendary_caller_of_exec = function
+  | Exec_shell_gate.Worker_dev_tools -> Legendary_counters.Worker_dev_tools
+  | Exec_shell_gate.Tool_code_write -> Legendary_counters.Tool_code_write
+  | Exec_shell_gate.Keeper_shell_bash -> Legendary_counters.Keeper_shell_bash
+;;
+
+let legendary_verdict_of_exec = function
+  | Exec_shell_gate.Allow _ -> Legendary_counters.Allow
+  | Exec_shell_gate.Reject _ -> Legendary_counters.Reject
+  | Exec_shell_gate.Cannot_parse _
+  | Exec_shell_gate.Too_complex _ -> Legendary_counters.Cannot_parse
+;;
+
+let record_exec_shell_gate ?caller verdict =
+  match caller with
+  | None -> ()
+  | Some c ->
+    Legendary_counters.incr_shell_gate
+      ~caller:(legendary_caller_of_exec c)
+      ~verdict:(legendary_verdict_of_exec verdict)
+;;
+
+let command_context_coding_with_allowlist
       ?caller
       ?(allow_pipes = true)
       ~(allowed_commands : string list)
@@ -247,53 +383,47 @@ let validate_command_coding_with_allowlist
   let trimmed = String.trim cmd in
   if trimmed = ""
   then Error Empty_command
-  else if has_coding_shell_injection_metachar trimmed
-  then Error Injection
-  else if has_process_substitution trimmed
-  then Error Process_substitution
-  else if has_unsafe_redirection trimmed
-  then Error Unsafe_redirect
   else (
-    (* Legacy verdict — direct [Result] now that the legacy_segments
-       fallback has been removed (env/opam are already in
-       [dev_allowed_commands]; the redundant [`Use_legacy_segments]
-       branch and the regex segment validator were dropped — this PR).
-       Parse failures conservatively map to [Error Injection] —
-       unparseable input is treated as potentially unsafe. *)
-    let legacy_result =
-      match Shell_command_gate.parse ?caller trimmed with
-      | Ok context ->
-        validate_command_coding_parsed ~allow_pipes ~allowed_commands context
-      | Error _ -> Error Injection
+    let verdict =
+      Exec_shell_gate.gate
+        ?caller
+        ~raw:trimmed
+        ~allowlist:(coding_allowlist_policy ~allow_pipes ~allowed_commands ())
+        ~path_policy:Exec_shell_gate.allow_all_paths
+        ~sandbox:Exec_shell_gate.host_sandbox
+        ()
     in
-    match caller with
-    | None -> legacy_result
-    | Some c ->
-      (* RFC-0131 PR-5 — parallel facade call.  Emit is automatic via
-         [Legendary_counters.incr_shell_gate] inside
-         [Shell_command_gate.validate_allowlist] (RFC-0131 PR-3). *)
-      let facade_verdict =
-        Shell_command_gate.validate_allowlist
-          ~caller:c
-          ~allow_pipes
-          ~allowed_commands
-          trimmed
-      in
-      if Shell_gate_authority.authority_enabled c
-      then (
-        (* RFC-0131 §4.4 — facade verdict authoritative; legacy
-           fallback only on [Cannot_parse] (parser coverage gap, which
-           now itself yields [Error Injection]). *)
-        match facade_verdict with
-        | Allow _ -> Ok ()
-        | Reject { reason; _ } -> Error (block_reason_of_reject reason)
-        | Cannot_parse { kind = _ } -> legacy_result)
-      else legacy_result)
+    record_exec_shell_gate ?caller verdict;
+    match verdict with
+    | Allow context ->
+      if context.Exec_shell_gate.direct_dune_seen
+      then Error Direct_dune_invocation
+      else (
+        match validate_wrapped_stages ~allowed_commands context.Exec_shell_gate.ast with
+        | Ok () -> Ok context
+        | Error _ as err -> err)
+    | Reject { context; reason; _ } ->
+      (match reason with
+       | Pipes_not_allowed _ -> Error Pipes_not_allowed
+       | _ when context.Exec_shell_gate.direct_dune_seen ->
+         Error Direct_dune_invocation
+       | _ -> Error (block_reason_of_exec_reject reason))
+    | Cannot_parse _ -> Error Injection
+    | Too_complex { reason } -> Error (block_reason_of_exec_too_complex reason))
+;;
+
+let validate_command_coding_with_allowlist ?caller ?allow_pipes ~allowed_commands cmd =
+  command_context_coding_with_allowlist
+    ?caller
+    ?allow_pipes
+    ~allowed_commands
+    cmd
+  |> Result.map (fun _ -> ())
 ;;
 
 (** Relaxed command validation for Coding/Full preset keepers.
-    Allows pipes and redirects; validates every command in the pipeline
-    against [dev_allowed_commands]. *)
+    Allows pipes; redirects remain blocked by the shell gate. Validates every
+    command in the pipeline against [dev_allowed_commands]. *)
 let validate_command_coding ?caller cmd =
   validate_command_coding_with_allowlist
     ?caller
@@ -396,61 +526,7 @@ let git_revisionish_token ?workdir token =
   not (Sys.file_exists resolved)
 ;;
 
-let command_allows_safe_globbed_path = function
-  | "ls" -> true
-  | _ -> false
-;;
-
-let token_glob_is_limited_to_basename (token : Path_words.t) =
-  let value = token.Path_words.value in
-  let start =
-    match String.rindex_opt value '/' with
-    | None -> 0
-    | Some idx -> idx + 1
-  in
-  let rec loop i =
-    if i >= String.length value
-    then true
-    else (
-      match value.[i] with
-      | '*' | '?' | '[' | ']' -> i >= start && loop (i + 1)
-      | _ -> loop (i + 1))
-  in
-  loop 0
-;;
-
-let path_token_error_hint (token : Path_words.t) =
-  let suggestions =
-    [ ( token.Path_words.globbed
-      , "Glob expansion ('*' / '?' / '[]') — use masc_code_search with file_pattern \
-         (e.g. file_pattern='*.ml') or rg with --glob instead of letting the shell \
-         expand." )
-    ; ( token.Path_words.braced
-      , "Brace expansion ('{a,b}') — run one command per target, or use masc_code_search \
-         / rg which accept multiple patterns natively." )
-    ; ( token.Path_words.escaped
-      , "Backslash escaping — the keeper shell does not interpret escapes. Use \
-         masc_code_search with is_regex=true for pattern work that would need \\. / \\w \
-         / etc." )
-    ; ( token.Path_words.quoted
-      , "Quoting — path args must be unquoted plain strings. Move any pattern into \
-         masc_code_search.query with is_regex appropriately set." )
-    ]
-  in
-  suggestions
-  |> List.filter_map (fun (cond, msg) -> if cond then Some msg else None)
-  |> String.concat " "
-;;
-
-let path_syntax_blocked_message (token : Path_words.t) =
-  let raw_hint = path_token_error_hint token in
-  let hint = if raw_hint = "" then None else Some raw_hint in
-  Keeper_path_check_error.(
-    to_message (Path_syntax_blocked { token = token.Path_words.value; hint }))
-;;
-
-let token_value_is_redirect_to_dev_null (token : Path_words.t) =
-  let value = token.Path_words.value in
+let token_value_is_redirect_to_dev_null value =
   String.equal value ">/dev/null"
   || String.equal value "2>/dev/null"
   || String.equal value "1>/dev/null"
@@ -459,8 +535,8 @@ let token_value_is_redirect_to_dev_null (token : Path_words.t) =
   || String.equal value "1>>/dev/null"
 ;;
 
-let token_value_is_redirect_op (token : Path_words.t) =
-  match token.Path_words.value with
+let token_value_is_redirect_op value =
+  match value with
   | ">" | ">>" | "<" | "2>" | "2>>" | "1>" | "1>>" -> true
   | _ -> false
 ;;
@@ -526,8 +602,7 @@ let command_pattern_arg_flags cmd =
   | _ -> []
 ;;
 
-let token_is_inline_pattern_flag cmd (token : Path_words.t) =
-  let value = token.Path_words.value in
+let token_is_inline_pattern_flag cmd value =
   command_pattern_arg_flags cmd
   |> List.find_map (fun (flag, consumes_primary_pattern) ->
     if String.starts_with ~prefix:(flag ^ "=") value
@@ -541,8 +616,7 @@ let command_flag_pattern_arity cmd value =
     if String.equal flag value then Some consumes_primary_pattern else None)
 ;;
 
-let rg_token_is_option_value (token : Path_words.t) =
-  let value = token.Path_words.value in
+let rg_token_is_option_value value =
   String.starts_with ~prefix:"-" value && String.length value > 1
 ;;
 
@@ -551,286 +625,245 @@ let command_treats_plain_args_as_content = function
   | _ -> false
 ;;
 
-let path_argument_words (words : Path_words.t list) =
-  match words with
-  | [] -> []
-  | command :: args ->
-    let command_name = command.Path_words.value in
-    let rg_files_mode =
-      String.equal command_name "rg"
-      && List.exists (fun token -> String.equal token.Path_words.value "--files") args
-    in
-    let rec loop ~skip_next_pattern ~redirect_target ~seen_primary_pattern acc =
-      function
-      | [] -> List.rev acc
-      | token :: rest ->
-        if redirect_target
-        then
-          let acc =
-            if String.equal token.Path_words.value "/dev/null" then acc else token :: acc
-          in
-          loop ~skip_next_pattern:None ~redirect_target:false ~seen_primary_pattern acc rest
-        else if token_value_is_redirect_to_dev_null token
-        then loop ~skip_next_pattern:None ~redirect_target:false ~seen_primary_pattern acc rest
-        else (
-          match skip_next_pattern with
-          | Some consumes_primary_pattern ->
-            loop
-              ~skip_next_pattern:None
-              ~redirect_target:false
-              ~seen_primary_pattern:
-                (seen_primary_pattern || consumes_primary_pattern)
-              acc
-              rest
-          | None ->
-            if token_value_is_redirect_op token
-            then loop ~skip_next_pattern:None ~redirect_target:true ~seen_primary_pattern acc rest
-            else
-              (match command_flag_pattern_arity command_name token.Path_words.value with
+let path_argument_values command_name args =
+  let rg_files_mode =
+    String.equal command_name "rg"
+    && List.exists (String.equal "--files") args
+  in
+  let rec loop ~skip_next_pattern ~redirect_target ~seen_primary_pattern acc = function
+    | [] -> List.rev acc
+    | token :: rest ->
+      if redirect_target
+      then
+        let acc = if String.equal token "/dev/null" then acc else token :: acc in
+        loop ~skip_next_pattern:None ~redirect_target:false ~seen_primary_pattern acc rest
+      else if token_value_is_redirect_to_dev_null token
+      then loop ~skip_next_pattern:None ~redirect_target:false ~seen_primary_pattern acc rest
+      else (
+        match skip_next_pattern with
+        | Some consumes_primary_pattern ->
+          loop
+            ~skip_next_pattern:None
+            ~redirect_target:false
+            ~seen_primary_pattern:(seen_primary_pattern || consumes_primary_pattern)
+            acc
+            rest
+        | None ->
+          if token_value_is_redirect_op token
+          then loop ~skip_next_pattern:None ~redirect_target:true ~seen_primary_pattern acc rest
+          else (
+            match command_flag_pattern_arity command_name token with
+            | Some consumes_primary_pattern ->
+              loop
+                ~skip_next_pattern:(Some consumes_primary_pattern)
+                ~redirect_target:false
+                ~seen_primary_pattern
+                acc
+                rest
+            | None ->
+              (match token_is_inline_pattern_flag command_name token with
                | Some consumes_primary_pattern ->
                  loop
-                   ~skip_next_pattern:(Some consumes_primary_pattern)
+                   ~skip_next_pattern:None
                    ~redirect_target:false
-                   ~seen_primary_pattern
+                   ~seen_primary_pattern:(seen_primary_pattern || consumes_primary_pattern)
+                   acc
+                   rest
+               | None when command_treats_plain_args_as_content command_name ->
+                 loop ~skip_next_pattern:None ~redirect_target:false ~seen_primary_pattern acc rest
+               | None when command_name = "sed"
+                           && (not seen_primary_pattern)
+                           && not (rg_token_is_option_value token) ->
+                 loop
+                   ~skip_next_pattern:None
+                   ~redirect_target:false
+                   ~seen_primary_pattern:true
+                   acc
+                   rest
+               | None when command_name = "rg"
+                           && (not rg_files_mode)
+                           && (not seen_primary_pattern)
+                           && not (rg_token_is_option_value token) ->
+                 loop
+                   ~skip_next_pattern:None
+                   ~redirect_target:false
+                   ~seen_primary_pattern:true
+                   acc
+                   rest
+               | None when command_name = "grep"
+                           && (not seen_primary_pattern)
+                           && not (rg_token_is_option_value token) ->
+                 loop
+                   ~skip_next_pattern:None
+                   ~redirect_target:false
+                   ~seen_primary_pattern:true
                    acc
                    rest
                | None ->
-                 (match token_is_inline_pattern_flag command_name token with
-                  | Some consumes_primary_pattern ->
-                    loop
-                      ~skip_next_pattern:None
-                      ~redirect_target:false
-                      ~seen_primary_pattern:
-                        (seen_primary_pattern || consumes_primary_pattern)
-                      acc
-                      rest
-                  | None when command_treats_plain_args_as_content command_name ->
-                    loop
-                      ~skip_next_pattern:None
-                      ~redirect_target:false
-                      ~seen_primary_pattern
-                      acc
-                      rest
-                  | None when command_name = "sed"
-                              && (not seen_primary_pattern)
-                              && not (rg_token_is_option_value token) ->
-                    loop
-                      ~skip_next_pattern:None
-                      ~redirect_target:false
-                      ~seen_primary_pattern:true
-                      acc
-                      rest
-                  | None when command_name = "rg"
-                              && (not rg_files_mode)
-                              && (not seen_primary_pattern)
-                              && not (rg_token_is_option_value token) ->
-                    loop
-                      ~skip_next_pattern:None
-                      ~redirect_target:false
-                      ~seen_primary_pattern:true
-                      acc
-                      rest
-                  | None when command_name = "grep"
-                              && (not seen_primary_pattern)
-                              && not (rg_token_is_option_value token) ->
-                    loop
-                      ~skip_next_pattern:None
-                      ~redirect_target:false
-                      ~seen_primary_pattern:true
-                      acc
-                      rest
-                  | None ->
-                    loop
-                      ~skip_next_pattern:None
-                      ~redirect_target:false
-                      ~seen_primary_pattern
-                      (token :: acc)
-                      rest)))
-    in
-    loop
-      ~skip_next_pattern:None
-      ~redirect_target:false
-      ~seen_primary_pattern:false
-      []
-      args
+                 loop
+                   ~skip_next_pattern:None
+                   ~redirect_target:false
+                   ~seen_primary_pattern
+                   (token :: acc)
+                   rest)))
+  in
+  loop
+    ~skip_next_pattern:None
+    ~redirect_target:false
+    ~seen_primary_pattern:false
+    []
+    args
+;;
+
+let literal_args_of_simple (simple : Masc_exec.Shell_ir.simple) =
+  let rec loop acc = function
+    | [] -> Some (List.rev acc)
+    | Masc_exec.Shell_ir.Lit value :: rest -> loop (value :: acc) rest
+    | Masc_exec.Shell_ir.Concat _ :: _ | Masc_exec.Shell_ir.Var _ :: _ -> None
+  in
+  loop [] simple.args
+;;
+
+let existing_dir_path_values_of_simple (simple : Masc_exec.Shell_ir.simple) =
+  let command_name = Masc_exec.Bin.to_string simple.bin |> Filename.basename in
+  let rec loop expect_existing_dir acc = function
+    | [] -> List.rev acc
+    | value :: rest ->
+      if value = ""
+      then loop expect_existing_dir acc rest
+      else if expect_existing_dir
+      then loop false (value :: acc) rest
+      else (
+        match path_value_of_flagged_token value with
+        | Some value when inline_path_flag_requires_existing_dir value ->
+          loop false (value :: acc) rest
+        | Some _ -> loop false acc rest
+        | None when is_path_flag value -> loop (path_flag_requires_existing_dir value) acc rest
+        | None
+          when command_materializes_path_arg command_name
+               && looks_like_path_token value ->
+          loop false (value :: acc) rest
+        | None -> loop false acc rest)
+  in
+  match literal_args_of_simple simple with
+  | None -> []
+  | Some args -> loop false [] (path_argument_values command_name args)
 ;;
 
 let existing_dir_path_values cmd =
-  let words = Path_words.of_command cmd in
-  let command_name =
-    match words with
-    | command :: _ -> Filename.basename command.Path_words.value
-    | [] -> ""
-  in
-  let rec loop expect_existing_dir acc = function
-    | [] -> List.rev acc
-    | token :: rest ->
-      if token.Path_words.value = ""
-      then loop expect_existing_dir acc rest
-      else if expect_existing_dir
-      then loop false (token.Path_words.value :: acc) rest
-      else (
-        match path_value_of_flagged_token token.Path_words.value with
-        | Some value when inline_path_flag_requires_existing_dir token.Path_words.value ->
-          loop false (value :: acc) rest
-        | Some _ -> loop false acc rest
-        | None when is_path_flag token.Path_words.value ->
-          loop (path_flag_requires_existing_dir token.Path_words.value) acc rest
-        | None
-          when command_materializes_path_arg command_name
-               && looks_like_path_token token.Path_words.value
-               && not (Path_words.has_unsafe_rewrite_syntax token)
-               && not token.Path_words.globbed ->
-          loop false (token.Path_words.value :: acc) rest
-        | None -> loop false acc rest)
-  in
-  words |> path_argument_words |> loop false []
+  match Masc_exec_bash_parser.Bash.parse_string cmd with
+  | Masc_exec.Parsed.Parsed (Masc_exec.Shell_ir.Simple simple) ->
+    existing_dir_path_values_of_simple simple
+  | Masc_exec.Parsed.Parsed (Masc_exec.Shell_ir.Pipeline stages) ->
+    stages
+    |> List.concat_map (function
+      | Masc_exec.Shell_ir.Simple simple -> existing_dir_path_values_of_simple simple
+      | Masc_exec.Shell_ir.Pipeline _ -> [])
+  | Masc_exec.Parsed.Parse_error _
+  | Masc_exec.Parsed.Parse_aborted _
+  | Masc_exec.Parsed.Too_complex _ -> []
 ;;
 
-let validate_command_paths ?keeper_id ?base_path ?workdir cmd =
+let validate_shell_ir_paths ?keeper_id ?base_path ?workdir shell_ir =
   match workdir with
   | None -> Ok ()
   | Some _ ->
-      let validate_path_value ~requires_existing_dir token =
-        if String.equal (strip_wrapping_quotes token.Path_words.value) "/dev/null"
+      let validate_path_value ~requires_existing_dir value =
+        if String.equal (strip_wrapping_quotes value) "/dev/null"
         then Ok ()
-        else if not (validate_path ?keeper_id ?base_path ?workdir token.Path_words.value)
+        else if not (validate_path ?keeper_id ?base_path ?workdir value)
         then
           Error
             (Keeper_path_check_error.(
                to_message
                  (Path_outside_whitelist
-                    { path = token.Path_words.value; for_keeper_command = true })))
-        else if requires_existing_dir && not (path_is_existing_dir ?workdir token.Path_words.value)
+                    { path = value; for_keeper_command = true })))
+        else if requires_existing_dir && not (path_is_existing_dir ?workdir value)
         then
           Error
             (Keeper_path_check_error.(
-               to_message (Cwd_not_directory { path = token.Path_words.value; hint = None })))
+               to_message (Cwd_not_directory { path = value; hint = None })))
         else Ok ()
       in
-      let rec validate_path_tokens ~command_name expect_existing_dir = function
+      let rec validate_path_values ~command_name expect_existing_dir = function
         | [] -> Ok ()
-        | token :: rest ->
-          if token.Path_words.value = ""
-          then validate_path_tokens ~command_name expect_existing_dir rest
+        | value :: rest ->
+          if value = ""
+          then validate_path_values ~command_name expect_existing_dir rest
           else if expect_existing_dir
           then
-            (match validate_path_value ~requires_existing_dir:true token with
-             | Ok () -> validate_path_tokens ~command_name false rest
+            (match validate_path_value ~requires_existing_dir:true value with
+             | Ok () -> validate_path_values ~command_name false rest
              | Error _ as err -> err)
           else (
-            match path_value_of_flagged_token token.Path_words.value with
-            | Some value ->
-              let token = { token with value } in
+            match path_value_of_flagged_token value with
+            | Some flagged_value ->
               (match
                  validate_path_value
-                   ~requires_existing_dir:(inline_path_flag_requires_existing_dir token.Path_words.value)
-                   token
+                   ~requires_existing_dir:(inline_path_flag_requires_existing_dir value)
+                   flagged_value
                with
-               | Ok () -> validate_path_tokens ~command_name false rest
+               | Ok () -> validate_path_values ~command_name false rest
                | Error _ as err -> err)
-            | None when is_path_flag token.Path_words.value ->
-              validate_path_tokens
+            | None when is_path_flag value ->
+              validate_path_values
                 ~command_name
-                (path_flag_requires_existing_dir token.Path_words.value)
+                (path_flag_requires_existing_dir value)
                 rest
             | None
               when String.equal command_name "git"
-                   && git_revisionish_token ?workdir token.Path_words.value ->
-              validate_path_tokens ~command_name false rest
-            | None when looks_like_path_token token.Path_words.value ->
-              if Path_words.has_unsafe_rewrite_syntax token
-              then Error (path_syntax_blocked_message token)
-              else if token.Path_words.globbed
-              then
-                if command_allows_safe_globbed_path command_name
-                   && token_glob_is_limited_to_basename token
-                then (
-                  match validate_path_value ~requires_existing_dir:false token with
-                  | Ok () -> validate_path_tokens ~command_name false rest
-                  | Error _ as err -> err)
-                else Error (path_syntax_blocked_message token)
-              else (
-                match validate_path_value ~requires_existing_dir:false token with
-                | Ok () -> validate_path_tokens ~command_name false rest
-                | Error _ as err -> err)
-            | None -> validate_path_tokens ~command_name false rest)
-      in
-      let validate_path_argument_words words path_words =
-        let command_name =
-          match words with
-          | command :: _ -> Filename.basename command.Path_words.value
-          | [] -> ""
-        in
-        validate_path_tokens ~command_name false path_words
-      in
-      let validate_word_stream words =
-        validate_path_argument_words words (path_argument_words words)
+                   && git_revisionish_token ?workdir value ->
+              validate_path_values ~command_name false rest
+            | None when looks_like_path_token value ->
+              (match validate_path_value ~requires_existing_dir:false value with
+               | Ok () -> validate_path_values ~command_name false rest
+               | Error _ as err -> err)
+            | None -> validate_path_values ~command_name false rest)
       in
       let rec validate_redirects = function
         | [] -> Ok ()
         | Masc_exec.Redirect_scope.File { target; _ } :: rest ->
-          let token = Masc_exec.Path_scope.raw target |> Path_words.of_literal in
-          (match validate_path_value ~requires_existing_dir:false token with
+          let target = Masc_exec.Path_scope.raw target in
+          (match validate_path_value ~requires_existing_dir:false target with
            | Ok () -> validate_redirects rest
            | Error _ as err -> err)
         | Masc_exec.Redirect_scope.Fd_to_fd _ :: rest -> validate_redirects rest
       in
-      let tokens_of_simple (simple : Masc_exec.Shell_ir.simple) =
-        let command = Masc_exec.Bin.to_string simple.bin |> Path_words.of_literal in
-        let rec args acc = function
-          | [] -> Some (command :: List.rev acc)
-          | Masc_exec.Shell_ir.Lit value :: rest ->
-            args (Path_words.of_literal value :: acc) rest
-          | Masc_exec.Shell_ir.Concat _ :: _ | Masc_exec.Shell_ir.Var _ :: _ -> None
-        in
-        args [] simple.args
+      let validate_simple (simple : Masc_exec.Shell_ir.simple) =
+        let command_name = Masc_exec.Bin.to_string simple.bin |> Filename.basename in
+        match literal_args_of_simple simple with
+        | None -> Ok ()
+        | Some args ->
+          (match
+             path_argument_values command_name args
+             |> validate_path_values ~command_name false
+           with
+           | Ok () -> validate_redirects simple.redirects
+           | Error _ as err -> err)
       in
       let validate_parsed_shell_ir = function
-        | Masc_exec.Shell_ir.Simple simple ->
-          (match tokens_of_simple simple with
-           | Some tokens ->
-             Some
-               (match validate_word_stream tokens with
-                | Ok () -> validate_redirects simple.redirects
-                | Error _ as err -> err)
-           | None -> None)
+        | Masc_exec.Shell_ir.Simple simple -> validate_simple simple
         | Masc_exec.Shell_ir.Pipeline stages ->
           let rec loop = function
-            | [] -> Some (Ok ())
+            | [] -> Ok ()
             | Masc_exec.Shell_ir.Simple simple :: rest ->
-              (match tokens_of_simple simple with
-               | None -> None
-               | Some tokens ->
-                 (match validate_word_stream tokens with
-                  | Ok () ->
-                    (match validate_redirects simple.redirects with
-                     | Ok () -> loop rest
-                     | Error _ as err -> Some err)
-                  | Error _ as err -> Some err))
-            | Masc_exec.Shell_ir.Pipeline _ :: _ -> None
+              (match validate_simple simple with
+               | Ok () -> loop rest
+               | Error _ as err -> err)
+            | Masc_exec.Shell_ir.Pipeline _ :: _ -> Ok ()
           in
           loop stages
       in
-      let source_words = Path_words.of_command cmd in
-      let source_path_words = path_argument_words source_words in
-      let source_needs_syntax_sensitive_gate =
-        List.exists
-          (fun token -> Path_words.has_unsafe_rewrite_syntax token || token.Path_words.globbed)
-          source_path_words
-      in
-      if source_needs_syntax_sensitive_gate
-      then validate_path_argument_words source_words source_path_words
-      else (
-        match Masc_exec_bash_parser.Bash.parse_string cmd with
-        | Masc_exec.Parsed.Parsed shell_ir ->
-          (match validate_parsed_shell_ir shell_ir with
-           | Some result -> result
-           | None -> validate_word_stream source_words)
-        | Masc_exec.Parsed.Parse_error _
-        | Masc_exec.Parsed.Parse_aborted _
-        | Masc_exec.Parsed.Too_complex _ ->
-          validate_word_stream source_words)
+      validate_parsed_shell_ir shell_ir
+;;
+
+let validate_command_paths ?keeper_id ?base_path ?workdir cmd =
+  match Masc_exec_bash_parser.Bash.parse_string cmd with
+  | Masc_exec.Parsed.Parsed shell_ir ->
+    validate_shell_ir_paths ?keeper_id ?base_path ?workdir shell_ir
+  | Masc_exec.Parsed.Parse_error _
+  | Masc_exec.Parsed.Parse_aborted _
+  | Masc_exec.Parsed.Too_complex _ -> Ok ()
 ;;
 
 (** Check if a command performs write/mutating operations.
@@ -1095,10 +1128,98 @@ let attribution_of_validation ~cmd (result : (unit, block_reason) result) : Attr
       ~reason:(block_reason_to_string br)
 ;;
 
+let shell_ir_with_default_cwd cwd ir =
+  match cwd with
+  | None -> ir
+  | Some dir ->
+    let default_cwd = Masc_exec.Path_scope.classify ~raw:dir ~cwd:dir in
+    let rec map_ir = function
+      | Masc_exec.Shell_ir.Simple simple ->
+        let simple =
+          match simple.cwd with
+          | Some _ -> simple
+          | None -> { simple with cwd = Some default_cwd }
+        in
+        Masc_exec.Shell_ir.Simple simple
+      | Masc_exec.Shell_ir.Pipeline stages ->
+        Masc_exec.Shell_ir.Pipeline (List.map map_ir stages)
+    in
+    map_ir ir
+;;
+
+let output_for_dispatch_status ~(status : Unix.process_status) ~stdout ~stderr =
+  match status with
+  | Unix.WEXITED 0 -> stdout
+  | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> (
+    match stdout, stderr with
+    | "", err -> err
+    | out, "" -> out
+    | out, err -> out ^ "\n" ^ err)
+;;
+
+let simple_literal_argv (simple : Masc_exec.Shell_ir.simple) =
+  match simple_literal_args simple with
+  | None -> None
+  | Some args -> Some (Masc_exec.Bin.to_string simple.Masc_exec.Shell_ir.bin :: args)
+;;
+
+let has_flag_prefix ~prefix args =
+  List.exists (fun arg -> String.length arg >= String.length prefix
+                          && String.sub arg 0 (String.length prefix) = prefix)
+    args
+;;
+
+let is_recursive_scan_command bin args =
+  match bin with
+  | "find" -> true
+  | "rg" -> true
+  | "grep" ->
+    List.exists
+      (fun arg ->
+         String.length arg >= 2
+         && arg.[0] = '-'
+         && (String.contains arg 'r' || String.contains arg 'R'))
+      args
+  | _ -> false
+;;
+
+let shell_exec_simple_timeout_floor (simple : Masc_exec.Shell_ir.simple) =
+  let bin = Masc_exec.Bin.to_string simple.Masc_exec.Shell_ir.bin in
+  match simple_literal_argv simple with
+  | None -> None
+  | Some (_ :: args) ->
+    if String.equal bin "git"
+       || String.equal bin "dune-local.sh"
+       || has_flag_prefix ~prefix:"scripts/dune-local.sh" (bin :: args)
+       || is_recursive_scan_command bin args
+    then Some Timeout_floor.Tool_dispatch
+    else None
+  | Some [] -> None
+;;
+
+let rec shell_exec_timeout_floor = function
+  | Masc_exec.Shell_ir.Simple simple -> shell_exec_simple_timeout_floor simple
+  | Masc_exec.Shell_ir.Pipeline stages ->
+    List.find_map shell_exec_timeout_floor stages
+;;
+
+let effective_shell_exec_timeout_sec_for_context ~requested context =
+  match shell_exec_timeout_floor context.Exec_shell_gate.ast with
+  | None -> requested
+  | Some floor -> Timeout_floor.clamp floor requested
+;;
+
+let effective_shell_exec_timeout_sec ~command ~requested =
+  let requested = Float.min 120.0 requested in
+  match command_context_with_allowlist ~allowed_commands:dev_allowed_commands command with
+  | Error _ -> requested
+  | Ok context -> effective_shell_exec_timeout_sec_for_context ~requested context
+;;
+
 let make_shell_exec_with_allowlist
       ~workdir
       ~on_exec
-      ~proc_mgr
+      ~proc_mgr:_
       ~clock
       ~allowed_commands
       ~description
@@ -1123,9 +1244,12 @@ let make_shell_exec_with_allowlist
        match Worker_tool_input.extract_string "command" input with
        | Error e -> tool_error e
        | Ok command ->
-         let validation = validate_command_with_allowlist ~allowed_commands command in
+         let command_context =
+           command_context_with_allowlist ~allowed_commands command
+         in
+         let validation = Result.map (fun _ -> ()) command_context in
          Dashboard_attribution.record (attribution_of_validation ~cmd:command validation);
-         (match validation with
+         (match command_context with
           | Error reason ->
             (* #13078: emit [command_blocked] telemetry so observers
                see validation failures.  Without this, the .mli's
@@ -1144,118 +1268,144 @@ let make_shell_exec_with_allowlist
                    ())
               on_exec;
             tool_error (block_reason_to_string reason)
-          | Ok () ->
-            let timeout =
-              Worker_tool_input.extract_float "timeout_s" input
-              |> Option.value ~default:30.0
-              |> Float.min 120.0
+          | Ok context ->
+            let path_workdir =
+              match workdir with
+              | Some dir when String.trim dir <> "" -> dir
+              | Some _ | None -> Sys.getcwd ()
             in
-            (try
-               let started = Time_compat.now () in
-               let record_result ?error_message result =
-                 let duration_ms =
-                   int_of_float ((Time_compat.now () -. started) *. 1000.0)
-                 in
-                 Option.iter
-                   (fun (f : tool_exec_observer) ->
-                      let success = Result.is_ok result in
-                      if success
-                      then f ~tool_name:"shell_exec" ~success:true ~duration_ms ()
-                      else
-                        f
-                          ~tool_name:"shell_exec"
-                          ~success:false
-                          ~duration_ms
-                          ~error_kind:Shell_error
-                          ?error_message
-                          ())
-                   on_exec;
-                 result
-               in
-               Tool_resource_gate.with_permit_raw
-                 ~clock
-                 ~tool_name:"shell_exec"
-                 ~arguments:input
-                 ~is_read_only:false
-                 ~on_reject:(fun message ->
-                   let message = "tool_resource_gate_saturated: " ^ message in
-                   record_result
-                     ~error_message:message
-                     (tool_error ~recoverable:true message))
-                 (fun () ->
-                    let buf = Buffer.create 1024 in
-                    let wrapped_command =
-                      match workdir with
-                      | Some dir when String.trim dir <> "" ->
-                        Printf.sprintf "cd %s && %s" (Filename.quote dir) command
-                      | _ -> command
-                    in
-                    let result =
-                      try
-                        let status, output =
-                          Fd_accountant.with_slot ~kind:Sandbox_exec (fun () ->
-                            Eio.Time.with_timeout_exn clock timeout (fun () ->
-                              Eio.Switch.run
-                              @@ fun sw ->
-                              let stdout_r, stdout_w =
-                                Eio.Process.pipe ~sw proc_mgr
-                              in
-                              let proc =
-                                Eio.Process.spawn
-                                  ~sw
-                                  proc_mgr
-                                  ~stdout:stdout_w
-                                  [ "sh"; "-c"; wrapped_command ^ " 2>&1" ]
-                              in
-                              Eio.Flow.close stdout_w;
-                              (try
-                                 Eio.Flow.copy stdout_r (Eio.Flow.buffer_sink buf);
-                                 Eio.Flow.close stdout_r
-                               with
-                               | Eio.Cancel.Cancelled _ as e ->
-                                 (try Eio.Flow.close stdout_r with
-                                  | Eio.Cancel.Cancelled _ as ce -> raise ce
-                                  | _ -> ());
-                                 raise e);
-                              let status = Eio.Process.await proc in
-                              status, Buffer.contents buf))
-                        in
-                        match status with
-                        | `Exited 0 -> Ok { Agent_sdk.Types.content = output }
-                        | `Exited code ->
-                          tool_error (Printf.sprintf "Exit code %d:\n%s" code output)
-                        | `Signaled sig_num ->
-                          tool_error
-                            ~recoverable:(sig_num = Sys.sigterm)
-                            (Printf.sprintf "Killed by signal %d:\n%s" sig_num output)
-                      with
-                      | Eio.Time.Timeout ->
-                        let output = Buffer.contents buf in
-                        tool_error
-                          ~recoverable:true
-                          (Printf.sprintf
-                             "Timeout after %.0fs: %s\n%s"
-                             timeout
-                             command
-                             output)
-                    in
-                    record_result result)
+            (match
+               validate_shell_ir_paths
+                 ~workdir:path_workdir
+                 context.Exec_shell_gate.ast
              with
-             | Eio.Cancel.Cancelled _ as e -> raise e
-             | exn ->
-               let duration_ms = 0 in
-               let exn_msg = Printexc.to_string exn in
+             | Error message ->
                Option.iter
                  (fun (f : tool_exec_observer) ->
                     f
                       ~tool_name:"shell_exec"
                       ~success:false
-                      ~duration_ms
-                      ~error_kind:Shell_error
-                      ~error_message:exn_msg
+                      ~duration_ms:0
+                      ~error_kind:Path_blocked
+                      ~error_message:message
                       ())
                  on_exec;
-               tool_error (Printf.sprintf "Command failed: %s" exn_msg))))
+               tool_error message
+             | Ok () ->
+               let timeout =
+                 Worker_tool_input.extract_float "timeout_s" input
+                 |> Option.value ~default:30.0
+                    (* DET-OK: fixed policy default for absent shell timeout. *)
+                 |> Float.min 120.0
+                 |> fun requested ->
+                 effective_shell_exec_timeout_sec_for_context ~requested context
+               in
+               (try
+                  let started = Time_compat.now () in
+                  let record_result ?error_message result =
+                    let duration_ms =
+                      int_of_float ((Time_compat.now () -. started) *. 1000.0)
+                    in
+                    Option.iter
+                      (fun (f : tool_exec_observer) ->
+                         let success = Result.is_ok result in
+                         if success
+                         then f ~tool_name:"shell_exec" ~success:true ~duration_ms ()
+                         else
+                           f
+                             ~tool_name:"shell_exec"
+                             ~success:false
+                             ~duration_ms
+                             ~error_kind:Shell_error
+                             ?error_message
+                             ())
+                      on_exec;
+                    result
+                  in
+                  Tool_resource_gate.with_permit_raw
+                    ~clock
+                    ~tool_name:"shell_exec"
+                    ~arguments:input
+                    ~is_read_only:false
+                    ~on_reject:(fun message ->
+                      let message = "tool_resource_gate_saturated: " ^ message in
+                      record_result
+                        ~error_message:message
+                        (tool_error ~recoverable:true message))
+                    (fun () ->
+                       let cwd =
+                         match workdir with
+                         | Some dir when String.trim dir <> "" -> Some dir
+                         | Some _ | None -> None
+                       in
+                       let result =
+                         try
+                           let dispatch_result =
+                             Fd_accountant.with_slot ~kind:Sandbox_exec (fun () ->
+                               let dispatch_ir =
+                                 shell_ir_with_default_cwd
+                                   cwd
+                                   context.Exec_shell_gate.ast
+                               in
+                               Masc_exec.Exec_dispatch.dispatch
+                                 ~timeout_sec:timeout
+                                 dispatch_ir)
+                           in
+                           let output =
+                             output_for_dispatch_status
+                               ~status:dispatch_result.status
+                               ~stdout:dispatch_result.stdout
+                               ~stderr:dispatch_result.stderr
+                           in
+                           match dispatch_result.status with
+                           | Unix.WEXITED 0 -> Ok { Agent_sdk.Types.content = output }
+                           | Unix.WEXITED 124 ->
+                             tool_error
+                               ~recoverable:true
+                               (Printf.sprintf
+                                  "Timeout after %.0fs: %s\n%s"
+                                  timeout
+                                  command
+                                  output)
+                           | Unix.WEXITED code ->
+                             tool_error (Printf.sprintf "Exit code %d:\n%s" code output)
+                           | Unix.WSIGNALED sig_num ->
+                             tool_error
+                               ~recoverable:(sig_num = Sys.sigterm)
+                               (Printf.sprintf
+                                  "Killed by signal %d:\n%s"
+                                  sig_num
+                                  output)
+                           | Unix.WSTOPPED sig_num ->
+                             tool_error
+                               ~recoverable:true
+                               (Printf.sprintf
+                                  "Stopped by signal %d:\n%s"
+                                  sig_num
+                                  output)
+                         with
+                         | Eio.Time.Timeout ->
+                           tool_error
+                             ~recoverable:true
+                             (Printf.sprintf "Timeout after %.0fs: %s\n%s" timeout command "")
+                       in
+                       record_result result)
+                with
+                | Eio.Cancel.Cancelled _ as e -> raise e
+                | exn ->
+                  let duration_ms = 0 in
+                  let exn_msg = Printexc.to_string exn in
+                  Option.iter
+                    (fun (f : tool_exec_observer) ->
+                       f
+                         ~tool_name:"shell_exec"
+                         ~success:false
+                         ~duration_ms
+                         ~error_kind:Shell_error
+                         ~error_message:exn_msg
+                         ())
+                    on_exec;
+                  tool_error (Printf.sprintf "Command failed: %s" exn_msg)))))
 ;;
 
 let make_shell_exec ~workdir ~on_exec ~proc_mgr ~clock =
@@ -1268,8 +1418,8 @@ let make_shell_exec ~workdir ~on_exec ~proc_mgr ~clock =
     ~description:
       "Execute a shell command and return stdout+stderr. Timeout: 30s default, max 120s. \
        Use for: running tests, git commands, build tools, directory listing. Unlike \
-       file_read (single file), this handles approved CLI operations. Commands run in \
-       /bin/sh but shell control syntax is rejected."
+       file_read (single file), this handles approved CLI operations. Supported commands \
+       run through Shell IR native dispatch; shell control syntax is rejected."
     ()
 ;;
 
@@ -1300,81 +1450,4 @@ let make_readonly_tools ~proc_mgr ~clock ?workdir ?on_exec () : Agent_sdk.Tool.t
   [ make_file_read ?workdir ?on_exec ()
   ; make_shell_exec_readonly ~workdir ~on_exec ~proc_mgr ~clock
   ]
-;;
-
-(* ================================================================ *)
-(* Tick 12 (P5, reduced scope) — shadow AST parse observation.      *)
-(*                                                                  *)
-(* The existing regex allowlist ([validate_command] above) remains  *)
-(* the authoritative gate.  This helper runs the typed bash parser  *)
-(* (Masc_exec.Parser.Bash.parse_string) in parallel and maps the    *)
-(* outcome to a coarse, stable tag string.  Callers that want to    *)
-(* build prod observability can log the tag alongside the regex     *)
-(* verdict; when the tag distribution has baked in (plan decision   *)
-(* point 2: "N=1000 prod 호출 무결 후 flag 전환"), the gate can    *)
-(* migrate in a follow-up without touching the regex layer.         *)
-(*                                                                  *)
-(* The helper never panics — the parser catches every Menhir/Lex    *)
-(* exception internally and surfaces them via Parsed.t.             *)
-(* ================================================================ *)
-
-(* Typed parser outcome — primary classification surface.  String
-   renderings exist only at log-emission boundaries via
-   [Gate_diff_types.parse_outcome_kind_to_tag].  Downstream histogram
-   dispatch (Legendary_counters) consumes the typed variant exhaustively
-   so a new [Parsed.reason_too_complex] arm is a compile-time forcing
-   function, not a silent "other"-bucket landing. *)
-let shadow_parse_outcome_kind (cmd : string) : parse_outcome_kind =
-  match Masc_exec_bash_parser.Bash.parse_string cmd with
-  | Masc_exec.Parsed.Parsed _ -> Parsed_simple
-  | Masc_exec.Parsed.Parse_error _ -> Parse_error
-  | Masc_exec.Parsed.Parse_aborted r -> Parse_aborted r
-  | Masc_exec.Parsed.Too_complex r -> Too_complex r
-;;
-
-(* Stable string rendering of the parse outcome — retained for log
-   emission and telemetry tags that already exist in operator
-   dashboards. Computes via the typed kind so the wording cannot
-   drift between this function and [Legendary_counters]. *)
-let shadow_parse_outcome (cmd : string) : string =
-  parse_outcome_kind_to_tag (shadow_parse_outcome_kind cmd)
-;;
-
-(* Legacy verdict ↔ shadow verdict cross-check.  Returns a tuple of
-   legacy allow/deny + shadow kind, so telemetry can spot "legacy
-   allows but shadow cannot parse" drift without needing two
-   separate call sites.  Intentionally side-effect free. *)
-let cross_check_command ~legacy cmd = legacy, shadow_parse_outcome_kind cmd
-
-(* Classification functions that depend on worker_dev_tools internals
-   (validate_command, shadow_parse_outcome_kind). Types come from
-   Gate_diff_types via [include Gate_diff_types] at the top. *)
-
-let classify_legacy cmd : legacy_verdict =
-  match validate_command cmd with
-  | Ok () ->
-    (match Eval_gate.detect_destructive cmd with
-     | Some (substring, _desc) -> Legacy_reject_destructive substring
-     | None -> Legacy_allow)
-  | Error _ -> Legacy_reject_by_allowlist
-;;
-
-let classify_shadow cmd : shadow_verdict =
-  (* Destructive classifier runs on the raw string regardless of
-     parser success — the substring catalogue does not need AST
-     structure. This keeps the shadow path meaningful on commands
-     the grammar has not yet upgraded to support. *)
-  match classify_destructive cmd with
-  | Some (cls, sub) -> Shadow_deny_destructive (cls, sub)
-  | None ->
-    (match shadow_parse_outcome_kind cmd with
-     | Parsed_simple -> Shadow_allow
-     | (Parse_error | Parse_aborted _ | Too_complex _) as kind ->
-       Shadow_parse_unsupported { kind })
-;;
-
-let diff_command cmd : gate_diff * legacy_verdict * shadow_verdict =
-  let legacy = classify_legacy cmd in
-  let shadow = classify_shadow cmd in
-  diff_of_verdicts ~legacy ~shadow, legacy, shadow
 ;;

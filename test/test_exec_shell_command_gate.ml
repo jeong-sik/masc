@@ -9,7 +9,7 @@
        matches what {!test/fixtures/shell_gate/baseline.jsonl}
        records for each corpus row (Phase 0 - baseline pin).
     2. [Masc_mcp.Worker_dev_tools.validate_command_coding_with_allowlist]
-       legacy verdict also matches the recorded baseline so any future
+       worker verdict also matches the recorded baseline so any future
        behavior change (Phase 2+) is visible as a corpus diff, not as
        a silent flip.
     3. Phase 1 facade-specific Plan invariants that the JSONL corpus
@@ -31,7 +31,7 @@ let allowlist : Gate.allowlist_policy =
 type fixture = {
   raw_cmd : string;
   category : string;
-  expected_legacy_verdict : string;
+  expected_worker_verdict : string;
   expected_ir_verdict : string;
   ir_detail : string option;
   note : string;
@@ -72,7 +72,7 @@ let parse_fixture_line line =
   let json = Yojson.Safe.from_string line in
   { raw_cmd = assoc_string "raw_cmd" json
   ; category = assoc_string "category" json
-  ; expected_legacy_verdict = assoc_string "expected_legacy_verdict" json
+  ; expected_worker_verdict = assoc_string "expected_worker_verdict" json
   ; expected_ir_verdict = assoc_string "expected_ir_verdict" json
   ; ir_detail = assoc_string_opt "ir_detail" json
   ; note = assoc_string "note" json
@@ -97,10 +97,10 @@ let load_corpus () =
   fixtures
 ;;
 
-(* Legacy verdict tagging — short string aligned with the JSONL
+(* Worker verdict tagging — short string aligned with the JSONL
    schema. The {!W.block_reason} variant is private to the module,
    so we use {!W.block_reason_to_string} indirectly via tag mapping. *)
-let legacy_tag (result : (unit, W.block_reason) result) : string =
+let worker_tag (result : (unit, W.block_reason) result) : string =
   match result with
   | Ok () -> "ok"
   | Error W.Empty_command -> "empty_command"
@@ -129,13 +129,13 @@ let run_corpus_row fixture =
          String.sub fixture.raw_cmd 0 60 ^ "..."
        else fixture.raw_cmd)
   in
-  let legacy =
+  let worker =
     W.validate_command_coding_with_allowlist ~allowed_commands:allowed fixture.raw_cmd
   in
   Alcotest.(check string)
-    (label ^ " legacy verdict")
-    fixture.expected_legacy_verdict
-    (legacy_tag legacy);
+    (label ^ " worker verdict")
+    fixture.expected_worker_verdict
+    (worker_tag worker);
   let ir =
     Gate.gate
       ~raw:fixture.raw_cmd
@@ -455,16 +455,14 @@ let test_too_complex_reason_tags_are_stable () =
    The fixtures are also pinned by [test_corpus_pinned] above. These
    dedicated tests exist so a regression on any of the three new
    divergence/policy axes produces a focused failure label instead of
-   a generic "row N legacy/ir verdict mismatch". *)
+   a generic "row N worker/ir verdict mismatch". *)
 
-let test_backslash_pipe_in_double_quotes_diverges () =
+let test_backslash_pipe_in_double_quotes_allows () =
   (* Corpus fixture: rg "a\|b"
-     Legacy: ok (the coding shell injection precheck excludes \ and the
-       quote-aware splitter does not see the inner |).
-     IR: Cannot_parse Parse_error (lexer rejects \ in dq_body and
-       classify_too_complex matches no single-char rule for this
-       input).
-     Phase 0 PR-A2: new divergence row. *)
+     Worker gate: ok.
+     IR: Allow. The typed parser keeps backslash-pipe inside the
+       quoted argv value instead of routing through the retired legacy
+       shape classifier. *)
   match
     Gate.gate
       ~raw:"rg \"a\\|b\""
@@ -473,16 +471,16 @@ let test_backslash_pipe_in_double_quotes_diverges () =
       ~sandbox:Gate.host_sandbox
       ()
   with
-  | Gate.Cannot_parse { reason = Gate.Parse_error } -> ()
+  | Gate.Allow _ -> ()
   | other ->
     Alcotest.failf
-      "expected Cannot_parse parse_error for backslash-pipe in dq, got %s"
+      "expected Allow for backslash-pipe in dq, got %s"
       (Gate.verdict_tag other)
 ;;
 
 let test_brace_expansion_is_too_complex_glob_brace () =
   (* Corpus fixture: ls {a,b}.txt
-     Legacy: ok (brace not in the coding shell injection precheck).
+     Worker gate: ok (brace not in the coding shell injection precheck).
      IR: Too_complex (Unsupported_construct `Glob_brace).
      Phase 0 PR-A2: new fixture covering classify_too_complex's
      [has "{" || has "}"] arm — previously no corpus row exercised
@@ -504,7 +502,7 @@ let test_brace_expansion_is_too_complex_glob_brace () =
 
 let test_absolute_path_traversal_phase1_allows () =
   (* Corpus fixture: cat /etc/passwd
-     Legacy: ok (no metachar trigger).
+     Worker gate: ok (no metachar trigger).
      IR (Phase 1, allow_all_paths default): Allow with single Simple
        stage [cat /etc/passwd]. Phase 5 will install a path policy
        that flips this row to Reject Path_outside_policy — this
@@ -592,9 +590,9 @@ let () =
         ] )
     ; ( "phase_0_pr_a2"
       , [ Alcotest.test_case
-            "backslash pipe in double quotes diverges"
+            "backslash pipe in double quotes stays literal"
             `Quick
-            test_backslash_pipe_in_double_quotes_diverges
+            test_backslash_pipe_in_double_quotes_allows
         ; Alcotest.test_case
             "brace expansion classified as glob_brace"
             `Quick

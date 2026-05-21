@@ -2,6 +2,7 @@ open Alcotest
 
 module KET = Masc_mcp.Keeper_exec_tools
 module KES = Masc_mcp.Keeper_exec_shared
+module Coord = Masc_mcp.Coord
 
 let temp_dir prefix =
   let dir = Filename.temp_file prefix "" in
@@ -20,6 +21,26 @@ let cleanup_dir path =
         Unix.unlink target
   in
   try rm path with _ -> ()
+
+let with_env key value f =
+  let prior = Sys.getenv_opt key in
+  Unix.putenv key value;
+  Fun.protect
+    ~finally:(fun () ->
+      match prior with
+      | Some old -> Unix.putenv key old
+      | None -> Unix.putenv key "")
+    f
+
+let write_file path content =
+  let oc = open_out_bin path in
+  Fun.protect ~finally:(fun () -> close_out oc) @@ fun () ->
+  output_string oc content
+
+let read_file path =
+  let ic = open_in_bin path in
+  Fun.protect ~finally:(fun () -> close_in ic) @@ fun () ->
+  really_input_string ic (in_channel_length ic)
 
 let make_meta ?(name = "keeper-exec-tools") ?(policy_voice_enabled = false) ?tool_access () =
   let tool_access =
@@ -73,6 +94,11 @@ let contains_substring text needle =
     && (String.sub text idx needle_len = needle || loop (idx + 1))
   in
   needle_len = 0 || loop 0
+
+let non_empty_lines text =
+  String.split_on_char '\n' text
+  |> List.map String.trim
+  |> List.filter (fun line -> line <> "")
 
 let check_kind ~msg expected payload =
   check string msg expected
@@ -345,6 +371,89 @@ let test_preflight_structured_block_is_execution_success () =
         (String.length
            Yojson.Safe.Util.(member "cascade" cascade |> to_string)
          > 0))
+
+let test_preflight_gh_checks_use_direct_argv () =
+  with_exec_fixture "keeper_exec_tools_preflight_gh_argv"
+    (fun ~config ~meta ~ctx_work:_ ->
+      let base = config.Coord.base_path in
+      let bin_dir = Filename.concat base "bin" in
+      let gh_args_log = Filename.concat base "gh-args.log" in
+      Unix.mkdir bin_dir 0o755;
+      write_file
+        (Filename.concat bin_dir "gh")
+        "#!/bin/sh\n\
+         printf '%s\\n' \"$*\" >> \"$GH_ARGS_LOG\"\n\
+         if [ \"$1\" = \"auth\" ] && [ \"$2\" = \"status\" ]; then\n\
+         \  exit 0\n\
+         fi\n\
+         if [ \"$1\" = \"repo\" ] && [ \"$2\" = \"view\" ] \
+            && [ \"$3\" = \"jeong-sik/masc-mcp\" ] \
+            && [ \"$4\" = \"--json\" ] \
+            && [ \"$5\" = \"name,defaultBranchRef\" ]; then\n\
+         \  printf '%s\\n' \
+              '{\"name\":\"masc-mcp\",\"defaultBranchRef\":{\"name\":\"trunk\"}}'\n\
+         \  exit 0\n\
+         fi\n\
+         printf 'unexpected gh: %s\\n' \"$*\" >&2\n\
+         exit 2\n";
+      Unix.chmod (Filename.concat bin_dir "gh") 0o755;
+      let captured = ref [] in
+      Fun.protect
+        ~finally:(fun () -> Exec_tap.disable ())
+        (fun () ->
+          Exec_tap.enable ~writer:(fun line -> captured := line :: !captured);
+          with_env "MASC_EXEC_GATE" "parallel" @@ fun () ->
+          with_env "GH_ARGS_LOG" gh_args_log @@ fun () ->
+          with_env
+            "PATH"
+            (bin_dir ^ ":"
+             ^ Option.value ~default:"/usr/bin:/bin" (Sys.getenv_opt "PATH"))
+          @@ fun () ->
+          let raw =
+            Masc_mcp.Keeper_exec_preflight.handle_keeper_preflight_check ~config
+              ~meta
+              ~args:
+                (`Assoc [ "repo", `String "jeong-sik/masc-mcp" ])
+          in
+          let json = Yojson.Safe.from_string raw in
+          check string "repo default branch from gh JSON" "trunk"
+            Yojson.Safe.Util.(member "default_branch" json |> to_string);
+          check bool "repo access succeeded" true
+            (contains_substring
+               Yojson.Safe.Util.(member "checks" json |> to_string)
+               "repo_access: ok");
+          check (list string) "gh called with direct argv" [
+            "auth status";
+            "repo view jeong-sik/masc-mcp --json name,defaultBranchRef";
+          ]
+            (non_empty_lines (read_file gh_args_log));
+          let process_lines =
+            List.filter
+              (fun line ->
+                 contains_substring line
+                   "\"kind\":\"Process_eio.run_argv_with_status\"")
+              !captured
+          in
+          check bool "process execution recorded" true (process_lines <> []);
+          check bool "auth argv recorded without shell" true
+            (List.exists
+               (fun line ->
+                  contains_substring line
+                    "\"argv\":[\"gh\",\"auth\",\"status\"]")
+               process_lines);
+          check bool "repo argv recorded without shell" true
+            (List.exists
+               (fun line ->
+                  contains_substring line
+                    "\"argv\":[\"gh\",\"repo\",\"view\",\"jeong-sik/masc-mcp\",\"--json\",\"name,defaultBranchRef\"]")
+               process_lines);
+          check bool "no shell wrapper in exec tap" false
+            (List.exists
+               (fun line ->
+                  contains_substring line "-lc"
+                  || contains_substring line "/bin/zsh"
+                  || contains_substring line "2>&1")
+               !captured)))
 
 let test_preflight_reports_autoboot_disabled_activation_blocker () =
   with_exec_fixture "keeper_exec_tools_preflight_autoboot_disabled"
@@ -811,6 +920,8 @@ let () =
         test_execute_with_outcome_bad_query_is_failure;
       test_case "preflight block is execution success" `Quick
         test_preflight_structured_block_is_execution_success;
+      test_case "preflight gh checks use direct argv" `Quick
+        test_preflight_gh_checks_use_direct_argv;
       test_case "preflight reports autoboot disabled activation blocker" `Quick
         test_preflight_reports_autoboot_disabled_activation_blocker;
       test_case "preflight reports proactive disabled activation blocker" `Quick

@@ -1,7 +1,16 @@
 (** Mutation/destructive command classifiers for worker dev tools. *)
 
+let shell_word_values cmd =
+  match Masc_exec_bash_parser.Bash_words.stages cmd with
+  | Error _ -> []
+  | Ok stages ->
+    stages
+    |> List.concat
+    |> List.map (fun (word : Masc_exec_bash_parser.Bash_words.word) -> word.value)
+;;
+
 let is_write_operation cmd =
-  let parts = String.split_on_char ' ' (String.trim cmd) in
+  let parts = shell_word_values cmd in
   match parts with
   | "git" :: sub :: _ ->
     List.mem
@@ -53,22 +62,7 @@ let rec skip_git_global_options = function
 ;;
 
 let is_git_branch_switch cmd =
-  let parts =
-    let buf = Buffer.create 64 in
-    let tokens = ref [] in
-    String.iter
-      (fun c ->
-         match c with
-         | ' ' | '\t' ->
-           if Buffer.length buf > 0
-           then (
-             tokens := Buffer.contents buf :: !tokens;
-             Buffer.clear buf)
-         | _ -> Buffer.add_char buf c)
-      (String.trim cmd);
-    if Buffer.length buf > 0 then tokens := Buffer.contents buf :: !tokens;
-    List.rev !tokens
-  in
+  let parts = shell_word_values cmd in
   let is_option arg = String.length arg > 0 && arg.[0] = '-' in
   let has_any_flag flags args = List.exists (fun a -> List.mem a flags) args in
   let rec first_non_option = function
@@ -108,9 +102,7 @@ let is_git_branch_switch cmd =
 ;;
 
 let is_destructive_bash_operation cmd =
-  let parts =
-    String.split_on_char ' ' (String.trim cmd) |> List.filter (fun s -> s <> "")
-  in
+  let parts = shell_word_values cmd in
   let is_short_option arg = String.length arg > 1 && arg.[0] = '-' && arg.[1] <> '-' in
   let has_short_flag flag arg = is_short_option arg && String.contains arg flag in
   let is_protected_branch_target arg =

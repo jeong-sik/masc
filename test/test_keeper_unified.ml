@@ -2423,7 +2423,8 @@ let test_prompt_includes_operational_tool_guidance () =
     bool
     "system prompt uses public Bash example"
     true
-    (contains_substring sys "Bash { command: \"git log --oneline -5\"");
+    (contains_substring sys
+       "Bash { executable: \"git\", argv: [\"log\", \"--oneline\", \"-5\"]");
   check
     bool
     "system prompt avoids keeper_shell rg recipe"
@@ -2431,9 +2432,9 @@ let test_prompt_includes_operational_tool_guidance () =
     (contains_substring sys "keeper_shell op=rg");
   check
     bool
-    "system prompt avoids keeper_bash command recipe"
+    "system prompt avoids private keeper_bash call shape"
     false
-    (contains_substring sys "keeper_bash { cmd:");
+    (contains_substring sys "keeper_bash {");
   check
     bool
     "raw gh PR creation not documented"
@@ -2479,7 +2480,8 @@ let test_capabilities_prompt_distinguishes_sandbox_and_worktree () =
     bool
     "git path documented via public Bash"
     true
-    (contains_substring prompt "Bash command='git status --short'");
+    (contains_substring prompt
+       "Bash executable=\"git\" argv=[\"status\",\"--short\"]");
   check
     bool
     "capabilities avoids hidden Bash backing name"
@@ -2586,7 +2588,7 @@ let test_system_prompt_prefers_bash_and_gh_pr_lane () =
     true
     (contains_substring
        sys
-       "Use only the tool schemas currently shown to you by the runtime");
+       "Use only the exact tool schemas currently shown to you by the runtime");
   check
     bool
     "mentions native PR route"
@@ -3212,7 +3214,7 @@ let test_work_discovery_nudge_uses_registered_keeper_tool_schemas () =
     bool
     "social guidance omits bash outside preset"
     false
-    (contains_substring social_guidance "`Bash` { command:");
+    (contains_substring social_guidance "`Bash` { executable:");
   check
     bool
     "social guidance omits worktree outside preset"
@@ -3222,12 +3224,12 @@ let test_work_discovery_nudge_uses_registered_keeper_tool_schemas () =
     bool
     "coding guidance includes public Bash schema"
     true
-    (contains_substring coding_guidance "`Bash` { command:");
+    (contains_substring coding_guidance "`Bash` { executable:");
   check
     bool
-    "coding guidance does not leak keeper_bash backing name"
+    "coding guidance does not leak keeper_bash call shape"
     false
-    (contains_substring coding_guidance "`keeper_bash` { cmd:");
+    (contains_substring coding_guidance "`keeper_bash` {");
   check
     bool
     "coding guidance includes web search schema"
@@ -3965,6 +3967,7 @@ let test_metrics_validated_evidence_counts_as_visible () =
     ; checks = []
     ; evidence = [ "tool_paired:keeper_fs_read" ]
     ; paired_tool_result_count = 1
+    ; evidence_roles = []
     ; has_file_write = false
     ; verification_pass_after_file_write = false
     ; final_text = None
@@ -4041,6 +4044,7 @@ let test_metrics_failed_validation_does_not_count_as_visible () =
     ; checks = []
     ; evidence = []
     ; paired_tool_result_count = 0
+    ; evidence_roles = []
     ; has_file_write = false
     ; verification_pass_after_file_write = false
     ; final_text = None
@@ -4085,6 +4089,7 @@ let test_metrics_file_write_evidence_counts_as_visible () =
     ; checks = []
     ; evidence = []
     ; paired_tool_result_count = 0
+    ; evidence_roles = []
     ; has_file_write = true
     ; verification_pass_after_file_write = true
     ; final_text = None
@@ -4333,6 +4338,7 @@ let test_append_metrics_snapshot_includes_cascade_observation () =
          ; checks = []
          ; evidence = [ "tool_paired:keeper_board_list" ]
          ; paired_tool_result_count = 1
+         ; evidence_roles = []
          ; has_file_write = false
          ; verification_pass_after_file_write = false
          ; final_text = Some "Observed"
@@ -4600,6 +4606,7 @@ let test_append_metrics_snapshot_treats_validated_evidence_as_tool_use () =
          ; checks = []
          ; evidence = [ "tool_paired:keeper_fs_read" ]
          ; paired_tool_result_count = 1
+         ; evidence_roles = []
          ; has_file_write = false
          ; verification_pass_after_file_write = false
          ; final_text = None
@@ -6433,6 +6440,7 @@ let required_tool_contract_violation_error () =
        ; reason =
            "required tool contract unsatisfied: tool_choice requested tool use, but the \
             model returned no ToolUse block"
+       ; violation_detail = None
        })
 ;;
 
@@ -7349,7 +7357,8 @@ let test_prompt_guides_shell_existence_checks_to_structured_tools () =
     bool
     "shell existence checks use public aliases"
     true
-    (contains_substring sys "Use `Read`, `Grep`, or one plain `Bash` command");
+    (contains_substring sys
+       "Use `Read`, `Grep`, or one typed `Bash` argv call");
   check
     bool
     "keeper bash hint forbids shell existence tests"
@@ -7913,6 +7922,7 @@ let test_required_tool_contract_violation_detected () =
          ; reason =
              "required tool contract unsatisfied: tool_choice requested tool use, but \
               the model returned no ToolUse block"
+         ; violation_detail = None
          })
   in
   check
@@ -8025,6 +8035,7 @@ let test_auto_recoverable_turn_error_excludes_required_tool_contract_violation (
          ; reason =
              "required tool contract unsatisfied: tool_choice requested tool use, but \
               the model returned no ToolUse block"
+         ; violation_detail = None
          })
   in
   check
@@ -9477,11 +9488,11 @@ let test_social_model_does_not_infer_comment_vote_as_board_comment () =
     routed.tools_used
 ;;
 
-let test_social_model_infers_masc_claim_task_from_tool_use () =
+let test_social_model_infers_masc_claim_next_from_tool_use () =
   let result =
     make_run_result
       ~text:""
-      ~tools:[ "masc_claim_task" ]
+      ~tools:[ "masc_claim_next" ]
       ~model:"test-model"
       ~input_tok:10
       ~output_tok:1
@@ -9505,7 +9516,7 @@ let test_social_model_infers_masc_claim_task_from_tool_use () =
     "transition reason"
     "tool_only:claim_task"
     (KSM.transition_reason_to_string transition_reason);
-  check (list string) "tool list preserved" [ "masc_claim_task" ] routed.tools_used
+  check (list string) "tool list preserved" [ "masc_claim_next" ] routed.tools_used
 ;;
 
 let test_social_model_magentic_ledger_silences_tool_only_turn () =
@@ -9553,12 +9564,12 @@ let test_social_model_magentic_ledger_silences_tool_only_turn () =
   check (list string) "tool list preserved" [ "masc_status" ] routed.tools_used
 ;;
 
-let test_social_model_magentic_ledger_tracks_masc_claim_task () =
+let test_social_model_magentic_ledger_tracks_masc_claim_next () =
   let meta = { minimal_meta with social_model = "magentic_ledger_v1" } in
   let result =
     make_run_result
       ~text:""
-      ~tools:[ "masc_claim_task" ]
+      ~tools:[ "masc_claim_next" ]
       ~model:"test-model"
       ~input_tok:10
       ~output_tok:1
@@ -9579,7 +9590,7 @@ let test_social_model_magentic_ledger_tracks_masc_claim_task () =
     "tool_only:claim_task"
     (KSM.transition_reason_to_string transition_reason);
   check string "visible response suppressed" "" routed.response_text;
-  check (list string) "tool list preserved" [ "masc_claim_task" ] routed.tools_used
+  check (list string) "tool list preserved" [ "masc_claim_next" ] routed.tools_used
 ;;
 
 let test_social_model_magentic_ledger_hides_nonvisible_tool_text () =
@@ -10234,7 +10245,7 @@ let test_tools_for_gated_affordance_covers_each_variant () =
   check
     (list string)
     "task claim affordance keeps active claim tools visible"
-    [ "keeper_task_claim"; "masc_claim_next"; "masc_claim_task" ]
+    [ "keeper_task_claim"; "masc_claim_next" ]
     (Surface.preferred_tool_names_for_turn_affordances [ "task_claim" ]);
   check
     bool
@@ -11497,17 +11508,17 @@ let () =
             `Quick
             test_social_model_does_not_infer_comment_vote_as_board_comment
         ; test_case
-            "social model infers masc claim task from tool use"
+            "social model infers masc claim next from tool use"
             `Quick
-            test_social_model_infers_masc_claim_task_from_tool_use
+            test_social_model_infers_masc_claim_next_from_tool_use
         ; test_case
             "magentic ledger silences tool-only turn"
             `Quick
             test_social_model_magentic_ledger_silences_tool_only_turn
         ; test_case
-            "magentic ledger tracks masc claim task"
+            "magentic ledger tracks masc claim next"
             `Quick
-            test_social_model_magentic_ledger_tracks_masc_claim_task
+            test_social_model_magentic_ledger_tracks_masc_claim_next
         ; test_case
             "magentic ledger hides non-visible tool text"
             `Quick
@@ -11591,12 +11602,12 @@ let () =
                        { status = 522
                        ; message = "Connection timed out"
                        }))))
-        ; test_case "ServerError 524 (Cloudflare gateway timeout) detected" `Quick
+        ; test_case "ServerError 524 short-circuits same-cascade transient retry" `Quick
           (fun () ->
             check
               bool
-              "524 cloudflare timeout is transient"
-              true
+              "524 cloudflare timeout is not same-cascade transient"
+              false
               (EC.is_transient_network_error
                  (Agent_sdk.Error.Api
                     (ServerError

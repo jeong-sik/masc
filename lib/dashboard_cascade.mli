@@ -354,7 +354,7 @@ val declared_provider_schemes_of_config : ?config_path:string -> unit -> string 
 val client_capacity_json : unit -> Yojson.Safe.t
 
 (** JSON snapshot of the {!Cascade_client_capacity_history} ring
-    buffer — per-event transitions (acquire / release / slot-full
+    buffer — per-event transitions (acquire / release / capacity-full
     rejection) recorded by the client-capacity semaphore.
 
     Complements {!client_capacity_json}: that one answers "how full

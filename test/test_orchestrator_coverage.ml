@@ -88,9 +88,9 @@ let test_make_orchestrator_prompt_contains_tools () =
       let _ = Str.search_forward (Str.regexp "masc_status") prompt 0 in true
     with Not_found -> false)
 
-let test_make_orchestrator_prompt_contains_claim () =
+let test_make_orchestrator_prompt_contains_transition_claim_path () =
   let prompt = Orchestrator.make_orchestrator_prompt ~port:8935 in
-  check bool "mentions masc_claim" true
+  check bool "mentions masc_transition" true
     (try
       let _ = Str.search_forward (Str.regexp "masc_transition") prompt 0 in true
     with Not_found -> false)
@@ -232,7 +232,8 @@ let () =
       test_case "basic" `Quick test_make_orchestrator_prompt_basic;
       test_case "contains mcp" `Quick test_make_orchestrator_prompt_contains_mcp;
       test_case "contains tools" `Quick test_make_orchestrator_prompt_contains_tools;
-      test_case "contains claim" `Quick test_make_orchestrator_prompt_contains_claim;
+      test_case "contains transition claim path" `Quick
+        test_make_orchestrator_prompt_contains_transition_claim_path;
       test_case "contains done" `Quick test_make_orchestrator_prompt_contains_done;
       test_case "mentions broadcast" `Quick test_make_orchestrator_prompt_mentions_broadcast;
     ];

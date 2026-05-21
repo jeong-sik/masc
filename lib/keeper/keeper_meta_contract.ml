@@ -91,7 +91,7 @@ type cascade_exhaustion_reason =
 
 type blocker_class =
   | Cascade_exhausted of cascade_exhaustion_reason
-  | Capacity_exhausted
+  | Capacity_backpressure
   | Ambiguous_post_commit_timeout
   | Ambiguous_post_commit_failure
   | Autonomous_slot_wait_timeout
@@ -138,7 +138,7 @@ type blocker_class =
 
 let blocker_class_to_string = function
   | Cascade_exhausted _ -> "cascade_exhausted"
-  | Capacity_exhausted -> "capacity_exhausted"
+  | Capacity_backpressure -> "capacity_backpressure"
   | Ambiguous_post_commit_timeout -> "ambiguous_post_commit_timeout"
   | Ambiguous_post_commit_failure -> "ambiguous_post_commit_failure"
   | Autonomous_slot_wait_timeout -> "autonomous_slot_wait_timeout"
@@ -166,7 +166,7 @@ let blocker_class_to_string = function
 
 let blocker_class_of_serialized_string = function
   | "cascade_exhausted" -> Some (Cascade_exhausted (Other_detail "cascade_exhausted"))
-  | "capacity_exhausted" -> Some Capacity_exhausted
+  | "capacity_backpressure" -> Some Capacity_backpressure
   | "ambiguous_post_commit_timeout" -> Some Ambiguous_post_commit_timeout
   | "ambiguous_post_commit_failure" -> Some Ambiguous_post_commit_failure
   | "autonomous_slot_wait_timeout" -> Some Autonomous_slot_wait_timeout
@@ -210,7 +210,7 @@ let blocker_class_continue_gate = function
   | Ambiguous_post_commit_timeout
   | Ambiguous_post_commit_failure -> true
   | Cascade_exhausted _
-  | Capacity_exhausted
+  | Capacity_backpressure
   | Autonomous_slot_wait_timeout
   | Admission_queue_wait_timeout
   | Turn_timeout_after_queue_wait

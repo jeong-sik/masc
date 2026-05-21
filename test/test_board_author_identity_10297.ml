@@ -8,9 +8,8 @@
     canonicalisation without comparison, so an LLM running as
     keeper [velvet-hammer] could write [author = "analyst"] and
     impersonate a different principal on the public board.
-    [canonicalize_board_actor_field] (board_comment, board_vote,
-    comment_vote) didn't even receive [agent_name] — it could not
-    have caught spoofing if it tried.
+    Board comment/vote paths also lacked an [agent_name] comparison
+    point, so they could not have caught spoofing either.
 
     These tests pin the unified [enforce_caller_identity]
     contract — the 3-branch SSOT pattern from
@@ -162,8 +161,8 @@ let test_velvet_hammer_cannot_post_as_analyst () =
 
 let test_voter_field_spoof_also_rewritten () =
   (* Vote/comment_vote calls used to bypass identity entirely
-     because [canonicalize_board_actor_field] never saw [agent_name].
-     Now they share the same gate. *)
+     because their old path never compared caller identity with
+     [agent_name].  Now they share the same gate. *)
   let before = counter_for ~tool:"masc_board_vote" ~field:"voter" in
   let result =
     D.enforce_caller_identity ~tool:"masc_board_vote" ~field:"voter"
@@ -205,8 +204,8 @@ let test_empty_ctx_preserves_legacy_canonicalisation () =
   (* If [agent_name] is somehow empty (HTTP path with no auth, test
      fixture without ctx), the helper should not invent a value but
      should still canonicalise the caller's surface form.  This
-     keeps the legacy [canonicalize_board_actor_field] semantics
-     for the empty-ctx case. *)
+     keeps the empty-ctx compatibility semantics for callers that
+     cannot provide a trusted runtime identity. *)
   let result =
     D.enforce_caller_identity ~tool:"masc_board_post" ~field:"author"
       ~agent_name:""

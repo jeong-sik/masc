@@ -53,6 +53,29 @@ let json_int_opt = function
 let json_string_list values = `List (List.map (fun value -> `String value) values)
 ;;
 
+let json_contract_violation_detail
+  (detail : Agent_sdk.Completion_contract_violation_detail.t option)
+  =
+  match detail with
+  | None -> `Null
+  | Some (detail : Agent_sdk.Completion_contract_violation_detail.t) ->
+    `Assoc
+      [ ( "called_tools"
+        , json_string_list
+            detail.Agent_sdk.Completion_contract_violation_detail.called_tools )
+      ; ( "satisfying_tools"
+        , json_string_list
+            detail.Agent_sdk.Completion_contract_violation_detail.satisfying_tools )
+      ; ( "rejection_reasons"
+        , `List
+            (List.map
+               (fun (tool_name, reason) ->
+                  `Assoc
+                    [ "tool_name", `String tool_name; "reason", `String reason ])
+               detail.Agent_sdk.Completion_contract_violation_detail.rejection_reasons) )
+      ]
+;;
+
 let network_error_kind_to_wire = function
   | Llm_provider.Http_client.Connection_refused -> "connection_refused"
   | Llm_provider.Http_client.Dns_failure -> "dns_failure"
@@ -131,10 +154,12 @@ let sdk_agent_error_fields = function
     ; "limit", `Int limit
     ; "detail", `String detail
     ]
-  | Agent_sdk.Error.CompletionContractViolation { contract; reason } ->
+  | Agent_sdk.Error.CompletionContractViolation
+      { contract; reason; violation_detail } ->
     [ "variant", `String "completion_contract_violation"
     ; "contract", `String (Agent_sdk.Completion_contract_id.to_string contract)
     ; "reason", `String reason
+    ; "violation_detail", json_contract_violation_detail violation_detail
     ]
   | Agent_sdk.Error.GuardrailViolation { validator; reason } ->
     [ "variant", `String "guardrail_violation"
@@ -289,7 +314,7 @@ let sdk_provider_error_fields error =
     ]
   | Llm_provider.Error.CapacityExhausted
       { scope; affected; retry_after; detail } ->
-    [ "variant", `String "capacity_exhausted"
+    [ "variant", `String "capacity_backpressure"
     ; "message", `String message
     ; "capacity_scope", `String (Llm_provider.Error.capacity_scope_to_string scope)
     ; "affected", json_string_list affected

@@ -1,9 +1,8 @@
 (** Coverage tests for Tool_agent — Agent management, fitness, and meta-cognition
 
     Tests dispatch routing, handler execution, helper functions for:
-    masc_agents, masc_register_capabilities, masc_agent_update,
-    masc_get_metrics, masc_agent_fitness, masc_collaboration_graph,
-    masc_agent_card
+    masc_agents, masc_agent_update, masc_get_metrics, masc_agent_fitness,
+    masc_collaboration_graph, masc_agent_card
 *)
 module Tool_args = Tool_args
 module Tool_result = Tool_result
@@ -128,10 +127,10 @@ let test_dispatch_agents () =
   Alcotest.(check bool) "agents dispatches" true (result <> None);
   )
 
-let test_dispatch_register_capabilities () =
+let test_dispatch_register_capabilities_removed () =
   with_ctx (fun ctx ->
   let result = Tool_agent.dispatch ctx ~name:"masc_register_capabilities" ~args:(`Assoc []) in
-  Alcotest.(check bool) "register_capabilities dispatches" true (result <> None);
+  Alcotest.(check bool) "register_capabilities removed" true (result = None);
   )
 
 let test_dispatch_agent_update () =
@@ -178,17 +177,6 @@ let test_handle_agent_card_rejects_unknown_action () =
   Alcotest.(check bool) "agent card rejects" false result.Tool_result.success;
   Alcotest.(check bool) "mentions invalid action" true
     (String.contains result.Tool_result.legacy_message 'b');
-  )
-
-(* ============================================================
-   Handler tests — register_capabilities
-   ============================================================ *)
-
-let test_register_capabilities () =
-  with_ctx (fun ctx ->
-  let args = `Assoc [("capabilities", `List [`String "test"; `String "code"])] in
-  let result = Tool_agent.handle_register_capabilities ctx args in
-  Alcotest.(check bool) "registers capabilities" true result.Tool_result.success;
   )
 
 (* ============================================================
@@ -412,7 +400,8 @@ let () =
     ("dispatch", [
       Alcotest.test_case "unknown returns None" `Quick test_dispatch_unknown;
       Alcotest.test_case "agents dispatches" `Quick test_dispatch_agents;
-      Alcotest.test_case "register_capabilities dispatches" `Quick test_dispatch_register_capabilities;
+      Alcotest.test_case "register_capabilities removed" `Quick
+        test_dispatch_register_capabilities_removed;
       Alcotest.test_case "agent_update dispatches" `Quick test_dispatch_agent_update;
       Alcotest.test_case "agent_card dispatches" `Quick test_dispatch_agent_card;
     ]);
@@ -421,9 +410,6 @@ let () =
       Alcotest.test_case "handle_agent_card" `Quick test_handle_agent_card;
       Alcotest.test_case "handle_agent_card rejects unknown action" `Quick
         test_handle_agent_card_rejects_unknown_action;
-    ]);
-    ("register_capabilities", [
-      Alcotest.test_case "with capabilities" `Quick test_register_capabilities;
     ]);
     ("agent_update", [
       Alcotest.test_case "status update" `Quick test_agent_update_status;

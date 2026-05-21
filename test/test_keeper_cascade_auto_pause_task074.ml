@@ -104,6 +104,7 @@ let mk_required_tool_contract_violation () =
          contract = Agent_sdk.Completion_contract_id.Require_tool_use;
          reason =
            "required tool contract unsatisfied: tool_choice requested tool use, but the model returned no ToolUse block";
+         violation_detail = None;
        })
 
 let test_pause_does_not_fire_on_transient () =

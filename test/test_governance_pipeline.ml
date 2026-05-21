@@ -6,7 +6,6 @@ module Tool_dispatch = Masc_mcp.Tool_dispatch
 module Tool_result = Tool_result
 
 let explicit_claim_tool = "masc_claim_next"
-let managed_claim_tool = "masc_claim_task"
 let generic_transition_tool = "masc_transition"
 let transition_claim_input = `Assoc [("action", `String "claim")]
 let transition_start_input = `Assoc [("action", `String "start")]
@@ -122,11 +121,6 @@ let test_risk_medium_claim_next () =
   Alcotest.(check string) "claim_next is medium"
     "medium" (Gp.risk_level_to_string risk)
 
-let test_risk_medium_claim_task () =
-  let risk = Gp.assess_risk ~tool_name:managed_claim_tool ~input:no_args in
-  Alcotest.(check string) "claim_task is medium"
-    "medium" (Gp.risk_level_to_string risk)
-
 let test_risk_medium_transition_claim () =
   let risk =
     Gp.assess_risk ~tool_name:generic_transition_tool ~input:transition_claim_input
@@ -170,7 +164,7 @@ let test_risk_low_status () =
     "low" (Gp.risk_level_to_string risk)
 
 let test_risk_low_list () =
-  let risk = Gp.assess_risk ~tool_name:"masc_list_tasks" ~input:no_args in
+  let risk = Gp.assess_risk ~tool_name:"masc_tasks" ~input:no_args in
   Alcotest.(check string) "list is low"
     "low" (Gp.risk_level_to_string risk)
 
@@ -939,7 +933,6 @@ let () =
       Alcotest.test_case "high: send" `Quick test_risk_high_send;
       Alcotest.test_case "high: spawn" `Quick test_risk_high_spawn;
       Alcotest.test_case "medium: claim_next" `Quick test_risk_medium_claim_next;
-      Alcotest.test_case "medium: claim_task" `Quick test_risk_medium_claim_task;
       Alcotest.test_case "medium: transition claim" `Quick
         test_risk_medium_transition_claim;
       Alcotest.test_case "medium: join" `Quick test_risk_medium_join;

@@ -5,9 +5,9 @@ module Types = Masc_domain
     Validates the structural invariant that keeper tools and agent
     coordination tools occupy disjoint namespaces.
 
-    Note: research-profile keepers intentionally receive masc_autoresearch_*
-    tools via the shard system. The isolation boundary is between keeper
-    tools and agent coordination tools (spawned_agent_public).
+    Retired autoresearch tools must not be restored through the shard system.
+    The isolation boundary is between keeper tools and agent coordination tools
+    (spawned_agent_public).
 
     Pure synchronous tests — no Eio or network required. *)
 
@@ -42,8 +42,7 @@ let make_meta
   | Error e -> failwith (Printf.sprintf "make_meta failed: %s" e)
 
 (* ============================================================
-   Known intentional cross-namespace tools
-   (research keepers receive these via shard, not dispatch)
+   Known intentional cross-namespace tools.
    ============================================================ *)
 
 let has_keeper_prefix name =
@@ -55,8 +54,6 @@ let has_keeper_prefix name =
     depends on inject_masc_schemas which runs after module init. *)
 let known_non_keeper_tool_names () : string list =
   List.concat [
-    Tool_shard.autoresearch_keeper_tools
-    |> List.map (fun (t : Masc_domain.tool_schema) -> t.name);
     Tool_shard.coding_tools
     |> List.map (fun (t : Masc_domain.tool_schema) -> t.name);
     Tool_code_write.tool_names;
@@ -117,7 +114,7 @@ let test_learned_only_keeper_prefixed () =
     "learned keeper only has keeper_* or curated masc_* tools" [] unexpected
 
 (* ============================================================
-   Invariant 2: Research keepers only add research/autoresearch tools
+   Invariant 2: Research keepers still use only known curated tools
    ============================================================ *)
 
 let test_research_extra_tools_are_research_only () =

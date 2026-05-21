@@ -22,7 +22,6 @@ let normalize_failure_text (text : string) : string =
       ("ambiguous_relative_read_path:", "ambiguous_relative_read_path");
       ("cwd_not_directory:", "cwd_not_directory");
       ("path blocked:", "path_blocked");
-      ("path syntax blocked:", "path_syntax_blocked");
       ("query looks like it may contain secrets", "query_secret_like");
       ("web search rate limit exceeded", "web_search_rate_limit");
       ("all web search providers failed", "web_search_provider_failure");

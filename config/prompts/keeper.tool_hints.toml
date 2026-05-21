@@ -60,8 +60,8 @@ description = "search files without Bash pipes, redirects, grep/head chains, or 
 
 [[hints]]
 name = "Bash"
-call = "`Bash` { command: \"single shell command\", cwd: \"repos/REPO\" }"
-description = "run one shell command; set cwd for git, never type keeper_* names as commands, and never use cd chaining, redirects, pipes, gh pr checks, or Bash glob paths"
+call = "`Bash` { executable: \"git\", argv: [\"status\", \"--short\"], cwd: \"repos/REPO\" }"
+description = "run one typed argv command; set cwd for git, never type keeper_* names as commands, and use pipeline/stages instead of shell syntax"
 
 [[hints]]
 name = "masc_web_search"

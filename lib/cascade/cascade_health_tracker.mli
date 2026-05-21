@@ -10,9 +10,7 @@
 
 (** {1 Runtime configuration (env-driven, read once at module load)}
 
-    The env var prefix is [MASC_CASCADE_*]; [OAS_CASCADE_*] is accepted
-    as a deprecated alias (legacy of the v0.149.0 OAS→MASC migration)
-    and emits a one-time warning. *)
+    The env var prefix is [MASC_CASCADE_*]. *)
 
 val window_sec : float
 (** Rolling window duration in seconds.  Default 300.0 (5 min). *)
@@ -29,8 +27,7 @@ val hard_quota_cooldown_sec : float
     {!cooldown_sec}, no threshold is required — one hard-quota event is
     enough.  Default 3600.0 (1h).
 
-    Env: [MASC_CASCADE_HARD_QUOTA_COOLDOWN_SEC] (with deprecated
-    [OAS_CASCADE_HARD_QUOTA_COOLDOWN_SEC] alias).
+    Env: [MASC_CASCADE_HARD_QUOTA_COOLDOWN_SEC].
 
     @since 0.161.0 *)
 
@@ -39,8 +36,7 @@ val terminal_failure_cooldown_sec : float
     provider/adapter failure, such as a provider CLI resumable-session conflict.
     Unlike {!cooldown_sec}, no threshold is required.  Default 3600.0 (1h).
 
-    Env: [MASC_CASCADE_TERMINAL_FAILURE_COOLDOWN_SEC] (with deprecated
-    [OAS_CASCADE_TERMINAL_FAILURE_COOLDOWN_SEC] alias). *)
+    Env: [MASC_CASCADE_TERMINAL_FAILURE_COOLDOWN_SEC]. *)
 
 val soft_rate_limit_cooldown_sec : float
 (** Default cooldown applied immediately on a transient HTTP 429 (soft
@@ -61,6 +57,18 @@ val soft_rate_limit_max_clamp_sec : float
     caller, not as a soft rate-limit.  Default 120.0 (2 min).
 
     Env: [MASC_CASCADE_SOFT_RATE_LIMIT_MAX_CLAMP_SEC]. *)
+
+val default_capacity_backpressure_backoff_sec : float
+(** Synthetic typed backoff applied when an upstream [Capacity_backpressure]
+    error arrives with [retry_after_sec = None].  Without this, the cascade
+    rotates immediately onto the next candidate and frequently lands back
+    on the same degraded provider before any recovery window has elapsed.
+    Default 5.0 (5s) — shorter than {!soft_rate_limit_cooldown_sec} because
+    capacity backpressure is a short-window signal (peers usually recover
+    faster than 429-bearing providers), but non-zero so the cascade does
+    not immediately re-select the just-rejected provider.
+
+    Env: [MASC_CASCADE_CAPACITY_BACKPRESSURE_DEFAULT_BACKOFF_SEC]. *)
 
 val latency_ring_size : int
 (** Number of recent successful-call latencies retained per provider for

@@ -1,6 +1,14 @@
+---
+title: Dashboard Component Ownership Decomposition
+rfc: 0050
+status: Active
+created: 2026-05-09
+implementation_prs: []
+---
+
 # RFC-0050 — Dashboard Component Ownership Decomposition
 
-Status: Draft
+Status: Active (frontmatter SSOT)
 Author: jeong-sik (with Claude Opus 4.7)
 Date: 2026-05-09
 Supersedes: —

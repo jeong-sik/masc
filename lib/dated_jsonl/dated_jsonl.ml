@@ -18,6 +18,7 @@ type t = {
   base_dir : string;
   mutex : Eio.Mutex.t Atomic.t;
   retention_days : int option;
+  max_bytes : int option;
   last_prune_day : string option Atomic.t;
 }
 
@@ -54,7 +55,7 @@ let mutex_for_base_dir ~base_dir =
         Hashtbl.add mutex_registry key cell;
         cell)
 
-let create ~base_dir ?mutex ?retention_days () =
+let create ~base_dir ?mutex ?retention_days ?max_bytes () =
   let mutex =
     match mutex with
     | Some mutex -> Atomic.make mutex
@@ -65,7 +66,18 @@ let create ~base_dir ?mutex ?retention_days () =
     | Some days when days > 0 -> Some days
     | _ -> None
   in
-  { base_dir; mutex; retention_days; last_prune_day = Atomic.make None }
+  let max_bytes =
+    match max_bytes with
+    | Some bytes when bytes > 0 -> Some bytes
+    | _ -> None
+  in
+  {
+    base_dir;
+    mutex;
+    retention_days;
+    max_bytes;
+    last_prune_day = Atomic.make None;
+  }
 
 let base_dir t = t.base_dir
 
@@ -132,6 +144,26 @@ let count_non_empty_lines path =
          with End_of_file -> ());
         !count)
     with Sys_error _ -> 0
+
+let file_size path =
+  try (Unix.stat path).Unix.st_size with
+  | Unix.Unix_error _ | Sys_error _ -> 0
+
+let day_file_paths_oldest_first base_dir =
+  list_month_dirs base_dir
+  |> List.rev
+  |> List.concat_map (fun month ->
+       let month_path = Filename.concat base_dir month in
+       list_day_files month_path
+       |> List.rev
+       |> List.map (fun day -> (month_path, Filename.concat month_path day)))
+
+let remove_file_and_empty_month ~month_path path =
+  try
+    Sys.remove path;
+    (try Unix.rmdir month_path with Unix.Unix_error _ -> ());
+    true
+  with Sys_error _ -> false
 
 (** Read the last [n] non-empty lines from a file without loading the entire
     file into memory.  Reads backwards in 8 KB chunks from the end.
@@ -233,6 +265,27 @@ let prune_unlocked t ~days =
     !deleted
   end
 
+let prune_to_max_bytes_unlocked t ~max_bytes ~keep_path =
+  if max_bytes <= 0 then 0
+  else begin
+    let files = day_file_paths_oldest_first t.base_dir in
+    let total =
+      List.fold_left (fun acc (_, path) -> acc + file_size path) 0 files
+    in
+    let remaining = ref total in
+    let deleted = ref 0 in
+    List.iter
+      (fun (month_path, path) ->
+         if !remaining > max_bytes && not (String.equal path keep_path) then
+           let bytes = file_size path in
+           if remove_file_and_empty_month ~month_path path then begin
+             remaining := max 0 (!remaining - bytes);
+             incr deleted
+           end)
+      files;
+    !deleted
+  end
+
 (* ── Public API ───────────────────────────────────────── *)
 
 let append_inner t json =
@@ -248,15 +301,24 @@ let append_inner t json =
   Eio.Mutex.use_ro mutex (fun () ->
     let dated = Jsonl_writer.dated_path_now ~base_dir:t.base_dir in
     Jsonl_writer.append_jsonl ~path:dated.path json;
-    match t.retention_days with
+    (match t.retention_days with
+     | None -> ()
+     | Some days ->
+       let today = dated.month_dir ^ "/" ^ dated.day_file in
+       if
+         not
+           (Option.equal String.equal
+              (Atomic.get t.last_prune_day)
+              (Some today))
+       then begin
+         ignore (prune_unlocked t ~days : int);
+         Atomic.set t.last_prune_day (Some today)
+       end);
+    match t.max_bytes with
     | None -> ()
-    | Some days ->
-      let today = dated.month_dir ^ "/" ^ dated.day_file in
-      if not (Option.equal String.equal (Atomic.get t.last_prune_day) (Some today))
-      then begin
-        ignore (prune_unlocked t ~days : int);
-        Atomic.set t.last_prune_day (Some today)
-      end)
+    | Some max_bytes ->
+      ignore
+        (prune_to_max_bytes_unlocked t ~max_bytes ~keep_path:dated.path : int))
 
 let append t json =
   (Atomic.get append_guard) (fun () -> append_inner t json)

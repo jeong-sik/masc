@@ -16,6 +16,7 @@ type event_kind =
   | Context_injected
   | Context_compacted
   | State_snapshot_sidecar_saved
+  | Working_state_sidecar_saved
   | Event_bus_correlated
   | Memory_injected
   | Memory_flushed

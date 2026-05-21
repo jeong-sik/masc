@@ -13,6 +13,14 @@ let has_strict_shell_metachar cmd =
       | _ -> false)
     cmd
 
+let shell_word_values cmd =
+  match Masc_exec_bash_parser.Bash_words.stages cmd with
+  | Error _ -> []
+  | Ok stages ->
+    stages
+    |> List.concat
+    |> List.map (fun (word : Masc_exec_bash_parser.Bash_words.word) -> word.value)
+
 (** Top-level gh CLI commands allowed. Commands not in this list are
     rejected at the allowlist gate. *)
 let gh_allowed_commands =
@@ -103,10 +111,7 @@ let gh_graphql_r2_mutations =
     "archiverepository" ]
 
 let extract_gh_api_method cmd =
-  let tokens =
-    String.split_on_char ' ' (String.trim cmd)
-    |> List.filter (fun s -> s <> "")
-  in
+  let tokens = shell_word_values cmd in
   let rec find = function
     | [] -> "GET"
     | "-X" :: m :: _ | "--method" :: m :: _ -> String.uppercase_ascii m
@@ -147,10 +152,7 @@ let gh_blocked_operations =
     Only the owner segment is returned; repo/branch names are outside
     the allowlist scope. *)
 let extract_gh_repo_owner cmd =
-  let tokens =
-    String.split_on_char ' ' (String.trim cmd)
-    |> List.filter (fun s -> s <> "")
-  in
+  let tokens = shell_word_values cmd in
   let owner_of_slug s =
     match String.split_on_char '/' s with
     | owner :: _ :: _ when owner <> "" -> Some owner
@@ -175,10 +177,7 @@ let extract_gh_repo_owner cmd =
     Example: "pr view 123" -> (Some "pr", Some "view")
     Example: "workflow --repo o/r disable" -> (Some "workflow", Some "disable") *)
 let extract_gh_command_pair cmd =
-  let parts =
-    String.split_on_char ' ' (String.trim cmd)
-    |> List.filter (fun s -> s <> "")
-  in
+  let parts = shell_word_values cmd in
   match parts with
   | [] -> (None, None)
   | [ x ] -> (Some x, None)
@@ -317,10 +316,7 @@ let classify_gh_reversibility cmd =
     if in_table gh_irreversible_ops then R2_Irreversible
     else if command = "api" then begin
       let method_ = extract_gh_api_method cmd in
-      let parts =
-        String.split_on_char ' ' (String.trim cmd)
-        |> List.filter (fun s -> s <> "")
-      in
+      let parts = shell_word_values cmd in
       if method_ = "DELETE" then R2_Irreversible
       else if gh_api_graphql_is_destructive cmd then R2_Irreversible
       else if List.mem method_ ["POST"; "PUT"; "PATCH"] then R1_Reversible
@@ -366,9 +362,7 @@ let positional_tokens parts =
 
 (** Shared tokenizer for destructive-operation checks. *)
 let gh_op_parts cmd =
-  String.split_on_char ' ' (String.trim cmd)
-  |> List.filter (fun s -> s <> "")
-  |> List.map String.lowercase_ascii
+  shell_word_values cmd |> List.map String.lowercase_ascii
 
 let has_positional_subcmd subcmds rest =
   let positionals = positional_tokens rest in
@@ -398,8 +392,7 @@ let is_gh_pr_merge cmd =
   | _ -> false
 
 let gh_raw_parts cmd =
-  String.split_on_char ' ' (String.trim cmd)
-  |> List.filter (fun s -> s <> "")
+  shell_word_values cmd
 
 let gh_option_takes_value tok =
   let tok = String.lowercase_ascii tok in

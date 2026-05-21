@@ -98,9 +98,6 @@ module Local_runtime : sig
   val mcp_url : unit -> string
 end
 
-module Llama = Local_runtime
-(** Backward-compatible alias for {!Local_runtime}. *)
-
 module Ollama : sig
   val server_url : string
   val default_model : string

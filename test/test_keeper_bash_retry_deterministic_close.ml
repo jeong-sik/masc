@@ -92,24 +92,14 @@ let test_completion_contract_violation () =
 ;;
 
 let test_keeper_shell_op_required () =
-  let raw = {|{"ok":false,"error":"keeper_shell_bash_deprecated"}|} in
+  let raw = {|{"ok":false,"error":"keeper_pr_create_requires_git_cwd"}|} in
   check_classify
-    ~name:"keeper_shell_bash_deprecated"
+    ~name:"keeper_pr_create_requires_git_cwd"
     ~expected:(Some D.Keeper_shell_op_required)
     raw
 ;;
 
 (* ── Deterministic — path-check path ──────────────────────────── *)
-
-let test_path_syntax_blocked_explicit () =
-  let raw =
-    {|{"ok":false,"error":"path_syntax_blocked","path":"/etc/shadow"}|}
-  in
-  check_classify
-    ~name:"path_syntax_blocked"
-    ~expected:(Some D.Path_syntax_blocked)
-    raw
-;;
 
 let test_path_outside_sandbox_via_path_check_block () =
   let raw =
@@ -246,7 +236,6 @@ let test_to_string_non_empty_for_every_variant () =
     ; D.Command_shape_blocked
     ; D.Task_state_probe_blocked
     ; D.Destructive_operation_blocked
-    ; D.Path_syntax_blocked
     ; D.Path_outside_sandbox
     ; D.Cwd_not_directory
     ; D.Policy_blocked
@@ -300,10 +289,6 @@ let () =
         ] )
     ; ( "classify_path_check"
       , [ Alcotest.test_case
-            "path_syntax_blocked"
-            `Quick
-            test_path_syntax_blocked_explicit
-        ; Alcotest.test_case
             "path_outside_sandbox_via_block"
             `Quick
             test_path_outside_sandbox_via_path_check_block

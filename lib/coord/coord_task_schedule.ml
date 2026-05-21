@@ -293,7 +293,10 @@ let claim_next_r
       ~agent_name
       ?agent_tool_names
       ?(exclude_task_ids = [])
-      ?(task_filter = fun _ -> true)
+      ?(task_filter : Masc_domain.task -> bool = fun _ -> true)
+      ?(admission_filter :
+         active_tasks:Masc_domain.task list -> Masc_domain.task -> bool =
+        fun ~active_tasks:_ _ -> true)
       ()
   =
   let exception Existing_claim of claim_next_result in
@@ -363,6 +366,14 @@ let claim_next_r
                    })));
         let observe_legacy_release () = () in
         let released_task_id, working_tasks = None, backlog.tasks in
+        let active_admission_tasks =
+          List.filter
+            (fun (task : Masc_domain.task) ->
+               match task.task_status with
+               | Claimed _ | InProgress _ -> true
+               | Todo | AwaitingVerification _ | Done _ | Cancelled _ -> false)
+            working_tasks
+        in
         (* Starvation prevention: Calculate effective priority
          Tasks waiting >24h get priority boost (-1 per 24h, min 1) *)
         let now = Time_compat.now () in
@@ -440,7 +451,7 @@ let claim_next_r
           | Some rid -> rid :: (blocked_ids @ exclude_task_ids)
           | None -> blocked_ids @ exclude_task_ids
         in
-        let receipt_blocks_task (task : task) =
+        let receipt_blocks_task (task : Masc_domain.task) =
           match agent_tool_names with
           | Some _ -> false
           | None ->
@@ -474,10 +485,19 @@ let claim_next_r
         let required_tools_allowed_for_agent =
           make_required_tools_predicate ?agent_tool_names ()
         in
-        let required_tool_claim_allowed (task : task) =
+        let required_tool_claim_allowed (task : Masc_domain.task) =
           let required_tools = task_required_tools task in
           required_tools_allowed_for_agent required_tools
           && not (receipt_blocks_task task)
+        in
+        let admission_decisions = Hashtbl.create 16 in
+        let admission_allowed (task : Masc_domain.task) =
+          match Hashtbl.find_opt admission_decisions task.id with
+          | Some allowed -> allowed
+          | None ->
+            let allowed = admission_filter ~active_tasks:active_admission_tasks task in
+            Hashtbl.replace admission_decisions task.id allowed;
+            allowed
         in
         let required_tool_excluded =
           List.filter
@@ -500,12 +520,14 @@ let claim_next_r
                 ; "agent_tool_names_known", `Bool (Option.is_some agent_tool_names)
                 ; "ts", `String (now_iso ())
                 ]);
-        let effective_task_filter task =
-          task_filter task && required_tool_claim_allowed task
+        let effective_task_filter (task : Masc_domain.task) =
+          task_filter task && admission_allowed task && required_tool_claim_allowed task
         in
         let task_filter_excluded =
           List.filter
-            (fun (t : task) -> (not (List.mem t.id all_excluded)) && not (task_filter t))
+            (fun (t : task) ->
+               (not (List.mem t.id all_excluded))
+               && ((not (task_filter t)) || not (admission_allowed t)))
             unclaimed
         in
         let eligible_from candidates =
@@ -519,6 +541,21 @@ let claim_next_r
           match primary_eligible with
           | _ :: _ -> primary_eligible
           | [] -> eligible_from soft_unclaimed
+        in
+        let explicit_excluded_count =
+          List.length exclude_task_ids
+          +
+          match released_task_id with
+          | Some _ -> 1
+          | None -> 0
+        in
+        let no_eligible_excluded_count =
+          List.length all_excluded
+          + List.length task_filter_excluded
+          + List.length required_tool_excluded
+        in
+        let receipt_required_tool_blocked =
+          List.exists receipt_blocks_task required_tool_excluded
         in
         (* Helper: clear agent current_task and reset status after a legacy
          released_task_id path when no replacement task can be claimed. Delegates to
@@ -563,10 +600,15 @@ let claim_next_r
             | None -> ());
            clear_agent_state_after_release ();
            Claim_next_no_eligible
-             { excluded_count =
-                 List.length all_excluded
-                 + List.length task_filter_excluded
-                 + List.length required_tool_excluded
+             { excluded_count = no_eligible_excluded_count
+             ; blocked_count = List.length blocked_todo
+             ; verification_blocked_count = List.length verification_blocked_todo
+             ; scope_excluded_count = List.length task_filter_excluded
+             ; required_tool_excluded_count = List.length required_tool_excluded
+             ; explicit_excluded_count
+             ; claim_pool_candidate_count = List.length unclaimed
+             ; receipt_required_tool_blocked
+             ; agent_tool_names_known = Option.is_some agent_tool_names
              }
          | _ :: _, task :: _ ->
            (* Claim this task *)
@@ -698,10 +740,21 @@ let claim_next config ~agent_name =
   | Claim_next_claimed { message; _ } -> message
   | Claim_next_no_unclaimed ->
     "No unclaimed tasks. ACTION: Stop task-checking — nothing to claim."
-  | Claim_next_no_eligible { excluded_count } ->
+  | Claim_next_no_eligible
+      { excluded_count
+      ; scope_excluded_count
+      ; required_tool_excluded_count
+      ; verification_blocked_count
+      ; _
+      } ->
     Printf.sprintf
-      "No eligible unclaimed tasks. ACTION: Stop task-checking — blocked/excluded=%d."
+      "No eligible unclaimed tasks. ACTION: Stop task-checking — \
+       blocked/excluded=%d (goal_scope_or_filter=%d, required_tools=%d, \
+       verification=%d)."
       excluded_count
+      scope_excluded_count
+      required_tool_excluded_count
+      verification_blocked_count
   | Claim_next_error e -> Printf.sprintf "Error: %s" e
 ;;
 

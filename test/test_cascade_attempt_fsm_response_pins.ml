@@ -123,6 +123,7 @@ let required_tool_contract_violation_error () =
        ; reason =
            "required tool contract unsatisfied: tool_choice requested tool use, but \
             the model returned no ToolUse block"
+       ; violation_detail = None
        })
 ;;
 

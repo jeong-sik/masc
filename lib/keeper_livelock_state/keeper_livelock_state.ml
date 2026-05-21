@@ -2,15 +2,13 @@
 
    See [.mli] for the rationale and the production system_log evidence
    that motivates the noise-dedupe layer. This module is intentionally
-   stdlib-only (Hashtbl + Mutex) so it can be linked into both the
-   main library and a standalone Alcotest executable without dragging
-   Eio in.
+   backed by the stdlib-only [Bounded_event_dedupe] state machine, so it
+   can be linked into both the main library and a standalone Alcotest
+   executable without dragging Eio in.
 
-   Threading: the in-memory [Hashtbl.t] is guarded by a single
-   [Mutex.t]. All public entry points take and release the lock in
-   a critical section that performs only [Hashtbl] manipulation and
-   integer arithmetic; no allocations of caller-visible records
-   happen while the lock is held, so contention is bounded.
+   Threading: [Bounded_event_dedupe] guards the in-memory table with a
+   single [Mutex.t]. All public entry points perform only key creation
+   and integer state updates, so contention is bounded.
 
    Memory: there is no eviction policy. The set of distinct
    [(keeper, gate_kind)] fingerprints is bounded by
@@ -58,32 +56,16 @@ type record_outcome =
   | `Threshold_park of threshold_park_payload
   ]
 
-type entry =
-  { mutable count : int
-  ; mutable parked_emitted : bool
-        (* True once a [`Threshold_park] outcome has been returned for
-           this entry, so subsequent calls return [`Repeated] not
-           another [`Threshold_park]. *)
-  }
-
-let make_entry () = { count = 0; parked_emitted = false }
-
 (* Fingerprint key. [gate_kind] is small and total, so we project it
    to its string label and concat with the keeper name and a null
    separator. The separator avoids the collision risk of
    [keeper ^ kind] when a keeper name happens to be a prefix of
    another keeper name plus the kind label. *)
 let key ~keeper ~gate_kind =
-  String.concat "\x00" [ keeper; gate_kind_to_string gate_kind ]
+  Bounded_event_dedupe.key [ keeper; gate_kind_to_string gate_kind ]
 ;;
 
-let state : (string, entry) Hashtbl.t = Hashtbl.create 32
-let mutex = Mutex.create ()
-
-let with_lock f =
-  Mutex.lock mutex;
-  Fun.protect ~finally:(fun () -> Mutex.unlock mutex) f
-;;
+let state = Bounded_event_dedupe.create ()
 
 let record_block
   ?(park_threshold = default_park_threshold)
@@ -93,41 +75,28 @@ let record_block
   : record_outcome
   =
   let k = key ~keeper ~gate_kind in
-  with_lock (fun () ->
-    match Hashtbl.find_opt state k with
-    | None ->
-      let e = make_entry () in
-      e.count <- 1;
-      Hashtbl.replace state k e;
-      `First
-    | Some e ->
-      e.count <- e.count + 1;
-      if e.count >= park_threshold && not e.parked_emitted
-      then (
-        e.parked_emitted <- true;
-        `Threshold_park { count = e.count; park_threshold })
-      else `Repeated e.count)
+  match Bounded_event_dedupe.record_threshold state ~key:k ~threshold:park_threshold with
+  | Bounded_event_dedupe.First_threshold -> `First
+  | Bounded_event_dedupe.Repeated_threshold count -> `Repeated count
+  | Bounded_event_dedupe.Threshold { count; threshold } ->
+    `Threshold_park { count; park_threshold = threshold }
 ;;
 
 let reset_for_keeper ~(keeper : string) : unit =
-  with_lock (fun () ->
-    List.iter
-      (fun gk ->
-        let k = key ~keeper ~gate_kind:gk in
-        Hashtbl.remove state k)
-      all_gate_kinds)
+  List.iter
+    (fun gk ->
+      let k = key ~keeper ~gate_kind:gk in
+      Bounded_event_dedupe.remove state ~key:k)
+    all_gate_kinds
 ;;
 
-let reset_for_test () : unit = with_lock (fun () -> Hashtbl.clear state)
+let reset_for_test () : unit = Bounded_event_dedupe.reset state
 
 let cardinality () : int =
-  with_lock (fun () -> Hashtbl.length state)
+  Bounded_event_dedupe.cardinality state
 ;;
 
 let block_count ~(keeper : string) ~(gate_kind : gate_kind) : int =
   let k = key ~keeper ~gate_kind in
-  with_lock (fun () ->
-    match Hashtbl.find_opt state k with
-    | None -> 0
-    | Some e -> e.count)
+  Bounded_event_dedupe.count state ~key:k
 ;;

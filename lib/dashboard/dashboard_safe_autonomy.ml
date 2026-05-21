@@ -1,6 +1,6 @@
 open Keeper_types
 
-type domain_level =
+type domain_level = Dashboard_safe_autonomy_level.domain_level =
   | Pass
   | Warn
   | Fail
@@ -71,38 +71,16 @@ type keeper_snapshot = {
   findings : finding list;
 }
 
-let tool_domain_id = "tool_correctness"
-let sandbox_domain_id = "sandbox_truth"
-let approval_domain_id = "approval_truth"
-let cascade_domain_id = "cascade_fsm_gracefulness"
-let audit_domain_id = "audit_trail_completeness"
-
-let domain_catalog =
-  [
-    (tool_domain_id, "Tool Correctness", 30);
-    (sandbox_domain_id, "Sandbox Truth", 20);
-    (approval_domain_id, "Approval Truth", 20);
-    (cascade_domain_id, "Cascade & FSM Gracefulness", 20);
-    (audit_domain_id, "Audit Trail Completeness", 10);
-  ]
-
-let level_to_string = function
-  | Pass -> "pass"
-  | Warn -> "warn"
-  | Fail -> "fail"
-
-let level_rank = function
-  | Pass -> 0
-  | Warn -> 1
-  | Fail -> 2
-
-let worse_level left right =
-  if level_rank left >= level_rank right then left else right
-
-let worst_level levels =
-  match levels with
-  | [] -> Warn
-  | hd :: tl -> List.fold_left worse_level hd tl
+let tool_domain_id = Dashboard_safe_autonomy_level.tool_domain_id
+let sandbox_domain_id = Dashboard_safe_autonomy_level.sandbox_domain_id
+let approval_domain_id = Dashboard_safe_autonomy_level.approval_domain_id
+let cascade_domain_id = Dashboard_safe_autonomy_level.cascade_domain_id
+let audit_domain_id = Dashboard_safe_autonomy_level.audit_domain_id
+let domain_catalog = Dashboard_safe_autonomy_level.domain_catalog
+let level_to_string = Dashboard_safe_autonomy_level.level_to_string
+let level_rank = Dashboard_safe_autonomy_level.level_rank
+let worse_level = Dashboard_safe_autonomy_level.worse_level
+let worst_level = Dashboard_safe_autonomy_level.worst_level
 
 let non_empty_string_opt value =
   let trimmed = String.trim value in

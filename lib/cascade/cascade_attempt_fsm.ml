@@ -504,8 +504,40 @@ let message_looks_like_terminal_provider_runtime_failure message =
   || (contains "error parsing sse message"
       && (contains "jsonrpc" || contains "jsonrpcmessage"))
 
+(* D6 fix: typed network-class terminals.
+
+   [Llm_provider.Retry.NetworkError] carries a structured
+   [Http_client.network_error_kind].  Pre-fix the classifier only inspected
+   the embedded [message] string, so a single endpoint outage materialised
+   as 3–5 retry events before cooldown.  Treating
+   [Connection_refused]/[Dns_failure] as terminal directly off the typed
+   variant collapses one outage to one event (~70% reduction of the
+   residual network-class storm).
+
+   The remaining [network_error_kind] arms ([Tls_error], [Timeout],
+   [Local_resource_exhaustion], [End_of_file], [Unknown]) are *not*
+   reclassified here: TLS/timeout/EOF can be transient and have separate
+   policy paths upstream, and [Local_resource_exhaustion] is the OS-level
+   class handled by [System_error_class]. *)
+let network_error_kind_is_terminal
+    (kind : Llm_provider.Http_client.network_error_kind) : bool =
+  match kind with
+  | Llm_provider.Http_client.Connection_refused -> true
+  | Llm_provider.Http_client.Dns_failure -> true
+  | Llm_provider.Http_client.Tls_error
+  | Llm_provider.Http_client.Timeout
+  | Llm_provider.Http_client.Local_resource_exhaustion
+  | Llm_provider.Http_client.End_of_file
+  | Llm_provider.Http_client.Unknown -> false
+
 let sdk_error_is_terminal_provider_runtime_failure
     (err : Agent_sdk.Error.sdk_error) : bool =
+  let direct_typed_network =
+    match err with
+    | Agent_sdk.Error.Api (Llm_provider.Retry.NetworkError { kind; _ }) ->
+        network_error_kind_is_terminal kind
+    | _ -> false
+  in
   let direct_api_message =
     match err with
     | Agent_sdk.Error.Api
@@ -521,7 +553,8 @@ let sdk_error_is_terminal_provider_runtime_failure
         message_looks_like_terminal_provider_runtime_failure message
     | _ -> false
   in
-  direct_api_message
+  direct_typed_network
+  || direct_api_message
   || message_looks_like_terminal_provider_runtime_failure
        (Agent_sdk.Error.to_string err)
 

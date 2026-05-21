@@ -168,6 +168,30 @@ Until the live LSP exporter lands, this command is a static seed reproducer and
 drift gate; it intentionally fails or emits omission rows instead of silently
 inventing refreshed symbol ranges.
 
+## Changed-Symbol Artifact
+
+The graph is most useful during large refactors when a PR can show which
+curated symbols, lanes, and guard tests its diff touches. Generate that
+review-scoped artifact with:
+
+```bash
+scripts/ide/changed-symbols --write
+```
+
+By default this compares `origin/main` with the current working tree and writes:
+
+```text
+docs/generated/reverse-engineering/changed-symbols.v1.json
+```
+
+The output schema is `masc.changed_symbols.v1`. It maps unified-diff line ranges
+onto `display_range` rows in `symbol-graph.v1.json`, carries the impacted guard
+tests, and records omissions for changed files that are not yet represented in
+the curated graph. The command is read-only with respect to runtime state: it
+uses `git diff`, `git ls-files --others --exclude-standard`, and the checked-in
+graph artifact only. It does not call `/api/v1/ide/lsp`, open a WebSocket, spawn
+language servers, or rewrite the symbol graph.
+
 ## JSON Schema
 
 The first artifact uses `masc.symbol_graph.v1`:

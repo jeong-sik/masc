@@ -1,0 +1,113 @@
+{
+  "schema_version": "masc.changed_symbols.v1",
+  "repo": "masc-mcp",
+  "generated_at": "2026-05-21T01:49:34Z",
+  "base_ref": "origin/main",
+  "base_commit": "bb7219b70c3c",
+  "merge_base": true,
+  "head_ref": "WORKTREE",
+  "head_commit": "WORKTREE",
+  "graph_artifact": "docs/generated/reverse-engineering/symbol-graph.v1.json",
+  "graph_schema_version": "masc.symbol_graph.v1",
+  "graph_base_commit": "22f3665e5218",
+  "diff_commands": [
+    "git diff --unified=0 --no-ext-diff --find-renames --no-color --merge-base origin/main",
+    "git ls-files --others --exclude-standard"
+  ],
+  "changed_files": [
+    {
+      "path": "docs/design/lsp-symbol-graph-exporter.md",
+      "status": "modified",
+      "source": "git_diff",
+      "changed_ranges": [
+        {
+          "start_line": 171,
+          "end_line": 194
+        }
+      ]
+    },
+    {
+      "path": "docs/reverse-engineering-design.html",
+      "status": "modified",
+      "source": "git_diff",
+      "changed_ranges": [
+        {
+          "start_line": 1396,
+          "end_line": 1401
+        }
+      ]
+    },
+    {
+      "path": "scripts/ide/changed-symbols",
+      "status": "added",
+      "source": "git_diff",
+      "changed_ranges": [
+        {
+          "start_line": 1,
+          "end_line": 507
+        }
+      ]
+    },
+    {
+      "path": "scripts/lint-spawn-bounded.allowlist",
+      "status": "modified",
+      "source": "git_diff",
+      "changed_ranges": [
+        {
+          "start_line": 34,
+          "end_line": 34
+        },
+        {
+          "start_line": 38,
+          "end_line": 38
+        }
+      ]
+    },
+    {
+      "path": "test/test_changed_symbols.py",
+      "status": "added",
+      "source": "git_diff",
+      "changed_ranges": [
+        {
+          "start_line": 1,
+          "end_line": 157
+        }
+      ]
+    }
+  ],
+  "impacted_symbols": [],
+  "impacted_lanes": [],
+  "test_owners": [],
+  "omissions": [
+    {
+      "code": "changed_file_not_in_symbol_graph",
+      "path": "docs/design/lsp-symbol-graph-exporter.md",
+      "status": "modified",
+      "source": "git_diff"
+    },
+    {
+      "code": "changed_file_not_in_symbol_graph",
+      "path": "docs/reverse-engineering-design.html",
+      "status": "modified",
+      "source": "git_diff"
+    },
+    {
+      "code": "changed_file_not_in_symbol_graph",
+      "path": "scripts/ide/changed-symbols",
+      "status": "added",
+      "source": "git_diff"
+    },
+    {
+      "code": "changed_file_not_in_symbol_graph",
+      "path": "scripts/lint-spawn-bounded.allowlist",
+      "status": "modified",
+      "source": "git_diff"
+    },
+    {
+      "code": "changed_file_not_in_symbol_graph",
+      "path": "test/test_changed_symbols.py",
+      "status": "added",
+      "source": "git_diff"
+    }
+  ]
+}

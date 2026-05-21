@@ -1393,6 +1393,12 @@
               <td><code>scripts/ide/export-symbol-graph --check</code></td>
               <td>Classifies merge/readiness blockers and proves the atlas path is operator-only: no runtime write route, no cache write, no keeper/task/git mutation.</td>
             </tr>
+            <tr>
+              <td><code>task-412</code> changed-symbol artifact</td>
+              <td>Current PR diff mapped through the checked-in symbol graph</td>
+              <td><a href="generated/reverse-engineering/changed-symbols.v1.json"><code>docs/generated/reverse-engineering/changed-symbols.v1.json</code></a></td>
+              <td><code>scripts/ide/changed-symbols --write</code> emits the PR-scoped symbols, lanes, guard tests, and omission rows without calling the live LSP route.</td>
+            </tr>
           </tbody>
         </table>
       </section>

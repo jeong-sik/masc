@@ -1,0 +1,507 @@
+#!/usr/bin/env python3
+"""Emit a changed-symbol impact artifact from the reverse-engineering graph.
+
+The symbol graph is intentionally base-commit-bound. This helper keeps PR
+review scoped by mapping a Git diff onto the checked-in graph rows and their
+test owners without opening the live LSP route or mutating runtime state.
+"""
+
+from __future__ import annotations
+
+import argparse
+import dataclasses
+import datetime
+import json
+import pathlib
+import re
+import subprocess
+import sys
+from typing import Any
+
+
+DEFAULT_GRAPH = pathlib.Path("docs/generated/reverse-engineering/symbol-graph.v1.json")
+DEFAULT_OUTPUT = pathlib.Path(
+    "docs/generated/reverse-engineering/changed-symbols.v1.json"
+)
+SCHEMA_VERSION = "masc.changed_symbols.v1"
+WORKTREE_HEAD = "WORKTREE"
+
+
+@dataclasses.dataclass(frozen=True)
+class ChangedRange:
+    start_line: int
+    end_line: int
+
+
+@dataclasses.dataclass
+class ChangedFile:
+    path: str
+    status: str
+    ranges: list[ChangedRange]
+    source: str
+
+
+def repo_root() -> pathlib.Path:
+    root = subprocess.check_output(
+        ["git", "rev-parse", "--show-toplevel"], text=True
+    ).strip()
+    return pathlib.Path(root)
+
+
+def git_short_ref(root: pathlib.Path, ref: str) -> str:
+    if ref == WORKTREE_HEAD:
+        return WORKTREE_HEAD
+    return subprocess.check_output(
+        ["git", "rev-parse", "--short=12", ref],
+        cwd=root,
+        text=True,
+    ).strip()
+
+
+def git_merge_base(root: pathlib.Path, base_ref: str, head_ref: str) -> str:
+    head = "HEAD" if head_ref == WORKTREE_HEAD else head_ref
+    return subprocess.check_output(
+        ["git", "merge-base", base_ref, head],
+        cwd=root,
+        text=True,
+    ).strip()
+
+
+def run_git(root: pathlib.Path, args: list[str]) -> str:
+    return subprocess.check_output(["git", *args], cwd=root, text=True)
+
+
+def load_json(path: pathlib.Path) -> dict[str, Any]:
+    with path.open(encoding="utf-8") as handle:
+        data = json.load(handle)
+    if not isinstance(data, dict):
+        raise ValueError(f"{path} root must be a JSON object")
+    return data
+
+
+def utc_now() -> str:
+    return (
+        datetime.datetime.now(datetime.timezone.utc)
+        .replace(microsecond=0)
+        .isoformat()
+        .replace("+00:00", "Z")
+    )
+
+
+def repo_relative_path(value: str) -> pathlib.Path:
+    path = pathlib.PurePosixPath(value)
+    if path.is_absolute() or ".." in path.parts:
+        raise ValueError(f"path is not confined to repo root: {value}")
+    return pathlib.Path(*path.parts)
+
+
+def line_count(path: pathlib.Path) -> int:
+    try:
+        with path.open(encoding="utf-8", errors="replace") as handle:
+            return sum(1 for _ in handle)
+    except FileNotFoundError:
+        return 0
+
+
+HUNK_RE = re.compile(
+    r"^@@ -(?P<old_start>\d+)(?:,(?P<old_len>\d+))? \+(?P<new_start>\d+)(?:,(?P<new_len>\d+))? @@"
+)
+
+
+def parse_new_range(line: str) -> ChangedRange | None:
+    match = HUNK_RE.match(line)
+    if match is None:
+        return None
+    start = int(match.group("new_start"))
+    length = int(match.group("new_len") or "1")
+    if length <= 0:
+        return None
+    return ChangedRange(start, start + length - 1)
+
+
+def normalize_status(
+    old_path: str | None, new_path: str | None
+) -> tuple[str, str | None]:
+    if old_path == "/dev/null" and new_path:
+        return "added", new_path
+    if new_path == "/dev/null" and old_path:
+        return "deleted", old_path
+    if new_path:
+        return "modified", new_path
+    if old_path:
+        return "modified", old_path
+    return "unknown", None
+
+
+def parse_unified_diff(diff_text: str) -> dict[str, ChangedFile]:
+    files: dict[str, ChangedFile] = {}
+    current_old: str | None = None
+    current_new: str | None = None
+    current_ranges: list[ChangedRange] = []
+
+    def flush() -> None:
+        nonlocal current_old, current_new, current_ranges
+        status, path = normalize_status(current_old, current_new)
+        if path is not None:
+            existing = files.get(path)
+            if existing is None:
+                files[path] = ChangedFile(
+                    path=path,
+                    status=status,
+                    ranges=list(current_ranges),
+                    source="git_diff",
+                )
+            else:
+                existing.ranges.extend(current_ranges)
+                if existing.status == "modified":
+                    existing.status = status
+        current_old = None
+        current_new = None
+        current_ranges = []
+
+    for raw_line in diff_text.splitlines():
+        if raw_line.startswith("diff --git "):
+            flush()
+            continue
+        if raw_line.startswith("--- "):
+            value = raw_line[4:].strip()
+            current_old = value[2:] if value.startswith("a/") else value
+            continue
+        if raw_line.startswith("+++ "):
+            value = raw_line[4:].strip()
+            current_new = value[2:] if value.startswith("b/") else value
+            continue
+        changed_range = parse_new_range(raw_line)
+        if changed_range is not None:
+            current_ranges.append(changed_range)
+    flush()
+    return files
+
+
+def changed_files_from_git(
+    root: pathlib.Path,
+    *,
+    base_ref: str,
+    head_ref: str,
+    merge_base: bool,
+    include_untracked: bool,
+    exclude_paths: set[str],
+) -> tuple[list[str], dict[str, ChangedFile]]:
+    diff_args = ["diff", "--unified=0", "--no-ext-diff", "--find-renames", "--no-color"]
+    if merge_base:
+        diff_args.append("--merge-base")
+    diff_args.append(base_ref)
+    if head_ref != WORKTREE_HEAD:
+        diff_args.append(head_ref)
+    diff_text = run_git(root, diff_args)
+    files = {
+        path: row
+        for path, row in parse_unified_diff(diff_text).items()
+        if path not in exclude_paths
+    }
+    commands = ["git " + " ".join(diff_args)]
+
+    if include_untracked:
+        untracked = run_git(
+            root, ["ls-files", "--others", "--exclude-standard"]
+        ).splitlines()
+        commands.append("git ls-files --others --exclude-standard")
+        for path in untracked:
+            if not path or path in exclude_paths:
+                continue
+            count = line_count(root / repo_relative_path(path))
+            ranges = [ChangedRange(1, count)] if count > 0 else []
+            files[path] = ChangedFile(
+                path=path, status="added", ranges=ranges, source="untracked"
+            )
+    return commands, files
+
+
+def range_overlaps(left: ChangedRange, right: ChangedRange) -> bool:
+    return left.start_line <= right.end_line and right.start_line <= left.end_line
+
+
+def range_to_json(row: ChangedRange) -> dict[str, int]:
+    return {"start_line": row.start_line, "end_line": row.end_line}
+
+
+def symbol_range(symbol: dict[str, Any]) -> ChangedRange | None:
+    display_range = symbol.get("display_range")
+    if not isinstance(display_range, dict):
+        return None
+    start = display_range.get("start_line")
+    end = display_range.get("end_line")
+    if not isinstance(start, int) or not isinstance(end, int) or start > end:
+        return None
+    return ChangedRange(start, end)
+
+
+def matched_changed_ranges(
+    changed: ChangedFile,
+    symbol: dict[str, Any],
+) -> tuple[str, list[ChangedRange]]:
+    sr = symbol_range(symbol)
+    if sr is None:
+        return "invalid_symbol_range", []
+    if changed.status == "deleted" or not changed.ranges:
+        return "file_changed", []
+    overlaps = [row for row in changed.ranges if range_overlaps(row, sr)]
+    if overlaps:
+        return "range_overlap", overlaps
+    return "no_overlap", []
+
+
+def string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, str)]
+
+
+def graph_file_index(graph: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    index: dict[str, dict[str, Any]] = {}
+    for row in graph.get("files", []):
+        if isinstance(row, dict) and isinstance(row.get("path"), str):
+            index[row["path"]] = row
+    return index
+
+
+def collect_impacted_symbols(
+    graph: dict[str, Any],
+    changed_files: dict[str, ChangedFile],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str]]:
+    file_index = graph_file_index(graph)
+    impacted: list[dict[str, Any]] = []
+    omissions: list[dict[str, Any]] = []
+    tests: set[str] = set()
+
+    for path, changed in sorted(changed_files.items()):
+        file_row = file_index.get(path)
+        if file_row is None:
+            omissions.append(
+                {
+                    "code": "changed_file_not_in_symbol_graph",
+                    "path": path,
+                    "status": changed.status,
+                    "source": changed.source,
+                }
+            )
+            continue
+        for owner in file_row.get("test_owners", []):
+            if isinstance(owner, dict) and isinstance(owner.get("test_path"), str):
+                tests.add(owner["test_path"])
+        symbols = file_row.get("symbols", [])
+        if not isinstance(symbols, list) or not symbols:
+            omissions.append({"code": "graph_file_has_no_symbols", "path": path})
+            continue
+        matched_any = False
+        for symbol in symbols:
+            if not isinstance(symbol, dict):
+                continue
+            reason, ranges = matched_changed_ranges(changed, symbol)
+            if reason not in {"range_overlap", "file_changed"}:
+                continue
+            matched_any = True
+            for test_path in string_list(symbol.get("tests")):
+                tests.add(test_path)
+            impacted.append(
+                {
+                    "id": symbol.get("id"),
+                    "name": symbol.get("name"),
+                    "kind": symbol.get("kind"),
+                    "path": path,
+                    "match_reason": reason,
+                    "display_range": symbol.get("display_range"),
+                    "changed_ranges": [range_to_json(row) for row in ranges],
+                    "tests": string_list(symbol.get("tests")),
+                }
+            )
+        if not matched_any:
+            omissions.append(
+                {
+                    "code": "changed_ranges_do_not_overlap_tracked_symbols",
+                    "path": path,
+                    "changed_ranges": [range_to_json(row) for row in changed.ranges],
+                }
+            )
+    return impacted, omissions, sorted(tests)
+
+
+def collect_impacted_lanes(
+    graph: dict[str, Any],
+    changed_files: dict[str, ChangedFile],
+    test_owners: list[str],
+) -> list[dict[str, Any]]:
+    changed_paths = set(changed_files)
+    owner_tests = set(test_owners)
+    lanes: list[dict[str, Any]] = []
+    for lane in graph.get("lanes", []):
+        if not isinstance(lane, dict):
+            continue
+        primary_files = set(string_list(lane.get("primary_files")))
+        guard_tests = set(string_list(lane.get("guard_tests")))
+        matched_files = sorted(primary_files & changed_paths)
+        matched_tests = sorted(guard_tests & owner_tests)
+        if matched_files or matched_tests:
+            lanes.append(
+                {
+                    "name": lane.get("name"),
+                    "issue": lane.get("issue"),
+                    "goal": lane.get("goal"),
+                    "tasks": string_list(lane.get("tasks")),
+                    "matched_files": matched_files,
+                    "matched_guard_tests": matched_tests,
+                }
+            )
+    return lanes
+
+
+def build_artifact(
+    *,
+    root: pathlib.Path,
+    graph_path: pathlib.Path,
+    graph: dict[str, Any],
+    base_ref: str,
+    head_ref: str,
+    merge_base: bool,
+    include_untracked: bool,
+    exclude_paths: set[str],
+    generated_at: str,
+) -> dict[str, Any]:
+    commands, changed_files = changed_files_from_git(
+        root,
+        base_ref=base_ref,
+        head_ref=head_ref,
+        merge_base=merge_base,
+        include_untracked=include_untracked,
+        exclude_paths=exclude_paths,
+    )
+    impacted_symbols, omissions, test_owners = collect_impacted_symbols(
+        graph, changed_files
+    )
+    impacted_lanes = collect_impacted_lanes(graph, changed_files, test_owners)
+    graph_rel = graph_path.relative_to(root) if graph_path.is_absolute() else graph_path
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "repo": graph.get("repo", "masc-mcp"),
+        "generated_at": generated_at,
+        "base_ref": base_ref,
+        "base_commit": (
+            git_merge_base(root, base_ref, head_ref)[:12]
+            if merge_base
+            else git_short_ref(root, base_ref)
+        ),
+        "merge_base": merge_base,
+        "head_ref": head_ref,
+        "head_commit": git_short_ref(root, head_ref),
+        "graph_artifact": str(graph_rel),
+        "graph_schema_version": graph.get("schema_version"),
+        "graph_base_commit": graph.get("base_commit"),
+        "diff_commands": commands,
+        "changed_files": [
+            {
+                "path": changed.path,
+                "status": changed.status,
+                "source": changed.source,
+                "changed_ranges": [range_to_json(row) for row in changed.ranges],
+            }
+            for changed in sorted(changed_files.values(), key=lambda row: row.path)
+        ],
+        "impacted_symbols": impacted_symbols,
+        "impacted_lanes": impacted_lanes,
+        "test_owners": test_owners,
+        "omissions": omissions,
+    }
+
+
+def dump_canonical(data: dict[str, Any]) -> str:
+    return json.dumps(data, indent=2, ensure_ascii=False, sort_keys=False) + "\n"
+
+
+def validate_artifact(data: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    if data.get("schema_version") != SCHEMA_VERSION:
+        errors.append(f"schema_version must be {SCHEMA_VERSION}")
+    if not isinstance(data.get("changed_files"), list):
+        errors.append("changed_files must be a list")
+    if not isinstance(data.get("impacted_symbols"), list):
+        errors.append("impacted_symbols must be a list")
+    if not isinstance(data.get("test_owners"), list):
+        errors.append("test_owners must be a list")
+    for row in data.get("changed_files", []):
+        if not isinstance(row, dict) or not isinstance(row.get("path"), str):
+            errors.append(f"changed file row must carry path: {row!r}")
+    return errors
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--graph", type=pathlib.Path, default=DEFAULT_GRAPH)
+    parser.add_argument("--base-ref", default="origin/main")
+    parser.add_argument(
+        "--head-ref",
+        default=WORKTREE_HEAD,
+        help=f"Git ref to compare, or {WORKTREE_HEAD} for the current working tree",
+    )
+    parser.add_argument(
+        "--include-untracked",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="include untracked files as whole-file changes when head-ref is WORKTREE",
+    )
+    parser.add_argument(
+        "--merge-base",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="diff from merge-base(base-ref, head-ref) instead of the moving base ref tip",
+    )
+    parser.add_argument("--generated-at", default=None)
+    parser.add_argument(
+        "--emit", action="store_true", help="print artifact JSON to stdout"
+    )
+    parser.add_argument(
+        "--write", action="store_true", help="write artifact JSON to --output"
+    )
+    parser.add_argument("--output", type=pathlib.Path, default=DEFAULT_OUTPUT)
+    args = parser.parse_args()
+
+    root = repo_root()
+    graph_path = args.graph if args.graph.is_absolute() else root / args.graph
+    output_path = args.output if args.output.is_absolute() else root / args.output
+    include_untracked = bool(args.include_untracked and args.head_ref == WORKTREE_HEAD)
+    try:
+        output_rel = str(output_path.relative_to(root))
+    except ValueError:
+        output_rel = str(args.output)
+    try:
+        graph = load_json(graph_path)
+        artifact = build_artifact(
+            root=root,
+            graph_path=graph_path,
+            graph=graph,
+            base_ref=args.base_ref,
+            head_ref=args.head_ref,
+            merge_base=args.merge_base,
+            include_untracked=include_untracked,
+            exclude_paths={output_rel},
+            generated_at=args.generated_at or utc_now(),
+        )
+        errors = validate_artifact(artifact)
+    except (OSError, subprocess.CalledProcessError, ValueError) as exc:
+        print(f"changed-symbols error: {exc}", file=sys.stderr)
+        return 1
+    if errors:
+        for error in errors:
+            print(f"changed-symbols error: {error}", file=sys.stderr)
+        return 1
+
+    encoded = dump_canonical(artifact)
+    if args.write:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(encoded, encoding="utf-8")
+    if args.emit or not args.write:
+        sys.stdout.write(encoded)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

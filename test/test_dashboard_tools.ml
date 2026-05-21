@@ -101,6 +101,8 @@ let test_git_upstream_status_uses_origin_head_for_detached_checkout () =
     (fun () ->
       with_dashboard_eio @@ fun () ->
       ignore (run_git_exn dir [ "init"; "-q"; "-b"; "main" ]);
+      (* See: local git templates may install hooks that block fixture commits. *)
+      ignore (run_git_exn dir [ "config"; "core.hooksPath"; "/dev/null" ]);
       let readme = Filename.concat dir "README.md" in
       write_file readme "one\n";
       ignore (run_git_exn dir [ "add"; "README.md" ]);

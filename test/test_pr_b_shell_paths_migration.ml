@@ -26,10 +26,9 @@ open Alcotest
     for NixOS / Alpine portability without touching this PR's call
     sites.
 
-    [lib/exec/test/test_exec_run_json.ml:89] also contains a
-    [/bin/bash] literal but lives in the [lib/exec/test/] sub-tree
-    (separate dune stanza) and is a *test fixture*, not a production
-    dispatch path — out of PR-B scope. *)
+    Background auto-promotion tests were removed with the legacy
+    keeper_bash background surface, so no [lib/exec/test/] bash
+    fixture is exempted here. *)
 
 let pinned_bash_literal_count = 0
 let pinned_zsh_literal_count = 0

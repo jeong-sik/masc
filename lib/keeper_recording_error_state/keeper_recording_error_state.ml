@@ -23,7 +23,6 @@
 
 type error_kind =
   | Sandbox_docker
-  | Path_syntax_blocked
   | Stale_turn_timeout
   | Fiber_unresolved
   | Oas_timeout_budget
@@ -36,7 +35,6 @@ type error_kind =
 
 let error_kind_to_string = function
   | Sandbox_docker -> "sandbox_docker"
-  | Path_syntax_blocked -> "path_syntax_blocked"
   | Stale_turn_timeout -> "stale_turn_timeout"
   | Fiber_unresolved -> "fiber_unresolved"
   | Oas_timeout_budget -> "oas_timeout_budget"
@@ -50,7 +48,6 @@ let error_kind_to_string = function
 
 let error_kind_of_string = function
   | "sandbox_docker" -> Some Sandbox_docker
-  | "path_syntax_blocked" -> Some Path_syntax_blocked
   | "stale_turn_timeout" -> Some Stale_turn_timeout
   | "fiber_unresolved" -> Some Fiber_unresolved
   | "oas_timeout_budget" -> Some Oas_timeout_budget
@@ -65,7 +62,6 @@ let error_kind_of_string = function
 
 let all_error_kinds =
   [ Sandbox_docker
-  ; Path_syntax_blocked
   ; Stale_turn_timeout
   ; Fiber_unresolved
   ; Oas_timeout_budget
@@ -81,9 +77,10 @@ let all_error_kinds =
 (* Substring-based classifier. Order matters: longer / more specific
    markers come first so a "state machine guard violation: expected_version
    mismatch" string is not silently re-classified as the second bucket.
-   Production samples (system_log_2026-05-16, 299 events) show the eight
-   buckets above cover ~95% of traffic; the remaining ~5% land in [Other]
-   and are good candidates for future arm promotion. *)
+   Production samples (system_log_2026-05-16, 299 events) showed the
+   promoted buckets covered ~95% of traffic before the legacy path-tokenizer
+   bucket was retired; remaining unmatched text lands in [Other] and is a
+   candidate for future arm promotion. *)
 let classify_error (err : string) : error_kind =
   let contains needle = String.length err >= String.length needle
     && (
@@ -98,8 +95,6 @@ let classify_error (err : string) : error_kind =
   in
   if contains "sandbox docker"
   then Sandbox_docker
-  else if contains "Path syntax blocked"
-  then Path_syntax_blocked
   else if contains "stale_turn_timeout"
   then Stale_turn_timeout
   else if contains "fiber_unresolved"

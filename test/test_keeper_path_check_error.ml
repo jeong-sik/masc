@@ -7,29 +7,6 @@
 
 open Masc_mcp.Keeper_path_check_error
 
-let test_path_syntax_blocked_no_hint () =
-  let msg = to_message (Path_syntax_blocked { token = "/tmp/foo"; hint = None }) in
-  Alcotest.(check string)
-    "syntax_blocked: byte-equivalent to legacy emit"
-    "Path syntax blocked: shell quoting, globbing, brace expansion, and \
-     backslash escapes are not allowed for path-bearing keeper commands. \
-     Use plain unquoted paths and explicit cwd."
-    msg
-;;
-
-let test_path_syntax_blocked_with_hint () =
-  let msg =
-    to_message
-      (Path_syntax_blocked { token = "/tmp/foo"; hint = Some "Remove backslash escape." })
-  in
-  Alcotest.(check string)
-    "syntax_blocked: appends hint with single space separator"
-    "Path syntax blocked: shell quoting, globbing, brace expansion, and \
-     backslash escapes are not allowed for path-bearing keeper commands. \
-     Use plain unquoted paths and explicit cwd. Remove backslash escape."
-    msg
-;;
-
 let test_path_outside_whitelist_keeper_command () =
   let msg =
     to_message
@@ -63,8 +40,7 @@ let test_cwd_not_directory_no_hint () =
 
 let test_parse_roundtrip_variants () =
   let cases =
-    [ Path_syntax_blocked { token = "x"; hint = None }
-    ; Path_outside_whitelist { path = "x"; for_keeper_command = true }
+    [ Path_outside_whitelist { path = "x"; for_keeper_command = true }
     ; Path_outside_whitelist { path = "x"; for_keeper_command = false }
     ; Cwd_not_directory { path = "x"; hint = None }
     ]
@@ -94,8 +70,7 @@ let test_parse_prefix_rejects_unrelated () =
 
 let test_message_prefix_is_lowercase_prefix_of_message () =
   let variants =
-    [ Path_syntax_blocked { token = "x"; hint = None }
-    ; Path_outside_whitelist { path = "x"; for_keeper_command = true }
+    [ Path_outside_whitelist { path = "x"; for_keeper_command = true }
     ; Path_outside_whitelist { path = "x"; for_keeper_command = false }
     ; Cwd_not_directory { path = "x"; hint = None }
     ]
@@ -117,12 +92,7 @@ let () =
   Alcotest.run
     "keeper_path_check_error"
     [ ( "to_message"
-      , [ Alcotest.test_case "path_syntax_blocked no hint" `Quick test_path_syntax_blocked_no_hint
-        ; Alcotest.test_case
-            "path_syntax_blocked with hint"
-            `Quick
-            test_path_syntax_blocked_with_hint
-        ; Alcotest.test_case
+      , [ Alcotest.test_case
             "path_outside_whitelist keeper_command"
             `Quick
             test_path_outside_whitelist_keeper_command

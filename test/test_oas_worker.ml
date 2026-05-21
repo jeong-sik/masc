@@ -4913,7 +4913,7 @@ let test_worker_build_agent_validation_retry_exhausted () =
   | Exit -> ()
 ;;
 
-let test_oas_worker_exec_run_exit_condition_result_returns_partial_success () =
+let test_oas_worker_exit_condition_result_returns_partial_success () =
   try
     Eio.Switch.run
     @@ fun sw ->
@@ -6554,7 +6554,7 @@ let () =
         ; Alcotest.test_case
             "exit_condition_result returns partial success"
             `Quick
-            test_oas_worker_exec_run_exit_condition_result_returns_partial_success
+            test_oas_worker_exit_condition_result_returns_partial_success
         ] )
     ; ( "keeper_checkpoint_boundary"
       , [ Alcotest.test_case

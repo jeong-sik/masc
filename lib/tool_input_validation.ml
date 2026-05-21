@@ -130,6 +130,78 @@ let schema_has_properties = function
   | _ -> false
 ;;
 
+let property_names schema =
+  match Yojson.Safe.Util.member "properties" schema with
+  | `Assoc props -> List.map fst props
+  | _ -> []
+;;
+
+let forbids_additional_properties schema =
+  match Yojson.Safe.Util.member "additionalProperties" schema with
+  | `Bool false -> true
+  | _ -> false
+;;
+
+let unsupported_arg_names schema = function
+  | `Assoc fields when forbids_additional_properties schema ->
+    let properties = property_names schema in
+    fields
+    |> List.filter_map (fun (name, _) ->
+      if List.mem name properties then None else Some name)
+    |> List.sort_uniq String.compare
+  | _ -> []
+;;
+
+let simple_one_of_required_groups schema =
+  match Yojson.Safe.Util.member "oneOf" schema with
+  | `List branches ->
+    let groups =
+      List.filter_map
+        (fun branch ->
+           let required = required_names branch in
+           if required = [] then None else Some required)
+        branches
+    in
+    if List.length groups = List.length branches then groups else []
+  | _ -> []
+;;
+
+let one_of_required_shape_error schema = function
+  | `Assoc fields ->
+    let groups = simple_one_of_required_groups schema in
+    if groups = []
+    then None
+    else (
+      let has name = List.mem_assoc name fields in
+      let matching_groups =
+        List.filter (fun required -> List.for_all has required) groups
+      in
+      match matching_groups with
+      | [ _ ] -> None
+      | [] ->
+        let options =
+          groups |> List.map (String.concat "+") |> String.concat " | "
+        in
+        Some (Printf.sprintf "arguments must include exactly one of: %s" options)
+      | _ :: _ :: _ ->
+        let options =
+          matching_groups |> List.map (String.concat "+") |> String.concat " | "
+        in
+        Some
+          (Printf.sprintf
+             "arguments match multiple mutually exclusive schemas: %s"
+             options))
+  | _ -> None
+;;
+
+let schema_shape_error schema args =
+  match unsupported_arg_names schema args with
+  | name :: names ->
+    let names = String.concat ", " (name :: names) in
+    Some (Printf.sprintf "received unsupported field(s): %s" names)
+  | [] -> one_of_required_shape_error schema args
+;;
+
 let empty_tool_args = function
   | `Null | `Assoc [] -> true
   | _ -> false
@@ -248,16 +320,23 @@ let validation_action ?schema ~name ~args () : Tool_dispatch.pre_hook_action =
                "Tool '%s' declares no input fields but received arguments"
                name)
     | Some schema ->
-      let lookup lookup_name =
-        let schema_opt =
-          if String.equal lookup_name name
-          then Some schema
-          else Tool_dispatch.lookup_schema lookup_name
-        in
-        Option.map (validation_schema_of_json ~name:lookup_name) schema_opt
-      in
-      let hook = Agent_sdk.Tool_middleware.make_validation_hook ~lookup in
-      (match hook ~name ~args:prepared_args with
+      (match schema_shape_error schema prepared_args with
+       | Some message ->
+         reject_validation
+           ~name
+           ~reason:"invalid_args"
+           ~message:(Printf.sprintf "Tool '%s' %s" name message)
+       | None ->
+         let lookup lookup_name =
+           let schema_opt =
+             if String.equal lookup_name name
+             then Some schema
+             else Tool_dispatch.lookup_schema lookup_name
+           in
+           Option.map (validation_schema_of_json ~name:lookup_name) schema_opt
+         in
+         let hook = Agent_sdk.Tool_middleware.make_validation_hook ~lookup in
+         (match hook ~name ~args:prepared_args with
     | Agent_sdk.Tool_middleware.Pass when not (Yojson.Safe.equal prepared_args args) ->
       let reason = pass_reason ~schema:(Some schema) ~args ~prepared_args in
       emit_validation_telemetry ~tool:name ~result:"pass" ~reason;
@@ -287,7 +366,7 @@ let validation_action ?schema ~name ~args () : Tool_dispatch.pre_hook_action =
              actual category instead of bucketing as "unclassified". *)
           failure_class = Some Tool_result.Policy_rejection
         }
-      )
+      ))
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn -> validation_exception_action ~name exn

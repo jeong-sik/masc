@@ -1478,8 +1478,8 @@ let make_tool_bundle
                    "Search file contents with ripgrep. Use this for code/file observation; \
                     use Bash only for command execution."
                  | "Bash" ->
-                   "Execute one shell command through the public Bash front door. Set cwd \
-                    for multi-repo git/gh commands; use Read/Grep for file observation and \
+                   "Execute typed argv through the public Bash front door. Set cwd for \
+                    multi-repo git/gh commands; use Read/Grep for file observation and \
                     visible task/board/PR tools instead of typing tool names as shell \
                     commands."
                  | _ -> internal_def.description

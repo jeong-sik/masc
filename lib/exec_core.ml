@@ -849,8 +849,7 @@ let semantic_fields_of_executed (result : executed_result) : (string * Yojson.Sa
       else (
         (* Foreground exec merges stdout+stderr via "2>&1" at the
            keeper layer, so feed the merged stream as stdout and an
-           empty stderr.  Background tasks (keeper_bash_output) will
-           get a separate path when Tick 7's split reaches here. *)
+           empty stderr. *)
         let markers =
           Cdal_judge.of_exec_outcome ~semantic:sem ~stdout:result.output ~stderr:""
         in

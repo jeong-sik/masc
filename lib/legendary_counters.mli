@@ -1,82 +1,11 @@
-(** In-process counters for the Legendary Bash dark-launch observers.
+(** In-process counters for keeper shell observers.
 
-    These counters are incremented only while the matching observer
-    env flag is enabled (see [Worker_dev_tools.shadow_diff_log_enabled]
-    and [MASC_BASH_AUTO_BG_OBSERVE] in [keeper_exec_shell]), so an
-    operator running with observers off pays zero cost.
-
-    All counters are [Atomic.t] and safe to increment from any fiber
-    or domain.  The module is a pure sidecar to the log-line stream:
-    flipping observers on produces both structured logs (for grep /
-    log aggregators) and in-memory totals (for dashboards / HTTP
-    snapshot endpoints). *)
-
-val incr_gate_diff : Gate_diff_types.gate_diff -> unit
-(** Record one P5 shadow-gate call under the given bucket.  Always
-    increments [gate_diff_total] in the snapshot. *)
-
-val incr_auto_bg_observed : promoted_candidate:bool -> unit
-(** Record one P4 foreground-only call that the observer inspected.
-    When [promoted_candidate] is [true] the elapsed duration would
-    have tripped [MASC_BLOCKING_BUDGET_MS]. *)
+    Tracks live observer families: docker-sandbox gh exit classes and
+    [Shell_command_gate] caller x verdict partitions. *)
 
 val incr_gh_exit_class : Gh_exit_class.t -> unit
-(** Record one docker-sandbox gh invocation under its exit class, as
-    classified by {!Gh_exit_class.classify}.  Callers increment this
-    from the docker shell emission sites in [Keeper_shell_docker] so
-    that the dashboard and [/api/v1/legendary_bash/shadow_counters]
-    endpoint can visualise the distribution of gh outcomes
-    (Ok_0 vs Auth_failed vs Network vs …) without parsing stderr
-    blobs in the UI layer.
+(** Record one docker-sandbox gh invocation under its exit class. *)
 
-    This is the first production consumer of {!Gh_exit_class};
-    previous callers only relied on raw exit codes. *)
-
-val incr_too_complex : Masc_exec.Parsed.reason_too_complex -> unit
-(** Record one shadow rejection attributable to a recognised-but-
-    unsupported bash construct.  Typed dispatch over the parser's full
-    [reason_too_complex] surface — every variant maps to a specific
-    atom; a new variant in [Masc_exec.Parsed] forces this function to
-    be updated at compile time.
-
-    [`Unknown_construct _] is the only payload-carrying variant; its
-    string is intentionally discarded at the counter boundary (the
-    structured log line carries it separately).  All [`Unknown_construct]
-    counts land in [too_complex_other] — the catch-all atom is now
-    reserved exclusively for this variant rather than being a sink for
-    unrecognised strings.
-
-    Callers should invoke this IN ADDITION to [incr_gate_diff
-    Shadow_cannot_parse] — the per-reason buckets are a histogram
-    refinement of that single bucket, not a replacement. *)
-
-val incr_too_complex_parse_error : unit -> unit
-(** Record one [Parse_error] outcome — Menhir/Lex error on the input.
-    Increments [too_complex_parse_error]. *)
-
-val incr_too_complex_parse_aborted : Masc_exec.Parsed.reason_aborted -> unit
-(** Record one [Parse_aborted _] outcome — parser bailed due to
-    timeout, depth limit, or token limit.  All three reasons collapse
-    into [too_complex_parse_aborted]; per-reason breakdown would be a
-    separate metric-rename PR. *)
-
-val incr_typed_advisor : Shell_ir_validator.advisory -> unit
-(** RFC-0092 Phase A — record one typed-advisor outcome under its
-    bucket ([typed_advisor_allow] / [typed_advisor_reject] /
-    [typed_advisor_cannot_parse]).  Exhaustive over
-    [Shell_ir_validator.advisory]; a new variant in the validator
-    forces an update here at compile time.  Increment only while
-    [Gate_diff_types.typed_advisor_log_enabled ()] is true so an
-    operator running with the flag off pays zero cost. *)
-
-(** RFC-0131 — caller × verdict telemetry partition for the exec
-    shell command gate.
-
-    Mirrors the [caller] tag defined in
-    {!Masc_exec_command_gate.Shell_command_gate.caller}.  Callers that
-    produce an exec gate verdict increment this counter at their boundary
-    so production telemetry follows the actual authoritative path rather
-    than the retired legacy authority-flip shim. *)
 type shell_gate_caller =
   | Worker_dev_tools
   | Tool_code_write
@@ -91,130 +20,31 @@ val incr_shell_gate
   :  caller:shell_gate_caller
   -> verdict:shell_gate_verdict_kind
   -> unit
-(** Record one shell_command_gate verdict under the given
-    [caller × verdict] bucket.  Exhaustive over both sums; adding a
-    new caller or verdict variant forces an update here at compile
-    time.
-
-    [caller] is required because partition-less rows are useless for
-    the PR-5 authority-flip decision; legacy callers without a
-    caller tag simply do not increment. *)
+(** Record one [Shell_command_gate] verdict under the caller x verdict
+    bucket. *)
 
 val reset : unit -> unit
-(** Zero every counter.  Used by tests; operators should not rely on
-    this surface. *)
+(** Zero every counter.  Used by tests. *)
 
-type snapshot = {
-  gate_diff_total : int;
-  gate_diff_agree : int;
-  gate_diff_legacy_allow_shadow_deny : int;
-  gate_diff_legacy_deny_shadow_allow : int;
-  gate_diff_shadow_cannot_parse : int;
-  auto_bg_observed : int;
-  auto_bg_would_have_promoted : int;
-  (* Per-reason histogram of the shadow_cannot_parse bucket.  Mirrors
-     [Parsed.reason_too_complex] 1:1 except for [Unknown_construct]
-     which collapses into [too_complex_other].  The sum of the
-     per-reason buckets plus [too_complex_parse_error] plus
-     [too_complex_parse_aborted] plus [too_complex_other] matches
-     [gate_diff_shadow_cannot_parse]. *)
-  too_complex_redirect : int;
-  too_complex_logic_op : int;
-  too_complex_heredoc : int;
-  too_complex_here_string : int;
-  too_complex_cmd_subst : int;
-  too_complex_proc_subst : int;
-  too_complex_subshell : int;
-  too_complex_arith_expansion : int;
-  too_complex_control_flow : int;
-  too_complex_function_def : int;
-  too_complex_glob_brace : int;
-  too_complex_background : int;
-  too_complex_parse_error : int;
-  too_complex_parse_aborted : int;
-  too_complex_other : int;
-  (* Distribution of docker-sandbox gh invocations by exit class, as
-     classified by {!Gh_exit_class.classify}.  Callers increment these
-     from the JSON emission sites in [Keeper_shell_docker]; non-gh
-     commands in the same sandbox do not touch these counters. *)
-  gh_exit_ok_0 : int;
-  gh_exit_policy_blocked : int;
-  gh_exit_type_mismatch : int;
-  gh_exit_auth_failed : int;
-  gh_exit_network : int;
-  gh_exit_unknown : int;
-  (* RFC-0092 Phase A typed-advisor parity counters.  Increment only
-     while [Gate_diff_types.typed_advisor_log_enabled ()] is true. *)
-  typed_advisor_allow : int;
-  typed_advisor_reject : int;
-  typed_advisor_cannot_parse : int;
-  (* RFC-0131 — caller × verdict partition for the exec shell command
-     gate.  3 callers × 3 verdicts = 9
-     buckets.  Field order matches [shell_gate_caller × shell_gate_verdict_kind]
-     row-major.  See {!incr_shell_gate} for the increment surface. *)
-  shell_gate_worker_dev_tools_allow : int;
-  shell_gate_worker_dev_tools_reject : int;
-  shell_gate_worker_dev_tools_cannot_parse : int;
-  shell_gate_tool_code_write_allow : int;
-  shell_gate_tool_code_write_reject : int;
-  shell_gate_tool_code_write_cannot_parse : int;
-  shell_gate_keeper_shell_bash_allow : int;
-  shell_gate_keeper_shell_bash_reject : int;
-  shell_gate_keeper_shell_bash_cannot_parse : int;
-}
+type snapshot =
+  { gh_exit_ok_0 : int
+  ; gh_exit_policy_blocked : int
+  ; gh_exit_type_mismatch : int
+  ; gh_exit_auth_failed : int
+  ; gh_exit_network : int
+  ; gh_exit_unknown : int
+  ; shell_gate_worker_dev_tools_allow : int
+  ; shell_gate_worker_dev_tools_reject : int
+  ; shell_gate_worker_dev_tools_cannot_parse : int
+  ; shell_gate_tool_code_write_allow : int
+  ; shell_gate_tool_code_write_reject : int
+  ; shell_gate_tool_code_write_cannot_parse : int
+  ; shell_gate_keeper_shell_bash_allow : int
+  ; shell_gate_keeper_shell_bash_reject : int
+  ; shell_gate_keeper_shell_bash_cannot_parse : int
+  }
 
 val snapshot : unit -> snapshot
 
 val snapshot_to_json : snapshot -> Yojson.Safe.t
-(** Stable JSON shape for dashboard / HTTP consumers.  Field names
-    mirror the record labels exactly. *)
-
-(** {2 Derived ratios}
-
-    Pure functions over [snapshot] that encapsulate the flip-decision
-    math documented in [LEGENDARY-BASH-RUNBOOK.md].  Dashboards, the
-    [/api/v1/legendary_bash/shadow_counters] JSON surface, and
-    operator shell recipes should prefer these helpers over
-    re-implementing the same numerator / denominator pairing.  All
-    functions return [0.0] when their denominator is zero — the
-    "observer off" read must be safely serialisable as a finite
-    float (no NaN / inf in the JSON output). *)
-
-val disagree_ratio : snapshot -> float
-(** [(gate_diff_legacy_allow_shadow_deny +
-        gate_diff_legacy_deny_shadow_allow)
-     / gate_diff_total].
-
-    Fraction of P5 gate calls where the legacy regex gate and the new
-    AST gate produced opposite verdicts, excluding [`Shadow_cannot_parse].
-    Drives the [MASC_BASH_AST_ONLY] flip criterion (target 0.0 over a
-    rolling 7-day window). *)
-
-val shadow_parse_coverage : snapshot -> float
-(** [1.0 - gate_diff_shadow_cannot_parse / gate_diff_total].
-
-    Fraction of observed P5 calls that the AST gate could fully parse
-    (i.e., the shadow verdict was either [`Agree] or an actual
-    disagreement, not a parser bailout).  Drives the "parse gap
-    < 1%" flip criterion in the runbook — a coverage of [0.99] or
-    higher is the flip target. *)
-
-val auto_bg_promotion_rate : snapshot -> float
-(** [auto_bg_would_have_promoted / auto_bg_observed].
-
-    Fraction of P4 observed foreground calls that exceeded
-    [MASC_BLOCKING_BUDGET_MS].  Guides both the [MASC_BLOCKING_BUDGET_MS]
-    tuning ("would promotion fire too often?") and the
-    [MASC_BASH_AUTO_BG] default-flip decision ("is promotion rare
-    enough to be tolerable?"). *)
-
-val snapshot_to_json_with_ratios : snapshot -> Yojson.Safe.t
-(** Same flat field set as {!snapshot_to_json}, with an additional
-    ["ratios"] sibling object containing the three derived ratios
-    ({!disagree_ratio}, {!shadow_parse_coverage},
-    {!auto_bg_promotion_rate}).  Consumers that prefer server-computed
-    flip-decision math over client-side arithmetic should call this
-    helper; the flat fields remain a 1:1 mirror of {!snapshot} so
-    existing dashboards keep working.  All ratio values are finite
-    ([0.0] when the denominator is zero), so the output remains a
-    valid JSON document regardless of observer state. *)
+(** Stable JSON shape for dashboard / HTTP consumers. *)

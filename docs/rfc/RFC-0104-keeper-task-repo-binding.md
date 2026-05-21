@@ -30,8 +30,8 @@ ERROR Keeper keeper:tech_glutton tool_error: Bash —
   "sandbox root cannot run git/gh: mount point
    /Users/dancer/me/.masc/playground/docker/tech_glutton is not a git
    repository and multiple sandbox repos exist. Set cwd explicitly before
-   retrying. Example next call: keeper_bash { cmd: ... cwd: repos/deepclaude }.
-   Available repos: deepclaude, masc-mcp. Do not retry the same cmd from
+   retrying. Example next call: Bash { executable: "gh", argv: [...], cwd: "repos/deepclaude" }.
+   Available repos: deepclaude, masc-mcp. Do not retry the same git/gh request from
    sandbox root."
 ```
 

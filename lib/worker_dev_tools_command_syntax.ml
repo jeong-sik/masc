@@ -16,7 +16,6 @@ let split_shell_tokens cmd =
     |> List.map String.trim
     |> List.filter (fun token -> token <> "")
 ;;
-
 let strip_wrapping_quotes token =
   let len = String.length token in
   if len >= 2

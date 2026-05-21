@@ -1,4 +1,4 @@
-(** Parse-once SSOT for shell command validation.
+(** Parse-once SSOT facade for shell command validation.
 
     Phase 1 of the Shell IR Promotion Goal Plan (2026-05-18). Lives
     in [lib/exec/command_gate/] as the [masc_exec_command_gate]
@@ -73,7 +73,7 @@ type too_complex_reason =
 
 (** Reusable parse context. [stages] is the ordered Simple list as
     parsed; [stage_bins] is the binary name of each stage in order;
-    [invokes_direct_dune] is true when any stage directly runs [dune]
+    [direct_dune_seen] is true when any stage directly runs [dune]
     or wraps it through known transparent command runners such as
     [env] or [opam exec].
     Invariants:
@@ -88,7 +88,7 @@ type parsed_context = {
   ast : Masc_exec.Shell_ir.t;
   stages : Masc_exec.Shell_ir.simple list;
   stage_bins : string list;
-  invokes_direct_dune : bool;
+  direct_dune_seen : bool;
 }
 
 (** Phase 1 verdict surface — four arms matching the Plan's typed
@@ -106,8 +106,8 @@ type verdict =
 
 (** Allowlist policy. [allow_pipes = true] keeps the existing legacy
     behavior; [false] yields {!Pipes_not_allowed} for any pipeline with
-    two or more stages. [redirect_allowed = false] rejects file
-    redirects while still allowing fd-to-fd redirects such as [2>&1]. *)
+    two or more stages. [redirect_allowed = false] rejects all redirect
+    syntax, including fd-to-fd redirects such as [2>&1]. *)
 type allowlist_policy = {
   allowed_commands : string list;
   allow_pipes : bool;
@@ -115,10 +115,10 @@ type allowlist_policy = {
 }
 
 (** Path policy applied to literal path arguments and file redirect
-    targets of every stage. Phase 1 intentionally keeps the policy
-    minimal — only an opt-in classifier callback is consulted, so the
-    facade itself does no [Path_scope] decision-making and instead
-    defers to the caller. *)
+    targets of every stage.
+    Phase 1 intentionally keeps the policy minimal — only an opt-in
+    classifier callback is consulted, so the facade itself does no
+    [Path_scope] decision-making and instead defers to the caller. *)
 type path_policy = {
   classify : (raw_path:string -> [ `Allow | `Deny of string ]) option;
 }
@@ -199,36 +199,3 @@ val too_complex_reason_tag : too_complex_reason -> string
 val stage_count : parsed_context -> int
 val last_stage_bin : parsed_context -> string option
 val is_pipeline : parsed_context -> bool
-
-val raw_invokes_direct_dune : string -> bool
-(** Returns [true] when a raw command string directly invokes [dune],
-    including through transparent wrappers handled by the exec gate
-    context classifier ([env], [env -S], and [opam exec]). This helper
-    is for compatibility call sites that must preserve legacy acceptance
-    of shell words outside the stricter Bash IR grammar while sharing
-    the same direct-dune policy classifier. *)
-
-(** {1 Authority flag (RFC-0092 Phase C)} *)
-
-val is_authoritative : unit -> bool
-(** [is_authoritative ()] returns [true] iff the
-    [MASC_BASH_TYPED_AUTHORITY] environment variable is set to one of
-    the documented truthy values: [1], [true], [TRUE], [yes], [on].
-    Default off — no behavior change while unset.
-
-    This is the facade-side mirror of
-    [Masc_mcp.Gate_diff_types.typed_authority_enabled].  Both
-    predicates intentionally share the same truthy-value set; the
-    duplication exists because this sub-library
-    ([masc_exec_command_gate]) cannot depend on the root [masc_mcp]
-    library without introducing a cycle.
-
-    Consumers outside the keeper boundary (Phase 1 facade callers
-    listed in the {!caller} sum) should prefer this predicate;
-    consumers inside the root [masc_mcp] library should use
-    [Masc_mcp.Gate_diff_types.typed_authority_enabled].  Both return
-    the same bool at any given env-var state.
-
-    Predicate-only stage: this PR does not change facade behavior
-    when the flag is on — the authority decision-arm wiring lands in
-    a follow-up so risk stays measurable. *)

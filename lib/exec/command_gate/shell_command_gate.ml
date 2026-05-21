@@ -35,7 +35,7 @@ type parsed_context = {
   ast : SI.t;
   stages : SI.simple list;
   stage_bins : string list;
-  invokes_direct_dune : bool;
+  direct_dune_seen : bool;
 }
 
 type verdict =
@@ -146,28 +146,33 @@ let rec drop_env_assignments = function
     if is_env_assignment_word word then drop_env_assignments rest else word :: rest
 ;;
 
-let rec command_words_invoke_direct_dune = function
+let rec command_words_run_dune = function
   | [] -> false
-  | command :: args -> command_invokes_direct_dune command args
+  | command :: args -> command_runs_dune command args
 
-and split_string_invokes_direct_dune text =
+and split_string_runs_dune text =
   match Masc_exec_bash_parser.Bash_words.stages text with
   | Error _ -> false
-  | Ok stages -> List.exists command_words_invoke_direct_dune (List.map (List.map (fun w -> w.Masc_exec_bash_parser.Bash_words.value)) stages)
+  | Ok stages ->
+    List.exists
+      command_words_run_dune
+      (List.map
+         (List.map (fun w -> w.Masc_exec_bash_parser.Bash_words.value))
+         stages)
 
-and env_args_invoke_direct_dune = function
+and env_args_run_dune = function
   | [] -> false
   | word :: rest ->
     if is_env_assignment_word word || word = "-" || word = "-i"
        || word = "--ignore-environment" || word = "-0" || word = "--null"
-    then env_args_invoke_direct_dune rest
+    then env_args_run_dune rest
     else if word = "--"
-    then command_words_invoke_direct_dune (drop_env_assignments rest)
+    then command_words_run_dune (drop_env_assignments rest)
     else if word = "-S" || word = "--split-string"
     then (
       match rest with
       | arg :: rest ->
-        split_string_invokes_direct_dune arg || env_args_invoke_direct_dune rest
+        split_string_runs_dune arg || env_args_run_dune rest
       | [] -> false)
     else if String.starts_with ~prefix:"--split-string=" word
     then
@@ -175,23 +180,23 @@ and env_args_invoke_direct_dune = function
       let arg =
         String.sub word (String.length prefix) (String.length word - String.length prefix)
       in
-      split_string_invokes_direct_dune arg
+      split_string_runs_dune arg
     else if word = "-u" || word = "--unset" || word = "-C" || word = "--chdir"
     then (
       match rest with
-      | _ :: rest -> env_args_invoke_direct_dune rest
+      | _ :: rest -> env_args_run_dune rest
       | [] -> false)
     else if String.starts_with ~prefix:"-u" word
             || String.starts_with ~prefix:"--unset=" word
             || String.starts_with ~prefix:"--chdir=" word
-    then env_args_invoke_direct_dune rest
-    else command_words_invoke_direct_dune (word :: rest)
+    then env_args_run_dune rest
+    else command_words_run_dune (word :: rest)
 
-and opam_exec_args_invoke_direct_dune = function
+and opam_exec_args_run_dune = function
   | sub :: rest when String.equal (basename_word sub) "exec" ->
     let rec after_sentinel = function
       | [] -> false
-      | "--" :: rest -> command_words_invoke_direct_dune rest
+      | "--" :: rest -> command_words_run_dune rest
       | _ :: rest -> after_sentinel rest
     in
     let rec without_sentinel = function
@@ -211,34 +216,34 @@ and opam_exec_args_invoke_direct_dune = function
                 || String.starts_with ~prefix:"--cli=" word
                 || String.starts_with ~prefix:"-" word
         then without_sentinel rest
-        else command_words_invoke_direct_dune (word :: rest)
+        else command_words_run_dune (word :: rest)
     in
     after_sentinel rest || without_sentinel rest
   | _ -> false
 
-and command_invokes_direct_dune command args =
+and command_runs_dune command args =
   match basename_word command with
   | "dune" -> true
-  | "env" -> env_args_invoke_direct_dune args
-  | "opam" -> opam_exec_args_invoke_direct_dune args
+  | "env" -> env_args_run_dune args
+  | "opam" -> opam_exec_args_run_dune args
   | _ -> false
 ;;
 
-let stage_invokes_direct_dune (stage : SI.simple) =
+let stage_runs_dune (stage : SI.simple) =
   let command = BIN.to_string stage.SI.bin in
   let args = List.filter_map arg_literal stage.SI.args in
-  command_invokes_direct_dune command args
+  command_runs_dune command args
 ;;
 
-let raw_invokes_direct_dune raw = split_string_invokes_direct_dune raw
+let raw_runs_dune raw = split_string_runs_dune raw
 
 let make_context ~stages =
   match ast_of_stages stages with
   | None -> None
   | Some ast ->
     let stage_bins = List.map (fun s -> BIN.to_string s.SI.bin) stages in
-    let invokes_direct_dune = List.exists stage_invokes_direct_dune stages in
-    Some { ast; stages; stage_bins; invokes_direct_dune }
+    let direct_dune_seen = List.exists stage_runs_dune stages in
+    Some { ast; stages; stage_bins; direct_dune_seen }
 ;;
 
 let bin_allowed ~(allowed_commands : string list) (bin : string) =
@@ -257,12 +262,8 @@ let first_disallowed_stage ~allowed_commands stage_bins =
   scan 1 stage_bins
 ;;
 
-let stage_has_file_redirect (simple : SI.simple) : bool =
-  List.exists
-    (function
-      | Masc_exec.Redirect_scope.File _ -> true
-      | Masc_exec.Redirect_scope.Fd_to_fd _ -> false)
-    simple.SI.redirects
+let stage_has_redirect (simple : SI.simple) : bool =
+  simple.SI.redirects <> []
 ;;
 
 (* Extract every literal path-bearing surface from a simple stage so
@@ -313,11 +314,11 @@ let first_path_failure ~(path_policy : path_policy) stages =
     scan_stages 1 stages
 ;;
 
-let first_file_redirect_stage stages =
+let first_redirect_stage stages =
   let rec scan idx = function
     | [] -> None
     | stage :: rest ->
-      if stage_has_file_redirect stage then Some idx else scan (idx + 1) rest
+      if stage_has_redirect stage then Some idx else scan (idx + 1) rest
   in
   scan 1 stages
 ;;
@@ -364,14 +365,14 @@ let apply_policy ~(allowlist : allowlist_policy) ~(path_policy : path_policy)
          Reject { context; reason; diagnostic }
        | None ->
          (match
-            if allowlist.redirect_allowed then None else first_file_redirect_stage stages
+            if allowlist.redirect_allowed then None else first_redirect_stage stages
           with
           | Some stage ->
             Reject
               { context
               ; reason = Redirect_disallowed_in_caller { stage }
               ; diagnostic =
-                  Printf.sprintf "pipeline stage %d carries a file redirect" stage
+                  Printf.sprintf "pipeline stage %d carries a redirect" stage
               }
           | None ->
             (match first_path_failure ~path_policy stages with
@@ -487,19 +488,3 @@ let last_stage_bin context =
 ;;
 
 let is_pipeline context = List.length context.stage_bins > 1
-
-(* RFC-0092 Phase C authority — facade-side predicate.
-
-   This sub-library cannot depend on [masc_mcp.gate_diff_types]
-   (which lives in the root masc_mcp library and would introduce a
-   cycle), so the env read is duplicated here.  The truthy-value set
-   must stay byte-for-byte identical to [Gate_diff_types.
-   typed_authority_enabled] — both predicates are the single
-   operator-facing SSOT for [MASC_BASH_TYPED_AUTHORITY] and divergence
-   would silently break the authority flip.  If a future RFC promotes
-   the predicate to a shared dep, delete this copy. *)
-let is_authoritative () =
-  match Sys.getenv_opt "MASC_BASH_TYPED_AUTHORITY" with
-  | Some ("1" | "true" | "TRUE" | "yes" | "on") -> true
-  | _ -> false
-;;

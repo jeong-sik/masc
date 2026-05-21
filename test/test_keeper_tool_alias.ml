@@ -412,13 +412,21 @@ let test_public_input_schema_present () =
     (Option.is_none (Alias.public_input_schema "Nope"))
 ;;
 
-let test_bash_schema_uses_command_field () =
+let test_bash_schema_uses_typed_fields () =
   let schema = Option.get (Alias.public_input_schema "Bash") in
   let props = Option.get (yojson_field "properties" schema) in
   Alcotest.(check bool)
-    "Bash schema exposes 'command' (not 'cmd')"
+    "Bash schema exposes executable"
     true
-    (Option.is_some (yojson_field "command" props));
+    (Option.is_some (yojson_field "executable" props));
+  Alcotest.(check bool)
+    "Bash schema exposes argv"
+    true
+    (Option.is_some (yojson_field "argv" props));
+  Alcotest.(check bool)
+    "Bash schema exposes pipeline"
+    true
+    (Option.is_some (yojson_field "pipeline" props));
   Alcotest.(check bool)
     "Bash schema exposes cwd for sandbox repo disambiguation"
     true
@@ -427,37 +435,29 @@ let test_bash_schema_uses_command_field () =
     "Bash schema does not expose 'cmd' directly"
     true
     (Option.is_none (yojson_field "cmd" props));
-  let required =
-    match yojson_field "required" schema with
-    | Some (`List items) ->
-      List.filter_map
-        (function
-          | `String s -> Some s
-          | _ -> None)
-        items
-    | _ -> []
-  in
-  Alcotest.(check (list string)) "Bash requires 'command'" [ "command" ] required
+  Alcotest.(check bool)
+    "Bash schema does not expose legacy command"
+    true
+    (Option.is_none (yojson_field "command" props));
+  Alcotest.(check bool)
+    "Bash schema does not expose background toggle"
+    true
+    (Option.is_none (yojson_field "run_in_background" props))
 ;;
 
-let test_bash_schema_guides_public_frontdoor () =
+let test_bash_schema_guides_typed_frontdoor () =
   let schema = Option.get (Alias.public_input_schema "Bash") in
   let props = Option.get (yojson_field "properties" schema) in
-  let command = Option.get (yojson_field "command" props) in
-  let description = Option.get (yojson_string_field "description" command) in
+  let executable = Option.get (yojson_field "executable" props) in
+  let description = Option.get (yojson_string_field "description" executable) in
   List.iter
     (fun (label, needle) ->
        Alcotest.(check bool)
          label
          true
          (string_contains ~sub:needle description))
-    [ "Bash command schema names public front door", "public Bash front door"
-    ; "Bash command schema blocks keeper tool names", "Do not call keeper_*"
-    ; "Bash command schema blocks masc tool names", "masc_* tool names"
-    ; "Bash command schema routes file observation", "use Read or Grep first"
-    ; "Bash command schema routes workflow tools", "visible task/board/PR tools"
-    ; "Bash command schema asks for cwd", "Always set cwd"
-    ; "Bash command schema blocks command substitution", "command substitution"
+    [ "Bash executable schema names typed argv", "Typed argv form"
+    ; "Bash executable schema blocks combined shell syntax", "do not combine shell syntax"
     ]
 ;;
 
@@ -477,23 +477,20 @@ let test_read_schema_uses_file_path () =
 let test_translate_bash_input () =
   let input =
     `Assoc
-      [ "command", `String "ls -la"
+      [ "executable", `String "ls"
+      ; "argv", `List [ `String "-la" ]
       ; "cwd", `String "repos/masc-mcp"
-      ; "timeout", `Int 60
-      ; "description", `String "list files"
-      ; "run_in_background", `Bool false
+      ; "timeout_sec", `Int 60
       ]
   in
   let translated = Alias.translate_input ~public:"Bash" input in
-  let cmd = yojson_field "cmd" translated in
+  let executable = yojson_field "executable" translated in
   let timeout_sec = yojson_field "timeout_sec" translated in
   let cwd = yojson_field "cwd" translated in
-  let bg = yojson_field "run_in_background" translated in
-  let desc = yojson_field "description" translated in
   Alcotest.(check (option string))
-    "command -> cmd"
-    (Some "ls -la")
-    (Option.bind cmd (function
+    "executable passes through"
+    (Some "ls")
+    (Option.bind executable (function
        | `String s -> Some s
        | _ -> None));
   Alcotest.(check (option int))
@@ -508,8 +505,7 @@ let test_translate_bash_input () =
     (Option.bind cwd (function
        | `String s -> Some s
        | _ -> None));
-  Alcotest.(check bool) "run_in_background passes through" true (Option.is_some bg);
-  Alcotest.(check bool) "description is dropped" true (Option.is_none desc)
+  Alcotest.(check bool) "typed args unchanged" true (Yojson.Safe.equal input translated)
 ;;
 
 let test_translate_read_input () =
@@ -860,13 +856,13 @@ let () =
             `Quick
             test_public_input_schema_present
         ; Alcotest.test_case
-            "Bash schema uses 'command' field"
+            "Bash schema uses typed fields"
             `Quick
-            test_bash_schema_uses_command_field
+            test_bash_schema_uses_typed_fields
         ; Alcotest.test_case
-            "Bash schema guides public front door"
+            "Bash schema guides typed front door"
             `Quick
-            test_bash_schema_guides_public_frontdoor
+            test_bash_schema_guides_typed_frontdoor
         ; Alcotest.test_case
             "Read schema uses 'file_path' field"
             `Quick

@@ -321,7 +321,6 @@ lib/exec/risk_classifier.ml:46
 lib/failure_envelope.ml:80
 lib/failure_envelope.ml:146
 lib/failure_envelope.ml:207
-lib/gate_diff_types.ml:140
 lib/gate/channel_gate_discord_state.ml:282
 lib/gate/channel_gate_discord_state.ml:295
 lib/gate/channel_gate_imessage_state.ml:298
@@ -827,8 +826,6 @@ lib/server/server_routes_http_routes_channel_gate.ml:177
 lib/server/server_routes_http_routes_credentials.ml:236
 lib/server/server_routes_http_routes_dashboard.ml:70
 lib/server/server_routes_http_routes_git_graph.ml:8
-lib/server/server_routes_http_routes_legendary_bash.ml:243
-lib/server/server_routes_http_routes_legendary_bash.ml:295
 lib/server/server_routes_http_routes_provider_runs.ml:169
 lib/server/server_routes_http_routes_provider_runs.ml:199
 lib/server/server_routes_http_routes_provider_runs.ml:218

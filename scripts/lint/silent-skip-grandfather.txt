@@ -38,6 +38,4 @@ lib/keeper/keeper_shell_bash.ml:666:E2
 #  comment-only lines via tree-sitter-OCaml in a future iteration.
 #  For PR-1 we accept regex-based grep with `# noqa` suppression
 #  inline where comments quote the pattern.)
-lib/exec/test/test_exec_run_json.ml:34:T1
-lib/exec/test/test_exec_run.ml:39:T1
 lib/keeper/keeper_memory_recall.ml:23:T1

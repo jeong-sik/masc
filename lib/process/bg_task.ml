@@ -6,9 +6,8 @@
    time it is called.  Rationale:
    - Simpler lifecycle: no long-lived switch to manage, no fiber
      leakage surface.
-   - Matches the MCP request/response cadence — the LLM polls by
-     calling [keeper_bash_output], so there is always a natural
-     trigger for draining.
+   - Matches a pull-based request/response cadence: consumers call
+     [read], so there is always a natural trigger for draining.
    - Back-pressure: the OS pipe buffer (~64 KB on Linux, larger on
      macOS) absorbs short silences; long silences block the child on
      write until the next pull.  Acceptable for Tick 6a; Tick 7 will

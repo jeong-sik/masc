@@ -2423,7 +2423,8 @@ let test_prompt_includes_operational_tool_guidance () =
     bool
     "system prompt uses public Bash example"
     true
-    (contains_substring sys "Bash { command: \"git log --oneline -5\"");
+    (contains_substring sys
+       "Bash { executable: \"git\", argv: [\"log\", \"--oneline\", \"-5\"]");
   check
     bool
     "system prompt avoids keeper_shell rg recipe"
@@ -2431,9 +2432,9 @@ let test_prompt_includes_operational_tool_guidance () =
     (contains_substring sys "keeper_shell op=rg");
   check
     bool
-    "system prompt avoids keeper_bash command recipe"
+    "system prompt avoids private keeper_bash call shape"
     false
-    (contains_substring sys "keeper_bash { cmd:");
+    (contains_substring sys "keeper_bash {");
   check
     bool
     "raw gh PR creation not documented"
@@ -2479,7 +2480,8 @@ let test_capabilities_prompt_distinguishes_sandbox_and_worktree () =
     bool
     "git path documented via public Bash"
     true
-    (contains_substring prompt "Bash command='git status --short'");
+    (contains_substring prompt
+       "Bash executable=\"git\" argv=[\"status\",\"--short\"]");
   check
     bool
     "capabilities avoids hidden Bash backing name"
@@ -2586,7 +2588,7 @@ let test_system_prompt_prefers_bash_and_gh_pr_lane () =
     true
     (contains_substring
        sys
-       "Use only the tool schemas currently shown to you by the runtime");
+       "Use only the exact tool schemas currently shown to you by the runtime");
   check
     bool
     "mentions native PR route"
@@ -3212,7 +3214,7 @@ let test_work_discovery_nudge_uses_registered_keeper_tool_schemas () =
     bool
     "social guidance omits bash outside preset"
     false
-    (contains_substring social_guidance "`Bash` { command:");
+    (contains_substring social_guidance "`Bash` { executable:");
   check
     bool
     "social guidance omits worktree outside preset"
@@ -3222,12 +3224,12 @@ let test_work_discovery_nudge_uses_registered_keeper_tool_schemas () =
     bool
     "coding guidance includes public Bash schema"
     true
-    (contains_substring coding_guidance "`Bash` { command:");
+    (contains_substring coding_guidance "`Bash` { executable:");
   check
     bool
-    "coding guidance does not leak keeper_bash backing name"
+    "coding guidance does not leak keeper_bash call shape"
     false
-    (contains_substring coding_guidance "`keeper_bash` { cmd:");
+    (contains_substring coding_guidance "`keeper_bash` {");
   check
     bool
     "coding guidance includes web search schema"
@@ -7350,7 +7352,8 @@ let test_prompt_guides_shell_existence_checks_to_structured_tools () =
     bool
     "shell existence checks use public aliases"
     true
-    (contains_substring sys "Use `Read`, `Grep`, or one plain `Bash` command");
+    (contains_substring sys
+       "Use `Read`, `Grep`, or one typed `Bash` argv call");
   check
     bool
     "keeper bash hint forbids shell existence tests"

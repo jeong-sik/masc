@@ -1,5 +1,4 @@
 (** Shell word helpers for worker path and transparent-wrapper policy. *)
-
 val strip_wrapping_quotes : string -> string
 
 val command_after_env_prefix : string list -> string option

@@ -5,7 +5,7 @@ module Types = Masc_domain
 open Masc_mcp
 
 let all_keeper : Tool_name.Keeper.t list =
-  [ Bash; Bash_kill; Bash_output; Board_cleanup; Board_comment; Board_comment_vote
+  [ Bash; Board_cleanup; Board_comment; Board_comment_vote
   ; Board_curation_read; Board_curation_submit; Board_delete
   ; Board_get; Board_list; Board_post; Board_search; Board_stats; Board_vote
   ; Broadcast; Code_read; Context_status; Discovery; Fs_edit; Fs_read

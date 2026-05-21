@@ -6,8 +6,8 @@ Plan - 2026-05-18.html`, PR-A).
 Each row in `baseline.jsonl` is one fixture used by
 `test_exec_shell_command_gate.ml` to pin both:
 
-- The legacy `Worker_dev_tools.validate_command_coding_with_allowlist`
-  verdict (`legacy_verdict`).
+- The `Worker_dev_tools.validate_command_coding_with_allowlist`
+  verdict (`worker_verdict`).
 - The Phase 1 SSOT `Masc_exec_command_gate.Shell_command_gate.gate`
   verdict (`ir_verdict`).
 
@@ -23,7 +23,7 @@ Each line is a single object:
 {
   "raw_cmd": "<the input string>",
   "category": "<corpus category>",
-  "expected_legacy_verdict": "<ok | injection | chain_or_redirect | ...>",
+  "expected_worker_verdict": "<ok | injection | chain_or_redirect | ...>",
   "expected_ir_verdict": "<allow | reject | cannot_parse | too_complex>",
   "ir_detail": "<optional tag — reject_reason, parse_reason, or too_complex_reason>",
   "note": "<one-line rationale>"
@@ -32,20 +32,20 @@ Each line is a single object:
 
 `category` is one of:
 
-- `successful` — legacy and IR both allow.
-- `rejected` — legacy and IR both reject (or both classify outside
+- `successful` — worker gate and IR both allow.
+- `rejected` — worker gate and IR both reject (or both classify outside
   the allowlist) for the same root reason.
-- `false_positive` — legacy rejects a benign command that IR
+- `false_positive` — worker gate rejects a benign command that IR
   correctly allows. This is the bucket the quoted-pipe regex fix
   (#16110) and follow-ups continue to drain.
 - `too_complex` — IR classifies as `too_complex` (heredoc, cmd_subst,
-  proc_subst, logic_op, …); legacy may allow or reject depending on
+  proc_subst, logic_op, …); worker gate may allow or reject depending on
   metachar scan.
 - `quoted_pipe`, `regex_alternation`, `literal_pipe`, `real_pipeline`,
   `redirection`, `glob`, `path_traversal` — feature buckets for the
   Plan's "Phase 0 minimum set".
 
-## Legacy verdict tags
+## Worker verdict tags
 
 `block_reason_to_string` cases map to short tags here:
 

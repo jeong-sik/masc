@@ -1120,9 +1120,9 @@ let link_task_execution_artifacts_r
              in
              emit_task_activity
                config
-              ~agent_name:"system"
-              ~task_id
-              ~kind:(Event_kind.Task.to_string Event_kind.Task.Linked)
+               ~agent_name:"system"
+               ~task_id
+               ~kind:(Event_kind.Task.to_string Event_kind.Task.Linked)
                ~payload:(`Assoc ([ "task_id", `String task_id ] @ execution_link_fields));
              log_event
                config

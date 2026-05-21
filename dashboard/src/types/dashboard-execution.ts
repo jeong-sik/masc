@@ -117,15 +117,99 @@ export interface DashboardRuntimeResolution {
   build: ServerBuildIdentity
   keeper_runtime: KeeperRuntimeResolved | null
   fleet_safety: DashboardFleetSafetyHealth | null
+  cdal: DashboardCdalHealth | null
 }
 
 export interface DashboardFleetSafetyHealth {
   keeper_fibers: number | null
   paused_keepers: number | null
+  paused_keepers_health: DashboardPausedKeepersHealth | null
   keeper_fleet_no_fibers: boolean | null
   keeper_fd_pressure: DashboardFleetPressureHealth | null
   keeper_fleet_safety: DashboardFleetPressureHealth | null
   keeper_reaction_ledger: DashboardKeeperReactionLedgerHealth | null
+}
+
+export interface DashboardPausedKeeperDetail {
+  name: string
+  autoboot_enabled: boolean | null
+  pause_kind: string | null
+  auto_resume_after_sec: number | null
+  persisted_auto_resume_after_sec: number | null
+  auto_resume_source: string | null
+  paused_elapsed_sec: number | null
+  auto_resume_remaining_sec: number | null
+  last_blocker_class: string | null
+  last_blocker_detail: string | null
+  missing_pause_root_cause: boolean | null
+}
+
+export interface DashboardPausedKeeperReadError {
+  keeper: string
+  error: string
+}
+
+export interface DashboardPausedKeepersHealth {
+  count: number | null
+  names: string[]
+  running_count: number | null
+  running_names: string[]
+  durable_count: number | null
+  durable_names: string[]
+  autoboot_enabled_count: number | null
+  autoboot_enabled_names: string[]
+  details: DashboardPausedKeeperDetail[]
+  read_error_count: number | null
+  read_errors: DashboardPausedKeeperReadError[]
+}
+
+export interface DashboardCdalProofCompleteness {
+  scan_limit: number | null
+  run_dir_entries_seen: number | null
+  scan_truncated: boolean | null
+  run_dirs_scanned: number | null
+  completed_run_dirs: number | null
+  incomplete_run_dirs: number | null
+  stale_incomplete_run_dirs: number | null
+  terminal_incomplete_run_dirs: number | null
+  missing_manifest_run_dirs: number | null
+  missing_contract_run_dirs: number | null
+  stale_incomplete_grace_seconds: number | null
+  sample_stale_incomplete_run_ids: string[]
+  sample_terminal_incomplete_run_ids: string[]
+}
+
+export interface DashboardCdalProofStoreHealth {
+  root: string | null
+  proofs_dir: string | null
+  exists: boolean | null
+  latest_activity_at: string | null
+  latest_activity_unix: number | null
+  age_seconds: number | null
+  status: string | null
+  completeness: DashboardCdalProofCompleteness | null
+}
+
+export interface DashboardCdalTaskScopeHealth {
+  status: string | null
+  recent_limit: number | null
+  recent_rows: number | null
+  task_id_rows: number | null
+  missing_task_scope_rows: number | null
+  legacy_unscoped_rows: number | null
+  current_writer_missing_task_scope_rows: number | null
+  missing_task_scope: boolean | null
+  partial_task_scope: boolean | null
+  current_writer_missing_task_scope: boolean | null
+  legacy_unscoped_only: boolean | null
+}
+
+export interface DashboardCdalHealth {
+  writer_status: string | null
+  operator_action_required: boolean | null
+  proof_store_path_drift: boolean | null
+  proof_store: DashboardCdalProofStoreHealth | null
+  task_scope: DashboardCdalTaskScopeHealth | null
 }
 
 export interface DashboardKeeperReactionLedgerPendingKeeper {

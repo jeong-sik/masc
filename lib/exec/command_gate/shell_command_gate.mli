@@ -235,3 +235,20 @@ val is_authoritative : unit -> bool
     Predicate-only stage: this PR does not change facade behavior
     when the flag is on — the authority decision-arm wiring lands in
     a follow-up so risk stays measurable. *)
+
+val is_authoritative_for : caller -> bool
+(** [is_authoritative_for caller] returns [true] iff
+    [MASC_SHELL_GATE_AUTHORITY] explicitly lists [caller].
+
+    Accepted comma-separated tokens are:
+
+    - [worker] or [worker_dev_tools]
+    - [code_write] or [tool_code_write]
+    - [keeper_bash] or [keeper_shell_bash]
+
+    The predicate re-reads the environment on every call and ignores
+    unknown tokens. Broad truthy values such as [1], [true], and [on]
+    are intentionally not accepted here: RFC-0131's authority flip is
+    per-caller, so operators must name the caller set explicitly.
+    This is behavior-neutral until authority decision arms consume the
+    predicate in a follow-up PR. *)

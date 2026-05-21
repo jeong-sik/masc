@@ -40,7 +40,7 @@ let valid_sections =
   ; "command", [ "operations" ]
   ; "connectors", [ "connector-status" ]
   ; "workspace", [ "board"; "sub-boards"; "moderation"; "planning"; "repositories"; "verification" ]
-  ; "lab", [ "tools"; "autoresearch"; "harness" ]
+  ; "lab", [ "tools"; "harness" ]
   ; "code", [ "ide-shell" ]
   ]
 ;;

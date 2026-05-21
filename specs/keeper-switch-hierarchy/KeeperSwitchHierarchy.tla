@@ -7,8 +7,8 @@
 \* Runtime truth being modelled:
 \*   - On server startup, root_sw is set; current_sw := root_sw.
 \*   - Two fiber roles run concurrently:
-\*       * SERVER fibers (dashboard, board_dispatch, relation_materializer,
-\*         autoresearch_codegen) — fork child work that MUST attach to root_sw
+\*       * SERVER fibers (dashboard, board_dispatch, relation_materializer) —
+\*         fork child work that MUST attach to root_sw
 \*         (they outlive any single turn).
 \*       * KEEPER fibers — execute run_turn. Inside run_turn, with_sw swaps
 \*         current_sw := turn_sw, and resources created by keeper should

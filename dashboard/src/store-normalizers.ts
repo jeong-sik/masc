@@ -115,7 +115,6 @@ export function normalizeTask(raw: unknown): Task | null {
           ? {
               operation_id: asString(raw.contract.links.operation_id) ?? null,
               session_id: asString(raw.contract.links.session_id) ?? null,
-              autoresearch_loop_id: asString(raw.contract.links.autoresearch_loop_id) ?? null,
             }
           : null,
       }
@@ -135,7 +134,6 @@ export function normalizeTask(raw: unknown): Task | null {
     ? {
         operation_id: asString(raw.execution_links.operation_id) ?? null,
         session_id: asString(raw.execution_links.session_id) ?? null,
-        autoresearch_loop_id: asString(raw.execution_links.autoresearch_loop_id) ?? null,
       }
     : null
   return {

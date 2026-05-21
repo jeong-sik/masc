@@ -73,7 +73,6 @@ code_refs:
   - `#workspace?section=verification`
 - `lab`
   - `#lab?section=tools`
-  - `#lab?section=autoresearch`
   - `#lab?section=harness`
 - `code`
   - `#code?section=ide-shell`
@@ -184,8 +183,6 @@ code_refs:
   - lab tools inventory
 - `GET /api/v1/dashboard/tool-quality`, `GET /api/v1/tool-metrics`, `GET /api/v1/prompts`
   - lab tool quality aggregates, unified usage metrics, and prompt registry read model
-- `GET /api/v1/autoresearch/loops`
-  - lab autoresearch loops
 - `GET /api/v1/dashboard/harness-health`
   - lab harness health
 - `GET /api/v1/ide/annotations`, `GET /api/v1/ide/regions`, `GET /api/v1/ide/presence`

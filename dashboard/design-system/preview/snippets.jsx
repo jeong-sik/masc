@@ -219,61 +219,6 @@ const SNIPPETS = [
 </div>`,
   },
   {
-    id: 'ar-loop-row', group: 'phase2', src: 'preview/components.css',
-    title: 'Autoresearch loop row',
-    desc: 'ar-loop summary line. State: .open / .closed. Confidence: .hi / .lo / .vlo.',
-    html:
-`<div style="display:flex;flex-direction:column">
-  <div class="ar-row">
-    <span class="id">ar-2025-04-11</span>
-    <span class="topic">Why does cascade hop 4 return null on probe timeout?</span>
-    <span class="st closed">CLOSED</span>
-    <span class="conf hi">0.92</span>
-  </div>
-  <div class="ar-row">
-    <span class="id">ar-2025-04-18</span>
-    <span class="topic">Drift threshold calibration vs claim_holder churn</span>
-    <span class="st open">OPEN</span>
-    <span class="conf lo">0.41</span>
-  </div>
-  <div class="ar-row">
-    <span class="id">ar-2025-04-22</span>
-    <span class="topic">Operator nudge cooldown effect on stalled tasks</span>
-    <span class="st open">OPEN</span>
-    <span class="conf vlo">0.18</span>
-  </div>
-</div>`,
-  },
-  {
-    id: 'ar-finding-card', group: 'phase2', src: 'preview/components.css',
-    title: 'Autoresearch finding card',
-    desc: 'Hypothesis · evidence · conclusion. Three styled blocks with brass / muted / ok accents.',
-    html:
-`<div class="ar-find">
-  <div class="hdr">
-    <span class="id">f-002</span>
-    <span class="loop">ar-2025-04-11</span>
-    <span class="conf">conf 0.92</span>
-  </div>
-  <div>
-    <div class="sec-h">Hypothesis</div>
-    <div class="hy">Cascade hop 4 returns null when upstream probe exceeds 1.8s.</div>
-  </div>
-  <div>
-    <div class="sec-h">Evidence</div>
-    <div class="ev-list">
-      <div class="ev">6/6 runs above 1.8s probe → null hop 4</div>
-      <div class="ev">0/12 runs below 1.5s probe → null hop 4</div>
-      <div class="ev">tracebacks consistent at cascade.py:412</div>
-    </div>
-  </div>
-  <div>
-    <div class="sec-h">Conclusion</div>
-    <div class="co">Hop 4 lacks timeout-aware fallback. Patch with 4s probe window.</div>
-  </div>
-</div>`,
-  },
-  {
     id: 'episode-card', group: 'phase2', src: 'preview/components.css',
     title: 'Episode card',
     desc: 'Per-turn episode card with participant pills and outcome chip.',
@@ -419,8 +364,8 @@ const SNIPPETS = [
   </div>
   <div class="row">
     <span class="glyph">⎇</span>
-    <span class="nm">ar/drift-calibration</span>
-    <span class="tag AUTORESEARCH">AUTORESEARCH</span>
+    <span class="nm">research/drift-calibration</span>
+    <span class="tag RESEARCH">RESEARCH</span>
     <span class="st research">research</span>
     <span class="ahbh"><span class="ah">+0</span><span class="bh">−18</span></span>
     <span class="head">7c5b4a3</span>
@@ -479,7 +424,7 @@ const SNIPPETS = [
 
 const GROUPS = [
   { id: 'atoms',  name: 'Atoms',                  desc: 'Smallest reusable building blocks — chips, bars, sparks, buttons.' },
-  { id: 'phase2', name: 'Phase 2 row primitives', desc: 'Reusable rows from board, decisions, memory, autoresearch, audit, cascade, heuristic, nudge, keeper, branch.' },
+  { id: 'phase2', name: 'Phase 2 row primitives', desc: 'Reusable rows from board, decisions, memory, audit, cascade, heuristic, nudge, keeper, branch.' },
   { id: 'forms',  name: 'Form controls',          desc: 'Inputs, checkboxes, toggles, segmented controls.' },
 ];
 

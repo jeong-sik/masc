@@ -92,11 +92,6 @@ export const HEATMAP_COLORS = [
   'var(--color-cyan)', // 76-100%
 ] as const
 
-// --- Autoresearch form defaults ---
-export const AUTORESEARCH_DEFAULT_MAX_CYCLES = 100
-export const AUTORESEARCH_DEFAULT_CYCLE_TIMEOUT_S = 300
-export const AUTORESEARCH_DEFAULT_MODEL = 'glm'
-
 // --- TLA+ verification panel poll interval ---
 export const TLA_POLL_INTERVAL_MS = 60_000
 

@@ -5,8 +5,7 @@ module Types = Masc_domain
     Validates the structural invariant that keeper tools and agent
     coordination tools occupy disjoint namespaces.
 
-    Retired autoresearch tools must not be restored through the shard system.
-    The isolation boundary is between keeper tools and agent coordination tools
+	    The isolation boundary is between keeper tools and agent coordination tools
     (spawned_agent_public).
 
     Pure synchronous tests — no Eio or network required. *)

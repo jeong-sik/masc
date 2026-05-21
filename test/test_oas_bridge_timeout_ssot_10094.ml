@@ -11,7 +11,7 @@
      1. The known caller table preserves the deliberate 120s/180s
         budgets that were originally chosen for compute-heavy
         callers — a future refactor that drops them by accident
-        regresses autoresearch / deep_review / anti_rationalization
+        regresses persona authoring / deep_review / anti_rationalization
         rather than just the fantasy 60s sites this PR fixed.
      2. The two fantasy 60s budgets are raised to the global
         default (300s) — the explicit symptom from the issue.
@@ -59,7 +59,6 @@ let test_intentional_budgets_preserved () =
   clear_envs ();
   let cases =
     [
-      Cfg.Autoresearch_codegen, 120.0;
       Cfg.Keeper_persona_authoring, 120.0;
       Cfg.Server_openai_compat, 120.0;
       Cfg.Tool_deep_review, 180.0;

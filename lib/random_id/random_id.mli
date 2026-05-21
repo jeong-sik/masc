@@ -2,7 +2,7 @@
 
     Wraps [Mirage_crypto_rng.generate] + hex encoding — the same
     5-line pattern that had been copy-pasted across 6 call-sites
-    (verification, board post/comment, autoresearch finding, coord
+    (verification, board post/comment, coord
     task, streamable HTTP session, ...). Centralising removes the
     drift risk and lets lower-layer libraries (e.g. [masc_coord])
     use the same generator without depending on [masc_mcp].

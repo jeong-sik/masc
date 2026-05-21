@@ -106,47 +106,6 @@ let test_execute_tool_tag_dispatch_respects_pre_hooks () =
       Alcotest.(check string) "blocked message returned" "blocked-by-pre-hook"
         (Tool_result.message hook_result))
 
-let test_execute_tool_autoresearch_is_retired () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  Mcp_eio.set_net (Eio.Stdenv.net env);
-  Mcp_eio.set_clock (Eio.Stdenv.clock env);
-  let clock = Eio.Stdenv.clock env in
-  Eio.Switch.run @@ fun sw ->
-  let base_path = temp_dir () in
-  Fun.protect
-    ~finally:(fun () ->
-      Tool_dispatch.clear_hooks ();
-      cleanup_dir base_path)
-    (fun () ->
-      Tool_dispatch.clear_hooks ();
-      let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
-      let sid = "mcp-autoresearch-session-agent" in
-      let init_result =
-        Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
-          ~name:"masc_init" ~arguments:(`Assoc [])
-      in
-      (* masc_init pruned from registry - dispatch fails. Initialise
-         the room state directly so downstream masc_join succeeds. *)
-      Alcotest.(check bool) "init returns failure (tool pruned)" false
-        init_result.Tool_result.success;
-      let _ = Masc_mcp.Coord.init state.room_config ~agent_name:None in
-      let join_result =
-        Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
-          ~name:"masc_join"
-          ~arguments:(`Assoc [ ("agent_name", `String "codex") ])
-      in
-      Alcotest.(check bool) "join success" true join_result.Tool_result.success;
-      let start_result =
-        Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
-          ~name:"masc_autoresearch_start"
-          ~arguments:(`Assoc [])
-      in
-      Alcotest.(check bool) "start is retired" false start_result.Tool_result.success;
-      Alcotest.(check bool) "fails before autoresearch dispatch" true
-        (contains_substring (Tool_result.message start_result)
-           "not in current tool set"))
-
 let () =
   Alcotest.run "Mcp_server_eio_tool_dispatch"
     [
@@ -156,8 +115,5 @@ let () =
           ( "execute tag dispatch respects pre-hooks",
             `Quick,
             test_execute_tool_tag_dispatch_respects_pre_hooks );
-          ( "execute autoresearch is retired",
-            `Quick,
-            test_execute_tool_autoresearch_is_retired );
         ] );
     ]

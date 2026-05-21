@@ -70,7 +70,7 @@ val force_cancel_task_r :
 
 val link_task_execution_artifacts_r :
   config -> task_id:string ->
-  ?session_id:string -> ?operation_id:string -> ?autoresearch_loop_id:string ->
+  ?session_id:string -> ?operation_id:string ->
   unit -> string Masc_domain.masc_result
 
 (** {1 Re-exported type (backward compatibility)} *)

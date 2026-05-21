@@ -187,7 +187,7 @@ val handle_call_tool_eio :
     [resources/updated] for the resource ids the tool
     invalidated.  [broadcast_tools_list_changed] is fired
     when the call is known to alter the tool catalogue
-    (autoresearch start / stop, etc).
+    (long-running mutations, etc).
 
     The dispatcher applies the per-tool timeout from
     {!tool_timeout_sec_opt}, retries read-only failures

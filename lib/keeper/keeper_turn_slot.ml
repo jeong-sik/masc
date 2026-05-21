@@ -9,33 +9,25 @@ open Keeper_types
 (** The three semaphore pools that gate keeper turn admission.
     Closed sum type: adding a new pool requires updating every match site,
     which the compiler enforces exhaustively. *)
-type slot_pool =
+type slot_pool = Keeper_turn_slot_types.slot_pool =
   | Turn_pool
   | Autonomous_pool
   | Reactive_pool
 
-let slot_pool_to_string = function
-  | Turn_pool -> "turn"
-  | Autonomous_pool -> "autonomous"
-  | Reactive_pool -> "reactive"
-;;
+let slot_pool_to_string = Keeper_turn_slot_types.slot_pool_to_string
 
-exception Semaphore_wait_timeout of float
+exception Semaphore_wait_timeout = Keeper_turn_slot_types.Semaphore_wait_timeout
 
-type semaphore_wait_phase =
+type semaphore_wait_phase = Keeper_turn_slot_types.semaphore_wait_phase =
   | Autonomous_queue_head
   | Autonomous_slot
   | Reactive_slot
   | Turn_slot
 
-let semaphore_wait_phase_to_string = function
-  | Autonomous_queue_head -> "autonomous_queue_head"
-  | Autonomous_slot -> "autonomous_slot"
-  | Reactive_slot -> "reactive_slot"
-  | Turn_slot -> "turn_slot"
-;;
+let semaphore_wait_phase_to_string =
+  Keeper_turn_slot_types.semaphore_wait_phase_to_string
 
-type semaphore_wait_timeout =
+type semaphore_wait_timeout = Keeper_turn_slot_types.semaphore_wait_timeout =
   { timeout_wait_sec : float
   ; timeout_phase : semaphore_wait_phase
   ; timeout_autonomous_available : int
@@ -46,17 +38,7 @@ type semaphore_wait_timeout =
   ; timeout_holders : (string * float) list
   }
 
-(* RFC-0085 PR-11 — Dropped the [~deprecated] fallback; the typo legacy
-   env MASC_KEEPER_AUTOBOT_MAX is no longer recognised. Operators
-   must set MASC_KEEPER_AUTOBOOT_MAX. *)
-let int_of_env_default ~primary ~default ~min_v ~max_v =
-  match Sys.getenv_opt primary with
-  | None -> default
-  | Some raw when String.trim raw = "" -> default
-  | Some raw ->
-    let v = Option.value ~default (int_of_string_opt (String.trim raw)) in
-    Keeper_config.clamp_int v ~min_v ~max_v
-;;
+let int_of_env_default = Keeper_turn_slot_types.int_of_env_default
 
 (* Global turn slot cap across autonomous + reactive pools.
 

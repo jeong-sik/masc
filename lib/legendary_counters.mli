@@ -69,23 +69,14 @@ val incr_typed_advisor : Shell_ir_validator.advisory -> unit
     [Gate_diff_types.typed_advisor_log_enabled ()] is true so an
     operator running with the flag off pays zero cost. *)
 
-(** RFC-0131 PR-3 — caller × verdict telemetry partition for the
-    Shell_command_gate facade.
+(** RFC-0131 — caller × verdict telemetry partition for the exec
+    shell command gate.
 
-    Mirrors the [caller] tag defined in {!Shell_command_gate.caller}
-    on both the legacy and SSOT facades.  Increment from each
-    facade's verdict-producing public entry point ({!Shell_command_gate.gate},
-    {!Shell_command_gate.lower_typed_pipeline}, and
-    {!Shell_command_gate.validate_allowlist} on legacy) so a future
-    authority flip (RFC-0131 PR-5) automatically populates the
-    per-caller partition without further wiring.
-
-    Until PR-5 lands the production parse path goes through
-    [Worker_dev_tools.validate_command_coding_with_allowlist] which
-    consumes only [Shell_command_gate.parse] (a parser, not a
-    verdict producer), so emit volume is naturally 0 in production.
-    Tests covering the verdict surface exercise this counter
-    directly. *)
+    Mirrors the [caller] tag defined in
+    {!Masc_exec_command_gate.Shell_command_gate.caller}.  Callers that
+    produce an exec gate verdict increment this counter at their boundary
+    so production telemetry follows the actual authoritative path rather
+    than the retired legacy authority-flip shim. *)
 type shell_gate_caller =
   | Worker_dev_tools
   | Tool_code_write
@@ -157,8 +148,8 @@ type snapshot = {
   typed_advisor_allow : int;
   typed_advisor_reject : int;
   typed_advisor_cannot_parse : int;
-  (* RFC-0131 PR-3 — caller × verdict partition for the
-     [Shell_command_gate] facade.  3 callers × 3 verdicts = 9
+  (* RFC-0131 — caller × verdict partition for the exec shell command
+     gate.  3 callers × 3 verdicts = 9
      buckets.  Field order matches [shell_gate_caller × shell_gate_verdict_kind]
      row-major.  See {!incr_shell_gate} for the increment surface. *)
   shell_gate_worker_dev_tools_allow : int;

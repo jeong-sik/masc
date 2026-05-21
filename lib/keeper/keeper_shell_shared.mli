@@ -94,8 +94,9 @@ val clamp_shell_timeout :
   ?min_sec:float -> default:float -> Yojson.Safe.t -> float
 (** [clamp_shell_timeout ?min_sec ~default args] reads the
     optional [timeout_sec] field from [args], clamps it to
-    [\[min_sec, user_timeout_max_sec\]] (default [min_sec=1.0]),
-    and falls back to [default] when absent. *)
+    [\[min_sec, user_timeout_max_sec\]] (default:
+    [Timeout_floor.Native_shell]), and falls back to [default] when
+    absent. *)
 
 (** {1 Word + git-token tokenization} *)
 

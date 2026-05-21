@@ -124,7 +124,7 @@ type docker_shell_result =
     ([gh_min_timeout_sec = 15s], #8688) plus 5s headroom for image
     pull and container creation.  Operators can override via
     [MASC_KEEPER_DOCKER_RUN_MIN_TIMEOUT_SEC] (read once at module
-    load, floor 1s). *)
+    load, clamped to [Timeout_floor.Docker_run]). *)
 val docker_run_min_timeout_sec : float
 
 (** Run [cmd] inside the keeper Docker sandbox; clamps

@@ -521,7 +521,7 @@ let test_load_credential_missing_keeper_alias_stays_quiet () =
   check string "missing keeper alias emits no parse noise" ""
     (String.trim stderr_output)
 
-let test_verify_token_dashboard_legacy_alias_fallback () =
+let test_verify_token_rejects_dashboard_dev_legacy_alias () =
   let dir = setup_test_room () in
   let result =
     match Auth.create_token dir ~agent_name:"dashboard-dev" ~role:Masc_domain.Admin with
@@ -531,13 +531,11 @@ let test_verify_token_dashboard_legacy_alias_fallback () =
   in
   cleanup_test_room dir;
   match result with
-  | Ok cred ->
-      check string "legacy dashboard token owner" "dashboard-dev" cred.agent_name
+  | Ok cred -> fail (Printf.sprintf "unexpected credential owner: %s" cred.agent_name)
   | Error e ->
-      fail
-        (Printf.sprintf
-           "dashboard should accept legacy dashboard-dev credential: %s"
-           (Masc_domain.masc_error_to_string e))
+      let rendered = Masc_domain.masc_error_to_string e in
+      check bool "legacy dashboard-dev bearer rejected for dashboard" true
+        (contains_substring rendered "bearer token belongs to dashboard-dev")
 
 let test_save_raw_token_credential_uses_provided_token () =
   let dir = setup_test_room () in
@@ -1466,8 +1464,8 @@ let () =
         test_verify_token_keeper_alias_archives_dual_identity_bare;
       test_case "load_credential missing keeper alias stays quiet" `Quick
         test_load_credential_missing_keeper_alias_stays_quiet;
-      test_case "verify_token dashboard legacy alias fallback" `Quick
-        test_verify_token_dashboard_legacy_alias_fallback;
+      test_case "verify_token rejects dashboard-dev legacy alias" `Quick
+        test_verify_token_rejects_dashboard_dev_legacy_alias;
       test_case "save_raw_token_credential uses provided token" `Quick
         test_save_raw_token_credential_uses_provided_token;
       test_case "save_raw_token_credential works in eio runtime" `Quick

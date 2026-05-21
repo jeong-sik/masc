@@ -177,15 +177,6 @@ let raw_token_file config agent_name =
   Filename.concat (auth_dir config) (agent_name ^ ".token")
 ;;
 
-(* Dashboard loopback dev-token was historically issued under
-   [dashboard-dev] while the UI defaults to [dashboard]. Keep the old
-   credential valid for [dashboard] requests so already-open browser
-   sessions survive restarts and token-file migration. *)
-let legacy_credential_aliases = function
-  | "dashboard" -> [ "dashboard-dev" ]
-  | _ -> []
-;;
-
 let load_credential_from_path config agent_name path : agent_credential option =
   if file_exists path
   then (
@@ -281,33 +272,6 @@ let load_credential config agent_name : agent_credential option =
       | _ -> load_credential_from_path_raw config agent_name file
     with
     | Sys_error _ | Yojson.Json_error _ -> None)
-;;
-
-let load_credential_with_aliases config agent_name : agent_credential option =
-  match load_credential config agent_name with
-  | Some _ as c -> c
-  | None ->
-    let aliases = legacy_credential_aliases agent_name in
-    let result = List.find_map (load_credential config) aliases in
-    (match result with
-     | Some cred ->
-       (* Observability for RFC P2-b: every silent alias-fallback hit
-              indicates a dual-identity caller (e.g. requested
-              [keeper-sangsu-agent] while only bare [sangsu] credential
-              exists, or vice versa). The fallback preserves availability
-              by routing to the legacy credential, but [cred.agent_name]
-              reveals the file the request was served from — different
-              from the requested name. P2-a's [load_credential_of]
-              surfaces this as [Credential_mismatch]; this warn measures
-              how often the legacy fallback is still load-bearing while
-              migrations are in flight. *)
-       Log.Auth.warn
-         "[identity_drift:alias_fallback] requested=%s resolved=%s aliases_tried=[%s]"
-         agent_name
-         cred.agent_name
-         (String.concat ";" aliases)
-     | None -> ());
-    result
 ;;
 
 type load_credential_error =
@@ -814,16 +778,15 @@ let missing_credential_error config ~agent_name ~token : masc_error =
 
 (** Verify a token.
 
-    Looks up the credential by exact [agent_name] match first. If that
-    misses, hard-coded legacy aliases (dashboard → dashboard-dev) are
-    accepted. Generated nicknames may also use a token owned by their
-    stable prefix, but only when the supplied token itself resolves to
-    that prefix. This keeps joined nickname continuity without letting an
-    unrelated bearer token impersonate another generated family. Keeper
-    transport aliases (keeper-<name>-agent) additionally accept an
-    existing stable keeper token even after an exact alias credential has
-    been bootstrapped, because these aliases are transport identity, not
-    separate runtime actors. *)
+    Looks up the credential by exact [agent_name] match only. Generated
+    nicknames may use a token owned by their stable prefix, but only when
+    the supplied token itself resolves to that prefix. This keeps joined
+    nickname continuity without letting an unrelated bearer token
+    impersonate another generated family. Keeper transport aliases
+    (keeper-<name>-agent) additionally accept an existing stable keeper
+    token even after an exact alias credential has been bootstrapped,
+    because these aliases are transport identity, not separate runtime
+    actors. *)
 let verify_token_owner_alias config ~agent_name ~token =
   match find_credential_by_token config ~token with
   | Ok owner when String.equal owner.agent_name (credential_agent_name agent_name) ->
@@ -844,13 +807,7 @@ let verify_token_owner_alias config ~agent_name ~token =
 ;;
 
 let verify_token config ~agent_name ~token : (agent_credential, masc_error) result =
-  let cred_opt =
-    match load_credential config agent_name with
-    | Some _ as c -> c
-    | None ->
-      legacy_credential_aliases agent_name |> List.find_map (load_credential config)
-  in
-  match cred_opt with
+  match load_credential config agent_name with
   | None -> verify_token_owner_alias config ~agent_name ~token
   | Some cred ->
     let token_hash = sha256_hash token in
@@ -1179,7 +1136,7 @@ let refresh_token config ~agent_name ~old_token
   match verify_token config ~agent_name ~token:old_token with
   | Error (Auth (Auth_error.TokenExpired _)) ->
     (* Allow refresh even if expired *)
-    (match load_credential_with_aliases config agent_name with
+    (match load_credential config agent_name with
      | None ->
        Error (Auth (Auth_error.Unauthorized ("No credential found for " ^ agent_name)))
      | Some old_cred -> create_token config ~agent_name ~role:old_cred.role)

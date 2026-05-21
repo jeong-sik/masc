@@ -1,10 +1,10 @@
 {
   "stats": {
-    "total_modules": 1042,
-    "total_edges": 4378,
-    "avg_out_degree": 4.2,
-    "leaf_count": 265,
-    "root_count": 165
+    "total_modules": 1052,
+    "total_edges": 4409,
+    "avg_out_degree": 4.19,
+    "leaf_count": 266,
+    "root_count": 167
   },
   "top_imported": [
     [
@@ -17,7 +17,7 @@
     ],
     [
       "Coord",
-      191
+      193
     ],
     [
       "Keeper_metrics",
@@ -37,7 +37,7 @@
     ],
     [
       "Keeper_cascade_profile",
-      48
+      50
     ],
     [
       "Tool_dispatch",
@@ -69,7 +69,7 @@
     ],
     [
       "Sse",
-      33
+      34
     ],
     [
       "Keeper_types_profile",
@@ -85,7 +85,7 @@
     ],
     [
       "Cascade_runtime",
-      29
+      31
     ]
   ],
   "top_importers": [
@@ -131,7 +131,7 @@
     ],
     [
       "Server_routes_http_routes_dashboard",
-      35
+      36
     ],
     [
       "Keeper_heartbeat_loop",
@@ -143,7 +143,7 @@
     ],
     [
       "Server_h2_gateway",
-      31
+      32
     ],
     [
       "Server_routes_http_runtime",
@@ -393,6 +393,10 @@
       "Voice_bridge",
       "Voice_session_manager",
       "Worktree_live_context"
+    ],
+    [
+      "Autoresearch",
+      "Autoresearch_codegen"
     ]
   ],
   "clusters": [
@@ -710,6 +714,19 @@
       "coupling_ratio": 0.333
     },
     {
+      "prefix": "tool_autoresearch",
+      "module_count": 4,
+      "members": [
+        "Tool_autoresearch_broadcast",
+        "Tool_autoresearch_context",
+        "Tool_autoresearch_cycle",
+        "Tool_autoresearch_registry"
+      ],
+      "internal_edges": 3,
+      "external_dep_count": 6,
+      "coupling_ratio": 0.333
+    },
+    {
       "prefix": "keeper_supervisor",
       "module_count": 13,
       "members": [
@@ -961,8 +978,8 @@
         "Server_routes_http_sidecar_paths"
       ],
       "internal_edges": 33,
-      "external_dep_count": 101,
-      "coupling_ratio": 0.246
+      "external_dep_count": 102,
+      "coupling_ratio": 0.244
     },
     {
       "prefix": "keeper_tool",
@@ -1340,25 +1357,6 @@
       "coupling_ratio": 0.125
     },
     {
-      "prefix": "dashboard_http",
-      "module_count": 10,
-      "members": [
-        "Dashboard_http_helpers",
-        "Dashboard_http_keeper",
-        "Dashboard_http_keeper_detail",
-        "Dashboard_http_keeper_feeds",
-        "Dashboard_http_keeper_metrics",
-        "Dashboard_http_keeper_outcomes",
-        "Dashboard_http_keeper_trust",
-        "Dashboard_http_keeper_types",
-        "Dashboard_http_monitoring",
-        "Dashboard_http_tool_quality"
-      ],
-      "internal_edges": 6,
-      "external_dep_count": 60,
-      "coupling_ratio": 0.091
-    },
-    {
       "prefix": "keeper_agent",
       "module_count": 10,
       "members": [
@@ -1378,16 +1376,24 @@
       "coupling_ratio": 0.091
     },
     {
-      "prefix": "server_h2",
-      "module_count": 3,
+      "prefix": "dashboard_http",
+      "module_count": 11,
       "members": [
-        "Server_h2_gateway",
-        "Server_h2_gateway_helpers",
-        "Server_h2_gateway_routes_extra"
+        "Dashboard_http_autoresearch",
+        "Dashboard_http_helpers",
+        "Dashboard_http_keeper",
+        "Dashboard_http_keeper_detail",
+        "Dashboard_http_keeper_feeds",
+        "Dashboard_http_keeper_metrics",
+        "Dashboard_http_keeper_outcomes",
+        "Dashboard_http_keeper_trust",
+        "Dashboard_http_keeper_types",
+        "Dashboard_http_monitoring",
+        "Dashboard_http_tool_quality"
       ],
-      "internal_edges": 3,
-      "external_dep_count": 35,
-      "coupling_ratio": 0.079
+      "internal_edges": 6,
+      "external_dep_count": 61,
+      "coupling_ratio": 0.09
     },
     {
       "prefix": "tool_task",
@@ -1415,6 +1421,18 @@
       ],
       "internal_edges": 1,
       "external_dep_count": 12,
+      "coupling_ratio": 0.077
+    },
+    {
+      "prefix": "server_h2",
+      "module_count": 3,
+      "members": [
+        "Server_h2_gateway",
+        "Server_h2_gateway_helpers",
+        "Server_h2_gateway_routes_extra"
+      ],
+      "internal_edges": 3,
+      "external_dep_count": 36,
       "coupling_ratio": 0.077
     },
     {
@@ -1679,6 +1697,31 @@
       "Masc_oas_bridge",
       "Spawn",
       "Tool_name"
+    ],
+    "Autoresearch": [
+      "Autoresearch_codegen",
+      "Cascade_runtime",
+      "Keeper_cascade_profile"
+    ],
+    "Autoresearch_codegen": [
+      "Agent_sdk_response",
+      "Approval_callbacks",
+      "Autoresearch",
+      "Cascade_inference",
+      "Cascade_runner",
+      "Cascade_runtime",
+      "Keeper_cascade_profile",
+      "Keeper_turn_driver",
+      "Masc_oas_bridge"
+    ],
+    "Autoresearch_knowledge": [
+      "Graphql_client"
+    ],
+    "Autoresearch_lineage": [],
+    "Autoresearch_result_bridge": [
+      "Attribution",
+      "Autoresearch",
+      "Verification"
     ],
     "Backend_mutex_metrics": [
       "Prometheus"
@@ -2335,6 +2378,9 @@
       "Dashboard_yjs",
       "Eval_calibration",
       "Keeper_types"
+    ],
+    "Dashboard_http_autoresearch": [
+      "Autoresearch"
     ],
     "Dashboard_http_helpers": [
       "Dashboard",
@@ -6532,6 +6578,7 @@
       "Coord",
       "Credits_dashboard",
       "Dashboard_branches",
+      "Dashboard_http_autoresearch",
       "Dashboard_oas_bridge",
       "Dashboard_operator_nudges",
       "Dashboard_rooms",
@@ -6790,6 +6837,7 @@
       "Dashboard_feature_health",
       "Dashboard_goal_loop",
       "Dashboard_harness_health",
+      "Dashboard_http_autoresearch",
       "Dashboard_http_tool_quality",
       "Dashboard_keeper_feature_proof",
       "Dashboard_nav_event",
@@ -7138,6 +7186,26 @@
     ],
     "Tool_assignment_telemetry": [
       "Prometheus"
+    ],
+    "Tool_autoresearch_broadcast": [
+      "Autoresearch",
+      "Sse"
+    ],
+    "Tool_autoresearch_context": [
+      "Coord"
+    ],
+    "Tool_autoresearch_cycle": [
+      "Autoresearch",
+      "Autoresearch_knowledge",
+      "Autoresearch_lineage",
+      "Coord",
+      "Memory_oas_bridge",
+      "Tool_autoresearch_broadcast",
+      "Tool_autoresearch_context",
+      "Tool_autoresearch_registry"
+    ],
+    "Tool_autoresearch_registry": [
+      "Autoresearch"
     ],
     "Tool_board": [],
     "Tool_board_cache": [],

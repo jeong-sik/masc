@@ -149,9 +149,15 @@ module Shell_timeout = struct
      Exhaustive match (warning 4) so a new bucket forces a deliberate
      floor/non-floor classification here, once, rather than at every
      call site that branches on it. *)
-  let timeout_floor : bucket -> Timeout_floor.t option = function
-    | Gh_min -> Some Timeout_floor.Tool_dispatch
+  type timeout_floor =
+    | Tool_dispatch_floor
+
+  let timeout_floor : bucket -> timeout_floor option = function
+    | Gh_min -> Some Tool_dispatch_floor
     | Io | Read | Git_meta | User_max | Cleanup_rm | Unknown _ -> None
+
+  let timeout_floor_default_sec = function
+    | Tool_dispatch_floor -> 15.0
 
   let is_floor_bucket bucket =
     Option.is_some (timeout_floor bucket)
@@ -160,7 +166,7 @@ module Shell_timeout = struct
     | Io -> Some 30.0
     | Read -> Some 15.0
     | Git_meta -> Some 5.0
-    | Gh_min -> Some (Timeout_floor.default_sec Timeout_floor.Tool_dispatch)
+    | Gh_min -> Some (timeout_floor_default_sec Tool_dispatch_floor)
     | User_max -> Some 180.0
     | Cleanup_rm -> Some 5.0
     | Unknown _ -> None
@@ -193,7 +199,7 @@ module Shell_timeout = struct
     | Some floor ->
       (* Read-only floor — see .mli.  Operators MUST NOT lower this
          via env; doing so cascades 401 retries (#8688). *)
-      Timeout_floor.default_sec floor
+      timeout_floor_default_sec floor
     | None ->
       let per_bucket_env = per_bucket_env_var ~bucket in
       match trimmed_value_opt per_bucket_env with

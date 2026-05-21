@@ -61,7 +61,7 @@ docker run -d --rm \
   -v "$playground:/workspace:rw" \
   --workdir /workspace \
   "$image_tag" \
-  sh -lc 'trap : TERM INT; while :; do sleep 3600; done' >/dev/null
+  tail -f /dev/null >/dev/null
 
 trap 'docker rm -f "$container_name" >/dev/null 2>&1 || true; rm -rf "$tmpdir"' EXIT
 

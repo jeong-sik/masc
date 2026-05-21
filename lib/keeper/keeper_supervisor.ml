@@ -538,77 +538,12 @@ let persona_profile_path_for_drift_check =
 let log_persona_drift_if_missing = Startup_helpers.log_persona_drift_if_missing
 
 let supervise_keepalive ~proactive_warmup_sec (ctx : _ context) (meta : keeper_meta) =
-  if Keeper_registry.is_registered ~base_path:ctx.config.base_path meta.name
-  then ()
-  else
-    match Keeper_registry.spawn_slots_decision ~base_path:ctx.config.base_path () with
-    | Error reason ->
-      Keeper_registry.record_spawn_slot_denied ~keeper_name:meta.name ~surface:"supervisor" reason;
-      publish_lifecycle
-        ~event:
-          (Keeper_lifecycle_events.Custom_event
-             { verb = Keeper_lifecycle_events.Admission_denied
-             ; phase = Some Keeper_state_machine.Offline
-             })
-        meta.name
-        (Keeper_registry.spawn_slot_denial_reason_to_detail reason)
-        ()
-    | Ok () -> (
-    log_persona_drift_if_missing ~base_path:ctx.config.base_path meta;
-    (* Register in Keeper_registry — single source of truth. *)
-    let reg =
-      Keeper_registry.register_offline ~base_path:ctx.config.base_path meta.name meta
-    in
-    (* Coord initialization *)
-    (try
-       if not (Coord_utils.is_initialized ctx.config)
-       then (
-         let (_init_msg : string) = Coord.init ctx.config ~agent_name:None in
-         ())
-     with
-     | Eio.Cancel.Cancelled _ as e -> raise e
-     | exn ->
-       Prometheus.inc_counter
-         Keeper_metrics.metric_keeper_room_init_failures
-         ~labels:[ "keeper", meta.name ]
-         ();
-       Log.Keeper.error "supervisor room init failed: %s" (Printexc.to_string exn));
-    let live_meta =
-      try
-        let synced = ensure_keeper_room_presence ctx.config meta in
-        (match write_meta ctx.config synced with
-         | Ok () -> ()
-         | Error msg ->
-           Prometheus.inc_counter
-             Keeper_metrics.metric_keeper_write_meta_failures
-             ~labels:[ "keeper", meta.name; "phase", "presence_sync" ]
-             ();
-           Log.Keeper.warn
-             "supervisor presence sync: write_meta failed for %s: %s"
-             meta.name
-             msg);
-        synced
-      with
-      | Eio.Cancel.Cancelled _ as e -> raise e
-      | exn ->
-        Prometheus.inc_counter
-          Keeper_metrics.metric_keeper_presence_sync_failures
-          ~labels:[ "keeper", meta.name ]
-          ();
-        Log.Keeper.error "supervisor presence sync failed: %s" (Printexc.to_string exn);
-        meta
-    in
-    Keeper_registry.update_meta ~base_path:ctx.config.base_path meta.name live_meta;
-    launch_supervised_fiber ~proactive_warmup_sec ctx live_meta reg;
-    publish_lifecycle
-      ~event:
-        (Keeper_lifecycle_events.Custom_event
-           { verb = Keeper_lifecycle_events.Started
-           ; phase = Some Keeper_state_machine.Running
-           })
-      meta.name
-      "supervised"
-      ())
+  Keeper_supervisor_supervise_keepalive.supervise_keepalive
+    ~publish_lifecycle
+    ~launch_supervised_fiber
+    ~proactive_warmup_sec
+    ctx
+    meta
 ;;
 
 let resume_keeper_after_reconcile_gate (ctx : _ context) (meta : keeper_meta) =

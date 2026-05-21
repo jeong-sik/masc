@@ -7,17 +7,17 @@
 
 | Metric | Current | Delta |
 | --- | --- | --- |
-| total_modules | 1042 | - |
-| total_edges | 4378 | - |
-| avg_out_degree | 4.2 | - |
-| scc_count | 1 | - |
+| total_modules | 1052 | - |
+| total_edges | 4409 | - |
+| avg_out_degree | 4.19 | - |
+| scc_count | 2 | - |
 | largest_scc_size | 221 | - |
 
 ## Room/Coordination Dependents
 
 | Module | Dependents | Delta |
 | --- | --- | --- |
-| Coord | 191 | - |
+| Coord | 193 | - |
 
 ## Top Hub Modules
 
@@ -25,12 +25,12 @@
 | --- | --- | --- |
 | 1 | Prometheus | 227 |
 | 2 | Keeper_types | 217 |
-| 3 | Coord | 191 |
+| 3 | Coord | 193 |
 | 4 | Keeper_metrics | 148 |
 | 5 | Keeper_registry | 80 |
 | 6 | Keeper_id | 63 |
 | 7 | Keeper_state_machine | 57 |
-| 8 | Keeper_cascade_profile | 48 |
+| 8 | Keeper_cascade_profile | 50 |
 | 9 | Tool_dispatch | 48 |
 | 10 | Mcp_server | 48 |
 

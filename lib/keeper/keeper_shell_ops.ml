@@ -111,10 +111,7 @@ let handle_keeper_shell
     in
     (* P16: Record execution in history for failure pattern detection *)
     let success = st = Unix.WEXITED 0 in
-    let cmd_prefix =
-      match String.split_on_char ' ' cmd with
-      | [] -> cmd | w :: _ -> w
-    in
+    let cmd_prefix = Keeper_shell_command_semantics.cmd_prefix cmd in
     let entry = Masc_exec.Bash_history.{
       ts = Unix.time ();
       cmd_hash = Masc_exec.Bash_history.cmd_hash cmd;
@@ -160,10 +157,7 @@ let handle_keeper_shell
   let render_completed_process_result ?cwd ~cmd ?(extra = []) st out =
     (* P16: Record execution in history for failure pattern detection *)
     let success = st = Unix.WEXITED 0 in
-    let cmd_prefix =
-      match String.split_on_char ' ' cmd with
-      | [] -> cmd | w :: _ -> w
-    in
+    let cmd_prefix = Keeper_shell_command_semantics.cmd_prefix cmd in
     let elapsed_ms =
       List.find_map (fun (k, v) ->
         if k = "execution_time_ms" then

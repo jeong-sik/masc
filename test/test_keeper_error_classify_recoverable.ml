@@ -89,7 +89,7 @@ let test_typed_capacity_backpressure_is_not_cascade_exhausted () =
   | None ->
     fail "typed capacity backpressure should be recoverable as capacity"
 
-let test_provider_capacity_exhausted_is_capacity_backpressure () =
+let test_provider_capacity_backpressure_is_capacity_backpressure () =
   let err =
     Agent_sdk.Error.Provider
       (Llm_provider.Error.CapacityExhausted
@@ -471,7 +471,7 @@ let () =
           test_case "typed capacity backpressure is not cascade exhausted" `Quick
             test_typed_capacity_backpressure_is_not_cascade_exhausted;
           test_case "provider CapacityExhausted is capacity backpressure" `Quick
-            test_provider_capacity_exhausted_is_capacity_backpressure;
+            test_provider_capacity_backpressure_is_capacity_backpressure;
           test_case "All_providers_failed is recoverable" `Quick
             test_all_providers_failed_recoverable;
           test_case "No_providers_available is recoverable" `Quick

@@ -540,7 +540,7 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
                     })
              | None -> None)
           | None -> None)
-      | Some (`String ("capacity_backpressure" | "capacity_exhausted")) -> (
+      | Some (`String "capacity_backpressure") -> (
           match
             string_opt_of_assoc "cascade_name" json,
             string_opt_of_assoc "source" json,

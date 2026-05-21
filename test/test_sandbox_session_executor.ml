@@ -4,7 +4,7 @@
     the start → exec → cleanup lifecycle:
     - [start] returns a handle whose [container_name] is the plan's;
       a [run_detached] error injection surfaces typed from [start];
-    - [exec] forwards to [D.exec] (matched on container + cmd), a
+    - [exec] forwards to [D.exec] (matched on container + command_argv), a
       non-zero container exit stays an [Ok exec_result], a daemon-level
       error surfaces typed;
     - [cleanup] forwards to [D.rm];
@@ -88,9 +88,9 @@ let test_exec_forwards_to_docker_exec () =
   let handle = start_or_fail (sample_plan ()) in
   Keeper_docker_client_mock.inject_exec
     ~container:(Session.container_name handle)
-    ~cmd:"echo hi"
+    ~command_argv:[ "echo"; "hi" ]
     (Ok exec_ok);
-  (match Session.exec handle ~cmd:"echo hi" with
+  (match Session.exec handle ~command_argv:[ "echo"; "hi" ] with
    | Ok er -> check string "stdout threaded through" "out" er.stdout
    | Error _ -> fail "expected Ok exec_result");
   check int "exec injection consumed" 0 (Keeper_docker_client_mock.pending_calls ())
@@ -101,9 +101,9 @@ let test_exec_nonzero_exit_is_ok_result () =
   let handle = start_or_fail (sample_plan ()) in
   Keeper_docker_client_mock.inject_exec
     ~container:(Session.container_name handle)
-    ~cmd:"false"
+    ~command_argv:[ "false" ]
     (Ok Keeper_docker_response.{ exit_code = 1; stdout = ""; stderr = "boom" });
-  match Session.exec handle ~cmd:"false" with
+  match Session.exec handle ~command_argv:[ "false" ] with
   | Ok er ->
     check int "container-command exit code is the result, not an error" 1 er.exit_code
   | Error _ -> fail "non-zero container exit must be Ok, not Error"
@@ -114,9 +114,9 @@ let test_exec_daemon_error_surfaces () =
   let handle = start_or_fail (sample_plan ()) in
   Keeper_docker_client_mock.inject_exec
     ~container:(Session.container_name handle)
-    ~cmd:"echo hi"
+    ~command_argv:[ "echo"; "hi" ]
     (Error Keeper_docker_client.Daemon_unreachable);
-  match Session.exec handle ~cmd:"echo hi" with
+  match Session.exec handle ~command_argv:[ "echo"; "hi" ] with
   | Error Keeper_docker_client.Daemon_unreachable -> ()
   | _ -> fail "daemon-level error must surface typed"
 ;;
@@ -124,7 +124,7 @@ let test_exec_daemon_error_surfaces () =
 let test_exec_no_injection_misses () =
   setup ();
   let handle = start_or_fail (sample_plan ()) in
-  match Session.exec handle ~cmd:"echo hi" with
+  match Session.exec handle ~command_argv:[ "echo"; "hi" ] with
   | Error Keeper_docker_client.Daemon_unreachable -> ()
   | _ -> fail "no exec injection ⇒ Mock's default miss"
 ;;
@@ -158,11 +158,15 @@ let test_lifecycle_start_exec_cleanup () =
   setup ();
   let handle = start_or_fail (sample_plan ()) in
   let c = Session.container_name handle in
-  Keeper_docker_client_mock.inject_exec ~container:c ~cmd:"step 1" (Ok exec_ok);
-  Keeper_docker_client_mock.inject_exec ~container:c ~cmd:"step 2" (Ok exec_ok);
+  Keeper_docker_client_mock.inject_exec ~container:c ~command_argv:[ "step"; "1" ] (Ok exec_ok);
+  Keeper_docker_client_mock.inject_exec ~container:c ~command_argv:[ "step"; "2" ] (Ok exec_ok);
   Keeper_docker_client_mock.inject_rm c (Ok ());
-  (match Session.exec handle ~cmd:"step 1" with Ok _ -> () | Error _ -> fail "step 1");
-  (match Session.exec handle ~cmd:"step 2" with Ok _ -> () | Error _ -> fail "step 2");
+  (match Session.exec handle ~command_argv:[ "step"; "1" ] with
+   | Ok _ -> ()
+   | Error _ -> fail "step 1");
+  (match Session.exec handle ~command_argv:[ "step"; "2" ] with
+   | Ok _ -> ()
+   | Error _ -> fail "step 2");
   (match Session.cleanup handle with Ok () -> () | Error _ -> fail "cleanup");
   check int "all injections drained in order" 0 (Keeper_docker_client_mock.pending_calls ())
 ;;

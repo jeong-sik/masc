@@ -281,6 +281,7 @@
   keeper_hooks_oas_cost_events
   keeper_hooks_oas_idle
   keeper_hooks_oas_pr_metrics
+  keeper_hooks_oas_introspection
   keeper_tools_oas_markers
   keeper_sandbox
   keeper_sandbox_control

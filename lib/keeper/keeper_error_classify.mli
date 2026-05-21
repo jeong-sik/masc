@@ -83,7 +83,7 @@ type degraded_retry_reason =
   | Cascade_candidates_filtered
   | Required_tool_contract_violation
   | Cascade_exhausted
-  | Capacity_exhausted
+  | Capacity_backpressure
   | Rate_limit
   | Server_error
   | Auth_error

@@ -122,7 +122,7 @@
   test_keeper_health_probe
   test_oas_error_kind_counter
   test_cascade_error_classify_decoder
-  test_cascade_capacity_exhausted_cooldown
+  test_cascade_capacity_backpressure_cooldown
   test_cascade_capacity_backpressure_synthetic_backoff
   test_oas_empty_response_diagnostic
   test_board_author_identity_10297
@@ -439,7 +439,7 @@
   test_keeper_health_probe
   test_oas_error_kind_counter
   test_cascade_error_classify_decoder
-  test_cascade_capacity_exhausted_cooldown
+  test_cascade_capacity_backpressure_cooldown
   test_cascade_capacity_backpressure_synthetic_backoff
   test_oas_empty_response_diagnostic
   test_board_author_identity_10297
@@ -1244,7 +1244,6 @@
   test_tool_control_coverage
   test_tool_misc_coverage
   test_ag_ui_coverage
-  test_tool_suspend_coverage
   test_tool_code_coverage
   test_tool_code_write_coverage
   test_tool_code_read_containment
@@ -1304,7 +1303,6 @@
   test_tool_control_coverage
   test_tool_misc_coverage
   test_ag_ui_coverage
-  test_tool_suspend_coverage
   test_tool_code_coverage
   test_tool_code_write_coverage
   test_tool_code_read_containment

@@ -5,18 +5,12 @@
     path-token normalization helpers plus explicit argv/word helpers for
     transparent wrappers such as [env] and [opam exec]. *)
 
-let split_wrapper_words cmd =
-  match Masc_exec_bash_parser.Bash_words.stages cmd with
-  | Ok [ words ] ->
-    words
-    |> List.map (fun word -> word.Masc_exec_bash_parser.Bash_words.value)
-    |> List.filter (fun token -> token <> "")
-  | Ok (words :: _) ->
-    words
-    |> List.map (fun word -> word.Masc_exec_bash_parser.Bash_words.value)
-    |> List.filter (fun token -> token <> "")
-  | Ok [] | Error _ -> []
+let split_on_space cmd =
+  String.split_on_char ' ' cmd
+  |> List.map String.trim
+  |> List.filter (fun token -> token <> "")
 ;;
+
 let strip_wrapping_quotes token =
   let len = String.length token in
   if len >= 2
@@ -62,7 +56,7 @@ let rec command_after_env_prefix_tokens = function
       match rest with
       | arg :: rest -> (
         match
-          command_after_env_prefix_tokens (split_wrapper_words (strip_wrapping_quotes arg))
+          command_after_env_prefix_tokens (split_on_space (strip_wrapping_quotes arg))
         with
         | Some _ as command -> command
         | None -> command_after_env_prefix_tokens rest)
@@ -73,7 +67,7 @@ let rec command_after_env_prefix_tokens = function
       let arg =
         String.sub token (String.length prefix) (String.length token - String.length prefix)
       in
-      command_after_env_prefix_tokens (split_wrapper_words (strip_wrapping_quotes arg))
+      command_after_env_prefix_tokens (split_on_space (strip_wrapping_quotes arg))
     else if token = "-u" || token = "--unset" || token = "-C" || token = "--chdir"
     then (
       match rest with
@@ -140,8 +134,4 @@ let command_after_env_prefix tokens =
 
 let opam_exec_command_name tokens =
   Option.bind (opam_exec_command_tokens tokens) effective_command_name_from_tokens
-;;
-
-let segment_command_name segment =
-  effective_command_name_from_tokens (split_wrapper_words segment)
 ;;

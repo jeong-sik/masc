@@ -202,6 +202,22 @@ let host_pipeline_specs stages =
   in
   loop [] stages
 
+let docker_pipeline_specs stages =
+  let rec loop pipeline_runner acc = function
+    | [] -> Option.map (fun runner -> runner, List.rev acc) pipeline_runner
+    | Shell_ir.Simple simple :: rest ->
+        (match simple.sandbox with
+         | Docker { pipeline_runner = Some runner; _ } when simple.redirects = [] ->
+             let argv, env, cwd = process_spec_of_simple simple in
+             let stage : Sandbox_target.pipeline_stage = { argv; env; cwd } in
+             let pipeline_runner = Option.value pipeline_runner ~default:runner in
+             loop (Some pipeline_runner) (stage :: acc) rest
+         | _ -> None)
+        [@warning "-4"]
+    | Shell_ir.Pipeline _ :: _ -> None
+  in
+  loop None [] stages
+
 let rec dispatch_pipeline ?timeout_sec stages =
   match stages with
   | [] ->
@@ -225,37 +241,52 @@ let rec dispatch_pipeline ?timeout_sec stages =
                specs
            in
            { status; stdout; stderr }
-       | None ->
-         let rec chain ~prev_stdout ~status ~stderr = function
-           | [] -> { status; stdout = prev_stdout; stderr }
-           | Shell_ir.Simple s :: rest ->
-               let stage_result =
-                 dispatch_simple ?timeout_sec ~stdin_content:prev_stdout s
+       | None -> (
+           match docker_pipeline_specs stages with
+           | Some (runner, specs) ->
+               let status, stdout, stderr =
+                 runner ~stages:specs ~timeout_sec:(dispatch_timeout_sec timeout_sec)
                in
-               let status = pipeline_status status stage_result.status in
-               let stderr = stderr ^ stage_result.stderr in
-               chain ~prev_stdout:stage_result.stdout ~status ~stderr rest
-           | Pipeline _ :: _ ->
-               { status = Unix.WEXITED 1
-               ; stdout = ""
-               ; stderr = stderr ^ "nested pipeline not supported in native dispatch"
-               }
-         in
-         match stages with
-         | [] | [ _ ] ->
-             invalid_pipeline "invalid pipeline arity in native dispatch"
-         | first :: rest -> (
-           match first with
-           | Shell_ir.Simple s ->
-               let first_result = dispatch_simple ?timeout_sec s in
-               let status = pipeline_status (Unix.WEXITED 0) first_result.status in
-               chain
-                 ~prev_stdout:first_result.stdout
-                 ~status
-                 ~stderr:first_result.stderr
-                 rest
-           | Pipeline _ ->
-               invalid_pipeline "nested pipeline not supported in native dispatch" ))
+               { status; stdout; stderr }
+           | None ->
+               let rec chain ~prev_stdout ~status ~stderr = function
+                 | [] -> { status; stdout = prev_stdout; stderr }
+                 | Shell_ir.Simple s :: rest ->
+                     let stage_result =
+                       dispatch_simple ?timeout_sec ~stdin_content:prev_stdout s
+                     in
+                     let status = pipeline_status status stage_result.status in
+                     let stderr = stderr ^ stage_result.stderr in
+                     chain
+                       ~prev_stdout:stage_result.stdout
+                       ~status
+                       ~stderr
+                       rest
+                 | Pipeline _ :: _ ->
+                     { status = Unix.WEXITED 1
+                     ; stdout = ""
+                     ; stderr =
+                         stderr ^ "nested pipeline not supported in native dispatch"
+                     }
+               in
+               (match stages with
+                | [] | [ _ ] ->
+                    invalid_pipeline "invalid pipeline arity in native dispatch"
+                | first :: rest -> (
+                  match first with
+                  | Shell_ir.Simple s ->
+                      let first_result = dispatch_simple ?timeout_sec s in
+                      let status =
+                        pipeline_status (Unix.WEXITED 0) first_result.status
+                      in
+                      chain
+                        ~prev_stdout:first_result.stdout
+                        ~status
+                        ~stderr:first_result.stderr
+                        rest
+                  | Pipeline _ ->
+                      invalid_pipeline
+                        "nested pipeline not supported in native dispatch" ))))
 
 and dispatch ?timeout_sec (ir : Shell_ir.t) =
   match ir with

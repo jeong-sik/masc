@@ -783,20 +783,21 @@ let handle_code_git ~tool_name ~start_time ctx args =
             | Some cfg -> Keeper_tool_policy_config.clone_depth cfg
             | None -> 0
           in
-          let depth_flag =
-            if depth > 0 then Printf.sprintf " --depth %d" depth else ""
-          in
+          let depth_args = if depth > 0 then [ "--depth"; string_of_int depth ] else [] in
           let timeout = match get_policy_config ~base_path:ctx.config.Coord.base_path with
             | Some cfg -> Keeper_tool_policy_config.clone_timeout_sec cfg
             | None -> 120.0
           in
-          let cmd = ["sh"; "-c";
-                     Printf.sprintf "cd %s && git clone%s %s"
-                       (Filename.quote abs_cwd)
-                       depth_flag
-                       (Filename.quote clone_url)]
-          in
-          match Masc_exec.Exec_gate.run_argv_with_status ~actor:`Coord_git ~raw_source:(String.concat " " cmd) ~summary:"git clone" ~timeout_sec:timeout cmd with
+          let cmd = [ "git"; "clone" ] @ depth_args @ [ clone_url ] in
+          match
+            Masc_exec.Exec_gate.run_argv_with_status
+              ~actor:`Coord_git
+              ~raw_source:(String.concat " " cmd)
+              ~summary:"git clone"
+              ~timeout_sec:timeout
+              ~cwd:abs_cwd
+              cmd
+          with
           | Unix.WEXITED code, output ->
             let response =
               `Assoc
@@ -845,18 +846,22 @@ let handle_code_git ~tool_name ~start_time ctx args =
           (missing_cwd_error_json ctx ~cwd ~resolved_cwd:dir ~action ())
       | Ok cwd_opt ->
         let dir = match cwd_opt with Some d -> d | None -> "." in
-        let cmd = ["sh"; "-c";
-                   Printf.sprintf "cd %s && git %s %s"
-                     (Filename.quote dir)
-                     action
-                     (String.concat " " (List.map Filename.quote git_args))]
-        in
+        let cmd = "git" :: action :: git_args in
         let env_opt =
           if String.equal action "commit" then
             Some (Keeper_identity.git_env_for_keeper ~keeper_name:ctx.agent_name)
           else None
         in
-        match Masc_exec.Exec_gate.run_argv_with_status ~actor:`Coord_git ~raw_source:(String.concat " " cmd) ~summary:"git action execution" ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Shell ()) ?env:env_opt cmd with
+        match
+          Masc_exec.Exec_gate.run_argv_with_status
+            ~actor:`Coord_git
+            ~raw_source:(String.concat " " cmd)
+            ~summary:"git action execution"
+            ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Shell ())
+            ?env:env_opt
+            ~cwd:dir
+            cmd
+        with
         | Unix.WEXITED code, output ->
           let response =
             `Assoc

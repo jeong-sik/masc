@@ -89,6 +89,10 @@ let rec mkdir_p dir =
 let write_file path content =
   Out_channel.with_open_bin path (fun oc -> output_string oc content)
 
+let write_executable path content =
+  write_file path content;
+  Unix.chmod path 0o755
+
 let policy_toml ?(denied_repos = []) allowed_orgs =
   let array items =
     items |> List.map (Printf.sprintf "%S") |> String.concat ", "
@@ -685,6 +689,51 @@ let test_code_git_status_marks_docker_keeper_route () =
   check string "brokered via" "brokered" (json_string_field "via" msg);
   check string "brokered route" "brokered" (json_string_field "route_via" msg)
 
+let test_code_git_status_uses_direct_git_argv () =
+  let base_path = fresh_base_path () in
+  let config = make_config base_path in
+  let cwd = Filename.concat base_path ".masc/playground/test-agent/repos/repo" in
+  mkdir_p cwd;
+  let fake_bin = Filename.concat base_path "fake-bin" in
+  mkdir_p fake_bin;
+  let git_pwd_file = Filename.concat base_path "git-pwd.txt" in
+  let git_argv_file = Filename.concat base_path "git-argv.txt" in
+  write_executable
+    (Filename.concat fake_bin "git")
+    (Printf.sprintf
+       "#!/bin/sh\n\
+        printf '%%s\\n' \"$PWD\" > %s\n\
+        printf '%%s\\n' \"$@\" > %s\n\
+        exit 0\n"
+       (Filename.quote git_pwd_file)
+       (Filename.quote git_argv_file));
+  write_executable
+    (Filename.concat fake_bin "sh")
+    "#!/bin/sh\necho unexpected shell >&2\nexit 42\n";
+  let old_path = Option.value (Sys.getenv_opt "PATH") ~default:"" in
+  let ctx =
+    { Tool_code_write.config;
+      agent_name = "test-agent";
+    }
+  in
+  let args =
+    `Assoc
+      [
+        ("action", `String "status");
+        ("args", `List [ `String "--short;touch"; `String "owned" ]);
+        ("cwd", `String cwd);
+      ]
+  in
+  with_trimmed_env "PATH" (Some (fake_bin ^ ":" ^ old_path)) @@ fun () ->
+  let ok, msg = dispatch_exn ctx ~name:"masc_code_git" ~args in
+  check bool "status succeeds through fake git" true ok;
+  check string "git cwd" cwd
+    (String.trim (Stdlib.In_channel.read_all git_pwd_file));
+  check string "git argv stays literal" "status\n--short;touch\nowned"
+    (String.trim (Stdlib.In_channel.read_all git_argv_file));
+  check bool "shell was not invoked" false
+    (msg_contains ~needle:"unexpected shell" msg)
+
 let test_code_edit_identical_replacement_is_noop () =
   let base_path = fresh_base_path () in
   let config = make_config base_path in
@@ -1138,6 +1187,8 @@ let () =
         test_code_git_checkout_dot_blocked_before_cwd_validation;
       test_case "status marks docker keeper route" `Quick
         test_code_git_status_marks_docker_keeper_route;
+      test_case "status uses direct git argv" `Quick
+        test_code_git_status_uses_direct_git_argv;
       test_case "missing docker cwd reports worktree hint" `Quick
         test_code_git_missing_docker_cwd_reports_worktree_hint;
     ]);

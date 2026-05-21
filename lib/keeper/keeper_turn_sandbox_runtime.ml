@@ -417,34 +417,30 @@ let write_file_common
       (t : t)
       ~(host_path : string)
       ~(content : string)
-      ~(timeout_sec : float)
+      ~timeout_sec:_
       ~(append : bool)
       ()
   =
   match container_path_of_host t ~host_path with
   | Error _ as err -> err
-  | Ok container_path ->
-    let parent = Filename.dirname container_path in
-    let redirect = if append then ">>" else ">" in
-    let shell_cmd =
-      Printf.sprintf
-        "mkdir -p -- %s && cat %s %s"
-        (Filename.quote parent)
-        redirect
-        (Filename.quote container_path)
-    in
-    (match
-       run_exec_with_status
-         ~stdin_content:content
-         t
-         ~timeout_sec
-         ~cwd:t.host_root
-         ~command_argv:[ "sh"; "-lc"; shell_cmd ]
+  | Ok _container_path ->
+    let host_path = normalize_path host_path in
+    (try
+       Fs_compat.mkdir_p (Filename.dirname host_path);
+       if append
+       then Fs_compat.append_file host_path content
+       else Fs_compat.save_file host_path content;
+       Ok ()
      with
-     | Error _ as err -> err
-     | Ok (Unix.WEXITED 0, _out) -> Ok ()
-     | Ok (st, out) ->
-       Error (format_docker_exec_error ~head_program:"write_file" ~st ~out))
+     | Eio.Cancel.Cancelled _ as e -> raise e
+     | Sys_error msg -> Error msg
+     | Unix.Unix_error (err, fn, arg) ->
+       Error
+         (Printf.sprintf
+            "%s%s%s"
+            (Unix.error_message err)
+            (if String.equal fn "" then "" else ": " ^ fn)
+            (if String.equal arg "" then "" else " " ^ arg)))
 ;;
 
 let overwrite_file t ~host_path ~content ~timeout_sec () =

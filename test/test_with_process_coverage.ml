@@ -8,11 +8,14 @@ module WP = With_process
     so that leaks in the helper surface as baseline drift, not silent. *)
 let count_open_fds () =
   let pid = Unix.getpid () in
-  let cmd = Printf.sprintf "lsof -p %d 2>/dev/null | wc -l" pid in
-  let lines, _ = WP.with_process_in cmd WP.drain_lines in
-  match lines with
-  | [] -> 0
-  | line :: _ -> (try int_of_string (String.trim line) with _ -> 0)
+  let lines, status =
+    WP.with_process_args_in "lsof"
+      [| "lsof"; "-p"; string_of_int pid |]
+      WP.drain_lines
+  in
+  match status with
+  | Unix.WEXITED 0 -> List.length lines
+  | _ -> 0
 
 (* ----- tests ----------------------------------------------------------- *)
 
@@ -109,8 +112,11 @@ let test_process_guard_wraps_helpers () =
           WP.drain_lines
       in
       check (list string) "guarded stdout" [ "guard" ] lines;
-      let lines, _ = WP.with_process_in "printf guard2" WP.drain_lines in
-      check (list string) "guarded shell stdout" [ "guard2" ] lines;
+      let lines, _ =
+        WP.with_process_args_in "/bin/echo" [| "/bin/echo"; "guard2" |]
+          WP.drain_lines
+      in
+      check (list string) "guarded argv stdout" [ "guard2" ] lines;
       check int "guard high-water" 1 (Atomic.get high_water);
       check int "guard released" 0 (Atomic.get depth))
 

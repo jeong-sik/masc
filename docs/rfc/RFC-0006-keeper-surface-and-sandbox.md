@@ -4,7 +4,7 @@
 - **Author**: vincent (with Claude)
 - **Created**: 2026-04-20
 - **Related**: #8773, #8778, #8471
-- **Drives**: 18% turn-loss recovery + closes host FS leak for `docker_hardened` keepers
+- **Drives**: 18% turn-loss recovery + closes host FS leak for `docker` keepers
 
 ## 1. Problem
 
@@ -13,7 +13,7 @@ Two failures observed on 2026-04-20 are symptoms of the same architectural decis
 | # | Symptom | Mechanism |
 |---|---------|-----------|
 | A | Tool metrics underreport: 525/2906 (≈18%) keeper turns nuked with `unexpected tool names` | LLM emits Claude Code built-in names (`Bash`/`Read`/`Edit`/`Skill`/`Agent`/`Grep`/`Write`/`WebSearch`). `keeper_agent_run.ml:1893` returns `Error (Internal …)` when no valid call mixes in. |
-| B | `minjae` (sandbox_profile=docker_hardened) reads host paths under `/Users/dancer/...` | `keeper_bash` is gated to docker, but `keeper_fs_read` and `keeper_shell` (op=rg/ls/find/cat) execute as the host process. Containment is asymmetric. |
+| B | `minjae` (`sandbox_profile=docker`) reads host paths under `/Users/dancer/...` | `keeper_bash` is gated to docker, but `keeper_fs_read` and `keeper_shell` (op=rg/ls/find/cat) execute as the host process. Containment is asymmetric. |
 
 Root cause:
 
@@ -26,7 +26,7 @@ Fix A (alias router) addresses #8778 narrowly but leaves #B and the prefix desig
 
 **Goals**
 - G1. Zero `unexpected tool names` nukes for the eight Claude Code built-ins listed in #8778.
-- G2. For `sandbox_profile=docker_hardened` keepers, **all** tool execution (read + write + shell) happens inside the same container.
+- G2. For `sandbox_profile=docker` keepers, **all** tool execution (read + write + shell) happens inside the same container.
 - G3. Backward compatible with current personas, prompts, and metrics consumers (no decisions.jsonl shape break).
 - G4. No regression on prompt cache hit rate (Anthropic input cache).
 
@@ -64,7 +64,7 @@ Acceptance: `unexpected_tool_names` distinct list shrinks to ≤ 0 occurrences o
 
 ### 3.2 Symmetric sandbox (Phase B)
 
-For any keeper with `sandbox_profile = Docker_hardened`:
+For any keeper with `sandbox_profile = docker`:
 
 - A **per-turn container** owns the keeper's working set: `/work/playground` (rw, mounted from `<base_path>/.masc/playground/<keeper>/`), `/work/repos/<repo>` (rw if cloned), `/work/cache` (rw, ephemeral).
 - The **host filesystem is not mounted**. `/Users`, `/Volumes`, `/`, `/etc`, etc. are invisible inside the container.
@@ -74,7 +74,7 @@ For any keeper with `sandbox_profile = Docker_hardened`:
   - `Edit` / `Write` → `docker exec <cid> sh -c 'cat > … <<EOF'` (NEW)
   - `Grep` / `keeper_shell` → `docker exec <cid> rg/ls/find …` (NEW)
 - The container is reused across calls within the same turn (cheap exec) and torn down on turn end. Cold-start ≈ 200ms per turn (acceptable; turn budget is seconds).
-- Non-hardened keepers (`Legacy_local`) keep host execution. The asymmetry disappears *for the keepers we declared hardened*.
+- Local keepers keep host execution. The asymmetry disappears for keepers declared as Docker-backed.
 
 Acceptance: `docker exec` is the only syscall path observed for `minjae`/`analyst`/`janitor`/`poe` over a 24h replay.
 
@@ -82,8 +82,8 @@ Acceptance: `docker exec` is the only syscall path observed for `minjae`/`analys
 
 | Keeper sandbox | Bash | Read | Edit/Write | Grep / keeper_shell |
 |----------------|------|------|------------|----------------------|
-| `Legacy_local` (default) | host (validated) | host | host | host |
-| `Docker_hardened`        | container | container | container | container |
+| `Local` (default) | host (validated) | host | host | host |
+| `Docker`          | container | container | container | container |
 
 Exactly one rule: **whichever profile decides one tool, decides every tool.**
 
@@ -101,7 +101,7 @@ Each phase is independently mergeable and revertable.
 ## 5. Validation
 
 - `test/test_keeper_tool_alias.ml` — alias map round-trip + unknown name → teaching error.
-- `test/test_keeper_symmetric_sandbox.ml` — assert that for `Docker_hardened` keepers, `keeper_fs_read` resolves through `docker exec`, not `Eio_unix.openfile`.
+- `test/test_keeper_symmetric_sandbox.ml` — assert that for `Docker` keepers, `keeper_fs_read` resolves through `docker exec`, not `Eio_unix.openfile`.
 - 24h replay metric:
   - `unexpected_tool_names` distinct count over 24h: target **0** for the Anthropic 5 (`Bash|Read|Edit|Grep|Write`).
   - `Read` calls outside `/work/...` for hardened keepers: target **0**.
@@ -120,15 +120,14 @@ Each phase guarded by an env flag (`MASC_KEEPER_TOOL_ALIAS=true`, `MASC_KEEPER_S
 
 ## 8. Addendum — 2026-04-21 profile rename
 
-After deploying, the three-variant external surface (`Legacy_local | Docker_hardened | Docker_with_git`) proved to mix two concerns: (a) execution location (host vs container) and (b) per-command credential mounting for git/gh. Only (a) is a stable profile attribute; (b) is a runtime dispatch decision.
+After deploying, the previous three-variant external surface proved to mix two concerns: (a) execution location (host vs container) and (b) per-command credential mounting for git/gh. Only (a) is a stable profile attribute; (b) is a runtime dispatch decision.
 
 The external surface is now collapsed to two variants:
 
-| Old external variant | New external variant | Notes |
-|----------------------|----------------------|-------|
-| `Legacy_local`       | `Local`              | Same semantics. Fs scoped to `<base_path>/.masc/playground/<keeper>/`. |
-| `Docker_hardened`    | `Docker`             | Same base semantics (hardened container with network=none). |
-| `Docker_with_git`    | `Docker` + per-command dispatch | No longer a profile. When `sandbox_profile=Docker` and the `keeper_bash` cmd's leading token is `git`/`gh`, the container is launched with network=inherit + gh/git credential mounts *for that one command*. Surfaced in response JSON as `git_creds_enabled: true`. |
+| Current external variant | Notes |
+|--------------------------|-------|
+| `Local`                  | Host execution scoped to `<base_path>/.masc/playground/<keeper>/`. |
+| `Docker`                 | Container execution. Per-command `git`/`gh` credential mounting is runtime dispatch, not a profile. |
 
 The 3→2 containment matrix (section 3.3) now reads:
 
@@ -137,4 +136,4 @@ The 3→2 containment matrix (section 3.3) now reads:
 | `Local` (default) | host (validated) | host | host | host |
 | `Docker`          | container | container | container | container |
 
-Compat: `sandbox_profile_of_string` accepts the three old strings and warns via `sandbox_profile_of_string_with_warning`. The compat arm is removable once all state JSON/TOML files are rewritten. No other RFC-0006 semantics change.
+Current implementation note: compatibility aliases were removed. `sandbox_profile_of_string` accepts only the canonical external values `local` and `docker`; pre-rename profile names are rejected so stale state is fixed at the source instead of silently reinterpreted.

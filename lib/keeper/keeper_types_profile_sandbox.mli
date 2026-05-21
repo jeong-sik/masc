@@ -17,7 +17,6 @@ type network_mode =
 val sandbox_profile_to_string : sandbox_profile -> string
 val reserved_cascade_names : string list
 val sandbox_profile_of_string : string -> sandbox_profile option
-val sandbox_profile_of_string_with_warning : source:string -> string -> sandbox_profile option
 val all_sandbox_profiles : sandbox_profile list
 val valid_sandbox_profile_strings : string list
 val network_mode_to_string : network_mode -> string

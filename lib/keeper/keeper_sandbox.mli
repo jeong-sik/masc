@@ -32,6 +32,29 @@ val backend_to_string : backend -> string
 
 (** {1 Path resolution} *)
 
+(** [backend_of_config_agent ~config ~agent_name] resolves the keeper's
+    declared backend from persisted keeper configuration. Callers that
+    need sandbox shape should depend on this contract instead of reading
+    keeper TOML or Docker path details directly. *)
+val backend_of_config_agent :
+  config:Coord.config ->
+  agent_name:string ->
+  backend
+
+(** [host_root_rel_of_config_agent ~config ~agent_name] returns the
+    backend-scoped relative sandbox root for [agent_name]. *)
+val host_root_rel_of_config_agent :
+  config:Coord.config ->
+  agent_name:string ->
+  string
+
+(** [host_root_abs_of_config_agent ~config ~agent_name] returns the
+    backend-scoped absolute host-side sandbox root for [agent_name]. *)
+val host_root_abs_of_config_agent :
+  config:Coord.config ->
+  agent_name:string ->
+  string
+
 (** [host_root_abs ~config name] returns the absolute host-side
     legacy unscoped sandbox root for [name] rooted at [config.base_path]. *)
 val host_root_abs : config:Coord.config -> string -> string
@@ -59,6 +82,16 @@ val host_root_abs_of_meta :
 (** [container_root name] returns the in-container path used by the
     hardened Docker backend. *)
 val container_root : string -> string
+
+(** [host_path_of_visible_path ~config ~agent_name raw_path] maps a
+    sandbox-visible absolute path for [agent_name] back to the
+    backend-scoped host path used for validation. Non-matching absolute
+    paths and relative paths are returned unchanged. *)
+val host_path_of_visible_path :
+  config:Coord.config ->
+  agent_name:string ->
+  string ->
+  string
 
 (** [keeper_visible_root_abs_of_meta ~config meta] is the absolute
     sandbox root the keeper LLM should treat as its working root,

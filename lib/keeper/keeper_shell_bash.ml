@@ -1499,9 +1499,8 @@ let handle_keeper_bash
        the selected root/keeper GitHub identity bundle read-only for the
        duration of this command. Disabled when
        MASC_KEEPER_SANDBOX_GIT_DISPATCH=false.
-       [git_creds_enabled] replaces the former Docker_with_git variant:
-       the external profile stays Docker; the dispatcher reads this flag
-       to choose between Keeper_shell_shared.run_docker_with_git_bash and Keeper_shell_shared.run_docker_hardened_bash. *)
+       The external profile stays Docker; the dispatcher reads this flag
+       to choose between the credentialed Docker path and plain Docker path. *)
     let sandbox_profile, sandbox_network_mode, git_creds_enabled =
       if base_profile = Docker
          && Env_config_keeper.KeeperSandbox.with_git_dispatch_enabled ()
@@ -1690,7 +1689,7 @@ let handle_keeper_bash
         Keeper_metrics.metric_keeper_bash_network_upgrade
         ~labels:[ ("keeper", meta.name); ("detected_tool", detected_tool) ]
         ();
-      Keeper_shell_shared.run_docker_with_git_bash
+      Keeper_shell_shared.run_docker_credentialed_bash
         ~turn_sandbox_runtime:
           (Keeper_sandbox_factory.resolve_opt
              turn_sandbox_factory_git ~cwd)
@@ -1700,7 +1699,7 @@ let handle_keeper_bash
         "DOCKER_EXEC: keeper=%s cwd=%s cmd=%s network=%s"
         meta.name cwd cmd_for_log (network_mode_to_string sandbox_network_mode);
       with_raw_json_exec_cache (fun () ->
-        Keeper_shell_shared.run_docker_hardened_bash
+        Keeper_shell_shared.run_docker_bash
           ~turn_sandbox_runtime:
             (Keeper_sandbox_factory.resolve_opt
                turn_sandbox_factory ~cwd)

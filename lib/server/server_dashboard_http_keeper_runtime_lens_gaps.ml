@@ -285,5 +285,5 @@ let runtime_lens_gaps ~terminal_event_present ~claim_scope ~config_drift scan =
          gaps
   in
   gaps
-  @ Server_dashboard_http_keeper_runtime_lens_clock_edges.runtime_lens_clock_gaps
+  @ Server_dashboard_http_keeper_runtime_lens_clock_groups.runtime_lens_clock_gaps
       scan

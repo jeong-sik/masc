@@ -491,6 +491,16 @@ describe('RuntimeLensSection', () => {
             finished_count: 1,
             terminal_status: 'timeout',
           },
+          tool_lineage: {
+            recorded: false,
+            decision: null,
+          },
+          payload_role: {
+            counts: {},
+          },
+          source_clock: {
+            counts: {},
+          },
           claim_scope: {
             present: false,
             source: 'tool_call_log',

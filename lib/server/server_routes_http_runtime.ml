@@ -1282,6 +1282,38 @@ let refresh_full_health_snapshot_sync ?(listener = "http/1.1") request =
 let snapshot_is_stale ~now snapshot =
   now -. snapshot.computed_at > full_health_snapshot_ttl_sec
 
+let full_health_snapshot_stale_reason ~now snapshot =
+  match snapshot with
+  | None -> None
+  | Some snapshot ->
+      (match snapshot.error with
+       | Some error
+         when snapshot.last_good_available
+              && full_health_refresh_timeout_error error ->
+           Some "last_good_refresh_timeout"
+       | Some _ when snapshot.last_good_available -> Some "last_good_refresh_error"
+       | Some error when full_health_refresh_timeout_error error ->
+           Some "refresh_timeout"
+       | Some _ -> Some "refresh_error"
+       | None when snapshot_is_stale ~now snapshot -> Some "ttl_expired"
+       | None -> None)
+
+let full_health_snapshot_stale_age_ms ~now snapshot =
+  let stale_started_at =
+    match snapshot with
+    | None -> None
+    | Some snapshot ->
+        (match snapshot.stale_since_ts with
+         | Some ts -> Some ts
+         | None when snapshot_is_stale ~now snapshot ->
+             Some (snapshot.computed_at +. full_health_snapshot_ttl_sec)
+         | None -> None)
+  in
+  match stale_started_at with
+  | None -> `Null
+  | Some started_at ->
+      `Int (max 0 (int_of_float ((now -. started_at) *. 1000.)))
+
 let full_health_snapshot_metadata ~now ~refresh_in_flight ~refresh_started_at
     ~refresh_requested snapshot =
   let component_timed_out =
@@ -1317,10 +1349,18 @@ let full_health_snapshot_metadata ~now ~refresh_in_flight ~refresh_started_at
           stale_since_ts_json,
           status )
   in
+  let stale_reason =
+    match full_health_snapshot_stale_reason ~now snapshot with
+    | Some reason -> `String reason
+    | None -> `Null
+  in
+  let stale_age_ms = full_health_snapshot_stale_age_ms ~now snapshot in
   `Assoc
     [
       ("status", `String status);
       ("snapshot_age_ms", snapshot_age_ms);
+      ("stale_reason", stale_reason);
+      ("stale_age_ms", stale_age_ms);
       ("computed_at_unix", computed_at);
       ("duration_ms", duration_ms);
       ("ttl_ms", `Int (int_of_float (full_health_snapshot_ttl_sec *. 1000.)));

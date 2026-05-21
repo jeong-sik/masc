@@ -1395,6 +1395,10 @@ let test_health_response_full_query_uses_snapshot_cache () =
   let refreshed = Server_routes_http_runtime.make_health_response_json request in
   Alcotest.(check string) "refreshed snapshot is ready" "ready"
     (refreshed |> member "full_health_snapshot" |> member "status" |> to_string);
+  Alcotest.(check bool) "ready snapshot has no stale reason" true
+    (refreshed |> member "full_health_snapshot" |> member "stale_reason" = `Null);
+  Alcotest.(check bool) "ready snapshot has no stale age" true
+    (refreshed |> member "full_health_snapshot" |> member "stale_age_ms" = `Null);
   Alcotest.(check bool) "refreshed full health keeps reaction ledger" true
     (match refreshed |> member "keeper_reaction_ledger" with
      | `Assoc _ -> true
@@ -1442,6 +1446,12 @@ let test_full_health_refresh_timeout_preserves_last_snapshot () =
      |> to_bool);
   Alcotest.(check string) "timeout error is surfaced" (Printexc.to_string timeout_error)
     (after |> member "full_health_snapshot" |> member "error" |> to_string);
+  Alcotest.(check string) "timeout stale reason" "last_good_refresh_timeout"
+    (after |> member "full_health_snapshot" |> member "stale_reason" |> to_string);
+  Alcotest.(check bool) "timeout stale age is surfaced" true
+    (match after |> member "full_health_snapshot" |> member "stale_age_ms" with
+     | `Int age -> age >= 0
+     | _ -> false);
   Alcotest.(check bool) "timeout records stale-since timestamp" true
     (match after |> member "full_health_snapshot" |> member "stale_since_ts" with
      | `Float _ | `Int _ -> true
@@ -1469,6 +1479,12 @@ let test_full_health_cold_refresh_timeout_is_timeout_not_error () =
   Alcotest.(check bool) "cold timeout has no last good" false
     (after |> member "full_health_snapshot" |> member "last_good_available"
      |> to_bool);
+  Alcotest.(check string) "cold timeout stale reason" "refresh_timeout"
+    (after |> member "full_health_snapshot" |> member "stale_reason" |> to_string);
+  Alcotest.(check bool) "cold timeout stale age is surfaced" true
+    (match after |> member "full_health_snapshot" |> member "stale_age_ms" with
+     | `Int age -> age >= 0
+     | _ -> false);
   Alcotest.(check bool) "cold timeout marks component timeout" true
     (after |> member "cdal" |> member "component_timed_out" |> to_bool)
 

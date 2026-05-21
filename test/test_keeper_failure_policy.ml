@@ -50,7 +50,7 @@ let test_operational_timeout_phase_aliases () =
       "no_first_token", Policy.First_token;
       "stream_idle", Policy.Stream_idle Policy.Streaming_unknown;
       "max_execution_time", Policy.Wall_clock;
-      "capacity_exhausted", Policy.Capacity_backpressure;
+      "capacity_backpressure", Policy.Capacity_backpressure;
     ]
   in
   List.iter

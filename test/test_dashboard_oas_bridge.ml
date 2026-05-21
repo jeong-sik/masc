@@ -349,7 +349,7 @@ let test_provider_error_counts_group_and_filter () =
     provider_error_count
       ~provider:"runtime"
       ~cascade:"primary"
-      ~kind:"capacity_exhausted"
+      ~kind:"capacity_backpressure"
       ~capacity_scope:"model"
       all
   in

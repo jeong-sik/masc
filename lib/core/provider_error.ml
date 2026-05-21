@@ -38,7 +38,7 @@ let scope_to_string = function
 
 let to_error_kind = function
   | RateLimit _ -> "rate_limit"
-  | CapacityExhausted _ -> "capacity_exhausted"
+  | CapacityExhausted _ -> "capacity_backpressure"
   | AuthError -> "auth_error"
   | ServerError _ -> "server_error"
   | InvalidRequest _ -> "invalid_request"
@@ -69,7 +69,7 @@ let to_yojson = function
   | CapacityExhausted { scope } ->
       `Assoc
         [
-          ("kind", `String "capacity_exhausted");
+          ("kind", `String "capacity_backpressure");
           ("scope", `String (scope_to_string scope));
           ("affected", string_list_to_yojson [ public_runtime_provider_label ]);
         ]

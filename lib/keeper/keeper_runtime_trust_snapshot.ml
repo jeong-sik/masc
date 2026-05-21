@@ -11,20 +11,7 @@ open Keeper_runtime_trust_timeline
    [keeper_agent_run.ml]. *)
 let normalize_persisted_terminal_reason_code = function
   | "completed" -> "success"
-  | "capacity_exhausted" -> "capacity_backpressure"
   | code -> code
-
-let normalize_masc_oas_error_message value =
-  if String_util.contains_substring value "[masc_oas_error]"
-  then
-    value
-    |> String_util.replace_substring
-         ~needle:"\"kind\":\"capacity_exhausted\""
-         ~by:"\"kind\":\"capacity_backpressure\""
-    |> String_util.replace_substring
-         ~needle:"\"kind\": \"capacity_exhausted\""
-         ~by:"\"kind\": \"capacity_backpressure\""
-  else value
 
 let rec normalize_receipt_projection_json = function
   | `Assoc fields ->
@@ -35,14 +22,11 @@ let rec normalize_receipt_projection_json = function
                match key, value with
                | "terminal_reason_code", `String code ->
                    `String (normalize_persisted_terminal_reason_code code)
-               | "message", `String message ->
-                   `String (normalize_masc_oas_error_message message)
                | _ -> normalize_receipt_projection_json value
              in
              (key, value))
            fields)
   | `List values -> `List (List.map normalize_receipt_projection_json values)
-  | `String value -> `String (normalize_masc_oas_error_message value)
   | json -> json
 
 let terminal_reason_from_decision json =

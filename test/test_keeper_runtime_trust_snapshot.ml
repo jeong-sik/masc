@@ -124,7 +124,7 @@ let test_snapshot_counts_malformed_decision_rows () =
          (drop_value invalid_payload -. before_invalid_payload))
 ;;
 
-let test_snapshot_normalizes_legacy_capacity_receipt_projection () =
+let test_snapshot_projects_capacity_backpressure_receipt () =
   Eio_main.run
   @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -135,7 +135,7 @@ let test_snapshot_normalizes_legacy_capacity_receipt_projection () =
        with_env "MASC_BASE_PATH" base_dir
        @@ fun () ->
        let config = Masc_mcp.Coord.default_config base_dir in
-       let keeper_name = "runtime-trust-legacy-capacity" in
+       let keeper_name = "runtime-trust-capacity-backpressure" in
        let meta = make_meta keeper_name in
        append_execution_receipt
          config
@@ -144,7 +144,7 @@ let test_snapshot_normalizes_legacy_capacity_receipt_projection () =
              [ "schema", `String "keeper.execution_receipt.v1"
              ; "recorded_at", `String "2026-05-20T17:32:38Z"
              ; "keeper_name", `String keeper_name
-             ; "terminal_reason_code", `String "capacity_exhausted"
+             ; "terminal_reason_code", `String "capacity_backpressure"
              ; "outcome", `String "receipt_failed"
              ; ( "error"
                , `Assoc
@@ -152,7 +152,7 @@ let test_snapshot_normalizes_legacy_capacity_receipt_projection () =
                    ; ( "message"
                      , `String
                          "Internal error: [masc_oas_error] \
-                          {\"kind\":\"capacity_exhausted\",\"source\":\"client_capacity\"}" )
+                          {\"kind\":\"capacity_backpressure\",\"source\":\"client_capacity\"}" )
                    ] )
              ; "ended_at", `String "2026-05-20T17:32:38Z"
              ]);
@@ -168,11 +168,11 @@ let test_snapshot_normalizes_legacy_capacity_receipt_projection () =
          "capacity_backpressure"
          (latest_receipt |> member "terminal_reason_code" |> to_string);
        Alcotest.(check bool)
-         "projected error message hides legacy internal kind"
-         false
+         "projected error message keeps canonical internal kind"
+         true
          (String_util.contains_substring
             (latest_receipt |> member "error" |> member "message" |> to_string)
-            "\"kind\":\"capacity_exhausted\""))
+            "\"kind\":\"capacity_backpressure\""))
 ;;
 
 let () =
@@ -184,9 +184,9 @@ let () =
             `Quick
             test_snapshot_counts_malformed_decision_rows
         ; Alcotest.test_case
-            "legacy capacity receipt projection is normalized"
+            "capacity backpressure receipt projection is canonical"
             `Quick
-            test_snapshot_normalizes_legacy_capacity_receipt_projection
+            test_snapshot_projects_capacity_backpressure_receipt
         ] )
     ]
 ;;

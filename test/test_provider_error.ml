@@ -105,7 +105,7 @@ let test_rate_limit_can_be_capacity_exhausted () =
     check bool "capacity" true (P.is_capacity_exhausted error);
     check_json
       "json"
-      {|{"kind":"capacity_exhausted","scope":"provider","affected":["runtime"]}|}
+      {|{"kind":"capacity_backpressure","scope":"provider","affected":["runtime"]}|}
       error
   | _ -> fail "expected provider CapacityExhausted"
 ;;
@@ -284,7 +284,7 @@ let test_emit_sdk_provider_error_metric_rate_limit () =
 let test_emit_sdk_provider_error_metric_capacity_scope () =
   let before =
     counter_for
-      ~kind:"capacity_exhausted"
+      ~kind:"capacity_backpressure"
       ~provider:public_provider
       ~cascade_name:"primary"
       ~capacity_scope:"provider"
@@ -301,16 +301,16 @@ let test_emit_sdk_provider_error_metric_capacity_scope () =
          ~provider:"anthropic"
     |> expect_some
   in
-  check string "emitted kind" "capacity_exhausted" (P.to_error_kind emitted);
+  check string "emitted kind" "capacity_backpressure" (P.to_error_kind emitted);
   check
     (float 0.0001)
     "counter +1"
     (before +. 1.0)
-    (counter_for
-       ~kind:"capacity_exhausted"
-       ~provider:public_provider
-       ~cascade_name:"primary"
-       ~capacity_scope:"provider")
+       (counter_for
+          ~kind:"capacity_backpressure"
+          ~provider:public_provider
+          ~cascade_name:"primary"
+          ~capacity_scope:"provider")
 ;;
 
 let test_emit_sdk_provider_error_metric_skips_non_api () =

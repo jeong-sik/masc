@@ -817,10 +817,58 @@ let transition_task_r
 ;;
 
 (** Release task back to backlog - transition wrapper *)
-let release_task_r = Coord_task_release.release_task_r
-let force_release_task_r = Coord_task_release.force_release_task_r
-let force_done_task_r = Coord_task_release.force_done_task_r
-let force_cancel_task_r = Coord_task_release.force_cancel_task_r
+let release_task_r config ~agent_name ~task_id ?expected_version ?handoff_context ()
+  : string Masc_domain.masc_result
+  =
+  transition_task_r
+    config
+    ~agent_name
+    ~task_id
+    ~action:Masc_domain.Release
+    ?expected_version
+    ?handoff_context
+    ()
+;;
+
+let force_release_task_r config ~agent_name ~task_id ?handoff_context ()
+  : string Masc_domain.masc_result
+  =
+  transition_task_r
+    config
+    ~agent_name
+    ~task_id
+    ~action:Masc_domain.Release
+    ?handoff_context
+    ~force:true
+    ()
+;;
+
+let force_done_task_r config ~agent_name ~task_id ~notes ()
+  : string Masc_domain.masc_result
+  =
+  transition_task_r
+    config
+    ~agent_name
+    ~task_id
+    ~action:Masc_domain.Done_action
+    ~notes
+    ~force:true
+    ()
+;;
+
+let force_cancel_task_r config ~agent_name ~task_id ~reason ()
+  : string Masc_domain.masc_result
+  =
+  transition_task_r
+    config
+    ~agent_name
+    ~task_id
+    ~action:Masc_domain.Cancel
+    ~reason
+    ~force:true
+    ()
+;;
+
 let cancel_task_r config ~agent_name ~task_id ~reason : string Masc_domain.masc_result =
   if not (is_initialized config)
   then Error (Masc_domain.System Masc_domain.System_error.NotInitialized)

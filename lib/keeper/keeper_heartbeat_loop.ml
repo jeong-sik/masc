@@ -641,54 +641,7 @@ let refresh_work_as_heartbeat
       consecutive_failures := 0))
 ;;
 
-let dispatch_recurring_keepalive
-      ~(ctx : _ context)
-      ~(meta_after_proactive : keeper_meta)
-      ~(now_ts : float)
-  : int
-  =
-  (* Recover from transient broadcast failures that previously
-     auto-disabled tasks via [dispatch_due]'s [max_failures] guard.
-     Without this call the keeper's heartbeat broadcasts stay silent
-     for the lifetime of the process, eventually triggering stale-kill
-     cascades.  See lib/keeper/keeper_recurring.ml for the cooldown rule. *)
-  let _reenabled =
-    Keeper_recurring.reenable_due_tasks ~keeper_name:meta_after_proactive.name ~now_ts
-  in
-  try
-    Keeper_recurring.dispatch_due
-      ~keeper_name:meta_after_proactive.name
-      ~now_ts
-      ~dispatch:(fun task action ->
-        match action with
-        | Keeper_recurring.Broadcast msg ->
-          (try
-             let _ =
-               Coord.broadcast
-                 ctx.config
-                 ~from_agent:meta_after_proactive.agent_name
-                 ~content:(Printf.sprintf "[loop:%s] %s" task.label msg)
-             in
-             Log.Keeper.info "[recurring] %s dispatched: %s" task.id task.label;
-             Ok ()
-           with
-           | exn ->
-             Log.Keeper.warn "[recurring] %s failed: %s" task.id (Printexc.to_string exn);
-             Prometheus.inc_counter
-               Keeper_metrics.metric_keeper_recurring_failures
-               ~labels:[ "task", task.id; "phase", "task_execution" ]
-               ();
-             Error (Printexc.to_string exn)))
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn ->
-    Log.Keeper.warn "[recurring] dispatch error: %s" (Printexc.to_string exn);
-    Prometheus.inc_counter
-      Keeper_metrics.metric_keeper_recurring_failures
-      ~labels:[ "task", "dispatch"; "phase", "dispatch_error" ]
-      ();
-    0
-;;
+let dispatch_recurring_keepalive = Keeper_heartbeat_loop_dispatch_recurring.dispatch_recurring_keepalive
 
 (** Whether a smart-heartbeat decision should allow the keepalive
     cycle to continue evaluating turns.

@@ -7,6 +7,9 @@ ROOT=""
 LIMIT=20
 FD_WARN="${MASC_DOCKER_PLAYGROUND_FD_WARN:-10000}"
 WORKTREE_WARN="${MASC_DOCKER_PLAYGROUND_WORKTREE_WARN:-100}"
+CLEANUP_SUMMARY=0
+CLEANUP_DAYS=7
+AGGRESSIVE_CLEANUP_DAYS=""
 
 usage() {
   cat <<'EOF'
@@ -25,6 +28,15 @@ Options:
   --worktree-warn N
                 Warn when root contains at least N worktree entries.
                 Default: $MASC_DOCKER_PLAYGROUND_WORKTREE_WARN, then 100.
+  --cleanup-summary
+                Run cleanup dry-runs and print summary counters for root and
+                the largest keeper/repo bucket. No files are removed.
+  --cleanup-days N
+                Days threshold for cleanup dry-run commands and summaries.
+                Default: 7.
+  --aggressive-cleanup-days N
+                Also print a second, more aggressive dry-run summary. This is
+                diagnostic only; use --apply manually after review.
 EOF
 }
 
@@ -34,24 +46,49 @@ while [ $# -gt 0 ]; do
     --limit) LIMIT="${2:-}"; shift 2 ;;
     --fd-warn) FD_WARN="${2:-}"; shift 2 ;;
     --worktree-warn) WORKTREE_WARN="${2:-}"; shift 2 ;;
+    --cleanup-summary) CLEANUP_SUMMARY=1; shift ;;
+    --cleanup-days)
+      CLEANUP_SUMMARY=1
+      CLEANUP_DAYS="${2:-}"
+      if [ -z "$CLEANUP_DAYS" ]; then
+        echo "--cleanup-days requires a value" >&2
+        exit 2
+      fi
+      shift 2
+      ;;
+    --aggressive-cleanup-days)
+      CLEANUP_SUMMARY=1
+      AGGRESSIVE_CLEANUP_DAYS="${2:-}"
+      if [ -z "$AGGRESSIVE_CLEANUP_DAYS" ]; then
+        echo "--aggressive-cleanup-days requires a value" >&2
+        exit 2
+      fi
+      shift 2
+      ;;
     -h|--help|help) usage; exit 0 ;;
     *) echo "unknown arg: $1" >&2; exit 2 ;;
   esac
 done
 
-for numeric_arg in LIMIT FD_WARN WORKTREE_WARN; do
+for numeric_arg in LIMIT FD_WARN WORKTREE_WARN CLEANUP_DAYS; do
   numeric_value="${!numeric_arg}"
   if ! [[ "$numeric_value" =~ ^[0-9]+$ ]]; then
     case "$numeric_arg" in
       LIMIT) numeric_flag="limit" ;;
       FD_WARN) numeric_flag="fd-warn" ;;
       WORKTREE_WARN) numeric_flag="worktree-warn" ;;
+      CLEANUP_DAYS) numeric_flag="cleanup-days" ;;
       *) numeric_flag="$numeric_arg" ;;
     esac
     echo "--$numeric_flag must be a non-negative integer (got: $numeric_value)" >&2
     exit 2
   fi
 done
+
+if [ -n "$AGGRESSIVE_CLEANUP_DAYS" ] && ! [[ "$AGGRESSIVE_CLEANUP_DAYS" =~ ^[0-9]+$ ]]; then
+  echo "--aggressive-cleanup-days must be a non-negative integer (got: $AGGRESSIVE_CLEANUP_DAYS)" >&2
+  exit 2
+fi
 
 if [ -z "$ROOT" ]; then
   BASE="${MASC_BASE_PATH:-$(pwd)}"
@@ -132,11 +169,98 @@ emit_top_fanout_action() {
   echo "top_fanout_count=$top_fanout_count"
   echo "top_fanout_keeper=$top_fanout_keeper"
   echo "top_fanout_repo=$top_fanout_repo"
-  echo "top_fanout_cleanup_dry_run_command=scripts/cleanup-docker-playground-worktrees.sh --root $quoted_root --keeper $quoted_keeper --repo $quoted_repo --days 7"
-  echo "top_fanout_broken_dry_run_command=scripts/cleanup-docker-playground-worktrees.sh --root $quoted_root --keeper $quoted_keeper --repo $quoted_repo --days 7 --include-broken"
+  echo "top_fanout_cleanup_dry_run_command=scripts/cleanup-docker-playground-worktrees.sh --root $quoted_root --keeper $quoted_keeper --repo $quoted_repo --days $CLEANUP_DAYS"
+  echo "top_fanout_broken_dry_run_command=scripts/cleanup-docker-playground-worktrees.sh --root $quoted_root --keeper $quoted_keeper --repo $quoted_repo --days $CLEANUP_DAYS --include-broken"
 }
 
 emit_top_fanout_action
+
+cleanup_script_path() {
+  local script_dir
+  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  printf '%s\n' "$script_dir/cleanup-docker-playground-worktrees.sh"
+}
+
+summary_field() {
+  local summary="$1"
+  local key="$2"
+  printf '%s\n' "$summary" | sed -n "s/.* ${key}=\([0-9][0-9]*\).*/\1/p"
+}
+
+emit_cleanup_summary_fields() {
+  local prefix="$1"
+  local days="$2"
+  local summary="$3"
+  local key value
+  echo "${prefix}_days=$days"
+  for key in scanned candidates removed recent dirty active broken broken_candidates broken_removed failed; do
+    value="$(summary_field "$summary" "$key")"
+    if [ -z "$value" ]; then
+      value="0"
+    fi
+    echo "${prefix}_${key}=$value"
+  done
+}
+
+run_cleanup_summary() {
+  local prefix="$1"
+  local days="$2"
+  local keeper="${3:-}"
+  local repo="${4:-}"
+  local cleanup_script
+  local summary
+  cleanup_script="$(cleanup_script_path)"
+  if [ ! -x "$cleanup_script" ]; then
+    echo "${prefix}_unavailable=cleanup_script_missing"
+    return 0
+  fi
+  if [ -n "$keeper" ] && [ -n "$repo" ]; then
+    summary="$("$cleanup_script" --root "$ROOT" --keeper "$keeper" --repo "$repo" --days "$days" \
+      | awk '/^Summary / { line=$0 } END { print line }')"
+  else
+    summary="$("$cleanup_script" --root "$ROOT" --days "$days" \
+      | awk '/^Summary / { line=$0 } END { print line }')"
+  fi
+  if [ -z "$summary" ]; then
+    echo "${prefix}_unavailable=cleanup_summary_missing"
+    return 0
+  fi
+  emit_cleanup_summary_fields "$prefix" "$days" "$summary"
+}
+
+emit_cleanup_summaries() {
+  [ "$CLEANUP_SUMMARY" -eq 1 ] || return 0
+  echo ""
+  echo "Cleanup dry-run summary:"
+  run_cleanup_summary "cleanup_summary" "$CLEANUP_DAYS"
+  if [ -s "$fanout_tmp" ]; then
+    local top_fanout_line top_fanout_count top_fanout_keeper top_fanout_repo
+    top_fanout_line="$(sort -rn "$fanout_tmp" | head -n 1)"
+    set -- $top_fanout_line
+    top_fanout_count="${1:-0}"
+    top_fanout_keeper="${2:-}"
+    top_fanout_repo="${3:-}"
+    if [ "$top_fanout_count" -gt 0 ] && [ -n "$top_fanout_keeper" ] && [ -n "$top_fanout_repo" ]; then
+      run_cleanup_summary "top_fanout_cleanup_summary" "$CLEANUP_DAYS" \
+        "$top_fanout_keeper" "$top_fanout_repo"
+    fi
+  fi
+  if [ -n "$AGGRESSIVE_CLEANUP_DAYS" ]; then
+    run_cleanup_summary "aggressive_cleanup_summary" "$AGGRESSIVE_CLEANUP_DAYS"
+    if [ -s "$fanout_tmp" ]; then
+      local top_fanout_line top_fanout_count top_fanout_keeper top_fanout_repo
+      top_fanout_line="$(sort -rn "$fanout_tmp" | head -n 1)"
+      set -- $top_fanout_line
+      top_fanout_count="${1:-0}"
+      top_fanout_keeper="${2:-}"
+      top_fanout_repo="${3:-}"
+      if [ "$top_fanout_count" -gt 0 ] && [ -n "$top_fanout_keeper" ] && [ -n "$top_fanout_repo" ]; then
+        run_cleanup_summary "top_fanout_aggressive_cleanup_summary" \
+          "$AGGRESSIVE_CLEANUP_DAYS" "$top_fanout_keeper" "$top_fanout_repo"
+      fi
+    fi
+  fi
+}
 
 emit_hotspot_status() {
   local hotspot_status="ok"
@@ -169,6 +293,7 @@ emit_hotspot_status() {
 if ! command -v lsof >/dev/null 2>&1; then
   echo "fd_holders=unavailable (lsof not found)"
   emit_hotspot_status
+  emit_cleanup_summaries
   exit 0
 fi
 
@@ -205,7 +330,9 @@ if lsof -n -P +c 64 2>/dev/null \
   head -n "$LIMIT" "$holders_tmp"
   echo "top_holder_fd_count=$top_holder_fd_count"
   emit_hotspot_status
+  emit_cleanup_summaries
 else
   echo "fd_holders=unavailable (lsof failed)"
   emit_hotspot_status
+  emit_cleanup_summaries
 fi

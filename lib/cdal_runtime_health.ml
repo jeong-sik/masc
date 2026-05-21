@@ -266,6 +266,12 @@ let has_stale_incomplete_runs completeness =
   | None -> false
 ;;
 
+let has_terminal_incomplete_runs completeness =
+  match json_int_field "terminal_incomplete_run_dirs" completeness with
+  | Some count -> count > 0
+  | None -> false
+;;
+
 let proof_store_root_json
       ~now
       ~stale_age_seconds
@@ -288,6 +294,8 @@ let proof_store_root_json
   let status =
     if has_stale_incomplete_runs completeness
     then "stale_incomplete_runs"
+    else if has_terminal_incomplete_runs completeness
+    then "active"
     else status_of_latest ~stale_age_seconds ~exists ~age_seconds
   in
   `Assoc

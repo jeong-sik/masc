@@ -32,3 +32,15 @@ val decide
   -> notes:string
   -> reason:string
   -> (decision, invalid) result
+
+(** Enumerate the [task_action]s that [decide] would accept for the given
+    [task_status] under the supplied caller context. Pure over the [decide]
+    table — useful for surfacing valid next actions to keepers before they
+    dispatch a transition (closes the workaround posture noted in
+    [Task_transition_state] module header). *)
+val valid_next_actions
+  :  verification_enabled:bool
+  -> same_agent:bool
+  -> force:bool
+  -> task_status:Masc_domain.task_status
+  -> Masc_domain.task_action list

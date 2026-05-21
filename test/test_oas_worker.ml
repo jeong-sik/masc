@@ -4499,6 +4499,70 @@ let test_sdk_error_terminal_provider_runtime_detects_jsonrpc_sse_parse_storm () 
     (Keeper_turn_driver.sdk_error_is_terminal_provider_runtime_failure err)
 ;;
 
+(* D6: typed [NetworkError { kind = Connection_refused }] should classify
+   terminal off the variant — pre-fix it leaked into Generic + 3-5 retries
+   per outage. *)
+let test_sdk_error_terminal_provider_runtime_detects_typed_connection_refused () =
+  let err =
+    Agent_sdk.Error.Api
+      (Llm_provider.Retry.NetworkError
+         { message = "connect: connection refused"
+         ; kind = Llm_provider.Http_client.Connection_refused
+         })
+  in
+  Alcotest.(check bool)
+    "typed Connection_refused is terminal provider runtime"
+    true
+    (Keeper_turn_driver.sdk_error_is_terminal_provider_runtime_failure err)
+;;
+
+(* D6: typed [NetworkError { kind = Dns_failure }] — same network-class
+   semantics as Connection_refused. *)
+let test_sdk_error_terminal_provider_runtime_detects_typed_dns_failure () =
+  let err =
+    Agent_sdk.Error.Api
+      (Llm_provider.Retry.NetworkError
+         { message = "dns lookup failed: nxdomain"
+         ; kind = Llm_provider.Http_client.Dns_failure
+         })
+  in
+  Alcotest.(check bool)
+    "typed Dns_failure is terminal provider runtime"
+    true
+    (Keeper_turn_driver.sdk_error_is_terminal_provider_runtime_failure err)
+;;
+
+(* D6 regression guard: pre-existing message-based classification must
+   continue to match even when the typed variant is not network-class. *)
+let test_sdk_error_terminal_provider_runtime_preserves_message_path () =
+  let err =
+    Agent_sdk.Error.Api
+      (Llm_provider.Retry.InvalidRequest
+         { message = "provider CLI rejected the request (exit 1)" })
+  in
+  Alcotest.(check bool)
+    "provider cli rejected exit 1 (message path) stays terminal"
+    true
+    (Keeper_turn_driver.sdk_error_is_terminal_provider_runtime_failure err)
+;;
+
+(* D6 regression guard: a generic network error with an [Unknown] kind and
+   no terminal substring must remain non-terminal so retries continue to
+   apply where transient. *)
+let test_sdk_error_terminal_provider_runtime_ignores_unknown_network_error () =
+  let err =
+    Agent_sdk.Error.Api
+      (Llm_provider.Retry.NetworkError
+         { message = "transient socket hiccup"
+         ; kind = Llm_provider.Http_client.Unknown
+         })
+  in
+  Alcotest.(check bool)
+    "generic Unknown network error is not terminal"
+    false
+    (Keeper_turn_driver.sdk_error_is_terminal_provider_runtime_failure err)
+;;
+
 let test_codex_cli_prompt_preflight_uses_pipeline_context_window_fallback () =
   let provider_cfg = make_codex_cli_provider_cfg () in
   let config =
@@ -6455,6 +6519,22 @@ let () =
             "terminal runtime detects JSON-RPC SSE parse storm"
             `Quick
             test_sdk_error_terminal_provider_runtime_detects_jsonrpc_sse_parse_storm
+        ; Alcotest.test_case
+            "D6: terminal runtime detects typed Connection_refused"
+            `Quick
+            test_sdk_error_terminal_provider_runtime_detects_typed_connection_refused
+        ; Alcotest.test_case
+            "D6: terminal runtime detects typed Dns_failure"
+            `Quick
+            test_sdk_error_terminal_provider_runtime_detects_typed_dns_failure
+        ; Alcotest.test_case
+            "D6: terminal runtime preserves message-based path"
+            `Quick
+            test_sdk_error_terminal_provider_runtime_preserves_message_path
+        ; Alcotest.test_case
+            "D6: terminal runtime ignores generic Unknown network error"
+            `Quick
+            test_sdk_error_terminal_provider_runtime_ignores_unknown_network_error
         ; Alcotest.test_case
             "worker build_agent installs retry policy"
             `Quick

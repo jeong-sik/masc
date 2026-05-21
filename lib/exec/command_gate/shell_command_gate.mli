@@ -173,18 +173,21 @@ val gate_typed
 val lower_typed_pipeline
   :  ?caller:caller
   -> stages:Masc_exec.Shell_ir.simple list
+  -> allowlist:allowlist_policy
+  -> path_policy:path_policy
   -> sandbox:sandbox_context
   -> unit
   -> verdict
 (** Lower a typed pipeline (e.g. from {!Keeper_tool_bash_input}) into
     the same {!verdict} shape. Empty input yields {!Cannot_parse
-    Parse_error}; a single stage yields [Allow] with a [Simple] AST;
-    multiple stages yield [Allow] with a non-nested
-    [Pipeline]. Nested pipelines are forbidden because the input type
-    already guarantees [Simple] stages — this helper exists so typed
-    input shares the {!verdict} surface with raw input.  [?caller] is
-    captured for the upcoming telemetry partition (RFC-0131 PR-3) and
-    does not affect the verdict. *)
+    Parse_error}; a single stage yields a [Simple] AST; multiple
+    stages yield a non-nested [Pipeline]. The resulting context then
+    runs through the same allowlist, redirect, path-policy, and
+    sandbox handling as {!gate}. Nested pipelines are forbidden
+    because the input type already guarantees [Simple] stages — this
+    helper exists so typed input shares the {!verdict} surface with raw
+    input.  [?caller] is captured for the upcoming telemetry partition
+    (RFC-0131 PR-3) and does not affect the verdict. *)
 
 (** {1 Tags for telemetry} *)
 

@@ -267,6 +267,23 @@ val record_soft_rate_limited :
   unit ->
   unit
 
+(** [record_capacity_backpressure] is like {!record_soft_rate_limited}
+    but tags the event as [Capacity_backpressure] and uses
+    [default_capacity_backpressure_backoff_sec] as the synthetic default.
+    A single capacity-exhaustion event triggers immediate cooldown so the
+    cascade skips the provider for the rest of the cycle without waiting
+    for the [cooldown_threshold] consecutive-failure count.
+
+    See {!record_failure} for [error_kind] / [error_reason] semantics. *)
+val record_capacity_backpressure :
+  t ->
+  provider_key:string ->
+  ?retry_after_s:float ->
+  ?error_kind:error_kind ->
+  ?error_reason:string ->
+  unit ->
+  unit
+
 (** Drop tracker entries whose rolling window is empty AND whose cooldown
     has expired.  Intended as opportunistic maintenance — idle providers
     carry no information but keep growing the hashtable (and pollute the
@@ -378,6 +395,7 @@ type outcome_kind =
   | Outcome_hard_quota
   | Outcome_terminal_failure
   | Outcome_soft_rate_limited
+  | Outcome_capacity_backpressure
 
 (** [recent_outcome_count t ~provider_key ~outcome ~window_s] returns the
     number of events of [outcome] recorded for [provider_key] within the

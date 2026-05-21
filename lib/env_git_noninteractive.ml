@@ -24,8 +24,6 @@ let env_pairs =
 let docker_args =
   List.concat_map (fun (k, v) -> [ "-e"; k ^ "=" ^ v ]) env
 
-let docker_env_args = docker_args
-
 let key_of_entry entry =
   match String.index_opt entry '=' with
   | None -> entry

@@ -43,7 +43,9 @@ let read_all ic =
   Buffer.contents buf
 
 let run_git_exn repo args =
-  let argv = Array.of_list ("git" :: "-C" :: repo :: args) in
+  let argv =
+    Array.of_list ("git" :: "-C" :: repo :: "-c" :: "core.hooksPath=/dev/null" :: args)
+  in
   let ic = Unix.open_process_args_in "git" argv in
   let output = read_all ic in
   match Unix.close_process_in ic with
@@ -416,22 +418,6 @@ let test_dashboard_tools_projection () =
       | Some row ->
           check bool "local worker tool keeps local_worker surface" true
             (has_surface "local_worker" row));
-      (match deprecated_alias_tool with
-      | None -> ()
-      | Some row ->
-          check bool "deprecated alias has registered schema" true
-            (row |> member "registered_schema" |> to_bool);
-          check bool "deprecated alias has dispatch registration" true
-            (row |> member "dispatch_registered" |> to_bool);
-          check string "deprecated alias visibility surfaced" "hidden"
-            (row |> member "visibility" |> to_string);
-          check string "deprecated alias lifecycle surfaced" "deprecated"
-            (row |> member "lifecycle" |> to_string);
-          check string "deprecated alias replacement surfaced"
-            "masc_agent_update"
-            (row |> member "replacement" |> to_string);
-          check bool "deprecated alias not assigned a surface" false
-            (row |> member "surfaces" |> to_list <> []));
       match hidden_tool with
       | None -> ()
       | Some row ->

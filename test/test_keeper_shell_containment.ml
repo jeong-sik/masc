@@ -8,6 +8,7 @@
 
 module Coord = Masc_mcp.Coord
 module Keeper_exec_shell = Masc_mcp.Keeper_exec_shell
+module Keeper_exec_shared = Masc_mcp.Keeper_exec_shared
 module Keeper_gh_env = Masc_mcp.Keeper_gh_env
 module Keeper_id = Masc_mcp.Keeper_id
 module Keeper_registry = Masc_mcp.Keeper_registry
@@ -441,6 +442,35 @@ let test_docker_container_file_path_maps_to_host_worktree () =
       (normalize_realpath host_file) (normalize_realpath path)
   | Error e -> Alcotest.fail ("file path should map container path: " ^ e)
 
+let test_keeper_worktree_shorthand_maps_to_agent_worktree () =
+  setup ~keeper_name:"rondo" ~sandbox:Keeper_types.Local
+  @@ fun ~base:_ ~config ~meta ~playground ->
+  let host_file =
+    Filename.concat
+      playground
+      "repos/masc-mcp/.worktrees/agent-rondo-task-414/lib/cascade/cascade_attempt_fsm.ml"
+  in
+  ensure_dir (Filename.dirname host_file);
+  (match Fs_compat.save_file_atomic host_file "let marker = true\n" with
+   | Ok () -> ()
+   | Error e -> Alcotest.fail ("fixture write failed: " ^ e));
+  let raw_path =
+    ".masc/playground/rondo/repos/masc-mcp/.worktrees/rondo-task-414/lib/cascade/cascade_attempt_fsm.ml"
+  in
+  (match Keeper_exec_shared.resolve_keeper_read_path ~config ~meta ~raw_path with
+   | Ok path ->
+     Alcotest.(check string) "fs read maps shorthand worktree"
+       (normalize_realpath host_file)
+       (normalize_realpath path)
+   | Error e -> Alcotest.fail ("fs read should map shorthand worktree: " ^ e));
+  let args = `Assoc [ ("op", `String "head"); ("path", `String raw_path) ] in
+  match Keeper_shell_shared.resolve_keeper_shell_read_path ~config ~meta ~args with
+  | Ok path ->
+    Alcotest.(check string) "shell read maps shorthand worktree"
+      (normalize_realpath host_file)
+      (normalize_realpath path)
+  | Error e -> Alcotest.fail ("shell read should map shorthand worktree: " ^ e)
+
 let test_docker_other_container_root_stays_blocked () =
   setup ~keeper_name:"executor" ~sandbox:Keeper_types.Docker
   @@ fun ~base:_ ~config ~meta ~playground:_ ->
@@ -585,6 +615,8 @@ let () =
             `Quick test_docker_container_cwd_maps_to_host_worktree;
           Alcotest.test_case "docker container file path maps to host worktree"
             `Quick test_docker_container_file_path_maps_to_host_worktree;
+          Alcotest.test_case "keeper worktree shorthand maps to agent worktree"
+            `Quick test_keeper_worktree_shorthand_maps_to_agent_worktree;
           Alcotest.test_case "docker other container root stays blocked"
             `Quick test_docker_other_container_root_stays_blocked;
           Alcotest.test_case "docker git-creds also contained" `Quick

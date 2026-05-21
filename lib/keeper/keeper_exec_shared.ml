@@ -325,6 +325,60 @@ let rewrite_single_repo_relative_path
            raw))
 ;;
 
+let join_relative_components = function
+  | [] -> "."
+  | hd :: tl -> List.fold_left Filename.concat hd tl
+;;
+
+let task_id_from_worktree_alias ~(meta : keeper_meta) worktree_name =
+  let keeper_prefix = meta.name ^ "-" in
+  if String.starts_with ~prefix:keeper_prefix worktree_name
+  then (
+    let suffix =
+      String.sub
+        worktree_name
+        (String.length keeper_prefix)
+        (String.length worktree_name - String.length keeper_prefix)
+    in
+    if String.starts_with ~prefix:"task-" suffix then Some suffix else None)
+  else if String.starts_with ~prefix:"task-" worktree_name
+  then Some worktree_name
+  else None
+;;
+
+let rewrite_task_worktree_alias_if_present
+      ~(config : Coord.config)
+      ~(meta : keeper_meta)
+      (raw : string)
+  =
+  if (not (Filename.is_relative raw)) || raw = ""
+  then None
+  else (
+    match Keeper_alerting_path.split_relative_components raw with
+    | "repos" :: repo_name :: ".worktrees" :: worktree_name :: rest ->
+      let playground = keeper_playground_root ~config ~meta in
+      let current_abs = Filename.concat playground raw in
+      if safe_file_exists current_abs
+      then None
+      else (
+        match task_id_from_worktree_alias ~meta worktree_name with
+        | None -> None
+        | Some task_id ->
+          let canonical_worktree =
+            Playground_paths.worktree_dir_name meta.agent_name task_id
+          in
+          let rewritten =
+            join_relative_components
+              ([ "repos"; repo_name; ".worktrees"; canonical_worktree ] @ rest)
+          in
+          Log.Keeper.info
+            "playground_relative: task worktree alias rewrite %S -> %S"
+            raw
+            rewritten;
+          Some rewritten)
+    | _ -> None)
+;;
+
 let host_path_of_own_container_path
       ~(config : Coord.config)
       ~(meta : keeper_meta)
@@ -442,6 +496,11 @@ let playground_relative_unless_allowed_root
   | Error _ as err -> err
   | Ok (Some rewritten) -> Ok rewritten
   | Ok None ->
+    let trimmed =
+      Option.value
+        ~default:trimmed
+        (rewrite_task_worktree_alias_if_present ~config ~meta trimmed)
+    in
     if
       trimmed = ""
       || (not (Filename.is_relative trimmed))

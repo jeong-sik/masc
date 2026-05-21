@@ -34,6 +34,7 @@ type runtime_manifest_scan =
   ; mutable latest_provider_lane_row : Keeper_runtime_manifest.t option
   ; mutable latest_pre_dispatch_blocked_row : Keeper_runtime_manifest.t option
   ; mutable latest_tool_lineage_decision : Yojson.Safe.t option
+  ; mutable payload_role_counts : (string, int) Hashtbl.t
   ; mutable context_injected_count : int
   ; mutable context_compacted_event_count : int
   ; mutable active_open_loop_count : int option
@@ -71,6 +72,7 @@ let make_runtime_manifest_scan ~path ~limit =
   ; latest_provider_lane_row = None
   ; latest_pre_dispatch_blocked_row = None
   ; latest_tool_lineage_decision = None
+  ; payload_role_counts = Hashtbl.create 17
   ; context_injected_count = 0
   ; context_compacted_event_count = 0
   ; active_open_loop_count = None
@@ -107,6 +109,15 @@ let update_runtime_manifest_scan scan row =
   scan.total_rows <- scan.total_rows + 1;
   push_bounded scan.returned_rows scan.limit row;
   increment_event_count scan row.Keeper_runtime_manifest.event;
+  (match
+     Yojson.Safe.Util.member "payload_role" row.Keeper_runtime_manifest.decision
+   with
+   | `String role ->
+     let current =
+       Option.value (Hashtbl.find_opt scan.payload_role_counts role) ~default:0
+     in
+     Hashtbl.replace scan.payload_role_counts role (current + 1)
+   | _ -> ());
   (match row.Keeper_runtime_manifest.keeper_turn_id with
    | Some value -> scan.keeper_turn_ids <- value :: scan.keeper_turn_ids
    | None -> ());

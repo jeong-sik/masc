@@ -56,6 +56,15 @@ type turn_context = {
   manifest_keeper_turn_id : int option;
 }
 
+type payload_role =
+  | Model_input
+  | Operator_evidence
+  | Checkpoint
+  | Memory_store
+
+val payload_role_to_string : payload_role -> string
+val payload_role_of_string : string -> payload_role option
+
 val schema_version : int
 val all_event_kinds : event_kind list
 val event_kind_to_string : event_kind -> string
@@ -93,6 +102,8 @@ val clock_refs_for_context :
   Yojson.Safe.t
 
 val with_clock_refs : clock_refs:Yojson.Safe.t -> Yojson.Safe.t -> Yojson.Safe.t
+
+val with_payload_role : payload_role:payload_role -> Yojson.Safe.t -> Yojson.Safe.t
 
 val tool_lineage :
   ?searched_tool_names:string list ->

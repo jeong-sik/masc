@@ -22,6 +22,25 @@ type event_kind =
   | Receipt_appended
   | Turn_finished
 
+type payload_role =
+  | Model_input
+  | Operator_evidence
+  | Checkpoint
+  | Memory_store
+
+let payload_role_to_string = function
+  | Model_input -> "model_input"
+  | Operator_evidence -> "operator_evidence"
+  | Checkpoint -> "checkpoint"
+  | Memory_store -> "memory_store"
+
+let payload_role_of_string = function
+  | "model_input" -> Some Model_input
+  | "operator_evidence" -> Some Operator_evidence
+  | "checkpoint" -> Some Checkpoint
+  | "memory_store" -> Some Memory_store
+  | _ -> None
+
 type links = {
   receipt_path : string option;
   checkpoint_path : string option;
@@ -275,6 +294,18 @@ let with_clock_refs ~clock_refs decision =
     | `Assoc fields when assoc_has_key "clock_refs" fields -> decision
     | `Assoc fields -> `Assoc (fields @ [ ("clock_refs", clock_refs) ])
     | other -> `Assoc [ ("decision", other); ("clock_refs", clock_refs) ])
+
+let with_payload_role ~payload_role decision =
+  match decision with
+  | `Assoc fields when assoc_has_key "payload_role" fields -> decision
+  | `Assoc fields ->
+    `Assoc (fields @ [ ("payload_role", `String (payload_role_to_string payload_role)) ])
+  | other ->
+    `Assoc
+      [
+        ("decision", other);
+        ("payload_role", `String (payload_role_to_string payload_role));
+      ]
 
 let tool_lineage_stage ~stage ~tool_names ~count () : Yojson.Safe.t =
   `Assoc

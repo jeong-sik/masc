@@ -240,29 +240,31 @@ let run_turn
     ~keeper_turn_id:manifest_keeper_turn_id
     ~checkpoint_path
     ~decision:
-      (`Assoc
-        [
-          ("loaded_checkpoint_present", `Bool ctx.loaded_checkpoint_present);
-          ("pre_dispatch_compacted", `Bool pre_dispatch_compacted);
-          ( "pre_dispatch_checkpoint_error",
-            match pre_dispatch_checkpoint_error with
-            | None -> `Null
-            | Some err -> `String (Agent_sdk.Error.to_string err) );
-        ])
+      (Keeper_runtime_manifest.with_payload_role ~payload_role:Checkpoint
+        (`Assoc
+          [
+            ("loaded_checkpoint_present", `Bool ctx.loaded_checkpoint_present);
+            ("pre_dispatch_compacted", `Bool pre_dispatch_compacted);
+            ( "pre_dispatch_checkpoint_error",
+              match pre_dispatch_checkpoint_error with
+              | None -> `Null
+              | Some err -> `String (Agent_sdk.Error.to_string err) );
+          ]))
     Keeper_runtime_manifest.Checkpoint_loaded;
   append_manifest ~site:"context_compacted"
     ~keeper_turn_id:manifest_keeper_turn_id
     ~status:(if pre_dispatch_compacted then "compacted" else "skipped")
     ~decision:
-      (`Assoc
-        [
-          ("pre_dispatch_compacted", `Bool pre_dispatch_compacted);
-          ( "pre_dispatch_checkpoint_error",
-            match pre_dispatch_checkpoint_error with
-            | None -> `Null
-            | Some err -> `String (Agent_sdk.Error.to_string err) );
-          ("checkpoint_path", `String checkpoint_path);
-        ])
+      (Keeper_runtime_manifest.with_payload_role ~payload_role:Model_input
+        (`Assoc
+          [
+            ("pre_dispatch_compacted", `Bool pre_dispatch_compacted);
+            ( "pre_dispatch_checkpoint_error",
+              match pre_dispatch_checkpoint_error with
+              | None -> `Null
+              | Some err -> `String (Agent_sdk.Error.to_string err) );
+            ("checkpoint_path", `String checkpoint_path);
+          ]))
     Keeper_runtime_manifest.Context_compacted;
   (* Steps 5-6: turn prompt, memory/temporal context, prompt metrics,
      user message append, token estimation — Keeper_run_prompt. *)
@@ -289,18 +291,19 @@ let run_turn
   append_manifest ~site:"context_injected"
     ~keeper_turn_id:manifest_keeper_turn_id
     ~decision:
-      (`Assoc
-        [
-          ("base_system_prompt_digest", `String (digest_text base_system_prompt));
-          ("turn_system_prompt_digest", `String (digest_text turn_system_prompt));
-          ("dynamic_context_digest", `String (digest_text dynamic_context));
-          ("memory_context_digest", `String (digest_text memory_context));
-          ("temporal_context_digest", `String (digest_text temporal_context));
-          ("user_message_digest", `String (digest_text user_message));
-          ("history_message_count", `Int (List.length history_messages));
-          ("history_messages_digest", `String history_messages_digest);
-          ("estimated_input_tokens", `Int estimated_input_tokens);
-        ])
+      (Keeper_runtime_manifest.with_payload_role ~payload_role:Model_input
+        (`Assoc
+          [
+            ("base_system_prompt_digest", `String (digest_text base_system_prompt));
+            ("turn_system_prompt_digest", `String (digest_text turn_system_prompt));
+            ("dynamic_context_digest", `String (digest_text dynamic_context));
+            ("memory_context_digest", `String (digest_text memory_context));
+            ("temporal_context_digest", `String (digest_text temporal_context));
+            ("user_message_digest", `String (digest_text user_message));
+            ("history_message_count", `Int (List.length history_messages));
+            ("history_messages_digest", `String history_messages_digest);
+            ("estimated_input_tokens", `Int estimated_input_tokens);
+          ]))
     Keeper_runtime_manifest.Context_injected;
   let actionable_signal =
     match world_observation with

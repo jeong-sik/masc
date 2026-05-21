@@ -825,6 +825,12 @@ function formatToolLineage(lineage: KeeperRuntimeLensToolLineageAxis): string {
   return parts.length > 0 ? parts.join(' → ') : 'recorded (no stages)'
 }
 
+function formatPayloadRole(axis: KeeperRuntimeLensPayloadRoleAxis): string {
+  const entries = Object.entries(axis.counts)
+  if (entries.length === 0) return 'none'
+  return entries.map(([role, count]) => `${role}:${count}`).join(' · ')
+}
+
 function runtimeTraceProviderTerminal(trace: KeeperRuntimeTraceResponse): string {
   const provider = trace.provider_attempts
   const status = compactToken(provider.terminal_status, 'unknown')
@@ -1057,6 +1063,7 @@ export function RuntimeLensSection({
         <${SignalRow} label="tool materialized" value=${formatLensList(tool.materialized_tools)} />
         <${SignalRow} label="tool missing" value=${formatLensList(tool.missing_required_tools)} />
         <${SignalRow} label="tool lineage" value=${formatToolLineage(lens.axes.tool_lineage)} />
+        <${SignalRow} label="payload role" value=${formatPayloadRole(lens.axes.payload_role)} />
         <${SignalRow} label="claim scope" value=${claim.present ? `${claim.mode ?? 'unknown'} / ${claim.status}` : 'not observed'} />
         <${SignalRow} label="claim excluded" value=${claim.excluded_count === null ? '-' : String(claim.excluded_count)} />
         <${SignalRow} label="claim goals" value=${formatLensList(claim.effective_goal_ids)} />

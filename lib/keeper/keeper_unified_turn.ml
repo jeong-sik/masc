@@ -1300,7 +1300,9 @@ let run_keeper_cycle
                       ?event_bus_correlation_id:turn_event_bus.correlation_id
                       ?event_bus_run_id:turn_event_bus.run_id
                       ?caused_by:turn_event_bus.caused_by ())
-                 ~decision:(turn_event_bus_manifest_decision turn_event_bus)
+                 ~decision:
+                   (Keeper_runtime_manifest.with_payload_role ~payload_role:Operator_evidence
+                      (turn_event_bus_manifest_decision turn_event_bus))
                  Keeper_runtime_manifest.Event_bus_correlated;
                let run_result =
                  match event_bus_integrity_error_snapshot () with

@@ -148,6 +148,27 @@ let read_json_local path =
 let read_json_local_result path =
   Safe_ops.read_json_file_safe path
 
+type read_json_error =
+  | Json_read_exn of exn
+  | Json_read_error of string
+
+let parse_json_content_result ~context content =
+  let trimmed = String.trim content in
+  if trimmed = "" then Ok (`Assoc [])
+  else Safe_ops.parse_json_safe ~context trimmed
+
+let read_json_local_result_exn path =
+  try
+    if not (Sys.file_exists path) then
+      Error (Json_read_error (Printf.sprintf "File not found: %s" path))
+    else
+      Fs_compat.load_file path
+      |> parse_json_content_result ~context:path
+      |> Result.map_error (fun msg -> Json_read_error msg)
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn -> Error (Json_read_exn exn)
+
 let json_to_pretty_utf8 json =
   json |> Safe_ops.sanitize_json_utf8 |> Yojson.Safe.pretty_to_string
 
@@ -239,11 +260,6 @@ let read_json config path =
   | None -> read_json_local path
 
 let read_json_result config path =
-  let parse_backend_json ~context content =
-    let trimmed = String.trim content in
-    if trimmed = "" then Ok (`Assoc [])
-    else Safe_ops.parse_json_safe ~context trimmed
-  in
   match key_of_path config path with
   | Some key -> begin
       match config.backend with
@@ -251,7 +267,7 @@ let read_json_result config path =
       | Memory _ | FileSystem _ ->
       match backend_get config ~key with
       | Ok (Some content) ->
-          parse_backend_json ~context:"read_json_result" content
+          parse_json_content_result ~context:"read_json_result" content
       | Ok None -> Ok (`Assoc [])
       | Error e ->
           Error
@@ -403,11 +419,8 @@ let agent_json_needs_repair = function
       | Some _ -> false)
   | _ -> false
 
-(* RFC-0154 PR-2: substring vocabulary lives in
-   [System_error_class.classify_string] now.  Wrapper preserved for the
-   one local [read_agent_with_repair] caller below. *)
-let is_fd_pressure_text detail =
-  match System_error_class.classify_string detail with
+let is_fd_pressure_exn exn =
+  match System_error_class.classify_exn exn with
   | System_error_class.Fd_exhaustion -> true
   | System_error_class.Disk_exhaustion
   | System_error_class.Permission_denied
@@ -416,22 +429,64 @@ let is_fd_pressure_text detail =
   | System_error_class.Other _ -> false
 ;;
 
-let read_agent_with_repair config path =
-  (match read_json_result config path with
-   | Error msg when is_fd_pressure_text msg ->
-     Error ("fd_pressure_io: " ^ msg)
-   | Ok _
-   | Error _ ->
-  let json = read_json config path in
-  match Masc_domain.agent_of_yojson json with
-  | Ok agent as ok ->
+type read_agent_error =
+  | Agent_fd_pressure of exn
+  | Agent_read_error of string
+
+let read_agent_json_from_backend config key =
+  match backend_get config ~key with
+  | Ok (Some content) ->
+    parse_json_content_result ~context:"read_agent_with_repair" content
+    |> Result.map_error (fun msg -> Json_read_error msg)
+  | Ok None -> Ok (`Assoc [])
+  | Error e ->
+    Error
+      (Json_read_error
+         (Printf.sprintf
+            "[read_agent_with_repair] backend_get failed for %s: %s"
+            key
+            (Backend_types.show_error e)))
+
+let read_agent_json_result config path =
+  match key_of_path config path with
+  | Some key ->
+    (match config.backend with
+     | FileSystem _ ->
+       (match
+          (try Ok (Sys.file_exists path) with
+           | Eio.Cancel.Cancelled _ as e -> raise e
+           | exn -> Error (Json_read_exn exn))
+        with
+        | Ok true -> read_json_local_result_exn path
+        | Ok false -> read_agent_json_from_backend config key
+        | Error _ as err -> err)
+     | Memory _ -> read_agent_json_from_backend config key)
+  | None -> read_json_local_result_exn path
+
+let read_agent_with_repair_result config path =
+  match read_agent_json_result config path with
+  | Error (Json_read_exn exn) when is_fd_pressure_exn exn ->
+    Error (Agent_fd_pressure exn)
+  | Error (Json_read_exn exn) -> Error (Agent_read_error (Printexc.to_string exn))
+  | Error (Json_read_error msg) -> Error (Agent_read_error msg)
+  | Ok json ->
+    (match Masc_domain.agent_of_yojson json with
+     | Ok agent ->
       if agent_json_needs_repair json then (
         Log.Coord.warn
           "agent state repair: repaired agent JSON and rewrote canonical state for %s"
           path;
         write_json config path (Masc_domain.agent_to_yojson agent));
-      ok
-  | Error _ as error -> error)
+      Ok agent
+     | Error msg -> Error (Agent_read_error msg))
+
+let read_agent_with_repair config path =
+  match read_agent_with_repair_result config path with
+  | Ok agent -> Ok agent
+  | Error (Agent_fd_pressure exn) ->
+    let detail = Printexc.to_string exn in
+    Error ("fd_pressure_io: " ^ detail)
+  | Error (Agent_read_error msg) -> Error msg
 
 (* ============================================ *)
 (* File locking                                 *)

@@ -2,13 +2,17 @@ import { html } from 'htm/preact'
 import { render } from 'preact'
 import { act } from 'preact/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { TelemetryResponse, TelemetrySummaryResponse } from '../api/dashboard'
+import type { DashboardCacheStatsResponse, TelemetryResponse, TelemetrySummaryResponse } from '../api/dashboard'
 
 void vi
 vi.setConfig({ testTimeout: 120_000 })
 
 const baseTelemetry: TelemetryResponse = {
   generated_at: '2026-04-09T05:10:00Z',
+  generated_at_iso: '2026-04-09T05:10:00Z',
+  dashboard_surface: '/api/v1/dashboard/telemetry',
+  source: 'telemetry_unified',
+  query: { source: 'tool_metric', n: 100 },
   count: 1,
   entries: [
     {
@@ -41,6 +45,42 @@ const baseSummary: TelemetrySummaryResponse = {
   total_entries: 1,
 }
 
+const baseCacheStats: DashboardCacheStatsResponse = {
+  entries: 2,
+  fresh: 1,
+  stale: 1,
+  expired: 0,
+  ready_fresh: 1,
+  ready_stale: 1,
+  computing: 0,
+  max_entries: 500,
+  hits_total: 8,
+  misses_total: 2,
+  hit_ratio: 0.8,
+  timeout_circuit_open: 0,
+  timeout_circuit_tracked: 1,
+  entries_truncated_to: 50,
+  entry_details: [
+    {
+      key: 'telemetry:/Users/dancer/me/.masc:src=tool_metric:n=100',
+      kind: 'fresh',
+      ttl_remaining_ms: 750,
+      stale_remaining_ms: 10_000,
+    },
+    {
+      key: 'telemetry:/Users/dancer/me/.masc:all:n=100',
+      kind: 'stale',
+      ttl_remaining_ms: 0,
+      stale_remaining_ms: 4_000,
+    },
+    {
+      key: 'health:full',
+      kind: 'fresh',
+      ttl_remaining_ms: 500,
+    },
+  ],
+}
+
 async function flushUi(): Promise<void> {
   await act(async () => {
     for (let i = 0; i < 4; i += 1) {
@@ -67,6 +107,7 @@ async function loadPanel(
     fetchDashboardShell?: (args?: { light?: boolean; signal?: AbortSignal }) => Promise<unknown>
     fetchDashboardTools?: (args?: { signal?: AbortSignal }) => Promise<unknown>
     fetchDashboardNamespaceTruth?: (args?: { signal?: AbortSignal }) => Promise<unknown>
+    fetchDashboardCacheStats?: (args?: { signal?: AbortSignal }) => Promise<DashboardCacheStatsResponse>
   },
 ) {
   vi.resetModules()
@@ -76,6 +117,7 @@ async function loadPanel(
     fetchDashboardShell: opts?.fetchDashboardShell ?? vi.fn().mockResolvedValue({ counts: { keepers: 2, agents: 0, tasks: 5 }, status: { version: '0.2.0', build: { uptime_seconds: 600 } } }),
     fetchDashboardTools: opts?.fetchDashboardTools ?? vi.fn().mockResolvedValue({ tool_inventory: { count: 10, tools: [], surface_summary: { public_mcp: { count: 5, tools: [] } } }, tool_usage: { total_calls: 100, never_called_count: 0 } }),
     fetchDashboardNamespaceTruth: opts?.fetchDashboardNamespaceTruth ?? vi.fn().mockResolvedValue({ execution: { summary: { active_operations: 3, blocked_operations: 1, continuity_alerts: 0 } } }),
+    fetchDashboardCacheStats: opts?.fetchDashboardCacheStats ?? vi.fn().mockResolvedValue(baseCacheStats),
   }))
   return import('./telemetry-unified')
 }
@@ -213,6 +255,13 @@ describe('TelemetryUnified', () => {
     expect(container.textContent).toContain('Auto-refresh 30s')
     expect(container.textContent).toContain('MASC telemetry store entries')
     expect(container.textContent).toContain('mcp__masc__masc_status')
+    expect(container.textContent).toContain('Query cache')
+    expect(container.textContent).toContain('telemetry keys')
+    expect(container.textContent).toContain('fresh:1')
+    expect(container.textContent).toContain('stale:1')
+    expect(container.textContent).toContain('hit 80%')
+    expect(container.textContent).toContain('/api/v1/dashboard/telemetry')
+    expect(container.textContent).toContain('source=tool_metric')
     expect(container.textContent).toContain('freshness_slo_exceeded')
     expect(container.textContent).toContain('Telemetry_unified.summary_json')
     expect(container.textContent).toContain('.masc/tool_metrics/YYYY-MM/DD.jsonl')
@@ -226,6 +275,25 @@ describe('TelemetryUnified', () => {
     expect(container.textContent).toContain('1 차단 작업')
     expect(container.textContent).not.toContain('활성 세션')
     expect(container.textContent).toContain('5 public')
+  })
+
+  it('keeps telemetry rows when dashboard cache stats are unavailable', async () => {
+    const fetchTelemetry = vi.fn().mockResolvedValue(baseTelemetry)
+    const fetchTelemetrySummary = vi.fn().mockResolvedValue(baseSummary)
+    const fetchDashboardCacheStats = vi.fn().mockRejectedValue(new Error('cache offline'))
+    const { TelemetryUnified } = await loadPanel(fetchTelemetry, fetchTelemetrySummary, {
+      fetchDashboardCacheStats,
+    })
+
+    await act(async () => {
+      render(html`<${TelemetryUnified} />`, container)
+      await Promise.resolve()
+    })
+    await flushUi()
+
+    expect(fetchDashboardCacheStats).toHaveBeenCalled()
+    expect(container.textContent).toContain('mcp__masc__masc_status')
+    expect(container.textContent).toContain('cache stats unavailable: cache offline')
   })
 
   it('renders telemetry summary coverage gap provenance', async () => {

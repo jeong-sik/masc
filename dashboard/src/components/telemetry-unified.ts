@@ -7,8 +7,11 @@ import {
   fetchDashboardShell,
   fetchDashboardTools,
   fetchDashboardNamespaceTruth,
+  fetchDashboardCacheStats,
   fetchTelemetry,
+  type DashboardCacheStatsResponse,
   type TelemetryEntry,
+  type TelemetryResponse,
   type TelemetrySource,
   type TelemetrySourceSummary,
 } from '../api/dashboard'
@@ -55,9 +58,12 @@ const EMPTY_STORE: StoreSnapshot = {
 }
 interface TelemetryState {
   entries: TelemetryEntry[]
+  telemetry: TelemetryResponse | null
   summary: TelemetrySourceSummary[]
   totalEntries: number
   store: StoreSnapshot
+  cacheStats: DashboardCacheStatsResponse | null
+  cacheStatsError: string | null
   loading: boolean
   error: string | null
 }
@@ -745,6 +751,110 @@ function telemetrySourceProvenanceRows(src: TelemetrySourceSummary): Array<{ lab
   return rows
 }
 
+function formatMilliseconds(value: number | undefined): string {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return '-'
+  const abs = Math.abs(value)
+  if (abs >= 1000) return `${(value / 1000).toFixed(1)}s`
+  return `${value}ms`
+}
+
+function shortCacheKey(key: string): string {
+  const withoutPrefix = key.startsWith('telemetry:') ? key.slice('telemetry:'.length) : key
+  return withoutPrefix.length > 90 ? `...${withoutPrefix.slice(-87)}` : withoutPrefix
+}
+
+function TelemetryCachePanel({
+  telemetry,
+  summary,
+  cacheStats,
+  cacheStatsError,
+}: {
+  telemetry: TelemetryResponse | null
+  summary: TelemetrySourceSummary[]
+  cacheStats: DashboardCacheStatsResponse | null
+  cacheStatsError: string | null
+}) {
+  const telemetryCacheEntries = (cacheStats?.entry_details ?? []).filter(entry => entry.key.startsWith('telemetry:'))
+  const cacheKindCounts = telemetryCacheEntries.reduce<Record<string, number>>((acc, entry) => {
+    acc[entry.kind] = (acc[entry.kind] ?? 0) + 1
+    return acc
+  }, {})
+  const unhealthySources = summary.filter(src => {
+    const health = src.health ?? ''
+    return health !== '' && health !== 'ok' && health !== 'healthy' && health !== 'fresh'
+  })
+  const activeQuery = telemetry?.query
+  const queryParts = [
+    activeQuery?.source ? `source=${String(activeQuery.source)}` : null,
+    activeQuery?.keeper ? `keeper=${String(activeQuery.keeper)}` : null,
+    activeQuery?.session_id ? `session=${String(activeQuery.session_id)}` : null,
+    activeQuery?.operation_id ? `operation=${String(activeQuery.operation_id)}` : null,
+    activeQuery?.worker_run_id ? `worker=${String(activeQuery.worker_run_id)}` : null,
+    activeQuery?.n ? `n=${String(activeQuery.n)}` : null,
+  ].filter((part): part is string => Boolean(part))
+  const cacheRows = telemetryCacheEntries.slice(0, 3)
+  return html`
+    <section class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3" aria-label="Telemetry cache freshness">
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div class="min-w-0">
+          <div class="text-xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">Query cache</div>
+          <div class="mt-1 text-2xs text-[var(--color-fg-disabled)]">
+            ${telemetry?.generated_at_iso ?? telemetry?.generated_at ?? '-'}
+            ${telemetry?.dashboard_surface ? html`<span class="mx-1">·</span><span class="font-mono">${telemetry.dashboard_surface}</span>` : null}
+          </div>
+        </div>
+        <div class="flex flex-wrap gap-2 text-2xs">
+          <span class="rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] px-2 py-1 text-[var(--color-fg-muted)]">
+            telemetry keys <span class="font-mono text-[var(--color-fg-primary)]">${telemetryCacheEntries.length}</span>
+          </span>
+          <span class="rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] px-2 py-1 text-[var(--color-fg-muted)]">
+            hit <span class="font-mono text-[var(--color-fg-primary)]">${(((cacheStats?.hit_ratio ?? 0) * 100).toFixed(0))}%</span>
+          </span>
+          <span class="rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] px-2 py-1 text-[var(--color-fg-muted)]">
+            source issues <span class=${`font-mono ${unhealthySources.length > 0 ? 'text-[var(--bad-light)]' : 'text-[var(--color-status-ok)]'}`}>${unhealthySources.length}</span>
+          </span>
+        </div>
+      </div>
+      <div class="mt-3 grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)]">
+        <div class="grid gap-2 text-2xs text-[var(--color-fg-muted)]">
+          <div class="flex flex-wrap gap-2">
+            ${Object.entries(cacheKindCounts).length > 0
+              ? Object.entries(cacheKindCounts).map(([kind, count]) => html`
+                <span class="rounded-[var(--r-1)] border border-[var(--color-border-default)] px-2 py-1 font-mono">${kind}:${count}</span>
+              `)
+              : html`<span class="rounded-[var(--r-1)] border border-[var(--color-border-default)] px-2 py-1">no telemetry cache rows</span>`}
+          </div>
+          ${cacheStatsError ? html`
+            <div class="rounded-[var(--r-1)] border border-[var(--bad-muted)] bg-[var(--bad-soft)] px-2 py-1 text-[var(--bad-light)]">
+              cache stats unavailable: ${cacheStatsError}
+            </div>
+          ` : null}
+          ${queryParts.length > 0 ? html`
+            <div class="min-w-0 break-all font-mono text-3xs text-[var(--color-fg-disabled)]">${queryParts.join(' · ')}</div>
+          ` : null}
+        </div>
+        <div class="grid gap-1">
+          ${cacheRows.length > 0 ? cacheRows.map(entry => html`
+            <div class="grid grid-cols-[5.5rem_minmax(0,1fr)_7rem] items-center gap-2 rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] px-2 py-1 text-3xs">
+              <span class="font-mono text-[var(--color-fg-muted)]">${entry.kind}</span>
+              <span class="min-w-0 truncate font-mono text-[var(--color-fg-primary)]" title=${entry.key}>${shortCacheKey(entry.key)}</span>
+              <span class="text-right font-mono text-[var(--color-fg-disabled)]">
+                ${entry.kind === 'computing'
+                  ? formatMilliseconds(entry.computing_for_ms)
+                  : formatMilliseconds(entry.ttl_remaining_ms)}
+              </span>
+            </div>
+          `) : html`
+            <div class="rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] px-2 py-1 text-3xs text-[var(--color-fg-disabled)]">
+              cache detail sample does not include telemetry rows
+            </div>
+          `}
+        </div>
+      </div>
+    </section>
+  `
+}
+
 function SummaryCard({ src }: { src: TelemetrySourceSummary }) {
   const meta = sourceMeta(src.source)
   const hasData = src.entry_count > 0
@@ -1012,9 +1122,12 @@ export function TelemetryUnified() {
   const autoRefreshLoadRef = useRef<() => Promise<void>>(async () => undefined)
   const state = useSignal<TelemetryState>({
     entries: [],
+    telemetry: null,
     summary: [],
     totalEntries: 0,
     store: EMPTY_STORE,
+    cacheStats: null,
+    cacheStatsError: null,
     loading: true,
     error: null,
   })
@@ -1080,7 +1193,16 @@ export function TelemetryUnified() {
           uptime: shell?.status?.build?.uptime_seconds ?? null,
         } satisfies StoreSnapshot
       })
-      const [telemetry, , store] = await Promise.all([
+      const cacheStatsPromise = fetchDashboardCacheStats({ signal: controller.signal })
+        .then(cacheStats => ({ cacheStats, cacheStatsError: null as string | null }))
+        .catch(error => {
+          if (isAbortError(error)) throw error
+          return {
+            cacheStats: null,
+            cacheStatsError: error instanceof Error ? error.message : String(error),
+          }
+        })
+      const [telemetry, , store, cacheStatsResult] = await Promise.all([
         fetchTelemetry({
           source: sourceFilter.value || undefined,
           keeper: keeperFilter.value || undefined,
@@ -1094,6 +1216,7 @@ export function TelemetryUnified() {
         // does not duplicate this fetch across panels.
         refreshSharedTelemetrySummary({ signal: controller.signal }),
         storePromise,
+        cacheStatsPromise,
       ])
       if (requestId !== latestRequestId.current) return
       // refreshSharedTelemetrySummary records failures on the shared error
@@ -1108,9 +1231,12 @@ export function TelemetryUnified() {
       const summary = sharedTelemetrySummary.value ?? { sources: [], total_entries: 0, generated_at: '' }
       state.value = {
         entries: telemetry.entries,
+        telemetry,
         summary: summary.sources,
         totalEntries: summary.total_entries,
         store,
+        cacheStats: cacheStatsResult.cacheStats,
+        cacheStatsError: cacheStatsResult.cacheStatsError,
         loading: false,
         error: null,
       }
@@ -1160,6 +1286,7 @@ export function TelemetryUnified() {
   }, [])
 
   const { entries, summary, totalEntries, store, loading, error } = state.value
+  const { telemetry, cacheStats, cacheStatsError } = state.value
   const entrySearchQuery = entrySearch.value
   const allDisplayItems = useMemo(() => buildTelemetryDisplayItems(entries), [entries])
   const displayItems = useMemo(
@@ -1200,6 +1327,13 @@ export function TelemetryUnified() {
       </div>
 
       <${OasHealthChip} />
+
+      <${TelemetryCachePanel}
+        telemetry=${telemetry}
+        summary=${summary}
+        cacheStats=${cacheStats}
+        cacheStatsError=${cacheStatsError}
+      />
 
       <${TelemetryRouteFocusPanel} focus=${routeFocus} matchCount=${routeFocusedItemKeys.size} />
 

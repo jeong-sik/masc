@@ -1413,12 +1413,13 @@ let sweep_and_recover (ctx : _ context) =
       | _ -> ());
     Eio_guard.yield_step sweep_names_ym);
   (* Phase 3.5: self-healing circuit breaker — auto-resume keepers that were
-     auto-paused (have [auto_resume_after_sec = Some sec]) and whose pause
-     timer has elapsed.  Clearing [paused = false] here lets Phase 4
-     (reconcile_keepalive_keepers) pick them up and restart them on the same
-     sweep.  Reconcile-gated pauses (ambiguous commit timeouts) and
-     operator-initiated pauses ([auto_resume_after_sec = None]) are
-     intentionally skipped so they continue to require human action. *)
+     auto-paused and whose pause timer has elapsed.  Clearing [paused = false]
+     here lets Phase 4 (reconcile_keepalive_keepers) pick them up and restart
+     them on the same sweep.  Reconcile-gated pauses and intentional operator
+     pauses are skipped, but legacy timeout pauses with [last_blocker =
+     Turn_timeout] and no explicit [auto_resume_after_sec] use the initial
+     auto-resume backoff so capacity does not stay degraded forever after a
+     plain turn timeout. *)
   Keeper_types.keeper_names ctx.config
   |> List.iter (fun name ->
     if Keeper_registry.is_running ~base_path name
@@ -1455,7 +1456,11 @@ let sweep_and_recover (ctx : _ context) =
              ~labels:[ "keeper", name; "cascade", cascade_name ]
              ()
          | Keeper_health_probe.Unknown | Keeper_health_probe.Healthy ->
-           let resume_after_sec = Option.value ~default:0.0 meta.auto_resume_after_sec in
+           let resume_after_sec =
+             Option.value
+               ~default:0.0
+               (Keeper_supervisor_types.paused_meta_effective_auto_resume_after_sec meta)
+           in
            let paused_ts =
              Coord_resilience.Time.parse_iso8601_opt meta.updated_at
              |> Option.value ~default:0.0
@@ -1468,6 +1473,7 @@ let sweep_and_recover (ctx : _ context) =
              let resumed_meta =
                { meta with
                  paused = false
+               ; auto_resume_after_sec = Some resume_after_sec
                ; updated_at = now_iso ()
                ; runtime = { meta.runtime with last_blocker = None }
                }

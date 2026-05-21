@@ -1580,6 +1580,89 @@ let test_operator_pause_not_auto_resumed () =
       check (float 0.001) "metric_keeper_auto_resumed_total NOT incremented"
         baseline_auto_resume after_auto_resume)
 
+let test_turn_timeout_pause_without_explicit_policy_auto_resumes () =
+  with_restart_launch_noop @@ fun () ->
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  with_config_dir @@ fun config_dir ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Reg.clear ();
+      Masc_mcp.Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc_mcp.Coord.default_config base_dir in
+      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "supervisor"));
+      let name = "timeout-paused-implicit-resume" in
+      write_keeper_toml config_dir ~name;
+      let two_hours_ago =
+        let t = Unix.gmtime (Unix.time () -. 7200.0) in
+        Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
+          (t.tm_year + 1900) (t.tm_mon + 1) t.tm_mday
+          t.tm_hour t.tm_min t.tm_sec
+      in
+      let timeout_blocker =
+        KT.blocker_info_of_class ~detail:"turn_timeout" KT.Turn_timeout
+      in
+      let paused_meta =
+        { (make_meta name) with
+          paused = true;
+          auto_resume_after_sec = None;
+          updated_at = two_hours_ago;
+          runtime =
+            { (make_meta name).runtime with
+              last_blocker = Some timeout_blocker;
+            };
+        }
+      in
+      check bool "timeout pause without explicit policy is due"
+        true
+        (Masc_mcp.Keeper_supervisor_types.paused_meta_auto_resume_due
+           ~now:(Unix.time ())
+           paused_meta);
+      (match KT.write_meta config paused_meta with
+       | Ok () -> ()
+       | Error err -> fail err);
+      check bool "precondition: timeout pause is not bootable" false
+        (List.mem name (KR.bootable_keeper_names config));
+      let baseline_auto_resume =
+        Masc_mcp.Prometheus.metric_total
+          Masc_mcp.Keeper_metrics.metric_keeper_auto_resumed_total
+      in
+      let ctx : _ KT.context =
+        {
+          config;
+          agent_name = "supervisor";
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+          net = Some (Eio.Stdenv.net env);
+        }
+      in
+      Sup.sweep_and_recover ctx;
+      (match KT.read_meta config name with
+       | Ok (Some m) ->
+           check bool "meta.paused = false after implicit timeout resume"
+             false m.paused;
+           check bool "implicit timeout backoff is materialized"
+             true (Option.is_some m.auto_resume_after_sec);
+           check bool "last_blocker cleared after implicit timeout resume"
+             true (Option.is_none m.runtime.last_blocker)
+       | Ok None -> fail "meta missing"
+       | Error err -> fail ("read_meta failed: " ^ err));
+      check bool "timeout-resumed keeper re-enters bootable set" true
+        (List.mem name (KR.bootable_keeper_names config));
+      check bool "timeout-resumed keeper is reconciled into registry" true
+        (Reg.is_registered ~base_path:config.base_path name);
+      let after_auto_resume =
+        Masc_mcp.Prometheus.metric_total
+          Masc_mcp.Keeper_metrics.metric_keeper_auto_resumed_total
+      in
+      check (float 0.001) "metric_keeper_auto_resumed_total incremented by 1"
+        (baseline_auto_resume +. 1.0) after_auto_resume)
+
 (* Regression guard for #17063/#17067: [auto_resume_after_sec = None] is the
    manual/operator pause contract.  A [Capacity_exhausted] blocker from old
    persisted metadata must not be treated as an implicit auto-resume policy. *)
@@ -1906,6 +1989,8 @@ let () =
         test_sweep_auto_resumes_after_backoff;
       test_case "operator pause (None) is NOT auto-resumed by sweep" `Quick
         test_operator_pause_not_auto_resumed;
+      test_case "turn timeout pause without explicit policy auto-resumes"
+        `Quick test_turn_timeout_pause_without_explicit_policy_auto_resumes;
       test_case "capacity blocker without resume policy is NOT auto-resumed"
         `Quick test_capacity_blocker_without_resume_policy_not_auto_resumed;
       test_case "initial delay capped at max_sec when initial > max (regression)" `Quick

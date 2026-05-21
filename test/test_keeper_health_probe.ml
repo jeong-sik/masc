@@ -147,8 +147,10 @@ let test_run_once_records_specific_failure_ratio_reason () =
   in
   let register_crashed name reason =
     let meta = make_meta ~cascade_name name in
+    (* See: fixture setup only needs the registry side effect. *)
     ignore (R.register ~base_path:base_dir name meta);
     R.set_failure_reason ~base_path:base_dir name (Some reason);
+    (* See: fixture setup only needs the terminal-event side effect. *)
     ignore
       (R.dispatch_event
          ~base_path:base_dir

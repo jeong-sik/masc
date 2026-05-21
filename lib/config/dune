@@ -20,7 +20,8 @@
    keeper_sandbox_config
    masc_network_defaults
    masc_time_constants
-   playground_paths)
+   playground_paths
+   timeout_floor)
  (wrapped false)
  ; RFC-0071 §3.4 Phase 5 ratchet: warning 4 (fragile pattern match) on.
  ; Closed-variant fragile sites fixed in this PR: env_config_oas_bridge.ml's

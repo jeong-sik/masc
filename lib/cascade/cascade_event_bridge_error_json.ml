@@ -55,17 +55,21 @@ let json_string_list values = `List (List.map (fun value -> `String value) value
 
 let json_contract_violation_detail = function
   | None -> `Null
-  | Some detail ->
+  | Some (detail : Agent_sdk.Completion_contract_violation_detail.t) ->
     `Assoc
-      [ "called_tools", json_string_list detail.called_tools
-      ; "satisfying_tools", json_string_list detail.satisfying_tools
+      [ ( "called_tools"
+        , json_string_list
+            detail.Agent_sdk.Completion_contract_violation_detail.called_tools )
+      ; ( "satisfying_tools"
+        , json_string_list
+            detail.Agent_sdk.Completion_contract_violation_detail.satisfying_tools )
       ; ( "rejection_reasons"
         , `List
             (List.map
                (fun (tool_name, reason) ->
                   `Assoc
                     [ "tool_name", `String tool_name; "reason", `String reason ])
-               detail.rejection_reasons) )
+               detail.Agent_sdk.Completion_contract_violation_detail.rejection_reasons) )
       ]
 ;;
 

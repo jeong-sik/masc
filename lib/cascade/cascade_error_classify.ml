@@ -839,14 +839,14 @@ let config_for_label
     ?contract
     ?approval
     ~(description : string option)
-    () : (Cascade_runner.config, Agent_sdk.Error.sdk_error) result =
+    () : (Cascade_agent_context.config, Agent_sdk.Error.sdk_error) result =
   let* provider =
-    Cascade_runner.resolve_provider_config_of_label model_label
-    |> Result.map_error Cascade_runner.label_resolution_error_to_sdk_error
+    Cascade_transport.resolve_provider_config_of_label model_label
+    |> Result.map_error Cascade_transport.label_resolution_error_to_sdk_error
   in
   Ok
     {
-      (Cascade_runner.default_config ~name ~provider_cfg:provider
+      (Cascade_agent_context.default_config ~name ~provider_cfg:provider
          ~system_prompt ~tools)
       with
       max_turns;
@@ -901,7 +901,7 @@ let provider_requires_argv_prompt_preflight provider_cfg =
   | None -> false
 ;;
 
-let codex_cli_prompt_preflight ~(config : Cascade_runner.config) ~(goal : string)
+let codex_cli_prompt_preflight ~(config : Cascade_agent_context.config) ~(goal : string)
     : codex_cli_prompt_preflight option =
   (* RFC-0058 §2.4 — dispatch by adapter capability flag
      ([tool_policy.argv_prompt_preflight]), never by provider variant.
@@ -993,7 +993,7 @@ let codex_cli_preflight_error ~(scope : string)
          limit = preflight.retry_limit_tokens;
        })
 
-let with_codex_cli_preflight ~(scope : string) ~(config : Cascade_runner.config)
+let with_codex_cli_preflight ~(scope : string) ~(config : Cascade_agent_context.config)
     ~(goal : string) (run : unit -> ('a, Agent_sdk.Error.sdk_error) result)
     : ('a, Agent_sdk.Error.sdk_error) result =
   match codex_cli_prompt_preflight ~config ~goal with

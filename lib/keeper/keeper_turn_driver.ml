@@ -184,8 +184,7 @@ let run_named
     match runtime_manifest_required_tool_names with
     | [] -> tool_filtered_candidates, []
     | required_tool_names ->
-      tool_filtered_candidates
-      |> List.fold_right
+      List.fold_right
            (fun candidate (kept, rejected) ->
               let provider_label = Cascade_runtime_candidate.provider_label candidate in
               let drop ~lane ~missing_required_tools ~materialized_tool_names =
@@ -248,6 +247,7 @@ let run_named
                          ~runtime_mcp_policy)
                     ~missing_required_tools
                     ~materialized_tool_names)
+           tool_filtered_candidates
            ([], [])
   in
   let health_filtered_candidates =

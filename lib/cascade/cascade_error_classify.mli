@@ -178,8 +178,8 @@ val config_for_label :
   ?approval:Agent_sdk.Hooks.approval_callback ->
   description:string option ->
   unit ->
-  (Cascade_runner.config, Agent_sdk.Error.sdk_error) result
-(** Build an [Cascade_runner.config] from a model label string.  Resolves
+  (Cascade_agent_context.config, Agent_sdk.Error.sdk_error) result
+(** Build an [Cascade_agent_context.config] from a model label string.  Resolves
     the provider config and fills in defaults. *)
 
 (** {1 Codex CLI preflight} *)
@@ -194,14 +194,14 @@ type codex_cli_prompt_preflight = {
 }
 
 val codex_cli_prompt_preflight :
-  config:Cascade_runner.config -> goal:string -> codex_cli_prompt_preflight option
+  config:Cascade_agent_context.config -> goal:string -> codex_cli_prompt_preflight option
 (** Check whether a codex_cli invocation would exceed the argv or context
     window limit.  Returns [Some] when limits are hit, [None] when safe
     (or when the provider is not codex_cli). *)
 
 val with_codex_cli_preflight :
   scope:string ->
-  config:Cascade_runner.config ->
+  config:Cascade_agent_context.config ->
   goal:string ->
   (unit -> ('a, Agent_sdk.Error.sdk_error) result) ->
   ('a, Agent_sdk.Error.sdk_error) result

@@ -450,6 +450,8 @@
   test_fsm_drift_counter
   test_gc_sampler
   test_process_timeout_counter
+  test_timeout_floor
+  test_timeout_origin
   test_git_fetch_timeout_9587
   test_inference_utils
   test_auth_ambiguous_lookup_9786

@@ -10,9 +10,15 @@
 # Active vs Implemented is a judgement call).
 #
 # Usage:
-#   bash scripts/audit-rfc-closeout-lag.sh [--since DATE] [--min N]
+#   bash scripts/audit-rfc-closeout-lag.sh [--since DATE] [--min N] [--exclude-body]
 #
-# Defaults: since=2026-04-01, min=1 (report any non-zero count).
+# Defaults: since=2026-04-01, min=1, exclude-body=false.
+#
+# --exclude-body: skip commits whose subject is RFC body or renumber
+#   (`docs(rfc):` / `chore(rfc): renumber`). Reduces false positives
+#   surfaced by the 2026-05-21 sweep where RFC-0145 and RFC-0122 were
+#   flagged purely because of body / renumber commits with no
+#   implementation behind them.
 #
 # Output (TSV on stdout, sorted by descending commit count):
 #   RFC-NNNN<TAB><commits>
@@ -26,6 +32,7 @@ set -euo pipefail
 
 since="2026-04-01"
 min_commits=1
+exclude_body=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -33,6 +40,8 @@ while [[ $# -gt 0 ]]; do
       since="$2"; shift 2 ;;
     --min)
       min_commits="$2"; shift 2 ;;
+    --exclude-body)
+      exclude_body=true; shift ;;
     -h|--help)
       sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'
       exit 0 ;;
@@ -43,6 +52,14 @@ while [[ $# -gt 0 ]]; do
 done
 
 cd "$(git rev-parse --show-toplevel)"
+
+# Match commit subjects that are RFC body or renumber paperwork rather
+# than implementation. Format from `git log --oneline`:
+#   <short_sha> docs(rfc): ... RFC-NNNN ...
+#   <short_sha> chore(rfc): renumber RFC-NNNN ...
+# Anchored after the sha+space prefix so production fix() / feat()
+# subjects that mention "docs(rfc)" in their body do not get dropped.
+body_subject_pattern='^[a-f0-9]+ (docs\(rfc\)|chore\(rfc\): renumber)'
 
 # Capture RFC identifiers appearing in commit subjects on origin/main
 # within the window. Sort -u + while-read keeps the script grep-free
@@ -63,8 +80,19 @@ git log --oneline origin/main --since="$since" 2>/dev/null \
       fi
 
       # Count commit subjects that reference this RFC identifier.
-      count=$(git log --oneline origin/main --since="$since" 2>/dev/null \
-        | grep -c "${rfc}\b" || true)
+      # Disable pipefail locally so an empty intermediate grep does
+      # not abort the surrounding while-read loop.
+      set +o pipefail
+      if [[ "$exclude_body" == true ]]; then
+        count=$(git log --oneline origin/main --since="$since" 2>/dev/null \
+          | grep "${rfc}\b" \
+          | grep -vE "$body_subject_pattern" \
+          | wc -l | tr -d ' ')
+      else
+        count=$(git log --oneline origin/main --since="$since" 2>/dev/null \
+          | grep -c "${rfc}\b")
+      fi
+      set -o pipefail
 
       if [[ "$count" -ge "$min_commits" ]]; then
         printf "%s\t%d\n" "$rfc" "$count"

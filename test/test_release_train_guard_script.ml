@@ -8,8 +8,6 @@ let source_root () =
 let script_path () =
   Filename.concat (source_root ()) "scripts/check-release-train-guard.sh"
 
-let quote = Filename.quote
-
 let contains_substring haystack needle =
   let hlen = String.length haystack in
   let nlen = String.length needle in
@@ -50,25 +48,43 @@ let with_temp_dir prefix f =
   Unix.mkdir dir 0o755;
   Fun.protect ~finally:(fun () -> rm_rf dir) (fun () -> f dir)
 
-let run_shell ~cwd cmd =
+let run_process ~cwd prog argv =
   let out = Filename.temp_file "release-train-guard-out" ".txt" in
   let err = Filename.temp_file "release-train-guard-err" ".txt" in
-  let wrapped =
-    Printf.sprintf "cd %s && %s > %s 2> %s" (quote cwd) cmd (quote out) (quote err)
+  let out_fd = Unix.openfile out [ Unix.O_WRONLY; Unix.O_TRUNC ] 0o600 in
+  let err_fd = Unix.openfile err [ Unix.O_WRONLY; Unix.O_TRUNC ] 0o600 in
+  let original_cwd = Sys.getcwd () in
+  let pid =
+    Fun.protect
+      ~finally:(fun () ->
+        Sys.chdir original_cwd;
+        Unix.close out_fd;
+        Unix.close err_fd)
+      (fun () ->
+        Sys.chdir cwd;
+        Unix.create_process prog argv Unix.stdin out_fd err_fd)
   in
-  let code = Sys.command wrapped in
+  let _, status = Unix.waitpid [] pid in
+  let code =
+    match status with
+    | Unix.WEXITED code -> code
+    | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> 255
+  in
   let stdout = read_file out in
   let stderr = read_file err in
   Sys.remove out;
   Sys.remove err;
   (code, stdout, stderr)
 
-let run_shell_ok ~cwd cmd =
-  let code, stdout, stderr = run_shell ~cwd cmd in
+let run_process_ok ~cwd prog argv =
+  let code, stdout, stderr = run_process ~cwd prog argv in
   if code <> 0 then
-    failf "command failed (%d): %s\nstdout:\n%s\nstderr:\n%s" code cmd stdout
+    failf "command failed (%d): %s\nstdout:\n%s\nstderr:\n%s" code prog stdout
       stderr;
   (stdout, stderr)
+
+let git_ok ~cwd args =
+  ignore (run_process_ok ~cwd "git" (Array.of_list ("git" :: args)))
 
 let install_script_under_test dir =
   let target = Filename.concat dir "scripts/check-release-train-guard.sh" in
@@ -83,28 +99,28 @@ let write_dune_project ~dir ~version =
 
 let commit_version ~dir ~version ~message =
   write_dune_project ~dir ~version;
-  ignore
-    (run_shell_ok ~cwd:dir
-       (Printf.sprintf
-          "git add dune-project && git -c core.hooksPath=/dev/null commit -q -m %s"
-          (quote message)))
+  git_ok ~cwd:dir [ "add"; "dune-project" ];
+  git_ok ~cwd:dir
+    [ "-c"; "core.hooksPath=/dev/null"; "commit"; "-q"; "-m"; message ]
 
 let init_repo_with_release_tags dir =
-  ignore (run_shell_ok ~cwd:dir "git init -q");
-  ignore (run_shell_ok ~cwd:dir "git config user.email test@example.com");
-  ignore (run_shell_ok ~cwd:dir "git config user.name tester");
-  ignore (run_shell_ok ~cwd:dir "git checkout -qb main");
+  git_ok ~cwd:dir [ "init"; "-q" ];
+  git_ok ~cwd:dir [ "config"; "user.email"; "test@example.com" ];
+  git_ok ~cwd:dir [ "config"; "user.name"; "tester" ];
+  git_ok ~cwd:dir [ "checkout"; "-qb"; "main" ];
   commit_version ~dir ~version:"2.263.0" ~message:"main release";
-  ignore (run_shell_ok ~cwd:dir "git tag v2.263.0");
-  ignore (run_shell_ok ~cwd:dir "git checkout -qb seed/zero-series");
+  git_ok ~cwd:dir [ "tag"; "v2.263.0" ];
+  git_ok ~cwd:dir [ "checkout"; "-qb"; "seed/zero-series" ];
   commit_version ~dir ~version:"0.1.1" ~message:"seed zero release";
-  ignore (run_shell_ok ~cwd:dir "git tag v0.1.1");
-  ignore (run_shell_ok ~cwd:dir "git checkout main")
+  git_ok ~cwd:dir [ "tag"; "v0.1.1" ];
+  git_ok ~cwd:dir [ "checkout"; "main" ]
 
 let commit_on_branch ~dir ~branch ~version ~message =
-  ignore (run_shell_ok ~cwd:dir (Printf.sprintf "git checkout -qb %s" branch));
+  git_ok ~cwd:dir [ "checkout"; "-qb"; branch ];
   commit_version ~dir ~version ~message;
-  let stdout, _stderr = run_shell_ok ~cwd:dir "git rev-parse --short HEAD" in
+  let stdout, _stderr =
+    run_process_ok ~cwd:dir "git" [| "git"; "rev-parse"; "--short"; "HEAD" |]
+  in
   String.trim stdout
 
 let test_cross_major_reset_ignores_legacy_2x_tags () =
@@ -114,11 +130,10 @@ let test_cross_major_reset_ignores_legacy_2x_tags () =
       ignore
         (commit_on_branch ~dir ~branch:"version-reset" ~version:"0.2.0"
            ~message:"reset active line");
-      let cmd =
-        Printf.sprintf "/bin/bash %s --base main --head version-reset"
-          (quote script)
+      let code, stdout, stderr =
+        run_process ~cwd:dir script
+          [| script; "--base"; "main"; "--head"; "version-reset" |]
       in
-      let code, stdout, stderr = run_shell ~cwd:dir cmd in
       if code <> 0 then
         failf "guard failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout stderr;
       check bool "uses base major tag lineage" true
@@ -132,11 +147,10 @@ let test_cross_major_reset_rejects_older_head_series_version () =
       ignore
         (commit_on_branch ~dir ~branch:"bad-reset" ~version:"0.1.0"
            ~message:"bad reset");
-      let cmd =
-        Printf.sprintf "/bin/bash %s --base main --head bad-reset"
-          (quote script)
+      let code, _stdout, stderr =
+        run_process ~cwd:dir script
+          [| script; "--base"; "main"; "--head"; "bad-reset" |]
       in
-      let code, _stdout, stderr = run_shell ~cwd:dir cmd in
       check bool "command fails" true (code <> 0);
       check bool "mentions older head series tag" true
         (contains_substring stderr
@@ -144,17 +158,17 @@ let test_cross_major_reset_rejects_older_head_series_version () =
 
 let test_train_build_suffix_tag_matches_package_version () =
   with_temp_dir "release-train-build-suffix" (fun dir ->
-      ignore (run_shell_ok ~cwd:dir "git init -q");
-      ignore (run_shell_ok ~cwd:dir "git config user.email test@example.com");
-      ignore (run_shell_ok ~cwd:dir "git config user.name tester");
-      ignore (run_shell_ok ~cwd:dir "git checkout -qb main");
+      git_ok ~cwd:dir [ "init"; "-q" ];
+      git_ok ~cwd:dir [ "config"; "user.email"; "test@example.com" ];
+      git_ok ~cwd:dir [ "config"; "user.name"; "tester" ];
+      git_ok ~cwd:dir [ "checkout"; "-qb"; "main" ];
       commit_version ~dir ~version:"0.19.10" ~message:"main release";
-      ignore (run_shell_ok ~cwd:dir "git tag v0.19.10-505");
+      git_ok ~cwd:dir [ "tag"; "v0.19.10-505" ];
       let script = install_script_under_test dir in
-      let cmd =
-        Printf.sprintf "/bin/bash %s --base main --head main" (quote script)
+      let code, stdout, stderr =
+        run_process ~cwd:dir script
+          [| script; "--base"; "main"; "--head"; "main" |]
       in
-      let code, stdout, stderr = run_shell ~cwd:dir cmd in
       if code <> 0 then
         failf "guard failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout stderr;
       check bool "normalizes train build tag suffix" true
@@ -163,15 +177,16 @@ let test_train_build_suffix_tag_matches_package_version () =
 
 let test_no_base_logs_raw_suffixed_tag_ref () =
   with_temp_dir "release-train-no-base-suffix" (fun dir ->
-      ignore (run_shell_ok ~cwd:dir "git init -q");
-      ignore (run_shell_ok ~cwd:dir "git config user.email test@example.com");
-      ignore (run_shell_ok ~cwd:dir "git config user.name tester");
-      ignore (run_shell_ok ~cwd:dir "git checkout -qb main");
+      git_ok ~cwd:dir [ "init"; "-q" ];
+      git_ok ~cwd:dir [ "config"; "user.email"; "test@example.com" ];
+      git_ok ~cwd:dir [ "config"; "user.name"; "tester" ];
+      git_ok ~cwd:dir [ "checkout"; "-qb"; "main" ];
       commit_version ~dir ~version:"0.19.10" ~message:"main release";
-      ignore (run_shell_ok ~cwd:dir "git tag v0.19.10-505");
+      git_ok ~cwd:dir [ "tag"; "v0.19.10-505" ];
       let script = install_script_under_test dir in
-      let cmd = Printf.sprintf "/bin/bash %s --head main" (quote script) in
-      let code, stdout, stderr = run_shell ~cwd:dir cmd in
+      let code, stdout, stderr =
+        run_process ~cwd:dir script [| script; "--head"; "main" |]
+      in
       if code <> 0 then
         failf "guard failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout stderr;
       check bool "prints raw tag ref and normalized version" true
@@ -185,11 +200,10 @@ let test_pending_bootstrap_series_warns_without_blocking_same_version () =
       ignore
         (commit_on_branch ~dir ~branch:"version-reset" ~version:"0.2.0"
            ~message:"reset active line");
-      let cmd =
-        Printf.sprintf "/bin/bash %s --base version-reset --head version-reset"
-          (quote script)
+      let code, stdout, stderr =
+        run_process ~cwd:dir script
+          [| script; "--base"; "version-reset"; "--head"; "version-reset" |]
       in
-      let code, stdout, stderr = run_shell ~cwd:dir cmd in
       if code <> 0 then
         failf "guard failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout stderr;
       check bool "warns for pending tag" true
@@ -203,14 +217,13 @@ let test_pending_bootstrap_series_blocks_next_train_until_tagged () =
       ignore
         (commit_on_branch ~dir ~branch:"version-reset" ~version:"0.2.0"
            ~message:"reset active line");
-      ignore
-        (run_shell_ok ~cwd:dir "git checkout version-reset && git checkout -qb next-train");
+      git_ok ~cwd:dir [ "checkout"; "version-reset" ];
+      git_ok ~cwd:dir [ "checkout"; "-qb"; "next-train" ];
       commit_version ~dir ~version:"0.3.0" ~message:"next train";
-      let cmd =
-        Printf.sprintf "/bin/bash %s --base version-reset --head next-train"
-          (quote script)
+      let code, _stdout, stderr =
+        run_process ~cwd:dir script
+          [| script; "--base"; "version-reset"; "--head"; "next-train" |]
       in
-      let code, _stdout, stderr = run_shell ~cwd:dir cmd in
       check bool "command fails" true (code <> 0);
       check bool "requires pending tag first" true
         (contains_substring stderr

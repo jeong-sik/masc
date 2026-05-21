@@ -729,7 +729,6 @@ let run_turn
                    tool_observation.observed_tool_names
                  in
                  observed_tool_names_ref := observed_tool_names;
-                 let tool_names = tool_observation.tool_names in
                  (* RFC-0064: canonicalise observed tool names across all three
                     input surfaces (LLM-native public / MCP protocol /
                     already-internal) before the disclosure check. Without

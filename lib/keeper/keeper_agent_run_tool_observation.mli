@@ -13,5 +13,5 @@ val analyze
   -> requested_tool_names_seen:string list
   -> tool_usage_before:(string * int) list
   -> tool_calls:Keeper_agent_result.tool_call_detail list
-  -> Agent_sdk.Types.content list
+  -> Agent_sdk.Types.content_block list
   -> observed

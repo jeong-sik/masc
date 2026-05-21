@@ -1023,6 +1023,54 @@ module Json_stream_cli_transport_local = struct
   ;;
 end
 
+let json_stream_cli_transport_ctor
+      ~(provider_cfg : Llm_provider.Provider_config.t)
+      ~runtime_mcp_policy
+      ~cli_transport_overrides
+  =
+  let cwd =
+    Option.bind cli_transport_overrides (fun overrides ->
+      overrides.Cascade_transport_cli_overrides.cwd)
+  in
+  let stdout_idle_timeout_s =
+    Option.bind cli_transport_overrides (fun overrides ->
+      overrides.Cascade_transport_cli_overrides.cli_subprocess_idle_sec)
+  in
+  let mcp_config_json = cli_runtime_mcp_jsons ~base:[] runtime_mcp_policy in
+  let model = cli_model_for_provider_config provider_cfg in
+  let config_json = cli_runtime_config_json_for_provider provider_cfg in
+  let extra_env = cli_direct_binding_extra_env provider_cfg in
+  let cli_path =
+    cli_command_for_provider_config provider_cfg
+    |> Option.value ~default:Json_stream_cli_transport_local.default_config.cli_path
+  in
+  let process_name = cli_process_name_for_provider_config provider_cfg in
+  let config =
+    { Json_stream_cli_transport_local.default_config with
+      cli_path
+    ; process_name
+    ; model
+    ; cwd
+    ; config_json
+    ; mcp_config_json
+    ; extra_env
+    ; stdout_idle_timeout_s
+    }
+  in
+  match Process_eio.get_proc_mgr () with
+  | Error detail -> Error (invalid_runtime_config "proc_mgr" detail)
+  | Ok mgr ->
+    Ok
+      (Cascade_transport_cli_ctors.make_per_call_switch_transport (fun ~sw ->
+         Json_stream_cli_transport_local.create ~sw ~mgr ~config))
+;;
+
+let () =
+  Cascade_transport_non_http_registry.register_non_http_transport
+    ~kind:Llm_provider.Provider_config.Kimi_cli
+    ~ctor:json_stream_cli_transport_ctor
+;;
+
 (* CLI transport constructors + per-call switch wrapping + ctor
    registration extracted to [Cascade_transport_cli_ctors]
    (godfile decomp). The sibling's top-level [let () = ...]

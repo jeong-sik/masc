@@ -6,18 +6,18 @@ val in_turn_liveness_pulse_interval_sec : unit -> float
 
 val with_in_turn_liveness_pulse_for_test :
   sw:Eio.Switch.t ->
-  clock:_ Eio.Time.clock ->
+  clock:'clock Eio.Time.clock ->
   interval_sec:float ->
   tick:(unit -> unit) ->
-  (unit -> 'a) ->
-  'a
+  (unit -> 'result) ->
+  'result
 
 val emit_in_turn_liveness_pulse :
-  ctx:'a context -> meta:keeper_meta -> unit
+  ctx:'clock context -> meta:keeper_meta -> unit
 
 val with_in_turn_liveness_pulse :
-  ctx:'a context ->
+  ctx:'clock context ->
   meta:keeper_meta ->
   stop:bool Atomic.t ->
-  (unit -> 'a) ->
-  'a
+  (unit -> 'result) ->
+  'result

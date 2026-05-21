@@ -2,8 +2,6 @@
 
 module Mc_cache : module type of Server_dashboard_meta_cognition_cache
 
-module Mc_cache : module type of Server_dashboard_meta_cognition_cache
-
 val meta_cognition_summary_ttl : float
 
 val meta_cognition_summary_stale_for : float

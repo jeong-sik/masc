@@ -714,6 +714,17 @@ export interface KeeperRuntimeLensProviderAttemptAxis {
   terminal_status: string | null
 }
 
+export interface KeeperRuntimeLensToolLineageStage {
+  stage: string
+  tool_names: string[]
+  count: number
+}
+
+export interface KeeperRuntimeLensToolLineageAxis {
+  recorded: boolean
+  decision: Record<string, KeeperRuntimeLensToolLineageStage> | null
+}
+
 export interface KeeperRuntimeLensClaimScopeAxis {
   present: boolean
   source: string
@@ -782,6 +793,7 @@ export interface KeeperRuntimeLensAxes {
   tool_surface: KeeperRuntimeLensToolSurfaceAxis
   provider_lane: KeeperRuntimeLensProviderLaneAxis
   provider_attempt: KeeperRuntimeLensProviderAttemptAxis
+  tool_lineage: KeeperRuntimeLensToolLineageAxis
   claim_scope: KeeperRuntimeLensClaimScopeAxis
   config_drift: KeeperRuntimeLensConfigDriftAxis
   runtime_proof: KeeperRuntimeLensRuntimeProofAxis
@@ -1114,6 +1126,35 @@ function parseRuntimeLensProviderAttemptAxis(raw: unknown): KeeperRuntimeLensPro
   }
 }
 
+function parseRuntimeLensToolLineageStage(raw: unknown): KeeperRuntimeLensToolLineageStage {
+  const obj = isRecord(raw) ? raw : {}
+  return {
+    stage: stringField(obj, 'stage'),
+    tool_names: stringListField(obj, 'tool_names'),
+    count: numberField(obj, 'count'),
+  }
+}
+
+function parseRuntimeLensToolLineageAxis(raw: unknown): KeeperRuntimeLensToolLineageAxis {
+  const obj = isRecord(raw) ? raw : {}
+  const decisionRaw = obj.decision
+  let decision: Record<string, KeeperRuntimeLensToolLineageStage> | null = null
+  if (isRecord(decisionRaw)) {
+    const parsed: Record<string, KeeperRuntimeLensToolLineageStage> = {}
+    for (const key of Object.keys(decisionRaw)) {
+      const stage = parseRuntimeLensToolLineageStage(decisionRaw[key])
+      if (stage.stage !== '' || stage.count > 0 || stage.tool_names.length > 0) {
+        parsed[key] = stage
+      }
+    }
+    decision = Object.keys(parsed).length > 0 ? parsed : null
+  }
+  return {
+    recorded: obj.recorded === true,
+    decision,
+  }
+}
+
 function parseRuntimeLensClaimScopeAxis(raw: unknown): KeeperRuntimeLensClaimScopeAxis {
   const obj = isRecord(raw) ? raw : {}
   return {
@@ -1194,6 +1235,7 @@ function parseRuntimeLensAxes(raw: unknown): KeeperRuntimeLensAxes {
     tool_surface: parseRuntimeLensToolSurfaceAxis(obj.tool_surface),
     provider_lane: parseRuntimeLensProviderLaneAxis(obj.provider_lane),
     provider_attempt: parseRuntimeLensProviderAttemptAxis(obj.provider_attempt),
+    tool_lineage: parseRuntimeLensToolLineageAxis(obj.tool_lineage),
     claim_scope: parseRuntimeLensClaimScopeAxis(obj.claim_scope),
     config_drift: parseRuntimeLensConfigDriftAxis(obj.config_drift),
     runtime_proof: parseRuntimeLensRuntimeProofAxis(obj.runtime_proof),

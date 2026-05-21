@@ -33,6 +33,7 @@ type runtime_manifest_scan =
   ; mutable latest_provider_lane_decision : Yojson.Safe.t option
   ; mutable latest_provider_lane_row : Keeper_runtime_manifest.t option
   ; mutable latest_pre_dispatch_blocked_row : Keeper_runtime_manifest.t option
+  ; mutable latest_tool_lineage_decision : Yojson.Safe.t option
   ; mutable context_injected_count : int
   ; mutable context_compacted_event_count : int
   ; mutable active_open_loop_count : int option
@@ -69,6 +70,7 @@ let make_runtime_manifest_scan ~path ~limit =
   ; latest_provider_lane_decision = None
   ; latest_provider_lane_row = None
   ; latest_pre_dispatch_blocked_row = None
+  ; latest_tool_lineage_decision = None
   ; context_injected_count = 0
   ; context_compacted_event_count = 0
   ; active_open_loop_count = None
@@ -125,6 +127,8 @@ let update_runtime_manifest_scan scan row =
      scan.latest_provider_lane_row <- Some row
    | Keeper_runtime_manifest.Pre_dispatch_blocked ->
      scan.latest_pre_dispatch_blocked_row <- Some row
+   | Keeper_runtime_manifest.Tool_lineage_recorded ->
+     scan.latest_tool_lineage_decision <- Some row.Keeper_runtime_manifest.decision
    | Keeper_runtime_manifest.Context_injected ->
      scan.context_injected_count <- scan.context_injected_count + 1
    | Keeper_runtime_manifest.Context_compacted ->

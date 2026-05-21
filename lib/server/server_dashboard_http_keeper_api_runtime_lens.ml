@@ -188,6 +188,17 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
                   ( "missing_required_tools",
                     json_string_list missing_required_tools );
                 ] );
+            ( "tool_lineage",
+              `Assoc
+                [
+                  ( "recorded",
+                    `Bool (Option.is_some scan.latest_tool_lineage_decision)
+                  );
+                  ( "decision",
+                    match scan.latest_tool_lineage_decision with
+                    | Some value -> value
+                    | None -> `Null );
+                ] );
             ( "provider_attempt",
               `Assoc
                 [
@@ -307,7 +318,11 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
             ( "tool_runtime",
               runtime_lens_swimlane_json scan gaps ~lane:"tool_runtime"
                 ~label:"Tool Runtime"
-                ~events:[ Keeper_runtime_manifest.Tool_surface_selected ]
+                ~events:
+                  [
+                    Keeper_runtime_manifest.Tool_surface_selected;
+                    Keeper_runtime_manifest.Tool_lineage_recorded;
+                  ]
                 ~terminal_status:tool_runtime_status );
             ( "memory_context",
               runtime_lens_swimlane_json scan gaps ~lane:"memory_context"

@@ -25,6 +25,7 @@ import type {
   KeeperRuntimeLensClockEdge,
   KeeperRuntimeLensClockGroup,
   KeeperRuntimeLensLane,
+  KeeperRuntimeLensToolLineageAxis,
   KeeperRuntimeTraceResponse,
 } from '../api/keeper'
 import { serverStatus, shellRuntimeResolution } from '../store'
@@ -811,6 +812,19 @@ function formatLensList(values: string[], emptyLabel = 'none'): string {
   return `${values.slice(0, 3).join(', ')} +${values.length - 3}`
 }
 
+function formatToolLineage(lineage: KeeperRuntimeLensToolLineageAxis): string {
+  if (!lineage.recorded) return 'not recorded'
+  const stages = ['searched', 'visible', 'materialized', 'emitted', 'executed', 'verified']
+  const parts: string[] = []
+  for (const key of stages) {
+    const stage = lineage.decision?.[key]
+    if (stage) {
+      parts.push(`${key}:${stage.count}`)
+    }
+  }
+  return parts.length > 0 ? parts.join(' → ') : 'recorded (no stages)'
+}
+
 function runtimeTraceProviderTerminal(trace: KeeperRuntimeTraceResponse): string {
   const provider = trace.provider_attempts
   const status = compactToken(provider.terminal_status, 'unknown')
@@ -1042,6 +1056,7 @@ export function RuntimeLensSection({
         <${SignalRow} label="tool required" value=${formatLensList(tool.required_tools)} />
         <${SignalRow} label="tool materialized" value=${formatLensList(tool.materialized_tools)} />
         <${SignalRow} label="tool missing" value=${formatLensList(tool.missing_required_tools)} />
+        <${SignalRow} label="tool lineage" value=${formatToolLineage(lens.axes.tool_lineage)} />
         <${SignalRow} label="claim scope" value=${claim.present ? `${claim.mode ?? 'unknown'} / ${claim.status}` : 'not observed'} />
         <${SignalRow} label="claim excluded" value=${claim.excluded_count === null ? '-' : String(claim.excluded_count)} />
         <${SignalRow} label="claim goals" value=${formatLensList(claim.effective_goal_ids)} />

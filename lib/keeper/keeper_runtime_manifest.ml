@@ -7,6 +7,7 @@ type event_kind =
   | Pre_dispatch_blocked
   | Tool_surface_selected
   | Provider_lane_resolved
+  | Tool_lineage_recorded
   | Provider_attempt_started
   | Provider_attempt_finished
   | Context_injected
@@ -61,6 +62,7 @@ let all_event_kinds =
     Pre_dispatch_blocked;
     Tool_surface_selected;
     Provider_lane_resolved;
+    Tool_lineage_recorded;
     Provider_attempt_started;
     Provider_attempt_finished;
     Context_injected;
@@ -83,6 +85,7 @@ let event_kind_to_string = function
   | Pre_dispatch_blocked -> "pre_dispatch_blocked"
   | Tool_surface_selected -> "tool_surface_selected"
   | Provider_lane_resolved -> "provider_lane_resolved"
+  | Tool_lineage_recorded -> "tool_lineage_recorded"
   | Provider_attempt_started -> "provider_attempt_started"
   | Provider_attempt_finished -> "provider_attempt_finished"
   | Context_injected -> "context_injected"
@@ -104,6 +107,7 @@ let event_kind_of_string = function
   | "pre_dispatch_blocked" -> Some Pre_dispatch_blocked
   | "tool_surface_selected" -> Some Tool_surface_selected
   | "provider_lane_resolved" -> Some Provider_lane_resolved
+  | "tool_lineage_recorded" -> Some Tool_lineage_recorded
   | "provider_attempt_started" -> Some Provider_attempt_started
   | "provider_attempt_finished" -> Some Provider_attempt_finished
   | "context_injected" -> Some Context_injected
@@ -175,7 +179,8 @@ let clock_lane_of_event = function
   | Provider_attempt_started
   | Provider_attempt_finished ->
     "provider"
-  | Tool_surface_selected -> "tool_runtime"
+  | Tool_surface_selected
+  | Tool_lineage_recorded -> "tool_runtime"
   | Checkpoint_loaded
   | State_snapshot_sidecar_saved
   | Working_state_sidecar_saved
@@ -270,6 +275,34 @@ let with_clock_refs ~clock_refs decision =
     | `Assoc fields when assoc_has_key "clock_refs" fields -> decision
     | `Assoc fields -> `Assoc (fields @ [ ("clock_refs", clock_refs) ])
     | other -> `Assoc [ ("decision", other); ("clock_refs", clock_refs) ])
+
+let tool_lineage_stage ~stage ~tool_names ~count () : Yojson.Safe.t =
+  `Assoc
+    [
+      ("stage", `String stage);
+      ("tool_names", `List (List.map (fun n -> `String n) tool_names));
+      ("count", `Int count);
+    ]
+
+let tool_lineage ?searched_tool_names ?visible_tool_names
+    ?materialized_tool_names ?emitted_tool_names ?executed_tool_names
+    ?verified_tool_names () : Yojson.Safe.t =
+  let stage name tools =
+    match tools with
+    | Some names -> Some (tool_lineage_stage ~stage:name ~tool_names:names ~count:(List.length names) ())
+    | None -> None
+  in
+  `Assoc
+    (List.filter_map
+       (fun (key, value) -> Option.map (fun v -> key, v) value)
+       [
+         "searched", stage "searched" searched_tool_names;
+         "visible", stage "visible" visible_tool_names;
+         "materialized", stage "materialized" materialized_tool_names;
+         "emitted", stage "emitted" emitted_tool_names;
+         "executed", stage "executed" executed_tool_names;
+         "verified", stage "verified" verified_tool_names;
+       ])
 
 let make ?(ts = Masc_domain.now_iso ()) ~keeper_name ?agent_name ~trace_id
     ?generation ?keeper_turn_id ?oas_turn_count ~event ?cascade_name

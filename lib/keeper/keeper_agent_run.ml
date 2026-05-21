@@ -420,6 +420,7 @@ let run_turn
     let canonical_tool_names_ref = s.Keeper_run_tools.canonical_tool_names_ref in
     let unexpected_tool_names_ref = s.Keeper_run_tools.unexpected_tool_names_ref in
     let actual_keeper_tool_names_ref = s.Keeper_run_tools.actual_keeper_tool_names_ref in
+    let materialized_tool_names_ref : string list ref = ref [] in
     let keeper_has_owned_active_task () =
       Option.is_some (owned_active_task_id_for_meta ~config ~meta:acc.meta)
     in
@@ -614,9 +615,26 @@ let run_turn
                    ~memory
                    ~runtime_manifest_context
                    ~runtime_manifest_append:
-                     (Keeper_runtime_manifest.append_best_effort
-                        ~site:"cascade_runtime"
-                        config)
+                     (fun manifest ->
+                        (match manifest.Keeper_runtime_manifest.event with
+                         | Keeper_runtime_manifest.Provider_lane_resolved ->
+                           (match manifest.Keeper_runtime_manifest.decision with
+                            | `Assoc fields ->
+                              (match List.assoc_opt "materialized_tool_names" fields with
+                               | Some (`List names) ->
+                                 materialized_tool_names_ref
+                                   := List.filter_map
+                                        (function
+                                         | `String s -> Some s
+                                         | _ -> None)
+                                        names
+                               | _ -> ())
+                            | _ -> ())
+                         | _ -> ());
+                        Keeper_runtime_manifest.append_best_effort
+                          ~site:"cascade_runtime"
+                          config
+                          manifest)
                    ~runtime_manifest_required_tool_names:
                      acc.tool_surface.required_tool_names
                       (* Keepers use turn-level retry for transient errors but benefit
@@ -1978,6 +1996,19 @@ let run_turn
          | Ok _ -> "ok"
          | Error _ -> "error"
        in
+       append_receipt_manifest
+         ~site:"tool_lineage"
+         ~status:"recorded"
+         ~decision:
+           (Keeper_runtime_manifest.tool_lineage
+              ~searched_tool_names:initial_tool_surface.deterministic_prefilter
+              ~visible_tool_names:initial_tool_surface.all_allowed
+              ~materialized_tool_names:!materialized_tool_names_ref
+              ~emitted_tool_names:!reported_tool_names_ref
+              ~executed_tool_names:!observed_tool_names_ref
+              ~verified_tool_names:!actual_keeper_tool_names_ref
+              ())
+         Keeper_runtime_manifest.Tool_lineage_recorded;
        append_receipt_manifest
          ~site:"turn_finished"
          ~status:final_status

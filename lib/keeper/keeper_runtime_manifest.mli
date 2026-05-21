@@ -11,6 +11,7 @@ type event_kind =
   | Pre_dispatch_blocked
   | Tool_surface_selected
   | Provider_lane_resolved
+  | Tool_lineage_recorded
   | Provider_attempt_started
   | Provider_attempt_finished
   | Context_injected
@@ -92,6 +93,16 @@ val clock_refs_for_context :
   Yojson.Safe.t
 
 val with_clock_refs : clock_refs:Yojson.Safe.t -> Yojson.Safe.t -> Yojson.Safe.t
+
+val tool_lineage :
+  ?searched_tool_names:string list ->
+  ?visible_tool_names:string list ->
+  ?materialized_tool_names:string list ->
+  ?emitted_tool_names:string list ->
+  ?executed_tool_names:string list ->
+  ?verified_tool_names:string list ->
+  unit ->
+  Yojson.Safe.t
 
 val make :
   ?ts:string ->

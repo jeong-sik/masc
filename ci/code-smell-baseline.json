@@ -2757,10 +2757,6 @@
           "value": 1
         },
         {
-          "file": "lib/tool_autoresearch.ml",
-          "value": 12
-        },
-        {
           "file": "lib/tool_board_dispatch.ml",
           "value": 1
         },

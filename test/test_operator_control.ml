@@ -41,6 +41,10 @@ let () =
             "snapshot summary surfaces paused keeper runtime trust" `Quick
             Test_operator_control_snapshot
             .test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust;
+          Alcotest.test_case "digest room includes keeper runtime attention"
+            `Quick
+            Test_operator_control_snapshot
+            .test_digest_room_includes_keeper_runtime_attention;
           Alcotest.test_case
             "snapshot lightweight summary preserves receipt causal event" `Quick
             Test_operator_control_snapshot

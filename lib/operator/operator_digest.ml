@@ -96,6 +96,109 @@ let build_room_attention_items config =
     (recent_tool_host_failures ~now:(Time_compat.now ()) ()
     @ pending_items)
 
+let assoc_bool_field ~default key fields =
+  match List.assoc_opt key fields with
+  | Some (`Bool value) -> value
+  | _ -> default
+
+let assoc_string_field key fields =
+  match List.assoc_opt key fields with
+  | Some (`String value) ->
+      let value = String.trim value in
+      if String.equal value "" then None else Some value
+  | _ -> None
+
+let keeper_attention_kind = function
+  | Some reason -> "keeper_" ^ reason
+  | None -> "keeper_attention"
+
+let keeper_attention_severity ~reason ~runtime_blocker_class =
+  match reason, runtime_blocker_class with
+  | Some "runtime_blocked", _
+  | Some "timeout_budget_exhausted", _
+  | Some "continue_gate_required", _ -> Sev_bad
+  | _, Some _ -> Sev_bad
+  | _ -> Sev_warn
+
+let keeper_attention_summary ~(meta : Keeper_types.keeper_meta) ~reason
+    ~runtime_blocker_summary =
+  let reason = Option.value ~default:"attention_required" reason in
+  match runtime_blocker_summary with
+  | Some summary ->
+      Printf.sprintf "%s needs operator attention: %s (%s)" meta.name reason summary
+  | None -> Printf.sprintf "%s needs operator attention: %s" meta.name reason
+
+let keeper_attention_projection config (meta : Keeper_types.keeper_meta) =
+  let attention_fields = Keeper_status_bridge.attention_fields_json config meta in
+  if not (assoc_bool_field ~default:false "needs_attention" attention_fields)
+  then None
+  else
+    let blocker_fields = Keeper_status_bridge.runtime_blocker_fields_json config meta in
+    let reason = assoc_string_field "attention_reason" attention_fields in
+    let next_human_action =
+      assoc_string_field "next_human_action" attention_fields
+    in
+    let runtime_blocker_class =
+      assoc_string_field "runtime_blocker_class" blocker_fields
+    in
+    let runtime_blocker_summary =
+      assoc_string_field "runtime_blocker_summary" blocker_fields
+    in
+    let severity = keeper_attention_severity ~reason ~runtime_blocker_class in
+    let evidence =
+      `Assoc
+        [
+          ("source", `String "keeper_status_bridge");
+          ("keeper_name", `String meta.name);
+          ("agent_name", `String meta.agent_name);
+          ("paused", `Bool meta.paused);
+          ("attention", `Assoc attention_fields);
+          ("runtime_blocker", `Assoc blocker_fields);
+        ]
+    in
+    let attention_item =
+      {
+        kind = keeper_attention_kind reason;
+        severity;
+        summary =
+          keeper_attention_summary ~meta ~reason ~runtime_blocker_summary;
+        target_type = "keeper";
+        target_id = Some meta.name;
+        actor = Some meta.agent_name;
+        evidence;
+      }
+    in
+    let action_reason =
+      match next_human_action with
+      | Some action -> Printf.sprintf "Inspect keeper attention: %s" action
+      | None -> "Inspect keeper attention"
+    in
+    let recommended_action =
+      {
+        action_type = "keeper_probe";
+        target_type = "keeper";
+        target_id = Some meta.name;
+        severity;
+        reason = action_reason;
+        suggested_payload =
+          `Assoc
+            [
+              ("source", `String "operator_digest");
+              ("keeper", `String meta.name);
+              ("reason", string_option_to_json reason);
+              ("next_human_action", string_option_to_json next_human_action);
+            ];
+      }
+    in
+    Some (attention_item, recommended_action)
+
+let keeper_attention_projection_items config =
+  Keeper_types.keeper_names config
+  |> List.filter_map (fun name ->
+    match Keeper_types.read_meta config name with
+    | Ok (Some meta) -> keeper_attention_projection config meta
+    | Ok None | Error _ -> None)
+
 let room_recommendations _config =
   dedup_recommendations []
 
@@ -155,13 +258,17 @@ let digest_json ?actor ?target_type ?target_id:_target_id ?include_workers:_incl
     match target_type with
     | "root" ->
         let confirm_scope = pending_confirm_scope ?actor config in
+        let keeper_attention, keeper_recommendations =
+          keeper_attention_projection_items config |> List.split
+        in
         let attention_items =
           build_room_attention_items config
+          @ keeper_attention
           |> List.sort compare_attention
         in
         let recommended_actions =
           dedup_recommendations
-            (room_recommendations config)
+            (room_recommendations config @ keeper_recommendations)
         in
         let fallback_recommendation_summary =
           summary_of_recommendations ~actor:actor_name recommended_actions

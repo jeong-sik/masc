@@ -355,6 +355,7 @@ let test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust () =
       cleanup_dir base_dir)
     (fun () ->
       let config = Coord.default_config base_dir in
+      (* See: this fixture only needs an initialized room for digest reads. *)
       ignore (Coord.init config ~agent_name:(Some "operator"));
       let keeper_ctx : _ Tool_keeper.context =
         {
@@ -475,6 +476,111 @@ let test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust () =
         "completion_contract_violation:require_tool_use"
         (trust |> member "latest_terminal_reason" |> member "code"
        |> to_string))
+
+let test_digest_room_includes_keeper_runtime_attention () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let keeper_name = "digest-runtime-attention" in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_keepalive.stop_keepalive keeper_name;
+      Keeper_registry.clear ();
+      Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "operator")); (* See: fixture init. *)
+      let keeper_ctx : _ Tool_keeper.context =
+        {
+          config;
+          agent_name = "operator";
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+          net = None;
+        }
+      in
+      let ok, _ =
+        dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_up"
+          ~args:
+            (`Assoc
+              [
+                ("name", `String keeper_name);
+                ("goal", `String "Expose keeper attention in digest");
+                ("proactive_enabled", `Bool false);
+                ("autoboot_enabled", `Bool false);
+              ])
+      in
+      Alcotest.(check bool) "keeper up ok" true ok;
+      Keeper_keepalive.stop_keepalive keeper_name;
+      let meta =
+        match Keeper_types.read_meta config keeper_name with
+        | Ok (Some meta) -> meta
+        | Ok None -> Alcotest.fail "expected keeper meta"
+        | Error err -> Alcotest.fail err
+      in
+      let meta =
+        {
+          meta with
+          paused = true;
+          runtime =
+            {
+              meta.runtime with
+              last_blocker =
+                Some
+                  (Keeper_types.blocker_info_of_class
+                     ~detail:"Completion contract requires a keeper tool call"
+                     Keeper_types.Completion_contract_violation);
+            };
+        }
+      in
+      (match Keeper_types.write_meta config meta with
+      | Ok () -> ()
+      | Error err -> Alcotest.fail err);
+      let digest =
+        match
+          Operator_control.digest_json ~actor:"dashboard"
+            (operator_ctx env sw config "dashboard")
+        with
+        | Ok json -> json
+        | Error err -> Alcotest.fail err
+      in
+      let open Yojson.Safe.Util in
+      let target_id_is_keeper item =
+        match item |> member "target_id" with
+        | `String value -> String.equal value keeper_name
+        | _ -> false
+      in
+      let keeper_attention =
+        digest |> member "attention_items" |> to_list
+        |> List.find_opt target_id_is_keeper
+        |> Option.value ~default:`Null
+      in
+      Alcotest.(check bool) "keeper attention present" true
+        (keeper_attention <> `Null);
+      Alcotest.(check string) "keeper attention target type" "keeper"
+        (keeper_attention |> member "target_type" |> to_string);
+      Alcotest.(check string) "keeper attention kind" "keeper_paused"
+        (keeper_attention |> member "kind" |> to_string);
+      Alcotest.(check string) "keeper attention severity" "bad"
+        (keeper_attention |> member "severity" |> to_string);
+      Alcotest.(check string) "keeper attention blocker class"
+        "completion_contract_violation"
+        (keeper_attention |> member "evidence" |> member "runtime_blocker"
+         |> member "runtime_blocker_class" |> to_string);
+      let keeper_probe =
+        digest |> member "recommended_actions" |> to_list
+        |> List.find_opt (fun row ->
+          target_id_is_keeper row
+          && String.equal "keeper_probe" (row |> member "action_type" |> to_string))
+        |> Option.value ~default:`Null
+      in
+      Alcotest.(check bool) "keeper probe recommendation present" true
+        (keeper_probe <> `Null);
+      Alcotest.(check bool) "recommendation summary is non-empty" true
+        (digest |> member "recommendation_summary" |> member "count" |> to_int > 0))
 
 let test_lightweight_snapshot_preserves_receipt_latest_causal_event () =
   Eio_main.run @@ fun env ->

@@ -8,8 +8,6 @@ let source_root () =
 let run_local_script_path () =
   Filename.concat (Filename.concat (source_root ()) "scripts") "run-local.sh"
 
-let quote = Filename.quote
-
 let read_file path =
   In_channel.with_open_bin path In_channel.input_all
 
@@ -53,34 +51,49 @@ let with_temp_dir prefix f =
   Unix.mkdir dir 0o755;
   Fun.protect ~finally:(fun () -> rm_rf dir) (fun () -> f dir)
 
-let run_shell ?(env = []) ?(unset_env = []) ~cwd cmd =
-  let unset_prefix =
-    unset_env
-    |> List.map (fun name -> Printf.sprintf "-u %s" (quote name))
-    |> String.concat " "
-  in
-  let env_prefix =
-    env
-    |> List.map (fun (k, v) -> Printf.sprintf "%s=%s" k (quote v))
-    |> String.concat " "
-  in
-  let shell_prefix =
-    match (String.trim unset_prefix, String.trim env_prefix) with
-    | "", "" -> ""
-    | unset_prefix, "" -> Printf.sprintf "env %s" unset_prefix
-    | "", env_prefix -> env_prefix
-    | unset_prefix, env_prefix -> Printf.sprintf "env %s %s" unset_prefix env_prefix
-  in
-  let full =
-    if shell_prefix = "" then
-      Printf.sprintf "cd %s && %s" (quote cwd) cmd
-    else
-      Printf.sprintf "cd %s && %s %s" (quote cwd) shell_prefix cmd
-  in
+let env_array ~unset_env overrides =
+  let table = Hashtbl.create 64 in
+  Unix.environment ()
+  |> Array.iter (fun entry ->
+         match String.index_opt entry '=' with
+         | None -> ()
+         | Some idx ->
+             let key = String.sub entry 0 idx in
+             let value =
+               String.sub entry (idx + 1) (String.length entry - idx - 1)
+             in
+             Hashtbl.replace table key value);
+  List.iter (fun key -> Hashtbl.remove table key) unset_env;
+  List.iter (fun (key, value) -> Hashtbl.replace table key value) overrides;
+  Hashtbl.fold
+    (fun key value acc -> Printf.sprintf "%s=%s" key value :: acc)
+    table []
+  |> Array.of_list
+
+let run_process ?(env = []) ?(unset_env = []) ~cwd prog argv =
   let out = Filename.temp_file "run-local-out" ".txt" in
   let err = Filename.temp_file "run-local-err" ".txt" in
-  let wrapped = Printf.sprintf "%s > %s 2> %s" full (quote out) (quote err) in
-  let code = Sys.command wrapped in
+  let out_fd = Unix.openfile out [ Unix.O_WRONLY; Unix.O_TRUNC ] 0o600 in
+  let err_fd = Unix.openfile err [ Unix.O_WRONLY; Unix.O_TRUNC ] 0o600 in
+  let original_cwd = Sys.getcwd () in
+  let pid =
+    Fun.protect
+      ~finally:(fun () ->
+        Sys.chdir original_cwd;
+        Unix.close out_fd;
+        Unix.close err_fd)
+      (fun () ->
+        Sys.chdir cwd;
+        Unix.create_process_env prog argv
+          (env_array ~unset_env env)
+          Unix.stdin out_fd err_fd)
+  in
+  let _, status = Unix.waitpid [] pid in
+  let code =
+    match status with
+    | Unix.WEXITED code -> code
+    | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> 255
+  in
   let stdout = read_file out in
   let stderr = read_file err in
   Sys.remove out;
@@ -143,12 +156,11 @@ let test_bootstraps_local_config_and_sets_http_only_env () =
       let capture = Filename.concat dir "captured-env.txt" in
       let script = Filename.concat repo_root "scripts/run-local.sh" in
       let code, stdout, stderr =
-        run_shell ~cwd:repo_root
+        run_process ~cwd:repo_root script
           ~env:[ ("FAKE_CAPTURE_FILE", capture) ]
           ~unset_env:
             [ "MASC_BASE_PATH"; "MASC_CONFIG_DIR"; "MASC_PERSONAS_DIR" ]
-          (Printf.sprintf "%s --target-dir %s --port 9955"
-             (quote script) (quote target))
+          [| script; "--target-dir"; target; "--port"; "9955" |]
       in
       if code <> 0 then
         failf "run-local failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout stderr;
@@ -184,11 +196,18 @@ let test_bootstrap_keepers_flag_is_opt_in () =
       mkdir_p target;
       let script = Filename.concat repo_root "scripts/run-local.sh" in
       let code, stdout, stderr =
-        run_shell ~cwd:repo_root
+        run_process ~cwd:repo_root script
           ~unset_env:
             [ "MASC_BASE_PATH"; "MASC_CONFIG_DIR"; "MASC_PERSONAS_DIR" ]
-          (Printf.sprintf "%s --target-dir %s --port 9956 --bootstrap-only --bootstrap-keepers"
-             (quote script) (quote target))
+          [|
+            script;
+            "--target-dir";
+            target;
+            "--port";
+            "9956";
+            "--bootstrap-only";
+            "--bootstrap-keepers";
+          |]
       in
       if code <> 0 then
         failf "run-local bootstrap-keepers failed (%d)\nstdout:\n%s\nstderr:\n%s"
@@ -205,14 +224,12 @@ let test_print_port_is_stable_for_target_dir () =
       mkdir_p target;
       let script = Filename.concat repo_root "scripts/run-local.sh" in
       let code1, stdout1, stderr1 =
-        run_shell ~cwd:repo_root
-          (Printf.sprintf "%s --print-port --target-dir %s"
-             (quote script) (quote target))
+        run_process ~cwd:repo_root script
+          [| script; "--print-port"; "--target-dir"; target |]
       in
       let code2, stdout2, stderr2 =
-        run_shell ~cwd:repo_root
-          (Printf.sprintf "%s --print-port --target-dir %s"
-             (quote script) (quote target))
+        run_process ~cwd:repo_root script
+          [| script; "--print-port"; "--target-dir"; target |]
       in
       if code1 <> 0 || code2 <> 0 then
         failf "print-port failed (%d/%d)\nstdout1:\n%s\nstderr1:\n%s\nstdout2:\n%s\nstderr2:\n%s"
@@ -228,26 +245,25 @@ let test_build_dashboard_flag_is_opt_in () =
       let marker = Filename.concat dir "dashboard-build.marker" in
       let helper = Filename.concat repo_root "scripts/build-dashboard-if-needed.sh" in
       write_executable helper
-        (Printf.sprintf "#!/bin/sh\nset -eu\necho invoked > %s\n" (quote marker));
+        "#!/bin/sh\nset -eu\n: \"${DASHBOARD_MARKER:?}\"\necho invoked > \
+         \"$DASHBOARD_MARKER\"\n";
       let target = Filename.concat dir "target" in
       mkdir_p target;
       let capture = Filename.concat dir "captured-env.txt" in
       let script = Filename.concat repo_root "scripts/run-local.sh" in
       let code_no_flag, stdout_no_flag, stderr_no_flag =
-        run_shell ~cwd:repo_root
-          ~env:[ ("FAKE_CAPTURE_FILE", capture) ]
-          (Printf.sprintf "%s --target-dir %s --port 9956"
-             (quote script) (quote target))
+        run_process ~cwd:repo_root script
+          ~env:[ ("FAKE_CAPTURE_FILE", capture); ("DASHBOARD_MARKER", marker) ]
+          [| script; "--target-dir"; target; "--port"; "9956" |]
       in
       if code_no_flag <> 0 then
         failf "run-local without flag failed (%d)\nstdout:\n%s\nstderr:\n%s"
           code_no_flag stdout_no_flag stderr_no_flag;
       check bool "helper not invoked without flag" false (Sys.file_exists marker);
       let code_flag, stdout_flag, stderr_flag =
-        run_shell ~cwd:repo_root
-          ~env:[ ("FAKE_CAPTURE_FILE", capture) ]
-          (Printf.sprintf "%s --target-dir %s --port 9957 --build-dashboard"
-             (quote script) (quote target))
+        run_process ~cwd:repo_root script
+          ~env:[ ("FAKE_CAPTURE_FILE", capture); ("DASHBOARD_MARKER", marker) ]
+          [| script; "--target-dir"; target; "--port"; "9957"; "--build-dashboard" |]
       in
       if code_flag <> 0 then
         failf "run-local with flag failed (%d)\nstdout:\n%s\nstderr:\n%s"
@@ -265,10 +281,9 @@ let test_existing_target_config_is_not_overwritten () =
       let capture = Filename.concat dir "captured-env.txt" in
       let script = Filename.concat repo_root "scripts/run-local.sh" in
       let code, stdout, stderr =
-        run_shell ~cwd:repo_root
+        run_process ~cwd:repo_root script
           ~env:[ ("FAKE_CAPTURE_FILE", capture) ]
-          (Printf.sprintf "%s --target-dir %s --port 9958"
-             (quote script) (quote target))
+          [| script; "--target-dir"; target; "--port"; "9958" |]
       in
       if code <> 0 then
         failf "run-local failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout stderr;
@@ -286,15 +301,14 @@ let test_explicit_config_env_is_preserved_without_bootstrap () =
       let capture = Filename.concat dir "captured-env.txt" in
       let script = Filename.concat repo_root "scripts/run-local.sh" in
       let code, stdout, stderr =
-        run_shell ~cwd:repo_root
+        run_process ~cwd:repo_root script
           ~env:
             [
               ("FAKE_CAPTURE_FILE", capture);
               ("MASC_CONFIG_DIR", override_root);
               ("MASC_PERSONAS_DIR", override_personas);
             ]
-          (Printf.sprintf "%s --target-dir %s --port 9959"
-             (quote script) (quote target))
+          [| script; "--target-dir"; target; "--port"; "9959" |]
       in
       if code <> 0 then
         failf "run-local with explicit config env failed (%d)\nstdout:\n%s\nstderr:\n%s"
@@ -317,15 +331,14 @@ let test_config_dir_set_personas_dir_unset_defaults_to_config_personas () =
       let capture = Filename.concat dir "captured-env.txt" in
       let script = Filename.concat repo_root "scripts/run-local.sh" in
       let code, stdout, stderr =
-        run_shell ~cwd:repo_root
+        run_process ~cwd:repo_root script
           ~env:
             [
               ("FAKE_CAPTURE_FILE", capture);
               ("MASC_CONFIG_DIR", override_config);
             ]
           ~unset_env:[ "MASC_PERSONAS_DIR" ]
-          (Printf.sprintf "%s --target-dir %s --port 9960"
-             (quote script) (quote target))
+          [| script; "--target-dir"; target; "--port"; "9960" |]
       in
       if code <> 0 then
         failf "run-local with MASC_CONFIG_DIR only failed (%d)\nstdout:\n%s\nstderr:\n%s"
@@ -345,12 +358,18 @@ let test_bootstrap_only_materializes_state_without_exec () =
       let capture = Filename.concat dir "captured-env.txt" in
       let script = Filename.concat repo_root "scripts/run-local.sh" in
       let code, stdout, stderr =
-        run_shell ~cwd:repo_root
+        run_process ~cwd:repo_root script
           ~env:[ ("FAKE_CAPTURE_FILE", capture) ]
           ~unset_env:
             [ "MASC_BASE_PATH"; "MASC_CONFIG_DIR"; "MASC_PERSONAS_DIR" ]
-          (Printf.sprintf "%s --target-dir %s --port 9961 --bootstrap-only"
-             (quote script) (quote target))
+          [|
+            script;
+            "--target-dir";
+            target;
+            "--port";
+            "9961";
+            "--bootstrap-only";
+          |]
       in
       if code <> 0 then
         failf "run-local bootstrap-only failed (%d)\nstdout:\n%s\nstderr:\n%s"

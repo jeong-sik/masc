@@ -8,8 +8,6 @@ let source_root () =
 let script_path () =
   Filename.concat (source_root ()) "scripts/ci/git-fetch-retry.sh"
 
-let quote = Filename.quote
-
 let contains_substring haystack needle =
   let hlen = String.length haystack in
   let nlen = String.length needle in
@@ -40,24 +38,49 @@ let with_temp_dir prefix f =
   Unix.mkdir dir 0o755;
   Fun.protect ~finally:(fun () -> rm_rf dir) (fun () -> f dir)
 
-let run_shell ?(env = []) ~cwd cmd =
-  let env_prefix =
-    env
-    |> List.map (fun (k, v) -> Printf.sprintf "%s=%s" k (quote v))
-    |> String.concat " "
-  in
-  let full =
-    if env_prefix = "" then
-      Printf.sprintf "cd %s && %s" (quote cwd) cmd
-    else
-      Printf.sprintf "cd %s && %s %s" (quote cwd) env_prefix cmd
-  in
+let env_array overrides =
+  let table = Hashtbl.create 32 in
+  Array.iter
+    (fun entry ->
+      match String.index_opt entry '=' with
+      | None -> ()
+      | Some idx ->
+          let key = String.sub entry 0 idx in
+          Hashtbl.replace table key entry)
+    (Unix.environment ());
+  List.iter
+    (fun (key, value) ->
+      Hashtbl.replace table key (Printf.sprintf "%s=%s" key value))
+    overrides;
+  Hashtbl.fold (fun _ entry acc -> entry :: acc) table [] |> Array.of_list
+
+let run_process ?(env = []) ~cwd prog argv =
   let out = Filename.temp_file "git-fetch-retry-out" ".txt" in
   let err = Filename.temp_file "git-fetch-retry-err" ".txt" in
-  let wrapped =
-    Printf.sprintf "%s > %s 2> %s" full (quote out) (quote err)
+  let out_fd =
+    Unix.openfile out [ Unix.O_CREAT; Unix.O_TRUNC; Unix.O_WRONLY ] 0o644
   in
-  let code = Sys.command wrapped in
+  let err_fd =
+    Unix.openfile err [ Unix.O_CREAT; Unix.O_TRUNC; Unix.O_WRONLY ] 0o644
+  in
+  let original_cwd = Sys.getcwd () in
+  let pid =
+    Fun.protect
+      ~finally:(fun () ->
+        Sys.chdir original_cwd;
+        Unix.close out_fd;
+        Unix.close err_fd)
+      (fun () ->
+        Sys.chdir cwd;
+        Unix.create_process_env prog argv (env_array env) Unix.stdin out_fd
+          err_fd)
+  in
+  let _, status = Unix.waitpid [] pid in
+  let code =
+    match status with
+    | Unix.WEXITED code -> code
+    | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> 255
+  in
   let stdout = read_file out in
   let stderr = read_file err in
   Sys.remove out;
@@ -122,11 +145,10 @@ let test_retries_until_fetch_succeeds () =
           ("GIT_FETCH_RETRY_MAX_DELAY_SECONDS", "0");
         ]
       in
-      let cmd =
-        Printf.sprintf "/bin/bash %s origin main --depth=1"
-          (quote (script_path ()))
+      let code, stdout, stderr =
+        run_process ~cwd:dir ~env "/bin/bash"
+          [| "/bin/bash"; script_path (); "origin"; "main"; "--depth=1" |]
       in
-      let code, stdout, stderr = run_shell ~cwd:dir ~env cmd in
       if code <> 0 then
         failf "git-fetch-retry failed (%d)\nstdout:\n%s\nstderr:\n%s" code
           stdout stderr;
@@ -164,11 +186,10 @@ let test_reports_failure_after_last_attempt () =
           ("GIT_FETCH_RETRY_MAX_DELAY_SECONDS", "0");
         ]
       in
-      let cmd =
-        Printf.sprintf "/bin/bash %s origin main --depth=1"
-          (quote (script_path ()))
+      let code, _stdout, stderr =
+        run_process ~cwd:dir ~env "/bin/bash"
+          [| "/bin/bash"; script_path (); "origin"; "main"; "--depth=1" |]
       in
-      let code, _stdout, stderr = run_shell ~cwd:dir ~env cmd in
       check bool "command fails after attempts exhausted" true (code <> 0);
       check bool "final failure message emitted" true
         (contains_substring stderr "git fetch failed after 3 attempt(s)");

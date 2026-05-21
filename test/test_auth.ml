@@ -1260,17 +1260,8 @@ let test_authorize_unknown_non_masc_tool_strict_denied () =
            ~agent_name:"worker_agent" ~tool_class:"external")
   | Error e -> fail (Printf.sprintf "wrong error: %s" (Masc_domain.masc_error_to_string e))
 
-let test_authorize_unknown_canonical_tool_strict_worker_allowed () =
-  (* #10205 finding 1: lock the [internal_tool_prefixes] vocabulary
-     (masc_, decision., experiment., client.) so a future refactor
-     that drops one silently is caught here.  Each prefix's
-     unmapped tool must pass strict-mode check for a Worker. *)
-  let prefixes_with_unlisted_tool = [
-    "masc_unlisted_tool";
-    "decision.unlisted_tool";
-    "experiment.unlisted_tool";
-    "client.unlisted_tool";
-  ] in
+let test_authorize_unknown_masc_prefix_strict_worker_allowed () =
+  let prefixes_with_unlisted_tool = [ "masc_unlisted_tool" ] in
   let dir = setup_test_room () in
   let _ = Auth.enable_auth dir ~require_token:true ~agent_name:"test-admin" in
   let create_result = Auth.create_token dir ~agent_name:"worker_agent" ~role:Masc_domain.Worker in
@@ -1287,6 +1278,41 @@ let test_authorize_unknown_canonical_tool_strict_worker_allowed () =
                        ~token:(Some raw_token) ~tool_name)
               (Ok ())
               prefixes_with_unlisted_tool)
+    | Error e -> Error e
+  in
+  cleanup_test_room dir;
+  match result with
+  | Ok () -> ()
+  | Error e -> fail (Masc_domain.masc_error_to_string e)
+
+let test_authorize_retired_dotted_tool_prefixes_strict_denied () =
+  let retired_unlisted_tools =
+    [ "decision.unlisted_tool"; "experiment.unlisted_tool"; "client.unlisted_tool" ]
+  in
+  let dir = setup_test_room () in
+  let _ = Auth.enable_auth dir ~require_token:true ~agent_name:"test-admin" in
+  let create_result = Auth.create_token dir ~agent_name:"worker_agent" ~role:Masc_domain.Worker in
+  let result =
+    match create_result with
+    | Ok (raw_token, _) ->
+      with_env "MASC_TOOL_AUTH_STRICT" "1" (fun () ->
+        List.fold_left
+          (fun acc tool_name ->
+             match acc with
+             | Error _ as e -> e
+             | Ok () ->
+               (match
+                  Auth.authorize_tool
+                    dir
+                    ~agent_name:"worker_agent"
+                    ~token:(Some raw_token)
+                    ~tool_name
+                with
+                | Error (Masc_domain.Auth (Masc_domain.Auth_error.Forbidden _)) -> Ok ()
+                | Ok () -> fail ("unexpected allow: " ^ tool_name)
+                | Error e -> Error e))
+          (Ok ())
+          retired_unlisted_tools)
     | Error e -> Error e
   in
   cleanup_test_room dir;
@@ -1475,8 +1501,10 @@ let () =
         `Quick test_authorize_unknown_masc_tool_strict_worker_allowed;
       test_case "strict unknown non-masc tool denied"
         `Quick test_authorize_unknown_non_masc_tool_strict_denied;
-      test_case "strict unknown canonical tool allows worker"
-        `Quick test_authorize_unknown_canonical_tool_strict_worker_allowed;
+      test_case "strict unknown masc prefix allows worker"
+        `Quick test_authorize_unknown_masc_prefix_strict_worker_allowed;
+      test_case "strict retired dotted tool prefixes denied"
+        `Quick test_authorize_retired_dotted_tool_prefixes_strict_denied;
       test_case "strict known keeper tool allows worker"
         `Quick test_authorize_known_keeper_tool_strict_worker_allowed;
       test_case "strict v2 known keeper tool allows worker"

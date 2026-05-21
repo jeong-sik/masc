@@ -116,8 +116,9 @@ flowchart LR
 ### 3. Removed Game View Alias Lane
 
 `decision.*`, `experiment.*`, `trpg.*`, `experiment_start`, and `masc_trpg_*`
-are not current MCP front-door tools. They should remain historical protocol
-notes only unless a future product decision reintroduces them through the normal
+are not current MCP front-door tools. Historical references belong only in
+archive/audit records; root docs and tests must not document them as callable
+surfaces unless a future product decision reintroduces them through the normal
 tool schema/catalog path.
 
 ## Architecture Layers
@@ -142,7 +143,7 @@ flowchart TD
 ### What was confusing
 
 - Historical docs still mention team-session/command-plane as if they were canonical.
-- Historical game-view docs may still mention `decision.*`, `experiment.*`, `trpg.*`, `experiment_start`, and `masc_trpg_*`; these are not current public MCP tools.
+- The root game-view protocol draft has been removed; `decision.*`, `experiment.*`, `trpg.*`, `experiment_start`, and `masc_trpg_*` must not be reintroduced as live docs.
 - `Prompt_registry` and `Mcp_prompt_surface` describe two different prompt systems; without an explicit note, they look like one broken or incomplete system.
 - `docs/spec/SPEC-INDEX.md` still contains historical descriptions that should not be treated as the current front door.
 - `Config.raw_all_tool_schemas` and `Tools.all_schemas_extended` are two different assembly lists; the former includes Config-dependent modules (Board, Compact, Agent_timeline) that the latter deliberately omits to avoid a cycle.
@@ -159,7 +160,7 @@ flowchart TD
 | Removed alias ghosts | `masc_claim`, `experiment_start`, `masc_trpg_*` | Deletion target; do not preserve for compatibility |
 | Retired front-door | `masc_collaboration_graph` | Removed from `raw_all_tool_schemas` in `config.ml` but still cited in spec docs |
 | Intentional internal-only | `Prompt_registry`, `data/prompts/*.json`, `config/prompts/*.md` | Real runtime feature, not public MCP surface |
-| Experimental but documented | `SWARM-RISC`, `GAME-VIEW-PROTOCOL` draft | Keep clearly labeled as non-canonical or draft |
+| Experimental but documented | `SWARM-RISC` | Keep clearly labeled as non-canonical or draft |
 | Placeholder / review-needed | none | Dead hidden placeholder removed from the MCP schema inventory |
 | Documentation orphan | old count claims, old module lists, stale “full spec” prose | Should be downgraded to historical or refreshed |
 
@@ -190,5 +191,4 @@ flowchart TD
 2. `docs/spec/01-system-overview.md`
 3. `docs/QUICK-START.md`
 4. `docs/COMMAND-PLANE-RUNBOOK.md`
-5. `docs/GAME-VIEW-PROTOCOL.md` as explicit draft
-6. `docs/spec/SPEC-INDEX.md` as historical snapshot, not current SSOT
+5. `docs/spec/SPEC-INDEX.md` as historical snapshot, not current SSOT

@@ -1,6 +1,8 @@
-(* Tests for [Masc_log.System_log_category] — RFC-0155 PR-1 scout. *)
+(* Tests for [System_log_category] — RFC-0155 PR-1 scout.
+   The [masc_log] library is [(wrapped false)], so its modules
+   (Log, System_log_category) are top-level. No [Masc_log.] prefix. *)
 
-module C = Masc_log.System_log_category
+module C = System_log_category
 
 let test_to_string_stable () =
   Alcotest.(check string)

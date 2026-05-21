@@ -413,7 +413,7 @@ let test_validate_code_shell_command_allows_pipe () =
   check (result unit string) "piped allowlisted commands accepted"
     (Ok ())
     (Tool_code_write.validate_code_shell_command
-       "scripts/dune-local.sh build 2>&1 | tail -5")
+       "scripts/dune-local.sh build | tail -5")
 
 let test_validate_code_shell_command_rejects_pipe_to_disallowed () =
   match
@@ -458,14 +458,24 @@ let test_validate_code_shell_command_allows_wrapped_allowed () =
 let test_validate_code_shell_command_allows_dune_local_build () =
   check (result unit string) "dune-local build allowed" (Ok ())
     (Tool_code_write.validate_code_shell_command
-       "scripts/dune-local.sh build 2>&1")
+       "scripts/dune-local.sh build")
 
 let test_validate_code_shell_command_rejects_direct_dune () =
-  match Tool_code_write.validate_code_shell_command "dune build 2>&1" with
+  match Tool_code_write.validate_code_shell_command "dune build" with
   | Error reason ->
       check bool "reason mentions dune-local" true
         (msg_contains ~needle:"scripts/dune-local.sh" reason)
   | Ok () -> fail "expected bare dune to be rejected"
+
+let test_validate_code_shell_command_rejects_redirect () =
+  match
+    Tool_code_write.validate_code_shell_command
+      "scripts/dune-local.sh build 2>&1"
+  with
+  | Error reason ->
+      check bool "reason mentions redirect" true
+        (msg_contains ~needle:"Redirect syntax is not allowed" reason)
+  | Ok () -> fail "expected fd redirect to be rejected"
 
 let test_validate_code_shell_command_allows_grep () =
   check (result unit string) "grep allowed" (Ok ())
@@ -503,9 +513,9 @@ let test_validate_code_shell_command_allows_log_regression_shapes () =
     (Ok ())
     (Tool_code_write.validate_code_shell_command
        "rg \"of_yojson\\|to_yojson\" --type ml -n lib/tool_args.ml");
-  check (result unit string) "find allows stderr dev-null sink" (Ok ())
+  check (result unit string) "find allows allowlisted scan" (Ok ())
     (Tool_code_write.validate_code_shell_command
-       "find . -name \"cascade.toml\" -type f 2>/dev/null")
+       "find . -name \"cascade.toml\" -type f")
 
 let test_validate_code_shell_command_uses_code_shell_allowlist_hint () =
   match Tool_code_write.validate_code_shell_command "curl --version" with
@@ -921,7 +931,7 @@ let test_code_shell_pipeline_grep_exit_one_no_matches_is_success () =
       [
         ( "command",
           `String
-            (Printf.sprintf "cat %s 2>&1 | grep __masc_code_shell_no_match__"
+            (Printf.sprintf "cat %s | grep __masc_code_shell_no_match__"
                code_shell_repo_fixture) );
         ("timeout", `Int 5);
       ]
@@ -1212,6 +1222,8 @@ let () =
         test_validate_code_shell_command_allows_dune_local_build;
       Alcotest.test_case "rejects direct dune" `Quick
         test_validate_code_shell_command_rejects_direct_dune;
+      test_case "rejects redirect syntax" `Quick
+        test_validate_code_shell_command_rejects_redirect;
       test_case "allows grep" `Quick
         test_validate_code_shell_command_allows_grep;
       test_case "allows sed and pwd" `Quick

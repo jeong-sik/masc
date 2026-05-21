@@ -11,6 +11,14 @@ let test_provider_health_reachable_accepts_json_health () =
     (Masc_mcp.Tool_local_runtime.provider_health_reachable ~status:(Some 503)
        ~body:(Some {|{"status":"error"}|}))
 
+let test_split_ws_preserves_quoted_cmdline_values () =
+  check
+    (list string)
+    "quoted model path remains one argv"
+    [ "/opt/bin/llama-server"; "-m"; "/models/Qwen 3.5.gguf"; "--port"; "8080" ]
+    (Masc_mcp.Tool_local_runtime.split_ws
+       {|/opt/bin/llama-server -m "/models/Qwen 3.5.gguf" --port 8080|})
+
 let test_classify_runtime_blocker_prefers_slot_count_when_health_ok () =
   let blocker, detail =
     Masc_mcp.Tool_local_runtime.classify_runtime_blocker ~provider_reachable:true
@@ -117,6 +125,8 @@ let () =
         [
           test_case "accepts json health payload" `Quick
             test_provider_health_reachable_accepts_json_health;
+          test_case "split_ws preserves quoted cmdline values" `Quick
+            test_split_ws_preserves_quoted_cmdline_values;
         ] );
       ( "runtime_blocker",
         [

@@ -29,6 +29,11 @@ let find_by_name name (schemas : tool_schema list) : tool_schema =
       (String.concat ", " (List.map (fun s -> s.name) schemas))
 ;;
 
+let check_absent name (schemas : tool_schema list) =
+  Alcotest.(check bool) (name ^ " absent") true
+    (Option.is_none (List.find_opt (fun s -> String.equal s.name name) schemas))
+;;
+
 let test_masc_config_name_matches () =
   let gen = find_by_name "masc_config" Tool_descriptors_gen.schemas in
   let hand = find_by_name "masc_config" Tool_schemas_misc.schemas in
@@ -255,55 +260,14 @@ let test_masc_cleanup_zombies_input_schema_matches () =
     gen.input_schema
 ;;
 
-let test_masc_webrtc_offer_name_matches () =
-  let gen = find_by_name "masc_webrtc_offer" Tool_descriptors_gen.schemas in
-  let hand = find_by_name "masc_webrtc_offer" Tool_schemas_misc.schemas in
-  Alcotest.(check string) "masc_webrtc_offer name" hand.name gen.name
+let test_webrtc_signaling_descriptors_removed () =
+  List.iter
+    (fun name ->
+      check_absent name Tool_descriptors_gen.schemas;
+      check_absent name Tool_schemas_misc.schemas)
+    [ "masc_webrtc_offer"; "masc_webrtc_answer" ]
 ;;
 
-let test_masc_webrtc_offer_description_matches () =
-  let gen = find_by_name "masc_webrtc_offer" Tool_descriptors_gen.schemas in
-  let hand = find_by_name "masc_webrtc_offer" Tool_schemas_misc.schemas in
-  Alcotest.(check string)
-    "masc_webrtc_offer description"
-    hand.description
-    gen.description
-;;
-
-let test_masc_webrtc_offer_input_schema_matches () =
-  let gen = find_by_name "masc_webrtc_offer" Tool_descriptors_gen.schemas in
-  let hand = find_by_name "masc_webrtc_offer" Tool_schemas_misc.schemas in
-  Alcotest.check
-    yojson_testable
-    "masc_webrtc_offer input_schema (Yojson.Safe.equal)"
-    hand.input_schema
-    gen.input_schema
-;;
-
-let test_masc_webrtc_answer_name_matches () =
-  let gen = find_by_name "masc_webrtc_answer" Tool_descriptors_gen.schemas in
-  let hand = find_by_name "masc_webrtc_answer" Tool_schemas_misc.schemas in
-  Alcotest.(check string) "masc_webrtc_answer name" hand.name gen.name
-;;
-
-let test_masc_webrtc_answer_description_matches () =
-  let gen = find_by_name "masc_webrtc_answer" Tool_descriptors_gen.schemas in
-  let hand = find_by_name "masc_webrtc_answer" Tool_schemas_misc.schemas in
-  Alcotest.(check string)
-    "masc_webrtc_answer description"
-    hand.description
-    gen.description
-;;
-
-let test_masc_webrtc_answer_input_schema_matches () =
-  let gen = find_by_name "masc_webrtc_answer" Tool_descriptors_gen.schemas in
-  let hand = find_by_name "masc_webrtc_answer" Tool_schemas_misc.schemas in
-  Alcotest.check
-    yojson_testable
-    "masc_webrtc_answer input_schema (Yojson.Safe.equal)"
-    hand.input_schema
-    gen.input_schema
-;;
 
 let test_masc_tool_admin_update_name_matches () =
   let gen = find_by_name "masc_tool_admin_update" Tool_descriptors_gen.schemas in
@@ -416,27 +380,11 @@ let () =
             `Quick
             test_masc_cleanup_zombies_input_schema_matches
         ] )
-    ; ( "masc_webrtc_offer field-by-field"
-      , [ Alcotest.test_case "name" `Quick test_masc_webrtc_offer_name_matches
-        ; Alcotest.test_case
-            "description"
+    ; ( "webrtc signaling removed"
+      , [ Alcotest.test_case
+            "not generated"
             `Quick
-            test_masc_webrtc_offer_description_matches
-        ; Alcotest.test_case
-            "input_schema"
-            `Quick
-            test_masc_webrtc_offer_input_schema_matches
-        ] )
-    ; ( "masc_webrtc_answer field-by-field"
-      , [ Alcotest.test_case "name" `Quick test_masc_webrtc_answer_name_matches
-        ; Alcotest.test_case
-            "description"
-            `Quick
-            test_masc_webrtc_answer_description_matches
-        ; Alcotest.test_case
-            "input_schema"
-            `Quick
-            test_masc_webrtc_answer_input_schema_matches
+            test_webrtc_signaling_descriptors_removed
         ] )
     ; ( "masc_tool_admin_update field-by-field"
       , [ Alcotest.test_case "name" `Quick test_masc_tool_admin_update_name_matches

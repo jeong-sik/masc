@@ -232,9 +232,10 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
           else
             with_server_state h2_reqd (fun state ->
               match
-                authorize_tool_request
+                authorize_same_origin_permission_request
                   ~base_path:state.Mcp_server.room_config.base_path
-                  ~tool_name:"masc_webrtc_offer"
+                  ~permission:Masc_domain.CanBroadcast
+                  ~endpoint:"WebRTC signaling"
                   httpun_request
               with
               | Error err ->
@@ -261,9 +262,10 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
           else
             with_server_state h2_reqd (fun state ->
               match
-                authorize_tool_request
+                authorize_same_origin_permission_request
                   ~base_path:state.Mcp_server.room_config.base_path
-                  ~tool_name:"masc_webrtc_answer"
+                  ~permission:Masc_domain.CanBroadcast
+                  ~endpoint:"WebRTC signaling"
                   httpun_request
               with
               | Error err ->

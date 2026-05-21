@@ -27,7 +27,6 @@ type fixture = {
   mutable board_post_id : string option;
   mutable keeper_name : string option;
   mutable verification_id : string option;
-  mutable webrtc_offer_id : string option;
   mutable handover_id : string option;
   mutable library_topic : string option;
   mutable worktree_task_id : string option;
@@ -82,8 +81,6 @@ let strict_success_names =
     "masc_transition";
     "masc_transport_status";
     "masc_websocket_discovery";
-    "masc_webrtc_answer";
-    "masc_webrtc_offer";
     "masc_who";
     "masc_workflow_guide";
     "masc_worktree_create";
@@ -347,7 +344,6 @@ let make_fixture sw ~proc_mgr ~fs ~net ~mono_clock clock ~base_path init_mode =
       board_post_id = None;
       keeper_name = None;
       verification_id = None;
-      webrtc_offer_id = None;
       handover_id = None;
       library_topic = None;
       worktree_task_id = None;
@@ -463,27 +459,6 @@ let ensure_verification_request fixture =
       fixture.verification_id <- Some req_id;
       req_id
 
-let ensure_webrtc_offer fixture =
-  match fixture.webrtc_offer_id with
-  | Some offer_id -> offer_id
-  | None ->
-      let body =
-        execute_tool_ok fixture ~name:"masc_webrtc_offer"
-          ~arguments:
-            (`Assoc
-              [
-                ("agent_name", `String fixture.agent_name);
-                ("ice_candidates", `List [ `String "candidate:tool-matrix" ]);
-              ])
-      in
-      let offer_id =
-        match extract_id body ~fields:[ "offer_id"; "id" ] ~prefixes:[ "offer-" ] with
-        | Some value -> value
-        | None -> failwith ("failed to parse offer id from: " ^ body)
-      in
-      fixture.webrtc_offer_id <- Some offer_id;
-      offer_id
-
 let ensure_handover _fixture =
   (* masc_handover_create pruned from registry. Helper retained as a
      stub for any transitional callers; returns a synthetic id. *)
@@ -582,9 +557,7 @@ let prepare_for_name fixture name =
     ensure_plan_initialized fixture;
   if List.mem name [ "masc_board_get"; "masc_board_comment"; "masc_board_vote"; "masc_board_comment_vote"; "masc_board_delete" ] then
     ignore (ensure_board_post fixture);
-  (* masc_verify_* tools pruned from registry; no preparation needed. *)
-  if name = "masc_webrtc_answer" then
-    ignore (ensure_webrtc_offer fixture);
+  (* masc_verify_* and masc_webrtc_* tools pruned from registry; no preparation needed. *)
   if List.mem name [ "masc_worktree_create"; "masc_worktree_list" ] then
     ignore (ensure_playground_clone fixture);
   if name = "masc_worktree_remove" then
@@ -712,7 +685,7 @@ let field_value fixture ~tool_name field_name schema =
       `Float 1.0
   | "timeout" when tool_name = "masc_listen" -> `Int 1
   | "interval" when tool_name = "masc_heartbeat_start" -> `Int 5
-  | "offer_id" -> `String (ensure_webrtc_offer fixture)
+  | "offer_id" -> `String "offer-pruned-stub"
   | "ice_candidates" -> `List [ `String "candidate:tool-matrix" ]
   | "tool_name" -> `String "masc_status"
   | "subscription_id" -> `String "subscription-001"

@@ -360,22 +360,25 @@ let test_system_internal_callable () =
       (String.concat ", " uncallable);
   Alcotest.(check bool) "all system_internal callable" true (uncallable = [])
 
-let test_pruned_tools_registered_as_deprecated () =
-  (* Tools pruned from user-facing surfaces are registered as Deprecated
-     in explicit_metadata (#5039). They stay hidden from tools/list and
-     remain callable for in-flight sessions. Some may be fully removed
-     from surfaces when no backward compat is needed. *)
+let test_pruned_webrtc_tools_fully_removed () =
+  (* WebRTC signaling remains available through HTTP /webrtc/* endpoints,
+     but the legacy MCP tool names are no longer retained as deprecated
+     compatibility entries. *)
   let deprecated_names =
     List.map fst Tool_catalog.deprecated_tool_entries
   in
   List.iter
     (fun name ->
-      Alcotest.(check bool) (name ^ " is Deprecated") true
+      Alcotest.(check bool) (name ^ " not Deprecated") false
         (List.mem name deprecated_names);
-      Alcotest.(check bool) (name ^ " hidden") false
+      Alcotest.(check bool) (name ^ " not visible") false
         (Tool_catalog.is_visible name);
-      Alcotest.(check bool) (name ^ " callable") true
-        (Tool_catalog.allow_direct_call name))
+      Alcotest.(check bool) (name ^ " no explicit metadata") true
+        (Option.is_none (Tool_catalog.registered_metadata name));
+      Alcotest.(check bool) (name ^ " not on system surface") false
+        (Tool_catalog.is_on_surface Tool_catalog.System_internal name);
+      Alcotest.(check bool) (name ^ " not keeper internal") false
+        (Tool_catalog.is_on_surface Tool_catalog.Keeper_internal name))
     [
       "masc_webrtc_answer";
       "masc_webrtc_offer";
@@ -487,7 +490,7 @@ let () =
             test_system_internal_not_visible;
           Alcotest.test_case "System_internal callable" `Quick
             test_system_internal_callable;
-          Alcotest.test_case "pruned tools registered as Deprecated" `Quick
-            test_pruned_tools_registered_as_deprecated;
+          Alcotest.test_case "pruned webrtc tools fully removed" `Quick
+            test_pruned_webrtc_tools_fully_removed;
         ] );
     ]

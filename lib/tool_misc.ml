@@ -149,8 +149,6 @@ let dispatch ctx ~name ~args : Tool_result.t option =
   in
   match name with
   | "masc_config" -> Some (Tool_misc_admin.handle_config ~tool_name:name ~start_time:start args)
-  | "masc_webrtc_offer" -> Some (Tool_misc_transport.handle_webrtc_offer ~tool_name:name ~start_time:start args)
-  | "masc_webrtc_answer" -> Some (Tool_misc_transport.handle_webrtc_answer ~tool_name:name ~start_time:start args)
   | "masc_dashboard" -> Some (handle_dashboard ~tool_name:name ~start_time:start ctx args)
   | "masc_gc" -> Some (handle_gc ~tool_name:name ~start_time:start ctx args)
   | "masc_cleanup_zombies" -> Some (handle_cleanup_zombies ~tool_name:name ~start_time:start ctx args)
@@ -183,7 +181,7 @@ let tool_required_permission = function
       Some Masc_domain.CanReadState
   | "masc_tool_admin_snapshot" | "masc_tool_admin_update" ->
       Some Masc_domain.CanAdmin
-  | "masc_webrtc_offer" | "masc_webrtc_answer" | "masc_cleanup_zombies" ->
+  | "masc_cleanup_zombies" ->
       Some Masc_domain.CanBroadcast
   | _ -> None
 

@@ -6,7 +6,7 @@ type scope =
    work but that the external MCP orchestrator surface should not
    expose. Wave 1 (PR-N1, #14627): code/web/worktree (8). Wave 2
    (PR-N2d, #14633): coord/inline admin observability audit verdict
-   (5), plan_* (6), run_* (6), webrtc (2). Wave 3 (PR-N3, this PR):
+   (5), plan_* (6), run_* (6). Wave 3 (PR-N3, this PR):
    keeper_board_* duplicates (12). *)
 let keeper_internal_list : string list =
   [ (* === Wave 1 (PR #14627) === *)
@@ -37,9 +37,7 @@ let keeper_internal_list : string list =
   ; "masc_run_init"
   ; "masc_run_list"
   ; "masc_run_log"
-  ; "masc_run_plan" (* webrtc (experimental, not in user surface definition) *)
-  ; "masc_webrtc_offer"
-  ; "masc_webrtc_answer"
+  ; "masc_run_plan"
     (* === Wave 3 (this PR) — keeper_board_* duplicates === *)
     (* The board domain has parallel keeper_board_* / masc_board_*
        definitions. masc_board_* stays in the orchestrator surface

@@ -219,15 +219,13 @@ let test_permission_for_tool_broadcast () =
   | Some Masc_domain.CanBroadcast -> ()
   | _ -> fail "expected CanBroadcast"
 
-let test_permission_for_tool_webrtc_offer () =
-  match Auth.permission_for_tool "masc_webrtc_offer" with
-  | Some Masc_domain.CanBroadcast -> ()
-  | _ -> fail "expected CanBroadcast"
-
-let test_permission_for_tool_webrtc_answer () =
-  match Auth.permission_for_tool "masc_webrtc_answer" with
-  | Some Masc_domain.CanBroadcast -> ()
-  | _ -> fail "expected CanBroadcast"
+let test_permission_for_tool_webrtc_signaling_removed () =
+  match
+    ( Auth.permission_for_tool "masc_webrtc_offer",
+      Auth.permission_for_tool "masc_webrtc_answer" )
+  with
+  | None, None -> ()
+  | _ -> fail "expected WebRTC signaling endpoints to be absent from tool auth"
 
 let test_permission_for_tool_channel_gate () =
   match Auth.permission_for_tool "channel_gate" with
@@ -1127,8 +1125,8 @@ let () =
       test_case "claim" `Quick test_permission_for_tool_claim;
       test_case "claim_next" `Quick test_permission_for_tool_claim_next;
       test_case "broadcast" `Quick test_permission_for_tool_broadcast;
-      test_case "webrtc_offer" `Quick test_permission_for_tool_webrtc_offer;
-      test_case "webrtc_answer" `Quick test_permission_for_tool_webrtc_answer;
+      test_case "webrtc_signaling_removed" `Quick
+        test_permission_for_tool_webrtc_signaling_removed;
       test_case "channel_gate" `Quick test_permission_for_tool_channel_gate;
       test_case "board_list" `Quick test_permission_for_tool_board_list;
       test_case "board_post" `Quick test_permission_for_tool_board_post;

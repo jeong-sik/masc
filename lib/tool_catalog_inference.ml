@@ -179,9 +179,7 @@ let inferred_effect_domain_of_typed_tool_name = function
   | TN.Masc TM.Board_sub_board_get
   | TN.Masc TM.Board_sub_board_list
   | TN.Masc TM.Approval_pending
-  | TN.Masc TM.Approval_get
-  | TN.Masc TM.Webrtc_answer
-  | TN.Masc TM.Webrtc_offer ->
+  | TN.Masc TM.Approval_get ->
       Some Read_only
   | TN.Masc TM.Code_delete
   | TN.Masc TM.Code_edit
@@ -428,8 +426,6 @@ let tool_group_of_typed_tool_name = function
       | TM.Update_priority
       | TM.Web_fetch
       | TM.Web_search
-      | TM.Webrtc_answer
-      | TM.Webrtc_offer
       | TM.Who
       | TM.Workflow_guide ) ->
       Some Masc_core

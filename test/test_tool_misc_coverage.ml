@@ -172,9 +172,7 @@ let () = test "dispatch_web_search_requires_query" (fun () ->
   match Tool_misc.dispatch ctx ~name:"masc_web_search" ~args with
   | Some result ->
       assert (not result.success);
-      let json = parse_json result.legacy_message in
-      assert (Yojson.Safe.Util.member "status" json = `String "error");
-      assert (Yojson.Safe.Util.member "message" json = `String "query is required")
+      assert (Tool_result.message result = "query is required")
   | None -> failwith "dispatch returned None"
 )
 
@@ -185,11 +183,9 @@ let () = test "dispatch_web_search_rejects_long_query" (fun () ->
   match Tool_misc.dispatch ctx ~name:"masc_web_search" ~args with
   | Some result ->
       assert (not result.success);
-      let json = parse_json result.legacy_message in
-      assert (Yojson.Safe.Util.member "status" json = `String "error");
       assert
-        (Yojson.Safe.Util.member "message" json
-         = `String "query must be at most 500 characters")
+        (Tool_result.message result
+         = "query must be at most 500 characters")
   | None -> failwith "dispatch returned None"
 )
 
@@ -199,11 +195,9 @@ let () = test "dispatch_web_search_rejects_secret_like_query" (fun () ->
   match Tool_misc.dispatch ctx ~name:"masc_web_search" ~args with
   | Some result ->
       assert (not result.success);
-      let json = parse_json result.legacy_message in
-      assert (Yojson.Safe.Util.member "status" json = `String "error");
       assert
-        (Yojson.Safe.Util.member "message" json
-         = `String "query looks like it may contain secrets; refine it before using web search")
+        (Tool_result.message result
+         = "query looks like it may contain secrets; refine it before using web search")
   | None -> failwith "dispatch returned None"
 )
 
@@ -396,12 +390,8 @@ let () = test "web_search_simulate_for_test_reports_all_failures" (fun () ->
       [ ("brave", `Empty); ("bing_rss", `Error "rss unavailable") ]
   in
   assert (not result.success);
-  let json = parse_json (Tool_result.message result) in
-  assert (Yojson.Safe.Util.member "status" json = `String "error");
   assert
-    (str_contains
-       Yojson.Safe.Util.(member "message" json |> to_string)
-       "bing_rss: rss unavailable")
+    (str_contains (Tool_result.message result) "bing_rss: rss unavailable")
 )
 
 let () = test "parse_official_provider_json_payloads" (fun () ->
@@ -448,7 +438,7 @@ let () = test "redact_transport_error_detail" (fun () ->
      = "forbidden response")
 )
 
-let () = test "dispatch_webrtc_offer" (fun () ->
+let () = test "dispatch_webrtc_tools_removed" (fun () ->
   let ctx = make_test_ctx () in
   let args =
     `Assoc
@@ -458,84 +448,9 @@ let () = test "dispatch_webrtc_offer" (fun () ->
         ("dtls_fingerprint", `String "sha-256:AA:BB:CC");
       ]
   in
-  match Tool_misc.dispatch ctx ~name:"masc_webrtc_offer" ~args with
-  | Some result ->
-      assert result.success;
-      let json = parse_json result.legacy_message in
-      let offer_id = Yojson.Safe.Util.(json |> member "offer_id" |> to_string) in
-      assert (String.length offer_id > 0);
-      ignore (Server_webrtc_transport.cleanup_expired_offers ~max_age_s:0.0 ())
-  | None -> failwith "dispatch returned None"
+  assert (Tool_misc.dispatch ctx ~name:"masc_webrtc_offer" ~args = None);
+  assert (Tool_misc.dispatch ctx ~name:"masc_webrtc_answer" ~args = None)
 )
-
-let () = test "dispatch_webrtc_answer" (fun () ->
-  let ctx = make_test_ctx () in
-  let offer_args =
-    `Assoc
-      [
-        ("agent_name", `String "offer-agent");
-        ("ice_candidates", `List [ `String "candidate:127.0.0.1:5001" ]);
-      ]
-  in
-  let offer_result =
-    match Tool_misc.dispatch ctx ~name:"masc_webrtc_offer" ~args:offer_args with
-    | Some result when result.success -> parse_json result.legacy_message
-    | Some result -> failwith result.legacy_message
-    | None -> failwith "offer dispatch returned None"
-  in
-  let offer_id =
-    Yojson.Safe.Util.(offer_result |> member "offer_id" |> to_string)
-  in
-  let answer_args =
-    `Assoc
-      [
-        ("offer_id", `String offer_id);
-        ("agent_name", `String "answer-agent");
-        ("ice_candidates", `List [ `String "candidate:127.0.0.1:5002" ]);
-      ]
-  in
-  match Tool_misc.dispatch ctx ~name:"masc_webrtc_answer" ~args:answer_args with
-  | Some result ->
-      assert result.success;
-      let json = parse_json result.legacy_message in
-      let peer_id = Yojson.Safe.Util.(json |> member "peer_id" |> to_string) in
-      assert (String.length peer_id > 0);
-      Server_webrtc_transport.remove_peer peer_id
-  | None -> failwith "dispatch returned None"
-)
-
-let () = test "dispatch_webrtc_offer_disabled" (fun () ->
-  with_env "MASC_WEBRTC_ENABLED" (Some "0") (fun () ->
-    let ctx = make_test_ctx () in
-    let args =
-      `Assoc
-        [
-          ("agent_name", `String "offer-agent");
-          ("ice_candidates", `List [ `String "candidate:127.0.0.1:5000" ]);
-        ]
-    in
-    match Tool_misc.dispatch ctx ~name:"masc_webrtc_offer" ~args with
-    | Some result ->
-        assert (not result.success);
-        assert (str_contains result.legacy_message "webrtc transport disabled")
-    | None -> failwith "dispatch returned None"))
-
-let () = test "dispatch_webrtc_answer_disabled" (fun () ->
-  with_env "MASC_WEBRTC_ENABLED" (Some "0") (fun () ->
-    let ctx = make_test_ctx () in
-    let args =
-      `Assoc
-        [
-          ("offer_id", `String "offer-1");
-          ("agent_name", `String "answer-agent");
-          ("ice_candidates", `List [ `String "candidate:127.0.0.1:5002" ]);
-        ]
-    in
-    match Tool_misc.dispatch ctx ~name:"masc_webrtc_answer" ~args with
-    | Some result ->
-        assert (not result.success);
-        assert (str_contains result.legacy_message "webrtc transport disabled")
-    | None -> failwith "dispatch returned None"))
 
 let () = test "dispatch_tool_admin_snapshot" (fun () ->
   let ctx = make_test_ctx () in

@@ -80,8 +80,6 @@ let legacy_permission_entries : (string * permission) list =
   ; "masc_heartbeat", CanBroadcast
   ; "masc_goal_transition", CanBroadcast
   ; "masc_goal_verify", CanBroadcast
-  ; "masc_webrtc_offer", CanBroadcast
-  ; "masc_webrtc_answer", CanBroadcast
   ; "channel_gate", CanBroadcast
   ; "masc_agent_update", CanBroadcast
   ; "masc_spawn", CanBroadcast

@@ -288,6 +288,14 @@ val authorize_read_request :
   base_path:string -> Httpun.Request.t -> (unit, Masc_domain.masc_error) result
 (** Check read-tier auth. *)
 
+val authorize_same_origin_permission_request :
+  base_path:string ->
+  permission:Masc_domain.permission ->
+  endpoint:string -> Httpun.Request.t -> (unit, Masc_domain.masc_error) result
+(** Check mutation auth for HTTP endpoints that allow loopback
+    same-origin browser requests without turning the endpoint into an
+    MCP tool. *)
+
 val authorize_tool_request :
   base_path:string ->
   tool_name:string -> Httpun.Request.t -> (unit, Masc_domain.masc_error) result
@@ -326,6 +334,15 @@ val with_permission_auth :
    Httpun.Request.t -> Httpun.Reqd.t -> unit) ->
   Httpun.Request.t -> Httpun.Reqd.t -> unit
 (** Permission-tier combinator. *)
+
+val with_same_origin_permission_auth :
+  permission:Masc_domain.permission ->
+  endpoint:string ->
+  (Mcp_server.server_state ->
+   Httpun.Request.t -> Httpun.Reqd.t -> unit) ->
+  Httpun.Request.t -> Httpun.Reqd.t -> unit
+(** Permission-tier combinator for HTTP mutations that accept
+    same-origin loopback browser requests or bearer-token requests. *)
 
 val with_tool_auth :
   tool_name:string ->

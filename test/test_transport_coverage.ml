@@ -501,15 +501,13 @@ let test_rest_tool_to_endpoint_websocket_discovery () =
   check string "method" "GET" (Transport.Rest.method_to_string m);
   check string "path" "/ws" path
 
-let test_rest_tool_to_endpoint_webrtc_offer () =
+let test_rest_tool_to_endpoint_webrtc_signaling_removed () =
   let (m, path) = Transport.Rest.tool_to_endpoint "masc_webrtc_offer" in
-  check string "method" "POST" (Transport.Rest.method_to_string m);
-  check string "path" "/webrtc/offer" path
-
-let test_rest_tool_to_endpoint_webrtc_answer () =
+  check string "offer method" "POST" (Transport.Rest.method_to_string m);
+  check string "offer fallback path" "/mcp" path;
   let (m, path) = Transport.Rest.tool_to_endpoint "masc_webrtc_answer" in
-  check string "method" "POST" (Transport.Rest.method_to_string m);
-  check string "path" "/webrtc/answer" path
+  check string "answer method" "POST" (Transport.Rest.method_to_string m);
+  check string "answer fallback path" "/mcp" path
 
 let test_rest_tool_to_endpoint_unknown () =
   let (m, path) = Transport.Rest.tool_to_endpoint "unknown_tool" in
@@ -577,19 +575,19 @@ let test_rest_parse_request_websocket_discovery () =
   in
   check string "method_name" "masc_websocket_discovery" req.method_name
 
-let test_rest_parse_request_webrtc_offer () =
+let test_rest_parse_request_webrtc_offer_not_tool () =
   let req =
     Transport.Rest.parse_request ~http_method:"POST" ~path:"/webrtc/offer"
       ~query_params:[] ~body:"{\"agent_name\":\"a\"}"
   in
-  check string "method_name" "masc_webrtc_offer" req.method_name
+  check string "method_name" "unknown" req.method_name
 
-let test_rest_parse_request_webrtc_answer () =
+let test_rest_parse_request_webrtc_answer_not_tool () =
   let req =
     Transport.Rest.parse_request ~http_method:"POST" ~path:"/webrtc/answer"
       ~query_params:[] ~body:"{\"offer_id\":\"offer-1\",\"agent_name\":\"b\"}"
   in
-  check string "method_name" "masc_webrtc_answer" req.method_name
+  check string "method_name" "unknown" req.method_name
 
 let test_rest_parse_request_tool () =
   let req = Transport.Rest.parse_request ~http_method:"POST" ~path:"/api/v1/tools/custom_tool" ~query_params:[] ~body:"" in
@@ -627,8 +625,6 @@ let test_rest_parse_request_roundtrips_direct_bindings () =
       "masc_operator_action";
       "masc_operator_confirm";
       "masc_websocket_discovery";
-      "masc_webrtc_offer";
-      "masc_webrtc_answer";
       "masc_broadcast";
       "masc_agent_card";
     ]
@@ -965,8 +961,8 @@ let () =
         test_rest_tool_to_endpoint_operator_confirm;
       test_case "agent_card" `Quick test_rest_tool_to_endpoint_agent_card;
       test_case "websocket_discovery" `Quick test_rest_tool_to_endpoint_websocket_discovery;
-      test_case "webrtc_offer" `Quick test_rest_tool_to_endpoint_webrtc_offer;
-      test_case "webrtc_answer" `Quick test_rest_tool_to_endpoint_webrtc_answer;
+      test_case "webrtc signaling removed" `Quick
+        test_rest_tool_to_endpoint_webrtc_signaling_removed;
       test_case "unknown" `Quick test_rest_tool_to_endpoint_unknown;
     ];
     "rest.parse_request", [
@@ -986,8 +982,10 @@ let () =
         test_rest_parse_request_agent_card_canonical;
       test_case "websocket discovery" `Quick
         test_rest_parse_request_websocket_discovery;
-      test_case "webrtc offer" `Quick test_rest_parse_request_webrtc_offer;
-      test_case "webrtc answer" `Quick test_rest_parse_request_webrtc_answer;
+      test_case "webrtc offer not tool" `Quick
+        test_rest_parse_request_webrtc_offer_not_tool;
+      test_case "webrtc answer not tool" `Quick
+        test_rest_parse_request_webrtc_answer_not_tool;
       test_case "tool" `Quick test_rest_parse_request_tool;
       test_case "unknown" `Quick test_rest_parse_request_unknown;
       test_case "with body" `Quick test_rest_parse_request_with_body;

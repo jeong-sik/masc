@@ -750,6 +750,33 @@ let authorize_permission_request ~base_path ~permission request :
 let authorize_read_request ~base_path request : (unit, Masc_domain.masc_error) result =
   authorize_permission_request ~base_path ~permission:Masc_domain.CanReadState request
 
+let authorize_same_origin_permission_request ~base_path ~permission ~endpoint request
+    : (unit, Masc_domain.masc_error) result =
+  let auth_cfg = Auth.load_auth_config base_path in
+  let token = auth_token_from_request request in
+  match
+    if Option.is_some token then Ok ()
+    else ensure_same_origin_browser_request request
+  with
+  | Error err -> Error err
+  | Ok () ->
+      (match ensure_strict_http_token_auth ~endpoint auth_cfg with
+      | Error msg -> Error (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized msg))
+      | Ok auth_cfg -> (
+          match resolve_agent_name_for_auth ~base_path request ~token with
+          | Error err -> Error err
+          | Ok agent_name_opt ->
+              let agent_name = Option.value ~default:"dashboard" agent_name_opt in
+              if
+                auth_cfg.enabled && auth_cfg.require_token && token <> None
+                && agent_name_opt = None
+              then
+                Error
+                  (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized
+                     "Agent name required (X-Gate-Agent / X-MASC-Agent or token-bound credential)"))
+              else
+                Auth.check_permission base_path ~agent_name ~token ~permission))
+
 let authorize_tool_request ~base_path ~tool_name request :
     (unit, Masc_domain.masc_error) result =
   let auth_cfg = Auth.load_auth_config base_path in
@@ -847,6 +874,21 @@ and with_permission_auth ~permission handler request reqd =
   | Some state ->
       let base_path = state.Mcp_server.room_config.base_path in
       (match authorize_permission_request ~base_path ~permission request with
+      | Ok () ->
+          (match check_agent_rate_limit request reqd with
+          | Ok () -> handler state request reqd
+          | Error () -> ())
+      | Error err -> respond_auth_error request reqd err)
+
+and with_same_origin_permission_auth ~permission ~endpoint handler request reqd =
+  match !server_state with
+  | None -> Http_server_eio.Response.json {|{"error":"not initialized"}|} reqd
+  | Some state ->
+      let base_path = state.Mcp_server.room_config.base_path in
+      (match
+         authorize_same_origin_permission_request ~base_path ~permission ~endpoint
+           request
+       with
       | Ok () ->
           (match check_agent_rate_limit request reqd with
           | Ok () -> handler state request reqd

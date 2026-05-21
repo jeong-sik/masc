@@ -180,8 +180,6 @@ module Masc : sig
     | Tool_admin_snapshot
     | Tool_admin_update
     | Tool_stats
-    | Webrtc_answer
-    | Webrtc_offer
 
   val to_string : t -> string
   val of_string : string -> t option

@@ -712,40 +712,24 @@ let run_turn
                    ~keeper_name:meta.name
                    ~trajectory_acc
                    result.response.content;
-                 let reported_tool_names =
-                   List.filter_map
-                     (function
-                       | Agent_sdk.Types.ToolUse { name; _ } -> Some name
-                       | _ -> None)
-                     result.response.content
-                 in
-                 reported_tool_names_ref := reported_tool_names;
-                 let tool_usage_after =
-                   Keeper_tool_disclosure.keeper_tool_usage_snapshot
+                 let tool_observation =
+                   Keeper_agent_run_tool_observation.analyze
                      ~base_path:config.base_path
                      ~keeper_name:meta.name
+                     ~requested_tool_names_seen:acc.requested_tool_names_seen
+                     ~tool_usage_before
+                     ~tool_calls:acc.tool_calls
+                     result.response.content
                  in
-                 let registry_observed_tool_names =
-                   Keeper_tool_disclosure.tool_usage_delta
-                     ~before:tool_usage_before
-                     ~after:tool_usage_after
+                 let reported_tool_names =
+                   tool_observation.reported_tool_names
                  in
-                 let hook_observed_tool_names =
-                   List.rev_map
-                     (fun (detail : tool_call_detail) -> detail.tool_name)
-                     acc.tool_calls
-                 in
+                 reported_tool_names_ref := reported_tool_names;
                  let observed_tool_names =
-                   Keeper_tool_disclosure.merge_observed_tool_names
-                     ~registry_observed_tool_names
-                     ~hook_observed_tool_names
+                   tool_observation.observed_tool_names
                  in
                  observed_tool_names_ref := observed_tool_names;
-                 let tool_names =
-                   Keeper_tool_disclosure.merge_reported_and_observed_tool_names
-                     ~reported_tool_names
-                     ~observed_tool_names
-                 in
+                 let tool_names = tool_observation.tool_names in
                  (* RFC-0064: canonicalise observed tool names across all three
                     input surfaces (LLM-native public / MCP protocol /
                     already-internal) before the disclosure check. Without
@@ -762,13 +746,11 @@ let run_turn
                     single observed call does not produce multiple
                     counter samples (PR #14585 review #3). *)
                  let canonical_tool_names =
-                   List.map Keeper_tool_disclosure.canonical_tool_name_observed tool_names
+                   tool_observation.canonical_tool_names
                  in
                  canonical_tool_names_ref := canonical_tool_names;
                  let unexpected_tool_names =
-                   Keeper_tool_disclosure.unexpected_tool_names
-                     ~allowed_tool_names:acc.requested_tool_names_seen
-                     ~tool_names:canonical_tool_names
+                   tool_observation.unexpected_tool_names
                  in
                  unexpected_tool_names_ref := unexpected_tool_names;
                  (* Partial tolerance (#8471): when a turn mixes valid tool calls
@@ -780,9 +762,7 @@ let run_turn
           turn produced no valid work. See feedback memory
           feedback_tool-error-messages-teach-llm.md. *)
                  let valid_tool_calls_present =
-                   Keeper_tool_disclosure.has_valid_tool_call
-                     ~unexpected_tool_names
-                     ~tool_names:canonical_tool_names
+                   tool_observation.valid_tool_calls_present
                  in
                  if valid_tool_calls_present then acc.keeper_surface_tool_used <- true;
                  if unexpected_tool_names <> [] && not valid_tool_calls_present

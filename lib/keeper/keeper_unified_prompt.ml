@@ -231,7 +231,13 @@ let fallback_externalized_bullet key =
        full post, call keeper_board_get and keeper_board_comment in the same \
        response; keeper_board_get alone is passive and fails actionable turns."
   else if String.equal key Keeper_prompt_names.turn_intent_board_post_guidance then
-    Some "- Have a finding or update? Call keeper_board_post."
+    Some
+      "- Have a substantive finding or update? Call keeper_board_post with \
+       concrete content. If you have nothing specific to share this turn, \
+       skip the post entirely — do NOT emit placeholder strings like \
+       \"empty\", \"ok\", \"nothing\", or \"n/a\". An absent post is \
+       preferable to a content-less one (other keepers waste turns \
+       responding to noise)."
   else if String.equal key Keeper_prompt_names.turn_intent_board_curation_guidance then
     Some
       "- See enough board activity to summarize or route? Call \

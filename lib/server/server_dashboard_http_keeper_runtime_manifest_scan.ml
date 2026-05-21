@@ -116,7 +116,9 @@ let update_runtime_manifest_scan scan row =
    with
    | `String role ->
      let current =
-       Option.value (Hashtbl.find_opt scan.payload_role_counts role) ~default:0
+       match Hashtbl.find_opt scan.payload_role_counts role with
+       | Some value -> value
+       | None -> 0
      in
      Hashtbl.replace scan.payload_role_counts role (current + 1)
    | _ -> ());
@@ -130,7 +132,9 @@ let update_runtime_manifest_scan scan row =
    with
    | Some clock ->
      let current =
-       Option.value (Hashtbl.find_opt scan.source_clock_counts clock) ~default:0
+       match Hashtbl.find_opt scan.source_clock_counts clock with
+       | Some value -> value
+       | None -> 0
      in
      Hashtbl.replace scan.source_clock_counts clock (current + 1)
    | None -> ());

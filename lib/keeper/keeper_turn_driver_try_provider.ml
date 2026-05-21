@@ -105,7 +105,11 @@ let emit_runtime_manifest
                @ [ ("decision", other) ]))
     in
     let decision =
-      let decision = Option.value decision ~default:(`Assoc []) in
+      let decision =
+        match decision with
+        | Some value -> value
+        | None -> `Assoc []
+      in
       Some
         (Keeper_runtime_manifest.with_clock_refs
            ~clock_refs:

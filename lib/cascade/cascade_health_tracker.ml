@@ -518,9 +518,9 @@ let record_soft_rate_limited t ~provider_key ?retry_after_s ?error_kind
     ?retry_after_s ~now:(Unix.gettimeofday ()) ()
 
 let record_capacity_backpressure t ~provider_key ?retry_after_s ?error_kind
-    ?error_reason () =
+    ?error_reason ~now () =
   record t ~provider_key ~outcome:Capacity_backpressure ?error_kind ?error_reason
-    ?retry_after_s ~now:(Unix.gettimeofday ()) ()
+    ?retry_after_s ~now ()
 
 (* ── Queries ──────────────────────────────────── *)
 

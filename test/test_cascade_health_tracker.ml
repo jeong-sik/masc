@@ -229,7 +229,7 @@ let test_provider_block_duration_observed_for_immediate_cooldowns () =
     (provider_block_duration_count soft_provider);
   check (float 0.001) "soft 429 observes Retry-After seconds" 30.0
     (provider_block_duration_sum soft_provider);
-  H.record_capacity_backpressure t ~provider_key:cap_provider ~retry_after_s:7.0 ();
+  H.record_capacity_backpressure t ~provider_key:cap_provider ~retry_after_s:7.0 ~now:(Unix.time ()) ();
   check (float 0.001) "capacity backpressure count" 1.0
     (provider_block_duration_count cap_provider);
   check (float 0.001) "capacity backpressure observes Retry-After seconds" 7.0
@@ -332,13 +332,13 @@ let test_capacity_backpressure_triggers_immediate_cooldown () =
      cannot serve this cycle.  Waiting for [cooldown_threshold] would burn
      additional cascade attempts on a saturated provider. *)
   let t = H.create () in
-  H.record_capacity_backpressure t ~provider_key:"p" ();
+  H.record_capacity_backpressure t ~provider_key:"p" ~now:(Unix.time ()) ();
   check bool "single capacity_backpressure event trips cooldown immediately"
     true (H.is_in_cooldown t ~provider_key:"p")
 
 let test_capacity_backpressure_cooldown_uses_default_backoff () =
   let t = H.create () in
-  H.record_capacity_backpressure t ~provider_key:"p" ();
+  H.record_capacity_backpressure t ~provider_key:"p" ~now:(Unix.time ()) ();
   match H.provider_info t ~provider_key:"p" with
   | None -> fail "provider_info returned None after record_capacity_backpressure"
   | Some info ->
@@ -355,7 +355,7 @@ let test_capacity_backpressure_cooldown_uses_default_backoff () =
 
 let test_capacity_backpressure_honors_retry_after () =
   let t = H.create () in
-  H.record_capacity_backpressure t ~provider_key:"p" ~retry_after_s:8.0 ();
+  H.record_capacity_backpressure t ~provider_key:"p" ~retry_after_s:8.0 ~now:(Unix.time ()) ();
   match H.provider_info t ~provider_key:"p" with
   | None -> fail "provider_info returned None"
   | Some info ->
@@ -369,7 +369,7 @@ let test_capacity_backpressure_honors_retry_after () =
 
 let test_capacity_backpressure_success_clears_cooldown () =
   let t = H.create () in
-  H.record_capacity_backpressure t ~provider_key:"p" ();
+  H.record_capacity_backpressure t ~provider_key:"p" ~now:(Unix.time ()) ();
   H.record_success t ~provider_key:"p" ();
   check bool "success after capacity_backpressure clears cooldown"
     false (H.is_in_cooldown t ~provider_key:"p")

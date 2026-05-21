@@ -684,7 +684,11 @@ let run_named
       let decision =
         match runtime_manifest_context with
         | Some manifest_ctx ->
-          let decision = Option.value decision ~default:(`Assoc []) in
+          let decision =
+            match decision with
+            | Some value -> value
+            | None -> `Assoc []
+          in
           Some
             (Keeper_runtime_manifest.with_clock_refs
                ~clock_refs:
@@ -886,6 +890,7 @@ let run_named
           ?retry_after_s
           ~error_kind
           ~error_reason
+          ~now:(Unix.time ())
           ()
       | None ->
         Cascade_health_tracker.record_failure

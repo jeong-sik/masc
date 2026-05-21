@@ -179,7 +179,11 @@ let append_runtime_manifest ~config ~keeper_name ~agent_name ~trace_id
         runtime_manifest_context ~keeper_name ~agent_name ~trace_id
           ~generation ~keeper_turn_id
       in
-      let decision = Option.value decision ~default:(`Assoc []) in
+      let decision =
+        match decision with
+        | Some value -> value
+        | None -> `Assoc []
+      in
       Some
         (Keeper_runtime_manifest.with_clock_refs
            ~clock_refs:

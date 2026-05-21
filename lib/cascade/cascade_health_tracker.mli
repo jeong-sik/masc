@@ -281,6 +281,7 @@ val record_capacity_backpressure :
   ?retry_after_s:float ->
   ?error_kind:error_kind ->
   ?error_reason:string ->
+  now:float ->
   unit ->
   unit
 

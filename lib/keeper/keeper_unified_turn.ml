@@ -97,12 +97,17 @@ let run_keeper_cycle
   in
   let append_manifest ?status ?decision ?cascade_name ?clock_refs ~site event =
     let decision =
-      let decision = Option.value decision ~default:(`Assoc []) in
+      let decision =
+        match decision with
+        | Some value -> value
+        | None -> `Assoc []
+      in
       let clock_refs =
-        Option.value clock_refs
-          ~default:
-            (Keeper_runtime_manifest.clock_refs_for_context
-               runtime_manifest_context ~event ())
+        match clock_refs with
+        | Some value -> value
+        | None ->
+          Keeper_runtime_manifest.clock_refs_for_context
+            runtime_manifest_context ~event ()
       in
       Some
         (Keeper_runtime_manifest.with_clock_refs

@@ -189,3 +189,40 @@ let decide
       | Masc_domain.Cancelled _ ) ) ->
     if verification_enabled then Error Invalid_transition else Error Verification_disabled
 ;;
+
+(* Enumerate the actions that [decide] would accept for the given status under
+   ~same_agent / ~force / ~verification_enabled. Pure function over the decide
+   table; closes the workaround posture noted in
+   lib/task_transition_state/task_transition_state.ml header. Pass [~same_agent]
+   reflecting whether the caller is the task's current assignee (irrelevant for
+   Todo / AwaitingVerification approver checks but [decide] still routes
+   through it for [Claim] / [Start] / [Done_action] / [Cancel] / [Release] /
+   [Submit_for_verification]). *)
+let valid_next_actions
+      ~verification_enabled
+      ~same_agent
+      ~force
+      ~task_status
+  =
+  let same_agent_pred _ = same_agent in
+  let try_action action =
+    match
+      decide
+        ~verification_enabled
+        ~verification_timeout_seconds:0.0
+        ~new_verification_id:(fun () -> "")
+        ~same_agent:same_agent_pred
+        ~agent_name:""
+        ~task_id:""
+        ~task_status
+        ~action
+        ~now:""
+        ~force
+        ~notes:""
+        ~reason:""
+    with
+    | Ok _ -> true
+    | Error _ -> false
+  in
+  List.filter try_action Masc_domain.all_task_actions
+;;

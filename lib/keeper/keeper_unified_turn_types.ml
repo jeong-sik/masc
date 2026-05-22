@@ -204,7 +204,6 @@ let registry_failure_reason_of_terminal_reason
   | Keeper_turn_disposition.External_cancel
   | Keeper_turn_disposition.Turn_wall_clock_timeout
   | Keeper_turn_disposition.Oas_timeout_budget
-  | Keeper_turn_disposition.Cascade_attempts_exhausted
   | Keeper_turn_disposition.Gh_repo_context_missing_worktree
   | Keeper_turn_disposition.Post_commit_ambiguous
   | Keeper_turn_disposition.Unknown _ -> None

@@ -29,7 +29,10 @@ type t =
   | External_cancel
   (** Turn cancelled before completion (operator stop, switch_keeper, …). *)
   | Turn_wall_clock_timeout (** Turn exceeded its wall-clock budget. *)
-  | Oas_timeout_budget (** OAS turn-budget cooldown / cap rejection. *)
+  | Oas_timeout_budget
+  (** Legacy OAS timeout-budget wire value. Operators should inspect
+      owner-specific turn/provider timeout evidence instead of treating this
+      as a distinct root cause. *)
   | Cascade_attempts_exhausted
   (** Cascade aggregate outcome: all candidate attempts were exhausted.
           Operators should inspect per-attempt root causes instead of treating

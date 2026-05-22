@@ -66,7 +66,7 @@ let summary = function
 let next_action = function
   | Success -> None
   | External_cancel -> Some "rerun_if_still_relevant"
-  | Turn_wall_clock_timeout | Oas_timeout_budget -> Some "inspect_timeout_budget"
+  | Turn_wall_clock_timeout | Oas_timeout_budget -> Some "inspect_turn_timeout"
   | Cascade_attempts_exhausted -> Some "inspect_cascade_attempts"
   | Gh_repo_context_missing_worktree -> Some "create_or_link_worktree"
   | Required_tool_use_no_tool_call ->

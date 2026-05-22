@@ -351,6 +351,13 @@ type cascade_route =
   }
 [@@deriving show, eq]
 
+type cascade_profile =
+  { name : string
+  ; required_capabilities : string list
+  ; provider_filter : string option
+  }
+[@@deriving show, eq]
+
 type cascade_config =
   { providers : cascade_provider list
   ; models : cascade_model_spec list
@@ -360,6 +367,7 @@ type cascade_config =
   ; tier_groups : cascade_tier_group list
   ; routes : cascade_route list
   ; system_targets : cascade_route list
+  ; profiles : cascade_profile list
   }
 [@@deriving show, eq]
 

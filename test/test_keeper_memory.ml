@@ -539,10 +539,20 @@ let test_memory_write_then_recall_with_state_block () =
     check bool "at least one note written" true (notes_written > 0);
     check bool "goal kind present" true (List.mem "goal" kinds);
 
-    (* Verify recall reads back what was written *)
+    (* Verify recall reads back what was written.  RFC-0149 §3.1 migration:
+       route through the Result-returning entry point and fail the test on
+       [Error _] so an IO fault cannot masquerade as an empty summary. *)
     let summary =
-      Keeper_memory_recall.read_keeper_memory_summary config
-        ~name:"e2e-keeper" ~max_bytes:100000 ~max_lines:100 ~recent_limit:10
+      match
+        Keeper_memory_recall.read_keeper_memory_summary_result config
+          ~name:"e2e-keeper" ~max_bytes:100000 ~max_lines:100 ~recent_limit:10
+      with
+      | Ok s -> s
+      | Error exn_class ->
+          fail
+            (Printf.sprintf
+               "memory bank read failed: %s"
+               (Keeper_memory_recall_exn_class.to_label exn_class))
     in
     check bool "recall finds notes" true (summary.total_notes > 0);
     check bool "recall has goal kind" true
@@ -567,10 +577,19 @@ let test_memory_write_then_recall_meta_fallback () =
     check bool "fallback wrote notes" true (notes_written > 0);
     check bool "fallback wrote goal kind" true (List.mem "goal" kinds);
 
-    (* Recall should find the note *)
+    (* Recall should find the note.  RFC-0149 §3.1 migration: same
+       Result-pattern as above. *)
     let summary =
-      Keeper_memory_recall.read_keeper_memory_summary config
-        ~name:"fallback-keeper" ~max_bytes:100000 ~max_lines:100 ~recent_limit:10
+      match
+        Keeper_memory_recall.read_keeper_memory_summary_result config
+          ~name:"fallback-keeper" ~max_bytes:100000 ~max_lines:100 ~recent_limit:10
+      with
+      | Ok s -> s
+      | Error exn_class ->
+          fail
+            (Printf.sprintf
+               "memory bank read failed: %s"
+               (Keeper_memory_recall_exn_class.to_label exn_class))
     in
     check bool "recall finds fallback notes" true (summary.total_notes > 0))
 

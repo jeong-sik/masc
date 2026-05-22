@@ -91,15 +91,28 @@ let handle_keeper_list ctx args : tool_result =
              [memory_recent_note] field as a typed unavailable marker
              instead of being indistinguishable from "no recorded notes".
              [None] stays reserved for "Ok summary with empty recent_notes". *)
+          let memory_summary_result =
+            read_keeper_memory_summary_result
+              ctx.config
+              ~name:m.name
+              ~max_bytes:120000
+              ~max_lines:180
+              ~recent_limit:3
+          in
+          let memory_bank_summary =
+            match memory_summary_result with
+            | Ok summary -> summary
+            | Error _ ->
+              {
+                total_notes = 0;
+                last_ts_unix = 0.0;
+                top_kind = None;
+                kind_counts = [];
+                recent_notes = [];
+              }
+          in
           let memory_recent_note =
-            match
-              read_keeper_memory_summary_result
-                ctx.config
-                ~name:m.name
-                ~max_bytes:120000
-                ~max_lines:180
-                ~recent_limit:3
-            with
+            match memory_summary_result with
             | Ok summary ->
               (match summary.recent_notes with
                | row :: _ -> Some row.text

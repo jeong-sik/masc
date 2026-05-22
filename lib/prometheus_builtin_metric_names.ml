@@ -149,7 +149,7 @@ include Prometheus_policy_metric_names
    with the [keeper_passive_loop_detector] streak counter so operators
    can see "alive but unproductive" keepers in Grafana before the
    detection latch fires.  Labels: keeper. *)
-(* PR-M (Leak 9): consecutive [oas_timeout_budget] cycle FAILED strikes
+(* PR-M (Leak 9): consecutive [provider_timeout] cycle FAILED strikes
    per keeper. Counter increments on each strike; a strike at
    [outcome=promote] means [Keeper_fiber_crash] was raised so
    [Keeper_supervisor.sweep_and_recover] will respawn the fiber. Without

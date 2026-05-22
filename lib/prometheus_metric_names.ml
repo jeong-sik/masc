@@ -75,7 +75,7 @@
    query like
      rate(masc_keeper_turn_latency_bucket_total{bucket="600-1200s"}[5m])
    directly surfaces slow-turn keepers without needing the JSONL
-   ledger.  20-minute turns from oas_timeout_budget exhaustion
+   ledger.  20-minute turns from provider_timeout exhaustion
    (#9933, observed 1,204,542 ms = 20 min on taskmaster
    2026-04-24) appear in the [over_1200s] bucket and operators can
    alert on its rate.  Existing [masc_llm_inference_duration_seconds]

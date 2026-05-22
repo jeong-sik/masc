@@ -97,6 +97,18 @@ val empty_keeper_state_snapshot : keeper_state_snapshot
 (** All-empty snapshot used as a default when no [STATE] block was
     emitted. *)
 
+type compaction_source =
+  | Pre_dispatch_hygiene
+  | MASC_policy
+  | OAS_proactive
+  | OAS_emergency
+  | Memory_bank
+(** Closed-sum variant distinguishing which subsystem initiated a
+    compaction. Replaces the previous generic "compacted" string. *)
+
+val compaction_source_to_string : compaction_source -> string
+val compaction_source_of_string_opt : string -> compaction_source option
+
 (** {1 Memory bank entry types} *)
 
 type keeper_memory_line = {
@@ -118,7 +130,7 @@ type keeper_memory_summary = {
 
 type memory_bank_compaction = {
   performed : bool;
-  reason : string option;
+  source : compaction_source option;
   target_notes : int;
   before_notes : int;
   after_notes : int;

@@ -755,7 +755,7 @@ let compact_memory_bank_if_needed
   if not (Fs_compat.file_exists path) then
     { no_memory_bank_compaction with
       target_notes;
-      reason = Some "missing_file";
+      source = None;
     }
   else
     let size_bytes =
@@ -766,7 +766,7 @@ let compact_memory_bank_if_needed
     | Error _ ->
       { no_memory_bank_compaction with
         target_notes;
-        reason = Some "read_failed";
+        source = None;
       }
     | Ok content ->
       let parsed, invalid = parse_memory_bank_content content in
@@ -777,14 +777,14 @@ let compact_memory_bank_if_needed
           target_notes;
           before_notes;
           after_notes = before_notes;
-          reason = Some "under_trigger_bytes";
+          source = None;
         }
       else if before_notes <= target_notes && invalid = 0 then
         { no_memory_bank_compaction with
           target_notes;
           before_notes;
           after_notes = before_notes;
-          reason = Some "under_target";
+          source = None;
         }
       else
         (* Consolidation: merge progress clusters and promote recurring notes *)
@@ -819,7 +819,7 @@ let compact_memory_bank_if_needed
             target_notes;
             before_notes;
             after_notes = before_notes;
-            reason = Some "already_compact";
+            source = None;
           }
         else
           let kind_caps = memory_kind_caps_for_compaction ~target_notes in
@@ -898,7 +898,7 @@ let compact_memory_bank_if_needed
               before_notes;
               after_notes;
               dedup_dropped;
-              reason = Some "no_reduction";
+              source = None;
             }
           else
             match
@@ -918,7 +918,7 @@ let compact_memory_bank_if_needed
                 after_notes = before_notes;
                 dedup_dropped;
                 invalid_dropped = invalid;
-                reason = Some "write_failed";
+                source = None;
               }
             | Ok () ->
               let retained =
@@ -937,7 +937,7 @@ let compact_memory_bank_if_needed
                 evicted;
               {
                 performed = true;
-                reason = Some "compacted";
+                source = Some Memory_bank;
                 target_notes;
                 before_notes;
                 after_notes;

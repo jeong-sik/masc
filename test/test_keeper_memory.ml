@@ -1804,10 +1804,11 @@ let test_compaction_records_consolidation_metrics () =
     let compaction =
       Keeper_memory_bank.compact_memory_bank_if_needed config meta
     in
-    let compaction_reason =
-      Option.value ~default:"none" compaction.reason
+    let compaction_source_str =
+      Option.value ~default:"none"
+        (Option.map Keeper_memory_policy.compaction_source_to_string compaction.source)
     in
-    check bool (Printf.sprintf "compaction ran (%s)" compaction_reason)
+    check bool (Printf.sprintf "compaction ran (%s)" compaction_source_str)
       true compaction.performed;
     check (float 0.001) "progress consolidation generated"
       (generated_progress_before +. 1.0)
@@ -1865,8 +1866,9 @@ let test_compaction_runs_on_note_pressure_under_byte_trigger () =
       Keeper_memory_bank.compact_memory_bank_if_needed config meta
     in
     check bool "compaction ran from note pressure" true compaction.performed;
-    check (option string) "compaction reason" (Some "compacted")
-      compaction.reason;
+    check (option string) "compaction source"
+      (Some (Keeper_memory_policy.compaction_source_to_string Keeper_memory_policy.Memory_bank))
+      (Option.map Keeper_memory_policy.compaction_source_to_string compaction.source);
     check int "before notes" (target_notes + 1) compaction.before_notes;
     check int "after notes capped to target" target_notes compaction.after_notes;
     check int "one note dropped" 1 compaction.dropped_notes)

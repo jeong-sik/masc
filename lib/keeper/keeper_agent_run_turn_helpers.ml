@@ -171,7 +171,7 @@ let runtime_manifest_context ~keeper_name ~agent_name ~trace_id ~generation
 let append_runtime_manifest ~config ~keeper_name ~agent_name ~trace_id
     ~generation ~cascade_name ?status ?decision ?keeper_turn_id
     ?oas_turn_count ?elapsed_ms ?logical_seq ?checkpoint_path ?receipt_path
-    ~site event =
+    ?compaction_source ~site event =
   let decision =
     match keeper_turn_id with
     | None -> decision
@@ -189,7 +189,7 @@ let append_runtime_manifest ~config ~keeper_name ~agent_name ~trace_id
         (Keeper_runtime_manifest.with_clock_refs
            ~clock_refs:
              (Keeper_runtime_manifest.clock_refs_for_context ctx ~event
-                ?oas_turn_count ?elapsed_ms ?logical_seq ())
+                ?oas_turn_count ?elapsed_ms ?logical_seq ?compaction_source ())
            decision)
   in
   Keeper_runtime_manifest.make ~keeper_name ~agent_name ~trace_id ~generation

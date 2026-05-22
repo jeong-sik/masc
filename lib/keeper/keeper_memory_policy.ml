@@ -166,9 +166,32 @@ type keeper_memory_summary = {
   recent_notes: keeper_memory_line list;
 }
 
+type compaction_source =
+  | Pre_dispatch_hygiene
+  | MASC_policy
+  | OAS_proactive
+  | OAS_emergency
+  | Memory_bank
+
+let compaction_source_to_string = function
+  | Pre_dispatch_hygiene -> "pre_dispatch_hygiene"
+  | MASC_policy -> "masc_policy"
+  | OAS_proactive -> "oas_proactive"
+  | OAS_emergency -> "oas_emergency"
+  | Memory_bank -> "memory_bank"
+
+let compaction_source_of_string_opt (s : string) : compaction_source option =
+  match s with
+  | "pre_dispatch_hygiene" -> Some Pre_dispatch_hygiene
+  | "masc_policy" -> Some MASC_policy
+  | "oas_proactive" -> Some OAS_proactive
+  | "oas_emergency" -> Some OAS_emergency
+  | "memory_bank" -> Some Memory_bank
+  | _ -> None
+
 type memory_bank_compaction = {
   performed: bool;
-  reason: string option;
+  source: compaction_source option;
   target_notes: int;
   before_notes: int;
   after_notes: int;
@@ -180,7 +203,7 @@ type memory_bank_compaction = {
 
 let no_memory_bank_compaction = {
   performed = false;
-  reason = None;
+  source = None;
   target_notes = 0;
   before_notes = 0;
   after_notes = 0;

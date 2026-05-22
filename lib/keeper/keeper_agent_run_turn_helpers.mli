@@ -65,6 +65,7 @@ val append_runtime_manifest :
   ?logical_seq:int ->
   ?checkpoint_path:string ->
   ?receipt_path:string ->
+  ?compaction_source:string ->
   site:string ->
   Keeper_runtime_manifest.event_kind ->
   unit

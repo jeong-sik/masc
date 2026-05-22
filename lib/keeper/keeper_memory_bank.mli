@@ -102,7 +102,7 @@ type keeper_memory_summary =
 type memory_bank_compaction =
   Keeper_memory_policy.memory_bank_compaction = {
   performed : bool;
-  reason : string option;
+  source : Keeper_memory_policy.compaction_source option;
   target_notes : int;
   before_notes : int;
   after_notes : int;

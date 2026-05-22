@@ -246,7 +246,9 @@ let parse_provider_healthcheck ~(path : string) (tbl : Otoml.t)
     dropped. The result is sorted by key for deterministic show/eq. *)
 let parse_headers (tbl : Otoml.t) (path : string) : (string * string) list =
   match Otoml.get_table tbl with
-  | exception _ ->
+  (* RFC-0145 — narrow to the only exception [Otoml.get_table] raises
+     on a non-table value.  Unrelated runtime exceptions propagate. *)
+  | exception Otoml.Type_error _ ->
     Logs.warn (fun m ->
       m
         "cascade_declarative_parser: %s — expected TOML table, got non-table value; \
@@ -259,7 +261,9 @@ let parse_headers (tbl : Otoml.t) (path : string) : (string * string) list =
         (fun (k, v) ->
            match Otoml.get_string v with
            | s -> Some (k, s)
-           | exception _ ->
+           (* RFC-0145 — narrow to the only exception [Otoml.get_string]
+              raises on a non-string value. *)
+           | exception Otoml.Type_error _ ->
              Logs.warn (fun m ->
                m
                  "cascade_declarative_parser: %s.%s — non-string header value, ignoring"

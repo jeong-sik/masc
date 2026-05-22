@@ -411,7 +411,6 @@ let test_coding_preset_has_coordination_tools () =
     true
     (has_tool "keeper_task_submit_for_verification" tools);
   check bool "has keeper_task_create" true (has_tool "keeper_task_create" tools);
-  check bool "has keeper_pr_create" true (has_tool "keeper_pr_create" tools);
   check
     bool
     "has keeper_task_force_release"

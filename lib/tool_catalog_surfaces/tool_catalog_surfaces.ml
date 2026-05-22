@@ -86,7 +86,6 @@ let keeper_internal_tools =
        keeper-bound runtime MCP surface instead of silently dropping them. *)
     "keeper_pr_list"
   ; "keeper_pr_status"
-  ; "keeper_pr_create"
   ; "keeper_pr_review_read"
   ; "keeper_pr_review_comment"
   ; "keeper_pr_review_reply"

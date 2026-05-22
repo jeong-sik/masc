@@ -1,6 +1,7 @@
-(** Tool_shard_types_schemas_github_pr — Dedicated GitHub PR workflow tool schemas (keeper_pr_list/status/create). *)
+(** Tool_shard_types_schemas_github_pr — read-only GitHub PR tool schemas. *)
 
-(** Dedicated GitHub PR workflow tools. *)
+(** Read-only GitHub PR tools. PR creation is a GitHub/forge mutation and is
+    intentionally not exposed as a keeper-native concept. *)
 let keeper_github_pr_tools : Masc_domain.tool_schema list =
   [ { name = "keeper_pr_list"
     ; description =
@@ -74,58 +75,6 @@ let keeper_github_pr_tools : Masc_domain.tool_schema list =
                       ] )
                 ] )
           ; "required", `List [ `String "pr_number" ]
-          ]
-    }
-  ; { name = "keeper_pr_create"
-    ; description =
-        "Create a draft GitHub pull request with keeper-scoped credentials. Draft-only \
-         by policy: omit draft or set draft=true. Requires delivery, coding, or full \
-         preset."
-    ; input_schema =
-        `Assoc
-          [ "type", `String "object"
-          ; ( "properties"
-            , `Assoc
-                [ ( "repo"
-                  , `Assoc
-                      [ "type", `String "string"
-                      ; ( "description"
-                        , `String
-                            "GitHub repo (owner/name). Optional when cwd is a git repo." )
-                      ] )
-                ; ( "cwd"
-                  , `Assoc
-                      [ "type", `String "string"
-                      ; ( "description"
-                        , `String
-                            "Keeper sandbox repo/worktree cwd. Required when repo cannot \
-                             infer the branch context." )
-                      ] )
-                ; ( "title"
-                  , `Assoc [ "type", `String "string"; "description", `String "PR title" ]
-                  )
-                ; ( "body"
-                  , `Assoc [ "type", `String "string"; "description", `String "PR body" ]
-                  )
-                ; ( "base"
-                  , `Assoc
-                      [ "type", `String "string"
-                      ; "description", `String "Optional base branch"
-                      ] )
-                ; ( "head"
-                  , `Assoc
-                      [ "type", `String "string"
-                      ; "description", `String "Optional head branch"
-                      ] )
-                ; ( "draft"
-                  , `Assoc
-                      [ "type", `String "boolean"
-                      ; ( "description"
-                        , `String
-                            "Must be true if provided; ready PR creation is rejected." )
-                      ] )
-                ] )
-          ; "required", `List [ `String "title"; `String "body" ]
           ]
     }
   ]

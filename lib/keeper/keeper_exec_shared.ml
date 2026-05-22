@@ -587,7 +587,6 @@ let keeper_tools_list_json ~(meta : keeper_meta) =
     | Tool_name.Keeper.Memory_search
     | Tool_name.Keeper.Memory_write -> "memory"
     | Tool_name.Keeper.Broadcast | Tool_name.Keeper.Handoff -> "coordination"
-    | Tool_name.Keeper.Pr_create
     | Tool_name.Keeper.Pr_list
     | Tool_name.Keeper.Pr_review_comment
     | Tool_name.Keeper.Pr_review_read

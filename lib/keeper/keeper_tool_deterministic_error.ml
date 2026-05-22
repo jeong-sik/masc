@@ -108,7 +108,6 @@ let reason_of_error_code = function
   | "gh_command_blocked" -> Some Policy_blocked
   | "gh_irreversible_blocked" -> Some Policy_blocked
   | "completion_contract_violation" -> Some Completion_contract_violation
-  | "keeper_pr_create_requires_git_cwd" -> Some Keeper_shell_op_required
   | _ -> None
 ;;
 

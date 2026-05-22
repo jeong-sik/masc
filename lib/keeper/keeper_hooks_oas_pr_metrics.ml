@@ -196,7 +196,6 @@ let pr_work_actions_of_command command =
 
 let is_pr_work_action_tool_name = function
   | "masc_code_git"
-  | "keeper_pr_create"
   | "keeper_shell"
   | "keeper_bash"
   | "masc_code_shell" -> true
@@ -250,20 +249,6 @@ let pr_work_action_metric_events_of_tool_io
                route_via;
              };
            ])
-  | "keeper_pr_create" ->
-      let work_ref = pr_create_ref_of_input input in
-      let pr_url = Option.bind output_json pr_url_of_json in
-      [
-        {
-          work_action = "PR_CREATE";
-          work_source = "keeper_pr_create";
-          work_ref;
-          pr_url;
-          command = None;
-          success;
-          route_via;
-        };
-      ]
   | "keeper_shell" | "keeper_bash" | "masc_code_shell" ->
       command_candidates_of_tool_io ~tool_name ~input ~output_json
       |> List.concat_map (fun command ->
@@ -369,7 +354,6 @@ let append_pr_work_action_metrics
     () =
   let route_via_fallback =
     match meta.sandbox_profile, tool_name with
-    | Docker, "keeper_pr_create" -> Some "docker"
     | Docker, "keeper_shell" -> Some "docker"
     | Docker, ("keeper_bash" | "masc_code_shell" | "masc_code_git") ->
         Some "docker"

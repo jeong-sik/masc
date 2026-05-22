@@ -58,8 +58,8 @@ let command_blocked_hint ?allowed_commands name =
     | "curl" | "wget" ->
       " Use masc_web_fetch to fetch page content, or masc_web_search to find sources."
     | "gh" ->
-      " Use keeper_shell op=gh for GitHub CLI work when a keeper task has repo \
-       context. Use git directly for repository/worktree/branch operations."
+      " Use keeper_pr_* tools for GitHub operations (create, merge, comment) or \
+       masc_board_post to escalate. Use git directly for repository/worktree/branch operations."
     | "docker"
     | "podman"
     | "kubectl"
@@ -149,12 +149,12 @@ let validate_command_name_with_allowlist ~allowed_commands = function
 ;;
 
 let strict_allowlist_policy ~allowed_commands : Exec_shell_gate.allowlist_policy =
-  { allowed_commands; allow_pipes = false }
+  { allowed_commands; allow_pipes = false; redirect_allowed = false }
 ;;
 
 let coding_allowlist_policy ?(allow_pipes = true) ~allowed_commands ()
   : Exec_shell_gate.allowlist_policy =
-  { allowed_commands; allow_pipes }
+  { allowed_commands; allow_pipes; redirect_allowed = false }
 ;;
 
 let rec shell_ir_literal_text = function
@@ -288,7 +288,10 @@ let command_context_with_allowlist ?caller ~allowed_commands cmd =
     | Allow context ->
       if context.Exec_shell_gate.direct_dune_seen
       then Error Direct_dune_invocation
-      else Ok context
+      else (
+        match validate_wrapped_stages ~allowed_commands context.Exec_shell_gate.ast with
+        | Ok () -> Ok context
+        | Error _ as err -> err)
     | Reject { context; reason; _ } ->
       if context.Exec_shell_gate.direct_dune_seen
       then Error Direct_dune_invocation
@@ -846,7 +849,7 @@ let attribution_of_validation ~cmd (result : (unit, block_reason) result) : Attr
   match result with
   | Ok () ->
     let evidence : Yojson.Safe.t = `Assoc [ "cmd", `String cmd ] in
-    Attribution.passed ~origin:Det ~gate:"exec_policy" ~evidence
+    Attribution.passed ~origin:Det ~gate:"worker_dev_tools" ~evidence
   | Error br ->
     let command_name =
       match br with
@@ -864,7 +867,7 @@ let attribution_of_validation ~cmd (result : (unit, block_reason) result) : Attr
     in
     Attribution.policy_failed
       ~origin:Det
-      ~gate:"exec_policy"
+      ~gate:"worker_dev_tools"
       ~evidence
       ~reason:(block_reason_to_string br)
 ;;

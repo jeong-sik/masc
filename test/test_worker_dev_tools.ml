@@ -378,7 +378,7 @@ let test_shell_exec_uses_shell_ir_dispatch_cwd () =
        | Error { Agent_sdk.Types.message = e; _ } ->
          Alcotest.fail (Printf.sprintf "shell_exec failed: %s" e)
        | Ok { Agent_sdk.Types.content = output } ->
-         Alcotest.(check string) "pwd output" (workdir ^ "\n") output;
+         Alcotest.(check string) "pwd output" (Unix.realpath workdir ^ "\n") output;
          let process_line =
            List.find_opt
              (fun line ->

@@ -113,22 +113,49 @@ let file_pattern_position_after file_rel ~anchor pattern =
           Some (Str.search_forward pattern_re content anchor_pos)
         with Not_found -> None)
 
-let quote = Filename.quote
+let env_array overrides =
+  let env = Hashtbl.create 64 in
+  Unix.environment ()
+  |> Array.iter (fun binding ->
+         match String.index_opt binding '=' with
+         | Some index ->
+             Hashtbl.replace env
+               (String.sub binding 0 index)
+               (String.sub binding (index + 1)
+                  (String.length binding - index - 1))
+         | None -> ());
+  List.iter (fun (key, value) -> Hashtbl.replace env key value) overrides;
+  Hashtbl.fold
+    (fun key value acc -> Printf.sprintf "%s=%s" key value :: acc)
+    env []
+  |> Array.of_list
+
+let process_exit_code = function
+  | Unix.WEXITED code -> code
+  | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> 255
+
+let run_silent_process ?(env = []) ~cwd prog argv =
+  let dev_null = Unix.openfile Filename.null [ Unix.O_WRONLY ] 0o600 in
+  Fun.protect
+    ~finally:(fun () -> Unix.close dev_null)
+    (fun () ->
+      let original_cwd = Sys.getcwd () in
+      Fun.protect
+        ~finally:(fun () -> Sys.chdir original_cwd)
+        (fun () ->
+          Sys.chdir cwd;
+          let pid =
+            Unix.create_process_env prog argv (env_array env) Unix.stdin
+              dev_null dev_null
+          in
+          let _, status = Unix.waitpid [] pid in
+          process_exit_code status))
 
 let run_agent_draft_policy env =
-  let env_prefix =
-    env
-    |> List.map (fun (k, v) -> Printf.sprintf "%s=%s" k (quote v))
-    |> String.concat " "
-  in
   let script =
     Filename.concat (source_root ()) "scripts/ci/check-agent-draft-policy.sh"
   in
-  let cmd =
-    Printf.sprintf "cd %s && %s bash %s >/dev/null 2>&1"
-      (quote (source_root ())) env_prefix (quote script)
-  in
-  Sys.command cmd
+  run_silent_process ~cwd:(source_root ()) ~env "bash" [| "bash"; script |]
 
 let write_file path content =
   let oc = open_out path in
@@ -157,18 +184,22 @@ let run_branch_protection_with_forbidden_token ?(allow_unreadable = false) () =
       "#!/usr/bin/env bash\necho 'gh: Resource not accessible by integration (HTTP 403)' >&2\nexit 1\n";
     Unix.chmod fake_gh 0o755;
     let path = Printf.sprintf "%s:%s" dir (Sys.getenv "PATH") in
-    let allow =
-      if allow_unreadable then "BRANCH_PROTECTION_ALLOW_UNREADABLE=1 " else ""
+    let env =
+      [
+        ("PATH", path);
+        ("BRANCH_PROTECTION_REPOSITORY", "jeong-sik/masc-mcp");
+        ("BRANCH_PROTECTION_BRANCH", "main");
+      ]
+      @
+      if allow_unreadable then
+        [ ("BRANCH_PROTECTION_ALLOW_UNREADABLE", "1") ]
+      else
+        []
     in
     let script =
       Filename.concat (source_root ()) "scripts/ci/check-main-branch-protection.sh"
     in
-    let cmd =
-      Printf.sprintf
-        "cd %s && env PATH=%s BRANCH_PROTECTION_REPOSITORY=jeong-sik/masc-mcp BRANCH_PROTECTION_BRANCH=main %sbash %s >/dev/null 2>&1"
-        (quote (source_root ())) (quote path) allow (quote script)
-    in
-    Sys.command cmd)
+    run_silent_process ~cwd:(source_root ()) ~env "bash" [| "bash"; script |])
 
 let test_ci_sync_and_asset_contracts () =
   check bool "pr sync script added" true

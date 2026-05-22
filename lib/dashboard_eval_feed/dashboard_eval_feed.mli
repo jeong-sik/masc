@@ -39,7 +39,8 @@ val read_verdict_json : Yojson.Safe.t -> (swiss_verdict_json, string) result
 val list_agents : base_path:string -> string list
 (** Return sorted agent names that have eval data under
     [<base_path>/.oas/eval/].  Returns an empty list when the
-    directory does not exist.  Never raises. *)
+    directory does not exist.  Missing eval data is a normal fresh-boot
+    state and does not log a warning.  Never raises. *)
 
 val read_latest :
   base_path:string -> agent_name:string -> limit:int -> eval_snapshot list
@@ -50,7 +51,8 @@ val read_latest :
     [verdict] field conforming to the swiss-verdict schema.
 
     Returns an empty list when the directory does not exist or contains
-    no parseable files.  Never raises. *)
+    no parseable files.  Missing eval data is a normal fresh-boot state
+    and does not log a warning.  Never raises. *)
 
 val snapshot_to_json : eval_snapshot -> Yojson.Safe.t
 (** Serialize an eval snapshot to JSON for HTTP responses. *)

@@ -162,6 +162,19 @@ let test_parse_layer_missing_name () =
 
 (* ── read_latest tests ───────────────────────────────────────────── *)
 
+let test_list_agents_nonexistent_dir () =
+  let result = Eval_feed.list_agents ~base_path:"/nonexistent/path" in
+  check int "empty result" 0 (List.length result)
+
+let test_list_agents_with_dirs () =
+  let base = tmpdir "eval_agents" in
+  let eval_root = Filename.concat (Filename.concat base ".oas") "eval" in
+  mkdir_p (Filename.concat eval_root "keeper-b");
+  mkdir_p (Filename.concat eval_root "keeper-a");
+  write_file (Filename.concat eval_root "readme.txt") "ignore me";
+  let result = Eval_feed.list_agents ~base_path:base in
+  check (list string) "sorted agent dirs" [ "keeper-a"; "keeper-b" ] result
+
 let test_read_latest_empty_dir () =
   let base = tmpdir "eval_empty" in
   let result = Eval_feed.read_latest ~base_path:base ~agent_name:"keeper-a" ~limit:10 in
@@ -326,6 +339,10 @@ let () =
         ] );
       ( "read_latest",
         [
+          test_case "list_agents nonexistent directory" `Quick
+            test_list_agents_nonexistent_dir;
+          test_case "list_agents with dirs" `Quick
+            test_list_agents_with_dirs;
           test_case "empty directory" `Quick test_read_latest_empty_dir;
           test_case "nonexistent directory" `Quick
             test_read_latest_nonexistent_dir;

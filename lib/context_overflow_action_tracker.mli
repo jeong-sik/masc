@@ -8,7 +8,7 @@
     Issue #9935 evidence: 45 imminent events per day fleet-wide
     with no observability on whether any reduction action followed.
     The scheduler can continue firing turns on an overflowed
-    keeper, which then burns out on the oas_timeout_budget
+    keeper, which then burns out as provider_timeout
     (#9933). This module closes the loop by tracking per-keeper
     state and emitting metrics when an imminent event goes
     unanswered within a grace window.

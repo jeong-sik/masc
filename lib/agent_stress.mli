@@ -42,7 +42,7 @@ type stress_kind =
   | Turn_failure of turn_failure (** keeper turn ended in an error/partial outcome *)
   | Fallback_approval            (** anti-rat or post-verifier fell back to approve *)
   | Timeout                      (** OAS/LLM call timed out *)
-  | Provider_timeout             (** provider/OAS stream timed out *)
+  | Provider_timeout             (** provider stream timed out *)
   | Capacity_pressure            (** admission, cascade, or provider capacity pressure *)
   | Turn_liveness                (** stale turn, heartbeat, or fiber liveness issue *)
   | Parse_degraded               (** LLM response required fallback parsing *)

@@ -280,7 +280,7 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
     (* #9935: track imminent→action pairing so an unanswered
          overflow (no compact_started/compacted within grace
          window) is observable via metric + warn log, rather
-         than silently burning out on oas_timeout_budget. *)
+         than silently burning out as provider_timeout. *)
     Prometheus.set_gauge
       Prometheus.metric_oas_context_overflow_ratio
       ~labels:[ "agent_name", agent_name ]

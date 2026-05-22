@@ -128,23 +128,10 @@ let read_keeper_memory_summary_result
   | Ok lines -> Ok (summarize_memory_bank_lines lines ~recent_limit)
   | Error exn_class -> Error exn_class
 
-let read_keeper_memory_summary
-    (config : Coord.config)
-    ~(name : string)
-    ~(max_bytes : int)
-    ~(max_lines : int)
-    ~(recent_limit : int) : keeper_memory_summary =
-  let lines =
-    read_file_tail_lines
-      (keeper_memory_bank_path config name)
-      ~max_bytes
-      ~max_lines
-  in
-  summarize_memory_bank_lines lines ~recent_limit
-
-(* RFC-0149 §3.1: pure list -> list reducer extracted so the legacy
-   silent-fallback path and the [_result] variant share the same
-   business logic. *)
+(* RFC-0149 §3.1: pure list -> list reducer.  Now the sole consumer is
+   [read_memory_horizon_counts_result]; the legacy facade was deleted
+   in the §3.1 closeout once all caller sites consumed the typed
+   variant. *)
 let memory_horizon_counts_from_lines (lines : string list) :
     (string * int) list =
   let counts : (string, int) Hashtbl.t = Hashtbl.create 8 in
@@ -183,22 +170,10 @@ let read_memory_horizon_counts_result
   | Ok lines -> Ok (memory_horizon_counts_from_lines lines)
   | Error exn_class -> Error exn_class
 
-let read_memory_horizon_counts
-    (config : Coord.config)
-    ~(name : string)
-    ~(max_bytes : int)
-    ~(max_lines : int) : (string * int) list =
-  let lines =
-    read_file_tail_lines
-      (keeper_memory_bank_path config name)
-      ~max_bytes
-      ~max_lines
-  in
-  memory_horizon_counts_from_lines lines
-
-(* RFC-0149 §3.1: pure list -> list filter extracted as a horizon-aware
-   memory text projector.  Shared between the legacy facade and the
-   [_result] variant. *)
+(* RFC-0149 §3.1: pure list -> list filter (horizon-aware memory text
+   projector).  Now the sole consumer is
+   [read_recent_memory_texts_result]; the legacy facade was deleted
+   in the §3.1 closeout. *)
 let recent_memory_texts_from_lines
     ~(horizon : string)
     ~(limit : int)
@@ -244,21 +219,6 @@ let read_recent_memory_texts_result
   with
   | Ok lines -> Ok (recent_memory_texts_from_lines ~horizon ~limit lines)
   | Error exn_class -> Error exn_class
-
-let read_recent_memory_texts
-    (config : Coord.config)
-    ~(name : string)
-    ~(horizon : string)
-    ~(max_bytes : int)
-    ~(max_lines : int)
-    ~(limit : int) : string list =
-  let lines =
-    read_file_tail_lines
-      (keeper_memory_bank_path config name)
-      ~max_bytes
-      ~max_lines
-  in
-  recent_memory_texts_from_lines ~horizon ~limit lines
 
 (** Detect whether a query is asking about past conversation memory.
 
@@ -794,15 +754,6 @@ let load_history_user_messages_result
     Ok (history_user_messages_from_lines ~path ~max_n lines)
   | Error exn_class -> Error exn_class
 
-(** Load user messages from a history.jsonl file (persisted across generations).
-    Each line is a JSON object with "role" and "content" fields.
-    Returns up to [max_n] user messages from the tail of the file. *)
-let load_history_user_messages ~(path : string) ~(max_n : int) : string list =
-  let lines =
-    read_file_tail_lines path ~max_bytes:0 ~max_lines:(max_n * 3)
-  in
-  history_user_messages_from_lines ~path ~max_n lines
-
 (** Build recall candidates by merging checkpoint messages with history.jsonl.
     Checkpoint messages are prioritized (recent context), history.jsonl
     provides cross-generation recall for older conversations. Deduplication
@@ -813,7 +764,17 @@ let recall_candidates_with_history
     ~(max_checkpoint : int)
     ~(max_history : int) : string list =
   let from_checkpoint = recent_user_messages checkpoint_messages ~max_n:max_checkpoint in
-  let from_history = load_history_user_messages ~path:history_path ~max_n:max_history in
+  (* RFC-0149 §3.1 closeout — aggregation site.  History read failure
+     is elided to [[]] so the checkpoint matches still surface; the
+     bounded [exn_class] counter on [read_file_tail_lines] is the
+     informational signal for the failure. *)
+  let from_history =
+    match
+      load_history_user_messages_result ~path:history_path ~max_n:max_history
+    with
+    | Ok msgs -> msgs
+    | Error _ -> []
+  in
   (* Deduplicate: checkpoint messages take priority *)
   let key_of s =
     let len = min 100 (String.length s) in

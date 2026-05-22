@@ -235,18 +235,33 @@ let search_history
       ~(limit : int)
   : string list
   =
+  (* RFC-0149 §3.1 — aggregation site.  Multiple history files are
+     concatenated for search; a per-path Read failure is dropped to
+     [[]] so a single corrupt history does not suppress matches from
+     the others.  The decision to elide is made *here* rather than
+     hidden inside a silent facade — failures still surface via the
+     [metric_keeper_memory_recall_read_errors] counter emitted by
+     [read_file_tail_lines]. *)
   let current_history =
-    Keeper_memory_recall.load_history_user_messages
-      ~path:
-        (keeper_history_path config (Keeper_id.Trace_id.to_string meta.runtime.trace_id))
-      ~max_n:50
+    match
+      Keeper_memory_recall.load_history_user_messages_result
+        ~path:
+          (keeper_history_path config (Keeper_id.Trace_id.to_string meta.runtime.trace_id))
+        ~max_n:50
+    with
+    | Ok msgs -> msgs
+    | Error _ -> []
   in
   let prev_history =
     meta.runtime.trace_history
     |> List.concat_map (fun old_trace_id ->
-      Keeper_memory_recall.load_history_user_messages
-        ~path:(keeper_history_path config old_trace_id)
-        ~max_n:20)
+      match
+        Keeper_memory_recall.load_history_user_messages_result
+          ~path:(keeper_history_path config old_trace_id)
+          ~max_n:20
+      with
+      | Ok msgs -> msgs
+      | Error _ -> [])
   in
   let checkpoint_user_msgs =
     Keeper_memory_recall.recent_user_messages (messages_of_context ctx_work) ~max_n:100

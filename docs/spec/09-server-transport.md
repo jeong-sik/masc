@@ -761,7 +761,6 @@ sequenceDiagram
 |---------|--------|------|
 | `MASC_HTTP_AUTH_STRICT` | non-loopback시 자동 | MCP 경로 토큰 인증 강제 |
 | `MASC_ADMIN_TOKEN` | (미설정) | Admin API 토큰 |
-| `MASC_ALLOW_LEGACY_ACCEPT` | 0 | Accept 헤더 레거시 호환 |
 
 ### 15.4 SSE 설정
 

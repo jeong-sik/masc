@@ -78,8 +78,6 @@ let request_runtime_result = Server_mcp_transport_http_headers.request_runtime_r
 let request_force_json_response =
   Server_mcp_transport_http_headers.request_force_json_response
 
-let allow_legacy_accept = Server_mcp_transport_http_headers.allow_legacy_accept
-
 let classify_mcp_accept = Server_mcp_transport_http_headers.classify_mcp_accept
 
 let classify_mcp_accept_for_body =
@@ -87,9 +85,6 @@ let classify_mcp_accept_for_body =
 
 let should_use_sse_for_body =
   Server_mcp_transport_http_headers.should_use_sse_for_body
-
-let legacy_accept_warning_headers =
-  Server_mcp_transport_http_headers.legacy_accept_warning_headers
 
 let legacy_transport_deprecation_headers =
   Server_mcp_transport_http_headers.legacy_transport_deprecation_headers

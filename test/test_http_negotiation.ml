@@ -39,14 +39,10 @@ let test_classify_mcp_accept () =
   in
   check_mode "strict streamable"
     Streamable
-    (classify_mcp_accept ~allow_legacy:false
-       (Some "application/json, text/event-stream"));
-  check_mode "legacy accepted"
-    Legacy_accepted
-    (classify_mcp_accept ~allow_legacy:true (Some "text/event-stream"));
+    (classify_mcp_accept (Some "application/json, text/event-stream"));
   check_mode "strict reject"
     Rejected
-    (classify_mcp_accept ~allow_legacy:false (Some "text/event-stream"));
+    (classify_mcp_accept (Some "text/event-stream"));
   ()
 
 let test_protocol_continuity_allows_missing_header () =
@@ -107,7 +103,7 @@ let test_notification_body_relaxes_accept () =
     {|{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}|}
   in
   let mode = Transport.classify_mcp_accept_for_body request body in
-  check bool "notification legacy accepted" true
+  check bool "notification accept relaxation" true
     (match mode with
     | Mcp_transport_protocol.Http_negotiation.Legacy_accepted -> true
     | _ -> false)
@@ -217,7 +213,7 @@ let () =
     [
       ("accepts_sse_header", [test_case "parses Accept" `Quick test_accepts_sse_header]);
       ("accepts_streamable_mcp", [test_case "requires json+sse" `Quick test_accepts_streamable_mcp]);
-      ("classify_mcp_accept", [test_case "strict vs legacy fallback" `Quick test_classify_mcp_accept]);
+      ("classify_mcp_accept", [test_case "strict classification" `Quick test_classify_mcp_accept]);
       ("protocol_continuity", [
         test_case "missing header falls back to session" `Quick test_protocol_continuity_allows_missing_header;
         test_case "remembered session version is reused" `Quick test_protocol_version_for_session_falls_back_to_negotiated_version;

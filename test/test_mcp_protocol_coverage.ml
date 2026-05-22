@@ -161,50 +161,33 @@ let test_streamable_case_insensitive () =
 
 let test_classify_streamable () =
   let mode =
-    Http_negotiation.classify_mcp_accept ~allow_legacy:false
+    Http_negotiation.classify_mcp_accept
       (Some "application/json, text/event-stream")
   in
   check bool "streamable mode" true
     (match mode with Http_negotiation.Streamable -> true | _ -> false)
 
-let test_classify_legacy_accepted () =
-  let mode =
-    Http_negotiation.classify_mcp_accept ~allow_legacy:true
-      (Some "text/event-stream")
-  in
-  check bool "legacy accepted mode" true
-    (match mode with Http_negotiation.Legacy_accepted -> true | _ -> false)
-
 let test_classify_rejected () =
   let mode =
-    Http_negotiation.classify_mcp_accept ~allow_legacy:false
-      (Some "text/event-stream")
+    Http_negotiation.classify_mcp_accept (Some "text/event-stream")
   in
   check bool "rejected mode" true
     (match mode with Http_negotiation.Rejected -> true | _ -> false)
 
 let test_classify_none_rejected () =
   let mode =
-    Http_negotiation.classify_mcp_accept ~allow_legacy:false None
+    Http_negotiation.classify_mcp_accept None
   in
   check bool "none rejected" true
     (match mode with Http_negotiation.Rejected -> true | _ -> false)
 
-let test_classify_none_legacy () =
-  let mode =
-    Http_negotiation.classify_mcp_accept ~allow_legacy:true None
-  in
-  check bool "none legacy" true
-    (match mode with Http_negotiation.Legacy_accepted -> true | _ -> false)
-
-let test_classify_wildcard_legacy () =
+let test_classify_wildcard_rejected () =
   (* */* alone: json=true but sse=false, so not Streamable *)
   let mode =
-    Http_negotiation.classify_mcp_accept ~allow_legacy:true
-      (Some "*/*")
+    Http_negotiation.classify_mcp_accept (Some "*/*")
   in
-  check bool "wildcard falls to legacy" true
-    (match mode with Http_negotiation.Legacy_accepted -> true | _ -> false)
+  check bool "wildcard rejected" true
+    (match mode with Http_negotiation.Rejected -> true | _ -> false)
 
 (* ============================================================
    Test Runners
@@ -258,10 +241,8 @@ let () =
     ];
     "classify_mcp_accept", [
       test_case "streamable" `Quick test_classify_streamable;
-      test_case "legacy accepted" `Quick test_classify_legacy_accepted;
       test_case "rejected" `Quick test_classify_rejected;
       test_case "none rejected" `Quick test_classify_none_rejected;
-      test_case "none legacy" `Quick test_classify_none_legacy;
-      test_case "wildcard legacy" `Quick test_classify_wildcard_legacy;
+      test_case "wildcard rejected" `Quick test_classify_wildcard_rejected;
     ];
   ]

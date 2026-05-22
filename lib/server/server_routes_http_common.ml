@@ -159,12 +159,7 @@ let accepts_streamable_mcp (request : Httpun.Request.t) =
 let request_force_json_response =
   Server_mcp_transport_http.request_force_json_response
 
-let allow_legacy_accept = Server_mcp_transport_http.allow_legacy_accept
-
 let classify_mcp_accept = Server_mcp_transport_http.classify_mcp_accept
-
-let legacy_accept_warning_headers =
-  Server_mcp_transport_http.legacy_accept_warning_headers
 
 let legacy_transport_deprecation_headers =
   Server_mcp_transport_http.legacy_transport_deprecation_headers

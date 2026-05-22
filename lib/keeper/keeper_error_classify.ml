@@ -271,7 +271,7 @@ type degraded_retry_reason =
   | Max_turns
   | Resumable_cli_session
   | Admission_queue_timeout
-  | Oas_timeout_budget
+  | Provider_timeout
   | Turn_timeout
   | Cascade_candidates_filtered
   | Required_tool_contract_violation
@@ -286,7 +286,7 @@ let degraded_retry_reason_to_string = function
   | Max_turns -> "max_turns"
   | Resumable_cli_session -> "resumable_cli_session"
   | Admission_queue_timeout -> "admission_queue_timeout"
-  | Oas_timeout_budget -> "oas_timeout_budget"
+  | Provider_timeout -> "provider_timeout"
   | Turn_timeout -> "turn_timeout"
   | Cascade_candidates_filtered -> "cascade_candidates_filtered"
   | Required_tool_contract_violation -> "required_tool_contract_violation"
@@ -360,7 +360,7 @@ let degraded_retry_after_recoverable_error
     | Some (Keeper_turn_driver.Admission_queue_timeout _) ->
         local_recovery_retry Admission_queue_timeout
     | Some (Keeper_turn_driver.Oas_timeout_budget _) ->
-        local_recovery_retry Oas_timeout_budget
+        local_recovery_retry Provider_timeout
     | Some (Keeper_turn_driver.Turn_timeout _) ->
         local_recovery_retry Turn_timeout
     | Some (Keeper_turn_driver.Capacity_backpressure _) ->
@@ -416,7 +416,7 @@ let recoverable_cascade_failure_reason (err : Agent_sdk.Error.sdk_error) =
     | Some (Keeper_turn_driver.Admission_queue_timeout _) ->
         Some Admission_queue_timeout
     | Some (Keeper_turn_driver.Oas_timeout_budget _) ->
-        Some Oas_timeout_budget
+        Some Provider_timeout
     | Some (Keeper_turn_driver.Turn_timeout _) ->
         Some Turn_timeout
     | Some (Keeper_turn_driver.Capacity_backpressure _) ->

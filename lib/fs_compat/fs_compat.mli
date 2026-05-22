@@ -136,8 +136,27 @@ val fold_jsonl_lines
   -> string
   -> 'acc
 
-(** Append JSON value as line to JSONL file. *)
+(** Append JSON value as line to JSONL file.
+
+    Backed by a process-local per-path fd cache (RFC-0162 §3.4).
+    Each path keeps one cached [out_channel] reused across appends;
+    cross-domain serialization is provided by the same per-path
+    mutex registry as [append_file_unix], preserving RFC-0108 §3.2's
+    Record-interleave-0 guarantee. The cache is bounded by
+    [fd_cache_max=32] with LRU eviction; [close_all_cached_writers]
+    is registered at [at_exit]. *)
 val append_jsonl : string -> Yojson.Safe.t -> unit
+
+(** Flush and close every cached [out_channel] held by
+    [append_jsonl]. Safe to call concurrently with active appends;
+    a subsequent [append_jsonl] re-opens fresh. Intended for
+    shutdown sequencing and rare administrative refresh.
+    RFC-0162 §3.4. *)
+val close_all_cached_writers : unit -> unit
+
+(** Drop and close every cached writer. Test-only — production
+    relies on process-lifetime persistence and [at_exit] drain. *)
+val reset_fd_cache_for_testing : unit -> unit
 
 (** {1 Storage Backend Abstraction}
 

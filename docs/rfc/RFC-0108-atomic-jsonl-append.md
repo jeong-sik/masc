@@ -132,6 +132,8 @@ val close : t -> unit
 - **Per-record fsync**: durability 보장은 `close` 시점만. crash 시 마지막 N record 손실은 수용.
 - **Cross-domain LRU fd cache**: 단순화를 위해 fd 는 첫 `open_writer` 가 가지고 있다가 `close` 시 해제. fd 수가 keeper N (≤64) 수준이라 cache 가 없어도 무방.
 
+  **Update (RFC-0162, 2026-05-23)**: production evidence (22,440 calls × `EMFILE`/`ENFILE` trace, dashboard fleet-health audit) 로 위 가정이 *unit time 당 open/close churn* 축에서 반증됨. **Per-path fd cache** (RFC-0162 §3.4) 가 본 RFC 의 *Record-interleave-0* 보장과 정합한 형태로 도입됨 — 같은 path 의 `out_channel` 을 process lifetime 동안 재사용하고, 기존 `get_append_path_mutex` 가 cross-domain 직렬화를 그대로 담당한다. fd_cache_max=32 + LRU + `at_exit` drain.
+
 ## 4. Migration Plan
 
 ### 4.1 4 Writer 수렴

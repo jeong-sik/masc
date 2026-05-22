@@ -227,7 +227,7 @@ let run_turn
   in
   let append_manifest ?(elapsed_ms = None) ?(logical_seq = None)
       ?status ?decision ?keeper_turn_id ?oas_turn_count ?checkpoint_path
-      ~site event =
+      ?compaction_source ~site event =
     let elapsed_ms =
       match elapsed_ms with
       | Some _ -> elapsed_ms
@@ -253,7 +253,7 @@ let run_turn
       ~cascade_name:cascade_name_string
       ?status ?decision ?keeper_turn_id ?oas_turn_count
       ?elapsed_ms ?logical_seq
-      ?checkpoint_path
+      ?checkpoint_path ?compaction_source
       ~site
       event
   in
@@ -278,6 +278,7 @@ let run_turn
     Keeper_runtime_manifest.Checkpoint_loaded;
   append_manifest ~site:"context_compacted"
     ~keeper_turn_id:manifest_keeper_turn_id
+    ~compaction_source:(if pre_dispatch_compacted then "pre_dispatch_hygiene" else "skipped")
     ~status:(if pre_dispatch_compacted then "compacted" else "skipped")
     ~decision:
       (Keeper_runtime_manifest.with_payload_role ~payload_role:Model_input

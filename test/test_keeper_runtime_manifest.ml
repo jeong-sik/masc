@@ -2968,7 +2968,8 @@ let test_runtime_trace_lens_summarizes_source_clock_axis () =
       append_manifest_or_fail config
         (with_clock_refs "monotonic" M.Context_injected "injected" []);
       append_manifest_or_fail config
-        (with_clock_refs "logical" M.Context_compacted "compacted" []);
+        (with_clock_refs "logical" M.Context_compacted "compacted"
+           [ ("compaction_source", `String "pre_dispatch_hygiene") ]);
       append_manifest_or_fail config
         (with_clock_refs "oas_event_bus" M.Event_bus_correlated "observed"
            [ ("context_compacted_count", `Int 1) ]);

@@ -202,7 +202,7 @@ let int_field_opt key value =
 
 let clock_refs ?edge_id ?lane ?source_clock ?observed_at ?started_at
     ?finished_at ?elapsed_ms ?provider_attempt_id ?tool_batch_id ?checkpoint_id
-    ?compaction_id ?memory_injection_id ?event_bus_correlation_id
+    ?compaction_id ?compaction_source ?memory_injection_id ?event_bus_correlation_id
     ?event_bus_run_id ?parent_event_id ?caused_by ?logical_seq () =
   `Assoc
     (List.filter_map
@@ -220,6 +220,7 @@ let clock_refs ?edge_id ?lane ?source_clock ?observed_at ?started_at
          string_field_opt "tool_batch_id" tool_batch_id;
          string_field_opt "checkpoint_id" checkpoint_id;
          string_field_opt "compaction_id" compaction_id;
+         string_field_opt "compaction_source" compaction_source;
          string_field_opt "memory_injection_id" memory_injection_id;
          string_field_opt "event_bus_correlation_id" event_bus_correlation_id;
          string_field_opt "event_bus_run_id" event_bus_run_id;
@@ -276,9 +277,9 @@ let context_checkpoint_id ctx ?oas_turn_count () =
   Printf.sprintf "checkpoint:%s:oas-%s" ctx.manifest_trace_id
     (oas_turn_label oas_turn_count)
 
-let context_compaction_id ctx =
-  Printf.sprintf "%s:keeper-%s:compaction-pre-dispatch"
-    ctx.manifest_trace_id (turn_label ctx)
+let context_compaction_id ctx ~source =
+  Printf.sprintf "%s:keeper-%s:compaction-%s"
+    ctx.manifest_trace_id (turn_label ctx) source
 
 let context_memory_injection_id ctx ?oas_turn_count () =
   Printf.sprintf "%s:keeper-%s:memory-oas-%s" ctx.manifest_trace_id
@@ -286,7 +287,7 @@ let context_memory_injection_id ctx ?oas_turn_count () =
 
 let clock_refs_for_context ctx ~event ?oas_turn_count ?elapsed_ms
     ?event_bus_correlation_id ?event_bus_run_id ?parent_event_id ?caused_by
-    ?logical_seq () =
+    ?logical_seq ?compaction_source () =
   let tool_batch_id =
     match event with
     | Tool_surface_selected
@@ -305,9 +306,10 @@ let clock_refs_for_context ctx ~event ?oas_turn_count ?elapsed_ms
   in
   let compaction_id =
     match event with
-    | Context_compacted
+    | Context_compacted ->
+      Some (context_compaction_id ctx ~source:(Option.value ~default:"pre_dispatch" compaction_source))
     | Event_bus_correlated ->
-      Some (context_compaction_id ctx)
+      Some (context_compaction_id ctx ~source:(Option.value ~default:"event_bus" compaction_source))
     | _ -> None
   in
   let memory_injection_id =
@@ -320,7 +322,7 @@ let clock_refs_for_context ctx ~event ?oas_turn_count ?elapsed_ms
   clock_refs ~edge_id:(context_edge_id ctx event)
     ~lane:(clock_lane_of_event event) ~source_clock:(source_clock_of_event event)
     ?elapsed_ms ?tool_batch_id
-    ?checkpoint_id ?compaction_id ?memory_injection_id
+    ?checkpoint_id ?compaction_id ?compaction_source ?memory_injection_id
     ?event_bus_correlation_id ?event_bus_run_id ?parent_event_id ?caused_by
     ?logical_seq ()
 

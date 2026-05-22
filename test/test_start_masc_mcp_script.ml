@@ -60,12 +60,7 @@ let with_temp_dir prefix f =
   Unix.mkdir dir 0o755;
   Fun.protect ~finally:(fun () -> rm_rf dir) (fun () -> f dir)
 
-let run_shell ?(env = []) ~cwd cmd =
-  let env =
-    if List.mem_assoc "MASC_ALLOW_PORT_REUSE" env then env
-    else ("MASC_ALLOW_PORT_REUSE", "1") :: env
-  in
-  let scrubbed_env =
+let scrubbed_env_names =
     [
       "MASC_STORAGE_TYPE";
       "MASC_KEEPER_BOOTSTRAP_ENABLED";
@@ -80,33 +75,70 @@ let run_shell ?(env = []) ~cwd cmd =
       "MASC_WS_ENABLED";
       "MASC_WEBRTC_ENABLED";
     ]
-    |> List.map (fun name -> Printf.sprintf "-u %s" name)
-    |> String.concat " "
+
+let env_array overrides =
+  let overrides =
+    if List.mem_assoc "MASC_ALLOW_PORT_REUSE" overrides then overrides
+    else ("MASC_ALLOW_PORT_REUSE", "1") :: overrides
   in
-  let env_prefix =
-    env
-    |> List.map (fun (k, v) -> Printf.sprintf "%s=%s" k (quote v))
-    |> String.concat " "
-  in
-  let shell_cmd =
-    match String.trim env_prefix with
-    | "" -> Printf.sprintf "env %s %s" scrubbed_env cmd
-    | _ -> Printf.sprintf "env %s %s %s" scrubbed_env env_prefix cmd
-  in
-  let full =
-    Printf.sprintf "cd %s && %s" (quote cwd) shell_cmd
-  in
+  let env = Hashtbl.create 64 in
+  Unix.environment ()
+  |> Array.iter (fun binding ->
+         match String.index_opt binding '=' with
+         | Some index ->
+             let key = String.sub binding 0 index in
+             if not (List.mem key scrubbed_env_names) then
+               Hashtbl.replace env key
+                 (String.sub binding (index + 1)
+                    (String.length binding - index - 1))
+         | None -> ());
+  List.iter (fun (key, value) -> Hashtbl.replace env key value) overrides;
+  Hashtbl.fold
+    (fun key value acc -> Printf.sprintf "%s=%s" key value :: acc)
+    env []
+  |> Array.of_list
+
+let process_exit_code = function
+  | Unix.WEXITED code -> code
+  | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> 255
+
+let run_process ?(env = []) ~cwd prog argv =
   let out = Filename.temp_file "start-masc-out" ".txt" in
   let err = Filename.temp_file "start-masc-err" ".txt" in
-  let wrapped =
-    Printf.sprintf "%s > %s 2> %s" full (quote out) (quote err)
+  let out_fd =
+    Unix.openfile out [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_TRUNC ] 0o600
   in
-  let code = Sys.command wrapped in
-  let stdout = read_file out in
-  let stderr = read_file err in
-  Sys.remove out;
-  Sys.remove err;
-  (code, stdout, stderr)
+  Fun.protect
+    ~finally:(fun () -> Unix.close out_fd)
+    (fun () ->
+      let err_fd =
+        Unix.openfile err [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_TRUNC ] 0o600
+      in
+      Fun.protect
+        ~finally:(fun () -> Unix.close err_fd)
+        (fun () ->
+          let original_cwd = Sys.getcwd () in
+          let code =
+            Fun.protect
+              ~finally:(fun () -> Sys.chdir original_cwd)
+              (fun () ->
+                Sys.chdir cwd;
+                let pid =
+                  Unix.create_process_env prog argv (env_array env) Unix.stdin
+                    out_fd err_fd
+                in
+                let _, status = Unix.waitpid [] pid in
+                process_exit_code status)
+          in
+          let stdout = read_file out in
+          let stderr = read_file err in
+          Sys.remove out;
+          Sys.remove err;
+          (code, stdout, stderr)))
+
+let run_script ?env ~cwd script args =
+  run_process ?env ~cwd "/bin/bash"
+    (Array.of_list ("/bin/bash" :: script :: args))
 
 let copy_script src dst =
   write_executable dst (read_file src)
@@ -288,7 +320,7 @@ let test_explicit_env_overrides_repo_env_files () =
       make_fake_eio_exe dir;
       let capture = Filename.concat dir "captured-env.txt" in
       let code, stdout, stderr =
-        run_shell ~cwd:dir
+        run_script ~cwd:dir script
           ~env:
             [
               ("FAKE_CAPTURE_FILE", capture);
@@ -296,8 +328,7 @@ let test_explicit_env_overrides_repo_env_files () =
               ("MASC_BASE_PATH", dir);
               ("MASC_CONFIG_DIR", Filename.concat dir "config");
             ]
-          (Printf.sprintf "%s --http --port 9955 --base-path %s"
-             (quote script) (quote dir))
+          [ "--http"; "--port"; "9955"; "--base-path"; dir ]
       in
       if code <> 0 then
         failf "start script failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout
@@ -320,15 +351,14 @@ let test_fd_hotspot_headroom_override_is_preserved () =
       make_fake_eio_exe dir;
       let capture = Filename.concat dir "captured-fd-hotspot.txt" in
       let code, stdout, stderr =
-        run_shell ~cwd:dir
+        run_script ~cwd:dir script
           ~env:
             [
               ("FAKE_CAPTURE_FILE", capture);
               ("MASC_BASE_PATH", dir);
               ("MASC_KEEPER_HOST_FD_HOTSPOT_HEADROOM", "1024");
             ]
-          (Printf.sprintf "%s --http --port 9973 --base-path %s"
-             (quote script) (quote dir))
+          [ "--http"; "--port"; "9973"; "--base-path"; dir ]
       in
       if code <> 0 then
         failf "start script failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout
@@ -352,7 +382,7 @@ let test_realtime_transports_default_to_base_path_config_and_preserve_override (
       in
       let capture_default = Filename.concat dir "captured-default.txt" in
       let code_default, stdout_default, stderr_default =
-        run_shell ~cwd:dir
+        run_script ~cwd:dir script
           ~env:
             [
               ("FAKE_CAPTURE_FILE", capture_default);
@@ -360,8 +390,7 @@ let test_realtime_transports_default_to_base_path_config_and_preserve_override (
               ("MASC_BASE_PATH", dir);
               ("MASC_CONFIG_DIR", "");
             ]
-          (Printf.sprintf "%s --http --port 9956 --base-path %s"
-             (quote script) (quote dir))
+          [ "--http"; "--port"; "9956"; "--base-path"; dir ]
       in
       if code_default <> 0 then
         failf "start script failed (%d)\nstdout:\n%s\nstderr:\n%s"
@@ -378,7 +407,7 @@ let test_realtime_transports_default_to_base_path_config_and_preserve_override (
         (Sys.file_exists (Filename.concat bootstrapped_config "cascade.toml"));
       let capture_override = Filename.concat dir "captured-override.txt" in
       let code_override, stdout_override, stderr_override =
-        run_shell ~cwd:dir
+        run_script ~cwd:dir script
           ~env:
             [
               ("FAKE_CAPTURE_FILE", capture_override);
@@ -387,8 +416,7 @@ let test_realtime_transports_default_to_base_path_config_and_preserve_override (
               ("MASC_WS_ENABLED", "0");
               ("MASC_WEBRTC_ENABLED", "0");
             ]
-          (Printf.sprintf "%s --http --port 9957 --base-path %s"
-             (quote script) (quote dir))
+          [ "--http"; "--port"; "9957"; "--base-path"; dir ]
       in
       if code_override <> 0 then
         failf "start script failed (%d)\nstdout:\n%s\nstderr:\n%s"
@@ -413,7 +441,7 @@ let test_bootstraps_base_path_config_from_repo_when_unset () =
       in
       let capture = Filename.concat dir "captured-fallback.txt" in
       let code, stdout, stderr =
-        run_shell ~cwd:dir
+        run_script ~cwd:dir script
           ~env:
             [
               ("FAKE_CAPTURE_FILE", capture);
@@ -421,8 +449,7 @@ let test_bootstraps_base_path_config_from_repo_when_unset () =
               ("MASC_BASE_PATH", dir);
               ("MASC_CONFIG_DIR", "");
             ]
-          (Printf.sprintf "%s --http --port 9959 --base-path %s"
-             (quote script) (quote dir))
+          [ "--http"; "--port"; "9959"; "--base-path"; dir ]
       in
       if code <> 0 then
         failf "start script failed (%d)\nstdout:\n%s\nstderr:\n%s"
@@ -445,7 +472,7 @@ let test_default_base_path_requires_explicit_base_path () =
       mkdir_p me_root;
       let capture = Filename.concat dir "captured-no-home-default.txt" in
       let code, stdout, stderr =
-        run_shell ~cwd:dir
+        run_script ~cwd:dir script
           ~env:
             [
               ("FAKE_CAPTURE_FILE", capture);
@@ -453,7 +480,7 @@ let test_default_base_path_requires_explicit_base_path () =
               ("MASC_BASE_PATH", "");
               ("MASC_CONFIG_DIR", "");
             ]
-          (Printf.sprintf "%s --http --port 9969" (quote script))
+          [ "--http"; "--port"; "9969" ]
       in
       check int "start script fails without explicit base path" 2 code;
       check bool "does not invoke server executable" false
@@ -476,14 +503,14 @@ let test_absolute_env_base_path_is_preserved () =
       mkdir_p home_dir;
       let capture = Filename.concat dir "captured-sanitized.txt" in
       let code, stdout, stderr =
-        run_shell ~cwd:dir
+        run_script ~cwd:dir script
           ~env:
             [
               ("FAKE_CAPTURE_FILE", capture);
               ("HOME", home_dir);
               ("MASC_BASE_PATH", stale_root);
             ]
-          (Printf.sprintf "%s --http --port 9960" (quote script))
+          [ "--http"; "--port"; "9960" ]
       in
       if code <> 0 then
         failf "start script failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout
@@ -507,14 +534,14 @@ let test_absolute_parent_project_base_path_is_preserved () =
       make_fake_eio_exe repo;
       let capture = Filename.concat dir "captured-parent-sanitized.txt" in
       let code, stdout, stderr =
-        run_shell ~cwd:repo
+        run_script ~cwd:repo script
           ~env:
             [
               ("FAKE_CAPTURE_FILE", capture);
               ("HOME", home_dir);
               ("MASC_BASE_PATH", parent);
             ]
-          (Printf.sprintf "%s --http --port 9963" (quote script))
+          [ "--http"; "--port"; "9963" ]
       in
       if code <> 0 then
         failf "start script failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout
@@ -535,14 +562,21 @@ let test_cli_sidecar_root_is_exported () =
       mkdir_p sidecar_root;
       let capture = Filename.concat dir "captured-sidecar-root.txt" in
       let code, stdout, stderr =
-        run_shell ~cwd:dir
+        run_script ~cwd:dir script
           ~env:
             [
               ("FAKE_CAPTURE_FILE", capture);
               ("MASC_BASE_PATH", base_path);
             ]
-          (Printf.sprintf "%s --http --port 9970 --base-path %s --sidecar-root %s"
-             (quote script) (quote base_path) (quote sidecar_root))
+          [
+            "--http";
+            "--port";
+            "9970";
+            "--base-path";
+            base_path;
+            "--sidecar-root";
+            sidecar_root;
+          ]
       in
       if code <> 0 then
         failf "start script failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout
@@ -568,13 +602,13 @@ let test_zshenv_absolute_base_path_is_preserved () =
       make_fake_eio_exe repo;
       let capture = Filename.concat dir "captured-zshenv-sanitized.txt" in
       let code, stdout, stderr =
-        run_shell ~cwd:repo
+        run_script ~cwd:repo script
           ~env:
             [
               ("FAKE_CAPTURE_FILE", capture);
               ("HOME", home_dir);
             ]
-          (Printf.sprintf "%s --http --port 9965" (quote script))
+          [ "--http"; "--port"; "9965" ]
       in
       if code <> 0 then
         failf "start script failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout
@@ -596,14 +630,14 @@ let test_shared_root_env_base_path_is_preserved () =
       mkdir_p home_dir;
       let capture = Filename.concat dir "captured-opt-in.txt" in
       let code, stdout, stderr =
-        run_shell ~cwd:dir
+        run_script ~cwd:dir script
           ~env:
             [
               ("FAKE_CAPTURE_FILE", capture);
               ("HOME", home_dir);
               ("MASC_BASE_PATH", inherited_root);
             ]
-          (Printf.sprintf "%s --http --port 9964" (quote script))
+          [ "--http"; "--port"; "9964" ]
       in
       if code <> 0 then
         failf "start script failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout
@@ -630,14 +664,13 @@ let test_worktree_prefers_local_build_over_workspace_build () =
       write_fake_eio_exe workspace_exe ~marker:"workspace";
       let capture = Filename.concat dir "captured-pref.txt" in
       let code, stdout, stderr =
-        run_shell ~cwd:worktree
+        run_script ~cwd:worktree script
           ~env:
             [
               ("FAKE_CAPTURE_FILE", capture);
               ("MASC_BASE_PATH", repo_root);
             ]
-          (Printf.sprintf "%s --http --port 9958 --base-path %s"
-             (quote script) (quote repo_root))
+          [ "--http"; "--port"; "9958"; "--base-path"; repo_root ]
       in
       if code <> 0 then
         failf "start script failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout
@@ -660,15 +693,14 @@ let test_explicit_base_path_execs_from_base_path () =
       make_fake_eio_exe repo;
       let capture = Filename.concat dir "captured-explicit-cwd.txt" in
       let code, stdout, stderr =
-        run_shell ~cwd:repo
+        run_script ~cwd:repo script
           ~env:
             [
               ("FAKE_CAPTURE_FILE", capture);
               ("HOME", home_dir);
               ("MASC_BASE_PATH", parent);
             ]
-          (Printf.sprintf "%s --http --port 9966 --base-path %s"
-             (quote script) (quote parent))
+          [ "--http"; "--port"; "9966"; "--base-path"; parent ]
       in
       if code <> 0 then
         failf "start script failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout
@@ -696,14 +728,13 @@ let test_explicit_base_path_ignores_repo_local_config_from_zshenv () =
       make_fake_eio_exe repo;
       let capture = Filename.concat dir "captured-explicit-base-config.txt" in
       let code, stdout, stderr =
-        run_shell ~cwd:repo
+        run_script ~cwd:repo script
           ~env:
             [
               ("FAKE_CAPTURE_FILE", capture);
               ("HOME", home_dir);
             ]
-          (Printf.sprintf "%s --http --port 9967 --base-path %s"
-             (quote script) (quote parent))
+          [ "--http"; "--port"; "9967"; "--base-path"; parent ]
       in
       if code <> 0 then
         failf "start script failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout
@@ -729,15 +760,14 @@ let test_explicit_base_path_ignores_repo_local_config_from_parent_env () =
       make_fake_eio_exe repo;
       let capture = Filename.concat dir "captured-explicit-parent-env.txt" in
       let code, stdout, stderr =
-        run_shell ~cwd:repo
+        run_script ~cwd:repo script
           ~env:
             [
               ("FAKE_CAPTURE_FILE", capture);
               ("MASC_CONFIG_DIR", Filename.concat repo "config");
               ("MASC_PERSONAS_DIR", Filename.concat repo "config/personas");
             ]
-          (Printf.sprintf "%s --http --port 9968 --base-path %s"
-             (quote script) (quote parent))
+          [ "--http"; "--port"; "9968"; "--base-path"; parent ]
       in
       if code <> 0 then
         failf "start script failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout
@@ -758,14 +788,13 @@ let test_explicit_http_port_derives_sidecar_ports () =
       make_fake_eio_exe dir;
       let capture = Filename.concat dir "captured-sidecar-ports.txt" in
       let code, stdout, stderr =
-        run_shell ~cwd:dir
+        run_script ~cwd:dir script
           ~env:
             [
               ("FAKE_CAPTURE_FILE", capture);
               ("MASC_BASE_PATH", dir);
             ]
-          (Printf.sprintf "%s --http --port 9951 --base-path %s"
-             (quote script) (quote dir))
+          [ "--http"; "--port"; "9951"; "--base-path"; dir ]
       in
       if code <> 0 then
         failf "start script failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout
@@ -782,13 +811,12 @@ let test_grpc_direct_banner_is_preserved_in_stderr () =
       copy_script (script_path ()) script;
       make_fake_eio_exe_with_stderr dir;
       let code, stdout, stderr =
-        run_shell ~cwd:dir
+        run_script ~cwd:dir script
           ~env:
             [
               ("MASC_BASE_PATH", dir);
             ]
-          (Printf.sprintf "%s --http --port 9951 --base-path %s"
-             (quote script) (quote dir))
+          [ "--http"; "--port"; "9951"; "--base-path"; dir ]
       in
       if code <> 0 then
         failf "start script failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout
@@ -822,7 +850,7 @@ let test_stale_dune_artifacts_are_cleaned_and_retried () =
             ~path:(Filename.concat scripts_dir "dune-local.sh")
             ~log_file:dune_local_log;
           let code, stdout, stderr =
-            run_shell ~cwd:dir
+            run_script ~cwd:dir script
               ~env:
                 [
                   ("FAKE_CAPTURE_FILE", capture);
@@ -830,8 +858,7 @@ let test_stale_dune_artifacts_are_cleaned_and_retried () =
                   ("MASC_DUNE_JOBS", "2");
                   ("PATH", fake_bin ^ ":" ^ Sys.getenv "PATH");
                 ]
-              (Printf.sprintf "%s --http --port 9971 --base-path %s"
-                 (quote script) (quote dir))
+              [ "--http"; "--port"; "9971"; "--base-path"; dir ]
           in
           if code <> 0 then
             failf "start script failed (%d)\nstdout:\n%s\nstderr:\n%s"
@@ -882,7 +909,7 @@ let test_dune_cache_temp_error_retries_with_cache_disabled () =
             ~path:(Filename.concat scripts_dir "dune-local.sh")
             ~log_file:dune_local_log;
           let code, stdout, stderr =
-            run_shell ~cwd:dir
+            run_script ~cwd:dir script
               ~env:
                 [
                   ("FAKE_CAPTURE_FILE", capture);
@@ -890,8 +917,7 @@ let test_dune_cache_temp_error_retries_with_cache_disabled () =
                   ("MASC_DUNE_JOBS", "2");
                   ("PATH", fake_bin ^ ":" ^ Sys.getenv "PATH");
                 ]
-              (Printf.sprintf "%s --http --port 9972 --base-path %s"
-                 (quote script) (quote dir))
+              [ "--http"; "--port"; "9972"; "--base-path"; dir ]
           in
           if code <> 0 then
             failf "start script failed (%d)\nstdout:\n%s\nstderr:\n%s"
@@ -939,7 +965,7 @@ let test_stale_executable_requires_build_lock () =
           write_executable (Filename.concat fake_bin "dune")
             "#!/bin/sh\necho 'dune should not run while build lock is held' >&2\nexit 99\n";
           let code, _stdout, stderr =
-            run_shell ~cwd:dir
+            run_script ~cwd:dir script
               ~env:
                 [
                   ("FAKE_CAPTURE_FILE", capture);
@@ -947,8 +973,7 @@ let test_stale_executable_requires_build_lock () =
                   ("MASC_BUILD_LOCK_PATH", lock_dir);
                   ("PATH", fake_bin ^ ":" ^ Sys.getenv "PATH");
                 ]
-              (Printf.sprintf "%s --http --port 9972 --base-path %s"
-                 (quote script) (quote dir))
+              [ "--http"; "--port"; "9972"; "--base-path"; dir ]
           in
           check bool "startup refuses stale executable when build lock is held" true
             (code <> 0);
@@ -988,15 +1013,14 @@ exit 0
 |};
       make_fake_stdio_eio_exe dir;
       let code, stdout, stderr =
-        run_shell ~cwd:dir
+        run_script ~cwd:dir script
           ~env:
             [
               ("FAKE_CAPTURE_FILE", capture);
               ("MASC_BASE_PATH", dir);
               ("PATH", fake_bin ^ ":" ^ Sys.getenv "PATH");
             ]
-          (Printf.sprintf "%s --stdio --base-path %s"
-             (quote script) (quote dir))
+          [ "--stdio"; "--base-path"; dir ]
       in
       if code <> 0 then
         failf "start script failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout
@@ -1036,7 +1060,7 @@ exit 1
            (quote lsof_seen) (quote lsof_seen));
       make_fake_eio_exe dir;
       let code, stdout, stderr =
-        run_shell ~cwd:dir
+        run_script ~cwd:dir script
           ~env:
             [
               ("FAKE_CAPTURE_FILE", capture);
@@ -1045,8 +1069,7 @@ exit 1
               ("MASC_PORT_PREFLIGHT_WAIT_MAX_SEC", "1");
               ("PATH", fake_bin ^ ":" ^ Sys.getenv "PATH");
             ]
-          (Printf.sprintf "%s --http --port 9954 --base-path %s"
-             (quote script) (quote dir))
+          [ "--http"; "--port"; "9954"; "--base-path"; dir ]
       in
       if code <> 0 then
         failf "start script failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout
@@ -1074,15 +1097,14 @@ let test_loopback_disables_keeper_autoboot_by_default_and_preserves_override ()
       let home_dir = Filename.concat dir "home" in
       let capture_default = Filename.concat dir "captured-loopback-default.txt" in
       let code_default, stdout_default, stderr_default =
-        run_shell ~cwd:repo_root
+        run_script ~cwd:repo_root loopback_script
           ~env:
             [
               ("FAKE_CAPTURE_FILE", capture_default);
               ("HOME", home_dir);
               ("MASC_KEEPER_BOOTSTRAP_ENABLED", "");
             ]
-          (Printf.sprintf "%s --port 9961 --base-path %s"
-             (quote loopback_script) (quote repo_root))
+          [ "--port"; "9961"; "--base-path"; repo_root ]
       in
       if code_default <> 0 then
         failf "loopback script failed (%d)\nstdout:\n%s\nstderr:\n%s"
@@ -1094,15 +1116,14 @@ let test_loopback_disables_keeper_autoboot_by_default_and_preserves_override ()
         Filename.concat dir "captured-loopback-override.txt"
       in
       let code_override, stdout_override, stderr_override =
-        run_shell ~cwd:repo_root
+        run_script ~cwd:repo_root loopback_script
           ~env:
             [
               ("FAKE_CAPTURE_FILE", capture_override);
               ("HOME", home_dir);
               ("MASC_KEEPER_BOOTSTRAP_ENABLED", "true");
             ]
-          (Printf.sprintf "%s --port 9962 --base-path %s"
-             (quote loopback_script) (quote repo_root))
+          [ "--port"; "9962"; "--base-path"; repo_root ]
       in
       if code_override <> 0 then
         failf "loopback script override failed (%d)\nstdout:\n%s\nstderr:\n%s"

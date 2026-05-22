@@ -194,9 +194,7 @@ type blocker_class =
 
 val blocker_class_to_string : blocker_class -> string
 (** Canonical lowercase labels.  Pinned literals — operator
-    dashboards parse these for keeper supervisor alerting. Legacy
-    ["oas_timeout_budget"] input is parse-only compatibility and maps to
-    [Turn_timeout]. *)
+    dashboards parse these for keeper supervisor alerting. *)
 
 val cascade_exhaustion_summary :
   cascade_exhaustion_reason -> string

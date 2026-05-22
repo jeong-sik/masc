@@ -100,9 +100,6 @@ let get_cookie_value = Server_mcp_transport_http.get_cookie_value
 
 let get_session_id_any = Server_mcp_transport_http.get_session_id_any
 
-let legacy_messages_endpoint_url =
-  Server_mcp_transport_http.legacy_messages_endpoint_url
-
 let get_protocol_version = Server_mcp_transport_http.get_protocol_version
 
 let get_protocol_version_for_session =
@@ -194,7 +191,6 @@ let is_mcp_like_path path =
   || String.equal path "/mcp/managed"
   || String.equal path "/mcp/operator"
   || String.equal path "/sse"
-  || String.equal path "/messages"
 
 (** Returns true if the request failed origin or protocol-version
     validation and the corresponding error response was sent on [reqd].

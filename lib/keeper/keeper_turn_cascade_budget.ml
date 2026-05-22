@@ -392,19 +392,8 @@ let reclassify_oas_timeout_for_attempt
   match err, timeout_budget with
   | Agent_sdk.Error.Api (Timeout { message }), Some timeout_budget
     when EC.is_structural_oas_timeout_message message ->
-      Keeper_turn_driver.sdk_error_of_masc_internal_error
-        (Keeper_turn_driver.Oas_timeout_budget
-           {
-             budget_sec = timeout_budget.effective_timeout_sec;
-             keeper_turn_timeout_sec =
-               timeout_budget.keeper_turn_timeout_sec;
-             estimated_input_tokens = timeout_budget.estimated_input_tokens;
-             source = timeout_budget.source;
-             remaining_turn_budget_sec =
-               Some timeout_budget.remaining_turn_budget_sec;
-             min_required_sec = min_oas_timeout_budget_sec;
-             phase = "cascade_attempt_watchdog";
-           })
+      ignore timeout_budget;
+      err
   | _ -> err
 
 let attempt_watchdog_outer_turn_reserve_sec = 1.0

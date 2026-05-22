@@ -1353,7 +1353,7 @@ let run_keeper_cycle
                   let e_str = Agent_sdk.Error.to_string err in
                   let is_transient = EC.is_transient_network_error err in
                   (match Keeper_turn_driver.classify_masc_internal_error err with
-                   | Some (Keeper_turn_driver.Oas_timeout_budget _) ->
+                   | Some (Keeper_turn_driver.Provider_timeout _) ->
                      Prometheus.inc_counter
                        Keeper_metrics.metric_keeper_oas_timeout_classifications
                        ~labels:[ "classification", "structural_budget" ]

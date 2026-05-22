@@ -364,7 +364,7 @@ let degraded_retry_bypasses_slot_phase_guard
      was added to Cascade_error_classify, which is exactly the wrong default
      for a guard that decides whether to bypass slot-phase admission. *)
   match Keeper_turn_driver.classify_masc_internal_error err with
-  | Some (Keeper_turn_driver.Oas_timeout_budget _) -> true
+  | Some (Keeper_turn_driver.Provider_timeout _) -> true
   | Some (Keeper_turn_driver.Cascade_exhausted { reason; _ })
     when cascade_reason_is_structural_attempt_timeout reason ->
       true

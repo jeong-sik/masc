@@ -59,7 +59,7 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
             let trimmed = String.trim detail in
             if trimmed = "" then reason else trimmed
         | Some
-            (Keeper_turn_driver.Oas_timeout_budget
+            (Keeper_turn_driver.Provider_timeout
                {
                  budget_sec;
                  keeper_turn_timeout_sec;
@@ -95,7 +95,7 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
     | Some err -> (
         match Keeper_turn_driver.classify_masc_internal_error err with
         | Some
-            (Keeper_turn_driver.Oas_timeout_budget _
+            (Keeper_turn_driver.Provider_timeout _
             | Keeper_turn_driver.Turn_timeout _
             | Keeper_turn_driver.Admission_queue_timeout _
             | Keeper_turn_driver.Admission_queue_rejected _

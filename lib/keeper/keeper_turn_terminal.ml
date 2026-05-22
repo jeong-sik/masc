@@ -76,7 +76,7 @@ let of_failure ?(post_commit_ambiguous = false) ?(tool_call_count = 0) ~raw_erro
   then make ~source:"typed_error" "post_commit_ambiguous"
   else (
     match Keeper_turn_driver.classify_masc_internal_error err with
-    | Some (Keeper_turn_driver.Oas_timeout_budget _) ->
+    | Some (Keeper_turn_driver.Provider_timeout _) ->
       of_disposition
         ~source:"typed_error"
         Keeper_turn_disposition.Turn_wall_clock_timeout

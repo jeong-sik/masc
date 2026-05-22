@@ -86,12 +86,14 @@ let handle_keeper_list ctx args : tool_result =
             in
             find_latest (List.rev metrics_window_lines)
           in
-          (* RFC-0149 §3.1 — route through the Result-returning resolver
-             so a memory-bank IO fault surfaces on the operator-visible
-             [memory_recent_note] field as a typed unavailable marker
-             instead of being indistinguishable from "no recorded notes".
-             [None] stays reserved for "Ok summary with empty recent_notes". *)
-          let memory_recent_note =
+          (* RFC-0149 §3.1 — single typed read drives both the structured
+             [memory_bank_summary] (consumed by [memory_bank] / counts
+             elsewhere in this object) and the operator-visible
+             [memory_recent_note] string field.  An IO fault surfaces a
+             typed unavailable marker on the note, and the empty-shaped
+             summary preserves the legacy aggregate semantics (zero notes,
+             no kinds) so downstream JSON keys stay populated. *)
+          let memory_bank_summary, memory_recent_note =
             match
               read_keeper_memory_summary_result
                 ctx.config
@@ -101,13 +103,27 @@ let handle_keeper_list ctx args : tool_result =
                 ~recent_limit:3
             with
             | Ok summary ->
-              (match summary.recent_notes with
-               | row :: _ -> Some row.text
-               | [] -> None)
+              let note =
+                match summary.recent_notes with
+                | row :: _ -> Some row.text
+                | [] -> None
+              in
+              summary, note
             | Error exn_class ->
-              Some
-                (Printf.sprintf "[memory unavailable: %s]"
-                   (Keeper_memory_recall_exn_class.to_label exn_class))
+              let empty : Keeper_memory_policy.keeper_memory_summary =
+                { total_notes = 0
+                ; last_ts_unix = 0.0
+                ; top_kind = None
+                ; kind_counts = []
+                ; recent_notes = []
+                }
+              in
+              let note =
+                Some
+                  (Printf.sprintf "[memory unavailable: %s]"
+                     (Keeper_memory_recall_exn_class.to_label exn_class))
+              in
+              empty, note
           in
             let continuity_reflection_hold_s =
               let cooldown = Float.of_int m.compaction.cooldown_sec in

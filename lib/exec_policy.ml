@@ -433,41 +433,26 @@ let looks_like_url token =
   | _ -> false
 ;;
 
-let is_path_flag token =
-  match token with
-  | "-C" | "--git-dir" | "--work-tree" | "--exec-path" -> true
-  | _ -> false
+(* Path-argument descriptors moved to [Exec_policy_path_arg_descriptor]
+   under Shell IR Adjacent Surfaces Plan §P11. The descriptor module
+   is consulted before the [looks_like_path_token] heuristic so path
+   validation routes through typed metadata first. *)
+let is_path_flag = Exec_policy_path_arg_descriptor.is_path_flag
+
+let path_flag_requires_existing_dir =
+  Exec_policy_path_arg_descriptor.path_flag_requires_existing_dir
 ;;
 
-let path_flag_requires_existing_dir token =
-  match token with
-  | "-C" | "--work-tree" -> true
-  | _ -> false
+let path_value_of_flagged_token =
+  Exec_policy_path_arg_descriptor.path_value_of_flagged_token
 ;;
 
-let path_value_of_flagged_token token =
-  let prefixes = [ "--git-dir="; "--work-tree="; "--exec-path=" ] in
-  List.find_map
-    (fun prefix ->
-       if String.starts_with ~prefix token
-       then
-         Some
-           (String.sub
-              token
-              (String.length prefix)
-              (String.length token - String.length prefix))
-       else None)
-    prefixes
+let inline_path_flag_requires_existing_dir =
+  Exec_policy_path_arg_descriptor.inline_path_flag_requires_existing_dir
 ;;
 
-let inline_path_flag_requires_existing_dir token =
-  String.starts_with ~prefix:"--work-tree=" token
-;;
-
-let command_materializes_path_arg = function
-  | "cat" | "find" | "grep" | "head" | "ls" | "nl" | "rg" | "sed" | "stat"
-  | "tail" | "wc" -> true
-  | _ -> false
+let command_materializes_path_arg =
+  Exec_policy_path_arg_descriptor.command_materializes_path_arg
 ;;
 
 let path_is_existing_dir ?workdir path =

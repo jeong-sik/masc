@@ -34,5 +34,4 @@ type t =
   | Simple of simple
   | Pipeline of t list            (** length >= 2 — head | middle* | tail *)
 
-val pp_arg : Format.formatter -> arg -> unit
 val pp : Format.formatter -> t -> unit

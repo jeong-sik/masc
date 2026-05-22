@@ -106,6 +106,32 @@ describe('KeeperRuntimeAlertStrip', () => {
     expect(text).not.toContain('inspect_turn_timeout')
   })
 
+  // Lock the remaining producer-side action wires that
+  // [canonicalNextHumanAction] folds into inspect_runtime_blocker. Each
+  // wire here has a live producer in lib/keeper (see
+  // Keeper_turn_disposition.next_action and Keeper_status_bridge), so
+  // dropping any rewrite branch silently in a future sweep would leak
+  // the raw legacy label into operator copy. The previous
+  // canonicalizes-* it() blocks already cover inspect_watchdog_root_cause
+  // and inspect_turn_timeout.
+  it.each([
+    'inspect_cascade_attempts',
+    'inspect_provider_tool_lane',
+    'inspect_completion_contract',
+    'inspect_turn_finalization',
+  ])('canonicalizes %s into inspect_runtime_blocker operator copy', (action) => {
+    const { container } = render(h(KeeperRuntimeAlertStrip, {
+      keeper: keeper({
+        needs_attention: true,
+        next_human_action: action,
+      }),
+    }))
+
+    const text = container.textContent ?? ''
+    expect(text).toContain('런타임 근거 확인')
+    expect(text).not.toContain(action)
+  })
+
   it('closes 모순 #3: per-attempt completed outcome is hidden when per-turn stop cause is terminal failure', () => {
     const { container } = render(h(KeeperRuntimeAlertStrip, {
       keeper: keeper({

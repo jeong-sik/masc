@@ -589,6 +589,8 @@ let run_named
   (* MASC-driven cascade FSM: try each provider, decide on failure.
      Extracted to [Keeper_turn_driver_try_provider.run_try_provider] via
      explicit [try_provider_ctx] record (RFC-0051 PR-3a). *)
+  let turn_start = Mtime_clock.now () in
+  let seq_ref = ref 0 in
   let try_provider_ctx : Keeper_turn_driver_try_provider.try_provider_ctx = {
     cascade_name;
     error_cascade_name;
@@ -648,6 +650,8 @@ let run_named
     runtime_manifest_context;
     runtime_manifest_append;
     runtime_manifest_required_tool_names;
+    turn_start;
+    seq_ref;
   } in
   let emit_runtime_manifest ?status ?decision ?oas_turn_count event =
     match runtime_manifest_context, runtime_manifest_append with
@@ -668,6 +672,14 @@ let run_named
       let decision =
         match runtime_manifest_context with
         | Some manifest_ctx ->
+          seq_ref := !seq_ref + 1;
+          let elapsed_ms =
+            let ns =
+              Mtime.Span.to_uint64_ns
+                (Mtime.span turn_start (Mtime_clock.now ()))
+            in
+            Some (Int64.to_int (Int64.div ns 1_000_000L))
+          in
           let decision =
             match decision with
             | Some value -> value
@@ -677,12 +689,14 @@ let run_named
             (Keeper_runtime_manifest.with_clock_refs
                ~clock_refs:
                  (Keeper_runtime_manifest.clock_refs_for_context manifest_ctx
-                    ~event ?oas_turn_count ())
+                    ~event ?oas_turn_count ?elapsed_ms
+                    ~logical_seq:!seq_ref ())
                decision)
         | None -> decision
       in
       Keeper_runtime_manifest.make_for_context manifest_ctx ~event
-        ?oas_turn_count ~cascade_name ?status ?decision ()
+        ?oas_turn_count ~logical_seq:!seq_ref ~cascade_name ?status ?decision
+        ()
       |> append
     | _ -> ()
   in

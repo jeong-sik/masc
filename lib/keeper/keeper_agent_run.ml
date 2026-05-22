@@ -211,6 +211,8 @@ let run_turn
   let keeper_oas_context = ctx.keeper_oas_context in
   let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
   let manifest_keeper_turn_id = meta.runtime.usage.total_turns + 1 in
+  let turn_start = Mtime_clock.now () in
+  let seq_ref = ref 0 in
   let runtime_manifest_context =
     Turn_helpers.runtime_manifest_context
       ~keeper_name:meta.name
@@ -223,7 +225,25 @@ let run_turn
     Keeper_checkpoint_store.oas_checkpoint_path ~session_dir:session.session_dir
       ~session_id:trace_id
   in
-  let append_manifest =
+  let append_manifest ?(elapsed_ms = None) ?(logical_seq = None)
+      ?status ?decision ?keeper_turn_id ?oas_turn_count ?checkpoint_path
+      ~site event =
+    let elapsed_ms =
+      match elapsed_ms with
+      | Some _ -> elapsed_ms
+      | None ->
+        let ns =
+          Mtime.Span.to_uint64_ns (Mtime.span turn_start (Mtime_clock.now ()))
+        in
+        Some (Int64.to_int (Int64.div ns 1_000_000L))
+    in
+    let logical_seq =
+      match logical_seq with
+      | Some _ -> logical_seq
+      | None ->
+        seq_ref := !seq_ref + 1;
+        Some !seq_ref
+    in
     Turn_helpers.append_runtime_manifest
       ~config
       ~keeper_name:meta.name
@@ -231,6 +251,11 @@ let run_turn
       ~trace_id
       ~generation
       ~cascade_name:cascade_name_string
+      ?status ?decision ?keeper_turn_id ?oas_turn_count
+      ?elapsed_ms ?logical_seq
+      ?checkpoint_path
+      ~site
+      event
   in
   let digest_text = Turn_helpers.digest_text in
   let digest_message_texts_as_joined =

@@ -95,6 +95,8 @@ let run_keeper_cycle
     ; manifest_keeper_turn_id = Some keeper_turn_id
     }
   in
+  let turn_start = Mtime_clock.now () in
+  let seq_ref = ref 0 in
   let append_manifest ?status ?decision ?cascade_name ?clock_refs ~site event =
     let decision =
       let decision =
@@ -106,8 +108,17 @@ let run_keeper_cycle
         match clock_refs with
         | Some value -> value
         | None ->
+          seq_ref := !seq_ref + 1;
+          let elapsed_ms =
+            let ns =
+              Mtime.Span.to_uint64_ns
+                (Mtime.span turn_start (Mtime_clock.now ()))
+            in
+            Some (Int64.to_int (Int64.div ns 1_000_000L))
+          in
           Keeper_runtime_manifest.clock_refs_for_context
-            runtime_manifest_context ~event ()
+            runtime_manifest_context ~event ?elapsed_ms
+            ~logical_seq:!seq_ref ()
       in
       Some
         (Keeper_runtime_manifest.with_clock_refs

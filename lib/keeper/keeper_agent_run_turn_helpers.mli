@@ -61,6 +61,8 @@ val append_runtime_manifest :
   ?decision:Yojson.Safe.t ->
   ?keeper_turn_id:int ->
   ?oas_turn_count:int ->
+  ?elapsed_ms:int ->
+  ?logical_seq:int ->
   ?checkpoint_path:string ->
   ?receipt_path:string ->
   site:string ->

@@ -1,8 +1,15 @@
 (** See cascade_client_capacity.mli for documentation. *)
 
+(** Circuit-breaker: consecutive rejections before opening the circuit. *)
+let circuit_threshold = 3
+(** Circuit-breaker: seconds the circuit stays open before half-open retry. *)
+let circuit_cooldown_sec = 30.0
+
 type entry = {
   max_concurrent : int;
   active : int Atomic.t;
+  consecutive_rejections : int Atomic.t;
+  circuit_open_until : float Atomic.t;
 }
 
 let registry : (string, entry) Hashtbl.t = Hashtbl.create 4
@@ -19,13 +26,17 @@ let register ~url ~max_concurrent =
   with_lock registry_mu (fun () ->
       match Hashtbl.find_opt registry url with
       | None ->
-        let e = { max_concurrent; active = Atomic.make 0 } in
+        let e = { max_concurrent; active = Atomic.make 0;
+                   consecutive_rejections = Atomic.make 0;
+                   circuit_open_until = Atomic.make 0.0 } in
         Hashtbl.replace registry url e
       | Some existing ->
         if existing.max_concurrent <> max_concurrent then
-          (* Keep the active counter; replace only the cap. *)
+          (* Keep the active counter and circuit-breaker state; replace only the cap. *)
           Hashtbl.replace registry url
-            { max_concurrent; active = existing.active })
+            { max_concurrent; active = existing.active;
+              consecutive_rejections = existing.consecutive_rejections;
+              circuit_open_until = existing.circuit_open_until })
 
 let registered_urls () =
   with_lock registry_mu (fun () ->
@@ -76,12 +87,23 @@ let try_acquire url =
   match lookup url with
   | None -> None
   | Some e ->
+    (* Circuit-breaker fast path: if circuit is open, skip this key
+       so the cascade can try alternative routes. *)
+    let open_until = Atomic.get e.circuit_open_until in
+    if open_until > 0.0 && Unix.gettimeofday () < open_until then
+      None
+    else
     (* Optimistic CAS on the atomic counter.  Loop to retry when
        another fiber bumps the count between read and CAS. *)
     let rec attempt () =
       let current = Atomic.get e.active in
       if current >= e.max_concurrent then begin
-        (* Slot full: record for observability before returning. *)
+        (* Slot full: track consecutive rejections for circuit-breaker. *)
+        let rejections = Atomic.fetch_and_add e.consecutive_rejections 1 + 1 in
+        if rejections >= circuit_threshold then begin
+          Atomic.set e.circuit_open_until
+            (Unix.gettimeofday () +. circuit_cooldown_sec)
+        end;
         Cascade_client_capacity_history.record {
           ts = Unix.gettimeofday ();
           key = url;
@@ -91,6 +113,8 @@ let try_acquire url =
         None
       end
       else if Atomic.compare_and_set e.active current (current + 1) then (
+        Atomic.set e.consecutive_rejections 0;
+        Atomic.set e.circuit_open_until 0.0;
         Cascade_client_capacity_history.record {
           ts = Unix.gettimeofday ();
           key = url;

@@ -47,7 +47,6 @@ let error_kind_to_string = function
 ;;
 
 let canonical_error_kind_label = function
-  | "oas_timeout_budget" -> "provider_timeout"
   | value -> value
 
 let error_kind_of_string raw =
@@ -105,7 +104,7 @@ let classify_error (err : string) : error_kind =
   then Stale_turn_timeout
   else if contains "fiber_unresolved"
   then Fiber_unresolved
-  else if contains "provider_timeout" || contains "oas_timeout_budget"
+  else if contains "provider_timeout"
   then Provider_timeout
   else if contains "state machine guard" || contains "guard violation"
   then State_machine_guard

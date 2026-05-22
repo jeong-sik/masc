@@ -1,4 +1,4 @@
-(** Mutation/destructive command classifiers for worker dev tools. *)
+(** Mutation/destructive command classifiers for execution policy. *)
 
 let shell_word_values cmd =
   match Masc_exec_bash_parser.Bash_words.stages cmd with

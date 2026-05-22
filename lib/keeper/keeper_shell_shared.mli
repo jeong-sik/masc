@@ -138,8 +138,8 @@ val diagnosis_of_readonly_category : string -> Exec_core.diagnosis option
     Returns [None] for unknown categories. *)
 
 val diagnosis_of_block_reason :
-  Worker_dev_tools.block_reason -> Exec_core.diagnosis option
-(** Map a {!Worker_dev_tools.block_reason} to a structured
+  Exec_policy.block_reason -> Exec_core.diagnosis option
+(** Map a {!Exec_policy.block_reason} to a structured
     diagnosis (rule_id + explanation + suggested rewrite or
     [tool_suggestion]). *)
 

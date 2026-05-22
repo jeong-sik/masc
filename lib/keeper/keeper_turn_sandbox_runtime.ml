@@ -349,7 +349,7 @@ let start_container (t : t) ~(timeout_sec : float) =
                Error
                  (Printf.sprintf
                     "docker_container_inspect_failed (existence check): %s"
-                    (Worker_dev_tools.truncate_for_log inspect_out)))
+                    (Exec_policy.truncate_for_log inspect_out)))
           | _ ->
             let status_label =
               match st with
@@ -687,7 +687,7 @@ let cleanup (t : t) =
            | Unix.WEXITED n -> Printf.sprintf "exited(%d)" n
            | Unix.WSIGNALED n -> Printf.sprintf "signaled(%d)" n
            | Unix.WSTOPPED n -> Printf.sprintf "stopped(%d)" n)
-          (Worker_dev_tools.truncate_for_log check_out);
+          (Exec_policy.truncate_for_log check_out);
         false
     in
     (* Probe existence once and reuse across the success/failure branches —

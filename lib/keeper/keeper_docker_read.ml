@@ -178,7 +178,7 @@ let run_command_in_container_with_status ?turn_sandbox_factory
              (Printf.sprintf
                 "docker_%s_failed: exit=%d output=%s"
                 head_program code
-                (Worker_dev_tools.truncate_for_log out))
+                (Exec_policy.truncate_for_log out))
          | Unix.WSIGNALED n ->
            Error
              (Printf.sprintf "docker_%s_signaled: signal=%d" head_program n)

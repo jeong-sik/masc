@@ -6,15 +6,15 @@
     - {!Shell_safety_types} re-exported via [include] (line 13 of the .ml).
       Provides [destructive_class], destructive pattern metadata, and
       command-log hash helpers.
-    - {!Gh_command_validation} re-exported via [include] (line 712 of
-      the .ml). Provides [gh_reversibility] + [gh] command validators.
-    - This module's own surface: [block_reason] type, command-validation
-      gates, attribution helper, log-redaction helpers, and the OAS tool
+    - {!Exec_policy} re-exported for compatibility. Provides [block_reason],
+      command-validation gates, Shell IR path validation, mutation classifiers,
+      and log-redaction helpers.
+    - {!Gh_command_validation} re-exported via [include]. Provides
+      [gh_reversibility] + [gh] command validators.
+    - This module's own surface: attribution helper and the Agent SDK tool
       factories ({!make_tools}, {!make_readonly_tools}).
 
-    Internal helpers stay hidden: path resolution, character-class
-    classifiers, pipeline tokenization, command-name extraction,
-    URL/credential redaction, [mkdir_p], the underlying file_read/
+    Internal helpers stay hidden: [mkdir_p], the underlying file_read/
     file_write/shell_exec tool builders, and parser-reason tag helpers. *)
 
 include module type of Shell_safety_types
@@ -25,7 +25,7 @@ include module type of Shell_safety_types
     {!validate_command_coding} reject a candidate shell command.  The
     [Command_not_allowed] payload carries the offending command name
     so the caller can render an actionable hint. *)
-type block_reason =
+type block_reason = Exec_policy.block_reason =
   | Empty_command
   | Chain_or_redirect
   | Injection

@@ -337,7 +337,7 @@ let cleanup_oneshot_container ~container_name =
       "docker oneshot cleanup failed for %s (status=%s, output=%s)"
       container_name
       (docker_exec_status_label status)
-      (Worker_dev_tools.truncate_for_log output)
+      (Exec_policy.truncate_for_log output)
 ;;
 
 let fd_admission_error ~(config : Coord.config) =
@@ -379,7 +379,7 @@ let ensure_docker_shell_image_available ~image ~timeout_sec =
           build the default keeper sandbox image, or set \
           MASC_KEEPER_SANDBOX_DOCKER_IMAGE to a locally available image."
          image
-         (Worker_dev_tools.truncate_for_log output))
+         (Exec_policy.truncate_for_log output))
 ;;
 
 let run_docker_shell_command_with_status_internal
@@ -439,7 +439,7 @@ let run_docker_shell_command_with_status_internal
            with
            | Error e -> Error e
            | Ok () ->
-             Worker_dev_tools.validate_command_paths
+             Exec_policy.validate_command_paths
                ~keeper_id:meta.name
                ~base_path:(Keeper_alerting_path.project_root_of_config config)
                ~workdir:cwd
@@ -801,7 +801,7 @@ let run_docker_credentialed_bash
            with
            | Error e -> Error e
            | Ok () ->
-             Worker_dev_tools.validate_command_paths
+             Exec_policy.validate_command_paths
                ~keeper_id:meta.name
                ~base_path:(Keeper_alerting_path.project_root_of_config config)
                ~workdir:cwd
@@ -893,7 +893,7 @@ let run_docker_bash
         with
         | Error e -> Error e
         | Ok () ->
-          Worker_dev_tools.validate_command_paths
+          Exec_policy.validate_command_paths
             ~keeper_id:meta.name
             ~base_path:(Keeper_alerting_path.project_root_of_config config)
             ~workdir:cwd

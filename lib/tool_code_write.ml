@@ -697,7 +697,7 @@ let handle_code_shell ~tool_name ~start_time ctx args =
     | Error reason ->
         Tool_result.error ~tool_name ~start_time
           ~failure_class:(Some Tool_result.Workflow_rejection)
-          (Worker_dev_tools.block_reason_to_string_with_allowlist
+          (Exec_policy.block_reason_to_string_with_allowlist
              ~allowed_commands:allowed_shell_commands
              reason)
     | Ok command_context ->
@@ -723,7 +723,7 @@ let handle_code_shell ~tool_name ~start_time ctx args =
                | None -> Sys.getcwd ()
              in
 	             match
-	               Worker_dev_tools.validate_shell_ir_paths
+	               Exec_policy.validate_shell_ir_paths
 	                 ~workdir:path_workdir
 	                 command_context.Exec_shell_gate.ast
 	             with

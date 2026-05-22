@@ -18,6 +18,14 @@ let contains_substring s needle =
   in
   if n_len = 0 then true else loop 0
 
+let load_source rel =
+  let source_root =
+    match Sys.getenv_opt "DUNE_SOURCEROOT" with
+    | Some root -> root
+    | None -> Sys.getcwd ()
+  in
+  In_channel.with_open_text (Filename.concat source_root rel) In_channel.input_all
+
 let with_env name value f =
   let previous = Sys.getenv_opt name in
   Unix.putenv name value;
@@ -1927,5 +1935,32 @@ let () =
              | Attribution.Policy_failed _ -> true
              | _ -> false)
         ) variants);
+    ];
+    "exec_policy_split", [
+      Alcotest.test_case "worker_dev_tools delegates shared shell policy" `Quick
+        (fun () ->
+        let worker_source = load_source "lib/worker_dev_tools.ml" in
+        let exec_policy_source = load_source "lib/exec_policy.ml" in
+        let keeper_bash_source = load_source "lib/keeper/keeper_shell_bash.ml" in
+        Alcotest.(check bool) "worker delegates command context" true
+          (contains_substring
+             worker_source
+             "let command_context_with_allowlist = Exec_policy.command_context_with_allowlist");
+        Alcotest.(check bool) "worker delegates Shell IR paths" true
+          (contains_substring
+             worker_source
+             "let validate_shell_ir_paths = Exec_policy.validate_shell_ir_paths");
+        Alcotest.(check bool) "policy owns command hint" true
+          (contains_substring exec_policy_source "let command_blocked_hint");
+        Alcotest.(check bool) "worker no longer owns command hint" false
+          (contains_substring worker_source "let command_blocked_hint");
+        Alcotest.(check bool) "keeper bash uses shared policy directly" true
+          (contains_substring
+             keeper_bash_source
+             "Exec_policy.validate_shell_ir_paths");
+        Alcotest.(check bool) "policy helper names are no longer worker-owned" false
+          (contains_substring exec_policy_source "Worker_dev_tools_paths");
+        Alcotest.(check bool) "policy uses renamed path helper" true
+          (contains_substring exec_policy_source "module Paths = Exec_policy_paths"));
     ];
   ]

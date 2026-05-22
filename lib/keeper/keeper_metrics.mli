@@ -413,7 +413,6 @@ val metric_keeper_presence_sync_failures : string
 val metric_keeper_self_preservation_universal : string
 val metric_keeper_stale_storm_paused : string
 val metric_keeper_provider_timeout_loop_paused : string
-val metric_keeper_oas_timeout_budget_loop_paused : string
 val metric_keeper_cycle_exceptions : string
 val metric_keeper_snapshot_write_failures : string
 val metric_keeper_state_snapshot_skipped_no_state : string
@@ -595,11 +594,9 @@ val metric_keeper_required_tool_gate_suppressed_total : string
 val metric_keeper_consecutive_idle : string
 val metric_keeper_last_productive_ts : string
 val metric_keeper_provider_timeout_strike : string
-val metric_keeper_oas_timeout_budget_strike : string
 val metric_keeper_stale_termination_total : string
 val metric_keeper_stale_termination_by_class : string
 val metric_keeper_provider_timeout_watchdog_termination : string
-val metric_keeper_oas_timeout_budget_watchdog_termination : string
 val metric_keeper_stale_termination_threshold_breached : string
 val metric_keeper_stale_termination_batch : string
 val metric_keeper_stale_broadcast_emit_failures : string

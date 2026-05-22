@@ -411,7 +411,7 @@ module KeeperKeepalive = struct
       let parsed = Float.of_string_opt (String.trim raw) in
       let capped = Option.map (fun v -> Float.min v 600.0) parsed in
       Some (Float.max 30.0 (Option.value ~default:300.0 capped))
-    | None -> Some 300.0
+    | None -> None
   ;;
 
   (** Maximum turns per single OAS Agent.run call.

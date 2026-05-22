@@ -532,9 +532,7 @@ let publish_keeper_lifecycle
       ()
   : unit
   =
-  match get_bus () with
-  | Some bus -> Cascade_events.publish_keeper_lifecycle bus ~event ~keeper_name ~detail ()
-  | None -> ()
+  Cascade_events.publish_keeper_lifecycle ~event ~keeper_name ~detail ()
 ;;
 
 (** Phase-event helper: the wire event name IS the phase name. *)

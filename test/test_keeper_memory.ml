@@ -1155,10 +1155,19 @@ let read_repo_file rel =
         really_input_string ic (in_channel_length ic))
 
 let test_keeper_agent_run_wires_memory_llm_summarizer () =
-  let source = read_repo_file "lib/keeper/keeper_agent_run.ml" in
+  (* The memory-LLM summarizer wiring lives in the post-turn memory
+     sub-module after the RFC-0147 keeper_agent_run decomposition.
+     [Keeper_memory_llm_summary.make] is constructed there and threaded
+     into [Keeper_memory_bank.compact_memory_bank_if_needed] via the
+     [?summarizer] labelled argument. *)
+  let source =
+    read_repo_file "lib/keeper/keeper_agent_run_post_turn_memory.ml"
+  in
   let summarizer_pos =
     match Astring.String.find_sub ~sub:"Keeper_memory_llm_summary.make" source with
-    | None -> fail "expected Keeper_memory_llm_summary.make in keeper_agent_run"
+    | None ->
+      fail
+        "expected Keeper_memory_llm_summary.make in keeper_agent_run_post_turn_memory"
     | Some pos -> pos
   in
   let compaction_pos =
@@ -1167,7 +1176,9 @@ let test_keeper_agent_run_wires_memory_llm_summarizer () =
         ~sub:"Keeper_memory_bank.compact_memory_bank_if_needed"
         source
     with
-    | None -> fail "expected compact_memory_bank_if_needed in keeper_agent_run"
+    | None ->
+      fail
+        "expected compact_memory_bank_if_needed in keeper_agent_run_post_turn_memory"
     | Some pos -> pos
   in
   check bool "summarizer constructed before compaction" true
@@ -1806,7 +1817,7 @@ let test_compaction_records_consolidation_metrics () =
     in
     let compaction_source_str =
       Option.value ~default:"none"
-        (Option.map Keeper_memory_policy.compaction_source_to_string compaction.source)
+        (Option.map Masc_mcp.Keeper_memory_policy.compaction_source_to_string compaction.source)
     in
     check bool (Printf.sprintf "compaction ran (%s)" compaction_source_str)
       true compaction.performed;
@@ -1867,8 +1878,12 @@ let test_compaction_runs_on_note_pressure_under_byte_trigger () =
     in
     check bool "compaction ran from note pressure" true compaction.performed;
     check (option string) "compaction source"
-      (Some (Keeper_memory_policy.compaction_source_to_string Keeper_memory_policy.Memory_bank))
-      (Option.map Keeper_memory_policy.compaction_source_to_string compaction.source);
+      (Some
+         (Masc_mcp.Keeper_memory_policy.compaction_source_to_string
+            Masc_mcp.Keeper_memory_policy.Memory_bank))
+      (Option.map
+         Masc_mcp.Keeper_memory_policy.compaction_source_to_string
+         compaction.source);
     check int "before notes" (target_notes + 1) compaction.before_notes;
     check int "after notes capped to target" target_notes compaction.after_notes;
     check int "one note dropped" 1 compaction.dropped_notes)

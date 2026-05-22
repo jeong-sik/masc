@@ -7,8 +7,8 @@
       [test/test_mcp_server_eio.ml] exercises the join-required
       decisions to keep alias handling consistent across refactors.
     - {!caller_agent_name_from_arguments} — isolates the
-      HTTP [_agent_name] vs legacy [agent_name] precedence
-      contract without running the full dispatcher.
+      HTTP [_agent_name] caller identity contract without running
+      the full dispatcher.
     - {!execute_tool_eio} — invoked by
       [lib/server/server_runtime_bootstrap.ml] and threaded
       through {!Mcp_server_eio_call_tool.handle_call_tool_eio}
@@ -52,10 +52,9 @@ val resolve_join_state :
 
 val caller_agent_name_from_arguments : Yojson.Safe.t -> string option
 (** Returns the explicit caller identity carried in [tools/call]
-    arguments.  The internal HTTP-auth marker [_agent_name] wins
-    over legacy [agent_name]; legacy [agent_name] remains the fallback
-    for direct callers and old MCP clients.  Blank and ["unknown"]
-    values are ignored. *)
+    arguments.  Only the internal HTTP-auth marker [_agent_name] is
+    accepted; tool-domain [agent_name] arguments are not caller
+    identity.  Blank and ["unknown"] values are ignored. *)
 
 (** {1 Test hooks} *)
 

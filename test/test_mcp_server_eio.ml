@@ -1277,13 +1277,13 @@ let test_execute_tool_explicit_agent_name_not_overridden () =
     resolve (`Assoc [ ("agent_name", `String "codex") ])
   in
   Alcotest.(check string)
-    "explicit agent_name wins over stale cache"
-    "codex" codex.agent_name;
+    "tool-domain agent_name does not override cached caller"
+    "cached-stale-nickname" codex.agent_name;
   let gemini =
     resolve (`Assoc [ ("_agent_name", `String "gemini"); ("agent_name", `String "codex") ])
   in
   Alcotest.(check string)
-    "internal _agent_name wins over legacy agent_name"
+    "internal _agent_name is caller over tool-domain agent_name"
     "gemini" gemini.agent_name;
   let cached = resolve (`Assoc []) in
   Alcotest.(check string)
@@ -1346,13 +1346,13 @@ let test_execute_tool_generated_agent_name_uses_token_identity () =
 
   cleanup_dir base_path
 
-let test_execute_tool_internal_agent_name_overrides_legacy_arg () =
+let test_execute_tool_internal_agent_name_is_caller_identity () =
   let resolve args =
     Masc_mcp.Mcp_server_eio_caller_identity.caller_agent_name_from_arguments
       args
   in
   Alcotest.(check (option string))
-    "_agent_name wins over legacy agent_name"
+    "_agent_name is caller over tool-domain agent_name"
     (Some "stable-admin")
     (resolve
        (`Assoc
@@ -1361,12 +1361,12 @@ let test_execute_tool_internal_agent_name_overrides_legacy_arg () =
            ("agent_name", `String "claude");
          ]));
   Alcotest.(check (option string))
-    "legacy agent_name remains fallback"
-    (Some "claude")
+    "agent_name is not caller fallback"
+    None
     (resolve (`Assoc [ ("agent_name", `String "claude") ]));
   Alcotest.(check (option string))
-    "unknown internal marker falls back to legacy"
-    (Some "claude")
+    "unknown internal marker does not fall back to agent_name"
+    None
     (resolve
        (`Assoc
          [
@@ -2784,8 +2784,8 @@ let eio_tests = [
   "explicit alias reuses joined nickname", `Quick, test_execute_tool_explicit_alias_reuses_joined_nickname;
   "generated agent_name uses token identity", `Quick,
     test_execute_tool_generated_agent_name_uses_token_identity;
-  "internal _agent_name overrides legacy agent_name", `Quick,
-    test_execute_tool_internal_agent_name_overrides_legacy_arg;
+  "internal _agent_name is caller identity", `Quick,
+    test_execute_tool_internal_agent_name_is_caller_identity;
   "explicit generated alias claim_next not rewritten by token", `Quick,
     test_execute_tool_explicit_generated_alias_claim_next_not_rewritten_by_token;
   "explicit generated alias transition not rewritten by token", `Quick,

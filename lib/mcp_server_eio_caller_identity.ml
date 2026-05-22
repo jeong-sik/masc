@@ -26,7 +26,7 @@ let caller_agent_name_from_arguments arguments =
   in
   match nonempty_nonunknown "_agent_name" with
   | Some _ as value -> value
-  | None -> nonempty_nonunknown "agent_name"
+  | None -> None
 
 let direct_call_block_message name =
   if Tool_catalog.is_on_surface Tool_catalog.Keeper_internal name then (

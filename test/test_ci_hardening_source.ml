@@ -2068,10 +2068,10 @@ let test_transport_route_contracts () =
   check bool "frontend exposes ws discovery route" true
     (file_contains_pattern "lib/server/server_routes_http_routes_frontend.ml"
        {|Http.Router.get "/ws" websocket_discovery_handler|});
-  check bool "mcp http agent injection preserves explicit legacy agent_name" true
-    (file_contains_pattern "lib/server/server_mcp_transport_http.ml"
+  check bool "mcp http agent injection preserves tool target agent_name" true
+    (file_contains_pattern "lib/server/server_mcp_actor_injection.ml"
        {|Option.is_none existing_agent
-                    && Option.is_none existing_legacy_agent|});
+                    && Option.is_none existing_tool_agent_name|});
   check bool "h2 mcp post injects canonical http actor" true
     (file_contains_pattern "lib/server/server_h2_gateway.ml"
        "body_with_canonical_http_actor");

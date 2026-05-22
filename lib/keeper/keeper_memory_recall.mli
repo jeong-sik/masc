@@ -52,18 +52,6 @@ val read_keeper_memory_summary_result :
 
     @since RFC-0149 Phase 1 *)
 
-val read_keeper_memory_summary :
-  Coord.config ->
-  name:string ->
-  max_bytes:int ->
-  max_lines:int ->
-  recent_limit:int ->
-  keeper_memory_summary
-(** Silent-fallback summary reader: returns an empty summary on any
-    IO failure.  Retained as a facade during the RFC-0149 §3.1 sunset
-    window; new callers should prefer
-    {!read_keeper_memory_summary_result}. *)
-
 val read_memory_horizon_counts_result :
   Coord.config ->
   name:string ->
@@ -76,16 +64,6 @@ val read_memory_horizon_counts_result :
     ([Error class]).
 
     @since RFC-0149 §3.1 *)
-
-val read_memory_horizon_counts :
-  Coord.config ->
-  name:string ->
-  max_bytes:int ->
-  max_lines:int ->
-  (string * int) list
-(** Silent-fallback variant: returns [[]] on any IO failure.  Retained
-    as a facade during the RFC-0149 §3.1 sunset window; new callers
-    should prefer {!read_memory_horizon_counts_result}. *)
 
 val read_recent_memory_texts_result :
   Coord.config ->
@@ -101,17 +79,6 @@ val read_recent_memory_texts_result :
 
     @since RFC-0149 §3.1 *)
 
-val read_recent_memory_texts :
-  Coord.config ->
-  name:string ->
-  horizon:string ->
-  max_bytes:int ->
-  max_lines:int ->
-  limit:int ->
-  string list
-(** Silent-fallback variant: returns [[]] on any IO failure.  Retained
-    as a facade during the RFC-0149 §3.1 sunset window; new callers
-    should prefer {!read_recent_memory_texts_result}. *)
 
 (** {1 Query Detection} *)
 
@@ -235,12 +202,6 @@ val load_history_user_messages_result :
     ([Error class]).
 
     @since RFC-0149 §3.1 *)
-
-val load_history_user_messages :
-  path:string -> max_n:int -> string list
-(** Silent-fallback variant: returns [[]] on any IO failure.  Retained
-    as a facade during the RFC-0149 §3.1 sunset window; new callers
-    should prefer {!load_history_user_messages_result}. *)
 
 val recall_candidates_with_history :
   checkpoint_messages:Agent_sdk.Types.message list ->

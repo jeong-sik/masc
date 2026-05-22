@@ -137,23 +137,31 @@ let run
          let bank_path =
            Keeper_types_support.keeper_memory_bank_path config meta.name
          in
+         (* RFC-0149 §3.1 closeout — route through the typed Result
+            variant.  The dispatch-failure counter + WARN are retained
+            (this is a behavioural error boundary for post-turn memory
+            recall, not the §3.1 read-side path) but now consume a
+            bounded [exn_class] label instead of the raw [exn]. *)
          let candidates =
-           try
-             Keeper_memory_recall.load_history_user_messages
+           match
+             Keeper_memory_recall.load_history_user_messages_result
                ~path:bank_path
                ~max_n:50
            with
-           | Eio.Cancel.Cancelled _ as e -> raise e
-           | exn ->
+           | Ok msgs -> msgs
+           | Error exn_class ->
+             let exn_label =
+               Keeper_memory_recall_exn_class.to_label exn_class
+             in
              Prometheus.inc_counter
                Keeper_metrics.metric_keeper_dispatch_event_failures
                ~labels:
                  [ "keeper", meta.name; "site", "memory_recall" ]
                ();
              Log.Keeper.warn
-               "keeper:%s memory recall history load failed: %s"
+               "keeper:%s memory recall history load failed: <error class=%s>"
                meta.name
-               (Printexc.to_string exn);
+               exn_label;
              []
          in
          Some

@@ -393,7 +393,7 @@ let spawn ~agent_name ~prompt ?timeout_seconds ?working_dir () =
           parsed.text
         else
           let rendered =
-            Masc_exec.Exec_shell_adapter.output_for_dispatch_status ~status ~stdout:parsed.text ~stderr:stderr_output
+            Exec_shell_adapter.output_for_dispatch_status ~status ~stdout:parsed.text ~stderr:stderr_output
           in
           if String.trim rendered = ""
           then fallback_spawn_failure_output ~exit_code

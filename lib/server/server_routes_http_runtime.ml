@@ -862,6 +862,9 @@ let cdal_health_json () =
           ("error", `String (Printexc.to_string exn));
         ]
 
+let full_health_refresh_timeout_error error =
+  String_util.contains_substring error "refresh_timeout label=full_health_snapshot"
+
 let full_health_component_placeholder ?error ?(component_timed_out = false) ~status
     component =
   let error_fields =
@@ -1215,9 +1218,6 @@ let store_full_health_snapshot snapshot =
       match snapshot.error with
       | None -> full_health_consecutive_failures := 0
       | Some _ -> ())
-
-let full_health_refresh_timeout_error error =
-  String_util.contains_substring error "refresh_timeout label=full_health_snapshot"
 
 let mark_full_health_snapshot_error exn =
   let now = Unix.gettimeofday () in

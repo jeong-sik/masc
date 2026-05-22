@@ -276,20 +276,20 @@ let has_recent_skip_observation ~now ~threshold
       reasons <> [] && now -. ts <= threshold
   | None -> false
 
-let pending_oas_timeout_budget_count
+let pending_provider_timeout_count
     (entry : Keeper_registry.registry_entry) : int option =
-  let is_timeout_budget_observation_reason reason =
+  let is_provider_timeout_observation_reason reason =
     List.exists
       (String.equal reason)
       Keeper_heartbeat_loop.provider_timeout_observation_reasons
   in
-  let has_timeout_observation =
+  let has_provider_timeout_observation =
     match entry.last_skip_observation with
     | Some (_, reasons) ->
-        List.exists is_timeout_budget_observation_reason reasons
+        List.exists is_provider_timeout_observation_reason reasons
     | None -> false
   in
-  match entry.last_failure_reason, has_timeout_observation with
+  match entry.last_failure_reason, has_provider_timeout_observation with
   | Some (Keeper_registry.Provider_timeout_loop { count }), true -> Some count
   | _ -> None
 
@@ -555,7 +555,7 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                      "%s: stale broadcast emit failed (restart still triggered): %s"
                      meta.name (Printexc.to_string exn)
                in
-               match pending_oas_timeout_budget_count entry with
+               match pending_provider_timeout_count entry with
                | Some count when idle_stale ->
                  let stall_seconds = now -. last_turn in
                  let failure_reason =
@@ -572,7 +572,7 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                    ~labels:[ ("keeper", meta.name) ]
                    ();
                  Log.Keeper.error
-                   "%s: watchdog terminating fiber (oas_timeout_budget unresolved after idle %.0fs; count=%d; preserving provider timeout root cause) [cascade=%s]"
+                   "%s: watchdog terminating fiber (provider_timeout unresolved after idle %.0fs; count=%d; preserving provider timeout root cause) [cascade=%s]"
                    meta.name stall_seconds count (Keeper_types.cascade_name_of_meta meta);
                  emit_watchdog_broadcast ~failure_reason:(Some failure_reason)
                    ~stall_seconds

@@ -507,25 +507,8 @@ let mkdir_p (path : string) : unit =
 
    Race: two domains may both miss-and-mkdir; the second [mkdir] is a
    harmless EEXIST. The mutex covers the [Hashtbl] op only. *)
-let mkdir_p_done : (string, unit) Hashtbl.t = Hashtbl.create 32
-let mkdir_p_memo_mu = Stdlib.Mutex.create ()
-
-let mkdir_p_memoized (path : string) : unit =
-  let cached =
-    Stdlib.Mutex.protect mkdir_p_memo_mu (fun () ->
-      Hashtbl.mem mkdir_p_done path)
-  in
-  if not cached then begin
-    mkdir_p path;
-    Stdlib.Mutex.protect mkdir_p_memo_mu (fun () ->
-      Hashtbl.replace mkdir_p_done path ())
-  end
-;;
-
-let reset_mkdir_memo_for_testing () =
-  Stdlib.Mutex.protect mkdir_p_memo_mu (fun () ->
-    Hashtbl.reset mkdir_p_done)
-;;
+let mkdir_p_memoized path = Mkdir_memo.mkdir_p_memoized ~mkdir_p path
+let reset_mkdir_memo_for_testing () = Mkdir_memo.reset_for_testing ()
 
 (** Parse pre-read string lines as JSONL.
     Use when lines come from [Keeper_memory.read_file_tail_lines] or

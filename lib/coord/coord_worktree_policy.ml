@@ -38,14 +38,10 @@ let policy_string_array_of_line ~key line =
       in
       Some items
 
-let git_clone_policy_paths ~base_path =
-  let canonical =
-    Filename.concat
-      (Common.masc_dir_from_base_path ~base_path |> fun d -> Filename.concat d "config")
-      "tool_policy.toml"
-  in
-  let legacy = Filename.concat (Filename.concat base_path "config") "tool_policy.toml" in
-  canonical, legacy
+let git_clone_policy_path ~base_path =
+  Filename.concat
+    (Common.masc_dir_from_base_path ~base_path |> fun d -> Filename.concat d "config")
+    "tool_policy.toml"
 
 let parse_git_clone_policy_content content =
   let rec loop in_git_clone allowed denied = function
@@ -75,30 +71,23 @@ let parse_git_clone_policy_content content =
   loop false [] [] (String.split_on_char '\n' content)
 
 let load_git_clone_policy_result ~base_path =
-  let canonical, legacy = git_clone_policy_paths ~base_path in
+  let canonical = git_clone_policy_path ~base_path in
   let read_or_empty p =
     match Safe_ops.read_file_safe p with
     | Error _ -> None
     | Ok content -> Some content
   in
-  let content_opt =
-    match read_or_empty canonical with
-    | Some c -> Some c
-    | None -> read_or_empty legacy
-  in
-  match content_opt with
+  match read_or_empty canonical with
   | None ->
       Error
         (Printf.sprintf
-           "tool policy config not found at %s or %s"
-           canonical legacy)
+           "tool policy config not found at %s"
+           canonical)
   | Some content -> Ok (parse_git_clone_policy_content content)
 
 (* SSOT path resolution: canonical config root is [<base_path>/.masc/config/]
    (same primitive Config_dir_resolver.path_from_local_masc uses via
-   Common.masc_dir_from_base_path). The legacy [<base_path>/config/] form is
-   retained as a secondary lookup for older deployments. Reading order:
-   canonical first, legacy fallback only when canonical is absent. *)
+   Common.masc_dir_from_base_path). *)
 let load_git_clone_policy ~base_path =
   match load_git_clone_policy_result ~base_path with
   | Ok policy -> policy

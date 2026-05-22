@@ -17,12 +17,6 @@ type name_map = {
 }
 
 let default_names_path = ".gate/runtime/discord/names.json"
-(* Legacy path from the pre-v0.9.0 layout. Read-fallback still honours it so
-   that operators who have data there see a transparent migration on the next
-   write. `sidecars/discord-bot/.gate/discord_names.json` (even older layout)
-   is no longer auto-discovered; set MASC_DISCORD_NAMES_PATH if still in use. *)
-let legacy_names_path =
-  Filename.concat Common.masc_dirname "connectors/discord/names.json"
 
 let resolve_path raw_path =
   if Filename.is_relative raw_path then
@@ -39,18 +33,14 @@ let configured_read_path env_name ~default ~legacy =
   match Sys.getenv_opt env_name |> Env_config_core.trim_opt with
   | Some raw -> resolve_path raw
   | None ->
-      let preferred = resolve_path default in
-      let legacy = resolve_path legacy in
-      if Sys.file_exists preferred then preferred
-      else if Sys.file_exists legacy then legacy
-      else preferred
+      ignore legacy;
+      resolve_path default
 
 let names_write_path () =
   configured_write_path "MASC_DISCORD_NAMES_PATH" ~default:default_names_path
 
 let names_read_path () =
-  configured_read_path "MASC_DISCORD_NAMES_PATH"
-    ~default:default_names_path ~legacy:legacy_names_path
+  configured_write_path "MASC_DISCORD_NAMES_PATH" ~default:default_names_path
 
 let read_json_file_opt path =
   try Some (Yojson.Safe.from_file path) with

@@ -55,10 +55,6 @@ type run_result =
   ; tool_surface : tool_surface_metrics
   }
 
-let nonempty_trimmed raw =
-  let trimmed = String.trim raw in
-  if trimmed = "" then None else Some trimmed
-
 (* RFC-0132 PR-2: agent-result surface label = external boundary; redact via SSOT. *)
 let runtime_lane_label =
   Boundary_redaction.to_string Boundary_redaction.runtime_model_label

@@ -366,7 +366,7 @@ export function trustDispositionLabel(value: string | null | undefined): string 
  *  `runtime_proof_status` (the tool contract result) as two sibling
  *  spans labelled "검증" and "증명". The two fields are independent on
  *  the wire — a keeper can simultaneously surface
- *  `attention_reason = timeout_budget_exhausted` (verdict failure) and
+ *  `attention_reason = completion_contract_violation` (verdict failure) and
  *  `tool_contract_result = satisfied_execution` (tools that *were*
  *  called fulfilled their contract). With sibling rendering this
  *  appeared as "검증 · completion_contract_violation" *and* "증명 ·
@@ -453,7 +453,7 @@ export function computeKeeperVerdict(input: {
  *  a cascade ladder), while `stop_cause` is emitted per-turn (the
  *  terminal verdict for the whole turn budget). Rendering the
  *  per-attempt success under the generic "런타임 레인" label next to
- *  a per-turn failure such as legacy `oas_timeout_budget` reads as a
+ *  a per-turn failure such as `turn_timeout` reads as a
  *  contradiction.
  *
  *  We tag the observation with an explicit scope (`attempt`) and gate

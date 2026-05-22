@@ -183,13 +183,11 @@ let run ?(config = default_config) (room_config : Coord.config) : sweep_result =
   let st = Goal_store.read_state room_config in
   let goals', partial = sweep_goals ~config st.goals in
   let valid_ids = List.map (fun (g : Goal_store.goal) -> g.id) goals' in
-  (* Write updated goal state *)
-  if partial.purged > 0 || partial.stagnated > 0 then begin
-    Goal_store.write_state room_config
-      { goals = goals';
-        version = st.version + 1;
-        updated_at = Masc_domain.now_iso () }
-  end;
+  (* Write updated goal state — use update_state so the file lock protects
+     the read-modify-write cycle. Prevents truncation races (#17229). *)
+  if partial.purged > 0 || partial.stagnated > 0 then
+    ignore (Goal_store.update_state room_config (fun _state ->
+      { goals = goals'; version = st.version + 1; updated_at = Masc_domain.now_iso () }));
   (* Prune active_goal_ids from all keeper metas *)
   let total_orphans = ref 0 in
   let keeper_dir =

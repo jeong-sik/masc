@@ -173,14 +173,11 @@ val read_state : Coord.config -> state
     are passed through the internal normaliser ([priority]
     clamp + phase/status reconciliation). *)
 
-val write_state : Coord.config -> state -> unit
-(** Atomic write of the canonical state to {!goals_path}.
-    Caller is responsible for serialising concurrent
-    writes — the internal mutators ({!update_goal},
-    {!delete_goal}, {!upsert_goal}) all
-    hold the file lock around their read-modify-write
-    block; raw users of {!write_state} (the test harness
-    only) should not race against them. *)
+val update_state : Coord.config -> (state -> state) -> state
+(** Atomic read-modify-write under the goals file lock.
+    [f] receives the current state and returns the next state.
+    The file lock protects against concurrent truncation races
+    (#17229). *)
 
 (** {1 Single-goal operations} *)
 

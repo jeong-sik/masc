@@ -249,9 +249,14 @@ type runtime_blocker_surface =
   ; continue_gate : bool
   }
 
+let runtime_blocker_surface_class = function
+  | Oas_timeout_budget -> Turn_timeout
+  | cls -> cls
+;;
+
 let runtime_blocker_class_label ?(summary = "") cls =
-  match cls with
-  | _ -> blocker_class_to_string cls
+  let _ = summary in
+  blocker_class_to_string (runtime_blocker_surface_class cls)
 
 let is_cascade_exhausted_blocker_class blocker_class =
   String.equal
@@ -271,8 +276,9 @@ let is_completion_contract_blocker_class blocker_class =
 let runtime_blocker_surface_of_typed_class ?(summary = "") (cls : blocker_class)
   : runtime_blocker_surface
   =
+  let surface_cls = runtime_blocker_surface_class cls in
   let str = runtime_blocker_class_label ~summary cls in
-  let continue_gate = blocker_class_continue_gate cls in
+  let continue_gate = blocker_class_continue_gate surface_cls in
   let summary =
     match cls with
     | Capacity_backpressure ->
@@ -295,11 +301,8 @@ let runtime_blocker_surface_of_typed_class ?(summary = "") (cls : blocker_class)
           cascade_exhaustion_summary reason
         | _ -> summary)
     | Oas_timeout_budget ->
-      if summary = ""
-      then
-        "Legacy OAS timeout-budget blocker; inspect owner-specific provider, \
-         admission/capacity, or turn-timeout evidence before resume."
-      else summary
+      "Provider or turn timeout blocked this keeper; inspect provider stream, \
+       cascade pressure, and turn wall-clock evidence before resume."
     | Turn_livelock_blocked ->
       if summary = ""
       then "Keeper turn livelock guard blocked repeated dispatch of the same turn."

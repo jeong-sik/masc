@@ -997,14 +997,14 @@ let test_goal_detail_promotes_newer_runtime_blocker_over_stale_receipt () =
       check string "newer blocker drives operator disposition"
         "alert_exhausted"
         (runtime_trust |> member "operator_disposition" |> to_string);
-      check string "timeout blocker keeps attention reason"
-        "timeout_budget_exhausted"
+      check string "legacy timeout blocker collapses to runtime attention"
+        "runtime_blocked"
         (runtime_trust |> member "attention_reason" |> to_string);
       check string "latest terminal reason comes from blocker"
         "runtime_blocker"
         (terminal_reason |> member "source" |> to_string);
-      check string "latest terminal reason is timeout budget"
-        "oas_timeout_budget"
+      check string "latest terminal reason is normalized turn timeout"
+        "turn_timeout"
         (terminal_reason |> member "code" |> to_string);
       check string "latest causal event follows runtime blocker"
         "runtime_blocker"

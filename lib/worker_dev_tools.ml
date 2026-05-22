@@ -433,7 +433,6 @@ let validate_command_coding ?caller cmd =
 ;;
 
 let looks_like_url token =
-  let token = strip_wrapping_quotes token in
   match String.index_opt token ':' with
   | Some idx when idx + 2 < String.length token ->
     token.[idx + 1] = '/' && token.[idx + 2] = '/'
@@ -441,19 +440,18 @@ let looks_like_url token =
 ;;
 
 let is_path_flag token =
-  match strip_wrapping_quotes token with
+  match token with
   | "-C" | "--git-dir" | "--work-tree" | "--exec-path" -> true
   | _ -> false
 ;;
 
 let path_flag_requires_existing_dir token =
-  match strip_wrapping_quotes token with
+  match token with
   | "-C" | "--work-tree" -> true
   | _ -> false
 ;;
 
 let path_value_of_flagged_token token =
-  let token = strip_wrapping_quotes token in
   let prefixes = [ "--git-dir="; "--work-tree="; "--exec-path=" ] in
   List.find_map
     (fun prefix ->
@@ -469,7 +467,6 @@ let path_value_of_flagged_token token =
 ;;
 
 let inline_path_flag_requires_existing_dir token =
-  let token = strip_wrapping_quotes token in
   String.starts_with ~prefix:"--work-tree=" token
 ;;
 
@@ -486,7 +483,6 @@ let path_is_existing_dir ?workdir path =
 ;;
 
 let looks_like_path_token token =
-  let token = strip_wrapping_quotes token in
   token <> ""
   && (not (looks_like_url token))
   && (token = "."
@@ -499,7 +495,6 @@ let looks_like_path_token token =
 ;;
 
 let token_value_is_explicit_path token =
-  let token = strip_wrapping_quotes token in
   token = "."
   || token = ".."
   || String.starts_with ~prefix:"/" token
@@ -510,13 +505,12 @@ let token_value_is_explicit_path token =
 
 let token_has_parent_dir_segment token =
   token
-  |> strip_wrapping_quotes
   |> String.split_on_char '/'
   |> List.exists (String.equal "..")
 ;;
 
 let git_revisionish_token ?workdir token =
-  let token = strip_wrapping_quotes token |> String.trim in
+  let token = String.trim token in
   token <> ""
   && String.contains token '/'
   && (not (token_value_is_explicit_path token))
@@ -769,7 +763,7 @@ let validate_shell_ir_paths ?keeper_id ?base_path ?workdir shell_ir =
   | None -> Ok ()
   | Some _ ->
       let validate_path_value ~requires_existing_dir value =
-        if String.equal (strip_wrapping_quotes value) "/dev/null"
+        if String.equal value "/dev/null"
         then Ok ()
         else if not (validate_path ?keeper_id ?base_path ?workdir value)
         then

@@ -1,6 +1,4 @@
 (** Shell word helpers for worker path and transparent-wrapper policy. *)
-val strip_wrapping_quotes : string -> string
-
 val command_after_env_prefix : string list -> string option
 (** Resolve the effective command name from argv words following an [env]
     executable. Environment assignments and supported env options are skipped;

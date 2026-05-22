@@ -42,22 +42,9 @@ let argv_words_of_split_string text =
   | Masc_exec.Parsed.Too_complex _ -> None
 ;;
 
-let strip_wrapping_quotes token =
-  let len = String.length token in
-  if len >= 2
-  then (
-    let first = token.[0]
-    and last = token.[len - 1] in
-    if (first = '"' && last = '"') || (first = '\'' && last = '\'')
-    then String.sub token 1 (len - 2)
-    else token)
-  else token
-;;
-
-let basename_token token = Filename.basename (strip_wrapping_quotes token)
+let basename_token token = Filename.basename token
 
 let is_env_assignment token =
-  let token = strip_wrapping_quotes token in
   match String.index_opt token '=' with
   | Some idx ->
     idx > 0
@@ -69,14 +56,12 @@ let is_env_assignment token =
 let rec skip_env_assignments_tokens = function
   | [] -> None
   | token :: rest ->
-    let token = strip_wrapping_quotes token in
     if is_env_assignment token then skip_env_assignments_tokens rest else Some (token :: rest)
 ;;
 
 let rec command_after_env_prefix_tokens = function
   | [] -> None
   | token :: rest ->
-    let token = strip_wrapping_quotes token in
     if is_env_assignment token || token = "-" || token = "-i"
        || token = "--ignore-environment" || token = "-0" || token = "--null"
     then command_after_env_prefix_tokens rest
@@ -86,7 +71,7 @@ let rec command_after_env_prefix_tokens = function
     then (
       match rest with
       | arg :: rest -> (
-        match argv_words_of_split_string (strip_wrapping_quotes arg) with
+        match argv_words_of_split_string arg with
         | Some split_tokens -> (
           match command_after_env_prefix_tokens split_tokens with
           | Some _ as command -> command
@@ -100,7 +85,7 @@ let rec command_after_env_prefix_tokens = function
         String.sub token (String.length prefix) (String.length token - String.length prefix)
       in
       Option.bind
-        (argv_words_of_split_string (strip_wrapping_quotes arg))
+        (argv_words_of_split_string arg)
         command_after_env_prefix_tokens
     else if token = "-u" || token = "--unset" || token = "-C" || token = "--chdir"
     then (
@@ -125,7 +110,6 @@ let opam_exec_command_tokens rest =
     let rec find_command_without_sentinel = function
       | [] -> None
       | token :: rest ->
-        let token = strip_wrapping_quotes token in
         if is_env_assignment token
         then find_command_without_sentinel rest
         else if token = "--switch" || token = "--color" || token = "--root" || token = "--cli"

@@ -54,7 +54,6 @@ let of_wire = function
     Some Stale_turn_timeout_in_turn
   | "stale_termination_storm" -> Some Stale_termination_storm
   | "stale_fleet_batch" -> Some Stale_fleet_batch
-  | "oas_timeout_budget" -> Some (Provider_runtime_error "provider_timeout")
   | "heartbeat_failures" -> Some Heartbeat_failures
   | "turn_failures" -> Some Turn_failures
   | "ambiguous_partial_commit" ->

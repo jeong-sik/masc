@@ -40,6 +40,13 @@ let write_file path content =
   mkdir_p (Filename.dirname path);
   Out_channel.with_open_bin path (fun oc -> output_string oc content)
 
+let write_per_keeper_token ~base_path ~agent_name ~token =
+  write_file
+    (Filename.concat
+       (Filename.concat base_path ".masc/auth")
+       (agent_name ^ ".token"))
+    token
+
 let minimal_live_cascade_toml =
   {|
 [providers.ollama]
@@ -325,7 +332,14 @@ target = "tier-group.glm-coding-with-spark"
 target = "tier-group.glm-coding-with-spark"
 |}
     config_root;
+  write_per_keeper_token
+    ~base_path
+    ~agent_name:(Keeper_types.keeper_agent_name "config-doctor")
+    ~token:"doctor-test-token";
   with_config_dir config_root @@ fun () ->
+  with_env "MASC_BASE_PATH" base_path @@ fun () ->
+  with_env "MASC_INTERNAL_MCP_TOKEN" "doctor-internal-token" @@ fun () ->
+  with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8931" @@ fun () ->
   with_env "OPENAI_API_KEY" "test" @@ fun () ->
   with_fake_docker fake_docker_missing_image_script @@ fun () ->
   with_env "MASC_CONFIG_DIR" config_root @@ fun () ->
@@ -443,6 +457,81 @@ target = "tier-group.glm-coding-with-spark"
        ~needle:"Route keeper_turn/tool_required to at least one provider"
        report.next_actions)
 
+let test_analyze_live_errors_on_keeper_internal_tool_not_materialized () =
+  with_temp_dir "config-doctor-keeper-internal-tool" @@ fun dir ->
+  let base_path = Filename.concat dir "base" in
+  let config_root = Filename.concat base_path ".masc/config" in
+  initialize_config_root
+    ~cascade_toml:{|[providers.codex_cli]
+display-name = "OpenAI Codex CLI"
+protocol = "openai-http"
+command = "codex"
+is-non-interactive = true
+
+[providers.codex_cli.credentials]
+type = "env"
+key = "OPENAI_API_KEY"
+
+[providers.codex_cli.capabilities]
+requires-per-keeper-bridging-for-bound-actor-tools = true
+identity-runtime-mcp-header-keys = ["x-masc-agent-name", "x-masc-keeper-name"]
+
+[models.codex-spark]
+api-name = "gpt-5.3-codex-spark"
+max-context = 128000
+tools-support = true
+streaming = true
+
+[models.codex-spark.capabilities]
+supports-native-streaming = true
+supports-response-format-json = true
+
+[codex_cli.codex-spark]
+is-default = true
+max-concurrent = 1
+
+[tier.codex-primary]
+members = ["codex_cli.codex-spark"]
+strategy = "failover"
+
+[tier-group.strict_tool_candidates]
+tiers = ["codex-primary"]
+strategy = "priority_tier"
+fallback = false
+
+[routes.keeper_turn]
+target = "tier-group.strict_tool_candidates"
+
+[routes.tool_required]
+target = "tier-group.strict_tool_candidates"
+|}
+    config_root;
+  with_config_dir config_root @@ fun () ->
+  with_env "MASC_BASE_PATH" base_path @@ fun () ->
+  with_env "OPENAI_API_KEY" "test" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" "false" @@ fun () ->
+  with_eio @@ fun ~sw ~net ~clock ~fs ~proc_mgr ->
+  let report =
+    Config_doctor.analyze_live
+      ~sw ~net ~clock ~fs ~proc_mgr
+      ~base_path_input:base_path
+      ~default_base_path:base_path
+      ()
+  in
+  check string "status escalates to error" "error" (status report.status);
+  check bool "keeper internal tool materialization warning present" true
+    (list_contains_substring
+       ~needle:"materialize required keeper internal tool keeper_bash"
+       report.warnings);
+  check bool "no-tool terminal hint present" true
+    (list_contains_substring
+       ~needle:"no_tool_capable_provider"
+       report.warnings);
+  check bool "next action points at tool-capable route" true
+    (list_contains_substring
+       ~needle:"Route keeper_turn/tool_required to at least one provider"
+       report.next_actions)
+
 let () =
   run "config_doctor"
     [
@@ -465,5 +554,8 @@ let () =
            test_case "analyze_live errors on tool-required route without forced tool provider"
              `Quick
              test_analyze_live_errors_on_tool_required_route_without_forced_tool_provider;
+           test_case "analyze_live errors when keeper internal tool is not materialized"
+             `Quick
+             test_analyze_live_errors_on_keeper_internal_tool_not_materialized;
          ]);
     ]

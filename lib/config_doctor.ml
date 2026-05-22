@@ -565,6 +565,81 @@ let provider_forced_tool_rejection_label provider_cfg =
   | Some reason -> Provider_tool_support.rejection_reason_label reason
   | None -> "passes"
 
+let doctor_keeper_agent_name = Keeper_types.keeper_agent_name "config-doctor"
+let required_keeper_internal_tool_name = "keeper_bash"
+
+let required_keeper_internal_tool : Agent_sdk.Tool.t =
+  Agent_sdk.Tool.create
+    ~name:required_keeper_internal_tool_name
+    ~description:"config doctor required keeper internal tool probe"
+    ~parameters:[]
+    (fun _input -> Ok { content = "ok" })
+
+let provider_required_keeper_internal_tool_issue provider_cfg =
+  let resolved =
+    try
+      Cascade_runner.resolve_tool_lane_for_oas_tools
+        ~agent_name:doctor_keeper_agent_name
+        ~tool_requirement:`Required
+        ~provider_cfg
+        ~tools:[ required_keeper_internal_tool ]
+        ()
+    with
+    | Env_config_core.Config_error detail ->
+        Error
+          (Agent_sdk.Error.Config
+             (Agent_sdk.Error.InvalidConfig
+                { field = "runtime_mcp_policy"; detail }))
+  in
+  match resolved with
+  | Error err -> Some (Agent_sdk.Error.to_string err)
+  | Ok (effective_tools, runtime_mcp_policy) ->
+      let materialized_tool_names =
+        Keeper_turn_driver_helpers.materialized_tool_names_after_lane
+          ~effective_tools
+          ~runtime_mcp_policy
+      in
+      let missing_required_tools =
+        Keeper_turn_driver_helpers.missing_required_tool_names_after_lane_by_name
+          ~required_tool_names:[ required_keeper_internal_tool_name ]
+          ~materialized_tool_names
+      in
+      if missing_required_tools = []
+      then None
+      else
+        Some
+          (Printf.sprintf
+             "missing_required_tools=[%s] materialized_tools=[%s]"
+             (String.concat ", " missing_required_tools)
+             (String.concat ", " materialized_tool_names))
+
+let keeper_internal_tool_route_issue route_key target candidates =
+  let rejections =
+    candidates
+    |> List.filter_map (fun provider_cfg ->
+           provider_required_keeper_internal_tool_issue provider_cfg
+           |> Option.map (fun reason ->
+                  Printf.sprintf
+                    "%s:%s"
+                    (Provider_tool_support.provider_debug_label provider_cfg)
+                    reason))
+  in
+  if List.length rejections <> List.length candidates
+  then None
+  else
+    Some
+      (Printf.sprintf
+         "Tool-required cascade route %s targets %s, but none of its %d \
+          provider candidate(s) materialize required keeper internal tool %s \
+          for a keeper agent. rejected=[%s]. Keeper turns that require %s \
+          will fail with no_tool_capable_provider."
+         route_key
+         target
+         (List.length candidates)
+         required_keeper_internal_tool_name
+         (String.concat ", " rejections)
+         required_keeper_internal_tool_name)
+
 let forced_tool_route_issue
     (snapshot : Cascade_catalog_runtime.snapshot)
     (use : Cascade_routes.logical_use)
@@ -608,14 +683,13 @@ let forced_tool_route_issue
                   will fail with no_tool_capable_provider."
                  route_key target)
           else if
-            List.exists
-              (Provider_tool_support.supports_required_tool_use
-                 ~require_tool_choice_support:true
-                 ~require_tool_support:true)
-              candidates
+            not
+              (List.exists
+                 (Provider_tool_support.supports_required_tool_use
+                    ~require_tool_choice_support:true
+                    ~require_tool_support:true)
+                 candidates)
           then
-            None
-          else
             let rejected =
               candidates
               |> List.map (fun provider_cfg ->
@@ -632,7 +706,9 @@ let forced_tool_route_issue
                   (needs inline tool_choice or runtime MCP). rejected=[%s]. \
                   Keeper turns that require tools will fail with \
                   no_tool_capable_provider."
-                 route_key target (List.length candidates) rejected))
+                 route_key target (List.length candidates) rejected)
+          else
+            keeper_internal_tool_route_issue route_key target candidates)
 
 let forced_tool_route_issues live_state_result =
   match live_catalog_snapshot live_state_result with

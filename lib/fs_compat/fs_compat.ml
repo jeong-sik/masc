@@ -679,84 +679,15 @@ let fold_jsonl_lines ~init ~f path =
    - The cache lookup uses a separate, microsecond-scoped mutex
      ([fd_cache_mu]) so two appends to *different* paths never
      contend on a global fd-cache lock. *)
-type cached_writer =
-  { oc : out_channel
-  ; mutable last_used : float
-  }
-
-let cached_writers : (string, cached_writer) Hashtbl.t = Hashtbl.create 32
-let fd_cache_mu = Stdlib.Mutex.create ()
-let fd_cache_max = 32
-
-let close_cached_writer_silently w =
-  try Stdlib.close_out w.oc with
-  | _ -> ()
-;;
-
-(* Evict the cached writer with the smallest [last_used], close its fd.
-   Inside [fd_cache_mu] only. *)
-let evict_lru_locked () =
-  let oldest = ref None in
-  Hashtbl.iter
-    (fun path w ->
-      match !oldest with
-      | None -> oldest := Some (path, w.last_used)
-      | Some (_, ts) when w.last_used < ts -> oldest := Some (path, w.last_used)
-      | _ -> ())
-    cached_writers;
-  match !oldest with
-  | None -> ()
-  | Some (victim_path, _) ->
-    (match Hashtbl.find_opt cached_writers victim_path with
-     | Some w ->
-       close_cached_writer_silently w;
-       Hashtbl.remove cached_writers victim_path
-     | None -> ())
-;;
-
-(* Inside [fd_cache_mu]: return the cached [out_channel] for [path],
-   opening (and possibly LRU-evicting) on first use. *)
-let get_or_open_writer_locked path =
-  let now = Unix.gettimeofday () in
-  match Hashtbl.find_opt cached_writers path with
-  | Some w ->
-    w.last_used <- now;
-    w.oc
-  | None ->
-    if Hashtbl.length cached_writers >= fd_cache_max then evict_lru_locked ();
-    let oc =
-      Stdlib.open_out_gen
-        [ Stdlib.Open_append; Stdlib.Open_creat; Stdlib.Open_wronly ]
-        0o644
-        path
-    in
-    Hashtbl.add cached_writers path { oc; last_used = now };
-    oc
-;;
-
-let close_all_cached_writers () =
-  Stdlib.Mutex.protect fd_cache_mu (fun () ->
-    Hashtbl.iter (fun _ w -> close_cached_writer_silently w) cached_writers;
-    Hashtbl.reset cached_writers)
-;;
-
-let reset_fd_cache_for_testing () = close_all_cached_writers ()
-
-(* Best-effort cache drain at process exit. RFC-0108 §6 already states
-   per-record fsync is out of scope, so the [flush] inside the hot
-   path is the durability boundary; this close is just to release
-   the fd handles cleanly. *)
-let () = Stdlib.at_exit close_all_cached_writers
+let close_all_cached_writers () = Fd_cache.close_all ()
+let reset_fd_cache_for_testing () = Fd_cache.reset_for_testing ()
 
 let append_jsonl (path : string) (json : Yojson.Safe.t) : unit =
   test_exec_home_guard ~op:"append_jsonl" path;
   let dir = Stdlib.Filename.dirname path in
   mkdir_p_memoized dir;
   let line = Yojson.Safe.to_string json ^ "\n" in
-  let oc =
-    Stdlib.Mutex.protect fd_cache_mu (fun () ->
-      get_or_open_writer_locked path)
-  in
+  let oc = Fd_cache.get_writer path in
   let path_mu = get_append_path_mutex path in
   Stdlib.Mutex.protect path_mu (fun () ->
     Stdlib.output_string oc line;

@@ -1,8 +1,8 @@
 {
   "schema": "shell-ir-consumption/v1",
   "generated_at_unix": 1779473046,
-  "g1_parse_string_caller_files_nontest": 12,
-  "g1_parse_string_total_refs_nontest": 19,
+  "g1_parse_string_caller_files_nontest": 13,
+  "g1_parse_string_total_refs_nontest": 20,
   "g2_classifier_string_sig": 0,
   "g2_classifier_ir_sig": 2,
   "g3_gate_typed_refs_in_keeper": 5,
@@ -13,5 +13,5 @@
   "g7_shell_word_values_refs": 8,
   "g7_bash_words_stages_refs": 9,
   "g7_parallel_parser_total": 17,
-  "info_ir_constructors_nontest": 49
+  "info_ir_constructors_nontest": 51
 }

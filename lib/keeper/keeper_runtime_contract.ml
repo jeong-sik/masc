@@ -34,7 +34,10 @@ let active_goal_ids_are_auto_keeper_goals config ~(meta : keeper_meta) goal_ids 
   && List.for_all
        (fun goal_id ->
          match Goal_store.get_goal config ~goal_id with
-         | Some goal -> goal_title_matches_keeper_purpose ~meta goal
+         | Some goal ->
+           (match goal.Goal_store.phase with
+           | Goal_phase.Paused -> false
+           | _ -> goal_title_matches_keeper_purpose ~meta goal)
          | None -> false)
        goal_ids
 

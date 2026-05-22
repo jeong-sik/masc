@@ -107,6 +107,13 @@ export interface DeriveInputs {
   readonly composite: KeeperCompositeSnapshot | null
 }
 
+function canonicalRuntimeBlockerClass(
+  blockerClass: KeeperRuntimeBlockerClass | null,
+): KeeperRuntimeBlockerClass | null {
+  if (blockerClass === 'oas_timeout_budget') return 'turn_timeout'
+  return blockerClass
+}
+
 export function deriveKeeperOperationalState(
   { keeper, composite }: DeriveInputs,
 ): KeeperOperationalState {
@@ -121,7 +128,7 @@ export function deriveKeeperOperationalState(
     return { kind: 'offline', ...axes, cause: deriveOfflineCause(keeper) }
   }
 
-  const blockerClass = keeper.runtime_blocker_class ?? null
+  const blockerClass = canonicalRuntimeBlockerClass(keeper.runtime_blocker_class ?? null)
   const attention = composite?.runtime_attention ?? null
   // An explicit stale marker is required to demote a blocker. The absence
   // of `runtime_attention` (older backend, missing composite) leaves the

@@ -1,0 +1,63 @@
+name: Shell IR Consumption Ratchet (RFC-0160)
+
+# RFC-0160 (Shell IR 1급 승격) §S7: gate PRs against the frozen
+# baseline at scripts/shell-ir-consumption-baseline.json so that
+# G1 (Bash.parse_string callers) and G7 (parallel parser refs) only
+# monotonically decrease toward target.
+#
+# The script exits 1 when either metric regresses; non-G1/G7 changes
+# (G2-G6 / info constructors) are reported but do not fail the gate
+# at this phase — those metrics still trend toward targets via
+# per-phase PRs (S2-S6), not a per-PR ratchet.
+#
+# Update protocol when a Shell IR phase PR legitimately moves a
+# metric: regenerate scripts/shell-ir-consumption-baseline.json via
+#   bash scripts/audit-shell-ir-consumption.sh --json > scripts/shell-ir-consumption-baseline.json
+# and commit alongside the structural change. Reviewer checks the
+# updated baseline against PR-stated KPI movement.
+
+on:
+  pull_request:
+    paths:
+      - 'lib/**'
+      - 'scripts/audit-shell-ir-consumption.sh'
+      - 'scripts/shell-ir-consumption-baseline.json'
+      - '.github/workflows/shell-ir-consumption-ratchet.yml'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: shell-ir-ratchet-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ratchet:
+    name: G1 + G7 monotone decrease
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install ripgrep + jq
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ripgrep jq
+
+      - name: Run audit against baseline
+        run: |
+          bash scripts/audit-shell-ir-consumption.sh \
+            --baseline scripts/shell-ir-consumption-baseline.json
+
+      - name: Emit current metrics (for PR diff)
+        if: always()
+        run: |
+          echo '## Shell IR consumption (current)'
+          bash scripts/audit-shell-ir-consumption.sh
+
+      - name: Upload JSON snapshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: shell-ir-consumption-current
+          path: scripts/shell-ir-consumption-baseline.json

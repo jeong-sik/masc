@@ -5,9 +5,6 @@
     role-policy derivation so they do not maintain separate hardcoded tool
     lists. *)
 
-val declared_permission_for_tool : string -> Masc_domain.permission option
-(** Tool_catalog-declared permission, when present. *)
-
 val known_tool_names : string list
 (** Tool names covered by either Tool_catalog metadata or the fallback table.
     Useful for policy derivation that must include permission-mapped tools even

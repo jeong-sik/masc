@@ -184,7 +184,6 @@ type operator_action =
   | No_operator_action
   | Fix_invocation
   | Inspect_provider_stream
-  | Inspect_timeout_budget
   | Reroute_or_tune_provider
   | Inspect_required_tool_contract
   | Reconcile_partial_commit
@@ -228,7 +227,6 @@ let operator_action_to_label = function
   | No_operator_action -> "none"
   | Fix_invocation -> "fix_invocation"
   | Inspect_provider_stream -> "inspect_provider_stream"
-  | Inspect_timeout_budget -> "inspect_timeout_budget"
   | Reroute_or_tune_provider -> "reroute_or_tune_provider"
   | Inspect_required_tool_contract -> "inspect_required_tool_contract"
   | Reconcile_partial_commit -> "reconcile_partial_commit"
@@ -261,12 +259,15 @@ let liveness_is_lost = function
 let oas_budget_loop_effect ~phase ~strikes ~liveness =
   match phase, strikes with
   | _, Some n when n >= 3 && liveness_is_lost liveness ->
-    Pause_keeper, Operator_breaker, Inspect_keeper_liveness, "oas_timeout_budget_liveness_lost"
+    ( Pause_keeper
+    , Operator_breaker
+    , Inspect_keeper_liveness
+    , "keeper_liveness_lost_after_timeout" )
   | _, Some n when n >= 3 ->
-    Pause_current_work, Provider_cooldown, Reroute_or_tune_provider, "oas_timeout_budget_loop"
+    Pause_current_work, Provider_cooldown, Reroute_or_tune_provider, "provider_timeout_loop"
   | Some Capacity_backpressure, _ ->
-    Soft_fail_turn, Provider_cooldown, Reroute_or_tune_provider, "oas_timeout_budget"
-  | _ -> Soft_fail_turn, Provider_cooldown, Inspect_timeout_budget, "oas_timeout_budget"
+    Soft_fail_turn, Provider_cooldown, Reroute_or_tune_provider, "provider_timeout:capacity_backpressure"
+  | _ -> Soft_fail_turn, Provider_cooldown, Inspect_provider_stream, "provider_timeout"
 ;;
 
 let decide = function
@@ -313,7 +314,7 @@ let decide = function
       ~failure_scope:Provider_scope
       ~lifecycle_effect:Soft_fail_turn
       ~circuit_effect:Provider_cooldown
-      ~operator_action:Inspect_timeout_budget
+      ~operator_action:Inspect_provider_stream
       ~keeper_death_allowed:false
       ~reason
   | Oas_timeout_budget { phase; strikes; liveness } ->
@@ -382,7 +383,7 @@ let decide = function
       ~failure_scope:Turn_scope
       ~lifecycle_effect:Force_release_turn
       ~circuit_effect:Operator_breaker
-      ~operator_action:Inspect_timeout_budget
+      ~operator_action:Inspect_keeper_liveness
       ~keeper_death_allowed:false
       ~reason:"stale_turn_with_progress"
   | Stale_turn { progress_seen = false } ->

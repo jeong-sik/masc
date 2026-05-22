@@ -56,20 +56,41 @@ let repo_root () =
 let load_nav_contract_from_script () =
   let root = repo_root () in
   let tmp = Filename.temp_file "dashboard-surface-contract" ".json" in
-  let cmd =
-    Printf.sprintf
-      "cd %s && bash scripts/check-dashboard-surface-parity.sh --print-nav-json > %s"
-      (Filename.quote root)
-      (Filename.quote tmp)
+  let out_fd =
+    Unix.openfile tmp [ Unix.O_WRONLY; Unix.O_TRUNC ] 0o600
   in
-  match Sys.command cmd with
+  let code =
+    Fun.protect
+      ~finally:(fun () -> Unix.close out_fd)
+      (fun () ->
+        let original_cwd = Sys.getcwd () in
+        Fun.protect
+          ~finally:(fun () -> Sys.chdir original_cwd)
+          (fun () ->
+            Sys.chdir root;
+            let argv =
+              [|
+                "bash";
+                "scripts/check-dashboard-surface-parity.sh";
+                "--print-nav-json";
+              |]
+            in
+            let pid =
+              Unix.create_process_env "bash" argv (Unix.environment ())
+                Unix.stdin out_fd Unix.stderr
+            in
+            match snd (Unix.waitpid [] pid) with
+            | Unix.WEXITED code -> code
+            | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> 255))
+  in
+  match code with
   | 0 ->
-      let json = Yojson.Safe.from_file tmp in
-      Sys.remove tmp;
-      load_surface_contracts_from_json json
+    let json = Yojson.Safe.from_file tmp in
+    Sys.remove tmp;
+    load_surface_contracts_from_json json
   | code ->
-      (try Sys.remove tmp with Sys_error _ -> ());
-      fail (Printf.sprintf "surface parity helper failed with exit code %d" code)
+    (try Sys.remove tmp with Sys_error _ -> ());
+    fail (Printf.sprintf "surface parity helper failed with exit code %d" code)
 
 let load_readiness_contract () =
   Dashboard_surface_readiness.json () |> load_surface_contracts_from_json

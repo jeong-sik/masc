@@ -540,6 +540,78 @@ fallback = false
          "expected one tiered provider, got %d"
          (List.length resolution.tiered_providers))
 
+let test_runtime_resolution_splits_multi_tier_group_admission_ids () =
+  let toml =
+    {|
+[providers.runpod_mtp]
+protocol = "openai-http"
+endpoint = "https://runpod.example.test/v1"
+
+[providers.ollama_cloud]
+protocol = "ollama-http"
+endpoint = "https://ollama.com"
+
+[providers.ollama_cloud.credentials]
+type = "env"
+key = "OLLAMA_CLOUD_API_KEY"
+
+[models.qwen36-mtp]
+api-name = "Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf"
+max-context = 160000
+tools-support = true
+streaming = true
+
+[models.qwen36-mtp.capabilities]
+supports-tool-choice = true
+supports-native-streaming = true
+
+[models.kimi-cloud]
+api-name = "kimi-k2.6"
+max-context = 128000
+tools-support = true
+streaming = true
+
+[models.kimi-cloud.capabilities]
+supports-tool-choice = true
+supports-native-streaming = true
+
+[runpod_mtp.qwen36-mtp]
+
+[ollama_cloud.kimi-cloud]
+
+[tier.runpod_primary]
+members = ["runpod_mtp.qwen36-mtp"]
+strategy = "failover"
+
+[tier.ollama_cloud_stable]
+members = ["ollama_cloud.kimi-cloud"]
+strategy = "failover"
+
+[tier-group.strict_tool_candidates]
+tiers = ["runpod_primary", "ollama_cloud_stable"]
+strategy = "failover"
+fallback = false
+|}
+  in
+  with_env "OLLAMA_CLOUD_API_KEY" "test-token" @@ fun () ->
+  with_temp_cascade_config toml @@ fun () ->
+  match
+    Masc_mcp.Cascade_catalog_runtime.resolve_named_providers_strict_with_secondary_resolver
+      ~cascade_name:"tier-group.strict_tool_candidates"
+      ()
+  with
+  | Error err -> fail err
+  | Ok { tiered_providers = [ runpod; ollama ]; _ } ->
+    check string "runpod admission tier id"
+      "tier-group.strict_tool_candidates.tier-0" runpod.tier_id;
+    check string "ollama cloud admission tier id"
+      "tier-group.strict_tool_candidates.tier-1" ollama.tier_id
+  | Ok resolution ->
+    fail
+      (Printf.sprintf
+         "expected two tiered providers, got %d"
+         (List.length resolution.tiered_providers))
+
 (* --- RFC-0058 Phase 8: partial parse --- *)
 
 (* Reproduces the 2026-05-17 keeper-skip incident: a stale [<ghost>.<m>]
@@ -829,6 +901,10 @@ let () =
           "runtime resolution preserves admission tier id"
           `Quick
           test_runtime_resolution_preserves_tier_id;
+        test_case
+          "runtime resolution splits multi-tier group admission ids"
+          `Quick
+          test_runtime_resolution_splits_multi_tier_group_admission_ids;
       ];
       "phase8_partial_parse",
       [

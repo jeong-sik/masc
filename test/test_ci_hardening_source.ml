@@ -1650,7 +1650,12 @@ let test_tool_failure_classification_contracts () =
        {|"failure_class"|});
   check bool "call path classifies once before log emit" true
     (file_contains_pattern "lib/mcp_server_eio_call_tool.ml"
-       "let failure_class = classify_tool_failure_class error_detail")
+       "let failure_class = classify_tool_failure_class error_detail");
+  check bool "deterministic tool failures have reason metric" true
+    (file_contains_pattern "lib/keeper/keeper_metrics.ml"
+       "masc_keeper_tools_oas_deterministic_failures_total"
+     && file_contains_pattern "lib/keeper/keeper_tools_oas.ml"
+          "record_deterministic_tool_failure_metric")
 
 let test_keeper_github_pr_tool_contracts () =
   check bool "dedicated keeper PR list tool exists" true
@@ -1689,6 +1694,17 @@ let test_keeper_github_pr_tool_contracts () =
        "REQUEST_CHANGES for actionable blockers"
      && file_contains_pattern "lib/tool_shard_types_schemas_pr_review.ml"
           "APPROVE only when the draft proof")
+
+let test_public_bash_alias_contracts () =
+  check bool "public Bash alias does not retain legacy command-type bridge" true
+    (file_not_contains_pattern "lib/keeper/keeper_tool_alias.ml" "command_type");
+  check bool "public Bash alias does not retain legacy_cmd enum" true
+    (file_not_contains_pattern "lib/keeper/keeper_tool_alias.ml" "legacy_cmd");
+  check bool "public Bash alias does not retain Legacy_cmd variant" true
+    (file_not_contains_pattern "lib/keeper/keeper_tool_alias.ml" "Legacy_cmd");
+  check bool "public Bash alias has no deferred structured route patcher" true
+    (file_not_contains_pattern "lib/keeper/keeper_tool_alias.ml"
+       "register_structured_routes")
 
 let test_keeper_pr_audit_contracts () =
   check bool "keeper fleet audit has explicit PR-create flag" true
@@ -2711,6 +2727,8 @@ let () =
             test_tool_failure_classification_contracts;
           test_case "keeper github PR tool contracts" `Quick
             test_keeper_github_pr_tool_contracts;
+          test_case "public Bash alias contracts" `Quick
+            test_public_bash_alias_contracts;
           test_case "keeper PR audit contracts" `Quick
             test_keeper_pr_audit_contracts;
           test_case "dashboard warm hydration contracts" `Quick

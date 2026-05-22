@@ -1208,6 +1208,19 @@ let test_workflow_rejection_same_args_short_circuits_after_first_failure () =
        let config = Coord.default_config dir in
        let tools = make_registered_tools ~config ~meta ~ctx_snapshot () in
        let bash = find_tool "Bash" tools in
+       let deterministic_metric_labels =
+         [ ( "tool", "Bash" )
+         ; ( "reason"
+           , Keeper_tool_deterministic_error.to_telemetry_key
+               Keeper_tool_deterministic_error.Workflow_rejection_blocked )
+         ]
+       in
+       let deterministic_metric_before =
+         Prometheus.metric_value_or_zero
+           Keeper_metrics.metric_keeper_tools_oas_deterministic_failures
+           ~labels:deterministic_metric_labels
+           ()
+       in
        let args = `Assoc [ "command", `String "keeper_tasks_list" ] in
        (match Tool.execute bash args with
         | Error { Agent_sdk.Types.message; _ } ->
@@ -1227,7 +1240,15 @@ let test_workflow_rejection_same_args_short_circuits_after_first_failure () =
             string
             "retry skipped reason"
             "deterministic_error_workflow_rejection_blocked"
-            (json_string "retry_skipped_reason" json)
+            (json_string "retry_skipped_reason" json);
+          check
+            (float 0.001)
+            "deterministic failure metric increments"
+            (deterministic_metric_before +. 1.0)
+            (Prometheus.metric_value_or_zero
+               Keeper_metrics.metric_keeper_tools_oas_deterministic_failures
+               ~labels:deterministic_metric_labels
+               ())
         | Ok _ -> fail "direct tool command through Bash should be a workflow rejection");
        match Tool.execute bash args with
        | Error { Agent_sdk.Types.message; _ } ->

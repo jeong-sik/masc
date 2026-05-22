@@ -476,6 +476,16 @@ let tool_failure_class_of_wire_string = function
     None
 ;;
 
+let record_deterministic_tool_failure_metric ~tool_name reason =
+  Prometheus.inc_counter
+    Keeper_metrics.metric_keeper_tools_oas_deterministic_failures
+    ~labels:
+      [ "tool", tool_name
+      ; "reason", Keeper_tool_deterministic_error.to_telemetry_key reason
+      ]
+    ()
+;;
+
 let transient_mutex_contention_error_class = "transient_mutex_contention"
 
 let transient_mutex_contention_tool_error
@@ -718,6 +728,9 @@ let make_keeper_tool_handler
             Keeper_metrics.metric_keeper_tools_oas_failures
             ~labels:[ "tool", name; "site", "workflow_scope_blocked" ]
             ();
+          record_deterministic_tool_failure_metric
+            ~tool_name:name
+            Keeper_tool_deterministic_error.Workflow_rejection_blocked;
           Log.Keeper.warn
             "tool %s workflow rejection retry skipped for same task/action scope"
             name;
@@ -906,6 +919,9 @@ let make_keeper_tool_handler
                 Some Keeper_tool_deterministic_error.Workflow_rejection_blocked
               | None, false -> None
             in
+            Option.iter
+              (record_deterministic_tool_failure_metric ~tool_name:name)
+              unified_reason;
             (match unified_reason, is_workflow_rejection with
              | Some reason, _ ->
                Log.Keeper.warn

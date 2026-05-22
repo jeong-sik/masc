@@ -3,12 +3,6 @@
     @see {!Cascade_trust} for full documentation.
     @since 0.174.0 *)
 
-(** {1 Kill Switch} *)
-
-(** [true] when [MASC_CASCADE_TRUST_DISABLED=1] or ["true"] is set.
-    When disabled, [trust_score] returns 1.0 for all providers. *)
-val disabled : bool
-
 (** {1 Trust Computation} *)
 
 (** Compute a trust score [0.0..1.0] from provider health data.
@@ -21,12 +15,6 @@ val disabled : bool
     When [disabled] is [true], returns 1.0 unconditionally. *)
 val trust_score : Cascade_health_tracker.provider_info -> float
 
-(** Modulate a config weight by the trust score.
-
-    Returns [max 1 (config_weight * trust)] so the provider always
-    retains at least weight 1.  Hard cooldown (weight 0) is handled
-    upstream by {!Cascade_health_tracker.effective_weight}. *)
-val modulated_weight : config_weight:int -> trust:float -> int
 
 (**/**)
 

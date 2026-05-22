@@ -2404,9 +2404,9 @@ let test_prompt_includes_operational_tool_guidance () =
     (contains_substring sys "Heartbeat is server-managed");
   check
     bool
-    "mentions draft PR broker"
+    "mentions visible gh PR creation path"
     true
-    (contains_substring sys "keeper_pr_create draft=true");
+    (contains_substring sys "Create or update PRs through the visible shell/GitHub CLI path");
   check
     bool
     "warns passive discovery tools do not satisfy active turns"
@@ -2437,9 +2437,9 @@ let test_prompt_includes_operational_tool_guidance () =
     (contains_substring sys "keeper_bash {");
   check
     bool
-    "raw gh PR creation not documented"
+    "dedicated PR creation tool not documented"
     false
-    (contains_substring sys "open draft PRs after pushing")
+    (contains_substring sys "keeper_pr_create draft=true")
 ;;
 
 let test_prompt_includes_research_evidence_contract () =
@@ -2502,9 +2502,9 @@ let test_capabilities_prompt_distinguishes_sandbox_and_worktree () =
         literally lists that exact name");
   check
     bool
-    "draft pr tool documented"
+    "visible gh PR creation path documented"
     true
-    (contains_substring prompt "keeper_pr_create");
+    (contains_substring prompt "Use `gh pr create` or `gh pr edit`");
   check
     bool
     "masc tools are not bash commands"
@@ -2591,9 +2591,9 @@ let test_system_prompt_prefers_bash_and_gh_pr_lane () =
        "Use only the exact tool schemas currently shown to you by the runtime");
   check
     bool
-    "mentions native PR route"
+    "mentions keeper-scoped gh identity"
     true
-    (contains_substring sys "native PR tools use a keeper-scoped gh identity");
+    (contains_substring sys "GitHub CLI work uses a keeper-scoped gh identity");
   check
     bool
     "does not advertise removed keeper_github"
@@ -10636,14 +10636,14 @@ let test_preferred_tool_choice_for_required_turn_claims_first () =
           (Agent_sdk.Types.show_tool_choice other)));
   (match
      Surface.preferred_tool_choice_for_required_tool_names
-       ~required_tool_names:[ "keeper_pr_create" ]
-       ~allowed_tool_names:[ "keeper_pr_create"; "keeper_bash" ]
+       ~required_tool_names:[ "keeper_shell" ]
+       ~allowed_tool_names:[ "keeper_shell"; "keeper_bash" ]
    with
    | Agent_sdk.Types.Any -> ()
    | other ->
      fail
        (Printf.sprintf
-          "expected Any for keeper_pr_create to avoid raw require_specific_tool \
+          "expected Any for keeper_shell to avoid raw require_specific_tool \
            MCP-prefix mismatches, got %s"
           (Agent_sdk.Types.show_tool_choice other)));
   (match
@@ -10738,7 +10738,7 @@ let test_preferred_tool_choice_for_required_turn_claims_first () =
      choose
        ~has_current_task:true
        ~turn_affordances:[ "inspect_worktree_delta" ]
-       ~allowed_tool_names:[ "keeper_pr_create"; "keeper_tasks_list" ]
+       ~allowed_tool_names:[ "keeper_shell"; "keeper_tasks_list" ]
        ()
    with
    | Agent_sdk.Types.Any -> ()

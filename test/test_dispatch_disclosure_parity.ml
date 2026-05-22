@@ -25,7 +25,7 @@ module TR = Masc_mcp.Keeper_tool_resolution
 let names_to_probe =
   [ "keeper_bash"
   ; "keeper_fs_edit"
-  ; "keeper_pr_create"
+  ; "keeper_pr_status"
   ; "masc_keeper_msg"
   ; "masc_keeper_sandbox_start"
   ; "masc_status"

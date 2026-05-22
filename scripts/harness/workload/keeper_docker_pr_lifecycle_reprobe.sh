@@ -1348,7 +1348,7 @@ prompt_for_keeper_create() {
   visibility="$(repo_visibility_for_keeper "$keeper")"
   if keeper_uses_fork_pr_route "$keeper"; then
     head_ref="$account:$branch"
-    git_route_rule="- You may use keeper_bash for gh repo fork / git remote setup only to prepare your own fork branch for this proof. Do not run gh pr create, gh pr review, or other PR mutations through keeper_shell or keeper_bash."
+    git_route_rule="- You may use keeper_bash for gh repo fork / git remote setup only to prepare your own fork branch for this proof. Do not run gh pr review or other review/close/merge mutations through keeper_shell or keeper_bash."
     push_step="$(cat <<EOF
 5. Commit and push exactly branch $branch with keeper_bash using the fork PR route because your upstream repo permission is $permission:
    - Confirm your GitHub account login is $account.
@@ -1359,28 +1359,28 @@ prompt_for_keeper_create() {
 EOF
 )"
     pr_step="$(cat <<EOF
-6. Create a draft PR from your fork branch with keeper_shell op=gh running
-   gh pr create. The command must include repo "$REPO_SLUG", head "$head_ref",
-   base "main", and cwd set to the returned proof worktree path. Do not leave
-   head/base empty and do not use the base repo path if the proof branch lives
-   in a separate worktree. Do not mark ready, do not merge, do not add
-   human-approved-ready.
+6. Create a draft PR from your fork branch through the visible shell/GitHub CLI
+   path running gh pr create. The command must include repo "$REPO_SLUG", head
+   "$head_ref", base "main", and cwd set to the returned proof worktree path.
+   Do not leave head/base empty and do not use the base repo path if the proof
+   branch lives in a separate worktree. Do not mark ready, do not merge, do not
+   add human-approved-ready.
 EOF
 )"
   else
     head_ref="$branch"
-    git_route_rule="- Use keeper_shell op=gh for GitHub PR creation after the branch is pushed."
+    git_route_rule="- Use the visible shell/GitHub CLI path for GitHub PR creation after the branch is pushed."
     push_step="$(cat <<EOF
 5. Commit and git push exactly branch $branch with keeper_bash. The tool result must show explicit Docker-backed route evidence such as via=docker, route_via=docker, via=brokered, or route_via=brokered.
 EOF
 )"
     pr_step="$(cat <<EOF
-6. Create a draft PR for that branch with keeper_shell op=gh running gh pr
-   create. The command must include repo "$REPO_SLUG", head "$head_ref", base
-   "main", and cwd set to the returned proof worktree path. Do not leave
-   head/base empty and do not use the base repo path if the proof branch lives
-   in a separate worktree. Do not mark ready, do not merge, do not add
-   human-approved-ready.
+6. Create a draft PR for that branch through the visible shell/GitHub CLI path
+   running gh pr create. The command must include repo "$REPO_SLUG", head
+   "$head_ref", base "main", and cwd set to the returned proof worktree path.
+   Do not leave head/base empty and do not use the base repo path if the proof
+   branch lives in a separate worktree. Do not mark ready, do not merge, do not
+   add human-approved-ready.
 EOF
 )"
   fi
@@ -1402,7 +1402,7 @@ Tool route rules:
 $git_route_rule
 - Do not use approval-requiring host code-write paths such as masc_code_write for this proof file.
 - If keeper_bash rejects mutating git as policy-blocked, stop and report the exact blocker instead of switching to host-local credentials.
-- Use keeper_shell op=gh for PR creation.
+- Use the visible shell/GitHub CLI path for PR creation.
 
 Required create lane:
 1. Use masc_web_search once for current external context before mutating. The

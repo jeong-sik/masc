@@ -1414,7 +1414,7 @@ let test_keeper_required_tool_contracts () =
        {|REQUIRED_TOOLS_LEGACY="${REQUIRED_TOOLS:-}"|}
      && file_contains_pattern
           "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
-          {|CREATE_REQUIRED_TOOLS="${CREATE_REQUIRED_TOOLS:-${REQUIRED_TOOLS_LEGACY:-masc_web_search,keeper_bash,keeper_pr_create}}"|}
+          {|CREATE_REQUIRED_TOOLS="${CREATE_REQUIRED_TOOLS:-${REQUIRED_TOOLS_LEGACY:-masc_web_search,keeper_bash,keeper_shell}}"|}
      && file_contains_pattern
           "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
           {|REVIEW_REQUIRED_TOOLS="${REVIEW_REQUIRED_TOOLS:-${REQUIRED_TOOLS_LEGACY:-keeper_shell,keeper_pr_review_comment}}"|});
@@ -1422,7 +1422,7 @@ let test_keeper_required_tool_contracts () =
     (file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
        "The create phase"
      && file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
-          "requires `masc_web_search`, `keeper_bash`, and `keeper_pr_create`"
+          "PR creation uses the visible shell/GitHub CLI path"
      && file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
           "the review phase requires `keeper_shell` and"
      && file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
@@ -1431,7 +1431,7 @@ let test_keeper_required_tool_contracts () =
     (file_contains_pattern "lib/tool_shard_types_schemas_taskboard.ml"
        "keeper_preflight_check"
      && file_contains_pattern "lib/tool_shard_types_schemas_taskboard.ml"
-          "keeper_pr_create"
+          "keeper_shell"
      && file_contains_pattern "lib/tool_shard_types_schemas_taskboard.ml"
           "keeper_pr_review_comment"
      && file_contains_pattern "lib/tool_shard_types_schemas_taskboard.ml"
@@ -1553,10 +1553,10 @@ let test_keeper_msg_timeout_contracts () =
     (file_contains_pattern
        "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
        "with keeper_bash from inside the Docker playground");
-  check bool "docker PR lifecycle prompt forbids gh pr shell mutation" true
+  check bool "docker PR lifecycle prompt routes pr create through visible shell path" true
     (file_contains_pattern
        "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
-       "Do not run gh pr create, gh pr review, or other mutating GitHub commands through keeper_shell or keeper_bash");
+       "Use the visible shell/GitHub CLI path for PR creation");
   check bool "runbook documents server incarnation restart classification" true
     (file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
        "`server_incarnation_changed`");
@@ -1654,25 +1654,24 @@ let test_tool_failure_classification_contracts () =
 
 let test_keeper_github_pr_tool_contracts () =
   check bool "dedicated keeper PR list tool exists" true
-    (file_contains_pattern "lib/tool_shard.ml" {|name = "keeper_pr_list"|});
+    (file_contains_pattern "lib/tool_shard_types_schemas_github_pr.ml"
+       {|name = "keeper_pr_list"|});
   check bool "dedicated keeper PR status tool exists" true
-    (file_contains_pattern "lib/tool_shard.ml" {|name = "keeper_pr_status"|});
-  check bool "dedicated keeper PR create tool exists" true
-    (file_contains_pattern "lib/tool_shard.ml" {|name = "keeper_pr_create"|});
-  check bool "PR create is draft-only" true
-    (file_contains_pattern "lib/keeper/keeper_tool_github_pr.ml"
-       {|[ "gh"; "pr"; "create" ]|}
-     && file_contains_pattern "lib/keeper/keeper_tool_github_pr.ml"
-          {|@ [ "--draft"; "--title"; title; "--body"; body ]|});
+    (file_contains_pattern "lib/tool_shard_types_schemas_github_pr.ml"
+       {|name = "keeper_pr_status"|});
+  check bool "dedicated keeper PR create tool is not exposed" true
+    (file_not_contains_pattern "lib/tool_shard.ml" {|name = "keeper_pr_create"|});
+  check bool "PR creation is delegated to visible shell path" true
+    (file_contains_pattern "lib/tool_shard_types_schemas_github_pr.ml"
+       "PR creation is a GitHub/forge mutation and is");
   check bool "keeper PR tools use scoped GH env" true
     (file_contains_pattern "lib/keeper/keeper_tool_github_pr.ml"
        "Keeper_gh_env.compose_base_with_gh_config");
   check bool "keeper PR tools verify credential materialization" true
     (file_contains_pattern "lib/keeper/keeper_tool_github_pr.ml"
        "Credential_materializer.verify_state");
-  check bool "keeper PR create is exposed by github group" true
-    (file_contains_pattern "config/tool_policy.toml"
-       {|keeper_pr_create|});
+  check bool "keeper PR create is absent from github group" true
+    (file_not_contains_pattern "config/tool_policy.toml" {|keeper_pr_create|});
   check bool "keeper core prompt routes PR review through native tool" true
     (file_contains_pattern "config/prompts/keeper.core_behavior.md"
        "PR REVIEW MUTATIONS"
@@ -1686,16 +1685,16 @@ let test_keeper_github_pr_tool_contracts () =
     (file_not_contains_pattern "config/prompts/keeper.core_behavior.md"
        {|gh pr review <n>|});
   check bool "keeper review schema names non-comment review policy" true
-    (file_contains_pattern "lib/tool_shard.ml"
-       "Use REQUEST_CHANGES for actionable blockers"
-     && file_contains_pattern "lib/tool_shard.ml"
-          "use APPROVE only when the draft proof preflight permits it")
+    (file_contains_pattern "lib/tool_shard_types_schemas_pr_review.ml"
+       "REQUEST_CHANGES for actionable blockers"
+     && file_contains_pattern "lib/tool_shard_types_schemas_pr_review.ml"
+          "APPROVE only when the draft proof")
 
 let test_keeper_pr_audit_contracts () =
   check bool "keeper fleet audit has explicit PR-create flag" true
     (file_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
        "--require-pr-create-evidence");
-  check bool "keeper fleet audit treats keeper_pr_create as creation evidence" true
+  check bool "keeper fleet audit still accepts historical keeper_pr_create evidence" true
     (file_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
        "PR_CREATE_TOOLS");
   check bool "keeper fleet audit requires structured create markers" true

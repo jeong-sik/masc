@@ -27,7 +27,7 @@ Triage and trigger detection run on each heartbeat using the proactive idle/cool
 | **library** | `keeper_library_{search,read}` | 2 | Yes |
 | **taskboard** | `keeper_tasks_{list,audit}`, `keeper_task_{force_release,force_done,claim,done,submit_for_verification,create}`, `keeper_broadcast` | 9 | Yes |
 | **voice** | `keeper_voice_{speak,listen,agent,sessions,session_start,session_end}` | 6 | Yes |
-| **coding** | `keeper_bash`, `keeper_preflight_check`, `keeper_pr_{list,status,create,review_read,review_comment,review_reply}`, `masc_{worktree_create,worktree_list,code_search,code_symbols,code_read}` | 13 | Yes |
+| **coding** | `keeper_bash`, `keeper_preflight_check`, `keeper_pr_{list,status,review_read,review_comment,review_reply}`, `masc_{worktree_create,worktree_list,code_search,code_symbols,code_read}` | 12 | Yes |
 
 Notes:
 - The `voice` shard still exists, but it is no longer part of the default keeper surface. The historical weather shard is retired from `Tool_shard`.

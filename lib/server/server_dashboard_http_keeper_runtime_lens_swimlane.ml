@@ -70,19 +70,36 @@ let runtime_lens_memory_terminal_status scan =
   else if scan.memory_flush_success_count > 0 then "flushed"
   else if scan.memory_injected_count > 0 then "injected"
   else if
+    runtime_lens_event_count scan Keeper_runtime_manifest.Checkpoint_saved > 0
+  then "checkpoint_saved"
+  else if
+    runtime_lens_event_count scan Keeper_runtime_manifest.Checkpoint_loaded > 0
+  then "checkpoint_loaded"
+  else if
     scan.context_injected_count > 0
     || scan.context_compacted_event_count > 0
     || scan.event_bus_count > 0
   then "context"
   else "empty"
 
-(** F8: lane mandatory event sets and terminal policy separation.
+(** F8 + P5: lane mandatory event sets, terminal policy, and completion proof.
 
     [finished] = the lane's terminal event is present.
+                 This means "the turn reached a terminal state for this lane",
+                 not "the lane fulfilled its contract".
+
     [complete] = all mandatory events for the lane are present AND
                  the terminal event is present (or the lane has no terminal).
+                 This means "the lane fulfilled its proof policy".
 
-    This distinguishes "the turn ended" from "the lane fulfilled its contract". *)
+    [mandatory_present] = all mandatory events are present but the lane
+                          has not reached its terminal event.
+
+    [incomplete] = some mandatory events are missing.
+
+    Separation of "terminal" from "complete" is required because a turn can
+    finish (Turn_finished) while a lane still lacks mandatory events
+    (e.g., missing checkpoint save, missing memory flush). *)
 
 type lane_policy =
   { lane : string
@@ -123,6 +140,8 @@ let lane_policies =
   ; { lane = "memory_context"
     ; mandatory_events =
         [ Keeper_runtime_manifest.Context_injected
+        ; Keeper_runtime_manifest.Checkpoint_loaded
+        ; Keeper_runtime_manifest.Checkpoint_saved
         ; Keeper_runtime_manifest.Memory_flushed
         ]
     ; terminal_events = [ Keeper_runtime_manifest.Memory_flushed ]
@@ -205,13 +224,40 @@ let runtime_lens_swimlane_completeness scan lane =
   else if mandatory_present then "mandatory_present"
   else "incomplete"
 
-let runtime_lens_swimlane_json scan gaps ~lane ~label ~events ~terminal_status =
+let runtime_lens_swimlane_json scan gaps ~lane ~label ~events
+    ~terminal_status ~synthetic_events =
   let gap_codes = runtime_lens_gap_codes_for_lane gaps lane in
-  let event_count =
+  let standard_event_count =
     events
     |> List.fold_left
          (fun total event -> total + runtime_lens_event_count scan event)
          0
+  in
+  let synthetic_event_count =
+    List.fold_left (fun total (_, count) -> total + count) 0 synthetic_events
+  in
+  let event_count = standard_event_count + synthetic_event_count in
+  let standard_events_json = runtime_lens_events_json scan events in
+  let synthetic_events_json =
+    List.map
+      (fun (name, count) ->
+         `Assoc [("event", `String name); ("count", `Int count)])
+      synthetic_events
+  in
+  let all_events =
+    match standard_events_json with
+    | `List events -> `List (events @ synthetic_events_json)
+    | other -> other
+  in
+  let dag_edges_json =
+    List.map
+      (fun (parent_event_id, event_id) ->
+         `Assoc
+           [
+             ("parent_event_id", `String parent_event_id);
+             ("event_id", `String event_id);
+           ])
+      scan.dag_edges
   in
   `Assoc
     [
@@ -225,5 +271,6 @@ let runtime_lens_swimlane_json scan gaps ~lane ~label ~events ~terminal_status =
         match gap_codes with
         | code :: _ -> `String code
         | [] -> `Null );
-      ("events", runtime_lens_events_json scan events);
+      ("events", all_events);
+      ("dag_edges", `List dag_edges_json);
     ]

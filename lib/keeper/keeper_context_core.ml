@@ -205,7 +205,6 @@ let role_of_string_opt = Message_json.role_of_string_opt
 let role_of_string = Message_json.role_of_string
 let content_blocks_to_json = Message_json.content_blocks_to_json
 let content_blocks_of_json = Message_json.content_blocks_of_json
-let legacy_content_text_of_json = Message_json.legacy_content_text_of_json
 let string_field_opt = Message_json.string_field_opt
 let metadata_of_json = Message_json.metadata_of_json
 let message_to_json = Message_json.message_to_json

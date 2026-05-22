@@ -39,38 +39,11 @@ let content_blocks_to_json
 let content_blocks_of_json
     (json : Yojson.Safe.t) : Agent_sdk.Types.content_block list option =
   let open Yojson.Safe.Util in
-  let parse_block_list = function
-    | `List blocks ->
-        let parsed = List.filter_map Agent_sdk.Api.content_block_of_json blocks in
-        if List.length parsed = List.length blocks then Some parsed else None
-    | _ -> None
-  in
-  match parse_block_list (json |> member "content_blocks") with
-  | Some _ as blocks -> blocks
-  | None ->
-      (* Some OAS/OpenAI-style checkpoints use a structured [content] array
-         instead of MASC's [content_blocks] field. Treat that as the same
-         block source rather than forcing the legacy flat-string path. *)
-      parse_block_list (json |> member "content")
-
-let legacy_content_text_of_json (json : Yojson.Safe.t) : string =
-  let open Yojson.Safe.Util in
-  match json |> member "content" with
-  | `String value -> Inference_utils.sanitize_text_utf8 value
-  | `Null -> ""
+  match json |> member "content_blocks" with
   | `List blocks ->
       let parsed = List.filter_map Agent_sdk.Api.content_block_of_json blocks in
-      let msg : Agent_sdk.Types.message =
-        {
-          Agent_sdk.Types.role = Agent_sdk.Types.User;
-          content = parsed;
-          name = None;
-          tool_call_id = None;
-          metadata = [];
-        }
-      in
-      Inference_utils.sanitize_text_utf8 (Agent_sdk.Types.text_of_message msg)
-  | _ -> ""
+      if List.length parsed = List.length blocks then Some parsed else None
+  | _ -> None
 
 let string_field_opt key value =
   match value with
@@ -109,11 +82,9 @@ let message_to_json (m : Agent_sdk.Types.message) : Yojson.Safe.t =
         | Agent_sdk.Types.Assistant -> None)
   in
   (* SSOT: structured [content_blocks] only. The previous flat [content]
-     field was a duplicate of [text_of_message m] used by legacy
-     checkpoint readers; new readers reconstruct text from
-     [content_blocks] via [text_of_history_jsonl_line] (see below).
-     Old checkpoints written with both fields still load fine because
-     [message_of_json] keeps the legacy [content] fallback. *)
+     field was a duplicate of [text_of_message m] used by retired
+     checkpoint readers; current readers reconstruct text from
+     [content_blocks] via [text_of_history_jsonl_line] (see below). *)
   let base =
     [
       ("role", `String (role_to_string m.role));
@@ -129,19 +100,10 @@ let message_to_json (m : Agent_sdk.Types.message) : Yojson.Safe.t =
 let message_of_json (json : Yojson.Safe.t) : Agent_sdk.Types.message =
   let open Yojson.Safe.Util in
   let role = json |> member "role" |> to_string |> role_of_string in
-  let text = legacy_content_text_of_json json in
   let content =
     match content_blocks_of_json json with
-    | Some blocks ->
-        if blocks <> [] then blocks
-        else
-          (* Legacy checkpoints stored only flattened text + role. For Tool
-             messages that means the original assistant ToolUse block is gone,
-             so rebuilding a structured ToolResult here creates an invalid
-             orphaned pair on the next Anthropic request. Fall back to plain
-             text so old checkpoints remain readable without breaking turns. *)
-          [ Agent_sdk.Types.Text text ]
-    | None -> [ Agent_sdk.Types.Text text ]
+    | Some blocks -> blocks
+    | None -> []
   in
   Inference_utils.sanitize_message_utf8
     {
@@ -158,9 +120,8 @@ let message_of_json (json : Yojson.Safe.t) : Agent_sdk.Types.message =
 
 (** Extract human-readable text from a single history.jsonl line that was
     produced by [message_to_json].  Reads structured [content_blocks]
-    first (current SSOT), falls back to the legacy flat [content] field
-    for lines written before that field was retired.  Returns [""] when
-    neither shape is parseable. *)
+    (current SSOT). Returns [""] when the canonical shape is absent or
+    unparseable. *)
 let text_of_history_jsonl_json (json : Yojson.Safe.t) : string =
   match content_blocks_of_json json with
   | Some blocks when blocks <> [] ->
@@ -174,4 +135,4 @@ let text_of_history_jsonl_json (json : Yojson.Safe.t) : string =
         }
       in
       Inference_utils.sanitize_text_utf8 (Agent_sdk.Types.text_of_message msg)
-  | _ -> legacy_content_text_of_json json
+  | _ -> ""

@@ -442,13 +442,14 @@ let runtime_lens_gaps ~terminal_event_present ~claim_scope ~config_drift scan =
          match scan.latest_context_compacted_row with
          | Some row ->
            let decision = row.Keeper_runtime_manifest.decision in
-           (match json_string_member_opt "source_phase" decision with
+           let clock_refs = Yojson.Safe.Util.member "clock_refs" decision in
+           (match json_string_member_opt "compaction_source" clock_refs with
             | Some _ -> gaps
             | None ->
               { code = "compaction_source_missing"
               ; severity = "warn"
               ; lane = "memory_context"
-              ; detail = Some "context_compacted row lacks source_phase"
+              ; detail = Some "context_compacted row lacks compaction_source in clock_refs"
               }
               :: gaps)
          | None -> gaps)

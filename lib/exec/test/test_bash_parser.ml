@@ -294,7 +294,7 @@ let test_single_quoted_arg () =
   | Parsed.Parsed (Shell_ir.Simple s) ->
     assert (Bin.to_string s.bin = "echo");
     (match s.args with
-     | [ Shell_ir.Lit ("hello world", _) ] -> ()
+     | [ Shell_ir.Lit ("hello world", meta) ] -> assert meta.quoted
      (* "single-quoted content must land as one Lit" *)
      | _ -> assert false)
   | _ -> assert false
@@ -351,7 +351,7 @@ let test_double_quoted_arg () =
   | Parsed.Parsed (Shell_ir.Simple s) ->
     assert (Bin.to_string s.bin = "echo");
     (match s.args with
-     | [ Shell_ir.Lit ("hello world", _) ] -> ()
+     | [ Shell_ir.Lit ("hello world", meta) ] -> assert meta.quoted
      (* "double-quoted content must land as one Lit" *)
      | _ -> assert false)
   | _ -> assert false
@@ -416,8 +416,8 @@ let test_word_with_double_quoted_suffix () =
          Shell_ir.Lit ("-rn", _);
          Shell_ir.Lit ("exec_semantic", _);
          Shell_ir.Lit ("lib/", _);
-         Shell_ir.Lit ("--include=*.ml", _);
-       ] -> ()
+         Shell_ir.Lit ("--include=*.ml", meta);
+       ] -> assert meta.quoted
      | _ -> assert false)
   | _ -> assert false
 

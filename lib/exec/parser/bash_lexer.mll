@@ -20,6 +20,16 @@
     if !token_count > token_limit then raise Token_limit_exceeded
   ;;
   let get_tokens () = !token_count
+  ;;
+  let meta_of_string w =
+    let has_star = String.contains w '*' in
+    let has_qmark = String.contains w '?' in
+    let has_backslash = String.contains w '\\' in
+    { Shell_ir.quoted = false
+    ; glob = has_star || has_qmark
+    ; escaped = has_backslash
+    }
+  ;;
 }
 
 (* WORD class: printable ASCII minus shell metacharacters that the
@@ -28,7 +38,7 @@ let digit = ['0'-'9']
 let fd = digit+
 
 let word_char = [^ ' ' '\t' '\n' '\r' '|' '<' '>' '&' ';' '(' ')'
-                   '\'' '"' '$' '`' '\\' '{' '}' '!' '*' '?']
+                   '\'' '"' '$' '`' '{' '}' '!']
 let word = word_char+
 
 (* Prefix for a single shell word that continues with quoted literal
@@ -36,7 +46,7 @@ let word = word_char+
    options inside the typed parser without accepting glob metachars in
    unquoted positions. *)
 let word_prefix_char = [^ ' ' '\t' '\n' '\r' '|' '<' '>' '&' ';' '(' ')'
-                          '\'' '"' '$' '`' '\\' '{' '}' '!' '*' '?']
+                          '\'' '"' '$' '`' '{' '}' '!']
 let word_prefix = word_prefix_char+
 
 (* Single-quote string: literal, no escape processing, no nested
@@ -91,10 +101,10 @@ rule token = parse
   | "/dev/null"    { incr_tokens (); DEV_NULL }
   | '\'' "/dev/null" '\'' { incr_tokens (); DEV_NULL }
   | '"' "/dev/null" '"' { incr_tokens (); DEV_NULL }
-  | (word_prefix as prefix) '\'' (sq_body as s) '\'' { incr_tokens (); WORD (prefix ^ s, true) }
-  | (word_prefix as prefix) '"' (dq_body as s) '"' { incr_tokens (); WORD (prefix ^ s, true) }
-  | '\'' (sq_body as s) '\'' { incr_tokens (); WORD s }
-  | '"' (dq_body as s) '"' { incr_tokens (); WORD s }
-  | word as w      { incr_tokens (); WORD w }
+  | (word_prefix as prefix) '\'' (sq_body as s) '\'' { incr_tokens (); WORD (prefix ^ s, { Shell_ir.quoted = true; glob = false; escaped = false }) }
+  | (word_prefix as prefix) '"' (dq_body as s) '"' { incr_tokens (); WORD (prefix ^ s, { Shell_ir.quoted = true; glob = false; escaped = false }) }
+  | '\'' (sq_body as s) '\'' { incr_tokens (); WORD (s, { Shell_ir.quoted = true; glob = false; escaped = false }) }
+  | '"' (dq_body as s) '"' { incr_tokens (); WORD (s, { Shell_ir.quoted = true; glob = false; escaped = false }) }
+  | word as w      { incr_tokens (); WORD (w, meta_of_string w) }
   | eof            { EOF }
   | _ as c         { raise (Failure (Printf.sprintf "unexpected char %c" c)) }

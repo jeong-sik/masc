@@ -341,9 +341,7 @@ let shell_simple ~mode ?(sandbox = Masc_exec.Sandbox_target.host ()) ?cwd ?(env 
     }
 ;;
 
-let to_shell_ir ?(sandbox = Masc_exec.Sandbox_target.host ()) ~mode input =
-  let ( let* ) = Result.bind in
-  let* () = validate ~mode input in
+let to_shell_ir_unvalidated ?(sandbox = Masc_exec.Sandbox_target.host ()) ~mode input =
   match input with
   | Exec { executable; argv; cwd; env } ->
     let stage = { executable; argv } in
@@ -360,6 +358,12 @@ let to_shell_ir ?(sandbox = Masc_exec.Sandbox_target.host ()) ~mode input =
       loop [] stages
     in
     Ok (Masc_exec.Shell_ir.Pipeline simples)
+;;
+
+let to_shell_ir ?sandbox ~mode input =
+  let ( let* ) = Result.bind in
+  let* () = validate ~mode input in
+  to_shell_ir_unvalidated ?sandbox ~mode input
 ;;
 
 let pp_mode ppf = function

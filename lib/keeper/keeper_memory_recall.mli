@@ -11,7 +11,31 @@ include module type of Keeper_memory_bank
 
 (** {1 File Reading} *)
 
+val read_file_tail_lines_result :
+  string -> max_bytes:int -> max_lines:int
+  -> (string list, Keeper_memory_recall_exn_class.t) result
+(** Result-returning tail reader.  [Ok []] covers both "no recorded
+    memory" (file missing, or [max_lines <= 0]) and "empty file"; the
+    caller cannot disambiguate at this entry point and should not try.
+    [Error class] surfaces an IO/parse failure classified through the
+    bounded {!Keeper_memory_recall_exn_class.t} closed sum so callers
+    can branch on a typed value instead of inspecting a stringified
+    exception (RFC-0149 §3.1).
+
+    Use this entry point when the caller can produce a meaningful
+    operator-visible signal on [Error] (e.g. propagate
+    {b Memory_unavailable} up the chain instead of silently rendering
+    an empty summary).
+
+    @since RFC-0149 Phase 1 *)
+
 val read_file_tail_lines : string -> max_bytes:int -> max_lines:int -> string list
+(** Silent-fallback tail reader: classifies IO/parse failures, emits
+    the [keeper_memory_recall_read_errors] counter + a WARN-once log
+    line, and returns [[]] on any [Error] class.  Retained as a facade
+    over {!read_file_tail_lines_result} during the RFC-0149 §3.1
+    sunset window; new callers should prefer the Result-returning
+    helper. *)
 
 val read_keeper_memory_summary :
   Coord.config ->

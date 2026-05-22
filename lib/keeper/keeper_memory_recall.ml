@@ -13,84 +13,98 @@ let re_weather_en = Re.str "weather" |> Re.compile
 let re_first_ko = Re.str "첫" |> Re.compile
 let re_first_en = Re.str "first" |> Re.compile
 
-let read_file_tail_lines path ~max_bytes ~max_lines : string list =
-  if max_lines <= 0 then []
-  else if not (Fs_compat.file_exists path) then []
+(* RFC-0149 §3.1 — typed Result entry point.  Distinguishes "no memory"
+   ([Ok []] for missing file or zero-line request) from "IO/parse fault"
+   ([Error class]).  The catch-all classifies the exception through the
+   closed sum {!Keeper_memory_recall_exn_class.t} so the caller can
+   branch on a bounded label instead of a free-form string. *)
+let read_file_tail_lines_result path ~max_bytes ~max_lines :
+    (string list, Keeper_memory_recall_exn_class.t) result =
+  if max_lines <= 0 then Ok []
+  else if not (Fs_compat.file_exists path) then Ok []
   else
-    (* The catch-all below preserves prior behavior (return [[]] on
-       IO failure), but read errors used to be indistinguishable from
-       "no recorded memory" — both paths returned the empty list.
-       Emit a counter + WARN so corrupt / missing memory bank files
-       become visible in operator dashboards. Label cardinality is
-       bounded by reusing [Keeper_memory_recall_exn_class] (a 4-value
-       closed sum); the full error string still goes to the log body. *)
     try
       let fd = Unix.openfile path [ Unix.O_RDONLY ] 0 in
-      Fun.protect
-        ~finally:(fun () -> try Unix.close fd with Unix.Unix_error _ -> ())
-        (fun () ->
-          let file_len = (Unix.LargeFile.fstat fd).Unix.LargeFile.st_size in
-          let min_start =
-            if max_bytes <= 0
-            then 0L
-            else Int64.max 0L (Int64.sub file_len (Int64.of_int max_bytes))
-          in
-          let chunk_size = 64 * 1024 in
-          let pos = ref file_len in
-          let chunks = ref [] in
-          let newline_count = ref 0 in
-          let count_newlines s =
-            String.iter (fun ch -> if ch = '\n' then incr newline_count) s
-          in
-          while Int64.compare !pos min_start > 0 && !newline_count <= max_lines do
-            let available = Int64.sub !pos min_start in
-            let read_len =
-              Int64.to_int (Int64.min (Int64.of_int chunk_size) available)
-            in
-            let start = Int64.sub !pos (Int64.of_int read_len) in
-            ignore (Unix.LargeFile.lseek fd start Unix.SEEK_SET);
-            let buf = Bytes.create read_len in
-            let rec read_exact offset remaining =
-              if remaining <= 0 then offset
-              else
-                let n = Unix.read fd buf offset remaining in
-                if n = 0 then offset else read_exact (offset + n) (remaining - n)
-            in
-            let bytes_read = read_exact 0 read_len in
-            let chunk = Bytes.sub_string buf 0 bytes_read in
-            count_newlines chunk;
-            chunks := chunk :: !chunks;
-            pos := start
-          done;
-          let content = String.concat "" !chunks in
-          let lines =
-            content
-            |> String.split_on_char '\n'
-            |> List.filter (fun s -> String.trim s <> "")
-          in
-          let lines =
-            if Int64.compare !pos 0L > 0
-            then (match lines with _ :: rest -> rest | [] -> [])
-            else lines
-          in
-          let n = List.length lines in
-          if n <= max_lines then lines
-          else
-            let drop = n - max_lines in
-            List.filteri (fun i _ -> i >= drop) lines)
+      Ok
+        (Fun.protect
+           ~finally:(fun () -> try Unix.close fd with Unix.Unix_error _ -> ())
+           (fun () ->
+             let file_len = (Unix.LargeFile.fstat fd).Unix.LargeFile.st_size in
+             let min_start =
+               if max_bytes <= 0
+               then 0L
+               else Int64.max 0L (Int64.sub file_len (Int64.of_int max_bytes))
+             in
+             let chunk_size = 64 * 1024 in
+             let pos = ref file_len in
+             let chunks = ref [] in
+             let newline_count = ref 0 in
+             let count_newlines s =
+               String.iter (fun ch -> if ch = '\n' then incr newline_count) s
+             in
+             while Int64.compare !pos min_start > 0 && !newline_count <= max_lines do
+               let available = Int64.sub !pos min_start in
+               let read_len =
+                 Int64.to_int (Int64.min (Int64.of_int chunk_size) available)
+               in
+               let start = Int64.sub !pos (Int64.of_int read_len) in
+               ignore (Unix.LargeFile.lseek fd start Unix.SEEK_SET);
+               let buf = Bytes.create read_len in
+               let rec read_exact offset remaining =
+                 if remaining <= 0 then offset
+                 else
+                   let n = Unix.read fd buf offset remaining in
+                   if n = 0 then offset else read_exact (offset + n) (remaining - n)
+               in
+               let bytes_read = read_exact 0 read_len in
+               let chunk = Bytes.sub_string buf 0 bytes_read in
+               count_newlines chunk;
+               chunks := chunk :: !chunks;
+               pos := start
+             done;
+             let content = String.concat "" !chunks in
+             let lines =
+               content
+               |> String.split_on_char '\n'
+               |> List.filter (fun s -> String.trim s <> "")
+             in
+             let lines =
+               if Int64.compare !pos 0L > 0
+               then (match lines with _ :: rest -> rest | [] -> [])
+               else lines
+             in
+             let n = List.length lines in
+             if n <= max_lines then lines
+             else
+               let drop = n - max_lines in
+               List.filteri (fun i _ -> i >= drop) lines))
     with
     | (Sys_error _ | Unix.Unix_error _ | End_of_file) as exn ->
-        let exn_label =
-          Keeper_memory_recall_exn_class.(to_label (classify exn))
-        in
-        Log.Keeper.warn
-          "read_file_tail_lines: dropping read of %s: %s"
-          path (Printexc.to_string exn);
-        Prometheus.inc_counter
-          Keeper_metrics.metric_keeper_memory_recall_read_errors
-          ~labels:[ ("exception_class", exn_label) ]
-          ();
-        []
+        Error (Keeper_memory_recall_exn_class.classify exn)
+
+let read_file_tail_lines path ~max_bytes ~max_lines : string list =
+  match read_file_tail_lines_result path ~max_bytes ~max_lines with
+  | Ok lines -> lines
+  | Error exn_class ->
+    (* WORKAROUND: RFC-0149 §3.1 sunset target.  Counter + WARN remain
+       in this legacy entry point only; the Result-returning helper
+       above surfaces the typed exception class so the caller can
+       branch on [Error] directly.
+
+       Removal: once every caller migrates to
+       [read_file_tail_lines_result], delete this Error arm together
+       with the counter/WARN per RFC-0149 §3.1 sunset criterion.  The
+       counter itself can be retained for long-tail trend analysis
+       (cardinality already bounded by [exn_class]). *)
+    let exn_label = Keeper_memory_recall_exn_class.to_label exn_class in
+    Log.Keeper.warn
+      "read_file_tail_lines: dropping read of %s: <error class=%s>"
+      path exn_label;
+    Prometheus.inc_counter
+      Keeper_metrics.metric_keeper_memory_recall_read_errors
+      ~labels:[ ("exception_class", exn_label) ]
+      ();
+    []
 
 let read_keeper_memory_summary
     (config : Coord.config)

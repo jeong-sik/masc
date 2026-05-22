@@ -431,31 +431,12 @@ let record t ~provider_key ~outcome ?error_kind ?error_reason
           ~labels:[("provider", provider_key)] cooldown_dur
       end
     | Capacity_backpressure ->
-      (* Capacity backpressure (provider full, model overloaded, tier
-         admission blocked, cascade slot exhausted).  Same immediate-
-         cooldown semantics as [Soft_rate_limited] — one event is enough
-         evidence that the provider cannot serve this cycle.  Uses
-         [default_capacity_backpressure_backoff_sec] as the synthetic
-         default instead of [soft_rate_limit_cooldown_sec] because the
-         upstream signal is capacity exhaustion, not a rate-budget burst.
-        Clamp positive caller-supplied [retry_after_s] to the same
-         ceiling so a misclassified hard quota cannot silently produce
-         a long blackout. *)
-      state.consecutive_failures <- state.consecutive_failures + 1;
-      bump_failure_fp ();
-      let cooldown_dur =
-        match retry_after_s with
-        | Some s when s > 0.0 -> Float.min s soft_rate_limit_max_clamp_sec
-        | _ -> default_capacity_backpressure_backoff_sec
-      in
-      let new_until = now +. cooldown_dur in
-      if new_until > state.cooldown_until then begin
-        state.cooldown_until <- new_until;
-        Cascade_metrics.on_provider_cooldown
-          ~provider:provider_key ~reason:"capacity_backpressure";
-        Prometheus.observe_histogram Keeper_metrics.metric_keeper_provider_block_duration_sec
-          ~labels:[("provider", provider_key)] cooldown_dur
-      end
+      (* Capacity exhaustion is transient load, not persistent health
+         degradation.  Do NOT increment consecutive_failures or touch
+         cooldown_until — the event is already recorded in [state.events]
+         above for observability.  The cascade will simply try the next
+         provider and revisit this one on the next turn. *)
+      ()
     | Hard_quota ->
       (* Hard-quota errors (balance depleted, quota exceeded, resource
          exhausted) don't recover on short-window retries — set a long

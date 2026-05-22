@@ -230,9 +230,25 @@ let profile_json_raw ~config_path ~keeper_assignable_names name =
    Exposed as a pure helper so the contract can be exercised without
    synthesizing a full [Keeper_registry.registry_entry]. *)
 let keeper_profile_fields ~keeper ~cascade_name : (string * Yojson.Safe.t) list =
+  (* RFC-0149 §3.3 — route through the Result-returning resolver so
+     unresolved cascade names surface as JSON [null] on [canonical]
+     instead of the silent [Keeper_turn] default that the legacy
+     [resolve_live] writes.  "Parse, don't validate" — never invent a
+     canonical value that the catalog did not actually resolve.
+
+     UI semantics (per the doc above): when [canonical] = [cascade_name]
+     the table shows "—"; when they differ the table surfaces drift.
+     [null] is a third state that the UI can render as "unresolved" — a
+     stronger drift signal than a silent rewrite to [Keeper_turn]. *)
+  let canonical_json =
+    match Keeper_cascade_profile.resolve_live_result cascade_name with
+    | Ok runtime ->
+      `String (Keeper_cascade_profile.runtime_name_to_string runtime)
+    | Error (`Unresolved _) -> `Null
+  in
   [ "keeper", `String keeper
   ; "cascade_name", `String cascade_name
-  ; "canonical", `String (Keeper_cascade_profile.resolve_live cascade_name)
+  ; "canonical", canonical_json
   ]
 ;;
 

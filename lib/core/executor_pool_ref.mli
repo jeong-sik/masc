@@ -11,8 +11,3 @@ val get : unit -> Eio.Executor_pool.t option
 val set : Eio.Executor_pool.t -> unit
 (** Install the pool reference. Idempotent overwrite. *)
 
-val submit_or_inline : ?weight:float -> (unit -> 'a) -> 'a
-(** Run [f] on the executor pool when available, else inline in the
-    caller's fiber. [Eio.Cancel.Cancelled] is re-raised so structured
-    concurrency is preserved; other pool-side exceptions trigger
-    inline fallback with a warn log. *)

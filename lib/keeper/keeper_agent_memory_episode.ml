@@ -115,8 +115,12 @@ let record_success
     institution episode store via [store_failed_turn_episode]).
 
     Mapping rationale:
-    - [*_timeout] / [*_timeout_*] / [oas_timeout_budget] → [Timeout]
-      (matches the Timeout dimension defined in agent_stress.mli).
+    - provider/OAS timeout families, including legacy [oas_timeout_budget],
+      → [Provider_timeout].
+    - admission/cascade/provider capacity families → [Capacity_pressure].
+    - stale turn, heartbeat, and fiber liveness families → [Turn_liveness].
+    - generic [*_timeout] / [*_timeout_*] remains [Timeout] only when owner
+      evidence is unavailable.
     - [completion_contract_violation] → [Parse_degraded] (the LLM
       response failed contract parse — semantically a parse-degraded
       output, not a timeout or hard failure streak). *)
@@ -142,9 +146,23 @@ let stress_kind_of_error_kind error_kind : Agent_stress.stress_kind option =
       loop 0
   in
   if trimmed = "" then None
-  else if ends_with "_timeout" trimmed
-       || contains "_timeout_" trimmed
-       || String.equal trimmed "oas_timeout_budget"
+  else if String.equal trimmed "oas_timeout_budget"
+       || String.equal trimmed "provider_timeout"
+       || String.equal trimmed "oas_run_timeout"
+       || String.equal trimmed "api_error_timeout"
+  then Some Agent_stress.Provider_timeout
+  else if String.equal trimmed "capacity_backpressure"
+       || String.equal trimmed "admission_queue_timeout"
+       || String.equal trimmed "admission_queue_rejected"
+       || contains "capacity" trimmed
+  then Some Agent_stress.Capacity_pressure
+  else if String.equal trimmed "stale_turn_timeout"
+       || String.equal trimmed "turn_livelock_blocked"
+       || String.equal trimmed "fiber_unresolved"
+       || contains "heartbeat" trimmed
+       || contains "liveness" trimmed
+  then Some Agent_stress.Turn_liveness
+  else if ends_with "_timeout" trimmed || contains "_timeout_" trimmed
   then Some Agent_stress.Timeout
   else if String.equal trimmed "completion_contract_violation"
   then Some Agent_stress.Parse_degraded

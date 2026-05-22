@@ -69,7 +69,10 @@ let parse_iso8601_opt s =
            let epoch, _ = Unix.mktime tm in
            Some epoch)
      with
-     | _ -> None)
+     (* RFC-0145 — narrowed from a wildcard catch-all to the only
+        exceptions [Scanf.sscanf] / [Unix.mktime] raise on ill-formed
+        ISO8601 input.  Unrelated runtime exceptions now propagate. *)
+     | Scanf.Scan_failure _ | End_of_file | Unix.Unix_error _ -> None)
   | _ -> None
 ;;
 
@@ -115,8 +118,13 @@ let parse_state_line line =
          Some { level; ts; reason }
        | _ -> None
      with
-     | _ -> None)
-  | exception _ -> None
+     (* RFC-0145 — narrowed from a wildcard to the only exception the
+        Yojson projection helpers raise on wrong-typed JSON. *)
+     | Yojson.Safe.Util.Type_error _ -> None)
+  (* RFC-0145 — narrowed from a wildcard to the only exception
+     [Yojson.Safe.from_string] raises on malformed JSON.  An I/O or
+     internal runtime exception bubbles to the caller. *)
+  | exception Yojson.Json_error _ -> None
 ;;
 
 let read_state_file_opt path =

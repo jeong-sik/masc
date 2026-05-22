@@ -259,7 +259,7 @@ let run plan =
   in
   let image = Keeper_sandbox_oneshot_plan.image plan in
   let command_argv = Keeper_sandbox_oneshot_plan.command_argv plan in
-  let timeout_sec = Keeper_sandbox_oneshot_plan.timeout_budget_sec plan in
+  let timeout_sec = Keeper_sandbox_oneshot_plan.execution_timeout_sec plan in
   (* [docker run --rm --name <name> <image> <command_argv>].
      [--rm] removes the container after exit (Phase 3b-iii default
      cleanup strategy — RFC §3.1's spec deferred a typed cleanup

@@ -683,8 +683,8 @@ let run_keeper_cycle
                            Ok result
                          | Error err ->
                            let err =
-                             reclassify_oas_timeout_for_attempt
-                               ~timeout_budget:!attempt_provider_timeout_budget
+                             reclassify_provider_timeout_for_attempt
+                               ~provider_timeout_budget:!attempt_provider_timeout_budget
                                err
                            in
                            let _ = drain_turn_event_bus ~site:"reconcile_pre_check" () in
@@ -1644,7 +1644,7 @@ let run_keeper_cycle
                       ~degraded_retry_applied
                       ~degraded_retry_cascade
                       ~fallback_reason
-                      ~last_provider_timeout_budget:!last_provider_timeout_budget
+                      ~last_provider_provider_timeout_budget:!last_provider_timeout_budget
                       ~current_turn_blocker_info:!current_turn_blocker_info
                       ~keeper_turn_id
                       result

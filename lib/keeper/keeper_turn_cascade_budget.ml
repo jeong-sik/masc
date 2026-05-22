@@ -386,13 +386,13 @@ let degraded_retry_bypasses_slot_phase_guard
   | None ->
     false
 
-let reclassify_oas_timeout_for_attempt
-    ~(timeout_budget : provider_timeout_budget option)
+let reclassify_provider_timeout_for_attempt
+    ~(provider_timeout_budget : provider_timeout_budget option)
     (err : Agent_sdk.Error.sdk_error) : Agent_sdk.Error.sdk_error =
-  match err, timeout_budget with
-  | Agent_sdk.Error.Api (Timeout { message }), Some timeout_budget
+  match err, provider_timeout_budget with
+  | Agent_sdk.Error.Api (Timeout { message }), Some provider_timeout_budget
     when EC.is_structural_oas_timeout_message message ->
-      ignore timeout_budget;
+      ignore provider_timeout_budget;
       err
   | _ -> err
 
@@ -400,9 +400,9 @@ let attempt_watchdog_outer_turn_reserve_sec = 1.0
 
 let attempt_watchdog_timeout_sec
     ~(remaining_turn_budget_s : float)
-    (timeout_budget : provider_timeout_budget) : float =
+    (provider_timeout_budget : provider_timeout_budget) : float =
   let desired =
-    timeout_budget.effective_timeout_sec +. provider_timeout_guard_sec
+    provider_timeout_budget.effective_timeout_sec +. provider_timeout_guard_sec
   in
   let cap_before_outer_timeout =
     Float.max 0.001

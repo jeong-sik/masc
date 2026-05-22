@@ -55,7 +55,7 @@ let load_memory_subsystems_entries ~(config : Coord_utils.config) =
                        keeper, row)
                      summary.recent_notes
                  in
-                 rows_acc @ rows, errs_acc
+                 List.rev_append rows rows_acc, errs_acc
                | Error exn_class ->
                  let label =
                    Keeper_memory_recall_exn_class.to_label exn_class
@@ -66,6 +66,7 @@ let load_memory_subsystems_entries ~(config : Coord_utils.config) =
       | Eio.Cancel.Cancelled _ as e -> raise e
       | _ -> [], []
     in
+    let rows = List.rev rows in
     let errors = List.rev errors in
     memory_subsystems_entry_cache
     := Some (config.base_path, now, rows, errors);

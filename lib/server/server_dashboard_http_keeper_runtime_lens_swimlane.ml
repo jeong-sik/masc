@@ -205,13 +205,30 @@ let runtime_lens_swimlane_completeness scan lane =
   else if mandatory_present then "mandatory_present"
   else "incomplete"
 
-let runtime_lens_swimlane_json scan gaps ~lane ~label ~events ~terminal_status =
+let runtime_lens_swimlane_json scan gaps ~lane ~label ~events
+    ~terminal_status ~synthetic_events =
   let gap_codes = runtime_lens_gap_codes_for_lane gaps lane in
-  let event_count =
+  let standard_event_count =
     events
     |> List.fold_left
          (fun total event -> total + runtime_lens_event_count scan event)
          0
+  in
+  let synthetic_event_count =
+    List.fold_left (fun total (_, count) -> total + count) 0 synthetic_events
+  in
+  let event_count = standard_event_count + synthetic_event_count in
+  let standard_events_json = runtime_lens_events_json scan events in
+  let synthetic_events_json =
+    List.map
+      (fun (name, count) ->
+         `Assoc [("event", `String name); ("count", `Int count)])
+      synthetic_events
+  in
+  let all_events =
+    match standard_events_json with
+    | `List events -> `List (events @ synthetic_events_json)
+    | other -> other
   in
   `Assoc
     [
@@ -225,5 +242,5 @@ let runtime_lens_swimlane_json scan gaps ~lane ~label ~events ~terminal_status =
         match gap_codes with
         | code :: _ -> `String code
         | [] -> `Null );
-      ("events", runtime_lens_events_json scan events);
+      ("events", all_events);
     ]

@@ -29,6 +29,7 @@ val runtime_lens_swimlane_json :
   label:string ->
   events:Keeper_runtime_manifest.event_kind list ->
   terminal_status:string ->
+  synthetic_events:(string * int) list ->
   Yojson.Safe.t
 
 val runtime_lens_keeper_terminal_status :

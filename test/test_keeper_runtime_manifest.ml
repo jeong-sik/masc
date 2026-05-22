@@ -1300,6 +1300,8 @@ let test_runtime_trace_lens_summarizes_tool_axis () =
       Alcotest.(check (list string))
         "lens gap codes"
         [ "lane_mandatory_event_missing"
+        ; "lane_mandatory_event_missing"
+        ; "lane_mandatory_event_missing"
         ; "required_tool_not_materialized"
         ; "context_delta_missing"
         ]
@@ -1527,8 +1529,8 @@ let test_runtime_trace_lens_groups_context_memory_swimlane () =
         2
         (json_int_member "episodes_flushed" memory_axis);
       Alcotest.(check int)
-        "lens memory has keeper lane gap"
-        1
+        "lens memory has keeper + memory_context lane gaps"
+        2
         (json_list_length "gaps" lens))
 
 let test_runtime_trace_lens_derives_clock_edges () =

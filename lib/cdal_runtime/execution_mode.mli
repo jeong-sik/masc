@@ -13,7 +13,6 @@ type t =
 [@@deriving yojson, show, eq, ord]
 
 val to_string : t -> string
-val of_string : string -> (t, string) result
 
 (** [can_serve ~requested ~effective] returns [true] iff
     [effective <= requested] in the ordering [Diagnose < Draft < Execute].

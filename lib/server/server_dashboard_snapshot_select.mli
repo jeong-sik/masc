@@ -2,7 +2,7 @@
 
     Steps 1+2+3 published a [Dashboard_snapshot]-first read path for
     four projections: [/shell], [/tools], [/telemetry/summary], and
-    [/project-snapshot] (+ aliases [/namespace-truth], [/room-truth]).
+    [/project-snapshot] (+ alias [/namespace-truth]).
     Step 5 of the migration sequence renamed this module from
     [Server_dashboard_shell_snapshot] to [Server_dashboard_snapshot_select]
     and retired [Dashboard_cache] from the cold-start fallback in
@@ -87,7 +87,7 @@ val select_project_snapshot_json :
   Httpun.Request.t ->
   Yojson.Safe.t
 (** RFC-0138 Phase 3 Step 3 — /project-snapshot (+ alias
-    /namespace-truth, /room-truth) read path selector.
+    /namespace-truth) read path selector.
 
     Returns [Dashboard_snapshot.current ()].namespace_truth when the
     refresh fiber has populated it (refresh_loop must be invoked with

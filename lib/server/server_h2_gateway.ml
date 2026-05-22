@@ -699,8 +699,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
                       ~extra_headers:cors))
 
       | `GET, "/api/v1/dashboard/project-snapshot"
-      | `GET, "/api/v1/dashboard/namespace-truth"
-      | `GET, "/api/v1/dashboard/room-truth" ->
+      | `GET, "/api/v1/dashboard/namespace-truth" ->
           with_h2_public_read h2_reqd (fun state ->
             let json =
               (* RFC-0138 Phase 3 Step 3 follow-up — route H/2 gateway

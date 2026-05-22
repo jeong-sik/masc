@@ -46,7 +46,7 @@ let typed_docker_sandbox_target ~turn_sandbox_factory ~meta ~cwd =
   match Keeper_sandbox_factory.resolve_opt turn_sandbox_factory ~cwd with
   | None ->
     Error
-      "typed keeper_bash Docker Shell IR dispatch requires a turn sandbox factory"
+      "typed Bash Docker Shell IR dispatch requires a turn sandbox factory"
   | Some runtime ->
     let image = typed_docker_image meta in
     let runner ~stdin_content ~argv ~env:_ ~cwd:stage_cwd ~timeout_sec =
@@ -149,7 +149,7 @@ let handle_keeper_bash_typed
           | Local -> Ok (Masc_exec.Sandbox_target.host (), [])
           | Docker ->
             if typed_input_has_env input
-            then Error "typed keeper_bash Docker Shell IR dispatch does not support env yet"
+            then Error "typed Bash Docker Shell IR dispatch does not support env yet"
             else (
               match typed_docker_local_fallback_target ~meta ~timeout_sec with
               | Some fallback when in_playground -> Ok fallback
@@ -328,5 +328,5 @@ let handle_keeper_bash
   else
     error_json
       ~fields:[ "typed", `Bool true ]
-      "typed keeper_bash input is required. Provide executable/argv or pipeline/stages."
+      "Typed Bash input is required. Provide executable/argv or pipeline/stages."
 ;;

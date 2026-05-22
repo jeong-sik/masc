@@ -148,7 +148,9 @@ export function rosterStateNote(
   }
 
   const diagnosticError = keeper.diagnostic?.last_error?.trim()
-  if (diagnosticError) return { label: '최근 오류', text: diagnosticError }
+  if (diagnosticError) {
+    return { label: state.kind === 'running' ? '이전 오류' : '최근 오류', text: diagnosticError }
+  }
 
   const hint = monitoringHint?.trim()
   if (hint) return { label: '참고', text: hint }
@@ -879,7 +881,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
             <span><strong class="text-[var(--color-fg-secondary)]">현재 단계</strong>는 FSM/monitor phase입니다.</span>
             <span><strong class="text-[var(--color-fg-secondary)]">차단 근거</strong>는 live/stale blocker 증거입니다.</span>
             <span><strong class="text-[var(--color-fg-secondary)]">점</strong>은 활동/presence입니다. 흔들리면 방금 움직였습니다.</span>
-            <span><strong class="text-[var(--color-fg-secondary)]">파생</strong>은 keeper 런타임에서 만든 synthetic row입니다.</span>
+            <span><strong class="text-[var(--color-fg-secondary)]">파생</strong>은 keeper가 자동 생성한 sub-op alias입니다. 카운트에서 중복 제외됩니다.</span>
           </div>
           <div class="grid grid-cols-[minmax(180px,1.35fr)_minmax(90px,0.55fr)_minmax(150px,1fr)_minmax(150px,1fr)_minmax(120px,0.7fr)] gap-3 border-b border-[var(--color-border-divider)] px-4 py-2.5 text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)] max-lg:hidden">
             <span>Keeper</span>
@@ -896,7 +898,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
               const nowLabel =
                 row.fsmStageText
                 ?? row.monitoringEvidence?.phase?.label
-                ?? row.band.label
+                ?? (row.monitoringEvidence?.stage?.label ?? '-')
               const latestTool = row.recentTools[0] ?? (row.toolCallCount != null && row.toolCallCount > 0 ? `${row.toolCallCount} calls` : '-')
 
               return html`

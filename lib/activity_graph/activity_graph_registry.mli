@@ -7,10 +7,10 @@
     fan-out without re-introducing the cycle this split was
     extracted to break.
 
-    Internal storage (the [registry_mutex] handle, the
-    [client_count_atomic] counter, and the [client_id_counter]
-    monotonic id source) is hidden — callers consume only the
-    locked accessors and the lifecycle entry points. *)
+    Internal storage (the [registry_mutex] handle and the
+    [client_id_counter] monotonic id source) is hidden — callers
+    consume only the locked accessors and the lifecycle entry
+    points. *)
 
 open Activity_graph_types
 
@@ -58,9 +58,7 @@ val register :
   unit ->
   int
 (** Register or replace the client for [session_id] and return
-    the freshly-allocated [client_id] (monotonic, never reused).
-    A re-register with the same [session_id] preserves the
-    counter — only new sessions increment {!client_count}. *)
+    the freshly-allocated [client_id] (monotonic, never reused). *)
 
 val unregister : string -> unit
 (** Drop the client for [session_id] unconditionally. No-op when
@@ -71,8 +69,3 @@ val unregister_if_current : string -> int -> unit
     [client_id] equals the given one. Used to avoid a TOCTOU
     where a slow disconnect handler removes a client another
     fiber has already replaced via {!register}. *)
-
-val client_count : unit -> int
-(** Number of distinct [session_id]s currently registered.
-    Backed by an [Atomic.t] so the read does not take the
-    registry lock. *)

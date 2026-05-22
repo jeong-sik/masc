@@ -1644,7 +1644,7 @@ let run_keeper_cycle
                       ~degraded_retry_applied
                       ~degraded_retry_cascade
                       ~fallback_reason
-                      ~last_provider_provider_timeout_budget:!last_provider_timeout_budget
+                      ~last_provider_timeout_budget:!last_provider_timeout_budget
                       ~current_turn_blocker_info:!current_turn_blocker_info
                       ~keeper_turn_id
                       result

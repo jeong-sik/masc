@@ -102,3 +102,36 @@ let stages source =
   in
   scan No_quote 0
 ;;
+
+let top_level_command_segments command =
+  let len = String.length command in
+  let push_segment unconditional start stop acc =
+    let segment = String.sub command start (stop - start) |> String.trim in
+    if String.equal segment "" then acc else (unconditional, segment) :: acc
+  in
+  let rec loop acc unconditional start i quote escaped =
+    if i >= len
+    then List.rev (push_segment unconditional start len acc)
+    else if escaped
+    then loop acc unconditional start (i + 1) quote false
+    else (
+      match quote, command.[i] with
+      | (No_quote | Double_quote), '\\' ->
+        loop acc unconditional start (i + 1) quote true
+      | No_quote, '\'' -> loop acc unconditional start (i + 1) Single_quote false
+      | No_quote, '"' -> loop acc unconditional start (i + 1) Double_quote false
+      | Single_quote, '\'' -> loop acc unconditional start (i + 1) No_quote false
+      | Double_quote, '"' -> loop acc unconditional start (i + 1) No_quote false
+      | No_quote, '&' when i + 1 < len && command.[i + 1] = '&' ->
+        let acc = push_segment unconditional start i acc in
+        loop acc false (i + 2) (i + 2) No_quote false
+      | No_quote, '|' when i + 1 < len && command.[i + 1] = '|' ->
+        let acc = push_segment unconditional start i acc in
+        loop acc false (i + 2) (i + 2) No_quote false
+      | No_quote, ('\n' | ';') ->
+        let acc = push_segment unconditional start i acc in
+        loop acc true (i + 1) (i + 1) No_quote false
+      | _ -> loop acc unconditional start (i + 1) quote false)
+  in
+  loop [] true 0 0 No_quote false
+;;

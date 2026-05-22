@@ -86,6 +86,18 @@ let typed_docker_runtime_failure_fields output =
   then [ "failure_class", `String "policy_rejection" ]
   else []
 
+let typed_docker_local_fallback_target ~meta ~timeout_sec =
+  let image = typed_docker_image meta in
+  match Keeper_sandbox_runtime.docker_image_present ~image ~timeout_sec with
+  | Ok () -> None
+  | Error message ->
+    Some
+      ( Masc_exec.Sandbox_target.host ()
+      , [ "requested_sandbox", `String "docker"
+        ; "sandbox_fallback", `String "local_playground"
+        ; "sandbox_fallback_reason", `String (Worker_dev_tools.truncate_for_log message)
+        ] )
+
 let handle_keeper_bash_typed
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
       ~(config : Coord.config)
@@ -132,18 +144,23 @@ let handle_keeper_bash_typed
         in
         let dispatch_sandbox =
           match sandbox_profile with
-          | Local -> Ok (Masc_exec.Sandbox_target.host ())
+          | Local -> Ok (Masc_exec.Sandbox_target.host (), [])
           | Docker ->
             if typed_input_has_env input
             then Error "typed keeper_bash Docker Shell IR dispatch does not support env yet"
-            else typed_docker_sandbox_target ~turn_sandbox_factory ~meta ~cwd
+            else (
+              match typed_docker_local_fallback_target ~meta ~timeout_sec with
+              | Some fallback when in_playground -> Ok fallback
+              | Some _ | None ->
+                typed_docker_sandbox_target ~turn_sandbox_factory ~meta ~cwd
+                |> Result.map (fun target -> target, []))
         in
         (match dispatch_sandbox with
          | Error e ->
            error_json
              ~fields:[ "typed", `Bool true; "cmd", `String cmd_for_log; "cwd", `String cwd ]
              e
-         | Ok dispatch_sandbox ->
+         | Ok (dispatch_sandbox, sandbox_extra_fields) ->
         if Worker_dev_tools.is_destructive_bash_operation cmd
         then
           Yojson.Safe.to_string
@@ -227,6 +244,7 @@ let handle_keeper_bash_typed
                     ~cmd
                     ~extra:
                       (runtime_failure_fields
+                       @ sandbox_extra_fields
                        @ [ "cwd", `String cwd
                          ; "typed", `Bool true
                          ; "execution_time_ms", `Int elapsed_ms

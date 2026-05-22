@@ -77,6 +77,11 @@ val docker_run_pull_never_args : unit -> string list
 (** Canonical operator action for a missing keeper sandbox image. *)
 val docker_image_missing_next_action : string
 
+(** [docker_image_present ~image ~timeout_sec] checks whether the configured
+    keeper sandbox image can be inspected locally. [Error message] includes
+    daemon/socket access failures as well as missing-image failures. *)
+val docker_image_present : image:string -> timeout_sec:float -> (unit, string) result
+
 (** Docker [--label] argv fragment for containers owned by the keeper
     sandbox runtime. *)
 val docker_label_args

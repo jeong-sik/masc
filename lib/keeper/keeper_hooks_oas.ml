@@ -213,8 +213,9 @@ let make_hooks
         fun ~tool_name:_ ~input:_ -> None)
     ?(on_tool_executed :
         tool_name:string -> input:Yojson.Safe.t -> output_text:string ->
-        success:bool -> duration_ms:float -> provider:string -> unit =
-        fun ~tool_name:_ ~input:_ ~output_text:_ ~success:_ ~duration_ms:_ ~provider:_ -> ())
+        success:bool -> duration_ms:float -> provider:string ->
+        typed_outcome:Keeper_tool_outcome.t option -> unit =
+        fun ~tool_name:_ ~input:_ ~output_text:_ ~success:_ ~duration_ms:_ ~provider:_ ~typed_outcome:_ -> ())
     ?(trajectory_acc : Trajectory.accumulator option)
     ?(discover_work_nudge : unit -> string option =
         fun () -> None)
@@ -497,6 +498,23 @@ let make_hooks
           | Ok { Agent_sdk.Types.content; _ } -> content
           | Error { Agent_sdk.Types.message; _ } -> message
         in
+        (* Extract typed_outcome from structured tool output JSON.  The claim
+           handler embeds a typed outcome variant when it reports no eligible
+           tasks so downstream can classify progress without string parsing. *)
+        let typed_outcome =
+          match output with
+          | Ok { Agent_sdk.Types.content; _ } ->
+            (match Yojson.Safe.from_string content with
+             | json ->
+               (match json with
+                | `Assoc fields ->
+                  (match List.assoc_opt "typed_outcome" fields with
+                   | Some nested -> Keeper_tool_outcome.of_json nested
+                   | None -> None)
+                | _ -> None)
+             | exception _ -> None)
+          | Error _ -> None
+        in
         let input_keys = match input with
           | `Assoc pairs -> String.concat "," (List.map fst pairs)
           | _ -> "-"
@@ -701,6 +719,7 @@ let make_hooks
              ~success:(outcome = "ok")
              ~duration_ms:summary.duration_ms
              ~provider:summary.provider
+             ~typed_outcome
          with Eio.Cancel.Cancelled _ as e -> raise e
             | exn ->
               Prometheus.inc_counter

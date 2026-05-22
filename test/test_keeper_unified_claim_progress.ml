@@ -92,6 +92,7 @@ let tool_call_detail ?(outcome = "ok") tool_name : KAR.tool_call_detail =
   { tool_name
   ; provider = "test"
   ; outcome
+  ; typed_outcome = None
   ; latency_ms = 1.0
   ; task_id = None
   ; route_evidence = None

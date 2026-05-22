@@ -257,6 +257,40 @@ let tool_progress_class_to_string = function
   | Completion -> "completion"
 ;;
 
+(** [turn_effect] abstracts the 4 tool-progress classes into the 3 actual
+    effects they have on the turn FSM. The existing 4-class classification
+    collapses to 2 effects (increment streak / reset streak); we add a
+    third for task-555 idle-loop prevention.
+
+    - [Streak_increment]: Passive_status, Claim_context — read-only or
+      context-binding turns that do not prove liveness.
+    - [Streak_reset]: Execution, Completion — turns that materially advance
+      or complete work.
+    - [Streak_reset_and_empty_queue_sleep]: the keeper legitimately has no
+      work to do (all tasks scope-excluded, no claimed task, etc.). Resets
+      the streak and signals the phase gate to enter EmptyQueueSleep.
+
+    @since task-555 *)
+type turn_effect =
+  | Streak_increment
+  | Streak_reset
+  | Streak_reset_and_empty_queue_sleep of {
+      reason : empty_queue_reason;
+    }
+
+and empty_queue_reason =
+  | No_eligible_tasks of {
+      scope_excluded_count : int;
+      all_goals_excluded : bool;
+    }
+  | No_work_to_report
+;;
+
+let effect_of_progress_class = function
+  | Passive_status | Claim_context -> Streak_increment
+  | Execution | Completion -> Streak_reset
+;;
+
 let canonical_tool_name = canonical_name
 let canonical_tool_name_observed = canonical_name_observed
 
@@ -520,6 +554,27 @@ let classify_tool_progress name =
   else if tool_name_can_satisfy_required_contract name
   then Execution
   else Passive_status
+;;
+
+(** [classify_tool_progress_with_outcome] routes the legacy name-based
+    classification through the typed-outcome channel when available.
+
+    The critical path for task-555: a [Claim_context] tool such as
+    [keeper_task_claim] that returns [No_progress (No_eligible_tasks _)]
+    must produce [Streak_reset_and_empty_queue_sleep], not
+    [Streak_increment]. Without this override the keeper enters an
+    idle loop of claim → extend → claim.
+
+    @since task-555 *)
+let classify_tool_progress_with_outcome name outcome =
+  match outcome with
+  | Some (Keeper_tool_outcome.No_progress { reason = No_eligible_tasks { scope_excluded_count; all_goals_excluded } }) ->
+    Streak_reset_and_empty_queue_sleep
+      { reason = No_eligible_tasks { scope_excluded_count; all_goals_excluded } }
+  | Some (Keeper_tool_outcome.No_progress { reason = Resource_conflict _ | No_work_available })
+  | Some (Keeper_tool_outcome.Progress | Keeper_tool_outcome.Error _)
+  | None ->
+    effect_of_progress_class (classify_tool_progress name)
 ;;
 
 let is_owned_task_coordination_progress_tool_name name =

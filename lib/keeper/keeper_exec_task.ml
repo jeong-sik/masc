@@ -616,6 +616,35 @@ let handle_keeper_task_tool
               ?fallback_reason:claim_goal_scope.fallback_reason ()
           , [] )
     in
+    let typed_outcome_field =
+      match result with
+      | Coord.Claim_next_no_eligible
+          { scope_excluded_count
+          ; blocked_count
+          ; verification_blocked_count
+          ; required_tool_excluded_count
+          ; _
+          } ->
+        let all_goals_excluded =
+          match claim_goal_scope.effective_goal_ids with
+          | [] -> true
+          | _ -> false
+        in
+        Some
+          ( "typed_outcome"
+          , Keeper_tool_outcome.to_json
+              (Keeper_tool_outcome.No_progress
+                 { reason =
+                     Keeper_tool_outcome.No_eligible_tasks
+                       { scope_excluded_count
+                       ; blocked_count
+                       ; verification_blocked_count
+                       ; required_tool_excluded_count
+                       ; all_goals_excluded
+                       }
+                 }) )
+      | _ -> None
+    in
     Yojson.Safe.to_string
       (`Assoc
          ([
@@ -623,6 +652,9 @@ let handle_keeper_task_tool
             ("claim_scope", claim_scope);
             ("auto_started", `Bool !auto_started_ok);
           ]
+         @ (match typed_outcome_field with
+            | Some field -> [ field ]
+            | None -> [])
          @ claimed_task_fields
          @ wip_admission_result_fields wip_rejections
          @

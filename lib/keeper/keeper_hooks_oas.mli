@@ -205,7 +205,8 @@ val make_hooks :
                      input:Yojson.Safe.t ->
                      output_text:string ->
                      success:bool ->
-                     duration_ms:float -> provider:string -> unit) ->
+                     duration_ms:float -> provider:string ->
+                     typed_outcome:Keeper_tool_outcome.t option -> unit) ->
   ?trajectory_acc:Trajectory.accumulator ->
   ?discover_work_nudge:(unit -> string option) ->
   ?passive_loop_nudge:(unit -> string option) ->

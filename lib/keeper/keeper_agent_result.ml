@@ -7,6 +7,7 @@ type tool_call_detail =
   { tool_name : string
   ; provider : string
   ; outcome : string
+  ; typed_outcome : Keeper_tool_outcome.t option
   ; latency_ms : float
   ; task_id : string option
   ; route_evidence : Yojson.Safe.t option
@@ -23,6 +24,11 @@ let tool_call_detail_to_json (detail : tool_call_detail) =
     | Some task_id -> [ ("task_id", `String task_id) ]
     | None -> []
   in
+  let typed_outcome_field =
+    match detail.typed_outcome with
+    | Some outcome -> [ ("typed_outcome", Keeper_tool_outcome.to_json outcome) ]
+    | None -> []
+  in
   `Assoc
     ([
        ("tool_name", `String detail.tool_name);
@@ -30,6 +36,7 @@ let tool_call_detail_to_json (detail : tool_call_detail) =
        ("outcome", `String detail.outcome);
        ("latency_ms", `Float detail.latency_ms);
      ]
+     @ typed_outcome_field
      @ task_id_field
      @ route_evidence_field)
 

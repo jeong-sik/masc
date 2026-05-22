@@ -128,6 +128,44 @@ type tool_progress_class =
 
 val tool_progress_class_to_string : tool_progress_class -> string
 
+(** [turn_effect] abstracts the 4 tool-progress classes into the 3 actual
+    effects they have on the turn FSM. See implementation for detailed
+    semantics of each constructor.
+
+    @since task-555 *)
+type turn_effect =
+  | Streak_increment
+  | Streak_reset
+  | Streak_reset_and_empty_queue_sleep of {
+      reason : empty_queue_reason;
+    }
+
+and empty_queue_reason =
+  | No_eligible_tasks of {
+      scope_excluded_count : int;
+      all_goals_excluded : bool;
+    }
+  | No_work_to_report
+
+(** Map the legacy 4-class classification to its underlying [turn_effect].
+    All existing tool-progress classes collapse to [Streak_increment] or
+    [Streak_reset]; [Streak_reset_and_empty_queue_sleep] is only produced
+    via typed-outcome classification (see [classify_tool_progress_with_outcome]).
+
+    @since task-555 *)
+val effect_of_progress_class : tool_progress_class -> turn_effect
+
+(** Route a tool call through typed-outcome classification.
+
+    When [outcome] is [Some (No_progress (No_eligible_tasks ...))] the
+    result is [Streak_reset_and_empty_queue_sleep] regardless of the
+    tool's legacy progress class. All other outcomes fall back to
+    [effect_of_progress_class (classify_tool_progress name)].
+
+    @since task-555 *)
+val classify_tool_progress_with_outcome
+  : string -> Keeper_tool_outcome.t option -> turn_effect
+
 (** Pure canonicalisation — no telemetry side-effect.
 
     Used by set-logic call sites (required-tool canonicalisation, surface

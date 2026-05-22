@@ -167,6 +167,42 @@ error is the operator-visible signal.
 - Removing catch-all `_ ->` arms in non-parse code (RFC-OAS Cluster C
   candidate).
 
+## 8a. Complementary wildcard-narrowing sweep (2026-05-22)
+
+The §6 sunset criterion is satisfied by `Parse_outcome.parse_safe`
+adoption at the 7 predecessor sites.  Separately from that
+migration, `/loop` session 2026-05-22 opened a stacked sweep to narrow
+remaining `| exception _ -> ...` arms under `lib/` (and matching
+`try ... with | _ -> ...` arms) to the typed exception(s) the
+underlying call can actually raise.  This sweep is *complementary*,
+not a substitute for the §6 criterion: it tightens the §2 pattern
+shape (no unbounded wildcards) but each site retains its own ad-hoc
+result type rather than the unified `Parse_outcome.t`.
+
+| PR | File(s) | Sites | Narrowing target |
+|----|---------|-------|------------------|
+| #17780 | `keeper_approval_queue` | 1 | `Yojson.Safe.Util.Type_error` |
+| #17783 | `host_fd_pressure_poller` | 3 | `Scanf.Scan_failure \| End_of_file \| Unix.Unix_error`, `Yojson.Safe.Util.Type_error`, `Yojson.Json_error` |
+| #17789 | `coord_worktree_repo_discovery` | 4 | `Otoml.Type_error`, `Otoml.Parse_error \| Sys_error` |
+| #17793 | `ide_region_tracker` | 2 | `Failure _` |
+| #17795 | `cascade_declarative_parser` | 2 | `Otoml.Type_error` |
+| #17796 | `cascade_declarative_parser` (parse_headers) | 2 | `Otoml.Type_error` |
+| #17803 | `sidecar`, `bg_task`, `bash_history`, `shutdown_hooks` | 5 | `Yojson.Json_error`, `Unix.Unix_error` |
+
+Planned cumulative effect after the listed stacked PRs land:
+**18 wildcard arms narrowed**; `| exception _ -> ...` count under
+`lib/` drops from 19 → 1.  Until those follow-ups merge, this RFC
+records the migration plan rather than claiming the current tree has
+already reached the final count.  The intended single remaining site
+is `keeper_turn_driver_admission.release_client_capacity_quietly`,
+retained because it wraps a caller-supplied callback whose exception
+contract is unbounded by design (RFC §3 anti-goal "Each call site
+keeps its own domain error type").
+
+The sweep does *not* flip this RFC's status — the §6 criterion still
+requires `Parse_outcome` adoption at the 7 predecessor sites.  Tracker
+for the formal migration remains in §5.
+
 ## 9. Risk
 
 - `Printexc.exn_slot_name`-based classification is a string match. If

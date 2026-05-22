@@ -28,7 +28,7 @@ Keeper pause emit은 5 site에서 자동 발동되지만, 그 중 **3 site는 au
 | **S3** overflow + compact_retry_exhausted | `keeper_turn_cascade_budget.ml:546` | **❌** | (없음) |
 | **S4** resilience_retry/fallback_unbound | `keeper_turn_cascade_budget.ml:599` + `keeper_unified_turn_failure.ml:65` + `keeper_unified_turn.ml:1445` | **❌** | (없음) |
 | **S5** turn livelock block | `keeper_unified_turn_livelock_block.ml:88` | **❌** | (없음) |
-| S6 oas_timeout_budget | `keeper_supervisor_pause_policy.handle_oas_timeout_budget_pause` | ✅ | `Auto_resume_with_backoff` |
+| S6 provider_timeout_loop | `keeper_supervisor_pause_policy.handle_provider_timeout_pause` | ✅ | `Auto_resume_with_backoff` |
 | S7 stale storm | `keeper_supervisor_pause_policy.handle_stale_storm_pause` | ❌ | `Manual_resume_required` (의도적) |
 
 S3/S4/S5는 *cascade routing failure* 또는 *resilience executor 부재* 같은 transient 상태에서 발동되는데도 영구 pause로 떨어지는 비대칭이다. S6는 같은 cascade 영역인데도 auto-resume — 일관성 부재.
@@ -47,7 +47,7 @@ S3/S4/S5는 *cascade routing failure* 또는 *resilience executor 부재* 같은
 ## 4. 결함
 
 ### 4.1 의미적 비대칭
-S6 (oas_timeout_budget)는 transient cascade health 문제로 분류하여 backoff resume. 그러나 같은 *cascade routing 영역*의 S3/S4/S5는 manual 강제 — 사용자가 의도적으로 분리한 *없음*. 근거: `keeper_supervisor_pause_policy.mli`에 정책 enum (`Auto_resume_with_backoff` / `Manual_resume_required`)이 있지만 S3/S4/S5는 이 enum을 거치지 않고 직접 `dispatch_event_unit Operator_pause` + `set_keeper_paused_state ~paused:true` 호출.
+S6 (provider_timeout_loop)는 transient cascade health 문제로 분류하여 backoff resume. 그러나 같은 *cascade routing 영역*의 S3/S4/S5는 manual 강제 — 사용자가 의도적으로 분리한 *없음*. 근거: `keeper_supervisor_pause_policy.mli`에 정책 enum (`Auto_resume_with_backoff` / `Manual_resume_required`)이 있지만 S3/S4/S5는 이 enum을 거치지 않고 직접 `dispatch_event_unit Operator_pause` + `set_keeper_paused_state ~paused:true` 호출.
 
 ### 4.2 메커니즘 부재
 `auto_resume_after_sec`을 set하는 코드 site는 `handle_crash_auto_pause` (`keeper_supervisor_pause_policy.ml:43-48`) 단일. S3/S4/S5는 이 함수를 호출하지 않음. supervisor Phase 3.5 sweep (`keeper_supervisor.ml:1517-1608`)은 `auto_resume_after_sec=Some sec`만 보므로 S3/S4/S5 pauses는 sweep에 *invisible*.
@@ -89,7 +89,7 @@ val handle_pause :
 | Overflow + compact_retry_exhausted | Auto_resume_with_backoff (300s → 3600s) | compact retry exhaustion은 transient context size 문제. 다음 turn에서 context가 자연 축소될 수 있음. |
 | Resilience retry/fallback unbound | Auto_resume_with_backoff (60s → 600s) | provider unavailability는 보통 transient. backoff로 cascade rotation 시도. |
 | Turn livelock | Auto_resume_with_backoff (180s → 1800s) | cascade routing 실패는 cascade 자체가 회복되면 자동 해결 가능. |
-| oas_timeout_budget | Auto_resume_with_backoff (현재 정책 유지) | 변경 없음. |
+| provider_timeout_loop | Auto_resume_with_backoff (현재 정책 유지) | 변경 없음. |
 | Stale storm | Manual_resume_required (현재 정책 유지) | stale storm은 운영자 진단 필요 — 의도적 manual. |
 
 ### 5.3 supervisor sweep 확장

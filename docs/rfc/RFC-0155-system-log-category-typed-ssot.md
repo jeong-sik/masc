@@ -64,7 +64,7 @@ type t =
   | Host_fd_pressure
   | Docker_start_pressure
   | Keeper_stale_watchdog_lifecycle
-  | Oas_timeout_budget
+  | Provider_timeout
   | Provider_cascade_exhaustion
   | Required_tool_contract_mismatch
   | Task_state_probe_misuse

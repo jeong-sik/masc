@@ -169,8 +169,8 @@ let host_path_of_command_value ~cwd value =
   else value
 ;;
 
-let ensure_command_existing_dirs ~(config : Coord.config) ~(meta : Keeper_types.keeper_meta)
-      ~cwd ~cmd =
+let ensure_existing_dir_values ~(config : Coord.config) ~(meta : Keeper_types.keeper_meta)
+      ~cwd values =
   let rec loop = function
     | [] -> Ok ()
     | value :: rest ->
@@ -179,5 +179,23 @@ let ensure_command_existing_dirs ~(config : Coord.config) ~(meta : Keeper_types.
        | Error _ as err -> err
        | Ok _ -> loop rest)
   in
-  loop (Worker_dev_tools.existing_dir_path_values cmd)
+  loop values
+;;
+
+let ensure_shell_ir_existing_dirs ~(config : Coord.config) ~(meta : Keeper_types.keeper_meta)
+      ~cwd ~ir =
+  ensure_existing_dir_values
+    ~config
+    ~meta
+    ~cwd
+    (Worker_dev_tools.existing_dir_path_values_of_shell_ir ir)
+;;
+
+let ensure_command_existing_dirs ~(config : Coord.config) ~(meta : Keeper_types.keeper_meta)
+      ~cwd ~cmd =
+  ensure_existing_dir_values
+    ~config
+    ~meta
+    ~cwd
+    (Worker_dev_tools.existing_dir_path_values cmd)
 ;;

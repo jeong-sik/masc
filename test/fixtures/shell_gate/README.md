@@ -68,7 +68,8 @@ Each line is a single object:
 
 - For `reject`: see `reject_reason_tag` —
   `command_not_in_allowlist` / `pipeline_segment_disallowed` /
-  `pipes_not_allowed` / `path_outside_policy`.
+  `pipes_not_allowed` / `redirect_disallowed_in_caller` /
+  `path_outside_policy`.
 - For `cannot_parse`: see `parse_reason_tag` — `parse_error` /
   `timeout` / `depth_limit` / `token_limit`.
 - For `too_complex`: see `too_complex_reason_tag` —

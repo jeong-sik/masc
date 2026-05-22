@@ -8,7 +8,6 @@ val content_blocks_to_json :
 val content_blocks_of_json :
   Yojson.Safe.t -> Agent_sdk.Types.content_block list option
 
-val legacy_content_text_of_json : Yojson.Safe.t -> string
 val string_field_opt : string -> string option -> (string * Yojson.Safe.t) list
 val metadata_of_json : Yojson.Safe.t -> (string * Yojson.Safe.t) list
 val message_to_json : Agent_sdk.Types.message -> Yojson.Safe.t

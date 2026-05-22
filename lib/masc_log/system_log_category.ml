@@ -49,7 +49,12 @@ let all =
     Network_error_other;
   ]
 
-let of_string_opt = function
+let canonical_label = function
+  | "oas_timeout_budget" -> "provider_timeout"
+  | label -> label
+
+let of_string_opt raw =
+  match canonical_label raw with
   | "task_ownership_ambiguity_current_task_unset" ->
       Some Task_ownership_ambiguity_current_task_unset
   | "state_store_current_task_path_corruption" ->
@@ -59,7 +64,7 @@ let of_string_opt = function
   | "host_fd_pressure" -> Some Host_fd_pressure
   | "docker_start_pressure" -> Some Docker_start_pressure
   | "keeper_stale_watchdog_lifecycle" -> Some Keeper_stale_watchdog_lifecycle
-  | "provider_timeout" | "oas_timeout_budget" -> Some Provider_timeout
+  | "provider_timeout" -> Some Provider_timeout
   | "provider_cascade_exhaustion" -> Some Provider_cascade_exhaustion
   | "required_tool_contract_mismatch" -> Some Required_tool_contract_mismatch
   | "task_state_probe_misuse" -> Some Task_state_probe_misuse

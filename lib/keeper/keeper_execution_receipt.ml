@@ -1152,12 +1152,23 @@ let stale_kill_class_label = function
 ;;
 
 let stale_terminal_reason_code_typed reason =
-  Keeper_turn_terminal_code.of_failure_reason_option reason
+  match reason with
+  | Some (Keeper_registry.Oas_timeout_budget_loop _) ->
+    Keeper_turn_terminal_code.Provider_runtime_error "provider_timeout_loop"
+  | _ -> Keeper_turn_terminal_code.of_failure_reason_option reason
 ;;
 
 let stale_broadcast_failure_cohort = function
+  | Some (Keeper_registry.Oas_timeout_budget_loop _) -> "provider_timeout_loop"
   | Some _ as reason -> Keeper_registry.failure_reason_cohort_key reason
   | None -> "stale_turn_timeout"
+;;
+
+let stale_broadcast_failure_reason_text = function
+  | Some (Keeper_registry.Oas_timeout_budget_loop { count }) ->
+    Some (Printf.sprintf "provider_timeout_loop(count=%d)" count)
+  | Some reason -> Some (Keeper_registry.failure_reason_to_string reason)
+  | None -> None
 ;;
 
 let stale_broadcast_kill_class = function
@@ -1190,9 +1201,7 @@ let stale_broadcast_payload
       ~last_turn_ts
   =
   let cascade_name_string = cascade_name_to_string cascade_name in
-  let failure_reason_text =
-    Option.map Keeper_registry.failure_reason_to_string failure_reason
-  in
+  let failure_reason_text = stale_broadcast_failure_reason_text failure_reason in
   let failure_reason_cohort = stale_broadcast_failure_cohort failure_reason in
   `Assoc
     [ "schema", `String "keeper.operator_broadcast_required.v1"

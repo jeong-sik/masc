@@ -777,22 +777,22 @@ let test_stale_broadcast_payload_preserves_timeout_budget_failure_reason () =
   check
     string
     "disposition reason"
-    "oas_timeout_budget_loop"
+    "provider_timeout_loop"
     (payload |> U.member "disposition_reason" |> U.to_string);
   check
     string
     "terminal reason"
-    "oas_timeout_budget"
+    "provider_timeout_loop"
     (payload |> U.member "terminal_reason_code" |> U.to_string);
   check
     string
     "failure cohort"
-    "oas_timeout_budget_loop"
+    "provider_timeout_loop"
     (payload |> U.member "failure_reason_cohort" |> U.to_string);
   check
     string
     "failure reason detail"
-    "oas_timeout_budget_loop(count=4)"
+    "provider_timeout_loop(count=4)"
     (payload |> U.member "failure_reason" |> U.to_string);
   check
     string

@@ -17,6 +17,11 @@ let dedupe_tool_names names =
   Json_util.dedupe_keep_order
     (names |> List.map String.trim |> List.filter (fun name -> name <> ""))
 
+let json_list_length = function
+  | `List l -> List.length l
+  | _ -> 0
+;;
+
 let trajectory_line_ts = Trace.line_ts
 let dedupe_thinking_lines = Trace.dedupe_thinking_lines
 
@@ -1050,7 +1055,7 @@ let handle_keeper_get_subroutes state req request reqd =
       let json = `Assoc [
         "keeper", `String name;
         "current_phase", phase_str;
-        "count", `Int (match transitions with `List l -> List.length l | _ -> 0);
+        "count", `Int (json_list_length transitions);
         "transitions", transitions;
       ] in
       Http.Response.json ~compress:true ~request:req
@@ -1071,7 +1076,7 @@ let handle_keeper_get_subroutes state req request reqd =
       in
       let json = `Assoc [
         "keeper", `String name;
-        "count", `Int (match events with `List l -> List.length l | _ -> 0);
+        "count", `Int (json_list_length events);
         "events", events;
       ] in
       Http.Response.json ~compress:true ~request:req

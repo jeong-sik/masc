@@ -197,3 +197,66 @@ implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body �
 | 0153 | Cascade Backpressure & Tier Admission | Active | (this PR) 2026-05-21 | 3-phase (A.1 + A.2 + B.1) 머지 후 frontmatter `status: Draft` 잔존 — `audit-rfc-closeout-lag.sh` (#17123) 으로 surfaced. **Phase A.1 #16965** (typed `Cascade_saturation_signal`), **Phase A.2 #16988** (wire emission), **Phase B.1 #16991** (`cascade_tier_admission` module + tests). `implementation_prs` freeform string ("#16965 (Phase A.1, …)") 가 README 표준 (bare integer list) 으로 normalize. Phase B.2+ (runtime path wiring) / Phase C (caller backpressure) / soak window 미시작. Status promoted Draft → Active. Related RFC-0009, RFC-0022, RFC-0042, RFC-0082, RFC-0088, RFC-0102, RFC-0127, RFC-0152. |
 | 0154 | System_error_class typed SSOT — close substring-classifier loop across backend + telemetry + dashboard | Implemented | (this PR) 2026-05-21 | 5-PR sprint #17015~#17051 (Tool Monitor dashboard UX) 후속. OS-level 실패 분류가 backend 4 substring matcher (`keeper_fd_pressure.ml:97`, `keeper_disk_pressure.ml:55`, `coord_utils_ops.ml:410`, `keeper_stale_watchdog.ml:203`) 로 분산 + `Telemetry_coverage_gap.record ~error:string` 의 13 caller 가 `Printexc.to_string exn` 으로 압축 + dashboard `classifyCoverageError` 가 *같은 substring vocab 으로 재분류* 하는 정보 손실 cycle. `lib/core/system_error_class.ml` closed-sum SSOT (`Fd_exhaustion \| Disk_exhaustion \| Permission_denied \| Connection_refused \| Timeout \| Other of string`) + wire `error_class` typed tag + dashboard typed-first cascading lookup. 4-PR phased rollout 24h 안 closure: PR-1 #17064 (모듈), PR-3 #17073 (dashboard lookup), PR-4 #17072 (cutover runbook), PR-2 #17078 (wire + 4 matcher 통폐합). Workaround Rejection Bar 시그니처 #2 (substring 분류기) + #3 (N-of-M, PR #17051 disk_exhaustion 가 2-of-M 누적 시작) root fix. Related RFC-0042, RFC-0088, RFC-0097, RFC-0105, RFC-0122, RFC-0142, RFC-0148, RFC-0149. |
 | 0162 | JSONL Write-Path FD Pressure Root-Fix | Draft | (this PR) 2026-05-23 | Dashboard fleet-health 패널 audit (2026-05-23) 가 추적한 7 surface signal 이 `.masc/` JSONL writer 의 단일 write-path fd/disk 압박으로 수렴. RFC-0108 §3.3 의 *cross-domain fd cache 비목표* 가정 (fd 수가 keeper N≤64 수준) 을 production evidence (22,440 calls × ENFILE, 30 day-file × 465 MB, dashboard 30s self-amplification) 로 반증. 4-phase migration: Phase 0a (`Fs_compat.append_jsonl` `mkdir_p` once-per-path memoize — append 당 stat 1→0, RFC-0108 직교), Phase 0b (`Dated_jsonl.count_entries` 10s TTL cache — dashboard scan amplification 3× ↓), Phase 1 (`MASC_TOOL_CALL_LOG_RETENTION_DAYS` opt-in → opt-out default 30d, *mli line 99-103 의 "default is 30 days" 약속 회복*), Phase 2 (per-domain fd cache — RFC-0108 §3.3 invalidate). 별도 RFC 후보로 `blocker_class` typed variant 에 `Fd_pressure_blocked` 추가 (§3.5 observability gap, scope 밖). Workaround Rejection Bar §1 (counter/WARN 추가 아닌 syscall 제거) + §2 (substring 없음) + §3 (N-of-M 회피 — 각 phase 가 root contributor 1 개 닫음) 모두 회피. Related RFC-0089, RFC-0097, RFC-0108, RFC-0137, RFC-0154. |
+
+## Closed RFC Archive
+
+> Archive of RFCs whose frontmatter `status` is `Implemented` or `Superseded`.
+> Generated from `rg "^status: (Implemented|Superseded)" docs/rfc/`.
+> Last updated: 2026-05-23.
+
+### Implemented
+
+- [RFC-0010 — ocamlformat config reconciliation](RFC-0010-ocamlformat-config-reconciliation.md)
+- [RFC-0071 — Exhaustive Match Sweep Codemod — Eliminate N-of-M `_ -> false/None` Anti-Pattern](RFC-0071-exhaustive-match-sweep-codemod.md)
+- [RFC-0072 — Type-encoded keeper sub-FSM transitions (cascade + turn_phase)](RFC-0072-keeper-sub-fsm-transitions-typed.md)
+- [RFC-0073 — Tool Readiness Probe — Typed Precondition + Runtime Gap Disclosure](RFC-0073-tool-readiness-probe.md)
+- [RFC-0077 — Write-side silent failure — typed propagation](RFC-0077-write-side-silent-failure-typed.md)
+- [RFC-0078 — RFC Number Reservation Ledger + CI Collision Guard](RFC-0078-rfc-number-reservation-ledger.md)
+- [RFC-0079 — Log row typed encoder + silent-drop removal](RFC-0079-log-row-typed-encoder.md)
+- [RFC-0080 — Tool registry SSOT — collapse 15-fold OR membership into typed Tool_name boundary](RFC-0080-tool-registry-ssot.md)
+- [RFC-0081 — OAS Telemetry Envelope Context & Keeper/Goal Pivot Timeline](RFC-0081-telemetry-envelope-and-pivot-timeline.md)
+- [RFC-0084 — Keeper→Tool Dispatch Unification + 100% Trace/Telemetry](RFC-0084-keeper-tool-dispatch-unification.md)
+- [RFC-0086 — Keeper namespace bulk promotion to sub-library](RFC-0086-keeper-namespace-bulk-promotion.md)
+- [RFC-0087 — Tool Dispatch Path Unification + Legacy Purge](RFC-0087-tool-dispatch-path-unification-and-legacy-purge.md)
+- [RFC-0089 — String Classifier to Typed Variant — direct replacement, no lint](RFC-0089-string-classifier-to-typed-variant.md)
+- [RFC-0090 — Write-side success-model attribution — finish N-of-M migration](RFC-0090-write-side-success-model-attribution.md)
+- [RFC-0091 — Keeper bash tool: cmd string → typed Argv schema (lexer/validator 박멸)](RFC-0091-keeper-bash-typed-argv.md)
+- [RFC-0093 — Board persistence — path unification (snapshot vs append)](RFC-0093-board-persistence-path-unification.md)
+- [RFC-0094 — Compact cooldown semantics split — typed write anchor vs check anchor](RFC-0094-compact-cooldown-semantics-split.md)
+- [RFC-0095 — OpenAI-compat provider streaming wire-up](RFC-0095-openai-compat-streaming-wire-up.md)
+- [RFC-0096 — Keeper Turn Contract — multi-turn reasoning + tier-group SPOF root-fix](RFC-0096-keeper-turn-contract-multi-turn-and-tier-group-spof.md)
+- [RFC-0098 — Typed JSON-RPC error envelope & production-code silent-failure lint](RFC-0098-typed-jsonrpc-error-envelope.md)
+- [RFC-0102 — Pre-turn cascade availability gate — reuse, not new surface](RFC-0102-pre-turn-cascade-availability-gate.md)
+- [RFC-0105 — OpenAI-compat boundary: Agent_sdk.Error.t → HTTP status + typed envelope](RFC-0105-openai-compat-typed-error-mapping.md)
+- [RFC-0110 — Tool-pair atomicity at write boundary — sunset compaction repair fabrication](RFC-0110-tool-pair-atomicity-write-boundary.md)
+- [RFC-0111 — Goal mint atomicity — auto-goal uniqueness invariant at write boundary](RFC-0111-goal-mint-atomicity-uniqueness-invariant.md)
+- [RFC-0112 — Typed JSON parse boundary — eliminate silent-drop fallback across read sites](RFC-0112-typed-json-parse-boundary.md)
+- [RFC-0113 — KeeperReactionLiveness L1–L5 runtime — phased OCaml mirror of TLA+ design ground](RFC-0113-keeper-reaction-liveness-runtime.md)
+- [RFC-0114 — KSM event precondition enforcement at apply_event boundary](RFC-0114-ksm-precondition-enforcement.md)
+- [RFC-0115 — KTC turn_phase spec ← runtime parity — backfill spec for Turn_routing / Turn_exhausted](RFC-0115-ktc-turn-phase-spec-runtime-parity.md)
+- [RFC-0116 — KCR fallback cap mechanism parity — explicit counter at spec ↔ visited-list at runtime](RFC-0116-kcr-fallback-cap-mechanism-parity.md)
+- [RFC-0117 — KCR item-health representation parity — typed Degraded variant + spec cooldown action + PerKeeperIsolation correction](RFC-0117-kcr-health-state-representation-parity.md)
+- [RFC-0118 — KCT NoTerminalCascade S1 — typed Result at select_cascade boundary + Zombie mapping correction](RFC-0118-kct-terminal-cascade-contract.md)
+- [RFC-0119 — Observer spec mapping table drift lint — sentinel-marker validator for OCaml↔TLA+ collapse projections](RFC-0119-observer-spec-mapping-table-drift-lint.md)
+- [RFC-0122 — Keeper disk pressure — process-local fleet failure mode beyond FD](RFC-0122-keeper-disk-pressure.md)
+- [RFC-0123 — Briefing last_event fabrication — option-typed write boundary, sunset read-side sentinel](RFC-0123-briefing-last-event-fabrication-write-boundary.md)
+- [RFC-0126 — Silent fallback discipline (typed split for option/result wildcard arms)](RFC-0126-silent-fallback-discipline.md)
+- [RFC-0129 — Cascade attempt idle-cap: kill the reserve_fraction band-aid](RFC-0129-http-idle-timeout-and-streaming-progress.md)
+- [RFC-0130 — Fleet Capacity Supervisor](RFC-0130-fleet-capacity-supervisor.md)
+- [RFC-0131 — Shell Command Gate facade — multi-caller IR-first validation](RFC-0131-shell-command-gate-facade.md)
+- [RFC-0132 — Redaction SSOT — `runtime` boundary-label private type](RFC-0132-redaction-ssot.md)
+- [RFC-0133 — Keeper Phase Casing SSOT Consolidation](RFC-0133-keeper-phase-casing-ssot-consolidation.md)
+- [RFC-0135 — Dashboard Keeper Operational Surface — Typed SSOT](RFC-0135-dashboard-keeper-operational-ssot.md)
+- [RFC-0136 — Keeper Unified Turn — Stage Decomposition of run_keeper_cycle](RFC-0136-keeper-unified-turn-decomposition.md)
+- [RFC-0138 — dashboard snapshot lock free architecture](RFC-0138-dashboard-snapshot-lock-free-architecture.md)
+- [RFC-0140 — Dashboard Wire-Format Codec Layer](RFC-0140-dashboard-wire-codec-layer.md)
+- [RFC-0148 — Typed `tool_error` Variant for LLM-Facing Tool Failure Surface](RFC-0148-typed-tool-error-variant.md)
+- [RFC-0149 — audit telemetry as fix sunset](RFC-0149-audit-telemetry-as-fix-sunset.md)
+- [RFC-0151 — 4-metric monotone-decrease ratchet for code-smell metrics](RFC-0151-code-smell-monotone-ratchet.md)
+- [RFC-0153 — Cascade Backpressure & Tier Admission](RFC-0153-cascade-backpressure-and-admission.md)
+- [RFC-0154 — System_error_class typed SSOT — close substring-classifier loop across backend + telemetry + dashboard](RFC-0154-system-error-class-typed-ssot.md)
+- [RFC-0155 — System_log_category Typed SSOT — emit-side closed sum for ops log taxonomy](RFC-0155-system-log-category-typed-ssot.md)
+
+### Superseded
+
+- RFC-0055 — Cascade Fallback Chain Capability-Tier Routing (file missing; superseded_by 0058 per table above)

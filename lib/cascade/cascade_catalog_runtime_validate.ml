@@ -198,7 +198,7 @@ let rejection_of_path ~config_path ~attempted_mtime ~checked_at
 let active_source_state ~config_path =
   Cascade_toml_materializer.source_state ~config_path
 
-let profile_build_of_declarative_profile ~required_capability_profile
+let profile_build_of_declarative_profile
     (profile : Cascade_declarative_hotpath.profile) =
   let candidates =
     List.map
@@ -219,11 +219,10 @@ let profile_build_of_declarative_profile ~required_capability_profile
     cli_max_concurrent = profile.cli_max_concurrent;
     candidates;
     probes = Probe.profile_probes candidates;
-    required_capability_profile;
+    required_capability_profile = profile.required_capability_profile;
   }
 
-let validate_profile_static ?declarative_snapshot ~config_path
-    ~required_capability_profile name :
+let validate_profile_static ?declarative_snapshot ~config_path name :
     (profile_build, profile_rejection) result =
   let (_ : string) = config_path in
   match declarative_snapshot with
@@ -234,10 +233,7 @@ let validate_profile_static ?declarative_snapshot ~config_path
             String.equal profile.name name)
           snapshot.profiles
       with
-      | Some profile ->
-          Ok
-            (profile_build_of_declarative_profile
-               ~required_capability_profile profile)
+      | Some profile -> Ok (profile_build_of_declarative_profile profile)
       | None ->
           Error
             {
@@ -460,8 +456,7 @@ let validate_path_result ?sw ?net ~config_path () =
                 (fun (ok_acc, err_acc) name ->
                   match
                     validate_profile_static ?declarative_snapshot
-                      ~config_path
-                      ~required_capability_profile:None name
+                      ~config_path name
                   with
                   | Ok profile -> (profile :: ok_acc, err_acc)
                   | Error rejection -> (ok_acc, rejection :: err_acc))

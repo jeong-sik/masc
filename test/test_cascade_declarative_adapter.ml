@@ -672,6 +672,7 @@ let test_alias_parent_missing () =
     ; tier_groups = []
     ; routes = []
     ; system_targets = []
+    ; profiles = []
     }
   in
   let catalog = adapt_config cfg in

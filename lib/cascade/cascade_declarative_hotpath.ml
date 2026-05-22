@@ -26,6 +26,7 @@ type profile = {
   strategy : Cascade_strategy.t;
   ollama_max_concurrent : int option;
   cli_max_concurrent : int option;
+  required_capability_profile : string option;
   candidates : candidate list;
 }
 
@@ -105,6 +106,7 @@ let adapted_profile_to_profile (ap : adapted_profile) : profile option =
       strategy = ap.strategy;
       ollama_max_concurrent = ap.ollama_max_concurrent;
       cli_max_concurrent = ap.cli_max_concurrent;
+      required_capability_profile = ap.required_capability_profile;
       candidates;
     }
 

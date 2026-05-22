@@ -30,6 +30,7 @@ type adapted_profile = {
   strategy : Cascade_strategy.t;
   ollama_max_concurrent : int option;
   cli_max_concurrent : int option;
+  required_capability_profile : string option;
 }
 
 type adapted_catalog = {
@@ -439,6 +440,7 @@ let build_profile_from_tier (cfg : cascade_config)
     strategy;
     ollama_max_concurrent = tier.max_concurrent;
     cli_max_concurrent = tier.max_concurrent;
+    required_capability_profile = None;
   }
 
 (* --- Tier-group → adapted_profile --- *)
@@ -478,6 +480,7 @@ let build_profile_from_tier_group (cfg : cascade_config)
     strategy;
     ollama_max_concurrent = None;
     cli_max_concurrent = None;
+    required_capability_profile = tg.required_capability_profile;
   }
 
 (* --- Route target resolution --- *)

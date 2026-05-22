@@ -780,7 +780,10 @@ let parse_tier_group (name : string) (tbl : Otoml.t)
   | _, Error e -> Error e
   | Ok strategy, Ok keeper_assignable ->
     let fallback = Otoml.find_or ~default:false tbl Otoml.get_boolean [ "fallback" ] in
-    Ok { name; tiers; strategy; fallback; keeper_assignable }
+    let required_capability_profile =
+      Otoml.find_opt tbl Otoml.get_string [ "required_capability_profile" ]
+    in
+    Ok { name; tiers; strategy; fallback; keeper_assignable; required_capability_profile }
 ;;
 
 let parse_tier_groups (toml : Otoml.t)

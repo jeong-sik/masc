@@ -290,6 +290,7 @@ type cascade_tier_group =
   ; strategy : cascade_strategy
   ; fallback : bool
   ; keeper_assignable : bool option
+  ; required_capability_profile : string option
   }
 [@@deriving show, eq]
 

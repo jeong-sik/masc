@@ -42,6 +42,8 @@ type adapted_profile = {
   (** Per-tier [max_concurrent] cap for Ollama providers, if set. *)
   cli_max_concurrent : int option;
   (** Per-tier [max_concurrent] cap for CLI providers, if set. *)
+  required_capability_profile : string option;
+  (** Capability profile name required by this tier-group, if any. *)
 }
 
 type adapted_catalog = {
@@ -52,6 +54,8 @@ type adapted_catalog = {
   (** [(target_name, "provider.model")] pairs. *)
   default_profile : string option;
   (** The profile whose binding has [is-default = true], if any. *)
+  capability_profiles : Cascade_declarative_types.cascade_profile list;
+  (** Capability profiles declared in [[profiles.*]] section. *)
   errors : adapter_error list;
   (** Accumulated errors. Empty when adaptation succeeds fully. *)
 }

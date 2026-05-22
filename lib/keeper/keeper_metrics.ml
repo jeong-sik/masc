@@ -635,6 +635,10 @@ let metric_keeper_board_signal_no_wake_total = "masc_keeper_board_signal_no_wake
 let metric_keeper_meta_json_failures = "masc_keeper_meta_json_failures_total"
 let metric_keeper_tools_oas_failures = "masc_keeper_tools_oas_failures_total"
 
+let metric_keeper_tools_oas_deterministic_failures =
+  "masc_keeper_tools_oas_deterministic_failures_total"
+;;
+
 let metric_keeper_oas_hook_output_parse_failures =
   "masc_keeper_oas_hook_output_parse_failures_total"
 ;;

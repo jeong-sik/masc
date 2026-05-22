@@ -1573,6 +1573,8 @@
 
 (include stanzas/test_event_kind.inc)
 
+(include stanzas/test_exec_policy_path_arg_descriptor.inc)
+
 (include stanzas/test_export_symbol_graph.inc)
 
 (include stanzas/test_feature_flag_registry.inc)

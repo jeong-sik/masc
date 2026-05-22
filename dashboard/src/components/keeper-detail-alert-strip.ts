@@ -67,7 +67,6 @@ const ATTENTION_REASONS = [
   'paused',
   'paused_blocked',
   'runtime_blocked',
-  'timeout_budget_exhausted',
   'social_model_fallback',
   'fd_pressure',
   'runtime_trust_snapshot_unavailable',
@@ -80,10 +79,14 @@ const ATTENTION_REASON_LABELS: Record<AttentionReason, string> = {
   paused: '일시정지',
   paused_blocked: '일시정지 원인 확인 필요',
   runtime_blocked: '런타임 근거 확인 필요',
-  timeout_budget_exhausted: '레거시 타임아웃 예산 표면',
   social_model_fallback: '소셜 모델 폴백',
   fd_pressure: 'FD 임계치 초과',
   runtime_trust_snapshot_unavailable: '런타임 신뢰 스냅샷 없음',
+}
+
+function canonicalAttentionReason(reason: string | null): string | null {
+  if (reason === 'timeout_budget_exhausted') return 'runtime_blocked'
+  return reason
 }
 
 function isAttentionReason(s: string): s is AttentionReason {
@@ -91,11 +94,12 @@ function isAttentionReason(s: string): s is AttentionReason {
 }
 
 function attentionReasonLabel(reason: string | null, paused: boolean): string | null {
-  if (!reason) return null
-  if ((reason === 'paused' || reason === 'paused_blocked') && paused) return null
-  if (isAttentionReason(reason)) return ATTENTION_REASON_LABELS[reason]
-  warnUnknownAttentionToken('attention_reason', reason)
-  return reason
+  const canonicalReason = canonicalAttentionReason(reason)
+  if (!canonicalReason) return null
+  if ((canonicalReason === 'paused' || canonicalReason === 'paused_blocked') && paused) return null
+  if (isAttentionReason(canonicalReason)) return ATTENTION_REASON_LABELS[canonicalReason]
+  warnUnknownAttentionToken('attention_reason', canonicalReason)
+  return canonicalReason
 }
 
 // Backend emit sites for `next_human_action` (paired 1:1 with the
@@ -107,7 +111,6 @@ const NEXT_HUMAN_ACTIONS = [
   'approve_or_reject_continue',
   'inspect_blocker_before_resume',
   'inspect_runtime_blocker',
-  'inspect_timeout_budget',
   'resolve_approval',
   'resume_or_review',
   'review_social_model',
@@ -120,7 +123,6 @@ const NEXT_HUMAN_ACTION_LABELS: Record<NextHumanAction, string> = {
   approve_or_reject_continue: '계속 진행 승인 또는 거절',
   inspect_blocker_before_resume: '원인 확인 후 재개',
   inspect_runtime_blocker: '런타임 근거 확인',
-  inspect_timeout_budget: '원인별 타임아웃 확인',
   resolve_approval: '승인 요청 처리',
   resume_or_review: '재개 또는 설정 검토',
   review_social_model: '소셜 모델 설정 검토',
@@ -132,11 +134,17 @@ function isNextHumanAction(s: string): s is NextHumanAction {
   return (NEXT_HUMAN_ACTIONS as readonly string[]).includes(s)
 }
 
-function nextHumanActionLabel(action: string | null): string | null {
-  if (!action) return null
-  if (isNextHumanAction(action)) return NEXT_HUMAN_ACTION_LABELS[action]
-  warnUnknownAttentionToken('next_human_action', action)
+function canonicalNextHumanAction(action: string | null): string | null {
+  if (action === 'inspect_timeout_budget') return 'inspect_runtime_blocker'
   return action
+}
+
+function nextHumanActionLabel(action: string | null): string | null {
+  const canonicalAction = canonicalNextHumanAction(action)
+  if (!canonicalAction) return null
+  if (isNextHumanAction(canonicalAction)) return NEXT_HUMAN_ACTION_LABELS[canonicalAction]
+  warnUnknownAttentionToken('next_human_action', canonicalAction)
+  return canonicalAction
 }
 
 // (attention_reason, next_human_action) pairs that surface the same
@@ -152,18 +160,28 @@ function nextHumanActionLabel(action: string | null): string | null {
 const ATTENTION_PAIR_DUPLICATES: ReadonlyArray<readonly [AttentionReason, NextHumanAction]> = [
   ['runtime_blocked', 'inspect_runtime_blocker'],
   ['paused_blocked', 'inspect_blocker_before_resume'],
-  // Legacy timeout-budget pair is still accepted from older backend wires,
-  // but new operator copy should route to owner-specific timeout/admission/
-  // capacity causes.
-  ['timeout_budget_exhausted', 'inspect_timeout_budget'],
   ['runtime_trust_snapshot_unavailable', 'inspect_keeper_runtime_trust'],
 ]
 const ATTENTION_PAIR_DUPLICATE_KEYS = new Set<string>(
   ATTENTION_PAIR_DUPLICATES.map(([r, a]) => `${r}|${a}`),
 )
 function isAttentionPairDuplicate(reason: string | null, action: string | null): boolean {
-  if (!reason || !action) return false
-  return ATTENTION_PAIR_DUPLICATE_KEYS.has(`${reason}|${action}`)
+  const canonicalReason = canonicalAttentionReason(reason)
+  const canonicalAction = canonicalNextHumanAction(action)
+  if (!canonicalReason || !canonicalAction) return false
+  return ATTENTION_PAIR_DUPLICATE_KEYS.has(`${canonicalReason}|${canonicalAction}`)
+}
+
+function canonicalTerminalCode(code: string | null): string | null {
+  if (code === 'oas_timeout_budget') return 'turn_timeout'
+  return code
+}
+
+function canonicalTerminalSummary(code: string | null, summary: string | null | undefined): string | null {
+  if (code === 'oas_timeout_budget') {
+    return '턴 실행 시간이 제한 시간을 초과했습니다.'
+  }
+  return summary?.trim() || null
 }
 
 // One-time warn per (kind, token) so dev consoles surface backend
@@ -236,12 +254,15 @@ function renderCascadeAttemptObservation(observation: CascadeAttemptObservation)
 }
 
 export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
-  const runtimeBlockerClass = keeper.runtime_blocker_class
+  const runtimeBlockerClass =
+    keeper.runtime_blocker_class === 'oas_timeout_budget'
+      ? 'turn_timeout'
+      : keeper.runtime_blocker_class
   const runtimeBlocker = keeperRuntimeBlockerHint(keeper)
   const continueGate = keeper.runtime_blocker_continue_gate === true
   const socialFallbackActive = keeper.social_model_recognized === false
-  const attentionReason = keeper.attention_reason?.trim() || null
-  const nextHumanAction = keeper.next_human_action?.trim() || null
+  const attentionReason = canonicalAttentionReason(keeper.attention_reason?.trim() || null)
+  const nextHumanAction = canonicalNextHumanAction(keeper.next_human_action?.trim() || null)
   // RFC-0135 PR-13: canonical paused predicate. SSOT also covers
   // FSM phase=Paused / pipeline_stage=paused / status=paused, so the
   // "paused + live blocker" composite flag and the attention-reason
@@ -275,14 +296,21 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
   const isBlockedBeforeWorktree = pendingApprovalBlockerClass === 'blocked_before_worktree'
   const trustDisposition = keeper.trust?.disposition?.trim() || null
   const trustSummary =
-    keeper.trust?.attention_reason?.trim()
+    canonicalAttentionReason(keeper.trust?.attention_reason?.trim() || null)
     || keeper.trust?.disposition_reason?.trim()
     || keeper.trust?.execution_summary?.mutation_guard_summary?.trim()
     || null
   const stopCause = keeper.stop_cause ?? null
+  const stopCauseCodeRaw = stopCause?.code?.trim() || null
+  const stopCauseCode = canonicalTerminalCode(stopCauseCodeRaw)
+  const stopCauseSummary = canonicalTerminalSummary(stopCauseCodeRaw, stopCause?.summary)
   const latestTerminalReason = keeper.trust?.latest_terminal_reason ?? null
-  const latestTerminalCode = latestTerminalReason?.code?.trim() || null
-  const latestTerminalSummary = latestTerminalReason?.summary?.trim() || null
+  const latestTerminalCodeRaw = latestTerminalReason?.code?.trim() || null
+  const latestTerminalCode = canonicalTerminalCode(latestTerminalCodeRaw)
+  const latestTerminalSummary = canonicalTerminalSummary(
+    latestTerminalCodeRaw,
+    latestTerminalReason?.summary,
+  )
   // Hide "종료 코드" when it references a past *success* turn while the
   // current stop_cause is a terminal failure -- that is the
   // "정지 원인 · turn_timeout / 종료 코드 · success" time-axis mix the
@@ -291,10 +319,10 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
   // failure surface from different observability layers.
   const suppressStaleLatestTerminal =
     latestTerminalCode !== null
-    && stopCause !== null
-    && isTurnTerminalFailureCode(stopCause.code)
+    && stopCauseCode !== null
+    && isTurnTerminalFailureCode(stopCauseCode)
     && !isTurnTerminalFailureCode(latestTerminalCode)
-  const latestNextAction = keeper.trust?.latest_next_action?.trim() || null
+  const latestNextAction = canonicalNextHumanAction(keeper.trust?.latest_next_action?.trim() || null)
   const operatorDispositionReason = keeper.trust?.operator_disposition_reason?.trim() || null
   const shouldShowOperatorDispositionReason =
     operatorDispositionReason !== null && operatorDispositionReason !== trustSummary
@@ -396,7 +424,7 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
     attempts: typeof observedProviderAttempts === 'number' ? observedProviderAttempts : null,
     fallbackApplied: observedProviderFallback === true,
   }
-  const turnTerminallyFailed = isTurnTerminalFailureCode(stopCause?.code ?? null)
+  const turnTerminallyFailed = isTurnTerminalFailureCode(stopCauseCode)
     || isTurnTerminalFailureCode(latestTerminalCode)
   const renderCascadeAttempt =
     (cascadeAttempt.outcome !== null || cascadeAttempt.attempts !== null)
@@ -541,10 +569,10 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
         ${nextHumanActionText && !suppressDuplicateNextAction
           ? html`<span><strong class="text-[var(--color-fg-secondary)]">다음 액션</strong> · ${nextHumanActionText}</span>`
           : null}
-        ${stopCause && isTurnTerminalFailureCode(stopCause.code)
-          ? html`<span><strong class="text-[var(--color-fg-secondary)]">정지 원인</strong> · ${stopCause.code}${stopCause.summary ? html` · <${SyntheticAwareText} text=${stopCause.summary} />` : null}</span>`
+        ${stopCause && stopCauseCode && isTurnTerminalFailureCode(stopCauseCode)
+          ? html`<span><strong class="text-[var(--color-fg-secondary)]">정지 원인</strong> · ${stopCauseCode}${stopCauseSummary ? html` · <${SyntheticAwareText} text=${stopCauseSummary} />` : null}</span>`
           : null}
-        ${latestTerminalCode && latestTerminalCode !== stopCause?.code && !suppressStaleLatestTerminal
+        ${latestTerminalCode && latestTerminalCode !== stopCauseCode && !suppressStaleLatestTerminal
           ? html`<span><strong class="text-[var(--color-fg-secondary)]">종료 코드</strong> · ${latestTerminalCode}${latestTerminalSummary ? html` · <${SyntheticAwareText} text=${latestTerminalSummary} />` : null}</span>`
           : null}
         ${latestNextAction && !duplicatesAttentionReason(latestNextAction)

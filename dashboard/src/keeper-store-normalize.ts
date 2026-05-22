@@ -405,7 +405,8 @@ function normalizeMetricsSeries(raw: unknown): KeeperMetricPoint[] {
               segments: promptSegments,
             }
           : null
-      const rawTimeoutBudget = isRecord(item.timeout_budget) ? item.timeout_budget : null
+      const rawProviderTimeoutBudget = isRecord(item.provider_timeout_budget) ? item.provider_timeout_budget : null
+      const rawTimeoutBudget = isRecord(item.timeout_budget) ? item.timeout_budget : rawProviderTimeoutBudget
       const timeout_budget =
         rawTimeoutBudget != null
           ? {

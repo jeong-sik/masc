@@ -25,13 +25,11 @@ let test_turn_timeout_blocker_class_roundtrip () =
   | None -> fail "Turn_timeout label did not parse back"
 
 let test_oas_timeout_budget_blocker_class_collapses_to_turn_timeout () =
-  let cls = KT.Turn_timeout in
-  let label = KT.blocker_class_to_string cls in
-  check string "label" "turn_timeout" label;
-  match MC.blocker_class_of_serialized_string label with
+  let legacy_label = "oas_timeout_budget" in
+  match MC.blocker_class_of_serialized_string legacy_label with
   | Some MC.Turn_timeout -> ()
   | Some _ -> fail "legacy timeout-budget label parsed as wrong class"
-  | None -> fail "legacy timeout-budget label did not parse back"
+  | None -> fail "legacy timeout-budget label did not parse"
 
 let test_stale_fleet_batch_blocker_class_roundtrip () =
   let cls = KT.Stale_fleet_batch in
@@ -53,10 +51,18 @@ let test_capacity_backpressure_blocker_class_roundtrip () =
 
 let test_timeout_blocker_class_labels_collapse () =
   let tt = KT.blocker_class_to_string KT.Turn_timeout in
-  let ot = KT.blocker_class_to_string KT.Turn_timeout in
+  let legacy_ot = "oas_timeout_budget" in
   let fb = KT.blocker_class_to_string KT.Stale_fleet_batch in
-  check bool "Turn_timeout = Oas_timeout_budget alias" true (tt = ot);
-  check bool "Stale_fleet_batch distinct" true (fb <> tt && fb <> ot)
+  check string "Turn_timeout label" "turn_timeout" tt;
+  check bool "Stale_fleet_batch distinct" true (fb <> tt && fb <> legacy_ot);
+  match
+    ( MC.blocker_class_of_serialized_string tt,
+      MC.blocker_class_of_serialized_string legacy_ot )
+  with
+  | Some MC.Turn_timeout, Some MC.Turn_timeout -> ()
+  | Some _, Some _ -> fail "timeout labels parsed as different blocker classes"
+  | None, _ -> fail "turn timeout label did not parse"
+  | _, None -> fail "legacy timeout-budget label did not parse"
 
 let test_meta_json_roundtrip_with_auto_pause_blocker () =
   let base_json = `Assoc [

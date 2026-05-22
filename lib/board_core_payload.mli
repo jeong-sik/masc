@@ -24,13 +24,6 @@ val extract_state_block : string -> string option * string
     text)]. When the opening marker has no matching close, the
     block extends to end-of-text. *)
 
-val meta_state_block : Yojson.Safe.t option -> string option
-(** Read the [state_block] field from a JSON meta object.
-
-    Returns [Some s] when [meta_json] is a JSON object containing
-    a non-empty string [state_block]. Returns [None] for
-    [None] / non-object / non-string / empty-after-trim values. *)
-
 type meta_parse_error = Meta_not_assoc of Yojson.Safe.t
 (** Typed parse failure for [merge_meta_json] / [normalize_post_payload].
 

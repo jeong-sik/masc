@@ -55,16 +55,6 @@ let extract_state_block (text : string) : string option * string =
     in
     Some state_block, String.trim (before ^ after)
 
-let meta_state_block (meta_json : Yojson.Safe.t option) =
-  match meta_json with
-  | Some (`Assoc fields) -> (
-      match List.assoc_opt "state_block" fields with
-      | Some (`String value) ->
-          let value = String.trim value in
-          if String.equal value "" then None else Some value
-      | _ -> None)
-  | _ -> None
-
 type meta_parse_error = Meta_not_assoc of Yojson.Safe.t
 
 let merge_meta_json ?state_block (meta_json : Yojson.Safe.t option) :

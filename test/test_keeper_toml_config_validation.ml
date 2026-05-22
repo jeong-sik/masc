@@ -622,12 +622,22 @@ target = "tier-group.primary"
     (Masc_mcp.Keeper_cascade_profile.is_system_only_cascade "tier.primary");
   check bool "qualified tier-group remains system-only" true
     (Masc_mcp.Keeper_cascade_profile.is_system_only_cascade "tier-group.primary");
+  let resolved_string raw =
+    match
+      Masc_mcp.Keeper_cascade_profile.resolve_live_result
+        ~config_path:cascade_path raw
+    with
+    | Ok name -> Masc_mcp.Keeper_cascade_profile.runtime_name_to_string name
+    | Error (`Unresolved raw) ->
+        fail
+          (Printf.sprintf
+             "qualified cascade %S did not resolve against test catalog"
+             raw)
+  in
   check string "qualified tier resolves without fallback" "tier.primary"
-    (Masc_mcp.Keeper_cascade_profile.resolve_live
-       ~config_path:cascade_path "tier.primary");
+    (resolved_string "tier.primary");
   check string "qualified tier-group resolves without fallback" "tier-group.primary"
-    (Masc_mcp.Keeper_cascade_profile.resolve_live
-       ~config_path:cascade_path "tier-group.primary");
+    (resolved_string "tier-group.primary");
   (match
      with_temp_toml
        "[keeper]\nname = \"testkeeper\"\ncascade_name = \"tier.primary\"\n"

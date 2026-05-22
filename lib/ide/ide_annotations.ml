@@ -170,36 +170,9 @@ let create
     Ok annotation)
 ;;
 
-(* RFC-0128 §5 — read-side de-duplication by annotation [id] (UUID).
-   When [merge_legacy = true], records living under the requested
-   partition take priority over Legacy ones with the same id. This
-   preserves the latest write while still surfacing pre-RFC-0128
-   data so the IDE does not appear to lose history at cut-over. *)
-let dedup_by_id_keeping_primary ~primary ~legacy =
-  let seen = Hashtbl.create 64 in
-  List.iter (fun (a : annotation) -> Hashtbl.replace seen a.id ()) primary;
-  let filtered_legacy =
-    List.filter (fun (a : annotation) -> not (Hashtbl.mem seen a.id)) legacy
-  in
-  primary @ filtered_legacy
-;;
-
-let list
-      ~base_dir
-      ?(partition = Ide_paths.Legacy)
-      ?(merge_legacy = false)
-      ~filter
-      ()
-  =
+let list ~base_dir ?(partition = Ide_paths.Legacy) ~filter () =
   ensure_store ~base_dir ~partition ();
-  let primary : annotation list = load_all_partition ~base_dir partition in
-  let all =
-    if merge_legacy && partition <> Ide_paths.Legacy
-    then
-      let legacy = load_all_partition ~base_dir Ide_paths.Legacy in
-      dedup_by_id_keeping_primary ~primary ~legacy
-    else primary
-  in
+  let all : annotation list = load_all_partition ~base_dir partition in
   let by_file =
     match filter.file_path with
     | Some fp -> List.filter (fun (a : annotation) -> a.file_path = fp) all

@@ -160,16 +160,10 @@ let add_routes router =
          in
          let filter = { Ide_annotation_types.file_path; keeper_id; goal_id; task_id } in
          let partition = resolve_partition_for_query ~state ~uri in
-         (* RFC-0128 §5 — the HTTP read route is the natural cut-over
-            point: the IDE has no way to ask for two stores explicitly,
-            so the server merges Legacy on its behalf. Once Phase 3
-            migrates the flat store into [by-url]/[_orphan], this flag
-            becomes a no-op. *)
          let annotations =
            Ide_annotations.list
              ~base_dir:base
              ~partition
-             ~merge_legacy:true
              ~filter
              ()
          in
@@ -349,14 +343,10 @@ let add_routes router =
            | _ -> None
          in
          let partition = resolve_partition_for_query ~state ~uri in
-         (* RFC-0128 §5 — same cut-over rationale as the annotations
-            route: merge Legacy so pre-RFC-0128 regions stay visible
-            after the by-url migration. *)
          let regions =
            Ide_region_tracker.read_regions
              ~base_dir:base
              ~partition
-             ~merge_legacy:true
              ?file_path
              ()
          in

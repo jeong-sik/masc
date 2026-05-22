@@ -240,7 +240,7 @@ export function displayState(value: string): string {
  *  the `(detail)` portion verbatim so operators retain the parametric
  *  payload while reading a Korean label. Unknown bases fall back to
  *  the raw string. */
-const FAILURE_REASON_BASE_LABELS: Record<string, string> = {
+const FAILURE_REASON_BASE_LABELS = {
   heartbeat_consecutive_failures: '하트비트 연속 실패',
   turn_consecutive_failures: '턴 연속 실패',
   stale_turn_timeout: 'Stale 턴 시간 초과',
@@ -251,17 +251,33 @@ const FAILURE_REASON_BASE_LABELS: Record<string, string> = {
   ambiguous_partial_commit: '부분 commit 모호',
   fiber_unresolved: 'Fiber 미해결',
   exception: '런타임 예외',
+} as const
+
+type FailureReasonBase = keyof typeof FAILURE_REASON_BASE_LABELS
+
+function isFailureReasonBase(value: string): value is FailureReasonBase {
+  return Object.prototype.hasOwnProperty.call(FAILURE_REASON_BASE_LABELS, value)
+}
+
+/** Split a parametric string `<base>(<detail>)` at the first '('.
+ *  Returns `[base, detail]` where detail includes the '('.
+ *  If no '(' is found, returns `[whole, null]`.
+ *  Mirrors the backend wire format emitted by
+ *  `Keeper_registry_types.failure_reason_to_string`. */
+function splitParametric(value: string): [string, string | null] {
+  const idx = value.indexOf('(')
+  if (idx < 0) return [value, null]
+  return [value.slice(0, idx), value.slice(idx)]
 }
 
 export function failureReasonLabel(value: string | null | undefined): string | null {
   if (!value) return null
   const trimmed = value.trim()
   if (!trimmed) return null
-  const parenIdx = trimmed.indexOf('(')
-  const base = parenIdx >= 0 ? trimmed.slice(0, parenIdx) : trimmed
+  const [base, detail] = splitParametric(trimmed)
+  if (!isFailureReasonBase(base)) return trimmed
   const koreanBase = FAILURE_REASON_BASE_LABELS[base]
-  if (!koreanBase) return trimmed
-  return parenIdx >= 0 ? `${koreanBase}${trimmed.slice(parenIdx)}` : koreanBase
+  return detail ? `${koreanBase}${detail}` : koreanBase
 }
 
 /** Korean labels for `execution.outcome` / `keeper.latest_execution_outcome`.

@@ -3,6 +3,7 @@ import {
   extractLaneValue,
   displayState,
   fmtDuration,
+  failureReasonLabel,
   STATE_DISPLAY_NAMES,
   LANE_LABELS,
   INVARIANT_LABELS,
@@ -156,6 +157,30 @@ describe('constants', () => {
   it('MAX_OBSERVATIONS and MAX_TRANSITION_HISTORY are positive', () => {
     expect(MAX_OBSERVATIONS).toBeGreaterThan(0)
     expect(MAX_TRANSITION_HISTORY).toBeGreaterThan(0)
+  })
+})
+
+describe('failureReasonLabel', () => {
+  it('maps known bases to Korean', () => {
+    expect(failureReasonLabel('heartbeat_consecutive_failures')).toBe('하트비트 연속 실패')
+    expect(failureReasonLabel('exception')).toBe('런타임 예외')
+  })
+
+  it('preserves parametric detail after the base', () => {
+    expect(failureReasonLabel('heartbeat_consecutive_failures(3)')).toBe('하트비트 연속 실패(3)')
+    expect(failureReasonLabel('tool_required_unsatisfied(code:detail)')).toBe('필수 도구 미충족(code:detail)')
+  })
+
+  it('falls back to raw string for unknown bases', () => {
+    expect(failureReasonLabel('mystery_failure')).toBe('mystery_failure')
+    expect(failureReasonLabel('unknown(42)')).toBe('unknown(42)')
+  })
+
+  it('returns null for empty / null / undefined inputs', () => {
+    expect(failureReasonLabel(null)).toBeNull()
+    expect(failureReasonLabel(undefined)).toBeNull()
+    expect(failureReasonLabel('')).toBeNull()
+    expect(failureReasonLabel('   ')).toBeNull()
   })
 })
 

@@ -39,8 +39,8 @@ let register
     `Counter;
   add
     Keeper_metrics.metric_keeper_oas_timeout_budget_watchdog_termination
-    "Total watchdog terminations preserving unresolved oas_timeout_budget      failure \
-     reason. Labels: keeper."
+    "Total watchdog terminations preserving unresolved timeout failure evidence. Labels: \
+     keeper."
     `Counter;
   add
     Keeper_metrics.metric_keeper_stale_termination_threshold_breached
@@ -163,7 +163,7 @@ let register
     `Counter;
   add
     Keeper_metrics.metric_keeper_oas_timeout_budget_strike
-    "OAS timeout budget strikes (consecutive timeouts before escalation). Labels: keeper."
+    "Provider timeout strikes (consecutive timeouts before escalation). Labels: keeper."
     `Counter;
   add
     Keeper_metrics.metric_keeper_path_rejection

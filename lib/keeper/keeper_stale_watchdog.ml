@@ -310,8 +310,8 @@ let () =
     ~name:Keeper_metrics.metric_keeper_oas_timeout_budget_watchdog_termination
     ~help:
       "Total watchdog terminations that preserved an unresolved \
-       oas_timeout_budget failure reason instead of reclassifying the \
-       keeper as an idle stale stall. Labels: keeper."
+       timeout failure evidence instead of reclassifying the keeper as \
+       an idle stale stall. Labels: keeper."
     ()
 
 (* #10765 phase 2: fleet-wide batch termination detection.

@@ -852,7 +852,7 @@ let sweep_and_recover (ctx : _ context) =
        [keeper-level max-turn watchdog] (PR #15964) which cancels the
        keepalive fiber at a typed wall-clock boundary BEFORE the slot
        leaks. Removal target: 30-day soak on
-       [metric_keeper_oas_timeout_budget_watchdog_termination] reaching
+       stale-watchdog timeout termination metric reaching
        zero with [MASC_KEEPER_MAX_TURN_WATCHDOG_TIMEOUT_SEC] enabled
        fleet-wide. Do not add new callers. *)
     (match Keeper_turn_slot.force_release_holder_for ~keeper_name:entry.name with

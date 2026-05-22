@@ -336,7 +336,7 @@ let to_string = function
   | PresenceSyncFailures -> "masc_keeper_presence_sync_failures_total"
   | SelfPreservationUniversal -> "masc_keeper_self_preservation_universal_total"
   | StaleStormPaused -> "masc_keeper_stale_storm_paused_total"
-  | OasTimeoutBudgetLoopPaused -> "masc_keeper_oas_timeout_budget_loop_paused_total"
+  | OasTimeoutBudgetLoopPaused -> "masc_keeper_provider_timeout_loop_paused_total"
   | CycleExceptions -> "masc_keeper_cycle_exceptions_total"
   | SnapshotWriteFailures -> "masc_keeper_snapshot_write_failures_total"
   | ProgressUpdatedLineFailures -> "masc_keeper_progress_updated_line_failures_total"
@@ -397,11 +397,11 @@ let to_string = function
   | RequiredToolGateSuppressedTotal -> "masc_keeper_required_tool_gate_suppressed_total"
   | ConsecutiveIdle -> "masc_keeper_consecutive_idle"
   | LastProductiveTs -> "masc_keeper_last_productive_ts"
-  | OasTimeoutBudgetStrike -> "masc_keeper_oas_timeout_budget_strike_total"
+  | OasTimeoutBudgetStrike -> "masc_keeper_provider_timeout_strike_total"
   | StaleTerminationTotal -> "masc_keeper_stale_termination_total"
   | StaleTerminationByClass -> "masc_keeper_stale_termination_by_class_total"
   | OasTimeoutBudgetWatchdogTermination ->
-    "masc_keeper_oas_timeout_budget_watchdog_termination_total"
+    "masc_keeper_stale_watchdog_timeout_termination_total"
   | StaleTerminationThresholdBreached ->
     "masc_keeper_stale_termination_threshold_breached_total"
   | StaleTerminationBatch -> "masc_keeper_stale_termination_batch_total"
@@ -724,7 +724,7 @@ let metric_keeper_self_preservation_universal =
 let metric_keeper_stale_storm_paused = "masc_keeper_stale_storm_paused_total"
 
 let metric_keeper_oas_timeout_budget_loop_paused =
-  "masc_keeper_oas_timeout_budget_loop_paused_total"
+  "masc_keeper_provider_timeout_loop_paused_total"
 ;;
 
 let metric_keeper_cycle_exceptions = "masc_keeper_cycle_exceptions_total"
@@ -938,7 +938,7 @@ let metric_keeper_consecutive_idle = "masc_keeper_consecutive_idle"
 let metric_keeper_last_productive_ts = "masc_keeper_last_productive_ts"
 
 let metric_keeper_oas_timeout_budget_strike =
-  "masc_keeper_oas_timeout_budget_strike_total"
+  "masc_keeper_provider_timeout_strike_total"
 ;;
 
 let metric_keeper_stale_termination_total = "masc_keeper_stale_termination_total"
@@ -948,7 +948,7 @@ let metric_keeper_stale_termination_by_class =
 ;;
 
 let metric_keeper_oas_timeout_budget_watchdog_termination =
-  "masc_keeper_oas_timeout_budget_watchdog_termination_total"
+  "masc_keeper_stale_watchdog_timeout_termination_total"
 ;;
 
 let metric_keeper_stale_termination_threshold_breached =

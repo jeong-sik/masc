@@ -106,6 +106,28 @@ let read_file_tail_lines path ~max_bytes ~max_lines : string list =
       ();
     []
 
+(* RFC-0149 §3.1 — typed Result entry point.  Distinguishes "empty
+   memory bank" ([Ok summary] where [summary] holds zero recent rows)
+   from "memory bank read failed" ([Error class]).  Callers that want
+   to render a [Memory_unavailable] signal up the chain should consume
+   this variant instead of the legacy
+   [read_keeper_memory_summary]/[empty-summary] silent fallback. *)
+let read_keeper_memory_summary_result
+    (config : Coord.config)
+    ~(name : string)
+    ~(max_bytes : int)
+    ~(max_lines : int)
+    ~(recent_limit : int) :
+    (keeper_memory_summary, Keeper_memory_recall_exn_class.t) result =
+  match
+    read_file_tail_lines_result
+      (keeper_memory_bank_path config name)
+      ~max_bytes
+      ~max_lines
+  with
+  | Ok lines -> Ok (summarize_memory_bank_lines lines ~recent_limit)
+  | Error exn_class -> Error exn_class
+
 let read_keeper_memory_summary
     (config : Coord.config)
     ~(name : string)

@@ -143,11 +143,15 @@ export function rosterStateNote(
     }
   }
 
+  if (state.kind === 'offline' && keeper.agent?.current_task) {
+    return { label: '작업 중단', text: `할당된 작업이 있으나 keeper가 ${state.cause} 상태입니다` }
+  }
+
   const diagnosticError = keeper.diagnostic?.last_error?.trim()
   if (diagnosticError) return { label: '최근 오류', text: diagnosticError }
 
   const hint = monitoringHint?.trim()
-  if (hint) return { label: '상태 메모', text: hint }
+  if (hint) return { label: '참고', text: hint }
   return null
 }
 

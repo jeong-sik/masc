@@ -493,6 +493,40 @@ let mkdir_p (path : string) : unit =
        Eio.Path.mkdirs ~exists_ok:true ~perm:0o755 eio_path)
 ;;
 
+(* RFC-0162 §3.1: once-per-path mkdir memoize. Hot append paths
+   ([append_jsonl] in particular) call [mkdir_p] on every record so
+   that the day-rollover dir gets created on first append. After the
+   dir exists, every subsequent call only burns a [Sys.file_exists]
+   or [Eio.Path.mkdirs ~exists_ok:true] stat syscall — yet on the
+   tool_call_io path this adds up to ~22k stats over a few hours and
+   contributes to the EMFILE/ENFILE pressure documented in the RFC.
+
+   The cache stores only the *fact* that the dir exists; it does not
+   keep an fd open. RFC-0108 §2.5's cached [out_channel] corruption
+   does not apply. RFC-0108 §3.3 (cross-domain fd cache) is unrelated.
+
+   Race: two domains may both miss-and-mkdir; the second [mkdir] is a
+   harmless EEXIST. The mutex covers the [Hashtbl] op only. *)
+let mkdir_p_done : (string, unit) Hashtbl.t = Hashtbl.create 32
+let mkdir_p_memo_mu = Stdlib.Mutex.create ()
+
+let mkdir_p_memoized (path : string) : unit =
+  let cached =
+    Stdlib.Mutex.protect mkdir_p_memo_mu (fun () ->
+      Hashtbl.mem mkdir_p_done path)
+  in
+  if not cached then begin
+    mkdir_p path;
+    Stdlib.Mutex.protect mkdir_p_memo_mu (fun () ->
+      Hashtbl.replace mkdir_p_done path ())
+  end
+;;
+
+let reset_mkdir_memo_for_testing () =
+  Stdlib.Mutex.protect mkdir_p_memo_mu (fun () ->
+    Hashtbl.reset mkdir_p_done)
+;;
+
 (** Parse pre-read string lines as JSONL.
     Use when lines come from [Keeper_memory.read_file_tail_lines] or
     other non-file sources.  Logs malformed lines with [source] tag.
@@ -642,7 +676,7 @@ let fold_jsonl_lines ~init ~f path =
 let append_jsonl (path : string) (json : Yojson.Safe.t) : unit =
   test_exec_home_guard ~op:"append_jsonl" path;
   let dir = Stdlib.Filename.dirname path in
-  mkdir_p dir;
+  mkdir_p_memoized dir;
   let line = Yojson.Safe.to_string json ^ "\n" in
   let mu = get_append_path_mutex path in
   Stdlib.Mutex.lock mu;

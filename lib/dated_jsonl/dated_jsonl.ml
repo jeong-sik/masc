@@ -423,7 +423,7 @@ let iter_range t ~since ~until f =
       end)
       months
 
-let count_entries t =
+let count_entries_uncached t =
   let months = list_month_dirs t.base_dir in
   List.fold_left (fun total month ->
     let month_path = Filename.concat t.base_dir month in
@@ -434,6 +434,55 @@ let count_entries t =
         month_total + count_non_empty_lines path
       ) 0 days
   ) 0 months
+
+(* RFC-0162 §3.2: process-local TTL cache around [count_entries].
+
+   The dashboard refreshes Tool Monitor / Fleet Health / Tool Quality
+   surfaces every 30 s. Each surface calls [count_entries] on the
+   same store (`.masc/tool_calls/`, `.masc/oas-events/`, etc.),
+   opening and closing every day-file to count newlines. With 30
+   day-files × 15 MB on a single store this turns into a hot
+   read-side load that competes for the same OS fd budget as the
+   write-side append it is reporting on.
+
+   The cached count is good for [count_cache_ttl_sec] seconds. A
+   stale count is acceptable for the dashboard surface: appends are
+   monotonic increases, so a slightly stale total under-counts by
+   at most [ttl × append_rate], which is well below the dashboard
+   refresh granularity. Tests and audit callers that need the
+   live count use [count_entries_uncached]. *)
+let count_cache_ttl_sec = 10.0
+
+type count_cache_entry =
+  { entry_count : int
+  ; computed_at : float
+  }
+
+let count_cache : (string, count_cache_entry) Hashtbl.t = Hashtbl.create 8
+let count_cache_mu = Stdlib.Mutex.create ()
+
+let count_entries t =
+  let key = t.base_dir in
+  let now = Unix.gettimeofday () in
+  let cached_opt =
+    Stdlib.Mutex.protect count_cache_mu (fun () ->
+      match Hashtbl.find_opt count_cache key with
+      | Some entry when now -. entry.computed_at < count_cache_ttl_sec ->
+        Some entry.entry_count
+      | _ -> None)
+  in
+  match cached_opt with
+  | Some n -> n
+  | None ->
+    let n = count_entries_uncached t in
+    Stdlib.Mutex.protect count_cache_mu (fun () ->
+      Hashtbl.replace count_cache key { entry_count = n; computed_at = now });
+    n
+;;
+
+let reset_count_cache_for_testing () =
+  Stdlib.Mutex.protect count_cache_mu (fun () -> Hashtbl.reset count_cache)
+;;
 let read_range t ~since ~until =
   let collected = ref [] in
   iter_range t ~since ~until (fun json -> collected := json :: !collected);

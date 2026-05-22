@@ -67,7 +67,21 @@ val prune : t -> days:int -> int
 val count_entries : t -> int
 [@@@warning "+32"]
 (* [count_entries t] returns the total number of non-empty lines across all
-   day-files. Scans files by counting newlines without JSON parsing. *)
+   day-files. Scans files by counting newlines without JSON parsing.
+
+   Backed by a process-local TTL cache (RFC-0162 §3.2) keyed on
+   [base_dir]. The cached count is good for ~10 s; concurrent
+   dashboard refresh surfaces share the result so a 30 s window
+   costs one scan, not three. Tests and audit callers that need
+   the live count should use [count_entries_uncached]. *)
+
+val count_entries_uncached : t -> int
+(** Like [count_entries] but bypasses the TTL cache. Use in tests
+    or rare audit paths that must observe the live filesystem
+    count. RFC-0162 §3.2. *)
+
+val reset_count_cache_for_testing : unit -> unit
+(** Reset the [count_entries] TTL cache. Test-only. *)
 
 val load_tail_lines : string -> max_lines:int -> string list
 (** [load_tail_lines file ~max_lines] efficiently reads the last [max_lines]

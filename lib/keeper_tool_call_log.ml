@@ -90,17 +90,29 @@ let queued_count_for_testing () =
 
 let dropped_count_for_testing () = Atomic.get append_queue_dropped
 
+(* RFC-0162 §3.3: default retention. The earlier opt-in policy
+   (None unless env explicitly set positive) let `.masc/tool_calls/`
+   grow unbounded; RFC-0162 §1.2 observed 30 day-files / 465 MB on a
+   developer workstation. The dashboard count_entries scan
+   (Phase 0b) and the host kern.maxfiles budget both degrade
+   monotonically with directory size.
+
+   The mli already documents "default is 30 days, and values <= 0
+   disable pruning" (lib/keeper_tool_call_log.mli:99-103), so this
+   change is a contract recovery — the ml implementation was
+   drifted from its own stated contract. Operators that want the
+   prior unbounded behavior must now opt out explicitly with
+   MASC_TOOL_CALL_LOG_RETENTION_DAYS=0. *)
+let retention_days_default = 30
+
 let retention_days () =
-  (* Opt-in: default disabled. Operators set MASC_TOOL_CALL_LOG_RETENTION_DAYS
-     to a positive int to enable pruning. Default unset = unbounded growth,
-     surfaced via disk-pressure circuit breaker (PR-4) and pending volume
-     RFC (Context_window_usage telemetry-as-fix root). *)
   match Sys.getenv_opt "MASC_TOOL_CALL_LOG_RETENTION_DAYS" with
   | Some raw ->
     (match int_of_string_opt (String.trim raw) with
      | Some days when days > 0 -> Some days
-     | _ -> None)
-  | None -> None
+     | Some _ -> None      (* explicit 0 or negative → retain forever *)
+     | None -> Some retention_days_default  (* malformed → safe default *))
+  | None -> Some retention_days_default
 
 let init ?cluster_name ~base_path () =
   let cluster_name =

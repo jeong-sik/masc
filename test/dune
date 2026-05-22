@@ -1535,6 +1535,8 @@
 
 (include stanzas/test_dated_jsonl_mutex_registry_10372.inc)
 
+(include stanzas/test_dated_jsonl_count_cache.inc)
+
 (include stanzas/test_distributed_lock_acquire_failed_counter.inc)
 
 (include stanzas/test_distributed_lock_backlog_namespace.inc)
@@ -1582,6 +1584,8 @@
 (include stanzas/test_fs_compat_append_jsonl_atomicity.inc)
 
 (include stanzas/test_fs_compat_home_guard.inc)
+
+(include stanzas/test_fs_compat_mkdir_memo.inc)
 
 (include stanzas/test_fsm_drift_per_agent_counter.inc)
 

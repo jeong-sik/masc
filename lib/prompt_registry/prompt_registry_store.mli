@@ -25,12 +25,6 @@ type t = {
   mutex : Eio.Mutex.t;
 }
 
-val create : unit -> t
-(** Build a fresh store with empty Hashtbls (capacities matched
-    to historical workload — 64 / 64 / 16 / 32), [None] dir refs,
-    and a fresh [Eio.Mutex.t]. Tests use this to avoid cross-case
-    pollution. *)
-
 val default : unit -> t
 (** Return the process-wide singleton store. Identity-stable
     across calls; prefer {!create} in tests when isolation is

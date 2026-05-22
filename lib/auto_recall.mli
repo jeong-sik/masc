@@ -107,21 +107,6 @@ val fetch_context_eio :
   unit ->
   recall_result
 
-(** Fetch context with query-based relevance boosting.
-    Items matching the query get their relevance boosted.
-
-    @param room_config MASC room configuration
-    @param config Recall configuration
-    @param query Query string for matching
-    @return Recall result with boosted relevance
-*)
-val fetch_context_smart :
-  Coord_utils.config ->
-  config:recall_config ->
-  query:string ->
-  unit ->
-  recall_result
-
 (** {1 Formatting} *)
 
 (** Format recall result as grep-like injection-ready text.

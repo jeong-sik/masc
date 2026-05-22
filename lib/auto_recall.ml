@@ -404,9 +404,8 @@ let extract_query_hints query =
 
 (* Byte-wise substring search (haystack already lowered, needle lowered
    inline).  Replaces a per-hint [Re.compile] that ran inside a
-   [List.exists]: with K hints and N items in [fetch_context_smart],
-   the old form built K × N regex DFAs even though each pattern was a
-   plain literal. *)
+   [List.exists]: with K hints and N items, the old form built K × N
+   regex DFAs even though each pattern was a plain literal. *)
 let contains_lowered_substring ~haystack_lower needle =
   let nlen = String.length needle in
   let hlen = String.length haystack_lower in
@@ -439,21 +438,3 @@ let content_matches_query content query =
       && contains_lowered_substring ~haystack_lower:content_lower hint
     ) hints
 
-(** Fetch context with query-based relevance boosting *)
-let fetch_context_smart
-    (room_config : Coord_utils.config)
-    ~(config : recall_config)
-    ~(query : string)
-    ()
-    : recall_result =
-  let result = fetch_context room_config ~config ~query () in
-  (* Boost relevance for items matching query *)
-  let boosted_items = List.map (fun item ->
-    if content_matches_query item.content query then
-      { item with relevance = min 1.0 (item.relevance +. 0.3) }
-    else
-      item
-  ) result.items in
-  (* Re-sort after boosting *)
-  let sorted = List.sort (fun a b -> compare b.relevance a.relevance) boosted_items in
-  { result with items = sorted }

@@ -132,39 +132,3 @@ let run_worker_oas ~sw ?net ~room_config
           ~raw_trace ~gate_config
           ?worker_run_id:spec.worker_run_id ()
 
-
-let preflight_spawn_batch ?clock_opt specs =
-  match Worker_runtime_config.backend () with
-  | Worker_execution_backend.Local_playground -> Ok ()
-  | Worker_execution_backend.Docker ->
-      let docker_specs =
-        specs
-        |> List.filter (fun (spec : Worker_execution_spec.t) ->
-               spec.runtime_backend = Worker_execution_backend.Docker)
-        |> List.map (fun (spec : Worker_execution_spec.t) ->
-               {
-                 Worker_runtime_docker.worker_name = spec.worker_name;
-                 model_label = spec.model_label;
-               })
-      in
-      Worker_runtime_docker.preflight_batch ?clock_opt docker_specs
-
-let run_worker ~sw ?net ~runtime_backend ~base_path ~worker_name ~model_label
-    ~room_config ?working_dir
-    ?thinking_enabled
-    ?worker_run_id ~role ~selection_note
-    ~(prompt : string) ~(timeout_sec : int) :
-    unit -> (run_result, string) result =
-  let spec =
-    build_execution_spec ~base_path ~worker_name ~model_label
-      ~runtime_backend ?working_dir
-      ?thinking_enabled ?worker_run_id ~role ~selection_note ~prompt
-      ~timeout_sec ()
-  in
-  match runtime_backend with
-  | Worker_execution_backend.Local_playground ->
-      run_worker_oas ~sw ?net ~room_config spec
-  | Worker_execution_backend.Docker ->
-      let spec = Worker_runtime_docker.rewrite_spec_for_container spec in
-      let clock_opt = Eio_context.get_clock_opt () in
-      fun () -> Worker_runtime_docker.run_worker_spec ?clock_opt spec

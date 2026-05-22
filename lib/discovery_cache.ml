@@ -88,10 +88,6 @@ let cache_age_seconds () =
 
 (* ── Convenience queries ─────────────────────────────────── *)
 
-let any_local_healthy () =
-  let endpoints = get_cached_or_refresh () in
-  List.exists (fun (e : endpoint_info) -> e.healthy) endpoints
-
 let idle_slot_count () =
   let endpoints = get_cached_or_refresh () in
   List.fold_left (fun acc (e : endpoint_info) ->
@@ -109,4 +105,3 @@ let busy_slot_count () =
 (* ── JSON (delegates to OAS) ─────────────────────────────── *)
 
 let endpoint_to_json = Llm_provider.Discovery.endpoint_status_to_json
-let summary_to_json = Llm_provider.Discovery.summary_to_json

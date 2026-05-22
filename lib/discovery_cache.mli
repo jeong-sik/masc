@@ -64,12 +64,6 @@ val cache_updated_at : float Atomic.t
 
 (** {1 Refresh + read} *)
 
-val refresh_cache : unit -> unit
-(** Run the discovery probe (HTTP, no lock held) and install
-    the result under the cache mutex. Also persists the snapshot
-    to {!Discovery_history} when {!set_base_path} has been called.
-    No-op when {!set_env} has not yet captured the Eio handles. *)
-
 val get_cached_or_refresh : unit -> endpoint_info list
 (** Return the cached endpoint list, refreshing first when:
     - the TTL has elapsed (30 seconds), or
@@ -82,10 +76,6 @@ val cache_age_seconds : unit -> float
 (** Wall-clock seconds since the last successful refresh. *)
 
 (** {1 Convenience queries} *)
-
-val any_local_healthy : unit -> bool
-(** [true] iff at least one cached endpoint reports healthy.
-    Implicitly refreshes via {!get_cached_or_refresh}. *)
 
 val idle_slot_count : unit -> int
 (** Sum of [slot.idle] across cached endpoints; endpoints with
@@ -102,7 +92,3 @@ val busy_slot_count : unit -> int
 val endpoint_to_json : endpoint_info -> Yojson.Safe.t
 (** Re-export of [Llm_provider.Discovery.endpoint_status_to_json]
     so dashboard consumers do not have to spell the path. *)
-
-val summary_to_json : endpoint_info list -> Yojson.Safe.t
-(** Re-export of [Llm_provider.Discovery.summary_to_json] so
-    dashboard consumers do not have to spell the path. *)

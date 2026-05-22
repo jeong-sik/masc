@@ -86,6 +86,11 @@ const ATTENTION_REASON_LABELS: Record<AttentionReason, string> = {
 
 function canonicalAttentionReason(reason: string | null): string | null {
   if (reason === 'timeout_budget_exhausted') return 'runtime_blocked'
+  if (reason === 'cascade_attempts_exhausted') return 'runtime_blocked'
+  if (reason === 'provider_tool_capability_missing') return 'runtime_blocked'
+  if (reason === 'completion_contract_violation') return 'runtime_blocked'
+  if (reason === 'watchdog_stale_turn') return 'runtime_blocked'
+  if (reason === 'fiber_unresolved') return 'runtime_blocked'
   return reason
 }
 
@@ -136,6 +141,11 @@ function isNextHumanAction(s: string): s is NextHumanAction {
 
 function canonicalNextHumanAction(action: string | null): string | null {
   if (action === 'inspect_timeout_budget') return 'inspect_runtime_blocker'
+  if (action === 'inspect_cascade_attempts') return 'inspect_runtime_blocker'
+  if (action === 'inspect_provider_tool_lane') return 'inspect_runtime_blocker'
+  if (action === 'inspect_completion_contract') return 'inspect_runtime_blocker'
+  if (action === 'inspect_watchdog_root_cause') return 'inspect_runtime_blocker'
+  if (action === 'inspect_turn_finalization') return 'inspect_runtime_blocker'
   return action
 }
 

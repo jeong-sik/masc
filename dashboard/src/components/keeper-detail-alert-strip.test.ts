@@ -78,6 +78,22 @@ describe('KeeperRuntimeAlertStrip', () => {
     expect(text).not.toContain('증명')
   })
 
+  it('canonicalizes runtime attention tokens before rendering operator copy', () => {
+    const { container } = render(h(KeeperRuntimeAlertStrip, {
+      keeper: keeper({
+        needs_attention: true,
+        attention_reason: 'watchdog_stale_turn',
+        next_human_action: 'inspect_watchdog_root_cause',
+      }),
+    }))
+
+    const text = container.textContent ?? ''
+    expect(text).toContain('runtime_blocked')
+    expect(text).toContain('런타임 근거 확인')
+    expect(text).not.toContain('watchdog_stale_turn')
+    expect(text).not.toContain('inspect_watchdog_root_cause')
+  })
+
   it('closes 모순 #3: per-attempt completed outcome is hidden when per-turn stop cause is terminal failure', () => {
     const { container } = render(h(KeeperRuntimeAlertStrip, {
       keeper: keeper({

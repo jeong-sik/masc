@@ -74,7 +74,8 @@ let next_action = function
   | Required_tool_use_unsatisfied ->
     Some "inspect_tool_contract_rejection"
   | Post_commit_ambiguous -> Some "reconcile_partial_commit"
-  | Provider_error _ | Unknown _ -> Some "inspect_latest_error"
+  | Provider_error _ -> Some "inspect_provider_runtime_cause"
+  | Unknown _ -> Some "inspect_latest_error"
 ;;
 
 let to_wire = function

@@ -272,6 +272,10 @@ let is_completion_contract_blocker_class blocker_class =
   String.equal blocker_class (blocker_class_to_string Completion_contract_violation)
 ;;
 
+let is_provider_runtime_blocker_class blocker_class =
+  String.equal blocker_class "provider_runtime_error"
+;;
+
 
 let runtime_blocker_surface_of_typed_class ?(summary = "") (cls : blocker_class)
   : runtime_blocker_surface
@@ -476,7 +480,11 @@ let runtime_blocker_surface_of_failure_reason (reason : Keeper_registry.failure_
   | Keeper_registry.Provider_runtime_error { code; detail } ->
     Some
       { blocker_class = "provider_runtime_error"
-      ; summary = Printf.sprintf "%s: %s" code detail
+      ; summary =
+          Printf.sprintf
+            "Provider runtime catch-all (%s): %s; inspect typed provider/auth/DNS/timeout/capacity cause."
+            code
+            detail
       ; continue_gate = false
       }
   | Keeper_registry.Tool_required_unsatisfied { code; detail } ->
@@ -766,6 +774,8 @@ let attention_fields_json (config : Coord_utils.config) (meta : keeper_meta) =
         true, Some "provider_tool_capability_missing", Some "inspect_provider_tool_lane"
       | Some blocker when is_completion_contract_blocker_class blocker.blocker_class ->
         true, Some "completion_contract_violation", Some "inspect_completion_contract"
+      | Some blocker when is_provider_runtime_blocker_class blocker.blocker_class ->
+        true, Some "provider_runtime_error", Some "inspect_provider_runtime_cause"
       | Some _ -> true, Some "runtime_blocked", Some "inspect_runtime_blocker"
       | None when meta.paused -> true, Some "paused", Some "resume_or_review"
       | None when not social_model_recognized ->

@@ -32,6 +32,20 @@ let content_blocks_of_json
       if List.length parsed = List.length blocks then Some parsed else None
   | _ -> None
 
+let legacy_content_blocks_of_json
+    (json : Yojson.Safe.t) : Agent_sdk.Types.content_block list option =
+  let open Yojson.Safe.Util in
+  match json |> member "content" with
+  | `String text -> Some [ Agent_sdk.Types.Text text ]
+  | `List blocks ->
+    let parse_legacy_block = function
+      | `String text -> Some (Agent_sdk.Types.Text text)
+      | block -> Agent_sdk.Api.content_block_of_json block
+    in
+    let parsed = List.filter_map parse_legacy_block blocks in
+    if List.length parsed = List.length blocks then Some parsed else None
+  | _ -> None
+
 let string_field_opt key value =
   match value with
   | Some text -> [ (key, `String text) ]
@@ -68,10 +82,8 @@ let message_to_json (m : Agent_sdk.Types.message) : Yojson.Safe.t =
         | Agent_sdk.Types.User
         | Agent_sdk.Types.Assistant -> None)
   in
-  (* SSOT: structured [content_blocks] only. The previous flat [content]
-     field was a duplicate of [text_of_message m] used by retired
-     checkpoint readers; current readers reconstruct text from
-     [content_blocks] via [text_of_history_jsonl_line] (see below). *)
+  (* SSOT for new writes: structured [content_blocks]. Readers below still
+     accept legacy flat [content] rows when [content_blocks] is absent. *)
   let base =
     [
       ("role", `String (role_to_string m.role));
@@ -97,7 +109,7 @@ let message_of_json (json : Yojson.Safe.t) : Agent_sdk.Types.message =
   let content =
     match content_blocks_of_json json with
     | Some blocks -> blocks
-    | None -> []
+    | None -> Option.value (legacy_content_blocks_of_json json) ~default:[]
   in
   Inference_utils.sanitize_message_utf8
     {
@@ -112,13 +124,14 @@ let message_of_json (json : Yojson.Safe.t) : Agent_sdk.Types.message =
       metadata = [];
     }
 
-(** Extract human-readable text from a single history.jsonl line that was
-    produced by [message_to_json].  Reads structured [content_blocks]
-    (current SSOT). Returns [""] when the canonical shape is absent or
-    unparseable. *)
+(** Extract human-readable text from a single history.jsonl line. Reads
+    structured [content_blocks] first and falls back to legacy [content] rows
+    when the canonical shape is absent. *)
 let text_of_history_jsonl_json (json : Yojson.Safe.t) : string =
-  match content_blocks_of_json json with
-  | Some blocks when blocks <> [] ->
+  let text_of_blocks blocks =
+    if blocks = []
+    then ""
+    else
       let msg : Agent_sdk.Types.message =
         {
           Agent_sdk.Types.role = Agent_sdk.Types.User;
@@ -129,4 +142,10 @@ let text_of_history_jsonl_json (json : Yojson.Safe.t) : string =
         }
       in
       Inference_utils.sanitize_text_utf8 (Agent_sdk.Types.text_of_message msg)
-  | _ -> ""
+  in
+  match content_blocks_of_json json with
+  | Some blocks -> text_of_blocks blocks
+  | None ->
+    (match legacy_content_blocks_of_json json with
+     | Some blocks -> text_of_blocks blocks
+     | None -> "")

@@ -191,7 +191,7 @@ let handle_keeper_bash_typed
                ~extra:[ "cmd", `String cmd_for_log; "typed", `Bool true; "execution_time_ms", `Int 0 ]
                ())
         else
-          match Keeper_tool_bash_input.to_shell_ir_unvalidated ~mode ~sandbox:dispatch_sandbox input with
+          match Keeper_tool_bash_input.to_shell_ir ~mode ~sandbox:dispatch_sandbox input with
           | Error e ->
             error_json
               ~fields:[ "typed", `Bool true; "cmd", `String cmd_for_log; "cwd", `String cwd ]

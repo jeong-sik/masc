@@ -372,7 +372,7 @@ let test_keeper_internal_descriptions_no_cross_leak () =
     ]
   in
   let internal_schemas =
-    Tool_shard.all_keeper_tool_schemas
+    Config.raw_all_tool_schemas
     |> List.filter (fun (s : Masc_domain.tool_schema) ->
            Tool_catalog.is_on_surface Tool_catalog.Keeper_internal s.name)
   in

@@ -648,6 +648,31 @@ let keeper_bash_typed_pipeline_args ~cwd =
       ("timeout_sec", `Float 5.0);
     ]
 
+let keeper_bash_typed_single_stage_pipeline_args ~cwd =
+  `Assoc
+    [
+      ( "pipeline",
+        `List
+          [
+            `Assoc
+              [
+                ("executable", `String "printf");
+                ("argv", `List [ `String "typed" ]);
+              ];
+          ] );
+      ("cwd", `String cwd);
+      ("timeout_sec", `Float 5.0);
+    ]
+
+let keeper_bash_typed_env_wrapper_args ~cwd =
+  `Assoc
+    [
+      ("executable", `String "env");
+      ("argv", `List [ `String "id" ]);
+      ("cwd", `String cwd);
+      ("timeout_sec", `Float 5.0);
+    ]
+
 let check_typed_pipeline_response raw =
   (match parse_bool_field raw "ok" with
    | Some true -> ()
@@ -659,6 +684,40 @@ let check_typed_pipeline_response raw =
     (parse_status_exit_code raw);
   Alcotest.(check bool) "pipeline output propagated" true
     (response_mentions raw "output" "5")
+
+let check_typed_validation_error raw needle =
+  Alcotest.(check (option bool)) "typed command rejected" (Some false)
+    (parse_bool_field raw "ok");
+  Alcotest.(check (option bool)) "typed response" (Some true)
+    (parse_bool_field raw "typed");
+  Alcotest.(check bool) "validation error surfaced" true
+    (response_mentions raw "error" needle)
+
+let test_bash_typed_env_wrapper_target_rejected () =
+  setup ~sandbox:Keeper_types.Local
+  @@ fun ~config ~meta ~playground ->
+  Keeper_exec_shell.handle_keeper_bash
+    ~turn_sandbox_factory:None
+    ~turn_sandbox_factory_git:None
+    ~exec_cache:None
+    ~config
+    ~meta
+    ~args:(keeper_bash_typed_env_wrapper_args ~cwd:playground)
+    ()
+  |> check_typed_validation_error "executable \"id\" not in dev_full allowlist"
+
+let test_bash_typed_single_stage_pipeline_rejected () =
+  setup ~sandbox:Keeper_types.Local
+  @@ fun ~config ~meta ~playground ->
+  Keeper_exec_shell.handle_keeper_bash
+    ~turn_sandbox_factory:None
+    ~turn_sandbox_factory_git:None
+    ~exec_cache:None
+    ~config
+    ~meta
+    ~args:(keeper_bash_typed_single_stage_pipeline_args ~cwd:playground)
+    ()
+  |> check_typed_validation_error "Pipeline.stages requires at least two stages"
 
 let test_bash_typed_pipeline_falls_back_to_local_playground () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "missing:test" @@ fun () ->
@@ -2151,6 +2210,12 @@ let () =
           Alcotest.test_case
             "keeper_bash typed pipeline uses local shell ir dispatch"
             `Quick test_bash_typed_pipeline_uses_local_shell_ir_dispatch;
+          Alcotest.test_case
+            "keeper_bash typed env wrapper target is validated"
+            `Quick test_bash_typed_env_wrapper_target_rejected;
+          Alcotest.test_case
+            "keeper_bash typed single-stage pipeline is rejected"
+            `Quick test_bash_typed_single_stage_pipeline_rejected;
           Alcotest.test_case
             "keeper_bash typed pipeline falls back to local playground"
             `Quick test_bash_typed_pipeline_falls_back_to_local_playground;

@@ -200,7 +200,7 @@ let read_public_schema =
     ; property
         "limit"
         "integer"
-        "Approximate maximum bytes to return (mapped to keeper_fs_read max_bytes; \
+        "Approximate maximum bytes to return (byte-based limit; \
          line-based limit is not supported)."
     ; property
         "offset"

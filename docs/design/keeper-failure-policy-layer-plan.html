@@ -278,7 +278,7 @@
       <h2>Executive Goal</h2>
       <p>
         현재 문제는 keeper 실패가 여러 callsite에서 서로 다른 언어로 해석된다는 점이다.
-        <code>keeper_bash</code> workflow rejection, <code>oas_timeout_budget</code>, stale watchdog,
+        <code>keeper_bash</code> workflow rejection, <code>provider_timeout</code>, stale watchdog,
         supervisor auto-pause, dashboard blocked count가 서로 다른 정책 계층처럼 동작하면서
         operator에게는 모두 "keeper가 막힘/죽음"으로 보인다.
       </p>
@@ -300,7 +300,7 @@
           <ul>
             <li><code>Paused</code>, <code>Blocked</code>, <code>Backoff</code>, <code>Provider cooldown</code>이 UI/로그에서 섞인다.</li>
             <li><code>blocked_count</code>가 실제 blocked task 수가 아니라 fleet capacity shortfall로 보인다.</li>
-            <li><code>Oas_timeout_budget_loop</code>가 provider/turn 증상인데 keeper lifecycle event로 승격된다.</li>
+            <li><code>Provider_timeout_loop</code>가 provider/turn 증상인데 keeper lifecycle event로 승격된다.</li>
             <li>stale watchdog은 root cause를 보존하려다 lifecycle action까지 과하게 이어질 수 있다.</li>
           </ul>
         </div>
@@ -308,7 +308,7 @@
           <h3>Immediate Mitigations In Flight</h3>
           <ul>
             <li><span class="done">Done / PR</span> <code>#16154</code>: deterministic <code>keeper_bash</code> guard rejection을 <code>workflow_rejection</code>으로 분류해 circuit breaker에서 제외.</li>
-            <li><span class="done">Done / PR</span> <code>#16159</code>: repeated <code>oas_timeout_budget</code> strike가 <code>Keeper_fiber_crash</code>로 승격되는 직접 경로 제거.</li>
+            <li><span class="done">Done / PR</span> <code>#16159</code>: repeated <code>provider_timeout</code> strike가 <code>Keeper_fiber_crash</code>로 승격되는 직접 경로 제거.</li>
             <li><span class="done">Done / OAS PR</span> <code>oas#1632</code>: provider timeout을 <code>stream_idle:streaming_thinking</code>, <code>stream_body</code>, <code>provider_step</code> 같은 typed evidence로 보존.</li>
             <li><span class="done">Done / MASC PR</span> <code>#16191</code>: downstream OAS pin을 <code>main@308152ee</code> (<code>v0.196.1</code>)로 올리고 API surface fingerprint를 갱신.</li>
             <li><span class="doing">Started / MASC PR</span> <code>#16178</code>: <code>Keeper_failure_policy.decide</code> pure matrix와 heartbeat OAS timeout strike callsite를 policy decision으로 연결.</li>
@@ -318,7 +318,7 @@
       </div>
       <div class="callout warning">
         <strong>Important:</strong>
-        <code>oas_timeout_budget</code>는 원인이 아니라 증상이다. 단일 timeout error kind만 보고 "recoverable" 또는 "hopeless"를 결정하면 안 된다.
+        <code>provider_timeout</code>는 keeper death 원인이 아니라 provider/turn 증상이다. 단일 timeout evidence만 보고 "recoverable" 또는 "hopeless"를 결정하면 안 된다.
         provider/cascade 상태, fallback 가능성, terminal fingerprint, slot/process liveness, repeated stale evidence를 함께 봐야 한다.
       </div>
     </section>
@@ -403,11 +403,11 @@ type decision = {
             <td>Command rejected by workflow guard. Rewrite tool usage.</td>
           </tr>
           <tr>
-            <td><code>provider_timeout</code> / <code>oas_timeout_budget</code></td>
+            <td><code>provider_timeout</code></td>
             <td>provider call or keeper turn</td>
             <td><span class="ok">turn soft fail</span></td>
             <td>only with separate liveness evidence such as wedged child process or leaked slot</td>
-            <td>Provider or turn budget exhausted. Inspect timeout budget and provider health.</td>
+            <td>Provider or turn budget exhausted. Inspect provider timeout evidence and turn wall-clock health.</td>
           </tr>
           <tr>
             <td><code>transient_network</code> / <code>overload</code></td>
@@ -483,7 +483,7 @@ type decision = {
       </div>
       <div class="callout">
         <strong>Policy rule:</strong>
-        <code>oas_timeout_budget</code> alone may set <code>Turn_soft_fail</code> or <code>Provider_cooldown</code>.
+        <code>provider_timeout</code> alone may set <code>Turn_soft_fail</code> or <code>Provider_cooldown</code>.
         It may not set <code>Keeper_auto_pause</code> or <code>Keeper_dead</code> unless a second typed evidence source proves keeper/runtime liveness is broken.
       </div>
     </section>
@@ -534,7 +534,7 @@ type decision = {
             <td><span class="status doing">draft PR</span></td>
             <td>Migrate heartbeat OAS timeout and transient error paths to policy decisions.</td>
             <td><code>#16178</code>: <code>keeper_heartbeat_loop.ml</code>, <code>keeper_failure_policy.ml</code>, strike tests</td>
-            <td><code>oas_timeout_budget</code> strike limit routes through policy; <code>stream_idle:streaming_thinking</code> is preserved and cannot allow keeper death without liveness evidence.</td>
+            <td><code>provider_timeout</code> strike limit routes through policy; <code>stream_idle:streaming_thinking</code> is preserved and cannot allow keeper death without liveness evidence.</td>
           </tr>
           <tr>
             <td>P0-D</td>

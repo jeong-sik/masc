@@ -42,24 +42,24 @@ val record_cascade_backpressure_observation
   -> reason:string
   -> unit
 
-val oas_timeout_budget_observation_reasons : string list
+val provider_timeout_observation_reasons : string list
 
-val record_oas_timeout_budget_observation
+val record_provider_timeout_observation
   :  base_path:string
   -> keeper_name:string
   -> unit
 
-val clear_oas_timeout_budget_failure_reason
+val clear_provider_timeout_failure_reason
   :  base_path:string
   -> keeper_name:string
   -> unit
 
-val prior_oas_timeout_budget_strikes
+val prior_provider_timeout_strikes
   :  base_path:string
   -> keeper_name:string
   -> int
 
-val is_oas_timeout_budget_error : Agent_sdk.Error.sdk_error -> bool
+val is_provider_timeout_error : Agent_sdk.Error.sdk_error -> bool
 val timeout_phase_of_oas_timeout_budget_phase : string -> Keeper_failure_policy.timeout_phase option
 
 val oas_timeout_budget_policy_decision

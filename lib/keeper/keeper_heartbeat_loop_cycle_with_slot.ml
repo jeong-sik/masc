@@ -13,8 +13,8 @@
       Exception] + raises [Keeper_registry.Keeper_fiber_crash] for
       the supervisor to handle.
 
-    - Legacy timeout-budget errors → provider-timeout strike-counter bump (seeded from
-      [prior_oas_timeout_budget_strikes]) + persistent failure
+    - Provider-timeout errors → provider-timeout strike-counter bump (seeded from
+      [prior_provider_timeout_strikes]) + persistent failure
       reason + observation recording + [Keeper_failure_policy.decide]
       kill/keep decision + [metric_keeper_provider_timeout_strike]
       tick with policy-derived outcome label.
@@ -23,8 +23,8 @@
       [metric_keeper_meta_read_failures] on read failure +
       Site=none_after_failure or error_after_failure label).
 
-    - [Ok updated] → reset budget exhaustion + clear OAS timeout
-      budget failure reason + return updated meta.
+    - [Ok updated] → reset budget exhaustion + clear provider-timeout
+      failure reason + return updated meta.
 
     Pure helper move — no callback injection, all references reach
     external modules (Keeper_unified_turn, Agent_sdk, Log, Prometheus,
@@ -83,12 +83,12 @@ let run_keeper_cycle_with_slot
         (Some
            (Keeper_registry.Exception (Printf.sprintf "fatal environment error: %s" e_str)));
       raise Keeper_registry.Keeper_fiber_crash);
-    if Observations.is_oas_timeout_budget_error err
+    if Observations.is_provider_timeout_error err
     then (
       let keeper_name = meta_after_cursor_persist.name in
       Keeper_turn_slot.reset_budget_exhaustion ~keeper_name;
       Log.Keeper.warn
-        "%s: legacy oas_timeout_budget observed; preserving original turn \
+        "%s: provider_timeout observed; preserving original turn \
          failure without Provider_timeout_loop latch"
         keeper_name);
     (match read_meta ctx.config meta_after_cursor_persist.name with
@@ -116,7 +116,7 @@ let run_keeper_cycle_with_slot
        meta_after_cursor_persist)
   | Ok updated ->
     Keeper_turn_slot.reset_budget_exhaustion ~keeper_name:meta_after_cursor_persist.name;
-    Observations.clear_oas_timeout_budget_failure_reason
+    Observations.clear_provider_timeout_failure_reason
       ~base_path:ctx.config.base_path
       ~keeper_name:meta_after_cursor_persist.name;
     updated

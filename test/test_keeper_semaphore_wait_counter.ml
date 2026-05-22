@@ -444,7 +444,7 @@ let test_wait_observation_updates_registry_skip_stamp () =
       | Some _ -> Alcotest.fail "last_skip_observation was not stamped"
       | None -> Alcotest.fail "registered keeper missing")
 
-let test_oas_timeout_budget_observation_reason_labels () =
+let test_provider_timeout_observation_reason_labels () =
   Alcotest.(check (list string))
     "provider timeout watchdog reasons"
     [
@@ -452,9 +452,9 @@ let test_oas_timeout_budget_observation_reason_labels () =
       "provider_timeout";
       "keeper_turn_retry_backoff";
     ]
-    Masc_mcp.Keeper_heartbeat_loop.oas_timeout_budget_observation_reasons
+    Masc_mcp.Keeper_heartbeat_loop.provider_timeout_observation_reasons
 
-let test_oas_timeout_budget_observation_updates_registry () =
+let test_provider_timeout_observation_updates_registry () =
   let base_path =
     Filename.concat (Filename.get_temp_dir_name ())
       (Printf.sprintf "masc-oas-timeout-observation-%d" (Unix.getpid ()))
@@ -472,7 +472,7 @@ let test_oas_timeout_budget_observation_updates_registry () =
         | Some entry -> entry.meta.runtime.usage.last_turn_ts
         | None -> Alcotest.fail "registered keeper missing before observation"
       in
-      Masc_mcp.Keeper_heartbeat_loop.record_oas_timeout_budget_observation
+      Masc_mcp.Keeper_heartbeat_loop.record_provider_timeout_observation
         ~base_path
         ~keeper_name:keeper;
       match Masc_mcp.Keeper_registry.get ~base_path keeper with
@@ -480,7 +480,7 @@ let test_oas_timeout_budget_observation_updates_registry () =
                meta = updated_meta; _ } ->
         Alcotest.(check (list string))
           "provider timeout stamped for watchdog routing"
-          Masc_mcp.Keeper_heartbeat_loop.oas_timeout_budget_observation_reasons
+          Masc_mcp.Keeper_heartbeat_loop.provider_timeout_observation_reasons
           reasons;
         Alcotest.(check bool)
           "last_turn_ts touched"
@@ -529,8 +529,8 @@ let () =
       Alcotest.test_case "registry skip stamp is updated" `Quick
         test_wait_observation_updates_registry_skip_stamp;
       Alcotest.test_case "oas timeout labels are stable" `Quick
-        test_oas_timeout_budget_observation_reason_labels;
+        test_provider_timeout_observation_reason_labels;
       Alcotest.test_case "oas timeout registry stamp is updated" `Quick
-        test_oas_timeout_budget_observation_updates_registry;
+        test_provider_timeout_observation_updates_registry;
     ];
   ]

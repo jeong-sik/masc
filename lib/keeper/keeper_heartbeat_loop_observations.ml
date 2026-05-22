@@ -148,19 +148,19 @@ let record_cascade_backpressure_observation ~base_path ~keeper_name ~reason =
   Keeper_registry.touch_last_turn_ts ~base_path keeper_name
 ;;
 
-let oas_timeout_budget_observation_reasons =
+let provider_timeout_observation_reasons =
   [ "provider_runtime_error"; "provider_timeout"; "keeper_turn_retry_backoff" ]
 ;;
 
-let record_oas_timeout_budget_observation ~base_path ~keeper_name =
+let record_provider_timeout_observation ~base_path ~keeper_name =
   Keeper_registry.record_skip_reasons
     ~base_path
     keeper_name
-    ~reasons:oas_timeout_budget_observation_reasons;
+    ~reasons:provider_timeout_observation_reasons;
   Keeper_registry.touch_last_turn_ts ~base_path keeper_name
 ;;
 
-let clear_oas_timeout_budget_failure_reason ~base_path ~keeper_name =
+let clear_provider_timeout_failure_reason ~base_path ~keeper_name =
   match Keeper_registry.get ~base_path keeper_name with
   | Some
       { Keeper_registry.last_failure_reason =
@@ -170,7 +170,7 @@ let clear_oas_timeout_budget_failure_reason ~base_path ~keeper_name =
   | _ -> ()
 ;;
 
-let prior_oas_timeout_budget_strikes ~base_path ~keeper_name =
+let prior_provider_timeout_strikes ~base_path ~keeper_name =
   match Keeper_registry.get ~base_path keeper_name with
   | Some
       { Keeper_registry.last_failure_reason =
@@ -180,7 +180,7 @@ let prior_oas_timeout_budget_strikes ~base_path ~keeper_name =
   | _ -> 0
 ;;
 
-let is_oas_timeout_budget_error (err : Agent_sdk.Error.sdk_error) =
+let is_provider_timeout_error (err : Agent_sdk.Error.sdk_error) =
   (* Enumerate every [masc_internal_error] variant + [None] so the
      compiler flags any new constructor here. Mirrors the fix in
      [degraded_retry_bypasses_slot_phase_guard] (PR #14716) and

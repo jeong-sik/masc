@@ -6,13 +6,6 @@
 
 open Keeper_types
 
-(** Resolve the tool_preset from [profile_defaults.tool_preset]
-    via [Keeper_preset_defaults.preset_of_defaults_warn] with
-    [call_site:"keeper_turn_up_create"]. Returns [None] when the
-    defaults field is unset or names an unknown preset. *)
-val preset_of_defaults :
-  keeper_profile_defaults -> tool_preset option
-
 (** Persist a freshly-built keeper_meta with field-merging CAS
     retry — preserves heartbeat-owned cursors when bootstrap races
     a supervisor write (#9749). *)

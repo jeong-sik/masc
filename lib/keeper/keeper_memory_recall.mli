@@ -37,6 +37,21 @@ val read_file_tail_lines : string -> max_bytes:int -> max_lines:int -> string li
     sunset window; new callers should prefer the Result-returning
     helper. *)
 
+val read_keeper_memory_summary_result :
+  Coord.config ->
+  name:string ->
+  max_bytes:int ->
+  max_lines:int ->
+  recent_limit:int ->
+  (keeper_memory_summary, Keeper_memory_recall_exn_class.t) result
+(** Result-returning variant of {!read_keeper_memory_summary}.  On
+    [Error class] the caller can render a typed [Memory_unavailable]
+    signal up the chain (boot-time alert, operator-visible degraded
+    status) instead of emitting an empty summary that is
+    indistinguishable from a fresh keeper with no recorded memory.
+
+    @since RFC-0149 Phase 1 *)
+
 val read_keeper_memory_summary :
   Coord.config ->
   name:string ->
@@ -44,6 +59,10 @@ val read_keeper_memory_summary :
   max_lines:int ->
   recent_limit:int ->
   keeper_memory_summary
+(** Silent-fallback summary reader: returns an empty summary on any
+    IO failure.  Retained as a facade during the RFC-0149 §3.1 sunset
+    window; new callers should prefer
+    {!read_keeper_memory_summary_result}. *)
 
 val read_memory_horizon_counts :
   Coord.config ->

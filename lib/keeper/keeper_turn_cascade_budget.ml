@@ -215,8 +215,8 @@ let oas_retry_budget_available_for_turn
    paths ([adaptive_*_retry] / [static_300s_*_retry]). The current
    caller in [Keeper_unified_turn.ml:589-615] calls
    [resolve_bounded_oas_timeout_budget_with_turn_budget] and, when it
-   returns [None] for a retry, *emits* an [Oas_timeout_budget] error
-   with [source="pre_retry_budget_unavailable"]. That collapses two
+   returns [None] for a retry, emits a turn-owned timeout instead of
+   minting an [Oas_timeout_budget] root cause. That keeps two
    different failure semantics into one wire code:
      (a) the cascade attempt never started because admission budget
          was insufficient, and

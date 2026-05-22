@@ -623,24 +623,16 @@ let run_keeper_cycle
                                ~remaining_turn_budget_s:(remaining_turn_budget_s ())
                            with
                            | None ->
+                             let remaining_turn_budget_sec =
+                               remaining_turn_budget_s ()
+                             in
                              Error
                                (Keeper_turn_driver.sdk_error_of_masc_internal_error
-                                  (Keeper_turn_driver.Oas_timeout_budget
-                                     { budget_sec = 0.0
-                                     ; keeper_turn_timeout_sec = timeout_sec
-                                     ; estimated_input_tokens =
-                                         prompt_timeout_estimate_tokens
-                                     ; source =
-                                         (if is_retry
-                                          then "pre_retry_budget_unavailable"
-                                          else "pre_attempt_budget_unavailable")
-                                     ; remaining_turn_budget_sec =
-                                         Some (remaining_turn_budget_s ())
-                                     ; min_required_sec = min_oas_timeout_budget_sec
-                                     ; phase =
-                                         (if is_retry
-                                          then "pre_retry_budget_gate"
-                                          else "pre_attempt_budget_gate")
+                                  (Keeper_turn_driver.Turn_timeout
+                                     {
+                                       elapsed_sec =
+                                         Float.max 0.0
+                                           (timeout_sec -. remaining_turn_budget_sec);
                                      }))
                            | Some timeout_budget ->
                              attempt_timeout_budget := Some timeout_budget;

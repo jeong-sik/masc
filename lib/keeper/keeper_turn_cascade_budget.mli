@@ -115,7 +115,7 @@ val oas_retry_budget_available_for_turn :
     Distinguishes "admission denied before any provider attempt"
     from "provider attempt ran and OAS server timed out". The
     existing call surface in [Keeper_unified_turn] emits
-    [Oas_timeout_budget] with [source="pre_retry_budget_unavailable"]
+    [Turn_timeout] instead of minting an [Oas_timeout_budget] root cause
     for the former case, which collapses both semantics into one
     metric. This function exposes the typed decision so callers can
     branch on the closed-sum reason. The matching error variant

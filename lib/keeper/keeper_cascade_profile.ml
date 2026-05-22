@@ -370,25 +370,13 @@ let catalog_metadata_of_materialized_json json =
       fallback_hints;
     }
 
-let catalog_metadata_result ?config_path () =
-  let path_opt =
-    match config_path with
-    | Some path -> Some path
-    | None -> Config_dir_resolver.cascade_path_opt ()
-  in
-  match path_opt with
-  | None -> Error "cascade catalog path is not resolved"
-  | Some path -> (
-      match Cascade_config_loader.load_catalog_source_for_diagnostics path with
-      | Error msg -> Error ("declarative cascade catalog invalid: " ^ msg)
-      | Ok json -> catalog_metadata_of_materialized_json json)
-
-(* RFC-0143 Phase 1 bridge.
+(* RFC-0143 typed catalog metadata query.
 
    Distinguishes the three control-flow origins of an unavailable
-   catalog so callers (PR-2..PR-4) can decide what to do about each
-   without grepping the error string. The three branches mirror the
-   three Error sites in [catalog_metadata_result] above. *)
+   catalog so callers can decide what to do about each without
+   grepping an error string.  Replaces the legacy string-error
+   [catalog_metadata_result] which was deleted by the §4 PR-5
+   closeout once all callers consumed this typed variant. *)
 type catalog_unavailable_reason =
   | Catalog_path_not_resolved
       (** The config-dir resolver returned no cascade.toml path.
@@ -415,12 +403,6 @@ let catalog_unavailable_reason_to_string = function
   | Catalog_metadata_invalid _ -> "metadata_invalid"
 ;;
 
-(* Bridge: typed query alongside the legacy string-error
-   [catalog_metadata_result]. PR-1 of RFC-0143 introduces this
-   without migrating any callers. PR-2..PR-4 migrate the six
-   internal call sites (lines 399/408/413/433/494/489 in the
-   pre-migration file) one batch at a time; PR-5 deletes the
-   legacy [catalog_metadata_result] once no callers remain. *)
 let catalog_metadata_query ?config_path () =
   let path_opt =
     match config_path with

@@ -1060,7 +1060,9 @@ let handle_schema _state request reqd =
             reqd
             ~status:`OK
             (`Assoc [ "ok", `Bool true; "id", `String id; "schema", parsed ])
-        | exception _ ->
+        (* RFC-0145 — narrow to the only exception
+           [Yojson.Safe.from_string] raises on malformed JSON. *)
+        | exception Yojson.Json_error _ ->
           respond_json
             request
             reqd

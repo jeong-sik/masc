@@ -397,7 +397,10 @@ let poll_state st =
 	          | _, s -> mark_process_finished st s
 	          | exception Unix.Unix_error (Unix.ECHILD, _, _) ->
 	              mark_process_finished st (Unix.WEXITED 0)
-	          | exception _ -> ()));
+	          (* RFC-0145 — narrow to the only remaining exception kind
+	             [Unix.waitpid] raises (the [ECHILD] case is handled
+	             above as a domain-meaningful outcome). *)
+	          | exception Unix.Unix_error _ -> ()));
     if st.status = None
        && st.timeout_sec > 0.0
        && Unix.gettimeofday () -. st.handle.started_at > st.timeout_sec
@@ -407,7 +410,9 @@ let poll_state st =
 	      (match Unix.waitpid [ Unix.WNOHANG ] st.handle.pid with
 	       | 0, _ -> ()
 	       | _, s -> mark_process_finished st s
-	       | exception _ -> ())
+	       (* RFC-0145 — narrow to [Unix.Unix_error] (the only exception
+	          [Unix.waitpid] raises). *)
+	       | exception Unix.Unix_error _ -> ())
     end;
 	    if st.status <> None && st.stdout_eof && st.stderr_eof then begin
 		      st.closed <- true;

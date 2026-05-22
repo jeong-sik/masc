@@ -87,8 +87,10 @@ let run_all () =
       let count_after_budget = ref 0 in
       Eio_guard.protect
         ~finally:(fun () ->
+          (* RFC-0145 — narrow to [Unix.Unix_error] (the only exception
+             [Unix.closedir] raises on a bad fd). *)
           try Unix.closedir dh with
-          | _ -> ())
+          | Unix.Unix_error _ -> ())
         (fun () ->
            while not !stop do
              match Unix.readdir dh with

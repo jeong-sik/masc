@@ -289,6 +289,53 @@ let runtime_lens_gaps ~terminal_event_present ~claim_scope ~config_drift scan =
                 :: acc)
          gaps
   in
+  let gaps =
+    gaps
+    |> (fun gaps ->
+         match scan.provider_terminal_row with
+         | Some row when row.Keeper_runtime_manifest.links.receipt_path = None ->
+           { code = "receipt_missing"
+           ; severity = "warn"
+           ; lane = "keeper"
+           ; detail = Some "terminal event has no receipt_path link"
+           }
+           :: gaps
+         | _ -> gaps)
+    |> (fun gaps ->
+         match scan.provider_terminal_row with
+         | Some row when row.Keeper_runtime_manifest.links.checkpoint_path = None ->
+           { code = "checkpoint_missing"
+           ; severity = "warn"
+           ; lane = "oas_agent"
+           ; detail = Some "terminal event has no checkpoint_path link"
+           }
+           :: gaps
+         | _ -> gaps)
+    |> (fun gaps ->
+         match scan.provider_terminal_row with
+         | Some row when row.Keeper_runtime_manifest.links.tool_call_log_path = None ->
+           { code = "artifact_link_missing"
+           ; severity = "warn"
+           ; lane = "tool_runtime"
+           ; detail = Some "terminal event has no tool_call_log_path link"
+           }
+           :: gaps
+         | _ -> gaps)
+    |> (fun gaps ->
+         if scan.provider_started_count > 0
+            && scan.event_bus_correlation_ids = []
+            && scan.event_bus_run_ids = []
+         then
+           { code = "provider_oas_link_missing"
+           ; severity = "warn"
+           ; lane = "provider"
+           ; detail =
+               Some
+                 "provider attempt started but no event_bus correlation or run_id links"
+           }
+           :: gaps
+         else gaps)
+  in
   gaps
   @ Server_dashboard_http_keeper_runtime_lens_clock_groups.runtime_lens_clock_gaps
       scan

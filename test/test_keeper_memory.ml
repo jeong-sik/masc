@@ -8,6 +8,7 @@ module Keeper_memory_recall_exn_class = Masc_mcp.Keeper_memory_recall_exn_class
 module Keeper_world_observation = Masc_mcp.Keeper_world_observation
 module Meas = Masc_mcp.Keeper_measurement
 module Keeper_types = Masc_mcp.Keeper_types
+module Keeper_memory_policy = Masc_mcp.Keeper_memory_policy
 module KET = Masc_mcp.Keeper_exec_tools
 module KEC = Masc_mcp.Keeper_exec_context
 module Types = Masc_domain

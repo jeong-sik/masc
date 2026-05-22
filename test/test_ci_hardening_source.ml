@@ -1255,6 +1255,7 @@ let test_keeper_zombie_field_contracts () =
       trace_id = "trace-test";
       generation = 1;
       turn_count = Some 1;
+      oas_turn_count = None;
       current_task_id = Some "task-123";
       goal_ids = [ "goal-123" ];
       outcome = `Ok;

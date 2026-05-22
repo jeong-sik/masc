@@ -1494,6 +1494,7 @@ let run_turn
          ; trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id
          ; generation
          ; turn_count = !receipt_turn_count_ref
+         ; oas_turn_count = !receipt_turn_count_ref
          ; current_task_id =
              Option.map Keeper_id.Task_id.to_string acc.meta.current_task_id
          ; goal_ids = meta.active_goal_ids

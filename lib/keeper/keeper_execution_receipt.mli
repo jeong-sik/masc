@@ -203,6 +203,7 @@ type t =
   ; trace_id : string
   ; generation : int
   ; turn_count : int option
+  ; oas_turn_count : int option
   ; current_task_id : string option
   ; goal_ids : string list
   ; outcome : outcome_kind

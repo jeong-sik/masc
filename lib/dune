@@ -225,6 +225,8 @@
   keeper_turn_driver_helpers
   keeper_turn_driver_try_provider
   keeper_turn_driver_wrappers
+  keeper_turn_cascade_budget_admission
+  keeper_turn_cascade_budget_event_bus
   keeper_turn_cascade_budget_routing
   keeper_unified_metrics_json_support
   keeper_unified_metrics_support

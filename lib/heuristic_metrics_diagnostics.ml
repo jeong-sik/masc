@@ -6,9 +6,6 @@ type tuple_key = {
   triggered : bool;
 }
 
-let make_tuple_key ~raw_value ~threshold ~triggered =
-  { raw_value; threshold; triggered }
-
 type site_stat = {
   site : site;
   count : int;
@@ -64,7 +61,7 @@ let parse_record (j : Yojson.Safe.t) : parsed option =
   Some
     {
       site;
-      key = make_tuple_key ~raw_value:raw ~threshold:thr ~triggered:trig;
+      key = { raw_value = raw; threshold = thr; triggered = trig };
       timestamp = ts;
     }
 

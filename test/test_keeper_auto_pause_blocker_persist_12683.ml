@@ -2,15 +2,13 @@
     [last_blocker_class] into keeper_meta so the blocker survives
     supervisor unregister/restart.
 
-    Two structural facts this test pins:
+    Structural fact this test pins: a meta JSON written with
+    [last_blocker] and [last_blocker_class] round-trips through
+    serialization/deserialization without loss, so the blocker survives
+    server restart.
 
-    1. [blocker_class_of_string] maps legacy ["oas_timeout_budget"]
-       to [Turn_timeout] so dashboard/meta round-trips do not resurrect
-       timeout-budget as a distinct blocker class.
-
-    2. A meta JSON written with [last_blocker] and [last_blocker_class]
-       round-trips through serialization/deserialization without loss,
-       so the blocker survives server restart. *)
+    (Legacy ["oas_timeout_budget"] wire mapping was retired by #17805;
+    related test rows have been removed accordingly.) *)
 
 open Alcotest
 module KT = Masc_mcp.Keeper_types
@@ -23,13 +21,6 @@ let test_turn_timeout_blocker_class_roundtrip () =
   match MC.blocker_class_of_serialized_string label with
   | Some _ -> ()
   | None -> fail "Turn_timeout label did not parse back"
-
-let test_oas_timeout_budget_blocker_class_collapses_to_turn_timeout () =
-  let legacy_label = "oas_timeout_budget" in
-  match MC.blocker_class_of_serialized_string legacy_label with
-  | Some MC.Turn_timeout -> ()
-  | Some _ -> fail "legacy timeout-budget label parsed as wrong class"
-  | None -> fail "legacy timeout-budget label did not parse"
 
 let test_stale_fleet_batch_blocker_class_roundtrip () =
   let cls = KT.Stale_fleet_batch in
@@ -48,21 +39,6 @@ let test_capacity_backpressure_blocker_class_roundtrip () =
   | Some MC.Capacity_backpressure -> ()
   | Some _ -> fail "Capacity_backpressure label parsed as wrong class"
   | None -> fail "Capacity_backpressure label did not parse back"
-
-let test_timeout_blocker_class_labels_collapse () =
-  let tt = KT.blocker_class_to_string KT.Turn_timeout in
-  let legacy_ot = "oas_timeout_budget" in
-  let fb = KT.blocker_class_to_string KT.Stale_fleet_batch in
-  check string "Turn_timeout label" "turn_timeout" tt;
-  check bool "Stale_fleet_batch distinct" true (fb <> tt && fb <> legacy_ot);
-  match
-    ( MC.blocker_class_of_serialized_string tt,
-      MC.blocker_class_of_serialized_string legacy_ot )
-  with
-  | Some MC.Turn_timeout, Some MC.Turn_timeout -> ()
-  | Some _, Some _ -> fail "timeout labels parsed as different blocker classes"
-  | None, _ -> fail "turn timeout label did not parse"
-  | _, None -> fail "legacy timeout-budget label did not parse"
 
 let test_meta_json_roundtrip_with_auto_pause_blocker () =
   let base_json = `Assoc [
@@ -146,14 +122,10 @@ let () =
         [
           test_case "Turn_timeout roundtrip" `Quick
             test_turn_timeout_blocker_class_roundtrip;
-          test_case "Oas_timeout_budget collapses to Turn_timeout" `Quick
-            test_oas_timeout_budget_blocker_class_collapses_to_turn_timeout;
           test_case "Stale_fleet_batch roundtrip" `Quick
             test_stale_fleet_batch_blocker_class_roundtrip;
           test_case "Capacity_backpressure roundtrip" `Quick
             test_capacity_backpressure_blocker_class_roundtrip;
-          test_case "timeout labels collapse" `Quick
-            test_timeout_blocker_class_labels_collapse;
         ] );
       ( "meta JSON roundtrip",
         [

@@ -50,10 +50,10 @@ detail, while turn-owned wall-clock exhaustion surfaces as
 `terminal_reason.next_action = "inspect_turn_timeout"`. The runtime-trust
 snapshot mirrors that as `latest_next_action`, and the runtime surface marks
 the keeper as needing attention with
-`next_human_action = "inspect_turn_timeout"` when the keeper is not paused.
+`next_human_action = "inspect_runtime_blocker"` when the keeper is not paused.
 Paused provider-timeout cases keep the paused workflow
 (`attention_reason = "paused_blocked"`,
-`next_human_action = "inspect_runtime_blocker"`) while still exposing
+`next_human_action = "inspect_blocker_before_resume"`) while still exposing
 `runtime_blocker_class = "turn_timeout"` or provider-runtime timeout detail.
 Repeated consecutive provider-timeout strikes are promoted by the keepalive
 loop to `Provider_timeout_loop`, which the supervisor auto-pauses instead of

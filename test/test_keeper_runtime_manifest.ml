@@ -1300,6 +1300,8 @@ let test_runtime_trace_lens_summarizes_tool_axis () =
       Alcotest.(check (list string))
         "lens gap codes"
         [ "lane_mandatory_event_missing"
+        ; "lane_mandatory_event_missing"
+        ; "lane_mandatory_event_missing"
         ; "required_tool_not_materialized"
         ; "context_delta_missing"
         ]
@@ -1527,8 +1529,8 @@ let test_runtime_trace_lens_groups_context_memory_swimlane () =
         2
         (json_int_member "episodes_flushed" memory_axis);
       Alcotest.(check int)
-        "lens memory has keeper lane gap"
-        1
+        "lens memory has keeper + memory_context lane gaps"
+        2
         (json_list_length "gaps" lens))
 
 let test_runtime_trace_lens_derives_clock_edges () =
@@ -2003,6 +2005,59 @@ let test_runtime_trace_lens_surfaces_clock_group_gaps () =
           "clock_checkpoint_group_open";
           "clock_memory_injection_unflushed";
           "clock_parent_edge_missing";
+        ])
+
+let test_runtime_trace_lens_surfaces_artifact_link_gaps () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc_mcp.Coord.default_config base_dir in
+      let keeper_name = "runtime-lens-artifact-gaps" in
+      let trace_id = "trace-runtime-lens-artifact-gaps" in
+      let keeper_turn_id = 80 in
+      append_manifest_or_fail config
+        (M.make ~ts:"2026-05-13T00:00:00Z" ~keeper_name
+           ~trace_id ~keeper_turn_id ~event:M.Turn_started
+           ~status:"started" ());
+      append_manifest_or_fail config
+        (M.make ~ts:"2026-05-13T00:00:01Z" ~keeper_name
+           ~trace_id ~keeper_turn_id ~oas_turn_count:1
+           ~event:M.Provider_attempt_started ~status:"started" ());
+      append_manifest_or_fail config
+        (M.make ~ts:"2026-05-13T00:00:02Z" ~keeper_name
+           ~trace_id ~keeper_turn_id ~oas_turn_count:1
+           ~event:M.Provider_attempt_finished ~status:"ok"
+           ~decision:(`Assoc [ ("terminal_provider_kind", `String "openai") ])
+           ());
+      append_manifest_or_fail config
+        (M.make ~ts:"2026-05-13T00:00:03Z" ~keeper_name
+           ~trace_id ~keeper_turn_id ~event:M.Turn_finished
+           ~status:"ok" ());
+      let status, json =
+        Masc_mcp.Server_dashboard_http_keeper_api.keeper_runtime_trace_json
+          config keeper_name ~trace_id ~turn_id:keeper_turn_id ()
+      in
+      Alcotest.(check string)
+        "artifact gap runtime trace status"
+        "ok"
+        (match status with `OK -> "ok" | `Not_found -> "not_found");
+      let gap_codes =
+        Yojson.Safe.Util.(
+          json |> member "runtime_lens" |> member "gaps" |> to_list
+          |> List.map (fun gap -> gap |> member "code" |> to_string))
+      in
+      List.iter
+        (fun code ->
+          Alcotest.(check bool)
+            ("artifact gap surfaces " ^ code)
+            true
+            (List.mem code gap_codes))
+        [
+          "receipt_missing";
+          "checkpoint_missing";
+          "artifact_link_missing";
+          "provider_oas_link_missing";
         ])
 
 let test_runtime_trace_api_surfaces_meta_read_error_without_trace_id () =
@@ -3926,6 +3981,10 @@ let () =
             "runtime trace lens surfaces clock group gaps"
             `Quick
             test_runtime_trace_lens_surfaces_clock_group_gaps;
+          Alcotest.test_case
+            "runtime trace lens surfaces artifact link gaps"
+            `Quick
+            test_runtime_trace_lens_surfaces_artifact_link_gaps;
           Alcotest.test_case
             "runtime trace API surfaces corrupt meta without trace id"
             `Quick

@@ -6532,7 +6532,7 @@ let test_degraded_retry_after_recoverable_error_includes_provider_timeout () =
       ~effective_cascade:"underdog"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
       (Masc_mcp.Keeper_turn_driver.sdk_error_of_masc_internal_error
-         (Masc_mcp.Keeper_turn_driver.Oas_timeout_budget
+         (Masc_mcp.Keeper_turn_driver.Provider_timeout
             { budget_sec = 273.0
             ; keeper_turn_timeout_sec = 1200.0
             ; estimated_input_tokens = 2_000
@@ -7125,7 +7125,7 @@ let test_metrics_failure_response () =
 let test_metrics_failure_timeout_increments_proactive_backoff () =
   let sdk_error =
     Masc_mcp.Keeper_turn_driver.sdk_error_of_masc_internal_error
-      (Masc_mcp.Keeper_turn_driver.Oas_timeout_budget
+      (Masc_mcp.Keeper_turn_driver.Provider_timeout
          { budget_sec = 90.0
          ; keeper_turn_timeout_sec = 90.0
          ; estimated_input_tokens = 42_000
@@ -8387,7 +8387,7 @@ let test_oas_timeout_reclassifies_only_current_attempt_budget () =
       UT.reclassify_oas_timeout_for_attempt ~timeout_budget:(Some timeout_budget) err
     in
     (match Masc_mcp.Keeper_turn_driver.classify_masc_internal_error classified with
-     | Some (Masc_mcp.Keeper_turn_driver.Oas_timeout_budget budget) ->
+     | Some (Masc_mcp.Keeper_turn_driver.Provider_timeout budget) ->
        check int "estimated tokens preserved" 2_000 budget.estimated_input_tokens;
        check string "source preserved" timeout_budget.source budget.source;
        check
@@ -8415,7 +8415,7 @@ let test_pre_retry_timeout_helper_does_not_reuse_stale_budget () =
 
 let oas_timeout_budget_error () =
   Masc_mcp.Keeper_turn_driver.sdk_error_of_masc_internal_error
-    (Masc_mcp.Keeper_turn_driver.Oas_timeout_budget
+    (Masc_mcp.Keeper_turn_driver.Provider_timeout
        { budget_sec = 273.0
        ; keeper_turn_timeout_sec = 1200.0
        ; estimated_input_tokens = 2_000

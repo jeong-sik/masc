@@ -429,3 +429,67 @@ let () =
     ; "Write", write_public_schema, translate_write_input
     ]
 ;;
+
+(* ── Phase 6: Typed argv / Pipeline bridge ────────────────────────
+
+   Adds structured input support to the routing layer so that tool
+   descriptors can advertise exec/pipeline schemas alongside the
+   legacy cmd string surface.
+
+   The bridge validates typed Keeper_tool_bash_input.t and translates
+   it to the canonical Shell_ir.t used by dispatch.  Legacy cmd
+   strings are preserved as a compatibility path with deprecation
+   telemetry.
+
+   See RFC-0091 Phase 6 and shell-ir-promotion-goal-2026-05-18.html.
+*)
+
+type structured_input =
+  | Typed_exec of Keeper_tool_bash_input.bash_input
+  | Legacy_cmd of string
+
+let translate_bash_input input_json =
+  match Keeper_tool_bash_input.of_json input_json with
+  | Ok typed ->
+    Yojson.Safe.to_json (`Assoc [
+      "command_type", `String "typed_exec";
+      "bash_input", input_json
+    ])
+  | Error _ ->
+    input_json
+
+let route_with_structured_input (route : route) : route =
+  { route with translate = translate_bash_input }
+
+let register_structured_routes () =
+  (* Replace Bash route with structured-input aware translator.  Other
+     routes continue to use the identity translator for now. *)
+  Hashtbl.replace routing_table "Bash"
+    { internal_name = "keeper_bash"
+    ; translate = translate_bash_input
+    ; public_schema = Some (schema_for "Bash")
+    };
+  Hashtbl.replace routing_table "Grep"
+    { internal_name = "keeper_shell"
+    ; translate = translate_bash_input
+    ; public_schema = Some (schema_for "Grep")
+    }
+
+and schema_for tool_name =
+  `Assoc [
+    "type", `String "object";
+    "properties", `Assoc [
+      "command_type", `Assoc [
+        "type", `String "string";
+        "enum", `List [ `String "typed_exec"; `String "legacy_cmd" ]
+      ];
+      "bash_input", `Assoc [
+        "type", `String "object";
+        "description", `String "Structured exec/pipeline input (see RFC-0091)"
+      ];
+      "cmd", `Assoc [
+        "type", `String "string";
+        "description", `String "Legacy raw command string (deprecated)"
+      ]
+    ]
+  ]

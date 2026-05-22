@@ -1781,6 +1781,11 @@ let run_turn
            | [] -> None
            | _ -> Keeper_tool_call_log.current_log_path ()
          in
+         let clock_refs =
+           Keeper_runtime_manifest.clock_refs_for_context
+             runtime_manifest_context ~event ()
+         in
+         let decision = Keeper_runtime_manifest.with_clock_refs ~clock_refs decision in
          Keeper_runtime_manifest.make ~ts:receipt.ended_at
            ~keeper_name:receipt.keeper_name ~agent_name:receipt.agent_name
            ~trace_id:receipt.trace_id ~generation:receipt.generation

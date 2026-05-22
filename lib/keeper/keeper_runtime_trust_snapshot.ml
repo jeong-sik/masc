@@ -83,9 +83,12 @@ let disposition_of_runtime_blocker_class
     : string -> Keeper_turn_disposition.t = function
   | "completion_contract_violation" | "tool_required_unsatisfied" ->
       Keeper_turn_disposition.Required_tool_use_unsatisfied
-  | "oas_timeout_budget" ->
-      Keeper_turn_disposition.Oas_timeout_budget
-  | "turn_timeout" | "turn_timeout_after_queue_wait" | "stale_turn_timeout" ->
+  | "oas_timeout_budget"
+  (* Legacy decode only: do not resurrect the retired synthetic
+     Oas_timeout_budget disposition from dashboard/runtime-trust wire. *)
+  | "turn_timeout"
+  | "turn_timeout_after_queue_wait"
+  | "stale_turn_timeout" ->
       Keeper_turn_disposition.Turn_wall_clock_timeout
   | "ambiguous_post_commit_timeout" | "ambiguous_post_commit_failure" ->
       Keeper_turn_disposition.Post_commit_ambiguous

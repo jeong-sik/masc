@@ -41,16 +41,3 @@ val dispatch_request :
     threaded through for forward compatibility — the current ["ping"]
     dispatcher ignores them.  Polymorphic types intentional: the
     adapter does not own the runtime types. *)
-
-val sdk_prompt_of_local :
-  Mcp_prompt_surface.prompt_def -> Mcp_protocol.Mcp_types.prompt
-(** [sdk_prompt_of_local prompt] converts a MASC-side
-    {!Mcp_prompt_surface.prompt_def} into the SDK-side
-    {!Mcp_protocol.Mcp_types.prompt}.  Each
-    {!Mcp_prompt_surface.prompt_argument} maps to a
-    {!Mcp_protocol.Mcp_types} prompt argument with [description]
-    wrapped in [Some] and [required] wrapped in [Some].
-
-    Exposed because {!Mcp_prompt_surface}'s interface references
-    this conversion in its public contract — keeping the bridge in
-    a single .mli avoids duplication. *)

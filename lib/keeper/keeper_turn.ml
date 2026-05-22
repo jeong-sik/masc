@@ -349,20 +349,28 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                         ?source_generation:recovery_generation
                         snapshot
                 in
-                let durable_memory =
-                  read_recent_memory_texts ctx.config
-                    ~name:meta.name
-                    ~horizon:Keeper_memory_policy.long_term_horizon
-                    ~max_bytes:(128 * 1024)
-                    ~max_lines:200
-                    ~limit:3
-                in
+                (* RFC-0149 §3.1 — route through typed Result resolver
+                   so a memory bank IO fault is rendered as an explicit
+                   [unavailable] marker in the prompt context instead of
+                   collapsing into an empty block indistinguishable from
+                   "no long-term notes recorded". *)
                 let durable_text =
-                  match durable_memory with
-                  | [] -> ""
-                  | items ->
+                  match
+                    read_recent_memory_texts_result ctx.config
+                      ~name:meta.name
+                      ~horizon:Keeper_memory_policy.long_term_horizon
+                      ~max_bytes:(128 * 1024)
+                      ~max_lines:200
+                      ~limit:3
+                  with
+                  | Ok [] -> ""
+                  | Ok items ->
                       "Long-term memory:\n- "
                       ^ String.concat "\n- " (List.map String.trim items)
+                  | Error exn_class ->
+                      Printf.sprintf
+                        "Long-term memory: [unavailable: %s]"
+                        (Keeper_memory_recall_exn_class.to_label exn_class)
                 in
                 let recovery_fallback =
                   if recovery_sections <> [] then []

@@ -451,13 +451,25 @@ let keeper_context_status_json
   let ctx_ratio =
     if ctx_max = 0 then 0.0 else float_of_int ctx_tokens /. float_of_int ctx_max
   in
-  let memory_tier_summary =
-    Keeper_memory_recall.read_memory_horizon_counts
-      config
-      ~name:meta.name
-      ~max_bytes:(128 * 1024)
-      ~max_lines:300
-    |> List.map (fun (horizon, count) -> horizon, `Int count)
+  (* RFC-0149 §3.1 — route through typed Result resolver so a memory
+     bank IO fault surfaces as the sibling [memory_tier_error_class]
+     field instead of an empty [memory_tier_summary] that is
+     indistinguishable from "no recorded horizons". *)
+  let memory_tier_summary, memory_tier_error_class =
+    match
+      Keeper_memory_recall.read_memory_horizon_counts_result
+        config
+        ~name:meta.name
+        ~max_bytes:(128 * 1024)
+        ~max_lines:300
+    with
+    | Ok counts ->
+      let json =
+        List.map (fun (horizon, count) -> horizon, `Int count) counts
+      in
+      json, None
+    | Error exn_class ->
+      [], Some (Keeper_memory_recall_exn_class.to_label exn_class)
   in
   (* Give the keeper sandbox-relative paths from the SSOT so it never needs
      to interpolate host storage paths such as ".masc/playground/<name>/". *)
@@ -506,6 +518,10 @@ let keeper_context_status_json
            ; "continuity_summary", `String continuity_summary
            ; "recovery_source", `String recovery_source
            ; "memory_tier_summary", `Assoc memory_tier_summary
+           ; ( "memory_tier_error_class"
+             , match memory_tier_error_class with
+               | Some label -> `String label
+               | None -> `Null )
            ]))
 ;;
 

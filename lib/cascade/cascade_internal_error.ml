@@ -380,9 +380,8 @@ let summary_of_masc_internal_error = function
    dashboards and Grafana alerts can watch the fleet-wide rate per
    error class (cascade_exhausted vs provider_timeout vs
    ambiguous_post_commit, etc.) rather than reading the free-form
-   BDI blocker string.  Historical [oas_timeout_budget] events accumulated
-   across 9 keepers in 24h without an aggregate signal — this
-   counter is the per-kind surface.
+   BDI blocker string.  Historical provider-timeout events accumulated across 9 keepers in 24h
+   without an aggregate signal — this counter is the per-kind surface.
 
    Emit point is this constructor so all 14 call sites of
    [sdk_error_of_masc_internal_error] are covered automatically,

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Shell IR consumption audit — RFC-0156 baseline metric collector.
+# Shell IR consumption audit — RFC-0160 baseline metric collector.
 #
-# Motivation: RFC-0156 (Shell IR 1급 승격) promotes Shell IR from
+# Motivation: RFC-0160 (Shell IR 1급 승격) promotes Shell IR from
 # transit-only envelope to single-source decision substrate.
 # Plan SSOT: ~/me/memory/shell-ir-first-class-promotion-todo-2026-05-23.html
 #
@@ -126,7 +126,7 @@ JSON
 
 emit_text() {
   cat <<TEXT
-Shell IR Consumption Audit — RFC-0156 baseline
+Shell IR Consumption Audit — RFC-0160 baseline
 Generated: $(date -u +%Y-%m-%dT%H:%M:%SZ)
 
   G1  Bash.parse_string callers (lib/, non-test files)
@@ -187,10 +187,10 @@ diff_against_baseline() {
     regressions=$((regressions + 1))
   fi
   if [[ "$regressions" -gt 0 ]]; then
-    echo "RFC-0156 baseline regressed in ${regressions} metric(s)" >&2
+    echo "RFC-0160 baseline regressed in ${regressions} metric(s)" >&2
     exit 1
   fi
-  echo "OK (RFC-0156 ratchet: no G1/G7 regression)"
+  echo "OK (RFC-0160 ratchet: no G1/G7 regression)"
 }
 
 case "$mode" in

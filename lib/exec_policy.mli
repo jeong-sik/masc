@@ -76,9 +76,15 @@ val validate_command_paths :
   string ->
   (unit, string) result
 
-val is_write_operation : string -> bool
-val is_git_branch_switch : string -> bool
-val is_destructive_bash_operation : string -> bool
+(** RFC-0160 S1: IR-typed structural mutation classifiers. *)
+val is_write_operation : Masc_exec.Shell_ir.t -> bool
+val is_git_branch_switch : Masc_exec.Shell_ir.t -> bool
+val is_destructive_bash_operation : Masc_exec.Shell_ir.t -> bool
+
+(** Transitional string wrappers (DEPRECATED — removed in S4). *)
+val is_write_operation_of_string : string -> bool
+val is_git_branch_switch_of_string : string -> bool
+val is_destructive_bash_operation_of_string : string -> bool
 
 val sanitize_command_for_log : string -> string
 val truncate_for_log : ?max_len:int -> string -> string

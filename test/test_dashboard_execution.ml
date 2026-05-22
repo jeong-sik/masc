@@ -479,6 +479,7 @@ let append_execution_receipt
       generation = meta.runtime.generation;
       turn_count = Some 3;
       oas_turn_count = None;
+      oas_dispatch_mode = None;
       current_task_id = None;
       goal_ids = meta.active_goal_ids;
       outcome;

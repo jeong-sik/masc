@@ -1256,6 +1256,7 @@ let test_keeper_zombie_field_contracts () =
       generation = 1;
       turn_count = Some 1;
       oas_turn_count = None;
+      oas_dispatch_mode = None;
       current_task_id = Some "task-123";
       goal_ids = [ "goal-123" ];
       outcome = `Ok;

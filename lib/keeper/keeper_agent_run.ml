@@ -1495,6 +1495,7 @@ let run_turn
          ; generation
          ; turn_count = !receipt_turn_count_ref
          ; oas_turn_count = !receipt_turn_count_ref
+         ; oas_dispatch_mode = Some "single_provider_agent_run"
          ; current_task_id =
              Option.map Keeper_id.Task_id.to_string acc.meta.current_task_id
          ; goal_ids = meta.active_goal_ids

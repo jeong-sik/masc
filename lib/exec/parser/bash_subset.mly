@@ -24,7 +24,7 @@ let file_redirect fd target mode =
 
    See RFC v5 (docs/rfc/RFC-0005). */
 
-%token <string> WORD
+%token <string * bool> WORD
 %token DEV_NULL
 %token <int * int> FD_REDIRECT
 %token <int * Masc_exec.Redirect_scope.mode> FILE_REDIRECT_OP
@@ -36,7 +36,7 @@ let file_redirect fd target mode =
 %%
 
 literal_word:
-  | value = WORD { value }
+  | value = WORD { fst value }
   | DEV_NULL { "/dev/null" }
 
 part:

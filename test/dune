@@ -931,6 +931,7 @@
   test_cdal_mode_enforcer
   test_cdal_mode_resolver
   test_verification_fsm
+  test_verification_fsm_toggle_race
   test_task_sandbox
   test_governance_yojson_roundtrip
   test_eval_calibration
@@ -1156,6 +1157,7 @@
   test_cdal_mode_enforcer
   test_cdal_mode_resolver
   test_verification_fsm
+  test_verification_fsm_toggle_race
   test_task_sandbox
   test_governance_yojson_roundtrip
   test_eval_calibration

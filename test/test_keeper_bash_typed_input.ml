@@ -176,6 +176,7 @@ let test_wrapper_exec_target_allowlist () =
         ; env = []
         }
     ];
+  expect_not_allowlisted ~target:"'git'" (mk_exec "env" [ "'git'"; "status" ]);
   List.iter
     (fun input ->
       match Bash_input.validate ~mode:Bash_input.Dev_full input with

@@ -33,9 +33,6 @@ type run_result =
   ; tool_surface : Keeper_agent_tool_surface.tool_surface_metrics
   }
 
-(** Trim and return [None] if the result is empty. *)
-val nonempty_trimmed : string -> string option
-
 (** Legacy MASC-facing model label helper.
 
     MASC no longer exposes concrete provider/model identity on status,

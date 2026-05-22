@@ -196,11 +196,6 @@ let latest_active config ~surface ~target_type ~target_id =
   let table = latest_by_key config in
   Hashtbl.find_opt table (key_of ~surface ~target_type ~target_id)
 
-let latest_active_json config ~surface ~target_type ~target_id =
-  match latest_active config ~surface ~target_type ~target_id with
-  | Some value -> Some (to_yojson value)
-  | None -> None
-
 let record config ~surface ~target_type ~target_id ~summary ~confidence
     ?model_name ?runtime_name ?recommended_action ?(evidence_refs = [])
     ?(fallback_used = false) ?(disagreement_with_truth = false) ~generated_at

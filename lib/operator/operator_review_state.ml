@@ -71,12 +71,6 @@ let raw_review_decisions config =
       |> List.sort compare_review_decision
   | Some _ -> []
 
-let write_review_decisions config entries =
-  entries
-  |> List.sort compare_review_decision
-  |> List.map review_decision_to_yojson
-  |> fun rows -> Coord_utils.write_json config (review_state_path config) (`List rows)
-
 let read_review_decisions config = raw_review_decisions config
 
 let recent_review_decisions ?limit ?target_type ?target_id config =

@@ -119,14 +119,6 @@ val latest_active :
     [(surface, target_type, target_id)] key, comparing by
     [generated_at_unix].  None when the key has no records. *)
 
-val latest_active_json :
-  Coord.config ->
-  surface:string ->
-  target_type:target_type ->
-  target_id:string option ->
-  Yojson.Safe.t option
-(** {!latest_active} composed with {!to_yojson}. *)
-
 (** {1 Write} *)
 
 val record :

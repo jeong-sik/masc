@@ -183,7 +183,7 @@ let lane_mandatory_events_present scan lane =
 
 let lane_terminal_event_present scan lane =
   match lane_policy_for_lane lane with
-  | Some { terminal_events = []; _ } -> true
+  | Some { terminal_events = []; _ } -> false
   | Some policy ->
     List.exists
       (fun event ->
@@ -192,11 +192,17 @@ let lane_terminal_event_present scan lane =
   | None -> true
 
 let runtime_lens_swimlane_completeness scan lane =
+  let mandatory_present = lane_mandatory_events_present scan lane in
   let finished = lane_terminal_event_present scan lane in
-  let complete = lane_mandatory_events_present scan lane && finished in
+  let terminal_required =
+    match lane_policy_for_lane lane with
+    | Some { terminal_events = []; _ } -> false
+    | Some _ | None -> true
+  in
+  let complete = mandatory_present && ((not terminal_required) || finished) in
   if complete then "complete"
   else if finished then "finished"
-  else if lane_mandatory_events_present scan lane then "mandatory_present"
+  else if mandatory_present then "mandatory_present"
   else "incomplete"
 
 let runtime_lens_swimlane_json scan gaps ~lane ~label ~events ~terminal_status =

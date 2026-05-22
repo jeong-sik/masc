@@ -1439,6 +1439,14 @@ let test_runtime_trace_lens_terminal_uses_latest_turn_without_turn_filter () =
            ~trace_id ~keeper_turn_id:1 ~event:M.Turn_started
            ~status:"started" ());
       append_manifest_or_fail config
+        (M.make ~ts:"2026-05-13T00:00:00.250Z" ~keeper_name
+           ~trace_id ~keeper_turn_id:1 ~event:M.Tool_surface_selected
+           ~status:"selected" ());
+      append_manifest_or_fail config
+        (M.make ~ts:"2026-05-13T00:00:00.500Z" ~keeper_name
+           ~trace_id ~keeper_turn_id:1 ~event:M.Cascade_routed
+           ~status:"routed" ());
+      append_manifest_or_fail config
         (M.make ~ts:"2026-05-13T00:00:01Z" ~keeper_name
            ~trace_id ~keeper_turn_id:1 ~event:M.Turn_finished
            ~status:"finished" ());
@@ -1483,7 +1491,21 @@ let test_runtime_trace_lens_terminal_uses_latest_turn_without_turn_filter () =
       Alcotest.(check bool)
         "latest turn surfaces missing finish gap"
         true
-        (List.mem "missing_turn_finished" gaps))
+        (List.mem "missing_turn_finished" gaps);
+      let swimlanes = Yojson.Safe.Util.(lens |> member "swimlanes") in
+      Alcotest.(check string)
+        "tool lane completeness uses selected turn"
+        "incomplete"
+        Yojson.Safe.Util.(
+          swimlanes |> member "tool_runtime" |> member "completeness" |> to_string);
+      Alcotest.(check string)
+        "cascade lane completeness uses selected turn"
+        "incomplete"
+        Yojson.Safe.Util.(
+          swimlanes
+          |> member "masc_policy_cascade"
+          |> member "completeness"
+          |> to_string))
 
 let test_runtime_trace_lens_groups_context_memory_swimlane () =
   let base_dir = temp_dir () in

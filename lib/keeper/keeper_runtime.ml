@@ -22,92 +22,14 @@ open Keeper_types
     preserves disk-of-record (raw bytes), but compare uses the
     capped form that the prompt actually renders.  Disk data is
     preserved; loop terminates. *)
-let personality_text_equal a b =
-  let one_field s : Keeper_personality_io.coerced_personality =
-    { Keeper_personality_io.will = s; needs = ""; desires = ""; instructions = "" }
-    |> Keeper_personality_io.to_prompt_form
-         ~max_bytes:Keeper_config.prompt_render_max_bytes
-    |> Keeper_personality_io.coerce
-  in
-  match Keeper_personality_io.compare_normalized (one_field a) (one_field b) with
-  | `Equal -> true
-  | `Drift _ -> false
-
-(** #10269: when [personality_text_equal] reports a mismatch, the
-    operator needs to know WHICH personality field differs and HOW
-    badly.  Pre-fix the re-sync log was opaque
-    ([re-syncing [personality] for <name>]) so a fleet of repeated
-    re-syncs (371 events / 3000 logs on [nick0cave] alone, 12% of all
-    log volume) carried no information about whether the drift was a
-    1-byte trailing newline or a structural divergence between the
-    TOML source and the persisted JSON.
-
-    [personality_diff_summary] returns one entry per differing field
-    formatted as [<field>(cur=<len>,tgt=<len>,diff@<pos>)] where [pos]
-    is the byte index of the first character that disagrees AFTER the
-    same trimming used by {!personality_text_equal}.  [pos = -1] means
-    the trimmed strings agree byte-for-byte (impossible by
-    construction here since the entry is only emitted when
-    [personality_text_equal] is false; kept as a defensive sentinel).
-
-    The summary is cheap: only invoked on the cycle that actually
-    performs a re-sync, never on the stable steady-state path. *)
-(* Layer 2 PR-B (commit 6): same delegation pattern. Log format
-   "<name>(cur=N,tgt=N,diff@P)" preserved verbatim so dashboard log
-   scrapers don't need to migrate. The numbers now reflect post-trim
-   bytes (no truncation), so a 357-byte nick0cave will reads cur=357
-   instead of cur=319 — the value the disk actually holds. *)
-let personality_field_diff_entry name current target =
-  let one_field s : Keeper_personality_io.coerced_personality =
-    Keeper_personality_io.coerce
-      { will = s; needs = ""; desires = ""; instructions = "" }
-  in
-  match
-    Keeper_personality_io.compare_normalized (one_field current) (one_field target)
-  with
-  | `Equal -> None
-  | `Drift diffs ->
-      (* compare_normalized only inspected the [will] slot we wrapped
-         around the input; the diff list therefore has at most one
-         entry. *)
-      (match diffs with
-       | [] -> None
-       | d :: _ ->
-           Some
-             (Printf.sprintf "%s(cur=%d,tgt=%d,diff@%d)" name
-                d.current_bytes d.target_bytes d.diff_offset))
-
-let personality_diff_summary fields =
-  List.filter_map
-    (fun (name, current, target) ->
-      personality_field_diff_entry name current target)
-    fields
-
-(** #10269: per-call helper used at runtime re-sync sites (this PR).
-    Complements [personality_diff_summary] (batch over a list) by
-    emitting raw + trimmed previews on a single field at the moment a
-    re-sync fires.  Different output shape from
-    [personality_field_diff_entry] above:
-    [field(raw_meta_len=N raw_target_len=N trim_meta=S trim_target=S)]
-    so dashboards can distinguish raw-length drift from trimmed-content
-    drift (TOML triple-quote drop vs JSON encoding drift vs persona
-    overlay).  Returns [None] when the two trim-equal so steady-state
-    keepers stay quiet.  Trimmed previews truncated to 32 bytes each
-    to keep a wide [instructions] field log-friendly. *)
-let personality_field_diff_summary ~field ~current ~target =
-  if personality_text_equal current target then None
-  else
-    let preview s =
-      let trimmed = String.trim s in
-      if String.length trimmed <= 32 then trimmed
-      else String.sub trimmed 0 32 ^ "..."
-    in
-    Some
-      (Printf.sprintf
-         "%s(raw_meta_len=%d raw_target_len=%d trim_meta=%S trim_target=%S)"
-         field
-         (String.length current) (String.length target)
-         (preview current) (preview target))
+let personality_text_equal =
+  Keeper_runtime_personality_diff.personality_text_equal
+let personality_field_diff_entry =
+  Keeper_runtime_personality_diff.personality_field_diff_entry
+let personality_diff_summary =
+  Keeper_runtime_personality_diff.personality_diff_summary
+let personality_field_diff_summary =
+  Keeper_runtime_personality_diff.personality_field_diff_summary
 
 
 type boot_meta_resolution = {

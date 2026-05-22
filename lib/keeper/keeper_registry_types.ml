@@ -9,17 +9,17 @@ module StringMap = Map.Make (String)
 (** Structured failure reason for cohort detection in self-preservation.
     ADT matching replaces string prefix matching for crash_msg grouping. *)
 type ambiguous_partial_commit_kind =
+  Keeper_registry_types_kill_class.ambiguous_partial_commit_kind =
   | Post_commit_timeout
   | Post_commit_failure
 
 type ambiguous_partial_commit =
+  Keeper_registry_types_kill_class.ambiguous_partial_commit =
   { kind : ambiguous_partial_commit_kind
   ; detail : string
   }
 
-(** Phase B PR-6 (2026-04-28): typed sub-class of stale-watchdog kills.
-    See keeper_registry.mli for rationale. *)
-type stale_kill_class =
+type stale_kill_class = Keeper_registry_types_kill_class.stale_kill_class =
   | Idle_turn of { stall_seconds : float }
   | In_turn_hung of
       { active_seconds : float
@@ -33,33 +33,9 @@ type stale_kill_class =
       }
   | Noop_failure_loop of { noop_count : int }
 
-let progress_kind_label = function
-  | Some kind -> kind
-  | None -> "-"
-;;
-
-let stale_kill_class_to_string = function
-  | Idle_turn { stall_seconds } -> Printf.sprintf "idle_turn(%.0fs)" stall_seconds
-  | In_turn_hung { active_seconds; timeout_threshold } ->
-    Printf.sprintf
-      "in_turn_hung(active=%.0fs threshold=%.0fs)"
-      active_seconds
-      timeout_threshold
-  | Mid_turn_no_progress
-      { active_seconds
-      ; since_progress_seconds
-      ; progress_timeout_threshold
-      ; last_progress_kind
-      } ->
-    Printf.sprintf
-      "mid_turn_no_progress(active=%.0fs since_progress=%.0fs threshold=%.0fs last=%s)"
-      active_seconds
-      since_progress_seconds
-      progress_timeout_threshold
-      (progress_kind_label last_progress_kind)
-  | Noop_failure_loop { noop_count } ->
-    Printf.sprintf "noop_failure_loop(noop=%d)" noop_count
-;;
+let progress_kind_label = Keeper_registry_types_kill_class.progress_kind_label
+let stale_kill_class_to_string =
+  Keeper_registry_types_kill_class.stale_kill_class_to_string
 
 type failure_reason =
   | Heartbeat_consecutive_failures of int
@@ -96,10 +72,8 @@ type failure_reason =
   | Fiber_unresolved
   | Exception of string
 
-let ambiguous_partial_commit_kind_to_string = function
-  | Post_commit_timeout -> "post_commit_timeout"
-  | Post_commit_failure -> "post_commit_failure"
-;;
+let ambiguous_partial_commit_kind_to_string =
+  Keeper_registry_types_kill_class.ambiguous_partial_commit_kind_to_string
 
 let failure_reason_to_string = function
   | Heartbeat_consecutive_failures n ->

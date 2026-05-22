@@ -101,40 +101,12 @@ let check_egress ~(config : Coord.config) ~(meta : keeper_meta) ~cmd =
 
 (* ── Container naming ──────────────────────────────────── *)
 
-let keeper_sandbox_container_name (meta : keeper_meta) =
-  Printf.sprintf
-    "masc-keeper-%s-%d-%d"
-    (Coord_utils.safe_filename meta.name)
-    (Unix.getpid ())
-    (int_of_float (Unix.gettimeofday () *. 1000.0))
-;;
-
-let keeper_private_container_root (meta : keeper_meta) =
-  Keeper_sandbox.container_root meta.name
-;;
-
-let docker_private_workspace_cwd ~(config : Coord.config) ~(meta : keeper_meta) host_cwd =
-  let normalize_path_for_containment path =
-    Keeper_alerting_path.normalize_path_for_check_stripped path
-  in
-  let host_root =
-    Keeper_sandbox.host_root_abs_of_meta ~config meta |> normalize_path_for_containment
-  in
-  let container_root = keeper_private_container_root meta in
-  let host_cwd = normalize_path_for_containment host_cwd in
-  if host_cwd = host_root
-  then container_root
-  else if String.starts_with ~prefix:(host_root ^ "/") host_cwd
-  then (
-    let suffix =
-      String.sub
-        host_cwd
-        (String.length host_root + 1)
-        (String.length host_cwd - String.length host_root - 1)
-    in
-    Filename.concat container_root suffix)
-  else container_root
-;;
+let keeper_sandbox_container_name =
+  Keeper_shell_docker_container_name.keeper_sandbox_container_name
+let keeper_private_container_root =
+  Keeper_shell_docker_container_name.keeper_private_container_root
+let docker_private_workspace_cwd =
+  Keeper_shell_docker_container_name.docker_private_workspace_cwd
 
 let rewrite_docker_command_paths ~(config : Coord.config) ~(meta : keeper_meta) cmd =
   let raw_host_root =

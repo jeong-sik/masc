@@ -3,24 +3,9 @@
 
 open Dashboard_http_helpers
 
-let contains_substring ~needle haystack = String_util.contains_substring haystack needle
-
-let take n xs =
-  let rec loop acc remaining xs =
-    if remaining <= 0
-    then List.rev acc
-    else (
-      match xs with
-      | [] -> List.rev acc
-      | x :: tl -> loop (x :: acc) (remaining - 1) tl)
-  in
-  loop [] n xs
-;;
-
-let trim_to_option raw =
-  let trimmed = String.trim raw in
-  if trimmed = "" then None else Some trimmed
-;;
+let contains_substring = Server_dashboard_http_runtime_info_json.contains_substring
+let take = Server_dashboard_http_runtime_info_json.take
+let trim_to_option = Server_dashboard_http_runtime_info_json.trim_to_option
 
 type dashboard_runtime_probe_cache_entry =
   { probe : Yojson.Safe.t
@@ -206,28 +191,13 @@ let git_rev_parse_short path =
           else git_rev_parse_short_cached_any dir |> Option.value ~default:None))
 ;;
 
-let opt_string_json = function
-  | None -> `Null
-  | Some value -> `String value
-;;
-
-let opt_bool_json = function
-  | None -> `Null
-  | Some value -> `Bool value
-;;
-
-let opt_commit_equal left right =
-  match left, right with
-  | Some left, Some right -> Some (String.equal left right)
-  | _ -> None
-;;
-
-let opt_int_json = function
-  | None -> `Null
-  | Some value -> `Int value
-;;
+let opt_string_json = Server_dashboard_http_runtime_info_json.opt_string_json
+let opt_bool_json = Server_dashboard_http_runtime_info_json.opt_bool_json
+let opt_commit_equal = Server_dashboard_http_runtime_info_json.opt_commit_equal
+let opt_int_json = Server_dashboard_http_runtime_info_json.opt_int_json
 
 type git_upstream_status =
+  Server_dashboard_http_runtime_info_json.git_upstream_status =
   { branch : string option
   ; upstream_ref : string option
   ; upstream_head_commit : string option
@@ -236,13 +206,7 @@ type git_upstream_status =
   }
 
 let empty_git_upstream_status =
-  { branch = None
-  ; upstream_ref = None
-  ; upstream_head_commit = None
-  ; ahead_count = None
-  ; behind_count = None
-  }
-;;
+  Server_dashboard_http_runtime_info_json.empty_git_upstream_status
 
 let git_upstream_status_probe_hook_for_tests :
   (string -> git_upstream_status option) option Atomic.t

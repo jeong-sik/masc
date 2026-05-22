@@ -47,12 +47,13 @@ type world_observation =
   }
 
 type keeper_cycle_channel =
+  Keeper_world_observation_turn_types.keeper_cycle_channel =
   | Reactive
   | Scheduled_autonomous
 
 type unified_turn_channel = keeper_cycle_channel
 
-type turn_reason =
+type turn_reason = Keeper_world_observation_turn_types.turn_reason =
   | Mention_pending
   | Board_event_pending
   | Scope_message_pending
@@ -71,7 +72,7 @@ type turn_reason =
   | Min_interval_elapsed
   | Entropic_oscillation
 
-type skip_reason =
+type skip_reason = Keeper_world_observation_turn_types.skip_reason =
   | Keeper_paused
   | Approval_pending
   | Scheduled_autonomous_disabled
@@ -80,47 +81,19 @@ type skip_reason =
   | Cooldown_pending of { remaining_sec : int }
   | No_signal
 
-type turn_verdict =
+type turn_verdict = Keeper_world_observation_turn_types.turn_verdict =
   | Run of { reasons : turn_reason * turn_reason list }
   | Skip of { reasons : skip_reason * skip_reason list }
 
-let turn_reason_to_string = function
-  | Mention_pending -> "mention_pending"
-  | Board_event_pending -> "board_event_pending"
-  | Scope_message_pending -> "scope_message_pending"
-  | Scheduled_autonomous_turn -> "scheduled_autonomous_turn"
-  | Idle_cooldown_elapsed _ -> "idle_cooldown_elapsed"
-  | Cooldown_elapsed -> "cooldown_elapsed"
-  | Task_backlog _ -> "task_backlog"
-  | Task_reactive_cooldown_elapsed -> "task_reactive_cooldown_elapsed"
-  | Never_started -> "never_started"
-  | Min_interval_elapsed -> "min_interval_elapsed"
-  | Entropic_oscillation -> "entropic_oscillation"
-;;
-
-let skip_reason_to_string = function
-  | Keeper_paused -> "keeper_paused"
-  | Approval_pending -> "approval_pending"
-  | Scheduled_autonomous_disabled -> "scheduled_autonomous_disabled"
-  | Provider_cooldown_pending _ -> "provider_cooldown_pending"
-  | Idle_gate_pending _ -> "idle_gate_pending"
-  | Cooldown_pending _ -> "cooldown_pending"
-  | No_signal -> "no_signal"
-;;
-
-let channel_to_string = function
-  | Reactive -> "reactive"
-  | Scheduled_autonomous -> "scheduled_autonomous"
-;;
-
-let is_autonomous_channel (channel : string) : bool =
-  String.equal channel "scheduled_autonomous" || String.equal channel "proactive"
-;;
-
-let verdict_reasons_to_strings = function
-  | Run { reasons = first, rest } -> List.map turn_reason_to_string (first :: rest)
-  | Skip { reasons = first, rest } -> List.map skip_reason_to_string (first :: rest)
-;;
+let turn_reason_to_string =
+  Keeper_world_observation_turn_types.turn_reason_to_string
+let skip_reason_to_string =
+  Keeper_world_observation_turn_types.skip_reason_to_string
+let channel_to_string = Keeper_world_observation_turn_types.channel_to_string
+let is_autonomous_channel =
+  Keeper_world_observation_turn_types.is_autonomous_channel
+let verdict_reasons_to_strings =
+  Keeper_world_observation_turn_types.verdict_reasons_to_strings
 
 type keeper_cycle_decision =
   { should_run : bool

@@ -5,12 +5,9 @@ type stage_part =
   | Arg of string
   | Redirect of Redirect_scope.t
 
-let dev_null_path () =
-  Path_scope.classify ~raw:"/dev/null" ~cwd:"."
-;;
-
-let file_redirect fd mode =
-  Redirect_scope.File { fd; target = dev_null_path (); mode }
+let file_redirect fd target mode =
+  Redirect_scope.File
+    { fd; target = Path_scope.classify ~raw:target ~cwd:"."; mode }
 ;;
 %}
 
@@ -18,9 +15,8 @@ let file_redirect fd mode =
 
    Productions now cover simple commands, pipelines, env prefixes
    (recognized in bash.ml from leading WORD tokens), fd-to-fd redirects,
-   and /dev/null file redirects. Subsequent PRs extend to:
-   - general file redirects beyond the explicit /dev/null sink
-   - subset guards that mint Parsed.Too_complex rather than matching.
+   and file redirects. Subsequent PRs extend to subset guards that mint
+   Parsed.Too_complex rather than matching.
 
    The grammar emits a list of raw (bin, args, redirects) triples,
    one per pipeline stage. bash.ml adapts the singleton case to
@@ -49,9 +45,9 @@ part:
       let src, dst = pair in
       Redirect (Redirect_scope.Fd_to_fd { src; dst })
     }
-  | item = FILE_REDIRECT_OP DEV_NULL {
+  | item = FILE_REDIRECT_OP target = literal_word {
       let fd, mode = item in
-      Redirect (file_redirect fd mode)
+      Redirect (file_redirect fd target mode)
     }
 
 stage:

@@ -45,7 +45,7 @@ let start_sidecar_process ~base_path ~script =
   | Error msg -> Error msg
 ;;
 
-type desired_state =
+type desired_state = Server_routes_http_routes_sidecar_state.desired_state =
   | Desired_running
   | Desired_stopped
 
@@ -57,11 +57,11 @@ type desired_record =
   ; updated_at : string
   }
 
-type observed_state =
+type observed_state = Server_routes_http_routes_sidecar_state.observed_state =
   | Observed_available
   | Observed_unavailable
 
-type reconcile_result =
+type reconcile_result = Server_routes_http_routes_sidecar_state.reconcile_result =
   | Reconcile_started
   | Reconcile_noop of string
 
@@ -76,26 +76,14 @@ type attempt_record =
   ; updated_at : string
   }
 
-let desired_state_to_string = function
-  | Desired_running -> "running"
-  | Desired_stopped -> "stopped"
-;;
-
-let desired_state_of_string = function
-  | "running" -> Some Desired_running
-  | "stopped" -> Some Desired_stopped
-  | _ -> None
-;;
-
-let observed_state_to_string = function
-  | Observed_available -> "available"
-  | Observed_unavailable -> "unavailable"
-;;
-
-let reconcile_result_to_string = function
-  | Reconcile_started -> "started"
-  | Reconcile_noop reason -> "noop:" ^ reason
-;;
+let desired_state_to_string =
+  Server_routes_http_routes_sidecar_state.desired_state_to_string
+let desired_state_of_string =
+  Server_routes_http_routes_sidecar_state.desired_state_of_string
+let observed_state_to_string =
+  Server_routes_http_routes_sidecar_state.observed_state_to_string
+let reconcile_result_to_string =
+  Server_routes_http_routes_sidecar_state.reconcile_result_to_string
 
 let attempt_record_json (record : attempt_record) =
   `Assoc

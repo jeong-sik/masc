@@ -39,8 +39,9 @@ type t =
       Current fleet-batch detection is observation-only; fresh watchdog kills
       retain their per-keeper terminal code. *)
   | Oas_timeout_budget
-  (** [Keeper_registry.Oas_timeout_budget_loop]: same keeper
-          exhausted the OAS turn budget on consecutive cycles. *)
+  (** Legacy wire-only timeout-budget code. New registry projections
+      normalize this to provider/turn timeout evidence instead of emitting
+      ["oas_timeout_budget"]. *)
   | Heartbeat_failures (** [Keeper_registry.Heartbeat_consecutive_failures]. *)
   | Turn_failures (** [Keeper_registry.Turn_consecutive_failures]. *)
   | Provider_runtime_error of string

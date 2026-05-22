@@ -56,7 +56,7 @@ let of_wire = function
     Some Stale_turn_timeout_in_turn
   | "stale_termination_storm" -> Some Stale_termination_storm
   | "stale_fleet_batch" -> Some Stale_fleet_batch
-  | "oas_timeout_budget" -> Some Oas_timeout_budget
+  | "oas_timeout_budget" -> Some (Provider_runtime_error "provider_timeout")
   | "heartbeat_failures" -> Some Heartbeat_failures
   | "turn_failures" -> Some Turn_failures
   | "ambiguous_partial_commit" ->
@@ -86,7 +86,8 @@ let of_failure_reason : Keeper_registry.failure_reason -> t = function
     Stale_turn_timeout_noop
   | Keeper_registry.Stale_termination_storm _ -> Stale_termination_storm
   | Keeper_registry.Stale_fleet_batch _ -> Stale_fleet_batch
-  | Keeper_registry.Oas_timeout_budget_loop _ -> Oas_timeout_budget
+  | Keeper_registry.Oas_timeout_budget_loop _ ->
+    Provider_runtime_error "provider_timeout_loop"
   | Keeper_registry.Provider_runtime_error { code; _ } -> Provider_runtime_error code
   | Keeper_registry.Tool_required_unsatisfied { code; _ } ->
     Tool_required_unsatisfied code

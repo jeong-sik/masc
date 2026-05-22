@@ -62,6 +62,15 @@ let test_message_of_json_ignores_flat_content () =
   let msg = C.message_of_json flat_content in
   Alcotest.(check int) "no canonical blocks" 0 (List.length msg.content)
 
+let test_message_of_json_rejects_unknown_role () =
+  let json : Yojson.Safe.t =
+    `Assoc [ ("role", `String "operator"); ("content_blocks", `List []) ]
+  in
+  Alcotest.check_raises
+    "unknown role rejected"
+    (Invalid_argument "keeper_context_core: unknown role \"operator\"")
+    (fun () -> C.message_of_json json |> ignore)
+
 (* --- text_of_history_jsonl_json --- *)
 
 let test_history_jsonl_text_uses_blocks_first () =
@@ -201,6 +210,8 @@ let () =
             test_message_of_json_new_content_blocks_only;
           Alcotest.test_case "flat content ignored" `Quick
             test_message_of_json_ignores_flat_content;
+          Alcotest.test_case "unknown role rejected" `Quick
+            test_message_of_json_rejects_unknown_role;
           Alcotest.test_case "round-trip text preserved" `Quick
             test_roundtrip_text_preserved;
         ] );

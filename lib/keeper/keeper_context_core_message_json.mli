@@ -1,6 +1,5 @@
 val role_to_string : Agent_sdk.Types.role -> string
 val role_of_string_opt : string -> Agent_sdk.Types.role option
-val role_of_string : string -> Agent_sdk.Types.role
 
 val content_blocks_to_json :
   Agent_sdk.Types.content_block list -> Yojson.Safe.t

@@ -19,19 +19,6 @@ let role_of_string_opt = function
   | "tool" -> Some Agent_sdk.Types.Tool
   | _ -> None
 
-(* Backwards-compatible wrapper. [Tool] is the safest fallback for an
-   unrecognised role: tool messages are interpretive context, not
-   instructions, so misclassifying System/Assistant/User as Tool hides
-   the message rather than letting the LLM act on it. The warn log
-   preserves operator visibility. *)
-let role_of_string s =
-  match role_of_string_opt s with
-  | Some role -> role
-  | None ->
-      Log.Misc.warn
-        "keeper_context_core: unknown role %S, defaulting to Tool (#8623)" s;
-      Agent_sdk.Types.Tool
-
 let content_blocks_to_json
     (blocks : Agent_sdk.Types.content_block list) : Yojson.Safe.t =
   `List (List.map Agent_sdk.Api.content_block_to_json blocks)
@@ -99,7 +86,14 @@ let message_to_json (m : Agent_sdk.Types.message) : Yojson.Safe.t =
 
 let message_of_json (json : Yojson.Safe.t) : Agent_sdk.Types.message =
   let open Yojson.Safe.Util in
-  let role = json |> member "role" |> to_string |> role_of_string in
+  let raw_role = json |> member "role" |> to_string in
+  let role =
+    match role_of_string_opt raw_role with
+    | Some role -> role
+    | None ->
+        invalid_arg
+          (Printf.sprintf "keeper_context_core: unknown role %S" raw_role)
+  in
   let content =
     match content_blocks_of_json json with
     | Some blocks -> blocks

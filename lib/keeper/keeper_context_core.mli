@@ -71,10 +71,6 @@ val role_to_string : Agent_sdk.Types.role -> string
     handle [None] explicitly (#8623). *)
 val role_of_string_opt : string -> Agent_sdk.Types.role option
 
-(** Backwards-compatible wrapper that defaults unknown roles to
-    [Tool] with a warn log (#8623). *)
-val role_of_string : string -> Agent_sdk.Types.role
-
 val message_to_json : Agent_sdk.Types.message -> Yojson.Safe.t
 val message_of_json : Yojson.Safe.t -> Agent_sdk.Types.message
 

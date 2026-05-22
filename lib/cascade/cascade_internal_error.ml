@@ -12,7 +12,7 @@
 
 type cascade_name = Keeper_cascade_profile.runtime_name
 
-let cascade_name_of_string raw = Keeper_cascade_profile.Runtime_name raw
+let cascade_name_of_string raw = Keeper_cascade_profile.runtime_name_of_string raw
 let cascade_name_to_string = Keeper_cascade_profile.runtime_name_to_string
 
 type provider_rejection = {
@@ -291,6 +291,20 @@ let masc_internal_error_to_json = function
         ("kind", `String "internal_contract_rejected");
         ("reason", `String reason);
       ]
+
+(* #task-533: Normalize cascade_name for operator-facing surfaces.
+   Upstream constructs names like "tier-group.strict_tool_candidates"
+   but the canonical short form ("strict_tool_candidates") is what
+   operators should see in JSON errors, dashboards, and Prometheus labels.
+   This function strips known tier-group prefixes to produce a consistent
+   name regardless of how the cascade was configured. *)
+let normalize_cascade_name_for_json raw_name =
+  let prefix = "tier-group." in
+  let prefix_len = String.length prefix in
+  if String.length raw_name > prefix_len
+     && String.equal prefix (String.sub raw_name 0 prefix_len)
+  then String.sub raw_name prefix_len (String.length raw_name - prefix_len)
+  else raw_name
 
 let summarize_list ?(empty = "none") values =
   match values with

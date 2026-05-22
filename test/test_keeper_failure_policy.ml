@@ -67,6 +67,7 @@ let test_provider_streaming_thinking_timeout_does_not_kill_keeper () =
       (Policy.Provider_timeout
          {
            phase = Some (Policy.Stream_idle Policy.Streaming_thinking);
+           strikes = None;
            liveness = Policy.In_turn_progress;
          })
   in

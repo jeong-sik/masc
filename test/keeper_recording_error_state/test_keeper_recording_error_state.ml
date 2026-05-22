@@ -48,6 +48,16 @@ let test_classify_oas_timeout () =
      = S.Provider_timeout)
 ;;
 
+let test_classify_mixed_stale_and_legacy_timeout_keeps_stale () =
+  check
+    bool
+    "stale_turn_timeout wins over legacy timeout-budget marker"
+    true
+    (S.classify_error
+       "stale_turn_timeout(idle_turn(1559s)); prior=oas_timeout_budget"
+     = S.Stale_turn_timeout)
+;;
+
 let test_classify_state_machine_guard () =
   check
     bool
@@ -220,6 +230,10 @@ let () =
         ; test_case "stale_turn_timeout" `Quick test_classify_stale_turn
         ; test_case "fiber_unresolved" `Quick test_classify_fiber_unresolved
         ; test_case "legacy timeout-budget provider timeout" `Quick test_classify_oas_timeout
+        ; test_case
+            "mixed stale and legacy timeout keeps stale"
+            `Quick
+            test_classify_mixed_stale_and_legacy_timeout_keeps_stale
         ; test_case
             "state machine guard"
             `Quick

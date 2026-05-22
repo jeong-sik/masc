@@ -196,7 +196,7 @@ dashboard 30s refresh × 3 surface 동시 → TTL 10s 이내 첫 호출만 scan.
 - 영구 보존 운영자는 `MASC_TOOL_CALL_LOG_RETENTION_DAYS=0` 명시.
 - **추가 정당화 — 문서-구현 drift**: `lib/keeper_tool_call_log.mli:99-103` 가 *이미* "default is 30 days, and values <= 0 disable pruning" 라고 *약속* 한 상태. 구현이 그 약속을 위반한 drift. 본 phase 는 *새 정책 도입* 이 아니라 *공표된 약속 회복*. RFC-0108 §3.3 가정 invalidate 보다 정당화 부담이 낮다.
 
-### 3.4 Phase 2 — Cross-domain fd reuse (RFC-0108 §3.3 invalidate)
+### 3.4 Phase 2 — Per-path fd cache (RFC-0108 §3.3 invalidate)
 
 본 phase 가 RFC-0108 §3.3 의 *명시적 비목표* 결정을 뒤집는 핵심.
 
@@ -205,23 +205,79 @@ dashboard 30s refresh × 3 surface 동시 → TTL 10s 이내 첫 호출만 scan.
 **Invalidation**:
 
 - "fd 수" 는 *순간 동시 open 수* 가 아니라 *unit time 당 open/close churn* 으로 봐야 한다.
-- 22,440 tool calls × 평균 4-5 동시 fiber → unit time 당 fd churn 이 호스트 kernel filp_cachep 슬랩에 압력.
+- 22,440 tool calls × 평균 4-5 동시 fiber → unit time 당 fd churn 이 호스트 kernel `filp_cachep` 슬랩에 압력.
 - macOS Apple Virtualization VM (RFC-0137 §1) 환경에서 host-wide `kern.maxfiles` 가 인근 프로세스와 공유되어 budget 가정이 흔들림.
 
-**Design 후보**:
+**Design re-think (2026-05-23, Phase 2 작성 중 발견)**: 본 RFC 초안의 *Design 후보 A — Per-domain fd cache* 는 *cross-domain interleave 위험*을 새로 도입한다. POSIX `O_APPEND + write(buf, len)` 의 atomicity 는 `PIPE_BUF` 이하만 보장 (macOS/Linux 일반적으로 ~4 KB). 4 KB+ record (예: prompt dump, large tool output) 가 두 domain 의 *서로 다른 fd* 로 동시에 write 될 때 record interleave 발생 가능. RFC-0108 §3.2 의 *Record interleave 0* 보장이 깨진다.
 
-| 후보 | 설명 | Pro | Con |
-|---|---|---|---|
-| **A. Per-domain fd cache** | 각 domain 이 자기 own fd 보유, cross-domain shared 없음 | RFC-0108 §3.2 보장 유지 | domain 수만큼 fd 사용 |
-| **B. Single-writer coordinator fiber** | 단일 domain 이 fd 보유, 다른 fiber 는 메시지 큐 | fd 최소화 | RFC-0108 §3.2 record interleave 보장 재검증 필요 |
+**채택 Design — Per-path fd cache (cross-domain serialized)**:
 
-**선호: A (Per-domain fd cache)**. 이유:
+| 결정 | 메커니즘 |
+|---|---|
+| **Single fd per path** | path 당 단 하나의 `out_channel` 이 process lifetime 동안 재사용. cross-domain interleave 불가능 (fd 가 하나뿐). |
+| **Cross-domain serialize** | 기존 `append_path_mutex_registry` (`Stdlib.Mutex`) 가 path 별 mutex 로 fiber + 도메인 양쪽을 직렬화. RFC-0108 §3.2 보장 *그대로 활용*. |
+| **Cache lookup 분리 mutex** | path mutex 와 별개의 `fd_cache_mu` 가 Hashtbl op 만 보호 (microsecond 단위 critical section). path mutex 는 `output_string + flush` 만 보유. |
+| **LRU evict** | `fd_cache_max = 32` 초과 시 oldest `last_used` 의 fd 를 `Stdlib.close_out`. day rollover 시 어제 path 가 자연 evict. |
+| **Process shutdown** | `Stdlib.at_exit` 에 `close_all_cached_writers` 등록. flush 후 close. |
 
-- B 는 RFC-0108 §3.2 *Record interleave 0* 보장 재검증 부담.
-- A 는 RFC-0108 §3.2 보장을 *그대로 유지* — 같은 domain 의 같은 fd 는 buffer 공유 안전. cross-domain 은 fd 자체가 분리되므로 corruption 없음.
-- fd 수: 4 writer × 8 domain ≈ 32 fd. RFC-0108 §3.3 의 N≤64 budget 안.
+```ocaml
+type cached_writer = { oc : out_channel; last_used : float }
+let cached_writers : (string, cached_writer) Hashtbl.t = Hashtbl.create 32
+let fd_cache_mu = Stdlib.Mutex.create ()
+let fd_cache_max = 32
 
-**LRU evict**: process lifetime 동안 path 가 day rollover 시 *어제 path* 가 stale. LRU max 8 entry per domain → 4 writer × 2 day = 8 path 까지 캐시. 초과 시 LRU evict + `Stdlib.close_out`.
+(* Inside fd_cache_mu: get-or-open + LRU. *)
+let get_or_open_writer_locked path =
+  match Hashtbl.find_opt cached_writers path with
+  | Some w ->
+    Hashtbl.replace cached_writers path
+      { w with last_used = Unix.gettimeofday () };
+    w.oc
+  | None ->
+    if Hashtbl.length cached_writers >= fd_cache_max
+    then evict_lru_locked ();
+    let oc =
+      Stdlib.open_out_gen
+        [ Stdlib.Open_append; Stdlib.Open_creat; Stdlib.Open_wronly ]
+        0o644 path
+    in
+    Hashtbl.add cached_writers path
+      { oc; last_used = Unix.gettimeofday () };
+    oc
+
+let append_jsonl path json =
+  test_exec_home_guard ~op:"append_jsonl" path;
+  let dir = Filename.dirname path in
+  mkdir_p_memoized dir;                              (* Phase 0a *)
+  let line = Yojson.Safe.to_string json ^ "\n" in
+  let path_mu = get_append_path_mutex path in
+  let oc =
+    Stdlib.Mutex.protect fd_cache_mu (fun () ->
+      get_or_open_writer_locked path)
+  in
+  Stdlib.Mutex.protect path_mu (fun () ->
+    Stdlib.output_string oc line;
+    Stdlib.flush oc)
+```
+
+**보장 (RFC-0108 §3.2 와 1:1 매칭)**:
+
+| 보장 | 메커니즘 |
+|---|---|
+| Fiber race 0 | `append_path_mutex_registry` 가 path 별 `Stdlib.Mutex` 로 fiber+도메인 양쪽 직렬화 (RFC-0108 와 같음) |
+| Partial-write 0 | `output_string + flush` 가 single critical section 안. `out_channel` buffer 가 cross-call carry-over 하지만 critical section 보장 |
+| Record interleave 0 | path 당 단일 fd → POSIX write 가 어떤 size 든 단일 producer 에서 순차 |
+| Large record 안전 | 같은 path mutex 가 끝까지 record 보유 |
+| Cross-process race | RFC-0108 §3.3 와 같음 — 비목표 |
+| Per-record fsync | `flush` 만, no `fsync` — RFC-0108 §6 와 같음 |
+
+**fd budget 분석**:
+
+- macOS default `RLIMIT_NOFILE` = 256 (soft) / unlimited (hard). masc-mcp 가 256 root 안에서 운영.
+- 4 writer (system_log / trajectory / oas-events / reaction-ledger) × 평균 1 active path = 4 fd baseline.
+- Day rollover 시 어제 path 도 evict 전까지 남음 → 최대 8 fd.
+- Dashboard read-side, network connection 등 합쳐 ~30 fd. fd_cache_max=32 는 safe margin.
+- RFC-0108 §3.3 의 "N≤64" budget 안 *충분히 들어옴*.
 
 ### 3.5 §4.5 — Observability gap (related, non-blocking)
 

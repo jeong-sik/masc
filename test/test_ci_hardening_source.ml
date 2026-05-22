@@ -2213,6 +2213,14 @@ let test_dashboard_doctor_route_process_contracts () =
        "With_process.with_process_args_in"
     && file_contains_pattern "lib/server/server_routes_http_routes_dashboard.ml"
          {|[| self_bin; "doctor"; "all"; "--json" |]|}
+    && file_contains_pattern "lib/server/server_routes_http_routes_dashboard.ml"
+         "dashboard_doctor_degraded_json"
+    && file_contains_pattern "lib/server/server_routes_http_routes_dashboard.ml"
+         {|MASC_MAIN_EIO_EXE|}
+    && file_contains_pattern "lib/server/server_routes_http_routes_dashboard.ml"
+         {|"summary"|}
+    && file_contains_pattern "lib/server/server_routes_http_routes_dashboard.ml"
+         {|"doctors"|}
     && file_not_contains_pattern "lib/server/server_routes_http_routes_dashboard.ml"
          {|doctor all --json|})
 

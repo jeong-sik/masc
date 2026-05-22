@@ -236,7 +236,9 @@ val timeout_error_kinds : error_kind list
     {!stress_kind_for_error_kind} mapper treats as
     timeout-class.  Pinned because
     [test/test_agent_stress_timeout_wire_10341.ml] asserts
-    its length to keep the catalogue from drifting. *)
+    its length to keep the catalogue from drifting.  Legacy
+    [oas_timeout_budget] is intentionally not listed; callers should
+    emit owner-specific timeout kinds such as [provider_timeout]. *)
 
 val stress_kind_for_error_kind :
   error_kind -> Agent_stress.stress_kind option

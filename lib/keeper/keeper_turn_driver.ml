@@ -865,38 +865,58 @@ let run_named
          within milliseconds.  Inject a typed synthetic backoff so the
          cooldown path still applies; emit a warning so operators can
          see that the upstream omitted the hint. *)
-      let immediate_cooldown_retry_after =
-        match sdk_error_capacity_backpressure_retry_after_s sdk_err with
-        | Some retry_after -> Some retry_after
-        | None ->
-          (match sdk_error_capacity_backpressure_retry_hint sdk_err with
-           | Some (Cbr_explicit s) -> Some (Some s)
-           | Some (Cbr_synthetic_default s) ->
-             Log.Misc.warn
-               "cascade_capacity_backpressure: provider=%s retry_after_sec=null \
-                injecting synthetic backoff=%.1fs (error_kind=%s)"
-               provider_key s
-               (Cascade_health_tracker.error_kind_to_string error_kind);
-             Some (Some s)
-           | None -> sdk_error_soft_rate_limited sdk_err)
+      let capacity_source =
+        sdk_error_capacity_backpressure_source sdk_err
       in
-      match immediate_cooldown_retry_after with
-      | Some retry_after_s ->
-        Cascade_health_tracker.record_capacity_backpressure
-          Cascade_health_tracker.global
-          ~provider_key
-          ?retry_after_s
-          ~error_kind
-          ~error_reason
-          ~now:(Unix.time ())
-          ()
-      | None ->
-        Cascade_health_tracker.record_failure
-          Cascade_health_tracker.global
-          ~provider_key
-          ~error_kind
-          ~error_reason
-          ()
+      let provider_owned_capacity =
+        match capacity_source with
+        | Some Provider_capacity -> true
+        | Some (Client_capacity | Tier_admission | Cascade_slot) -> false
+        | None -> true
+      in
+      if not provider_owned_capacity
+      then
+        Log.Misc.info
+          "cascade_capacity_backpressure: source=%s provider=%s not recorded \
+           as provider health/cooldown (error_kind=%s)"
+          (capacity_source
+           |> Option.map capacity_backpressure_source_to_string
+           |> Option.value ~default:"unknown")
+          provider_key
+          (Cascade_health_tracker.error_kind_to_string error_kind)
+      else
+        let immediate_cooldown_retry_after =
+          match sdk_error_capacity_backpressure_retry_after_s sdk_err with
+          | Some retry_after -> Some retry_after
+          | None ->
+            (match sdk_error_capacity_backpressure_retry_hint sdk_err with
+             | Some (Cbr_explicit s) -> Some (Some s)
+             | Some (Cbr_synthetic_default s) ->
+               Log.Misc.warn
+                 "cascade_capacity_backpressure: provider=%s retry_after_sec=null \
+                  injecting synthetic backoff=%.1fs (error_kind=%s)"
+                 provider_key s
+                 (Cascade_health_tracker.error_kind_to_string error_kind);
+               Some (Some s)
+             | None -> sdk_error_soft_rate_limited sdk_err)
+        in
+        match immediate_cooldown_retry_after with
+        | Some retry_after_s ->
+          Cascade_health_tracker.record_capacity_backpressure
+            Cascade_health_tracker.global
+            ~provider_key
+            ?retry_after_s
+            ~error_kind
+            ~error_reason
+            ~now:(Unix.time ())
+            ()
+        | None ->
+          Cascade_health_tracker.record_failure
+            Cascade_health_tracker.global
+            ~provider_key
+            ~error_kind
+            ~error_reason
+            ()
   in
   let acquire_client_capacity_slot candidate =
     let capacity_key =

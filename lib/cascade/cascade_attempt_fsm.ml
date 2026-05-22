@@ -882,6 +882,26 @@ type capacity_backpressure_retry_hint =
   | Cbr_explicit of float
   | Cbr_synthetic_default of float
 
+let sdk_error_capacity_backpressure_source (err : Agent_sdk.Error.sdk_error)
+  : Cascade_error_classify.capacity_backpressure_source option =
+  match Cascade_error_classify.classify_masc_internal_error err with
+  | Some (Cascade_error_classify.Capacity_backpressure { source; _ }) ->
+    Some source
+  | Some (Cascade_error_classify.Cascade_exhausted _)
+  | Some (Cascade_error_classify.Resumable_cli_session _)
+  | Some (Cascade_error_classify.No_tool_capable_provider _)
+  | Some (Cascade_error_classify.Accept_rejected _)
+  | Some (Cascade_error_classify.Admission_queue_timeout _)
+  | Some (Cascade_error_classify.Admission_queue_rejected _)
+  | Some (Cascade_error_classify.Turn_timeout _)
+  | Some (Cascade_error_classify.Oas_timeout_budget _)
+  | Some (Cascade_error_classify.Max_tokens_ceiling_violation _)
+  | Some (Cascade_error_classify.Ambiguous_post_commit _)
+  | Some (Cascade_error_classify.Internal_unhandled_exception _)
+  | Some (Cascade_error_classify.Internal_bridge_exception _)
+  | Some (Cascade_error_classify.Internal_contract_rejected _)
+  | None -> None
+
 let sdk_error_capacity_backpressure_retry_hint (err : Agent_sdk.Error.sdk_error)
   : capacity_backpressure_retry_hint option =
   match Cascade_error_classify.classify_masc_internal_error err with

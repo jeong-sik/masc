@@ -164,6 +164,14 @@ type capacity_backpressure_retry_hint =
         injects {!Cascade_health_tracker.default_capacity_backpressure_backoff_sec}
         to prevent immediate cascade re-rotation onto the same provider. *)
 
+val sdk_error_capacity_backpressure_source :
+  Agent_sdk.Error.sdk_error ->
+  Cascade_error_classify.capacity_backpressure_source option
+(** [Some source] when the error classifies as a MASC-internal
+    [Capacity_backpressure].  Callers use this to keep provider-owned
+    capacity failures separate from client/tier/cascade-slot backpressure
+    when projecting provider health. *)
+
 val sdk_error_capacity_backpressure_retry_hint :
   Agent_sdk.Error.sdk_error -> capacity_backpressure_retry_hint option
 (** [Some hint] when the error classifies as

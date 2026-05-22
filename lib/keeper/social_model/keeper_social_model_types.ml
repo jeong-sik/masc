@@ -171,8 +171,8 @@ let default_option_field_max_chars = 200
    Agent_sdk.Error.to_string's "Internal error: [masc_oas_error]" wrapper)
    must NOT be truncated at the narrative budget, or the JSON body is
    cut mid-key and downstream consumers (dashboard, retry classifier,
-   log search) see a partial kind=oas_timeout_budget record with the
-   budget-underscore value missing, and cannot recover the diagnostic
+   log search) see a partial provider-timeout record with the
+   budget value missing, and cannot recover the diagnostic
    fields. The operator ends up re-filing the same triage ticket
    because the budget value, elapsed time, and source field never
    reach them. *)

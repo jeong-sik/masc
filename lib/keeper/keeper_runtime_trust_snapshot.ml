@@ -85,7 +85,7 @@ let disposition_of_runtime_blocker_class
       Keeper_turn_disposition.Required_tool_use_unsatisfied
   | "oas_timeout_budget"
   (* Legacy decode only: do not resurrect the retired synthetic
-     Oas_timeout_budget disposition from dashboard/runtime-trust wire. *)
+     timeout-budget disposition from dashboard/runtime-trust wire. *)
   | "turn_timeout"
   | "turn_timeout_after_queue_wait"
   | "stale_turn_timeout" ->

@@ -89,7 +89,7 @@ let run_keeper_cycle_with_slot
       Keeper_turn_slot.reset_budget_exhaustion ~keeper_name;
       Log.Keeper.warn
         "%s: legacy oas_timeout_budget observed; preserving original turn \
-         failure without Oas_timeout_budget_loop latch"
+         failure without Provider_timeout_loop latch"
         keeper_name);
     (match read_meta ctx.config meta_after_cursor_persist.name with
      | Ok (Some latest) -> latest

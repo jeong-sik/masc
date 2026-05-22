@@ -862,7 +862,7 @@ let reset_autonomous_completion_for_test () : unit =
    Counter is in-memory for the common same-server case and is reset on
    any successful turn (see [Ok updated] branch). On first bump after a
    process restart, callers may seed it from the persisted
-   [Oas_timeout_budget_loop] failure reason so restart cannot erase a
+   [Provider_timeout_loop] failure reason so restart cannot erase a
    partially observed loop. *)
 let oas_timeout_budget_strike_limit = 3
 

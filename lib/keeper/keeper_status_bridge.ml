@@ -459,7 +459,7 @@ let runtime_blocker_surface_of_failure_reason (reason : Keeper_registry.failure_
             count
       ; continue_gate = false
       }
-  | Keeper_registry.Oas_timeout_budget_loop { count } ->
+  | Keeper_registry.Provider_timeout_loop { count } ->
     Some
       (runtime_blocker_surface_of_typed_class
          ~summary:

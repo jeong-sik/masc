@@ -1153,19 +1153,19 @@ let stale_kill_class_label = function
 
 let stale_terminal_reason_code_typed reason =
   match reason with
-  | Some (Keeper_registry.Oas_timeout_budget_loop _) ->
+  | Some (Keeper_registry.Provider_timeout_loop _) ->
     Keeper_turn_terminal_code.Provider_runtime_error "provider_timeout_loop"
   | _ -> Keeper_turn_terminal_code.of_failure_reason_option reason
 ;;
 
 let stale_broadcast_failure_cohort = function
-  | Some (Keeper_registry.Oas_timeout_budget_loop _) -> "provider_timeout_loop"
+  | Some (Keeper_registry.Provider_timeout_loop _) -> "provider_timeout_loop"
   | Some _ as reason -> Keeper_registry.failure_reason_cohort_key reason
   | None -> "stale_turn_timeout"
 ;;
 
 let stale_broadcast_failure_reason_text = function
-  | Some (Keeper_registry.Oas_timeout_budget_loop { count }) ->
+  | Some (Keeper_registry.Provider_timeout_loop { count }) ->
     Some (Printf.sprintf "provider_timeout_loop(count=%d)" count)
   | Some reason -> Some (Keeper_registry.failure_reason_to_string reason)
   | None -> None

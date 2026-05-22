@@ -86,7 +86,7 @@ let of_failure_reason : Keeper_registry.failure_reason -> t = function
     Stale_turn_timeout_noop
   | Keeper_registry.Stale_termination_storm _ -> Stale_termination_storm
   | Keeper_registry.Stale_fleet_batch _ -> Stale_fleet_batch
-  | Keeper_registry.Oas_timeout_budget_loop _ ->
+  | Keeper_registry.Provider_timeout_loop _ ->
     Provider_runtime_error "provider_timeout_loop"
   | Keeper_registry.Provider_runtime_error { code; _ } -> Provider_runtime_error code
   | Keeper_registry.Tool_required_unsatisfied { code; _ } ->

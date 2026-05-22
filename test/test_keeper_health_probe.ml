@@ -135,7 +135,7 @@ let test_runtime_pressure_classifier () =
     pressure_label_t
     "legacy oas timeout normalizes to provider timeout"
     (Some "provider_timeout")
-    (pressure_label_of_failure_reason (R.Oas_timeout_budget_loop { count = 2 }))
+    (pressure_label_of_failure_reason (R.Provider_timeout_loop { count = 2 }))
 ;;
 
 let test_run_once_records_specific_failure_ratio_reason () =

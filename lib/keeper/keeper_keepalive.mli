@@ -202,7 +202,7 @@ val set_after_acquire_flag_hook_for_test :
     Reset on any successful turn.
     The in-process CAS map survives within a server lifetime. After
     restart, callers may hydrate the first bump from persisted
-    [Oas_timeout_budget_loop] state so multi-process loops still reach
+    [Provider_timeout_loop] state so multi-process loops still reach
     the policy gate. *)
 val oas_timeout_budget_strike_limit : int
 

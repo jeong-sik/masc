@@ -189,7 +189,7 @@ let failure_reason_policy_decision
   : Keeper_failure_policy.decision option
   =
   match reason with
-  | Some (Keeper_registry.Oas_timeout_budget_loop { count }) ->
+  | Some (Keeper_registry.Provider_timeout_loop { count }) ->
     Some
       (Keeper_failure_policy.decide
          (Keeper_failure_policy.Oas_timeout_budget

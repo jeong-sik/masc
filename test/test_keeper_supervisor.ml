@@ -125,7 +125,7 @@ let test_auto_resume_disabled () =
 
 let test_supervisor_policy_pauses_watchdog_provider_timeout_loop () =
   let decision =
-    policy_decision_exn (Some (Reg.Oas_timeout_budget_loop { count = 3 }))
+    policy_decision_exn (Some (Reg.Provider_timeout_loop { count = 3 }))
   in
   check string "scope" "turn" (KFP.failure_scope_to_label decision.failure_scope);
   check string "lifecycle" "pause_keeper"
@@ -1168,7 +1168,7 @@ let test_provider_timeout_loop_pause_skips_restart () =
       Reg.restore_supervisor_state ~base_path:config.base_path name
         ~restart_count:0 ~last_restart_ts:0.0 ~crash_log:[];
       Reg.set_failure_reason ~base_path:config.base_path name
-        (Some (Reg.Oas_timeout_budget_loop { count = 3 }));
+        (Some (Reg.Provider_timeout_loop { count = 3 }));
       let baseline_pause =
         Masc_mcp.Prometheus.metric_total
           "masc_keeper_provider_timeout_loop_paused_total"
@@ -1232,7 +1232,7 @@ let test_unresolved_watchdog_stopped_budget_loop_is_reaped () =
       Reg.restore_supervisor_state ~base_path:config.base_path name
         ~restart_count:0 ~last_restart_ts:0.0 ~crash_log:[];
       Reg.set_failure_reason ~base_path:config.base_path name
-        (Some (Reg.Oas_timeout_budget_loop { count = 3 }));
+        (Some (Reg.Provider_timeout_loop { count = 3 }));
       let ctx : _ KT.context =
         {
           config;
@@ -1410,7 +1410,7 @@ let test_oas_auto_resume_after_sec_doubles_on_repause () =
       Reg.restore_supervisor_state ~base_path:config.base_path name
         ~restart_count:0 ~last_restart_ts:0.0 ~crash_log:[];
       Reg.set_failure_reason ~base_path:config.base_path name
-        (Some (Reg.Oas_timeout_budget_loop { count = 3 }));
+        (Some (Reg.Provider_timeout_loop { count = 3 }));
       let ctx : _ KT.context =
         {
           config;
@@ -2475,7 +2475,7 @@ let () =
            [Turn_consecutive_failures] / [Exception] / etc., and
            [watchdog_stop_pending] only restarts on
            [Stale_turn_timeout | Stale_termination_storm |
-           Stale_fleet_batch | Oas_timeout_budget_loop].  Recovery would set
+           Stale_fleet_batch | Provider_timeout_loop].  Recovery would set
            [fiber_stop=true] but the supervisor would never convert
            it into a crash/restart.  Pin the post-recovery cohort to
            [stale_turn_timeout] so this regression is caught. *)

@@ -185,7 +185,7 @@ val set_after_acquire_flag_hook_for_test :
     [Keeper_failure_policy] before choosing any lifecycle effect.
 
     Counts are stored in an in-process CAS map and can be seeded from the
-    persisted [Oas_timeout_budget_loop] failure reason on the first bump after
+    persisted [Provider_timeout_loop] failure reason on the first bump after
     restart or another process update. *)
 val oas_timeout_budget_strike_limit : int
 

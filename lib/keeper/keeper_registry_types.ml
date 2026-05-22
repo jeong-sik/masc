@@ -53,7 +53,7 @@ type failure_reason =
           fleet-batch detection is observation-only and must not create this
           failure reason; if old runtime state still contains it, the
           supervisor treats it like a restartable watchdog crash. *)
-  | Oas_timeout_budget_loop of { count : int }
+  | Provider_timeout_loop of { count : int }
   (** Latched when the same keeper exhausts the OAS turn budget on
           consecutive cycles. This is a provider/cascade/runtime throughput
           failure, so the supervisor pauses instead of restarting into the
@@ -85,7 +85,7 @@ let failure_reason_to_string = function
     Printf.sprintf "stale_termination_storm(count=%d)" count
   | Stale_fleet_batch { distinct_count } ->
     Printf.sprintf "stale_fleet_batch(distinct_count=%d)" distinct_count
-  | Oas_timeout_budget_loop { count } ->
+  | Provider_timeout_loop { count } ->
     Printf.sprintf "provider_timeout_loop(count=%d)" count
   | Provider_runtime_error { code; detail; provider_id; http_status } ->
     let prov =
@@ -123,7 +123,7 @@ let failure_reason_cohort_key = function
   | Some (Stale_turn_timeout _) -> "stale_turn_timeout"
   | Some (Stale_termination_storm _) -> "stale_termination_storm"
   | Some (Stale_fleet_batch _) -> "stale_fleet_batch"
-  | Some (Oas_timeout_budget_loop _) -> "provider_timeout_loop"
+  | Some (Provider_timeout_loop _) -> "provider_timeout_loop"
   | Some (Provider_runtime_error _) -> "provider_runtime_error"
   | Some (Tool_required_unsatisfied _) -> "tool_required_unsatisfied"
   | Some (Ambiguous_partial_commit _) -> "ambiguous_partial_commit"
@@ -135,7 +135,7 @@ let failure_reason_cohort_key = function
 let stale_watchdog_failure_reason ~prior ~kill_class =
   match prior with
   | Some
-      ( Oas_timeout_budget_loop _
+      ( Provider_timeout_loop _
       | Provider_runtime_error _
       | Tool_required_unsatisfied _
       | Ambiguous_partial_commit _

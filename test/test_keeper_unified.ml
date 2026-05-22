@@ -6536,7 +6536,7 @@ let test_degraded_retry_after_recoverable_error_includes_oas_timeout_budget () =
             { budget_sec = 273.0
             ; keeper_turn_timeout_sec = 1200.0
             ; estimated_input_tokens = 2_000
-            ; source = "static_300s"
+            ; source = "turn_budget"
             ; remaining_turn_budget_sec = Some 600.0
             ; min_required_sec = 15.0
             ; phase = "test_phase"
@@ -8229,8 +8229,8 @@ let test_bounded_oas_timeout_first_attempt_uses_full_usable_budget () =
   | Some budget ->
     check
       (float 0.01)
-      "first attempt receives adaptive default cap (no halving)"
-      300.0
+      "first attempt receives usable_budget (remaining - guard) after RFC-0156"
+      485.0
       budget.effective_timeout_sec;
     check
       (float 0.01)
@@ -8239,10 +8239,82 @@ let test_bounded_oas_timeout_first_attempt_uses_full_usable_budget () =
       budget.remaining_turn_budget_sec;
     check
       string
-      "source records static_300s default cap"
-      "static_300s"
+      "source records turn_budget after RFC-0156 (static_300s retired)"
+      "turn_budget"
       budget.source
   | None -> fail "expected bounded timeout"
+;;
+
+(* RFC-0156 — OAS total timeout removal.
+   Pins the post-removal invariants of [resolve_bounded_oas_timeout_budget_with_turn_budget]:
+     (1) [estimated_input_tokens] is structurally ignored — any token count
+         under the same remaining_turn_budget yields the same effective_timeout.
+     (2) [source] never carries the retired "static_300s*" labels.
+     (3) effective_timeout tracks [remaining_turn_budget - oas_timeout_guard_sec]
+         (no longer capped at 300s when ample turn budget remains). *)
+let test_rfc_0156_token_count_does_not_affect_budget () =
+  let resolve estimated_input_tokens =
+    UT.resolve_bounded_oas_timeout_budget_with_turn_budget
+      ~allow_wall_clock_retry_budget:false
+      ~is_retry:false
+      ~estimated_input_tokens
+      ~max_turns:4
+      ~remaining_turn_budget_s:1000.0
+  in
+  let pick = function
+    | Some b -> b.UT.effective_timeout_sec
+    | None -> fail "expected Some budget for ample remaining"
+  in
+  let small = pick (resolve 100) in
+  let medium = pick (resolve 10_000) in
+  let large = pick (resolve 1_000_000) in
+  check (float 0.01)
+    "small token count: same effective timeout"
+    small medium;
+  check (float 0.01)
+    "huge token count: same effective timeout (ignored per RFC-0156)"
+    small large
+;;
+
+let test_rfc_0156_source_never_static_300s () =
+  match
+    UT.resolve_bounded_oas_timeout_budget_with_turn_budget
+      ~allow_wall_clock_retry_budget:false
+      ~is_retry:false
+      ~estimated_input_tokens:2_000
+      ~max_turns:4
+      ~remaining_turn_budget_s:1000.0
+  with
+  | None -> fail "expected bounded timeout"
+  | Some budget ->
+    let starts_with prefix s =
+      String.length s >= String.length prefix
+      && String.sub s 0 (String.length prefix) = prefix
+    in
+    check bool
+      "source does not start with static_300s after RFC-0156"
+      false
+      (starts_with "static_300s" budget.source)
+;;
+
+let test_rfc_0156_effective_tracks_remaining_budget () =
+  (* With turn_timeout >= remaining_turn_budget, effective_timeout collapses
+     to usable_budget = remaining - guard (15s). The pre-RFC behaviour
+     would have clamped at min(300, usable) = 300. *)
+  match
+    UT.resolve_bounded_oas_timeout_budget_with_turn_budget
+      ~allow_wall_clock_retry_budget:false
+      ~is_retry:false
+      ~estimated_input_tokens:2_000
+      ~max_turns:4
+      ~remaining_turn_budget_s:1000.0
+  with
+  | None -> fail "expected bounded timeout"
+  | Some budget ->
+    check (float 0.01)
+      "effective_timeout = remaining - oas_timeout_guard_sec (no 300s clamp)"
+      985.0
+      budget.effective_timeout_sec
 ;;
 
 (* RFC-0129: renamed from [test_attempt_watchdog_preserves_degraded_retry_reserve].
@@ -8263,8 +8335,8 @@ let test_attempt_watchdog_uses_full_usable_budget () =
     check
       (float 0.01)
       "attempt watchdog = min(effective+guard, remaining-outer_reserve) \
-       = min(315, 499) = 315"
-      315.0
+       = min(500, 499) = 499 after RFC-0156 (effective = usable_budget)"
+      499.0
       (UT.attempt_watchdog_timeout_sec ~remaining_turn_budget_s:500.0 budget)
   | None -> fail "expected bounded timeout"
 ;;
@@ -8277,7 +8349,7 @@ let test_attempt_watchdog_fires_before_outer_turn_timeout () =
     ; remaining_turn_budget_sec = 293.0
     ; estimated_input_tokens = 2_000
     ; max_turns = 4
-    ; source = "static_300s_per_attempt_retry"
+    ; source = "turn_budget_per_attempt_retry"
     }
   in
   check
@@ -8347,7 +8419,7 @@ let oas_timeout_budget_error () =
        { budget_sec = 273.0
        ; keeper_turn_timeout_sec = 1200.0
        ; estimated_input_tokens = 2_000
-       ; source = "static_300s"
+       ; source = "turn_budget"
        ; remaining_turn_budget_sec = Some 600.0
        ; min_required_sec = 15.0
        ; phase = "test_phase"
@@ -8567,7 +8639,7 @@ let test_degraded_retry_wall_clock_budget_allows_remaining_turn_time () =
   with
   | None -> fail "degraded retry should use remaining wall-clock budget"
   | Some budget ->
-    check string "source marks wall-clock retry" "static_300s_wall_clock_retry" budget.source;
+    check string "source marks wall-clock retry" "turn_budget_wall_clock_retry" budget.source;
     check
       (float 0.01)
       "wall-clock retry leaves finalization guard"
@@ -11831,6 +11903,18 @@ let () =
             "bounded OAS timeout refuses too little remaining budget"
             `Quick
             test_bounded_oas_timeout_refuses_too_little_budget
+        ; test_case
+            "RFC-0156: estimated_input_tokens does not affect budget"
+            `Quick
+            test_rfc_0156_token_count_does_not_affect_budget
+        ; test_case
+            "RFC-0156: source never carries static_300s label"
+            `Quick
+            test_rfc_0156_source_never_static_300s
+        ; test_case
+            "RFC-0156: effective_timeout tracks remaining_turn_budget"
+            `Quick
+            test_rfc_0156_effective_tracks_remaining_budget
         ; test_case
             "OAS timeout classification uses current attempt budget"
             `Quick

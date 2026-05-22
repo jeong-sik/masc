@@ -110,6 +110,7 @@ function attentionReasonLabel(reason: string | null, paused: boolean): string | 
 // Backend emit sites for `next_human_action` (paired 1:1 with the
 // corresponding `attention_reason`):
 //   - lib/keeper/keeper_status_bridge.ml:727-742 (seven common actions)
+//   - lib/keeper/keeper_turn_disposition.ml:63-70 (runtime-trust latest action)
 //   - lib/keeper_fd_pressure.ml:191 ('restore_fd_headroom')
 //   - lib/dashboard/dashboard_goals.ml:45 ('inspect_keeper_runtime_trust')
 const NEXT_HUMAN_ACTIONS = [
@@ -140,6 +141,7 @@ function isNextHumanAction(s: string): s is NextHumanAction {
 }
 
 function canonicalNextHumanAction(action: string | null): string | null {
+  if (action === 'inspect_turn_timeout') return 'inspect_runtime_blocker'
   if (action === 'inspect_timeout_budget') return 'inspect_runtime_blocker'
   if (action === 'inspect_cascade_attempts') return 'inspect_runtime_blocker'
   if (action === 'inspect_provider_tool_lane') return 'inspect_runtime_blocker'

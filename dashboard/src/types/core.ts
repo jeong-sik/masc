@@ -365,7 +365,7 @@ export interface KeeperMetricPoint {
   handoff_new_generation: number | null
   prompt_fingerprint: string | null
   prompt_metrics: PromptTelemetry | null
-  timeout_budget: TimeoutBudgetTelemetry | null
+  provider_timeout_plan: TimeoutBudgetTelemetry | null
   ctx_composition: CtxCompositionTelemetry | null
   input_tokens: number | null
   output_tokens: number | null

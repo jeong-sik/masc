@@ -58,7 +58,7 @@ describe('InferenceTelemetryPanel', () => {
         fallback_from: null,
         fallback_to: null,
         fallback_reason: null,
-        timeout_budget: null,
+        provider_timeout_plan: null,
       },
       {
         ts: 2,
@@ -105,7 +105,7 @@ describe('InferenceTelemetryPanel', () => {
         fallback_from: null,
         fallback_to: null,
         fallback_reason: null,
-        timeout_budget: null,
+        provider_timeout_plan: null,
       },
     ] satisfies KeeperMetricPoint[]
     const keeper = { metrics_series: metricsSeries } as Keeper
@@ -159,7 +159,7 @@ describe('InferenceTelemetryPanel', () => {
         fallback_from: null,
         fallback_to: null,
         fallback_reason: null,
-        timeout_budget: null,
+        provider_timeout_plan: null,
       },
       {
         ts: 2,
@@ -198,7 +198,7 @@ describe('InferenceTelemetryPanel', () => {
         fallback_from: null,
         fallback_to: null,
         fallback_reason: null,
-        timeout_budget: null,
+        provider_timeout_plan: null,
       },
     ] satisfies KeeperMetricPoint[]
     const keeper = { metrics_series: metricsSeries } as Keeper

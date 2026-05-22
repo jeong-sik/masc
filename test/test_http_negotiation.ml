@@ -30,7 +30,6 @@ let test_classify_mcp_accept () =
     let same =
       match (expected, actual) with
       | Streamable, Streamable
-      | Legacy_accepted, Legacy_accepted
       | Rejected, Rejected ->
           true
       | _ -> false
@@ -95,17 +94,14 @@ let test_protocol_continuity_rejects_mismatch () =
             (String.length msg > 0
             && String.contains msg ':'))
 
-let test_notification_body_relaxes_accept () =
+let test_notification_json_only_rejected () =
   let module Transport = Masc_mcp.Server_mcp_transport_http in
   let headers = Httpun.Headers.of_list [("accept", "application/json")] in
   let request = Httpun.Request.create ~headers `POST "/mcp" in
-  let body =
-    {|{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}|}
-  in
-  let mode = Transport.classify_mcp_accept_for_body request body in
-  check bool "notification accept relaxation" true
+  let mode = Transport.classify_mcp_accept request in
+  check bool "notification json-only is rejected" true
     (match mode with
-    | Mcp_transport_protocol.Http_negotiation.Legacy_accepted -> true
+    | Mcp_transport_protocol.Http_negotiation.Rejected -> true
     | _ -> false)
 
 let test_request_json_only_accepted () =
@@ -113,10 +109,7 @@ let test_request_json_only_accepted () =
   let module Transport = Masc_mcp.Server_mcp_transport_http in
   let headers = Httpun.Headers.of_list [("accept", "application/json")] in
   let request = Httpun.Request.create ~headers `POST "/mcp" in
-  let body =
-    {|{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}|}
-  in
-  let mode = Transport.classify_mcp_accept_for_body request body in
+  let mode = Transport.classify_mcp_accept request in
   check bool "json-only accept is rejected" true
     (match mode with
     | Mcp_transport_protocol.Http_negotiation.Rejected -> true
@@ -127,10 +120,7 @@ let test_initialize_json_only_accepted () =
   let module Transport = Masc_mcp.Server_mcp_transport_http in
   let headers = Httpun.Headers.of_list [("accept", "application/json")] in
   let request = Httpun.Request.create ~headers `POST "/mcp" in
-  let body =
-    {|{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"0.1"}}}|}
-  in
-  let mode = Transport.classify_mcp_accept_for_body request body in
+  let mode = Transport.classify_mcp_accept request in
   check bool "initialize with json-only is rejected" true
     (match mode with
     | Mcp_transport_protocol.Http_negotiation.Rejected -> true
@@ -141,10 +131,7 @@ let test_no_accept_header_rejected () =
   let module Transport = Masc_mcp.Server_mcp_transport_http in
   let headers = Httpun.Headers.of_list [] in
   let request = Httpun.Request.create ~headers `POST "/mcp" in
-  let body =
-    {|{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}|}
-  in
-  let mode = Transport.classify_mcp_accept_for_body request body in
+  let mode = Transport.classify_mcp_accept request in
   check bool "no accept header is rejected" true
     (match mode with
     | Mcp_transport_protocol.Http_negotiation.Rejected -> true
@@ -219,8 +206,9 @@ let () =
         test_case "remembered session version is reused" `Quick test_protocol_version_for_session_falls_back_to_negotiated_version;
         test_case "mismatch still rejects" `Quick test_protocol_continuity_rejects_mismatch;
       ]);
-      ("body_aware_accept", [
-        test_case "notification relaxes accept" `Quick test_notification_body_relaxes_accept;
+      ("accept_contract", [
+        test_case "notification json-only rejected" `Quick
+          test_notification_json_only_rejected;
         test_case "json-only accept is rejected" `Quick test_request_json_only_accepted;
         test_case "initialize json-only is rejected" `Quick test_initialize_json_only_accepted;
         test_case "no accept header rejected" `Quick test_no_accept_header_rejected;

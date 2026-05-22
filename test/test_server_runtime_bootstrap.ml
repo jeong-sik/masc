@@ -2299,6 +2299,7 @@ let test_main_eio_fresh_bootstrap_and_mcp_handshake () =
               ~headers:
                 [
                   "Content-Type: application/json";
+                  "Accept: application/json, text/event-stream";
                   "Mcp-Session-Id: " ^ session_id;
                   "Mcp-Protocol-Version: " ^ protocol_version;
                 ]
@@ -2318,6 +2319,7 @@ let test_main_eio_fresh_bootstrap_and_mcp_handshake () =
               ~headers:
                 [
                   "Content-Type: application/json";
+                  "Accept: application/json, text/event-stream";
                   "Mcp-Session-Id: " ^ session_id;
                   "Mcp-Protocol-Version: " ^ protocol_version;
                 ]

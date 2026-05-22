@@ -175,17 +175,13 @@ let test_classify_rejected () =
     (match mode with Http_negotiation.Rejected -> true | _ -> false)
 
 let test_classify_none_rejected () =
-  let mode =
-    Http_negotiation.classify_mcp_accept None
-  in
+  let mode = Http_negotiation.classify_mcp_accept None in
   check bool "none rejected" true
     (match mode with Http_negotiation.Rejected -> true | _ -> false)
 
 let test_classify_wildcard_rejected () =
   (* */* alone: json=true but sse=false, so not Streamable *)
-  let mode =
-    Http_negotiation.classify_mcp_accept (Some "*/*")
-  in
+  let mode = Http_negotiation.classify_mcp_accept (Some "*/*") in
   check bool "wildcard rejected" true
     (match mode with Http_negotiation.Rejected -> true | _ -> false)
 

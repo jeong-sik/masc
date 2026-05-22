@@ -41,7 +41,6 @@ let assert_accept_mode label expected actual =
   let same =
     match (expected, actual) with
     | Negotiation.Streamable, Negotiation.Streamable
-    | Negotiation.Legacy_accepted, Negotiation.Legacy_accepted
     | Negotiation.Rejected, Negotiation.Rejected ->
         true
     | _ -> false
@@ -146,13 +145,12 @@ let test_shared_post_admission_matrix () =
     request ~headers:[ ("accept", "application/json") ] "/mcp"
   in
   assert_accept_mode "streamable Accept remains admitted" Negotiation.Streamable
-    (Headers.classify_mcp_accept_for_body streamable_request (body "tools/call"));
+    (Headers.classify_mcp_accept streamable_request);
   assert_accept_mode "json-only Accept is rejected for requests" Negotiation.Rejected
-    (Headers.classify_mcp_accept_for_body json_only_request (body "tools/call"));
-  assert_accept_mode "json-only notifications remain legacy-compatible"
-    Negotiation.Legacy_accepted
-    (Headers.classify_mcp_accept_for_body json_only_request
-       {|{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}|})
+    (Headers.classify_mcp_accept json_only_request);
+  assert_accept_mode "json-only notifications are rejected"
+    Negotiation.Rejected
+    (Headers.classify_mcp_accept json_only_request)
 
 let test_shared_protocol_and_delete_matrix () =
   let session_id = "h1-h2-parity-protocol-session" in

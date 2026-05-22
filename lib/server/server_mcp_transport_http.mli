@@ -80,8 +80,6 @@ val get_protocol_version_for_session :
 val request_force_json_response : Httpun.Request.t -> bool
 val classify_mcp_accept :
   Httpun.Request.t -> Mcp_transport_protocol.Http_negotiation.accept_mode
-val classify_mcp_accept_for_body :
-  Httpun.Request.t -> string -> Mcp_transport_protocol.Http_negotiation.accept_mode
 val should_use_sse_for_body :
   Httpun.Request.t ->
   string ->

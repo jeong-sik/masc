@@ -33,11 +33,6 @@ val body_jsonrpc_method : string -> (string * bool) option
     non-object body).  [has_id] reports whether the [id] field is
     present (used to distinguish notifications from requests). *)
 
-val is_notification_method : string -> bool
-(** [is_notification_method m] tests whether [m] starts with the
-    literal prefix [["notifications/"]].  Notifications must have
-    [has_id = false] in the JSON-RPC envelope. *)
-
 val is_initialize_method : string -> bool
 (** [is_initialize_method m] tests whether [m] equals the literal
     [["initialize"]].  The initialize handshake must always go over
@@ -46,7 +41,7 @@ val is_initialize_method : string -> bool
 (** {1 Accept-header classification}
 
     The MCP spec mandates [Accept: application/json, text/event-stream]
-    for streamable transports.  One request-level opt-out remains:
+    for streamable transports.  One opt-out remains:
 
     - The [x-masc-force-json] request header overrides the Accept
       negotiation entirely. *)
@@ -56,17 +51,6 @@ val classify_mcp_accept :
   Mcp_transport_protocol.Http_negotiation.accept_mode
 (** [classify_mcp_accept request] reads the [accept] header and
     returns the negotiation classification. *)
-
-val classify_mcp_accept_for_body :
-  Httpun.Request.t ->
-  string ->
-  Mcp_transport_protocol.Http_negotiation.accept_mode
-(** Same as {!classify_mcp_accept} but with one upgrade path: when
-    the Accept header alone classifies as [Rejected] AND the body
-    is a notification (method starts with [notifications/], no id),
-    promote the classification to [Legacy_accepted] so notifications
-    can land even from clients that omit the streamable Accept set.
-    Notification-only relaxation, never for request-id'd calls. *)
 
 val should_use_sse_for_body :
   Httpun.Request.t ->
@@ -79,10 +63,6 @@ val should_use_sse_for_body :
     handshake (always JSON) OR [accept_mode <> Streamable] OR the
     Accept header does not include [text/event-stream]. *)
 
-val request_accepts_json : Httpun.Request.t -> bool
-(** [request_accepts_json request] returns [true] iff the Accept
-    header advertises [application/json] (or wildcard). *)
-
 val request_force_json_response : Httpun.Request.t -> bool
 (** [request_force_json_response request] returns [true] iff the
     [x-masc-force-json] header is set to a truthy value
@@ -92,8 +72,8 @@ val request_force_json_response : Httpun.Request.t -> bool
 val force_json_response : bool
 (** Module-init cache of [MASC_FORCE_JSON_RESPONSE] OR
     [MCP_FORCE_JSON_RESPONSE] env flags (truthy semantics matching
-    the local env parser).  Either flag forces every response to
-    plain JSON regardless of Accept negotiation. *)
+    {!request_force_json_response}).  Either flag forces every
+    response to plain JSON regardless of Accept negotiation. *)
 
 (** {1 Header builders} *)
 

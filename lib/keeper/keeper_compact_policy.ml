@@ -317,24 +317,32 @@ let compact_if_needed_typed
     let new_ratio = context_ratio compacted_ctx in
     let new_msg_count = message_count compacted_ctx in
     let new_tok_count = token_count compacted_ctx in
-    (* [max 0 (pre - post)] silently floors the negative-delta case to
-       zero. Surface that case as a counter so operators can detect
-       divergence between the pre/post token (or message) measurement
-       sources — without this signal, [saved_tokens=0] is ambiguous
-       between "no savings" and "post-recount exceeded pre-estimate".
-       The kind label is a closed 2-value vocabulary. *)
-    if tok_count < new_tok_count then
-      Prometheus.inc_counter
-        Keeper_metrics.metric_keeper_compaction_negative_savings
-        ~labels:[ ("keeper", meta.name); ("kind", "tokens") ]
-        ();
-    if msg_count < new_msg_count then
-      Prometheus.inc_counter
-        Keeper_metrics.metric_keeper_compaction_negative_savings
-        ~labels:[ ("keeper", meta.name); ("kind", "messages") ]
-        ();
-    let saved_tokens = max 0 (tok_count - new_tok_count) in
-    let saved_messages = max 0 (msg_count - new_msg_count) in
+    (* RFC-0149 §3.2 PR-2 — the silent [max 0 (pre - post)] floor and
+       the companion [metric_keeper_compaction_negative_savings] counter
+       (a §1 telemetry-as-fix artefact) are replaced by a phantom-typed
+       [Token_count.saved] match.  The [`Divergent] arm carries the
+       overrun magnitude as a typed payload that surfaces on the
+       post-compact JSONL record below ([tokens_divergence] /
+       [messages_divergence]), so operators can detect estimator
+       drift without a free-floating Prometheus counter. *)
+    let saved_tokens, tokens_divergence =
+      match
+        Token_count.saved
+          ~pre:(Token_count.pre_estimate tok_count)
+          ~post:(Token_count.post_recount new_tok_count)
+      with
+      | `Saved n -> n, None
+      | `Divergent n -> 0, Some n
+    in
+    let saved_messages, messages_divergence =
+      match
+        Token_count.saved
+          ~pre:(Token_count.pre_estimate msg_count)
+          ~post:(Token_count.post_recount new_msg_count)
+      with
+      | `Saved n -> n, None
+      | `Divergent n -> 0, Some n
+    in
     Prometheus.inc_counter
       Keeper_metrics.metric_keeper_compactions
       ~labels:[ "keeper", meta.name ]
@@ -384,6 +392,14 @@ let compact_if_needed_typed
             ; "after_tokens", `Int new_tok_count
             ; "saved_messages", `Int saved_messages
             ; "saved_tokens", `Int saved_tokens
+            ; ( "tokens_divergence"
+              , match tokens_divergence with
+                | Some n -> `Int n
+                | None -> `Null )
+            ; ( "messages_divergence"
+              , match messages_divergence with
+                | Some n -> `Int n
+                | None -> `Null )
             ; ( "tool_pair_repair"
               , `Assoc
                   [ ( "downgraded_tool_uses"

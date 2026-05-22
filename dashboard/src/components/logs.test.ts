@@ -102,17 +102,17 @@ describe('log diagnostics', () => {
         seq: 3,
         level: 'ERROR',
         module: 'Keeper',
-        message: 'keeper_llm_bridge timeout',
+        message: 'keeper provider timeout',
         details: {
           failure_envelope: {
             surface: 'keeper_oas_bridge',
             entity_kind: 'oas_execution',
             entity_id: null,
-            cause_code: 'oas_timeout_budget',
+            cause_code: 'provider_timeout',
             severity: 'bad',
-            summary: 'OAS execution exceeded budget',
+            summary: 'Provider execution timed out',
             recoverability: 'operator_action_required',
-            operator_action: 'inspect_timeout_budget',
+            operator_action: 'inspect_provider_stream',
             evidence_ref: { timeout_sec: 300 },
           },
         },
@@ -135,7 +135,7 @@ describe('log diagnostics', () => {
     expect(summary.errors).toBe(1)
     expect(summary.warnings).toBe(1)
     expect(summary.failureEnvelopes).toBe(1)
-    expect(summary.topCauses).toContainEqual({ cause: 'oas_timeout_budget', count: 1 })
+    expect(summary.topCauses).toContainEqual({ cause: 'provider_timeout', count: 1 })
     expect(summary.topCauses).toHaveLength(1)
     expect(summary.topModules[0]).toEqual({ module: 'Keeper', count: 2 })
   })

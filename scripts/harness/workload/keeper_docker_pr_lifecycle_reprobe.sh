@@ -55,7 +55,7 @@ LIFECYCLE_MUTATION_MODE="split"
 PHASE_MODE="${PHASE_MODE:-both}"
 REVIEW_RESUME="${REVIEW_RESUME:-0}"
 REQUIRED_TOOLS_LEGACY="${REQUIRED_TOOLS:-}"
-CREATE_REQUIRED_TOOLS="${CREATE_REQUIRED_TOOLS:-${REQUIRED_TOOLS_LEGACY:-masc_web_search,keeper_bash,keeper_pr_create}}"
+CREATE_REQUIRED_TOOLS="${CREATE_REQUIRED_TOOLS:-${REQUIRED_TOOLS_LEGACY:-masc_web_search,keeper_bash,keeper_shell}}"
 REVIEW_REQUIRED_TOOLS="${REVIEW_REQUIRED_TOOLS:-${REQUIRED_TOOLS_LEGACY:-keeper_shell,keeper_pr_review_comment}}"
 MCP_URL="${MCP_URL:-http://127.0.0.1:8935/mcp}"
 MCP_TOKEN="${MASC_MCP_TOKEN:-}"
@@ -1359,26 +1359,28 @@ prompt_for_keeper_create() {
 EOF
 )"
     pr_step="$(cat <<EOF
-6. Create a draft PR from your fork branch with keeper_pr_create. The call must include
-   repo="$REPO_SLUG", head="$head_ref", base="main", draft=true, and cwd set to
-   the returned proof worktree path. Do not leave head/base empty and do not use
-   the base repo path if the proof branch lives in a separate worktree. Do not
-   mark ready, do not merge, do not add human-approved-ready.
+6. Create a draft PR from your fork branch with keeper_shell op=gh running
+   gh pr create. The command must include repo "$REPO_SLUG", head "$head_ref",
+   base "main", and cwd set to the returned proof worktree path. Do not leave
+   head/base empty and do not use the base repo path if the proof branch lives
+   in a separate worktree. Do not mark ready, do not merge, do not add
+   human-approved-ready.
 EOF
 )"
   else
     head_ref="$branch"
-    git_route_rule="- Do not run gh pr create, gh pr review, or other mutating GitHub commands through keeper_shell or keeper_bash."
+    git_route_rule="- Use keeper_shell op=gh for GitHub PR creation after the branch is pushed."
     push_step="$(cat <<EOF
 5. Commit and git push exactly branch $branch with keeper_bash. The tool result must show explicit Docker-backed route evidence such as via=docker, route_via=docker, via=brokered, or route_via=brokered.
 EOF
 )"
     pr_step="$(cat <<EOF
-6. Create a draft PR for that branch with keeper_pr_create. The call must include
-   repo="$REPO_SLUG", head="$head_ref", base="main", draft=true, and cwd set to
-   the returned proof worktree path. Do not leave head/base empty and do not use
-   the base repo path if the proof branch lives in a separate worktree. Do not
-   mark ready, do not merge, do not add human-approved-ready.
+6. Create a draft PR for that branch with keeper_shell op=gh running gh pr
+   create. The command must include repo "$REPO_SLUG", head "$head_ref", base
+   "main", and cwd set to the returned proof worktree path. Do not leave
+   head/base empty and do not use the base repo path if the proof branch lives
+   in a separate worktree. Do not mark ready, do not merge, do not add
+   human-approved-ready.
 EOF
 )"
   fi
@@ -1400,7 +1402,7 @@ Tool route rules:
 $git_route_rule
 - Do not use approval-requiring host code-write paths such as masc_code_write for this proof file.
 - If keeper_bash rejects mutating git as policy-blocked, stop and report the exact blocker instead of switching to host-local credentials.
-- Use keeper_pr_create for PR creation.
+- Use keeper_shell op=gh for PR creation.
 
 Required create lane:
 1. Use masc_web_search once for current external context before mutating. The
@@ -1442,7 +1444,7 @@ Safety rules:
 
 This prompt is sent with create-phase masc_keeper_msg.required_tools so the
 runtime records tool_surface_mismatch or missing_required_tool_use when
-masc_web_search/keeper_bash/keeper_pr_create are not visible or not used.
+masc_web_search/keeper_bash/keeper_shell are not visible or not used.
 EOF
 }
 
@@ -1710,7 +1712,7 @@ create_result_has_tool_evidence() {
 
   if ! jq -e '
       any(.result.tool_call_evidence[]?;
-        (.tool_name == "keeper_pr_create")
+        (.tool_name == "keeper_shell")
         and ((.outcome // "") == "ok")
         and (((.route_evidence.via // "") == "docker")
              or ((.route_evidence.via // "") == "brokered")
@@ -1744,7 +1746,7 @@ create_result_has_tool_evidence() {
     jq -r '
       [
         .result.tool_call_evidence[]?
-        | select(.tool_name == "keeper_pr_create" and ((.outcome // "") == "ok"))
+        | select(.tool_name == "keeper_shell" and ((.outcome // "") == "ok"))
         | .route_evidence.pr_url // empty
       ]
       | last // empty

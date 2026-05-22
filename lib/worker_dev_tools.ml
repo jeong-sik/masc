@@ -98,11 +98,8 @@ let command_blocked_hint ?allowed_commands name =
     | "curl" | "wget" ->
       " Use masc_web_fetch to fetch page content, or masc_web_search to find sources."
     | "gh" ->
-      " 'gh' is NOT available in the keeper sandbox. For pull-request work use \
-       keeper_pr_list / keeper_pr_status / keeper_pr_create / keeper_pr_review_read / \
-       keeper_pr_review_comment. For issues use masc_board_list / masc_board_post / \
-       masc_board_comment. For commits or branches just use 'git' directly — it is on \
-       the allowlist."
+      " Use keeper_shell op=gh for GitHub CLI work when a keeper task has repo \
+       context. Use git directly for repository/worktree/branch operations."
     | "docker"
     | "podman"
     | "kubectl"

@@ -247,8 +247,7 @@ let tools_for_gated_affordance = function
       "keeper_board_post"; "keeper_task_create"; "masc_add_task";
       "keeper_tasks_audit"; "keeper_board_cleanup" ]
   | Inspect_worktree_delta ->
-    [ "keeper_shell"; "keeper_bash"; "masc_code_shell"; "keeper_fs_edit";
-      "keeper_pr_create" ]
+    [ "keeper_shell"; "keeper_bash"; "masc_code_shell"; "keeper_fs_edit" ]
 
 let satisfying_tools_for_turn ~(turn_affordances : string list) ~(allowed_tool_names : string list)
   : string list
@@ -629,7 +628,7 @@ let preferred_tool_choice_for_required_tool_names
   | _ :: _ ->
     (* Use the provider-level "some tool is required" contract here, even
        for a single explicit required tool. Runtime MCP transports may return
-       names such as [mcp__masc__keeper_pr_create]; OAS exact-tool contracts
+       names such as [mcp__masc__keeper_shell]; OAS exact-tool contracts
        compare raw names before MASC can canonicalize them, so exact Tool(name)
        can reject a correct call. MASC still validates the specific required
        names after execution via [outstanding_required_tool_names]. *)
@@ -717,7 +716,6 @@ let tool_search_alias_entries =
   ; "keeper_task_submit_for_verification", "태스크 검증제출 리뷰요청 PR검토"
   ; "keeper_task_force_release", "태스크 강제해제 반환"
   ; "keeper_task_force_done", "태스크 강제완료"
-  ; "keeper_pr_create", "pr create pull request github draft 생성 풀리퀘스트 열기"
   ; "keeper_pr_review_read", "pr review pull request github diff comments reviews 읽기 검토"
   ; "keeper_pr_review_comment", "pr review pull request github comment approve request_changes 코멘트 승인 변경요청"
   ; "keeper_pr_review_reply", "pr review pull request github reply inline comment 답글 리뷰댓글"

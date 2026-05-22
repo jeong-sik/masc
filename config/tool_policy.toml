@@ -61,9 +61,9 @@ tools = ["keeper_fs_edit"]
 tools = ["keeper_library_search", "keeper_library_read"]
 
 [groups.github]
-# Dedicated PR helpers run keeper-scoped credential preflight before gh.
-# keeper_pr_create is draft-only; ready/merge flows remain gated elsewhere.
-tools = ["keeper_preflight_check", "keeper_pr_list", "keeper_pr_status", "keeper_pr_create"]
+# Read-only PR helpers run keeper-scoped credential preflight before gh.
+# PR creation is handled through the visible shell/GitHub CLI path.
+tools = ["keeper_preflight_check", "keeper_pr_list", "keeper_pr_status"]
 
 [groups.github_review]
 tools = ["keeper_pr_review_read", "keeper_pr_review_comment", "keeper_pr_review_reply"]

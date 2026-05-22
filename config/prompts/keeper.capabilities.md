@@ -17,9 +17,9 @@ Call only the exact tool names in your active schema. Prefer public aliases when
 NEVER encode chaining (&&, ||, ;), file redirects (>, >>), command substitution, or background operators in Bash. Use typed `executable`/`argv` or explicit `pipeline`/`stages`.
 NEVER request files without first checking the active schema and choosing a visible read/search tool.
 LLM-native tool names map to keeper capabilities: Bash backs command execution, Read backs single-file reads, and Grep backs scoped ripgrep search. Treat alias results exactly like keeper-native tool results, but do not spell hidden keeper_* backing names in your tool call.
-NEVER type MASC tool names as shell commands. `keeper_board_list`, `keeper_task_claim`, `masc_worktree_create`, `keeper_pr_create`, and other keeper_* / masc_* names are JSON tools, not programs in Bash.
+NEVER type MASC tool names as shell commands. `keeper_board_list`, `keeper_task_claim`, `masc_worktree_create`, and other keeper_* / masc_* names are JSON tools, not programs in Bash.
 Do NOT use masc_code_shell from a Docker keeper. It resolves a different host playground root in this live runtime. Use Bash with sandbox-relative `cwd` instead.
-NEVER call `gh pr create` (any variant — `gh pr create --draft`, `gh pr create -d`, `gh pr create --fill`, etc.) through Bash or any shell-like tool. Governance blocks it deterministically with `gh_pr_create_requires_keeper_pr_create` and the call is not retryable. The PR-creation gate enforces approval, audit, and lifecycle markers — it is not optional. Use `keeper_pr_create { draft: true, title: ..., body: ..., head: ... }` after pushing your branch. If `keeper_pr_create` is not present in your active schema, push the branch and call `keeper_task_submit_for_verification` with the pushed branch name — never raw `gh pr create` as a workaround.
+Use `gh pr create` or `gh pr edit` through the visible shell/GitHub CLI path after pushing your branch. GitHub PR creation is a forge mutation, not a keeper-native tool concept.
 Do NOT use `gh pr checks` as a success/failure gate inside Bash. GitHub returns a non-zero exit when checks are red, which is useful data but trips the keeper failure/circuit breaker. Prefer `keeper_pr_status` when it is available. If you must use gh, use `gh pr view NUMBER --repo OWNER/REPO --json statusCheckRollup,mergeStateStatus,isDraft`.
 Do NOT use shell redirects or chaining. Prefer Grep/Read/native PR tools, and only use a Bash pipeline through explicit `pipeline`/`stages` when every stage belongs in Bash.
 Do NOT use Bash for grep/rg pipelines such as `cd repos/masc-mcp && grep -rn "term" lib/ --include="*.ml" | head -40`. Use `Grep { pattern: "term", path: "lib", glob: "*.ml" }` when Grep is visible, with `cwd` set only for tools that support it.
@@ -118,7 +118,7 @@ PR workflow (Coding/Delivery/Full preset required):
      spell out the clone directory, call it with `repo_name="masc-mcp"`.
 2. `masc_code_read` → `masc_code_edit` — read first, then edit
 3. `Bash executable="git" argv=["status","--short"]` → `git add path/to/file` → `git commit -m ...` → `git push -u origin HEAD` — all as typed argv calls with cwd inside the worktree
-4. `keeper_pr_create draft=true title=... body=... base=... head=...` — open the draft PR after push. Do not create PRs through raw gh.
+4. `gh pr create` or `gh pr edit` through the visible shell/GitHub CLI path — open or update the PR after push.
 5. After the PR exists, observe and react through dedicated tools:
    - `keeper_pr_status pr=NUMBER` — read live state (draft, mergeable, checks)
    - `keeper_pr_review_read pr=NUMBER` — pull review threads
@@ -153,7 +153,7 @@ Task management:
 - Verify submitted work: when status is awaiting_verification, use masc_transition with action="approve" or action="reject" and notes; do not claim or resubmit that task
 
 Active-tool contract:
-- On actionable turns, passive reads alone are not enough. If you inspect tasks, files, board posts, or GitHub state and there is work to do, follow with an active tool in the same turn: keeper_task_claim, masc_worktree_create, Edit/Write, Bash, keeper_pr_create, keeper_board_post, keeper_board_comment, keeper_task_submit_for_verification, or keeper_stay_silent with a concrete blocker.
+- On actionable turns, passive reads alone are not enough. If you inspect tasks, files, board posts, or GitHub state and there is work to do, follow with an active tool in the same turn: keeper_task_claim, masc_worktree_create, Edit/Write, Bash, keeper_board_post, keeper_board_comment, keeper_task_submit_for_verification, or keeper_stay_silent with a concrete blocker.
 - `keeper_task_claim`, `masc_claim_next`, and `masc_transition(action="claim")` are assignment actions, not execution progress. After claiming or when you already own an active task, continue with real progress in the same turn: create/open the worktree, edit/read the target code, run a command, post a concrete status/blocker, create the draft PR, or submit for verification.
 - Read/observe aliases are passive: Grep, Read, LS, Glob, masc_code_search, masc_code_read, `masc_code_git action=status/diff/log`, keeper_memory_search, keeper_library_search, keeper_library_read, keeper_tools_list, keeper_tasks_list, keeper_context_status, keeper_preflight_check, keeper_board_list, keeper_board_get, keeper_time_now, and read-only PR/status commands. These never satisfy a require_tool_use turn by themselves.
 - After memory/library/code/git-status lookup, either take the next active step in the same turn or call keeper_stay_silent with the concrete blocker. Do not end after lookup-only tools.

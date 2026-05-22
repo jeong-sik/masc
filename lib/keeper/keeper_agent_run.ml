@@ -908,42 +908,14 @@ let run_turn
                          else tool_contract_status ()
                        in
                        acc.receipt_tool_contract_result <- contract_status;
-                       (* #10091: emit the labelled counter so dashboards
-                  can distinguish the [has_current_task=true]
-                  strict-gate path (#10031 kept this intentionally
-                  strict) from the [has_current_task=false] path
-                  (already relaxed to [Auto]).  The strict gate
-                  behaviour is unchanged — this is pure
-                  observability that lets the operator pinpoint
-                  which (keeper, contract_status) pairs are
-                  config-mismatched. *)
-                       Keeper_tool_disclosure.record_require_tool_use_violation
+                       Keeper_agent_run_contract_violation_log.record_passive
                          ~keeper_name:meta.name
                          ~has_current_task:(keeper_has_owned_active_task ())
-                         ~contract_status:
-                           (Keeper_execution_receipt
-                            .tool_contract_result_to_string contract_status);
-                       let signal_label =
-                         Keeper_contract_classifier.actionable_signal_label
-                           actionable_signal_kind
-                       in
-                       Log.Keeper.error
-                         "keeper:%s required tool contract violated (turn=%d, tools=%d, \
-                          signal=%s). Rejecting no-op/passive actionable turn. Reason: \
-                          %s"
-                         meta.name
-                         result.turns
-                         (List.length actual_keeper_tool_names)
-                         signal_label
-                         reason;
-                       Prometheus.inc_counter
-                         Keeper_metrics.metric_keeper_contract_violations
-                         ~labels:
-                           [ "keeper_name", meta.name
-                           ; "kind", "passive"
-                           ; "signal", signal_label
-                           ]
-                         ();
+                         ~contract_status
+                         ~actionable_signal_kind
+                         ~turns:result.turns
+                         ~actual_keeper_tool_names
+                         ~reason;
                        Error (contract_violation_error reason)
                      | Ok (), None ->
                        acc.receipt_tool_contract_result <- tool_contract_status ();
@@ -956,40 +928,15 @@ let run_turn
                          else tool_contract_status ()
                        in
                        acc.receipt_tool_contract_result <- contract_status;
-                       Keeper_tool_disclosure.record_require_tool_use_violation
+                       Keeper_agent_run_contract_violation_log.record_text_only
                          ~keeper_name:meta.name
                          ~has_current_task:(keeper_has_owned_active_task ())
-                         ~contract_status:
-                           (Keeper_execution_receipt
-                            .tool_contract_result_to_string contract_status);
-                       let contract_str =
-                         match effective_completion_contract with
-                         | Keeper_tool_disclosure.Allow_text_or_tool ->
-                           "Allow_text_or_tool"
-                         | Keeper_tool_disclosure.Require_tool_use -> "Require_tool_use"
-                       in
-                       let signal_label =
-                         Keeper_contract_classifier.actionable_signal_label
-                           actionable_signal_kind
-                       in
-                       Log.Keeper.error
-                         "keeper:%s required tool contract violated (turn=%d, tools=%d, \
-                          contract=%s, signal=%s). Rejecting text-only response. Reason: \
-                          %s"
-                         meta.name
-                         result.turns
-                         (List.length actual_keeper_tool_names)
-                         contract_str
-                         signal_label
-                         reason;
-                       Prometheus.inc_counter
-                         Keeper_metrics.metric_keeper_contract_violations
-                         ~labels:
-                           [ "keeper_name", meta.name
-                           ; "kind", "text_only"
-                           ; "signal", signal_label
-                           ]
-                         ();
+                         ~contract_status
+                         ~effective_completion_contract
+                         ~actionable_signal_kind
+                         ~turns:result.turns
+                         ~actual_keeper_tool_names
+                         ~reason;
                        Error (contract_violation_error reason)
                    in
                    let finalize_response_text raw_response_text =

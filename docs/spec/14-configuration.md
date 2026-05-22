@@ -101,9 +101,6 @@ resolved config root는 별도 탐색 규칙을 가진다: `MASC_CONFIG_DIR` -> 
 | `NEO4J_HTTP_URI` | string | `""` | Neo4j HTTP API URI |
 | `NEO4J_USER` | string | `"neo4j"` | Neo4j 사용자 |
 | `NEO4J_PASSWORD` | string | (필수) | Neo4j 비밀번호 |
-| `VOICE_MCP_HOST` | string | `"127.0.0.1"` | Legacy voice session fallback host. Prefer `MASC_BASE_PATH/.masc/voice_config.json` `session.endpoints`. |
-| `VOICE_MCP_PORT` | int | 8936 | Legacy voice session fallback port. Prefer `MASC_BASE_PATH/.masc/voice_config.json` `session.endpoints`. |
-
 **Voice Configuration** (`MASC_BASE_PATH/.masc/voice_config.json`):
 
 All voice paths resolve relative to `MASC_BASE_PATH/.masc/`. The config file

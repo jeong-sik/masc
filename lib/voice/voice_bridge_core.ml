@@ -8,7 +8,7 @@
     TTS Strategy (priority order):
     1. ElevenLabs API direct (ELEVENLABS_API_KEY)
     2. Railway proxy (ELEVENLABS_PROXY_URL)
-    3. Voice MCP session endpoint (HTTP /mcp, legacy VOICE_MCP_* fallback)
+    3. Voice MCP session endpoint (HTTP /mcp)
     4. text_fallback (silent)
 
     Eio Migration Notes:

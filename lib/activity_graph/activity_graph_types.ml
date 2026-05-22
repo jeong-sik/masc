@@ -50,19 +50,6 @@ let node_status_of_string_opt = function
   | "" -> Some Unset
   | _ -> None
 
-(** Back-compat wrapper: unknown wire still falls back to [Observed] but a
-    [Log.Misc.warn] is emitted so producer/consumer drift surfaces in
-    operator logs instead of silently misclassifying the node. The previous
-    `_ -> Observed` arm was explicitly documented as "fail-open"; that
-    posture is preserved here, just observable. See #8777. *)
-let node_status_of_string s =
-  match node_status_of_string_opt s with
-  | Some v -> v
-  | None ->
-      Log.Misc.warn
-        "activity_graph: unknown node_status wire %S -> Observed (drift; see #8777)" s;
-      Observed
-
 (** Span status: separate from node_status (different lifecycle).
     @since 7182 *)
 type span_status =
@@ -90,19 +77,6 @@ let span_status_of_string_opt = function
   | "stopped" -> Some Span_stopped
   | "ended" -> Some Span_ended
   | _ -> None
-
-(** Back-compat wrapper: unknown wire still falls back to [Span_ended]
-    (the legacy permissive default), but a [Log.Misc.warn] is emitted so
-    producer/consumer drift surfaces in operator logs instead of silently
-    misclassifying the span as terminal. Same template as
-    [node_status_of_string] (#8779). See #8605. *)
-let span_status_of_string s =
-  match span_status_of_string_opt s with
-  | Some v -> v
-  | None ->
-      Log.Misc.warn
-        "activity_graph: unknown span_status wire %S -> Span_ended (drift; see #8605)" s;
-      Span_ended
 
 type entity_ref = {
   kind : string;

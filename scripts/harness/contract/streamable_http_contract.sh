@@ -156,7 +156,7 @@ header_value() {
   ' "$header_file"
 }
 
-echo "[1/8] json-only Accept is rejected"
+echo "[1/7] json-only Accept is rejected"
 wait_for_mcp_ready
 h1="$tmpdir/json-only-accept.headers"
 b1="$tmpdir/json-only-accept.body"
@@ -176,7 +176,7 @@ if ! grep -qi "Invalid Accept header" "$b1"; then
   exit 1
 fi
 
-echo "[2/8] streamable Accept success"
+echo "[2/7] streamable Accept success"
 h2="$tmpdir/ok.headers"
 b2="$tmpdir/ok.body"
 post_with_accept "application/json, text/event-stream" \
@@ -197,7 +197,7 @@ if [ -z "$SESSION_ID" ] || [ -z "$PROTOCOL_VERSION" ]; then
   exit 1
 fi
 
-echo "[3/8] follow-up POST accepts missing protocol header via session continuity"
+echo "[3/7] follow-up POST accepts missing protocol header via session continuity"
 h3="$tmpdir/missing-protocol.headers"
 b3="$tmpdir/missing-protocol.body"
 post_with_session "$SESSION_ID" "" \
@@ -211,7 +211,7 @@ if [ "$code3" != "200" ]; then
   exit 1
 fi
 
-echo "[4/8] follow-up POST rejects mismatched protocol header"
+echo "[4/7] follow-up POST rejects mismatched protocol header"
 h4="$tmpdir/mismatch-protocol.headers"
 b4="$tmpdir/mismatch-protocol.body"
 post_with_session "$SESSION_ID" "2025-03-26" \
@@ -230,7 +230,7 @@ if ! grep -qi "mismatch" "$b4"; then
   exit 1
 fi
 
-echo "[5/8] follow-up POST succeeds with matching protocol header"
+echo "[5/7] follow-up POST succeeds with matching protocol header"
 h5="$tmpdir/match-protocol.headers"
 b5="$tmpdir/match-protocol.body"
 post_with_session "$SESSION_ID" "$PROTOCOL_VERSION" \
@@ -244,7 +244,7 @@ if [ "$code5" != "200" ]; then
   exit 1
 fi
 
-echo "[6/8] follow-up GET accepts missing protocol header via session continuity"
+echo "[6/7] follow-up GET accepts missing protocol header via session continuity"
 h6="$tmpdir/get-missing-protocol.headers"
 b6="$tmpdir/get-missing-protocol.body"
 get_with_session "$SESSION_ID" "" "$h6" "$b6"
@@ -256,7 +256,7 @@ if [ "$code6" != "200" ]; then
   exit 1
 fi
 
-echo "[7/8] follow-up DELETE accepts missing protocol header via session continuity"
+echo "[7/7] follow-up DELETE accepts missing protocol header via session continuity"
 h7="$tmpdir/delete-missing-protocol.headers"
 b7="$tmpdir/delete-missing-protocol.body"
 delete_with_session "$SESSION_ID" "" "$h7" "$b7"
@@ -267,29 +267,5 @@ if [ "$code7" != "200" ] && [ "$code7" != "204" ]; then
   cat "$b7"
   exit 1
 fi
-
-echo "[8/8] /sse deprecation headers"
-h8="$tmpdir/sse.headers"
-curl -sS -D "$h8" -o /dev/null --max-time 1 \
-  -H 'Accept: text/event-stream' \
-  "$BASE_URL/sse" || true
-require_header_contains "$h8" "Deprecation" "true"
-require_header_contains "$h8" "Link" "</mcp>; rel=\"successor-version\""
-
-echo "[legacy] /messages deprecation headers"
-h9="$tmpdir/messages.headers"
-b9="$tmpdir/messages.body"
-curl -sS -D "$h9" -o "$b9" \
-  -X POST "$BASE_URL/messages" \
-  -H 'Content-Type: application/json' \
-  -d '{"jsonrpc":"2.0","id":9,"method":"ping"}'
-code9="$(status_code "$h9")"
-if [ "$code9" != "400" ]; then
-  echo "FAIL: expected 400 for missing session_id on /messages, got $code9"
-  cat "$h9"
-  cat "$b9"
-  exit 1
-fi
-require_header_contains "$h9" "Deprecation" "true"
 
 echo "PASS: streamable_http contract harness"

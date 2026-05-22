@@ -188,13 +188,10 @@ end
 
 module Voice = struct
   (** Default Voice MCP server host *)
-  let default_host =
-    get_string ~default:Masc_network_defaults.masc_http_default_host
-      "VOICE_MCP_HOST"
+  let default_host = Masc_network_defaults.masc_http_default_host
 
   (** Default Voice MCP server port *)
-  let default_port =
-    get_int ~default:8936 "VOICE_MCP_PORT"
+  let default_port = 8936
 
   (** Voice MCP HTTP request budget (seconds).
 

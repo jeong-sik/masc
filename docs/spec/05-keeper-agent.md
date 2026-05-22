@@ -282,7 +282,7 @@ Triage -> BudgetCheck -> (ModelDeliberation | DeterministicBaseline) -> Execute 
 
 1. `keeper_keepalive` heartbeat tick
 2. `world_observation.observe` -> 세계 상태 수집
-3. `unified_turn.run_unified_turn` -> `build_prompt` + `run_turn`
+3. `unified_turn.run_keeper_cycle` -> `build_prompt` + `run_turn`
 4. `update_metrics_from_result` -> keeper_meta 갱신
 5. `write_meta` -> 메타데이터 영속화
 

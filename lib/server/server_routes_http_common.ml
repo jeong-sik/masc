@@ -69,9 +69,6 @@ let get_cookie_value = Server_mcp_transport_http.get_cookie_value
 
 let get_session_id_any = Server_mcp_transport_http.get_session_id_any
 
-let legacy_messages_endpoint_url =
-  Server_mcp_transport_http.legacy_messages_endpoint_url
-
 let get_protocol_version = Server_mcp_transport_http.get_protocol_version
 
 let get_protocol_version_for_session =
@@ -161,9 +158,6 @@ let request_force_json_response =
 
 let classify_mcp_accept = Server_mcp_transport_http.classify_mcp_accept
 
-let legacy_transport_deprecation_headers =
-  Server_mcp_transport_http.legacy_transport_deprecation_headers
-
 let force_json_response = Server_mcp_transport_http.force_json_response
 
 let get_last_event_id = Server_mcp_transport_http.get_last_event_id
@@ -239,18 +233,14 @@ let stop_sse_session = Server_mcp_transport_http.stop_sse_session
 let close_all_sse_connections =
   Server_mcp_transport_http.close_all_sse_connections
 
-let handle_get_mcp ?legacy_messages_endpoint
-    ?(profile = Server_mcp_transport_http.Full) ?sse_kind request reqd =
+let handle_get_mcp ?(profile = Server_mcp_transport_http.Full) ?sse_kind
+    request reqd =
   Server_mcp_transport_http.handle_get_mcp ~deps:(mcp_transport_http_deps ())
-    ?legacy_messages_endpoint ~profile ?sse_kind request reqd
+    ~profile ?sse_kind request reqd
 
 let handle_get_operator_mcp request reqd =
   Server_mcp_transport_http.handle_get_operator_mcp
     ~deps:(mcp_transport_http_deps ()) request reqd
-
-let handle_post_messages request reqd =
-  Server_mcp_transport_http.handle_post_messages ~deps:(mcp_transport_http_deps ())
-    request reqd
 
 let handle_post_mcp ?(profile = Server_mcp_transport_http.Full) request reqd =
   Server_mcp_transport_http.handle_post_mcp ~deps:(mcp_transport_http_deps ())

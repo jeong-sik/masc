@@ -309,6 +309,3 @@ val unified_turn_decision :
 
 val should_run_keeper_cycle :
   meta:Keeper_types.keeper_meta -> world_observation -> bool
-
-val should_run_unified_turn :
-  meta:Keeper_types.keeper_meta -> world_observation -> bool

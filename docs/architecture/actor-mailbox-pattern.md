@@ -79,7 +79,7 @@ producer fiber ─── Stream.add ──▶  [bounded mailbox]
 ## Why this is not a "let's actor-ize the keeper FSMs" plan
 
 The 5 keeper sub-FSMs (KSM/KTC/KDP/KCL/KMC) currently couple via
-synchronous direct calls inside `Keeper_unified_turn.run_unified_turn`
+synchronous direct calls inside `Keeper_unified_turn.run_keeper_cycle`
 (see PR-H test docs and `docs/keeper-fsm-graph.dot`). Refactoring all
 five into mailbox actors is a multi-day effort whose benefit hinges on
 hypothetical data — frequency of cross-FSM communication, contention

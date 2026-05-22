@@ -13,11 +13,10 @@
     [find_property] / [assoc_members] / [int_member],
     [schema_type] / [label_or_default],
     [validate_json_value] / [validate_input_json],
-    [param_type_of_schema_opt] / [param_type_of_schema] /
-    [tool_params_of_input_schema], and [build_operation_arguments])
-    are hidden — callers consume the typed records, the lookup
-    helpers, the canonical operation list, and the resolver entry
-    points only. *)
+    [param_type_of_schema_opt] / [tool_params_of_input_schema], and
+    [build_operation_arguments]) are hidden — callers consume the
+    typed records, the lookup helpers, the canonical operation list,
+    and the resolver entry points only. *)
 
 (** {1 Typed binding} *)
 
@@ -93,10 +92,6 @@ val param_type_of_schema_opt :
     documented vocabulary ([string] / [integer] / [number] /
     [boolean] / [array] / [object]); [None] for non-vocabulary
     values like [null] / typos / tuple variants (#8832). *)
-
-val param_type_of_schema : Yojson.Safe.t -> Agent_sdk.Types.param_type
-(** Permissive variant of {!param_type_of_schema_opt} that defaults
-    unknown / missing types to [String]. *)
 
 (** {1 Discovery payload} *)
 

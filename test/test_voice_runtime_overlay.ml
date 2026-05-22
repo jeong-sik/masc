@@ -51,6 +51,19 @@ let test_default_agent_voices_preserve_runtime_defaults () =
     (Voice.default_agent_voices ())
 ;;
 
+let test_voice_mcp_env_no_longer_overrides_default_session_url () =
+  with_env "MASC_HTTP_BASE_URL" None (fun () ->
+    with_env "MASC_HOST" None (fun () ->
+      with_env "MASC_HTTP_PORT" None (fun () ->
+        with_env "VOICE_MCP_HOST" (Some "voice.example.test") (fun () ->
+          with_env "VOICE_MCP_PORT" (Some "9999") (fun () ->
+            check
+              string
+              "voice env ignored"
+              "http://127.0.0.1:8935/mcp"
+              (Voice.default_session_url ~path:"/mcp"))))))
+;;
+
 let test_stt_request_elevenlabs_direct () =
   let endpoint : Masc_mcp.Voice_config.endpoint =
     { id = "test-stt"
@@ -159,6 +172,10 @@ let () =
             "default agent voices preserve runtime defaults"
             `Quick
             test_default_agent_voices_preserve_runtime_defaults
+        ; test_case
+            "voice mcp env no longer overrides default session url"
+            `Quick
+            test_voice_mcp_env_no_longer_overrides_default_session_url
         ] )
     ; ( "stt"
       , [ test_case

@@ -94,8 +94,6 @@ val get_session_id_any : Httpun.Request.t -> string option
 val get_protocol_version : Httpun.Request.t -> string
 val get_protocol_version_for_session :
   ?session_id:string -> Httpun.Request.t -> string
-val legacy_messages_endpoint_url :
-  Httpun.Request.t -> string -> string
 
 (** {1 Server state} *)
 
@@ -123,8 +121,6 @@ val request_force_json_response : Httpun.Request.t -> bool
 val classify_mcp_accept :
   Httpun.Request.t ->
   Mcp_transport_protocol.Http_negotiation.accept_mode
-val legacy_transport_deprecation_headers :
-  (string * string) list
 val force_json_response : bool
 val get_last_event_id : Httpun.Request.t -> int option
 
@@ -145,7 +141,6 @@ val close_all_sse_connections : unit -> unit
 (** {1 MCP HTTP route handlers} *)
 
 val handle_get_mcp :
-  ?legacy_messages_endpoint:(string -> string) ->
   ?profile:Server_mcp_transport_http.tool_profile ->
   ?sse_kind:Sse.session_kind ->
   Httpun.Request.t ->
@@ -153,9 +148,6 @@ val handle_get_mcp :
   unit
 
 val handle_get_operator_mcp :
-  Httpun.Request.t -> Httpun.Reqd.t -> unit
-
-val handle_post_messages :
   Httpun.Request.t -> Httpun.Reqd.t -> unit
 
 val handle_post_mcp :

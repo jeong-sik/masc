@@ -863,17 +863,9 @@ let run_turn
                    let actionable_tool_contract_violation_reason =
                      actionable_contract.violation_reason
                    in
-                   let contract_violation_error reason =
-                     Agent_sdk.Error.Agent
-                       (Agent_sdk.Error.CompletionContractViolation
-                          { contract = Agent_sdk.Completion_contract_id.Require_tool_use
-                          ; reason
-                          ; violation_detail = None
-                          })
-                   in
                    let tool_contract_status ()
                        : Keeper_execution_receipt.tool_contract_result =
-                     tool_contract_result_for_observed_tools
+                     Contract_helpers.observed_tool_contract_status
                        ~required_tool_names:acc.tool_surface.required_tool_names
                        ~missing_visible_required:
                          acc.tool_surface.missing_required_tool_names
@@ -913,7 +905,8 @@ let run_turn
                          ~turns:result.turns
                          ~actual_keeper_tool_names
                          ~reason;
-                       Error (contract_violation_error reason)
+                       Error
+                         (Contract_helpers.completion_contract_violation_error reason)
                      | Ok (), None ->
                        acc.receipt_tool_contract_result <- tool_contract_status ();
                        Ok (`Provider_text text)
@@ -934,7 +927,8 @@ let run_turn
                          ~turns:result.turns
                          ~actual_keeper_tool_names
                          ~reason;
-                       Error (contract_violation_error reason)
+                       Error
+                         (Contract_helpers.completion_contract_violation_error reason)
                    in
                    let finalize_response_text raw_response_text =
                      let stop_reason_str =

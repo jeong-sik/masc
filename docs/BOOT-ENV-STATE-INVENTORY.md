@@ -361,7 +361,6 @@ Notes:
   Discord bot. When the bot uses relative paths, resolve them against the same
   `MASC_BASE_PATH` as the server. Operational setup and verification steps live
   in `sidecars/discord-bot/README.md`.
-- `VOICE_MCP_HOST` and `VOICE_MCP_PORT` remain legacy environment fallbacks.
 - All voice paths resolve relative to `MASC_BASE_PATH/.masc/`.
   `voice_config.json` is discovered at `<runtime_root>/voice_config.json`
   where `<runtime_root>` = `MASC_BASE_PATH/.masc/`.
@@ -595,8 +594,6 @@ MASC_ZOMBIE_CLEANUP_INTERVAL_SEC
 MASC_ZOMBIE_THRESHOLD_SEC
 OLLAMA_DEFAULT_MODEL
 OLLAMA_SERVER_URL
-VOICE_MCP_HOST
-VOICE_MCP_PORT
 ZAI_BASE_URL
 ```
 
@@ -731,5 +728,5 @@ To regenerate the inventories:
 ```bash
 rg -oN '"MASC_[A-Z0-9_]+"' lib/config/env_config_core.ml lib/config/env_config_runtime.ml lib/config/env_config_governance.ml lib/config/env_config_keeper.ml | tr -d '"' | sort -u
 rg -oN '"MASC_[A-Z0-9_]+"' lib bin | tr -d '"' | sort -u
-rg -oN '"(LLAMA_[A-Z0-9_]+|OLLAMA_[A-Z0-9_]+|VOICE_MCP_[A-Z0-9_]+|HOME|DUNE_SOURCEROOT)"' lib bin | tr -d '"' | sort -u
+rg -oN '"(LLAMA_[A-Z0-9_]+|OLLAMA_[A-Z0-9_]+|HOME|DUNE_SOURCEROOT)"' lib bin | tr -d '"' | sort -u
 ```

@@ -4,9 +4,7 @@
     - the strict [_opt] variant returns [Some] only for documented
       JSON Schema vocabulary,
     - unknown types (e.g. "null", future JSON Schema 2020-12 keywords)
-      return [None] (no silent permissive default),
-    - the back-compat wrapper preserves the legacy [String] fallback so
-      existing tool registrations see no behaviour change. *)
+      return [None] (no silent permissive default). *)
 
 open Alcotest
 
@@ -58,17 +56,6 @@ let test_unknown_types_return_none () =
     None
     (Contract.param_type_of_schema_opt (schema_with_type "tuple"))
 
-let test_wrapper_preserves_legacy_default () =
-  (* Back-compat: unknown type still falls back to String (with a warn
-     line going to the log). *)
-  let open Agent_sdk.Types in
-  check param_type_testable "unknown type -> String legacy"
-    String
-    (Contract.param_type_of_schema (schema_with_type "null"));
-  check param_type_testable "known type unchanged"
-    Integer
-    (Contract.param_type_of_schema (schema_with_type "integer"))
-
 let test_no_type_field_falls_through_schema_type () =
   (* schema_type returns "object" when no "type" field but properties
      exist; "string" otherwise. The strict classifier should still hit
@@ -95,10 +82,5 @@ let () =
             test_unknown_types_return_none;
           test_case "no type field still resolves via schema_type" `Quick
             test_no_type_field_falls_through_schema_type;
-        ] );
-      ( "back-compat wrapper",
-        [
-          test_case "wrapper preserves legacy String default" `Quick
-            test_wrapper_preserves_legacy_default;
         ] );
     ]

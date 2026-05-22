@@ -21,7 +21,7 @@ implementation_prs: [16604, 16624, 16643]
 
 ### 1.1 현재 상태
 
-`lib/keeper/keeper_unified_turn.ml` 은 `OAS Agent.run()` 경유 keeper turn 의 *단일 진입점* (3-path dispatcher 통합 후 RFC-? 산물). 1943 LOC 중 top-level let 정의는 단 2개 — `run_keeper_cycle` (L22-1941) + alias `run_unified_turn = run_keeper_cycle` (L1943).
+`lib/keeper/keeper_unified_turn.ml` 은 `OAS Agent.run()` 경유 keeper turn 의 *단일 진입점* (3-path dispatcher 통합 후 RFC-? 산물). Public entrypoint 는 `run_keeper_cycle` 이다.
 
 interface (`.mli`, 319 LOC) 의 30+ surface 는 모두 *5 sub-module 가 정의* 하고 `keeper_unified_turn.ml` 이 `include` 로 re-export:
 
@@ -225,7 +225,7 @@ Phase Gate 추출은 *순수 mechanical* — 동일 code path 가 다른 module 
 
 ### 5.2 Test coverage gap
 
-mli 의 *"Exposed for regression tests"* 주석에 대응하는 직접 test 가 현재 *없거나 indirect* (`run_unified_turn` 통한 transitive). 본 RFC 시작 *전* 에 *baseline test 보강* 가 별도 PR (PR-0) 으로 정당화 가능. PR-1 는 *behavior preservation* 만, *new test* 는 PR-1 includes 또는 PR-0.
+mli 의 *"Exposed for regression tests"* 주석에 대응하는 직접 test 가 현재 *없거나 indirect* (`run_keeper_cycle` 통한 transitive). 본 RFC 시작 *전* 에 *baseline test 보강* 가 별도 PR (PR-0) 으로 정당화 가능. PR-1 는 *behavior preservation* 만, *new test* 는 PR-1 includes 또는 PR-0.
 
 ### 5.3 Sub-RFC drift
 

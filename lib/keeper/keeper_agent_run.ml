@@ -121,6 +121,7 @@ let run_turn
       ()
   : (run_result, Agent_sdk.Error.sdk_error) result
   =
+  (* Section 1: Setup — sanitize input, build context, compose prompt. *)
   let user_message = Keeper_run_prompt.sanitize_user_message user_message in
   Masc_runtime_events.emit_turn_start ();
   Memory_hooks.clear_last_memory_injection meta.agent_name;
@@ -386,6 +387,7 @@ let run_turn
            config)
       ()
   in
+  (* Section 2: Tool surface — select tools, compute surface, validate contracts. *)
   match setup with
   | Error e -> Error e
   | Ok s ->
@@ -614,6 +616,7 @@ let run_turn
          ~start_turn_count
          ~max_context
          ~pre_dispatch_compacted;
+       (* Section 3: Dispatch — call Keeper_turn_driver.run_named / Agent.run. *)
        let turn_result =
          match pre_dispatch_checkpoint_error with
          | Some err -> Error err
@@ -750,7 +753,8 @@ let run_turn
            Without this, read_continuity_summary finds no [STATE] in the
            checkpoint messages and returns empty — causing keepers to lose
            context across turns.  See #5431. *)
-                 (* RFC-MASC-004: AfterTurn hooks flush incrementally during
+                 (* Section 4: Result processing — parse response, handle tool calls, validate contracts. *)
+                (* RFC-MASC-004: AfterTurn hooks flush incrementally during
           Agent.run. Post-run episode creation requires an explicit
           flush_incremental call since AfterTurn already fired. *)
                  let text = Agent_sdk.Types.text_of_content result.response.content in
@@ -1201,7 +1205,8 @@ let run_turn
                      (* Save checkpoint after extracting the replay snapshot so the
                  persisted checkpoint carries scrubbed assistant text plus
                  structured replay metadata on the last assistant message. *)
-                     let saved_checkpoint_result =
+                     (* Section 5: Persistence — save checkpoint, write execution receipt. *)
+                    let saved_checkpoint_result =
                        match result.checkpoint with
                        | Some checkpoint ->
                          let patched =
@@ -1661,6 +1666,7 @@ let run_turn
          ~meta
          ~acc
          ();
+       (* Section 6: Finalization — assemble final result, emit manifest, return. *)
        let final_result =
          match turn_result, receipt_append_outcome with
          | Error _, _ ->

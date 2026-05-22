@@ -178,7 +178,7 @@ let test_inject_agent_name_adds_internal_actor_when_missing () =
   check (option int) "keeps other args" (Some 7)
     (member "days" args |> to_int_option)
 
-let test_inject_agent_name_preserves_legacy_target_by_default () =
+let test_inject_agent_name_preserves_tool_target_by_default () =
   let body =
     {|{"jsonrpc":"2.0","method":"tools/call","params":{"name":"masc_agent_fitness","arguments":{"agent_name":"target-keeper","days":7}},"id":1}|}
   in
@@ -189,7 +189,7 @@ let test_inject_agent_name_preserves_legacy_target_by_default () =
   let open Yojson.Safe.Util in
   check (option string) "does not add _agent_name" None
     (member "_agent_name" args |> to_string_option);
-  check (option string) "keeps legacy agent_name" (Some "target-keeper")
+  check (option string) "keeps tool target agent_name" (Some "target-keeper")
     (member "agent_name" args |> to_string_option)
 
 let test_inject_agent_name_rewrites_internal_actor_only () =
@@ -386,8 +386,8 @@ let () =
     "inject_agent_name", [
       test_case "adds internal actor when missing" `Quick
         test_inject_agent_name_adds_internal_actor_when_missing;
-      test_case "preserves legacy target by default" `Quick
-        test_inject_agent_name_preserves_legacy_target_by_default;
+      test_case "preserves tool target by default" `Quick
+        test_inject_agent_name_preserves_tool_target_by_default;
       test_case "rewrite_existing only rewrites _agent_name" `Quick
         test_inject_agent_name_rewrites_internal_actor_only;
       test_case "reducer skips absent actor" `Quick

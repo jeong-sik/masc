@@ -4,8 +4,8 @@
     must be overwritten. The legacy argument-scoped [token] is also removed
     when HTTP auth is present so stale MCP bodies cannot override the
     transport token; without HTTP auth, caller identity resolution ignores the
-    argument token. Legacy [agent_name] is left untouched because some tools use
-    it as a domain argument rather than caller identity. *)
+    argument token. Tool-domain [agent_name] is left untouched because some
+    tools use it as a target argument rather than caller identity. *)
 let inject_agent_name_into_body ?(rewrite_existing = false) ?(strip_token = false)
     ~agent_name body_str =
   try
@@ -26,7 +26,7 @@ let inject_agent_name_into_body ?(rewrite_existing = false) ?(strip_token = fals
               else
                 Some trimmed)
         in
-        let existing_legacy_agent =
+        let existing_tool_agent_name =
           Option.bind
             (member "agent_name" args |> to_string_option)
             (fun value ->
@@ -56,7 +56,7 @@ let inject_agent_name_into_body ?(rewrite_existing = false) ?(strip_token = fals
               let should_inject =
                 rewrite_existing
                 || (Option.is_none existing_agent
-                   && Option.is_none existing_legacy_agent)
+                   && Option.is_none existing_tool_agent_name)
               in
               if should_inject then
                 `Assoc (("_agent_name", `String agent_name) :: normalized_fields)

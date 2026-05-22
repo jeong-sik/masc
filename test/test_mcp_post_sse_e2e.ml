@@ -402,12 +402,12 @@ let rec join_until_ready ~port ~retries_left =
       join_until_ready ~port ~retries_left:(retries - 1)
   | _ -> result
 
-let test_post_tools_call_preserves_explicit_legacy_agent_name () =
+let test_post_tools_call_preserves_explicit_tool_agent_name () =
   with_server @@ fun ~port ->
   let result = join_until_ready ~port ~retries_left:40 in
-  require_http_ok "legacy agent_name preservation tools/call" result;
+  require_http_ok "tool agent_name preservation tools/call" result;
   check int "curl exits cleanly" 0 result.curl_exit;
-  let json = parse_json_body "legacy agent_name preservation tools/call" result in
+  let json = parse_json_body "tool agent_name preservation tools/call" result in
   check bool "json-rpc error absent" true (json |> U.member "error" = `Null);
   check bool "tool succeeded" false
     (json |> U.member "result" |> U.member "isError" |> U.to_bool);
@@ -415,9 +415,9 @@ let test_post_tools_call_preserves_explicit_legacy_agent_name () =
     json |> U.member "result" |> U.member "content" |> U.index 0
     |> U.member "text" |> U.to_string
   in
-  check bool "explicit legacy agent_name preserved" true
+  check bool "explicit tool agent_name preserved" true
     (contains_substr "Type: gemini" text);
-  check bool "header actor not injected over explicit legacy agent_name" false
+  check bool "header actor not used as tool target agent_name" false
     (contains_substr "Type: dashboard-header-actor" text)
 
 let () =
@@ -427,7 +427,7 @@ let () =
         [
           test_case "post tools/call streams sse framing" `Slow
             test_post_tools_call_streams_sse_framing;
-          test_case "post tools/call preserves explicit legacy agent_name"
-            `Slow test_post_tools_call_preserves_explicit_legacy_agent_name;
+          test_case "post tools/call preserves explicit tool agent_name"
+            `Slow test_post_tools_call_preserves_explicit_tool_agent_name;
         ] );
     ]

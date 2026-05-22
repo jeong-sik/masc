@@ -29,7 +29,7 @@ module Float = Stdlib.Float
 open Masc_domain
 open Tool_args
 
-let masc_code_search_name = Tool_name.Operation.to_string Tool_name.Operation.Code_search
+let masc_code_search_name = Tool_name.Masc.to_string Tool_name.Masc.Code_search
 
 (* Context required by code tools *)
 type context = {

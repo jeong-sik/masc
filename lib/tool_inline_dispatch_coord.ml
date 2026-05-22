@@ -23,7 +23,7 @@ module Float = Stdlib.Float
 
 open Tool_inline_dispatch_types
 
-let masc_add_task_name = Tool_name.Operation.to_string Tool_name.Operation.Add_task
+let masc_add_task_name = Tool_name.Masc.to_string Tool_name.Masc.Add_task
 
 (** Argument extraction helpers bound to ctx.arguments. *)
 let arg_get_string ctx key default =

@@ -21,9 +21,9 @@ module Float = Stdlib.Float
 
     @since God file decomposition — extracted from tool_task.ml *)
 
-let masc_add_task_name = Tool_name.Operation.to_string Tool_name.Operation.Add_task
+let masc_add_task_name = Tool_name.Masc.to_string Tool_name.Masc.Add_task
 let masc_code_git_name = Tool_name.Operation.to_string Tool_name.Operation.Code_git
-let masc_claim_next_name = Tool_name.Operation.to_string Tool_name.Operation.Claim_next
+let masc_claim_next_name = Tool_name.Masc.to_string Tool_name.Masc.Claim_next
 
 let schemas : Masc_domain.tool_schema list = [
   {

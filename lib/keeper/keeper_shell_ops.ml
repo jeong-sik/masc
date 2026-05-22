@@ -1179,16 +1179,20 @@ let handle_keeper_shell
         let canonical_cmd_str =
           Keeper_gh_shared.render_simple_gh_command parsed_cmd
         in
-        (* Reversibility gate (Thariq / Anthropic auto-mode principle):
-           - R0 read / R1 reversible mutation: allowed; R1 is audit-logged.
-           - R2 irreversible: rejected with a structured-tool hint so the
-             LLM can self-recover toward an operator-approval path without
-             a second round-trip. *)
-        let reversibility =
-          Worker_dev_tools.classify_gh_reversibility canonical_cmd_str
+        (* RFC-0160 S3: risk classification via IR-based Shell_ir_risk
+           rather than string-based classify_gh_reversibility. *)
+        let gh_classify_ir =
+          Keeper_gh_shared.gh_simple_command_to_shell_ir
+            ~sandbox:(Masc_exec.Sandbox_target.host ())
+            parsed_cmd
         in
+        let gh_risk_envelope =
+          Masc_exec.Shell_ir_risk.classify
+            (Masc_exec.Shell_ir_risk.undecided gh_classify_ir)
+        in
+        let reversibility = gh_risk_envelope.Masc_exec.Shell_ir_risk.risk in
         let rev_tag =
-          Worker_dev_tools.string_of_gh_reversibility reversibility
+          Masc_exec.Shell_ir_risk.string_of_risk_class reversibility
         in
         let gh_cmd_display cmd =
           Printf.sprintf "gh %s"
@@ -1212,7 +1216,7 @@ let handle_keeper_shell
         in
         let run_gh_command ~display_command ~parsed_command ~cwd
             ~(ctx : Keeper_shell_gh_context.gh_repo_context option) =
-          if reversibility = Worker_dev_tools.R1_Reversible then
+          if reversibility = Masc_exec.Shell_ir_risk.R1_Reversible_mutation then
             Log.Keeper.info
               "gh_audit: keeper=%s reversibility=R1 cwd=%s cmd=%s"
               meta.name cwd display_command;
@@ -1348,7 +1352,7 @@ let handle_keeper_shell
               gh_base ~command:display_command ~ok ~cwd hinted_fields
         in
         (match reversibility with
-         | Worker_dev_tools.R2_Irreversible ->
+         | Masc_exec.Shell_ir_risk.R2_Irreversible ->
            let hint =
              Option.value
                (Worker_dev_tools.structured_tool_hint_for_r2 canonical_cmd_str)
@@ -1367,7 +1371,7 @@ let handle_keeper_shell
            gh_base ~ok:false ~cwd:"" ~command:(gh_cmd_display parsed_cmd)
              [ "error", `String "gh_irreversible_blocked"
              ; "hint", `String hint ]
-         | R0_Read | R1_Reversible ->
+         | Masc_exec.Shell_ir_risk.R0_Read | Masc_exec.Shell_ir_risk.R1_Reversible_mutation ->
            begin
              match allowed_orgs_opt with
              | None ->

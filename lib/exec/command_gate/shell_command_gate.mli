@@ -109,6 +109,7 @@ type verdict =
     two or more stages. Redirects are always rejected, including fd-to-fd redirects such as
     syntax, including fd-to-fd redirects such as [2>&1]. *)
 type allowlist_policy = {
+  redirect_allowed : bool;
   allowed_commands : string list;
   allow_pipes : bool;
   

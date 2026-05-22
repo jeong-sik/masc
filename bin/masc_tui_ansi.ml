@@ -49,10 +49,13 @@ end
 let get_terminal_size () =
   let read_tput arg =
     try
-      let ic = Unix.open_process_args_in "tput" [| "tput"; arg |] in
-      Fun.protect
-        ~finally:(fun () -> ignore (Unix.close_process_in ic))
-        (fun () -> int_of_string_opt (String.trim (input_line ic)))
+      let line, status =
+        Masc_mcp.With_process.with_process_args_in "tput" [| "tput"; arg |]
+          input_line
+      in
+      match status with
+      | Unix.WEXITED 0 -> int_of_string_opt (String.trim line)
+      | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> None
     with Unix.Unix_error _ | Sys_error _ | End_of_file -> None
   in
   match read_tput "cols", read_tput "lines" with

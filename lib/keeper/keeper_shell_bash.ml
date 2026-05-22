@@ -117,7 +117,10 @@ let handle_keeper_bash_typed
             ~fields:[ "typed", `Bool true; "cmd", `String cmd_for_log; "cwd", `String cwd ]
             (typed_validation_error_text e)
         | Ok ir ->
-        if Exec_policy.is_destructive_bash_operation ir
+        let envelope =
+          Masc_exec.Shell_ir_risk.classify (Masc_exec.Shell_ir_risk.undecided ir)
+        in
+        if Masc_exec.Shell_ir_risk.is_destructive envelope
         then
           Yojson.Safe.to_string
             (Exec_core.blocked_result_json
@@ -129,7 +132,9 @@ let handle_keeper_bash_typed
                ~retryability:Exec_core.Operator_required
                ~extra:[ "cmd", `String cmd_for_log; "typed", `Bool true; "execution_time_ms", `Int 0 ]
                ())
-        else if (not write_enabled) && Exec_policy.is_write_operation ir
+        else if (not write_enabled)
+             && (Masc_exec.Shell_ir_risk.is_r1 envelope
+                || Masc_exec.Shell_ir_risk.is_r2 envelope)
         then
           Yojson.Safe.to_string
             (Exec_core.blocked_result_json
@@ -153,7 +158,7 @@ let handle_keeper_bash_typed
             let gate_verdict =
               Shell_gate.gate_typed
                 ~caller:Shell_gate.Keeper_shell_bash
-                ~ir
+                ~ir:envelope.Masc_exec.Shell_ir_risk.ir
                 ~allowlist:{ allowed_commands; allow_pipes = true; redirect_allowed = true }
                 ~path_policy:Shell_gate.allow_all_paths
                 ~sandbox:{ target = dispatch_sandbox }
@@ -186,7 +191,7 @@ let handle_keeper_bash_typed
             let path_validation =
               match
                 Keeper_task_worktree_lazy.ensure_shell_ir_existing_dirs
-                  ~config ~meta ~cwd ~ir
+                  ~config ~meta ~cwd ~ir:envelope.Masc_exec.Shell_ir_risk.ir
               with
               | Error e -> Error e
               | Ok () ->
@@ -194,7 +199,7 @@ let handle_keeper_bash_typed
                   ~keeper_id:meta.name
                   ~base_path:root
                   ~workdir:cwd
-                  ir
+                  envelope.Masc_exec.Shell_ir_risk.ir
             in
             (match path_validation with
              | Error e -> error_json ~fields:[ "blocked_cmd", `String cmd_for_log ] e
@@ -205,7 +210,9 @@ let handle_keeper_bash_typed
                    (fun () -> Some (Exec_core.snapshot_env ~cwd))
                in
                let t0 = Unix.gettimeofday () in
-               let result = Masc_exec.Exec_dispatch.dispatch ir in
+               let result =
+                 Masc_exec.Exec_dispatch.dispatch_decided envelope
+               in
                let elapsed_ms =
                  elapsed_duration_ms
                    ~start_time:t0

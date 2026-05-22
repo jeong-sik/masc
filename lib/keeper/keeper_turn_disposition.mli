@@ -108,8 +108,6 @@ val to_wire : t -> string
     [Keeper_turn_terminal_code.of_wire]; if that succeeds, the result
     is wrapped via [of_termination_code] (which may itself collapse to
     a non-Provider_error disposition such as [Required_tool_use_unsatisfied]).
-    Legacy ["oas_timeout_budget"] input parses to [Turn_wall_clock_timeout]
-    and is not represented as a distinct disposition state.
     Otherwise [Unknown { raw_error = wire }] is returned. *)
 val of_wire : string -> t
 

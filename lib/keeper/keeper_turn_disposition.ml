@@ -122,7 +122,6 @@ let of_wire = function
   | "success" -> Success
   | "external_cancel" -> External_cancel
   | "turn_wall_clock_timeout" -> Turn_wall_clock_timeout
-  | "oas_timeout_budget" -> Turn_wall_clock_timeout
   | "cascade_attempts_exhausted" -> Cascade_attempts_exhausted
   | "gh_repo_context_missing_worktree" -> Gh_repo_context_missing_worktree
   | "required_tool_use_no_tool_call" -> Required_tool_use_no_tool_call

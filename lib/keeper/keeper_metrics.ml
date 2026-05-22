@@ -724,10 +724,6 @@ let metric_keeper_provider_timeout_loop_paused =
   "masc_keeper_provider_timeout_loop_paused_total"
 ;;
 
-let metric_keeper_oas_timeout_budget_loop_paused =
-  metric_keeper_provider_timeout_loop_paused
-;;
-
 let metric_keeper_cycle_exceptions = "masc_keeper_cycle_exceptions_total"
 let metric_keeper_snapshot_write_failures = "masc_keeper_snapshot_write_failures_total"
 
@@ -942,8 +938,6 @@ let metric_keeper_provider_timeout_strike =
   "masc_keeper_provider_timeout_strike_total"
 ;;
 
-let metric_keeper_oas_timeout_budget_strike = metric_keeper_provider_timeout_strike
-
 let metric_keeper_stale_termination_total = "masc_keeper_stale_termination_total"
 
 let metric_keeper_stale_termination_by_class =
@@ -952,10 +946,6 @@ let metric_keeper_stale_termination_by_class =
 
 let metric_keeper_provider_timeout_watchdog_termination =
   "masc_keeper_provider_timeout_watchdog_termination_total"
-;;
-
-let metric_keeper_oas_timeout_budget_watchdog_termination =
-  metric_keeper_provider_timeout_watchdog_termination
 ;;
 
 let metric_keeper_stale_termination_threshold_breached =

@@ -24,7 +24,7 @@ window before semaphore over-release removal.
 | P2 keeper_docker default audit | — | **Closed — no action** | audit revealed `default_timeout_sec () = 2s` (typed Sandbox caller); both sites already bounded |
 | P3 cascade socket budget | — | **Out of scope** | blocked on `Agent_sdk` upstream + RFC-0107 D.2c (cascade-facing client migration) |
 | P4 supervisor watchdog | #15964 | **Closed** | opt-in `MASC_KEEPER_MAX_TURN_WATCHDOG_TIMEOUT_SEC`, reuses `In_turn_hung` (no new variant) |
-| P5 deprecation marker | #15973 | tracking | `force_release_holder_for` marked WORKAROUND; removal blocked on 30-day `metric_keeper_oas_timeout_budget_watchdog_termination` trend → 0 |
+| P5 deprecation marker | #15973 | tracking | `force_release_holder_for` marked WORKAROUND; removal blocked on 30-day `metric_keeper_provider_timeout_watchdog_termination` trend -> 0 |
 
 ### implementation_prs reconciliation
 
@@ -41,7 +41,7 @@ the index entry.
 Removal of `Keeper_turn_slot.force_release_holder_for` (~50 LoC) is
 the only remaining work, and it is *gated on observation* rather than
 implementation. P5 closeout PR will land once
-`metric_keeper_oas_timeout_budget_watchdog_termination` has held at
+`metric_keeper_provider_timeout_watchdog_termination` has held at
 0 for 30 consecutive days after P4 (#15964) merge.
 
 P4 (#15964) merged 2026-05-17 → 30-day window earliest 2026-06-16.
@@ -203,7 +203,7 @@ let with_bounded_run ~clock ~process_mgr ~cwd ?env ?stdin_source
 | **P2 keeper_docker default audit** (Closed — no action) | Initial proposal: narrow `default_timeout_sec ()` at line 278 (`docker rm`) + line 309 (`docker info`). Audit during sprint revealed `default_timeout_sec () = Env_config_exec_timeout.timeout_sec ~caller:Sandbox ()` which is **already 2s** (typed caller variant). Both sites are daemon liveness probes — `Sandbox` budget is correct. **No change needed**; this row is retained only as audit trail | (none) | 0 LoC |
 | **P3 cascade socket budget** (Out of scope — `Agent_sdk` dependency) | Initial proposal: wrap `cascade_event_bridge` LLM HTTPS calls in inner `Switch.run` + `Fiber.first` race. Audit revealed cascade calls flow through `Agent_sdk.Types.api_response` — i.e. the LLM HTTPS client lives inside the external `Agent_sdk` library, not in `lib/cascade/`. `rg 'cohttp\|piaf\|Eio\.Net\|Eio\.Flow\.read' lib/cascade/` returns 0 matches. **Cannot be addressed by a masc-mcp PR**; needs an Agent_sdk upstream PR or a masc-mcp-side HTTP client substitution layer (the latter is exactly what RFC-0107 Phase D is building incrementally — currently only D.2a `masc_http_client` pool skeleton merged via #15881). Wait for RFC-0107 D.2b/D.2c (cascade-facing client migration), then revisit | (none, blocked on Agent_sdk + RFC-0107 D.2c) | 0 LoC in this sprint |
 | **P4 supervisor watchdog** (Closed) | `keeper_supervisor` 의 keepalive call (line 237-243) 에 `Eio.Fiber.first (Eio.Time.sleep ctx.clock t) (run_heartbeat_loop)` 패턴 적용. Opt-in env `MASC_KEEPER_MAX_TURN_WATCHDOG_TIMEOUT_SEC` (default disabled). Timer 만료 시 `set_failure_reason (Stale_turn_timeout In_turn_hung)` stamp → 기존 watchdog_triggered branch (line 254-272) 가 자연스럽게 crash recovery 트리거. 새 stale_kill_class variant 추가 안 함 (N-of-M 회피, `In_turn_hung` 재사용) | supervisor patch | ~93 LoC (PR #15964) |
-| **P5 deprecation** | `Keeper_turn_slot.force_release_holder_for` (keeper_supervisor.ml:1578) 가 *symptom suppression*. P1~P4 적용 후 `metric_keeper_oas_timeout_budget_watchdog_termination` 30일 trend 가 0 으로 수렴하면 remove | semaphore over-release 제거 | ~50 LoC |
+| **P5 deprecation** | `Keeper_turn_slot.force_release_holder_for` (keeper_supervisor.ml:1578) 가 *symptom suppression*. P1~P4 적용 후 `metric_keeper_provider_timeout_watchdog_termination` 30일 trend 가 0 으로 수렴하면 remove | semaphore over-release 제거 | ~50 LoC |
 
 각 Phase 의 PR 은 root-fix loop 와 분리하여 *atomic* 으로 머지한다. P3 는 RFC-0107 의 머지 후 진행 (dependency).
 
@@ -230,7 +230,7 @@ P1+ 머지 조건 (각 Phase 별):
 
 1. 해당 site 의 기존 test 가 동일 동작 (regression 0).
 2. timeout 발동 시 process 가 OS 차원에서 사라지는 integration test (`pgrep -f <argv>` 0 결과).
-3. Prometheus `metric_keeper_oas_timeout_budget_watchdog_termination` 30일 trend 감소.
+3. Prometheus `metric_keeper_provider_timeout_watchdog_termination` 30일 trend 감소.
 
 ## 6. Evidence
 

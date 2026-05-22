@@ -123,6 +123,8 @@ let lane_policies =
   ; { lane = "memory_context"
     ; mandatory_events =
         [ Keeper_runtime_manifest.Context_injected
+        ; Keeper_runtime_manifest.Checkpoint_loaded
+        ; Keeper_runtime_manifest.Checkpoint_saved
         ; Keeper_runtime_manifest.Memory_flushed
         ]
     ; terminal_events = [ Keeper_runtime_manifest.Memory_flushed ]

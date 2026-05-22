@@ -371,7 +371,7 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
                 ~terminal_status:tool_runtime_status );
             ( "memory_context",
               runtime_lens_swimlane_json swimlane_scan gaps ~lane:"memory_context"
-                ~label:"Memory/Context"
+                ~label:"Memory/Context/Checkpoint"
                 ~events:
                   [
                     Keeper_runtime_manifest.Context_injected;
@@ -379,6 +379,10 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
                     Keeper_runtime_manifest.Event_bus_correlated;
                     Keeper_runtime_manifest.Memory_injected;
                     Keeper_runtime_manifest.Memory_flushed;
+                    Keeper_runtime_manifest.Checkpoint_loaded;
+                    Keeper_runtime_manifest.Checkpoint_saved;
+                    Keeper_runtime_manifest.State_snapshot_sidecar_saved;
+                    Keeper_runtime_manifest.Working_state_sidecar_saved;
                   ]
                 ~terminal_status:(runtime_lens_memory_terminal_status scan)
                 ~synthetic_events:[] );

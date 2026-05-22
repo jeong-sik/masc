@@ -66,12 +66,28 @@ let contains_substring haystack needle =
   in
   loop 0
 
-let run_ok ~cwd cmd =
-  let wrapped =
-    Printf.sprintf "cd %s && %s > /dev/null 2>&1" (Filename.quote cwd) cmd
+let run_process_ok ~cwd prog argv =
+  let dev_null = Unix.openfile "/dev/null" [ Unix.O_WRONLY ] 0o600 in
+  let original_cwd = Sys.getcwd () in
+  let pid =
+    Fun.protect
+      ~finally:(fun () ->
+        Sys.chdir original_cwd;
+        Unix.close dev_null)
+      (fun () ->
+        Sys.chdir cwd;
+        Unix.create_process prog argv Unix.stdin dev_null dev_null)
   in
-  let code = Sys.command wrapped in
-  if code <> 0 then Alcotest.failf "command failed (%d): %s" code cmd
+  let _, status = Unix.waitpid [] pid in
+  let code =
+    match status with
+    | Unix.WEXITED code -> code
+    | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> 255
+  in
+  if code <> 0 then Alcotest.failf "command failed (%d): %s" code prog
+
+let git_ok ~cwd args =
+  run_process_ok ~cwd "git" (Array.of_list ("git" :: args))
 
 let with_eio_fs f =
   Eio_main.run @@ fun env ->
@@ -208,9 +224,9 @@ let setup_docker_pr_tool f =
   let base = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   ensure_dir (Filename.concat base Common.masc_dirname);
-  run_ok ~cwd:base "git init -q";
-  run_ok ~cwd:base
-    "git remote add origin https://github.com/jeong-sik/masc-mcp.git";
+  git_ok ~cwd:base [ "init"; "-q" ];
+  git_ok ~cwd:base
+    [ "remote"; "add"; "origin"; "https://github.com/jeong-sik/masc-mcp.git" ];
   let config = Coord.default_config base in
   let meta = make_meta ~name:"pr-maker" ~sandbox:Keeper_types.Docker () in
   let repo =
@@ -221,7 +237,7 @@ let setup_docker_pr_tool f =
       "masc-mcp"
   in
   ensure_dir repo;
-  run_ok ~cwd:repo "git init -q";
+  git_ok ~cwd:repo [ "init"; "-q" ];
   ensure_github_identity_bundle ~config
     Masc_mcp.Keeper_gh_env.root_github_identity;
   f ~config ~meta

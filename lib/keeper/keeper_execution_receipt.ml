@@ -317,6 +317,10 @@ type t =
   ; extra_system_context_digest : string option
   ; extra_system_context_injected_size : int option
   ; extra_system_context_computed_size : int option
+  ; pre_dispatch_compacted : bool
+  ; pre_dispatch_compaction_trigger : string option
+  ; pre_dispatch_compaction_before_tokens : int option
+  ; pre_dispatch_compaction_after_tokens : int option
   }
 
 let stop_reason_to_string = function
@@ -893,6 +897,19 @@ let to_json (receipt : t) =
         | None -> `Null )
     ; ( "extra_system_context_computed_size"
       , match receipt.extra_system_context_computed_size with
+        | Some value -> `Int value
+        | None -> `Null )
+    ; ( "pre_dispatch_compacted", `Bool receipt.pre_dispatch_compacted )
+    ; ( "pre_dispatch_compaction_trigger"
+      , match receipt.pre_dispatch_compaction_trigger with
+        | Some value -> `String value
+        | None -> `Null )
+    ; ( "pre_dispatch_compaction_before_tokens"
+      , match receipt.pre_dispatch_compaction_before_tokens with
+        | Some value -> `Int value
+        | None -> `Null )
+    ; ( "pre_dispatch_compaction_after_tokens"
+      , match receipt.pre_dispatch_compaction_after_tokens with
         | Some value -> `Int value
         | None -> `Null )
     ]

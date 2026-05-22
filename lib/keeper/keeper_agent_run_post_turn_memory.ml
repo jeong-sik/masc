@@ -111,7 +111,7 @@ let run
    | exn ->
      Prometheus.inc_counter
        Keeper_metrics.metric_keeper_dispatch_event_failures
-       ~labels:[ "keeper", meta.name; "site", "compaction" ]
+       ~labels:[ "keeper", meta.name; "site", "memory_bank_compaction" ]
        ();
      Log.Keeper.warn
        "keeper:%s cascade=%s compaction failed: %s"

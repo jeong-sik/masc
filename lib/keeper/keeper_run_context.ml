@@ -19,6 +19,9 @@ type run_context =
   ; ctx_work : working_context
   ; resume_oas_checkpoint : Agent_sdk.Checkpoint.t option
   ; pre_dispatch_compacted : bool
+  ; pre_dispatch_compaction_trigger : string option
+  ; pre_dispatch_compaction_before_tokens : int option
+  ; pre_dispatch_compaction_after_tokens : int option
   ; pre_dispatch_checkpoint_error : Agent_sdk.Error.sdk_error option
   ; start_turn_count : int
   ; receipt_started_at : string
@@ -190,6 +193,17 @@ let prepare_run_context
   let ctx_work = checkpoint_hygiene.context in
   let resume_oas_checkpoint = checkpoint_hygiene.resume_checkpoint in
   let pre_dispatch_compacted = checkpoint_hygiene.compacted in
+  let pre_dispatch_compaction_trigger =
+    match checkpoint_hygiene.trigger with
+    | Some trigger -> Some (Compaction_trigger.to_human trigger)
+    | None -> None
+  in
+  let pre_dispatch_compaction_before_tokens =
+    if checkpoint_hygiene.applied then Some checkpoint_hygiene.before_tokens else None
+  in
+  let pre_dispatch_compaction_after_tokens =
+    if checkpoint_hygiene.applied then Some checkpoint_hygiene.after_tokens else None
+  in
   let pre_dispatch_checkpoint_error =
     match checkpoint_hygiene.save_error with
     | Some detail ->
@@ -248,6 +262,9 @@ let prepare_run_context
   ; ctx_work
   ; resume_oas_checkpoint
   ; pre_dispatch_compacted
+  ; pre_dispatch_compaction_trigger
+  ; pre_dispatch_compaction_before_tokens
+  ; pre_dispatch_compaction_after_tokens
   ; pre_dispatch_checkpoint_error
   ; start_turn_count
   ; receipt_started_at

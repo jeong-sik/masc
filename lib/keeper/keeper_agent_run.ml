@@ -1415,6 +1415,13 @@ let run_turn
                          ; stop_reason = result.stop_reason
                          ; inference_telemetry = result.response.telemetry
                          ; tool_surface = acc.tool_surface
+                         ; pre_dispatch_compacted = ctx.pre_dispatch_compacted
+                         ; pre_dispatch_compaction_trigger =
+                             ctx.pre_dispatch_compaction_trigger
+                         ; pre_dispatch_compaction_before_tokens =
+                             ctx.pre_dispatch_compaction_before_tokens
+                         ; pre_dispatch_compaction_after_tokens =
+                             ctx.pre_dispatch_compaction_after_tokens
                          }
                    in
                    match text_result with
@@ -1569,6 +1576,10 @@ let run_turn
          ; extra_system_context_digest
          ; extra_system_context_injected_size
          ; extra_system_context_computed_size = None
+         ; pre_dispatch_compacted = ctx.pre_dispatch_compacted
+         ; pre_dispatch_compaction_trigger = ctx.pre_dispatch_compaction_trigger
+         ; pre_dispatch_compaction_before_tokens = ctx.pre_dispatch_compaction_before_tokens
+         ; pre_dispatch_compaction_after_tokens = ctx.pre_dispatch_compaction_after_tokens
          }
        in
        let receipt_path =

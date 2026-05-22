@@ -615,6 +615,10 @@ let test_execution_receipt_json_includes_memory_fields () =
     ; extra_system_context_digest = Some "sha256:abc123"
     ; extra_system_context_injected_size = Some 789
     ; extra_system_context_computed_size = None
+    ; pre_dispatch_compacted = false
+    ; pre_dispatch_compaction_trigger = None
+    ; pre_dispatch_compaction_before_tokens = None
+    ; pre_dispatch_compaction_after_tokens = None
     }
   in
   let json = Keeper_execution_receipt.to_json receipt in
@@ -681,6 +685,10 @@ let test_execution_receipt_json_null_when_missing () =
     ; extra_system_context_digest = None
     ; extra_system_context_injected_size = None
     ; extra_system_context_computed_size = None
+    ; pre_dispatch_compacted = false
+    ; pre_dispatch_compaction_trigger = None
+    ; pre_dispatch_compaction_before_tokens = None
+    ; pre_dispatch_compaction_after_tokens = None
     }
   in
   let json = Keeper_execution_receipt.to_json receipt in

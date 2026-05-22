@@ -242,6 +242,10 @@ type t =
   ; extra_system_context_digest : string option
   ; extra_system_context_injected_size : int option
   ; extra_system_context_computed_size : int option
+  ; pre_dispatch_compacted : bool
+  ; pre_dispatch_compaction_trigger : string option
+  ; pre_dispatch_compaction_before_tokens : int option
+  ; pre_dispatch_compaction_after_tokens : int option
   }
 
 val stop_reason_to_string : Cascade_runner.stop_reason -> string

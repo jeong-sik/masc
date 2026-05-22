@@ -3457,6 +3457,10 @@ let make_run_result
   ; stop_reason = Masc_mcp.Cascade_runner.Completed
   ; inference_telemetry = None
   ; tool_surface = sample_tool_surface_metrics ()
+  ; pre_dispatch_compacted = false
+  ; pre_dispatch_compaction_trigger = None
+  ; pre_dispatch_compaction_before_tokens = None
+  ; pre_dispatch_compaction_after_tokens = None
   }
 ;;
 

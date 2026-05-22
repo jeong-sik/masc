@@ -1312,6 +1312,10 @@ let test_keeper_zombie_field_contracts () =
       extra_system_context_digest = None;
       extra_system_context_injected_size = None;
       extra_system_context_computed_size = None;
+      pre_dispatch_compacted = false;
+      pre_dispatch_compaction_trigger = None;
+      pre_dispatch_compaction_before_tokens = None;
+      pre_dispatch_compaction_after_tokens = None;
     }
   in
   let json = R.to_json receipt in

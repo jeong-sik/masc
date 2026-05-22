@@ -60,6 +60,10 @@ type run_result =
   ; stop_reason : Cascade_runner.stop_reason
   ; inference_telemetry : Agent_sdk.Types.inference_telemetry option
   ; tool_surface : tool_surface_metrics
+  ; pre_dispatch_compacted : bool
+  ; pre_dispatch_compaction_trigger : string option
+  ; pre_dispatch_compaction_before_tokens : int option
+  ; pre_dispatch_compaction_after_tokens : int option
   }
 
 (* RFC-0132 PR-2: agent-result surface label = external boundary; redact via SSOT. *)

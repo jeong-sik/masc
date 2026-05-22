@@ -245,12 +245,27 @@ let seed_persona_dir base_path agent_name =
   Config_dir_resolver.reset ()
 
 let run_cmd_exn argv =
-  let cmd = String.concat " " (List.map Filename.quote argv) in
-  match Sys.command cmd with
+  let code =
+    match argv with
+    | [] -> invalid_arg "run_cmd_exn: empty argv"
+    | prog :: _ ->
+        let dev_null = Unix.openfile Filename.null [ Unix.O_WRONLY ] 0o600 in
+        Fun.protect
+          ~finally:(fun () -> Unix.close dev_null)
+          (fun () ->
+            let pid =
+              Unix.create_process_env prog (Array.of_list argv)
+                (Unix.environment ()) Unix.stdin dev_null dev_null
+            in
+            match snd (Unix.waitpid [] pid) with
+            | Unix.WEXITED code -> code
+            | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> 255)
+  in
+  match code with
   | 0 -> ()
   | code ->
       failwith
-        (Printf.sprintf "command failed (%d): %s" code cmd)
+        (Printf.sprintf "command failed (%d): %s" code (String.concat " " argv))
 
 let write_text_file path content =
   Out_channel.with_open_bin path (fun oc -> output_string oc content)

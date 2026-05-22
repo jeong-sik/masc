@@ -43,20 +43,20 @@ let is_destructive e = e.risk = Destructive_protected
 
 (* --- Write sub-classification --------------------------------------- *)
 
-let classify_write_detail (words : string list) : risk_class =
+let classify_write_detail (words : string list) : risk_class option =
   match words with
   | "git" :: sub :: _ ->
     (match sub with
-     | "push" | "merge" | "rebase" | "commit" -> R1_Reversible_mutation
-     | "reset" -> R2_Irreversible
+     | "push" | "merge" | "rebase" | "commit" -> Some R1_Reversible_mutation
+     | "reset" -> Some R2_Irreversible
      | "checkout" | "branch" | "tag" | "stash" | "clone" | "init" ->
-       R1_Reversible_mutation
-     | _ -> R2_Irreversible)
-  | ("npm" | "pnpm" | "yarn") :: _ -> R1_Reversible_mutation
-  | "dune" :: _ -> R1_Reversible_mutation
-  | "make" :: _ -> R1_Reversible_mutation
-  | ("mv" | "cp" | "mkdir" | "touch" | "chmod") :: _ -> R1_Reversible_mutation
-  | _ -> R2_Irreversible
+       Some R1_Reversible_mutation
+     | _ -> None)
+  | ("npm" | "pnpm" | "yarn") :: _ -> Some R1_Reversible_mutation
+  | "dune" :: _ -> Some R1_Reversible_mutation
+  | "make" :: _ -> Some R1_Reversible_mutation
+  | ("mv" | "cp" | "mkdir" | "touch" | "chmod") :: _ -> Some R1_Reversible_mutation
+  | _ -> None
 
 (* --- gh classification on IR words ---------------------------------- *)
 
@@ -256,7 +256,9 @@ let classify (T ir : undecided t) : decided decided_ir =
     if is_destructive_bash_operation words then
       Destructive_protected
     else if is_write_operation words then
-      classify_write_detail words
+      (match classify_write_detail words with
+       | Some r -> r
+       | None -> R2_Irreversible)
     else
       (match words with
        | "gh" :: _ -> classify_gh words

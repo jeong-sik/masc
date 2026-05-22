@@ -63,11 +63,11 @@ val handle_stale_storm_pause
   -> count:int
   -> unit
 
-(** [handle_oas_timeout_budget_pause ~publish_phase_lifecycle ctx entry
-      ~count] pauses [entry] because the OAS provider call timed out
+(** [handle_provider_timeout_pause ~publish_phase_lifecycle ctx entry
+      ~count] pauses [entry] because the provider call timed out
     [count] times in a budget window. Auto-resume with exponential
     back-off (see [MASC_KEEPER_AUTO_RESUME_INITIAL_SEC]). *)
-val handle_oas_timeout_budget_pause
+val handle_provider_timeout_pause
   :  publish_phase_lifecycle:
        (phase:Keeper_state_machine.phase -> string -> string -> unit -> unit)
   -> _ context

@@ -36,7 +36,6 @@ let constructor_cases : (string * T.t) list =
   ; "of_code/unknown", T.of_code "totally_unmapped"
   ; "of_code/empty", T.of_code ""
   ; "of_code/gh_repo", T.of_code "gh_repo_context_missing_worktree"
-  ; "of_code/oas_timeout", T.of_code "oas_timeout_budget"
   ; "of_code/turn_wall_clock", T.of_code "turn_wall_clock_timeout"
   ; "of_code/require_tool_use", T.of_code "required_tool_use_no_tool_call"
   ]

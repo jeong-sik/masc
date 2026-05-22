@@ -24,6 +24,46 @@ let gh_simple_command_of_argv argv =
   | _ -> Ok { argv }
 ;;
 
+(** RFC-0160 S2: lower a parsed [gh_simple_command] to [Shell_ir.t].
+
+    The gh op handler historically dispatched via direct argv
+    ([Exec_gate.run_argv_with_status]) without routing through
+    {!Masc_exec_command_gate.Shell_command_gate.gate_typed} or
+    {!Exec_policy.validate_shell_ir_paths}. This helper allows the
+    handler to consume the same single gate as the op=bash path.
+
+    Construction is total: [Bin.Gh] is unconditionally available
+    (see lib/exec/bin.ml), so the result has no failure mode. The
+    [sandbox] target is passed by the caller to preserve docker
+    routing when [meta.sandbox_profile = Docker].
+
+    [args] are [Lit] tokens — each argv entry is a literal by
+    construction (the parser sub-grammar rejects shell metachars and
+    operators; see {!parse_simple_gh_command}). *)
+let gh_simple_command_to_shell_ir
+      ?(sandbox = Masc_exec.Sandbox_target.host ())
+      ?cwd
+      (cmd : gh_simple_command)
+  : Masc_exec.Shell_ir.t
+  =
+  let shell_arg text =
+    Masc_exec.Shell_ir.Lit (text, Masc_exec.Shell_ir.default_meta)
+  in
+  let cwd_scope =
+    match cwd with
+    | None -> None
+    | Some path -> Some (Masc_exec.Path_scope.classify ~raw:path ~cwd:path)
+  in
+  Masc_exec.Shell_ir.Simple
+    { bin = Masc_exec.Bin.of_known Masc_exec.Bin.Gh
+    ; args = List.map shell_arg cmd.argv
+    ; env = []
+    ; cwd = cwd_scope
+    ; redirects = []
+    ; sandbox
+    }
+;;
+
 let too_complex_reason_tag (r : Masc_exec.Parsed.reason_too_complex) =
   match r with
   | `Heredoc -> "heredoc"

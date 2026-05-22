@@ -91,7 +91,6 @@ type operator_action =
   | No_operator_action
   | Fix_invocation
   | Inspect_provider_stream
-  | Inspect_timeout_budget
   | Reroute_or_tune_provider
   | Inspect_required_tool_contract
   | Reconcile_partial_commit

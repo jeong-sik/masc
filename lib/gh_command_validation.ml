@@ -296,6 +296,11 @@ let has_mutating_http_method parts =
       4. top command + subcommand in [gh_reversible_mutations] → R1
       5. anything else → R0 (read-only default) *)
 let classify_gh_reversibility cmd =
+  (* RFC-0160 S1 regression: the shell parser rejects { } in graphql
+     query strings, so extract_gh_command_pair returns (None,_).
+     Short-circuit graphql classification before parser-dependent path. *)
+  if gh_api_graphql_is_destructive cmd then R2_Irreversible
+  else 
   match extract_gh_command_pair cmd with
   | (None, _) -> R0_Read
   | (Some command, subcmd_opt) ->

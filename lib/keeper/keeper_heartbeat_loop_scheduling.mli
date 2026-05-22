@@ -8,15 +8,6 @@ type cascade_backpressure_decision =
       reason : string;
     }
 
-val cascade_backpressure_observation_reasons : reason:string -> string list
-
-val cascade_backpressure_decision :
-  cascade_resilience:Keeper_exec_preflight.cascade_resilience option ->
-  should_run_turn:bool ->
-  cascade_name:string ->
-  cascade_status:Keeper_health_probe.health_status ->
-  cascade_backpressure_decision
-
 type keepalive_scheduling_decision = {
   turn_decision : Keeper_world_observation.keeper_cycle_decision;
   requested_should_run_turn : bool;

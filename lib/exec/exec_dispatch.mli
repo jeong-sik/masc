@@ -10,8 +10,10 @@ val resolve_arg : Shell_ir.arg -> string
 val dispatch : ?timeout_sec:float -> Shell_ir.t -> dispatch_result
 (** Execute a [Shell_ir.t] AST directly via Exec_gate without
     going through /bin/bash.  Simple commands use argv-based spawn;
-    pipelines chain stdout to stdin across stages.  [?timeout_sec]
-    overrides the dispatch default for every spawned stage. *)
+    redirect-free host and Docker pipelines use streaming process pipes;
+    unsupported pipeline shapes fall back to stdout-to-stdin chaining.
+    [?timeout_sec] is the whole pipeline budget for both streaming and
+    fallback pipeline paths. *)
 
 val dispatch_simple :
   ?timeout_sec:float -> ?stdin_content:string -> Shell_ir.simple -> dispatch_result

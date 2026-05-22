@@ -13,10 +13,22 @@ let non_empty_trimmed_string_opt value =
 
 let keeper_runtime_identity_fields (meta : Keeper_types.keeper_meta) =
   let cascade_name = Keeper_types.cascade_name_of_meta meta in
-  let effective_cascade = Keeper_cascade_profile.resolve_live cascade_name in
-  [ "cascade_name", string_option_to_json (non_empty_trimmed_string_opt cascade_name)
-  ; "cascade_canonical", `String effective_cascade
-  ; "selected_cascade_canonical", `String effective_cascade
+  let cascade_name_json =
+    string_option_to_json (non_empty_trimmed_string_opt cascade_name)
+  in
+  (* RFC-0149 §3.3 — use the Result-returning resolver so an unresolved
+     cascade surfaces as the original input on the canonical fields
+     (matching the degraded-fallback shape below) instead of the silent
+     [Keeper_turn] default the legacy [resolve_live] would have written. *)
+  let canonical_json =
+    match Keeper_cascade_profile.resolve_live_result cascade_name with
+    | Ok runtime ->
+      `String (Keeper_cascade_profile.runtime_name_to_string runtime)
+    | Error (`Unresolved _) -> cascade_name_json
+  in
+  [ "cascade_name", cascade_name_json
+  ; "cascade_canonical", canonical_json
+  ; "selected_cascade_canonical", canonical_json
   ; "primary_model", `Null
   ; "active_model", `Null
   ; "active_model_label", `Null

@@ -75,7 +75,6 @@ let blocker_class_indicates_overflow (klass : blocker_class) : bool =
   | Autonomous_slot_wait_timeout
   | Admission_queue_wait_timeout
   | Turn_timeout_after_queue_wait
-  | Oas_timeout_budget
   | Turn_timeout
   | Turn_livelock_blocked
   | Completion_contract_violation

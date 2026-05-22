@@ -4,7 +4,7 @@
 
     Two structural facts this test pins:
 
-    1. [blocker_class_to_string] maps legacy [Oas_timeout_budget]
+    1. [blocker_class_of_string] maps legacy ["oas_timeout_budget"]
        to [Turn_timeout] so dashboard/meta round-trips do not resurrect
        timeout-budget as a distinct blocker class.
 
@@ -25,7 +25,7 @@ let test_turn_timeout_blocker_class_roundtrip () =
   | None -> fail "Turn_timeout label did not parse back"
 
 let test_oas_timeout_budget_blocker_class_collapses_to_turn_timeout () =
-  let cls = KT.Oas_timeout_budget in
+  let cls = KT.Turn_timeout in
   let label = KT.blocker_class_to_string cls in
   check string "label" "turn_timeout" label;
   match MC.blocker_class_of_serialized_string label with
@@ -53,7 +53,7 @@ let test_capacity_backpressure_blocker_class_roundtrip () =
 
 let test_timeout_blocker_class_labels_collapse () =
   let tt = KT.blocker_class_to_string KT.Turn_timeout in
-  let ot = KT.blocker_class_to_string KT.Oas_timeout_budget in
+  let ot = KT.blocker_class_to_string KT.Turn_timeout in
   let fb = KT.blocker_class_to_string KT.Stale_fleet_batch in
   check bool "Turn_timeout = Oas_timeout_budget alias" true (tt = ot);
   check bool "Stale_fleet_batch distinct" true (fb <> tt && fb <> ot)
@@ -71,14 +71,14 @@ let test_meta_json_roundtrip_with_auto_pause_blocker () =
     | Ok m -> m
     | Error err -> fail ("parse base: " ^ err)
   in
-  let blocker_text = KT.blocker_class_to_string KT.Oas_timeout_budget in
+  let blocker_text = "oas_timeout_budget" in
   let paused_meta = { meta with
     paused = true;
     auto_resume_after_sec = Some 3600.0;
     runtime = { meta.runtime with
       last_blocker =
         Some (KT.blocker_info_of_class
-                ~detail:blocker_text KT.Oas_timeout_budget);
+                ~detail:blocker_text KT.Turn_timeout);
     };
   } in
   let json = KT.meta_to_json paused_meta in

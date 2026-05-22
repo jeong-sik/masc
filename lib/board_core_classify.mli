@@ -181,7 +181,3 @@ type reclassify_report = {
 }
 (** Output of bulk reclassification operations.  Used by both the
     filesystem and PG backends. *)
-
-val reclassify_report_to_yojson : reclassify_report -> Yojson.Safe.t
-(** Hand-written serialiser (no PPX) — kept so the JSON shape stays
-    stable across refactors. *)

@@ -70,19 +70,36 @@ let runtime_lens_memory_terminal_status scan =
   else if scan.memory_flush_success_count > 0 then "flushed"
   else if scan.memory_injected_count > 0 then "injected"
   else if
+    runtime_lens_event_count scan Keeper_runtime_manifest.Checkpoint_saved > 0
+  then "checkpoint_saved"
+  else if
+    runtime_lens_event_count scan Keeper_runtime_manifest.Checkpoint_loaded > 0
+  then "checkpoint_loaded"
+  else if
     scan.context_injected_count > 0
     || scan.context_compacted_event_count > 0
     || scan.event_bus_count > 0
   then "context"
   else "empty"
 
-(** F8: lane mandatory event sets and terminal policy separation.
+(** F8 + P5: lane mandatory event sets, terminal policy, and completion proof.
 
     [finished] = the lane's terminal event is present.
+                 This means "the turn reached a terminal state for this lane",
+                 not "the lane fulfilled its contract".
+
     [complete] = all mandatory events for the lane are present AND
                  the terminal event is present (or the lane has no terminal).
+                 This means "the lane fulfilled its proof policy".
 
-    This distinguishes "the turn ended" from "the lane fulfilled its contract". *)
+    [mandatory_present] = all mandatory events are present but the lane
+                          has not reached its terminal event.
+
+    [incomplete] = some mandatory events are missing.
+
+    Separation of "terminal" from "complete" is required because a turn can
+    finish (Turn_finished) while a lane still lacks mandatory events
+    (e.g., missing checkpoint save, missing memory flush). *)
 
 type lane_policy =
   { lane : string

@@ -37,6 +37,21 @@ val gh_simple_command_with_repo_flag :
   gh_simple_command ->
   gh_simple_command
 
+(** RFC-0160 S2: lower a parsed [gh_simple_command] to [Shell_ir.t].
+
+    Used by the keeper [op=gh] handler so the gh dispatch path
+    routes through the same single gate
+    ({!Masc_exec_command_gate.Shell_command_gate.gate_typed}) and
+    path validator ({!Exec_policy.validate_shell_ir_paths}) as the
+    [op=bash] path.
+
+    Construction is total: no failure mode at this boundary. *)
+val gh_simple_command_to_shell_ir :
+  ?sandbox:Masc_exec.Sandbox_target.t ->
+  ?cwd:string ->
+  gh_simple_command ->
+  Masc_exec.Shell_ir.t
+
 (* ---- Repo slug + flag utilities ------------------------------- *)
 
 val has_repo_flag : string -> bool

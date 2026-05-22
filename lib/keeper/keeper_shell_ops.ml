@@ -1230,7 +1230,60 @@ let handle_keeper_shell
               @ repo_fields
             | None -> []
           in
+          (* RFC-0160 S2: route gh dispatch through the same Shell IR
+             gate that op=bash uses. Builds [Shell_ir.t] via the
+             [gh_simple_command_to_shell_ir] lift, then runs
+             [gate_typed] + [validate_shell_ir_paths] before the
+             actual dispatch. The dispatch step itself still uses the
+             existing argv path ([run_argv_with_status] /
+             [run_docker_shell_command_with_status]); routing the
+             execution through [Exec_dispatch.dispatch] is deferred
+             (gh requires env / timeout / docker-routing fields that
+             [Exec_dispatch] does not yet thread). *)
+          let gh_sandbox_target =
+            if meta.sandbox_profile = Docker
+            then Masc_exec.Sandbox_target.host ()
+              (* docker routing handled below; gate runs on host-shape IR *)
+            else Masc_exec.Sandbox_target.host ()
+          in
+          let gh_ir =
+            Keeper_gh_shared.gh_simple_command_to_shell_ir
+              ~sandbox:gh_sandbox_target
+              ~cwd
+              parsed_command
+          in
+          let gh_gate_verdict =
+            Masc_exec_command_gate.Shell_command_gate.gate_typed
+              ~caller:Masc_exec_command_gate.Shell_command_gate.Keeper_shell_bash
+              ~ir:gh_ir
+              ~allowlist:
+                { allowed_commands = [ "gh" ]
+                ; allow_pipes = false
+                ; redirect_allowed = false
+                }
+              ~path_policy:Masc_exec_command_gate.Shell_command_gate.allow_all_paths
+              ~sandbox:{ target = gh_sandbox_target }
+              ()
+          in
+          let gh_path_verdict =
+            match gh_gate_verdict with
+            | Masc_exec_command_gate.Shell_command_gate.Allow _ ->
+              Exec_policy.validate_shell_ir_paths
+                ~keeper_id:meta.name
+                ~workdir:cwd
+                gh_ir
+            | _ -> Ok ()
+          in
           let gh_process =
+            match gh_gate_verdict with
+            | Masc_exec_command_gate.Shell_command_gate.Reject { diagnostic; _ } ->
+              Error (Printf.sprintf "gh_gate_reject: %s" diagnostic)
+            | Cannot_parse _ -> Error "gh_gate_cannot_parse"
+            | Too_complex _ -> Error "gh_gate_too_complex"
+            | Allow _ ->
+            match gh_path_verdict with
+            | Error msg -> Error (Printf.sprintf "gh_path_reject: %s" msg)
+            | Ok () ->
             if meta.sandbox_profile = Docker
             then
               match

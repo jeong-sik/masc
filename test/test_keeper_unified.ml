@@ -8413,7 +8413,7 @@ let test_pre_retry_timeout_helper_does_not_reuse_stale_budget () =
     (Option.is_none (Masc_mcp.Keeper_turn_driver.classify_masc_internal_error classified))
 ;;
 
-let oas_timeout_budget_error () =
+let provider_timeout_error () =
   Masc_mcp.Keeper_turn_driver.sdk_error_of_masc_internal_error
     (Masc_mcp.Keeper_turn_driver.Provider_timeout
        { budget_sec = 273.0
@@ -8436,14 +8436,14 @@ let test_degraded_retry_budget_gate_allows_remaining_budget () =
       ~estimated_input_tokens:2_000
       ~max_turns:4
       ~remaining_turn_budget_s:1200.0
-      (oas_timeout_budget_error ())
+      (provider_timeout_error ())
   with
   | UT.Degraded_retry_allowed retry ->
     check string "retry cascade" (phase_recovery_cascade_name ()) retry.next_cascade;
     check
       string
       "fallback reason"
-      "oas_timeout_budget"
+      "provider_timeout"
       (EC.degraded_retry_reason_to_string retry.fallback_reason)
   | UT.Degraded_retry_slot_phase_exhausted _ ->
     fail "expected productive slot phase budget to remain"
@@ -8461,7 +8461,7 @@ let test_degraded_retry_budget_gate_blocks_exhausted_budget () =
       ~estimated_input_tokens:2_000
       ~max_turns:4
       ~remaining_turn_budget_s:0.0
-      (oas_timeout_budget_error ())
+      (provider_timeout_error ())
   with
   | UT.Degraded_retry_budget_exhausted retry ->
     check
@@ -8472,7 +8472,7 @@ let test_degraded_retry_budget_gate_blocks_exhausted_budget () =
     check
       string
       "fallback reason"
-      "oas_timeout_budget"
+      "provider_timeout"
       (EC.degraded_retry_reason_to_string retry.fallback_reason)
   | UT.Degraded_retry_slot_phase_exhausted _ ->
     fail "expected exhausted retry budget, not slot phase budget"
@@ -8480,7 +8480,7 @@ let test_degraded_retry_budget_gate_blocks_exhausted_budget () =
   | UT.No_degraded_retry -> fail "expected recoverable retry candidate"
 ;;
 
-let test_degraded_retry_slot_phase_allows_oas_timeout_local_recovery () =
+let test_degraded_retry_slot_phase_allows_provider_timeout_local_recovery () =
   match
     UT.next_fail_open_cascade_for_turn_with_budget
       ~base_cascade:"underdog"
@@ -8491,7 +8491,7 @@ let test_degraded_retry_slot_phase_allows_oas_timeout_local_recovery () =
       ~max_turns:4
       ~time_spent_in_turn_s:(UT.degraded_retry_slot_phase_budget_sec +. 1.0)
       ~remaining_turn_budget_s:300.0
-      (oas_timeout_budget_error ())
+      (provider_timeout_error ())
   with
   | UT.Degraded_retry_allowed retry ->
     check
@@ -8502,7 +8502,7 @@ let test_degraded_retry_slot_phase_allows_oas_timeout_local_recovery () =
     check
       string
       "fallback reason"
-      "oas_timeout_budget"
+      "provider_timeout"
       (EC.degraded_retry_reason_to_string retry.fallback_reason)
   | UT.Degraded_retry_slot_phase_exhausted _ ->
     fail "expected provider timeout budget to bypass slot phase for local recovery"
@@ -8737,7 +8737,7 @@ let test_degraded_retry_budget_gate_allows_retry_with_tiny_remaining () =
       ~estimated_input_tokens:2_000
       ~max_turns:4
       ~remaining_turn_budget_s:3.0
-      (oas_timeout_budget_error ())
+      (provider_timeout_error ())
   with
   | UT.Degraded_retry_budget_exhausted _ -> ()
   | UT.Degraded_retry_allowed _ ->
@@ -11934,7 +11934,7 @@ let () =
         ; test_case
             "provider timeout budget can still rotate to local recovery after slot phase"
             `Quick
-            test_degraded_retry_slot_phase_allows_oas_timeout_local_recovery
+            test_degraded_retry_slot_phase_allows_provider_timeout_local_recovery
         ; test_case
             "max_execution_time_s cascade exhaustion can still rotate after slot phase"
             `Quick

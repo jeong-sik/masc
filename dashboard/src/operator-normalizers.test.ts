@@ -311,29 +311,29 @@ describe('normalizeOperatorSnapshot', () => {
     expect(result.keepers).toEqual([])
   })
 
-  it('preserves keeper runtime_trust and stopped-reaction attention fields', () => {
+  it('preserves keeper runtime_trust and owner-specific stopped-reaction attention fields', () => {
     const result = normalizeOperatorSnapshot({
       keepers: [
         {
           name: 'blocked-keeper',
           status: 'active',
           needs_attention: true,
-          attention_reason: 'timeout_budget_exhausted',
-          next_human_action: 'inspect_timeout_budget',
+          attention_reason: 'turn_timeout',
+          next_human_action: 'inspect_runtime_blocker',
           runtime_trust: {
             disposition: 'Alert',
             operator_disposition: 'pause_runtime',
-            operator_disposition_reason: 'timeout_budget_exhausted',
+            operator_disposition_reason: 'turn_timeout',
             needs_attention: true,
-            attention_reason: 'timeout_budget_exhausted',
+            attention_reason: 'turn_timeout',
             latest_terminal_reason: {
-              code: 'timeout_budget_exhausted',
+              code: 'turn_timeout',
               source: 'execution_receipt',
               severity: 'bad',
-              summary: 'Turn budget exhausted after 15 turns',
-              next_action: 'inspect_timeout_budget',
+              summary: 'Turn execution exceeded the keeper turn deadline',
+              next_action: 'inspect_runtime_blocker',
             },
-            latest_next_action: 'inspect_timeout_budget',
+            latest_next_action: 'inspect_runtime_blocker',
           },
         },
       ],
@@ -341,20 +341,20 @@ describe('normalizeOperatorSnapshot', () => {
     expect(result.keepers).toHaveLength(1)
     const keeper = result.keepers[0]!
     expect(keeper.needs_attention).toBe(true)
-    expect(keeper.attention_reason).toBe('timeout_budget_exhausted')
-    expect(keeper.next_human_action).toBe('inspect_timeout_budget')
+    expect(keeper.attention_reason).toBe('turn_timeout')
+    expect(keeper.next_human_action).toBe('inspect_runtime_blocker')
     expect(keeper.runtime_trust).toMatchObject({
       disposition: 'Alert',
       operator_disposition: 'pause_runtime',
-      operator_disposition_reason: 'timeout_budget_exhausted',
+      operator_disposition_reason: 'turn_timeout',
       needs_attention: true,
       latest_terminal_reason: {
-        code: 'timeout_budget_exhausted',
+        code: 'turn_timeout',
         severity: 'bad',
-        summary: 'Turn budget exhausted after 15 turns',
-        next_action: 'inspect_timeout_budget',
+        summary: 'Turn execution exceeded the keeper turn deadline',
+        next_action: 'inspect_runtime_blocker',
       },
-      latest_next_action: 'inspect_timeout_budget',
+      latest_next_action: 'inspect_runtime_blocker',
     })
   })
 

@@ -375,7 +375,7 @@ describe('normalizeKeepers lifecycle metrics', () => {
     })
   })
 
-  it('preserves stopped-reaction fields in trust summary', () => {
+  it('preserves owner-specific stopped-reaction fields in trust summary', () => {
     const [keeper] = normalizeKeepers([
       {
         name: 'blocked-keeper',
@@ -383,17 +383,17 @@ describe('normalizeKeepers lifecycle metrics', () => {
         trust: {
           disposition: 'Alert',
           operator_disposition: 'pause_runtime',
-          operator_disposition_reason: 'timeout_budget_exhausted',
+          operator_disposition_reason: 'turn_timeout',
           needs_attention: true,
-          attention_reason: 'timeout_budget_exhausted',
+          attention_reason: 'turn_timeout',
           latest_terminal_reason: {
-            code: 'timeout_budget_exhausted',
+            code: 'turn_timeout',
             source: 'execution_receipt',
             severity: 'bad',
-            summary: 'Turn budget exhausted after 15 turns',
-            next_action: 'inspect_timeout_budget',
+            summary: 'Turn execution exceeded the keeper turn deadline',
+            next_action: 'inspect_runtime_blocker',
           },
-          latest_next_action: 'inspect_timeout_budget',
+          latest_next_action: 'inspect_runtime_blocker',
         },
       },
     ])
@@ -401,23 +401,23 @@ describe('normalizeKeepers lifecycle metrics', () => {
     expect(keeper?.trust).toMatchObject({
       disposition: 'Alert',
       operator_disposition: 'pause_runtime',
-      operator_disposition_reason: 'timeout_budget_exhausted',
+      operator_disposition_reason: 'turn_timeout',
       needs_attention: true,
-      attention_reason: 'timeout_budget_exhausted',
+      attention_reason: 'turn_timeout',
       latest_terminal_reason: {
-        code: 'timeout_budget_exhausted',
+        code: 'turn_timeout',
         source: 'execution_receipt',
         severity: 'bad',
-        summary: 'Turn budget exhausted after 15 turns',
-        next_action: 'inspect_timeout_budget',
+        summary: 'Turn execution exceeded the keeper turn deadline',
+        next_action: 'inspect_runtime_blocker',
       },
-      latest_next_action: 'inspect_timeout_budget',
+      latest_next_action: 'inspect_runtime_blocker',
     })
     expect(keeper?.stop_cause).toMatchObject({
-      code: 'timeout_budget_exhausted',
+      code: 'turn_timeout',
       source: 'terminal_reason_code',
-      summary: 'Turn budget exhausted after 15 turns',
-      next_action: 'inspect_timeout_budget',
+      summary: 'Turn execution exceeded the keeper turn deadline',
+      next_action: 'inspect_runtime_blocker',
     })
   })
 
@@ -886,18 +886,18 @@ describe('normalizeKeeperTrustTerminalReason — exported helper', () => {
 
   it('returns a full terminal reason when code is present', () => {
     const result = normalizeKeeperTrustTerminalReason({
-      code: 'timeout_budget_exhausted',
+      code: 'turn_timeout',
       source: 'execution_receipt',
       severity: 'bad',
-      summary: 'keeper timed out before completing the turn',
-      next_action: 'adjust_timeout_budget',
+      summary: 'keeper exceeded the turn deadline',
+      next_action: 'inspect_runtime_blocker',
     })
     expect(result).toEqual({
-      code: 'timeout_budget_exhausted',
+      code: 'turn_timeout',
       source: 'execution_receipt',
       severity: 'bad',
-      summary: 'keeper timed out before completing the turn',
-      next_action: 'adjust_timeout_budget',
+      summary: 'keeper exceeded the turn deadline',
+      next_action: 'inspect_runtime_blocker',
     })
   })
 

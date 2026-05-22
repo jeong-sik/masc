@@ -86,7 +86,5 @@ val result_to_string : spawn_result -> string
 
 (** {1 Helpers} *)
 
-val output_for_status :
-  status:Unix.process_status -> stdout:string -> stderr:string -> string
 val fallback_spawn_failure_output : exit_code:int -> string
 val add_default_model_arg : string -> string list -> string list

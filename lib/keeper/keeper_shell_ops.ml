@@ -1352,7 +1352,8 @@ let handle_keeper_shell
               gh_base ~command:display_command ~ok ~cwd hinted_fields
         in
         (match reversibility with
-         | Masc_exec.Shell_ir_risk.R2_Irreversible ->
+         | Masc_exec.Shell_ir_risk.R2_Irreversible
+         | Masc_exec.Shell_ir_risk.Destructive_protected ->
            let hint =
              Option.value
                (Worker_dev_tools.structured_tool_hint_for_r2 canonical_cmd_str)

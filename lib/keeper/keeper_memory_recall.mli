@@ -64,12 +64,42 @@ val read_keeper_memory_summary :
     window; new callers should prefer
     {!read_keeper_memory_summary_result}. *)
 
+val read_memory_horizon_counts_result :
+  Coord.config ->
+  name:string ->
+  max_bytes:int ->
+  max_lines:int ->
+  ((string * int) list, Keeper_memory_recall_exn_class.t) result
+(** Result-returning variant of {!read_memory_horizon_counts}.  On
+    [Error class] the caller can distinguish "no horizon counts because
+    the bank is empty" ([Ok []]) from "the bank read failed"
+    ([Error class]).
+
+    @since RFC-0149 §3.1 *)
+
 val read_memory_horizon_counts :
   Coord.config ->
   name:string ->
   max_bytes:int ->
   max_lines:int ->
   (string * int) list
+(** Silent-fallback variant: returns [[]] on any IO failure.  Retained
+    as a facade during the RFC-0149 §3.1 sunset window; new callers
+    should prefer {!read_memory_horizon_counts_result}. *)
+
+val read_recent_memory_texts_result :
+  Coord.config ->
+  name:string ->
+  horizon:string ->
+  max_bytes:int ->
+  max_lines:int ->
+  limit:int ->
+  (string list, Keeper_memory_recall_exn_class.t) result
+(** Result-returning variant of {!read_recent_memory_texts}.  On
+    [Error class] the caller can distinguish "no recent texts in this
+    horizon" ([Ok []]) from "the bank read failed" ([Error class]).
+
+    @since RFC-0149 §3.1 *)
 
 val read_recent_memory_texts :
   Coord.config ->
@@ -79,6 +109,9 @@ val read_recent_memory_texts :
   max_lines:int ->
   limit:int ->
   string list
+(** Silent-fallback variant: returns [[]] on any IO failure.  Retained
+    as a facade during the RFC-0149 §3.1 sunset window; new callers
+    should prefer {!read_recent_memory_texts_result}. *)
 
 (** {1 Query Detection} *)
 
@@ -192,8 +225,22 @@ val learned_policy_auto_rules :
 val recent_user_messages :
   Agent_sdk.Types.message list -> max_n:int -> string list
 
+val load_history_user_messages_result :
+  path:string ->
+  max_n:int ->
+  (string list, Keeper_memory_recall_exn_class.t) result
+(** Result-returning variant of {!load_history_user_messages}.  On
+    [Error class] the caller can distinguish "no user messages in the
+    history file" ([Ok []]) from "the history file read failed"
+    ([Error class]).
+
+    @since RFC-0149 §3.1 *)
+
 val load_history_user_messages :
   path:string -> max_n:int -> string list
+(** Silent-fallback variant: returns [[]] on any IO failure.  Retained
+    as a facade during the RFC-0149 §3.1 sunset window; new callers
+    should prefer {!load_history_user_messages_result}. *)
 
 val recall_candidates_with_history :
   checkpoint_messages:Agent_sdk.Types.message list ->

@@ -2,7 +2,7 @@
     Extracted from [Keeper_agent_run.run_turn] Step 8 body (RFC-0147 PR-9). *)
 
 val run :
-  config:Keeper_types.config ->
+  config:Coord_utils.config ->
   meta:Keeper_types.keeper_meta ->
   acc:Keeper_run_tools.hook_accumulator ->
   unit ->

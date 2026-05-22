@@ -2,7 +2,9 @@
 
     Extracted from [Keeper_agent_run.run_turn] Step 8 body (RFC-0147 PR-9). *)
 
-let run ~config ~meta ~acc () =
+let run ~config ~(meta : Keeper_types.keeper_meta)
+      ~(acc : Keeper_run_tools.hook_accumulator) ()
+  =
   match acc.meta.current_task_id with
   | None -> ()
   | Some task_id ->

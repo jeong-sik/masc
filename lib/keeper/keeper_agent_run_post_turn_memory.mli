@@ -9,7 +9,7 @@
     counted, never propagated.  [Eio.Cancel.Cancelled] is re-raised. *)
 
 val run :
-  config:Keeper_types.config ->
+  config:Coord_utils.config ->
   meta:Keeper_types.keeper_meta ->
   memory:Agent_sdk.Memory.t ->
   turn:int ->
@@ -18,7 +18,7 @@ val run :
   actual_tools:string list ->
   state_snapshot:Keeper_memory_policy.keeper_state_snapshot ->
   post_turn_t0:float ->
-  ?provider_filter:string ->
+  ?provider_filter:string list ->
   cascade_name:string ->
   inference_telemetry:Agent_sdk.Types.inference_telemetry option ->
   unit ->

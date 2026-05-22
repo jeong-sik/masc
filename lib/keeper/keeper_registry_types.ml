@@ -86,7 +86,7 @@ let failure_reason_to_string = function
   | Stale_fleet_batch { distinct_count } ->
     Printf.sprintf "stale_fleet_batch(distinct_count=%d)" distinct_count
   | Oas_timeout_budget_loop { count } ->
-    Printf.sprintf "oas_timeout_budget_loop(count=%d)" count
+    Printf.sprintf "provider_timeout_loop(count=%d)" count
   | Provider_runtime_error { code; detail; provider_id; http_status } ->
     let prov =
       Option.fold provider_id ~none:""
@@ -123,7 +123,7 @@ let failure_reason_cohort_key = function
   | Some (Stale_turn_timeout _) -> "stale_turn_timeout"
   | Some (Stale_termination_storm _) -> "stale_termination_storm"
   | Some (Stale_fleet_batch _) -> "stale_fleet_batch"
-  | Some (Oas_timeout_budget_loop _) -> "oas_timeout_budget_loop"
+  | Some (Oas_timeout_budget_loop _) -> "provider_timeout_loop"
   | Some (Provider_runtime_error _) -> "provider_runtime_error"
   | Some (Tool_required_unsatisfied _) -> "tool_required_unsatisfied"
   | Some (Ambiguous_partial_commit _) -> "ambiguous_partial_commit"

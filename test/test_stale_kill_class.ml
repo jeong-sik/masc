@@ -75,8 +75,8 @@ let test_failure_reason_to_string_noop () =
           (Noop_failure_loop { noop_count = 4 })))
 
 let test_failure_reason_to_string_oas_timeout_budget_loop () =
-  r "Oas_timeout_budget_loop includes count"
-    "oas_timeout_budget_loop(count=3)"
+  r "legacy timeout-budget loop normalizes to provider timeout"
+    "provider_timeout_loop(count=3)"
     (failure_reason_to_string (Oas_timeout_budget_loop { count = 3 }))
 
 let test_failure_reason_to_string_stale_fleet_batch () =
@@ -154,7 +154,7 @@ let test_cohort_key_collapses_subclasses () =
        (Some (Stale_turn_timeout (Noop_failure_loop { noop_count = 1 }))))
 
 let test_oas_timeout_budget_loop_cohort_key () =
-  r "Oas_timeout_budget_loop cohort_key" "oas_timeout_budget_loop"
+  r "legacy timeout-budget loop cohort_key" "provider_timeout_loop"
     (failure_reason_cohort_key
        (Some (Oas_timeout_budget_loop { count = 3 })))
 
@@ -282,6 +282,8 @@ let root_cause_label reasons =
 let test_batch_root_cause_labels () =
   r "cascade_unhealthy label" "cascade_unhealthy"
     (SW.batch_root_cause_to_string SW.Cascade_unhealthy);
+  r "provider_timeout label" "provider_timeout"
+    (SW.batch_root_cause_to_string SW.Provider_timeout);
   r "provider_auth label" "provider_auth"
     (SW.batch_root_cause_to_string SW.Provider_auth);
   r "fd_exhaustion label" "fd_exhaustion"
@@ -303,7 +305,7 @@ let test_batch_root_cause_fd_exhaustion () =
     (root_cause_label [ Exception "too many open files (os error 24)" ])
 
 let test_batch_root_cause_cascade_unhealthy () =
-  r "cascade unhealthy" "cascade_unhealthy"
+  r "provider timeout" "provider_timeout"
     (root_cause_label [ Oas_timeout_budget_loop { count = 2 } ])
 
 let test_batch_root_cause_mixed () =

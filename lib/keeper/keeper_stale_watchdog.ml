@@ -168,6 +168,7 @@ let active_turn_stale_status_for_test = active_turn_stale_status
 
 type batch_root_cause =
   | Cascade_unhealthy
+  | Provider_timeout
   | Provider_auth
   | Fd_exhaustion
   | Mixed
@@ -175,6 +176,7 @@ type batch_root_cause =
 
 let batch_root_cause_to_string = function
   | Cascade_unhealthy -> "cascade_unhealthy"
+  | Provider_timeout -> "provider_timeout"
   | Provider_auth -> "provider_auth"
   | Fd_exhaustion -> "fd_exhaustion"
   | Mixed -> "mixed"
@@ -217,10 +219,11 @@ let failure_reason_batch_root_cause
       Some Provider_auth
   | Exception detail when fd_exhaustion_failure detail ->
       Some Fd_exhaustion
+  | Oas_timeout_budget_loop _ ->
+      Some Provider_timeout
   | Stale_turn_timeout _
   | Stale_termination_storm _
   | Stale_fleet_batch _
-  | Oas_timeout_budget_loop _
   | Provider_runtime_error _ ->
       Some Cascade_unhealthy
   | Heartbeat_consecutive_failures _

@@ -26,10 +26,6 @@ type node_status =
 
 val node_status_to_string : node_status -> string
 
-(** Strict parser. Returns [None] on unknown wire so callers react
-    explicitly (drop / fallback / route). See #8777 / #8605. *)
-val node_status_of_string_opt : string -> node_status option
-
 (** {1 Span status}
 
     Separate lifecycle from {!node_status}.
@@ -42,7 +38,7 @@ type span_status =
 val span_status_to_string : span_status -> string
 
 (** Strict parser: returns [None] on unknown wire so callers can react
-    explicitly. Mirror of {!node_status_of_string_opt}. See #8605. *)
+    explicitly (drop / fallback / route). See #8605. *)
 val span_status_of_string_opt : string -> span_status option
 
 (** {1 Graph entities} *)

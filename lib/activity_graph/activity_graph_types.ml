@@ -33,23 +33,6 @@ let node_status_to_string = function
   | Stopped -> "stopped" | Finalized -> "finalized"
   | Observed -> "observed" | Coord -> "room" | Unset -> ""
 
-(** Strict parser. Returns [None] on unknown wire so callers can react
-    explicitly (drop / fallback / route). See #8777 / #8605. *)
-let node_status_of_string_opt = function
-  | "active" -> Some Active | "offline" -> Some Offline | "spawned" -> Some Spawned
-  | "retired" -> Some Retired | "compacting" -> Some Compacting | "handoff" -> Some Handoff
-  | "autonomy" -> Some Autonomy | "guardrail" -> Some Guardrail
-  | "todo" -> Some Todo | "claimed" -> Some Claimed | "in_progress" -> Some In_progress
-  | "done" -> Some Done | "cancelled" -> Some Cancelled
-  | "posted" -> Some Posted | "discussed" -> Some Discussed
-  | "open" -> Some Open | "resolved" -> Some Resolved
-  | "approved" -> Some Approved | "denied" -> Some Denied
-  | "running" -> Some Running | "paused" -> Some Paused
-  | "stopped" -> Some Stopped | "finalized" -> Some Finalized
-  | "observed" -> Some Observed | "room" -> Some Coord
-  | "" -> Some Unset
-  | _ -> None
-
 (** Span status: separate from node_status (different lifecycle).
     @since 7182 *)
 type span_status =
@@ -64,8 +47,7 @@ let span_status_to_string = function
   | Span_ended -> "ended"
 
 (** Strict parser. Returns [None] on unknown wire so callers can react
-    explicitly (drop / fallback / route). Mirror of [node_status_of_string_opt]
-    introduced in #8779. See #8605. *)
+    explicitly (drop / fallback / route). See #8605. *)
 let span_status_of_string_opt = function
   | "open" -> Some Span_open
   | "completed" -> Some Span_completed

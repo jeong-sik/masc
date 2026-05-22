@@ -105,5 +105,3 @@ val public_input_schema : string -> Yojson.Safe.t option
 
     For unknown public names this is the identity. *)
 val translate_input : public:string -> Yojson.Safe.t -> Yojson.Safe.t
-
-val register_structured_routes : unit -> unit

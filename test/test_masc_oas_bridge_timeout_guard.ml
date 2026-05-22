@@ -10,7 +10,7 @@ let expected_invalid_timeout timeout_s =
 let check_rejects_timeout ~name timeout_s =
   let called = ref false in
   let run () =
-    Masc_oas_bridge.run_safe ~timeout_s (fun () ->
+    Masc_oas_bridge.run_safe ~caller:"test_timeout_guard" ~timeout_s (fun () ->
       called := true;
       Ok "should-not-run")
     |> ignore
@@ -38,7 +38,7 @@ let test_accepts_positive_timeout_without_eio_env () =
   | None ->
     let called = ref false in
     (match
-       Masc_oas_bridge.run_safe ~timeout_s:0.1 (fun () ->
+       Masc_oas_bridge.run_safe ~caller:"test_timeout_guard" ~timeout_s:0.1 (fun () ->
          called := true;
          Ok "ok")
      with

@@ -222,6 +222,10 @@ let register
      site"
     `Counter;
   add
+    Keeper_metrics.metric_keeper_tools_oas_deterministic_failures
+    "Total keeper OAS deterministic tool failures, labeled by tool and reason"
+    `Counter;
+  add
     Keeper_metrics.metric_keeper_oas_hook_output_parse_failures
     "Total keeper OAS hook tool-output JSON parse failures, labeled by surface"
     `Counter;

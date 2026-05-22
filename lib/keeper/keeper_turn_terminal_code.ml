@@ -35,7 +35,7 @@ let to_wire = function
     "stale_turn_timeout"
   | Stale_termination_storm -> "stale_termination_storm"
   | Stale_fleet_batch -> "stale_fleet_batch"
-  | Oas_timeout_budget -> "oas_timeout_budget"
+  | Oas_timeout_budget -> "provider_timeout"
   | Heartbeat_failures -> "heartbeat_failures"
   | Turn_failures -> "turn_failures"
   | Provider_runtime_error code -> code

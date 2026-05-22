@@ -81,13 +81,12 @@ val is_write_operation : Masc_exec.Shell_ir.t -> bool
 val is_git_branch_switch : Masc_exec.Shell_ir.t -> bool
 val is_destructive_bash_operation : Masc_exec.Shell_ir.t -> bool
 
-(** Transitional string wrappers (DEPRECATED — removed in S4). *)
-val is_write_operation_of_string : string -> bool
-val is_git_branch_switch_of_string : string -> bool
-val is_destructive_bash_operation_of_string : string -> bool
+(** Flatten all literal stage words from a parsed shell IR.
+    Replaces the historical [shell_word_values] string extractors. *)
+val flat_stage_words : Masc_exec.Shell_ir.t -> string list
 
-(** RFC-0160 S6: shared shell-word extractor (single source of truth,
-    replaces 3 duplicated [shell_word_values] private copies). *)
+(** Shared shell-word extractor for callers with raw strings.
+    Callers with [Shell_ir.t] should use {!flat_stage_words}. *)
 val stage_words_of_string : string -> string list
 
 val sanitize_command_for_log : string -> string

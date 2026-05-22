@@ -253,11 +253,6 @@ let runtime_blocker_class_label ?(summary = "") cls =
   match cls with
   | _ -> blocker_class_to_string cls
 
-let is_timeout_budget_blocker_class blocker_class =
-  String.equal blocker_class (blocker_class_to_string Oas_timeout_budget)
-  || String.equal blocker_class (blocker_class_to_string Turn_timeout)
-;;
-
 let is_cascade_exhausted_blocker_class blocker_class =
   String.equal
     blocker_class
@@ -301,7 +296,9 @@ let runtime_blocker_surface_of_typed_class ?(summary = "") (cls : blocker_class)
         | _ -> summary)
     | Oas_timeout_budget ->
       if summary = ""
-      then "OAS budget timeout fired before the keeper hard timeout."
+      then
+        "Legacy OAS timeout-budget blocker; inspect the owner-specific timeout, \
+         admission, or capacity evidence before resume."
       else summary
     | Turn_livelock_blocked ->
       if summary = ""
@@ -760,8 +757,6 @@ let attention_fields_json (config : Coord_utils.config) (meta : keeper_meta) =
         true, Some "continue_gate_required", Some "approve_or_reject_continue"
       | Some _ when meta.paused ->
         true, Some "paused", Some "inspect_blocker_before_resume"
-      | Some blocker when is_timeout_budget_blocker_class blocker.blocker_class ->
-        true, Some "timeout_budget_exhausted", Some "inspect_timeout_budget"
       | Some blocker when is_cascade_exhausted_blocker_class blocker.blocker_class ->
         true, Some "cascade_attempts_exhausted", Some "inspect_cascade_attempts"
       | Some blocker when is_no_tool_capable_provider_blocker_class blocker.blocker_class ->

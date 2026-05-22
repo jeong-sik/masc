@@ -27,3 +27,9 @@ val dispatch_decided :
   Shell_ir_risk.decided Shell_ir_risk.decided_ir -> dispatch_result
 (** RFC-0160 S3: dispatch a risk-classified IR.  The phantom type
     ensures the IR has passed through [Shell_ir_risk.classify]. *)
+
+val dispatch_pipeline :
+  ?timeout_sec:float -> Shell_ir.t list -> dispatch_result
+(** Execute a pipeline of commands, streaming stdout between stages.
+    Handles [Simple] stages natively; nested [Pipeline] stages are
+    rejected with an error. *)

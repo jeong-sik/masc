@@ -428,7 +428,6 @@ let handle_goal_upsert ~tool_name ~start_time (ctx : context) args : Tool_result
             | `created -> "created"
             | `updated -> "updated"
           in
-          let task_marker = Printf.sprintf "[goal:%s]" goal.id in
           ok_result
             ~tool_name
             ~start_time
@@ -442,10 +441,9 @@ let handle_goal_upsert ~tool_name ~start_time (ctx : context) args : Tool_result
                      goal.title
                      goal.id) )
             ; "task_link_field", `String "goal_id"
-            ; "task_link_mode", `String "structured_with_legacy_title_marker"
-            ; "task_title_marker", `String task_marker
+            ; "task_link_mode", `String "structured_goal_id"
             ; ( "linked_task_title_example"
-              , `String (Printf.sprintf "%s[child] %s" task_marker goal.title) )
+              , `String (Printf.sprintf "[child] %s" goal.title) )
             ]))
 ;;
 

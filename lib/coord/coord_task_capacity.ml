@@ -13,34 +13,10 @@ type capacity_error = {
 
 let default_goal_open_limit = 3
 
-(* [task_matches_goal] is duplicated from [lib/goal/convergence.ml] because
-   that module is part of the [masc_mcp] library, which depends on
-   [masc_coord] — we cannot pull it in here without a dependency cycle.
-   The logic is pure (no external state) and trivially mirrors the
-   upstream definition: structured [goal_id] match, falling back to the
-   legacy [[goal:<id>]] title marker. Keep both in sync. *)
-let goal_title_marker goal_id = Printf.sprintf "[goal:%s]" goal_id
-
-let title_has_goal_marker ~goal_id title =
-  let tag = goal_title_marker goal_id in
-  let title_lower = String.lowercase_ascii title in
-  let tag_lower = String.lowercase_ascii tag in
-  let tag_len = String.length tag_lower in
-  let title_len = String.length title_lower in
-  if tag_len > title_len then false
-  else
-    let found = ref false in
-    for i = 0 to title_len - tag_len do
-      if not !found && String.sub title_lower i tag_len = tag_lower
-      then found := true
-    done;
-    !found
-;;
-
 let task_matches_goal ~goal_id (task : Masc_domain.task) =
   match task.goal_id with
   | Some linked_goal_id -> String.equal linked_goal_id goal_id
-  | None -> title_has_goal_marker ~goal_id task.title
+  | None -> false
 ;;
 
 let open_task_count_for_goal (backlog : Masc_domain.backlog) ~goal_id =

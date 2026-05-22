@@ -215,17 +215,17 @@ let test_duplicate_active_claim_violation () =
   check_has_code "duplicate_active_claim_owners" violations
 ;;
 
-let test_goal_linkage_prefers_structured_goal_id () =
+let test_goal_linkage_requires_structured_goal_id () =
   let explicit =
     task ~id:"task-1" ~title:"Implement product FSM" ~goal_id:"goal-1" ()
   in
-  let legacy =
-    task ~id:"task-2" ~title:"[goal:goal-1] legacy marker" ()
+  let title_marker_only =
+    task ~id:"task-2" ~title:"[goal:goal-1] title marker" ()
   in
   let explicit_other_with_legacy_marker =
     task
       ~id:"task-3"
-      ~title:"[goal:goal-1] stale legacy marker"
+      ~title:"[goal:goal-1] stale title marker"
       ~goal_id:"goal-2"
       ()
   in
@@ -234,15 +234,15 @@ let test_goal_linkage_prefers_structured_goal_id () =
     true
     (Convergence.task_has_goal_id ~goal_id:"goal-1" explicit);
   Alcotest.(check bool)
-    "legacy marker does not satisfy structured matcher"
+    "title marker does not satisfy structured matcher"
     false
-    (Convergence.task_has_goal_id ~goal_id:"goal-1" legacy);
+    (Convergence.task_has_goal_id ~goal_id:"goal-1" title_marker_only);
   Alcotest.(check bool)
-    "legacy matcher remains backward compatible"
-    true
-    (Convergence.task_matches_goal ~goal_id:"goal-1" legacy);
+    "title marker does not satisfy goal matcher"
+    false
+    (Convergence.task_matches_goal ~goal_id:"goal-1" title_marker_only);
   Alcotest.(check bool)
-    "structured goal_id wins over stale title marker"
+    "structured goal_id ignores stale title marker"
     false
     (Convergence.task_matches_goal ~goal_id:"goal-1" explicit_other_with_legacy_marker)
 ;;
@@ -458,7 +458,7 @@ let () =
       , [ Alcotest.test_case
             "structured goal_id matcher"
             `Quick
-            test_goal_linkage_prefers_structured_goal_id
+            test_goal_linkage_requires_structured_goal_id
         ] )
     ; ( "invariants"
       , [ Alcotest.test_case

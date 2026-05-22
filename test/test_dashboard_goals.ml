@@ -370,26 +370,21 @@ let test_cancelled_only_goal_is_at_risk () =
   check int "linkage warning count" 1
     (node |> member "linkage_warning_count" |> to_int)
 
-let test_title_marker_links_legacy_task () =
+let test_title_marker_does_not_link_task () =
   with_room @@ fun config ->
   let goal, _kind =
-    match Goal_store.upsert_goal config ~title:"Legacy marker goal" () with
+    match Goal_store.upsert_goal config ~title:"Title marker goal" () with
     | Ok payload -> payload
     | Error msg -> fail msg
   in
   ignore
     (Coord_task.add_task config
-       ~title:(Printf.sprintf "[goal:%s] Legacy task" goal.id)
-       ~priority:3 ~description:"legacy title marker");
+       ~title:(Printf.sprintf "[goal:%s] Title marker task" goal.id)
+       ~priority:3 ~description:"title marker only");
   let node = Dashboard_goals.dashboard_goals_tree_json ~config |> root_node in
-  let task =
-    match node |> member "tasks" |> to_list with
-    | task :: _ -> task
-    | [] -> fail "expected linked title-marker task"
-  in
-  check string "legacy linkage source" "title_tag"
-    (task |> member "linkage_source" |> to_string);
-  check string "node linkage source" "title_tag"
+  check int "title marker task not linked" 0
+    (node |> member "tasks" |> to_list |> List.length);
+  check string "node linkage source" "none"
     (node |> member "linkage_source" |> to_string)
 
 let test_goal_attainment_projects_percent_target () =
@@ -1125,8 +1120,8 @@ let () =
             test_open_task_without_keeper_is_at_risk;
           test_case "cancelled-only goal is at risk" `Quick
             test_cancelled_only_goal_is_at_risk;
-          test_case "title marker links legacy task" `Quick
-            test_title_marker_links_legacy_task;
+          test_case "title marker does not link task" `Quick
+            test_title_marker_does_not_link_task;
           test_case "goal attainment projects percent targets" `Quick
             test_goal_attainment_projects_percent_target;
           test_case "goal attainment exports prometheus metric" `Quick

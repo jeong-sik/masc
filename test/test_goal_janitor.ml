@@ -168,22 +168,22 @@ let test_escalate_stale_unclaimed_tasks_without_goal_linkage () =
             ~description:"missing goal linkage");
   ignore (Coord.add_task config ~title:"Fresh unlinked task" ~priority:2
             ~description:"fresh enough to avoid escalation");
-  ignore (Coord.add_task config ~title:"Legacy linked [goal:g1]" ~priority:3
-            ~description:"title tag keeps legacy linkage visible");
+  ignore (Coord.add_task config ~title:"Title marker only [goal:g1]" ~priority:3
+            ~description:"title tag does not create linkage");
   ignore (Coord.add_task ~goal_id:"g1" config ~title:"Explicit linked task"
             ~priority:4 ~description:"structured linkage");
   let stale = iso_seconds_ago (31 * 60) in
   set_task_created_at config ~title:"Stale unlinked task" ~created_at:stale;
-  set_task_created_at config ~title:"Legacy linked [goal:g1]" ~created_at:stale;
+  set_task_created_at config ~title:"Title marker only [goal:g1]" ~created_at:stale;
   set_task_created_at config ~title:"Explicit linked task" ~created_at:stale;
   let result = Goal_janitor.run config in
-  check int "one stale unlinked task escalated" 1 result.orphan_tasks;
+  check int "two stale unlinked tasks escalated" 2 result.orphan_tasks;
   let events = event_lines_containing config "goal_orphan_task_escalation" in
   check bool "escalation event emitted" true
     (not (String.equal events ""));
   check bool "stale unlinked task id included" true
     (contains_substring events "task-001");
-  check bool "legacy title-tag task not escalated" false
+  check bool "title-marker-only task escalated" true
     (contains_substring events "task-003")
 
 let test_prune_orphaned_ids () =

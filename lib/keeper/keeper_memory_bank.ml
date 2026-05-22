@@ -188,40 +188,10 @@ let consensus_default_re = Re.Pcre.re {|\d{6,}ep\+?|} |> Re.compile
 let consensus_re_mu = Stdlib.Mutex.create ()
 let consensus_re_cached : (string * Re.re) option ref = ref None
 
-let memory_env_opt name =
-  match Env_config_core.raw_value_opt name with
-  | None -> None
-  | Some raw ->
-      let s = String.trim raw in
-      if s = "" then None else Some s
-
-let memory_env_int_logged name ~default =
-  match memory_env_opt name with
-  | None -> default
-  | Some raw ->
-      (match int_of_string_opt raw with
-       | Some n -> n
-       | None ->
-           Log.Keeper.warn
-             "invalid %s=%S; using default %d"
-             name raw default;
-           default)
-
-let memory_env_bool_logged name ~default =
-  match memory_env_opt name with
-  | None -> default
-  | Some raw ->
-      match String.lowercase_ascii raw with
-      | "1" | "true" | "yes" | "on" | "enabled" -> true
-      | "0" | "false" | "no" | "off" | "disabled" -> false
-      | _ ->
-          Log.Keeper.warn
-            "invalid %s=%S; using default %b"
-            name raw default;
-          default
-
-let memory_llm_summary_enabled () =
-  memory_env_bool_logged "MASC_KEEPER_MEMORY_LLM_SUMMARY" ~default:false
+let memory_env_opt = Keeper_memory_bank_env.memory_env_opt
+let memory_env_int_logged = Keeper_memory_bank_env.memory_env_int_logged
+let memory_env_bool_logged = Keeper_memory_bank_env.memory_env_bool_logged
+let memory_llm_summary_enabled = Keeper_memory_bank_env.memory_llm_summary_enabled
 
 let consensus_pattern_key () =
   match memory_env_opt "MASC_KEEPER_MEMORY_CONSENSUS_PATTERN" with
@@ -281,13 +251,7 @@ let memory_placeholders () =
       in
       base @ extra
 
-let max_memory_text_length () =
-  match memory_env_opt "MASC_KEEPER_MEMORY_MAX_LENGTH" with
-  | None -> 4096
-  | Some raw ->
-      (match int_of_string_opt raw with
-       | Some n when n > 0 -> n
-       | _ -> 4096)
+let max_memory_text_length = Keeper_memory_bank_env.max_memory_text_length
 
 let is_meaningful_memory_text (s : string) : bool =
   let key = normalize_memory_text_key s in

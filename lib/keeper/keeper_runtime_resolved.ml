@@ -82,8 +82,6 @@ let turn_timeout_sec_live () =
     (Float.min 900.0
        (get_float ~default:600.0 "MASC_KEEPER_TURN_TIMEOUT_SEC"))
 
-let oas_timeout_default_sec = 300.0
-
 let admission_wait_timeout_sec_live () =
   Float.max 5.0
     (Float.min 1200.0
@@ -306,14 +304,13 @@ let oas_timeout_for_estimated_input_tokens_with_turn_budget
   match runtime.oas_timeout_override_sec.value with
   | Some value -> value
   | None ->
-      (* #10008 fm2: kept in lockstep with
+      (* RFC-0156: OAS total timeout removed — turn_timeout_sec is the
+         wall-clock cap, stream_idle_timeout is the per-stream cap.
+         Kept in lockstep with
          [Env_config.KeeperKeepalive.oas_timeout_for_estimated_input_tokens_with_turn_budget].
-         The old formula scaled linearly with [max_turns * per_turn(=30s)]
-         but production p50 turn latency was ~16 min (#9933), making
-         the multiplier 32x below reality.  Drop the turn-count and
-         input-token scaling. Keep the default OAS call cap at 300s so
-         the 600s keeper turn envelope has room for cascade fallback. *)
-      Float.min runtime.turn_timeout_sec.value oas_timeout_default_sec
+         Old: Float.min turn_timeout_sec oas_timeout_default_sec (= 300s clamp).
+         New: turn_timeout_sec (no 300s clamp; cascade handled by rotation). *)
+      runtime.turn_timeout_sec.value
 
 let oas_timeout_for_estimated_input_tokens ~(estimated_input_tokens : int) :
     float =

@@ -64,13 +64,13 @@ call = "`Bash` { executable: \"git\", argv: [\"status\", \"--short\"], cwd: \"re
 description = "run one typed argv command; set cwd for git, never type keeper_* names as commands, and use pipeline/stages instead of shell syntax"
 
 [[hints]]
-name = "masc_web_search"
-call = "`masc_web_search` { query: \"current-info query\", limit: 5 }"
+name = "WebSearch"
+call = "`WebSearch` { query: \"current-info query\", limit: 5 }"
 description = "look up current public context before time-sensitive claims"
 
 [[hints]]
-name = "masc_web_fetch"
-call = "`masc_web_fetch` { url: \"https://example.com/page\", timeout: {{web_fetch_timeout}} }"
+name = "WebFetch"
+call = "`WebFetch` { url: \"https://example.com/page\", timeout: {{web_fetch_timeout}} }"
 description = "fetch and read a web page before citing it"
 
 [[hints]]

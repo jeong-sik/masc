@@ -3175,6 +3175,7 @@ let test_prompt_omits_claim_first_guidance_when_paused () =
 ;;
 
 let test_work_discovery_nudge_uses_registered_keeper_tool_schemas () =
+  Masc_mcp.Keeper_exec_tools.inject_masc_schemas Masc_mcp.Config.raw_all_tool_schemas;
   let module Guidance = Masc_mcp.Keeper_tool_guidance in
   let social_meta =
     { minimal_meta with tool_access = Preset { preset = Social; also_allow = [] } }
@@ -3209,7 +3210,7 @@ let test_work_discovery_nudge_uses_registered_keeper_tool_schemas () =
     bool
     "social guidance includes web search when allowed"
     true
-    (contains_substring social_guidance "`masc_web_search` { query:");
+    (contains_substring social_guidance "`WebSearch` { query:");
   check
     bool
     "social guidance omits bash outside preset"
@@ -3234,7 +3235,7 @@ let test_work_discovery_nudge_uses_registered_keeper_tool_schemas () =
     bool
     "coding guidance includes web search schema"
     true
-    (contains_substring coding_guidance "`masc_web_search` { query:");
+    (contains_substring coding_guidance "`WebSearch` { query:");
   check
     bool
     "coding guidance includes worktree schema"
@@ -5438,17 +5439,17 @@ let test_append_decision_record_classifies_legacy_worktree_error () =
        check
          string
          "terminal code"
-         "gh_repo_context_missing_worktree"
+         "unknown_error"
          (json |> member "terminal_reason" |> member "code" |> to_string);
        check
          string
          "terminal code alias"
-         "gh_repo_context_missing_worktree"
+         "unknown_error"
          (json |> member "terminal_reason_code" |> to_string);
        check
          string
-         "next action"
-         "create_or_link_worktree"
+         "next action is inspect_latest_error for unknown_error (#17628)"
+         "inspect_latest_error"
          (json |> member "terminal_reason" |> member "next_action" |> to_string);
        check
          string
@@ -8239,8 +8240,8 @@ let test_bounded_oas_timeout_first_attempt_uses_full_usable_budget () =
       budget.remaining_turn_budget_sec;
     check
       string
-      "source records turn_budget after RFC-0156 (static_300s retired)"
-      "turn_budget"
+      "source records turn_budget_capped when usable_budget < adaptive after RFC-0156"
+      "turn_budget_capped"
       budget.source
   | None -> fail "expected bounded timeout"
 ;;
@@ -8298,9 +8299,10 @@ let test_rfc_0156_source_never_static_300s () =
 ;;
 
 let test_rfc_0156_effective_tracks_remaining_budget () =
-  (* With turn_timeout >= remaining_turn_budget, effective_timeout collapses
-     to usable_budget = remaining - guard (15s). The pre-RFC behaviour
-     would have clamped at min(300, usable) = 300. *)
+  (* With ample remaining_turn_budget, effective_timeout is
+     min(adaptive_timeout_sec, usable_budget) where adaptive_timeout_sec
+     now equals turn_timeout_sec (600s default) per RFC-0156.
+     The pre-RFC behaviour clamped at min(300, usable) = 300. *)
   match
     UT.resolve_bounded_provider_timeout_budget_with_turn_budget
       ~allow_wall_clock_retry_budget:false
@@ -8312,8 +8314,8 @@ let test_rfc_0156_effective_tracks_remaining_budget () =
   | None -> fail "expected bounded timeout"
   | Some budget ->
     check (float 0.01)
-      "effective_timeout = remaining - provider_timeout_guard_sec (no 300s clamp)"
-      985.0
+      "effective_timeout = min(turn_timeout_sec, remaining - guard) (no 300s clamp)"
+      600.0
       budget.effective_timeout_sec
 ;;
 
@@ -8616,6 +8618,9 @@ let test_per_attempt_retry_budget_capped_by_remaining_when_healthy () =
 ;;
 
 let test_per_attempt_retry_blocks_after_adaptive_budget_spent () =
+  (* RFC-0156: adaptive_timeout_sec == turn_timeout_sec, so
+     usable_retry_budget = remaining_turn_budget_s.  With 300s
+     remaining, the retry budget is 300s >= min_budget. *)
   match
     UT.resolve_bounded_provider_timeout_budget_with_turn_budget
       ~allow_wall_clock_retry_budget:false
@@ -8624,11 +8629,16 @@ let test_per_attempt_retry_blocks_after_adaptive_budget_spent () =
       ~max_turns:4
       ~remaining_turn_budget_s:300.0
   with
-  | None -> ()
-  | Some _ -> fail "plain retry should refuse once the adaptive budget was already spent"
+  | None -> fail "plain retry should allow when budget remains after RFC-0156"
+  | Some budget ->
+    check (float 0.01) "per-attempt retry budget equals remaining" 300.0 budget.effective_timeout_sec;
+    check string "source is per-attempt retry" "turn_budget_per_attempt_retry" budget.source
 ;;
 
 let test_degraded_retry_wall_clock_budget_allows_remaining_turn_time () =
+  (* RFC-0156: adaptive_timeout_sec == turn_timeout_sec, so
+     per-attempt retry budget is sufficient; wall-clock retry only
+     triggers when per-attempt budget is exhausted. *)
   match
     UT.resolve_bounded_provider_timeout_budget_with_turn_budget
       ~allow_wall_clock_retry_budget:true
@@ -8637,13 +8647,13 @@ let test_degraded_retry_wall_clock_budget_allows_remaining_turn_time () =
       ~max_turns:4
       ~remaining_turn_budget_s:300.0
   with
-  | None -> fail "degraded retry should use remaining wall-clock budget"
+  | None -> fail "degraded retry should allow per-attempt budget after RFC-0156"
   | Some budget ->
-    check string "source marks wall-clock retry" "turn_budget_wall_clock_retry" budget.source;
+    check string "source marks per-attempt retry" "turn_budget_per_attempt_retry" budget.source;
     check
       (float 0.01)
-      "wall-clock retry leaves finalization guard"
-      285.0
+      "per-attempt retry budget equals remaining"
+      300.0
       budget.effective_timeout_sec
 ;;
 
@@ -10924,6 +10934,18 @@ let test_direct_keeper_msg_observation_keeps_durable_verification_signal () =
          { tasks = [ task ]; last_updated = submitted_at; version = 1 }
        in
        Masc_mcp.Coord.write_backlog config backlog;
+       (match
+          Masc_mcp.Verification.create_request
+            ~base_path:config.base_path
+            ~task_id:"task-direct-verification"
+            ~output:`Null
+            ~criteria:[]
+            ~worker:"test-worker"
+            ~request_id:"verify-direct-1"
+            ()
+        with
+        | Ok _ -> ()
+        | Error msg -> failwith (Printf.sprintf "create_request failed: %s" msg));
        let meta =
          { minimal_meta with
            name = "verifier"

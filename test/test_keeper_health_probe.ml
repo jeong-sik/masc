@@ -133,8 +133,8 @@ let test_runtime_pressure_classifier () =
           }));
   Alcotest.check
     pressure_label_t
-    "oas timeout"
-    (Some "oas_timeout_budget")
+    "legacy oas timeout normalizes to provider timeout"
+    (Some "provider_timeout")
     (pressure_label_of_failure_reason (R.Oas_timeout_budget_loop { count = 2 }))
 ;;
 

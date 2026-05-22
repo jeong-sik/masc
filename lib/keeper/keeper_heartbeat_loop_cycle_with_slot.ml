@@ -86,72 +86,11 @@ let run_keeper_cycle_with_slot
     if Observations.is_oas_timeout_budget_error err
     then (
       let keeper_name = meta_after_cursor_persist.name in
-      let prior_strikes =
-        Observations.prior_oas_timeout_budget_strikes ~base_path:ctx.config.base_path ~keeper_name
-      in
-      let strikes =
-        Keeper_turn_slot.bump_budget_exhaustion_seeded ~keeper_name ~prior_strikes
-      in
-      Keeper_registry.set_failure_reason
-        ~base_path:ctx.config.base_path
-        keeper_name
-        (Some (Keeper_registry.Oas_timeout_budget_loop { count = strikes }));
-      Observations.record_oas_timeout_budget_observation ~base_path:ctx.config.base_path ~keeper_name;
-      let decision =
-        match Observations.oas_timeout_budget_policy_decision ~strikes err with
-        | Some decision -> decision
-        | None ->
-          Keeper_failure_policy.decide
-            (Keeper_failure_policy.Oas_timeout_budget
-               { phase = None
-               ; strikes = Some strikes
-               ; liveness = Keeper_failure_policy.Recent_heartbeat
-               })
-      in
-      let metric_outcome = Observations.oas_timeout_budget_metric_outcome decision in
-      if Keeper_failure_policy.should_kill_keeper decision
-      then (
-        Log.Keeper.error
-          "%s: %d consecutive oas_timeout_budget strikes -- policy allows keeper \
-           death (lifecycle=%s circuit=%s reason=%s)"
-          keeper_name
-          strikes
-          (Keeper_failure_policy.lifecycle_effect_to_label decision.lifecycle_effect)
-          (Keeper_failure_policy.circuit_effect_to_label decision.circuit_effect)
-          decision.reason;
-        Prometheus.inc_counter
-          Keeper_metrics.metric_keeper_oas_timeout_budget_strike
-          ~labels:[ "keeper", keeper_name; "outcome", metric_outcome ]
-          ();
-        Keeper_turn_slot.reset_budget_exhaustion ~keeper_name;
-        raise Keeper_registry.Keeper_fiber_crash)
-      else if strikes >= Keeper_turn_slot.oas_timeout_budget_strike_limit
-      then (
-        Log.Keeper.warn
-          "%s: %d consecutive oas_timeout_budget strikes (>= %d) -- policy=%s \
-           lifecycle=%s circuit=%s; keeping keeper alive"
-          keeper_name
-          strikes
-          Keeper_turn_slot.oas_timeout_budget_strike_limit
-          decision.reason
-          (Keeper_failure_policy.lifecycle_effect_to_label decision.lifecycle_effect)
-          (Keeper_failure_policy.circuit_effect_to_label decision.circuit_effect);
-        Prometheus.inc_counter
-          Keeper_metrics.metric_keeper_oas_timeout_budget_strike
-          ~labels:[ "keeper", keeper_name; "outcome", metric_outcome ]
-          ())
-      else (
-        Log.Keeper.warn
-          "%s: oas_timeout_budget strike %d/%d (policy=%s lifecycle=%s)"
-          keeper_name
-          strikes
-          Keeper_turn_slot.oas_timeout_budget_strike_limit
-          decision.reason
-          (Keeper_failure_policy.lifecycle_effect_to_label decision.lifecycle_effect);
-        Prometheus.inc_counter
-          Keeper_metrics.metric_keeper_oas_timeout_budget_strike
-          ~labels:[ "keeper", keeper_name; "outcome", metric_outcome ]
-          ()));
+      Keeper_turn_slot.reset_budget_exhaustion ~keeper_name;
+      Log.Keeper.warn
+        "%s: legacy oas_timeout_budget observed; preserving original turn \
+         failure without Oas_timeout_budget_loop latch"
+        keeper_name);
     (match read_meta ctx.config meta_after_cursor_persist.name with
      | Ok (Some latest) -> latest
      | Ok None ->

@@ -4,8 +4,16 @@ open Server_utils
 
 let memory_subsystems_entry_cache_ttl_sec = 30.0
 
+(* RFC-0149 §3.1: cache holds typed errors alongside successful rows so the
+   dashboard JSON can surface per-keeper Read failure class instead of silently
+   swallowing them. *)
 let memory_subsystems_entry_cache
-  : (string * float * (string * Keeper_memory_policy.keeper_memory_line) list) option ref
+  : (string
+     * float
+     * (string * Keeper_memory_policy.keeper_memory_line) list
+     * (string * string) list)
+      option
+      ref
   =
   ref None
 ;;
@@ -22,35 +30,46 @@ let load_memory_subsystems_entries ~(config : Coord_utils.config) =
   (* NDT-OK: wall-clock read only gates a dashboard cache TTL. *)
   let now = Unix.gettimeofday () in
   match !memory_subsystems_entry_cache with
-  | Some (base_path, cached_at, rows)
+  | Some (base_path, cached_at, rows, errors)
     when String.equal base_path config.base_path
-         && now -. cached_at < memory_subsystems_entry_cache_ttl_sec -> rows
+         && now -. cached_at < memory_subsystems_entry_cache_ttl_sec ->
+    (rows, errors)
   | _ ->
-    let rows =
+    let rows, errors =
       try
         Keeper_types.keeper_names config
-        |> List.concat_map (fun keeper ->
-          try
-            let summary =
-              Keeper_memory_recall.read_keeper_memory_summary
-                config
-                ~name:keeper
-                ~max_bytes:120000
-                ~max_lines:180
-                ~recent_limit:30
-            in
-            List.map
-              (fun (row : Keeper_memory_policy.keeper_memory_line) -> keeper, row)
-              summary.recent_notes
-          with
-          | Eio.Cancel.Cancelled _ as e -> raise e
-          | _ -> [])
+        |> List.fold_left
+             (fun (rows_acc, errs_acc) keeper ->
+               match
+                 Keeper_memory_recall.read_keeper_memory_summary_result
+                   config
+                   ~name:keeper
+                   ~max_bytes:120000
+                   ~max_lines:180
+                   ~recent_limit:30
+               with
+               | Ok summary ->
+                 let rows =
+                   List.map
+                     (fun (row : Keeper_memory_policy.keeper_memory_line) ->
+                       keeper, row)
+                     summary.recent_notes
+                 in
+                 rows_acc @ rows, errs_acc
+               | Error exn_class ->
+                 let label =
+                   Keeper_memory_recall_exn_class.to_label exn_class
+                 in
+                 rows_acc, (keeper, label) :: errs_acc)
+             ([], [])
       with
       | Eio.Cancel.Cancelled _ as e -> raise e
-      | _ -> []
+      | _ -> [], []
     in
-    memory_subsystems_entry_cache := Some (config.base_path, now, rows);
-    rows
+    let errors = List.rev errors in
+    memory_subsystems_entry_cache
+    := Some (config.base_path, now, rows, errors);
+    rows, errors
 ;;
 
 let dashboard_memory_subsystems_http_json
@@ -110,8 +129,10 @@ let dashboard_memory_subsystems_http_json
       ; "ts_unix", `Float row.ts_unix
       ]
   in
-  let all_memory_entries =
-    if include_memory_entries then load_memory_subsystems_entries ~config else []
+  let all_memory_entries, memory_entry_errors =
+    if include_memory_entries
+    then load_memory_subsystems_entries ~config
+    else [], []
   in
   let memory_total = List.length all_memory_entries in
   let memory_filtered =
@@ -211,6 +232,15 @@ let dashboard_memory_subsystems_http_json
                 (List.map
                    (fun (keeper, row) -> memory_entry_to_json keeper row)
                    memory_entries) )
+          ; ( "errors"
+            , `List
+                (List.map
+                   (fun (keeper, error_class) ->
+                     `Assoc
+                       [ "keeper", `String keeper
+                       ; "error_class", `String error_class
+                       ])
+                   memory_entry_errors) )
           ] )
     ; ( "filters"
       , `Assoc

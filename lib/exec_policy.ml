@@ -877,6 +877,8 @@ let is_destructive_bash_operation_of_string =
   Mutation_classifier.is_destructive_bash_operation_of_string
 ;;
 
+let stage_words_of_string = Mutation_classifier.stage_words_of_string
+
 let sanitize_command_for_log = Log_sanitize.sanitize_command_for_log
 let truncate_for_log = Log_sanitize.truncate_for_log
 

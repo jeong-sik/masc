@@ -48,3 +48,14 @@ val is_destructive_bash_operation : Masc_exec.Shell_ir.t -> bool
 val is_write_operation_of_string : string -> bool
 val is_git_branch_switch_of_string : string -> bool
 val is_destructive_bash_operation_of_string : string -> bool
+
+(** RFC-0160 S6: shared shell-word extractor, single source of truth
+    for what used to be 3 duplicated [shell_word_values] copies in
+    [exec_policy_log_sanitize], [gh_command_validation], and
+    [keeper_tool_registry]. Returns the flattened literal stage words
+    across all pipeline segments ([[]] on parse failure or
+    non-literal-only stages).
+
+    Transitional surface: prefer {!Masc_exec.Shell_ir.t}-typed callers
+    once their upstream entry points migrate (S4). *)
+val stage_words_of_string : string -> string list

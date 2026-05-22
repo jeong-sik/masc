@@ -211,3 +211,16 @@ let parse_and_apply (classifier : Shell_ir.t -> bool) (cmd : string) : bool =
 let is_write_operation_of_string = parse_and_apply is_write_operation
 let is_git_branch_switch_of_string = parse_and_apply is_git_branch_switch
 let is_destructive_bash_operation_of_string = parse_and_apply is_destructive_bash_operation
+
+(** RFC-0160 S6: shared shell-word extractor that replaces the
+    private [shell_word_values] copies previously duplicated in
+    [exec_policy_log_sanitize], [gh_command_validation], and
+    [keeper_tool_registry]. Returns flattened literal stage words
+    (or [[]] on parse failure / non-literal stages). Transitional
+    surface: callers should accept [Shell_ir.t] directly once their
+    entry points migrate (S4). *)
+let stage_words_of_string (cmd : string) : string list =
+  match Masc_exec_bash_parser.Bash.parse_string cmd with
+  | Parsed.Parsed ir -> flat_stage_words ir
+  | _ -> []
+;;

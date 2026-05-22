@@ -86,6 +86,10 @@ val is_write_operation_of_string : string -> bool
 val is_git_branch_switch_of_string : string -> bool
 val is_destructive_bash_operation_of_string : string -> bool
 
+(** RFC-0160 S6: shared shell-word extractor (single source of truth,
+    replaces 3 duplicated [shell_word_values] private copies). *)
+val stage_words_of_string : string -> string list
+
 val sanitize_command_for_log : string -> string
 val truncate_for_log : ?max_len:int -> string -> string
 

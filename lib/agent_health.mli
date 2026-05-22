@@ -27,8 +27,7 @@ module Random = Stdlib.Random
     - Pre-action: {!is_healthy} before [decide_agent_action]
     - Post-action: {!record_success} / {!record_failure} after
       [execute_agent_action]
-    - Statistics: {!get_summary} / {!get_all_summaries} for
-      dashboard/monitoring
+    - Statistics: {!get_summary} for dashboard/monitoring
 
     @since 2.75.0 *)
 
@@ -80,8 +79,6 @@ val filter_healthy :
 (** {1 Statistics} *)
 
 val get_summary : agent_name:string -> agent_health_summary
-
-val get_all_summaries : unit -> agent_health_summary list
 
 (** {1 JSON Serialization} *)
 

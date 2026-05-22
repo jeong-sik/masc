@@ -141,21 +141,6 @@ let get_summary ~agent_name : agent_health_summary =
     cooldown_remaining_sec = cooldown_remaining_of status.open_until;
   }
 
-(** Get health summaries for all known agents. *)
-let get_all_summaries () : agent_health_summary list =
-  let breakers = Circuit_breaker.list_all_breakers (Eio.Lazy.force Circuit_breaker.global) in
-  List.map (fun (s : Circuit_breaker.breaker_status) ->
-    {
-      agent_name = s.agent_id;
-      status =
-        health_status_of_breaker
-          ~state_name:s.state_name
-          ~open_reason:s.open_reason;
-      recent_failures = s.recent_failures;
-      cooldown_remaining_sec = cooldown_remaining_of s.open_until;
-    }
-  ) breakers
-
 (** {1 JSON Serialization} *)
 
 let health_status_to_string = function

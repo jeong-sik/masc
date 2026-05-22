@@ -220,23 +220,43 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
 
           (* In compact mode (used by execution surface), skip heavy memory bank I/O.
              Full memory bank is only needed for individual keeper detail view. *)
+          (* RFC-0149 §3.1 — route through the Result-returning resolver
+             so a memory-bank IO fault surfaces a typed [unavailable]
+             JSON shape that the dashboard frontend can render as a
+             warning state, separate from "Ok summary with empty bank". *)
           let (memory_bank_json, memory_recent_note) =
             if compact then
               (`Assoc [("total_files", `Int 0); ("skipped", `Bool true)], None)
             else
-              let summary =
-                Keeper_memory.read_keeper_memory_summary
+              match
+                Keeper_memory.read_keeper_memory_summary_result
                   config
                   ~name:m.name
                   ~max_bytes:120000
                   ~max_lines:200
                   ~recent_limit:4
-              in
-              let note = match summary.Keeper_memory.recent_notes with
-                | row :: _ -> Some row.Keeper_memory.text
-                | [] -> None
-              in
-              (Keeper_memory.memory_summary_to_json summary, note)
+              with
+              | Ok summary ->
+                let note = match summary.Keeper_memory.recent_notes with
+                  | row :: _ -> Some row.Keeper_memory.text
+                  | [] -> None
+                in
+                (Keeper_memory.memory_summary_to_json summary, note)
+              | Error exn_class ->
+                let label =
+                  Keeper_memory_recall_exn_class.to_label exn_class
+                in
+                let note =
+                  Some (Printf.sprintf "[memory unavailable: %s]" label)
+                in
+                let json =
+                  `Assoc
+                    [ ("total_files", `Int 0)
+                    ; ("unavailable", `Bool true)
+                    ; ("error_class", `String label)
+                    ]
+                in
+                (json, note)
           in
           let history_path =
             Filename.concat

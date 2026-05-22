@@ -110,7 +110,7 @@ Phase 0에서 측정한다.
 
 ### 1.4 Unified Turn 중 Max Silence
 
-Keepalive fiber는 단일 fiber다. `run_unified_turn` 호출(keeper_keepalive.ml:348) 중에는 loop가 blocking되어 presence sync나 lease 갱신이 불가능하다. 현재 실질적 max silence는 LLM inference timeout (~100s, Cloudflare constraint)이지만, 이 값이 zombie detection이나 supervisor sweep에 명시적으로 연결되어 있지 않다.
+Keepalive fiber는 단일 fiber다. `run_keeper_cycle` 호출(keeper_keepalive.ml:348) 중에는 loop가 blocking되어 presence sync나 lease 갱신이 불가능하다. 현재 실질적 max silence는 LLM inference timeout (~100s, Cloudflare constraint)이지만, 이 값이 zombie detection이나 supervisor sweep에 명시적으로 연결되어 있지 않다.
 
 ## 2. Non-Goals
 
@@ -131,7 +131,7 @@ Keepalive fiber는 단일 fiber다. `run_unified_turn` 호출(keeper_keepalive.m
 | Room presence sync | `ensure_keeper_room_presence` (keeper_coordination.ml:47) | Every 30s | File read + write (single room) |
 | Snapshot collection | JSONL append + SSE broadcast + OAS event | Every `snapshot_interval_sec` (300s) | File write + HTTP |
 | Board event scan | `collect_board_events` (keeper_world_observation.ml) | Every 30s | Directory scan |
-| Unified turn | `run_unified_turn` (conditional) | Proactive gate | LLM inference (blocking) |
+| Unified turn | `run_keeper_cycle` (conditional) | Proactive gate | LLM inference (blocking) |
 | Recurring tasks | `dispatch_due` | Every 30s | Conditional broadcast |
 | Improve loop tick | `maybe_tick_from_keepalive` | Every 30s | Unknown (needs measurement) |
 

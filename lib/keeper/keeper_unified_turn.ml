@@ -1665,5 +1665,3 @@ let run_keeper_cycle
   | Keeper_unified_turn_phase_gate.Phase_gate_proceed phase_opt ->
     main_path phase_opt
 ;;
-
-let run_unified_turn = run_keeper_cycle

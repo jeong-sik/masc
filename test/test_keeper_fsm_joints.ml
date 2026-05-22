@@ -19,7 +19,7 @@
     - [check_event_priority_monotone] — registry-bound, requires a
       full {!Keeper_registry.registry_entry}; covered by
       [test_keeper_composite_observer.ml] integration paths instead.
-    - End-to-end {!Keeper_unified_turn.run_unified_turn} drive — needs
+    - End-to-end {!Keeper_unified_turn.run_keeper_cycle} drive — needs
       Coord.config + meta + observation + OAS env. Separate trail. *)
 
 module Obs = Masc_mcp.Keeper_composite_observer

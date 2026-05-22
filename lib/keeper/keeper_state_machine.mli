@@ -137,7 +137,7 @@ type auto_rule_summary = {
     [_completed] / [_failed] events MUST be dispatched with an explicit
     lifecycle origin through {!Keeper_registry}. Normal turn-owned events
     use [Post_turn_lifecycle], which runs synchronously at the tail of a
-    keeper turn (inside [Keeper_unified_turn.run_unified_turn] or the
+    keeper turn (inside [Keeper_unified_turn.run_keeper_cycle] or the
     legacy [Keeper_turn] path). Manual compaction uses the narrower
     [Operator_compact] origin for compaction events only.
 
@@ -145,7 +145,7 @@ type auto_rule_summary = {
     NOT explicitly gate dispatch on [phase]. It relies on the
     structural property that [Compaction_started] and [Handoff_started]
     are always paired with their [_completed] / [_failed] counterparts
-    inside a single [run_unified_turn] call, so the next keepalive
+    inside a single [run_keeper_cycle] call, so the next keepalive
     iteration can never observe the keeper in [Compacting] or
     [HandingOff] phase at its dispatch decision point.
 

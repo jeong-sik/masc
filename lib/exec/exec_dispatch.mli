@@ -15,6 +15,13 @@ val dispatch_simple :
     forwarded without dropping the stage's sandbox target.  [?timeout_sec]
     overrides the dispatch default. *)
 
+val dispatch :
+  ?timeout_sec:float -> Shell_ir.t -> dispatch_result
+(** General dispatch over any [Shell_ir.t] variant.  [Simple] routes
+    to [dispatch_simple]; [Pipeline] routes to internal pipeline
+    logic.  Prefer [dispatch_decided] for production keeper paths.
+    Exposed for tests and legacy call sites. *)
+
 val dispatch_decided :
   ?timeout_sec:float ->
   Shell_ir_risk.decided Shell_ir_risk.decided_ir -> dispatch_result

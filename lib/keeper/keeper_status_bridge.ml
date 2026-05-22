@@ -258,6 +258,12 @@ let is_timeout_budget_blocker_class blocker_class =
   || String.equal blocker_class (blocker_class_to_string Turn_timeout)
 ;;
 
+let is_cascade_exhausted_blocker_class blocker_class =
+  String.equal
+    blocker_class
+    (blocker_class_to_string (Cascade_exhausted (Other_detail "")))
+;;
+
 let runtime_blocker_surface_of_typed_class ?(summary = "") (cls : blocker_class)
   : runtime_blocker_surface
   =
@@ -735,6 +741,8 @@ let attention_fields_json (config : Coord_utils.config) (meta : keeper_meta) =
         true, Some "paused", Some "inspect_blocker_before_resume"
       | Some blocker when is_timeout_budget_blocker_class blocker.blocker_class ->
         true, Some "timeout_budget_exhausted", Some "inspect_timeout_budget"
+      | Some blocker when is_cascade_exhausted_blocker_class blocker.blocker_class ->
+        true, Some "cascade_attempts_exhausted", Some "inspect_cascade_attempts"
       | Some _ -> true, Some "runtime_blocked", Some "inspect_runtime_blocker"
       | None when meta.paused -> true, Some "paused", Some "resume_or_review"
       | None when not social_model_recognized ->

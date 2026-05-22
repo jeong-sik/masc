@@ -29,6 +29,26 @@ type semaphore_wait_timeout = {
 (** Global turn slot cap. Safety ceiling for ALL keeper turns. *)
 val keeper_turn_throttle_limit : int
 
+(** Which configuration layer supplied the effective throttle limit. *)
+type throttle_source =
+  | Env_override
+  | Toml
+  | Default
+
+val keeper_turn_throttle_source : throttle_source
+(** Source of {!keeper_turn_throttle_limit}.
+    - [Env_override] — [MASC_KEEPER_AUTOBOOT_MAX] was set in the process
+      environment; it takes precedence over TOML.
+    - [Toml] — the value came from [keeper_runtime.toml].
+    - [Default] — neither env nor TOML supplied a value; the hardcoded
+      default (32) is in effect.
+
+    @since issue #17192 *)
+
+val throttle_source_to_string : throttle_source -> string
+(** Canonical string representation for logs and JSON surfaces:
+    ["env_override" | "toml" | "default"]. *)
+
 val turn_semaphore : Eio.Semaphore.t
 val autonomous_turn_semaphore : Eio.Semaphore.t
 val reactive_turn_semaphore : Eio.Semaphore.t

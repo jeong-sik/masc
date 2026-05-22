@@ -37,6 +37,15 @@
     parse failure.  Missing file is not an error: returns [Ok 0]. *)
 val load_and_apply : base_path:string -> (int, string) result
 
+(** Read the raw TOML value for [env_name] from the shadow registry.
+    Returns [None] when the key was absent from [keeper_runtime.toml]
+    or the file did not exist.
+
+    This is the TOML intent *independent* of any env override — it lets
+    operator surfaces warn when an env var silently differs from the
+    operator's TOML configuration (issue #17192). *)
+val toml_value_opt : string -> string option
+
 (** Pure resolution: parse TOML and determine which env vars would be
     overridden, without mutating the process-local boot override store.
 

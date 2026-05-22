@@ -47,13 +47,81 @@ let int_of_env_default = Keeper_turn_slot_types.int_of_env_default
    only enforced floor is [min_v:1] (0 = deadlock). The previous [max_v:20]
    cap was a typo-defence boilerplate, not an architectural ceiling, and
    forced operator raise-cycles every time the fleet grew. Removed. *)
-let keeper_turn_throttle_limit =
-  int_of_env_default
-    ~primary:"MASC_KEEPER_AUTOBOOT_MAX"
-    ~default:32
-    ~min_v:1
-    ~max_v:max_int
+
+(** Which configuration layer supplied the effective throttle limit.
+    Used by operator surfaces to warn when an env override silently
+    differs from the operator's TOML intent (issue #17192). *)
+type throttle_source =
+  | Env_override
+  | Toml
+  | Default
+
+let keeper_turn_throttle_limit, keeper_turn_throttle_source =
+  let env_name = "MASC_KEEPER_AUTOBOOT_MAX" in
+  let default = 32 in
+  let min_v = 1 in
+  let max_v = max_int in
+  let parse raw =
+    let v = Option.value ~default (int_of_string_opt (String.trim raw)) in
+    Keeper_config.clamp_int v ~min_v ~max_v
+  in
+  if Env_config_core.running_under_test_executable () then
+    (default, Default)
+  else
+    match Sys.getenv_opt env_name with
+    | Some raw when String.trim raw <> "" -> parse raw, Env_override
+    | _ -> (
+      match Env_config_core.raw_value_opt env_name with
+      | Some raw when String.trim raw <> "" -> parse raw, Toml
+      | _ -> default, Default)
 ;;
+
+let throttle_source_to_string = function
+  | Env_override -> "env_override"
+  | Toml -> "toml"
+  | Default -> "default"
+;;
+
+(** Warn when the env override significantly exceeds the operator's TOML
+    intent.  Factor >= 2 is the threshold: a fleet sized for N keepers
+    that silently runs at 2N+ is the overload pattern reported in #17192.
+    Also warns when TOML requests a lower cap than the effective value. *)
+let check_throttle_divergence () =
+  if Env_config_core.running_under_test_executable () then
+    ()
+  else
+    match keeper_turn_throttle_source with
+    | Env_override -> (
+      match Keeper_runtime_config.toml_value_opt "MASC_KEEPER_AUTOBOOT_MAX" with
+      | None -> ()
+      | Some toml_raw -> (
+        match int_of_string_opt (String.trim toml_raw) with
+        | None -> ()
+        | Some toml_val when toml_val <= 0 -> ()
+        | Some toml_val ->
+          let env_val = keeper_turn_throttle_limit in
+          let factor = float_of_int env_val /. float_of_int toml_val in
+          if factor >= 2.0
+          then
+            Log.Keeper.warn
+              "autoboot divergence: env MASC_KEEPER_AUTOBOOT_MAX=%d is %.1fx the TOML \
+               value (%d); fleet may be overloaded. Either unset the env var to honour \
+               TOML, or update TOML to match the intended cap."
+              env_val
+              factor
+              toml_val
+          else if env_val > toml_val
+          then
+            Log.Keeper.info
+              "autoboot divergence: env MASC_KEEPER_AUTOBOOT_MAX=%d exceeds TOML (%d) \
+               by a smaller margin (factor %.1fx); monitor fleet capacity."
+              env_val
+              toml_val
+              factor))
+    | Toml | Default -> ()
+;;
+
+let () = check_throttle_divergence ()
 
 let turn_semaphore = Eio.Semaphore.make keeper_turn_throttle_limit
 

@@ -102,7 +102,7 @@ describe('isCrashedPhase — SSE-safe casing checker', () => {
 
 describe('keeperIsStuckOnRecoverableBlocker', () => {
   it.each([
-    ['cascade_exhausted'], ['oas_timeout_budget'], ['turn_timeout'],
+    ['cascade_exhausted'], ['turn_timeout'],
   ])('blocker_class=%s ⇒ stuck-recoverable', (cls) => {
     expect(keeperIsStuckOnRecoverableBlocker(k({ runtime_blocker_class: cls as Keeper['runtime_blocker_class'] }))).toBe(true)
   })
@@ -115,8 +115,11 @@ describe('keeperIsStuckOnRecoverableBlocker', () => {
 })
 
 describe('keeperCanWakeup', () => {
-  it('stuck on recoverable blocker ⇒ can wake', () => {
-    expect(keeperCanWakeup(k({ runtime_blocker_class: 'oas_timeout_budget' }))).toBe(true)
+  it('stuck on canonical recoverable blocker ⇒ can wake', () => {
+    expect(keeperCanWakeup(k({ runtime_blocker_class: 'turn_timeout' }))).toBe(true)
+  })
+  it('legacy timeout-budget blocker ⇒ cannot wake', () => {
+    expect(keeperCanWakeup(k({ runtime_blocker_class: 'oas_timeout_budget' as Keeper['runtime_blocker_class'] }))).toBe(false)
   })
   it('plain running keeper ⇒ can wake (kick next turn)', () => {
     expect(keeperCanWakeup(k({ phase: 'Running' }))).toBe(true)

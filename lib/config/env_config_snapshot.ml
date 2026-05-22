@@ -614,8 +614,6 @@ let operator_entries =
       "Coord TTL for operator judge cleanup (clamped >=15 seconds)";
     entry ~default:"300" "MASC_OPERATOR_JUDGE_SESSION_TTL_SEC"
       "Session TTL for operator judge cleanup (clamped >=30 seconds)";
-    entry ~default:"(none)" "MASC_OPERATOR_JUDGE_TIMEOUT_SEC"
-      "Background operator judge timeout (falls back to inference timeout)";
   ]
 
 let orchestrator_entries =

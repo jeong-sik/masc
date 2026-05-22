@@ -222,13 +222,11 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_KEEPER_SUPERVISOR_MAX_RESTARTS` | typed:int | Thresholds | operator | 17 | Maximum restart attempts before declaring a keeper dead. @category Thresholds @ops_class operator |
 | `MASC_KEEPER_SUPERVISOR_SWEEP_SEC` | typed:float | Timeouts | operator | 29 | Interval between supervisor sweep runs (seconds). @category Timeouts @ops_class operator |
 
-## Env_config_oas_bridge (3 knobs; typed classification 0/0)
+## Env_config_oas_bridge (1 knobs; typed classification 0/0)
 
 | Env var | Kind | Category | Ops class | Line | Doc |
 |---|---|---|---|---|---|
-| `MASC_DASHBOARD_GOVERNANCE_JUDGE_TIMEOUT_SEC` | string_literal | n/a | n/a | 122 | #9629: Each caller may also honour a legacy env var name from before the SSOT migration.  When present, the legacy na... |
 | `MASC_OAS_BRIDGE_TIMEOUT_DEFAULT_SEC` | string_literal | n/a | n/a | 132 |  |
-| `MASC_OPERATOR_JUDGE_TIMEOUT_SEC` | string_literal | n/a | n/a | 121 | #9629: Each caller may also honour a legacy env var name from before the SSOT migration.  When present, the legacy na... |
 
 ## Env_config_runtime (116 knobs; typed classification 3/93)
 

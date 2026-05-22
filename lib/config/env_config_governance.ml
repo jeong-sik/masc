@@ -17,11 +17,7 @@ module Inference = struct
      (governance compute_judgments / operator compute_judgments) now
      resolve their timeout through [Env_config_oas_bridge] alongside
      the other LLM-via-OAS-worker callers, so this module no longer
-     exposes them.  The legacy env-var names
-     ([MASC_OPERATOR_JUDGE_TIMEOUT_SEC],
-     [MASC_DASHBOARD_GOVERNANCE_JUDGE_TIMEOUT_SEC]) remain honoured
-     by [Env_config_oas_bridge.timeout_sec] as a per-caller alias
-     during the migration window. *)
+     exposes them. *)
 
   (** Enable inference response cache (L1+L2). *)
   let cache_enabled =

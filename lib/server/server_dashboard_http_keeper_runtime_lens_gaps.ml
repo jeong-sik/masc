@@ -254,9 +254,14 @@ let runtime_lens_gaps ~terminal_event_present ~claim_scope ~config_drift scan =
             let has_any_event_in_lane =
               List.exists
                 (fun event ->
+                   String.equal
+                     (Server_dashboard_http_keeper_runtime_lens_swimlane.event_lane
+                        event)
+                     lane
+                   &&
                    Server_dashboard_http_keeper_runtime_manifest_scan.runtime_manifest_scan_event_count
                      scan event > 0)
-                policy.mandatory_events
+                Keeper_runtime_manifest.all_event_kinds
             in
             if not has_any_event_in_lane then acc
             else

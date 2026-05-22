@@ -25,33 +25,6 @@ let json_string_list_member key json =
       items
   | _ -> []
 
-let event_lane = function
-  | Keeper_runtime_manifest.Turn_started
-  | Keeper_runtime_manifest.Phase_gate_decided
-  | Keeper_runtime_manifest.Pre_dispatch_blocked
-  | Keeper_runtime_manifest.Receipt_appended
-  | Keeper_runtime_manifest.Turn_finished ->
-    "keeper"
-  | Keeper_runtime_manifest.Cascade_routed
-  | Keeper_runtime_manifest.Provider_lane_resolved ->
-    "masc_policy_cascade"
-  | Keeper_runtime_manifest.Provider_attempt_started
-  | Keeper_runtime_manifest.Provider_attempt_finished ->
-    "provider"
-  | Keeper_runtime_manifest.Tool_surface_selected
-  | Keeper_runtime_manifest.Tool_lineage_recorded -> "tool_runtime"
-  | Keeper_runtime_manifest.Checkpoint_loaded
-  | Keeper_runtime_manifest.State_snapshot_sidecar_saved
-  | Keeper_runtime_manifest.Working_state_sidecar_saved
-  | Keeper_runtime_manifest.Checkpoint_saved ->
-    "oas_agent"
-  | Keeper_runtime_manifest.Context_injected
-  | Keeper_runtime_manifest.Context_compacted
-  | Keeper_runtime_manifest.Event_bus_correlated
-  | Keeper_runtime_manifest.Memory_injected
-  | Keeper_runtime_manifest.Memory_flushed ->
-    "memory_context"
-
 let clock_refs decision =
   match Yojson.Safe.Util.member "clock_refs" decision with
   | `Assoc _ as obj -> Some obj
@@ -183,8 +156,9 @@ let event_finished_at row =
     None
 
 let event_source_clock = function
-  | Keeper_runtime_manifest.Event_bus_correlated -> "oas_event_bus"
-  | _ -> "wall"
+  | event ->
+    Keeper_runtime_manifest.source_clock_of_event event
+    |> Keeper_runtime_manifest.source_clock_to_string
 
 let clock_edge_json ~idx ~provider_attempt_index row =
   let event = row.Keeper_runtime_manifest.event in

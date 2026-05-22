@@ -67,7 +67,7 @@ let observed_tool_contract_status ~required_tool_names ~missing_visible_required
       ~had_owned_active_task_at_turn_start ~actual_keeper_tool_names
   : Keeper_execution_receipt.tool_contract_result
   =
-  Keeper_agent_tool_surface.tool_contract_result_for_observed_tools
+  Keeper_agent_run_turn_helpers.tool_contract_result_for_observed_tools
     ~required_tool_names ~missing_visible_required ~had_owned_active_task_at_turn_start
     ~actual_keeper_tool_names
 ;;

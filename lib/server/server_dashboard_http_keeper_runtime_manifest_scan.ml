@@ -122,22 +122,31 @@ let update_runtime_manifest_scan scan row =
      in
      Hashtbl.replace scan.payload_role_counts role (current + 1)
    | _ -> ());
-  (match
-     let clock_refs =
-       Yojson.Safe.Util.member "clock_refs" row.Keeper_runtime_manifest.decision
-     in
-     match clock_refs with
-     | `Assoc _ -> json_string_member_opt "source_clock" clock_refs
-     | _ -> None
-   with
-   | Some clock ->
-     let current =
-       match Hashtbl.find_opt scan.source_clock_counts clock with
-       | Some value -> value
-       | None -> 0
-     in
-     Hashtbl.replace scan.source_clock_counts clock (current + 1)
-   | None -> ());
+  let source_clock =
+    let fallback =
+      row.Keeper_runtime_manifest.event
+      |> Keeper_runtime_manifest.source_clock_of_event
+      |> Keeper_runtime_manifest.source_clock_to_string
+    in
+    let clock_refs =
+      Yojson.Safe.Util.member "clock_refs" row.Keeper_runtime_manifest.decision
+    in
+    match clock_refs with
+    | `Assoc _ ->
+      (match json_string_member_opt "source_clock" clock_refs with
+       | Some clock -> (
+         match Keeper_runtime_manifest.source_clock_of_string clock with
+         | Some valid -> Keeper_runtime_manifest.source_clock_to_string valid
+         | None -> fallback)
+       | None -> fallback)
+    | _ -> fallback
+  in
+  let current =
+    match Hashtbl.find_opt scan.source_clock_counts source_clock with
+    | Some value -> value
+    | None -> 0
+  in
+  Hashtbl.replace scan.source_clock_counts source_clock (current + 1);
   (match row.Keeper_runtime_manifest.keeper_turn_id with
    | Some value -> scan.keeper_turn_ids <- value :: scan.keeper_turn_ids
    | None -> ());

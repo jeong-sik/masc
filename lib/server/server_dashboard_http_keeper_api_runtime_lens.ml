@@ -25,6 +25,13 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
   let terminal_event_present =
     terminal_event_present_for_turn ?keeper_turn_id scan
   in
+  let swimlane_scan =
+    match (turn_id, keeper_turn_id) with
+    | Some _, _ | _, None -> scan
+    | None, Some selected_turn_id ->
+      read_runtime_manifest_scan ~config ~keeper_name ~trace_id
+        ~turn_id:selected_turn_id ~limit:scan.limit ()
+  in
   let claim_scope =
     Server_dashboard_http_keeper_runtime_lens_summaries.claim_scope_summary_json
       ~keeper_name
@@ -267,7 +274,7 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
         `Assoc
           [
             ( "keeper",
-              runtime_lens_swimlane_json scan gaps ~lane:"keeper"
+              runtime_lens_swimlane_json swimlane_scan gaps ~lane:"keeper"
                 ~label:"Keeper"
                 ~events:
                   [
@@ -281,7 +288,7 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
                   (runtime_lens_keeper_terminal_status ~terminal_event_present scan)
             );
             ( "masc_policy_cascade",
-              runtime_lens_swimlane_json scan gaps
+              runtime_lens_swimlane_json swimlane_scan gaps
                 ~lane:"masc_policy_cascade" ~label:"MASC Cascade"
                 ~events:
                   [
@@ -294,7 +301,7 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
                        (if has_provider_lane then "resolved" else "empty"))
             );
             ( "oas_agent",
-              runtime_lens_swimlane_json scan gaps ~lane:"oas_agent"
+              runtime_lens_swimlane_json swimlane_scan gaps ~lane:"oas_agent"
                 ~label:"OAS"
                 ~events:
                   [
@@ -316,7 +323,7 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
                    then "checkpoint_loaded"
                    else "empty") );
             ( "provider",
-              runtime_lens_swimlane_json scan gaps ~lane:"provider"
+              runtime_lens_swimlane_json swimlane_scan gaps ~lane:"provider"
                 ~label:"Provider"
                 ~events:
                   [
@@ -326,7 +333,7 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
                 ~terminal_status:(runtime_lens_provider_terminal_status scan)
             );
             ( "tool_runtime",
-              runtime_lens_swimlane_json scan gaps ~lane:"tool_runtime"
+              runtime_lens_swimlane_json swimlane_scan gaps ~lane:"tool_runtime"
                 ~label:"Tool Runtime"
                 ~events:
                   [
@@ -335,7 +342,7 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
                   ]
                 ~terminal_status:tool_runtime_status );
             ( "memory_context",
-              runtime_lens_swimlane_json scan gaps ~lane:"memory_context"
+              runtime_lens_swimlane_json swimlane_scan gaps ~lane:"memory_context"
                 ~label:"Memory/Context"
                 ~events:
                   [

@@ -250,6 +250,7 @@ describe('keeper runtime trace', () => {
             label: 'Provider',
             event_count: 2,
             terminal_status: 'timeout',
+            completeness: 'complete',
             gap_codes: [],
             events: [{ event: 'provider_attempt_finished', count: 1 }],
           },
@@ -258,6 +259,7 @@ describe('keeper runtime trace', () => {
             label: 'Tool Runtime',
             event_count: 1,
             terminal_status: 'missing_required_tool',
+            completeness: 'complete',
             gap_codes: ['required_tool_not_materialized'],
           },
         },
@@ -331,6 +333,7 @@ describe('keeper runtime trace', () => {
     expect(result.runtime_lens.swimlanes.provider.terminal_status).toBe('timeout')
     expect(result.runtime_lens.swimlanes.memory_context.terminal_status).toBe('unknown')
     expect(result.runtime_lens.clock_edges[0]?.edge_id).toBe('edge-provider-start')
+    expect(result.runtime_lens.swimlanes.tool_runtime.completeness).toBe('complete')
     expect(result.runtime_lens.clock_edges[0]?.provider_attempt_id).toBe('trace-lens:keeper-9:provider-attempt-1')
     expect(result.runtime_lens.clock_edges[0]?.event_bus_event_count).toBe(2)
     expect(result.runtime_lens.clock_edges[0]?.event_bus_payload_kinds).toEqual(['tool_called', 'tool_completed'])

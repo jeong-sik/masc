@@ -18,6 +18,7 @@
 set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
+REPO_ROOT=$(pwd)
 
 if ! command -v rg >/dev/null 2>&1; then
   echo "ERROR: check-variants.sh requires ripgrep (rg)." >&2
@@ -38,9 +39,37 @@ extract_ocaml_all_list() {
   # Capture everything between the opening [ and the closing ] of "let <name> ="
   # then pull out individual constructor names (word chars starting with upper
   # or lower, separated by ;/whitespace).
-  awk "/^let ${list_name}[[:space:]]*=/{found=1} found{print} found && /\]/{exit}" "$file" \
-    | rg '\b([A-Z][a-zA-Z_0-9]*)\b' -o -r '$1' \
-    | sort -u || true
+  local content
+  content=$(awk "/^let ${list_name}[[:space:]]*=/{found=1} found{print} found && /\]/{exit}" "$file")
+
+  # If the assignment line itself (or the very next line) does not contain
+  # '[', the definition is a delegation
+  # (e.g. `let all_phases = Keeper_state_machine_phase.all_phases`)
+  # rather than a list literal. Follow the reference heuristically.
+  local first_line second_line
+  first_line=$(echo "$content" | head -1)
+  second_line=$(echo "$content" | sed -n '2p')
+  if ! echo "$first_line" | grep -q '\[' && ! echo "$second_line" | grep -q '^\s*\['; then
+    local ref_module ref_name snake_module candidate
+    ref_module=$(echo "$content" | head -1 | rg '=\s*([A-Z][a-zA-Z_0-9]*)\.' -o -r '$1' || true)
+    ref_name=$(echo "$content" | head -1 | rg '\.([a-z_][a-zA-Z_0-9]*)' -o -r '$1' || true)
+    if [ -n "$ref_module" ] && [ -n "$ref_name" ]; then
+      snake_module=$(echo "$ref_module" | perl -pe 's/([A-Z])/_\L$1/g' | perl -pe 's/^_//')
+      for d in lib/keeper lib lib/coord lib/server lib/dashboard; do
+        candidate="${REPO_ROOT}/${d}/${snake_module}.ml"
+        if [ -f "$candidate" ]; then
+          # Guard against infinite recursion: only follow one level.
+          extract_ocaml_all_list "$candidate" "$ref_name"
+          return
+        fi
+      done
+    fi
+    # Could not resolve delegation — return empty so the caller can fall back.
+    true
+    return
+  fi
+
+  echo "$content" | rg '\b([A-Z][a-zA-Z_0-9]*)\b' -o -r '$1' | sort -u || true
 }
 
 # Extract constructor names from an OCaml type definition.

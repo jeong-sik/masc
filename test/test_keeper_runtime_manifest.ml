@@ -1127,6 +1127,9 @@ let test_runtime_trace_lens_summarizes_tool_axis () =
         `List (List.map (fun value -> `String value) values)
       in
       append_manifest_or_fail config
+        (M.make ~ts:"2026-05-12T23:59:59Z" ~keeper_name
+           ~trace_id ~keeper_turn_id ~event:M.Turn_started ~status:"started" ());
+      append_manifest_or_fail config
         (M.make ~ts:"2026-05-13T00:00:00Z" ~keeper_name
            ~trace_id ~keeper_turn_id ~event:M.Tool_surface_selected
            ~status:"selected"
@@ -1142,6 +1145,10 @@ let test_runtime_trace_lens_summarizes_tool_axis () =
                  ("required_tool_names", strings [ "keeper_task_done" ]);
                  ("missing_required_tool_names", strings [ "keeper_task_done" ]);
                ])
+           ());
+      append_manifest_or_fail config
+        (M.make ~ts:"2026-05-13T00:00:00.500Z" ~keeper_name
+           ~trace_id ~keeper_turn_id ~event:M.Cascade_routed ~status:"routed"
            ());
       append_manifest_or_fail config
         (M.make ~ts:"2026-05-13T00:00:01Z" ~keeper_name
@@ -1202,6 +1209,7 @@ let test_runtime_trace_lens_summarizes_tool_axis () =
       let claim_scope = Yojson.Safe.Util.(axes |> member "claim_scope") in
       let config_drift = Yojson.Safe.Util.(axes |> member "config_drift") in
       let context = Yojson.Safe.Util.(axes |> member "context") in
+      let swimlanes = Yojson.Safe.Util.(lens |> member "swimlanes") in
       Alcotest.(check (list string))
         "lens requested tools"
         [ "read_file" ]
@@ -1250,6 +1258,19 @@ let test_runtime_trace_lens_summarizes_tool_axis () =
         "lens active open loop count"
         3
         (json_int_member "active_open_loop_count" context);
+      Alcotest.(check string)
+        "tool runtime lane completes without terminal event"
+        "complete"
+        Yojson.Safe.Util.(
+          swimlanes |> member "tool_runtime" |> member "completeness" |> to_string);
+      Alcotest.(check string)
+        "cascade lane completes without terminal event"
+        "complete"
+        Yojson.Safe.Util.(
+          swimlanes
+          |> member "masc_policy_cascade"
+          |> member "completeness"
+          |> to_string);
       let api_manifest_rows =
         Yojson.Safe.Util.(json |> member "manifest_rows" |> to_list)
       in
@@ -1299,7 +1320,7 @@ let test_runtime_trace_lens_summarizes_tool_axis () =
       in
       Alcotest.(check (list string))
         "lens gap codes"
-        [ "required_tool_not_materialized"; "context_delta_missing" ]
+        [ "lane_mandatory_event_missing"; "required_tool_not_materialized"; "context_delta_missing" ]
         gaps)
 
 let test_runtime_trace_lens_surfaces_docker_github_sandbox_proof () =
@@ -1418,6 +1439,14 @@ let test_runtime_trace_lens_terminal_uses_latest_turn_without_turn_filter () =
            ~trace_id ~keeper_turn_id:1 ~event:M.Turn_started
            ~status:"started" ());
       append_manifest_or_fail config
+        (M.make ~ts:"2026-05-13T00:00:00.250Z" ~keeper_name
+           ~trace_id ~keeper_turn_id:1 ~event:M.Tool_surface_selected
+           ~status:"selected" ());
+      append_manifest_or_fail config
+        (M.make ~ts:"2026-05-13T00:00:00.500Z" ~keeper_name
+           ~trace_id ~keeper_turn_id:1 ~event:M.Cascade_routed
+           ~status:"routed" ());
+      append_manifest_or_fail config
         (M.make ~ts:"2026-05-13T00:00:01Z" ~keeper_name
            ~trace_id ~keeper_turn_id:1 ~event:M.Turn_finished
            ~status:"finished" ());
@@ -1462,7 +1491,21 @@ let test_runtime_trace_lens_terminal_uses_latest_turn_without_turn_filter () =
       Alcotest.(check bool)
         "latest turn surfaces missing finish gap"
         true
-        (List.mem "missing_turn_finished" gaps))
+        (List.mem "missing_turn_finished" gaps);
+      let swimlanes = Yojson.Safe.Util.(lens |> member "swimlanes") in
+      Alcotest.(check string)
+        "tool lane completeness uses selected turn"
+        "incomplete"
+        Yojson.Safe.Util.(
+          swimlanes |> member "tool_runtime" |> member "completeness" |> to_string);
+      Alcotest.(check string)
+        "cascade lane completeness uses selected turn"
+        "incomplete"
+        Yojson.Safe.Util.(
+          swimlanes
+          |> member "masc_policy_cascade"
+          |> member "completeness"
+          |> to_string))
 
 let test_runtime_trace_lens_groups_context_memory_swimlane () =
   let base_dir = temp_dir () in
@@ -1473,6 +1516,9 @@ let test_runtime_trace_lens_groups_context_memory_swimlane () =
       let keeper_name = "runtime-lens-memory" in
       let trace_id = "trace-runtime-lens-memory" in
       let keeper_turn_id = 8 in
+      append_manifest_or_fail config
+        (M.make ~ts:"2026-05-12T23:59:59Z" ~keeper_name
+           ~trace_id ~keeper_turn_id ~event:M.Turn_started ~status:"started" ());
       append_manifest_or_fail config
         (M.make ~ts:"2026-05-13T00:00:00Z" ~keeper_name
            ~trace_id ~keeper_turn_id ~event:M.Context_injected
@@ -1721,6 +1767,10 @@ let test_runtime_trace_lens_derives_clock_edges () =
         "provider edge lane"
         (Some "provider")
         (json_string_member_opt "lane" provider_finish);
+      Alcotest.(check (option string))
+        "provider edge derives provider source clock"
+        (Some "provider")
+        (json_string_member_opt "source_clock" provider_finish);
       let checkpoint_edge = require_edge "checkpoint_saved" in
       Alcotest.(check (option string))
         "checkpoint edge derives checkpoint id"
@@ -1866,7 +1916,26 @@ let test_runtime_trace_lens_derives_clock_edges () =
       Alcotest.(check (option string))
         "receipt edge keeps receipt link"
         (Some "/tmp/receipt-clock.jsonl")
-        (json_string_member_opt "receipt_path" receipt_links))
+        (json_string_member_opt "receipt_path" receipt_links);
+      let source_clock_axis =
+        Yojson.Safe.Util.(lens |> member "axes" |> member "source_clock")
+      in
+      Alcotest.(check int)
+        "source clock axis includes fallback wall rows"
+        8
+        (json_int_member "wall" source_clock_axis);
+      Alcotest.(check int)
+        "source clock axis includes fallback provider rows"
+        2
+        (json_int_member "provider" source_clock_axis);
+      Alcotest.(check int)
+        "source clock axis keeps explicit monotonic row"
+        1
+        (json_int_member "monotonic" source_clock_axis);
+      Alcotest.(check int)
+        "source clock axis includes event bus row"
+        1
+        (json_int_member "oas_event_bus" source_clock_axis))
 
 let test_runtime_trace_lens_surfaces_clock_integrity_gaps () =
   let base_dir = temp_dir () in
@@ -1885,6 +1954,10 @@ let test_runtime_trace_lens_surfaces_clock_integrity_gaps () =
         (M.make ~ts:"2026-05-13T00:00:01Z" ~keeper_name
            ~trace_id ~keeper_turn_id ~event:M.Provider_attempt_started
            ~status:"started" ());
+      append_manifest_or_fail config
+        (M.make ~ts:"2026-05-13T00:00:01.500Z" ~keeper_name
+           ~trace_id ~keeper_turn_id ~event:M.Tool_lineage_recorded
+           ~status:"recorded" ());
       append_manifest_or_fail config
         (M.make ~ts:"2026-05-13T00:00:02Z" ~keeper_name
            ~trace_id ~keeper_turn_id ~event:M.Event_bus_correlated
@@ -1926,6 +1999,7 @@ let test_runtime_trace_lens_surfaces_clock_integrity_gaps () =
           "clock_context_injection_missing";
           "clock_event_bus_uncorrelated";
           "clock_checkpoint_without_context";
+          "lane_mandatory_event_missing";
         ])
 
 let test_runtime_trace_lens_surfaces_clock_group_gaps () =
@@ -2933,7 +3007,21 @@ let test_source_clock_roundtrip () =
     (Option.map M.source_clock_to_string (M.source_clock_of_string "oas_event_bus"));
   Alcotest.(check (option string))
     "unknown source_clock is rejected" None
-    (Option.map M.source_clock_to_string (M.source_clock_of_string "not_real"))
+    (Option.map M.source_clock_to_string (M.source_clock_of_string "not_real"));
+  Alcotest.(check string)
+    "provider event defaults to provider clock"
+    "provider"
+    (M.source_clock_of_event M.Provider_attempt_started
+     |> M.source_clock_to_string);
+  Alcotest.(check string)
+    "context event defaults to logical clock"
+    "logical"
+    (M.source_clock_of_event M.Context_injected |> M.source_clock_to_string);
+  Alcotest.(check string)
+    "event bus defaults to oas event bus clock"
+    "oas_event_bus"
+    (M.source_clock_of_event M.Event_bus_correlated
+     |> M.source_clock_to_string)
 
 let test_runtime_trace_lens_summarizes_source_clock_axis () =
   let base_dir = temp_dir () in

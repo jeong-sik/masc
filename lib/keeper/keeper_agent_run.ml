@@ -860,9 +860,6 @@ let run_turn
                    let actionable_signal_kind =
                      actionable_contract.actionable_signal_kind
                    in
-                   let _actionable_signal_context =
-                     actionable_contract.actionable_signal_context
-                   in
                    let actionable_tool_contract_violation_reason =
                      actionable_contract.violation_reason
                    in
@@ -933,19 +930,17 @@ let run_turn
                          (Contract_helpers.completion_contract_violation_error reason)
                    in
                    let finalize_response_text raw_response_text =
-                     Keeper_agent_run_response_text.finalize
-                       ~keeper_name:meta.name
-                       ~goal:meta.goal
-                       ~actual_keeper_tool_names:!actual_keeper_tool_names_ref
-                       ~fallback_tool_names:actual_keeper_tool_names
-                       ~stop_reason:result.stop_reason
-                       ~raw_response_text
-                   in
-                   let
-                     { Keeper_agent_run_response_text.state_snapshot; response_text }
-                     =
-                     finalize_response_text raw_response_text
-                   in
+                     let
+                       { Keeper_agent_run_response_text.state_snapshot; response_text }
+                       =
+                       Keeper_agent_run_response_text.finalize
+                         ~keeper_name:meta.name
+                         ~goal:meta.goal
+                         ~actual_keeper_tool_names:!actual_keeper_tool_names_ref
+                         ~fallback_tool_names:actual_keeper_tool_names
+                         ~stop_reason:result.stop_reason
+                         ~raw_response_text
+                     in
                     let state_snapshot_source =
                       if
                         Option.is_some
@@ -1518,15 +1513,14 @@ let run_turn
                                       , Keeper_hooks_oas.inference_telemetry_to_runtime_json t )
                                     ]
                                   | None -> [])
-                               @
-                               match recall_eval with
-                               | Some e ->
-                                 [ "memory_recall_performed", `Bool e.performed
-                                 ; "memory_recall_passed", `Bool e.passed
-                                 ; "memory_recall_score", `Float e.final_score
-                                 ; "memory_recall_candidates", `Int e.candidate_count
-                                 ]
-                               | None -> [])
+                               @ (match recall_eval with
+                                  | Some e ->
+                                    [ "memory_recall_performed", `Bool e.performed
+                                    ; "memory_recall_passed", `Bool e.passed
+                                    ; "memory_recall_score", `Float e.final_score
+                                    ; "memory_recall_candidates", `Int e.candidate_count
+                                    ]
+                                  | None -> []))
                           in
                           Keeper_types_support.append_jsonl_line
                             (Keeper_types_support.keeper_decision_log_path

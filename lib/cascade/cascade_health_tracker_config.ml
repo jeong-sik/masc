@@ -139,12 +139,19 @@ let soft_rate_limit_max_clamp_sec =
     ()
 
 (** Synthetic backoff for [Capacity_backpressure] with no [retry_after_sec].
-    See {!Cascade_health_tracker_config.default_capacity_backpressure_backoff_sec}
-    for rationale. *)
+
+    5.0 s was too short — providers rotated back into selection before
+    upstream capacity recovered, causing immediate re-failure and
+    keeper-turn thrashing (task-536).  30.0 s gives a reasonable
+    recovery window while still clamping to
+    [soft_rate_limit_max_clamp_sec] when a real [retry_after] hint is
+    present.
+
+    Override via [MASC_CASCADE_CAPACITY_BACKPRESSURE_DEFAULT_BACKOFF_SEC]. *)
 let default_capacity_backpressure_backoff_sec =
   read_float_setting
     ~primary:"MASC_CASCADE_CAPACITY_BACKPRESSURE_DEFAULT_BACKOFF_SEC"
-    ~default:5.0
+    ~default:30.0
     ()
 
 let read_ring_size env_name =

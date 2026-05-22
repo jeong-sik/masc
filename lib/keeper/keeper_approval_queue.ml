@@ -158,9 +158,14 @@ let string_opt_of_json = function
   | _ -> None
 ;;
 
+(* RFC-0145 — narrow the wildcard catch-all to the only exception
+   [Yojson.Safe.Util.member] can raise on non-object inputs.  An
+   unrelated runtime exception (e.g. [Out_of_memory], async failure,
+   unexpected internal contract break) will now propagate to the
+   caller instead of being silently coerced to [None]. *)
 let string_opt_member key json =
   match Yojson.Safe.Util.member key json with
-  | exception _ -> None
+  | exception Yojson.Safe.Util.Type_error _ -> None
   | value -> string_opt_of_json value
 ;;
 

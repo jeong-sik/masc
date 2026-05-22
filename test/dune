@@ -148,6 +148,7 @@
   test_ide_migration
   test_keeper_runtime_manifest
   test_keeper_runtime_manifest_completeness
+  test_keeper_runtime_manifest_clock_separation
   test_schema_surface_index
   test_keeper_accountability
   test_reputation_ledger_v2
@@ -466,6 +467,7 @@
   test_ide_migration
   test_keeper_runtime_manifest
   test_keeper_runtime_manifest_completeness
+  test_keeper_runtime_manifest_clock_separation
   test_schema_surface_index
   test_keeper_accountability
   test_reputation_ledger_v2

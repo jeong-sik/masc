@@ -25,7 +25,7 @@ type error_kind =
   | Sandbox_docker
   | Stale_turn_timeout
   | Fiber_unresolved
-  | Oas_timeout_budget
+  | Provider_timeout
   | State_machine_guard
   | Expected_version_mismatch
   | Cascade_resolution_failure
@@ -37,7 +37,7 @@ let error_kind_to_string = function
   | Sandbox_docker -> "sandbox_docker"
   | Stale_turn_timeout -> "stale_turn_timeout"
   | Fiber_unresolved -> "fiber_unresolved"
-  | Oas_timeout_budget -> "oas_timeout_budget"
+  | Provider_timeout -> "provider_timeout"
   | State_machine_guard -> "state_machine_guard"
   | Expected_version_mismatch -> "expected_version_mismatch"
   | Cascade_resolution_failure -> "cascade_resolution_failure"
@@ -50,7 +50,7 @@ let error_kind_of_string = function
   | "sandbox_docker" -> Some Sandbox_docker
   | "stale_turn_timeout" -> Some Stale_turn_timeout
   | "fiber_unresolved" -> Some Fiber_unresolved
-  | "oas_timeout_budget" -> Some Oas_timeout_budget
+  | "provider_timeout" | "oas_timeout_budget" -> Some Provider_timeout
   | "state_machine_guard" -> Some State_machine_guard
   | "expected_version_mismatch" -> Some Expected_version_mismatch
   | "cascade_resolution_failure" -> Some Cascade_resolution_failure
@@ -64,7 +64,7 @@ let all_error_kinds =
   [ Sandbox_docker
   ; Stale_turn_timeout
   ; Fiber_unresolved
-  ; Oas_timeout_budget
+  ; Provider_timeout
   ; State_machine_guard
   ; Expected_version_mismatch
   ; Cascade_resolution_failure
@@ -99,8 +99,8 @@ let classify_error (err : string) : error_kind =
   then Stale_turn_timeout
   else if contains "fiber_unresolved"
   then Fiber_unresolved
-  else if contains "oas_timeout_budget"
-  then Oas_timeout_budget
+  else if contains "provider_timeout" || contains "oas_timeout_budget"
+  then Provider_timeout
   else if contains "state machine guard" || contains "guard violation"
   then State_machine_guard
   else if contains "expected_version" && contains "mismatch"

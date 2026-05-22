@@ -42,10 +42,10 @@ let test_classify_fiber_unresolved () =
 let test_classify_oas_timeout () =
   check
     bool
-    "oas_timeout_budget_loop(count=1) → Oas_timeout_budget"
+    "oas_timeout_budget_loop(count=1) → Provider_timeout"
     true
     (S.classify_error "oas_timeout_budget_loop(count=1)"
-     = S.Oas_timeout_budget)
+     = S.Provider_timeout)
 ;;
 
 let test_classify_state_machine_guard () =
@@ -219,7 +219,7 @@ let () =
       , [ test_case "sandbox docker" `Quick test_classify_sandbox_docker
         ; test_case "stale_turn_timeout" `Quick test_classify_stale_turn
         ; test_case "fiber_unresolved" `Quick test_classify_fiber_unresolved
-        ; test_case "oas_timeout_budget" `Quick test_classify_oas_timeout
+        ; test_case "legacy timeout-budget provider timeout" `Quick test_classify_oas_timeout
         ; test_case
             "state machine guard"
             `Quick

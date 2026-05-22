@@ -32,3 +32,12 @@ val ensure_command_existing_dirs :
 (** Inspect [cmd] for existing-directory path requirements such as
     [git -C <dir>] and lazily repair matching current-task worktrees relative
     to [cwd]. *)
+
+val ensure_shell_ir_existing_dirs :
+  config:Coord.config ->
+  meta:Keeper_types.keeper_meta ->
+  cwd:string ->
+  ir:Masc_exec.Shell_ir.t ->
+  (unit, string) result
+(** Inspect typed Shell IR for existing-directory path requirements without
+    reparsing a diagnostic command string. *)

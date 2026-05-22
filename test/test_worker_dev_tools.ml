@@ -1455,6 +1455,33 @@ let () =
               (contains_substring msg "outside allowed directories")
           | Ok () ->
             Alcotest.fail "nested Shell IR path must not bypass validation");
+      Alcotest.test_case
+        "Shell IR existing-dir materialization keeps typed argv tokens"
+        `Quick
+        (fun () ->
+          let open Masc_exec.Shell_ir in
+          let git = Masc_exec.Bin.of_string "git" |> Result.get_ok in
+          let head = Masc_exec.Bin.of_string "head" |> Result.get_ok in
+          let simple bin args =
+            Simple
+              { bin
+              ; args = List.map (fun arg -> Lit arg) args
+              ; env = []
+              ; cwd = None
+              ; redirects = []
+              ; sandbox = Masc_exec.Sandbox_target.host ()
+              }
+          in
+          let ir =
+            Pipeline
+              [ simple git [ "-C"; "repos/my repo/.worktrees/task"; "status" ]
+              ; Pipeline [ simple head [ "-1" ] ]
+              ]
+          in
+          Alcotest.(check (list string))
+            "existing-dir values"
+            [ "repos/my repo/.worktrees/task" ]
+            (Worker_dev_tools.existing_dir_path_values_of_shell_ir ir));
       Alcotest.test_case "outside literal path is blocked"
         `Quick (fun () ->
           match Worker_dev_tools.validate_command_paths

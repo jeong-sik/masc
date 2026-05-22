@@ -35,6 +35,21 @@ val required_tool_lane_unavailable_error :
   materialized_tools:string list ->
   Agent_sdk.Error.sdk_error
 
+val provider_rejection_for_required_tool_unsupported :
+  provider_label:string ->
+  missing_required_tools:string list ->
+  Cascade_error_classify.provider_rejection
+
+val no_tool_capable_provider_of_pre_dispatch_rejections :
+  cascade_name:Cascade_error_classify.cascade_name ->
+  configured_labels:string list ->
+  runtime_manifest_required_tool_names:string list ->
+  runtime_mcp_policy:Llm_provider.Llm_transport.runtime_mcp_policy option ->
+  tools:Agent_sdk.Tool.t list ->
+  required_lane_provider_rejections:Cascade_error_classify.provider_rejection list ->
+  pre_dispatch_provider_rejections:Cascade_error_classify.provider_rejection list ->
+  Cascade_error_classify.masc_internal_error option
+
 type empty_candidate_classification =
   | Tool_capability_empty
   | Provider_unavailable

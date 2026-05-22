@@ -647,8 +647,8 @@ let compute_judgments
     (* build_facts() is moved inside the bridge so a deadlock in
        get_agents_status is bounded by the resolved timeout rather
        than hanging the daemon fiber indefinitely (#8319).
-       #9629: caller migrated from legacy run_safe to run_with_caller
-       so this judge resolves its budget through Env_config_oas_bridge
+       #9629: caller uses run_with_caller so this judge resolves its
+       budget through Env_config_oas_bridge
        and surfaces in the per-caller Prometheus counter. *)
     Masc_oas_bridge.run_with_caller
       ~caller:Env_config_oas_bridge.Governance_judge (fun () ->

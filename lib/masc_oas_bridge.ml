@@ -10,12 +10,10 @@
     [caller] (#10094) is a free-form identifier ("auto_responder",
     "tool_deep_review", ...) that flows into the timeout label so
     operators can distinguish fantasy budgets from intentional ones
-    when both fire timeouts in the same session.  Defaults to
-    "unknown" so legacy callers still compile; new code should
+    when both fire timeouts in the same session.  Callers must
     pass [~caller] explicitly or use {!run_with_caller}, which
     accepts a typed caller and pulls the configured budget from
     [Env_config_oas_bridge]. *)
-let default_caller = "unknown"
 let min_timeout_s = 0.0
 let routine_cancel_inner_substring = "Eio__core__Fiber.Not_first"
 
@@ -23,7 +21,7 @@ let is_routine_fast_cancel ~bucket ~inner_str =
   String.equal bucket "fast"
   && String_util.contains_substring inner_str routine_cancel_inner_substring
 
-let run_safe ?(caller = default_caller) ~timeout_s fn =
+let run_safe ~caller ~timeout_s fn =
   if not (Float.is_finite timeout_s) || Float.compare timeout_s min_timeout_s <= 0 then
     invalid_arg
       (Printf.sprintf

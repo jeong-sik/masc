@@ -1042,7 +1042,6 @@ let prepare_agent_setup
     ; query_text
     }
   in
-  Keeper_tool_alias.register_structured_routes ();
   let initial_tool_surface =
     compute_tool_surface
       ~turn:(start_turn_count + 1)

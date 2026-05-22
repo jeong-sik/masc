@@ -230,10 +230,9 @@ let compute_judgments
       Keeper_cascade_profile.Operator_judge
   in
   match
-    (* #9629: caller migrated from legacy run_safe (which fell back to
-       the global 30s inference timeout) to run_with_caller so this
-       judge inherits Operator_judge's 300s default and surfaces in the
-       per-caller Prometheus counter. *)
+    (* #9629: caller uses run_with_caller so this judge inherits
+       Operator_judge's 300s default and surfaces in the per-caller
+       Prometheus counter. *)
     Masc_oas_bridge.run_with_caller
       ~caller:Env_config_oas_bridge.Operator_judge (fun () ->
       Keeper_turn_driver_wrappers.run_named_with_masc_tools ~cascade_name

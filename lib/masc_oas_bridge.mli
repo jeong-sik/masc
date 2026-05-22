@@ -6,11 +6,10 @@
 (** Safe execution of a generic OAS operation with a mandatory timeout.
     Catches [Eio.Time.Timeout] and [Eio.Cancel.Cancelled] to perform functional rollback.
     [caller] (#10094) labels the Prometheus timeout counter so the
-    operator can attribute timeouts to specific call sites; defaults
-    to ["unknown"] for backwards compatibility with legacy callers.
+    operator can attribute timeouts to specific call sites.
     Raises [Invalid_argument] when [timeout_s] is not positive and finite. *)
 val run_safe
-  :  ?caller:string
+  :  caller:string
   -> timeout_s:float
   -> (unit -> ('a, Agent_sdk.Error.sdk_error) result)
   -> ('a, Agent_sdk.Error.sdk_error) result

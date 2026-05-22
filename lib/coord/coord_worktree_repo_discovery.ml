@@ -88,23 +88,27 @@ let repo_exact_alias_variants token =
   |> List.filter (fun s -> s <> "")
   |> List.sort_uniq String.compare
 
+(* RFC-0145 — narrow wildcard fallbacks to [Otoml.Type_error] only.
+   Otoml getters raise exactly that exception on type mismatch; any
+   unrelated runtime exception (allocation failure, async failure)
+   now propagates to the caller. *)
 let toml_table_opt value =
   try Some (Otoml.get_table value) with
-  | _ -> None
+  | Otoml.Type_error _ -> None
 
 let toml_string_opt tbl key =
   match List.assoc_opt key tbl with
   | None -> None
   | Some value -> (
       try Some (Otoml.get_string value) with
-      | _ -> None)
+      | Otoml.Type_error _ -> None)
 
 let toml_string_array_or_empty tbl key =
   match List.assoc_opt key tbl with
   | None -> []
   | Some value -> (
       try Otoml.get_array Otoml.get_string value with
-      | _ -> [])
+      | Otoml.Type_error _ -> [])
 
 let repository_config_path config =
   Filename.concat
@@ -151,8 +155,14 @@ let repository_aliases_for_candidate config ~repo_name =
                      in
                      if List.mem repo_name aliases then aliases else [])
             |> List.sort_uniq String.compare)
+    (* RFC-0145 — narrow to the exceptions [Otoml.Parser.from_file]
+       can raise on malformed / unreadable [repositories.toml].  Inner
+       [Otoml.find_opt] returns an option (does not raise), and the
+       nested [toml_*_opt] helpers already swallow [Otoml.Type_error]
+       at their own boundaries.  Unrelated runtime exceptions now
+       propagate to the caller. *)
     with
-    | _ -> []
+    | Otoml.Parse_error _ | Sys_error _ -> []
 
 (* Route to the SSOT helper rather than allocating String.sub on every
    step.  Keeps semantics aligned across modules (empty needle returns

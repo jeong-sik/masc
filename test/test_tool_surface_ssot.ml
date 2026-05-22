@@ -345,6 +345,63 @@ let test_system_internal_not_visible () =
       (String.concat ", " visible);
   Alcotest.(check bool) "all system_internal hidden" true (visible = [])
 
+let test_keeper_internal_descriptions_no_cross_leak () =
+  (* Keeper-internal tool descriptions should not reference other internal
+     tool names.  The LLM sees these descriptions and will attempt to call
+     whatever name it finds — referencing [keeper_shell] in the [keeper_bash]
+     description causes the LLM to emit [keeper_shell] calls that bypass
+     the alias routing layer (Keeper_tool_alias only routes public names
+     like [Bash], [Grep], etc.). *)
+  let contains_substring haystack needle =
+    let hlen = String.length haystack in
+    let nlen = String.length needle in
+    if nlen = 0 then true
+    else if nlen > hlen then false
+    else
+      let rec loop i =
+        i + nlen <= hlen
+        && (String.sub haystack i nlen = needle || loop (i + 1))
+      in
+      loop 0
+  in
+  let internal_names_to_check =
+    [ "keeper_bash"; "keeper_shell"; "keeper_fs_edit"; "keeper_fs_read"
+    ; "keeper_memory_search"; "keeper_memory_write"; "keeper_board_post"
+    ; "keeper_board_list"; "keeper_pr_create"; "keeper_pr_review_comment"
+    ; "masc_code_shell"; "shell_exec"; "worker_dev_tools"
+    ]
+  in
+  let internal_schemas =
+    Tool_shard.all_keeper_tool_schemas
+    |> List.filter (fun (s : Masc_domain.tool_schema) ->
+           Tool_catalog.is_on_surface Tool_catalog.Keeper_internal s.name)
+  in
+  let violations = ref [] in
+  List.iter (fun (schema : Masc_domain.tool_schema) ->
+    List.iter (fun leaked_name ->
+      if String.length leaked_name > 0
+         && String.equal schema.name leaked_name = false
+         && contains_substring schema.description leaked_name
+      then
+        violations :=
+          (schema.name, leaked_name) :: !violations
+    ) internal_names_to_check
+  ) internal_schemas;
+  if !violations <> [] then begin
+    let msg =
+      !violations
+      |> List.map (fun (host, leak) ->
+             Printf.sprintf "  %s.description contains \"%s\"" host leak)
+      |> String.concat "\n"
+    in
+    Alcotest.failf
+      "Keeper-internal description cross-leak:\n%s\n\
+       Internal names should not appear in descriptions; use public-facing \
+       terms (Bash, Grep, Edit, Write, Read) instead." msg
+  end
+  else
+    Alcotest.(check bool) "no cross-leak" true (!violations = [])
+
 let test_system_internal_callable () =
   (* System_internal tools must be callable via tools/call. *)
   let system_tools = Tool_catalog.tools_for_surface Tool_catalog.System_internal in
@@ -461,6 +518,8 @@ let () =
             test_active_surfaced_tools_are_routable_and_permissioned;
           Alcotest.test_case "Public_mcp count cap <= 80" `Quick
             test_public_mcp_count_cap;
+          Alcotest.test_case "Keeper_internal descriptions no cross-leak" `Quick
+            test_keeper_internal_descriptions_no_cross_leak;
           Alcotest.test_case "System_internal not visible" `Quick
             test_system_internal_not_visible;
           Alcotest.test_case "System_internal callable" `Quick

@@ -242,7 +242,7 @@ let masc_internal_error_to_json = function
       } ->
     `Assoc
       [
-        ("kind", `String "oas_timeout_budget");
+        ("kind", `String "provider_timeout");
         ("budget_sec", `Float budget_sec);
         ("keeper_turn_timeout_sec", `Float keeper_turn_timeout_sec);
         ("estimated_input_tokens", `Int estimated_input_tokens);
@@ -378,11 +378,11 @@ let summary_of_masc_internal_error = function
 
 (* #9933: classify emitted [masc_oas_error] payloads by kind so
    dashboards and Grafana alerts can watch the fleet-wide rate per
-   error class (cascade_exhausted vs turn_timeout vs
+   error class (cascade_exhausted vs provider_timeout vs
    ambiguous_post_commit, etc.) rather than reading the free-form
-   BDI blocker string.  Historical timeout-budget inputs are folded
-   into the owner-specific turn-timeout metric label; do not mint a
-   first-class [kind=oas_timeout_budget] series.
+   BDI blocker string.  Historical [oas_timeout_budget] events accumulated
+   across 9 keepers in 24h without an aggregate signal — this
+   counter is the per-kind surface.
 
    Emit point is this constructor so all 14 call sites of
    [sdk_error_of_masc_internal_error] are covered automatically,
@@ -401,7 +401,7 @@ let () =
        kind (cascade_exhausted | capacity_backpressure | resumable_cli_session | \
        no_tool_capable_provider | accept_rejected | \
        admission_queue_timeout | admission_queue_rejected | \
-       turn_timeout | max_tokens_ceiling_violation | \
+       turn_timeout | provider_timeout | max_tokens_ceiling_violation | \
        ambiguous_post_commit | internal_unhandled_exception | \
        internal_bridge_exception | internal_contract_rejected), \
        cascade_name (originating cascade or \"unknown\" for \
@@ -417,7 +417,7 @@ let kind_of_masc_internal_error = function
   | Admission_queue_timeout _ -> "admission_queue_timeout"
   | Admission_queue_rejected _ -> "admission_queue_rejected"
   | Turn_timeout _ -> "turn_timeout"
-  | Oas_timeout_budget _ -> "turn_timeout"
+  | Oas_timeout_budget _ -> "provider_timeout"
   | Max_tokens_ceiling_violation _ -> "max_tokens_ceiling_violation"
   | Ambiguous_post_commit _ -> "ambiguous_post_commit"
   | Internal_unhandled_exception _ -> "internal_unhandled_exception"

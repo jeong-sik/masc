@@ -27,8 +27,8 @@ let test_metric_name_stable () =
     "masc_oas_error_total"
     OWN.masc_oas_error_total_metric
 
-let test_oas_timeout_budget_kind () =
-  let kind = "oas_timeout_budget" in
+let test_provider_timeout_kind () =
+  let kind = "provider_timeout" in
   let before = counter_for kind in
   let _ =
     OWN.sdk_error_of_masc_internal_error
@@ -44,7 +44,7 @@ let test_oas_timeout_budget_kind () =
          })
   in
   Alcotest.(check (float 0.0001))
-    "oas_timeout_budget counter +1"
+    "provider_timeout counter +1"
     (before +. 1.0)
     (counter_for kind)
 
@@ -308,9 +308,9 @@ let test_ambiguous_post_commit_kind () =
 let test_kind_isolation () =
   (* Bumping one kind must not move the counter for a different
      kind — the label separation is what lets Grafana split
-     [rate(...{kind=~"oas_timeout_budget"}[5m])] cleanly. *)
+     [rate(...{kind=~"provider_timeout"}[5m])] cleanly. *)
   let a = "turn_timeout" in
-  let b = "oas_timeout_budget" in
+  let b = "provider_timeout" in
   let b_before = counter_for b in
   let _ =
     OWN.sdk_error_of_masc_internal_error
@@ -397,8 +397,8 @@ let () =
         ] );
       ( "per_kind_increment",
         [
-          Alcotest.test_case "oas_timeout_budget" `Quick
-            test_oas_timeout_budget_kind;
+          Alcotest.test_case "provider_timeout" `Quick
+            test_provider_timeout_kind;
           Alcotest.test_case "turn_timeout" `Quick
             test_turn_timeout_kind;
           Alcotest.test_case "cascade_exhausted" `Quick

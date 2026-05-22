@@ -14,7 +14,6 @@ type t =
 [@@deriving yojson, show, eq, ord]
 
 val to_string : t -> string
-val of_string : string -> (t, string) result
 
 (** Maximum allowed execution mode for this risk class.
     [None] means the run should be rejected outright. *)

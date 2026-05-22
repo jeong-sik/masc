@@ -269,6 +269,7 @@
   exec_policy_log_sanitize
   exec_policy_command_syntax
   exec_policy_mutation_classifier
+  exec_shell_adapter
   ;; keeper_memory sub-modules
   keeper_memory_policy_summary_filter
   keeper_memory_policy

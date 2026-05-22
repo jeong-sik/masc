@@ -1940,6 +1940,8 @@ let () =
       Alcotest.test_case "worker_dev_tools delegates shared shell policy" `Quick
         (fun () ->
         let worker_source = load_source "lib/worker_dev_tools.ml" in
+        let code_shell_source = load_source "lib/tool_code_write.ml" in
+        let shell_adapter_source = load_source "lib/exec_shell_adapter.ml" in
         let exec_policy_source = load_source "lib/exec_policy.ml" in
         let keeper_bash_source = load_source "lib/keeper/keeper_shell_bash.ml" in
         Alcotest.(check bool) "worker delegates command context" true
@@ -1961,6 +1963,34 @@ let () =
         Alcotest.(check bool) "policy helper names are no longer worker-owned" false
           (contains_substring exec_policy_source "Worker_dev_tools_paths");
         Alcotest.(check bool) "policy uses renamed path helper" true
-          (contains_substring exec_policy_source "module Paths = Exec_policy_paths"));
+          (contains_substring exec_policy_source "module Paths = Exec_policy_paths");
+        Alcotest.(check bool) "shell adapter owns cwd default helper" true
+          (contains_substring shell_adapter_source "let shell_ir_with_default_cwd");
+        Alcotest.(check bool) "worker delegates cwd default helper" true
+          (contains_substring
+             worker_source
+             "Exec_shell_adapter.shell_ir_with_default_cwd");
+        Alcotest.(check bool) "code shell delegates cwd default helper" true
+          (contains_substring
+             code_shell_source
+             "Exec_shell_adapter.shell_ir_with_default_cwd");
+        Alcotest.(check bool) "worker no longer owns cwd default helper" false
+          (contains_substring worker_source "let shell_ir_with_default_cwd");
+        Alcotest.(check bool) "code shell no longer owns cwd default helper" false
+          (contains_substring code_shell_source "let shell_ir_with_default_cwd");
+        Alcotest.(check bool) "shell adapter owns dispatch output helper" true
+          (contains_substring shell_adapter_source "let output_for_dispatch_status");
+        Alcotest.(check bool) "worker delegates dispatch output helper" true
+          (contains_substring
+             worker_source
+             "Exec_shell_adapter.output_for_dispatch_status");
+        Alcotest.(check bool) "code shell delegates dispatch output helper" true
+          (contains_substring
+             code_shell_source
+             "Exec_shell_adapter.output_for_dispatch_status");
+        Alcotest.(check bool) "worker no longer owns dispatch output helper" false
+          (contains_substring worker_source "let output_for_dispatch_status");
+        Alcotest.(check bool) "code shell no longer owns dispatch output helper" false
+          (contains_substring code_shell_source "let output_for_dispatch_status"));
     ];
   ]

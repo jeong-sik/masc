@@ -277,35 +277,6 @@ let make_file_write ?workdir ?on_exec () =
    validation callsite can record the attribution without forward
    referencing. *)
 
-let shell_ir_with_default_cwd cwd ir =
-  match cwd with
-  | None -> ir
-  | Some dir ->
-    let default_cwd = Masc_exec.Path_scope.classify ~raw:dir ~cwd:dir in
-    let rec map_ir = function
-      | Masc_exec.Shell_ir.Simple simple ->
-        let simple =
-          match simple.cwd with
-          | Some _ -> simple
-          | None -> { simple with cwd = Some default_cwd }
-        in
-        Masc_exec.Shell_ir.Simple simple
-      | Masc_exec.Shell_ir.Pipeline stages ->
-        Masc_exec.Shell_ir.Pipeline (List.map map_ir stages)
-    in
-    map_ir ir
-;;
-
-let output_for_dispatch_status ~(status : Unix.process_status) ~stdout ~stderr =
-  match status with
-  | Unix.WEXITED 0 -> stdout
-  | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> (
-    match stdout, stderr with
-    | "", err -> err
-    | out, "" -> out
-    | out, err -> out ^ "\n" ^ err)
-;;
-
 let simple_literal_argv (simple : Masc_exec.Shell_ir.simple) =
   match simple_literal_args simple with
   | None -> None
@@ -492,7 +463,7 @@ let make_shell_exec_with_allowlist
                            let dispatch_result =
                              Fd_accountant.with_slot ~kind:Sandbox_exec (fun () ->
                                let dispatch_ir =
-                                 shell_ir_with_default_cwd
+                                 Exec_shell_adapter.shell_ir_with_default_cwd
                                    cwd
                                    context.Exec_shell_gate.ast
                                in
@@ -501,7 +472,7 @@ let make_shell_exec_with_allowlist
                                  dispatch_ir)
                            in
                            let output =
-                             output_for_dispatch_status
+                             Exec_shell_adapter.output_for_dispatch_status
                                ~status:dispatch_result.status
                                ~stdout:dispatch_result.stdout
                                ~stderr:dispatch_result.stderr

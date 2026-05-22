@@ -140,7 +140,7 @@ let append_metrics_snapshot
       ~message_count:lifecycle.message_count
       ~compaction:lifecycle.compaction
       ~handoff_json:lifecycle.handoff_json
-      ?timeout_budget_json:
+      ?provider_timeout_budget_json:
         (Option.map KCB.provider_timeout_budget_to_yojson last_timeout_budget)
       ()
   with

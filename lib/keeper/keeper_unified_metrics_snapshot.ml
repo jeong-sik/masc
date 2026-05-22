@@ -21,7 +21,7 @@ let append_metrics_snapshot ~(config : Coord.config) ~(meta : keeper_meta)
     ~(message_count : int)
     ~(compaction : Keeper_exec_context.compaction_event)
     ~(handoff_json : Yojson.Safe.t option)
-    ?timeout_budget_json ?deliberation_execution () : unit =
+    ?provider_timeout_budget_json ?deliberation_execution () : unit =
   let now_ts = Time_compat.now () in
   let _observation = observation in
   let turn_mode = turn_mode_of_result result in
@@ -119,8 +119,8 @@ let append_metrics_snapshot ~(config : Coord.config) ~(meta : keeper_meta)
         ("resolved_model_id", `Null);
         ("prompt_fingerprint", `String result.prompt_metrics.fingerprint);
         ("prompt", Keeper_agent_run.prompt_metrics_to_json result.prompt_metrics);
-        ( "timeout_budget",
-          match timeout_budget_json with
+        ( "provider_timeout_budget",
+          match provider_timeout_budget_json with
           | Some value -> value
           | None -> `Null );
         ("ctx_composition", Keeper_agent_run.ctx_composition_to_json result.ctx_composition);
@@ -250,4 +250,3 @@ let append_metrics_snapshot ~(config : Coord.config) ~(meta : keeper_meta)
            ]
          ()
    | _ -> ())
-

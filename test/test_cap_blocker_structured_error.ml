@@ -3,7 +3,7 @@
    #9933: blocker field must preserve structured masc_oas_error
    JSON payloads. The pre-fix behaviour truncated at 200 chars,
    slicing payloads like
-   "Internal error: [masc_oas_error] {\"kind\":\"oas_timeout_budget\",\
+   "Internal error: [masc_oas_error] {\"kind\":\"provider_timeout\",\
    \"budget_sec\":30.0,...}" mid-key and leaving operators with
    "budget_" as the trailing evidence.
 
@@ -20,7 +20,7 @@
 module T = Masc_mcp.Keeper_social_model_types
 
 let oas_error_payload_small =
-  "[masc_oas_error] {\"kind\":\"oas_timeout_budget\",\
+  "[masc_oas_error] {\"kind\":\"provider_timeout\",\
    \"budget_sec\":30.0,\"keeper_turn_timeout_sec\":120.0,\
    \"estimated_input_tokens\":45000,\"source\":\"tool_list_build\"}"
 
@@ -28,7 +28,7 @@ let wrapped_oas_error_payload_small = "Internal error: " ^ oas_error_payload_sma
 
 let oas_error_payload_huge =
   let buf = Buffer.create 2500 in
-  Buffer.add_string buf "[masc_oas_error] {\"kind\":\"oas_timeout_budget\",\"extra\":\"";
+  Buffer.add_string buf "[masc_oas_error] {\"kind\":\"provider_timeout\",\"extra\":\"";
   for _ = 1 to 2500 do Buffer.add_char buf 'x' done;
   Buffer.add_string buf "\"}";
   Buffer.contents buf

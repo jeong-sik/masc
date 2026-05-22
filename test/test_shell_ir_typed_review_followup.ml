@@ -34,7 +34,7 @@ let make_simple
       args
   =
   let bin = Result.get_ok (Bin.of_string bin) in
-  let args = List.map (fun s -> Shell_ir.Lit s) args in
+  let args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) args in
   {
     Shell_ir.bin;
     args;
@@ -65,7 +65,7 @@ let constructor_label = function
 
 let test_env_forces_generic () =
   let simple =
-    make_simple ~env:[ "PATH", Shell_ir.Lit "/tmp" ] "ls" [ "-l" ]
+    make_simple ~env:[ "PATH", Shell_ir.Lit ("/tmp", Shell_ir.default_meta) ] "ls" [ "-l" ]
   in
   let result = Shell_ir_typed.of_simple simple in
   check bool
@@ -99,7 +99,7 @@ let test_non_literal_arg_falls_through_to_generic () =
   let simple_with_var =
     {
       Shell_ir.bin = Result.get_ok (Bin.of_string "ls");
-      args = [ Shell_ir.Var "HOME" ];
+      args = [ Shell_ir.Var ("HOME", Shell_ir.default_meta) ];
       env = [];
       cwd = None;
       redirects = [];
@@ -155,8 +155,8 @@ let test_sudo_round_trip_preserves_quoted_arg () =
   let reconstructed_argv =
     List.map
       (function
-        | Shell_ir.Lit (s, Shell_ir.default_meta) -> s
-        | Shell_ir.Var (_, Shell_ir.default_meta) | Shell_ir.Concat _ -> failwith "unexpected non-lit arg")
+        | Shell_ir.Lit (s, _) -> s
+        | Shell_ir.Var (_, _) | Shell_ir.Concat _ -> failwith "unexpected non-lit arg")
       reconstructed.Shell_ir.args
   in
   check (list string)

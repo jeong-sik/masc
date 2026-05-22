@@ -6,7 +6,7 @@
     transparent wrappers such as [env] and [opam exec]. *)
 
 let rec shell_ir_literal_text = function
-  | Masc_exec.Shell_ir.Lit (text, Shell_ir.default_meta) -> Some text
+  | Masc_exec.Shell_ir.Lit (text, _) -> Some text
   | Masc_exec.Shell_ir.Concat parts ->
     let rec loop acc = function
       | [] -> Some (String.concat "" (List.rev acc))
@@ -16,7 +16,7 @@ let rec shell_ir_literal_text = function
          | None -> None)
     in
     loop [] parts
-  | Masc_exec.Shell_ir.Var (_, Shell_ir.default_meta) -> None
+  | Masc_exec.Shell_ir.Var (_, _) -> None
 ;;
 
 let argv_words_of_simple (simple : Masc_exec.Shell_ir.simple) =

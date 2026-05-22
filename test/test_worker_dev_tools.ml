@@ -1373,7 +1373,7 @@ let () =
           let ir =
             Simple
               { bin
-              ; args = [ Lit "/etc/passwd" ]
+              ; args = [ Lit ("/etc/passwd", default_meta) ]
               ; env = []
               ; cwd = None
               ; redirects = []
@@ -1397,7 +1397,7 @@ let () =
           let ir =
             Simple
               { bin
-              ; args = [ Var "DYNAMIC_INPUT" ]
+              ; args = [ Var ("DYNAMIC_INPUT", default_meta) ]
               ; env = []
               ; cwd = None
               ; redirects =
@@ -1444,7 +1444,7 @@ let () =
           let simple bin args =
             Simple
               { bin
-              ; args = List.map (fun arg -> Lit arg) args
+              ; args = List.map (fun arg -> Lit (arg, default_meta)) args
               ; env = []
               ; cwd = None
               ; redirects = []
@@ -1473,7 +1473,7 @@ let () =
           let simple bin args =
             Simple
               { bin
-              ; args = List.map (fun arg -> Lit arg) args
+              ; args = List.map (fun arg -> Lit (arg, default_meta)) args
               ; env = []
               ; cwd = None
               ; redirects = []

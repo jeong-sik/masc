@@ -226,7 +226,6 @@ describe('FleetHealthPanel', () => {
           missing_task_scope: false,
           partial_task_scope: false,
           current_writer_missing_task_scope: false,
-          legacy_unscoped_only: false,
         },
       },
     }

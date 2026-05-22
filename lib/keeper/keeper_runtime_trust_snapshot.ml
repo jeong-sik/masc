@@ -79,12 +79,8 @@ let terminal_reason_from_receipt receipt =
    The provider-runtime classes preserve their originating blocker
    string in the typed payload instead of collapsing to a single
    "provider_error" literal. *)
-let canonical_runtime_blocker_class = function
-  | "oas_timeout_budget" -> "turn_timeout"
-  | blocker_class -> blocker_class
-
 let disposition_of_runtime_blocker_class raw_blocker_class =
-  match canonical_runtime_blocker_class raw_blocker_class with
+  match raw_blocker_class with
   | "completion_contract_violation" | "tool_required_unsatisfied" ->
       Keeper_turn_disposition.Required_tool_use_unsatisfied
   | "turn_timeout"

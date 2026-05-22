@@ -264,6 +264,7 @@ let runtime_lens_gaps ~terminal_event_present ~claim_scope ~config_drift scan =
                 Keeper_runtime_manifest.all_event_kinds
             in
             if not has_any_event_in_lane then acc
+            else if scan.has_terminal then acc
             else
               let missing =
                 List.filter
@@ -321,6 +322,52 @@ let runtime_lens_gaps ~terminal_event_present ~claim_scope ~config_drift scan =
            }
            :: gaps
          | _ -> gaps)
+    |> (fun gaps ->
+         (* P5: terminal vs complete proof separation.
+            Turn_finished exists but a mandatory lane policy is not satisfied. *)
+         if scan.has_terminal
+         then
+           let incomplete_lanes =
+             Server_dashboard_http_keeper_runtime_lens_swimlane.lane_policies
+             |> List.filter_map
+                  (fun policy ->
+                     let lane =
+                       policy.Server_dashboard_http_keeper_runtime_lens_swimlane.lane
+                     in
+                     let missing =
+                       List.filter
+                         (fun event ->
+                            Server_dashboard_http_keeper_runtime_manifest_scan
+                              .runtime_manifest_scan_event_count
+                              scan event
+                            = 0)
+                         policy.mandatory_events
+                     in
+                     match missing with
+                     | [] -> None
+                     | _ ->
+                       let missing_codes =
+                         List.map Keeper_runtime_manifest.event_kind_to_string missing
+                       in
+                       Some (lane, missing_codes))
+           in
+           match incomplete_lanes with
+           | [] -> gaps
+           | _ ->
+             let detail =
+               incomplete_lanes
+               |> List.map
+                    (fun (lane, codes) ->
+                       Printf.sprintf "%s: %s" lane (String.concat ", " codes))
+               |> String.concat "; "
+             in
+             { code = "turn_terminal_incomplete"
+             ; severity = "warn"
+             ; lane = "keeper"
+             ; detail = Some detail
+             }
+             :: gaps
+         else gaps)
     |> (fun gaps ->
          if scan.provider_started_count > 0
             && scan.event_bus_correlation_ids = []

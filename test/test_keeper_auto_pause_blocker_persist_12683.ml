@@ -4,9 +4,9 @@
 
     Two structural facts this test pins:
 
-    1. [blocker_class_to_string] maps [Turn_timeout] and
-       [Oas_timeout_budget] to canonical labels that the dashboard
-       and [paused_meta_requires_reconcile_recovery] can parse back.
+    1. [blocker_class_to_string] maps legacy [Oas_timeout_budget]
+       to [Turn_timeout] so dashboard/meta round-trips do not resurrect
+       timeout-budget as a distinct blocker class.
 
     2. A meta JSON written with [last_blocker] and [last_blocker_class]
        round-trips through serialization/deserialization without loss,
@@ -24,13 +24,14 @@ let test_turn_timeout_blocker_class_roundtrip () =
   | Some _ -> ()
   | None -> fail "Turn_timeout label did not parse back"
 
-let test_oas_timeout_budget_blocker_class_roundtrip () =
+let test_oas_timeout_budget_blocker_class_collapses_to_turn_timeout () =
   let cls = KT.Oas_timeout_budget in
   let label = KT.blocker_class_to_string cls in
-  check bool "label non-empty" true (String.length label > 0);
+  check string "label" "turn_timeout" label;
   match MC.blocker_class_of_serialized_string label with
-  | Some _ -> ()
-  | None -> fail "Oas_timeout_budget label did not parse back"
+  | Some MC.Turn_timeout -> ()
+  | Some _ -> fail "legacy timeout-budget label parsed as wrong class"
+  | None -> fail "legacy timeout-budget label did not parse back"
 
 let test_stale_fleet_batch_blocker_class_roundtrip () =
   let cls = KT.Stale_fleet_batch in
@@ -50,11 +51,11 @@ let test_capacity_backpressure_blocker_class_roundtrip () =
   | Some _ -> fail "Capacity_backpressure label parsed as wrong class"
   | None -> fail "Capacity_backpressure label did not parse back"
 
-let test_blocker_class_labels_are_distinct () =
+let test_timeout_blocker_class_labels_collapse () =
   let tt = KT.blocker_class_to_string KT.Turn_timeout in
   let ot = KT.blocker_class_to_string KT.Oas_timeout_budget in
   let fb = KT.blocker_class_to_string KT.Stale_fleet_batch in
-  check bool "Turn_timeout <> Oas_timeout_budget" true (tt <> ot);
+  check bool "Turn_timeout = Oas_timeout_budget alias" true (tt = ot);
   check bool "Stale_fleet_batch distinct" true (fb <> tt && fb <> ot)
 
 let test_meta_json_roundtrip_with_auto_pause_blocker () =
@@ -92,8 +93,8 @@ let test_meta_json_roundtrip_with_auto_pause_blocker () =
    | Some info ->
      check string "last_blocker.detail preserved" blocker_text info.detail;
      (match info.klass with
-      | KT.Oas_timeout_budget -> ()
-      | _ -> fail "blocker klass not Oas_timeout_budget after roundtrip")
+      | KT.Turn_timeout -> ()
+      | _ -> fail "legacy timeout-budget blocker did not collapse to Turn_timeout")
    | None -> fail "last_blocker should be Some after roundtrip")
 
 let test_meta_json_roundtrip_with_stale_storm_blocker () =
@@ -139,14 +140,14 @@ let () =
         [
           test_case "Turn_timeout roundtrip" `Quick
             test_turn_timeout_blocker_class_roundtrip;
-          test_case "Oas_timeout_budget roundtrip" `Quick
-            test_oas_timeout_budget_blocker_class_roundtrip;
+          test_case "Oas_timeout_budget collapses to Turn_timeout" `Quick
+            test_oas_timeout_budget_blocker_class_collapses_to_turn_timeout;
           test_case "Stale_fleet_batch roundtrip" `Quick
             test_stale_fleet_batch_blocker_class_roundtrip;
           test_case "Capacity_backpressure roundtrip" `Quick
             test_capacity_backpressure_blocker_class_roundtrip;
-          test_case "labels are distinct" `Quick
-            test_blocker_class_labels_are_distinct;
+          test_case "timeout labels collapse" `Quick
+            test_timeout_blocker_class_labels_collapse;
         ] );
       ( "meta JSON roundtrip",
         [

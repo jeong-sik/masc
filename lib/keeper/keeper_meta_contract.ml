@@ -165,7 +165,7 @@ let blocker_class_to_string = function
   | Autonomous_slot_wait_timeout -> "autonomous_slot_wait_timeout"
   | Admission_queue_wait_timeout -> "admission_queue_wait_timeout"
   | Turn_timeout_after_queue_wait -> "turn_timeout_after_queue_wait"
-  | Oas_timeout_budget -> "oas_timeout_budget"
+  | Oas_timeout_budget -> "turn_timeout"
   | Turn_timeout -> "turn_timeout"
   | Turn_livelock_blocked -> "turn_livelock_blocked"
   | Completion_contract_violation -> "completion_contract_violation"
@@ -193,7 +193,7 @@ let blocker_class_of_serialized_string = function
   | "autonomous_slot_wait_timeout" -> Some Autonomous_slot_wait_timeout
   | "admission_queue_wait_timeout" -> Some Admission_queue_wait_timeout
   | "turn_timeout_after_queue_wait" -> Some Turn_timeout_after_queue_wait
-  | "oas_timeout_budget" -> Some Oas_timeout_budget
+  | "oas_timeout_budget" -> Some Turn_timeout
   | "turn_timeout" -> Some Turn_timeout
   | "turn_livelock_blocked" -> Some Turn_livelock_blocked
   | "completion_contract_violation" -> Some Completion_contract_violation

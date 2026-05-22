@@ -12,7 +12,6 @@ type client = {
 
 let clients : (string, client) Hashtbl.t = Hashtbl.create 16
 let registry_mutex = Eio.Mutex.create ()
-let client_count_atomic = Atomic.make 0
 let client_id_counter = Atomic.make 0
 
 let with_registry_rw f =
@@ -45,25 +44,18 @@ let register session_id ~push ~last_seq ?(kind_filters = []) () =
           created_at;
         }
       in
-      let existed = Hashtbl.mem clients session_id in
       Hashtbl.replace clients session_id client;
-      if not existed then Atomic.incr client_count_atomic;
       client_id)
 
 let unregister session_id =
   with_registry_rw (fun () ->
-      if Hashtbl.mem clients session_id then begin
-        Hashtbl.remove clients session_id;
-        Atomic.decr client_count_atomic
-      end)
+      if Hashtbl.mem clients session_id then
+        Hashtbl.remove clients session_id)
 
 let unregister_if_current session_id client_id =
   with_registry_rw (fun () ->
       match Hashtbl.find_opt clients session_id with
       | Some client when client.client_id = client_id ->
-          Hashtbl.remove clients session_id;
-          Atomic.decr client_count_atomic
+          Hashtbl.remove clients session_id
       | Some _ -> ()
       | None -> ())
-
-let client_count () = Atomic.get client_count_atomic

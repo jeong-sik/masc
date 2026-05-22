@@ -85,7 +85,6 @@ const ATTENTION_REASON_LABELS: Record<AttentionReason, string> = {
 }
 
 function canonicalAttentionReason(reason: string | null): string | null {
-  if (reason === 'timeout_budget_exhausted') return 'runtime_blocked'
   if (reason === 'cascade_attempts_exhausted') return 'runtime_blocked'
   if (reason === 'provider_tool_capability_missing') return 'runtime_blocked'
   if (reason === 'completion_contract_violation') return 'runtime_blocked'
@@ -185,14 +184,10 @@ function isAttentionPairDuplicate(reason: string | null, action: string | null):
 }
 
 function canonicalTerminalCode(code: string | null): string | null {
-  if (code === 'oas_timeout_budget') return 'turn_timeout'
   return code
 }
 
 function canonicalTerminalSummary(code: string | null, summary: string | null | undefined): string | null {
-  if (code === 'oas_timeout_budget') {
-    return '턴 실행 시간이 제한 시간을 초과했습니다.'
-  }
   return summary?.trim() || null
 }
 
@@ -266,10 +261,7 @@ function renderCascadeAttemptObservation(observation: CascadeAttemptObservation)
 }
 
 export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
-  const runtimeBlockerClass =
-    keeper.runtime_blocker_class === 'oas_timeout_budget'
-      ? 'turn_timeout'
-      : keeper.runtime_blocker_class
+  const runtimeBlockerClass = keeper.runtime_blocker_class
   const runtimeBlocker = keeperRuntimeBlockerHint(keeper)
   const continueGate = keeper.runtime_blocker_continue_gate === true
   const socialFallbackActive = keeper.social_model_recognized === false

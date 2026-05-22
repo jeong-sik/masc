@@ -207,7 +207,7 @@ const runtimeBlockerLabels = {
   autonomous_slot_wait_timeout: '자율 슬롯 대기 만료',
   admission_queue_wait_timeout: '대기열 진입 만료',
   turn_timeout_after_queue_wait: '대기 후 턴 만료',
-  oas_timeout_budget: 'OAS 응답 만료',
+  oas_timeout_budget: '레거시 OAS 타임아웃 표면',
   turn_timeout: '턴 응답 만료',
   turn_livelock_blocked: '턴 livelock 차단',
   completion_contract_violation: '완료 계약 위반',
@@ -268,7 +268,7 @@ export function keeperRuntimeBlockerHint(keeper: Keeper | null | undefined): str
     return '대기 후 실행된 턴이 전체 제한 시간을 초과했습니다.'
   }
   if (blockerClass === 'oas_timeout_budget') {
-    return 'OAS 실행 예산이 먼저 소진되었습니다.'
+    return '레거시 timeout-budget 표면입니다. 실제 owner-specific timeout/admission/capacity 원인을 확인하세요.'
   }
   if (blockerClass === 'turn_timeout') {
     return '턴 실행 시간이 제한 시간을 초과했습니다.'

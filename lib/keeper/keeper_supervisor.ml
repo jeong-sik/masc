@@ -964,16 +964,12 @@ let sweep_and_recover (ctx : _ context) =
        let last_fr_str =
          Option.map Keeper_registry.failure_reason_to_string entry.last_failure_reason
        in
-       (match Keeper_keepalive.get_bus () with
-        | Some bus ->
-          Cascade_events.publish_keeper_dead
-            bus
-            ~keeper_name:entry.name
-            ~reason:msg
-            ~restart_count:entry.restart_count
-            ~last_failure_reason:last_fr_str
-            ()
-        | None -> ());
+       Cascade_events.publish_keeper_dead
+         ~keeper_name:entry.name
+         ~reason:msg
+         ~restart_count:entry.restart_count
+         ~last_failure_reason:last_fr_str
+         ();
        Prometheus.inc_counter
          Keeper_metrics.metric_keeper_dead_total
          ~labels:

@@ -87,6 +87,89 @@ let read_reusable_dashboard_dev_token = Server_routes_http_dashboard_dev_token.r
 let persist_dashboard_dev_token = Server_routes_http_dashboard_dev_token.persist_dashboard_dev_token
 let mint_dashboard_dev_token = Server_routes_http_dashboard_dev_token.mint_dashboard_dev_token
 let ensure_dashboard_dev_token = Server_routes_http_dashboard_dev_token.ensure_dashboard_dev_token
+
+let executable_file_exists path =
+  try
+    Sys.file_exists path
+    && not (Sys.is_directory path)
+    &&
+    (Unix.access path [ Unix.X_OK ];
+     true)
+  with _ -> false
+
+let append_unique candidate acc =
+  match candidate with
+  | None | Some "" -> acc
+  | Some path when List.mem path acc -> acc
+  | Some path -> acc @ [ path ]
+
+let dashboard_doctor_self_bin () =
+  let argv0 =
+    if Array.length Sys.argv = 0 then None else Some Sys.argv.(0)
+  in
+  let argv0_absolute =
+    match argv0 with
+    | Some path when not (Filename.is_relative path) -> Some path
+    | Some path -> Some (Filename.concat (Sys.getcwd ()) path)
+    | None -> None
+  in
+  let build = Build_identity.current () in
+  let build_root_bin =
+    build.repo_root
+    |> Option.map (fun root ->
+      Filename.concat root "_build/default/bin/main_eio.exe")
+  in
+  []
+  |> append_unique (Sys.getenv_opt "MASC_MAIN_EIO_EXE")
+  |> append_unique argv0
+  |> append_unique argv0_absolute
+  |> append_unique (Some build.executable_path)
+  |> append_unique build_root_bin
+  |> List.find_opt executable_file_exists
+  |> Option.value ~default:(Option.value argv0 ~default:build.executable_path)
+
+let dashboard_doctor_degraded_json ~self_bin ~exn =
+  let message = Printexc.to_string exn in
+  Yojson.Safe.to_string
+    (`Assoc
+      [ "title", `String "MASC Doctor (dashboard degraded)"
+      ; ( "doctors"
+        , `List
+            [ `Assoc
+                [ "name", `String "dashboard-route"
+                ; "kind", `String "config"
+                ; "exit_code", `Int 2
+                ; ( "payload"
+                  , `Assoc
+                      [ "title", `String "Dashboard Doctor Route"
+                      ; "status", `String "error"
+                      ; ( "checks"
+                        , `List
+                            [ `Assoc
+                                [ "name", `String "self-binary"
+                                ; "status", `String "error"
+                                ; "message", `String message
+                                ; "path", `String self_bin
+                                ] ] )
+                      ; ( "summary"
+                        , `Assoc
+                            [ "total", `Int 1
+                            ; "ok", `Int 0
+                            ; "warn", `Int 0
+                            ; "error", `Int 1
+                            ] )
+                      ] )
+                ] ] )
+      ; ( "summary"
+        , `Assoc
+            [ "total", `Int 1
+            ; "ok", `Int 0
+            ; "warn", `Int 0
+            ; "error", `Int 1
+            ] )
+      ; "exit_code", `Int 2
+      ])
+
 (** Broadcast handler: parse JSON body, extract "message" string field, and
     relay via Coord.broadcast.  Error responses are encoded through Yojson so
     exception messages cannot break JSON framing via embedded quotes. *)
@@ -462,7 +545,7 @@ let rec add_routes ~sw ~clock router =
        else with_public_read handler request reqd)
   |> Http.Router.get "/api/v1/dashboard/doctor" (fun request reqd ->
        with_public_read (fun _state req reqd ->
-         let self_bin = Sys.argv.(0) in
+         let self_bin = dashboard_doctor_self_bin () in
          try
            let buf, _status =
              With_process.with_process_args_in
@@ -478,21 +561,8 @@ let rec add_routes ~sw ~clock router =
          with
          | Eio.Cancel.Cancelled _ as exn -> raise exn
          | exn ->
-           let err =
-             Yojson.Safe.to_string
-               (`Assoc
-                 [ "error", `String (Printexc.to_string exn)
-                 ; ( "hint"
-                   , `String
-                       "server must be launched from the repo root so the \
-                        self-binary can resolve sidecar/ paths" )
-                 ])
-           in
-           Http.Response.json
-             ~status:`Internal_server_error
-             ~request:req
-             err
-             reqd
+           let degraded = dashboard_doctor_degraded_json ~self_bin ~exn in
+           Http.Response.json ~compress:true ~request:req degraded reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/governance" (fun request reqd ->
        with_public_read (fun state req reqd ->

@@ -1,5 +1,4 @@
-(** Slot/pool/phase variants + wait-timeout payload for the keeper
-    turn slot machinery. *)
+(** Slot/pool/phase variants + wait-timeout payload for keeper turn slots. *)
 
 type slot_pool =
   | Turn_pool

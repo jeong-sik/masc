@@ -364,24 +364,22 @@ let apply_policy ~(allowlist : allowlist_policy) ~(path_policy : path_policy)
          in
          Reject { context; reason; diagnostic }
        | None ->
-         (match
-            first_redirect_stage stages
-          with
-          | Some stage ->
+         (match first_path_failure ~path_policy stages with
+          | Some (stage_idx, raw_path, diagnostic) ->
             Reject
               { context
-              ; reason = Redirect_disallowed_in_caller { stage }
-              ; diagnostic =
-                  Printf.sprintf "pipeline stage %d carries a redirect" stage
+              ; reason =
+                  Path_outside_policy { stage = stage_idx; raw_path; diagnostic }
+              ; diagnostic
               }
           | None ->
-            (match first_path_failure ~path_policy stages with
-             | Some (stage_idx, raw_path, diagnostic) ->
+            (match first_redirect_stage stages with
+             | Some stage ->
                Reject
                  { context
-                 ; reason =
-                     Path_outside_policy { stage = stage_idx; raw_path; diagnostic }
-                 ; diagnostic
+                 ; reason = Redirect_disallowed_in_caller { stage }
+                 ; diagnostic =
+                     Printf.sprintf "pipeline stage %d carries a redirect" stage
                  }
              | None -> Allow context)))
 ;;

@@ -1,5 +1,5 @@
-(** Outcome-kind polymorphic variant + bijection helpers for
-    keeper execution receipts. *)
+(** Outcome-kind polymorphic variant + bijection helpers for keeper execution
+    receipts. *)
 
 type outcome_kind =
   [ `Ok

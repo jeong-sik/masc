@@ -1,8 +1,4 @@
-(** Keeper lifecycle phase variant + bijection helpers.
-
-    SSOT for the 13-state lifecycle phase enum referenced by the
-    [Keeper_state_machine] FSM, dashboard UI, persona audits, and
-    operator-facing keeper status surfaces. *)
+(** Keeper lifecycle phase variant + bijection helpers. *)
 
 type phase =
   | Offline

@@ -1,4 +1,6 @@
-(** Durable per-turn decision manifest for keeper runtime diagnosis. *)
+(** Durable per-turn decision manifest for keeper runtime diagnosis.
+
+    See the corresponding [mli] for the layered SSOT hierarchy. *)
 
 type event_kind =
   | Turn_started

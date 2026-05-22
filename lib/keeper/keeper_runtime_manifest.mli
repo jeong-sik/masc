@@ -2,7 +2,33 @@
 
     The manifest is intentionally narrower than execution receipts.  Receipts
     describe what happened after a turn; manifest rows record the routing and
-    context decisions that explain why the turn took that path. *)
+    context decisions that explain why the turn took that path.
+
+    {2 Layered SSOT}
+
+    The manifest is structured in five layers.  Each layer has a single
+    authoritative source of truth and a clear boundary:
+
+    - {b Layer 1 — Identity}: [keeper_name], [agent_name], [trace_id],
+      [generation].  Stable across every event in a turn.  SSOT is the
+      keeper registry entry at turn start.
+
+    - {b Layer 2 — Time}: [ts], [source_clock], [clock_refs].  Provides
+      wall / monotonic / logical / provider / event_bus provenance.
+      SSOT is the runtime clock snapshot taken when the event is emitted.
+
+    - {b Layer 3 — Lineage}: [event_kind], [tool_lineage] (6 stages:
+      searched / visible / materialized / emitted / executed / verified).
+      Tracks the tool lifecycle.  SSOT is the tool dispatch pipeline.
+
+    - {b Layer 4 — Payload}: [payload_role] ([Model_input],
+      [Operator_evidence], [Checkpoint], [Memory_store]).  Classifies the
+      semantic role of the decision data.  SSOT is the caller contract
+      at the injection point.
+
+    - {b Layer 5 — Trust}: public projection allowlist.  Redacts sensitive
+      fields based on consumer identity.  SSOT is the consumer capability
+      profile. *)
 
 type event_kind =
   | Turn_started

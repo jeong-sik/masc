@@ -21,6 +21,26 @@ module Float = Stdlib.Float
     Parse boundary: [of_string] at MCP/JSON ingress only.
     Internal code uses [t] directly — typos become compile errors. *)
 
+module Operation = struct
+  type t =
+    | Code_write
+    | Code_edit
+    | Code_read
+    | Code_delete
+    | Code_shell
+    | Code_git
+    | Worktree_create
+
+  let to_string = function
+    | Code_write -> "masc_code_write"
+    | Code_edit -> "masc_code_edit"
+    | Code_read -> "masc_code_read"
+    | Code_delete -> "masc_code_delete"
+    | Code_shell -> "masc_code_shell"
+    | Code_git -> "masc_code_git"
+    | Worktree_create -> "masc_worktree_create"
+end
+
 module Keeper = struct
   type t =
     | Bash

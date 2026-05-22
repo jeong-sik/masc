@@ -182,6 +182,36 @@ let simple_literal_args (simple : Masc_exec.Shell_ir.simple) =
   loop [] simple.Masc_exec.Shell_ir.args
 ;;
 
+let meta_has_unquoted_glob (meta : Masc_exec.Shell_ir.arg_meta) =
+  meta.glob && not meta.quoted
+;;
+
+let rec shell_ir_arg_has_unquoted_glob = function
+  | Masc_exec.Shell_ir.Lit (_, meta)
+  | Masc_exec.Shell_ir.Var (_, meta) -> meta_has_unquoted_glob meta
+  | Masc_exec.Shell_ir.Concat parts ->
+    List.exists shell_ir_arg_has_unquoted_glob parts
+;;
+
+let simple_has_unquoted_glob (simple : Masc_exec.Shell_ir.simple) =
+  List.exists
+    shell_ir_arg_has_unquoted_glob
+    simple.Masc_exec.Shell_ir.args
+  || List.exists
+       (fun (_, arg) -> shell_ir_arg_has_unquoted_glob arg)
+       simple.Masc_exec.Shell_ir.env
+;;
+
+let rec shell_ir_has_unquoted_glob = function
+  | Masc_exec.Shell_ir.Simple simple -> simple_has_unquoted_glob simple
+  | Masc_exec.Shell_ir.Pipeline stages ->
+    List.exists shell_ir_has_unquoted_glob stages
+;;
+
+let validate_no_unquoted_glob ast =
+  if shell_ir_has_unquoted_glob ast then Error Injection else Ok ()
+;;
+
 let validate_wrapper_target ~allowed_commands ~wrapper_name = function
   | None -> Error (Command_not_allowed wrapper_name)
   | Some "dune" -> Error Direct_dune_invocation
@@ -289,9 +319,14 @@ let command_context_with_allowlist ?caller ~allowed_commands cmd =
       if context.Exec_shell_gate.direct_dune_seen
       then Error Direct_dune_invocation
       else (
-        match validate_wrapped_stages ~allowed_commands context.Exec_shell_gate.ast with
-        | Ok () -> Ok context
-        | Error _ as err -> err)
+        match validate_no_unquoted_glob context.Exec_shell_gate.ast with
+        | Error _ as err -> err
+        | Ok () ->
+          (match
+             validate_wrapped_stages ~allowed_commands context.Exec_shell_gate.ast
+           with
+           | Ok () -> Ok context
+           | Error _ as err -> err))
     | Reject { context; reason; _ } ->
       if context.Exec_shell_gate.direct_dune_seen
       then Error Direct_dune_invocation
@@ -356,9 +391,14 @@ let command_context_coding_with_allowlist
       if context.Exec_shell_gate.direct_dune_seen
       then Error Direct_dune_invocation
       else (
-        match validate_wrapped_stages ~allowed_commands context.Exec_shell_gate.ast with
-        | Ok () -> Ok context
-        | Error _ as err -> err)
+        match validate_no_unquoted_glob context.Exec_shell_gate.ast with
+        | Error _ as err -> err
+        | Ok () ->
+          (match
+             validate_wrapped_stages ~allowed_commands context.Exec_shell_gate.ast
+           with
+           | Ok () -> Ok context
+           | Error _ as err -> err))
     | Reject { context; reason; _ } ->
       (match reason with
        | Pipes_not_allowed _ -> Error Pipes_not_allowed

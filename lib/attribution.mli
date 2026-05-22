@@ -82,15 +82,6 @@ val to_yojson : t -> Yojson.Safe.t
     - [Partial_pass]       → [{"kind":"partial_pass",
                                "score":0.85,"rationale":"..."}] *)
 
-val of_yojson : Yojson.Safe.t -> (t, string) result
-(** Parse from JSON. Returns [Error] with a human-readable message on
-    malformed input (missing field, unknown [kind], bad types).
-    Missing [evidence] defaults to [`Null]. *)
-
-val show : t -> string
-(** Single-line representation for debug logs. Elides [evidence] and
-    long string fields to keep logs scannable. *)
-
 (** {1 Smart constructors}
 
     Prefer these over the raw record — they enforce the sum invariant

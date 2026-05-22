@@ -54,7 +54,6 @@
   test_mcp_h1_h2_admission_parity
   test_streamable_http_upgrade
   test_mcp_session_id_header
-  test_keeper_turn_terminal_code_byte_compat
   test_keeper_sdk_error_typed_bridge
   test_openai_compat_error_map
   test_read_drop_reason
@@ -373,7 +372,6 @@
   test_mcp_h1_h2_admission_parity
   test_streamable_http_upgrade
   test_mcp_session_id_header
-  test_keeper_turn_terminal_code_byte_compat
   test_keeper_sdk_error_typed_bridge
   test_openai_compat_error_map
   test_read_drop_reason

@@ -80,7 +80,7 @@ const ATTENTION_REASON_LABELS: Record<AttentionReason, string> = {
   paused: '일시정지',
   paused_blocked: '일시정지 원인 확인 필요',
   runtime_blocked: '런타임 근거 확인 필요',
-  timeout_budget_exhausted: '타임아웃 예산 소진',
+  timeout_budget_exhausted: '레거시 타임아웃 예산 표면',
   social_model_fallback: '소셜 모델 폴백',
   fd_pressure: 'FD 임계치 초과',
   runtime_trust_snapshot_unavailable: '런타임 신뢰 스냅샷 없음',
@@ -120,7 +120,7 @@ const NEXT_HUMAN_ACTION_LABELS: Record<NextHumanAction, string> = {
   approve_or_reject_continue: '계속 진행 승인 또는 거절',
   inspect_blocker_before_resume: '원인 확인 후 재개',
   inspect_runtime_blocker: '런타임 근거 확인',
-  inspect_timeout_budget: '타임아웃 예산 확인',
+  inspect_timeout_budget: '원인별 타임아웃 확인',
   resolve_approval: '승인 요청 처리',
   resume_or_review: '재개 또는 설정 검토',
   review_social_model: '소셜 모델 설정 검토',
@@ -152,6 +152,9 @@ function nextHumanActionLabel(action: string | null): string | null {
 const ATTENTION_PAIR_DUPLICATES: ReadonlyArray<readonly [AttentionReason, NextHumanAction]> = [
   ['runtime_blocked', 'inspect_runtime_blocker'],
   ['paused_blocked', 'inspect_blocker_before_resume'],
+  // Legacy timeout-budget pair is still accepted from older backend wires,
+  // but new operator copy should route to owner-specific timeout/admission/
+  // capacity causes.
   ['timeout_budget_exhausted', 'inspect_timeout_budget'],
   ['runtime_trust_snapshot_unavailable', 'inspect_keeper_runtime_trust'],
 ]
@@ -469,7 +472,7 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
               onClick=${() => handleDirective('pause')}
               title="일시정지: 실행 중인 keeper 를 일시 멈춥니다 (running → paused, 현재 turn 은 정상 종료)"
             >일시정지하기<//>
-            ${(hbStale || runtimeBlockerClass === 'oas_timeout_budget' || runtimeBlockerClass === 'cascade_exhausted' || runtimeBlockerClass === 'turn_timeout')
+            ${(hbStale || runtimeBlockerClass === 'cascade_exhausted' || runtimeBlockerClass === 'turn_timeout')
               ? html`<${ActionButton}
                   variant="warn"
                   size="sm"

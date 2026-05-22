@@ -249,10 +249,7 @@ type runtime_blocker_surface =
   ; continue_gate : bool
   }
 
-let runtime_blocker_surface_class = function
-  | Oas_timeout_budget -> Turn_timeout
-  | cls -> cls
-;;
+let runtime_blocker_surface_class cls = cls
 
 let runtime_blocker_class_label ?(summary = "") cls =
   let _ = summary in
@@ -313,9 +310,6 @@ let runtime_blocker_surface_of_typed_class ?(summary = "") (cls : blocker_class)
           in
           cascade_exhaustion_summary reason
         | _ -> summary)
-    | Oas_timeout_budget ->
-      "Provider or turn timeout blocked this keeper; inspect provider stream, \
-       cascade pressure, and turn wall-clock evidence before resume."
     | Turn_livelock_blocked ->
       if summary = ""
       then "Keeper turn livelock guard blocked repeated dispatch of the same turn."
@@ -387,7 +381,6 @@ let runtime_blocker_surface_of_legacy_string reason cls =
   | Autonomous_slot_wait_timeout
   | Admission_queue_wait_timeout
   | Turn_timeout_after_queue_wait
-  | Oas_timeout_budget
   | Turn_timeout
   | Turn_livelock_blocked
   | Completion_contract_violation

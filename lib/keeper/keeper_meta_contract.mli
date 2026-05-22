@@ -174,7 +174,6 @@ type blocker_class =
   | Autonomous_slot_wait_timeout
   | Admission_queue_wait_timeout
   | Turn_timeout_after_queue_wait
-  | Oas_timeout_budget
   | Turn_timeout
   | Turn_livelock_blocked
   | Completion_contract_violation
@@ -195,9 +194,9 @@ type blocker_class =
 
 val blocker_class_to_string : blocker_class -> string
 (** Canonical lowercase labels.  Pinned literals — operator
-    dashboards parse these for keeper supervisor alerting.
-    [Oas_timeout_budget] is legacy input compatibility and serializes as
-    ["turn_timeout"]. *)
+    dashboards parse these for keeper supervisor alerting. Legacy
+    ["oas_timeout_budget"] input is parse-only compatibility and maps to
+    [Turn_timeout]. *)
 
 val cascade_exhaustion_summary :
   cascade_exhaustion_reason -> string

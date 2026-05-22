@@ -111,39 +111,14 @@ module For_testing = struct
   let board_sse_event_params = board_sse_event_params
 end
 
-let fork_logged_fiber ~sw ~on_error run =
-  Eio.Fiber.fork ~sw (fun () ->
-    try run () with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | exn -> on_error exn)
-;;
-
-let log_server_fiber_crash name exn =
-  Log.Server.error "%s fiber crashed: %s" name (Printexc.to_string exn)
-;;
-
-let log_dashboard_fiber_crash name exn =
-  Log.Dashboard.error "%s fiber crashed: %s" name (Printexc.to_string exn)
-;;
-
-let filteri_with_fair_yield f xs =
-  let meter = Eio_guard.create_yield_meter ~interval:1 () in
-  List.filteri
-    (fun idx item ->
-       let keep = f idx item in
-       Eio_guard.yield_step meter;
-       keep)
-    xs
-;;
-
-let iteri_with_fair_yield f xs =
-  let meter = Eio_guard.create_yield_meter ~interval:1 () in
-  List.iteri
-    (fun idx item ->
-       f idx item;
-       Eio_guard.yield_step meter)
-    xs
-;;
+let fork_logged_fiber = Server_bootstrap_loops_fiber.fork_logged_fiber
+let log_server_fiber_crash =
+  Server_bootstrap_loops_fiber.log_server_fiber_crash
+let log_dashboard_fiber_crash =
+  Server_bootstrap_loops_fiber.log_dashboard_fiber_crash
+let filteri_with_fair_yield =
+  Server_bootstrap_loops_fiber.filteri_with_fair_yield
+let iteri_with_fair_yield = Server_bootstrap_loops_fiber.iteri_with_fair_yield
 
 let start_keeper_loops
       ~sw

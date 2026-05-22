@@ -141,7 +141,6 @@ function isNextHumanAction(s: string): s is NextHumanAction {
 
 function canonicalNextHumanAction(action: string | null): string | null {
   if (action === 'inspect_turn_timeout') return 'inspect_runtime_blocker'
-  if (action === 'inspect_timeout_budget') return 'inspect_runtime_blocker'
   if (action === 'inspect_cascade_attempts') return 'inspect_runtime_blocker'
   if (action === 'inspect_provider_tool_lane') return 'inspect_runtime_blocker'
   if (action === 'inspect_completion_contract') return 'inspect_runtime_blocker'

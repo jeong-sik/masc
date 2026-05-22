@@ -249,6 +249,16 @@ let runtime_lens_swimlane_json scan gaps ~lane ~label ~events
     | `List events -> `List (events @ synthetic_events_json)
     | other -> other
   in
+  let dag_edges_json =
+    List.map
+      (fun (parent_event_id, event_id) ->
+         `Assoc
+           [
+             ("parent_event_id", `String parent_event_id);
+             ("event_id", `String event_id);
+           ])
+      scan.dag_edges
+  in
   `Assoc
     [
       ("lane", `String lane);
@@ -262,4 +272,5 @@ let runtime_lens_swimlane_json scan gaps ~lane ~label ~events
         | code :: _ -> `String code
         | [] -> `Null );
       ("events", all_events);
+      ("dag_edges", `List dag_edges_json);
     ]

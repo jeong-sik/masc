@@ -42,6 +42,7 @@ type runtime_manifest_scan =
   ; mutable provider_started_count : int
   ; mutable provider_finished_count : int
   ; mutable provider_terminal_row : Keeper_runtime_manifest.t option
+  ; mutable dag_edges : (string * string) list
   }
 
 let make_runtime_manifest_scan ~path ~limit =
@@ -81,6 +82,7 @@ let make_runtime_manifest_scan ~path ~limit =
   ; provider_started_count = 0
   ; provider_finished_count = 0
   ; provider_terminal_row = None
+  ; dag_edges = []
   }
 
 let push_bounded queue limit value =
@@ -111,6 +113,20 @@ let update_runtime_manifest_scan scan row =
   scan.total_rows <- scan.total_rows + 1;
   push_bounded scan.returned_rows scan.limit row;
   increment_event_count scan row.Keeper_runtime_manifest.event;
+  (match
+     let decision = row.Keeper_runtime_manifest.decision in
+     let clock_refs = Yojson.Safe.Util.member "clock_refs" decision in
+     match clock_refs with
+     | `Assoc _ ->
+       let event_id = json_string_member_opt "event_id" clock_refs in
+       let parent_event_id = json_string_member_opt "parent_event_id" clock_refs in
+       (match event_id, parent_event_id with
+        | Some eid, Some peid -> Some (peid, eid)
+        | _ -> None)
+     | _ -> None
+   with
+   | Some edge -> scan.dag_edges <- edge :: scan.dag_edges
+   | None -> ());
   (match
      Yojson.Safe.Util.member "payload_role" row.Keeper_runtime_manifest.decision
    with

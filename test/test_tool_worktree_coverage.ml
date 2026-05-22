@@ -113,10 +113,32 @@ let write_git_clone_policy_toml ~base_path =
     (Filename.concat base_path ".masc/config/tool_policy.toml")
     "[git_clone]\nallowed_orgs = []\ndenied_repos = []\n"
 
-let run_ok ~cwd cmd =
-  let wrapped = Printf.sprintf "cd %s && %s > /dev/null 2>&1" (Filename.quote cwd) cmd in
-  let code = Sys.command wrapped in
-  if code <> 0 then fail (Printf.sprintf "command failed (%d): %s" code cmd)
+let process_exit_code = function
+  | Unix.WEXITED code -> code
+  | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> 255
+
+let run_process_ok ~cwd prog argv =
+  let original_cwd = Sys.getcwd () in
+  let dev_null = Unix.openfile Filename.null [ Unix.O_WRONLY ] 0o600 in
+  Fun.protect
+    ~finally:(fun () ->
+      Unix.close dev_null;
+      Sys.chdir original_cwd)
+    (fun () ->
+      Sys.chdir cwd;
+      let pid =
+        Unix.create_process_env prog argv (Unix.environment ()) Unix.stdin
+          dev_null dev_null
+      in
+      let _, status = Unix.waitpid [] pid in
+      let code = process_exit_code status in
+      if code <> 0 then
+        fail
+          (Printf.sprintf "command failed (%d): %s" code
+             (String.concat " " (Array.to_list argv))))
+
+let git_ok ~cwd args =
+  run_process_ok ~cwd "git" (Array.of_list ("git" :: args))
 
 let init_process_eio env =
   let proc_mgr = Eio.Stdenv.process_mgr env in
@@ -129,21 +151,18 @@ let setup_nested_repo_with_remote ~base_path ~repo_rel =
   let remote = Filename.concat base_path ".remote-masc-mcp.git" in
   let repo = Filename.concat base_path repo_rel in
   ensure_dir (Filename.dirname repo);
-  run_ok ~cwd:base_path
-    (Printf.sprintf "git init --bare -q --initial-branch=main %s"
-       (Filename.quote remote));
-  run_ok ~cwd:base_path
-    (Printf.sprintf "git clone -q %s %s"
-       (Filename.quote remote) (Filename.quote repo));
-  run_ok ~cwd:repo "git config user.email test@example.com";
-  run_ok ~cwd:repo "git config user.name Test";
+  git_ok ~cwd:base_path
+    [ "init"; "--bare"; "-q"; "--initial-branch=main"; remote ];
+  git_ok ~cwd:base_path [ "clone"; "-q"; remote; repo ];
+  git_ok ~cwd:repo [ "config"; "user.email"; "test@example.com" ];
+  git_ok ~cwd:repo [ "config"; "user.name"; "Test" ];
   let readme = Filename.concat repo "README.md" in
   let oc = open_out readme in
   output_string oc "# sandbox auto-provision test\n";
   close_out oc;
-  run_ok ~cwd:repo "git add README.md";
-  run_ok ~cwd:repo "git commit -q -m init";
-  run_ok ~cwd:repo "git push -q origin main";
+  git_ok ~cwd:repo [ "add"; "README.md" ];
+  git_ok ~cwd:repo [ "commit"; "-q"; "-m"; "init" ];
+  git_ok ~cwd:repo [ "push"; "-q"; "origin"; "main" ];
   repo
 
 let create_file_storm ~base_path ~count =
@@ -348,7 +367,7 @@ let test_dispatch_worktree_create_reports_missing_sandbox_clone () =
   Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  run_ok ~cwd:base_path "git init -q -b main";
+  git_ok ~cwd:base_path [ "init"; "-q"; "-b"; "main" ];
   let config = Masc_mcp.Coord.default_config base_path in
   ignore (Masc_mcp.Coord.init config ~agent_name:(Some "test-agent"));
   let ctx : Tool_worktree.context = { config; agent_name = "test-agent" } in
@@ -374,7 +393,7 @@ let test_dispatch_worktree_create_auto_provisions_workspace_repo () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   init_process_eio env;
-  run_ok ~cwd:base_path "git init -q -b main";
+  git_ok ~cwd:base_path [ "init"; "-q"; "-b"; "main" ];
   ignore
     (setup_nested_repo_with_remote ~base_path
        ~repo_rel:"workspace/yousleepwhen/masc-mcp");
@@ -417,7 +436,7 @@ let test_dispatch_worktree_create_refreshes_playground_repo_cache () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   init_process_eio env;
-  run_ok ~cwd:base_path "git init -q -b main";
+  git_ok ~cwd:base_path [ "init"; "-q"; "-b"; "main" ];
   ignore
     (setup_nested_repo_with_remote ~base_path
        ~repo_rel:"workspace/yousleepwhen/masc-mcp");
@@ -465,7 +484,7 @@ let test_playground_repo_cache_preserves_concurrent_updates () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   init_process_eio env;
-  run_ok ~cwd:base_path "git init -q -b main";
+  git_ok ~cwd:base_path [ "init"; "-q"; "-b"; "main" ];
   let repo_path =
     setup_nested_repo_with_remote ~base_path
       ~repo_rel:"workspace/yousleepwhen/masc-mcp"
@@ -503,7 +522,7 @@ let test_dispatch_worktree_create_auto_provisions_after_file_storm () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   init_process_eio env;
-  run_ok ~cwd:base_path "git init -q -b main";
+  git_ok ~cwd:base_path [ "init"; "-q"; "-b"; "main" ];
   create_file_storm ~base_path ~count:4005;
   ignore
     (setup_nested_repo_with_remote ~base_path
@@ -531,7 +550,7 @@ let test_dispatch_worktree_create_auto_provisions_before_hidden_dir_storm () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   init_process_eio env;
-  run_ok ~cwd:base_path "git init -q -b main";
+  git_ok ~cwd:base_path [ "init"; "-q"; "-b"; "main" ];
   create_hidden_dir_storm ~base_path ~count:4005;
   ignore
     (setup_nested_repo_with_remote ~base_path
@@ -563,7 +582,7 @@ let test_dispatch_worktree_create_auto_provisions_before_wide_workspace_storm ()
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   init_process_eio env;
-  run_ok ~cwd:base_path "git init -q -b main";
+  git_ok ~cwd:base_path [ "init"; "-q"; "-b"; "main" ];
   create_wide_workspace_storm ~base_path ~count:4005;
   ignore
     (setup_nested_repo_with_remote ~base_path
@@ -594,7 +613,7 @@ let test_dispatch_worktree_create_and_remove_use_docker_keeper_lane () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   init_process_eio env;
-  run_ok ~cwd:base_path "git init -q -b main";
+  git_ok ~cwd:base_path [ "init"; "-q"; "-b"; "main" ];
   ignore
     (setup_nested_repo_with_remote ~base_path
        ~repo_rel:"workspace/yousleepwhen/masc-mcp");
@@ -674,7 +693,7 @@ let test_dispatch_worktree_create_repairs_existing_sandbox_clone_checkout () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   init_process_eio env;
-  run_ok ~cwd:base_path "git init -q -b main";
+  git_ok ~cwd:base_path [ "init"; "-q"; "-b"; "main" ];
   let source_repo =
     setup_nested_repo_with_remote ~base_path
       ~repo_rel:"workspace/yousleepwhen/masc-mcp"
@@ -685,9 +704,7 @@ let test_dispatch_worktree_create_repairs_existing_sandbox_clone_checkout () =
   in
   ensure_dir sandbox_repos;
   let sandbox_clone = Filename.concat sandbox_repos "masc-mcp" in
-  run_ok ~cwd:base_path
-    (Printf.sprintf "git clone -q %s %s"
-       (Filename.quote source_repo) (Filename.quote sandbox_clone));
+  git_ok ~cwd:base_path [ "clone"; "-q"; source_repo; sandbox_clone ];
   clear_checkout_but_keep_git_dir sandbox_clone;
   let config = Masc_mcp.Coord.default_config base_path in
   ignore (Masc_mcp.Coord.init config ~agent_name:(Some "sangsu"));
@@ -726,7 +743,7 @@ let test_dispatch_worktree_create_cleans_failed_auto_clone () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   init_process_eio env;
-  run_ok ~cwd:base_path "git init -q -b main";
+  git_ok ~cwd:base_path [ "init"; "-q"; "-b"; "main" ];
   let broken_source =
     Filename.concat base_path "workspace/yousleepwhen/masc-mcp"
   in
@@ -762,7 +779,7 @@ let test_dispatch_worktree_create_rejects_invalid_sandbox_clone () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   init_process_eio env;
-  run_ok ~cwd:base_path "git init -q -b main";
+  git_ok ~cwd:base_path [ "init"; "-q"; "-b"; "main" ];
   let sandbox_clone =
     Filename.concat base_path ".masc/playground/test-agent/repos/masc-mcp"
   in
@@ -809,7 +826,7 @@ let test_worktree_create_rejects_existing_non_git_worktree_path () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   init_process_eio env;
-  run_ok ~cwd:base_path "git init -q -b main";
+  git_ok ~cwd:base_path [ "init"; "-q"; "-b"; "main" ];
   let source_repo =
     setup_nested_repo_with_remote ~base_path
       ~repo_rel:"workspace/yousleepwhen/masc-mcp"
@@ -819,9 +836,7 @@ let test_worktree_create_rejects_existing_non_git_worktree_path () =
   in
   ensure_dir sandbox_repos;
   let sandbox_clone = Filename.concat sandbox_repos "masc-mcp" in
-  run_ok ~cwd:base_path
-    (Printf.sprintf "git clone -q %s %s"
-       (Filename.quote source_repo) (Filename.quote sandbox_clone));
+  git_ok ~cwd:base_path [ "clone"; "-q"; source_repo; sandbox_clone ];
   let config = Masc_mcp.Coord.default_config base_path in
   ignore (Masc_mcp.Coord.init config ~agent_name:(Some "test-agent"));
   let ctx : Tool_worktree.context = { config; agent_name = "test-agent" } in
@@ -857,7 +872,7 @@ let test_worktree_create_rejects_existing_wrong_branch_worktree () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   init_process_eio env;
-  run_ok ~cwd:base_path "git init -q -b main";
+  git_ok ~cwd:base_path [ "init"; "-q"; "-b"; "main" ];
   let source_repo =
     setup_nested_repo_with_remote ~base_path
       ~repo_rel:"workspace/yousleepwhen/masc-mcp"
@@ -867,9 +882,7 @@ let test_worktree_create_rejects_existing_wrong_branch_worktree () =
   in
   ensure_dir sandbox_repos;
   let sandbox_clone = Filename.concat sandbox_repos "masc-mcp" in
-  run_ok ~cwd:base_path
-    (Printf.sprintf "git clone -q %s %s"
-       (Filename.quote source_repo) (Filename.quote sandbox_clone));
+  git_ok ~cwd:base_path [ "clone"; "-q"; source_repo; sandbox_clone ];
   let config = Masc_mcp.Coord.default_config base_path in
   ignore (Masc_mcp.Coord.init config ~agent_name:(Some "test-agent"));
   let ctx : Tool_worktree.context = { config; agent_name = "test-agent" } in
@@ -880,9 +893,16 @@ let test_worktree_create_rejects_existing_wrong_branch_worktree () =
          (Playground_paths.worktree_dir_name "test-agent" task_id))
   in
   ensure_dir (Filename.dirname worktree_path);
-  run_ok ~cwd:sandbox_clone
-    (Printf.sprintf "git worktree add -q %s -b stale-existing-worktree origin/main"
-       (Filename.quote worktree_path));
+  git_ok ~cwd:sandbox_clone
+    [
+      "worktree";
+      "add";
+      "-q";
+      worktree_path;
+      "-b";
+      "stale-existing-worktree";
+      "origin/main";
+    ];
   let args =
     `Assoc
       [ ("task_id", `String task_id)
@@ -912,7 +932,7 @@ let test_worktree_create_concurrent_same_name_converges () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   init_process_eio env;
-  run_ok ~cwd:base_path "git init -q -b main";
+  git_ok ~cwd:base_path [ "init"; "-q"; "-b"; "main" ];
   let source_repo =
     setup_nested_repo_with_remote ~base_path
       ~repo_rel:"workspace/yousleepwhen/masc-mcp"
@@ -922,9 +942,7 @@ let test_worktree_create_concurrent_same_name_converges () =
   in
   ensure_dir sandbox_repos;
   let sandbox_clone = Filename.concat sandbox_repos "masc-mcp" in
-  run_ok ~cwd:base_path
-    (Printf.sprintf "git clone -q %s %s"
-       (Filename.quote source_repo) (Filename.quote sandbox_clone));
+  git_ok ~cwd:base_path [ "clone"; "-q"; source_repo; sandbox_clone ];
   let config = Masc_mcp.Coord.default_config base_path in
   ignore (Masc_mcp.Coord.init config ~agent_name:(Some "race-agent"));
   let task_id = "task-race-create" in

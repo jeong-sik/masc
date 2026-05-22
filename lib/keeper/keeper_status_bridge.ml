@@ -157,7 +157,7 @@ let blocker_class_of_string (reason : string) : blocker_class option =
   else if String_util.contains_substring_ci trimmed "autonomous turn slot wait timeout"
   then Some Autonomous_slot_wait_timeout
   else if String_util.contains_substring_ci trimmed "oas budget timeout"
-  then Some Oas_timeout_budget
+  then Some Turn_timeout
   else if String_util.contains_substring_ci trimmed "turn wall-clock timeout"
   then Some Turn_timeout
   else if
@@ -197,7 +197,7 @@ let blocker_class_of_sdk_error (err : Agent_sdk.Error.sdk_error) : blocker_class
   | Some (Keeper_turn_driver.Admission_queue_timeout _) ->
     Some Admission_queue_wait_timeout
   | Some (Keeper_turn_driver.Admission_queue_rejected _) -> None
-  | Some (Keeper_turn_driver.Oas_timeout_budget _) -> Some Oas_timeout_budget
+  | Some (Keeper_turn_driver.Oas_timeout_budget _) -> Some Turn_timeout
   | Some (Keeper_turn_driver.Max_tokens_ceiling_violation _) -> None
   | Some (Keeper_turn_driver.Turn_timeout _) -> Some Turn_timeout
   | Some (Keeper_turn_driver.Ambiguous_post_commit { is_timeout; _ }) ->

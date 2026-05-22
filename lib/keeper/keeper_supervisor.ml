@@ -782,7 +782,7 @@ let sweep_and_recover (ctx : _ context) =
        [watchdog_stop_pending]. *)
     let stamp_cohort =
       match entry.last_failure_reason with
-      | Some (Keeper_registry.Provider_timeout_loop _) -> Some Oas_timeout_budget
+      | Some (Keeper_registry.Provider_timeout_loop _) -> Some Turn_timeout
       | Some (Keeper_registry.Stale_turn_timeout _)
       | Some (Keeper_registry.Stale_fleet_batch _)
       | Some (Keeper_registry.Stale_termination_storm _) -> Some Stale_turn_timeout

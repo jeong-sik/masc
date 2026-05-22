@@ -1,5 +1,5 @@
 (* Keeper_turn_cascade_budget — cascade execution types, fail-open rotation,
-   OAS timeout budget resolution, context overflow observation, keeper pause/resume
+   provider timeout budget resolution, context overflow observation, keeper pause/resume
    sync, partial-commit continue gate, and context budget resolution.
 
    Extracted from keeper_unified_turn.ml (L501-1079) during the god-file split. *)
@@ -53,11 +53,11 @@ let record_turn_failure_stress =
    holds and the halving workaround was killing healthy slow
    streams (14-event 307.5s cluster, 2026-05-17 fleet).
 *)
-let oas_timeout_guard_sec = 15.0
+let provider_timeout_guard_sec = 15.0
 
-let min_oas_timeout_budget_sec = 15.0
+let min_provider_timeout_budget_sec = 15.0
 
-type oas_timeout_budget_resolution = {
+type provider_timeout_budget = {
   effective_timeout_sec : float;
   adaptive_timeout_sec : float;
   keeper_turn_timeout_sec : float;
@@ -67,11 +67,11 @@ type oas_timeout_budget_resolution = {
   source : string;
 }
 
-let oas_timeout_budget_resolution_to_yojson
-    (budget : oas_timeout_budget_resolution) : Yojson.Safe.t =
+let provider_timeout_budget_to_yojson
+    (budget : provider_timeout_budget) : Yojson.Safe.t =
   `Assoc
     [
-      ("oas_timeout_sec", `Float budget.effective_timeout_sec);
+      ("provider_timeout_sec", `Float budget.effective_timeout_sec);
       ("adaptive_timeout_sec", `Float budget.adaptive_timeout_sec);
       ("keeper_turn_timeout_sec", `Float budget.keeper_turn_timeout_sec);
       ("remaining_turn_budget_sec", `Float budget.remaining_turn_budget_sec);
@@ -80,11 +80,11 @@ let oas_timeout_budget_resolution_to_yojson
       ("source", `String budget.source);
     ]
 
-let resolve_bounded_oas_timeout_budget_with_turn_budget
+let resolve_bounded_provider_timeout_budget_with_turn_budget
     ~(allow_wall_clock_retry_budget : bool)
     ~(is_retry : bool)
     ~(estimated_input_tokens : int) ~(max_turns : int)
-    ~(remaining_turn_budget_s : float) : oas_timeout_budget_resolution option =
+    ~(remaining_turn_budget_s : float) : provider_timeout_budget option =
   let runtime = Keeper_runtime_resolved.current () in
   let adaptive_timeout_sec =
     Keeper_runtime_resolved
@@ -98,16 +98,16 @@ let resolve_bounded_oas_timeout_budget_with_turn_budget
     (* Guard: same-cascade retries cannot consume more than 1x per-attempt
        budget per slot acquisition. Degraded cascade rotation can opt into
        wall-clock retry budget so a first cascade that legitimately spent its
-       OAS timeout budget can still fail open inside the remaining turn time. *)
+       provider timeout budget can still fail open inside the remaining turn time. *)
     let wall_clock_retry_budget =
-      let usable_budget = remaining_turn_budget_s -. oas_timeout_guard_sec in
-      if usable_budget < min_oas_timeout_budget_sec
+      let usable_budget = remaining_turn_budget_s -. provider_timeout_guard_sec in
+      if usable_budget < min_provider_timeout_budget_sec
       then None
       else Some (Float.min adaptive_timeout_sec usable_budget)
     in
     let retry_budget =
       if remaining_turn_budget_s <= 0.0 then None
-      else if usable_retry_budget >= min_oas_timeout_budget_sec then
+      else if usable_retry_budget >= min_provider_timeout_budget_sec then
         Some (usable_retry_budget, false)
       else if allow_wall_clock_retry_budget then
         Option.map (fun timeout -> (timeout, true)) wall_clock_retry_budget
@@ -139,8 +139,8 @@ let resolve_bounded_oas_timeout_budget_with_turn_budget
           source;
         }
   end else begin
-    let usable_budget = remaining_turn_budget_s -. oas_timeout_guard_sec in
-    if usable_budget < min_oas_timeout_budget_sec
+    let usable_budget = remaining_turn_budget_s -. provider_timeout_guard_sec in
+    if usable_budget < min_provider_timeout_budget_sec
     then None
     else
       let effective_timeout_sec =
@@ -171,12 +171,12 @@ let resolve_bounded_oas_timeout_budget_with_turn_budget
         }
   end
 
-let bounded_oas_timeout_for_turn_budget_with_turn_budget
+let bounded_provider_timeout_for_turn_budget_with_turn_budget
     ~(estimated_input_tokens : int) ~(max_turns : int)
     ~(remaining_turn_budget_s : float) : float option =
   Option.map
-    (fun (budget : oas_timeout_budget_resolution) -> budget.effective_timeout_sec)
-    (resolve_bounded_oas_timeout_budget_with_turn_budget
+    (fun (budget : provider_timeout_budget) -> budget.effective_timeout_sec)
+    (resolve_bounded_provider_timeout_budget_with_turn_budget
        ~allow_wall_clock_retry_budget:false
        ~is_retry:false
        ~estimated_input_tokens ~max_turns ~remaining_turn_budget_s)
@@ -191,18 +191,18 @@ let allow_wall_clock_retry_budget_for_attempt
   && attempt = 1
   && List.length attempted_cascades > 1
 
-let bounded_oas_timeout_for_turn_budget ~(estimated_input_tokens : int)
+let bounded_provider_timeout_for_turn_budget ~(estimated_input_tokens : int)
     ~(remaining_turn_budget_s : float) : float option =
-  bounded_oas_timeout_for_turn_budget_with_turn_budget ~estimated_input_tokens
+  bounded_provider_timeout_for_turn_budget_with_turn_budget ~estimated_input_tokens
     ~max_turns:(Keeper_runtime_resolved.reactive_max_turns_per_call ())
     ~remaining_turn_budget_s
 
-let oas_retry_budget_available_for_turn
+let provider_retry_budget_available_for_turn
     ~(allow_wall_clock_retry_budget : bool) ~(is_retry : bool)
     ~(estimated_input_tokens : int) ~(max_turns : int)
     ~(remaining_turn_budget_s : float) : bool =
   Option.is_some
-    (resolve_bounded_oas_timeout_budget_with_turn_budget
+    (resolve_bounded_provider_timeout_budget_with_turn_budget
        ~allow_wall_clock_retry_budget
        ~is_retry ~estimated_input_tokens
        ~max_turns ~remaining_turn_budget_s)
@@ -211,17 +211,17 @@ let oas_retry_budget_available_for_turn
    ------------------------------------------------------------------
    Typed admission decision for an upcoming cascade attempt.
 
-   Background: 1077/24h [oas_timeout_budget] events, ~74% from retry
+   Background: 1077/24h [provider_timeout] events, ~74% from retry
    paths ([adaptive_*_retry] / [static_300s_*_retry]). The current
    caller in [Keeper_unified_turn.ml:589-615] calls
-   [resolve_bounded_oas_timeout_budget_with_turn_budget] and, when it
+   [resolve_bounded_provider_timeout_budget_with_turn_budget] and, when it
    returns [None] for a retry, emits a turn-owned timeout instead of
-   minting an [Oas_timeout_budget] root cause. That keeps two
+   minting an [Provider_timeout] root cause. That keeps two
    different failure semantics into one wire code:
      (a) the cascade attempt never started because admission budget
          was insufficient, and
      (b) an actual provider attempt ran and the server timed out.
-   Mixing them inflates the [oas_timeout_budget] signature and hides
+   Mixing them inflates the [provider_timeout] signature and hides
    the retry-admission rate.
 
    This function returns a typed admission decision. It does NOT
@@ -282,10 +282,10 @@ let decide_retry_admission_for_turn
     in
     let usable_retry_budget = adaptive_timeout_sec -. time_spent_in_turn in
     let usable_wall_clock_budget =
-      remaining_turn_budget_s -. oas_timeout_guard_sec
+      remaining_turn_budget_s -. provider_timeout_guard_sec
     in
     let projected_usable_budget_s =
-      if usable_retry_budget >= min_oas_timeout_budget_sec then
+      if usable_retry_budget >= min_provider_timeout_budget_sec then
         usable_retry_budget
       else if allow_wall_clock_retry_budget then usable_wall_clock_budget
       else usable_retry_budget
@@ -295,35 +295,35 @@ let decide_retry_admission_for_turn
         (Retry_budget_below_min
            {
              projected_usable_budget_s;
-             min_required_s = min_oas_timeout_budget_sec;
+             min_required_s = min_provider_timeout_budget_sec;
              remaining_turn_budget_s;
              adaptive_timeout_s = adaptive_timeout_sec;
              allow_wall_clock_retry_budget;
            })
-    else if usable_retry_budget >= min_oas_timeout_budget_sec then Ok ()
+    else if usable_retry_budget >= min_provider_timeout_budget_sec then Ok ()
     else if
       allow_wall_clock_retry_budget
-      && usable_wall_clock_budget >= min_oas_timeout_budget_sec
+      && usable_wall_clock_budget >= min_provider_timeout_budget_sec
     then Ok ()
     else
       Error
         (Retry_budget_below_min
            {
              projected_usable_budget_s;
-             min_required_s = min_oas_timeout_budget_sec;
+             min_required_s = min_provider_timeout_budget_sec;
              remaining_turn_budget_s;
              adaptive_timeout_s = adaptive_timeout_sec;
              allow_wall_clock_retry_budget;
            })
   else
-    let usable_budget = remaining_turn_budget_s -. oas_timeout_guard_sec in
-    if usable_budget >= min_oas_timeout_budget_sec then Ok ()
+    let usable_budget = remaining_turn_budget_s -. provider_timeout_guard_sec in
+    if usable_budget >= min_provider_timeout_budget_sec then Ok ()
     else
       Error
         (First_attempt_budget_below_min
            {
              projected_usable_budget_s = usable_budget;
-             min_required_s = min_oas_timeout_budget_sec;
+             min_required_s = min_provider_timeout_budget_sec;
              remaining_turn_budget_s;
            })
 
@@ -364,7 +364,7 @@ let degraded_retry_bypasses_slot_phase_guard
      was added to Cascade_error_classify, which is exactly the wrong default
      for a guard that decides whether to bypass slot-phase admission. *)
   match Keeper_turn_driver.classify_masc_internal_error err with
-  | Some (Keeper_turn_driver.Oas_timeout_budget _) -> true
+  | Some (Keeper_turn_driver.Provider_timeout _) -> true
   | Some (Keeper_turn_driver.Cascade_exhausted { reason; _ })
     when cascade_reason_is_structural_attempt_timeout reason ->
       true
@@ -387,7 +387,7 @@ let degraded_retry_bypasses_slot_phase_guard
     false
 
 let reclassify_oas_timeout_for_attempt
-    ~(timeout_budget : oas_timeout_budget_resolution option)
+    ~(timeout_budget : provider_timeout_budget option)
     (err : Agent_sdk.Error.sdk_error) : Agent_sdk.Error.sdk_error =
   match err, timeout_budget with
   | Agent_sdk.Error.Api (Timeout { message }), Some timeout_budget
@@ -400,16 +400,16 @@ let attempt_watchdog_outer_turn_reserve_sec = 1.0
 
 let attempt_watchdog_timeout_sec
     ~(remaining_turn_budget_s : float)
-    (timeout_budget : oas_timeout_budget_resolution) : float =
+    (timeout_budget : provider_timeout_budget) : float =
   let desired =
-    timeout_budget.effective_timeout_sec +. oas_timeout_guard_sec
+    timeout_budget.effective_timeout_sec +. provider_timeout_guard_sec
   in
   let cap_before_outer_timeout =
     Float.max 0.001
       (remaining_turn_budget_s -. attempt_watchdog_outer_turn_reserve_sec)
   in
   let floor =
-    Float.min min_oas_timeout_budget_sec cap_before_outer_timeout
+    Float.min min_provider_timeout_budget_sec cap_before_outer_timeout
   in
   Float.max floor (Float.min desired cap_before_outer_timeout)
 
@@ -453,7 +453,7 @@ let next_fail_open_cascade_for_turn_with_budget
         | None -> false
       then Degraded_retry_slot_phase_exhausted retry
       else if
-        oas_retry_budget_available_for_turn
+        provider_retry_budget_available_for_turn
           ~allow_wall_clock_retry_budget:true
           ~is_retry:true ~estimated_input_tokens ~max_turns
           ~remaining_turn_budget_s

@@ -188,7 +188,7 @@ let is_provider_timeout_error (err : Agent_sdk.Error.sdk_error) =
      both sweeps — the same predicate shape exists in three places
      and only this one still had a catch-all. *)
   match Keeper_turn_driver.classify_masc_internal_error err with
-  | Some (Keeper_turn_driver.Oas_timeout_budget _) -> true
+  | Some (Keeper_turn_driver.Provider_timeout _) -> true
   | Some
       ( Keeper_turn_driver.Cascade_exhausted _
       | Keeper_turn_driver.Capacity_backpressure _
@@ -224,7 +224,7 @@ let oas_timeout_budget_policy_decision
   : Keeper_failure_policy.decision option
   =
   match Keeper_turn_driver.classify_masc_internal_error err with
-  | Some (Keeper_turn_driver.Oas_timeout_budget { phase; _ }) ->
+  | Some (Keeper_turn_driver.Provider_timeout { phase; _ }) ->
     Some
       (Keeper_failure_policy.decide
          (Keeper_failure_policy.Provider_timeout

@@ -917,7 +917,8 @@ let append_unfinished_provider_attempt_finished_best_effort
   | Ok (Some started) ->
     let inherited_fields =
       match started.decision with
-      | `Assoc fields -> fields
+      | `Assoc fields ->
+        List.filter (fun (k, _) -> not (String.equal k "clock_refs")) fields
       | _ -> []
     in
     let terminal_fields =
@@ -934,9 +935,12 @@ let append_unfinished_provider_attempt_finished_best_effort
       | None -> terminal_fields
       | Some kind -> ("exception_kind", `String kind) :: terminal_fields
     in
+    let decision = `Assoc (inherited_fields @ terminal_fields) in
+    let clock_refs = clock_refs_for_context ctx ~event:Provider_attempt_finished () in
+    let decision = with_clock_refs ~clock_refs decision in
     make_for_context ctx ~event:Provider_attempt_finished
       ?cascade_name:started.cascade_name
       ~status
-      ~decision:(`Assoc (inherited_fields @ terminal_fields))
+      ~decision
       ()
     |> append_best_effort ~site config

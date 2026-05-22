@@ -42,6 +42,24 @@ let log_task_transition_failed err =
       Log.Task.warn "task transition failed: %s" message
   | _ -> Log.Task.error "task transition failed: %s" message
 
+(** Client-side FSM gate: reject impossible transitions before server dispatch.
+    Uses [Coord_task_classify.valid_next_actions_for_status] as SSOT. *)
+let client_side_transition_gate_error ~task_opt ~action ~action_s =
+  match task_opt with
+  | None -> None
+  | Some (task : Masc_domain.task) ->
+    let valid_actions = Coord_task_classify.valid_next_actions_for_status task.task_status in
+    if List.mem action valid_actions
+    then None
+    else
+      Some
+        (Masc_domain.Task_error.InvalidState
+           (Printf.sprintf
+              "Transition '%s' from status '%s' is not allowed. Valid actions: %s"
+              action_s
+              (Masc_domain.task_status_to_string task.task_status)
+              (String.concat ", " (List.map Masc_domain.task_action_to_string valid_actions))))
+
 include Tool_task_payloads
 
 let is_registered_keeper_agent_alias_name config agent_name =
@@ -736,6 +754,11 @@ and handle_transition ?agent_tool_names ~tool_name ~start_time ctx args =
   in
   match verifier_terminal_verdict_noop with
   | Some message -> Tool_result.ok ~tool_name ~start_time message
+  | None ->
+  match client_side_transition_gate_error ~task_opt ~action ~action_s with
+  | Some err ->
+    log_task_transition_failed (Masc_domain.Task err);
+    result_to_response ~tool_name ~start_time (Error (Masc_domain.Task err))
   | None ->
   match handoff_context with
   | Error error -> Tool_result.error ~tool_name ~start_time error

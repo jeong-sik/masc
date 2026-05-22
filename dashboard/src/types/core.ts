@@ -400,10 +400,6 @@ export const KEEPER_RUNTIME_BLOCKER_CLASSES = [
   'autonomous_slot_wait_timeout',
   'admission_queue_wait_timeout',
   'turn_timeout_after_queue_wait',
-  // Legacy wire compatibility only. Do not use this as a current runtime root
-  // cause or dashboard wakeup/action predicate; owner-specific timeout,
-  // admission, or capacity blockers must be emitted instead.
-  'oas_timeout_budget',
   'turn_timeout',
   // Emitted by `lib/keeper/keeper_meta_contract.ml:101` (Turn_livelock_blocked)
   // serialized via `blocker_class_to_string` → `"turn_livelock_blocked"`.

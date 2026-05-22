@@ -53,8 +53,8 @@ type error_kind =
   | Stale_turn_timeout (** ["stale_turn_timeout(...)"] supervisor guard. *)
   | Fiber_unresolved (** ["fiber_unresolved"] sentinel from turn lifecycle. *)
   | Provider_timeout
-      (** Provider/OAS timeout family. Legacy ["oas_timeout_budget_loop(...)"]
-          text is normalized here instead of becoming its own root cause. *)
+      (** Provider-timeout family. Legacy ["oas_timeout_budget_loop(...)"] text is
+          normalized here instead of becoming its own root cause. *)
   | State_machine_guard
       (** ["state machine guard violation"] / FSM transition rejected. *)
   | Expected_version_mismatch (** CAS expected_version mismatch. *)

@@ -46,11 +46,16 @@ let error_kind_to_string = function
   | Other -> "other"
 ;;
 
-let error_kind_of_string = function
+let canonical_error_kind_label = function
+  | "oas_timeout_budget" -> "provider_timeout"
+  | value -> value
+
+let error_kind_of_string raw =
+  match canonical_error_kind_label raw with
   | "sandbox_docker" -> Some Sandbox_docker
   | "stale_turn_timeout" -> Some Stale_turn_timeout
   | "fiber_unresolved" -> Some Fiber_unresolved
-  | "provider_timeout" | "oas_timeout_budget" -> Some Provider_timeout
+  | "provider_timeout" -> Some Provider_timeout
   | "state_machine_guard" -> Some State_machine_guard
   | "expected_version_mismatch" -> Some Expected_version_mismatch
   | "cascade_resolution_failure" -> Some Cascade_resolution_failure
@@ -82,24 +87,28 @@ let all_error_kinds =
    bucket was retired; remaining unmatched text lands in [Other] and is a
    candidate for future arm promotion. *)
 let classify_error (err : string) : error_kind =
-  let contains needle = String.length err >= String.length needle
+  let contains_in haystack needle = String.length haystack >= String.length needle
     && (
       let nlen = String.length needle in
-      let elen = String.length err in
+      let elen = String.length haystack in
       let rec go i =
         if i + nlen > elen then false
-        else if String.sub err i nlen = needle then true
+        else if String.sub haystack i nlen = needle then true
         else go (i + 1)
       in
       go 0)
   in
+  let err =
+    if contains_in err "oas_timeout_budget" then "provider_timeout" else err
+  in
+  let contains needle = contains_in err needle in
   if contains "sandbox docker"
   then Sandbox_docker
   else if contains "stale_turn_timeout"
   then Stale_turn_timeout
   else if contains "fiber_unresolved"
   then Fiber_unresolved
-  else if contains "provider_timeout" || contains "oas_timeout_budget"
+  else if contains "provider_timeout"
   then Provider_timeout
   else if contains "state machine guard" || contains "guard violation"
   then State_machine_guard

@@ -117,13 +117,6 @@ val classify_mcp_accept :
 (** Re-export of
     {!Server_mcp_transport_http_headers.classify_mcp_accept}. *)
 
-val classify_mcp_accept_for_body :
-  Httpun.Request.t ->
-  string ->
-  Mcp_transport_protocol.Http_negotiation.accept_mode
-(** Re-export of
-    {!Server_mcp_transport_http_headers.classify_mcp_accept_for_body}. *)
-
 val should_use_sse_for_body :
   Httpun.Request.t ->
   string ->

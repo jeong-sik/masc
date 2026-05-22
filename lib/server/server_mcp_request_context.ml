@@ -43,8 +43,7 @@ let decide_post_body ~request ~context ~session_is_known body_str =
       | Error msg -> Error (Unknown_session msg)
       | Ok () -> (
           match
-            Server_mcp_transport_http_headers.classify_mcp_accept_for_body request
-              body_str
+            Server_mcp_transport_http_headers.classify_mcp_accept request
           with
           | Mcp_transport_protocol.Http_negotiation.Rejected ->
               Error (Invalid_accept invalid_accept_message)

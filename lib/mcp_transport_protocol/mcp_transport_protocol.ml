@@ -6,8 +6,7 @@
     JSON-RPC core: request/response types, builders, validators.
     Protocol version: supported versions, validation, normalization.
     HTTP negotiation: delegates parsing to {!Mcp_protocol.Http_negotiation}
-    (SDK); adds [accept_mode] with [Legacy_accepted] for the HTTP
-    notification-only relaxation. *)
+    (SDK) and classifies the Streamable HTTP Accept contract. *)
 
 (* ── JSON-RPC core types ─────────────────────────────────── *)
 
@@ -114,12 +113,9 @@ let jsonrpc_notification ?params method_name =
 
 module Http_negotiation = struct
   (** MASC-specific accept classification.
-      [Legacy_accepted] has no SDK equivalent. It is reserved for the HTTP
-      layer's notification-only relaxation; normal request Accept negotiation
-      never returns it. *)
+      Streamable HTTP requires both JSON and SSE media types. *)
   type accept_mode =
     | Streamable
-    | Legacy_accepted
     | Rejected
 
   (* Re-export SDK constants so callers' [Http_negotiation.sse_content_type]

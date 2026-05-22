@@ -2388,6 +2388,50 @@ let test_effective_keepalive_meta_prefers_disk_when_present () =
   check int "turn count comes from disk" 11
     chosen.runtime.usage.total_turns
 
+let test_boot_already_live_running () =
+  R.clear ();
+  let meta = make_meta "boot-live-running" in
+  ignore (R.register ~base_path:bp "boot-live-running" meta);
+  ignore (R.dispatch_event ~base_path:bp "boot-live-running" KSM.Fiber_started);
+  check bool "Running keeper is_boot_already_live" true
+    (R.is_boot_already_live ~base_path:bp "boot-live-running")
+
+let test_boot_already_live_paused () =
+  R.clear ();
+  let meta = make_meta "boot-live-paused" in
+  ignore (R.register ~base_path:bp "boot-live-paused" meta);
+  ignore (R.dispatch_event ~base_path:bp "boot-live-paused" KSM.Fiber_started);
+  ignore (R.dispatch_event ~base_path:bp "boot-live-paused" KSM.Operator_pause);
+  check bool "Paused keeper is_boot_already_live" true
+    (R.is_boot_already_live ~base_path:bp "boot-live-paused")
+
+let test_boot_not_already_live_failing () =
+  R.clear ();
+  let meta = make_meta "boot-live-failing" in
+  ignore (R.register ~base_path:bp "boot-live-failing" meta);
+  ignore (R.dispatch_event ~base_path:bp "boot-live-failing" KSM.Fiber_started);
+  ignore
+    (R.dispatch_event ~base_path:bp "boot-live-failing"
+       (KSM.Heartbeat_failed { consecutive = 1; max_allowed = 3 }));
+  check bool "Failing keeper is NOT boot_already_live" false
+    (R.is_boot_already_live ~base_path:bp "boot-live-failing")
+
+let test_boot_not_already_live_offline () =
+  R.clear ();
+  let meta = make_meta "boot-live-offline" in
+  ignore (R.register_offline ~base_path:bp "boot-live-offline" meta);
+  check bool "Offline keeper is NOT boot_already_live" false
+    (R.is_boot_already_live ~base_path:bp "boot-live-offline")
+
+let test_boot_not_already_live_stop_requested () =
+  R.clear ();
+  let meta = make_meta "boot-live-stopped" in
+  ignore (R.register ~base_path:bp "boot-live-stopped" meta);
+  ignore (R.dispatch_event ~base_path:bp "boot-live-stopped" KSM.Fiber_started);
+  ignore (R.dispatch_event ~base_path:bp "boot-live-stopped" KSM.Stop_requested);
+  check bool "Running keeper with stop_requested is NOT boot_already_live" false
+    (R.is_boot_already_live ~base_path:bp "boot-live-stopped")
+
 let () =
   run "Keeper_registry"
     [
@@ -2586,5 +2630,13 @@ let () =
             test_two_sdk_turn_boundaries_no_assert;
           eio_test "set_turn_phase rejection bumps guard metric"
             test_set_turn_phase_rejection_bumps_guard_metric;
+        ] );
+      ( "issue_17218_boot_idempotency",
+        [
+          test_case "boot_already_live for Running" `Quick test_boot_already_live_running;
+          test_case "boot_already_live for Paused" `Quick test_boot_already_live_paused;
+          test_case "boot NOT already_live for Failing" `Quick test_boot_not_already_live_failing;
+          test_case "boot NOT already_live for Offline" `Quick test_boot_not_already_live_offline;
+          test_case "boot NOT already_live when stop_requested" `Quick test_boot_not_already_live_stop_requested;
         ] );
     ]

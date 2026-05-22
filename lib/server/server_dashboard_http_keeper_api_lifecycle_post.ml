@@ -188,13 +188,8 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
           action name agent_name;
         let live_boot_entry =
           if String.equal action "boot"
-          then (
-            match Keeper_registry.get ~base_path:config.base_path name with
-            | Some entry
-              when entry.conditions.fiber_alive
-                   && not entry.conditions.stop_requested ->
-              Some entry
-            | Some _ | None -> None)
+             && Keeper_registry.is_boot_already_live ~base_path:config.base_path name
+          then Keeper_registry.get ~base_path:config.base_path name
           else None
         in
         (match live_boot_entry with

@@ -254,6 +254,14 @@ val set_grpc_close : base_path:string -> string -> (unit -> unit) option -> unit
 (** Check if a keeper is in Running state. *)
 val is_running : base_path:string -> string -> bool
 
+(** Check if a keeper is already live for boot idempotency.
+    Returns [true] when the keeper has a live fiber, is not
+    stop-requested, and its phase is [Running] or [Paused].
+    All other phases (including [Failing] and [Offline]) return [false]
+    so that [/boot] can restart the keeper instead of silently
+    doing nothing (Issue #17218). *)
+val is_boot_already_live : base_path:string -> string -> bool
+
 (** Check if a keeper has ANY registry entry (regardless of state).
     Used by reconcile to skip Crashed/Dead keepers. *)
 val is_registered : base_path:string -> string -> bool

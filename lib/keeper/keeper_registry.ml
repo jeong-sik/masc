@@ -981,6 +981,16 @@ let is_running ~base_path name =
   | None -> false
 ;;
 
+let is_boot_already_live ~base_path name =
+  match get ~base_path name with
+  | Some entry
+    when entry.conditions.fiber_alive
+         && not entry.conditions.stop_requested
+         && (entry.phase = Running || entry.phase = Paused) ->
+    true
+  | Some _ | None -> false
+;;
+
 (** True if the keeper has ANY registry entry (regardless of state).
     Used by reconcile to avoid re-launching Crashed/Dead keepers. *)
 let is_registered ~base_path name = Option.is_some (get ~base_path name)

@@ -101,20 +101,43 @@ let test_logic_and_rejected () =
   | Parsed.Too_complex `Logic_op -> ()
   | _ -> assert false
 
-let test_general_redirect_rejected () =
+let test_general_redirect_parsed () =
   match Bash.parse_string "echo hi > /tmp/out" with
-  | Parsed.Too_complex `Redirect -> ()
-  (* "> must classify as Redirect" *)
+  | Parsed.Parsed (Shell_ir.Simple s) ->
+    assert (Bin.to_string s.bin = "echo");
+    assert (s.args = [ Shell_ir.Lit "hi" ]);
+    (match s.redirects with
+     | [ Redirect_scope.File { fd = 1; target; mode = Redirect_scope.Write } ] ->
+       assert (Path_scope.raw target = "/tmp/out")
+     | _ -> assert false)
   | _ -> assert false
 
-let test_redirect_append_rejected () =
+let test_redirect_append_parsed () =
   match Bash.parse_string "echo hi >> /tmp/out" with
-  | Parsed.Too_complex `Redirect -> ()
+  | Parsed.Parsed (Shell_ir.Simple s) ->
+    (match s.redirects with
+     | [ Redirect_scope.File { fd = 1; target; mode = Redirect_scope.Append } ] ->
+       assert (Path_scope.raw target = "/tmp/out")
+     | _ -> assert false)
   | _ -> assert false
 
-let test_input_redirect_rejected () =
+let test_input_redirect_parsed () =
   match Bash.parse_string "cat < /etc/hosts" with
-  | Parsed.Too_complex `Redirect -> ()
+  | Parsed.Parsed (Shell_ir.Simple s) ->
+    (match s.redirects with
+     | [ Redirect_scope.File { fd = 0; target; mode = Redirect_scope.Read } ] ->
+       assert (Path_scope.raw target = "/etc/hosts")
+     | _ -> assert false)
+  | _ -> assert false
+
+let test_general_redirect_rejected_before_dispatch () =
+  match Bash.parse_string "echo hi > /tmp/out" with
+  | Parsed.Parsed ir ->
+    let result = Masc_exec.Exec_dispatch.dispatch ir in
+    assert (result.status = Unix.WEXITED 1);
+    assert (result.stdout = "");
+    assert (String.contains result.stderr 'w');
+    assert (String.contains result.stderr '/')
   | _ -> assert false
 
 let test_fd_redirect_parsed () =
@@ -468,9 +491,10 @@ let () =
   test_single_command_is_simple_not_pipeline ();
   test_logic_or_rejected ();
   test_logic_and_rejected ();
-  test_general_redirect_rejected ();
-  test_redirect_append_rejected ();
-  test_input_redirect_rejected ();
+  test_general_redirect_parsed ();
+  test_redirect_append_parsed ();
+  test_input_redirect_parsed ();
+  test_general_redirect_rejected_before_dispatch ();
   test_fd_redirect_parsed ();
   test_dev_null_redirect_parsed ();
   test_spaced_dev_null_redirect_parsed ();

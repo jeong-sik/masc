@@ -303,6 +303,21 @@ correlator the receipt does.
 | Step 6b-1 | `Keeper_contract_classifier.classify_actionable_signal` helper (additive) | merged (#11217) |
 | Step 6b-2 | Replace `String_util.contains_substring_ci` heuristic at `keeper_agent_run.ml:2285-2298` with the typed helper (RISKY — turn-accept distribution change, needs dual-emit window) | pending |
 
+## External comparison
+
+MASC sits in a different product category from general-purpose agent SDKs. Keeping the positioning explicit prevents design decisions from drifting toward runner-centric or workspace-centric assumptions that do not fit an operator-governed control plane.
+
+| Product family | Center of gravity | Turn model | Cascade ownership | Memory model | Operator surface |
+|---|---|---|---|---|---|
+| Claude Agent SDK | Runner / session | `Agent.run` loop with tool callbacks | OAS internal cascade | Session-scoped context + optional memory | Weak — run-level events only |
+| OpenAI Agents SDK | Runner / session | `Runner.run` pipeline with handoffs | OAS internal cascade | Thread + vector store | Weak — run-level traces |
+| Google ADK | Runner / agent graph | Event-loop with stateful agents | Model routing per agent | Session memory + artifacts | Medium — deployment + evaluation |
+| OpenClaw | Workspace / orchestrator | Plan-execute with tool registry | Workspace-level fallback | Long-term memory bank + compression | Strong — workspace governance |
+| Hermes | Workspace / skills | Skill-based execution graph | Provider fallback per skill | Context files + skill memory | Medium — provider + skill management |
+| **MASC** | **Supervisor / cascade** | Heartbeat-scheduled autonomous cycle + direct `masc_keeper_msg` | **MASC-owned** `Keeper_cascade_engine` selects single-provider OAS runs | Three-layer: OAS checkpoint, MASC receipt/snapshot, memory hooks | **Strong** — registry phase, FSM, runtime manifest, receipt, lens, audit ring |
+
+**Design implication**: When a feature request sounds like "add session memory" or "enable automatic provider fallback", the first question is which layer owns it. Session memory belongs to the OAS checkpoint layer. Automatic provider fallback belongs to the OAS cascade layer. MASC adds value by supervising, governing, and receipting those layers, not by reimplementing them.
+
 ## References
 
 - `lib/keeper/keeper_unified_turn.ml` — turn entry, pre-dispatch gates, receipts

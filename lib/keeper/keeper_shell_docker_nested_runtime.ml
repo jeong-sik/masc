@@ -31,49 +31,54 @@ type shell_guard_token =
   | Guard_word of string * bool
   | Guard_separator
 
-let shell_guard_tokens cmd =
-  let flush_word acc buf quoted =
-    if Buffer.length buf = 0
-    then acc
-    else (
-      let word = Buffer.contents buf |> String.lowercase_ascii in
-      Buffer.clear buf;
-      Guard_word (word, quoted) :: acc)
-  in
-  let len = String.length cmd in
-  let rec loop i quote quoted acc buf =
+let push_guard_word acc ~quoted value =
+  if String.equal value ""
+  then acc
+  else Guard_word (String.lowercase_ascii value, quoted) :: acc
+;;
+
+let split_unquoted_guard_word acc value =
+  let len = String.length value in
+  let rec loop start i acc =
     if i >= len
-    then List.rev (flush_word acc buf quoted)
+    then push_guard_word acc ~quoted:false (String.sub value start (len - start))
     else (
-      match quote, cmd.[i] with
-      | Some q, c when c = q -> loop (i + 1) None true acc buf
-      | Some _, c ->
-        Buffer.add_char buf c;
-        loop (i + 1) quote quoted acc buf
-      | None, (('\'' | '"') as q) -> loop (i + 1) (Some q) true acc buf
-      | None, (' ' | '\t' | '\r' | '\n') ->
-        let acc = flush_word acc buf quoted in
-        loop (i + 1) None false acc buf
-      | None, (';' | '|') ->
-        let acc = Guard_separator :: flush_word acc buf quoted in
-        loop (i + 1) None false acc buf
-      | None, '&' ->
-        let acc =
-          if i + 1 < len && cmd.[i + 1] = '&'
-          then Guard_separator :: flush_word acc buf quoted
-          else flush_word acc buf quoted
-        in
-        loop
-          (if i + 1 < len && cmd.[i + 1] = '&' then i + 2 else i + 1)
-          None
-          false
-          acc
-          buf
-      | None, c ->
-        Buffer.add_char buf c;
-        loop (i + 1) None quoted acc buf)
+      match value.[i] with
+      | ';' ->
+        let acc = push_guard_word acc ~quoted:false (String.sub value start (i - start)) in
+        loop (i + 1) (i + 1) (Guard_separator :: acc)
+      | '&' when i + 1 < len && value.[i + 1] = '&' ->
+        let acc = push_guard_word acc ~quoted:false (String.sub value start (i - start)) in
+        loop (i + 2) (i + 2) (Guard_separator :: acc)
+      | '|' when i + 1 < len && value.[i + 1] = '|' ->
+        let acc = push_guard_word acc ~quoted:false (String.sub value start (i - start)) in
+        loop (i + 2) (i + 2) (Guard_separator :: acc)
+      | _ch -> loop start (i + 1) acc)
   in
-  loop 0 None false [] (Buffer.create 32)
+  loop 0 0 acc
+;;
+
+let guard_tokens_of_word acc (word : Masc_exec_bash_parser.Bash_words.word) =
+  if word.quoted
+  then push_guard_word acc ~quoted:true word.value
+  else if String.equal word.value "&&"
+          || String.equal word.value "||"
+          || String.equal word.value ";"
+  then Guard_separator :: acc
+  else split_unquoted_guard_word acc word.value
+;;
+
+let shell_guard_tokens cmd =
+  match Masc_exec_bash_parser.Bash_words.stages cmd with
+  | Error _ -> []
+  | Ok stages ->
+    stages
+    |> List.fold_left
+         (fun acc stage ->
+            let acc = List.fold_left guard_tokens_of_word acc stage in
+            Guard_separator :: acc)
+         []
+    |> List.rev
 ;;
 
 let shell_assignment_like word =
@@ -198,11 +203,21 @@ let unquoted_word_mentions_socket_marker tokens =
 
 let rec command_uses_nested_container_runtime cmd =
   let tokens = shell_guard_tokens cmd in
-  command_word_mentions_nested_runtime tokens
-  || command_substitution_mentions_nested_runtime tokens
-  || unquoted_word_mentions_socket_marker tokens
-  ||
-  match shell_c_payload tokens with
-  | None -> false
-  | Some payload -> command_uses_nested_container_runtime payload
+  match tokens with
+  | [] ->
+    let lower = String.lowercase_ascii cmd in
+    List.exists
+      (fun token -> String_util.contains_substring lower token)
+      nested_container_runtime_tokens
+    || List.exists
+         (fun marker -> String_util.contains_substring lower marker)
+         sandbox_socket_markers
+  | _ ->
+    command_word_mentions_nested_runtime tokens
+    || command_substitution_mentions_nested_runtime tokens
+    || unquoted_word_mentions_socket_marker tokens
+    ||
+    match shell_c_payload tokens with
+    | None -> false
+    | Some payload -> command_uses_nested_container_runtime payload
 ;;

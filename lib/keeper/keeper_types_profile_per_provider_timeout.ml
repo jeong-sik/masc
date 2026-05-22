@@ -8,7 +8,7 @@
     Extracted verbatim from [Keeper_types_profile]. The
     [per_provider_timeout_state] variant + constructors come from
     [Keeper_types_profile_defaults] via [include] — same pattern the
-    parent uses at line 145. *)
+    parent uses for shared profile defaults. *)
 
 include Keeper_types_profile_defaults
 

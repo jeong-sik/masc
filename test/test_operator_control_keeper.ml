@@ -2892,6 +2892,10 @@ proactive_enabled = true
       Alcotest.(check bool) "unknown active goal rejected" false ok;
       Alcotest.(check bool) "unknown active goal names surfaced" true
         (contains_substring msg "goal-missing");
+      (* Stop keepalive before direct write_meta to prevent CAS conflict.
+         The keepalive fiber bumps meta_version on each tick, racing with
+         the test's read-then-write cycle.  Issue #17231. *)
+      Keeper_keepalive.stop_keepalive keeper_name;
       let meta = read_keeper_meta_exn config keeper_name in
       let mutated =
         {
@@ -2921,7 +2925,6 @@ proactive_enabled = true
       (match Masc_mcp.Keeper_types.write_meta config mutated with
       | Ok () -> ()
       | Error err -> Alcotest.fail ("meta write failed: " ^ err));
-      Keeper_keepalive.stop_keepalive keeper_name;
       let status, json =
         Masc_mcp.Dashboard_http_keeper.keeper_config_json config keeper_name
       in

@@ -216,7 +216,6 @@ let runtime_codes_to_projection : (string * Code.t * D.t) list =
     , Code.Stale_turn_timeout_no_progress
     , D.Turn_wall_clock_timeout )
   ; "Stale_turn_timeout/noop", Code.Stale_turn_timeout_noop, D.Turn_wall_clock_timeout
-  ; "Oas_timeout_budget", Code.Oas_timeout_budget, D.Turn_wall_clock_timeout
   ; ( "Tool_required_unsatisfied"
     , Code.Tool_required_unsatisfied "x"
     , D.Required_tool_use_unsatisfied )

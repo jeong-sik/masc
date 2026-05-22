@@ -187,15 +187,15 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
         Log.Server.info "keeper lifecycle %s name=%s actor=%s started"
           action name agent_name;
         let live_boot_entry =
-          if String.equal action "boot"
-          then (
-            match Keeper_registry.get ~base_path:config.base_path name with
-            | Some entry
-              when entry.conditions.fiber_alive
-                   && not entry.conditions.stop_requested ->
-              Some entry
-            | Some _ | None -> None)
-          else None
+          match Keeper_registry.get ~base_path:config.base_path name with
+          | Some entry
+            when String.equal action "boot"
+                 && entry.conditions.fiber_alive
+                 && not entry.conditions.stop_requested
+                 && (entry.phase = Keeper_state_machine.Running
+                     || entry.phase = Keeper_state_machine.Paused) ->
+            Some entry
+          | Some _ | None -> None
         in
         (match live_boot_entry with
          | Some entry ->

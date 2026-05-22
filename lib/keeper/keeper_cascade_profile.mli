@@ -94,6 +94,14 @@ val keeper_catalog_names : ?config_path:string -> unit -> string list
 val system_catalog_names : ?config_path:string -> unit -> string list
 (** Live system-only profile names present in [cascade.toml]. *)
 
+val required_capability_profile_of_cascade_name : string -> string option
+(** [required_capability_profile_of_cascade_name name] returns the
+    [required_capability_profile] declared for cascade [name] in the
+    live catalog snapshot, or [None] when the snapshot is missing or
+    the cascade is not found.  Used by pre-dispatch capability-aware
+    rotation filtering so [Tool_required] turns do not rotate into
+    cascades whose providers cannot satisfy forced [tool_choice]. *)
+
 val fallback_cascade_for : ?config_path:string -> string -> string option
 (** Declarative escalation hint for [name].
 

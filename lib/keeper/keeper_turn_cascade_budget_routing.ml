@@ -109,7 +109,26 @@ let next_fail_open_cascade_for_turn
   let rotation_cascades =
     match tool_requirement, rotation_cascades with
     | Keeper_agent_tool_surface.Required, Some _ ->
-      Some (dedupe_keep_order [ base_cascade; tool_required_rotation_cascade_name () ])
+      let tr_cascade = tool_required_rotation_cascade_name () in
+      let tr_has_required_tool_choice =
+        match
+          Keeper_cascade_profile.required_capability_profile_of_cascade_name
+            tr_cascade
+        with
+        | None -> true
+        | Some profile_name -> (
+          match
+            Cascade_capability_profile.resolve_required_capabilities
+              profile_name
+          with
+          | None -> true
+          | Some reqs ->
+            reqs.inline_tool_choice = Cascade_capability_profile.Required)
+      in
+      if tr_has_required_tool_choice then
+        Some (dedupe_keep_order [ base_cascade; tr_cascade ])
+      else
+        Some (dedupe_keep_order [ base_cascade ])
     | _ -> rotation_cascades
   in
   EC.degraded_rotation_after_recoverable_error

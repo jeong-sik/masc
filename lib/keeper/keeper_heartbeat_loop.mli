@@ -129,7 +129,7 @@ val provider_timeout_observation_reasons : string list
 val record_provider_timeout_observation :
   base_path:string -> keeper_name:string -> unit
 
-val oas_timeout_budget_policy_decision :
+val provider_timeout_policy_decision :
   strikes:int -> Agent_sdk.Error.sdk_error -> Keeper_failure_policy.decision option
 (** Return the policy decision for a structured [Oas_timeout_budget] error.
     This heartbeat-loop path is reached after the keeper turn returned, so

@@ -58,7 +58,7 @@ let test_strike_limit_is_soft_backoff () =
    | KK.Provider_timeout_warn ->
      failwith "strike limit should soft-backoff, not crash")
 
-let oas_timeout_budget_error ~phase =
+let provider_timeout_error ~phase =
   KTD.sdk_error_of_masc_internal_error
     (KTD.Oas_timeout_budget
        { budget_sec = 90.0
@@ -75,23 +75,23 @@ let turn_timeout_error () =
 
 let test_cycle_failed_log_level_is_policy_aware () =
   Alcotest.(check bool)
-    "oas timeout budget cycle failure is warn"
+    "provider timeout cycle failure is warn"
     true
     (EC.should_warn_keeper_cycle_failed
-       (oas_timeout_budget_error ~phase:"cascade_attempt_watchdog"));
+       (provider_timeout_error ~phase:"cascade_attempt_watchdog"));
   Alcotest.(check bool)
     "turn wall-clock timeout remains error"
     false
     (EC.should_warn_keeper_cycle_failed (turn_timeout_error ()))
 
 let test_strike_limit_routes_through_policy_without_keeper_death () =
-  let err = oas_timeout_budget_error ~phase:"stream_idle:streaming_thinking" in
+  let err = provider_timeout_error ~phase:"stream_idle:streaming_thinking" in
   match
-    KH.oas_timeout_budget_policy_decision
+    KH.provider_timeout_policy_decision
       ~strikes:KK.provider_timeout_strike_limit
       err
   with
-  | None -> Alcotest.fail "expected OAS timeout budget policy decision"
+  | None -> Alcotest.fail "expected provider timeout policy decision"
   | Some decision ->
     Alcotest.(check bool) "keeper death denied" false decision.keeper_death_allowed;
     Alcotest.(check string)
@@ -108,9 +108,9 @@ let test_strike_limit_routes_through_policy_without_keeper_death () =
       decision.reason
 
 let test_capacity_phase_routes_to_provider_tuning () =
-  let err = oas_timeout_budget_error ~phase:"capacity_backpressure" in
-  match KH.oas_timeout_budget_policy_decision ~strikes:1 err with
-  | None -> Alcotest.fail "expected OAS timeout budget policy decision"
+  let err = provider_timeout_error ~phase:"capacity_backpressure" in
+  match KH.provider_timeout_policy_decision ~strikes:1 err with
+  | None -> Alcotest.fail "expected provider timeout policy decision"
   | Some decision ->
     Alcotest.(check bool) "keeper death denied" false decision.keeper_death_allowed;
     Alcotest.(check string)

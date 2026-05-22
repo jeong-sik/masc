@@ -60,11 +60,11 @@ val prior_provider_timeout_strikes
   -> int
 
 val is_provider_timeout_error : Agent_sdk.Error.sdk_error -> bool
-val timeout_phase_of_oas_timeout_budget_phase : string -> Keeper_failure_policy.timeout_phase option
+val timeout_phase_of_provider_timeout_phase : string -> Keeper_failure_policy.timeout_phase option
 
-val oas_timeout_budget_policy_decision
+val provider_timeout_policy_decision
   :  strikes:int
   -> Agent_sdk.Error.sdk_error
   -> Keeper_failure_policy.decision option
 
-val oas_timeout_budget_metric_outcome : Keeper_failure_policy.decision -> string
+val provider_timeout_metric_outcome : Keeper_failure_policy.decision -> string

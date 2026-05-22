@@ -120,16 +120,16 @@ let prior_provider_timeout_strikes =
 
 let is_provider_timeout_error = Observations.is_provider_timeout_error
 
-let timeout_phase_of_oas_timeout_budget_phase =
-  Observations.timeout_phase_of_oas_timeout_budget_phase
+let timeout_phase_of_provider_timeout_phase =
+  Observations.timeout_phase_of_provider_timeout_phase
 ;;
 
-let oas_timeout_budget_policy_decision =
-  Observations.oas_timeout_budget_policy_decision
+let provider_timeout_policy_decision =
+  Observations.provider_timeout_policy_decision
 ;;
 
-let oas_timeout_budget_metric_outcome =
-  Observations.oas_timeout_budget_metric_outcome
+let provider_timeout_metric_outcome =
+  Observations.provider_timeout_metric_outcome
 ;;
 
 let persist_message_cursor_updates = Keeper_heartbeat_loop_persist_cursor.persist_message_cursor_updates

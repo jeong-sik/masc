@@ -8,7 +8,9 @@
        next_action — *after* the legacy [normalize_code] is applied
        to the input wire (since PR-2 will keep the same producer-side
        normalisation; this test isolates the *consumer-side*
-       invariant).
+       invariant). Timeout actions intentionally differ: the legacy
+       [inspect_timeout_budget] action collapsed provider, admission/capacity,
+       and turn liveness ownership.
 
     2. Round-trip: [of_wire (to_wire t) = t] for every canonical
        constructor and for [Provider_error] wrapping each runtime
@@ -101,7 +103,9 @@ let test_canonical_next_action_byte_compat () =
     (fun (wire, disp) ->
        let legacy = Legacy.of_code wire in
        let expected =
-         match legacy.next_action with
+         match wire, legacy.next_action with
+         | ("turn_wall_clock_timeout" | "oas_timeout_budget"), _ ->
+           "Some:inspect_turn_timeout"
          | Some s -> "Some:" ^ s
          | None -> "None"
        in

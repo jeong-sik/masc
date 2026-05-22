@@ -35,8 +35,7 @@ This document is the operator-facing SSOT for:
 | `operator_digest` | Background proactive refresh loop | Cached payload wrapped as `{type, payload, ts_unix}` | Default root HTTP path returns cache; non-default requests recompute. |
 | `execution_snapshot` | Background proactive refresh loop | Cached payload wrapped as `{type, payload, ts_unix}` | Used by execution dashboard surfaces. |
 | `transport_health_snapshot` | Background proactive refresh loop | Cached payload wrapped as `{type, payload, ts_unix}` | Used for transport diagnostics. |
-| `namespace_truth_snapshot` | After namespace-truth recomposition from cached surfaces | Cached payload wrapped as `{type, payload, ts_unix}` | `room_truth_snapshot` is the legacy alias. |
-| `room_truth_snapshot` | Emitted together with `namespace_truth_snapshot` | Same payload as namespace truth | Compatibility alias; not a distinct read model. |
+| `namespace_truth_snapshot` | After namespace-truth recomposition from cached surfaces | Cached payload wrapped as `{type, payload, ts_unix}` | Namespace truth dashboard snapshot. |
 
 ## `keeper_composite_changed`
 
@@ -176,7 +175,7 @@ Source of accepted event names on the dashboard side: `dashboard/src/types/sse.t
 | Keeper direct SSE | `keeper_heartbeat`, `keeper_handoff`, `masc/keeper_handoff`, `keeper_compaction`, `masc/keeper_compaction`, `keeper_guardrail`, `masc/keeper_guardrail`, `keeper_phase_changed`, `keeper_composite_changed`, `keeper_tool_call`, `masc/keeper_tool_call`, `keeper_tool_skipped`, `keeper_turn_complete`, `masc/keeper_turn_complete` |
 | Approval / governance | `client_input_approved`, `client_input_rejected`, `client_input_updated`, `governance_param_changed`, `approval:pending`, `approval:resolved` |
 | OAS bridge | `oas:masc:keeper:snapshot`, `oas:masc:keeper:lifecycle`, `oas:agent_started`, `oas:agent_completed`, `oas:tool_called`, `oas:tool_completed`, `oas:turn_started`, `oas:turn_completed`, `oas:context_compacted`, `oas:task_state_changed`, `oas:masc:harness:verdict_recorded`, `oas:masc:harness:pre_compact`, `oas:masc:harness:handoff` |
-| Server-push snapshots | `room_truth_snapshot`, `namespace_truth_snapshot`, `execution_snapshot`, `operator_snapshot`, `operator_digest`, `transport_health_snapshot` |
+| Server-push snapshots | `namespace_truth_snapshot`, `execution_snapshot`, `operator_snapshot`, `operator_digest`, `transport_health_snapshot` |
 
 ### 2. OAS custom events published by MASC
 
@@ -201,7 +200,7 @@ These originate in `lib/oas_events.ml` and are later relayed by `oas_event_bridg
 | Event name | Status | Notes |
 | --- | --- | --- |
 | `keeper_lifecycle` | removed legacy direct SSE | Replaced by `keeper_phase_changed` for observer-facing FSM transitions and `oas:masc:keeper:lifecycle` for lifecycle detail. |
-| `room_truth_snapshot` | compatibility alias | Emitted together with `namespace_truth_snapshot`; same payload, different name. |
+| `room_truth_snapshot` | removed legacy alias | Replaced by `namespace_truth_snapshot`; same payload shape, canonical event name only. |
 
 ## Representative Messages
 

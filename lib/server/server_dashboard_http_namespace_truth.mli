@@ -92,14 +92,13 @@ val broadcast_namespace_truth_snapshot :
 (** [broadcast_namespace_truth_snapshot state] dedup-broadcasts the
     current snapshot to all Observer SSE sessions.
 
-    Three SSE channels emitted per broadcast (snapshot payload
+    Two SSE channels emitted per broadcast (snapshot payload
     identical):
 
     | [type] field | Stream alias |
     | --- | --- |
     | ["project_snapshot"] | canonical |
     | ["namespace_truth_snapshot"] | alias for namespace dashboards |
-    | ["room_truth_snapshot"] | legacy compatibility |
 
     Dedup: SHA-256 of the serialized snapshot (with [generated_at]
     stripped recursively before hashing).  When the hash matches the

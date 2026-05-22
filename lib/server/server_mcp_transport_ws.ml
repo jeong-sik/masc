@@ -250,7 +250,7 @@ let valid_dashboard_slice = function
   | _ -> false
 
 let dashboard_slice_for_sse_type = function
-  | "project_snapshot" | "namespace_truth_snapshot" | "room_truth_snapshot" ->
+  | "project_snapshot" | "namespace_truth_snapshot" ->
       Some "namespace"
   | "execution_snapshot" ->
       Some "execution"

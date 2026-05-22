@@ -479,7 +479,7 @@ let test_oas_timeout_budget_observation_updates_registry () =
       | Some { Masc_mcp.Keeper_registry.last_skip_observation = Some (_, reasons);
                meta = updated_meta; _ } ->
         Alcotest.(check (list string))
-          "timeout budget stamped for watchdog routing"
+          "provider timeout stamped for watchdog routing"
           Masc_mcp.Keeper_heartbeat_loop.oas_timeout_budget_observation_reasons
           reasons;
         Alcotest.(check bool)

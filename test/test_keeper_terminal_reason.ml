@@ -520,20 +520,6 @@ let test_structured_no_tool_capable_provider () =
   check string "code" "no_tool_capable_provider" (terminal_code terminal)
 ;;
 
-let test_legacy_gh_worktree_text () =
-  let terminal =
-    KT.of_legacy_error_text
-      "keeper_shell failed: gh_repo_context_missing_worktree: active task has no linked \
-       worktree"
-  in
-  check string "code" "gh_repo_context_missing_worktree" (terminal_code terminal);
-  check
-    (option string)
-    "next action"
-    (Some "create_or_link_worktree")
-    (terminal_next_action terminal)
-;;
-
 (* Contract violation encoding/decoding tests *)
 
 module KER = Masc_mcp.Keeper_execution_receipt
@@ -749,7 +735,6 @@ let () =
             "no tool-capable provider"
             `Quick
             test_structured_no_tool_capable_provider
-        ; test_case "legacy gh missing worktree text" `Quick test_legacy_gh_worktree_text
         ] )
     ; ( "contract violation encoding"
       , [ test_case "encode_tool_list" `Quick test_encode_tool_list

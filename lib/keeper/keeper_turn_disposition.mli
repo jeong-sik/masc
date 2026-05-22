@@ -50,10 +50,9 @@ type t =
           [String.starts_with ~prefix:"api_error_"]. *)
   | Unknown of { raw_error : string }
   (** Last-resort escape hatch for un-classified producer paths
-          (mainly [Keeper_turn_terminal.of_legacy_error_text] until
-          PR-3). [to_wire] returns ["unknown_error"] when [raw_error]
-          is empty, else [raw_error] verbatim — matches the legacy
-          [of_legacy_error_text "" → "unknown_error"] behaviour.
+          that have not yet been promoted to a closed constructor.
+          [to_wire] returns ["unknown_error"] when [raw_error] is empty,
+          else [raw_error] verbatim.
 
           PR-3 lint
           [scripts/lint/no-free-unknown-disposition.sh] will block

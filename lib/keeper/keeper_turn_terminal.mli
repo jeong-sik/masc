@@ -59,6 +59,5 @@ val of_failure
   -> Agent_sdk.Error.sdk_error
   -> t
 
-val of_legacy_error_text : string -> t
 val to_json : t -> Yojson.Safe.t
 val of_json : Yojson.Safe.t -> t option

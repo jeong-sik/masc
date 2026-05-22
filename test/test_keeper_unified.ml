@@ -2203,7 +2203,7 @@ let test_runtime_trust_snapshot_surfaces_terminal_reason () =
              ; ( "terminal_reason"
                , `Assoc
                    [ "code", `String "gh_repo_context_missing_worktree"
-                   ; "source", `String "legacy_error_text"
+                   ; "source", `String "typed_error"
                    ; "severity", `String "warn"
                    ; ( "summary"
                      , `String

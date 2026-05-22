@@ -216,7 +216,15 @@ let keeper_reply_snapshot_of_history (history_items : Yojson.Safe.t list) =
       (`String "delivered", `Float assistant_ts, `String preview)
 
 let error_keywords =
-  [ "error"; "failed"; "timeout"; "graphql"; "model"; "runtime"; "provider" ]
+  [ "error"
+  ; "failed"
+  ; "timeout"
+  ; "graphql"
+  ; "model"
+  ; (* RFC-0132-EXEMPT: classification list, not boundary redaction *)
+    "runtime"
+  ; "provider"
+  ]
 
 let looks_error_like text =
   List.exists (string_contains_ci text) error_keywords

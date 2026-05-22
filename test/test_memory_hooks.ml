@@ -503,26 +503,37 @@ let test_hook_slots_populated () =
 
 (* ── Memory injection recording tests (OAS checklist #3) ──────── *)
 
+let triple a b c =
+  let pp fmt (x, y, z) =
+    Format.fprintf fmt "(%a, %a, %a)" (Alcotest.pp a) x (Alcotest.pp b) y (Alcotest.pp c) z
+  in
+  let equal (x1, y1, z1) (x2, y2, z2) =
+    Alcotest.equal a x1 x2 && Alcotest.equal b y1 y2 && Alcotest.equal c z1 z2
+  in
+  Alcotest.testable pp equal
+
 let test_record_and_get_last_memory_injection () =
-  Memory_hooks.record_last_memory_injection "agent_a" "digest123" 456;
+  Memory_hooks.record_last_memory_injection "agent_a" "digest123" 400 456;
   let result = Memory_hooks.get_last_memory_injection "agent_a" in
-  check (option (pair string int)) "retrieves recorded injection" (Some ("digest123", 456)) result
+  check (option (triple string int int)) "retrieves recorded injection"
+    (Some ("digest123", 400, 456)) result
 
 let test_get_last_memory_injection_returns_none_when_missing () =
   let result = Memory_hooks.get_last_memory_injection "unknown_agent_xyz" in
-  check (option (pair string int)) "returns None for unknown agent" None result
+  check (option (triple string int int)) "returns None for unknown agent" None result
 
 let test_record_last_memory_injection_overwrites () =
-  Memory_hooks.record_last_memory_injection "agent_b" "first" 100;
-  Memory_hooks.record_last_memory_injection "agent_b" "second" 200;
+  Memory_hooks.record_last_memory_injection "agent_b" "first" 100 150;
+  Memory_hooks.record_last_memory_injection "agent_b" "second" 200 250;
   let result = Memory_hooks.get_last_memory_injection "agent_b" in
-  check (option (pair string int)) "overwrites previous injection" (Some ("second", 200)) result
+  check (option (triple string int int)) "overwrites previous injection"
+    (Some ("second", 200, 250)) result
 
 let test_clear_last_memory_injection () =
-  Memory_hooks.record_last_memory_injection "agent_clear" "digest" 123;
+  Memory_hooks.record_last_memory_injection "agent_clear" "digest" 100 123;
   Memory_hooks.clear_last_memory_injection "agent_clear";
   let result = Memory_hooks.get_last_memory_injection "agent_clear" in
-  check (option (pair string int)) "cleared" None result
+  check (option (triple string int int)) "cleared" None result
 
 let test_memory_injection_cleared_on_continue () =
   let tmp_dir = Filename.temp_dir "masc_test_mh" "" in
@@ -542,7 +553,7 @@ let test_memory_injection_cleared_on_continue () =
   (match decision with
    | Agent_sdk.Hooks.Continue ->
      let result = Memory_hooks.get_last_memory_injection "test_clear" in
-     check (option (pair string int)) "cleared on Continue" None result
+     check (option (triple string int int)) "cleared on Continue" None result
    | Agent_sdk.Hooks.AdjustParams _ ->
      let result = Memory_hooks.get_last_memory_injection "test_clear" in
      check bool "has entry after AdjustParams" true (Option.is_some result);
@@ -554,7 +565,7 @@ let test_memory_injection_cleared_on_continue () =
      (match decision2 with
       | Agent_sdk.Hooks.Continue ->
         let result2 = Memory_hooks.get_last_memory_injection "test_clear" in
-        check (option (pair string int)) "cleared on second Continue" None result2
+        check (option (triple string int int)) "cleared on second Continue" None result2
       | _ -> ())
    | _ -> fail "unexpected decision");
   (try Sys.rmdir tmp_dir with _ -> ())
@@ -615,7 +626,7 @@ let test_execution_receipt_json_includes_memory_fields () =
     ; ended_at = "2024-01-01T00:00:01Z"
     ; extra_system_context_digest = Some "sha256:abc123"
     ; extra_system_context_injected_size = Some 789
-    ; extra_system_context_computed_size = None
+    ; extra_system_context_computed_size = Some 400
     ; pre_dispatch_compacted = false
     ; pre_dispatch_compaction_trigger = None
     ; pre_dispatch_compaction_before_tokens = None
@@ -626,10 +637,13 @@ let test_execution_receipt_json_includes_memory_fields () =
   let json = Keeper_execution_receipt.to_json receipt in
   let digest = Yojson.Safe.Util.(member "extra_system_context_digest" json) in
   let size = Yojson.Safe.Util.(member "extra_system_context_injected_size" json) in
+  let computed = Yojson.Safe.Util.(member "extra_system_context_computed_size" json) in
   check string "extra_system_context_digest in JSON" "sha256:abc123"
     (match digest with `String s -> s | _ -> "");
   check int "extra_system_context_injected_size in JSON" 789
-    (match size with `Int n -> n | `Intlit s -> int_of_string s | _ -> 0)
+    (match size with `Int n -> n | `Intlit s -> int_of_string s | _ -> 0);
+  check int "extra_system_context_computed_size in JSON" 400
+    (match computed with `Int n -> n | `Intlit s -> int_of_string s | _ -> 0)
 
 let test_execution_receipt_json_null_when_missing () =
   let receipt : Keeper_execution_receipt.t =

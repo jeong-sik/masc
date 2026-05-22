@@ -81,6 +81,8 @@ type try_provider_ctx =
   ; runtime_manifest_context : Keeper_runtime_manifest.turn_context option
   ; runtime_manifest_append : (Keeper_runtime_manifest.t -> unit) option
   ; runtime_manifest_required_tool_names : string list
+  ; turn_start : Mtime.t
+  ; seq_ref : int ref
   }
 
 let emit_runtime_manifest
@@ -104,6 +106,14 @@ let emit_runtime_manifest
               (Keeper_cascade_engine.manifest_fields ctx.cascade_engine
                @ [ ("decision", other) ]))
     in
+    ctx.seq_ref := !(ctx.seq_ref) + 1;
+    let elapsed_ms =
+      let ns =
+        Mtime.Span.to_uint64_ns
+          (Mtime.span ctx.turn_start (Mtime_clock.now ()))
+      in
+      Some (Int64.to_int (Int64.div ns 1_000_000L))
+    in
     let decision =
       let decision =
         match decision with
@@ -114,11 +124,12 @@ let emit_runtime_manifest
         (Keeper_runtime_manifest.with_clock_refs
            ~clock_refs:
              (Keeper_runtime_manifest.clock_refs_for_context manifest_ctx ~event
-                ())
+                ?elapsed_ms ~logical_seq:!(ctx.seq_ref) ())
            decision)
     in
     Keeper_runtime_manifest.make_for_context manifest_ctx ~event
-      ~cascade_name:ctx.cascade_name ?status ?decision ()
+      ~cascade_name:ctx.cascade_name ?logical_seq:(Some !(ctx.seq_ref))
+      ?status ?decision ()
     |> append
   | _ -> ()
 

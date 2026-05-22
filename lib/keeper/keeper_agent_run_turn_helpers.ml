@@ -170,7 +170,8 @@ let runtime_manifest_context ~keeper_name ~agent_name ~trace_id ~generation
 
 let append_runtime_manifest ~config ~keeper_name ~agent_name ~trace_id
     ~generation ~cascade_name ?status ?decision ?keeper_turn_id
-    ?oas_turn_count ?checkpoint_path ?receipt_path ~site event =
+    ?oas_turn_count ?elapsed_ms ?logical_seq ?checkpoint_path ?receipt_path
+    ~site event =
   let decision =
     match keeper_turn_id with
     | None -> decision
@@ -188,12 +189,12 @@ let append_runtime_manifest ~config ~keeper_name ~agent_name ~trace_id
         (Keeper_runtime_manifest.with_clock_refs
            ~clock_refs:
              (Keeper_runtime_manifest.clock_refs_for_context ctx ~event
-                ?oas_turn_count ())
+                ?oas_turn_count ?elapsed_ms ?logical_seq ())
            decision)
   in
   Keeper_runtime_manifest.make ~keeper_name ~agent_name ~trace_id ~generation
-    ?keeper_turn_id ?oas_turn_count ~event ~cascade_name ?status ?decision
-    ?checkpoint_path ?receipt_path ()
+    ?keeper_turn_id ?oas_turn_count ?logical_seq ~event ~cascade_name ?status
+    ?decision ?checkpoint_path ?receipt_path ()
   |> Keeper_runtime_manifest.append_best_effort ~site config
 
 let cleanup_agent_setup ~keeper_name (setup : Keeper_run_tools.agent_setup) =

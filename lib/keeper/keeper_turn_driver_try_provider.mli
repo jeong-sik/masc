@@ -60,6 +60,8 @@ type try_provider_ctx =
   ; runtime_manifest_context : Keeper_runtime_manifest.turn_context option
   ; runtime_manifest_append : (Keeper_runtime_manifest.t -> unit) option
   ; runtime_manifest_required_tool_names : string list
+  ; turn_start : Mtime.t
+  ; seq_ref : int ref
   }
 
 val run_try_provider :

@@ -12,6 +12,7 @@ import {
   type MemorySubsystemsSynapse,
   type MemorySubsystemsEpisode,
   type MemorySubsystemsMemoryEntry,
+  type MemorySubsystemsMemoryEntryError,
 } from '../api/dashboard'
 import { formatTimeAgo } from '../lib/format-time'
 import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
@@ -534,6 +535,7 @@ export function MemoryEntriesPanel({
   activeKind,
   onKindChange,
   focused,
+  errors,
 }: {
   readonly entries: readonly MemorySubsystemsMemoryEntry[]
   readonly visibleEntries: readonly MemorySubsystemsMemoryEntry[]
@@ -543,6 +545,10 @@ export function MemoryEntriesPanel({
   readonly activeKind: string
   readonly onKindChange: (kind: string) => void
   readonly focused: boolean
+  /** RFC-0149 §3.1 — per-keeper memory bank read failures.  Each entry
+   *  means that keeper's `memory.jsonl` could not be read; the entry
+   *  rows under `entries` are still trustworthy for the other keepers. */
+  readonly errors?: readonly MemorySubsystemsMemoryEntryError[]
 }) {
   const chips = [
     { key: 'all', label: 'all', count: entries.length },
@@ -575,6 +581,27 @@ export function MemoryEntriesPanel({
         size="sm"
         tone="accent"
       />
+      ${
+        errors && errors.length > 0
+          ? html`<div
+              data-testid="memory-entries-errors"
+              role="alert"
+              class="rounded-[var(--r-1)] border border-[var(--warn-fg)] bg-[var(--warn-bg)] px-3 py-2 text-2xs text-[var(--color-fg-primary)]"
+            >
+              <div class="font-semibold mb-1">
+                ${errors.length} keeper${errors.length > 1 ? 's' : ''} memory unavailable
+              </div>
+              <ul class="flex flex-wrap gap-x-3 gap-y-1 font-mono">
+                ${errors.map(e => html`
+                  <li>
+                    <span class="text-[var(--color-fg-primary)]">${e.keeper}</span>:
+                    <span class="text-[var(--warn-fg)]">${e.error_class}</span>
+                  </li>
+                `)}
+              </ul>
+            </div>`
+          : null
+      }
       ${
         visibleEntries.length === 0
           ? html`<div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] p-4 text-center text-sm text-[var(--color-fg-muted)]">
@@ -754,6 +781,7 @@ export function MemorySubsystems({ focus }: MemorySubsystemsProps = {}) {
                   activeKind=${memoryKindFilter.value}
                   onKindChange=${(kind: string) => { memoryKindFilter.value = kind }}
                   focused=${normalizedFocus === 'entries'}
+                  errors=${data?.memory_entries?.errors ?? []}
                 />
               </div>
             `
@@ -975,6 +1003,7 @@ export function KeeperMemoryPanel({ keeperName }: { readonly keeperName: string 
         activeKind=${memoryKindFilter.value}
         onKindChange=${(kind: string) => { memoryKindFilter.value = kind }}
         focused=${true}
+        errors=${data?.memory_entries?.errors ?? []}
       />
       ${error ? html`<div class="text-xs text-[var(--color-status-warn)]">refresh error: ${error}</div>` : null}
     </div>

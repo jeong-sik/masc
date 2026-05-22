@@ -30,6 +30,10 @@ type t =
   (** Turn cancelled before completion (operator stop, switch_keeper, …). *)
   | Turn_wall_clock_timeout (** Turn exceeded its wall-clock budget. *)
   | Oas_timeout_budget (** OAS turn-budget cooldown / cap rejection. *)
+  | Cascade_attempts_exhausted
+  (** Cascade aggregate outcome: all candidate attempts were exhausted.
+          Operators should inspect per-attempt root causes instead of treating
+          this as the root cause. *)
   | Gh_repo_context_missing_worktree
   (** GitHub command blocked because the active task has no linked
           worktree. *)
@@ -91,6 +95,7 @@ val next_action : t -> string option
     - [External_cancel] → ["external_cancel"]
     - [Turn_wall_clock_timeout] → ["turn_wall_clock_timeout"]
     - [Oas_timeout_budget] → ["oas_timeout_budget"]
+    - [Cascade_attempts_exhausted] → ["cascade_attempts_exhausted"]
     - [Gh_repo_context_missing_worktree] → ["gh_repo_context_missing_worktree"]
     - [Required_tool_use_no_tool_call] → ["required_tool_use_no_tool_call"]
     - [Required_tool_use_unsatisfied] → ["required_tool_use_unsatisfied"]

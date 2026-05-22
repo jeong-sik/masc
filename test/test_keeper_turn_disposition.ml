@@ -9,7 +9,7 @@
        to the input wire (since PR-2 will keep the same producer-side
        normalisation; this test isolates the *consumer-side*
        invariant). Timeout actions intentionally differ: the legacy
-       [inspect_timeout_budget] action collapsed provider, admission/capacity,
+       [inspect_turn_timeout] action collapsed provider, admission/capacity,
        and turn liveness ownership.
 
     2. Round-trip: [of_wire (to_wire t) = t] for every canonical
@@ -148,7 +148,7 @@ let round_trippable : (string * D.t) list =
   [ "Success", D.Success
   ; "External_cancel", D.External_cancel
   ; "Turn_wall_clock_timeout", D.Turn_wall_clock_timeout
-  ; "Oas_timeout_budget legacy alias", D.Oas_timeout_budget
+  ; "legacy timeout-budget wire alias", D.Turn_wall_clock_timeout
   ; "Gh_repo_context_missing_worktree", D.Gh_repo_context_missing_worktree
   ; "Required_tool_use_no_tool_call", D.Required_tool_use_no_tool_call
   ; "Required_tool_use_unsatisfied", D.Required_tool_use_unsatisfied

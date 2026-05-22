@@ -191,10 +191,10 @@ let test_extract_reply_from_reply_field () =
   let result = Gate_keeper_backend.extract_reply_text body in
   check string "reply field extracted" "hello world" result
 
-let test_extract_reply_fallback_to_text_field () =
+let test_extract_reply_does_not_fallback_to_text_field () =
   let body = {|{"text":"fallback content"}|} in
   let result = Gate_keeper_backend.extract_reply_text body in
-  check string "text field fallback" "fallback content" result
+  check string "text field is not reply" body result
 
 let test_extract_reply_raw_on_non_json () =
   let body = "not json at all" in
@@ -274,7 +274,8 @@ let () =
       ( "response_parsing",
         [
           test_case "reply field extracted" `Quick test_extract_reply_from_reply_field;
-          test_case "text field fallback" `Quick test_extract_reply_fallback_to_text_field;
+          test_case "text field is not reply" `Quick
+            test_extract_reply_does_not_fallback_to_text_field;
           test_case "raw body on non-json" `Quick test_extract_reply_raw_on_non_json;
           test_case "turn stats present" `Quick test_extract_turn_stats_present;
           test_case "turn stats ignore model-only payload" `Quick

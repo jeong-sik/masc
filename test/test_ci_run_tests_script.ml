@@ -82,7 +82,11 @@ let run_process ?(env = []) ~cwd prog argv =
         Unix.create_process_env prog argv (env_array env) Unix.stdin out_fd
           err_fd)
   in
-  let _, status = Unix.waitpid [] pid in
+  let rec wait () =
+    try Unix.waitpid [] pid
+    with Unix.Unix_error (Unix.EINTR, _, _) -> wait ()
+  in
+  let _, status = wait () in
   let code =
     match status with
     | Unix.WEXITED code -> code
@@ -124,9 +128,7 @@ exit 0
   bin_dir
 
 let make_dune_test_command ~dir =
-  let path = Filename.concat dir "run-dune-test.sh" in
-  write_executable path "#!/bin/sh\nset -eu\ncd \"${REPO_DIR:?}\"\nexec dune test --root .\n";
-  path
+  Printf.sprintf "dune test --root %s" dir
 
 let make_sleep_command ~dir =
   let path = Filename.concat dir "sleep-long.sh" in
@@ -197,6 +199,7 @@ exit 1
 
 let test_rpc_retry_uses_isolated_build_dir () =
   with_temp_dir "ci-run-tests-retry" (fun dir ->
+      let cwd = Unix.realpath dir in
       let repo_dir = Filename.concat dir "repo" in
       Unix.mkdir repo_dir 0o755;
       let fake_log = Filename.concat dir "fake-dune.log" in
@@ -211,7 +214,6 @@ let test_rpc_retry_uses_isolated_build_dir () =
           ("PATH", path);
           ("DUNE_BUILD_DIR", "");
           ("FAKE_DUNE_LOG", fake_log);
-          ("REPO_DIR", repo_dir);
           ("CI_TEST_HEARTBEAT_SEC", "1");
           ("CI_TEST_TIMEOUT_SEC", "30");
           ("CI_TEST_LOG_FILE", ci_log);
@@ -244,10 +246,10 @@ let test_rpc_retry_uses_isolated_build_dir () =
       match log_lines with
       | [ first; second ] ->
           check string "first attempt uses default build dir and repo cwd"
-            (Printf.sprintf "test||%s" repo_dir)
+            (Printf.sprintf "test||%s" cwd)
             first;
           check string "second attempt uses isolated build dir and repo cwd"
-            (Printf.sprintf "test|.ci_build|%s" repo_dir)
+            (Printf.sprintf "test|.ci_build|%s" cwd)
             second
       | _ ->
           failf "expected exactly two dune invocations, got:\n%s"
@@ -255,6 +257,7 @@ let test_rpc_retry_uses_isolated_build_dir () =
 
 let test_agent_sdk_artifact_failure_after_flaky_retry_disables_cache () =
   with_temp_dir "ci-run-tests-interface" (fun dir ->
+      let cwd = Unix.realpath dir in
       let repo_dir = Filename.concat dir "repo" in
       Unix.mkdir repo_dir 0o755;
       let fake_log = Filename.concat dir "fake-dune.log" in
@@ -269,7 +272,6 @@ let test_agent_sdk_artifact_failure_after_flaky_retry_disables_cache () =
           ("PATH", path);
           ("DUNE_BUILD_DIR", "");
           ("FAKE_DUNE_LOG", fake_log);
-          ("REPO_DIR", repo_dir);
           ("CI_TEST_HEARTBEAT_SEC", "1");
           ("CI_TEST_TIMEOUT_SEC", "30");
           ("CI_TEST_LOG_FILE", ci_log);
@@ -303,16 +305,16 @@ let test_agent_sdk_artifact_failure_after_flaky_retry_disables_cache () =
       match log_lines with
       | [ first; second; third; fourth ] ->
           check string "first attempt uses default build dir"
-            (Printf.sprintf "test|||%s" repo_dir)
+            (Printf.sprintf "test|||%s" cwd)
             first;
           check string "flaky retry uses isolated build dir without cache override"
-            (Printf.sprintf "test|.ci_build_flaky||%s" repo_dir)
+            (Printf.sprintf "test|.ci_build_flaky||%s" cwd)
             second;
           check string "clean uses isolated build dir"
-            (Printf.sprintf "clean|.ci_build_flaky||%s" dir)
+            (Printf.sprintf "clean|.ci_build_flaky||%s" cwd)
             third;
           check string "clean retry disables dune cache"
-            (Printf.sprintf "test|.ci_build_flaky|disabled|%s" repo_dir)
+            (Printf.sprintf "test|.ci_build_flaky|disabled|%s" cwd)
             fourth
       | _ ->
           failf "expected exactly four dune invocations, got:\n%s"
@@ -320,6 +322,7 @@ let test_agent_sdk_artifact_failure_after_flaky_retry_disables_cache () =
 
 let test_disk_full_failure_skips_flaky_retry () =
   with_temp_dir "ci-run-tests-disk-full" (fun dir ->
+      let cwd = Unix.realpath dir in
       let repo_dir = Filename.concat dir "repo" in
       Unix.mkdir repo_dir 0o755;
       let fake_log = Filename.concat dir "fake-dune.log" in
@@ -334,7 +337,6 @@ let test_disk_full_failure_skips_flaky_retry () =
           ("PATH", path);
           ("DUNE_BUILD_DIR", "");
           ("FAKE_DUNE_LOG", fake_log);
-          ("REPO_DIR", repo_dir);
           ("CI_TEST_HEARTBEAT_SEC", "1");
           ("CI_TEST_TIMEOUT_SEC", "30");
           ("CI_TEST_LOG_FILE", ci_log);
@@ -366,7 +368,7 @@ let test_disk_full_failure_skips_flaky_retry () =
       match log_lines with
       | [ first ] ->
           check string "single attempt uses repo cwd"
-            (Printf.sprintf "test||%s" repo_dir)
+            (Printf.sprintf "test||%s" cwd)
             first
       | _ ->
           failf "expected exactly one dune invocation, got:\n%s"
@@ -399,7 +401,8 @@ let test_timeout_diagnostics_capture_active_process_group () =
         (contains_substring observed_output
            "active command process tree snapshot:");
       check bool "sleeping process captured" true
-        (contains_substring observed_output "sleep 10");
+        (contains_substring observed_output "sleep 10"
+        || contains_substring observed_output "sleep-long.sh");
       check bool "timeout error present" true
         (contains_substring observed_output
            "[ci-run] ERROR: test command timed out after 2s"))

@@ -13,8 +13,6 @@ let source_root () =
 let script_path () =
   Filename.concat (source_root ()) "scripts/ci-run-tests.sh"
 
-let quote = Filename.quote
-
 let contains_substring haystack needle =
   let hlen = String.length haystack in
   let nlen = String.length needle in
@@ -29,6 +27,10 @@ let read_file path =
 
 let write_file path content =
   Out_channel.with_open_bin path (fun oc -> output_string oc content)
+
+let write_executable path content =
+  write_file path content;
+  Unix.chmod path 0o755
 
 let rec rm_rf path =
   if Sys.file_exists path then
@@ -45,24 +47,47 @@ let with_temp_dir prefix f =
   Unix.mkdir dir 0o755;
   Fun.protect ~finally:(fun () -> rm_rf dir) (fun () -> f dir)
 
-let run_shell ?(env = []) ~cwd cmd =
-  let env_prefix =
-    env
-    |> List.map (fun (k, v) -> Printf.sprintf "%s=%s" k (quote v))
-    |> String.concat " "
-  in
-  let full =
-    if env_prefix = "" then
-      Printf.sprintf "cd %s && %s" (quote cwd) cmd
-    else
-      Printf.sprintf "cd %s && %s %s" (quote cwd) env_prefix cmd
-  in
+let env_array overrides =
+  let table = Hashtbl.create 64 in
+  Unix.environment ()
+  |> Array.iter (fun entry ->
+         match String.index_opt entry '=' with
+         | None -> ()
+         | Some idx ->
+             let key = String.sub entry 0 idx in
+             let value =
+               String.sub entry (idx + 1) (String.length entry - idx - 1)
+             in
+             Hashtbl.replace table key value);
+  List.iter (fun (key, value) -> Hashtbl.replace table key value) overrides;
+  Hashtbl.fold
+    (fun key value acc -> Printf.sprintf "%s=%s" key value :: acc)
+    table []
+  |> Array.of_list
+
+let run_process ?(env = []) ~cwd prog argv =
   let out = Filename.temp_file "ci-run-tests-out" ".txt" in
   let err = Filename.temp_file "ci-run-tests-err" ".txt" in
-  let wrapped =
-    Printf.sprintf "%s > %s 2> %s" full (quote out) (quote err)
+  let out_fd = Unix.openfile out [ Unix.O_WRONLY; Unix.O_TRUNC ] 0o600 in
+  let err_fd = Unix.openfile err [ Unix.O_WRONLY; Unix.O_TRUNC ] 0o600 in
+  let original_cwd = Sys.getcwd () in
+  let pid =
+    Fun.protect
+      ~finally:(fun () ->
+        Sys.chdir original_cwd;
+        Unix.close out_fd;
+        Unix.close err_fd)
+      (fun () ->
+        Sys.chdir cwd;
+        Unix.create_process_env prog argv (env_array env) Unix.stdin out_fd
+          err_fd)
   in
-  let code = Sys.command wrapped in
+  let _, status = Unix.waitpid [] pid in
+  let code =
+    match status with
+    | Unix.WEXITED code -> code
+    | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> 255
+  in
   let stdout = read_file out in
   let stderr = read_file err in
   Sys.remove out;
@@ -97,6 +122,20 @@ exit 0
   ;
   Unix.chmod dune_path 0o755;
   bin_dir
+
+let make_dune_test_command ~dir =
+  let path = Filename.concat dir "run-dune-test.sh" in
+  write_executable path "#!/bin/sh\nset -eu\ncd \"${REPO_DIR:?}\"\nexec dune test --root .\n";
+  path
+
+let make_sleep_command ~dir =
+  let path = Filename.concat dir "sleep-long.sh" in
+  write_executable path "#!/bin/sh\nset -eu\nsleep 10\n";
+  path
+
+let run_ci ?(env = []) ~cwd command =
+  let script = script_path () in
+  run_process ~cwd ~env script [| script; command |]
 
 let make_fake_dune_flaky_then_agent_sdk_artifact_failure dir =
   let bin_dir = Filename.concat dir "bin-interface" in
@@ -172,6 +211,7 @@ let test_rpc_retry_uses_isolated_build_dir () =
           ("PATH", path);
           ("DUNE_BUILD_DIR", "");
           ("FAKE_DUNE_LOG", fake_log);
+          ("REPO_DIR", repo_dir);
           ("CI_TEST_HEARTBEAT_SEC", "1");
           ("CI_TEST_TIMEOUT_SEC", "30");
           ("CI_TEST_LOG_FILE", ci_log);
@@ -179,10 +219,7 @@ let test_rpc_retry_uses_isolated_build_dir () =
         ]
       in
       let code, stdout, stderr =
-        run_shell ~cwd:dir ~env
-          (Printf.sprintf "%s %s" (quote (script_path ()))
-             (quote
-                (Printf.sprintf "cd %s && dune test --root ." (quote repo_dir))))
+        run_ci ~cwd:dir ~env (make_dune_test_command ~dir)
       in
       if code <> 0 then
         failf "ci-run-tests failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout
@@ -232,6 +269,7 @@ let test_agent_sdk_artifact_failure_after_flaky_retry_disables_cache () =
           ("PATH", path);
           ("DUNE_BUILD_DIR", "");
           ("FAKE_DUNE_LOG", fake_log);
+          ("REPO_DIR", repo_dir);
           ("CI_TEST_HEARTBEAT_SEC", "1");
           ("CI_TEST_TIMEOUT_SEC", "30");
           ("CI_TEST_LOG_FILE", ci_log);
@@ -239,10 +277,7 @@ let test_agent_sdk_artifact_failure_after_flaky_retry_disables_cache () =
         ]
       in
       let code, stdout, stderr =
-        run_shell ~cwd:dir ~env
-          (Printf.sprintf "%s %s" (quote (script_path ()))
-             (quote
-                (Printf.sprintf "cd %s && dune test --root ." (quote repo_dir))))
+        run_ci ~cwd:dir ~env (make_dune_test_command ~dir)
       in
       if code <> 0 then
         failf "ci-run-tests failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout
@@ -299,6 +334,7 @@ let test_disk_full_failure_skips_flaky_retry () =
           ("PATH", path);
           ("DUNE_BUILD_DIR", "");
           ("FAKE_DUNE_LOG", fake_log);
+          ("REPO_DIR", repo_dir);
           ("CI_TEST_HEARTBEAT_SEC", "1");
           ("CI_TEST_TIMEOUT_SEC", "30");
           ("CI_TEST_LOG_FILE", ci_log);
@@ -307,10 +343,7 @@ let test_disk_full_failure_skips_flaky_retry () =
         ]
       in
       let code, stdout, stderr =
-        run_shell ~cwd:dir ~env
-          (Printf.sprintf "%s %s" (quote (script_path ()))
-             (quote
-                (Printf.sprintf "cd %s && dune test --root ." (quote repo_dir))))
+        run_ci ~cwd:dir ~env (make_dune_test_command ~dir)
       in
       check int "disk full exit code" 1 code;
       let ci_log_contents = read_file ci_log in
@@ -351,9 +384,7 @@ let test_timeout_diagnostics_capture_active_process_group () =
         ]
       in
       let code, stdout, stderr =
-        run_shell ~cwd:dir ~env
-          (Printf.sprintf "%s %s" (quote (script_path ()))
-             (quote "sh -c 'sleep 10'"))
+        run_ci ~cwd:dir ~env (make_sleep_command ~dir)
       in
       check int "timeout exit code" 124 code;
       let ci_log_contents = read_file ci_log in

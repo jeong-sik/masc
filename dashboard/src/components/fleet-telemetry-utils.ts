@@ -738,8 +738,9 @@ export function summaryCounts(rows: FleetRow[]): FleetSummaryCounts {
     && row.last_activity_ago_s >= STALE_ACTIVITY_SEC,
   ).length
   // 2026-05-05 fleet-stuck visibility: count keepers carrying a typed
-  // [runtime_blocker_class] (semaphore_wait_timeout, oas_timeout_budget,
-  // contract_violation, …).  These are alive-but-blocked keepers that
+  // [runtime_blocker_class] (admission_queue_wait_timeout,
+  // provider_tool_capability_missing, completion_contract_violation, …).
+  // These are alive-but-blocked keepers that
   // the live/stale gauges miss — fiber is up, but the next turn cannot
   // start.  Pairs with the `Semaphore_wait_timeout` typing fix
   // (#12855) and the cascade fallback-cycle detector (#12866) so

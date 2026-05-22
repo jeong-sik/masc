@@ -6526,7 +6526,7 @@ let test_degraded_retry_after_recoverable_error_includes_turn_timeout () =
     degraded_retry
 ;;
 
-let test_degraded_retry_after_recoverable_error_includes_oas_timeout_budget () =
+let test_degraded_retry_after_recoverable_error_includes_provider_timeout () =
   let degraded_retry =
     EC.degraded_retry_after_recoverable_error
       ~effective_cascade:"underdog"
@@ -6543,9 +6543,9 @@ let test_degraded_retry_after_recoverable_error_includes_oas_timeout_budget () =
             }))
   in
   expect_degraded_retry
-    "oas timeout budget degraded retry"
+    "provider timeout degraded retry"
     KC.local_recovery_cascade_name
-    "oas_timeout_budget"
+    "provider_timeout"
     degraded_retry
 ;;
 
@@ -12070,9 +12070,9 @@ let () =
             `Quick
             test_degraded_retry_after_recoverable_error_includes_turn_timeout
         ; test_case
-            "OAS timeout budget is degraded-retry eligible"
+            "provider timeout is degraded-retry eligible"
             `Quick
-            test_degraded_retry_after_recoverable_error_includes_oas_timeout_budget
+            test_degraded_retry_after_recoverable_error_includes_provider_timeout
         ; test_case
             "max turns is degraded-retry eligible"
             `Quick

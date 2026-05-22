@@ -78,7 +78,7 @@ type degraded_retry_reason =
   | Max_turns
   | Resumable_cli_session
   | Admission_queue_timeout
-  | Oas_timeout_budget
+  | Provider_timeout
   | Turn_timeout
   | Cascade_candidates_filtered
   | Required_tool_contract_violation

@@ -923,12 +923,12 @@ let run_named
       Cascade_runtime_candidate.capacity_key candidate |> String.trim
     in
     if String.equal capacity_key ""
-       || not (Cascade_client_capacity.is_registered capacity_key)
     then `No_client_capacity
     else
       match Cascade_client_capacity.try_acquire capacity_key with
-      | Some release -> `Acquired (capacity_key, release)
-      | None -> `Full capacity_key
+      | Unregistered -> `No_client_capacity
+      | Acquired release -> `Acquired (capacity_key, release)
+      | Full { retry_after_s } -> `Full (capacity_key, retry_after_s)
   in
   let emit_capacity_blocked_manifest ~capacity_key =
     emit_runtime_manifest
@@ -1333,7 +1333,7 @@ let run_named
       let is_last = rest = [] in
       let attempt_index = max 1 (candidate_count - List.length rest) in
       match acquire_client_capacity_slot candidate with
-      | `Full capacity_key ->
+      | `Full (capacity_key, retry_after_s) ->
         emit_capacity_blocked_manifest ~capacity_key;
         record_cascade_attempt candidate ~outcome:(`Failure "client_capacity_full") ();
         Cascade_legacy_runner.record_fallback_event capture
@@ -1352,7 +1352,7 @@ let run_named
         try_cascade ~on_success ?resume_checkpoint ?per_provider_timeout_s
           ~pre_dispatch_required_tool_rejections_rev
           ~last_capacity_backpressure:
-            (Client_capacity, capacity_detail, None)
+            (Client_capacity, capacity_detail, retry_after_s)
           rest last_err
       | (`No_client_capacity | `Acquired _) as capacity_slot ->
       let capacity_release =

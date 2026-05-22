@@ -72,9 +72,16 @@ let capacity url =
 
 type release = unit -> unit
 
+type acquire_result =
+  | Acquired of release
+  | Full of { retry_after_s : float option }
+  | Unregistered
+
+let default_retry_after_sec = 5.0
+
 let try_acquire url =
   match lookup url with
-  | None -> None
+  | None -> Unregistered
   | Some e ->
     (* Optimistic CAS on the atomic counter.  Loop to retry when
        another fiber bumps the count between read and CAS. *)
@@ -88,7 +95,7 @@ let try_acquire url =
           kind = Rejected_full;
           active_after = current;
         };
-        None
+        Full { retry_after_s = Some default_retry_after_sec }
       end
       else if Atomic.compare_and_set e.active current (current + 1) then (
         Cascade_client_capacity_history.record {
@@ -111,7 +118,7 @@ let try_acquire url =
             }
           end
         in
-        Some release)
+        Acquired release)
       else attempt ()
     in
     attempt ()

@@ -1372,21 +1372,6 @@ let handle_keeper_shell
            gh_base ~ok:false ~cwd:"" ~command:(gh_cmd_display parsed_cmd)
              [ "error", `String "gh_irreversible_blocked"
              ; "hint", `String hint ]
-         | Masc_exec.Shell_ir_risk.Destructive_protected ->
-           let hint =
-             "This gh command is classified as destructive-protected. \
-              It requires explicit operator approval before execution."
-           in
-           Prometheus.inc_counter
-             Keeper_metrics.metric_keeper_shell_ops_failures
-             ~labels:[("keeper", meta.name)]
-             ();
-           Log.Keeper.warn
-             "keeper_shell op=gh Destructive_protected blocked: %s (keeper=%s)"
-             canonical_cmd_str meta.name;
-           gh_base ~ok:false ~cwd:"" ~command:(gh_cmd_display parsed_cmd)
-             [ "error", `String "gh_destructive_protected_blocked"
-             ; "hint", `String hint ]
          | Masc_exec.Shell_ir_risk.R0_Read | Masc_exec.Shell_ir_risk.R1_Reversible_mutation ->
            begin
              match allowed_orgs_opt with

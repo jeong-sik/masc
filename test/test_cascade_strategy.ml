@@ -230,15 +230,16 @@ let test_client_capacity_acquire_release () =
   C.unregister_all ();
   C.register ~url:"http://x:11434" ~max_concurrent:1;
   match C.try_acquire "http://x:11434" with
-  | None -> fail "first acquire should succeed"
-  | Some release ->
+  | Unregistered | Full _ -> fail "first acquire should succeed"
+  | Acquired release ->
     (match C.capacity "http://x:11434" with
      | Some info -> check int "active = 1 after acquire" 1 info.process_active
      | None -> fail "capacity disappeared");
     (* Second acquire must fail. *)
     (match C.try_acquire "http://x:11434" with
-     | Some _ -> fail "second acquire on 1-slot must fail"
-     | None -> ());
+     | Acquired _ -> fail "second acquire on 1-slot must fail"
+     | Unregistered -> fail "endpoint unregistered unexpectedly"
+     | Full _ -> ());
     release ();
     (match C.capacity "http://x:11434" with
      | Some info ->
@@ -249,8 +250,8 @@ let test_client_capacity_release_idempotent () =
   C.unregister_all ();
   C.register ~url:"http://y:11434" ~max_concurrent:1;
   match C.try_acquire "http://y:11434" with
-  | None -> fail "acquire failed"
-  | Some release ->
+  | Unregistered | Full _ -> fail "acquire failed"
+  | Acquired release ->
     release ();
     release ();  (* second release must be a no-op, not underflow *)
     match C.capacity "http://y:11434" with
@@ -284,8 +285,8 @@ let test_client_capacity_unregistered_url () =
   check (option int) "capacity = None for unregistered URL"
     None (Option.map (fun (i : T.capacity_info) -> i.total)
             (C.capacity "http://nope:9999"));
-  check bool "try_acquire = None for unregistered URL"
-    true (C.try_acquire "http://nope:9999" = None)
+  check bool "try_acquire = Unregistered for unregistered URL"
+    true (C.try_acquire "http://nope:9999" = Unregistered)
 
 let test_client_capacity_clamp_max () =
   C.unregister_all ();
@@ -336,13 +337,17 @@ let test_cli_acquire_blocks_at_cap () =
     ~capacity_keys:["cli:claude_code"]
     ~max_concurrent:1;
   match C.try_acquire "cli:claude_code" with
-  | None -> fail "first acquire should succeed"
-  | Some release ->
-    check bool "second acquire returns None at cap"
-      true (C.try_acquire "cli:claude_code" = None);
+  | Unregistered | Full _ -> fail "first acquire should succeed"
+  | Acquired release ->
+    check bool "second acquire returns Full at cap"
+      true
+      (match C.try_acquire "cli:claude_code" with
+       | Full _ -> true | _ -> false);
     release ();
     check bool "after release: capacity available again"
-      true (C.try_acquire "cli:claude_code" <> None)
+      true
+      (match C.try_acquire "cli:claude_code" with
+       | Acquired _ -> true | _ -> false)
 
 let test_cli_idempotent_registration () =
   C.unregister_all ();
@@ -376,8 +381,8 @@ let test_snapshot_reflects_active_acquires () =
   C.unregister_all ();
   C.register ~url:"cli:codex_cli" ~max_concurrent:2;
   match C.try_acquire "cli:codex_cli" with
-  | None -> fail "first acquire failed"
-  | Some _release ->
+  | Unregistered | Full _ -> fail "first acquire failed"
+  | Acquired _release ->
     let entries = C.snapshot () in
     match List.assoc_opt "cli:codex_cli" entries with
     | None -> fail "snapshot missing entry"
@@ -546,11 +551,13 @@ let test_history_try_acquire_records_events () =
   C.register ~url:"cli:claude_code" ~max_concurrent:1;
   (* First acquire → Acquired recorded *)
   (match C.try_acquire "cli:claude_code" with
-   | None -> fail "first acquire should succeed"
-   | Some release ->
+   | Unregistered | Full _ -> fail "first acquire should succeed"
+   | Acquired release ->
      (* Second acquire → Rejected_full recorded *)
      check bool "second acquire hits cap"
-       true (C.try_acquire "cli:claude_code" = None);
+       true
+       (match C.try_acquire "cli:claude_code" with
+        | Full _ -> true | _ -> false);
      release ();
      let events = CH.snapshot () in
      (* Expected newest-first: Released, Rejected_full, Acquired. *)

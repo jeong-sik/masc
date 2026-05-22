@@ -113,40 +113,6 @@ type checkpoint_load_error =
 val classify_sdk_error :
   Agent_sdk.Error.sdk_error -> checkpoint_load_error
 
-(** Sequence a [('a, 'e) result] list into [('a list, 'e) result],
-    short-circuiting on the first [Error]. *)
-val result_all : ('a, 'e) result list -> ('a list, 'e) result
-
-(** Strict content-block parser used for compat OAS checkpoint
-    decode. Errors carry an [Agent_sdk.Error.sdk_error]. *)
-val content_block_of_json_strict :
-  Yojson.Safe.t -> (Agent_sdk.Types.content_block, Agent_sdk.Error.sdk_error) result
-
-(** Compat role parser — accepts trim/case variations and rejects
-    unknown roles via [Agent_sdk.Error.UnknownVariant]. *)
-val role_of_string_compat :
-  string -> (Agent_sdk.Types.role, Agent_sdk.Error.sdk_error) result
-
-(** Compat message-of-json parser. Errors carry an
-    [Agent_sdk.Error.sdk_error]. *)
-val message_of_json_compat :
-  Yojson.Safe.t -> (Agent_sdk.Types.message, Agent_sdk.Error.sdk_error) result
-
-(** Re-shape legacy checkpoint JSON so unknown roles default to
-    [assistant] before handing it to the OAS deserializer. *)
-val normalize_checkpoint_json_for_sdk : Yojson.Safe.t -> Yojson.Safe.t
-
-(** Compat [Agent_sdk.Checkpoint.of_json] that re-parses messages with
-    [message_of_json_compat] when the SDK rejects the raw shape. *)
-val checkpoint_of_json_compat :
-  Yojson.Safe.t -> (Agent_sdk.Checkpoint.t, Agent_sdk.Error.sdk_error) result
-
-(** Compat [Agent_sdk.Checkpoint.of_string]: tries the SDK parser first,
-    then falls back to [checkpoint_of_json_compat] on the
-    UTF-8-sanitized raw JSON. *)
-val checkpoint_of_string_compat :
-  string -> (Agent_sdk.Checkpoint.t, Agent_sdk.Error.sdk_error) result
-
 (** Load a single OAS history archive entry. Returns [Not_found]
     when the file does not exist; classifies SDK errors via
     [classify_sdk_error]. *)

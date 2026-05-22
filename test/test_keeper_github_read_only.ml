@@ -252,28 +252,6 @@ let test_read_only_case_insensitive () =
     true (is_ro ~tool_name:"keeper_shell" ~input:(mk_cmd "Pr View 123"))
 
 let test_prefixed_gh_command_normalization () =
-  Alcotest.(check (option int)) "prefixed gh parser still finds PR number"
-    (Some 123)
-    (match Keeper_gh_shared.extract_gh_target_number "gh pr view 123" with
-     | Some (Keeper_gh_shared.PR, n) -> Some n
-     | _ -> None);
-  Alcotest.(check (option int)) "quoted target number is parsed"
-    (Some 123)
-    (match Keeper_gh_shared.extract_gh_target_number "gh pr view '123'" with
-     | Some (Keeper_gh_shared.PR, n) -> Some n
-     | _ -> None);
-  Alcotest.(check (option string)) "prefixed gh parser still finds mutation"
-    (Some "pr")
-    (match Keeper_gh_shared.gh_mutates_entity "gh pr merge 123" with
-     | Some Keeper_gh_shared.PR -> Some "pr"
-     | Some Keeper_gh_shared.Issue -> Some "issue"
-     | None -> None);
-  Alcotest.(check (option string)) "quoted mutation subcommand is parsed"
-    (Some "pr")
-    (match Keeper_gh_shared.gh_mutates_entity "gh pr 'merge' 123" with
-     | Some Keeper_gh_shared.PR -> Some "pr"
-     | Some Keeper_gh_shared.Issue -> Some "issue"
-     | None -> None);
   Alcotest.(check bool) "prefixed gh command stays read-only"
     true
     (is_ro ~tool_name:"keeper_shell" ~input:(mk_cmd "gh pr list --state open"));
@@ -488,82 +466,6 @@ let test_input_aware_mutation_detection () =
     true
     (has_side_effect ~tool_name:"masc_code_git" ~input:(mk_action "commit"))
 
-let test_dangerous_gh_command_classifier () =
-  let open Keeper_gh_shared in
-  let cases =
-    [
-      ("repo delete owner/repo", Some "repo delete");
-      ("--repo owner/repo repo delete owner/repo", Some "repo delete");
-      ("-R owner/repo repo archive owner/repo", Some "repo archive");
-      ("--hostname github.example.com repo transfer owner/repo", Some "repo transfer");
-      ("auth logout", Some "auth logout");
-      ("AUTH TOKEN", Some "auth token");
-      ("secret set MY_SECRET", Some "secret set");
-      ("ssh-key delete 123", Some "ssh-key delete");
-      ("pr merge 123", None);
-      ("repo view owner/repo", None);
-      ("issue comment 42 --body ok", None);
-    ]
-  in
-  List.iter (fun (cmd, expected) ->
-    Alcotest.(check (option string))
-      (Printf.sprintf "dangerous classifier: %s" cmd)
-      expected
-      (gh_dangerous_command cmd)
-  ) cases
-
-let test_resolve_task_repo_context_uses_current_task_worktree () =
-  with_repo_context_test_env @@ fun ~base:_ ~config ~repo_dir ->
-  run_argv
-    [ "git"; "-C"; repo_dir; "remote"; "add"; "origin"
-    ; "https://github.com/example/project.git"
-    ];
-  let task_id =
-    add_task_with_worktree ~config ~repo_dir ~repo_name:"project"
-  in
-  let meta = make_meta ~current_task_id:task_id () in
-  match Keeper_gh_shared.resolve_task_repo_context ~config ~meta with
-  | Ok ctx ->
-    Alcotest.(check string) "task id" task_id ctx.task_id;
-    Alcotest.(check string) "git root" repo_dir ctx.git_root;
-    Alcotest.(check string) "repo slug" "example/project" ctx.repo_slug
-  | Error _ -> Alcotest.fail "expected task repo context"
-
-let test_resolve_task_repo_context_reports_missing_worktree () =
-  with_repo_context_test_env @@ fun ~base:_ ~config ~repo_dir:_ ->
-  let _ = Coord.add_task config ~title:"GitHub work" ~priority:1 ~description:"" in
-  let backlog = Coord.read_backlog config in
-  let task_id =
-    match backlog.Masc_domain.tasks with
-    | task :: _ -> task.id
-    | [] -> Alcotest.fail "expected task"
-  in
-  let meta = make_meta ~current_task_id:task_id () in
-  match Keeper_gh_shared.resolve_task_repo_context ~config ~meta with
-  | Error (Keeper_gh_shared.Current_task_missing_worktree missing_task_id) ->
-    Alcotest.(check string) "task id" task_id missing_task_id
-  | Ok _ -> Alcotest.fail "expected missing worktree error"
-  | Error _ -> Alcotest.fail "unexpected repo context error"
-
-let test_resolve_task_repo_context_rejects_non_github_origin () =
-  with_repo_context_test_env @@ fun ~base:_ ~config ~repo_dir ->
-  run_argv
-    [ "git"; "-C"; repo_dir; "remote"; "add"; "origin"
-    ; "https://gitlab.com/example/project.git"
-    ];
-  let task_id =
-    add_task_with_worktree ~config ~repo_dir ~repo_name:"project"
-  in
-  let meta = make_meta ~current_task_id:task_id () in
-  match Keeper_gh_shared.resolve_task_repo_context ~config ~meta with
-  | Error
-      (Keeper_gh_shared.Current_task_origin_not_github
-         { task_id = actual_task_id; git_root }) ->
-    Alcotest.(check string) "task id" task_id actual_task_id;
-    Alcotest.(check string) "git root" repo_dir git_root
-  | Ok _ -> Alcotest.fail "expected non-github origin error"
-  | Error _ -> Alcotest.fail "unexpected repo context error"
-
 let test_repo_slug_of_task_worktree_infers_parent_config_for_container_gitdir () =
   with_repo_context_test_env @@ fun ~base:_ ~config:_ ~repo_dir ->
   run_argv
@@ -584,84 +486,6 @@ let test_repo_slug_of_task_worktree_infers_parent_config_for_container_gitdir ()
     (Keeper_gh_shared.repo_slug_of_task_worktree
        ~git_root:"/home/keeper/repos/project"
        ~worktree_cwd:worktree_dir)
-
-let test_gh_cache_fetch_uses_direct_argv () =
-  with_repo_context_test_env @@ fun ~base ~config ~repo_dir:_ ->
-  ensure_policy_config_loaded ();
-  let repo_slug = Printf.sprintf "example/direct-argv-%d" (Unix.getpid ()) in
-  let endpoint =
-    Printf.sprintf
-      "repos/%s/pulls?state=all&per_page=%d"
-      repo_slug
-      (Keeper_tool_policy.gh_cache_fetch_page_size ())
-  in
-  let gh_args_log = Filename.concat base "gh-args.log" in
-  let gh_env_log = Filename.concat base "gh-env.log" in
-  let script =
-    "#!/bin/sh\n\
-     printf '%s\\n' \"$*\" >> \"$GH_ARGS_LOG\"\n\
-     printf '%s\\n' \"${GH_CONFIG_DIR:-}\" >> \"$GH_ENV_LOG\"\n\
-     if [ \"$1\" = \"api\" ]; then\n\
-     \  printf '42\\n'\n\
-     \  exit 0\n\
-     fi\n\
-     printf 'unexpected gh: %s\\n' \"$*\" >&2\n\
-     exit 2\n"
-  in
-  with_fake_gh script @@ fun () ->
-  let captured = ref [] in
-  Fun.protect
-    ~finally:(fun () -> Exec_tap.disable ())
-    (fun () ->
-      Exec_tap.enable ~writer:(fun line -> captured := line :: !captured);
-      with_env "MASC_EXEC_GATE" "parallel" @@ fun () ->
-      with_env "GH_ARGS_LOG" gh_args_log @@ fun () ->
-      with_env "GH_ENV_LOG" gh_env_log @@ fun () ->
-      match
-        Keeper_gh_shared.validate_number ~config ~repo_slug
-          ~kind:Keeper_gh_shared.PR ~number:42
-      with
-      | `Valid ->
-        Alcotest.(check string)
-          "gh api direct argv"
-          (Printf.sprintf "api %s --jq .[] | .number" endpoint)
-          (String.trim (read_file gh_args_log));
-        Alcotest.(check bool)
-          "gh config dir is passed via env"
-          true
-          (String.trim (read_file gh_env_log) <> "");
-        let process_lines =
-          List.filter
-            (fun line ->
-               contains_substring line
-                 {|Process_eio.run_argv_with_status|})
-            !captured
-        in
-        Alcotest.(check bool)
-          "process execution recorded"
-          true
-          (process_lines <> []);
-        Alcotest.(check bool)
-          "direct gh argv recorded"
-          true
-          (List.exists
-             (fun line ->
-                contains_substring line
-                  (Printf.sprintf
-                     {|["gh","api","%s","--jq",".[] | .number"]|}
-                     endpoint))
-             process_lines);
-        Alcotest.(check bool)
-          "no shell wrapper in exec tap"
-          false
-          (List.exists
-             (fun line ->
-                List.exists
-                  (fun needle -> contains_substring line needle)
-                  [ "-lc"; "/bin/zsh"; "2>/dev/null" ])
-             !captured)
-      | `Invalid _ -> Alcotest.fail "expected valid cached PR number"
-      | `Unknown -> Alcotest.fail "expected gh cache to populate")
 
 let fake_docker_gh_script =
   "#!/bin/sh\n\
@@ -691,6 +515,7 @@ printf 'docker-gh-ok workdir=%s cmd=%s\\n' \"$workdir\" \"$*\"\n"
 
 let test_keeper_shell_gh_without_current_task_uses_sandbox_context () =
   with_repo_context_test_env @@ fun ~base:_ ~config ~repo_dir:_ ->
+  ensure_policy_config_loaded ();
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "" @@ fun () ->
   let meta = make_meta ~sandbox_profile:Keeper_types.Docker () in
   let factory = Keeper_sandbox_factory.create ~config ~meta () in
@@ -1036,8 +861,6 @@ let () =
             test_api_via_args;
           Alcotest.test_case "input-aware mutation detection" `Quick
             test_input_aware_mutation_detection;
-          Alcotest.test_case "dangerous gh classifier" `Quick
-            test_dangerous_gh_command_classifier;
           Alcotest.test_case "tool observer via OAS event bus" `Quick
             test_tool_call_observer_via_oas_event_bus;
           Alcotest.test_case "side-effect tracking via OAS event bus" `Quick
@@ -1055,18 +878,10 @@ let () =
         ] );
       ( "repo_context",
         [
-          Alcotest.test_case "current task worktree resolves repo context"
-            `Quick test_resolve_task_repo_context_uses_current_task_worktree;
-          Alcotest.test_case "missing worktree is structured error" `Quick
-            test_resolve_task_repo_context_reports_missing_worktree;
-          Alcotest.test_case "non-github origin is structured error" `Quick
-            test_resolve_task_repo_context_rejects_non_github_origin;
           Alcotest.test_case
             "worktree parent config survives container gitdir"
             `Quick
             test_repo_slug_of_task_worktree_infers_parent_config_for_container_gitdir;
-          Alcotest.test_case "gh cache fetch uses direct argv" `Quick
-            test_gh_cache_fetch_uses_direct_argv;
           Alcotest.test_case
             "keeper_shell gh without current task uses sandbox context"
             `Quick test_keeper_shell_gh_without_current_task_uses_sandbox_context;

@@ -344,7 +344,6 @@ describe('normalizeDashboardRuntimeResolution fleet safety', () => {
           missing_task_scope: true,
           partial_task_scope: true,
           current_writer_missing_task_scope: true,
-          legacy_unscoped_only: false,
         },
       },
     }))

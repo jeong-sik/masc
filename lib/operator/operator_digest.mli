@@ -37,7 +37,6 @@ val dedup_recommendations : recommended_action list -> recommended_action list
 val summary_of_recommendations : actor:string -> recommended_action list -> Yojson.Safe.t
 
 val health_from_attention_items : attention_item list -> string
-val normalize_team_health : string -> string
 
 val build_room_attention_items : Coord.config -> attention_item list
 

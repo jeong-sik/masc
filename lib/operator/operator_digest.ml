@@ -15,12 +15,6 @@ let health_from_attention_items (items : attention_item list) =
   else if items <> [] then "warn"
   else "ok"
 
-let normalize_team_health = function
-  | "healthy" -> "ok"
-  | "degraded" -> "warn"
-  | "critical" -> "bad"
-  | other -> other
-
 let tool_host_attention_window_sec = 900.0
 
 let recent_tool_host_failures ~now () =

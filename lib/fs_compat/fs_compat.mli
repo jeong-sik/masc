@@ -88,6 +88,20 @@ val realpath : string -> string
 (** Create directory recursively. *)
 val mkdir_p : string -> unit
 
+(** [mkdir_p_memoized path] is [mkdir_p] but skips the stat/mkdir
+    syscalls on every call after the first for the same [path].
+    Use on hot append paths (jsonl writers, ledger appends) where the
+    same dir is touched many times per second. RFC-0162 §3.1.
+
+    The cache caches only the *fact* of dir existence; no fd is held.
+    External processes that delete the dir after first call will see
+    silent skip — acceptable for [.masc/] (self-owned). *)
+val mkdir_p_memoized : string -> unit
+
+(** Reset the [mkdir_p_memoized] cache. Test-only — production code
+    relies on process-lifetime persistence. *)
+val reset_mkdir_memo_for_testing : unit -> unit
+
 (** Load JSONL file as list of JSON values.
     Malformed lines are logged and dropped. *)
 val load_jsonl : string -> Yojson.Safe.t list

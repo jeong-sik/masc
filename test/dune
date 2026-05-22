@@ -1583,6 +1583,8 @@
 
 (include stanzas/test_fs_compat_home_guard.inc)
 
+(include stanzas/test_fs_compat_mkdir_memo.inc)
+
 (include stanzas/test_fsm_drift_per_agent_counter.inc)
 
 (include stanzas/test_gate_protocol.inc)

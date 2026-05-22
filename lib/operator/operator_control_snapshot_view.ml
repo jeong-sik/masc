@@ -35,9 +35,8 @@ let all_snapshot_views = [ Summary; Sessions; Keepers; Messages; Full ]
 let valid_snapshot_view_strings = List.map snapshot_view_to_string all_snapshot_views
 
 (* Sound partial parser — Some for canonical strings, None otherwise.
-   [parse_snapshot_view] below intentionally falls back to [Full] for
-   tool/HTTP back-compat; this opt variant exists for callers that
-   want to distinguish unknown input. *)
+   Callers that need tool/HTTP back-compat should make their fallback
+   explicit at the boundary. *)
 let snapshot_view_of_string_opt raw =
   match String.trim raw |> String.lowercase_ascii with
   | "summary" -> Some Summary
@@ -46,12 +45,4 @@ let snapshot_view_of_string_opt raw =
   | "messages" -> Some Messages
   | "full" -> Some Full
   | _ -> None
-;;
-
-let parse_snapshot_view = function
-  | Some raw ->
-    (match snapshot_view_of_string_opt raw with
-     | Some v -> v
-     | None -> Full)
-  | None -> Full
 ;;

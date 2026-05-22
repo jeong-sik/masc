@@ -667,7 +667,6 @@ type snapshot_view = Operator_control_snapshot_view.snapshot_view =
 let snapshot_view_to_string = Operator_control_snapshot_view.snapshot_view_to_string
 let valid_snapshot_view_strings = Operator_control_snapshot_view.valid_snapshot_view_strings
 let snapshot_view_of_string_opt = Operator_control_snapshot_view.snapshot_view_of_string_opt
-let parse_snapshot_view = Operator_control_snapshot_view.parse_snapshot_view
 
 (* Snapshot TTL cache with same-key deduplication (singleflight)
    extracted to [Operator_control_snapshot_cache] (godfile decomp).
@@ -818,7 +817,11 @@ let snapshot_json
     ignore (initialized, _snapshot_session_window_seconds (), _snapshot_session_limit ());
     let trace_id = trace_id "ops" in
     let actor_name = normalized_actor ~context_actor:ctx.agent_name actor in
-    let view = parse_snapshot_view view in
+    let view =
+      match Option.bind view snapshot_view_of_string_opt with
+      | Some view -> view
+      | None -> Full
+    in
     let include_keepers =
       include_keepers
       &&

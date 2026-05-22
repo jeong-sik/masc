@@ -1,5 +1,4 @@
-(** Tool_misc_admin — auth, config, tool inventory, and feature
-    flag handlers.
+(** Tool_misc_admin — auth, config, and tool inventory handlers.
 
     Extracted from {!Tool_misc} to reduce god-file size.  Contains
     administrative tool handlers for the dashboard:
@@ -7,7 +6,6 @@
     - {!handle_config} (auth config snapshot for the operator UI)
     - {!handle_tool_admin_snapshot} (tool inventory + permissions)
     - {!handle_tool_admin_update} (write a section's auth config)
-    - {!handle_feature_flags} (feature flag inventory)
     - {!tool_inventory_json} (catalog-driven schema list)
 
     @since 2.187.0 — God file decomposition Phase 1.
@@ -15,9 +13,8 @@
     Internal: \[U\] (Yojson.Safe.Util alias), \[json_string_option\],
     \[bool_arg_opt\], \[int_arg_opt\] (3 local args helpers
     duplicated from Tool_misc to avoid circular deps),
-    \[permission_to_json\], \[auth_snapshot_json\],
-    \[enforcement_summary_json\], \[handle_feature_flags\] stay
-    private — none are referenced outside this file. *)
+    \[permission_to_json\], \[auth_snapshot_json\] stay private —
+    none are referenced outside this file. *)
 
 (** {1 Types} *)
 
@@ -65,15 +62,10 @@ val tool_inventory_json :
 
 (** {1 Tool handlers}
 
-    All four handlers take [args : Yojson.Safe.t] (the JSON-RPC
+    All three handlers take [args : Yojson.Safe.t] (the JSON-RPC
     [params] object) and return {!tool_result}.  [ctx] is required
     for the snapshot/update handlers because they read from the
     base path. *)
-
-val handle_feature_flags : tool_name:string -> start_time:float -> Yojson.Safe.t -> tool_result
-(** [handle_feature_flags ~tool_name ~start_time args] returns the
-    feature flag inventory filtered by optional [args.category] and
-    [args.only_overridden]. *)
 
 val handle_config : tool_name:string -> start_time:float -> Yojson.Safe.t -> tool_result
 (** [handle_config ~tool_name ~start_time args] returns the auth-config

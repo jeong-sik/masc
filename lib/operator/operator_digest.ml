@@ -108,20 +108,27 @@ let assoc_string_field key fields =
       if String.equal value "" then None else Some value
   | _ -> None
 
-let keeper_attention_kind = function
+let canonical_keeper_attention_reason = function
+  | Some "timeout_budget_exhausted" -> Some "provider_timeout"
+  | reason -> reason
+
+let keeper_attention_kind reason =
+  match canonical_keeper_attention_reason reason with
   | Some reason -> "keeper_" ^ reason
   | None -> "keeper_attention"
 
 let keeper_attention_severity ~reason ~runtime_blocker_class =
+  let reason = canonical_keeper_attention_reason reason in
   match reason, runtime_blocker_class with
   | Some "runtime_blocked", _
-  | Some "timeout_budget_exhausted", _
+  | Some "provider_timeout", _
   | Some "continue_gate_required", _ -> Sev_bad
   | _, Some _ -> Sev_bad
   | _ -> Sev_warn
 
 let keeper_attention_summary ~(meta : Keeper_types.keeper_meta) ~reason
     ~runtime_blocker_summary =
+  let reason = canonical_keeper_attention_reason reason in
   match reason, runtime_blocker_summary with
   | Some reason, Some summary ->
       Printf.sprintf "%s needs operator attention: %s (%s)" meta.name reason summary

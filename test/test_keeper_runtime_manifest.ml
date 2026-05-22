@@ -3413,6 +3413,55 @@ let test_public_to_json_redacts_decision () =
   Alcotest.(check bool) "public_to_json drops provider_secret" true
     (Yojson.Safe.Util.member "provider_secret" decision = `Null)
 
+(** F6: provider/model provenance taxonomy regression guard.
+    All fields emitted by [provider_attempt_provenance_fields] must be
+    redacted in public projection. If a new provenance field is added
+    there without updating the allowlist, this test catches the leak. *)
+let test_public_projection_filters_all_provenance_fields () =
+  let manifest =
+    M.make ~keeper_name:"k" ~trace_id:"t" ~event:M.Provider_attempt_started
+      ~decision:
+        (`Assoc
+           [ ("edge_id", `String "e1")
+           ; ("model_source", `String "named_cascade")
+           ; ("resolved_model_source", `String "cascade_catalog_binding")
+           ; ("capability_source", `String "provider_config_from_cascade_catalog")
+           ; ("fallback_authority", `String "declared_cascade")
+           ; ("provider_source_cascade", `String "ollama-local")
+           ; ("provider_secret", `String "shh")
+           ; ("latency_ms", `Int 42)
+           ])
+      ()
+  in
+  let private_json = M.to_json manifest in
+  let private_decision = Yojson.Safe.Util.member "decision" private_json in
+  Alcotest.(check bool) "private keeps model_source" true
+    (Yojson.Safe.Util.member "model_source" private_decision <> `Null);
+  Alcotest.(check bool) "private keeps resolved_model_source" true
+    (Yojson.Safe.Util.member "resolved_model_source" private_decision <> `Null);
+  Alcotest.(check bool) "private keeps capability_source" true
+    (Yojson.Safe.Util.member "capability_source" private_decision <> `Null);
+  Alcotest.(check bool) "private keeps fallback_authority" true
+    (Yojson.Safe.Util.member "fallback_authority" private_decision <> `Null);
+  Alcotest.(check bool) "private keeps provider_source_cascade" true
+    (Yojson.Safe.Util.member "provider_source_cascade" private_decision <> `Null);
+  let public_json = M.public_to_json manifest in
+  let public_decision = Yojson.Safe.Util.member "decision" public_json in
+  Alcotest.(check bool) "public drops model_source" true
+    (Yojson.Safe.Util.member "model_source" public_decision = `Null);
+  Alcotest.(check bool) "public drops resolved_model_source" true
+    (Yojson.Safe.Util.member "resolved_model_source" public_decision = `Null);
+  Alcotest.(check bool) "public drops capability_source" true
+    (Yojson.Safe.Util.member "capability_source" public_decision = `Null);
+  Alcotest.(check bool) "public drops fallback_authority" true
+    (Yojson.Safe.Util.member "fallback_authority" public_decision = `Null);
+  Alcotest.(check bool) "public drops provider_source_cascade" true
+    (Yojson.Safe.Util.member "provider_source_cascade" public_decision = `Null);
+  Alcotest.(check bool) "public drops provider_secret" true
+    (Yojson.Safe.Util.member "provider_secret" public_decision = `Null);
+  Alcotest.(check bool) "public keeps latency_ms" true
+    (Yojson.Safe.Util.member "latency_ms" public_decision <> `Null)
+
 let test_logical_seq_roundtrip () =
   let manifest =
     M.make ~keeper_name:"k" ~trace_id:"t" ~event:M.Turn_started
@@ -3924,6 +3973,14 @@ let () =
             test_to_json_preserves_full_decision;
           Alcotest.test_case "public_to_json redacts decision" `Quick
             test_public_to_json_redacts_decision;
+          Alcotest.test_case
+            "public projection filters all provenance fields"
+            `Quick
+            test_public_projection_filters_all_provenance_fields;
+          Alcotest.test_case "public projection keeps elapsed_ms" `Quick
+            test_public_projection_elapsed_ms_allowlist;
+          Alcotest.test_case "public projection keeps logical_seq" `Quick
+            test_public_projection_logical_seq_allowlist;
           Alcotest.test_case
             "runtime manifest contract omits provider/model fields"
             `Quick

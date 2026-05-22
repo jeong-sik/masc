@@ -421,7 +421,7 @@ let error_kind_to_string (Error_kind value) = value
 
 let timeout_error_kinds =
   List.map error_kind_of_string
-    [ "oas_timeout_budget"; "turn_timeout"; "admission_queue_timeout" ]
+    [ "provider_timeout"; "turn_timeout"; "admission_queue_timeout" ]
 
 let stress_kind_for_error_kind error_kind =
   let trimmed = String.trim (error_kind_to_string error_kind) in

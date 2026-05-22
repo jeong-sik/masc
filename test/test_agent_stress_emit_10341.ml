@@ -50,10 +50,10 @@ let classify value =
   Keeper_agent_memory_episode.stress_kind_of_error_kind
     (Memory_oas_bridge.error_kind_of_string value)
 
-let test_oas_timeout_budget_to_timeout () =
-  check opt_kind "oas_timeout_budget -> Timeout"
+let test_provider_timeout_to_timeout () =
+  check opt_kind "provider_timeout -> Timeout"
     (Some Agent_stress.Timeout)
-    (classify "oas_timeout_budget")
+    (classify "provider_timeout")
 
 let test_turn_timeout_to_timeout () =
   check opt_kind "turn_timeout -> Timeout"
@@ -88,8 +88,8 @@ let () =
   run "agent_stress_emit_10341"
     [
       ("classifier", [
-           test_case "oas_timeout_budget maps to Timeout" `Quick
-             test_oas_timeout_budget_to_timeout;
+           test_case "provider_timeout maps to Timeout" `Quick
+             test_provider_timeout_to_timeout;
            test_case "*_timeout suffix maps to Timeout" `Quick
              test_turn_timeout_to_timeout;
            test_case "completion_contract_violation maps to Parse_degraded"

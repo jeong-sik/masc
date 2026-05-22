@@ -9,7 +9,8 @@
     declared [Timeout] but no caller emitted it.
 
     [Memory_oas_bridge.store_failed_turn_episode] now fans out one
-    [Timeout] stress event when the [error_kind] argument names a
+    [Timeout] stress event when the [error_kind] argument names an
+    owner-specific
     timeout-class failure from the OAS internal-error vocabulary.
     These tests pin the classifier — the IO side
     ([Agent_stress.record] -> JSONL) is exercised by
@@ -25,10 +26,10 @@ let kind_to_string = B.error_kind_to_string
 
 (* --- timeout kinds map to [Some Timeout] ------------------------ *)
 
-let test_oas_timeout_budget_maps () =
-  match B.stress_kind_for_error_kind (kind "oas_timeout_budget") with
+let test_provider_timeout_maps () =
+  match B.stress_kind_for_error_kind (kind "provider_timeout") with
   | Some Masc_mcp.Agent_stress.Timeout -> ()
-  | _ -> failf "oas_timeout_budget should map to Timeout"
+  | _ -> failf "provider_timeout should map to Timeout"
 
 let test_turn_timeout_maps () =
   match B.stress_kind_for_error_kind (kind "turn_timeout") with
@@ -43,7 +44,7 @@ let test_admission_queue_timeout_maps () =
 (* --- whitespace tolerance --------------------------------------- *)
 
 let test_trims_whitespace () =
-  match B.stress_kind_for_error_kind (kind "  oas_timeout_budget  ") with
+  match B.stress_kind_for_error_kind (kind "  provider_timeout  ") with
   | Some Masc_mcp.Agent_stress.Timeout -> ()
   | _ -> failf "trimmed timeout kind should still map to Timeout"
 
@@ -107,7 +108,7 @@ let test_timeout_kinds_list_is_three_items () =
     (List.length B.timeout_error_kinds);
   check (list string) "stable order for log diffs"
     [
-      "oas_timeout_budget";
+      "provider_timeout";
       "turn_timeout";
       "admission_queue_timeout";
     ]
@@ -118,8 +119,8 @@ let () =
     [
       ( "timeout-kinds-mapped",
         [
-          test_case "oas_timeout_budget -> Timeout" `Quick
-            test_oas_timeout_budget_maps;
+          test_case "provider_timeout -> Timeout" `Quick
+            test_provider_timeout_maps;
           test_case "turn_timeout -> Timeout" `Quick
             test_turn_timeout_maps;
           test_case "admission_queue_timeout -> Timeout" `Quick

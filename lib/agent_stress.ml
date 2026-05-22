@@ -34,6 +34,9 @@ type stress_kind =
   | Turn_failure of turn_failure
   | Fallback_approval
   | Timeout
+  | Provider_timeout
+  | Capacity_pressure
+  | Turn_liveness
   | Parse_degraded
   | Task_released
 
@@ -77,6 +80,12 @@ let stress_kind_to_json = function
     `Assoc [("type", `String "fallback_approval")]
   | Timeout ->
     `Assoc [("type", `String "timeout")]
+  | Provider_timeout ->
+    `Assoc [("type", `String "provider_timeout")]
+  | Capacity_pressure ->
+    `Assoc [("type", `String "capacity_pressure")]
+  | Turn_liveness ->
+    `Assoc [("type", `String "turn_liveness")]
   | Parse_degraded ->
     `Assoc [("type", `String "parse_degraded")]
   | Task_released ->

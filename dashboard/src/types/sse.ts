@@ -68,7 +68,6 @@ export type SSEEventType =
   | `oas:${string}`
   // Server-push snapshot events (proactive cache broadcasts)
   | 'project_snapshot'
-  | 'room_truth_snapshot'
   | 'namespace_truth_snapshot'
   | 'execution_snapshot'
   | 'operator_snapshot'

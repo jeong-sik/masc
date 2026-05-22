@@ -60,7 +60,6 @@ const FIXED_SSE_EVENT_TYPES = new Set([
   'approval:pending',
   'approval:resolved',
   'project_snapshot',
-  'room_truth_snapshot',
   'namespace_truth_snapshot',
   'execution_snapshot',
   'operator_snapshot',

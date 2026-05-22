@@ -15,14 +15,6 @@
     {!Keeper_metrics.metric_keeper_emergency_compact_ratio_threshold}. *)
 val emergency_compact_ratio_threshold : float
 
-(** Tool-heavy compaction gate: minimum message count before the
-    [tool_heavy] gate becomes eligible. *)
-val tool_heavy_msg_threshold : int
-
-(** Tool-heavy compaction gate: minimum context ratio before the
-    [tool_heavy] gate becomes eligible. *)
-val tool_heavy_ratio_floor : float
-
 (** Typed result for the compaction policy gate. String rendering is kept
     at telemetry/persistence boundaries via {!compaction_decision_to_string}. *)
 type compaction_decision =
@@ -48,6 +40,8 @@ val decide_compaction
   -> message_gate:int
   -> token_gate:int
   -> cooldown_sec:int
+  -> tool_heavy_msg_threshold:int
+  -> tool_heavy_ratio_floor:float
   -> last_continuity_update_ts:float
   -> last_proactive_ts:float
   -> now_ts:float

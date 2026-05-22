@@ -16,7 +16,3 @@ val frame_update : string -> string
 val broadcast_keeper_telemetry :
   keeper_name:string -> trace_id:string -> turn_index:int -> model_id:string -> unit
 
-(** [broadcast_trace_telemetry ~author ~position] publishes a trace Yjs
-    telemetry update to dashboard observer sessions. Ordering follows local
-    caller invocation order; no cross-process ordering is guaranteed. *)
-val broadcast_trace_telemetry : author:string -> position:int -> unit

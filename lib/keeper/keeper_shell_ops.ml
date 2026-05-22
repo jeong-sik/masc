@@ -1237,7 +1237,7 @@ let handle_keeper_shell
              actual dispatch. The dispatch step itself still uses the
              existing argv path ([run_argv_with_status] /
              [run_docker_shell_command_with_status]); routing the
-             execution through [Exec_dispatch.dispatch] is deferred
+             execution through [Exec_dispatch.dispatch_decided] is deferred
              (gh requires env / timeout / docker-routing fields that
              [Exec_dispatch] does not yet thread). *)
           let gh_sandbox_target =

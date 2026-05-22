@@ -627,6 +627,15 @@ let resolve_live_with_catalog ~catalog raw =
 let resolve_live ?config_path raw =
   resolve_live_with_catalog ~catalog:(catalog_lookup_names ?config_path ()) raw
 
+(* RFC-0149 §3.3 — Result-returning wrapper that reads the active catalog
+   from the resolved cascade config path.  Mirrors {!resolve_live} for
+   callers that need to fail loud on unresolved input instead of taking
+   the silent fallback. *)
+let resolve_live_result ?config_path raw :
+    (runtime_name, [ `Unresolved of string ]) result =
+  resolve_live_with_catalog_result
+    ~catalog:(catalog_lookup_names ?config_path ()) raw
+
 let canonicalize (raw : string) : string =
   canonicalize_with_catalog ~catalog:(catalog_names ()) raw
 

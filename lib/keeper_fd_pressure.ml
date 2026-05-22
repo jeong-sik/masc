@@ -12,10 +12,8 @@
     process nofile budget has passed.
 
     Fleet baseline (2026-05-17): default capacity targets 64 active keepers
-    (= 64 * fd_per_active_keeper + fd_headroom). The previous default named
-    [MASC_KEEPER_MIN_NOFILE_FOR_24] (= 4096) capped the fleet at ~41 keepers
-    under macOS launchctl defaults; ramping to 64-keeper baseline closes that
-    gap without changing the admission policy itself. *)
+    (= 64 * fd_per_active_keeper + fd_headroom). The fleet knob is
+    [MASC_KEEPER_MIN_NOFILE_FOR_FLEET]. *)
 
 let cooldown_until = Atomic.make 0.0
 let last_log_at = Atomic.make 0.0
@@ -406,31 +404,17 @@ let system_fd_snapshot ?now () =
           snapshot)
 ;;
 
-(* Fleet baseline (renamed 2026-05-17 from min_nofile_for_24_keepers).
-   Default targets 64 active keepers: 64 * fd_per_active_keeper (96)
-   + fd_headroom (128) ≈ 6272; with 2x margin → 12288. The legacy env name
-   [MASC_KEEPER_MIN_NOFILE_FOR_24] is still honored for operators who set it
-   pre-rename, but FLEET takes precedence and the legacy var only applies
-   when FLEET is absent. *)
+(* Fleet baseline. Default targets 64 active keepers:
+   64 * fd_per_active_keeper (96) + fd_headroom (128) ≈ 6272;
+   with 2x margin → 12288. *)
 let min_nofile_for_fleet () =
   let fleet_default = 12288 in
   let from_fleet =
     Env_config_core.get_int ~default:0 "MASC_KEEPER_MIN_NOFILE_FOR_FLEET"
   in
-  let resolved =
-    if from_fleet > 0
-    then from_fleet
-    else (
-      let legacy =
-        Env_config_core.get_int ~default:0 "MASC_KEEPER_MIN_NOFILE_FOR_24"
-      in
-      if legacy > 0 then legacy else fleet_default)
-  in
+  let resolved = if from_fleet > 0 then from_fleet else fleet_default in
   max 256 resolved
 ;;
-
-(* Compat alias preserved for any out-of-tree callers; do not add new uses. *)
-let min_nofile_for_24_keepers = min_nofile_for_fleet
 
 let fd_headroom () =
   Env_config_core.get_int ~default:128 "MASC_KEEPER_FD_HEADROOM"
@@ -738,7 +722,7 @@ let runtime_state_json ?(soft_limit = process_nofile_soft_limit ())
     ; "host_fd_hotspot_probe_supported", host_fd_hotspot_probe_supported
     ; "headroom", `Int (fd_headroom ())
     ; "fd_per_active_keeper", `Int (fd_per_active_keeper ())
-    ; "min_nofile_for_24_keepers", `Int (min_nofile_for_24_keepers ())
+    ; "min_nofile_for_fleet", `Int (min_nofile_for_fleet ())
     ; "requested_keepers", `Int requested_keepers
     ; "target_keeper_count", `Int target_keeper_count
     ; "active_keepers", `Int active_keepers

@@ -11,6 +11,31 @@ module Social = Keeper_social_model
 include Keeper_unified_metrics_support
 include Keeper_unified_metrics_json_support
 
+let provider_timeout_failure_summary
+      ~budget_sec
+      ~keeper_turn_timeout_sec
+      ~estimated_input_tokens
+      ~source
+      ~remaining_turn_budget_sec
+      ~min_required_sec
+      ~phase
+  =
+  let remaining =
+    match remaining_turn_budget_sec with
+    | Some value -> Printf.sprintf "%.1fs" value
+    | None -> "unknown"
+  in
+  Printf.sprintf
+    "Provider timeout exhausted; phase=%s; source=%s; budget=%.1fs; remaining=%s; min_required=%.1fs; estimated_input_tokens=%d; keeper_turn_timeout=%.1fs"
+    phase
+    source
+    budget_sec
+    remaining
+    min_required_sec
+    estimated_input_tokens
+    keeper_turn_timeout_sec
+;;
+
 let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
     ~(observation : Keeper_world_observation.world_observation)
     ~(reason : string) ?(is_transient = false) ?social_state
@@ -35,10 +60,23 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
             if trimmed = "" then reason else trimmed
         | Some
             (Keeper_turn_driver.Oas_timeout_budget
-               _ as err) ->
-            Option.value
-              ~default:reason
-              (Keeper_turn_driver.summary_of_masc_internal_error err)
+               {
+                 budget_sec;
+                 keeper_turn_timeout_sec;
+                 estimated_input_tokens;
+                 source;
+                 remaining_turn_budget_sec;
+                 min_required_sec;
+                 phase;
+               }) ->
+            provider_timeout_failure_summary
+              ~budget_sec
+              ~keeper_turn_timeout_sec
+              ~estimated_input_tokens
+              ~source
+              ~remaining_turn_budget_sec
+              ~min_required_sec
+              ~phase
         | Some (Keeper_turn_driver.Capacity_backpressure _ as err) ->
             Option.value
               ~default:reason

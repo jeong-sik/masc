@@ -204,8 +204,6 @@ describe('parseTransportHealthData', () => {
         managed_endpoint: '/mcp/managed',
         operator_endpoint: '/mcp/operator',
         delete_endpoint: '/mcp',
-        legacy_sse_endpoint: '/sse',
-        legacy_messages_endpoint: '/messages',
         default_transport: 'streamable_http',
         supports_post: true,
         supports_sse_upgrade: true,

@@ -46,6 +46,15 @@ val make :
   unit ->
   Agent_sdk.Hooks.hooks
 
+val record_last_memory_injection : string -> string -> int -> unit
+(** Record the digest and final size of the last memory injection for an
+    agent. Thread-safe (Stdlib.Mutex). Overwrites any previous entry. *)
+
+val get_last_memory_injection : string -> (string * int) option
+(** Retrieve the last recorded memory injection digest and size for an
+    agent. Thread-safe (Stdlib.Mutex). Returns [None] if no injection was
+    recorded since the last [Continue] branch or process start. *)
+
 val compose_with_inner :
   memory_hooks:Agent_sdk.Hooks.hooks ->
   inner:Agent_sdk.Hooks.hooks ->

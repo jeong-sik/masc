@@ -311,6 +311,8 @@ type t =
   ; error_message : string option
   ; started_at : string
   ; ended_at : string
+  ; memory_context_digest : string option
+  ; extra_system_context_final_size : int option
   }
 
 let stop_reason_to_string = function
@@ -867,6 +869,14 @@ let to_json (receipt : t) =
     ; "error", error_json
     ; "started_at", `String receipt.started_at
     ; "ended_at", `String receipt.ended_at
+    ; ( "memory_context_digest"
+      , match receipt.memory_context_digest with
+        | Some value -> `String value
+        | None -> `Null )
+    ; ( "extra_system_context_final_size"
+      , match receipt.extra_system_context_final_size with
+        | Some value -> `Int value
+        | None -> `Null )
     ]
 ;;
 

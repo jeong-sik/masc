@@ -1306,6 +1306,8 @@ let test_keeper_zombie_field_contracts () =
       error_message = None;
       started_at = "2026-05-06T00:00:00Z";
       ended_at = "2026-05-06T00:00:01Z";
+      memory_context_digest = None;
+      extra_system_context_final_size = None;
     }
   in
   let json = R.to_json receipt in

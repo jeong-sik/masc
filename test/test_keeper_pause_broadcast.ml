@@ -106,6 +106,8 @@ let mk_receipt
   ; error_message
   ; started_at = "2026-04-26T00:00:00Z"
   ; ended_at = "2026-04-26T00:00:01Z"
+  ; memory_context_digest = None
+  ; extra_system_context_final_size = None
   }
 ;;
 

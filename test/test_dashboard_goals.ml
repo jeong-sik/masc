@@ -167,6 +167,8 @@ let append_keeper_receipt
       error_message = None;
       started_at;
       ended_at;
+      memory_context_digest = None;
+      extra_system_context_final_size = None;
     }
   in
   Keeper_execution_receipt.append config receipt

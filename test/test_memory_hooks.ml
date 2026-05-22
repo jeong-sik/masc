@@ -13,6 +13,9 @@ open Alcotest
 module Memory_oas_bridge = Masc_mcp.Memory_oas_bridge
 module Memory_hooks = Masc_mcp.Memory_hooks
 module Runtime_manifest = Masc_mcp.Keeper_runtime_manifest
+module Keeper_execution_receipt = Masc_mcp.Keeper_execution_receipt
+module Keeper_agent_tool_surface = Masc_mcp.Keeper_agent_tool_surface
+module Keeper_types = Masc_mcp.Keeper_types
 module P = Masc_mcp.Prometheus
 
 let test_base_path = Filename.temp_dir "masc_memory_hooks_base" ""
@@ -498,6 +501,180 @@ let test_hook_slots_populated () =
   check bool "on_error is None" true (Option.is_none hooks.on_error);
   (try Sys.rmdir tmp_dir with _ -> ())
 
+(* ── Memory injection recording tests (OAS checklist #3) ──────── *)
+
+let test_record_and_get_last_memory_injection () =
+  Memory_hooks.record_last_memory_injection "agent_a" "digest123" 456;
+  let result = Memory_hooks.get_last_memory_injection "agent_a" in
+  check (option (pair string int)) "retrieves recorded injection" (Some ("digest123", 456)) result
+
+let test_get_last_memory_injection_returns_none_when_missing () =
+  let result = Memory_hooks.get_last_memory_injection "unknown_agent_xyz" in
+  check (option (pair string int)) "returns None for unknown agent" None result
+
+let test_record_last_memory_injection_overwrites () =
+  Memory_hooks.record_last_memory_injection "agent_b" "first" 100;
+  Memory_hooks.record_last_memory_injection "agent_b" "second" 200;
+  let result = Memory_hooks.get_last_memory_injection "agent_b" in
+  check (option (pair string int)) "overwrites previous injection" (Some ("second", 200)) result
+
+let test_memory_injection_cleared_on_continue () =
+  let tmp_dir = Filename.temp_dir "masc_test_mh" "" in
+  let config = make_test_config ~base_path:tmp_dir in
+  let memory = Memory_oas_bridge.create_memory ~agent_name:"test_clear" () in
+  let hooks = Memory_hooks.make
+    ~agent_name:"test_clear"
+    ~config
+    ~memory
+    ()
+  in
+  let event = make_before_turn_params_event ~turn:1 () in
+  let decision = match hooks.before_turn_params with
+    | Some f -> f event
+    | None -> fail "before_turn_params hook should be Some"
+  in
+  (match decision with
+   | Agent_sdk.Hooks.Continue ->
+     let result = Memory_hooks.get_last_memory_injection "test_clear" in
+     check (option (pair string int)) "cleared on Continue" None result
+   | Agent_sdk.Hooks.AdjustParams _ ->
+     let result = Memory_hooks.get_last_memory_injection "test_clear" in
+     check bool "has entry after AdjustParams" true (Option.is_some result);
+     let event2 = make_before_turn_params_event ~turn:2 () in
+     let decision2 = match hooks.before_turn_params with
+       | Some f -> f event2
+       | None -> fail "before_turn_params hook should be Some"
+     in
+     (match decision2 with
+      | Agent_sdk.Hooks.Continue ->
+        let result2 = Memory_hooks.get_last_memory_injection "test_clear" in
+        check (option (pair string int)) "cleared on second Continue" None result2
+      | _ -> ())
+   | _ -> fail "unexpected decision");
+  (try Sys.rmdir tmp_dir with _ -> ())
+
+let test_execution_receipt_json_includes_memory_fields () =
+  let receipt : Keeper_execution_receipt.t =
+    { keeper_name = "test_keeper"
+    ; agent_name = "test_agent"
+    ; trace_id = "trace-abc"
+    ; generation = 1
+    ; turn_count = Some 1
+    ; current_task_id = None
+    ; goal_ids = []
+    ; outcome = `Ok
+    ; terminal_reason_code = "test"
+    ; response_text_present = false
+    ; model_used = None
+    ; requested_tools = []
+    ; reported_tools = []
+    ; observed_tools = []
+    ; canonical_tools = []
+    ; unexpected_tools = []
+    ; tools_used = []
+    ; tool_contract_result = Keeper_execution_receipt.Contract_not_dispatched
+    ; tool_surface =
+        { turn_lane = Keeper_agent_tool_surface.Lane_pre_dispatch
+        ; tool_surface_class = Keeper_agent_tool_surface.Surface_none
+        ; tool_requirement = No_tools
+        ; visible_tool_count = 0
+        ; tool_gate_enabled = false
+        ; tool_surface_fallback_used = false
+        ; required_tools = []
+        ; required_tool_candidates = []
+        ; missing_required_tools = []
+        }
+    ; sandbox_kind = Keeper_types.Local
+    ; sandbox_root = None
+    ; network_mode = Keeper_types.Network_none
+    ; approval_profile = None
+    ; approval_profile_derived = false
+    ; cascade_name = Keeper_execution_receipt.cascade_name_of_string "test"
+    ; cascade_selected_model = None
+    ; cascade_attempt_count = 0
+    ; cascade_fallback_applied = false
+    ; cascade_outcome = Keeper_execution_receipt.Cascade_not_dispatched
+    ; degraded_retry_applied = false
+    ; degraded_retry_cascade = None
+    ; fallback_reason = None
+    ; cascade_rotation_attempts = []
+    ; stop_reason = None
+    ; error_kind = None
+    ; error_message = None
+    ; started_at = "2024-01-01T00:00:00Z"
+    ; ended_at = "2024-01-01T00:00:01Z"
+    ; memory_context_digest = Some "sha256:abc123"
+    ; extra_system_context_final_size = Some 789
+    }
+  in
+  let json = Keeper_execution_receipt.to_json receipt in
+  let digest = Yojson.Safe.Util.(member "memory_context_digest" json) in
+  let size = Yojson.Safe.Util.(member "extra_system_context_final_size" json) in
+  check string "memory_context_digest in JSON" "sha256:abc123"
+    (match digest with `String s -> s | _ -> "");
+  check int "extra_system_context_final_size in JSON" 789
+    (match size with `Int n -> n | `Intlit s -> int_of_string s | _ -> 0)
+
+let test_execution_receipt_json_null_when_missing () =
+  let receipt : Keeper_execution_receipt.t =
+    { keeper_name = "test_keeper"
+    ; agent_name = "test_agent"
+    ; trace_id = "trace-abc"
+    ; generation = 1
+    ; turn_count = Some 1
+    ; current_task_id = None
+    ; goal_ids = []
+    ; outcome = `Ok
+    ; terminal_reason_code = "test"
+    ; response_text_present = false
+    ; model_used = None
+    ; requested_tools = []
+    ; reported_tools = []
+    ; observed_tools = []
+    ; canonical_tools = []
+    ; unexpected_tools = []
+    ; tools_used = []
+    ; tool_contract_result = Keeper_execution_receipt.Contract_not_dispatched
+    ; tool_surface =
+        { turn_lane = Keeper_agent_tool_surface.Lane_pre_dispatch
+        ; tool_surface_class = Keeper_agent_tool_surface.Surface_none
+        ; tool_requirement = No_tools
+        ; visible_tool_count = 0
+        ; tool_gate_enabled = false
+        ; tool_surface_fallback_used = false
+        ; required_tools = []
+        ; required_tool_candidates = []
+        ; missing_required_tools = []
+        }
+    ; sandbox_kind = Keeper_types.Local
+    ; sandbox_root = None
+    ; network_mode = Keeper_types.Network_none
+    ; approval_profile = None
+    ; approval_profile_derived = false
+    ; cascade_name = Keeper_execution_receipt.cascade_name_of_string "test"
+    ; cascade_selected_model = None
+    ; cascade_attempt_count = 0
+    ; cascade_fallback_applied = false
+    ; cascade_outcome = Keeper_execution_receipt.Cascade_not_dispatched
+    ; degraded_retry_applied = false
+    ; degraded_retry_cascade = None
+    ; fallback_reason = None
+    ; cascade_rotation_attempts = []
+    ; stop_reason = None
+    ; error_kind = None
+    ; error_message = None
+    ; started_at = "2024-01-01T00:00:00Z"
+    ; ended_at = "2024-01-01T00:00:01Z"
+    ; memory_context_digest = None
+    ; extra_system_context_final_size = None
+    }
+  in
+  let json = Keeper_execution_receipt.to_json receipt in
+  let digest = Yojson.Safe.Util.(member "memory_context_digest" json) in
+  let size = Yojson.Safe.Util.(member "extra_system_context_final_size" json) in
+  check bool "memory_context_digest is Null" true (digest = `Null);
+  check bool "extra_system_context_final_size is Null" true (size = `Null)
+
 (* ── Test suite ────────────────────────────────────────────── *)
 
 let () =
@@ -528,5 +705,15 @@ let () =
     ];
     "feature_flag", [
       test_case "flag removed (Phase 2)" `Quick test_feature_flag_removed;
+    ];
+    "memory_injection_record", [
+      test_case "record and get last injection" `Quick test_record_and_get_last_memory_injection;
+      test_case "get returns None when missing" `Quick test_get_last_memory_injection_returns_none_when_missing;
+      test_case "record overwrites previous" `Quick test_record_last_memory_injection_overwrites;
+      test_case "cleared on Continue branch" `Quick test_memory_injection_cleared_on_continue;
+    ];
+    "execution_receipt_json", [
+      test_case "includes memory fields in JSON" `Quick test_execution_receipt_json_includes_memory_fields;
+      test_case "emits Null when memory fields absent" `Quick test_execution_receipt_json_null_when_missing;
     ];
   ]

@@ -137,12 +137,12 @@ let record_context_max_observation
    - [60-300s]:      acceptable for cloud-LLM heavy turns.
    - [300-600s]:     unusually slow; investigate if persistent.
    - [600-1200s]:    long turn — approaches but does not exceed
-                     the 1200s [oas_timeout_budget] cap (#9933).
-                     Operator-actionable warning.
-   - [over_1200s]:   turn longer than the OAS budget cap.
-                     Almost always indicates the budget fired
-                     and the keeper retried.  Direct evidence
-                     of #9943's 1,204,542 ms taskmaster sample.
+                     the keeper turn deadline. Operator-actionable
+                     latency warning.
+   - [over_1200s]:   turn longer than the keeper turn deadline.
+                     Inspect owner-specific runtime evidence
+                     (provider timeout, admission/capacity, or
+                     turn liveness) before classifying the cause.
 
    Boundaries are inclusive on the upper edge so 60.0 → 60-300,
    600.0 → 600-1200, 1200.0 → over_1200s.  This matches the
@@ -177,7 +177,7 @@ let record_turn_latency_bucket
   if latency_ms >= threshold then
     Log.Keeper.warn
       "[long-turn] keeper=%s latency_ms=%d (>= %d ms threshold) bucket=%s \
-       — investigate cascade exhaustion / oas_timeout_budget (#9933, #9943)"
+       — inspect owner-specific runtime evidence before classifying timeout cause"
       keeper latency_ms threshold bucket
 
 let label_or_unknown raw =

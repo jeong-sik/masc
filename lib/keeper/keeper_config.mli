@@ -193,13 +193,16 @@ val normalize_continuity_compaction_cooldown_sec : int -> int
 val default_keep_recent_tool_results : int
 
 (** Default message-count floor for the tool-heavy compaction gate.
-    Mirrors the prior global constant in [Keeper_compact_policy].
-    Wired into [decide_compaction] by PR-B. *)
+    Wired into [decide_compaction] by PR-B.  Operator override (PR-C):
+    [MASC_KEEPER_TOOL_HEAVY_MSG_THRESHOLD] (valid range [1, 10_000];
+    out-of-range warns and falls back to 40, mirroring
+    [Keeper_compact_policy.emergency_compact_ratio_threshold]). *)
 val default_tool_heavy_msg_threshold : int
 
 (** Default context-ratio floor for the tool-heavy compaction gate.
-    Mirrors the prior global constant in [Keeper_compact_policy].
-    Wired into [decide_compaction] by PR-B. *)
+    Wired into [decide_compaction] by PR-B.  Operator override (PR-C):
+    [MASC_KEEPER_TOOL_HEAVY_RATIO_FLOOR] (valid range [0.0, 1.0);
+    out-of-range or non-finite values warn and fall back to 0.15). *)
 val default_tool_heavy_ratio_floor : float
 
 (** Hard upper bound for operator-supplied

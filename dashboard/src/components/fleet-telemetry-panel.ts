@@ -849,7 +849,7 @@ export function FleetTelemetryPanel() {
           value=${counts.blocked.toString()}
           detail=${counts.blocked > 0
             ? '런타임은 살아있지만 typed blocker_class를 가진 키퍼 — 행 필터에서 blocker 클래스 이름으로 검색해 원인 확인.'
-            : '활성 차단 사유가 보고된 키퍼가 없습니다 (semaphore_wait_timeout, oas_timeout_budget 등).'}
+            : '활성 차단 사유가 보고된 키퍼가 없습니다 (admission_queue_wait_timeout, provider_runtime_error 등).'}
           tone=${counts.blocked > 0 ? 'warn' : 'ok'}
         />
         <${SummaryCard}

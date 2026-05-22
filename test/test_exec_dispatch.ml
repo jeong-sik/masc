@@ -490,6 +490,51 @@ let () =
 	      assert (second_cwd = "/tmp/pipeline")
 	  | _ -> assert false
 
+let () =
+  with_eio @@ fun () ->
+  let open Masc_exec.Shell_ir in
+  let slow_bin = Masc_exec.Bin.of_string "slow" |> Result.get_ok in
+  let next_bin = Masc_exec.Bin.of_string "next" |> Result.get_ok in
+  let runner_calls = ref [] in
+  let mock_runner ~stdin_content ~argv ~env:_ ~cwd:_ ~timeout_sec =
+    runner_calls := (argv, stdin_content, timeout_sec) :: !runner_calls;
+    match argv, stdin_content with
+    | [ "slow" ], None ->
+        Unix.sleepf 0.12;
+        Unix.WEXITED 0, "typed", ""
+    | [ "next" ], Some "typed" ->
+        Unix.WEXITED 0, "ok", ""
+    | _ -> Unix.WEXITED 2, "", "unexpected mock runner call"
+  in
+  let docker_sandbox =
+    Masc_exec.Sandbox_target.docker ~image:"pipeline-image" ~runner:mock_runner ()
+  in
+  let stage bin =
+    Simple
+      {
+        bin;
+        args = [];
+        env = [];
+        cwd = None;
+        redirects = [];
+        sandbox = docker_sandbox;
+      }
+  in
+  let result =
+    Masc_exec.Exec_dispatch.dispatch
+      ~timeout_sec:0.5
+      (Pipeline [ stage slow_bin; stage next_bin ])
+  in
+  assert (result.status = Unix.WEXITED 0);
+  assert (result.stdout = "ok");
+  match List.rev !runner_calls with
+  | [ ([ "slow" ], None, first_timeout); ([ "next" ], Some "typed", second_timeout) ] ->
+      assert (first_timeout <= 0.5);
+      assert (first_timeout > 0.45);
+      assert (second_timeout < first_timeout);
+      assert (second_timeout < 0.45)
+  | _ -> assert false
+
 (* --- dispatch_pipeline prefers Docker streaming pipeline runner --- *)
 
 let () =
@@ -552,6 +597,79 @@ let () =
       assert (first.cwd = Some "/tmp/pipeline");
       assert (second.cwd = Some "/tmp/pipeline")
   | _ -> assert false
+
+let () =
+  with_eio @@ fun () ->
+  let open Masc_exec.Shell_ir in
+  let printf_bin = Masc_exec.Bin.of_string "printf" |> Result.get_ok in
+  let wc_bin = Masc_exec.Bin.of_string "wc" |> Result.get_ok in
+  let first_simple_calls = ref [] in
+  let second_simple_calls = ref [] in
+  let first_pipeline_called = ref false in
+  let second_pipeline_called = ref false in
+  let first_simple_runner ~stdin_content ~argv ~env:_ ~cwd:_ ~timeout_sec:_ =
+    first_simple_calls := (argv, stdin_content) :: !first_simple_calls;
+    match argv, stdin_content with
+    | [ "printf"; "typed" ], None -> Unix.WEXITED 0, "typed", ""
+    | _ -> Unix.WEXITED 2, "", "unexpected first runner call"
+  in
+  let second_simple_runner ~stdin_content ~argv ~env:_ ~cwd:_ ~timeout_sec:_ =
+    second_simple_calls := (argv, stdin_content) :: !second_simple_calls;
+    match argv, stdin_content with
+    | [ "wc"; "-c" ], Some "typed" -> Unix.WEXITED 0, "5\n", ""
+    | _ -> Unix.WEXITED 2, "", "unexpected second runner call"
+  in
+  let first_pipeline_runner ~stages:_ ~timeout_sec:_ =
+    first_pipeline_called := true;
+    Unix.WEXITED 3, "", "first pipeline runner should not be used"
+  in
+  let second_pipeline_runner ~stages:_ ~timeout_sec:_ =
+    second_pipeline_called := true;
+    Unix.WEXITED 3, "", "second pipeline runner should not be used"
+  in
+  let first_docker_sandbox =
+    Masc_exec.Sandbox_target.docker
+      ~image:"pipeline-image"
+      ~runner:first_simple_runner
+      ~pipeline_runner:first_pipeline_runner
+      ()
+  in
+  let second_docker_sandbox =
+    Masc_exec.Sandbox_target.docker
+      ~image:"pipeline-image"
+      ~runner:second_simple_runner
+      ~pipeline_runner:second_pipeline_runner
+      ()
+  in
+  let stages =
+    [
+      Simple
+        {
+          bin = printf_bin;
+          args = [ Lit "typed" ];
+          env = [];
+          cwd = None;
+          redirects = [];
+          sandbox = first_docker_sandbox;
+        };
+      Simple
+        {
+          bin = wc_bin;
+          args = [ Lit "-c" ];
+          env = [];
+          cwd = None;
+          redirects = [];
+          sandbox = second_docker_sandbox;
+        };
+    ]
+  in
+  let result = Masc_exec.Exec_dispatch.dispatch (Pipeline stages) in
+  assert (not !first_pipeline_called);
+  assert (not !second_pipeline_called);
+  assert (result.status = Unix.WEXITED 0);
+  assert (String.trim result.stdout = "5");
+  assert (!first_simple_calls = [ [ "printf"; "typed" ], None ]);
+  assert (!second_simple_calls = [ [ "wc"; "-c" ], Some "typed" ])
 
 let () =
   with_eio @@ fun () ->

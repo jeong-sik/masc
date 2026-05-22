@@ -3977,6 +3977,10 @@ let () =
             "public projection filters all provenance fields"
             `Quick
             test_public_projection_filters_all_provenance_fields;
+          Alcotest.test_case "public projection keeps elapsed_ms" `Quick
+            test_public_projection_elapsed_ms_allowlist;
+          Alcotest.test_case "public projection keeps logical_seq" `Quick
+            test_public_projection_logical_seq_allowlist;
           Alcotest.test_case
             "runtime manifest contract omits provider/model fields"
             `Quick

@@ -26,10 +26,6 @@ type tuple_key = private {
   triggered : bool;
 }
 
-val make_tuple_key : raw_value:float -> threshold:float -> triggered:bool -> tuple_key
-(** Constructor used by tests and callers that want to query
-    [per_site_unique_tuples] directly. *)
-
 type site_stat = {
   site : site;
   count : int;

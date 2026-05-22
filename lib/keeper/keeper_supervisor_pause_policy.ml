@@ -8,7 +8,8 @@
     - the unified entrypoint [handle_crash_auto_pause] used by both
       stale-termination-storm and OAS-timeout-budget-loop pause paths;
     - thin per-cause wrappers [handle_stale_storm_pause] and
-      [handle_oas_timeout_budget_pause];
+      [handle_oas_timeout_budget_pause] (legacy registry input,
+      surfaced as a provider-timeout loop);
     - the read-side classifier [failure_reason_policy_decision] that
       maps a persisted [Keeper_registry.failure_reason] back to a
       [Keeper_failure_policy.decision].
@@ -73,14 +74,14 @@ let handle_crash_auto_pause
      in
      (* Task-138 §"Max no-task-progress 30min = release claimed":
           when the supervisor pauses a keeper because the same blocker
-          class is looping (stale_storm or oas_timeout_budget_loop),
+          class is looping (stale_storm or provider_timeout_loop),
           the keeper is no longer making progress on its claimed task.
           Releasing [current_task_id] here lets a peer pick the task
           up while this keeper sits in [paused=true] back-off.
 
           Without this release the diagnostic state is "executor.json:
           current_task_id=task-147, paused=true, last_blocker.klass=
-          oas_timeout_budget" — task is stuck forever because (a) this
+          turn_timeout" — task is stuck forever because (a) this
           keeper cannot run while paused and (b) other keepers see the
           claim and skip.  The released task ID is not separately audited
           here; [last_blocker] in [runtime] already carries the pause
@@ -168,18 +169,18 @@ let handle_oas_timeout_budget_pause
     ~publish_phase_lifecycle
     ctx
     entry
-    ~reason_tag:"oas_timeout_budget_loop"
+    ~reason_tag:"provider_timeout_loop"
     ~metric_name:Keeper_metrics.metric_keeper_oas_timeout_budget_loop_paused
-    ~lifecycle_detail:(Printf.sprintf "oas_timeout_budget_loop count=%d" count)
-    ~blocker_class:(Some Oas_timeout_budget)
+    ~lifecycle_detail:(Printf.sprintf "provider_timeout_loop count=%d" count)
+    ~blocker_class:(Some Turn_timeout)
     ~resume_policy:Auto_resume_with_backoff
     ~log_message:
       (Printf.sprintf
-         "OAS TIMEOUT BUDGET LOOP AUTO-PAUSED (count=%d). Supervisor will attempt \
+         "PROVIDER TIMEOUT LOOP AUTO-PAUSED (count=%d). Supervisor will attempt \
           self-healing auto-resume with exponential back-off (see \
           MASC_KEEPER_AUTO_RESUME_INITIAL_SEC). Operator may also tune or reroute the \
           cascade/model before resuming manually; restarting into the same slow-provider \
-          budget loop is avoided by the back-off delay."
+          timeout loop is avoided by the back-off delay."
          count)
 ;;
 

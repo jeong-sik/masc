@@ -947,3 +947,88 @@ let append_unfinished_provider_attempt_finished_best_effort
       ~decision
       ()
     |> append_best_effort ~site config
+
+(* ═══════════════════════════════════════════════════════════════════════════════
+   F8: Lane-level mandatory event sets and turn completeness policy.
+   ═══════════════════════════════════════════════════════════════════════════════ *)
+
+(** For each event kind, the clock_refs keys that MUST be present for the
+    manifest to be considered structurally complete at that lane. *)
+let mandatory_clock_refs_for_event = function
+  | Turn_started ->
+    [ "edge_id"; "lane" ]
+  | Provider_attempt_started ->
+    [ "edge_id"; "lane"; "provider_attempt_id" ]
+  | Provider_attempt_finished ->
+    [ "edge_id"; "lane"; "provider_attempt_id"; "elapsed_ms" ]
+  | Tool_surface_selected ->
+    [ "edge_id"; "lane"; "tool_batch_id" ]
+  | Provider_lane_resolved ->
+    [ "edge_id"; "lane"; "tool_batch_id" ]
+  | Context_compacted ->
+    [ "edge_id"; "lane"; "compaction_id"; "compaction_source" ]
+  | Checkpoint_saved ->
+    [ "edge_id"; "lane"; "checkpoint_id" ]
+  | Memory_injected | Memory_flushed ->
+    [ "edge_id"; "lane"; "memory_injection_id" ]
+  | Receipt_appended ->
+    [ "edge_id"; "lane" ]
+  | Turn_finished ->
+    [ "edge_id"; "lane" ]
+  | _ ->
+    [ "edge_id"; "lane" ]
+
+let clock_refs_has_keys keys clock_refs_json =
+  match clock_refs_json with
+  | `Assoc fields ->
+    List.for_all
+      (fun key -> List.exists (fun (k, _) -> String.equal k key) fields)
+      keys
+  | _ -> false
+
+let validate_manifest_completeness manifest =
+  let required_keys = mandatory_clock_refs_for_event manifest.event in
+  match manifest.decision with
+  | `Assoc fields ->
+    (match List.assoc_opt "clock_refs" fields with
+    | Some clock_refs ->
+      if clock_refs_has_keys required_keys clock_refs then
+        Ok ()
+      else
+        Error
+          (Printf.sprintf
+             "manifest for %s missing mandatory clock_refs keys: [%s]"
+             (event_kind_to_string manifest.event)
+             (String.concat ", "
+                (List.filter
+                   (fun key -> not (clock_refs_has_keys [ key ] clock_refs))
+                   required_keys)))
+    | None ->
+      Error
+        (Printf.sprintf "manifest for %s missing clock_refs entirely"
+           (event_kind_to_string manifest.event)))
+  | _ ->
+    Error
+      (Printf.sprintf "manifest for %s has non-assoc decision"
+         (event_kind_to_string manifest.event))
+
+(** A turn is "finished" when a [Turn_finished] event exists.
+    A turn is "complete" when it is finished AND has both a receipt link
+    and a checkpoint link, meaning all mandatory lane artifacts are present. *)
+let is_finished_turn manifests =
+  List.exists
+    (fun m -> m.event = Turn_finished)
+    manifests
+
+let is_complete_turn manifests =
+  is_finished_turn manifests
+  && List.exists
+       (fun m ->
+         m.event = Receipt_appended
+         && Option.is_some m.links.receipt_path)
+       manifests
+  && List.exists
+       (fun m ->
+         m.event = Checkpoint_saved
+         && Option.is_some m.links.checkpoint_path)
+       manifests

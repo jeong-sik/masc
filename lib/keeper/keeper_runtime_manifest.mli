@@ -194,3 +194,19 @@ val append_unfinished_provider_attempt_finished_best_effort :
   ?exception_kind:string ->
   unit ->
   unit
+
+(** {2 F8: Turn completeness policy} *)
+
+(** The clock_refs keys that are mandatory for a structurally complete
+    manifest at this event lane. *)
+val mandatory_clock_refs_for_event : event_kind -> string list
+
+(** Check whether a manifest carries all mandatory clock_refs for its event. *)
+val validate_manifest_completeness : t -> (unit, string) result
+
+(** Whether a list of manifests includes a [Turn_finished] event. *)
+val is_finished_turn : t list -> bool
+
+(** Whether a turn is both [finished] and has all mandatory lane artifacts:
+    receipt link + checkpoint link. *)
+val is_complete_turn : t list -> bool

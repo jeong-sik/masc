@@ -361,3 +361,7 @@ and dispatch ?timeout_sec (ir : Shell_ir.t) =
   match ir with
   | Shell_ir.Simple s -> dispatch_simple ?timeout_sec s
   | Pipeline stages -> dispatch_pipeline ?timeout_sec stages
+
+let dispatch_decided ?timeout_sec (envelope : Shell_ir_risk.decided Shell_ir_risk.decided_ir) :
+    dispatch_result =
+  dispatch ?timeout_sec envelope.Shell_ir_risk.ir

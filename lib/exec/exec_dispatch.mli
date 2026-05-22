@@ -21,3 +21,9 @@ val dispatch_simple :
     used by pipeline dispatch when a previous stage's stdout must be
     forwarded without dropping the stage's sandbox target.  [?timeout_sec]
     overrides the dispatch default. *)
+
+val dispatch_decided :
+  ?timeout_sec:float ->
+  Shell_ir_risk.decided Shell_ir_risk.decided_ir -> dispatch_result
+(** RFC-0160 S3: dispatch a risk-classified IR.  The phantom type
+    ensures the IR has passed through [Shell_ir_risk.classify]. *)

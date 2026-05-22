@@ -86,19 +86,29 @@ let handle_keeper_list ctx args : tool_result =
             in
             find_latest (List.rev metrics_window_lines)
           in
-          let memory_bank_summary =
-              read_keeper_memory_summary
+          (* RFC-0149 §3.1 — route through the Result-returning resolver
+             so a memory-bank IO fault surfaces on the operator-visible
+             [memory_recent_note] field as a typed unavailable marker
+             instead of being indistinguishable from "no recorded notes".
+             [None] stays reserved for "Ok summary with empty recent_notes". *)
+          let memory_recent_note =
+            match
+              read_keeper_memory_summary_result
                 ctx.config
                 ~name:m.name
                 ~max_bytes:120000
                 ~max_lines:180
                 ~recent_limit:3
-            in
-            let memory_recent_note =
-              match memory_bank_summary.recent_notes with
-              | row :: _ -> Some row.text
-              | [] -> None
-            in
+            with
+            | Ok summary ->
+              (match summary.recent_notes with
+               | row :: _ -> Some row.text
+               | [] -> None)
+            | Error exn_class ->
+              Some
+                (Printf.sprintf "[memory unavailable: %s]"
+                   (Keeper_memory_recall_exn_class.to_label exn_class))
+          in
             let continuity_reflection_hold_s =
               let cooldown = Float.of_int m.compaction.cooldown_sec in
               let last_reflection_ts =

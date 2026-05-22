@@ -207,7 +207,7 @@ const runtimeBlockerLabels = {
   autonomous_slot_wait_timeout: '자율 슬롯 대기 만료',
   admission_queue_wait_timeout: '대기열 진입 만료',
   turn_timeout_after_queue_wait: '대기 후 턴 만료',
-  oas_timeout_budget: '레거시 OAS 타임아웃 표면',
+  oas_timeout_budget: '턴 응답 만료',
   turn_timeout: '턴 응답 만료',
   turn_livelock_blocked: '턴 livelock 차단',
   completion_contract_violation: '완료 계약 위반',
@@ -243,7 +243,8 @@ export function keeperRuntimeBlockerLabel(
   blockerClass: Keeper['runtime_blocker_class'] | null | undefined,
 ): string | null {
   if (!blockerClass) return null
-  return runtimeBlockerLabels[blockerClass] ?? null
+  const canonicalBlockerClass = blockerClass === 'oas_timeout_budget' ? 'turn_timeout' : blockerClass
+  return runtimeBlockerLabels[canonicalBlockerClass] ?? null
 }
 
 export function keeperRuntimeBlockerHint(keeper: Keeper | null | undefined): string | null {
@@ -251,7 +252,9 @@ export function keeperRuntimeBlockerHint(keeper: Keeper | null | undefined): str
   if (keeper.runtime_blocker_continue_gate) return continueGateHint(keeper)
   const blockerClass = keeper.runtime_blocker_class
   const runtimeBlocker = keeper.runtime_blocker_summary?.trim()
-  if (runtimeBlocker && runtimeBlocker !== blockerClass) return runtimeBlocker
+  if (runtimeBlocker && runtimeBlocker !== blockerClass && blockerClass !== 'oas_timeout_budget') {
+    return runtimeBlocker
+  }
   if (blockerClass === 'ambiguous_post_commit_timeout') {
     return '최근 변경 이후 응답이 끊겨 상태 확인이 필요합니다.'
   }
@@ -268,7 +271,7 @@ export function keeperRuntimeBlockerHint(keeper: Keeper | null | undefined): str
     return '대기 후 실행된 턴이 전체 제한 시간을 초과했습니다.'
   }
   if (blockerClass === 'oas_timeout_budget') {
-    return '레거시 timeout-budget 표면입니다. 실제 owner-specific timeout/admission/capacity 원인을 확인하세요.'
+    return '턴 실행 시간이 제한 시간을 초과했습니다.'
   }
   if (blockerClass === 'turn_timeout') {
     return '턴 실행 시간이 제한 시간을 초과했습니다.'

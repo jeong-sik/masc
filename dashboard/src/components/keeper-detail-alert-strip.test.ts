@@ -68,7 +68,8 @@ describe('KeeperRuntimeAlertStrip', () => {
     const text = container.textContent ?? ''
     // Verdict failure is surfaced under a single "검증" label.
     expect(text).toContain('검증')
-    expect(text).toContain('timeout_budget_exhausted')
+    expect(text).toContain('runtime_blocked')
+    expect(text).not.toContain('timeout_budget_exhausted')
     // The tool contract success is preserved but tagged as scope
     // evidence ("도구 계약"), not as a sibling "증명" claim that would
     // read as the surface contradicting itself.
@@ -97,9 +98,10 @@ describe('KeeperRuntimeAlertStrip', () => {
     }))
 
     const text = container.textContent ?? ''
-    // Per-turn stop cause is still rendered.
+    // Per-turn stop cause is rendered through the canonical terminal code.
     expect(text).toContain('정지 원인')
-    expect(text).toContain('oas_timeout_budget')
+    expect(text).toContain('turn_timeout')
+    expect(text).not.toContain('oas_timeout_budget')
     // Per-attempt success is gated out so the strip no longer shows
     // "런타임 레인 · completed" next to "정지 원인 · oas_timeout_budget".
     expect(text).not.toContain('런타임 레인')
@@ -146,7 +148,9 @@ describe('KeeperRuntimeAlertStrip', () => {
 
     expect(container.textContent).toContain('일시정지')
     expect(container.textContent).toContain('일시정지 원인')
-    expect(container.textContent).toContain('OAS budget timeout fired before the keeper hard timeout.')
+    expect(container.textContent).toContain('턴 응답 만료')
+    expect(container.textContent).toContain('턴 실행 시간이 제한 시간을 초과했습니다.')
+    expect(container.textContent).not.toContain('OAS budget timeout fired before the keeper hard timeout.')
     expect(container.textContent).toContain('원인 확인 후 재개')
     expect(container.textContent).not.toContain('런타임 차단')
     expect(container.textContent).not.toContain('주의 사유 · paused')

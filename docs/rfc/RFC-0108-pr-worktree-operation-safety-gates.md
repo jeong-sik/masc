@@ -1,7 +1,7 @@
 ---
 rfc: "0108"
 title: "PR / Worktree Operation Safety Gates"
-status: Draft
+status: Implemented
 created: 2026-05-17
 updated: 2026-05-17
 author: vincent

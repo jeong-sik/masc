@@ -3,7 +3,7 @@ rfc: RFC-0052
 title: Boot-time Required Invariants (typed)
 author: jeong-sik
 created: 2026-05-09
-status: Draft
+status: Implemented
 supersedes: -
 related:
   - RFC-0001 (det/nondet boundary harness — Eio env initialization)

@@ -1,7 +1,7 @@
 ---
 rfc: "0120"
 title: "Cross-spec set-name divergence — 3-class classification framework (STALE / DELIBERATE / NAME COLLISION)"
-status: Draft
+status: Implemented
 created: 2026-05-17
 updated: 2026-05-17
 author: vincent

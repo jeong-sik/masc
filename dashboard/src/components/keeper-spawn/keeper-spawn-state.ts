@@ -3,7 +3,7 @@ import { callMcpTool } from '../../api/mcp'
 import { asBoolean, asString, asStringArray, extractArray, isRecord } from '../common/normalize'
 import { showToast } from '../common/toast'
 import { createAsyncResource, getData } from '../../lib/async-state'
-import { shellAuthSummary } from '../../store'
+import { refreshExecution, shellAuthSummary } from '../../store'
 import { dashboardAuthAccess } from '../../lib/dashboard-auth-access'
 
 export interface PersonaSummary {
@@ -217,7 +217,10 @@ export async function spawnKeeperFromPersona(personaName: string, opts?: { dryRu
     if (opts?.dryRun) args.dry_run = true
     const result = await callMcpTool('masc_keeper_create_from_persona', args)
     spawnResult.value = { success: true, message: result }
-    if (!opts?.dryRun) showToast(`${personaName} 키퍼 생성 완료`, 'success')
+    if (!opts?.dryRun) {
+      showToast(`${personaName} 키퍼 생성 완료`, 'success')
+      void refreshExecution({ force: true })
+    }
   } catch (err) {
     const message = formatKeeperSpawnError(err instanceof Error ? err.message : String(err))
     spawnResult.value = { success: false, message }

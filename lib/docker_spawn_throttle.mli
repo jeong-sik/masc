@@ -33,12 +33,3 @@ val with_slot : (unit -> 'a) -> 'a
 
     Exceptions from [f] propagate; the slot is always released. *)
 
-val effective_concurrency : unit -> int
-(** [effective_concurrency ()] reports the current cap.
-    Returns [1] while [Keeper_fd_pressure.active ()] is true (degraded
-    serialization), the configured maximum otherwise. Observability
-    only — not a synchronization primitive. *)
-
-val configured_max : unit -> int
-(** [configured_max ()] reports the configured upper bound (post-env
-    resolution), independent of degraded state. *)

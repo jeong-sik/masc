@@ -406,6 +406,35 @@ let test_path_policy_rejects () =
       (Gate.verdict_tag other)
 ;;
 
+let test_path_policy_rejects_redirect_target () =
+  (* File redirect targets are structural Shell IR surfaces. A caller
+     path policy must see the target before the generic caller-level
+     redirect deny collapses it to Redirect_disallowed_in_caller. *)
+  let classify ~raw_path =
+    if raw_path = "/tmp/out" then `Deny "redirect target not allowed"
+    else `Allow
+  in
+  let policy = { Gate.classify = Some classify } in
+  match
+    Gate.gate
+      ~raw:"ls > /tmp/out"
+      ~allowlist
+      ~path_policy:policy
+      ~sandbox:Gate.host_sandbox
+      ()
+  with
+  | Gate.Reject
+      { reason =
+          Gate.Path_outside_policy
+            { stage = 1; raw_path = "/tmp/out"; diagnostic = "redirect target not allowed" }
+      ; _
+      } -> ()
+  | other ->
+    Alcotest.failf
+      "expected redirect target Path_outside_policy reject, got %s"
+      (Gate.verdict_tag other)
+;;
+
 let test_sandbox_target_propagates_to_every_stage () =
   (* Plan: sandbox context is echoed through the IR so downstream
      dispatch does not re-parse. Verify every stage carries the
@@ -581,6 +610,10 @@ let () =
             "sandbox target propagates to every stage"
             `Quick
             test_sandbox_target_propagates_to_every_stage
+        ; Alcotest.test_case
+            "path policy sees file redirect target"
+            `Quick
+            test_path_policy_rejects_redirect_target
         ] )
     ; ( "phase_1_telemetry"
       , [ Alcotest.test_case

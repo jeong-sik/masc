@@ -1306,7 +1306,7 @@ let test_runtime_trace_lens_summarizes_tool_axis () =
       in
       Alcotest.(check (list string))
         "lens gap codes"
-        [ "required_tool_not_materialized"; "context_delta_missing" ]
+        [ "lane_mandatory_event_missing"; "required_tool_not_materialized"; "context_delta_missing" ]
         gaps)
 
 let test_runtime_trace_lens_surfaces_docker_github_sandbox_proof () =
@@ -1896,6 +1896,10 @@ let test_runtime_trace_lens_surfaces_clock_integrity_gaps () =
            ~trace_id ~keeper_turn_id ~event:M.Provider_attempt_started
            ~status:"started" ());
       append_manifest_or_fail config
+        (M.make ~ts:"2026-05-13T00:00:01.500Z" ~keeper_name
+           ~trace_id ~keeper_turn_id ~event:M.Tool_lineage_recorded
+           ~status:"recorded" ());
+      append_manifest_or_fail config
         (M.make ~ts:"2026-05-13T00:00:02Z" ~keeper_name
            ~trace_id ~keeper_turn_id ~event:M.Event_bus_correlated
            ~status:"observed"
@@ -1936,6 +1940,7 @@ let test_runtime_trace_lens_surfaces_clock_integrity_gaps () =
           "clock_context_injection_missing";
           "clock_event_bus_uncorrelated";
           "clock_checkpoint_without_context";
+          "lane_mandatory_event_missing";
         ])
 
 let test_runtime_trace_lens_surfaces_clock_group_gaps () =

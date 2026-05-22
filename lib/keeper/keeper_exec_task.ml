@@ -1,11 +1,23 @@
 open Keeper_types
 open Keeper_exec_shared
 
-let keeper_task_result_json = function
-  | Ok msg -> Yojson.Safe.to_string (`Assoc [ "ok", `Bool true; "result", `String msg ])
+let keeper_task_result_json ?(typed_outcome = (None : Keeper_tool_outcome.t option)) result =
+  match result with
+  | Ok msg ->
+    let typed_fields =
+      match typed_outcome with
+      | Some t -> [ "typed_outcome", Keeper_tool_outcome.to_json t ]
+      | None -> []
+    in
+    Yojson.Safe.to_string (`Assoc ([ "ok", `Bool true; "result", `String msg ] @ typed_fields))
   | Error e ->
+    let typed_fields =
+      match typed_outcome with
+      | Some t -> [ "typed_outcome", Keeper_tool_outcome.to_json t ]
+      | None -> []
+    in
     Yojson.Safe.to_string
-      (`Assoc [ "ok", `Bool false; "error", `String (Masc_domain.masc_error_to_string e) ])
+      (`Assoc ([ "ok", `Bool false; "error", `String (Masc_domain.masc_error_to_string e) ] @ typed_fields))
 ;;
 
 let workflow_rejection_error_json message =
@@ -14,7 +26,7 @@ let workflow_rejection_error_json message =
     message
 ;;
 
-let keeper_tool_result_json ~failure_class ~(ok : bool) ~(message : string) =
+let keeper_tool_result_json ?(typed_outcome = (None : Keeper_tool_outcome.t option)) ~failure_class ~(ok : bool) ~(message : string) () =
   let failure_class_fields =
     match failure_class with
     | Some cls when not ok ->
@@ -26,13 +38,19 @@ let keeper_tool_result_json ~failure_class ~(ok : bool) ~(message : string) =
     | None ->
       []
   in
+  let typed_outcome_fields =
+    match typed_outcome with
+    | Some outcome -> [ "typed_outcome", Keeper_tool_outcome.to_json outcome ]
+    | None -> []
+  in
   Yojson.Safe.to_string
     (`Assoc
        ([
          "ok", `Bool ok;
          ((if ok then "result" else "error"), `String message);
        ]
-        @ failure_class_fields))
+        @ failure_class_fields
+        @ typed_outcome_fields))
 ;;
 
 let validate_goal_id config goal_id =
@@ -351,8 +369,16 @@ let handle_keeper_task_tool
           (List.length orphans)
     in
     Yojson.Safe.to_string
-      (`Assoc [ "orphan_count", `Int (List.length orphans); "orphans", `List items;
-                "action", `String action_hint ])
+      (`Assoc
+         [ "orphan_count", `Int (List.length orphans)
+         ; "orphans", `List items
+         ; "action", `String action_hint
+         ; ( "typed_outcome"
+           , Keeper_tool_outcome.to_json
+               (if orphans = []
+                then Keeper_tool_outcome.No_progress { reason = No_work_available }
+                else Keeper_tool_outcome.Progress) )
+         ])
   | "keeper_task_force_release" ->
     let task_id = Safe_ops.json_string ~default:"" "task_id" args |> String.trim in
     let reason = Safe_ops.json_string ~default:"" "reason" args |> String.trim in
@@ -383,6 +409,7 @@ let handle_keeper_task_tool
                reason)
       in
       keeper_task_result_json
+        ~typed_outcome:(Some Keeper_tool_outcome.Progress)
         (Coord.force_release_task_r config ~agent_name:agent ~task_id ()))
   | "keeper_task_force_done" ->
     let task_id = Safe_ops.json_string ~default:"" "task_id" args |> String.trim in
@@ -403,6 +430,7 @@ let handle_keeper_task_tool
          Example: notes='PR #12345 merged, all tests green'."
     else
       keeper_task_result_json
+        ~typed_outcome:(Some Keeper_tool_outcome.Progress)
         (Coord.force_done_task_r
            config
            ~agent_name:(keeper_agent_sender ~meta)
@@ -417,7 +445,12 @@ let handle_keeper_task_tool
       let _ =
         Coord.broadcast config ~from_agent:(keeper_agent_sender ~meta) ~content:message
       in
-      Yojson.Safe.to_string (`Assoc [ "ok", `Bool true; "broadcast", `String message ]))
+      Yojson.Safe.to_string
+        (`Assoc
+           [ "ok", `Bool true
+           ; "broadcast", `String message
+           ; "typed_outcome", Keeper_tool_outcome.to_json Keeper_tool_outcome.Progress
+           ]))
   | "keeper_task_create" ->
     let title = Safe_ops.json_string ~default:"" "title" args |> String.trim in
     let description = Safe_ops.json_string ~default:"" "description" args |> String.trim in
@@ -456,6 +489,8 @@ let handle_keeper_task_tool
                     "ok", `Bool true;
                     "result", `String result;
                     "goal_id", Json_util.string_opt_to_json goal_id;
+                    ( "typed_outcome"
+                    , Keeper_tool_outcome.to_json Keeper_tool_outcome.Progress );
                   ]))))
   | "keeper_task_claim" ->
     let agent_tool_names = Keeper_tool_policy.keeper_allowed_tool_names meta in
@@ -709,9 +744,14 @@ let handle_keeper_task_tool
           (`Assoc args_for_transition)
       in
       keeper_tool_result_json
+        ~typed_outcome:
+          (if transition_result.Tool_result.success
+           then Some Keeper_tool_outcome.Progress
+           else None)
         ~failure_class:(Tool_result.failure_class transition_result)
         ~ok:transition_result.Tool_result.success
-        ~message:transition_result.Tool_result.legacy_message)
+        ~message:transition_result.Tool_result.legacy_message
+        ())
   | "keeper_task_submit_for_verification" ->
     let task_id = Safe_ops.json_string ~default:"" "task_id" args |> String.trim in
     let notes = Safe_ops.json_string ~default:"" "notes" args |> String.trim in
@@ -763,8 +803,13 @@ let handle_keeper_task_tool
              ])
       in
       keeper_tool_result_json
+        ~typed_outcome:
+          (if transition_result.Tool_result.success
+           then Some Keeper_tool_outcome.Progress
+           else None)
         ~failure_class:(Tool_result.failure_class transition_result)
         ~ok:transition_result.Tool_result.success
-        ~message:transition_result.Tool_result.legacy_message)
+        ~message:transition_result.Tool_result.legacy_message
+        ())
   | other -> error_json ~fields:[ "tool", `String other ] "unknown_task_tool"
 ;;

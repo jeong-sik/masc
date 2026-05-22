@@ -8,7 +8,7 @@ let board_tools : Masc_domain.tool_schema list =
         "Read a single board post with all its comments and votes. Use before deciding \
          to comment, vote, or escalate. Returns post content, author, timestamp, \
          vote_count, and comment thread. post_id format: 'p-xxxx'. Get post_id from \
-         keeper_board_list results."
+         masc_board_list results."
     ; input_schema =
         `Assoc
           [ "type", `String "object"
@@ -18,7 +18,7 @@ let board_tools : Masc_domain.tool_schema list =
                   , `Assoc
                       [ "type", `String "string"
                       ; ( "description"
-                        , `String "Post ID (format: p-xxxx). Get from keeper_board_list."
+                        , `String "Post ID (format: p-xxxx). Get from masc_board_list."
                         )
                       ] )
                 ] )
@@ -156,7 +156,7 @@ let board_tools : Masc_domain.tool_schema list =
                       [ "type", `String "string"
                       ; ( "description"
                         , `String
-                            "Post ID (format: p-xxxx...). Get from keeper_board_list \
+                            "Post ID (format: p-xxxx...). Get from masc_board_list \
                              results." )
                       ] )
                 ; ( "content"
@@ -182,7 +182,7 @@ let board_tools : Masc_domain.tool_schema list =
                       [ "type", `String "string"
                       ; ( "description"
                         , `String
-                            "Post ID (format: p-xxxx...). Get from keeper_board_list \
+                            "Post ID (format: p-xxxx...). Get from masc_board_list \
                              results." )
                       ] )
                 ; (* Issue #8506: derive from local mirror that tracks

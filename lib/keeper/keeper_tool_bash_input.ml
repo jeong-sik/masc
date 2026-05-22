@@ -72,7 +72,7 @@ let reject_unknown_fields ~path ~allowed fields =
   let allowed key = List.exists (String.equal key) allowed in
   match List.find_opt (fun (key, _) -> not (allowed key)) fields with
   | None -> Ok ()
-  | Some (key, _) -> result_errorf "%s.%s is not a supported typed keeper_bash field" path key
+  | Some (key, _) -> result_errorf "%s.%s is not a supported typed Bash field" path key
 ;;
 
 let required_string ~path fields key =
@@ -177,7 +177,7 @@ let of_json (json : Yojson.Safe.t) =
     if Option.is_some (member fields "cmd")
     then
       Error
-        "cmd string is not a typed keeper_bash input; provide \
+        "cmd string is not a typed Bash input; provide \
          executable/argv or pipeline stages"
     else Ok ()
   in

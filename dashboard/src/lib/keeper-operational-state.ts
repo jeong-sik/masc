@@ -319,6 +319,31 @@ export function compositeIsTurnIdle(snapshot: { turn_phase: string }): boolean {
   return snapshot.turn_phase === 'idle'
 }
 
+/** Composite snapshot has entered the post-cascade-exhaustion failure
+ *  mode: KSM has folded to `failing` AND the cascade lane reports
+ *  `exhausted` (no provider path left). Two sites in
+ *  `fsm-hub-invariant-analysis` (`nextExpectedStep` /
+ *  `deriveOperationalInsight`) need this exact conjunction; an SSOT
+ *  prevents the predicate from drifting when either enum evolves.
+ *  Phase wire format stays lowercase per the open-string composite
+ *  schema. */
+export function isFailingAfterCascadeExhausted(
+  snapshot: { phase: string; cascade: { state: string } },
+): boolean {
+  return snapshot.phase === 'failing' && snapshot.cascade.state === 'exhausted'
+}
+
+/** Composite compaction is owning the current turn — either the KSM
+ *  phase has folded to `compacting` or the KMC lane stage is active.
+ *  Two sites in `fsm-hub-invariant-analysis` need the same disjunction;
+ *  SSOT here so the cross-axis OR stays consistent. Phase wire format
+ *  stays lowercase per the open-string composite schema. */
+export function isCompactionActive(
+  snapshot: { phase: string; compaction: { stage: string } },
+): boolean {
+  return snapshot.phase === 'compacting' || snapshot.compaction.stage === 'compacting'
+}
+
 // RFC-0135 PR-14c — display reason SSOT (Goal-2c typed-state expansion).
 //
 // `keeper-detail-runtime.ts:257-264` inlined a 3-way fallback for the

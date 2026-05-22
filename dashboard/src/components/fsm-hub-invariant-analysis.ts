@@ -11,6 +11,10 @@ import {
   fmtDuration,
 } from './fsm-hub-types'
 import { deriveObservedLaneSummaries } from './fsm-hub-lane-analysis'
+import {
+  isFailingAfterCascadeExhausted,
+  isCompactionActive,
+} from '../lib/keeper-operational-state'
 
 function brokenInvariantKey(
   invariants: KeeperCompositeInvariants,
@@ -71,13 +75,13 @@ function nextExpectedStep(snapshot: KeeperCompositeSnapshot): string {
   if (snapshot.collapsed_from) {
     return `lifecycle 가 raw phase ${snapshot.collapsed_from} 에서 carrier phase 로 collapse 됨; 다음 meaningful edge 가 turn activity 재개 전에 그 underlying condition 을 clear 해야 함.`
   }
-  if (snapshot.phase === 'failing' && snapshot.cascade.state === 'exhausted') {
+  if (isFailingAfterCascadeExhausted(snapshot)) {
     return '정상 provider path 또는 명시적 recovery clearance 가 failing 을 해제해야 running 재개 가능.'
   }
   if (snapshot.phase === 'overflowed') {
     return 'context overflow 은 compaction 또는 명시적 operator clearance 로 해소되어야 lifecycle 이 정착 가능.'
   }
-  if (snapshot.phase === 'compacting' || snapshot.compaction.stage === 'compacting') {
+  if (isCompactionActive(snapshot)) {
     return 'KMC 가 done 에 도달한 뒤 KSM 이 running 으로 control 을 반환해야 함.'
   }
   if (snapshot.phase === 'handing_off') {
@@ -133,7 +137,7 @@ export function deriveOperationalInsight(
 
   const lanes = precomputedLanes ?? deriveObservedLaneSummaries(snapshot, observations, now)
   const stalledLane = lanes.find(lane => lane.stalled)
-  if (snapshot.phase === 'failing' && snapshot.cascade.state === 'exhausted') {
+  if (isFailingAfterCascadeExhausted(snapshot)) {
     return {
       tone: 'error',
       headline: 'cascade exhaustion 후 실패',
@@ -171,7 +175,7 @@ export function deriveOperationalInsight(
       ],
     }
   }
-  if (snapshot.phase === 'compacting' || snapshot.compaction.stage === 'compacting') {
+  if (isCompactionActive(snapshot)) {
     return {
       tone: 'info',
       headline: 'Compaction 가 현재 턴 소유',

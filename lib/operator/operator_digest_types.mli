@@ -41,8 +41,6 @@ type recommended_action = {
 (** {1 Thresholds and ranking} *)
 
 val stalled_session_threshold_sec : float
-val planned_worker_turn_grace_sec : float
-val room_digest_session_limit : int
 
 (** [Sev_critical → 3], [Sev_bad → 2], [Sev_warn → 1]. Used for
     descending-severity comparators. *)

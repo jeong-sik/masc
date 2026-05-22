@@ -168,7 +168,9 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
                 Some (Turn_timeout { elapsed_sec = v })
               | _ -> None)
           | _ -> None)
-      | Some (`String "oas_timeout_budget") -> (
+      | Some (`String kind)
+        when String.equal kind "provider_timeout"
+             || String.equal kind "oas_timeout_budget" -> (
           match json with
           | `Assoc fields -> (
               match
@@ -182,7 +184,7 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
                 Some (`Int estimated_input_tokens),
                 Some (`String source) ->
                   Some
-                    (Oas_timeout_budget
+                    (Provider_timeout
                        {
                          budget_sec;
                          keeper_turn_timeout_sec;
@@ -292,4 +294,3 @@ let classify_masc_internal_error (err : Agent_sdk.Error.sdk_error) :
             (String.length msg - String.length masc_internal_error_prefix)))
      with Yojson.Json_error _ -> None)
   | _ -> None
-

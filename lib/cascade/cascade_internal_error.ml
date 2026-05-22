@@ -77,7 +77,7 @@ type masc_internal_error =
   | Turn_timeout of {
       elapsed_sec : float;
     }
-  | Oas_timeout_budget of {
+  | Provider_timeout of {
       budget_sec : float;
       keeper_turn_timeout_sec : float;
       estimated_input_tokens : int;
@@ -230,7 +230,7 @@ let masc_internal_error_to_json = function
         ("kind", `String "turn_timeout");
         ("elapsed_sec", `Float elapsed_sec);
       ]
-  | Oas_timeout_budget
+  | Provider_timeout
       {
         budget_sec;
         keeper_turn_timeout_sec;
@@ -332,7 +332,7 @@ let summary_of_masc_internal_error = function
            (List.length provider_rejections)
            (summarize_provider_rejections provider_rejections)
            (List.length configured_labels))
-  | Oas_timeout_budget
+  | Provider_timeout
       {
         budget_sec;
         keeper_turn_timeout_sec;
@@ -349,7 +349,7 @@ let summary_of_masc_internal_error = function
       in
       Some
         (Printf.sprintf
-           "OAS timeout budget exhausted; phase=%s; source=%s; budget=%.1fs; remaining=%s; min_required=%.1fs; estimated_input_tokens=%d; keeper_turn_timeout=%.1fs"
+           "Provider timeout exhausted; phase=%s; source=%s; budget=%.1fs; remaining=%s; min_required=%.1fs; estimated_input_tokens=%d; keeper_turn_timeout=%.1fs"
            phase source budget_sec remaining min_required_sec
            estimated_input_tokens keeper_turn_timeout_sec)
   | Max_tokens_ceiling_violation
@@ -417,7 +417,7 @@ let kind_of_masc_internal_error = function
   | Admission_queue_timeout _ -> "admission_queue_timeout"
   | Admission_queue_rejected _ -> "admission_queue_rejected"
   | Turn_timeout _ -> "turn_timeout"
-  | Oas_timeout_budget _ -> "provider_timeout"
+  | Provider_timeout _ -> "provider_timeout"
   | Max_tokens_ceiling_violation _ -> "max_tokens_ceiling_violation"
   | Ambiguous_post_commit _ -> "ambiguous_post_commit"
   | Internal_unhandled_exception _ -> "internal_unhandled_exception"
@@ -440,7 +440,7 @@ let cascade_name_of_masc_internal_error = function
   | Accept_rejected _
   | Admission_queue_rejected _
   | Turn_timeout _
-  | Oas_timeout_budget _
+  | Provider_timeout _
   | Ambiguous_post_commit _
   | Internal_unhandled_exception _
   | Internal_bridge_exception _

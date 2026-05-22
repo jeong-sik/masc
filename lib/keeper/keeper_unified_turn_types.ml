@@ -146,7 +146,7 @@ let cascade_exhausted_failure_reason_of_raw_error ~detail raw_error =
       | Cascade_error_classify.Admission_queue_timeout _
       | Cascade_error_classify.Admission_queue_rejected _
       | Cascade_error_classify.Turn_timeout _
-      | Cascade_error_classify.Oas_timeout_budget _
+      | Cascade_error_classify.Provider_timeout _
       | Cascade_error_classify.Max_tokens_ceiling_violation _
       | Cascade_error_classify.Ambiguous_post_commit _
       (* RFC-0159 Phase A: typed [Internal_*] variants are not
@@ -203,7 +203,7 @@ let registry_failure_reason_of_terminal_reason
   | Keeper_turn_disposition.Success
   | Keeper_turn_disposition.External_cancel
   | Keeper_turn_disposition.Turn_wall_clock_timeout
-  | Keeper_turn_disposition.Oas_timeout_budget
+  | Keeper_turn_disposition.Provider_timeout
   | Keeper_turn_disposition.Gh_repo_context_missing_worktree
   | Keeper_turn_disposition.Post_commit_ambiguous
   | Keeper_turn_disposition.Unknown _ -> None

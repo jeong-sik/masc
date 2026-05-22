@@ -64,7 +64,7 @@ type masc_internal_error =
       reason : string;
     }
   | Turn_timeout of { elapsed_sec : float }
-  | Oas_timeout_budget of {
+  | Provider_timeout of {
       budget_sec : float;
       keeper_turn_timeout_sec : float;
       estimated_input_tokens : int;

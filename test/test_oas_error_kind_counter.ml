@@ -32,7 +32,7 @@ let test_provider_timeout_kind () =
   let before = counter_for kind in
   let _ =
     OWN.sdk_error_of_masc_internal_error
-      (OWN.Oas_timeout_budget
+      (OWN.Provider_timeout
          {
            budget_sec = 423.8;
            keeper_turn_timeout_sec = 1200.0;

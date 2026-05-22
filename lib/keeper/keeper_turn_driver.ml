@@ -125,36 +125,20 @@ let run_named
     || keeper_internal_tools_require_materialized_runtime_surface
          ~keeper_name tools
   in
-  let ( configured_labels_result,
-        candidate_cfgs_result,
-        tiered_providers_result,
-        secondary_resolver ) =
-    let named_resolution =
-      Cascade_catalog_runtime
-      .resolve_named_providers_strict_with_secondary_resolver
-        ~sw ~net ?provider_filter ~cascade_name ()
-    in
-    let candidate_cfgs_result =
-      match named_resolution with
-      | Ok resolution -> Ok resolution.providers
-      | Error detail -> Error detail
-    in
-    let tiered_providers_result =
-      match named_resolution with
-      | Ok resolution -> Ok resolution.tiered_providers
-      | Error detail -> Error detail
-    in
-    let secondary_resolver =
-      match named_resolution with
-      | Ok resolution -> Some resolution.secondary_resolver
-      | Error _ -> None
-    in
-    ( Cascade_runtime.models_of_cascade_name_result runtime_cascade_name,
-      candidate_cfgs_result,
-      tiered_providers_result,
-      secondary_resolver )
+  let named_resolution =
+    Keeper_turn_driver_named_resolution.resolve
+      ~sw
+      ~net
+      ?provider_filter
+      ~cascade_name
+      ~runtime_cascade_name
+      ()
   in
-  (match configured_labels_result, candidate_cfgs_result, tiered_providers_result with
+  (match
+     ( named_resolution.configured_labels_result,
+       named_resolution.candidate_cfgs_result,
+       named_resolution.tiered_providers_result )
+   with
    | Error detail, _, _ | _, Error detail, _ | _, _, Error detail ->
        Log.Misc.error "cascade %s: %s" cascade_name detail;
        Error (cascade_catalog_error_to_sdk_error detail)
@@ -170,7 +154,7 @@ let run_named
       ~tools
       ~require_tool_choice_support
       ~require_tool_support
-      ?secondary_resolver
+      ?secondary_resolver:named_resolution.secondary_resolver
       ~label:cascade_name
       candidate_cfgs
   in

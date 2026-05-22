@@ -31,22 +31,14 @@ let process_status_to_string = function
   | Unix.WSIGNALED signal -> Printf.sprintf "signal %d" signal
   | Unix.WSTOPPED signal -> Printf.sprintf "stopped %d" signal
 
-let read_all ic =
-  let buf = Buffer.create 256 in
-  (try
-     while true do
-       Buffer.add_string buf (input_line ic);
-       Buffer.add_char buf '\n'
-     done
-   with
-   | End_of_file -> ());
-  Buffer.contents buf
-
 let run_git_exn repo args =
   let argv = Array.of_list ("git" :: "-C" :: repo :: args) in
-  let ic = Unix.open_process_args_in "git" argv in
-  let output = read_all ic in
-  match Unix.close_process_in ic with
+  let buf, status =
+    Lib.With_process.with_process_args_in "git" argv
+      Lib.With_process.drain_to_buffer
+  in
+  let output = Buffer.contents buf in
+  match status with
   | Unix.WEXITED 0 -> String.trim output
   | status ->
     Alcotest.failf

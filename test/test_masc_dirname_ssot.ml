@@ -50,9 +50,10 @@ let rg_matching_files ~pattern ~paths =
       @ paths
       @ [ "--glob"; "*.ml"; "--glob"; "*.mli" ])
   in
-  let ic = Unix.open_process_args_in "rg" argv in
-  let lines = drain ic in
-  let _ = Unix.close_process_in ic in
+  let lines, _status =
+    Masc_mcp.With_process.with_process_args_in "rg" argv
+      Masc_mcp.With_process.drain_lines
+  in
   lines
 
 (* Heuristic: skip occurrences whose line is clearly inside an OCaml

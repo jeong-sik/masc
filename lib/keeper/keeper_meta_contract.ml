@@ -220,13 +220,16 @@ let cascade_exhaustion_summary = function
   | Dns_failure ->
     "Cascade exhausted; hostname resolution failed (DNS)."
   | No_providers_available -> "Cascade exhausted; no providers were available."
-  | All_providers_failed -> "Cascade exhausted after all configured providers failed."
-  | Candidates_filtered_after_cycles -> "Cascade exhausted after provider failures."
+  | All_providers_failed ->
+    "Cascade exhausted after all configured providers failed; inspect per-attempt root causes."
+  | Candidates_filtered_after_cycles ->
+    "Cascade exhausted after provider candidates were filtered; inspect candidate filter reasons."
   | Max_turns_exceeded ->
     "Cascade exhausted after a provider hit its per-call turn budget."
   | Structural_attempt_timeout _ ->
     "Cascade exhausted after the per-OAS-call ceiling (max_execution_time_s) fired."
-  | Other_detail _ -> "Cascade exhausted after provider failures."
+  | Other_detail _ ->
+    "Cascade exhausted; inspect cascade attempts for the dominant root cause."
 ;;
 
 let blocker_class_continue_gate = function

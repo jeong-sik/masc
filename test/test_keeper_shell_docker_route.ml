@@ -132,6 +132,12 @@ let run_process_ok ~cwd prog argv =
 let git_ok ~cwd args =
   run_process_ok ~cwd "git" (Array.of_list ("git" :: args))
 
+let docker_image_available image =
+  let cmd =
+    Printf.sprintf "docker image inspect %s > /dev/null 2>&1" (Filename.quote image)
+  in
+  Sys.command cmd = 0
+
 let clear_checkout_but_keep_git_dir root =
   Sys.readdir root
   |> Array.iter (fun name ->
@@ -620,6 +626,100 @@ let test_turn_sandbox_file_write_uses_host_bind_mount () =
   Alcotest.(check string) "content written via bind-mounted host path"
     "alpha\nbeta\n"
     (Fs_compat.load_file target)
+
+let keeper_bash_typed_pipeline_args ~cwd =
+  `Assoc
+    [
+      ( "pipeline",
+        `List
+          [
+            `Assoc
+              [
+                ("executable", `String "printf");
+                ("argv", `List [ `String "typed" ]);
+              ];
+            `Assoc
+              [
+                ("executable", `String "wc");
+                ("argv", `List [ `String "-c" ]);
+              ];
+          ] );
+      ("cwd", `String cwd);
+      ("timeout_sec", `Float 5.0);
+    ]
+
+let check_typed_pipeline_response raw =
+  (match parse_bool_field raw "ok" with
+   | Some true -> ()
+   | Some false -> Alcotest.failf "typed pipeline succeeds: got false in %s" raw
+   | None -> Alcotest.failf "typed pipeline succeeds: missing ok in %s" raw);
+  Alcotest.(check (option bool)) "typed response" (Some true)
+    (parse_bool_field raw "typed");
+  Alcotest.(check int) "typed pipeline exit status" 0
+    (parse_status_exit_code raw);
+  Alcotest.(check bool) "pipeline output propagated" true
+    (response_mentions raw "output" "5")
+
+let test_bash_typed_pipeline_falls_back_to_local_playground () =
+  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "missing:test" @@ fun () ->
+  setup ~sandbox:Keeper_types.Docker
+  @@ fun ~config ~meta ~playground ->
+  let raw =
+    Keeper_exec_shell.handle_keeper_bash
+      ~turn_sandbox_factory:None
+      ~turn_sandbox_factory_git:None
+      ~exec_cache:None
+      ~config
+      ~meta
+      ~args:(keeper_bash_typed_pipeline_args ~cwd:playground)
+      ()
+  in
+  check_typed_pipeline_response raw;
+  Alcotest.(check (option string)) "requested docker" (Some "docker")
+    (parse_string_field raw "requested_sandbox");
+  Alcotest.(check (option string)) "fallback local playground"
+    (Some "local_playground")
+    (parse_string_field raw "sandbox_fallback")
+
+let test_bash_typed_pipeline_uses_local_shell_ir_dispatch () =
+  setup ~sandbox:Keeper_types.Local
+  @@ fun ~config ~meta ~playground ->
+  Keeper_exec_shell.handle_keeper_bash
+    ~turn_sandbox_factory:None
+    ~turn_sandbox_factory_git:None
+    ~exec_cache:None
+    ~config
+    ~meta
+    ~args:(keeper_bash_typed_pipeline_args ~cwd:playground)
+    ()
+  |> check_typed_pipeline_response
+
+let test_bash_typed_pipeline_uses_turn_sandbox_docker_runner () =
+  let image = "masc-keeper-sandbox:local" in
+  if not (docker_image_available image)
+  then Alcotest.skip ()
+  else
+    with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" image
+    @@ fun () ->
+    setup ~sandbox:Keeper_types.Docker
+    @@ fun ~config ~meta ~playground ->
+    let factory = Keeper_sandbox_factory.create ~config ~meta () in
+    Fun.protect
+      ~finally:(fun () -> Keeper_sandbox_factory.cleanup factory)
+    @@ fun () ->
+    let raw =
+      Keeper_exec_shell.handle_keeper_bash
+        ~turn_sandbox_factory:(Some factory)
+        ~turn_sandbox_factory_git:None
+        ~exec_cache:None
+        ~config
+        ~meta
+        ~args:(keeper_bash_typed_pipeline_args ~cwd:playground)
+        ()
+    in
+    check_typed_pipeline_response raw;
+    Alcotest.(check (option string)) "no local fallback when docker works" None
+      (parse_string_field raw "sandbox_fallback")
 
 let test_bash_routes_through_docker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "" @@ fun () ->
@@ -1138,7 +1238,7 @@ let test_docker_shell_missing_image_fails_before_run () =
     Alcotest.(check bool) "docker run skipped" false
       (contains_substring log "\nrun ")
 
-let test_bash_missing_image_is_policy_rejection () =
+let test_bash_missing_image_falls_back_to_local_playground () =
   with_fake_docker fake_docker_missing_image_script @@ fun () ->
   setup ~sandbox:Keeper_types.Docker
   @@ fun ~config ~meta ~playground ->
@@ -1156,14 +1256,15 @@ let test_bash_missing_image_is_policy_rejection () =
       ~exec_cache:None
       ~config
       ~meta
-      ~args:(`Assoc [ ("cmd", `String "pwd"); ("cwd", `String playground) ])
+      ~args:(keeper_bash_typed_pipeline_args ~cwd:playground)
       ()
   in
-  Alcotest.(check bool) "error mentions sandbox image" true
-    (response_mentions raw "error" "sandbox_image_missing");
-  Alcotest.(check (option string)) "missing image is operator policy blocker"
-    (Some "policy_rejection")
-    (parse_string_field raw "failure_class");
+  check_typed_pipeline_response raw;
+  Alcotest.(check (option string)) "requested docker" (Some "docker")
+    (parse_string_field raw "requested_sandbox");
+  Alcotest.(check (option string)) "fallback local playground"
+    (Some "local_playground")
+    (parse_string_field raw "sandbox_fallback");
   let log = read_file log_path in
   Alcotest.(check bool) "image inspect attempted" true
     (contains_substring log "image inspect missing:test");
@@ -2048,6 +2149,15 @@ let () =
             "turn sandbox file writes use bind-mounted host path"
             `Quick test_turn_sandbox_file_write_uses_host_bind_mount;
           Alcotest.test_case
+            "keeper_bash typed pipeline uses local shell ir dispatch"
+            `Quick test_bash_typed_pipeline_uses_local_shell_ir_dispatch;
+          Alcotest.test_case
+            "keeper_bash typed pipeline falls back to local playground"
+            `Quick test_bash_typed_pipeline_falls_back_to_local_playground;
+          Alcotest.test_case
+            "keeper_bash typed pipeline uses turn sandbox docker runner"
+            `Quick test_bash_typed_pipeline_uses_turn_sandbox_docker_runner;
+          Alcotest.test_case
             "git-creds skips missing SSH_AUTH_SOCK"
             `Quick test_git_creds_skips_missing_ssh_auth_sock;
           Alcotest.test_case
@@ -2058,8 +2168,8 @@ let () =
             `Quick test_docker_shell_mounts_masc_config_runtime_paths;
           Alcotest.test_case "docker shell missing image fails before run" `Quick
             test_docker_shell_missing_image_fails_before_run;
-          Alcotest.test_case "keeper_bash missing image is policy rejection" `Quick
-            test_bash_missing_image_is_policy_rejection;
+          Alcotest.test_case "keeper_bash missing image falls back locally" `Quick
+            test_bash_missing_image_falls_back_to_local_playground;
           Alcotest.test_case
             "missing playground bind source blocks before docker"
             `Quick test_bash_missing_playground_blocks_before_docker;

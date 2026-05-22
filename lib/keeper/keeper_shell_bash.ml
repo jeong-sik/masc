@@ -205,7 +205,7 @@ let handle_keeper_bash_typed
                    (fun () -> Some (Exec_core.snapshot_env ~cwd))
                in
                let t0 = Unix.gettimeofday () in
-               let result = Masc_exec.Exec_dispatch.dispatch ir in
+               let result = Masc_exec.Exec_dispatch.dispatch_decided (Shell_ir_risk.classify (Shell_ir_risk.undecided ir)) in
                let elapsed_ms =
                  elapsed_duration_ms
                    ~start_time:t0

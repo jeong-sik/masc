@@ -149,7 +149,7 @@ let record_cascade_backpressure_observation ~base_path ~keeper_name ~reason =
 ;;
 
 let oas_timeout_budget_observation_reasons =
-  [ "provider_runtime_error"; "oas_timeout_budget"; "keeper_turn_retry_backoff" ]
+  [ "provider_runtime_error"; "provider_timeout"; "keeper_turn_retry_backoff" ]
 ;;
 
 let record_oas_timeout_budget_observation ~base_path ~keeper_name =

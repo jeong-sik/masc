@@ -457,16 +457,25 @@ module KeeperKeepalive = struct
     : float
     =
     let _ = max_turns in
+    let _ = estimated_input_tokens in
     match oas_timeout_sec_override with
     | Some v -> v
     | None ->
-      (* #10008 fm2 removed token-count scaling because it timed out real
-         research turns before useful work could finish. The replacement must
-         still leave headroom for cascade fallback: default OAS calls get a
-         300s cap inside the 600s keeper turn envelope. [max_turns] controls
-         the OAS agent's loop budget elsewhere; it is not a wall-clock input. *)
-      let _ = estimated_input_tokens in
-      Float.min turn_timeout_sec oas_timeout_default_sec
+      (* RFC-0156: OAS total timeout 제거 — turn_timeout이 wall-clock cap,
+         stream_idle_timeout이 per-stream cap. 함수 이름의 `for_estimated_input_tokens`
+         + `with_turn_budget`은 historic naming이며 v2 PR에서 rename 예정.
+
+         이전 행위: Float.min turn_timeout_sec oas_timeout_default_sec
+                    (= min(600, 300) = 300, "static_300s" source label)
+         새 행위:   turn_timeout_sec
+                    (cascade rotation은 stream_idle + HTTP error + completion contract로 trigger)
+
+         Slow-but-successful 5분+ 응답이 회수됨. cascade fallback 시간은 줄지만
+         stream_idle_timeout이 healthy slow stream을 신호로 잡음.
+
+         #10008 fm2의 의도 ("research turn 끝까지 진행") 와 정합 — token scaling
+         복원 없이 단순히 turn-level cap 한 layer로 단순화. *)
+      turn_timeout_sec
   ;;
 
   let oas_timeout_for_estimated_input_tokens ~(estimated_input_tokens : int) : float =

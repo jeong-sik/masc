@@ -6536,7 +6536,7 @@ let test_degraded_retry_after_recoverable_error_includes_oas_timeout_budget () =
             { budget_sec = 273.0
             ; keeper_turn_timeout_sec = 1200.0
             ; estimated_input_tokens = 2_000
-            ; source = "static_300s"
+            ; source = "turn_budget"
             ; remaining_turn_budget_sec = Some 600.0
             ; min_required_sec = 15.0
             ; phase = "test_phase"
@@ -8229,8 +8229,8 @@ let test_bounded_oas_timeout_first_attempt_uses_full_usable_budget () =
   | Some budget ->
     check
       (float 0.01)
-      "first attempt receives adaptive default cap (no halving)"
-      300.0
+      "first attempt receives usable_budget (remaining - guard) after RFC-0156"
+      485.0
       budget.effective_timeout_sec;
     check
       (float 0.01)
@@ -8239,8 +8239,8 @@ let test_bounded_oas_timeout_first_attempt_uses_full_usable_budget () =
       budget.remaining_turn_budget_sec;
     check
       string
-      "source records static_300s default cap"
-      "static_300s"
+      "source records turn_budget after RFC-0156 (static_300s retired)"
+      "turn_budget"
       budget.source
   | None -> fail "expected bounded timeout"
 ;;
@@ -8263,8 +8263,8 @@ let test_attempt_watchdog_uses_full_usable_budget () =
     check
       (float 0.01)
       "attempt watchdog = min(effective+guard, remaining-outer_reserve) \
-       = min(315, 499) = 315"
-      315.0
+       = min(500, 499) = 499 after RFC-0156 (effective = usable_budget)"
+      499.0
       (UT.attempt_watchdog_timeout_sec ~remaining_turn_budget_s:500.0 budget)
   | None -> fail "expected bounded timeout"
 ;;
@@ -8277,7 +8277,7 @@ let test_attempt_watchdog_fires_before_outer_turn_timeout () =
     ; remaining_turn_budget_sec = 293.0
     ; estimated_input_tokens = 2_000
     ; max_turns = 4
-    ; source = "static_300s_per_attempt_retry"
+    ; source = "turn_budget_per_attempt_retry"
     }
   in
   check
@@ -8347,7 +8347,7 @@ let oas_timeout_budget_error () =
        { budget_sec = 273.0
        ; keeper_turn_timeout_sec = 1200.0
        ; estimated_input_tokens = 2_000
-       ; source = "static_300s"
+       ; source = "turn_budget"
        ; remaining_turn_budget_sec = Some 600.0
        ; min_required_sec = 15.0
        ; phase = "test_phase"
@@ -8567,7 +8567,7 @@ let test_degraded_retry_wall_clock_budget_allows_remaining_turn_time () =
   with
   | None -> fail "degraded retry should use remaining wall-clock budget"
   | Some budget ->
-    check string "source marks wall-clock retry" "static_300s_wall_clock_retry" budget.source;
+    check string "source marks wall-clock retry" "turn_budget_wall_clock_retry" budget.source;
     check
       (float 0.01)
       "wall-clock retry leaves finalization guard"

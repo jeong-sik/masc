@@ -123,8 +123,10 @@ let resolve_bounded_oas_timeout_budget_with_turn_budget
         with
         | Some _, true -> "override_wall_clock_retry"
         | Some _, false -> "override_per_attempt_retry"
-        | None, true -> "static_300s_wall_clock_retry"
-        | None, false -> "static_300s_per_attempt_retry"
+        (* RFC-0156: adaptive_timeout_sec is now turn_timeout_sec, so
+           the unattributed branch labels its source as turn_budget. *)
+        | None, true -> "turn_budget_wall_clock_retry"
+        | None, false -> "turn_budget_per_attempt_retry"
       in
       Some
         {
@@ -151,8 +153,11 @@ let resolve_bounded_oas_timeout_budget_with_turn_budget
         match runtime.oas_timeout_override_sec.value, capped_by_turn_budget with
         | Some _, true -> "override_capped_by_turn_budget"
         | Some _, false -> "override"
-        | None, true -> "static_300s_capped_by_turn_budget"
-        | None, false -> "static_300s"
+        (* RFC-0156: adaptive_timeout_sec == turn_timeout_sec, so capped_by_turn_budget
+           is always false here. Label preserved for downstream observers, marked
+           turn_budget to retire the misleading "static_300s" name. *)
+        | None, true -> "turn_budget_capped"
+        | None, false -> "turn_budget"
       in
       Some
         {

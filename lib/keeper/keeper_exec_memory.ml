@@ -54,6 +54,22 @@ type memory_match =
 
 let memory_bank_persistence_surface = "keeper_exec_memory_bank"
 
+let memory_horizon_of_kind_with_fallback kind =
+  match Keeper_memory_policy.memory_horizon_of_kind_opt kind with
+  | Some horizon -> horizon
+  | None ->
+      Log.Memory.warn
+        "keeper_exec_memory: unknown memory kind %S -> mid_term (drift; see #8826)"
+        kind;
+      Keeper_memory_policy.mid_term_horizon
+;;
+
+let memory_horizon_of_json_with_fallback ~kind json =
+  match Keeper_memory_policy.memory_horizon_of_json_opt json with
+  | Some horizon -> horizon
+  | None -> memory_horizon_of_kind_with_fallback kind
+;;
+
 let report_memory_bank_read_drop ~path ~reason ~detail =
   Safe_ops.report_persistence_read_drop
     ~on_drop:(fun () ->
@@ -93,7 +109,7 @@ let search_memory_bank
       | `Assoc _ as j ->
         (try
            let kind = Safe_ops.json_string ~default:"" "kind" j |> String.trim in
-           let horizon = Keeper_memory_policy.memory_horizon_of_json ~kind j in
+           let horizon = memory_horizon_of_json_with_fallback ~kind j in
            let source = Safe_ops.json_string ~default:"" "source" j |> String.trim in
            let text = Safe_ops.json_string ~default:"" "text" j |> String.trim in
            let priority = Safe_ops.json_int ~default:0 "priority" j in

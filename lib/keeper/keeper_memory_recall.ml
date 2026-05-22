@@ -153,8 +153,14 @@ let read_recent_memory_texts
   |> List.filter_map parse_memory_bank_row
   |> List.filter (fun row ->
          let row_horizon =
-           if String.trim row.horizon = ""
-           then memory_horizon_of_kind row.kind
+           if String.trim row.horizon = "" then
+             match memory_horizon_of_kind_opt row.kind with
+             | Some horizon -> horizon
+             | None ->
+                 Log.Memory.warn
+                   "memory_horizon_recall: unknown kind %S -> mid_term (drift; see #8826)"
+                   row.kind;
+                 mid_term_horizon
            else row.horizon
          in
          String.equal row_horizon horizon)

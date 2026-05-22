@@ -45,15 +45,12 @@ type t = {
 val enforced_all : agent_overlay
 (** All risk classes at [Enforced].  The safest default. *)
 
-val strict_default : agent_overlay
-(** Alias for [enforced_all].  Backward-compatible name. *)
-
 val permissive_default : agent_overlay
 (** [safe_trust = Auto_safe], audited/privileged at [Enforced].
     For well-trusted keeper agents in a dev worktree. *)
 
 val empty : t
-(** [empty] has [defaults = strict_default] and no per-agent entries.
+(** [empty] has [defaults = enforced_all] and no per-agent entries.
     Fail-closed bootstrap for CI and new agents. *)
 
 val lookup : t -> actor:Agent_id.t -> agent_overlay

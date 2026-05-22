@@ -20,7 +20,7 @@ let lit s = Shell_ir.Lit s
 let default_policy : Approval_policy.t =
   { raw_source = "(test)"; summary = "(test summary)" }
 
-let strict_overlay = Approval_config.strict_default
+let strict_overlay = Approval_config.enforced_all
 
 let internal_overlay : Approval_config.agent_overlay =
   {

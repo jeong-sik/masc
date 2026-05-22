@@ -2,8 +2,8 @@
 
 open Masc_exec
 
-let test_strict_is_fail_closed () =
-  let o = Approval_config.strict_default in
+let test_enforced_all_is_fail_closed () =
+  let o = Approval_config.enforced_all in
   assert (o.safe_trust = Enforced);
   assert (o.audited_trust = Enforced);
   assert (o.privileged_trust = Enforced)
@@ -14,16 +14,16 @@ let test_permissive_default_auto_safe () =
   assert (o.audited_trust = Enforced);
   assert (o.privileged_trust = Enforced)
 
-let test_empty_uses_strict_defaults () =
+let test_empty_uses_enforced_defaults () =
   let cfg = Approval_config.empty in
   assert (cfg.per_agent = []);
   let o = Approval_config.lookup cfg ~actor:`Other_agent in
-  assert (o = Approval_config.strict_default)
+  assert (o = Approval_config.enforced_all)
 
 let test_lookup_matches_registered_agent () =
   let cfg : Approval_config.t =
     {
-      defaults = Approval_config.strict_default;
+      defaults = Approval_config.enforced_all;
       per_agent = [
         (`Coord_git, Approval_config.permissive_default);
       ];
@@ -32,11 +32,11 @@ let test_lookup_matches_registered_agent () =
   let alpha = Approval_config.lookup cfg ~actor:`Coord_git in
   assert (alpha = Approval_config.permissive_default);
   let other = Approval_config.lookup cfg ~actor:`Other_agent in
-  assert (other = Approval_config.strict_default)
+  assert (other = Approval_config.enforced_all)
 
 let () =
-  test_strict_is_fail_closed ();
+  test_enforced_all_is_fail_closed ();
   test_permissive_default_auto_safe ();
-  test_empty_uses_strict_defaults ();
+  test_empty_uses_enforced_defaults ();
   test_lookup_matches_registered_agent ();
   print_endline "[test_approval_config] all tests passed"

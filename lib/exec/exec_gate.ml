@@ -35,7 +35,7 @@ let internal_observer_overlay : Approval_config.agent_overlay =
 
 let rollout_config : Approval_config.t =
   {
-    defaults = Approval_config.strict_default;
+    defaults = Approval_config.enforced_all;
     per_agent =
       [
         (`Coord_git, internal_git_admin_overlay);

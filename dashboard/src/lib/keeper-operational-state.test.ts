@@ -187,7 +187,7 @@ describe('deriveKeeperOperationalState — stuck branch (RFC-0135 §1.1 root)', 
     // stale marker → blocker stays meaningful (fail-closed). Mirrors the
     // older-backend case where runtime_attention may omit the field.
     const state = deriveKeeperOperationalState({
-      keeper: makeKeeper({ runtime_blocker_class: 'oas_timeout_budget' }),
+      keeper: makeKeeper({ runtime_blocker_class: 'turn_timeout' }),
       composite: makeComposite({
         runtime_attention: attention({ execution_current: undefined }),
       }),
@@ -195,7 +195,7 @@ describe('deriveKeeperOperationalState — stuck branch (RFC-0135 §1.1 root)', 
     expect(state).toMatchObject({
       kind: 'stuck',
       attention: 'clean',
-      reason: 'oas_timeout_budget',
+      reason: 'turn_timeout',
     })
   })
 
@@ -518,7 +518,7 @@ describe('KeeperOperationalState.attention axis — RFC-0135 §13 Goal-2 (2026-0
     // kind=offline × attention=needs_attention
     ['offline', { phase: 'Offline' }, { runtime_attention: attention({ needs_attention: true }) }, 'needs_attention'],
     // kind=stuck × attention=blocked
-    ['stuck', { runtime_blocker_class: 'oas_timeout_budget' as KeeperRuntimeBlockerClass }, { runtime_attention: attention({ blocked: true }) }, 'blocked'],
+    ['stuck', { runtime_blocker_class: 'turn_timeout' as KeeperRuntimeBlockerClass }, { runtime_attention: attention({ blocked: true }) }, 'blocked'],
     // kind=running × attention=clean
     ['running', {}, { runtime_attention: attention({}) }, 'clean'],
   ])('kind=%s × attention=%s — axes orthogonal', (kind, keeperOverrides, compositeOverrides, expectedAttention) => {

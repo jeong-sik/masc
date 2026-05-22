@@ -35,6 +35,11 @@ let get_last_memory_injection agent_name =
   with_last_memory_injection_lock (fun () ->
     Hashtbl.find_opt last_memory_injection agent_name)
 ;;
+
+let clear_last_memory_injection agent_name =
+  with_last_memory_injection_lock (fun () ->
+    Hashtbl.remove last_memory_injection agent_name)
+;;
 (** Build an [extra_system_context] string from episodic, procedural,
     and institutional memory.
 

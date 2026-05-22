@@ -123,6 +123,7 @@ let run_turn
   =
   let user_message = Keeper_run_prompt.sanitize_user_message user_message in
   Masc_runtime_events.emit_turn_start ();
+  Memory_hooks.clear_last_memory_injection meta.agent_name;
   (* Cancel-safe cleanup (#9747): stdlib [Fun.protect] wraps finally
      exceptions in [Fun.Finally_raised], masking the outer
      [Eio.Cancel.Cancelled] raised by the turn body during fleet-wide
@@ -278,7 +279,8 @@ let run_turn
     Keeper_runtime_manifest.Checkpoint_loaded;
   append_manifest ~site:"context_compacted"
     ~keeper_turn_id:manifest_keeper_turn_id
-    ~compaction_source:(if pre_dispatch_compacted then "pre_dispatch_hygiene" else "skipped")
+    ?compaction_source:
+      (if pre_dispatch_compacted then Some "pre_dispatch_hygiene" else None)
     ~status:(if pre_dispatch_compacted then "compacted" else "skipped")
     ~decision:
       (Keeper_runtime_manifest.with_payload_role ~payload_role:Model_input

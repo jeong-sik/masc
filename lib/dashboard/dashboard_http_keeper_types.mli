@@ -16,7 +16,19 @@ val runtime_warning_ctx_ratio : float
     [Env_config_keeper.DashboardHealth]. *)
 
 val live_keeper_cascade_name : string -> string
-(** Resolve a raw cascade name to its live (post-rotation) identifier. *)
+(** Resolve a raw cascade name to its live (post-rotation) identifier.
+
+    {b Note:} silent-fallback path retained for the RFC-0149 §3.3 sunset
+    window.  New callers should prefer {!live_keeper_cascade_name_result}. *)
+
+val live_keeper_cascade_name_result :
+  string -> (Keeper_cascade_profile.runtime_name, [ `Unresolved of string ]) result
+(** Result-returning variant of {!live_keeper_cascade_name}.  On
+    [Error (`Unresolved raw)] the caller is expected to surface the
+    unresolved input directly (e.g. as JSON [null] on the canonical
+    field) rather than fall back to the silent [Keeper_turn] default.
+
+    @since RFC-0149 Phase 1 *)
 
 val compute_health_score :
   restart_count:int ->

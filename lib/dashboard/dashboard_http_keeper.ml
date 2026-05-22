@@ -135,7 +135,14 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
             if last_activity_ts <= 0.0 then 0.0 else now_ts -. last_activity_ts
           in
           let trace_history_count = List.length m.runtime.trace_history in
-          let _effective_cascade_name = live_keeper_cascade_name (Keeper_types.cascade_name_of_meta m) in
+          (* RFC-0149 §3.3 — removed [_effective_cascade_name] zombie
+             binding (commit f0075c3611, "domain-owned counter").  The
+             bound name was unused; the line existed only to trigger
+             [Cascade_metrics.on_resolve_live_fallback] through the
+             silent-fallback path — exactly the workaround RFC-0149
+             §3.3 sunsets.  No replacement needed: unresolved cascades
+             surface on the canonical JSON field via the Result-returning
+             resolver at the other call site below. *)
           let primary_model = "" in
           let primary_model_norm = normalize_model_name primary_model in
           let last_compaction_saved_tokens =
@@ -1138,12 +1145,21 @@ let keeper_config_json (config : Coord.config) (name : string)
         ]
       in
       let cascade_name = Keeper_types.cascade_name_of_meta m in
-      let effective_cascade_name = live_keeper_cascade_name cascade_name in
+      (* RFC-0149 §3.3 — Result-returning resolver: on [Error] the
+         canonical field surfaces as JSON [null] (parse-don't-validate
+         honest signal) instead of the silent [Keeper_turn] rewrite the
+         legacy [live_keeper_cascade_name] would produce. *)
+      let selected_cascade_canonical_json =
+        match live_keeper_cascade_name_result cascade_name with
+        | Ok runtime ->
+          `String (Keeper_cascade_profile.runtime_name_to_string runtime)
+        | Error (`Unresolved _) -> `Null
+      in
       let execution =
         `Assoc [
           ("selected_cascade_name", `String cascade_name);
           ( "selected_cascade_canonical",
-            `String effective_cascade_name );
+            selected_cascade_canonical_json );
           ( "cascade_ref",
             (match m.cascade_ref with
              | Some ref_ -> Cascade_ref.cascade_ref_to_json ref_

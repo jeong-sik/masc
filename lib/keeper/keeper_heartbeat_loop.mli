@@ -131,7 +131,7 @@ val record_provider_timeout_observation :
 
 val provider_timeout_policy_decision :
   strikes:int -> Agent_sdk.Error.sdk_error -> Keeper_failure_policy.decision option
-(** Return the policy decision for a structured [Oas_timeout_budget] error.
+(** Return the policy decision for a structured provider-timeout error.
     This heartbeat-loop path is reached after the keeper turn returned, so
     timeout evidence is not liveness loss by itself. *)
 

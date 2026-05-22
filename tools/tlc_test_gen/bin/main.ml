@@ -22,13 +22,20 @@ let parse path =
       None
   | Ok state -> Some state
 
-(* mkdir -p without depending on the [Unix] library — relies on stdlib only.
-   Returns true if the directory exists (or was created) after the call. *)
-let mkdir_p dir =
-  if Sys.file_exists dir then Sys.is_directory dir
+let rec mkdir_p dir =
+  if dir = "" || dir = Filename.current_dir_name then true
+  else if Sys.file_exists dir then Sys.is_directory dir
   else
-    let cmd = Printf.sprintf "mkdir -p %s" (Filename.quote dir) in
-    Sys.command cmd = 0 && Sys.file_exists dir && Sys.is_directory dir
+    let parent = Filename.dirname dir in
+    let parent_ready = parent = dir || mkdir_p parent in
+    parent_ready
+    &&
+    try
+      Unix.mkdir dir 0o755;
+      true
+    with
+    | Unix.Unix_error (Unix.EEXIST, _, _) -> Sys.is_directory dir
+    | Unix.Unix_error _ -> false
 
 let write_to dir state out =
   if not (mkdir_p dir) then begin

@@ -14,24 +14,7 @@
     Internal helpers (the [existing_dir] predicate, the
     [prompt_markdown_dir_candidates] list, and the
     [bootstrapped_signature] memo ref) are hidden — callers
-    consume only the three entry points below. *)
-
-val init : unit -> unit
-(** Re-scan the currently-configured markdown directory and
-    register all prompts that have YAML frontmatter. Used by
-    tests after a manual [Prompt_registry.set_markdown_dir] call;
-    no-op when no directory is configured. *)
-
-val resolve_prompt_markdown_dir :
-  workspace_path:string ->
-  base_path:string ->
-  string
-(** Pick the prompt markdown directory for a given workspace.
-    Currently always returns [Config_dir_resolver.prompts_dir ()]
-    (both for the resolved candidate and the fallback) — the
-    parameters are accepted for forward compatibility with
-    workspace-scoped overrides and exercised directly by the
-    [test_server_runtime_bootstrap] suite. *)
+    consume only the entry point below. *)
 
 val bootstrap_runtime :
   workspace_path:string ->

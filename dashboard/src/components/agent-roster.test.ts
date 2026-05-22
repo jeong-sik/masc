@@ -158,7 +158,7 @@ describe('rosterStateNote — RFC-0135 §1.1 typed-state conditioning', () => {
     })
   })
 
-  it('falls through to diagnostic error when no blocker and no stale blocker', () => {
+  it('running keeper with diagnostic error shows "이전 오류" (not current)', () => {
     const note = rosterStateNote(
       k({
         phase: 'Running',
@@ -172,7 +172,25 @@ describe('rosterStateNote — RFC-0135 §1.1 typed-state conditioning', () => {
       compositeWith(attention({ execution_current: true })),
       null,
     )
-    expect(note).toEqual({ label: '최근 오류', text: 'tool call failed' })
+    expect(note).toEqual({ label: '이전 오류', text: 'tool call failed' })
+  })
+
+  it('offline keeper with diagnostic error shows "최근 오류"', () => {
+    const note = rosterStateNote(
+      k({
+        phase: 'Crashed',
+        status: 'offline',
+        diagnostic: {
+          last_error: 'fiber died',
+          health_state: 'degraded',
+          next_action_path: 'recover',
+          last_reply_status: 'error',
+        },
+      }),
+      null,
+      null,
+    )
+    expect(note).toEqual({ label: '최근 오류', text: 'fiber died' })
   })
 
   it('falls through to monitoring hint when nothing else applies', () => {

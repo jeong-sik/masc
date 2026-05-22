@@ -115,8 +115,8 @@ let record_success
     institution episode store via [store_failed_turn_episode]).
 
     Mapping rationale:
-    - provider/OAS timeout families, including legacy [oas_timeout_budget],
-      → [Provider_timeout].
+    - provider-timeout families, with legacy [oas_timeout_budget] normalized
+      at the mapper boundary → [Provider_timeout].
     - admission/cascade/provider capacity families → [Capacity_pressure].
     - stale turn, heartbeat, and fiber liveness families → [Turn_liveness].
     - generic [*_timeout] / [*_timeout_*] remains [Timeout] only when owner
@@ -127,6 +127,11 @@ let record_success
 let stress_kind_of_error_kind error_kind : Agent_stress.stress_kind option =
   let trimmed =
     String.trim (Memory_oas_bridge.error_kind_to_string error_kind)
+  in
+  let canonical_error_kind =
+    match trimmed with
+    | "oas_timeout_budget" -> "provider_timeout"
+    | value -> value
   in
   let ends_with suffix s =
     let ls = String.length s in
@@ -145,24 +150,24 @@ let stress_kind_of_error_kind error_kind : Agent_stress.stress_kind option =
       in
       loop 0
   in
-  if trimmed = "" then None
-  else if String.equal trimmed "oas_timeout_budget"
-       || String.equal trimmed "provider_timeout"
-       || String.equal trimmed "oas_run_timeout"
-       || String.equal trimmed "api_error_timeout"
+  if canonical_error_kind = "" then None
+  else if String.equal canonical_error_kind "provider_timeout"
+       || String.equal canonical_error_kind "oas_run_timeout"
+       || String.equal canonical_error_kind "api_error_timeout"
   then Some Agent_stress.Provider_timeout
-  else if String.equal trimmed "capacity_backpressure"
-       || String.equal trimmed "admission_queue_timeout"
-       || String.equal trimmed "admission_queue_rejected"
-       || contains "capacity" trimmed
+  else if String.equal canonical_error_kind "capacity_backpressure"
+       || String.equal canonical_error_kind "admission_queue_timeout"
+       || String.equal canonical_error_kind "admission_queue_rejected"
+       || contains "capacity" canonical_error_kind
   then Some Agent_stress.Capacity_pressure
-  else if String.equal trimmed "stale_turn_timeout"
-       || String.equal trimmed "turn_livelock_blocked"
-       || String.equal trimmed "fiber_unresolved"
-       || contains "heartbeat" trimmed
-       || contains "liveness" trimmed
+  else if String.equal canonical_error_kind "stale_turn_timeout"
+       || String.equal canonical_error_kind "turn_livelock_blocked"
+       || String.equal canonical_error_kind "fiber_unresolved"
+       || contains "heartbeat" canonical_error_kind
+       || contains "liveness" canonical_error_kind
   then Some Agent_stress.Turn_liveness
-  else if ends_with "_timeout" trimmed || contains "_timeout_" trimmed
+  else if ends_with "_timeout" canonical_error_kind
+       || contains "_timeout_" canonical_error_kind
   then Some Agent_stress.Timeout
   else if String.equal trimmed "completion_contract_violation"
   then Some Agent_stress.Parse_degraded

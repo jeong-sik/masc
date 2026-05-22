@@ -297,8 +297,8 @@ let runtime_blocker_surface_of_typed_class ?(summary = "") (cls : blocker_class)
     | Oas_timeout_budget ->
       if summary = ""
       then
-        "Legacy OAS timeout-budget blocker; inspect the owner-specific timeout, \
-         admission, or capacity evidence before resume."
+        "Legacy OAS timeout-budget blocker; inspect owner-specific provider, \
+         admission/capacity, or turn-timeout evidence before resume."
       else summary
     | Turn_livelock_blocked ->
       if summary = ""
@@ -457,10 +457,10 @@ let runtime_blocker_surface_of_failure_reason (reason : Keeper_registry.failure_
       (runtime_blocker_surface_of_typed_class
          ~summary:
            (Printf.sprintf
-              "OAS budget timeout repeated %d consecutive cycle(s); keeper was \
+              "Provider timeout repeated %d consecutive cycle(s); keeper was \
                auto-paused before restart loop."
               count)
-         Oas_timeout_budget)
+         Turn_timeout)
   | Keeper_registry.Stale_fleet_batch { distinct_count } ->
     Some
       (runtime_blocker_surface_of_typed_class

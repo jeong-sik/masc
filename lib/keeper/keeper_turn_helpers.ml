@@ -303,6 +303,7 @@ let record_pre_dispatch_terminal_observation
     ; pre_dispatch_compaction_trigger = None
     ; pre_dispatch_compaction_before_tokens = None
     ; pre_dispatch_compaction_after_tokens = None
+    ; oas_internal_cascade_allowed = false
     }
   in
   let receipt_path =

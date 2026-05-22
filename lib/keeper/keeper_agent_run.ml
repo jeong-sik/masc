@@ -1562,6 +1562,10 @@ let run_turn
               | Some obs -> obs.fallback_applied
               | None -> false)
          ; cascade_outcome = cascade_outcome_of_observation cascade_observation
+         ; oas_internal_cascade_allowed =
+             (match cascade_observation with
+              | Some obs -> obs.oas_internal_cascade_allowed
+              | None -> false)
          ; degraded_retry_applied
          ; degraded_retry_cascade =
              Option.map

@@ -26,6 +26,7 @@ type cascade_observation = {
   fallback_events : cascade_fallback_event list;
   attempt_details_available : bool;
   attempt_details_source : string;
+  oas_internal_cascade_allowed : bool;
 }
 
 and cascade_attempt = {
@@ -156,6 +157,7 @@ let cascade_observation_of_candidates ~cascade_name ?strategy ~configured_labels
     ?(fallback_events = [])
     ?(attempt_details_available = false)
     ?(attempt_details_source = "opaque_named_cascade")
+    ?(oas_internal_cascade_allowed = false)
     () : cascade_observation =
   let candidate_models =
     List.init (max 0 candidate_count) (fun _ -> public_runtime_model_label)
@@ -193,6 +195,7 @@ let cascade_observation_of_candidates ~cascade_name ?strategy ~configured_labels
     fallback_events;
     attempt_details_available;
     attempt_details_source;
+    oas_internal_cascade_allowed;
   }
 
 (* ================================================================ *)
@@ -403,13 +406,16 @@ let cascade_metrics_for_candidates ~candidate_count:(_ : int) () =
 
 let cascade_observation_with_metrics ~cascade_name ?strategy ~configured_labels
     ~(candidate_count : int)
-    ~(selected_model_raw : string option) ~(capture : cascade_metrics_capture) () =
+    ~(selected_model_raw : string option) ~(capture : cascade_metrics_capture)
+    ?(oas_internal_cascade_allowed = false)
+    () =
   cascade_observation_of_candidates ~cascade_name ?strategy ~configured_labels
     ~candidate_count ~selected_model_raw
     ~attempts:(List.rev capture.attempts_rev)
     ~fallback_events:(List.rev capture.fallback_events_rev)
     ~attempt_details_available:true
     ~attempt_details_source:"oas_metrics_callbacks"
+    ~oas_internal_cascade_allowed
     ()
 
 (* ================================================================ *)
@@ -441,6 +447,7 @@ let cascade_observation_to_json (obs : cascade_observation) : Yojson.Safe.t =
           (List.map cascade_fallback_event_to_json obs.fallback_events) );
       ("attempt_details_available", `Bool obs.attempt_details_available);
       ("attempt_details_source", `String obs.attempt_details_source);
+      ("oas_internal_cascade_allowed", `Bool obs.oas_internal_cascade_allowed);
     ]
 
 let get_cascade_audit_store store_opt =

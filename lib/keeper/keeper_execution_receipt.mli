@@ -231,6 +231,7 @@ type t =
   ; cascade_attempt_count : int
   ; cascade_fallback_applied : bool
   ; cascade_outcome : cascade_outcome
+  ; oas_internal_cascade_allowed : bool
   ; degraded_retry_applied : bool
   ; degraded_retry_cascade : cascade_name option
   ; fallback_reason : Keeper_error_classify.degraded_retry_reason option

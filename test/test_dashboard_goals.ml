@@ -178,6 +178,7 @@ let append_keeper_receipt
       pre_dispatch_compaction_trigger = None;
       pre_dispatch_compaction_before_tokens = None;
       pre_dispatch_compaction_after_tokens = None;
+      oas_internal_cascade_allowed = false;
     }
   in
   Keeper_execution_receipt.append config receipt

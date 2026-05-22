@@ -306,6 +306,7 @@ type t =
   ; cascade_attempt_count : int
   ; cascade_fallback_applied : bool
   ; cascade_outcome : cascade_outcome
+  ; oas_internal_cascade_allowed : bool
   ; degraded_retry_applied : bool
   ; degraded_retry_cascade : cascade_name option
   ; fallback_reason : Keeper_error_classify.degraded_retry_reason option
@@ -881,6 +882,7 @@ let to_json (receipt : t) =
           ; "attempt_count", `Int receipt.cascade_attempt_count
           ; "fallback_applied", `Bool receipt.cascade_fallback_applied
           ; "outcome", `String (cascade_outcome_to_string receipt.cascade_outcome)
+          ; "oas_internal_cascade_allowed", `Bool receipt.oas_internal_cascade_allowed
           ; "degraded_retry_applied", `Bool receipt.degraded_retry_applied
           ; ( "degraded_retry_cascade"
             , match receipt.degraded_retry_cascade with

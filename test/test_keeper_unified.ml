@@ -3680,6 +3680,7 @@ let test_metrics_surface_model_prefers_successful_cascade_label () =
             ]
         ; attempt_details_available = true
         ; attempt_details_source = "oas_metrics_callbacks"
+        ; oas_internal_cascade_allowed = false
         }
       ()
   in
@@ -3743,6 +3744,7 @@ let test_metrics_resolved_model_id_prefers_last_attempt_id () =
         ; fallback_events = []
         ; attempt_details_available = true
         ; attempt_details_source = "oas_metrics_callbacks"
+        ; oas_internal_cascade_allowed = false
         }
       ()
   in
@@ -4408,6 +4410,7 @@ let test_append_metrics_snapshot_includes_cascade_observation () =
                    ]
                ; attempt_details_available = true
                ; attempt_details_source = "oas_metrics_callbacks"
+               ; oas_internal_cascade_allowed = false
                }
          }
        in

@@ -620,6 +620,7 @@ let test_execution_receipt_json_includes_memory_fields () =
     ; pre_dispatch_compaction_trigger = None
     ; pre_dispatch_compaction_before_tokens = None
     ; pre_dispatch_compaction_after_tokens = None
+    ; oas_internal_cascade_allowed = false
     }
   in
   let json = Keeper_execution_receipt.to_json receipt in
@@ -691,6 +692,7 @@ let test_execution_receipt_json_null_when_missing () =
     ; pre_dispatch_compaction_trigger = None
     ; pre_dispatch_compaction_before_tokens = None
     ; pre_dispatch_compaction_after_tokens = None
+    ; oas_internal_cascade_allowed = false
     }
   in
   let json = Keeper_execution_receipt.to_json receipt in

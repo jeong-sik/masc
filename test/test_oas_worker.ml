@@ -859,6 +859,7 @@ let test_cascade_observation_json_includes_fallback_fields () =
         ]
     ; attempt_details_available = true
     ; attempt_details_source = "oas_metrics_callbacks"
+    ; oas_internal_cascade_allowed = false
     }
   in
   let json = Cascade_legacy_runner.cascade_observation_to_json observation in
@@ -1051,6 +1052,7 @@ let test_cascade_audit_persists_observation () =
              ]
          ; attempt_details_available = true
          ; attempt_details_source = "oas_metrics_callbacks"
+         ; oas_internal_cascade_allowed = false
          }
        in
        Masc_mcp.Cascade_legacy_runner.record_cascade

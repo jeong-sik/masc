@@ -271,16 +271,6 @@ let parse_command cmd =
   | Masc_exec.Parsed.Parse_aborted _
   | Masc_exec.Parsed.Too_complex _ -> []
 
-let output_for_status ~(status : Unix.process_status) ~(stdout : string)
-    ~(stderr : string) : string =
-  match status with
-  | Unix.WEXITED 0 -> stdout
-  | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> (
-      match stdout, stderr with
-      | "", err -> err
-      | out, "" -> out
-      | out, err -> out ^ "\n" ^ err)
-
 let fallback_spawn_failure_output ~exit_code =
   Printf.sprintf
     "spawned agent exited with code %d without any stdout/stderr output"
@@ -403,7 +393,7 @@ let spawn ~agent_name ~prompt ?timeout_seconds ?working_dir () =
           parsed.text
         else
           let rendered =
-            output_for_status ~status ~stdout:parsed.text ~stderr:stderr_output
+            Masc_exec.Exec_shell_adapter.output_for_dispatch_status ~status ~stdout:parsed.text ~stderr:stderr_output
           in
           if String.trim rendered = ""
           then fallback_spawn_failure_output ~exit_code

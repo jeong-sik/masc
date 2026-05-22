@@ -149,6 +149,17 @@ val resolve_live : ?config_path:string -> string -> string
 (** Like {!resolve_live_with_catalog}, but reads the active catalog from the
     resolved cascade config path. *)
 
+val resolve_live_result :
+  ?config_path:string -> string -> (runtime_name, [ `Unresolved of string ]) result
+(** Result-returning variant of {!resolve_live} — wraps
+    {!resolve_live_with_catalog_result} with the active catalog loaded
+    from [config_path].  Callers that should fail loud on unresolved
+    input (boot-time error, operator alert) use this entry point; the
+    legacy {!resolve_live} silently falls back to [Keeper_turn] default
+    (RFC-0149 §3.3 sunset target).
+
+    @since RFC-0149 Phase 1 *)
+
 val canonicalize : string -> string
 (** Catalog-aware normalization: legacy aliases collapse to their canonical
     name through [routes], live catalog names pass through, otherwise

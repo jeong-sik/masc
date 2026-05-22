@@ -247,7 +247,19 @@ let test_keeper_shell_gh_read_only_stays_low () =
   in
   check "keeper_shell op=gh pr view → low"
     (GP.risk_level_to_string GP.Low)
-    (GP.risk_level_to_string actual)
+    (GP.risk_level_to_string actual);
+  let typed_actual =
+    GP.assess_risk
+      ~tool_name:"keeper_shell"
+      ~input:
+        (`Assoc
+          [ ("op", `String "gh")
+          ; ("argv", `List [ `String "pr"; `String "view"; `String "123" ])
+          ])
+  in
+  check "keeper_shell op=gh argv pr view → low"
+    (GP.risk_level_to_string GP.Low)
+    (GP.risk_level_to_string typed_actual)
 
 let test_keeper_shell_gh_mutation_escalates_high () =
   let actual =
@@ -257,7 +269,26 @@ let test_keeper_shell_gh_mutation_escalates_high () =
   in
   check "keeper_shell op=gh pr comment → high"
     (GP.risk_level_to_string GP.High)
-    (GP.risk_level_to_string actual)
+    (GP.risk_level_to_string actual);
+  let typed_actual =
+    GP.assess_risk
+      ~tool_name:"keeper_shell"
+      ~input:
+        (`Assoc
+          [ ("op", `String "gh")
+          ; ( "argv"
+            , `List
+                [ `String "pr"
+                ; `String "comment"
+                ; `String "123"
+                ; `String "--body"
+                ; `String "hi"
+                ] )
+          ])
+  in
+  check "keeper_shell op=gh argv pr comment → high"
+    (GP.risk_level_to_string GP.High)
+    (GP.risk_level_to_string typed_actual)
 
 (* ── 2. Threshold decisions ──────────────────────────────── *)
 

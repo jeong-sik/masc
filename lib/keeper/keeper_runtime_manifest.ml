@@ -80,6 +80,7 @@ type t = {
   generation : int option;
   keeper_turn_id : int option;
   oas_turn_count : int option;
+  logical_seq : int option;
   event : event_kind;
   cascade_name : string option;
   status : string;
@@ -184,10 +185,15 @@ let string_field_opt key value =
   | Some value when String.trim value <> "" -> Some (key, `String value)
   | Some _ | None -> None
 
+let int_field_opt key value =
+  match value with
+  | Some value -> Some (key, `Int value)
+  | None -> None
+
 let clock_refs ?edge_id ?lane ?source_clock ?observed_at ?started_at
-    ?finished_at ?provider_attempt_id ?tool_batch_id ?checkpoint_id
+    ?finished_at ?elapsed_ms ?provider_attempt_id ?tool_batch_id ?checkpoint_id
     ?compaction_id ?memory_injection_id ?event_bus_correlation_id
-    ?event_bus_run_id ?parent_event_id ?caused_by () =
+    ?event_bus_run_id ?parent_event_id ?caused_by ?logical_seq () =
   `Assoc
     (List.filter_map
        (fun value -> value)
@@ -199,6 +205,7 @@ let clock_refs ?edge_id ?lane ?source_clock ?observed_at ?started_at
          string_field_opt "observed_at" observed_at;
          string_field_opt "started_at" started_at;
          string_field_opt "finished_at" finished_at;
+         int_field_opt "elapsed_ms" elapsed_ms;
          string_field_opt "provider_attempt_id" provider_attempt_id;
          string_field_opt "tool_batch_id" tool_batch_id;
          string_field_opt "checkpoint_id" checkpoint_id;
@@ -208,6 +215,7 @@ let clock_refs ?edge_id ?lane ?source_clock ?observed_at ?started_at
          string_field_opt "event_bus_run_id" event_bus_run_id;
          string_field_opt "parent_event_id" parent_event_id;
          string_field_opt "caused_by" caused_by;
+         int_field_opt "logical_seq" logical_seq;
        ])
 
 let clock_lane_of_event = function
@@ -266,8 +274,9 @@ let context_memory_injection_id ctx ?oas_turn_count () =
   Printf.sprintf "%s:keeper-%s:memory-oas-%s" ctx.manifest_trace_id
     (turn_label ctx) (oas_turn_label oas_turn_count)
 
-let clock_refs_for_context ctx ~event ?oas_turn_count
-    ?event_bus_correlation_id ?event_bus_run_id ?parent_event_id ?caused_by () =
+let clock_refs_for_context ctx ~event ?oas_turn_count ?elapsed_ms
+    ?event_bus_correlation_id ?event_bus_run_id ?parent_event_id ?caused_by
+    ?logical_seq () =
   let tool_batch_id =
     match event with
     | Tool_surface_selected
@@ -308,9 +317,10 @@ let clock_refs_for_context ctx ~event ?oas_turn_count
     | _ -> Wall
   in
   clock_refs ~edge_id:(context_edge_id ctx event)
-    ~lane:(clock_lane_of_event event) ~source_clock ?tool_batch_id
+    ~lane:(clock_lane_of_event event) ~source_clock ?elapsed_ms ?tool_batch_id
     ?checkpoint_id ?compaction_id ?memory_injection_id
-    ?event_bus_correlation_id ?event_bus_run_id ?parent_event_id ?caused_by ()
+    ?event_bus_correlation_id ?event_bus_run_id ?parent_event_id ?caused_by
+    ?logical_seq ()
 
 let assoc_has_key key fields =
   List.exists (fun (field, _) -> String.equal field key) fields
@@ -365,7 +375,7 @@ let tool_lineage ?searched_tool_names ?visible_tool_names
        ])
 
 let make ?(ts = Masc_domain.now_iso ()) ~keeper_name ?agent_name ~trace_id
-    ?generation ?keeper_turn_id ?oas_turn_count ~event ?cascade_name
+    ?generation ?keeper_turn_id ?oas_turn_count ?logical_seq ~event ?cascade_name
     ?(status = "ok") ?(decision = `Assoc []) ?receipt_path ?checkpoint_path
     ?tool_call_log_path () =
   {
@@ -377,6 +387,7 @@ let make ?(ts = Masc_domain.now_iso ()) ~keeper_name ?agent_name ~trace_id
     generation;
     keeper_turn_id;
     oas_turn_count;
+    logical_seq;
     event;
     cascade_name;
     status;
@@ -384,13 +395,13 @@ let make ?(ts = Masc_domain.now_iso ()) ~keeper_name ?agent_name ~trace_id
     links = { receipt_path; checkpoint_path; tool_call_log_path };
   }
 
-let make_for_context ctx ~event ?oas_turn_count ?cascade_name ?status ?decision
-    ?receipt_path ?checkpoint_path ?tool_call_log_path () =
+let make_for_context ctx ~event ?oas_turn_count ?logical_seq ?cascade_name
+    ?status ?decision ?receipt_path ?checkpoint_path ?tool_call_log_path () =
   make ~keeper_name:ctx.manifest_keeper_name
     ?agent_name:ctx.manifest_agent_name ~trace_id:ctx.manifest_trace_id
     ?generation:ctx.manifest_generation
-    ?keeper_turn_id:ctx.manifest_keeper_turn_id ?oas_turn_count ~event
-    ?cascade_name ?status ?decision ?receipt_path ?checkpoint_path
+    ?keeper_turn_id:ctx.manifest_keeper_turn_id ?oas_turn_count ?logical_seq
+    ~event ?cascade_name ?status ?decision ?receipt_path ?checkpoint_path
     ?tool_call_log_path ()
 
 let json_of_string_opt = function
@@ -416,17 +427,18 @@ let links_to_json links =
 let manifest_top_level_allowlist =
   StringSet.of_list
     [ "schema_version"; "ts"; "keeper_name"; "agent_name"; "trace_id"
-    ; "generation"; "keeper_turn_id"; "oas_turn_count"; "event"
+    ; "generation"; "keeper_turn_id"; "oas_turn_count"; "logical_seq"; "event"
     ; "cascade_name"; "status"; "decision"; "links"
     ]
 
 let decision_public_allowlist =
   StringSet.of_list
     [ "edge_id"; "lane"; "source_clock"; "observed_at"; "started_at"; "finished_at"
-    ; "provider_attempt_id"; "tool_batch_id"; "checkpoint_id"; "compaction_id"
-    ; "memory_injection_id"; "event_bus_correlation_id"; "event_bus_run_id"
-    ; "parent_event_id"; "caused_by"; "repair_reason"; "matched_started_ts"
-    ; "matched_started_status"; "error"; "exception_kind"; "latency_ms"
+    ; "elapsed_ms"; "provider_attempt_id"; "tool_batch_id"; "checkpoint_id"
+    ; "compaction_id"; "memory_injection_id"; "event_bus_correlation_id"
+    ; "event_bus_run_id"; "parent_event_id"; "caused_by"; "logical_seq"
+    ; "repair_reason"; "matched_started_ts"; "matched_started_status"
+    ; "error"; "exception_kind"; "latency_ms"
     ; "checkpoint_after_present"; "is_last"; "per_provider_timeout_s"
     ; "attempt_timeout_s"; "attempt_timeout_source"; "attempt_watchdog_source"
     ; "liveness_mode"; "liveness_budget_source"
@@ -439,9 +451,9 @@ let decision_public_allowlist =
 let clock_refs_public_allowlist =
   StringSet.of_list
     [ "edge_id"; "lane"; "source_clock"; "observed_at"; "started_at"; "finished_at"
-    ; "provider_attempt_id"; "tool_batch_id"; "checkpoint_id"; "compaction_id"
-    ; "memory_injection_id"; "event_bus_correlation_id"; "event_bus_run_id"
-    ; "parent_event_id"; "caused_by"
+    ; "elapsed_ms"; "provider_attempt_id"; "tool_batch_id"; "checkpoint_id"
+    ; "compaction_id"; "memory_injection_id"; "event_bus_correlation_id"
+    ; "event_bus_run_id"; "parent_event_id"; "caused_by"; "logical_seq"
     ]
 
 let rec reject_unknown_fields ~allowlist path = function
@@ -538,6 +550,7 @@ let to_json manifest =
       ("generation", json_of_int_opt manifest.generation);
       ("keeper_turn_id", json_of_int_opt manifest.keeper_turn_id);
       ("oas_turn_count", json_of_int_opt manifest.oas_turn_count);
+      ("logical_seq", json_of_int_opt manifest.logical_seq);
       ("event", `String (event_kind_to_string manifest.event));
       ("cascade_name", json_of_string_opt manifest.cascade_name);
       ("status", `String manifest.status);
@@ -556,6 +569,7 @@ let public_to_json manifest =
       ("generation", json_of_int_opt manifest.generation);
       ("keeper_turn_id", json_of_int_opt manifest.keeper_turn_id);
       ("oas_turn_count", json_of_int_opt manifest.oas_turn_count);
+      ("logical_seq", json_of_int_opt manifest.logical_seq);
       ("event", `String (event_kind_to_string manifest.event));
       ("cascade_name", json_of_string_opt manifest.cascade_name);
       ("status", `String manifest.status);
@@ -641,6 +655,7 @@ let of_json = function
             optional_int "generation" fields >>= fun generation ->
             optional_int "keeper_turn_id" fields >>= fun keeper_turn_id ->
             optional_int "oas_turn_count" fields >>= fun oas_turn_count ->
+            optional_int "logical_seq" fields >>= fun logical_seq ->
             required_string "event" fields >>= fun event_string ->
             (match event_kind_of_string event_string with
             | None -> Error (Printf.sprintf "unknown event: %S" event_string)
@@ -661,6 +676,7 @@ let of_json = function
                 generation;
                 keeper_turn_id;
                 oas_turn_count;
+                logical_seq;
                 event;
                 cascade_name;
                 status;

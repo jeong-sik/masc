@@ -1,9 +1,8 @@
 %{
 open Masc_exec
-open Shell_ir
 
 type stage_part =
-  | Arg of (string * bool)
+  | Arg of (string * Masc_exec.Shell_ir.arg_meta)
   | Redirect of Redirect_scope.t
 
 let file_redirect fd target mode =
@@ -25,20 +24,20 @@ let file_redirect fd target mode =
 
    See RFC v5 (docs/rfc/RFC-0005). */
 
-%token <string * Shell_ir.arg_meta> WORD
+%token <string * Masc_exec.Shell_ir.arg_meta> WORD
 %token DEV_NULL
 %token <int * int> FD_REDIRECT
 %token <int * Masc_exec.Redirect_scope.mode> FILE_REDIRECT_OP
 %token PIPE
 %token EOF
 
-%start <((string * bool) * (string * bool) list * Masc_exec.Redirect_scope.t list) list> command
+%start <((string * Masc_exec.Shell_ir.arg_meta) * (string * Masc_exec.Shell_ir.arg_meta) list * Masc_exec.Redirect_scope.t list) list> command
 
 %%
 
 literal_word:
   | value = WORD { value }
-  | DEV_NULL { "/dev/null", false }
+  | DEV_NULL { "/dev/null", Masc_exec.Shell_ir.default_meta }
 
 part:
   | arg = literal_word { Arg arg }

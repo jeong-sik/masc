@@ -7,6 +7,7 @@
 
 {
   open Bash_subset
+  open Masc_exec
 
   (* Token budget — each lexeme increments a counter.  The 50k ceiling
      is enforced in the lexer so large inputs abort before Menhir builds

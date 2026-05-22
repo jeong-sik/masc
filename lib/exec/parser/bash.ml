@@ -16,9 +16,7 @@ let is_env_name_char = function
   | 'A' .. 'Z' | 'a' .. 'z' | '0' .. '9' | '_' -> true
   | _other -> false
 
-let meta ~quoted = { Shell_ir.default_meta with quoted }
-
-let parse_env_assignment (word, quoted) =
+let parse_env_assignment (word_str, meta) =
   match String.index_opt word_str '=' with
   | None -> None
   | Some 0 -> None
@@ -30,14 +28,14 @@ let parse_env_assignment (word, quoted) =
       let value =
         String.sub word_str (idx + 1) (String.length word_str - idx - 1)
       in
-      Some (name, Shell_ir.Lit (value, meta ~quoted))
+      Some (name, Shell_ir.Lit (value, meta))
     else None
 
 let split_env_prefix words =
   let rec loop env = function
     | [] -> Error { Parsed.pos = Lexing.dummy_pos; token = ""; expected = [ "command" ] }
     | word :: rest ->
-      (match parse_env_assignment (fst word) with
+      (match parse_env_assignment word with
        | Some binding -> loop (binding :: env) rest
        | None -> Ok (List.rev env, word, rest))
   in
@@ -56,9 +54,7 @@ let raw_to_simple (bin_word, args_words, redirects)
     Error { Parsed.pos = Lexing.dummy_pos; token = bin_str; expected = [] }
   | Ok bin ->
     let args =
-      List.map
-        (fun (s, quoted) -> Shell_ir.Lit (s, meta ~quoted))
-        args_words
+      List.map (fun (s, meta) -> Shell_ir.Lit (s, meta)) args_words
     in
     Ok
       { Shell_ir.bin
@@ -80,7 +76,11 @@ let rec map_stages = function
         | Ok tail -> Ok (simple :: tail)))
 
 let to_shell_ir
-      (stages : (string * string list * Redirect_scope.t list) list)
+      (stages :
+        ( (string * Shell_ir.arg_meta)
+        * (string * Shell_ir.arg_meta) list
+        * Redirect_scope.t list )
+        list)
     : Shell_ir.t Parsed.t =
   match map_stages stages with
   | Error e -> Parsed.Parse_error e

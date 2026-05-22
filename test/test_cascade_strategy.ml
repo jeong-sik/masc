@@ -575,6 +575,54 @@ let test_history_try_acquire_records_events () =
           "cli:claude_code" a.key
       | _ -> fail "expected 3 events"))
 
+let test_try_acquire_unregistered_returns_unregistered () =
+  C.unregister_all ();
+  match C.try_acquire "http://never-registered.example/api" with
+  | Unregistered -> ()
+  | Acquired _ -> fail "unregistered URL should not acquire"
+  | Full _ -> fail "unregistered URL should not report Full"
+
+let test_try_acquire_full_returns_retry_after () =
+  C.unregister_all ();
+  C.register ~url:"cli:test_retry" ~max_concurrent:1;
+  let acquired =
+    match C.try_acquire "cli:test_retry" with
+    | Acquired r -> r
+    | Unregistered | Full _ -> fail "first acquire should succeed"
+  in
+  (* Capacity is now saturated. *)
+  (match C.try_acquire "cli:test_retry" with
+   | Full { retry_after_s } ->
+     check (option (float 0.01)) "retry_after_s is Some 5.0"
+       (Some 5.0) retry_after_s
+   | Acquired _ -> fail "second acquire should be Full"
+   | Unregistered -> fail "registered URL should not be Unregistered");
+  acquired ()
+
+let test_try_acquire_full_then_release_then_acquire () =
+  C.unregister_all ();
+  C.register ~url:"cli:test_cycle" ~max_concurrent:1;
+  let release1 =
+    match C.try_acquire "cli:test_cycle" with
+    | Acquired r -> r
+    | Unregistered | Full _ -> fail "first acquire should succeed"
+  in
+  (* Exhaust capacity. *)
+  (match C.try_acquire "cli:test_cycle" with
+   | Full _ -> ()
+   | Acquired _ -> fail "should be Full at cap"
+   | Unregistered -> fail "registered URL should not be Unregistered");
+  (* Release and re-acquire. *)
+  release1 ();
+  (match C.try_acquire "cli:test_cycle" with
+   | Acquired r -> r ()
+   | Unregistered | Full _ -> fail "re-acquire after release should succeed");
+  (* Verify counter is back to zero via snapshot. *)
+  match C.snapshot () with
+  | (url, info) :: _ when url = "cli:test_cycle" ->
+    check int "active after full cycle" 0 info.process_active
+  | _ -> ()
+
 (* ── Prometheus counter coverage (LT-6) ──────────────────
 
    The counter increment runs outside the ring-buffer mutex and uses the
@@ -926,6 +974,12 @@ let () =
         test_history_snapshot_kind_filter;
       test_case "try_acquire records events on registered URL" `Quick
         test_history_try_acquire_records_events;
+      test_case "try_acquire unregistered returns Unregistered" `Quick
+        test_try_acquire_unregistered_returns_unregistered;
+      test_case "try_acquire Full carries retry_after_sec" `Quick
+        test_try_acquire_full_returns_retry_after;
+      test_case "try_acquire release cycle frees slot" `Quick
+        test_try_acquire_full_then_release_then_acquire;
       test_case "record bumps Prometheus counter with label" `Quick
         test_history_prometheus_counter_increments;
       test_case "dashboard JSON exposes provenance" `Quick

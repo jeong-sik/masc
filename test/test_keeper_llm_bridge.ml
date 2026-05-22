@@ -115,8 +115,8 @@ let test_timeout_log_carries_failure_envelope () =
           assert_latest_failure_envelope
             ~label:"timeout"
             ~needle:"OAS execution timed out"
-            ~cause_code:"oas_timeout_budget"
-            ~operator_action:"inspect_timeout_budget"
+            ~cause_code:"provider_timeout"
+            ~operator_action:"inspect_provider_stream"
         | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
         | Ok value -> Alcotest.failf "unexpected success: %s" value)))
 ;;

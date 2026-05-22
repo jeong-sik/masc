@@ -66,7 +66,7 @@ let operator_action_check_masc_eio_env = "check_masc_eio_env"
 let operator_action_inspect_oas_bridge_error = "inspect_oas_bridge_error"
 let site_no_clock = "no_clock"
 let site_timeout = "timeout"
-let cause_code_oas_timeout_budget = "oas_timeout_budget"
+let cause_code_provider_timeout = "provider_timeout"
 let site_cancelled = "cancelled"
 let site_execution_error = "execution_error"
 let channel_oas_bridge = "oas_bridge"
@@ -247,11 +247,11 @@ let run_with_timeout_and_fallback
       in
       let envelope =
         bridge_failure_envelope
-          ~cause_code:cause_code_oas_timeout_budget
+          ~cause_code:cause_code_provider_timeout
           ~severity:Failure_envelope.Bad
-          ~summary:"OAS execution exceeded its keeper bridge timeout budget"
+          ~summary:"Provider execution exceeded its keeper bridge timeout"
           ~recoverability:Failure_envelope.Operator_action_required
-          ~operator_action:"inspect_timeout_budget"
+          ~operator_action:"inspect_provider_stream"
           ~evidence_ref:
             (`Assoc
               [

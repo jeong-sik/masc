@@ -41,21 +41,24 @@ warning preserves the same fields (`layer`, `origin`, `budget`, `actual`,
 
 ## Operator outcome
 
-Timeout budget failures are not global shutdown signals. A single
-`oas_timeout_budget` is scoped to the keeper turn that exhausted its OAS
-budget. The turn ledger and runtime-trust snapshot must surface
-`terminal_reason.code = "oas_timeout_budget"` with
-`terminal_reason.next_action = "inspect_timeout_budget"`. The runtime-trust
+Provider timeout failures are not global shutdown signals. A single
+`provider_timeout` is scoped to the provider attempt or keeper turn whose
+provider wait exceeded the active budget. The turn ledger and runtime-trust
+snapshot must surface provider-owned timeout evidence as provider timeout
+detail, while turn-owned wall-clock exhaustion surfaces as
+`terminal_reason.code = "turn_wall_clock_timeout"` with
+`terminal_reason.next_action = "inspect_turn_timeout"`. The runtime-trust
 snapshot mirrors that as `latest_next_action`, and the runtime surface marks
 the keeper as needing attention with
-`next_human_action = "inspect_timeout_budget"` when the keeper is not paused.
-Paused timeout-budget cases keep the paused workflow
+`next_human_action = "inspect_turn_timeout"` when the keeper is not paused.
+Paused provider-timeout cases keep the paused workflow
 (`attention_reason = "paused_blocked"`,
 `next_human_action = "inspect_runtime_blocker"`) while still exposing
-`runtime_blocker_class = "oas_timeout_budget"`. Repeated consecutive budget
-strikes are promoted by the keepalive loop to
-`Oas_timeout_budget_loop`, which the supervisor auto-pauses instead of
-restart-looping.
+`runtime_blocker_class = "turn_timeout"` or provider-runtime timeout detail.
+Repeated consecutive provider-timeout strikes are promoted by the keepalive
+loop to `Provider_timeout_loop`, which the supervisor auto-pauses instead of
+restart-looping. Legacy `oas_timeout_budget` wire labels are decode-only
+compatibility and must be canonicalized before deriving operator state.
 
 For parallel OAS work, distinguish all-settled fanout from fail-fast race:
 `Async_agent.all` contains per-agent timeout/error results while siblings

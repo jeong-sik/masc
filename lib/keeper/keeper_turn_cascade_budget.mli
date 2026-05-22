@@ -164,6 +164,9 @@ val reclassify_oas_timeout_for_attempt :
   timeout_budget:oas_timeout_budget_resolution option ->
   Agent_sdk.Error.sdk_error ->
   Agent_sdk.Error.sdk_error
+(** Preserve upstream structural timeout errors instead of minting a synthetic
+    [Oas_timeout_budget] root cause.  Kept as a named hook while the
+    provider-timeout root-cause ADT is introduced in a later PR. *)
 
 val attempt_watchdog_timeout_sec :
   remaining_turn_budget_s:float ->

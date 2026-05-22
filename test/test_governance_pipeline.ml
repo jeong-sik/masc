@@ -902,7 +902,20 @@ let test_escalation_read_only_keeper_shell_gh_unchanged () =
       ~base_risk:Gp.Low
   in
   Alcotest.(check string) "read-only keeper_shell op=gh stays low"
-    "low" (Gp.risk_level_to_string unchanged)
+    "low" (Gp.risk_level_to_string unchanged);
+  let typed_unchanged =
+    Gp.combinatorial_risk_escalation
+      ~trifecta_active:true
+      ~tool_name:"keeper_shell"
+      ~input:
+        (`Assoc
+          [ ("op", `String "gh")
+          ; ("argv", `List [ `String "pr"; `String "view"; `String "123" ])
+          ])
+      ~base_risk:Gp.Low
+  in
+  Alcotest.(check string) "read-only keeper_shell op=gh argv stays low"
+    "low" (Gp.risk_level_to_string typed_unchanged)
 
 let test_tool_capabilities_known () =
   let caps = Gp.tool_capabilities "keeper_bash" in

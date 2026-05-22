@@ -57,7 +57,7 @@ describe('KeeperRuntimeAlertStrip', () => {
         needs_attention: true,
         trust: {
           disposition: 'Alert',
-          attention_reason: 'timeout_budget_exhausted',
+          attention_reason: 'completion_contract_violation',
           execution_summary: {
             tool_contract_result: 'satisfied_execution',
           },
@@ -69,7 +69,7 @@ describe('KeeperRuntimeAlertStrip', () => {
     // Verdict failure is surfaced under a single "검증" label.
     expect(text).toContain('검증')
     expect(text).toContain('runtime_blocked')
-    expect(text).not.toContain('timeout_budget_exhausted')
+    expect(text).not.toContain('completion_contract_violation')
     // The tool contract success is preserved but tagged as scope
     // evidence ("도구 계약"), not as a sibling "증명" claim that would
     // read as the surface contradicting itself.
@@ -88,20 +88,32 @@ describe('KeeperRuntimeAlertStrip', () => {
     }))
 
     const text = container.textContent ?? ''
-    expect(text).toContain('runtime_blocked')
-    expect(text).toContain('런타임 근거 확인')
+    expect(text).toContain('런타임 근거 확인 필요')
     expect(text).not.toContain('watchdog_stale_turn')
     expect(text).not.toContain('inspect_watchdog_root_cause')
+  })
+
+  it('canonicalizes turn-disposition timeout actions before rendering operator copy', () => {
+    const { container } = render(h(KeeperRuntimeAlertStrip, {
+      keeper: keeper({
+        needs_attention: true,
+        next_human_action: 'inspect_turn_timeout',
+      }),
+    }))
+
+    const text = container.textContent ?? ''
+    expect(text).toContain('런타임 근거 확인')
+    expect(text).not.toContain('inspect_turn_timeout')
   })
 
   it('closes 모순 #3: per-attempt completed outcome is hidden when per-turn stop cause is terminal failure', () => {
     const { container } = render(h(KeeperRuntimeAlertStrip, {
       keeper: keeper({
         stop_cause: {
-          code: 'oas_timeout_budget',
+          code: 'turn_timeout',
           source: 'runtime_blocker_class',
-          label: 'OAS timeout budget',
-          summary: 'budget exhausted before turn completion',
+          label: 'Turn timeout',
+          summary: 'turn wall clock exceeded before completion',
         },
         trust: {
           execution_summary: {
@@ -117,9 +129,9 @@ describe('KeeperRuntimeAlertStrip', () => {
     // Per-turn stop cause is rendered through the canonical terminal code.
     expect(text).toContain('정지 원인')
     expect(text).toContain('turn_timeout')
-    expect(text).not.toContain('oas_timeout_budget')
+    expect(text).toContain('turn_timeout')
     // Per-attempt success is gated out so the strip no longer shows
-    // "런타임 레인 · completed" next to "정지 원인 · oas_timeout_budget".
+    // "런타임 레인 · completed" next to "정지 원인 · turn_timeout".
     expect(text).not.toContain('런타임 레인')
     expect(text).not.toContain('마지막 시도')
   })
@@ -157,8 +169,8 @@ describe('KeeperRuntimeAlertStrip', () => {
         needs_attention: true,
         attention_reason: 'paused',
         next_human_action: 'inspect_blocker_before_resume',
-        runtime_blocker_class: 'oas_timeout_budget',
-        runtime_blocker_summary: 'OAS budget timeout fired before the keeper hard timeout.',
+        runtime_blocker_class: 'turn_timeout',
+        runtime_blocker_summary: 'Turn timeout fired before resume.',
       }),
     }))
 

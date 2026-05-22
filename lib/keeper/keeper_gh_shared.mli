@@ -89,6 +89,12 @@ type gh_simple_command
 val parse_simple_gh_command :
   string -> (gh_simple_command, gh_command_parse_error) result
 
+(** Build a simple gh command from already-tokenized argv. Accepts both
+    [["pr"; "list"]] and [["gh"; "pr"; "list"]] forms, preserving each
+    argument as a literal argv atom. *)
+val gh_simple_command_of_argv :
+  string list -> (gh_simple_command, gh_command_parse_error) result
+
 val gh_simple_command_argv : gh_simple_command -> string list
 
 val render_simple_gh_command : gh_simple_command -> string

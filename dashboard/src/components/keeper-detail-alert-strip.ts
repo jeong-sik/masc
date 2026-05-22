@@ -85,7 +85,6 @@ const ATTENTION_REASON_LABELS: Record<AttentionReason, string> = {
 }
 
 function canonicalAttentionReason(reason: string | null): string | null {
-  if (reason === 'timeout_budget_exhausted') return 'runtime_blocked'
   if (reason === 'cascade_attempts_exhausted') return 'runtime_blocked'
   if (reason === 'provider_tool_capability_missing') return 'runtime_blocked'
   if (reason === 'completion_contract_violation') return 'runtime_blocked'
@@ -110,6 +109,7 @@ function attentionReasonLabel(reason: string | null, paused: boolean): string | 
 // Backend emit sites for `next_human_action` (paired 1:1 with the
 // corresponding `attention_reason`):
 //   - lib/keeper/keeper_status_bridge.ml:727-742 (seven common actions)
+//   - lib/keeper/keeper_turn_disposition.ml:63-70 (runtime-trust latest action)
 //   - lib/keeper_fd_pressure.ml:191 ('restore_fd_headroom')
 //   - lib/dashboard/dashboard_goals.ml:45 ('inspect_keeper_runtime_trust')
 const NEXT_HUMAN_ACTIONS = [
@@ -140,6 +140,7 @@ function isNextHumanAction(s: string): s is NextHumanAction {
 }
 
 function canonicalNextHumanAction(action: string | null): string | null {
+  if (action === 'inspect_turn_timeout') return 'inspect_runtime_blocker'
   if (action === 'inspect_timeout_budget') return 'inspect_runtime_blocker'
   if (action === 'inspect_cascade_attempts') return 'inspect_runtime_blocker'
   if (action === 'inspect_provider_tool_lane') return 'inspect_runtime_blocker'
@@ -183,14 +184,10 @@ function isAttentionPairDuplicate(reason: string | null, action: string | null):
 }
 
 function canonicalTerminalCode(code: string | null): string | null {
-  if (code === 'oas_timeout_budget') return 'turn_timeout'
   return code
 }
 
 function canonicalTerminalSummary(code: string | null, summary: string | null | undefined): string | null {
-  if (code === 'oas_timeout_budget') {
-    return '턴 실행 시간이 제한 시간을 초과했습니다.'
-  }
   return summary?.trim() || null
 }
 
@@ -264,10 +261,7 @@ function renderCascadeAttemptObservation(observation: CascadeAttemptObservation)
 }
 
 export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
-  const runtimeBlockerClass =
-    keeper.runtime_blocker_class === 'oas_timeout_budget'
-      ? 'turn_timeout'
-      : keeper.runtime_blocker_class
+  const runtimeBlockerClass = keeper.runtime_blocker_class
   const runtimeBlocker = keeperRuntimeBlockerHint(keeper)
   const continueGate = keeper.runtime_blocker_continue_gate === true
   const socialFallbackActive = keeper.social_model_recognized === false

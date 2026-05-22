@@ -593,8 +593,8 @@ let compute_metrics_window
 	              ("memory_compaction_dropped_notes", `Int memory_compaction_dropped_notes_now);
 	              ("memory_compaction_invalid_dropped", `Int memory_compaction_invalid_dropped_now);
 	              ("memory_expected_topic", Json_util.string_opt_to_json memory_expected_topic);
-              ( "provider_timeout_budget",
-                j |> member "provider_timeout_budget" );
+              ( "provider_timeout_plan",
+                j |> member "provider_timeout_plan" );
               ( "inference_telemetry",
                 j
                 |> member "inference_telemetry"

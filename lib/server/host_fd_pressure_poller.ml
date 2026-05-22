@@ -71,8 +71,9 @@ let parse_iso8601_opt s =
      with
      (* RFC-0145 — narrowed from a wildcard catch-all to the only
         exceptions [Scanf.sscanf] / [Unix.mktime] raise on ill-formed
-        ISO8601 input.  Unrelated runtime exceptions now propagate. *)
-     | Scanf.Scan_failure _ | End_of_file | Unix.Unix_error _ -> None)
+        ISO8601 input.  [Failure] covers numeric conversion failures
+        from [Scanf.sscanf] for malformed external timestamps. *)
+     | Scanf.Scan_failure _ | Failure _ | End_of_file | Unix.Unix_error _ -> None)
   | _ -> None
 ;;
 

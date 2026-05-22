@@ -111,6 +111,39 @@ let required_tool_lane_unavailable_error ~lane ~missing_required_tools
              (String.concat ", " materialized_tools);
        })
 
+let provider_rejection_for_required_tool_unsupported ~provider_label
+    ~missing_required_tools =
+  ({
+     reason =
+       Printf.sprintf
+         "required_tool_unsupported: provider=%s missing_required_tools=[%s]"
+         provider_label
+         (String.concat ", " missing_required_tools);
+   }
+    : Cascade_error_classify.provider_rejection)
+
+let no_tool_capable_provider_of_pre_dispatch_rejections ~cascade_name
+    ~configured_labels ~runtime_manifest_required_tool_names ~runtime_mcp_policy
+    ~tools ~required_lane_provider_rejections ~pre_dispatch_provider_rejections =
+  match runtime_manifest_required_tool_names, pre_dispatch_provider_rejections with
+  | [], _ | _, [] -> None
+  | _ ->
+      let required_tool_names =
+        match required_tool_names_for_no_tool_error ~runtime_mcp_policy ~tools with
+        | [] -> dedupe_keep_order runtime_manifest_required_tool_names
+        | names -> names
+      in
+      Some
+        (Cascade_error_classify.No_tool_capable_provider
+           {
+             cascade_name;
+             configured_labels;
+             required_tool_names;
+             provider_rejections =
+               required_lane_provider_rejections
+               @ pre_dispatch_provider_rejections;
+           })
+
 type empty_candidate_classification =
   | Tool_capability_empty
   | Provider_unavailable

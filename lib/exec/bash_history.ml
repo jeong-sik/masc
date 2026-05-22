@@ -225,7 +225,9 @@ let load_entries path =
           while true do
             let line = input_line ic in
             match Yojson.Safe.from_string line with
-            | exception _ -> ()
+            (* RFC-0145 — narrow to the only exception
+               [Yojson.Safe.from_string] raises on malformed JSON. *)
+            | exception Yojson.Json_error _ -> ()
             | json ->
               (match entry_of_json json with
                | Some e -> entries := e :: !entries

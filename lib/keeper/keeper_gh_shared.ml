@@ -92,6 +92,19 @@ let render_simple_gh_command cmd =
   cmd.argv |> List.map Filename.quote |> String.concat " "
 ;;
 
+let gh_simple_command_of_argv argv =
+  let rec drop_leading_gh = function
+    | token :: rest when String_util.equals_ci token "gh" -> drop_leading_gh rest
+    | remaining -> remaining
+  in
+  let argv = drop_leading_gh argv in
+  match argv with
+  | [] -> Error Empty_command
+  | _ when List.exists (fun arg -> String.contains arg '\000') argv ->
+    Error (Unsupported_command_shape "nul_arg")
+  | _ -> Ok { argv }
+;;
+
 let too_complex_reason_tag (r : Masc_exec.Parsed.reason_too_complex) =
   match r with
   | `Heredoc -> "heredoc"

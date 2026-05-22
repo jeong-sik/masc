@@ -154,7 +154,7 @@ export function KeeperMemoryTierPanel({
     `
   }
 
-  if (error || !usage || usage.length === 0) {
+  if (error || memoryBankErrorClass !== null || !usage || usage.length === 0) {
     // RFC-0149 §3.1 — if the bank read returned a typed failure class,
     // surface it on the empty-state message so operators can distinguish
     // "no memory rows recorded" from "memory bank unreadable".

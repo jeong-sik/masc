@@ -34,17 +34,8 @@ let runtime_pressure_class_to_string = function
   | Runtime_failure -> "runtime_failure"
 ;;
 
-let canonical_runtime_pressure_label = function
-  | "oas_timeout_budget" | "oas_timeout_budget_loop" -> "provider_timeout"
-  | label -> label
-
 let runtime_pressure_class_of_label label =
-  match
-    label
-    |> String.trim
-    |> String.lowercase_ascii
-    |> canonical_runtime_pressure_label
-  with
+  match label |> String.trim |> String.lowercase_ascii with
   | "client_capacity_full" | "client_capacity" -> Some Client_capacity_full
   | "tier_admission_full" | "tier_admission" -> Some Tier_admission_full
   | "provider_capacity" | "provider_capacity_full" | "capacity_backpressure" ->

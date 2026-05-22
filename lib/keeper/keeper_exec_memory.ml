@@ -241,7 +241,7 @@ let search_history
      the others.  The decision to elide is made *here* rather than
      hidden inside a silent facade — failures still surface via the
      [metric_keeper_memory_recall_read_errors] counter emitted by
-     [read_file_tail_lines]. *)
+     [Keeper_memory_recall.load_history_user_messages_result]. *)
   let current_history =
     match
       Keeper_memory_recall.load_history_user_messages_result

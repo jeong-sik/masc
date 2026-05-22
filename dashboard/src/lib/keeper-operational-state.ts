@@ -110,7 +110,7 @@ export interface DeriveInputs {
 function canonicalRuntimeBlockerClass(
   blockerClass: KeeperRuntimeBlockerClass | null,
 ): KeeperRuntimeBlockerClass | null {
-  if (blockerClass === 'oas_timeout_budget') return 'turn_timeout'
+  if (blockerClass === 'oas_timeout_budget') return null
   return blockerClass
 }
 

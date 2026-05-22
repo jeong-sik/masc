@@ -44,6 +44,54 @@ let observe_history_append ~root ~keeper_name entry =
         keeper_name root (Printexc.to_string exn)
 ;;
 
+let json_string_list_field name args =
+  match args with
+  | `Assoc fields ->
+    (match List.assoc_opt name fields with
+     | None -> Ok None
+     | Some (`List values) ->
+       let rec collect acc = function
+         | [] -> Ok (Some (List.rev acc))
+         | `String value :: rest -> collect (value :: acc) rest
+         | _ :: _ -> Error (Printf.sprintf "%s must be an array of strings" name)
+       in
+       collect [] values
+     | Some _ -> Error (Printf.sprintf "%s must be an array of strings" name))
+  | _ -> Ok None
+;;
+
+let gh_parse_error_reason = function
+  | Keeper_gh_shared.Empty_command -> "empty_command"
+  | Keeper_gh_shared.Unsupported_shell_construct tag -> tag
+  | Keeper_gh_shared.Unsupported_command_shape tag -> tag
+;;
+
+let gh_command_from_args raw_cmd_str args =
+  match json_string_list_field "argv" args with
+  | Error msg -> Error (`Input msg)
+  | Ok argv_opt ->
+    let has_cmd = String.trim raw_cmd_str <> "" in
+    (match has_cmd, argv_opt with
+     | true, Some _ ->
+       Error
+         (`Input
+           "cmd and argv are mutually exclusive for gh op; use argv for the typed \
+            contract or cmd for the legacy string contract")
+     | false, None ->
+       Error
+         (`Input
+           "argv or legacy cmd is required for gh op. Prefer typed argv, e.g. \
+            argv=[\"pr\",\"list\",\"--state\",\"open\"].")
+     | true, None ->
+       (match Keeper_gh_shared.parse_simple_gh_command raw_cmd_str with
+        | Ok parsed -> Ok parsed
+        | Error parse_error -> Error (`Parse parse_error))
+     | false, Some argv ->
+       (match Keeper_gh_shared.gh_simple_command_of_argv argv with
+        | Ok parsed -> Ok parsed
+        | Error parse_error -> Error (`Parse parse_error)))
+;;
+
 let handle_keeper_shell
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
       ~exec_cache:(_exec_cache : Masc_exec.Exec_cache.t option)
@@ -1112,34 +1160,24 @@ let handle_keeper_shell
     let timeout_sec =
       Keeper_shell_shared.clamp_shell_timeout ~min_sec:Keeper_shell_shared.gh_min_timeout_sec ~default:gh_default_timeout args
     in
-    if String.trim raw_cmd_str = "" then
-      error_json ~fields:[ "op", `String op ]
-        "cmd is required for gh op. Good: cmd='pr list --state open'. Bad: cmd=''."
-    else (
-      match Keeper_gh_shared.parse_simple_gh_command raw_cmd_str with
-      | Error parse_error ->
-        let reason =
-          match parse_error with
-          | Keeper_gh_shared.Empty_command -> "empty_command"
-          | Keeper_gh_shared.Unsupported_shell_construct tag -> tag
-          | Keeper_gh_shared.Unsupported_command_shape tag -> tag
-        in
-        Yojson.Safe.to_string
-          (`Assoc
-              [ "ok", `Bool false
-              ; "op", `String op
-              ; "error", `String "gh_command_shape_unsupported"
-              ; "reason", `String reason
-              ; "hint", `String
-                 "GitHub shell bridge only accepts one simple gh command. \
-                   Avoid pipelines, redirects, env prefixes, and shell \
-                   control syntax."
-              ])
-      | Ok parsed_cmd ->
+    (match gh_command_from_args raw_cmd_str args with
+     | Error (`Input msg) -> error_json ~fields:[ "op", `String op ] msg
+     | Error (`Parse parse_error) ->
+       let reason = gh_parse_error_reason parse_error in
+       Yojson.Safe.to_string
+         (`Assoc
+             [ "ok", `Bool false
+             ; "op", `String op
+             ; "error", `String "gh_command_shape_unsupported"
+             ; "reason", `String reason
+             ; "hint", `String
+                "GitHub shell bridge accepts typed argv or one simple gh command. \
+                 Avoid pipelines, redirects, env prefixes, and shell control syntax."
+             ])
+     | Ok parsed_cmd ->
         let allowed_orgs_opt = Keeper_tool_policy.git_clone_allowed_orgs () in
         let canonical_cmd_str =
-          Keeper_gh_shared.gh_simple_command_argv parsed_cmd
-          |> String.concat " "
+          Keeper_gh_shared.render_simple_gh_command parsed_cmd
         in
         (* Reversibility gate (Thariq / Anthropic auto-mode principle):
            - R0 read / R1 reversible mutation: allowed; R1 is audit-logged.

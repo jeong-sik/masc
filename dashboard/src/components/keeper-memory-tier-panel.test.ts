@@ -86,12 +86,16 @@ describe('filterMemoryKindUsage', () => {
   })
 })
 
-function mockMemoryTierFetches(usage: MemoryKindUsageEntry[]) {
+function mockMemoryTierFetches(
+  usage: MemoryKindUsageEntry[],
+  opts: { memoryKindUsageErrorClass?: string | null } = {},
+) {
   fetchKeeperStateDiagramMock.mockResolvedValue({
     keeper: 'keeper-1',
     current_phase: 'Compacting',
     mermaid: 'graph TD',
     memory_kind_usage: usage,
+    memory_kind_usage_error_class: opts.memoryKindUsageErrorClass ?? null,
   } satisfies KeeperStateDiagramResponse)
   const composite = {
     correlation_id: 'keeper-1:run-1',
@@ -139,5 +143,17 @@ describe('KeeperMemoryTierPanel status chips', () => {
     expect(kmcChip?.getAttribute('data-status-chip-uppercase')).toBe('false')
     expect(compactingChip?.getAttribute('data-status-chip-tone')).toBe('warn')
     expect(compactingChip?.getAttribute('data-status-chip-uppercase')).toBe('false')
+  })
+
+  it('surfaces memory bank read errors even when policy caps provide usage rows', async () => {
+    mockMemoryTierFetches(
+      [{ kind: 'tool_result', used: 0, cap: 10, priority: 1 }],
+      { memoryKindUsageErrorClass: 'io_error' },
+    )
+
+    render(html`<${KeeperMemoryTierPanel} keeperName="keeper-1" />`)
+
+    await waitFor(() => expect(screen.getByText('메모리 뱅크 읽기 실패: io_error')).toBeTruthy())
+    expect(screen.queryByText('tool_result')).toBeNull()
   })
 })

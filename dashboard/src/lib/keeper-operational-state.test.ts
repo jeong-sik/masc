@@ -199,18 +199,6 @@ describe('deriveKeeperOperationalState — stuck branch (RFC-0135 §1.1 root)', 
     })
   })
 
-  it('legacy timeout-budget blocker collapses to turn_timeout headline reason', () => {
-    const state = deriveKeeperOperationalState({
-      keeper: makeKeeper({ runtime_blocker_class: 'oas_timeout_budget' }),
-      composite: null,
-    })
-    expect(state).toMatchObject({
-      kind: 'stuck',
-      attention: 'clean',
-      reason: 'turn_timeout',
-    })
-  })
-
   it('fiber_alive=false ⇒ stuck reason=fiber_dead even without blocker', () => {
     const composite = makeComposite()
     ;(composite as unknown as { phase_diagnosis: unknown }).phase_diagnosis = {
@@ -233,8 +221,7 @@ describe('deriveKeeperOperationalState — stuck branch (RFC-0135 §1.1 root)', 
         keeper: makeKeeper({ runtime_blocker_class: cls as KeeperRuntimeBlockerClass }),
         composite: null,
       })
-      const expectedReason = cls === 'oas_timeout_budget' ? 'turn_timeout' : cls
-      expect(state.kind === 'stuck' && state.reason === expectedReason).toBe(true)
+      expect(state.kind === 'stuck' && state.reason === cls).toBe(true)
     }
   })
 })
@@ -370,27 +357,6 @@ describe('deriveKeeperOperationalState — priority invariants', () => {
       keeper: makeKeeper({
         phase: 'Running',
         runtime_blocker_class: 'turn_timeout',
-      }),
-      composite: makeComposite({
-        runtime_attention: attention({
-          execution_current: false,
-          stale_execution_receipt: true,
-        }),
-      }),
-    })
-    expect(state).toMatchObject({
-      kind: 'running',
-      attention: 'clean',
-      turnPhase: 'idle',
-      staleBlocker: 'turn_timeout',
-    })
-  })
-
-  it('legacy timeout-budget stale blocker collapses to turn_timeout context', () => {
-    const state = deriveKeeperOperationalState({
-      keeper: makeKeeper({
-        phase: 'Running',
-        runtime_blocker_class: 'oas_timeout_budget',
       }),
       composite: makeComposite({
         runtime_attention: attention({

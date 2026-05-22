@@ -108,12 +108,8 @@ let assoc_string_field key fields =
       if String.equal value "" then None else Some value
   | _ -> None
 
-let canonical_keeper_attention_reason = function
-  | Some "timeout_budget_exhausted" -> None
-  | reason -> reason
-
 let keeper_attention_kind reason =
-  match canonical_keeper_attention_reason reason with
+  match reason with
   | Some reason -> "keeper_" ^ reason
   | None -> "keeper_attention"
 

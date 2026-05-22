@@ -1041,10 +1041,25 @@ let run_named
   in
   let rec try_cascade
       ?(on_success = fun ~provider_key:_ -> ())
+      ?(pre_dispatch_required_tool_rejections_rev = [])
       ?resume_checkpoint ?per_provider_timeout_s ?last_capacity_source
       ?last_capacity_backpressure remaining last_err =
     match remaining with
     | [] ->
+      let pre_dispatch_no_tool_capable =
+        match last_err, last_capacity_backpressure with
+        | None, None ->
+          no_tool_capable_provider_of_pre_dispatch_rejections
+            ~cascade_name:error_cascade_name
+            ~configured_labels
+            ~runtime_manifest_required_tool_names
+            ~runtime_mcp_policy
+            ~tools
+            ~required_lane_provider_rejections
+            ~pre_dispatch_provider_rejections:
+              (List.rev pre_dispatch_required_tool_rejections_rev)
+        | Some _, _ | _, Some _ -> None
+      in
       let reason : Keeper_types.cascade_exhaustion_reason = match last_err with
         | Some (Llm_provider.Http_client.NetworkError { message; kind }) ->
             if kind = Llm_provider.Http_client.Connection_refused
@@ -1141,11 +1156,14 @@ let run_named
              sdk_error_of_masc_internal_error capacity_error
            | None ->
              sdk_error_of_masc_internal_error
-               (Cascade_exhausted
-                  {
-                    cascade_name = error_cascade_name;
-                    reason;
-                  }))
+               (match pre_dispatch_no_tool_capable with
+                | Some internal_error -> internal_error
+                | None ->
+                  Cascade_exhausted
+                    {
+                      cascade_name = error_cascade_name;
+                      reason;
+                    }))
       in
       Error
         terminal_error
@@ -1200,6 +1218,11 @@ let run_named
              let skip_reason =
                Cascade_candidate_skip_reason.Required_tool_unsupported { missing }
              in
+             let provider_rejection =
+               provider_rejection_for_required_tool_unsupported
+                 ~provider_label
+                 ~missing_required_tools:missing
+             in
              Log.Misc.info
                "cascade %s: pre-dispatch blocked provider=%s reason=%s \
                 missing=[%s]"
@@ -1221,12 +1244,14 @@ let run_named
                     ; "provider_attempt_started", `Bool false
                     ])
                Keeper_runtime_manifest.Pre_dispatch_blocked;
-             Some ()
+             Some provider_rejection
            | Some true | None -> None)
       in
       match pre_dispatch_blocked with
-      | Some () ->
+      | Some provider_rejection ->
         try_cascade ~on_success ?resume_checkpoint ?per_provider_timeout_s
+          ~pre_dispatch_required_tool_rejections_rev:
+            (provider_rejection :: pre_dispatch_required_tool_rejections_rev)
           ?last_capacity_source ?last_capacity_backpressure rest last_err
       | None ->
       let tier_admission_id = Cascade_runtime_candidate.tier_id candidate in
@@ -1245,9 +1270,11 @@ let run_named
               "cascade %s: skipping %s (provider_key=%s cooldown: %s)"
               cascade_name runtime_candidate_label runtime_candidate_label msg;
             try_cascade ~on_success ?resume_checkpoint ?per_provider_timeout_s
+              ~pre_dispatch_required_tool_rejections_rev
               ?last_capacity_source ?last_capacity_backpressure rest last_err
         | None ->
             try_cascade ~on_success ?resume_checkpoint ?per_provider_timeout_s
+              ~pre_dispatch_required_tool_rejections_rev
               ?last_capacity_source ?last_capacity_backpressure rest last_err)
       else (
       (match health_cooldown with
@@ -1277,6 +1304,7 @@ let run_named
           Printf.sprintf "client capacity key %s is full" capacity_key
         in
         try_cascade ~on_success ?resume_checkpoint ?per_provider_timeout_s
+          ~pre_dispatch_required_tool_rejections_rev
           ~last_capacity_backpressure:
             (Client_capacity, capacity_detail, None)
           rest last_err
@@ -1499,6 +1527,7 @@ let run_named
           Printf.sprintf "tier admission %s is full" tier_admission_id
         in
         try_cascade ~on_success ?resume_checkpoint ?per_provider_timeout_s
+          ~pre_dispatch_required_tool_rejections_rev
           ~last_capacity_backpressure:
             (Tier_admission, capacity_detail, None)
           rest last_err
@@ -1595,7 +1624,11 @@ let run_named
            (* The rejected response is not trusted progress.  Resuming
               from its checkpoint can turn a fallback provider into a
               replay of the rejected empty/schema-invalid turn. *)
-           try_cascade ?resume_checkpoint (filter_provider_health_fail_open rest) new_err
+           try_cascade
+             ~pre_dispatch_required_tool_rejections_rev
+             ?resume_checkpoint
+             (filter_provider_health_fail_open rest)
+             new_err
          | Cascade_fsm.Exhausted _ ->
            record_candidate_health_rejected candidate ~reason;
            let observation =
@@ -1769,6 +1802,7 @@ let run_named
                 Option.bind new_err capacity_backpressure_source_of_http_error
               in
               try_cascade
+                ~pre_dispatch_required_tool_rejections_rev
                 ?resume_checkpoint:retry_resume_checkpoint
                 ?last_capacity_source
                 (filter_provider_health_fail_open rest)

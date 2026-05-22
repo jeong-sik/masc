@@ -27,12 +27,7 @@ export function asKeeperRuntimeBlockerClass(
 //
 // Backend can still decode these 24 lowercase wire strings (verified by
 // `Keeper_synthetic_marker` audit, 2026-05-19). The list below is the
-// *frozen* mirror — keep it 1:1 with `keeper_meta_contract.ml`.
-// Some entries are legacy compatibility surfaces rather than desired
-// new root-cause emissions; for example, `oas_timeout_budget` should be
-// projected to owner-specific timeout/admission/capacity causes before it
-// reaches operator copy.
-//
+// *frozen* mirror — keep it 1:1 with `keeper_meta_contract.ml`.//
 // Status bridge (`lib/keeper/keeper_status_bridge.ml`) emits two
 // additional dashboard-only synthetic classes (`synthetic_stall`,
 // `self_imposed_idle`) and the runtime trust pipeline emits
@@ -59,7 +54,6 @@ const BACKEND_KEEPER_META_BLOCKER_CLASSES = [
   'autonomous_slot_wait_timeout',
   'admission_queue_wait_timeout',
   'turn_timeout_after_queue_wait',
-  'oas_timeout_budget', // legacy decode/compat only; do not present as a new root cause
   'turn_timeout',
   'turn_livelock_blocked',
   'completion_contract_violation',

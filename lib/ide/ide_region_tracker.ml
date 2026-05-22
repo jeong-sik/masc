@@ -6,13 +6,16 @@ let parse_hunk_header line =
   if not (String.starts_with ~prefix:"@@" line) then None
   else
     let parts = String.split_on_char ' ' line in
+    (* RFC-0145 — [List.nth] raises [Failure "nth"] on out-of-bounds;
+       narrow the wildcard catch-all to that one exception so unrelated
+       runtime failures propagate to the caller. *)
     let old_part =
       try List.nth parts 1 with
-      | _ -> ""
+      | Failure _ -> ""
     in
     let _new_part =
       try List.nth parts 2 with
-      | _ -> ""
+      | Failure _ -> ""
     in
     let parse_start s =
       let s =

@@ -262,7 +262,7 @@ let is_gh_api_read_only (cmd_lower : string) : bool =
 ;;
 
 (** Extract the effective gh command string from keeper_shell op=gh input.
-    [keeper_exec_shell] uses the [cmd] field. *)
+    [keeper_exec_shell] accepts typed [argv] and legacy [cmd] fields. *)
 let normalize_gh_command (cmd : string) : string =
   let tokens = shell_word_values cmd in
   let rec drop_leading_gh = function
@@ -272,12 +272,45 @@ let normalize_gh_command (cmd : string) : string =
   String.concat " " (drop_leading_gh tokens)
 ;;
 
+let normalize_gh_argv argv =
+  let rec drop_leading_gh = function
+    | token :: rest when String_util.equals_ci token "gh" -> drop_leading_gh rest
+    | remaining -> remaining
+  in
+  drop_leading_gh argv |> String.concat " "
+;;
+
+let json_string_list = function
+  | `List values ->
+    let rec collect acc = function
+      | [] -> Some (List.rev acc)
+      | `String value :: rest -> collect (value :: acc) rest
+      | _ :: _ -> None
+    in
+    collect [] values
+  | _ -> None
+;;
+
 let gh_effective_cmd (input : Yojson.Safe.t) : string =
   match input with
   | `Assoc fields ->
-    (match List.assoc_opt "cmd" fields with
-     | Some (`String s) -> normalize_gh_command s
-     | _ -> "")
+    let cmd =
+      match List.assoc_opt "cmd" fields with
+      | Some (`String s) when String.trim s <> "" -> Some (normalize_gh_command s)
+      | _ -> None
+    in
+    let has_argv_field = Option.is_some (List.assoc_opt "argv" fields) in
+    let argv =
+      match List.assoc_opt "argv" fields with
+      | Some value -> Option.map normalize_gh_argv (json_string_list value)
+      | None -> None
+    in
+    (match cmd, argv with
+     | Some _, Some _ -> ""
+     | Some _, None when has_argv_field -> ""
+     | Some cmd, None -> cmd
+     | None, Some argv -> argv
+     | None, None -> "")
   | _ -> ""
 ;;
 

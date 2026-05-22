@@ -20,11 +20,6 @@
 
 open Cascade_internal_error
 
-let canonical_masc_oas_kind kind =
-  match kind with
-  | "oas_timeout_budget" -> "provider_timeout"
-  | _ -> kind
-
 let parse_masc_internal_error_json (json : Yojson.Safe.t) :
     masc_internal_error option =
   let int_opt_of_assoc key = function
@@ -173,8 +168,7 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
                 Some (Turn_timeout { elapsed_sec = v })
               | _ -> None)
           | _ -> None)
-      | Some (`String kind)
-        when String.equal (canonical_masc_oas_kind kind) "provider_timeout" -> (
+      | Some (`String "provider_timeout") -> (
           match json with
           | `Assoc fields -> (
               match

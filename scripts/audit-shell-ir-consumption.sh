@@ -74,10 +74,15 @@ g3_gate_typed=$(rg -c 'Shell_(command_)?gate\.gate_typed|gate_typed ~' lib/keepe
   | awk -F: '{s+=$2} END{print s+0}')
 
 # ---- G4: risk stamp existence ----
+# Primary: phantom envelope module shell_ir_risk.ml/mli (RFC-0160 S3)
+g4_phantom=$(rg -c "'decided\b|decided_ir|undecided\b" lib/exec/shell_ir_risk.ml lib/exec/shell_ir_risk.mli 2>/dev/null \
+  | awk -F: '{s+=$2} END{print s+0}')
 g4_risk_in_simple=$(rg -c 'risk\s*:\s*risk_class|type.*risk_class' lib/exec/shell_ir.ml lib/exec/shell_ir.mli 2>/dev/null \
   | awk -F: '{s+=$2} END{print s+0}')
-g4_phantom=$(rg -c "'decided\b|decided_ir" lib/exec/shell_ir.ml lib/exec/shell_ir.mli 2>/dev/null \
-  | awk -F: '{s+=$2} END{print s+0}')
+# Consumer metric: files calling dispatch_decided (non-test)
+g4_dispatch_decided=$(rg -l 'dispatch_decided' lib/ 2>/dev/null \
+  | rg -v '/test/' \
+  | wc -l | tr -d ' ')
 
 # ---- G5: validate_shell_ir_paths callers ----
 g5_callers=$(rg -l 'validate_shell_ir_paths' lib/ 2>/dev/null \
@@ -114,6 +119,7 @@ emit_json() {
   "g3_gate_typed_refs_in_keeper": ${g3_gate_typed},
   "g4_risk_in_simple": ${g4_risk_in_simple},
   "g4_phantom_envelope": ${g4_phantom},
+  "g4_dispatch_decided_consumers": ${g4_dispatch_decided},
   "g5_validate_paths_callers_nontest": ${g5_callers},
   "g6_tla_spec_exists": ${g6_spec},
   "g7_shell_word_values_refs": ${g7_shell_word_values},
@@ -139,9 +145,10 @@ Generated: $(date -u +%Y-%m-%dT%H:%M:%SZ)
   G3  Shell_command_gate.gate_typed refs in lib/keeper/
         ${g3_gate_typed} refs                          (target: ≥ 4 keeper ops covered)
 
-  G4  Risk-stamped IR
+  G4  Risk-stamped IR (phantom envelope in shell_ir_risk.ml/mli)
         risk in simple: ${g4_risk_in_simple}, phantom: ${g4_phantom}
-                                                       (target: one of these ≥ 1)
+        dispatch_decided consumers: ${g4_dispatch_decided} files
+                                                       (target: phantom≥10, consumers≥3)
 
   G5  validate_shell_ir_paths caller files (non-test, non-defining)
         ${g5_callers} files                            (target: ≥ 4)
@@ -184,6 +191,14 @@ diff_against_baseline() {
   c_g7=$(echo "$current_json" | jq -r '.g7_parallel_parser_total')
   if [[ "$c_g7" -gt "$b_g7" ]]; then
     echo "REGRESS G7 (parallel parser refs): ${b_g7} → ${c_g7}"
+    regressions=$((regressions + 1))
+  fi
+  # G4 phantom must not decrease
+  local b_g4 c_g4
+  b_g4=$(jq -r '.g4_phantom_envelope // 0' "$baseline_file")
+  c_g4=$(echo "$current_json" | jq -r '.g4_phantom_envelope')
+  if [[ "$c_g4" -lt "$b_g4" ]]; then
+    echo "REGRESS G4 (phantom envelope): ${b_g4} → ${c_g4}"
     regressions=$((regressions + 1))
   fi
   if [[ "$regressions" -gt 0 ]]; then

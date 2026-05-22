@@ -482,13 +482,6 @@ let system_catalog_names ?config_path () =
 let logged_invalid_fallback : (string * string, unit) Hashtbl.t =
   Hashtbl.create 4
 
-(** Track raw cascade names that did not resolve to any live catalog
-    member so the resolve-live silent-fallback WARN fires once per
-    distinct unresolved name. Bounded by the number of distinct typo /
-    stale-reference names seen during the process lifetime — typical
-    operator workloads keep this in the low single digits. *)
-let logged_unresolved_raw : (string, unit) Hashtbl.t = Hashtbl.create 4
-
 let fallback_cascade_for ?config_path name =
   let public_name = normalized_query_name ?config_path name in
   if String.equal public_name "" then None
@@ -599,38 +592,12 @@ let resolve_live_with_catalog_result ~catalog raw :
   if List.mem normalized catalog then Ok (Runtime_name normalized)
   else Error (`Unresolved raw)
 
-let resolve_live_with_catalog ~catalog raw =
-  match resolve_live_with_catalog_result ~catalog raw with
-  | Ok name -> runtime_name_to_string name
-  | Error (`Unresolved raw') ->
-    let trimmed = String.trim raw' in
-    (* WORKAROUND: RFC-0149 §3.3 sunset target #16787.  Counter + WARN-once
-       remain in the legacy [string]-returning entry point only; the new
-       Result-returning helper above surfaces [Error (`Unresolved raw)]
-       directly so callers can fail-loud at config load time.
-
-       Removal: once every caller migrates to
-       [resolve_live_with_catalog_result], delete this Error arm together
-       with [Cascade_metrics.on_resolve_live_fallback] and
-       [logged_unresolved_raw] per RFC-0149 §3.3 sunset criterion. *)
-    Cascade_metrics.on_resolve_live_fallback ();
-    if not (Hashtbl.mem logged_unresolved_raw trimmed) then begin
-      Hashtbl.add logged_unresolved_raw trimmed ();
-      Log.Misc.warn
-        "[CascadeConfig] cascade name %S did not resolve to any catalog \
-         member; falling back to [Keeper_turn] default — check cascade.toml \
-         for typo or stale reference"
-        trimmed
-    end;
-    Cascade_routes.fallback_name_for_catalog Keeper_turn ~catalog
-
-let resolve_live ?config_path raw =
-  resolve_live_with_catalog ~catalog:(catalog_lookup_names ?config_path ()) raw
-
 (* RFC-0149 §3.3 — Result-returning wrapper that reads the active catalog
-   from the resolved cascade config path.  Mirrors {!resolve_live} for
-   callers that need to fail loud on unresolved input instead of taking
-   the silent fallback. *)
+   from the resolved cascade config path.  Mirrors
+   {!resolve_live_with_catalog_result} but with the catalog loaded from
+   [config_path].  The legacy silent-fallback [resolve_live] /
+   [resolve_live_with_catalog] entry points + their counter + WARN-once
+   Hashtbl were removed as part of the §3.3 sunset closeout. *)
 let resolve_live_result ?config_path raw :
     (runtime_name, [ `Unresolved of string ]) result =
   resolve_live_with_catalog_result

@@ -10,14 +10,10 @@ let health_penalty_warn = Env_config_keeper.DashboardHealth.penalty_warn
 let runtime_warning_ctx_ratio =
   Env_config_keeper.DashboardHealth.runtime_warning_ctx_ratio
 
-let live_keeper_cascade_name (raw : string) =
-  Keeper_cascade_profile.resolve_live raw
-
-(* RFC-0149 §3.3 — Result-returning sibling of {!live_keeper_cascade_name}.
-   New dashboard call sites should consume the typed [Error (`Unresolved _)]
-   and surface it on the canonical JSON field as [`Null] (parse-don't-validate
-   honest signal) instead of letting the silent [Keeper_turn] fallback paper
-   over an unresolved cascade. *)
+(* RFC-0149 §3.3 — typed Result resolver for dashboard call sites.  The
+   legacy [live_keeper_cascade_name] facade + its silent-fallback carrier
+   ([Keeper_cascade_profile.resolve_live]) were removed in the §3.3
+   sunset closeout. *)
 let live_keeper_cascade_name_result (raw : string) :
     (Keeper_cascade_profile.runtime_name, [ `Unresolved of string ]) result =
   Keeper_cascade_profile.resolve_live_result raw

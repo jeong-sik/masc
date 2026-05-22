@@ -209,14 +209,12 @@ val on_weighted_item_dropped : reason:string -> unit
     migration tracker — 5-layer cascade.toml never hits this
     path, so non-zero rate flags legacy fixtures. *)
 
-val on_resolve_live_fallback : unit -> unit
-(** Tick the resolve-live fallback counter at
-    [Keeper_cascade_profile.resolve_live_with_catalog] when the
-    requested raw cascade name (and its logical-use
-    normalization) is not present in the live catalog and the
-    function falls back to the [Keeper_turn] default.  Distinct
-    from iter-30 [route_resolve_fallback] which catches the
-    route-table-lookup variant. *)
+(* RFC-0149 §3.3 sunset closeout: [on_resolve_live_fallback] +
+   [metric_resolve_live_fallback] removed.  Their carrier function
+   ([Keeper_cascade_profile.resolve_live_with_catalog] silent fallback)
+   was deleted in the same closeout; every caller now consumes
+   [resolve_live_with_catalog_result] and surfaces [Error (`Unresolved _)]
+   on the operator-visible path. *)
 
 val on_fallback_hint_invalid : unit -> unit
 (** Tick the fallback-hint-invalid counter at

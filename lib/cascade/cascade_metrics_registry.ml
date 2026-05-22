@@ -102,8 +102,10 @@ let all_cascade_counters : (string * string) list =
     , "masc_cascade_route_binding_dropped_total" )
   ; ( "masc_cascade_weighted_item_dropped_total"
     , "masc_cascade_weighted_item_dropped_total" )
-  ; ( "masc_cascade_resolve_live_fallback_total"
-    , "masc_cascade_resolve_live_fallback_total" )
+  (* RFC-0149 §3.3 sunset closeout: masc_cascade_resolve_live_fallback_total
+     registry entry removed.  Counter + carrier function deleted; the typed
+     [Error (`Unresolved _)] in [resolve_live_with_catalog_result] replaces
+     the silent-fallback signal. *)
   ; ( "masc_cascade_fallback_hint_invalid_total"
     , "masc_cascade_fallback_hint_invalid_total" )
   ; ( "masc_cascade_runtime_mcp_legacy_strip_total"

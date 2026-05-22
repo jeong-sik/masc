@@ -43,13 +43,13 @@ let kind value = M.error_kind_of_string value
 
 let test_learnings_carries_error_kind_first () =
   let learnings =
-    M.failure_learnings ~error_kind:(kind "oas_timeout_budget")
+    M.failure_learnings ~error_kind:(kind "provider_timeout")
       ~error_preview:"Adaptive estimated input tokens exceeded budget"
   in
   check (list string)
     "[failure_kind; error_preview] in order"
     [
-      "failure_kind: oas_timeout_budget";
+      "failure_kind: provider_timeout";
       "error_preview: Adaptive estimated input tokens exceeded budget";
     ]
     learnings

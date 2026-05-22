@@ -38,30 +38,39 @@ landed in part; Phase 2/3 remain.
   the *other* call families (telemetry_unified, dashboard_http_helpers,
   server_dashboard_http) but the originating godfile remains untouched.
 
-### Phase 2 — module split (not started)
+### Phase 2 — module split (mostly landed; PR-3 cancelled)
 
-`cascade_error_classify.ml` 939 LoC is still a single file. The three
-target modules described in §4 Phase 2 do not exist:
+`cascade_error_classify.ml` has been reduced from **939 LoC** at
+2026-05-21 to **111 LoC** on `origin/main` (2026-05-22).  Two of
+the three planned target modules now exist; PR-3 was cancelled
+when the codex-preflight content was reorganized into
+`cascade_config_builder.ml` instead of a new sibling.
 
-- `cascade_internal_error.ml(.mli)` — absent
-- `cascade_error_from_sdk.ml(.mli)` — absent
-- `cascade_codex_preflight.ml(.mli)` — absent
+| Phase 2 PR | Target | Status |
+|------------|--------|--------|
+| PR-1 | `lib/cascade/cascade_internal_error.ml(.mli)` | **landed** (file present on `origin/main`) |
+| PR-2 | `lib/cascade/cascade_error_from_sdk.ml(.mli)` | **landed** (PR #17474, merged 2026-05-22; appears in §frontmatter `implementation_prs`) |
+| PR-3 | `lib/cascade/cascade_codex_preflight.ml(.mli)` | **cancelled** — the Codex CLI prompt preflight content lives in `lib/cascade/cascade_config_builder.ml`, whose module-header comment reads *"Cascade config construction and Codex CLI prompt preflight"*.  The functions reachable via `grep -n 'preflight' lib/cascade/cascade_config_builder.ml` cover the original PR-3 scope without creating a third sibling module. |
 
-### Phase 3 — reachability sweep (not started)
+Net Phase 2 effect: the originating godfile is **88% smaller**
+(939 → 111 LoC) and the two new modules carry the typed bodies
+PR-1/PR-2 prescribed.
 
-`masc_internal_error` variant constructor reachability has not been
-audited. Phase 3 prerequisite (smaller Phase 2 modules) is not met.
+### Phase 3 — reachability sweep (Phase 2 prerequisite now met)
 
-### Pending work
+The Phase 3 prerequisite ("smaller Phase 2 modules") is satisfied
+as of 2026-05-22.  `masc_internal_error` variant constructor
+reachability audit can now run on the three smaller surfaces
+(`cascade_internal_error.ml`, `cascade_error_from_sdk.ml`, the
+residual 111-line `cascade_error_classify.ml`).  Not started yet.
 
-The substantive RFC-0142 work — godfile decomposition + catch-all
-typed-conversion at the canonical site — is still ahead. The four
-merged PRs migrated *consumer* call families (telemetry_unified,
-dashboard, server) but not the *origin* module. Phase 2 PR sequence
-should start with `cascade_internal_error.ml` extraction; that will
-reduce `cascade_error_classify.ml` by ~300 LoC and unblock Phase 1
-migration of the remaining ~20 `Json_field`-eligible catch-alls on a
-smaller surface.
+### Remaining work
+
+Phase 3 reachability sweep is the only substantive work left for
+this RFC.  Phase 1 migration of the remaining `Json_field`-eligible
+catch-alls is now achievable on the much-smaller residual godfile
+(was ~20 catch-alls in 939 LoC, expected to be 3-5 in the 111 LoC
+remainder).
 
 ### Related RFC
 

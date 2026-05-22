@@ -106,13 +106,31 @@ let rec ensure_dir path =
     if parent <> path then ensure_dir parent;
     Unix.mkdir path 0o755)
 
-let run_ok ~cwd cmd =
-  let wrapped =
-    Printf.sprintf "cd %s && %s > /dev/null 2>&1" (Filename.quote cwd) cmd
-  in
-  let code = Sys.command wrapped in
-  if code <> 0 then
-    Alcotest.failf "command failed (%d): %s" code cmd
+let process_exit_code = function
+  | Unix.WEXITED code -> code
+  | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> 255
+
+let run_process_ok ~cwd prog argv =
+  let original_cwd = Sys.getcwd () in
+  let dev_null = Unix.openfile Filename.null [ Unix.O_WRONLY ] 0o600 in
+  Fun.protect
+    ~finally:(fun () ->
+      Unix.close dev_null;
+      Sys.chdir original_cwd)
+    (fun () ->
+      Sys.chdir cwd;
+      let pid =
+        Unix.create_process_env prog argv (Unix.environment ()) Unix.stdin
+          dev_null dev_null
+      in
+      let _, status = Unix.waitpid [] pid in
+      let code = process_exit_code status in
+      if code <> 0 then
+        Alcotest.failf "command failed (%d): %s" code
+          (String.concat " " (Array.to_list argv)))
+
+let git_ok ~cwd args =
+  run_process_ok ~cwd "git" (Array.of_list ("git" :: args))
 
 let clear_checkout_but_keep_git_dir root =
   Sys.readdir root
@@ -709,7 +727,7 @@ let test_bash_git_creds_uses_oneshot_with_turn_runtime () =
   seed_github_credential_mapping ~config ~keeper_name:meta.name ();
   let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
   ensure_dir repo;
-  run_ok ~cwd:repo "git init -q";
+  git_ok ~cwd:repo [ "init"; "-q" ];
   let log_path = Filename.concat config.Coord.base_path "docker.log" in
   let factory = Keeper_sandbox_factory.create ~config ~meta () in
   Fun.protect
@@ -747,7 +765,7 @@ let test_bash_git_creds_missing_bundle_is_structured_blocker () =
   @@ fun ~config ~meta ~playground ->
   let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
   ensure_dir repo;
-  run_ok ~cwd:repo "git init -q";
+  git_ok ~cwd:repo [ "init"; "-q" ];
   let log_path = Filename.concat config.Coord.base_path "docker.log" in
   with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
@@ -857,7 +875,7 @@ let test_bash_git_c_bare_worktrees_from_root_uses_single_repo () =
   let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
   let worktree = Filename.concat repo ".worktrees/task-229" in
   ensure_dir worktree;
-  run_ok ~cwd:repo "git init -q";
+  git_ok ~cwd:repo [ "init"; "-q" ];
   let log_path = Filename.concat config.Coord.base_path "docker.log" in
   with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
@@ -891,7 +909,7 @@ let test_bash_git_push_requires_write_preset_before_docker () =
   ensure_github_identity_bundle ~config Masc_mcp.Keeper_gh_env.root_github_identity;
   let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
   ensure_dir repo;
-  run_ok ~cwd:repo "git init -q";
+  git_ok ~cwd:repo [ "init"; "-q" ];
   let log_path = Filename.concat config.Coord.base_path "docker.log" in
   with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
   let raw =
@@ -920,7 +938,7 @@ let test_bash_git_push_routes_through_git_creds_docker () =
   seed_github_credential_mapping ~config ~keeper_name:meta.name ();
   let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
   ensure_dir repo;
-  run_ok ~cwd:repo "git init -q";
+  git_ok ~cwd:repo [ "init"; "-q" ];
   let log_path = Filename.concat config.Coord.base_path "docker.log" in
   with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
   let raw =
@@ -1019,12 +1037,12 @@ let test_git_worktree_add_uses_host_git_metadata () =
   @@ fun ~config ~meta ~playground ->
   let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
   ensure_dir repo;
-  run_ok ~cwd:repo "git init -q -b main";
-  run_ok ~cwd:repo "git config user.email test@example.com";
-  run_ok ~cwd:repo "git config user.name Test";
+  git_ok ~cwd:repo [ "init"; "-q"; "-b"; "main" ];
+  git_ok ~cwd:repo [ "config"; "user.email"; "test@example.com" ];
+  git_ok ~cwd:repo [ "config"; "user.name"; "Test" ];
   write_file (Filename.concat repo "README.md") "# wt\n";
-  run_ok ~cwd:repo "git add README.md";
-  run_ok ~cwd:repo "git commit -q -m init";
+  git_ok ~cwd:repo [ "add"; "README.md" ];
+  git_ok ~cwd:repo [ "commit"; "-q"; "-m"; "init" ];
   let factory = Keeper_sandbox_factory.create ~config ~meta () in
   Fun.protect
     ~finally:(fun () -> Keeper_sandbox_factory.cleanup factory)
@@ -1252,7 +1270,7 @@ let run_git_creds_docker_shell ~config ~(meta : Keeper_types.keeper_meta) ~playg
   let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
   ensure_dir repo;
   if not (Sys.file_exists (Filename.concat repo ".git")) then
-    run_ok ~cwd:repo "git init -q";
+    git_ok ~cwd:repo [ "init"; "-q" ];
   with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
@@ -1308,7 +1326,7 @@ let test_sandbox_root_git_cwd_single_repo_auto_chdir () =
   @@ fun ~config ~meta ~playground ->
   let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
   ensure_dir repo;
-  run_ok ~cwd:repo "git init -q";
+  git_ok ~cwd:repo [ "init"; "-q" ];
   let cwd, error =
     Keeper_shell_command_semantics.resolve_sandbox_root_git_cwd ~config ~meta
       ~cwd:playground ~cmd:"git status"
@@ -1328,8 +1346,8 @@ let test_sandbox_root_git_cwd_multi_repo_blocks_before_exec () =
   let repo_b = Filename.concat repos "beta" in
   ensure_dir repo_a;
   ensure_dir repo_b;
-  run_ok ~cwd:repo_a "git init -q";
-  run_ok ~cwd:repo_b "git init -q";
+  git_ok ~cwd:repo_a [ "init"; "-q" ];
+  git_ok ~cwd:repo_b [ "init"; "-q" ];
   let cwd, error =
     Keeper_shell_command_semantics.resolve_sandbox_root_git_cwd ~config ~meta
       ~cwd:playground ~cmd:"gh pr list"
@@ -1357,8 +1375,8 @@ let test_sandbox_root_git_cwd_cd_chain_is_not_interpreted () =
   let worktree = Filename.concat repo_b ".worktrees/keeper-nick0cave-agent-task-236" in
   ensure_dir repo_a;
   ensure_dir worktree;
-  run_ok ~cwd:repo_a "git init -q";
-  run_ok ~cwd:repo_b "git init -q";
+  git_ok ~cwd:repo_a [ "init"; "-q" ];
+  git_ok ~cwd:repo_b [ "init"; "-q" ];
   let cwd, error =
     Keeper_shell_command_semantics.resolve_sandbox_root_git_cwd ~config ~meta
       ~cwd:playground
@@ -1604,18 +1622,17 @@ let test_git_clone_repairs_existing_docker_clone_checkout () =
   seed_github_credential_mapping ~config ~keeper_name:meta.name ();
   let source_repo = Filename.concat playground "source-masc-mcp" in
   ensure_dir source_repo;
-  run_ok ~cwd:source_repo "git init -q -b main";
-  run_ok ~cwd:source_repo "git config user.email test@example.com";
-  run_ok ~cwd:source_repo "git config user.name Test";
+  git_ok ~cwd:source_repo [ "init"; "-q"; "-b"; "main" ];
+  git_ok ~cwd:source_repo [ "config"; "user.email"; "test@example.com" ];
+  git_ok ~cwd:source_repo [ "config"; "user.name"; "Test" ];
   let source_readme = Filename.concat source_repo "README.md" in
   write_file source_readme "# sandbox clone\n";
-  run_ok ~cwd:source_repo "git add README.md";
-  run_ok ~cwd:source_repo "git commit -q -m init";
+  git_ok ~cwd:source_repo [ "add"; "README.md" ];
+  git_ok ~cwd:source_repo [ "commit"; "-q"; "-m"; "init" ];
   let repos_dir = Filename.concat playground "repos" in
   ensure_dir repos_dir;
   let clone_path = Filename.concat repos_dir "masc-mcp" in
-  run_ok ~cwd:repos_dir
-    (Printf.sprintf "git clone -q %s masc-mcp" (Filename.quote source_repo));
+  git_ok ~cwd:repos_dir [ "clone"; "-q"; source_repo; "masc-mcp" ];
   let restored_readme = Filename.concat clone_path "README.md" in
   clear_checkout_but_keep_git_dir clone_path;
   Alcotest.(check bool) "checkout file removed before repair" false

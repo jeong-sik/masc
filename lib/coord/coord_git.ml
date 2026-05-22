@@ -245,7 +245,7 @@ let create ~base_path ~agent_name ~task_id ~base_branch : string masc_result =
               if exit_code = 0 then
                 Ok
                   (Printf.sprintf
-                     "Worktree created:\n  Path: %s\n  Branch: %s%s\n\nNext: cd %s && work. Use git for branch/commit/push and keeper_shell op=gh for GitHub PR work."
+                     "Worktree created:\n  Path: %s\n  Branch: %s%s\n\nNext: cd %s && work. Use git for branch/commit/push and Grep op=gh for GitHub PR work."
                      worktree_path branch_name note worktree_path)
               else Error (System (System_error.IoError (Printf.sprintf "Failed to create worktree from origin/%s." resolved_base))))
 

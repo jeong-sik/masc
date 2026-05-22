@@ -80,10 +80,9 @@ type failure_reason =
           failure reason; if old runtime state still contains it, the
           supervisor treats it like a restartable watchdog crash. *)
   | Oas_timeout_budget_loop of { count : int }
-      (** Latched when the same keeper exhausts the OAS turn budget on
-          consecutive cycles. This is a provider/cascade/runtime throughput
-          failure, so the supervisor pauses instead of restarting into the
-          same slow model and burning another multi-minute budget. *)
+      (** Legacy persisted timeout-loop value. New operator/cohort surfaces
+          normalize it to provider-timeout ownership instead of presenting
+          timeout-budget as a distinct root cause. *)
   | Provider_runtime_error of
       { code : string
       ; detail : string

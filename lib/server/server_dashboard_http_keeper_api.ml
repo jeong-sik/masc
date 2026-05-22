@@ -530,7 +530,9 @@ let handle_keeper_directive_post state _agent_name req reqd body_str =
       try
         let json = Yojson.Safe.from_string body_str in
         match Safe_ops.json_string_opt "action" json with
-        | Some a when a = "pause" || a = "resume" || a = "wakeup" -> Ok a
+        | Some "pause" -> Ok `Pause
+        | Some "resume" -> Ok `Resume
+        | Some "wakeup" -> Ok `Wakeup
         | Some a ->
             Error
               (Printf.sprintf
@@ -545,15 +547,13 @@ let handle_keeper_directive_post state _agent_name req reqd body_str =
           (Printf.sprintf {|{"ok":false,"error":%s}|}
              (Yojson.Safe.to_string (`String msg)))
           reqd
-    | Ok action_str ->
+    | Ok directive ->
         let config = state.Mcp_server.room_config in
-        let directive =
-          match action_str with
-          | "pause" -> `Pause
-          | "resume" -> `Resume
-          | "wakeup" -> `Wakeup
-          | _ -> assert false
-                 (* Validated at HTTP boundary above (lines 533-537). *)
+        let action_str =
+          match directive with
+          | `Pause -> "pause"
+          | `Resume -> "resume"
+          | `Wakeup -> "wakeup"
         in
         (* Issue #8391 HIGH #1: split [Ok None] (meta vanished) from [Error _]
            (IO/parse failure). For pause/resume the operator expects state to

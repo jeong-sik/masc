@@ -183,7 +183,6 @@ module KeeperKeepalive : sig
     -> float
 
   val oas_timeout_for_estimated_input_tokens : estimated_input_tokens:int -> float
-  val oas_timeout_sec : float
   val stream_idle_timeout_sec : float
 
   val body_timeout_sec_override : float option

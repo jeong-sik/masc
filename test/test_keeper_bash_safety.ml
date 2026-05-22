@@ -840,7 +840,7 @@ let test_bash_missing_typed_input_field () =
   match parse_error_field raw with
   | Some err ->
       Alcotest.(check bool) "error mentions typed input is required" true
-        (String_util.contains_substring err "typed keeper_bash input is required")
+        (String_util.contains_substring err "Typed Bash input is required")
   | None ->
       Alcotest.fail ("expected error json for missing typed input field, got: " ^ raw)
 

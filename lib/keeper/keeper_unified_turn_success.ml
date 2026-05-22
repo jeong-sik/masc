@@ -112,7 +112,7 @@ let append_metrics_snapshot
       ~semaphore_wait_ms:_
       ~turn_cost
       ~(lifecycle : KEC.post_turn_lifecycle)
-      ~last_timeout_budget
+      ~last_provider_timeout_budget
   =
   try
     let any_pending =
@@ -141,7 +141,7 @@ let append_metrics_snapshot
       ~compaction:lifecycle.compaction
       ~handoff_json:lifecycle.handoff_json
       ?provider_timeout_budget_json:
-        (Option.map KCB.provider_timeout_budget_to_yojson last_timeout_budget)
+        (Option.map KCB.provider_timeout_budget_to_yojson last_provider_timeout_budget)
       ()
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
@@ -463,7 +463,7 @@ let handle
       ~degraded_retry_applied
       ~degraded_retry_cascade
       ~fallback_reason
-      ~last_timeout_budget
+      ~last_provider_timeout_budget
       ~current_turn_blocker_info
       ~keeper_turn_id
       result
@@ -504,7 +504,7 @@ let handle
     ~semaphore_wait_ms
     ~turn_cost
     ~lifecycle
-    ~last_timeout_budget;
+    ~last_provider_timeout_budget;
   let turn_mode = KUM.turn_mode_of_result result in
   let turn_mode_label = KUM.turn_mode_to_string turn_mode in
   let model_used = Keeper_agent_run.surface_model_used result in

@@ -851,7 +851,7 @@ let reset_autonomous_completion_for_test () : unit =
 
    [provider_timeout] is the canonical policy surface for the legacy
    structured timeout-budget path
-   (see [Keeper_unified_turn.resolve_bounded_oas_timeout_budget_with_turn_budget]).
+   (see [Keeper_unified_turn.resolve_bounded_provider_timeout_budget_with_turn_budget]).
    Re-running on the same fiber gives the same context and the same
    shape of failure repeats, but provider/cascade budget pressure is not
    keeper fiber corruption. Crossing [provider_timeout_strike_limit]

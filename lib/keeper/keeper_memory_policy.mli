@@ -161,12 +161,7 @@ val memory_horizon_of_kind_opt : string -> string option
 (** Horizon for [kind], or [None] when [kind] is unknown.  Use this in
     silent-default contexts. *)
 
-val memory_horizon_of_kind : string -> string
-(** Horizon for [kind] with a typed fallback to [mid_term_horizon] for
-    unknown kinds. *)
-
 val memory_horizon_of_json_opt : Yojson.Safe.t -> string option
-val memory_horizon_of_json : kind:string -> Yojson.Safe.t -> string
 
 (** {1 [STATE] block parsing} *)
 

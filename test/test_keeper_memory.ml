@@ -1530,7 +1530,10 @@ let memory_bank_test_row ~kind ~trace_id ~text ~priority ~idx =
        [
          ("schema_version", `Int Keeper_memory_bank.keeper_memory_schema_version);
          ("kind", `String kind);
-         ("horizon", `String (Keeper_memory_bank.memory_horizon_of_kind kind));
+         ( "horizon",
+           `String
+             (Keeper_memory_bank.memory_horizon_of_kind_opt kind
+              |> Option.value ~default:Keeper_memory_bank.mid_term_horizon) );
          ("source", `String "test_seed");
          ("text", `String text);
          ("priority", `Int priority);

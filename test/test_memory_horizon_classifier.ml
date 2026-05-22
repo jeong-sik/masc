@@ -3,9 +3,7 @@
     Verifies that:
     - the strict [_opt] variants return [Some] only for documented
       vocabulary,
-    - unknown wire strings return [None] (no silent permissive default),
-    - the back-compat wrappers preserve the legacy [mid_term_horizon]
-      fallback so existing callers see no behaviour change. *)
+    - unknown wire strings return [None] (no silent permissive default). *)
 
 open Alcotest
 
@@ -56,16 +54,6 @@ let test_case_and_whitespace_normalised () =
     (Some Policy.short_term_horizon)
     (Policy.memory_horizon_of_kind_opt "  next  ")
 
-let test_wrapper_preserves_legacy_default () =
-  (* Back-compat: unknown kind still falls back to mid_term_horizon
-     (with a warn line going to the log). *)
-  check string "unknown kind -> mid_term legacy"
-    Policy.mid_term_horizon
-    (Policy.memory_horizon_of_kind "definitely_not_a_kind");
-  check string "known kind unchanged"
-    Policy.short_term_horizon
-    (Policy.memory_horizon_of_kind "next")
-
 let test_json_strict_classifier () =
   let json_with horizon =
     `Assoc [ ("horizon", `String horizon); ("kind", `String "next") ]
@@ -86,20 +74,6 @@ let test_json_strict_classifier () =
     None
     (Policy.memory_horizon_of_json_opt (`Assoc [ ("kind", `String "next") ]))
 
-let test_json_wrapper_falls_back_to_kind () =
-  let json_unknown =
-    `Assoc [ ("horizon", `String "unknown_horizon"); ("kind", `String "next") ]
-  in
-  check string "JSON unknown horizon falls through to kind classification"
-    Policy.short_term_horizon
-    (Policy.memory_horizon_of_json ~kind:"next" json_unknown);
-  let json_known =
-    `Assoc [ ("horizon", `String "long_term"); ("kind", `String "next") ]
-  in
-  check string "JSON known horizon takes precedence over kind"
-    Policy.long_term_horizon
-    (Policy.memory_horizon_of_json ~kind:"next" json_known)
-
 let () =
   Alcotest.run "memory_horizon_classifier"
     [
@@ -112,12 +86,5 @@ let () =
           test_case "case and whitespace normalised" `Quick
             test_case_and_whitespace_normalised;
           test_case "JSON strict classifier" `Quick test_json_strict_classifier;
-        ] );
-      ( "back-compat wrappers",
-        [
-          test_case "wrapper preserves legacy default" `Quick
-            test_wrapper_preserves_legacy_default;
-          test_case "JSON wrapper falls back to kind" `Quick
-            test_json_wrapper_falls_back_to_kind;
         ] );
     ]

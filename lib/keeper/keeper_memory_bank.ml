@@ -20,8 +20,7 @@
    This block is the reverse-direction citation so code search for
    "KeeperMemoryLifecycle" lands in this module too — completing the
    sibling pair with keeper_memory_policy.ml which carries the
-   horizon-tier and producer anchors (memory_horizon_of_kind_opt
-   and memory_horizon_of_kind).
+   horizon-tier and producer anchor (memory_horizon_of_kind_opt).
 
    Sibling division of labor:
      keeper_memory_policy.ml   tier vocabulary, producer,
@@ -45,6 +44,22 @@
 open Keeper_types
 
 include Keeper_memory_policy
+
+let memory_horizon_of_kind_with_fallback kind =
+  match memory_horizon_of_kind_opt kind with
+  | Some horizon -> horizon
+  | None ->
+      Log.Memory.warn
+        "memory_horizon_of_kind_with_fallback: unknown kind %S -> mid_term (drift; see #8826)"
+        kind;
+      mid_term_horizon
+;;
+
+let memory_horizon_of_json_with_fallback ~kind json =
+  match memory_horizon_of_json_opt json with
+  | Some horizon -> horizon
+  | None -> memory_horizon_of_kind_with_fallback kind
+;;
 
 let with_stdlib_mutex mutex f =
   Stdlib.Mutex.lock mutex;
@@ -332,7 +347,7 @@ let parse_memory_bank_row (line : string) : keeper_memory_row_raw option =
       None
     else
     let kind = Safe_ops.json_string ~default:"" "kind" j |> String.trim in
-    let horizon = memory_horizon_of_json ~kind j in
+    let horizon = memory_horizon_of_json_with_fallback ~kind j in
     let source = Safe_ops.json_string ~default:"" "source" j |> String.trim in
     let generation = Safe_ops.json_int ~default:0 "generation" j in
     let text = Safe_ops.json_string ~default:"" "text" j |> String.trim in
@@ -980,7 +995,7 @@ let append_memory_notes_from_reply
     with_memory_bank_lock path (fun () ->
       List.iter
         (fun (kind, text, priority) ->
-           let horizon = memory_horizon_of_kind kind in
+           let horizon = memory_horizon_of_kind_with_fallback kind in
            if not (Hashtbl.mem seen_kinds kind) then begin
              Hashtbl.add seen_kinds kind ();
              kinds_acc := kind :: !kinds_acc

@@ -14,10 +14,7 @@
                                          [long_term_horizon].
       provenanced  -> rows with non-empty trace_id / source
                       (lives in keeper_memory_bank, not this file).
-      producer     -> [memory_horizon_of_kind_opt] (strict) and
-                      [memory_horizon_of_kind] (back-compat wrapper that
-                      defaults unknown kinds to mid_term with a warn —
-                      see #8826 drift note).
+      producer     -> [memory_horizon_of_kind_opt] (strict).
 
     This block is the reverse-direction citation so code search for
     "KeeperMemoryLifecycle" lands here.  Citations are by symbol name,
@@ -211,19 +208,6 @@ let memory_horizon_of_kind_opt (kind : string) : string option =
   | "long_term" -> Some long_term_horizon
   | _ -> None
 
-(* Back-compat wrapper: warns once per unknown kind and falls back to
-   [mid_term_horizon] (the legacy permissive default). The explicit warn
-   converts the silent #8605-family fallback into an observable signal
-   without changing the legacy classification result. *)
-let memory_horizon_of_kind (kind : string) : string =
-  match memory_horizon_of_kind_opt kind with
-  | Some h -> h
-  | None ->
-      Log.Memory.warn
-        "memory_horizon_of_kind: unknown kind %S -> mid_term (drift; see #8826)"
-        kind;
-      mid_term_horizon
-
 (* Strict JSON horizon parser: returns [None] for missing or unknown
    horizon strings so callers can decide whether to consult [kind] or
    reject the row. *)
@@ -237,15 +221,6 @@ let memory_horizon_of_json_opt (json : Yojson.Safe.t) : string option =
   | "mid_term" -> Some mid_term_horizon
   | "long_term" -> Some long_term_horizon
   | _ -> None
-
-(* Back-compat wrapper: when the JSON [horizon] is absent or unknown we
-   fall through to [memory_horizon_of_kind kind] (which itself warns on
-   unknown). The cascade is preserved exactly; the new wrapper just
-   exposes a strict variant for new callers. *)
-let memory_horizon_of_json ~(kind : string) (json : Yojson.Safe.t) : string =
-  match memory_horizon_of_json_opt json with
-  | Some h -> h
-  | None -> memory_horizon_of_kind kind
 
 let trim_nonempty (s : string) : string option =
   let t = String.trim s in

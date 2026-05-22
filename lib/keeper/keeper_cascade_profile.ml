@@ -575,7 +575,15 @@ let normalize_keeper_runtime_declared_name ?config_path raw =
   then cascade_name_for_use ?config_path Keeper_turn
   else normalized
 
-let resolve_live_with_catalog ~catalog raw =
+(* RFC-0149 §3.3 — "Parse, don't validate" reverse of the silent-fallback
+   shape.  [resolve_live_with_catalog_result] returns [Ok runtime_name]
+   when the catalog can resolve the input, otherwise [Error (`Unresolved
+   raw)].  The legacy [resolve_live_with_catalog] below keeps the silent
+   fallback + WARN-once + counter for callers that have not yet migrated,
+   but the unresolved branch is now isolated to a single [Error] arm so
+   the sunset path is mechanical. *)
+let resolve_live_with_catalog_result ~catalog raw :
+    (runtime_name, [ `Unresolved of string ]) result =
   let trimmed = String.trim raw in
   let normalized =
     if List.mem trimmed catalog then trimmed
@@ -584,20 +592,27 @@ let resolve_live_with_catalog ~catalog raw =
       | Some use -> Cascade_routes.fallback_name_for_catalog use ~catalog
       | None -> trimmed
   in
-  if List.mem normalized catalog then normalized
-  else begin
-    (* Iter 36: raw cascade name doesn't normalize to a catalog
-       member.  Silently falls back to [Keeper_turn] default —
-       operator's intended cascade is invalidated.  Distinct from
-       iter-30 [route_resolve_fallback] which catches the
-       route-table path; this is the direct-raw-name path.
+  (* [normalized] is already verified to be a catalog member, so it is
+     canonical; bypass [runtime_name_of_string]'s re-canonicalization
+     (also avoids the forward reference — [runtime_name_of_string] is
+     defined further below). *)
+  if List.mem normalized catalog then Ok (Runtime_name normalized)
+  else Error (`Unresolved raw)
 
-       2026-05-20: counter alone was not enough — operators were
-       reading Prometheus but the cascade name that failed to
-       resolve was not in the metric (cardinality bound).  Surface
-       the unresolved name in a WARN line that fires once per
-       distinct raw value so operators can fix the typo / stale
-       cascade.toml entry without grepping the audit JSONL. *)
+let resolve_live_with_catalog ~catalog raw =
+  match resolve_live_with_catalog_result ~catalog raw with
+  | Ok name -> runtime_name_to_string name
+  | Error (`Unresolved raw') ->
+    let trimmed = String.trim raw' in
+    (* WORKAROUND: RFC-0149 §3.3 sunset target #16787.  Counter + WARN-once
+       remain in the legacy [string]-returning entry point only; the new
+       Result-returning helper above surfaces [Error (`Unresolved raw)]
+       directly so callers can fail-loud at config load time.
+
+       Removal: once every caller migrates to
+       [resolve_live_with_catalog_result], delete this Error arm together
+       with [Cascade_metrics.on_resolve_live_fallback] and
+       [logged_unresolved_raw] per RFC-0149 §3.3 sunset criterion. *)
     Cascade_metrics.on_resolve_live_fallback ();
     if not (Hashtbl.mem logged_unresolved_raw trimmed) then begin
       Hashtbl.add logged_unresolved_raw trimmed ();
@@ -608,7 +623,6 @@ let resolve_live_with_catalog ~catalog raw =
         trimmed
     end;
     Cascade_routes.fallback_name_for_catalog Keeper_turn ~catalog
-  end
 
 let resolve_live ?config_path raw =
   resolve_live_with_catalog ~catalog:(catalog_lookup_names ?config_path ()) raw

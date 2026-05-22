@@ -1,7 +1,7 @@
 ---
 rfc: "0157"
 title: "Cascade pre-turn required-tool filter — provider capability boundary"
-status: Draft
+status: Active
 created: 2026-05-21
 updated: 2026-05-21
 author: claude-opus

@@ -1,7 +1,7 @@
 ---
 rfc: "0084"
 title: "Keeper→Tool Dispatch Unification + 100% Trace/Telemetry"
-status: Implementation Complete (sprint closeout PR-14)
+status: Implemented
 created: 2026-05-15
 updated: 2026-05-15
 author: vincent

@@ -1,7 +1,7 @@
 ---
 rfc: "0097"
 title: "Keeper sandbox container reuse (long-running sandbox per keeper)"
-status: In-progress
+status: Active
 created: 2026-05-17
 updated: 2026-05-20
 author: vincent

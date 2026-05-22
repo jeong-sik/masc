@@ -16,7 +16,6 @@ type runtime_pressure_class =
   | Provider_dns_failure
   | Provider_timeout
   | Provider_error
-  | Oas_timeout_budget
   | Turn_stale_timeout
   | Keeper_liveness_failure
   | Tool_contract_failure
@@ -29,7 +28,6 @@ let runtime_pressure_class_to_string = function
   | Provider_dns_failure -> "provider_dns_failure"
   | Provider_timeout -> "provider_timeout"
   | Provider_error -> "provider_error"
-  | Oas_timeout_budget -> "oas_timeout_budget"
   | Turn_stale_timeout -> "turn_stale_timeout"
   | Keeper_liveness_failure -> "keeper_liveness_failure"
   | Tool_contract_failure -> "tool_contract_failure"
@@ -43,9 +41,9 @@ let runtime_pressure_class_of_label label =
   | "provider_capacity" | "provider_capacity_full" | "capacity_backpressure" ->
     Some Provider_capacity
   | "provider_dns_failure" | "provider_dns" -> Some Provider_dns_failure
-  | "provider_timeout" -> Some Provider_timeout
+  | "provider_timeout" | "oas_timeout_budget" | "oas_timeout_budget_loop" ->
+    Some Provider_timeout
   | "provider_error" | "provider_runtime_error" -> Some Provider_error
-  | "oas_timeout_budget" | "oas_timeout_budget_loop" -> Some Oas_timeout_budget
   | "turn_stale_timeout" | "stale_turn_timeout" -> Some Turn_stale_timeout
   | "keeper_liveness_failure" | "heartbeat_failures" | "turn_failures" ->
     Some Keeper_liveness_failure
@@ -105,7 +103,7 @@ let provider_runtime_pressure_class ~code ~detail ~http_status =
 ;;
 
 let runtime_pressure_class_of_failure_reason = function
-  | Some (Keeper_registry.Oas_timeout_budget_loop _) -> Some Oas_timeout_budget
+  | Some (Keeper_registry.Oas_timeout_budget_loop _) -> Some Provider_timeout
   | Some (Keeper_registry.Provider_runtime_error { code; detail; http_status; _ }) ->
     Some (provider_runtime_pressure_class ~code ~detail ~http_status)
   | Some (Keeper_registry.Stale_turn_timeout _) -> Some Turn_stale_timeout

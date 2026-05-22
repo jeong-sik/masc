@@ -23,7 +23,6 @@ type runtime_pressure_class =
   | Provider_dns_failure
   | Provider_timeout
   | Provider_error
-  | Oas_timeout_budget
   | Turn_stale_timeout
   | Keeper_liveness_failure
   | Tool_contract_failure

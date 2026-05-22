@@ -454,7 +454,7 @@ let test_structured_required_tool_no_tool_call () =
 let test_structured_oas_timeout_budget_collapses_to_turn_timeout () =
   let err =
     Masc_mcp.Keeper_turn_driver.sdk_error_of_masc_internal_error
-      (Masc_mcp.Keeper_turn_driver.Oas_timeout_budget
+      (Masc_mcp.Keeper_turn_driver.Provider_timeout
          { budget_sec = 90.0
          ; keeper_turn_timeout_sec = 1200.0
          ; estimated_input_tokens = 10_000

@@ -8,7 +8,7 @@
 
     @since Unified Keeper Loop *)
 
-type oas_timeout_budget_resolution =
+type provider_timeout_budget =
   { effective_timeout_sec : float
   ; adaptive_timeout_sec : float
   ; keeper_turn_timeout_sec : float
@@ -18,13 +18,13 @@ type oas_timeout_budget_resolution =
   ; source : string
   }
 
-val resolve_bounded_oas_timeout_budget_with_turn_budget
+val resolve_bounded_provider_timeout_budget_with_turn_budget
   :  allow_wall_clock_retry_budget:bool
   -> is_retry:bool
   -> estimated_input_tokens:int
   -> max_turns:int
   -> remaining_turn_budget_s:float
-  -> oas_timeout_budget_resolution option
+  -> provider_timeout_budget option
 (** RFC-0129: see [Keeper_turn_cascade_budget] for the rationale
     behind removing the [reserve_degraded_retry_budget] knob. *)
 
@@ -33,7 +33,7 @@ val resolve_bounded_oas_timeout_budget_with_turn_budget
     still rotate through the degraded cascade path. *)
 val attempt_watchdog_timeout_sec
   :  remaining_turn_budget_s:float
-  -> oas_timeout_budget_resolution
+  -> provider_timeout_budget
   -> float
 
 val allow_wall_clock_retry_budget_for_attempt
@@ -43,7 +43,7 @@ val allow_wall_clock_retry_budget_for_attempt
   -> attempted_cascades:string list
   -> bool
 
-val oas_retry_budget_available_for_turn
+val provider_retry_budget_available_for_turn
   :  allow_wall_clock_retry_budget:bool
   -> is_retry:bool
   -> estimated_input_tokens:int
@@ -55,11 +55,11 @@ val degraded_retry_slot_phase_budget_sec : float
 val degraded_retry_slot_phase_available : time_spent_in_turn_s:float -> bool
 
 (** Reclassify a structural OAS timeout only when the current attempt
-    actually dispatched with an OAS timeout budget. This prevents a
+    actually dispatched with an provider timeout budget. This prevents a
     pre-retry turn-budget exhaustion from borrowing a stale previous
     attempt budget and incorrectly rotating cascades. *)
 val reclassify_oas_timeout_for_attempt
-  :  timeout_budget:oas_timeout_budget_resolution option
+  :  timeout_budget:provider_timeout_budget option
   -> Agent_sdk.Error.sdk_error
   -> Agent_sdk.Error.sdk_error
 
@@ -296,12 +296,12 @@ val run_keeper_cycle
     @param observation World state snapshot
     @param generation Current generation counter *)
 
-val bounded_oas_timeout_for_turn_budget
+val bounded_provider_timeout_for_turn_budget
   :  estimated_input_tokens:int
   -> remaining_turn_budget_s:float
   -> float option
 
-val bounded_oas_timeout_for_turn_budget_with_turn_budget
+val bounded_provider_timeout_for_turn_budget_with_turn_budget
   :  estimated_input_tokens:int
   -> max_turns:int
   -> remaining_turn_budget_s:float

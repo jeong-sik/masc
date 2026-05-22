@@ -6532,7 +6532,7 @@ let test_degraded_retry_after_recoverable_error_includes_provider_timeout () =
       ~effective_cascade:"underdog"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
       (Masc_mcp.Keeper_turn_driver.sdk_error_of_masc_internal_error
-         (Masc_mcp.Keeper_turn_driver.Oas_timeout_budget
+         (Masc_mcp.Keeper_turn_driver.Provider_timeout
             { budget_sec = 273.0
             ; keeper_turn_timeout_sec = 1200.0
             ; estimated_input_tokens = 2_000
@@ -7125,7 +7125,7 @@ let test_metrics_failure_response () =
 let test_metrics_failure_timeout_increments_proactive_backoff () =
   let sdk_error =
     Masc_mcp.Keeper_turn_driver.sdk_error_of_masc_internal_error
-      (Masc_mcp.Keeper_turn_driver.Oas_timeout_budget
+      (Masc_mcp.Keeper_turn_driver.Provider_timeout
          { budget_sec = 90.0
          ; keeper_turn_timeout_sec = 90.0
          ; estimated_input_tokens = 42_000
@@ -8135,7 +8135,7 @@ let test_bounded_oas_timeout_uses_adaptive_when_budget_is_large () =
       ~estimated_input_tokens
   in
   match
-    UT.bounded_oas_timeout_for_turn_budget
+    UT.bounded_provider_timeout_for_turn_budget
       ~estimated_input_tokens
       ~remaining_turn_budget_s:1200.0
   with
@@ -8150,17 +8150,17 @@ let test_bounded_oas_timeout_uses_adaptive_when_budget_is_large () =
 ;;
 
 (* #10008 fm2: the budget formula no longer scales with token count,
-   so [bounded_oas_timeout_for_turn_budget] returns the same value
+   so [bounded_provider_timeout_for_turn_budget] returns the same value
    for small and large prompts when the remaining_turn_budget is
    unchanged.  Replaces the prior "smaller prompt gets smaller
    budget" invariant, which was load-bearing on the (removed)
    [per_1k * tokens] term. *)
 let test_bounded_oas_timeout_is_token_independent () =
   match
-    ( UT.bounded_oas_timeout_for_turn_budget
+    ( UT.bounded_provider_timeout_for_turn_budget
         ~estimated_input_tokens:2_000
         ~remaining_turn_budget_s:1200.0
-    , UT.bounded_oas_timeout_for_turn_budget
+    , UT.bounded_provider_timeout_for_turn_budget
         ~estimated_input_tokens:262_144
         ~remaining_turn_budget_s:1200.0 )
   with
@@ -8175,7 +8175,7 @@ let test_bounded_oas_timeout_is_token_independent () =
 
 let test_bounded_oas_timeout_caps_to_remaining_turn_budget () =
   match
-    UT.bounded_oas_timeout_for_turn_budget
+    UT.bounded_provider_timeout_for_turn_budget
       ~estimated_input_tokens:2_000
       ~remaining_turn_budget_s:235.7
   with
@@ -8195,7 +8195,7 @@ let test_bounded_oas_timeout_uses_channel_turn_budget_override () =
       ~max_turns
   in
   match
-    UT.bounded_oas_timeout_for_turn_budget_with_turn_budget
+    UT.bounded_provider_timeout_for_turn_budget_with_turn_budget
       ~max_turns
       ~estimated_input_tokens
       ~remaining_turn_budget_s:1200.0
@@ -8219,7 +8219,7 @@ let test_bounded_oas_timeout_uses_channel_turn_budget_override () =
    still has headroom. *)
 let test_bounded_oas_timeout_first_attempt_uses_full_usable_budget () =
   match
-    UT.resolve_bounded_oas_timeout_budget_with_turn_budget
+    UT.resolve_bounded_provider_timeout_budget_with_turn_budget
       ~allow_wall_clock_retry_budget:false
       ~is_retry:false
       ~estimated_input_tokens:2_000
@@ -8246,15 +8246,15 @@ let test_bounded_oas_timeout_first_attempt_uses_full_usable_budget () =
 ;;
 
 (* RFC-0156 — OAS total timeout removal.
-   Pins the post-removal invariants of [resolve_bounded_oas_timeout_budget_with_turn_budget]:
+   Pins the post-removal invariants of [resolve_bounded_provider_timeout_budget_with_turn_budget]:
      (1) [estimated_input_tokens] is structurally ignored — any token count
          under the same remaining_turn_budget yields the same effective_timeout.
      (2) [source] never carries the retired "static_300s*" labels.
-     (3) effective_timeout tracks [remaining_turn_budget - oas_timeout_guard_sec]
+     (3) effective_timeout tracks [remaining_turn_budget - provider_timeout_guard_sec]
          (no longer capped at 300s when ample turn budget remains). *)
 let test_rfc_0156_token_count_does_not_affect_budget () =
   let resolve estimated_input_tokens =
-    UT.resolve_bounded_oas_timeout_budget_with_turn_budget
+    UT.resolve_bounded_provider_timeout_budget_with_turn_budget
       ~allow_wall_clock_retry_budget:false
       ~is_retry:false
       ~estimated_input_tokens
@@ -8278,7 +8278,7 @@ let test_rfc_0156_token_count_does_not_affect_budget () =
 
 let test_rfc_0156_source_never_static_300s () =
   match
-    UT.resolve_bounded_oas_timeout_budget_with_turn_budget
+    UT.resolve_bounded_provider_timeout_budget_with_turn_budget
       ~allow_wall_clock_retry_budget:false
       ~is_retry:false
       ~estimated_input_tokens:2_000
@@ -8302,7 +8302,7 @@ let test_rfc_0156_effective_tracks_remaining_budget () =
      to usable_budget = remaining - guard (15s). The pre-RFC behaviour
      would have clamped at min(300, usable) = 300. *)
   match
-    UT.resolve_bounded_oas_timeout_budget_with_turn_budget
+    UT.resolve_bounded_provider_timeout_budget_with_turn_budget
       ~allow_wall_clock_retry_budget:false
       ~is_retry:false
       ~estimated_input_tokens:2_000
@@ -8312,7 +8312,7 @@ let test_rfc_0156_effective_tracks_remaining_budget () =
   | None -> fail "expected bounded timeout"
   | Some budget ->
     check (float 0.01)
-      "effective_timeout = remaining - oas_timeout_guard_sec (no 300s clamp)"
+      "effective_timeout = remaining - provider_timeout_guard_sec (no 300s clamp)"
       985.0
       budget.effective_timeout_sec
 ;;
@@ -8324,7 +8324,7 @@ let test_rfc_0156_effective_tracks_remaining_budget () =
    slice. *)
 let test_attempt_watchdog_uses_full_usable_budget () =
   match
-    UT.resolve_bounded_oas_timeout_budget_with_turn_budget
+    UT.resolve_bounded_provider_timeout_budget_with_turn_budget
       ~allow_wall_clock_retry_budget:false
       ~is_retry:false
       ~estimated_input_tokens:2_000
@@ -8364,7 +8364,7 @@ let test_bounded_oas_timeout_refuses_too_little_budget () =
     (option (float 0.01))
     "insufficient budget returns none"
     None
-    (UT.bounded_oas_timeout_for_turn_budget
+    (UT.bounded_provider_timeout_for_turn_budget
        ~estimated_input_tokens:2_000
        ~remaining_turn_budget_s:20.0)
 ;;
@@ -8374,7 +8374,7 @@ let test_oas_timeout_reclassifies_only_current_attempt_budget () =
     Agent_sdk.Error.Api (Timeout { message = "Timeout after 273.0s (budget=273s)" })
   in
   match
-    UT.resolve_bounded_oas_timeout_budget_with_turn_budget
+    UT.resolve_bounded_provider_timeout_budget_with_turn_budget
       ~allow_wall_clock_retry_budget:false
       ~is_retry:false
       ~estimated_input_tokens:2_000
@@ -8387,7 +8387,7 @@ let test_oas_timeout_reclassifies_only_current_attempt_budget () =
       UT.reclassify_oas_timeout_for_attempt ~timeout_budget:(Some timeout_budget) err
     in
     (match Masc_mcp.Keeper_turn_driver.classify_masc_internal_error classified with
-     | Some (Masc_mcp.Keeper_turn_driver.Oas_timeout_budget budget) ->
+     | Some (Masc_mcp.Keeper_turn_driver.Provider_timeout budget) ->
        check int "estimated tokens preserved" 2_000 budget.estimated_input_tokens;
        check string "source preserved" timeout_budget.source budget.source;
        check
@@ -8396,7 +8396,7 @@ let test_oas_timeout_reclassifies_only_current_attempt_budget () =
          (Some timeout_budget.remaining_turn_budget_sec)
          budget.remaining_turn_budget_sec;
        check string "phase" "cascade_attempt_watchdog" budget.phase
-     | _ -> fail "expected OAS timeout budget classification")
+     | _ -> fail "expected provider timeout budget classification")
 ;;
 
 let test_pre_retry_timeout_helper_does_not_reuse_stale_budget () =
@@ -8415,7 +8415,7 @@ let test_pre_retry_timeout_helper_does_not_reuse_stale_budget () =
 
 let oas_timeout_budget_error () =
   Masc_mcp.Keeper_turn_driver.sdk_error_of_masc_internal_error
-    (Masc_mcp.Keeper_turn_driver.Oas_timeout_budget
+    (Masc_mcp.Keeper_turn_driver.Provider_timeout
        { budget_sec = 273.0
        ; keeper_turn_timeout_sec = 1200.0
        ; estimated_input_tokens = 2_000
@@ -8505,7 +8505,7 @@ let test_degraded_retry_slot_phase_allows_oas_timeout_local_recovery () =
       "oas_timeout_budget"
       (EC.degraded_retry_reason_to_string retry.fallback_reason)
   | UT.Degraded_retry_slot_phase_exhausted _ ->
-    fail "expected OAS timeout budget to bypass slot phase for local recovery"
+    fail "expected provider timeout budget to bypass slot phase for local recovery"
   | UT.Degraded_retry_budget_exhausted _ -> fail "expected retry budget to remain"
   | UT.No_degraded_retry -> fail "expected recoverable retry candidate"
 ;;
@@ -8583,7 +8583,7 @@ let test_degraded_retry_slot_phase_allows_first_contract_rotation () =
    turn timeout (600s). *)
 let test_per_attempt_retry_budget_with_near_zero_remaining () =
   match
-    UT.resolve_bounded_oas_timeout_budget_with_turn_budget
+    UT.resolve_bounded_provider_timeout_budget_with_turn_budget
       ~allow_wall_clock_retry_budget:false
       ~is_retry:true
       ~estimated_input_tokens:2_000
@@ -8599,7 +8599,7 @@ let test_per_attempt_retry_budget_with_near_zero_remaining () =
 
 let test_per_attempt_retry_budget_capped_by_remaining_when_healthy () =
   match
-    UT.resolve_bounded_oas_timeout_budget_with_turn_budget
+    UT.resolve_bounded_provider_timeout_budget_with_turn_budget
       ~allow_wall_clock_retry_budget:false
       ~is_retry:true
       ~estimated_input_tokens:2_000
@@ -8617,7 +8617,7 @@ let test_per_attempt_retry_budget_capped_by_remaining_when_healthy () =
 
 let test_per_attempt_retry_blocks_after_adaptive_budget_spent () =
   match
-    UT.resolve_bounded_oas_timeout_budget_with_turn_budget
+    UT.resolve_bounded_provider_timeout_budget_with_turn_budget
       ~allow_wall_clock_retry_budget:false
       ~is_retry:true
       ~estimated_input_tokens:2_000
@@ -8630,7 +8630,7 @@ let test_per_attempt_retry_blocks_after_adaptive_budget_spent () =
 
 let test_degraded_retry_wall_clock_budget_allows_remaining_turn_time () =
   match
-    UT.resolve_bounded_oas_timeout_budget_with_turn_budget
+    UT.resolve_bounded_provider_timeout_budget_with_turn_budget
       ~allow_wall_clock_retry_budget:true
       ~is_retry:true
       ~estimated_input_tokens:2_000
@@ -8692,7 +8692,7 @@ let test_degraded_retry_wall_clock_budget_gate_is_one_shot () =
 
 let test_non_retry_still_refuses_tiny_budget () =
   match
-    UT.resolve_bounded_oas_timeout_budget_with_turn_budget
+    UT.resolve_bounded_provider_timeout_budget_with_turn_budget
       ~allow_wall_clock_retry_budget:false
       ~is_retry:false
       ~estimated_input_tokens:2_000
@@ -8707,7 +8707,7 @@ let test_per_attempt_retry_refuses_zero_remaining () =
   (* Wall-clock gate: a retry with 0.0s remaining would be immediately
      cancelled by the outer turn timeout — resolver must return None. *)
   match
-    UT.resolve_bounded_oas_timeout_budget_with_turn_budget
+    UT.resolve_bounded_provider_timeout_budget_with_turn_budget
       ~allow_wall_clock_retry_budget:false
       ~is_retry:true
       ~estimated_input_tokens:2_000
@@ -11932,7 +11932,7 @@ let () =
             `Quick
             test_degraded_retry_budget_gate_blocks_exhausted_budget
         ; test_case
-            "OAS timeout budget can still rotate to local recovery after slot phase"
+            "provider timeout budget can still rotate to local recovery after slot phase"
             `Quick
             test_degraded_retry_slot_phase_allows_oas_timeout_local_recovery
         ; test_case

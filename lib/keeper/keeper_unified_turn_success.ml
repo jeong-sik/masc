@@ -141,7 +141,7 @@ let append_metrics_snapshot
       ~compaction:lifecycle.compaction
       ~handoff_json:lifecycle.handoff_json
       ?timeout_budget_json:
-        (Option.map KCB.oas_timeout_budget_resolution_to_yojson last_timeout_budget)
+        (Option.map KCB.provider_timeout_budget_to_yojson last_timeout_budget)
       ()
   with
   | Eio.Cancel.Cancelled _ as e -> raise e

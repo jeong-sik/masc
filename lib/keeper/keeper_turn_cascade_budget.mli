@@ -1,5 +1,5 @@
 (* Keeper_turn_cascade_budget — cascade execution types, fail-open rotation,
-   OAS timeout budget resolution, context overflow observation, keeper pause/resume
+   provider timeout budget resolution, context overflow observation, keeper pause/resume
    sync, partial-commit continue gate, and context budget resolution.
 
    Public sub-module included by [Keeper_unified_turn]. *)
@@ -49,15 +49,15 @@ val record_turn_failure_stress :
   err:Agent_sdk.Error.sdk_error ->
   unit
 
-val oas_timeout_guard_sec : float
+val provider_timeout_guard_sec : float
 (** Retry guard floor (seconds). *)
 
-val min_oas_timeout_budget_sec : float
-(** Minimum OAS timeout budget (seconds). *)
+val min_provider_timeout_budget_sec : float
+(** Minimum provider timeout budget (seconds). *)
 
 val sdk_error_kind : Agent_sdk.Error.sdk_error -> string
 
-type oas_timeout_budget_resolution = {
+type provider_timeout_budget = {
   effective_timeout_sec : float;
   adaptive_timeout_sec : float;
   keeper_turn_timeout_sec : float;
@@ -67,16 +67,16 @@ type oas_timeout_budget_resolution = {
   source : string;
 }
 
-val oas_timeout_budget_resolution_to_yojson :
-  oas_timeout_budget_resolution -> Yojson.Safe.t
+val provider_timeout_budget_to_yojson :
+  provider_timeout_budget -> Yojson.Safe.t
 
-val resolve_bounded_oas_timeout_budget_with_turn_budget :
+val resolve_bounded_provider_timeout_budget_with_turn_budget :
   allow_wall_clock_retry_budget:bool ->
   is_retry:bool ->
   estimated_input_tokens:int ->
   max_turns:int ->
   remaining_turn_budget_s:float ->
-  oas_timeout_budget_resolution option
+  provider_timeout_budget option
 (** RFC-0129: the [reserve_degraded_retry_budget] knob was removed
     (2026-05-18). The first-attempt branch now hands the full usable
     budget to [max_execution_time_s]; the keeper turn timeout still
@@ -91,18 +91,18 @@ val allow_wall_clock_retry_budget_for_attempt :
   attempted_cascades:string list ->
   bool
 
-val bounded_oas_timeout_for_turn_budget_with_turn_budget :
+val bounded_provider_timeout_for_turn_budget_with_turn_budget :
   estimated_input_tokens:int ->
   max_turns:int ->
   remaining_turn_budget_s:float ->
   float option
 
-val bounded_oas_timeout_for_turn_budget :
+val bounded_provider_timeout_for_turn_budget :
   estimated_input_tokens:int ->
   remaining_turn_budget_s:float ->
   float option
 
-val oas_retry_budget_available_for_turn :
+val provider_retry_budget_available_for_turn :
   allow_wall_clock_retry_budget:bool ->
   is_retry:bool ->
   estimated_input_tokens:int ->
@@ -115,7 +115,7 @@ val oas_retry_budget_available_for_turn :
     Distinguishes "admission denied before any provider attempt"
     from "provider attempt ran and OAS server timed out". The
     existing call surface in [Keeper_unified_turn] emits
-    [Turn_timeout] instead of minting an [Oas_timeout_budget] root cause
+    [Turn_timeout] instead of minting an [Provider_timeout] root cause
     for the former case, which collapses both semantics into one
     metric. This function exposes the typed decision so callers can
     branch on the closed-sum reason. The matching error variant
@@ -153,7 +153,7 @@ val degraded_retry_slot_phase_budget_sec : float
     suppressed. This is a guardrail for #12888: once the productive
     phase has already consumed this much wall clock, rotation should end
     the cycle instead of holding the same slot for another provider
-    attempt. OAS timeout-budget failures may still rotate to the next
+    attempt. provider-timeout failures may still rotate to the next
     degraded cascade when retry budget remains, because the failed attempt
     already represents the budgeted provider wait. *)
 
@@ -161,23 +161,23 @@ val degraded_retry_slot_phase_available :
   time_spent_in_turn_s:float -> bool
 
 val reclassify_oas_timeout_for_attempt :
-  timeout_budget:oas_timeout_budget_resolution option ->
+  timeout_budget:provider_timeout_budget option ->
   Agent_sdk.Error.sdk_error ->
   Agent_sdk.Error.sdk_error
 (** Preserve upstream structural timeout errors instead of minting a synthetic
-    [Oas_timeout_budget] root cause.  Kept as a named hook while the
+    [Provider_timeout] root cause.  Kept as a named hook while the
     provider-timeout root-cause ADT is introduced in a later PR. *)
 
 val attempt_watchdog_timeout_sec :
   remaining_turn_budget_s:float ->
-  oas_timeout_budget_resolution ->
+  provider_timeout_budget ->
   float
 (** Wall-clock watchdog for a single cascade attempt.
 
     The watchdog fires after the OAS per-attempt budget plus the normal
     finalization guard, while reserving a small outer-turn margin before the
     enclosing keeper turn wall-clock timeout. This keeps a hung provider
-    attempt on the structured [oas_timeout_budget] path, where degraded cascade
+    attempt on the structured [provider_timeout] path, where degraded cascade
     rotation can still run, instead of falling through to terminal
     [turn_timeout]. *)
 

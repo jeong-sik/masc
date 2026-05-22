@@ -390,7 +390,7 @@ let run_keeper_cycle
                     Keeper_registry.Decision_active_guard_ok
                 | _ -> ());
                let last_execution = ref initial_execution in
-               let last_timeout_budget : oas_timeout_budget_resolution option ref =
+               let last_timeout_budget : provider_timeout_budget option ref =
                  ref None
                in
                let degraded_retry_info = ref None in
@@ -615,7 +615,7 @@ let run_keeper_cycle
                                ~attempted_cascades
                            in
                            match
-                             resolve_bounded_oas_timeout_budget_with_turn_budget
+                             resolve_bounded_provider_timeout_budget_with_turn_budget
                                ~allow_wall_clock_retry_budget
                                ~is_retry
                                ~max_turns
@@ -1353,7 +1353,7 @@ let run_keeper_cycle
                   let e_str = Agent_sdk.Error.to_string err in
                   let is_transient = EC.is_transient_network_error err in
                   (match Keeper_turn_driver.classify_masc_internal_error err with
-                   | Some (Keeper_turn_driver.Oas_timeout_budget _) ->
+                   | Some (Keeper_turn_driver.Provider_timeout _) ->
                      Prometheus.inc_counter
                        Keeper_metrics.metric_keeper_oas_timeout_classifications
                        ~labels:[ "classification", "structural_budget" ]

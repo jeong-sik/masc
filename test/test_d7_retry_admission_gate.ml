@@ -4,8 +4,8 @@
     [Keeper_turn_cascade_budget.decide_retry_admission_for_turn]
     returns:
       - [Ok ()] when remaining turn budget is well above the
-        per-attempt floor ([oas_timeout_guard_sec +
-        min_oas_timeout_budget_sec] = 30s) for a retry without
+        per-attempt floor ([provider_timeout_guard_sec +
+        min_provider_timeout_budget_sec] = 30s) for a retry without
         wall-clock fallback.
       - [Error (Retry_budget_below_min _)] when the projected
         wall-clock budget falls below the min floor (15s).
@@ -24,7 +24,7 @@ module KCB = Masc_mcp.Keeper_turn_cascade_budget
    [allow_wall_clock_retry_budget]) are enough to drive the
    wall-clock branch deterministically:
      usable_wall_clock_budget = remaining_turn_budget_s - 15.0
-   threshold is min_oas_timeout_budget_sec = 15.0 *)
+   threshold is min_provider_timeout_budget_sec = 15.0 *)
 
 let pp_decision ppf = function
   | Ok () -> Format.fprintf ppf "Ok"

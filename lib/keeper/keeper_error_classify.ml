@@ -224,7 +224,7 @@ let is_auto_recoverable_cascade_exhausted_error (err : Agent_sdk.Error.sdk_error
   | Some (Keeper_turn_driver.Admission_queue_rejected _)
   | Some (Keeper_turn_driver.Admission_queue_timeout _)
   | Some (Keeper_turn_driver.Turn_timeout _)
-  | Some (Keeper_turn_driver.Oas_timeout_budget _)
+  | Some (Keeper_turn_driver.Provider_timeout _)
   | Some (Keeper_turn_driver.Max_tokens_ceiling_violation _)
   | Some (Keeper_turn_driver.Ambiguous_post_commit _)
   (* RFC-0159 Phase A: opaque internal failures. *)
@@ -244,7 +244,7 @@ let is_resumable_cli_session_error (err : Agent_sdk.Error.sdk_error) : bool =
   | Some (Keeper_turn_driver.Admission_queue_timeout _)
   | Some (Keeper_turn_driver.Admission_queue_rejected _)
   | Some (Keeper_turn_driver.Turn_timeout _)
-  | Some (Keeper_turn_driver.Oas_timeout_budget _)
+  | Some (Keeper_turn_driver.Provider_timeout _)
   | Some (Keeper_turn_driver.Max_tokens_ceiling_violation _)
   | Some (Keeper_turn_driver.Ambiguous_post_commit _)
   (* RFC-0159 Phase A: opaque internal failures. *)
@@ -359,7 +359,7 @@ let degraded_retry_after_recoverable_error
         local_recovery_retry Resumable_cli_session
     | Some (Keeper_turn_driver.Admission_queue_timeout _) ->
         local_recovery_retry Admission_queue_timeout
-    | Some (Keeper_turn_driver.Oas_timeout_budget _) ->
+    | Some (Keeper_turn_driver.Provider_timeout _) ->
         local_recovery_retry Provider_timeout
     | Some (Keeper_turn_driver.Turn_timeout _) ->
         local_recovery_retry Turn_timeout
@@ -415,7 +415,7 @@ let recoverable_cascade_failure_reason (err : Agent_sdk.Error.sdk_error) =
         Some Resumable_cli_session
     | Some (Keeper_turn_driver.Admission_queue_timeout _) ->
         Some Admission_queue_timeout
-    | Some (Keeper_turn_driver.Oas_timeout_budget _) ->
+    | Some (Keeper_turn_driver.Provider_timeout _) ->
         Some Provider_timeout
     | Some (Keeper_turn_driver.Turn_timeout _) ->
         Some Turn_timeout
@@ -726,7 +726,7 @@ let is_auto_recoverable_turn_error (err : Agent_sdk.Error.sdk_error) : bool =
 
 let should_warn_keeper_cycle_failed (err : Agent_sdk.Error.sdk_error) : bool =
   match Keeper_turn_driver.classify_masc_internal_error err with
-  | Some (Keeper_turn_driver.Oas_timeout_budget _) -> true
+  | Some (Keeper_turn_driver.Provider_timeout _) -> true
   | Some (Keeper_turn_driver.Capacity_backpressure _) -> true
   | Some (Keeper_turn_driver.Cascade_exhausted _)
   | Some (Keeper_turn_driver.Resumable_cli_session _)
@@ -783,7 +783,7 @@ let is_ambiguous_side_effect_error (err : Agent_sdk.Error.sdk_error) : bool =
   | Some (Keeper_turn_driver.Admission_queue_rejected _)
   | Some (Keeper_turn_driver.Admission_queue_timeout _)
   | Some (Keeper_turn_driver.Turn_timeout _)
-  | Some (Keeper_turn_driver.Oas_timeout_budget _)
+  | Some (Keeper_turn_driver.Provider_timeout _)
   | Some (Keeper_turn_driver.Max_tokens_ceiling_violation _)
   (* RFC-0159 Phase A: opaque internal failures are unambiguous failures. *)
   | Some (Keeper_turn_driver.Internal_unhandled_exception _)
@@ -962,7 +962,7 @@ let is_cascade_exhausted_error (err : Agent_sdk.Error.sdk_error) : bool =
   | Some (Keeper_turn_driver.Capacity_backpressure _)
   | Some (Keeper_turn_driver.Admission_queue_timeout _)
   | Some (Keeper_turn_driver.Admission_queue_rejected _)
-  | Some (Keeper_turn_driver.Oas_timeout_budget _)
+  | Some (Keeper_turn_driver.Provider_timeout _)
   | Some (Keeper_turn_driver.Turn_timeout _)
   | Some (Keeper_turn_driver.Max_tokens_ceiling_violation _)
   | Some (Keeper_turn_driver.Ambiguous_post_commit _)

@@ -163,8 +163,6 @@ const StreamableHttpSchema = object({
   managed_endpoint: fallback(string(), '/mcp/managed'),
   operator_endpoint: fallback(string(), '/mcp/operator'),
   delete_endpoint: fallback(string(), '/mcp'),
-  legacy_sse_endpoint: fallback(string(), '/sse'),
-  legacy_messages_endpoint: fallback(string(), '/messages'),
   default_transport: fallback(string(), 'unknown'),
   supports_post: fallback(boolean(), false),
   supports_sse_upgrade: fallback(boolean(), false),

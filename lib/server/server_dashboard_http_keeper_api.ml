@@ -1197,24 +1197,32 @@ let handle_keeper_get_subroutes state req request reqd =
       let last_provider = `Null in
       (* Memory tier usage: join kind_caps (policy) with kind_counts (bank
          summary). Each kind reports used / cap so the dashboard tier
-         panel can render saturation without re-reading the memory file. *)
+         panel can render saturation without re-reading the memory file.
+
+         RFC-0149 §3.1: route the bank read through the typed Result
+         resolver.  [memory_kind_usage] keeps its [`List …] shape for
+         existing dashboard consumers
+         (dashboard/src/components/keeper-memory-tier-panel.ts,
+         dashboard/src/components/ide/ide-persistence-panel.ts).  The
+         typed [Keeper_memory_recall_exn_class.t] label rides on the
+         sibling [memory_kind_usage_error_class] field so an IO fault is
+         distinguishable from "memory bank empty / no kinds recorded".  *)
+      let used_by_kind, memory_kind_usage_error_class =
+        match meta with
+        | Ok (Some _) ->
+          (match
+             Keeper_memory.read_keeper_memory_summary_result
+               state.Mcp_server.room_config
+               ~name ~max_bytes:120_000 ~max_lines:200 ~recent_limit:0
+           with
+           | Ok summary ->
+             summary.Keeper_memory.kind_counts, None
+           | Error exn_class ->
+             [], Some (Keeper_memory_recall_exn_class.to_label exn_class))
+        | _ -> [], None
+      in
       let memory_kind_usage : Yojson.Safe.t =
         let caps = Keeper_memory_policy.kind_caps () in
-        let used_by_kind =
-          match meta with
-          | Ok (Some _) ->
-            (try
-              let summary =
-                Keeper_memory.read_keeper_memory_summary
-                  state.Mcp_server.room_config
-                  ~name ~max_bytes:120_000 ~max_lines:200 ~recent_limit:0
-              in
-              summary.Keeper_memory.kind_counts
-            with
-            | Eio.Cancel.Cancelled _ as e -> raise e
-            | _ -> [])
-          | _ -> []
-        in
         let lookup_used k =
           List.assoc_opt k used_by_kind |> Option.value ~default:0
         in
@@ -1225,6 +1233,11 @@ let handle_keeper_get_subroutes state req request reqd =
             "cap", `Int cap;
             "priority", `Int (Keeper_memory_policy.priority_for_kind ~kind);
           ]) caps)
+      in
+      let memory_kind_usage_error_class_json : Yojson.Safe.t =
+        match memory_kind_usage_error_class with
+        | Some label -> `String label
+        | None -> `Null
       in
       (* Compaction sub-FSM: only emit a diagram when the keeper is in
          the [Compacting] phase. The three nodes mirror
@@ -1259,6 +1272,7 @@ let handle_keeper_get_subroutes state req request reqd =
         "cascade_models", `List (List.map (fun s -> `String s) cascade_models);
         "last_provider_result", last_provider;
         "memory_kind_usage", memory_kind_usage;
+        "memory_kind_usage_error_class", memory_kind_usage_error_class_json;
       ] in
       Http.Response.json ~compress:true ~request:req
         (Yojson.Safe.to_string json) reqd

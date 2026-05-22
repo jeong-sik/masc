@@ -276,6 +276,15 @@ let is_provider_runtime_blocker_class blocker_class =
   String.equal blocker_class "provider_runtime_error"
 ;;
 
+let is_stale_watchdog_blocker_class blocker_class =
+  String.equal blocker_class (blocker_class_to_string Stale_turn_timeout)
+;;
+
+let is_fiber_unresolved_blocker_class blocker_class =
+  String.equal blocker_class (blocker_class_to_string Fiber_unresolved)
+;;
+
+
 
 let runtime_blocker_surface_of_typed_class ?(summary = "") (cls : blocker_class)
   : runtime_blocker_surface
@@ -311,6 +320,16 @@ let runtime_blocker_surface_of_typed_class ?(summary = "") (cls : blocker_class)
       if summary = ""
       then "Keeper turn livelock guard blocked repeated dispatch of the same turn."
       else summary
+    | Fiber_unresolved ->
+      if summary = ""
+      then
+        "Keeper turn fiber ended without completion bookkeeping; inspect liveness/finalization wrapper and preserve the original root cause."
+      else summary
+    | Stale_turn_timeout ->
+      if summary = ""
+      then
+        "Watchdog marked the turn stale; inspect watchdog timing and the underlying root cause separately."
+      else summary
     | No_tool_capable_provider ->
       (match
          Keeper_turn_driver.classify_masc_internal_error
@@ -343,8 +362,6 @@ let runtime_blocker_surface_of_typed_class ?(summary = "") (cls : blocker_class)
     | Turn_timeout_after_queue_wait
     | Turn_timeout
     | Stay_silent_loop
-    | Fiber_unresolved
-    | Stale_turn_timeout
     | Stale_fleet_batch
     | Sdk_max_turns_exceeded
     | Sdk_token_budget_exceeded
@@ -776,6 +793,10 @@ let attention_fields_json (config : Coord_utils.config) (meta : keeper_meta) =
         true, Some "completion_contract_violation", Some "inspect_completion_contract"
       | Some blocker when is_provider_runtime_blocker_class blocker.blocker_class ->
         true, Some "provider_runtime_error", Some "inspect_provider_runtime_cause"
+      | Some blocker when is_stale_watchdog_blocker_class blocker.blocker_class ->
+        true, Some "watchdog_stale_turn", Some "inspect_watchdog_root_cause"
+      | Some blocker when is_fiber_unresolved_blocker_class blocker.blocker_class ->
+        true, Some "fiber_unresolved", Some "inspect_turn_finalization"
       | Some _ -> true, Some "runtime_blocked", Some "inspect_runtime_blocker"
       | None when meta.paused -> true, Some "paused", Some "resume_or_review"
       | None when not social_model_recognized ->

@@ -541,6 +541,54 @@ module Coord = Masc_mcp.Coord
 let make_test_room_config dir =
   Coord.default_config dir
 
+(* RFC-0149 §3.1: typed Error path for the horizon-counts reader.
+   A keeper whose memory.jsonl path resolves to a directory (which
+   [read_file_tail_lines] cannot tail) must surface as
+   [Error io_error] rather than collapsing to [Ok []]
+   indistinguishable from "no rows recorded". *)
+let test_read_memory_horizon_counts_result_error_on_directory_path () =
+  let dir = test_tmpdir () in
+  Fun.protect ~finally:(fun () -> cleanup_tmpdir dir) (fun () ->
+    let config = make_test_room_config dir in
+    let memory_path = Keeper_types.keeper_memory_bank_path config "bad-keeper" in
+    (* Pre-create the parent directory structure, then a *directory*
+       (not a file) at the memory.jsonl path. *)
+    let parent = Filename.dirname memory_path in
+    (try Unix.mkdir parent 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+    Unix.mkdir memory_path 0o755;
+    match
+      Keeper_memory_recall.read_memory_horizon_counts_result config
+        ~name:"bad-keeper" ~max_bytes:100000 ~max_lines:100
+    with
+    | Ok _ ->
+      fail "expected Error io_error when memory.jsonl path is a directory"
+    | Error exn_class ->
+      check string "Error label is io_error"
+        "io_error"
+        (Keeper_memory_recall_exn_class.to_label exn_class))
+
+(* RFC-0149 §3.1: typed Error path for the recent-memory-texts reader. *)
+let test_read_recent_memory_texts_result_error_on_directory_path () =
+  let dir = test_tmpdir () in
+  Fun.protect ~finally:(fun () -> cleanup_tmpdir dir) (fun () ->
+    let config = make_test_room_config dir in
+    let memory_path = Keeper_types.keeper_memory_bank_path config "bad-keeper" in
+    let parent = Filename.dirname memory_path in
+    (try Unix.mkdir parent 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+    Unix.mkdir memory_path 0o755;
+    match
+      Keeper_memory_recall.read_recent_memory_texts_result config
+        ~name:"bad-keeper"
+        ~horizon:Masc_mcp.Keeper_memory_policy.long_term_horizon
+        ~max_bytes:100000 ~max_lines:100 ~limit:5
+    with
+    | Ok _ ->
+      fail "expected Error io_error when memory.jsonl path is a directory"
+    | Error exn_class ->
+      check string "Error label is io_error"
+        "io_error"
+        (Keeper_memory_recall_exn_class.to_label exn_class))
+
 (** E2E: write memory via append_memory_notes_from_reply, then read back via recall.
     Tests the full pipeline: reply → parse → snapshot → candidates → JSONL → recall.
     This is the test that was missing (RFC #3646 I1). *)
@@ -1915,6 +1963,10 @@ let () =
             test_load_history_user_messages_ignores_internal_prompt_entries;
           test_case "load_history_user_messages_result Error on directory path" `Quick
             test_load_history_user_messages_result_error_on_directory_path;
+          test_case "read_memory_horizon_counts_result Error on directory path" `Quick
+            test_read_memory_horizon_counts_result_error_on_directory_path;
+          test_case "read_recent_memory_texts_result Error on directory path" `Quick
+            test_read_recent_memory_texts_result_error_on_directory_path;
           test_case "read_file_tail_lines reads tail without byte cap" `Quick
             test_read_file_tail_lines_reads_tail_without_byte_cap;
           test_case "read_file_tail_lines drops partial byte-cap line" `Quick

@@ -19,6 +19,22 @@
     @since v2.265.0 (RFC-MASC-004 Phase 1)
     @since v2.266.0 (RFC-MASC-004 Phase 2-3 — legacy functions removed) *)
 
+let last_memory_injection_mu = Stdlib.Mutex.create ()
+let last_memory_injection : (string, string * int) Hashtbl.t = Hashtbl.create 64
+
+let with_last_memory_injection_lock f =
+  Stdlib.Mutex.lock last_memory_injection_mu;
+  Fun.protect ~finally:(fun () -> Stdlib.Mutex.unlock last_memory_injection_mu) f
+
+let record_last_memory_injection agent_name digest size =
+  with_last_memory_injection_lock (fun () ->
+    Hashtbl.replace last_memory_injection agent_name (digest, size))
+;;
+
+let get_last_memory_injection agent_name =
+  with_last_memory_injection_lock (fun () ->
+    Hashtbl.find_opt last_memory_injection agent_name)
+;;
 (** Build an [extra_system_context] string from episodic, procedural,
     and institutional memory.
 
@@ -206,6 +222,8 @@ let make
                           | Some text -> String.length text) );
                    ]))
              Keeper_runtime_manifest.Memory_injected;
+           with_last_memory_injection_lock (fun () ->
+             Hashtbl.remove last_memory_injection agent_name);
            Agent_sdk.Hooks.Continue
          | Some mem_text ->
            let extra =
@@ -242,6 +260,15 @@ let make
                           | Some text -> String.length text) );
                    ]))
              Keeper_runtime_manifest.Memory_injected;
+           let extra_system_context_chars_after =
+             match extra with
+             | None -> 0
+             | Some text -> String.length text
+           in
+           record_last_memory_injection
+             agent_name
+             (Digest.to_hex (Digest.string mem_text))
+             extra_system_context_chars_after;
            Agent_sdk.Hooks.AdjustParams
              { current_params with extra_system_context = extra })
       | _ -> Agent_sdk.Hooks.Continue);

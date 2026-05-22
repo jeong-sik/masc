@@ -75,16 +75,6 @@ val review :
   ?sw:Eio.Switch.t ->
   review_request -> review_result
 
-(** Backward-compatible wrapper returning only the verdict. *)
-val review_verdict :
-  ?evaluator_cascade:string ->
-  ?generator_cascade:string ->
-  ?completion_contract:string list ->
-  ?on_verdict:(review_result -> unit) ->
-  ?few_shot_block:string ->
-  ?sw:Eio.Switch.t ->
-  review_request -> verdict
-
 (** Check completion notes against a contract. Returns unmet items.
     Used internally by Gate 2.5; exposed for testing. *)
 val check_contract : notes:string -> contract:string list -> string list

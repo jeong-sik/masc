@@ -48,28 +48,6 @@ let runtime_lens_events_json scan events =
              ]))
   |> fun events -> `List events
 
-let runtime_lens_swimlane_json scan gaps ~lane ~label ~events ~terminal_status =
-  let gap_codes = runtime_lens_gap_codes_for_lane gaps lane in
-  let event_count =
-    events
-    |> List.fold_left
-         (fun total event -> total + runtime_lens_event_count scan event)
-         0
-  in
-  `Assoc
-    [
-      ("lane", `String lane);
-      ("label", `String label);
-      ("event_count", `Int event_count);
-      ("terminal_status", `String terminal_status);
-      ("gap_codes", json_string_list gap_codes);
-      ( "gap_badge",
-        match gap_codes with
-        | code :: _ -> `String code
-        | [] -> `Null );
-      ("events", runtime_lens_events_json scan events);
-    ]
-
 let runtime_lens_keeper_terminal_status ~terminal_event_present scan =
   if terminal_event_present then "finished"
   else if
@@ -205,6 +183,7 @@ let lane_mandatory_events_present scan lane =
 
 let lane_terminal_event_present scan lane =
   match lane_policy_for_lane lane with
+  | Some { terminal_events = []; _ } -> true
   | Some policy ->
     List.exists
       (fun event ->
@@ -219,3 +198,26 @@ let runtime_lens_swimlane_completeness scan lane =
   else if finished then "finished"
   else if lane_mandatory_events_present scan lane then "mandatory_present"
   else "incomplete"
+
+let runtime_lens_swimlane_json scan gaps ~lane ~label ~events ~terminal_status =
+  let gap_codes = runtime_lens_gap_codes_for_lane gaps lane in
+  let event_count =
+    events
+    |> List.fold_left
+         (fun total event -> total + runtime_lens_event_count scan event)
+         0
+  in
+  `Assoc
+    [
+      ("lane", `String lane);
+      ("label", `String label);
+      ("event_count", `Int event_count);
+      ("terminal_status", `String terminal_status);
+      ("completeness", `String (runtime_lens_swimlane_completeness scan lane));
+      ("gap_codes", json_string_list gap_codes);
+      ( "gap_badge",
+        match gap_codes with
+        | code :: _ -> `String code
+        | [] -> `Null );
+      ("events", runtime_lens_events_json scan events);
+    ]

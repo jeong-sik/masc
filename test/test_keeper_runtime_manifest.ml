@@ -1209,6 +1209,7 @@ let test_runtime_trace_lens_summarizes_tool_axis () =
       let claim_scope = Yojson.Safe.Util.(axes |> member "claim_scope") in
       let config_drift = Yojson.Safe.Util.(axes |> member "config_drift") in
       let context = Yojson.Safe.Util.(axes |> member "context") in
+      let swimlanes = Yojson.Safe.Util.(lens |> member "swimlanes") in
       Alcotest.(check (list string))
         "lens requested tools"
         [ "read_file" ]
@@ -1257,6 +1258,19 @@ let test_runtime_trace_lens_summarizes_tool_axis () =
         "lens active open loop count"
         3
         (json_int_member "active_open_loop_count" context);
+      Alcotest.(check string)
+        "tool runtime lane completes without terminal event"
+        "complete"
+        Yojson.Safe.Util.(
+          swimlanes |> member "tool_runtime" |> member "completeness" |> to_string);
+      Alcotest.(check string)
+        "cascade lane completes without terminal event"
+        "complete"
+        Yojson.Safe.Util.(
+          swimlanes
+          |> member "masc_policy_cascade"
+          |> member "completeness"
+          |> to_string);
       let api_manifest_rows =
         Yojson.Safe.Util.(json |> member "manifest_rows" |> to_list)
       in

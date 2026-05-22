@@ -821,6 +821,7 @@ export interface KeeperRuntimeLensLane {
   label: string
   event_count: number
   terminal_status: string
+  completeness: string
   gap_codes: string[]
   gap_badge: string | null
   events: KeeperRuntimeLensLaneEvent[]
@@ -1302,6 +1303,7 @@ function parseRuntimeLensLane(raw: unknown, lane: string, label: string): Keeper
     label: stringField(obj, 'label') || label,
     event_count: numberField(obj, 'event_count'),
     terminal_status: stringField(obj, 'terminal_status') || 'unknown',
+    completeness: stringField(obj, 'completeness') || 'unknown',
     gap_codes: stringListField(obj, 'gap_codes'),
     gap_badge: nullableStringField(obj, 'gap_badge'),
     events,

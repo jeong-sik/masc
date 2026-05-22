@@ -390,6 +390,7 @@ describe('RuntimeLensSection', () => {
     label,
     event_count: eventCount,
     terminal_status: terminalStatus,
+    completeness: eventCount > 0 ? 'complete' : 'incomplete',
     gap_codes: gapCodes,
     gap_badge: gapCodes[0] ?? null,
     events: eventCount > 0 ? [{ event: `${key}_event`, count: eventCount }] : [],

@@ -147,6 +147,7 @@ let tool_call ?task_id tool_name : Keeper_agent_run.tool_call_detail =
   { tool_name
   ; provider = "runtime"
   ; outcome = "ok"
+  ; typed_outcome = None
   ; latency_ms = 1.0
   ; task_id
   ; route_evidence = None

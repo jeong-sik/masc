@@ -1164,6 +1164,7 @@ let prepare_agent_setup
           <- { tool_name
              ; provider
              ; outcome
+             ; typed_outcome = None
              ; latency_ms = duration_ms
              ; task_id
              ; route_evidence

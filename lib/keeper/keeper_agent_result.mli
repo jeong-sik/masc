@@ -4,6 +4,7 @@ type tool_call_detail =
   { tool_name : string
   ; provider : string
   ; outcome : string
+  ; typed_outcome : Keeper_tool_outcome.t option
   ; latency_ms : float
   ; task_id : string option
   ; route_evidence : Yojson.Safe.t option

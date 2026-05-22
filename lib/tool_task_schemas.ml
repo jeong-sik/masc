@@ -21,15 +21,21 @@ module Float = Stdlib.Float
 
     @since God file decomposition — extracted from tool_task.ml *)
 
+let masc_add_task_name = Tool_name.Operation.to_string Tool_name.Operation.Add_task
+let masc_code_git_name = Tool_name.Operation.to_string Tool_name.Operation.Code_git
+let masc_claim_next_name = Tool_name.Operation.to_string Tool_name.Operation.Claim_next
+
 let schemas : Masc_domain.tool_schema list = [
   {
-    name = "masc_add_task";
-    description = "Add a new task to the backlog for agents to claim. \
+    name = masc_add_task_name;
+    description = Printf.sprintf
+      "Add a new task to the backlog for agents to claim. \
 Tasks default to an advisory verification contract with completion/evidence requirements. \
 Normal status flow is todo → claimed → awaiting_verification → done/cancelled when verification FSM is enabled. \
 Priority 1=urgent, 5=low (default 3). \
 Returns task-XXX ID for tracking. \
-Example: masc_add_task({title: 'Fix login bug', goal_id: 'g-123', priority: 1, description: 'Users cannot login with SSO'})";
+Example: %s({title: 'Fix login bug', goal_id: 'g-123', priority: 1, description: 'Users cannot login with SSO'})"
+      masc_add_task_name;
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -59,7 +65,7 @@ Example: masc_add_task({title: 'Fix login bug', goal_id: 'g-123', priority: 1, d
             ("required_tools", `Assoc [
               ("type", `String "array");
               ("items", `Assoc [ ("type", `String "string") ]);
-              ("description", `String "Tool names required to claim this task, e.g. Bash or masc_code_git.");
+              ("description", `String (Printf.sprintf "Tool names required to claim this task, e.g. Bash or %s." masc_code_git_name));
             ]);
             ("required_evidence", `Assoc [ ("type", `String "array"); ("items", `Assoc [ ("type", `String "string") ]) ]);
             ("inspect_gate_evidence", `Assoc [ ("type", `String "array"); ("items", `Assoc [ ("type", `String "string") ]) ]);
@@ -79,11 +85,14 @@ Example: masc_add_task({title: 'Fix login bug', goal_id: 'g-123', priority: 1, d
   };
   {
     name = "masc_batch_add_tasks";
-    description = "Add multiple tasks in one call (more efficient than repeated masc_add_task). \
+    description = Printf.sprintf
+      "Add multiple tasks in one call (more efficient than repeated %s). \
 Use when: loading sprint backlog, importing from JIRA, creating related tasks. \
-Tasks default to the same advisory verification contract/evidence requirements as masc_add_task. \
+Tasks default to the same advisory verification contract/evidence requirements as %s. \
 Each task gets unique ID (task-XXX). Atomic: all succeed or all fail. \
-Example: masc_batch_add_tasks({tasks: [{title: 'Task A', goal_id: 'g-123', priority: 2}, {title: 'Task B', goal_id: 'g-124'}]})";
+Example: masc_batch_add_tasks({tasks: [{title: 'Task A', goal_id: 'g-123', priority: 2}, {title: 'Task B', goal_id: 'g-124'}]})"
+      masc_add_task_name
+      masc_add_task_name;
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -118,7 +127,7 @@ Example: masc_batch_add_tasks({tasks: [{title: 'Task A', goal_id: 'g-123', prior
                   ("required_tools", `Assoc [
                     ("type", `String "array");
                     ("items", `Assoc [ ("type", `String "string") ]);
-                    ("description", `String "Tool names required to claim this task, e.g. Bash or masc_code_git.");
+                    ("description", `String (Printf.sprintf "Tool names required to claim this task, e.g. Bash or %s." masc_code_git_name));
                   ]);
                   ("required_evidence", `Assoc [ ("type", `String "array"); ("items", `Assoc [ ("type", `String "string") ]) ]);
                   ("inspect_gate_evidence", `Assoc [ ("type", `String "array"); ("items", `Assoc [ ("type", `String "string") ]) ]);
@@ -216,16 +225,20 @@ Tip: Look for status='todo' tasks to claim.";
   };
   {
     name = "masc_transition";
-    description = "Move a task through its lifecycle: claim, start, done, cancel, release, \
+    description = Printf.sprintf
+      "Move a task through its lifecycle: claim, start, done, cancel, release, \
 submit_for_verification, approve, reject, or submit_pr_evidence. \
 Call when you pick up, finish, or abandon a task. Supports CAS via expected_version. \
-After masc_add_task or masc_claim_next; pair with masc_deliver before action='done'. \
+After %s or %s; pair with masc_deliver before action='done'. \
 Use submit_for_verification to request cross-agent review; approve/reject for verifier actions. \
 Use submit_pr_evidence to submit a merged PR as evidence for a todo task that requires tools \
 unavailable to you — this transitions the task directly to awaiting_verification so a keeper \
 with the required tools can verify and close it. For compatibility, \
 submit_for_verification with evidence on a todo task is treated as submit_pr_evidence. \
-Tasks created through masc_add_task normally route action='done' into awaiting_verification rather than final done.";
+Tasks created through %s normally route action='done' into awaiting_verification rather than final done."
+      masc_add_task_name
+      masc_claim_next_name
+      masc_add_task_name;
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [

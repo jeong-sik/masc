@@ -29,6 +29,8 @@ module Float = Stdlib.Float
 open Masc_domain
 open Tool_args
 
+let masc_code_search_name = Tool_name.Operation.to_string Tool_name.Operation.Code_search
+
 (* Context required by code tools *)
 type context = {
   config: Coord.config;
@@ -536,7 +538,7 @@ let dispatch ctx ~name ~args : Tool_result.t option =
 let schemas : Masc_domain.tool_schema list = [
   (* masc_code_search *)
   {
-    name = "masc_code_search";
+    name = masc_code_search_name;
     description = "Search code using ripgrep. Literal match by default (is_regex=false). \
 Use simple words/phrases as query. Example: query='handle_request', file_pattern='*.ml'. \
 Set is_regex=true only for patterns like 'foo.*bar' or 'class \\w+'.";
@@ -597,9 +599,11 @@ Pair with masc_code_read to then read specific line ranges of interest.";
   (* masc_code_read *)
   {
     name = "masc_code_read";
-    description = "Read a single file with offset/limit pagination. \
+    description = Printf.sprintf
+      "Read a single file with offset/limit pagination. \
 Returns typed error_kind on failure (path_is_directory, file_not_found, binary_file, file_too_large, io_error). \
-For directories use masc_code_search or shell 'ls -la'.";
+For directories use %s or shell 'ls -la'."
+      masc_code_search_name;
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [

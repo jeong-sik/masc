@@ -123,7 +123,7 @@ let test_auto_resume_disabled () =
   check (option (float 0.1)) "initial <= 0 disables auto-resume"
     None delay
 
-let test_supervisor_policy_pauses_watchdog_oas_budget_loop () =
+let test_supervisor_policy_pauses_watchdog_provider_timeout_loop () =
   let decision =
     policy_decision_exn (Some (Reg.Oas_timeout_budget_loop { count = 3 }))
   in
@@ -133,7 +133,7 @@ let test_supervisor_policy_pauses_watchdog_oas_budget_loop () =
   check string "circuit" "operator_breaker"
     (KFP.circuit_effect_to_label decision.circuit_effect);
   check bool "keeper death denied" false decision.keeper_death_allowed;
-  check string "reason" "oas_timeout_budget_liveness_lost" decision.reason
+  check string "reason" "keeper_liveness_lost_after_timeout" decision.reason
 
 let test_supervisor_policy_pauses_stale_storm () =
   let decision =
@@ -1003,7 +1003,7 @@ let test_sweep_and_recover_swallows_failing_tombstone_hook () =
 (* ── Phase 2 (#10765): stale-termination storm auto-pause ──────── *)
 
 (* Reproduces the Mode A failure pattern from 2026-04-27 fleet observation:
-   keeper proactive turn fails (cascade dead / oas_timeout_budget) → stale
+   keeper proactive turn fails (cascade dead / provider_timeout) → stale
    watchdog kills fiber → supervisor restarts → 30 min later same stale →
    restart loop with no operator-actionable signal beyond log ERROR.
 
@@ -1145,7 +1145,7 @@ let test_legacy_stale_fleet_batch_routes_to_restart_budget () =
        | Error err -> fail ("read_meta failed: " ^ err));
       ())
 
-let test_oas_timeout_budget_loop_pause_skips_restart () =
+let test_provider_timeout_loop_pause_skips_restart () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
   Eio.Switch.run @@ fun sw ->
@@ -1158,20 +1158,20 @@ let test_oas_timeout_budget_loop_pause_skips_restart () =
     (fun () ->
       let config = Masc_mcp.Coord.default_config base_dir in
       ignore (Masc_mcp.Coord.init config ~agent_name:(Some "supervisor"));
-      let name = "oas-timeout-loop-keeper" in
+      let name = "provider-timeout-loop-keeper" in
       let meta = make_meta name in
       (match KT.write_meta config meta with
        | Ok () -> ()
        | Error err -> fail err);
       let reg = Reg.register ~base_path:config.base_path name meta in
-      Eio.Promise.resolve reg.done_r (`Crashed "synthetic OAS budget loop");
+      Eio.Promise.resolve reg.done_r (`Crashed "synthetic provider timeout loop");
       Reg.restore_supervisor_state ~base_path:config.base_path name
         ~restart_count:0 ~last_restart_ts:0.0 ~crash_log:[];
       Reg.set_failure_reason ~base_path:config.base_path name
         (Some (Reg.Oas_timeout_budget_loop { count = 3 }));
       let baseline_pause =
         Masc_mcp.Prometheus.metric_total
-          "masc_keeper_oas_timeout_budget_loop_paused_total"
+          "masc_keeper_provider_timeout_loop_paused_total"
       in
       let baseline_dead =
         Masc_mcp.Prometheus.metric_total
@@ -1190,23 +1190,23 @@ let test_oas_timeout_budget_loop_pause_skips_restart () =
       Sup.sweep_and_recover ctx;
       let after_pause =
         Masc_mcp.Prometheus.metric_total
-          "masc_keeper_oas_timeout_budget_loop_paused_total"
+          "masc_keeper_provider_timeout_loop_paused_total"
       in
       let after_dead =
         Masc_mcp.Prometheus.metric_total
           Masc_mcp.Keeper_metrics.metric_keeper_dead_total
       in
-      check (float 0.001) "oas_timeout_budget_loop counter incremented by 1"
+      check (float 0.001) "provider_timeout_loop counter incremented by 1"
         (baseline_pause +. 1.0) after_pause;
       check (float 0.001) "dead counter NOT incremented (budget loop is pause)"
         baseline_dead after_dead;
       (match KT.read_meta config name with
        | Ok (Some m) ->
-           check bool "meta.paused = true after OAS budget loop pause"
+           check bool "meta.paused = true after provider timeout loop pause"
              true m.paused
-       | Ok None -> fail "meta missing after OAS budget loop pause"
+       | Ok None -> fail "meta missing after provider timeout loop pause"
        | Error err -> fail ("read_meta failed: " ^ err));
-      check bool "registry entry unregistered after OAS budget loop pause"
+      check bool "registry entry unregistered after provider timeout loop pause"
         false (Reg.is_registered ~base_path:config.base_path name))
 
 let test_unresolved_watchdog_stopped_budget_loop_is_reaped () =
@@ -1248,10 +1248,10 @@ let test_unresolved_watchdog_stopped_budget_loop_is_reaped () =
        | Ok (Some m) ->
            check bool "meta.paused = true after unresolved watchdog stop"
              true m.paused;
-           check bool "budget loop blocker class preserved"
+           check bool "provider timeout blocker class preserved"
              true
              (match m.runtime.last_blocker with
-              | Some b -> b.klass = KT.Oas_timeout_budget
+              | Some b -> b.klass = KT.Turn_timeout
               | None -> false)
        | Ok None -> fail "meta missing after unresolved watchdog stop"
        | Error err -> fail ("read_meta failed: " ^ err));
@@ -1406,7 +1406,7 @@ let test_oas_auto_resume_after_sec_doubles_on_repause () =
        | Ok () -> ()
        | Error err -> fail err);
       let reg = Reg.register ~base_path:config.base_path name initial_meta in
-      Eio.Promise.resolve reg.done_r (`Crashed "oas timeout budget loop");
+      Eio.Promise.resolve reg.done_r (`Crashed "provider timeout loop");
       Reg.restore_supervisor_state ~base_path:config.base_path name
         ~restart_count:0 ~last_restart_ts:0.0 ~crash_log:[];
       Reg.set_failure_reason ~base_path:config.base_path name
@@ -1910,8 +1910,8 @@ let () =
       test_case "never negative" `Quick test_backoff_never_negative;
     ];
     "failure_policy_bridge", [
-      test_case "watchdog OAS budget loop pauses via policy" `Quick
-        test_supervisor_policy_pauses_watchdog_oas_budget_loop;
+      test_case "watchdog provider timeout loop pauses via policy" `Quick
+        test_supervisor_policy_pauses_watchdog_provider_timeout_loop;
       test_case "stale storm pauses via policy" `Quick
         test_supervisor_policy_pauses_stale_storm;
       test_case "stale turn restarts via policy" `Quick
@@ -1975,8 +1975,8 @@ let () =
         test_stale_storm_pause_skips_restart;
       test_case "legacy Stale_fleet_batch follows restart budget" `Quick
         test_legacy_stale_fleet_batch_routes_to_restart_budget;
-      test_case "Oas_timeout_budget_loop skips restart, persists paused, increments counter" `Quick
-        test_oas_timeout_budget_loop_pause_skips_restart;
+      test_case "Provider timeout loop skips restart, persists paused, increments counter" `Quick
+        test_provider_timeout_loop_pause_skips_restart;
       test_case "unresolved watchdog-stopped budget loop is reaped" `Quick
         test_unresolved_watchdog_stopped_budget_loop_is_reaped;
       test_case "non-storm Crashed still routes to restart (regression guard)" `Quick

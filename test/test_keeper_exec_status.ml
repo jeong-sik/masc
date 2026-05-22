@@ -599,10 +599,10 @@ let test_runtime_surface_names_no_tool_provider_details () =
   check bool "summary omits rejected provider identity" false
     (has_substring surfaced_summary "codex_cli:codex")
 
-let test_runtime_surface_routes_oas_timeout_to_timeout_action () =
+let test_runtime_surface_routes_turn_timeout_to_runtime_action () =
   KR.clear ();
-  with_temp_base_path "test-keeper-exec-status-oas-timeout" (fun base_path ->
-      let base = make_meta ~name:"runtime-oas-timeout-action-test" () in
+  with_temp_base_path "test-keeper-exec-status-turn-timeout" (fun base_path ->
+      let base = make_meta ~name:"runtime-turn-timeout-action-test" () in
       let meta =
         {
           base with
@@ -612,8 +612,8 @@ let test_runtime_surface_routes_oas_timeout_to_timeout_action () =
               last_blocker =
                 Some
                   (KT.blocker_info_of_class
-                     ~detail:"OAS budget timeout fired before the keeper hard timeout."
-                     KT.Oas_timeout_budget);
+                     ~detail:"Provider stream exceeded the keeper turn timeout."
+                     KT.Turn_timeout);
             };
         }
       in
@@ -622,22 +622,22 @@ let test_runtime_surface_routes_oas_timeout_to_timeout_action () =
       let runtime = KSB.runtime_surface_json config meta in
       let open Yojson.Safe.Util in
       check string "runtime blocker class"
-        "oas_timeout_budget"
+        "turn_timeout"
         (runtime |> member "runtime_blocker_class" |> to_string);
       check bool "needs attention" true
         (runtime |> member "needs_attention" |> to_bool);
       check string "attention reason"
-        "timeout_budget_exhausted"
+        "runtime_blocked"
         (runtime |> member "attention_reason" |> to_string);
       check string "next human action"
-        "inspect_timeout_budget"
+        "inspect_runtime_blocker"
         (runtime |> member "next_human_action" |> to_string))
 
 let test_runtime_surface_routes_paused_timeout_to_paused_action () =
   KR.clear ();
-  with_temp_base_path "test-keeper-exec-status-paused-oas-timeout"
+  with_temp_base_path "test-keeper-exec-status-paused-turn-timeout"
     (fun base_path ->
-      let base = make_meta ~name:"runtime-paused-oas-timeout-action-test" () in
+      let base = make_meta ~name:"runtime-paused-turn-timeout-action-test" () in
       let meta =
         {
           base with
@@ -648,8 +648,8 @@ let test_runtime_surface_routes_paused_timeout_to_paused_action () =
               last_blocker =
                 Some
                   (KT.blocker_info_of_class
-                     ~detail:"OAS budget timeout fired before the keeper hard timeout."
-                     KT.Oas_timeout_budget);
+                     ~detail:"Provider stream exceeded the keeper turn timeout."
+                     KT.Turn_timeout);
             };
         }
       in
@@ -658,7 +658,7 @@ let test_runtime_surface_routes_paused_timeout_to_paused_action () =
       let runtime = KSB.runtime_surface_json config meta in
       let open Yojson.Safe.Util in
       check string "runtime blocker class"
-        "oas_timeout_budget"
+        "turn_timeout"
         (runtime |> member "runtime_blocker_class" |> to_string);
       check string "pause state"
         "paused"
@@ -1251,7 +1251,7 @@ let () =
             test_runtime_surface_names_no_tool_provider_details;
           test_case "runtime surface routes OAS timeout to timeout action"
             `Quick
-            test_runtime_surface_routes_oas_timeout_to_timeout_action;
+            test_runtime_surface_routes_turn_timeout_to_runtime_action;
           test_case "runtime surface routes paused timeout to paused action"
             `Quick
             test_runtime_surface_routes_paused_timeout_to_paused_action;

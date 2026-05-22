@@ -75,6 +75,11 @@ export function KeeperMemoryTierPanel({
   snapshot: externalSnapshot,
 }: KeeperMemoryTierPanelProps) {
   const [usage, setUsage] = useState<MemoryKindUsageEntry[] | null>(null)
+  /** RFC-0149 §3.1 — typed memory-bank read failure label
+   *  (`Keeper_memory_recall_exn_class.t`).  Disambiguates "no rows
+   *  recorded" (usage=[], errorClass=null) from "bank read failed"
+   *  (usage=[], errorClass="<label>"). */
+  const [memoryBankErrorClass, setMemoryBankErrorClass] = useState<string | null>(null)
   const [internalSnapshot, setInternalSnapshot] = useState<KeeperCompositeSnapshot | null>(null)
   const snapshot = externalSnapshot ?? internalSnapshot
   const [error, setError] = useState<string | null>(null)
@@ -105,8 +110,10 @@ export function KeeperMemoryTierPanel({
 
           if (usageResult.status === 'fulfilled') {
             setUsage(usageResult.value.memory_kind_usage ?? [])
+            setMemoryBankErrorClass(usageResult.value.memory_kind_usage_error_class ?? null)
           } else {
             setUsage(null)
+            setMemoryBankErrorClass(null)
             nextError = usageResult.reason instanceof Error ? usageResult.reason.message : 'memory tier fetch failed'
           }
 
@@ -148,7 +155,14 @@ export function KeeperMemoryTierPanel({
   }
 
   if (error || !usage || usage.length === 0) {
-    return html`<${EmptyState} message=${error ?? '메모리 티어 데이터 없음'} compact />`
+    // RFC-0149 §3.1 — if the bank read returned a typed failure class,
+    // surface it on the empty-state message so operators can distinguish
+    // "no memory rows recorded" from "memory bank unreadable".
+    const emptyMessage = error
+      ?? (memoryBankErrorClass !== null
+        ? `메모리 뱅크 읽기 실패: ${memoryBankErrorClass}`
+        : '메모리 티어 데이터 없음')
+    return html`<${EmptyState} message=${emptyMessage} compact />`
   }
 
   const totalUsed = usage.reduce((sum, row) => sum + row.used, 0)

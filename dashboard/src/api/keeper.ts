@@ -519,6 +519,12 @@ export interface KeeperStateDiagramResponse {
   cascade_models?: string[]
   last_provider_result?: string | null
   memory_kind_usage?: MemoryKindUsageEntry[]
+  /** RFC-0149 §3.1 — sibling field carrying the typed memory-bank
+   *  read failure class (`yojson_parse_error | io_error | type_error
+   *  | other`).  `null` means the bank was readable; a string label
+   *  means the read failed and `memory_kind_usage` contains the
+   *  empty-counts fallback rather than a real snapshot. */
+  memory_kind_usage_error_class?: string | null
 }
 
 export async function fetchKeeperTransitions(

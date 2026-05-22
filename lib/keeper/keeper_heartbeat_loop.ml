@@ -102,23 +102,23 @@ let record_cascade_backpressure_observation =
   Observations.record_cascade_backpressure_observation
 ;;
 
-let oas_timeout_budget_observation_reasons =
-  Observations.oas_timeout_budget_observation_reasons
+let provider_timeout_observation_reasons =
+  Observations.provider_timeout_observation_reasons
 ;;
 
-let record_oas_timeout_budget_observation =
-  Observations.record_oas_timeout_budget_observation
+let record_provider_timeout_observation =
+  Observations.record_provider_timeout_observation
 ;;
 
-let clear_oas_timeout_budget_failure_reason =
-  Observations.clear_oas_timeout_budget_failure_reason
+let clear_provider_timeout_failure_reason =
+  Observations.clear_provider_timeout_failure_reason
 ;;
 
-let prior_oas_timeout_budget_strikes =
-  Observations.prior_oas_timeout_budget_strikes
+let prior_provider_timeout_strikes =
+  Observations.prior_provider_timeout_strikes
 ;;
 
-let is_oas_timeout_budget_error = Observations.is_oas_timeout_budget_error
+let is_provider_timeout_error = Observations.is_provider_timeout_error
 
 let timeout_phase_of_oas_timeout_budget_phase =
   Observations.timeout_phase_of_oas_timeout_budget_phase

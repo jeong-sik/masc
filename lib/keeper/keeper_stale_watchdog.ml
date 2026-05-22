@@ -281,7 +281,7 @@ let pending_oas_timeout_budget_count
   let is_timeout_budget_observation_reason reason =
     List.exists
       (String.equal reason)
-      Keeper_heartbeat_loop.oas_timeout_budget_observation_reasons
+      Keeper_heartbeat_loop.provider_timeout_observation_reasons
   in
   let has_timeout_observation =
     match entry.last_skip_observation with

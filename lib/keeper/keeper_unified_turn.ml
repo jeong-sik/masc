@@ -95,7 +95,25 @@ let run_keeper_cycle
     ; manifest_keeper_turn_id = Some keeper_turn_id
     }
   in
-  let append_manifest ?status ?decision ?cascade_name ~site event =
+  let append_manifest ?status ?decision ?cascade_name ?clock_refs ~site event =
+    let decision =
+      let decision =
+        match decision with
+        | Some value -> value
+        | None -> `Assoc []
+      in
+      let clock_refs =
+        match clock_refs with
+        | Some value -> value
+        | None ->
+          Keeper_runtime_manifest.clock_refs_for_context
+            runtime_manifest_context ~event ()
+      in
+      Some
+        (Keeper_runtime_manifest.with_clock_refs
+           ~clock_refs
+           decision)
+    in
     Keeper_runtime_manifest.make_for_context runtime_manifest_context ~event
       ?cascade_name ?status ?decision ()
     |> Keeper_runtime_manifest.append_best_effort ~site config
@@ -1280,7 +1298,16 @@ let run_keeper_cycle
                in
                append_manifest ~site:"event_bus_correlated"
                  ~status:event_bus_manifest_status
-                 ~decision:(turn_event_bus_manifest_decision turn_event_bus)
+                 ~clock_refs:
+                   (Keeper_runtime_manifest.clock_refs_for_context
+                      runtime_manifest_context
+                      ~event:Keeper_runtime_manifest.Event_bus_correlated
+                      ?event_bus_correlation_id:turn_event_bus.correlation_id
+                      ?event_bus_run_id:turn_event_bus.run_id
+                      ?caused_by:turn_event_bus.caused_by ())
+                 ~decision:
+                   (Keeper_runtime_manifest.with_payload_role ~payload_role:Operator_evidence
+                      (turn_event_bus_manifest_decision turn_event_bus))
                  Keeper_runtime_manifest.Event_bus_correlated;
                let run_result =
                  match event_bus_integrity_error_snapshot () with

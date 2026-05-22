@@ -171,6 +171,26 @@ let runtime_manifest_context ~keeper_name ~agent_name ~trace_id ~generation
 let append_runtime_manifest ~config ~keeper_name ~agent_name ~trace_id
     ~generation ~cascade_name ?status ?decision ?keeper_turn_id
     ?oas_turn_count ?checkpoint_path ?receipt_path ~site event =
+  let decision =
+    match keeper_turn_id with
+    | None -> decision
+    | Some keeper_turn_id ->
+      let ctx =
+        runtime_manifest_context ~keeper_name ~agent_name ~trace_id
+          ~generation ~keeper_turn_id
+      in
+      let decision =
+        match decision with
+        | Some value -> value
+        | None -> `Assoc []
+      in
+      Some
+        (Keeper_runtime_manifest.with_clock_refs
+           ~clock_refs:
+             (Keeper_runtime_manifest.clock_refs_for_context ctx ~event
+                ?oas_turn_count ())
+           decision)
+  in
   Keeper_runtime_manifest.make ~keeper_name ~agent_name ~trace_id ~generation
     ?keeper_turn_id ?oas_turn_count ~event ~cascade_name ?status ?decision
     ?checkpoint_path ?receipt_path ()

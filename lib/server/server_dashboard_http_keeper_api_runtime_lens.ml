@@ -188,6 +188,27 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
                   ( "missing_required_tools",
                     json_string_list missing_required_tools );
                 ] );
+            ( "tool_lineage",
+              `Assoc
+                [
+                  ( "recorded",
+                    `Bool (Option.is_some scan.latest_tool_lineage_decision)
+                  );
+                  ( "decision",
+                    match scan.latest_tool_lineage_decision with
+                    | Some value -> value
+                    | None -> `Null );
+                ] );
+            ( "payload_role",
+              `Assoc
+                (Hashtbl.fold
+                   (fun role count acc -> (role, `Int count) :: acc)
+                   scan.payload_role_counts []) );
+            ( "source_clock",
+              `Assoc
+                (Hashtbl.fold
+                   (fun clock count acc -> (clock, `Int count) :: acc)
+                   scan.source_clock_counts []) );
             ( "provider_attempt",
               `Assoc
                 [
@@ -307,7 +328,11 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
             ( "tool_runtime",
               runtime_lens_swimlane_json scan gaps ~lane:"tool_runtime"
                 ~label:"Tool Runtime"
-                ~events:[ Keeper_runtime_manifest.Tool_surface_selected ]
+                ~events:
+                  [
+                    Keeper_runtime_manifest.Tool_surface_selected;
+                    Keeper_runtime_manifest.Tool_lineage_recorded;
+                  ]
                 ~terminal_status:tool_runtime_status );
             ( "memory_context",
               runtime_lens_swimlane_json scan gaps ~lane:"memory_context"
@@ -322,5 +347,11 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
                   ]
                 ~terminal_status:(runtime_lens_memory_terminal_status scan) );
           ] );
+      ( "clock_edges",
+        Server_dashboard_http_keeper_runtime_lens_clock_edges.runtime_lens_clock_edges_json
+          scan );
+      ( "clock_groups",
+        Server_dashboard_http_keeper_runtime_lens_clock_groups.runtime_lens_clock_groups_json
+          scan );
       ("gaps", `List (List.map runtime_lens_gap_json gaps));
     ]

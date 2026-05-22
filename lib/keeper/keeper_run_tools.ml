@@ -1024,6 +1024,7 @@ let prepare_agent_setup
     ; per_call_turn
     ; per_call_max_turns = max_turns
     ; core_count
+    ; deterministic_prefilter
     ; deterministic_prefilter_count = List.length deterministic_prefilter
     ; discovered_count
     ; llm_selected_count = llm_only_count

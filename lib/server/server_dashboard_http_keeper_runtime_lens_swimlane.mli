@@ -41,3 +41,19 @@ val runtime_lens_provider_terminal_status :
 
 val runtime_lens_memory_terminal_status :
   Server_dashboard_http_keeper_runtime_manifest_scan.runtime_manifest_scan -> string
+
+type lane_policy =
+  { lane : string
+  ; mandatory_events : Keeper_runtime_manifest.event_kind list
+  ; terminal_events : Keeper_runtime_manifest.event_kind list
+  }
+
+val lane_policies : lane_policy list
+val lane_mandatory_event_codes : string -> string list
+val lane_terminal_event_codes : string -> string list
+val lane_mandatory_events_present :
+  Server_dashboard_http_keeper_runtime_manifest_scan.runtime_manifest_scan -> string -> bool
+val lane_terminal_event_present :
+  Server_dashboard_http_keeper_runtime_manifest_scan.runtime_manifest_scan -> string -> bool
+val runtime_lens_swimlane_completeness :
+  Server_dashboard_http_keeper_runtime_manifest_scan.runtime_manifest_scan -> string -> string

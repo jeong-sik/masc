@@ -11,6 +11,7 @@ type event_kind =
   | Pre_dispatch_blocked
   | Tool_surface_selected
   | Provider_lane_resolved
+  | Tool_lineage_recorded
   | Provider_attempt_started
   | Provider_attempt_finished
   | Context_injected
@@ -55,11 +56,74 @@ type turn_context = {
   manifest_keeper_turn_id : int option;
 }
 
+type payload_role =
+  | Model_input
+  | Operator_evidence
+  | Checkpoint
+  | Memory_store
+
+val payload_role_to_string : payload_role -> string
+val payload_role_of_string : string -> payload_role option
+
+type source_clock =
+  | Wall
+  | Monotonic
+  | Logical
+  | Provider
+  | Event_bus
+
+val source_clock_to_string : source_clock -> string
+val source_clock_of_string : string -> source_clock option
+
 val schema_version : int
 val all_event_kinds : event_kind list
 val event_kind_to_string : event_kind -> string
 val event_kind_of_string : string -> event_kind option
 val safe_segment : string -> string
+
+val clock_refs :
+  ?edge_id:string ->
+  ?lane:string ->
+  ?source_clock:source_clock ->
+  ?observed_at:string ->
+  ?started_at:string ->
+  ?finished_at:string ->
+  ?provider_attempt_id:string ->
+  ?tool_batch_id:string ->
+  ?checkpoint_id:string ->
+  ?compaction_id:string ->
+  ?memory_injection_id:string ->
+  ?event_bus_correlation_id:string ->
+  ?event_bus_run_id:string ->
+  ?parent_event_id:string ->
+  ?caused_by:string ->
+  unit ->
+  Yojson.Safe.t
+
+val clock_refs_for_context :
+  turn_context ->
+  event:event_kind ->
+  ?oas_turn_count:int ->
+  ?event_bus_correlation_id:string ->
+  ?event_bus_run_id:string ->
+  ?parent_event_id:string ->
+  ?caused_by:string ->
+  unit ->
+  Yojson.Safe.t
+
+val with_clock_refs : clock_refs:Yojson.Safe.t -> Yojson.Safe.t -> Yojson.Safe.t
+
+val with_payload_role : payload_role:payload_role -> Yojson.Safe.t -> Yojson.Safe.t
+
+val tool_lineage :
+  ?searched_tool_names:string list ->
+  ?visible_tool_names:string list ->
+  ?materialized_tool_names:string list ->
+  ?emitted_tool_names:string list ->
+  ?executed_tool_names:string list ->
+  ?verified_tool_names:string list ->
+  unit ->
+  Yojson.Safe.t
 
 val make :
   ?ts:string ->
@@ -93,6 +157,8 @@ val make_for_context :
   t
 
 val to_json : t -> Yojson.Safe.t
+val public_to_json : t -> Yojson.Safe.t
+val public_projection_of_decision : Yojson.Safe.t -> Yojson.Safe.t
 val of_json : Yojson.Safe.t -> (t, string) result
 
 val execution_receipt_path_for_today :

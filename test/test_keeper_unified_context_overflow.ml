@@ -92,6 +92,12 @@ let test_summarize_turn_event_bus_extracts_overflow_signal () =
     ]
   in
   let summary = UT.summarize_turn_event_bus events in
+  check int "event count" 2 summary.event_count;
+  check
+    (list string)
+    "payload kinds"
+    [ "turn_started"; "context_overflow_imminent" ]
+    summary.payload_kinds;
   check
     (option string)
     "correlation id from first event"
@@ -127,6 +133,12 @@ let test_summarize_turn_event_bus_extracts_compaction_signal () =
     ]
   in
   let summary = UT.summarize_turn_event_bus events in
+  check int "compaction event count" 2 summary.event_count;
+  check
+    (list string)
+    "compaction payload kinds"
+    [ "context_compact_started"; "context_compacted" ]
+    summary.payload_kinds;
   check
     (option string)
     "compaction correlation"
@@ -150,6 +162,8 @@ let test_context_overflow_event_prefers_event_bus_signal () =
     { correlation_id = Some "cid-123"
     ; run_id = Some "run-1"
     ; caused_by = None
+    ; event_count = 1
+    ; payload_kinds = [ "context_overflow_imminent" ]
     ; overflow_imminent = Some { estimated_tokens = 205_000; limit_tokens = 200_000 }
     ; context_compact_started_count = 0
     ; context_compacted_count = 0

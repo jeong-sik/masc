@@ -419,31 +419,31 @@ let test_json_roundtrip () =
         parsed.oas_turn_count;
       let emitted_json = M.to_json manifest in
       Alcotest.(check bool)
-        "manifest JSON omits provider kind"
+        "manifest JSON omits provider kind at top level"
         false
         (json_has_key "provider_kind" emitted_json);
       Alcotest.(check bool)
-        "manifest JSON omits model id"
+        "manifest JSON omits model id at top level"
         false
         (json_has_key "model_id" emitted_json);
       let emitted_decision =
         Yojson.Safe.Util.(emitted_json |> member "decision")
       in
       Alcotest.(check bool)
-        "manifest decision omits provider kind"
-        false
+        "manifest decision preserves provider kind"
+        true
         (json_has_key "provider_kind" emitted_decision);
       Alcotest.(check bool)
-        "manifest decision omits model id"
-        false
+        "manifest decision preserves model id"
+        true
         (json_has_key "model_id" emitted_decision);
       Alcotest.(check bool)
-        "manifest decision omits response model"
-        false
+        "manifest decision preserves response model"
+        true
         (json_has_key "response_model" emitted_decision);
       Alcotest.(check bool)
-        "manifest decision omits retired per-provider timeout key"
-        false
+        "manifest decision preserves per-provider timeout key"
+        true
         (json_has_key "per_provider_timeout_s" emitted_decision);
       Alcotest.(check bool)
         "manifest decision preserves attempt timeout"
@@ -478,12 +478,13 @@ let test_json_roundtrip () =
           ]
       in
       (match M.of_json retired_top_level_json with
-       | Ok _ -> Alcotest.fail "retired top-level provider/model fields parsed"
+       | Ok parsed ->
+         Alcotest.(check string)
+           "legacy top-level extra fields parse leniently"
+           "trace-legacy"
+           parsed.M.trace_id
        | Error msg ->
-         Alcotest.(check bool)
-           "retired top-level provider/model fields rejected"
-           true
-           (contains_substring msg "retired runtime manifest field"));
+         Alcotest.fail ("legacy top-level fields should parse leniently: " ^ msg));
       let retired_decision_json =
         `Assoc
           [
@@ -503,12 +504,13 @@ let test_json_roundtrip () =
           ]
       in
       match M.of_json retired_decision_json with
-      | Ok _ -> Alcotest.fail "retired decision provider/model fields parsed"
-      | Error msg ->
+      | Ok parsed ->
         Alcotest.(check bool)
-          "retired decision provider/model fields rejected"
+          "legacy decision response_model parsed leniently"
           true
-          (contains_substring msg "retired runtime manifest decision field")
+          (json_has_key "response_model" parsed.M.decision)
+      | Error msg ->
+        Alcotest.fail ("legacy decision fields should parse leniently: " ^ msg)
 
 let test_of_json_rejects_unknown_event () =
   let json =
@@ -656,6 +658,13 @@ let json_has_key name json =
   match json with
   | `Assoc fields -> List.mem_assoc name fields
   | _ -> false
+
+let json_object_member name json = Yojson.Safe.Util.member name json
+
+let clock_refs_member name row =
+  row.M.decision
+  |> json_object_member "clock_refs"
+  |> json_string_member_opt name
 
 let require_some label = function
   | Some value -> value
@@ -1094,7 +1103,16 @@ let test_runtime_trace_api_bounds_rows_but_counts_full_manifest () =
       Alcotest.(check int)
         "bounded trace counts receipt append from full scan"
         1
-        (json_int_member "receipt_appended_count" turn_identity))
+        (json_int_member "receipt_appended_count" turn_identity);
+      let gap_codes =
+        Yojson.Safe.Util.(
+          json |> member "runtime_lens" |> member "gaps" |> to_list
+          |> List.map (fun gap -> gap |> member "code" |> to_string))
+      in
+      Alcotest.(check bool)
+        "bounded trace surfaces clock window truncation"
+        true
+        (List.mem "clock_edges_window_truncated" gap_codes))
 
 let test_runtime_trace_lens_summarizes_tool_axis () =
   let base_dir = temp_dir () in
@@ -1510,6 +1528,480 @@ let test_runtime_trace_lens_groups_context_memory_swimlane () =
         0
         (json_list_length "gaps" lens))
 
+let test_runtime_trace_lens_derives_clock_edges () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc_mcp.Coord.default_config base_dir in
+      let keeper_name = "runtime-lens-clock-edges" in
+      let trace_id = "trace-runtime-lens-clock-edges" in
+      let keeper_turn_id = 77 in
+      let strings values =
+        `List (List.map (fun value -> `String value) values)
+      in
+      append_manifest_or_fail config
+        (M.make ~ts:"2026-05-13T00:00:00Z" ~keeper_name
+           ~trace_id ~keeper_turn_id ~event:M.Turn_started ~status:"started"
+           ());
+      append_manifest_or_fail config
+        (M.make ~ts:"2026-05-13T00:00:01Z" ~keeper_name
+           ~trace_id ~keeper_turn_id ~event:M.Tool_surface_selected
+           ~status:"selected"
+           ~decision:
+             (`Assoc
+               [
+                 ("required_tool_names", strings [ "keeper_task_done" ]);
+                 ("missing_required_tool_names", strings []);
+               ])
+           ());
+      append_manifest_or_fail config
+        (M.make ~ts:"2026-05-13T00:00:02Z" ~keeper_name
+           ~trace_id ~keeper_turn_id ~event:M.Provider_lane_resolved
+           ~status:"resolved"
+           ~decision:
+             (`Assoc
+               [
+                 ("requested_tool_names", strings [ "keeper_task_done" ]);
+                 ("required_tool_names", strings [ "keeper_task_done" ]);
+                 ("materialized_tool_names", strings [ "keeper_task_done" ]);
+                 ("missing_required_tool_names_after_lane", strings []);
+                 ("resolved_lane", `String "runtime_mcp");
+               ])
+           ());
+      append_manifest_or_fail config
+        (M.make ~ts:"2026-05-13T00:00:03Z" ~keeper_name
+           ~trace_id ~keeper_turn_id ~event:M.Provider_attempt_started
+           ~status:"started"
+           ~decision:
+             (`Assoc
+               [
+                 ("model_source", `String "named_cascade");
+                 ("capability_source", `String "provider_config_from_cascade_catalog");
+                 ("clock_refs", `Assoc [ ("edge_id", `String "edge-provider-start") ]);
+               ])
+           ());
+      append_manifest_or_fail config
+        (M.make ~ts:"2026-05-13T00:00:04Z" ~keeper_name
+           ~trace_id ~keeper_turn_id ~event:M.Context_injected
+           ~status:"injected"
+           ~decision:
+             (`Assoc
+               [
+                 ("turn_system_prompt_digest", `String "digest-turn-system");
+                 ("memory_context_digest", `String "digest-memory-context");
+                 ( "clock_refs",
+                   `Assoc
+                     [
+                       ("edge_id", `String "edge-context-explicit");
+                       ("lane", `String "memory_context");
+                       ("source_clock", `String "monotonic");
+                       ("observed_at", `String "2026-05-13T00:00:04.123Z");
+                       ("started_at", `String "2026-05-13T00:00:04.100Z");
+                       ("finished_at", `String "2026-05-13T00:00:04.200Z");
+                       ("parent_event_id", `String "edge-provider-start");
+                       ("caused_by", `String "provider_attempt_started");
+                     ] );
+               ])
+           ());
+      append_manifest_or_fail config
+        (M.make ~ts:"2026-05-13T00:00:05Z" ~keeper_name
+           ~trace_id ~keeper_turn_id ~oas_turn_count:1
+           ~event:M.Memory_injected ~status:"injected"
+           ~decision:
+             (`Assoc
+               [
+                 ("memory_context_digest", `String "digest-memory");
+                 ("extra_system_context_chars_after", `Int 123);
+               ])
+           ());
+      append_manifest_or_fail config
+        (M.make ~ts:"2026-05-13T00:00:06Z" ~keeper_name
+           ~trace_id ~keeper_turn_id ~event:M.Event_bus_correlated
+           ~status:"observed"
+           ~decision:
+             (`Assoc
+               [
+                 ("correlation_id", `String "corr-clock-1");
+                 ("run_id", `String "run-clock-1");
+                 ("event_count", `Int 2);
+                 ( "payload_kinds",
+                   `List
+                     [
+                       `String "context_compact_started";
+                       `String "context_compacted";
+                     ] );
+                 ("context_compact_started_count", `Int 1);
+                 ("context_compacted_count", `Int 1);
+               ])
+           ());
+      append_manifest_or_fail config
+        (M.make ~ts:"2026-05-13T00:00:07Z" ~keeper_name
+           ~trace_id ~keeper_turn_id ~oas_turn_count:2
+           ~event:M.Checkpoint_saved ~status:"saved"
+           ~checkpoint_path:"/tmp/oas-clock-checkpoint.json"
+           ~decision:
+             (`Assoc [ ("session_id", `String trace_id); ("turns", `Int 2) ])
+           ());
+      append_manifest_or_fail config
+        (M.make ~ts:"2026-05-13T00:00:07.500Z" ~keeper_name
+           ~trace_id ~keeper_turn_id ~oas_turn_count:2
+           ~event:M.Working_state_sidecar_saved ~status:"saved"
+           ~checkpoint_path:"/tmp/oas-clock-checkpoint.json"
+           ~decision:
+             (`Assoc [ ("session_id", `String trace_id); ("turns", `Int 2) ])
+           ());
+      append_manifest_or_fail config
+        (M.make ~ts:"2026-05-13T00:00:08Z" ~keeper_name
+           ~trace_id ~keeper_turn_id ~oas_turn_count:2
+           ~event:M.Provider_attempt_finished ~status:"provider_returned"
+           ~decision:
+             (`Assoc [ ("fallback_authority", `String "declared_cascade") ])
+           ());
+      append_manifest_or_fail config
+        (M.make ~ts:"2026-05-13T00:00:09Z" ~keeper_name
+           ~trace_id ~keeper_turn_id ~event:M.Receipt_appended
+           ~status:"appended" ~receipt_path:"/tmp/receipt-clock.jsonl"
+           ~tool_call_log_path:"/tmp/tool-clock.jsonl" ());
+      append_manifest_or_fail config
+        (M.make ~ts:"2026-05-13T00:00:10Z" ~keeper_name
+           ~trace_id ~keeper_turn_id ~event:M.Turn_finished ~status:"ok"
+           ());
+      let status, json =
+        Masc_mcp.Server_dashboard_http_keeper_api.keeper_runtime_trace_json
+          config keeper_name ~trace_id ~turn_id:keeper_turn_id ()
+      in
+      Alcotest.(check string)
+        "clock edge runtime trace status"
+        "ok"
+        (match status with `OK -> "ok" | `Not_found -> "not_found");
+      let lens = Yojson.Safe.Util.(json |> member "runtime_lens") in
+      let edges = Yojson.Safe.Util.(lens |> member "clock_edges" |> to_list) in
+      let groups = Yojson.Safe.Util.(lens |> member "clock_groups" |> to_list) in
+      let require_edge event =
+        match
+          List.find_opt
+            (fun edge ->
+              json_string_member_opt "event" edge = Some event)
+            edges
+        with
+        | Some edge -> edge
+        | None -> Alcotest.fail ("missing clock edge: " ^ event)
+      in
+      let require_group group_type group_id =
+        match
+          List.find_opt
+            (fun group ->
+              json_string_member_opt "group_type" group = Some group_type
+              && json_string_member_opt "group_id" group = Some group_id)
+            groups
+        with
+        | Some group -> group
+        | None ->
+          Alcotest.fail
+            (Printf.sprintf "missing clock group: %s/%s" group_type group_id)
+      in
+      Alcotest.(check int)
+        "clock edges keep all returned manifest rows"
+        12
+        (List.length edges);
+      let tool_edge = require_edge "tool_surface_selected" in
+      let lane_edge = require_edge "provider_lane_resolved" in
+      Alcotest.(check (option string))
+        "tool surface has synthetic tool batch id"
+        (json_string_member_opt "tool_batch_id" tool_edge)
+        (json_string_member_opt "tool_batch_id" lane_edge);
+      let provider_start = require_edge "provider_attempt_started" in
+      let provider_finish = require_edge "provider_attempt_finished" in
+      Alcotest.(check (option string))
+        "provider attempt start/finish share id"
+        (json_string_member_opt "provider_attempt_id" provider_start)
+        (json_string_member_opt "provider_attempt_id" provider_finish);
+      Alcotest.(check (option string))
+        "provider edge lane"
+        (Some "provider")
+        (json_string_member_opt "lane" provider_finish);
+      let checkpoint_edge = require_edge "checkpoint_saved" in
+      Alcotest.(check (option string))
+        "checkpoint edge derives checkpoint id"
+        (Some "checkpoint:trace-runtime-lens-clock-edges:oas-2")
+        (json_string_member_opt "checkpoint_id" checkpoint_edge);
+      let working_sidecar_edge = require_edge "working_state_sidecar_saved" in
+      Alcotest.(check (option string))
+        "working state sidecar shares checkpoint id"
+        (json_string_member_opt "checkpoint_id" checkpoint_edge)
+        (json_string_member_opt "checkpoint_id" working_sidecar_edge);
+      Alcotest.(check (option string))
+        "working state sidecar is oas lane"
+        (Some "oas_agent")
+        (json_string_member_opt "lane" working_sidecar_edge);
+      let memory_edge = require_edge "memory_injected" in
+      Alcotest.(check (option string))
+        "memory edge derives memory injection id"
+        (Some "trace-runtime-lens-clock-edges:keeper-77:memory-oas-1")
+        (json_string_member_opt "memory_injection_id" memory_edge);
+      let event_bus_edge = require_edge "event_bus_correlated" in
+      Alcotest.(check (option string))
+        "event bus edge keeps correlation id"
+        (Some "corr-clock-1")
+        (json_string_member_opt "event_bus_correlation_id" event_bus_edge);
+      Alcotest.(check (option string))
+        "event bus edge keeps run id"
+        (Some "run-clock-1")
+        (json_string_member_opt "event_bus_run_id" event_bus_edge);
+      Alcotest.(check int)
+        "event bus edge keeps event count"
+        2
+        (json_int_member "event_bus_event_count" event_bus_edge);
+      Alcotest.(check (list string))
+        "event bus edge keeps payload kinds"
+        [ "context_compact_started"; "context_compacted" ]
+        (json_string_list_member "event_bus_payload_kinds" event_bus_edge);
+      let turn_group =
+        require_group "turn" "trace-runtime-lens-clock-edges:keeper-77"
+      in
+      Alcotest.(check int)
+        "turn group covers all edges"
+        12
+        (json_int_member "edge_count" turn_group);
+      Alcotest.(check bool)
+        "turn group is closed by turn finish"
+        true
+        (json_bool_member "closed" turn_group);
+      Alcotest.(check (list string))
+        "turn group terminal event"
+        [ "turn_finished" ]
+        (json_string_list_member "terminal_events" turn_group);
+      let tool_group =
+        require_group
+          "tool_batch"
+          (Option.value
+             (json_string_member_opt "tool_batch_id" tool_edge)
+             ~default:"missing-tool-batch")
+      in
+      Alcotest.(check int)
+        "tool batch group links surface and lane"
+        2
+        (json_int_member "edge_count" tool_group);
+      Alcotest.(check (list string))
+        "tool batch group spans tool and cascade lanes"
+        [ "tool_runtime"; "masc_policy_cascade" ]
+        (json_string_list_member "lanes" tool_group);
+      let provider_group =
+        require_group
+          "provider_attempt"
+          (Option.value
+             (json_string_member_opt "provider_attempt_id" provider_start)
+             ~default:"missing-provider-attempt")
+      in
+      Alcotest.(check int)
+        "provider group links start and finish"
+        2
+        (json_int_member "edge_count" provider_group);
+      Alcotest.(check bool)
+        "provider group is closed"
+        true
+        (json_bool_member "closed" provider_group);
+      let checkpoint_group =
+        require_group
+          "checkpoint"
+          (Option.value
+             (json_string_member_opt "checkpoint_id" checkpoint_edge)
+             ~default:"missing-checkpoint")
+      in
+      Alcotest.(check int)
+        "checkpoint group links saved checkpoint and working sidecar"
+        2
+        (json_int_member "edge_count" checkpoint_group);
+      Alcotest.(check bool)
+        "checkpoint group closes on working sidecar"
+        true
+        (json_bool_member "closed" checkpoint_group);
+      Alcotest.(check (list string))
+        "checkpoint group terminal events include working sidecar"
+        [ "checkpoint_saved"; "working_state_sidecar_saved" ]
+        (json_string_list_member "terminal_events" checkpoint_group);
+      let event_bus_group =
+        require_group "event_bus_correlation" "corr-clock-1"
+      in
+      Alcotest.(check int)
+        "event bus group keeps event count"
+        2
+        (json_int_member "event_bus_event_count" event_bus_group);
+      Alcotest.(check (list string))
+        "event bus group keeps payload kinds"
+        [ "context_compact_started"; "context_compacted" ]
+        (json_string_list_member "event_bus_payload_kinds" event_bus_group);
+      Alcotest.(check (option string))
+        "event bus fallback source clock"
+        (Some "oas_event_bus")
+        (json_string_member_opt "source_clock" event_bus_edge);
+      let context_edge = require_edge "context_injected" in
+      Alcotest.(check (option string))
+        "clock edge prefers explicit edge id"
+        (Some "edge-context-explicit")
+        (json_string_member_opt "edge_id" context_edge);
+      Alcotest.(check (option string))
+        "clock edge prefers explicit source clock"
+        (Some "monotonic")
+        (json_string_member_opt "source_clock" context_edge);
+      Alcotest.(check (option string))
+        "clock edge prefers explicit observed_at"
+        (Some "2026-05-13T00:00:04.123Z")
+        (json_string_member_opt "observed_at" context_edge);
+      Alcotest.(check (option string))
+        "clock edge keeps parent event id"
+        (Some "edge-provider-start")
+        (json_string_member_opt "parent_event_id" context_edge);
+      Alcotest.(check (option string))
+        "clock edge keeps causal source"
+        (Some "provider_attempt_started")
+        (json_string_member_opt "caused_by" context_edge);
+      let receipt_edge = require_edge "receipt_appended" in
+      Alcotest.(check (option string))
+        "non event-bus fallback source clock defaults to wall"
+        (Some "wall")
+        (json_string_member_opt "source_clock" receipt_edge);
+      let receipt_links = Yojson.Safe.Util.(receipt_edge |> member "links") in
+      Alcotest.(check (option string))
+        "receipt edge keeps receipt link"
+        (Some "/tmp/receipt-clock.jsonl")
+        (json_string_member_opt "receipt_path" receipt_links))
+
+let test_runtime_trace_lens_surfaces_clock_integrity_gaps () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc_mcp.Coord.default_config base_dir in
+      let keeper_name = "runtime-lens-clock-gaps" in
+      let trace_id = "trace-runtime-lens-clock-gaps" in
+      let keeper_turn_id = 78 in
+      append_manifest_or_fail config
+        (M.make ~ts:"2026-05-13T00:00:00Z" ~keeper_name
+           ~trace_id ~keeper_turn_id ~event:M.Turn_started
+           ~status:"started" ());
+      append_manifest_or_fail config
+        (M.make ~ts:"2026-05-13T00:00:01Z" ~keeper_name
+           ~trace_id ~keeper_turn_id ~event:M.Provider_attempt_started
+           ~status:"started" ());
+      append_manifest_or_fail config
+        (M.make ~ts:"2026-05-13T00:00:02Z" ~keeper_name
+           ~trace_id ~keeper_turn_id ~event:M.Event_bus_correlated
+           ~status:"observed"
+           ~decision:(`Assoc [ ("context_compacted_count", `Int 1) ])
+           ());
+      append_manifest_or_fail config
+        (M.make ~ts:"2026-05-13T00:00:03Z" ~keeper_name
+           ~trace_id ~keeper_turn_id ~event:M.Checkpoint_saved
+           ~status:"saved" ~checkpoint_path:"/tmp/clock-gap-checkpoint.json"
+           ());
+      append_manifest_or_fail config
+        (M.make ~ts:"2026-05-13T00:00:04Z" ~keeper_name
+           ~trace_id ~keeper_turn_id ~event:M.Turn_finished ~status:"error"
+           ());
+      let status, json =
+        Masc_mcp.Server_dashboard_http_keeper_api.keeper_runtime_trace_json
+          config keeper_name ~trace_id ~turn_id:keeper_turn_id ()
+      in
+      Alcotest.(check string)
+        "clock gap runtime trace status"
+        "ok"
+        (match status with `OK -> "ok" | `Not_found -> "not_found");
+      let gap_codes =
+        Yojson.Safe.Util.(
+          json |> member "runtime_lens" |> member "gaps" |> to_list
+          |> List.map (fun gap -> gap |> member "code" |> to_string))
+      in
+      List.iter
+        (fun code ->
+          Alcotest.(check bool)
+            ("clock gap surfaces " ^ code)
+            true
+            (List.mem code gap_codes))
+        [
+          "tool_surface_missing";
+          "provider_lane_unresolved";
+          "clock_provider_attempt_unfinished";
+          "clock_context_injection_missing";
+          "clock_event_bus_uncorrelated";
+          "clock_checkpoint_without_context";
+        ])
+
+let test_runtime_trace_lens_surfaces_clock_group_gaps () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc_mcp.Coord.default_config base_dir in
+      let keeper_name = "runtime-lens-clock-group-gaps" in
+      let trace_id = "trace-runtime-lens-clock-group-gaps" in
+      let keeper_turn_id = 79 in
+      append_manifest_or_fail config
+        (M.make ~ts:"2026-05-13T00:00:00Z" ~keeper_name
+           ~trace_id ~keeper_turn_id ~event:M.Turn_started
+           ~status:"started" ());
+      append_manifest_or_fail config
+        (M.make ~ts:"2026-05-13T00:00:01Z" ~keeper_name
+           ~trace_id ~keeper_turn_id ~event:M.Tool_surface_selected
+           ~status:"selected" ());
+      append_manifest_or_fail config
+        (M.make ~ts:"2026-05-13T00:00:02Z" ~keeper_name
+           ~trace_id ~keeper_turn_id ~oas_turn_count:1
+           ~event:M.Checkpoint_loaded ~status:"loaded"
+           ~checkpoint_path:"/tmp/open-checkpoint.json"
+           ~decision:(`Assoc [ ("session_id", `String trace_id) ])
+           ());
+      append_manifest_or_fail config
+        (M.make ~ts:"2026-05-13T00:00:03Z" ~keeper_name
+           ~trace_id ~keeper_turn_id ~oas_turn_count:1
+           ~event:M.Memory_injected ~status:"injected" ());
+      append_manifest_or_fail config
+        (M.make ~ts:"2026-05-13T00:00:04Z" ~keeper_name
+           ~trace_id ~keeper_turn_id ~event:M.Context_injected
+           ~status:"injected"
+           ~decision:
+             (`Assoc
+               [
+                 ( "clock_refs",
+                   `Assoc
+                     [
+                       ("edge_id", `String "edge-context-dangling-parent");
+                       ("parent_event_id", `String "missing-parent-edge");
+                       ("caused_by", `String "synthetic_missing_parent");
+                     ] );
+               ])
+           ());
+      append_manifest_or_fail config
+        (M.make ~ts:"2026-05-13T00:00:05Z" ~keeper_name
+           ~trace_id ~keeper_turn_id ~event:M.Turn_finished ~status:"ok"
+           ());
+      let status, json =
+        Masc_mcp.Server_dashboard_http_keeper_api.keeper_runtime_trace_json
+          config keeper_name ~trace_id ~turn_id:keeper_turn_id ()
+      in
+      Alcotest.(check string)
+        "clock group gap runtime trace status"
+        "ok"
+        (match status with `OK -> "ok" | `Not_found -> "not_found");
+      let gap_codes =
+        Yojson.Safe.Util.(
+          json |> member "runtime_lens" |> member "gaps" |> to_list
+          |> List.map (fun gap -> gap |> member "code" |> to_string))
+      in
+      List.iter
+        (fun code ->
+          Alcotest.(check bool)
+            ("clock group gap surfaces " ^ code)
+            true
+            (List.mem code gap_codes))
+        [
+          "clock_tool_batch_open";
+          "clock_checkpoint_group_open";
+          "clock_memory_injection_unflushed";
+          "clock_parent_edge_missing";
+        ])
+
 let test_runtime_trace_api_surfaces_meta_read_error_without_trace_id () =
   let base_dir = temp_dir () in
   Fun.protect
@@ -1756,6 +2248,56 @@ let test_successful_provider_turn_links_runtime_artifacts () =
             false
             (json_bool_member "oas_internal_cascade_allowed"
                provider_lane_row.M.decision);
+          let expected_tool_batch_id =
+            Printf.sprintf "%s:keeper-%d:tool-batch-oas-0" trace_id
+              keeper_turn_id
+          in
+          let tool_surface_row =
+            require_manifest_event M.Tool_surface_selected rows
+          in
+          Alcotest.(check (option string))
+            "tool surface carries explicit clock tool batch"
+            (Some expected_tool_batch_id)
+            (clock_refs_member "tool_batch_id" tool_surface_row);
+          Alcotest.(check (option string))
+            "provider lane shares explicit clock tool batch"
+            (Some expected_tool_batch_id)
+            (clock_refs_member "tool_batch_id" provider_lane_row);
+          Alcotest.(check (option string))
+            "provider lane clock edge id"
+            (Some
+               (Printf.sprintf "%s:keeper-%d:provider_lane_resolved"
+                  trace_id keeper_turn_id))
+            (clock_refs_member "edge_id" provider_lane_row);
+          let provider_finished_row =
+            require_manifest_event M.Provider_attempt_finished rows
+          in
+          let expected_provider_attempt_id =
+            Printf.sprintf "%s:keeper-%d:provider-attempt-1" trace_id
+              keeper_turn_id
+          in
+          Alcotest.(check (option string))
+            "provider start carries explicit clock attempt id"
+            (Some expected_provider_attempt_id)
+            (clock_refs_member "provider_attempt_id" provider_started_row);
+          Alcotest.(check (option string))
+            "provider finish shares explicit clock attempt id"
+            (Some expected_provider_attempt_id)
+            (clock_refs_member "provider_attempt_id" provider_finished_row);
+          Alcotest.(check (option string))
+            "provider finish points to provider start edge"
+            (Some
+               (Printf.sprintf
+                  "%s:provider_attempt_started"
+                  expected_provider_attempt_id))
+            (clock_refs_member "parent_event_id" provider_finished_row);
+          let context_row = require_manifest_event M.Context_injected rows in
+          Alcotest.(check (option string))
+            "context injection carries explicit clock edge"
+            (Some
+               (Printf.sprintf "%s:keeper-%d:context_injected" trace_id
+                  keeper_turn_id))
+            (clock_refs_member "edge_id" context_row);
           let checkpoint_row = require_manifest_event M.Checkpoint_saved rows in
           let checkpoint_path =
             require_some "checkpoint manifest link"
@@ -1765,6 +2307,18 @@ let test_successful_provider_turn_links_runtime_artifacts () =
             "checkpoint file exists"
             true
             (Sys.file_exists checkpoint_path);
+          Alcotest.(check (option string))
+            "checkpoint save carries explicit clock checkpoint id"
+            (Some
+               (Printf.sprintf "checkpoint:%s:oas-%d" trace_id
+                  result.turn_count))
+            (clock_refs_member "checkpoint_id" checkpoint_row);
+          let memory_row = require_manifest_event M.Memory_injected rows in
+          Alcotest.(check bool)
+            "memory injection carries explicit clock memory id"
+            true
+            (Option.is_some
+               (clock_refs_member "memory_injection_id" memory_row));
           let receipt_row = require_manifest_event M.Receipt_appended rows in
           let receipt_path =
             require_some "receipt manifest link" receipt_row.M.links.receipt_path
@@ -1830,6 +2384,12 @@ let test_successful_provider_turn_links_runtime_artifacts () =
             true
             (Sys.file_exists latest_state_path);
           let working_row = require_manifest_event M.Working_state_sidecar_saved rows in
+          Alcotest.(check (option string))
+            "working state sidecar carries explicit clock checkpoint id"
+            (Some
+               (Printf.sprintf "checkpoint:%s:oas-%d" trace_id
+                  result.turn_count))
+            (clock_refs_member "checkpoint_id" working_row);
           let working_path =
             require_some "working state sidecar path"
               (json_string_member_opt
@@ -2359,6 +2919,92 @@ let test_wired_manifest_sites () =
         ] );
     ]
 
+let test_source_clock_roundtrip () =
+  List.iter
+    (fun clock ->
+      let wire = M.source_clock_to_string clock in
+      Alcotest.(check (option string))
+        ("source_clock parses: " ^ wire) (Some wire)
+        (Option.map M.source_clock_to_string (M.source_clock_of_string wire)))
+    [ M.Wall; M.Monotonic; M.Logical; M.Provider; M.Event_bus ];
+  Alcotest.(check (option string))
+    "event_bus roundtrips through oas_event_bus wire"
+    (Some "oas_event_bus")
+    (Option.map M.source_clock_to_string (M.source_clock_of_string "oas_event_bus"));
+  Alcotest.(check (option string))
+    "unknown source_clock is rejected" None
+    (Option.map M.source_clock_to_string (M.source_clock_of_string "not_real"))
+
+let test_runtime_trace_lens_summarizes_source_clock_axis () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc_mcp.Coord.default_config base_dir in
+      let keeper_name = "runtime-lens-source-clock" in
+      let trace_id = "trace-runtime-lens-source-clock" in
+      let keeper_turn_id = 55 in
+      let with_clock_refs source_clock event status decision_extras =
+        M.make ~ts:"2026-05-13T00:00:00Z" ~keeper_name
+          ~trace_id ~keeper_turn_id ~event ~status
+          ~decision:
+            (`Assoc
+              ([
+                ( "clock_refs",
+                  `Assoc [ ("source_clock", `String source_clock) ] );
+              ] @ decision_extras))
+          ()
+      in
+      append_manifest_or_fail config
+        (with_clock_refs "wall" M.Turn_started "started" []);
+      append_manifest_or_fail config
+        (with_clock_refs "provider" M.Provider_attempt_started "started"
+           [ ("model_source", `String "named_cascade") ]);
+      append_manifest_or_fail config
+        (with_clock_refs "provider" M.Provider_attempt_finished "ok" []);
+      append_manifest_or_fail config
+        (with_clock_refs "monotonic" M.Context_injected "injected" []);
+      append_manifest_or_fail config
+        (with_clock_refs "logical" M.Context_compacted "compacted" []);
+      append_manifest_or_fail config
+        (with_clock_refs "oas_event_bus" M.Event_bus_correlated "observed"
+           [ ("context_compacted_count", `Int 1) ]);
+      append_manifest_or_fail config
+        (with_clock_refs "wall" M.Turn_finished "ok" []);
+      let status, json =
+        Masc_mcp.Server_dashboard_http_keeper_api.keeper_runtime_trace_json
+          config keeper_name ~trace_id ~turn_id:keeper_turn_id ()
+      in
+      Alcotest.(check string)
+        "source_clock lens status"
+        "ok"
+        (match status with `OK -> "ok" | `Not_found -> "not_found");
+      let source_clock_axis =
+        Yojson.Safe.Util.(
+          json |> member "runtime_lens" |> member "axes"
+          |> member "source_clock")
+      in
+      Alcotest.(check int)
+        "source_clock wall count"
+        2
+        (json_int_member "wall" source_clock_axis);
+      Alcotest.(check int)
+        "source_clock provider count"
+        2
+        (json_int_member "provider" source_clock_axis);
+      Alcotest.(check int)
+        "source_clock monotonic count"
+        1
+        (json_int_member "monotonic" source_clock_axis);
+      Alcotest.(check int)
+        "source_clock logical count"
+        1
+        (json_int_member "logical" source_clock_axis);
+      Alcotest.(check int)
+        "source_clock oas_event_bus count"
+        1
+        (json_int_member "oas_event_bus" source_clock_axis))
+
 let test_context_helper () =
   let ctx : M.turn_context =
     { manifest_keeper_name = "sangsu"
@@ -2381,7 +3027,28 @@ let test_context_helper () =
   Alcotest.(check (option int)) "keeper_turn_id" (Some 9)
     manifest.keeper_turn_id;
   Alcotest.(check (option int)) "oas_turn_count" (Some 2)
-    manifest.oas_turn_count
+    manifest.oas_turn_count;
+  let event_bus_refs =
+    M.clock_refs_for_context ctx ~event:M.Event_bus_correlated
+      ~event_bus_correlation_id:"corr-context"
+      ~event_bus_run_id:"run-context" ~caused_by:"parent-run" ()
+  in
+  Alcotest.(check (option string))
+    "event bus clock source"
+    (Some "oas_event_bus")
+    (json_string_member_opt "source_clock" event_bus_refs);
+  Alcotest.(check (option string))
+    "event bus correlation clock ref"
+    (Some "corr-context")
+    (json_string_member_opt "event_bus_correlation_id" event_bus_refs);
+  Alcotest.(check (option string))
+    "event bus run clock ref"
+    (Some "run-context")
+    (json_string_member_opt "event_bus_run_id" event_bus_refs);
+  Alcotest.(check (option string))
+    "event bus cause clock ref"
+    (Some "parent-run")
+    (json_string_member_opt "caused_by" event_bus_refs)
 
 let test_required_tool_lane_missing_names () =
   let module FT = Masc_mcp.Keeper_turn_driver_helpers in
@@ -2666,6 +3333,86 @@ let test_keeper_hot_path_avoids_oas_complete_cascade () =
       "lib/keeper/keeper_turn_driver_wrappers.ml";
     ]
 
+let test_public_projection_allowlist_filters_provider_model () =
+  let decision =
+    `Assoc
+      [ ("edge_id", `String "e1")
+      ; ("lane", `String "L1")
+      ; ("source_clock", `String "wall")
+      ; ("model_source", `String "gpt-4")
+      ; ("provider_attempt_id", `String "pa1")
+      ; ( "clock_refs"
+        , `Assoc
+            [ ("edge_id", `String "ce1")
+            ; ("source_clock", `String "monotonic")
+            ; ("provider_model_hint", `String "should_be_filtered")
+            ; ("provider_attempt_id", `String "cpa1")
+            ] )
+      ; ("unknown_field", `String "x")
+      ]
+  in
+  let projected = M.public_projection_of_decision decision in
+  let fields =
+    match projected with
+    | `Assoc f -> f
+    | _ -> Alcotest.fail "expected Assoc"
+  in
+  let has key = List.mem_assoc key fields in
+  let clock_refs =
+    match List.assoc_opt "clock_refs" fields with
+    | Some (`Assoc f) -> f
+    | _ -> Alcotest.fail "expected clock_refs Assoc"
+  in
+  let clock_has key = List.mem_assoc key clock_refs in
+  Alcotest.(check bool) "edge_id kept" true (has "edge_id");
+  Alcotest.(check bool) "lane kept" true (has "lane");
+  Alcotest.(check bool) "source_clock kept" true (has "source_clock");
+  Alcotest.(check bool) "provider_attempt_id kept" true (has "provider_attempt_id");
+  Alcotest.(check bool) "model_source filtered" false (has "model_source");
+  Alcotest.(check bool) "unknown_field filtered" false (has "unknown_field");
+  Alcotest.(check bool) "clock_refs kept" true (has "clock_refs");
+  Alcotest.(check bool) "clock edge_id kept" true (clock_has "edge_id");
+  Alcotest.(check bool) "clock source_clock kept" true (clock_has "source_clock");
+  Alcotest.(check bool) "clock provider_attempt_id kept" true (clock_has "provider_attempt_id");
+  Alcotest.(check bool) "clock provider_model_hint filtered" false (clock_has "provider_model_hint")
+
+let test_to_json_preserves_full_decision () =
+  let manifest =
+    M.make ~keeper_name:"k" ~trace_id:"t" ~event:M.Turn_started
+      ~decision:
+        (`Assoc
+           [ ("model_source", `String "gpt-4")
+           ; ("provider_secret", `String "shh")
+           ])
+      ()
+  in
+  let json = M.to_json manifest in
+  let decision = Yojson.Safe.Util.member "decision" json in
+  Alcotest.(check bool) "to_json keeps model_source" true
+    (Yojson.Safe.Util.member "model_source" decision <> `Null);
+  Alcotest.(check bool) "to_json keeps provider_secret" true
+    (Yojson.Safe.Util.member "provider_secret" decision <> `Null)
+
+let test_public_to_json_redacts_decision () =
+  let manifest =
+    M.make ~keeper_name:"k" ~trace_id:"t" ~event:M.Turn_started
+      ~decision:
+        (`Assoc
+           [ ("edge_id", `String "e1")
+           ; ("model_source", `String "gpt-4")
+           ; ("provider_secret", `String "shh")
+           ])
+      ()
+  in
+  let json = M.public_to_json manifest in
+  let decision = Yojson.Safe.Util.member "decision" json in
+  Alcotest.(check bool) "public_to_json keeps edge_id" true
+    (Yojson.Safe.Util.member "edge_id" decision <> `Null);
+  Alcotest.(check bool) "public_to_json drops model_source" true
+    (Yojson.Safe.Util.member "model_source" decision = `Null);
+  Alcotest.(check bool) "public_to_json drops provider_secret" true
+    (Yojson.Safe.Util.member "provider_secret" decision = `Null)
+
 let test_runtime_manifest_contract_omits_provider_model_fields () =
   check_source_omits "lib/keeper/keeper_runtime_manifest.mli" "provider_kind";
   check_source_omits "lib/keeper/keeper_runtime_manifest.mli" "model_id";
@@ -2915,6 +3662,8 @@ let () =
           Alcotest.test_case "unknown event rejected" `Quick
             test_of_json_rejects_unknown_event;
           Alcotest.test_case "safe path segment" `Quick test_safe_segment;
+          Alcotest.test_case "source_clock roundtrip" `Quick
+            test_source_clock_roundtrip;
           Alcotest.test_case "context helper" `Quick test_context_helper;
         ] );
       ( "append",
@@ -2955,6 +3704,22 @@ let () =
             "runtime trace lens groups context and memory swimlane"
             `Quick
             test_runtime_trace_lens_groups_context_memory_swimlane;
+          Alcotest.test_case
+            "runtime trace lens summarizes source_clock axis"
+            `Quick
+            test_runtime_trace_lens_summarizes_source_clock_axis;
+          Alcotest.test_case
+            "runtime trace lens derives clock edges"
+            `Quick
+            test_runtime_trace_lens_derives_clock_edges;
+          Alcotest.test_case
+            "runtime trace lens surfaces clock integrity gaps"
+            `Quick
+            test_runtime_trace_lens_surfaces_clock_integrity_gaps;
+          Alcotest.test_case
+            "runtime trace lens surfaces clock group gaps"
+            `Quick
+            test_runtime_trace_lens_surfaces_clock_group_gaps;
           Alcotest.test_case
             "runtime trace API surfaces corrupt meta without trace id"
             `Quick
@@ -3004,6 +3769,14 @@ let () =
             `Quick test_keeper_cascade_engine_boundary;
           Alcotest.test_case "keeper hot path avoids OAS Complete_cascade"
             `Quick test_keeper_hot_path_avoids_oas_complete_cascade;
+          Alcotest.test_case
+            "public projection allowlist filters provider/model fields"
+            `Quick
+            test_public_projection_allowlist_filters_provider_model;
+          Alcotest.test_case "to_json preserves full decision" `Quick
+            test_to_json_preserves_full_decision;
+          Alcotest.test_case "public_to_json redacts decision" `Quick
+            test_public_to_json_redacts_decision;
           Alcotest.test_case
             "runtime manifest contract omits provider/model fields"
             `Quick

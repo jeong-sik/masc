@@ -223,11 +223,17 @@ let test_provider_block_duration_observed_for_immediate_cooldowns () =
   let soft_provider = "p-dash-13-soft-rl" in
   let hard_provider = "p-dash-13-hard-quota" in
   let terminal_provider = "p-dash-13-terminal" in
+  let cap_provider = "p-dash-13-capacity" in
   H.record_soft_rate_limited t ~provider_key:soft_provider ~retry_after_s:30.0 ();
   check (float 0.001) "soft 429 count" 1.0
     (provider_block_duration_count soft_provider);
   check (float 0.001) "soft 429 observes Retry-After seconds" 30.0
     (provider_block_duration_sum soft_provider);
+  H.record_capacity_backpressure t ~provider_key:cap_provider ~retry_after_s:7.0 ~now:(Unix.time ()) ();
+  check (float 0.001) "capacity backpressure count" 1.0
+    (provider_block_duration_count cap_provider);
+  check (float 0.001) "capacity backpressure observes Retry-After seconds" 7.0
+    (provider_block_duration_sum cap_provider);
   H.record_hard_quota t ~provider_key:hard_provider ();
   check (float 0.001) "hard quota count" 1.0
     (provider_block_duration_count hard_provider);
@@ -317,6 +323,56 @@ let test_hard_quota_preserves_longer_existing_cooldown () =
   in
   check bool "second hard_quota does not shorten cooldown"
     true (expires_after_second >= expires_after_first)
+
+(* ── Capacity_backpressure outcome ──────────────────────────────── *)
+
+let test_capacity_backpressure_triggers_immediate_cooldown () =
+  (* Like soft_rate_limited and hard_quota, a single capacity-backpressure
+     event must trip cooldown immediately — the provider has declared it
+     cannot serve this cycle.  Waiting for [cooldown_threshold] would burn
+     additional cascade attempts on a saturated provider. *)
+  let t = H.create () in
+  H.record_capacity_backpressure t ~provider_key:"p" ~now:(Unix.time ()) ();
+  check bool "single capacity_backpressure event trips cooldown immediately"
+    true (H.is_in_cooldown t ~provider_key:"p")
+
+let test_capacity_backpressure_cooldown_uses_default_backoff () =
+  let t = H.create () in
+  H.record_capacity_backpressure t ~provider_key:"p" ~now:(Unix.time ()) ();
+  match H.provider_info t ~provider_key:"p" with
+  | None -> fail "provider_info returned None after record_capacity_backpressure"
+  | Some info ->
+    let now = Unix.gettimeofday () in
+    (match info.cooldown_expires_at with
+     | None -> fail "expected cooldown_expires_at = Some _, got None"
+     | Some expires ->
+       let remaining = expires -. now in
+       (* Default backoff is 5.0s; accept 1..15s to be robust to CI env
+          overrides and timer jitter. *)
+       check bool
+         (Printf.sprintf "capacity_backpressure cooldown (%.0fs) near default 5s" remaining)
+         true (remaining >= 1.0 && remaining <= 15.0))
+
+let test_capacity_backpressure_honors_retry_after () =
+  let t = H.create () in
+  H.record_capacity_backpressure t ~provider_key:"p" ~retry_after_s:8.0 ~now:(Unix.time ()) ();
+  match H.provider_info t ~provider_key:"p" with
+  | None -> fail "provider_info returned None"
+  | Some info ->
+    let now = Unix.gettimeofday () in
+    (match info.cooldown_expires_at with
+     | None -> fail "expected Some cooldown"
+     | Some expires ->
+       let remaining = expires -. now in
+       check bool "explicit retry_after honored" true
+         (remaining >= 6.0 && remaining <= 12.0))
+
+let test_capacity_backpressure_success_clears_cooldown () =
+  let t = H.create () in
+  H.record_capacity_backpressure t ~provider_key:"p" ~now:(Unix.time ()) ();
+  H.record_success t ~provider_key:"p" ();
+  check bool "success after capacity_backpressure clears cooldown"
+    false (H.is_in_cooldown t ~provider_key:"p")
 
 (* ── Fingerprint counter (Phase 0 trust observability) ──────────── *)
 
@@ -858,6 +914,16 @@ let () =
         test_hard_quota_success_clears_cooldown;
       test_case "second hard_quota does not shorten cooldown" `Quick
         test_hard_quota_preserves_longer_existing_cooldown;
+    ];
+    "capacity_backpressure", [
+      test_case "single event trips immediate cooldown" `Quick
+        test_capacity_backpressure_triggers_immediate_cooldown;
+      test_case "cooldown duration uses default backoff" `Quick
+        test_capacity_backpressure_cooldown_uses_default_backoff;
+      test_case "explicit retry_after honored" `Quick
+        test_capacity_backpressure_honors_retry_after;
+      test_case "success clears cooldown" `Quick
+        test_capacity_backpressure_success_clears_cooldown;
     ];
     "fingerprint", [
       test_case "same classification accumulates" `Quick

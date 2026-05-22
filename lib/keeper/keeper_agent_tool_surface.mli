@@ -112,6 +112,7 @@ type computed_tool_surface =
   ; per_call_turn : int
   ; per_call_max_turns : int
   ; core_count : int
+  ; deterministic_prefilter : string list
   ; deterministic_prefilter_count : int
   ; discovered_count : int
   ; llm_selected_count : int

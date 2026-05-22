@@ -675,16 +675,61 @@ let run_named
             Some
               (`Assoc
                 (Keeper_cascade_engine.manifest_fields cascade_engine @ fields))
-        | Some other ->
+      | Some other ->
             Some
               (`Assoc
                 (Keeper_cascade_engine.manifest_fields cascade_engine
                  @ [ ("decision", other) ]))
       in
+      let decision =
+        match runtime_manifest_context with
+        | Some manifest_ctx ->
+          let decision =
+            match decision with
+            | Some value -> value
+            | None -> `Assoc []
+          in
+          Some
+            (Keeper_runtime_manifest.with_clock_refs
+               ~clock_refs:
+                 (Keeper_runtime_manifest.clock_refs_for_context manifest_ctx
+                    ~event ?oas_turn_count ())
+               decision)
+        | None -> decision
+      in
       Keeper_runtime_manifest.make_for_context manifest_ctx ~event
         ?oas_turn_count ~cascade_name ?status ?decision ()
       |> append
     | _ -> ()
+  in
+  let manifest_turn_label (manifest_ctx : Keeper_runtime_manifest.turn_context) =
+    match manifest_ctx.manifest_keeper_turn_id with
+    | Some value -> string_of_int value
+    | None -> "unknown"
+  in
+  let provider_attempt_id_for_context manifest_ctx attempt_index =
+    Printf.sprintf "%s:keeper-%s:provider-attempt-%d"
+      manifest_ctx.Keeper_runtime_manifest.manifest_trace_id
+      (manifest_turn_label manifest_ctx)
+      attempt_index
+  in
+  let provider_attempt_edge_id manifest_ctx event attempt_index =
+    Printf.sprintf "%s:%s"
+      (provider_attempt_id_for_context manifest_ctx attempt_index)
+      (Keeper_runtime_manifest.event_kind_to_string event)
+  in
+  let provider_attempt_clock_refs ~event ~attempt_index ?parent_event_id
+      ?caused_by () =
+    match runtime_manifest_context with
+    | None -> `Assoc []
+    | Some manifest_ctx ->
+      Keeper_runtime_manifest.clock_refs
+        ~edge_id:(provider_attempt_edge_id manifest_ctx event attempt_index)
+        ~lane:"provider"
+        ~source_clock:Provider
+        ~provider_attempt_id:
+          (provider_attempt_id_for_context manifest_ctx attempt_index)
+        ?parent_event_id ?caused_by ()
   in
           let try_provider ?resume_checkpoint ?per_provider_timeout_s candidate =
             Keeper_turn_driver_try_provider.run_try_provider
@@ -809,7 +854,7 @@ let run_named
     else
       (* Capacity backpressure shares the immediate-cooldown semantics of a
          soft rate limit: one event is sufficient evidence that the
-         provider cannot serve, so we reuse [record_soft_rate_limited]
+         provider cannot serve, so we call [record_capacity_backpressure]
          rather than counting toward the 3-failure threshold of
          [record_failure]. The retry_after hint, when present, drives
          cooldown duration (clamped by
@@ -839,12 +884,13 @@ let run_named
       in
       match immediate_cooldown_retry_after with
       | Some retry_after_s ->
-        Cascade_health_tracker.record_soft_rate_limited
+        Cascade_health_tracker.record_capacity_backpressure
           Cascade_health_tracker.global
           ~provider_key
           ?retry_after_s
           ~error_kind
           ~error_reason
+          ~now:(Unix.time ())
           ()
       | None ->
         Cascade_health_tracker.record_failure
@@ -1124,6 +1170,7 @@ let run_named
              cascade_name runtime_candidate_label runtime_candidate_label msg
        | None -> ());
       let is_last = rest = [] in
+      let attempt_index = max 1 (candidate_count - List.length rest) in
       match acquire_client_capacity_slot candidate with
       | `Full capacity_key ->
         emit_capacity_blocked_manifest ~capacity_key;
@@ -1191,7 +1238,7 @@ let run_named
         else
           None
       in
-      let attempt_started_at = Unix.gettimeofday () in
+      let attempt_started_at = Mtime_clock.now () in
       let started_record =
         { started_provenance = provider_attempt_provenance
         ; started_is_last = is_last
@@ -1227,7 +1274,21 @@ let run_named
           emit_runtime_manifest
             ~status
             ?oas_turn_count
-            ~decision:(provider_attempt_finished_decision finished_record)
+            ~decision:
+              (Keeper_runtime_manifest.with_clock_refs
+                 ~clock_refs:
+                   (provider_attempt_clock_refs
+                      ~event:Keeper_runtime_manifest.Provider_attempt_finished
+                      ~attempt_index
+                      ~parent_event_id:
+                        (match runtime_manifest_context with
+                         | None -> ""
+                         | Some manifest_ctx ->
+                           provider_attempt_edge_id manifest_ctx
+                             Keeper_runtime_manifest.Provider_attempt_started
+                             attempt_index)
+                      ~caused_by:"provider_attempt_started" ())
+                 (provider_attempt_finished_decision finished_record))
             Keeper_runtime_manifest.Provider_attempt_finished)
       in
       let record_attempt_terminal ~error attempt_latency_ms =
@@ -1250,12 +1311,18 @@ let run_named
             capacity_release;
           emit_runtime_manifest
             ~status:"started"
-            ~decision:(provider_attempt_started_decision started_record)
+            ~decision:
+              (Keeper_runtime_manifest.with_clock_refs
+                 ~clock_refs:
+                   (provider_attempt_clock_refs
+                      ~event:Keeper_runtime_manifest.Provider_attempt_started
+                      ~attempt_index ())
+                 (provider_attempt_started_decision started_record))
             Keeper_runtime_manifest.Provider_attempt_started;
           Eio.Switch.on_release provider_attempt_sw (fun () ->
             if not !provider_attempt_finished_emitted then
               let attempt_latency_ms =
-                (Unix.gettimeofday () -. attempt_started_at) *. 1000.0
+                (Int64.to_float (Mtime.Span.to_uint64_ns (Mtime.span attempt_started_at (Mtime_clock.now ()))) /. 1_000_000.)
               in
               Eio.Cancel.protect (fun () ->
                 emit_provider_attempt_finished_once
@@ -1282,7 +1349,7 @@ let run_named
           with
           | result, checkpoint_after, liveness_success_sample ->
             let attempt_latency_ms =
-              (Unix.gettimeofday () -. attempt_started_at) *. 1000.0
+              (Int64.to_float (Mtime.Span.to_uint64_ns (Mtime.span attempt_started_at (Mtime_clock.now ()))) /. 1_000_000.)
             in
             emit_provider_attempt_finished_once
               ~status:(provider_attempt_status_of_result result)
@@ -1311,7 +1378,7 @@ let run_named
           | exception exn ->
             let bt = Printexc.get_raw_backtrace () in
             let attempt_latency_ms =
-              (Unix.gettimeofday () -. attempt_started_at) *. 1000.0
+              (Int64.to_float (Mtime.Span.to_uint64_ns (Mtime.span attempt_started_at (Mtime_clock.now ()))) /. 1_000_000.)
             in
             let status, error = provider_attempt_status_and_error_of_exception exn in
             emit_provider_attempt_finished_once

@@ -242,3 +242,48 @@ let runtime_lens_gaps ~terminal_event_present ~claim_scope ~config_drift scan =
            gaps
        else gaps)
   |> List.rev
+  |> fun gaps ->
+  let gaps =
+    (* F8: lane mandatory event set gaps.
+       For each lane with a defined policy, emit a gap if any mandatory event
+       is missing while the lane has at least one event (proving activity). *)
+    Server_dashboard_http_keeper_runtime_lens_swimlane.lane_policies
+    |> List.fold_left
+         (fun acc policy ->
+            let lane = policy.Server_dashboard_http_keeper_runtime_lens_swimlane.lane in
+            let has_any_event_in_lane =
+              List.exists
+                (fun event ->
+                   Server_dashboard_http_keeper_runtime_manifest_scan.runtime_manifest_scan_event_count
+                     scan event > 0)
+                policy.mandatory_events
+            in
+            if not has_any_event_in_lane then acc
+            else
+              let missing =
+                List.filter
+                  (fun event ->
+                     Server_dashboard_http_keeper_runtime_manifest_scan.runtime_manifest_scan_event_count
+                       scan event = 0)
+                  policy.mandatory_events
+              in
+              match missing with
+              | [] -> acc
+              | _ ->
+                let missing_codes =
+                  List.map Keeper_runtime_manifest.event_kind_to_string missing
+                in
+                { code = "lane_mandatory_event_missing"
+                ; severity = "warn"
+                ; lane
+                ; detail =
+                    Some
+                      (Printf.sprintf "mandatory events missing: %s"
+                         (String.concat ", " missing_codes))
+                }
+                :: acc)
+         gaps
+  in
+  gaps
+  @ Server_dashboard_http_keeper_runtime_lens_clock_groups.runtime_lens_clock_gaps
+      scan

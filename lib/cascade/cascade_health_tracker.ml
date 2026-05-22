@@ -68,6 +68,7 @@ type outcome =
   | Hard_quota
   | Terminal_failure
   | Soft_rate_limited
+  | Capacity_backpressure
 
 type event = {
   time: float;  (* Unix timestamp *)
@@ -429,6 +430,32 @@ let record t ~provider_key ~outcome ?error_kind ?error_reason
         Prometheus.observe_histogram Keeper_metrics.metric_keeper_provider_block_duration_sec
           ~labels:[("provider", provider_key)] cooldown_dur
       end
+    | Capacity_backpressure ->
+      (* Capacity backpressure (provider full, model overloaded, tier
+         admission blocked, cascade slot exhausted).  Same immediate-
+         cooldown semantics as [Soft_rate_limited] — one event is enough
+         evidence that the provider cannot serve this cycle.  Uses
+         [default_capacity_backpressure_backoff_sec] as the synthetic
+         default instead of [soft_rate_limit_cooldown_sec] because the
+         upstream signal is capacity exhaustion, not a rate-budget burst.
+        Clamp positive caller-supplied [retry_after_s] to the same
+         ceiling so a misclassified hard quota cannot silently produce
+         a long blackout. *)
+      state.consecutive_failures <- state.consecutive_failures + 1;
+      bump_failure_fp ();
+      let cooldown_dur =
+        match retry_after_s with
+        | Some s when s > 0.0 -> Float.min s soft_rate_limit_max_clamp_sec
+        | _ -> default_capacity_backpressure_backoff_sec
+      in
+      let new_until = now +. cooldown_dur in
+      if new_until > state.cooldown_until then begin
+        state.cooldown_until <- new_until;
+        Cascade_metrics.on_provider_cooldown
+          ~provider:provider_key ~reason:"capacity_backpressure";
+        Prometheus.observe_histogram Keeper_metrics.metric_keeper_provider_block_duration_sec
+          ~labels:[("provider", provider_key)] cooldown_dur
+      end
     | Hard_quota ->
       (* Hard-quota errors (balance depleted, quota exceeded, resource
          exhausted) don't recover on short-window retries — set a long
@@ -489,6 +516,11 @@ let record_soft_rate_limited t ~provider_key ?retry_after_s ?error_kind
     ?error_reason () =
   record t ~provider_key ~outcome:Soft_rate_limited ?error_kind ?error_reason
     ?retry_after_s ~now:(Unix.gettimeofday ()) ()
+
+let record_capacity_backpressure t ~provider_key ?retry_after_s ?error_kind
+    ?error_reason ~now () =
+  record t ~provider_key ~outcome:Capacity_backpressure ?error_kind ?error_reason
+    ?retry_after_s ~now ()
 
 (* ── Queries ──────────────────────────────────── *)
 
@@ -798,6 +830,7 @@ type outcome_kind =
   | Outcome_hard_quota
   | Outcome_terminal_failure
   | Outcome_soft_rate_limited
+  | Outcome_capacity_backpressure
 
 let outcome_matches kind ev =
   (* Enumerate every [outcome_kind] x [outcome] pair so the compiler
@@ -813,19 +846,22 @@ let outcome_matches kind ev =
   | Outcome_rejected, Rejected
   | Outcome_hard_quota, Hard_quota
   | Outcome_terminal_failure, Terminal_failure
-  | Outcome_soft_rate_limited, Soft_rate_limited -> true
+  | Outcome_soft_rate_limited, Soft_rate_limited
+  | Outcome_capacity_backpressure, Capacity_backpressure -> true
   | Outcome_success,
-      (Failure | Rejected | Hard_quota | Terminal_failure | Soft_rate_limited)
+      (Failure | Rejected | Hard_quota | Terminal_failure | Soft_rate_limited | Capacity_backpressure)
   | Outcome_failure,
-      (Success | Rejected | Hard_quota | Terminal_failure | Soft_rate_limited)
+      (Success | Rejected | Hard_quota | Terminal_failure | Soft_rate_limited | Capacity_backpressure)
   | Outcome_rejected,
-      (Success | Failure | Hard_quota | Terminal_failure | Soft_rate_limited)
+      (Success | Failure | Hard_quota | Terminal_failure | Soft_rate_limited | Capacity_backpressure)
   | Outcome_hard_quota,
-      (Success | Failure | Rejected | Terminal_failure | Soft_rate_limited)
+      (Success | Failure | Rejected | Terminal_failure | Soft_rate_limited | Capacity_backpressure)
   | Outcome_terminal_failure,
-      (Success | Failure | Rejected | Hard_quota | Soft_rate_limited)
+      (Success | Failure | Rejected | Hard_quota | Soft_rate_limited | Capacity_backpressure)
   | Outcome_soft_rate_limited,
-      (Success | Failure | Rejected | Hard_quota | Terminal_failure) -> false
+      (Success | Failure | Rejected | Hard_quota | Terminal_failure | Capacity_backpressure)
+  | Outcome_capacity_backpressure,
+      (Success | Failure | Rejected | Hard_quota | Terminal_failure | Soft_rate_limited) -> false
 
 (* Count [outcome] events recorded for [provider_key] within the last
    [window_s] seconds.  We piggyback on the same event ring used by

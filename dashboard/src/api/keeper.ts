@@ -714,6 +714,25 @@ export interface KeeperRuntimeLensProviderAttemptAxis {
   terminal_status: string | null
 }
 
+export interface KeeperRuntimeLensToolLineageStage {
+  stage: string
+  tool_names: string[]
+  count: number
+}
+
+export interface KeeperRuntimeLensToolLineageAxis {
+  recorded: boolean
+  decision: Record<string, KeeperRuntimeLensToolLineageStage> | null
+}
+
+export interface KeeperRuntimeLensPayloadRoleAxis {
+  counts: Record<string, number>
+}
+
+export interface KeeperRuntimeLensSourceClockAxis {
+  counts: Record<string, number>
+}
+
 export interface KeeperRuntimeLensClaimScopeAxis {
   present: boolean
   source: string
@@ -782,6 +801,9 @@ export interface KeeperRuntimeLensAxes {
   tool_surface: KeeperRuntimeLensToolSurfaceAxis
   provider_lane: KeeperRuntimeLensProviderLaneAxis
   provider_attempt: KeeperRuntimeLensProviderAttemptAxis
+  tool_lineage: KeeperRuntimeLensToolLineageAxis
+  payload_role: KeeperRuntimeLensPayloadRoleAxis
+  source_clock: KeeperRuntimeLensSourceClockAxis
   claim_scope: KeeperRuntimeLensClaimScopeAxis
   config_drift: KeeperRuntimeLensConfigDriftAxis
   runtime_proof: KeeperRuntimeLensRuntimeProofAxis
@@ -820,10 +842,62 @@ export interface KeeperRuntimeLensGap {
   detail: string | null
 }
 
+export interface KeeperRuntimeLensClockEdgeLinks {
+  receipt_path: string | null
+  checkpoint_path: string | null
+  tool_call_log_path: string | null
+}
+
+export interface KeeperRuntimeLensClockEdge {
+  edge_id: string
+  lane: string
+  event: string
+  status: string
+  observed_at: string
+  source_clock: string
+  started_at: string | null
+  finished_at: string | null
+  trace_id: string
+  keeper_turn_id: number | null
+  oas_turn_count: number | null
+  provider_attempt_id: string | null
+  tool_batch_id: string | null
+  checkpoint_id: string | null
+  compaction_id: string | null
+  memory_injection_id: string | null
+  event_bus_correlation_id: string | null
+  event_bus_run_id: string | null
+  event_bus_event_count: number | null
+  event_bus_payload_kinds: string[]
+  parent_event_id: string | null
+  caused_by: string | null
+  links: KeeperRuntimeLensClockEdgeLinks
+}
+
+export interface KeeperRuntimeLensClockGroup {
+  group_type: string
+  group_id: string
+  edge_count: number
+  edge_ids: string[]
+  lanes: string[]
+  events: string[]
+  statuses: string[]
+  first_observed_at: string | null
+  last_observed_at: string | null
+  closed: boolean
+  terminal_events: string[]
+  parent_event_ids: string[]
+  caused_by: string[]
+  event_bus_event_count: number
+  event_bus_payload_kinds: string[]
+}
+
 export interface KeeperRuntimeLens {
   turn_clock: KeeperRuntimeLensTurnClock
   axes: KeeperRuntimeLensAxes
   swimlanes: KeeperRuntimeLensSwimlanes
+  clock_edges: KeeperRuntimeLensClockEdge[]
+  clock_groups: KeeperRuntimeLensClockGroup[]
   gaps: KeeperRuntimeLensGap[]
 }
 
@@ -1062,6 +1136,63 @@ function parseRuntimeLensProviderAttemptAxis(raw: unknown): KeeperRuntimeLensPro
   }
 }
 
+function parseRuntimeLensToolLineageStage(raw: unknown): KeeperRuntimeLensToolLineageStage {
+  const obj = isRecord(raw) ? raw : {}
+  return {
+    stage: stringField(obj, 'stage'),
+    tool_names: stringListField(obj, 'tool_names'),
+    count: numberField(obj, 'count'),
+  }
+}
+
+function parseRuntimeLensToolLineageAxis(raw: unknown): KeeperRuntimeLensToolLineageAxis {
+  const obj = isRecord(raw) ? raw : {}
+  const decisionRaw = obj.decision
+  let decision: Record<string, KeeperRuntimeLensToolLineageStage> | null = null
+  if (isRecord(decisionRaw)) {
+    const parsed: Record<string, KeeperRuntimeLensToolLineageStage> = {}
+    for (const key of Object.keys(decisionRaw)) {
+      const stage = parseRuntimeLensToolLineageStage(decisionRaw[key])
+      if (stage.stage !== '' || stage.count > 0 || stage.tool_names.length > 0) {
+        parsed[key] = stage
+      }
+    }
+    decision = Object.keys(parsed).length > 0 ? parsed : null
+  }
+  return {
+    recorded: obj.recorded === true,
+    decision,
+  }
+}
+
+function parseRuntimeLensPayloadRoleAxis(raw: unknown): KeeperRuntimeLensPayloadRoleAxis {
+  const obj = isRecord(raw) ? raw : {}
+  const counts: Record<string, number> = {}
+  if (isRecord(obj)) {
+    for (const key of Object.keys(obj)) {
+      const value = obj[key]
+      if (typeof value === 'number') {
+        counts[key] = value
+      }
+    }
+  }
+  return { counts }
+}
+
+function parseRuntimeLensSourceClockAxis(raw: unknown): KeeperRuntimeLensSourceClockAxis {
+  const obj = isRecord(raw) ? raw : {}
+  const counts: Record<string, number> = {}
+  if (isRecord(obj)) {
+    for (const key of Object.keys(obj)) {
+      const value = obj[key]
+      if (typeof value === 'number') {
+        counts[key] = value
+      }
+    }
+  }
+  return { counts }
+}
+
 function parseRuntimeLensClaimScopeAxis(raw: unknown): KeeperRuntimeLensClaimScopeAxis {
   const obj = isRecord(raw) ? raw : {}
   return {
@@ -1142,6 +1273,9 @@ function parseRuntimeLensAxes(raw: unknown): KeeperRuntimeLensAxes {
     tool_surface: parseRuntimeLensToolSurfaceAxis(obj.tool_surface),
     provider_lane: parseRuntimeLensProviderLaneAxis(obj.provider_lane),
     provider_attempt: parseRuntimeLensProviderAttemptAxis(obj.provider_attempt),
+    tool_lineage: parseRuntimeLensToolLineageAxis(obj.tool_lineage),
+    payload_role: parseRuntimeLensPayloadRoleAxis(obj.payload_role),
+    source_clock: parseRuntimeLensSourceClockAxis(obj.source_clock),
     claim_scope: parseRuntimeLensClaimScopeAxis(obj.claim_scope),
     config_drift: parseRuntimeLensConfigDriftAxis(obj.config_drift),
     runtime_proof: parseRuntimeLensRuntimeProofAxis(obj.runtime_proof),
@@ -1196,13 +1330,80 @@ function parseRuntimeLensGap(raw: unknown): KeeperRuntimeLensGap {
   }
 }
 
+function parseRuntimeLensClockEdgeLinks(raw: unknown): KeeperRuntimeLensClockEdgeLinks {
+  const obj = isRecord(raw) ? raw : {}
+  return {
+    receipt_path: nullableStringField(obj, 'receipt_path'),
+    checkpoint_path: nullableStringField(obj, 'checkpoint_path'),
+    tool_call_log_path: nullableStringField(obj, 'tool_call_log_path'),
+  }
+}
+
+function parseRuntimeLensClockEdge(raw: unknown): KeeperRuntimeLensClockEdge {
+  const obj = isRecord(raw) ? raw : {}
+  return {
+    edge_id: stringField(obj, 'edge_id') || 'unknown_edge',
+    lane: stringField(obj, 'lane') || 'unknown',
+    event: stringField(obj, 'event') || 'unknown_event',
+    status: stringField(obj, 'status') || 'unknown',
+    observed_at: stringField(obj, 'observed_at'),
+    source_clock: stringField(obj, 'source_clock') || 'unknown',
+    started_at: nullableStringField(obj, 'started_at'),
+    finished_at: nullableStringField(obj, 'finished_at'),
+    trace_id: stringField(obj, 'trace_id'),
+    keeper_turn_id: nullableNumberField(obj, 'keeper_turn_id'),
+    oas_turn_count: nullableNumberField(obj, 'oas_turn_count'),
+    provider_attempt_id: nullableStringField(obj, 'provider_attempt_id'),
+    tool_batch_id: nullableStringField(obj, 'tool_batch_id'),
+    checkpoint_id: nullableStringField(obj, 'checkpoint_id'),
+    compaction_id: nullableStringField(obj, 'compaction_id'),
+    memory_injection_id: nullableStringField(obj, 'memory_injection_id'),
+    event_bus_correlation_id: nullableStringField(obj, 'event_bus_correlation_id'),
+    event_bus_run_id: nullableStringField(obj, 'event_bus_run_id'),
+    event_bus_event_count: nullableNumberField(obj, 'event_bus_event_count'),
+    event_bus_payload_kinds: stringListField(obj, 'event_bus_payload_kinds'),
+    parent_event_id: nullableStringField(obj, 'parent_event_id'),
+    caused_by: nullableStringField(obj, 'caused_by'),
+    links: parseRuntimeLensClockEdgeLinks(obj.links),
+  }
+}
+
+function parseRuntimeLensClockGroup(raw: unknown): KeeperRuntimeLensClockGroup {
+  const obj = isRecord(raw) ? raw : {}
+  return {
+    group_type: stringField(obj, 'group_type') || 'unknown',
+    group_id: stringField(obj, 'group_id') || 'unknown_group',
+    edge_count: numberField(obj, 'edge_count'),
+    edge_ids: stringListField(obj, 'edge_ids'),
+    lanes: stringListField(obj, 'lanes'),
+    events: stringListField(obj, 'events'),
+    statuses: stringListField(obj, 'statuses'),
+    first_observed_at: nullableStringField(obj, 'first_observed_at'),
+    last_observed_at: nullableStringField(obj, 'last_observed_at'),
+    closed: nullableBooleanField(obj, 'closed') ?? false,
+    terminal_events: stringListField(obj, 'terminal_events'),
+    parent_event_ids: stringListField(obj, 'parent_event_ids'),
+    caused_by: stringListField(obj, 'caused_by'),
+    event_bus_event_count: numberField(obj, 'event_bus_event_count'),
+    event_bus_payload_kinds: stringListField(obj, 'event_bus_payload_kinds'),
+  }
+}
+
 function parseRuntimeLens(raw: unknown, fallbackTraceId: string): KeeperRuntimeLens {
   const obj = isRecord(raw) ? raw : {}
   const gaps = Array.isArray(obj.gaps) ? obj.gaps.map(parseRuntimeLensGap) : []
+  const clockEdges = Array.isArray(obj.clock_edges)
+    ? obj.clock_edges.map(parseRuntimeLensClockEdge)
+    : []
+  const clockGroups = Array.isArray(obj.clock_groups)
+    ? obj.clock_groups.map(parseRuntimeLensClockGroup)
+    : []
   return {
     turn_clock: parseRuntimeLensTurnClock(obj.turn_clock, fallbackTraceId),
     axes: parseRuntimeLensAxes(obj.axes),
     swimlanes: parseRuntimeLensSwimlanes(obj.swimlanes),
+    clock_edges: clockEdges,
+    clock_groups: clockGroups,
     gaps,
   }
 }

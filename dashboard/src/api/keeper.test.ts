@@ -261,12 +261,57 @@ describe('keeper runtime trace', () => {
             gap_codes: ['required_tool_not_materialized'],
           },
         },
+        clock_edges: [
+          {
+            edge_id: 'edge-provider-start',
+            lane: 'provider',
+            event: 'provider_attempt_started',
+            status: 'started',
+            observed_at: '2026-05-13T00:00:03Z',
+            source_clock: 'wall',
+            started_at: '2026-05-13T00:00:03Z',
+            trace_id: 'trace-lens',
+            keeper_turn_id: 9,
+            provider_attempt_id: 'trace-lens:keeper-9:provider-attempt-1',
+            event_bus_correlation_id: 'corr-1',
+            event_bus_event_count: 2,
+            event_bus_payload_kinds: ['tool_called', 'tool_completed'],
+            links: {
+              tool_call_log_path: '/tmp/tool-calls.jsonl',
+            },
+          },
+        ],
+        clock_groups: [
+          {
+            group_type: 'provider_attempt',
+            group_id: 'trace-lens:keeper-9:provider-attempt-1',
+            edge_count: 2,
+            edge_ids: ['edge-provider-start', 'edge-provider-finish'],
+            lanes: ['provider'],
+            events: ['provider_attempt_started', 'provider_attempt_finished'],
+            statuses: ['started', 'provider_returned'],
+            first_observed_at: '2026-05-13T00:00:03Z',
+            last_observed_at: '2026-05-13T00:00:08Z',
+            closed: true,
+            terminal_events: ['provider_attempt_finished'],
+            parent_event_ids: [],
+            caused_by: [],
+            event_bus_event_count: 0,
+            event_bus_payload_kinds: [],
+          },
+        ],
         gaps: [
           {
             code: 'required_tool_not_materialized',
             severity: 'bad',
             lane: 'tool_runtime',
             detail: 'missing required tools: keeper_task_done',
+          },
+          {
+            code: 'clock_provider_attempt_unfinished',
+            severity: 'warn',
+            lane: 'provider',
+            detail: 'provider attempts started=1 finished=0',
           },
         ],
       },
@@ -285,7 +330,18 @@ describe('keeper runtime trace', () => {
     expect(result.runtime_lens.axes.runtime_proof.tools).toEqual(['keeper_bash', 'keeper_pr_create'])
     expect(result.runtime_lens.swimlanes.provider.terminal_status).toBe('timeout')
     expect(result.runtime_lens.swimlanes.memory_context.terminal_status).toBe('unknown')
-    expect(result.runtime_lens.gaps.map(gap => gap.code)).toEqual(['required_tool_not_materialized'])
+    expect(result.runtime_lens.clock_edges[0]?.edge_id).toBe('edge-provider-start')
+    expect(result.runtime_lens.clock_edges[0]?.provider_attempt_id).toBe('trace-lens:keeper-9:provider-attempt-1')
+    expect(result.runtime_lens.clock_edges[0]?.event_bus_event_count).toBe(2)
+    expect(result.runtime_lens.clock_edges[0]?.event_bus_payload_kinds).toEqual(['tool_called', 'tool_completed'])
+    expect(result.runtime_lens.clock_edges[0]?.links.tool_call_log_path).toBe('/tmp/tool-calls.jsonl')
+    expect(result.runtime_lens.clock_groups[0]?.group_type).toBe('provider_attempt')
+    expect(result.runtime_lens.clock_groups[0]?.closed).toBe(true)
+    expect(result.runtime_lens.clock_groups[0]?.terminal_events).toEqual(['provider_attempt_finished'])
+    expect(result.runtime_lens.gaps.map(gap => gap.code)).toEqual([
+      'required_tool_not_materialized',
+      'clock_provider_attempt_unfinished',
+    ])
   })
 
   it('fetches runtime trace evidence with query params', async () => {

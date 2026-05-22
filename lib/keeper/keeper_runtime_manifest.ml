@@ -7,6 +7,7 @@ type event_kind =
   | Pre_dispatch_blocked
   | Tool_surface_selected
   | Provider_lane_resolved
+  | Tool_lineage_recorded
   | Provider_attempt_started
   | Provider_attempt_finished
   | Context_injected
@@ -20,6 +21,49 @@ type event_kind =
   | Checkpoint_saved
   | Receipt_appended
   | Turn_finished
+
+type payload_role =
+  | Model_input
+  | Operator_evidence
+  | Checkpoint
+  | Memory_store
+
+let payload_role_to_string = function
+  | Model_input -> "model_input"
+  | Operator_evidence -> "operator_evidence"
+  | Checkpoint -> "checkpoint"
+  | Memory_store -> "memory_store"
+
+let payload_role_of_string = function
+  | "model_input" -> Some Model_input
+  | "operator_evidence" -> Some Operator_evidence
+  | "checkpoint" -> Some Checkpoint
+  | "memory_store" -> Some Memory_store
+  | _ -> None
+
+type source_clock =
+  | Wall
+  | Monotonic
+  | Logical
+  | Provider
+  | Event_bus
+
+let source_clock_to_string = function
+  | Wall -> "wall"
+  | Monotonic -> "monotonic"
+  | Logical -> "logical"
+  | Provider -> "provider"
+  | Event_bus -> "oas_event_bus"
+
+let source_clock_of_string = function
+  | "wall" -> Some Wall
+  | "monotonic" -> Some Monotonic
+  | "logical" -> Some Logical
+  | "provider" -> Some Provider
+  | "oas_event_bus" -> Some Event_bus
+  | _ -> None
+
+module StringSet = Set.Make (String)
 
 type links = {
   receipt_path : string option;
@@ -61,6 +105,7 @@ let all_event_kinds =
     Pre_dispatch_blocked;
     Tool_surface_selected;
     Provider_lane_resolved;
+    Tool_lineage_recorded;
     Provider_attempt_started;
     Provider_attempt_finished;
     Context_injected;
@@ -83,6 +128,7 @@ let event_kind_to_string = function
   | Pre_dispatch_blocked -> "pre_dispatch_blocked"
   | Tool_surface_selected -> "tool_surface_selected"
   | Provider_lane_resolved -> "provider_lane_resolved"
+  | Tool_lineage_recorded -> "tool_lineage_recorded"
   | Provider_attempt_started -> "provider_attempt_started"
   | Provider_attempt_finished -> "provider_attempt_finished"
   | Context_injected -> "context_injected"
@@ -104,6 +150,7 @@ let event_kind_of_string = function
   | "pre_dispatch_blocked" -> Some Pre_dispatch_blocked
   | "tool_surface_selected" -> Some Tool_surface_selected
   | "provider_lane_resolved" -> Some Provider_lane_resolved
+  | "tool_lineage_recorded" -> Some Tool_lineage_recorded
   | "provider_attempt_started" -> Some Provider_attempt_started
   | "provider_attempt_finished" -> Some Provider_attempt_finished
   | "context_injected" -> Some Context_injected
@@ -131,6 +178,191 @@ let safe_segment value =
     "unknown"
   else
     sanitized
+
+let string_field_opt key value =
+  match value with
+  | Some value when String.trim value <> "" -> Some (key, `String value)
+  | Some _ | None -> None
+
+let clock_refs ?edge_id ?lane ?source_clock ?observed_at ?started_at
+    ?finished_at ?provider_attempt_id ?tool_batch_id ?checkpoint_id
+    ?compaction_id ?memory_injection_id ?event_bus_correlation_id
+    ?event_bus_run_id ?parent_event_id ?caused_by () =
+  `Assoc
+    (List.filter_map
+       (fun value -> value)
+       [
+         string_field_opt "edge_id" edge_id;
+         string_field_opt "lane" lane;
+         string_field_opt "source_clock"
+           (Option.map source_clock_to_string source_clock);
+         string_field_opt "observed_at" observed_at;
+         string_field_opt "started_at" started_at;
+         string_field_opt "finished_at" finished_at;
+         string_field_opt "provider_attempt_id" provider_attempt_id;
+         string_field_opt "tool_batch_id" tool_batch_id;
+         string_field_opt "checkpoint_id" checkpoint_id;
+         string_field_opt "compaction_id" compaction_id;
+         string_field_opt "memory_injection_id" memory_injection_id;
+         string_field_opt "event_bus_correlation_id" event_bus_correlation_id;
+         string_field_opt "event_bus_run_id" event_bus_run_id;
+         string_field_opt "parent_event_id" parent_event_id;
+         string_field_opt "caused_by" caused_by;
+       ])
+
+let clock_lane_of_event = function
+  | Turn_started
+  | Phase_gate_decided
+  | Pre_dispatch_blocked
+  | Receipt_appended
+  | Turn_finished ->
+    "keeper"
+  | Cascade_routed
+  | Provider_lane_resolved ->
+    "masc_policy_cascade"
+  | Provider_attempt_started
+  | Provider_attempt_finished ->
+    "provider"
+  | Tool_surface_selected
+  | Tool_lineage_recorded -> "tool_runtime"
+  | Checkpoint_loaded
+  | State_snapshot_sidecar_saved
+  | Working_state_sidecar_saved
+  | Checkpoint_saved ->
+    "oas_agent"
+  | Context_injected
+  | Context_compacted
+  | Event_bus_correlated
+  | Memory_injected
+  | Memory_flushed ->
+    "memory_context"
+
+let turn_label ctx =
+  match ctx.manifest_keeper_turn_id with
+  | Some value -> string_of_int value
+  | None -> "unknown"
+
+let oas_turn_label = function
+  | Some value -> string_of_int value
+  | None -> "0"
+
+let context_edge_id ctx event =
+  Printf.sprintf "%s:keeper-%s:%s" ctx.manifest_trace_id (turn_label ctx)
+    (event_kind_to_string event)
+
+let context_tool_batch_id ctx ?oas_turn_count () =
+  Printf.sprintf "%s:keeper-%s:tool-batch-oas-%s"
+    ctx.manifest_trace_id (turn_label ctx) (oas_turn_label oas_turn_count)
+
+let context_checkpoint_id ctx ?oas_turn_count () =
+  Printf.sprintf "checkpoint:%s:oas-%s" ctx.manifest_trace_id
+    (oas_turn_label oas_turn_count)
+
+let context_compaction_id ctx =
+  Printf.sprintf "%s:keeper-%s:compaction-pre-dispatch"
+    ctx.manifest_trace_id (turn_label ctx)
+
+let context_memory_injection_id ctx ?oas_turn_count () =
+  Printf.sprintf "%s:keeper-%s:memory-oas-%s" ctx.manifest_trace_id
+    (turn_label ctx) (oas_turn_label oas_turn_count)
+
+let clock_refs_for_context ctx ~event ?oas_turn_count
+    ?event_bus_correlation_id ?event_bus_run_id ?parent_event_id ?caused_by () =
+  let tool_batch_id =
+    match event with
+    | Tool_surface_selected
+    | Provider_lane_resolved ->
+      Some (context_tool_batch_id ctx ?oas_turn_count ())
+    | _ -> None
+  in
+  let checkpoint_id =
+    match event with
+    | Checkpoint_loaded
+    | State_snapshot_sidecar_saved
+    | Working_state_sidecar_saved
+    | Checkpoint_saved ->
+      Some (context_checkpoint_id ctx ?oas_turn_count ())
+    | _ -> None
+  in
+  let compaction_id =
+    match event with
+    | Context_compacted
+    | Event_bus_correlated ->
+      Some (context_compaction_id ctx)
+    | _ -> None
+  in
+  let memory_injection_id =
+    match event with
+    | Memory_injected
+    | Memory_flushed ->
+      Some (context_memory_injection_id ctx ?oas_turn_count ())
+    | _ -> None
+  in
+  let source_clock =
+    match event with
+    | Event_bus_correlated -> Event_bus
+    | Provider_attempt_started
+    | Provider_attempt_finished -> Provider
+    | Context_injected
+    | Context_compacted -> Logical
+    | _ -> Wall
+  in
+  clock_refs ~edge_id:(context_edge_id ctx event)
+    ~lane:(clock_lane_of_event event) ~source_clock ?tool_batch_id
+    ?checkpoint_id ?compaction_id ?memory_injection_id
+    ?event_bus_correlation_id ?event_bus_run_id ?parent_event_id ?caused_by ()
+
+let assoc_has_key key fields =
+  List.exists (fun (field, _) -> String.equal field key) fields
+
+let with_clock_refs ~clock_refs decision =
+  match clock_refs with
+  | `Assoc [] -> decision
+  | _ -> (
+    match decision with
+    | `Assoc fields when assoc_has_key "clock_refs" fields -> decision
+    | `Assoc fields -> `Assoc (fields @ [ ("clock_refs", clock_refs) ])
+    | other -> `Assoc [ ("decision", other); ("clock_refs", clock_refs) ])
+
+let with_payload_role ~payload_role decision =
+  match decision with
+  | `Assoc fields when assoc_has_key "payload_role" fields -> decision
+  | `Assoc fields ->
+    `Assoc (fields @ [ ("payload_role", `String (payload_role_to_string payload_role)) ])
+  | other ->
+    `Assoc
+      [
+        ("decision", other);
+        ("payload_role", `String (payload_role_to_string payload_role));
+      ]
+
+let tool_lineage_stage ~stage ~tool_names ~count () : Yojson.Safe.t =
+  `Assoc
+    [
+      ("stage", `String stage);
+      ("tool_names", `List (List.map (fun n -> `String n) tool_names));
+      ("count", `Int count);
+    ]
+
+let tool_lineage ?searched_tool_names ?visible_tool_names
+    ?materialized_tool_names ?emitted_tool_names ?executed_tool_names
+    ?verified_tool_names () : Yojson.Safe.t =
+  let stage name tools =
+    match tools with
+    | Some names -> Some (tool_lineage_stage ~stage:name ~tool_names:names ~count:(List.length names) ())
+    | None -> None
+  in
+  `Assoc
+    (List.filter_map
+       (fun (key, value) -> Option.map (fun v -> key, v) value)
+       [
+         "searched", stage "searched" searched_tool_names;
+         "visible", stage "visible" visible_tool_names;
+         "materialized", stage "materialized" materialized_tool_names;
+         "emitted", stage "emitted" emitted_tool_names;
+         "executed", stage "executed" executed_tool_names;
+         "verified", stage "verified" verified_tool_names;
+       ])
 
 let make ?(ts = Masc_domain.now_iso ()) ~keeper_name ?agent_name ~trace_id
     ?generation ?keeper_turn_id ?oas_turn_count ~event ?cascade_name
@@ -177,63 +409,123 @@ let links_to_json links =
       ("tool_call_log_path", json_of_string_opt links.tool_call_log_path);
     ]
 
-let string_contains_substring haystack needle =
-  let haystack_len = String.length haystack in
-  let needle_len = String.length needle in
-  if needle_len = 0 then true
-  else if needle_len > haystack_len then false
-  else
-    let rec loop idx =
-      if idx + needle_len > haystack_len then false
-      else if String.sub haystack idx needle_len = needle then true
-      else loop (idx + 1)
-    in
-    loop 0
+(* Allowlist-based public projection.
+   The previous substring-based redaction (§2 anti-pattern) has been removed;
+   public filtering now uses explicit allowlists in {!public_projection_of_decision}. *)
 
-let is_provider_attempt_provenance_key = function
-  | "model_source"
-  | "resolved_model_source"
-  | "capability_source"
-  | "fallback_authority"
-  | "provider_source_cascade" ->
-    true
-  | _ -> false
+let manifest_top_level_allowlist =
+  StringSet.of_list
+    [ "schema_version"; "ts"; "keeper_name"; "agent_name"; "trace_id"
+    ; "generation"; "keeper_turn_id"; "oas_turn_count"; "event"
+    ; "cascade_name"; "status"; "decision"; "links"
+    ]
 
-let redacts_provider_model_key key =
-  let key = String.lowercase_ascii key in
-  (not (is_provider_attempt_provenance_key key))
-  &&
-  (string_contains_substring key "provider"
-   || string_contains_substring key "model"
-   || String.equal key "configured_labels")
+let decision_public_allowlist =
+  StringSet.of_list
+    [ "edge_id"; "lane"; "source_clock"; "observed_at"; "started_at"; "finished_at"
+    ; "provider_attempt_id"; "tool_batch_id"; "checkpoint_id"; "compaction_id"
+    ; "memory_injection_id"; "event_bus_correlation_id"; "event_bus_run_id"
+    ; "parent_event_id"; "caused_by"; "repair_reason"; "matched_started_ts"
+    ; "matched_started_status"; "error"; "exception_kind"; "latency_ms"
+    ; "checkpoint_after_present"; "is_last"; "per_provider_timeout_s"
+    ; "attempt_timeout_s"; "attempt_timeout_source"; "attempt_watchdog_source"
+    ; "liveness_mode"; "liveness_budget_source"
+    ; "context_compact_started_count"; "context_compacted_count"
+    ; "last_compaction"; "active_open_loop_count"
+    ; "episodes_flushed"; "procedures_flushed"
+    ; "clock_refs"
+    ]
 
-let rec retired_provider_model_key_path ?(prefix = "decision") = function
+let clock_refs_public_allowlist =
+  StringSet.of_list
+    [ "edge_id"; "lane"; "source_clock"; "observed_at"; "started_at"; "finished_at"
+    ; "provider_attempt_id"; "tool_batch_id"; "checkpoint_id"; "compaction_id"
+    ; "memory_injection_id"; "event_bus_correlation_id"; "event_bus_run_id"
+    ; "parent_event_id"; "caused_by"
+    ]
+
+let rec reject_unknown_fields ~allowlist path = function
   | `Assoc fields ->
       List.find_map
         (fun (key, value) ->
-          let path = prefix ^ "." ^ key in
-          if redacts_provider_model_key key then Some path
-          else retired_provider_model_key_path ~prefix:path value)
+          let full_path = if String.equal path "" then key else path ^ "." ^ key in
+          if StringSet.mem key allowlist then
+            reject_unknown_fields ~allowlist full_path value
+          else Some full_path)
         fields
   | `List values ->
       values
       |> List.mapi (fun idx value -> idx, value)
       |> List.find_map (fun (idx, value) ->
-        retired_provider_model_key_path
-          ~prefix:(Printf.sprintf "%s[%d]" prefix idx)
+        reject_unknown_fields ~allowlist
+          (Printf.sprintf "%s[%d]" path idx)
           value)
   | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ -> None
 
-let rec redact_provider_model_json = function
-  | `Assoc fields ->
-      `Assoc
-        (fields
-        |> List.filter_map (fun (key, value) ->
-               if redacts_provider_model_key key then None
-               else Some (key, redact_provider_model_json value)))
-  | `List values -> `List (List.map redact_provider_model_json values)
-  | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _) as value ->
-      value
+let reject_retired_manifest_fields fields =
+  match
+    reject_unknown_fields
+      ~allowlist:manifest_top_level_allowlist
+      "" (`Assoc fields)
+  with
+  | Some path ->
+      Error
+        (Printf.sprintf
+           "retired runtime manifest field %S is no longer accepted" path)
+  | None -> Ok ()
+
+let reject_retired_decision_fields decision =
+  let rec check path = function
+    | `Assoc fields ->
+        let allowlist =
+          if String.equal path "" then decision_public_allowlist
+          else if String.equal path "clock_refs" then clock_refs_public_allowlist
+          else decision_public_allowlist
+        in
+        List.find_map
+          (fun (key, value) ->
+            let full_path = if String.equal path "" then key else path ^ "." ^ key in
+            if StringSet.mem key allowlist then check full_path value
+            else Some full_path)
+          fields
+    | `List values ->
+        values
+        |> List.mapi (fun idx value -> idx, value)
+        |> List.find_map (fun (idx, value) ->
+          check (Printf.sprintf "%s[%d]" path idx) value)
+    | _ -> None
+  in
+  match check "" decision with
+  | Some path ->
+      Error
+        (Printf.sprintf
+           "retired runtime manifest decision field %S is no longer accepted"
+           path)
+  | None -> Ok ()
+
+let rec public_projection_of_decision decision =
+  let rec project path = function
+    | `Assoc fields ->
+        let allowlist =
+          if String.equal path "" then decision_public_allowlist
+          else if String.equal path "clock_refs" then clock_refs_public_allowlist
+          else decision_public_allowlist
+        in
+        `Assoc
+          (List.filter_map
+             (fun (key, value) ->
+               if StringSet.mem key allowlist then
+                 Some
+                   ( key
+                   , project
+                       (if String.equal path "" then key else path ^ "." ^ key)
+                       value )
+               else None)
+             fields)
+    | `List values -> `List (List.map (project path) values)
+    | other -> other
+  in
+  project "" decision
 
 let to_json manifest =
   `Assoc
@@ -249,7 +541,25 @@ let to_json manifest =
       ("event", `String (event_kind_to_string manifest.event));
       ("cascade_name", json_of_string_opt manifest.cascade_name);
       ("status", `String manifest.status);
-      ("decision", redact_provider_model_json manifest.decision);
+      ("decision", manifest.decision);
+      ("links", links_to_json manifest.links);
+    ]
+
+let public_to_json manifest =
+  `Assoc
+    [
+      ("schema_version", `Int manifest.schema_version);
+      ("ts", `String manifest.ts);
+      ("keeper_name", `String manifest.keeper_name);
+      ("agent_name", json_of_string_opt manifest.agent_name);
+      ("trace_id", `String manifest.trace_id);
+      ("generation", json_of_int_opt manifest.generation);
+      ("keeper_turn_id", json_of_int_opt manifest.keeper_turn_id);
+      ("oas_turn_count", json_of_int_opt manifest.oas_turn_count);
+      ("event", `String (event_kind_to_string manifest.event));
+      ("cascade_name", json_of_string_opt manifest.cascade_name);
+      ("status", `String manifest.status);
+      ("decision", public_projection_of_decision manifest.decision);
       ("links", links_to_json manifest.links);
     ]
 
@@ -311,29 +621,11 @@ let links_of_json = function
         (Printf.sprintf "field \"links\" must be an object (received %s)"
            (Json_util.kind_name other))
 
-let reject_retired_manifest_fields fields =
-  match List.find_opt (fun (key, _) -> redacts_provider_model_key key) fields with
-  | Some (key, _) ->
-      Error
-        (Printf.sprintf
-           "retired runtime manifest field %S is no longer accepted" key)
-  | None -> Ok ()
-
-let reject_retired_decision_fields decision =
-  match retired_provider_model_key_path decision with
-  | Some path ->
-      Error
-        (Printf.sprintf
-           "retired runtime manifest decision field %S is no longer accepted"
-           path)
-  | None -> Ok ()
-
 let of_json = function
   | `Assoc fields -> (
       let ( >>= ) result f =
         match result with Ok value -> f value | Error _ as err -> err
       in
-      reject_retired_manifest_fields fields >>= fun () ->
       match required_int "schema_version" fields with
       | Error _ as err -> err
       | Ok parsed_schema_version ->
@@ -357,7 +649,6 @@ let of_json = function
             optional_string "cascade_name" fields >>= fun cascade_name ->
             required_string "status" fields >>= fun status ->
             field "decision" fields >>= fun decision ->
-            reject_retired_decision_fields decision >>= fun () ->
             field "links" fields >>= fun links_json ->
             links_of_json links_json >>= fun links ->
             Ok

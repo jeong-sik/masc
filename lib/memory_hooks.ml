@@ -121,6 +121,13 @@ let append_runtime_manifest
     event =
   match runtime_manifest_context, runtime_manifest_append with
   | Some context, Some append ->
+      let decision =
+        Keeper_runtime_manifest.with_clock_refs
+          ~clock_refs:
+            (Keeper_runtime_manifest.clock_refs_for_context context ~event
+               ?oas_turn_count ())
+          decision
+      in
       let manifest =
         Keeper_runtime_manifest.make_for_context context ~event ?oas_turn_count
           ~status ~decision ()
@@ -184,19 +191,20 @@ let make
              ~oas_turn_count:turn
              ~status:"skipped"
              ~decision:
-               (`Assoc
-                 [
-                   ("memory_context_present", `Bool false);
-                   ("episode_limit", `Int episode_limit);
-                   ("procedure_limit", `Int procedure_limit);
-                   ( "existing_extra_system_context_present",
-                     `Bool (Option.is_some current_params.extra_system_context) );
-                   ( "existing_extra_system_context_chars",
-                     `Int
-                       (match current_params.extra_system_context with
-                        | None -> 0
-                        | Some text -> String.length text) );
-                 ])
+               (Keeper_runtime_manifest.with_payload_role ~payload_role:Model_input
+                 (`Assoc
+                   [
+                     ("memory_context_present", `Bool false);
+                     ("episode_limit", `Int episode_limit);
+                     ("procedure_limit", `Int procedure_limit);
+                     ( "existing_extra_system_context_present",
+                       `Bool (Option.is_some current_params.extra_system_context) );
+                     ( "existing_extra_system_context_chars",
+                       `Int
+                         (match current_params.extra_system_context with
+                          | None -> 0
+                          | Some text -> String.length text) );
+                   ]))
              Keeper_runtime_manifest.Memory_injected;
            Agent_sdk.Hooks.Continue
          | Some mem_text ->
@@ -211,27 +219,28 @@ let make
              ~oas_turn_count:turn
              ~status:"injected"
              ~decision:
-               (`Assoc
-                 [
-                   ("memory_context_present", `Bool true);
-                   ("memory_context_chars", `Int (String.length mem_text));
-                   ( "memory_context_digest",
-                     `String (Digest.to_hex (Digest.string mem_text)) );
-                   ("episode_limit", `Int episode_limit);
-                   ("procedure_limit", `Int procedure_limit);
-                   ( "existing_extra_system_context_present",
-                     `Bool (Option.is_some current_params.extra_system_context) );
-                   ( "existing_extra_system_context_chars",
-                     `Int
-                       (match current_params.extra_system_context with
-                        | None -> 0
-                        | Some text -> String.length text) );
-                   ( "extra_system_context_chars_after",
-                     `Int
-                       (match extra with
-                        | None -> 0
-                        | Some text -> String.length text) );
-                 ])
+               (Keeper_runtime_manifest.with_payload_role ~payload_role:Model_input
+                 (`Assoc
+                   [
+                     ("memory_context_present", `Bool true);
+                     ("memory_context_chars", `Int (String.length mem_text));
+                     ( "memory_context_digest",
+                       `String (Digest.to_hex (Digest.string mem_text)) );
+                     ("episode_limit", `Int episode_limit);
+                     ("procedure_limit", `Int procedure_limit);
+                     ( "existing_extra_system_context_present",
+                       `Bool (Option.is_some current_params.extra_system_context) );
+                     ( "existing_extra_system_context_chars",
+                       `Int
+                         (match current_params.extra_system_context with
+                          | None -> 0
+                          | Some text -> String.length text) );
+                     ( "extra_system_context_chars_after",
+                       `Int
+                         (match extra with
+                          | None -> 0
+                          | Some text -> String.length text) );
+                   ]))
              Keeper_runtime_manifest.Memory_injected;
            Agent_sdk.Hooks.AdjustParams
              { current_params with extra_system_context = extra })
@@ -260,13 +269,14 @@ let make
              ~oas_turn_count:turn
              ~status:"success"
              ~decision:
-               (`Assoc
-                 [
-                   ("episodes_flushed", `Int ep);
-                   ("procedures_flushed", `Int pr);
-                   ("duration_s", `Float duration_s);
-                   ("response_model", `String response.Agent_sdk.Types.model);
-                 ])
+               (Keeper_runtime_manifest.with_payload_role ~payload_role:Memory_store
+                 (`Assoc
+                   [
+                     ("episodes_flushed", `Int ep);
+                     ("procedures_flushed", `Int pr);
+                     ("duration_s", `Float duration_s);
+                     ("response_model", `String response.Agent_sdk.Types.model);
+                   ]))
              Keeper_runtime_manifest.Memory_flushed
          with
          | Eio.Cancel.Cancelled _ as e -> raise e
@@ -289,14 +299,15 @@ let make
                ~oas_turn_count:turn
                ~status:"error"
                ~decision:
-                 (`Assoc
-                   [
-                     ("episodes_flushed", `Int 0);
-                     ("procedures_flushed", `Int 0);
-                     ("duration_s", `Float duration_s);
-                     ("error", `String (Printexc.to_string exn));
-                     ("response_model", `String response.Agent_sdk.Types.model);
-                   ])
+                 (Keeper_runtime_manifest.with_payload_role ~payload_role:Memory_store
+                   (`Assoc
+                     [
+                       ("episodes_flushed", `Int 0);
+                       ("procedures_flushed", `Int 0);
+                       ("duration_s", `Float duration_s);
+                       ("error", `String (Printexc.to_string exn));
+                       ("response_model", `String response.Agent_sdk.Types.model);
+                     ]))
                Keeper_runtime_manifest.Memory_flushed;
              Log.Keeper.warn
                "memory_hooks: flush_incremental failed agent=%s: %s"

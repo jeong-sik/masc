@@ -491,6 +491,16 @@ describe('RuntimeLensSection', () => {
             finished_count: 1,
             terminal_status: 'timeout',
           },
+          tool_lineage: {
+            recorded: false,
+            decision: null,
+          },
+          payload_role: {
+            counts: {},
+          },
+          source_clock: {
+            counts: {},
+          },
           claim_scope: {
             present: false,
             source: 'tool_call_log',
@@ -566,6 +576,56 @@ describe('RuntimeLensSection', () => {
           tool_runtime: lane('tool_runtime', 'Tool Runtime', 1, 'missing_required_tool', ['required_tool_not_materialized']),
           memory_context: lane('memory_context', 'Memory/Context', 3, 'flushed'),
         },
+        clock_edges: [
+          {
+            edge_id: 'edge-provider-start',
+            lane: 'provider',
+            event: 'provider_attempt_started',
+            status: 'started',
+            observed_at: '2026-05-13T00:00:03Z',
+            source_clock: 'wall',
+            started_at: '2026-05-13T00:00:03Z',
+            finished_at: null,
+            trace_id: 'trace-lens',
+            keeper_turn_id: 7,
+            oas_turn_count: 2,
+            provider_attempt_id: 'trace-lens:keeper-7:provider-attempt-1',
+            tool_batch_id: null,
+            checkpoint_id: null,
+            compaction_id: null,
+            memory_injection_id: null,
+            event_bus_correlation_id: 'corr-1',
+            event_bus_run_id: 'run-1',
+            event_bus_event_count: 2,
+            event_bus_payload_kinds: ['tool_called', 'tool_completed'],
+            parent_event_id: null,
+            caused_by: null,
+            links: {
+              receipt_path: null,
+              checkpoint_path: null,
+              tool_call_log_path: '/tmp/tool-calls.jsonl',
+            },
+          },
+        ],
+        clock_groups: [
+          {
+            group_type: 'event_bus_correlation',
+            group_id: 'corr-1',
+            edge_count: 1,
+            edge_ids: ['edge-provider-start'],
+            lanes: ['provider'],
+            events: ['provider_attempt_started'],
+            statuses: ['started'],
+            first_observed_at: '2026-05-13T00:00:03Z',
+            last_observed_at: '2026-05-13T00:00:03Z',
+            closed: true,
+            terminal_events: ['event_bus_correlated'],
+            parent_event_ids: [],
+            caused_by: [],
+            event_bus_event_count: 2,
+            event_bus_payload_kinds: ['tool_called', 'tool_completed'],
+          },
+        ],
         gaps: [
           {
             code: 'required_tool_not_materialized',
@@ -729,6 +789,14 @@ describe('RuntimeLensSection', () => {
     expect(screen.getAllByText('1/1').length).toBeGreaterThan(0)
     expect(screen.getByText('provider terminal')).toBeInTheDocument()
     expect(screen.getByText('timeout / outer_oas_timeout')).toBeInTheDocument()
+    expect(screen.getByText('clock edges')).toBeInTheDocument()
+    expect(screen.getByText('clock groups')).toBeInTheDocument()
+    expect(screen.getByTestId('runtime-lens-clock-groups')).toBeInTheDocument()
+    expect(screen.getByText('event_bus_correlation')).toBeInTheDocument()
+    expect(screen.getByText('tool_called · tool_completed')).toBeInTheDocument()
+    expect(screen.getByTestId('runtime-lens-clock-edges')).toBeInTheDocument()
+    expect(screen.getByText('provider_attempt_started')).toBeInTheDocument()
+    expect(screen.getByText('edge-provider-start')).toBeInTheDocument()
     expect(screen.getByText('event ids')).toBeInTheDocument()
     expect(screen.getByText('corr corr-1 · run run-1')).toBeInTheDocument()
     expect(screen.getByText('memory evidence')).toBeInTheDocument()

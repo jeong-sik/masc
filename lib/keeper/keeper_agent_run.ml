@@ -240,29 +240,31 @@ let run_turn
     ~keeper_turn_id:manifest_keeper_turn_id
     ~checkpoint_path
     ~decision:
-      (`Assoc
-        [
-          ("loaded_checkpoint_present", `Bool ctx.loaded_checkpoint_present);
-          ("pre_dispatch_compacted", `Bool pre_dispatch_compacted);
-          ( "pre_dispatch_checkpoint_error",
-            match pre_dispatch_checkpoint_error with
-            | None -> `Null
-            | Some err -> `String (Agent_sdk.Error.to_string err) );
-        ])
+      (Keeper_runtime_manifest.with_payload_role ~payload_role:Checkpoint
+        (`Assoc
+          [
+            ("loaded_checkpoint_present", `Bool ctx.loaded_checkpoint_present);
+            ("pre_dispatch_compacted", `Bool pre_dispatch_compacted);
+            ( "pre_dispatch_checkpoint_error",
+              match pre_dispatch_checkpoint_error with
+              | None -> `Null
+              | Some err -> `String (Agent_sdk.Error.to_string err) );
+          ]))
     Keeper_runtime_manifest.Checkpoint_loaded;
   append_manifest ~site:"context_compacted"
     ~keeper_turn_id:manifest_keeper_turn_id
     ~status:(if pre_dispatch_compacted then "compacted" else "skipped")
     ~decision:
-      (`Assoc
-        [
-          ("pre_dispatch_compacted", `Bool pre_dispatch_compacted);
-          ( "pre_dispatch_checkpoint_error",
-            match pre_dispatch_checkpoint_error with
-            | None -> `Null
-            | Some err -> `String (Agent_sdk.Error.to_string err) );
-          ("checkpoint_path", `String checkpoint_path);
-        ])
+      (Keeper_runtime_manifest.with_payload_role ~payload_role:Model_input
+        (`Assoc
+          [
+            ("pre_dispatch_compacted", `Bool pre_dispatch_compacted);
+            ( "pre_dispatch_checkpoint_error",
+              match pre_dispatch_checkpoint_error with
+              | None -> `Null
+              | Some err -> `String (Agent_sdk.Error.to_string err) );
+            ("checkpoint_path", `String checkpoint_path);
+          ]))
     Keeper_runtime_manifest.Context_compacted;
   (* Steps 5-6: turn prompt, memory/temporal context, prompt metrics,
      user message append, token estimation — Keeper_run_prompt. *)
@@ -289,18 +291,19 @@ let run_turn
   append_manifest ~site:"context_injected"
     ~keeper_turn_id:manifest_keeper_turn_id
     ~decision:
-      (`Assoc
-        [
-          ("base_system_prompt_digest", `String (digest_text base_system_prompt));
-          ("turn_system_prompt_digest", `String (digest_text turn_system_prompt));
-          ("dynamic_context_digest", `String (digest_text dynamic_context));
-          ("memory_context_digest", `String (digest_text memory_context));
-          ("temporal_context_digest", `String (digest_text temporal_context));
-          ("user_message_digest", `String (digest_text user_message));
-          ("history_message_count", `Int (List.length history_messages));
-          ("history_messages_digest", `String history_messages_digest);
-          ("estimated_input_tokens", `Int estimated_input_tokens);
-        ])
+      (Keeper_runtime_manifest.with_payload_role ~payload_role:Model_input
+        (`Assoc
+          [
+            ("base_system_prompt_digest", `String (digest_text base_system_prompt));
+            ("turn_system_prompt_digest", `String (digest_text turn_system_prompt));
+            ("dynamic_context_digest", `String (digest_text dynamic_context));
+            ("memory_context_digest", `String (digest_text memory_context));
+            ("temporal_context_digest", `String (digest_text temporal_context));
+            ("user_message_digest", `String (digest_text user_message));
+            ("history_message_count", `Int (List.length history_messages));
+            ("history_messages_digest", `String history_messages_digest);
+            ("estimated_input_tokens", `Int estimated_input_tokens);
+          ]))
     Keeper_runtime_manifest.Context_injected;
   let actionable_signal =
     match world_observation with
@@ -420,6 +423,7 @@ let run_turn
     let canonical_tool_names_ref = s.Keeper_run_tools.canonical_tool_names_ref in
     let unexpected_tool_names_ref = s.Keeper_run_tools.unexpected_tool_names_ref in
     let actual_keeper_tool_names_ref = s.Keeper_run_tools.actual_keeper_tool_names_ref in
+    let materialized_tool_names_ref : string list ref = ref [] in
     let keeper_has_owned_active_task () =
       Option.is_some (owned_active_task_id_for_meta ~config ~meta:acc.meta)
     in
@@ -614,9 +618,26 @@ let run_turn
                    ~memory
                    ~runtime_manifest_context
                    ~runtime_manifest_append:
-                     (Keeper_runtime_manifest.append_best_effort
-                        ~site:"cascade_runtime"
-                        config)
+                     (fun manifest ->
+                        (match manifest.Keeper_runtime_manifest.event with
+                         | Keeper_runtime_manifest.Provider_lane_resolved ->
+                           (match manifest.Keeper_runtime_manifest.decision with
+                            | `Assoc fields ->
+                              (match List.assoc_opt "materialized_tool_names" fields with
+                               | Some (`List names) ->
+                                 materialized_tool_names_ref
+                                   := List.filter_map
+                                        (function
+                                         | `String s -> Some s
+                                         | _ -> None)
+                                        names
+                               | _ -> ())
+                            | _ -> ())
+                         | _ -> ());
+                        Keeper_runtime_manifest.append_best_effort
+                          ~site:"cascade_runtime"
+                          config
+                          manifest)
                    ~runtime_manifest_required_tool_names:
                      acc.tool_surface.required_tool_names
                       (* Keepers use turn-level retry for transient errors but benefit
@@ -1978,6 +1999,19 @@ let run_turn
          | Ok _ -> "ok"
          | Error _ -> "error"
        in
+       append_receipt_manifest
+         ~site:"tool_lineage"
+         ~status:"recorded"
+         ~decision:
+           (Keeper_runtime_manifest.tool_lineage
+              ~searched_tool_names:initial_tool_surface.deterministic_prefilter
+              ~visible_tool_names:initial_tool_surface.all_allowed
+              ~materialized_tool_names:!materialized_tool_names_ref
+              ~emitted_tool_names:!reported_tool_names_ref
+              ~executed_tool_names:!observed_tool_names_ref
+              ~verified_tool_names:!actual_keeper_tool_names_ref
+              ())
+         Keeper_runtime_manifest.Tool_lineage_recorded;
        append_receipt_manifest
          ~site:"turn_finished"
          ~status:final_status

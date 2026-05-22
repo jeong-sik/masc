@@ -22,7 +22,12 @@ import { formatIndependentCounters, formatRatioPair } from './counter-format'
 import type { Keeper } from '../types'
 import type {
   KeeperCompositeSnapshot,
+  KeeperRuntimeLensClockEdge,
+  KeeperRuntimeLensClockGroup,
   KeeperRuntimeLensLane,
+  KeeperRuntimeLensPayloadRoleAxis,
+  KeeperRuntimeLensSourceClockAxis,
+  KeeperRuntimeLensToolLineageAxis,
   KeeperRuntimeTraceResponse,
 } from '../api/keeper'
 import { serverStatus, shellRuntimeResolution } from '../store'
@@ -809,6 +814,31 @@ function formatLensList(values: string[], emptyLabel = 'none'): string {
   return `${values.slice(0, 3).join(', ')} +${values.length - 3}`
 }
 
+function formatToolLineage(lineage: KeeperRuntimeLensToolLineageAxis): string {
+  if (!lineage.recorded) return 'not recorded'
+  const stages = ['searched', 'visible', 'materialized', 'emitted', 'executed', 'verified']
+  const parts: string[] = []
+  for (const key of stages) {
+    const stage = lineage.decision?.[key]
+    if (stage) {
+      parts.push(`${key}:${stage.count}`)
+    }
+  }
+  return parts.length > 0 ? parts.join(' → ') : 'recorded (no stages)'
+}
+
+function formatPayloadRole(axis: KeeperRuntimeLensPayloadRoleAxis): string {
+  const entries = Object.entries(axis.counts)
+  if (entries.length === 0) return 'none'
+  return entries.map(([role, count]) => `${role}:${count}`).join(' · ')
+}
+
+function formatSourceClock(axis: KeeperRuntimeLensSourceClockAxis): string {
+  const entries = Object.entries(axis.counts)
+  if (entries.length === 0) return 'none'
+  return entries.map(([clock, count]) => `${clock}:${count}`).join(' · ')
+}
+
 function runtimeTraceProviderTerminal(trace: KeeperRuntimeTraceResponse): string {
   const provider = trace.provider_attempts
   const status = compactToken(provider.terminal_status, 'unknown')
@@ -889,6 +919,90 @@ function lensLaneTone(lane: KeeperRuntimeLensLane): StatusChipTone {
   return 'ok'
 }
 
+function clockEdgeTitle(edge: KeeperRuntimeLensClockEdge): string {
+  return [
+    `edge ${edge.edge_id}`,
+    `trace ${edge.trace_id || '-'}`,
+    `keeper ${edge.keeper_turn_id ?? '-'}`,
+    `oas ${edge.oas_turn_count ?? '-'}`,
+    edge.provider_attempt_id ? `provider ${edge.provider_attempt_id}` : null,
+    edge.tool_batch_id ? `tool ${edge.tool_batch_id}` : null,
+    edge.checkpoint_id ? `checkpoint ${edge.checkpoint_id}` : null,
+    edge.memory_injection_id ? `memory ${edge.memory_injection_id}` : null,
+    edge.event_bus_correlation_id ? `corr ${edge.event_bus_correlation_id}` : null,
+    edge.event_bus_run_id ? `run ${edge.event_bus_run_id}` : null,
+    edge.event_bus_event_count !== null ? `event-bus events ${edge.event_bus_event_count}` : null,
+    edge.event_bus_payload_kinds.length > 0 ? `payloads ${edge.event_bus_payload_kinds.join(', ')}` : null,
+    edge.parent_event_id ? `parent ${edge.parent_event_id}` : null,
+    edge.caused_by ? `caused by ${edge.caused_by}` : null,
+    edge.started_at ? `started ${edge.started_at}` : null,
+    edge.finished_at ? `finished ${edge.finished_at}` : null,
+  ].filter(Boolean).join('\n')
+}
+
+function clockGroupTitle(group: KeeperRuntimeLensClockGroup): string {
+  return [
+    `${group.group_type} ${group.group_id}`,
+    `${group.edge_count} edges`,
+    group.lanes.length > 0 ? `lanes ${group.lanes.join(', ')}` : null,
+    group.events.length > 0 ? `events ${group.events.join(', ')}` : null,
+    group.statuses.length > 0 ? `statuses ${group.statuses.join(', ')}` : null,
+    group.terminal_events.length > 0 ? `terminal ${group.terminal_events.join(', ')}` : null,
+    group.parent_event_ids.length > 0 ? `parents ${group.parent_event_ids.join(', ')}` : null,
+    group.caused_by.length > 0 ? `caused by ${group.caused_by.join(', ')}` : null,
+    group.event_bus_event_count > 0 ? `event-bus events ${group.event_bus_event_count}` : null,
+    group.event_bus_payload_kinds.length > 0 ? `payloads ${group.event_bus_payload_kinds.join(', ')}` : null,
+    group.first_observed_at ? `first ${group.first_observed_at}` : null,
+    group.last_observed_at ? `last ${group.last_observed_at}` : null,
+  ].filter(Boolean).join('\n')
+}
+
+function RuntimeLensClockGroupRow({ group }: { group: KeeperRuntimeLensClockGroup }) {
+  const detail =
+    group.event_bus_payload_kinds.length > 0
+      ? group.event_bus_payload_kinds.join(' · ')
+      : group.events.join(' · ') || 'no events'
+  return html`
+    <div
+      class="grid grid-cols-[minmax(7rem,0.9fr)_minmax(9rem,1.5fr)_auto] gap-2 items-center rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2 min-w-0"
+      title=${clockGroupTitle(group)}
+    >
+      <div class="min-w-0">
+        <div class="text-xs font-medium text-[var(--color-fg-secondary)] truncate">${group.group_type}</div>
+        <div class="text-3xs text-[var(--color-fg-muted)] font-mono truncate">${group.edge_count} edges</div>
+      </div>
+      <div class="min-w-0">
+        <div class="text-xs text-[var(--color-fg-secondary)] truncate">${group.group_id}</div>
+        <div class="text-3xs text-[var(--color-fg-muted)] font-mono truncate">${detail}</div>
+      </div>
+      <span class="text-3xs font-mono text-[var(--color-fg-muted)] tabular-nums justify-self-end truncate max-w-32">
+        ${group.closed ? 'closed' : 'open'}
+      </span>
+    </div>
+  `
+}
+
+function RuntimeLensClockEdgeRow({ edge }: { edge: KeeperRuntimeLensClockEdge }) {
+  return html`
+    <div
+      class="grid grid-cols-[minmax(7rem,0.9fr)_minmax(9rem,1.5fr)_auto] gap-2 items-center rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2 min-w-0"
+      title=${clockEdgeTitle(edge)}
+    >
+      <div class="min-w-0">
+        <div class="text-xs font-medium text-[var(--color-fg-secondary)] truncate">${edge.lane}</div>
+        <div class="text-3xs text-[var(--color-fg-muted)] font-mono truncate">${edge.source_clock}</div>
+      </div>
+      <div class="min-w-0">
+        <div class="text-xs text-[var(--color-fg-secondary)] truncate">${edge.event}</div>
+        <div class="text-3xs text-[var(--color-fg-muted)] font-mono truncate">${edge.edge_id}</div>
+      </div>
+      <span class="text-3xs font-mono text-[var(--color-fg-muted)] tabular-nums justify-self-end truncate max-w-32">
+        ${edge.event_bus_event_count !== null ? `${edge.event_bus_event_count} evt` : edge.status}
+      </span>
+    </div>
+  `
+}
+
 function RuntimeLensLaneRow({ lane }: { lane: KeeperRuntimeLensLane }) {
   return html`
     <div class="grid grid-cols-[minmax(8rem,1fr)_auto] md:grid-cols-[minmax(9rem,1fr)_auto_auto] gap-2 items-center rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2 min-w-0">
@@ -936,6 +1050,8 @@ export function RuntimeLensSection({
   const memory = lens.axes.memory
   const clock = lens.turn_clock
   const artifacts = trace.linked_artifacts
+  const clockEdges = lens.clock_edges
+  const clockGroups = lens.clock_groups
   const swimlanes = [
     lens.swimlanes.keeper,
     lens.swimlanes.masc_policy_cascade,
@@ -954,6 +1070,9 @@ export function RuntimeLensSection({
         <${SignalRow} label="tool required" value=${formatLensList(tool.required_tools)} />
         <${SignalRow} label="tool materialized" value=${formatLensList(tool.materialized_tools)} />
         <${SignalRow} label="tool missing" value=${formatLensList(tool.missing_required_tools)} />
+        <${SignalRow} label="tool lineage" value=${formatToolLineage(lens.axes.tool_lineage)} />
+        <${SignalRow} label="payload role" value=${formatPayloadRole(lens.axes.payload_role)} />
+        <${SignalRow} label="source clock" value=${formatSourceClock(lens.axes.source_clock)} />
         <${SignalRow} label="claim scope" value=${claim.present ? `${claim.mode ?? 'unknown'} / ${claim.status}` : 'not observed'} />
         <${SignalRow} label="claim excluded" value=${claim.excluded_count === null ? '-' : String(claim.excluded_count)} />
         <${SignalRow} label="claim goals" value=${formatLensList(claim.effective_goal_ids)} />
@@ -997,6 +1116,8 @@ export function RuntimeLensSection({
         />
         <${SignalRow} label="provider attempts" value=${`${trace.provider_attempts.started_count}/${trace.provider_attempts.finished_count}`} />
         <${SignalRow} label="provider terminal" value=${runtimeTraceProviderTerminal(trace)} />
+        <${SignalRow} label="clock edges" value=${clockEdges.length} />
+        <${SignalRow} label="clock groups" value=${clockGroups.length} />
         <${SignalRow} label="event ids" value=${runtimeTraceEventIds(trace)} />
         <${SignalRow} label="memory evidence" value=${runtimeTraceMemoryEvidence(trace)} />
         <${SignalRow} label="stale reason" value=${compactToken(trace.stale_reason, 'none')} />
@@ -1018,6 +1139,22 @@ export function RuntimeLensSection({
       <div class="grid grid-cols-1 xl:grid-cols-2 gap-2">
         ${swimlanes.map(lane => html`<${RuntimeLensLaneRow} lane=${lane} />`)}
       </div>
+
+      ${clockGroups.length > 0
+        ? html`
+            <div class="grid grid-cols-1 xl:grid-cols-2 gap-2" data-testid="runtime-lens-clock-groups">
+              ${clockGroups.slice(0, 8).map(group => html`<${RuntimeLensClockGroupRow} group=${group} />`)}
+            </div>
+          `
+        : null}
+
+      ${clockEdges.length > 0
+        ? html`
+            <div class="grid grid-cols-1 xl:grid-cols-2 gap-2" data-testid="runtime-lens-clock-edges">
+              ${clockEdges.slice(0, 8).map(edge => html`<${RuntimeLensClockEdgeRow} edge=${edge} />`)}
+            </div>
+          `
+        : null}
     </div>
   `
 }

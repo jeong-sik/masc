@@ -102,6 +102,8 @@ type turn_event_bus_summary =
   { correlation_id : string option
   ; run_id : string option
   ; caused_by : string option
+  ; event_count : int
+  ; payload_kinds : string list
   ; overflow_imminent : turn_event_bus_overflow option
   ; context_compact_started_count : int
   ; context_compacted_count : int

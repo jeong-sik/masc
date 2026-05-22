@@ -5,10 +5,18 @@
     glob/brace expansion, backgrounding) is rejected at parse time as
     [Parsed.Too_complex _]. *)
 
+type arg_meta = {
+  quoted : bool;
+  glob : bool;
+  escaped : bool;
+}
+
+val default_meta : arg_meta
+
 type arg =
-  | Lit of string                 (** single- or double-quoted literal *)
+  | Lit of string * arg_meta      (** single- or double-quoted literal *)
   | Concat of arg list            (** adjacent arg pieces: [foo"bar"$X] *)
-  | Var of string                 (** [$HOME], [${VAR}], [${VAR:-default}] *)
+  | Var of string * arg_meta      (** [$HOME], [${VAR}], [${VAR:-default}] *)
 
 type simple = {
   bin : Bin.t;

@@ -300,7 +300,7 @@ let test_lower_typed_single_stage () =
         (match Masc_exec.Bin.of_string "rg" with
          | Ok b -> b
          | Error _ -> Alcotest.fail "Bin.of_string rg failed")
-    ; args = [ Masc_exec.Shell_ir.Lit "foo"; Masc_exec.Shell_ir.Lit "lib" ]
+    ; args = [ Masc_exec.Shell_ir.Lit ("foo", Masc_exec.Shell_ir.default_meta); Masc_exec.Shell_ir.Lit ("lib", Masc_exec.Shell_ir.default_meta) ]
     ; env = []
     ; cwd = None
     ; redirects = []
@@ -327,7 +327,7 @@ let make_stage bin args =
       (match Masc_exec.Bin.of_string bin with
        | Ok b -> b
        | Error _ -> Alcotest.failf "Bin.of_string %s failed" bin)
-  ; args = List.map (fun a -> Masc_exec.Shell_ir.Lit a) args
+  ; args = List.map (fun a -> Masc_exec.Shell_ir.Lit (a, Masc_exec.Shell_ir.default_meta)) args
   ; env = []
   ; cwd = None
   ; redirects = []

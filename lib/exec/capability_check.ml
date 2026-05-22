@@ -4,8 +4,8 @@
    compile error here, so policy decisions are never silently dropped. *)
 
 let lit_of_arg = function
-  | Shell_ir.Lit (s, Shell_ir.default_meta) -> Some s
-  | Shell_ir.Var (_, Shell_ir.default_meta) | Shell_ir.Concat _ -> None
+  | Shell_ir.Lit (s, _) -> Some s
+  | Shell_ir.Var (_, _) | Shell_ir.Concat _ -> None
 
 let all_lits_opt (args : Shell_ir.arg list) : string list option =
   let rec go acc = function

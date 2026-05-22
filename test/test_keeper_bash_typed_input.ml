@@ -315,8 +315,8 @@ let test_of_json_stages_alias_reports_stages_path () =
 ;;
 
 let shell_arg_string = function
-  | Masc_exec.Shell_ir.Lit (s, Shell_ir.default_meta) -> s
-  | Masc_exec.Shell_ir.Var (name, Shell_ir.default_meta) -> "$" ^ name
+  | Masc_exec.Shell_ir.Lit (s, _) -> s
+  | Masc_exec.Shell_ir.Var (name, _) -> "$" ^ name
   | Masc_exec.Shell_ir.Concat _ -> "<concat>"
 ;;
 

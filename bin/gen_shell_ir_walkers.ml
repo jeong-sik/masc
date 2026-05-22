@@ -58,7 +58,7 @@ let shell_ir_typed_spec : ctor list =
         match path with None -> flag_args | Some p -> flag_args @ [ p ]
       in
       { Shell_ir.bin = Bin.of_known Bin.Ls
-      ; args = List.map (fun s -> Shell_ir.Lit s) args
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) args
       ; env = []
       ; cwd = None
       ; redirects = []
@@ -118,7 +118,7 @@ parse [] None args|}
         @ (match path with None -> [] | Some p -> [ p ])
       in
       { Shell_ir.bin = Bin.of_known Bin.Rg
-      ; args = List.map (fun s -> Shell_ir.Lit s) args
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) args
       ; env = []
       ; cwd = None
       ; redirects = []
@@ -156,7 +156,7 @@ parse true None None args|}
         {|
       let args = if short then [ "-s" ] else [] in
       { Shell_ir.bin = Bin.of_known Bin.Git
-      ; args = List.map (fun s -> Shell_ir.Lit s) ("status" :: args)
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) ("status" :: args)
       ; env = []
       ; cwd = None
       ; redirects = []
@@ -187,7 +187,7 @@ parse false args|}
         @ [ repo ]
       in
       { Shell_ir.bin = Bin.of_known Bin.Git
-      ; args = List.map (fun s -> Shell_ir.Lit s) ("clone" :: args)
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) ("clone" :: args)
       ; env = []
       ; cwd = None
       ; redirects = []
@@ -240,7 +240,7 @@ parse 1 None None args|}
       let body_args = match body with None -> [] | Some d -> [ "-d"; d ] in
       let args = method_args @ header_args @ body_args @ [ url ] in
       { Shell_ir.bin = Bin.of_known Bin.Curl
-      ; args = List.map (fun s -> Shell_ir.Lit s) args
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) args
       ; env = []
       ; cwd = None
       ; redirects = []
@@ -306,7 +306,7 @@ parse `GET [] None None args|}
         @ (if force then [ "-f" ] else [])
       in
       { Shell_ir.bin = Bin.of_known Bin.Rm
-      ; args = List.map (fun s -> Shell_ir.Lit s) (flag_args @ paths)
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) (flag_args @ paths)
       ; env = []
       ; cwd = None
       ; redirects = []
@@ -338,7 +338,7 @@ parse false false [] args|}
     ; to_simple_body =
         {|
       { Shell_ir.bin = Bin.of_known Bin.Sudo
-      ; args = List.map (fun s -> Shell_ir.Lit s) target_argv
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) target_argv
       ; env = []
       ; cwd = None
       ; redirects = []
@@ -452,8 +452,8 @@ let emit_of_simple buf spec =
     "let gen_of_simple (s : Shell_ir.simple) : Shell_ir_typed_types.wrapped =\n\
     \  let generic () = Shell_ir_typed_types.W (Shell_ir_typed_types.Generic s) in\n\
     \  let lit_of_arg = function\n\
-    \    | Shell_ir.Lit (s, Shell_ir.default_meta) -> Some s\n\
-    \    | Shell_ir.Var (_, Shell_ir.default_meta) | Shell_ir.Concat _ -> None\n\
+    \    | Shell_ir.Lit (s, _) -> Some s\n\
+    \    | Shell_ir.Var (_, _) | Shell_ir.Concat _ -> None\n\
     \  in\n\
     \  let rec all_lits_opt args =\n\
     \    let rec go acc = function\n\

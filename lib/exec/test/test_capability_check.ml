@@ -57,7 +57,7 @@ let test_git_with_var_falls_back_to_exec_bin () =
   (* git ${REMOTE} push — can't classify statically, falls back. *)
   let ir =
     Shell_ir.Simple
-      (simple ~args:[ Shell_ir.Var "REMOTE"; lit "push" ] (bin_ok "git"))
+      (simple ~args:[ Shell_ir.Var ("REMOTE", Shell_ir.default_meta); lit "push" ] (bin_ok "git"))
   in
   match Capability_check.of_ir ir with
   | [ Capability.Exec_bin (b, _) ] ->

@@ -48,6 +48,45 @@ let runtime_lens_events_json scan events =
              ]))
   |> fun events -> `List events
 
+let runtime_lens_swimlane_json scan gaps ~lane ~label ~events
+    ~terminal_status ~synthetic_events =
+  let gap_codes = runtime_lens_gap_codes_for_lane gaps lane in
+  let standard_event_count =
+    events
+    |> List.fold_left
+         (fun total event -> total + runtime_lens_event_count scan event)
+         0
+  in
+  let synthetic_event_count =
+    List.fold_left (fun total (_, count) -> total + count) 0 synthetic_events
+  in
+  let event_count = standard_event_count + synthetic_event_count in
+  let standard_events_json = runtime_lens_events_json scan events in
+  let synthetic_events_json =
+    List.map
+      (fun (name, count) ->
+         `Assoc [("event", `String name); ("count", `Int count)])
+      synthetic_events
+  in
+  let all_events =
+    match standard_events_json with
+    | `List events -> `List (events @ synthetic_events_json)
+    | other -> other
+  in
+  `Assoc
+    [
+      ("lane", `String lane);
+      ("label", `String label);
+      ("event_count", `Int event_count);
+      ("terminal_status", `String terminal_status);
+      ("gap_codes", json_string_list gap_codes);
+      ( "gap_badge",
+        match gap_codes with
+        | code :: _ -> `String code
+        | [] -> `Null );
+      ("events", all_events);
+    ]
+
 let runtime_lens_keeper_terminal_status ~terminal_event_present scan =
   if terminal_event_present then "finished"
   else if
@@ -129,34 +168,6 @@ let lane_policies =
     }
   ]
 
-let event_lane = function
-  | Keeper_runtime_manifest.Turn_started
-  | Keeper_runtime_manifest.Phase_gate_decided
-  | Keeper_runtime_manifest.Pre_dispatch_blocked
-  | Keeper_runtime_manifest.Receipt_appended
-  | Keeper_runtime_manifest.Turn_finished ->
-    "keeper"
-  | Keeper_runtime_manifest.Cascade_routed
-  | Keeper_runtime_manifest.Provider_lane_resolved ->
-    "masc_policy_cascade"
-  | Keeper_runtime_manifest.Provider_attempt_started
-  | Keeper_runtime_manifest.Provider_attempt_finished ->
-    "provider"
-  | Keeper_runtime_manifest.Tool_surface_selected
-  | Keeper_runtime_manifest.Tool_lineage_recorded ->
-    "tool_runtime"
-  | Keeper_runtime_manifest.Checkpoint_loaded
-  | Keeper_runtime_manifest.State_snapshot_sidecar_saved
-  | Keeper_runtime_manifest.Working_state_sidecar_saved
-  | Keeper_runtime_manifest.Checkpoint_saved ->
-    "oas_agent"
-  | Keeper_runtime_manifest.Context_injected
-  | Keeper_runtime_manifest.Context_compacted
-  | Keeper_runtime_manifest.Event_bus_correlated
-  | Keeper_runtime_manifest.Memory_injected
-  | Keeper_runtime_manifest.Memory_flushed ->
-    "memory_context"
-
 let lane_policy_for_lane lane =
   List.find_opt (fun policy -> String.equal policy.lane lane) lane_policies
 
@@ -183,7 +194,6 @@ let lane_mandatory_events_present scan lane =
 
 let lane_terminal_event_present scan lane =
   match lane_policy_for_lane lane with
-  | Some { terminal_events = []; _ } -> false
   | Some policy ->
     List.exists
       (fun event ->
@@ -192,38 +202,9 @@ let lane_terminal_event_present scan lane =
   | None -> true
 
 let runtime_lens_swimlane_completeness scan lane =
-  let mandatory_present = lane_mandatory_events_present scan lane in
   let finished = lane_terminal_event_present scan lane in
-  let terminal_required =
-    match lane_policy_for_lane lane with
-    | Some { terminal_events = []; _ } -> false
-    | Some _ | None -> true
-  in
-  let complete = mandatory_present && ((not terminal_required) || finished) in
+  let complete = lane_mandatory_events_present scan lane && finished in
   if complete then "complete"
   else if finished then "finished"
-  else if mandatory_present then "mandatory_present"
+  else if lane_mandatory_events_present scan lane then "mandatory_present"
   else "incomplete"
-
-let runtime_lens_swimlane_json scan gaps ~lane ~label ~events ~terminal_status =
-  let gap_codes = runtime_lens_gap_codes_for_lane gaps lane in
-  let event_count =
-    events
-    |> List.fold_left
-         (fun total event -> total + runtime_lens_event_count scan event)
-         0
-  in
-  `Assoc
-    [
-      ("lane", `String lane);
-      ("label", `String label);
-      ("event_count", `Int event_count);
-      ("terminal_status", `String terminal_status);
-      ("completeness", `String (runtime_lens_swimlane_completeness scan lane));
-      ("gap_codes", json_string_list gap_codes);
-      ( "gap_badge",
-        match gap_codes with
-        | code :: _ -> `String code
-        | [] -> `Null );
-      ("events", runtime_lens_events_json scan events);
-    ]

@@ -77,6 +77,29 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
     then "selected"
     else "empty"
   in
+  let tool_lineage_stage_counts () =
+    match scan.latest_tool_lineage_decision with
+    | None -> []
+    | Some decision ->
+      let stages =
+        [ "searched"
+        ; "visible"
+        ; "materialized"
+        ; "emitted"
+        ; "executed"
+        ; "verified"
+        ]
+      in
+      List.filter_map
+        (fun stage ->
+           match Yojson.Safe.Util.member stage decision with
+           | `Assoc _ as obj -> (
+             match Yojson.Safe.Util.member "count" obj with
+             | `Int count when count > 0 -> Some (stage, count)
+             | _ -> None)
+           | _ -> None)
+        stages
+  in
   `Assoc
     [
       ( "turn_clock",
@@ -286,6 +309,7 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
                   ]
                 ~terminal_status:
                   (runtime_lens_keeper_terminal_status ~terminal_event_present scan)
+                ~synthetic_events:[]
             );
             ( "masc_policy_cascade",
               runtime_lens_swimlane_json swimlane_scan gaps
@@ -299,6 +323,7 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
                   (Option.value provider_lane_status
                      ~default:
                        (if has_provider_lane then "resolved" else "empty"))
+                ~synthetic_events:[]
             );
             ( "oas_agent",
               runtime_lens_swimlane_json swimlane_scan gaps ~lane:"oas_agent"
@@ -321,7 +346,8 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
                        Keeper_runtime_manifest.Checkpoint_loaded
                      > 0
                    then "checkpoint_loaded"
-                   else "empty") );
+                   else "empty")
+                ~synthetic_events:[] );
             ( "provider",
               runtime_lens_swimlane_json swimlane_scan gaps ~lane:"provider"
                 ~label:"Provider"
@@ -331,6 +357,7 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
                     Keeper_runtime_manifest.Provider_attempt_finished;
                   ]
                 ~terminal_status:(runtime_lens_provider_terminal_status scan)
+                ~synthetic_events:[]
             );
             ( "tool_runtime",
               runtime_lens_swimlane_json swimlane_scan gaps ~lane:"tool_runtime"
@@ -340,6 +367,7 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
                     Keeper_runtime_manifest.Tool_surface_selected;
                     Keeper_runtime_manifest.Tool_lineage_recorded;
                   ]
+                ~synthetic_events:(tool_lineage_stage_counts ())
                 ~terminal_status:tool_runtime_status );
             ( "memory_context",
               runtime_lens_swimlane_json swimlane_scan gaps ~lane:"memory_context"
@@ -352,7 +380,8 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
                     Keeper_runtime_manifest.Memory_injected;
                     Keeper_runtime_manifest.Memory_flushed;
                   ]
-                ~terminal_status:(runtime_lens_memory_terminal_status scan) );
+                ~terminal_status:(runtime_lens_memory_terminal_status scan)
+                ~synthetic_events:[] );
           ] );
       ( "clock_edges",
         Server_dashboard_http_keeper_runtime_lens_clock_edges.runtime_lens_clock_edges_json

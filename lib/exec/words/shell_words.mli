@@ -2,10 +2,10 @@
     source-shape information which {!Masc_exec.Shell_ir.Lit} intentionally
     does not carry.
 
-    This module is not an execution parser.  It shares the bash-subset
-    lexical boundary and returns ordered pipeline stages so path policy can
-    make quote/glob/brace decisions without keeping a private tokenizer in
-    caller modules. *)
+    This module is not an execution parser. It shares the bash-subset lexical
+    boundary and returns ordered pipeline stages so path policy can make
+    quote/glob/brace decisions without keeping a private tokenizer in caller
+    modules. *)
 
 type word = {
   value : string;

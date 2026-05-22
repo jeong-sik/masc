@@ -1,7 +1,7 @@
 ---
 rfc: "0075"
 title: "Keeper Tools Smoke — Exhaustive Dispatch Coverage Regression Gate"
-status: Draft
+status: Implemented
 created: 2026-05-14
 updated: 2026-05-14
 author: vincent

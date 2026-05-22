@@ -404,6 +404,19 @@ describe('statusClass', () => {
     expect(statusClass(makeRow({ status: 'stopped' }))).toContain('var(--bad-light)')
   })
 
+  // Lock the remaining offline-trigger status strings in statusClass.
+  // Mirrors the fleetBand offline-trigger set (5 statuses); the
+  // 'unbooted' arm is defensive (no current OCaml producer) per the
+  // feedback_dead_defensive_cleanup_must_check_test_lock memory pattern.
+  it.each([
+    'offline',
+    'unbooted',
+    'dead',
+    'crashed',
+  ])('returns bad-light for status=%s', (status) => {
+    expect(statusClass(makeRow({ status }))).toContain('var(--bad-light)')
+  })
+
   it('returns warn for runtime blocker', () => {
     expect(statusClass(makeRow({ runtime_blocker_class: 'turn_timeout' }))).toContain('var(--color-status-warn)')
   })

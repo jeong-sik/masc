@@ -11,7 +11,7 @@
     identical {!t}. No wall-clock, no Random, no global state.
 
     Scope of Phase 3b-iii: the record exposes the four most-needed
-    fields ([container_name], [image], [command_argv], [timeout_budget_sec]).
+    fields ([container_name], [image], [command_argv], [execution_timeout_sec]).
     Mount, ulimit, and network_mode are deferred to Phase 3b-iv where
     they arrive as typed records together with the [Real]
     [Keeper_docker_client] implementation. *)
@@ -55,7 +55,7 @@ type t
       ~turn_id ~attempt ~suffix:meta_name]
     - [image = default_image] (Phase 3b-iv: caller-provided)
     - [command_argv = command_argv]
-    - [timeout_budget_sec = default_timeout_budget_sec] (Phase 3b-iv:
+    - [execution_timeout_sec = default_execution_timeout_sec] (Phase 3b-iv:
       caller-provided)
 
     The signature accepts [meta_name] as a [string] in Phase 3a/3b-iii
@@ -76,9 +76,9 @@ val image : t -> string
 
 val command_argv : t -> string list
 
-(** Timeout budget in seconds. Phase 3b-iv replaces with [Eio.Time.span]
+(** Execution timeout in seconds. Phase 3b-iv replaces with [Eio.Time.span]
     once Eio is wired into the plan layer. *)
-val timeout_budget_sec : t -> float
+val execution_timeout_sec : t -> float
 
 (** {1 Equality / pretty-print for tests} *)
 
@@ -94,4 +94,4 @@ val pp : Format.formatter -> t -> unit
 val default_image : string
 
 (** Default per-turn timeout — Phase 3b-iv parameterises. *)
-val default_timeout_budget_sec : float
+val default_execution_timeout_sec : float

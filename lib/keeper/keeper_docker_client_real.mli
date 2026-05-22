@@ -39,7 +39,7 @@
     - [run] — wired: spawns
       [docker run --rm --name <name> <image> <command_argv>] via
       [Process_eio.run_argv_with_status_split], passing
-      [Keeper_sandbox_oneshot_plan.timeout_budget_sec] as the
+      [Keeper_sandbox_oneshot_plan.execution_timeout_sec] as the
       [?timeout_sec] parameter. Status mapping is the same as [exec]
       ({!Keeper_docker_response.exec_result} on container-command exit;
       [Error Daemon_unreachable] on daemon-level status). [--rm]

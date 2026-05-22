@@ -117,9 +117,9 @@ let test_command_argv_round_trip () =
     (Keeper_sandbox_oneshot_plan.command_argv (happy_plan ()))
 
 let test_timeout_default () =
-  check (float 0.0) "timeout_budget_sec = default"
-    Keeper_sandbox_oneshot_plan.default_timeout_budget_sec
-    (Keeper_sandbox_oneshot_plan.timeout_budget_sec (happy_plan ()))
+  check (float 0.0) "execution_timeout_sec = default"
+    Keeper_sandbox_oneshot_plan.default_execution_timeout_sec
+    (Keeper_sandbox_oneshot_plan.execution_timeout_sec (happy_plan ()))
 
 (* ── Determinism: same inputs ⇒ same plan ─────────────────────── *)
 

@@ -38,7 +38,7 @@ let register
      in_turn_hung | noop_failure_loop). Labels: keeper, class."
     `Counter;
   add
-    Keeper_metrics.metric_keeper_oas_timeout_budget_watchdog_termination
+    Keeper_metrics.metric_keeper_provider_timeout_watchdog_termination
     "Total watchdog terminations preserving unresolved timeout failure evidence. Labels: \
      keeper."
     `Counter;
@@ -162,7 +162,7 @@ let register
      reason."
     `Counter;
   add
-    Keeper_metrics.metric_keeper_oas_timeout_budget_strike
+    Keeper_metrics.metric_keeper_provider_timeout_strike
     "Provider timeout strikes (consecutive timeouts before escalation). Labels: keeper."
     `Counter;
   add

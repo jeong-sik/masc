@@ -16,7 +16,7 @@
     - Legacy timeout-budget errors → provider-timeout strike-counter bump (seeded from
       [prior_oas_timeout_budget_strikes]) + persistent failure
       reason + observation recording + [Keeper_failure_policy.decide]
-      kill/keep decision + [metric_keeper_oas_timeout_budget_strike]
+      kill/keep decision + [metric_keeper_provider_timeout_strike]
       tick with policy-derived outcome label.
 
     - Any other [Error err] → DEBUG log + re-read meta (with

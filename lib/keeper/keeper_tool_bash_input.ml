@@ -342,6 +342,7 @@ let shell_simple ~mode ?(sandbox = Masc_exec.Sandbox_target.host ()) ?cwd ?(env 
 ;;
 
 let to_shell_ir_unvalidated ?(sandbox = Masc_exec.Sandbox_target.host ()) ~mode input =
+  let ( let* ) = Result.bind in
   match input with
   | Exec { executable; argv; cwd; env } ->
     let stage = { executable; argv } in

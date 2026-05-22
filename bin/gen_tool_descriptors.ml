@@ -216,11 +216,6 @@ let masc_tool_admin_snapshot_spec : tool_spec =
         ; p_description = "Include hidden tools in tool_inventory (default: true)"
         ; p_required = false
         }
-      ; { p_name = "include_deprecated"
-        ; p_type = T_bool { default = Some true }
-        ; p_description = "Include deprecated tools in tool_inventory (default: true)"
-        ; p_required = false
-        }
       ]
   ; additional_properties = false
   ; behavior_contract = []
@@ -249,62 +244,6 @@ let masc_cleanup_zombies_spec : tool_spec =
   ; description =
       "Remove zombie agents (no heartbeat for 5+ min) and release their file locks."
   ; parameters = []
-  ; additional_properties = false
-  ; behavior_contract = []
-  }
-;;
-
-let masc_webrtc_offer_spec : tool_spec =
-  { name = "masc_webrtc_offer"
-  ; description =
-      "Create a WebRTC signaling offer in the server registry and return an offer_id. \
-       Use from the initiating side before calling masc_webrtc_answer from the \
-       answering side."
-  ; parameters =
-      [ { p_name = "agent_name"
-        ; p_type = T_string { enum = None; default = None }
-        ; p_description = "Name of the agent creating the offer"
-        ; p_required = true
-        }
-      ; { p_name = "ice_candidates"
-        ; p_type = T_string_array { default = Some (`List []) }
-        ; p_description = "ICE candidates gathered by the offering peer"
-        ; p_required = false
-        }
-      ; { p_name = "dtls_fingerprint"
-        ; p_type = T_string { enum = None; default = None }
-        ; p_description = "Optional DTLS fingerprint for the offering peer"
-        ; p_required = false
-        }
-      ]
-  ; additional_properties = false
-  ; behavior_contract = []
-  }
-;;
-
-let masc_webrtc_answer_spec : tool_spec =
-  { name = "masc_webrtc_answer"
-  ; description =
-      "Accept a pending WebRTC signaling offer by offer_id and return the peer_id plus \
-       server-side ICE credentials. Use from the answering side after a prior \
-       masc_webrtc_offer call."
-  ; parameters =
-      [ { p_name = "offer_id"
-        ; p_type = T_string { enum = None; default = None }
-        ; p_description = "Offer identifier returned by masc_webrtc_offer"
-        ; p_required = true
-        }
-      ; { p_name = "agent_name"
-        ; p_type = T_string { enum = None; default = None }
-        ; p_description = "Name of the agent accepting the offer"
-        ; p_required = true
-        }
-      ; { p_name = "ice_candidates"
-        ; p_type = T_string_array { default = Some (`List []) }
-        ; p_description = "Optional ICE candidates gathered by the answering peer"
-        ; p_required = false
-        }
-      ]
   ; additional_properties = false
   ; behavior_contract = []
   }
@@ -761,8 +700,6 @@ let phase6_specs : tool_spec list =
   ; masc_tool_admin_snapshot_spec
   ; masc_tool_stats_spec
   ; masc_cleanup_zombies_spec
-  ; masc_webrtc_offer_spec
-  ; masc_webrtc_answer_spec
   ; masc_tool_admin_update_spec
     (* PR-1 (paving stone): control group *)
   ; masc_pause_spec

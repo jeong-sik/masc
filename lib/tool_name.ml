@@ -336,8 +336,6 @@ module Masc = struct
     | Tool_admin_snapshot
     | Tool_admin_update
     | Tool_stats
-    | Webrtc_answer
-    | Webrtc_offer
 
   let to_string = function
     | Add_task -> "masc_add_task"
@@ -435,8 +433,6 @@ module Masc = struct
     | Tool_admin_snapshot -> "masc_tool_admin_snapshot"
     | Tool_admin_update -> "masc_tool_admin_update"
     | Tool_stats -> "masc_tool_stats"
-    | Webrtc_answer -> "masc_webrtc_answer"
-    | Webrtc_offer -> "masc_webrtc_offer"
   ;;
 
   let of_string = function
@@ -535,8 +531,6 @@ module Masc = struct
     | "masc_tool_admin_snapshot" -> Some Tool_admin_snapshot
     | "masc_tool_admin_update" -> Some Tool_admin_update
     | "masc_tool_stats" -> Some Tool_stats
-    | "masc_webrtc_answer" -> Some Webrtc_answer
-    | "masc_webrtc_offer" -> Some Webrtc_offer
     | _ -> None
   ;;
 

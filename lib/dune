@@ -305,7 +305,6 @@
   coord_goals_verification
   ;; tool_schema_dsl — shared JSON Schema builder (added by #3640)
   tool_schema_dsl
-  tool_misc_transport
   tool_misc_admin
   tool_keeper_persona_audit
   enforcement_status

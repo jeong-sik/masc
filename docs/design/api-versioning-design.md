@@ -20,7 +20,8 @@ MCP and gRPC have version negotiation. HTTP REST and Tool Schemas do not.
 
 When a breaking change ships:
 - HTTP REST clients get unexpected JSON shapes with no migration path
-- Tool schema changes (rename, input change, removal) cause silent failures
+- Tool schema changes (rename, input change, removal) need ratchets that prevent
+  removed names from re-entering descriptors or dispatch
 - No documented policy for what constitutes a "breaking change"
 - No deprecation timeline or sunset communication
 
@@ -32,7 +33,7 @@ When a breaking change ships:
 | **gRPC** | 6 RPCs | `masc.coordination.v1` package | None (proto3 compat rules apply) |
 | **HTTP REST** | 70+ under `/api/v1/` | Hardcoded path prefix | **No v2 path, no negotiation, no deprecation** |
 | **WebSocket** | `/ws` | Shares MCP protocol version | None (inherits MCP) |
-| **Tool Schemas** | 305+ tools | None | **No per-tool version, no deprecation metadata** |
+| **Tool Schemas** | 305+ tools | Catalog + ratchet tests | **No soft-removal compatibility lane** |
 | **OpenAPI** | `/api/v1/openapi.json` | Generated dynamically | **Not bound to a spec version** |
 
 ## 3. Design Constraints
@@ -79,18 +80,17 @@ let with_sunset ~sunset_date ~successor response =
 The dashboard is always deployed alongside the server. MCP clients don't use REST.
 Additive-only evolution with sunset headers covers the actual risk.
 
-### 5.2 Tool Schema: Version + Deprecation Metadata
+### 5.2 Tool Schema: Removal Discipline
 
-Add two optional fields to `tool_schema`:
+Do not add soft-removal metadata to MCP tool schemas. Removed tools must leave
+the MCP descriptor and dispatch surfaces rather than staying callable through a
+compatibility flag.
 
 ```ocaml
 type tool_schema = {
   name : string;
   description : string;
   input_schema : Yojson.Safe.t;
-  version : string option;        (* NEW: semver, e.g. "1.2.0" *)
-  deprecated : bool;              (* NEW: soft removal signal *)
-  successor : string option;      (* NEW: replacement tool name *)
 }
 ```
 
@@ -131,11 +131,11 @@ gRPC under `masc.coordination.v1` follows standard proto3 rules:
 | Change Type | Classification | Required Action |
 |-------------|---------------|-----------------|
 | Add JSON field to response | **Compatible** | None |
-| Add optional tool input param | **Compatible** | Bump tool version PATCH |
-| Add required tool input param with default | **Minor** | Bump tool version MINOR |
-| Add required tool input param without default | **Breaking** | Bump MAJOR, deprecate old tool, keep both for 2 minor releases |
+| Add optional tool input param | **Compatible** | Add focused schema/handler test |
+| Add required tool input param with default | **Minor** | Add focused schema/handler test |
+| Add required tool input param without default | **Breaking** | Prefer a new tool name; remove the old descriptor/dispatch when retired |
 | Remove/rename JSON field | **Breaking** | Sunset header, 30-day grace |
-| Remove tool entirely | **Breaking** | Mark deprecated, keep 2 minor releases, then remove |
+| Remove tool entirely | **Breaking** | Remove descriptor and dispatch; add a ratchet for the removed MCP name |
 | Change field type | **Breaking** | New field name, deprecate old |
 | Change error code semantics | **Breaking** | Version bump, document in CHANGELOG |
 
@@ -161,23 +161,23 @@ CI should validate that `openapi.json` output is parseable and `info.version` ma
 | Phase | Scope | Effort | Files |
 |-------|-------|--------|-------|
 | **P0: Policy** | Document breaking change policy, proto3 rules | 1 day | `docs/`, `proto/README.md` |
-| **P1: Tool annotations** | Add `annotations` to tool_schema, populate for deprecated tools | 2-3 days | `types_core.ml`, `mcp_server_eio.ml`, tool schema files |
+| **P1: Tool ratchets** | Add descriptor/dispatch ratchets for removed MCP tool names | 1 day | `test/`, tool schema files |
 | **P2: Sunset headers** | Add sunset header helper, apply to known deprecated endpoints | 1-2 days | `server_routes_http_*.ml` |
 | **P3: OpenAPI binding** | Bind `info.version` to `Version.version`, CI validation | 1 day | `transport_rest.ml`, `scripts/` |
-| **P4: Feature flag integration** | Expose tool deprecation in `masc_feature_flags` | 0.5 day | `feature_flag_registry.ml`, `tool_misc.ml` |
 
-Total: **5-7 days** (can be parallelized with other work).
+Total: **4-6 days** (can be parallelized with other work).
 
 ## 7. Migration Path
 
-**For existing tools being deprecated (from Wave 1)**:
-Tools already removed in Wave 1 (encryption, tempo, notifications) don't need deprecation
-since they had zero external callers. Future removals should follow:
+**For existing tools being removed (from Wave 1)**:
+Tools already removed in Wave 1 (encryption, tempo, notifications) did not need
+a compatibility window since they had zero external callers. Future tool removals
+should follow:
 
-1. Mark `deprecated = true` + set `successor` in tool schema
-2. Keep tool functional for 2 minor releases (~2-4 weeks)
-3. Move to hidden list (`include_deprecated=true` to see)
-4. Remove after grace period
+1. Remove the tool from generated descriptors and callable MCP dispatch.
+2. Keep any independent REST endpoint only when it has a separate transport
+   contract.
+3. Add or update a ratchet that prevents the MCP tool name from returning.
 
 **For REST endpoints**:
 No endpoints are currently deprecated. When needed:
@@ -191,13 +191,13 @@ No endpoints are currently deprecated. When needed:
 | Decision | Alternative | Why This |
 |----------|-------------|----------|
 | No `/api/v2/` | Version prefix routing | Single developer, dashboard is co-deployed |
-| Tool annotations over version prefix | `/tools/v2/list` | MCP spec supports annotations natively |
+| Tool ratchets over soft-removal flags | Compatibility descriptor lane | Removed MCP tools should not stay callable or discoverable |
 | 30-day sunset period | 90-day enterprise grace | Personal project, fast iteration cycle |
 | Additive-only REST | Breaking changes with version bump | Simpler, fewer code paths |
 
 ## 9. Verification
 
 - [ ] `scripts/check-openapi-version.sh`: `info.version` matches `Version.version`
-- [ ] Tool schema test: every tool with `deprecated=true` has `successor` set
+- [ ] Tool schema test: removed MCP tool names are absent from descriptors and dispatch
 - [ ] No REST endpoint returns `Sunset` header without corresponding CHANGELOG entry
 - [ ] Proto files pass `buf breaking` check against previous release tag

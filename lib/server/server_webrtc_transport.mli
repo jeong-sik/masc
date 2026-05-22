@@ -1,11 +1,10 @@
 (** Server_webrtc_transport — WebRTC signaling +
     DataChannel transport for MASC.
 
-    Reached via dotted call from 7 modules (agent_card,
+    Reached via dotted call from server modules (agent_card,
     server_bootstrap_http / _loops,
     server_h2_gateway, routes_frontend,
-    runtime_bootstrap, tool_misc_transport,
-    transport_metrics) and via the [module Wrtc =
+    runtime_bootstrap, transport_metrics) and via the [module Wrtc =
     Masc_mcp.Server_webrtc_transport] alias from the WS
     + signaling regression tests.
 

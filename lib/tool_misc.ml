@@ -17,9 +17,8 @@ module Float = Stdlib.Float
 
 (** Tool_misc — Miscellaneous operations (facade).
 
-    Dispatches to sub-modules:
-    - Tool_misc_transport: transport, websocket, webrtc handlers
-    - Tool_misc_admin: auth, config, tool inventory, feature flag handlers
+    Dispatches auth, config, tool inventory, and feature flag handlers to
+    [Tool_misc_admin].
 
     Retains: dashboard, verify_handoff, gc, cleanup_zombies,
     tool_stats, tool_help.
@@ -131,12 +130,11 @@ let handle_web_fetch ~tool_name ~start_time _ctx args =
 (* Public re-exports from sub-modules                               *)
 (* ================================================================ *)
 
-let tool_inventory_json ctx ~include_hidden ~include_deprecated =
+let tool_inventory_json ctx ~include_hidden =
   let admin_ctx : Tool_misc_admin.context =
     { config = ctx.config; agent_name = ctx.agent_name }
   in
   Tool_misc_admin.tool_inventory_json admin_ctx ~include_hidden
-    ~include_deprecated
 
 (* ================================================================ *)
 (* Dispatch (facade)                                                *)
@@ -149,8 +147,6 @@ let dispatch ctx ~name ~args : Tool_result.t option =
   in
   match name with
   | "masc_config" -> Some (Tool_misc_admin.handle_config ~tool_name:name ~start_time:start args)
-  | "masc_webrtc_offer" -> Some (Tool_misc_transport.handle_webrtc_offer ~tool_name:name ~start_time:start args)
-  | "masc_webrtc_answer" -> Some (Tool_misc_transport.handle_webrtc_answer ~tool_name:name ~start_time:start args)
   | "masc_dashboard" -> Some (handle_dashboard ~tool_name:name ~start_time:start ctx args)
   | "masc_gc" -> Some (handle_gc ~tool_name:name ~start_time:start ctx args)
   | "masc_cleanup_zombies" -> Some (handle_cleanup_zombies ~tool_name:name ~start_time:start ctx args)
@@ -183,7 +179,7 @@ let tool_required_permission = function
       Some Masc_domain.CanReadState
   | "masc_tool_admin_snapshot" | "masc_tool_admin_update" ->
       Some Masc_domain.CanAdmin
-  | "masc_webrtc_offer" | "masc_webrtc_answer" | "masc_cleanup_zombies" ->
+  | "masc_cleanup_zombies" ->
       Some Masc_domain.CanBroadcast
   | _ -> None
 

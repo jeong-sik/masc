@@ -37,9 +37,7 @@ let keeper_internal_list : string list =
   ; "masc_run_init"
   ; "masc_run_list"
   ; "masc_run_log"
-  ; "masc_run_plan" (* webrtc (experimental, not in user surface definition) *)
-  ; "masc_webrtc_offer"
-  ; "masc_webrtc_answer"
+  ; "masc_run_plan"
     (* === Wave 3 (this PR) — keeper_board_* duplicates === *)
     (* The board domain has parallel keeper_board_* / masc_board_*
        definitions. masc_board_* stays in the orchestrator surface

@@ -145,13 +145,6 @@ let constraints_from_meta (meta : Tool_catalog.metadata) =
     | Tool_catalog.Hidden -> [ "Hidden from the default tool list." ]
     | Tool_catalog.Default -> []
   in
-  let lifecycle_note =
-    match meta.lifecycle, meta.replacement with
-    | Tool_catalog.Deprecated, Some replacement ->
-        [ "Deprecated. Prefer " ^ replacement ^ "." ]
-    | Tool_catalog.Deprecated, None -> [ "Deprecated." ]
-    | Tool_catalog.Active, _ -> []
-  in
   let implementation_note =
     match meta.implementation_status with
     | Tool_catalog.Placeholder -> [ "Placeholder implementation; not a truthful default surface." ]
@@ -159,7 +152,7 @@ let constraints_from_meta (meta : Tool_catalog.metadata) =
     | Tool_catalog.Adapter -> [ "Compatibility or adapter surface." ]
     | Tool_catalog.Real -> []
   in
-  visibility_note @ lifecycle_note @ implementation_note
+  visibility_note @ implementation_note
 
 let constraints_from_metadata name =
   constraints_from_meta (Tool_catalog.metadata name)
@@ -186,10 +179,10 @@ let manual_help_entry name =
         {
           name;
           short_description = "Return canonical help and metadata for a specific MASC tool.";
-          when_to_use = "Use when you need the concise description, lifecycle, and detailed guidance for one tool.";
+          when_to_use = "Use when you need the concise description, visibility, and detailed guidance for one tool.";
           key_constraints = [];
           details_markdown =
-            "Returns the canonical short description, lifecycle/visibility metadata, replacement info, and detailed help for a specific tool.";
+            "Returns the canonical short description, visibility metadata, and detailed help for a specific tool.";
           doc_refs = [ "docs/COMMAND-PLANE-RUNBOOK.md" ];
           prompt_hints = [ "Pair with prompt 'tool_help' when you want a ready-to-use explanation." ];
         }
@@ -268,26 +261,21 @@ let manual_help_entry name =
         }
   | _ -> None
 
-let derived_short_description_with_meta (meta : Tool_catalog.metadata) name original =
-  match meta.lifecycle, meta.replacement with
-  | Tool_catalog.Deprecated, Some replacement ->
-      "Deprecated alias for " ^ replacement ^ "."
-  | Tool_catalog.Deprecated, None -> "Deprecated tool retained for compatibility."
-  | _, _ ->
-      let seed =
-        match first_sentence original with
-        | "" -> default_when_to_use name
-        | sentence -> sentence
-      in
-      let cleaned =
-        seed |> normalize_spaces |> truncate ~max_len:120
-      in
-      if String.equal cleaned "" then
-        "MASC tool."
-      else if String.ends_with ~suffix:"." cleaned then
-        cleaned
-      else
-        cleaned ^ "."
+let derived_short_description_with_meta (_meta : Tool_catalog.metadata) name original =
+  let seed =
+    match first_sentence original with
+    | "" -> default_when_to_use name
+    | sentence -> sentence
+  in
+  let cleaned =
+    seed |> normalize_spaces |> truncate ~max_len:120
+  in
+  if String.equal cleaned "" then
+    "MASC tool."
+  else if String.ends_with ~suffix:"." cleaned then
+    cleaned
+  else
+    cleaned ^ "."
 
 let derived_short_description name original =
   derived_short_description_with_meta (Tool_catalog.metadata name) name original
@@ -383,11 +371,6 @@ let entry_markdown (entry : help_entry) =
       "- lifecycle: `" ^ lifecycle ^ "`";
     ]
   in
-  let replacement_lines =
-    match meta.replacement with
-    | Some replacement -> [ "- replacement: `" ^ replacement ^ "`" ]
-    | None -> []
-  in
   let when_lines =
     [
       "";
@@ -450,7 +433,7 @@ let entry_markdown (entry : help_entry) =
     | None -> []
   in
   String.concat "\n"
-    (header @ replacement_lines @ when_lines @ constraint_lines @ detail_lines
+    (header @ when_lines @ constraint_lines @ detail_lines
    @ doc_lines @ prompt_lines @ workflow_lines)
 
 let index_json (schemas : Masc_domain.tool_schema list) =

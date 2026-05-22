@@ -29,13 +29,11 @@ val is_raw_tool_name : string -> bool
 
 val visible_tool_schemas :
   ?include_hidden:bool ->
-  ?include_deprecated:bool ->
   unit -> Masc_domain.tool_schema list
 (** Get visible tool schemas. *)
 
 val surface_tool_schemas :
   ?include_hidden:bool ->
-  ?include_deprecated:bool ->
   unit -> Masc_domain.tool_schema list
 (** Subset of [visible_tool_schemas] whose [Tool_scope.classify] is
     [Surface]. Initial keeper-internal list is empty, so on PR-N0
@@ -44,6 +42,6 @@ val surface_tool_schemas :
 
 val keeper_internal_tool_schemas : unit -> Masc_domain.tool_schema list
 (** Subset whose [Tool_scope.classify] is [Keeper_internal]. Includes
-    hidden + deprecated by default since keeper personas may reach
-    tools the external MCP surface does not expose. Empty until PR-N1
-    populates the keeper-internal list. *)
+    hidden tools by default since keeper personas may reach tools the
+    external MCP surface does not expose. Empty until PR-N1 populates
+    the keeper-internal list. *)

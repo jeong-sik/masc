@@ -352,9 +352,7 @@ let classify_masc_tool (tool : Tool_name.Masc.t) =
   | Gc
   | Operator_action
   | Operator_confirm
-  | Tool_admin_update
-  | Webrtc_answer
-  | Webrtc_offer -> Generic_write
+  | Tool_admin_update -> Generic_write
   | Agent_card
   | Agent_fitness
   | Agents

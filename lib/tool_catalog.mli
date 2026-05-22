@@ -1,14 +1,14 @@
 
-(** Tool_catalog — Visibility and lifecycle metadata for MCP tools.
+(** Tool_catalog — Visibility metadata for MCP tools.
 
     Central registry for tool access control:
     - Visibility: Default (public) vs Hidden (internal-only)
-    - Lifecycle: Active, Deprecated, Placeholder *)
+    - Implementation status: Real, Adapter, Simulation, Placeholder *)
 
 (** {1 Types} *)
 
 type visibility = Default | Hidden
-type lifecycle = Active | Deprecated
+type lifecycle = Active
 
 type implementation_status =
   | Real
@@ -56,11 +56,6 @@ type metadata = {
 
 val default_metadata : metadata
 
-val deprecated :
-  ?canonical_name:string -> ?replacement:string ->
-  ?allow_direct_call_when_hidden:bool ->
-  ?implementation_status:implementation_status -> string -> metadata
-
 val hidden_active :
   ?canonical_name:string -> ?replacement:string ->
   ?allow_direct_call_when_hidden:bool ->
@@ -90,7 +85,7 @@ val is_main_worktree_boundary_exempt : string -> bool option
 val tool_group : string -> tool_group option
 val canonical_tool_name : string -> string
 val is_placeholder : string -> bool
-val is_visible : ?include_hidden:bool -> ?include_deprecated:bool -> string -> bool
+val is_visible : ?include_hidden:bool -> string -> bool
 val allow_direct_call : string -> bool
 
 (** {1 String conversions} *)
@@ -119,9 +114,6 @@ val registered_metadata : string -> metadata option
 
 val explicit_metadata : (string * metadata) list
 (** Explicitly configured tool metadata entries (for test verification). *)
-
-val deprecated_tool_entries : (string * metadata) list
-(** Precomputed subset of [explicit_metadata] where lifecycle = Deprecated. *)
 
 (** {1 Tool Surface System}
 

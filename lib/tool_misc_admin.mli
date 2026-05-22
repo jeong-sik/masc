@@ -54,9 +54,8 @@ val valid_admin_section_strings : string list
 val tool_inventory_json :
   _ ->
   include_hidden:bool ->
-  include_deprecated:bool ->
   Yojson.Safe.t
-(** [tool_inventory_json _ctx ~include_hidden ~include_deprecated]
+(** [tool_inventory_json _ctx ~include_hidden]
     returns the tool catalog snapshot.
 
     [enabled_in_current_mode] is reported as [false] because this
@@ -85,8 +84,7 @@ val handle_tool_admin_snapshot : tool_name:string -> start_time:float -> context
     inventory + auth config + feature-flag summary for the admin
     dashboard.  Optional args:
 
-    - [include_hidden] (bool, default [true]).
-    - [include_deprecated] (bool, default [true]). *)
+    - [include_hidden] (bool, default [true]). *)
 
 val handle_tool_admin_update :
   tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> tool_result

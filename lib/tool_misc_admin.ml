@@ -116,7 +116,7 @@ let auth_snapshot_json ctx =
       ("credentials", `List credentials);
     ]
 
-let tool_inventory_json _ctx ~include_hidden ~include_deprecated =
+let tool_inventory_json _ctx ~include_hidden =
   (* Returns all tool schemas from catalog with metadata.
      enabled_in_current_mode=false because this is dashboard context (no keeper).
      Keeper-specific tool availability is determined by keeper_allowed_tool_names. *)
@@ -145,7 +145,7 @@ let tool_inventory_json _ctx ~include_hidden ~include_deprecated =
   let schemas =
     Config.raw_all_tool_schemas
     |> List.filter (fun (schema : Masc_domain.tool_schema) ->
-           Tool_catalog.is_visible ~include_hidden ~include_deprecated schema.name)
+           Tool_catalog.is_visible ~include_hidden schema.name)
     |> List.sort (fun (left : Masc_domain.tool_schema) right -> String.compare left.name right.name)
   in
   let rows =
@@ -273,14 +273,11 @@ let handle_feature_flags ~tool_name ~start_time args : tool_result =
     | None -> flags
     | Some cat -> List.filter (fun (f : Feature_flag_registry.flag) -> String.equal f.category cat) flags
   in
-  let deprecated_tools = Tool_catalog.deprecated_tool_entries in
   let json = `Assoc [
     ("total", `Int (List.length Feature_flag_registry.all_flags));
     ("shown", `Int (List.length flags));
     ("flags", `List (List.map Feature_flag_registry.flag_to_json flags));
     ("deprecated_flags", `Int (List.length (Feature_flag_registry.deprecated_flags ())));
-    ("deprecated_tools", `Int (List.length deprecated_tools));
-    ("deprecated_tool_names", `List (List.map (fun (name, _) -> `String name) deprecated_tools));
   ] in
   Tool_result.ok ~tool_name ~start_time (Yojson.Safe.to_string json)
 
@@ -291,13 +288,12 @@ let handle_config ~tool_name ~start_time args : tool_result =
 
 let handle_tool_admin_snapshot ~tool_name ~start_time ctx args =
   let include_hidden = get_bool args "include_hidden" true in
-  let include_deprecated = get_bool args "include_deprecated" true in
   Tool_args.ok_result ~tool_name ~start_time
     [
       ("generated_at", `String (Masc_domain.now_iso ()));
       ("auth", auth_snapshot_json ctx);
       ( "tool_inventory",
-        tool_inventory_json ctx ~include_hidden ~include_deprecated );
+        tool_inventory_json ctx ~include_hidden );
     ]
 
 let handle_tool_admin_update ~tool_name ~start_time ctx args =

@@ -11,6 +11,7 @@
    env_config_governance
    env_config_keeper
    env_config_keeper_retry_backoff
+   env_config_cascade_tier_backoff
    env_config_keeper_supervisor
    env_config_oas_bridge
    env_config_runtime

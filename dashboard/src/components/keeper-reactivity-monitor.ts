@@ -97,6 +97,9 @@ export function extractKeeperStopSummaries(
         else if (cls === 'noop_failure_loop') e.noop_failure_loop += s.value
       }
     } else if (
+      // Legacy compatibility metrics. New keeper policy should surface
+      // owner-specific timeout/admission/capacity causes instead of treating
+      // timeout-legacy budget strikes as a first-class root cause.
       m.name === 'masc_keeper_oas_timeout_budget_strike' ||
       m.name === 'masc_keeper_oas_timeout_budget_strike_total'
     ) {
@@ -317,7 +320,7 @@ function AutoPausePanel({
                       ` : null}
                       ${s.budget_loop_pauses > 0 ? html`
                         <span class="rounded bg-[var(--bad-10)] px-1.5 py-0.5 text-[var(--bad-light)]">
-                          budget loop pause ${s.budget_loop_pauses}
+                          legacy budget loop pause ${s.budget_loop_pauses}
                         </span>
                       ` : null}
                       ${s.stale_total > 0 ? html`

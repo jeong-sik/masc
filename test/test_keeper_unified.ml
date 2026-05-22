@@ -8382,18 +8382,18 @@ let test_oas_timeout_reclassifies_only_current_attempt_budget () =
       ~remaining_turn_budget_s:1200.0
   with
   | None -> fail "expected timeout budget"
-  | Some timeout_budget ->
+  | Some provider_timeout_budget ->
     let classified =
-      UT.reclassify_oas_timeout_for_attempt ~timeout_budget:(Some timeout_budget) err
+      UT.reclassify_provider_timeout_for_attempt ~provider_timeout_budget:(Some provider_timeout_budget) err
     in
     (match Masc_mcp.Keeper_turn_driver.classify_masc_internal_error classified with
      | Some (Masc_mcp.Keeper_turn_driver.Provider_timeout budget) ->
        check int "estimated tokens preserved" 2_000 budget.estimated_input_tokens;
-       check string "source preserved" timeout_budget.source budget.source;
+       check string "source preserved" provider_timeout_budget.source budget.source;
        check
          (option (float 0.001))
          "remaining budget preserved"
-         (Some timeout_budget.remaining_turn_budget_sec)
+         (Some provider_timeout_budget.remaining_turn_budget_sec)
          budget.remaining_turn_budget_sec;
        check string "phase" "cascade_attempt_watchdog" budget.phase
      | _ -> fail "expected provider timeout budget classification")
@@ -8405,7 +8405,7 @@ let test_pre_retry_timeout_helper_does_not_reuse_stale_budget () =
       (Timeout
          { message = "Turn wall-clock budget exhausted before retry (remaining=2.0s)" })
   in
-  let classified = UT.reclassify_oas_timeout_for_attempt ~timeout_budget:None err in
+  let classified = UT.reclassify_provider_timeout_for_attempt ~provider_timeout_budget:None err in
   check
     bool
     "plain helper call without budget stays raw timeout"

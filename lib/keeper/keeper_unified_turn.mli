@@ -58,8 +58,8 @@ val degraded_retry_slot_phase_available : time_spent_in_turn_s:float -> bool
     actually dispatched with an provider timeout budget. This prevents a
     pre-retry turn-budget exhaustion from borrowing a stale previous
     attempt budget and incorrectly rotating cascades. *)
-val reclassify_oas_timeout_for_attempt
-  :  timeout_budget:provider_timeout_budget option
+val reclassify_provider_timeout_for_attempt
+  :  provider_timeout_budget:provider_timeout_budget option
   -> Agent_sdk.Error.sdk_error
   -> Agent_sdk.Error.sdk_error
 

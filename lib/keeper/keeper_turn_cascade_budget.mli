@@ -160,8 +160,8 @@ val degraded_retry_slot_phase_budget_sec : float
 val degraded_retry_slot_phase_available :
   time_spent_in_turn_s:float -> bool
 
-val reclassify_oas_timeout_for_attempt :
-  timeout_budget:provider_timeout_budget option ->
+val reclassify_provider_timeout_for_attempt :
+  provider_timeout_budget:provider_timeout_budget option ->
   Agent_sdk.Error.sdk_error ->
   Agent_sdk.Error.sdk_error
 (** Preserve upstream structural timeout errors instead of minting a synthetic

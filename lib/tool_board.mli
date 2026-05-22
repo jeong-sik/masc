@@ -14,8 +14,7 @@
       search, comment_vote, reaction, profile, hearth_list,
       curation_read, delete),
     - the {b truncated-markdown detector}
-      ({!detect_truncated_markdown} +
-      {!detect_truncated_markdown_with_reason}) used by
+      ({!detect_truncated_markdown_with_reason}) used by
       the post-create path to flag chat-suffix paste
       accidents,
     - the {b sort-order parser} ({!parse_sort_order})
@@ -65,11 +64,6 @@ val detect_truncated_markdown_with_reason :
     Used by [handle_post_create] to surface a precise
     reason in the response when a paste appears
     truncated. *)
-
-val detect_truncated_markdown : string -> bool
-(** Boolean form — true iff
-    {!detect_truncated_markdown_with_reason} returns a
-    [Some]. *)
 
 (** {1 Sort order} *)
 

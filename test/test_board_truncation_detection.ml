@@ -88,20 +88,6 @@ let test_fence_priority_over_link () =
   check (option signal_t) "fence has higher priority"
     (Some Tool_board.Odd_fence) (detect s)
 
-(* ---- Boolean wrapper agrees with reason API ------------------------ *)
-
-let test_bool_wrapper_agrees () =
-  let cases = [
-    ("complete.", false);
-    ("```\nopen", true);
-    ("trailing `code", true);
-    ("trailing [link](url", true);
-  ] in
-  List.iter (fun (input, expected) ->
-    check bool (Printf.sprintf "case %S" input) expected
-      (Tool_board.detect_truncated_markdown input)
-  ) cases
-
 let () =
   run "board truncation detection (#9777)"
     [
@@ -126,9 +112,5 @@ let () =
       ( "priority",
         [
           test_case "fence wins over link" `Quick test_fence_priority_over_link;
-        ] );
-      ( "compat",
-        [
-          test_case "bool wrapper agrees with reason" `Quick test_bool_wrapper_agrees;
         ] );
     ]

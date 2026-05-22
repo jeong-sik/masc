@@ -515,6 +515,7 @@ printf 'docker-gh-ok workdir=%s cmd=%s\\n' \"$workdir\" \"$*\"\n"
 
 let test_keeper_shell_gh_without_current_task_uses_sandbox_context () =
   with_repo_context_test_env @@ fun ~base:_ ~config ~repo_dir:_ ->
+  ensure_policy_config_loaded ();
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "" @@ fun () ->
   let meta = make_meta ~sandbox_profile:Keeper_types.Docker () in
   let factory = Keeper_sandbox_factory.create ~config ~meta () in

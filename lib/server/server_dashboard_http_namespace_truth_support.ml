@@ -371,7 +371,6 @@ let namespace_truth_source = "namespace_truth_read_model"
 let namespace_truth_aliases =
   [
     "/api/v1/dashboard/project-snapshot";
-    "/api/v1/dashboard/room-truth";
   ]
 
 let namespace_truth_aliases_json () =

@@ -37,6 +37,7 @@ type adapted_catalog = {
   routes : (string * string) list;
   system_targets : (string * string) list;
   default_profile : string option;
+  capability_profiles : cascade_profile list;
   errors : adapter_error list;
 }
 
@@ -642,5 +643,6 @@ let adapt_config (cfg : cascade_config) : adapted_catalog =
     routes;
     system_targets;
     default_profile;
+    capability_profiles = cfg.profiles;
     errors = List.rev (!errors) @ route_errors;
   }

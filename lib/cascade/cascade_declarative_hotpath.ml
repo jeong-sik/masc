@@ -34,6 +34,7 @@ type decl_snapshot = {
   mtime : float;
   validated_at : float;
   profiles : profile list;
+  capability_profiles : Cascade_declarative_types.cascade_profile list;
 }
 
 (* --- Low-level helpers --- *)
@@ -130,6 +131,7 @@ let adapted_catalog_to_snapshot ~source_path (ac : adapted_catalog) :
       mtime = stat.Unix.st_mtime;
       validated_at = Unix.gettimeofday ();
       profiles;
+      capability_profiles = ac.capability_profiles;
     }
 
 (* --- TOML loading --- *)

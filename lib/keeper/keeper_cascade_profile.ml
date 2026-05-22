@@ -459,23 +459,27 @@ let normalized_query_name ?config_path raw =
 let is_system_only_cascade raw =
   let routed = routed_query_target raw |> String.trim in
   let public_name = public_name_of_target routed in
-  match catalog_metadata_result () with
-  | Ok meta ->
+  (* RFC-0143 PR-2 — typed catalog query. *)
+  match catalog_metadata_query () with
+  | Catalog_ok meta ->
       if is_qualified_profile_name routed then
         List.mem routed meta.system_qualified_names
       else
         List.mem public_name meta.system_names
-  | Error _ -> false
+  | Catalog_unavailable _ -> false
 
 let keeper_catalog_names ?config_path () =
-  match catalog_metadata_result ?config_path () with
-  | Ok meta -> meta.keeper_assignable_names
-  | Error _ -> catalog_names ?config_path ()
+  (* RFC-0143 PR-2 — typed catalog query.  On [Catalog_unavailable]
+     fall back to the plain catalog name list. *)
+  match catalog_metadata_query ?config_path () with
+  | Catalog_ok meta -> meta.keeper_assignable_names
+  | Catalog_unavailable _ -> catalog_names ?config_path ()
 
 let system_catalog_names ?config_path () =
-  match catalog_metadata_result ?config_path () with
-  | Ok meta -> meta.system_names
-  | Error _ -> []
+  (* RFC-0143 PR-2 — typed catalog query. *)
+  match catalog_metadata_query ?config_path () with
+  | Catalog_ok meta -> meta.system_names
+  | Catalog_unavailable _ -> []
 
 (** Track which (cascade, target) pairs we have already logged as
     invalid fallback hints so the WARN line fires once per process. *)
@@ -486,9 +490,10 @@ let fallback_cascade_for ?config_path name =
   let public_name = normalized_query_name ?config_path name in
   if String.equal public_name "" then None
   else
-    match catalog_metadata_result ?config_path () with
-    | Error _ -> None
-    | Ok meta -> (
+    (* RFC-0143 PR-2 — typed catalog query. *)
+    match catalog_metadata_query ?config_path () with
+    | Catalog_unavailable _ -> None
+    | Catalog_ok meta -> (
         let qualified_name =
           let routed = routed_query_target ?config_path name |> String.trim in
           if is_qualified_profile_name routed
@@ -547,9 +552,10 @@ let normalize_keeper_runtime_declared_name ?config_path raw =
   let normalized = normalize_declared_name raw in
   let public_name = public_name_of_target normalized in
   let explicitly_keeper_assignable =
-    match catalog_metadata_result ?config_path () with
-    | Ok meta -> List.mem normalized meta.keeper_assignable_names
-    | Error _ -> false
+    (* RFC-0143 PR-2 — typed catalog query. *)
+    match catalog_metadata_query ?config_path () with
+    | Catalog_ok meta -> List.mem normalized meta.keeper_assignable_names
+    | Catalog_unavailable _ -> false
   in
   let keeper_route_targets =
     keeper_runtime_route_uses

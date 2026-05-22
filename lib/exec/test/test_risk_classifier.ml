@@ -94,6 +94,22 @@ let test_quoted_redirect_stays_read () =
          "quoted redirect should stay Read, got %s"
          (RC.risk_class_to_string other))
 
+let test_pipeline_uses_highest_stage_risk () =
+  (match RC.classify "cat README.md | tee copy.md" with
+   | RC.Write -> ()
+   | other ->
+     Alcotest.fail
+       (Printf.sprintf
+          "pipeline with write stage should be Write, got %s"
+          (RC.risk_class_to_string other)));
+  match RC.classify "cat README.md | rm -rf tmp/generated" with
+  | RC.Destructive -> ()
+  | other ->
+    Alcotest.fail
+      (Printf.sprintf
+         "pipeline with destructive stage should be Destructive, got %s"
+         (RC.risk_class_to_string other))
+
 (* --- classify: network commands --- *)
 
 let test_classify_network () =
@@ -218,10 +234,11 @@ let () =
   test_classify_read ();
   test_classify_write ();
   test_quoted_redirect_stays_read ();
+  test_pipeline_uses_highest_stage_risk ();
   test_classify_network ();
   test_classify_destructive ();
   test_flag_escalation ();
   test_classify_unknown ();
   test_whitespace_handling ();
   test_empty_string ();
-  print_endline "test_risk_classifier: 14/14 passed"
+  print_endline "test_risk_classifier: 15/15 passed"

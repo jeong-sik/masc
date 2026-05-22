@@ -442,6 +442,19 @@ let test_word_metadata_marks_globbed_path () =
     assert (not path.quoted)
   | _ -> assert false
 
+let test_top_level_command_segments_preserve_quote_boundaries () =
+  let segments =
+    Bash_words.top_level_command_segments
+      {|git commit -m "do not gh pr create" && gh pr create --draft; git push origin feat|}
+  in
+  match segments with
+  | [
+      (true, {|git commit -m "do not gh pr create"|});
+      (false, "gh pr create --draft");
+      (true, "git push origin feat");
+    ] -> ()
+  | _ -> assert false
+
 let test_double_quote_with_dollar_rejected () =
   (* Variable expansion is subset-excluded at the A1 layer — any '$'
      inside "..." breaks the lex so Parse_error surfaces rather than
@@ -528,6 +541,7 @@ let () =
   test_word_with_double_quoted_suffix ();
   test_word_metadata_preserves_quoted_path_and_pipeline ();
   test_word_metadata_marks_globbed_path ();
+  test_top_level_command_segments_preserve_quote_boundaries ();
   test_double_quote_with_dollar_rejected ();
   test_double_quote_with_backslash_rejected ();
   test_double_quote_with_backtick_rejected ();

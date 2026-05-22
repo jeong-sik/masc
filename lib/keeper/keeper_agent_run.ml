@@ -890,11 +890,10 @@ let run_turn
                      | Ok (), Some reason ->
                        let contract_status
                            : Keeper_execution_receipt.tool_contract_result =
-                         if actual_keeper_tool_names = []
-                         then Contract_missing_required_tool_use
-                         else if progress_keeper_tool_names = []
-                         then Contract_needs_execution_progress
-                         else tool_contract_status ()
+                         Contract_helpers.passive_violation_contract_status
+                           ~actual_keeper_tool_names
+                           ~progress_keeper_tool_names
+                           ~fallback:tool_contract_status
                        in
                        acc.receipt_tool_contract_result <- contract_status;
                        Keeper_agent_run_contract_violation_log.record_passive
@@ -913,9 +912,9 @@ let run_turn
                      | Error reason, _ ->
                        let contract_status
                            : Keeper_execution_receipt.tool_contract_result =
-                         if actual_keeper_tool_names = []
-                         then Contract_missing_required_tool_use
-                         else tool_contract_status ()
+                         Contract_helpers.text_only_violation_contract_status
+                           ~actual_keeper_tool_names
+                           ~fallback:tool_contract_status
                        in
                        acc.receipt_tool_contract_result <- contract_status;
                        Keeper_agent_run_contract_violation_log.record_text_only
@@ -931,53 +930,18 @@ let run_turn
                          (Contract_helpers.completion_contract_violation_error reason)
                    in
                    let finalize_response_text raw_response_text =
-                     let stop_reason_str =
-                       match result.stop_reason with
-                       | Cascade_runner.Completed -> "completed"
-                       | Cascade_runner.TurnBudgetExhausted _ -> "budget_exhausted"
-                       | Cascade_runner.MutationBoundaryReached { tool_name; _ } ->
-                         (match tool_name with
-                          | Some tool -> Printf.sprintf "mutation_boundary(%s)" tool
-                          | None -> "mutation_boundary")
-                     in
-                     let state_snapshot =
-                       match
-                         Keeper_memory_policy.parse_state_snapshot_from_reply
-                           raw_response_text
-                       with
-                       | Some snapshot -> snapshot
-                       | None ->
-                         let final_tool_names =
-                           match !actual_keeper_tool_names_ref with
-                           | [] -> actual_keeper_tool_names
-                           | names -> names
-                         in
-                         let synth =
-                           Keeper_memory_policy.synthesize_state_from_run_result
-                             ~goal:meta.goal
-                             ~tools_used:final_tool_names
-                             ~stop_reason:stop_reason_str
-                             ~response_text:raw_response_text
-                         in
-                         Log.Keeper.info
-                           "keeper:%s [STATE] missing, synthesized from %d tools \
-                            (stop=%s)"
-                           meta.name
-                           (List.length final_tool_names)
-                           stop_reason_str;
-                         synth
-                     in
-                     let response_text =
-                       match
-                         Keeper_text_processing.state_snapshot_reply_fallback
-                           (Some state_snapshot)
-                     with
-                     | Some fallback ->
-                       Keeper_text_processing.user_visible_reply_text
-                         ~fallback
-                         raw_response_text
-                     | None ->
-                       Keeper_text_processing.user_visible_reply_text raw_response_text
+                     Keeper_agent_run_response_text.finalize
+                       ~keeper_name:meta.name
+                       ~goal:meta.goal
+                       ~actual_keeper_tool_names:!actual_keeper_tool_names_ref
+                       ~fallback_tool_names:actual_keeper_tool_names
+                       ~stop_reason:result.stop_reason
+                       ~raw_response_text
+                   in
+                   let
+                     { Keeper_agent_run_response_text.state_snapshot; response_text }
+                     =
+                     finalize_response_text raw_response_text
                    in
                     let state_snapshot_source =
                       if

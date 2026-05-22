@@ -423,10 +423,10 @@ let git_subcommand tokens =
   loop tokens
 
 let command_words_for_parsing cmd =
-  match Command_words.stages cmd with
+  match Masc_exec_shell_words.Shell_words.stages cmd with
   | Ok [ words ] ->
       words
-      |> List.map (fun (word : Command_words.word) -> word.value)
+      |> List.map (fun (word : Masc_exec_shell_words.Shell_words.word) -> word.value)
       |> List.filter (fun s -> s <> "")
   | Ok [] | Ok (_ :: _ :: _) | Error _ -> []
 

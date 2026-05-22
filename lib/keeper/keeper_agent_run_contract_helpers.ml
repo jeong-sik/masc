@@ -71,3 +71,22 @@ let observed_tool_contract_status ~required_tool_names ~missing_visible_required
     ~required_tool_names ~missing_visible_required ~had_owned_active_task_at_turn_start
     ~actual_keeper_tool_names
 ;;
+
+let passive_violation_contract_status ~actual_keeper_tool_names
+      ~progress_keeper_tool_names ~fallback
+  : Keeper_execution_receipt.tool_contract_result
+  =
+  if actual_keeper_tool_names = []
+  then Contract_missing_required_tool_use
+  else if progress_keeper_tool_names = []
+  then Contract_needs_execution_progress
+  else fallback ()
+;;
+
+let text_only_violation_contract_status ~actual_keeper_tool_names ~fallback
+  : Keeper_execution_receipt.tool_contract_result
+  =
+  if actual_keeper_tool_names = []
+  then Contract_missing_required_tool_use
+  else fallback ()
+;;

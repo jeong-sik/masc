@@ -19,8 +19,7 @@ type http_context = {
   include_configured : bool;
 }
 (** Concrete record because callers
-    ({!Server_routes_http_runtime},
-    {!Tool_misc_transport}) field-access [base_url] / [host]
+    ({!Server_routes_http_runtime}) field-access [base_url] / [host]
     when composing operator-visible URLs.
 
     Field invariants enforced by every constructor:

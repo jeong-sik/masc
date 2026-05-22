@@ -101,7 +101,6 @@ val archetype_of_string_opt : string -> archetype option
 
 val archetype_emoji : archetype -> string
 
-val get_archetype : t -> archetype
 val set_archetype : t -> archetype -> t
 
 val archetype_weight : archetype -> string -> float

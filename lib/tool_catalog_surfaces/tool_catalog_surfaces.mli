@@ -53,9 +53,8 @@ val keeper_internal_replacement : string -> string option
     when one exists (e.g. [keeper_board_get] -> [masc_board_get]).
     Returns [None] when no replacement is registered.
 
-    Used during the keeper-tool deprecation transition — callers
-    look up the new name to forward calls without breaking
-    backward compat. *)
+    Used only for keeper-internal alias routing; it is not an MCP
+    deprecation or descriptor-retention mechanism. *)
 
 (** {1 Surface variant} *)
 

@@ -2,10 +2,10 @@
     source-shape information which {!Masc_exec.Shell_ir.Lit} intentionally
     does not carry.
 
-    This module is not an execution parser.  It shares the bash-subset
-    lexical boundary and returns ordered pipeline stages so path policy can
-    make quote/glob/brace decisions without keeping a private tokenizer in
-    caller modules. *)
+    This module is not an execution parser. It shares the bash-subset lexical
+    boundary and returns ordered pipeline stages so path policy can make
+    quote/glob/brace decisions without keeping a private tokenizer in caller
+    modules. *)
 
 type word = {
   value : string;
@@ -24,3 +24,9 @@ val stages : string -> (word list list, error) result
     Empty stages are omitted so callers can remain fail-closed at their own
     command-shape layer while still reusing successfully recovered words for
     diagnostics and path policy. *)
+
+val top_level_command_segments : string -> (bool * string) list
+(** Split [source] on unquoted top-level [&&], [||], [;], and newlines.
+    The boolean marks whether the segment is unconditionally reached from the
+    left.  Single [|] is intentionally not a separator here; pipeline-aware
+    callers should continue using {!stages}. *)

@@ -20,7 +20,7 @@ code_refs:
 ## Base
 - Base URL: `http://127.0.0.1:8935`
 - REST Base: `/api/v1`
-- SSE: `/sse`
+- SSE observer: `/mcp?sse_kind=observer`
 - MCP: `/mcp`
 
 ## Auth
@@ -28,7 +28,7 @@ code_refs:
   - `Authorization: Bearer <token>`
   - `X-MASC-Agent: <agent_name>`
 - SSE
-  - `/sse?agent=<agent_name>&token=<token>`
+  - `/mcp?agent=<agent_name>&token=<token>&session_id=<session_id>&sse_kind=observer`
 
 ## Canonical v1 Surfaces
 

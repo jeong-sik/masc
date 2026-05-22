@@ -240,6 +240,7 @@ let oas_retry_budget_available_for_turn
      change is the natural typed boundary expansion. *)
 
 type retry_admission_denial =
+  Keeper_turn_cascade_budget_admission.retry_admission_denial =
   | Retry_budget_below_min of {
       projected_usable_budget_s : float;
       min_required_s : float;
@@ -253,33 +254,14 @@ type retry_admission_denial =
       remaining_turn_budget_s : float;
     }
 
-type attempt_kind = First_attempt | Retry_attempt
+type attempt_kind = Keeper_turn_cascade_budget_admission.attempt_kind =
+  | First_attempt
+  | Retry_attempt
 
-let attempt_kind_is_retry = function
-  | First_attempt -> false
-  | Retry_attempt -> true
-
-let retry_admission_denial_to_yojson (d : retry_admission_denial) : Yojson.Safe.t =
-  match d with
-  | Retry_budget_below_min r ->
-    `Assoc
-      [
-        ("kind", `String "retry_budget_below_min");
-        ("projected_usable_budget_s", `Float r.projected_usable_budget_s);
-        ("min_required_s", `Float r.min_required_s);
-        ("remaining_turn_budget_s", `Float r.remaining_turn_budget_s);
-        ("adaptive_timeout_s", `Float r.adaptive_timeout_s);
-        ( "allow_wall_clock_retry_budget",
-          `Bool r.allow_wall_clock_retry_budget );
-      ]
-  | First_attempt_budget_below_min r ->
-    `Assoc
-      [
-        ("kind", `String "first_attempt_budget_below_min");
-        ("projected_usable_budget_s", `Float r.projected_usable_budget_s);
-        ("min_required_s", `Float r.min_required_s);
-        ("remaining_turn_budget_s", `Float r.remaining_turn_budget_s);
-      ]
+let attempt_kind_is_retry =
+  Keeper_turn_cascade_budget_admission.attempt_kind_is_retry
+let retry_admission_denial_to_yojson =
+  Keeper_turn_cascade_budget_admission.retry_admission_denial_to_yojson
 
 let decide_retry_admission_for_turn
     ~(remaining_turn_budget_s : float)
@@ -489,19 +471,22 @@ let next_fail_open_cascade_for_turn_with_budget
       then Degraded_retry_allowed retry
       else Degraded_retry_budget_exhausted retry
 
-type turn_event_bus_overflow = {
+type turn_event_bus_overflow =
+  Keeper_turn_cascade_budget_event_bus.turn_event_bus_overflow = {
   estimated_tokens : int;
   limit_tokens : int;
 }
 
-type turn_event_bus_compaction = {
+type turn_event_bus_compaction =
+  Keeper_turn_cascade_budget_event_bus.turn_event_bus_compaction = {
   before_tokens : int;
   after_tokens : int;
   tokens_freed : int;
   phase_hint : string;
 }
 
-type turn_event_bus_summary = {
+type turn_event_bus_summary =
+  Keeper_turn_cascade_budget_event_bus.turn_event_bus_summary = {
   correlation_id : string option;
   run_id : string option;
   caused_by : string option;
@@ -514,55 +499,13 @@ type turn_event_bus_summary = {
 }
 
 let empty_turn_event_bus_summary =
-  {
-    correlation_id = None;
-    run_id = None;
-    caused_by = None;
-    event_count = 0;
-    payload_kinds = [];
-    overflow_imminent = None;
-    context_compact_started_count = 0;
-    context_compacted_count = 0;
-    last_compaction = None;
-  }
+  Keeper_turn_cascade_budget_event_bus.empty_turn_event_bus_summary
 
-let add_payload_kind kinds kind =
-  if List.mem kind kinds then kinds else kinds @ [ kind ]
+let merge_turn_event_bus_summary =
+  Keeper_turn_cascade_budget_event_bus.merge_turn_event_bus_summary
 
-let merge_payload_kinds left right =
-  List.fold_left add_payload_kind left right
-
-let merge_turn_event_bus_summary
-    (left : turn_event_bus_summary)
-    (right : turn_event_bus_summary) : turn_event_bus_summary =
-  {
-    correlation_id =
-      (match left.correlation_id with
-       | Some _ -> left.correlation_id
-       | None -> right.correlation_id);
-    run_id =
-      (match left.run_id with
-       | Some _ -> left.run_id
-       | None -> right.run_id);
-    caused_by =
-      (match left.caused_by with
-       | Some _ -> left.caused_by
-       | None -> right.caused_by);
-    event_count = left.event_count + right.event_count;
-    payload_kinds = merge_payload_kinds left.payload_kinds right.payload_kinds;
-    overflow_imminent =
-      (match right.overflow_imminent with
-       | Some _ -> right.overflow_imminent
-       | None -> left.overflow_imminent);
-    context_compact_started_count =
-      left.context_compact_started_count + right.context_compact_started_count;
-    context_compacted_count =
-      left.context_compacted_count + right.context_compacted_count;
-    last_compaction =
-      (match right.last_compaction with
-       | Some _ -> right.last_compaction
-       | None -> left.last_compaction);
-  }
+let add_payload_kind =
+  Keeper_turn_cascade_budget_event_bus.add_payload_kind
 
 let summarize_turn_event_bus
     (events : Agent_sdk.Event_bus.event list) : turn_event_bus_summary =

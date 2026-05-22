@@ -702,8 +702,8 @@ let normalized_input_hash (input : Yojson.Safe.t) =
 ;;
 
 let first_cmd_token (cmd : string) =
-  match Masc_exec.Command_words.stages cmd with
-  | Ok ((token :: _) :: _) -> Some token.Masc_exec.Command_words.value
+  match Masc_exec_bash_parser.Bash_words.stages cmd with
+  | Ok ((token :: _) :: _) -> Some token.Masc_exec_bash_parser.Bash_words.value
   | Ok ([] :: _) | Ok [] | Error _ -> None
 ;;
 

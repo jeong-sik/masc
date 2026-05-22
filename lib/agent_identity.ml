@@ -402,19 +402,6 @@ let archetype_emoji = function
   | Athena -> "🧠"
   | Generalist -> "🌐"
 
-(** Get archetype from identity metadata *)
-let get_archetype identity =
-  match List.assoc_opt "archetype" identity.metadata with
-  | None -> Generalist
-  | Some s -> (
-      match archetype_of_string_opt s with
-      | Some archetype -> archetype
-      | None ->
-          Log.Misc.warn
-            "get_archetype: unknown archetype metadata %S → Generalist fallback (#8691)"
-            s;
-          Generalist)
-
 (** Set archetype in identity metadata *)
 let set_archetype identity archetype =
   let filtered = List.filter (fun (k, _) -> not (String.equal k "archetype")) identity.metadata in  { identity with metadata = ("archetype", archetype_to_string archetype) :: filtered }

@@ -374,11 +374,11 @@ let public_tool_schemas_from (public_tool_source_schemas : Masc_domain.tool_sche
   |> Tool_help_registry.canonicalize_schemas
 
 let visible_public_tool_schemas_from
-    ?(include_hidden = false) ?(include_deprecated = false)
+    ?(include_hidden = false)
     (public_tool_source_schemas : Masc_domain.tool_schema list) : Masc_domain.tool_schema list =
   public_tool_schemas_from public_tool_source_schemas
   |> List.filter (fun (schema : Masc_domain.tool_schema) ->
-         Tool_catalog.is_visible ~include_hidden ~include_deprecated schema.name)
+         Tool_catalog.is_visible ~include_hidden schema.name)
 
 let local_worker_tool_schemas ?names () :
     (Masc_domain.tool_schema list, string) result =

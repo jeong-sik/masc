@@ -968,7 +968,6 @@ function normalizeDashboardCdalTaskScopeHealth(raw: unknown): DashboardCdalTaskS
     missing_task_scope: asBoolean(raw.missing_task_scope) ?? null,
     partial_task_scope: asBoolean(raw.partial_task_scope) ?? null,
     current_writer_missing_task_scope: asBoolean(raw.current_writer_missing_task_scope) ?? null,
-    legacy_unscoped_only: asBoolean(raw.legacy_unscoped_only) ?? null,
   }
 }
 

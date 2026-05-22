@@ -672,8 +672,8 @@ let test_masc_tool_admin_snapshot_schema () =
       | Some props ->
           Alcotest.(check bool) "has include_hidden" true
             (List.mem_assoc "include_hidden" props);
-          Alcotest.(check bool) "has include_deprecated" true
-            (List.mem_assoc "include_deprecated" props)
+          Alcotest.(check int) "admin snapshot property count" 1
+            (List.length props)
       | None -> Alcotest.fail "masc_tool_admin_snapshot missing properties"
 
 let test_masc_tool_admin_update_schema () =
@@ -776,30 +776,6 @@ let test_masc_agent_card_schema () =
           Alcotest.(check bool) "has agent_name" true
             (List.mem_assoc "agent_name" props)
       | None -> Alcotest.fail "masc_agent_card missing properties"
-
-let test_masc_webrtc_offer_schema () =
-  match find_tool "masc_webrtc_offer" with
-  | None -> Alcotest.fail "masc_webrtc_offer not found"
-  | Some schema ->
-      match get_json_assoc "properties" schema.input_schema with
-      | Some props ->
-          Alcotest.(check bool) "has agent_name" true
-            (List.mem_assoc "agent_name" props);
-          Alcotest.(check bool) "has ice_candidates" true
-            (List.mem_assoc "ice_candidates" props)
-      | None -> Alcotest.fail "masc_webrtc_offer missing properties"
-
-let test_masc_webrtc_answer_schema () =
-  match find_tool "masc_webrtc_answer" with
-  | None -> Alcotest.fail "masc_webrtc_answer not found"
-  | Some schema ->
-      match get_json_assoc "properties" schema.input_schema with
-      | Some props ->
-          Alcotest.(check bool) "has offer_id" true
-            (List.mem_assoc "offer_id" props);
-          Alcotest.(check bool) "has agent_name" true
-            (List.mem_assoc "agent_name" props)
-      | None -> Alcotest.fail "masc_webrtc_answer missing properties"
 
 (* ============================================================ *)
 (* 21. Edge Case Tests                                           *)
@@ -946,8 +922,6 @@ let () =
       Alcotest.test_case "agent_card" `Quick test_masc_agent_card_schema;
     ];
     "transport_tools", [
-      Alcotest.test_case "webrtc_offer" `Quick test_masc_webrtc_offer_schema;
-      Alcotest.test_case "webrtc_answer" `Quick test_masc_webrtc_answer_schema;
     ];
     "edge_cases", [
       Alcotest.test_case "description_not_short" `Quick test_description_not_too_short;

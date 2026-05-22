@@ -249,7 +249,7 @@ let test_body_with_canonical_http_actor_uses_token_owner () =
             ("x-masc-agent", "dashboard");
           ]
       in
-      let request = Httpun.Request.create ~headers `POST "/messages" in
+      let request = Httpun.Request.create ~headers `POST "/mcp" in
       let body =
         {|{"jsonrpc":"2.0","method":"tools/call","params":{"name":"masc_keeper_status","arguments":{"_agent_name":"dashboard","token":"stale-token","name":"sangsu"}},"id":1}|}
       in

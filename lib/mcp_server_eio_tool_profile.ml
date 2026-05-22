@@ -70,7 +70,7 @@ Prefer worktrees for parallel work. \
 Use masc_tool_help to inspect tool contracts and prefer the smallest useful surface."
 
 let tool_schemas_for_profile ?(include_hidden = false)
-    ?(include_deprecated = false) ?(include_keeper_internal = false) _state
+    ?(include_keeper_internal = false) _state
     profile =
   let schemas =
     match profile with
@@ -83,13 +83,12 @@ let tool_schemas_for_profile ?(include_hidden = false)
             |> List.filter (fun (schema : Masc_domain.tool_schema) ->
                    Tool_catalog.is_on_surface Tool_catalog.Keeper_internal
                      schema.name
-                   && Tool_catalog.is_visible ~include_hidden:true
-                        ~include_deprecated schema.name)
+                   && Tool_catalog.is_visible ~include_hidden:true schema.name)
         in
         let all =
           Config.visible_tool_schemas
             ~include_hidden:(show_all || include_keeper_internal)
-            ~include_deprecated ()
+            ()
           @ keeper_internal_schemas
           |> dedupe_tool_schemas_by_name
         in
@@ -107,7 +106,7 @@ let tool_schemas_for_profile ?(include_hidden = false)
         full_profile_tools
     | Managed_agent ->
         let passthrough =
-          Config.visible_tool_schemas ~include_hidden:true ~include_deprecated:false ()
+          Config.visible_tool_schemas ~include_hidden:true ()
           |> List.filter (fun (schema : Masc_domain.tool_schema) ->
                  Hashtbl.mem managed_agent_passthrough_tool_set schema.name
                  && Tool_catalog.is_visible ~include_hidden:true schema.name)
@@ -126,16 +125,15 @@ let tool_allowed_in_profile ?(internal_keeper_runtime = false) state profile
         internal_keeper_runtime
       else
         (* Equivalent to [List.mem tool_name (names from
-           visible_tool_schemas ~include_hidden:true
-           ~include_deprecated:true)]: that helper composes raw schemas
-           → dedupe → canonicalize → filter is_visible.  Dedupe and
+           visible_tool_schemas ~include_hidden:true)]: that helper
+           composes raw schemas → dedupe → canonicalize → filter
+           is_visible.  Dedupe and
            canonicalize do not change the name set, so the name set is
            exactly { n | n ∈ raw_all_tool_schemas.names ∧ is_visible n }.
            Two O(1) checks replace ~150 schema canonicalizations + a
            List.mem per dispatch. *)
         Config.is_raw_tool_name tool_name
-        && Tool_catalog.is_visible ~include_hidden:true ~include_deprecated:true
-             tool_name
+        && Tool_catalog.is_visible ~include_hidden:true tool_name
   | Managed_agent ->
       Option.is_some (Sdk_tool_contract.sdk_binding_by_name tool_name)
       || (tool_schemas_for_profile state Managed_agent
@@ -160,7 +158,6 @@ let tool_annotations_for_profile _profile tool_name =
     | Some v -> v
     | None -> Tool_dispatch.is_idempotent tool_name || read_only
   in
-  let is_deprecated = meta.lifecycle = Tool_catalog.Deprecated in
   (* MCP 2025-03-26: [openWorldHint] signals whether the tool can
      interact with systems outside the server's closed world.
      Default per spec is [true]. We emit an explicit value when we
@@ -182,13 +179,6 @@ let tool_annotations_for_profile _profile tool_name =
     @ (match open_world_hint with
        | Some v -> [ ("openWorldHint", `Bool v) ]
        | None -> [])
-    @ (if is_deprecated then [ ("deprecated", `Bool true) ] else [])
-    @ (match meta.replacement with
-       | Some r when is_deprecated -> [ ("successor", `String r) ]
-       | _ -> [])
-    @ (match meta.reason with
-       | Some r when is_deprecated -> [ ("deprecationReason", `String r) ]
-       | _ -> [])
   in
   if fields = [] then None else Some (`Assoc fields)
 
@@ -337,7 +327,6 @@ type cursor_params = { cursor : string option }
 type tools_list_params = {
   names : string list option;
   include_hidden : bool;
-  include_deprecated : bool;
   include_usage : bool;
   cursor : string option;
 }
@@ -448,8 +437,7 @@ let requested_tool_list_params params =
   let open Yojson.Safe.Util in
   let* fields = strict_assoc_params params in
   let allowed =
-    [ "_meta"; "names"; "include_hidden"; "include_deprecated"; "include_usage";
-      "cursor" ]
+    [ "_meta"; "names"; "include_hidden"; "include_usage"; "cursor" ]
   in
   let unknown =
     fields
@@ -489,13 +477,11 @@ let requested_tool_list_params params =
     in
     let* cursor = cursor_param payload in
     let* include_hidden = bool_param payload "include_hidden" in
-    let* include_deprecated = bool_param payload "include_deprecated" in
     let* include_usage = bool_param payload "include_usage" in
     Ok
       {
         names;
         include_hidden;
-        include_deprecated;
         include_usage;
         cursor;
       }

@@ -208,7 +208,6 @@ export interface DashboardCdalTaskScopeHealth {
   missing_task_scope: boolean | null
   partial_task_scope: boolean | null
   current_writer_missing_task_scope: boolean | null
-  legacy_unscoped_only: boolean | null
 }
 
 export interface DashboardCdalHealth {

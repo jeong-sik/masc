@@ -38,7 +38,6 @@ type t = {
   is_destructive : bool;
   is_idempotent : bool;
   visibility : Tool_catalog.visibility;
-  lifecycle : Tool_catalog.lifecycle;
   implementation_status : Tool_catalog.implementation_status;
   canonical_name : string option;
   replacement : string option;
@@ -65,7 +64,6 @@ let create
     ?(is_destructive = false)
     ?(is_idempotent = false)
     ?(visibility = Tool_catalog.Default)
-    ?(lifecycle = Tool_catalog.Active)
     ?(implementation_status = Tool_catalog.Real)
     ?canonical_name
     ?replacement
@@ -78,7 +76,7 @@ let create
     () =
   { name; description; module_tag; input_schema; handler_binding;
     is_read_only; requires_join; is_destructive; is_idempotent;
-    visibility; lifecycle; implementation_status;
+    visibility; implementation_status;
     canonical_name; replacement; reason;
     allow_direct_call_when_hidden; title; required_permission; effect_domain;
     requires_actor_binding }
@@ -145,7 +143,7 @@ let register (spec : t) =
   in
   Tool_catalog.register_metadata spec.name
     { Tool_catalog.visibility = effective_visibility;
-      lifecycle = spec.lifecycle;
+      lifecycle = Tool_catalog.Active;
       implementation_status = spec.implementation_status;
       canonical_name = spec.canonical_name;
       replacement = spec.replacement;

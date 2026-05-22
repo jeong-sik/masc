@@ -381,6 +381,16 @@ let test_nested_runtime_detector_ignores_git_commit_message () =
     (Keeper_shell_docker.command_uses_nested_container_runtime
        "git status && docker run --rm alpine true");
   Alcotest.(check bool)
+    "docker after compact separator is still blocked"
+    true
+    (Keeper_shell_docker.command_uses_nested_container_runtime
+       "git status;docker run --rm alpine true");
+  Alcotest.(check bool)
+    "quoted separator text is not a command boundary"
+    false
+    (Keeper_shell_docker.command_uses_nested_container_runtime
+       "git commit -m 'status;docker run --rm alpine true'");
+  Alcotest.(check bool)
     "quoted docker command word is still blocked"
     true
     (Keeper_shell_docker.command_uses_nested_container_runtime

@@ -289,8 +289,7 @@ let requires_auth_permission row =
 
 let test_no_orphaned_tools () =
   (* Every active registered schema must belong to at least one catalog
-     surface. Deprecated tools may be intentionally absent from every
-     surface only when their lifecycle/replacement metadata says so. *)
+     surface. *)
   let orphaned =
     schema_surface_audit_rows ()
     |> List.filter (fun row ->
@@ -360,26 +359,6 @@ let test_system_internal_callable () =
       (String.concat ", " uncallable);
   Alcotest.(check bool) "all system_internal callable" true (uncallable = [])
 
-let test_pruned_tools_registered_as_deprecated () =
-  (* Tools pruned from user-facing surfaces are registered as Deprecated
-     in explicit_metadata (#5039). They stay hidden from tools/list and
-     remain callable for in-flight sessions. Some may be fully removed
-     from surfaces when no backward compat is needed. *)
-  let deprecated_names =
-    List.map fst Tool_catalog.deprecated_tool_entries
-  in
-  List.iter
-    (fun name ->
-      Alcotest.(check bool) (name ^ " is Deprecated") true
-        (List.mem name deprecated_names);
-      Alcotest.(check bool) (name ^ " hidden") false
-        (Tool_catalog.is_visible name);
-      Alcotest.(check bool) (name ^ " callable") true
-        (Tool_catalog.allow_direct_call name))
-    [
-      "masc_webrtc_answer";
-      "masc_webrtc_offer";
-    ]
 let test_workspace_mutating_canonical_used () =
   (* workspace_mutating_tool_names in tool_catalog_surfaces is the canonical list.
      Verify no empty or phantom entries. *)
@@ -487,7 +466,5 @@ let () =
             test_system_internal_not_visible;
           Alcotest.test_case "System_internal callable" `Quick
             test_system_internal_callable;
-          Alcotest.test_case "pruned tools registered as Deprecated" `Quick
-            test_pruned_tools_registered_as_deprecated;
         ] );
     ]

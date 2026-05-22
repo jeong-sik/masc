@@ -107,44 +107,6 @@ let pr_review_action_metric_event_of_tool_io
            })
   | _ -> None
 
-let split_top_level_command_segments command =
-  let len = String.length command in
-  let push_segment unconditional start stop acc =
-    let segment = String.sub command start (stop - start) |> String.trim in
-    if segment = "" then acc else (unconditional, segment) :: acc
-  in
-  let rec loop acc unconditional start i in_single in_double escaped =
-    if i >= len then List.rev (push_segment unconditional start len acc)
-    else
-      let c = command.[i] in
-      if escaped then loop acc unconditional start (i + 1) in_single in_double false
-      else
-        match c with
-        | '\\' when not in_single ->
-            loop acc unconditional start (i + 1) in_single in_double true
-        | '\'' when not in_double ->
-            loop acc unconditional start (i + 1) (not in_single) in_double false
-        | '"' when not in_single ->
-            loop acc unconditional start (i + 1) in_single (not in_double) false
-        | '&' when (not in_single) && (not in_double) && i + 1 < len
-                   && command.[i + 1] = '&' ->
-            let acc = push_segment unconditional start i acc in
-            loop acc false (i + 2) (i + 2) in_single in_double false
-        | '|' when (not in_single) && (not in_double) && i + 1 < len
-                   && command.[i + 1] = '|' ->
-            let acc = push_segment unconditional start i acc in
-            loop acc false (i + 2) (i + 2) in_single in_double false
-        | '\n' when (not in_single) && not in_double ->
-            let acc = push_segment unconditional start i acc in
-            loop acc true (i + 1) (i + 1) in_single in_double false
-        | ';' when (not in_single) && not in_double ->
-            let acc = push_segment unconditional start i acc in
-            loop acc true (i + 1) (i + 1) in_single in_double false
-        | _ ->
-            loop acc unconditional start (i + 1) in_single in_double false
-  in
-  loop [] true 0 0 false false false
-
 let pr_work_action_of_git_action raw =
   match String.trim raw |> String.lowercase_ascii with
   | "add" -> Some "GIT_ADD"
@@ -183,7 +145,7 @@ let pr_work_actions_of_gh_segment segment =
   | _ -> []
 
 let pr_work_actions_of_command command =
-  split_top_level_command_segments command
+  Masc_exec_bash_parser.Bash_words.top_level_command_segments command
   |> List.concat_map (fun (unconditional, segment) ->
        (* Shell conditionals can skip later segments at runtime.  Without
           per-segment exit data, count only top-level segments that are

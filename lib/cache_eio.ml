@@ -69,10 +69,6 @@ let cache_file config key =
   Filename.concat (cache_dir config) (cache_filename key ^ ".json")
 ;;
 
-let legacy_cache_file config key =
-  Filename.concat (cache_dir config) (sanitize_key key ^ ".json")
-;;
-
 let entry_to_json (entry : cache_entry) : Yojson.Safe.t =
   `Assoc
     [ "key", `String entry.key
@@ -168,28 +164,6 @@ let decrement_cached_entry_count () =
     if current < 0 then current else max 0 (current - 1))
 ;;
 
-let maybe_migrate_legacy_entry config ~key entry =
-  let legacy_path = legacy_cache_file config key in
-  let primary_path = cache_file config key in
-  if
-    primary_path = legacy_path
-    || (not (Sys.file_exists legacy_path))
-    || Sys.file_exists primary_path
-  then ()
-  else (
-    try
-      let json = entry_to_json entry in
-      let content = Yojson.Safe.pretty_to_string json in
-      Fs_compat.save_file primary_path content;
-      if not (remove_file_if_exists legacy_path) then Atomic.set cached_entry_count (-1)
-    with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | exn ->
-      Log.Misc.warn
-        "cache_eio maybe_migrate_legacy_entry failed: %s"
-        (Printexc.to_string exn))
-;;
-
 (** Guard to prevent concurrent directory scan stampedes.
     Only one fiber may scan the cache directory at a time;
     concurrent callers return [fallback] immediately. *)
@@ -211,6 +185,21 @@ let read_cache_filenames dir =
     |> List.filter (fun f -> Filename.check_suffix f ".json")
 ;;
 
+let is_primary_cache_file filename entry =
+  String.equal filename (cache_filename entry.key ^ ".json")
+;;
+
+let count_primary_entries dir =
+  read_cache_filenames dir
+  |> List.fold_left
+       (fun count filename ->
+          let path = Filename.concat dir filename in
+          match read_entry_file path with
+          | Some entry when is_primary_cache_file filename entry -> count + 1
+          | _ -> count)
+       0
+;;
+
 (** Evict all expired cache entries. Returns count of evicted entries.
     Guarded: only one scan runs at a time; concurrent calls return 0. *)
 let evict_expired config =
@@ -230,8 +219,7 @@ let evict_expired config =
         filenames
     in
     (* Refresh cached count after eviction *)
-    let remaining = List.length filenames - evicted in
-    Atomic.set cached_entry_count remaining;
+    Atomic.set cached_entry_count (-1);
     evicted)
 ;;
 
@@ -282,9 +270,7 @@ let count_entries config =
   then c
   else (
     let dir = cache_dir config in
-    let count =
-      if not (Sys.file_exists dir) then 0 else List.length (read_cache_filenames dir)
-    in
+    let count = if not (Sys.file_exists dir) then 0 else count_primary_entries dir in
     Atomic.set cached_entry_count count;
     count)
 ;;
@@ -309,22 +295,12 @@ let set config ~key ~value ?(ttl_seconds : int option) ?(tags : string list = []
     else (
       ensure_cache_dir config;
       let primary_path = cache_file config key in
-      let legacy_path = legacy_cache_file config key in
       let primary_entry = read_entry_file primary_path in
-      let legacy_entry =
-        if String.equal primary_path legacy_path
-        then None
-        else read_entry_file legacy_path
-      in
       let is_overwrite =
         Option.fold
           ~none:false
           ~some:(fun entry -> String.equal entry.key key)
           primary_entry
-        || Option.fold
-             ~none:false
-             ~some:(fun entry -> String.equal entry.key key)
-             legacy_entry
       in
       let cap_check =
         match primary_entry with
@@ -332,7 +308,7 @@ let set config ~key ~value ?(ttl_seconds : int option) ?(tags : string list = []
           Error "Cache file collision detected for hashed key"
         | _ ->
           (* BUG-012: Max entries cap -- evict expired first, then reject if still full.
-             Overwrites and legacy-path migrations bypass the cap check. *)
+             Overwrites bypass the cap check. *)
           let max_entries = Env_config.Cache.max_entries in
           let current = count_entries config in
           if (not is_overwrite) && current >= max_entries
@@ -355,19 +331,7 @@ let set config ~key ~value ?(ttl_seconds : int option) ?(tags : string list = []
         try
           let target_exists = Sys.file_exists primary_path in
           Fs_compat.save_file primary_path content;
-          let removed_legacy =
-            if not (String.equal primary_path legacy_path)
-            then (
-              match legacy_entry with
-              | Some existing when String.equal existing.key key ->
-                remove_file_if_exists legacy_path
-              | _ -> false)
-            else false
-          in
-          if removed_legacy
-          then Atomic.set cached_entry_count (-1)
-          else if not target_exists
-          then ignore (Atomic.fetch_and_add cached_entry_count 1);
+          if not target_exists then ignore (Atomic.fetch_and_add cached_entry_count 1);
           Ok entry
         with
         | Eio.Cancel.Cancelled _ as e -> raise e
@@ -378,17 +342,8 @@ let set config ~key ~value ?(ttl_seconds : int option) ?(tags : string list = []
     Also triggers batch eviction when expired ratio > 50% (throttled). *)
 let get config ~key : (cache_entry option, string) result =
   let primary_path = cache_file config key in
-  let legacy_path = legacy_cache_file config key in
   let located =
-    match read_matching_entry primary_path ~key with
-    | Some entry -> Some (primary_path, entry, false)
-    | None ->
-      if String.equal primary_path legacy_path
-      then None
-      else (
-        match read_matching_entry legacy_path ~key with
-        | Some entry -> Some (legacy_path, entry, true)
-        | None -> None)
+    read_matching_entry primary_path ~key |> Option.map (fun entry -> primary_path, entry)
   in
   (* PR-0.2.A: cache hit/miss observation only (no logic change). *)
   let cache_label = [ "cache", "eio" ] in
@@ -398,7 +353,7 @@ let get config ~key : (cache_entry option, string) result =
     (* Trigger batch eviction check even on miss *)
     let _evicted = maybe_evict_expired config in
     Ok None
-  | Some (path, entry, from_legacy) ->
+  | Some (path, entry) ->
     (try
        if is_expired entry
        then (
@@ -412,7 +367,6 @@ let get config ~key : (cache_entry option, string) result =
          Ok None)
        else (
          Prometheus.inc_counter Prometheus.metric_cache_hits_total ~labels:cache_label ();
-         if from_legacy then maybe_migrate_legacy_entry config ~key entry;
          let _evicted = maybe_evict_expired config in
          Ok (Some entry))
      with
@@ -423,20 +377,10 @@ let get config ~key : (cache_entry option, string) result =
 (** Delete cache entry - synchronous *)
 let delete config ~key : (bool, string) result =
   let primary_path = cache_file config key in
-  let legacy_path = legacy_cache_file config key in
   try
     let deleted_primary = remove_file_if_exists primary_path in
-    let deleted_legacy =
-      if String.equal primary_path legacy_path
-      then false
-      else (
-        match read_matching_entry legacy_path ~key with
-        | Some _ -> remove_file_if_exists legacy_path
-        | None -> false)
-    in
     if deleted_primary then decrement_cached_entry_count ();
-    if deleted_legacy then decrement_cached_entry_count ();
-    Ok (deleted_primary || deleted_legacy)
+    Ok deleted_primary
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | e -> Error (Printexc.to_string e)
@@ -465,17 +409,8 @@ let list config ?(tag : string option) () : cache_entry list =
                  | None -> true
                  | Some t -> List.mem t entry.tags
                in
-               if include_entry
-               then (
-                 let is_primary =
-                   String.equal filename (cache_filename entry.key ^ ".json")
-                 in
-                 match Hashtbl.find_opt deduped entry.key with
-                 | Some (existing, existing_is_primary)
-                   when existing.created_at > entry.created_at
-                        || (existing.created_at = entry.created_at
-                            && (existing_is_primary || not is_primary)) -> ()
-                 | _ -> Hashtbl.replace deduped entry.key (entry, is_primary)))
+               if include_entry && is_primary_cache_file filename entry
+               then Hashtbl.replace deduped entry.key (entry, true))
            | None -> ())
         entries;
       Hashtbl.fold (fun _ (entry, _) acc -> entry :: acc) deduped [])

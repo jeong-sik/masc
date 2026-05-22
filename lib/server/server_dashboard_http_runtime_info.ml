@@ -959,7 +959,7 @@ let dashboard_tools_http_json ?actor ?timing (config : Coord.config) : Yojson.Sa
     in
     let inventory =
       run Tools_compute (fun () ->
-        Tool_misc.tool_inventory_json ctx ~include_hidden:true ~include_deprecated:true)
+        Tool_misc.tool_inventory_json ctx ~include_hidden:true)
     in
     let usage =
       run Tools_compute (fun () ->

@@ -502,12 +502,12 @@ let test_rest_tool_to_endpoint_websocket_discovery () =
   check string "path" "/ws" path
 
 let test_rest_tool_to_endpoint_webrtc_offer () =
-  let (m, path) = Transport.Rest.tool_to_endpoint "masc_webrtc_offer" in
+  let (m, path) = Transport.Rest.tool_to_endpoint "webrtc_offer" in
   check string "method" "POST" (Transport.Rest.method_to_string m);
   check string "path" "/webrtc/offer" path
 
 let test_rest_tool_to_endpoint_webrtc_answer () =
-  let (m, path) = Transport.Rest.tool_to_endpoint "masc_webrtc_answer" in
+  let (m, path) = Transport.Rest.tool_to_endpoint "webrtc_answer" in
   check string "method" "POST" (Transport.Rest.method_to_string m);
   check string "path" "/webrtc/answer" path
 
@@ -582,14 +582,14 @@ let test_rest_parse_request_webrtc_offer () =
     Transport.Rest.parse_request ~http_method:"POST" ~path:"/webrtc/offer"
       ~query_params:[] ~body:"{\"agent_name\":\"a\"}"
   in
-  check string "method_name" "masc_webrtc_offer" req.method_name
+  check string "method_name" "webrtc_offer" req.method_name
 
 let test_rest_parse_request_webrtc_answer () =
   let req =
     Transport.Rest.parse_request ~http_method:"POST" ~path:"/webrtc/answer"
       ~query_params:[] ~body:"{\"offer_id\":\"offer-1\",\"agent_name\":\"b\"}"
   in
-  check string "method_name" "masc_webrtc_answer" req.method_name
+  check string "method_name" "webrtc_answer" req.method_name
 
 let test_rest_parse_request_tool () =
   let req = Transport.Rest.parse_request ~http_method:"POST" ~path:"/api/v1/tools/custom_tool" ~query_params:[] ~body:"" in
@@ -627,8 +627,8 @@ let test_rest_parse_request_roundtrips_direct_bindings () =
       "masc_operator_action";
       "masc_operator_confirm";
       "masc_websocket_discovery";
-      "masc_webrtc_offer";
-      "masc_webrtc_answer";
+      "webrtc_offer";
+      "webrtc_answer";
       "masc_broadcast";
       "masc_agent_card";
     ]

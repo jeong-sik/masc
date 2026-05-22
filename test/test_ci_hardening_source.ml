@@ -2089,9 +2089,9 @@ let test_transport_route_contracts () =
   check bool "frontend exposes webrtc answer route" true
     (file_contains_pattern "lib/server/server_routes_http_routes_frontend.ml"
        {|Http.Router.post "/webrtc/answer"|});
-  check bool "frontend webrtc routes require tool auth" true
+  check bool "frontend webrtc routes require broadcast auth" true
     (file_contains_pattern "lib/server/server_routes_http_routes_frontend.ml"
-       "let webrtc_signaling_handler ~tool_name signaling_fn request reqd =\n  with_tool_auth ~tool_name");
+       "let webrtc_signaling_handler signaling_fn request reqd =\n  with_permission_auth ~permission:Masc_domain.CanBroadcast");
   check bool "h2 gateway exposes webrtc offer route" true
     (file_contains_pattern "lib/server/server_h2_gateway.ml"
        {|`POST, "/webrtc/offer"|});
@@ -2102,15 +2102,13 @@ let test_transport_route_contracts () =
     transport_delete_path_verifies_full_mcp_auth;
   check bool "h2 delete path verifies full mcp auth" true
     h2_delete_path_verifies_full_mcp_auth;
-  check bool "h2 gateway webrtc routes enforce tool auth" true
+  check bool "h2 gateway webrtc routes enforce broadcast auth" true
     (file_contains_pattern "lib/server/server_h2_gateway.ml"
-       {|authorize_tool_request|}
+       {|authorize_permission_request|}
     && file_contains_pattern "lib/server/server_h2_gateway.ml"
          {|~base_path:state.Mcp_server.room_config.base_path|}
     && file_contains_pattern "lib/server/server_h2_gateway.ml"
-         {|~tool_name:"masc_webrtc_offer"|}
-    && file_contains_pattern "lib/server/server_h2_gateway.ml"
-         {|~tool_name:"masc_webrtc_answer"|});
+         {|~permission:Masc_domain.CanBroadcast|});
   check bool "h2 gateway respects webrtc disabled state" true
     (file_contains_pattern "lib/server/server_h2_gateway.ml"
        {|Server_webrtc_transport.is_enabled ()|})

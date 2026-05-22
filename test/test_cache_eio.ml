@@ -305,7 +305,7 @@ let test_overwrite_existing_key_when_cache_is_full () =
     ));
   print_endline "  test_overwrite_existing_key_when_cache_is_full passed"
 
-let test_get_migrates_legacy_entry_and_list_dedupes () =
+let test_legacy_filename_entries_are_ignored () =
   with_temp_masc_dir (fun config ->
     let key = "legacy/key" in
     let legacy_path =
@@ -323,21 +323,25 @@ let test_get_migrates_legacy_entry_and_list_dedupes () =
     Fs_compat.save_file legacy_path
       (Yojson.Safe.pretty_to_string (Cache_eio.entry_to_json entry));
     Cache_eio.reset_cached_entry_count ();
-    assert (Cache_eio.count_entries config = 1);
+    assert (Cache_eio.count_entries config = 0);
     (match Cache_eio.get config ~key with
-     | Ok (Some fetched) -> assert (fetched.Cache_eio.value = "legacy-value")
-     | _ -> failwith "Expected legacy entry to be readable");
+     | Ok None -> ()
+     | _ -> failwith "Expected legacy filename entry to be ignored");
     let primary_path =
       Filename.concat (Cache_eio.cache_dir config)
         (Cache_eio.cache_filename key ^ ".json")
     in
-    assert (Sys.file_exists primary_path);
-    assert (not (Sys.file_exists legacy_path));
+    assert (not (Sys.file_exists primary_path));
+    assert (Sys.file_exists legacy_path);
     let listed = Cache_eio.list config () in
-    assert (List.length listed = 1);
-    assert (Cache_eio.count_entries config = 1)
+    assert (List.length listed = 0);
+    (match Cache_eio.delete config ~key with
+     | Ok false -> ()
+     | _ -> failwith "Expected delete to ignore legacy filename entry");
+    assert (Sys.file_exists legacy_path);
+    assert (Cache_eio.count_entries config = 0)
   );
-  print_endline "  test_get_migrates_legacy_entry_and_list_dedupes passed"
+  print_endline "  test_legacy_filename_entries_are_ignored passed"
 
 let () =
   Alcotest.run "Cache_eio"
@@ -371,7 +375,7 @@ let () =
             `Quick test_distinct_keys_do_not_collide_after_sanitize;
           Alcotest.test_case "overwrite existing key when full" `Quick
             test_overwrite_existing_key_when_cache_is_full;
-          Alcotest.test_case "get migrates legacy entry and list dedupes"
-            `Quick test_get_migrates_legacy_entry_and_list_dedupes;
+          Alcotest.test_case "legacy filename entries are ignored"
+            `Quick test_legacy_filename_entries_are_ignored;
         ] );
     ]

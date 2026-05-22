@@ -893,7 +893,10 @@ let compute_section ~name ?section_timings_ref f =
       (match section_timings_ref with
        | Some ref -> ref := (name, elapsed_ms) :: !ref
        | None -> ());
-      full_health_component_placeholder ~error:(Printexc.to_string exn) ~status:"error" name
+      let error = Printexc.to_string exn in
+      let timed_out = full_health_refresh_timeout_error error in
+      let status = if timed_out then "timeout" else "error" in
+      full_health_component_placeholder ~error ~component_timed_out:true ~status name
 
 let make_health_json ?(listener = "http/1.1") ?section_timings_ref request =
   let uptime_secs = health_uptime_secs () in

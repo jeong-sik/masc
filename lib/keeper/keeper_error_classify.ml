@@ -182,6 +182,7 @@ let message_looks_like_capacity_backpressure detail =
   string_contains_substring ~needle:"client capacity" lower
   || string_contains_substring ~needle:"capacity exhausted" lower
   || string_contains_substring ~needle:"local_resource_exhaustion" lower
+  || string_contains_substring ~needle:"slot full" lower
 
 let message_looks_like_gateway_backpressure detail =
   let lower = String.lowercase_ascii detail in
@@ -387,7 +388,7 @@ let degraded_retry_after_recoverable_error
         (Keeper_turn_driver.Cascade_exhausted
            { reason = Keeper_types.Other_detail detail; _ })
       when message_looks_like_capacity_backpressure detail ->
-        local_recovery_retry Cascade_exhausted
+        local_recovery_retry Capacity_backpressure
     | Some (Keeper_turn_driver.Cascade_exhausted _)
     | Some (Keeper_turn_driver.No_tool_capable_provider _)
     | Some (Keeper_turn_driver.Accept_rejected _)
@@ -443,7 +444,7 @@ let recoverable_cascade_failure_reason (err : Agent_sdk.Error.sdk_error) =
         (Keeper_turn_driver.Cascade_exhausted
            { reason = Keeper_types.Other_detail detail; _ })
       when message_looks_like_capacity_backpressure detail ->
-        Some Cascade_exhausted
+        Some Capacity_backpressure
     | Some (Keeper_turn_driver.Cascade_exhausted _) ->
         (* Generic cascade exhaustion: all candidates failed without a more
            specific reason. Treat as recoverable so declarative

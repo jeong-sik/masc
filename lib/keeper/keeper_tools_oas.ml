@@ -89,6 +89,7 @@ type failure_counts =
 
 and workflow_rejection_block =
   { count : int
+  ; task_id : string option
   ; rule_id : string option
   ; tool_suggestion : string option
   ; hint : string option
@@ -224,6 +225,7 @@ let workflow_rejection_scope_block_record counts key info =
     in
     let block =
       { count = previous_count + 1
+      ; task_id = info.task_id
       ; rule_id = info.rule_id
       ; tool_suggestion = info.tool_suggestion
       ; hint = info.hint
@@ -281,7 +283,6 @@ let workflow_rejection_recovery_fields ~tool_name ~count raw =
     @ optional_string "required_next_tool" info.tool_suggestion
     @ if count >= 2 then [ "workflow_rejection_loop", `Bool true ] else []
 ;;
-
 
 let json_has_nonempty_evidence_refs json =
   let nonempty_string = function
@@ -352,7 +353,8 @@ let workflow_rejection_scope_block_fields ~tool_name block =
           (workflow_rejection_recovery_instruction
              ~tool_name
              ~count:(block.count + 1)
-             { task_id = None; rule_id = block.rule_id
+             { task_id = block.task_id
+             ; rule_id = block.rule_id
              ; tool_suggestion = block.tool_suggestion
              ; hint = block.hint
              })
@@ -806,7 +808,7 @@ let make_keeper_tool_handler
             let deterministic_reason =
               Keeper_tool_deterministic_error.classify_raw raw_result
             in
-            let workflow_rejection_recovery_fields =
+            let workflow_rejection_recovery_fields, workflow_rejection_count =
               if is_workflow_rejection
               then (
                 match workflow_rejection_info_of_raw raw_result with
@@ -821,9 +823,10 @@ let make_keeper_tool_handler
                           scope_key
                           info)
                    | None -> ());
-                  workflow_rejection_recovery_fields ~tool_name:name ~count raw_result
-                | None -> [])
-              else []
+                  ( workflow_rejection_recovery_fields ~tool_name:name ~count raw_result
+                  , Some count )
+                | None -> [], None)
+              else [], None
             in
             let deterministic_recovery_fields =
               match deterministic_reason with
@@ -927,23 +930,28 @@ let make_keeper_tool_handler
             Option.iter
               (record_deterministic_tool_failure_metric ~tool_name:name)
               unified_reason;
-            (match unified_reason, is_workflow_rejection with
-             | Some reason, _ ->
+            (match unified_reason, workflow_rejection_count with
+             | Some reason, Some 1 ->
+               Log.Keeper.warn
+                 "tool %s workflow rejection (first, retry skipped, reason=%s): %s"
+                 name
+                 (Keeper_tool_deterministic_error.to_telemetry_key reason)
+                 detail
+             | Some reason, Some n ->
+               Log.Keeper.info
+                 "tool %s workflow rejection (repeated count=%d, retry skipped, \
+                  reason=%s): %s"
+                 name
+                 n
+                 (Keeper_tool_deterministic_error.to_telemetry_key reason)
+                 detail
+             | Some reason, None ->
                Log.Keeper.warn
                  "tool %s deterministic error (retry skipped, reason=%s): %s"
                  name
                  (Keeper_tool_deterministic_error.to_telemetry_key reason)
                  detail
-             | None, true ->
-               (* Unreachable by construction (see [unified_reason]
-                  above); kept for exhaustiveness. *)
-               Log.Keeper.warn
-                 "tool %s deterministic error (retry skipped, reason=%s): %s"
-                 name
-                 (Keeper_tool_deterministic_error.to_telemetry_key
-                    Keeper_tool_deterministic_error.Workflow_rejection_blocked)
-                 detail
-             | None, false ->
+             | None, _ ->
                (* MASC/OAS Error-Warn Reduction Goal §P3 adjacency
                   (2026-05-19): the same (tool, normalized detail)
                   tuple recurs as the supervisor walks the 1->2->3

@@ -30,11 +30,6 @@ val node_status_to_string : node_status -> string
     explicitly (drop / fallback / route). See #8777 / #8605. *)
 val node_status_of_string_opt : string -> node_status option
 
-(** Back-compat wrapper: unknown wire falls back to [Observed] but a
-    [Log.Misc.warn] is emitted so producer/consumer drift surfaces in
-    operator logs. See #8777. *)
-val node_status_of_string : string -> node_status
-
 (** {1 Span status}
 
     Separate lifecycle from {!node_status}.
@@ -49,11 +44,6 @@ val span_status_to_string : span_status -> string
 (** Strict parser: returns [None] on unknown wire so callers can react
     explicitly. Mirror of {!node_status_of_string_opt}. See #8605. *)
 val span_status_of_string_opt : string -> span_status option
-
-(** Back-compat parser: unknown wire still collapses to [Span_ended]
-    but emits a [Log.Misc.warn] so producer/consumer drift surfaces in
-    operator logs instead of silently misclassifying the span. *)
-val span_status_of_string : string -> span_status
 
 (** {1 Graph entities} *)
 

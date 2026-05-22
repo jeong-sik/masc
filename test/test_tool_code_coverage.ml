@@ -42,10 +42,30 @@ let write_text_file path content =
     ~finally:(fun () -> close_out_noerr oc)
     (fun () -> output_string oc content)
 
-let run_shell_ok ~cwd cmd =
-  let quoted_cwd = Filename.quote cwd in
-  let rc = Sys.command (Printf.sprintf "cd %s && %s" quoted_cwd cmd) in
-  Alcotest.(check int) ("shell command: " ^ cmd) 0 rc
+let process_exit_code = function
+  | Unix.WEXITED code -> code
+  | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> 255
+
+let run_process_ok ~cwd prog argv =
+  let original_cwd = Sys.getcwd () in
+  let dev_null = Unix.openfile Filename.null [ Unix.O_WRONLY ] 0o600 in
+  Fun.protect
+    ~finally:(fun () ->
+      Unix.close dev_null;
+      Sys.chdir original_cwd)
+    (fun () ->
+      Sys.chdir cwd;
+      let pid =
+        Unix.create_process_env prog argv (Unix.environment ()) Unix.stdin
+          dev_null dev_null
+      in
+      let _, status = Unix.waitpid [] pid in
+      Alcotest.(check int)
+        ("process command: " ^ String.concat " " (Array.to_list argv))
+        0 (process_exit_code status))
+
+let git_ok ~cwd args =
+  run_process_ok ~cwd "git" (Array.of_list ("git" :: args))
 
 let make_ctx_in_dir base_dir =
   Eio_main.run @@ fun env ->
@@ -130,9 +150,9 @@ let test_code_search_with_file_pattern_finds_matches () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
-      run_shell_ok ~cwd:base_dir "git init -q -b main";
-      run_shell_ok ~cwd:base_dir "git config user.email test@example.com";
-      run_shell_ok ~cwd:base_dir "git config user.name test";
+      git_ok ~cwd:base_dir [ "init"; "-q"; "-b"; "main" ];
+      git_ok ~cwd:base_dir [ "config"; "user.email"; "test@example.com" ];
+      git_ok ~cwd:base_dir [ "config"; "user.name"; "test" ];
       write_text_file (Filename.concat base_dir "match.ml")
         "let mascot_needle = 1\n";
       write_text_file (Filename.concat base_dir "ignore.md")
@@ -161,9 +181,9 @@ let test_code_search_treats_dash_prefixed_query_as_literal () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
-      run_shell_ok ~cwd:base_dir "git init -q -b main";
-      run_shell_ok ~cwd:base_dir "git config user.email test@example.com";
-      run_shell_ok ~cwd:base_dir "git config user.name test";
+      git_ok ~cwd:base_dir [ "init"; "-q"; "-b"; "main" ];
+      git_ok ~cwd:base_dir [ "config"; "user.email"; "test@example.com" ];
+      git_ok ~cwd:base_dir [ "config"; "user.name"; "test" ];
       write_text_file (Filename.concat base_dir "sample.txt")
         "--help should be searched literally\n";
       let ctx = make_ctx_in_dir base_dir in

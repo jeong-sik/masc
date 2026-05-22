@@ -66,35 +66,6 @@ type code_shell_exit_status =
 let classify_code_shell_exit =
   Tool_code_write_shell_validate.classify_code_shell_exit
 
-let shell_ir_with_default_cwd cwd ir =
-  match cwd with
-  | None -> ir
-  | Some dir ->
-    let default_cwd = Masc_exec.Path_scope.classify ~raw:dir ~cwd:dir in
-    let rec map_ir = function
-      | Masc_exec.Shell_ir.Simple simple ->
-        let simple =
-          match simple.cwd with
-          | Some _ -> simple
-          | None -> { simple with cwd = Some default_cwd }
-        in
-        Masc_exec.Shell_ir.Simple simple
-      | Masc_exec.Shell_ir.Pipeline stages ->
-        Masc_exec.Shell_ir.Pipeline (List.map map_ir stages)
-    in
-    map_ir ir
-;;
-
-let output_for_dispatch_status ~(status : Unix.process_status) ~stdout ~stderr =
-  match status with
-  | Unix.WEXITED 0 -> stdout
-  | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> (
-    match stdout, stderr with
-    | "", err -> err
-    | out, "" -> out
-    | out, err -> out ^ "\n" ^ err)
-;;
-
 let git_common_root path =
   try
     match
@@ -735,13 +706,13 @@ let handle_code_shell ~tool_name ~start_time ctx args =
 	                 match
 	                   Masc_exec.Exec_dispatch.dispatch
 	                     ~timeout_sec:safe_timeout
-	                     (shell_ir_with_default_cwd
+	                     (Exec_shell_adapter.shell_ir_with_default_cwd
 	                        cwd_opt
 	                        command_context.Exec_shell_gate.ast)
 	                 with
 	                 | { status = Unix.WEXITED code; stdout; stderr } ->
 	                     let output =
-	                       output_for_dispatch_status
+	                       Exec_shell_adapter.output_for_dispatch_status
 	                         ~status:(Unix.WEXITED code)
 	                         ~stdout
 	                         ~stderr
@@ -776,7 +747,7 @@ let handle_code_shell ~tool_name ~start_time ctx args =
 	                       (Yojson.Safe.pretty_to_string response)
 	                 | { status = Unix.WSIGNALED sig_num; stdout; stderr } ->
 	                     let output =
-	                       output_for_dispatch_status
+	                       Exec_shell_adapter.output_for_dispatch_status
 	                         ~status:(Unix.WSIGNALED sig_num)
 	                         ~stdout
 	                         ~stderr
@@ -788,7 +759,7 @@ let handle_code_shell ~tool_name ~start_time ctx args =
 	                          (truncate_output output))
 	                 | { status = Unix.WSTOPPED sig_num; stdout; stderr } ->
 	                     let output =
-	                       output_for_dispatch_status
+	                       Exec_shell_adapter.output_for_dispatch_status
 	                         ~status:(Unix.WSTOPPED sig_num)
 	                         ~stdout
 	                         ~stderr

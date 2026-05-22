@@ -192,7 +192,7 @@ let transport_status_json (ctx : http_context) =
              ; "auth_policy_present", `Bool streamable_auth_policy_present
              ; "base_url", `String ctx.base_url
              ; "mcp_url", `String (ctx.base_url ^ "/mcp")
-             ; "sse_url", `String (ctx.base_url ^ "/sse")
+             ; "sse_url", `String (ctx.base_url ^ "/mcp?sse_kind=observer")
              ]) )
     ; ( "grpc"
       , `Assoc

@@ -106,20 +106,18 @@ window flag first.
 
 ## What this PR does NOT change
 
-- **Server-side SSE infra** stays running.  `/sse`, `/sse/simple`,
-  `Oas_sse_bridge`, gRPC subscriber path — all still operational.
+- **Server-side SSE publisher infra** stays running.  Dashboard observer SSE is
+  served through `GET /mcp?sse_kind=observer`; `Oas_sse_bridge` and the gRPC
+  subscriber path remain operational.
   Removing them is a later PR after parallel-mode soak validates the WS
   channel under real workloads.
-- **A2A external endpoints** (`/sse/portal`, `/sse/subscriptions`) stay
-  unchanged.  External agents that subscribe to those routes are NOT
-  affected by the dashboard cutover.
 
 ## Verifying after cutover
 
 1. Open the dashboard.
 2. Confirm the beacon is green.
 3. DevTools → Network → confirm:
-   - 0 connections to `/sse` (EventSource type)
+   - 0 connections to `/mcp?...sse_kind=observer` (EventSource type)
    - 1 connection to `/ws` (WebSocket type, status 101)
 4. Trigger a server-side event (e.g., a heartbeat, a keeper
    broadcast).  Beacon counter should increment, journal feed should

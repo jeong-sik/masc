@@ -84,6 +84,9 @@ let test_transport_status_http_shape_extends_tool_shape () =
      with
     | `Bool _ -> true
     | _ -> false);
+  check string "http surface reports canonical observer SSE URL"
+    "http://127.0.0.1:8935/mcp?sse_kind=observer"
+    Yojson.Safe.Util.(http_json |> member "http" |> member "sse_url" |> to_string);
   check bool "grpc surface exposes reachability"
     true
     (match

@@ -494,26 +494,26 @@ let make_hooks
       | Agent_sdk.Hooks.PostToolUse { tool_name; input; output; duration_ms = hook_duration_ms; _ } ->
         record_progress ("tool_completed:" ^ tool_name);
         incr tool_call_count_ref;
-        let output_text = match output with
-          | Ok { Agent_sdk.Types.content; _ } -> content
-          | Error { Agent_sdk.Types.message; _ } -> message
-        in
-        (* Extract typed_outcome from structured tool output JSON.  The claim
-           handler embeds a typed outcome variant when it reports no eligible
-           tasks so downstream can classify progress without string parsing. *)
-        let typed_outcome =
+        (* Extract typed_outcome from structured tool output JSON and strip it
+           from the LLM-facing output so the internal metadata does not leak
+           into the next turn's context. *)
+        let output_text, typed_outcome =
           match output with
           | Ok { Agent_sdk.Types.content; _ } ->
             (match Yojson.Safe.from_string content with
              | json ->
-               (match json with
-                | `Assoc fields ->
-                  (match List.assoc_opt "typed_outcome" fields with
-                   | Some nested -> Keeper_tool_outcome.of_json nested
-                   | None -> None)
-                | _ -> None)
-             | exception _ -> None)
-          | Error _ -> None
+               let typed_outcome =
+                 match json with
+                 | `Assoc fields ->
+                   (match List.assoc_opt "typed_outcome" fields with
+                    | Some nested -> Keeper_tool_outcome.of_json nested
+                    | None -> None)
+                 | _ -> None
+               in
+               let stripped = Keeper_tool_outcome.strip_from_json json in
+               (Yojson.Safe.to_string stripped, typed_outcome)
+             | exception _ -> (content, None))
+          | Error { Agent_sdk.Types.message; _ } -> (message, None)
         in
         let input_keys = match input with
           | `Assoc pairs -> String.concat "," (List.map fst pairs)

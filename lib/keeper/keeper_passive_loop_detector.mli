@@ -44,6 +44,21 @@ val record_turn :
     latched per episode — it will not fire again until the streak resets
     and a new episode begins. *)
 
+val record_turn_effect :
+  keeper_name:string ->
+  Keeper_tool_disclosure.turn_effect ->
+  unit
+(** [record_turn_effect ~keeper_name turn_effect] is the typed variant of
+    [record_turn].  It consumes a [Keeper_tool_disclosure.turn_effect]
+    directly, avoiding the lossy string round-trip.
+
+    - [Streak_increment] increments the passive streak.
+    - [Streak_reset] resets the streak and records a productive turn.
+    - [Streak_reset_and_empty_queue_sleep] resets the streak (empty queue
+      is not a passive loop) and logs the reason for operators.
+
+    @since task-555 *)
+
 val current_streak : keeper_name:string -> int
 (** Return the current passive-only streak for [keeper_name].
     Returns 0 if the keeper has no recorded state. *)

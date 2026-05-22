@@ -294,6 +294,51 @@ let test_nudge_message_contains_streak_count () =
     check_absent "passive nudge avoids keeper_bash" "keeper_bash" text;
     check_absent "passive nudge avoids keeper_fs_read" "keeper_fs_read" text
 
+(* ── record_turn_effect tests (task-555) ──────────────────────────── *)
+
+module TD = Masc_mcp.Keeper_tool_disclosure
+
+let test_turn_effect_streak_increment () =
+  Eio_main.run @@ fun _env ->
+  setup ();
+  PLD.record_turn_effect ~keeper_name:"k-effect-inc" TD.Streak_increment;
+  PLD.record_turn_effect ~keeper_name:"k-effect-inc" TD.Streak_increment;
+  check int "Streak_increment → streak 2" 2
+    (PLD.current_streak ~keeper_name:"k-effect-inc")
+
+let test_turn_effect_streak_reset () =
+  Eio_main.run @@ fun _env ->
+  setup ();
+  PLD.record_turn_effect ~keeper_name:"k-effect-reset" TD.Streak_increment;
+  PLD.record_turn_effect ~keeper_name:"k-effect-reset" TD.Streak_increment;
+  PLD.record_turn_effect ~keeper_name:"k-effect-reset" TD.Streak_reset;
+  check int "Streak_reset → streak 0" 0
+    (PLD.current_streak ~keeper_name:"k-effect-reset")
+
+let test_turn_effect_empty_queue_sleep_resets_streak () =
+  Eio_main.run @@ fun _env ->
+  setup ();
+  PLD.record_turn_effect ~keeper_name:"k-effect-sleep" TD.Streak_increment;
+  PLD.record_turn_effect ~keeper_name:"k-effect-sleep" TD.Streak_increment;
+  PLD.record_turn_effect ~keeper_name:"k-effect-sleep"
+    (TD.Streak_reset_and_empty_queue_sleep
+       { reason = TD.No_eligible_tasks { scope_excluded_count = 3; all_goals_excluded = true } });
+  check int "Streak_reset_and_empty_queue_sleep → streak 0" 0
+    (PLD.current_streak ~keeper_name:"k-effect-sleep")
+
+let test_turn_effect_mixed_with_record_turn () =
+  Eio_main.run @@ fun _env ->
+  setup ();
+  (* Old API + new API interleaved — must share the same state. *)
+  PLD.record_turn ~keeper_name:"k-mixed" ~progress_class:"passive_status";
+  PLD.record_turn_effect ~keeper_name:"k-mixed" TD.Streak_increment;
+  PLD.record_turn ~keeper_name:"k-mixed" ~progress_class:"passive_status";
+  check int "mixed old/new API → streak 3" 3
+    (PLD.current_streak ~keeper_name:"k-mixed");
+  PLD.record_turn_effect ~keeper_name:"k-mixed" TD.Streak_reset;
+  check int "mixed reset → streak 0" 0
+    (PLD.current_streak ~keeper_name:"k-mixed")
+
 let () =
   run "keeper_passive_loop_detector" [
     "streak", [
@@ -341,5 +386,15 @@ let () =
         test_nudge_message_none_for_unknown_keeper;
       test_case "nudge text contains streak count" `Quick
         test_nudge_message_contains_streak_count;
+    ];
+    "turn_effect (task-555)", [
+      test_case "Streak_increment increments streak" `Quick
+        test_turn_effect_streak_increment;
+      test_case "Streak_reset resets streak" `Quick
+        test_turn_effect_streak_reset;
+      test_case "Streak_reset_and_empty_queue_sleep resets streak" `Quick
+        test_turn_effect_empty_queue_sleep_resets_streak;
+      test_case "Mixed record_turn + record_turn_effect" `Quick
+        test_turn_effect_mixed_with_record_turn;
     ];
   ]

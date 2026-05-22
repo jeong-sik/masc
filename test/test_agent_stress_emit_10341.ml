@@ -39,7 +39,13 @@ let opt_kind = testable
           Fmt.string fmt "Some Fallback_approval"
       | Some Agent_stress.Task_released -> Fmt.string fmt "Some Task_released"
       | Some (Agent_stress.Turn_failure _) ->
-          Fmt.string fmt "Some Turn_failure")
+          Fmt.string fmt "Some Turn_failure"
+      | Some Agent_stress.Provider_timeout ->
+          Fmt.string fmt "Some Provider_timeout"
+      | Some Agent_stress.Capacity_pressure ->
+          Fmt.string fmt "Some Capacity_pressure"
+      | Some Agent_stress.Turn_liveness ->
+          Fmt.string fmt "Some Turn_liveness")
     (fun a b ->
        match (a, b) with
        | None, None -> true

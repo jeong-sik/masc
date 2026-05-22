@@ -114,7 +114,6 @@ let keeper_attention_kind reason =
   | None -> "keeper_attention"
 
 let keeper_attention_severity ~reason ~runtime_blocker_class =
-  let reason = canonical_keeper_attention_reason reason in
   match reason, runtime_blocker_class with
   | Some "runtime_blocked", _
   | Some "provider_timeout", _
@@ -124,7 +123,6 @@ let keeper_attention_severity ~reason ~runtime_blocker_class =
 
 let keeper_attention_summary ~(meta : Keeper_types.keeper_meta) ~reason
     ~runtime_blocker_summary =
-  let reason = canonical_keeper_attention_reason reason in
   match reason, runtime_blocker_summary with
   | Some reason, Some summary ->
       Printf.sprintf "%s needs operator attention: %s (%s)" meta.name reason summary

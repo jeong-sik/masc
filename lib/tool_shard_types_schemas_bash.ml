@@ -112,7 +112,7 @@ let keeper_bash_timeout_sec_field =
 ;;
 
 let keeper_bash_description =
-  "Execute one command through the keeper_bash safety gates via typed argv. Use \
+  "Execute one command through the typed execution gates via typed argv. Use \
    executable/argv for one process, or pipeline/stages for explicit Shell IR \
    pipelines. The legacy 'cmd' string field is no longer accepted. Shell \
    metacharacters in argv are data, not syntax. Good: executable='git' \
@@ -123,9 +123,9 @@ let keeper_bash_description =
    'repos/X' instead. Sandbox root is NOT a git repository: git/gh calls require \
    cwd='repos/<REPO_NAME>' (or the worktree path under it). 'not a git repository' \
    or 'path_outside_sandbox' from the sandbox root means you forgot the cwd. For \
-   read-only search/listing use keeper_shell or Grep when visible; for file edits use \
-   keeper_fs_edit. Long-running commands must be split or run through a \
-   dedicated structured workflow; keeper_bash no longer exposes background task \
+   read-only search/listing use Grep when visible; for file edits use Edit. \
+   Long-running commands must be split or run through a \
+   dedicated structured workflow; this tool no longer exposes background task \
    lifecycle tools."
 ;;
 

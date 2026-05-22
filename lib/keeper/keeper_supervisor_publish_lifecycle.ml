@@ -4,8 +4,7 @@
     [publish_lifecycle] is the supervisor's single event-emission
     helper.  It (a) records the event into the per-keeper lifecycle
     audit ring for the dashboard (#12798), and (b) republishes onto
-    the cascade event bus iff [Keeper_keepalive.get_bus ()] resolves —
-    pre-bus callers no-op gracefully.
+    the cascade event bus when the process-wide MASC event bus is set.
 
     [publish_phase_lifecycle ~phase] is a thin convenience that
     constructs a [Keeper_lifecycle_events.Phase_event phase] and
@@ -33,9 +32,7 @@ let publish_lifecycle
   in
   (* #12798: record in the per-keeper lifecycle audit ring for dashboard. *)
   Keeper_lifecycle_audit.record ~keeper_name ~event_name ~phase ~detail;
-  match Keeper_keepalive.get_bus () with
-  | Some bus -> Cascade_events.publish_keeper_lifecycle bus ~event ~keeper_name ~detail ()
-  | None -> ()
+  Cascade_events.publish_keeper_lifecycle ~event ~keeper_name ~detail ()
 ;;
 
 (** Phase-event helper: the wire event name IS the phase name. *)

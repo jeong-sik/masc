@@ -7,12 +7,9 @@
     [masc.broadcast], [masc.heartbeat], [masc.keeper.lifecycle],
     ...
 
-    The [bus] argument is accepted for backward compatibility
-    but ignored — every publish routes to
-    {!Masc_event_bus.get} so the OAS/MASC layer boundary is
-    preserved regardless of the caller's bus reference.  OAS's
-    [event_bus.mli:103-107] explicitly warns against publishing
-    domain events onto OAS's bus.
+    Every publish routes to {!Masc_event_bus.get} so the OAS/MASC
+    layer boundary is preserved.  OAS's [event_bus.mli:103-107]
+    explicitly warns against publishing domain events onto OAS's bus.
 
     Wire format on SSE output keeps colon separators
     ([masc.broadcast]) for dashboard compatibility — translation
@@ -23,12 +20,11 @@
 (** {1 Active publishers} *)
 
 val publish_broadcast :
-  Agent_sdk.Event_bus.t -> agent_name:string -> content:string -> unit
+  agent_name:string -> content:string -> unit
 (** Publishes [masc.broadcast] with payload
     [{agent_name, content, timestamp}]. *)
 
 val publish_heartbeat :
-  Agent_sdk.Event_bus.t ->
   agent_name:string ->
   turn:int ->
   context_pct:float ->
@@ -37,7 +33,6 @@ val publish_heartbeat :
     [{agent_name, turn, context_pct, timestamp}]. *)
 
 val publish_task_transition :
-  Agent_sdk.Event_bus.t ->
   agent_name:string ->
   task_id:string ->
   transition:Masc_domain.task_action ->
@@ -55,7 +50,6 @@ val publish_task_transition :
 (** {1 Keeper snapshot + lifecycle} *)
 
 val publish_keeper_snapshot :
-  Agent_sdk.Event_bus.t ->
   keeper_name:string ->
   generation:int ->
   context_ratio:float ->
@@ -66,7 +60,6 @@ val publish_keeper_snapshot :
     Emitted alongside SSE broadcast in [keeper_keepalive]. *)
 
 val publish_keeper_lifecycle :
-  Agent_sdk.Event_bus.t ->
   event:Keeper_lifecycle_events.lifecycle_event ->
   keeper_name:string ->
   detail:string ->
@@ -97,7 +90,6 @@ val publish_keeper_lifecycle :
     where observability matters most. *)
 
 val publish_keeper_dead :
-  Agent_sdk.Event_bus.t ->
   keeper_name:string ->
   reason:string ->
   restart_count:int ->

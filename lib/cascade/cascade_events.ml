@@ -6,11 +6,9 @@
     Custom-name convention: [masc.broadcast], [masc.heartbeat],
     [masc.keeper.lifecycle], ...
 
-    The [bus] argument is accepted for backward compatibility but
-    ignored: every publish routes to [Masc_event_bus.get ()] so the
-    OAS/MASC layer boundary is preserved regardless of the caller's
-    bus reference. OAS's [event_bus.mli:103-107] explicitly warns
-    against publishing domain events onto OAS's bus.
+    Every publish routes to [Masc_event_bus.get ()] so the OAS/MASC
+    layer boundary is preserved. OAS's [event_bus.mli:103-107]
+    explicitly warns against publishing domain events onto OAS's bus.
 
     Wire format on SSE output keeps colon separators ("masc.broadcast")
     for dashboard compatibility — the translation is done by the SSE
@@ -18,16 +16,16 @@
 
     @since 2.90.0 (bus-separated since 2.353.0) *)
 
-(* Route every publish to the MASC-owned bus. Caller-passed [bus] is
-   ignored — this closes the OAS boundary violation where MASC was
-   publishing Custom("masc:...") onto OAS's shared bus. *)
+(* Route every publish to the MASC-owned bus. This closes the OAS boundary
+   violation where MASC was publishing Custom("masc:...") onto OAS's shared
+   bus. *)
 let masc_publish event =
   match Masc_event_bus.get () with
   | Some mb -> Agent_sdk_metrics_bridge.publish mb event
   | None -> ()
 
 (** Publish a broadcast event to the shared Event_bus. *)
-let publish_broadcast (_bus : Agent_sdk.Event_bus.t) ~agent_name ~content =
+let publish_broadcast ~agent_name ~content =
   let payload = `Assoc [
     ("agent_name", `String agent_name);
     ("content", `String content);
@@ -36,7 +34,7 @@ let publish_broadcast (_bus : Agent_sdk.Event_bus.t) ~agent_name ~content =
   masc_publish (Agent_sdk.Event_bus.mk_event (Custom ("masc.broadcast", payload)))
 
 (** Publish a heartbeat event to the shared Event_bus. *)
-let publish_heartbeat (_bus : Agent_sdk.Event_bus.t) ~agent_name ~turn ~context_pct =
+let publish_heartbeat ~agent_name ~turn ~context_pct =
   let payload = `Assoc [
     ("agent_name", `String agent_name);
     ("turn", `Int turn);
@@ -51,7 +49,7 @@ let publish_heartbeat (_bus : Agent_sdk.Event_bus.t) ~agent_name ~turn ~context_
     ("claim" / "start" / "done" / ...) is preserved via
     [Masc_domain.task_action_to_string]. Sibling refactor of #8846 (the
     Coord-side hook for the same transition vocabulary). *)
-let publish_task_transition (_bus : Agent_sdk.Event_bus.t) ~agent_name ~task_id
+let publish_task_transition ~agent_name ~task_id
     ~(transition : Masc_domain.task_action) =
   let payload = `Assoc [
     ("agent_name", `String agent_name);
@@ -65,7 +63,7 @@ let publish_task_transition (_bus : Agent_sdk.Event_bus.t) ~agent_name ~task_id
 
 (** Publish a keeper snapshot event to the OAS Event_bus.
     Emitted alongside SSE broadcast in keeper_keepalive. *)
-let publish_keeper_snapshot (_bus : Agent_sdk.Event_bus.t) ~keeper_name
+let publish_keeper_snapshot ~keeper_name
     ~generation ~context_ratio ~message_count =
   let payload = `Assoc [
     ("keeper_name", `String keeper_name);
@@ -106,7 +104,7 @@ let publish_keeper_snapshot (_bus : Agent_sdk.Event_bus.t) ~keeper_name
      - Custom_event { verb; phase = Some p } -> event=verb, phase=p
      - Phase_event p                          -> event=p, phase=p
    The legacy ?phase optional argument is folded into the variant. *)
-let publish_keeper_lifecycle (_bus : Agent_sdk.Event_bus.t)
+let publish_keeper_lifecycle
     ~(event : Keeper_lifecycle_events.lifecycle_event)
     ~keeper_name ~detail () =
   let phase_json =
@@ -134,7 +132,7 @@ let publish_keeper_lifecycle (_bus : Agent_sdk.Event_bus.t)
     the [event="dead"] entry on [masc.keeper.lifecycle] (which is unstructured
     free-form [detail]) so subscribers can filter on a stable topic and pull
     the structured fields directly. Topic: [masc.keeper.dead]. *)
-let publish_keeper_dead (_bus : Agent_sdk.Event_bus.t)
+let publish_keeper_dead
     ~keeper_name ~reason ~restart_count ~last_failure_reason () =
   let last_failure_json =
     match last_failure_reason with

@@ -55,6 +55,11 @@ val get_last_memory_injection : string -> (string * int) option
     agent. Thread-safe (Stdlib.Mutex). Returns [None] if no injection was
     recorded since the last [Continue] branch or process start. *)
 
+val clear_last_memory_injection : string -> unit
+(** Clear the recorded memory injection digest and size for an agent.
+    Used at the keeper turn boundary so pre-dispatch failures cannot
+    inherit side-channel data from an earlier turn. *)
+
 val compose_with_inner :
   memory_hooks:Agent_sdk.Hooks.hooks ->
   inner:Agent_sdk.Hooks.hooks ->

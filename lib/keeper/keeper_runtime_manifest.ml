@@ -441,8 +441,8 @@ let decision_public_allowlist =
     ; "elapsed_ms"; "provider_attempt_id"; "tool_batch_id"; "checkpoint_id"
     ; "compaction_id"; "memory_injection_id"; "event_bus_correlation_id"
     ; "event_bus_run_id"; "parent_event_id"; "caused_by"; "logical_seq"
-    ; "repair_reason"; "matched_started_ts"; "matched_started_status"
-    ; "error"; "exception_kind"; "latency_ms"
+    ; "compaction_source"; "repair_reason"; "matched_started_ts"
+    ; "matched_started_status"; "error"; "exception_kind"; "latency_ms"
     ; "checkpoint_after_present"; "is_last"; "per_provider_timeout_s"
     ; "attempt_timeout_s"; "attempt_timeout_source"; "attempt_watchdog_source"
     ; "liveness_mode"; "liveness_budget_source"
@@ -456,8 +456,9 @@ let clock_refs_public_allowlist =
   StringSet.of_list
     [ "edge_id"; "lane"; "source_clock"; "observed_at"; "started_at"; "finished_at"
     ; "elapsed_ms"; "provider_attempt_id"; "tool_batch_id"; "checkpoint_id"
-    ; "compaction_id"; "memory_injection_id"; "event_bus_correlation_id"
-    ; "event_bus_run_id"; "parent_event_id"; "caused_by"; "logical_seq"
+    ; "compaction_id"; "compaction_source"; "memory_injection_id"
+    ; "event_bus_correlation_id"; "event_bus_run_id"; "parent_event_id"
+    ; "caused_by"; "logical_seq"
     ]
 
 let rec reject_unknown_fields ~allowlist path = function

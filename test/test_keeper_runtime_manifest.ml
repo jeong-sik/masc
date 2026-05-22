@@ -3343,12 +3343,14 @@ let test_public_projection_allowlist_filters_provider_model () =
       [ ("edge_id", `String "e1")
       ; ("lane", `String "L1")
       ; ("source_clock", `String "wall")
+      ; ("compaction_source", `String "pre_dispatch_hygiene")
       ; ("model_source", `String "gpt-4")
       ; ("provider_attempt_id", `String "pa1")
       ; ( "clock_refs"
         , `Assoc
             [ ("edge_id", `String "ce1")
             ; ("source_clock", `String "monotonic")
+            ; ("compaction_source", `String "pre_dispatch_hygiene")
             ; ("provider_model_hint", `String "should_be_filtered")
             ; ("provider_attempt_id", `String "cpa1")
             ] )
@@ -3371,12 +3373,14 @@ let test_public_projection_allowlist_filters_provider_model () =
   Alcotest.(check bool) "edge_id kept" true (has "edge_id");
   Alcotest.(check bool) "lane kept" true (has "lane");
   Alcotest.(check bool) "source_clock kept" true (has "source_clock");
+  Alcotest.(check bool) "compaction_source kept" true (has "compaction_source");
   Alcotest.(check bool) "provider_attempt_id kept" true (has "provider_attempt_id");
   Alcotest.(check bool) "model_source filtered" false (has "model_source");
   Alcotest.(check bool) "unknown_field filtered" false (has "unknown_field");
   Alcotest.(check bool) "clock_refs kept" true (has "clock_refs");
   Alcotest.(check bool) "clock edge_id kept" true (clock_has "edge_id");
   Alcotest.(check bool) "clock source_clock kept" true (clock_has "source_clock");
+  Alcotest.(check bool) "clock compaction_source kept" true (clock_has "compaction_source");
   Alcotest.(check bool) "clock provider_attempt_id kept" true (clock_has "provider_attempt_id");
   Alcotest.(check bool) "clock provider_model_hint filtered" false (clock_has "provider_model_hint")
 

@@ -106,6 +106,17 @@ let read_file_tail_lines path ~max_bytes ~max_lines : string list =
       ();
     []
 
+let record_memory_recall_read_error ~site path exn_class =
+  let exn_label = Keeper_memory_recall_exn_class.to_label exn_class in
+  Log.Keeper.warn
+    "%s: dropping history read of %s: <error class=%s>"
+    site path exn_label;
+  Prometheus.inc_counter
+    Keeper_metrics.metric_keeper_memory_recall_read_errors
+    ~labels:[ ("exception_class", exn_label) ]
+    ()
+;;
+
 (* RFC-0149 §3.1 — typed Result entry point.  Distinguishes "empty
    memory bank" ([Ok summary] where [summary] holds zero recent rows)
    from "memory bank read failed" ([Error class]).  Callers that want
@@ -739,7 +750,8 @@ let history_user_messages_from_lines
 
 (* RFC-0149 §3.1: typed Result variant.  Distinguishes [Ok []] ("no
    user messages found in the history file") from [Error class] ("the
-   history file read failed"). *)
+   history file read failed"). Read failures still increment the bounded
+   recall-read-error metric before returning [Error]. *)
 let load_history_user_messages_result
     ~(path : string)
     ~(max_n : int) :
@@ -752,7 +764,12 @@ let load_history_user_messages_result
   with
   | Ok lines ->
     Ok (history_user_messages_from_lines ~path ~max_n lines)
-  | Error exn_class -> Error exn_class
+  | Error exn_class ->
+    record_memory_recall_read_error
+      ~site:"load_history_user_messages_result"
+      path
+      exn_class;
+    Error exn_class
 
 (** Build recall candidates by merging checkpoint messages with history.jsonl.
     Checkpoint messages are prioritized (recent context), history.jsonl
@@ -766,8 +783,9 @@ let recall_candidates_with_history
   let from_checkpoint = recent_user_messages checkpoint_messages ~max_n:max_checkpoint in
   (* RFC-0149 §3.1 closeout — aggregation site.  History read failure
      is elided to [[]] so the checkpoint matches still surface; the
-     bounded [exn_class] counter on [read_file_tail_lines] is the
-     informational signal for the failure. *)
+     bounded [exn_class] counter emitted by
+     [load_history_user_messages_result] is the informational signal for
+     the failure. *)
   let from_history =
     match
       load_history_user_messages_result ~path:history_path ~max_n:max_history

@@ -518,6 +518,12 @@ let test_record_last_memory_injection_overwrites () =
   let result = Memory_hooks.get_last_memory_injection "agent_b" in
   check (option (pair string int)) "overwrites previous injection" (Some ("second", 200)) result
 
+let test_clear_last_memory_injection () =
+  Memory_hooks.record_last_memory_injection "agent_clear" "digest" 123;
+  Memory_hooks.clear_last_memory_injection "agent_clear";
+  let result = Memory_hooks.get_last_memory_injection "agent_clear" in
+  check (option (pair string int)) "cleared" None result
+
 let test_memory_injection_cleared_on_continue () =
   let tmp_dir = Filename.temp_dir "masc_test_mh" "" in
   let config = make_test_config ~base_path:tmp_dir in
@@ -710,6 +716,7 @@ let () =
       test_case "record and get last injection" `Quick test_record_and_get_last_memory_injection;
       test_case "get returns None when missing" `Quick test_get_last_memory_injection_returns_none_when_missing;
       test_case "record overwrites previous" `Quick test_record_last_memory_injection_overwrites;
+      test_case "clear last injection" `Quick test_clear_last_memory_injection;
       test_case "cleared on Continue branch" `Quick test_memory_injection_cleared_on_continue;
     ];
     "execution_receipt_json", [

@@ -98,9 +98,6 @@ let classify_error (err : string) : error_kind =
       in
       go 0)
   in
-  let err =
-    if contains_in err "oas_timeout_budget" then "provider_timeout" else err
-  in
   let contains needle = contains_in err needle in
   if contains "sandbox docker"
   then Sandbox_docker
@@ -108,7 +105,7 @@ let classify_error (err : string) : error_kind =
   then Stale_turn_timeout
   else if contains "fiber_unresolved"
   then Fiber_unresolved
-  else if contains "provider_timeout"
+  else if contains "provider_timeout" || contains "oas_timeout_budget"
   then Provider_timeout
   else if contains "state machine guard" || contains "guard violation"
   then State_machine_guard

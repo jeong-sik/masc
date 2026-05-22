@@ -419,12 +419,26 @@ type error_kind = Error_kind of string
 let error_kind_of_string value = Error_kind value
 let error_kind_to_string (Error_kind value) = value
 
+let canonical_error_kind_label = function
+  | "oas_timeout_budget" -> "provider_timeout"
+  | "oas_timeout_budget_loop" -> "provider_timeout_loop"
+  | value -> value
+
 let timeout_error_kinds =
   List.map error_kind_of_string
-    [ "provider_timeout"; "turn_timeout"; "admission_queue_timeout" ]
+    [
+      "provider_timeout";
+      "provider_timeout_loop";
+      "turn_timeout";
+      "admission_queue_timeout";
+    ]
 
 let stress_kind_for_error_kind error_kind =
-  let trimmed = String.trim (error_kind_to_string error_kind) in
+  let trimmed =
+    error_kind_to_string error_kind
+    |> String.trim
+    |> canonical_error_kind_label
+  in
   if
     List.exists
       (fun kind -> String.equal trimmed (error_kind_to_string kind))
@@ -463,7 +477,11 @@ let () =
     ()
 
 let normalize_error_kind kind =
-  let trimmed = String.trim (error_kind_to_string kind) in
+  let trimmed =
+    error_kind_to_string kind
+    |> String.trim
+    |> canonical_error_kind_label
+  in
   if trimmed = "" then "unspecified" else trimmed
 
 let failure_learnings ~error_kind ~error_preview =
@@ -496,7 +514,7 @@ let store_failed_turn_episode
     String_util.utf8_safe ~max_bytes:4099 ~suffix:"..." error_message
     |> String_util.to_string
   in
-  let error_kind_label = error_kind_to_string error_kind in
+  let error_kind_label = normalize_error_kind error_kind in
   let summary =
     Printf.sprintf "keeper turn %d failed (%s): %s" turn error_kind_label
       error_preview

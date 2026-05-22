@@ -451,7 +451,7 @@ let test_structured_required_tool_no_tool_call () =
     (terminal_next_action terminal)
 ;;
 
-let test_structured_oas_timeout_budget () =
+let test_structured_oas_timeout_budget_collapses_to_turn_timeout () =
   let err =
     Masc_mcp.Keeper_turn_driver.sdk_error_of_masc_internal_error
       (Masc_mcp.Keeper_turn_driver.Oas_timeout_budget
@@ -465,12 +465,12 @@ let test_structured_oas_timeout_budget () =
          })
   in
   let terminal = KT.of_failure ~raw_error:(Agent_sdk.Error.to_string err) err in
-  check string "code" "oas_timeout_budget" (terminal_code terminal);
+  check string "code" "turn_wall_clock_timeout" (terminal_code terminal);
   check string "severity" "warn" (KT.severity_to_string (terminal_severity terminal));
   check
     (option string)
     "next action"
-    (Some "inspect_timeout_budget")
+    (Some "inspect_turn_timeout")
     (terminal_next_action terminal)
 ;;
 
@@ -722,7 +722,10 @@ let () =
             "required tool no tool call"
             `Quick
             test_structured_required_tool_no_tool_call
-        ; test_case "oas timeout budget" `Quick test_structured_oas_timeout_budget
+        ; test_case
+            "legacy OAS timeout budget collapses to turn timeout"
+            `Quick
+            test_structured_oas_timeout_budget_collapses_to_turn_timeout
         ; test_case
             "max_tokens ceiling violation"
             `Quick

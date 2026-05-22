@@ -69,9 +69,9 @@ describe('extractKeeperStopSummaries', () => {
     expect(gamma.storm_pauses).toBe(7)
   })
 
-  it('aggregates budget_loop_pauses from masc_keeper_oas_timeout_budget_loop_paused_total', () => {
+  it('aggregates budget_loop_pauses from masc_keeper_provider_timeout_loop_paused_total', () => {
     const metrics: ParsedMetric[] = [
-      makeMetric('masc_keeper_oas_timeout_budget_loop_paused_total', [
+      makeMetric('masc_keeper_provider_timeout_loop_paused_total', [
         { labels: { keeper: 'delta' }, value: 4 },
       ]),
     ]
@@ -80,9 +80,9 @@ describe('extractKeeperStopSummaries', () => {
     expect(delta.budget_loop_pauses).toBe(4)
   })
 
-  it('aggregates budget_strikes from masc_keeper_oas_timeout_budget_strike', () => {
+  it('aggregates budget_strikes from masc_keeper_provider_timeout_strike_total', () => {
     const metrics: ParsedMetric[] = [
-      makeMetric('masc_keeper_oas_timeout_budget_strike', [
+      makeMetric('masc_keeper_provider_timeout_strike_total', [
         { labels: { keeper: 'epsilon' }, value: 2 },
       ]),
     ]

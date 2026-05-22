@@ -1171,7 +1171,7 @@ let test_oas_timeout_budget_loop_pause_skips_restart () =
         (Some (Reg.Oas_timeout_budget_loop { count = 3 }));
       let baseline_pause =
         Masc_mcp.Prometheus.metric_total
-          "masc_keeper_oas_timeout_budget_loop_paused_total"
+          "masc_keeper_provider_timeout_loop_paused_total"
       in
       let baseline_dead =
         Masc_mcp.Prometheus.metric_total
@@ -1190,7 +1190,7 @@ let test_oas_timeout_budget_loop_pause_skips_restart () =
       Sup.sweep_and_recover ctx;
       let after_pause =
         Masc_mcp.Prometheus.metric_total
-          "masc_keeper_oas_timeout_budget_loop_paused_total"
+          "masc_keeper_provider_timeout_loop_paused_total"
       in
       let after_dead =
         Masc_mcp.Prometheus.metric_total

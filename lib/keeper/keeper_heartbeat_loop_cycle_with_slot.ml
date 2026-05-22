@@ -13,7 +13,7 @@
       Exception] + raises [Keeper_registry.Keeper_fiber_crash] for
       the supervisor to handle.
 
-    - OAS timeout budget errors → strike-counter bump (seeded from
+    - Legacy timeout-budget errors → provider-timeout strike-counter bump (seeded from
       [prior_oas_timeout_budget_strikes]) + persistent failure
       reason + observation recording + [Keeper_failure_policy.decide]
       kill/keep decision + [metric_keeper_oas_timeout_budget_strike]

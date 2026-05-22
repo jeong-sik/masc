@@ -157,7 +157,7 @@ val fairness_delay_sec_at : now:float -> keeper_name:string -> float
     (PR #15964), which cancels the keepalive fiber at a typed wall-clock
     boundary BEFORE the slot is leaked, so this rescue path stops being
     reached. Removal target: 30-day soak on
-    [metric_keeper_oas_timeout_budget_watchdog_termination] reaching
+    stale-watchdog timeout termination metric reaching
     zero after `MASC_KEEPER_MAX_TURN_WATCHDOG_TIMEOUT_SEC` is enabled
     fleet-wide. Do not invoke from new call sites. Existing legitimate
     callers (slated to be unwound under removal target above):

@@ -212,8 +212,7 @@ let register
     `Counter;
   add
     Keeper_metrics.metric_keeper_oas_timeout_budget_loop_paused
-    "Total keepers auto-paused due to repeated OAS timeout budget exhaustion. Labeled by \
-     keeper."
+    "Total keepers auto-paused due to repeated provider timeout loops. Labeled by keeper."
     `Counter;
   add
     Keeper_metrics.metric_keeper_cycle_exceptions

@@ -100,6 +100,7 @@ export function extractKeeperStopSummaries(
       // Legacy compatibility metrics. New keeper policy should surface
       // owner-specific timeout/admission/capacity causes instead of treating
       // timeout-legacy budget strikes as a first-class root cause.
+      m.name === 'masc_keeper_provider_timeout_strike_total' ||
       m.name === 'masc_keeper_oas_timeout_budget_strike' ||
       m.name === 'masc_keeper_oas_timeout_budget_strike_total'
     ) {
@@ -110,7 +111,10 @@ export function extractKeeperStopSummaries(
       for (const s of m.samples) {
         if (s.labels.keeper) entry(s.labels.keeper).storm_pauses += s.value
       }
-    } else if (m.name === 'masc_keeper_oas_timeout_budget_loop_paused_total') {
+    } else if (
+      m.name === 'masc_keeper_provider_timeout_loop_paused_total' ||
+      m.name === 'masc_keeper_oas_timeout_budget_loop_paused_total'
+    ) {
       for (const s of m.samples) {
         if (s.labels.keeper) entry(s.labels.keeper).budget_loop_pauses += s.value
       }

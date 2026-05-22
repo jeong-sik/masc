@@ -196,7 +196,7 @@ let test_of_simple_generic_fallback () =
      | Shell_ir_typed.W (Generic _) -> true
      | _ -> false);
   (* Var arg *)
-  let w_var = Shell_ir_typed.of_simple { base with args = [ Shell_ir.Var "X" ] } in
+  let w_var = Shell_ir_typed.of_simple { base with args = [ Shell_ir.Var ("X", Shell_ir.default_meta) ] } in
   Alcotest.(check bool)
     "var fallback"
     true

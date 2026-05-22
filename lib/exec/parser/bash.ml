@@ -24,7 +24,7 @@ let parse_env_assignment word =
     let name = String.sub word 0 idx in
     if is_env_name_start name.[0]
        && String.for_all is_env_name_char name
-    then (
+    then
       let value =
         String.sub word (idx + 1) (String.length word - idx - 1)
       in

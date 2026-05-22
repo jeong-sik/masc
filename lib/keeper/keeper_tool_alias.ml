@@ -450,18 +450,18 @@ type structured_input =
 
 let translate_bash_input input_json =
   match Keeper_tool_bash_input.of_json input_json with
-  | Ok typed ->
-    Yojson.Safe.to_json (`Assoc [
+  | Ok _typed ->
+    `Assoc [
       "command_type", `String "typed_exec";
       "bash_input", input_json
-    ])
+    ]
   | Error _ ->
     input_json
 
 let route_with_structured_input (route : route) : route =
   { route with translate = translate_bash_input }
 
-let register_structured_routes () =
+let rec register_structured_routes () =
   (* Replace Bash route with structured-input aware translator.  Other
      routes continue to use the identity translator for now. *)
   Hashtbl.replace routing_table "Bash"

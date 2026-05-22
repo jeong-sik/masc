@@ -23,7 +23,7 @@ let test_ls_with_args () =
   | Parsed.Parsed (Shell_ir.Simple s) ->
     assert (Bin.to_string s.bin = "ls");
     (match s.args with
-     | [ Shell_ir.Lit "-la"; Shell_ir.Lit "/tmp" ] -> ()
+     | [ Shell_ir.Lit ("-la", _); Shell_ir.Lit ("/tmp", _) ] -> ()
      (* "args wrong shape" *)
      | _ -> assert false)
   (* "ls -la /tmp must parse" *)
@@ -33,7 +33,7 @@ let test_echo_message () =
   match Bash.parse_string "echo hello" with
   | Parsed.Parsed (Shell_ir.Simple s) ->
     assert (Bin.to_string s.bin = "echo");
-    assert (s.args = [ Shell_ir.Lit "hello" ])
+    assert (s.args = [ Shell_ir.Lit ("hello", Shell_ir.default_meta) ])
   (* "echo hello must parse" *)
   | _ -> assert false
 
@@ -41,7 +41,7 @@ let test_dev_null_as_regular_arg () =
   match Bash.parse_string "cat /dev/null" with
   | Parsed.Parsed (Shell_ir.Simple s) ->
     assert (Bin.to_string s.bin = "cat");
-    assert (s.args = [ Shell_ir.Lit "/dev/null" ]);
+    assert (s.args = [ Shell_ir.Lit ("/dev/null", Shell_ir.default_meta) ]);
     assert (s.redirects = [])
   | _ -> assert false
 
@@ -73,7 +73,7 @@ let test_three_stage_pipeline_with_args () =
        assert (Bin.to_string s1.bin = "ls");
        assert (Bin.to_string s2.bin = "grep");
        assert (Bin.to_string s3.bin = "wc");
-       assert (s2.args = [ Shell_ir.Lit "foo" ])
+       assert (s2.args = [ Shell_ir.Lit ("foo", Shell_ir.default_meta) ])
      (* "3-stage pipeline inner shape wrong" *)
      | _ -> assert false)
   (* "3-stage pipeline must parse" *)
@@ -105,7 +105,7 @@ let test_general_redirect_parsed () =
   match Bash.parse_string "echo hi > /tmp/out" with
   | Parsed.Parsed (Shell_ir.Simple s) ->
     assert (Bin.to_string s.bin = "echo");
-    assert (s.args = [ Shell_ir.Lit "hi" ]);
+    assert (s.args = [ Shell_ir.Lit ("hi", Shell_ir.default_meta) ]);
     (match s.redirects with
      | [ Redirect_scope.File { fd = 1; target; mode = Redirect_scope.Write } ] ->
        assert (Path_scope.raw target = "/tmp/out")
@@ -190,23 +190,23 @@ let test_env_prefix_parsed () =
   match Bash.parse_string "LC_ALL=C git status" with
   | Parsed.Parsed (Shell_ir.Simple s) ->
     assert (Bin.to_string s.bin = "git");
-    assert (s.args = [ Shell_ir.Lit "status" ]);
-    assert (s.env = [ "LC_ALL", Shell_ir.Lit "C" ])
+    assert (s.args = [ Shell_ir.Lit ("status", Shell_ir.default_meta) ]);
+    assert (s.env = [ "LC_ALL", Shell_ir.Lit ("C", Shell_ir.default_meta) ])
   | _ -> assert false
 
 let test_multiple_env_prefixes_preserve_order () =
   match Bash.parse_string "A=1 B='two words' printenv A" with
   | Parsed.Parsed (Shell_ir.Simple s) ->
     assert (Bin.to_string s.bin = "printenv");
-    assert (s.args = [ Shell_ir.Lit "A" ]);
-    assert (s.env = [ "A", Shell_ir.Lit "1"; "B", Shell_ir.Lit "two words" ])
+    assert (s.args = [ Shell_ir.Lit ("A", Shell_ir.default_meta) ]);
+    assert (s.env = [ "A", Shell_ir.Lit ("1", Shell_ir.default_meta); "B", Shell_ir.Lit ("two words", Shell_ir.default_meta) ])
   | _ -> assert false
 
 let test_env_assignment_after_bin_is_arg () =
   match Bash.parse_string "echo LC_ALL=C" with
   | Parsed.Parsed (Shell_ir.Simple s) ->
     assert (Bin.to_string s.bin = "echo");
-    assert (s.args = [ Shell_ir.Lit "LC_ALL=C" ]);
+    assert (s.args = [ Shell_ir.Lit ("LC_ALL=C", Shell_ir.default_meta) ]);
     assert (s.env = [])
   | _ -> assert false
 
@@ -220,10 +220,10 @@ let test_pipeline_env_prefixes_preserved_per_stage () =
   | Parsed.Parsed (Shell_ir.Pipeline [ Shell_ir.Simple s1; Shell_ir.Simple s2 ]) ->
     assert (Bin.to_string s1.bin = "printf");
     assert (Bin.to_string s2.bin = "wc");
-    assert (s1.env = [ "LC_ALL", Shell_ir.Lit "C" ]);
-    assert (s2.env = [ "LANG", Shell_ir.Lit "C" ]);
-    assert (s1.args = [ Shell_ir.Lit "hi" ]);
-    assert (s2.args = [ Shell_ir.Lit "-c" ])
+    assert (s1.env = [ "LC_ALL", Shell_ir.Lit ("C", Shell_ir.default_meta) ]);
+    assert (s2.env = [ "LANG", Shell_ir.Lit ("C", Shell_ir.default_meta) ]);
+    assert (s1.args = [ Shell_ir.Lit ("hi", Shell_ir.default_meta) ]);
+    assert (s2.args = [ Shell_ir.Lit ("-c", Shell_ir.default_meta) ])
   | _ -> assert false
 
 let test_env_prefix_dispatch_overlay () =
@@ -294,7 +294,7 @@ let test_single_quoted_arg () =
   | Parsed.Parsed (Shell_ir.Simple s) ->
     assert (Bin.to_string s.bin = "echo");
     (match s.args with
-     | [ Shell_ir.Lit "hello world" ] -> ()
+     | [ Shell_ir.Lit ("hello world", _) ] -> ()
      (* "single-quoted content must land as one Lit" *)
      | _ -> assert false)
   | _ -> assert false
@@ -304,7 +304,7 @@ let test_single_quoted_empty () =
   | Parsed.Parsed (Shell_ir.Simple s) ->
     assert (Bin.to_string s.bin = "echo");
     (match s.args with
-     | [ Shell_ir.Lit "" ] -> ()
+     | [ Shell_ir.Lit ("", _) ] -> ()
      (* "empty single-quoted string must land as empty Lit" *)
      | _ -> assert false)
   | _ -> assert false
@@ -315,10 +315,10 @@ let test_multiple_single_quoted_args () =
     assert (Bin.to_string s.bin = "git");
     (match s.args with
      | [
-         Shell_ir.Lit "commit";
-         Shell_ir.Lit "-m";
-         Shell_ir.Lit "my message";
-         Shell_ir.Lit "--allow-empty";
+         Shell_ir.Lit ("commit", _);
+         Shell_ir.Lit ("-m", _);
+         Shell_ir.Lit ("my message", _);
+         Shell_ir.Lit ("--allow-empty", _);
        ] -> ()
      (* "commit message must preserve spaces as one Lit" *)
      | _ -> assert false)
@@ -331,7 +331,7 @@ let test_single_quote_with_pipe_metachar () =
   match Bash.parse_string "echo 'foo | bar'" with
   | Parsed.Parsed (Shell_ir.Simple s) ->
     (match s.args with
-     | [ Shell_ir.Lit "foo | bar" ] -> ()
+     | [ Shell_ir.Lit ("foo | bar", _) ] -> ()
      | _ -> assert false)
   | _ -> assert false
 
@@ -351,7 +351,7 @@ let test_double_quoted_arg () =
   | Parsed.Parsed (Shell_ir.Simple s) ->
     assert (Bin.to_string s.bin = "echo");
     (match s.args with
-     | [ Shell_ir.Lit "hello world" ] -> ()
+     | [ Shell_ir.Lit ("hello world", _) ] -> ()
      (* "double-quoted content must land as one Lit" *)
      | _ -> assert false)
   | _ -> assert false
@@ -361,7 +361,7 @@ let test_double_quoted_empty () =
   | Parsed.Parsed (Shell_ir.Simple s) ->
     assert (Bin.to_string s.bin = "echo");
     (match s.args with
-     | [ Shell_ir.Lit "" ] -> ()
+     | [ Shell_ir.Lit ("", _) ] -> ()
      (* "empty double-quoted string must land as empty Lit" *)
      | _ -> assert false)
   | _ -> assert false
@@ -372,7 +372,7 @@ let test_double_quote_with_pipe_metachar () =
   match Bash.parse_string "echo \"foo | bar\"" with
   | Parsed.Parsed (Shell_ir.Simple s) ->
     (match s.args with
-     | [ Shell_ir.Lit "foo | bar" ] -> ()
+     | [ Shell_ir.Lit ("foo | bar", _) ] -> ()
      | _ -> assert false)
   | _ -> assert false
 
@@ -384,7 +384,7 @@ let test_double_quote_rg_pattern () =
   | Parsed.Parsed (Shell_ir.Simple s) ->
     assert (Bin.to_string s.bin = "rg");
     (match s.args with
-     | [ Shell_ir.Lit "error pattern"; Shell_ir.Lit "src/" ] -> ()
+     | [ Shell_ir.Lit ("error pattern", _); Shell_ir.Lit ("src/", _) ] -> ()
      | _ -> assert false)
   | _ -> assert false
 
@@ -397,9 +397,9 @@ let test_double_quote_with_escaped_regex_pipe () =
     assert (Bin.to_string s.bin = "rg");
     (match s.args with
      | [
-         Shell_ir.Lit "-n";
-         Shell_ir.Lit {|ghost\|task|};
-         Shell_ir.Lit "lib/";
+         Shell_ir.Lit ("-n", _);
+         Shell_ir.Lit ({|ghost\|task|}, _);
+         Shell_ir.Lit ("lib/", _);
        ] -> ()
      | _ -> assert false)
   | _ -> assert false
@@ -413,10 +413,10 @@ let test_word_with_double_quoted_suffix () =
     assert (Bin.to_string s.bin = "grep");
     (match s.args with
      | [
-         Shell_ir.Lit "-rn";
-         Shell_ir.Lit "exec_semantic";
-         Shell_ir.Lit "lib/";
-         Shell_ir.Lit "--include=*.ml";
+         Shell_ir.Lit ("-rn", _);
+         Shell_ir.Lit ("exec_semantic", _);
+         Shell_ir.Lit ("lib/", _);
+         Shell_ir.Lit ("--include=*.ml", _);
        ] -> ()
      | _ -> assert false)
   | _ -> assert false

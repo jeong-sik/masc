@@ -254,9 +254,9 @@ let parse_command cmd =
   let collect_lit_args args =
     let rec loop acc = function
       | [] -> Some (List.rev acc)
-      | Masc_exec.Shell_ir.Lit (arg, Shell_ir.default_meta) :: rest -> loop (arg :: acc) rest
+      | Masc_exec.Shell_ir.Lit (arg, _) :: rest -> loop (arg :: acc) rest
       | Masc_exec.Shell_ir.Concat _ :: _
-      | Masc_exec.Shell_ir.Var (_, Shell_ir.default_meta) :: _ -> None
+      | Masc_exec.Shell_ir.Var (_, _) :: _ -> None
     in
     loop [] args
   in

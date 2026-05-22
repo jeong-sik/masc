@@ -11,7 +11,7 @@ let with_eio f =
 let () =
   let open Masc_exec.Shell_ir in
   let test_resolve_lit =
-    let result = Masc_exec.Exec_dispatch.(resolve_arg (Lit "hello")) in
+    let result = Masc_exec.Exec_dispatch.(resolve_arg (Lit ("hello", default_meta))) in
     assert (result = "hello")
   in
   test_resolve_lit
@@ -19,18 +19,28 @@ let () =
 let () =
   let open Masc_exec.Shell_ir in
   Unix.putenv "MASC_TEST_P7_VAR" "world";
-  let result = Masc_exec.Exec_dispatch.(resolve_arg (Var "MASC_TEST_P7_VAR")) in
+  let result = Masc_exec.Exec_dispatch.(resolve_arg (Var ("MASC_TEST_P7_VAR", default_meta))) in
   assert (result = "world")
 
 let () =
   let open Masc_exec.Shell_ir in
-  let result = Masc_exec.Exec_dispatch.(resolve_arg (Var "__MASC_NONEXISTENT_P7__")) in
+  let result =
+    Masc_exec.Exec_dispatch.(resolve_arg (Var ("__MASC_NONEXISTENT_P7__", default_meta)))
+  in
   assert (result = "")
 
 let () =
   let open Masc_exec.Shell_ir in
   Unix.putenv "MASC_TEST_P7_VAR" "world";
-  let result = Masc_exec.Exec_dispatch.(resolve_arg (Concat [Lit "prefix-"; Var "MASC_TEST_P7_VAR"; Lit "-suffix"])) in
+  let result =
+    Masc_exec.Exec_dispatch.(
+      resolve_arg
+        (Concat
+           [ Lit ("prefix-", default_meta)
+           ; Var ("MASC_TEST_P7_VAR", default_meta)
+           ; Lit ("-suffix", default_meta)
+           ]))
+  in
   assert (result = "prefix-world-suffix");
   Unix.putenv "MASC_TEST_P7_VAR" ""
 
@@ -43,7 +53,7 @@ let () =
   let ir =
     Simple
       { bin
-      ; args = [ Lit "hello"; Lit "world" ]
+      ; args = [ Lit ("hello", default_meta); Lit ("world", default_meta) ]
       ; env = []
       ; cwd = None
       ; redirects = []
@@ -64,7 +74,7 @@ let () =
   let ir =
     Simple
       { bin
-      ; args = [ Lit "/nonexistent_file_p7_test" ]
+      ; args = [ Lit ("/nonexistent_file_p7_test", default_meta) ]
       ; env = []
       ; cwd = None
       ; redirects = []
@@ -84,8 +94,8 @@ let () =
   let tr_bin = Masc_exec.Bin.of_string "tr" |> Result.get_ok in
   let host_sandbox = Masc_exec.Sandbox_target.host () in
   let stages = [
-    Simple { bin = echo_bin; args = [Lit "hello world"]; env = []; cwd = None; redirects = []; sandbox = host_sandbox };
-    Simple { bin = tr_bin; args = [Lit "a-z"; Lit "A-Z"]; env = []; cwd = None; redirects = []; sandbox = host_sandbox };
+    Simple { bin = echo_bin; args = [Lit ("hello world", default_meta)]; env = []; cwd = None; redirects = []; sandbox = host_sandbox };
+    Simple { bin = tr_bin; args = [Lit ("a-z", default_meta); Lit ("A-Z", default_meta)]; env = []; cwd = None; redirects = []; sandbox = host_sandbox };
   ] in
   let result = Masc_exec.Exec_dispatch.dispatch (Pipeline stages) in
   let stdout = String.trim result.stdout in
@@ -103,7 +113,7 @@ let () =
   let stages =
     [
       Simple { bin = yes_bin; args = []; env = []; cwd = None; redirects = []; sandbox = host_sandbox };
-      Simple { bin = head_bin; args = [Lit "-n"; Lit "1"]; env = []; cwd = None; redirects = []; sandbox = host_sandbox };
+      Simple { bin = head_bin; args = [Lit ("-n", default_meta); Lit ("1", default_meta)]; env = []; cwd = None; redirects = []; sandbox = host_sandbox };
     ]
   in
   let result = Masc_exec.Exec_dispatch.dispatch ~timeout_sec:2.0 (Pipeline stages) in
@@ -119,7 +129,7 @@ let () =
   let false_bin = Masc_exec.Bin.of_string "false" |> Result.get_ok in
   let host_sandbox = Masc_exec.Sandbox_target.host () in
   let stages = [
-    Simple { bin = echo_bin; args = [Lit "ok"]; env = []; cwd = None; redirects = []; sandbox = host_sandbox };
+    Simple { bin = echo_bin; args = [Lit ("ok", default_meta)]; env = []; cwd = None; redirects = []; sandbox = host_sandbox };
     Simple { bin = false_bin; args = []; env = []; cwd = None; redirects = []; sandbox = host_sandbox };
   ] in
   let result = Masc_exec.Exec_dispatch.dispatch (Pipeline stages) in
@@ -145,7 +155,7 @@ let () =
       Simple
         {
           bin = echo_bin;
-          args = [ Lit "recovered" ];
+          args = [ Lit ("recovered", default_meta) ];
           env = [];
           cwd = None;
           redirects = [];
@@ -166,7 +176,7 @@ let () =
     Simple
       {
         bin = sh_bin;
-        args = [ Lit "-c"; Lit script ];
+        args = [ Lit ("-c", default_meta); Lit (script, default_meta) ];
         env = [];
         cwd = None;
         redirects = [];
@@ -237,7 +247,7 @@ let () =
   let stage =
     Simple
       { bin
-      ; args = [ Lit "single" ]
+      ; args = [ Lit ("single", default_meta) ]
       ; env = []
       ; cwd = None
       ; redirects = []
@@ -260,7 +270,7 @@ let () =
   let echo_stage =
     Simple
       { bin = echo_bin
-      ; args = [ Lit "nested" ]
+      ; args = [ Lit ("nested", default_meta) ]
       ; env = []
       ; cwd = None
       ; redirects = []
@@ -307,7 +317,7 @@ let () =
   let ir =
     Simple
       { bin
-      ; args = [ Lit "hello"; Lit "world" ]
+      ; args = [ Lit ("hello", default_meta); Lit ("world", default_meta) ]
       ; env = []
       ; cwd = None
       ; redirects = []
@@ -463,7 +473,7 @@ let () =
       Simple
         {
           bin = printf_bin;
-          args = [ Lit "typed" ];
+          args = [ Lit ("typed", default_meta) ];
           env = [];
           cwd;
           redirects = [];
@@ -472,7 +482,7 @@ let () =
       Simple
         {
           bin = wc_bin;
-          args = [ Lit "-c" ];
+          args = [ Lit ("-c", default_meta) ];
           env = [];
           cwd;
           redirects = [];
@@ -568,7 +578,7 @@ let () =
       Simple
         {
           bin = printf_bin;
-          args = [ Lit "typed" ];
+          args = [ Lit ("typed", default_meta) ];
           env = [];
           cwd;
           redirects = [];
@@ -577,7 +587,7 @@ let () =
       Simple
         {
           bin = wc_bin;
-          args = [ Lit "-c" ];
+          args = [ Lit ("-c", default_meta) ];
           env = [];
           cwd;
           redirects = [];
@@ -646,7 +656,7 @@ let () =
       Simple
         {
           bin = printf_bin;
-          args = [ Lit "typed" ];
+          args = [ Lit ("typed", default_meta) ];
           env = [];
           cwd = None;
           redirects = [];
@@ -655,7 +665,7 @@ let () =
       Simple
         {
           bin = wc_bin;
-          args = [ Lit "-c" ];
+          args = [ Lit ("-c", default_meta) ];
           env = [];
           cwd = None;
           redirects = [];
@@ -704,7 +714,7 @@ let () =
       Simple
         {
           bin = printf_bin;
-          args = [ Lit "typed" ];
+          args = [ Lit ("typed", default_meta) ];
           env = [];
           cwd = None;
           redirects =
@@ -717,7 +727,7 @@ let () =
       Simple
         {
           bin = wc_bin;
-          args = [ Lit "-c" ];
+          args = [ Lit ("-c", default_meta) ];
           env = [];
           cwd = None;
           redirects = [];
@@ -749,7 +759,7 @@ let () =
   let ir =
     Simple
       { bin
-      ; args = [ Lit "x" ]
+      ; args = [ Lit ("x", default_meta) ]
       ; env = []
       ; cwd = None
       ; redirects = []

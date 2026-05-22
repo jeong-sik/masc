@@ -125,7 +125,7 @@ let ast_of_stages = function
 ;;
 
 let arg_literal = function
-  | SI.Lit s -> Some s
+  | SI.Lit (s, _) -> Some s
   | SI.Var _ | SI.Concat _ -> None
 ;;
 
@@ -275,7 +275,7 @@ let literal_path_surfaces (simple : SI.simple) : string list =
   let argv =
     List.filter_map
       (function
-        | SI.Lit s -> Some s
+        | SI.Lit (s, _) -> Some s
         | SI.Var _ | SI.Concat _ -> None)
       simple.SI.args
   in

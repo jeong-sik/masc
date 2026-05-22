@@ -820,19 +820,29 @@ let validate_shell_ir_paths ?keeper_id ?base_path ?workdir shell_ir =
            | Error _ as err -> err)
         | Masc_exec.Redirect_scope.Fd_to_fd _ :: rest -> validate_redirects rest
       in
+      let validate_cwd = function
+        | None -> Ok ()
+        | Some cwd ->
+          Masc_exec.Path_scope.raw cwd
+          |> validate_path_value ~requires_existing_dir:true
+      in
       let validate_simple (simple : Masc_exec.Shell_ir.simple) =
         let command_name = Masc_exec.Bin.to_string simple.bin |> Filename.basename in
-        match literal_args_of_simple simple with
-        | None -> Ok ()
-        | Some args ->
-          (match
-             path_argument_values command_name args
-             |> validate_path_values ~command_name false
-           with
-           | Ok () -> validate_redirects simple.redirects
-           | Error _ as err -> err)
+        let argv_result =
+          match literal_args_of_simple simple with
+          | None -> Ok ()
+          | Some args ->
+            path_argument_values command_name args
+            |> validate_path_values ~command_name false
+        in
+        match validate_cwd simple.cwd with
+        | Error _ as err -> err
+        | Ok () ->
+        (match argv_result with
+        | Error _ as err -> err
+        | Ok () -> validate_redirects simple.redirects)
       in
-      let validate_parsed_shell_ir = function
+      let rec validate_parsed_shell_ir = function
         | Masc_exec.Shell_ir.Simple simple -> validate_simple simple
         | Masc_exec.Shell_ir.Pipeline stages ->
           let rec loop = function
@@ -841,7 +851,10 @@ let validate_shell_ir_paths ?keeper_id ?base_path ?workdir shell_ir =
               (match validate_simple simple with
                | Ok () -> loop rest
                | Error _ as err -> err)
-            | Masc_exec.Shell_ir.Pipeline _ :: _ -> Ok ()
+            | Masc_exec.Shell_ir.Pipeline nested :: rest ->
+              (match validate_parsed_shell_ir (Masc_exec.Shell_ir.Pipeline nested) with
+               | Ok () -> loop rest
+               | Error _ as err -> err)
           in
           loop stages
       in

@@ -22,11 +22,6 @@ type output = {
   delivery_surface : Keeper_social_model_types.delivery_surface;
 }
 
-val transition :
-  state option ->
-  input ->
-  state * output * Keeper_social_model_types.transition_reason
-
 val apply_to_result :
   meta:keeper_meta ->
   observation:Keeper_world_observation.world_observation ->

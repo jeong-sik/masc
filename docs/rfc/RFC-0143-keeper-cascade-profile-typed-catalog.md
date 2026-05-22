@@ -8,34 +8,55 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0088", "0141", "0142", "0148", "0154"]
-implementation_prs: [16860]
+implementation_prs: [16860, 17814]
 ---
 
-## Progress audit (2026-05-21)
+## Progress audit (2026-05-22)
 
-Status promoted Draft → Active. The §4 PR-1 bridge phase shipped;
-PR-2/3/4/5 batch migrations remain.
+Status remains Active.  PR-1 (bridge) and PR-2 (self-migration) have
+shipped; PR-3 / PR-4 are *cancelled* per audit (see below); PR-5
+closeout is in flight.
 
 | Phase | PR | Scope | Merged |
 |-------|-----|------|--------|
-| PR-1 (bridge) | #16860 | `catalog_metadata_query` typed bridge alongside existing `catalog_metadata_result` (string error → typed `Unavailable` translation via Otoml message inspection) + unit tests | 2026-05-20 |
+| PR-1 (bridge) | #16860 | `catalog_metadata_query` typed bridge alongside `catalog_metadata_result` (string error → typed `Unavailable` translation via Otoml message inspection) + unit tests | 2026-05-20 |
+| PR-2 (self-migration) | #17814 | `keeper_cascade_profile.ml` — 5 in-file call sites migrated (`is_system_only_cascade`, `keeper_catalog_names`, `system_catalog_names`, `fallback_cascade_for`, `normalize_keeper_runtime_declared_name`) | 2026-05-22 |
 
-### Pending
+### PR-3 / PR-4 cancelled — no external callers exist
 
-| Phase | Scope | 25+ caller batch |
-|-------|------|------------------|
-| PR-2 | `keeper_cascade_profile.ml` self-migration (6 sites batch A) | self |
-| PR-3 | `lib/keeper/` callers batch B (8 files: keeper_runtime / keeper_exec_preflight / keeper_status_bridge / keeper_unified_turn / keeper_persona_authoring / keeper_turn_up_args / keeper_turn_cascade_budget_routing / keeper_world_observation) | external keeper |
-| PR-4 | `lib/cascade/` + dashboard + server batch C (5 files) | cross-domain |
-| PR-5 | `catalog_metadata_result` deletion + `silent-failure-ratchet` regenerate (`error_result_silence` drops by 6 minimum) | API removal + closure |
+The original §4 PR-3 and PR-4 listed 8 + 5 = 13 external files
+expected to call `catalog_metadata_result`.  Audit on 2026-05-22
+(post-PR-2):
+
+```
+$ grep -rn 'catalog_metadata_result\b' lib/ test/ dashboard/src
+lib/keeper/keeper_cascade_profile.ml:373:let catalog_metadata_result …   ← the function itself
+lib/keeper/keeper_cascade_profile.mli:...                            ← doc-comments only
+test/test_keeper_cascade_profile_bridge.ml:5: …                       ← doc-comment only
+```
+
+Zero external callers.  PR-3 / PR-4 were a misread of the call
+graph; `catalog_metadata_result` was always a private function
+(never declared in the `.mli`) used only within
+`keeper_cascade_profile.ml`.  PR-2 therefore drained the last live
+caller, and the legacy function is now dead code.
+
+### PR-5 — in flight as #17820
+
+`#17820` stacks on PR-2 and deletes the legacy
+`catalog_metadata_result` function body together with its
+doc-comment references in the `.ml`, `.mli`, and the bridge test.
+After it merges, the audit script's
+`silent-failure-ratchet` regeneration can run.
 
 ### Transitional API note
 
-§4 PR-1 explicitly tolerates string-match translation (Otoml error
+§4 PR-1 explicitly tolerated string-match translation (Otoml error
 message → typed `Unavailable` variant) as a *time-boxed*
-transitional. PR-5 removes that path once all callers migrated. The
-audit script (#17123) will not flag this string-match site because
-it lives in the bridge module, not at the caller boundary.
+transitional path.  After #17820 the bridge module is the sole
+catalog accessor; the string-match site continues to live inside it
+and is not flagged by the audit script (#17123) because it sits at
+the bridge boundary, not at any caller boundary.
 
 ### Related RFC
 

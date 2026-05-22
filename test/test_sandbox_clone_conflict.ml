@@ -30,19 +30,41 @@ let cleanup_dir path =
   in
   if Sys.file_exists path then rm path
 
-let run_ok ~cwd cmd =
-  let status = Sys.command (Printf.sprintf "cd %s && %s" (Filename.quote cwd) cmd) in
-  if status <> 0 then failwith (Printf.sprintf "Command failed: %s" cmd)
+let process_exit_code = function
+  | Unix.WEXITED code -> code
+  | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> 255
+
+let run_process_ok ~cwd prog argv =
+  let original_cwd = Sys.getcwd () in
+  let dev_null = Unix.openfile Filename.null [ Unix.O_WRONLY ] 0o600 in
+  Fun.protect
+    ~finally:(fun () ->
+      Unix.close dev_null;
+      Sys.chdir original_cwd)
+    (fun () ->
+      Sys.chdir cwd;
+      let pid =
+        Unix.create_process_env prog argv (Unix.environment ()) Unix.stdin
+          dev_null dev_null
+      in
+      let _, status = Unix.waitpid [] pid in
+      let code = process_exit_code status in
+      if code <> 0 then
+        failwith
+          (Printf.sprintf "Command failed (%d): %s" code
+             (String.concat " " (Array.to_list argv))))
+
+let git_ok ~cwd args =
+  run_process_ok ~cwd "git" (Array.of_list ("git" :: args))
 
 let test_auto_provision_rejects_plain_dir_clone_conflict () =
   let base_path = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
   mkdir_p base_path;
-  run_ok ~cwd:base_path "git init -q -b main";
+  git_ok ~cwd:base_path [ "init"; "-q"; "-b"; "main" ];
   let source_repo = Filename.concat base_path "workspace/yousleepwhen/masc-mcp" in
   mkdir_p (Filename.dirname source_repo);
-  run_ok ~cwd:base_path
-    (Printf.sprintf "git init -q -b main %s" (Filename.quote source_repo));
+  git_ok ~cwd:base_path [ "init"; "-q"; "-b"; "main"; source_repo ];
   let repos_dir = Filename.concat base_path ".masc/playground/test-agent/repos" in
   mkdir_p repos_dir;
   let conflict_path = Filename.concat repos_dir "masc-mcp" in

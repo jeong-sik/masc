@@ -22,13 +22,18 @@ let with_env f =
    and kernel cleanup by sleeping briefly before probing. *)
 let process_exists argv_substring =
   Unix.sleepf 0.2;
-  let cmd =
-    Printf.sprintf "pgrep -f %s > /dev/null 2>&1"
-      (Filename.quote argv_substring)
-  in
-  match Unix.system cmd with
-  | Unix.WEXITED 0 -> true
-  | _ -> false
+  let dev_null = Unix.openfile Filename.null [ Unix.O_WRONLY ] 0o600 in
+  Fun.protect
+    ~finally:(fun () -> Unix.close dev_null)
+    (fun () ->
+      let argv = [| "pgrep"; "-f"; argv_substring |] in
+      let pid =
+        Unix.create_process_env "pgrep" argv (Unix.environment ()) Unix.stdin
+          dev_null dev_null
+      in
+      match snd (Unix.waitpid [] pid) with
+      | Unix.WEXITED 0 -> true
+      | _ -> false)
 
 let test_done_within_timeout () =
   with_env @@ fun ~clock ~process_mgr ~cwd ->

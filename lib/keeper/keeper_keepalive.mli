@@ -196,7 +196,7 @@ val reset_autonomous_completion_for_test : unit -> unit
 val set_after_acquire_flag_hook_for_test :
   (label:string -> keeper_name:string -> unit) option -> unit
 
-(** PR-M (Leak 9): consecutive [oas_timeout_budget] cycle FAILED strikes
+(** PR-M (Leak 9): consecutive [provider_timeout] cycle FAILED strikes
     per keeper. The heartbeat loop routes the count through
     [Keeper_failure_policy] instead of treating the limit as keeper death.
     Reset on any successful turn.
@@ -204,14 +204,14 @@ val set_after_acquire_flag_hook_for_test :
     restart, callers may hydrate the first bump from persisted
     [Provider_timeout_loop] state so multi-process loops still reach
     the policy gate. *)
-val oas_timeout_budget_strike_limit : int
+val provider_timeout_strike_limit : int
 
-type oas_timeout_budget_strike_outcome =
-  | Oas_timeout_budget_warn
-  | Oas_timeout_budget_soft_backoff
+type provider_timeout_strike_outcome =
+  | Provider_timeout_warn
+  | Provider_timeout_soft_backoff
 
-val classify_oas_timeout_budget_strike :
-  strikes:int -> oas_timeout_budget_strike_outcome
+val classify_provider_timeout_strike :
+  strikes:int -> provider_timeout_strike_outcome
 
 val bump_budget_exhaustion_seeded :
   keeper_name:string -> prior_strikes:int -> int

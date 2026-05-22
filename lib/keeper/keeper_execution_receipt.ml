@@ -281,6 +281,7 @@ type t =
   ; turn_count : int option
   ; oas_turn_count : int option
   ; oas_dispatch_mode : string option
+  ; oas_internal_cascade_disabled : bool
   ; current_task_id : string option
   ; goal_ids : string list
   ; outcome : outcome_kind
@@ -795,6 +796,8 @@ let to_json (receipt : t) =
       , match receipt.oas_dispatch_mode with
         | Some value -> `String value
         | None -> `Null )
+    ; ( "oas_internal_cascade_disabled"
+      , `Bool receipt.oas_internal_cascade_disabled )
     ; ( "current_task_id"
       , match receipt.current_task_id with
         | Some value -> `String value

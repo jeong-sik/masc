@@ -206,6 +206,7 @@ type t =
   ; turn_count : int option
   ; oas_turn_count : int option
   ; oas_dispatch_mode : string option
+  ; oas_internal_cascade_disabled : bool
   ; current_task_id : string option
   ; goal_ids : string list
   ; outcome : outcome_kind

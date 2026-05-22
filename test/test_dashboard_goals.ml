@@ -125,6 +125,7 @@ let append_keeper_receipt
       turn_count = Some 7;
       oas_turn_count = None;
       oas_dispatch_mode = None;
+      oas_internal_cascade_disabled = false;
       current_task_id = None;
       goal_ids = meta.active_goal_ids;
       outcome;

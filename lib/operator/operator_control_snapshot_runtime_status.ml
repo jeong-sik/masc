@@ -26,7 +26,8 @@ let runtime_status_from_live_signal (agent_status_json : Yojson.Safe.t) =
 let health_state_allows_runtime_status_override (diagnostic : Yojson.Safe.t) =
   let kh =
     Safe_ops.json_string ~default:"offline" "health_state" diagnostic
-    |> Keeper_exec_status.keeper_health_of_string
+    |> Keeper_exec_status.keeper_health_of_string_opt
+    |> Option.value ~default:Keeper_types.KH_offline
   in
   match kh with
   | Keeper_types.KH_stale | KH_degraded | KH_zombie | KH_dead -> false

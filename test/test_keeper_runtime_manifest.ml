@@ -1127,6 +1127,9 @@ let test_runtime_trace_lens_summarizes_tool_axis () =
         `List (List.map (fun value -> `String value) values)
       in
       append_manifest_or_fail config
+        (M.make ~ts:"2026-05-12T23:59:59Z" ~keeper_name
+           ~trace_id ~keeper_turn_id ~event:M.Turn_started ~status:"started" ());
+      append_manifest_or_fail config
         (M.make ~ts:"2026-05-13T00:00:00Z" ~keeper_name
            ~trace_id ~keeper_turn_id ~event:M.Tool_surface_selected
            ~status:"selected"
@@ -1142,6 +1145,10 @@ let test_runtime_trace_lens_summarizes_tool_axis () =
                  ("required_tool_names", strings [ "keeper_task_done" ]);
                  ("missing_required_tool_names", strings [ "keeper_task_done" ]);
                ])
+           ());
+      append_manifest_or_fail config
+        (M.make ~ts:"2026-05-13T00:00:00.500Z" ~keeper_name
+           ~trace_id ~keeper_turn_id ~event:M.Cascade_routed ~status:"routed"
            ());
       append_manifest_or_fail config
         (M.make ~ts:"2026-05-13T00:00:01Z" ~keeper_name
@@ -1473,6 +1480,9 @@ let test_runtime_trace_lens_groups_context_memory_swimlane () =
       let keeper_name = "runtime-lens-memory" in
       let trace_id = "trace-runtime-lens-memory" in
       let keeper_turn_id = 8 in
+      append_manifest_or_fail config
+        (M.make ~ts:"2026-05-12T23:59:59Z" ~keeper_name
+           ~trace_id ~keeper_turn_id ~event:M.Turn_started ~status:"started" ());
       append_manifest_or_fail config
         (M.make ~ts:"2026-05-13T00:00:00Z" ~keeper_name
            ~trace_id ~keeper_turn_id ~event:M.Context_injected

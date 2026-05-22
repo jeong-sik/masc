@@ -108,9 +108,6 @@ type target_summary = {
 
 (** {1 Store lifecycle} *)
 
-val init : unit -> unit
-(** Initialise or re-use the in-memory moderation store.  Idempotent. *)
-
 val reset_for_test : unit -> unit
 (** Drop all in-memory state.  Test-only. *)
 

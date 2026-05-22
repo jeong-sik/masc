@@ -168,11 +168,6 @@ let store () : store =
       global_store := Some s;
       s
 
-let init () : unit =
-  match !global_store with
-  | Some _ -> ()
-  | None   -> global_store := Some (make_store ())
-
 let reset_for_test () : unit =
   global_store := None
 

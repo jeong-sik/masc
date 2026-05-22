@@ -1,17 +1,52 @@
-(** Mutation/destructive command classifiers for execution policy. *)
+(** Mutation/destructive command classifiers — IR-typed.
 
-let shell_word_values cmd =
-  match Masc_exec_bash_parser.Bash_words.stages cmd with
-  | Error _ -> []
-  | Ok stages ->
-    stages
-    |> List.concat
-    |> List.map (fun (word : Masc_exec_bash_parser.Bash_words.word) -> word.value)
+    RFC-0160 S1: signature migration from [string] to [Shell_ir.t].
+    String wrappers retained as transitional ([_of_string] suffix);
+    they lower internally via [Bash.parse_string] and will be removed
+    in S4 once direct callers are migrated. *)
+
+open Masc_exec
+
+(* ---- Stage-word extraction from Shell IR ---------------------- *)
+
+(** Extract literal words from a single [Shell_ir.simple] stage:
+    [[bin; arg0; arg1; ...]]. Non-literal args ([Concat], [Var])
+    abort the extraction by returning [None] — these were valid IR
+    parses but cannot be matched against the closed sub-command set,
+    so they fall through to a [false] classification (mirroring the
+    string-era behavior where [Bash_words.stages] also returned [Ok]
+    for them but the [List.mem] checks could not match a [$VAR]). *)
+let literal_words_of_simple (simple : Shell_ir.simple) : string list option =
+  let rec collect acc = function
+    | [] -> Some (List.rev acc)
+    | Shell_ir.Lit (a, _) :: rest -> collect (a :: acc) rest
+    | Shell_ir.Concat _ :: _ | Shell_ir.Var _ :: _ -> None
+  in
+  match collect [] simple.args with
+  | None -> None
+  | Some args -> Some (Bin.to_string simple.bin :: args)
 ;;
 
-let is_write_operation cmd =
-  let parts = shell_word_values cmd in
-  match parts with
+(** Flatten all literal stage words into one list (matches the
+    historical [shell_word_values cmd] return shape: stages
+    concatenated). Non-literal-only stages contribute their literal
+    prefix only. *)
+let flat_stage_words (ir : Shell_ir.t) : string list =
+  let rec collect acc = function
+    | Shell_ir.Simple s ->
+      (match literal_words_of_simple s with
+       | Some ws -> ws :: acc
+       | None -> acc)
+    | Shell_ir.Pipeline stages ->
+      List.fold_left collect acc stages
+  in
+  List.rev (collect [] ir) |> List.concat
+;;
+
+(* ---- IR-typed classifiers ------------------------------------- *)
+
+let is_write_operation (ir : Shell_ir.t) : bool =
+  match flat_stage_words ir with
   | "git" :: sub :: _ ->
     List.mem
       sub
@@ -61,8 +96,8 @@ let rec skip_git_global_options = function
   | parts -> parts
 ;;
 
-let is_git_branch_switch cmd =
-  let parts = shell_word_values cmd in
+let is_git_branch_switch (ir : Shell_ir.t) : bool =
+  let parts = flat_stage_words ir in
   let is_option arg = String.length arg > 0 && arg.[0] = '-' in
   let has_any_flag flags args = List.exists (fun a -> List.mem a flags) args in
   let rec first_non_option = function
@@ -101,8 +136,8 @@ let is_git_branch_switch cmd =
   | _ -> false
 ;;
 
-let is_destructive_bash_operation cmd =
-  let parts = shell_word_values cmd in
+let is_destructive_bash_operation (ir : Shell_ir.t) : bool =
+  let parts = flat_stage_words ir in
   let is_short_option arg = String.length arg > 1 && arg.[0] = '-' && arg.[1] <> '-' in
   let has_short_flag flag arg = is_short_option arg && String.contains arg flag in
   let is_protected_branch_target arg =
@@ -150,8 +185,29 @@ let is_destructive_bash_operation cmd =
       List.exists (fun arg -> arg = "--force" || has_short_flag 'f' arg) option_args
     in
     has_recursive && has_force
-  | _ ->
-    (match Eval_gate.detect_destructive cmd with
-     | Some _ -> true
-     | None -> false)
+  | _ -> false
+(* RFC-0160 S1: removed [Eval_gate.detect_destructive cmd] fallback.
+
+   Reason: typed argv (the input shape after [to_shell_ir]) cannot
+   carry raw-shell evasion patterns ([\xNN] expansion, variable
+   substitution, sub-shell). Each argv token is a literal by
+   construction. The string-fallback covered evasion in the era when
+   callers passed raw shell strings; with IR input it is dead.
+
+   Callers that still receive raw strings (e.g. worker_oas.ml:389,
+   keeper_shell_bash.ml entry) should run [Eval_gate.detect_destructive]
+   on the {i raw} string {i before} lowering, separately from this
+   structural classifier. *)
 ;;
+
+(* ---- Backward-compat string wrappers (DEPRECATED, removed in S4) - *)
+
+let parse_and_apply (classifier : Shell_ir.t -> bool) (cmd : string) : bool =
+  match Masc_exec_bash_parser.Bash.parse_string cmd with
+  | Parsed.Parsed ir -> classifier ir
+  | _ -> false
+;;
+
+let is_write_operation_of_string = parse_and_apply is_write_operation
+let is_git_branch_switch_of_string = parse_and_apply is_git_branch_switch
+let is_destructive_bash_operation_of_string = parse_and_apply is_destructive_bash_operation

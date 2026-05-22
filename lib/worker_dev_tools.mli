@@ -144,21 +144,30 @@ val existing_dir_path_values : string -> string list
 (** [true] iff the command performs a write/mutating operation
     (git push/commit, dune clean, npm publish, mv, cp, mkdir,
     chmod, ...).  Read-only commands (git status, rg)
-    return [false]. *)
-val is_write_operation : string -> bool
+    return [false].
 
-(** [true] iff [cmd] is a git branch-switch / branch-mutation command
-    (checkout, switch, branch -c/-m/-D, ...).  Used by the keeper bash
-    sandbox guard to redirect such operations to the explicit worktree
-    flow.  Read-only listing forms are allowed (return [false]). *)
-val is_git_branch_switch : string -> bool
+    RFC-0160 S1: IR-typed signature; caller provides parsed
+    [Shell_ir.t] instead of raw string. *)
+val is_write_operation : Masc_exec.Shell_ir.t -> bool
 
-(** [true] iff [cmd] is destructive at the bash layer: [rm -rf],
-    forced [git push --force] / [git reset --hard], [git clean -fd],
-    or anything {!Eval_gate.detect_destructive} flags.  Distinct from
-    {!classify_destructive} (Shell_safety_types) which classifies the
-    *kind* of destruction; this returns a boolean for the bash gate. *)
-val is_destructive_bash_operation : string -> bool
+(** [true] iff [ir] is a git branch-switch / branch-mutation command
+    (checkout, switch, branch -c/-m/-D, ...). *)
+val is_git_branch_switch : Masc_exec.Shell_ir.t -> bool
+
+(** [true] iff [ir] is *structurally* destructive at the bash layer:
+    [rm -rf], forced [git push --force] / protected-branch push,
+    [git reset --hard].
+
+    RFC-0160 S1: dropped {!Eval_gate.detect_destructive} evasion
+    fallback — typed argv eliminates raw-shell evasion by construction.
+    Callers receiving raw strings must run [Eval_gate.detect_destructive]
+    separately {i before} parsing. *)
+val is_destructive_bash_operation : Masc_exec.Shell_ir.t -> bool
+
+(** Transitional string wrappers (DEPRECATED — removed in RFC-0160 S4). *)
+val is_write_operation_of_string : string -> bool
+val is_git_branch_switch_of_string : string -> bool
+val is_destructive_bash_operation_of_string : string -> bool
 
 (** {1 Logging redaction} *)
 

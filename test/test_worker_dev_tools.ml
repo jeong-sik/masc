@@ -1014,59 +1014,59 @@ let () =
     "is_destructive_bash_operation", [
       Alcotest.test_case "blocks force push" `Quick (fun () ->
         Alcotest.(check bool) "force push" true
-          (Worker_dev_tools.is_destructive_bash_operation "git push --force"));
+          (Worker_dev_tools.is_destructive_bash_operation_of_string "git push --force"));
       Alcotest.test_case "blocks push -f" `Quick (fun () ->
         Alcotest.(check bool) "push -f" true
-          (Worker_dev_tools.is_destructive_bash_operation "git push -f origin feature"));
+          (Worker_dev_tools.is_destructive_bash_operation_of_string "git push -f origin feature"));
       Alcotest.test_case "blocks push to main" `Quick (fun () ->
         Alcotest.(check bool) "push main" true
-          (Worker_dev_tools.is_destructive_bash_operation "git push origin main"));
+          (Worker_dev_tools.is_destructive_bash_operation_of_string "git push origin main"));
       Alcotest.test_case "blocks push to master" `Quick (fun () ->
         Alcotest.(check bool) "push master" true
-          (Worker_dev_tools.is_destructive_bash_operation "git push origin master"));
+          (Worker_dev_tools.is_destructive_bash_operation_of_string "git push origin master"));
       Alcotest.test_case "blocks push refspec to main" `Quick (fun () ->
         Alcotest.(check bool) "push refspec main" true
-          (Worker_dev_tools.is_destructive_bash_operation "git push origin HEAD:main"));
+          (Worker_dev_tools.is_destructive_bash_operation_of_string "git push origin HEAD:main"));
       Alcotest.test_case "blocks quoted push refspec to main" `Quick (fun () ->
         Alcotest.(check bool) "quoted push refspec main" true
-          (Worker_dev_tools.is_destructive_bash_operation
+          (Worker_dev_tools.is_destructive_bash_operation_of_string
              "git push origin 'HEAD:main'"));
       Alcotest.test_case "blocks push refs heads main" `Quick (fun () ->
         Alcotest.(check bool) "push refs/heads/main" true
-          (Worker_dev_tools.is_destructive_bash_operation "git push origin refs/heads/main"));
+          (Worker_dev_tools.is_destructive_bash_operation_of_string "git push origin refs/heads/main"));
       Alcotest.test_case "blocks force with lease" `Quick (fun () ->
         Alcotest.(check bool) "force with lease" true
-          (Worker_dev_tools.is_destructive_bash_operation "git push --force-with-lease origin feature/fix-1"));
+          (Worker_dev_tools.is_destructive_bash_operation_of_string "git push --force-with-lease origin feature/fix-1"));
       Alcotest.test_case "allows push to feature branch" `Quick (fun () ->
         Alcotest.(check bool) "push feature" false
-          (Worker_dev_tools.is_destructive_bash_operation "git push origin feature/fix-1"));
+          (Worker_dev_tools.is_destructive_bash_operation_of_string "git push origin feature/fix-1"));
       Alcotest.test_case "blocks git reset --hard" `Quick (fun () ->
         Alcotest.(check bool) "reset hard" true
-          (Worker_dev_tools.is_destructive_bash_operation "git reset --hard HEAD~1"));
+          (Worker_dev_tools.is_destructive_bash_operation_of_string "git reset --hard HEAD~1"));
       Alcotest.test_case "blocks quoted git reset --hard" `Quick (fun () ->
         Alcotest.(check bool) "quoted reset hard" true
-          (Worker_dev_tools.is_destructive_bash_operation "git reset '--hard' HEAD~1"));
+          (Worker_dev_tools.is_destructive_bash_operation_of_string "git reset '--hard' HEAD~1"));
       Alcotest.test_case "allows git reset (soft)" `Quick (fun () ->
         Alcotest.(check bool) "reset soft" false
-          (Worker_dev_tools.is_destructive_bash_operation "git reset HEAD~1"));
+          (Worker_dev_tools.is_destructive_bash_operation_of_string "git reset HEAD~1"));
       Alcotest.test_case "blocks rm -rf" `Quick (fun () ->
         Alcotest.(check bool) "rm -rf" true
-          (Worker_dev_tools.is_destructive_bash_operation "rm -rf /"));
+          (Worker_dev_tools.is_destructive_bash_operation_of_string "rm -rf /"));
       Alcotest.test_case "blocks rm -fr" `Quick (fun () ->
         Alcotest.(check bool) "rm -fr" true
-          (Worker_dev_tools.is_destructive_bash_operation "rm -fr build"));
+          (Worker_dev_tools.is_destructive_bash_operation_of_string "rm -fr build"));
       Alcotest.test_case "allows rm single file" `Quick (fun () ->
         Alcotest.(check bool) "rm single" false
-          (Worker_dev_tools.is_destructive_bash_operation "rm foo.txt"));
+          (Worker_dev_tools.is_destructive_bash_operation_of_string "rm foo.txt"));
       Alcotest.test_case "allows rm -f single file" `Quick (fun () ->
         Alcotest.(check bool) "rm -f single file" false
-          (Worker_dev_tools.is_destructive_bash_operation "rm -f foo.txt"));
+          (Worker_dev_tools.is_destructive_bash_operation_of_string "rm -f foo.txt"));
       Alcotest.test_case "allows rm -f report txt" `Quick (fun () ->
         Alcotest.(check bool) "rm -f report.txt" false
-          (Worker_dev_tools.is_destructive_bash_operation "rm -f report.txt"));
+          (Worker_dev_tools.is_destructive_bash_operation_of_string "rm -f report.txt"));
       Alcotest.test_case "allows git commit" `Quick (fun () ->
         Alcotest.(check bool) "git commit" false
-          (Worker_dev_tools.is_destructive_bash_operation "git commit -m 'fix'"));
+          (Worker_dev_tools.is_destructive_bash_operation_of_string "git commit -m 'fix'"));
     ];
     "gh_pr_merge_target", [
       Alcotest.test_case "extracts numeric pr id" `Quick (fun () ->

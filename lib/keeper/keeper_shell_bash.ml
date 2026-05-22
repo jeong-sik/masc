@@ -106,7 +106,18 @@ let handle_keeper_bash_typed
              ~fields:[ "typed", `Bool true; "cmd", `String cmd_for_log; "cwd", `String cwd ]
              e
          | Ok (dispatch_sandbox, sandbox_extra_fields) ->
-        if Exec_policy.is_destructive_bash_operation cmd
+        (* RFC-0160 S1: lower-then-classify. Typed argv → Shell IR
+           once, then both mutation classifiers consume the same IR.
+           This removes the previous double-parse (mutation classifier
+           re-tokenized cmd:string via Bash_words.stages before IR
+           was even built). *)
+        match Keeper_tool_bash_input.to_shell_ir ~mode ~sandbox:dispatch_sandbox input with
+        | Error e ->
+          error_json
+            ~fields:[ "typed", `Bool true; "cmd", `String cmd_for_log; "cwd", `String cwd ]
+            (typed_validation_error_text e)
+        | Ok ir ->
+        if Exec_policy.is_destructive_bash_operation ir
         then
           Yojson.Safe.to_string
             (Exec_core.blocked_result_json
@@ -118,7 +129,7 @@ let handle_keeper_bash_typed
                ~retryability:Exec_core.Operator_required
                ~extra:[ "cmd", `String cmd_for_log; "typed", `Bool true; "execution_time_ms", `Int 0 ]
                ())
-        else if (not write_enabled) && Exec_policy.is_write_operation cmd
+        else if (not write_enabled) && Exec_policy.is_write_operation ir
         then
           Yojson.Safe.to_string
             (Exec_core.blocked_result_json
@@ -134,12 +145,6 @@ let handle_keeper_bash_typed
                ~extra:[ "cmd", `String cmd_for_log; "typed", `Bool true; "execution_time_ms", `Int 0 ]
                ())
         else
-          match Keeper_tool_bash_input.to_shell_ir ~mode ~sandbox:dispatch_sandbox input with
-          | Error e ->
-            error_json
-              ~fields:[ "typed", `Bool true; "cmd", `String cmd_for_log; "cwd", `String cwd ]
-              (typed_validation_error_text e)
-          | Ok ir ->
             let allowed_commands =
               match mode with
               | Keeper_tool_bash_input.Dev_full -> Dev_exec_allowlist.dev

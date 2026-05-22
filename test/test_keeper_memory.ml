@@ -4,6 +4,7 @@ module Mention = Mention
 module Keeper_execution = Masc_mcp.Keeper_execution
 module Keeper_memory = Masc_mcp.Keeper_memory
 module Keeper_memory_recall = Masc_mcp.Keeper_memory_recall
+module Keeper_memory_recall_exn_class = Masc_mcp.Keeper_memory_recall_exn_class
 module Keeper_world_observation = Masc_mcp.Keeper_world_observation
 module Meas = Masc_mcp.Keeper_measurement
 module Keeper_types = Masc_mcp.Keeper_types
@@ -397,6 +398,62 @@ let test_read_file_tail_lines_drops_partial_byte_cap_line () =
       Keeper_memory_recall.read_file_tail_lines path ~max_bytes:8 ~max_lines:3
     in
     check (list string) "partial first capped line dropped" [ "third" ] lines)
+
+(* RFC-0149 §3.1 — direct unit tests for the Result-returning helper.
+   The legacy facade tests above exercise the [Ok] path indirectly;
+   these cases pin the [Ok] / [Ok []] / [Error _] tri-state contract
+   so a caller migration cannot silently regress the typed boundary. *)
+
+let exn_class_testable =
+  let module E = Keeper_memory_recall_exn_class in
+  Alcotest.testable
+    (fun ppf c -> Format.pp_print_string ppf (E.to_label c))
+    (fun a b -> E.to_label a = E.to_label b)
+
+let test_read_file_tail_lines_result_ok_on_normal_read () =
+  let dir = test_tmpdir () in
+  Fun.protect ~finally:(fun () -> cleanup_tmpdir dir) (fun () ->
+    let path = Filename.concat dir "history.jsonl" in
+    let oc = open_out path in
+    output_string oc "alpha\nbeta\ngamma\n";
+    close_out oc;
+    match
+      Keeper_memory_recall.read_file_tail_lines_result path
+        ~max_bytes:0 ~max_lines:3
+    with
+    | Ok lines ->
+        check (list string) "all three lines on ok"
+          [ "alpha"; "beta"; "gamma" ] lines
+    | Error _ -> fail "expected Ok on a readable file, got Error")
+
+let test_read_file_tail_lines_result_ok_empty_on_missing_file () =
+  let dir = test_tmpdir () in
+  Fun.protect ~finally:(fun () -> cleanup_tmpdir dir) (fun () ->
+    let path = Filename.concat dir "does-not-exist.jsonl" in
+    match
+      Keeper_memory_recall.read_file_tail_lines_result path
+        ~max_bytes:0 ~max_lines:3
+    with
+    | Ok lines ->
+        check (list string) "missing file maps to Ok []" [] lines
+    | Error _ ->
+        fail "missing file must surface as Ok [] (no recorded memory)")
+
+let test_read_file_tail_lines_result_error_on_directory_path () =
+  let dir = test_tmpdir () in
+  Fun.protect ~finally:(fun () -> cleanup_tmpdir dir) (fun () ->
+    (* Use the test tmpdir itself as the "file" path: [Unix.openfile]
+       on a directory raises [Unix.Unix_error (EISDIR, ...)] on macOS /
+       Linux, which the Result helper classifies as [Io_error]. *)
+    match
+      Keeper_memory_recall.read_file_tail_lines_result dir
+        ~max_bytes:0 ~max_lines:3
+    with
+    | Ok _ ->
+        fail "directory-as-path must surface as Error, not Ok"
+    | Error c ->
+        check exn_class_testable "io_error classification"
+          Keeper_memory_recall_exn_class.Io_error c)
 
 let test_recall_candidates_with_history_dedup () =
   let dir = test_tmpdir () in
@@ -1794,6 +1851,12 @@ let () =
             test_read_file_tail_lines_reads_tail_without_byte_cap;
           test_case "read_file_tail_lines drops partial byte-cap line" `Quick
             test_read_file_tail_lines_drops_partial_byte_cap_line;
+          test_case "read_file_tail_lines_result Ok on normal read" `Quick
+            test_read_file_tail_lines_result_ok_on_normal_read;
+          test_case "read_file_tail_lines_result Ok [] on missing file" `Quick
+            test_read_file_tail_lines_result_ok_empty_on_missing_file;
+          test_case "read_file_tail_lines_result Error on directory path" `Quick
+            test_read_file_tail_lines_result_error_on_directory_path;
           test_case "recall_candidates_with_history deduplicates" `Quick
             test_recall_candidates_with_history_dedup;
           test_case "recall_candidates_with_history appends history" `Quick

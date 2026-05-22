@@ -1811,6 +1811,8 @@
 
 (include stanzas/test_server_state_product.inc)
 
+(include stanzas/test_shell_parse_site_ratchet.inc)
+
 (include stanzas/test_smart_heartbeat_keepalive.inc)
 
 (include stanzas/test_snapshot_size_cap.inc)

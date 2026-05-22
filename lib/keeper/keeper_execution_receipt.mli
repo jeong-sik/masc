@@ -238,8 +238,9 @@ type t =
   ; error_message : string option
   ; started_at : string
   ; ended_at : string
-  ; memory_context_digest : string option
-  ; extra_system_context_final_size : int option
+  ; extra_system_context_digest : string option
+  ; extra_system_context_injected_size : int option
+  ; extra_system_context_computed_size : int option
   }
 
 val stop_reason_to_string : Cascade_runner.stop_reason -> string

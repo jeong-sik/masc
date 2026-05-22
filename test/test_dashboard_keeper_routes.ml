@@ -844,8 +844,9 @@ let append_execution_receipt
       error_message = None;
       started_at;
       ended_at;
-      memory_context_digest = None;
-      extra_system_context_final_size = None;
+      extra_system_context_digest = None;
+      extra_system_context_injected_size = None;
+      extra_system_context_computed_size = None;
     }
   in
   let tm = Unix.gmtime (Unix.gettimeofday ()) in

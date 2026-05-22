@@ -1483,7 +1483,7 @@ let run_turn
            |> Keeper_turn_terminal_code.to_wire
        in
        let cascade_observation = !receipt_cascade_observation_ref in
-       let memory_context_digest, extra_system_context_final_size =
+       let extra_system_context_digest, extra_system_context_injected_size =
          match Memory_hooks.get_last_memory_injection meta.agent_name with
          | Some (digest, size) -> Some digest, Some size
          | None -> None, None
@@ -1554,8 +1554,9 @@ let run_turn
          ; error_message
          ; started_at = receipt_started_at
          ; ended_at = receipt_ended_at
-         ; memory_context_digest
-         ; extra_system_context_final_size
+         ; extra_system_context_digest
+         ; extra_system_context_injected_size
+         ; extra_system_context_computed_size = None
          }
        in
        let receipt_path =

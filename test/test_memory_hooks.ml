@@ -611,16 +611,17 @@ let test_execution_receipt_json_includes_memory_fields () =
     ; error_message = None
     ; started_at = "2024-01-01T00:00:00Z"
     ; ended_at = "2024-01-01T00:00:01Z"
-    ; memory_context_digest = Some "sha256:abc123"
-    ; extra_system_context_final_size = Some 789
+    ; extra_system_context_digest = Some "sha256:abc123"
+    ; extra_system_context_injected_size = Some 789
+    ; extra_system_context_computed_size = None
     }
   in
   let json = Keeper_execution_receipt.to_json receipt in
-  let digest = Yojson.Safe.Util.(member "memory_context_digest" json) in
-  let size = Yojson.Safe.Util.(member "extra_system_context_final_size" json) in
-  check string "memory_context_digest in JSON" "sha256:abc123"
+  let digest = Yojson.Safe.Util.(member "extra_system_context_digest" json) in
+  let size = Yojson.Safe.Util.(member "extra_system_context_injected_size" json) in
+  check string "extra_system_context_digest in JSON" "sha256:abc123"
     (match digest with `String s -> s | _ -> "");
-  check int "extra_system_context_final_size in JSON" 789
+  check int "extra_system_context_injected_size in JSON" 789
     (match size with `Int n -> n | `Intlit s -> int_of_string s | _ -> 0)
 
 let test_execution_receipt_json_null_when_missing () =
@@ -675,15 +676,16 @@ let test_execution_receipt_json_null_when_missing () =
     ; error_message = None
     ; started_at = "2024-01-01T00:00:00Z"
     ; ended_at = "2024-01-01T00:00:01Z"
-    ; memory_context_digest = None
-    ; extra_system_context_final_size = None
+    ; extra_system_context_digest = None
+    ; extra_system_context_injected_size = None
+    ; extra_system_context_computed_size = None
     }
   in
   let json = Keeper_execution_receipt.to_json receipt in
-  let digest = Yojson.Safe.Util.(member "memory_context_digest" json) in
-  let size = Yojson.Safe.Util.(member "extra_system_context_final_size" json) in
-  check bool "memory_context_digest is Null" true (digest = `Null);
-  check bool "extra_system_context_final_size is Null" true (size = `Null)
+  let digest = Yojson.Safe.Util.(member "extra_system_context_digest" json) in
+  let size = Yojson.Safe.Util.(member "extra_system_context_injected_size" json) in
+  check bool "extra_system_context_digest is Null" true (digest = `Null);
+  check bool "extra_system_context_injected_size is Null" true (size = `Null)
 
 (* ── Test suite ────────────────────────────────────────────── *)
 

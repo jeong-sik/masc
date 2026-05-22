@@ -1592,7 +1592,7 @@ let test_runtime_trace_lens_derives_clock_edges () =
              (`Assoc
                [
                  ("turn_system_prompt_digest", `String "digest-turn-system");
-                 ("memory_context_digest", `String "digest-memory-context");
+                 ("extra_system_context_digest", `String "digest-memory-context");
                  ( "clock_refs",
                    `Assoc
                      [
@@ -1614,7 +1614,7 @@ let test_runtime_trace_lens_derives_clock_edges () =
            ~decision:
              (`Assoc
                [
-                 ("memory_context_digest", `String "digest-memory");
+                 ("extra_system_context_digest", `String "digest-memory");
                  ("extra_system_context_chars_after", `Int 123);
                ])
            ());

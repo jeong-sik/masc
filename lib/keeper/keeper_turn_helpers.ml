@@ -294,8 +294,9 @@ let record_pre_dispatch_terminal_observation
     ; error_message
     ; started_at
     ; ended_at
-    ; memory_context_digest = None
-    ; extra_system_context_final_size = None
+    ; extra_system_context_digest = None
+    ; extra_system_context_injected_size = None
+    ; extra_system_context_computed_size = None
     }
   in
   let receipt_path =

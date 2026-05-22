@@ -60,7 +60,7 @@ export function PromptTelemetryPanel({ keeper }: { keeper: Keeper }) {
   )
   const latestTotal = latestPrompt?.estimated_total_tokens ?? null
   const latestCacheable = latestPrompt?.estimated_cacheable_tokens ?? null
-  const latestTimeoutBudget = latest?.timeout_budget ?? null
+  const latestProviderTimeoutPlan = latest?.provider_timeout_plan ?? null
   const cacheableRatio =
     latestTotal && latestCacheable != null && latestTotal > 0
       ? latestCacheable / latestTotal
@@ -105,14 +105,14 @@ export function PromptTelemetryPanel({ keeper }: { keeper: Keeper }) {
             <span>latest ${latestTotal != null ? formatTokens(latestTotal) : '-'}</span>
             <span>cacheable ${latestCacheable != null ? formatTokens(latestCacheable) : '-'}</span>
             ${cacheableRatio != null ? html`<span>${Math.round(cacheableRatio * 100)}% cacheable</span>` : null}
-            ${latestTimeoutBudget?.oas_timeout_sec != null
-              ? html`<span>OAS ${Math.round(latestTimeoutBudget.oas_timeout_sec)}s</span>`
+            ${latestProviderTimeoutPlan?.oas_timeout_sec != null
+              ? html`<span>OAS ${Math.round(latestProviderTimeoutPlan.oas_timeout_sec)}s</span>`
               : null}
-            ${latestTimeoutBudget?.keeper_turn_timeout_sec != null
-              ? html`<span>keeper cap ${Math.round(latestTimeoutBudget.keeper_turn_timeout_sec)}s</span>`
+            ${latestProviderTimeoutPlan?.keeper_turn_timeout_sec != null
+              ? html`<span>keeper cap ${Math.round(latestProviderTimeoutPlan.keeper_turn_timeout_sec)}s</span>`
               : null}
-            ${latestTimeoutBudget?.source
-              ? html`<span>${latestTimeoutBudget.source}</span>`
+            ${latestProviderTimeoutPlan?.source
+              ? html`<span>${latestProviderTimeoutPlan.source}</span>`
               : null}
             ${latest?.cascade_strategy
               ? html`<span>strategy ${latest.cascade_strategy}</span>`

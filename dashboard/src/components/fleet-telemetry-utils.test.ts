@@ -189,7 +189,7 @@ describe('buildFleetRows runtime labels', () => {
             handoff_new_generation: null,
             prompt_fingerprint: null,
             prompt_metrics: null,
-            timeout_budget: null,
+            provider_timeout_plan: null,
             ctx_composition: null,
             input_tokens: null,
             output_tokens: null,

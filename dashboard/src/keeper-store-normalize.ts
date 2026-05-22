@@ -406,17 +406,16 @@ function normalizeMetricsSeries(raw: unknown): KeeperMetricPoint[] {
             }
           : null
       const rawProviderTimeoutPlan = isRecord(item.provider_timeout_plan) ? item.provider_timeout_plan : null
-      const rawTimeoutBudget = isRecord(item.timeout_budget) ? item.timeout_budget : rawProviderTimeoutPlan
-      const timeout_budget =
-        rawTimeoutBudget != null
+      const provider_timeout_plan =
+        rawProviderTimeoutPlan != null
           ? {
-              oas_timeout_sec: asNumber(rawTimeoutBudget.oas_timeout_sec) ?? null,
-              adaptive_timeout_sec: asNumber(rawTimeoutBudget.adaptive_timeout_sec) ?? null,
-              keeper_turn_timeout_sec: asNumber(rawTimeoutBudget.keeper_turn_timeout_sec) ?? null,
-              remaining_turn_budget_sec: asNumber(rawTimeoutBudget.remaining_turn_budget_sec) ?? null,
-              estimated_input_tokens: asNumber(rawTimeoutBudget.estimated_input_tokens) ?? null,
-              max_turns: asNumber(rawTimeoutBudget.max_turns) ?? null,
-              source: typeof rawTimeoutBudget.source === 'string' ? rawTimeoutBudget.source : null,
+              oas_timeout_sec: asNumber(rawProviderTimeoutPlan.oas_timeout_sec) ?? null,
+              adaptive_timeout_sec: asNumber(rawProviderTimeoutPlan.adaptive_timeout_sec) ?? null,
+              keeper_turn_timeout_sec: asNumber(rawProviderTimeoutPlan.keeper_turn_timeout_sec) ?? null,
+              remaining_turn_budget_sec: asNumber(rawProviderTimeoutPlan.remaining_turn_budget_sec) ?? null,
+              estimated_input_tokens: asNumber(rawProviderTimeoutPlan.estimated_input_tokens) ?? null,
+              max_turns: asNumber(rawProviderTimeoutPlan.max_turns) ?? null,
+              source: typeof rawProviderTimeoutPlan.source === 'string' ? rawProviderTimeoutPlan.source : null,
             }
           : null
       const rawCtxComposition = isRecord(item.ctx_composition) ? item.ctx_composition : null
@@ -481,7 +480,7 @@ function normalizeMetricsSeries(raw: unknown): KeeperMetricPoint[] {
         handoff_new_generation: handoffNewGeneration,
         prompt_fingerprint: promptFingerprint,
         prompt_metrics,
-        timeout_budget,
+        provider_timeout_plan,
         ctx_composition,
         input_tokens: inputTokens,
         output_tokens: outputTokens,

@@ -37,7 +37,7 @@ let canonical_app_codes : (string * D.t) list =
   [ "success", D.Success
   ; "external_cancel", D.External_cancel
   ; "turn_wall_clock_timeout", D.Turn_wall_clock_timeout
-  ; "oas_timeout_budget", D.Oas_timeout_budget
+  ; "oas_timeout_budget", D.Turn_wall_clock_timeout
   ; "gh_repo_context_missing_worktree", D.Gh_repo_context_missing_worktree
   ; "required_tool_use_no_tool_call", D.Required_tool_use_no_tool_call
   ; "required_tool_use_unsatisfied", D.Required_tool_use_unsatisfied
@@ -148,7 +148,7 @@ let round_trippable : (string * D.t) list =
   [ "Success", D.Success
   ; "External_cancel", D.External_cancel
   ; "Turn_wall_clock_timeout", D.Turn_wall_clock_timeout
-  ; "Oas_timeout_budget", D.Oas_timeout_budget
+  ; "Oas_timeout_budget legacy alias", D.Oas_timeout_budget
   ; "Gh_repo_context_missing_worktree", D.Gh_repo_context_missing_worktree
   ; "Required_tool_use_no_tool_call", D.Required_tool_use_no_tool_call
   ; "Required_tool_use_unsatisfied", D.Required_tool_use_unsatisfied
@@ -216,7 +216,7 @@ let runtime_codes_to_projection : (string * Code.t * D.t) list =
     , Code.Stale_turn_timeout_no_progress
     , D.Turn_wall_clock_timeout )
   ; "Stale_turn_timeout/noop", Code.Stale_turn_timeout_noop, D.Turn_wall_clock_timeout
-  ; "Oas_timeout_budget", Code.Oas_timeout_budget, D.Oas_timeout_budget
+  ; "Oas_timeout_budget", Code.Oas_timeout_budget, D.Turn_wall_clock_timeout
   ; ( "Tool_required_unsatisfied"
     , Code.Tool_required_unsatisfied "x"
     , D.Required_tool_use_unsatisfied )

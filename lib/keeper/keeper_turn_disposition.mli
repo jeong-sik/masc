@@ -97,7 +97,7 @@ val next_action : t -> string option
     - [Success] → ["success"]
     - [External_cancel] → ["external_cancel"]
     - [Turn_wall_clock_timeout] → ["turn_wall_clock_timeout"]
-    - [Oas_timeout_budget] → ["oas_timeout_budget"]
+    - [Oas_timeout_budget] → ["turn_wall_clock_timeout"] (legacy alias)
     - [Cascade_attempts_exhausted] → ["cascade_attempts_exhausted"]
     - [Gh_repo_context_missing_worktree] → ["gh_repo_context_missing_worktree"]
     - [Required_tool_use_no_tool_call] → ["required_tool_use_no_tool_call"]

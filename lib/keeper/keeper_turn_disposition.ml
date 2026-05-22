@@ -44,9 +44,8 @@ let severity = function
 let summary = function
   | Success -> "turn completed"
   | External_cancel -> "keeper turn was cancelled before completion"
-  | Turn_wall_clock_timeout -> "keeper turn hit the wall-clock timeout"
-  | Oas_timeout_budget ->
-    "OAS call was skipped or failed because the turn timeout budget was exhausted"
+  | Turn_wall_clock_timeout | Oas_timeout_budget ->
+    "keeper turn hit the wall-clock timeout"
   | Cascade_attempts_exhausted ->
     "cascade attempts exhausted; inspect per-attempt root causes"
   | Gh_repo_context_missing_worktree ->
@@ -81,7 +80,7 @@ let to_wire = function
   | Success -> "success"
   | External_cancel -> "external_cancel"
   | Turn_wall_clock_timeout -> "turn_wall_clock_timeout"
-  | Oas_timeout_budget -> "oas_timeout_budget"
+  | Oas_timeout_budget -> "turn_wall_clock_timeout"
   | Cascade_attempts_exhausted -> "cascade_attempts_exhausted"
   | Gh_repo_context_missing_worktree -> "gh_repo_context_missing_worktree"
   | Required_tool_use_no_tool_call -> "required_tool_use_no_tool_call"
@@ -109,7 +108,7 @@ let of_termination_code (c : Code.t) : t =
   | Code.Stale_turn_timeout_in_turn
   | Code.Stale_turn_timeout_no_progress
   | Code.Stale_turn_timeout_noop -> Turn_wall_clock_timeout
-  | Code.Oas_timeout_budget -> Oas_timeout_budget
+  | Code.Oas_timeout_budget -> Turn_wall_clock_timeout
   | Code.Tool_required_unsatisfied _ -> Required_tool_use_unsatisfied
   | Code.Ambiguous_partial_commit_post_commit_timeout
   | Code.Ambiguous_partial_commit_post_commit_failure -> Post_commit_ambiguous
@@ -127,7 +126,7 @@ let of_wire = function
   | "success" -> Success
   | "external_cancel" -> External_cancel
   | "turn_wall_clock_timeout" -> Turn_wall_clock_timeout
-  | "oas_timeout_budget" -> Oas_timeout_budget
+  | "oas_timeout_budget" -> Turn_wall_clock_timeout
   | "cascade_attempts_exhausted" -> Cascade_attempts_exhausted
   | "gh_repo_context_missing_worktree" -> Gh_repo_context_missing_worktree
   | "required_tool_use_no_tool_call" -> Required_tool_use_no_tool_call
@@ -145,6 +144,8 @@ let equal a b =
   | Success, Success
   | External_cancel, External_cancel
   | Turn_wall_clock_timeout, Turn_wall_clock_timeout
+  | Turn_wall_clock_timeout, Oas_timeout_budget
+  | Oas_timeout_budget, Turn_wall_clock_timeout
   | Oas_timeout_budget, Oas_timeout_budget
   | Cascade_attempts_exhausted, Cascade_attempts_exhausted
   | Gh_repo_context_missing_worktree, Gh_repo_context_missing_worktree

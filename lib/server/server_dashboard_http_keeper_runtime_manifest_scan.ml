@@ -42,6 +42,9 @@ type runtime_manifest_scan =
   ; mutable provider_started_count : int
   ; mutable provider_finished_count : int
   ; mutable provider_terminal_row : Keeper_runtime_manifest.t option
+  ; mutable latest_context_injected_row : Keeper_runtime_manifest.t option
+  ; mutable latest_context_compacted_row : Keeper_runtime_manifest.t option
+  ; mutable latest_memory_injected_row : Keeper_runtime_manifest.t option
   ; mutable dag_edges : (string * string) list
   }
 
@@ -82,6 +85,9 @@ let make_runtime_manifest_scan ~path ~limit =
   ; provider_started_count = 0
   ; provider_finished_count = 0
   ; provider_terminal_row = None
+  ; latest_context_injected_row = None
+  ; latest_context_compacted_row = None
+  ; latest_memory_injected_row = None
   ; dag_edges = []
   }
 
@@ -186,9 +192,11 @@ let update_runtime_manifest_scan scan row =
    | Keeper_runtime_manifest.Tool_lineage_recorded ->
      scan.latest_tool_lineage_decision <- Some row.Keeper_runtime_manifest.decision
    | Keeper_runtime_manifest.Context_injected ->
-     scan.context_injected_count <- scan.context_injected_count + 1
+     scan.context_injected_count <- scan.context_injected_count + 1;
+     scan.latest_context_injected_row <- Some row
    | Keeper_runtime_manifest.Context_compacted ->
-     scan.context_compacted_event_count <- scan.context_compacted_event_count + 1
+     scan.context_compacted_event_count <- scan.context_compacted_event_count + 1;
+     scan.latest_context_compacted_row <- Some row
    | Keeper_runtime_manifest.State_snapshot_sidecar_saved ->
      scan.active_open_loop_count <-
        json_int_member_opt "active_open_loop_count"
@@ -220,6 +228,7 @@ let update_runtime_manifest_scan scan row =
       | _ -> ())
    | Keeper_runtime_manifest.Memory_injected ->
      scan.memory_injected_count <- scan.memory_injected_count + 1;
+     scan.latest_memory_injected_row <- Some row;
      if String.equal row.Keeper_runtime_manifest.status "injected"
      then scan.memory_injected_present_count <- scan.memory_injected_present_count + 1
    | Keeper_runtime_manifest.Memory_flushed ->

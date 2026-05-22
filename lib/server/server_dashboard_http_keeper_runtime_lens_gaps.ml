@@ -335,6 +335,151 @@ let runtime_lens_gaps ~terminal_event_present ~claim_scope ~config_drift scan =
            }
            :: gaps
          else gaps)
+    |> (fun gaps ->
+         if scan.total_rows > 0
+            && runtime_manifest_scan_event_count scan Keeper_runtime_manifest.Turn_started
+               > 0
+            && runtime_manifest_scan_event_count scan Keeper_runtime_manifest.Phase_gate_decided
+               = 0
+         then
+           { code = "phase_gate_missing"
+           ; severity = "warn"
+           ; lane = "keeper"
+           ; detail = Some "turn started but no phase_gate_decided event recorded"
+           }
+           :: gaps
+         else gaps)
+    |> (fun gaps ->
+         if scan.total_rows > 0
+            && runtime_manifest_scan_event_count scan Keeper_runtime_manifest.Turn_started
+               > 0
+            && runtime_manifest_scan_event_count scan Keeper_runtime_manifest.Cascade_routed
+               = 0
+         then
+           { code = "cascade_decision_missing"
+           ; severity = "warn"
+           ; lane = "masc_policy_cascade"
+           ; detail = Some "turn started but no cascade_routed event recorded"
+           }
+           :: gaps
+         else gaps)
+    |> (fun gaps ->
+         if scan.provider_started_count > scan.provider_finished_count
+         then
+           { code = "provider_attempt_unclosed"
+           ; severity = "bad"
+           ; lane = "provider"
+           ; detail =
+               Some
+                 (Printf.sprintf
+                    "provider attempts started (%d) exceeds finished (%d)"
+                    scan.provider_started_count
+                    scan.provider_finished_count)
+           }
+           :: gaps
+         else gaps)
+    |> (fun gaps ->
+         match scan.provider_terminal_row with
+         | Some row ->
+           let decision = row.Keeper_runtime_manifest.decision in
+           (match json_string_member_opt "terminal_provider_kind" decision with
+            | Some _ -> gaps
+            | None ->
+              { code = "provider_provenance_missing"
+              ; severity = "warn"
+              ; lane = "provider"
+              ; detail = Some "terminal provider row lacks terminal_provider_kind"
+              }
+              :: gaps)
+         | None -> gaps)
+    |> (fun gaps ->
+         match scan.latest_tool_lineage_decision with
+         | Some decision ->
+           let has_emitted =
+             match Yojson.Safe.Util.member "emitted" decision with
+             | `Assoc _ -> true
+             | _ -> false
+           in
+           let has_executed =
+             match Yojson.Safe.Util.member "executed" decision with
+             | `Assoc _ -> true
+             | _ -> false
+           in
+           if has_emitted && not has_executed
+           then
+             { code = "tool_emitted_not_executed"
+             ; severity = "warn"
+             ; lane = "tool_runtime"
+             ; detail = Some "tool lineage shows emitted stage but no executed stage"
+             }
+             :: gaps
+           else gaps
+         | None -> gaps)
+    |> (fun gaps ->
+         match scan.latest_tool_lineage_decision with
+         | Some decision ->
+           let has_executed =
+             match Yojson.Safe.Util.member "executed" decision with
+             | `Assoc _ -> true
+             | _ -> false
+           in
+           let has_verified =
+             match Yojson.Safe.Util.member "verified" decision with
+             | `Assoc _ -> true
+             | _ -> false
+           in
+           if has_executed && not has_verified
+           then
+             { code = "tool_execution_unverified"
+             ; severity = "warn"
+             ; lane = "tool_runtime"
+             ; detail = Some "tool lineage shows executed stage but no verified stage"
+             }
+             :: gaps
+           else gaps
+         | None -> gaps)
+    |> (fun gaps ->
+         match scan.latest_context_compacted_row with
+         | Some row ->
+           let decision = row.Keeper_runtime_manifest.decision in
+           (match json_string_member_opt "source_phase" decision with
+            | Some _ -> gaps
+            | None ->
+              { code = "compaction_source_missing"
+              ; severity = "warn"
+              ; lane = "memory_context"
+              ; detail = Some "context_compacted row lacks source_phase"
+              }
+              :: gaps)
+         | None -> gaps)
+    |> (fun gaps ->
+         match scan.latest_context_injected_row with
+         | Some row ->
+           let decision = row.Keeper_runtime_manifest.decision in
+           (match json_string_member_opt "context_digest" decision with
+            | Some _ -> gaps
+            | None ->
+              { code = "context_digest_missing"
+              ; severity = "warn"
+              ; lane = "memory_context"
+              ; detail = Some "context_injected row lacks context_digest"
+              }
+              :: gaps)
+         | None -> gaps)
+    |> (fun gaps ->
+         match scan.latest_memory_injected_row with
+         | Some row ->
+           let decision = row.Keeper_runtime_manifest.decision in
+           (match json_string_member_opt "payload_digest" decision with
+            | Some _ -> gaps
+            | None ->
+              { code = "memory_payload_digest_missing"
+              ; severity = "warn"
+              ; lane = "memory_context"
+              ; detail = Some "memory_injected row lacks payload_digest"
+              }
+              :: gaps)
+         | None -> gaps)
   in
   gaps
   @ Server_dashboard_http_keeper_runtime_lens_clock_groups.runtime_lens_clock_gaps

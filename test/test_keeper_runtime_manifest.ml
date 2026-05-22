@@ -1530,7 +1530,7 @@ let test_runtime_trace_lens_groups_context_memory_swimlane () =
         (json_int_member "episodes_flushed" memory_axis);
       Alcotest.(check int)
         "lens memory has keeper + memory_context lane gaps"
-        2
+        4
         (json_list_length "gaps" lens))
 
 let test_runtime_trace_lens_derives_clock_edges () =

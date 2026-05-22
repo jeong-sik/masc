@@ -185,9 +185,8 @@ masc-ide-migrate --base-path <project-root> --commit
 ```
 
 Records are written to `by-url/<slug>/` and `_orphan/`. The Legacy
-flat files are *kept* so a read with `?merge_legacy=true` (the
-default for the HTTP route) still surfaces them — useful while
-verifying the migration.
+flat files are *kept* after this step so operators can inspect or
+back them up before deletion.
 
 ### Step 3 — Delete legacy
 
@@ -196,8 +195,7 @@ masc-ide-migrate --base-path <project-root> --commit --delete-legacy
 ```
 
 Removes the flat `annotations.jsonl` / `regions.jsonl` after a
-successful migration. After this step, `merge_legacy` becomes a
-no-op.
+successful migration.
 
 The migration is idempotent: re-running on an already-migrated store
 returns a zero-count report.
@@ -207,8 +205,6 @@ returns a zero-count report.
 - Auto-migration on server boot. The data movement is irreversible
   without a backup; explicit operator opt-in via this CLI is the only
   way to commit it.
-- Removing the `merge_legacy` read flag. That happens in a later cycle
-  after Phase 3 has been verified in production.
 - Multi-base-path consolidation. Each `main_eio` instance owns its own
   `.masc-ide/` tree; there is no cross-instance merge.
 

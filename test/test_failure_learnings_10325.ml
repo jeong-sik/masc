@@ -50,7 +50,7 @@ let extract_failure_learnings ~error_kind ~error_message =
 let test_no_generic_boilerplate () =
   let learnings =
     extract_failure_learnings
-      ~error_kind:"oas_timeout_budget"
+      ~error_kind:"provider_timeout"
       ~error_message:"keeper exceeded budget after 12 turns"
   in
   List.iter
@@ -66,12 +66,12 @@ let test_no_generic_boilerplate () =
 let test_kind_and_message_emitted_as_tags () =
   let learnings =
     extract_failure_learnings
-      ~error_kind:"oas_timeout_budget"
+      ~error_kind:"provider_timeout"
       ~error_message:"keeper exceeded budget after 12 turns"
   in
   let has_kind =
     List.exists
-      (fun s -> s = "failure_kind: oas_timeout_budget")
+      (fun s -> s = "failure_kind: provider_timeout")
       learnings
   in
   let has_message_tag =

@@ -67,6 +67,7 @@ let mk_receipt
   ; trace_id = "trace-test"
   ; generation = 1
   ; turn_count = Some 1
+  ; oas_turn_count = None
   ; current_task_id
   ; goal_ids
   ; outcome
@@ -531,6 +532,7 @@ let test_turn_livelock_broadcast_suppresses_duplicate_turn () =
          ; trace_id = "trace-livelock-dedupe-1"
          ; generation = 7
          ; turn_count = Some 605
+         ; oas_turn_count = None
          ; current_task_id = Some "task-livelock-dedupe"
          }
        in
@@ -552,7 +554,7 @@ let test_turn_livelock_broadcast_suppresses_duplicate_turn () =
             ());
        R.append
          config
-         { receipt with trace_id = "trace-livelock-dedupe-3"; turn_count = Some 606 };
+         { receipt with trace_id = "trace-livelock-dedupe-3"; turn_count = Some 606; oas_turn_count = None };
        check int "new turn emits again" 2 (operator_broadcast_event_count config))
 ;;
 

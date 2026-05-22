@@ -123,6 +123,7 @@ let append_keeper_receipt
       trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id;
       generation = meta.runtime.generation;
       turn_count = Some 7;
+      oas_turn_count = None;
       current_task_id = None;
       goal_ids = meta.active_goal_ids;
       outcome;

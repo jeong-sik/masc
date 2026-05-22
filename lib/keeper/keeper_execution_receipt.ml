@@ -278,6 +278,7 @@ type t =
   ; trace_id : string
   ; generation : int
   ; turn_count : int option
+  ; oas_turn_count : int option
   ; current_task_id : string option
   ; goal_ids : string list
   ; outcome : outcome_kind
@@ -777,6 +778,10 @@ let to_json (receipt : t) =
     ; "generation", `Int receipt.generation
     ; ( "turn_count"
       , match receipt.turn_count with
+        | Some value -> `Int value
+        | None -> `Null )
+    ; ( "oas_turn_count"
+      , match receipt.oas_turn_count with
         | Some value -> `Int value
         | None -> `Null )
     ; ( "current_task_id"

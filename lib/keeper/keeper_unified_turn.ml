@@ -390,7 +390,7 @@ let run_keeper_cycle
                     Keeper_registry.Decision_active_guard_ok
                 | _ -> ());
                let last_execution = ref initial_execution in
-               let last_timeout_budget : provider_timeout_budget option ref =
+               let last_provider_timeout_budget : provider_timeout_budget option ref =
                  ref None
                in
                let degraded_retry_info = ref None in
@@ -588,7 +588,7 @@ let run_keeper_cycle
                              ~attempted_cascades
                              err
                          in
-                         let attempt_timeout_budget = ref None in
+                         let attempt_provider_timeout_budget = ref None in
                          let max_turns =
                            match channel with
                            | Keeper_world_observation.Reactive ->
@@ -634,9 +634,9 @@ let run_keeper_cycle
                                          Float.max 0.0
                                            (timeout_sec -. remaining_turn_budget_sec);
                                      }))
-                           | Some timeout_budget ->
-                             attempt_timeout_budget := Some timeout_budget;
-                             last_timeout_budget := Some timeout_budget;
+                           | Some provider_timeout_budget ->
+                             attempt_provider_timeout_budget := Some provider_timeout_budget;
+                             last_provider_timeout_budget := Some provider_timeout_budget;
                              (* Cascade_trying marking moved into the disclosure
                      hook in [Keeper_run_tools] (BeforeTurnParams) so
                      that the spec-mandated atomic group
@@ -656,14 +656,14 @@ let run_keeper_cycle
                              let attempt_watchdog_s =
                                attempt_watchdog_timeout_sec
                                  ~remaining_turn_budget_s:(remaining_turn_budget_s ())
-                                 timeout_budget
+                                 provider_timeout_budget
                              in
                              do_run
                                ~execution
                                ~run_meta
                                ~run_generation
                                ~is_retry
-                               ~oas_timeout_s:timeout_budget.effective_timeout_sec
+                               ~oas_timeout_s:provider_timeout_budget.effective_timeout_sec
                                ~attempt_watchdog_s
                          in
                          match attempt_result with
@@ -684,7 +684,7 @@ let run_keeper_cycle
                          | Error err ->
                            let err =
                              reclassify_oas_timeout_for_attempt
-                               ~timeout_budget:!attempt_timeout_budget
+                               ~timeout_budget:!attempt_provider_timeout_budget
                                err
                            in
                            let _ = drain_turn_event_bus ~site:"reconcile_pre_check" () in
@@ -798,7 +798,7 @@ let run_keeper_cycle
                      finally aborted the cycle (see fleet logs:
                      "passive status/read tools" cascade=default →
                      keeper_unified → kimi_cli_keeper → … →
-                     oas_timeout_budget at 1064s/1200s).  Cap at 1 rotation
+                     provider_timeout at 1064s/1200s).  Cap at 1 rotation
                      so the keeper releases its turn budget promptly.
 
                      The cap fires when attempted_cascades has at least 2
@@ -1416,7 +1416,7 @@ let run_keeper_cycle
                      else if is_transient
                      then " (transient, cooldown preserved)"
                      else if EC.should_warn_keeper_cycle_failed err
-                     then " (oas_timeout_budget, policy handled)"
+                     then " (provider_timeout, policy handled)"
                      else "")
                     (short_preview e_str);
                   Prometheus.inc_counter
@@ -1644,7 +1644,7 @@ let run_keeper_cycle
                       ~degraded_retry_applied
                       ~degraded_retry_cascade
                       ~fallback_reason
-                      ~last_timeout_budget:!last_timeout_budget
+                      ~last_provider_timeout_budget:!last_provider_timeout_budget
                       ~current_turn_blocker_info:!current_turn_blocker_info
                       ~keeper_turn_id
                       result

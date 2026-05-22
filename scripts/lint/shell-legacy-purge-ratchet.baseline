@@ -31,6 +31,9 @@ String.split_on_char ' ' cmd 0
 String.split_on_char ' ' config.command 0
 shell_words_prefix 0
 shell_words_with_boundaries 0
+Masc_exec.Command_words 0
+Command_words.stages 0
+include Masc_exec.Command_words 0
 strip_command_wrappers 0
 cmd_gh_pr_native_subcommand 0
 cmd_contains_gh_pr_create 0

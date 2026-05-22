@@ -1654,6 +1654,8 @@ let test_tool_failure_classification_contracts () =
   check bool "deterministic tool failures have reason metric" true
     (file_contains_pattern "lib/keeper/keeper_metrics.ml"
        "masc_keeper_tools_oas_deterministic_failures_total"
+     && file_contains_pattern "lib/keeper/keeper_metrics.mli"
+          "val metric_keeper_tools_oas_deterministic_failures : string"
      && file_contains_pattern "lib/keeper/keeper_tools_oas.ml"
           "record_deterministic_tool_failure_metric")
 
@@ -1704,7 +1706,29 @@ let test_public_bash_alias_contracts () =
     (file_not_contains_pattern "lib/keeper/keeper_tool_alias.ml" "Legacy_cmd");
   check bool "public Bash alias has no deferred structured route patcher" true
     (file_not_contains_pattern "lib/keeper/keeper_tool_alias.ml"
-       "register_structured_routes")
+       "register_structured_routes"
+     && file_not_contains_pattern "lib/keeper/keeper_tool_alias.mli"
+          "register_structured_routes"
+     && file_not_contains_pattern "lib/keeper/keeper_run_tools.ml"
+          "register_structured_routes")
+
+let test_public_bash_guidance_contracts () =
+  let raw_command prefix = "command='" ^ prefix in
+  let raw_bash_with_command prefix = "Bash with " ^ raw_command prefix in
+  check bool "readonly diagnoses do not teach raw Bash command field" true
+    (file_not_contains_pattern "lib/keeper/keeper_shell_shared.ml"
+       (raw_command "git add")
+     && file_not_contains_pattern "lib/keeper/keeper_shell_shared.ml"
+          (raw_command "opam install")
+     && file_not_contains_pattern "lib/keeper/keeper_shell_shared.ml"
+          (raw_command "rm .tmp"));
+  check bool "path recovery hints do not teach raw Bash command field" true
+    (file_not_contains_pattern "lib/keeper/keeper_exec_shared.ml"
+       (raw_bash_with_command "ls")
+     && file_not_contains_pattern "lib/keeper/keeper_failure_circuit_breaker.ml"
+          (raw_bash_with_command "ls")
+     && file_not_contains_pattern "lib/keeper/keeper_repo_readiness.ml"
+          (raw_bash_with_command "git status"))
 
 let test_keeper_pr_audit_contracts () =
   check bool "keeper fleet audit has explicit PR-create flag" true
@@ -2729,6 +2753,8 @@ let () =
             test_keeper_github_pr_tool_contracts;
           test_case "public Bash alias contracts" `Quick
             test_public_bash_alias_contracts;
+          test_case "public Bash guidance contracts" `Quick
+            test_public_bash_guidance_contracts;
           test_case "keeper PR audit contracts" `Quick
             test_keeper_pr_audit_contracts;
           test_case "dashboard warm hydration contracts" `Quick

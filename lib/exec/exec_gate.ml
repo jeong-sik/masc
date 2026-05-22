@@ -66,7 +66,7 @@ let mode_of_env () =
   | Some ("enforced" | "true" | "1") -> Enforced
   | _ -> Off
 
-let lit s = Shell_ir.Lit s
+let lit s = Shell_ir.Lit (s, Shell_ir.default_meta)
 
 let env_bindings_of_array env =
   Array.to_list env

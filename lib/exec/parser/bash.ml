@@ -28,7 +28,7 @@ let parse_env_assignment word =
       let value =
         String.sub word (idx + 1) (String.length word - idx - 1)
       in
-      Some (name, Shell_ir.Lit value))
+      Some (name, Shell_ir.Lit (value, Shell_ir.default_meta))
     else None
 
 let split_env_prefix words =
@@ -53,7 +53,7 @@ let raw_to_simple (bin_str, args_str, redirects)
        at least one token), so this branch is defensive. *)
     Error { Parsed.pos = Lexing.dummy_pos; token = bin_str; expected = [] }
   | Ok bin ->
-    let args = List.map (fun s -> Shell_ir.Lit s) args_str in
+    let args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) args_str in
     Ok
       { Shell_ir.bin
       ; args

@@ -240,8 +240,8 @@ let test_no_forgotten_git_askpass_literals () =
     |]
   in
   let lines, _status =
-    Masc_mcp.With_process.with_process_args_in "rg" argv
-      Masc_mcp.With_process.drain_lines
+    With_process.with_process_args_in "rg" argv
+      With_process.drain_lines
   in
   let offenders =
     List.filter

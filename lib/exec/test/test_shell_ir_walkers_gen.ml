@@ -16,7 +16,7 @@ let bin_ok name =
   | Error _ -> assert false
 ;;
 
-let lit s = Shell_ir.Lit s
+let lit s = Shell_ir.Lit (s, Shell_ir.default_meta)
 
 (* Construct one [W] for each constructor with minimal payload. The
    payload values do not affect [risk] or [sandbox] (both walk only on

@@ -50,7 +50,7 @@ let get_terminal_size () =
   let read_tput arg =
     try
       let line, status =
-        Masc_mcp.With_process.with_process_args_in "tput" [| "tput"; arg |]
+        With_process.with_process_args_in "tput" [| "tput"; arg |]
           input_line
       in
       match status with

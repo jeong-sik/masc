@@ -158,7 +158,7 @@ let coding_allowlist_policy ?(allow_pipes = true) ~allowed_commands ()
 ;;
 
 let rec shell_ir_literal_text = function
-  | Masc_exec.Shell_ir.Lit text -> Some text
+  | Masc_exec.Shell_ir.Lit (text, Shell_ir.default_meta) -> Some text
   | Masc_exec.Shell_ir.Concat parts ->
     let rec loop acc = function
       | [] -> Some (String.concat "" (List.rev acc))
@@ -168,7 +168,7 @@ let rec shell_ir_literal_text = function
          | None -> None)
     in
     loop [] parts
-  | Masc_exec.Shell_ir.Var _ -> None
+  | Masc_exec.Shell_ir.Var (_, Shell_ir.default_meta) -> None
 ;;
 
 let simple_literal_args (simple : Masc_exec.Shell_ir.simple) =
@@ -663,8 +663,8 @@ let path_argument_values command_name args =
 let literal_args_of_simple (simple : Masc_exec.Shell_ir.simple) =
   let rec loop acc = function
     | [] -> Some (List.rev acc)
-    | Masc_exec.Shell_ir.Lit value :: rest -> loop (value :: acc) rest
-    | Masc_exec.Shell_ir.Concat _ :: _ | Masc_exec.Shell_ir.Var _ :: _ -> None
+    | Masc_exec.Shell_ir.Lit (value, Shell_ir.default_meta) :: rest -> loop (value :: acc) rest
+    | Masc_exec.Shell_ir.Concat _ :: _ | Masc_exec.Shell_ir.Var (_, Shell_ir.default_meta) :: _ -> None
   in
   loop [] simple.args
 ;;

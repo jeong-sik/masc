@@ -14,7 +14,7 @@
     worktree would be invisible to [Approval_policy.find_write_escape]
     on a parsed command. *)
 
-let arg s = Shell_ir.Lit s
+let arg s = Shell_ir.Lit (s, Shell_ir.default_meta)
 
 let args_of_flags flags =
   List.map

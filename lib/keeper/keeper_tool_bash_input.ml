@@ -310,7 +310,7 @@ let validate ~mode = function
     each stages
 ;;
 
-let shell_arg text = Masc_exec.Shell_ir.Lit text
+let shell_arg text = Masc_exec.Shell_ir.Lit (text, Shell_ir.default_meta)
 
 let shell_env env =
   List.map (fun (key, value) -> key, shell_arg value) env

@@ -130,10 +130,10 @@ let gh_simple_command_of_simple (simple : Masc_exec.Shell_ir.simple)
       else (
         let rec collect acc = function
           | [] -> Ok (Masc_exec.Bin.to_string simple.bin, { argv = List.rev acc })
-          | Masc_exec.Shell_ir.Lit s :: rest -> collect (s :: acc) rest
+          | Masc_exec.Shell_ir.Lit (s, Shell_ir.default_meta) :: rest -> collect (s :: acc) rest
           | Masc_exec.Shell_ir.Concat _ :: _ ->
             Error (Unsupported_command_shape "concat_arg")
-          | Masc_exec.Shell_ir.Var _ :: _ -> Error (Unsupported_command_shape "var_arg")
+          | Masc_exec.Shell_ir.Var (_, Shell_ir.default_meta) :: _ -> Error (Unsupported_command_shape "var_arg")
         in
         collect [] simple.args))
 ;;

@@ -15,7 +15,7 @@ let simple ?(args = []) ?(env = []) ?(cwd = None) ?(redirects = [])
     : Shell_ir.simple =
   { bin; args; env; cwd; redirects; sandbox }
 
-let lit s = Shell_ir.Lit s
+let lit s = Shell_ir.Lit (s, Shell_ir.default_meta)
 
 let default_policy : Approval_policy.t =
   { raw_source = "(test)"; summary = "(test summary)" }

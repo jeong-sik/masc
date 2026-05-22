@@ -3,7 +3,7 @@ rfc: RFC-0038 Phase 2
 title: Keeper Identity Canonical Form (alias canonicalization)
 author: jeong-sik
 created: 2026-05-09
-status: Draft (sketch)
+status: Draft
 supersedes: -
 related:
   - RFC-0038 Phase 1 (opaque identifier types — Provider_id, Cascade_name)

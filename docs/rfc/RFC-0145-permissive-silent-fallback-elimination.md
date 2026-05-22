@@ -1,7 +1,7 @@
 ---
 rfc: "0145"
 title: "Permissive-Silent-Fallback Elimination"
-status: Draft
+status: Active
 created: 2026-05-20
 updated: 2026-05-20
 author: vincent

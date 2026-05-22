@@ -1,7 +1,7 @@
 ---
 rfc: "0155"
 title: "System_log_category Typed SSOT — emit-side closed sum for ops log taxonomy"
-status: Draft
+status: Active
 created: 2026-05-21
 updated: 2026-05-21
 author: vincent

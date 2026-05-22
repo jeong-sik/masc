@@ -168,8 +168,10 @@ let test_escalate_stale_unclaimed_tasks_without_goal_linkage () =
             ~description:"missing goal linkage");
   ignore (Coord.add_task config ~title:"Fresh unlinked task" ~priority:2
             ~description:"fresh enough to avoid escalation");
-  ignore (Coord.add_task config ~title:"Title marker only [goal:g1]" ~priority:3
-            ~description:"title tag does not create linkage");
+  (match Coord.add_task config ~title:"Title marker only [goal:g1]" ~priority:3
+           ~description:"title tag does not create linkage" with
+   | Ok _ -> ()
+   | Error err -> fail (Masc_domain.masc_error_to_string err));
   ignore (Coord.add_task ~goal_id:"g1" config ~title:"Explicit linked task"
             ~priority:4 ~description:"structured linkage");
   let stale = iso_seconds_ago (31 * 60) in

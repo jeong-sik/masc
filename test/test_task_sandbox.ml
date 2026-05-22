@@ -169,11 +169,33 @@ let test_symlink_created_when_masc_exists () =
    since Coord_worktree.worktree_create_r uses Process_eio.
    ============================================================ *)
 
-(** Run a shell command, raising on failure. *)
-let run_cmd cmd =
-  let exit_code = Sys.command cmd in
-  if exit_code <> 0 then
-    failwith (Printf.sprintf "command failed (exit %d): %s" exit_code cmd)
+(** Run a process, raising on failure. *)
+let process_exit_code = function
+  | Unix.WEXITED code -> code
+  | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> 255
+
+let run_process_ok ?cwd prog argv =
+  let original_cwd = Sys.getcwd () in
+  let dev_null = Unix.openfile Filename.null [ Unix.O_WRONLY ] 0o600 in
+  Fun.protect
+    ~finally:(fun () ->
+      Unix.close dev_null;
+      Sys.chdir original_cwd)
+    (fun () ->
+      Option.iter Sys.chdir cwd;
+      let pid =
+        Unix.create_process_env prog argv (Unix.environment ()) Unix.stdin
+          dev_null dev_null
+      in
+      let _, status = Unix.waitpid [] pid in
+      let exit_code = process_exit_code status in
+      if exit_code <> 0 then
+        failwith
+          (Printf.sprintf "command failed (exit %d): %s" exit_code
+             (String.concat " " (Array.to_list argv))))
+
+let git ?cwd args =
+  run_process_ok ?cwd "git" (Array.of_list ("git" :: args))
 
 let write_file path content =
   Fs_compat.mkdir_p (Filename.dirname path);
@@ -203,8 +225,7 @@ let seed_playground_clone ~base_path ~agent_name ~source_repo =
   Fs_compat.mkdir_p repos_dir;
   if Sys.file_exists clone_path then
     Fs_compat.remove_tree clone_path;
-  run_cmd (Printf.sprintf "git clone %s %s"
-    (Filename.quote source_repo) (Filename.quote clone_path));
+  git [ "clone"; source_repo; clone_path ];
   clone_path
 
 let setup_named_repo_with_file ~base_path ~repo_name ~file_path =
@@ -216,27 +237,18 @@ let setup_named_repo_with_file ~base_path ~repo_name ~file_path =
       (Filename.concat "sources" repo_name)
   in
   Fs_compat.mkdir_p (Filename.dirname repo);
-  run_cmd
-    (Printf.sprintf "git init --bare --initial-branch=main %s"
-       (Filename.quote bare_dir));
-  run_cmd
-    (Printf.sprintf "git clone %s %s"
-       (Filename.quote bare_dir) (Filename.quote repo));
-  run_cmd
-    (Printf.sprintf "git -C %s config user.email test@test.com"
-       (Filename.quote repo));
-  run_cmd
-    (Printf.sprintf "git -C %s config user.name test"
-       (Filename.quote repo));
+  git [ "init"; "--bare"; "--initial-branch=main"; bare_dir ];
+  git [ "clone"; bare_dir; repo ];
+  git ~cwd:repo [ "config"; "user.email"; "test@test.com" ];
+  git ~cwd:repo [ "config"; "user.name"; "test" ];
   let full_path = Filename.concat repo file_path in
   Fs_compat.mkdir_p (Filename.dirname full_path);
   let oc = open_out full_path in
   output_string oc "test fixture\n";
   close_out oc;
-  run_cmd (Printf.sprintf "git -C %s add ." (Filename.quote repo));
-  run_cmd
-    (Printf.sprintf "git -C %s commit -m init" (Filename.quote repo));
-  run_cmd (Printf.sprintf "git -C %s push origin main" (Filename.quote repo));
+  git ~cwd:repo [ "add"; "." ];
+  git ~cwd:repo [ "commit"; "-m"; "init" ];
+  git ~cwd:repo [ "push"; "origin"; "main" ];
   repo
 
 let task ?worktree ?(files = []) ~id ~title ~description () : Masc_domain.task =
@@ -291,7 +303,7 @@ let with_lazy_worktree_fixture f =
     (fun () ->
       Eio_main.run (fun env ->
         Fs_compat.set_fs (Eio.Stdenv.fs env);
-        run_cmd (Printf.sprintf "git init -q -b main %s" (Filename.quote dir));
+        git [ "init"; "-q"; "-b"; "main"; dir ];
         let proc_mgr = Eio.Stdenv.process_mgr env in
         let clock = Eio.Stdenv.clock env in
         let cwd = Eio.Stdenv.cwd env in
@@ -390,22 +402,17 @@ let test_full_lifecycle () =
     Eio_main.run (fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
       (* Setup git repo with origin *)
-      let git d args =
-        run_cmd (Printf.sprintf "git -C %s %s" (Filename.quote d) args)
-      in
-      run_cmd (Printf.sprintf "git init --bare --initial-branch=main %s"
-        (Filename.quote bare_dir));
-      run_cmd (Printf.sprintf "git clone %s %s"
-        (Filename.quote bare_dir) (Filename.quote dir));
-      git dir "config user.email test@test.com";
-      git dir "config user.name test";
+      git [ "init"; "--bare"; "--initial-branch=main"; bare_dir ];
+      git [ "clone"; bare_dir; dir ];
+      git ~cwd:dir [ "config"; "user.email"; "test@test.com" ];
+      git ~cwd:dir [ "config"; "user.name"; "test" ];
       let readme = Filename.concat dir "README.md" in
       let oc = open_out readme in
       output_string oc "# Test\n";
       close_out oc;
-      git dir "add README.md";
-      git dir "commit -m 'initial commit'";
-      git dir "push origin main";
+      git ~cwd:dir [ "add"; "README.md" ];
+      git ~cwd:dir [ "commit"; "-m"; "initial commit" ];
+      git ~cwd:dir [ "push"; "origin"; "main" ];
 
       (* Initialize Process_eio so Coord_worktree can work *)
       let proc_mgr = Eio.Stdenv.process_mgr env in
@@ -448,8 +455,7 @@ let test_full_lifecycle () =
         let _files = Task_sandbox.changed_files sb in
         (* Untracked files won't show in git diff, only in git status *)
         (* Stage the file so git diff --cached picks it up *)
-        run_cmd (Printf.sprintf "git -C %s add work.txt"
-          (Filename.quote sb.worktree_path));
+        git ~cwd:sb.worktree_path [ "add"; "work.txt" ];
         let files_after_add = Task_sandbox.changed_files sb in
         check bool "staged file detected" true
           (List.exists (fun f ->
@@ -484,7 +490,7 @@ let test_create_infers_repo_from_task_file_evidence () =
     (fun () ->
       Eio_main.run (fun env ->
         Fs_compat.set_fs (Eio.Stdenv.fs env);
-        run_cmd (Printf.sprintf "git init -q -b main %s" (Filename.quote dir));
+        git [ "init"; "-q"; "-b"; "main"; dir ];
         let proc_mgr = Eio.Stdenv.process_mgr env in
         let clock = Eio.Stdenv.clock env in
         let cwd = Eio.Stdenv.cwd env in
@@ -565,7 +571,7 @@ let test_create_resolves_docker_visible_path_to_host_worktree () =
     (fun () ->
       Eio_main.run (fun env ->
         Fs_compat.set_fs (Eio.Stdenv.fs env);
-        run_cmd (Printf.sprintf "git init -q -b main %s" (Filename.quote dir));
+        git [ "init"; "-q"; "-b"; "main"; dir ];
         let proc_mgr = Eio.Stdenv.process_mgr env in
         let clock = Eio.Stdenv.clock env in
         let cwd = Eio.Stdenv.cwd env in
@@ -594,11 +600,7 @@ let test_create_resolves_docker_visible_path_to_host_worktree () =
         in
         Fs_compat.mkdir_p docker_repos_dir;
         let docker_clone = Filename.concat docker_repos_dir "masc-mcp" in
-        run_cmd
-          (Printf.sprintf
-             "git clone %s %s"
-             (Filename.quote source_repo)
-             (Filename.quote docker_clone));
+        git [ "clone"; source_repo; docker_clone ];
         let task_id = "task-docker-visible" in
         let expected_worktree =
           Filename.concat
@@ -647,7 +649,7 @@ let test_create_fails_ambiguous_multi_repo_without_evidence () =
     (fun () ->
       Eio_main.run (fun env ->
         Fs_compat.set_fs (Eio.Stdenv.fs env);
-        run_cmd (Printf.sprintf "git init -q -b main %s" (Filename.quote dir));
+        git [ "init"; "-q"; "-b"; "main"; dir ];
         let proc_mgr = Eio.Stdenv.process_mgr env in
         let clock = Eio.Stdenv.clock env in
         let cwd = Eio.Stdenv.cwd env in
@@ -705,7 +707,7 @@ let test_create_infers_repo_from_task_repo_mentions () =
     (fun () ->
       Eio_main.run (fun env ->
         Fs_compat.set_fs (Eio.Stdenv.fs env);
-        run_cmd (Printf.sprintf "git init -q -b main %s" (Filename.quote dir));
+        git [ "init"; "-q"; "-b"; "main"; dir ];
         let proc_mgr = Eio.Stdenv.process_mgr env in
         let clock = Eio.Stdenv.clock env in
         let cwd = Eio.Stdenv.cwd env in
@@ -817,22 +819,17 @@ let test_with_sandbox_lifecycle () =
   ) (fun () ->
     Eio_main.run (fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-      let git d args =
-        run_cmd (Printf.sprintf "git -C %s %s" (Filename.quote d) args)
-      in
-      run_cmd (Printf.sprintf "git init --bare --initial-branch=main %s"
-        (Filename.quote bare_dir));
-      run_cmd (Printf.sprintf "git clone %s %s"
-        (Filename.quote bare_dir) (Filename.quote dir));
-      git dir "config user.email test@test.com";
-      git dir "config user.name test";
+      git [ "init"; "--bare"; "--initial-branch=main"; bare_dir ];
+      git [ "clone"; bare_dir; dir ];
+      git ~cwd:dir [ "config"; "user.email"; "test@test.com" ];
+      git ~cwd:dir [ "config"; "user.name"; "test" ];
       let readme = Filename.concat dir "README.md" in
       let oc = open_out readme in
       output_string oc "# Test\n";
       close_out oc;
-      git dir "add README.md";
-      git dir "commit -m 'initial commit'";
-      git dir "push origin main";
+      git ~cwd:dir [ "add"; "README.md" ];
+      git ~cwd:dir [ "commit"; "-m"; "initial commit" ];
+      git ~cwd:dir [ "push"; "origin"; "main" ];
 
       let proc_mgr = Eio.Stdenv.process_mgr env in
       let clock = Eio.Stdenv.clock env in
@@ -877,22 +874,17 @@ let test_with_sandbox_cleans_up_on_exception () =
   ) (fun () ->
     Eio_main.run (fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-      let git d args =
-        run_cmd (Printf.sprintf "git -C %s %s" (Filename.quote d) args)
-      in
-      run_cmd (Printf.sprintf "git init --bare --initial-branch=main %s"
-        (Filename.quote bare_dir));
-      run_cmd (Printf.sprintf "git clone %s %s"
-        (Filename.quote bare_dir) (Filename.quote dir));
-      git dir "config user.email test@test.com";
-      git dir "config user.name test";
+      git [ "init"; "--bare"; "--initial-branch=main"; bare_dir ];
+      git [ "clone"; bare_dir; dir ];
+      git ~cwd:dir [ "config"; "user.email"; "test@test.com" ];
+      git ~cwd:dir [ "config"; "user.name"; "test" ];
       let readme = Filename.concat dir "README.md" in
       let oc = open_out readme in
       output_string oc "# Test\n";
       close_out oc;
-      git dir "add README.md";
-      git dir "commit -m 'initial commit'";
-      git dir "push origin main";
+      git ~cwd:dir [ "add"; "README.md" ];
+      git ~cwd:dir [ "commit"; "-m"; "initial commit" ];
+      git ~cwd:dir [ "push"; "origin"; "main" ];
 
       let proc_mgr = Eio.Stdenv.process_mgr env in
       let clock = Eio.Stdenv.clock env in

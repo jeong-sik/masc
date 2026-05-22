@@ -5,7 +5,9 @@
 > and the `record_pre_dispatch_terminal_observation` receipt path
 > after Step 0a wired `keeper_turn_id` into every silent skip site.
 
-## Sequence
+## Autonomous cycle sequence
+
+This is the heartbeat-scheduled path. The supervisor launches a keepalive fiber that loops until `fiber_stop` is set.
 
 ```mermaid
 sequenceDiagram
@@ -45,6 +47,76 @@ sequenceDiagram
         end
     end
 ```
+
+## Keepalive autonomous cycle flow
+
+The scheduling loop that sits above the lifecycle phase FSM. Presence, snapshot, event intake, world observation, admission, and dispatch run in order until the fiber is stopped.
+
+```mermaid
+flowchart TD
+    A[Supervisor launches keepalive fiber] --> B[run_heartbeat_loop]
+    B --> C{fiber_stop?}
+    C -- yes --> Z[exit; supervisor dispatches Stop_requested/Drain_complete]
+    C -- no --> D[fair_yield + read changed keeper meta]
+    D --> E[repair identity drift and sync registry meta]
+    E --> F{smart heartbeat gate}
+    F -- Skip_idle and no wake/signal --> B
+    F -- Emit/Skip_busy/woken --> G[sync room presence / heartbeat_ok or heartbeat_failed]
+    G --> H{consecutive heartbeat failures over threshold?}
+    H -- yes --> X[set failure reason; raise Keeper_fiber_crash]
+    H -- no --> I[expire approval queue; maybe write heartbeat snapshot]
+    I --> J[collect board events and event queue stimuli]
+    J --> K[world observation + scheduling decision]
+    K --> L{should_run_turn?}
+    L -- no --> M[record skip reasons / backpressure / cursor updates]
+    L -- yes --> N[FD/disk/admission gates]
+    N -- blocked --> M
+    N -- admitted --> O[with_keeper_turn_slot]
+    O --> P[Keeper_unified_turn.run_keeper_cycle]
+    P --> Q[OAS-backed keeper turn path]
+    Q --> R[refresh work-as-heartbeat; recurring dispatch; stage timing]
+    M --> R
+    R --> B
+    X --> Y[Supervisor records crash, lifecycle Crashed, recovery sweep may restart]
+```
+
+## Direct keeper message turn
+
+This path bypasses the heartbeat scheduling loop entirely. `masc_keeper_msg` family calls enter through `Keeper_turn.handle_keeper_msg`, run preflight, and then call `Keeper_agent_run.run_turn` directly. The same OAS/cascade/tool/context engine is used internally.
+
+```mermaid
+flowchart TD
+    A[keeper_msg args] --> B[preflight_keeper_msg]
+    B --> C{name/message/direct_reply valid? keeper exists?}
+    C -- no --> X[typed error JSON]
+    C -- yes --> D[resolve cascade name from live catalog]
+    D --> E[resilience/API-key/local endpoint preflight]
+    E --> F[build prompt callback]
+    F --> G[dynamic context: recovery snapshot, long-term memory, skills, worktree changes, telemetry, turn instructions, required tools]
+    G --> H[Keeper_agent_run.run_turn]
+    H --> I[prepare_run_context: inference params, session dir, checkpoint, base prompt, pre-dispatch compaction]
+    I --> J[build_turn_context: sanitize user, memory/temporal context, append user]
+    J --> K[prepare_agent_setup: tool surface, hooks, reducer, memory hooks]
+    K --> L[Keeper_turn_driver.run_named]
+    L --> M[OAS Agent/Pipeline loop]
+    M --> N[post-run contracts, state snapshot, checkpoint, memory write, receipt]
+    N --> O[metrics snapshot + lifecycle/broadcast + keepalive wake + response JSON]
+```
+
+## Autonomous vs Direct comparison
+
+| Dimension | Autonomous cycle | Direct keeper message turn |
+|---|---|---|
+| Trigger | Heartbeat tick / scheduling decision | `masc_keeper_msg` direct request |
+| Scheduling | `run_heartbeat_loop` admits turn after world observation | Immediate preflight then dispatch |
+| Entry point | `Keeper_unified_turn.run_keeper_cycle` | `Keeper_turn.handle_keeper_msg` |
+| Phase gate | Yes — skipped if phase blocks turn | No — direct turn is phase-agnostic but still checks keeper existence |
+| Cascade selection | Same `cascade.toml` based resolution | Same `cascade.toml` based resolution |
+| Tool surface | Same `compute_tool_surface` + OAS hooks | Same `compute_tool_surface` + OAS hooks |
+| Receipt | Same `Keeper_execution_receipt` append | Same `Keeper_execution_receipt` append |
+| Lifecycle wake | Returns into keepalive loop | Wakes keepalive so next cycle picks up state change |
+
+Both paths share `Keeper_agent_run.run_turn` as the common execution engine. The difference is strictly in admission: heartbeat-scheduled vs request-triggered.
 
 ## State machine
 
@@ -140,6 +212,8 @@ correlator the receipt does.
   `docs/keeper-fsm-graph.dot`.
 
 ## Open work
+
+> OAS hardening checklist #6 — Direct vs autonomous turn docs refresh — is completed by this revision.
 
 | Plan step | Adds | Status |
 |---|---|---|

@@ -93,6 +93,31 @@ describe('KeeperRuntimeAlertStrip', () => {
     expect(text).not.toContain('inspect_watchdog_root_cause')
   })
 
+  // Lock the remaining producer-side attention reasons that
+  // [canonicalAttentionReason] folds into runtime_blocked. Producers
+  // live at Keeper_status_bridge.ml:782/784/791 (cascade_attempts_exhausted,
+  // provider_tool_capability_missing, fiber_unresolved). The previous
+  // canonicalizes-* it() blocks already cover watchdog_stale_turn and
+  // completion_contract_violation; this parametrises the rest. The
+  // rendered Korean copy "런타임 근거 확인 필요" is the user-visible label
+  // mapped from runtime_blocked in ATTENTION_REASON_LABELS.
+  it.each([
+    'cascade_attempts_exhausted',
+    'provider_tool_capability_missing',
+    'fiber_unresolved',
+  ])('canonicalizes %s into runtime_blocked operator copy', (reason) => {
+    const { container } = render(h(KeeperRuntimeAlertStrip, {
+      keeper: keeper({
+        needs_attention: true,
+        attention_reason: reason,
+      }),
+    }))
+
+    const text = container.textContent ?? ''
+    expect(text).toContain('런타임 근거 확인 필요')
+    expect(text).not.toContain(reason)
+  })
+
   it('canonicalizes turn-disposition timeout actions before rendering operator copy', () => {
     const { container } = render(h(KeeperRuntimeAlertStrip, {
       keeper: keeper({

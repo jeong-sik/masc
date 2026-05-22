@@ -87,13 +87,31 @@ let contains_substring haystack needle =
   in
   loop 0
 
-let run_ok ~cwd cmd =
-  let wrapped =
-    Printf.sprintf "cd %s && %s > /dev/null 2>&1" (Filename.quote cwd) cmd
-  in
-  let code = Sys.command wrapped in
-  if code <> 0 then
-    Alcotest.failf "command failed (%d): %s" code cmd
+let process_exit_code = function
+  | Unix.WEXITED code -> code
+  | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> 255
+
+let run_process_ok ~cwd prog argv =
+  let original_cwd = Sys.getcwd () in
+  let dev_null = Unix.openfile Filename.null [ Unix.O_WRONLY ] 0o600 in
+  Fun.protect
+    ~finally:(fun () ->
+      Unix.close dev_null;
+      Sys.chdir original_cwd)
+    (fun () ->
+      Sys.chdir cwd;
+      let pid =
+        Unix.create_process_env prog argv (Unix.environment ()) Unix.stdin
+          dev_null dev_null
+      in
+      let _, status = Unix.waitpid [] pid in
+      let code = process_exit_code status in
+      if code <> 0 then
+        Alcotest.failf "command failed (%d): %s" code
+          (String.concat " " (Array.to_list argv)))
+
+let git_ok ~cwd args =
+  run_process_ok ~cwd "git" (Array.of_list ("git" :: args))
 
 let with_eio_fs f =
   Eio_main.run @@ fun env ->
@@ -274,9 +292,9 @@ let setup_docker_review f =
   let base = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   ensure_dir (Filename.concat base Common.masc_dirname);
-  run_ok ~cwd:base "git init -q";
-  run_ok ~cwd:base
-    "git remote add origin https://github.com/jeong-sik/masc-mcp.git";
+  git_ok ~cwd:base [ "init"; "-q" ];
+  git_ok ~cwd:base
+    [ "remote"; "add"; "origin"; "https://github.com/jeong-sik/masc-mcp.git" ];
   let config = Coord.default_config base in
   let meta =
     make_meta ~name:"reviewer" ~sandbox:Keeper_types.Docker ()
@@ -290,9 +308,9 @@ let setup_local_review f =
   let base = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   ensure_dir (Filename.concat base Common.masc_dirname);
-  run_ok ~cwd:base "git init -q";
-  run_ok ~cwd:base
-    "git remote add origin https://github.com/jeong-sik/masc-mcp.git";
+  git_ok ~cwd:base [ "init"; "-q" ];
+  git_ok ~cwd:base
+    [ "remote"; "add"; "origin"; "https://github.com/jeong-sik/masc-mcp.git" ];
   let config = Coord.default_config base in
   let meta = make_meta ~name:"reviewer" ~sandbox:Keeper_types.Local () in
   f ~base ~config ~meta

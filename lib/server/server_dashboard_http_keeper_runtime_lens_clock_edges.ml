@@ -156,8 +156,9 @@ let event_finished_at row =
     None
 
 let event_source_clock = function
-  | Keeper_runtime_manifest.Event_bus_correlated -> "oas_event_bus"
-  | _ -> "wall"
+  | event ->
+    Keeper_runtime_manifest.source_clock_of_event event
+    |> Keeper_runtime_manifest.source_clock_to_string
 
 let clock_edge_json ~idx ~provider_attempt_index row =
   let event = row.Keeper_runtime_manifest.event in

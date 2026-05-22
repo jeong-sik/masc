@@ -1745,6 +1745,10 @@ let test_runtime_trace_lens_derives_clock_edges () =
         "provider edge lane"
         (Some "provider")
         (json_string_member_opt "lane" provider_finish);
+      Alcotest.(check (option string))
+        "provider edge derives provider source clock"
+        (Some "provider")
+        (json_string_member_opt "source_clock" provider_finish);
       let checkpoint_edge = require_edge "checkpoint_saved" in
       Alcotest.(check (option string))
         "checkpoint edge derives checkpoint id"
@@ -1890,7 +1894,26 @@ let test_runtime_trace_lens_derives_clock_edges () =
       Alcotest.(check (option string))
         "receipt edge keeps receipt link"
         (Some "/tmp/receipt-clock.jsonl")
-        (json_string_member_opt "receipt_path" receipt_links))
+        (json_string_member_opt "receipt_path" receipt_links);
+      let source_clock_axis =
+        Yojson.Safe.Util.(lens |> member "axes" |> member "source_clock")
+      in
+      Alcotest.(check int)
+        "source clock axis includes fallback wall rows"
+        8
+        (json_int_member "wall" source_clock_axis);
+      Alcotest.(check int)
+        "source clock axis includes fallback provider rows"
+        2
+        (json_int_member "provider" source_clock_axis);
+      Alcotest.(check int)
+        "source clock axis keeps explicit monotonic row"
+        1
+        (json_int_member "monotonic" source_clock_axis);
+      Alcotest.(check int)
+        "source clock axis includes event bus row"
+        1
+        (json_int_member "oas_event_bus" source_clock_axis))
 
 let test_runtime_trace_lens_surfaces_clock_integrity_gaps () =
   let base_dir = temp_dir () in
@@ -2962,7 +2985,21 @@ let test_source_clock_roundtrip () =
     (Option.map M.source_clock_to_string (M.source_clock_of_string "oas_event_bus"));
   Alcotest.(check (option string))
     "unknown source_clock is rejected" None
-    (Option.map M.source_clock_to_string (M.source_clock_of_string "not_real"))
+    (Option.map M.source_clock_to_string (M.source_clock_of_string "not_real"));
+  Alcotest.(check string)
+    "provider event defaults to provider clock"
+    "provider"
+    (M.source_clock_of_event M.Provider_attempt_started
+     |> M.source_clock_to_string);
+  Alcotest.(check string)
+    "context event defaults to logical clock"
+    "logical"
+    (M.source_clock_of_event M.Context_injected |> M.source_clock_to_string);
+  Alcotest.(check string)
+    "event bus defaults to oas event bus clock"
+    "oas_event_bus"
+    (M.source_clock_of_event M.Event_bus_correlated
+     |> M.source_clock_to_string)
 
 let test_runtime_trace_lens_summarizes_source_clock_axis () =
   let base_dir = temp_dir () in

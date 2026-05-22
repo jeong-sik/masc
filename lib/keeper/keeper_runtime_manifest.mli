@@ -74,6 +74,7 @@ type source_clock =
 
 val source_clock_to_string : source_clock -> string
 val source_clock_of_string : string -> source_clock option
+val source_clock_of_event : event_kind -> source_clock
 
 val schema_version : int
 val all_event_kinds : event_kind list

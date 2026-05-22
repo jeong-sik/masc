@@ -63,6 +63,16 @@ let source_clock_of_string = function
   | "oas_event_bus" -> Some Event_bus
   | _ -> None
 
+let source_clock_of_event = function
+  | Event_bus_correlated -> Event_bus
+  | Provider_attempt_started
+  | Provider_attempt_finished ->
+    Provider
+  | Context_injected
+  | Context_compacted ->
+    Logical
+  | _ -> Wall
+
 module StringSet = Set.Make (String)
 
 type links = {
@@ -298,17 +308,8 @@ let clock_refs_for_context ctx ~event ?oas_turn_count
       Some (context_memory_injection_id ctx ?oas_turn_count ())
     | _ -> None
   in
-  let source_clock =
-    match event with
-    | Event_bus_correlated -> Event_bus
-    | Provider_attempt_started
-    | Provider_attempt_finished -> Provider
-    | Context_injected
-    | Context_compacted -> Logical
-    | _ -> Wall
-  in
   clock_refs ~edge_id:(context_edge_id ctx event)
-    ~lane:(clock_lane_of_event event) ~source_clock ?tool_batch_id
+    ~lane:(clock_lane_of_event event) ~source_clock:(source_clock_of_event event) ?tool_batch_id
     ?checkpoint_id ?compaction_id ?memory_injection_id
     ?event_bus_correlation_id ?event_bus_run_id ?parent_event_id ?caused_by ()
 

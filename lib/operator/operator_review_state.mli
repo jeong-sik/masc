@@ -44,10 +44,6 @@ val compare_review_decision :
 val read_review_decisions :
   Coord_utils.config -> review_decision list
 
-(** Atomically rewrite the full decision log. *)
-val write_review_decisions :
-  Coord_utils.config -> review_decision list -> unit
-
 (** {1 Queries} *)
 
 (** [recent_review_decisions ?limit ?target_type ?target_id config]

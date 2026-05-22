@@ -115,8 +115,7 @@ let record_success
     institution episode store via [store_failed_turn_episode]).
 
     Mapping rationale:
-    - provider-timeout families, with legacy [oas_timeout_budget] normalized
-      at the mapper boundary → [Provider_timeout].
+    - provider-timeout families → [Provider_timeout].
     - admission/cascade/provider capacity families → [Capacity_pressure].
     - stale turn, heartbeat, and fiber liveness families → [Turn_liveness].
     - generic [*_timeout] / [*_timeout_*] remains [Timeout] only when owner
@@ -128,11 +127,7 @@ let stress_kind_of_error_kind error_kind : Agent_stress.stress_kind option =
   let trimmed =
     String.trim (Memory_oas_bridge.error_kind_to_string error_kind)
   in
-  let canonical_error_kind =
-    match trimmed with
-    | "oas_timeout_budget" -> "provider_timeout"
-    | value -> value
-  in
+  let canonical_error_kind = trimmed in
   let ends_with suffix s =
     let ls = String.length s in
     let lp = String.length suffix in

@@ -49,12 +49,8 @@ let all =
     Network_error_other;
   ]
 
-let canonical_label = function
-  | "oas_timeout_budget" -> "provider_timeout"
-  | label -> label
-
 let of_string_opt raw =
-  match canonical_label raw with
+  match raw with
   | "task_ownership_ambiguity_current_task_unset" ->
       Some Task_ownership_ambiguity_current_task_unset
   | "state_store_current_task_path_corruption" ->

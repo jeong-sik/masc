@@ -591,6 +591,17 @@ let resolve_live_result ?config_path raw :
   resolve_live_with_catalog_result
     ~catalog:(catalog_lookup_names ?config_path ()) raw
 
+let required_capability_profile_of_cascade_name name =
+  Cascade_catalog_runtime_cache.with_cache_lock (fun () ->
+    match !Cascade_catalog_runtime_cache.cache.active_snapshot with
+    | None -> None
+    | Some snapshot -> (
+      match
+        Cascade_catalog_runtime_cache.profile_lookup snapshot.profiles name
+      with
+      | None -> None
+      | Some profile -> profile.required_capability_profile))
+
 let canonicalize (raw : string) : string =
   canonicalize_with_catalog ~catalog:(catalog_names ()) raw
 

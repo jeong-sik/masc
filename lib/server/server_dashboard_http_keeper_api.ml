@@ -547,6 +547,14 @@ let handle_keeper_directive_post state _agent_name req reqd body_str =
           reqd
     | Ok action_str ->
         let config = state.Mcp_server.room_config in
+        let directive =
+          match action_str with
+          | "pause" -> `Pause
+          | "resume" -> `Resume
+          | "wakeup" -> `Wakeup
+          | _ -> assert false
+                 (* Validated at HTTP boundary above (lines 533-537). *)
+        in
         (* Issue #8391 HIGH #1: split [Ok None] (meta vanished) from [Error _]
            (IO/parse failure). For pause/resume the operator expects state to
            change; silent 200 hides the failure. For wakeup we preserve the
@@ -582,21 +590,10 @@ let handle_keeper_directive_post state _agent_name req reqd body_str =
           | Some _ | None -> ()
         in
         let proceed () =
-          (* #10583: pause was missing from the first match, falling
-             through to the [_] arm and emitting a false
-             "Unknown keeper directive: pause" WARN even though the
-             second match (line 923) handles pause correctly. The
-             persisted paused=true also was not reaching meta.json
-             because persist_paused_state(true) was never called for
-             the pause action. Adding the case here both removes the
-             false WARN and restores meta-side durability so the next
-             server restart preserves the operator's pause decision. *)
-          (match action_str with
-           | "pause" -> persist_paused_state true
-           | "resume" -> persist_paused_state false
-           | "wakeup" -> ()
-           | _ ->
-               Log.Server.warn "Unknown keeper directive: %s" action_str);
+          (match directive with
+           | `Pause -> persist_paused_state true
+           | `Resume -> persist_paused_state false
+           | `Wakeup -> ());
           let resolved_agent_name =
             match Keeper_registry_lookup.find_by_name name with
             | Some entry -> entry.meta.agent_name
@@ -607,20 +604,19 @@ let handle_keeper_directive_post state _agent_name req reqd body_str =
           in
           Keeper_keepalive.process_directive
             ~agent_name:resolved_agent_name action_str;
-          (match action_str with
-           | "pause" -> refresh_keeper_execution_surfaces ~config ~name "paused"
-           | "resume" -> refresh_keeper_execution_surfaces ~config ~name "resumed"
-           | "wakeup" -> invalidate_keeper_execution_surfaces ~config ()
-           | _ -> invalidate_keeper_execution_surfaces ~config ());
+          (match directive with
+           | `Pause -> refresh_keeper_execution_surfaces ~config ~name "paused"
+           | `Resume -> refresh_keeper_execution_surfaces ~config ~name "resumed"
+           | `Wakeup -> invalidate_keeper_execution_surfaces ~config ());
           Http.Response.json ~compress:true ~request:req
             (Printf.sprintf {|{"ok":true,"action":"%s","name":"%s"}|}
                (String.escaped action_str) (String.escaped name))
             reqd
         in
         let needs_meta_for_state_transition =
-          match action_str with
-          | "pause" | "resume" -> true
-          | _ -> false
+          match directive with
+          | `Pause | `Resume -> true
+          | `Wakeup -> false
         in
         (match read_result, needs_meta_for_state_transition with
          | Error err, true ->

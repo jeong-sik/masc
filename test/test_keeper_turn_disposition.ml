@@ -37,7 +37,6 @@ let canonical_app_codes : (string * D.t) list =
   [ "success", D.Success
   ; "external_cancel", D.External_cancel
   ; "turn_wall_clock_timeout", D.Turn_wall_clock_timeout
-  ; "oas_timeout_budget", D.Turn_wall_clock_timeout
   ; "gh_repo_context_missing_worktree", D.Gh_repo_context_missing_worktree
   ; "required_tool_use_no_tool_call", D.Required_tool_use_no_tool_call
   ; "required_tool_use_unsatisfied", D.Required_tool_use_unsatisfied
@@ -104,8 +103,7 @@ let test_canonical_next_action_byte_compat () =
        let legacy = Legacy.of_code wire in
        let expected =
          match wire, legacy.next_action with
-         | ("turn_wall_clock_timeout" | "oas_timeout_budget"), _ ->
-           "Some:inspect_turn_timeout"
+         | "turn_wall_clock_timeout", _ -> "Some:inspect_turn_timeout"
          | _, Some s -> "Some:" ^ s
          | _, None -> "None"
        in
@@ -148,7 +146,6 @@ let round_trippable : (string * D.t) list =
   [ "Success", D.Success
   ; "External_cancel", D.External_cancel
   ; "Turn_wall_clock_timeout", D.Turn_wall_clock_timeout
-  ; "legacy timeout-budget wire alias", D.Turn_wall_clock_timeout
   ; "Gh_repo_context_missing_worktree", D.Gh_repo_context_missing_worktree
   ; "Required_tool_use_no_tool_call", D.Required_tool_use_no_tool_call
   ; "Required_tool_use_unsatisfied", D.Required_tool_use_unsatisfied

@@ -200,7 +200,7 @@
   keeper_turn_telemetry
   keeper_agent_prompt_metrics
   keeper_agent_tool_surface
-  keeper_agent_run_phase0_telemetry keeper_agent_run_contract_retry
+  keeper_agent_run_phase0_telemetry keeper_agent_run_contract_retry keeper_agent_run_actionable_contract
   keeper_agent_run_contract_helpers keeper_agent_run_thinking_trajectory
   keeper_agent_run_tool_observation keeper_agent_run_tool_surface_violation keeper_agent_run_receipt_append
   keeper_agent_result

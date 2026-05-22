@@ -16,36 +16,38 @@ let is_env_name_char = function
   | 'A' .. 'Z' | 'a' .. 'z' | '0' .. '9' | '_' -> true
   | _other -> false
 
-let parse_env_assignment word =
-  match String.index_opt word '=' with
+let meta ~quoted = { Shell_ir.default_meta with quoted }
+
+let parse_env_assignment (word, quoted) =
+  match String.index_opt word_str '=' with
   | None -> None
   | Some 0 -> None
   | Some idx ->
-    let name = String.sub word 0 idx in
+    let name = String.sub word_str 0 idx in
     if is_env_name_start name.[0]
        && String.for_all is_env_name_char name
     then
       let value =
-        String.sub word (idx + 1) (String.length word - idx - 1)
+        String.sub word_str (idx + 1) (String.length word_str - idx - 1)
       in
-      Some (name, Shell_ir.Lit (value, Shell_ir.default_meta))
+      Some (name, Shell_ir.Lit (value, meta ~quoted))
     else None
 
 let split_env_prefix words =
   let rec loop env = function
     | [] -> Error { Parsed.pos = Lexing.dummy_pos; token = ""; expected = [ "command" ] }
     | word :: rest ->
-      (match parse_env_assignment word with
+      (match parse_env_assignment (fst word) with
        | Some binding -> loop (binding :: env) rest
        | None -> Ok (List.rev env, word, rest))
   in
   loop [] words
 
-let raw_to_simple (bin_str, args_str, redirects)
+let raw_to_simple (bin_word, args_words, redirects)
     : (Shell_ir.simple, Parsed.parse_error) result =
-  match split_env_prefix (bin_str :: args_str) with
+  match split_env_prefix (bin_word :: args_words) with
   | Error e -> Error e
-  | Ok (env, bin_str, args_str) -> (
+  | Ok (env, (bin_str, _), args_words) -> (
   match Bin.of_string bin_str with
   | Error (`Unknown _) ->
     (* A0 guarantees Bin.of_string only errors on empty input.  That
@@ -53,7 +55,11 @@ let raw_to_simple (bin_str, args_str, redirects)
        at least one token), so this branch is defensive. *)
     Error { Parsed.pos = Lexing.dummy_pos; token = bin_str; expected = [] }
   | Ok bin ->
-    let args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) args_str in
+    let args =
+      List.map
+        (fun (s, quoted) -> Shell_ir.Lit (s, meta ~quoted))
+        args_words
+    in
     Ok
       { Shell_ir.bin
       ; args

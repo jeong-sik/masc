@@ -3059,6 +3059,15 @@ export interface MemorySubsystemsMemoryEntry {
   ts_unix: number
 }
 
+/** RFC-0149 §3.1 — per-keeper memory bank read failure, surfaced as
+ *  a typed sibling field next to the entry rows.  `error_class` is one
+ *  of the closed 4-value `Keeper_memory_recall_exn_class.t` labels
+ *  (`yojson_parse_error | io_error | type_error | other`). */
+export interface MemorySubsystemsMemoryEntryError {
+  keeper: string
+  error_class: string
+}
+
 export interface MemorySubsystemsResponse {
   generated_at: string
   hebbian: {
@@ -3078,6 +3087,11 @@ export interface MemorySubsystemsResponse {
     shown: number
     limit: number
     items: MemorySubsystemsMemoryEntry[]
+    /** RFC-0149 §3.1 — per-keeper memory bank read failures.  Each
+     *  entry means that keeper's `memory.jsonl` could not be read and
+     *  the corresponding rows are absent from `items`; the rest of
+     *  `items` is still trustworthy. */
+    errors?: MemorySubsystemsMemoryEntryError[]
   }
   filters: {
     keepers: string[]

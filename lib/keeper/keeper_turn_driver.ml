@@ -1168,6 +1168,52 @@ let run_named
       Error
         terminal_error
     | candidate :: rest ->
+      (* Fleet-level backoff: when every remaining candidate is under
+         health cooldown, wait until the earliest cooldown expires rather
+         than exhausting the cascade immediately.  This prevents the
+         fail-open -> capacity-backpressure -> restart loop that thrashes
+         keepers when all providers are simultaneously exhausted.
+         (task-536, PR-17885 follow-up). *)
+      (if health_cooldown_fail_open then (
+         let now = Unix.gettimeofday () in
+         let all_candidates = candidate :: rest in
+         let cooldown_expirations =
+           List.filter_map
+             (fun c ->
+                match Cascade_runtime_candidate.first_health_cooldown c with
+                | None -> None
+                | Some (key, _) -> (
+                  match
+                    Cascade_health_tracker.provider_info
+                      Cascade_health_tracker.global ~provider_key:key
+                  with
+                  | None -> None
+                  | Some info -> info.cooldown_expires_at))
+             all_candidates
+         in
+         if List.length cooldown_expirations = List.length all_candidates
+            && cooldown_expirations <> []
+         then (
+           let min_expiry =
+             List.fold_left Float.min Float.infinity cooldown_expirations
+           in
+           let wait_sec =
+             Float.max 0.0
+               (Float.min
+                  (min_expiry -. now)
+                  Cascade_health_tracker_config.default_capacity_backpressure_backoff_sec)
+           in
+           if wait_sec > 0.0 then (
+             Log.Misc.info
+               "cascade %s: fleet-level backoff -- all %d provider(s) in \
+                cooldown, waiting %.1fs for earliest recovery"
+               cascade_name
+               (List.length all_candidates)
+               wait_sec;
+             match Eio_context.get_clock_opt () with
+             | Some clock -> Eio.Time.sleep clock wait_sec
+             | None -> Unix.sleepf wait_sec
+           ))));
       Eio_guard.fair_yield (); (* P0: keep fast-fail cascades scheduler-fair. *)
       (* RFC-0157 PR-1: pre-dispatch required-tool capability gate.
          Resolves the candidate's effective tool surface and checks whether

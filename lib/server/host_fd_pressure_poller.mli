@@ -21,12 +21,3 @@ val start : sw:Eio.Switch.t -> clock:_ Eio.Time.clock -> unit
     [Server_bootstrap_loops.start_background_maintenance]. Cancelled
     when [sw] terminates. *)
 
-val state_file_path : unit -> string
-(** [state_file_path ()] returns the configured pressure state path.
-    Default [/tmp/masc-host-pressure.state]; env-overrideable via
-    [MASC_HOST_FD_PRESSURE_STATE_FILE]. Exposed for testing. *)
-
-val poll_interval_sec : unit -> float
-(** [poll_interval_sec ()] returns the poll cadence. Default 1.0s;
-    env-overrideable via [MASC_HOST_FD_PRESSURE_POLL_INTERVAL_SEC],
-    bounded [0.5, 60.0]. *)

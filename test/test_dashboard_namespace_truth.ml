@@ -181,11 +181,11 @@ let test_dashboard_namespace_truth_empty_room () =
           (match json |> member "generated_at_iso" with
           | `String value -> String.length value > 0
           | _ -> false);
-        check bool "room-truth alias advertised"
-          true
+        check bool "room-truth alias retired"
+          false
           (json |> member "dashboard_aliases" |> to_list
-          |> List.map to_string
-          |> List.mem "/api/v1/dashboard/room-truth");
+           |> List.map to_string
+           |> List.mem "/api/v1/dashboard/room-truth");
         check bool "readiness status exposed"
           true
           (String.length (json |> member "readiness" |> member "status" |> to_string) > 0);

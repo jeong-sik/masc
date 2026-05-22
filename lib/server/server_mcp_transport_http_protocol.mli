@@ -112,11 +112,6 @@ val request_force_json_response : Httpun.Request.t -> bool
 (** Re-export of
     {!Server_mcp_transport_http_headers.request_force_json_response}. *)
 
-val allow_legacy_accept : bool
-(** Re-export of
-    {!Server_mcp_transport_http_headers.allow_legacy_accept}.
-    Captured at module init from [MASC_ALLOW_LEGACY_ACCEPT]. *)
-
 val classify_mcp_accept :
   Httpun.Request.t -> Mcp_transport_protocol.Http_negotiation.accept_mode
 (** Re-export of
@@ -136,14 +131,6 @@ val should_use_sse_for_body :
   bool
 (** Re-export of
     {!Server_mcp_transport_http_headers.should_use_sse_for_body}. *)
-
-val legacy_accept_warning_headers :
-  Mcp_transport_protocol.Http_negotiation.accept_mode ->
-  (string * string) list
-(** Re-export of
-    {!Server_mcp_transport_http_headers.legacy_accept_warning_headers}.
-    Returns warn-deprecation headers when the accept mode is
-    [Legacy_accepted], else [\[\]]. *)
 
 val legacy_transport_deprecation_headers : (string * string) list
 (** Re-export of

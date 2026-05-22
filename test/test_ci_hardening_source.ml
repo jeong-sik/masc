@@ -1780,16 +1780,19 @@ let test_input_validation_contracts () =
        "maybe_evict_expired config")
 
 let test_room_current_validation_contracts () =
-  (* H2 gateway serves canonical namespace routes and keeps temporary room
-     aliases so mixed dashboard/backend deployments do not break during rollout. *)
+  (* H2 gateway serves canonical namespace routes; the dashboard room-truth
+     alias is retired so mixed wording cannot become a second surface. *)
   check bool "h2 gateway serves project-snapshot endpoint" true
     (file_contains_pattern "lib/server/server_h2_gateway.ml"
        {|"/api/v1/dashboard/project-snapshot"|});
   check bool "h2 gateway serves namespace-truth endpoint alias" true
     (file_contains_pattern "lib/server/server_h2_gateway.ml"
        {|"/api/v1/dashboard/namespace-truth"|});
-  check bool "h2 gateway keeps room-truth alias endpoint during rollout" true
-    (file_contains_pattern "lib/server/server_h2_gateway.ml"
+  check bool "h2 gateway does not serve retired room-truth alias" true
+    (file_not_contains_pattern "lib/server/server_h2_gateway.ml"
+       {|"/api/v1/dashboard/room-truth"|});
+  check bool "http router does not serve retired room-truth alias" true
+    (file_not_contains_pattern "lib/server/server_routes_http_routes_dashboard.ml"
        {|"/api/v1/dashboard/room-truth"|});
   check bool "h2 gateway serves namespace current endpoint" true
     (file_contains_pattern "lib/server/server_h2_gateway.ml"

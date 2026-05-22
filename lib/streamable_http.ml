@@ -20,7 +20,6 @@ type session = {
 
 type response_mode =
   | Json_response of Yojson.Safe.t
-  | Json_batch of Yojson.Safe.t list
   | Sse_upgrade
   | Error_response of int * string
 

@@ -304,7 +304,7 @@ async function mcpCall(name, args) {
   });
 
   log('operator digest probe');
-  const missionJsonResult = await mcpCall('masc_operator_digest', { actor: 'mission-smoke', target_type: 'room' });
+  const missionJsonResult = await mcpCall('masc_operator_digest', { actor: 'mission-smoke', target_type: 'root' });
   checks.push({
     name: 'operator digest remains callable during smoke',
     pass: !!missionJsonResult,

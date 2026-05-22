@@ -577,19 +577,6 @@ let mcp_post_handler
           let response = Httpun.Response.create ~headers `OK in
           safe_respond_with_string reqd response json_str
 
-      | Streamable_http.Json_batch jsons ->
-          let json_str = Yojson.Safe.to_string (`List jsons) in
-          let extra_headers = match session_opt with
-            | Some s -> Streamable_http.with_session_header s []
-            | None -> []
-          in
-          let headers = Httpun.Headers.of_list ([
-            ("content-type", "application/json");
-            ("content-length", string_of_int (String.length json_str));
-          ] @ extra_headers) in
-          let response = Httpun.Response.create ~headers `OK in
-          safe_respond_with_string reqd response json_str
-
       | Streamable_http.Sse_upgrade ->
           Response.text ~status:`Not_implemented
             "SSE upgrade is not supported on this transport" reqd

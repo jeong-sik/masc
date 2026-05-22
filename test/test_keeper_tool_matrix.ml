@@ -18,8 +18,6 @@ let requested_tool_names () =
       | [] -> None
       | names -> Some names
 
-let quote = Filename.quote
-
 let read_file path =
   In_channel.with_open_bin path In_channel.input_all
 
@@ -29,13 +27,26 @@ let log_progress fmt =
       Printf.eprintf "[keeper_tool_matrix] %s\n%!" line)
     fmt
 
+let find_in_path executable =
+  let path =
+    Sys.getenv_opt "PATH" |> Option.value ~default:""
+    |> String.split_on_char ':'
+  in
+  List.find_map
+    (fun dir ->
+      let candidate =
+        Filename.concat (if dir = "" then "." else dir) executable
+      in
+      try
+        Unix.access candidate [ Unix.X_OK ];
+        Some candidate
+      with Unix.Unix_error _ -> None)
+    path
+
 let timeout_command () =
-  if Sys.command "command -v timeout >/dev/null 2>&1" = 0 then
-    Some "timeout"
-  else if Sys.command "command -v gtimeout >/dev/null 2>&1" = 0 then
-    Some "gtimeout"
-  else
-    None
+  match find_in_path "timeout" with
+  | Some _ as found -> found
+  | None -> find_in_path "gtimeout"
 
 let tool_case_timeout_sec () =
   match Sys.getenv_opt "KEEPER_TOOL_MATRIX_CASE_TIMEOUT_SEC" with
@@ -125,6 +136,48 @@ let parse_case_result ~tool_name output =
                    tool_name raw);
           })
 
+let env_array overrides =
+  let env = Hashtbl.create 64 in
+  Unix.environment ()
+  |> Array.iter (fun binding ->
+         match String.index_opt binding '=' with
+         | Some index ->
+             Hashtbl.replace env
+               (String.sub binding 0 index)
+               (String.sub binding (index + 1)
+                  (String.length binding - index - 1))
+         | None -> ());
+  List.iter (fun (key, value) -> Hashtbl.replace env key value) overrides;
+  Hashtbl.fold
+    (fun key value acc -> Printf.sprintf "%s=%s" key value :: acc)
+    env []
+  |> Array.of_list
+
+let process_exit_code = function
+  | Unix.WEXITED code -> code
+  | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> 255
+
+let run_capture_process ~env ~out_file ~err_file prog argv =
+  let out_fd =
+    Unix.openfile out_file [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_TRUNC ] 0o600
+  in
+  Fun.protect
+    ~finally:(fun () -> Unix.close out_fd)
+    (fun () ->
+      let err_fd =
+        Unix.openfile err_file
+          [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_TRUNC ]
+          0o600
+      in
+      Fun.protect
+        ~finally:(fun () -> Unix.close err_fd)
+        (fun () ->
+          let pid =
+            Unix.create_process_env prog argv env Unix.stdin out_fd err_fd
+          in
+          let _, status = Unix.waitpid [] pid in
+          process_exit_code status))
+
 let run_tool_case_process tool_name =
   let tmp_root = Filename.temp_file "keeper-tool-matrix-base" "" in
   Sys.remove tmp_root;
@@ -137,22 +190,24 @@ let run_tool_case_process tool_name =
   let cleanup_dir path =
     if Sys.file_exists path then Cases.cleanup_dir path
   in
-  let timeout_prefix =
+  let env =
+    env_array [ ("TMPDIR", tmp_root); ("TEMP", tmp_root); ("TMP", tmp_root) ]
+  in
+  let prog, argv =
     match timeout_command () with
     | Some bin ->
-        Printf.sprintf "%s -k 1s %ds " bin (tool_case_timeout_sec ())
-    | None -> ""
-  in
-  let env_prefix =
-    Printf.sprintf "TMPDIR=%s TEMP=%s TMP=%s " (quote tmp_root)
-      (quote tmp_root) (quote tmp_root)
-  in
-  let cmd =
-    Printf.sprintf "%s%s%s %s" env_prefix timeout_prefix
-      (quote (runner_path ())) (quote tool_name)
-  in
-  let wrapped =
-    Printf.sprintf "%s > %s 2> %s" cmd (quote out_file) (quote err_file)
+        ( bin,
+          [|
+            bin;
+            "-k";
+            "1s";
+            Printf.sprintf "%ds" (tool_case_timeout_sec ());
+            runner_path ();
+            tool_name;
+          |] )
+    | None ->
+        let runner = runner_path () in
+        (runner, [| runner; tool_name |])
   in
   Fun.protect
     ~finally:(fun () ->
@@ -160,7 +215,7 @@ let run_tool_case_process tool_name =
       cleanup_file err_file;
       cleanup_dir tmp_root)
     (fun () ->
-      let status = Sys.command wrapped in
+      let status = run_capture_process ~env ~out_file ~err_file prog argv in
       let output =
         String.concat "\n" [ read_file out_file; read_file err_file ]
       in

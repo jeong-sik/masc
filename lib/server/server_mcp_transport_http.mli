@@ -78,7 +78,6 @@ val validate_protocol_version_continuity :
 val get_protocol_version_for_session :
   ?session_id:string -> Httpun.Request.t -> string
 val request_force_json_response : Httpun.Request.t -> bool
-val allow_legacy_accept : bool
 val classify_mcp_accept :
   Httpun.Request.t -> Mcp_transport_protocol.Http_negotiation.accept_mode
 val classify_mcp_accept_for_body :
@@ -88,8 +87,6 @@ val should_use_sse_for_body :
   string ->
   Mcp_transport_protocol.Http_negotiation.accept_mode ->
   bool
-val legacy_accept_warning_headers :
-  Mcp_transport_protocol.Http_negotiation.accept_mode -> (string * string) list
 val legacy_transport_deprecation_headers : (string * string) list
 val force_json_response : bool
 val get_last_event_id : Httpun.Request.t -> int option

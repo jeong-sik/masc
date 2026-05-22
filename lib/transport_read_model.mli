@@ -16,7 +16,6 @@
 type http_context = {
   base_url : string;
   host : string;
-  allow_legacy_accept : bool;
   include_configured : bool;
 }
 (** Concrete record because callers
@@ -29,9 +28,6 @@ type http_context = {
       (single-pass; runs on every binding/handshake).
     - [host] is canonicalised through
       {!normalize_advertised_host}.
-    - [allow_legacy_accept] mirrors the
-      [MASC_ALLOW_LEGACY_ACCEPT] gate so the JSON projection
-      can advertise legacy-mode availability.
     - [include_configured] toggles whether
       [(configured: <bool>)] sub-fields appear in the
       [transport_status_json] output (operator-only flag — UI
@@ -62,24 +58,21 @@ val make_http_context :
   ?include_configured:bool ->
   base_url:string ->
   host:string ->
-  allow_legacy_accept:bool ->
   unit ->
   http_context
 (** [make_http_context ?include_configured ~base_url ~host
-    ~allow_legacy_accept ()] returns a context with [base_url]
-    normalised through {!normalize_loopback_base_url} (private,
-    delegates to {!normalize_advertised_host} for host
-    component + trailing-slash strip) and [host] normalised
-    through {!normalize_advertised_host}.  [include_configured]
-    defaults to [false]. *)
+    ()] returns a context with [base_url] normalised through
+    {!normalize_loopback_base_url} (private, delegates to
+    {!normalize_advertised_host} for host component + trailing-slash
+    strip) and [host] normalised through {!normalize_advertised_host}.
+    [include_configured] defaults to [false]. *)
 
 val context_from_env :
   ?include_configured:bool ->
-  allow_legacy_accept:bool ->
   unit ->
   http_context
-(** [context_from_env ?include_configured ~allow_legacy_accept ()]
-    builds a context from the runtime environment:
+(** [context_from_env ?include_configured ()] builds a context from the
+    runtime environment:
 
     1. Default host from {!Env_config_core.masc_host} (then
        canonicalised).

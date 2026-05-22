@@ -160,7 +160,7 @@ check_pair() {
 
 echo "=== Check 1: KeeperStateMachine.phase (OCaml) vs KeeperPhase (TypeScript) ==="
 
-KSM_ML="lib/keeper/keeper_state_machine.ml"
+KSM_ML="lib/keeper/keeper_state_machine_phase.ml"
 KP_TS="dashboard/src/types/core.ts"
 
 if [ -f "$KSM_ML" ] && [ -f "$KP_TS" ]; then

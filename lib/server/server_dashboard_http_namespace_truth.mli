@@ -28,9 +28,8 @@ val dashboard_namespace_truth_http_json :
 
     All responses, including cold-start, carry top-level
     [dashboard_surface], [dashboard_aliases], [source], [retention],
-    and [generated_at_iso] fields so legacy aliases such as
-    [/dashboard/room-truth] remain visibly tied to the canonical
-    namespace-truth read model.
+    and [generated_at_iso] fields tied to the canonical namespace-truth
+    read model.
 
     Cold-start fast-path: when the proactive
     {!Server_dashboard_http_execution_surfaces.execution_cache} has

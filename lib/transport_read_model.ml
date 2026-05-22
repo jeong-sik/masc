@@ -1,7 +1,6 @@
 type http_context =
   { base_url : string
   ; host : string
-  ; allow_legacy_accept : bool
   ; include_configured : bool
   }
 
@@ -78,17 +77,15 @@ let make_http_context
       ?(include_configured = false)
       ~base_url
       ~host
-      ~allow_legacy_accept
       ()
   =
   { base_url = normalize_loopback_base_url base_url
   ; host = normalize_advertised_host host
-  ; allow_legacy_accept
   ; include_configured
   }
 ;;
 
-let context_from_env ?(include_configured = false) ~allow_legacy_accept () =
+let context_from_env ?(include_configured = false) () =
   let default_host = configured_http_host () |> normalize_advertised_host in
   let default_base_url =
     Printf.sprintf "http://%s:%d" default_host (configured_http_port ())
@@ -107,7 +104,7 @@ let context_from_env ?(include_configured = false) ~allow_legacy_accept () =
     | Some value -> normalize_advertised_host value
     | None -> default_host
   in
-  make_http_context ~include_configured ~base_url ~host ~allow_legacy_accept ()
+  make_http_context ~include_configured ~base_url ~host ()
 ;;
 
 let maybe_configured_fields ~include_configured enabled =
@@ -186,7 +183,6 @@ let transport_status_json (ctx : http_context) =
   let webrtc_enabled = Server_webrtc_transport.is_enabled () in
   `Assoc
     [ "streamable_http_default", `Bool true
-    ; "allow_legacy_accept", `Bool ctx.allow_legacy_accept
     ; "legacy_endpoints_deprecated", `Bool true
     ; ( "http"
       , `Assoc

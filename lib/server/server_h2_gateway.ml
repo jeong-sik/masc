@@ -405,9 +405,6 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
                                  h2_respond_json h2_reqd body ~status:`Bad_request
                                    ~extra_headers:(cors @ mcp_headers session_id protocol_version)
                              | Ok post_context ->
-                                 let accept_warn_headers =
-                                   post_context.accept_warn_headers
-                                 in
                                  with_server_state h2_reqd (fun state ->
                                    let profile =
                                      mcp_eio_profile_of_transport_profile profile
@@ -438,8 +435,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
                                        httpun_request
                                    in
                                    let mcp_hdrs =
-                                     accept_warn_headers @ mcp_headers session_id protocol_version
-                                     @ cors
+                                     mcp_headers session_id protocol_version @ cors
                                    in
                                    match response_json with
                                    | `Null ->
@@ -699,8 +695,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
                       ~extra_headers:cors))
 
       | `GET, "/api/v1/dashboard/project-snapshot"
-      | `GET, "/api/v1/dashboard/namespace-truth"
-      | `GET, "/api/v1/dashboard/room-truth" ->
+      | `GET, "/api/v1/dashboard/namespace-truth" ->
           with_h2_public_read h2_reqd (fun state ->
             let json =
               (* RFC-0138 Phase 3 Step 3 follow-up — route H/2 gateway

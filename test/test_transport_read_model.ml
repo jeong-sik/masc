@@ -28,8 +28,8 @@ let rec strip_configured = function
   | other -> other
 
 let make_context ?(include_configured = false) () =
-  TRM.make_http_context ~include_configured ~allow_legacy_accept:false
-    ~base_url:"http://127.0.0.1:8935" ~host:"127.0.0.1" ()
+  TRM.make_http_context ~include_configured ~base_url:"http://127.0.0.1:8935"
+    ~host:"127.0.0.1" ()
 
 let test_websocket_discovery_http_shape_extends_tool_shape () =
   let tool_json = TRM.websocket_discovery_json (make_context ()) in
@@ -121,21 +121,20 @@ let test_context_from_env_uses_default_loopback_base_url () =
   with_env "MASC_HTTP_BASE_URL" None (fun () ->
       with_env "MASC_HOST" (Some "0.0.0.0") (fun () ->
           with_env "MASC_HTTP_PORT" (Some "8935") (fun () ->
-              let ctx = TRM.context_from_env ~allow_legacy_accept:false () in
+              let ctx = TRM.context_from_env () in
               check string "normalized host" "127.0.0.1" ctx.host;
               check string "default base_url" "http://127.0.0.1:8935"
                 ctx.base_url)))
 
 let test_context_from_env_trims_explicit_base_url () =
   with_env "MASC_HTTP_BASE_URL" (Some "https://example.com/root/") (fun () ->
-      let ctx = TRM.context_from_env ~allow_legacy_accept:true () in
+      let ctx = TRM.context_from_env () in
       check string "host derived from base url" "example.com" ctx.host;
-      check string "base_url trimmed" "https://example.com/root" ctx.base_url;
-      check bool "allow_legacy_accept carried" true ctx.allow_legacy_accept)
+      check string "base_url trimmed" "https://example.com/root" ctx.base_url)
 
 let test_context_from_env_normalizes_loopback_alias_base_url () =
   with_env "MASC_HTTP_BASE_URL" (Some "http://localhost:8935/root/") (fun () ->
-      let ctx = TRM.context_from_env ~allow_legacy_accept:false () in
+      let ctx = TRM.context_from_env () in
       check string "loopback alias host canonicalized" "127.0.0.1" ctx.host;
       check string "loopback alias base_url canonicalized"
         "http://127.0.0.1:8935/root" ctx.base_url)

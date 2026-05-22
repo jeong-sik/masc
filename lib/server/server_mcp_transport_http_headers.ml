@@ -45,10 +45,8 @@ let request_force_json_response (request : Httpun.Request.t) =
   | Some value -> header_truthy_value value
   | None -> false
 
-let allow_legacy_accept = env_flag "MASC_ALLOW_LEGACY_ACCEPT"
-
 let classify_mcp_accept (request : Httpun.Request.t) =
-  Http_negotiation.classify_mcp_accept ~allow_legacy:allow_legacy_accept
+  Http_negotiation.classify_mcp_accept
     (Httpun.Headers.get request.headers "accept")
 
 let body_jsonrpc_method body_str =
@@ -87,15 +85,6 @@ let should_use_sse_for_body (request : Httpun.Request.t) body_str accept_mode =
       accept_mode = Http_negotiation.Streamable
       && Http_negotiation.accepts_sse_header
            (Httpun.Headers.get request.headers "accept")
-
-let legacy_accept_warning_headers = function
-  | Http_negotiation.Legacy_accepted ->
-      [
-        ( "warning",
-          "299 - \"Legacy Accept is deprecated; use 'application/json, text/event-stream'\"" );
-        ("x-masc-legacy-accept", "1");
-      ]
-  | Http_negotiation.Streamable | Http_negotiation.Rejected -> []
 
 let legacy_transport_deprecation_headers =
   [

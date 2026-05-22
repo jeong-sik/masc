@@ -46,15 +46,14 @@ let keeper_health_of_string_opt = function
   | "dead" -> Some KH_dead
   | _ -> None
 
-(** Back-compat wrapper for callers not yet migrated to the option form.
-    Logs the unknown string once per call so drift is operator-visible
-    even when callers do not branch on it. *)
-let keeper_health_of_string s =
+let keeper_health_or_offline ~source s =
   match keeper_health_of_string_opt s with
   | Some h -> h
   | None ->
       Log.Keeper.warn
-        "keeper_health_of_string: unknown wire string %S → KH_offline fallback (#8670)" s;
+        "%s: unknown keeper health wire string %S -> KH_offline fallback (#8670)"
+        source
+        s;
       KH_offline
 
 let keeper_continuity_to_string = function
@@ -448,7 +447,7 @@ let augment_keeper_diagnostic_json
   let health_state =
     json_string_opt "health_state" diagnostic
     |> Option.value ~default:"offline"
-    |> keeper_health_of_string
+    |> keeper_health_or_offline ~source:"augment_keeper_diagnostic_json"
   in
   let continuity_state =
     keeper_continuity_state ~meta ~keepalive_running
@@ -484,7 +483,7 @@ let keeper_surface_status
   let health_state =
     json_string_opt "health_state" diagnostic
     |> Option.value ~default:"offline"
-    |> keeper_health_of_string
+    |> keeper_health_or_offline ~source:"keeper_surface_status"
   in
   let agent_runtime_status =
     json_string_opt "status" agent_status |> Option.map String.lowercase_ascii

@@ -34,8 +34,8 @@ let process_status_to_string = function
 let run_git_exn repo args =
   let argv = Array.of_list ("git" :: "-C" :: repo :: args) in
   let buf, status =
-    Lib.With_process.with_process_args_in "git" argv
-      Lib.With_process.drain_to_buffer
+    With_process.with_process_args_in "git" argv
+      With_process.drain_to_buffer
   in
   let output = Buffer.contents buf in
   match status with

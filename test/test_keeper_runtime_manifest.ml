@@ -3175,6 +3175,57 @@ let test_required_tool_lane_unavailable_is_tool_support_config_error () =
       "expected tool_support InvalidConfig, got %s"
       (Agent_sdk.Error.to_string err)
 
+let test_pre_dispatch_required_tool_exhaustion_is_no_tool_capable () =
+  let module FT = Masc_mcp.Keeper_turn_driver_helpers in
+  let provider_rejection =
+    FT.provider_rejection_for_required_tool_unsupported
+      ~provider_label:"glm-coding"
+      ~missing_required_tools:[ "keeper_bash" ]
+  in
+  match
+    FT.no_tool_capable_provider_of_pre_dispatch_rejections
+      ~cascade_name:
+        (Masc_mcp.Keeper_turn_driver.cascade_name_of_string
+           "strict_tool_candidates")
+      ~configured_labels:[ "glm-coding.glm-5.keeper" ]
+      ~runtime_manifest_required_tool_names:[ "keeper_bash" ]
+      ~runtime_mcp_policy:None
+      ~tools:[]
+      ~required_lane_provider_rejections:[]
+      ~pre_dispatch_provider_rejections:[ provider_rejection ]
+  with
+  | Some
+      (Masc_mcp.Cascade_error_classify.No_tool_capable_provider
+        { required_tool_names; provider_rejections; _ }) ->
+    Alcotest.(check (list string))
+      "required tool names survive empty materialized tool list"
+      [ "keeper_bash" ]
+      required_tool_names;
+    Alcotest.(check int)
+      "provider rejection retained"
+      1
+      (List.length provider_rejections);
+    let rejection_reason =
+      match provider_rejections with
+      | [ rejection ] -> rejection.reason
+      | _ -> ""
+    in
+    Alcotest.(check bool)
+      "rejection records provider"
+      true
+      (contains_substring rejection_reason "provider=glm-coding");
+    Alcotest.(check bool)
+      "rejection records missing tool"
+      true
+      (contains_substring rejection_reason "missing_required_tools=[keeper_bash]")
+  | Some err ->
+    Alcotest.failf
+      "expected No_tool_capable_provider, got %s"
+      (Masc_mcp.Cascade_error_classify.kind_of_masc_internal_error err)
+  | None ->
+    Alcotest.fail
+      "expected pre-dispatch required-tool exhaustion to produce typed error"
+
 let test_empty_candidate_classification_separates_tool_filter_from_availability () =
   let module FT = Masc_mcp.Keeper_turn_driver_helpers in
   let check label expected actual =
@@ -3909,6 +3960,9 @@ let () =
           Alcotest.test_case
             "required tool lane mismatch is cascade-recoverable"
             `Quick test_required_tool_lane_unavailable_is_tool_support_config_error;
+          Alcotest.test_case
+            "pre-dispatch required-tool exhaustion is typed"
+            `Quick test_pre_dispatch_required_tool_exhaustion_is_no_tool_capable;
           Alcotest.test_case
             "empty candidate classification keeps availability separate"
             `Quick

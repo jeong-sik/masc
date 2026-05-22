@@ -13,6 +13,7 @@ type t =
   | External_cancel
   | Turn_wall_clock_timeout
   | Oas_timeout_budget
+  | Cascade_attempts_exhausted
   | Gh_repo_context_missing_worktree
   | Required_tool_use_no_tool_call
   | Required_tool_use_unsatisfied
@@ -31,6 +32,7 @@ let severity = function
   | External_cancel
   | Turn_wall_clock_timeout
   | Oas_timeout_budget
+  | Cascade_attempts_exhausted
   | Gh_repo_context_missing_worktree -> Warn
   | Required_tool_use_no_tool_call
   | Required_tool_use_unsatisfied
@@ -45,6 +47,8 @@ let summary = function
   | Turn_wall_clock_timeout -> "keeper turn hit the wall-clock timeout"
   | Oas_timeout_budget ->
     "OAS call was skipped or failed because the turn timeout budget was exhausted"
+  | Cascade_attempts_exhausted ->
+    "cascade attempts exhausted; inspect per-attempt root causes"
   | Gh_repo_context_missing_worktree ->
     "GitHub command blocked because the active task has no linked worktree"
   | Required_tool_use_no_tool_call ->
@@ -63,6 +67,7 @@ let next_action = function
   | Success -> None
   | External_cancel -> Some "rerun_if_still_relevant"
   | Turn_wall_clock_timeout | Oas_timeout_budget -> Some "inspect_timeout_budget"
+  | Cascade_attempts_exhausted -> Some "inspect_cascade_attempts"
   | Gh_repo_context_missing_worktree -> Some "create_or_link_worktree"
   | Required_tool_use_no_tool_call | Required_tool_use_unsatisfied ->
     Some "inspect_provider_tool_contract"
@@ -75,6 +80,7 @@ let to_wire = function
   | External_cancel -> "external_cancel"
   | Turn_wall_clock_timeout -> "turn_wall_clock_timeout"
   | Oas_timeout_budget -> "oas_timeout_budget"
+  | Cascade_attempts_exhausted -> "cascade_attempts_exhausted"
   | Gh_repo_context_missing_worktree -> "gh_repo_context_missing_worktree"
   | Required_tool_use_no_tool_call -> "required_tool_use_no_tool_call"
   | Required_tool_use_unsatisfied -> "required_tool_use_unsatisfied"
@@ -120,6 +126,7 @@ let of_wire = function
   | "external_cancel" -> External_cancel
   | "turn_wall_clock_timeout" -> Turn_wall_clock_timeout
   | "oas_timeout_budget" -> Oas_timeout_budget
+  | "cascade_attempts_exhausted" -> Cascade_attempts_exhausted
   | "gh_repo_context_missing_worktree" -> Gh_repo_context_missing_worktree
   | "required_tool_use_no_tool_call" -> Required_tool_use_no_tool_call
   | "required_tool_use_unsatisfied" -> Required_tool_use_unsatisfied
@@ -137,6 +144,7 @@ let equal a b =
   | External_cancel, External_cancel
   | Turn_wall_clock_timeout, Turn_wall_clock_timeout
   | Oas_timeout_budget, Oas_timeout_budget
+  | Cascade_attempts_exhausted, Cascade_attempts_exhausted
   | Gh_repo_context_missing_worktree, Gh_repo_context_missing_worktree
   | Required_tool_use_no_tool_call, Required_tool_use_no_tool_call
   | Required_tool_use_unsatisfied, Required_tool_use_unsatisfied
@@ -147,6 +155,7 @@ let equal a b =
   | External_cancel, _
   | Turn_wall_clock_timeout, _
   | Oas_timeout_budget, _
+  | Cascade_attempts_exhausted, _
   | Gh_repo_context_missing_worktree, _
   | Required_tool_use_no_tool_call, _
   | Required_tool_use_unsatisfied, _

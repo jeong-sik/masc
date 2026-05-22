@@ -79,8 +79,7 @@ let adaptive = Cfg.KeeperKeepalive.oas_timeout_for_estimated_input_tokens
    turn envelope. Input-token size and max_turns no longer affect the computed
    budget; explicit env override remains the only way to change it. *)
 
-let turn_cap = Cfg.KeeperKeepalive.turn_timeout_sec
-let oas_cap = Cfg.KeeperKeepalive.oas_timeout_sec
+let oas_cap = 300.0
 
 let test_oas_timeout_32k_uses_oas_cap () =
   let v = adaptive ~estimated_input_tokens:32_000 in
@@ -122,7 +121,7 @@ let test_oas_timeout_is_token_independent () =
   let v3 = adaptive ~estimated_input_tokens:262_144 in
   check (float 0.1) "32K == 128K (both at OAS cap)" v1 v2;
   check (float 0.1) "128K == 262K (both at OAS cap)" v2 v3;
-  check (float 0.1) "all equal to oas_timeout_sec" oas_cap v1
+  check (float 0.1) "all equal to OAS cap" oas_cap v1
 
 let test_oas_timeout_cap () =
   let v = adaptive ~estimated_input_tokens:1_000_000 in
@@ -152,11 +151,6 @@ let test_scheduled_autonomous_max_turns_range () =
   check bool "scheduled autonomous max_turns >= 1" true (v >= 1);
   check bool "scheduled autonomous max_turns <= global" true
     (v <= Cfg.KeeperKeepalive.oas_max_turns_per_call)
-
-let test_oas_timeout_sec_compat () =
-  (* Without env override, oas_timeout_sec returns 300.0 default *)
-  let v = Cfg.KeeperKeepalive.oas_timeout_sec in
-  check (float 1.0) "backward compat default 300s" 300.0 v
 
 (* ── Semaphore wait timeout (defense against peer slot hoarding) ── *)
 
@@ -389,7 +383,6 @@ let () =
       test_case "max_turns range" `Quick test_max_turns_range;
       test_case "scheduled autonomous max_turns range" `Quick
         test_scheduled_autonomous_max_turns_range;
-      test_case "oas_timeout_sec backward compat" `Quick test_oas_timeout_sec_compat;
     ];
     "semaphore_wait_timeout", [
       test_case "default 60s" `Quick test_semaphore_wait_timeout_default;

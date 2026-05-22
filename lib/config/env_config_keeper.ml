@@ -475,13 +475,6 @@ module KeeperKeepalive = struct
       ~max_turns:oas_max_turns_per_call
   ;;
 
-  (** Backward-compatible accessor: returns the env override or 300s default.
-      Prefer {!oas_timeout_for_estimated_input_tokens} when a live prompt
-      estimate is available. *)
-  let oas_timeout_sec =
-    Option.value ~default:oas_timeout_default_sec oas_timeout_sec_override
-  ;;
-
   (** Idle-gap timeout for streaming OAS provider responses.
       This bounds time between streamed lines, not total turn duration.
       Env: [MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC]. Default: 120. Range: [5, 600]. *)
@@ -500,10 +493,9 @@ module KeeperKeepalive = struct
       producing line breaks.
 
       Opt-in: unset env leaves [None] so {!Cascade_agent_context} skips
-      the builder wiring. Set to a value strictly less than the per-call
-      turn cap (e.g. 240–540s when [oas_timeout_sec] is 300–600s) for
-      attempt-level fall-forward; set [<= stream_idle_timeout_sec] for a
-      strict overall cap.
+      the builder wiring. Set to a value strictly less than the effective
+      OAS attempt cap for attempt-level fall-forward; set
+      [<= stream_idle_timeout_sec] for a strict overall cap.
 
       Env: [MASC_KEEPER_BODY_TIMEOUT_SEC]. Default: unset → [None].
       Range when set: [10, 600]. *)

@@ -211,6 +211,16 @@ let handle_keeper_bash_typed
                 ~sandbox:{ target = dispatch_sandbox }
                 ()
             in
+            let () =
+              let open Legendary_counters in
+              incr_shell_gate
+                ~caller:Keeper_shell_bash
+                ~verdict:
+                  (match gate_verdict with
+                   | Shell_gate.Allow _ -> Allow
+                   | Shell_gate.Reject _ -> Reject
+                   | Shell_gate.Cannot_parse _ | Shell_gate.Too_complex _ -> Cannot_parse)
+            in
             match gate_verdict with
             | Reject { diagnostic; _ } ->
               error_json

@@ -52,7 +52,9 @@ type error_kind =
   | Sandbox_docker (** ["sandbox docker exec failed ..."] family. *)
   | Stale_turn_timeout (** ["stale_turn_timeout(...)"] supervisor guard. *)
   | Fiber_unresolved (** ["fiber_unresolved"] sentinel from turn lifecycle. *)
-  | Oas_timeout_budget (** ["oas_timeout_budget_loop(...)"] from OAS bridge. *)
+  | Provider_timeout
+      (** Provider/OAS timeout family. Legacy ["oas_timeout_budget_loop(...)"]
+          text is normalized here instead of becoming its own root cause. *)
   | State_machine_guard
       (** ["state machine guard violation"] / FSM transition rejected. *)
   | Expected_version_mismatch (** CAS expected_version mismatch. *)

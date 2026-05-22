@@ -4,7 +4,7 @@ title: Keeper `last_blocker` auto-clear + cascade recovery escalation
 author: jeong-sik (with Claude Opus 4.7)
 created: 2026-05-14
 corrected: 2026-05-15
-status: Draft
+status: Implemented
 supersedes: —
 related:
   - RFC-0038 §4 problem 3 (operator_disposition ↔ paused desync — noted but unresolved)

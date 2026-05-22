@@ -3,7 +3,7 @@ rfc: RFC-0053
 title: Tool Dispatch Session-Local Handles
 author: jeong-sik
 created: 2026-05-09
-status: Draft
+status: Implemented
 supersedes: -
 related:
   - RFC-0035 (cognitive IDE — tool surface context)

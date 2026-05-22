@@ -860,9 +860,6 @@ let run_turn
                    let actionable_signal_kind =
                      actionable_contract.actionable_signal_kind
                    in
-                   let actionable_signal_context =
-                     actionable_contract.actionable_signal_context
-                   in
                    let actionable_tool_contract_violation_reason =
                      actionable_contract.violation_reason
                    in

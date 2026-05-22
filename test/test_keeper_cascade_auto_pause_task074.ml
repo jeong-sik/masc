@@ -77,7 +77,7 @@ let test_pause_fires_on_cascade_exhausted_variants () =
 
 let mk_oas_timeout_budget () =
   Owne.sdk_error_of_masc_internal_error
-    (Owne.Oas_timeout_budget
+    (Owne.Provider_timeout
        { budget_sec = 30.0;
          keeper_turn_timeout_sec = 60.0;
          estimated_input_tokens = 1000;

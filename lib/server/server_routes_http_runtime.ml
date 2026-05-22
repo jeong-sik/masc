@@ -667,6 +667,10 @@ let keeper_fleet_safety_health_json
            || no_running_fibers
            || low_running_fiber_margin
            || reaction_capacity_below_target) )
+    ; "autoboot_throttle_limit"
+    , `Int Keeper_keepalive.keeper_turn_throttle_limit
+    ; ( "autoboot_throttle_source"
+      , `String (Config_boot_overrides.source "MASC_KEEPER_AUTOBOOT_MAX") )
     ]
 
 let take limit values =

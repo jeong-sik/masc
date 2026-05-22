@@ -1115,6 +1115,10 @@ let test_health_json_surfaces_durable_paused_keepers () =
             (fleet_safety |> member "reaction_capacity_shortfall_count" |> to_int);
           Alcotest.(check bool) "health fleet asks for operator action" true
             (fleet_safety |> member "operator_action_required" |> to_bool);
+          Alcotest.(check int) "health exposes autoboot throttle limit" 32
+            (fleet_safety |> member "autoboot_throttle_limit" |> to_int);
+          Alcotest.(check string) "health exposes autoboot throttle source" "default"
+            (fleet_safety |> member "autoboot_throttle_source" |> to_string);
           Alcotest.(check string) "health reaction ledger degraded"
             "degraded"
             (reaction_ledger |> member "status" |> to_string);

@@ -290,17 +290,3 @@ type reclassify_report = {
   apply_failures : int;
   changed_post_ids : string list;
 }
-
-let reclassify_report_to_yojson (report : reclassify_report) =
-  `Assoc
-    [
-      ("backend", `String report.backend);
-      ("dry_run", `Bool report.dry_run);
-      ("scanned", `Int report.scanned);
-      ("changed", `Int report.changed);
-      ("unchanged", `Int report.unchanged);
-      ("skipped", `Int report.skipped);
-      ("apply_failures", `Int report.apply_failures);
-      ( "changed_post_ids",
-        `List (List.map (fun id -> `String id) report.changed_post_ids) );
-    ]

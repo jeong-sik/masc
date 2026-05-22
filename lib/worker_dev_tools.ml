@@ -59,6 +59,10 @@ let is_git_branch_switch = Exec_policy.is_git_branch_switch
 let is_destructive_bash_operation = Exec_policy.is_destructive_bash_operation
 let sanitize_command_for_log = Exec_policy.sanitize_command_for_log
 let truncate_for_log = Exec_policy.truncate_for_log
+let block_reason_tag = Exec_policy.block_reason_tag
+let attribution_of_validation = Exec_policy.attribution_of_validation
+let block_reason_tag = Exec_policy.block_reason_tag
+let attribution_of_validation = Exec_policy.attribution_of_validation
 
 (* --- gh CLI validation (extracted to Gh_command_validation) --- *)
 

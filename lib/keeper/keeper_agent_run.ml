@@ -847,52 +847,24 @@ let run_turn
                        ~history_messages
                        ~actual_input_tokens:(Some usage.input_tokens)
                    in
-                   (* Classify the most-specific actionable signal from the structured
-            keeper world snapshot. This deliberately avoids re-parsing the
-            rendered prompt text; prompt copy may change without changing the
-            deterministic contract gate. *)
-                   let actionable_signal_kind
-                     : Keeper_contract_classifier.actionable_signal
-                     =
-                     match world_observation with
-                     | None -> No_actionable_signal
-                     | Some observation ->
-                       observation
-                       |> Keeper_contract_classifier.of_keeper_world_observation
-                       |> Keeper_contract_classifier.classify_actionable_signal_for_tools
-                            ~allowed_tool_names:all_tool_names
-                   in
-                   let tool_gate_required =
-                     Keeper_agent_tool_surface
-                     .turn_affordances_require_tool_gate_with_allowed
+                   let actionable_contract =
+                     Keeper_agent_run_actionable_contract.analyze
+                       ~world_observation
                        ~allowed_tool_names:all_tool_names
-                       turn_affordances
+                       ~turn_affordances
+                       ~progress_keeper_tool_names
+                       ~no_progress_success_tool_names
+                       ~claim_context_allowed:
+                         (not had_owned_active_task_at_turn_start)
+                   in
+                   let actionable_signal_kind =
+                     actionable_contract.actionable_signal_kind
                    in
                    let actionable_signal_context =
-                     Keeper_contract_classifier.make_actionable_signal_context
-                       ~tool_gate_required
-                       ~actionable_signal:actionable_signal_kind
+                     actionable_contract.actionable_signal_context
                    in
                    let actionable_tool_contract_violation_reason =
-                     if
-                       Keeper_contract_classifier.is_actionable_signal_context
-                         actionable_signal_context
-                       && progress_keeper_tool_names = []
-                       && no_progress_success_tool_names <> []
-                     then
-                       Some
-                         (Printf.sprintf
-                            "actionable keeper context (%s) was present, but the model \
-                             only used idempotent setup tools that made no execution \
-                             progress: %s"
-                            (Keeper_contract_classifier.actionable_signal_context_label
-                               actionable_signal_context)
-                            (String.concat ", " no_progress_success_tool_names))
-                     else
-                       Keeper_tool_disclosure.actionable_tool_contract_violation_reason
-                         ~claim_context_allowed:(not had_owned_active_task_at_turn_start)
-                         ~actionable_signal_context
-                         ~tool_names:progress_keeper_tool_names
+                     actionable_contract.violation_reason
                    in
                    let contract_violation_error reason =
                      Agent_sdk.Error.Agent

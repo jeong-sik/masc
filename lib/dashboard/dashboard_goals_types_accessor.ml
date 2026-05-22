@@ -51,9 +51,7 @@ let task_is_linked_to_goal (task : Masc_domain.task) goal_id =
 let task_linkage_source_opt (task : Masc_domain.task) goal_id =
   match task.goal_id with
   | Some task_goal_id when String.equal task_goal_id goal_id -> Some "explicit"
-  | Some _ -> None
-  | None ->
-      if task_is_linked_to_goal task goal_id then Some "title_tag" else None
+  | Some _ | None -> None
 
 let task_assignee (task : Masc_domain.task) : string option =
   Masc_domain.task_assignee_of_status task.task_status

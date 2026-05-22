@@ -143,22 +143,17 @@ let test_goal_upsert_and_list () =
     | `String id when id <> "" -> id
     | _ -> fail "goal_id missing from upsert response"
   in
-  let task_marker =
-    match Yojson.Safe.Util.member "task_title_marker" created_json with
-    | `String marker -> marker
-    | _ -> fail "task_title_marker missing from upsert response"
-  in
-  check
-    bool
-    "task marker embeds goal id"
-    true
-    (String.equal task_marker (Printf.sprintf "[goal:%s]" goal_id));
   let task_link_field =
     match Yojson.Safe.Util.member "task_link_field" created_json with
     | `String field -> field
     | _ -> fail "task_link_field missing from upsert response"
   in
   check string "structured link field" "goal_id" task_link_field;
+  check string "structured link mode" "structured_goal_id"
+    (Yojson.Safe.Util.member "task_link_mode" created_json
+     |> Yojson.Safe.Util.to_string);
+  check bool "title marker omitted" true
+    (Yojson.Safe.Util.member "task_title_marker" created_json = `Null);
   let listed =
     Tool_coord.dispatch
       (coord_ctx config)

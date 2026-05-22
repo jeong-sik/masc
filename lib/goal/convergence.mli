@@ -12,17 +12,11 @@ type convergence_signal =
 (** Serialize a convergence signal to JSON. *)
 val convergence_signal_to_yojson : convergence_signal -> Yojson.Safe.t
 
-(** Legacy title marker retained for backward compatibility. *)
-val goal_title_marker : string -> string
-
-(** True when the task is structurally linked to the goal or carries the
-    legacy [[goal:<id>]] title marker. *)
+(** True when the task's structured [goal_id] field matches. *)
 val task_matches_goal : goal_id:string -> Masc_domain.task -> bool
 
-(** True only when the task's structured [goal_id] field matches.
-
-    New read models should prefer this over {!task_matches_goal}; the latter is
-    retained for legacy convergence compatibility with old title-marker tasks. *)
+(** Alias for {!task_matches_goal}; retained for call sites that need the
+    predicate name to be explicit about structured linkage. *)
 val task_has_goal_id : goal_id:string -> Masc_domain.task -> bool
 
 (** Check whether a goal's tasks have converged.
@@ -31,9 +25,8 @@ val task_has_goal_id : goal_id:string -> Masc_domain.task -> bool
     [None] when work is still in progress.
 
     @param goal_id  The goal whose tasks to evaluate.
-    @param tasks    All tasks in the room (filtered internally by explicit
-                    [task.goal_id], with legacy title-tag fallback when
-                    [goal_id] is absent).
+    @param tasks    All tasks in the room, filtered internally by explicit
+                    [task.goal_id].
     @param stagnation_threshold  Number of iterations without progress before
                                  emitting [StagnationDetected]. Defaults to [5].
     @param iterations_without_progress  Current count of iterations with no task

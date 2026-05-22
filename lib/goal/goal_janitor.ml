@@ -114,10 +114,7 @@ let task_age_seconds ?(now = Unix.gettimeofday ()) (task : Masc_domain.task) =
 let task_has_current_goal_link ~valid_goal_ids (task : Masc_domain.task) =
   match task.goal_id with
   | Some goal_id -> List.mem goal_id valid_goal_ids
-  | None ->
-      List.exists
-        (fun goal_id -> Convergence.task_matches_goal ~goal_id task)
-        valid_goal_ids
+  | None -> false
 
 let audit_unclaimed_goal_orphan_tasks ?(now = Unix.gettimeofday ())
     ~valid_goal_ids ~min_age_seconds (tasks : Masc_domain.task list) =

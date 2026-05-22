@@ -251,8 +251,7 @@ let taskboard_tools : Masc_domain.tool_schema list =
                       [ "type", `String "string"
                       ; ( "description"
                         , `String
-                            "Optional structured goal linkage. Preferred over relying \
-                             only on [goal:<id>] in the title." )
+                            "Optional structured goal linkage." )
                       ] )
                 ; ( "contract"
                   , `Assoc

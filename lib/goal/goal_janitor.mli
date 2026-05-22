@@ -70,7 +70,7 @@ val prune_active_goal_ids :
 
 (** [audit_unclaimed_goal_orphan_tasks ~valid_goal_ids
     ~min_age_seconds tasks] returns stale [Todo] tasks with no structured
-    [goal_id] and no current legacy title-tag linkage. *)
+    [goal_id] linkage. *)
 val audit_unclaimed_goal_orphan_tasks :
   ?now:float ->
   valid_goal_ids:string list ->

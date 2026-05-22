@@ -21,17 +21,12 @@
 
      1. Both judges resolve to [dashboard_judge_default_sec] by default,
         instead of inheriting the generic 300s worker budget.
-     2. The legacy per-caller env vars
+     2. Removed pre-SSOT env vars
         ([MASC_OPERATOR_JUDGE_TIMEOUT_SEC],
-        [MASC_DASHBOARD_GOVERNANCE_JUDGE_TIMEOUT_SEC]) are still
-        honoured as a fallback so operator deployment configs that
-        pin the pre-SSOT names continue to take effect.
-     3. The new per-caller env var
-        ([MASC_OAS_BRIDGE_TIMEOUT_GOVERNANCE_JUDGE_SEC] etc.) beats
-        the legacy env var when both are set — operators migrating
-        to the SSOT do not have to unset the legacy var first.
-     4. The legacy override does not leak into other callers — only
-        the registered judge consumes its alias. *)
+        [MASC_DASHBOARD_GOVERNANCE_JUDGE_TIMEOUT_SEC]) are ignored.
+     3. The canonical per-caller env var
+        ([MASC_OAS_BRIDGE_TIMEOUT_GOVERNANCE_JUDGE_SEC] etc.) is the
+        only per-judge override surface. *)
 
 let () =
   let dir =
@@ -82,43 +77,30 @@ let test_judge_defaults_are_bounded () =
     Cfg.dashboard_judge_default_sec
     (Cfg.timeout_sec ~caller:Cfg.Operator_judge ())
 
-let test_legacy_env_honoured_as_fallback () =
+let test_removed_envs_are_ignored () =
   clear_all_envs ();
   Unix.putenv "MASC_OPERATOR_JUDGE_TIMEOUT_SEC" "75.0";
   Unix.putenv "MASC_DASHBOARD_GOVERNANCE_JUDGE_TIMEOUT_SEC" "90.0";
   Alcotest.(check (float 0.0001))
-    "Operator_judge honours legacy env"
-    75.0
+    "Operator_judge ignores removed env"
+    Cfg.dashboard_judge_default_sec
     (Cfg.timeout_sec ~caller:Cfg.Operator_judge ());
   Alcotest.(check (float 0.0001))
-    "Governance_judge honours legacy env"
-    90.0
+    "Governance_judge ignores removed env"
+    Cfg.dashboard_judge_default_sec
     (Cfg.timeout_sec ~caller:Cfg.Governance_judge ());
   clear_all_envs ()
 
-let test_new_env_beats_legacy_env () =
+let test_canonical_env_overrides_judge_default () =
   clear_all_envs ();
   Unix.putenv "MASC_OPERATOR_JUDGE_TIMEOUT_SEC" "75.0";
   Unix.putenv
     (Cfg.per_caller_env_var ~caller:Cfg.Operator_judge)
     "55.0";
   Alcotest.(check (float 0.0001))
-    "new per-caller env wins over legacy env"
+    "canonical per-caller env wins"
     55.0
     (Cfg.timeout_sec ~caller:Cfg.Operator_judge ());
-  clear_all_envs ()
-
-let test_legacy_env_does_not_leak_to_other_callers () =
-  clear_all_envs ();
-  Unix.putenv "MASC_OPERATOR_JUDGE_TIMEOUT_SEC" "13.0";
-  Alcotest.(check (float 0.0001))
-    "Tool_deep_review unaffected by Operator_judge legacy env"
-    180.0
-    (Cfg.timeout_sec ~caller:Cfg.Tool_deep_review ());
-  Alcotest.(check (float 0.0001))
-    "Auto_responder unaffected by Operator_judge legacy env"
-    Cfg.global_default_sec
-    (Cfg.timeout_sec ~caller:Cfg.Auto_responder ());
   clear_all_envs ()
 
 let test_judges_listed_in_known_callers () =
@@ -146,13 +128,11 @@ let () =
           Alcotest.test_case "judges listed in known_callers"
             `Quick test_judges_listed_in_known_callers;
         ] );
-      ( "legacy_aliases",
+      ( "removed_envs",
         [
-          Alcotest.test_case "legacy env honoured as fallback"
-            `Quick test_legacy_env_honoured_as_fallback;
-          Alcotest.test_case "new env beats legacy env"
-            `Quick test_new_env_beats_legacy_env;
-          Alcotest.test_case "legacy env does not leak"
-            `Quick test_legacy_env_does_not_leak_to_other_callers;
+          Alcotest.test_case "removed envs are ignored"
+            `Quick test_removed_envs_are_ignored;
+          Alcotest.test_case "canonical env overrides judge default"
+            `Quick test_canonical_env_overrides_judge_default;
         ] );
     ]

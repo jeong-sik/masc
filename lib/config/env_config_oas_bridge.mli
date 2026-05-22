@@ -9,15 +9,14 @@
 
     Lookup order in {!timeout_sec} (top wins):
     1. Per-caller env [MASC_OAS_BRIDGE_TIMEOUT_<CALLER>_SEC].
-    2. Legacy per-caller env (#9629 migration window).
-    3. Per-caller checked-in default.
-    4. Global env [MASC_OAS_BRIDGE_TIMEOUT_DEFAULT_SEC] — only for
+    2. Per-caller checked-in default.
+    3. Global env [MASC_OAS_BRIDGE_TIMEOUT_DEFAULT_SEC] — only for
        unknown callers; not an override.
-    5. [300.0] hardcoded fallback.
+    4. [300.0] hardcoded fallback.
 
     The default-resolution table, env-var name builders, and
-    legacy-alias map are intentionally hidden — callers interact
-    through [timeout_sec ~caller ()] only. *)
+    timeout parser are intentionally hidden — callers interact through
+    [timeout_sec ~caller ()] only. *)
 
 (** Named caller identity. [Unknown of <key>] handles a future caller
     without a typed default; resolution falls through to the global
@@ -51,9 +50,7 @@ val global_env_var : string
     step 1 of {!timeout_sec}'s lookup order. Exposed for tests. *)
 val per_caller_env_var : caller:caller -> string
 
-(** The typed-default caller table exposed for tests that want to
-    walk every caller (e.g. assert that the legacy alias map covers
-    them all). *)
+(** The typed-default caller table exposed for tests. *)
 val known_callers : unit -> caller list
 
 (** Hardcoded final fallback (seconds) — also reused as the typed

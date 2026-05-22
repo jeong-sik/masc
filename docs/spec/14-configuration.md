@@ -142,8 +142,6 @@ contains four sections: `tts`, `stt`, `session`, `local_playback`.
 | 환경변수 | 타입 | 기본값 | 설명 |
 |----------|------|--------|------|
 | `MASC_INFERENCE_TIMEOUT_SEC` | float | 30.0 | 모델 API 호출 타임아웃 |
-| `MASC_OPERATOR_JUDGE_TIMEOUT_SEC` | int | (inference fallback) | Operator judge 타임아웃 |
-| `MASC_DASHBOARD_GOVERNANCE_JUDGE_TIMEOUT_SEC` | int | (inference fallback) | Dashboard governance judge 타임아웃 |
 | `MASC_INFERENCE_CACHE_ENABLED` | bool | true | 추론 캐시 활성화 |
 | `MASC_INFERENCE_CACHE_TTL_SEC` | int | 300 | 캐시 TTL (초) |
 | `MASC_INFERENCE_CACHE_MAX_PROMPT_CHARS` | int | 48000 | 캐시 대상 최대 프롬프트 길이 |

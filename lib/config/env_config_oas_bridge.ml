@@ -111,24 +111,6 @@ let per_caller_env_var ~caller =
   Printf.sprintf "MASC_OAS_BRIDGE_TIMEOUT_%s_SEC" (upper_case (caller_key caller))
 ;;
 
-(** #9629: Each caller may also honour a legacy env var name from
-    before the SSOT migration.  When present, the legacy name acts
-    as a tier-2 override (between the new per-caller env var and the
-    checked-in default) so operators with deployment configs pinning
-    the legacy name continue to take effect during the migration
-    window.  Returning [None] means the caller has no legacy alias. *)
-let legacy_per_caller_env_var = function
-  | Operator_judge -> Some "MASC_OPERATOR_JUDGE_TIMEOUT_SEC"
-  | Governance_judge -> Some "MASC_DASHBOARD_GOVERNANCE_JUDGE_TIMEOUT_SEC"
-  | Auto_responder
-  | Dashboard_provider_runs
-  | Keeper_persona_authoring
-  | Server_openai_compat
-  | Tool_deep_review
-  | Anti_rationalization -> None
-  | Unknown _ -> None
-;;
-
 let global_env_var = "MASC_OAS_BRIDGE_TIMEOUT_DEFAULT_SEC"
 
 (** Empty-string env vars (the [Unix.putenv NAME ""] pattern used
@@ -157,41 +139,27 @@ let timeout_env_value ~default raw =
       1. Per-caller env [MASC_OAS_BRIDGE_TIMEOUT_<CALLER>_SEC]
          — wins unconditionally.  Lets the operator tune one
          caller without touching others.
-      2. Legacy per-caller env (#9629).  Operator_judge accepts
-         [MASC_OPERATOR_JUDGE_TIMEOUT_SEC]; Governance_judge accepts
-         [MASC_DASHBOARD_GOVERNANCE_JUDGE_TIMEOUT_SEC].  Honoured for
-         the migration window so operator deployment configs that
-         still pin the pre-SSOT names keep working.  Removed when
-         no legacy alias is registered for the caller.
-      3. Per-caller checked-in default ([known_default_sec]).
+      2. Per-caller checked-in default ([known_default_sec]).
          Preserves intentional 120/180s budgets for compute-heavy
          callers; raises the old fantasy 60s worker budgets to
          [global_default_sec] (300s); bounds dashboard judge daemons to
          [dashboard_judge_default_sec].
-      4. Global env [MASC_OAS_BRIDGE_TIMEOUT_DEFAULT_SEC] — only
+      3. Global env [MASC_OAS_BRIDGE_TIMEOUT_DEFAULT_SEC] — only
          consulted for UNKNOWN callers (typo, future caller
          without a default entry).  Treating it as an override
          would let one slow provider silently shift every
          caller's budget; that is a footgun.
-      5. [global_default_sec] (300s) hardcoded final fallback. *)
+      4. [global_default_sec] (300s) hardcoded final fallback. *)
 let timeout_sec ~caller () =
   let per_caller_env = per_caller_env_var ~caller in
   match trimmed_value_opt per_caller_env with
   | Some v -> timeout_env_value ~default:global_default_sec v
   | None ->
-    let legacy_env_value =
-      match legacy_per_caller_env_var caller with
-      | Some name -> trimmed_value_opt name
-      | None -> None
-    in
-    (match legacy_env_value with
-     | Some v -> timeout_env_value ~default:global_default_sec v
+    (match known_default_sec caller with
+     | Some d -> d
      | None ->
-       (match known_default_sec caller with
-        | Some d -> d
-        | None ->
-          (* Unknown caller: fall to global env, then global default. *)
-          (match trimmed_value_opt global_env_var with
-           | Some v -> timeout_env_value ~default:global_default_sec v
-           | None -> global_default_sec)))
+       (* Unknown caller: fall to global env, then global default. *)
+       (match trimmed_value_opt global_env_var with
+        | Some v -> timeout_env_value ~default:global_default_sec v
+        | None -> global_default_sec))
 ;;

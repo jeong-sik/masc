@@ -82,6 +82,16 @@ val validate : mode:allowlist_mode -> bash_input -> (unit, validation_error) res
     success, or the first {!validation_error} encountered.  No side
     effects, no exceptions. *)
 
+val to_shell_ir_unvalidated :
+  ?sandbox:Masc_exec.Sandbox_target.t ->
+  mode:allowlist_mode ->
+  bash_input ->
+  (Masc_exec.Shell_ir.t, validation_error) result
+(** Lower [input] into {!Masc_exec.Shell_ir.t} without allowlist validation.
+    Callers that use the Shell IR facade ([Shell_command_gate.gate_typed])
+    should use this entrypoint so validation runs through the facade rather
+    than duplicating the allowlist check. *)
+
 val to_shell_ir :
   ?sandbox:Masc_exec.Sandbox_target.t ->
   mode:allowlist_mode ->

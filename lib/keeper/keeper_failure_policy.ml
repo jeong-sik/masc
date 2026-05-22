@@ -256,7 +256,7 @@ let liveness_is_lost = function
   | Recent_heartbeat | In_turn_progress | Unknown_liveness -> false
 ;;
 
-let oas_budget_loop_effect ~phase ~strikes ~liveness =
+let provider_timeout_policy_effect ~phase ~strikes ~liveness =
   match phase, strikes with
   | _, Some n when n >= 3 && liveness_is_lost liveness ->
     ( Pause_keeper
@@ -266,7 +266,7 @@ let oas_budget_loop_effect ~phase ~strikes ~liveness =
   | _, Some n when n >= 3 ->
     Pause_current_work, Provider_cooldown, Reroute_or_tune_provider, "provider_timeout_loop"
   | Some Capacity_backpressure, _ ->
-    Soft_fail_turn, Provider_cooldown, Reroute_or_tune_provider, "provider_timeout:capacity_backpressure"
+    Soft_fail_turn, Provider_cooldown, Reroute_or_tune_provider, "provider_timeout"
   | _ -> Soft_fail_turn, Provider_cooldown, Inspect_provider_stream, "provider_timeout"
 ;;
 
@@ -319,7 +319,7 @@ let decide = function
       ~reason
   | Oas_timeout_budget { phase; strikes; liveness } ->
     let lifecycle_effect, circuit_effect, operator_action, reason =
-      oas_budget_loop_effect ~phase ~strikes ~liveness
+      provider_timeout_policy_effect ~phase ~strikes ~liveness
     in
     let reason =
       match phase with

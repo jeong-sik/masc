@@ -97,7 +97,7 @@ let test_provider_capacity_backpressure_reroutes_provider () =
   check string "reason" "provider_timeout:capacity_backpressure" decision.reason
 ;;
 
-let test_oas_capacity_backpressure_reroutes_before_loop_threshold () =
+let test_legacy_timeout_budget_capacity_backpressure_reroutes_provider () =
   let decision =
     Policy.decide
       (Policy.Oas_timeout_budget
@@ -111,7 +111,7 @@ let test_oas_capacity_backpressure_reroutes_before_loop_threshold () =
   check_lifecycle "lifecycle" "soft_fail_turn" decision.lifecycle_effect;
   check_circuit "circuit" "provider_cooldown" decision.circuit_effect;
   check_action "action" "reroute_or_tune_provider" decision.operator_action;
-  check string "reason" "oas_timeout_budget:capacity_backpressure" decision.reason
+  check string "reason" "provider_timeout:capacity_backpressure" decision.reason
 ;;
 
 let test_oas_budget_loop_with_live_keeper_pauses_work_not_keeper () =
@@ -204,8 +204,8 @@ let () =
             test_provider_streaming_thinking_timeout_does_not_kill_keeper;
           test_case "provider capacity backpressure reroutes provider" `Quick
             test_provider_capacity_backpressure_reroutes_provider;
-          test_case "OAS capacity backpressure reroutes before loop threshold" `Quick
-            test_oas_capacity_backpressure_reroutes_before_loop_threshold;
+          test_case "legacy timeout-budget capacity backpressure reroutes provider" `Quick
+            test_legacy_timeout_budget_capacity_backpressure_reroutes_provider;
           test_case "live OAS budget loop pauses work, not keeper" `Quick
             test_oas_budget_loop_with_live_keeper_pauses_work_not_keeper;
           test_case "lost-liveness OAS budget loop pauses keeper without death" `Quick

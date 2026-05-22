@@ -104,7 +104,7 @@ let test_strike_limit_routes_through_policy_without_keeper_death () =
       (KFP.circuit_effect_to_label decision.circuit_effect);
     Alcotest.(check string)
       "reason preserves streaming thinking"
-      "oas_timeout_budget_loop:stream_idle:streaming_thinking"
+      "provider_timeout_loop:stream_idle:streaming_thinking"
       decision.reason
 
 let test_capacity_phase_routes_to_provider_tuning () =
@@ -127,7 +127,7 @@ let test_capacity_phase_routes_to_provider_tuning () =
       (KFP.operator_action_to_label decision.operator_action);
     Alcotest.(check string)
       "reason preserves capacity phase"
-      "oas_timeout_budget:capacity_backpressure"
+      "provider_timeout:capacity_backpressure"
       decision.reason
 
 let test_concurrent_bumps_do_not_lose_updates () =

@@ -136,7 +136,8 @@ let failure_count_jump_to counts key ~target =
 ;;
 
 type workflow_rejection_info =
-  { rule_id : string option
+  { task_id : string option
+  ; rule_id : string option
   ; tool_suggestion : string option
   ; hint : string option
   }
@@ -153,6 +154,7 @@ let workflow_rejection_info_of_raw raw =
     match json_or_detail_string_opt "failure_class" json with
     | Some "workflow_rejection" ->
       let diagnosis = diagnosis_json_opt json in
+      let task_id = json_nonempty_string_opt "task_id" json in
       let rule_id =
         match diagnosis with
         | Some diagnosis -> json_assoc_string_opt "rule_id" diagnosis
@@ -164,7 +166,8 @@ let workflow_rejection_info_of_raw raw =
         | None -> None
       in
       Some
-        { rule_id
+        { task_id
+        ; rule_id
         ; tool_suggestion
         ; hint = json_or_detail_string_opt "hint" json
         }
@@ -177,7 +180,8 @@ let workflow_rejection_info_of_raw raw =
 
 let workflow_rejection_family_key ~tool_name info =
   Printf.sprintf
-    "%s:%s:%s"
+    "%s:%s:%s:%s"
+    (Option.value ~default:"unknown_task" info.task_id)
     tool_name
     (Option.value ~default:"unknown_rule" info.rule_id)
     (Option.value ~default:"unknown_tool" info.tool_suggestion)

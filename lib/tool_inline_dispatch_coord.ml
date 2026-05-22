@@ -23,6 +23,8 @@ module Float = Stdlib.Float
 
 open Tool_inline_dispatch_types
 
+let masc_add_task_name = Tool_name.Operation.to_string Tool_name.Operation.Add_task
+
 (** Argument extraction helpers bound to ctx.arguments. *)
 let arg_get_string ctx key default =
   Safe_ops.json_string ~default key ctx.arguments
@@ -97,8 +99,9 @@ let handle_start ~tool_name ~start_time (ctx : context) : tool_result option =
         Some
           (Tool_result.ok ~tool_name ~start_time
              (Printf.sprintf
-                "masc_start complete (project scope set + joined as %s). No task created — use masc_add_task to create one."
-                agent_name))
+                "masc_start complete (project scope set + joined as %s). No task created — use %s to create one."
+                agent_name
+                masc_add_task_name))
       else begin
         (* RFC-0034.v2: per-goal cap guard. masc_start does not pass a
            [goal_id], so the guard is a no-op for orphan tasks. Wired so

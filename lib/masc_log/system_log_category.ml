@@ -6,7 +6,7 @@ type t =
   | Host_fd_pressure
   | Docker_start_pressure
   | Keeper_stale_watchdog_lifecycle
-  | Oas_timeout_budget
+  | Provider_timeout
   | Provider_cascade_exhaustion
   | Required_tool_contract_mismatch
   | Task_state_probe_misuse
@@ -24,7 +24,7 @@ let to_string = function
   | Host_fd_pressure -> "host_fd_pressure"
   | Docker_start_pressure -> "docker_start_pressure"
   | Keeper_stale_watchdog_lifecycle -> "keeper_stale_watchdog_lifecycle"
-  | Oas_timeout_budget -> "oas_timeout_budget"
+  | Provider_timeout -> "provider_timeout"
   | Provider_cascade_exhaustion -> "provider_cascade_exhaustion"
   | Required_tool_contract_mismatch -> "required_tool_contract_mismatch"
   | Task_state_probe_misuse -> "task_state_probe_misuse"
@@ -41,7 +41,7 @@ let all =
     Host_fd_pressure;
     Docker_start_pressure;
     Keeper_stale_watchdog_lifecycle;
-    Oas_timeout_budget;
+    Provider_timeout;
     Provider_cascade_exhaustion;
     Required_tool_contract_mismatch;
     Task_state_probe_misuse;
@@ -59,7 +59,7 @@ let of_string_opt = function
   | "host_fd_pressure" -> Some Host_fd_pressure
   | "docker_start_pressure" -> Some Docker_start_pressure
   | "keeper_stale_watchdog_lifecycle" -> Some Keeper_stale_watchdog_lifecycle
-  | "oas_timeout_budget" -> Some Oas_timeout_budget
+  | "provider_timeout" | "oas_timeout_budget" -> Some Provider_timeout
   | "provider_cascade_exhaustion" -> Some Provider_cascade_exhaustion
   | "required_tool_contract_mismatch" -> Some Required_tool_contract_mismatch
   | "task_state_probe_misuse" -> Some Task_state_probe_misuse

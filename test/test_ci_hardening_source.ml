@@ -1288,6 +1288,7 @@ let test_keeper_zombie_field_contracts () =
           required_tools = [ "Read" ];
           required_tool_candidates = [];
           missing_required_tools = [];
+          materialized_tools = [];
         };
       sandbox_kind = Masc_mcp.Keeper_types.Local;
       sandbox_root = None;

@@ -794,6 +794,7 @@ let append_execution_receipt
           required_tools = [];
           required_tool_candidates;
           missing_required_tools = [];
+          materialized_tools = [];
         };
       sandbox_kind =
         Masc_mcp.Keeper_execution_receipt.sandbox_kind_of_meta meta;

@@ -62,6 +62,7 @@ type tool_surface =
   ; required_tools : string list
   ; required_tool_candidates : string list
   ; missing_required_tools : string list
+  ; materialized_tools : string list
   }
 
 (* Phase identifier emitted when a cascade rotation releases the in-flight
@@ -831,6 +832,8 @@ let to_json (receipt : t) =
             , list_json receipt.tool_surface.required_tool_candidates )
           ; ( "missing_required_tools"
             , list_json receipt.tool_surface.missing_required_tools )
+          ; ( "materialized_tools"
+            , list_json receipt.tool_surface.materialized_tools )
           ] )
     ; ( "sandbox"
       , `Assoc
@@ -1059,6 +1062,8 @@ let operator_broadcast_payload (receipt : t) ~disposition ~reason =
           ; "tool_gate_enabled", `Bool receipt.tool_surface.tool_gate_enabled
           ; ( "tool_surface_fallback_used"
             , `Bool receipt.tool_surface.tool_surface_fallback_used )
+          ; ( "materialized_tools"
+            , list_json receipt.tool_surface.materialized_tools )
           ] )
     ; ( "sandbox"
       , `Assoc

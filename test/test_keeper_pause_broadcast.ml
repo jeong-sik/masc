@@ -16,6 +16,7 @@ let mk_tool_surface
       ?(required_tools = [])
       ?(required_tool_candidates = [])
       ?(missing_required_tools = [])
+      ?(materialized_tools = [])
       ()
   : R.tool_surface
   =
@@ -35,6 +36,7 @@ let mk_tool_surface
   ; required_tools
   ; required_tool_candidates
   ; missing_required_tools
+  ; materialized_tools
   }
 ;;
 

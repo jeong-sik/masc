@@ -591,6 +591,7 @@ let test_execution_receipt_json_includes_memory_fields () =
         ; required_tools = []
         ; required_tool_candidates = []
         ; missing_required_tools = []
+        ; materialized_tools = []
         }
     ; sandbox_kind = Keeper_types.Local
     ; sandbox_root = None
@@ -656,6 +657,7 @@ let test_execution_receipt_json_null_when_missing () =
         ; required_tools = []
         ; required_tool_candidates = []
         ; missing_required_tools = []
+        ; materialized_tools = []
         }
     ; sandbox_kind = Keeper_types.Local
     ; sandbox_root = None

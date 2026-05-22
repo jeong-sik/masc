@@ -221,6 +221,7 @@ let pre_dispatch_tool_surface : Keeper_execution_receipt.tool_surface =
   ; required_tools = []
   ; required_tool_candidates = []
   ; missing_required_tools = []
+  ; materialized_tools = []
   }
 ;;
 

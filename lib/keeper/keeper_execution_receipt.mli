@@ -98,6 +98,7 @@ type tool_surface =
   ; required_tools : string list
   ; required_tool_candidates : string list
   ; missing_required_tools : string list
+  ; materialized_tools : string list
   }
 
 (** Phase identifier emitted when a cascade rotation releases the in-flight

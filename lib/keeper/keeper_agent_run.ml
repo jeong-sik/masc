@@ -1524,6 +1524,7 @@ let run_turn
              ; required_tool_candidates =
                  acc.tool_surface.required_tool_candidate_names
              ; missing_required_tools = acc.tool_surface.missing_required_tool_names
+             ; materialized_tools = !materialized_tool_names_ref
              }
          ; sandbox_kind = Keeper_execution_receipt.sandbox_kind_of_meta meta
          ; sandbox_root = Some keeper_visible_sandbox_root

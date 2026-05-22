@@ -75,6 +75,12 @@ let source_clock_of_event = function
     Logical
   | _ -> Wall
 
+type logical_ordering = {
+  parent_event_id : string option;
+  caused_by : string option;
+  logical_seq : int option;
+}
+
 module StringSet = Set.Make (String)
 
 type links = {
@@ -230,6 +236,71 @@ let clock_refs ?edge_id ?lane ?source_clock ?observed_at ?started_at
          string_field_opt "caused_by" caused_by;
          int_field_opt "logical_seq" logical_seq;
        ])
+
+let extract_string_field key json =
+  match json with
+  | `Assoc fields ->
+    (match List.assoc_opt key fields with
+    | Some (`String value) -> Some value
+    | _ -> None)
+  | _ -> None
+
+let extract_int_field key json =
+  match json with
+  | `Assoc fields ->
+    (match List.assoc_opt key fields with
+    | Some (`Int value) -> Some value
+    | _ -> None)
+  | _ -> None
+
+let extract_clock_refs decision =
+  match decision with
+  | `Assoc fields -> List.assoc_opt "clock_refs" fields
+  | _ -> None
+
+let source_clock_from_manifest manifest =
+  match extract_clock_refs manifest.decision with
+  | Some (`Assoc fields) ->
+    (match List.assoc_opt "source_clock" fields with
+    | Some (`String s) -> source_clock_of_string s
+    | _ -> None)
+  | _ -> None
+
+let logical_ordering manifest =
+  match extract_clock_refs manifest.decision with
+  | Some (`Assoc fields) ->
+    let parent_event_id =
+      match List.assoc_opt "parent_event_id" fields with
+      | Some (`String s) -> Some s
+      | _ -> None
+    in
+    let caused_by =
+      match List.assoc_opt "caused_by" fields with
+      | Some (`String s) -> Some s
+      | _ -> None
+    in
+    let logical_seq =
+      match List.assoc_opt "logical_seq" fields with
+      | Some (`Int i) -> Some i
+      | _ -> None
+    in
+    { parent_event_id; caused_by; logical_seq }
+  | _ -> { parent_event_id = None; caused_by = None; logical_seq = None }
+
+let comparable_for_latency a b =
+  match source_clock_from_manifest a, source_clock_from_manifest b with
+  | Some sc_a, Some sc_b ->
+    if sc_a = sc_b then Ok sc_a
+    else
+      Error
+        (Printf.sprintf
+           "latency comparison invalid: source_clock mismatch (%s vs %s)"
+           (source_clock_to_string sc_a)
+           (source_clock_to_string sc_b))
+  | None, _ ->
+    Error "latency comparison invalid: manifest a has no source_clock"
+  | _, None ->
+    Error "latency comparison invalid: manifest b has no source_clock"
 
 let clock_lane_of_event = function
   | Turn_started

@@ -221,6 +221,30 @@ val append_unfinished_provider_attempt_finished_best_effort :
   unit ->
   unit
 
+(** {2 F5: Clock separation policy}
+
+    Wall-clock ([ts]) is display-only.  Ordering uses logical
+    [parent_event_id]/[caused_by]/[logical_seq].  Latency comparison
+    ([elapsed_ms]) is only valid between events that share the same
+    [source_clock]. *)
+
+type logical_ordering = {
+  parent_event_id : string option;
+  caused_by : string option;
+  logical_seq : int option;
+}
+
+(** Extract the source_clock from a manifest's decision JSON. *)
+val source_clock_from_manifest : t -> source_clock option
+
+(** Extract the logical ordering fields from a manifest's clock_refs. *)
+val logical_ordering : t -> logical_ordering
+
+(** Validate that two manifests share the same source_clock so that
+    their [elapsed_ms] values are comparable.  Returns [Ok source_clock]
+    on match, [Error msg] on mismatch or missing clock. *)
+val comparable_for_latency : t -> t -> (source_clock, string) result
+
 (** {2 F8: Turn completeness policy} *)
 
 (** The clock_refs keys that are mandatory for a structurally complete

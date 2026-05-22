@@ -197,8 +197,8 @@ let handle_keeper_bash_typed
           | Ok ir ->
             let path_validation =
               match
-                Keeper_task_worktree_lazy.ensure_command_existing_dirs
-                  ~config ~meta ~cwd ~cmd
+                Keeper_task_worktree_lazy.ensure_shell_ir_existing_dirs
+                  ~config ~meta ~cwd ~ir
               with
               | Error e -> Error e
               | Ok () ->

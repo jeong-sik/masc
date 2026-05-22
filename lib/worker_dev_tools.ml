@@ -741,15 +741,15 @@ let existing_dir_path_values_of_simple (simple : Masc_exec.Shell_ir.simple) =
   | Some args -> loop false [] (path_argument_values command_name args)
 ;;
 
+let rec existing_dir_path_values_of_shell_ir = function
+  | Masc_exec.Shell_ir.Simple simple -> existing_dir_path_values_of_simple simple
+  | Masc_exec.Shell_ir.Pipeline stages ->
+    List.concat_map existing_dir_path_values_of_shell_ir stages
+;;
+
 let existing_dir_path_values cmd =
   match Masc_exec_bash_parser.Bash.parse_string cmd with
-  | Masc_exec.Parsed.Parsed (Masc_exec.Shell_ir.Simple simple) ->
-    existing_dir_path_values_of_simple simple
-  | Masc_exec.Parsed.Parsed (Masc_exec.Shell_ir.Pipeline stages) ->
-    stages
-    |> List.concat_map (function
-      | Masc_exec.Shell_ir.Simple simple -> existing_dir_path_values_of_simple simple
-      | Masc_exec.Shell_ir.Pipeline _ -> [])
+  | Masc_exec.Parsed.Parsed shell_ir -> existing_dir_path_values_of_shell_ir shell_ir
   | Masc_exec.Parsed.Parse_error _
   | Masc_exec.Parsed.Parse_aborted _
   | Masc_exec.Parsed.Too_complex _ -> []

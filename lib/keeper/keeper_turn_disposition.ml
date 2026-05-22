@@ -69,8 +69,10 @@ let next_action = function
   | Turn_wall_clock_timeout | Oas_timeout_budget -> Some "inspect_timeout_budget"
   | Cascade_attempts_exhausted -> Some "inspect_cascade_attempts"
   | Gh_repo_context_missing_worktree -> Some "create_or_link_worktree"
-  | Required_tool_use_no_tool_call | Required_tool_use_unsatisfied ->
-    Some "inspect_provider_tool_contract"
+  | Required_tool_use_no_tool_call ->
+    Some "inspect_model_tool_call_contract"
+  | Required_tool_use_unsatisfied ->
+    Some "inspect_tool_contract_rejection"
   | Post_commit_ambiguous -> Some "reconcile_partial_commit"
   | Provider_error _ | Unknown _ -> Some "inspect_latest_error"
 ;;

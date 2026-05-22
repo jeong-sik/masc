@@ -470,9 +470,13 @@ let make_shell_exec_with_allowlist
                                    cwd
                                    context.Exec_shell_gate.ast
                                in
-                               Masc_exec.Exec_dispatch.dispatch
+                               let dispatch_envelope =
+                                 Masc_exec.Shell_ir_risk.classify
+                                   (Masc_exec.Shell_ir_risk.undecided dispatch_ir)
+                               in
+                               Masc_exec.Exec_dispatch.dispatch_decided
                                  ~timeout_sec:timeout
-                                 dispatch_ir)
+                                 dispatch_envelope)
                            in
                            let output =
                              Exec_shell_adapter.output_for_dispatch_status

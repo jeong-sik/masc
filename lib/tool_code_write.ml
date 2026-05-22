@@ -703,12 +703,19 @@ let handle_code_shell ~tool_name ~start_time ctx args =
 	                   ~failure_class:(Some Tool_result.Policy_rejection)
 	                   reason
 	             | Ok () ->
+	                 let dispatch_ir =
+	                   Exec_shell_adapter.shell_ir_with_default_cwd
+	                     cwd_opt
+	                     command_context.Exec_shell_gate.ast
+	                 in
+	                 let dispatch_envelope =
+	                   Masc_exec.Shell_ir_risk.classify
+	                     (Masc_exec.Shell_ir_risk.undecided dispatch_ir)
+	                 in
 	                 match
-	                   Masc_exec.Exec_dispatch.dispatch
+	                   Masc_exec.Exec_dispatch.dispatch_decided
 	                     ~timeout_sec:safe_timeout
-	                     (Exec_shell_adapter.shell_ir_with_default_cwd
-	                        cwd_opt
-	                        command_context.Exec_shell_gate.ast)
+	                     dispatch_envelope
 	                 with
 	                 | { status = Unix.WEXITED code; stdout; stderr } ->
 	                     let output =

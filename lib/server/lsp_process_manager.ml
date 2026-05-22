@@ -28,7 +28,7 @@ let pp_spawn_error fmt = function
 (** Language → command mapping. Returns [(executable, argv)] or [None]. *)
 let command_for_lang lang_id =
   match lang_id with
-  | "ocaml" -> Some ("ocaml-lsp-server", [ "ocaml-lsp-server" ])
+  | "ocaml" -> Some ("ocamllsp", [ "ocamllsp" ])
   | "typescript" | "javascript" ->
     Some ("typescript-language-server", [ "typescript-language-server"; "--stdio" ])
   | "python" -> Some ("pylsp", [ "pylsp" ])

@@ -177,21 +177,16 @@ let migrate_legacy_dirs_with_renames = Server_runtime_bootstrap_legacy_migration
 let migrate_legacy_dirs = Server_runtime_bootstrap_legacy_migration.migrate_legacy_dirs
 let migrate_legacy_keeper_dirs_blocking = Server_runtime_bootstrap_legacy_migration.migrate_legacy_keeper_dirs_blocking
 
-let default_room_for_flat_migration =
-  Server_runtime_bootstrap_legacy_room.default_room_for_flat_migration
-let legacy_room_candidates =
-  Server_runtime_bootstrap_legacy_room.legacy_room_candidates
-let infer_current_room_from_legacy_dirs =
-  Server_runtime_bootstrap_legacy_room.infer_current_room_from_legacy_dirs
-let load_current_room_or_default =
-  Server_runtime_bootstrap_legacy_room.load_current_room_or_default
-
 let migrate_room_to_flat (state : Mcp_server.server_state) =
   let masc_root = Coord.masc_root_dir state.room_config in
   let rooms_dir = Filename.concat masc_root "rooms" in
   if not (Sys.file_exists rooms_dir) then ()
   else begin
-    match load_current_room_or_default masc_root rooms_dir with
+    match
+      Server_runtime_bootstrap_legacy_room.load_current_room_or_default
+        masc_root
+        rooms_dir
+    with
     | Some current_room ->
         let room_dir = Filename.concat rooms_dir current_room in
         if Sys.file_exists room_dir && Sys.is_directory room_dir then begin

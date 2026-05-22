@@ -178,6 +178,9 @@ let make
         in
         (match memory_ctx with
          | None ->
+           let memory_injection_id =
+             agent_name ^ ":" ^ string_of_int turn ^ ":skipped"
+           in
            append_runtime_manifest
              ?runtime_manifest_context
              ?runtime_manifest_append
@@ -186,6 +189,7 @@ let make
              ~decision:
                (`Assoc
                  [
+                   ("memory_injection_id", `String memory_injection_id);
                    ("memory_context_present", `Bool false);
                    ("episode_limit", `Int episode_limit);
                    ("procedure_limit", `Int procedure_limit);
@@ -205,6 +209,9 @@ let make
              | None -> Some mem_text
              | Some existing -> Some (existing ^ "\n\n" ^ mem_text)
            in
+           let memory_injection_id =
+             agent_name ^ ":" ^ string_of_int turn ^ ":injected"
+           in
            append_runtime_manifest
              ?runtime_manifest_context
              ?runtime_manifest_append
@@ -213,6 +220,7 @@ let make
              ~decision:
                (`Assoc
                  [
+                   ("memory_injection_id", `String memory_injection_id);
                    ("memory_context_present", `Bool true);
                    ("memory_context_chars", `Int (String.length mem_text));
                    ( "memory_context_digest",
@@ -227,6 +235,11 @@ let make
                         | None -> 0
                         | Some text -> String.length text) );
                    ( "extra_system_context_chars_after",
+                     `Int
+                       (match extra with
+                        | None -> 0
+                        | Some text -> String.length text) );
+                   ( "extra_system_context_size",
                      `Int
                        (match extra with
                         | None -> 0
@@ -254,6 +267,9 @@ let make
              Log.Keeper.debug
                "memory_hooks: flush_incremental agent=%s episodes=%d procedures=%d"
                agent_name ep pr;
+           let memory_flush_id =
+             agent_name ^ ":" ^ string_of_int turn ^ ":flushed"
+           in
            append_runtime_manifest
              ?runtime_manifest_context
              ?runtime_manifest_append
@@ -262,6 +278,7 @@ let make
              ~decision:
                (`Assoc
                  [
+                   ("memory_flush_id", `String memory_flush_id);
                    ("episodes_flushed", `Int ep);
                    ("procedures_flushed", `Int pr);
                    ("duration_s", `Float duration_s);
@@ -283,6 +300,9 @@ let make
                ~duration_s
                ~episodes:0
                ~procedures:0;
+             let memory_flush_id =
+               agent_name ^ ":" ^ string_of_int turn ^ ":flushed:error"
+             in
              append_runtime_manifest
                ?runtime_manifest_context
                ?runtime_manifest_append
@@ -291,6 +311,7 @@ let make
                ~decision:
                  (`Assoc
                    [
+                     ("memory_flush_id", `String memory_flush_id);
                      ("episodes_flushed", `Int 0);
                      ("procedures_flushed", `Int 0);
                      ("duration_s", `Float duration_s);

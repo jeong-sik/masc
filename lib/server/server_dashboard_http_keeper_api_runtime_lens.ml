@@ -214,6 +214,30 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
                     `Int scan.context_compact_started_count );
                   ( "context_compacted_count",
                     `Int scan.context_compacted_count );
+                  ( "source_phase",
+                    match scan.context_source_phase with
+                    | Some value -> `String value
+                    | None -> `Null );
+                  ( "payload_role",
+                    match scan.context_payload_role with
+                    | Some value -> `String value
+                    | None -> `Null );
+                  ( "final_payload_digest",
+                    match scan.context_final_payload_digest with
+                    | Some value -> `String value
+                    | None -> `Null );
+                  ( "compaction_source",
+                    match scan.context_compaction_source with
+                    | Some value -> `String value
+                    | None -> `Null );
+                  ( "memory_injection_id",
+                    match scan.memory_injection_id with
+                    | Some value -> `String value
+                    | None -> `Null );
+                  ( "memory_flush_id",
+                    match scan.memory_flush_id with
+                    | Some value -> `String value
+                    | None -> `Null );
                   ( "checkpoint_loaded_count",
                     `Int
                       (runtime_lens_event_count scan

@@ -35,6 +35,12 @@ type runtime_manifest_scan =
   ; mutable latest_pre_dispatch_blocked_row : Keeper_runtime_manifest.t option
   ; mutable context_injected_count : int
   ; mutable context_compacted_event_count : int
+  ; mutable context_source_phase : string option
+  ; mutable context_payload_role : string option
+  ; mutable context_final_payload_digest : string option
+  ; mutable context_compaction_source : string option
+  ; mutable memory_injection_id : string option
+  ; mutable memory_flush_id : string option
   ; mutable active_open_loop_count : int option
   ; mutable provider_started_count : int
   ; mutable provider_finished_count : int
@@ -71,6 +77,12 @@ let make_runtime_manifest_scan ~path ~limit =
   ; latest_pre_dispatch_blocked_row = None
   ; context_injected_count = 0
   ; context_compacted_event_count = 0
+  ; context_source_phase = None
+  ; context_payload_role = None
+  ; context_final_payload_digest = None
+  ; context_compaction_source = None
+  ; memory_injection_id = None
+  ; memory_flush_id = None
   ; active_open_loop_count = None
   ; provider_started_count = 0
   ; provider_finished_count = 0
@@ -126,9 +138,23 @@ let update_runtime_manifest_scan scan row =
    | Keeper_runtime_manifest.Pre_dispatch_blocked ->
      scan.latest_pre_dispatch_blocked_row <- Some row
    | Keeper_runtime_manifest.Context_injected ->
-     scan.context_injected_count <- scan.context_injected_count + 1
+     scan.context_injected_count <- scan.context_injected_count + 1;
+     let decision = row.Keeper_runtime_manifest.decision in
+     (match json_string_member_opt "source_phase" decision with
+      | Some value -> scan.context_source_phase <- Some value
+      | None -> ());
+     (match json_string_member_opt "payload_role" decision with
+      | Some value -> scan.context_payload_role <- Some value
+      | None -> ());
+     (match json_string_member_opt "final_payload_digest" decision with
+      | Some value -> scan.context_final_payload_digest <- Some value
+      | None -> ());
    | Keeper_runtime_manifest.Context_compacted ->
-     scan.context_compacted_event_count <- scan.context_compacted_event_count + 1
+     scan.context_compacted_event_count <- scan.context_compacted_event_count + 1;
+     let decision = row.Keeper_runtime_manifest.decision in
+     (match json_string_member_opt "compaction_source" decision with
+      | Some value -> scan.context_compaction_source <- Some value
+      | None -> ())
    | Keeper_runtime_manifest.State_snapshot_sidecar_saved ->
      scan.active_open_loop_count <-
        json_int_member_opt "active_open_loop_count"
@@ -161,7 +187,11 @@ let update_runtime_manifest_scan scan row =
    | Keeper_runtime_manifest.Memory_injected ->
      scan.memory_injected_count <- scan.memory_injected_count + 1;
      if String.equal row.Keeper_runtime_manifest.status "injected"
-     then scan.memory_injected_present_count <- scan.memory_injected_present_count + 1
+     then scan.memory_injected_present_count <- scan.memory_injected_present_count + 1;
+     let decision = row.Keeper_runtime_manifest.decision in
+     (match json_string_member_opt "memory_injection_id" decision with
+      | Some value -> scan.memory_injection_id <- Some value
+      | None -> ())
    | Keeper_runtime_manifest.Memory_flushed ->
      let decision = row.Keeper_runtime_manifest.decision in
      scan.memory_flushed_count <- scan.memory_flushed_count + 1;
@@ -169,6 +199,9 @@ let update_runtime_manifest_scan scan row =
      then scan.memory_flush_success_count <- scan.memory_flush_success_count + 1;
      if String.equal row.Keeper_runtime_manifest.status "error"
      then scan.memory_flush_error_count <- scan.memory_flush_error_count + 1;
+     (match json_string_member_opt "memory_flush_id" decision with
+      | Some value -> scan.memory_flush_id <- Some value
+      | None -> ());
      scan.episodes_flushed <-
        scan.episodes_flushed
        + Option.value (json_int_member_opt "episodes_flushed" decision) ~default:0;

@@ -773,6 +773,12 @@ export interface KeeperRuntimeLensContextAxis {
   state_snapshot_sidecar_saved_count: number
   active_open_loop_count: number
   last_compaction: unknown
+  source_phase: string | null
+  payload_role: string | null
+  final_payload_digest: string | null
+  compaction_source: string | null
+  memory_injection_id: string | null
+  memory_flush_id: string | null
 }
 
 export interface KeeperRuntimeLensMemoryAxis extends KeeperRuntimeTraceMemorySummary {}
@@ -1132,6 +1138,12 @@ function parseRuntimeLensContextAxis(raw: unknown): KeeperRuntimeLensContextAxis
     state_snapshot_sidecar_saved_count: numberField(obj, 'state_snapshot_sidecar_saved_count'),
     active_open_loop_count: numberField(obj, 'active_open_loop_count'),
     last_compaction: obj.last_compaction ?? null,
+    source_phase: nullableStringField(obj, 'source_phase'),
+    payload_role: nullableStringField(obj, 'payload_role'),
+    final_payload_digest: nullableStringField(obj, 'final_payload_digest'),
+    compaction_source: nullableStringField(obj, 'compaction_source'),
+    memory_injection_id: nullableStringField(obj, 'memory_injection_id'),
+    memory_flush_id: nullableStringField(obj, 'memory_flush_id'),
   }
 }
 

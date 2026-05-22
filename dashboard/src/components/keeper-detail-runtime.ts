@@ -968,8 +968,14 @@ export function RuntimeLensSection({
         <${SignalRow} label="proof tools" value=${formatLensList(proof.tools)} />
         <${SignalRow} label="network proof" value=${formatLensList(proof.network_modes)} />
         <${SignalRow} label="context compaction" value=${formatRatioPair({ numerator: context.context_compacted_count, denominator: context.context_compact_started_count })} />
+        <${SignalRow} label="context source phase" value=${context.source_phase ?? '-'} />
+        <${SignalRow} label="context payload role" value=${context.payload_role ?? '-'} />
+        <${SignalRow} label="context digest" value=${compactToken(context.final_payload_digest ?? '-')} />
+        <${SignalRow} label="compaction source" value=${context.compaction_source ?? '-'} />
         <${SignalRow} label="working loops" value=${context.active_open_loop_count} />
         <${SignalRow} label="memory flush" value=${formatIndependentCounters({ leftLabel: 'success', leftValue: memory.memory_flush_success_count, rightLabel: 'error', rightValue: memory.memory_flush_error_count })} />
+        <${SignalRow} label="memory injection id" value=${compactToken(context.memory_injection_id ?? '-')} />
+        <${SignalRow} label="memory flush id" value=${compactToken(context.memory_flush_id ?? '-')} />
         <${SignalRow} label="trace id" value=${compactToken(trace.trace_id)} />
         <${SignalRow}
           label="manifest file"

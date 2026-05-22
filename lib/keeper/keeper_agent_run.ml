@@ -262,6 +262,7 @@ let run_turn
             | None -> `Null
             | Some err -> `String (Agent_sdk.Error.to_string err) );
           ("checkpoint_path", `String checkpoint_path);
+          ("compaction_source", `String "pre_dispatch_hygiene");
         ])
     Keeper_runtime_manifest.Context_compacted;
   (* Steps 5-6: turn prompt, memory/temporal context, prompt metrics,
@@ -286,6 +287,17 @@ let run_turn
   let estimated_input_tokens = prompt_ctx.Keeper_run_prompt.estimated_input_tokens in
   let ctx_work = prompt_ctx.Keeper_run_prompt.ctx_work in
   let history_messages_digest = digest_message_texts_as_joined history_messages in
+  let final_payload_text =
+    String.concat "\n\n"
+      [
+        base_system_prompt;
+        turn_system_prompt;
+        dynamic_context;
+        memory_context;
+        temporal_context;
+        user_message;
+      ]
+  in
   append_manifest ~site:"context_injected"
     ~keeper_turn_id:manifest_keeper_turn_id
     ~decision:
@@ -300,6 +312,9 @@ let run_turn
           ("history_message_count", `Int (List.length history_messages));
           ("history_messages_digest", `String history_messages_digest);
           ("estimated_input_tokens", `Int estimated_input_tokens);
+          ("source_phase", `String "turn_dispatch");
+          ("payload_role", `String "model_input");
+          ("final_payload_digest", `String (digest_text final_payload_text));
         ])
     Keeper_runtime_manifest.Context_injected;
   let actionable_signal =

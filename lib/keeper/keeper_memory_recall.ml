@@ -142,17 +142,11 @@ let read_keeper_memory_summary
   in
   summarize_memory_bank_lines lines ~recent_limit
 
-let read_memory_horizon_counts
-    (config : Coord.config)
-    ~(name : string)
-    ~(max_bytes : int)
-    ~(max_lines : int) : (string * int) list =
-  let lines =
-    read_file_tail_lines
-      (keeper_memory_bank_path config name)
-      ~max_bytes
-      ~max_lines
-  in
+(* RFC-0149 §3.1: pure list -> list reducer extracted so the legacy
+   silent-fallback path and the [_result] variant share the same
+   business logic. *)
+let memory_horizon_counts_from_lines (lines : string list) :
+    (string * int) list =
   let counts : (string, int) Hashtbl.t = Hashtbl.create 8 in
   List.iter
     (fun line ->
@@ -172,19 +166,43 @@ let read_memory_horizon_counts
          let c = compare vb va in
          if c <> 0 then c else String.compare ka kb)
 
-let read_recent_memory_texts
+(* RFC-0149 §3.1: typed Result variant.  Distinguishes [Ok []] ("no
+   horizon rows recorded") from [Error class] ("bank read failed"). *)
+let read_memory_horizon_counts_result
     (config : Coord.config)
     ~(name : string)
-    ~(horizon : string)
     ~(max_bytes : int)
-    ~(max_lines : int)
-    ~(limit : int) : string list =
+    ~(max_lines : int) :
+    ((string * int) list, Keeper_memory_recall_exn_class.t) result =
+  match
+    read_file_tail_lines_result
+      (keeper_memory_bank_path config name)
+      ~max_bytes
+      ~max_lines
+  with
+  | Ok lines -> Ok (memory_horizon_counts_from_lines lines)
+  | Error exn_class -> Error exn_class
+
+let read_memory_horizon_counts
+    (config : Coord.config)
+    ~(name : string)
+    ~(max_bytes : int)
+    ~(max_lines : int) : (string * int) list =
   let lines =
     read_file_tail_lines
       (keeper_memory_bank_path config name)
       ~max_bytes
       ~max_lines
   in
+  memory_horizon_counts_from_lines lines
+
+(* RFC-0149 §3.1: pure list -> list filter extracted as a horizon-aware
+   memory text projector.  Shared between the legacy facade and the
+   [_result] variant. *)
+let recent_memory_texts_from_lines
+    ~(horizon : string)
+    ~(limit : int)
+    (lines : string list) : string list =
   lines
   |> List.filter_map parse_memory_bank_row
   |> List.filter (fun row ->
@@ -206,6 +224,41 @@ let read_recent_memory_texts
   |> dedup_by_key (fun row -> normalize_memory_text_key row.text)
   |> take (max 0 limit)
   |> List.map (fun row -> row.text)
+
+(* RFC-0149 §3.1: typed Result variant.  Distinguishes [Ok []] ("no
+   recent texts for this horizon") from [Error class] ("bank read
+   failed"). *)
+let read_recent_memory_texts_result
+    (config : Coord.config)
+    ~(name : string)
+    ~(horizon : string)
+    ~(max_bytes : int)
+    ~(max_lines : int)
+    ~(limit : int) :
+    (string list, Keeper_memory_recall_exn_class.t) result =
+  match
+    read_file_tail_lines_result
+      (keeper_memory_bank_path config name)
+      ~max_bytes
+      ~max_lines
+  with
+  | Ok lines -> Ok (recent_memory_texts_from_lines ~horizon ~limit lines)
+  | Error exn_class -> Error exn_class
+
+let read_recent_memory_texts
+    (config : Coord.config)
+    ~(name : string)
+    ~(horizon : string)
+    ~(max_bytes : int)
+    ~(max_lines : int)
+    ~(limit : int) : string list =
+  let lines =
+    read_file_tail_lines
+      (keeper_memory_bank_path config name)
+      ~max_bytes
+      ~max_lines
+  in
+  recent_memory_texts_from_lines ~horizon ~limit lines
 
 (** Detect whether a query is asking about past conversation memory.
 
@@ -666,11 +719,15 @@ let recent_user_messages (msgs : Agent_sdk.Types.message list) ~(max_n : int) : 
        else None)
   |> take max_n
 
-(** Load user messages from a history.jsonl file (persisted across generations).
-    Each line is a JSON object with "role" and "content" fields.
-    Returns up to [max_n] user messages from the tail of the file. *)
-let load_history_user_messages ~(path : string) ~(max_n : int) : string list =
-  let lines = read_file_tail_lines path ~max_bytes:0 ~max_lines:(max_n * 3) in
+(* RFC-0149 §3.1: pure list -> list filter extracted so the legacy
+   silent-fallback path and the [_result] variant share the same
+   per-line parsing logic.  The per-line [try ... with exn -> log +
+   counter + None] is preserved here — that is a separate boundary
+   (JSONL corruption) from the file-read IO fault. *)
+let history_user_messages_from_lines
+    ~(path : string)
+    ~(max_n : int)
+    (lines : string list) : string list =
   lines
   |> List.filter_map (fun line ->
        try
@@ -719,6 +776,32 @@ let load_history_user_messages ~(path : string) ~(max_n : int) : string list =
              ();
            None)
   |> take max_n
+
+(* RFC-0149 §3.1: typed Result variant.  Distinguishes [Ok []] ("no
+   user messages found in the history file") from [Error class] ("the
+   history file read failed"). *)
+let load_history_user_messages_result
+    ~(path : string)
+    ~(max_n : int) :
+    (string list, Keeper_memory_recall_exn_class.t) result =
+  match
+    read_file_tail_lines_result
+      path
+      ~max_bytes:0
+      ~max_lines:(max_n * 3)
+  with
+  | Ok lines ->
+    Ok (history_user_messages_from_lines ~path ~max_n lines)
+  | Error exn_class -> Error exn_class
+
+(** Load user messages from a history.jsonl file (persisted across generations).
+    Each line is a JSON object with "role" and "content" fields.
+    Returns up to [max_n] user messages from the tail of the file. *)
+let load_history_user_messages ~(path : string) ~(max_n : int) : string list =
+  let lines =
+    read_file_tail_lines path ~max_bytes:0 ~max_lines:(max_n * 3)
+  in
+  history_user_messages_from_lines ~path ~max_n lines
 
 (** Build recall candidates by merging checkpoint messages with history.jsonl.
     Checkpoint messages are prioritized (recent context), history.jsonl

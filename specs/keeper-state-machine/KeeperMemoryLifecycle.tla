@@ -36,18 +36,17 @@
 \*
 \* Producer (kind -> tier classification):
 \*   lib/keeper/keeper_memory_policy.ml:memory_horizon_of_kind_opt  (strict)
-\*   lib/keeper/keeper_memory_policy.ml:memory_horizon_of_kind      (back-compat wrapper)
 \*   lib/keeper/keeper_memory_policy.ml:memory_horizon_of_json_opt  (JSON variant)
 \*
 \* Persistence / promotion sites:
-\*   lib/keeper/keeper_memory_bank.ml:append_memory_notes_from_reply   — writes via memory_horizon_of_kind
+\*   lib/keeper/keeper_memory_bank.ml:append_memory_notes_from_reply   — writes via memory_horizon_of_kind_with_fallback
 \*   lib/keeper/keeper_memory_recall.ml:read_recent_memory_texts       — recall path, same horizon fn
 \*   lib/keeper/keeper_compact_policy.ml    overflow + handoff scheduling
 \*   lib/keeper/keeper_compact_audit.ml     ledger trail (provenance source)
 \*
 \* SCOPE DRIFT (worth knowing, NOT a spec violation):
-\*   memory_horizon_of_kind silently routes unknown kinds to mid_term_horizon
-\*   (lib/keeper/keeper_memory_policy.ml:memory_horizon_of_kind  `| None -> mid_term_horizon`).
+\*   memory_horizon_of_kind_with_fallback routes unknown kinds to mid_term_horizon
+\*   (lib/keeper/keeper_memory_bank.ml:memory_horizon_of_kind_with_fallback).
 \*   The spec invariants (ProvenanceRequired, RecoveryBounded, NoSilentLoss)
 \*   hold regardless of WHICH tier a note lands in -- the drift is UPSTREAM
 \*   of the spec vocabulary. A typo'd kind ("goalss") gets the wrong tier
@@ -62,7 +61,7 @@
 \*
 \* Adding new tiers / horizons:
 \*   - new horizon constant -> spec needs a new tier variable + cap + invariant
-\*   - new kind keyword     -> only producer side (memory_horizon_of_kind);
+\*   - new kind keyword     -> only producer side (memory_horizon_of_kind_opt);
 \*                             does NOT require spec update unless it lands
 \*                             in a new tier
 \*

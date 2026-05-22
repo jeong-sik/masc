@@ -167,58 +167,13 @@ let create_process_env ?cwd prog argv env stdin_fd stdout_fd stderr_fd =
           Sys.chdir dir;
           Unix.create_process_env prog (Array.of_list argv) env stdin_fd stdout_fd stderr_fd)
 
-let output_for_status ~(status : Unix.process_status) ~(stdout : string)
-    ~(stderr : string) : string =
-  let succeeded =
-    match status with
-    | Unix.WEXITED 0 -> true
-    | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> false
-  in
-  if succeeded then stdout
-  else
-    match stdout, stderr with
-    | "", err -> err
-    | out, "" -> out
-    | out, err -> out ^ "\n" ^ err
-
-let process_error_output ?(stderr = "") ~label:_ ~reason () =
-  let stderr = String.trim stderr in
-  if stderr = "" then
-    Printf.sprintf "process_eio_error: %s" reason
-  else
-    Printf.sprintf "process_eio_error: %s\nstderr:\n%s" reason stderr
-
-let reason_of_exn_for_output = function
-  | Unix.Unix_error (err, fn, _) ->
-      Printf.sprintf "%s: %s" fn (Unix.error_message err)
-  | exn -> Printexc.to_string exn
-
-(** Create a private stderr capture file for Unix fallback status helpers.
-    Uses [Filename.temp_file] for atomic creation, then opens the file with
-    private permissions and marks the descriptor close-on-exec to avoid
-    descriptor leaks into unrelated child processes. *)
-let create_stderr_tempfile () =
-  let path = Filename.temp_file "masc_process_eio_stderr" ".tmp" in
-  let fd =
-    Unix.openfile path [ Unix.O_WRONLY; Unix.O_TRUNC; Unix.O_CLOEXEC ] 0o600
-  in
-  (path, fd)
-
-let remove_temp_file_quietly path =
-  try Sys.remove path with
-  | Sys_error _ -> ()
-
-let read_stderr_capture path =
-  try In_channel.with_open_bin path In_channel.input_all with
-  | Sys_error msg ->
-      Printf.sprintf
-        "(stderr capture error) %s: %s"
-        (Filename.basename path) msg
-
-let captured_stderr_or_empty path_opt =
-  match path_opt with
-  | Some path -> read_stderr_capture path
-  | None -> ""
+let output_for_status = Process_eio_stderr.output_for_status
+let process_error_output = Process_eio_stderr.process_error_output
+let reason_of_exn_for_output = Process_eio_stderr.reason_of_exn_for_output
+let create_stderr_tempfile = Process_eio_stderr.create_stderr_tempfile
+let remove_temp_file_quietly = Process_eio_stderr.remove_temp_file_quietly
+let read_stderr_capture = Process_eio_stderr.read_stderr_capture
+let captured_stderr_or_empty = Process_eio_stderr.captured_stderr_or_empty
 
 let with_unix_capture ?env ?cwd ?stdin_content ?(capture_stderr = false)
     ?(timeout_sec = default_timeout_sec)

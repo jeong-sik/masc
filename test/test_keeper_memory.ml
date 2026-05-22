@@ -345,10 +345,15 @@ let test_load_history_user_messages () =
     let oc = open_out path in
     List.iter (fun l -> output_string oc (l ^ "\n")) lines;
     close_out oc;
-    let result = Keeper_memory_recall.load_history_user_messages ~path ~max_n:10 in
-    check int "3 user messages" 3 (List.length result);
-    check string "first" "hello world" (List.hd result);
-    check string "last" "third question" (List.nth result 2))
+    match
+      Keeper_memory_recall.load_history_user_messages_result
+        ~path ~max_n:10
+    with
+    | Error _ -> fail "expected Ok for readable history file"
+    | Ok result ->
+      check int "3 user messages" 3 (List.length result);
+      check string "first" "hello world" (List.hd result);
+      check string "last" "third question" (List.nth result 2))
 
 let test_load_history_user_messages_ignores_internal_prompt_entries () =
   let dir = test_tmpdir () in
@@ -363,13 +368,37 @@ let test_load_history_user_messages_ignores_internal_prompt_entries () =
     let oc = open_out path in
     List.iter (fun l -> output_string oc (l ^ "\n")) lines;
     close_out oc;
-    let result = Keeper_memory_recall.load_history_user_messages ~path ~max_n:10 in
-    check int "prompt source dropped, user-authored world kept" 3 (List.length result);
-    check string "first real" "real user question" (List.hd result);
-    check string "world memory kept"
-      "## Current World State\n\n### Namespace State\n- User-authored world memory should survive history filtering"
-      (List.nth result 1);
-    check string "second real" "second real question" (List.nth result 2))
+    match
+      Keeper_memory_recall.load_history_user_messages_result
+        ~path ~max_n:10
+    with
+    | Error _ -> fail "expected Ok for readable history file"
+    | Ok result ->
+      check int "prompt source dropped, user-authored world kept" 3
+        (List.length result);
+      check string "first real" "real user question" (List.hd result);
+      check string "world memory kept"
+        "## Current World State\n\n### Namespace State\n- User-authored world memory should survive history filtering"
+        (List.nth result 1);
+      check string "second real" "second real question" (List.nth result 2))
+
+(* RFC-0149 §3.1 PR-11: typed Error path for the user-history reader.
+   A directory path (which [read_file_tail_lines] cannot tail) must
+   surface as [Error io_error] rather than collapsing to [Ok []]
+   indistinguishable from "no user messages recorded". *)
+let test_load_history_user_messages_result_error_on_directory_path () =
+  let dir = test_tmpdir () in
+  Fun.protect ~finally:(fun () -> cleanup_tmpdir dir) (fun () ->
+    match
+      Keeper_memory_recall.load_history_user_messages_result
+        ~path:dir ~max_n:10
+    with
+    | Ok _ ->
+      fail "expected Error io_error when path is a directory"
+    | Error exn_class ->
+      check string "Error label is io_error"
+        "io_error"
+        (Keeper_memory_recall_exn_class.to_label exn_class))
 
 let test_read_file_tail_lines_reads_tail_without_byte_cap () =
   let dir = test_tmpdir () in
@@ -1866,6 +1895,8 @@ let () =
             test_load_history_user_messages;
           test_case "load_history_user_messages ignores internal prompt entries" `Quick
             test_load_history_user_messages_ignores_internal_prompt_entries;
+          test_case "load_history_user_messages_result Error on directory path" `Quick
+            test_load_history_user_messages_result_error_on_directory_path;
           test_case "read_file_tail_lines reads tail without byte cap" `Quick
             test_read_file_tail_lines_reads_tail_without_byte_cap;
           test_case "read_file_tail_lines drops partial byte-cap line" `Quick

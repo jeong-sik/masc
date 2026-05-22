@@ -45,7 +45,6 @@ end
 (** Response modes for /mcp endpoint *)
 type response_mode =
   | Json_response of Yojson.Safe.t       (** Single JSON-RPC response *)
-  | Json_batch of Yojson.Safe.t list     (** Deprecated compatibility constructor; new requests should not use batch *)
   | Sse_upgrade                          (** Upgrade to SSE stream *)
   | Error_response of int * string       (** HTTP error (status, message) *)
 

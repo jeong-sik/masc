@@ -92,7 +92,7 @@ let docker_info_security_options_with_class ~timeout_sec =
       { message =
           Printf.sprintf
             "docker info failed while validating sandbox runtime: %s"
-            (Worker_dev_tools.truncate_for_log out)
+            (Exec_policy.truncate_for_log out)
       ; failure_class = classify_docker_runtime_failure ~status:st ~output:out
       }
   else (
@@ -300,8 +300,8 @@ let docker_output_mentions_mount_failure output =
 
 let docker_failure_output_for_log output =
   if docker_output_mentions_mount_failure output
-  then Worker_dev_tools.truncate_for_log ~max_len:4096 output
-  else Worker_dev_tools.truncate_for_log output
+  then Exec_policy.truncate_for_log ~max_len:4096 output
+  else Exec_policy.truncate_for_log output
 ;;
 
 let optional_context_field key = function
@@ -751,7 +751,7 @@ let parse_inspect_line line =
     Error
       (Printf.sprintf
          "unexpected docker inspect cleanup payload: %s"
-         (Worker_dev_tools.truncate_for_log line))
+         (Exec_policy.truncate_for_log line))
 ;;
 
 let parse_live_container_line line =
@@ -787,7 +787,7 @@ let parse_live_container_line line =
     Error
       (Printf.sprintf
          "unexpected docker inspect container payload: %s"
-         (Worker_dev_tools.truncate_for_log line))
+         (Exec_policy.truncate_for_log line))
 ;;
 
 let pid_alive pid =
@@ -850,7 +850,7 @@ let inspect_cleanup_container ~container_id ~timeout_sec =
       (Printf.sprintf
          "docker inspect failed for cleanup container %s: %s"
          container_id
-         (Worker_dev_tools.truncate_for_log out))
+         (Exec_policy.truncate_for_log out))
   else (
     match nonempty_lines out with
     | line :: _ -> parse_inspect_line line
@@ -876,7 +876,7 @@ let remove_cleanup_container ~container_id ~timeout_sec =
       (Printf.sprintf
          "docker rm -f failed for cleanup container %s: %s"
          container_id
-         (Worker_dev_tools.truncate_for_log out))
+         (Exec_policy.truncate_for_log out))
 ;;
 
 let cleanup_stale_containers
@@ -910,7 +910,7 @@ let cleanup_stale_containers
       ; errors =
           [ Printf.sprintf
               "docker ps failed during keeper sandbox cleanup: %s"
-              (Worker_dev_tools.truncate_for_log out)
+              (Exec_policy.truncate_for_log out)
           ]
       }
     else (
@@ -976,7 +976,7 @@ let list_container_ids ?keeper_name ?container_kind ~base_path ~timeout_sec () =
       Error
         (Printf.sprintf
            "docker ps failed while listing keeper sandbox containers: %s"
-           (Worker_dev_tools.truncate_for_log out))
+           (Exec_policy.truncate_for_log out))
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
@@ -1022,7 +1022,7 @@ let list_containers ?keeper_name ?container_kind ~base_path ~timeout_sec () =
       Error
         (Printf.sprintf
            "docker inspect failed while listing keeper sandbox containers: %s"
-           (Worker_dev_tools.truncate_for_log out))
+           (Exec_policy.truncate_for_log out))
     else (
       let parsed = nonempty_lines out |> List.map parse_live_container_line in
       let errors =
@@ -1157,7 +1157,7 @@ let docker_image_present_with_class ~image ~timeout_sec =
             Printf.sprintf
               "keeper sandbox image %s is not available locally: %s"
               image
-              (Worker_dev_tools.truncate_for_log out)
+              (Exec_policy.truncate_for_log out)
         ; failure_class = classify_image_inspect_failure ~status:st ~output:out
         })
 ;;
@@ -1213,7 +1213,7 @@ let docker_image_required_commands_with_class ~image ~timeout_sec =
       { message =
           Printf.sprintf
             "failed to inspect keeper sandbox image commands: %s"
-            (Worker_dev_tools.truncate_for_log out)
+            (Exec_policy.truncate_for_log out)
       ; failure_class = classify_image_inventory_failure ~status:st ~output:out
       }
 ;;

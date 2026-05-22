@@ -299,7 +299,7 @@ let diagnosis_of_readonly_category category =
 
 let diagnosis_of_block_reason reason =
   match reason with
-  | Worker_dev_tools.Chain_or_redirect ->
+  | Exec_policy.Chain_or_redirect ->
       Some { Exec_core.rule_id = "command_chaining_blocked"
             ; explanation =
                 "Pipe | and chain && or ; combine multiple commands; the \
@@ -308,7 +308,7 @@ let diagnosis_of_block_reason reason =
                 Some "Split into two Bash calls, or use visible Read/Grep \
                       tools for file inspection and search."
             ; tool_suggestion = None }
-  | Worker_dev_tools.Pipes_not_allowed ->
+  | Exec_policy.Pipes_not_allowed ->
       Some { Exec_core.rule_id = "command_pipe_blocked"
             ; explanation =
                 "Pipes (|) connect two processes; each needs separate \
@@ -317,7 +317,7 @@ let diagnosis_of_block_reason reason =
                 Some "Run the first command, then pipe the output into \
                       the second Bash call."
             ; tool_suggestion = None }
-  | Worker_dev_tools.Direct_dune_invocation ->
+  | Exec_policy.Direct_dune_invocation ->
       Some { Exec_core.rule_id = "direct_dune_blocked"
             ; explanation =
                 "Bare dune bypasses scripts/dune-local.sh and can create \
@@ -325,14 +325,14 @@ let diagnosis_of_block_reason reason =
             ; rewrite =
                 Some "Run scripts/dune-local.sh build <target> from the repo root."
             ; tool_suggestion = Some "Bash" }
-  | Worker_dev_tools.Unsafe_redirect ->
+  | Exec_policy.Unsafe_redirect ->
       Some { Exec_core.rule_id = "command_redirect_blocked"
             ; explanation =
                 "Redirect syntax changes process I/O outside the typed command \
                  contract."
             ; rewrite = None
             ; tool_suggestion = Some "Write" }
-  | Worker_dev_tools.Injection ->
+  | Exec_policy.Injection ->
       Some { Exec_core.rule_id = "command_injection_blocked"
             ; explanation =
                 "Shell metacharacters ($(), ``, eval) can inject arbitrary \
@@ -341,7 +341,7 @@ let diagnosis_of_block_reason reason =
                 Some "Compute the value first, then pass it as a literal \
                       argument in a second Bash call."
             ; tool_suggestion = None }
-  | Worker_dev_tools.Process_substitution ->
+  | Exec_policy.Process_substitution ->
       Some { Exec_core.rule_id = "command_process_subst_blocked"
             ; explanation =
                 "<() and >() process substitutions create sub-processes; \
@@ -350,7 +350,7 @@ let diagnosis_of_block_reason reason =
                 Some "Write the intermediate result to a temp file, then \
                       reference it in the second command."
             ; tool_suggestion = None }
-  | Worker_dev_tools.Command_not_allowed name ->
+  | Exec_policy.Command_not_allowed name ->
       Some { Exec_core.rule_id = "command_not_allowed"
             ; explanation =
                 Printf.sprintf
@@ -358,7 +358,7 @@ let diagnosis_of_block_reason reason =
                   name
             ; rewrite = None
             ; tool_suggestion = None }
-  | Worker_dev_tools.Empty_command ->
+  | Exec_policy.Empty_command ->
       Some { Exec_core.rule_id = "command_empty"
             ; explanation = "The command string is empty."
             ; rewrite =

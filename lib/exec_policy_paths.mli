@@ -1,4 +1,4 @@
-(** Path normalization and allowlist checks for worker dev tools. *)
+(** Path normalization and allowlist checks for execution policy. *)
 
 val normalize_path : ?base_dir:string -> string -> string
 val resolve_path : ?base_dir:string -> string -> string

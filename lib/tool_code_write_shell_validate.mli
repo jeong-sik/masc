@@ -6,7 +6,7 @@ val allowed_shell_commands : string list
 val code_shell_command_context
   :  string
   -> (Masc_exec_command_gate.Shell_command_gate.parsed_context,
-      Worker_dev_tools.block_reason)
+      Exec_policy.block_reason)
      result
 
 val validate_code_shell_command : string -> (unit, string) result

@@ -299,7 +299,7 @@ let looks_like_test_command ~base ~sub =
 
 let family_of_base_command ~cmd ~tokens ~base =
   let sub = second_token tokens in
-  let write_intent = Worker_dev_tools.is_write_operation cmd in
+  let write_intent = Exec_policy.is_write_operation cmd in
   match String.lowercase_ascii base with
   | "git" ->
     (match
@@ -354,7 +354,7 @@ let family_of_base_command ~cmd ~tokens ~base =
 ;;
 
 let reversibility_of_command ~cmd family =
-  if Worker_dev_tools.is_destructive_bash_operation cmd
+  if Exec_policy.is_destructive_bash_operation cmd
   then Irreversible
   else (
     match family with
@@ -363,7 +363,7 @@ let reversibility_of_command ~cmd family =
 ;;
 
 let risk_of_command ~cmd ~write_intent family =
-  if Worker_dev_tools.is_destructive_bash_operation cmd
+  if Exec_policy.is_destructive_bash_operation cmd
   then High
   else (
     match family with
@@ -375,7 +375,7 @@ let risk_of_command ~cmd ~write_intent family =
 
 let classify_command ~cmd =
   let tokens = first_segment_tokens cmd in
-  let write_intent = Worker_dev_tools.is_write_operation cmd in
+  let write_intent = Exec_policy.is_write_operation cmd in
   let family =
     match base_command_of_tokens tokens with
     | Some base -> family_of_base_command ~cmd ~tokens ~base

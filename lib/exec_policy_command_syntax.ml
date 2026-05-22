@@ -1,4 +1,4 @@
-(** Shell word helpers for worker path and transparent-wrapper policy.
+(** Shell word helpers for execution policy path and transparent-wrapper checks.
 
     Command-shape validation is owned by
     [Masc_exec_command_gate.Shell_command_gate]. This module keeps only

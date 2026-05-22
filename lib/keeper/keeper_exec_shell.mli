@@ -24,7 +24,7 @@ val readonly_hint_of_category : string -> string
     that each category carries a concrete example, not just a label. *)
 
 val diagnosis_of_block_reason :
-  Worker_dev_tools.block_reason -> Exec_core.diagnosis option
+  Exec_policy.block_reason -> Exec_core.diagnosis option
 (** Machine-parseable recovery diagnosis for a readonly/workflow block
     reason. Kept on the facade because the shell executor is the public
     entry point used by tests and callers; implementation lives in

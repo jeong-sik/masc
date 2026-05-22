@@ -270,9 +270,9 @@ let check_wrapper_exec_target ~mode ~executable ~argv =
     check_wrapper_target
       ~mode
       ~wrapper_name:"env"
-      (Worker_dev_tools_command_syntax.command_after_env_prefix argv)
+      (Exec_policy_command_syntax.command_after_env_prefix argv)
   | "opam" -> (
-    match Worker_dev_tools_command_syntax.opam_exec_command_name argv with
+    match Exec_policy_command_syntax.opam_exec_command_name argv with
     | Some "opam" -> Ok ()
     | target -> check_wrapper_target ~mode ~wrapper_name:"opam" target)
   | _ -> Ok ()

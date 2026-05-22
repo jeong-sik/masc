@@ -95,7 +95,7 @@ let typed_docker_local_fallback_target ~meta ~timeout_sec =
       ( Masc_exec.Sandbox_target.host ()
       , [ "requested_sandbox", `String "docker"
         ; "sandbox_fallback", `String "local_playground"
-        ; "sandbox_fallback_reason", `String (Worker_dev_tools.truncate_for_log message)
+        ; "sandbox_fallback_reason", `String (Exec_policy.truncate_for_log message)
         ] )
 
 let handle_keeper_bash_typed
@@ -121,8 +121,8 @@ let handle_keeper_bash_typed
         let cmd = typed_input_command_text input in
         let cmd_for_log =
           cmd
-          |> Worker_dev_tools.sanitize_command_for_log
-          |> Worker_dev_tools.truncate_for_log
+          |> Exec_policy.sanitize_command_for_log
+          |> Exec_policy.truncate_for_log
         in
         let mode =
           if write_enabled
@@ -161,7 +161,7 @@ let handle_keeper_bash_typed
              ~fields:[ "typed", `Bool true; "cmd", `String cmd_for_log; "cwd", `String cwd ]
              e
          | Ok (dispatch_sandbox, sandbox_extra_fields) ->
-        if Worker_dev_tools.is_destructive_bash_operation cmd
+        if Exec_policy.is_destructive_bash_operation cmd
         then
           Yojson.Safe.to_string
             (Exec_core.blocked_result_json
@@ -173,7 +173,7 @@ let handle_keeper_bash_typed
                ~retryability:Exec_core.Operator_required
                ~extra:[ "cmd", `String cmd_for_log; "typed", `Bool true; "execution_time_ms", `Int 0 ]
                ())
-        else if (not write_enabled) && Worker_dev_tools.is_write_operation cmd
+        else if (not write_enabled) && Exec_policy.is_write_operation cmd
         then
           Yojson.Safe.to_string
             (Exec_core.blocked_result_json
@@ -202,7 +202,7 @@ let handle_keeper_bash_typed
               with
               | Error e -> Error e
               | Ok () ->
-                Worker_dev_tools.validate_shell_ir_paths
+                Exec_policy.validate_shell_ir_paths
                   ~keeper_id:meta.name
                   ~base_path:root
                   ~workdir:cwd

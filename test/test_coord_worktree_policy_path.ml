@@ -5,9 +5,8 @@
     was empty [allowed_orgs] for keepers whose lookup goes through this loader,
     surfacing as [No allowed orgs configured for git clone] in clone attempts.
 
-    These tests pin the new behaviour: canonical path takes precedence, legacy
-    path is honoured as a fallback, and absence of both is a clean empty
-    return.
+    These tests pin the current behaviour: only the canonical path is read, and
+    absence is a clean empty return for compatibility callers.
 *)
 
 open Alcotest
@@ -72,29 +71,14 @@ let test_canonical_masc_config () =
   check (list string) "canonical .masc/config/ resolves orgs"
     [ "jeong-sik"; "kidsnote" ] allowed
 
-let test_legacy_config_dir () =
-  with_temp_dir "coord-worktree-policy-legacy" @@ fun base ->
-  let dir = Filename.concat base "config" in
-  mkdir_p dir;
-  write_file (Filename.concat dir "tool_policy.toml")
-    (policy_with_orgs [ "legacy-org" ]);
-  let allowed, _denied = CW.load_git_clone_policy ~base_path:base in
-  check (list string) "legacy <base>/config/ honoured when canonical missing"
-    [ "legacy-org" ] allowed
-
-let test_canonical_takes_priority () =
-  with_temp_dir "coord-worktree-policy-priority" @@ fun base ->
-  let canon = Filename.concat (Filename.concat base ".masc") "config" in
-  mkdir_p canon;
-  write_file (Filename.concat canon "tool_policy.toml")
-    (policy_with_orgs [ "canonical" ]);
+let test_legacy_config_dir_ignored () =
+  with_temp_dir "coord-worktree-policy-legacy-ignored" @@ fun base ->
   let legacy = Filename.concat base "config" in
   mkdir_p legacy;
   write_file (Filename.concat legacy "tool_policy.toml")
-    (policy_with_orgs [ "legacy" ]);
+    (policy_with_orgs [ "legacy-org" ]);
   let allowed, _denied = CW.load_git_clone_policy ~base_path:base in
-  check (list string) "canonical wins over legacy when both exist"
-    [ "canonical" ] allowed
+  check (list string) "legacy <base>/config/ ignored" [] allowed
 
 let test_neither_present () =
   with_temp_dir "coord-worktree-policy-none" @@ fun base ->
@@ -175,8 +159,8 @@ let () =
       ( "load_git_clone_policy",
         [
           test_case "canonical .masc/config/" `Quick test_canonical_masc_config;
-          test_case "legacy <base>/config/" `Quick test_legacy_config_dir;
-          test_case "canonical takes priority" `Quick test_canonical_takes_priority;
+          test_case "legacy <base>/config/ ignored" `Quick
+            test_legacy_config_dir_ignored;
           test_case "neither path present" `Quick test_neither_present;
         ] );
       ( "validate_clone_origin_url",

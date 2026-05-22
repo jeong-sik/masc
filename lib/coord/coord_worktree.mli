@@ -43,11 +43,10 @@ val policy_string_array_of_line :
 
 val load_git_clone_policy :
   base_path:string -> string list * string list
-(** Load [(allowed_orgs, denied_repos)] from [tool_policy.toml].  Canonical
-    [<base_path>/.masc/config/tool_policy.toml] takes priority over legacy
-    [<base_path>/config/tool_policy.toml].  Returns empty lists when the file
-    is missing for compatibility; enforcement uses a fail-closed result loader
-    internally. *)
+(** Load [(allowed_orgs, denied_repos)] from
+    [<base_path>/.masc/config/tool_policy.toml]. Returns empty lists when the
+    file is missing for compatibility; enforcement uses a fail-closed result
+    loader internally. *)
 
 (** {1 GitHub URL parsing} *)
 

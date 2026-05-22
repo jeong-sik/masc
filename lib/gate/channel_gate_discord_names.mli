@@ -25,7 +25,8 @@ val default_names_path : string
 val configured_write_path : string -> default:string -> string
 
 (** [configured_read_path env_name ~default ~legacy] — env override,
-    else [default], else [legacy] fallback (for pre-v0.9.0 layout). *)
+    else [default]. [legacy] is ignored; retained only for existing direct
+    callers that already pass a legacy path. *)
 val configured_read_path :
   string -> default:string -> legacy:string -> string
 
@@ -33,7 +34,8 @@ val configured_read_path :
     {!default_names_path}). *)
 val names_write_path : unit -> string
 
-(** Default read path with pre-v0.9.0 legacy fallback. *)
+(** Default read path (env [MASC_DISCORD_NAMES_PATH] →
+    {!default_names_path}). *)
 val names_read_path : unit -> string
 
 (** {1 State I/O} *)

@@ -487,25 +487,12 @@ let dashboard_goals_snapshot_json ~(config : Coord.config) : Yojson.Safe.t =
     ]
 ;;
 
-let compact_preview ~max_chars text =
-  let text = String.trim text in
-  if String.length text <= max_chars
-  then text, false
-  else String.sub text 0 max_chars ^ "...", true
-;;
-
-let json_member key = function
-  | `Assoc fields ->
-    (match List.assoc_opt key fields with
-     | Some v -> v
-     | None -> `Null)
-  | _ -> `Null
-;;
-
-let json_string key json = Json_util.get_string json key
-let json_int key json = Json_util.get_int json key
-let json_float key json = Json_util.get_float json key
-let json_bool key json = Json_util.get_bool json key
+let compact_preview = Server_dashboard_http_json_utils.compact_preview
+let json_member = Server_dashboard_http_json_utils.json_member
+let json_string = Server_dashboard_http_json_utils.json_string
+let json_int = Server_dashboard_http_json_utils.json_int
+let json_float = Server_dashboard_http_json_utils.json_float
+let json_bool = Server_dashboard_http_json_utils.json_bool
 
 (* Compact-receipt JSON builders extracted to
    [Server_dashboard_compact_receipt_json] (godfile decomp). *)
@@ -516,29 +503,9 @@ let compact_receipt_tool_surface_json =
   Server_dashboard_compact_receipt_json.compact_receipt_tool_surface_json
 ;;
 
-(* RFC-0142 PR-5: lift the silent [| _ -> None] catch-all through
-   [Json_field.{float,assoc} |> to_option] so Wrong_shape becomes
-   structurally distinct from Field_absent. Caller semantics
-   unchanged: both legacy and new shapes return [None] on missing
-   key or mismatched JSON variant. [Json_field.float] accepts both
-   [`Float] and [`Int] (returning [float_of_int i]), matching the
-   legacy 2-arm match. *)
-
-let json_number key json =
-  Json_field.float json key |> Json_field.to_option
-;;
-
-let json_assoc key json =
-  Json_field.assoc json key
-  |> Json_field.to_option
-  |> Option.map (fun fields -> `Assoc fields)
-;;
-
-let string_has_prefix ~prefix value =
-  let prefix_len = String.length prefix in
-  String.length value >= prefix_len
-  && String.equal (String.sub value 0 prefix_len) prefix
-;;
+let json_number = Server_dashboard_http_json_utils.json_number
+let json_assoc = Server_dashboard_http_json_utils.json_assoc
+let string_has_prefix = Server_dashboard_http_json_utils.string_has_prefix
 
 let tool_call_output_text json =
   match json_member "output" json with

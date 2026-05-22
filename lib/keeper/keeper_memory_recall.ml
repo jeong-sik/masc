@@ -865,6 +865,3 @@ let work_kind_of_eval (e : memory_recall_eval) : string =
     | Some "first_question" -> "first_question_answer"
     | Some topic when topic <> "" -> topic
     | _ -> "general_chat"
-
-(* Tool definitions moved to Tool_shard for dynamic composition.
-   This alias maintains backward compatibility. *)

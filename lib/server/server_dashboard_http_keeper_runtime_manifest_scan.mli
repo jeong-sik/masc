@@ -40,6 +40,9 @@ type runtime_manifest_scan =
   ; mutable provider_started_count : int
   ; mutable provider_finished_count : int
   ; mutable provider_terminal_row : Keeper_runtime_manifest.t option
+  ; mutable latest_context_injected_row : Keeper_runtime_manifest.t option
+  ; mutable latest_context_compacted_row : Keeper_runtime_manifest.t option
+  ; mutable latest_memory_injected_row : Keeper_runtime_manifest.t option
   ; mutable dag_edges : (string * string) list
   }
 

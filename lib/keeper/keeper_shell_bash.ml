@@ -13,6 +13,8 @@ module For_testing = struct
   let elapsed_duration_ms = elapsed_duration_ms
 end
 
+module Shell_gate = Masc_exec_command_gate.Shell_command_gate
+
 let sandbox_profile_label = function
   | Local -> "host"
   | Docker -> "docker"
@@ -189,12 +191,40 @@ let handle_keeper_bash_typed
                ~extra:[ "cmd", `String cmd_for_log; "typed", `Bool true; "execution_time_ms", `Int 0 ]
                ())
         else
-          match Keeper_tool_bash_input.to_shell_ir ~mode ~sandbox:dispatch_sandbox input with
+          match Keeper_tool_bash_input.to_shell_ir_unvalidated ~mode ~sandbox:dispatch_sandbox input with
           | Error e ->
             error_json
               ~fields:[ "typed", `Bool true; "cmd", `String cmd_for_log; "cwd", `String cwd ]
               (typed_validation_error_text e)
           | Ok ir ->
+            let allowed_commands =
+              match mode with
+              | Keeper_tool_bash_input.Dev_full -> Dev_exec_allowlist.dev
+              | Keeper_tool_bash_input.Readonly -> Dev_exec_allowlist.readonly
+            in
+            let gate_verdict =
+              Shell_gate.gate_typed
+                ~caller:Shell_gate.Keeper_shell_bash
+                ~ir
+                ~allowlist:{ allowed_commands; allow_pipes = true; redirect_allowed = true }
+                ~path_policy:Shell_gate.allow_all_paths
+                ~sandbox:{ target = dispatch_sandbox }
+                ()
+            in
+            match gate_verdict with
+            | Reject { diagnostic; _ } ->
+              error_json
+                ~fields:[ "typed", `Bool true; "cmd", `String cmd_for_log; "cwd", `String cwd ]
+                diagnostic
+            | Cannot_parse _ ->
+              error_json
+                ~fields:[ "typed", `Bool true; "cmd", `String cmd_for_log; "cwd", `String cwd ]
+                "Cannot parse command"
+            | Too_complex _ ->
+              error_json
+                ~fields:[ "typed", `Bool true; "cmd", `String cmd_for_log; "cwd", `String cwd ]
+                "Command too complex"
+            | Allow _context ->
             let path_validation =
               match
                 Keeper_task_worktree_lazy.ensure_shell_ir_existing_dirs

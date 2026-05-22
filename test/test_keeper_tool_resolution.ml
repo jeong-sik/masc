@@ -107,7 +107,7 @@ let policy_tool_names = [
   "keeper_board_get"; "keeper_board_list"; "keeper_board_post"; "keeper_board_search";
   "keeper_board_stats"; "keeper_board_vote"; "keeper_broadcast"; "keeper_context_status";
   "keeper_fs_edit"; "keeper_fs_read"; "keeper_library_read"; "keeper_library_search";
-  "keeper_memory_search"; "keeper_memory_write"; "keeper_pr_create"; "keeper_pr_list";
+  "keeper_memory_search"; "keeper_memory_write"; "keeper_pr_list";
   "keeper_pr_review_comment"; "keeper_pr_review_read"; "keeper_pr_review_reply";
   "keeper_pr_status"; "keeper_preflight_check"; "keeper_shell"; "keeper_task_done";
   "keeper_task_submit_for_verification"; "keeper_time_now"; "keeper_tool_search";

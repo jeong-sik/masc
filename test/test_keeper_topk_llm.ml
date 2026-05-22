@@ -420,23 +420,23 @@ let test_deterministic_prefilter_surfaces_pr_review_for_explicit_request () =
   Alcotest.(check bool) "pr review comment appears in final visible surface"
     true (List.mem "keeper_pr_review_comment" visible)
 
-let test_pr_create_aliases_cover_draft_pr_workflow () =
+let test_shell_aliases_cover_draft_pr_workflow () =
   let aliases =
-    Keeper_agent_tool_surface.tool_search_aliases "keeper_pr_create"
+    Keeper_agent_tool_surface.tool_search_aliases "keeper_shell"
   in
-  Alcotest.(check bool) "keeper_pr_create aliases mention draft PR"
+  Alcotest.(check bool) "keeper_shell aliases mention draft PR"
     true (List.mem "draft" aliases);
-  Alcotest.(check bool) "keeper_pr_create aliases mention pull request"
+  Alcotest.(check bool) "keeper_shell aliases mention pull request"
     true (List.mem "pull" aliases);
-  Alcotest.(check bool) "keeper_pr_create aliases include Korean create intent"
+  Alcotest.(check bool) "keeper_shell aliases include Korean create intent"
     true (List.mem "생성" aliases)
 
-let test_deterministic_prefilter_surfaces_pr_create_for_draft_pr_request () =
+let test_deterministic_prefilter_surfaces_shell_for_draft_pr_request () =
   let pr_create_tools =
     test_tools
     @ [
-        make_tool "keeper_pr_create"
-          "Open a draft pull request through the keeper credential broker";
+        make_tool "keeper_shell"
+          "Structured shell/GitHub CLI operations including draft pull request creation";
       ]
   in
   let selected =
@@ -453,8 +453,10 @@ let test_deterministic_prefilter_surfaces_pr_create_for_draft_pr_request () =
       ~llm_selected:[]
       ~discovered:[]
   in
-  Alcotest.(check bool) "keeper_pr_create appears in visible surface"
-    true (List.mem "keeper_pr_create" visible)
+  Alcotest.(check bool) "keeper_shell appears in visible surface"
+    true (List.mem "keeper_shell" visible);
+  Alcotest.(check bool) "keeper_pr_create stays out of visible surface"
+    false (List.mem "keeper_pr_create" visible)
 
 let test_tool_search_partition_returns_allowed_core_hits () =
   let partition =
@@ -575,9 +577,9 @@ let () =
       Alcotest.test_case "deterministic prefilter surfaces pr review tools" `Quick
         test_deterministic_prefilter_surfaces_pr_review_for_explicit_request;
       Alcotest.test_case "pr create aliases cover draft workflow" `Quick
-        test_pr_create_aliases_cover_draft_pr_workflow;
+        test_shell_aliases_cover_draft_pr_workflow;
       Alcotest.test_case "deterministic prefilter surfaces pr create" `Quick
-        test_deterministic_prefilter_surfaces_pr_create_for_draft_pr_request;
+        test_deterministic_prefilter_surfaces_shell_for_draft_pr_request;
       Alcotest.test_case "tool_search returns allowed core hits" `Quick
         test_tool_search_partition_returns_allowed_core_hits;
       Alcotest.test_case "tool_search filters denied core hits" `Quick

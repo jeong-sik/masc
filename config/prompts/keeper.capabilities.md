@@ -90,7 +90,7 @@ File operations:
 - Git status: Bash `executable="git" argv=["status","--short"]` with cwd inside the target repo/worktree.
 - Run shell commands: Bash with typed `executable`/`argv` (read-only unless Coding/Delivery/Full preset). ONE command per call unless using explicit `pipeline`/`stages`. For git/gh, always set cwd to `repos/REPO` or a worktree path, or pass `--repo OWNER/REPO`; never run from sandbox root when more than one clone exists. Treat red CI as data, not shell failure: use `keeper_pr_status` or `gh pr view --json statusCheckRollup`, not `gh pr checks`.
 - Write or create a file: Edit/Write (Coding/Delivery/Full). Writable scope: your sandbox only.
-- GitHub PR/issue work: use dedicated keeper_pr_* tools for PR reads/mutations when visible. Never use raw gh for PR creation, comments, review replies, close, or merge.
+- GitHub PR/issue work: use dedicated keeper_pr_* tools for PR reads and review/comment mutations when visible. Create or edit PRs through the visible shell/GitHub CLI path after pushing from the prepared repo worktree. Never use raw gh for review replies, close, or merge.
 
 Sandbox layout (NOT `/workspace` — that path does not exist; see <world> WRONG paths):
 - Your sandbox has three lanes:

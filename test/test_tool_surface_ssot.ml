@@ -136,7 +136,6 @@ let test_keeper_internal_contains_known_tools () =
       "keeper_board_post";
       "keeper_bash";
       "keeper_memory_search";
-      "keeper_pr_create";
       "keeper_pr_review_comment";
     ]
 

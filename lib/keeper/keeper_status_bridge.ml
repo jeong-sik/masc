@@ -264,6 +264,15 @@ let is_cascade_exhausted_blocker_class blocker_class =
     (blocker_class_to_string (Cascade_exhausted (Other_detail "")))
 ;;
 
+let is_no_tool_capable_provider_blocker_class blocker_class =
+  String.equal blocker_class (blocker_class_to_string No_tool_capable_provider)
+;;
+
+let is_completion_contract_blocker_class blocker_class =
+  String.equal blocker_class (blocker_class_to_string Completion_contract_violation)
+;;
+
+
 let runtime_blocker_surface_of_typed_class ?(summary = "") (cls : blocker_class)
   : runtime_blocker_surface
   =
@@ -306,8 +315,21 @@ let runtime_blocker_surface_of_typed_class ?(summary = "") (cls : blocker_class)
        | Some err ->
          (match Keeper_turn_driver.summary_of_masc_internal_error err with
           | Some structured_summary -> structured_summary
-          | None -> if summary = "" then str else summary)
-       | None -> if summary = "" then str else summary)
+          | None ->
+            if summary = ""
+            then
+              "No configured provider can satisfy the required tool set before dispatch."
+            else summary)
+       | None ->
+         if summary = ""
+         then
+           "No configured provider can satisfy the required tool set before dispatch."
+         else summary)
+    | Completion_contract_violation ->
+      if summary = ""
+      then
+        "Provider response violated the required completion/tool contract after dispatch."
+      else summary
     (* All remaining blocker_class variants carry no class-specific summary
        transformation — fall back to the live summary or the typed name. *)
     | Ambiguous_post_commit_timeout
@@ -316,7 +338,6 @@ let runtime_blocker_surface_of_typed_class ?(summary = "") (cls : blocker_class)
     | Admission_queue_wait_timeout
     | Turn_timeout_after_queue_wait
     | Turn_timeout
-    | Completion_contract_violation
     | Stay_silent_loop
     | Fiber_unresolved
     | Stale_turn_timeout
@@ -743,6 +764,10 @@ let attention_fields_json (config : Coord_utils.config) (meta : keeper_meta) =
         true, Some "timeout_budget_exhausted", Some "inspect_timeout_budget"
       | Some blocker when is_cascade_exhausted_blocker_class blocker.blocker_class ->
         true, Some "cascade_attempts_exhausted", Some "inspect_cascade_attempts"
+      | Some blocker when is_no_tool_capable_provider_blocker_class blocker.blocker_class ->
+        true, Some "provider_tool_capability_missing", Some "inspect_provider_tool_lane"
+      | Some blocker when is_completion_contract_blocker_class blocker.blocker_class ->
+        true, Some "completion_contract_violation", Some "inspect_completion_contract"
       | Some _ -> true, Some "runtime_blocked", Some "inspect_runtime_blocker"
       | None when meta.paused -> true, Some "paused", Some "resume_or_review"
       | None when not social_model_recognized ->

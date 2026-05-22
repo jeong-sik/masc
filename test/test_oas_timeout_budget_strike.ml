@@ -60,7 +60,7 @@ let test_strike_limit_is_soft_backoff () =
 
 let oas_timeout_budget_error ~phase =
   KTD.sdk_error_of_masc_internal_error
-    (KTD.Oas_timeout_budget
+    (KTD.Provider_timeout
        { budget_sec = 90.0
        ; keeper_turn_timeout_sec = 1200.0
        ; estimated_input_tokens = 10_000

@@ -41,7 +41,6 @@ let append = Keeper_context_core.append
 let append_many = Keeper_context_core.append_many
 let sync_oas_context = Keeper_context_core.sync_oas_context
 let role_to_string = Keeper_context_core.role_to_string
-let role_of_string = Keeper_context_core.role_of_string
 let role_of_string_opt = Keeper_context_core.role_of_string_opt
 let message_to_json = Keeper_context_core.message_to_json
 let message_of_json = Keeper_context_core.message_of_json

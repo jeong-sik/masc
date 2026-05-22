@@ -202,7 +202,6 @@ let generate_checkpoint_id () =
 
 let role_to_string = Message_json.role_to_string
 let role_of_string_opt = Message_json.role_of_string_opt
-let role_of_string = Message_json.role_of_string
 let content_blocks_to_json = Message_json.content_blocks_to_json
 let content_blocks_of_json = Message_json.content_blocks_of_json
 let string_field_opt = Message_json.string_field_opt

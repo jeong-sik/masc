@@ -36,16 +36,12 @@ val append : working_context -> Agent_sdk.Types.message -> working_context
 val append_many : working_context -> Agent_sdk.Types.message list -> working_context
 val sync_oas_context : working_context -> working_context
 
-(** Backwards-compatible: unknown -> [Tool] (safest fallback) + warn log.
-    See {!role_of_string_opt} for the strict version. Issue #8623. *)
 val role_to_string : Agent_sdk.Types.role -> string
 
 (** Strict variant — returns [None] for unrecognised role strings.
     Use this in checkpoint loaders / new code where silently
     misattributing a chat-history message would corrupt the
     LLM-visible conversation. *)
-val role_of_string : string -> Agent_sdk.Types.role
-
 val role_of_string_opt : string -> Agent_sdk.Types.role option
 val message_to_json : Agent_sdk.Types.message -> Yojson.Safe.t
 val message_of_json : Yojson.Safe.t -> Agent_sdk.Types.message

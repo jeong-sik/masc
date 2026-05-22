@@ -316,6 +316,11 @@ let run_turn
   let estimated_input_tokens = prompt_ctx.Keeper_run_prompt.estimated_input_tokens in
   let ctx_work = prompt_ctx.Keeper_run_prompt.ctx_work in
   let history_messages_digest = digest_message_texts_as_joined history_messages in
+  let context_digest =
+    digest_text
+      (base_system_prompt ^ turn_system_prompt ^ dynamic_context ^ memory_context
+       ^ temporal_context ^ user_message ^ history_messages_digest)
+  in
   append_manifest ~site:"context_injected"
     ~keeper_turn_id:manifest_keeper_turn_id
     ~decision:
@@ -331,6 +336,7 @@ let run_turn
             ("history_message_count", `Int (List.length history_messages));
             ("history_messages_digest", `String history_messages_digest);
             ("estimated_input_tokens", `Int estimated_input_tokens);
+            ("context_digest", `String context_digest);
           ]))
     Keeper_runtime_manifest.Context_injected;
   let actionable_signal =

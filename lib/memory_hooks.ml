@@ -249,6 +249,8 @@ let make
                      ("memory_context_chars", `Int (String.length mem_text));
                      ( "memory_context_digest",
                        `String (Digest.to_hex (Digest.string mem_text)) );
+                     ("payload_digest",
+                      `String (Digest.to_hex (Digest.string mem_text)) );
                      ("episode_limit", `Int episode_limit);
                      ("procedure_limit", `Int procedure_limit);
                      ( "existing_extra_system_context_present",

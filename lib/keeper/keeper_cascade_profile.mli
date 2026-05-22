@@ -168,21 +168,18 @@ val models_key : string -> string
 val temperature_key : string -> string
 val max_tokens_key : string -> string
 
-(** {1 RFC-0143 Phase 1 — typed catalog query bridge}
+(** {1 RFC-0143 — typed catalog query}
 
     Distinguishes the three control-flow origins of an unavailable
     catalog so callers can decide what to do about each instead of
     collapsing them into [Error _ -> false] / [Error _ -> []].
 
-    The bridge runs alongside the legacy [catalog_metadata_result]
-    (a [('a, string) result]) so call sites can migrate in batches.
-    Per RFC-0143 §4, the legacy API is removed in PR-5 once no
-    callers remain. *)
+    The legacy string-error [catalog_metadata_result] was deleted by
+    the §4 PR-5 closeout once all in-file callers consumed the typed
+    variant. *)
 
-(** Catalog metadata record returned by the bridge. Mirrors the
-    fields the legacy [catalog_metadata_result] already returned;
-    exposed here so the typed query is callable from outside the
-    module. *)
+(** Catalog metadata record returned by the query.  Exposed here so
+    the typed query is callable from outside the module. *)
 type catalog_metadata = {
   qualified_names : string list;
   public_names : string list;
@@ -212,7 +209,7 @@ val catalog_metadata_query
   :  ?config_path:string
   -> unit
   -> catalog_metadata catalog_query_result
-(** Typed alternative to [catalog_metadata_result]. The
-    [Catalog_unavailable] payload carries both the typed [reason]
-    (suitable for routing logic and metric labels) and the original
-    [message] (suitable for operator-facing logs). *)
+(** Typed catalog metadata accessor.  The [Catalog_unavailable]
+    payload carries both the typed [reason] (suitable for routing
+    logic and metric labels) and the original [message] (suitable
+    for operator-facing logs). *)

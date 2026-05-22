@@ -1,8 +1,9 @@
 (** test_keeper_cascade_profile_bridge — Unit tests for the
-    [catalog_metadata_query] typed bridge.
+    [catalog_metadata_query] typed catalog accessor.
 
-    The bridge has three control-flow origins, mirroring the three
-    [Error] sites in the legacy [catalog_metadata_result]:
+    The query has three control-flow origins (the legacy
+    string-error [catalog_metadata_result] was deleted by the
+    RFC-0143 §4 PR-5 closeout):
 
     {ul
     {- [Catalog_path_not_resolved] — the resolver returned [None].}

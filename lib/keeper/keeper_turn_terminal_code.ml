@@ -1,10 +1,8 @@
 (* RFC-0042 PR-1: closed sum type for keeper turn terminal code.
 
    See [.mli] for the public contract. This file holds the type
-   definition, the wire-format serialisation chosen to be byte-for-byte
-   compatible with [Keeper_execution_receipt.stale_terminal_reason_code]
-   as of main, and the canonical bridge from
-   [Keeper_registry.failure_reason]. *)
+   definition, the wire-format serialisation, and the canonical bridge
+   from [Keeper_registry.failure_reason]. *)
 
 type t =
   | Healthy
@@ -105,10 +103,9 @@ let of_failure_reason : Keeper_registry.failure_reason -> t = function
 let of_failure_reason_option = function
   | Some fr -> of_failure_reason fr
   | None ->
-    (* Legacy [stale_terminal_reason_code None] emitted "stale_turn_timeout".
-       Canonical sub-class for that wire string is [In_turn_hung] (see
-       [of_wire]); we reuse it here so [to_wire (of_failure_reason_option None)]
-       is byte-for-byte equal to the pre-RFC default. *)
+    (* A stale keeper without a recorded failure reason still emits the
+       stale-turn cohort. Canonicalise to [In_turn_hung], matching the
+       lossy [of_wire] convention for ["stale_turn_timeout"]. *)
     Stale_turn_timeout_in_turn
 ;;
 

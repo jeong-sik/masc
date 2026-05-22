@@ -4,10 +4,8 @@
 
     This module is introduced in PR-1 of the RFC migration and is
     intentionally inert: no caller in the tree references it yet.
-    PR-2 swaps the existing typed bridges
-    ([Keeper_execution_receipt.stale_terminal_reason_code],
-    [keeper_agent_error.agent_error_terminal_reason_code]) to return
-    values of type [t]; PR-3 swaps [Keeper_turn_terminal.t.code] from
+    PR-2 swaps the existing typed bridges to return values of type [t];
+    PR-3 swaps [Keeper_turn_terminal.t.code] from
     [string] to [t]; PR-4 converts the readers
     ([Keeper_execution_receipt] disposition mapping,
     [Keeper_passive_loop_detector.progress_class_of_terminal_reason_code])
@@ -77,10 +75,8 @@ type t =
           the actual sub-kind set. *)
 
 (** Stable wire format. The strings produced here are byte-for-byte
-    compatible with the strings emitted today by
-    [Keeper_execution_receipt.stale_terminal_reason_code], so swapping
-    callers in PR-2 / PR-3 does not change the JSON received by
-    dashboards, [bin/masc-trace], or external consumers.
+    compatible with the receipt JSON consumed by dashboards,
+    [bin/masc-trace], and external consumers.
 
     The [Stale_turn_timeout_*] variants and the two
     [Ambiguous_partial_commit_*] variants intentionally collapse to a
@@ -101,8 +97,7 @@ val to_wire : t -> string
     documented in the [.ml] — to avoid silent fallthrough. *)
 val of_wire : string -> t option
 
-(** Canonical bridge from the existing typed source. Replaces
-    [Keeper_execution_receipt.stale_terminal_reason_code] in PR-2.
+(** Canonical bridge from the existing typed source.
 
     Exhaustive over [Keeper_registry.failure_reason]: adding a new
     constructor there is a compile error here, which is the property

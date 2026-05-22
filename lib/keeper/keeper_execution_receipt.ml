@@ -1151,17 +1151,8 @@ let stale_kill_class_label = function
   | Keeper_registry.Noop_failure_loop _ -> "noop_failure_loop"
 ;;
 
-(* RFC-0042 PR-2: delegate to [Keeper_turn_terminal_code]. The pre-RFC
-   inline match has been preserved as the test oracle in
-   [test/test_keeper_turn_terminal_code.ml] (byte-for-byte invariant).
-   New [Keeper_registry.failure_reason] constructors are now a compile
-   error in [Keeper_turn_terminal_code.of_failure_reason]. *)
 let stale_terminal_reason_code_typed reason =
   Keeper_turn_terminal_code.of_failure_reason_option reason
-;;
-
-let stale_terminal_reason_code reason =
-  Keeper_turn_terminal_code.to_wire (stale_terminal_reason_code_typed reason)
 ;;
 
 let stale_broadcast_failure_cohort = function
@@ -1212,7 +1203,10 @@ let stale_broadcast_payload
     ; "generation", `Int generation
     ; "disposition", `String "stalled"
     ; "disposition_reason", `String failure_reason_cohort
-    ; "terminal_reason_code", `String (stale_terminal_reason_code failure_reason)
+    ; ( "terminal_reason_code"
+      , `String
+          (Keeper_turn_terminal_code.to_wire
+             (stale_terminal_reason_code_typed failure_reason)) )
     ; "failure_reason", string_opt_json failure_reason_text
     ; "failure_reason_cohort", `String failure_reason_cohort
     ; "stale_kill_class", string_opt_json (stale_broadcast_kill_class failure_reason)

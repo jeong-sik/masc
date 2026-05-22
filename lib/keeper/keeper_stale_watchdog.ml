@@ -307,7 +307,7 @@ let () =
 
 let () =
   Prometheus.register_counter
-    ~name:Keeper_metrics.metric_keeper_oas_timeout_budget_watchdog_termination
+    ~name:Keeper_metrics.metric_keeper_provider_timeout_watchdog_termination
     ~help:
       "Total watchdog terminations that preserved an unresolved \
        timeout failure evidence instead of reclassifying the keeper as \
@@ -568,7 +568,7 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                     root cause for supervisor auto-pause. *)
                  request_watchdog_stop ();
                  Prometheus.inc_counter
-                   Keeper_metrics.metric_keeper_oas_timeout_budget_watchdog_termination
+                   Keeper_metrics.metric_keeper_provider_timeout_watchdog_termination
                    ~labels:[ ("keeper", meta.name) ]
                    ();
                  Log.Keeper.error

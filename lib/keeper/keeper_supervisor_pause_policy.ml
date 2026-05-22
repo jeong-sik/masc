@@ -170,7 +170,7 @@ let handle_oas_timeout_budget_pause
     ctx
     entry
     ~reason_tag:"provider_timeout_loop"
-    ~metric_name:Keeper_metrics.metric_keeper_oas_timeout_budget_loop_paused
+    ~metric_name:Keeper_metrics.metric_keeper_provider_timeout_loop_paused
     ~lifecycle_detail:(Printf.sprintf "provider_timeout_loop count=%d" count)
     ~blocker_class:(Some Turn_timeout)
     ~resume_policy:Auto_resume_with_backoff

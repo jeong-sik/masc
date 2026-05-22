@@ -211,7 +211,7 @@ let register
     "Total keepers auto-paused due to stale termination storms. Labeled by keeper."
     `Counter;
   add
-    Keeper_metrics.metric_keeper_oas_timeout_budget_loop_paused
+    Keeper_metrics.metric_keeper_provider_timeout_loop_paused
     "Total keepers auto-paused due to repeated provider timeout loops. Labeled by keeper."
     `Counter;
   add

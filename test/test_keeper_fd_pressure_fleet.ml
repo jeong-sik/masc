@@ -2,8 +2,8 @@
     monotonic CAS for [cooldown_until] / [last_log_at], and single-flight
     semantics for [process_nofile_soft_limit].
 
-    Covers the four T1 changes that landed together:
-    - T1-A: [min_nofile_for_fleet] default + [min_nofile_for_24_keepers] alias
+    Covers the fleet FD pressure behavior:
+    - [min_nofile_for_fleet] default
     - T1-C: [cas_monotonic_max] never loses larger writers under race
     - T1-D: [nofile_soft_limit_cache] 3-state variant gives one [Resolved]
             answer regardless of concurrent first-touches *)
@@ -41,14 +41,6 @@ let test_fleet_default_at_or_above_12288 () =
     (Printf.sprintf "min_nofile_for_fleet () = %d >= 12288" v)
     true
     (v >= 12288)
-
-let test_legacy_alias_matches_fleet () =
-  (* [min_nofile_for_24_keepers] is preserved as a compat alias so external
-     readers don't break; it must resolve to the same value. *)
-  Alcotest.(check int)
-    "min_nofile_for_24_keepers = min_nofile_for_fleet"
-    (FD.min_nofile_for_fleet ())
-    (FD.min_nofile_for_24_keepers ())
 
 let test_low_nofile_blocks_synthetic_24_keeper_start () =
   FD.reset_for_tests ();
@@ -251,8 +243,6 @@ let () =
     [ ( "fleet-baseline"
       , [ Alcotest.test_case "default >= 12288" `Quick
             test_fleet_default_at_or_above_12288
-        ; Alcotest.test_case "legacy alias matches fleet" `Quick
-            test_legacy_alias_matches_fleet
         ; Alcotest.test_case "nofile=256 blocks synthetic 24-keeper start" `Quick
             test_low_nofile_blocks_synthetic_24_keeper_start
         ] )

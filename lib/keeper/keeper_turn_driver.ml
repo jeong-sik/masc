@@ -1087,14 +1087,84 @@ let run_named
         terminal_error
     | candidate :: rest ->
       Eio_guard.fair_yield (); (* P0: keep fast-fail cascades scheduler-fair. *)
-      (* Phase A: no provider snapshot is available yet, so the boundary returns
-         [Capability_unknown] and preserves routing. Later phases only swap in
-         a real snapshot producer at this call site. *)
-      ignore
-        (Provider_capability.decide_required_action
-           (Provider_capability.unknown
-              ~provider_name:(Cascade_runtime_candidate.provider_label candidate))
-           ~required_tools:runtime_manifest_required_tool_names);
+      (* RFC-0157 PR-1: pre-dispatch required-tool capability gate.
+         Resolves the candidate's effective tool surface and checks whether
+         it can satisfy required_tools before acquiring capacity slot or
+         dispatching to the provider. Falls through to [Capability_unknown]
+         when tool resolution fails (preserving Phase A routing). *)
+      let pre_dispatch_blocked =
+        match runtime_manifest_required_tool_names with
+        | [] -> None (* no required tools — skip gate *)
+        | required_tool_names ->
+        let provider_label = Cascade_runtime_candidate.provider_label candidate in
+        match
+          Cascade_runtime_candidate.resolve_tool_lane_for_oas_tools
+            ?agent_name:(Cascade_oas_runner.keeper_agent_name_opt keeper_name)
+            ~tool_requirement:`Required
+            ~tools
+            candidate
+        with
+        | Error _ ->
+          (* Tool resolution failed — fall through as Capability_unknown. *)
+          None
+        | Ok (effective_tools, _) ->
+          let satisfying_tools =
+            effective_tools
+            |> List.map (fun (tool : Agent_sdk.Tool.t) -> tool.schema.name)
+          in
+          let snapshot =
+            Provider_capability.known
+              ~provider_name:provider_label
+              ~satisfying_tools
+              ~tool_choice_support:require_tool_choice_support
+          in
+          (match
+             Provider_capability.can_satisfy_required_action
+               ~require_tool_choice:require_tool_choice_support
+               snapshot
+               ~required_tools:required_tool_names
+           with
+           | Some false ->
+             let missing =
+               match
+                 Provider_capability.missing_required_tools
+                   snapshot ~required_tools:required_tool_names
+               with
+               | Some m -> m
+               | None -> required_tool_names
+             in
+             let skip_reason =
+               Cascade_candidate_skip_reason.Required_tool_unsupported { missing }
+             in
+             Log.Misc.info
+               "cascade %s: pre-dispatch blocked provider=%s reason=%s \
+                missing=[%s]"
+               cascade_name
+               provider_label
+               (Cascade_candidate_skip_reason.to_manifest_tag skip_reason)
+               (String.concat ", " missing);
+             Provider_capability.record_pre_dispatch_required_tool_filtered
+               ~provider:provider_label
+               ~missing_count:(List.length missing);
+             emit_runtime_manifest
+               ~status:"blocked"
+               ~decision:
+                 (`Assoc
+                    [ "blocker", `String "required_tool_unsupported"
+                    ; "provider", `String provider_label
+                    ; ( "missing_tools",
+                        `List (List.map (fun t -> `String t) missing) )
+                    ; "provider_attempt_started", `Bool false
+                    ])
+               Keeper_runtime_manifest.Pre_dispatch_blocked;
+             Some ()
+           | Some true | None -> None)
+      in
+      match pre_dispatch_blocked with
+      | Some () ->
+        try_cascade ~on_success ?resume_checkpoint ?per_provider_timeout_s
+          ?last_capacity_source ?last_capacity_backpressure rest last_err
+      | None ->
       let tier_admission_id = Cascade_runtime_candidate.tier_id candidate in
       let health_cooldown =
         Cascade_runtime_candidate.first_health_cooldown candidate

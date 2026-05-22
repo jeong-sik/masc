@@ -112,7 +112,7 @@ val health_path_diagnostics :
     default base path computed from env. *)
 
 val make_health_json :
-  ?listener:string -> Httpun.Request.t -> Yojson.Safe.t
+  ?listener:string -> ?section_timings_ref:(string * int) list ref -> Httpun.Request.t -> Yojson.Safe.t
 (** [make_health_json ?listener request] builds the full health diagnostics
     JSON body.  [listener] defaults to ["http/1.1"] and is overridden to
     ["h2"] by the H2 gateway.  This is the force-compute diagnostic builder

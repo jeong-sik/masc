@@ -862,7 +862,40 @@ let cdal_health_json () =
           ("error", `String (Printexc.to_string exn));
         ]
 
-let make_health_json ?(listener = "http/1.1") request =
+let full_health_component_placeholder ?error ?(component_timed_out = false) ~status
+    component =
+  let error_fields =
+    match error with
+    | Some error -> [("error", `String error)]
+    | None -> []
+  in
+  `Assoc
+    ([
+       ("component", `String component);
+       ("status", `String status);
+       ("component_timed_out", `Bool component_timed_out);
+     ]
+     @ error_fields)
+
+let compute_section ~name ?section_timings_ref f =
+  let started = Unix.gettimeofday () in
+  try
+    let result = f () in
+    let elapsed_ms = max 0 (int_of_float ((Unix.gettimeofday () -. started) *. 1000.)) in
+    (match section_timings_ref with
+     | Some ref -> ref := (name, elapsed_ms) :: !ref
+     | None -> ());
+    result
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+      let elapsed_ms = max 0 (int_of_float ((Unix.gettimeofday () -. started) *. 1000.)) in
+      (match section_timings_ref with
+       | Some ref -> ref := (name, elapsed_ms) :: !ref
+       | None -> ());
+      full_health_component_placeholder ~error:(Printexc.to_string exn) ~status:"error" name
+
+let make_health_json ?(listener = "http/1.1") ?section_timings_ref request =
   let uptime_secs = health_uptime_secs () in
   let build = Build_identity.current () in
   let keeper_config_parse_errors =
@@ -911,9 +944,23 @@ let make_health_json ?(listener = "http/1.1") request =
   let base_path = current_room_base_path_opt () in
   let phase_counts = keeper_phase_counts ?base_path () in
   let keeper_fibers = phase_counts.running in
-  let paused_keepers_json = paused_keepers_health_json () in
-  let reaction_ledger_json = keeper_reaction_ledger_health_json () in
-  let fd_accountant_json = fd_accountant_snapshot_json () in
+  let paused_keepers_json =
+    compute_section ~name:"paused_keepers" ?section_timings_ref paused_keepers_health_json
+  in
+  let reaction_ledger_json =
+    compute_section ~name:"keeper_reaction_ledger" ?section_timings_ref
+      keeper_reaction_ledger_health_json
+  in
+  let fd_accountant_json =
+    compute_section ~name:"fd_accountant" ?section_timings_ref fd_accountant_snapshot_json
+  in
+  let keeper_fleet_safety =
+    compute_section ~name:"keeper_fleet_safety" ?section_timings_ref
+      (fun () -> keeper_fleet_safety_health_json ~phase_counts ~paused_keepers_json ())
+  in
+  let cdal_health_json =
+    compute_section ~name:"cdal" ?section_timings_ref cdal_health_json
+  in
   Tool_args.ok_assoc [
     ("server", `String "masc-mcp");
     ("version", `String build.release_version);
@@ -944,9 +991,7 @@ let make_health_json ?(listener = "http/1.1") request =
     , Keeper_fd_pressure.runtime_state_json ~active_keepers:keeper_fibers
         ~starting_keepers:0 ~requested_keepers:24 () );
     ("fd_accountant", fd_accountant_json);
-    ( "keeper_fleet_safety"
-    , keeper_fleet_safety_health_json ~phase_counts
-        ~paused_keepers_json () );
+    ("keeper_fleet_safety", keeper_fleet_safety);
     ("keeper_reaction_ledger", reaction_ledger_json);
     (* Paused-keeper visibility: a keeper with [meta.paused = true] does not
        run turns, and auto-paused keepers may no longer have a live registry
@@ -955,7 +1000,7 @@ let make_health_json ?(listener = "http/1.1") request =
        so an operator can correlate with the cause encoded in their
        last_blocker_class. *)
     (key_paused_keepers, paused_keepers_json);
-    ("cdal", cdal_health_json ());
+    ("cdal", cdal_health_json);
     ("keeper_config_parse_error_count",
      `Int keeper_config_parse_error_count);
     ( "keeper_config_parse_errors",
@@ -1004,6 +1049,7 @@ type full_health_snapshot = {
   error : string option;
   stale_since_ts : float option;
   last_good_available : bool;
+  section_timings : (string * int) list;
 }
 
 let full_health_snapshot_mu = Stdlib.Mutex.create ()
@@ -1064,21 +1110,6 @@ let full_health_cached_field_names =
 let full_health_field_is_cached name =
   List.exists (String.equal name) full_health_cached_field_names
 
-let full_health_component_placeholder ?error ?(component_timed_out = false) ~status
-    component =
-  let error_fields =
-    match error with
-    | Some error -> [ ("error", `String error) ]
-    | None -> []
-  in
-  `Assoc
-    ([
-       ("component", `String component);
-       ("status", `String status);
-       ("component_timed_out", `Bool component_timed_out);
-     ]
-     @ error_fields)
-
 let full_health_placeholder_fields ?error ?(component_timed_out = false)
     ?(status = "warming") () =
   [
@@ -1137,8 +1168,11 @@ let duration_ms ~started_at ~finished_at =
 
 let compute_full_health_snapshot ?(listener = "http/1.1") request =
   let started_at = Unix.gettimeofday () in
+  let section_timings_ref = ref [] in
   try
-    let fields = cached_full_health_fields (make_health_json ~listener request) in
+    let fields =
+      cached_full_health_fields (make_health_json ~listener ~section_timings_ref request)
+    in
     let finished_at = Unix.gettimeofday () in
     {
       fields;
@@ -1147,6 +1181,7 @@ let compute_full_health_snapshot ?(listener = "http/1.1") request =
       error = None;
       stale_since_ts = None;
       last_good_available = true;
+      section_timings = List.rev !section_timings_ref;
     }
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -1160,6 +1195,7 @@ let compute_full_health_snapshot ?(listener = "http/1.1") request =
         error = Some error;
         stale_since_ts = Some finished_at;
         last_good_available = false;
+        section_timings = List.rev !section_timings_ref;
       }
 
 let store_full_health_snapshot snapshot =
@@ -1191,14 +1227,15 @@ let mark_full_health_snapshot_error exn =
          no prior snapshot (warm path on cold boot), fall back to the
          all-error placeholder so the field set stays well-typed. *)
       let preserved_fields, preserved_computed_at, preserved_duration_ms,
-          prior_stale_since, last_good_available =
+          prior_stale_since, last_good_available, preserved_section_timings =
         match !full_health_snapshot with
         | Some s when s.last_good_available ->
             (* A last-good payload exists — keep its component fields
                and preserve [computed_at] so [snapshot_age_ms]
                remains the age of the payload rather than the age of
                the failed refresh attempt. *)
-            (s.fields, s.computed_at, s.duration_ms, s.stale_since_ts, true)
+            (s.fields, s.computed_at, s.duration_ms, s.stale_since_ts, true,
+             s.section_timings)
         | Some s ->
             (* Previous snapshot was already an error placeholder —
                keep whatever [fields] it had (which may itself be
@@ -1210,7 +1247,8 @@ let mark_full_health_snapshot_error exn =
               s.computed_at,
               s.duration_ms,
               s.stale_since_ts,
-              s.last_good_available )
+              s.last_good_available,
+              s.section_timings )
         | None ->
             (* Cold boot — no prior snapshot.  Fall back to the
                original placeholder shape, but classify refresh
@@ -1223,7 +1261,8 @@ let mark_full_health_snapshot_error exn =
               now,
               0,
               None,
-              false )
+              false,
+              [] )
       in
       let stale_since_ts =
         match prior_stale_since with
@@ -1239,6 +1278,7 @@ let mark_full_health_snapshot_error exn =
             error = Some error;
             stale_since_ts;
             last_good_available;
+            section_timings = preserved_section_timings;
           };
       full_health_refresh_in_flight := false;
       full_health_refresh_started_at := None;
@@ -1345,6 +1385,16 @@ let full_health_snapshot_metadata ~now ~refresh_in_flight ~refresh_started_at
     | None -> `Null
   in
   let stale_age_ms = full_health_snapshot_stale_age_ms ~now snapshot in
+  let section_timings_json =
+    match snapshot with
+    | Some s ->
+        `List
+          (List.map
+             (fun (name, ms) ->
+               `Assoc [ ("name", `String name); ("ms", `Int ms) ])
+             s.section_timings)
+    | None -> `List []
+  in
   `Assoc
     [
       ("status", `String status);
@@ -1365,6 +1415,7 @@ let full_health_snapshot_metadata ~now ~refresh_in_flight ~refresh_started_at
       ("component_timed_out", `Bool component_timed_out);
       ("error", error);
       ("last_good_available", `Bool (Option.fold ~none:false ~some:(fun s -> s.last_good_available) snapshot));
+      ("section_timings", section_timings_json);
       (* [stale_since_ts] is the wall-clock of the FIRST failure of
          the current outage; null when the snapshot is fresh.
          Consumers should prefer this over [computed_at_unix] for

@@ -49,6 +49,16 @@ let provider_capacity_scope_to_http =
 let provider_error_to_http_error =
   Cascade_attempt_fsm_http_error.provider_error_to_http_error
 
+let capacity_backpressure_source_to_failure_scope = function
+  | Cascade_error_classify.Provider_capacity ->
+    Llm_provider.Http_client.Failure_scope_provider
+  | Cascade_error_classify.Client_capacity ->
+    Llm_provider.Http_client.Failure_scope_account
+  | Cascade_error_classify.Tier_admission ->
+    Llm_provider.Http_client.Failure_scope_model
+  | Cascade_error_classify.Cascade_slot ->
+    Llm_provider.Http_client.Failure_scope_unknown
+
 (** Convert an OAS sdk_error into a Cascade_fsm provider_outcome.
     API-level errors and model-capability-dependent agent errors are
     cascadeable (a different provider may succeed).  Structural agent
@@ -64,8 +74,19 @@ let sdk_error_to_cascade_outcome (err : Agent_sdk.Error.sdk_error)
   (* All other MASC-internal classifications (and unclassified errors) fall
      through to the structured [match err with] below to derive the cascade
      outcome from the raw [sdk_error] payload. *)
+  | Some (Cascade_error_classify.Capacity_backpressure { detail; retry_after_sec; source; _ }) ->
+    Some
+      (Cascade_fsm.Call_err
+         (Llm_provider.Http_client.ProviderFailure
+            { kind =
+                Llm_provider.Http_client.Capacity_exhausted
+                  { scope = capacity_backpressure_source_to_failure_scope source
+                  ; retry_after = retry_after_sec
+                  ; model = None
+                  }
+            ; message = detail
+            }))
   | Some (Cascade_error_classify.Cascade_exhausted _)
-  | Some (Cascade_error_classify.Capacity_backpressure _)
   | Some (Cascade_error_classify.No_tool_capable_provider _)
   | Some (Cascade_error_classify.Accept_rejected _)
   | Some (Cascade_error_classify.Admission_queue_timeout _)

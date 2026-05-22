@@ -8,32 +8,30 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0088", "0126", "0142", "0148", "0154"]
-implementation_prs: [16837, 16887, 16889]
+implementation_prs: [16837, 16887, 16889, 17485]
 ---
 
-## Progress audit (2026-05-21)
+## Progress audit (2026-05-22)
 
-Status promoted Draft → Active. PR-1/2/3 of the five-PR phase plan
-landed within the §4 cadence; PR-4 and PR-5 remain.
+Status remains Active. PR-1/2/3/4 of the five-PR phase plan have
+landed; only PR-5 (silent-failure ratchet regenerate) remains.
 
 | Phase | PR | Scope | Merged |
 |-------|-----|------|--------|
 | PR-1 | #16837 | `lib/repo_manager/field_resolution.{ml,mli}` typed extractor + variant tests | 2026-05-19 |
 | PR-2 | #16887 | `repo_store.ml:48-67` 4-site migration | 2026-05-19 |
 | PR-3 | #16889 | `credential_store.ml:75-94` 4-site migration | 2026-05-19 |
-| **PR-4** | (pending) | `credential_materializer.ml` `try … with _` → typed exception matching | not landed |
+| PR-4 | #17485 | `credential_materializer.ml` `try … with _` → typed exception matching | 2026-05-20 |
 | **PR-5** | (pending) | silent-failure ratchet regenerate (`error_result_silence` ≥8 drop) | not landed |
 
-### Pending work — PR-4
+### Completed — PR-4 (#17485, 2026-05-20)
 
-`lib/repo_manager/credential_materializer.ml` still contains five
-bare `try` blocks (lines 68 / 83 / 170 / 213 / 292) that swallow
-exceptions with `_ -> default`. The RFC §4 PR-4 prescription is to
-convert each to a concrete-exception match (`Unix.Unix_error _ |
-Otoml.Parse_error _`) while ensuring `Eio.Cancel.Cancelled`
-propagates unchanged. Until PR-4 lands, the typed variant introduced
-by PR-1 is not load-bearing on the materializer surface — the
-swallow-on-error path is still the dominant failure handling.
+All five `try` blocks in `lib/repo_manager/credential_materializer.ml`
+(lines 68 / 83 / 170 / 213 / 292) now match typed exceptions only:
+each catches `Sys_error _ | Unix.Unix_error _` (and re-raises the
+`Eio.Cancel.Cancelled` boundary upstream).  The typed variant
+introduced by PR-1 is therefore load-bearing on the materializer
+surface — the swallow-on-error path is removed.
 
 ### Pending work — PR-5
 

@@ -157,33 +157,3 @@ val close_all_cached_writers : unit -> unit
 (** Drop and close every cached writer. Test-only — production
     relies on process-lifetime persistence and [at_exit] drain. *)
 val reset_fd_cache_for_testing : unit -> unit
-
-(** {1 Storage Backend Abstraction}
-
-    Types for future migration to composite backends (local + remote).
-    Existing functions continue to operate on the local filesystem.
-    New code can use [backend] to select storage targets.
-
-    @since 2.95.0 — Issue #1442 *)
-
-type backend_kind =
-  | Local (** Local filesystem (Eio or Unix fallback) *)
-  | Remote of string (** Remote endpoint URL *)
-
-type backend =
-  { kind : backend_kind
-  ; base_path : string (** Root directory for this backend *)
-  }
-
-(** Create a backend descriptor.
-    Defaults to [Local] when [kind] is omitted. *)
-val create_backend : ?kind:backend_kind -> base_path:string -> unit -> backend
-
-(** Return the base_path of a backend. *)
-val backend_base_path : backend -> string
-
-(** Serialize backend_kind for logging/diagnostics. *)
-val backend_kind_to_string : backend_kind -> string
-
-(** Convenience: create a [Local] backend with the given base_path. *)
-val default_backend : base_path:string -> backend

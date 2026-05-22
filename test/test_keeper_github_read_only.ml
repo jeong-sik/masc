@@ -3,7 +3,7 @@ module Types = Masc_domain
 (** Tests for [Keeper_tool_registry.is_read_only_with_input].
 
     Validates input-aware read-only classification for keeper_shell op=gh:
-    1. Read-only gh subcommands (pr list, issue view, etc.) via cmd
+    1. Read-only gh subcommands (pr list, issue view, etc.) via cmd/argv
     2. Mutating gh subcommands are not classified as read-only
     3. gh api GET (default) is read-only
     4. gh api with -X POST/PUT/DELETE is mutating
@@ -32,14 +32,18 @@ let mk_bash_exec executable argv =
     ; "argv", `List (List.map (fun arg -> `String arg) argv)
     ]
 
-(* Legacy helpers for backward compat with older tests (not exercised;
-   keeper_shell op=gh only accepts cmd, not args). *)
 let mk_args args =
-  `Assoc [ ("op", `String "gh");
-           ("cmd", `String (String.concat " " args)) ]
+  `Assoc
+    [ ("op", `String "gh")
+    ; ("argv", `List (List.map (fun arg -> `String arg) args))
+    ]
 
-let mk_cmd_and_args cmd _args =
-  `Assoc [ ("op", `String "gh"); ("cmd", `String cmd) ]
+let mk_cmd_and_args cmd args =
+  `Assoc
+    [ ("op", `String "gh")
+    ; ("cmd", `String cmd)
+    ; ("argv", `List (List.map (fun arg -> `String arg) args))
+    ]
 
 let mk_action action =
   `Assoc [ ("action", `String action) ]
@@ -79,11 +83,16 @@ let run_argv argv =
   | [] -> invalid_arg "run_argv: empty argv"
   | prog :: args ->
     let pid = Unix.create_process prog (Array.of_list argv) Unix.stdin Unix.stdout Unix.stderr in
-    match Unix.waitpid [] pid with
+    let rec wait () =
+      match Unix.waitpid [] pid with
+      | result -> result
+      | exception Unix.Unix_error (Unix.EINTR, _, _) -> wait ()
+    in
+    match wait () with
     | _, Unix.WEXITED 0 -> ()
     | _ ->
-    Alcotest.fail
-      (Printf.sprintf "command failed: %s" (String.concat " " (prog :: args)))
+      Alcotest.fail
+        (Printf.sprintf "command failed: %s" (String.concat " " (prog :: args)))
 
 let with_env key value f =
   let prior = Sys.getenv_opt key in
@@ -289,6 +298,17 @@ let test_parse_simple_gh_command_rejects_pipeline () =
   | Ok _ -> Alcotest.fail "expected pipeline rejection"
   | Error _ -> Alcotest.fail "expected pipeline rejection tag"
 
+let test_typed_gh_argv_preserves_literal_args () =
+  match
+    Keeper_gh_shared.gh_simple_command_of_argv
+      [ "gh"; "pr"; "comment"; "123"; "--body"; "looks good to me" ]
+  with
+  | Ok cmd ->
+    Alcotest.(check (list string)) "typed argv preserved"
+      [ "pr"; "comment"; "123"; "--body"; "looks good to me" ]
+      (Keeper_gh_shared.gh_simple_command_argv cmd)
+  | Error _ -> Alcotest.fail "expected typed gh argv parse"
+
 let test_repo_flag_injection_prefixes_args () =
   match Keeper_gh_shared.parse_simple_gh_command "--repo old/repo pr view 123" with
   | Ok cmd ->
@@ -302,12 +322,13 @@ let test_repo_flag_injection_prefixes_args () =
   | Error _ -> Alcotest.fail "expected simple gh command parse"
 
 (* ================================================================ *)
-(* Read-only subcommands via args                                    *)
+(* Read-only subcommands via argv                                    *)
 (* ================================================================ *)
 
 let test_read_only_via_args () =
   let read_only_args =
     [ ["pr"; "list"];
+      ["gh"; "pr"; "list"];
       ["pr"; "view"; "123"];
       ["pr"; "diff"; "123"];
       ["issue"; "list"];
@@ -317,19 +338,20 @@ let test_read_only_via_args () =
   in
   List.iter (fun args ->
     Alcotest.(check bool)
-      (Printf.sprintf "read-only args: [%s]" (String.concat "; " args))
+      (Printf.sprintf "read-only argv: [%s]" (String.concat "; " args))
       true
       (is_ro ~tool_name:"keeper_shell" ~input:(mk_args args))
   ) read_only_args
 
-let test_cmd_takes_precedence_over_args () =
-  (* When cmd is present and non-empty, args are ignored *)
-  Alcotest.(check bool) "cmd=mutating overrides read-only args"
+let test_cmd_and_argv_is_not_read_only () =
+  (* Execution rejects ambiguous cmd+argv, so the approval classifier must not
+     auto-approve it as read-only. *)
+  Alcotest.(check bool) "cmd+argv read-only/mutating ambiguity is not read-only"
     false
     (is_ro ~tool_name:"keeper_shell"
        ~input:(mk_cmd_and_args "pr merge 123" ["pr"; "list"]));
-  Alcotest.(check bool) "cmd=read-only overrides mutating args"
-    true
+  Alcotest.(check bool) "cmd+argv mutating/read-only ambiguity is not read-only"
+    false
     (is_ro ~tool_name:"keeper_shell"
        ~input:(mk_cmd_and_args "pr list" ["pr"; "merge"; "123"]))
 
@@ -691,7 +713,13 @@ let test_keeper_shell_gh_without_current_task_uses_sandbox_context () =
           [
             ("op", `String "gh");
             ("cwd", `String "");
-            ("cmd", `String "pr list --repo example/project");
+            ( "argv"
+            , `List
+                [ `String "pr"
+                ; `String "list"
+                ; `String "--repo"
+                ; `String "example/project"
+                ] );
           ])
   in
   let json = Yojson.Safe.from_string raw in
@@ -970,15 +998,17 @@ let () =
             test_parse_simple_gh_command_preserves_quoted_args;
           Alcotest.test_case "simple gh parser rejects pipeline" `Quick
             test_parse_simple_gh_command_rejects_pipeline;
+          Alcotest.test_case "typed gh argv preserves literal args" `Quick
+            test_typed_gh_argv_preserves_literal_args;
           Alcotest.test_case "repo flag injection prefixes args" `Quick
             test_repo_flag_injection_prefixes_args;
         ] );
-      ( "read_only_args",
+      ( "read_only_argv",
         [
-          Alcotest.test_case "read-only via args field" `Quick
+          Alcotest.test_case "read-only via argv field" `Quick
             test_read_only_via_args;
-          Alcotest.test_case "cmd takes precedence over args" `Quick
-            test_cmd_takes_precedence_over_args;
+          Alcotest.test_case "cmd and argv is not read-only" `Quick
+            test_cmd_and_argv_is_not_read_only;
         ] );
       ( "mutating_cmds",
         [

@@ -13,8 +13,9 @@ let shell_tools : Masc_domain.tool_schema list =
          explicit allowed directory or cloned repo. find REQUIRES pattern param (e.g. \
          pattern=\"*.ml\"). No generic bash execution: use Bash for command \
          execution. git_clone: clone a repo into your sandbox repos/ lane (url \
-         required). gh op: run a gh CLI subcommand with cmd=\"<subcommand>\" (e.g. \
-         cmd=\"pr list --state open\"). Requires an active claimed task/current_task_id \
+         required). gh op: run a gh CLI subcommand with typed argv (e.g. \
+         argv=[\"pr\",\"list\",\"--state\",\"open\"]; legacy cmd is still accepted). \
+         Requires an active claimed task/current_task_id \
          because repo context is derived from the task worktree. Always run `gh pr list` \
          first before referencing a PR number to avoid hallucinations. Dangerous \
          commands (repo delete, auth logout, secret set/delete) are blocked. If path not \
@@ -42,10 +43,21 @@ let shell_tools : Masc_domain.tool_schema list =
                       [ "type", `String "string"
                       ; ( "description"
                         , `String
-                            "gh subcommand for op=gh, e.g. 'pr list --state open'. \
-                             Requires an active claimed task/current_task_id. The active \
-                             task worktree determines the repo; any --repo flag is \
-                             normalized to that repo." )
+                            "Legacy gh subcommand string for op=gh, e.g. 'pr list \
+                             --state open'. Prefer argv for typed calls. Requires an \
+                             active claimed task/current_task_id. The active task \
+                             worktree determines the repo; any --repo flag is normalized \
+                             to that repo." )
+                      ] )
+                ; ( "argv"
+                  , `Assoc
+                      [ "type", `String "array"
+                      ; "items", `Assoc [ "type", `String "string" ]
+                      ; ( "description"
+                        , `String
+                            "Typed gh argv for op=gh without the leading gh binary, e.g. \
+                             [\"pr\",\"list\",\"--state\",\"open\"]. A leading \"gh\" is \
+                             accepted and stripped. Mutually exclusive with cmd." )
                       ] )
                 ; ( "path"
                   , `Assoc

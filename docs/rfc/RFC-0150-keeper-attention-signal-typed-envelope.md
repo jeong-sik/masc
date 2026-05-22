@@ -27,7 +27,7 @@ PR #16908 작업 중 다음 모순이 *모두 dashboard 측에서* string-pair p
 |--------------------|---------------------|----------------|
 | `runtime_blocked` | `inspect_runtime_blocker` | "런타임 근거 확인 필요" / "런타임 근거 확인" |
 | `paused_blocked` | `inspect_blocker_before_resume` | "일시정지 원인 확인 필요" / "원인 확인 후 재개" |
-| `timeout_budget_exhausted` | `inspect_timeout_budget` | "타임아웃 예산 소진" / "타임아웃 예산 확인" |
+| `provider_timeout` | `inspect_turn_timeout` | "프로바이더 타임아웃" / "타임아웃 근거 확인" |
 | `runtime_trust_snapshot_unavailable` | `inspect_keeper_runtime_trust` | "런타임 신뢰 스냅샷 없음" / "런타임 신뢰 스냅샷 확인" |
 
 PR #16908 PR-1 ckpt-1(commit `be17dd75db`)이 이 4쌍을 dashboard `ATTENTION_PAIR_DUPLICATES` set으로 dedupe했다. backend가 두 field를 *paired emit*하는 것 자체가 본 RFC가 닫고자 하는 anti-pattern.
@@ -51,7 +51,7 @@ PR #16908 PR-1 ckpt-1(commit `be17dd75db`)이 이 4쌍을 dashboard `ATTENTION_P
 type attention_signal =
   | Runtime_blocked of { blocker_class: string; runtime_proof_url: string option }
   | Paused_blocked of { since: float }
-  | Timeout_budget_exhausted of { elapsed_sec: float; budget_sec: float }
+  | Provider_timeout of { elapsed_sec: float; budget_sec: float }
   | Social_model_fallback of { fallback_provider: string }
   | Fd_pressure of { headroom_pct: float }
   | Runtime_trust_snapshot_unavailable
@@ -69,7 +69,7 @@ type attention_signal =
 ```json
 {
   "attention_signal": {
-    "kind": "timeout_budget_exhausted",
+    "kind": "provider_timeout",
     "elapsed_sec": 600.0,
     "budget_sec": 600.0
   }

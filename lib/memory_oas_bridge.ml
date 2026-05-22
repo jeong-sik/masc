@@ -420,8 +420,6 @@ let error_kind_of_string value = Error_kind value
 let error_kind_to_string (Error_kind value) = value
 
 let canonical_error_kind_label = function
-  | "oas_timeout_budget" -> "provider_timeout"
-  | "oas_timeout_budget_loop" -> "provider_timeout_loop"
   | value -> value
 
 let timeout_error_kinds =

@@ -410,6 +410,19 @@ let translate_input ~public input =
    because the per-tool helpers above are not yet in scope at table creation
    time. This [register] call patches in the real values. *)
 
+let rec register_structured_routes () =
+  Hashtbl.replace routing_table "Bash"
+    { internal_name = "keeper_bash"
+    ; translate = translate_bash_input
+    ; public_schema = Some (bash_public_schema)
+    };
+  Hashtbl.replace routing_table "Grep"
+    { internal_name = "keeper_shell"
+    ; translate = translate_bash_input
+    ; public_schema = Some (bash_public_schema)
+    }
+;;
+
 let () =
   List.iter
     (fun (pub, schema, translator) ->

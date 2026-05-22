@@ -273,44 +273,6 @@ let make_file_write ?workdir ?on_exec () =
    validation callsite can record the attribution without forward
    referencing. *)
 
-let block_reason_tag = function
-  | Empty_command -> "empty_command"
-  | Chain_or_redirect -> "chain_or_redirect"
-  | Injection -> "injection"
-  | Process_substitution -> "process_substitution"
-  | Unsafe_redirect -> "unsafe_redirect"
-  | Pipes_not_allowed -> "pipes_not_allowed"
-  | Direct_dune_invocation -> "direct_dune_invocation"
-  | Command_not_allowed _ -> "command_not_allowed"
-;;
-
-let attribution_of_validation ~cmd (result : (unit, block_reason) result) : Attribution.t =
-  match result with
-  | Ok () ->
-    let evidence : Yojson.Safe.t = `Assoc [ "cmd", `String cmd ] in
-    Attribution.passed ~origin:Det ~gate:"worker_dev_tools" ~evidence
-  | Error br ->
-    let command_name =
-      match br with
-      | Command_not_allowed name -> Some name
-      | Direct_dune_invocation -> Some "dune"
-      | _ -> None
-    in
-    let evidence : Yojson.Safe.t =
-      `Assoc
-        ([ "cmd", `String cmd; "block_reason", `String (block_reason_tag br) ]
-         @
-         match command_name with
-         | Some n -> [ "command_name", `String n ]
-         | None -> [])
-    in
-    Attribution.policy_failed
-      ~origin:Det
-      ~gate:"worker_dev_tools"
-      ~evidence
-      ~reason:(block_reason_to_string br)
-;;
-
 let shell_ir_with_default_cwd cwd ir =
   match cwd with
   | None -> ir
@@ -431,7 +393,7 @@ let make_shell_exec_with_allowlist
            command_context_with_allowlist ~allowed_commands command
          in
          let validation = Result.map (fun _ -> ()) command_context in
-         Dashboard_attribution.record (attribution_of_validation ~cmd:command validation);
+         Dashboard_attribution.record (Exec_policy.attribution_of_validation ~cmd:command validation);
          (match command_context with
           | Error reason ->
             (* #13078: emit [command_blocked] telemetry so observers

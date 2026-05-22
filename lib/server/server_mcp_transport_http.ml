@@ -513,8 +513,8 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
                                       ("Internal error: "
                                      ^ Printexc.to_string exn))))))))
 
-let handle_get_mcp ~deps ?legacy_messages_endpoint ?(profile = Full)
-    ?(sse_kind = Sse.Coordinator) request reqd =
+let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Coordinator)
+    request reqd =
   if not (deps.is_ready ()) then
     respond_not_ready ~deps request reqd
   else
@@ -532,11 +532,6 @@ let handle_get_mcp ~deps ?legacy_messages_endpoint ?(profile = Full)
              deps.verify_mcp_auth ~base_path request)
     | Operator_remote ->
         deps.verify_operator_mcp_auth ~base_path request
-  in
-  let legacy_headers =
-    match legacy_messages_endpoint with
-    | Some _ -> legacy_transport_deprecation_headers
-    | None -> []
   in
   let last_event_id = get_last_event_id request in
   match validate_mcp_session_profile ~profile session_id with
@@ -567,7 +562,7 @@ let handle_get_mcp ~deps ?legacy_messages_endpoint ?(profile = Full)
       (match auth_result with
       | Error msg ->
           respond_mcp_error ~code:Mcp_error_code.Auth_error ~deps request reqd ~session_id
-            ~protocol_version ~extra_headers:legacy_headers msg
+            ~protocol_version msg
       | Ok () ->
       remember_mcp_profile session_id profile;
       (match check_sse_connect_guard session_id with
@@ -580,8 +575,7 @@ let handle_get_mcp ~deps ?legacy_messages_endpoint ?(profile = Full)
             Transport_metrics.inc_sse_reconnect ();
           let headers =
             Httpun.Headers.of_list
-              (legacy_headers
-              @ sse_stream_headers ~deps session_id protocol_version origin)
+              (sse_stream_headers ~deps session_id protocol_version origin)
           in
           let response = Httpun.Response.create ~headers `OK in
           let writer = Httpun.Reqd.respond_with_streaming reqd response in
@@ -613,15 +607,6 @@ let handle_get_mcp ~deps ?legacy_messages_endpoint ?(profile = Full)
           register_sse_conn ~session_id ~info;
           if not (send_raw info (sse_prime_event ())) then
             Log.Server.debug "SSE prime send failed for session %s" info.session_id;
-          (match legacy_messages_endpoint with
-          | None -> ()
-          | Some f ->
-              let endpoint_url = f session_id in
-              if not (send_raw info
-                        (Sse.format_event ~event_type:"endpoint" endpoint_url))
-              then
-                Log.Server.debug "SSE endpoint send failed for session %s"
-                  info.session_id);
           (match last_event_id with
           | Some last_id ->
               let missed = Sse.get_events_after_for_kind sse_kind last_id in
@@ -705,71 +690,6 @@ let handle_get_operator_mcp ~deps request reqd =
         msg
   | Ok () ->
       handle_get_mcp ~deps ~profile:Operator_remote request reqd
-
-let handle_post_messages ~deps request reqd =
-  if not (deps.is_ready ()) then
-    respond_not_ready ~deps request reqd
-  else
-  let origin = deps.get_origin request in
-  let legacy_headers = legacy_transport_deprecation_headers in
-  match get_session_id_any request with
-  | None ->
-      let body = "session_id required" in
-      let headers =
-        Httpun.Headers.of_list
-          (("content-length", string_of_int (String.length body))
-          :: (legacy_headers @ deps.cors_headers origin))
-      in
-      let response = Httpun.Response.create ~headers `Bad_request in
-      safe_respond_with_string reqd response body
-  | Some session_id when not (Mcp_session.is_valid session_id) ->
-      let body = "invalid session_id" in
-      let headers =
-        Httpun.Headers.of_list
-          (("content-length", string_of_int (String.length body))
-          :: (legacy_headers @ deps.cors_headers origin))
-      in
-      let response = Httpun.Response.create ~headers `Bad_request in
-      safe_respond_with_string reqd response body
-  | Some session_id ->
-      let protocol_version = get_protocol_version_for_session ~session_id request in
-      let auth_token = deps.auth_token_from_request request in
-      let base_path = deps.get_base_path () in
-      (match deps.verify_mcp_auth ~base_path request with
-      | Error msg ->
-          respond_mcp_error ~code:Mcp_error_code.Auth_error ~deps request reqd ~session_id
-            ~protocol_version ~extra_headers:legacy_headers msg
-      | Ok () ->
-          Http.Request.read_body_async reqd (fun body_str ->
-              match request_runtime_result deps with
-              | Error msg ->
-                  respond_mcp_error ~code:Mcp_error_code.Internal_error ~extra_headers:legacy_headers
-                    ~deps request reqd ~session_id ~protocol_version msg
-              | Ok runtime ->
-                  let sw = runtime.sw in
-                  Eio.Fiber.fork ~sw (fun () ->
-                  let body_with_agent =
-                    body_with_canonical_http_actor ~base_path ~auth_token
-                      request body_str
-                  in
-                  let internal_keeper_runtime =
-                    Server_auth.is_verified_internal_keeper_request
-                      ~base_path request
-                  in
-                  let response_json =
-                    runtime.handle_request ~mcp_session_id:session_id
-                      ?auth_token ~internal_keeper_runtime body_with_agent
-                  in
-                  (match response_json with
-                  | `Null -> ()
-                  | json -> Sse.send_to session_id json);
-                  let headers =
-                    Httpun.Headers.of_list
-                      (("content-length", "0")
-                      :: (legacy_headers @ mcp_headers session_id protocol_version))
-                  in
-                  let response = Httpun.Response.create ~headers `Accepted in
-                  safe_respond_with_string reqd response "")))
 
 let handle_delete_mcp ~deps ?(profile = Full) request reqd =
   if not (deps.is_ready ()) then

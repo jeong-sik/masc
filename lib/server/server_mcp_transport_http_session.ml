@@ -167,23 +167,6 @@ let get_session_id_any (request : Httpun.Request.t) =
       | Some _ as id -> id
       | None -> get_cookie_value request "mcp-session-id")
 
-let legacy_messages_endpoint_url (request : Httpun.Request.t) session_id =
-  match Httpun.Headers.get request.headers "host" with
-  | Some host ->
-      let proto =
-        match Httpun.Headers.get request.headers "x-forwarded-proto" with
-        | Some p -> p
-        | None ->
-            (* Length-mismatched [String.sub host 0 17 = "masc.crying.pict"]
-               (17-char substring vs 16-char literal) was always false, so
-               tunnel hosts silently advertised http://. starts_with also
-               drops a per-request allocation. *)
-            if String.starts_with ~prefix:"masc.crying.pict" host then "https"
-            else "http"
-      in
-      Printf.sprintf "%s://%s/messages?session_id=%s" proto host session_id
-  | None -> Printf.sprintf "/messages?session_id=%s" session_id
-
 let get_protocol_version (request : Httpun.Request.t) =
   match get_header_any_case request.headers "mcp-protocol-version" with
   | Some v -> v

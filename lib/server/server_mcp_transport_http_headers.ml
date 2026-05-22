@@ -69,14 +69,6 @@ let should_use_sse_for_body (request : Httpun.Request.t) body_str accept_mode =
       && Http_negotiation.accepts_sse_header
            (Httpun.Headers.get request.headers "accept")
 
-let legacy_transport_deprecation_headers =
-  [
-    ("deprecation", "true");
-    ( "warning",
-      "299 - \"Legacy SSE endpoints (/sse,/messages) are deprecated; use /mcp\"" );
-    ("link", "</mcp>; rel=\"successor-version\"");
-  ]
-
 let force_json_response =
   env_flag "MASC_FORCE_JSON_RESPONSE" || env_flag "MCP_FORCE_JSON_RESPONSE"
 

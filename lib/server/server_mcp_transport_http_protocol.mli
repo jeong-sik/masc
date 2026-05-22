@@ -125,10 +125,6 @@ val should_use_sse_for_body :
 (** Re-export of
     {!Server_mcp_transport_http_headers.should_use_sse_for_body}. *)
 
-val legacy_transport_deprecation_headers : (string * string) list
-(** Re-export of
-    {!Server_mcp_transport_http_headers.legacy_transport_deprecation_headers}. *)
-
 val force_json_response : bool
 (** Re-export of
     {!Server_mcp_transport_http_headers.force_json_response}.

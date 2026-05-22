@@ -261,4 +261,3 @@ let add_routes ~port ~host router =
   |> Http.Router.add ~path:"/graphql" ~methods:[`GET; `POST]
        ~handler:(fun request reqd ->
          with_read_auth (fun _state req reqd -> handle_graphql req reqd) request reqd)
-  |> Http.Router.post "/messages" handle_post_messages

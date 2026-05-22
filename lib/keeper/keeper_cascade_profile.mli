@@ -116,13 +116,34 @@ val is_system_only_cascade : string -> bool
 val canonicalize_with_catalog : catalog:string list -> string -> string
 (** Resolves dynamic profiles against an explicit live catalog. *)
 
+val resolve_live_with_catalog_result :
+  catalog:string list -> string -> (runtime_name, [ `Unresolved of string ]) result
+(** Result-returning variant of {!resolve_live_with_catalog}.  Callers
+    that want to distinguish unresolved input from a successful lookup
+    should use this entry point; the legacy [resolve_live_with_catalog]
+    silently falls back to the [Keeper_turn] default and emits a WARN +
+    counter (RFC-0149 §3.3 workaround #16787, sunset target).
+
+    Returns [Ok (Runtime_name normalized)] when [raw] either matches the
+    catalog directly or normalizes via a logical route alias that lands
+    on a catalog member; otherwise [Error (`Unresolved raw)] carrying the
+    original (un-trimmed) input so the operator-visible diagnostic can
+    point to exactly what was provided.
+
+    @since RFC-0149 Phase 1 *)
+
 val resolve_live_with_catalog : catalog:string list -> string -> string
 (** Resolves a keeper-declared cascade against an explicit live catalog.
 
     Names already present in the catalog pass through; logical route
     aliases collapse via [routes]; otherwise the keeper-turn fallback is used.
     Callers that accept qualified declarative names must pass a lookup catalog
-    containing those qualified names, not only display/public names. *)
+    containing those qualified names, not only display/public names.
+
+    {b Note:} For new callers, prefer {!resolve_live_with_catalog_result}
+    which returns a typed [Error (`Unresolved _)] instead of silently
+    falling back.  This entry point retains the silent-fallback behaviour
+    for the RFC-0149 §3.3 sunset window. *)
 
 val resolve_live : ?config_path:string -> string -> string
 (** Like {!resolve_live_with_catalog}, but reads the active catalog from the

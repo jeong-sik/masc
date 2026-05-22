@@ -192,7 +192,7 @@ let failure_reason_policy_decision
   | Some (Keeper_registry.Provider_timeout_loop { count }) ->
     Some
       (Keeper_failure_policy.decide
-         (Keeper_failure_policy.Oas_timeout_budget
+         (Keeper_failure_policy.Provider_timeout
             { phase = None
             ; strikes = Some count
             ; liveness = Keeper_failure_policy.Watchdog_stale

@@ -227,7 +227,7 @@ let oas_timeout_budget_policy_decision
   | Some (Keeper_turn_driver.Oas_timeout_budget { phase; _ }) ->
     Some
       (Keeper_failure_policy.decide
-         (Keeper_failure_policy.Oas_timeout_budget
+         (Keeper_failure_policy.Provider_timeout
             { phase = timeout_phase_of_oas_timeout_budget_phase phase
             ; strikes = Some strikes
             ; liveness = Keeper_failure_policy.Recent_heartbeat

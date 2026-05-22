@@ -144,10 +144,6 @@ type failure =
   | Workflow_rejection of { rule_id : string option }
   | Provider_timeout of
       { phase : timeout_phase option
-      ; liveness : liveness_evidence
-      }
-  | Oas_timeout_budget of
-      { phase : timeout_phase option
       ; strikes : int option
       ; liveness : liveness_evidence
       }
@@ -284,7 +280,27 @@ let decide = function
       ~operator_action:Fix_invocation
       ~keeper_death_allowed:false
       ~reason
-  | Provider_timeout { phase = Some (Stream_idle state); liveness = _ } ->
+  | Provider_timeout { phase; strikes = (Some _ as strikes); liveness } ->
+    let lifecycle_effect, circuit_effect, operator_action, reason =
+      provider_timeout_policy_effect ~phase ~strikes ~liveness
+    in
+    let reason =
+      match phase with
+      | Some phase -> reason ^ ":" ^ timeout_phase_to_label phase
+      | None -> reason
+    in
+    let failure_scope =
+      if liveness_is_lost liveness then Keeper_liveness_scope else Provider_scope
+    in
+    make_decision
+      ~failure_scope
+      ~lifecycle_effect
+      ~circuit_effect
+      ~operator_action
+      ~keeper_death_allowed:false
+      ~reason
+  | Provider_timeout
+      { phase = Some (Stream_idle state); strikes = None; liveness = _ } ->
     let has_activity = stream_idle_state_is_activity state in
     make_decision
       ~failure_scope:Provider_scope
@@ -296,7 +312,8 @@ let decide = function
         (if has_activity
          then "provider_stream_idle_active:" ^ stream_idle_state_to_label state
          else "provider_stream_idle:" ^ stream_idle_state_to_label state)
-  | Provider_timeout { phase = Some Capacity_backpressure; liveness = _ } ->
+  | Provider_timeout
+      { phase = Some Capacity_backpressure; strikes = None; liveness = _ } ->
     make_decision
       ~failure_scope:Provider_scope
       ~lifecycle_effect:Soft_fail_turn
@@ -304,7 +321,7 @@ let decide = function
       ~operator_action:Reroute_or_tune_provider
       ~keeper_death_allowed:false
       ~reason:"provider_timeout:capacity_backpressure"
-  | Provider_timeout { phase; liveness = _ } ->
+  | Provider_timeout { phase; strikes = None; liveness = _ } ->
     let reason =
       match phase with
       | Some phase -> "provider_timeout:" ^ timeout_phase_to_label phase
@@ -315,22 +332,6 @@ let decide = function
       ~lifecycle_effect:Soft_fail_turn
       ~circuit_effect:Provider_cooldown
       ~operator_action:Inspect_provider_stream
-      ~keeper_death_allowed:false
-      ~reason
-  | Oas_timeout_budget { phase; strikes; liveness } ->
-    let lifecycle_effect, circuit_effect, operator_action, reason =
-      provider_timeout_policy_effect ~phase ~strikes ~liveness
-    in
-    let reason =
-      match phase with
-      | Some phase -> reason ^ ":" ^ timeout_phase_to_label phase
-      | None -> reason
-    in
-    make_decision
-      ~failure_scope:Turn_scope
-      ~lifecycle_effect
-      ~circuit_effect
-      ~operator_action
       ~keeper_death_allowed:false
       ~reason
   | Transient_provider_failure ->

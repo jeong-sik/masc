@@ -51,13 +51,6 @@ type failure =
   | Workflow_rejection of { rule_id : string option }
   | Provider_timeout of
       { phase : timeout_phase option
-      ; liveness : liveness_evidence
-      }
-  (** Legacy OAS timeout-budget ingress. Decisions normalize this to
-      provider-timeout or keeper-liveness ownership; callers must not
-      project it back as a distinct operator-facing root cause. *)
-  | Oas_timeout_budget of
-      { phase : timeout_phase option
       ; strikes : int option
       ; liveness : liveness_evidence
       }

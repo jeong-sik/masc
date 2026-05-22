@@ -87,6 +87,7 @@ let test_provider_capacity_backpressure_reroutes_provider () =
       (Policy.Provider_timeout
          {
            phase = Some Policy.Capacity_backpressure;
+           strikes = None;
            liveness = Policy.Recent_heartbeat;
          })
   in
@@ -97,44 +98,44 @@ let test_provider_capacity_backpressure_reroutes_provider () =
   check string "reason" "provider_timeout:capacity_backpressure" decision.reason
 ;;
 
-let test_legacy_timeout_budget_capacity_backpressure_reroutes_provider () =
+let test_provider_timeout_strike_capacity_backpressure_reroutes_provider () =
   let decision =
     Policy.decide
-      (Policy.Oas_timeout_budget
+      (Policy.Provider_timeout
          {
            phase = Some Policy.Capacity_backpressure;
            strikes = Some 1;
            liveness = Policy.Recent_heartbeat;
          })
   in
-  check_scope "scope" "turn" decision.failure_scope;
+  check_scope "scope" "provider" decision.failure_scope;
   check_lifecycle "lifecycle" "soft_fail_turn" decision.lifecycle_effect;
   check_circuit "circuit" "provider_cooldown" decision.circuit_effect;
   check_action "action" "reroute_or_tune_provider" decision.operator_action;
   check string "reason" "provider_timeout:capacity_backpressure" decision.reason
 ;;
 
-let test_oas_budget_loop_with_live_keeper_pauses_work_not_keeper () =
+let test_provider_timeout_loop_with_live_keeper_pauses_work_not_keeper () =
   let decision =
     Policy.decide
-      (Policy.Oas_timeout_budget
+      (Policy.Provider_timeout
          {
            phase = Some Policy.Caller_budget;
            strikes = Some 6;
            liveness = Policy.Recent_heartbeat;
          })
   in
-  check_scope "scope" "turn" decision.failure_scope;
+  check_scope "scope" "provider" decision.failure_scope;
   check_lifecycle "lifecycle" "pause_current_work" decision.lifecycle_effect;
   check_circuit "circuit" "provider_cooldown" decision.circuit_effect;
   check_action "action" "reroute_or_tune_provider" decision.operator_action;
   check bool "keeper death not allowed" false (Policy.should_kill_keeper decision)
 ;;
 
-let test_oas_budget_loop_with_lost_liveness_pauses_keeper_without_death () =
+let test_provider_timeout_loop_with_lost_liveness_pauses_keeper_without_death () =
   let decision =
     Policy.decide
-      (Policy.Oas_timeout_budget
+      (Policy.Provider_timeout
          {
            phase = Some (Policy.Stream_idle Policy.Awaiting_first_event);
            strikes = Some 3;
@@ -205,11 +206,11 @@ let () =
           test_case "provider capacity backpressure reroutes provider" `Quick
             test_provider_capacity_backpressure_reroutes_provider;
           test_case "legacy timeout-budget capacity backpressure reroutes provider" `Quick
-            test_legacy_timeout_budget_capacity_backpressure_reroutes_provider;
+            test_provider_timeout_strike_capacity_backpressure_reroutes_provider;
           test_case "live OAS budget loop pauses work, not keeper" `Quick
-            test_oas_budget_loop_with_live_keeper_pauses_work_not_keeper;
+            test_provider_timeout_loop_with_live_keeper_pauses_work_not_keeper;
           test_case "lost-liveness OAS budget loop pauses keeper without death" `Quick
-            test_oas_budget_loop_with_lost_liveness_pauses_keeper_without_death;
+            test_provider_timeout_loop_with_lost_liveness_pauses_keeper_without_death;
           test_case "workflow rejection skips keeper circuit" `Quick
             test_workflow_rejection_skips_keeper_circuit;
           test_case "keeper death is liveness-only" `Quick

@@ -106,8 +106,8 @@ let test_canonical_next_action_byte_compat () =
          match wire, legacy.next_action with
          | ("turn_wall_clock_timeout" | "oas_timeout_budget"), _ ->
            "Some:inspect_turn_timeout"
-         | Some s -> "Some:" ^ s
-         | None -> "None"
+         | _, Some s -> "Some:" ^ s
+         | _, None -> "None"
        in
        let actual =
          match D.next_action disp with

@@ -108,7 +108,7 @@ let mk_required_tool_contract_violation () =
        })
 
 let test_pause_does_not_fire_on_transient () =
-  check bool "Oas_timeout_budget -> no pause" false
+  check bool "Provider_timeout -> no pause" false
     (EC.is_cascade_exhausted_error (mk_oas_timeout_budget ()));
   check bool "Turn_timeout -> no pause" false
     (EC.is_cascade_exhausted_error (mk_turn_timeout ()));

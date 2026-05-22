@@ -148,7 +148,7 @@ let round_trippable : (string * D.t) list =
   [ "Success", D.Success
   ; "External_cancel", D.External_cancel
   ; "Turn_wall_clock_timeout", D.Turn_wall_clock_timeout
-  ; "Oas_timeout_budget legacy alias", D.Oas_timeout_budget
+  ; "Oas_timeout_budget legacy alias", D.Turn_wall_clock_timeout
   ; "Gh_repo_context_missing_worktree", D.Gh_repo_context_missing_worktree
   ; "Required_tool_use_no_tool_call", D.Required_tool_use_no_tool_call
   ; "Required_tool_use_unsatisfied", D.Required_tool_use_unsatisfied

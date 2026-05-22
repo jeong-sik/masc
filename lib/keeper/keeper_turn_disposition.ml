@@ -12,7 +12,6 @@ type t =
   | Success
   | External_cancel
   | Turn_wall_clock_timeout
-  | Oas_timeout_budget
   | Cascade_attempts_exhausted
   | Gh_repo_context_missing_worktree
   | Required_tool_use_no_tool_call
@@ -31,7 +30,6 @@ let severity = function
   | Success -> Ok
   | External_cancel
   | Turn_wall_clock_timeout
-  | Oas_timeout_budget
   | Cascade_attempts_exhausted
   | Gh_repo_context_missing_worktree -> Warn
   | Required_tool_use_no_tool_call
@@ -44,7 +42,7 @@ let severity = function
 let summary = function
   | Success -> "turn completed"
   | External_cancel -> "keeper turn was cancelled before completion"
-  | Turn_wall_clock_timeout | Oas_timeout_budget ->
+  | Turn_wall_clock_timeout ->
     "keeper turn hit the wall-clock timeout"
   | Cascade_attempts_exhausted ->
     "cascade attempts exhausted; inspect per-attempt root causes"
@@ -65,7 +63,7 @@ let summary = function
 let next_action = function
   | Success -> None
   | External_cancel -> Some "rerun_if_still_relevant"
-  | Turn_wall_clock_timeout | Oas_timeout_budget -> Some "inspect_turn_timeout"
+  | Turn_wall_clock_timeout -> Some "inspect_turn_timeout"
   | Cascade_attempts_exhausted -> Some "inspect_cascade_attempts"
   | Gh_repo_context_missing_worktree -> Some "create_or_link_worktree"
   | Required_tool_use_no_tool_call ->
@@ -80,7 +78,6 @@ let to_wire = function
   | Success -> "success"
   | External_cancel -> "external_cancel"
   | Turn_wall_clock_timeout -> "turn_wall_clock_timeout"
-  | Oas_timeout_budget -> "turn_wall_clock_timeout"
   | Cascade_attempts_exhausted -> "cascade_attempts_exhausted"
   | Gh_repo_context_missing_worktree -> "gh_repo_context_missing_worktree"
   | Required_tool_use_no_tool_call -> "required_tool_use_no_tool_call"
@@ -143,9 +140,6 @@ let equal a b =
   | Success, Success
   | External_cancel, External_cancel
   | Turn_wall_clock_timeout, Turn_wall_clock_timeout
-  | Turn_wall_clock_timeout, Oas_timeout_budget
-  | Oas_timeout_budget, Turn_wall_clock_timeout
-  | Oas_timeout_budget, Oas_timeout_budget
   | Cascade_attempts_exhausted, Cascade_attempts_exhausted
   | Gh_repo_context_missing_worktree, Gh_repo_context_missing_worktree
   | Required_tool_use_no_tool_call, Required_tool_use_no_tool_call
@@ -156,7 +150,6 @@ let equal a b =
   | Success, _
   | External_cancel, _
   | Turn_wall_clock_timeout, _
-  | Oas_timeout_budget, _
   | Cascade_attempts_exhausted, _
   | Gh_repo_context_missing_worktree, _
   | Required_tool_use_no_tool_call, _

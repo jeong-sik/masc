@@ -29,10 +29,6 @@ type t =
   | External_cancel
   (** Turn cancelled before completion (operator stop, switch_keeper, …). *)
   | Turn_wall_clock_timeout (** Turn exceeded its wall-clock budget. *)
-  | Oas_timeout_budget
-  (** Legacy OAS timeout-budget wire value. Operators should inspect
-      owner-specific turn/provider timeout evidence instead of treating this
-      as a distinct root cause. *)
   | Cascade_attempts_exhausted
   (** Cascade aggregate outcome: all candidate attempts were exhausted.
           Operators should inspect per-attempt root causes instead of treating
@@ -97,7 +93,6 @@ val next_action : t -> string option
     - [Success] → ["success"]
     - [External_cancel] → ["external_cancel"]
     - [Turn_wall_clock_timeout] → ["turn_wall_clock_timeout"]
-    - [Oas_timeout_budget] → ["turn_wall_clock_timeout"] (legacy alias)
     - [Cascade_attempts_exhausted] → ["cascade_attempts_exhausted"]
     - [Gh_repo_context_missing_worktree] → ["gh_repo_context_missing_worktree"]
     - [Required_tool_use_no_tool_call] → ["required_tool_use_no_tool_call"]
@@ -113,6 +108,8 @@ val to_wire : t -> string
     [Keeper_turn_terminal_code.of_wire]; if that succeeds, the result
     is wrapped via [of_termination_code] (which may itself collapse to
     a non-Provider_error disposition such as [Required_tool_use_unsatisfied]).
+    Legacy ["oas_timeout_budget"] input parses to [Turn_wall_clock_timeout]
+    and is not represented as a distinct disposition state.
     Otherwise [Unknown { raw_error = wire }] is returned. *)
 val of_wire : string -> t
 

@@ -19,6 +19,16 @@ include Keeper_unified_turn_types
 
 include Keeper_unified_turn_phase_plan
 
+type retry_loop_input =
+  { run_meta : keeper_meta
+  ; execution : cascade_execution
+  ; run_generation : int
+  ; attempt : int
+  ; is_retry : bool
+  ; allow_degraded_wall_clock_retry_budget : bool
+  ; attempted_cascades : string list
+  }
+
 let run_keeper_cycle
       ~(config : Coord.config)
       ~(meta : keeper_meta)
@@ -568,15 +578,18 @@ let run_keeper_cycle
                        let fail_open_rotation_cascades =
                          active_fail_open_rotation_cascades ()
                        in
-                       let rec retry_loop
-                                 ~run_meta
-                                 ~(execution : cascade_execution)
-                                 ~run_generation
-                                 ~attempt
-                                 ~is_retry
-                                 ~allow_degraded_wall_clock_retry_budget
-                                 ~attempted_cascades
-                         =
+                       let rec retry_loop (input : retry_loop_input) =
+                         let { run_meta
+                             ; execution
+                             ; run_generation
+                             ; attempt
+                             ; is_retry
+                             ; allow_degraded_wall_clock_retry_budget
+                             ; attempted_cascades
+                             }
+                           =
+                           input
+                         in
                          let execution_cascade_name =
                            KCP.runtime_name_to_string execution.cascade_name
                          in
@@ -945,14 +958,15 @@ let run_keeper_cycle
                                   Eio.Fiber.yield ();
                                   let run_retry_after_reacquire () =
                                     retry_loop
-                                      ~run_meta
-                                      ~execution:next_execution
-                                      ~run_generation
-                                      ~attempt:1
-                                      ~is_retry:true
-                                      ~allow_degraded_wall_clock_retry_budget:true
-                                      ~attempted_cascades:
-                                        (next_execution_cascade_name :: attempted_cascades)
+                                      { run_meta
+                                      ; execution = next_execution
+                                      ; run_generation
+                                      ; attempt = 1
+                                      ; is_retry = true
+                                      ; allow_degraded_wall_clock_retry_budget = true
+                                      ; attempted_cascades =
+                                          next_execution_cascade_name :: attempted_cascades
+                                      }
                                   in
                                   (match turn_slot_control with
                                    | None -> run_retry_after_reacquire ()
@@ -1095,13 +1109,14 @@ let run_keeper_cycle
                                  ();
                                Eio.Time.sleep clock delay;
                                retry_loop
-                                 ~run_meta
-                                 ~execution
-                                 ~run_generation
-                                 ~attempt:(attempt + 1)
-                                 ~is_retry:true
-                                 ~allow_degraded_wall_clock_retry_budget:false
-                                 ~attempted_cascades
+                                 { run_meta
+                                 ; execution
+                                 ; run_generation
+                                 ; attempt = attempt + 1
+                                 ; is_retry = true
+                                 ; allow_degraded_wall_clock_retry_budget = false
+                                 ; attempted_cascades
+                                 }
                              | No_degraded_retry when EC.is_context_overflow err ->
                                let current_turn_event_bus =
                                  drain_turn_event_bus ~site:"context_overflow_capture" ()
@@ -1154,16 +1169,17 @@ let run_keeper_cycle
                        (try
                           Eio.Time.with_timeout_exn clock timeout_sec (fun () ->
                             retry_loop
-                              ~run_meta:meta
-                              ~execution:initial_execution
-                              ~run_generation:generation
-                              ~attempt:1
-                              ~is_retry:false
-                              ~allow_degraded_wall_clock_retry_budget:false
-                              ~attempted_cascades:
-                                [ KCP.runtime_name_to_string
-                                    initial_execution.cascade_name
-                                ])
+                              { run_meta = meta
+                              ; execution = initial_execution
+                              ; run_generation = generation
+                              ; attempt = 1
+                              ; is_retry = false
+                              ; allow_degraded_wall_clock_retry_budget = false
+                              ; attempted_cascades =
+                                  [ KCP.runtime_name_to_string
+                                      initial_execution.cascade_name
+                                  ]
+                              })
                         with
                         | Eio.Time.Timeout ->
                           let msg =

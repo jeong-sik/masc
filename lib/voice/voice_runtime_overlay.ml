@@ -171,31 +171,6 @@ let normalize_base_url value =
   else trimmed
 ;;
 
-let legacy_voice_env_warning_emitted = Atomic.make false
-
-let warn_legacy_voice_env_once () =
-  if not (Atomic.get legacy_voice_env_warning_emitted)
-  then (
-    Atomic.set legacy_voice_env_warning_emitted true;
-    Log.Misc.warn
-      "VOICE_MCP_HOST/PORT fallback is deprecated; prefer .masc/voice_config.json \
-       session.endpoints or MASC_HTTP_* listener settings.")
-;;
-
-let legacy_voice_base_url_opt () =
-  let host_opt = Sys.getenv_opt "VOICE_MCP_HOST" |> trim_opt in
-  let port_opt = Sys.getenv_opt "VOICE_MCP_PORT" |> trim_opt in
-  match host_opt, port_opt with
-  | None, None -> None
-  | _ ->
-    warn_legacy_voice_env_once ();
-    let host = Option.value host_opt ~default:Env_config.Voice.default_host in
-    let port =
-      Option.value port_opt ~default:(string_of_int Env_config.Voice.default_port)
-    in
-    Some (Printf.sprintf "http://%s:%s" host port)
-;;
-
 let http_listener_env_explicit () =
   Option.is_some (Sys.getenv_opt Env_config_core.http_base_url_env_key |> trim_opt)
   || Option.is_some (Sys.getenv_opt Env_config_core.host_env_key |> trim_opt)
@@ -212,14 +187,11 @@ let default_session_base_url () =
         "http://%s:%s"
         (Env_config_core.masc_host ())
         (Env_config_core.masc_http_port ())
-    else (
-      match legacy_voice_base_url_opt () with
-      | Some legacy_base_url -> normalize_base_url legacy_base_url
-      | None ->
-        Printf.sprintf
-          "http://%s:%s"
-          (Env_config_core.masc_host ())
-          (Env_config_core.masc_http_port ()))
+    else
+      Printf.sprintf
+        "http://%s:%s"
+        (Env_config_core.masc_host ())
+        (Env_config_core.masc_http_port ())
 ;;
 
 let compose_endpoint_url ~base_url ~path =

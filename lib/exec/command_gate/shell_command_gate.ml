@@ -49,6 +49,7 @@ type verdict =
   | Too_complex of { reason : too_complex_reason }
 
 type allowlist_policy = {
+  redirect_allowed : bool;
   allowed_commands : string list;
   allow_pipes : bool;
   
@@ -374,14 +375,14 @@ let apply_policy ~(allowlist : allowlist_policy) ~(path_policy : path_policy)
               }
           | None ->
             (match first_redirect_stage stages with
-             | Some stage ->
+             | Some stage when not allowlist.redirect_allowed ->
                Reject
                  { context
                  ; reason = Redirect_disallowed_in_caller { stage }
                  ; diagnostic =
                      Printf.sprintf "pipeline stage %d carries a redirect" stage
                  }
-             | None -> Allow context)))
+             | _ -> Allow context)))
 ;;
 
 let parse_only_to_stages (parsed : SI.t PD.t) :

@@ -171,14 +171,13 @@ error is the operator-visible signal.
 
 The §6 sunset criterion is satisfied by `Parse_outcome.parse_safe`
 adoption at the 7 predecessor sites.  Separately from that
-migration, a sweep in `/loop` session 2026-05-22 narrowed every
-remaining `| exception _ -> ...` arm under `lib/` (and every
-matching `try ... with | _ -> ...` arm) to the typed exception(s)
-the underlying call can actually raise.  This sweep is
-*complementary*, not a substitute for the §6 criterion: it tightens
-the §2 pattern shape (no unbounded wildcards) but each site retains
-its own ad-hoc result type rather than the unified
-`Parse_outcome.t`.
+migration, `/loop` session 2026-05-22 opened a stacked sweep to narrow
+remaining `| exception _ -> ...` arms under `lib/` (and matching
+`try ... with | _ -> ...` arms) to the typed exception(s) the
+underlying call can actually raise.  This sweep is *complementary*,
+not a substitute for the §6 criterion: it tightens the §2 pattern
+shape (no unbounded wildcards) but each site retains its own ad-hoc
+result type rather than the unified `Parse_outcome.t`.
 
 | PR | File(s) | Sites | Narrowing target |
 |----|---------|-------|------------------|
@@ -190,12 +189,15 @@ its own ad-hoc result type rather than the unified
 | #17796 | `cascade_declarative_parser` (parse_headers) | 2 | `Otoml.Type_error` |
 | #17803 | `sidecar`, `bg_task`, `bash_history`, `shutdown_hooks` | 5 | `Yojson.Json_error`, `Unix.Unix_error` |
 
-Cumulative effect: **18 wildcard arms narrowed**; `| exception _ ->
-...` count under `lib/` drops from 19 → 1.  The single remaining
-site is `keeper_turn_driver_admission.release_client_capacity_quietly`,
-intentionally retained because it wraps a caller-supplied callback
-whose exception contract is unbounded by design (RFC §3 anti-goal
-"Each call site keeps its own domain error type").
+Planned cumulative effect after the listed stacked PRs land:
+**18 wildcard arms narrowed**; `| exception _ -> ...` count under
+`lib/` drops from 19 → 1.  Until those follow-ups merge, this RFC
+records the migration plan rather than claiming the current tree has
+already reached the final count.  The intended single remaining site
+is `keeper_turn_driver_admission.release_client_capacity_quietly`,
+retained because it wraps a caller-supplied callback whose exception
+contract is unbounded by design (RFC §3 anti-goal "Each call site
+keeps its own domain error type").
 
 The sweep does *not* flip this RFC's status — the §6 criterion still
 requires `Parse_outcome` adoption at the 7 predecessor sites.  Tracker

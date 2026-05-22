@@ -91,8 +91,8 @@ rule token = parse
   | "/dev/null"    { incr_tokens (); DEV_NULL }
   | '\'' "/dev/null" '\'' { incr_tokens (); DEV_NULL }
   | '"' "/dev/null" '"' { incr_tokens (); DEV_NULL }
-  | (word_prefix as prefix) '\'' (sq_body as s) '\'' { incr_tokens (); WORD (prefix ^ s) }
-  | (word_prefix as prefix) '"' (dq_body as s) '"' { incr_tokens (); WORD (prefix ^ s) }
+  | (word_prefix as prefix) '\'' (sq_body as s) '\'' { incr_tokens (); WORD (prefix ^ s, true) }
+  | (word_prefix as prefix) '"' (dq_body as s) '"' { incr_tokens (); WORD (prefix ^ s, true) }
   | '\'' (sq_body as s) '\'' { incr_tokens (); WORD s }
   | '"' (dq_body as s) '"' { incr_tokens (); WORD s }
   | word as w      { incr_tokens (); WORD w }

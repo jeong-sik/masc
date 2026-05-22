@@ -140,14 +140,12 @@ let dashboard_doctor_degraded_json ~self_bin ~exn =
                 ; "kind", `String "config"
                 ; "exit_code", `Int 2
                 ; ( "payload"
-                  , `Assoc
+                  , Tool_args.error_assoc
                       [ "title", `String "Dashboard Doctor Route"
-                      ; "status", `String "error"
                       ; ( "checks"
                         , `List
-                            [ `Assoc
+                            [ Tool_args.error_assoc
                                 [ "name", `String "self-binary"
-                                ; "status", `String "error"
                                 ; "message", `String message
                                 ; "path", `String self_bin
                                 ] ] )

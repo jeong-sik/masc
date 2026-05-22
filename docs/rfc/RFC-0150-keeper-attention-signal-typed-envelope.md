@@ -1,7 +1,7 @@
 ---
 rfc: "0150"
 title: "Keeper Attention Signal — backend 단일 typed wire envelope"
-status: Draft
+status: Implemented
 created: 2026-05-20
 updated: 2026-05-20
 author: vincent

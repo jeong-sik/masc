@@ -1,7 +1,7 @@
 ---
 name: RFC-0156
 title: OAS total timeout 제거 — turn timeout + stream idle 두 layer로 단순화
-status: Draft
+status: Implemented
 authors:
   - vincent.dev@kidsnote.com (Claude Opus 4.7 paired)
 created: 2026-05-22

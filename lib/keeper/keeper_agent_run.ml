@@ -893,11 +893,10 @@ let run_turn
                      | Ok (), Some reason ->
                        let contract_status
                            : Keeper_execution_receipt.tool_contract_result =
-                         if actual_keeper_tool_names = []
-                         then Contract_missing_required_tool_use
-                         else if progress_keeper_tool_names = []
-                         then Contract_needs_execution_progress
-                         else tool_contract_status ()
+                         Contract_helpers.passive_violation_contract_status
+                           ~actual_keeper_tool_names
+                           ~progress_keeper_tool_names
+                           ~fallback:tool_contract_status
                        in
                        acc.receipt_tool_contract_result <- contract_status;
                        Keeper_agent_run_contract_violation_log.record_passive
@@ -916,9 +915,9 @@ let run_turn
                      | Error reason, _ ->
                        let contract_status
                            : Keeper_execution_receipt.tool_contract_result =
-                         if actual_keeper_tool_names = []
-                         then Contract_missing_required_tool_use
-                         else tool_contract_status ()
+                         Contract_helpers.text_only_violation_contract_status
+                           ~actual_keeper_tool_names
+                           ~fallback:tool_contract_status
                        in
                        acc.receipt_tool_contract_result <- contract_status;
                        Keeper_agent_run_contract_violation_log.record_text_only

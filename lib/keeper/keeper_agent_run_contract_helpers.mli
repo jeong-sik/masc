@@ -28,3 +28,14 @@ val observed_tool_contract_status :
   had_owned_active_task_at_turn_start:bool ->
   actual_keeper_tool_names:string list ->
   Keeper_execution_receipt.tool_contract_result
+
+val passive_violation_contract_status :
+  actual_keeper_tool_names:string list ->
+  progress_keeper_tool_names:string list ->
+  fallback:(unit -> Keeper_execution_receipt.tool_contract_result) ->
+  Keeper_execution_receipt.tool_contract_result
+
+val text_only_violation_contract_status :
+  actual_keeper_tool_names:string list ->
+  fallback:(unit -> Keeper_execution_receipt.tool_contract_result) ->
+  Keeper_execution_receipt.tool_contract_result

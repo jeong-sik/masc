@@ -306,6 +306,21 @@ describe('fleetBand', () => {
     expect(fleetBand(makeRow({ status: 'crashed' }))).toBe('offline')
   })
 
+  // Lock the remaining offline-trigger status strings in fleetBand's
+  // production code. `'offline'` has an active producer
+  // (dashboard_governance_judge.ml:164, dashboard_mission_agents.ml:206,
+  // keeper_exec_status.ml:276/353); `'unbooted'` is defensive (no
+  // current OCaml producer, but the production check is load-bearing
+  // for non-OCaml producers or future runtime states). Per
+  // feedback_dead_defensive_cleanup_must_check_test_lock memory, lock
+  // the defensive arm explicitly rather than treating it as dead.
+  it.each([
+    'offline',
+    'unbooted',
+  ])('classifies offline for status=%s', (status) => {
+    expect(fleetBand(makeRow({ status }))).toBe('offline')
+  })
+
   it('classifies paused', () => {
     expect(fleetBand(makeRow({ status: 'paused' }))).toBe('paused')
   })

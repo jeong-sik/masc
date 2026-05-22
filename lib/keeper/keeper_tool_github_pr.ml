@@ -1,4 +1,4 @@
-(** Dedicated GitHub PR keeper tools. *)
+(** Read-only GitHub PR keeper tools. *)
 
 open Keeper_types
 open Keeper_exec_shared
@@ -67,12 +67,6 @@ let effective_repo_arg ~(config : Coord.config) repo =
                  repo))
     | Error reason -> Error reason
 
-let opt_flag flag = function
-  | None -> []
-  | Some value ->
-      let value = String.trim value in
-      if value = "" then [] else [ flag; value ]
-
 let clamp_limit n =
   Int.max 1 (Int.min 100 n)
 
@@ -105,52 +99,6 @@ let build_pr_status_argv ~repo ~pr_number =
   [ "gh"; "pr"; "view"; string_of_int pr_number ]
   |> with_repo_arg repo
   |> fun argv -> argv @ [ "--json"; pr_json_fields ^ ",body,files,reviews,comments" ]
-
-let build_pr_view_recovery_argv ~repo ~head =
-  let head = Option.map String.trim head |> Option.value ~default:"" in
-  (if head = "" then [ "gh"; "pr"; "view" ] else [ "gh"; "pr"; "view"; head ])
-  |> with_repo_arg repo
-  |> fun argv -> argv @ [ "--json"; pr_json_fields ^ ",body" ]
-
-let build_pr_create_argv ~repo ~title ~body ~base ~head =
-  [ "gh"; "pr"; "create" ]
-  |> with_repo_arg repo
-  |> fun argv ->
-  argv
-  @ [ "--draft"; "--title"; title; "--body"; body ]
-  @ opt_flag "--base" base
-  @ opt_flag "--head" head
-
-let draft_request_allowed args =
-  match Safe_ops.json_bool_opt "draft" args with
-  | Some false -> false
-  | Some true | None -> (
-      match Safe_ops.json_bool_opt "ready" args with
-      | Some true -> false
-      | Some false | None -> true)
-
-(* Research is intentionally allowed here: [config/tool_policy.toml]'s
-   [presets.research] grants the [github] group (which contains
-   [keeper_pr_create]) per the "Step 9 bloodflow restoration plan"
-   comment, so analyst/scholar/verifier-tier keepers can open draft
-   PRs as part of their work. Without Research, the tool stays visible
-   in the surface but fails at dispatch with [preset_insufficient] —
-   the visible/callable contradiction surfaced when an analyst keeper
-   tried a Docker PR-lifecycle proof. Mirrors
-   [Keeper_tool_pr_review.pr_review_mutation_preset_ok], which already
-   includes Research. *)
-(* For a guard predicate a catch-all default loses exhaustiveness:
-   any future preset would silently inherit whichever side of the
-   guard the wildcard happens to land on (the previous [_ -> false]
-   would have defaulted new presets to "disallowed").  Enumerate
-   every variant so the compiler's Warning 8 forces a deliberate
-   classification when [Keeper_meta_tool_access.tool_access_preset]
-   grows, instead of letting policy drift through a wildcard.
-   PR #14716 / #14762 follow-up. *)
-let mutation_preset_ok = function
-  | Some (Research | Delivery | Coding | Full) -> true
-  | Some (Minimal | Social | Messaging | Dispatch) -> false
-  | None -> false
 
 let scoped_credential_or_error ~config ~meta =
   match Keeper_gh_env.keeper_binding config ~keeper_name:meta.name with
@@ -188,41 +136,6 @@ let scoped_credential_or_error ~config ~meta =
 let status_ok = function
   | Unix.WEXITED 0 -> true
   | _ -> false
-
-let contains_substring haystack needle = String_util.contains_substring haystack needle
-
-let pr_create_failure_may_have_created_pr output =
-  let output = String.lowercase_ascii output in
-  List.exists
-    (contains_substring output)
-    [
-      "http 504";
-      "504 gateway timeout";
-      "gateway timeout";
-      "context deadline exceeded";
-      "i/o timeout";
-    ]
-
-(* gh CLI verbatim prefix when a PR for the same head already exists:
-   "a pull request for branch \"<owner:branch>\" into branch \"<base>\"
-    already exists:\n<url>\n"
-   Match the leading clause case-insensitively so future gh versions with
-   minor wording shifts still classify correctly. *)
-let pr_create_failure_already_exists output =
-  let output = String.lowercase_ascii output in
-  contains_substring output "a pull request for branch"
-  && contains_substring output "already exists"
-
-(* Recovery reason classifier — returned alongside the recovery result so
-   observers can distinguish a transient retry-style recovery (504/timeout)
-   from a deterministic idempotency hit (PR already exists). *)
-let classify_pr_create_recovery output =
-  if pr_create_failure_already_exists output then
-    Some "pr_already_exists"
-  else if pr_create_failure_may_have_created_pr output then
-    Some "pr_create_transient_failure"
-  else
-    None
 
 type gh_exec_result =
   { status : Unix.process_status
@@ -280,57 +193,7 @@ let output_json ?(extra_fields = []) ~ok ~tool ~operation ~meta ~binding
        ]
        @ extra_fields))
 
-let nearest_git_root_within ~sandbox_root cwd =
-  let normalize = Keeper_alerting_path.normalize_path_for_check_stripped in
-  let sandbox_root = normalize sandbox_root in
-  let rec loop dir =
-    let dir = normalize dir in
-    if safe_file_exists (Filename.concat dir ".git") then Some dir
-    else if String.equal dir sandbox_root then None
-    else
-      let parent = Filename.dirname dir in
-      if String.equal parent dir then None else loop parent
-  in
-  loop cwd
-
-let pr_create_git_cwd_error ~(meta : keeper_meta) ~cwd ~sandbox_root =
-  Yojson.Safe.to_string
-    (`Assoc
-      [
-        "ok", `Bool false;
-        "tool", `String "keeper_pr_create";
-        "operation", `String "pr_create";
-        "error", `String "keeper_pr_create_requires_git_cwd";
-        "reason",
-        `String
-          "keeper_pr_create must run from a cloned repo or task worktree cwd, \
-           not the sandbox root.";
-        "keeper", `String meta.name;
-        "cwd", `String cwd;
-        "sandbox_root", `String sandbox_root;
-        "hint",
-        `String
-          "Pass cwd=\"repos/REPO\" or \
-           cwd=\"repos/REPO/.worktrees/TASK_ID\" after cloning and pushing \
-           the branch.";
-        "expected_cwd_examples",
-        `List
-          [
-            `String "repos/masc-mcp";
-            `String "repos/masc-mcp/.worktrees/KEEPER-TASK_ID";
-          ];
-      ])
-
-let validate_pr_create_git_cwd ~config ~meta ~cwd =
-  let sandbox_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
-  let normalize = Keeper_alerting_path.normalize_path_for_check_stripped in
-  match nearest_git_root_within ~sandbox_root cwd with
-  | Some git_root when not (String.equal (normalize git_root) (normalize sandbox_root)) ->
-      Ok ()
-  | Some _ | None ->
-      Error (pr_create_git_cwd_error ~meta ~cwd ~sandbox_root)
-
-let run_gh ?recover_pr_create ~tool ~operation ~config ~meta ~args ~write argv =
+let run_gh ~tool ~operation ~config ~meta ~args ~write argv =
   match scoped_credential_or_error ~config ~meta with
   | Error json -> Yojson.Safe.to_string json
   | Ok (binding, state, env) -> (
@@ -352,14 +215,6 @@ let run_gh ?recover_pr_create ~tool ~operation ~config ~meta ~args ~write argv =
                 "keeper", `String meta.name;
               ])
       | Ok cwd ->
-          let cwd_preflight =
-            if String.equal tool "keeper_pr_create" then
-              validate_pr_create_git_cwd ~config ~meta ~cwd
-            else Ok ()
-          in
-          (match cwd_preflight with
-           | Error json -> json
-           | Ok () ->
           let timeout_sec =
             Env_config_exec_timeout.timeout_sec
               ~caller:(if write then Pr_review_post else Pr_review)
@@ -369,36 +224,8 @@ let run_gh ?recover_pr_create ~tool ~operation ~config ~meta ~args ~write argv =
             run_gh_argv ~config ~meta ~env ~cwd ~timeout_sec argv
           in
           let result_ok = status_ok result.status in
-          let recovered =
-            match recover_pr_create with
-            | Some (repo, head) when not result_ok -> (
-                match classify_pr_create_recovery result.output with
-                | None -> None
-                | Some reason ->
-                    let recovery =
-                      run_gh_argv ~config ~meta ~env ~cwd ~timeout_sec
-                        (build_pr_view_recovery_argv ~repo ~head)
-                    in
-                    if status_ok recovery.status then Some (recovery, reason)
-                    else None)
-            | _ -> None
-          in
-          (match recovered with
-           | Some (recovery, reason) ->
-               output_json ~ok:true ~tool ~operation ~meta ~binding ~state
-                 ~cwd ~via:recovery.via ~output:recovery.output
-                 ~extra_fields:
-                   [
-                     "recovered_from_error", `String reason;
-                     "original_ok", `Bool false;
-                     "original_output", `String result.output;
-                     "recovery_tool", `String "gh pr view";
-                   ]
-                 ()
-           | None ->
-               output_json ~ok:result_ok ~tool ~operation ~meta ~binding
-                 ~state ~cwd ~via:result.via ~output:result.output ()))
-          )
+          output_json ~ok:result_ok ~tool ~operation ~meta ~binding ~state
+            ~cwd ~via:result.via ~output:result.output ())
 
 let handle_keeper_pr_list ~(config : Coord.config) ~(meta : keeper_meta)
     ~(args : Yojson.Safe.t) =
@@ -426,47 +253,9 @@ let handle_keeper_pr_status ~(config : Coord.config) ~(meta : keeper_meta)
         run_gh ~tool:"keeper_pr_status" ~operation:"pr_status" ~config
           ~meta ~args ~write:false (build_pr_status_argv ~repo ~pr_number)
 
-let handle_keeper_pr_create ~(config : Coord.config) ~(meta : keeper_meta)
-    ~(args : Yojson.Safe.t) =
-  let title = Safe_ops.json_string ~default:"" "title" args |> String.trim in
-  let body = Safe_ops.json_string ~default:"" "body" args |> String.trim in
-  let repo = Safe_ops.json_string ~default:"" "repo" args in
-  let base = Safe_ops.json_string_opt "base" args in
-  let head = Safe_ops.json_string_opt "head" args in
-  if not (draft_request_allowed args) then
-    error_json "keeper_pr_create is draft-only; omit draft or set draft=true."
-  else if title = "" then
-    error_json "title is required."
-  else if body = "" then
-    error_json "body is required."
-  else if not (mutation_preset_ok (Keeper_types.tool_access_preset meta.tool_access)) then
-    Yojson.Safe.to_string
-      (`Assoc
-        [
-          "ok", `Bool false;
-          "error", `String "preset_insufficient";
-          "reason", `String "keeper_pr_create requires research, delivery, coding, or full preset";
-        ])
-  else
-    match effective_repo_arg ~config repo with
-    | Error reason -> error_json reason
-    | Ok repo ->
-        run_gh ~tool:"keeper_pr_create" ~operation:"pr_create" ~config
-          ~meta ~args ~write:true ~recover_pr_create:(repo, head)
-          (build_pr_create_argv ~repo ~title ~body ~base ~head)
-
 module For_testing = struct
   let build_pr_list_argv = build_pr_list_argv
   let build_pr_status_argv = build_pr_status_argv
-  let build_pr_view_recovery_argv = build_pr_view_recovery_argv
-  let build_pr_create_argv = build_pr_create_argv
-  let draft_request_allowed = draft_request_allowed
   let effective_repo_arg = effective_repo_arg
-  let pr_create_failure_may_have_created_pr =
-    pr_create_failure_may_have_created_pr
-  let pr_create_failure_already_exists = pr_create_failure_already_exists
-  let classify_pr_create_recovery = classify_pr_create_recovery
-
   let quote_argv = quote_argv
-  let mutation_preset_ok = mutation_preset_ok
 end

@@ -8,7 +8,6 @@ val output_json_opt :
 
 val route_via_of_json : Yojson.Safe.t -> string option
 val pr_url_of_json : Yojson.Safe.t -> string option
-val pr_create_ref_of_input : Yojson.Safe.t -> string option
 
 val command_candidates_of_tool_io :
   tool_name:string ->

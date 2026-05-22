@@ -155,32 +155,8 @@ let region_key (r : code_region) =
     r.timestamp_ms
     src_tag
 
-let dedup_regions_keeping_primary ~primary ~legacy =
-  let seen = Hashtbl.create 64 in
-  List.iter (fun r -> Hashtbl.replace seen (region_key r) ()) primary;
-  let extra =
-    List.filter (fun r -> not (Hashtbl.mem seen (region_key r))) legacy
-  in
-  primary @ extra
-
-let read_regions
-      ~base_dir
-      ?(partition = Ide_paths.Legacy)
-      ?(merge_legacy = false)
-      ?file_path
-      ()
-  =
-  let primary =
-    load_regions_from_path ?file_path (regions_file ~base_dir ~partition ())
-  in
-  if merge_legacy && partition <> Ide_paths.Legacy then
-    let legacy =
-      load_regions_from_path
-        ?file_path
-        (regions_file ~base_dir ~partition:Ide_paths.Legacy ())
-    in
-    dedup_regions_keeping_primary ~primary ~legacy
-  else primary
+let read_regions ~base_dir ?(partition = Ide_paths.Legacy) ?file_path () =
+  load_regions_from_path ?file_path (regions_file ~base_dir ~partition ())
 
 let json_string_field key json =
   match json with

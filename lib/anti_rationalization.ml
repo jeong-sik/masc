@@ -860,28 +860,6 @@ let review
                   }))))
 ;;
 
-(** Backward-compatible wrapper that returns only the verdict.
-    Use [review] directly for structured results with audit metadata. *)
-let review_verdict
-      ?evaluator_cascade
-      ?generator_cascade
-      ?completion_contract
-      ?on_verdict
-      ?few_shot_block
-      ?sw
-      req
-  =
-  (review
-     ?evaluator_cascade
-     ?generator_cascade
-     ?completion_contract
-     ?on_verdict
-     ?few_shot_block
-     ?sw
-     req)
-    .verdict
-;;
-
 let review_result_to_json (r : review_result) : Yojson.Safe.t =
   let base =
     [ ( "verdict"

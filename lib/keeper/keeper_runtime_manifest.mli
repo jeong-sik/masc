@@ -41,6 +41,7 @@ type t = {
   generation : int option;
   keeper_turn_id : int option;
   oas_turn_count : int option;
+  logical_seq : int option;
   event : event_kind;
   cascade_name : string option;
   status : string;
@@ -89,6 +90,7 @@ val clock_refs :
   ?observed_at:string ->
   ?started_at:string ->
   ?finished_at:string ->
+  ?elapsed_ms:int ->
   ?provider_attempt_id:string ->
   ?tool_batch_id:string ->
   ?checkpoint_id:string ->
@@ -98,6 +100,7 @@ val clock_refs :
   ?event_bus_run_id:string ->
   ?parent_event_id:string ->
   ?caused_by:string ->
+  ?logical_seq:int ->
   unit ->
   Yojson.Safe.t
 
@@ -105,10 +108,12 @@ val clock_refs_for_context :
   turn_context ->
   event:event_kind ->
   ?oas_turn_count:int ->
+  ?elapsed_ms:int ->
   ?event_bus_correlation_id:string ->
   ?event_bus_run_id:string ->
   ?parent_event_id:string ->
   ?caused_by:string ->
+  ?logical_seq:int ->
   unit ->
   Yojson.Safe.t
 
@@ -134,6 +139,7 @@ val make :
   ?generation:int ->
   ?keeper_turn_id:int ->
   ?oas_turn_count:int ->
+  ?logical_seq:int ->
   event:event_kind ->
   ?cascade_name:string ->
   ?status:string ->
@@ -148,6 +154,7 @@ val make_for_context :
   turn_context ->
   event:event_kind ->
   ?oas_turn_count:int ->
+  ?logical_seq:int ->
   ?cascade_name:string ->
   ?status:string ->
   ?decision:Yojson.Safe.t ->

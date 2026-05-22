@@ -22,18 +22,41 @@ let fresh_base_path ~tag =
   Unix.mkdir raw 0o755;
   try Unix.realpath raw with Unix.Unix_error _ -> raw
 
-let sh cmd =
-  let rc = Sys.command cmd in
-  if rc <> 0 then failwith (Printf.sprintf "shell cmd failed (rc=%d): %s" rc cmd)
+let process_exit_code = function
+  | Unix.WEXITED code -> code
+  | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> 255
+
+let run_process_ok ~cwd prog argv =
+  let original_cwd = Sys.getcwd () in
+  let dev_null = Unix.openfile Filename.null [ Unix.O_WRONLY ] 0o600 in
+  Fun.protect
+    ~finally:(fun () ->
+      Unix.close dev_null;
+      Sys.chdir original_cwd)
+    (fun () ->
+      Sys.chdir cwd;
+      let pid =
+        Unix.create_process_env prog argv (Unix.environment ()) Unix.stdin
+          dev_null dev_null
+      in
+      let _, status = Unix.waitpid [] pid in
+      let code = process_exit_code status in
+      if code <> 0 then
+        failwith
+          (Printf.sprintf "process failed (rc=%d): %s" code
+             (String.concat " " (Array.to_list argv))))
+
+let git_ok ~cwd args =
+  run_process_ok ~cwd "git" (Array.of_list ("git" :: args))
 
 let git_init_base base_path =
-  sh (Printf.sprintf "cd %s && git init -q -b main" base_path);
-  sh (Printf.sprintf "cd %s && git config user.email test@example.com" base_path);
-  sh (Printf.sprintf "cd %s && git config user.name test" base_path);
-  sh
-    (Printf.sprintf
-       "cd %s && touch README && git add README && git commit -qm init"
-       base_path)
+  git_ok ~cwd:base_path [ "init"; "-q"; "-b"; "main" ];
+  git_ok ~cwd:base_path [ "config"; "user.email"; "test@example.com" ];
+  git_ok ~cwd:base_path [ "config"; "user.name"; "test" ];
+  let oc = open_out (Filename.concat base_path "README") in
+  close_out oc;
+  git_ok ~cwd:base_path [ "add"; "README" ];
+  git_ok ~cwd:base_path [ "commit"; "-q"; "-m"; "init" ]
 
 let write_file path content =
   let oc = open_out path in

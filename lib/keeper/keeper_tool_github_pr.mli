@@ -1,8 +1,9 @@
-(** Dedicated GitHub PR keeper tools.
+(** Read-only GitHub PR keeper tools.
 
-    These are intentionally narrower than [keeper_shell op=gh]: they run
-    scoped [gh] argv commands after verifying the keeper/root GitHub
-    credential bundle and keep PR creation draft-only. *)
+    These are intentionally narrower than [keeper_shell op=gh]: they run scoped
+    read-only [gh] argv commands after verifying the keeper/root GitHub
+    credential bundle. GitHub PR creation is not exposed as a keeper-native
+    capability. *)
 
 val handle_keeper_pr_list :
   config:Coord.config ->
@@ -16,12 +17,6 @@ val handle_keeper_pr_status :
   args:Yojson.Safe.t ->
   string
 
-val handle_keeper_pr_create :
-  config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
-  args:Yojson.Safe.t ->
-  string
-
 module For_testing : sig
   val build_pr_list_argv :
     repo:string -> state:string -> limit:int -> string list
@@ -29,37 +24,8 @@ module For_testing : sig
   val build_pr_status_argv :
     repo:string -> pr_number:int -> string list
 
-  val build_pr_create_argv :
-    repo:string ->
-    title:string ->
-    body:string ->
-    base:string option ->
-    head:string option ->
-    string list
-
   val effective_repo_arg :
     config:Coord.config -> string -> (string, string) result
 
-  val draft_request_allowed : Yojson.Safe.t -> bool
-
   val quote_argv : string list -> string
-
-  val mutation_preset_ok : Keeper_types.tool_preset option -> bool
-  (** Mirrors the runtime gate in [handle_keeper_pr_create]. Exposed so
-      regression tests can pin the visible/callable contract: any preset
-      that grants the [github] group in [config/tool_policy.toml] must
-      return [true] here. *)
-
-  val pr_create_failure_already_exists : string -> bool
-  (** [true] when [output] matches the gh CLI verbatim
-      "a pull request for branch ... already exists" prefix. Exposed so
-      tests can pin the classifier wording independently of the recovery
-      path. *)
-
-  val classify_pr_create_recovery : string -> string option
-  (** Recovery reason classifier. Returns [Some "pr_already_exists"] for
-      idempotent hits, [Some "pr_create_transient_failure"] for 504/timeout
-      patterns, or [None] when the output is not recoverable. The string
-      identifier is what gets emitted as [recovered_from_error] in the
-      keeper_pr_create JSON output. *)
 end

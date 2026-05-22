@@ -232,14 +232,6 @@ let pr_url_of_json json =
        | None -> None
        | Some value -> github_pr_url_from_text value)
 
-let pr_create_ref_of_input input =
-  [
-    string_field_opt "head" input;
-    string_field_opt "branch" input;
-    string_field_opt "head_ref" input;
-  ]
-  |> List.find_map Fun.id
-
 let command_input_of_tool ~(tool_name : string) (input : Yojson.Safe.t) =
   match tool_name with
   | "keeper_shell" ->

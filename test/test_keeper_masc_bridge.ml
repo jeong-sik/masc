@@ -55,10 +55,30 @@ let read_text_file path =
     ~finally:(fun () -> close_in_noerr ic)
     (fun () -> Stdlib.really_input_string ic (in_channel_length ic))
 
-let run_shell_ok ~cwd cmd =
-  let quoted_cwd = Filename.quote cwd in
-  let rc = Sys.command (Printf.sprintf "cd %s && %s" quoted_cwd cmd) in
-  Alcotest.(check int) ("shell command: " ^ cmd) 0 rc
+let process_exit_code = function
+  | Unix.WEXITED code -> code
+  | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> 255
+
+let run_process_ok ~cwd prog argv =
+  let original_cwd = Sys.getcwd () in
+  let dev_null = Unix.openfile Filename.null [ Unix.O_WRONLY ] 0o600 in
+  Fun.protect
+    ~finally:(fun () ->
+      Unix.close dev_null;
+      Sys.chdir original_cwd)
+    (fun () ->
+      Sys.chdir cwd;
+      let pid =
+        Unix.create_process_env prog argv (Unix.environment ()) Unix.stdin
+          dev_null dev_null
+      in
+      let _, status = Unix.waitpid [] pid in
+      Alcotest.(check int)
+        ("process command: " ^ String.concat " " (Array.to_list argv))
+        0 (process_exit_code status))
+
+let git_ok ~cwd args =
+  run_process_ok ~cwd "git" (Array.of_list ("git" :: args))
 
 let run_with_fs f =
   Eio_main.run @@ fun env ->
@@ -630,7 +650,7 @@ let test_read_only_preflight_accepts_sandbox_relative_repo_path () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
-      run_shell_ok ~cwd:dir "git init --quiet";
+      git_ok ~cwd:dir [ "init"; "--quiet" ];
       let file_path =
         Filename.concat dir
           ".masc/playground/docker/masc-improver/repos/masc-mcp/lib/thompson_sampling.ml"
@@ -683,7 +703,7 @@ let test_write_preflight_accepts_docker_container_repo_path () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
-      run_shell_ok ~cwd:dir "git init --quiet";
+      git_ok ~cwd:dir [ "init"; "--quiet" ];
       let keeper_toml =
         Filename.concat dir ".masc/config/keepers/sangsu.toml"
       in
@@ -748,7 +768,7 @@ let test_write_preflight_accepts_sandbox_relative_repo_path () =
       Masc_mcp.Keeper_registry.unregister ~base_path:dir keeper_name;
       cleanup_dir dir)
     (fun () ->
-      run_shell_ok ~cwd:dir "git init --quiet";
+      git_ok ~cwd:dir [ "init"; "--quiet" ];
       let rel_path =
         "repos/masc-mcp/.worktrees/keeper-nick0cave-agent-task-240/lib/foo.ml"
       in

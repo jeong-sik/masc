@@ -165,7 +165,8 @@ let stage_ids_for_record record =
   if
     docker
     && keeper_creds
-    && String.equal tool "keeper_pr_create"
+    && String.equal tool "keeper_shell"
+    && contains_substring text "gh pr create"
   then stages := "pr_create" :: !stages;
   List.rev !stages
 ;;
@@ -260,7 +261,7 @@ let json ?window_hours ~n ~keeper_names () =
              (List.length stage_rows)
              failed_observed) )
     ; ( "required_tools"
-      , string_list_json [ "keeper_bash"; "keeper_shell"; "keeper_pr_create" ] )
+      , string_list_json [ "keeper_bash"; "keeper_shell" ] )
     ; "passing_tools", `List []
     ; "weak_tools", `List []
     ; "missing_tools", `List []

@@ -505,9 +505,6 @@ let execute_keeper_tool_call_with_outcome
        | "keeper_pr_status" ->
          make_executed_tool_result
            (Keeper_tool_github_pr.handle_keeper_pr_status ~config ~meta ~args)
-       | "keeper_pr_create" ->
-         make_executed_tool_result
-           (Keeper_tool_github_pr.handle_keeper_pr_create ~config ~meta ~args)
        | "keeper_pr_review_read" ->
          make_executed_tool_result
            (Keeper_tool_pr_review.handle_keeper_pr_review_read ~config ~meta ~args)

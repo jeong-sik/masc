@@ -60,32 +60,49 @@ let with_temp_dir prefix f =
   let dir = Filename.temp_dir prefix "" in
   Fun.protect ~finally:(fun () -> rm_rf dir) (fun () -> f dir)
 
-let run_shell ?(env = []) ?(unset_env = []) ~cwd cmd =
-  let unset_prefix =
-    unset_env
-    |> List.map (fun name -> Printf.sprintf "-u %s" (quote name))
-    |> String.concat " "
-  in
-  let env_prefix =
-    env
-    |> List.map (fun (k, v) -> Printf.sprintf "%s=%s" k (quote v))
-    |> String.concat " "
-  in
-  let shell_prefix =
-    match (String.trim unset_prefix, String.trim env_prefix) with
-    | "", "" -> ""
-    | up, "" -> Printf.sprintf "env %s" up
-    | "", ep -> ep
-    | up, ep -> Printf.sprintf "env %s %s" up ep
-  in
-  let full =
-    if shell_prefix = "" then Printf.sprintf "cd %s && %s" (quote cwd) cmd
-    else Printf.sprintf "cd %s && %s %s" (quote cwd) shell_prefix cmd
-  in
+let env_array ~unset_env overrides =
+  let table = Hashtbl.create 64 in
+  Unix.environment ()
+  |> Array.iter (fun entry ->
+         match String.index_opt entry '=' with
+         | None -> ()
+         | Some idx ->
+             let key = String.sub entry 0 idx in
+             let value =
+               String.sub entry (idx + 1) (String.length entry - idx - 1)
+             in
+             Hashtbl.replace table key value);
+  List.iter (fun key -> Hashtbl.remove table key) unset_env;
+  List.iter (fun (key, value) -> Hashtbl.replace table key value) overrides;
+  Hashtbl.fold
+    (fun key value acc -> Printf.sprintf "%s=%s" key value :: acc)
+    table []
+  |> Array.of_list
+
+let run_process ?(env = []) ?(unset_env = []) ~cwd prog argv =
   let out = Filename.temp_file "dune-local-out" ".txt" in
   let err = Filename.temp_file "dune-local-err" ".txt" in
-  let wrapped = Printf.sprintf "%s > %s 2> %s" full (quote out) (quote err) in
-  let code = Sys.command wrapped in
+  let out_fd = Unix.openfile out [ Unix.O_WRONLY; Unix.O_TRUNC ] 0o600 in
+  let err_fd = Unix.openfile err [ Unix.O_WRONLY; Unix.O_TRUNC ] 0o600 in
+  let original_cwd = Sys.getcwd () in
+  let pid =
+    Fun.protect
+      ~finally:(fun () ->
+        Sys.chdir original_cwd;
+        Unix.close out_fd;
+        Unix.close err_fd)
+      (fun () ->
+        Sys.chdir cwd;
+        Unix.create_process_env prog argv
+          (env_array ~unset_env env)
+          Unix.stdin out_fd err_fd)
+  in
+  let _, status = Unix.waitpid [] pid in
+  let code =
+    match status with
+    | Unix.WEXITED code -> code
+    | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> 255
+  in
   let stdout = read_file out in
   let stderr = read_file err in
   Sys.remove out;
@@ -175,8 +192,14 @@ let run_dune_local base bin_dir ?(env = []) ?(unset_env = []) subcommand =
         env
   in
   let script = Filename.concat (Filename.concat base "scripts") "dune-local.sh" in
-  run_shell ~cwd:base ~env:full_env ~unset_env
-    (Printf.sprintf "bash %s %s" (quote script) subcommand)
+  let subcommand_argv =
+    subcommand
+    |> String.split_on_char ' '
+    |> List.map String.trim
+    |> List.filter (fun value -> value <> "")
+  in
+  run_process ~cwd:base ~env:full_env ~unset_env "/bin/bash"
+    (Array.of_list ("/bin/bash" :: script :: subcommand_argv))
 
 (* --- tests ------------------------------------------------------------ *)
 
@@ -280,8 +303,9 @@ exec "$@"
          opam is typically in ~/.opam/SWITCH/bin/, not in /usr/bin or /bin. *)
       let minimal_path = Printf.sprintf "%s:/usr/bin:/bin" bin_dir in
       let lock_path = Filename.concat dir "dune-local.lock" in
+      let script = Filename.concat scripts_dir "dune-local.sh" in
       let code, _stdout, _stderr =
-        run_shell ~cwd:dir
+        run_process ~cwd:dir "/bin/bash"
           ~env:
             [
               ("PATH", minimal_path);
@@ -290,8 +314,7 @@ exec "$@"
               ("MASC_OPAM_LOCK_PATH", opam_lock_path);
             ]
           ~unset_env:[ "GITHUB_ACTIONS"; "MASC_SKIP_PIN_CHECK" ]
-          (Printf.sprintf "bash %s build"
-             (quote (Filename.concat scripts_dir "dune-local.sh")))
+          [| "/bin/bash"; script; "build" |]
       in
       check int "exits zero when opam absent" 0 code;
       let lock_log =
@@ -367,15 +390,15 @@ let test_live_build_lock_aborts_before_dune () =
       write_file build_lock_path "";
       write_executable
         (Filename.concat bin_dir "lsof")
-        (Printf.sprintf
-           {|#!/bin/sh
-if [ "${1:-}" = "-t" ] && [ "${2:-}" = %s ]; then
+        {|#!/bin/sh
+case "${1:-} ${2:-}" in
+  "-t "*/_build/.lock)
   printf '4321\n'
   exit 0
-fi
+  ;;
+esac
 exit 1
-|}
-           (quote build_lock_path));
+|};
       write_executable
         (Filename.concat bin_dir "ps")
         {|#!/bin/sh
@@ -704,7 +727,7 @@ printf '%s\n' "$base"
         Filename.concat (Filename.concat dir "scripts") "dune-local.sh"
       in
       let code, _stdout, stderr =
-        run_shell ~cwd:dir
+        run_process ~cwd:dir "/bin/bash"
           ~env:
             [
               ("PATH", bin_dir);
@@ -715,7 +738,7 @@ printf '%s\n' "$base"
               ("MASC_SKIP_OCAML_VERSION_CHECK", "1");
             ]
           ~unset_env:[ "GITHUB_ACTIONS"; "MASC_DUNE_LOCK_HELD" ]
-          (Printf.sprintf "/bin/bash %s build" (quote script))
+          [| "/bin/bash"; script; "build" |]
       in
       let needle = "neither lockf nor flock found; running unlocked" in
       let only_once =
@@ -769,8 +792,11 @@ exec "$@"
            (quote flock_log));
       let opam_lock_path = Filename.concat dir "opam.lock" in
       let dune_lock_path = Filename.concat dir "dune-local.lock" in
+      let script =
+        Filename.concat (Filename.concat dir "scripts") "dune-local.sh"
+      in
       let code, _stdout, _stderr =
-        run_shell ~cwd:dir
+        run_process ~cwd:dir "/bin/bash"
           ~env:
             [
               ("PATH", Printf.sprintf "%s:/bin" bin_dir);
@@ -781,11 +807,7 @@ exec "$@"
               ("MASC_SKIP_OCAML_VERSION_CHECK", "1");
             ]
           ~unset_env:[ "GITHUB_ACTIONS"; "MASC_OPAM_LOCK_HELD" ]
-          (Printf.sprintf "bash %s build"
-             (quote
-                (Filename.concat
-                   (Filename.concat dir "scripts")
-                   "dune-local.sh")))
+          [| "/bin/bash"; script; "build" |]
       in
       check int "exits zero through flock reexec" 0 code;
       check bool "flock invoked" true (Sys.file_exists flock_log);
@@ -842,8 +864,11 @@ fi
 exec "$@"
 |}
            (quote flock_log) (quote flock_log) (quote opam_lock_path));
+      let script =
+        Filename.concat (Filename.concat dir "scripts") "dune-local.sh"
+      in
       let code, _stdout, stderr =
-        run_shell ~cwd:dir
+        run_process ~cwd:dir "/bin/bash"
           ~env:
             [
               ("PATH", Printf.sprintf "%s:/bin" bin_dir);
@@ -855,11 +880,7 @@ exec "$@"
               ("MASC_SKIP_OCAML_VERSION_CHECK", "1");
             ]
           ~unset_env:[ "GITHUB_ACTIONS"; "MASC_OPAM_LOCK_HELD" ]
-          (Printf.sprintf "bash %s build"
-             (quote
-                (Filename.concat
-                   (Filename.concat dir "scripts")
-                   "dune-local.sh")))
+          [| "/bin/bash"; script; "build" |]
       in
       check int "opam flock timeout exits with flock status" 1 code;
       let lock_log = read_file flock_log in

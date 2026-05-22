@@ -3479,6 +3479,143 @@ let test_public_to_json_redacts_decision () =
   Alcotest.(check bool) "public_to_json drops provider_secret" true
     (Yojson.Safe.Util.member "provider_secret" decision = `Null)
 
+let test_logical_seq_roundtrip () =
+  let manifest =
+    M.make ~keeper_name:"k" ~trace_id:"t" ~event:M.Turn_started
+      ~logical_seq:42 ()
+  in
+  let json = M.to_json manifest in
+  Alcotest.(check (option int))
+    "to_json preserves logical_seq" (Some 42)
+    (match Yojson.Safe.Util.member "logical_seq" json with
+     | `Int value -> Some value
+     | `Null -> None
+     | other -> Alcotest.fail ("unexpected logical_seq type: " ^ Json_util.kind_name other));
+  let public_json = M.public_to_json manifest in
+  Alcotest.(check (option int))
+    "public_to_json preserves logical_seq" (Some 42)
+    (match Yojson.Safe.Util.member "logical_seq" public_json with
+     | `Int value -> Some value
+     | `Null -> None
+     | other -> Alcotest.fail ("unexpected logical_seq type: " ^ Json_util.kind_name other));
+  match M.of_json json with
+  | Error msg -> Alcotest.fail ("of_json failed: " ^ msg)
+  | Ok parsed ->
+    Alcotest.(check (option int))
+      "of_json recovers logical_seq" (Some 42) parsed.logical_seq
+
+let test_logical_seq_backward_compat () =
+  let json_without_seq =
+    `Assoc
+      [ ("schema_version", `Int 1)
+      ; ("ts", `String "2026-05-22T00:00:00Z")
+      ; ("keeper_name", `String "k")
+      ; ("agent_name", `Null)
+      ; ("trace_id", `String "t")
+      ; ("generation", `Null)
+      ; ("keeper_turn_id", `Null)
+      ; ("oas_turn_count", `Null)
+      ; ("event", `String "turn_started")
+      ; ("cascade_name", `Null)
+      ; ("status", `String "ok")
+      ; ("decision", `Assoc [])
+      ; ("links", `Assoc
+           [ ("receipt_path", `Null)
+           ; ("checkpoint_path", `Null)
+           ; ("tool_call_log_path", `Null)
+           ])
+      ]
+  in
+  match M.of_json json_without_seq with
+  | Error msg -> Alcotest.fail ("of_json failed on legacy row: " ^ msg)
+  | Ok parsed ->
+    Alcotest.(check (option int))
+      "legacy row without logical_seq parses as None" None parsed.logical_seq
+
+let test_clock_refs_elapsed_ms () =
+  let refs = M.clock_refs ~started_at:"2026-05-22T00:00:00Z"
+    ~finished_at:"2026-05-22T00:00:01Z" ~elapsed_ms:1000 ()
+  in
+  match refs with
+  | `Assoc fields ->
+    Alcotest.(check (option int))
+      "clock_refs includes elapsed_ms" (Some 1000)
+      (match List.assoc_opt "elapsed_ms" fields with
+       | Some (`Int value) -> Some value
+       | _ -> None)
+  | other ->
+    Alcotest.fail ("clock_refs must be Assoc, got: " ^ Json_util.kind_name other)
+
+let test_clock_refs_logical_seq () =
+  let refs = M.clock_refs ~edge_id:"e1" ~logical_seq:7 () in
+  match refs with
+  | `Assoc fields ->
+    Alcotest.(check (option int))
+      "clock_refs includes logical_seq" (Some 7)
+      (match List.assoc_opt "logical_seq" fields with
+       | Some (`Int value) -> Some value
+       | _ -> None)
+  | other ->
+    Alcotest.fail ("clock_refs must be Assoc, got: " ^ Json_util.kind_name other)
+
+let test_clock_refs_for_context_logical_seq () =
+  let ctx : M.turn_context =
+    { manifest_keeper_name = "k"
+    ; manifest_agent_name = None
+    ; manifest_trace_id = "t"
+    ; manifest_generation = None
+    ; manifest_keeper_turn_id = Some 1
+    }
+  in
+  let refs = M.clock_refs_for_context ctx ~event:M.Turn_started ~logical_seq:3 () in
+  match refs with
+  | `Assoc fields ->
+    Alcotest.(check (option int))
+      "clock_refs_for_context includes logical_seq" (Some 3)
+      (match List.assoc_opt "logical_seq" fields with
+       | Some (`Int value) -> Some value
+       | _ -> None)
+  | other ->
+    Alcotest.fail ("clock_refs_for_context must be Assoc, got: " ^ Json_util.kind_name other)
+
+let test_public_projection_elapsed_ms_allowlist () =
+  let manifest =
+    M.make ~keeper_name:"k" ~trace_id:"t" ~event:M.Provider_attempt_started
+      ~decision:
+        (M.with_clock_refs
+           ~clock_refs:(M.clock_refs ~elapsed_ms:500 ())
+           (`Assoc []))
+      ()
+  in
+  let public = M.public_to_json manifest in
+  let decision = Yojson.Safe.Util.member "decision" public in
+  let clock_refs = Yojson.Safe.Util.member "clock_refs" decision in
+  Alcotest.(check (option int))
+    "public projection preserves elapsed_ms" (Some 500)
+    (match Yojson.Safe.Util.member "elapsed_ms" clock_refs with
+     | `Int value -> Some value
+     | `Null -> None
+     | other -> Alcotest.fail ("unexpected elapsed_ms type: " ^ Json_util.kind_name other))
+
+let test_public_projection_logical_seq_allowlist () =
+  let manifest =
+    M.make ~keeper_name:"k" ~trace_id:"t" ~event:M.Turn_started
+      ~decision:
+        (M.with_clock_refs
+           ~clock_refs:(M.clock_refs ~logical_seq:9 ())
+           (`Assoc []))
+      ()
+  in
+  let public = M.public_to_json manifest in
+  let decision = Yojson.Safe.Util.member "decision" public in
+  let clock_refs = Yojson.Safe.Util.member "clock_refs" decision in
+  Alcotest.(check (option int))
+    "public projection preserves logical_seq in clock_refs" (Some 9)
+    (match Yojson.Safe.Util.member "logical_seq" clock_refs with
+     | `Int value -> Some value
+     | `Null -> None
+     | other -> Alcotest.fail ("unexpected logical_seq type: " ^ Json_util.kind_name other))
+
 let test_runtime_manifest_contract_omits_provider_model_fields () =
   check_source_omits "lib/keeper/keeper_runtime_manifest.mli" "provider_kind";
   check_source_omits "lib/keeper/keeper_runtime_manifest.mli" "model_id";
@@ -3730,6 +3867,16 @@ let () =
           Alcotest.test_case "safe path segment" `Quick test_safe_segment;
           Alcotest.test_case "source_clock roundtrip" `Quick
             test_source_clock_roundtrip;
+          Alcotest.test_case "logical_seq roundtrip" `Quick
+            test_logical_seq_roundtrip;
+          Alcotest.test_case "logical_seq backward compat" `Quick
+            test_logical_seq_backward_compat;
+          Alcotest.test_case "clock_refs elapsed_ms" `Quick
+            test_clock_refs_elapsed_ms;
+          Alcotest.test_case "clock_refs logical_seq" `Quick
+            test_clock_refs_logical_seq;
+          Alcotest.test_case "clock_refs_for_context logical_seq" `Quick
+            test_clock_refs_for_context_logical_seq;
           Alcotest.test_case "context helper" `Quick test_context_helper;
         ] );
       ( "append",

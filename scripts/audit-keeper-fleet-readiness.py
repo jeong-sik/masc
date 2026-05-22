@@ -55,9 +55,7 @@ PR_REVIEW_MUTATION_TOOLS = {
     "keeper_pr_review_comment",
     "keeper_pr_review_reply",
 }
-PR_CREATE_TOOLS = {
-    "keeper_pr_create",
-}
+PR_CREATE_TOOLS: set[str] = set()
 SHELL_TOOLS = {
     "keeper_bash",
     "keeper_shell",
@@ -654,7 +652,6 @@ def pr_evidence_from_row(row: dict[str, Any]) -> tuple[set[str], set[str]]:
 
     success = row_succeeded(row)
     if tools & PR_CREATE_TOOLS and success:
-        refs.add("keeper_pr_create")
         sources.add(source)
         add_pr_refs_from_structured_output(
             refs=refs, sources=sources, source=source, row=row
@@ -1025,8 +1022,6 @@ def pr_lifecycle_evidence_from_decision(
         if docker_routed():
             docker_evidence.add(item)
 
-    if any(tool_succeeded_in_row(row, tool) for tool in PR_CREATE_TOOLS):
-        add("pr_create:keeper_pr_create")
     tool = row.get("tool")
     if (
         row.get("event") == "tool_exec"
@@ -1057,9 +1052,7 @@ def pr_lifecycle_evidence_from_tool_call(
         if has_tool_call_docker_execution_marker(row):
             docker_evidence.add(item)
 
-    if tool == "keeper_pr_create":
-        add("pr_create:keeper_pr_create")
-    elif tool == "masc_code_git":
+    if tool == "masc_code_git":
         for command in tool_call_command_candidates(row):
             if command.strip().lower() == "push":
                 add("git_push:masc_code_git")

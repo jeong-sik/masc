@@ -526,7 +526,6 @@ let is_owned_task_coordination_progress_tool_name name =
   let name = canonical_tool_name name in
   match Tool_name.of_string name with
   | Some (Tool_name.Keeper Tool_name.Keeper.Handoff)
-  | Some (Tool_name.Keeper Tool_name.Keeper.Pr_create)
   | Some (Tool_name.Keeper Tool_name.Keeper.Pr_review_comment)
   | Some (Tool_name.Keeper Tool_name.Keeper.Pr_review_reply) -> true
   | _ -> false

@@ -103,7 +103,6 @@ let inferred_effect_domain_of_typed_tool_name = function
   | TN.Keeper TK.Broadcast
   | TN.Keeper TK.Handoff
   | TN.Keeper TK.Ide_annotate
-  | TN.Keeper TK.Pr_create
   | TN.Keeper TK.Pr_review_comment
   | TN.Keeper TK.Pr_review_reply
   | TN.Keeper TK.Task_claim
@@ -292,7 +291,6 @@ let tool_group_of_typed_tool_name = function
       | TK.Context_status
       | TK.Discovery
       | TK.Handoff
-      | TK.Pr_create
       | TK.Pr_list
       | TK.Pr_review_comment
       | TK.Pr_review_read

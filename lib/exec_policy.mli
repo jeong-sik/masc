@@ -82,3 +82,8 @@ val is_destructive_bash_operation : string -> bool
 
 val sanitize_command_for_log : string -> string
 val truncate_for_log : ?max_len:int -> string -> string
+
+val block_reason_tag : block_reason -> string
+
+val attribution_of_validation :
+  cmd:string -> (unit, block_reason) result -> Attribution.t

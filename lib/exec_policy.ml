@@ -830,3 +830,41 @@ let is_destructive_bash_operation = Mutation_classifier.is_destructive_bash_oper
 
 let sanitize_command_for_log = Log_sanitize.sanitize_command_for_log
 let truncate_for_log = Log_sanitize.truncate_for_log
+
+let block_reason_tag = function
+  | Empty_command -> "empty_command"
+  | Chain_or_redirect -> "chain_or_redirect"
+  | Injection -> "injection"
+  | Process_substitution -> "process_substitution"
+  | Unsafe_redirect -> "unsafe_redirect"
+  | Pipes_not_allowed -> "pipes_not_allowed"
+  | Direct_dune_invocation -> "direct_dune_invocation"
+  | Command_not_allowed _ -> "command_not_allowed"
+;;
+
+let attribution_of_validation ~cmd (result : (unit, block_reason) result) : Attribution.t =
+  match result with
+  | Ok () ->
+    let evidence : Yojson.Safe.t = `Assoc [ "cmd", `String cmd ] in
+    Attribution.passed ~origin:Det ~gate:"exec_policy" ~evidence
+  | Error br ->
+    let command_name =
+      match br with
+      | Command_not_allowed name -> Some name
+      | Direct_dune_invocation -> Some "dune"
+      | _ -> None
+    in
+    let evidence : Yojson.Safe.t =
+      `Assoc
+        ([ "cmd", `String cmd; "block_reason", `String (block_reason_tag br) ]
+         @
+         match command_name with
+         | Some n -> [ "command_name", `String n ]
+         | None -> [])
+    in
+    Attribution.policy_failed
+      ~origin:Det
+      ~gate:"exec_policy"
+      ~evidence
+      ~reason:(block_reason_to_string br)
+;;

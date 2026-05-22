@@ -103,7 +103,7 @@ let provider_runtime_pressure_class ~code ~detail ~http_status =
 ;;
 
 let runtime_pressure_class_of_failure_reason = function
-  | Some (Keeper_registry.Oas_timeout_budget_loop _) -> Some Provider_timeout
+  | Some (Keeper_registry.Provider_timeout_loop _) -> Some Provider_timeout
   | Some (Keeper_registry.Provider_runtime_error { code; detail; http_status; _ }) ->
     Some (provider_runtime_pressure_class ~code ~detail ~http_status)
   | Some (Keeper_registry.Stale_turn_timeout _) -> Some Turn_stale_timeout

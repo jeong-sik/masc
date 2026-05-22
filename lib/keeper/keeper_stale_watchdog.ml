@@ -219,7 +219,7 @@ let failure_reason_batch_root_cause
       Some Provider_auth
   | Exception detail when fd_exhaustion_failure detail ->
       Some Fd_exhaustion
-  | Oas_timeout_budget_loop _ ->
+  | Provider_timeout_loop _ ->
       Some Provider_timeout
   | Stale_turn_timeout _
   | Stale_termination_storm _
@@ -290,7 +290,7 @@ let pending_oas_timeout_budget_count
     | None -> false
   in
   match entry.last_failure_reason, has_timeout_observation with
-  | Some (Keeper_registry.Oas_timeout_budget_loop { count }), true -> Some count
+  | Some (Keeper_registry.Provider_timeout_loop { count }), true -> Some count
   | _ -> None
 
 let () =
@@ -559,7 +559,7 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                | Some count when idle_stale ->
                  let stall_seconds = now -. last_turn in
                  let failure_reason =
-                   Keeper_registry.Oas_timeout_budget_loop { count }
+                   Keeper_registry.Provider_timeout_loop { count }
                  in
                  Keeper_registry.set_failure_reason ~base_path meta.name
                    (Some failure_reason);

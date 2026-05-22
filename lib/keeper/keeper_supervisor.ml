@@ -185,7 +185,7 @@ let launch_supervised_fiber
                   | Some (Keeper_registry.Stale_turn_timeout _)
                   | Some (Keeper_registry.Stale_termination_storm _)
                   | Some (Keeper_registry.Stale_fleet_batch _)
-                  | Some (Keeper_registry.Oas_timeout_budget_loop _) -> true
+                  | Some (Keeper_registry.Provider_timeout_loop _) -> true
                   (* Other failure reasons are not stale-watchdog signals. *)
                   | Some (Keeper_registry.Heartbeat_consecutive_failures _)
                   | Some (Keeper_registry.Turn_consecutive_failures _)
@@ -717,7 +717,7 @@ let sweep_and_recover (ctx : _ context) =
             increments once per storm. *)
          handle_stale_storm_pause ctx entry ~count;
          to_unregister := entry :: !to_unregister
-       | Some (Keeper_registry.Oas_timeout_budget_loop { count }) ->
+       | Some (Keeper_registry.Provider_timeout_loop { count }) ->
          (* Watchdog-preserved OAS budget loops include liveness evidence,
             so policy allows keeper pause without treating timeout alone as
             keeper death. *)
@@ -754,7 +754,7 @@ let sweep_and_recover (ctx : _ context) =
     | Some (Keeper_registry.Stale_turn_timeout _)
     | Some (Keeper_registry.Stale_termination_storm _)
     | Some (Keeper_registry.Stale_fleet_batch _)
-    | Some (Keeper_registry.Oas_timeout_budget_loop _) -> true
+    | Some (Keeper_registry.Provider_timeout_loop _) -> true
     (* Other failure reasons are not stale-watchdog signals. *)
     | Some (Keeper_registry.Heartbeat_consecutive_failures _)
     | Some (Keeper_registry.Turn_consecutive_failures _)
@@ -782,7 +782,7 @@ let sweep_and_recover (ctx : _ context) =
        [watchdog_stop_pending]. *)
     let stamp_cohort =
       match entry.last_failure_reason with
-      | Some (Keeper_registry.Oas_timeout_budget_loop _) -> Some Oas_timeout_budget
+      | Some (Keeper_registry.Provider_timeout_loop _) -> Some Oas_timeout_budget
       | Some (Keeper_registry.Stale_turn_timeout _)
       | Some (Keeper_registry.Stale_fleet_batch _)
       | Some (Keeper_registry.Stale_termination_storm _) -> Some Stale_turn_timeout

@@ -79,7 +79,7 @@ type failure_reason =
           fleet-batch detection is observation-only and must not create this
           failure reason; if old runtime state still contains it, the
           supervisor treats it like a restartable watchdog crash. *)
-  | Oas_timeout_budget_loop of { count : int }
+  | Provider_timeout_loop of { count : int }
       (** Legacy persisted timeout-loop value. New operator/cohort surfaces
           normalize it to provider-timeout ownership instead of presenting
           timeout-budget as a distinct root cause. *)

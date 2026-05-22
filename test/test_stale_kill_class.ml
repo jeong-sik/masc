@@ -77,7 +77,7 @@ let test_failure_reason_to_string_noop () =
 let test_failure_reason_to_string_oas_timeout_budget_loop () =
   r "legacy timeout-budget loop normalizes to provider timeout"
     "provider_timeout_loop(count=3)"
-    (failure_reason_to_string (Oas_timeout_budget_loop { count = 3 }))
+    (failure_reason_to_string (Provider_timeout_loop { count = 3 }))
 
 let test_failure_reason_to_string_stale_fleet_batch () =
   r "Stale_fleet_batch includes distinct count"
@@ -156,7 +156,7 @@ let test_cohort_key_collapses_subclasses () =
 let test_oas_timeout_budget_loop_cohort_key () =
   r "legacy timeout-budget loop cohort_key" "provider_timeout_loop"
     (failure_reason_cohort_key
-       (Some (Oas_timeout_budget_loop { count = 3 })))
+       (Some (Provider_timeout_loop { count = 3 })))
 
 let test_stale_fleet_batch_cohort_key () =
   r "Stale_fleet_batch cohort_key" "stale_fleet_batch"
@@ -306,7 +306,7 @@ let test_batch_root_cause_fd_exhaustion () =
 
 let test_batch_root_cause_cascade_unhealthy () =
   r "provider timeout" "provider_timeout"
-    (root_cause_label [ Oas_timeout_budget_loop { count = 2 } ])
+    (root_cause_label [ Provider_timeout_loop { count = 2 } ])
 
 let test_batch_root_cause_mixed () =
   r "mixed" "mixed"
@@ -421,7 +421,7 @@ let () =
             test_failure_reason_to_string_mid_turn_no_progress;
           Alcotest.test_case "Stale_turn_timeout(Noop_failure_loop) wraps"
             `Quick test_failure_reason_to_string_noop;
-          Alcotest.test_case "Oas_timeout_budget_loop wraps" `Quick
+          Alcotest.test_case "Provider_timeout_loop wraps" `Quick
             test_failure_reason_to_string_oas_timeout_budget_loop;
           Alcotest.test_case "Stale_fleet_batch wraps" `Quick
             test_failure_reason_to_string_stale_fleet_batch;
@@ -434,7 +434,7 @@ let () =
         [
           Alcotest.test_case "all sub-classes collapse to one cohort"
             `Quick test_cohort_key_collapses_subclasses;
-          Alcotest.test_case "Oas_timeout_budget_loop cohort" `Quick
+          Alcotest.test_case "Provider_timeout_loop cohort" `Quick
             test_oas_timeout_budget_loop_cohort_key;
           Alcotest.test_case "Stale_fleet_batch cohort" `Quick
             test_stale_fleet_batch_cohort_key;

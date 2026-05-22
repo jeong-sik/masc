@@ -762,7 +762,7 @@ let test_stale_broadcast_payload_preserves_required_tool_failure_reason () =
 ;;
 
 let test_stale_broadcast_payload_preserves_timeout_budget_failure_reason () =
-  let failure_reason = Masc_mcp.Keeper_registry.Oas_timeout_budget_loop { count = 4 } in
+  let failure_reason = Masc_mcp.Keeper_registry.Provider_timeout_loop { count = 4 } in
   let payload =
     R.stale_broadcast_payload
       ~keeper_name:"executor"

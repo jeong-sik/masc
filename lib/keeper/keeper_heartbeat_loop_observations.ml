@@ -164,7 +164,7 @@ let clear_oas_timeout_budget_failure_reason ~base_path ~keeper_name =
   match Keeper_registry.get ~base_path keeper_name with
   | Some
       { Keeper_registry.last_failure_reason =
-          Some (Keeper_registry.Oas_timeout_budget_loop _)
+          Some (Keeper_registry.Provider_timeout_loop _)
       ; _
       } -> Keeper_registry.set_failure_reason ~base_path keeper_name None
   | _ -> ()
@@ -174,7 +174,7 @@ let prior_oas_timeout_budget_strikes ~base_path ~keeper_name =
   match Keeper_registry.get ~base_path keeper_name with
   | Some
       { Keeper_registry.last_failure_reason =
-          Some (Keeper_registry.Oas_timeout_budget_loop { count })
+          Some (Keeper_registry.Provider_timeout_loop { count })
       ; _
       } -> count
   | _ -> 0

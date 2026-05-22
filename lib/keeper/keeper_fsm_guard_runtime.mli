@@ -24,10 +24,3 @@
 
 val wrap_unit : action:string -> stage:string -> (unit -> unit) -> unit
 
-(** Compatibility no-op retained for older tests.  The guard policy no
-    longer reads [MASC_FSM_GUARD_ASSERT]. *)
-val refresh_policy_for_test : unit -> unit
-
-(** Always [true]: guard violations always re-raise after incrementing
-    the violation counter. *)
-val assert_mode_for_test : unit -> bool

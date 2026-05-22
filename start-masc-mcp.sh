@@ -1019,7 +1019,6 @@ if [ "$EIO_MODE" = "true" ] && [ "$HTTP_MODE" = "true" ]; then
         echo "  MCP endpoint: /mcp (set MASC_HTTP_BASE_URL for an absolute origin)" >&2
     fi
     echo "  MCP Accept: application/json, text/event-stream" >&2
-    echo "  Legacy Accept fallback: MASC_ALLOW_LEGACY_ACCEPT=1" >&2
     launch_from_base_path "$SELECTED_EXE" --host="$HOST" --port="$PORT" --base-path="$RESOLVED_BASE_PATH"
 elif [ "$HTTP_MODE" = "true" ]; then
     echo "Starting MASC MCP server (HTTP mode, $RUNTIME_NAME)..." >&2
@@ -1040,7 +1039,6 @@ elif [ "$HTTP_MODE" = "true" ]; then
         echo "  MCP endpoint: /mcp (set MASC_HTTP_BASE_URL for an absolute origin)" >&2
     fi
     echo "  MCP Accept: application/json, text/event-stream" >&2
-    echo "  Legacy Accept fallback: MASC_ALLOW_LEGACY_ACCEPT=1" >&2
     launch_from_base_path "$SELECTED_EXE" --http --port "$PORT" --path "$RESOLVED_BASE_PATH"
 else
     echo "Starting MASC MCP server (stdio mode, $RUNTIME_NAME)..." >&2

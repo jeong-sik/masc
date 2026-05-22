@@ -37,30 +37,17 @@ let pretty_json_string raw =
   try Yojson.Safe.from_string raw |> Yojson.Safe.pretty_to_string
   with Yojson.Json_error _ -> raw
 
-let env_flag_enabled name =
-  match Sys.getenv_opt name with
-  | None -> false
-  | Some raw ->
-      let v = String.trim raw |> String.lowercase_ascii in
-      String.equal v "1" || String.equal v "true" || String.equal v "yes" || String.equal v "y" || String.equal v "on"
-
 (* ================================================================ *)
 (* Handlers                                                         *)
 (* ================================================================ *)
 
 let handle_transport_status ~tool_name ~start_time _args : tool_result =
-  let ctx =
-    Transport_read_model.context_from_env
-      ~allow_legacy_accept:(env_flag_enabled "MASC_ALLOW_LEGACY_ACCEPT") ()
-  in
+  let ctx = Transport_read_model.context_from_env () in
   let json = Transport_read_model.transport_status_json ctx in
   Tool_result.ok ~tool_name ~start_time:start_time (Yojson.Safe.to_string json)
 
 let handle_websocket_discovery ~tool_name ~start_time _args : tool_result =
-  let ctx =
-    Transport_read_model.context_from_env
-      ~allow_legacy_accept:(env_flag_enabled "MASC_ALLOW_LEGACY_ACCEPT") ()
-  in
+  let ctx = Transport_read_model.context_from_env () in
   let json = Transport_read_model.websocket_discovery_json ctx in
   Tool_result.ok ~tool_name ~start_time:start_time (Yojson.Safe.to_string json)
 

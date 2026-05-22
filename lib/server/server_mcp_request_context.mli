@@ -19,7 +19,6 @@ val make :
 type post_body_decision = {
   body_str : string;
   accept_mode : Mcp_transport_protocol.Http_negotiation.accept_mode;
-  accept_warn_headers : (string * string) list;
 }
 
 type post_body_rejection =

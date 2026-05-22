@@ -5,7 +5,7 @@
     builders, validators), {b protocol version} (supported set, validation,
     normalization), and {b HTTP negotiation} (delegates parsing to
     {!Mcp_protocol.Http_negotiation} from the SDK; layers MASC's
-    [accept_mode] with [Legacy_accepted] for backward compatibility). *)
+    [accept_mode] with [Legacy_accepted] for the HTTP notification relaxation). *)
 
 (** {1 JSON-RPC Core Types} *)
 
@@ -74,9 +74,8 @@ module Http_negotiation : sig
       [Streamable] — Accept header advertises both [application/json] and
       [text/event-stream] (the spec-compliant mode).
 
-      [Legacy_accepted] — Accept header lacks one of those, but the
-      [allow_legacy] flag (gated on the [MASC_ALLOW_LEGACY_ACCEPT] env)
-      lets the request through for backward compatibility.
+      [Legacy_accepted] — reserved for the HTTP layer's notification-only
+      relaxation. The pure Accept classifier does not return this variant.
 
       [Rejected] — neither mode applies. *)
   type accept_mode =
@@ -109,10 +108,9 @@ module Http_negotiation : sig
       (the Streamable HTTP transport requirement). *)
 
   val classify_mcp_accept :
-    allow_legacy:bool -> string option -> accept_mode
+    string option -> accept_mode
   (** Top-level classification: [Streamable] if both media types are
-      advertised, else [Legacy_accepted] when [allow_legacy = true],
-      else [Rejected]. *)
+      advertised, else [Rejected]. *)
 end
 
 (** {1 Protocol Version} *)

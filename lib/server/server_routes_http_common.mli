@@ -120,13 +120,9 @@ val validate_origin : Httpun.Request.t -> bool
 val accepts_sse : Httpun.Request.t -> bool
 val accepts_streamable_mcp : Httpun.Request.t -> bool
 val request_force_json_response : Httpun.Request.t -> bool
-val allow_legacy_accept : bool
 val classify_mcp_accept :
   Httpun.Request.t ->
   Mcp_transport_protocol.Http_negotiation.accept_mode
-val legacy_accept_warning_headers :
-  Mcp_transport_protocol.Http_negotiation.accept_mode ->
-  (string * string) list
 val legacy_transport_deprecation_headers :
   (string * string) list
 val force_json_response : bool

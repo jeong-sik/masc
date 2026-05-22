@@ -115,11 +115,9 @@ let sse_headers = Server_mcp_transport_http_headers.sse_headers
 
 let sse_stream_headers = Server_mcp_transport_http_headers.sse_stream_headers
 
-let stream_post_sse_headers ~deps ~origin ~session_id ~protocol_version
-    ~accept_warn_headers =
+let stream_post_sse_headers ~deps ~origin ~session_id ~protocol_version =
   Httpun.Headers.of_list
-    (accept_warn_headers
-    @ [
+    ([
         ("content-type", Http_negotiation.sse_content_type);
         ("cache-control", "no-cache");
         ("connection", "close");
@@ -130,10 +128,9 @@ let stream_post_sse_headers ~deps ~origin ~session_id ~protocol_version
       @ deps.cors_headers origin)
 
 let stream_post_sse_start ~deps ~origin ~session_id ~protocol_version
-    ~accept_warn_headers reqd =
+    reqd =
   let headers =
     stream_post_sse_headers ~deps ~origin ~session_id ~protocol_version
-      ~accept_warn_headers
   in
   let response = Httpun.Response.create ~headers `OK in
   let writer = Httpun.Reqd.respond_with_streaming reqd response in
@@ -343,7 +340,6 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
             Error ()
       in
       let accept_mode = post_context.accept_mode in
-      let accept_warn_headers = post_context.accept_warn_headers in
       let* runtime =
         match request_runtime_result deps with
         | Ok r -> Ok r
@@ -374,7 +370,7 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
                                 let info =
                                   stream_post_sse_start ~deps ~origin ~session_id
                                     ~protocol_version:response_protocol_version
-                                    ~accept_warn_headers reqd
+                                    reqd
                                 in
                                 inline_sse := Some info;
                                 spawn_post_sse_keepalive ~sw ~clock info);
@@ -412,8 +408,7 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
                                     let headers =
                                       Httpun.Headers.of_list
                                         (("content-length", "0")
-                                        :: accept_warn_headers
-                                        @ mcp_headers session_id protocol_version)
+                                        :: mcp_headers session_id protocol_version)
                                     in
                                     let response =
                                       Httpun.Response.create ~headers `Accepted
@@ -425,8 +420,7 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
                                       Httpun.Headers.of_list
                                         (("content-length",
                                           string_of_int (String.length body))
-                                        :: accept_warn_headers
-                                        @ json_headers ~deps session_id
+                                        :: json_headers ~deps session_id
                                             protocol_version origin)
                                     in
                                     let response =
@@ -444,8 +438,7 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
                                       Httpun.Headers.of_list
                                         (("content-length",
                                           string_of_int (String.length body))
-                                        :: accept_warn_headers
-                                        @ sse_headers ~deps session_id
+                                        :: sse_headers ~deps session_id
                                             protocol_version origin)
                                     in
                                     let response =
@@ -459,8 +452,7 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
                                     let headers =
                                       Httpun.Headers.of_list
                                         (("content-length", "0")
-                                        :: accept_warn_headers
-                                        @ mcp_headers session_id protocol_version)
+                                        :: mcp_headers session_id protocol_version)
                                     in
                                     let response =
                                       Httpun.Response.create ~headers `Accepted
@@ -472,8 +464,7 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
                                       Httpun.Headers.of_list
                                         (("content-length",
                                           string_of_int (String.length body))
-                                        :: accept_warn_headers
-                                        @ json_headers ~deps session_id
+                                        :: json_headers ~deps session_id
                                             protocol_version origin)
                                     in
                                     let response =
@@ -495,8 +486,7 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
                                     let headers =
                                       Httpun.Headers.of_list
                                         (("transfer-encoding", "chunked")
-                                        :: accept_warn_headers
-                                        @ json_headers ~deps session_id
+                                        :: json_headers ~deps session_id
                                             protocol_version origin)
                                     in
                                     let response =

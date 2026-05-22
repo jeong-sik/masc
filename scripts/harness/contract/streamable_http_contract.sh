@@ -156,22 +156,25 @@ header_value() {
   ' "$header_file"
 }
 
-echo "[1/8] legacy Accept compatibility (deprecation warning)"
+echo "[1/8] json-only Accept is rejected"
 wait_for_mcp_ready
-h1="$tmpdir/legacy-accept.headers"
-b1="$tmpdir/legacy-accept.body"
+h1="$tmpdir/json-only-accept.headers"
+b1="$tmpdir/json-only-accept.body"
 post_with_accept "application/json" \
   '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","clientInfo":{"name":"contract","version":"1.0"},"capabilities":{}}}' \
   "$h1" "$b1"
 code1="$(status_code "$h1")"
-if [ "$code1" != "200" ]; then
-  echo "FAIL: expected 200 for legacy Accept with deprecation, got $code1"
+if [ "$code1" != "400" ]; then
+  echo "FAIL: expected 400 for json-only Accept, got $code1"
   cat "$h1"
   cat "$b1"
   exit 1
 fi
-require_header_contains "$h1" "x-masc-legacy-accept" "1"
-require_header_contains "$h1" "warning" "deprecated"
+if ! grep -qi "Invalid Accept header" "$b1"; then
+  echo "FAIL: expected invalid Accept body"
+  cat "$b1"
+  exit 1
+fi
 
 echo "[2/8] streamable Accept success"
 h2="$tmpdir/ok.headers"

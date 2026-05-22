@@ -46,25 +46,16 @@ val is_initialize_method : string -> bool
 (** {1 Accept-header classification}
 
     The MCP spec mandates [Accept: application/json, text/event-stream]
-    for streamable transports.  Two opt-outs:
+    for streamable transports.  One request-level opt-out remains:
 
-    - [allow_legacy_accept] env flag accepts the older single-type
-      Accept headers ([application/json] alone or [text/event-stream]
-      alone).
     - The [x-masc-force-json] request header overrides the Accept
       negotiation entirely. *)
-
-val allow_legacy_accept : bool
-(** Cached at module-init from the [MASC_ALLOW_LEGACY_ACCEPT]
-    environment flag.  Truthy values: [1] / [true] / [yes] / [on]
-    (case-insensitive, trimmed).  Anything else is [false]. *)
 
 val classify_mcp_accept :
   Httpun.Request.t ->
   Mcp_transport_protocol.Http_negotiation.accept_mode
 (** [classify_mcp_accept request] reads the [accept] header and
-    returns the negotiation classification, honouring
-    {!allow_legacy_accept}. *)
+    returns the negotiation classification. *)
 
 val classify_mcp_accept_for_body :
   Httpun.Request.t ->
@@ -101,7 +92,7 @@ val request_force_json_response : Httpun.Request.t -> bool
 val force_json_response : bool
 (** Module-init cache of [MASC_FORCE_JSON_RESPONSE] OR
     [MCP_FORCE_JSON_RESPONSE] env flags (truthy semantics matching
-    {!allow_legacy_accept}).  Either flag forces every response to
+    the local env parser).  Either flag forces every response to
     plain JSON regardless of Accept negotiation. *)
 
 (** {1 Header builders} *)
@@ -139,16 +130,6 @@ val json_headers :
     [content-type: application/json] + {!mcp_headers} pair +
     [deps.cors_headers origin].  The canonical "JSON response"
     builder used by every JSON-bodied response in the transport. *)
-
-val legacy_accept_warning_headers :
-  Mcp_transport_protocol.Http_negotiation.accept_mode ->
-  (string * string) list
-(** [legacy_accept_warning_headers classification] returns a
-    [warning: 299 - "..."] + [x-masc-legacy-accept: 1] pair when the
-    classification is [Legacy_accepted], empty list otherwise.
-    The warning code 299 is RFC 7234's "miscellaneous persistent
-    warning"; the literal text steers operators to upgrade the
-    client's Accept header. *)
 
 val legacy_transport_deprecation_headers : (string * string) list
 (** Static three-header set ([deprecation: true],

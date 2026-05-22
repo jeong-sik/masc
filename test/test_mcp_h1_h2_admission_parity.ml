@@ -88,9 +88,7 @@ let test_request_context_decides_post_body () =
    with
   | Ok decision ->
       assert_accept_mode "streamable decision" Negotiation.Streamable
-        decision.accept_mode;
-      check (list (pair string string)) "no warning headers" []
-        decision.accept_warn_headers
+        decision.accept_mode
   | Error _ -> fail "streamable known session should pass");
   (match
      Request_context.decide_post_body ~request:streamable_request

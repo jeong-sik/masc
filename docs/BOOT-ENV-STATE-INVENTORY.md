@@ -721,7 +721,7 @@ Important operator-facing families still outside the centralized inventory:
 
 - dashboard and operator HTTP surfaces: `MASC_DASHBOARD_*`, `MASC_OPERATOR_*`, `MASC_WARM_DELAY_*`
 - advanced keeper tuning: extra `MASC_KEEPER_*` reads from `keeper_config.ml`, `keeper_memory_bank.ml`, `keeper_tool_affinity.ml`, and related files
-- transport edge cases: `MASC_ALLOW_LEGACY_ACCEPT`, `MASC_FORCE_JSON_RESPONSE`, `MASC_POST_SSE_KEEPALIVE_SEC`, `MASC_SSE_*`
+- transport edge cases: `MASC_FORCE_JSON_RESPONSE`, `MASC_POST_SSE_KEEPALIVE_SEC`, `MASC_SSE_*`
 - worker runtime and Docker lanes: `MASC_WORKER_RUNTIME_*`
 - goal, swarm, economy, and notify lanes: `MASC_GOAL_*`, `MASC_SWARM_*`, `MASC_ECONOMY_*`, `MASC_NOTIFY_*`
 - connector overrides: `MASC_DISCORD_*`

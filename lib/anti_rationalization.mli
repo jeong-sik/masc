@@ -79,9 +79,6 @@ val review :
     Used internally by Gate 2.5; exposed for testing. *)
 val check_contract : notes:string -> contract:string list -> string list
 
-(** Serialize review result to JSON for logging/calibration. *)
-val review_result_to_json : review_result -> Yojson.Safe.t
-
 (** Load excuse patterns dynamically from config/excuse_patterns.json.
     Returns the default hardcoded list if the file is missing or invalid.
     Exposed for dashboard administration. *)

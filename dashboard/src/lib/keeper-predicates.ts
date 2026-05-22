@@ -116,10 +116,13 @@ export function isKeeperOffline(keeper: KeeperOfflineInput): boolean {
 /** Closed set of blocker classes that the wakeup action is intended
  *  to recover. These three are the classes pre-RFC `canWake` checked
  *  inline in keeper-action-panel.ts; widening this set requires
- *  matching backend wakeup-recovery handling. */
+ *  matching backend wakeup-recovery handling.
+ *
+ *  Do not include legacy `oas_timeout_budget`: it is a compatibility
+ *  surface, not an owner-specific recoverable blocker. Wakeup should be
+ *  driven by the owning timeout/admission/capacity cause instead. */
 const WAKEUP_RECOVERABLE_BLOCKERS = new Set<string>([
   'cascade_exhausted',
-  'oas_timeout_budget',
   'turn_timeout',
 ])
 

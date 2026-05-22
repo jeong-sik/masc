@@ -1256,6 +1256,7 @@ let test_keeper_zombie_field_contracts () =
       generation = 1;
       turn_count = Some 1;
       oas_turn_count = None;
+      oas_dispatch_mode = None;
       current_task_id = Some "task-123";
       goal_ids = [ "goal-123" ];
       outcome = `Ok;
@@ -1287,6 +1288,7 @@ let test_keeper_zombie_field_contracts () =
           required_tools = [ "Read" ];
           required_tool_candidates = [];
           missing_required_tools = [];
+          materialized_tools = [];
         };
       sandbox_kind = Masc_mcp.Keeper_types.Local;
       sandbox_root = None;
@@ -1307,8 +1309,9 @@ let test_keeper_zombie_field_contracts () =
       error_message = None;
       started_at = "2026-05-06T00:00:00Z";
       ended_at = "2026-05-06T00:00:01Z";
-      memory_context_digest = None;
-      extra_system_context_final_size = None;
+      extra_system_context_digest = None;
+      extra_system_context_injected_size = None;
+      extra_system_context_computed_size = None;
     }
   in
   let json = R.to_json receipt in

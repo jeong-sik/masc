@@ -221,6 +221,7 @@ let pre_dispatch_tool_surface : Keeper_execution_receipt.tool_surface =
   ; required_tools = []
   ; required_tool_candidates = []
   ; missing_required_tools = []
+  ; materialized_tools = []
   }
 ;;
 
@@ -260,6 +261,7 @@ let record_pre_dispatch_terminal_observation
          | Some _ -> keeper_turn_id
          | None -> Some meta.runtime.usage.total_turns)
     ; oas_turn_count = None
+    ; oas_dispatch_mode = None
     ; current_task_id = Option.map Keeper_id.Task_id.to_string meta.current_task_id
     ; goal_ids = meta.active_goal_ids
     ; outcome
@@ -293,8 +295,9 @@ let record_pre_dispatch_terminal_observation
     ; error_message
     ; started_at
     ; ended_at
-    ; memory_context_digest = None
-    ; extra_system_context_final_size = None
+    ; extra_system_context_digest = None
+    ; extra_system_context_injected_size = None
+    ; extra_system_context_computed_size = None
     }
   in
   let receipt_path =

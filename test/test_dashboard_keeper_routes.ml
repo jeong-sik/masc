@@ -769,6 +769,7 @@ let append_execution_receipt
       generation = meta.runtime.generation;
       turn_count = Some 2;
       oas_turn_count = None;
+      oas_dispatch_mode = None;
       current_task_id = None;
       goal_ids = meta.active_goal_ids;
       outcome = `Ok;
@@ -793,6 +794,7 @@ let append_execution_receipt
           required_tools = [];
           required_tool_candidates;
           missing_required_tools = [];
+          materialized_tools = [];
         };
       sandbox_kind =
         Masc_mcp.Keeper_execution_receipt.sandbox_kind_of_meta meta;
@@ -843,8 +845,9 @@ let append_execution_receipt
       error_message = None;
       started_at;
       ended_at;
-      memory_context_digest = None;
-      extra_system_context_final_size = None;
+      extra_system_context_digest = None;
+      extra_system_context_injected_size = None;
+      extra_system_context_computed_size = None;
     }
   in
   let tm = Unix.gmtime (Unix.gettimeofday ()) in

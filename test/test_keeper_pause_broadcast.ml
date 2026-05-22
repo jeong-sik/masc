@@ -16,6 +16,7 @@ let mk_tool_surface
       ?(required_tools = [])
       ?(required_tool_candidates = [])
       ?(missing_required_tools = [])
+      ?(materialized_tools = [])
       ()
   : R.tool_surface
   =
@@ -35,6 +36,7 @@ let mk_tool_surface
   ; required_tools
   ; required_tool_candidates
   ; missing_required_tools
+  ; materialized_tools
   }
 ;;
 
@@ -68,6 +70,7 @@ let mk_receipt
   ; generation = 1
   ; turn_count = Some 1
   ; oas_turn_count = None
+  ; oas_dispatch_mode = None
   ; current_task_id
   ; goal_ids
   ; outcome
@@ -107,8 +110,9 @@ let mk_receipt
   ; error_message
   ; started_at = "2026-04-26T00:00:00Z"
   ; ended_at = "2026-04-26T00:00:01Z"
-  ; memory_context_digest = None
-  ; extra_system_context_final_size = None
+  ; extra_system_context_digest = None
+  ; extra_system_context_injected_size = None
+  ; extra_system_context_computed_size = None
   }
 ;;
 
@@ -533,6 +537,7 @@ let test_turn_livelock_broadcast_suppresses_duplicate_turn () =
          ; generation = 7
          ; turn_count = Some 605
          ; oas_turn_count = None
+         ; oas_dispatch_mode = None
          ; current_task_id = Some "task-livelock-dedupe"
          }
        in
@@ -554,7 +559,8 @@ let test_turn_livelock_broadcast_suppresses_duplicate_turn () =
             ());
        R.append
          config
-         { receipt with trace_id = "trace-livelock-dedupe-3"; turn_count = Some 606; oas_turn_count = None };
+         { receipt with trace_id = "trace-livelock-dedupe-3"; turn_count = Some 606; oas_turn_count = None
+         ; oas_dispatch_mode = None };
        check int "new turn emits again" 2 (operator_broadcast_event_count config))
 ;;
 

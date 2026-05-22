@@ -1483,7 +1483,7 @@ let run_turn
            |> Keeper_turn_terminal_code.to_wire
        in
        let cascade_observation = !receipt_cascade_observation_ref in
-       let memory_context_digest, extra_system_context_final_size =
+       let extra_system_context_digest, extra_system_context_injected_size =
          match Memory_hooks.get_last_memory_injection meta.agent_name with
          | Some (digest, size) -> Some digest, Some size
          | None -> None, None
@@ -1495,6 +1495,7 @@ let run_turn
          ; generation
          ; turn_count = !receipt_turn_count_ref
          ; oas_turn_count = !receipt_turn_count_ref
+         ; oas_dispatch_mode = Some "single_provider_agent_run"
          ; current_task_id =
              Option.map Keeper_id.Task_id.to_string acc.meta.current_task_id
          ; goal_ids = meta.active_goal_ids
@@ -1523,6 +1524,7 @@ let run_turn
              ; required_tool_candidates =
                  acc.tool_surface.required_tool_candidate_names
              ; missing_required_tools = acc.tool_surface.missing_required_tool_names
+             ; materialized_tools = !materialized_tool_names_ref
              }
          ; sandbox_kind = Keeper_execution_receipt.sandbox_kind_of_meta meta
          ; sandbox_root = Some keeper_visible_sandbox_root
@@ -1553,8 +1555,9 @@ let run_turn
          ; error_message
          ; started_at = receipt_started_at
          ; ended_at = receipt_ended_at
-         ; memory_context_digest
-         ; extra_system_context_final_size
+         ; extra_system_context_digest
+         ; extra_system_context_injected_size
+         ; extra_system_context_computed_size = None
          }
        in
        let receipt_path =

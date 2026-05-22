@@ -124,6 +124,7 @@ let append_keeper_receipt
       generation = meta.runtime.generation;
       turn_count = Some 7;
       oas_turn_count = None;
+      oas_dispatch_mode = None;
       current_task_id = None;
       goal_ids = meta.active_goal_ids;
       outcome;
@@ -148,6 +149,7 @@ let append_keeper_receipt
           required_tools = [];
           required_tool_candidates = [];
           missing_required_tools = [];
+          materialized_tools = [];
         };
       sandbox_kind = Keeper_execution_receipt.sandbox_kind_of_meta meta;
       sandbox_root = Some config.base_path;
@@ -168,8 +170,9 @@ let append_keeper_receipt
       error_message = None;
       started_at;
       ended_at;
-      memory_context_digest = None;
-      extra_system_context_final_size = None;
+      extra_system_context_digest = None;
+      extra_system_context_injected_size = None;
+      extra_system_context_computed_size = None;
     }
   in
   Keeper_execution_receipt.append config receipt

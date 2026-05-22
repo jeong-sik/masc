@@ -62,6 +62,7 @@ type tool_surface =
   ; required_tools : string list
   ; required_tool_candidates : string list
   ; missing_required_tools : string list
+  ; materialized_tools : string list
   }
 
 (* Phase identifier emitted when a cascade rotation releases the in-flight
@@ -279,6 +280,7 @@ type t =
   ; generation : int
   ; turn_count : int option
   ; oas_turn_count : int option
+  ; oas_dispatch_mode : string option
   ; current_task_id : string option
   ; goal_ids : string list
   ; outcome : outcome_kind
@@ -312,8 +314,9 @@ type t =
   ; error_message : string option
   ; started_at : string
   ; ended_at : string
-  ; memory_context_digest : string option
-  ; extra_system_context_final_size : int option
+  ; extra_system_context_digest : string option
+  ; extra_system_context_injected_size : int option
+  ; extra_system_context_computed_size : int option
   }
 
 let stop_reason_to_string = function
@@ -784,6 +787,10 @@ let to_json (receipt : t) =
       , match receipt.oas_turn_count with
         | Some value -> `Int value
         | None -> `Null )
+    ; ( "oas_dispatch_mode"
+      , match receipt.oas_dispatch_mode with
+        | Some value -> `String value
+        | None -> `Null )
     ; ( "current_task_id"
       , match receipt.current_task_id with
         | Some value -> `String value
@@ -825,6 +832,8 @@ let to_json (receipt : t) =
             , list_json receipt.tool_surface.required_tool_candidates )
           ; ( "missing_required_tools"
             , list_json receipt.tool_surface.missing_required_tools )
+          ; ( "materialized_tools"
+            , list_json receipt.tool_surface.materialized_tools )
           ] )
     ; ( "sandbox"
       , `Assoc
@@ -874,12 +883,16 @@ let to_json (receipt : t) =
     ; "error", error_json
     ; "started_at", `String receipt.started_at
     ; "ended_at", `String receipt.ended_at
-    ; ( "memory_context_digest"
-      , match receipt.memory_context_digest with
+    ; ( "extra_system_context_digest"
+      , match receipt.extra_system_context_digest with
         | Some value -> `String value
         | None -> `Null )
-    ; ( "extra_system_context_final_size"
-      , match receipt.extra_system_context_final_size with
+    ; ( "extra_system_context_injected_size"
+      , match receipt.extra_system_context_injected_size with
+        | Some value -> `Int value
+        | None -> `Null )
+    ; ( "extra_system_context_computed_size"
+      , match receipt.extra_system_context_computed_size with
         | Some value -> `Int value
         | None -> `Null )
     ]
@@ -1049,6 +1062,8 @@ let operator_broadcast_payload (receipt : t) ~disposition ~reason =
           ; "tool_gate_enabled", `Bool receipt.tool_surface.tool_gate_enabled
           ; ( "tool_surface_fallback_used"
             , `Bool receipt.tool_surface.tool_surface_fallback_used )
+          ; ( "materialized_tools"
+            , list_json receipt.tool_surface.materialized_tools )
           ] )
     ; ( "sandbox"
       , `Assoc

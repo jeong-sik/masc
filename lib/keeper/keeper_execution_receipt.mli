@@ -98,6 +98,7 @@ type tool_surface =
   ; required_tools : string list
   ; required_tool_candidates : string list
   ; missing_required_tools : string list
+  ; materialized_tools : string list
   }
 
 (** Phase identifier emitted when a cascade rotation releases the in-flight
@@ -204,6 +205,7 @@ type t =
   ; generation : int
   ; turn_count : int option
   ; oas_turn_count : int option
+  ; oas_dispatch_mode : string option
   ; current_task_id : string option
   ; goal_ids : string list
   ; outcome : outcome_kind
@@ -237,8 +239,9 @@ type t =
   ; error_message : string option
   ; started_at : string
   ; ended_at : string
-  ; memory_context_digest : string option
-  ; extra_system_context_final_size : int option
+  ; extra_system_context_digest : string option
+  ; extra_system_context_injected_size : int option
+  ; extra_system_context_computed_size : int option
   }
 
 val stop_reason_to_string : Cascade_runner.stop_reason -> string

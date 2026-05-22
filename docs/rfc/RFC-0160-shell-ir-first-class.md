@@ -1,14 +1,14 @@
 ---
 rfc: "0160"
 title: "Shell IR 1급 승격 — single-source decision substrate across producer/classifier/gate/dispatch"
-status: Active
+status: Implemented
 created: 2026-05-23
 updated: 2026-05-23
 author: vincent
 supersedes: []
 superseded_by: null
 related: ["0042", "0086", "0088", "0091", "0107", "0142", "0154"]
-implementation_prs: [17873, 17884]
+implementation_prs: [17873, 17884, 17918, 17919, 17925, 17926, 17927]
 ---
 
 ## §0 · Context
@@ -182,6 +182,27 @@ match.
 
 **Closes**: G4 (`risk` stamped) + ensures S1's classifier output is
 *reused* by every downstream consumer instead of recomputed.
+
+#### S3 implementation record (2026-05-23)
+
+**Option B (phantom envelope)** selected and shipped across 5 PRs:
+
+| PR | Scope | Merged |
+|----|-------|--------|
+| #17918 | `lib/exec/shell_ir_risk.ml/mli` + `dispatch_decided` + tests | squash `5bb5c5f5cf` |
+| #17919 | `keeper_shell_bash.ml` — classify + dispatch_decided + risk-based gates | squash |
+| #17925 | Seal `Exec_dispatch.dispatch` behind `dispatch_decided` | squash |
+| #17926 | `keeper_shell_ops.ml` — gh reversibility → `Shell_ir_risk.classify` | squash `42aa53ebdb` |
+| #17927 | `worker_dev_tools.ml` + `tool_code_write.ml` — classify + dispatch_decided | squash `00c7f45afc` |
+
+**PR-5 gate enrichment cancelled**: Adding `risk_class` to
+`parsed_context` violates SRP — the gate does policy checking
+(allowlist/path/redirect); risk classification is a separate
+downstream concern. Current architecture (gate → classify → dispatch)
+is correct. Telemetry already recorded in `keeper_shell_bash` logs.
+
+**G4 audit metrics** (post-S3): phantom=20 refs in `shell_ir_risk.ml/mli`,
+`dispatch_decided` consumers=7 files (all production dispatch sites migrated).
 
 ### S4 · Parser entry consolidation
 

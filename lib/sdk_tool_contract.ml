@@ -285,20 +285,6 @@ let param_type_of_schema_opt schema : Agent_sdk.Types.param_type option =
   | "object" -> Some Agent_sdk.Types.Object
   | _ -> None
 
-(* Back-compat wrapper: warns once per unknown JSON Schema type and falls
-   back to [String] (the legacy permissive default mirrored by the
-   upstream Agent_sdk.Mcp.json_schema_type_to_param_type). The warn
-   converts the silent #8605-family fallback into an observable signal
-   without changing the tool-registration result. *)
-let param_type_of_schema schema =
-  match param_type_of_schema_opt schema with
-  | Some t -> t
-  | None ->
-      Log.Misc.warn
-        "param_type_of_schema: unknown JSON Schema type %S -> String (drift; see #8832)"
-        (schema_type schema);
-      Agent_sdk.Types.String
-
 let tool_params_of_input_schema schema =
   let required = required_names schema in
   property_map schema
@@ -311,7 +297,14 @@ let tool_params_of_input_schema schema =
            {
              name;
              description;
-             param_type = param_type_of_schema property_schema;
+             param_type =
+               (match param_type_of_schema_opt property_schema with
+               | Some t -> t
+               | None ->
+                   Log.Misc.warn
+                     "tool_params_of_input_schema: unknown JSON Schema type %S -> String (drift; see #8832)"
+                     (schema_type property_schema);
+                   Agent_sdk.Types.String);
              required = List.mem name required;
            }
          in

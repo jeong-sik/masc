@@ -131,12 +131,6 @@ val json_headers :
     [deps.cors_headers origin].  The canonical "JSON response"
     builder used by every JSON-bodied response in the transport. *)
 
-val legacy_transport_deprecation_headers : (string * string) list
-(** Static three-header set ([deprecation: true],
-    [warning: 299 - "..."], [link: </mcp>; rel="successor-version"])
-    for the legacy SSE endpoints ([/sse], [/messages]) which are
-    being phased out in favour of the unified [/mcp] path. *)
-
 (** {1 SSE constants} *)
 
 val sse_retry_ms : int

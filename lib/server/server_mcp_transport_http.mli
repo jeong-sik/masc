@@ -71,7 +71,6 @@ val get_session_id_query : string -> string option
 val get_header_any_case : Httpun.Headers.t -> string -> string option
 val get_cookie_value : Httpun.Request.t -> string -> string option
 val get_session_id_any : Httpun.Request.t -> string option
-val legacy_messages_endpoint_url : Httpun.Request.t -> string -> string
 val get_protocol_version : Httpun.Request.t -> string
 val validate_protocol_version_continuity :
   session_id:string -> Httpun.Request.t -> (unit, string) result
@@ -87,7 +86,6 @@ val should_use_sse_for_body :
   string ->
   Mcp_transport_protocol.Http_negotiation.accept_mode ->
   bool
-val legacy_transport_deprecation_headers : (string * string) list
 val force_json_response : bool
 val get_last_event_id : Httpun.Request.t -> int option
 val mcp_headers : string -> string -> (string * string) list
@@ -107,15 +105,12 @@ val handle_post_mcp :
   unit
 val handle_get_mcp :
   deps:deps ->
-  ?legacy_messages_endpoint:(string -> string) ->
   ?profile:tool_profile ->
   ?sse_kind:Sse.session_kind ->
   Httpun.Request.t ->
   Httpun.Reqd.t ->
   unit
 val handle_get_operator_mcp :
-  deps:deps -> Httpun.Request.t -> Httpun.Reqd.t -> unit
-val handle_post_messages :
   deps:deps -> Httpun.Request.t -> Httpun.Reqd.t -> unit
 val handle_delete_mcp :
   deps:deps ->

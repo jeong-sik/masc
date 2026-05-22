@@ -130,24 +130,6 @@ val get_session_id_any : Httpun.Request.t -> string option
     fallback order is the operator contract — clients that
     drop one channel still authenticate via the next. *)
 
-val legacy_messages_endpoint_url :
-  Httpun.Request.t -> string -> string
-(** [legacy_messages_endpoint_url request session_id] returns
-    the absolute URL for the legacy [/messages?session_id=...]
-    endpoint.
-
-    Protocol resolution:
-    - [X-Forwarded-Proto] header value when present.
-    - Otherwise [https] when [Host:] starts with the literal
-      prefix [["masc.crying.pict"]] (the Cloudflare tunnel
-      hostname); else [http].
-
-    The 16-char tunnel-host prefix is pinned at the contract
-    seam: an earlier version used a length-mismatched
-    [String.sub] (17-char substring vs 16-char literal) which
-    was always false, so tunnel hosts silently advertised
-    [http://].  Pinning prevents drift. *)
-
 (** {1 Protocol version resolution} *)
 
 val get_protocol_version : Httpun.Request.t -> string

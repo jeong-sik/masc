@@ -86,7 +86,4 @@ let classify_mcp_accept_for_body =
 let should_use_sse_for_body =
   Server_mcp_transport_http_headers.should_use_sse_for_body
 
-let legacy_transport_deprecation_headers =
-  Server_mcp_transport_http_headers.legacy_transport_deprecation_headers
-
 let force_json_response = Server_mcp_transport_http_headers.force_json_response

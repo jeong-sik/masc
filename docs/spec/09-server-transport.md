@@ -338,7 +338,6 @@ Sse.subscribe_external ~id:"ws-123"
 | GET | `/mcp/operator` | `handle_get_operator_mcp` | Operator SSE |
 | DELETE | `/mcp/operator` | `handle_delete_mcp ~profile:Operator_remote` | Operator 세션 종료 |
 | GET | `/sse` | `sse_simple_handler` | 단순 SSE (Observer) |
-| POST | `/messages` | `handle_post_messages` | 레거시 MCP 메시지 엔드포인트 |
 | GET | `/ws` | `websocket_discovery_json` | WebSocket discovery JSON (`enabled`, `ws_port`, `ws_url`) |
 | POST | `/webrtc/offer` | `handle_offer_request` | WebRTC offer signaling |
 | POST | `/webrtc/answer` | `handle_answer_request` | WebRTC answer signaling |
@@ -446,7 +445,7 @@ Access-Control-Expose-Headers: Mcp-Session-Id, Mcp-Protocol-Version
 Access-Control-Allow-Credentials: true
 ```
 
-MCP 경로(`/mcp`, `/sse`, `/messages`)에서 Origin 검증을 수행한다. 유효하지 않은 origin은 `403 Forbidden`.
+MCP 경로(`/mcp`, `/sse`)에서 Origin 검증을 수행한다. 유효하지 않은 origin은 `403 Forbidden`.
 
 ---
 

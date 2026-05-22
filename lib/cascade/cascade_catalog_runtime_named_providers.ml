@@ -109,7 +109,7 @@ let tier_id_for_candidate
     tier_index
     (candidate : candidate_runtime) =
   let health_key =
-    Cascade_config.provider_health_key_of_config candidate.provider_cfg
+    Llm_provider.Complete_cascade.provider_key candidate.provider_cfg
   in
   match Hashtbl.find_opt tier_index health_key with
   | Some queue when not (Queue.is_empty queue) -> Queue.pop queue

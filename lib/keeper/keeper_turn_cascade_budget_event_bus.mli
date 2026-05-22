@@ -30,3 +30,5 @@ val merge_turn_event_bus_summary
   :  turn_event_bus_summary
   -> turn_event_bus_summary
   -> turn_event_bus_summary
+
+val add_payload_kind : string list -> string -> string list

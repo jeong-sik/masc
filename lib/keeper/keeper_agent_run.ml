@@ -933,19 +933,17 @@ let run_turn
                          (Contract_helpers.completion_contract_violation_error reason)
                    in
                    let finalize_response_text raw_response_text =
-                     Keeper_agent_run_response_text.finalize
-                       ~keeper_name:meta.name
-                       ~goal:meta.goal
-                       ~actual_keeper_tool_names:!actual_keeper_tool_names_ref
-                       ~fallback_tool_names:actual_keeper_tool_names
-                       ~stop_reason:result.stop_reason
-                       ~raw_response_text
-                   in
-                   let
-                     { Keeper_agent_run_response_text.state_snapshot; response_text }
-                     =
-                     finalize_response_text raw_response_text
-                   in
+                     let
+                       { Keeper_agent_run_response_text.state_snapshot; response_text }
+                       =
+                       Keeper_agent_run_response_text.finalize
+                         ~keeper_name:meta.name
+                         ~goal:meta.goal
+                         ~actual_keeper_tool_names:!actual_keeper_tool_names_ref
+                         ~fallback_tool_names:actual_keeper_tool_names
+                         ~stop_reason:result.stop_reason
+                         ~raw_response_text
+                     in
                     let state_snapshot_source =
                       if
                         Option.is_some

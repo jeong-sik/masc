@@ -718,8 +718,6 @@ let transport_health_json ~config =
           ; "managed_endpoint", `String "/mcp/managed"
           ; "operator_endpoint", `String "/mcp/operator"
           ; "delete_endpoint", `String "/mcp"
-          ; "legacy_sse_endpoint", `String "/sse"
-          ; "legacy_messages_endpoint", `String "/messages"
           ; "default_transport", `String "streamable_http"
           ; "configured", `Bool true
           ; "protocol_capable", `Bool true

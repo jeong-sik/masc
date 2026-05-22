@@ -108,46 +108,68 @@ let eval_base ~base_path =
 let eval_dir ~base_path ~agent_name =
   Filename.concat (eval_base ~base_path) agent_name
 
-(* Silent [Sys_error _ -> []] previously hid two distinct failure modes
-   behind "no agents have eval data": (1) the eval directory is
-   legitimately empty (expected during fresh boot before any verdict
-   write), (2) the directory is unreadable due to permission denied,
-   missing parent, or filesystem unavailability. Operators staring at
-   an empty Eval Feed pane need to tell these apart. Same pattern as
-   #16712, #16720, #16724, #16725, #16729 (silent-failure series). *)
-let list_agents ~base_path =
-  let dir = eval_base ~base_path in
+let path_kind path =
+  try
+    if Sys.file_exists path then
+      if Sys.is_directory path then `Directory else `Other
+    else `Missing
+  with Sys_error msg -> `Unreadable msg
+
+let warn_unreadable ~op ~path msg =
+  Log.Dashboard.warn "[eval_feed.%s] path unreadable at %s: %s" op path msg
+
+let warn_not_directory ~op ~path =
+  Log.Dashboard.warn "[eval_feed.%s] expected directory at %s" op path
+
+let sorted_json_files dir =
   try
     Sys.readdir dir
     |> Array.to_list
-    |> List.filter (fun name ->
-         Sys.is_directory (Filename.concat dir name))
-    |> List.sort String.compare
-  with
-  | Sys_error msg ->
-    Log.Dashboard.warn
-      "[eval_feed.list_agents] eval directory unreadable at %s: %s"
-      dir
-      msg;
+    |> List.filter (fun f -> Filename.check_suffix f ".json")
+    |> List.sort (fun a b -> String.compare b a)
+  with Sys_error msg ->
+    warn_unreadable ~op:"read_latest" ~path:dir msg;
     []
+
+let list_agents ~base_path =
+  let dir = eval_base ~base_path in
+  match path_kind dir with
+  | `Missing -> []
+  | `Other ->
+      warn_not_directory ~op:"list_agents" ~path:dir;
+      []
+  | `Unreadable msg ->
+      warn_unreadable ~op:"list_agents" ~path:dir msg;
+      []
+  | `Directory -> (
+      try
+        Sys.readdir dir
+        |> Array.to_list
+        |> List.filter (fun name ->
+             match path_kind (Filename.concat dir name) with
+             | `Directory -> true
+             | `Missing | `Other -> false
+             | `Unreadable msg ->
+                 warn_unreadable ~op:"list_agents"
+                   ~path:(Filename.concat dir name) msg;
+                 false)
+        |> List.sort String.compare
+      with Sys_error msg ->
+        warn_unreadable ~op:"list_agents" ~path:dir msg;
+        [])
 
 let read_latest ~base_path ~agent_name ~limit =
   let dir = eval_dir ~base_path ~agent_name in
   let files =
-    try
-      Sys.readdir dir
-      |> Array.to_list
-      |> List.filter (fun f -> Filename.check_suffix f ".json")
-      |> List.sort (fun a b -> String.compare b a)
-    with
-    | Sys_error msg ->
-      Log.Dashboard.warn
-        "[eval_feed.read_latest] per-agent verdict directory unreadable for \
-         %s at %s: %s"
-        agent_name
-        dir
-        msg;
-      []
+    match path_kind dir with
+    | `Missing -> []
+    | `Other ->
+        warn_not_directory ~op:"read_latest" ~path:dir;
+        []
+    | `Unreadable msg ->
+        warn_unreadable ~op:"read_latest" ~path:dir msg;
+        []
+    | `Directory -> sorted_json_files dir
   in
   let rec collect acc remaining = function
     | [] -> List.rev acc

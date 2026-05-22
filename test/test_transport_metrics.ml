@@ -400,6 +400,14 @@ let test_transport_health_json () =
     | _ -> false);
   check string "presence stream endpoint" "/events/presence"
     (streamable_json |> U.member "presence_stream" |> U.to_string);
+  check bool "legacy SSE endpoint is not advertised" true
+    (match streamable_json |> U.member "legacy_sse_endpoint" with
+    | `Null -> true
+    | _ -> false);
+  check bool "legacy messages endpoint is not advertised" true
+    (match streamable_json |> U.member "legacy_messages_endpoint" with
+    | `Null -> true
+    | _ -> false);
   check int "grpc active streams" 1
     (grpc_json |> U.member "active_streams" |> U.to_int);
   check int "grpc subscribers" 2

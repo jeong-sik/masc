@@ -3,7 +3,6 @@ open Server_auth
 open Server_dashboard_http
 open Server_routes_http_common
 open Server_routes_http_keeper_stream
-open Tool_args
 
 module Http = Http_server_eio
 module Mcp_eio = Mcp_server_eio
@@ -141,11 +140,11 @@ let dashboard_doctor_degraded_json ~self_bin ~exn =
                 ; "kind", `String "config"
                 ; "exit_code", `Int 2
                 ; ( "payload"
-                  , error_assoc
+                  , Tool_args.error_assoc
                       [ "title", `String "Dashboard Doctor Route"
                       ; ( "checks"
                         , `List
-                            [ error_assoc
+                            [ Tool_args.error_assoc
                                 [ "name", `String "self-binary"
                                 ; "message", `String message
                                 ; "path", `String self_bin

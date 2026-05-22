@@ -246,7 +246,6 @@ const FAILURE_REASON_BASE_LABELS: Record<string, string> = {
   stale_turn_timeout: 'Stale 턴 시간 초과',
   stale_termination_storm: 'Stale 종료 폭주',
   stale_fleet_batch: 'Fleet stale 배치',
-  oas_timeout_budget_loop: '레거시 OAS 타임아웃 예산 루프',
   provider_runtime_error: 'Provider 런타임 오류',
   tool_required_unsatisfied: '필수 도구 미충족',
   ambiguous_partial_commit: '부분 commit 모호',
@@ -370,7 +369,7 @@ export function trustDispositionLabel(value: string | null | undefined): string 
  *  `attention_reason = timeout_budget_exhausted` (verdict failure) and
  *  `tool_contract_result = satisfied_execution` (tools that *were*
  *  called fulfilled their contract). With sibling rendering this
- *  appeared as "검증 · timeout_budget_exhausted" *and* "증명 ·
+ *  appeared as "검증 · completion_contract_violation" *and* "증명 ·
  *  satisfied_execution" at the same time, which an operator reads as
  *  the surface contradicting itself.
  *
@@ -481,11 +480,6 @@ export interface CascadeAttemptObservation {
  *  `lib/keeper/keeper_runtime_trust_snapshot.ml`. Unknown codes do
  *  not gate (fail open: operator still sees the attempt outcome). */
 const TURN_TERMINAL_FAILURE_CODES = new Set<string>([
-  // Legacy timeout-budget wires are still terminal failure codes for
-  // compatibility, but new operator copy should prefer owner-specific
-  // timeout/admission/capacity causes.
-  'oas_timeout_budget',
-  'oas_timeout_budget_loop',
   'turn_timeout',
   'turn_wall_clock_timeout',
   'cascade_exhausted',
@@ -628,7 +622,6 @@ const TERMINAL_REASON_CODE_LABELS: Record<string, string> = {
   stale_turn_timeout: '오래된 턴 시간 초과',
   stale_termination_storm: 'Stale 종료 폭주',
   stale_fleet_batch: 'Fleet stale 배치',
-  oas_timeout_budget: '레거시 OAS 타임아웃 예산',
   heartbeat_failures: '하트비트 실패',
   turn_failures: '턴 실패 반복',
   ambiguous_partial_commit: '부분 commit 모호',

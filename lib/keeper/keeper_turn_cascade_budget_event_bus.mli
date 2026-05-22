@@ -30,5 +30,13 @@ val merge_turn_event_bus_summary
   :  turn_event_bus_summary
   -> turn_event_bus_summary
   -> turn_event_bus_summary
+<<<<<<< HEAD
 
 val add_payload_kind : string list -> string -> string list
+||||||| parent of 7671e4309c (fix: repair broken build from recent refactoring PRs)
+=======
+
+val add_payload_kind : string list -> string -> string list
+
+val merge_payload_kinds : string list -> string list -> string list
+>>>>>>> 7671e4309c (fix: repair broken build from recent refactoring PRs)

@@ -12,11 +12,11 @@ let simple ?(args = []) ?(env = []) ?(cwd = None) ?(redirects = [])
     : Shell_ir.simple =
   { bin; args; env; cwd; redirects; sandbox }
 
-let lit s = Shell_ir.Lit s
+let lit s = Shell_ir.Lit (s, Shell_ir.default_meta)
 
 let arg_to_string = function
-  | Shell_ir.Lit s -> s
-  | Shell_ir.Var _ | Shell_ir.Concat _ ->
+  | Shell_ir.Lit (s, Shell_ir.default_meta) -> s
+  | Shell_ir.Var (_, Shell_ir.default_meta) | Shell_ir.Concat _ ->
     assert false (* tests use only literal args *)
 
 let argv_of_simple s =

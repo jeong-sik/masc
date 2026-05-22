@@ -155,8 +155,8 @@ let test_sudo_round_trip_preserves_quoted_arg () =
   let reconstructed_argv =
     List.map
       (function
-        | Shell_ir.Lit s -> s
-        | Shell_ir.Var _ | Shell_ir.Concat _ -> failwith "unexpected non-lit arg")
+        | Shell_ir.Lit (s, Shell_ir.default_meta) -> s
+        | Shell_ir.Var (_, Shell_ir.default_meta) | Shell_ir.Concat _ -> failwith "unexpected non-lit arg")
       reconstructed.Shell_ir.args
   in
   check (list string)

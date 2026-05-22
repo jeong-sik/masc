@@ -91,7 +91,7 @@ parse [] None args|}
     ; to_simple_body =
         {|
       { Shell_ir.bin = Bin.of_known Bin.Cat
-      ; args = [ Shell_ir.Lit path ]
+      ; args = [ Shell_ir.Lit (path, Shell_ir.default_meta) ]
       ; env = []
       ; cwd = None
       ; redirects = []
@@ -452,8 +452,8 @@ let emit_of_simple buf spec =
     "let gen_of_simple (s : Shell_ir.simple) : Shell_ir_typed_types.wrapped =\n\
     \  let generic () = Shell_ir_typed_types.W (Shell_ir_typed_types.Generic s) in\n\
     \  let lit_of_arg = function\n\
-    \    | Shell_ir.Lit s -> Some s\n\
-    \    | Shell_ir.Var _ | Shell_ir.Concat _ -> None\n\
+    \    | Shell_ir.Lit (s, Shell_ir.default_meta) -> Some s\n\
+    \    | Shell_ir.Var (_, Shell_ir.default_meta) | Shell_ir.Concat _ -> None\n\
     \  in\n\
     \  let rec all_lits_opt args =\n\
     \    let rec go acc = function\n\

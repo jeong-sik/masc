@@ -100,12 +100,12 @@ let pipeline_status current stage_status =
 (* --- arg resolution --- *)
 
 let rec resolve_arg = function
-  | Shell_ir.Lit s -> s
+  | Shell_ir.Lit (s, Shell_ir.default_meta) -> s
   | Concat parts ->
       let buf = Buffer.create 64 in
       List.iter (fun a -> Buffer.add_string buf (resolve_arg a)) parts;
       Buffer.contents buf
-  | Var name ->
+  | Var (name, _) ->
       (match Sys.getenv_opt name with Some v -> v | None -> "")
 
 let resolve_env env_bindings =

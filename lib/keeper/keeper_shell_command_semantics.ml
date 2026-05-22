@@ -13,8 +13,8 @@ type parsed_stage =
 let literal_args args =
   let rec loop acc = function
     | [] -> Some (List.rev acc)
-    | Masc_exec.Shell_ir.Lit arg :: rest -> loop (arg :: acc) rest
-    | Masc_exec.Shell_ir.Concat _ :: _ | Masc_exec.Shell_ir.Var _ :: _ -> None
+    | Masc_exec.Shell_ir.Lit (arg, Shell_ir.default_meta) :: rest -> loop (arg :: acc) rest
+    | Masc_exec.Shell_ir.Concat _ :: _ | Masc_exec.Shell_ir.Var (_, Shell_ir.default_meta) :: _ -> None
   in
   loop [] args
 

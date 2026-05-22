@@ -16,7 +16,7 @@ let simple ?(args = []) ?(env = []) ?(cwd = None) ?(redirects = [])
     : Shell_ir.simple =
   { bin; args; env; cwd; redirects; sandbox }
 
-let lit s = Shell_ir.Lit s
+let lit s = Shell_ir.Lit (s, Shell_ir.default_meta)
 
 let test_ls_emits_exec_bin () =
   let ir = Shell_ir.Simple (simple (bin_ok "ls")) in

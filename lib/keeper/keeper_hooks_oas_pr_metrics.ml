@@ -121,7 +121,7 @@ let pr_work_actions_of_git_segment segment =
            (Masc_exec.Bin.to_string simple.bin |> String.lowercase_ascii)
            "git" ->
       (match simple.args with
-       | Masc_exec.Shell_ir.Lit action :: _ ->
+       | Masc_exec.Shell_ir.Lit (action, Shell_ir.default_meta) :: _ ->
            pr_work_action_of_git_action action |> Option.to_list
        | _ -> [])
   | _ ->

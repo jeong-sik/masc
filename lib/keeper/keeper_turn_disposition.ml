@@ -108,7 +108,6 @@ let of_termination_code (c : Code.t) : t =
   | Code.Stale_turn_timeout_in_turn
   | Code.Stale_turn_timeout_no_progress
   | Code.Stale_turn_timeout_noop -> Turn_wall_clock_timeout
-  | Code.Oas_timeout_budget -> Turn_wall_clock_timeout
   | Code.Tool_required_unsatisfied _ -> Required_tool_use_unsatisfied
   | Code.Ambiguous_partial_commit_post_commit_timeout
   | Code.Ambiguous_partial_commit_post_commit_failure -> Post_commit_ambiguous

@@ -637,8 +637,8 @@ let handle_stale_storm_pause ctx entry =
   Pause_policy.handle_stale_storm_pause ~publish_phase_lifecycle ctx entry
 ;;
 
-let handle_oas_timeout_budget_pause ctx entry =
-  Pause_policy.handle_oas_timeout_budget_pause ~publish_phase_lifecycle ctx entry
+let handle_provider_timeout_pause ctx entry =
+  Pause_policy.handle_provider_timeout_pause ~publish_phase_lifecycle ctx entry
 ;;
 
 let failure_reason_policy_decision = Pause_policy.failure_reason_policy_decision
@@ -718,10 +718,10 @@ let sweep_and_recover (ctx : _ context) =
          handle_stale_storm_pause ctx entry ~count;
          to_unregister := entry :: !to_unregister
        | Some (Keeper_registry.Provider_timeout_loop { count }) ->
-         (* Watchdog-preserved OAS budget loops include liveness evidence,
+         (* Watchdog-preserved provider-timeout loops include liveness evidence,
             so policy allows keeper pause without treating timeout alone as
             keeper death. *)
-         handle_oas_timeout_budget_pause ctx entry ~count;
+         handle_provider_timeout_pause ctx entry ~count;
          to_unregister := entry :: !to_unregister
        | Some
            ( Keeper_registry.Heartbeat_consecutive_failures _

@@ -8,7 +8,7 @@
     - the unified entrypoint [handle_crash_auto_pause] used by both
       stale-termination-storm and OAS-timeout-budget-loop pause paths;
     - thin per-cause wrappers [handle_stale_storm_pause] and
-      [handle_oas_timeout_budget_pause] (legacy registry input,
+      [handle_provider_timeout_pause] (legacy registry input,
       surfaced as a provider-timeout loop);
     - the read-side classifier [failure_reason_policy_decision] that
       maps a persisted [Keeper_registry.failure_reason] back to a
@@ -159,7 +159,7 @@ let handle_stale_storm_pause
          count)
 ;;
 
-let handle_oas_timeout_budget_pause
+let handle_provider_timeout_pause
       ~publish_phase_lifecycle
       (ctx : _ context)
       (entry : Keeper_registry.registry_entry)

@@ -369,28 +369,45 @@ let handle_keeper_status ctx args : tool_result =
              in
              find_latest (List.rev metrics_window_lines)
          in
-         let memory_bank_summary =
+         (* RFC-0149 §3.1 — typed Result resolver.  The companion
+            [memory_bank_error_class] travels alongside the summary so
+            the dashboard detail surface can distinguish an empty
+            memory bank ([Ok summary], no recent rows) from an IO
+            fault ([Error class]) instead of collapsing both into the
+            same empty-shape record via the legacy silent fallback. *)
+         let empty_memory_bank_summary
+           : Keeper_memory_policy.keeper_memory_summary
+           =
+           { total_notes = 0
+           ; last_ts_unix = 0.0
+           ; top_kind = None
+           ; kind_counts = []
+           ; recent_notes = []
+           }
+         in
+         let memory_bank_summary, memory_bank_error_class =
            if include_memory_bank then
-             let summary =
-               read_keeper_memory_summary
+             match
+               read_keeper_memory_summary_result
                  ctx.config
                  ~name:m.name
                  ~max_bytes:tail_bytes
                  ~max_lines:(max (tail_turns * 10) 400)
                  ~recent_limit:8
-             in
-             {
-               summary with
-               recent_notes = apply_tail_order tail_order summary.recent_notes;
-             }
+             with
+             | Ok summary ->
+               let summary =
+                 { summary with
+                   recent_notes =
+                     apply_tail_order tail_order summary.recent_notes
+                 }
+               in
+               summary, None
+             | Error exn_class ->
+               ( empty_memory_bank_summary
+               , Some (Keeper_memory_recall_exn_class.to_label exn_class) )
            else
-             {
-               total_notes = 0;
-               last_ts_unix = 0.0;
-               top_kind = None;
-               kind_counts = [];
-               recent_notes = [];
-             }
+             empty_memory_bank_summary, None
          in
 
          let history_filter_fragments =
@@ -863,6 +880,10 @@ let handle_keeper_status ctx args : tool_result =
            ("skill_route", Json_util.option_to_yojson Fun.id last_skill_route);
            ("metrics_overview", metrics_summary_to_json metrics_overview);
            ("memory_bank", memory_summary_to_json memory_bank_summary);
+           ("memory_bank_error_class",
+             match memory_bank_error_class with
+             | Some label -> `String label
+             | None -> `Null);
            ("generation_lineage", generation_lineage);
            ("metrics_tail", metrics_tail);
            ("history_tail", history_tail);

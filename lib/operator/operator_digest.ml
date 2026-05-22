@@ -109,7 +109,7 @@ let assoc_string_field key fields =
   | _ -> None
 
 let canonical_keeper_attention_reason = function
-  | Some "timeout_budget_exhausted" -> Some "provider_timeout"
+  | Some "timeout_budget_exhausted" -> None
   | reason -> reason
 
 let keeper_attention_kind reason =

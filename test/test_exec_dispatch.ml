@@ -51,7 +51,6 @@ let () =
   let open Masc_exec.Shell_ir in
   let bin = Masc_exec.Bin.of_string "echo" |> Result.get_ok in
   let ir =
-    Simple
       { bin
       ; args = [ Lit ("hello", default_meta); Lit ("world", default_meta) ]
       ; env = []
@@ -60,7 +59,7 @@ let () =
       ; sandbox = Masc_exec.Sandbox_target.host ()
       }
   in
-  let result = Masc_exec.Exec_dispatch.dispatch ir in
+  let result = Masc_exec.Exec_dispatch.dispatch_simple ir in
   let stdout = String.trim result.stdout in
   assert (stdout = "hello world");
   assert (result.status = Unix.WEXITED 0)
@@ -72,7 +71,6 @@ let () =
   let open Masc_exec.Shell_ir in
   let bin = Masc_exec.Bin.of_string "cat" |> Result.get_ok in
   let ir =
-    Simple
       { bin
       ; args = [ Lit ("/nonexistent_file_p7_test", default_meta) ]
       ; env = []
@@ -81,7 +79,7 @@ let () =
       ; sandbox = Masc_exec.Sandbox_target.host ()
       }
   in
-  let result = Masc_exec.Exec_dispatch.dispatch ir in
+  let result = Masc_exec.Exec_dispatch.dispatch_simple ir in
   assert (result.status <> Unix.WEXITED 0);
   assert (String.length result.stderr > 0)
 
@@ -97,7 +95,7 @@ let () =
     Simple { bin = echo_bin; args = [Lit ("hello world", default_meta)]; env = []; cwd = None; redirects = []; sandbox = host_sandbox };
     Simple { bin = tr_bin; args = [Lit ("a-z", default_meta); Lit ("A-Z", default_meta)]; env = []; cwd = None; redirects = []; sandbox = host_sandbox };
   ] in
-  let result = Masc_exec.Exec_dispatch.dispatch (Pipeline stages) in
+  let result = Masc_exec.Exec_dispatch.dispatch_pipeline stages in
   let stdout = String.trim result.stdout in
   assert (stdout = "HELLO WORLD");
   assert (result.status = Unix.WEXITED 0)
@@ -116,7 +114,7 @@ let () =
       Simple { bin = head_bin; args = [Lit ("-n", default_meta); Lit ("1", default_meta)]; env = []; cwd = None; redirects = []; sandbox = host_sandbox };
     ]
   in
-  let result = Masc_exec.Exec_dispatch.dispatch ~timeout_sec:2.0 (Pipeline stages) in
+  let result = Masc_exec.Exec_dispatch.dispatch_pipeline ~timeout_sec:2.0 stages in
   assert (String.trim result.stdout = "y");
   assert (result.status <> Unix.WEXITED 124)
 
@@ -132,7 +130,7 @@ let () =
     Simple { bin = echo_bin; args = [Lit ("ok", default_meta)]; env = []; cwd = None; redirects = []; sandbox = host_sandbox };
     Simple { bin = false_bin; args = []; env = []; cwd = None; redirects = []; sandbox = host_sandbox };
   ] in
-  let result = Masc_exec.Exec_dispatch.dispatch (Pipeline stages) in
+  let result = Masc_exec.Exec_dispatch.dispatch_pipeline stages in
   assert (result.status = Unix.WEXITED 1)
 
 let () =
@@ -163,7 +161,7 @@ let () =
         };
     ]
   in
-  let result = Masc_exec.Exec_dispatch.dispatch (Pipeline stages) in
+  let result = Masc_exec.Exec_dispatch.dispatch_pipeline stages in
   assert (result.status = Unix.WEXITED 1);
   assert (String.trim result.stdout = "recovered")
 
@@ -184,12 +182,11 @@ let () =
       }
   in
   let result =
-    Masc_exec.Exec_dispatch.dispatch
-      (Pipeline
+    Masc_exec.Exec_dispatch.dispatch_pipeline
          [
            stage "echo left >&2; exit 7";
            stage "echo right >&2; exit 3";
-         ])
+         ]
   in
   assert (result.status = Unix.WEXITED 3);
   assert (result.stderr = "left\nright\n")
@@ -222,8 +219,7 @@ let () =
       }
   in
   let result =
-    Masc_exec.Exec_dispatch.dispatch
-      (Pipeline [ simple a_bin; simple b_bin; simple c_bin ])
+    Masc_exec.Exec_dispatch.dispatch_pipeline [ simple a_bin; simple b_bin; simple c_bin ]
   in
   assert (result.status = Unix.WEXITED 3);
   assert (result.stdout = "c-out");
@@ -233,7 +229,7 @@ let () =
 
 let () =
   with_eio @@ fun () ->
-  let result = Masc_exec.Exec_dispatch.dispatch (Masc_exec.Shell_ir.Pipeline []) in
+  let result = Masc_exec.Exec_dispatch.dispatch_pipeline [] in
   assert (result.status = Unix.WEXITED 1);
   assert (result.stdout = "");
   assert (result.stderr = "empty pipeline not supported in native dispatch")
@@ -254,7 +250,7 @@ let () =
       ; sandbox = Masc_exec.Sandbox_target.host ()
       }
   in
-  let result = Masc_exec.Exec_dispatch.dispatch (Pipeline [ stage ]) in
+  let result = Masc_exec.Exec_dispatch.dispatch_pipeline [ stage ] in
   assert (result.status = Unix.WEXITED 1);
   assert (result.stdout = "");
   assert (result.stderr = "single-stage pipeline not supported in native dispatch")
@@ -287,8 +283,12 @@ let () =
       ; sandbox = host_sandbox
       }
   in
+  let envelope =
+    { Masc_exec.Shell_ir_risk.ir = Pipeline [ Pipeline [ echo_stage; cat_stage ]; cat_stage ]
+    ; risk = Masc_exec.Shell_ir_risk.R0_Read }
+  in
   let result =
-    Masc_exec.Exec_dispatch.dispatch (Pipeline [ Pipeline [ echo_stage; cat_stage ]; cat_stage ])
+    Masc_exec.Exec_dispatch.dispatch_decided envelope
   in
   assert (result.status = Unix.WEXITED 1);
   assert (result.stdout = "");
@@ -315,7 +315,6 @@ let () =
     Masc_exec.Sandbox_target.docker ~image:"test-image" ~runner:mock_runner ()
   in
   let ir =
-    Simple
       { bin
       ; args = [ Lit ("hello", default_meta); Lit ("world", default_meta) ]
       ; env = []
@@ -324,7 +323,7 @@ let () =
       ; sandbox = docker_sandbox
       }
   in
-  let result = Masc_exec.Exec_dispatch.dispatch ir in
+  let result = Masc_exec.Exec_dispatch.dispatch_simple ir in
   assert (!runner_called);
   assert (!runner_argv = [ "echo"; "hello"; "world" ]);
   assert (Array.length !runner_env = 0);
@@ -354,7 +353,6 @@ let () =
     Masc_exec.Sandbox_target.docker ~image:"redirect-image" ~runner:mock_runner ()
   in
   let ir =
-    Simple
       {
         bin;
         args = [];
@@ -369,7 +367,7 @@ let () =
         sandbox = docker_sandbox;
       }
   in
-  let result = Masc_exec.Exec_dispatch.dispatch ir in
+  let result = Masc_exec.Exec_dispatch.dispatch_simple ir in
   assert (result.status = Unix.WEXITED 0);
   assert (result.stdout = "stderr");
   assert (result.stderr = "")
@@ -388,7 +386,6 @@ let () =
     Masc_exec.Sandbox_target.docker ~image:"redirect-image" ~runner:mock_runner ()
   in
   let ir =
-    Simple
       {
         bin;
         args = [];
@@ -402,7 +399,7 @@ let () =
         sandbox = docker_sandbox;
       }
   in
-  let result = Masc_exec.Exec_dispatch.dispatch ir in
+  let result = Masc_exec.Exec_dispatch.dispatch_simple ir in
   assert (result.status = Unix.WEXITED 0);
   assert (result.stdout = "stdout");
   assert (result.stderr = "")
@@ -425,7 +422,6 @@ let () =
     Masc_exec.Sandbox_target.docker ~image:"redirect-image" ~runner:mock_runner ()
   in
   let ir =
-    Simple
       {
         bin;
         args = [];
@@ -443,7 +439,7 @@ let () =
         sandbox = docker_sandbox;
       }
   in
-  let result = Masc_exec.Exec_dispatch.dispatch ir in
+  let result = Masc_exec.Exec_dispatch.dispatch_simple ir in
   assert (not !runner_called);
   assert (result.status = Unix.WEXITED 1);
   assert (result.stdout = "");
@@ -490,7 +486,7 @@ let () =
         };
     ]
   in
-  let result = Masc_exec.Exec_dispatch.dispatch (Pipeline stages) in
+  let result = Masc_exec.Exec_dispatch.dispatch_pipeline stages in
   assert (result.status = Unix.WEXITED 0);
   assert (String.trim result.stdout = "5");
   match List.rev !runner_calls with
@@ -531,9 +527,9 @@ let () =
       }
   in
   let result =
-    Masc_exec.Exec_dispatch.dispatch
+    Masc_exec.Exec_dispatch.dispatch_pipeline
       ~timeout_sec:0.5
-      (Pipeline [ stage slow_bin; stage next_bin ])
+      [ stage slow_bin; stage next_bin ]
   in
   assert (result.status = Unix.WEXITED 0);
   assert (result.stdout = "ok");
@@ -595,7 +591,7 @@ let () =
         };
     ]
   in
-  let result = Masc_exec.Exec_dispatch.dispatch (Pipeline stages) in
+  let result = Masc_exec.Exec_dispatch.dispatch_pipeline stages in
   assert (not !simple_runner_called);
   assert (result.status = Unix.WEXITED 0);
   assert (String.trim result.stdout = "5");
@@ -673,7 +669,7 @@ let () =
         };
     ]
   in
-  let result = Masc_exec.Exec_dispatch.dispatch (Pipeline stages) in
+  let result = Masc_exec.Exec_dispatch.dispatch_pipeline stages in
   assert (not !first_pipeline_called);
   assert (not !second_pipeline_called);
   assert (result.status = Unix.WEXITED 0);
@@ -735,7 +731,7 @@ let () =
         };
     ]
   in
-  let result = Masc_exec.Exec_dispatch.dispatch (Pipeline stages) in
+  let result = Masc_exec.Exec_dispatch.dispatch_pipeline stages in
   assert (not !pipeline_runner_called);
   assert (result.status = Unix.WEXITED 0);
   assert (String.trim result.stdout = "5");
@@ -757,7 +753,6 @@ let () =
     Masc_exec.Sandbox_target.docker ~image:"fail-image" ~runner:mock_runner ()
   in
   let ir =
-    Simple
       { bin
       ; args = [ Lit ("x", default_meta) ]
       ; env = []
@@ -766,7 +761,7 @@ let () =
       ; sandbox = docker_sandbox
       }
   in
-  let result = Masc_exec.Exec_dispatch.dispatch ir in
+  let result = Masc_exec.Exec_dispatch.dispatch_simple ir in
   assert (result.status = Unix.WEXITED 1);
   assert (result.stdout = "");
   assert (String.length result.stderr > 0)

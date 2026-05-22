@@ -192,6 +192,14 @@ let registry_failure_reason_of_terminal_reason
          ; provider_id = None
          ; http_status = None
          })
+  | Keeper_turn_disposition.Cascade_attempts_exhausted ->
+    Some
+      (Keeper_registry.Provider_runtime_error
+         { code = "cascade_attempts_exhausted"
+         ; detail
+         ; provider_id = None
+         ; http_status = None
+         })
   | Keeper_turn_disposition.Success
   | Keeper_turn_disposition.External_cancel
   | Keeper_turn_disposition.Turn_wall_clock_timeout

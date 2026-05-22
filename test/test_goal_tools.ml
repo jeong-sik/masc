@@ -138,11 +138,12 @@ let test_goal_upsert_and_list () =
     | Some result -> parse_json_result result
     | None -> fail "masc_goal_upsert not handled"
   in
-  let _goal_id =
+  let goal_id =
     match Yojson.Safe.Util.member "goal_id" created_json with
     | `String id when id <> "" -> id
     | _ -> fail "goal_id missing from upsert response"
   in
+  check bool "goal_id populated" true (String.length goal_id > 0);
   let task_link_field =
     match Yojson.Safe.Util.member "task_link_field" created_json with
     | `String field -> field

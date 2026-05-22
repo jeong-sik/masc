@@ -14,7 +14,7 @@ the categorization roadmap. Newly-added typed getters in
 `lib/config/env_config_*.ml` must carry nearby `@category` and
 `@ops_class` tags; existing knobs remain in the backfill lane.
 
-**Total**: 382 unique knobs across 10 modules.
+**Total**: 380 unique knobs across 10 modules.
 
 **Typed getter classification**: 26/235 tagged (`operator`: 26, `algorithm`: 0, `unclassified`: 209).
 
@@ -62,41 +62,41 @@ the categorization roadmap. Newly-added typed getters in
 
 | Env var | Kind | Category | Ops class | Line | Doc |
 |---|---|---|---|---|---|
-| `MASC_ANTI_RATIONALIZATION_FAIL_MODE` | typed:string | unclassified | unclassified | 215 |  |
-| `MASC_ANTI_RATIONALIZATION_GATE2_FAIL_CLOSED` | typed:bool | unclassified | unclassified | 237 |  |
-| `MASC_AUTONOMY_MAX_STARVATION_TICKS` | typed:int | unclassified | unclassified | 87 | {1 Thompson Sampling / Agent Selection Configuration} Primary env vars: MASC_AUTONOMY_*. |
-| `MASC_AUTONOMY_QUIET_END` | typed:int | unclassified | unclassified | 79 | Quiet hours end (0-23). |
-| `MASC_AUTONOMY_QUIET_START` | typed:int | unclassified | unclassified | 75 | Quiet hours start (0-23). Keeper suppresses actions in this window. |
-| `MASC_AUTONOMY_STARVATION_BONUS_COEF` | typed:float | unclassified | unclassified | 90 |  |
-| `MASC_AUTONOMY_THOMPSON_WEIGHT` | typed:float | unclassified | unclassified | 93 |  |
-| `MASC_AUTONOMY_VOTE_DECAY_FACTOR` | typed:float | unclassified | unclassified | 96 |  |
-| `MASC_DASHBOARD_FIXTURE` | string_literal | n/a | n/a | 149 | Dashboard fixture name override. |
-| `MASC_DASHBOARD_FIXTURES_ENABLED` | feature_flag | n/a | n/a | 145 | Whether dashboard fixtures are enabled. Default: false. Re-readable within the process; this does not imply shell-lev... |
-| `MASC_DASHBOARD_GOVERNANCE_JUDGE_ENABLED` | feature_flag | n/a | n/a | 156 | Whether governance judge is enabled. Default: true. |
-| `MASC_DASHBOARD_GOVERNANCE_JUDGE_INTERVAL_SEC` | typed:int | unclassified | unclassified | 153 | Governance judge interval, clamped to >= 15s. Default: 60. |
-| `MASC_DEFAULT_CASCADE` | string_literal | n/a | n/a | 164 | Default cascade label (e.g. "gemini:pro,claude:sonnet"). |
-| `MASC_DEFAULT_MODEL` | string_literal | n/a | n/a | 172 | Default model id. |
-| `MASC_DEFAULT_PROVIDER` | string_literal | n/a | n/a | 168 | Default provider name. |
-| `MASC_EVENT_BUFFER_SIZE` | typed:int | unclassified | unclassified | 117 | A2A event buffer size per subscription. Caps the in-memory event list to prevent unbounded growth. |
-| `MASC_GOAL_DISPATCH_RUNTIME` | typed:string | unclassified | unclassified | 188 | Goal dispatch runtime. Default: "task". |
-| `MASC_GOAL_MODELS` | string_literal | n/a | n/a | 184 | Goal models (comma-separated). |
-| `MASC_INFERENCE_CACHE_ENABLED` | feature_flag | n/a | n/a | 28 | Enable inference response cache (L1+L2). |
-| `MASC_INFERENCE_CACHE_L1_MAX_ENTRIES` | typed:int | unclassified | unclassified | 46 | L1 in-memory entry cap. BUG-015: Reduced from 2048 to 512 — unbounded growth with 2048 default caused excessive mem... |
-| `MASC_INFERENCE_CACHE_MAX_PROMPT_CHARS` | typed:int | unclassified | unclassified | 36 | Skip caching for oversized prompts (character count). |
-| `MASC_INFERENCE_CACHE_MAX_TEMP` | typed:float | unclassified | unclassified | 40 | Cache only deterministic temperatures (default exact 0.0). |
-| `MASC_INFERENCE_CACHE_TTL_SEC` | typed:int | unclassified | unclassified | 32 | Default TTL for inference response cache (seconds). |
+| `MASC_ANTI_RATIONALIZATION_FAIL_MODE` | typed:string | unclassified | unclassified | 211 |  |
+| `MASC_ANTI_RATIONALIZATION_GATE2_FAIL_CLOSED` | typed:bool | unclassified | unclassified | 233 |  |
+| `MASC_AUTONOMY_MAX_STARVATION_TICKS` | typed:int | unclassified | unclassified | 83 | {1 Thompson Sampling / Agent Selection Configuration} Primary env vars: MASC_AUTONOMY_*. |
+| `MASC_AUTONOMY_QUIET_END` | typed:int | unclassified | unclassified | 75 | Quiet hours end (0-23). |
+| `MASC_AUTONOMY_QUIET_START` | typed:int | unclassified | unclassified | 71 | Quiet hours start (0-23). Keeper suppresses actions in this window. |
+| `MASC_AUTONOMY_STARVATION_BONUS_COEF` | typed:float | unclassified | unclassified | 86 |  |
+| `MASC_AUTONOMY_THOMPSON_WEIGHT` | typed:float | unclassified | unclassified | 89 |  |
+| `MASC_AUTONOMY_VOTE_DECAY_FACTOR` | typed:float | unclassified | unclassified | 92 |  |
+| `MASC_DASHBOARD_FIXTURE` | string_literal | n/a | n/a | 145 | Dashboard fixture name override. |
+| `MASC_DASHBOARD_FIXTURES_ENABLED` | feature_flag | n/a | n/a | 141 | Whether dashboard fixtures are enabled. Default: false. Re-readable within the process; this does not imply shell-lev... |
+| `MASC_DASHBOARD_GOVERNANCE_JUDGE_ENABLED` | feature_flag | n/a | n/a | 152 | Whether governance judge is enabled. Default: true. |
+| `MASC_DASHBOARD_GOVERNANCE_JUDGE_INTERVAL_SEC` | typed:int | unclassified | unclassified | 149 | Governance judge interval, clamped to >= 15s. Default: 60. |
+| `MASC_DEFAULT_CASCADE` | string_literal | n/a | n/a | 160 | Default cascade label (e.g. "gemini:pro,claude:sonnet"). |
+| `MASC_DEFAULT_MODEL` | string_literal | n/a | n/a | 168 | Default model id. |
+| `MASC_DEFAULT_PROVIDER` | string_literal | n/a | n/a | 164 | Default provider name. |
+| `MASC_EVENT_BUFFER_SIZE` | typed:int | unclassified | unclassified | 113 | A2A event buffer size per subscription. Caps the in-memory event list to prevent unbounded growth. |
+| `MASC_GOAL_DISPATCH_RUNTIME` | typed:string | unclassified | unclassified | 184 | Goal dispatch runtime. Default: "task". |
+| `MASC_GOAL_MODELS` | string_literal | n/a | n/a | 180 | Goal models (comma-separated). |
+| `MASC_INFERENCE_CACHE_ENABLED` | feature_flag | n/a | n/a | 24 | Enable inference response cache (L1+L2). |
+| `MASC_INFERENCE_CACHE_L1_MAX_ENTRIES` | typed:int | unclassified | unclassified | 42 | L1 in-memory entry cap. BUG-015: Reduced from 2048 to 512 — unbounded growth with 2048 default caused excessive mem... |
+| `MASC_INFERENCE_CACHE_MAX_PROMPT_CHARS` | typed:int | unclassified | unclassified | 32 | Skip caching for oversized prompts (character count). |
+| `MASC_INFERENCE_CACHE_MAX_TEMP` | typed:float | unclassified | unclassified | 36 | Cache only deterministic temperatures (default exact 0.0). |
+| `MASC_INFERENCE_CACHE_TTL_SEC` | typed:int | unclassified | unclassified | 28 | Default TTL for inference response cache (seconds). |
 | `MASC_INFERENCE_TIMEOUT_SEC` | typed:float | unclassified | unclassified | 8 | Timeout for model API calls (seconds) |
-| `MASC_NEO4J_TIMEOUT_SEC` | typed:float | unclassified | unclassified | 106 | Neo4j / zombie-cleanup interval (seconds). Controls the zero-zombie Pulse rhythm in the orchestrator. Clamped to >= 1... |
-| `MASC_OPERATOR_CACHE_TTL` | typed:float | unclassified | unclassified | 136 | Operator snapshot cache TTL (seconds). Default: 30. |
-| `MASC_OPERATOR_JUDGE_ENABLED` | feature_flag | n/a | n/a | 124 | Whether operator judge background loop is enabled. Default: true. |
-| `MASC_OPERATOR_JUDGE_INTERVAL_SEC` | typed:int | unclassified | unclassified | 127 | Operator judge interval, clamped to >= 15s. Default: 60. |
-| `MASC_OPERATOR_JUDGE_ROOM_TTL_SEC` | typed:int | unclassified | unclassified | 130 | Coord TTL for operator judge cleanup, clamped to >= 15s. Default: 60. |
-| `MASC_OPERATOR_JUDGE_SESSION_TTL_SEC` | typed:int | unclassified | unclassified | 133 | Session TTL for operator judge cleanup, clamped to >= 30s. Default: 300. |
-| `MASC_RATE_LIMIT_CLEANUP_INTERVAL_SEC` | typed:float | unclassified | unclassified | 62 | Cleanup interval for stale rate limit buckets (seconds) |
-| `MASC_RATE_LIMIT_ENTRY_MAX_AGE_SEC` | typed:float | unclassified | unclassified | 66 | Max age for rate limit entries before cleanup (seconds) |
-| `MASC_ROUTING_CASCADE` | string_literal | n/a | n/a | 178 | Routing cascade for team session routing. Defaults to the logical [routes.routing] key; runtime callers normalize it ... |
-| `MASC_SPAWN_CACHE_POLICY` | typed:string | unclassified | unclassified | 52 | Spawn cache policy: - off - safe_only (GLM direct HTTP only, no MCP-tool side effects) |
-| `MASC_SSE_KEEPALIVE_SEC` | typed:float | unclassified | unclassified | 112 | SSE keepalive interval (seconds). Frequency of `: keepalive` frames on command-plane SSE streams. Clamped to >= 1.0 t... |
+| `MASC_NEO4J_TIMEOUT_SEC` | typed:float | unclassified | unclassified | 102 | Neo4j / zombie-cleanup interval (seconds). Controls the zero-zombie Pulse rhythm in the orchestrator. Clamped to >= 1... |
+| `MASC_OPERATOR_CACHE_TTL` | typed:float | unclassified | unclassified | 132 | Operator snapshot cache TTL (seconds). Default: 30. |
+| `MASC_OPERATOR_JUDGE_ENABLED` | feature_flag | n/a | n/a | 120 | Whether operator judge background loop is enabled. Default: true. |
+| `MASC_OPERATOR_JUDGE_INTERVAL_SEC` | typed:int | unclassified | unclassified | 123 | Operator judge interval, clamped to >= 15s. Default: 60. |
+| `MASC_OPERATOR_JUDGE_ROOM_TTL_SEC` | typed:int | unclassified | unclassified | 126 | Coord TTL for operator judge cleanup, clamped to >= 15s. Default: 60. |
+| `MASC_OPERATOR_JUDGE_SESSION_TTL_SEC` | typed:int | unclassified | unclassified | 129 | Session TTL for operator judge cleanup, clamped to >= 30s. Default: 300. |
+| `MASC_RATE_LIMIT_CLEANUP_INTERVAL_SEC` | typed:float | unclassified | unclassified | 58 | Cleanup interval for stale rate limit buckets (seconds) |
+| `MASC_RATE_LIMIT_ENTRY_MAX_AGE_SEC` | typed:float | unclassified | unclassified | 62 | Max age for rate limit entries before cleanup (seconds) |
+| `MASC_ROUTING_CASCADE` | string_literal | n/a | n/a | 174 | Routing cascade for team session routing. Defaults to the logical [routes.routing] key; runtime callers normalize it ... |
+| `MASC_SPAWN_CACHE_POLICY` | typed:string | unclassified | unclassified | 48 | Spawn cache policy: - off - safe_only (GLM direct HTTP only, no MCP-tool side effects) |
+| `MASC_SSE_KEEPALIVE_SEC` | typed:float | unclassified | unclassified | 108 | SSE keepalive interval (seconds). Frequency of `: keepalive` frames on command-plane SSE streams. Clamped to >= 1.0 t... |
 
 ## Env_config_keeper (84 knobs; typed classification 2/71)
 
@@ -226,7 +226,7 @@ the categorization roadmap. Newly-added typed getters in
 
 | Env var | Kind | Category | Ops class | Line | Doc |
 |---|---|---|---|---|---|
-| `MASC_OAS_BRIDGE_TIMEOUT_DEFAULT_SEC` | string_literal | n/a | n/a | 132 |  |
+| `MASC_OAS_BRIDGE_TIMEOUT_DEFAULT_SEC` | string_literal | n/a | n/a | 114 |  |
 
 ## Env_config_runtime (116 knobs; typed classification 3/93)
 
@@ -375,9 +375,9 @@ the categorization roadmap. Newly-added typed getters in
 | Env var | Kind | Category | Ops class | Line | Doc |
 |---|---|---|---|---|---|
 | `MASC_ALLOW_ANONYMOUS_MUTATIONS` | string_literal | n/a | n/a | 29 |  |
-| `MASC_ASSETS_DIR` | string_literal | n/a | n/a | 637 |  |
-| `MASC_BASE_PATH_RESOLUTION_SOURCE` | string_literal | n/a | n/a | 641 |  |
-| `MASC_BASE_PATH_STRICT` | string_literal | n/a | n/a | 643 |  |
+| `MASC_ASSETS_DIR` | string_literal | n/a | n/a | 635 |  |
+| `MASC_BASE_PATH_RESOLUTION_SOURCE` | string_literal | n/a | n/a | 639 |  |
+| `MASC_BASE_PATH_STRICT` | string_literal | n/a | n/a | 641 |  |
 | `MASC_BENCHMARK_RESULTS_DIR` | string_literal | n/a | n/a | 221 |  |
 | `MASC_CHANNEL_GATE_DEDUP_TTL_SEC` | string_literal | n/a | n/a | 295 |  |
 | `MASC_CHANNEL_GATE_MAX_CONTENT_LENGTH` | string_literal | n/a | n/a | 297 |  |
@@ -428,23 +428,23 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_KEEPER_UNIFIED_MAX_TOKENS` | string_literal | n/a | n/a | 168 |  |
 | `MASC_KEEPER_UNIFIED_TEMP` | string_literal | n/a | n/a | 167 |  |
 | `MASC_LOCK_WARN_MS` | string_literal | n/a | n/a | 215 |  |
-| `MASC_OTEL_ENABLED` | string_literal | n/a | n/a | 735 |  |
-| `MASC_PLACEHOLDER_TOOLS_ENABLED` | string_literal | n/a | n/a | 771 |  |
-| `MASC_SEARXNG_URL` | string_literal | n/a | n/a | 783 |  |
-| `MASC_SHUTDOWN_CLEANUP_TIMEOUT` | string_literal | n/a | n/a | 683 |  |
-| `MASC_SHUTDOWN_DRAIN_TIMEOUT` | string_literal | n/a | n/a | 685 |  |
-| `MASC_SHUTDOWN_FORCE_TIMEOUT` | string_literal | n/a | n/a | 687 |  |
-| `MASC_SHUTDOWN_NOTIFY_DELAY` | string_literal | n/a | n/a | 689 |  |
-| `MASC_SSE_STREAM_CAPACITY` | string_literal | n/a | n/a | 715 |  |
+| `MASC_OTEL_ENABLED` | string_literal | n/a | n/a | 733 |  |
+| `MASC_PLACEHOLDER_TOOLS_ENABLED` | string_literal | n/a | n/a | 769 |  |
+| `MASC_SEARXNG_URL` | string_literal | n/a | n/a | 781 |  |
+| `MASC_SHUTDOWN_CLEANUP_TIMEOUT` | string_literal | n/a | n/a | 681 |  |
+| `MASC_SHUTDOWN_DRAIN_TIMEOUT` | string_literal | n/a | n/a | 683 |  |
+| `MASC_SHUTDOWN_FORCE_TIMEOUT` | string_literal | n/a | n/a | 685 |  |
+| `MASC_SHUTDOWN_NOTIFY_DELAY` | string_literal | n/a | n/a | 687 |  |
+| `MASC_SSE_STREAM_CAPACITY` | string_literal | n/a | n/a | 713 |  |
 | `MASC_STRUCTURED_STATE` | string_literal | n/a | n/a | 151 |  |
 | `MASC_TELEMETRY_MAX_BYTES` | string_literal | n/a | n/a | 56 |  |
 | `MASC_TELEMETRY_RETENTION_DAYS` | string_literal | n/a | n/a | 53 |  |
-| `MASC_TEST_ALLOW_BASE_PATH_OVERRIDE` | string_literal | n/a | n/a | 751 |  |
-| `MASC_TEST_ALLOW_CONFIG_PATH_OVERRIDE` | string_literal | n/a | n/a | 753 |  |
+| `MASC_TEST_ALLOW_BASE_PATH_OVERRIDE` | string_literal | n/a | n/a | 749 |  |
+| `MASC_TEST_ALLOW_CONFIG_PATH_OVERRIDE` | string_literal | n/a | n/a | 751 |  |
 | `MASC_TLA_TRACE` | string_literal | n/a | n/a | 153 |  |
-| `MASC_WORKER_RUNTIME_BACKEND` | string_literal | n/a | n/a | 815 |  |
-| `MASC_WORKER_RUNTIME_DOCKER_IMAGE` | string_literal | n/a | n/a | 817 |  |
-| `MASC_WORKER_RUNTIME_HOST_MCP_BASE_URL` | string_literal | n/a | n/a | 819 |  |
+| `MASC_WORKER_RUNTIME_BACKEND` | string_literal | n/a | n/a | 813 |  |
+| `MASC_WORKER_RUNTIME_DOCKER_IMAGE` | string_literal | n/a | n/a | 815 |  |
+| `MASC_WORKER_RUNTIME_HOST_MCP_BASE_URL` | string_literal | n/a | n/a | 817 |  |
 | `MASC_WS_CLIENT_BUFFER_LIMIT_BYTES` | string_literal | n/a | n/a | 93 |  |
 | `MASC_WS_SLICE_INDEX_ENABLED` | string_literal | n/a | n/a | 96 |  |
 

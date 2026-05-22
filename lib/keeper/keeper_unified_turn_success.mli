@@ -12,7 +12,7 @@ val handle
   -> degraded_retry_applied:bool
   -> degraded_retry_cascade:string option
   -> fallback_reason:Keeper_error_classify.degraded_retry_reason option
-  -> last_timeout_budget:
+  -> last_provider_timeout_budget:
        Keeper_turn_cascade_budget.provider_timeout_budget option
   -> current_turn_blocker_info:Keeper_meta_contract.blocker_info option
   -> keeper_turn_id:int

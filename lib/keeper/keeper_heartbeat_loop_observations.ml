@@ -208,7 +208,7 @@ let is_provider_timeout_error (err : Agent_sdk.Error.sdk_error) =
     false
 ;;
 
-let timeout_phase_of_oas_timeout_budget_phase phase =
+let timeout_phase_of_provider_timeout_phase phase =
   let phase = String.trim phase in
   if String.equal phase ""
   then None
@@ -218,7 +218,7 @@ let timeout_phase_of_oas_timeout_budget_phase phase =
     | None -> Some Keeper_failure_policy.Unknown_timeout)
 ;;
 
-let oas_timeout_budget_policy_decision
+let provider_timeout_policy_decision
       ~(strikes : int)
       (err : Agent_sdk.Error.sdk_error)
   : Keeper_failure_policy.decision option
@@ -228,7 +228,7 @@ let oas_timeout_budget_policy_decision
     Some
       (Keeper_failure_policy.decide
          (Keeper_failure_policy.Provider_timeout
-            { phase = timeout_phase_of_oas_timeout_budget_phase phase
+            { phase = timeout_phase_of_provider_timeout_phase phase
             ; strikes = Some strikes
             ; liveness = Keeper_failure_policy.Recent_heartbeat
             }))
@@ -251,7 +251,7 @@ let oas_timeout_budget_policy_decision
     None
 ;;
 
-let oas_timeout_budget_metric_outcome
+let provider_timeout_metric_outcome
       (decision : Keeper_failure_policy.decision)
   =
   match decision.lifecycle_effect with

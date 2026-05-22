@@ -25,9 +25,3 @@ val classify : name:string -> scope
 (** [classify ~name] returns the scope for the named tool. Default
     [Surface] unless [name] appears in the keeper-internal list. *)
 
-val keeper_internal_names : unit -> string list
-(** [keeper_internal_names ()] is the explicit list of tool names whose
-    scope is [Keeper_internal]. Returned as a fresh list each call. *)
-
-val scope_to_string : scope -> string
-(** [scope_to_string s] returns ["surface"] or ["keeper_internal"]. *)

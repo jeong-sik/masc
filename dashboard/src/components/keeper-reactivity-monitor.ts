@@ -38,9 +38,9 @@ export interface KeeperStopSummary {
   idle_turn: number
   in_turn_hung: number
   noop_failure_loop: number
-  budget_strikes: number
+  provider_timeout_strikes: number
   storm_pauses: number
-  budget_loop_pauses: number
+  provider_timeout_loop_pauses: number
 }
 
 export interface ProactiveSkipRow {
@@ -71,9 +71,9 @@ export function extractKeeperStopSummaries(
       idle_turn: 0,
       in_turn_hung: 0,
       noop_failure_loop: 0,
-      budget_strikes: 0,
+      provider_timeout_strikes: 0,
       storm_pauses: 0,
-      budget_loop_pauses: 0,
+      provider_timeout_loop_pauses: 0,
     }
     map.set(keeper, fresh)
     return fresh
@@ -96,27 +96,17 @@ export function extractKeeperStopSummaries(
         else if (cls === 'in_turn_hung') e.in_turn_hung += s.value
         else if (cls === 'noop_failure_loop') e.noop_failure_loop += s.value
       }
-    } else if (
-      // Legacy compatibility metrics. New keeper policy should surface
-      // owner-specific timeout/admission/capacity causes instead of treating
-      // timeout-legacy budget strikes as a first-class root cause.
-      m.name === 'masc_keeper_provider_timeout_strike_total' ||
-      m.name === 'masc_keeper_oas_timeout_budget_strike' ||
-      m.name === 'masc_keeper_oas_timeout_budget_strike_total'
-    ) {
+    } else if (m.name === 'masc_keeper_provider_timeout_strike_total') {
       for (const s of m.samples) {
-        if (s.labels.keeper) entry(s.labels.keeper).budget_strikes += s.value
+        if (s.labels.keeper) entry(s.labels.keeper).provider_timeout_strikes += s.value
       }
     } else if (m.name === 'masc_keeper_stale_storm_paused_total') {
       for (const s of m.samples) {
         if (s.labels.keeper) entry(s.labels.keeper).storm_pauses += s.value
       }
-    } else if (
-      m.name === 'masc_keeper_provider_timeout_loop_paused_total' ||
-      m.name === 'masc_keeper_oas_timeout_budget_loop_paused_total'
-    ) {
+    } else if (m.name === 'masc_keeper_provider_timeout_loop_paused_total') {
       for (const s of m.samples) {
-        if (s.labels.keeper) entry(s.labels.keeper).budget_loop_pauses += s.value
+        if (s.labels.keeper) entry(s.labels.keeper).provider_timeout_loop_pauses += s.value
       }
     }
   }
@@ -288,7 +278,7 @@ function AutoPausePanel({
 
   const summaryMap = new Map(summaries.map(s => [s.keeper, s]))
 
-  if (pausedKeepers.length === 0 && summaries.every(s => s.storm_pauses === 0 && s.budget_loop_pauses === 0)) {
+  if (pausedKeepers.length === 0 && summaries.every(s => s.storm_pauses === 0 && s.provider_timeout_loop_pauses === 0)) {
     return html`
       <div class="rounded border border-[var(--ok-20)] bg-[var(--ok-10)] px-4 py-3 text-xs text-[var(--color-status-ok)]">
         ✓ 일시정지된 키퍼 없음 — 모든 키퍼가 정상 운영 중입니다
@@ -322,9 +312,9 @@ function AutoPausePanel({
                           storm pause ${s.storm_pauses}
                         </span>
                       ` : null}
-                      ${s.budget_loop_pauses > 0 ? html`
+                      ${s.provider_timeout_loop_pauses > 0 ? html`
                         <span class="rounded bg-[var(--bad-10)] px-1.5 py-0.5 text-[var(--bad-light)]">
-                          legacy budget loop pause ${s.budget_loop_pauses}
+                          provider timeout loop pause ${s.provider_timeout_loop_pauses}
                         </span>
                       ` : null}
                       ${s.stale_total > 0 ? html`
@@ -348,7 +338,7 @@ function AutoPausePanel({
         </div>
       ` : null}
 
-      ${summaries.some(s => s.storm_pauses > 0 || s.budget_loop_pauses > 0) ? html`
+      ${summaries.some(s => s.storm_pauses > 0 || s.provider_timeout_loop_pauses > 0) ? html`
         <div>
           <div class="mb-2 text-2xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">
             자동 일시정지 이력 (Prometheus)
@@ -359,14 +349,14 @@ function AutoPausePanel({
                 <tr class="border-b border-[var(--color-border-default)] text-left text-[var(--color-fg-muted)]">
                   <th scope="col" class="pb-2 pr-3 font-normal">키퍼</th>
                   <th scope="col" class="pb-2 pr-3 font-normal text-right">storm pause</th>
-                  <th scope="col" class="pb-2 pr-3 font-normal text-right">budget loop pause</th>
-                  <th scope="col" class="pb-2 pr-3 font-normal text-right">budget strike</th>
+                  <th scope="col" class="pb-2 pr-3 font-normal text-right">provider timeout loop pause</th>
+                  <th scope="col" class="pb-2 pr-3 font-normal text-right">provider timeout strike</th>
                   <th scope="col" class="pb-2 font-normal text-right">stale 종료</th>
                 </tr>
               </thead>
               <tbody>
                 ${summaries
-                  .filter(s => s.storm_pauses > 0 || s.budget_loop_pauses > 0 || s.budget_strikes > 0)
+                  .filter(s => s.storm_pauses > 0 || s.provider_timeout_loop_pauses > 0 || s.provider_timeout_strikes > 0)
                   .map(s => html`
                     <tr key=${s.keeper} class="border-b border-[var(--color-border-default)]/40 hover:bg-[var(--color-bg-surface)]">
                       <td class="py-1.5 pr-3">
@@ -378,11 +368,11 @@ function AutoPausePanel({
                       <td class="py-1.5 pr-3 text-right tabular-nums ${s.storm_pauses > 0 ? 'text-[var(--bad-light)]' : 'text-[var(--color-fg-muted)]'}">
                         ${s.storm_pauses}
                       </td>
-                      <td class="py-1.5 pr-3 text-right tabular-nums ${s.budget_loop_pauses > 0 ? 'text-[var(--bad-light)]' : 'text-[var(--color-fg-muted)]'}">
-                        ${s.budget_loop_pauses}
+                      <td class="py-1.5 pr-3 text-right tabular-nums ${s.provider_timeout_loop_pauses > 0 ? 'text-[var(--bad-light)]' : 'text-[var(--color-fg-muted)]'}">
+                        ${s.provider_timeout_loop_pauses}
                       </td>
-                      <td class="py-1.5 pr-3 text-right tabular-nums ${s.budget_strikes > 0 ? 'text-[var(--color-status-warn)]' : 'text-[var(--color-fg-muted)]'}">
-                        ${s.budget_strikes}
+                      <td class="py-1.5 pr-3 text-right tabular-nums ${s.provider_timeout_strikes > 0 ? 'text-[var(--color-status-warn)]' : 'text-[var(--color-fg-muted)]'}">
+                        ${s.provider_timeout_strikes}
                       </td>
                       <td class="py-1.5 text-right tabular-nums ${s.stale_total > 0 ? 'text-[var(--color-status-warn)]' : 'text-[var(--color-fg-muted)]'}">
                         ${s.stale_total}

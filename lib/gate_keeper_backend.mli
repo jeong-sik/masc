@@ -54,7 +54,8 @@ val filesystem_safe_or_unknown : string -> string
 
 val extract_reply_text : string -> string
 (** Parse the reply text from a keeper response JSON body.
-    Tries ["reply"] field first, then ["text"], then returns raw body. *)
+    Reads the ["reply"] field for JSON responses; non-JSON or missing-reply
+    bodies are returned verbatim. *)
 
 val extract_turn_stats : string -> Gate_protocol.turn_stats option
 (** Extract model usage statistics from a keeper response JSON body.

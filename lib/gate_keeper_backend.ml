@@ -22,10 +22,7 @@ let extract_reply_text (body : string) : string =
     let open Yojson.Safe.Util in
     match json |> member "reply" |> to_string_option with
     | Some r -> r
-    | None ->
-        (match json |> member "text" |> to_string_option with
-         | Some t -> t
-         | None -> body))
+    | None -> body)
 
 let extract_structured (body : string) : Yojson.Safe.t option =
   Safe_ops.protect ~default:None (fun () ->

@@ -46,4 +46,3 @@ val host : unit -> t
     [Keeper_turn_sandbox_runtime] or any other keeper-side construct. *)
 val docker : image:string -> runner:runner -> ?pipeline_runner:pipeline_runner -> unit -> t
 
-val pp : Format.formatter -> t -> unit

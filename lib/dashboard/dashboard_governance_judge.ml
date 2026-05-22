@@ -775,7 +775,7 @@ let mark_compute_finish (st : state) ~started_at ~outcome ~reason
   Prometheus.observe_histogram governance_compute_duration_metric
     ~labels duration_sec;
   Log.Governance.info
-    "refresh_once: compute_judgments telemetry outcome=%s reason=%s duration=%.3fs timeout_budget=%s in_flight_after=%d"
+    "refresh_once: compute_judgments telemetry outcome=%s reason=%s duration=%.3fs compute_timeout=%s in_flight_after=%d"
     outcome reason duration_sec
     (match timeout_sec with
      | Some value -> Printf.sprintf "%.1fs" value
@@ -826,7 +826,7 @@ let refresh_once ~sw ~net
         st.runtime_status <- status_refreshing;
         st.degraded_reason <- None);
     let started_at = Unix.gettimeofday () in
-    let timeout_budget =
+    let compute_timeout_sec =
       Some
         (Env_config_oas_bridge.timeout_sec
            ~caller:Env_config_oas_bridge.Governance_judge ())
@@ -837,7 +837,7 @@ let refresh_once ~sw ~net
       | Eio.Cancel.Cancelled _ as exn ->
           ignore
             (mark_compute_finish st ~started_at ~outcome:"error"
-               ~reason:"cancelled" ~timeout_sec:timeout_budget);
+               ~reason:"cancelled" ~timeout_sec:compute_timeout_sec);
           raise exn
       | exn ->
           Error
@@ -848,7 +848,7 @@ let refresh_once ~sw ~net
     | Ok (model_used, generated_at, expires_at, judgments) ->
         ignore
           (mark_compute_finish st ~started_at ~outcome:"ok" ~reason:"ok"
-             ~timeout_sec:timeout_budget);
+             ~timeout_sec:compute_timeout_sec);
         if judgments = [] then
           Log.Governance.routine
             "refresh_once: ok runtime=redacted judgments=%d"
@@ -878,14 +878,14 @@ let refresh_once ~sw ~net
         let timeout_sec =
           match timeout_sec_of_error message with
           | Some value -> Some value
-          | None -> timeout_budget
+          | None -> compute_timeout_sec
         in
         let duration_sec, in_flight =
           mark_compute_finish st ~started_at ~outcome:"error" ~reason
             ~timeout_sec
         in
         Log.Governance.warn
-          "refresh_once: compute_judgments failed: %s (duration=%.3fs timeout_budget=%s in_flight=%d)"
+          "refresh_once: compute_judgments failed: %s (duration=%.3fs compute_timeout=%s in_flight=%d)"
           message duration_sec
           (match timeout_sec with
            | Some value -> Printf.sprintf "%.1fs" value

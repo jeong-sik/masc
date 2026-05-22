@@ -135,7 +135,7 @@ let append_decision_record
     | None -> (
         match outcome, error with
         | "success", _ -> Keeper_turn_terminal.success ()
-        | _, Some err -> Keeper_turn_terminal.of_legacy_error_text err
+        | _, Some _ -> Keeper_turn_terminal.of_code ~source:"decision_error" "unknown_error"
         | _ -> Keeper_turn_terminal.of_code "unknown_error")
   in
   let terminal_reason_code = Keeper_turn_terminal.code terminal_reason in

@@ -71,56 +71,6 @@ let contract_code_from_error_text raw_error =
   else "required_tool_use_unsatisfied"
 ;;
 
-let of_legacy_error_text raw_error =
-  let trimmed = String.trim raw_error in
-  if trimmed = ""
-  then make ~source:"legacy_error_text" "unknown_error"
-  else if contains_ci trimmed "gh_repo_context_missing_worktree"
-  then make ~source:"legacy_error_text" "gh_repo_context_missing_worktree"
-  else if contains_ci trimmed "oas_timeout_budget"
-  then make ~source:"legacy_error_text" "oas_timeout_budget"
-  else if contains_ci trimmed "Turn wall-clock timeout"
-  then make ~source:"legacy_error_text" "turn_wall_clock_timeout"
-  else if contains_ci trimmed "require_tool_use"
-  then make ~source:"legacy_error_text" (contract_code_from_error_text trimmed)
-  else make ~source:"legacy_error_text" "unknown_error"
-;;
-
-(* The fallback was previously detected via [String.equal fallback.code
-   "unknown_error"]. Now we match on the typed disposition: only the
-   empty-raw [Unknown { raw_error = "" }] case (produced by
-   [of_legacy_error_text ""]) opts into the SDK-error-derived code. Any
-   other [of_legacy_error_text] result has classified the error and
-   should be returned as-is. *)
-let is_unknown_empty (reason : t) =
-  (* Enumerate every [Keeper_turn_disposition.t] variant so the
-     compiler flags any new disposition added. Only the empty-raw
-     [Unknown { raw_error = "" }] case opts into the SDK-error-derived
-     code; all other dispositions (Success, External_cancel,
-     Turn_wall_clock_timeout, Oas_timeout_budget,
-     Gh_repo_context_missing_worktree, Required_tool_use_no_tool_call,
-     Required_tool_use_unsatisfied, Post_commit_ambiguous,
-     Provider_error, and Unknown with non-empty raw_error) must yield
-     [false]. A future disposition variant added to
-     [Keeper_turn_disposition.t] would silently inherit [false] under
-     the previous [_ -> false] catch-all without a review point on
-     whether the new variant should opt into the unknown-empty
-     pathway. Same FSM Sparse Match anti-pattern as PRs #14716,
-     #14790, #14806, #14810, #14816, #14823. *)
-  match reason.disposition with
-  | Keeper_turn_disposition.Unknown { raw_error = "" } -> true
-  | Keeper_turn_disposition.Unknown { raw_error = _ }
-  | Keeper_turn_disposition.Success
-  | Keeper_turn_disposition.External_cancel
-  | Keeper_turn_disposition.Turn_wall_clock_timeout
-  | Keeper_turn_disposition.Oas_timeout_budget
-  | Keeper_turn_disposition.Gh_repo_context_missing_worktree
-  | Keeper_turn_disposition.Required_tool_use_no_tool_call
-  | Keeper_turn_disposition.Required_tool_use_unsatisfied
-  | Keeper_turn_disposition.Post_commit_ambiguous
-  | Keeper_turn_disposition.Provider_error _ -> false
-;;
-
 let of_failure ?(post_commit_ambiguous = false) ?(tool_call_count = 0) ~raw_error err =
   if post_commit_ambiguous
   then make ~source:"typed_error" "post_commit_ambiguous"
@@ -144,21 +94,17 @@ let of_failure ?(post_commit_ambiguous = false) ?(tool_call_count = 0) ~raw_erro
          in
          make ~source:"typed_error" code
        | _ ->
-         let fallback = of_legacy_error_text raw_error in
-         if is_unknown_empty fallback
-         then
-           (* RFC-0047 follow-up: emit typed [Provider_error] directly via
-              [Keeper_agent_error.terminal_reason_code_of_sdk_error_typed]
-              so [registry_failure_reason_of_terminal_reason] can match
-              exhaustively on disposition without a substring guard for
-              "api_error_*" wires. The typed bridge encapsulates the
-              [Sdk_error _] wrapping; the consumer no longer touches a
-              raw wire string. *)
-           of_disposition
-             ~source:"typed_error"
-             (Keeper_turn_disposition.Provider_error
-                (Keeper_agent_error.terminal_reason_code_of_sdk_error_typed err))
-         else fallback))
+         (* RFC-0047 follow-up: emit typed [Provider_error] directly via
+            [Keeper_agent_error.terminal_reason_code_of_sdk_error_typed]
+            so [registry_failure_reason_of_terminal_reason] can match
+            exhaustively on disposition without a substring guard for
+            "api_error_*" wires. The typed bridge encapsulates the
+            [Sdk_error _] wrapping; the consumer no longer touches a
+            raw wire string. *)
+         of_disposition
+           ~source:"typed_error"
+           (Keeper_turn_disposition.Provider_error
+              (Keeper_agent_error.terminal_reason_code_of_sdk_error_typed err))))
 ;;
 
 let of_code ?source ?summary ?next_action code =

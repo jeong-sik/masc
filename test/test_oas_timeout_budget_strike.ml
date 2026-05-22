@@ -47,15 +47,15 @@ let test_reset_clears () =
     (KK.peek_budget_exhaustion_for_test ~keeper_name:"reset")
 
 let test_strike_limit_is_soft_backoff () =
-  (match KK.classify_oas_timeout_budget_strike ~strikes:1 with
-   | KK.Oas_timeout_budget_warn -> ()
-   | KK.Oas_timeout_budget_soft_backoff -> failwith "strike 1 should warn");
+  (match KK.classify_provider_timeout_strike ~strikes:1 with
+   | KK.Provider_timeout_warn -> ()
+   | KK.Provider_timeout_soft_backoff -> failwith "strike 1 should warn");
   (match
-     KK.classify_oas_timeout_budget_strike
-       ~strikes:KK.oas_timeout_budget_strike_limit
+     KK.classify_provider_timeout_strike
+       ~strikes:KK.provider_timeout_strike_limit
    with
-   | KK.Oas_timeout_budget_soft_backoff -> ()
-   | KK.Oas_timeout_budget_warn ->
+   | KK.Provider_timeout_soft_backoff -> ()
+   | KK.Provider_timeout_warn ->
      failwith "strike limit should soft-backoff, not crash")
 
 let oas_timeout_budget_error ~phase =
@@ -88,7 +88,7 @@ let test_strike_limit_routes_through_policy_without_keeper_death () =
   let err = oas_timeout_budget_error ~phase:"stream_idle:streaming_thinking" in
   match
     KH.oas_timeout_budget_policy_decision
-      ~strikes:KK.oas_timeout_budget_strike_limit
+      ~strikes:KK.provider_timeout_strike_limit
       err
   with
   | None -> Alcotest.fail "expected OAS timeout budget policy decision"
@@ -148,7 +148,7 @@ let test_concurrent_bumps_do_not_lose_updates () =
       (KK.peek_budget_exhaustion_for_test ~keeper_name:keeper))
 
 let () =
-  Alcotest.run "oas_timeout_budget_strike"
+  Alcotest.run "provider_timeout_strike"
   [
     ( "strike ledger",
       [

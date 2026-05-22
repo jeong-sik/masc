@@ -170,9 +170,9 @@ include module type of Prometheus_cascade_metric_names
     - [meta_read_failed]: meta read I/O error — recovery skipped
     - [meta_write_failed]: meta write to clear [paused] failed *)
 
-(** PR-M (Leak 9): consecutive [oas_timeout_budget] cycle FAILED strikes.
+(** PR-M (Leak 9): consecutive [provider_timeout] cycle FAILED strikes.
     Labeled by [keeper] and [outcome]:
-    - [outcome=warn]: strike below [oas_timeout_budget_strike_limit];
+    - [outcome=warn]: strike below [provider_timeout_strike_limit];
       cycle continues.
     - [outcome=soft_backoff]: strike at or above limit; keeper fiber
       remains alive while provider/cascade cooldown and retry backoff

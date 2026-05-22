@@ -846,14 +846,15 @@ let reset_autonomous_completion_for_test () : unit =
   with_completion_table (fun () -> Hashtbl.reset last_autonomous_completion)
 ;;
 
-(* PR-M (Leak 9): consecutive [oas_timeout_budget] cycle FAILED strikes
+(* PR-M (Leak 9): consecutive [provider_timeout] cycle FAILED strikes
    per keeper.
 
-   [oas_timeout_budget] means the keeper cycle hit its structural budget
+   [provider_timeout] is the canonical policy surface for the legacy
+   structured timeout-budget path
    (see [Keeper_unified_turn.resolve_bounded_oas_timeout_budget_with_turn_budget]).
    Re-running on the same fiber gives the same context and the same
    shape of failure repeats, but provider/cascade budget pressure is not
-   keeper fiber corruption. Crossing [oas_timeout_budget_strike_limit]
+   keeper fiber corruption. Crossing [provider_timeout_strike_limit]
    is therefore routed through [Keeper_failure_policy] before any
    lifecycle effect is applied. Without independent keeper-liveness
    loss, the keeper stays alive while provider cooldown, cascade
@@ -864,16 +865,16 @@ let reset_autonomous_completion_for_test () : unit =
    process restart, callers may seed it from the persisted
    [Provider_timeout_loop] failure reason so restart cannot erase a
    partially observed loop. *)
-let oas_timeout_budget_strike_limit = 3
+let provider_timeout_strike_limit = 3
 
-type oas_timeout_budget_strike_outcome =
-  | Oas_timeout_budget_warn
-  | Oas_timeout_budget_soft_backoff
+type provider_timeout_strike_outcome =
+  | Provider_timeout_warn
+  | Provider_timeout_soft_backoff
 
-let classify_oas_timeout_budget_strike ~strikes =
-  if strikes >= oas_timeout_budget_strike_limit
-  then Oas_timeout_budget_soft_backoff
-  else Oas_timeout_budget_warn
+let classify_provider_timeout_strike ~strikes =
+  if strikes >= provider_timeout_strike_limit
+  then Provider_timeout_soft_backoff
+  else Provider_timeout_warn
 
 module Budget_strike_map = Map.Make (String)
 

@@ -173,6 +173,14 @@ val read_state : Coord.config -> state
     are passed through the internal normaliser ([priority]
     clamp + phase/status reconciliation). *)
 
+val write_state : Coord.config -> state -> unit
+(** Direct overwrite of {!goals_path} with the supplied state.
+    Used by tests that need deterministic initial state without
+    the read-modify-write cycle of {!update_state}.
+
+    Does *not* acquire the file lock; callers that need atomicity
+    should use {!update_state} instead. *)
+
 val update_state : Coord.config -> (state -> state) -> state
 (** Atomic read-modify-write under the goals file lock.
     [f] receives the current state and returns the next state.

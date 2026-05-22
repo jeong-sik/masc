@@ -82,6 +82,14 @@ val to_yojson : t -> Yojson.Safe.t
     - [Partial_pass]       → [{"kind":"partial_pass",
                                "score":0.85,"rationale":"..."}] *)
 
+val of_yojson : Yojson.Safe.t -> (t, string) result
+(** Deserialize from JSON. Inverse of {!to_yojson}. *)
+
+val show : t -> string
+(** Concise debug representation. Long fields (evidence, reason,
+    rationale) are elided to […] so the string is safe for logs and
+    test assertions. *)
+
 (** {1 Smart constructors}
 
     Prefer these over the raw record — they enforce the sum invariant

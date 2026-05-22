@@ -148,6 +148,14 @@ let detail_json_opt = Keeper_tools_oas_json.detail_json_opt
 let json_or_detail_string_opt = Keeper_tools_oas_json.json_or_detail_string_opt
 let diagnosis_json_opt = Keeper_tools_oas_json.diagnosis_json_opt
 
+let json_nonempty_string_opt key json =
+  match json_assoc_field_opt key json with
+  | Some (`String value) ->
+    let value = String.trim value in
+    if String.equal value "" then None else Some value
+  | _ -> None
+;;
+
 let workflow_rejection_info_of_raw raw =
   try
     let json = Yojson.Safe.from_string raw in
@@ -274,13 +282,6 @@ let workflow_rejection_recovery_fields ~tool_name ~count raw =
     @ if count >= 2 then [ "workflow_rejection_loop", `Bool true ] else []
 ;;
 
-let json_nonempty_string_opt key json =
-  match json_assoc_field_opt key json with
-  | Some (`String value) ->
-    let value = String.trim value in
-    if String.equal value "" then None else Some value
-  | _ -> None
-;;
 
 let json_has_nonempty_evidence_refs json =
   let nonempty_string = function
@@ -351,7 +352,7 @@ let workflow_rejection_scope_block_fields ~tool_name block =
           (workflow_rejection_recovery_instruction
              ~tool_name
              ~count:(block.count + 1)
-             { rule_id = block.rule_id
+             { task_id = None; rule_id = block.rule_id
              ; tool_suggestion = block.tool_suggestion
              ; hint = block.hint
              })

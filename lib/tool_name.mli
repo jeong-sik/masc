@@ -3,6 +3,19 @@
     Use [of_string] at MCP/JSON parse boundaries only.
     All internal code passes [t] values directly. *)
 
+module Operation : sig
+  type t =
+    | Code_write
+    | Code_edit
+    | Code_read
+    | Code_delete
+    | Code_shell
+    | Code_git
+    | Worktree_create
+
+  val to_string : t -> string
+end
+
 module Keeper : sig
   type t =
     | Bash

@@ -369,11 +369,6 @@ let detect_truncated_markdown_with_reason (text : string) : truncation_signal op
     else None)
 ;;
 
-(* Backwards-compatible boolean wrapper. *)
-let detect_truncated_markdown (text : string) : bool =
-  Option.is_some (detect_truncated_markdown_with_reason text)
-;;
-
 (** {1 Sort order}
 
     Issue #8449 PR B: [sort_order] re-exports [Board_dispatch.sort_order]

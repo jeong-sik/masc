@@ -21,8 +21,8 @@ let test_path_not_found () =
   in
   Alcotest.(check bool) "mentions ls hint" true
     (try
-       ignore (Str.search_forward (Str.regexp_string "Bash with command='ls") action 0);
-       true
+       Str.search_forward (Str.regexp_string "Bash executable='ls'") action 0
+       >= 0
      with Not_found -> false);
   Alcotest.(check bool) "mentions playground" true
     (try

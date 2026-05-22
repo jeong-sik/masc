@@ -34,14 +34,11 @@ let constructor_cases : (string * T.t) list =
   ; ( "of_code/sdk_error/agent_error_max_turns"
     , T.of_code "agent_error_max_turns_exceeded:turns=10,limit=10" )
   ; "of_code/unknown", T.of_code "totally_unmapped"
-  ; "of_legacy_error_text/empty", T.of_legacy_error_text ""
-  ; ( "of_legacy_error_text/gh_repo"
-    , T.of_legacy_error_text "gh_repo_context_missing_worktree" )
-  ; "of_legacy_error_text/oas_timeout", T.of_legacy_error_text "oas_timeout_budget"
-  ; ( "of_legacy_error_text/turn_wall_clock"
-    , T.of_legacy_error_text "Turn wall-clock timeout fired" )
-  ; ( "of_legacy_error_text/require_tool_use"
-    , T.of_legacy_error_text "called no keeper tools and require_tool_use was set" )
+  ; "of_code/empty", T.of_code ""
+  ; "of_code/gh_repo", T.of_code "gh_repo_context_missing_worktree"
+  ; "of_code/oas_timeout", T.of_code "oas_timeout_budget"
+  ; "of_code/turn_wall_clock", T.of_code "turn_wall_clock_timeout"
+  ; "of_code/require_tool_use", T.of_code "required_tool_use_no_tool_call"
   ]
 ;;
 
@@ -66,7 +63,7 @@ let test_to_json_keeps_code_field () =
     let keys = List.map fst fields |> List.sort String.compare in
     Alcotest.(check (list string))
       "JSON fields unchanged"
-      [ "code"; "next_action"; "severity"; "source"; "summary" ]
+      [ "code"; "disposition"; "next_action"; "severity"; "source"; "summary" ]
       keys
   | _ -> Alcotest.fail "expected JSON object"
 ;;

@@ -55,7 +55,7 @@ let actionable_path_action_for_class
     match cls with
     | Path_not_found ->
       Printf.sprintf
-        "File does not exist. Use Bash with command='ls %s' first to see available \
+        "File does not exist. Use Bash executable='ls' argv=['%s'] first to see available \
          files, or use a visible file-listing tool if one is present."
         playground
     | Path_not_allowed ->

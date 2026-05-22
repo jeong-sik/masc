@@ -274,8 +274,9 @@ let diagnosis_of_readonly_category category =
                 "git commit/push/checkout modify state; readonly shell only \
                  allows read-only git subcommands (log, diff, status, show)."
             ; rewrite =
-                Some "Use a write-capable Bash surface: Bash \
-                      command='git add lib/foo.ml'. Commit in a second Bash call."
+                Some
+                  "Use a write-capable Bash surface: Bash executable='git' \
+                   argv=['add','lib/foo.ml']. Commit in a second Bash call."
             ; tool_suggestion = None }
   | "package_install" ->
       Some { Exec_core.rule_id = "readonly_package_install_blocked"
@@ -283,8 +284,9 @@ let diagnosis_of_readonly_category category =
                 "opam install / npm install mutate the global environment; \
                  readonly shell forbids package mutations."
             ; rewrite =
-                Some "Use a write-capable Bash surface: Bash \
-                      command='opam install -y eio'."
+                Some
+                  "Use a write-capable Bash surface: Bash executable='opam' \
+                   argv=['install','-y','eio']."
             ; tool_suggestion = None }
   | "destructive" ->
       Some { Exec_core.rule_id = "readonly_destructive_blocked"
@@ -292,8 +294,9 @@ let diagnosis_of_readonly_category category =
                 "rm, curl -o, and similar destructive commands modify or \
                  delete state; readonly shell forbids them."
             ; rewrite =
-                Some "Use a write-capable Bash surface: Bash \
-                      command='rm .tmp/scratch.log'."
+                Some
+                  "Use a write-capable Bash surface: Bash executable='rm' \
+                   argv=['.tmp/scratch.log']."
             ; tool_suggestion = None }
   | _ -> None
 

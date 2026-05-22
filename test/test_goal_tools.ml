@@ -170,7 +170,11 @@ let test_goal_upsert_and_list () =
     | `Int n -> n
     | _ -> fail "count missing from goal list response"
   in
-  check int "one listed goal" 1 count
+  check int "one listed goal" 1 count;
+  let goals = Yojson.Safe.Util.member "goals" listed_json |> Yojson.Safe.Util.to_list in
+  match goals with
+  | [ goal_json ] -> check string "listed goal id" goal_id (get_string_field goal_json "id")
+  | _ -> fail "expected one listed goal"
 ;;
 
 let test_goal_list_filters_by_phase () =

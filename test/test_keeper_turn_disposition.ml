@@ -248,7 +248,7 @@ let test_projection () =
 ;;
 
 let check_cascade_failure_reason raw_error expected_code =
-  let terminal = Legacy.of_legacy_error_text raw_error in
+  let terminal = Legacy.of_code raw_error in
   match Unified_types.registry_failure_reason_of_terminal_reason terminal ~raw_error with
   | Some (Registry.Provider_runtime_error { code; detail }) ->
     Alcotest.(check string) "provider runtime code" expected_code code;

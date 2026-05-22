@@ -322,4 +322,3 @@ let repo_slug_of_git_root ~git_root =
   | Some slug -> Some slug
   | None -> repo_slug_of_git_command ~cwd:git_root
 ;;
-

@@ -26,3 +26,9 @@ and claim_scope_exclusions = {
 
 (** JSON serialization for telemetry and trace surfaces. *)
 val to_json : t -> Yojson.Safe.t
+
+(** JSON deserialization from tool output embedding. *)
+val of_json : Yojson.Safe.t -> t option
+
+(** Remove [typed_outcome] field from JSON before returning to LLM. *)
+val strip_from_json : Yojson.Safe.t -> Yojson.Safe.t

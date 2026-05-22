@@ -45,3 +45,60 @@ let to_json (outcome : t) : Yojson.Safe.t =
   | Error { reason } ->
     `Assoc [ "kind", `String "Error"; "reason", `String reason ]
 ;;
+
+let of_json (json : Yojson.Safe.t) : t option =
+  match json with
+  | `Assoc fields ->
+    (match List.assoc_opt "kind" fields with
+     | Some (`String "Progress") -> Some Progress
+     | Some (`String "No_progress") ->
+       (match List.assoc_opt "reason" fields with
+        | Some (`Assoc reason_fields) ->
+          (match List.assoc_opt "kind" reason_fields with
+           | Some (`String "No_eligible_tasks") ->
+             (match List.assoc_opt "exclusions" reason_fields with
+              | Some (`Assoc exc_fields) ->
+                let get_int key =
+                  match List.assoc_opt key exc_fields with
+                  | Some (`Int n) -> n
+                  | _ -> 0
+                in
+                let get_bool key =
+                  match List.assoc_opt key exc_fields with
+                  | Some (`Bool b) -> b
+                  | _ -> false
+                in
+                Some
+                  (No_progress
+                     { reason =
+                         No_eligible_tasks
+                           { scope_excluded_count = get_int "scope_excluded_count"
+                           ; blocked_count = get_int "blocked_count"
+                           ; verification_blocked_count = get_int "verification_blocked_count"
+                           ; required_tool_excluded_count = get_int "required_tool_excluded_count"
+                           ; all_goals_excluded = get_bool "all_goals_excluded"
+                           }
+                     })
+              | _ -> None)
+           | Some (`String "Resource_conflict") ->
+             (match List.assoc_opt "resource" reason_fields with
+              | Some (`String resource) ->
+                Some (No_progress { reason = Resource_conflict { resource } })
+              | _ -> None)
+           | Some (`String "No_work_available") ->
+             Some (No_progress { reason = No_work_available })
+           | _ -> None)
+        | _ -> None)
+     | Some (`String "Error") ->
+       (match List.assoc_opt "reason" fields with
+        | Some (`String reason) -> Some (Error { reason })
+        | _ -> None)
+     | _ -> None)
+  | _ -> None
+;;
+
+let strip_from_json (json : Yojson.Safe.t) : Yojson.Safe.t =
+  match json with
+  | `Assoc fields -> `Assoc (List.filter (fun (k, _) -> not (String.equal k "typed_outcome")) fields)
+  | json -> json
+;;

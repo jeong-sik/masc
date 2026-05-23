@@ -3,6 +3,21 @@
 
 open Agent_sdk
 open Masc_mcp
+module Parsed = Masc_exec.Parsed
+
+(* Test-local shim restoring [validate_command_paths] (string entry) by
+   composing [Bash.parse_string] with the new [validate_shell_ir_paths]
+   SSOT (RFC-0160 Shell IR first-class promotion removed the string
+   wrapper). 9 call sites below reach this through module rebinding. *)
+module Worker_dev_tools = struct
+  include Worker_dev_tools
+
+  let validate_command_paths ?keeper_id ?base_path ?workdir cmd =
+    match Masc_exec_bash_parser.Bash.parse_string cmd with
+    | Parsed.Parsed ir ->
+      validate_shell_ir_paths ?keeper_id ?base_path ?workdir ir
+    | _ -> Error "parse failure"
+end
 
 (* Helper: find tool by name from tool list *)
 let find_tool name tools =
@@ -1011,12 +1026,13 @@ let () =
         | Error _ -> ()
         | Ok () -> Alcotest.fail "should reject command outside custom allowlist");
     ];
-    "is_destructive_bash_operation", [
-      let is_destructive cmd =
-        match Masc_exec_bash_parser.Bash.parse_string cmd with
-        | Parsed.Parsed ir -> Worker_dev_tools.is_destructive_bash_operation ir
-        | _ -> false
-      in
+    ("is_destructive_bash_operation",
+     let is_destructive cmd =
+       match Masc_exec_bash_parser.Bash.parse_string cmd with
+       | Parsed.Parsed ir -> Worker_dev_tools.is_destructive_bash_operation ir
+       | _ -> false
+     in
+     [
       Alcotest.test_case "blocks force push" `Quick (fun () ->
         Alcotest.(check bool) "force push" true
           (is_destructive "git push --force"));
@@ -1071,7 +1087,7 @@ let () =
       Alcotest.test_case "allows git commit" `Quick (fun () ->
         Alcotest.(check bool) "git commit" false
           (is_destructive "git commit -m 'fix'"));
-    ];
+    ]);
     "gh_pr_merge_target", [
       Alcotest.test_case "extracts numeric pr id" `Quick (fun () ->
         Alcotest.(check (option string)) "numeric target" (Some "5934")

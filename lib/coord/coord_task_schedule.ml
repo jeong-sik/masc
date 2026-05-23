@@ -364,7 +364,6 @@ let claim_next_r
                    ; released_task_id = None
                    ; message
                    })));
-        let observe_legacy_release () = () in
         let released_task_id, working_tasks = None, backlog.tasks in
         let active_admission_tasks =
           List.filter
@@ -581,8 +580,7 @@ let claim_next_r
                 ; version = backlog.version + 1
                 }
               in
-              write_backlog config new_backlog;
-              observe_legacy_release ()
+              write_backlog config new_backlog
             | None -> ());
            clear_agent_state_after_release ();
            Claim_next_no_unclaimed
@@ -595,8 +593,7 @@ let claim_next_r
                 ; version = backlog.version + 1
                 }
               in
-              write_backlog config new_backlog;
-              observe_legacy_release ()
+              write_backlog config new_backlog
             | None -> ());
            clear_agent_state_after_release ();
            Claim_next_no_eligible
@@ -651,8 +648,7 @@ let claim_next_r
                 ~agent_name
                 ~task_id:rid
                 ~kind:(Event_kind.Task.to_string Event_kind.Task.Released)
-                ~payload:(`Assoc [ "task_id", `String rid ]);
-              observe_legacy_release ()
+                ~payload:(`Assoc [ "task_id", `String rid ])
             | None -> ());
            Coord_task.emit_task_activity
              config

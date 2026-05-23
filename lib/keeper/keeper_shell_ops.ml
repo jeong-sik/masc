@@ -60,6 +60,9 @@ let handle_keeper_shell
       Keeper_shell_runtime.run_wc_op ~root ~keeper_name:meta.name ~config ~meta
         ?turn_sandbox_factory ~op
     in
+    let run_git_cwd =
+      run_cwd ~max_bytes:1_000_000 ~timeout_sec:Keeper_shell_shared.read_timeout_sec
+    in
     match shell_op with
     | Pwd ->
       with_cwd (fun cwd ->
@@ -69,12 +72,11 @@ let handle_keeper_shell
           ~max_bytes:4096 ~timeout_sec:Keeper_shell_shared.io_timeout_sec ())
     | Git_status ->
       with_cwd (fun cwd ->
-        run_cwd ~cwd
+        run_git_cwd ~cwd
           ~cmd:"git -C <cwd> --no-optional-locks status --short --branch"
           ~docker_cmd:"git --no-optional-locks status --short --branch"
           ~command_argv:[ "git"; "--no-optional-locks"; "status"; "--short"; "--branch" ]
-          ~max_bytes:1_000_000
-          ~timeout_sec:Keeper_shell_shared.read_timeout_sec ())
+          ())
     | Ls ->
       with_read (fun target ->
         let limit = shell_readonly_limit args in
@@ -102,10 +104,10 @@ let handle_keeper_shell
         run_tree ~target ~limit ~timeout_sec:Keeper_shell_shared.read_timeout_sec ())
     | Git_diff ->
       with_cwd (fun cwd ->
-        run_cwd ~cwd ~cmd:"git diff --stat"
+        run_git_cwd ~cwd ~cmd:"git diff --stat"
           ~docker_cmd:"git --no-optional-locks diff --stat"
           ~command_argv:[ "git"; "--no-optional-locks"; "diff"; "--stat" ]
-          ~max_bytes:1_000_000 ~timeout_sec:Keeper_shell_shared.read_timeout_sec ())
+          ())
     | Git_worktree ->
       Keeper_shell_git_worktree.handle ~op ~meta ~config ~args ?turn_sandbox_factory
         ~root ~raw_path

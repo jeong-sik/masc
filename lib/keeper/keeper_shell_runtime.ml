@@ -304,7 +304,7 @@ let run_cwd_op
     pattern in ops.ml dispatcher arms. *)
 
 let run_readonly_json_op ~config ~meta ?turn_sandbox_factory ~op ~target
-    ~host_argv ~docker_argv ~max_bytes ~timeout_sec ~output_field
+    ~host_argv ~docker_argv ?(max_bytes = 1_000_000) ~timeout_sec ~output_field
     ~output_of_out ?extra ()
   =
   match
@@ -325,7 +325,6 @@ let run_ls_op ~config ~meta ?turn_sandbox_factory ~op ~target ~limit ~timeout_se
   run_readonly_json_op ~config ~meta ?turn_sandbox_factory ~op ~target
     ~host_argv:[ coreutils.ls; "-la"; target ]
     ~docker_argv:(fun cpath -> [ "ls"; "-la"; cpath ])
-    ~max_bytes:1_000_000
     ~timeout_sec
     ~output_field:"entries"
     ~output_of_out:(lines_to_json ~limit)
@@ -361,7 +360,6 @@ let run_head_tail_op ~config ~meta ?turn_sandbox_factory ~op ~target ~n ~timeout
   run_readonly_json_op ~config ~meta ?turn_sandbox_factory ~op ~target
     ~host_argv:[ coreutil; "-n"; string_of_int n; target ]
     ~docker_argv:(fun cpath -> [ coreutil; "-n"; string_of_int n; cpath ])
-    ~max_bytes:1_000_000
     ~timeout_sec
     ~output_field:"content"
     ~output_of_out:(fun out -> `String out)
@@ -378,7 +376,6 @@ let run_tree_op ~config ~meta ?turn_sandbox_factory ~op ~target ~limit ~timeout_
   run_readonly_json_op ~config ~meta ?turn_sandbox_factory ~op ~target
     ~host_argv:(tree_base target)
     ~docker_argv:(fun cpath -> tree_base cpath)
-    ~max_bytes:1_000_000
     ~timeout_sec
     ~output_field:"entries"
     ~output_of_out:(lines_to_json ~limit)

@@ -14,7 +14,6 @@ type workflow_rejection_info =
 
 type workflow_rejection_block =
   { count : int
-  ; task_id : string option
   ; rule_id : string option
   ; tool_suggestion : string option
   ; hint : string option
@@ -64,7 +63,7 @@ let workflow_rejection_info_of_raw raw =
   | Yojson.Json_error _ -> None
 ;;
 
-let workflow_rejection_family_key ~tool_name info =
+let workflow_rejection_family_key ~tool_name (info : workflow_rejection_info) =
   Printf.sprintf
     "%s:%s:%s:%s"
     (Option.value ~default:"unknown_task" info.task_id)

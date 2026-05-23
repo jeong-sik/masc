@@ -97,7 +97,7 @@ val resolve_declared_name :
   ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
   raw_name:string ->
   unit ->
-  (string, string) result
+  (Cascade_name.t, string) result
 
 val models_of_cascade_name :
   ?sw:Eio.Switch.t ->

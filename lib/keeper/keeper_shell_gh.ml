@@ -94,12 +94,12 @@ let handle ~op ~(meta : keeper_meta) ~(config : Coord.config) ~(args : Yojson.Sa
       Printf.sprintf "gh %s"
         (Keeper_gh_shared.render_simple_gh_command cmd)
     in
+    let route_fields =
+      if meta.sandbox_profile = Docker
+      then [ "via", `String "docker" ]
+      else []
+    in
     let gh_base ~ok ~cwd ~command extras =
-      let route_fields =
-        if meta.sandbox_profile = Docker
-        then [ "via", `String "docker" ]
-        else []
-      in
       Yojson.Safe.to_string
         (`Assoc
             ([ "ok", `Bool ok
@@ -109,6 +109,19 @@ let handle ~op ~(meta : keeper_meta) ~(config : Coord.config) ~(args : Yojson.Sa
              ; "reversibility", `String rev_tag
              ] @ route_fields @ extras))
     in
+    let gh_context_fields_of_ctx = function
+      | None -> []
+      | Some ctx ->
+        let repo_fields =
+          match ctx.repo_slug with
+          | Some repo_slug -> [ "repo", `String repo_slug ]
+          | None -> []
+        in
+        [ "task_id", `String ctx.task_id
+        ; "git_root", `String ctx.git_root
+        ]
+        @ repo_fields
+    in
     let run_gh_command ~display_command ~parsed_command ~cwd
         ~(ctx : Keeper_shell_gh_context.gh_repo_context option) =
       if reversibility = Masc_exec.Shell_ir_risk.R1_Reversible_mutation
@@ -116,20 +129,7 @@ let handle ~op ~(meta : keeper_meta) ~(config : Coord.config) ~(args : Yojson.Sa
         Log.Keeper.info
           "gh_audit: keeper=%s reversibility=R1 cwd=%s cmd=%s"
           meta.name cwd display_command;
-      let gh_context_fields =
-        match ctx with
-        | Some ctx ->
-          let repo_fields =
-            match ctx.repo_slug with
-            | Some repo_slug -> [ "repo", `String repo_slug ]
-            | None -> []
-          in
-          [ "task_id", `String ctx.task_id
-          ; "git_root", `String ctx.git_root
-          ]
-          @ repo_fields
-        | None -> []
-      in
+      let gh_context_fields = gh_context_fields_of_ctx ctx in
       let gh_ir =
         Keeper_gh_shared.gh_simple_command_to_shell_ir
           ~sandbox:(Masc_exec.Sandbox_target.host ())

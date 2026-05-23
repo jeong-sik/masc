@@ -98,7 +98,7 @@ export function TurnFsmDetailPanel({ snapshot }: { snapshot: KeeperCompositeSnap
             <${StatusChip} tone=${turnFsmChipTone(terminalTone(execution.outcome))} uppercase=${false} class="font-mono" title=${stopCause.source}>reason ${stopCause.code}</${StatusChip}>
           ` : null}
           ${execution.tool_contract_result ? html`
-            <${StatusChip} tone=${turnFsmChipTone(execution.tool_contract_result === 'violated' ? 'err' : 'neutral')} uppercase=${false} class="font-mono" title=${execution.tool_contract_result}>tool ${toolContractLabel(execution.tool_contract_result)}</${StatusChip}>
+            <${StatusChip} tone=${turnFsmChipTone((execution.tool_contract_result === 'violated' || execution.tool_contract_result === 'missing_required_tool_use') ? 'err' : 'neutral')} uppercase=${false} class="font-mono" title=${execution.tool_contract_result}>tool ${toolContractLabel(execution.tool_contract_result)}</${StatusChip}>
           ` : null}
         </div>
       ` : null}

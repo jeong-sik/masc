@@ -121,7 +121,7 @@ let register
   add
     Keeper_metrics.metric_keeper_contract_violations
     "Keeper turns rejected for required-tool-contract violations (labels: keeper_name, \
-     kind={passive|text_only}). #10530."
+     kind={passive|text_only|missing_required_tool_use}). #10530."
     `Counter;
   add
     Keeper_metrics.metric_keeper_alive_but_stuck

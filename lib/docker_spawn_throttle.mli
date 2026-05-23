@@ -33,3 +33,6 @@ val with_slot : (unit -> 'a) -> 'a
 
     Exceptions from [f] propagate; the slot is always released. *)
 
+val configured_max : unit -> int
+(** Return the current effective concurrency cap.  Exposed for testing. *)
+

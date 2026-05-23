@@ -3,7 +3,6 @@
 open Keeper_types
 
 module StringSet = Set.Make (String)
-module Message_json = Keeper_context_core_message_json
 
 type history_migration_stats =
   { moved_lines : int
@@ -62,7 +61,7 @@ let classify_history_jsonl_line (line : string) : history_line_action option =
       | Some raw -> String.trim raw
       | None -> ""
     in
-    let content = String.trim (Message_json.text_of_history_jsonl_json json) in
+    let content = String.trim (Keeper_context_core_message_json.text_of_history_jsonl_json json) in
     Some (classify_history_entry ~source ~content)
   with
   | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None
@@ -216,7 +215,7 @@ let persist_message ?source session msg =
     let path = history_path_for_source ~session_dir:session.session_dir ~source in
     let now_ts = Time_compat.now () in
     let payload =
-      match Message_json.message_to_json msg with
+      match Keeper_context_core_message_json.message_to_json msg with
       | `Assoc fields ->
           let fields =
             match source with

@@ -21,3 +21,9 @@ type t = {
 }
 
 val to_json : t -> Yojson.Safe.t
+
+val of_json : Yojson.Safe.t -> (t, string) result
+(** Parse a provenance record from JSON. Returns [Error msg] on malformed input. *)
+
+val empty : created_by:string -> created_at:float -> t
+(** Create a minimal provenance record with empty [origin_artifact_ids]. *)

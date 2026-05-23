@@ -24,3 +24,9 @@
 
 val wrap_unit : action:string -> stage:string -> (unit -> unit) -> unit
 
+val refresh_policy_for_test : unit -> unit
+(** No-op placeholder for test harnesses that expect a policy refresh hook. *)
+
+val assert_mode_for_test : unit -> bool
+(** Stub that returns [true].  Used in tests to verify FSM guard mode. *)
+

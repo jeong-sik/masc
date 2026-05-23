@@ -36,3 +36,18 @@ type run_result =
   ; pre_dispatch_compaction_after_tokens : int option
   }
 
+val tool_call_detail_to_json : tool_call_detail -> Yojson.Safe.t
+
+(** Legacy MASC-facing model label helper.
+
+    MASC no longer exposes concrete provider/model identity on status,
+    metrics, or dashboard surfaces; OAS owns that resolution. Kept for
+    schema compatibility and returns the neutral runtime lane label. *)
+val surface_model_used : run_result -> string
+
+(** Legacy MASC-facing resolved model helper.
+
+    Kept for schema compatibility and returns the neutral runtime lane label;
+    concrete provider/model identity belongs to OAS telemetry. *)
+val surface_resolved_model_id : run_result -> string
+

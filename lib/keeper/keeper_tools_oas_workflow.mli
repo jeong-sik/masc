@@ -54,6 +54,7 @@ val workflow_scope_key_of_input
     Defined here because [workflow_rejection_scope_block_fields] uses it. *)
 type workflow_rejection_block =
   { count : int
+  ; task_id : string option
   ; rule_id : string option
   ; tool_suggestion : string option
   ; hint : string option

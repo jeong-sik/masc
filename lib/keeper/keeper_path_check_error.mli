@@ -40,3 +40,12 @@ val to_message : t -> string
     so downstream tools that match on these messages keep their
     contract. *)
 
+val message_prefix : t -> string
+(** Return the lowercase prefix token for a given variant
+    (e.g. ["path blocked:"], ["cwd_not_directory:"]). *)
+
+val parse_prefix : string -> t option
+(** Reverse parse: given an error message string, recover the typed
+    variant if it starts with a known prefix. Returns [None] when no
+    prefix matches. *)
+

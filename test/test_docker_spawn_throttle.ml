@@ -2,16 +2,20 @@
 
     Tests cover:
     - Layer A: configured concurrency cap is respected under fan-in
-    - Layer B: fd_pressure trip degrades effective concurrency to 1 *)
+    - Layer B: fd_pressure trip degrades effective concurrency to 1
 
-module DST = Masc_mcp.Docker_spawn_throttle
+    Migrated from Docker_spawn_throttle to Fd_accountant (RFC-0101). *)
+
+module DST = Masc_mcp.Fd_accountant
 module FD = Masc_mcp.Keeper_fd_pressure
+
+let kind = DST.Docker_spawn
 
 let with_eio f =
   Eio_main.run (fun env -> ignore env; f ())
 
 let test_configured_max_in_range () =
-  let n = DST.configured_max () in
+  let n = DST.configured_concurrency ~kind in
   Alcotest.(check bool) "1 <= configured_max <= 64" true (n >= 1 && n <= 64)
 
 let test_concurrency_capped_under_fanin () =
@@ -19,7 +23,7 @@ let test_concurrency_capped_under_fanin () =
      Peak must not exceed configured_max. *)
   FD.reset_for_tests ();
   with_eio @@ fun () ->
-  let max_cap = DST.configured_max () in
+  let max_cap = DST.configured_concurrency ~kind in
   let in_flight = Atomic.make 0 in
   let peak = Atomic.make 0 in
   let fan = 32 in
@@ -27,7 +31,7 @@ let test_concurrency_capped_under_fanin () =
   let promises =
     List.init fan (fun _ ->
       Eio.Fiber.fork_promise ~sw (fun () ->
-        DST.with_slot (fun () ->
+        DST.with_slot ~kind (fun () ->
           let now = Atomic.fetch_and_add in_flight 1 + 1 in
           let rec bump_peak () =
             let cur = Atomic.get peak in
@@ -52,19 +56,19 @@ let test_degraded_mode_serializes () =
   FD.note ~site:"unit-test" ~detail:"too many open files in system" ();
   Alcotest.(check bool) "FD.active is true after note" true (FD.active ());
   Alcotest.(check int) "effective_concurrency = 1 while degraded" 1
-    (DST.effective_concurrency ());
+    (DST.effective_concurrency ~kind);
   FD.reset_for_tests ();
   Alcotest.(check int)
     "effective_concurrency restored after reset"
-    (DST.configured_max ())
-    (DST.effective_concurrency ())
+    (DST.configured_concurrency ~kind)
+    (DST.effective_concurrency ~kind)
 
 let test_exception_releases_slot () =
   (* If f raises, the slot must still be released — verify by running
      the cap-test after a raising call completes. *)
   FD.reset_for_tests ();
   with_eio @@ fun () ->
-  (try DST.with_slot (fun () -> failwith "intentional") with Failure _ -> ());
+  (try DST.with_slot ~kind (fun () -> failwith "intentional") with Failure _ -> ());
   (* After the exception, a fresh fan-in must still complete (slots not leaked). *)
   let fan = 16 in
   let done_ = Atomic.make 0 in
@@ -72,7 +76,7 @@ let test_exception_releases_slot () =
   let promises =
     List.init fan (fun _ ->
       Eio.Fiber.fork_promise ~sw (fun () ->
-        DST.with_slot (fun () -> ignore (Atomic.fetch_and_add done_ 1))))
+        DST.with_slot ~kind (fun () -> ignore (Atomic.fetch_and_add done_ 1))))
   in
   List.iter (fun p -> Eio.Promise.await_exn p) promises;
   Alcotest.(check int) "all 16 completed" fan (Atomic.get done_)

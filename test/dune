@@ -1865,10 +1865,7 @@
 
 (include stanzas/test_ws_standalone_close_payload.inc)
 
-(test
- (name test_dashboard_yjs)
- (modules test_dashboard_yjs)
- (libraries masc_test_deps))
+; test_dashboard_yjs: removed — Dashboard_yjs module no longer exists in lib/
 
 (test
  (name test_dashboard_o5_feeds)

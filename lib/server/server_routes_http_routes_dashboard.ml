@@ -26,6 +26,11 @@ let dashboard_logs_json = Server_dashboard_logs_json.build
 
 module Provider_logs = Server_routes_http_dashboard_provider_logs
 
+(* Cascade profile gate — extracted to Server_dashboard_cascade_profile_gate.
+   Re-exported here so the .mli contract is satisfied. *)
+let available_cascade_profiles = Server_dashboard_cascade_profile_gate.available_cascade_profiles
+let invalid_cascade_profiles = Server_dashboard_cascade_profile_gate.invalid_profiles
+
 
 (* RFC-0138 Phase 3 Step 5 — [telemetry_summary_cache_key] deleted
    along with [Dashboard_cache.get_or_compute] from the cold-start
@@ -1170,7 +1175,7 @@ and add_keeper_cascade_routes router =
 
   |> Http.Router.get "/api/v1/keeper/cascades" (fun request reqd ->
        with_public_read (fun _state _req reqd ->
-         let gate = cascade_profile_gate () in
+         let gate = Server_dashboard_cascade_profile_gate.compute () in
          Http.Response.json ~request:request
            (Yojson.Safe.to_string (`Assoc [
              ("profiles", `List (List.map (fun s -> `String s) gate.valid_profiles));
@@ -1206,7 +1211,7 @@ and add_keeper_cascade_routes router =
                  reqd
              | Some name, Some cascade ->
                let known = available_cascade_profiles () in
-               let invalid = invalid_cascade_assignment_profiles () in
+               let invalid = Server_dashboard_cascade_profile_gate.invalid_assignment_profiles () in
                (match List.assoc_opt cascade invalid with
                 | Some reasons ->
                   Http.Response.json ~status:`Conflict ~request:req

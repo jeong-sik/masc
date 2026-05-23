@@ -47,7 +47,11 @@ module Deadline : sig
     -> t
 
   val elapsed : t -> now:float -> float
+
+  val remaining : t -> now:float -> float
 end
+
+val metric_overshoot_total : string
 
 val overshoot_warn
   :  ?slack_s:float

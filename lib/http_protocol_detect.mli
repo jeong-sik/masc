@@ -26,3 +26,9 @@ val detect :
 
     Returns [Error "no Unix FD available on this socket"] when
     the flow has no Unix FD (e.g. an in-memory transport). *)
+
+val detect_from_fd : Unix.file_descr -> (protocol, string) result
+(** Low-level peek on a raw Unix file descriptor.  Exposed for testing. *)
+
+val protocol_to_string : protocol -> string
+(** Convert a protocol variant to a human-readable string. *)

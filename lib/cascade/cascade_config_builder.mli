@@ -38,3 +38,18 @@ val with_codex_cli_preflight :
   (unit -> ('a, Agent_sdk.Error.sdk_error) result) ->
   ('a, Agent_sdk.Error.sdk_error) result
 (** Wrap an execution with a codex_cli preflight check. *)
+
+type codex_cli_prompt_preflight = {
+  prompt_bytes : int;
+  prompt_tokens : int;
+  context_window_tokens : int;
+  retry_limit_tokens : int;
+  hits_argv_limit : bool;
+  hits_context_window : bool;
+}
+
+val codex_cli_prompt_preflight :
+  config:Cascade_runner.config ->
+  goal:string ->
+  codex_cli_prompt_preflight option
+(** Check whether the goal prompt exceeds adapter limits before dispatching. *)

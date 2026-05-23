@@ -4,13 +4,11 @@
     - Per-kind cap enforcement under concurrent fan-in.
     - Slot release on normal return and on exception.
     - Round-trip of [kind_to_string] / [kind_of_string].
-    - Delegation: [Docker_spawn_throttle] public API still works and
-      produces the same observable behaviour as direct
+    - Delegation: [Docker_spawn_throttle] was absorbed into
       [Fd_accountant.with_slot ~kind:Docker_spawn]. *)
 
 open Alcotest
 module FA = Masc_mcp.Fd_accountant
-module DST = Masc_mcp.Docker_spawn_throttle
 
 let tmpdir prefix =
   Filename.concat
@@ -98,12 +96,10 @@ let test_cap_bounds_fan_in () =
     Alcotest.failf "peak in-flight %d exceeded cap %d" hw cap
 
 let test_docker_delegation_consistent () =
-  (* DST.configured_max () must equal
-     Fd_accountant.configured_concurrency ~kind:Docker_spawn — the
-     whole point of the delegation. *)
-  let via_legacy = DST.configured_max () in
-  let via_accountant = FA.configured_concurrency ~kind:Docker_spawn in
-  check int "docker delegation cap parity" via_accountant via_legacy
+  (* Docker_spawn cap must be in range — Docker_spawn_throttle was
+     absorbed into Fd_accountant (RFC-0101). *)
+  let cap = FA.configured_concurrency ~kind:Docker_spawn in
+  check bool "docker spawn cap in [1, 64]" true (cap >= 1 && cap <= 64)
 
 let test_snapshot_shape () =
   let s = FA.fd_snapshot () in

@@ -231,23 +231,48 @@ let tool_result_text_of_block ~tool_use_id ~content ~json =
 
 let tool_use_text_of_block = Keeper_context_tool_text_block.tool_use_text_of_block
 
-type tool_pair_repair_stats = Keeper_context_core_pair_repair_stats.tool_pair_repair_stats =
+type tool_pair_repair_stats =
   { downgraded_tool_uses : int
   ; downgraded_tool_results : int
   }
 
 let empty_tool_pair_repair_stats =
-  Keeper_context_core_pair_repair_stats.empty_tool_pair_repair_stats
-let add_tool_pair_repair_stats =
-  Keeper_context_core_pair_repair_stats.add_tool_pair_repair_stats
-let tool_pair_repair_stats_changed =
-  Keeper_context_core_pair_repair_stats.tool_pair_repair_stats_changed
-let pair_repair_metadata_key =
-  Keeper_context_core_pair_repair_stats.pair_repair_metadata_key
+  { downgraded_tool_uses = 0; downgraded_tool_results = 0 }
+
+let add_tool_pair_repair_stats left right =
+  { downgraded_tool_uses =
+      left.downgraded_tool_uses + right.downgraded_tool_uses
+  ; downgraded_tool_results =
+      left.downgraded_tool_results + right.downgraded_tool_results
+  }
+
+let tool_pair_repair_stats_changed stats =
+  stats.downgraded_tool_uses > 0 || stats.downgraded_tool_results > 0
+
+let pair_repair_metadata_key = "masc.tool_pair_repair"
+
 let pair_repair_metadata_keys =
-  Keeper_context_core_pair_repair_stats.pair_repair_metadata_keys
-let with_pair_repair_metadata =
-  Keeper_context_core_pair_repair_stats.with_pair_repair_metadata
+  [ "was_fabricated"; "fabrication_source"; pair_repair_metadata_key ]
+
+let with_pair_repair_metadata ~kind ~count (msg : Agent_sdk.Types.message) =
+  let metadata =
+    List.filter
+      (fun (key, _) -> not (List.mem key pair_repair_metadata_keys))
+      msg.metadata
+  in
+  { msg with
+    metadata =
+      [ "was_fabricated", `Bool true
+      ; "fabrication_source", `String "tool_pair_repair"
+      ; ( pair_repair_metadata_key
+        , `Assoc
+            [ "version", `Int 1
+            ; "kind", `String kind
+            ; "count", `Int count
+            ] )
+      ]
+      @ metadata
+  }
 
 let repair_dangling_tool_use_messages_with_stats
     (messages : Agent_sdk.Types.message list)

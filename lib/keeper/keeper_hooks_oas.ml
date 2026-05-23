@@ -134,6 +134,16 @@ let self_correcting_tool_failure_class ?base_path error =
     Some failure_class
   | _ -> None
 
+module Gate_attempt = Keeper_hooks_oas_gate_attempt
+module Pr_metrics = Keeper_hooks_oas_pr_metrics
+
+let render_pre_tool_gate_output = Gate_attempt.render_pre_tool_gate_output
+let pre_tool_gate_error = Gate_attempt.pre_tool_gate_error
+let trajectory_duration_ms = Gate_attempt.trajectory_duration_ms
+let record_pre_tool_gate_attempt = Gate_attempt.record_pre_tool_gate_attempt
+let append_pr_review_action_metric = Pr_metrics.append_pr_review_action_metric
+let append_pr_work_action_metrics = Pr_metrics.append_pr_work_action_metrics
+
 include Keeper_hooks_oas_response_metrics
 
 (* cost_status / thinking_log_summary / pr_action types + telemetry helpers
@@ -857,10 +867,10 @@ let make_hooks
 
 module For_testing = struct
   let pr_review_action_metric_event_of_tool_io =
-    pr_review_action_metric_event_of_tool_io
+    Pr_metrics.pr_review_action_metric_event_of_tool_io
 
   let pr_work_action_metric_events_of_tool_io =
-    pr_work_action_metric_events_of_tool_io
+    Pr_metrics.pr_work_action_metric_events_of_tool_io
 end
 
 let hook_introspection_json

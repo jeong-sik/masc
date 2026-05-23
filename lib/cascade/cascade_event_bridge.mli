@@ -25,6 +25,17 @@ val start :
     Exposed for unit testing. *)
 val native_event_to_json : Agent_sdk.Event_bus.event -> Yojson.Safe.t option
 
+(** Like {!start} but with an explicit [drain_interval_s] parameter
+    instead of reading [MASC_OAS_SSE_DRAIN_INTERVAL_SEC].  Exposed for
+    unit tests that need deterministic timing. *)
+val start_with_interval :
+  drain_interval_s:float ->
+  sw:Eio.Switch.t ->
+  clock:_ Eio.Time.clock ->
+  config:Coord.config ->
+  bus:Agent_sdk.Event_bus.t ->
+  unit
+
 module For_testing : sig
   type pending_relay = private {
     json : Yojson.Safe.t;

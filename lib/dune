@@ -86,6 +86,7 @@
  keeper_meta_tool_access
  keeper_meta_contract
  keeper_personality_io
+ keeper_meta_json_scrub
  keeper_meta_json_parse
  keeper_meta_json
  keeper_types_support
@@ -151,6 +152,7 @@
    keeper_exec_ide
    keeper_shell_docker
    keeper_task_worktree_lazy
+   keeper_egress_audit
    keeper_shell_gh_context
    keeper_shell_shared
    keeper_shell_bash
@@ -277,6 +279,8 @@
   keeper_memory_recall
   keeper_status_bridge
   keeper_runtime_trust_timeline
+  keeper_hooks_oas_gate_attempt
+  keeper_hooks_oas_pr_metrics
   keeper_hooks_oas_output_json
   keeper_hooks_oas_response_metrics
   keeper_hooks_oas_cost_events

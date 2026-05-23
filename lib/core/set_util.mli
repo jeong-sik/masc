@@ -23,3 +23,9 @@ val count_difference
   -> present:('a -> 'b option)
   -> absent:('a -> 'b option)
   -> int
+
+val of_list_with : ('a -> 'b) -> 'a list -> ('b, unit) Hashtbl.t
+(** Build a hash table from a list using the given key-extraction function. *)
+
+val count_distinct : ('a -> 'b option) -> 'a list -> int
+(** Count distinct keys produced by the optional key function over the list. *)

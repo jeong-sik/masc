@@ -17,6 +17,11 @@ val check : author:string -> now:float -> float option
     drift across concurrent attempts. *)
 val record : author:string -> now:float -> unit
 
+(** [reset ()] clears the entire rate-limit table. Used when a board
+    store is being reloaded or reset (called from [board_votes] store
+    swap path). *)
+val reset : unit -> unit
+
 (** [sweep_stale ~now ~window] expires per-author timestamps older
     than [window] seconds from [now] and removes any author whose list
     became empty. Called from the board-core sweep loop. *)

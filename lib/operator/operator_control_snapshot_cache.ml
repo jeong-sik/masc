@@ -42,6 +42,42 @@ type snapshot_slot =
 let _snapshot_table : (string, snapshot_slot) Hashtbl.t = Hashtbl.create 4
 let _snapshot_mu = Eio.Mutex.create ()
 
+let _snapshot_ttl_s = Env_config.Operator.cache_ttl_sec
+let _snapshot_max_entries = 16
+
+let _maybe_evict_snapshot () =
+  if Hashtbl.length _snapshot_table >= _snapshot_max_entries
+  then (
+    let now_ts = Time_compat.now () in
+    let victim = ref None in
+    Hashtbl.iter
+      (fun key slot ->
+         match slot, !victim with
+         | Cached { expires_at; _ }, None when now_ts >= expires_at -> victim := Some key
+         | Cached _, None -> ()
+         | Cached _, Some _ -> ()
+         | Computing _, _ -> ())
+      _snapshot_table;
+    match !victim with
+    | Some key -> Hashtbl.remove _snapshot_table key
+    | None ->
+      let oldest_cached = ref None in
+      let any_key = ref None in
+      Hashtbl.iter
+        (fun key slot ->
+           match slot with
+           | Cached { expires_at; _ } ->
+             (match !oldest_cached with
+              | None -> oldest_cached := Some (key, expires_at)
+              | Some (_, e) when expires_at < e -> oldest_cached := Some (key, expires_at)
+              | Some _ -> ())
+           | Computing _ -> if !any_key = None then any_key := Some key)
+        _snapshot_table;
+      (match !oldest_cached with
+       | Some (key, _) -> Hashtbl.remove _snapshot_table key
+       | None -> ignore !any_key))
+;;
+
 let invalidate_snapshot_cache () =
   if Eio_guard.is_ready ()
   then (

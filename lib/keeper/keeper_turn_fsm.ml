@@ -134,6 +134,7 @@ type transition_action =
   | ContractOk
   | ContractViolation
   | ReceiptLost
+  | LivelockBlocked
   | GenericFail
   | SupervisorRequestsStop
   | HonorStopSignal
@@ -153,6 +154,7 @@ let transition_action_label = function
   | ContractOk -> "ContractOk"
   | ContractViolation -> "ContractViolation"
   | ReceiptLost -> "ReceiptLost"
+  | LivelockBlocked -> "LivelockBlocked"
   | GenericFail -> "GenericFail"
   | SupervisorRequestsStop -> "SupervisorRequestsStop"
   | HonorStopSignal -> "HonorStopSignal"
@@ -222,6 +224,9 @@ let classify_transition ?ctx ~(from_state: _ turn_state) ~(to_state: _ turn_stat
   | Any Cascade_routing, Any (Failed (Failure_cascade_unavailable _))
     when not stop_signaled_before ->
       Some CascadeUnavailable
+  | Any Cascade_routing, Any (Failed (Failure_turn_livelock_blocked _))
+    when not stop_signaled_before ->
+      Some LivelockBlocked
   | Any Awaiting_provider, Any Streaming when not stop_signaled_before ->
       Some ProviderResponded
   | Any Awaiting_provider, Any (Cancelled Cancelled_provider_timeout)

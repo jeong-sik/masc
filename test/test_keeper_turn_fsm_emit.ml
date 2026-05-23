@@ -89,6 +89,11 @@ let test_transition_actions_cover_tla_next () =
     ~from_state:F.Cascade_routing
     ~to_state:
       (F.Failed (F.Failure_cascade_unavailable { base = "ollama"; resolved = None }));
+  check_action
+    F.LivelockBlocked
+    ~from_state:F.Cascade_routing
+    ~to_state:
+      (F.Failed (F.Failure_turn_livelock_blocked { reason = "cycle_cap" }));
   check_action F.ProviderResponded ~from_state:F.Awaiting_provider ~to_state:F.Streaming;
   check_action
     F.ProviderTimeout

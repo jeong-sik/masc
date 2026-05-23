@@ -32,7 +32,7 @@ let resolved_model_id_for_result ~(meta : keeper_meta)
 let turn_cost_for_result ~(meta : keeper_meta)
     (result : Keeper_agent_run.run_result) : float =
   let resolved_model_id = resolved_model_id_for_result ~meta result in
-  let surface_model_used = Keeper_agent_run.surface_model_used result in
+  let surface_model_used = Keeper_agent_run.runtime_lane_label in
   let usage_trust =
     Keeper_unified_metrics.classify_usage_trust
       ~usage_reported:result.usage_reported
@@ -52,7 +52,7 @@ let update_direct_turn_meta (meta : keeper_meta) ~(latency_ms : int)
     (result : Keeper_agent_run.run_result) : keeper_meta =
   let now_ts = Time_compat.now () in
   let turn_cost = turn_cost_for_result ~meta result in
-  let surface_model_used = Keeper_agent_run.surface_model_used result in
+  let surface_model_used = Keeper_agent_run.runtime_lane_label in
   let resolved_model_id = resolved_model_id_for_result ~meta result in
   let usage_trust =
     Keeper_unified_metrics.classify_usage_trust
@@ -708,7 +708,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
               Progress.Tracker.complete turn_tracker
                 ~message:(Printf.sprintf "Turn completed: %d tool calls" result.tool_calls_made) ();
               let reply_json =
-                let surface_model_used = Keeper_agent_run.surface_model_used result in
+                let surface_model_used = Keeper_agent_run.runtime_lane_label in
                 let u = result.usage in
                 let cost_field = match u.cost_usd with
                   | Some c -> `Float c

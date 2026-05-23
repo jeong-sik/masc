@@ -262,9 +262,9 @@ let append_decision_record
         ( "telemetry",
           match result with
           | Some r ->
-              let surface_model_used = Keeper_agent_run.surface_model_used r in
+              let surface_model_used = Keeper_agent_run.runtime_lane_label in
               let resolved_model_id =
-                Keeper_agent_run.surface_resolved_model_id r
+                Keeper_agent_run.runtime_lane_label
               in
               let telemetry_reported = telemetry_reported_of_result r in
               let coverage_reason = coverage_reason_of_result r in

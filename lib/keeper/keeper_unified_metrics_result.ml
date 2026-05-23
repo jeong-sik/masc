@@ -20,8 +20,8 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
     ?(context_max = 0)
     (result : Keeper_agent_run.run_result) : keeper_meta =
   let now_ts = Time_compat.now () in
-  let surface_model_used = Keeper_agent_run.surface_model_used result in
-  let resolved_model_id = Keeper_agent_run.surface_resolved_model_id result in
+  let surface_model_used = Keeper_agent_run.runtime_lane_label in
+  let resolved_model_id = Keeper_agent_run.runtime_lane_label in
   let usage_trust =
     classify_usage_trust
       ~usage_reported:result.usage_reported

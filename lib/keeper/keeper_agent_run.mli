@@ -169,18 +169,11 @@ val turn_affordances_require_tool_gate_with_allowed
   -> string list
   -> bool
 
-(** Legacy MASC-facing model label helper.
-
-    MASC no longer exposes concrete provider/model identity on status,
-    metrics, or dashboard surfaces; OAS owns that resolution. Kept for
-    schema compatibility and returns the neutral runtime lane label. *)
-val surface_model_used : run_result -> string
-
-(** Legacy MASC-facing resolved model helper.
-
-    Kept for schema compatibility and returns the neutral runtime lane label;
-    concrete provider/model identity belongs to OAS telemetry. *)
-val surface_resolved_model_id : run_result -> string
+(** Boundary-redacted label used wherever MASC's keeper metrics surface
+    exposes a model identity field. OAS owns concrete provider/model
+    identity; the keeper-side surface collapses to this single label
+    via [Boundary_redaction]. *)
+val runtime_lane_label : string
 
 (** {1 Telemetry serialisation} *)
 

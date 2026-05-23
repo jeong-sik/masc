@@ -10,8 +10,8 @@ let runtime_lane_label =
   Boundary_redaction.to_string Boundary_redaction.runtime_model_label
 
 let turn_cost result =
-  let used_model_id = Keeper_agent_run.surface_model_used result in
-  let resolved_model_id = Keeper_agent_run.surface_resolved_model_id result in
+  let used_model_id = Keeper_agent_run.runtime_lane_label in
+  let resolved_model_id = Keeper_agent_run.runtime_lane_label in
   let usage_trust_for_cost =
     KUM.classify_usage_trust
       ~usage_reported:result.Keeper_agent_run.usage_reported
@@ -519,8 +519,8 @@ let handle
     ~last_provider_timeout_budget;
   let turn_mode = KUM.turn_mode_of_result result in
   let turn_mode_label = KUM.turn_mode_to_string turn_mode in
-  let model_used = Keeper_agent_run.surface_model_used result in
-  let resolved_model_id = Keeper_agent_run.surface_resolved_model_id result in
+  let model_used = Keeper_agent_run.runtime_lane_label in
+  let resolved_model_id = Keeper_agent_run.runtime_lane_label in
   let usage_trust =
     KUM.classify_usage_trust
       ~usage_reported:result.Keeper_agent_run.usage_reported

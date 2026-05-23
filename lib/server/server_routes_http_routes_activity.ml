@@ -150,8 +150,17 @@ let respond_board_json reqd json =
   Http.Response.json (Yojson.Safe.to_string json) reqd
 
 let board_error_json e = `Assoc [("error", `String (Tool_board.board_error_to_string e))]
-let invalid_json_error msg = (invalid_json_error msg)
-let sub_board_id_required_error () = (sub_board_id_required_error ())
+let invalid_json_error msg = `Assoc [("error", `String ("invalid JSON: " ^ msg))]
+let sub_board_id_required_error () = `Assoc [("error", `String "sub_board_id is required")]
+
+let ok_message_json_string ~ok msg =
+  Yojson.Safe.to_string (`Assoc [("ok", `Bool ok); ("message", `String msg)])
+
+let ok_false_message_json_string msg =
+  ok_message_json_string ~ok:false msg
+
+let ok_false_error_json_string msg =
+  Yojson.Safe.to_string (`Assoc [("ok", `Bool false); ("error", `String msg)])
 
 let add_routes ~sw ~clock router =
   router
@@ -520,10 +529,7 @@ let add_routes ~sw ~clock router =
                | Ok v -> f v
                | Error msg ->
                    respond_json_with_cors ~status:`Bad_request request reqd
-                     (Yojson.Safe.to_string (`Assoc [
-                       ("ok", `Bool false);
-                       ("message", `String msg)
-                     ]))
+                     (ok_false_message_json_string msg)
              in
              let* args =
                try Ok (Yojson.Safe.from_string body_str)
@@ -536,15 +542,10 @@ let add_routes ~sw ~clock router =
              let msg = Tool_result.message result in
              let status = if ok then `OK else `Bad_request in
              respond_json_with_cors ~status request reqd
-               (Yojson.Safe.to_string (`Assoc [
-                 ("ok", `Bool ok); ("message", `String msg)
-               ]))
+               (ok_message_json_string ~ok msg)
            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
              respond_json_with_cors ~status:`Bad_request request reqd
-               (Yojson.Safe.to_string (`Assoc [
-                 ("ok", `Bool false);
-                 ("message", `String (Printexc.to_string exn))
-               ]))
+               (ok_false_message_json_string (Printexc.to_string exn))
          )
        ) request reqd)
 
@@ -559,10 +560,7 @@ let add_routes ~sw ~clock router =
                | Ok v -> f v
                | Error msg ->
                    respond_json_with_cors ~status:`Bad_request request reqd
-                     (Yojson.Safe.to_string (`Assoc [
-                       ("ok", `Bool false);
-                       ("message", `String msg)
-                     ]))
+                     (ok_false_message_json_string msg)
              in
              let* args =
                try Ok (Yojson.Safe.from_string body_str)
@@ -580,15 +578,10 @@ let add_routes ~sw ~clock router =
              let msg = Tool_result.message result in
              let status = if ok then `Created else `Bad_request in
              respond_json_with_cors ~status request reqd
-               (Yojson.Safe.to_string (`Assoc [
-                 ("ok", `Bool ok); ("message", `String msg)
-               ]))
+               (ok_message_json_string ~ok msg)
            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
              respond_json_with_cors ~status:`Bad_request request reqd
-               (Yojson.Safe.to_string (`Assoc [
-                 ("ok", `Bool false);
-                 ("message", `String (Printexc.to_string exn))
-               ]))
+               (ok_false_message_json_string (Printexc.to_string exn))
          )
        ) request reqd)
 
@@ -603,10 +596,7 @@ let add_routes ~sw ~clock router =
                | Ok v -> f v
                | Error msg ->
                    respond_json_with_cors ~status:`Bad_request request reqd
-                     (Yojson.Safe.to_string (`Assoc [
-                       ("ok", `Bool false);
-                       ("message", `String msg)
-                     ]))
+                     (ok_false_message_json_string msg)
              in
              let* args =
                try Ok (Yojson.Safe.from_string body_str)
@@ -619,15 +609,10 @@ let add_routes ~sw ~clock router =
              let msg = Tool_result.message result in
              let status = if ok then `Created else `Bad_request in
              respond_json_with_cors ~status request reqd
-               (Yojson.Safe.to_string (`Assoc [
-                 ("ok", `Bool ok); ("message", `String msg)
-               ]))
+               (ok_message_json_string ~ok msg)
            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
              respond_json_with_cors ~status:`Bad_request request reqd
-               (Yojson.Safe.to_string (`Assoc [
-                 ("ok", `Bool false);
-                 ("message", `String (Printexc.to_string exn))
-               ]))
+               (ok_false_message_json_string (Printexc.to_string exn))
          )
        ) request reqd)
   |> Http.Router.get "/api/v1/karma" (fun request reqd ->
@@ -728,9 +713,7 @@ let add_routes ~sw ~clock router =
                |> Option.value ~default:"set" in
              if key = "" then
                respond_json_with_cors ~status:`Bad_request request reqd
-                 (Yojson.Safe.to_string (`Assoc [
-                   ("ok", `Bool false); ("error", `String "key is required")
-                 ]))
+                 (ok_false_error_json_string "key is required")
              else begin
                let result = match action with
                  | "clear" ->
@@ -766,16 +749,11 @@ let add_routes ~sw ~clock router =
                    ]))
                | Error msg ->
                  respond_json_with_cors ~status:`Bad_request request reqd
-                   (Yojson.Safe.to_string (`Assoc [
-                     ("ok", `Bool false); ("error", `String msg)
-                   ]))
+                   (ok_false_error_json_string msg)
              end
            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
              respond_json_with_cors ~status:`Bad_request request reqd
-               (Yojson.Safe.to_string (`Assoc [
-                 ("ok", `Bool false);
-                 ("error", `String (Printexc.to_string exn))
-               ]))
+               (ok_false_error_json_string (Printexc.to_string exn))
          )
        ) request reqd)
 
@@ -797,15 +775,11 @@ let add_routes ~sw ~clock router =
                | `Null -> None | v -> Some v in
              if param_key = "" then
                respond_json_with_cors ~status:`Bad_request request reqd
-                 (Yojson.Safe.to_string (`Assoc [
-                   ("ok", `Bool false); ("error", `String "param_key is required")
-                 ]))
+                 (ok_false_error_json_string "param_key is required")
              else match value_json with
              | None ->
                respond_json_with_cors ~status:`Bad_request request reqd
-                 (Yojson.Safe.to_string (`Assoc [
-                   ("ok", `Bool false); ("error", `String "value is required")
-                 ]))
+                 (ok_false_error_json_string "value is required")
              | Some value ->
                (match governance_param_risk param_key with
                 | Some "high" ->
@@ -821,12 +795,7 @@ let add_routes ~sw ~clock router =
                     (match Runtime_params.set_by_key param_key value with
                      | Error msg ->
                          respond_json_with_cors ~status:`Bad_request request reqd
-                           (Yojson.Safe.to_string
-                              (`Assoc
-                                 [
-                                   ("ok", `Bool false);
-                                   ("error", `String msg);
-                                 ]))
+                           (ok_false_error_json_string msg)
                      | Ok () ->
                          Runtime_params.persist ~base_path;
                          Runtime_params.record_audit ~base_path
@@ -852,10 +821,7 @@ let add_routes ~sw ~clock router =
                                  ]))))
            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
              respond_json_with_cors ~status:`Bad_request request reqd
-               (Yojson.Safe.to_string (`Assoc [
-                 ("ok", `Bool false);
-                 ("error", `String (Printexc.to_string exn))
-               ]))
+               (ok_false_error_json_string (Printexc.to_string exn))
          )
        ) request reqd)
 
@@ -874,9 +840,7 @@ let add_routes ~sw ~clock router =
              in
              if param_key = "" then
                respond_json_with_cors ~status:`Bad_request request reqd
-                 (Yojson.Safe.to_string (`Assoc [
-                   ("ok", `Bool false); ("error", `String "param_key is required")
-                 ]))
+                 (ok_false_error_json_string "param_key is required")
              else begin
                match governance_param_risk param_key with
                | Some "high" ->
@@ -892,12 +856,7 @@ let add_routes ~sw ~clock router =
                    match Runtime_params.clear_by_key param_key with
                    | Error msg ->
                        respond_json_with_cors ~status:`Bad_request request reqd
-                         (Yojson.Safe.to_string
-                            (`Assoc
-                               [
-                                 ("ok", `Bool false);
-                                 ("error", `String msg);
-                               ]))
+                         (ok_false_error_json_string msg)
                    | Ok () ->
                        let new_value =
                          match Runtime_params.registry ()
@@ -929,9 +888,6 @@ let add_routes ~sw ~clock router =
              end
            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
              respond_json_with_cors ~status:`Bad_request request reqd
-               (Yojson.Safe.to_string (`Assoc [
-                 ("ok", `Bool false);
-                 ("error", `String (Printexc.to_string exn))
-               ]))
+               (ok_false_error_json_string (Printexc.to_string exn))
          )
        ) request reqd)

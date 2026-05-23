@@ -1062,28 +1062,6 @@ let test_validate_args_keeper_bash_stages_rejected_by_schema () =
   | Ok _ ->
     Alcotest.fail "expected rejection: stages is no longer a schema-advertised field"
 
-let test_validate_args_keeper_bash_exec_with_empty_pipeline_duplicate () =
-  let args =
-    `Assoc
-      [ "executable", `String "echo"
-      ; "pipeline", `List []
-      ]
-  in
-  match
-    Tool_input_validation.validate_args
-      ~schema:keeper_bash_schema
-      ~name:"keeper_bash"
-      ~args
-      ()
-  with
-  | Ok forwarded ->
-    Alcotest.(check string) "executable preserved" "echo"
-      (assoc_string "executable" forwarded)
-  | Error result ->
-    Alcotest.failf
-      "expected keeper_bash with executable + empty pipeline to pass, got %s"
-      (Yojson.Safe.to_string result.Tool_result.data)
-
 let test_validate_args_keeper_bash_pipeline_rejects_null_exec () =
   let args =
     `Assoc
@@ -1294,8 +1272,6 @@ let () =
         test_validate_args_keeper_bash_exec_with_empty_pipeline;
       Alcotest.test_case "keeper_bash stages rejected by schema" `Quick
         test_validate_args_keeper_bash_stages_rejected_by_schema;
-      Alcotest.test_case "keeper_bash exec with empty pipeline (dup)" `Quick
-        test_validate_args_keeper_bash_exec_with_empty_pipeline_duplicate;
       Alcotest.test_case "keeper_bash pipeline + null exec" `Quick
         test_validate_args_keeper_bash_pipeline_rejects_null_exec;
       Alcotest.test_case "direct validation uses explicit schema" `Quick

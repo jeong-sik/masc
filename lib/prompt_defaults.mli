@@ -36,3 +36,11 @@ val bootstrap_runtime :
     is propagated; any other exception during override restore
     is logged via [Log.Misc.error] and swallowed so a corrupt
     override file cannot bring the boot path down. *)
+
+val init : unit -> unit
+(** Install prompt-registry observers and re-scan the currently
+    configured markdown directory.  Used by [bootstrap_runtime]
+    internally; also exposed for tests that have already set the
+    markdown dir via [Prompt_registry.set_markdown_dir] and just
+    need to (re)load prompts.  No-op when no markdown dir is
+    configured. *)

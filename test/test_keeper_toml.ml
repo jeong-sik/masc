@@ -453,7 +453,6 @@ proactive_enabled = true
 proactive_idle_sec = 300
 proactive_cooldown_sec = 60
 room_signal_prompt_enabled = true
-policy_voice_enabled = false
 autoboot_enabled = false
 github_identity = "anyang-keepers"
 git_identity_mode = "keeper_alias"
@@ -474,7 +473,6 @@ active_goal_ids = ["goal-runtime", "goal-masc-mcp"]
       check (option bool) "proactive" (Some true) d.proactive_enabled;
       check (option bool) "room signal prompt" (Some true)
         d.room_signal_prompt_enabled;
-      check (option bool) "policy_voice" (Some false) d.policy_voice_enabled;
       check (option bool) "autoboot_enabled" (Some false) d.autoboot_enabled;
       check (option string) "github_identity" (Some "anyang-keepers")
         d.github_identity;

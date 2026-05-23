@@ -171,43 +171,13 @@ instructions = "TOML instructions"
       check string "desires" "TOML desires" updated.desires;
       check string "instructions" "TOML instructions" updated.instructions
 
-(** Test: TOML policy fields overwrite stale runtime JSON values. *)
-let test_policy_resync () =
-  with_temp_dir "keeper-config-ssot-room" @@ fun room_dir ->
-  with_config_dir @@ fun config_dir ->
-  Fs_compat.clear_fs ();
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let keeper_name = "policy-resync-test" in
-  let keepers_toml_dir = Filename.concat config_dir "keepers" in
-  Unix.mkdir keepers_toml_dir 0o755;
-  write_file
-    (Filename.concat keepers_toml_dir (keeper_name ^ ".toml"))
-{|[keeper]
-sandbox_profile = "docker"
-goal = "test"
-policy_voice_enabled = false
-|};
-  let config = Coord.default_config room_dir in
-  let initial_meta =
-    match
-      Masc_test_deps.meta_of_json_fixture
-        (`Assoc
-          [
-            ("name", `String keeper_name);
-            ("agent_name", `String keeper_name);
-            ("trace_id", `String "trace-policy-resync");
-            ("policy_voice_enabled", `Bool true);
-          ])
-    with
-    | Ok meta -> meta
-    | Error e -> fail ("meta_of_json failed: " ^ e)
-  in
-  seed_persisted_meta config initial_meta;
-  match Keeper_runtime.ensure_keeper_meta config keeper_name with
-  | Error e -> fail ("ensure_keeper_meta failed: " ^ e)
-  | Ok updated ->
-      check bool "policy_voice_enabled" false updated.policy_voice_enabled
+(* test_policy_resync removed: RFC-0164 deletion roadmap dropped
+   [policy_voice_enabled] from Keeper_types.keeper_meta. The test
+   keyed its TOML-overwrites-stale-JSON assertion on that field
+   exclusively, so once the field went away the test no longer had
+   a policy field to drive the assertion. test_sandbox_policy_resync
+   below preserves the same TOML-resync coverage on the sandbox
+   policy fields, which remain part of keeper_meta. *)
 
 let test_sandbox_policy_resync () =
   with_temp_dir "keeper-config-ssot-room" @@ fun room_dir ->
@@ -1270,10 +1240,6 @@ let () =
         ] );
       ( "policy",
         [
-          test_case
-            "TOML policy fields overwrite stale runtime JSON"
-            `Quick
-            test_policy_resync;
           test_case
             "TOML sandbox policy fields overwrite stale runtime JSON"
             `Quick

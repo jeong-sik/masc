@@ -1017,16 +1017,14 @@ let handle_keeper_shell
                 "-not"; "-path"; "*/_build/*";
                 "-not"; "-path"; "*/.masc/*" ]
           in
-          Yojson.Safe.to_string
-            (`Assoc
-                [ "ok", `Bool (st = Unix.WEXITED 0)
-                ; "op", `String op
-                ; "path", `String target
-                ; "name", `String name_pattern
-                ; "via", `String "host"
-                ; "status", Keeper_alerting_path.process_status_to_json st
-                ; "files", lines_to_json ~limit out
-                ]))
+          render_completed_process_result ~cwd:None
+            ~cmd:("find " ^ target ^ " -maxdepth 5 -name " ^ name_pattern)
+            ~extra:[
+              "name", `String name_pattern;
+              "files", lines_to_json ~limit out;
+            ]
+            st out
+        )
   | "head" ->
     (match read_target () with
      | Error e -> path_error e

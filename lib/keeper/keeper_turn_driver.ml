@@ -147,6 +147,9 @@ let run_named
   let original_candidates =
     runtime_candidates_of_tiered_providers tiered_providers original_candidate_cfgs
   in
+  let required_capability_profile =
+    Keeper_cascade_profile.required_capability_profile_of_cascade_name cascade_name
+  in
   let tool_filtered_candidate_cfgs =
     filter_candidate_providers_for_tool_support
       ~keeper_name
@@ -154,6 +157,7 @@ let run_named
       ~tools
       ~require_tool_choice_support
       ~require_tool_support
+      ?required_capability_profile
       ?secondary_resolver:named_resolution.secondary_resolver
       ~label:cascade_name
       candidate_cfgs

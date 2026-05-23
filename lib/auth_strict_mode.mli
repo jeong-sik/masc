@@ -21,6 +21,15 @@
 
 type t = Off | Dry_run | Strict
 
+val of_string : string -> t
+(** Pure parser for [MASC_AUTH_STRICT] values.  Case-insensitive,
+    whitespace-trimmed.  Accepts [off|0|false], [strict|1|true],
+    [dry_run|dry-run|""].  Unknown values fall through to [Dry_run] so
+    operator omissions and typos do not silently disable measurement.
+
+    Exposed so the pre-Phase-B contract (pinned variants, pinned default)
+    is testable in isolation — the runtime [current ()] is not. *)
+
 val current : unit -> t
 (** Read [MASC_AUTH_STRICT] from the environment.  Unknown / missing values
     default to [Dry_run] so that operator omissions do not silently disable

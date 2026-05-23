@@ -21,6 +21,17 @@ let error_json ?(fields = []) (message : string) =
   Yojson.Safe.to_string (`Assoc (("error", `String message) :: fields))
 ;;
 
+let error_json_for_op ?(extra_fields = []) ~op message =
+  error_json ~fields:([ "op", `String op ] @ extra_fields) message
+;;
+;;
+
+let sandbox_profile_via_fields (meta : keeper_meta) =
+  if meta.sandbox_profile = Docker
+  then [ "via", `String "docker" ]
+  else []
+;;
+
 let tool_result_error_json (tr : Tool_result.t) =
   let fields =
     match Tool_result.failure_class tr with

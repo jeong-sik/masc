@@ -19,6 +19,10 @@ val effective_stages_of_ir : Masc_exec.Shell_ir.t -> parsed_stage list
 (** Extract effective command stages (after env/opam unwrap) from a
     pre-parsed Shell IR. *)
 
+val effective_stages_of_cmd : string -> parsed_stage list
+(** Convenience: parse [cmd] to IR (if possible) then extract effective
+    stages.  Returns [[]] when parsing fails. *)
+
 val stages_targets_git_or_gh : parsed_stage list -> bool
 (** [true] when any effective stage's executable is [git] or [gh]. *)
 

@@ -30,13 +30,10 @@ let handle_keeper_shell
      shell read ops. Local keepers remain on the host path. *)
   (* Actionable error: Samchon/Claude Code validateInput pattern.
      Returns structured JSON with tried path, playground root, and concrete next action. *)
-  let path_error e =
-    actionable_path_error ~op ~meta ~raw_path ~error:e
-  in
   match op with
   | "pwd" ->
     (match Keeper_shell_runtime.cwd_target ~config ~meta ~args ~root with
-     | Error e -> path_error e
+     | Error e -> Keeper_shell_runtime.path_error ~op ~meta ~raw_path e
      | Ok cwd ->
        Keeper_shell_runtime.run_cwd_op ~root ~keeper_name:meta.name ~op ~config ~meta
          ?turn_sandbox_factory ~cwd ~cmd:"pwd" ~docker_cmd:"pwd"
@@ -45,7 +42,7 @@ let handle_keeper_shell
          ~max_bytes:4096 ~timeout_sec:Keeper_shell_shared.io_timeout_sec ())
   | "git_status" ->
     (match Keeper_shell_runtime.cwd_target ~config ~meta ~args ~root with
-     | Error e -> path_error e
+     | Error e -> Keeper_shell_runtime.path_error ~op ~meta ~raw_path e
      | Ok cwd ->
        Keeper_shell_runtime.run_cwd_op ~root ~keeper_name:meta.name ~op ~config ~meta
          ?turn_sandbox_factory ~cwd
@@ -56,14 +53,14 @@ let handle_keeper_shell
          ~timeout_sec:Keeper_shell_shared.read_timeout_sec ())
   | "ls" ->
     (match Keeper_shell_runtime.read_target ~config ~meta ~args ~root with
-     | Error e -> path_error e
+     | Error e -> Keeper_shell_runtime.path_error ~op ~meta ~raw_path e
      | Ok target ->
        let limit = shell_readonly_limit args in
        Keeper_shell_runtime.run_ls_op ~config ~meta ?turn_sandbox_factory
          ~op ~target ~limit ~timeout_sec:Keeper_shell_shared.io_timeout_sec ())
   | "cat" ->
     (match Keeper_shell_runtime.read_target ~config ~meta ~args ~root with
-     | Error e -> path_error e
+     | Error e -> Keeper_shell_runtime.path_error ~op ~meta ~raw_path e
      | Ok target ->
        let max_bytes = shell_readonly_cat_max_bytes args in
        Keeper_shell_runtime.run_cat_op ~config ~meta ?turn_sandbox_factory
@@ -76,28 +73,28 @@ let handle_keeper_shell
     Keeper_shell_find.handle ~op ~meta ~config ~args ?turn_sandbox_factory ~root ~raw_path
   | "head" | "tail" ->
     (match Keeper_shell_runtime.read_target ~config ~meta ~args ~root with
-     | Error e -> path_error e
+     | Error e -> Keeper_shell_runtime.path_error ~op ~meta ~raw_path e
      | Ok target ->
        let n = max 1 (min 200 (Safe_ops.json_int ~default:20 "lines" args)) in
        Keeper_shell_runtime.run_head_tail_op ~config ~meta ?turn_sandbox_factory
          ~op ~target ~n ~timeout_sec:Keeper_shell_shared.read_timeout_sec ())
   | "wc" ->
     (match Keeper_shell_runtime.read_target ~config ~meta ~args ~root with
-     | Error e -> path_error e
+     | Error e -> Keeper_shell_runtime.path_error ~op ~meta ~raw_path e
      | Ok target ->
        Keeper_shell_runtime.run_wc_op ~root ~keeper_name:meta.name ~config ~meta
          ?turn_sandbox_factory ~op ~target
          ~timeout_sec:Keeper_shell_shared.read_timeout_sec ())
   | "tree" ->
     (match Keeper_shell_runtime.read_target ~config ~meta ~args ~root with
-     | Error e -> path_error e
+     | Error e -> Keeper_shell_runtime.path_error ~op ~meta ~raw_path e
      | Ok target ->
        let limit = shell_readonly_limit args in
        Keeper_shell_runtime.run_tree_op ~config ~meta ?turn_sandbox_factory
          ~op ~target ~limit ~timeout_sec:Keeper_shell_shared.read_timeout_sec ())
   | "git_diff" ->
     (match Keeper_shell_runtime.cwd_target ~config ~meta ~args ~root with
-     | Error e -> path_error e
+     | Error e -> Keeper_shell_runtime.path_error ~op ~meta ~raw_path e
      | Ok cwd ->
        Keeper_shell_runtime.run_cwd_op ~root ~keeper_name:meta.name ~op ~config ~meta
          ?turn_sandbox_factory ~cwd ~cmd:"git diff --stat"

@@ -38,35 +38,6 @@ let handle_keeper_shell
   let raw_path = Safe_ops.json_string ~default:"" "path" args |> String.trim in
   (* RFC-0006 Phase B-1.5: pin host-FS read guard for Docker keeper
      shell read ops. Local keepers remain on the host path. *)
-  let containment_check target =
-    Keeper_sandbox_containment.check_read_target ~config ~meta ~target
-  in
-  let repo_check target =
-    Keeper_repo_mapping.validate_path_access ~keeper_id:meta.name
-      ~base_path:root ~path:target
-  in
-  let read_target () =
-    match Keeper_shell_shared.resolve_keeper_shell_read_path ~config ~meta ~args with
-    | Error _ as e -> e
-    | Ok target ->
-      (match containment_check target with
-       | Error msg -> Error msg
-       | Ok () ->
-         match repo_check target with
-         | Error msg -> Error msg
-         | Ok () -> Ok target)
-  in
-  let cwd_target () =
-    match Keeper_shell_shared.resolve_keeper_shell_read_cwd ~config ~meta ~args with
-    | Error _ as e -> e
-    | Ok cwd ->
-      (match containment_check cwd with
-       | Error msg -> Error msg
-       | Ok () ->
-         match repo_check cwd with
-         | Error msg -> Error msg
-         | Ok () -> Ok cwd)
-  in
   (* Actionable error: Samchon/Claude Code validateInput pattern.
      Returns structured JSON with tried path, playground root, and concrete next action. *)
   let path_error e =
@@ -74,7 +45,7 @@ let handle_keeper_shell
   in
   match op with
   | "pwd" ->
-    (match cwd_target () with
+    (match Keeper_shell_runtime.cwd_target ~config ~meta ~args ~root with
      | Error e -> path_error e
      | Ok cwd ->
        Keeper_shell_runtime.run_cwd_op ~root ~keeper_name:meta.name ~op ~config ~meta
@@ -83,7 +54,7 @@ let handle_keeper_shell
          ~map_output:(Keeper_shell_runtime.hostify_turn_runtime_output ~config ~meta)
          ~max_bytes:4096 ~timeout_sec:Keeper_shell_shared.io_timeout_sec ())
   | "git_status" ->
-    (match cwd_target () with
+    (match Keeper_shell_runtime.cwd_target ~config ~meta ~args ~root with
      | Error e -> path_error e
      | Ok cwd ->
        Keeper_shell_runtime.run_cwd_op ~root ~keeper_name:meta.name ~op ~config ~meta
@@ -94,7 +65,7 @@ let handle_keeper_shell
          ~max_bytes:1_000_000
          ~timeout_sec:Keeper_shell_shared.read_timeout_sec ())
   | "ls" ->
-    (match read_target () with
+    (match Keeper_shell_runtime.read_target ~config ~meta ~args ~root with
      | Error e -> path_error e
      | Ok target ->
        let limit = shell_readonly_limit args in
@@ -115,7 +86,7 @@ let handle_keeper_shell
          in
          Keeper_shell_runtime.readonly_json_string fields)
   | "cat" ->
-    (match read_target () with
+    (match Keeper_shell_runtime.read_target ~config ~meta ~args ~root with
      | Error e -> path_error e
      | Ok target ->
        let max_bytes = shell_readonly_cat_max_bytes args in
@@ -171,7 +142,7 @@ let handle_keeper_shell
     if pattern = ""
     then error_json_for_op ~op "pattern is required for rg. Good: pattern='handle_request'. Bad: pattern=''."
     else (
-      match read_target () with
+      match Keeper_shell_runtime.read_target ~config ~meta ~args ~root with
       | Error e -> path_error e
       | Ok target ->
         let limit = shell_readonly_limit args in
@@ -215,7 +186,7 @@ let handle_keeper_shell
             in
             Keeper_shell_runtime.readonly_json_string fields)
   | "git_log" ->
-    (match cwd_target () with
+    (match Keeper_shell_runtime.cwd_target ~config ~meta ~args ~root with
      | Error e -> path_error e
      | Ok cwd ->
        let count = max 1 (min 50 (Safe_ops.json_int ~default:10 "count" args)) in
@@ -323,7 +294,7 @@ let handle_keeper_shell
     if name_pattern = ""
     then error_json_for_op ~op "pattern is required for find. Good: pattern='*.ml'. Bad: pattern=''."
     else (
-      match read_target () with
+      match Keeper_shell_runtime.read_target ~config ~meta ~args ~root with
       | Error e -> path_error e
       | Ok target ->
         let limit = shell_readonly_limit args in
@@ -355,7 +326,7 @@ let handle_keeper_shell
           in
           Keeper_shell_runtime.readonly_json_string fields)
   | "head" | "tail" ->
-    (match read_target () with
+    (match Keeper_shell_runtime.read_target ~config ~meta ~args ~root with
      | Error e -> path_error e
      | Ok target ->
        let n = max 1 (min 200 (Safe_ops.json_int ~default:20 "lines" args)) in
@@ -378,7 +349,7 @@ let handle_keeper_shell
          in
          Keeper_shell_runtime.readonly_json_string fields)
   | "wc" ->
-    (match read_target () with
+    (match Keeper_shell_runtime.read_target ~config ~meta ~args ~root with
      | Error e -> path_error e
      | Ok target ->
        match
@@ -394,7 +365,7 @@ let handle_keeper_shell
          Keeper_shell_runtime.render_completed_process_result ~root ~keeper_name:meta.name ~op
            ~cmd:"wc" ~extra:[ "path", `String target; "via", `String via ] st out)
   | "tree" ->
-    (match read_target () with
+    (match Keeper_shell_runtime.read_target ~config ~meta ~args ~root with
      | Error e -> path_error e
      | Ok target ->
        let limit = shell_readonly_limit args in
@@ -423,7 +394,7 @@ let handle_keeper_shell
          in
          Keeper_shell_runtime.readonly_json_string fields)
   | "git_diff" ->
-    (match cwd_target () with
+    (match Keeper_shell_runtime.cwd_target ~config ~meta ~args ~root with
      | Error e -> path_error e
      | Ok cwd ->
        Keeper_shell_runtime.run_cwd_op ~root ~keeper_name:meta.name ~op ~config ~meta

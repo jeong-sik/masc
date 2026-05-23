@@ -243,6 +243,30 @@ let validate_resolved_path ~config ~meta ~base_path path =
     repo_check ~keeper_id:meta.name ~base_path path
 ;;
 
+let read_target ~config ~meta ~args ~root =
+  match Keeper_shell_shared.resolve_keeper_shell_read_path ~config ~meta ~args with
+  | Error _ as e -> e
+  | Ok target ->
+    (match containment_check ~config ~meta target with
+     | Error msg -> Error msg
+     | Ok () ->
+       match repo_check ~keeper_id:meta.name ~base_path:root target with
+       | Error msg -> Error msg
+       | Ok () -> Ok target)
+;;
+
+let cwd_target ~config ~meta ~args ~root =
+  match Keeper_shell_shared.resolve_keeper_shell_read_cwd ~config ~meta ~args with
+  | Error _ as e -> e
+  | Ok cwd ->
+    (match containment_check ~config ~meta cwd with
+     | Error msg -> Error msg
+     | Ok () ->
+       match repo_check ~keeper_id:meta.name ~base_path:root cwd with
+       | Error msg -> Error msg
+       | Ok () -> Ok cwd)
+;;
+
 let read_target ~config ~meta ~args ~base_path () =
   match Keeper_shell_shared.resolve_keeper_shell_read_path ~config ~meta ~args with
   | Error _ as e -> e

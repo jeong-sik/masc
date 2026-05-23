@@ -1193,7 +1193,11 @@ let test_oneof_const_discriminator_rejects_unknown_kind () =
   | Error result ->
     let msg = Yojson.Safe.to_string result.Tool_result.data in
     Alcotest.(check bool) "error mentions exact-one-of" true
-      (string_contains msg "exactly one of")
+      (string_contains msg "exactly one of");
+    Alcotest.(check bool) "error mentions preset branch label" true
+      (string_contains msg "\"preset\"");
+    Alcotest.(check bool) "error mentions custom branch label" true
+      (string_contains msg "\"custom\"")
   | Ok _ -> Alcotest.fail "expected rejection for unknown kind value"
 ;;
 

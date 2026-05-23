@@ -185,6 +185,19 @@ let one_of_branch_constraints schema =
   | _ -> []
 ;;
 
+let branch_label b =
+  let const_parts =
+    List.map
+      (fun (name, value) ->
+         Printf.sprintf "%s=%s" name (Yojson.Safe.to_string value))
+      b.consts
+  in
+  let req_without_consts =
+    List.filter (fun name -> not (List.mem_assoc name b.consts)) b.required
+  in
+  String.concat "+" (const_parts @ req_without_consts)
+;;
+
 let one_of_required_shape_error schema = function
   | `Assoc fields ->
     let branches = one_of_branch_constraints schema in
@@ -214,16 +227,12 @@ let one_of_required_shape_error schema = function
       | [ _ ] -> None
       | [] ->
         let options =
-          branches
-          |> List.map (fun b -> String.concat "+" b.required)
-          |> String.concat " | "
+          branches |> List.map branch_label |> String.concat " | "
         in
         Some (Printf.sprintf "arguments must include exactly one of: %s" options)
       | _ :: _ :: _ ->
         let options =
-          matching
-          |> List.map (fun b -> String.concat "+" b.required)
-          |> String.concat " | "
+          matching |> List.map branch_label |> String.concat " | "
         in
         Some
           (Printf.sprintf

@@ -15,12 +15,3 @@
 val grep_like_line :
   source:string -> location:string -> content:string -> string
 
-(** [lines_of_search_output ?max_lines input] splits [input] on
-    ["\n---\n"], parses each chunk as either a labelled payload
-    ([\[label\]: ...]) or raw JSON, and emits one
-    {!grep_like_line} per result. [max_lines] defaults to [20]. *)
-val lines_of_search_output : ?max_lines:int -> string -> string list
-
-(** [format_search_output] is {!lines_of_search_output} joined by
-    ["\n"]. *)
-val format_search_output : ?max_lines:int -> string -> string

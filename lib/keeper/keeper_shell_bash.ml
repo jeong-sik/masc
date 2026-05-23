@@ -15,16 +15,6 @@ end
 
 module Shell_gate = Masc_exec_command_gate.Shell_command_gate
 
-let sandbox_profile_label = function
-  | Local -> "host"
-  | Docker -> "docker"
-
-let dispatch_status_label = function
-  | Unix.WEXITED 0 -> "exit_0"
-  | Unix.WEXITED _ -> "exit_nonzero"
-  | Unix.WSIGNALED _ -> "signaled"
-  | Unix.WSTOPPED _ -> "stopped"
-
 (* Typed keeper_bash input projections extracted to
    [Keeper_shell_bash_typed_input] (godfile decomp). *)
 let has_typed_bash_input_key = Keeper_shell_bash_typed_input.has_typed_bash_input_key
@@ -219,8 +209,8 @@ let handle_keeper_bash_typed
                Log.Keeper.info
                  "keeper_bash shell_ir_dispatch keeper=%s sandbox=%s status=%s elapsed_ms=%d"
                  meta.name
-                 (sandbox_profile_label sandbox_profile)
-                 (dispatch_status_label result.status)
+                 (Keeper_shell_shared.sandbox_profile_label sandbox_profile)
+                 (Keeper_shell_shared.process_status_label result.status)
                  elapsed_ms;
                let output =
                  if String.equal result.stderr ""

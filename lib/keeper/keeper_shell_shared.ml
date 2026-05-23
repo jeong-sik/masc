@@ -27,6 +27,16 @@ let run_argv_with_status_retry_eintr ?cwd ~timeout_sec argv =
   loop max_eintr_retries
 
 
+let sandbox_profile_label = function
+  | Local -> "host"
+  | Docker -> "docker"
+
+let process_status_label = function
+  | Unix.WEXITED 0 -> "exit_0"
+  | Unix.WEXITED _ -> "exit_nonzero"
+  | Unix.WSIGNALED _ -> "signaled"
+  | Unix.WSTOPPED _ -> "stopped"
+
 (** Write playground repo state cache after successful clone/pull.
     Reads git metadata from [repo_path] and upserts into
     [playground_dir/.playground_state.json]. Best-effort: failures are logged

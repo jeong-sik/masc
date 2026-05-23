@@ -28,6 +28,12 @@ val process_status_is_timeout : Unix.process_status -> bool
 (** [WSIGNALED Sys.sigterm] or [WEXITED 124] (Process_eio's
     Eio.Time.Timeout exit code). *)
 
+val sandbox_profile_label : Keeper_types.sandbox_profile -> string
+(** ["host"] for [Local], ["docker"] for [Docker]. *)
+
+val process_status_label : Unix.process_status -> string
+(** Human-readable label: [exit_0], [exit_nonzero], [signaled], [stopped]. *)
+
 val run_argv_with_status_retry_eintr :
   ?cwd:string ->
   timeout_sec:float ->

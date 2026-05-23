@@ -1,12 +1,6 @@
 (** Dashboard_yjs — Yjs WebSocket Projection Layer for Live Telemetry
     @since Project World Building (Big Bang) *)
 
-(** [frame_update payload] returns the Yjs update frame used by dashboard
-    telemetry broadcasts: sync step 0, update message type 2, varint payload
-    byte length, then the payload bytes. It is pure and preserves caller order
-    only through the caller's own sequencing. *)
-val frame_update : string -> string
-
 (** [broadcast_keeper_telemetry ~keeper_name ~trace_id ~turn_index ~model_id]
     publishes a keeper Yjs telemetry update to dashboard observer sessions.
     [model_id] is accepted for legacy call sites but redacted to the neutral

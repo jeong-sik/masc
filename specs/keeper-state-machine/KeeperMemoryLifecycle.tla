@@ -41,7 +41,7 @@
 \*
 \* Persistence / promotion sites:
 \*   lib/keeper/keeper_memory_bank.ml:append_memory_notes_from_reply   — writes via memory_horizon_of_kind_with_fallback
-\*   lib/keeper/keeper_memory_recall.ml:read_recent_memory_texts       — recall path, same horizon fn
+\*   lib/keeper/keeper_memory_recall.ml:read_recent_memory_texts_result  — recall path, same horizon fn
 \*   lib/keeper/keeper_compact_policy.ml    overflow + handoff scheduling
 \*   lib/keeper/keeper_compact_audit.ml     ledger trail (provenance source)
 \*

@@ -670,7 +670,21 @@ let operator_disposition (receipt : t)
       then Disp_pass_next_model, Reason_tool_route_recoverable_failure
       else Disp_pause_human, Reason_tool_route_recoverable_failure
     else if required_tool_contract_unsatisfied
-    then Disp_pause_human, Reason_tool_required_unsatisfied
+    then (
+      if receipt.tool_contract_result = Contract_missing_required_tool_use
+      then
+        Prometheus.inc_counter
+          Keeper_metrics.metric_keeper_contract_violations
+          ~labels:
+            [ "keeper_name", receipt.keeper_name
+            ; "kind", "missing_required_tool_use"
+            ; "signal"
+            , (if receipt.tools_used = []
+               then "no_tools_used"
+               else "partial_tools_used")
+            ]
+          ();
+      Disp_pause_human, Reason_tool_required_unsatisfied)
     else if
       receipt.degraded_retry_applied || Option.is_some receipt.degraded_retry_cascade
     then Disp_fail_open_next_cascade, Reason_degraded_retry

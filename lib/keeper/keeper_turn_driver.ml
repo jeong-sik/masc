@@ -181,8 +181,9 @@ let run_named
                  (String.concat ", " missing_required_tools)
                  (String.concat ", " materialized_tool_names)
              in
-             Log.Misc.info
-               "cascade %s: pre-dispatch skipped provider=%s reason=%s"
+             Log.Keeper.warn
+               "keeper:%s cascade %s: pre-dispatch skipped provider=%s reason=%s"
+               keeper_name
                cascade_name
                provider_label
                reason;

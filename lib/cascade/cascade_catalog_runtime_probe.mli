@@ -22,14 +22,14 @@ val profile_probes : candidate_runtime list -> candidate_probe list
 
 val normalize_endpoint_url : string -> string
 
-val endpoint_status_for_candidate : endpoint_status list -> candidate_runtime -> endpoint_status
+val endpoint_status_for_candidate : Llm_provider.Discovery.endpoint_status list -> candidate_runtime -> Llm_provider.Discovery.endpoint_status option
 
 val profile_probes_from_statuses :
-  endpoint_status list -> candidate_runtime list -> candidate_probe list
+  Llm_provider.Discovery.endpoint_status list -> candidate_runtime list -> candidate_probe list
 
 val attach_probe_results :
-  ?sw:Eio.Switch.t -> ?net:Eio.Net.t -> profile_snapshot list -> unit
+  ?sw:Eio.Switch.t -> ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t -> profile_snapshot list -> profile_snapshot list
 
-val probe_health_value : probe_status -> float
+val probe_health_value : candidate_probe_status -> float
 
 val record_probe_metrics : profile_snapshot list -> unit

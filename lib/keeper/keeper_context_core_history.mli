@@ -18,9 +18,9 @@ val normalize_system_context_prefix : string -> string
 val has_world_state_signature : string -> bool
 
 type history_line_action =
-  | Keep of { source : string option; content : string }
-  | Drop of { reason : string }
-  | Migrate of { source : string; content : string }
+  | Keep_main
+  | Move_internal
+  | Drop_line
 
 val classify_history_entry : source:string -> content:string -> history_line_action
 
@@ -34,4 +34,4 @@ val migrate_session_history_logs : session_dir:string -> history_migration_stats
 
 val history_path_for_source : session_dir:string -> source:string option -> string
 
-val persist_message : ?source:string -> string -> string -> unit
+val persist_message : ?source:string -> session_context -> Agent_sdk.Types.message -> unit

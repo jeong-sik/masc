@@ -16,6 +16,6 @@ val ensure_config_root_scaffold : string -> unit
 
 val copy_missing_config_root_seed : src:string -> dst:string -> unit
 
-val bootstrap_base_path_config_root : base_path:string -> string option
+val bootstrap_base_path_config_root : base_path:string -> unit
 
-val startup_config_resolution : base_path:string -> string option
+val startup_config_resolution : base_path:string -> Config_dir_resolver.resolution

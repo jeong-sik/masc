@@ -497,7 +497,7 @@ let make_hooks
                    (match List.assoc_opt "typed_outcome" fields with
                     | Some nested -> Keeper_tool_outcome.of_json nested
                     | None -> None)
-                 | `Null | `Bool _ | `Int _ | `Float _ | `String _ | `List _ ->
+                 | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
                    None
                in
                let stripped = Keeper_tool_outcome.strip_from_json json in

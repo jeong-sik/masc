@@ -7,7 +7,7 @@ type tool_call = {
 
 val prefix_of : string -> string option
 
-val classify_tool : string -> Multimodal.Artifact.tag option
+val classify_tool : string -> Multimodal.Artifact.kind_tag option
 
 val payload_of_args : Yojson.Safe.t -> Multimodal.Payload.t
 

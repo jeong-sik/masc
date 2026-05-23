@@ -116,6 +116,9 @@ let handle_keeper_bash_typed
           Exec_policy.sanitize_command_for_log_of_ir ~fallback_cmd:cmd ir
           |> Exec_policy.truncate_for_log
         in
+        let typed_error_fields =
+          [ "typed", `Bool true; "cmd", `String cmd_for_log; "cwd", `String cwd ]
+        in
         let envelope =
           Masc_exec.Shell_ir_risk.classify (Masc_exec.Shell_ir_risk.undecided ir)
         in
@@ -177,17 +180,11 @@ let handle_keeper_bash_typed
             in
             match gate_verdict with
             | Reject { diagnostic; _ } ->
-              error_json
-                ~fields:[ "typed", `Bool true; "cmd", `String cmd_for_log; "cwd", `String cwd ]
-                diagnostic
+              error_json ~fields:typed_error_fields diagnostic
             | Cannot_parse _ ->
-              error_json
-                ~fields:[ "typed", `Bool true; "cmd", `String cmd_for_log; "cwd", `String cwd ]
-                "Cannot parse command"
+              error_json ~fields:typed_error_fields "Cannot parse command"
             | Too_complex _ ->
-              error_json
-                ~fields:[ "typed", `Bool true; "cmd", `String cmd_for_log; "cwd", `String cwd ]
-                "Command too complex"
+              error_json ~fields:typed_error_fields "Command too complex"
             | Allow _context ->
             let path_validation =
               match

@@ -16,6 +16,16 @@
     [bootstrapped_signature] memo ref) are hidden — callers
     consume only the entry point below. *)
 
+val init : unit -> unit
+(** Idempotent bootstrap — calls {!bootstrap_runtime} with the
+    default workspace and base paths derived from {!Coord.config}.
+    Safe to call multiple times. *)
+
+val resolve_prompt_markdown_dir :
+  workspace_path:string -> base_path:string -> string
+(** Resolve the prompt markdown directory path.
+    Returns the directory path, or raises if no valid candidate exists. *)
+
 val bootstrap_runtime :
   workspace_path:string ->
   base_path:string ->

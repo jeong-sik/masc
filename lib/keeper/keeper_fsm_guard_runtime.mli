@@ -22,5 +22,12 @@
     [unit] (a function whose only purpose is to carry the
     [@@fsm_guard] attribute). *)
 
+val refresh_policy_for_test : unit -> unit
+(** Reset internal policy state for tests. No-op in production. *)
+
+val assert_mode_for_test : unit -> bool
+(** [true] when FSM guard assertions are enabled. Always [true] in
+    production; exposed for test introspection. *)
+
 val wrap_unit : action:string -> stage:string -> (unit -> unit) -> unit
 

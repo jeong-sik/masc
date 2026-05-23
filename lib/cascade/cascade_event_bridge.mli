@@ -21,6 +21,16 @@ val start :
   bus:Agent_sdk.Event_bus.t ->
   unit
 
+val start_with_interval :
+  drain_interval_s:float ->
+  sw:Eio.Switch.t ->
+  clock:_ Eio.Time.clock ->
+  config:Coord.config ->
+  bus:Agent_sdk.Event_bus.t ->
+  unit
+(** Start the bridge with an explicit drain interval (seconds).
+    Used by tests that need faster/slower event drain than the default. *)
+
 (** Serialize a single OAS event to SSE JSON.
     Exposed for unit testing. *)
 val native_event_to_json : Agent_sdk.Event_bus.event -> Yojson.Safe.t option

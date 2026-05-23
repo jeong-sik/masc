@@ -1422,14 +1422,14 @@ let run_keeper_cycle
                     ~labels:[ "keeper_name", meta.name; "outcome", "failure" ]
                     ();
                   if EC.is_provider_timeout_error err
-                  then
+                  then (
                     Keeper_turn_fsm.emit_transition
                       ~keeper_name:meta.name
                       ~turn_id:keeper_turn_id
                       ~prev:Keeper_turn_fsm.Streaming
                       (Keeper_turn_fsm.Cancelled
-                         Keeper_turn_fsm.Cancelled_provider_timeout)
-                  else
+                         Keeper_turn_fsm.Cancelled_provider_timeout))
+                  else (
                     let fsm_failure_reason =
                       if EC.is_required_tool_contract_violation err
                       then
@@ -1447,7 +1447,7 @@ let run_keeper_cycle
                       ~keeper_name:meta.name
                       ~turn_id:keeper_turn_id
                       ~prev:Keeper_turn_fsm.Streaming
-                      (Keeper_turn_fsm.Failed fsm_failure_reason);
+                      (Keeper_turn_fsm.Failed fsm_failure_reason));
                   let log_keeper_cycle_failed =
                     if EC.should_warn_keeper_cycle_failed err
                     then Log.Keeper.warn

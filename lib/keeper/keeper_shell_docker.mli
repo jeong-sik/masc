@@ -156,6 +156,12 @@ val run_trusted_docker_shell_command_with_status :
   network_mode:Keeper_types.network_mode ->
   (docker_shell_result, string) result
 
+(** Convenience wrapper for [docker_exec_failure_message_internal]
+    without context fields.  Returns a human-readable Docker exec failure
+    description for the LLM. *)
+val docker_exec_failure_message :
+  image:string -> status:Unix.process_status -> output:string -> string
+
 (** Run [cmd] inside the Docker sandbox with host credential bindings
     forwarded (Network_inherit). Returns the JSON envelope to
     surface to the LLM, including [gh_exit_class] when applicable. *)

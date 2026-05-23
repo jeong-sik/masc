@@ -9,6 +9,8 @@ open Keeper_types
 open Keeper_exec_shared
 open Keeper_shell_docker_exec_failure
 
+let docker_exec_failure_message = docker_exec_failure_message
+
 let path_exists path =
   try Sys.file_exists path with
   | Sys_error _ -> false

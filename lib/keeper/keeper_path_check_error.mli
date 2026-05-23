@@ -40,6 +40,11 @@ val to_message : t -> string
     so downstream tools that match on these messages keep their
     contract. *)
 
+val message_prefix : t -> string
+(** The canonical lowercase prefix string for a given variant.
+    Inverse of [parse_prefix] — [message_prefix (parse_prefix s)]
+    round-trips for all known prefixes. *)
+
 val parse_prefix : string -> t option
 (** Attempt to classify a raw error message by its prefix.
     Returns [Some t] if the message matches a known prefix pattern,

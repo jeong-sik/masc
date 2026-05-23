@@ -7,6 +7,13 @@
 
 (** Detect transient network errors eligible for retry.
     Uses structured [Agent_sdk.Error.sdk_error] pattern matching. *)
+val is_provider_timeout_error : Agent_sdk.Error.sdk_error -> bool
+(** [true] when the error indicates a provider-side timeout (not a
+    transport-level or client-side timeout). *)
+
+val is_receipt_lost_error : Agent_sdk.Error.sdk_error -> bool
+(** [true] when the error indicates a receipt was lost during processing. *)
+
 val is_transient_network_error : Agent_sdk.Error.sdk_error -> bool
 
 (** [true] when an OAS timeout message describes an execution budget expiry,

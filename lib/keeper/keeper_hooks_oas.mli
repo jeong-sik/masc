@@ -19,6 +19,13 @@ val keeper_denied_tools : string list
 
 (** {1 Tool-failure metrics} *)
 
+val trajectory_duration_ms : float -> int
+(** Convert a duration in milliseconds to an integer millisecond
+    value, rounding up sub-millisecond values to 1ms. *)
+
+val render_pre_tool_gate_output : Keeper_guards.gate_decision_event -> string
+(** Render the pre-tool gate output message for a blocked tool call. *)
+
 val tool_use_failure_metric : string
 (** Prometheus metric name for tool-use failures. *)
 

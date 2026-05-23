@@ -10,3 +10,7 @@
 val broadcast_keeper_telemetry :
   keeper_name:string -> trace_id:string -> turn_index:int -> model_id:string -> unit
 
+val frame_update : string -> string
+(** Apply a Yjs frame update to the current document state.
+    Returns the updated frame JSON. *)
+

@@ -14,3 +14,10 @@ val install : unit -> unit
     once before any keeper turn fires an LLM call.  Idempotent via an
     internal [Atomic.t] latch, so re-entering bootstrap (test harness,
     in-process restart) is safe. *)
+
+val render_record_message : Agent_sdk.Log.record -> string
+(** Render a log record's message field, including module prefix. *)
+
+val effective_level : Agent_sdk.Log.record -> Log.level
+(** Extract the effective log level from a record, accounting for
+    module-specific overrides. *)

@@ -1017,7 +1017,7 @@ let test_registered_hook_required_enum_blank_is_not_stripped () =
     Schema no longer advertises oneOf (PR #18110); handler precedence
     picks executable. Empty pipeline:[] must not trigger any validation
     error from the pre-hook shape check. *)
-let test_validate_args_keeper_bash_oneof_empty_pipeline () =
+let test_validate_args_keeper_bash_exec_with_empty_pipeline () =
   let args =
     `Assoc
       [ "executable", `String "pwd"
@@ -1042,7 +1042,7 @@ let test_validate_args_keeper_bash_oneof_empty_pipeline () =
 (** stages was removed from the schema (backward-compat alias only in handler).
     Sending stages in args now triggers additionalProperties rejection since
     the schema declares additionalProperties: false. *)
-let test_validate_args_keeper_bash_oneof_stages_rejected_by_schema () =
+let test_validate_args_keeper_bash_stages_rejected_by_schema () =
   let args =
     `Assoc
       [ "executable", `String "ls"
@@ -1062,7 +1062,7 @@ let test_validate_args_keeper_bash_oneof_stages_rejected_by_schema () =
   | Ok _ ->
     Alcotest.fail "expected rejection: stages is no longer a schema-advertised field"
 
-let test_validate_args_keeper_bash_oneof_exec_with_empty_pipeline () =
+let test_validate_args_keeper_bash_exec_with_empty_pipeline_duplicate () =
   let args =
     `Assoc
       [ "executable", `String "echo"
@@ -1084,7 +1084,7 @@ let test_validate_args_keeper_bash_oneof_exec_with_empty_pipeline () =
       "expected keeper_bash with executable + empty pipeline to pass, got %s"
       (Yojson.Safe.to_string result.Tool_result.data)
 
-let test_validate_args_keeper_bash_oneof_real_pipeline_rejects_empty_exec () =
+let test_validate_args_keeper_bash_pipeline_rejects_null_exec () =
   let args =
     `Assoc
       [ "executable", `Null
@@ -1290,14 +1290,14 @@ let () =
         test_validate_args_keeper_bash_accepts_typed_pipeline;
       Alcotest.test_case "keeper_bash rejects bad typed argv" `Quick
         test_validate_args_keeper_bash_rejects_bad_argv_type;
-      Alcotest.test_case "keeper_bash oneOf: executable + empty pipeline" `Quick
-        test_validate_args_keeper_bash_oneof_empty_pipeline;
-      Alcotest.test_case "keeper_bash oneOf: stages rejected by schema" `Quick
-        test_validate_args_keeper_bash_oneof_stages_rejected_by_schema;
-      Alcotest.test_case "keeper_bash oneOf: exec with empty pipeline" `Quick
-        test_validate_args_keeper_bash_oneof_exec_with_empty_pipeline;
-      Alcotest.test_case "keeper_bash oneOf: pipeline + null exec" `Quick
-        test_validate_args_keeper_bash_oneof_real_pipeline_rejects_empty_exec;
+      Alcotest.test_case "keeper_bash exec + empty pipeline" `Quick
+        test_validate_args_keeper_bash_exec_with_empty_pipeline;
+      Alcotest.test_case "keeper_bash stages rejected by schema" `Quick
+        test_validate_args_keeper_bash_stages_rejected_by_schema;
+      Alcotest.test_case "keeper_bash exec with empty pipeline (dup)" `Quick
+        test_validate_args_keeper_bash_exec_with_empty_pipeline_duplicate;
+      Alcotest.test_case "keeper_bash pipeline + null exec" `Quick
+        test_validate_args_keeper_bash_pipeline_rejects_null_exec;
       Alcotest.test_case "direct validation uses explicit schema" `Quick
         test_validate_args_uses_explicit_schema_without_registry;
       Alcotest.test_case "direct keeper_board_post accepts sources array" `Quick

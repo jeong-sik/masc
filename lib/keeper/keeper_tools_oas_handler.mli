@@ -1,7 +1,10 @@
 (** Keeper_tools_oas_handler — Tool handler factory for Agent.run().
 
-    Closure factory [make_keeper_tool_handler], bundle assembly
-    [make_tool_bundle], and convenience [make_tools].
+    Skeleton module: validation, circuit-breaking, workflow-rejection
+    gating, and resource-gate wrapping.  The heavy execution body lives
+    in [Keeper_tools_oas_handler_exec]; telemetry helpers live in
+    [Keeper_tools_oas_handler_telemetry].  Bundle assembly lives in
+    [Keeper_tools_oas_bundle].
 
     @since P1 extraction *)
 
@@ -29,29 +32,3 @@ val make_keeper_tool_handler
   -> unit
   -> Yojson.Safe.t
   -> Tool_result.t
-
-(** Build the keeper's full [tool_bundle]: internal tools +
-    alias-registered (public name) tools that translate input to
-    internal payloads. The cleanup thunk releases per-turn sandbox
-    runtimes (Docker case). *)
-val make_tool_bundle
-  :  config:Coord.config
-  -> meta:Keeper_types.keeper_meta
-  -> ctx_snapshot:Keeper_types.working_context
-  -> ?search_fn:(query:string -> max_results:int -> Yojson.Safe.t)
-  -> ?on_tool_called:(string -> unit)
-  -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
-  -> unit
-  -> Keeper_tools_oas.tool_bundle
-
-(** Convenience over [make_tool_bundle] returning only [.tools]. *)
-val make_tools
-  :  config:Coord.config
-  -> meta:Keeper_types.keeper_meta
-  -> ctx_snapshot:Keeper_types.working_context
-  -> ?search_fn:(query:string -> max_results:int -> Yojson.Safe.t)
-  -> ?on_tool_called:(string -> unit)
-  -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
-  -> unit
-  -> Agent_sdk.Tool.t list
-

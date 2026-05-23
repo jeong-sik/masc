@@ -131,7 +131,7 @@ let test_keeper_tool_bundle_cleanup_is_retained_and_invoked () =
     bool
     "run setup retains the full keeper tool bundle"
     true
-    (contains ~needle:"Keeper_tools_oas_handler.make_tool_bundle" run_tools_src);
+    (contains ~needle:"Keeper_tools_oas_bundle.make_tool_bundle" run_tools_src);
   check
     bool
     "run setup exposes the bundle cleanup callback"

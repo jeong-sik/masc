@@ -285,7 +285,10 @@
   keeper_tools_oas_markers
   keeper_tools_oas_workflow
   keeper_tools_oas_deterministic_error
+  keeper_tools_oas_handler_telemetry
+  keeper_tools_oas_handler_exec
   keeper_tools_oas_handler
+  keeper_tools_oas_bundle
   keeper_sandbox
   keeper_sandbox_control
   keeper_alerting_path

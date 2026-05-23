@@ -22,6 +22,13 @@
 include Keeper_hooks_oas_types
 open Keeper_hooks_oas_pr_metrics
 
+module Gate_attempt = Keeper_hooks_oas_gate_attempt
+
+let render_pre_tool_gate_output = Gate_attempt.render_pre_tool_gate_output
+let pre_tool_gate_error = Gate_attempt.pre_tool_gate_error
+let trajectory_duration_ms = Gate_attempt.trajectory_duration_ms
+let record_pre_tool_gate_attempt = Gate_attempt.record_pre_tool_gate_attempt
+
 (** Keeper deny list — derived from Tool_catalog surface SSOT.
     Administrative/destructive operations that should only be invoked
     by operators or through controlled workflows.
@@ -79,13 +86,6 @@ let idle_decision_to_label = function
   | Agent_sdk.Hooks.ApprovalRequired -> "approval_required"
   | Agent_sdk.Hooks.AdjustParams _ -> "adjust_params"
   | Agent_sdk.Hooks.ElicitInput _ -> "elicit_input"
-
-let trajectory_duration_ms duration_ms =
-  if
-    (not (Float.is_finite duration_ms))
-    || Float.compare duration_ms 0.0 <= 0
-  then 0
-  else max 1 (int_of_float (Float.round duration_ms))
 
 let failure_class_of_tool_error_json json =
   let direct = Safe_ops.json_string_opt "failure_class" json in
@@ -234,7 +234,13 @@ let make_hooks
      [make_hooks] closure — one state per keeper. *)
   let streak_state = Keeper_guards.make_streak_state () in
   let streak_threshold = 5 in
-  let record_gate_decision _event = () in
+  let record_gate_decision event =
+    record_pre_tool_gate_attempt
+      ~meta_ref
+      ~tool_call_count_ref
+      ?trajectory_acc
+      event
+  in
   (* Build the pre_tool_use guard chain via Hooks.compose. Each guard
      lives in Keeper_guards and emits its own masc:keeper_gate event
      on override/approval decisions. The observer persists the same

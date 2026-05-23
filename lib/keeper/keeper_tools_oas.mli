@@ -35,6 +35,13 @@ val tool_usage_json : string -> Yojson.Safe.t
     (default 5). *)
 val recent_tools_for_keeper : ?limit:int -> string -> string list
 
+(** Record an internal keeper tool call in the telemetry registry. *)
+val record_keeper_internal_tool_call
+  :  tool_name:string
+  -> success:bool
+  -> duration_ms:int
+  -> unit
+
 (** Repeated-failure guardrail threshold sourced from
     [Env_config.KeeperToolExec.max_consecutive_tool_failures].
     A tool is blocked after this many consecutive failures with the
@@ -43,9 +50,36 @@ val max_consecutive_failures : int
 
 (** Thread-safe per-tool consecutive-failure counters shared by the
     handler closures in one tool bundle. *)
+type workflow_rejection_block = Keeper_tools_oas_workflow.workflow_rejection_block
+
+type workflow_rejection_info = Keeper_tools_oas_workflow.workflow_rejection_info
+
 type failure_counts
 
 val create_failure_counts : unit -> failure_counts
+
+val failure_count_get : failure_counts -> string -> int
+
+val failure_count_record_failure : failure_counts -> string -> int
+
+val failure_count_reset : failure_counts -> string -> unit
+
+val failure_count_jump_to : failure_counts -> string -> target:int -> int
+
+val workflow_rejection_count_record : failure_counts -> string -> int
+
+val workflow_rejection_count_reset : failure_counts -> unit
+
+val workflow_rejection_scope_block_get
+  :  failure_counts
+  -> string
+  -> Keeper_tools_oas_workflow.workflow_rejection_block option
+
+val workflow_rejection_scope_block_record
+  :  failure_counts
+  -> string
+  -> Keeper_tools_oas_workflow.workflow_rejection_info
+  -> int
 
 (** Reset process-global retry-log dedupe state. Test-only entry point
     for suites that assert the first occurrence of a tool failure emits
@@ -63,19 +97,28 @@ val normalize_tool_result
   -> string
   -> string
 
+(** Map wire-level [failure_class] strings to typed
+    [Tool_result.tool_failure_class] variants. *)
+val tool_failure_class_of_wire_string
+  :  string option
+  -> Tool_result.tool_failure_class option
+
 (** Build top-level recovery hints for deterministic workflow rejections.
     These fields are intentionally outside [detail] so the LLM sees the
     required self-correction without parsing nested tool-specific payloads. *)
-val workflow_rejection_recovery_fields
-  :  tool_name:string
-  -> count:int
-  -> string
-  -> (string * Yojson.Safe.t) list
 
 (** Promote a tool-specific [recovery_plan] out of a deterministic
     failure payload so required-tool turns can route the next call
     without scraping nested detail text. *)
-val deterministic_recovery_plan_fields : string -> (string * Yojson.Safe.t) list
+
+(** Error-class string for transient mutex contention failures. *)
+val transient_mutex_contention_error_class : string
+
+(** Record a deterministic tool failure metric with telemetry labels. *)
+val record_deterministic_tool_failure_metric
+  :  tool_name:string
+  -> Keeper_tool_deterministic_error.deterministic_reason
+  -> unit
 
 (** Build the structured, recoverable envelope used when a keeper tool
     raises mutex EDEADLK / "Resource deadlock avoided". *)
@@ -86,16 +129,10 @@ val transient_mutex_contention_tool_error
   -> unit
   -> string
 
-(** Max chars for the SSE error preview rendered to dashboards. *)
-val sse_error_preview_max_chars : int
+(* Handlers moved to [Keeper_tools_oas_handler] — see
+   keeper_tools_oas_handler.mli for [make_keeper_tool_handler],
+   [make_tool_bundle], and [make_tools]. *)
 
-(** Extract safe, machine-checkable markers from tool input command fields and
-    trusted normalized output for keeper decision rows. This intentionally records only route /
-    lifecycle classes such as ["via=docker"], ["git push"],
-    ["gh pr create"], and ["event=APPROVE"], not raw command arguments or
-    tool output. Caller-controlled route fields in input are ignored, and
-    output [via] values are allowlisted before persistence. *)
-val tool_exec_result_markers : input:Yojson.Safe.t -> output:string -> string list
 
 (** Build the per-tool handler closure used by both internal and
     alias tool entries. The closure dispatches via
@@ -104,45 +141,11 @@ val tool_exec_result_markers : input:Yojson.Safe.t -> output:string -> string li
     internal tool schema used for pre-execution validation after
     [?translate_input] reshapes incoming JSON from a public alias
     schema to the internal payload (identity by default). *)
-val make_keeper_tool_handler
-  :  name:string
-  -> input_schema:Yojson.Safe.t
-  -> config:Coord.config
-  -> meta:Keeper_types.keeper_meta
-  -> ctx_snapshot:Keeper_types.working_context
-  -> ?turn_sandbox_factory:Keeper_sandbox_factory.t
-  -> ?turn_sandbox_factory_git:Keeper_sandbox_factory.t
-  -> exec_cache:Masc_exec.Exec_cache.t option
-  -> ?search_fn:(query:string -> max_results:int -> Yojson.Safe.t)
-  -> ?on_tool_called:(string -> unit)
-  -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
-  -> ?translate_input:(Yojson.Safe.t -> Yojson.Safe.t)
-  -> failure_counts:failure_counts
-  -> unit
-  -> Yojson.Safe.t
-  -> Tool_result.t
 
 (** Build the keeper's full [tool_bundle]: internal tools +
     alias-registered (public name) tools that translate input to
     internal payloads. The cleanup thunk releases per-turn sandbox
     runtimes (Docker case). *)
-val make_tool_bundle
-  :  config:Coord.config
-  -> meta:Keeper_types.keeper_meta
-  -> ctx_snapshot:Keeper_types.working_context
-  -> ?search_fn:(query:string -> max_results:int -> Yojson.Safe.t)
-  -> ?on_tool_called:(string -> unit)
-  -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
-  -> unit
-  -> tool_bundle
 
 (** Convenience over [make_tool_bundle] returning only [.tools]. *)
-val make_tools
-  :  config:Coord.config
-  -> meta:Keeper_types.keeper_meta
-  -> ctx_snapshot:Keeper_types.working_context
-  -> ?search_fn:(query:string -> max_results:int -> Yojson.Safe.t)
-  -> ?on_tool_called:(string -> unit)
-  -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
-  -> unit
-  -> Agent_sdk.Tool.t list
+

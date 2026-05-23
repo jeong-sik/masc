@@ -285,6 +285,9 @@
   keeper_hooks_oas_pr_metrics
   keeper_hooks_oas_introspection
   keeper_tools_oas_markers
+  keeper_tools_oas_workflow
+  keeper_tools_oas_deterministic_error
+  keeper_tools_oas_handler
   keeper_sandbox
   keeper_sandbox_control
   keeper_alerting_path

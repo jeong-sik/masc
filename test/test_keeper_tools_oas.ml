@@ -57,7 +57,7 @@ let test_make_tools_returns_nonempty () =
        @@ fun env ->
        Fs_compat.set_fs (Eio.Stdenv.fs env);
        let config = Coord.default_config dir in
-       let tools = Keeper_tools_oas.make_tools ~config ~meta ~ctx_snapshot () in
+       let tools = Keeper_tools_oas_handler.make_tools ~config ~meta ~ctx_snapshot () in
        check bool "tools nonempty" true (List.length tools > 0))
 ;;
 
@@ -83,7 +83,7 @@ let test_tools_have_valid_schemas () =
        @@ fun env ->
        Fs_compat.set_fs (Eio.Stdenv.fs env);
        let config = Coord.default_config dir in
-       let tools = Keeper_tools_oas.make_tools ~config ~meta ~ctx_snapshot () in
+       let tools = Keeper_tools_oas_handler.make_tools ~config ~meta ~ctx_snapshot () in
        List.iter
          (fun (tool : Agent_sdk.Tool.t) ->
             check
@@ -121,7 +121,7 @@ let test_tool_count_matches_allowed () =
        @@ fun env ->
        Fs_compat.set_fs (Eio.Stdenv.fs env);
        let config = Coord.default_config dir in
-       let tools = Keeper_tools_oas.make_tools ~config ~meta ~ctx_snapshot () in
+       let tools = Keeper_tools_oas_handler.make_tools ~config ~meta ~ctx_snapshot () in
        let allowed = Keeper_exec_tools.keeper_allowed_tool_names meta in
        let tool_names = List.map (fun (t : Agent_sdk.Tool.t) -> t.schema.name) tools in
        (* RFC-0006 Phase A.2: aliased Tool.t entries (Bash/Read) carry the
@@ -164,7 +164,7 @@ let ensure_read_repo_dir config meta =
 let make_registered_tools ~config ~meta ~ctx_snapshot () =
   let keeper_name = meta.Keeper_types.name in
   ignore (Keeper_registry.register ~base_path:config.Coord.base_path keeper_name meta);
-  Keeper_tools_oas.make_tools ~config ~meta ~ctx_snapshot ()
+  Keeper_tools_oas_handler.make_tools ~config ~meta ~ctx_snapshot ()
 ;;
 
 let dummy_schedule : Agent_sdk.Hooks.tool_schedule =
@@ -224,7 +224,7 @@ let test_public_alias_descriptions_are_frontdoor_safe () =
        @@ fun env ->
        Fs_compat.set_fs (Eio.Stdenv.fs env);
        let config = Coord.default_config dir in
-       let tools = Keeper_tools_oas.make_tools ~config ~meta ~ctx_snapshot () in
+       let tools = Keeper_tools_oas_handler.make_tools ~config ~meta ~ctx_snapshot () in
        let bash = find_tool "Bash" tools in
        let grep = find_tool "Grep" tools in
        check bool
@@ -351,7 +351,7 @@ let test_handler_does_not_write_tool_call_io_without_post_hook () =
          ~trace_id:"trace-direct-tool-io"
          ~turn:1
          ();
-       let tools = Keeper_tools_oas.make_tools ~config ~meta ~ctx_snapshot () in
+       let tools = Keeper_tools_oas_handler.make_tools ~config ~meta ~ctx_snapshot () in
        let tool = find_tool "keeper_time_now" tools in
        (match Tool.execute tool (`Assoc []) with
         | Ok _ -> ()
@@ -384,7 +384,7 @@ let test_post_hook_is_single_tool_call_log_writer () =
          ~trace_id:"trace-hook-tool-io"
          ~turn:1
          ();
-       let tools = Keeper_tools_oas.make_tools ~config ~meta ~ctx_snapshot () in
+       let tools = Keeper_tools_oas_handler.make_tools ~config ~meta ~ctx_snapshot () in
        let tool = find_tool "keeper_time_now" tools in
        let output_text =
          match Tool.execute tool (`Assoc []) with
@@ -441,7 +441,7 @@ let test_oas_wrapper_records_keeper_internal_tool_call () =
        Fs_compat.set_fs (Eio.Stdenv.fs env);
        Tool_registry.reset ();
        let config = Coord.default_config dir in
-       let bundle = Keeper_tools_oas.make_tool_bundle ~config ~meta ~ctx_snapshot () in
+       let bundle = Keeper_tools_oas_handler.make_tool_bundle ~config ~meta ~ctx_snapshot () in
        Fun.protect
          ~finally:(fun () ->
            bundle.cleanup ();
@@ -475,7 +475,7 @@ let test_oas_tool_callbacks_respect_resource_gate () =
     Tool_resource_gate.For_testing.set_limits ~shell:1 ();
     with_env "MASC_TOOL_GATE_WAIT_TIMEOUT_SEC" "0.05" (fun () ->
       let bundle =
-        Keeper_tools_oas.make_tool_bundle ~config ~meta ~ctx_snapshot ~clock ()
+        Keeper_tools_oas_handler.make_tool_bundle ~config ~meta ~ctx_snapshot ~clock ()
       in
       Fun.protect
         ~finally:bundle.cleanup
@@ -1117,7 +1117,7 @@ let workflow_rejection_shape_block_raw =
 
 let test_workflow_rejection_recovery_fields_expose_next_tool () =
   let recovery_fields =
-    Keeper_tools_oas.workflow_rejection_recovery_fields
+    Keeper_tools_oas_workflow.workflow_rejection_recovery_fields
       ~tool_name:"keeper_bash"
       ~count:1
       workflow_rejection_shape_block_raw
@@ -1145,7 +1145,7 @@ let test_workflow_rejection_recovery_fields_expose_next_tool () =
 
 let test_workflow_rejection_recovery_fields_mark_loop () =
   let recovery_fields =
-    Keeper_tools_oas.workflow_rejection_recovery_fields
+    Keeper_tools_oas_workflow.workflow_rejection_recovery_fields
       ~tool_name:"keeper_bash"
       ~count:2
       workflow_rejection_shape_block_raw
@@ -1166,7 +1166,7 @@ let test_deterministic_recovery_plan_fields_promote_next_tool () =
   let raw =
     {|{"ok":false,"error":"command_blocked","recovery_plan":{"kind":"structured_tool_rewrite","next_tool":"Grep","next_args":{"pattern":"term","path":"lib"},"instruction":"Use Grep with a scoped path.","reason":"shell_shape_requires_visible_search_tool","confidence":"high","do_not_retry_same_args":true}}|}
   in
-  let fields = Keeper_tools_oas.deterministic_recovery_plan_fields raw in
+  let fields = Keeper_tools_oas_deterministic_error.deterministic_recovery_plan_fields raw in
   let normalized =
     Keeper_tools_oas.normalize_tool_result
       ~workflow_rejection_recovery_fields:fields
@@ -1415,7 +1415,7 @@ let test_result_markers_capture_docker_approve () =
       ~success:true
       {|{"ok":true,"via":"docker","event":"APPROVE"}|}
   in
-  let markers = Keeper_tools_oas.tool_exec_result_markers ~input:(`Assoc []) ~output in
+  let markers = Keeper_tools_oas_markers.tool_exec_result_markers ~input:(`Assoc []) ~output in
   check bool "via marker" true (List.mem "via=docker" markers);
   check bool "approve marker" true (List.mem "event=APPROVE" markers)
 ;;
@@ -1425,7 +1425,7 @@ let test_result_markers_keep_git_push_class_only () =
     Keeper_tools_oas.normalize_tool_result ~success:true {|{"ok":true,"via":"docker"}|}
   in
   let markers =
-    Keeper_tools_oas.tool_exec_result_markers
+    Keeper_tools_oas_markers.tool_exec_result_markers
       ~input:(`Assoc [ "cmd", `String "git push origin feature/secret-proof" ])
       ~output
   in
@@ -1443,7 +1443,7 @@ let test_result_markers_ignore_lifecycle_mentions () =
     Keeper_tools_oas.normalize_tool_result ~success:true {|{"ok":true,"via":"docker"}|}
   in
   let markers =
-    Keeper_tools_oas.tool_exec_result_markers
+    Keeper_tools_oas_markers.tool_exec_result_markers
       ~input:
         (`Assoc
             [ "cmd", `String "echo git push"; "command", `String "printf 'gh pr create'" ])
@@ -1457,7 +1457,7 @@ let test_result_markers_ignore_lifecycle_mentions () =
 let test_result_markers_ignore_input_via () =
   let output = Keeper_tools_oas.normalize_tool_result ~success:true {|{"ok":true}|} in
   let markers =
-    Keeper_tools_oas.tool_exec_result_markers
+    Keeper_tools_oas_markers.tool_exec_result_markers
       ~input:(`Assoc [ "via", `String "docker" ])
       ~output
   in
@@ -1467,7 +1467,7 @@ let test_result_markers_ignore_input_via () =
 let test_result_markers_ignore_input_route_fields () =
   let output = Keeper_tools_oas.normalize_tool_result ~success:true {|{"ok":true}|} in
   let markers =
-    Keeper_tools_oas.tool_exec_result_markers
+    Keeper_tools_oas_markers.tool_exec_result_markers
       ~input:
         (`Assoc
             [ "action", `String "push"
@@ -1487,7 +1487,7 @@ let test_result_markers_reject_untrusted_via () =
       ~success:true
       {|{"ok":true,"via":"<script>alert(1)</script>"}|}
   in
-  let markers = Keeper_tools_oas.tool_exec_result_markers ~input:(`Assoc []) ~output in
+  let markers = Keeper_tools_oas_markers.tool_exec_result_markers ~input:(`Assoc []) ~output in
   check
     bool
     "untrusted via marker rejected"
@@ -1501,7 +1501,7 @@ let test_result_markers_capture_pr_create_operation () =
       ~success:true
       {|{"ok":true,"via":"docker","operation":"pr_create"}|}
   in
-  let markers = Keeper_tools_oas.tool_exec_result_markers ~input:(`Assoc []) ~output in
+  let markers = Keeper_tools_oas_markers.tool_exec_result_markers ~input:(`Assoc []) ~output in
   check bool "pr create marker" true (List.mem "gh pr create" markers);
   check bool "via marker" true (List.mem "via=docker" markers)
 ;;

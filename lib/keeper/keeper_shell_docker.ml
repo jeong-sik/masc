@@ -235,57 +235,46 @@ let run_docker_shell_command_with_status_internal
                 then [ "--network"; "bridge" ], "bridge"
                 else Keeper_sandbox_runtime.docker_network_args network_mode
               in
+              let mount_preflight_error ~reason ~detail_msg mount_path =
+                let details =
+                  docker_mount_preflight_details
+                    ~config
+                    ~meta
+                    ~image
+                    ~container_kind:"oneshot"
+                    ~network_label
+                    ~mount_path
+                    ~reason
+                in
+                sandbox_error
+                  ~details
+                  (Printf.sprintf
+                     "docker_shell_failed: %s: mount_path=%S \
+                      base_path_hash=%S keeper=%S image=%S container_kind=%S \
+                      network=%S (%s)"
+                     reason
+                     mount_path
+                     (Keeper_sandbox_runtime.base_path_hash config.base_path)
+                     meta.name
+                     image
+                     "oneshot"
+                     network_label
+                     detail_msg)
+              in
               (* Pre-flight: verify the bind source and host cwd before spawning a
                  container. Missing bind sources otherwise fail inside Docker
                  Desktop as opaque OCI mount errors and can degrade the daemon. *)
               (match Keeper_shell_docker_mount_check.check ~host_root ~cwd with
               | Error (Mount_source_not_found mount_path) ->
-                let details =
-                  docker_mount_preflight_details
-                    ~config
-                    ~meta
-                    ~image
-                    ~container_kind:"oneshot"
-                    ~network_label
-                    ~mount_path
-                    ~reason:"mount_source_not_found"
-                in
-                sandbox_error
-                  ~details
-                  (Printf.sprintf
-                     "docker_shell_failed: mount_source_not_found: mount_path=%S \
-                      base_path_hash=%S keeper=%S image=%S container_kind=%S \
-                      network=%S (host bind mount source does not exist; repair \
-                      the sandbox playground before docker run)"
-                     mount_path
-                     (Keeper_sandbox_runtime.base_path_hash config.base_path)
-                     meta.name
-                     image
-                     "oneshot"
-                     network_label)
+                mount_preflight_error
+                  ~reason:"mount_source_not_found"
+                  ~detail_msg:"host bind mount source does not exist; repair the sandbox playground before docker run"
+                  mount_path
               | Error (Mount_source_not_directory mount_path) ->
-                let details =
-                  docker_mount_preflight_details
-                    ~config
-                    ~meta
-                    ~image
-                    ~container_kind:"oneshot"
-                    ~network_label
-                    ~mount_path
-                    ~reason:"mount_source_not_directory"
-                in
-                sandbox_error
-                  ~details
-                  (Printf.sprintf
-                     "docker_shell_failed: mount_source_not_directory: mount_path=%S \
-                      base_path_hash=%S keeper=%S image=%S container_kind=%S \
-                      network=%S (host bind mount source must be a directory)"
-                     mount_path
-                     (Keeper_sandbox_runtime.base_path_hash config.base_path)
-                     meta.name
-                     image
-                     "oneshot"
-                     network_label)
+                mount_preflight_error
+                  ~reason:"mount_source_not_directory"
+                  ~detail_msg:"host bind mount source must be a directory"
+                  mount_path
               | Error (Cwd_not_found cwd) ->
                 sandbox_error
                   (Printf.sprintf

@@ -4,6 +4,15 @@
 
 open Keeper_types
 
+let agent_status_json ~exists ?error () =
+  let error_field =
+    match error with
+    | Some e -> [("error", `String e)]
+    | None -> []
+  in
+  `Assoc (("exists", `Bool exists) :: error_field)
+;;
+
 let active_model_of_meta (m : keeper_meta) : string =
   let _ = m in
   ""
@@ -66,15 +75,15 @@ let parse_agent_status (config : Coord.config) ~(agent_name : string) : Yojson.S
     Filename.concat (Coord.agents_dir config) (Coord.safe_filename agent_name ^ ".json")
   in
   if not (Coord.path_exists config agent_file) then
-    `Assoc [ ("exists", `Bool false) ]
+    agent_status_json ~exists:false ()
   else (
     match Coord.read_json_opt config agent_file with
     | None ->
-        `Assoc [ ("exists", `Bool true); ("error", `String "failed_to_read") ]
+        agent_status_json ~exists:true ~error:"failed_to_read" ()
     | Some json -> (
         match Masc_domain.agent_of_yojson json with
         | Error _ ->
-            `Assoc [ ("exists", `Bool true); ("error", `String "failed_to_parse") ]
+            agent_status_json ~exists:true ~error:"failed_to_parse" ()
         | Ok (agent : Masc_domain.agent) ->
             let now_ts = Time_compat.now () in
             let joined_ts =

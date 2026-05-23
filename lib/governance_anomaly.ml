@@ -377,21 +377,22 @@ let detect_deviations ~profile ~entries ~threshold =
     let observed_diversity = tool_diversity_of_batch entries in
     let observed_token = token_volume_of_batch entries in
     let observed_failure = failure_rate_of_batch entries in
-    let deviations = ref [] in
-    let add dimension observed expected stat =
+    let check dimension observed stat =
       let z = z_score ~observed ~mean:stat.mean ~stddev:stat.stddev in
       if abs_float z >= threshold then
-        deviations :=
-          { dimension; observed; expected = stat.mean; z_score = z; severity = severity_of_z z }
-          :: !deviations
+        Some
+          { dimension; observed; expected = stat.mean
+          ; z_score = z; severity = severity_of_z z }
+      else None
     in
-    add "activity_volume" observed_activity profile.activity_volume.mean profile.activity_volume;
-    add "tool_diversity" observed_diversity profile.tool_diversity.mean profile.tool_diversity;
-    (match (observed_token, profile.token_volume) with
-    | Some obs, Some stat -> add "token_volume" obs stat.mean stat
-    | _ -> ());
-    add "failure_rate" observed_failure profile.failure_rate.mean profile.failure_rate;
-    List.rev !deviations
+    List.filter_map Fun.id
+      [ check "activity_volume" observed_activity profile.activity_volume
+      ; check "tool_diversity" observed_diversity profile.tool_diversity
+      ; (match (observed_token, profile.token_volume) with
+         | Some obs, Some stat -> check "token_volume" obs stat
+         | None, _ | _, None -> None)
+      ; check "failure_rate" observed_failure profile.failure_rate
+      ]
 
 (* ── Top-level convenience ────────────────────────────────── *)
 

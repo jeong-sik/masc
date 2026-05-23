@@ -1,6 +1,8 @@
 open Keeper_types
 open Keeper_exec_shared
 
+module Shell_gate = Masc_exec_command_gate.Shell_command_gate
+
 (* RFC-0084 host-config-cleanup-C — coreutils path migration.
    Resolve the 6 absolute binary paths once at module-init time
    from the typed [Host_config.coreutils] field, then reference
@@ -410,21 +412,79 @@ let handle_keeper_shell
                      ; "via", `String "docker"
                      ; "entries", lines_to_json ~limit out
                      ])))
-        else
-          let st, out =
-           Keeper_shell_shared.run_argv_with_status_retry_eintr
-             ~timeout_sec:Keeper_shell_shared.io_timeout_sec
-             [ coreutils.ls; "-la"; target ]
+       else
+         (* P10: Host ls via Shell IR pipeline. Docker path preserved
+            above because Sandbox_target.docker runner semantics
+            (fresh vs reuse, container_path_of_host) differ from
+            Keeper_docker_read. *)
+         let dispatch_sandbox = Masc_exec.Sandbox_target.host () in
+         let ir =
+           Masc_exec.Shell_ir.Simple
+             { bin = Masc_exec.Bin.of_known Masc_exec.Bin.Ls
+             ; args =
+                 [ Masc_exec.Shell_ir.Lit ("-la", Masc_exec.Shell_ir.default_meta)
+                 ; Masc_exec.Shell_ir.Lit (target, Masc_exec.Shell_ir.default_meta)
+                 ]
+             ; env = []
+             ; cwd = None
+             ; redirects = []
+             ; sandbox = dispatch_sandbox
+             }
          in
-         Yojson.Safe.to_string
-           (`Assoc
-               [ "ok", `Bool (st = Unix.WEXITED 0)
-               ; "op", `String op
-               ; "path", `String target
-               ; "via", `String "host"
-               ; "status", Keeper_alerting_path.process_status_to_json st
-               ; "entries", lines_to_json ~limit out
-               ]))
+         let envelope =
+           Masc_exec.Shell_ir_risk.classify (Masc_exec.Shell_ir_risk.undecided ir)
+         in
+         let allowed_commands = Dev_exec_allowlist.readonly in
+         let gate_verdict =
+           Shell_gate.gate_typed
+             ~caller:Shell_gate.Keeper_shell_bash
+             ~ir:envelope.Masc_exec.Shell_ir_risk.ir
+             ~allowlist:{ allowed_commands; allow_pipes = true; redirect_allowed = true }
+             ~path_policy:Shell_gate.allow_all_paths
+             ~sandbox:{ target = dispatch_sandbox }
+             ()
+         in
+         (match gate_verdict with
+          | Reject { diagnostic; _ } ->
+            error_json
+              ~fields:[ "typed", `Bool true; "cmd", `String "ls -la"; "path", `String target ]
+              diagnostic
+          | Cannot_parse _ ->
+            error_json
+              ~fields:[ "typed", `Bool true; "cmd", `String "ls -la"; "path", `String target ]
+              "Cannot parse command"
+          | Too_complex _ ->
+            error_json
+              ~fields:[ "typed", `Bool true; "cmd", `String "ls -la"; "path", `String target ]
+              "Command too complex"
+          | Allow _context ->
+            let path_validation =
+              Exec_policy.validate_shell_ir_paths
+                ~keeper_id:meta.name
+                ~base_path:root
+                ~workdir:target
+                envelope.Masc_exec.Shell_ir_risk.ir
+            in
+            (match path_validation with
+             | Error e -> error_json ~fields:[ "blocked_cmd", `String "ls -la" ] e
+             | Ok () ->
+               let result =
+                 Masc_exec.Exec_dispatch.dispatch_decided envelope
+               in
+               let output =
+                 if String.equal result.stderr ""
+                 then result.stdout
+                 else result.stdout ^ result.stderr
+               in
+               Yojson.Safe.to_string
+                 (`Assoc
+                     [ "ok", `Bool (match result.status with Unix.WEXITED 0 -> true | _ -> false)
+                     ; "op", `String op
+                     ; "path", `String target
+                     ; "via", `String "host"
+                     ; "status", Keeper_alerting_path.process_status_to_json result.status
+                     ; "entries", lines_to_json ~limit output
+                     ]))))
   | "cat" ->
     (match read_target () with
      | Error e -> path_error e

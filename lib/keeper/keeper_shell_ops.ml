@@ -1094,16 +1094,13 @@ let handle_keeper_shell
            Keeper_shell_shared.run_argv_with_status_retry_eintr ~timeout_sec:Keeper_shell_shared.read_timeout_sec
              [ coreutils.tail; "-n"; string_of_int n; target ]
          in
-         Yojson.Safe.to_string
-           (`Assoc
-               [ "ok", `Bool (st = Unix.WEXITED 0)
-               ; "op", `String op
-               ; "path", `String target
-               ; "lines", `Int n
-               ; "via", `String "host"
-               ; "status", Keeper_alerting_path.process_status_to_json st
-               ; "content", `String out
-               ]))
+         render_completed_process_result ~cwd:None
+           ~cmd:("tail -n " ^ string_of_int n ^ " " ^ target)
+           ~extra:[
+             "lines", `Int n;
+           ]
+           st out
+       )
   | "wc" ->
     (match read_target () with
      | Error e -> path_error e

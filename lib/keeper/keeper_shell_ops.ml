@@ -34,12 +34,11 @@ let handle_keeper_shell
           ])
   | Some shell_op ->
     let op = Keeper_shell_shared.shell_op_to_string shell_op in
-    let with_cwd f =
-      Keeper_shell_runtime.with_cwd_target ~config ~meta ~args ~root ~op ~raw_path f
+    let with_target target_fn f =
+      target_fn ~config ~meta ~args ~root ~op ~raw_path f
     in
-    let with_read f =
-      Keeper_shell_runtime.with_read_target ~config ~meta ~args ~root ~op ~raw_path f
-    in
+    let with_cwd = with_target Keeper_shell_runtime.with_cwd_target in
+    let with_read = with_target Keeper_shell_runtime.with_read_target in
     let run_cwd =
       Keeper_shell_runtime.run_cwd_op ~root ~keeper_name:meta.name ~op ~config ~meta
         ?turn_sandbox_factory

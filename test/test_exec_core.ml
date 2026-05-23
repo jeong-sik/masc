@@ -122,8 +122,13 @@ let test_pipeline_last_command_uses_shared_words () =
     (get_string_field json "semantic_status")
 
 let test_unknown_write_is_not_git_write () =
+  let ir =
+    match Masc_exec_bash_parser.Bash.parse_string "mkdir tmp/generated" with
+    | Masc_exec.Parsed.Parsed ir -> ir
+    | _ -> Alcotest.fail "failed to parse mkdir command"
+  in
   let classification =
-    Masc_mcp.Exec_core.classify_command ~cmd:"mkdir tmp/generated"
+    Masc_mcp.Exec_core.classify_command_of_ir ir
   in
   check string "family" "unknown"
     (Masc_mcp.Exec_core.classification_to_json classification

@@ -225,3 +225,19 @@ let stage_words_of_string_result (cmd : string) : (string list, unit) result =
   | Parsed.Parsed ir -> Ok (flat_stage_words ir)
   | _ -> Error ()
 ;;
+
+(** Parse a string as a single simple command and extract its argv words.
+    Returns [None] for pipelines, parse errors, or non-literal args.
+    Replaces the duplicate parse in [Exec_policy_command_syntax.argv_words_of_split_string]. *)
+let argv_words_of_string text =
+  match Masc_exec_bash_parser.Bash.parse_string text with
+  | Parsed.Parsed (Shell_ir.Simple simple) -> literal_words_of_simple simple
+  | _ -> None
+;;
+
+(** Expose the raw [Bash.parse_string] result so that callers needing
+    [Shell_ir.t Parsed.t] (e.g. gh command validation) don't need to
+    import [Masc_exec_bash_parser] directly. *)
+let parsed_of_string text =
+  Masc_exec_bash_parser.Bash.parse_string text
+;;

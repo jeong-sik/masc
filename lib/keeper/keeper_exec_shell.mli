@@ -61,13 +61,6 @@ val rewrite_docker_host_paths_to_container :
     commands to the corresponding in-container playground root before
     execution. *)
 
-val cmd_targets_git_or_gh : string -> bool
-(** Docker git-credentials per-command dispatch predicate. True when
-    the trimmed command's first whitespace-separated word is exactly
-    "git" or "gh". Under sandbox_profile=docker this upgrades the
-    container to network=inherit with gh/git credential mounts for
-    the duration of that one command. Exposed for unit testing. *)
-
 val handle_keeper_bash :
   turn_sandbox_factory:Keeper_sandbox_factory.t option ->
   turn_sandbox_factory_git:Keeper_sandbox_factory.t option ->

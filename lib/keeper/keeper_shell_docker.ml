@@ -197,19 +197,15 @@ let ensure_keeper_sandbox_runtime ~timeout_sec =
   Keeper_sandbox_runtime.ensure_keeper_sandbox_runtime ~timeout_sec
 ;;
 
-let cmd_targets_gh = Keeper_shell_command_semantics.cmd_targets_gh
-let resolve_sandbox_root_git_cwd = Keeper_shell_command_semantics.resolve_sandbox_root_git_cwd
-
-let detect_gh_repo_flag_with_api_misuse =
-  Keeper_shell_command_semantics.detect_gh_repo_flag_with_api_misuse
-;;
 
 (* Emit a ("gh_exit_class", "…") JSON field when [cmd] targets gh,
    AND increment the matching Legendary_counters bucket.  Callers
    append the returned list to their `Assoc payload unconditionally —
    it is empty for non-gh commands, so call sites keep their shape. *)
-let gh_exit_class_field ~cmd ~status ~output : (string * Yojson.Safe.t) list =
-  if not (Keeper_shell_command_semantics.cmd_targets_gh cmd)
+let gh_exit_class_field ~cmd ~status ~output
+    ~(cmd_stages : Keeper_shell_command_semantics.parsed_stage list)
+    () : (string * Yojson.Safe.t) list =
+  if not (Keeper_shell_command_semantics.stages_targets_gh cmd_stages)
   then []
   else (
     let exit_code =
@@ -399,12 +395,7 @@ let run_docker_shell_command_with_status_internal
             references")
     else
       let cmd_stages =
-        match Masc_exec_bash_parser.Bash.parse_string cmd with
-        | Masc_exec.Parsed.Parsed ir ->
-          Keeper_shell_command_semantics.effective_stages_of_ir ir
-        | Masc_exec.Parsed.Parse_error _
-        | Masc_exec.Parsed.Parse_aborted _
-        | Masc_exec.Parsed.Too_complex _ -> []
+        Keeper_shell_command_semantics.effective_stages_of_cmd cmd
       in
       let cwd, multi_repo_blocker =
         Keeper_shell_command_semantics.resolve_sandbox_root_git_cwd_of_stages
@@ -419,7 +410,7 @@ let run_docker_shell_command_with_status_internal
           let validation_cmd =
             rewrite_docker_command_paths_for_host_validation ~config ~meta cmd
           in
-          (match Masc_exec_bash_parser.Bash.parse_string validation_cmd with
+          (match Exec_policy_mutation_classifier.parsed_of_string validation_cmd with
            | Masc_exec.Parsed.Parsed validation_ir ->
              (match
                 Keeper_task_worktree_lazy.ensure_shell_ir_existing_dirs
@@ -458,7 +449,10 @@ let run_docker_shell_command_with_status_internal
         (* #10855: surface gh syntax misuse before docker exec so the LLM
          sees a corrected-form hint in the same turn rather than gh's raw
          "unknown flag: --repo" error after the round-trip. *)
-           (match detect_gh_repo_flag_with_api_misuse cmd with
+           (match
+             Keeper_shell_command_semantics.gh_repo_flag_api_misuse_of_stages
+               cmd_stages
+           with
             | Some (repo_arg, endpoint) ->
               sandbox_error
                 (Printf.sprintf
@@ -561,7 +555,7 @@ let run_docker_shell_command_with_status_internal
                    | Ok () ->
                      let prepared_gitdirs =
                        if git_creds_enabled
-                          && Keeper_shell_command_semantics.cmd_targets_git_or_gh cmd
+                          && Keeper_shell_command_semantics.stages_targets_git_or_gh cmd_stages
                        then prepare_container_worktree_gitdirs ~host_root ~container_root
                        else 0
                      in
@@ -773,12 +767,7 @@ let run_docker_credentialed_bash
     | Some blocked_json -> blocked_json
     | None ->
       let cmd_stages =
-        match Masc_exec_bash_parser.Bash.parse_string cmd with
-        | Masc_exec.Parsed.Parsed ir ->
-          Keeper_shell_command_semantics.effective_stages_of_ir ir
-        | Masc_exec.Parsed.Parse_error _
-        | Masc_exec.Parsed.Parse_aborted _
-        | Masc_exec.Parsed.Too_complex _ -> []
+        Keeper_shell_command_semantics.effective_stages_of_cmd cmd
       in
       let cwd, sandbox_root_git_blocker =
         Keeper_shell_command_semantics.resolve_sandbox_root_git_cwd_of_stages
@@ -791,7 +780,7 @@ let run_docker_credentialed_bash
            rewrite_docker_command_paths_for_host_validation ~config ~meta cmd
          in
          let path_validation =
-           match Masc_exec_bash_parser.Bash.parse_string validation_cmd with
+           match Exec_policy_mutation_classifier.parsed_of_string validation_cmd with
            | Masc_exec.Parsed.Parsed validation_ir ->
              (match
                 Keeper_task_worktree_lazy.ensure_shell_ir_existing_dirs
@@ -846,7 +835,9 @@ let run_docker_credentialed_bash
                      @ gh_exit_class_field
                          ~cmd
                          ~status:result.status
-                         ~output:result.output))))))
+                         ~output:result.output
+                        ~cmd_stages
+                        ()))))))
 ;;
 
 let run_docker_bash
@@ -875,12 +866,7 @@ let run_docker_bash
       "sandbox_profile=docker blocks nested container runtimes and host socket references"
   else (
     let cmd_stages =
-      match Masc_exec_bash_parser.Bash.parse_string cmd with
-      | Masc_exec.Parsed.Parsed ir ->
-        Keeper_shell_command_semantics.effective_stages_of_ir ir
-      | Masc_exec.Parsed.Parse_error _
-      | Masc_exec.Parsed.Parse_aborted _
-      | Masc_exec.Parsed.Too_complex _ -> []
+      Keeper_shell_command_semantics.effective_stages_of_cmd cmd
     in
     let cwd, sandbox_root_git_blocker =
       Keeper_shell_command_semantics.resolve_sandbox_root_git_cwd_of_stages
@@ -893,7 +879,7 @@ let run_docker_bash
         rewrite_docker_command_paths_for_host_validation ~config ~meta cmd
       in
       let path_validation =
-        match Masc_exec_bash_parser.Bash.parse_string validation_cmd with
+        match Exec_policy_mutation_classifier.parsed_of_string validation_cmd with
         | Masc_exec.Parsed.Parsed validation_ir ->
           (match
              Keeper_task_worktree_lazy.ensure_shell_ir_existing_dirs
@@ -962,7 +948,7 @@ let run_docker_bash
                      , `String (Exec_core.string_of_semantic_status semantic_status)
                    ; "output", `String out
                    ]
-                   @ gh_exit_class_field ~cmd ~status:st ~output:out)))
+                   @ gh_exit_class_field ~cmd ~status:st ~output:out ~cmd_stages ()))
        | _ ->
          (match turn_sandbox_runtime with
           | Some _ ->
@@ -1023,5 +1009,7 @@ let run_docker_bash
                       @ gh_exit_class_field
                           ~cmd
                           ~status:result.status
-                          ~output:result.output)))))))
+                          ~output:result.output
+                          ~cmd_stages
+                          ()))))))
 ;;

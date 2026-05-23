@@ -372,15 +372,10 @@ let risk_of_command ~write_intent ~is_destructive family =
     | Read | Search | List | Git_read -> Low)
 ;;
 
-let classify_command ~cmd =
-  let tokens, write_intent, is_destructive =
-    match Masc_exec_bash_parser.Bash.parse_string cmd with
-    | Parsed.Parsed ir ->
-      ( Exec_policy_mutation_classifier.flat_stage_words ir,
-        Exec_policy.is_write_operation ir,
-        Exec_policy.is_destructive_bash_operation ir )
-    | _ -> ([], false, false)
-  in
+let classify_command_of_ir ir =
+  let tokens = Exec_policy_mutation_classifier.flat_stage_words ir in
+  let write_intent = Exec_policy.is_write_operation ir in
+  let is_destructive = Exec_policy.is_destructive_bash_operation ir in
   let family =
     match base_command_of_tokens tokens with
     | Some base -> family_of_base_command ~write_intent ~tokens ~base
@@ -391,7 +386,6 @@ let classify_command ~cmd =
   ; risk = risk_of_command ~write_intent ~is_destructive family
   ; write_intent
   }
-;;
 
 let string_of_command_family = function
   | Read -> "read"
@@ -648,8 +642,9 @@ let artifact_refs_of_output ~artifact_policy ~base_path ~keeper_name ~cmd ~outpu
      | None -> [])
 ;;
 
-let build_process_outcome ~artifact_policy ~base_path ~keeper_name ~cmd ~status ~output =
-  let classification = classify_command ~cmd in
+let default_classification = { family = Unknown; reversibility = Read_only; risk = Low; write_intent = false }
+
+let build_process_outcome ~classification ~artifact_policy ~base_path ~keeper_name ~cmd ~status ~output =
   let semantic_status = semantic_status_of_process ~cmd ~output status in
   let summary = summary_of_status classification semantic_status in
   let retryability = retryability_of_semantic_status semantic_status in
@@ -671,6 +666,7 @@ let build_process_outcome ~artifact_policy ~base_path ~keeper_name ~cmd ~status 
 ;;
 
 let build_blocked_outcome
+      ?(classification = default_classification)
       ~cmd
       ~error
       ~reason
@@ -680,7 +676,6 @@ let build_blocked_outcome
       ?(diag = None)
       ()
   =
-  let classification = classify_command ~cmd in
   let summary = summary_of_status classification Blocked in
   let recovery_hint =
     match hint with
@@ -949,6 +944,7 @@ let outcome_to_json ?(extra = []) ?(env_snapshot = None) = function
 
 let process_result_json
       ?(artifact_policy = Persist_if_large)
+      ?classification
       ~base_path
       ~keeper_name
       ~cmd
@@ -958,11 +954,14 @@ let process_result_json
       ~output
       ()
   =
-  build_process_outcome ~artifact_policy ~base_path ~keeper_name ~cmd ~status ~output
+  build_process_outcome
+    ~classification:(Option.value classification ~default:default_classification)
+    ~artifact_policy ~base_path ~keeper_name ~cmd ~status ~output
   |> outcome_to_json ~extra ~env_snapshot
 ;;
 
 let blocked_result_json
+      ?classification
       ~cmd
       ~error
       ~reason
@@ -974,6 +973,8 @@ let blocked_result_json
       ?(env_snapshot = None)
       ()
   =
-  build_blocked_outcome ~cmd ~error ~reason ?hint ~alternatives ~retryability ~diag ()
+  (match classification with
+   | Some c -> build_blocked_outcome ~classification:c ~cmd ~error ~reason ?hint ~alternatives ~retryability ~diag ()
+   | None -> build_blocked_outcome ~cmd ~error ~reason ?hint ~alternatives ~retryability ~diag ())
   |> outcome_to_json ~extra ~env_snapshot
 ;;

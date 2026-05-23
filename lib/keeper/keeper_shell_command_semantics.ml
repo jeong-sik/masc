@@ -40,13 +40,6 @@ let parsed_stages_of_ir ir =
   | Some stages -> List.rev stages
   | None -> []
 
-let parsed_stages cmd =
-  match Masc_exec_bash_parser.Bash.parse_string cmd with
-  | Masc_exec.Parsed.Parsed ir -> parsed_stages_of_ir ir
-  | Masc_exec.Parsed.Parse_error _
-  | Masc_exec.Parsed.Parse_aborted _
-  | Masc_exec.Parsed.Too_complex _ -> []
-
 let is_shell_identifier name =
   let len = String.length name in
   let is_head = function
@@ -88,25 +81,28 @@ let rec effective_stage = function
 let effective_stages_of_ir ir =
   parsed_stages_of_ir ir |> List.filter_map effective_stage
 
-let effective_stages cmd =
-  parsed_stages cmd |> List.filter_map effective_stage
+let strip_simple_shell_quotes token =
+  let len = String.length token in
+  if
+    len >= 2
+    && ((token.[0] = '\'' && token.[len - 1] = '\'')
+        || (token.[0] = '"' && token.[len - 1] = '"'))
+  then String.sub token 1 (len - 2)
+  else token
 
 let stages_targets_git_or_gh stages =
   List.exists (fun stage -> stage.bin = "git" || stage.bin = "gh") stages
 
-let cmd_targets_git_or_gh cmd =
-  effective_stages cmd |> stages_targets_git_or_gh
-
 let stages_targets_gh stages =
   List.exists (fun stage -> stage.bin = "gh") stages
 
-let cmd_targets_gh cmd =
-  effective_stages cmd |> stages_targets_gh
-
+(** First whitespace-delimited token from a command string, with surrounding
+    quotes stripped. Used for history/logging where full parse is unnecessary. *)
 let cmd_prefix cmd =
-  match effective_stages cmd with
-  | stage :: _ -> stage.bin
-  | [] -> String.trim cmd
+  let trimmed = String.trim cmd in
+  match String.split_on_char ' ' trimmed with
+  | [] | [""] -> trimmed
+  | first :: _ -> strip_simple_shell_quotes first
 
 let repo_flag_value = function
   | "--repo" -> None
@@ -117,25 +113,15 @@ let repo_flag_value = function
     if value = "" then None else Some value
   | _ -> None
 
-let detect_gh_repo_flag_with_api_misuse cmd =
+let gh_repo_flag_api_misuse_of_stages stages =
   let scan_args = function
     | "--repo" :: repo_arg :: "api" :: endpoint :: _ -> Some (repo_arg, endpoint)
     | flag :: "api" :: endpoint :: _ ->
       Option.map (fun repo_arg -> repo_arg, endpoint) (repo_flag_value flag)
     | _ -> None
   in
-  effective_stages cmd
-  |> List.find_map (fun stage ->
-       if stage.bin = "gh" then scan_args stage.args else None)
-
-let strip_simple_shell_quotes token =
-  let len = String.length token in
-  if
-    len >= 2
-    && ((token.[0] = '\'' && token.[len - 1] = '\'')
-        || (token.[0] = '"' && token.[len - 1] = '"'))
-  then String.sub token 1 (len - 2)
-  else token
+  List.find_map (fun stage ->
+    if stage.bin = "gh" then scan_args stage.args else None) stages
 
 let bare_worktrees_path token =
   let token = strip_simple_shell_quotes token in
@@ -159,8 +145,6 @@ let git_c_path_of_stages stages =
   List.find_map (fun stage ->
     if stage.bin = "git" then scan_git_args stage.args else None) stages
 
-let git_c_path cmd = effective_stages cmd |> git_c_path_of_stages
-
 let normalize_repos_path_token token =
   let token = strip_simple_shell_quotes token |> String.trim in
   let token =
@@ -182,9 +166,6 @@ let repos_path_hint_of_stages ~cmd stages =
            match normalize_repos_path_token token with
            | Some path -> Some (path, cmd)
            | None -> None)) stages
-
-let command_repos_path_hint cmd =
-  effective_stages cmd |> repos_path_hint_of_stages ~cmd:(String.trim cmd)
 
 let resolve_sandbox_root_git_cwd_of_stages
     ~(config : Coord.config) ~(meta : Keeper_types.keeper_meta) ~cwd ~cmd stages
@@ -260,6 +241,10 @@ let resolve_sandbox_root_git_cwd_of_stages
                (String.concat ", " many)) )))
   else cwd, None
 
-let resolve_sandbox_root_git_cwd ~(config : Coord.config) ~(meta : Keeper_types.keeper_meta) ~cwd ~cmd =
-  resolve_sandbox_root_git_cwd_of_stages
-    ~config ~meta ~cwd ~cmd (effective_stages cmd)
+let effective_stages_of_cmd cmd =
+  match Exec_policy_mutation_classifier.parsed_of_string cmd with
+  | Masc_exec.Parsed.Parsed ir -> effective_stages_of_ir ir
+  | Masc_exec.Parsed.Parse_error _
+  | Masc_exec.Parsed.Parse_aborted _
+  | Masc_exec.Parsed.Too_complex _ -> []
+

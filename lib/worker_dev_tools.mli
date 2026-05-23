@@ -116,21 +116,12 @@ val validate_shell_ir_paths
   -> Masc_exec.Shell_ir.t
   -> (unit, string) result
 
-(** Compatibility wrapper for legacy string call sites. Prefer
-    {!validate_shell_ir_paths} when the caller already has Shell IR. *)
-val validate_command_paths
-  :  ?keeper_id:string
-  -> ?base_path:string
-  -> ?workdir:string
-  -> string
-  -> (unit, string) result
-
 (** Return literal path values in [cmd] that should have their containing
     sandbox materialized before execution. This includes explicit existing-directory
     requirements (for example [git -C <dir>] and [--work-tree=<dir>]) and
     path arguments to read/list/search commands such as [cat], [find], [ls],
     and [rg]. Callers may use this to repair an expected sandbox directory
-    before delegating to {!validate_command_paths}; the validator remains
+    before delegating to {!validate_shell_ir_paths}; the validator remains
     the authority for out-of-sandbox paths. *)
 val existing_dir_path_values_of_shell_ir : Masc_exec.Shell_ir.t -> string list
 

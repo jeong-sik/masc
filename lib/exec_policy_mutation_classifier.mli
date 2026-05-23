@@ -59,3 +59,16 @@ val stage_words_of_string : string -> string list
     the legacy [Bash_words.stages]-based [shell_word_values] copy in
     [exec_policy_log_sanitize]. *)
 val stage_words_of_string_result : string -> (string list, unit) result
+
+(** Parse a string as a single simple command and extract its argv words.
+    Returns [None] for pipelines, parse errors, or non-literal args.
+    Replaces the duplicate [Bash.parse_string] in
+    [Exec_policy_command_syntax.argv_words_of_split_string]. *)
+val argv_words_of_string : string -> string list option
+
+(** Expose the raw [Bash.parse_string] result for callers that need
+    [Shell_ir.t Parsed.t] directly (e.g. gh command validation).
+    This is the SSOT entry point for string→IR parsing — all production
+    callers should route through this instead of calling
+    [Masc_exec_bash_parser.Bash.parse_string] directly. *)
+val parsed_of_string : string -> Masc_exec.Shell_ir.t Masc_exec.Parsed.t

@@ -52,14 +52,6 @@ let validate_command_coding = Exec_policy.validate_command_coding
 let simple_literal_args = Exec_policy.simple_literal_args
 let existing_dir_path_values_of_shell_ir = Exec_policy.existing_dir_path_values_of_shell_ir
 let validate_shell_ir_paths = Exec_policy.validate_shell_ir_paths
-let validate_command_paths ?keeper_id ?base_path ?workdir cmd =
-  match Masc_exec_bash_parser.Bash.parse_string cmd with
-  | Masc_exec.Parsed.Parsed shell_ir ->
-    Exec_policy.validate_shell_ir_paths ?keeper_id ?base_path ?workdir shell_ir
-  | Masc_exec.Parsed.Parse_error _
-  | Masc_exec.Parsed.Parse_aborted _
-  | Masc_exec.Parsed.Too_complex _ -> Ok ()
-;;
 let is_write_operation = Exec_policy.is_write_operation
 let is_git_branch_switch = Exec_policy.is_git_branch_switch
 let is_destructive_bash_operation = Exec_policy.is_destructive_bash_operation

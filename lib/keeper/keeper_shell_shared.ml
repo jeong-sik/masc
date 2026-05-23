@@ -685,8 +685,7 @@ let resolve_keeper_shell_read_path
 (* Sandbox infrastructure stays in Keeper_shell_docker; command-shape
    interpretation stays in Keeper_shell_command_semantics. *)
 let effective_sandbox_profile = Keeper_shell_docker.effective_sandbox_profile
-let cmd_targets_git_or_gh = Keeper_shell_command_semantics.cmd_targets_git_or_gh
-let cmd_targets_gh = Keeper_shell_command_semantics.cmd_targets_gh
+
 
 let ensure_keeper_sandbox_runtime = Keeper_shell_docker.ensure_keeper_sandbox_runtime
 let command_uses_nested_container_runtime = Keeper_shell_docker.command_uses_nested_container_runtime

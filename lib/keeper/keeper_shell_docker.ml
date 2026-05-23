@@ -8,25 +8,6 @@
 open Keeper_types
 open Keeper_exec_shared
 
-(* Docker exec failure formatting + recording extracted to
-   [Keeper_shell_docker_exec_failure] (godfile decomp). Local aliases
-   keep call sites byte-identical.
-
-   Previous message format `failed (image): <output>` lost diagnosability
-   when output was empty (cycle22 fleet log: 30분간 5건, detail empty).
-   Exit/signal status + empty placeholder identify root cause. *)
-module Exec_failure = Keeper_shell_docker_exec_failure
-
-let docker_exec_status_label = Exec_failure.docker_exec_status_label
-let docker_exec_failure_message_internal = Exec_failure.docker_exec_failure_message_internal
-let docker_exec_failure_message = Exec_failure.docker_exec_failure_message
-
-let docker_exec_failure_message_with_context =
-  Exec_failure.docker_exec_failure_message_with_context
-;;
-
-let record_docker_exec_failure = Exec_failure.record_docker_exec_failure
-
 let path_exists path =
   try Sys.file_exists path with
   | Sys_error _ -> false

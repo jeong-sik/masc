@@ -20,15 +20,16 @@
     @since v2.266.0 (RFC-MASC-004 Phase 2-3 — legacy functions removed) *)
 
 let last_memory_injection_mu = Stdlib.Mutex.create ()
-let last_memory_injection : (string, string * int) Hashtbl.t = Hashtbl.create 64
+let last_memory_injection : (string, string * int * int) Hashtbl.t =
+  Hashtbl.create 64
 
 let with_last_memory_injection_lock f =
   Stdlib.Mutex.lock last_memory_injection_mu;
   Fun.protect ~finally:(fun () -> Stdlib.Mutex.unlock last_memory_injection_mu) f
 
-let record_last_memory_injection agent_name digest size =
+let record_last_memory_injection agent_name digest computed_size injected_size =
   with_last_memory_injection_lock (fun () ->
-    Hashtbl.replace last_memory_injection agent_name (digest, size))
+    Hashtbl.replace last_memory_injection agent_name (digest, computed_size, injected_size))
 ;;
 
 let get_last_memory_injection agent_name =
@@ -275,6 +276,7 @@ let make
            record_last_memory_injection
              agent_name
              (Digest.to_hex (Digest.string mem_text))
+             (String.length mem_text)
              extra_system_context_chars_after;
            Agent_sdk.Hooks.AdjustParams
              { current_params with extra_system_context = extra })

@@ -1501,10 +1501,13 @@ let run_turn
            |> Keeper_turn_terminal_code.to_wire
        in
        let cascade_observation = !receipt_cascade_observation_ref in
-       let extra_system_context_digest, extra_system_context_injected_size =
+       let ( extra_system_context_digest
+             , extra_system_context_computed_size
+             , extra_system_context_injected_size ) =
          match Memory_hooks.get_last_memory_injection meta.agent_name with
-         | Some (digest, size) -> Some digest, Some size
-         | None -> None, None
+         | Some (digest, computed, injected) ->
+           Some digest, Some computed, Some injected
+         | None -> None, None, None
        in
        let receipt =
          { Keeper_execution_receipt.keeper_name = meta.name
@@ -1579,8 +1582,8 @@ let run_turn
          ; started_at = receipt_started_at
          ; ended_at = receipt_ended_at
          ; extra_system_context_digest
+         ; extra_system_context_computed_size
          ; extra_system_context_injected_size
-         ; extra_system_context_computed_size = None
          ; pre_dispatch_compacted = ctx.pre_dispatch_compacted
          ; pre_dispatch_compaction_trigger = ctx.pre_dispatch_compaction_trigger
          ; pre_dispatch_compaction_before_tokens = ctx.pre_dispatch_compaction_before_tokens

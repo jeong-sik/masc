@@ -58,6 +58,14 @@ type docker_shell_result =
   ; semantic_ok : bool
   }
 
+(** Normalize a Docker invocation result into the common [(status, output)]
+    pair used by shell-op handlers.  [Error] maps to a synthetic
+    [WEXITED 127] so callers can treat both branches uniformly. *)
+let docker_result_pair = function
+  | Ok (result : docker_shell_result) -> result.status, result.output
+  | Error msg -> Unix.WEXITED 127, msg
+;;
+
 (* docker run --rm wall-clock covers slot_wait + spawn + container
    cold start + actual cmd + drain. A 5s floor was insufficient under
    typical conditions — trivial commands such as [git -C ... status]

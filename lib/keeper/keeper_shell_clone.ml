@@ -3,11 +3,6 @@ open Keeper_exec_shared
 
 (* ── Shared helpers for git_clone/docker-or-host execution ───────── *)
 
-let docker_result_pair = function
-  | Ok (result : Keeper_shell_docker.docker_shell_result) ->
-    result.status, result.output
-  | Error msg -> Unix.WEXITED 127, msg
-
 let clone_action_json ~op ~action ~path ~status ~output ~extra ~via_fields =
   Yojson.Safe.to_string
     (`Assoc
@@ -20,6 +15,22 @@ let clone_action_json ~op ~action ~path ~status ~output ~extra ~via_fields =
          ]
          @ extra
          @ via_fields))
+
+(** Run a git command either inside the Docker sandbox or directly on
+    the host, normalising both branches to a [(status, output)] pair. *)
+let run_git_op_docker_or_host ~config ~meta ~repos_dir ~timeout_sec
+    ~docker_cmd ~host_raw_source ~host_summary ~host_argv
+  =
+  if meta.sandbox_profile = Docker
+  then
+    Keeper_shell_docker.run_docker_shell_command_with_status ~config ~meta
+      ~cwd:repos_dir ~timeout_sec ~cmd:docker_cmd
+      ~git_creds_enabled:true ~network_mode:Network_inherit
+    |> Keeper_shell_docker.docker_result_pair
+  else
+    Masc_exec.Exec_gate.run_argv_with_status ~actor:`Coord_git
+      ~raw_source:host_raw_source ~summary:host_summary ~timeout_sec
+      host_argv
 
 let handle
       ~op
@@ -129,19 +140,13 @@ let handle
               in
               (* Already cloned — pull latest instead *)
               let st, out =
-                if meta.sandbox_profile = Docker then
-                  Keeper_shell_docker.run_docker_shell_command_with_status ~config ~meta
-                    ~cwd:repos_dir ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Shell ())
-                    ~cmd:(Printf.sprintf "git -C %s pull --ff-only"
-                            (Filename.quote repo_name))
-                    ~git_creds_enabled:true ~network_mode:Network_inherit
-                  |> docker_result_pair
-                else
-                  Masc_exec.Exec_gate.run_argv_with_status ~actor:`Coord_git
-                    ~raw_source:("git -C " ^ clone_path ^ " pull --ff-only")
-                    ~summary:"keeper git pull"
-                    ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Shell ())
-                    [ "git"; "-C"; clone_path; "pull"; "--ff-only" ]
+                run_git_op_docker_or_host ~config ~meta ~repos_dir
+                  ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Shell ())
+                  ~docker_cmd:(Printf.sprintf "git -C %s pull --ff-only"
+                                 (Filename.quote repo_name))
+                  ~host_raw_source:("git -C " ^ clone_path ^ " pull --ff-only")
+                  ~host_summary:"keeper git pull"
+                  ~host_argv:[ "git"; "-C"; clone_path; "pull"; "--ff-only" ]
               in
               if st = Unix.WEXITED 0 then
                 Keeper_shell_shared.update_playground_repo_cache
@@ -162,24 +167,19 @@ let handle
            if depth > 0 then ["--depth"; string_of_int depth] else []
          in
          let shallow = depth > 0 in
+         let clone_cmd =
+           String.concat " "
+             (List.map Filename.quote
+                ("git" :: "clone" :: depth_args @ [ clone_url; repo_name ]))
+         in
          let st, out =
-           if meta.sandbox_profile = Docker then
-             let clone_cmd =
-               String.concat " "
-                 (List.map Filename.quote
-                    ("git" :: "clone" :: depth_args @ [ clone_url; repo_name ]))
-             in
-             Keeper_shell_docker.run_docker_shell_command_with_status ~config ~meta ~cwd:repos_dir
-               ~timeout_sec:(Keeper_tool_policy.clone_timeout_sec ())
-               ~cmd:clone_cmd
-               ~git_creds_enabled:true ~network_mode:Network_inherit
-             |> docker_result_pair
-           else
-             Masc_exec.Exec_gate.run_argv_with_status ~actor:`Coord_git
-               ~raw_source:("git clone " ^ String.concat " " depth_args ^ " " ^ clone_url ^ " " ^ clone_path)
-               ~summary:"keeper git clone"
-               ~timeout_sec:(Keeper_tool_policy.clone_timeout_sec ())
-               ("git" :: "clone" :: depth_args @ [ clone_url; clone_path ])
+           run_git_op_docker_or_host ~config ~meta ~repos_dir
+             ~timeout_sec:(Keeper_tool_policy.clone_timeout_sec ())
+             ~docker_cmd:clone_cmd
+             ~host_raw_source:("git clone " ^ String.concat " " depth_args
+                               ^ " " ^ clone_url ^ " " ^ clone_path)
+             ~host_summary:"keeper git clone"
+             ~host_argv:("git" :: "clone" :: depth_args @ [ clone_url; clone_path ])
          in
          if st = Unix.WEXITED 0 then
            Keeper_shell_shared.update_playground_repo_cache

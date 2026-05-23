@@ -78,6 +78,11 @@ type docker_shell_result =
   ; network_label : string
   }
 
+(** Normalize a Docker invocation result into the common [(status, output)]
+    pair.  [Error] maps to a synthetic [WEXITED 127]. *)
+val docker_result_pair :
+  (docker_shell_result, string) result -> Unix.process_status * string
+
 (** Cold-start floor (seconds) for [docker run --rm].  The wall-clock
     budget covers slot_wait + spawn + container cold start + actual
     cmd + drain; the default ([20.0]) matches the [gh] CLI floor

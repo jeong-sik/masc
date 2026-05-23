@@ -35,6 +35,11 @@ val classify : undecided t -> decided decided_ir
     Uses [Exec_policy_mutation_classifier] for bash operations,
     then gh subcommand tables for gh operations, defaulting to R0. *)
 
+val classify_gh : string list -> risk_class
+(** Direct gh word-list classification without IR construction.
+    Used by [Keeper_tool_registry] to avoid a circular dependency
+    through [Keeper_gh_shared]. *)
+
 val trust_decided : undecided t -> decided decided_ir
 (** Escape hatch for tests and transitional call sites.
     Production code must use [classify]. *)

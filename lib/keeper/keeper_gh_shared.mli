@@ -52,6 +52,15 @@ val gh_simple_command_to_shell_ir :
   gh_simple_command ->
   Masc_exec.Shell_ir.t
 
+(** RFC-0160 S3: classify the risk of a parsed gh command without
+    inline IR construction boilerplate.
+
+    Maps R0 → read-only, R1/R2/Destructive → mutating. *)
+val gh_simple_command_risk_class :
+  ?sandbox:Masc_exec.Sandbox_target.t ->
+  gh_simple_command ->
+  Masc_exec.Shell_ir_risk.risk_class
+
 (* ---- Repo slug + flag utilities ------------------------------- *)
 
 val has_repo_flag : string -> bool

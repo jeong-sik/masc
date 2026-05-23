@@ -160,6 +160,11 @@ let test_classify_gh_api_get_r0 () =
   let envelope = Risk.classify (Risk.undecided ir) in
   Alcotest.(check bool) "GET is R0" true (Risk.is_r0 envelope)
 
+let test_classify_gh_api_graphql_r1 () =
+  let ir = simple_ir "gh" [ "api"; "graphql" ] in
+  let envelope = Risk.classify (Risk.undecided ir) in
+  Alcotest.(check bool) "graphql is R1" true (Risk.is_r1 envelope)
+
 (* --- classify: pipeline --- *)
 
 let test_classify_pipeline_first_stage_destructive () =
@@ -199,7 +204,8 @@ let () =
   test_classify_gh_api_delete_r2 ();
   test_classify_gh_api_post_r1 ();
   test_classify_gh_api_get_r0 ();
+  test_classify_gh_api_graphql_r1 ();
   test_classify_pipeline_first_stage_destructive ();
   test_classify_unknown_read ();
   test_trust_decided ();
-  print_endline "test_shell_ir_risk: 14/14 passed"
+  print_endline "test_shell_ir_risk: 15/15 passed"

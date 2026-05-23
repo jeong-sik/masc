@@ -27,7 +27,10 @@ val cascade_name_to_string : cascade_name -> string
     {!provider_rejections_of_assoc} JSON helpers are internal to this module
     and used by the parser in {!Cascade_error_classify}. *)
 
-type provider_rejection = { reason : string }
+type provider_rejection = {
+  provider_label : string;
+  reason : string;
+}
 
 (** {1 Capacity backpressure source}
 

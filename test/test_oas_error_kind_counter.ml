@@ -154,8 +154,8 @@ let test_no_tool_capable_provider_payload_names_tools_and_rejections () =
         required_tool_names = [ "keeper_bash"; "masc_worktree_create" ];
         provider_rejections =
           [
-            { OWN.reason = "codex_keeper_bound_actor_required" };
-            { OWN.reason = "tool_lane_unsupported" };
+            { OWN.provider_label = "codex"; OWN.reason = "codex_keeper_bound_actor_required" };
+            { OWN.provider_label = "kimi"; OWN.reason = "tool_lane_unsupported" };
           ];
       }
   in
@@ -178,10 +178,15 @@ let test_no_tool_capable_provider_payload_names_tools_and_rejections () =
     "rejection reasons serialized without provider identity"
     [ "codex_keeper_bound_actor_required"; "tool_lane_unsupported" ]
     (json |> member "rejection_reasons" |> to_list |> List.map to_string);
-  Alcotest.(check bool)
-    "provider rejection identities omitted"
-    true
-    (json |> member "provider_rejections" = `Null);
+  Alcotest.(check (list (pair string string)))
+    "provider rejection identities serialized"
+    [ ("codex", "codex_keeper_bound_actor_required")
+    ; ("kimi", "tool_lane_unsupported")
+    ]
+    (json |> member "provider_rejections" |> to_list
+     |> List.map (fun item ->
+          (item |> member "provider_label" |> to_string,
+           item |> member "reason" |> to_string)));
   let err = OWN.sdk_error_of_masc_internal_error payload in
   match OWN.classify_masc_internal_error err with
   | Some parsed -> (
@@ -223,10 +228,13 @@ let test_no_tool_capable_provider_legacy_rejections_are_redacted () =
   | Some parsed -> (
       let redacted = OWN.masc_internal_error_to_json parsed in
       let open Yojson.Safe.Util in
-      Alcotest.(check bool)
-        "legacy provider_rejections not re-emitted"
-        true
-        (redacted |> member "provider_rejections" = `Null);
+      Alcotest.(check (list (pair string string)))
+        "legacy provider_rejections preserved with identity"
+        [ ("codex_cli:codex", "codex_keeper_bound_actor_required") ]
+        (redacted |> member "provider_rejections" |> to_list
+         |> List.map (fun item ->
+              (item |> member "provider_label" |> to_string,
+               item |> member "reason" |> to_string)));
       Alcotest.(check (list string))
         "legacy rejection reason survives"
         [ "codex_keeper_bound_actor_required" ]

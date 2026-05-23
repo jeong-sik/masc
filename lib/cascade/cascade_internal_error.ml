@@ -16,6 +16,7 @@ let cascade_name_of_string raw = Keeper_cascade_profile.Runtime_name raw
 let cascade_name_to_string = Keeper_cascade_profile.runtime_name_to_string
 
 type provider_rejection = {
+  provider_label : string;
   reason : string;
 }
 
@@ -129,8 +130,12 @@ let string_list_of_assoc key json =
 ;;
 
 let provider_rejection_of_json json =
+  let provider_label =
+    Json_field.string json "provider_label" |> Json_field.to_option
+    |> Option.value ~default:""
+  in
   match Json_field.string json "reason" |> Json_field.to_option with
-  | Some reason -> Some { reason }
+  | Some reason -> Some { provider_label; reason }
   | None -> None
 ;;
 
@@ -142,13 +147,24 @@ let provider_rejections_of_assoc key json =
 
 let provider_rejection_reasons_of_assoc key json =
   string_list_of_assoc key json
-  |> List.map (fun reason -> { reason })
+  |> List.map (fun reason -> { provider_label = ""; reason })
 
 let provider_rejection_reasons rejections =
   rejections
   |> List.map (fun r -> String.trim r.reason)
   |> List.filter (fun reason -> reason <> "")
   |> Json_util.dedupe_keep_order
+
+let provider_rejections_json rejections =
+  `List
+    (List.map
+       (fun r ->
+         `Assoc
+           [
+             ("provider_label", `String r.provider_label);
+             ("reason", `String r.reason);
+           ])
+       rejections)
 
 let string_opt_of_assoc key json =
   Json_field.string json key |> Json_field.to_option
@@ -198,6 +214,7 @@ let masc_internal_error_to_json = function
         ("configured_candidate_count", `Int (List.length configured_labels));
         ("required_tool_names", string_list_json required_tool_names);
         ("rejected_candidate_count", `Int (List.length provider_rejections));
+        ("provider_rejections", provider_rejections_json provider_rejections);
         ("rejection_reasons", string_list_json rejection_reasons);
       ]
   | Accept_rejected { scope; model; reason } ->

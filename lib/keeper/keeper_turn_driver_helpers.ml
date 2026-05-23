@@ -114,6 +114,7 @@ let required_tool_lane_unavailable_error ~lane ~missing_required_tools
 let provider_rejection_for_required_tool_unsupported ~provider_label
     ~missing_required_tools =
   ({
+     provider_label;
      reason =
        Printf.sprintf
          "required_tool_unsupported: provider=%s missing_required_tools=[%s]"
@@ -180,7 +181,14 @@ let provider_rejections_for_no_tool_error
            ~require_tool_choice_support ~require_tool_support candidate
        with
        | None -> None
-       | Some reason -> Some ({ reason } : Cascade_error_classify.provider_rejection))
+       | Some reason ->
+           Some
+             ({
+                provider_label =
+                  Cascade_runtime_candidate.provider_label candidate;
+                reason;
+              }
+               : Cascade_error_classify.provider_rejection))
 
 let apply_stream_idle_timeout_default = function
   | Some _ as v -> v

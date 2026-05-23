@@ -410,7 +410,7 @@ let run_docker_shell_command_with_status_internal
           let validation_cmd =
             rewrite_docker_command_paths_for_host_validation ~config ~meta cmd
           in
-          (match Masc_exec_bash_parser.Bash.parse_string validation_cmd with
+          (match Exec_policy_mutation_classifier.parsed_of_string validation_cmd with
            | Masc_exec.Parsed.Parsed validation_ir ->
              (match
                 Keeper_task_worktree_lazy.ensure_shell_ir_existing_dirs
@@ -780,7 +780,7 @@ let run_docker_credentialed_bash
            rewrite_docker_command_paths_for_host_validation ~config ~meta cmd
          in
          let path_validation =
-           match Masc_exec_bash_parser.Bash.parse_string validation_cmd with
+           match Exec_policy_mutation_classifier.parsed_of_string validation_cmd with
            | Masc_exec.Parsed.Parsed validation_ir ->
              (match
                 Keeper_task_worktree_lazy.ensure_shell_ir_existing_dirs
@@ -879,7 +879,7 @@ let run_docker_bash
         rewrite_docker_command_paths_for_host_validation ~config ~meta cmd
       in
       let path_validation =
-        match Masc_exec_bash_parser.Bash.parse_string validation_cmd with
+        match Exec_policy_mutation_classifier.parsed_of_string validation_cmd with
         | Masc_exec.Parsed.Parsed validation_ir ->
           (match
              Keeper_task_worktree_lazy.ensure_shell_ir_existing_dirs

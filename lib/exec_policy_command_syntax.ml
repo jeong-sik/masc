@@ -33,13 +33,7 @@ let argv_words_of_simple (simple : Masc_exec.Shell_ir.simple) =
 ;;
 
 let argv_words_of_split_string text =
-  match Masc_exec_bash_parser.Bash.parse_string text with
-  | Masc_exec.Parsed.Parsed (Masc_exec.Shell_ir.Simple simple) ->
-    argv_words_of_simple simple
-  | Masc_exec.Parsed.Parsed (Masc_exec.Shell_ir.Pipeline _)
-  | Masc_exec.Parsed.Parse_error _
-  | Masc_exec.Parsed.Parse_aborted _
-  | Masc_exec.Parsed.Too_complex _ -> None
+  Exec_policy_mutation_classifier.argv_words_of_string text
 ;;
 
 let basename_token token = Filename.basename token

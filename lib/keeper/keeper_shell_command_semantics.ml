@@ -242,7 +242,7 @@ let resolve_sandbox_root_git_cwd_of_stages
   else cwd, None
 
 let effective_stages_of_cmd cmd =
-  match Masc_exec_bash_parser.Bash.parse_string cmd with
+  match Exec_policy_mutation_classifier.parsed_of_string cmd with
   | Masc_exec.Parsed.Parsed ir -> effective_stages_of_ir ir
   | Masc_exec.Parsed.Parse_error _
   | Masc_exec.Parsed.Parse_aborted _

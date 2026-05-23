@@ -135,7 +135,7 @@ let parse_simple_gh_command (source : string)
   then Error Empty_command
   else (
     let parse text =
-      Masc_exec_bash_parser.Bash.parse_string text |> gh_simple_command_of_parsed
+      Exec_policy_mutation_classifier.parsed_of_string text |> gh_simple_command_of_parsed
     in
     let accept_gh = function
       | Ok (`Gh cmd) when cmd.argv <> [] -> Ok cmd

@@ -1,6 +1,7 @@
 
 open Server_auth
 open Server_dashboard_http
+open Server_h2_gateway_helpers
 open Server_routes_http_common
 open Server_routes_http_keeper_stream
 
@@ -265,7 +266,7 @@ let rec add_routes ~sw ~clock router =
                Http.Response.json ~request:req body reqd
              | Error msg ->
                let body =
-                 Yojson.Safe.to_string (`Assoc [ ("error", `String msg) ])
+                 error_json_string msg
                in
                Http.Response.json ~status:`Internal_server_error
                  ~request:req body reqd
@@ -417,19 +418,19 @@ let rec add_routes ~sw ~clock router =
                match Anti_rationalization.parse_excuse_patterns_json json with
                | Error msg ->
                  Http.Response.json ~status:`Bad_request ~request:req
-                   (Yojson.Safe.to_string (`Assoc [("ok", `Bool false); ("error", `String msg)])) reqd
+                   (error_json_string_with_ok msg) reqd
                | Ok patterns ->
                  (match Anti_rationalization.save_excuse_patterns patterns with
                  | Ok () ->
                      Http.Response.json ~request:req {|{"ok":true}|} reqd
                  | Error msg ->
                      Http.Response.json ~status:`Internal_server_error ~request:req
-                       (Yojson.Safe.to_string (`Assoc [("ok", `Bool false); ("error", `String msg)])) reqd)
+                       (error_json_string_with_ok msg) reqd)
              with
              | Eio.Cancel.Cancelled _ as exn -> raise exn
              | _exn ->
                Http.Response.json ~status:`Bad_request ~request:req
-                 (Yojson.Safe.to_string (`Assoc [("ok", `Bool false); ("error", `String "Invalid JSON body")])) reqd
+                 (error_json_string_with_ok "Invalid JSON body") reqd
            )
          ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/project-snapshot" (fun request reqd ->

@@ -1,5 +1,6 @@
 
 open Server_auth
+open Server_h2_gateway_helpers
 
 module Http = Http_server_eio
 

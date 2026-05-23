@@ -1,6 +1,7 @@
 
 open Server_utils
 open Server_auth
+open Server_h2_gateway_helpers
 open Server_routes_http_common
 open Server_routes_http_runtime
 
@@ -472,7 +473,7 @@ let add_routes ~sw ~clock router =
          (match extract_path_param ~prefix:"/api/v1/board/" path with
           | None ->
               Http.Response.json
-                (Yojson.Safe.to_string (`Assoc [("error", `String "post_id is required")]))
+                (error_json_string "post_id is required")
                 ~status:`Bad_request reqd
           | Some "curation" ->
               respond_board_json reqd (board_curation_json ())
@@ -649,7 +650,7 @@ let add_routes ~sw ~clock router =
          (match extract_path_param ~prefix:"/api/v1/mentions/" path with
           | None ->
               Http.Response.json
-                (Yojson.Safe.to_string (`Assoc [("error", `String "agent_name is required")]))
+                (error_json_string "agent_name is required")
                 ~status:`Bad_request reqd
           | Some agent_name ->
               let limit = standard_limit request in
@@ -676,7 +677,7 @@ let add_routes ~sw ~clock router =
          (match extract_path_param ~prefix:"/api/v1/reputation/" path with
           | None ->
               Http.Response.json
-                (Yojson.Safe.to_string (`Assoc [("error", `String "agent_name is required")]))
+                (error_json_string "agent_name is required")
                 ~status:`Bad_request reqd
           | Some agent_name ->
               let rep =

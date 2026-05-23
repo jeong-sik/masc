@@ -948,7 +948,7 @@ let run_docker_bash
                      , `String (Exec_core.string_of_semantic_status semantic_status)
                    ; "output", `String out
                    ]
-                   @ gh_exit_class_field ~cmd ~status:st ~output:out ~cmd_stages ()))
+                   @ gh_exit_class_field ~cmd ~status:st ~output:out ~cmd_stages ())))
        | _ ->
          (match turn_sandbox_runtime with
           | Some _ ->
@@ -1011,5 +1011,5 @@ let run_docker_bash
                           ~status:result.status
                           ~output:result.output
                           ~cmd_stages
-                          ()))))))
+                          ())))))))
 ;;

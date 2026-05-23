@@ -138,53 +138,7 @@ let handle_keeper_shell
                ; "content", `String body
                ]))
   | "rg" ->
-    let pattern = Safe_ops.json_string ~default:"" "pattern" args |> String.trim in
-    if pattern = ""
-    then error_json_for_op ~op "pattern is required for rg. Good: pattern='handle_request'. Bad: pattern=''."
-    else (
-      match Keeper_shell_runtime.read_target ~config ~meta ~args ~root with
-      | Error e -> path_error e
-      | Ok target ->
-        let limit = shell_readonly_limit args in
-        let file_type = Safe_ops.json_string ~default:"" "type" args |> String.trim in
-        let glob = Safe_ops.json_string ~default:"" "glob" args |> String.trim in
-        let base_argv = [ "rg"; "-n"; "-m"; string_of_int limit ] in
-        let type_argv = if file_type <> "" then [ "--type"; file_type ] else [] in
-        let glob_argv = if glob <> "" then [ "--glob"; glob ] else [] in
-        let docker_argv cpath = base_argv @ type_argv @ glob_argv @ [ pattern; cpath ] in
-        let rg_available = Keeper_shell_shared.shell_command_available "rg" in
-        let grep_available = Keeper_shell_shared.shell_command_available "grep" in
-        let host_argv_result =
-          if rg_available then
-            Ok (base_argv @ type_argv @ glob_argv @ [ pattern; target ])
-          else if not grep_available then
-            Error "rg executable not found, and grep fallback is unavailable"
-          else if file_type <> "" || glob <> "" then
-            Error "rg executable not found; grep fallback only supports pattern and path"
-          else
-            Ok [ "grep"; "-R"; "-n"; "-I"; "-m"; string_of_int limit; "--"; pattern; target ]
-        in
-        match host_argv_result with
-        | Error e -> path_error e
-        | Ok host_argv ->
-          match
-            Keeper_shell_runtime.run_readonly_op ~config ~meta ?turn_sandbox_factory
-              ~ok_exit_codes:[ 0; 1 ]
-              ~op ~target ~host_argv ~docker_argv
-              ~max_bytes:1_000_000
-              ~timeout_sec:Keeper_shell_shared.read_timeout_sec ()
-          with
-          | Error response -> response
-          | Ok (via, st, out) ->
-            let fields =
-              Keeper_shell_runtime.readonly_json_fields
-                ~ok_when:(fun st -> st = Unix.WEXITED 0 || st = Unix.WEXITED 1)
-                ~op ~path:target ~via
-                ~status:st ~output_field:"matches" ~output:(lines_to_json ~limit out)
-                ~extra:[ "pattern", `String pattern ]
-                ()
-            in
-            Keeper_shell_runtime.readonly_json_string fields)
+    Keeper_shell_rg.handle ~op ~meta ~config ~args ?turn_sandbox_factory ~root ~raw_path
   | "git_log" ->
     (match Keeper_shell_runtime.cwd_target ~config ~meta ~args ~root with
      | Error e -> path_error e
@@ -273,42 +227,7 @@ let handle_keeper_shell
             in
             Yojson.Safe.to_string json))
   | "find" ->
-    let name_pattern =
-      let pattern = Safe_ops.json_string ~default:"" "pattern" args |> String.trim in
-      if pattern <> ""
-      then pattern
-      else Safe_ops.json_string ~default:"" "name" args |> String.trim
-    in
-    if name_pattern = ""
-    then error_json_for_op ~op "pattern is required for find. Good: pattern='*.ml'. Bad: pattern=''."
-    else (
-      match Keeper_shell_runtime.read_target ~config ~meta ~args ~root with
-      | Error e -> path_error e
-      | Ok target ->
-        let limit = shell_readonly_limit args in
-        let find_base path =
-          [ "find"; path; "-maxdepth"; "5"; "-name"; name_pattern;
-            "-not"; "-path"; "*/.git/*";
-            "-not"; "-path"; "*/_build/*";
-            "-not"; "-path"; "*/.masc/*" ]
-        in
-        let docker_argv cpath = find_base cpath in
-        let host_argv = find_base target in
-        match
-          Keeper_shell_runtime.run_readonly_op ~config ~meta ?turn_sandbox_factory
-            ~op ~target ~host_argv ~docker_argv
-            ~max_bytes:1_000_000
-            ~timeout_sec:Keeper_shell_shared.read_timeout_sec ()
-        with
-        | Error response -> response
-        | Ok (via, st, out) ->
-          let fields =
-            Keeper_shell_runtime.readonly_json_fields ~op ~path:target ~via
-              ~status:st ~output_field:"files" ~output:(lines_to_json ~limit out)
-              ~extra:[ "name", `String name_pattern ]
-              ()
-          in
-          Keeper_shell_runtime.readonly_json_string fields)
+    Keeper_shell_find.handle ~op ~meta ~config ~args ?turn_sandbox_factory ~root ~raw_path
   | "head" | "tail" ->
     (match Keeper_shell_runtime.read_target ~config ~meta ~args ~root with
      | Error e -> path_error e

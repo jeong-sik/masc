@@ -19,7 +19,7 @@ let handle
   if name_pattern = ""
   then error_json_for_op ~op "pattern is required for find. Good: pattern='*.ml'. Bad: pattern=''."
   else (
-    match Keeper_shell_runtime.read_target ~config ~meta ~args ~base_path:root () with
+    match Keeper_shell_runtime.read_target ~config ~meta ~args ~root with
     | Error e -> Keeper_shell_runtime.path_error ~op ~meta ~raw_path e
     | Ok target ->
       let limit = shell_readonly_limit args in
@@ -34,7 +34,7 @@ let handle
           ~host_argv:(make_argv target)
           ~docker_argv:(fun cpath -> make_argv cpath)
           ~max_bytes:1_000_000
-          ~timeout_sec:Keeper_shell_timeout.read_timeout_sec
+          ~timeout_sec:Keeper_shell_shared.read_timeout_sec
           ()
       with
       | Error response -> response

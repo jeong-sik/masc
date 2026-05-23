@@ -14,7 +14,7 @@ let handle
   if pattern = ""
   then error_json_for_op ~op "pattern is required for rg. Good: pattern='handle_request'. Bad: pattern=''."
   else (
-    match Keeper_shell_runtime.read_target ~config ~meta ~args ~base_path:root () with
+    match Keeper_shell_runtime.read_target ~config ~meta ~args ~root with
     | Error e -> Keeper_shell_runtime.path_error ~op ~meta ~raw_path e
     | Ok target ->
       let limit = shell_readonly_limit args in
@@ -34,9 +34,10 @@ let handle
         else ""
       in
       if host_base = ""
-      then error_json_for_op ~op "rg executable not found, and grep fallback is unavailable"
+      then Keeper_shell_runtime.path_error ~op ~meta ~raw_path
+        "rg executable not found, and grep fallback is unavailable"
       else if (not rg_available) && (file_type <> "" || glob <> "")
-      then error_json_for_op ~op
+      then Keeper_shell_runtime.path_error ~op ~meta ~raw_path
         "rg executable not found; grep fallback only supports pattern and path"
       else
         let host_argv =
@@ -46,10 +47,11 @@ let handle
         in
         match
           Keeper_shell_runtime.run_readonly_op ~config ~meta ?turn_sandbox_factory ~op ~target
+            ~ok_exit_codes:[ 0; 1 ]
             ~host_argv
             ~docker_argv:(fun cpath -> make_argv "rg" cpath)
             ~max_bytes:1_000_000
-            ~timeout_sec:Keeper_shell_timeout.read_timeout_sec
+            ~timeout_sec:Keeper_shell_shared.read_timeout_sec
             ()
         with
         | Error response -> response

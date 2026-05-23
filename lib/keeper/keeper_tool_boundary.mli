@@ -23,10 +23,3 @@ val create :
 
 val dispatch :
   _ context -> name:string -> args:Yojson.Safe.t -> Keeper_types.tool_result option
-
-val dispatch_stream :
-  on_text_delta:(string -> unit) ->
-  _ context ->
-  name:string ->
-  args:Yojson.Safe.t ->
-  Keeper_types.tool_result option

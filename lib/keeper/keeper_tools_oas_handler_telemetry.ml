@@ -1,0 +1,87 @@
+(** Telemetry helpers for keeper tool OAS handler execution.
+
+    SSE broadcast, decision-log append, and event JSON construction.
+    Isolated to keep the handler skeleton focused on control flow. *)
+
+let keeper_tool_call_event_json
+      ~keeper_name
+      ~tool_name
+      ~duration_ms
+      ~success
+      ?error_text
+      ?(extra_fields = [])
+      ~ts
+      ()
+  =
+  let fields =
+    [ "type", `String "keeper_tool_call"
+    ; "name", `String keeper_name
+    ; "tool_name", `String tool_name
+    ; "duration_ms", `Int duration_ms
+    ; "success", `Bool success
+    ; "ts_unix", `Float ts
+    ]
+  in
+  let fields =
+    match error_text with
+    | Some error_text -> fields @ [ "error_text", `String error_text ]
+    | None -> fields
+  in
+  `Assoc (fields @ extra_fields)
+;;
+
+let broadcast_keeper_tool_call_event
+      ~keeper_name
+      ~tool_name
+      ~duration_ms
+      ~success
+      ?error_text
+      ?(extra_fields = [])
+      ~site
+      ~ts
+      ()
+  =
+  try
+    Sse.broadcast
+      (keeper_tool_call_event_json
+         ~keeper_name
+         ~tool_name
+         ~duration_ms
+         ~success
+         ?error_text
+         ~extra_fields
+         ~ts
+         ())
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+    Prometheus.inc_counter
+      Keeper_metrics.metric_keeper_sse_broadcast_failures
+      ~labels:[ "keeper", keeper_name ]
+      ();
+    Log.Keeper.warn
+      "keeper tool-call SSE broadcast failed: keeper=%s tool=%s site=%s err=%s"
+      keeper_name
+      tool_name
+      site
+      (Printexc.to_string exn)
+;;
+
+let append_tool_exec_decision_log ~config ~keeper_name ~site entry =
+  try
+    Keeper_types_support.append_jsonl_line
+      (Keeper_types_support.keeper_decision_log_path config keeper_name)
+      entry
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+    Prometheus.inc_counter
+      Keeper_metrics.metric_keeper_decision_audit_flush_failures
+      ~labels:[ "keeper", keeper_name ]
+      ();
+    Log.Keeper.warn
+      "keeper tool execution decision-log append failed: keeper=%s site=%s err=%s"
+      keeper_name
+      site
+      (Printexc.to_string exn)
+;;

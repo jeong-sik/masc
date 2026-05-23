@@ -222,7 +222,7 @@ let prepare_agent_setup
                  Printf.sprintf "%s(%.1f)" e.tool_name e.score)
               entries)));
   let keeper_tool_bundle =
-    Keeper_tools_oas_handler.make_tool_bundle
+    Keeper_tools_oas_bundle.make_tool_bundle
       ~config
       ~meta
       ~ctx_snapshot

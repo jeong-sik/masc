@@ -482,11 +482,7 @@ let run_docker_bash
       ~(cmd : string)
       ~(network_mode : network_mode)
   =
-  let image =
-    match meta.sandbox_image with
-    | Some img when String.trim img <> "" -> img
-    | _ -> Env_config_keeper.KeeperSandbox.docker_image ()
-  in
+  let image = resolve_sandbox_image meta in
   let sandbox_error_json message =
     Keeper_registry_error_recording.record ~base_path:config.base_path meta.name message;
     error_json message
@@ -494,9 +490,7 @@ let run_docker_bash
   if String.trim image = ""
   then sandbox_error_json "keeper sandbox docker image is not configured"
   else if command_uses_nested_container_runtime cmd
-  then
-    sandbox_error_json
-      "sandbox_profile=docker blocks nested container runtimes and host socket references"
+  then sandbox_error_json (nested_runtime_blocker ~git_creds_enabled:false)
   else (
     let cmd_stages =
       match Masc_exec_command_gate.Shell_command_gate.parse_to_ir_opt cmd with

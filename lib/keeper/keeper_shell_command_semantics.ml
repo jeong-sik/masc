@@ -24,7 +24,7 @@ let stage_of_simple simple =
   | Some args ->
     Some { bin = Masc_exec.Bin.to_string simple.bin; args }
 
-let parsed_stages cmd =
+let parsed_stages_of_ir ir =
   let rec loop acc = function
     | Masc_exec.Shell_ir.Simple simple -> (
         match stage_of_simple simple with
@@ -36,11 +36,13 @@ let parsed_stages cmd =
         (Some acc)
         stages
   in
+  match loop [] ir with
+  | Some stages -> List.rev stages
+  | None -> []
+
+let parsed_stages cmd =
   match Masc_exec_bash_parser.Bash.parse_string cmd with
-  | Masc_exec.Parsed.Parsed ir -> (
-      match loop [] ir with
-      | Some stages -> List.rev stages
-      | None -> [])
+  | Masc_exec.Parsed.Parsed ir -> parsed_stages_of_ir ir
   | Masc_exec.Parsed.Parse_error _
   | Masc_exec.Parsed.Parse_aborted _
   | Masc_exec.Parsed.Too_complex _ -> []
@@ -82,6 +84,9 @@ let rec effective_stage = function
        Some { bin; args }
      | _ -> None)
   | stage -> Some stage
+
+let effective_stages_of_ir ir =
+  parsed_stages_of_ir ir |> List.filter_map effective_stage
 
 let effective_stages cmd =
   parsed_stages cmd |> List.filter_map effective_stage

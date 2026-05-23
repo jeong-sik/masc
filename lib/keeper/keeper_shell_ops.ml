@@ -427,7 +427,7 @@ let handle_keeper_shell
                let result =
                  Masc_exec.Exec_dispatch.dispatch_decided envelope
                in
-               render_completed_process_result ~cwd:(Some cwd)
+               render_completed_process_result ~cwd
                  ~cmd:"git --no-optional-locks status --short --branch"
                  ~extra:[]
                  result.status result.stdout
@@ -534,7 +534,7 @@ let handle_keeper_shell
                  then result.stdout
                  else result.stdout ^ result.stderr
                in
-               render_completed_process_result ~cwd:None
+               render_completed_process_result
                  ~cmd:"ls -la"
                  ~extra:[
                    "path", `String target;
@@ -956,7 +956,7 @@ let handle_keeper_shell
                   let result =
                     Masc_exec.Exec_dispatch.dispatch_decided envelope
                   in
-                  render_completed_process_result ~cwd:(Some cwd)
+                  render_completed_process_result ~cwd
                     ~cmd:"git --no-optional-locks log --format=<fmt> -<n>"
                     ~extra:[
                       "count", `Int count;

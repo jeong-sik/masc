@@ -107,10 +107,13 @@ let inactive_missing_reason (meta : Keeper_types.keeper_meta) =
 (** Partition results by severity.  The boot hook can then route
     [Ok] at debug level and [missing]/[stale] at warn. *)
 let partition (results : result list) =
-  List.fold_left
-    (fun (oks, missings, orphans) r ->
-      match r.status with
-      | Ok_present -> (r :: oks, missings, orphans)
-      | Missing_at_expected _ -> (oks, r :: missings, orphans)
-      | Stale_orphan _ -> (oks, missings, r :: orphans))
-    ([], [], []) results
+  let oks, missings, orphans =
+    List.fold_left
+      (fun (oks, missings, orphans) r ->
+        match r.status with
+        | Ok_present -> (r :: oks, missings, orphans)
+        | Missing_at_expected _ -> (oks, r :: missings, orphans)
+        | Stale_orphan _ -> (oks, missings, r :: orphans))
+      ([], [], []) results
+  in
+  (List.rev oks, List.rev missings, List.rev orphans)

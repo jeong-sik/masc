@@ -56,7 +56,7 @@ let inline_path_flag_requires_existing_dir token =
 
 let command_materializes_path_arg = function
   | "cat" | "find" | "grep" | "head" | "ls" | "nl" | "rg" | "sed" | "stat"
-  | "tail" | "tree" | "wc" -> true
+  | "tail" | "wc" -> true
   | _ -> false
 ;;
 
@@ -68,5 +68,5 @@ let command_materializes_path_arg = function
     fails the assertion. *)
 let path_arg_command_corpus =
   [ "cat"; "find"; "grep"; "head"; "ls"; "nl"; "rg"; "sed"; "stat"; "tail"
-  ; "tree"; "wc" ]
+  ; "wc" ]
 ;;

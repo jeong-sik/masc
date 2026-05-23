@@ -150,17 +150,15 @@ let classify_gh (words : string list) : risk_class =
     in
     if in_table gh_irreversible_ops command sub then R2_Irreversible
     else if command = "api" then
-      if sub = "graphql" then R1_Reversible_mutation
-      else
-        let method_ =
-          match extract_method_from_parts words with
-          | Some m -> m
-          | None -> "GET"
-        in
-        if method_ = "DELETE" then R2_Irreversible
-        else if List.mem method_ [ "POST"; "PUT"; "PATCH" ] then R1_Reversible_mutation
-        else if has_mutating_method words then R1_Reversible_mutation
-        else R0_Read
+      let method_ =
+        match extract_method_from_parts words with
+        | Some m -> m
+        | None -> "GET"
+      in
+      if method_ = "DELETE" then R2_Irreversible
+      else if List.mem method_ [ "POST"; "PUT"; "PATCH" ] then R1_Reversible_mutation
+      else if has_mutating_method words then R1_Reversible_mutation
+      else R0_Read
     else if in_table gh_reversible_mutations command sub then R1_Reversible_mutation
     else R0_Read
 

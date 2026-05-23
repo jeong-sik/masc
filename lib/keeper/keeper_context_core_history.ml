@@ -4,11 +4,6 @@ open Keeper_types
 
 module StringSet = Set.Make (String)
 
-(* Note: this module is `include`d into Keeper_context_core which already
-   exposes `module Message_json = Keeper_context_core_message_json`. Avoid
-   re-declaring the alias here to prevent a duplicate-definition error at
-   the include site; reference the underlying module qualified instead. *)
-
 type history_migration_stats =
   { moved_lines : int
   ; dropped_lines : int

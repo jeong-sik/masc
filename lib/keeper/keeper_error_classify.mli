@@ -7,6 +7,13 @@
 
 (** Detect transient network errors eligible for retry.
     Uses structured [Agent_sdk.Error.sdk_error] pattern matching. *)
+val is_provider_timeout_error : Agent_sdk.Error.sdk_error -> bool
+(** [true] when the error indicates a provider-side timeout (not a
+    transport-level or client-side timeout). *)
+
+val is_receipt_lost_error : Agent_sdk.Error.sdk_error -> bool
+(** [true] when the error indicates a receipt was lost during processing. *)
+
 val is_transient_network_error : Agent_sdk.Error.sdk_error -> bool
 
 (** [true] when an OAS timeout message describes an execution budget expiry,
@@ -168,14 +175,3 @@ val summarize_post_commit_failure :
   kind:Keeper_registry.ambiguous_partial_commit_kind ->
   Agent_sdk.Error.sdk_error ->
   string
-
-val is_provider_timeout_error : Agent_sdk.Error.sdk_error -> bool
-(** True when [err] is a provider-timeout class failure (deadline,
-    cascade timeout, budget retry). Live caller:
-    [keeper_unified_turn.ml] degraded-retry classification. *)
-
-val is_receipt_lost_error : Agent_sdk.Error.sdk_error -> bool
-(** True when [err] indicates a receipt-lost failure (the provider
-    confirmed completion but the response payload was lost in transit).
-    Live caller: [keeper_unified_turn.ml] failure-reason classification
-    via the [EC] alias. *)

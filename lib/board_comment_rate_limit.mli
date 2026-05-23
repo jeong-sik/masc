@@ -17,12 +17,11 @@ val check : author:string -> now:float -> float option
     drift across concurrent attempts. *)
 val record : author:string -> now:float -> unit
 
-(** [reset ()] clears the tracker entirely. Re-exported via
-    [Board_core.reset_comment_rate_tracker] for the board-core sweep
-    used by [board_votes]. *)
-val reset : unit -> unit
-
 (** [sweep_stale ~now ~window] expires per-author timestamps older
     than [window] seconds from [now] and removes any author whose list
     became empty. Called from the board-core sweep loop. *)
 val sweep_stale : now:float -> window:float -> unit
+
+(** [reset] clears all comment rate-limit tracking state.
+    Used by board_core when reinitializing the store. *)
+val reset : unit -> unit

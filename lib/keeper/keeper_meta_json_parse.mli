@@ -28,7 +28,8 @@ type parsed_keeper_identity =
 
 (** Parsed policy slice of a persisted keeper meta. *)
 type parsed_keeper_policy =
-  { pp_sandbox_profile : sandbox_profile
+  { pp_policy_voice_enabled : bool
+  ; pp_sandbox_profile : sandbox_profile
   ; pp_sandbox_image : string option
   ; pp_network_mode : network_mode
   ; pp_allowed_paths : string list
@@ -43,6 +44,9 @@ type parsed_keeper_policy =
   ; pp_auto_handoff : bool
   ; pp_handoff_threshold : float
   ; pp_handoff_cooldown_sec : int
+  ; pp_voice_enabled : bool
+  ; pp_voice_channel : string
+  ; pp_voice_agent_id : string
   ; pp_per_provider_timeout_s : float option
   ; pp_always_approve : bool option
   }

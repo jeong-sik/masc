@@ -149,12 +149,14 @@ val gate
   -> sandbox:sandbox_context
   -> unit
   -> verdict
-(** Policy-aware gate for raw shell command strings. Parses [raw] through
-    the Bash parser, then applies the same allowlist, redirect, path
-    policy, sandbox, and nested-pipeline handling as {!gate_typed}.
-    Live caller: [Exec_policy.command_context_with_allowlist] via the
-    [Exec_shell_gate = Masc_exec_command_gate.Shell_command_gate]
-    module alias. *)
+(** Phase 1 SSOT entrypoint. Calls
+    {!Masc_exec_bash_parser.Bash.parse_string} once, lifts the result
+    into a {!parsed_context}, then applies allowlist and path policy
+    in that order. Sandbox context is recorded on every stage's
+    [Masc_exec.Shell_ir.simple.sandbox] field so downstream consumers
+    can route to [Exec_dispatch] in Phase 4 without re-parsing.
+    [?caller] is captured for the upcoming telemetry partition
+    (RFC-0131 PR-3) and does not affect the verdict. *)
 
 val gate_typed
   :  ?caller:caller

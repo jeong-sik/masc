@@ -23,3 +23,14 @@ val compute :
     Returns [default_ms] when fewer than [min_samples] successful runs
     are available. *)
 
+type stats_result =
+  | Default of { reason : string; recommended_ms : int }
+  | Adapted of { p95_ms : int; recommended_ms : int; sample_count : int }
+
+val stats : timeout_config -> Bash_history.history_entry list -> stats_result
+(** Return detailed statistics for the given entries, indicating whether
+    adaptation was possible or a default was used. *)
+
+val stats_to_json : stats_result -> Yojson.Safe.t
+(** Serialize stats_result to JSON for telemetry and test assertions. *)
+

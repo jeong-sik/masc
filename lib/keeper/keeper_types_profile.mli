@@ -31,6 +31,10 @@ val lower_string_list_opt : string list -> string list option
 val valid_tool_preset_raw_strings : string list
 val normalize_tool_preset_raw : string -> string option
 val first_some : 'a option -> 'a option -> 'a option
+val canonical_voice_channel : string -> string
+val default_voice_enabled_for : string -> bool
+val default_voice_channel_for : string -> string
+val default_voice_agent_id_for : string -> string
 val room_seq_map_to_json : (string * int) list -> Yojson.Safe.t
 val room_seq_map_of_json : Yojson.Safe.t -> (string * int) list
 

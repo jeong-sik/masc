@@ -26,3 +26,11 @@ val detect :
 
     Returns [Error "no Unix FD available on this socket"] when
     the flow has no Unix FD (e.g. an in-memory transport). *)
+
+val detect_from_fd : Unix.file_descr -> (protocol, string) result
+(** Low-level detector: peeks at the first bytes on [fd] using
+    [Unix.recv MSG_PEEK]. Returns the detected protocol or an
+    error string. *)
+
+val protocol_to_string : protocol -> string
+(** [protocol_to_string Http1 = "http1"], [protocol_to_string Http2 = "http2"]. *)

@@ -417,25 +417,22 @@ let parse_only_to_stages (parsed : SI.t PD.t) :
      | Nested_pipeline -> Error (`Too_complex Unsupported_nested_pipeline))
 ;;
 
-let gate_typed ?caller:_ ~ir ~allowlist ~path_policy ~sandbox () : verdict =
-  (* Typed callers have already crossed their schema boundary, so this
-     entrypoint intentionally skips Bash.parse_string while preserving
-     the same policy and verdict surface as [gate]. *)
-  match parse_only_to_stages (PD.Parsed ir) with
+let gate ?caller:_ ~raw ~allowlist ~path_policy ~sandbox () : verdict =
+  (* [caller] is captured for the upcoming telemetry partition
+     (RFC-0131 PR-3) and does not affect the verdict.  The
+     ignored-argument pattern is intentional: this iter establishes
+     the API surface; PR-3 wires the counters. *)
+  match parse_only_to_stages (Masc_exec_bash_parser.Bash.parse_string raw) with
   | Error (`Cannot_parse reason) -> Cannot_parse { reason }
   | Error (`Too_complex reason) -> Too_complex { reason }
   | Ok stages -> apply_policy ~allowlist ~path_policy ~sandbox ~stages
 ;;
 
-let gate ?caller:_ ~raw ~allowlist ~path_policy ~sandbox () : verdict =
-  (* String-based entrypoint retained for callers that have not migrated
-     to the typed Shell_ir surface yet (notably [Exec_policy] via the
-     [Exec_shell_gate] module alias). Parses [raw] once and delegates to
-     the same parse_only_to_stages + apply_policy pipeline as gate_typed,
-     so the typed-variant Too_complex wrapping is shared. The [caller]
-     label is API-shape-only — see the matching note on gate_typed. *)
-  let parsed = Masc_exec_bash_parser.Bash.parse_string raw in
-  match parse_only_to_stages parsed with
+let gate_typed ?caller:_ ~ir ~allowlist ~path_policy ~sandbox () : verdict =
+  (* Typed callers have already crossed their schema boundary, so this
+     entrypoint intentionally skips Bash.parse_string while preserving
+     the same policy and verdict surface as [gate]. *)
+  match parse_only_to_stages (PD.Parsed ir) with
   | Error (`Cannot_parse reason) -> Cannot_parse { reason }
   | Error (`Too_complex reason) -> Too_complex { reason }
   | Ok stages -> apply_policy ~allowlist ~path_policy ~sandbox ~stages

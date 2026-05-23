@@ -277,6 +277,7 @@
   keeper_memory_recall
   keeper_status_bridge
   keeper_runtime_trust_timeline
+  keeper_hooks_oas_gate_attempt
   keeper_hooks_oas_output_json
   keeper_hooks_oas_response_metrics
   keeper_hooks_oas_cost_events
@@ -528,14 +529,8 @@
    ;; to avoid type name collisions (transport, provider, binding, tier, strategy)
    ;; with identically-named types in the main library.
    masc_mcp.cascade_decl
-   ;; RFC-0163 Phase D1 — Cascade_name leaf extraction (lib/cascade_name/).
-   ;; Pure canonical-name validation, stdlib-only. Broken out of lib/cascade/
-   ;; so that masc_mcp.cascade_ref (which needs Cascade_name.t in its type
-   ;; definition) can depend on it without creating a circular dependency
-   ;; through the main masc_mcp library.
-   masc_mcp.cascade_name
    ;; RFC-0086 Phase 2.B prereq — Cascade_ref (lib/cascade/, 260+115 LoC)
-   ;; extracted to lib/cascade_ref/. Deps: yojson + masc_mcp.cascade_name.
+   ;; extracted to lib/cascade_ref/. Deps: yojson only (stdlib + Yojson.Safe).
    ;; Unblocks one of 6 cycle modules identified in plan §8.14 iter-2.
    ;; Intentional cycle breaker for Cascade_strategy -> Keeper_cascade_profile
    ;; -> Cascade_catalog_runtime -> Cascade_config -> Cascade_strategy chain

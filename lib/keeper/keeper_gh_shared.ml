@@ -64,18 +64,6 @@ let gh_simple_command_to_shell_ir
     }
 ;;
 
-let gh_simple_command_risk_class
-      ?(sandbox = Masc_exec.Sandbox_target.host ())
-      (cmd : gh_simple_command)
-  : Masc_exec.Shell_ir_risk.risk_class
-  =
-  let ir = gh_simple_command_to_shell_ir ~sandbox cmd in
-  let envelope =
-    Masc_exec.Shell_ir_risk.classify (Masc_exec.Shell_ir_risk.undecided ir)
-  in
-  envelope.Masc_exec.Shell_ir_risk.risk
-;;
-
 let too_complex_reason_tag (r : Masc_exec.Parsed.reason_too_complex) =
   match r with
   | `Heredoc -> "heredoc"

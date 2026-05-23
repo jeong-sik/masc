@@ -84,6 +84,12 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
       p.long_goal_opt
     |> normalize_goal_horizon_text
   in
+  let policy_voice_enabled =
+    first_some
+      p.policy_voice_enabled_opt
+      (first_some (Some old.policy_voice_enabled) p.profile_defaults.policy_voice_enabled)
+    |> Option.value ~default:false
+  in
   let allowed_paths =
     Option.value ~default:old.allowed_paths p.allowed_paths_opt
   in
@@ -282,7 +288,7 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
            if String.trim prev <> "" then prev
            else (Keeper_config.default_cascade_name ())
        in
-       Some Cascade_ref.{ group = Cascade_name.of_string_exn group; item = None });
+       Some Cascade_ref.{ group; item = None });
     will = new_will;
     needs = new_needs;
     desires = new_desires;
@@ -292,6 +298,7 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
           (if String.trim old.instructions <> "" then old.instructions
            else Option.value ~default:"" p.profile_defaults.instructions)
         p.instructions_opt;
+    policy_voice_enabled;
     allowed_paths;
     sandbox_profile;
     network_mode;
@@ -310,6 +317,14 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
            last_blocker = None;
          }
        else old.runtime);
+    voice_enabled =
+      Option.value ~default:old.voice_enabled p.voice_enabled_opt;
+    voice_channel =
+      (p.voice_channel_opt
+      |> Option.map canonical_voice_channel
+      |> Option.value ~default:old.voice_channel);
+    voice_agent_id =
+      Option.value ~default:old.voice_agent_id p.voice_agent_id_opt;
     mention_targets;
     room_signal_prompt_enabled;
     work_discovery_enabled =

@@ -27,7 +27,7 @@ let resolve_cascade
   let meta =
     match selected_item with
     | Some (group, item) ->
-      let cascade_ref = Some Cascade_ref.{ group = Cascade_name.of_string_exn group; item = Some item.id } in
+      let cascade_ref = Some Cascade_ref.{ group; item = Some item.id } in
       { meta with cascade_ref }
     | None -> meta
   in

@@ -59,6 +59,22 @@ val is_effectively_read_only_tool : string -> bool
 (** Negation of [is_effectively_read_only_tool]. *)
 val has_mutating_side_effect : string -> bool
 
+(** Read-only [gh] subcommand prefixes used by the input-aware
+    keeper_shell op=gh classifier. *)
+val gh_read_only_prefixes : string list
+
+(** Returns [true] when a [gh api ...] invocation is effectively a
+    GET request (no -X/--method, no -f/-F/--field, not graphql).
+    [cmd_lower] must already be lowercased and trimmed. *)
+val is_gh_api_read_only : string -> bool
+
+(** Strip leading [gh] tokens and re-join with single spaces. *)
+val normalize_gh_command : string -> string
+
+(** Project a [keeper_shell op=gh] input JSON to its normalized
+    [cmd] string ([""] when missing). *)
+val gh_effective_cmd : Yojson.Safe.t -> string
+
 (** [true] iff [input] has [op = "gh"]. *)
 val is_shell_gh_op : Yojson.Safe.t -> bool
 

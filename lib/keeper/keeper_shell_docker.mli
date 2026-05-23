@@ -5,15 +5,6 @@
     invocation. Pure infrastructure; generic command-shape policy lives
     in [Keeper_shell_command_semantics]. *)
 
-(** Build a structured failure message used by docker exec
-    diagnostics, emphasising the exit/signal status and (when
-    blank) flagging empty output explicitly. *)
-val docker_exec_failure_message :
-  image:string ->
-  status:Unix.process_status ->
-  output:string ->
-  string
-
 (** Path of the per-keeper egress policy file
     [<sandbox_root>/egress.json]. *)
 val egress_policy_path :
@@ -91,6 +82,7 @@ val gh_exit_class_field :
   status:Unix.process_status ->
   output:string ->
   cmd_stages:Keeper_shell_command_semantics.parsed_stage list ->
+  unit ->
   (string * Yojson.Safe.t) list
 
 (** [-v <host>:<container>:ro] mount list, or [[]] when [host] is
@@ -148,6 +140,12 @@ val run_trusted_docker_shell_command_with_status :
   git_creds_enabled:bool ->
   network_mode:Keeper_types.network_mode ->
   (docker_shell_result, string) result
+
+(** Convenience wrapper for [docker_exec_failure_message_internal]
+    without context fields.  Returns a human-readable Docker exec failure
+    description for the LLM. *)
+val docker_exec_failure_message :
+  image:string -> status:Unix.process_status -> output:string -> string
 
 (** Run [cmd] inside the Docker sandbox with host credential bindings
     forwarded (Network_inherit). Returns the JSON envelope to

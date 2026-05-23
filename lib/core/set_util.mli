@@ -18,6 +18,14 @@
     agents) or [started \ completed] (in-progress tasks) over a flat event
     stream. Replaces O(N x M) [List.filter ... List.mem] pipelines with
     O(N) work. *)
+val of_list_with : ('a -> 'b) -> 'a list -> ('b, unit) Hashtbl.t
+(** [of_list_with key xs] builds a Hashtbl-as-set from [xs] using [key] for
+    projection. Duplicates are collapsed; the value is always [()]. *)
+
+val count_distinct : ('a -> 'b option) -> 'a list -> int
+(** [count_distinct key xs] counts distinct [Some] keys produced by [key]
+    over [xs]. [None] values are skipped. *)
+
 val count_difference
   :  'a list
   -> present:('a -> 'b option)

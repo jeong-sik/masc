@@ -43,6 +43,12 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
     first_some p.autoboot_enabled_opt p.profile_defaults.autoboot_enabled
     |> Option.value ~default:true
   in
+  let policy_voice_enabled =
+    first_some
+      p.policy_voice_enabled_opt
+      p.profile_defaults.policy_voice_enabled
+    |> Option.value ~default:false
+  in
   let allowed_paths =
     match p.allowed_paths_opt with
     | Some paths -> paths
@@ -84,6 +90,17 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
       ~sandbox_profile
       ~preferred:p.network_mode_opt
       ~fallback:p.profile_defaults.network_mode
+  in
+  let voice_enabled =
+    Option.value ~default:(default_voice_enabled_for p.name) p.voice_enabled_opt
+  in
+  let voice_channel =
+    p.voice_channel_opt
+    |> Option.map canonical_voice_channel
+    |> Option.value ~default:(default_voice_channel_for p.name)
+  in
+  let voice_agent_id =
+    Option.value ~default:(default_voice_agent_id_for p.name) p.voice_agent_id_opt
   in
   let mention_targets =
     resolve_mention_targets
@@ -442,7 +459,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         social_model;
         cascade_ref =
           Some Cascade_ref.{
-            group = Cascade_name.of_string_exn selected_cascade_name;
+            group = selected_cascade_name;
             item = None;
           };
         (* RFC-0041 (post-step-4): cascade_ref is the SSOT; the legacy
@@ -452,6 +469,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         needs;
         desires;
         instructions;
+        policy_voice_enabled;
         sandbox_profile;
         sandbox_image = None;
         network_mode;
@@ -459,6 +477,9 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         tool_access;
         tool_preset_source = p.profile_defaults.tool_preset_source;
         tool_denylist;
+        voice_enabled;
+        voice_channel;
+        voice_agent_id;
         mention_targets;
         room_signal_prompt_enabled;
         joined_room_ids = [];
@@ -645,6 +666,9 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           ("desires", `String meta.desires);
           ("instructions", `String meta.instructions);
           ("cascade_name", `String (cascade_name_of_meta meta));
+          ("voice_enabled", `Bool meta.voice_enabled);
+          ("voice_channel", `String meta.voice_channel);
+          ("voice_agent_id", `String meta.voice_agent_id);
           ("social_model", `String meta.social_model);
           ("tool_access", tool_access_to_json meta.tool_access);
           ("tool_denylist",

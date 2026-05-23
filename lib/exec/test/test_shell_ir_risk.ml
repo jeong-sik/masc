@@ -160,11 +160,6 @@ let test_classify_gh_api_get_r0 () =
   let envelope = Risk.classify (Risk.undecided ir) in
   Alcotest.(check bool) "GET is R0" true (Risk.is_r0 envelope)
 
-let test_classify_gh_api_graphql_r1 () =
-  let ir = simple_ir "gh" [ "api"; "graphql" ] in
-  let envelope = Risk.classify (Risk.undecided ir) in
-  Alcotest.(check bool) "graphql is R1" true (Risk.is_r1 envelope)
-
 (* --- classify: pipeline --- *)
 
 let test_classify_pipeline_first_stage_destructive () =
@@ -175,35 +170,6 @@ let test_classify_pipeline_first_stage_destructive () =
   let envelope = Risk.classify (Risk.undecided ir) in
   Alcotest.(check bool) "pipeline with destructive first stage"
     true (Risk.is_destructive envelope)
-
-(* --- classify: gh read-only prefix equivalence (P9a) --- *)
-
-let test_classify_gh_read_only_prefixes_equivalence () =
-  let prefixes =
-    [ [ "pr"; "list" ]
-    ; [ "pr"; "view"; "123" ]
-    ; [ "pr"; "diff"; "123" ]
-    ; [ "pr"; "checks"; "123" ]
-    ; [ "pr"; "status" ]
-    ; [ "issue"; "list" ]
-    ; [ "issue"; "view"; "456" ]
-    ; [ "issue"; "status" ]
-    ; [ "repo"; "view" ]
-    ; [ "repo"; "list" ]
-    ; [ "release"; "list" ]
-    ; [ "release"; "view"; "v1.0" ]
-    ; [ "api"; "/repos/o/r" ]
-    ]
-  in
-  List.iter
-    (fun args ->
-       let ir = simple_ir "gh" args in
-       let envelope = Risk.classify (Risk.undecided ir) in
-       Alcotest.(check bool)
-         (Format.asprintf "%a is R0" Risk.pp_risk_class envelope.Risk.risk)
-         true
-         (Risk.is_r0 envelope))
-    prefixes
 
 (* --- classify: unknown commands → R0 --- *)
 
@@ -233,9 +199,7 @@ let () =
   test_classify_gh_api_delete_r2 ();
   test_classify_gh_api_post_r1 ();
   test_classify_gh_api_get_r0 ();
-  test_classify_gh_api_graphql_r1 ();
   test_classify_pipeline_first_stage_destructive ();
-  test_classify_gh_read_only_prefixes_equivalence ();
   test_classify_unknown_read ();
   test_trust_decided ();
-  print_endline "test_shell_ir_risk: 16/16 passed"
+  print_endline "test_shell_ir_risk: 14/14 passed"

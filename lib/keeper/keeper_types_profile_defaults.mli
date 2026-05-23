@@ -17,6 +17,7 @@ type keeper_profile_defaults = {
   needs : string option;
   desires : string option;
   instructions : string option;
+  policy_voice_enabled : bool option;
   autoboot_enabled : bool option;
   mention_targets : string list;
   proactive_enabled : bool option;

@@ -20,4 +20,8 @@ type t = {
   created_at : float;
 }
 
+val empty : created_by:string -> created_at:float -> t
+
 val to_json : t -> Yojson.Safe.t
+
+val of_json : Yojson.Safe.t -> (t, string) result

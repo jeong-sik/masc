@@ -26,6 +26,10 @@ val current : unit -> t
     default to [Dry_run] so that operator omissions do not silently disable
     measurement. *)
 
+val of_string : string -> t
+(** Parse a canonical env value into the strictness flag.
+    Unknown / missing values default to [Dry_run]. *)
+
 val to_label : t -> string
 (** [to_label Off = "off"], [Dry_run = "dry_run"], [Strict = "strict"].
     Used as the Prometheus [mode] label so operators can break down

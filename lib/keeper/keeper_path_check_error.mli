@@ -41,12 +41,13 @@ val to_message : t -> string
     contract. *)
 
 val message_prefix : t -> string
-(** Stable lowercase prefix token used by downstream classifiers
-    (e.g. dashboard tool-quality). Always a strict prefix of the
-    lowercase form of [to_message]. *)
+(** The canonical lowercase prefix string for a given variant.
+    Inverse of [parse_prefix] — [message_prefix (parse_prefix s)]
+    round-trips for all known prefixes. *)
 
 val parse_prefix : string -> t option
-(** Inverse of [to_message] for the variant tag only — payload fields
-    are left empty / [None] since the typed module is intended for
-    classification, not full message reconstruction. *)
+(** Attempt to classify a raw error message by its prefix.
+    Returns [Some t] if the message matches a known prefix pattern,
+    [None] otherwise. Used by failure-circuit-breaker for typed
+    error classification without substring grepping. *)
 

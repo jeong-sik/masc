@@ -7,6 +7,9 @@
 
 open Keeper_types
 open Keeper_exec_shared
+open Keeper_shell_docker_exec_failure
+
+let docker_exec_failure_message = docker_exec_failure_message
 
 let path_exists path =
   try Sys.file_exists path with
@@ -313,7 +316,7 @@ let cleanup_oneshot_container ~container_name =
     Log.Keeper.warn
       "docker oneshot cleanup failed for %s (status=%s, output=%s)"
       container_name
-      (Keeper_shell_docker_exec_failure.docker_exec_status_label status)
+      (docker_exec_status_label status)
       (Exec_policy.truncate_for_log output)
 ;;
 

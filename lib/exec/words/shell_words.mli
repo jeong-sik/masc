@@ -26,7 +26,6 @@ val stages : string -> (word list list, error) result
     diagnostics and path policy. *)
 
 val top_level_command_segments : string -> (bool * string) list
-(** Split [source] on unquoted top-level [&&], [||], [;], and newlines.
-    The boolean marks whether the segment is unconditionally reached from the
-    left.  Single [|] is intentionally not a separator here; pipeline-aware
-    callers should continue using {!stages}. *)
+(** Extract top-level command segments from a shell command string.
+    Returns a list of (is_quoted, segment) tuples for each segment.
+    Used by test fixtures and bash parser surfaces. *)

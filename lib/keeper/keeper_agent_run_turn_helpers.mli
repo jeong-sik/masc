@@ -78,9 +78,10 @@ val run_with_setup_cleanup : cleanup:(unit -> unit) -> (unit -> 'a) -> 'a
 val turn_progress_callbacks :
   config:Coord.config ->
   keeper_name:string ->
-  downstream:(Agent_sdk.Types.sse_event -> unit) option ->
+  downstream:(Llm_provider__Types.sse_event -> unit) option ->
+  turn_id:int ->
   (string -> unit)
   * bool
   * (unit -> unit) option
   * (unit -> unit) option
-  * (Agent_sdk.Types.sse_event -> unit) option
+  * (Llm_provider__Types.sse_event -> unit) option

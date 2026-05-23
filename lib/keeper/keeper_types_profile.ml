@@ -99,6 +99,30 @@ let normalize_tool_preset_raw raw =
 
 let first_some = Dashboard_utils.first_some
 
+let canonical_voice_channel = function
+  | "voice_only" -> "voice_only"
+  | "text_only" -> "text_only"
+  | _ -> "voice_text"
+
+let default_voice_enabled_for _name =
+  (* Pure tests may parse keeper metadata without an Eio context. In that
+     case, treat voice as disabled rather than failing metadata decoding. *)
+  try
+    match Voice_config.load () with
+    | Ok _ -> true
+    | Error _ -> false
+  with
+  | Effect.Unhandled _ -> false
+  | Sys_error _ -> false
+  | Unix.Unix_error _ -> false
+  | _ -> false
+
+let default_voice_channel_for name =
+  if default_voice_enabled_for name then "voice_text" else "text_only"
+
+let default_voice_agent_id_for name =
+  if default_voice_enabled_for name then name else ""
+
 let room_seq_map_to_json (items : (string * int) list) : Yojson.Safe.t =
   `Assoc (List.map (fun (room_id, seq) -> (room_id, `Int seq)) items)
 
@@ -417,6 +441,7 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         needs = str "needs";
         desires = str "desires";
         instructions = str "instructions";
+        policy_voice_enabled = bool_ "policy_voice_enabled";
         autoboot_enabled = bool_ "autoboot_enabled";
         mention_targets = strs "mention_targets";
         proactive_enabled = bool_ "proactive_enabled";
@@ -483,6 +508,7 @@ let parsed_field_key_names =
   ; "needs"
   ; "desires"
   ; "instructions"
+  ; "policy_voice_enabled"
   ; "autoboot_enabled"
   ; "mention_targets"
   ; "proactive_enabled"
@@ -536,6 +562,7 @@ let canonical_keeper_toml_key_names =
   ; "needs"
   ; "desires"
   ; "instructions"
+  ; "policy_voice_enabled"
   ; "autoboot_enabled"
   ; "mention_targets"
   ; "proactive_enabled"
@@ -681,6 +708,8 @@ let merge_keeper_profile_defaults
     needs = prefer overlay.needs base.needs;
     desires = prefer overlay.desires base.desires;
     instructions = prefer overlay.instructions base.instructions;
+    policy_voice_enabled =
+      prefer overlay.policy_voice_enabled base.policy_voice_enabled;
     autoboot_enabled = prefer overlay.autoboot_enabled base.autoboot_enabled;
     mention_targets =
       merge_string_list ~base:base.mention_targets overlay.mention_targets;
@@ -884,6 +913,10 @@ let load_keeper_profile_defaults_from_persona name : keeper_profile_defaults =
                 needs = Safe_ops.json_string_opt "needs" keeper_json;
                 desires = Safe_ops.json_string_opt "desires" keeper_json;
                 instructions = Safe_ops.json_string_opt "instructions" keeper_json;
+                policy_voice_enabled =
+                  (match Yojson.Safe.Util.member "policy_voice_enabled" keeper_json with
+                  | `Bool flag -> Some flag
+                  | _ -> None);
                 autoboot_enabled = None;
                 mention_targets = Safe_ops.json_string_list "mention_targets" keeper_json;
                 proactive_enabled = Safe_ops.json_bool_opt "proactive_enabled" keeper_json;

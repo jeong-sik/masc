@@ -63,7 +63,7 @@ let workflow_rejection_info_of_raw raw =
   | Yojson.Json_error _ -> None
 ;;
 
-let workflow_rejection_family_key ~tool_name (info : workflow_rejection_info) =
+let workflow_rejection_family_key ~tool_name info =
   Printf.sprintf
     "%s:%s:%s:%s"
     (Option.value ~default:"unknown_task" info.task_id)

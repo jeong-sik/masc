@@ -499,7 +499,8 @@ type keeper_meta =
   ; desires : string
   ; instructions : string
   ; (* -- Policy -- *)
-    sandbox_profile : sandbox_profile
+    policy_voice_enabled : bool
+  ; sandbox_profile : sandbox_profile
   ; sandbox_image : string option
   ; network_mode : network_mode
   ; allowed_paths : string list
@@ -515,6 +516,10 @@ type keeper_meta =
   ; auto_handoff : bool
   ; handoff_threshold : float
   ; handoff_cooldown_sec : int
+  ; (* -- Voice -- *)
+    voice_enabled : bool
+  ; voice_channel : string
+  ; voice_agent_id : string
   ; (* -- Lifecycle -- *)
     created_at : string
   ; updated_at : string
@@ -555,13 +560,14 @@ type keeper_meta =
 
 let cascade_name_of_meta (m : keeper_meta) : string =
   match m.cascade_ref with
-  | Some ref_ -> Cascade_name.to_string ref_.Cascade_ref.group
+  | Some ref_ when not (String.equal ref_.Cascade_ref.group "") ->
+    ref_.Cascade_ref.group
   | _ -> (Keeper_config.default_cascade_name ())
 ;;
 
 let set_cascade_name (name : string) (m : keeper_meta) : keeper_meta =
   let cascade_ref =
-    Some Cascade_ref.{ group = Cascade_name.of_string_exn name; item = None }
+    Some Cascade_ref.{ group = name; item = None }
   in
   { m with cascade_ref }
 ;;

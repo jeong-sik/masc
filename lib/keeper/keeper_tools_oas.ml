@@ -159,11 +159,11 @@ let workflow_rejection_scope_block_record counts key (info : Keeper_tools_oas_wo
       | Some block -> block.Keeper_tools_oas_workflow.count
       | None -> 0
     in
-    let block : Keeper_tools_oas_workflow.workflow_rejection_block =
-      { count = previous_count + 1
-      ; rule_id = info.rule_id
-      ; tool_suggestion = info.tool_suggestion
-      ; hint = info.hint
+    let block =
+      { Keeper_tools_oas_workflow.count = previous_count + 1
+      ; rule_id = info.Keeper_tools_oas_workflow.rule_id
+      ; tool_suggestion = info.Keeper_tools_oas_workflow.tool_suggestion
+      ; hint = info.Keeper_tools_oas_workflow.hint
       }
     in
     Hashtbl.replace counts.workflow_block_table key block;

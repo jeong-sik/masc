@@ -286,6 +286,7 @@ type keeper_meta = {
   needs: string;
   desires: string;
   instructions: string;
+  policy_voice_enabled: bool;
   sandbox_profile: sandbox_profile;
   sandbox_image: string option;
   network_mode: network_mode;
@@ -302,6 +303,9 @@ type keeper_meta = {
   auto_handoff: bool;
   handoff_threshold: float;
   handoff_cooldown_sec: int;
+  voice_enabled: bool;
+  voice_channel: string;
+  voice_agent_id: string;
   created_at: string;
   updated_at: string;
   max_context_override: int option;

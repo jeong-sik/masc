@@ -36,3 +36,7 @@ type run_result =
   ; pre_dispatch_compaction_after_tokens : int option
   }
 
+val tool_call_detail_to_json : tool_call_detail -> Yojson.Safe.t
+val surface_model_used : run_result -> string
+val surface_resolved_model_id : run_result -> string
+

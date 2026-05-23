@@ -189,12 +189,6 @@ include Keeper_hooks_oas_cost_events
 
 include Keeper_hooks_oas_idle
 
-(* pr_review_action_metric_event / pr_work_action_metric_event /
-   normalize_pr_review_action moved to Keeper_hooks_oas_types
-   (intra-library file split, 2026-05-16). *)
-
-include Keeper_hooks_oas_pr_metrics
-
 let make_hooks
     ~(config : Coord.config)
     ~(meta_ref : Keeper_types.keeper_meta ref)

@@ -227,7 +227,7 @@ let make_hooks
   let streak_state = Keeper_guards.make_streak_state () in
   let streak_threshold = 5 in
   let record_gate_decision event =
-    record_pre_tool_gate_attempt
+    Keeper_hooks_oas_gate_attempt.record_pre_tool_gate_attempt
       ~meta_ref
       ~tool_call_count_ref
       ?trajectory_acc
@@ -674,7 +674,7 @@ let make_hooks
                args_json = Yojson.Safe.to_string safe_input;
                gate_decision = Trajectory.Pass;
                result = Some safe_output;
-               duration_ms = trajectory_duration_ms duration_ms;
+               duration_ms = Keeper_hooks_oas_gate_attempt.trajectory_duration_ms duration_ms;
                error = (if outcome = "ok" then None else Some safe_output);
                cost_usd = Trajectory.tool_cost_estimate tool_name;
              }

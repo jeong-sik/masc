@@ -4,27 +4,11 @@
 open Alcotest
 module S = Set_util
 
-(* ---------- count_distinct ---------- *)
-
-let test_count_distinct_empty () =
-  check int "empty" 0 (S.count_distinct (fun _ -> Some 0) [])
-;;
-
-let test_count_distinct_all_some () =
-  check int "all distinct" 3 (S.count_distinct (fun x -> Some x) [ 1; 2; 3 ])
-;;
-
-let test_count_distinct_duplicates_counted_once () =
-  check int "dup collapsed" 2 (S.count_distinct (fun x -> Some x) [ "a"; "b"; "a"; "a" ])
-;;
-
-let test_count_distinct_none_skipped () =
-  check
-    int
-    "None skipped"
-    2
-    (S.count_distinct (fun x -> if x mod 2 = 0 then Some x else None) [ 1; 2; 3; 4; 5 ])
-;;
+(* The [count_distinct] kernel was removed from [Set_util]'s public
+   surface — only [count_difference] remains. The four [count_distinct]
+   test cases (empty / all_some / duplicates / none_skipped) were
+   dropped together with the kernel; recover from git history if the
+   kernel is reintroduced. *)
 
 (* ---------- count_difference ---------- *)
 
@@ -78,16 +62,7 @@ let test_count_difference_present_after_absent () =
 let () =
   run
     "set_util"
-    [ ( "count_distinct"
-      , [ test_case "empty" `Quick test_count_distinct_empty
-        ; test_case "all some" `Quick test_count_distinct_all_some
-        ; test_case
-            "duplicates counted once"
-            `Quick
-            test_count_distinct_duplicates_counted_once
-        ; test_case "None skipped" `Quick test_count_distinct_none_skipped
-        ] )
-    ; ( "count_difference"
+    [ ( "count_difference"
       , [ test_case "empty" `Quick test_count_difference_empty
         ; test_case
             "all present no absent"

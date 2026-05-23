@@ -642,9 +642,9 @@ let artifact_refs_of_output ~artifact_policy ~base_path ~keeper_name ~cmd ~outpu
      | None -> [])
 ;;
 
-let default_classification = { family = Unknown; reversibility = Safe; risk = Low; write_intent = false }
+let default_classification = { family = Unknown; reversibility = Read_only; risk = Low; write_intent = false }
 
-let build_process_outcome ?(classification = default_classification) ~artifact_policy ~base_path ~keeper_name ~cmd ~status ~output =
+let build_process_outcome ~classification ~artifact_policy ~base_path ~keeper_name ~cmd ~status ~output =
   let semantic_status = semantic_status_of_process ~cmd ~output status in
   let summary = summary_of_status classification semantic_status in
   let retryability = retryability_of_semantic_status semantic_status in
@@ -954,9 +954,9 @@ let process_result_json
       ~output
       ()
   =
-  (match classification with
-   | Some c -> build_process_outcome ~classification:c ~artifact_policy ~base_path ~keeper_name ~cmd ~status ~output
-   | None -> build_process_outcome ~artifact_policy ~base_path ~keeper_name ~cmd ~status ~output)
+  build_process_outcome
+    ~classification:(Option.value classification ~default:default_classification)
+    ~artifact_policy ~base_path ~keeper_name ~cmd ~status ~output
   |> outcome_to_json ~extra ~env_snapshot
 ;;
 

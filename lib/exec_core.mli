@@ -116,7 +116,7 @@ val classify_command_of_ir : Masc_exec.Shell_ir.t -> classification
 
 val default_classification : classification
 (** Constant classification used when no IR is available:
-    [{ family = Unknown; reversibility = Safe; risk = Low; write_intent = false }]. *)
+    [{ family = Unknown; reversibility = Read_only; risk = Low; write_intent = false }]. *)
 
 val classification_to_json : classification -> Yojson.Safe.t
 
@@ -130,7 +130,7 @@ val semantic_status_of_process :
 val string_of_retryability : retryability -> string
 
 val build_process_outcome :
-  ?classification:classification ->
+  classification:classification ->
   artifact_policy:artifact_policy ->
   base_path:string ->
   keeper_name:string ->

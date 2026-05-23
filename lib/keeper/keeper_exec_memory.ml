@@ -5,6 +5,11 @@ module StringSet = Set.Make (String)
 
 let contains_ci = String_util.contains_substring_ci
 
+let no_match_field = function
+  | true -> [ "no_match", `Bool true ]
+  | false -> []
+;;
+
 (* Issue #8484: Variant SSOT for memory search scope. Adding a new
    constructor forces compilation in [memory_search_source_to_string]
    AND extends [valid_memory_search_source_strings]; the schema in
@@ -327,7 +332,7 @@ let keeper_memory_search_json
          ; "match_count", `Int (List.length matches)
          ; "matches", `List match_jsons
          ]
-         @ if no_match then [ "no_match", `Bool true ] else [])
+         @ no_match_field no_match)
     | All ->
       let bank_matches, bank_total =
         search_memory_bank ~config ~meta ~query ~kind_filter ~limit
@@ -357,7 +362,7 @@ let keeper_memory_search_json
          ; "match_count", `Int total_matches
          ; "matches", `List (bank_jsons @ history_jsons)
          ]
-         @ if no_match then [ "no_match", `Bool true ] else [])
+         @ no_match_field no_match)
     | Memory ->
       let matches, total_candidates =
         search_memory_bank ~config ~meta ~query ~kind_filter ~limit
@@ -371,7 +376,7 @@ let keeper_memory_search_json
          ; "match_count", `Int (List.length matches)
          ; "matches", `List match_jsons
          ]
-         @ (if no_match then [ "no_match", `Bool true ] else [])
+         @ no_match_field no_match
          @ if kind_filter <> "" then [ "kind_filter", `String kind_filter ] else [])
   in
   (* Day-1 search logging: append search event to decisions log.

@@ -120,12 +120,6 @@ let handle_keeper_shell
   let path_error e =
     actionable_path_error ~op ~meta ~raw_path ~error:e
   in
-  let docker_git_log_path host_path =
-    if String.trim host_path = "" then Ok ""
-    else if Filename.is_relative host_path then Ok host_path
-    else
-      Keeper_docker_read.container_path_of_host ~config ~meta ~host_path
-  in
   match op with
   | "pwd" ->
     (match cwd_target () with
@@ -277,7 +271,7 @@ let handle_keeper_shell
        let file_path = Safe_ops.json_string ~default:"" "path" args |> String.trim in
        let grep = Safe_ops.json_string ~default:"" "grep" args |> String.trim in
        if Keeper_docker_read.should_route_read ~meta then
-         (match docker_git_log_path file_path with
+         (match Keeper_shell_runtime.docker_git_log_path ~config ~meta file_path with
           | Error err ->
             error_json
               ~fields:

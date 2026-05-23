@@ -20,9 +20,3 @@ include module type of Env_config_runtime
 include module type of Env_config_governance
 include module type of Env_config_keeper
 
-val print_summary : unit -> unit
-(** Log a multi-line summary of every nested config category at boot
-    time. Side-effects logging only. *)
-
-val to_json : unit -> Yojson.Safe.t
-(** Compatibility wrapper around {!Env_config_snapshot.to_json}. *)

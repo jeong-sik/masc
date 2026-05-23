@@ -142,18 +142,12 @@ let keeper_bash_schema : Masc_domain.tool_schema =
     ; keeper_bash_timeout_sec_field
     ]
   in
-  let one_of_branches =
-    [ `Assoc [ "required", `List [ `String "executable" ] ]
-    ; `Assoc [ "required", `List [ `String "pipeline" ] ]
-    ]
-  in
   { name = "keeper_bash"
   ; description = keeper_bash_description
   ; input_schema =
       `Assoc
         [ "type", `String "object"
         ; "properties", `Assoc properties
-        ; "oneOf", `List one_of_branches
         ; "additionalProperties", `Bool false
         ]
   }

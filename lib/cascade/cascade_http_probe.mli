@@ -105,9 +105,9 @@ val refresh_many
 
 (** {1 Pure JSON parser (test surface)} *)
 
-(** [parse_response ?total ?now json] interprets an ollama
-    [/api/ps] response.  Returns [Some info] when [json] is a JSON
-    object containing a [models] field that is a JSON array;
+(** [parse_response ?total json] interprets an ollama [/api/ps]
+    response.  Returns [Some info] when [json] is a JSON object
+    containing a [models] field that is a JSON array;
     [process_active] is set to the array length and
     [process_available] is [total - process_active] (clamped at
     zero).  [total] defaults to [1] (matches [OLLAMA_NUM_PARALLEL=1],
@@ -118,7 +118,6 @@ val refresh_many
     spinning up an HTTP server. *)
 val parse_response
   :  ?total:int
-  -> ?now:float
   -> Yojson.Safe.t
   -> Cascade_throttle.capacity_info option
 

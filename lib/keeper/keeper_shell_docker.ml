@@ -85,6 +85,16 @@ let nested_runtime_blocker ~git_creds_enabled =
     "sandbox_profile=docker blocks nested container runtimes and host socket references"
 ;;
 
+let sandbox_error_json ~config ~meta message =
+  Keeper_registry_error_recording.record ~base_path:config.base_path meta.name message;
+  error_json message
+;;
+
+let sandbox_error ~config ~meta ?details message =
+  Keeper_registry_error_recording.record ?details ~base_path:config.base_path meta.name message;
+  Error message
+;;
+
 (** Shared by [run_docker_credentialed_bash] and [run_docker_bash]:
     parse cmd → resolve cwd → validate paths.  Returns [Ok (cwd, cmd_stages)]
     when every gate passes.  [run_docker_shell_command_with_status_internal]
@@ -139,10 +149,7 @@ let run_docker_shell_command_with_status_internal
   =
   let timeout_sec = max timeout_sec docker_run_min_timeout_sec in
   let image = resolve_sandbox_image meta in
-  let sandbox_error ?details message =
-    Keeper_registry_error_recording.record ?details ~base_path:config.base_path meta.name message;
-    Error message
-  in
+  let sandbox_error = sandbox_error ~config ~meta in
   if String.trim image = ""
   then sandbox_error "keeper sandbox docker image is not configured"
   else (
@@ -430,10 +437,7 @@ let run_docker_credentialed_bash
       ()
   =
   let image = resolve_sandbox_image meta in
-  let sandbox_error_json message =
-    Keeper_registry_error_recording.record ~base_path:config.base_path meta.name message;
-    error_json message
-  in
+  let sandbox_error_json = sandbox_error_json ~config ~meta in
   if String.trim image = ""
   then sandbox_error_json "keeper sandbox docker image is not configured"
   else if command_uses_nested_container_runtime cmd
@@ -494,10 +498,7 @@ let run_docker_bash
       ~(network_mode : network_mode)
   =
   let image = resolve_sandbox_image meta in
-  let sandbox_error_json message =
-    Keeper_registry_error_recording.record ~base_path:config.base_path meta.name message;
-    error_json message
-  in
+  let sandbox_error_json = sandbox_error_json ~config ~meta in
   if String.trim image = ""
   then sandbox_error_json "keeper sandbox docker image is not configured"
   else if command_uses_nested_container_runtime cmd

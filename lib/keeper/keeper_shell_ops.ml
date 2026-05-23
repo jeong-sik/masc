@@ -63,7 +63,6 @@ let handle_keeper_shell
     in
     let run_tree_rt = run_tree ~timeout_sec:Keeper_shell_shared.read_timeout_sec in
     let run_wc_rt = run_wc ~timeout_sec:Keeper_shell_shared.read_timeout_sec in
-    let git_nolock_argv tail = "git" :: "--no-optional-locks" :: tail in
     match shell_op with
     | Pwd ->
       with_cwd (fun cwd ->
@@ -75,7 +74,7 @@ let handle_keeper_shell
       with_cwd (fun cwd ->
         run_git_cwd ~cwd
           ~cmd:"git -C <cwd> --no-optional-locks status --short --branch"
-          ~command_argv:(git_nolock_argv [ "status"; "--short"; "--branch" ])
+          ~command_argv:(Keeper_shell_runtime.git_nolock_argv [ "status"; "--short"; "--branch" ])
           ())
     | Ls ->
       with_read (fun target ->
@@ -105,7 +104,7 @@ let handle_keeper_shell
     | Git_diff ->
       with_cwd (fun cwd ->
         run_git_cwd ~cwd ~cmd:"git diff --stat"
-          ~command_argv:(git_nolock_argv [ "diff"; "--stat" ])
+          ~command_argv:(Keeper_shell_runtime.git_nolock_argv [ "diff"; "--stat" ])
           ())
     | Git_worktree ->
       Keeper_shell_git_worktree.handle ~op ~meta ~config ~args ?turn_sandbox_factory

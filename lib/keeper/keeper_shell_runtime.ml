@@ -110,6 +110,8 @@ let docker_git_log_path ~config ~meta host_path =
   else Keeper_docker_read.container_path_of_host ~config ~meta ~host_path
 ;;
 
+let git_nolock_argv tail = "git" :: "--no-optional-locks" :: tail
+
 let git_log_argv_core ~format ~count ~grep ?file_path ?cwd () =
   let base =
     [ "git"; "--no-optional-locks"; "log"

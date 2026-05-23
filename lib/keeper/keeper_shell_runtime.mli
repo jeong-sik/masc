@@ -55,6 +55,8 @@ val docker_git_log_path :
 
 (** {1 Git log helpers} *)
 
+val git_nolock_argv : string list -> string list
+
 val git_log_argv_core :
   format:string -> count:int -> grep:string -> ?file_path:string -> ?cwd:string -> unit -> string list
 

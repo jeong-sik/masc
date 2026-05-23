@@ -292,18 +292,14 @@ let handle_keeper_shell
       | Error e -> path_error e
       | Ok target ->
         let limit = shell_readonly_limit args in
-        let docker_argv cpath =
-          [ "find"; cpath; "-maxdepth"; "5"; "-name"; name_pattern;
+        let find_base path =
+          [ "find"; path; "-maxdepth"; "5"; "-name"; name_pattern;
             "-not"; "-path"; "*/.git/*";
             "-not"; "-path"; "*/_build/*";
             "-not"; "-path"; "*/.masc/*" ]
         in
-        let host_argv =
-          [ "find"; target; "-maxdepth"; "5"; "-name"; name_pattern;
-            "-not"; "-path"; "*/.git/*";
-            "-not"; "-path"; "*/_build/*";
-            "-not"; "-path"; "*/.masc/*" ]
-        in
+        let docker_argv cpath = find_base cpath in
+        let host_argv = find_base target in
         match
           Keeper_shell_runtime.run_readonly_op ~config ~meta ?turn_sandbox_factory
             ~op ~target ~host_argv ~docker_argv
@@ -363,16 +359,13 @@ let handle_keeper_shell
      | Error e -> path_error e
      | Ok target ->
        let limit = shell_readonly_limit args in
-       let docker_argv cpath =
-         [ "find"; cpath; "-maxdepth"; "3"; "-print";
+       let tree_base path =
+         [ "find"; path; "-maxdepth"; "3"; "-print";
            "-not"; "-path"; "*/.git/*";
            "-not"; "-path"; "*/_build/*" ]
        in
-       let host_argv =
-         [ "find"; target; "-maxdepth"; "3"; "-print";
-           "-not"; "-path"; "*/.git/*";
-           "-not"; "-path"; "*/_build/*" ]
-       in
+       let docker_argv cpath = tree_base cpath in
+       let host_argv = tree_base target in
        match
          Keeper_shell_runtime.run_readonly_op ~config ~meta ?turn_sandbox_factory
            ~op ~target ~host_argv ~docker_argv

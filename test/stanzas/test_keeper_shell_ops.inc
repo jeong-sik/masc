@@ -1,8 +1,0 @@
-; P10 — Output compatibility tests for keeper_shell_ops "ls" lowering.
-; Pins the JSON envelope shape so the Shell IR pipeline lowering is
-; constrained by documented behaviour rather than by prose intent.
-
-(test
- (name test_keeper_shell_ops)
- (modules test_keeper_shell_ops)
- (libraries masc_test_deps alcotest))

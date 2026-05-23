@@ -12,6 +12,7 @@ module Keeper_registry = Masc_mcp.Keeper_registry
 module Keeper_sandbox = Masc_mcp.Keeper_sandbox
 module Keeper_shell_docker = Masc_mcp.Keeper_shell_docker
 module Keeper_types = Masc_mcp.Keeper_types
+module Parsed = Masc_exec.Parsed
 module Json = Yojson.Safe.Util
 
 let validate = Masc_mcp.Worker_dev_tools.validate_command
@@ -819,8 +820,9 @@ let test_rewrite_docker_container_paths_for_host_validation () =
   let input =
     Printf.sprintf "git -C %s/repos/masc-mcp log --oneline -5\n" container_root
   in
-  Alcotest.(check bool) "raw container path is outside host workdir" true
-    (is_error (Masc_mcp.Worker_dev_tools.validate_command_paths ~workdir:host_repo input));
+  (* validate_command_paths removed — string-based path validation
+     superseded by Shell IR typed pipeline. Rewriting test below remains
+     valid because it exercises the path-rewrite logic independently. *)
   ensure_dir host_repo;
   let rewritten =
     Keeper_shell_docker.rewrite_docker_command_paths_for_host_validation
@@ -828,10 +830,7 @@ let test_rewrite_docker_container_paths_for_host_validation () =
   in
   Alcotest.(check string) "container root rewritten to host root for validation"
     (Printf.sprintf "git -C %s/repos/masc-mcp log --oneline -5\n" host_root)
-    rewritten;
-  Alcotest.(check bool) "rewritten path validates under host workdir" true
-    (is_ok
-       (Masc_mcp.Worker_dev_tools.validate_command_paths ~workdir:host_repo rewritten))
+    rewritten
 
 (* ── Negative / error-path tests (task-034) ──────────────────────── *)
 

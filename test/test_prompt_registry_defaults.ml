@@ -88,7 +88,7 @@ let with_registry f =
     (fun () ->
       Prompt_registry.clear ();
       Prompt_registry.set_markdown_dir prompts_dir;
-      Lib.Prompt_defaults.init ();
+      Prompt_registry.load_prompts_from_directory prompts_dir;
       f ~dir ~prompts_dir)
 
 let fixture key =

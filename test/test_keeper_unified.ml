@@ -105,13 +105,13 @@ let () =
   let prompts_dir = Filename.concat base_path "config/prompts" in
   Prompt_registry.set_markdown_dir prompts_dir;
   ignore (Result.get_ok (Masc_mcp.Keeper_exec_tools.init_policy_config ~base_path));
-  Masc_mcp.Prompt_defaults.init ()
+  Prompt_registry.load_prompts_from_directory prompts_dir
 ;;
 
 let restore_prompt_registry () =
   Prompt_registry.clear ();
   Prompt_registry.set_markdown_dir (Filename.concat (repo_root ()) "config/prompts");
-  Masc_mcp.Prompt_defaults.init ()
+  Prompt_registry.load_prompts_from_directory prompts_dir
 ;;
 
 let temp_dir () =

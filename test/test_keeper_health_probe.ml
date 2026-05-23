@@ -75,6 +75,7 @@ let test_runtime_pressure_classifier () =
           ; detail = "source=client_capacity; all client slots full"
           ; provider_id = None
           ; http_status = None
+          ; cascade_name = None
           }));
   Alcotest.check
     pressure_label_t
@@ -86,6 +87,7 @@ let test_runtime_pressure_classifier () =
           ; detail = "inflight_capacity_full tier=strict_tool_candidates"
           ; provider_id = None
           ; http_status = None
+          ; cascade_name = None
           }));
   Alcotest.check
     pressure_label_t
@@ -97,6 +99,7 @@ let test_runtime_pressure_classifier () =
           ; detail = "rate limit"
           ; provider_id = Some "openai"
           ; http_status = Some 429
+          ; cascade_name = None
           }));
   Alcotest.check
     pressure_label_t
@@ -108,6 +111,7 @@ let test_runtime_pressure_classifier () =
           ; detail = "getaddrinfo ENOTFOUND api.z.ai"
           ; provider_id = Some "zai"
           ; http_status = None
+          ; cascade_name = None
           }));
   Alcotest.check
     pressure_label_t
@@ -119,6 +123,7 @@ let test_runtime_pressure_classifier () =
           ; detail = "inter_chunk_idle timeout"
           ; provider_id = None
           ; http_status = Some 504
+          ; cascade_name = None
           }));
   Alcotest.check
     pressure_label_t
@@ -130,6 +135,7 @@ let test_runtime_pressure_classifier () =
           ; detail = "unexpected provider failure"
           ; provider_id = None
           ; http_status = Some 500
+          ; cascade_name = None
           }));
   Alcotest.check
     pressure_label_t
@@ -168,6 +174,7 @@ let test_run_once_records_specific_failure_ratio_reason () =
             ; detail = "getaddrinfo ENOTFOUND api.z.ai"
             ; provider_id = Some "zai"
             ; http_status = None
+            ; cascade_name = None
             });
        register_crashed
          "provider-dns-b"
@@ -176,6 +183,7 @@ let test_run_once_records_specific_failure_ratio_reason () =
             ; detail = "getaddrinfo ENOTFOUND api.z.ai"
             ; provider_id = Some "zai"
             ; http_status = None
+            ; cascade_name = None
             });
        H.run_once ~base_path:base_dir;
        Alcotest.check

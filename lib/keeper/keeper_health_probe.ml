@@ -52,7 +52,7 @@ let runtime_pressure_class_of_label label =
   | _ -> None
 ;;
 
-let provider_runtime_pressure_class ~code ~detail ~http_status =
+let provider_runtime_pressure_class ~code ~detail ~http_status ~cascade_name =
   let contains needle =
     String_util.contains_substring_ci code needle
     || String_util.contains_substring_ci detail needle
@@ -70,7 +70,7 @@ let provider_runtime_pressure_class ~code ~detail ~http_status =
   else if
     contains "tier_admission"
     || contains "inflight_capacity_full"
-    || contains "strict_tool_candidates"
+    || Option.is_some cascade_name
     || contains "tier="
   then Tier_admission_full
   else if
@@ -103,8 +103,8 @@ let provider_runtime_pressure_class ~code ~detail ~http_status =
 
 let runtime_pressure_class_of_failure_reason = function
   | Some (Keeper_registry.Provider_timeout_loop _) -> Some Provider_timeout
-  | Some (Keeper_registry.Provider_runtime_error { code; detail; http_status; _ }) ->
-    Some (provider_runtime_pressure_class ~code ~detail ~http_status)
+  | Some (Keeper_registry.Provider_runtime_error { code; detail; http_status; cascade_name }) ->
+    Some (provider_runtime_pressure_class ~code ~detail ~http_status ~cascade_name)
   | Some (Keeper_registry.Stale_turn_timeout _) -> Some Turn_stale_timeout
   | Some
       ( Keeper_registry.Heartbeat_consecutive_failures _

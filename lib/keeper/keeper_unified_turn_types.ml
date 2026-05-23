@@ -123,13 +123,14 @@ let cascade_exhaustion_reason_code
 
 let cascade_exhausted_failure_reason_of_raw_error ~detail raw_error =
   match Cascade_error_classify.classify_masc_internal_error_of_string raw_error with
-  | Some (Cascade_error_classify.Cascade_exhausted { reason; _ }) ->
+  | Some (Cascade_error_classify.Cascade_exhausted { reason; cascade_name }) ->
     Some
       (Keeper_registry.Provider_runtime_error
          { code = cascade_exhaustion_reason_code reason
          ; detail
          ; provider_id = None
          ; http_status = None
+         ; cascade_name = Some (Keeper_cascade_profile.runtime_name_to_string cascade_name)
          })
   | Some (Cascade_error_classify.Capacity_backpressure { detail = capacity_detail; _ }) ->
     Some
@@ -138,6 +139,7 @@ let cascade_exhausted_failure_reason_of_raw_error ~detail raw_error =
          ; detail = capacity_detail
          ; provider_id = None
          ; http_status = None
+         ; cascade_name = None
          })
   | Some
       ( Cascade_error_classify.Resumable_cli_session _
@@ -191,6 +193,7 @@ let registry_failure_reason_of_terminal_reason
          ; detail
          ; provider_id = None
          ; http_status = None
+         ; cascade_name = None
          })
   | Keeper_turn_disposition.Cascade_attempts_exhausted ->
     Some
@@ -199,6 +202,7 @@ let registry_failure_reason_of_terminal_reason
          ; detail
          ; provider_id = None
          ; http_status = None
+         ; cascade_name = None
          })
   | Keeper_turn_disposition.Success
   | Keeper_turn_disposition.External_cancel

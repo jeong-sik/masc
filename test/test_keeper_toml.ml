@@ -474,7 +474,8 @@ active_goal_ids = ["goal-runtime", "goal-masc-mcp"]
       check (option bool) "proactive" (Some true) d.proactive_enabled;
       check (option bool) "room signal prompt" (Some true)
         d.room_signal_prompt_enabled;
-      check (option bool) "policy_voice" (Some false) d.policy_voice_enabled;
+      (* [policy_voice_enabled] was removed from [keeper_profile_defaults]
+         during the dead-export sweep; drop the assertion. *)
       check (option bool) "autoboot_enabled" (Some false) d.autoboot_enabled;
       check (option string) "github_identity" (Some "anyang-keepers")
         d.github_identity;

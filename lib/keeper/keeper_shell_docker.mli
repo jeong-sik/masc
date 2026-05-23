@@ -91,6 +91,7 @@ val gh_exit_class_field :
   status:Unix.process_status ->
   output:string ->
   cmd_stages:Keeper_shell_command_semantics.parsed_stage list ->
+  unit ->
   (string * Yojson.Safe.t) list
 
 (** [-v <host>:<container>:ro] mount list, or [[]] when [host] is

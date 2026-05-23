@@ -8,6 +8,12 @@
 open Keeper_types
 open Keeper_exec_shared
 
+(* Re-export for tests that still call the canonical public surface
+   (test_keeper_shell_docker_route). Function body lives in the
+   sibling module Keeper_shell_docker_exec_failure. *)
+let docker_exec_failure_message =
+  Keeper_shell_docker_exec_failure.docker_exec_failure_message
+
 let path_exists path =
   try Sys.file_exists path with
   | Sys_error _ -> false

@@ -173,3 +173,8 @@ val is_provider_timeout_error : Agent_sdk.Error.sdk_error -> bool
 (** True when [err] is a provider-timeout class failure (deadline,
     cascade timeout, budget retry). Live caller:
     [keeper_unified_turn.ml] degraded-retry classification. *)
+
+val is_receipt_lost_error : Agent_sdk.Error.sdk_error -> bool
+(** True when [err] indicates a turn whose response was emitted by the
+    provider but lost in transit (network drop after commit). Live
+    caller: [keeper_unified_turn.ml] FSM failure-reason routing. *)

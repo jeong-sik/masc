@@ -141,6 +141,21 @@ val host_sandbox : sandbox_context
 (** Convenience: the default {!Masc_exec.Sandbox_target.host}
     sandbox. *)
 
+val gate
+  :  ?caller:caller
+  -> raw:string
+  -> allowlist:allowlist_policy
+  -> path_policy:path_policy
+  -> sandbox:sandbox_context
+  -> unit
+  -> verdict
+(** Policy-aware gate for raw shell command strings. Parses [raw] through
+    the Bash parser, then applies the same allowlist, redirect, path
+    policy, sandbox, and nested-pipeline handling as {!gate_typed}.
+    Live caller: [Exec_policy.command_context_with_allowlist] via the
+    [Exec_shell_gate = Masc_exec_command_gate.Shell_command_gate]
+    module alias. *)
+
 val gate_typed
   :  ?caller:caller
   -> ir:Masc_exec.Shell_ir.t

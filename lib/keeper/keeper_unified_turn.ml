@@ -1421,20 +1421,33 @@ let run_keeper_cycle
                     Keeper_metrics.metric_keeper_turns
                     ~labels:[ "keeper_name", meta.name; "outcome", "failure" ]
                     ();
-                  let fsm_failure_reason =
-                    if EC.is_required_tool_contract_violation err
-                    then
-                      Keeper_turn_fsm.Failure_tool_contract_violation
-                        { reason_code = "require_tool_use" }
-                    else
-                      Keeper_turn_fsm.Failure_provider_error
-                        { kind = sdk_error_kind err; detail = short_preview e_str }
-                  in
-                  Keeper_turn_fsm.emit_transition
-                    ~keeper_name:meta.name
-                    ~turn_id:keeper_turn_id
-                    ~prev:Keeper_turn_fsm.Streaming
-                    (Keeper_turn_fsm.Failed fsm_failure_reason);
+                  if EC.is_provider_timeout_error err
+                  then
+                    Keeper_turn_fsm.emit_transition
+                      ~keeper_name:meta.name
+                      ~turn_id:keeper_turn_id
+                      ~prev:Keeper_turn_fsm.Streaming
+                      (Keeper_turn_fsm.Cancelled
+                         Keeper_turn_fsm.Cancelled_provider_timeout)
+                  else
+                    let fsm_failure_reason =
+                      if EC.is_required_tool_contract_violation err
+                      then
+                        Keeper_turn_fsm.Failure_tool_contract_violation
+                          { reason_code = "require_tool_use" }
+                      else if EC.is_receipt_lost_error err
+                      then
+                        Keeper_turn_fsm.Failure_receipt_lost
+                          { primary_error = e_str; fallback_path = None }
+                      else
+                        Keeper_turn_fsm.Failure_provider_error
+                          { kind = sdk_error_kind err; detail = short_preview e_str }
+                    in
+                    Keeper_turn_fsm.emit_transition
+                      ~keeper_name:meta.name
+                      ~turn_id:keeper_turn_id
+                      ~prev:Keeper_turn_fsm.Streaming
+                      (Keeper_turn_fsm.Failed fsm_failure_reason);
                   let log_keeper_cycle_failed =
                     if EC.should_warn_keeper_cycle_failed err
                     then Log.Keeper.warn
@@ -1669,6 +1682,16 @@ let run_keeper_cycle
                   Error err
                 | Ok result ->
                   let final_execution = !last_execution in
+                  Keeper_turn_fsm.emit_transition
+                    ~keeper_name:meta.name
+                    ~turn_id:keeper_turn_id
+                    ~prev:Keeper_turn_fsm.Streaming
+                    Keeper_turn_fsm.Completing;
+                  Keeper_turn_fsm.emit_transition
+                    ~keeper_name:meta.name
+                    ~turn_id:keeper_turn_id
+                    ~prev:Keeper_turn_fsm.Completing
+                    Keeper_turn_fsm.Done;
                   finalize_trajectory_acc
                     ~config
                     ~keeper_name:meta.name

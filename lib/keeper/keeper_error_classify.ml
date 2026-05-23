@@ -177,6 +177,22 @@ let is_required_tool_contract_violation (err : Agent_sdk.Error.sdk_error) : bool
   | Agent_sdk.Error.A2a _
   | Agent_sdk.Error.Internal _ -> false
 
+(** Receipt I/O failure: the turn body succeeded but the authoritative
+    receipt could not be persisted.  See
+    [keeper_agent_run.ml::execution_receipt_append_failed]. *)
+let is_receipt_lost_error (err : Agent_sdk.Error.sdk_error) : bool =
+  match err with
+  | Agent_sdk.Error.Internal msg ->
+      string_contains_substring ~needle:"execution_receipt_append_failed" msg
+  | _ -> false
+
+(** Provider-level timeout (not structural OAS wall-clock budget). *)
+let is_provider_timeout_error (err : Agent_sdk.Error.sdk_error) : bool =
+  match err with
+  | Agent_sdk.Error.Api (Timeout _) -> true
+  | Agent_sdk.Error.Provider (Llm_provider.Error.Timeout _) -> true
+  | _ -> false
+
 let message_looks_like_gateway_backpressure detail =
   let lower = String.lowercase_ascii detail in
   string_contains_substring ~needle:"server error 524" lower

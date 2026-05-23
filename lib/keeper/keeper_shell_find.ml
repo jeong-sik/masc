@@ -28,20 +28,13 @@ let handle
             "-not"; "-path"; "*/_build/*";
             "-not"; "-path"; "*/.masc/*"  ]
         in
-        match
-          Keeper_shell_runtime.run_readonly_op ~config ~meta ?turn_sandbox_factory ~op ~target
-            ~host_argv:(make_argv target)
-            ~docker_argv:(fun cpath -> make_argv cpath)
-            ~max_bytes:1_000_000
-            ~timeout_sec:Keeper_shell_shared.read_timeout_sec
-            ()
-        with
-        | Error response -> response
-        | Ok (via, st, out) ->
-          Keeper_shell_runtime.readonly_json_string
-            (Keeper_shell_runtime.readonly_json_fields ~op ~path:target ~via
-               ~status:st ~output_field:"files"
-               ~output:(lines_to_json ~limit out)
-               ~extra:[ "name", `String name_pattern ]
-               ()))
+        Keeper_shell_runtime.run_readonly_json_op ~config ~meta ?turn_sandbox_factory ~op ~target
+          ~host_argv:(make_argv target)
+          ~docker_argv:(fun cpath -> make_argv cpath)
+          ~max_bytes:1_000_000
+          ~timeout_sec:Keeper_shell_shared.read_timeout_sec
+          ~output_field:"files"
+          ~output_of_out:(lines_to_json ~limit)
+          ~extra:[ "name", `String name_pattern ]
+          ())
 ;;

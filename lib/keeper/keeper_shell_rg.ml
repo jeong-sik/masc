@@ -44,25 +44,15 @@ let handle
             then make_argv "rg" target
             else [ "grep"; "-R"; "-n"; "-I"; "-m"; string_of_int limit; "--"; pattern; target ]
           in
-          match
-            Keeper_shell_runtime.run_readonly_op ~config ~meta ?turn_sandbox_factory ~op ~target
-              ~ok_exit_codes:[ 0; 1 ]
-              ~host_argv
-              ~docker_argv:(fun cpath -> make_argv "rg" cpath)
-              ~max_bytes:1_000_000
-              ~timeout_sec:Keeper_shell_shared.read_timeout_sec
-              ()
-          with
-          | Error response -> response
-          | Ok (via, st, out) ->
-            (* rg exit codes: 0=matches found, 1=no matches (not an error), 2+=real error.
-               Treat exit 1 as success with empty results — "no match" is a valid answer. *)
-            Keeper_shell_runtime.readonly_json_string
-              (Keeper_shell_runtime.readonly_json_fields
-                 ~ok_when:(fun st -> st = Unix.WEXITED 0 || st = Unix.WEXITED 1)
-                 ~op ~path:target ~via ~status:st
-                 ~output_field:"matches"
-                 ~output:(lines_to_json ~limit out)
-                 ~extra:[ "pattern", `String pattern ]
-                 ()))
+          Keeper_shell_runtime.run_readonly_json_op ~config ~meta ?turn_sandbox_factory ~op ~target
+            ~ok_exit_codes:[ 0; 1 ]
+            ~ok_when:(fun st -> st = Unix.WEXITED 0 || st = Unix.WEXITED 1)
+            ~host_argv
+            ~docker_argv:(fun cpath -> make_argv "rg" cpath)
+            ~max_bytes:1_000_000
+            ~timeout_sec:Keeper_shell_shared.read_timeout_sec
+            ~output_field:"matches"
+            ~output_of_out:(lines_to_json ~limit)
+            ~extra:[ "pattern", `String pattern ]
+            ())
 ;;

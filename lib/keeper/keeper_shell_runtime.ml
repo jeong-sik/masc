@@ -312,17 +312,20 @@ let run_cwd_op
     pattern in ops.ml dispatcher arms. *)
 
 let run_readonly_json_op ~config ~meta ?turn_sandbox_factory ~op ~target
-    ~host_argv ~docker_argv ?(max_bytes = 1_000_000) ~timeout_sec ~output_field
+    ~host_argv ~docker_argv ?(max_bytes = 1_000_000)
+    ?(ok_exit_codes = [ 0 ])
+    ?(ok_when = fun st -> st = Unix.WEXITED 0)
+    ~timeout_sec ~output_field
     ~output_of_out ?extra ()
   =
   match
-    run_readonly_op ~config ~meta ?turn_sandbox_factory
+    run_readonly_op ~config ~meta ?turn_sandbox_factory ~ok_exit_codes
       ~op ~target ~host_argv ~docker_argv ~max_bytes ~timeout_sec ()
   with
   | Error response -> response
   | Ok (via, st, out) ->
     let fields =
-      readonly_json_fields ~op ~path:target ~via
+      readonly_json_fields ~ok_when ~op ~path:target ~via
         ~status:st ~output_field ~output:(output_of_out out)
         ?extra ()
     in

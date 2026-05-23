@@ -215,3 +215,21 @@ val run_wc_op :
   timeout_sec:float ->
   unit ->
   string
+
+val run_readonly_json_op :
+  config:Coord.config ->
+  meta:Keeper_types.keeper_meta ->
+  ?turn_sandbox_factory:Keeper_sandbox_factory.t ->
+  op:string ->
+  target:string ->
+  host_argv:string list ->
+  docker_argv:(string -> string list) ->
+  ?max_bytes:int ->
+  ?ok_exit_codes:int list ->
+  ?ok_when:(Unix.process_status -> bool) ->
+  timeout_sec:float ->
+  output_field:string ->
+  output_of_out:(string -> Yojson.Safe.t) ->
+  ?extra:(string * Yojson.Safe.t) list ->
+  unit ->
+  string

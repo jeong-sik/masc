@@ -223,13 +223,7 @@ let artifact_threshold_bytes =
 ;;
 
 let command_word_stages cmd =
-  match Masc_exec_bash_parser.Bash_words.stages cmd with
-  | Ok stages ->
-      List.map
-        (fun words ->
-           List.map (fun (word : Masc_exec_bash_parser.Bash_words.word) -> word.value) words)
-        stages
-  | Error _ -> []
+  Exec_policy_mutation_classifier.stage_words_per_stage cmd
 ;;
 
 let first_segment_tokens cmd =

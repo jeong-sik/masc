@@ -235,6 +235,25 @@ let argv_words_of_string text =
   | _ -> None
 ;;
 
+(** Per-stage variant: each pipeline segment produces its own word list,
+    preserving stage boundaries (unlike {!flat_stage_words} which
+    concatenates). Replaces the historical [Bash_words.stages] return
+    shape for callers that need to inspect individual stages. *)
+let stage_words_per_stage (cmd : string) : string list list =
+  match Masc_exec_bash_parser.Bash.parse_string cmd with
+  | Parsed.Parsed ir ->
+    let rec collect acc = function
+      | Shell_ir.Simple s ->
+        (match literal_words_of_simple s with
+         | Some ws -> ws :: acc
+         | None -> acc)
+      | Shell_ir.Pipeline stages ->
+        List.fold_left collect acc stages
+    in
+    List.rev (collect [] ir)
+  | _ -> []
+;;
+
 (** Expose the raw [Bash.parse_string] result so that callers needing
     [Shell_ir.t Parsed.t] (e.g. gh command validation) don't need to
     import [Masc_exec_bash_parser] directly. *)

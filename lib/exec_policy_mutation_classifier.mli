@@ -72,3 +72,9 @@ val argv_words_of_string : string -> string list option
     callers should route through this instead of calling
     [Masc_exec_bash_parser.Bash.parse_string] directly. *)
 val parsed_of_string : string -> Masc_exec.Shell_ir.t Masc_exec.Parsed.t
+
+(** Per-stage word extraction: each pipeline segment produces its own
+    word list, preserving stage boundaries. Returns [[]] on parse
+    failure or non-literal args. Replaces [Bash_words.stages] for
+    callers that need per-stage inspection. *)
+val stage_words_per_stage : string -> string list list

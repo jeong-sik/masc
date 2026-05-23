@@ -58,27 +58,40 @@ let split_unquoted_guard_word acc value =
   loop 0 0 acc
 ;;
 
-let guard_tokens_of_word acc (word : Masc_exec_bash_parser.Bash_words.word) =
-  if word.quoted
-  then push_guard_word acc ~quoted:true word.value
-  else if String.equal word.value "&&"
-          || String.equal word.value "||"
-          || String.equal word.value ";"
-  then Guard_separator :: acc
-  else split_unquoted_guard_word acc word.value
+let rec guard_tokens_of_arg acc (arg : Masc_exec.Shell_ir.arg) =
+  match arg with
+  | Masc_exec.Shell_ir.Lit (value, meta) ->
+    if meta.Masc_exec.Shell_ir.quoted
+    then push_guard_word acc ~quoted:true value
+    else if String.equal value "&&"
+            || String.equal value "||"
+            || String.equal value ";"
+    then Guard_separator :: acc
+    else split_unquoted_guard_word acc value
+  | Masc_exec.Shell_ir.Concat parts ->
+    List.fold_left guard_tokens_of_arg acc (List.rev parts)
+  | Masc_exec.Shell_ir.Var _ -> acc
 ;;
 
 let shell_guard_tokens cmd =
-  match Masc_exec_bash_parser.Bash_words.stages cmd with
-  | Error _ -> []
-  | Ok stages ->
-    stages
-    |> List.fold_left
-         (fun acc stage ->
-            let acc = List.fold_left guard_tokens_of_word acc stage in
-            Guard_separator :: acc)
-         []
-    |> List.rev
+  match Masc_exec_bash_parser.Bash.parse_string cmd with
+  | Masc_exec.Parsed.Parsed ir ->
+    let rec collect acc = function
+      | Masc_exec.Shell_ir.Simple s ->
+        let bin_tokens =
+          guard_tokens_of_arg acc
+            (Masc_exec.Shell_ir.Lit
+               (Masc_exec.Bin.to_string s.bin, Masc_exec.Shell_ir.default_meta))
+        in
+        List.fold_left guard_tokens_of_arg bin_tokens (List.rev s.args)
+      | Masc_exec.Shell_ir.Pipeline stages ->
+        List.fold_left
+          (fun acc stage -> Guard_separator :: collect acc stage)
+          acc
+          (List.rev stages)
+    in
+    List.rev (collect [] ir)
+  | _ -> []
 ;;
 
 let shell_assignment_like word =

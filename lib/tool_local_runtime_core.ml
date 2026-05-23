@@ -56,15 +56,8 @@ let parse_int_opt value =
 let unique_preserve_order = Json_util.dedupe_keep_order
 
 let split_ws text =
-  match Masc_exec_bash_parser.Bash_words.stages text with
-  | Ok stages ->
-      stages
-      |> List.concat
-      |> List.map (fun (word : Masc_exec_bash_parser.Bash_words.word) -> word.value)
-      |> List.filter (fun item -> not (String.equal item ""))
-  | Error _ ->
-      let trimmed = String.trim text in
-      if String.equal trimmed "" then [] else [ trimmed ]
+  let words = Exec_policy_mutation_classifier.stage_words_of_string text in
+  List.filter (fun item -> not (String.equal item "")) words
 
 let string_contains_substring = String_util.contains_substring
 

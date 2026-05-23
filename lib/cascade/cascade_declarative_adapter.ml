@@ -228,7 +228,15 @@ let provider_config_from_declared_provider
            request_path_for_http_provider ~provider ~registry_entry ~kind ~base_url
          in
          let api_key = api_key_of_credential ?registry_entry provider.credentials in
-         let headers = Cascade_config.headers_with_auth ~kind ~api_key in
+         let auth_headers = Cascade_config.headers_with_auth ~kind ~api_key in
+         let custom_headers = Option.value ~default:[] provider.headers in
+         (* TOML-declared custom headers override generated auth headers by key.
+            This allows operators to set provider-specific headers (e.g.
+            anthropic-version) while preserving auth and Content-Type. *)
+         let custom_keys = List.map fst custom_headers in
+         let headers =
+           custom_headers @ List.filter (fun (k, _) -> not (List.mem k custom_keys)) auth_headers
+         in
          Some
            (Llm_provider.Provider_config.make
               ~kind
@@ -251,7 +259,7 @@ let provider_config_from_declared_provider
               ~model_id:spec.api_name
               ~base_url:""
               ~api_key:(api_key_of_credential ?registry_entry provider.credentials)
-              ~headers:[]
+              ~headers:(Option.value ~default:[] provider.headers)
               ~max_context:spec.max_context
               ?supports_tool_choice_override
               ?max_tokens

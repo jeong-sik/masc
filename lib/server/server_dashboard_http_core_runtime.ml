@@ -1,13 +1,10 @@
 (** Dashboard HTTP compute-runtime bindings, extracted from
-    [server_dashboard_http_core.ml]. Holds the shared
-    [runtime_support] instance, [set_executor_pool] alias,
-    [dashboard_runtime] constructor, the [run_dashboard_compute]
-    dispatch wrapper, and the [state_dashboard_runtime_caps]
-    state-decomposer. *)
+    [server_dashboard_http_core.ml]. Provides the
+    [set_executor_pool] alias, [dashboard_runtime] constructor,
+    the [run_dashboard_compute] dispatch wrapper, and the
+    [state_dashboard_runtime_caps] state-decomposer. *)
 
 open Server_dashboard_http_runtime_support
-
-let runtime_support = Server_dashboard_http_runtime_support.default ()
 
 (** Executor pool for CPU-heavy dashboard compute.
     Pool reference is shared via [Executor_pool_ref] in masc_core. *)
@@ -33,7 +30,6 @@ let run_dashboard_compute
   =
   let runtime = dashboard_runtime ?net ?mono_clock config in
   Server_dashboard_http_runtime_support.run_dashboard_compute
-    runtime_support
     ~mode
     ?runtime
     ~sw

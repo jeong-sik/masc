@@ -7,19 +7,11 @@ type runtime = {
   mono_clock : Eio.Time.Mono.ty Eio.Resource.t;
 }
 
-type t = unit
-
-let create () = ()
-
-let default_state : t = create ()
-
-let default () = default_state
-
 let set_executor_pool pool = Executor_pool_ref.set pool
 
-let run_dashboard_compute state ?(mode = Offloaded_readonly) ?runtime ~sw ~clock
+let run_dashboard_compute ?(mode = Offloaded_readonly) ?runtime ~sw ~clock
     ~(config : Coord.config) compute =
-  let _ = state, runtime, clock in
+  let _ = runtime, clock in
   let fallback () = compute ~config ~sw in
   let run_in_pool pool_sw =
     `Done (compute ~config ~sw:pool_sw)

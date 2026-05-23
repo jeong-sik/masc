@@ -1,9 +1,6 @@
 (** Dashboard compute-runtime bindings extracted from
     {!Server_dashboard_http_core}. *)
 
-val runtime_support : Server_dashboard_http_runtime_support.t
-(** Shared runtime-support handle for dashboard compute dispatch. *)
-
 val set_executor_pool : Eio.Executor_pool.t -> unit
 (** Register the dashboard executor pool. *)
 

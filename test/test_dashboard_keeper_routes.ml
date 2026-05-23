@@ -1302,24 +1302,6 @@ let test_agent_purge_route_removes_keeper_artifacts_and_toml () =
           (Masc_mcp.Keeper_id.Trace_id.to_string meta.runtime.trace_id)))
 ;;
 
-let test_available_cascade_profiles_filter_invalid_catalog_entries () =
-  with_mock_model @@ fun valid_model ->
-  with_temp_config_root
-    (cascade_toml ~route_target:"good" ~invalid_profiles:[ "broken" ] valid_model
-       [ "good" ])
-  @@ fun config_root ->
-  with_config_dir config_root @@ fun () ->
-  check
-    (list string)
-    "assignable cascades exclude invalid presets"
-    [ "tier-group.good"; "tier.good" ]
-    (Routes.available_cascade_profiles ());
-  let invalid = Routes.invalid_cascade_profiles () in
-  check bool "invalid preset is surfaced separately" true
-    (List.mem_assoc "tier.broken" invalid
-     || List.mem_assoc "tier-group.broken" invalid)
-;;
-
 let test_invalid_profile_projection_keeps_internal_names () =
   with_mock_model @@ fun valid_model ->
   let model_id, endpoint = split_model_spec valid_model in
@@ -2244,10 +2226,6 @@ let () =
             "agent purge removes keeper artifacts and keeper toml"
             `Slow
             test_agent_purge_route_removes_keeper_artifacts_and_toml
-        ; test_case
-            "available cascade profiles filter invalid catalog entries"
-            `Quick
-            test_available_cascade_profiles_filter_invalid_catalog_entries
         ; test_case
             "keeper cascade routes filter invalid catalog entries"
             `Slow

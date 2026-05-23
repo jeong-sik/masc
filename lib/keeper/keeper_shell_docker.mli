@@ -3,16 +3,11 @@
     Extracted from keeper_exec_shell.ml — Docker container
     lifecycle, sandbox profile resolution, and container
     invocation. Pure infrastructure; generic command-shape policy lives
-    in [Keeper_shell_command_semantics]. *)
+    in [Keeper_shell_command_semantics].
 
-(** Build a structured failure message used by docker exec
-    diagnostics, emphasising the exit/signal status and (when
-    blank) flagging empty output explicitly. *)
-val docker_exec_failure_message :
-  image:string ->
-  status:Unix.process_status ->
-  output:string ->
-  string
+    The failure-message and failure-recording surfaces moved out to
+    [Keeper_shell_docker_exec_failure] during godfile decomp. Call
+    those qualified rather than relying on a re-export here. *)
 
 (** Path of the per-keeper egress policy file
     [<sandbox_root>/egress.json]. *)
@@ -82,15 +77,15 @@ val ensure_keeper_sandbox_runtime :
     Returns [Some (repo_arg, endpoint)] when the misuse pattern is
     detected, [None] otherwise — caller emits a self-correcting
     error pre-exec. *)
-(** Emit a [("gh_exit_class", ...)] JSON field when [cmd] targets
+(** Emit a [("gh_exit_class", ...)] JSON field when [cmd_stages] target
     gh (otherwise []), and bump the matching [Legendary_counters]
     bucket. Caller appends the returned list to its assoc payload
     unconditionally — the empty case keeps callsite shapes stable. *)
 val gh_exit_class_field :
-  cmd:string ->
   status:Unix.process_status ->
   output:string ->
   cmd_stages:Keeper_shell_command_semantics.parsed_stage list ->
+  unit ->
   (string * Yojson.Safe.t) list
 
 (** [-v <host>:<container>:ro] mount list, or [[]] when [host] is

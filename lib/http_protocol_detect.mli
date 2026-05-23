@@ -10,12 +10,35 @@
 
     Internal helpers (the [h2_preface_prefix] string constant
     and the [h2_preface_len] derived integer) are hidden —
-    callers consume only the [protocol] variant and the
-    detector entry point. *)
+    callers consume only the [protocol] variant, the two
+    detector entry points, and the printable converter. *)
 
 type protocol =
   | Http1
   | Http2
+
+val detect_from_fd :
+  Unix.file_descr ->
+  (protocol, string) result
+(** [detect_from_fd fd] peeks the first bytes of [fd] using
+    [MSG_PEEK] and classifies the protocol. Exposed as the
+    lower-level entry point so unit tests can drive detection
+    against an [Unix.socketpair] without pulling in the Eio
+    runtime — the algorithm boundary is pinned at the raw-fd
+    layer, not the Eio adapter.
+
+    Returns [Ok Http2] when the peek matches the H2 preface
+    prefix, [Ok Http1] for any other observed bytes (including
+    a partial read shorter than the preface — any valid H2
+    client sends the full preface immediately).
+
+    [Ok Http1] is also returned for [EAGAIN] / [EWOULDBLOCK]
+    on a non-blocking socket — an in-flight HTTP/1.1 request
+    is the most likely cause.
+
+    Returns [Error msg] for [recv = 0] (peer closed before
+    sending) and for any other [Unix.Unix_error]
+    (formatted via [Unix.error_message]). *)
 
 val detect :
   _ Eio.Net.stream_socket ->
@@ -26,3 +49,7 @@ val detect :
 
     Returns [Error "no Unix FD available on this socket"] when
     the flow has no Unix FD (e.g. an in-memory transport). *)
+
+val protocol_to_string : protocol -> string
+(** ["HTTP/1.1"] / ["HTTP/2"] — printable form for log lines and
+    metric labels. *)

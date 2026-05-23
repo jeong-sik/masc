@@ -89,6 +89,10 @@ let test_empty_command () =
   Alcotest.(check bool) "empty blocked" true (is_error (validate ""));
   Alcotest.(check bool) "whitespace blocked" true (is_error (validate "   "))
 
+let is_write cmd =
+  match Masc_exec_bash_parser.Bash.parse_string cmd with
+  | Masc_exec_bash_parser.Parsed.Parsed ir -> Masc_mcp.Worker_dev_tools.is_write_operation ir
+  | _ -> false
 let test_write_ops_detected () =
   let writes = [
     "git push origin main";

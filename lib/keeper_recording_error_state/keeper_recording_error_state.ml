@@ -104,6 +104,8 @@ let classify_error (err : string) : error_kind =
   then Stale_turn_timeout
   else if contains "fiber_unresolved"
   then Fiber_unresolved
+  else if contains "oas_timeout_budget_loop"
+  then Provider_timeout
   else if contains "provider_timeout"
   then Provider_timeout
   else if contains "state machine guard" || contains "guard violation"

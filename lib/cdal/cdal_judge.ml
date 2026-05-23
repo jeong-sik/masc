@@ -24,12 +24,13 @@ let check_execution_mode (b : Cdal_loader.loaded_bundle) : Cdal_types.check_resu
   in
   if propagation_ok && escalation_ok
   then { check_id; status = Satisfied; findings = []; completeness_gaps = [] }
-  else (
-    let findings = ref [] in
-    if not propagation_ok
-    then
-      findings
-      := ({ Cdal_types.check_id
+  else
+    let propagation_finding : Cdal_types.contract_finding option =
+      if propagation_ok
+      then None
+      else
+        Some
+          { Cdal_types.check_id
           ; event_id = None
           ; observed =
               `String (Masc_mcp_cdal_runtime.Execution_mode.to_string proof_requested)
@@ -37,12 +38,13 @@ let check_execution_mode (b : Cdal_loader.loaded_bundle) : Cdal_types.check_resu
               `String (Masc_mcp_cdal_runtime.Execution_mode.to_string contract_mode)
           ; trace_ref = None
           }
-          : Cdal_types.contract_finding)
-         :: !findings;
-    if not escalation_ok
-    then
-      findings
-      := ({ Cdal_types.check_id
+    in
+    let escalation_finding : Cdal_types.contract_finding option =
+      if escalation_ok
+      then None
+      else
+        Some
+          { Cdal_types.check_id
           ; event_id = Some "escalation"
           ; observed =
               `String (Masc_mcp_cdal_runtime.Execution_mode.to_string proof_effective)
@@ -53,9 +55,12 @@ let check_execution_mode (b : Cdal_loader.loaded_bundle) : Cdal_types.check_resu
                    (Masc_mcp_cdal_runtime.Execution_mode.to_string proof_requested))
           ; trace_ref = None
           }
-          : Cdal_types.contract_finding)
-         :: !findings;
-    { check_id; status = Violated; findings = List.rev !findings; completeness_gaps = [] })
+    in
+    { check_id
+    ; status = Violated
+    ; findings = List.filter_map Fun.id [propagation_finding; escalation_finding]
+    ; completeness_gaps = []
+    }
 ;;
 
 (* ================================================================ *)

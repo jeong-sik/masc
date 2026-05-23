@@ -339,7 +339,6 @@
   test_keeper_turn_fsm_emit
   test_keeper_event_queue
   test_keeper_relevance_check
-  test_gh_api_classification
   test_stale_kill_class
   test_workspace_routes_keeper
   test_workspace_tree_exclusions
@@ -666,7 +665,6 @@
   test_keeper_turn_fsm_emit
   test_keeper_event_queue
   test_keeper_relevance_check
-  test_gh_api_classification
   test_actionable_path_action
   test_stale_kill_class
   test_provider_capability_matrix

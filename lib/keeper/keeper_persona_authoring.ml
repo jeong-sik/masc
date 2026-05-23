@@ -92,6 +92,9 @@ let choice_effect_fields = Archetypes.choice_effect_fields
 let choice_effect_for = Archetypes.choice_effect_for
 let archetype_axes_json = Archetypes.archetype_axes_json
 
+let keeper_create_preview_args name =
+  `Assoc [ "persona_name", `String name; "dry_run", `Bool true ]
+
 let field_catalog_entries =
   [ field_catalog_entry
         ~path:"name"
@@ -362,14 +365,14 @@ let schema_json ?(include_examples = false) () =
                  ; "dry_run", `Bool true
                  ] )
            ; ( "keeper_dry_run_args"
-             , `Assoc [ "persona_name", `String "<handle>"; "dry_run", `Bool true ] )
+             , keeper_create_preview_args "<handle>" )
            ] )
      ; ( "keeperization"
        , `Assoc
            [ "dry_run_tool", `String "masc_keeper_create_from_persona"
            ; "start_tool", `String "masc_keeper_create_from_persona"
            ; ( "dry_run_args"
-             , `Assoc [ "persona_name", `String "<handle>"; "dry_run", `Bool true ] )
+             , keeper_create_preview_args "<handle>" )
            ] )
      ]
      @ examples)
@@ -656,7 +659,7 @@ let save_result_to_json ?(dry_run = false) result =
     ; "profile", result.profile
     ; "warnings", string_list_to_json result.warnings
     ; ( "keeper_create_preview_args"
-      , `Assoc [ "persona_name", `String result.handle; "dry_run", `Bool true ] )
+      , keeper_create_preview_args result.handle )
     ]
 ;;
 
@@ -959,7 +962,7 @@ let handle_persona_generate ctx args =
                             ; "dry_run", `Bool false
                             ] )
                       ; ( "keeper_create_preview_args"
-                        , `Assoc [ "persona_name", `String handle; "dry_run", `Bool true ] )
+                        , keeper_create_preview_args handle )
                       ]
                   in
                   true, Yojson.Safe.to_string json

@@ -149,6 +149,10 @@ let board_karma_ledger_json req =
 let respond_board_json reqd json =
   Http.Response.json (Yojson.Safe.to_string json) reqd
 
+let board_error_json e = `Assoc [("error", `String (Tool_board.board_error_to_string e))]
+let invalid_json_error msg = (invalid_json_error msg)
+let sub_board_id_required_error () = (sub_board_id_required_error ())
+
 let add_routes ~sw ~clock router =
   router
   |> Http.Router.get "/api/v1/activity/events" (fun request reqd ->
@@ -378,12 +382,12 @@ let add_routes ~sw ~clock router =
               | Error e ->
                   Http.Response.json ~status:`Bad_request
                     (Yojson.Safe.to_string
-                       (`Assoc [("error", `String (Tool_board.board_error_to_string e))]))
+                       (board_error_json e))
                     reqd)
            with Yojson.Json_error msg ->
              Http.Response.json ~status:`Bad_request
                (Yojson.Safe.to_string
-                  (`Assoc [("error", `String ("invalid JSON: " ^ msg))]))
+                  ((invalid_json_error msg)))
                reqd))
          request reqd)
 
@@ -393,7 +397,7 @@ let add_routes ~sw ~clock router =
         | None ->
             Http.Response.json ~status:`Bad_request
               (Yojson.Safe.to_string
-                 (`Assoc [("error", `String "sub_board_id is required")]))
+                 ((sub_board_id_required_error ())))
               reqd
         | Some sub_board_id ->
             (match Board_dispatch.get_sub_board ~sub_board_id with
@@ -403,7 +407,7 @@ let add_routes ~sw ~clock router =
              | Error e ->
                  Http.Response.json ~status:`Not_found
                    (Yojson.Safe.to_string
-                      (`Assoc [("error", `String (Tool_board.board_error_to_string e))]))
+                      (board_error_json e))
                    reqd)))
 
   |> Http.Router.prefix_delete "/api/v1/board/sub-boards/" (fun request reqd ->
@@ -414,7 +418,7 @@ let add_routes ~sw ~clock router =
           | None ->
               Http.Response.json ~status:`Bad_request
                 (Yojson.Safe.to_string
-                   (`Assoc [("error", `String "sub_board_id is required")]))
+                   ((sub_board_id_required_error ())))
                 reqd
           | Some sub_board_id ->
               (match Board_dispatch.delete_sub_board ~sub_board_id with
@@ -424,7 +428,7 @@ let add_routes ~sw ~clock router =
                | Error e ->
                    Http.Response.json ~status:`Not_found
                      (Yojson.Safe.to_string
-                        (`Assoc [("error", `String (Tool_board.board_error_to_string e))]))
+                        (board_error_json e))
                      reqd)))
          request reqd)
 
@@ -448,7 +452,7 @@ let add_routes ~sw ~clock router =
               | None ->
                   Http.Response.json ~status:`Bad_request
                     (Yojson.Safe.to_string
-                       (`Assoc [("error", `String "sub_board_id is required")]))
+                       ((sub_board_id_required_error ())))
                     reqd
               | Some sub_board_id ->
                   (match Board_dispatch.update_sub_board ~sub_board_id ?name ?description ?members:members_arg ?access () with
@@ -458,12 +462,12 @@ let add_routes ~sw ~clock router =
                    | Error e ->
                        Http.Response.json ~status:`Bad_request
                          (Yojson.Safe.to_string
-                            (`Assoc [("error", `String (Tool_board.board_error_to_string e))]))
+                            (board_error_json e))
                          reqd))
            with Yojson.Json_error msg ->
              Http.Response.json ~status:`Bad_request
                (Yojson.Safe.to_string
-                  (`Assoc [("error", `String ("invalid JSON: " ^ msg))]))
+                  ((invalid_json_error msg)))
                reqd))
          request reqd)
 

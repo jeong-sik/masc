@@ -33,3 +33,15 @@ val with_slot : (unit -> 'a) -> 'a
 
     Exceptions from [f] propagate; the slot is always released. *)
 
+val configured_max : unit -> int
+(** Layer-A concurrency cap as configured by
+    [MASC_DOCKER_SPAWN_CONCURRENCY] (default 8, range 1..64).
+    Stable across calls within a process.  Delegates to
+    [Fd_accountant.configured_concurrency ~kind:Docker_spawn]. *)
+
+val effective_concurrency : unit -> int
+(** Current Layer-A effective concurrency.  Equal to
+    [configured_max ()] under normal conditions; a future change
+    could lower it on sustained FD pressure (Layer B).  Delegates to
+    [Fd_accountant.effective_concurrency ~kind:Docker_spawn]. *)
+

@@ -35,7 +35,3 @@ val classify :
   retry_count:int ->
   t
 
-(** Set of tool names considered "mechanical" for classification.
-    Exposed so tests can assert coverage and keeper operators can audit
-    the list. *)
-val mechanical_tools : string list

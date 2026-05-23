@@ -227,7 +227,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
 
       | `POST, "/webrtc/offer" ->
           if not (Server_webrtc_transport.is_enabled ()) then
-            h2_respond_json h2_reqd {|{"error":"webrtc transport disabled"}|}
+            h2_respond_json h2_reqd (error_json_string "webrtc transport disabled")
               ~status:`Not_found ~extra_headers:cors
           else
             with_server_state h2_reqd (fun state ->
@@ -256,7 +256,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
 
       | `POST, "/webrtc/answer" ->
           if not (Server_webrtc_transport.is_enabled ()) then
-            h2_respond_json h2_reqd {|{"error":"webrtc transport disabled"}|}
+            h2_respond_json h2_reqd (error_json_string "webrtc transport disabled")
               ~status:`Not_found ~extra_headers:cors
           else
             with_server_state h2_reqd (fun state ->
@@ -792,7 +792,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
               | None -> ""
             in
             if task_id = "" then
-              h2_respond_json h2_reqd {|{"error":"task_id is required"}|}
+              h2_respond_json h2_reqd (error_json_string "task_id is required")
                 ~status:`Bad_request ~extra_headers:cors
             else
               let limit =

@@ -818,7 +818,7 @@ let not_initialized_response path =
   if is_dashboard_bootstrap_path path then
     {|{"status":"initializing","message":"Server is warming up"}|}
   else
-    {|{"error":"not initialized"}|}
+    error_json_string "not initialized"
 
 let rec with_public_read handler request reqd =
   let strict = http_auth_strict_enabled () in

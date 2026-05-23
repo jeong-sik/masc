@@ -3,6 +3,7 @@
     request-handler bodies wired into the route table: agent broadcast,
     link previews, task history, and rooms listing. *)
 
+open Server_h2_gateway_helpers
 module Http = Http_server_eio
 
 (* Duplicated locally to avoid sibling -> parent cycle. The parent file
@@ -69,7 +70,7 @@ let handle_dashboard_task_history state req reqd =
   in
   if task_id = "" then
     Http.Response.json ~status:`Bad_request ~request:req
-      {|{"error":"task_id is required"}|} reqd
+      (error_json_string "task_id is required") reqd
   else
     let limit =
       Server_utils.int_query_param req "limit" ~default:50

@@ -60,12 +60,14 @@ let websocket_discovery_handler request reqd =
   in
   Http.Response.json body reqd
 
+open Server_h2_gateway_helpers
+
 let webrtc_signaling_handler signaling_fn request reqd =
   with_permission_auth ~permission:Masc_domain.CanBroadcast
     (fun _state _req reqd ->
       if not (Server_webrtc_transport.is_enabled ()) then
         Http.Response.json ~status:`Not_found
-          {|{"error":"webrtc transport disabled"}|}
+          (error_json_string "webrtc transport disabled")
           reqd
       else
         Http.Request.read_body_async reqd (fun body_str ->

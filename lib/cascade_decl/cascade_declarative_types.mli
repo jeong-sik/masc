@@ -290,12 +290,20 @@ type cascade_tier_group =
   ; strategy : cascade_strategy
   ; fallback : bool
   ; keeper_assignable : bool option
+  ; required_capability_profile : string option
   }
 [@@deriving show, eq]
 
 type cascade_route =
   { name : string
   ; target : string
+  }
+[@@deriving show, eq]
+
+type cascade_profile =
+  { name : string
+  ; required_capabilities : string list
+  ; provider_filter : string option
   }
 [@@deriving show, eq]
 
@@ -310,6 +318,7 @@ type cascade_config =
   ; tier_groups : cascade_tier_group list
   ; routes : cascade_route list
   ; system_targets : cascade_route list
+  ; profiles : cascade_profile list
   }
 [@@deriving show, eq]
 

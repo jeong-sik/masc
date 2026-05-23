@@ -745,6 +745,7 @@ keeper-assignable = false
 tiers = ["primary", "keeper_diverse", "__safe_lane"]
 strategy = "priority_tier"
 fallback = true
+required_capability_profile = "tool_strict"
 
 [tier-group.glm-coding-with-spark]
 # Tier-group for GLM-coding-first cascade with spark fallback.

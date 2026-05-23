@@ -14,6 +14,7 @@
 type candidate = {
   model_string : string;
   provider_cfg : Llm_provider.Provider_config.t;
+  provider_override : Provider_tool_support.runtime_capabilities_override option;
 }
 
 type profile = {
@@ -23,6 +24,7 @@ type profile = {
   strategy : Cascade_strategy.t;
   ollama_max_concurrent : int option;
   cli_max_concurrent : int option;
+  required_capability_profile : string option;
   candidates : candidate list;
 }
 
@@ -31,6 +33,7 @@ type decl_snapshot = {
   mtime : float;
   validated_at : float;
   profiles : profile list;
+  capability_profiles : Cascade_declarative_types.cascade_profile list;
 }
 
 (** {1 Low-level helpers} *)

@@ -25,6 +25,7 @@ type candidate_probe = {
 type candidate_runtime = {
   model_string : string;
   provider_cfg : Llm_provider.Provider_config.t;
+  provider_override : Provider_tool_support.runtime_capabilities_override option;
 }
 
 (* [profile_build] is the validated profile shape. Provider liveness remains

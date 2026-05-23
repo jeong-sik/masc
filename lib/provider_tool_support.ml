@@ -6,6 +6,14 @@ type capabilities =
   ; supports_runtime_mcp_http_headers : bool
   }
 
+type runtime_capabilities_override =
+  { supports_inline_tools : bool option
+  ; supports_inline_tool_choice : bool option
+  ; supports_runtime_mcp_tools : bool option
+  ; supports_runtime_tool_events : bool option
+  ; supports_runtime_mcp_http_headers : bool option
+  }
+
 type tool_policy =
   { supports_runtime_mcp_http_headers : bool
   ; requires_per_keeper_bridging_for_bound_actor_tools : bool
@@ -240,22 +248,50 @@ let supports_runtime_mcp_http_headers (provider_cfg : Llm_provider.Provider_conf
   (tool_policy_for_config provider_cfg).supports_runtime_mcp_http_headers
 ;;
 
-let capabilities_of_config (provider_cfg : Llm_provider.Provider_config.t) =
+let apply_override (base : capabilities) (override : runtime_capabilities_override option) : capabilities =
+  match override with
+  | None -> base
+  | Some o ->
+    { supports_inline_tools =
+        (match o.supports_inline_tools with None -> base.supports_inline_tools | Some v -> v)
+    ; supports_inline_tool_choice =
+        (match o.supports_inline_tool_choice with
+         | None -> base.supports_inline_tool_choice
+         | Some v -> v)
+    ; supports_runtime_mcp_tools =
+        (match o.supports_runtime_mcp_tools with
+         | None -> base.supports_runtime_mcp_tools
+         | Some v -> v)
+    ; supports_runtime_tool_events =
+        (match o.supports_runtime_tool_events with
+         | None -> base.supports_runtime_tool_events
+         | Some v -> v)
+    ; supports_runtime_mcp_http_headers =
+        (match o.supports_runtime_mcp_http_headers with
+         | None -> base.supports_runtime_mcp_http_headers
+         | Some v -> v)
+    }
+;;
+
+let capabilities_of_config ?override (provider_cfg : Llm_provider.Provider_config.t) =
   let caps = oas_capabilities_of_config provider_cfg in
-  { supports_inline_tools = caps.supports_tools
-  ; supports_inline_tool_choice = caps.supports_tools && caps.supports_tool_choice
-  ; supports_runtime_mcp_tools = caps.supports_runtime_mcp_tools
-  ; supports_runtime_tool_events = caps.supports_runtime_tool_events
-  ; supports_runtime_mcp_http_headers = supports_runtime_mcp_http_headers provider_cfg
-  }
+  let (base : capabilities) =
+    { supports_inline_tools = caps.supports_tools
+    ; supports_inline_tool_choice = caps.supports_tools && caps.supports_tool_choice
+    ; supports_runtime_mcp_tools = caps.supports_runtime_mcp_tools
+    ; supports_runtime_tool_events = caps.supports_runtime_tool_events
+    ; supports_runtime_mcp_http_headers = supports_runtime_mcp_http_headers provider_cfg
+    }
+  in
+  apply_override base override
 ;;
 
-let provider_supports_inline_tools (provider_cfg : Llm_provider.Provider_config.t) =
-  (capabilities_of_config provider_cfg).supports_inline_tools
+let provider_supports_inline_tools ?override (provider_cfg : Llm_provider.Provider_config.t) =
+  (capabilities_of_config ?override provider_cfg).supports_inline_tools
 ;;
 
-let provider_supports_runtime_mcp_lane (provider_cfg : Llm_provider.Provider_config.t) =
-  let caps = capabilities_of_config provider_cfg in
+let provider_supports_runtime_mcp_lane ?override (provider_cfg : Llm_provider.Provider_config.t) =
+  let caps = capabilities_of_config ?override provider_cfg in
   caps.supports_runtime_mcp_tools && caps.supports_runtime_tool_events
 ;;
 
@@ -353,6 +389,7 @@ let provider_supports_runtime_mcp_policy
 ;;
 
 let supports_required_tool_use
+      ?override
       ?runtime_mcp_policy
       ~require_tool_choice_support
       ~require_tool_support
@@ -361,7 +398,7 @@ let supports_required_tool_use
   if (not require_tool_choice_support) && not require_tool_support
   then true
   else (
-    let caps = capabilities_of_config provider_cfg in
+    let caps = capabilities_of_config ?override provider_cfg in
     let runtime_mcp =
       match runtime_mcp_policy with
       | Some policy -> provider_supports_runtime_mcp_policy provider_cfg policy
@@ -412,6 +449,7 @@ let rejection_reason_label = function
 ;;
 
 let classify_rejection
+      ?override
       ?runtime_mcp_policy
       ~require_tool_choice_support
       ~require_tool_support
@@ -421,13 +459,14 @@ let classify_rejection
   then None
   else if
     supports_required_tool_use
+      ?override
       ?runtime_mcp_policy
       ~require_tool_choice_support
       ~require_tool_support
       provider_cfg
   then None
   else (
-    let caps = capabilities_of_config provider_cfg in
+    let caps = capabilities_of_config ?override provider_cfg in
     let runtime_mcp_caps_ok =
       caps.supports_runtime_mcp_tools && caps.supports_runtime_tool_events
     in
@@ -490,6 +529,7 @@ let record_filter_rejection ~cascade ~provider_cfg ~reason =
 ;;
 
 let apply_required_tool_use_filter
+      ?override
       ?runtime_mcp_policy
       ~require_tool_choice_support
       ~require_tool_support
@@ -502,6 +542,7 @@ let apply_required_tool_use_filter
     let kept, rejected =
       List.partition
         (supports_required_tool_use
+           ?override
            ?runtime_mcp_policy
            ~require_tool_choice_support
            ~require_tool_support)
@@ -515,6 +556,7 @@ let apply_required_tool_use_filter
       (fun provider_cfg ->
          match
            classify_rejection
+             ?override
              ?runtime_mcp_policy
              ~require_tool_choice_support
              ~require_tool_support
@@ -535,6 +577,56 @@ let apply_required_tool_use_filter
          runtime_mcp_http_headers=%b)"
         label
         (String.concat ", " (List.map provider_debug_label providers))
+        runtime_mcp_http_headers);
+    kept)
+;;
+
+let apply_required_tool_use_filter_with_overrides
+      ?runtime_mcp_policy
+      ~require_tool_choice_support
+      ~require_tool_support
+      ~label
+      (providers : (Llm_provider.Provider_config.t * runtime_capabilities_override option) list)
+  =
+  if (not require_tool_choice_support) && not require_tool_support
+  then providers
+  else (
+    let kept, rejected =
+      List.partition
+        (fun (provider_cfg, override) ->
+           supports_required_tool_use
+             ?override
+             ?runtime_mcp_policy
+             ~require_tool_choice_support
+             ~require_tool_support
+             provider_cfg)
+        providers
+    in
+    List.iter
+      (fun (provider_cfg, override) ->
+         match
+           classify_rejection
+             ?override
+             ?runtime_mcp_policy
+             ~require_tool_choice_support
+             ~require_tool_support
+             provider_cfg
+         with
+         | Some reason -> record_filter_rejection ~cascade:label ~provider_cfg ~reason
+         | None -> ())
+      rejected;
+    if kept = [] && providers <> []
+    then (
+      let runtime_mcp_http_headers =
+        match runtime_mcp_policy with
+        | Some policy -> runtime_mcp_policy_requires_http_headers policy
+        | None -> false
+      in
+      Log.Misc.warn
+        "cascade %s: required tool-use gate removed all providers (providers=[%s], \
+         runtime_mcp_http_headers=%b)"
+        label
+        (String.concat ", " (List.map (fun (cfg, _) -> provider_debug_label cfg) providers))
         runtime_mcp_http_headers);
     kept)
 ;;

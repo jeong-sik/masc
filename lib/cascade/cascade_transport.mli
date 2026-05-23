@@ -96,11 +96,14 @@ val provider_caps_of_config :
 
 (** Whether a provider can accept inline tool definitions on a request.
     Alias for {!Provider_tool_support.provider_supports_inline_tools}. *)
-val provider_supports_inline_tools : Llm_provider.Provider_config.t -> bool
+val provider_supports_inline_tools :
+  ?override:Provider_tool_support.runtime_capabilities_override ->
+  Llm_provider.Provider_config.t -> bool
 
 (** Whether a provider supports the runtime MCP tool lane.  Alias for
     {!Provider_tool_support.provider_supports_runtime_mcp_lane}. *)
 val provider_supports_runtime_mcp_lane :
+  ?override:Provider_tool_support.runtime_capabilities_override ->
   Llm_provider.Provider_config.t -> bool
 
 (** Render the [mcpServers] config JSON consumed by JSON-stream CLI transports, filtering

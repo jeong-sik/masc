@@ -17,6 +17,7 @@ module Loader = Cascade_config_loader
 type candidate = {
   model_string : string;
   provider_cfg : Llm_provider.Provider_config.t;
+  provider_override : Provider_tool_support.runtime_capabilities_override option;
 }
 
 type profile = {
@@ -26,6 +27,7 @@ type profile = {
   strategy : Cascade_strategy.t;
   ollama_max_concurrent : int option;
   cli_max_concurrent : int option;
+  required_capability_profile : string option;
   candidates : candidate list;
 }
 
@@ -34,6 +36,7 @@ type decl_snapshot = {
   mtime : float;
   validated_at : float;
   profiles : profile list;
+  capability_profiles : Cascade_declarative_types.cascade_profile list;
 }
 
 (* --- Low-level helpers --- *)
@@ -84,9 +87,12 @@ let extract_inference_params (configs : Llm_provider.Provider_config.t list) :
 
 (* --- candidate from Provider_config.t --- *)
 
-let make_candidate (cfg : Llm_provider.Provider_config.t) : candidate =
+let make_candidate
+      ?(override : Provider_tool_support.runtime_capabilities_override option)
+      (cfg : Llm_provider.Provider_config.t) : candidate =
   { model_string = provider_config_to_model_string cfg;
-    provider_cfg = cfg }
+    provider_cfg = cfg;
+    provider_override = override }
 
 (* --- Profile conversion --- *)
 
@@ -94,9 +100,12 @@ let adapted_profile_to_profile (ap : adapted_profile) : profile option =
   match ap.provider_configs with
   | [] -> None
   | configs ->
-    let weighted_entries = List.map make_weighted_entry configs in
-    let inference_params = extract_inference_params configs in
-    let candidates = List.map make_candidate configs in
+    let configs_only = List.map fst configs in
+    let weighted_entries = List.map make_weighted_entry configs_only in
+    let inference_params = extract_inference_params configs_only in
+    let candidates =
+      List.map (fun (cfg, override) -> make_candidate ?override cfg) configs
+    in
     Some {
       name = ap.name;
       weighted_entries;
@@ -104,6 +113,7 @@ let adapted_profile_to_profile (ap : adapted_profile) : profile option =
       strategy = ap.strategy;
       ollama_max_concurrent = ap.ollama_max_concurrent;
       cli_max_concurrent = ap.cli_max_concurrent;
+      required_capability_profile = ap.required_capability_profile;
       candidates;
     }
 
@@ -130,6 +140,7 @@ let adapted_catalog_to_snapshot ~source_path (ac : adapted_catalog) :
       mtime = stat.Unix.st_mtime;
       validated_at = Unix.gettimeofday ();
       profiles;
+      capability_profiles = ac.capability_profiles;
     }
 
 (* --- TOML loading --- *)

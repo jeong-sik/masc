@@ -164,6 +164,7 @@ let test_r3_unknown_binding () =
     tier_groups = [];
     routes = [];
     system_targets = [];
+    profiles = [];
   } in
   let errs = Cascade_declarative_validator.validate cfg in
   has_rule "R3" errs

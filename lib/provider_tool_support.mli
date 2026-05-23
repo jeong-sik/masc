@@ -28,6 +28,17 @@ type capabilities =
   ; supports_runtime_mcp_http_headers : bool
   }
 
+(** Per-provider declarative capability override.
+    [None] fields inherit from the OAS runtime binding;
+    [Some v] fields replace the runtime-derived value. *)
+type runtime_capabilities_override =
+  { supports_inline_tools : bool option
+  ; supports_inline_tool_choice : bool option
+  ; supports_runtime_mcp_tools : bool option
+  ; supports_runtime_tool_events : bool option
+  ; supports_runtime_mcp_http_headers : bool option
+  }
+
 (** {1 Capability resolution} *)
 
 (** [oas_capabilities_of_config cfg] returns OAS-resolved
@@ -55,17 +66,26 @@ val oas_capabilities_of_config
       passthrough.
     - [supports_runtime_mcp_http_headers]: queried via the local
       cascade.toml provider-tool policy projection. *)
-val capabilities_of_config : Llm_provider.Provider_config.t -> capabilities
+val capabilities_of_config
+  :  ?override:runtime_capabilities_override
+  -> Llm_provider.Provider_config.t
+  -> capabilities
 
 (** [provider_supports_inline_tools cfg] is shorthand for
     [(capabilities_of_config cfg).supports_inline_tools]. *)
-val provider_supports_inline_tools : Llm_provider.Provider_config.t -> bool
+val provider_supports_inline_tools
+  :  ?override:runtime_capabilities_override
+  -> Llm_provider.Provider_config.t
+  -> bool
 
 (** [provider_supports_runtime_mcp_lane cfg] is true iff both
     [supports_runtime_mcp_tools] and [supports_runtime_tool_events]
     hold.  HTTP-header support is {b not} required at this level —
     that gate is enforced by {!provider_supports_runtime_mcp_policy}. *)
-val provider_supports_runtime_mcp_lane : Llm_provider.Provider_config.t -> bool
+val provider_supports_runtime_mcp_lane
+  :  ?override:runtime_capabilities_override
+  -> Llm_provider.Provider_config.t
+  -> bool
 
 (** [provider_requires_per_keeper_bridging_for_bound_actor_tools cfg] is
     MASC's local runtime-MCP transport policy projection for CLI providers that
@@ -136,7 +156,8 @@ val provider_supports_runtime_mcp_policy
     [runtime_mcp] resolves through {!provider_supports_runtime_mcp_policy}
     when [runtime_mcp_policy = Some _], else through the lane gate. *)
 val supports_required_tool_use
-  :  ?runtime_mcp_policy:Llm_provider.Llm_transport.runtime_mcp_policy
+  :  ?override:runtime_capabilities_override
+  -> ?runtime_mcp_policy:Llm_provider.Llm_transport.runtime_mcp_policy
   -> require_tool_choice_support:bool
   -> require_tool_support:bool
   -> Llm_provider.Provider_config.t
@@ -181,7 +202,8 @@ val rejection_reason_label : rejection_reason -> string
     Returns [None] when both [require_*] flags are false (filter
     disabled — no rejection to classify). *)
 val classify_rejection
-  :  ?runtime_mcp_policy:Llm_provider.Llm_transport.runtime_mcp_policy
+  :  ?override:runtime_capabilities_override
+  -> ?runtime_mcp_policy:Llm_provider.Llm_transport.runtime_mcp_policy
   -> require_tool_choice_support:bool
   -> require_tool_support:bool
   -> Llm_provider.Provider_config.t
@@ -227,9 +249,22 @@ val record_filter_rejection
     [runtime_mcp_http_headers] (the policy's HTTP-header demand
     flag).  Returns the kept providers in input order. *)
 val apply_required_tool_use_filter
-  :  ?runtime_mcp_policy:Llm_provider.Llm_transport.runtime_mcp_policy
+  :  ?override:runtime_capabilities_override
+  -> ?runtime_mcp_policy:Llm_provider.Llm_transport.runtime_mcp_policy
   -> require_tool_choice_support:bool
   -> require_tool_support:bool
   -> label:string
   -> Llm_provider.Provider_config.t list
   -> Llm_provider.Provider_config.t list
+
+(** [apply_required_tool_use_filter_with_overrides] is like
+    {!apply_required_tool_use_filter} but takes per-provider override
+    pairs so declarative capability cutover can supply a distinct
+    override for each provider in the list. *)
+val apply_required_tool_use_filter_with_overrides
+  :  ?runtime_mcp_policy:Llm_provider.Llm_transport.runtime_mcp_policy
+  -> require_tool_choice_support:bool
+  -> require_tool_support:bool
+  -> label:string
+  -> (Llm_provider.Provider_config.t * runtime_capabilities_override option) list
+  -> (Llm_provider.Provider_config.t * runtime_capabilities_override option) list

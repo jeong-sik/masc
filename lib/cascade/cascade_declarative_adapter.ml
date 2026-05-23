@@ -24,12 +24,16 @@ type adapter_error =
   | Internal of string
 [@@deriving show]
 
+type provider_config_with_override =
+  Llm_provider.Provider_config.t * Provider_tool_support.runtime_capabilities_override option
+
 type adapted_profile = {
   name : string;
-  provider_configs : Llm_provider.Provider_config.t list;
+  provider_configs : provider_config_with_override list;
   strategy : Cascade_strategy.t;
   ollama_max_concurrent : int option;
   cli_max_concurrent : int option;
+  required_capability_profile : string option;
 }
 
 type adapted_catalog = {
@@ -37,6 +41,7 @@ type adapted_catalog = {
   routes : (string * string) list;
   system_targets : (string * string) list;
   default_profile : string option;
+  capability_profiles : cascade_profile list;
   errors : adapter_error list;
 }
 
@@ -189,54 +194,71 @@ let effective_max_tokens_for_model spec requested =
   | None, None -> None
 ;;
 
+let override_of_declared_capabilities (caps : cascade_capabilities option)
+    : Provider_tool_support.runtime_capabilities_override option =
+  match caps with
+  | None -> None
+  | Some c ->
+    Some
+      { Provider_tool_support.supports_inline_tools = Some c.supports_inline_tools
+      ; supports_inline_tool_choice = None
+      ; supports_runtime_mcp_tools = Some c.supports_runtime_mcp_tools
+      ; supports_runtime_tool_events = Some c.supports_runtime_tool_events
+      ; supports_runtime_mcp_http_headers = Some c.supports_runtime_mcp_http_headers
+      }
+
 let provider_config_from_declared_provider
     (provider : cascade_provider)
     (spec : cascade_model_spec)
     ~(max_tokens : int option)
-    : Llm_provider.Provider_config.t option =
+    : provider_config_with_override option =
   let registry_entry = find_registry_entry provider.id in
   let supports_tool_choice_override =
     supports_tool_choice_override_of_model_spec spec
   in
   let max_tokens = effective_max_tokens_for_model spec max_tokens in
-  match provider.transport with
-  | Http base_url ->
-    let base_url = Masc_network_defaults.normalize_loopback_base_url base_url in
-    (match provider_kind_for_http_provider ?registry_entry provider with
-     | Some kind ->
-       let request_path =
-         request_path_for_http_provider ~provider ~registry_entry ~kind ~base_url
-       in
-       let api_key = api_key_of_credential ?registry_entry provider.credentials in
-       let headers = Cascade_config.headers_with_auth ~kind ~api_key in
-       Some
-         (Llm_provider.Provider_config.make
-            ~kind
-            ~model_id:spec.api_name
-            ~base_url
-            ~api_key
-            ~headers
-            ~request_path
-            ~max_context:spec.max_context
-            ?supports_tool_choice_override
-            ?max_tokens
-            ())
-     | None -> None)
-  | Cli _ ->
-    (match provider_kind_of_cli_provider provider with
-     | Some kind ->
-       Some
-         (Llm_provider.Provider_config.make
-            ~kind
-            ~model_id:spec.api_name
-            ~base_url:""
-            ~api_key:(api_key_of_credential ?registry_entry provider.credentials)
-            ~headers:[]
-            ~max_context:spec.max_context
-            ?supports_tool_choice_override
-            ?max_tokens
-            ())
-     | None -> None)
+  let override = override_of_declared_capabilities provider.capabilities in
+  let config_opt =
+    match provider.transport with
+    | Http base_url ->
+      let base_url = Masc_network_defaults.normalize_loopback_base_url base_url in
+      (match provider_kind_for_http_provider ?registry_entry provider with
+       | Some kind ->
+         let request_path =
+           request_path_for_http_provider ~provider ~registry_entry ~kind ~base_url
+         in
+         let api_key = api_key_of_credential ?registry_entry provider.credentials in
+         let headers = Cascade_config.headers_with_auth ~kind ~api_key in
+         Some
+           (Llm_provider.Provider_config.make
+              ~kind
+              ~model_id:spec.api_name
+              ~base_url
+              ~api_key
+              ~headers
+              ~request_path
+              ~max_context:spec.max_context
+              ?supports_tool_choice_override
+              ?max_tokens
+              ())
+       | None -> None)
+    | Cli _ ->
+      (match provider_kind_of_cli_provider provider with
+       | Some kind ->
+         Some
+           (Llm_provider.Provider_config.make
+              ~kind
+              ~model_id:spec.api_name
+              ~base_url:""
+              ~api_key:(api_key_of_credential ?registry_entry provider.credentials)
+              ~headers:[]
+              ~max_context:spec.max_context
+              ?supports_tool_choice_override
+              ?max_tokens
+              ())
+       | None -> None)
+  in
+  Option.map (fun cfg -> (cfg, override)) config_opt
 
 (* --- Model lookup --- *)
 
@@ -249,7 +271,7 @@ let find_model (cfg : cascade_config) (model_id : string) :
 let resolve_binding_config (cfg : cascade_config)
     (binding : cascade_binding)
     (errors : adapter_error list ref) :
-    Llm_provider.Provider_config.t option =
+    provider_config_with_override option =
   let model_spec = find_model cfg binding.model_id in
   match model_spec with
   | None ->
@@ -264,29 +286,28 @@ let resolve_binding_config (cfg : cascade_config)
     let result =
       match find_provider cfg binding.provider_id with
       | Some provider ->
-        (match provider_config_from_declared_provider provider spec ~max_tokens with
-         | Some cfg -> Some cfg
-         | None -> None)
+        provider_config_from_declared_provider provider spec ~max_tokens
       | None ->
         errors := Provider_not_found binding.provider_id :: !errors;
         None
     in
-    (match result with
-     | Some config ->
-       if binding.max_concurrent > 0
-       then
-         Some
-           { config with
-             Llm_provider.Provider_config.internal_model_rotation_count =
-               Some binding.max_concurrent
-           }
-       else Some config
-     | None ->
-       errors :=
-         Binding_resolution_failed
-           (Printf.sprintf "%s.%s" binding.provider_id binding.model_id)
-         :: !errors;
-       None)
+    match result with
+    | Some (config, override) ->
+      if binding.max_concurrent > 0
+      then
+        Some
+          ( { config with
+              Llm_provider.Provider_config.internal_model_rotation_count =
+                Some binding.max_concurrent
+            }
+          , override )
+      else Some (config, override)
+    | None ->
+      errors :=
+        Binding_resolution_failed
+          (Printf.sprintf "%s.%s" binding.provider_id binding.model_id)
+        :: !errors;
+      None
 
 (* --- Alias overrides --- *)
 
@@ -382,12 +403,12 @@ let build_tier_group_strategy (tg : cascade_tier_group)
 let resolve_member (cfg : cascade_config)
     (bindings_by_key : (string, cascade_binding) Hashtbl.t)
     (aliases_by_key : (string, cascade_alias) Hashtbl.t)
-    (resolved_configs : (string, Llm_provider.Provider_config.t) Hashtbl.t)
+    (resolved_configs : (string, provider_config_with_override) Hashtbl.t)
     (errors : adapter_error list ref)
     (member : string) :
-    Llm_provider.Provider_config.t option =
+    provider_config_with_override option =
   match Hashtbl.find_opt resolved_configs member with
-  | Some config -> Some config
+  | Some pair -> Some pair
   | None ->
     (* Try alias first (longer keys: "p.m.a") *)
     match Hashtbl.find_opt aliases_by_key member with
@@ -396,10 +417,10 @@ let resolve_member (cfg : cascade_config)
         Printf.sprintf "%s.%s" alias.provider_id alias.model_id
       in
       (match Hashtbl.find_opt resolved_configs parent_key with
-       | Some base ->
-         let overridden = apply_alias_overrides base alias in
-         Hashtbl.replace resolved_configs member overridden;
-         Some overridden
+       | Some (base_config, base_override) ->
+         let overridden_config = apply_alias_overrides base_config alias in
+         Hashtbl.replace resolved_configs member (overridden_config, base_override);
+         Some (overridden_config, base_override)
        | None ->
          errors := Alias_resolution_failed member :: !errors;
          None)
@@ -408,9 +429,9 @@ let resolve_member (cfg : cascade_config)
       (match Hashtbl.find_opt bindings_by_key member with
        | Some binding ->
          (match resolve_binding_config cfg binding errors with
-          | Some config ->
-            Hashtbl.replace resolved_configs member config;
-            Some config
+          | Some pair ->
+            Hashtbl.replace resolved_configs member pair;
+            Some pair
           | None -> None)
        | None ->
          errors := Binding_resolution_failed member :: !errors;
@@ -421,7 +442,7 @@ let resolve_member (cfg : cascade_config)
 let build_profile_from_tier (cfg : cascade_config)
     (bindings_by_key : (string, cascade_binding) Hashtbl.t)
     (aliases_by_key : (string, cascade_alias) Hashtbl.t)
-    (resolved_configs : (string, Llm_provider.Provider_config.t) Hashtbl.t)
+    (resolved_configs : (string, provider_config_with_override) Hashtbl.t)
     (errors : adapter_error list ref)
     (tier : cascade_tier) :
     adapted_profile =
@@ -438,6 +459,7 @@ let build_profile_from_tier (cfg : cascade_config)
     strategy;
     ollama_max_concurrent = tier.max_concurrent;
     cli_max_concurrent = tier.max_concurrent;
+    required_capability_profile = None;
   }
 
 (* --- Tier-group → adapted_profile --- *)
@@ -445,7 +467,7 @@ let build_profile_from_tier (cfg : cascade_config)
 let build_profile_from_tier_group (cfg : cascade_config)
     (bindings_by_key : (string, cascade_binding) Hashtbl.t)
     (aliases_by_key : (string, cascade_alias) Hashtbl.t)
-    (resolved_configs : (string, Llm_provider.Provider_config.t) Hashtbl.t)
+    (resolved_configs : (string, provider_config_with_override) Hashtbl.t)
     (tiers_by_name : (string, cascade_tier) Hashtbl.t)
     (errors : adapter_error list ref)
     (tg : cascade_tier_group) :
@@ -467,7 +489,7 @@ let build_profile_from_tier_group (cfg : cascade_config)
   let provider_configs = List.concat resolved_configs_by_tier in
   let tier_member_keys =
     List.map
-      (List.map provider_health_key_of_config)
+      (List.map (fun (cfg, _) -> provider_health_key_of_config cfg))
       resolved_configs_by_tier
   in
   let strategy = build_tier_group_strategy tg tier_member_keys in
@@ -477,6 +499,7 @@ let build_profile_from_tier_group (cfg : cascade_config)
     strategy;
     ollama_max_concurrent = None;
     cli_max_concurrent = None;
+    required_capability_profile = tg.required_capability_profile;
   }
 
 (* --- Route target resolution --- *)
@@ -550,7 +573,7 @@ let adapt_config (cfg : cascade_config) : adapted_catalog =
     Hashtbl.replace tiers_by_name t.name t)
     cfg.tiers;
 
-  (* Resolved configs cache (member key → Provider_config.t) *)
+  (* Resolved configs cache (member key → provider_config_with_override) *)
   let resolved_configs = Hashtbl.create 32 in
 
   (* Pre-resolve all bindings so aliases can reference them *)
@@ -595,7 +618,7 @@ let adapt_config (cfg : cascade_config) : adapted_catalog =
           let matching_profile =
             List.find_opt (fun (p : adapted_profile) ->
               List.exists
-                (fun (pc : Llm_provider.Provider_config.t) ->
+                (fun (pc, _override) ->
                   let model_string =
                     Printf.sprintf "%s:%s"
                       (Llm_provider.Provider_kind.to_string pc.Llm_provider.Provider_config.kind)
@@ -642,5 +665,6 @@ let adapt_config (cfg : cascade_config) : adapted_catalog =
     routes;
     system_targets;
     default_profile;
+    capability_profiles = cfg.profiles;
     errors = List.rev (!errors) @ route_errors;
   }

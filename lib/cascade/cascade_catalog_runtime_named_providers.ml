@@ -137,6 +137,12 @@ let provider_configs_of_ordered_entries ~(profile : profile_snapshot)
     (ordered_entries : Cascade_config_loader.weighted_entry list) =
   direct_candidate_providers_ordered_by_entries profile ordered_entries
 
+let candidates_with_overrides_of_ordered_entries ~(profile : profile_snapshot)
+    ~cascade_name:_
+    (ordered_entries : Cascade_config_loader.weighted_entry list) =
+  direct_candidates_ordered_by_entries profile ordered_entries
+  |> List.map (fun (c : candidate_runtime) -> (c.provider_cfg, c.provider_override))
+
 let resolve_named_providers ?sw ?net ?clock ?provider_filter
     ?(require_tool_choice_support = false) ?(require_tool_support = false)
     ?runtime_mcp_policy ~cascade_name () =
@@ -155,20 +161,29 @@ let resolve_named_providers ?sw ?net ?clock ?provider_filter
         Cascade_config.order_weighted_entries ~rotation_scope:normalized
           ~cascade:normalized profile.weighted_entries
       in
-      let parsed_declared_providers =
-        provider_configs_of_ordered_entries ~profile
+      let parsed_pairs =
+        candidates_with_overrides_of_ordered_entries ~profile
           ~cascade_name:normalized ordered_entries
       in
-      let filtered_declared_providers =
+      let parsed_configs = List.map fst parsed_pairs in
+      let filtered_configs =
         Cascade_config.apply_provider_filter ~provider_filter
-          ~label:normalized parsed_declared_providers
+          ~label:normalized parsed_configs
       in
-      let providers =
-        Provider_tool_support.apply_required_tool_use_filter
+      let is_kept cfg =
+        let key = candidate_key_of_cfg cfg in
+        List.exists (fun c -> candidate_key_of_cfg c = key) filtered_configs
+      in
+      let filtered_pairs =
+        List.filter (fun (cfg, _) -> is_kept cfg) parsed_pairs
+      in
+      let providers_with_overrides =
+        Provider_tool_support.apply_required_tool_use_filter_with_overrides
           ?runtime_mcp_policy ~require_tool_choice_support
           ~require_tool_support ~label:normalized
-          filtered_declared_providers
+          filtered_pairs
       in
+      let providers = List.map fst providers_with_overrides in
       if providers = [] then (
         Cascade_metrics.on_resolve_failure ~cascade:normalized
           ~reason:"no_callable_providers";
@@ -183,7 +198,7 @@ let resolve_named_providers ?sw ?net ?clock ?provider_filter
            [codex_cli:auto] or [custom:model@url], while Provider_config
            carries concrete/canonical labels.
            See memory/handoff-2026-04-24-masc-runtime-mcp-auth-resolved.md *)
-        let declared = List.map provider_label filtered_declared_providers in
+        let declared = List.map provider_label filtered_configs in
         let returned = List.map provider_label providers in
         let leaked =
           List.filter (fun m -> not (List.mem m declared)) returned
@@ -218,14 +233,15 @@ let resolve_named_providers_strict ?sw ?net ?clock ?provider_filter
         Cascade_config.order_weighted_entries ~rotation_scope:normalized
           ~cascade:normalized profile.weighted_entries
       in
-      let parsed_declared_providers =
-        provider_configs_of_ordered_entries ~profile
+      let parsed_pairs =
+        candidates_with_overrides_of_ordered_entries ~profile
           ~cascade_name:normalized ordered_entries
       in
-      let filtered_declared_providers =
+      let parsed_configs = List.map fst parsed_pairs in
+      let filtered_configs_result =
         match
           Cascade_config.apply_provider_filter_strict ~provider_filter
-            ~label:normalized parsed_declared_providers
+            ~label:normalized parsed_configs
         with
         | Error rejection ->
             Error
@@ -233,17 +249,25 @@ let resolve_named_providers_strict ?sw ?net ?clock ?provider_filter
                  rejection)
         | Ok ps -> Ok ps
       in
-      (match filtered_declared_providers with
+      (match filtered_configs_result with
        | Error _ as e ->
            Cascade_metrics.on_resolve_failure ~cascade:normalized
              ~reason:"provider_filter_rejected";
            e
-       | Ok filtered ->
-         let providers =
-           Provider_tool_support.apply_required_tool_use_filter
-             ?runtime_mcp_policy ~require_tool_choice_support
-             ~require_tool_support ~label:normalized filtered
+       | Ok filtered_configs ->
+         let is_kept cfg =
+           let key = candidate_key_of_cfg cfg in
+           List.exists (fun c -> candidate_key_of_cfg c = key) filtered_configs
          in
+         let filtered_pairs =
+           List.filter (fun (cfg, _) -> is_kept cfg) parsed_pairs
+         in
+         let providers_with_overrides =
+           Provider_tool_support.apply_required_tool_use_filter_with_overrides
+             ?runtime_mcp_policy ~require_tool_choice_support
+             ~require_tool_support ~label:normalized filtered_pairs
+         in
+         let providers = List.map fst providers_with_overrides in
          if providers = [] then (
            Cascade_metrics.on_resolve_failure ~cascade:normalized
              ~reason:"no_callable_providers";

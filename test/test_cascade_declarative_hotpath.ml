@@ -355,6 +355,7 @@ let test_empty_catalog () =
       routes = [];
       system_targets = [];
       default_profile = None;
+      capability_profiles = [];
       errors = [];
     }
   in

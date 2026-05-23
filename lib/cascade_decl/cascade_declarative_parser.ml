@@ -780,7 +780,10 @@ let parse_tier_group (name : string) (tbl : Otoml.t)
   | _, Error e -> Error e
   | Ok strategy, Ok keeper_assignable ->
     let fallback = Otoml.find_or ~default:false tbl Otoml.get_boolean [ "fallback" ] in
-    Ok { name; tiers; strategy; fallback; keeper_assignable }
+    let required_capability_profile =
+      Otoml.find_opt tbl Otoml.get_string [ "required_capability_profile" ]
+    in
+    Ok { name; tiers; strategy; fallback; keeper_assignable; required_capability_profile }
 ;;
 
 let parse_tier_groups (toml : Otoml.t)
@@ -831,6 +834,29 @@ let parse_system_targets (toml : Otoml.t) : cascade_route list =
       entries
 ;;
 
+(* --- Profiles --- *)
+
+let parse_profiles (toml : Otoml.t) : cascade_profile list =
+  match Otoml.find_opt toml Fun.id [ "profiles" ] with
+  | None -> []
+  | Some profiles_tbl ->
+    let entries = Otoml.get_table profiles_tbl in
+    List.filter_map
+      (fun (name, tbl) ->
+         if is_toml_table tbl then
+           let required_capabilities =
+             match Otoml.find_opt tbl (Otoml.get_array Otoml.get_string) [ "required_capabilities" ] with
+             | Some caps -> caps
+             | None -> []
+           in
+           let provider_filter =
+             Otoml.find_opt tbl Otoml.get_string [ "provider_filter" ]
+           in
+           Some { name; required_capabilities; provider_filter }
+         else None)
+      entries
+;;
+
 (* --- Top-level parse --- *)
 
 (* Extract the [Ok] payload from a parse result that the caller has
@@ -866,6 +892,7 @@ let parse_toml (toml : Otoml.t) : (cascade_config, parse_error list) result =
   let bindings, aliases = parse_bindings_and_aliases toml in
   let routes = parse_routes toml in
   let system_targets = parse_system_targets toml in
+  let profiles = parse_profiles toml in
   if !all_errors <> []
   then Error !all_errors
   else (
@@ -878,7 +905,7 @@ let parse_toml (toml : Otoml.t) : (cascade_config, parse_error list) result =
       extract_after_all_errors_guard ~label:"tier_groups" tier_groups_result
     in
     Ok
-      { providers; models; bindings; aliases; tiers; tier_groups; routes; system_targets })
+      { providers; models; bindings; aliases; tiers; tier_groups; routes; system_targets; profiles })
 ;;
 
 let parse_string (content : string) : (cascade_config, parse_error list) result =

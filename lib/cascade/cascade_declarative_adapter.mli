@@ -30,18 +30,27 @@ type adapter_error =
 
 (** {1 Adapted types} *)
 
+type provider_config_with_override =
+  Llm_provider.Provider_config.t * Provider_tool_support.runtime_capabilities_override option
+(** Provider config paired with an optional per-provider capability override.
+    [None] inherits from the OAS runtime binding; [Some o] replaces the
+    runtime-derived value for that provider. *)
+
 type adapted_profile = {
   name : string;
   (** Profile name derived from tier or tier-group (e.g. "tier.primary",
       "tier-group.primary"). *)
-  provider_configs : Llm_provider.Provider_config.t list;
-  (** Resolved provider configs, in declaration order. *)
+  provider_configs : provider_config_with_override list;
+  (** Resolved provider configs with optional per-provider capability
+      overrides, in declaration order. *)
   strategy : Cascade_strategy.t;
   (** Mapped strategy with parameters. *)
   ollama_max_concurrent : int option;
   (** Per-tier [max_concurrent] cap for Ollama providers, if set. *)
   cli_max_concurrent : int option;
   (** Per-tier [max_concurrent] cap for CLI providers, if set. *)
+  required_capability_profile : string option;
+  (** Capability profile name required by this tier-group, if any. *)
 }
 
 type adapted_catalog = {
@@ -52,6 +61,8 @@ type adapted_catalog = {
   (** [(target_name, "provider.model")] pairs. *)
   default_profile : string option;
   (** The profile whose binding has [is-default = true], if any. *)
+  capability_profiles : Cascade_declarative_types.cascade_profile list;
+  (** Capability profiles declared in [[profiles.*]] section. *)
   errors : adapter_error list;
   (** Accumulated errors. Empty when adaptation succeeds fully. *)
 }

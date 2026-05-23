@@ -1,6 +1,7 @@
 
 open Server_utils
 open Server_auth
+open Server_h2_gateway_helpers
 
 open Server_routes_http_common
 
@@ -1565,8 +1566,7 @@ let board_post_detail_json ~include_moderation ~blind_votes ~config ~voter
     ~response_format ~post_id =
   match Board_dispatch.get_post ~post_id with
   | Error err ->
-      (`Not_found, Printf.sprintf {|{"error":"%s"}|}
-         (String.escaped (Board_types.show_board_error err)))
+      (`Not_found, error_json_string (String.escaped (Board_types.show_board_error err)))
   | Ok post ->
       let author = Board.Agent_id.to_string post.author in
       let author_karma = Board_dispatch.get_agent_karma ~agent_name:author in

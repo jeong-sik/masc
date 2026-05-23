@@ -251,7 +251,7 @@ let rec add_routes ~sw ~clock router =
        if (not (http_auth_bind_is_loopback ()))
           || http_auth_strict_enabled () then
          Http.Response.json ~status:`Not_found ~request:request
-           {|{"error":"dev-token endpoint disabled (non-loopback bind or strict auth)"}|}
+           (error_json_string "dev-token endpoint disabled (non-loopback bind or strict auth)")
            reqd
        else
          with_public_read (fun state req reqd ->
@@ -1159,7 +1159,7 @@ let rec add_routes ~sw ~clock router =
              ) request reqd
        | Keeper_api.Keeper_post_unknown ->
            Http.Response.json ~status:`Not_found
-             {|{"error":"not found"}|} reqd)
+             (error_json_string "not found") reqd)
 
   (* ── Agent API routes (extracted) ── *)
   |> Server_dashboard_http_agent_api.add_agent_api_routes

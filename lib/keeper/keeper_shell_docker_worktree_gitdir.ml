@@ -123,3 +123,39 @@ let prepare ~host_root ~container_root =
     ~replacement:container_root
     (candidates ~host_root)
 ;;
+
+let private_stages_target_git_or_gh cmd =
+  match Masc_exec_command_gate.Shell_command_gate.parse_to_ir_opt cmd with
+  | Some ir ->
+    Keeper_shell_command_semantics.effective_stages_of_ir ir
+    |> Keeper_shell_command_semantics.stages_targets_git_or_gh
+  | None -> false
+;;
+
+(** [prepare] when [git_creds_enabled] and the command targets [git] or [gh].
+    Logs at info level when any paths were rewritten. *)
+let prepare_conditional ~git_creds_enabled ~cmd ~host_root ~container_root ~keeper_name =
+  if git_creds_enabled && private_stages_target_git_or_gh cmd
+  then (
+    let n = prepare ~host_root ~container_root in
+    if n > 0
+    then
+      Log.Keeper.info
+        "%s: prepared %d docker worktree gitdir path(s) under %s"
+        keeper_name n host_root;
+    n)
+  else 0
+;;
+
+(** [repair] when [git_creds_enabled] is true.  Logs at info level when
+    any paths were restored. *)
+let restore_and_log ~git_creds_enabled ~host_root ~container_root ~keeper_name =
+  if git_creds_enabled
+  then (
+    let restored = repair ~host_root ~container_root in
+    if restored > 0
+    then
+      Log.Keeper.info
+        "%s: restored %d docker worktree gitdir path(s) under %s"
+        keeper_name restored host_root)
+;;

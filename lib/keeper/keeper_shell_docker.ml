@@ -262,37 +262,15 @@ let run_docker_shell_command_with_status_internal
                    | Error err -> sandbox_error err
                    | Ok () ->
                      let prepared_gitdirs =
-                       if git_creds_enabled
-                          && (
-                            match Masc_exec_command_gate.Shell_command_gate.parse_to_ir_opt cmd with
-                            | Some ir ->
-                              Keeper_shell_command_semantics.effective_stages_of_ir ir
-                              |> Keeper_shell_command_semantics.stages_targets_git_or_gh
-                            | None -> false)
-                       then prepare_container_worktree_gitdirs ~host_root ~container_root
-                       else 0
+                       Keeper_shell_docker_worktree_gitdir.prepare_conditional
+                         ~git_creds_enabled ~cmd ~host_root ~container_root
+                         ~keeper_name:meta.name
                      in
                      let restore_gitdirs () =
-                       if git_creds_enabled
-                       then (
-                         let restored =
-                           repair_container_worktree_gitdirs ~host_root ~container_root
-                         in
-                         if restored > 0
-                         then
-                           Log.Keeper.info
-                             "%s: restored %d docker worktree gitdir path(s) under %s"
-                             meta.name
-                             restored
-                             host_root)
+                       Keeper_shell_docker_worktree_gitdir.restore_and_log
+                         ~git_creds_enabled ~host_root ~container_root
+                         ~keeper_name:meta.name
                      in
-                     if prepared_gitdirs > 0
-                     then
-                       Log.Keeper.info
-                         "%s: prepared %d docker worktree gitdir path(s) under %s"
-                         meta.name
-                         prepared_gitdirs
-                         host_root;
                      let uid = Unix.getuid () in
                      let gid = Unix.getgid () in
                      match

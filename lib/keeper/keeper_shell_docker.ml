@@ -466,6 +466,52 @@ let docker_bash_response ~ok ~git_creds_enabled ~image ~network_label ~status ~o
          @ [ "output", `String output ]
          @ gh_exit_class_field ~stages:cmd_stages ~status ~output))
 
+(** Convert a [docker_shell_result] into the JSON response string
+    shared by container-backed bash paths. *)
+let docker_result_to_bash_response ~config ~meta ~git_creds_enabled result =
+  let cwd_response =
+    Keeper_cwd_response.docker
+      ~host_cwd:result.cwd
+      ~container_cwd:(docker_private_workspace_cwd ~config ~meta result.cwd)
+  in
+  docker_bash_response
+    ~ok:result.semantic_ok
+    ~git_creds_enabled
+    ~image:result.image
+    ~network_label:result.network_label
+    ~status:result.status
+    ~output:result.output
+    ~cwd_response
+    ~semantic_status:result.semantic_status
+    ~cmd_stages:result.cmd_stages
+;;
+
+(** Shared container-backed bash execution: egress check →
+    [run_docker_shell_command_with_status] → response JSON.
+    Used by [run_docker_credentialed_bash] and [run_docker_bash]. *)
+let run_docker_bash_via_container
+      ~(config : Coord.config)
+      ~(meta : keeper_meta)
+      ~(cwd : string)
+      ~(timeout_sec : float)
+      ~(cmd : string)
+      ~git_creds_enabled
+      ~(network_mode : network_mode)
+  =
+  match check_egress ~config ~meta ~cmd with
+  | Some blocked_json -> blocked_json
+  | None ->
+    (match
+       run_docker_shell_command_with_status
+         ~config ~meta ~cwd ~timeout_sec ~cmd ~git_creds_enabled ~network_mode
+     with
+     | Error message when git_creds_enabled && is_credential_preflight_failure message ->
+       credential_preflight_failure_json ~keeper_name:meta.name ~message
+     | Error message -> error_json message
+     | Ok result ->
+       docker_result_to_bash_response ~config ~meta ~git_creds_enabled result)
+;;
+
 let run_docker_credentialed_bash
       ~(turn_sandbox_runtime : Keeper_turn_sandbox_runtime.t option)
       ~(config : Coord.config)
@@ -475,43 +521,14 @@ let run_docker_credentialed_bash
       ~(cmd : string)
       ()
   =
+  let _ = turn_sandbox_runtime in
   match docker_bash_preflight ~config ~meta ~cmd ~git_creds_enabled:true with
   | Some err -> err
-  | None -> (
-    (* P12: check egress policy for git commands with network access *)
-    match check_egress ~config ~meta ~cmd with
-    | Some blocked_json -> blocked_json
-    | None ->
-      let _ = turn_sandbox_runtime in
-      (match
-         run_docker_shell_command_with_status
-           ~config
-           ~meta
-           ~cwd
-           ~timeout_sec
-           ~cmd
-           ~git_creds_enabled:true
-           ~network_mode:Network_inherit
-       with
-       | Error message when is_credential_preflight_failure message ->
-         credential_preflight_failure_json ~keeper_name:meta.name ~message
-       | Error message -> error_json message
-       | Ok result ->
-         let cwd_response =
-           Keeper_cwd_response.docker
-             ~host_cwd:result.cwd
-             ~container_cwd:(docker_private_workspace_cwd ~config ~meta result.cwd)
-         in
-         docker_bash_response
-           ~ok:result.semantic_ok
-           ~git_creds_enabled:true
-           ~image:result.image
-           ~network_label:result.network_label
-           ~status:result.status
-           ~output:result.output
-           ~cwd_response
-           ~cmd_stages:result.cmd_stages
-           ))
+  | None ->
+    run_docker_bash_via_container
+      ~config ~meta ~cwd ~timeout_sec ~cmd
+      ~git_creds_enabled:true
+      ~network_mode:Network_inherit
 ;;
 
 let run_docker_bash
@@ -583,36 +600,8 @@ let run_docker_bash
            ~labels:[ "keeper", meta.name; "reason", "network_mode_mismatch" ]
            ()
        | None -> ());
-      (* P12: check egress policy before running networked container *)
-      (match check_egress ~config ~meta ~cmd with
-       | Some blocked_json -> blocked_json
-       | None ->
-         (match
-            run_docker_shell_command_with_status
-              ~config
-              ~meta
-              ~cwd
-              ~timeout_sec
-              ~cmd
-              ~git_creds_enabled:false
-              ~network_mode
-          with
-          | Error message -> error_json message
-          | Ok result ->
-            let cwd_response =
-              Keeper_cwd_response.docker
-                ~host_cwd:result.cwd
-                ~container_cwd:(docker_private_workspace_cwd ~config ~meta result.cwd)
-            in
-            docker_bash_response
-              ~ok:result.semantic_ok
-              ~git_creds_enabled:false
-              ~image:result.image
-              ~network_label:result.network_label
-              ~status:result.status
-              ~output:result.output
-              ~cwd_response
-              ~semantic_status:result.semantic_status
-              ~cmd_stages:result.cmd_stages
-              )))
+      run_docker_bash_via_container
+        ~config ~meta ~cwd ~timeout_sec ~cmd
+        ~git_creds_enabled:false
+        ~network_mode
 ;;

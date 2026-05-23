@@ -280,6 +280,7 @@
   keeper_hooks_oas_output_json
   keeper_hooks_oas_response_metrics
   keeper_hooks_oas_cost_events
+  keeper_hooks_oas_gate_attempt
   keeper_hooks_oas_idle
   keeper_hooks_oas_introspection
   keeper_hooks_oas_pr_metrics

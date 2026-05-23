@@ -172,9 +172,10 @@ val recent_tool_streak_count :
 
 (** {1 Pre-tool gate attempt rendering and telemetry}
 
-    Inlined from former [Keeper_hooks_oas_gate_attempt] (deleted) —
-    this module is the only production consumer and tests reach these
-    through the parent module surface. *)
+    Implementation lives in [Keeper_hooks_oas_gate_attempt]; the values
+    here are re-exports so existing parent-surface callers (including
+    [test_keeper_guards] and [test_keeper_hooks_oas_telemetry]) keep
+    working unchanged. *)
 
 val render_pre_tool_gate_output :
   Keeper_guards.gate_decision_event -> string

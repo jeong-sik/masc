@@ -31,21 +31,6 @@ val config_for_label :
 (** Build a {!Cascade_runner.config} from a model label string.  Resolves
     the provider config and fills in defaults. *)
 
-type codex_cli_prompt_preflight = {
-  prompt_bytes : int;
-  prompt_tokens : int;
-  context_window_tokens : int;
-  retry_limit_tokens : int;
-  hits_argv_limit : bool;
-  hits_context_window : bool;
-}
-
-val codex_cli_prompt_preflight :
-  config:Cascade_runner.config -> goal:string -> codex_cli_prompt_preflight option
-(** Check whether a codex_cli invocation would exceed the argv or context
-    window limit.  Returns [Some] when limits are hit, [None] when safe
-    or when the provider is not codex_cli. *)
-
 val with_codex_cli_preflight :
   scope:string ->
   config:Cascade_runner.config ->

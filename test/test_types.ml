@@ -482,8 +482,15 @@ let () =
         in
         witness Local; witness Docker;
         Alcotest.(check int) "count" 2 (List.length valid_sandbox_profile_strings));
-      Alcotest.test_case "cmd_targets_git_or_gh dispatch predicate" `Quick (fun () ->
-        let p = Masc_mcp.Keeper_exec_shell.cmd_targets_git_or_gh in
+      Alcotest.test_case "stages_targets_git_or_gh dispatch predicate" `Quick (fun () ->
+        (* Predicate moved from [Keeper_exec_shell.cmd_targets_git_or_gh]
+           (string -> bool) to
+           [Keeper_shell_command_semantics.stages_targets_git_or_gh]
+           (parsed_stage list -> bool) as part of RFC-0160 Shell IR
+           first-class promotion. [effective_stages_of_cmd] is the
+           canonical string-to-stages adapter. *)
+        let module KSCS = Masc_mcp.Keeper_shell_command_semantics in
+        let p s = KSCS.stages_targets_git_or_gh (KSCS.effective_stages_of_cmd s) in
         Alcotest.(check bool) "git status" true (p "git status");
         Alcotest.(check bool) "gh pr list" true (p "gh pr list");
         Alcotest.(check bool) "leading whitespace tolerated" true

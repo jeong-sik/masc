@@ -14,7 +14,7 @@
 #   G4  Risk-stamped IR (existence of Shell_ir.simple.risk or
 #       'decided phantom envelope)
 #   G5  validate_shell_ir_paths caller count (target: 4 keeper ops)
-#   G6  spec/ShellIRFirstClass.tla existence
+#   G6  specs/shell-ir-first-class/ShellIRFirstClass.tla existence
 #   G7  shell_word_values + Bash_words.stages parallel-parser callers
 #
 # Output modes:
@@ -55,27 +55,76 @@ if ! command -v rg >/dev/null 2>&1; then
   echo "error: rg (ripgrep) required" >&2
   exit 2
 fi
+if ! command -v perl >/dev/null 2>&1; then
+  echo "error: perl required for OCaml comment stripping" >&2
+  exit 2
+fi
+
+# Strip OCaml block comments `(* ... *)` (non-greedy across lines) from a
+# file and emit the de-commented content on stdout. Required because
+# docstring/comment mentions of legacy identifiers (e.g. `[shell_word_values]`
+# inside `(** ... *)`) inflate raw grep counts even after every real call
+# site has been migrated. Non-nested form is sufficient — OCaml allows
+# nested comments but masc-mcp does not use them in docstrings.
+strip_ocaml_comments() {
+  perl -0777 -pe 's{\(\*.*?\*\)}{}gs' "$1"
+}
+
+# Count files under lib/ that contain the pattern in *non-comment* code.
+count_code_files() {
+  local pattern="$1"
+  local total=0
+  while IFS= read -r f; do
+    [[ -z "$f" ]] && continue
+    if strip_ocaml_comments "$f" | grep -qE "$pattern"; then
+      total=$((total + 1))
+    fi
+  done < <(rg -l "$pattern" --type-add 'ocaml:*.{ml,mli}' -tocaml lib/ 2>/dev/null | rg -v '/test/' || true)
+  echo "$total"
+}
+
+# Sum non-comment matches of pattern across lib/ files.
+count_code_refs() {
+  local pattern="$1"
+  local total=0
+  while IFS= read -r f; do
+    [[ -z "$f" ]] && continue
+    local c
+    c=$(strip_ocaml_comments "$f" | grep -cE "$pattern" || true)
+    total=$((total + c))
+  done < <(rg -l "$pattern" --type-add 'ocaml:*.{ml,mli}' -tocaml lib/ 2>/dev/null | rg -v '/test/' || true)
+  echo "$total"
+}
+
+# List lib/ files (non-test) that contain pattern in non-comment code.
+list_code_files() {
+  local pattern="$1"
+  while IFS= read -r f; do
+    [[ -z "$f" ]] && continue
+    if strip_ocaml_comments "$f" | grep -qE "$pattern"; then
+      echo "$f"
+    fi
+  done < <(rg -l "$pattern" --type-add 'ocaml:*.{ml,mli}' -tocaml lib/ 2>/dev/null | rg -v '/test/' || true)
+}
 
 # ---- G1: Bash.parse_string callers (lib/, non-test) ----
-g1_callers_lib=$(rg -l 'Bash\.parse_string|Masc_exec_bash_parser\.Bash\.parse_string' lib/ 2>/dev/null \
-  | rg -v '/test/' \
-  | wc -l | tr -d ' ')
-g1_total_refs=$(rg -c 'Bash\.parse_string|Masc_exec_bash_parser\.Bash\.parse_string' lib/ 2>/dev/null \
-  | rg -v '/test/' \
-  | awk -F: '{s+=$2} END{print s+0}')
+g1_pattern='Bash\.parse_string|Masc_exec_bash_parser\.Bash\.parse_string'
+g1_callers_lib=$(count_code_files "$g1_pattern")
+g1_total_refs=$(count_code_refs "$g1_pattern")
 
 # ---- G1 allowed exceptions (named; any new file must be added here) ----
+# After comment-aware grep (S4 audit accuracy fix), only files with *real*
+# code-side `Bash.parse_string` references count. Files whose former
+# matches were docstring-only (`gh_command_validation.ml`,
+# `keeper_shell_command_semantics.mli`, the two `.mli` interfaces) have
+# been removed — re-add only if a future code-side call resurfaces.
 g1_allowed_files=(
   "lib/exec/command_gate/shell_command_gate.ml"
-  "lib/exec/command_gate/shell_command_gate.mli"
   "lib/exec_policy_mutation_classifier.ml"
-  "lib/exec_policy_mutation_classifier.mli"
-  "lib/gh_command_validation.ml"
-  "lib/keeper/keeper_shell_command_semantics.mli"
+  "lib/keeper/keeper_hooks_oas_pr_metrics.ml"
   "lib/spawn.ml"
 )
-g1_current_files=$(rg -l 'Bash\.parse_string|Masc_exec_bash_parser\.Bash\.parse_string' lib/ 2>/dev/null \
-  | rg -v '/test/' \
+g1_current_files=$(list_code_files "$g1_pattern" \
   | rg -v '/dune$|\.dune$' \
   | sort)
 g1_unclassified=()
@@ -114,15 +163,21 @@ g5_callers=$(rg -l 'validate_shell_ir_paths' lib/ 2>/dev/null \
   | wc -l | tr -d ' ')
 
 # ---- G6: TLA+ spec ----
-if [[ -f spec/ShellIRFirstClass.tla ]]; then g6_spec=1; else g6_spec=0; fi
+# RFC-0160 §S7 names `specs/shell-ir-first-class/ShellIRFirstClass.tla`.
+# Earlier audit drafts looked at `spec/` (singular) which never existed in
+# the repo; the spec was added in PR #18116 under the standard `specs/`
+# layout.
+if [[ -f specs/shell-ir-first-class/ShellIRFirstClass.tla ]]; then
+  g6_spec=1
+else
+  g6_spec=0
+fi
 
 # ---- G7: parallel parser refs ----
-g7_shell_word_values=$(rg -c 'shell_word_values' lib/ 2>/dev/null \
-  | rg -v '/test/' \
-  | awk -F: '{s+=$2} END{print s+0}')
-g7_bash_words_stages=$(rg -c 'Bash_words\.stages' lib/ 2>/dev/null \
-  | rg -v '/test/' \
-  | awk -F: '{s+=$2} END{print s+0}')
+# Comment-aware: docstring mentions of `[shell_word_values]` /
+# `[Bash_words.stages]` do not count toward the parallel-parser metric.
+g7_shell_word_values=$(count_code_refs 'shell_word_values')
+g7_bash_words_stages=$(count_code_refs 'Bash_words\.stages')
 g7_total=$(( g7_shell_word_values + g7_bash_words_stages ))
 
 # ---- IR constructor count (Simple / Pipeline) — non-G but informative ----
@@ -184,7 +239,7 @@ Generated: $(date -u +%Y-%m-%dT%H:%M:%SZ)
   G5  validate_shell_ir_paths caller files (non-test, non-defining)
         ${g5_callers} files                            (target: ≥ 4)
 
-  G6  TLA+ spec spec/ShellIRFirstClass.tla
+  G6  TLA+ spec specs/shell-ir-first-class/ShellIRFirstClass.tla
         exists: ${g6_spec}                             (target: 1)
 
   G7  Parallel parser refs (shell_word_values + Bash_words.stages, non-test)

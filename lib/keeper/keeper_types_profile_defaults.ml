@@ -15,7 +15,6 @@ type keeper_profile_defaults = {
   needs : string option;
   desires : string option;
   instructions : string option;
-  policy_voice_enabled : bool option;
   autoboot_enabled : bool option;
   mention_targets : string list;
   proactive_enabled : bool option;
@@ -82,7 +81,6 @@ let empty_keeper_profile_defaults =
     needs = None;
     desires = None;
     instructions = None;
-    policy_voice_enabled = None;
     autoboot_enabled = None;
     mention_targets = [];
     proactive_enabled = None;

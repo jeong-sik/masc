@@ -27,8 +27,7 @@ type parsed_keeper_identity =
   }
 
 type parsed_keeper_policy =
-  { pp_policy_voice_enabled : bool
-  ; pp_sandbox_profile : sandbox_profile
+  { pp_sandbox_profile : sandbox_profile
   ; pp_sandbox_image : string option
   ; pp_network_mode : network_mode
   ; pp_allowed_paths : string list
@@ -43,9 +42,6 @@ type parsed_keeper_policy =
   ; pp_auto_handoff : bool
   ; pp_handoff_threshold : float
   ; pp_handoff_cooldown_sec : int
-  ; pp_voice_enabled : bool
-  ; pp_voice_channel : string
-  ; pp_voice_agent_id : string
   ; pp_per_provider_timeout_s : float option
   ; pp_always_approve : bool option
   }
@@ -215,16 +211,12 @@ let parse_sandbox_policy_fields (json : Yojson.Safe.t)
 let parse_keeper_policy (json : Yojson.Safe.t) ~(keeper_name : string)
   : (parsed_keeper_policy, string) result
   =
-  let voice_enabled_default = default_voice_enabled_for keeper_name in
   match tool_access_of_meta_json json with
   | Error msg -> Error ("meta parse error: " ^ msg)
   | Ok pp_tool_access ->
     (match parse_sandbox_policy_fields json with
      | Error msg -> Error ("meta parse error: " ^ msg)
      | Ok (pp_sandbox_profile, pp_sandbox_image, pp_network_mode) ->
-    let pp_policy_voice_enabled =
-      Safe_ops.json_bool ~default:voice_enabled_default "policy_voice_enabled" json
-    in
     let pp_allowed_paths = Safe_ops.json_string_list "allowed_paths" json in
     let pp_tool_denylist = Safe_ops.json_string_list "tool_denylist" json in
     let pp_mention_targets =
@@ -292,22 +284,6 @@ let parse_keeper_policy (json : Yojson.Safe.t) ~(keeper_name : string)
     let pp_handoff_cooldown_sec =
       Safe_ops.json_int ~default:300 "handoff_cooldown_sec" json
     in
-    let pp_voice_enabled =
-      Safe_ops.json_bool ~default:voice_enabled_default "voice_enabled" json
-    in
-    let pp_voice_channel =
-      Safe_ops.json_string
-        ~default:(default_voice_channel_for keeper_name)
-        "voice_channel"
-        json
-      |> canonical_voice_channel
-    in
-    let pp_voice_agent_id =
-      Safe_ops.json_string
-        ~default:(default_voice_agent_id_for keeper_name)
-        "voice_agent_id"
-        json
-    in
     let pp_per_provider_timeout_s =
       normalize_per_provider_timeout_json_field
         ~source:(Printf.sprintf "keeper meta %s" keeper_name)
@@ -316,8 +292,7 @@ let parse_keeper_policy (json : Yojson.Safe.t) ~(keeper_name : string)
     in
     let pp_always_approve = Safe_ops.json_bool_opt "always_approve" json in
     Ok
-      { pp_policy_voice_enabled
-      ; pp_sandbox_profile
+      { pp_sandbox_profile
       ; pp_sandbox_image
       ; pp_network_mode
       ; pp_allowed_paths
@@ -361,9 +336,6 @@ let parse_keeper_policy (json : Yojson.Safe.t) ~(keeper_name : string)
       ; pp_auto_handoff
       ; pp_handoff_threshold
       ; pp_handoff_cooldown_sec
-      ; pp_voice_enabled
-      ; pp_voice_channel
-      ; pp_voice_agent_id
       ; pp_per_provider_timeout_s
       ; pp_always_approve
       })
@@ -656,7 +628,6 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
                    ; needs = identity.pk_needs
                    ; desires = identity.pk_desires
                    ; instructions = identity.pk_instructions
-                   ; policy_voice_enabled = policy.pp_policy_voice_enabled
                    ; sandbox_profile = policy.pp_sandbox_profile
                    ; sandbox_image = policy.pp_sandbox_image
                    ; network_mode = policy.pp_network_mode
@@ -674,9 +645,6 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
                    ; auto_handoff = policy.pp_auto_handoff
                    ; handoff_threshold = policy.pp_handoff_threshold
                    ; handoff_cooldown_sec = policy.pp_handoff_cooldown_sec
-                   ; voice_enabled = policy.pp_voice_enabled
-                   ; voice_channel = policy.pp_voice_channel
-                   ; voice_agent_id = policy.pp_voice_agent_id
                    ; per_provider_timeout_s = policy.pp_per_provider_timeout_s
                    ; always_approve = policy.pp_always_approve
                    ; created_at =

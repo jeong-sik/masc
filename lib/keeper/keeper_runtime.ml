@@ -253,8 +253,6 @@ let ensure_keeper_meta config name =
     let target_instructions = apply_default defaults.instructions meta.instructions in
 
     (* --- Policy --- *)
-    let target_policy_voice_enabled =
-      apply_default defaults.policy_voice_enabled meta.policy_voice_enabled in
     let target_autoboot_enabled =
       apply_default defaults.autoboot_enabled meta.autoboot_enabled in
     let target_mention_targets =
@@ -392,8 +390,7 @@ let ensure_keeper_meta config name =
     in
     let personality_changed = personality_diff_entries <> [] in
     let policy_changed =
-      meta.policy_voice_enabled <> target_policy_voice_enabled
-      || meta.autoboot_enabled <> target_autoboot_enabled
+      meta.autoboot_enabled <> target_autoboot_enabled
       || meta.mention_targets <> target_mention_targets
       || meta.active_goal_ids <> target_active_goal_ids
       || meta.tool_access <> target_tool_access
@@ -503,7 +500,6 @@ let ensure_keeper_meta config name =
         needs = target_needs;
         desires = target_desires;
         instructions = target_instructions;
-        policy_voice_enabled = target_policy_voice_enabled;
         autoboot_enabled = target_autoboot_enabled;
         mention_targets = target_mention_targets;
         active_goal_ids = target_active_goal_ids;

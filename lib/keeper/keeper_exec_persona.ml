@@ -35,7 +35,7 @@ let find_jsonl_row_by_action_id rows action_id =
 
 let resolved_keeper_args_to_json
     ~name ~persona_name ~goal ~short_goal ~mid_goal ~long_goal
-    ~instructions ~will ~needs ~desires ~policy_voice_enabled
+    ~instructions ~will ~needs ~desires
     ~mention_targets
     ~allowed_paths_opt
     ~autoboot_enabled_opt
@@ -55,7 +55,6 @@ let resolved_keeper_args_to_json
       ("will", `String will);
       ("needs", `String needs);
       ("desires", `String desires);
-      ("policy_voice_enabled", `Bool policy_voice_enabled);
       ("mention_targets", string_list_to_json mention_targets);
       ("tool_denylist", string_list_to_json tool_denylist);
       ("proactive_enabled", `Bool proactive_enabled);
@@ -95,9 +94,6 @@ let validate_resolved_keeper_create_json (json : Yojson.Safe.t) : string list =
   let errors = ref [] in
   let name = Safe_ops.json_string ~default:"" "name" json in
   let goal = Safe_ops.json_string ~default:"" "goal" json |> String.trim in
-  let _policy_voice_enabled =
-    Safe_ops.json_bool ~default:false "policy_voice_enabled" json
-  in
   let mention_targets = Safe_ops.json_string_list "mention_targets" json in
   if not (validate_name name) then
     errors :=
@@ -227,9 +223,6 @@ let render_keeper_toml_from_resolved_args (json : Yojson.Safe.t) :
               let fields = append_optional_string_field fields "needs" json in
               let fields = append_optional_string_field fields "desires" json in
               let fields = append_optional_string_field fields "instructions" json in
-              let fields =
-                append_optional_bool_field fields "policy_voice_enabled" json
-              in
               let fields =
                 append_optional_bool_field fields "autoboot_enabled" json
               in
@@ -403,12 +396,6 @@ let resolved_keeper_args_from_persona args :
           |> first_some defaults.desires
           |> Option.value ~default:(Env_config_core.keeper_desires ())
         in
-            let policy_voice_enabled =
-              first_some
-                (get_bool_opt args "policy_voice_enabled")
-              defaults.policy_voice_enabled
-              |> Option.value ~default:false
-            in
             let mention_targets =
               let explicit = get_string_list args "mention_targets" in
               let raw =
@@ -484,7 +471,6 @@ let resolved_keeper_args_from_persona args :
                      ~persona_name
                      ~goal ~short_goal ~mid_goal ~long_goal
                      ~instructions  ~will ~needs ~desires
-                     ~policy_voice_enabled
                      ~mention_targets
                      ~allowed_paths_opt:allowed_paths
                      ~autoboot_enabled_opt:autoboot_enabled

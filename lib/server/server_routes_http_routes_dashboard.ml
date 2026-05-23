@@ -11,18 +11,6 @@ module Runtime = Server_routes_http_runtime
 module Keeper_stream = Server_routes_http_keeper_stream
 module Keeper_api = Server_dashboard_http_keeper_api
 
-(* Cascade profile gate extracted to
-   [Server_dashboard_cascade_profile_gate] (godfile decomp). Type +
-   constructor functions re-exported via transparent alias so the
-   internal call sites stay byte-identical. *)
-module Cascade_profile_gate = Server_dashboard_cascade_profile_gate
-
-type cascade_profile_gate = Cascade_profile_gate.t = {
-  valid_profiles : string list;
-  invalid_profiles : (string * string list) list;
-  invalid_assignments : (string * string list) list;
-}
-
 let option_int_json = function
   | Some value -> `Int value
   | None -> `Null
@@ -38,11 +26,6 @@ let dashboard_logs_json = Server_dashboard_logs_json.build
 
 module Provider_logs = Server_routes_http_dashboard_provider_logs
 
-
-let cascade_profile_gate = Cascade_profile_gate.compute
-let available_cascade_profiles = Cascade_profile_gate.available_profiles
-let invalid_cascade_profiles = Cascade_profile_gate.invalid_profiles
-let invalid_cascade_assignment_profiles = Cascade_profile_gate.invalid_assignment_profiles
 
 (* RFC-0138 Phase 3 Step 5 — [telemetry_summary_cache_key] deleted
    along with [Dashboard_cache.get_or_compute] from the cold-start

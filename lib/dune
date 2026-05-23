@@ -152,6 +152,9 @@
    keeper_shell_docker_preflight
    keeper_shell_docker_lifecycle
    keeper_shell_docker_semantic
+   keeper_shell_docker_mount_check
+   keeper_shell_docker_credential
+   keeper_shell_docker_argv
    keeper_shell_docker_path_rewrite
    keeper_shell_docker_profile
    keeper_shell_docker

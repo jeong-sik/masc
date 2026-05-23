@@ -14,7 +14,9 @@ include Keeper_shell_docker_lifecycle
 include Keeper_shell_docker_path_rewrite
 include Keeper_shell_docker_profile
 include Keeper_shell_docker_semantic
-
+include Keeper_shell_docker_mount_check
+include Keeper_shell_docker_credential
+include Keeper_shell_docker_argv
 
 (* ── Container naming ──────────────────────────────────── *)
 
@@ -184,8 +186,8 @@ let run_docker_shell_command_with_status_internal
               (* Pre-flight: verify the bind source and host cwd before spawning a
                  container. Missing bind sources otherwise fail inside Docker
                  Desktop as opaque OCI mount errors and can degrade the daemon. *)
-              if not (path_exists host_root)
-              then
+              (match Keeper_shell_docker_mount_check.check ~host_root ~cwd with
+              | Error (Mount_source_not_found mount_path) ->
                 let details =
                   docker_mount_preflight_details
                     ~config
@@ -193,7 +195,7 @@ let run_docker_shell_command_with_status_internal
                     ~image
                     ~container_kind:"oneshot"
                     ~network_label
-                    ~mount_path:host_root
+                    ~mount_path
                     ~reason:"mount_source_not_found"
                 in
                 sandbox_error
@@ -203,14 +205,13 @@ let run_docker_shell_command_with_status_internal
                       base_path_hash=%S keeper=%S image=%S container_kind=%S \
                       network=%S (host bind mount source does not exist; repair \
                       the sandbox playground before docker run)"
-                     host_root
+                     mount_path
                      (Keeper_sandbox_runtime.base_path_hash config.base_path)
                      meta.name
                      image
                      "oneshot"
                      network_label)
-              else if not (path_is_directory host_root)
-              then
+              | Error (Mount_source_not_directory mount_path) ->
                 let details =
                   docker_mount_preflight_details
                     ~config
@@ -218,7 +219,7 @@ let run_docker_shell_command_with_status_internal
                     ~image
                     ~container_kind:"oneshot"
                     ~network_label
-                    ~mount_path:host_root
+                    ~mount_path
                     ~reason:"mount_source_not_directory"
                 in
                 sandbox_error
@@ -227,28 +228,26 @@ let run_docker_shell_command_with_status_internal
                      "docker_shell_failed: mount_source_not_directory: mount_path=%S \
                       base_path_hash=%S keeper=%S image=%S container_kind=%S \
                       network=%S (host bind mount source must be a directory)"
-                     host_root
+                     mount_path
                      (Keeper_sandbox_runtime.base_path_hash config.base_path)
                      meta.name
                      image
                      "oneshot"
                      network_label)
-              else if not (path_exists cwd)
-              then
+              | Error (Cwd_not_found cwd) ->
                 sandbox_error
                   (Printf.sprintf
                      "docker_shell_failed: cwd_not_found: %s (host working directory \
                       does not exist; verify the relative path under your playground \
                      before calling keeper_shell)"
                      cwd)
-              else if not (path_is_directory cwd)
-              then
+              | Error (Cwd_not_directory cwd) ->
                 sandbox_error
                   (Printf.sprintf
                      "docker_shell_failed: cwd_not_directory: %s (working directory must \
                       be a directory, not a file)"
                      cwd)
-              else (
+              | Ok () -> (
                 let _cleanup =
                   Keeper_sandbox_runtime.maybe_cleanup_stale_containers
                     ~base_path:config.base_path
@@ -304,82 +303,30 @@ let run_docker_shell_command_with_status_internal
                      with
                      | Error err -> sandbox_error err
                      | Ok identity_mounts ->
-                       let cred_result =
-                         if not git_creds_enabled
-                         then Ok ([], [])
-                         else (
-                           (* Credential composition is centralised in
-             [Keeper_host_config_provider.resolve].  It selects either the
-             keeper's explicit GitHub identity bundle or the MASC-owned
-             root bundle.  Ambient operator GH_TOKEN/GITHUB_TOKEN,
-             ~/.config/gh, ~/.ssh, and keychain probes are not part of
-             keeper execution. *)
-                           match
-                             Keeper_host_config_provider.resolve
-                               ~config
-                               ~identity:meta.name
-                           with
-                           | Error err -> Error (Keeper_credential_provider.pp_error err)
-                           | Ok binding ->
-                             let mounts =
-                               List.concat_map
-                                 (fun (m : Keeper_credential_provider.ro_mount) ->
-                                    [ "-v"; m.host ^ ":" ^ m.container ^ ":ro" ])
-                                 binding.ro_mounts
-                             in
-                             let envs =
-                               List.concat_map
-                                 (fun (k, v) -> [ "-e"; k ^ "=" ^ v ])
-                                 binding.env
-                             in
-                             Ok (mounts, envs))
-                       in
-                       (match cred_result with
-                        | Error err -> sandbox_error err
-                        | Ok (cred_mounts, cred_envs) ->
+                       match
+                         Keeper_shell_docker_credential.resolve
+                           ~config ~meta ~git_creds_enabled
+                       with
+                       | Error err -> sandbox_error err
+                       | Ok (cred_mounts, cred_envs) ->
                           let argv =
-                            Keeper_sandbox_runtime.docker_command_argv ()
-                            @ [ "run"; "--rm"; "--name"; container_name ]
-                            @ Keeper_sandbox_runtime.docker_label_args
-                                ~base_path:config.base_path
-                                ~keeper_name:meta.name
-                                ~container_kind:"oneshot"
-                                ~network_label
-                                ~ttl_sec:(docker_oneshot_ttl_sec ~timeout_sec)
-                                ()
-                            @ [ "-i"; "--user"; Printf.sprintf "%d:%d" uid gid ]
-                            @ Keeper_sandbox_runtime.docker_sandbox_env_args
-                                ~base_path:config.base_path
-                                ~container_root
-                            @ Keeper_sandbox_runtime.docker_nofile_args ()
-                            @ Env_config_keeper.KeeperSandbox.read_only_rootfs_args ()
-                            @ [ "--tmpfs"
-                              ; Env_config_keeper.KeeperSandbox.tmpfs_mount ()
-                              ; "--cap-drop=ALL"
-                              ; "--security-opt"
-                              ; "no-new-privileges"
-                              ]
-                            @ seccomp_args
-                            @ [ "--pids-limit"
-                              ; string_of_int (Env_config_keeper.KeeperSandbox.pids_limit ())
-                              ; "--memory"
-                              ; Env_config_keeper.KeeperSandbox.memory ()
-                              ; "-v"
-                              ; host_root ^ ":" ^ container_root ^ ":rw"
-                              ; "--workdir"
-                              ; container_cwd
-                              ]
-                            @ Keeper_sandbox_runtime.docker_config_mount_args
-                                ~base_path:config.base_path
-                                ~container_root
-                            @ Keeper_sandbox_runtime.docker_room_state_mount_args
-                                ~base_path:config.base_path
-                                ~container_root
-                            @ network_args
-                            @ cred_mounts
-                            @ cred_envs
-                            @ identity_mounts
-                            @ [ image; "bash"; "-l"; "-s" ]
+                            Keeper_shell_docker_argv.docker_run_argv
+                              ~config
+                              ~meta
+                              ~container_name
+                              ~container_root
+                              ~container_cwd
+                              ~host_root
+                              ~network_label
+                              ~network_args
+                              ~uid
+                              ~gid
+                              ~seccomp_args
+                              ~cred_mounts
+                              ~cred_envs
+                              ~identity_mounts
+                              ~image
+                              ~ttl_sec:(docker_oneshot_ttl_sec ~timeout_sec)
                           in
                           (try
                              let status, output =

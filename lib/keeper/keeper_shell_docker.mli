@@ -8,6 +8,9 @@
 include module type of Keeper_shell_docker_path_rewrite
 include module type of Keeper_shell_docker_profile
 include module type of Keeper_shell_docker_semantic
+include module type of Keeper_shell_docker_mount_check
+include module type of Keeper_shell_docker_credential
+include module type of Keeper_shell_docker_argv
 
 (** Diagnostic label for a [Unix.process_status]:
     [exit=N] / [signal=N] / [stopped=N]. *)

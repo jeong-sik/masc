@@ -233,6 +233,15 @@ let classify_transition ?ctx ~(from_state: _ turn_state) ~(to_state: _ turn_stat
       Some ToolReturned
   | Any Streaming, Any Completing when not stop_signaled_before ->
       Some StreamComplete
+  | Any Streaming, Any (Failed (Failure_tool_contract_violation _))
+    when not stop_signaled_before ->
+      Some ContractViolation
+  | Any Streaming, Any (Failed (Failure_receipt_lost _))
+    when not stop_signaled_before ->
+      Some ReceiptLost
+  | Any Streaming, Any (Cancelled Cancelled_provider_timeout)
+    when not stop_signaled_before ->
+      Some ProviderTimeout
   | Any Completing, Any Done when not stop_signaled_before ->
       Some ContractOk
   | Any Completing, Any (Failed (Failure_tool_contract_violation _))

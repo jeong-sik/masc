@@ -54,6 +54,8 @@ type docker_shell_result =
   ; network_label : string
   ; cmd_stages : string list
   ; cwd : string
+  ; semantic_status : Exec_core.semantic_status option
+  ; semantic_ok : bool
   }
 
 (* docker run --rm wall-clock covers slot_wait + spawn + container
@@ -394,7 +396,27 @@ let run_docker_shell_command_with_status_internal
                                Keeper_registry.clear_error
                                  ~base_path:config.base_path
                                  meta.name);
-                             Ok { status; output; image; network_label; cmd_stages; cwd }
+                             let semantic_status =
+                               docker_command_semantic_status ~cmd ~status ~output
+                             in
+                             let semantic_ok =
+                               match semantic_status with
+                               | Exec_core.Ok | Exec_core.No_match -> true
+                               | Exec_core.Partial
+                               | Exec_core.Blocked
+                               | Exec_core.Timeout
+                               | Exec_core.Runtime_error -> false
+                             in
+                             Ok
+                               { status
+                               ; output
+                               ; image
+                               ; network_label
+                               ; cmd_stages
+                               ; cwd
+                               ; semantic_status = Some semantic_status
+                               ; semantic_ok
+                               }
                            with
                            | Eio.Cancel.Cancelled _ as exn -> raise exn
                            | Failure err -> sandbox_error err
@@ -479,7 +501,7 @@ let run_docker_credentialed_bash
              ~container_cwd:(docker_private_workspace_cwd ~config ~meta result.cwd)
          in
          docker_bash_response
-           ~ok:(result.status = Unix.WEXITED 0)
+           ~ok:result.semantic_ok
            ~git_creds_enabled:true
            ~image:result.image
            ~network_label:result.network_label
@@ -579,32 +601,20 @@ let run_docker_bash
           with
           | Error message -> error_json message
           | Ok result ->
-            let semantic_status =
-              docker_command_semantic_status
-                ~cmd
-                ~status:result.status
-                ~output:result.output
-            in
-            let semantic_ok =
-              docker_command_semantic_success
-                ~cmd
-                ~status:result.status
-                ~output:result.output
-            in
             let cwd_response =
               Keeper_cwd_response.docker
                 ~host_cwd:result.cwd
                 ~container_cwd:(docker_private_workspace_cwd ~config ~meta result.cwd)
             in
             docker_bash_response
-              ~ok:semantic_ok
+              ~ok:result.semantic_ok
               ~git_creds_enabled:false
               ~image:result.image
               ~network_label:result.network_label
               ~status:result.status
               ~output:result.output
               ~cwd_response
-              ~semantic_status
+              ~semantic_status:result.semantic_status
               ~cmd_stages:result.cmd_stages
               )))
 ;;

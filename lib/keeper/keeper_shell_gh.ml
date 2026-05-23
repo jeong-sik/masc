@@ -147,7 +147,7 @@ let handle ~op ~(meta : keeper_meta) ~(config : Coord.config) ~(args : Yojson.Sa
               ; redirect_allowed = false
               }
             ~path_policy:Masc_exec_command_gate.Shell_command_gate.allow_all_paths
-            ~sandbox:{ target = gh_sandbox_target }
+            ~sandbox:Masc_exec_command_gate.Shell_command_gate.host_sandbox
             ()
         with
         | Masc_exec_command_gate.Shell_command_gate.Reject { diagnostic; _ } ->

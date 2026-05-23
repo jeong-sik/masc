@@ -334,6 +334,49 @@ let handle_keeper_shell
     | None ->
       render_process_result ~cwd ~cmd command_argv
   in
+  let run_line_count_reader ~coreutil =
+    match read_target () with
+    | Error e -> path_error e
+    | Ok target ->
+      let n = Safe_ops.json_int ~default:20 "lines" args |> fun v -> max 1 (min 200 v) in
+      if Keeper_docker_read.should_route_read ~meta then
+        (match
+           run_readonly_in_docker ~target
+             ~command_argv:(fun cpath ->
+               [ coreutil; "-n"; string_of_int n; cpath ])
+             ~max_bytes:1_000_000
+             ~timeout_sec:Keeper_shell_shared.read_timeout_sec
+             ()
+         with
+         | Error response -> response
+         | Ok (st, out) ->
+           Yojson.Safe.to_string
+             (`Assoc
+                 [ "ok", `Bool true
+                 ; "op", `String op
+                 ; "path", `String target
+                 ; "lines", `Int n
+                 ; "via", `String "docker"
+                 ; "status", Keeper_alerting_path.process_status_to_json st
+                 ; "content", `String out
+                 ]))
+      else
+        let st, out =
+          Keeper_shell_shared.run_argv_with_status_retry_eintr
+            ~timeout_sec:Keeper_shell_shared.read_timeout_sec
+            [ coreutil; "-n"; string_of_int n; target ]
+        in
+        Yojson.Safe.to_string
+          (`Assoc
+              [ "ok", `Bool (st = Unix.WEXITED 0)
+              ; "op", `String op
+              ; "path", `String target
+              ; "lines", `Int n
+              ; "via", `String "host"
+              ; "status", Keeper_alerting_path.process_status_to_json st
+              ; "content", `String out
+              ]))
+  in
   let render_docker_process_result ~cwd ~cmd ~docker_cmd ~timeout_sec =
     match
       Keeper_shell_shared.run_docker_shell_command_with_status ~config ~meta ~cwd ~timeout_sec
@@ -380,82 +423,43 @@ let handle_keeper_shell
     (match cwd_target () with
      | Error e -> path_error e
      | Ok cwd ->
-       if Keeper_docker_read.should_route_read ~meta then
-         render_docker_process_result ~cwd ~cmd:"pwd" ~docker_cmd:"pwd"
-           ~timeout_sec:Keeper_shell_shared.io_timeout_sec
-       else
-         run_in_turn_runtime ~cwd ~cmd:"pwd" ~command_argv:[ coreutils.pwd ]
-           ~map_output:hostify_turn_runtime_output
-           ~max_bytes:4096 ~timeout_sec:Keeper_shell_shared.io_timeout_sec ())
+       Keeper_shell_runtime.run_cwd_op ~root ~keeper_name:meta.name ~op ~config ~meta
+         ?turn_sandbox_factory ~cwd ~cmd:"pwd" ~docker_cmd:"pwd"
+         ~command_argv:[ coreutils.pwd ]
+         ~map_output:hostify_turn_runtime_output
+         ~max_bytes:4096 ~timeout_sec:Keeper_shell_shared.io_timeout_sec ())
   | "git_status" ->
     (match cwd_target () with
      | Error e -> path_error e
      | Ok cwd ->
-       if Keeper_docker_read.should_route_read ~meta then
-         render_docker_process_result ~cwd
-           ~cmd:"git -C <cwd> --no-optional-locks status --short --branch"
-           ~docker_cmd:"git --no-optional-locks status --short --branch"
-           ~timeout_sec:Keeper_shell_shared.read_timeout_sec
-       else
-         run_in_turn_runtime ~cwd
-           ~cmd:"git --no-optional-locks status --short --branch"
-           ~command_argv:
-             [ "git"; "--no-optional-locks"; "status"; "--short"; "--branch" ]
-           ~max_bytes:1_000_000
-           ~timeout_sec:Keeper_shell_shared.read_timeout_sec ())
+       Keeper_shell_runtime.run_cwd_op ~root ~keeper_name:meta.name ~op ~config ~meta
+         ?turn_sandbox_factory ~cwd
+         ~cmd:"git -C <cwd> --no-optional-locks status --short --branch"
+         ~docker_cmd:"git --no-optional-locks status --short --branch"
+         ~command_argv:[ "git"; "--no-optional-locks"; "status"; "--short"; "--branch" ]
+         ~max_bytes:1_000_000
+         ~timeout_sec:Keeper_shell_shared.read_timeout_sec ())
   | "ls" ->
     (match read_target () with
      | Error e -> path_error e
      | Ok target ->
        let limit = shell_readonly_limit args in
-       (* RFC-0006 Phase B-3b: Docker keepers route ls through the same
-          docker prelude as keeper_fs_read so the container's mount is
-          the load-bearing isolation. The host-side containment guard
-          above remains as defense in depth. *)
-       if Keeper_docker_read.should_route_read ~meta then
-         (match
-            Keeper_docker_read.container_path_of_host ~config ~meta
-              ~host_path:target
-          with
-          | Error e ->
-            error_json
-              ~fields:[ "op", `String op; "path", `String target ] e
-          | Ok cpath ->
-            (match
-               Keeper_docker_read.run_command_in_container
-                 ?turn_sandbox_factory ~config ~meta
-                 ~command_argv:[ "ls"; "-la"; cpath ]
-                 ~max_bytes:1_000_000
-                 ~timeout_sec:Keeper_shell_shared.io_timeout_sec
-                 ()
-             with
-             | Error msg ->
-               error_json
-                 ~fields:[ "op", `String op; "path", `String target ] msg
-             | Ok out ->
-               Yojson.Safe.to_string
-                 (`Assoc
-                     [ "ok", `Bool true
-                     ; "op", `String op
-                     ; "path", `String target
-                     ; "via", `String "docker"
-                     ; "entries", lines_to_json ~limit out
-                     ])))
-        else
-          let st, out =
-           Keeper_shell_shared.run_argv_with_status_retry_eintr
-             ~timeout_sec:Keeper_shell_shared.io_timeout_sec
-             [ coreutils.ls; "-la"; target ]
+       match
+         Keeper_shell_runtime.run_readonly_op ~config ~meta ?turn_sandbox_factory
+           ~op ~target
+           ~host_argv:[ coreutils.ls; "-la"; target ]
+           ~docker_argv:(fun cpath -> [ "ls"; "-la"; cpath ])
+           ~max_bytes:1_000_000
+           ~timeout_sec:Keeper_shell_shared.io_timeout_sec ()
+       with
+       | Error response -> response
+       | Ok (via, st, out) ->
+         let fields =
+           Keeper_shell_runtime.readonly_json_fields ~op ~path:target ~via
+             ~status:st ~output_field:"entries" ~output:(lines_to_json ~limit out)
+             ()
          in
-         Yojson.Safe.to_string
-           (`Assoc
-               [ "ok", `Bool (st = Unix.WEXITED 0)
-               ; "op", `String op
-               ; "path", `String target
-               ; "via", `String "host"
-               ; "status", Keeper_alerting_path.process_status_to_json st
-               ; "entries", lines_to_json ~limit out
-               ]))
+         Keeper_shell_runtime.readonly_json_string fields)
   | "cat" ->
     (match read_target () with
      | Error e -> path_error e
@@ -517,73 +521,45 @@ let handle_keeper_shell
       | Error e -> path_error e
       | Ok target ->
         let limit = shell_readonly_limit args in
-        (* Optional file-type filter (e.g. "ml", "py") *)
         let file_type = Safe_ops.json_string ~default:"" "type" args |> String.trim in
-        (* Optional glob filter (e.g. "*.ml", "lib/**/*.ml") *)
         let glob = Safe_ops.json_string ~default:"" "glob" args |> String.trim in
-        if Keeper_docker_read.should_route_read ~meta then
-          let base_argv = [ "rg"; "-n"; "-m"; string_of_int limit ] in
-          let type_argv = if file_type <> "" then [ "--type"; file_type ] else [] in
-          let glob_argv = if glob <> "" then [ "--glob"; glob ] else [] in
-          (match
-             run_readonly_in_docker ~target
-               ~command_argv:(fun cpath ->
-                 base_argv @ type_argv @ glob_argv @ [ pattern; cpath ])
-               ~ok_exit_codes:[ 0; 1 ]
-               ~max_bytes:1_000_000
-               ~timeout_sec:Keeper_shell_shared.read_timeout_sec
-               ()
-           with
-           | Error response -> response
-           | Ok (st, out) ->
-             Yojson.Safe.to_string
-               (`Assoc
-                   [ "ok", `Bool true
-                   ; "op", `String op
-                   ; "path", `String target
-                   ; "pattern", `String pattern
-                   ; "via", `String "docker"
-                   ; "status", Keeper_alerting_path.process_status_to_json st
-                   ; "matches", lines_to_json ~limit out
-                   ]))
-        else
-          let rg_available = Keeper_shell_shared.shell_command_available "rg" in
-          let grep_available = Keeper_shell_shared.shell_command_available "grep" in
-          let argv =
-            if rg_available then
-              let base_argv = [ "rg"; "-n"; "-m"; string_of_int limit ] in
-              let type_argv = if file_type <> "" then [ "--type"; file_type ] else [] in
-              let glob_argv = if glob <> "" then [ "--glob"; glob ] else [] in
-              Ok (base_argv @ type_argv @ glob_argv @ [ pattern; target ])
-            else if not grep_available then
-              Error "rg executable not found, and grep fallback is unavailable"
-            else if file_type <> "" || glob <> "" then
-              Error
-                "rg executable not found; grep fallback only supports pattern and path"
-            else
-              (* Keep readonly rg usable in lean CI images that do not ship ripgrep. *)
-              Ok
-                [ "grep"; "-R"; "-n"; "-I"; "-m"; string_of_int limit; "--"; pattern; target ]
-          in
-          match argv with
-          | Error e -> path_error e
-          | Ok argv ->
-            let st, out =
-              Keeper_shell_shared.run_argv_with_status_retry_eintr ~timeout_sec:Keeper_shell_shared.read_timeout_sec argv
+        let base_argv = [ "rg"; "-n"; "-m"; string_of_int limit ] in
+        let type_argv = if file_type <> "" then [ "--type"; file_type ] else [] in
+        let glob_argv = if glob <> "" then [ "--glob"; glob ] else [] in
+        let docker_argv cpath = base_argv @ type_argv @ glob_argv @ [ pattern; cpath ] in
+        let rg_available = Keeper_shell_shared.shell_command_available "rg" in
+        let grep_available = Keeper_shell_shared.shell_command_available "grep" in
+        let host_argv_result =
+          if rg_available then
+            Ok (base_argv @ type_argv @ glob_argv @ [ pattern; target ])
+          else if not grep_available then
+            Error "rg executable not found, and grep fallback is unavailable"
+          else if file_type <> "" || glob <> "" then
+            Error "rg executable not found; grep fallback only supports pattern and path"
+          else
+            Ok [ "grep"; "-R"; "-n"; "-I"; "-m"; string_of_int limit; "--"; pattern; target ]
+        in
+        match host_argv_result with
+        | Error e -> path_error e
+        | Ok host_argv ->
+          match
+            Keeper_shell_runtime.run_readonly_op ~config ~meta ?turn_sandbox_factory
+              ~ok_exit_codes:[ 0; 1 ]
+              ~op ~target ~host_argv ~docker_argv
+              ~max_bytes:1_000_000
+              ~timeout_sec:Keeper_shell_shared.read_timeout_sec ()
+          with
+          | Error response -> response
+          | Ok (via, st, out) ->
+            let fields =
+              Keeper_shell_runtime.readonly_json_fields
+                ~ok_when:(fun st -> st = Unix.WEXITED 0 || st = Unix.WEXITED 1)
+                ~op ~path:target ~via
+                ~status:st ~output_field:"matches" ~output:(lines_to_json ~limit out)
+                ~extra:[ "pattern", `String pattern ]
+                ()
             in
-            (* rg exit codes: 0=matches found, 1=no matches (not an error), 2+=real error.
-               Treat exit 1 as success with empty results — "no match" is a valid answer. *)
-            let is_ok = st = Unix.WEXITED 0 || st = Unix.WEXITED 1 in
-            Yojson.Safe.to_string
-              (`Assoc
-                  [ "ok", `Bool is_ok
-                  ; "op", `String op
-                  ; "path", `String target
-                  ; "pattern", `String pattern
-                  ; "via", `String "host"
-                  ; "status", Keeper_alerting_path.process_status_to_json st
-                  ; "matches", lines_to_json ~limit out
-                  ]))
+            Keeper_shell_runtime.readonly_json_string fields)
   | "git_log" ->
     (match cwd_target () with
      | Error e -> path_error e
@@ -712,472 +688,94 @@ let handle_keeper_shell
       | Error e -> path_error e
       | Ok target ->
         let limit = shell_readonly_limit args in
-        if Keeper_docker_read.should_route_read ~meta then
-          (match
-             run_readonly_in_docker ~target
-               ~command_argv:(fun cpath ->
-                 [ "find"; cpath; "-maxdepth"; "5"; "-name"; name_pattern;
-                   "-not"; "-path"; "*/.git/*";
-                   "-not"; "-path"; "*/_build/*";
-                   "-not"; "-path"; "*/.masc/*" ])
-               ~max_bytes:1_000_000
-               ~timeout_sec:Keeper_shell_shared.read_timeout_sec
-               ()
-           with
-           | Error response -> response
-           | Ok (st, out) ->
-             Yojson.Safe.to_string
-               (`Assoc
-                   [ "ok", `Bool true
-                   ; "op", `String op
-                   ; "path", `String target
-                   ; "name", `String name_pattern
-                   ; "via", `String "docker"
-                   ; "status", Keeper_alerting_path.process_status_to_json st
-                   ; "files", lines_to_json ~limit out
-                   ]))
-        else
-          let st, out =
-            Keeper_shell_shared.run_argv_with_status_retry_eintr ~timeout_sec:Keeper_shell_shared.read_timeout_sec
-              [ "find"; target; "-maxdepth"; "5"; "-name"; name_pattern;
-                "-not"; "-path"; "*/.git/*";
-                "-not"; "-path"; "*/_build/*";
-                "-not"; "-path"; "*/.masc/*" ]
+        let docker_argv cpath =
+          [ "find"; cpath; "-maxdepth"; "5"; "-name"; name_pattern;
+            "-not"; "-path"; "*/.git/*";
+            "-not"; "-path"; "*/_build/*";
+            "-not"; "-path"; "*/.masc/*" ]
+        in
+        let host_argv =
+          [ "find"; target; "-maxdepth"; "5"; "-name"; name_pattern;
+            "-not"; "-path"; "*/.git/*";
+            "-not"; "-path"; "*/_build/*";
+            "-not"; "-path"; "*/.masc/*" ]
+        in
+        match
+          Keeper_shell_runtime.run_readonly_op ~config ~meta ?turn_sandbox_factory
+            ~op ~target ~host_argv ~docker_argv
+            ~max_bytes:1_000_000
+            ~timeout_sec:Keeper_shell_shared.read_timeout_sec ()
+        with
+        | Error response -> response
+        | Ok (via, st, out) ->
+          let fields =
+            Keeper_shell_runtime.readonly_json_fields ~op ~path:target ~via
+              ~status:st ~output_field:"files" ~output:(lines_to_json ~limit out)
+              ~extra:[ "name", `String name_pattern ]
+              ()
           in
-          Yojson.Safe.to_string
-            (`Assoc
-                [ "ok", `Bool (st = Unix.WEXITED 0)
-                ; "op", `String op
-                ; "path", `String target
-                ; "name", `String name_pattern
-                ; "via", `String "host"
-                ; "status", Keeper_alerting_path.process_status_to_json st
-                ; "files", lines_to_json ~limit out
-                ]))
-  | "head" ->
-    (match read_target () with
-     | Error e -> path_error e
-     | Ok target ->
-       let n = Safe_ops.json_int ~default:20 "lines" args |> fun v -> max 1 (min 200 v) in
-       if Keeper_docker_read.should_route_read ~meta then
-         (match
-            run_readonly_in_docker ~target
-              ~command_argv:(fun cpath ->
-                [ "head"; "-n"; string_of_int n; cpath ])
-              ~max_bytes:1_000_000
-              ~timeout_sec:Keeper_shell_shared.read_timeout_sec
-              ()
-          with
-          | Error response -> response
-          | Ok (st, out) ->
-            Yojson.Safe.to_string
-              (`Assoc
-                  [ "ok", `Bool true
-                  ; "op", `String op
-                  ; "path", `String target
-                  ; "lines", `Int n
-                  ; "via", `String "docker"
-                  ; "status", Keeper_alerting_path.process_status_to_json st
-                  ; "content", `String out
-                  ]))
-       else
-         let st, out =
-           Keeper_shell_shared.run_argv_with_status_retry_eintr ~timeout_sec:Keeper_shell_shared.read_timeout_sec
-             [ coreutils.head; "-n"; string_of_int n; target ]
-         in
-         Yojson.Safe.to_string
-           (`Assoc
-               [ "ok", `Bool (st = Unix.WEXITED 0)
-               ; "op", `String op
-               ; "path", `String target
-               ; "lines", `Int n
-               ; "via", `String "host"
-               ; "status", Keeper_alerting_path.process_status_to_json st
-               ; "content", `String out
-               ]))
-  | "tail" ->
-    (match read_target () with
-     | Error e -> path_error e
-     | Ok target ->
-       let n = Safe_ops.json_int ~default:20 "lines" args |> fun v -> max 1 (min 200 v) in
-       if Keeper_docker_read.should_route_read ~meta then
-         (match
-            run_readonly_in_docker ~target
-              ~command_argv:(fun cpath ->
-                [ "tail"; "-n"; string_of_int n; cpath ])
-              ~max_bytes:1_000_000
-              ~timeout_sec:Keeper_shell_shared.read_timeout_sec
-              ()
-          with
-          | Error response -> response
-          | Ok (st, out) ->
-            Yojson.Safe.to_string
-              (`Assoc
-                  [ "ok", `Bool true
-                  ; "op", `String op
-                  ; "path", `String target
-                  ; "lines", `Int n
-                  ; "via", `String "docker"
-                  ; "status", Keeper_alerting_path.process_status_to_json st
-                  ; "content", `String out
-                  ]))
-       else
-         let st, out =
-           Keeper_shell_shared.run_argv_with_status_retry_eintr ~timeout_sec:Keeper_shell_shared.read_timeout_sec
-             [ coreutils.tail; "-n"; string_of_int n; target ]
-         in
-         Yojson.Safe.to_string
-           (`Assoc
-               [ "ok", `Bool (st = Unix.WEXITED 0)
-               ; "op", `String op
-               ; "path", `String target
-               ; "lines", `Int n
-               ; "via", `String "host"
-               ; "status", Keeper_alerting_path.process_status_to_json st
-               ; "content", `String out
-               ]))
+          Keeper_shell_runtime.readonly_json_string fields)
+  | "head" -> run_line_count_reader ~coreutil:coreutils.head
+  | "tail" -> run_line_count_reader ~coreutil:coreutils.tail
   | "wc" ->
     (match read_target () with
      | Error e -> path_error e
      | Ok target ->
-       if Keeper_docker_read.should_route_read ~meta then
-         (match
-            run_readonly_in_docker ~target
-              ~command_argv:(fun cpath -> [ "wc"; "-l"; cpath ])
-              ~max_bytes:4096
-              ~timeout_sec:Keeper_shell_shared.read_timeout_sec
-              ()
-          with
-          | Error response -> response
-          | Ok (st, out) ->
-            Yojson.Safe.to_string
-              (Exec_core.process_result_json
-                 ~artifact_policy:Exec_core.Inline_only
-                 ~base_path:root
-                 ~keeper_name:meta.name
-                 ~cmd:"wc"
-                 ~ir:(ir_of_cmd "wc")
-                 ~extra:
-                   [
-                     "op", `String op;
-                     "cmd", `String "wc";
-                     "cwd", `Null;
-                     "path", `String target;
-                     "via", `String "docker";
-                   ]
-                 ~status:st
-                 ~output:out
-                 ()))
-       else
-         render_process_result ~cmd:"wc" [ coreutils.wc; "-l"; target ])
+       match
+         Keeper_shell_runtime.run_readonly_op ~config ~meta ?turn_sandbox_factory
+           ~op ~target
+           ~host_argv:[ coreutils.wc; "-l"; target ]
+           ~docker_argv:(fun cpath -> [ "wc"; "-l"; cpath ])
+           ~max_bytes:4096
+           ~timeout_sec:Keeper_shell_shared.read_timeout_sec ()
+       with
+       | Error response -> response
+       | Ok (via, st, out) ->
+         Keeper_shell_runtime.render_completed_process_result ~root ~keeper_name:meta.name ~op
+           ~cmd:"wc" ~extra:[ "path", `String target; "via", `String via ] st out)
   | "tree" ->
     (match read_target () with
      | Error e -> path_error e
      | Ok target ->
        let limit = shell_readonly_limit args in
-       if Keeper_docker_read.should_route_read ~meta then
-         (match
-            run_readonly_in_docker ~target
-              ~command_argv:(fun cpath ->
-                [ "find"; cpath; "-maxdepth"; "3"; "-print";
-                  "-not"; "-path"; "*/.git/*";
-                  "-not"; "-path"; "*/_build/*" ])
-              ~max_bytes:1_000_000
-              ~timeout_sec:Keeper_shell_shared.read_timeout_sec
-              ()
-          with
-           | Error response -> response
-           | Ok (st, out) ->
-             Yojson.Safe.to_string
-               (`Assoc
-                   [ "ok", `Bool true
-                   ; "op", `String op
-                   ; "path", `String target
-                   ; "via", `String "docker"
-                   ; "status", Keeper_alerting_path.process_status_to_json st
-                   ; "entries", lines_to_json ~limit out
-                   ]))
-       else
-         let st, out =
-           Keeper_shell_shared.run_argv_with_status_retry_eintr ~timeout_sec:Keeper_shell_shared.read_timeout_sec
-             [ "find"; target; "-maxdepth"; "3"; "-print";
-               "-not"; "-path"; "*/.git/*";
-               "-not"; "-path"; "*/_build/*" ]
+       let docker_argv cpath =
+         [ "find"; cpath; "-maxdepth"; "3"; "-print";
+           "-not"; "-path"; "*/.git/*";
+           "-not"; "-path"; "*/_build/*" ]
+       in
+       let host_argv =
+         [ "find"; target; "-maxdepth"; "3"; "-print";
+           "-not"; "-path"; "*/.git/*";
+           "-not"; "-path"; "*/_build/*" ]
+       in
+       match
+         Keeper_shell_runtime.run_readonly_op ~config ~meta ?turn_sandbox_factory
+           ~op ~target ~host_argv ~docker_argv
+           ~max_bytes:1_000_000
+           ~timeout_sec:Keeper_shell_shared.read_timeout_sec ()
+       with
+       | Error response -> response
+       | Ok (via, st, out) ->
+         let fields =
+           Keeper_shell_runtime.readonly_json_fields ~op ~path:target ~via
+             ~status:st ~output_field:"entries" ~output:(lines_to_json ~limit out)
+             ()
          in
-         Yojson.Safe.to_string
-           (`Assoc
-               [ "ok", `Bool (st = Unix.WEXITED 0)
-               ; "op", `String op
-               ; "path", `String target
-               ; "via", `String "host"
-               ; "status", Keeper_alerting_path.process_status_to_json st
-               ; "entries", lines_to_json ~limit out
-               ]))
+         Keeper_shell_runtime.readonly_json_string fields)
   | "git_diff" ->
     (match cwd_target () with
      | Error e -> path_error e
      | Ok cwd ->
-       run_in_turn_runtime ~cwd ~cmd:"git diff --stat"
+       Keeper_shell_runtime.run_cwd_op ~root ~keeper_name:meta.name ~op ~config ~meta
+         ?turn_sandbox_factory ~cwd ~cmd:"git diff --stat"
+         ~docker_cmd:"git --no-optional-locks diff --stat"
          ~command_argv:[ "git"; "--no-optional-locks"; "diff"; "--stat" ]
          ~max_bytes:1_000_000 ~timeout_sec:Keeper_shell_shared.read_timeout_sec ())
   | "git_worktree" ->
-    let action =
-      Safe_ops.json_string ~default:"list" "action" args
-      |> String.trim |> String.lowercase_ascii
-    in
-    begin match action with
-    | "list" ->
-      (match cwd_target () with
-       | Error e -> path_error e
-       | Ok cwd ->
-         run_in_turn_runtime ~cwd ~cmd:"git worktree list"
-           ~map_output:hostify_turn_runtime_output
-           ~command_argv:[ "git"; "worktree"; "list" ]
-           ~max_bytes:1_000_000 ~timeout_sec:Keeper_shell_shared.read_timeout_sec ())
-    | "add" ->
-      let branch = Safe_ops.json_string ~default:"" "branch" args |> String.trim in
-      let base = Safe_ops.json_string ~default:"origin/main" "base" args |> String.trim in
-      if branch = "" then
-        error_json_for_op ~op
-          "branch is required. Good: action='add', branch='feature/my-task'. Bad: branch=''."
-      else (
-        match cwd_target () with
-	        | Error e -> path_error e
-	        | Ok cwd ->
-	          let wt_out_result =
-	            let _st, wt_out =
-	              Keeper_shell_shared.run_argv_with_status_retry_eintr
-	                ~timeout_sec:Keeper_shell_shared.git_meta_timeout_sec
-	                [ "git"; "-C"; cwd; "worktree"; "list"; "--porcelain" ]
-	            in
-	            Ok wt_out
-          in
-          match wt_out_result with
-          | Error msg ->
-            error_json_for_op ~op ~extra_fields:[ "cwd", `String cwd ] msg
-          | Ok wt_out ->
-          if String_util.contains_substring_ci wt_out branch then
-            let existing_path =
-              String.split_on_char '\n' wt_out
-              |> List.find_map (fun line ->
-                if String_util.contains_substring_ci line "worktree"
-                   && String_util.contains_substring_ci wt_out branch
-                then Some (String.trim line) else None)
-              |> Option.value ~default:"(unknown)"
-            in
-            Yojson.Safe.to_string
-              (`Assoc
-                  [ "ok", `Bool false
-                  ; "op", `String op
-                  ; "error", `String "branch_already_in_worktree"
-                  ; "branch", `String branch
-                  ; "existing_worktree", `String existing_path
-                  ; "hint", `String "Branch is already in a worktree. Use 'cd' to the existing path, or choose a different branch name."
-                  ])
-	          else
-	            let wt_path = Printf.sprintf ".worktrees/%s"
-	              (String.map (fun c -> if c = '/' then '-' else c) branch)
-	            in
-	            render_process_result ~cwd
-	              ~cmd:(Printf.sprintf "git worktree add %s -b %s %s" wt_path branch base)
-	              [ "git"; "worktree"; "add"; wt_path; "-b"; branch; base ]
-	      )
-    | other ->
-      error_json_for_op ~op
-        (Printf.sprintf "Unknown git_worktree action '%s'. Use: list, add." other)
-    end
+    Keeper_shell_git_worktree.handle ~op ~meta ~config ~args ?turn_sandbox_factory
+      ~root ~raw_path
   | "git_clone" ->
-    (* Clone a repo into this keeper's playground repos directory.
-       Sandboxed: always targets .masc/playground/<keeper_name>/repos/<repo_name>.
-       Validates against tool_policy.toml git_clone.allowed_orgs. *)
-    let url = Safe_ops.json_string ~default:"" "url" args |> String.trim in
-    if url = "" then
-      error_json_for_op ~op
-        "url is required for git_clone. Good: url='https://github.com/org/repo'. Bad: url=''."
-    else
-      let base_path = config.base_path in
-      (match Tool_code_write.validate_clone_url ~base_path url with
-       | Error reason ->
-         Yojson.Safe.to_string
-           (`Assoc
-               [ "ok", `Bool false
-               ; "op", `String op
-               ; "error", `String "clone_blocked"
-               ; "reason", `String reason
-               ; "url", `String url
-               ])
-       | Ok () ->
-         let clone_url = Tool_code_write.normalize_github_clone_url url in
-         let _bundle_paths = Keeper_alerting_path.ensure_sandbox_bundle ~config ~meta in
-         ignore (_bundle_paths : string list);
-         let playground = keeper_playground_root ~config ~meta in
-         let repos_dir = Filename.concat playground "repos" in
-         Fs_compat.mkdir_p repos_dir;
-         (* Derive repo name from URL: strip trailing slash, .git, then basename.
-            Guard against empty/traversal names (e.g. url ending with "/" or ".."). *)
-         let repo_name =
-           let stripped =
-             let s = String.trim url in
-             if String.ends_with ~suffix:"/" s
-             then String.sub s 0 (String.length s - 1) else s
-           in
-           let base = Filename.basename stripped in
-           let name =
-             if String.ends_with ~suffix:".git" base
-             then String.sub base 0 (String.length base - 4)
-             else base
-           in
-           (* Sanitize: only allow alphanumeric, hyphen, underscore, dot.
-              Reject empty, ".", ".." to prevent traversal. *)
-           let safe = String.map (fun c ->
-             if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
-                || (c >= '0' && c <= '9') || c = '-' || c = '_' || c = '.'
-             then c else '_') name
-           in
-           if safe = "" || safe = "." || safe = ".." then "repo" else safe
-         in
-         let clone_path = Filename.concat repos_dir repo_name in
-         let route_fields =
-           if meta.sandbox_profile = Docker then
-             [ "via", `String "docker" ]
-           else
-             []
-         in
-         let normalize_existing_origin_to_https clone_path =
-           match
-             Masc_exec.Exec_gate.run_argv_with_status ~actor:`Coord_git
-               ~raw_source:("git -C " ^ clone_path ^ " remote get-url origin")
-               ~summary:"keeper git remote get-url"
-               ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Git_meta ())
-               [ "git"; "-C"; clone_path; "remote"; "get-url"; "origin" ]
-           with
-           | Unix.WEXITED 0, origin ->
-             let origin = String.trim origin in
-             let normalized = Tool_code_write.normalize_github_clone_url origin in
-             if String.equal origin normalized then None
-             else
-               (match
-                  Masc_exec.Exec_gate.run_argv_with_status ~actor:`Coord_git
-                    ~raw_source:("git -C " ^ clone_path ^ " remote set-url origin " ^ normalized)
-                    ~summary:"keeper git remote set-url"
-                    ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Git_meta ())
-                    [ "git"; "-C"; clone_path; "remote"; "set-url"; "origin"; normalized ]
-                with
-                | Unix.WEXITED 0, _ -> Some "origin remote normalized to HTTPS"
-                | _, out ->
-                  Some
-                    (Printf.sprintf
-                       "origin remote normalization failed: %s"
-                       (String.trim out)))
-           | _ -> None
-         in
-         if Fs_compat.file_exists clone_path then
-           (* Existing sandbox clones may have a .git directory but no
-              checked-out files. Repair that locally before a pull, otherwise
-              git can report "Already up to date" while the worktree stays
-              unusable for read/search tools. *)
-           (match Coord_worktree.ensure_sandbox_clone_ready clone_path with
-            | Error err ->
-                Yojson.Safe.to_string
-                  (`Assoc
-                      ([ "ok", `Bool false
-                       ; "op", `String op
-                       ; "action", `String "repair_existing_clone"
-                       ; "path", `String clone_path
-                       ; "error", `String "sandbox_clone_not_ready"
-                       ; "status",
-                         Keeper_alerting_path.process_status_to_json
-                           (Unix.WEXITED 1)
-                       ; "output", `String (Masc_domain.masc_error_to_string err)
-                       ]
-                      @ route_fields))
-            | Ok repair_note ->
-                let origin_repair_note =
-                  normalize_existing_origin_to_https clone_path
-                in
-                (* Already cloned — pull latest instead *)
-                let st, out =
-                  if meta.sandbox_profile = Docker then
-                    match
-                      Keeper_shell_shared.run_docker_shell_command_with_status ~config ~meta
-                        ~cwd:repos_dir ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Shell ())
-                        ~cmd:(Printf.sprintf "git -C %s pull --ff-only"
-                                (Filename.quote repo_name))
-                        ~git_creds_enabled:true ~network_mode:Network_inherit
-                    with
-                    | Ok result -> (result.status, result.output)
-                    | Error msg -> (Unix.WEXITED 127, msg)
-                  else
-                    Masc_exec.Exec_gate.run_argv_with_status ~actor:`Coord_git
-                      ~raw_source:("git -C " ^ clone_path ^ " pull --ff-only")
-                      ~summary:"keeper git pull"
-                      ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Shell ())
-                      [ "git"; "-C"; clone_path; "pull"; "--ff-only" ]
-                in
-                if st = Unix.WEXITED 0 then
-                  Keeper_shell_shared.update_playground_repo_cache
-                    ~playground_dir:playground ~repo_name ~repo_path:clone_path
-                    ~action:"pull" ~shallow:false;
-                let repair_fields =
-                  [ repair_note; origin_repair_note ]
-                  |> List.filter_map (fun note -> note)
-                  |> function
-                  | [] -> []
-                  | notes -> [ "repair_note", `String (String.concat "; " notes) ]
-                in
-                Yojson.Safe.to_string
-                  (`Assoc
-                      ([ "ok", `Bool (st = Unix.WEXITED 0)
-                       ; "op", `String op
-                       ; "action", `String "pull"
-                       ; "path", `String clone_path
-                       ; "status", Keeper_alerting_path.process_status_to_json st
-                       ; "output", `String out
-                       ]
-                      @ repair_fields
-                      @ route_fields)))
-         else
-           let depth = Keeper_tool_policy.clone_depth () |> max 0 in
-           let depth_args =
-             if depth > 0 then ["--depth"; string_of_int depth] else []
-           in
-           let shallow = depth > 0 in
-           let st, out =
-             if meta.sandbox_profile = Docker then
-               let clone_cmd =
-                 String.concat " "
-                   (List.map Filename.quote
-                      ("git" :: "clone" :: depth_args @ [ clone_url; repo_name ]))
-               in
-               match
-                 Keeper_shell_shared.run_docker_shell_command_with_status ~config ~meta ~cwd:repos_dir
-                   ~timeout_sec:(Keeper_tool_policy.clone_timeout_sec ())
-                   ~cmd:clone_cmd
-                   ~git_creds_enabled:true ~network_mode:Network_inherit
-               with
-               | Ok result -> (result.status, result.output)
-               | Error msg -> (Unix.WEXITED 127, msg)
-             else
-               Masc_exec.Exec_gate.run_argv_with_status ~actor:`Coord_git
-                 ~raw_source:("git clone " ^ String.concat " " depth_args ^ " " ^ clone_url ^ " " ^ clone_path)
-                 ~summary:"keeper git clone"
-                 ~timeout_sec:(Keeper_tool_policy.clone_timeout_sec ())
-                 ("git" :: "clone" :: depth_args @ [ clone_url; clone_path ])
-           in
-           if st = Unix.WEXITED 0 then
-             Keeper_shell_shared.update_playground_repo_cache
-               ~playground_dir:playground ~repo_name ~repo_path:clone_path
-               ~action:"clone" ~shallow;
-           Yojson.Safe.to_string
-             (`Assoc
-                 ([ "ok", `Bool (st = Unix.WEXITED 0)
-                  ; "op", `String op
-                  ; "action", `String "clone"
-                  ; "path", `String clone_path
-                  ; "status", Keeper_alerting_path.process_status_to_json st
-                  ; "output", `String out
-                  ]
-                 @ route_fields)))
+    Keeper_shell_clone.handle ~op ~meta ~config ~args
   | "gh" ->
     let raw_cmd_str = Safe_ops.json_string ~default:"" "cmd" args in
     (* gh runs against remote network. Prior floors (1s, then 5s) kept

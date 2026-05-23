@@ -289,6 +289,7 @@ let readonly_json_string fields =
     read-target handler. *)
 
 let run_readonly_op
+      ?(ok_exit_codes = [ 0 ])
       ~config
       ~meta
       ?turn_sandbox_factory
@@ -303,7 +304,8 @@ let run_readonly_op
   if Keeper_docker_read.should_route_read ~meta
   then
     match
-      run_readonly_in_docker ~config ~meta ?turn_sandbox_factory ~op ~target
+      run_readonly_in_docker ~config ~meta ?turn_sandbox_factory ~ok_exit_codes
+        ~op ~target
         ~command_argv:docker_argv ~max_bytes ~timeout_sec ()
     with
     | Error response -> Error response

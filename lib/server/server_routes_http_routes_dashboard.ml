@@ -11,6 +11,15 @@ module Runtime = Server_routes_http_runtime
 module Keeper_stream = Server_routes_http_keeper_stream
 module Keeper_api = Server_dashboard_http_keeper_api
 
+(* Cascade profile gate extracted to
+   [Server_dashboard_cascade_profile_gate] (godfile decomp). *)
+module Cascade_profile_gate = Server_dashboard_cascade_profile_gate
+
+let cascade_profile_gate = Cascade_profile_gate.compute
+let available_cascade_profiles = Cascade_profile_gate.available_profiles
+let invalid_cascade_profiles = Cascade_profile_gate.invalid_profiles
+let invalid_cascade_assignment_profiles = Cascade_profile_gate.invalid_assignment_profiles
+
 let option_int_json = function
   | Some value -> `Int value
   | None -> `Null

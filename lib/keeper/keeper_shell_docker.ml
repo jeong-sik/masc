@@ -7,6 +7,7 @@
 
 open Keeper_types
 open Keeper_exec_shared
+open Keeper_shell_docker_exec_failure
 
 let path_exists path =
   try Sys.file_exists path with

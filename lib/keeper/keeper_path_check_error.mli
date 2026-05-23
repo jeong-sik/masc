@@ -40,3 +40,9 @@ val to_message : t -> string
     so downstream tools that match on these messages keep their
     contract. *)
 
+val parse_prefix : string -> t option
+(** Attempt to classify a raw error message by its prefix.
+    Returns [Some t] if the message matches a known prefix pattern,
+    [None] otherwise. Used by failure-circuit-breaker for typed
+    error classification without substring grepping. *)
+

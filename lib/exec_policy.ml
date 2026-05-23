@@ -840,6 +840,7 @@ let is_git_branch_switch = Mutation_classifier.is_git_branch_switch
 let is_destructive_bash_operation = Mutation_classifier.is_destructive_bash_operation
 let flat_stage_words = Mutation_classifier.flat_stage_words
 let stage_words_of_string = Mutation_classifier.stage_words_of_string
+let stage_words_of_string_result = Mutation_classifier.stage_words_of_string_result
 
 let sanitize_command_for_log = Log_sanitize.sanitize_command_for_log
 let truncate_for_log = Log_sanitize.truncate_for_log

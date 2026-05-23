@@ -24,3 +24,8 @@ val stages : string -> (word list list, error) result
     Empty stages are omitted so callers can remain fail-closed at their own
     command-shape layer while still reusing successfully recovered words for
     diagnostics and path policy. *)
+
+val top_level_command_segments : string -> (bool * string) list
+(** Extract top-level command segments from a shell command string.
+    Returns a list of (is_quoted, segment) tuples for each segment.
+    Used by test fixtures and bash parser surfaces. *)

@@ -97,6 +97,6 @@ let handle_keeper_voice_tool
           [ "status", `String (if ended then "ended" else "no_active_session")
           ; "agent_id", `String meta.name
           ])
-  | other -> error_json ~fields:[ "tool", `String other ] "unknown_voice_tool"
+  | other -> tool_error_json other "unknown_voice_tool"
 ;;
 

@@ -24,6 +24,8 @@ let error_json ?(fields = []) (message : string) =
 let error_json_for_op ?(extra_fields = []) ~op message =
   error_json ~fields:([ "op", `String op ] @ extra_fields) message
 ;;
+
+let tool_error_json name msg = error_json ~fields:[ "tool", `String name ] msg
 ;;
 
 let sandbox_profile_via_fields (meta : keeper_meta) =

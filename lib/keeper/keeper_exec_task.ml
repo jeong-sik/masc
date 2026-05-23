@@ -806,5 +806,5 @@ let handle_keeper_task_tool
         ~ok:transition_result.Tool_result.success
         ~message:transition_result.Tool_result.legacy_message
         ())
-  | other -> error_json ~fields:[ "tool", `String other ] "unknown_task_tool"
+  | other -> tool_error_json other "unknown_task_tool"
 ;;

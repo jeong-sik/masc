@@ -345,5 +345,5 @@ let handle_keeper_board_tool
     dispatch_board Tool_name.Masc.Board_sub_board_update args
   | Some Tool_name.Keeper.Board_sub_board_delete ->
     dispatch_board Tool_name.Masc.Board_sub_board_delete args
-  | Some _ | None -> error_json ~fields:[ "tool", `String name ] "unknown_board_tool"
+  | Some _ | None -> tool_error_json name "unknown_board_tool"
 ;;

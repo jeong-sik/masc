@@ -30,3 +30,12 @@ val to_label : t -> string
 (** [to_label Off = "off"], [Dry_run = "dry_run"], [Strict = "strict"].
     Used as the Prometheus [mode] label so operators can break down
     [masc_auth_strict_would_reject_total] by mode. *)
+
+val of_string : string -> t
+(** Parse the case-insensitive flag value the env reader uses internally.
+    Exposed for [test_auth_strict_mode], which pins the parser semantics
+    (case-folding, unknown→[Dry_run] default, exact-match of [off]/
+    [dry_run]/[strict]) ahead of Phase B PR-2 promoting [Strict] to a
+    typed reject; the test header documents this on purpose so a silent
+    rename or unknown-handling change fails at the test boundary rather
+    than in production telemetry. *)

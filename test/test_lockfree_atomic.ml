@@ -7,9 +7,17 @@ let test_update_single () =
   L.update a (fun n -> n + 1);
   Alcotest.(check int) "single update increments" 1 (Atomic.get a)
 
+(* [update_with_result] (tuple-returning) was retired in favor of
+   [update_with_commit] (record-returning) for call-site readability.
+   The three tests below were renamed in spirit but the function names
+   are kept so the test runner registration block (group label
+   "update_with_result") below stays a stable diff anchor. *)
+
 let test_update_with_result_returns_derived_value () =
   let a = Atomic.make 10 in
-  let prev = L.update_with_result a (fun n -> (n * 2, n)) in
+  let prev =
+    L.update_with_commit a (fun n -> { L.next_state = n * 2; result = n })
+  in
   Alcotest.(check int) "derived value is pre-update state" 10 prev;
   Alcotest.(check int) "state is transformed" 20 (Atomic.get a)
 
@@ -17,9 +25,9 @@ let test_update_with_result_on_map () =
   let module SMap = Map.Make (String) in
   let a = Atomic.make SMap.empty in
   let inserted =
-    L.update_with_result a (fun m ->
+    L.update_with_commit a (fun m ->
         let m' = SMap.add "k" 42 m in
-        (m', SMap.cardinal m'))
+        { L.next_state = m'; result = SMap.cardinal m' })
   in
   Alcotest.(check int) "cardinal after insert" 1 inserted;
   Alcotest.(check bool) "key present" true (SMap.mem "k" (Atomic.get a))
@@ -30,14 +38,14 @@ let test_update_with_result_replays_on_contention () =
   let a = Atomic.make 0 in
   let interference_left = ref 2 in
   let total =
-    L.update_with_result a (fun observed ->
+    L.update_with_commit a (fun observed ->
         (* Simulate another writer bumping [a] between our read and commit
            for the first two invocations. *)
         if !interference_left > 0 then begin
           decr interference_left;
           Atomic.set a (observed + 100)
         end;
-        (observed + 1, observed))
+        { L.next_state = observed + 1; result = observed })
   in
   (* Under contention the observed value changes each attempt, but the final
      commit must see whatever [Atomic.get] returned at that iteration. *)

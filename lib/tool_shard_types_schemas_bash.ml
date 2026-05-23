@@ -2,9 +2,10 @@
     schema.
 
     The public descriptor exposes only the typed argv / pipeline forms:
-    [executable]/[argv] for a single process and [pipeline]/[stages] for
+    [executable]/[argv] for a single process and [pipeline] for
     explicit Shell IR pipelines. Raw [cmd] strings are intentionally absent
-    from the schema. *)
+    from the schema. The handler still accepts [stages] as a backward-compatible
+    alias for [pipeline], but the schema no longer advertises it. *)
 
 let keeper_bash_exec_stage_schema =
   `Assoc
@@ -24,7 +25,7 @@ let keeper_bash_exec_stage_schema =
                 ; ( "description"
                   , `String
                       "Arguments passed verbatim to executable. Shell metacharacters \
-                       are data; use pipeline/stages for pipes." )
+                       are data; use pipeline for multi-stage execution." )
                 ] )
           ] )
     ; "required", `List [ `String "executable" ]
@@ -113,7 +114,7 @@ let keeper_bash_timeout_sec_field =
 
 let keeper_bash_description =
   "Execute one command through the typed execution gates via typed argv. Use \
-   executable/argv for one process, or pipeline/stages for explicit Shell IR \
+   executable/argv for one process, or pipeline for explicit Shell IR \
    pipelines. The legacy 'cmd' string field is no longer accepted. Shell \
    metacharacters in argv are data, not syntax. Good: executable='git' \
    argv=['status','--short'], pipeline=[{executable='git',...}, \
@@ -134,7 +135,6 @@ let keeper_bash_schema : Masc_domain.tool_schema =
     [ keeper_bash_executable_field
     ; keeper_bash_argv_field
     ; keeper_bash_pipeline_field
-    ; keeper_bash_stages_field
     ; keeper_bash_env_field
     ; keeper_bash_cwd_field
     ; keeper_bash_timeout_sec_field
@@ -143,7 +143,6 @@ let keeper_bash_schema : Masc_domain.tool_schema =
   let one_of_branches =
     [ `Assoc [ "required", `List [ `String "executable" ] ]
     ; `Assoc [ "required", `List [ `String "pipeline" ] ]
-    ; `Assoc [ "required", `List [ `String "stages" ] ]
     ]
   in
   { name = "keeper_bash"

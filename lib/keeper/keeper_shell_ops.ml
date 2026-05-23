@@ -368,12 +368,113 @@ let handle_keeper_shell
            ~docker_cmd:"git --no-optional-locks status --short --branch"
            ~timeout_sec:Keeper_shell_shared.read_timeout_sec
        else
-         run_in_turn_runtime ~cwd
-           ~cmd:"git --no-optional-locks status --short --branch"
-           ~command_argv:
-             [ "git"; "--no-optional-locks"; "status"; "--short"; "--branch" ]
-           ~max_bytes:1_000_000
-           ~timeout_sec:Keeper_shell_shared.read_timeout_sec ())
+         (* P11: Host git_status via Shell IR pipeline.
+            Preserves P16 Bash_history + failure_insight. *)
+         let dispatch_sandbox = Masc_exec.Sandbox_target.host () in
+         let cwd_scope = Path_scope.classify ~raw:cwd ~cwd:root in
+         let ir =
+           Masc_exec.Shell_ir.Simple
+             { bin = Masc_exec.Bin.of_known Masc_exec.Bin.Git
+             ; args =
+                 [ Masc_exec.Shell_ir.Lit ("--no-optional-locks", Masc_exec.Shell_ir.default_meta)
+                 ; Masc_exec.Shell_ir.Lit ("status", Masc_exec.Shell_ir.default_meta)
+                 ; Masc_exec.Shell_ir.Lit ("--short", Masc_exec.Shell_ir.default_meta)
+                 ; Masc_exec.Shell_ir.Lit ("--branch", Masc_exec.Shell_ir.default_meta)
+                 ]
+             ; env = []
+             ; cwd = Some cwd_scope
+             ; redirects = []
+             ; sandbox = dispatch_sandbox
+             }
+         in
+         let envelope =
+           Masc_exec.Shell_ir_risk.classify (Masc_exec.Shell_ir_risk.undecided ir)
+         in
+         let allowed_commands = Dev_exec_allowlist.dev in
+         let gate_verdict =
+           Shell_gate.gate_typed
+             ~caller:Shell_gate.Keeper_shell_bash
+             ~ir:envelope.Masc_exec.Shell_ir_risk.ir
+             ~allowlist:{ allowed_commands; allow_pipes = true; redirect_allowed = true }
+             ~path_policy:Shell_gate.allow_all_paths
+             ~sandbox:{ target = dispatch_sandbox }
+             ()
+         in
+         (match gate_verdict with
+          | Reject { diagnostic; _ } ->
+            error_json
+              ~fields:[ "typed", `Bool true; "cmd", `String "git status"; "path", `String cwd ]
+              diagnostic
+          | Cannot_parse _ ->
+            error_json
+              ~fields:[ "typed", `Bool true; "cmd", `String "git status"; "path", `String cwd ]
+              "Cannot parse command"
+          | Too_complex _ ->
+            error_json
+              ~fields:[ "typed", `Bool true; "cmd", `String "git status"; "path", `String cwd ]
+              "Command too complex"
+          | Allow _context ->
+            let path_validation =
+              Exec_policy.validate_shell_ir_paths
+                ~keeper_id:meta.name
+                ~base_path:root
+                ~workdir:cwd
+                envelope.Masc_exec.Shell_ir_risk.ir
+            in
+            (match path_validation with
+             | Error e -> error_json ~fields:[ "blocked_cmd", `String "git status" ] e
+             | Ok () ->
+               let result =
+                 Masc_exec.Exec_dispatch.dispatch_decided envelope
+               in
+               (* P16: Record execution in history for failure pattern detection *)
+               let success =
+                 match result.status with
+                 | Unix.WEXITED 0 -> true
+                 | _ -> false
+               in
+               let cmd = "git --no-optional-locks status --short --branch" in
+               let cmd_prefix = Keeper_shell_command_semantics.cmd_prefix cmd in
+               let entry =
+                 Masc_exec.Bash_history.
+                   { ts = Unix.time ()
+                   ; cmd_hash = Masc_exec.Bash_history.cmd_hash cmd
+                   ; cmd_prefix
+                   ; semantic_kind = op
+                   ; duration_ms = 0
+                   ; success
+                   }
+               in
+               observe_history_append ~root ~keeper_name:meta.name entry;
+               let insight_extra =
+                 let patterns =
+                   Masc_exec.Bash_history.failure_insight
+                     ~base_path:root
+                     ~keeper_name:meta.name
+                 in
+                 if patterns = []
+                 then []
+                 else
+                   [ "failure_insight"
+                   , `List (List.map Masc_exec.Bash_history.failure_pattern_to_json patterns)
+                   ]
+               in
+               Yojson.Safe.to_string
+                 (Exec_core.process_result_json
+                    ~artifact_policy:Exec_core.Inline_only
+                    ~base_path:root
+                    ~keeper_name:meta.name
+                    ~cmd
+                    ~extra:
+                      ([ "op", `String op
+                       ; "cmd", `String cmd
+                       ; "cwd", `String cwd
+                       ; "via", `String "host"
+                       ]
+                       @ insight_extra)
+                    ~status:result.status
+                    ~output:result.stdout
+                    ())))
   | "ls" ->
     (match read_target () with
      | Error e -> path_error e
@@ -835,22 +936,129 @@ let handle_keeper_shell
                      ; "entries", lines_to_json ~limit:50 out
                      ]))
           | None ->
-            let st, out =
-              Masc_exec.Exec_gate.run_argv_with_status ~actor:`Keeper_shell
-                ~raw_source:(String.concat " " argv)
-                ~summary:"keeper shell op"
-                ~timeout_sec:Keeper_shell_shared.read_timeout_sec argv
+            (* P11: Host git_log via Shell IR pipeline.
+               Preserves P16 Bash_history + failure_insight. *)
+            let dispatch_sandbox = Masc_exec.Sandbox_target.host () in
+            let cwd_scope = Path_scope.classify ~raw:cwd ~cwd:root in
+            let base_args =
+              [ Masc_exec.Shell_ir.Lit ("--no-optional-locks", Masc_exec.Shell_ir.default_meta)
+              ; Masc_exec.Shell_ir.Lit ("log", Masc_exec.Shell_ir.default_meta)
+              ; Masc_exec.Shell_ir.Lit (Printf.sprintf "--format=%s" format, Masc_exec.Shell_ir.default_meta)
+              ; Masc_exec.Shell_ir.Lit (Printf.sprintf "-%d" count, Masc_exec.Shell_ir.default_meta)
+              ]
             in
-            Yojson.Safe.to_string
-              (`Assoc
-                  [ "ok", `Bool (st = Unix.WEXITED 0)
-                  ; "op", `String op
-                  ; "cwd", `String cwd
-                  ; "count", `Int count
-                  ; "grep", `String grep
-                  ; "status", Keeper_alerting_path.process_status_to_json st
-                  ; "entries", lines_to_json ~limit:50 out
-                  ])))
+            let args_with_grep =
+              if grep = "" then base_args
+              else base_args @ [ Masc_exec.Shell_ir.Lit ("--grep=" ^ grep, Masc_exec.Shell_ir.default_meta) ]
+            in
+            let args =
+              if file_path = "" then args_with_grep
+              else
+                args_with_grep
+                @ [ Masc_exec.Shell_ir.Lit ("--", Masc_exec.Shell_ir.default_meta)
+                  ; Masc_exec.Shell_ir.Lit (file_path, Masc_exec.Shell_ir.default_meta)
+                  ]
+            in
+            let ir =
+              Masc_exec.Shell_ir.Simple
+                { bin = Masc_exec.Bin.of_known Masc_exec.Bin.Git
+                ; args
+                ; env = []
+                ; cwd = Some cwd_scope
+                ; redirects = []
+                ; sandbox = dispatch_sandbox
+                }
+            in
+            let envelope =
+              Masc_exec.Shell_ir_risk.classify (Masc_exec.Shell_ir_risk.undecided ir)
+            in
+            let allowed_commands = Dev_exec_allowlist.dev in
+            let gate_verdict =
+              Shell_gate.gate_typed
+                ~caller:Shell_gate.Keeper_shell_bash
+                ~ir:envelope.Masc_exec.Shell_ir_risk.ir
+                ~allowlist:{ allowed_commands; allow_pipes = true; redirect_allowed = true }
+                ~path_policy:Shell_gate.allow_all_paths
+                ~sandbox:{ target = dispatch_sandbox }
+                ()
+            in
+            (match gate_verdict with
+             | Reject { diagnostic; _ } ->
+               error_json
+                 ~fields:[ "typed", `Bool true; "cmd", `String "git log"; "path", `String cwd ]
+                 diagnostic
+             | Cannot_parse _ ->
+               error_json
+                 ~fields:[ "typed", `Bool true; "cmd", `String "git log"; "path", `String cwd ]
+                 "Cannot parse command"
+             | Too_complex _ ->
+               error_json
+                 ~fields:[ "typed", `Bool true; "cmd", `String "git log"; "path", `String cwd ]
+                 "Command too complex"
+             | Allow _context ->
+               let path_validation =
+                 Exec_policy.validate_shell_ir_paths
+                   ~keeper_id:meta.name
+                   ~base_path:root
+                   ~workdir:cwd
+                   envelope.Masc_exec.Shell_ir_risk.ir
+               in
+               (match path_validation with
+                | Error e -> error_json ~fields:[ "blocked_cmd", `String "git log" ] e
+                | Ok () ->
+                  let result =
+                    Masc_exec.Exec_dispatch.dispatch_decided envelope
+                  in
+                  (* P16: Record execution in history for failure pattern detection *)
+                  let success =
+                    match result.status with
+                    | Unix.WEXITED 0 -> true
+                    | _ -> false
+                  in
+                  let cmd = "git --no-optional-locks log --format=<fmt> -<n>" in
+                  let cmd_prefix = Keeper_shell_command_semantics.cmd_prefix cmd in
+                  let entry =
+                    Masc_exec.Bash_history.
+                      { ts = Unix.time ()
+                      ; cmd_hash = Masc_exec.Bash_history.cmd_hash cmd
+                      ; cmd_prefix
+                      ; semantic_kind = op
+                      ; duration_ms = 0
+                      ; success
+                      }
+                  in
+                  observe_history_append ~root ~keeper_name:meta.name entry;
+                  let insight_extra =
+                    let patterns =
+                      Masc_exec.Bash_history.failure_insight
+                        ~base_path:root
+                        ~keeper_name:meta.name
+                    in
+                    if patterns = []
+                    then []
+                    else
+                      [ "failure_insight"
+                      , `List (List.map Masc_exec.Bash_history.failure_pattern_to_json patterns)
+                      ]
+                  in
+                  Yojson.Safe.to_string
+                    (Exec_core.process_result_json
+                       ~artifact_policy:Exec_core.Inline_only
+                       ~base_path:root
+                       ~keeper_name:meta.name
+                       ~cmd
+                       ~extra:
+                         ([ "op", `String op
+                          ; "cmd", `String cmd
+                          ; "cwd", `String cwd
+                          ; "count", `Int count
+                          ; "grep", `String grep
+                          ; "via", `String "host"
+                          ]
+                          @ insight_extra)
+                       ~status:result.status
+                       ~output:result.stdout
+                       ()))))
   | "find" ->
     let name_pattern =
       let pattern = Safe_ops.json_string ~default:"" "pattern" args |> String.trim in

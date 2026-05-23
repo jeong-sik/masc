@@ -12,11 +12,11 @@
 
     The counter is maintained by explicit [try_acquire] / release
     pairs at the cascade call site.  No timeout, no queueing, no
-    blocking — if no permit is free, [try_acquire] returns [None] and
-    the strategy's capacity filter will have already skipped this
+    blocking — if no permit is free, [try_acquire] returns [Full]
+    and the strategy's capacity filter will have already skipped this
     endpoint in its ordering.  Defense-in-depth: both the filter and
     the acquire check the same counter, so a race between filter and
-    acquire simply yields a [None] that the cascade treats as typed
+    acquire simply yields a [Full] that the cascade treats as typed
     capacity backpressure before trying the next candidate.
 
     @since 0.9.6 *)
@@ -106,21 +106,24 @@ type release = unit -> unit
 (** Idempotent release thunk.  Calling it twice is safe; the second
     call is a no-op. *)
 
-val try_acquire : string -> release option
-(** Non-blocking acquire.  Returns [Some release] when a slot was
-    obtained and the caller is now responsible for calling [release]
-    exactly once (via [Fun.protect], [Eio.Switch.on_release], or
-    explicit control flow).  Returns [None] when:
-    - [url] is not registered → unlimited, no counter maintained
-      (caller should treat [None] as "no client cap, go ahead");
-    - [url] is registered and [process_available = 0] → client capacity
-      unavailable; caller should treat [None] as typed backpressure and
-      try another candidate.
+type acquire_result =
+  | Acquired of release
+  | Full of { retry_after_s : float option }
+  | Unregistered
+(** Result of a non-blocking acquire.
 
-    Disambiguate these two [None] cases via {!capacity}: if
-    [capacity url = None] the URL is unregistered; otherwise it is
-    full. *)
+    - [Acquired release] — slot obtained; caller must call [release]
+      exactly once.
+    - [Full { retry_after_s }] — [url] is registered but all slots are
+      in use.  [retry_after_s] hints when the caller should retry.
+    - [Unregistered] — [url] has no declared capacity; caller should
+      treat this as "no client cap, go ahead". *)
+
+val try_acquire : string -> acquire_result
+(** Non-blocking acquire.  See {!acquire_result} for outcome semantics.
+
+    @since 0.9.6 *)
 
 val is_registered : string -> bool
 (** [is_registered url] is [true] iff [url] has a declared capacity.
-    Convenience for the caller's [try_acquire] disambiguation. *)
+    Convenience for disambiguating [Unregistered] from [Full]. *)

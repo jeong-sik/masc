@@ -187,6 +187,10 @@ open Keeper_tools_oas_deterministic_error
 
     The [success] flag comes from the typed outcome returned by
     [Keeper_exec_tools.execute_keeper_tool_call_with_outcome]. *)
+let ok_result_json result =
+  Yojson.Safe.to_string (`Assoc [ "ok", `Bool true; "result", result ])
+;;
+
 let normalize_tool_result
       ?(workflow_rejection_recovery_fields = [])
       ~(success : bool)
@@ -200,7 +204,7 @@ let normalize_tool_result
       (* Success: wrap original JSON under "result" key.
          If original already has "ok":true, the normalized envelope
          is still consistent — "ok" at the top level is authoritative. *)
-      Yojson.Safe.to_string (`Assoc [ "ok", `Bool true; "result", json ])
+      ok_result_json json
     else (
       (* Failure: extract error message from whichever field is present,
          preserve original JSON as "detail" for debugging. *)
@@ -237,7 +241,7 @@ let normalize_tool_result
     (* Raw is not JSON (e.g. plain text from keeper_tasks_list).
        Wrap as-is. *)
     if success
-    then Yojson.Safe.to_string (`Assoc [ "ok", `Bool true; "result", `String raw ])
+    then ok_result_json (`String raw)
     else
       Yojson.Safe.to_string
         (`Assoc [ "ok", `Bool false; "error", `String raw; "detail", `Null ])

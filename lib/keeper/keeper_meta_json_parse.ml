@@ -146,7 +146,7 @@ let parse_keeper_identity (json : Yojson.Safe.t) : (parsed_keeper_identity, stri
          | ref_json ->
              (match Cascade_ref.cascade_ref_of_json ref_json with
               | Some ref -> Some ref
-              | None -> Some (Cascade_ref.cascade_ref_of_string pk_cascade_name)))
+              | None -> Cascade_ref.cascade_ref_of_string pk_cascade_name))
       ; pk_will
       ; pk_needs
       ; pk_desires

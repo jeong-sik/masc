@@ -42,7 +42,7 @@ type cascade_profile = {
 (** A reference to a specific position within a cascade profile.
     [item = None] means "let the group's strategy decide". *)
 type cascade_ref = {
-  group : string;
+  group : Cascade_name.t;
   item : string option;
 }
 
@@ -73,10 +73,10 @@ val cascade_ref_of_json : Yojson.Safe.t -> cascade_ref option
 
 (** {1 Migration helper} *)
 
-(** Convert a legacy cascade_name string into a cascade_ref.
+(** Convert a legacy cascade_name string into a cascade_ref option.
     The string becomes both the group name and (if non-empty) the item id.
-    Empty string produces an unconfigured reference. *)
-val cascade_ref_of_string : string -> cascade_ref
+    Empty string or non-canonical string produces [None] (unconfigured). *)
+val cascade_ref_of_string : string -> cascade_ref option
 
 (** {1 Lookup helpers} *)
 

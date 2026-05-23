@@ -560,14 +560,13 @@ type keeper_meta =
 
 let cascade_name_of_meta (m : keeper_meta) : string =
   match m.cascade_ref with
-  | Some ref_ when not (String.equal ref_.Cascade_ref.group "") ->
-    ref_.Cascade_ref.group
+  | Some ref_ -> Cascade_name.to_string ref_.Cascade_ref.group
   | _ -> (Keeper_config.default_cascade_name ())
 ;;
 
 let set_cascade_name (name : string) (m : keeper_meta) : keeper_meta =
   let cascade_ref =
-    Some Cascade_ref.{ group = name; item = None }
+    Some Cascade_ref.{ group = Cascade_name.of_string_exn name; item = None }
   in
   { m with cascade_ref }
 ;;

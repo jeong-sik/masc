@@ -48,8 +48,7 @@ let select_item_for_turn
   in
   let start_group =
     match cascade_ref with
-    | Some ref_ when not (String.equal ref_.group "") ->
-        ref_.group
+    | Some ref_ -> Cascade_name.to_string ref_.group
     | _ ->
         match cascade_profile.groups with
         | first :: _ -> first.name

@@ -292,6 +292,10 @@ if [ \"$1\" = \"info\" ]; then\n\
   printf '[]\\n'\n\
   exit 0\n\
 fi\n\
+if [ \"$1\" = \"image\" ] && [ \"$2\" = \"inspect\" ] && [ \"$3\" = \"alpine:test\" ]; then\n\
+  printf '[]\\n'\n\
+  exit 0\n\
+fi\n\
 if [ \"$1\" = \"run\" ]; then\n\
   printf 'no matches\\n'\n\
   exit 1\n\
@@ -302,6 +306,10 @@ exit 2\n"
 let fake_docker_echo_command_script =
   "#!/bin/sh\n\
 if [ \"$1\" = \"info\" ]; then\n\
+  printf '[]\\n'\n\
+  exit 0\n\
+fi\n\
+if [ \"$1\" = \"image\" ] && [ \"$2\" = \"inspect\" ] && [ \"$3\" = \"alpine:test\" ]; then\n\
   printf '[]\\n'\n\
   exit 0\n\
 fi\n\
@@ -327,6 +335,10 @@ if [ \"$1\" = \"info\" ]; then\n\
   printf '[]\\n'\n\
   exit 0\n\
 fi\n\
+if [ \"$1\" = \"image\" ] && [ \"$2\" = \"inspect\" ] && [ \"$3\" = \"alpine:test\" ]; then\n\
+  printf '[]\\n'\n\
+  exit 0\n\
+fi\n\
 if [ \"$1\" = \"run\" ]; then\n\
   if [ -n \"$log_file\" ]; then\n\
     printf 'run-started\\n' >> \"$log_file\"\n\
@@ -348,6 +360,14 @@ case \"$1\" in\n\
   info)\n\
     printf '[]\\n'\n\
     exit 0\n\
+    ;;\n\
+  image)\n\
+    if [ \"$2\" = \"inspect\" ] && [ \"$3\" = \"alpine:test\" ]; then\n\
+      printf '[]\\n'\n\
+      exit 0\n\
+    fi\n\
+    printf 'missing image\\n' >&2\n\
+    exit 1\n\
     ;;\n\
   run)\n\
     printf 'runtime-container\\n'\n\

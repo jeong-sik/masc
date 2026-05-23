@@ -149,6 +149,7 @@
    keeper_exec_board
    keeper_exec_fs
    keeper_exec_ide
+   keeper_shell_docker_preflight
    keeper_shell_docker
    keeper_shell_gh
    keeper_task_worktree_lazy

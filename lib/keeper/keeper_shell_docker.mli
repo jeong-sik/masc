@@ -18,20 +18,6 @@ val docker_exec_failure_message :
   output:string ->
   string
 
-(** Path of the per-keeper egress policy file
-    [<sandbox_root>/egress.json]. *)
-val egress_policy_path :
-  config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
-  string
-
-(** Check [cmd] against [Masc_exec.Egress_policy] for the keeper.
-    Returns [Some blocked_json] when blocked, [None] when allowed. *)
-val check_egress :
-  config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
-  cmd:string ->
-  string option
 
 (** Per-invocation container name [masc-keeper-<safe>-<pid>-<ms>]. *)
 val keeper_sandbox_container_name :

@@ -9,7 +9,7 @@ let make_artifact ~id_str ~kind ~now : A.any =
   | Ok id ->
       let provenance =
         {
-          Multimodal.Provenance_stub.origin_artifact_ids = [];
+          A.origin_artifact_ids = [];
           created_by = "test";
           created_at = now;
         }

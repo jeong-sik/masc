@@ -25,7 +25,6 @@ module Aid = Shared_types.Artifact_id
 module W = Multimodal.Workspace
 module A = Multimodal.Artifact
 module P = Multimodal.Payload
-module Pv = Multimodal.Provenance_stub
 module R = Resilience.Recovery
 module D = Resilience.Degradation
 module Env = Shared_audit.Envelope

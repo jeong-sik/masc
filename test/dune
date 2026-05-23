@@ -1663,6 +1663,8 @@
 
 (include stanzas/test_keeper_gh_parser_contract.inc)
 
+(include stanzas/test_keeper_shell_ops.inc)
+
 (include stanzas/test_keeper_gh_timeout_floor.inc)
 
 (include stanzas/test_keeper_identity_drift_counter.inc)

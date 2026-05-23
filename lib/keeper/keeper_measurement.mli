@@ -117,5 +117,4 @@ val capture :
 
 (** {1 Serialization} *)
 
-val threshold_params_to_json : threshold_params -> Yojson.Safe.t
 val measurement_snapshot_to_json : measurement_snapshot -> Yojson.Safe.t

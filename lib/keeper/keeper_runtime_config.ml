@@ -229,6 +229,13 @@ let observe_load_failure reason =
     ~labels:[ ("reason", reason) ]
     ()
 
+(* Shadow registry: stores every TOML value keyed by env name, even when
+   the env var is already set.  This lets operator surfaces compare the
+   effective env override against the operator's TOML intent (issue #17192). *)
+let toml_shadow : (string, string) Hashtbl.t = Hashtbl.create 16
+
+let toml_value_opt env_name = Hashtbl.find_opt toml_shadow env_name
+
 let load_and_apply ~base_path =
   let path = toml_path ~base_path in
   if not (Sys.file_exists path) then
@@ -246,7 +253,16 @@ let load_and_apply ~base_path =
       | Ok doc ->
         let count =
           List.fold_left
-            (fun acc kv -> if apply_one doc kv then acc + 1 else acc)
+            (fun acc (toml_key, env_name) ->
+               (* Populate shadow registry for every known key that has a
+                  TOML value, regardless of whether env preempts it. *)
+               (match List.assoc_opt toml_key doc with
+                | None -> ()
+                | Some v ->
+                  match value_to_string v with
+                  | None -> ()
+                  | Some s -> Hashtbl.replace toml_shadow env_name s);
+               if apply_one doc (toml_key, env_name) then acc + 1 else acc)
             0
             key_to_env
         in

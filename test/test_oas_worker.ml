@@ -3550,89 +3550,6 @@ let test_classify_filter_rejection_passes_when_provider_supported () =
     (reason = None)
 ;;
 
-let test_classify_filter_rejection_capability_profile_mismatch () =
-  let reason =
-    Masc_mcp.Cascade_oas_runner.classify_filter_rejection
-      ~keeper_name:"sangsu"
-      ~required_capability_profile:"tool_strict"
-      ~require_tool_choice_support:true
-      ~require_tool_support:true
-      (make_codex_cli_provider_cfg ())
-  in
-  Alcotest.(check bool)
-    "codex_cli with tool_strict profile → Capability_profile_mismatch"
-    true
-    (match reason with
-     | Some (Masc_mcp.Cascade_oas_runner.Capability_profile_mismatch "tool_strict") ->
-       true
-     | _ -> false)
-;;
-
-let test_classify_filter_rejection_capability_profile_passes () =
-  let reason =
-    Masc_mcp.Cascade_oas_runner.classify_filter_rejection
-      ~keeper_name:"sangsu"
-      ~required_capability_profile:"tool_strict"
-      ~require_tool_choice_support:true
-      ~require_tool_support:true
-      (make_claude_code_provider_cfg ())
-  in
-  Alcotest.(check bool)
-    "claude_code with tool_strict profile → None (passes)"
-    true
-    (reason = None)
-;;
-
-let test_filter_candidate_providers_for_tool_support_capability_profile_filters () =
-  let providers =
-    [ make_claude_code_provider_cfg ()
-    ; make_codex_cli_provider_cfg ()
-    ; make_gemini_cli_provider_cfg ()
-    ]
-  in
-  let filtered =
-    Masc_mcp.Cascade_oas_runner.filter_candidate_providers_for_tool_support
-      ~keeper_name:"sangsu"
-      ~require_tool_choice_support:true
-      ~require_tool_support:true
-      ~required_capability_profile:"tool_strict"
-      ~label:"strict_test"
-      providers
-  in
-  Alcotest.(check int)
-    "tool_strict keeps only claude_code (runtime_mcp + headers)"
-    1
-    (List.length filtered);
-  Alcotest.(check bool)
-    "tool_strict survivor is claude_code"
-    true
-    (match filtered with
-     | [ cfg ] ->
-       cfg.Llm_provider.Provider_config.kind
-       = Llm_provider.Provider_config.Claude_code
-     | _ -> false)
-;;
-
-let test_filter_candidate_providers_for_tool_support_no_profile_skips_check () =
-  let providers =
-    [ make_claude_code_provider_cfg ()
-    ; make_codex_cli_provider_cfg ()
-    ]
-  in
-  let filtered =
-    Masc_mcp.Cascade_oas_runner.filter_candidate_providers_for_tool_support
-      ~keeper_name:"sangsu"
-      ~require_tool_choice_support:false
-      ~require_tool_support:false
-      ~label:"no_profile_test"
-      providers
-  in
-  Alcotest.(check int)
-    "no required_capability_profile keeps all providers when tool gates are off"
-    2
-    (List.length filtered)
-;;
-
 let test_cli_mcp_config_json_of_policy_filters_to_allowed_servers () =
   let policy =
     { Llm_provider.Llm_transport.empty_runtime_mcp_policy with
@@ -6499,22 +6416,6 @@ let () =
             "classify_filter_rejection: returns None when provider passes"
             `Quick
             test_classify_filter_rejection_passes_when_provider_supported
-        ; Alcotest.test_case
-            "classify_filter_rejection: tool_strict rejects codex_cli (no headers)"
-            `Quick
-            test_classify_filter_rejection_capability_profile_mismatch
-        ; Alcotest.test_case
-            "classify_filter_rejection: tool_strict accepts claude_code (headers)"
-            `Quick
-            test_classify_filter_rejection_capability_profile_passes
-        ; Alcotest.test_case
-            "filter_candidate_providers: tool_strict keeps only header-capable CLI"
-            `Quick
-            test_filter_candidate_providers_for_tool_support_capability_profile_filters
-        ; Alcotest.test_case
-            "filter_candidate_providers: no profile skips capability check"
-            `Quick
-            test_filter_candidate_providers_for_tool_support_no_profile_skips_check
         ; Alcotest.test_case
             "CLI runtime MCP config keeps only allowed servers"
             `Quick

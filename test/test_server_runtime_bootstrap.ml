@@ -1637,10 +1637,7 @@ let test_migrate_resident_keeper_dirs_use_source_scoped_quarantine_path () =
 
 let test_blocking_bootstrap_promotes_legacy_keeper_meta_before_autoboot () =
   with_temp_dir "startup-blocking-legacy-keepers" (fun dir ->
-      let _config_root = make_config_root dir in
       write_basepath_keeper_toml dir "sangsu";
-      with_env "MASC_CONFIG_DIR" (Some _config_root) @@ fun () ->
-      Config_dir_resolver.reset ();
       let state = Mcp_server.create_state ~base_path:dir in
       let masc_root = Coord.masc_root_dir state.Mcp_server.room_config in
       let legacy_dir = Filename.concat masc_root "resident-keepers" in
@@ -1660,13 +1657,10 @@ let test_blocking_bootstrap_promotes_legacy_keeper_meta_before_autoboot () =
         (Sys.file_exists legacy_dir);
       Alcotest.(check bool) "legacy traces stay deferred to lazy startup" true
         (Sys.file_exists legacy_trace_dir);
-      let keepalive =
-        Keeper_types.keepalive_keeper_names state.Mcp_server.room_config
-      in
       Alcotest.(check (list string))
         "autoboot sees promoted keepers on first scan"
         [ "sangsu" ]
-        (List.filter (fun n -> String.equal n "sangsu") keepalive))
+        (Keeper_types.keepalive_keeper_names state.Mcp_server.room_config))
 
 let test_blocking_bootstrap_flattens_room_with_safe_current_room_fallback () =
   with_temp_dir "startup-blocking-room-flatten" (fun dir ->

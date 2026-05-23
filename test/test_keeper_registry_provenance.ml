@@ -76,7 +76,6 @@ let test_provider_runtime_error_carrier_none () =
       ; detail = "kimi unicode crash"
       ; provider_id = None
       ; http_status = None
-      ; cascade_name = None
       }
   in
   (check string)
@@ -91,7 +90,6 @@ let test_provider_runtime_error_carrier_some () =
       ; detail = "Timeout after 300.0s"
       ; provider_id = Some "runpod_mtp"
       ; http_status = Some 502
-      ; cascade_name = None
       }
   in
   let s = R.failure_reason_to_string r in

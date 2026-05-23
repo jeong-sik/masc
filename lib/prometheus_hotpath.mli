@@ -4,7 +4,7 @@
     call.  Observation gated by [MASC_DISABLE_HOTPATH_HIST]. *)
 val metric_oas_params_of_schema_sec : string
 
-(** Histogram: elapsed seconds per [Keeper_tools_oas_bundle.make_tool_bundle]
+(** Histogram: elapsed seconds per [Keeper_tools_oas_handler.make_tool_bundle]
     call.  Fires once per keeper turn. *)
 val metric_oas_make_tool_bundle_sec : string
 

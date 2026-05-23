@@ -152,7 +152,6 @@ let resolve_named_providers ?sw ?net ?clock ?provider_filter
         ~reason:"lookup_failed";
       e
   | Ok (_snapshot, normalized, profile) ->
-      let normalized = Cascade_name.to_string normalized in
       let provider_label (c : Llm_provider.Provider_config.t) =
         Printf.sprintf "%s:%s"
           (Llm_provider.Provider_config.string_of_provider_kind c.kind)
@@ -230,7 +229,6 @@ let resolve_named_providers_strict ?sw ?net ?clock ?provider_filter
         ~reason:"lookup_failed";
       e
   | Ok (_snapshot, normalized, profile) ->
-      let normalized = Cascade_name.to_string normalized in
       let ordered_entries =
         Cascade_config.order_weighted_entries ~rotation_scope:normalized
           ~cascade:normalized profile.weighted_entries
@@ -313,7 +311,6 @@ let resolve_named_providers_strict_with_secondary_resolver ?sw ?net ?clock
         ~reason:"lookup_failed";
       e
   | Ok (_snapshot, normalized, profile) ->
-      let normalized = Cascade_name.to_string normalized in
       let ordered_entries =
         Cascade_config.order_weighted_entries ~rotation_scope:normalized
           ~cascade:normalized profile.weighted_entries

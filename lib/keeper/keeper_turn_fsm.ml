@@ -134,8 +134,6 @@ type transition_action =
   | ContractOk
   | ContractViolation
   | ReceiptLost
-  | LivelockBlocked
-  | ProviderError
   | GenericFail
   | SupervisorRequestsStop
   | HonorStopSignal
@@ -155,8 +153,6 @@ let transition_action_label = function
   | ContractOk -> "ContractOk"
   | ContractViolation -> "ContractViolation"
   | ReceiptLost -> "ReceiptLost"
-  | LivelockBlocked -> "LivelockBlocked"
-  | ProviderError -> "ProviderError"
   | GenericFail -> "GenericFail"
   | SupervisorRequestsStop -> "SupervisorRequestsStop"
   | HonorStopSignal -> "HonorStopSignal"
@@ -226,12 +222,6 @@ let classify_transition ?ctx ~(from_state: _ turn_state) ~(to_state: _ turn_stat
   | Any Cascade_routing, Any (Failed (Failure_cascade_unavailable _))
     when not stop_signaled_before ->
       Some CascadeUnavailable
-  | Any Cascade_routing, Any (Failed (Failure_turn_livelock_blocked _))
-    when not stop_signaled_before ->
-      Some LivelockBlocked
-  | Any Cascade_routing, Any (Failed (Failure_provider_error _))
-    when not stop_signaled_before ->
-      Some ProviderError
   | Any Awaiting_provider, Any Streaming when not stop_signaled_before ->
       Some ProviderResponded
   | Any Awaiting_provider, Any (Cancelled Cancelled_provider_timeout)
@@ -243,18 +233,6 @@ let classify_transition ?ctx ~(from_state: _ turn_state) ~(to_state: _ turn_stat
       Some ToolReturned
   | Any Streaming, Any Completing when not stop_signaled_before ->
       Some StreamComplete
-  | Any Streaming, Any (Failed (Failure_tool_contract_violation _))
-    when not stop_signaled_before ->
-      Some ContractViolation
-  | Any Streaming, Any (Failed (Failure_receipt_lost _))
-    when not stop_signaled_before ->
-      Some ReceiptLost
-  | Any Streaming, Any (Failed (Failure_provider_error _))
-    when not stop_signaled_before ->
-      Some ProviderError
-  | Any Streaming, Any (Cancelled Cancelled_provider_timeout)
-    when not stop_signaled_before ->
-      Some ProviderTimeout
   | Any Completing, Any Done when not stop_signaled_before ->
       Some ContractOk
   | Any Completing, Any (Failed (Failure_tool_contract_violation _))

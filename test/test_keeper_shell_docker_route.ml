@@ -26,16 +26,6 @@ module Json = Yojson.Safe.Util
 
 (* ── Helpers ─────────────────────────────────────────────────────── *)
 
-let resolve_sandbox_root_git_cwd_string ~config ~meta ~cwd ~cmd =
-  let stages =
-    match Masc_exec_bash_parser.Bash.parse_string cmd with
-    | Masc_exec.Parsed.Parsed ir ->
-      Keeper_shell_command_semantics.effective_stages_of_ir ir
-    | _ -> []
-  in
-  Keeper_shell_command_semantics.resolve_sandbox_root_git_cwd_of_stages
-    ~config ~meta ~cwd ~cmd stages
-
 let with_env key value f =
   let prior = try Some (Sys.getenv key) with Not_found -> None in
   Unix.putenv key value;
@@ -1454,7 +1444,7 @@ let test_sandbox_root_git_cwd_zero_repo_blocks_before_exec () =
   setup ~sandbox:Keeper_types.Docker
   @@ fun ~config ~meta ~playground ->
   let cwd, error =
-    resolve_sandbox_root_git_cwd_string ~config ~meta
+    Keeper_shell_command_semantics.resolve_sandbox_root_git_cwd ~config ~meta
       ~cwd:playground ~cmd:"git status"
   in
   Alcotest.(check string) "cwd remains sandbox root" playground cwd;
@@ -1475,7 +1465,7 @@ let test_sandbox_root_git_cwd_single_repo_auto_chdir () =
   ensure_dir repo;
   git_ok ~cwd:repo [ "init"; "-q" ];
   let cwd, error =
-    resolve_sandbox_root_git_cwd_string ~config ~meta
+    Keeper_shell_command_semantics.resolve_sandbox_root_git_cwd ~config ~meta
       ~cwd:playground ~cmd:"git status"
   in
   let repo =
@@ -1496,7 +1486,7 @@ let test_sandbox_root_git_cwd_multi_repo_blocks_before_exec () =
   git_ok ~cwd:repo_a [ "init"; "-q" ];
   git_ok ~cwd:repo_b [ "init"; "-q" ];
   let cwd, error =
-    resolve_sandbox_root_git_cwd_string ~config ~meta
+    Keeper_shell_command_semantics.resolve_sandbox_root_git_cwd ~config ~meta
       ~cwd:playground ~cmd:"gh pr list"
   in
   Alcotest.(check string) "cwd remains sandbox root" playground cwd;
@@ -1525,7 +1515,7 @@ let test_sandbox_root_git_cwd_cd_chain_is_not_interpreted () =
   git_ok ~cwd:repo_a [ "init"; "-q" ];
   git_ok ~cwd:repo_b [ "init"; "-q" ];
   let cwd, error =
-    resolve_sandbox_root_git_cwd_string ~config ~meta
+    Keeper_shell_command_semantics.resolve_sandbox_root_git_cwd ~config ~meta
       ~cwd:playground
       ~cmd:"cd repos/masc-mcp/.worktrees/keeper-nick0cave-agent-task-236 && git status"
   in
@@ -1550,23 +1540,16 @@ let test_cmd_prefix_uses_shell_semantics () =
     "cd repos/masc-mcp && git status"
     "cd repos/masc-mcp && git status"
 
-let detect_gh_repo_api_misuse_of_string cmd =
-  match Masc_exec_bash_parser.Bash.parse_string cmd with
-  | Masc_exec.Parsed.Parsed ir ->
-    let stages = Keeper_shell_command_semantics.effective_stages_of_ir ir in
-    Keeper_shell_command_semantics.gh_repo_flag_api_misuse_of_stages stages
-  | _ -> None
-
 let test_gh_repo_api_misuse_uses_shell_semantics () =
   let check label expected cmd =
     Alcotest.(check (option (pair string string)))
       label
       expected
-      (detect_gh_repo_api_misuse_of_string cmd);
+      (Keeper_shell_command_semantics.detect_gh_repo_flag_with_api_misuse cmd);
     Alcotest.(check (option (pair string string)))
       (label ^ " docker alias")
       expected
-      (detect_gh_repo_api_misuse_of_string cmd)
+      (Keeper_shell_docker.detect_gh_repo_flag_with_api_misuse cmd)
   in
   check
     "quoted repo arg"

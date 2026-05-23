@@ -33,7 +33,14 @@ let argv_words_of_simple (simple : Masc_exec.Shell_ir.simple) =
 ;;
 
 let argv_words_of_split_string text =
-  Exec_policy_mutation_classifier.argv_words_of_string text
+  let words =
+    String.split_on_char ' ' text
+    |> List.map String.trim
+    |> List.filter (fun s -> s <> "")
+  in
+  match words with
+  | [] -> None
+  | _ -> Some words
 ;;
 
 let basename_token token = Filename.basename token

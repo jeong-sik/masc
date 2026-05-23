@@ -135,7 +135,9 @@ let parse_simple_gh_command (source : string)
   then Error Empty_command
   else (
     let parse text =
-      Exec_policy_mutation_classifier.parsed_of_string text |> gh_simple_command_of_parsed
+      match Masc_exec_command_gate.Shell_command_gate.parse_to_ir_opt text with
+      | None -> Error (Unsupported_command_shape "parse_error")
+      | Some ir -> gh_simple_command_of_parsed (Masc_exec.Parsed.Parsed ir)
     in
     let accept_gh = function
       | Ok (`Gh cmd) when cmd.argv <> [] -> Ok cmd

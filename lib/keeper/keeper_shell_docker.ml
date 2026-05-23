@@ -202,10 +202,8 @@ let ensure_keeper_sandbox_runtime ~timeout_sec =
    AND increment the matching Legendary_counters bucket.  Callers
    append the returned list to their `Assoc payload unconditionally —
    it is empty for non-gh commands, so call sites keep their shape. *)
-let gh_exit_class_field ~cmd ~status ~output
-    ~(cmd_stages : Keeper_shell_command_semantics.parsed_stage list)
-    () : (string * Yojson.Safe.t) list =
-  if not (Keeper_shell_command_semantics.stages_targets_gh cmd_stages)
+let gh_exit_class_field ~stages ~status ~output : (string * Yojson.Safe.t) list =
+  if not (Keeper_shell_command_semantics.stages_targets_gh stages)
   then []
   else (
     let exit_code =
@@ -395,7 +393,9 @@ let run_docker_shell_command_with_status_internal
             references")
     else
       let cmd_stages =
-        Keeper_shell_command_semantics.effective_stages_of_cmd cmd
+        match Masc_exec_command_gate.Shell_command_gate.parse_to_ir_opt cmd with
+        | Some ir -> Keeper_shell_command_semantics.effective_stages_of_ir ir
+        | None -> []
       in
       let cwd, multi_repo_blocker =
         Keeper_shell_command_semantics.resolve_sandbox_root_git_cwd_of_stages
@@ -410,8 +410,8 @@ let run_docker_shell_command_with_status_internal
           let validation_cmd =
             rewrite_docker_command_paths_for_host_validation ~config ~meta cmd
           in
-          (match Exec_policy_mutation_classifier.parsed_of_string validation_cmd with
-           | Masc_exec.Parsed.Parsed validation_ir ->
+          (match Masc_exec_command_gate.Shell_command_gate.parse_to_ir_opt validation_cmd with
+           | Some validation_ir ->
              (match
                 Keeper_task_worktree_lazy.ensure_shell_ir_existing_dirs
                   ~config ~meta ~cwd ~ir:validation_ir
@@ -423,9 +423,7 @@ let run_docker_shell_command_with_status_internal
                   ~base_path:(Keeper_alerting_path.project_root_of_config config)
                   ~workdir:cwd
                   validation_ir)
-           | Masc_exec.Parsed.Parse_error _
-           | Masc_exec.Parsed.Parse_aborted _
-           | Masc_exec.Parsed.Too_complex _ -> Ok ())
+           | None -> Ok ())
         else Ok ()
       in
       match path_validation with
@@ -450,9 +448,9 @@ let run_docker_shell_command_with_status_internal
          sees a corrected-form hint in the same turn rather than gh's raw
          "unknown flag: --repo" error after the round-trip. *)
            (match
-             Keeper_shell_command_semantics.gh_repo_flag_api_misuse_of_stages
-               cmd_stages
-           with
+              Keeper_shell_command_semantics.detect_gh_repo_flag_with_api_misuse_of_stages
+                cmd_stages
+            with
             | Some (repo_arg, endpoint) ->
               sandbox_error
                 (Printf.sprintf
@@ -555,7 +553,12 @@ let run_docker_shell_command_with_status_internal
                    | Ok () ->
                      let prepared_gitdirs =
                        if git_creds_enabled
-                          && Keeper_shell_command_semantics.stages_targets_git_or_gh cmd_stages
+                          && (
+                            match Masc_exec_command_gate.Shell_command_gate.parse_to_ir_opt cmd with
+                            | Some ir ->
+                              Keeper_shell_command_semantics.effective_stages_of_ir ir
+                              |> Keeper_shell_command_semantics.stages_targets_git_or_gh
+                            | None -> false)
                        then prepare_container_worktree_gitdirs ~host_root ~container_root
                        else 0
                      in
@@ -767,7 +770,9 @@ let run_docker_credentialed_bash
     | Some blocked_json -> blocked_json
     | None ->
       let cmd_stages =
-        Keeper_shell_command_semantics.effective_stages_of_cmd cmd
+        match Masc_exec_command_gate.Shell_command_gate.parse_to_ir_opt cmd with
+        | Some ir -> Keeper_shell_command_semantics.effective_stages_of_ir ir
+        | None -> []
       in
       let cwd, sandbox_root_git_blocker =
         Keeper_shell_command_semantics.resolve_sandbox_root_git_cwd_of_stages
@@ -780,8 +785,8 @@ let run_docker_credentialed_bash
            rewrite_docker_command_paths_for_host_validation ~config ~meta cmd
          in
          let path_validation =
-           match Exec_policy_mutation_classifier.parsed_of_string validation_cmd with
-           | Masc_exec.Parsed.Parsed validation_ir ->
+           match Masc_exec_command_gate.Shell_command_gate.parse_to_ir_opt validation_cmd with
+           | Some validation_ir ->
              (match
                 Keeper_task_worktree_lazy.ensure_shell_ir_existing_dirs
                   ~config ~meta ~cwd ~ir:validation_ir
@@ -793,9 +798,7 @@ let run_docker_credentialed_bash
                   ~base_path:(Keeper_alerting_path.project_root_of_config config)
                   ~workdir:cwd
                   validation_ir)
-           | Masc_exec.Parsed.Parse_error _
-           | Masc_exec.Parsed.Parse_aborted _
-           | Masc_exec.Parsed.Too_complex _ -> Ok ()
+           | None -> Ok ()
          in
          (match path_validation with
           | Error err -> sandbox_error_json (Printf.sprintf "%s [blocked_cmd=%s]" err validation_cmd)
@@ -833,11 +836,9 @@ let run_docker_credentialed_bash
                      ; "output", `String result.output
                      ]
                      @ gh_exit_class_field
-                         ~cmd
+                         ~stages:cmd_stages
                          ~status:result.status
-                         ~output:result.output
-                        ~cmd_stages
-                        ()))))))
+                         ~output:result.output))))))
 ;;
 
 let run_docker_bash
@@ -866,7 +867,9 @@ let run_docker_bash
       "sandbox_profile=docker blocks nested container runtimes and host socket references"
   else (
     let cmd_stages =
-      Keeper_shell_command_semantics.effective_stages_of_cmd cmd
+      match Masc_exec_command_gate.Shell_command_gate.parse_to_ir_opt cmd with
+      | Some ir -> Keeper_shell_command_semantics.effective_stages_of_ir ir
+      | None -> []
     in
     let cwd, sandbox_root_git_blocker =
       Keeper_shell_command_semantics.resolve_sandbox_root_git_cwd_of_stages
@@ -879,8 +882,8 @@ let run_docker_bash
         rewrite_docker_command_paths_for_host_validation ~config ~meta cmd
       in
       let path_validation =
-        match Exec_policy_mutation_classifier.parsed_of_string validation_cmd with
-        | Masc_exec.Parsed.Parsed validation_ir ->
+        match Masc_exec_command_gate.Shell_command_gate.parse_to_ir_opt validation_cmd with
+        | Some validation_ir ->
           (match
              Keeper_task_worktree_lazy.ensure_shell_ir_existing_dirs
                ~config ~meta ~cwd ~ir:validation_ir
@@ -892,9 +895,7 @@ let run_docker_bash
                ~base_path:(Keeper_alerting_path.project_root_of_config config)
                ~workdir:cwd
                validation_ir)
-        | Masc_exec.Parsed.Parse_error _
-        | Masc_exec.Parsed.Parse_aborted _
-        | Masc_exec.Parsed.Too_complex _ -> Ok ()
+        | None -> Ok ()
       in
       (match path_validation with
        | Error err -> sandbox_error_json (Printf.sprintf "%s [blocked_cmd=%s]" err validation_cmd)
@@ -948,7 +949,7 @@ let run_docker_bash
                      , `String (Exec_core.string_of_semantic_status semantic_status)
                    ; "output", `String out
                    ]
-                   @ gh_exit_class_field ~cmd ~status:st ~output:out ~cmd_stages ()))
+                   @ gh_exit_class_field ~stages:cmd_stages ~status:st ~output:out)))
        | _ ->
          (match turn_sandbox_runtime with
           | Some _ ->
@@ -1007,9 +1008,7 @@ let run_docker_bash
                       ; "output", `String result.output
                       ]
                       @ gh_exit_class_field
-                          ~cmd
+                          ~stages:cmd_stages
                           ~status:result.status
-                          ~output:result.output
-                          ~cmd_stages
-                          ()))))))
+                          ~output:result.output)))))))
 ;;

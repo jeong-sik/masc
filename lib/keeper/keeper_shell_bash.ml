@@ -64,11 +64,6 @@ let handle_keeper_bash_typed
           e
       | Ok input ->
         let cmd = typed_input_command_text input in
-        let cmd_for_log =
-          cmd
-          |> Exec_policy.sanitize_command_for_log
-          |> Exec_policy.truncate_for_log
-        in
         let mode =
           if write_enabled
           then Keeper_tool_bash_input.Dev_full
@@ -117,18 +112,19 @@ let handle_keeper_bash_typed
             ~fields:[ "typed", `Bool true; "cmd", `String cmd_for_log; "cwd", `String cwd ]
             (typed_validation_error_text e)
         | Ok ir ->
+        let cmd_for_log =
+          Exec_policy.sanitize_command_for_log_of_ir ~fallback_cmd:cmd ir
+          |> Exec_policy.truncate_for_log
+        in
         let envelope =
           Masc_exec.Shell_ir_risk.classify (Masc_exec.Shell_ir_risk.undecided ir)
-        in
-        let classification =
-          Exec_core.classify_command_of_ir envelope.Masc_exec.Shell_ir_risk.ir
         in
         if Masc_exec.Shell_ir_risk.is_destructive envelope
         then
           Yojson.Safe.to_string
             (Exec_core.blocked_result_json
-               ~classification
                ~cmd
+               ~ir
                ~error:"destructive_operation_blocked"
                ~reason:
                  "This typed command is destructive and is blocked for all presets."
@@ -142,8 +138,8 @@ let handle_keeper_bash_typed
         then
           Yojson.Safe.to_string
             (Exec_core.blocked_result_json
-               ~classification
                ~cmd
+               ~ir
                ~error:"write_operation_gated"
                ~reason:
                  "This typed command modifies state. A write-enabled preset is required."
@@ -239,10 +235,10 @@ let handle_keeper_bash_typed
                in
                Yojson.Safe.to_string
                  (Exec_core.process_result_json
-                    ~classification
                     ~base_path:root
                     ~keeper_name:meta.name
                     ~cmd
+                    ~ir
                     ~extra:
                       (runtime_failure_fields
                        @ sandbox_extra_fields

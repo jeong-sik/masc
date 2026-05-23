@@ -14,7 +14,7 @@ val lookup_active_profile :
   ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
   string ->
   ( Cascade_catalog_runtime_cache.snapshot
-    * Cascade_name.t
+    * string
     * Cascade_catalog_runtime_cache.profile_snapshot,
     string )
   result
@@ -25,7 +25,7 @@ val resolve_declared_name :
   ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
   raw_name:string ->
   unit ->
-  (Cascade_name.t, string) result
+  (string, string) result
 
 val models_of_cascade_name :
   ?sw:Eio.Switch.t ->

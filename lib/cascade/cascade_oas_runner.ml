@@ -147,10 +147,6 @@ let codex_cli_cannot_carry_keeper_bound_runtime_mcp
    pinpoints the failing check on the first read.
 
    Order of preference (mirrors the filter's short-circuit):
-   0. [Capability_profile_mismatch profile] — the provider's declared
-      capabilities do not satisfy the tier-group's
-      [required_capability_profile] (e.g. [tool_strict] requiring
-      [runtime_mcp_tools], [runtime_tool_events], [runtime_mcp_http_headers]).
    1. [Codex_keeper_bound_actor_required] — codex_cli cannot carry a
       runtime MCP policy that requires bound-actor tools (keeper-scoped).
    2. [Tool_lane_unsupported] — [resolve_tool_lane_for_oas_tools]
@@ -161,14 +157,11 @@ let codex_cli_cannot_carry_keeper_bound_runtime_mcp
       existing [rejection_reason] so dashboards stay consistent with
       [masc_cascade_filter_rejection_total]. *)
 type filter_rejection_reason =
-  | Capability_profile_mismatch of string
   | Codex_keeper_bound_actor_required
   | Tool_lane_unsupported
   | Required_tool_use of Provider_tool_support.rejection_reason
 
 let filter_rejection_reason_label = function
-  | Capability_profile_mismatch profile ->
-    Printf.sprintf "capability_profile_mismatch:%s" profile
   | Codex_keeper_bound_actor_required -> "codex_keeper_bound_actor_required"
   | Tool_lane_unsupported -> "tool_lane_unsupported"
   | Required_tool_use r -> Provider_tool_support.rejection_reason_label r
@@ -200,7 +193,7 @@ let codex_keeper_bound_skip_log_message ~label ~keeper_name provider_cfg reason 
          (Provider_tool_support.provider_debug_label provider_cfg)
          keeper_name
          (filter_rejection_reason_label reason))
-  | Capability_profile_mismatch _ | Tool_lane_unsupported | Required_tool_use _ -> None
+  | Tool_lane_unsupported | Required_tool_use _ -> None
 
 let log_codex_keeper_bound_skip ~label ~keeper_name provider_cfg reason =
   match codex_keeper_bound_skip_log_message ~label ~keeper_name provider_cfg reason with
@@ -225,64 +218,51 @@ let classify_filter_rejection
       ~(keeper_name : string)
       ?runtime_mcp_policy
       ?(tools = [])
-      ?required_capability_profile
       ~require_tool_choice_support
       ~require_tool_support
       (provider_cfg : Llm_provider.Provider_config.t)
   : filter_rejection_reason option
   =
-  let profile_mismatch =
-    match required_capability_profile with
-    | None -> None
-    | Some profile ->
-      let caps = Provider_tool_support.capabilities_of_config provider_cfg in
-      if not (Cascade_capability_profile.provider_satisfies_profile profile caps)
-      then Some (Capability_profile_mismatch profile)
-      else None
-  in
-  match profile_mismatch with
-  | Some _ -> profile_mismatch
-  | None ->
-    if
-      codex_cli_cannot_carry_keeper_bound_runtime_mcp
-        ~keeper_name
-        ~provider_cfg
-        runtime_mcp_policy
-    then Some Codex_keeper_bound_actor_required
+  if
+    codex_cli_cannot_carry_keeper_bound_runtime_mcp
+      ~keeper_name
+      ~provider_cfg
+      runtime_mcp_policy
+  then Some Codex_keeper_bound_actor_required
+  else (
+    let normalized_runtime_mcp_policy =
+      runtime_mcp_policy_for_provider ~keeper_name ~provider_cfg runtime_mcp_policy
+    in
+    let tool_lane_supported =
+      match tools with
+      | [] -> true
+      | _ ->
+        (match
+           Cascade_runner.resolve_tool_lane_for_oas_tools
+             ?agent_name:(keeper_agent_name_opt keeper_name)
+             ~tool_requirement:
+               (if require_tool_choice_support || require_tool_support
+                then `Required
+                else `Optional)
+             ~provider_cfg
+             ~tools
+             ()
+         with
+         | Ok _ -> true
+         | Error _ -> false)
+    in
+    if not tool_lane_supported
+    then Some Tool_lane_unsupported
     else (
-      let normalized_runtime_mcp_policy =
-        runtime_mcp_policy_for_provider ~keeper_name ~provider_cfg runtime_mcp_policy
-      in
-      let tool_lane_supported =
-        match tools with
-        | [] -> true
-        | _ ->
-          (match
-             Cascade_runner.resolve_tool_lane_for_oas_tools
-               ?agent_name:(keeper_agent_name_opt keeper_name)
-               ~tool_requirement:
-                 (if require_tool_choice_support || require_tool_support
-                  then `Required
-                  else `Optional)
-               ~provider_cfg
-               ~tools
-               ()
-           with
-           | Ok _ -> true
-           | Error _ -> false)
-      in
-      if not tool_lane_supported
-      then Some Tool_lane_unsupported
-      else (
-        match
-          Provider_tool_support.classify_rejection
-            ?runtime_mcp_policy:normalized_runtime_mcp_policy
-            ~require_tool_choice_support
-            ~require_tool_support
-            provider_cfg
-        with
-        | Some reason -> Some (Required_tool_use reason)
-        | None -> None))
+      match
+        Provider_tool_support.classify_rejection
+          ?runtime_mcp_policy:normalized_runtime_mcp_policy
+          ~require_tool_choice_support
+          ~require_tool_support
+          provider_cfg
+      with
+      | Some reason -> Some (Required_tool_use reason)
+      | None -> None))
 
 (* #11060: cascade-empty WARN dedupe.
 
@@ -347,7 +327,6 @@ let cascade_empty_should_emit_first ~label ~signature =
 let attempt_secondary_swap
       ~keeper_name
       ?runtime_mcp_policy
-      ?required_capability_profile
       ~tools
       ~require_tool_choice_support
       ~require_tool_support
@@ -374,7 +353,6 @@ let attempt_secondary_swap
        classify_filter_rejection
          ~keeper_name
          ?runtime_mcp_policy
-         ?required_capability_profile
          ~tools
          ~require_tool_choice_support
          ~require_tool_support
@@ -409,13 +387,11 @@ let filter_candidate_providers_for_tool_support
       ?(tools = [])
       ~require_tool_choice_support
       ~require_tool_support
-      ?required_capability_profile
       ?secondary_resolver
       ~label
       (provider_cfgs : Llm_provider.Provider_config.t list)
   =
   if (not require_tool_choice_support) && not require_tool_support
-     && Option.is_none required_capability_profile
   then provider_cfgs
   else (
     let kept_rev, rejected_rev, _ =
@@ -425,7 +401,6 @@ let filter_candidate_providers_for_tool_support
              classify_filter_rejection
                ~keeper_name
                ?runtime_mcp_policy
-               ?required_capability_profile
                ~tools
                ~require_tool_choice_support
                ~require_tool_support
@@ -441,7 +416,6 @@ let filter_candidate_providers_for_tool_support
                  attempt_secondary_swap
                    ~keeper_name
                    ?runtime_mcp_policy
-                   ?required_capability_profile
                    ~tools
                    ~require_tool_choice_support
                    ~require_tool_support

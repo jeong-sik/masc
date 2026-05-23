@@ -13,9 +13,6 @@ let dedupe_tool_names names =
   dedupe_keep_order (names |> List.map String.trim |> List.filter (fun name -> name <> ""))
 ;;
 
-(* RFC-0160 S6: private [shell_word_values] removed. Callers route
-   through {!Exec_policy.stage_words_of_string} (single SSOT). *)
-
 (* ── Runtime-resolved tool names ─────────────────────────────── *)
 
 let keeper_internal_candidate_tool_names =
@@ -206,8 +203,7 @@ let gh_read_only_prefixes =
     [api2 ...] (a hypothetical sibling subcommand) as a gh-api call and
     [graphqlx ...] as the graphql subcommand.  User hard rule: "no
     string matching for classification". *)
-let is_gh_api_read_only (cmd_lower : string) : bool =
-  let tokens = Exec_policy.stage_words_of_string cmd_lower in
+let is_gh_api_read_only_of_tokens (tokens : string list) : bool =
   match tokens with
   | "api" :: rest_after_api ->
     let is_graphql_subcommand =
@@ -255,15 +251,14 @@ let is_gh_api_read_only (cmd_lower : string) : bool =
   | _ -> false
 ;;
 
-(** Extract the effective gh command string from keeper_shell op=gh input.
+(** Extract the effective gh command token list from keeper_shell op=gh input.
     [keeper_exec_shell] accepts typed [argv] and legacy [cmd] fields. *)
-let normalize_gh_command (cmd : string) : string =
-  let tokens = Exec_policy.stage_words_of_string cmd in
+let normalize_gh_command_of_tokens (tokens : string list) : string list =
   let rec drop_leading_gh = function
     | token :: rest when String_util.equals_ci token "gh" -> drop_leading_gh rest
     | remaining -> remaining
   in
-  String.concat " " (drop_leading_gh tokens)
+  drop_leading_gh tokens
 ;;
 
 let normalize_gh_argv argv =

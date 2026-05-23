@@ -28,7 +28,8 @@ type prompt_flag =
 
 type spawn_config = {
   agent_name : string;
-  command : string;
+  command_argv : string list;
+    (** Pre-split argv for direct execution. No shell parsing needed. *)
   timeout_seconds : int;
   working_dir : string option;
   mcp_tools : string list;
@@ -67,7 +68,6 @@ val build_mcp_args : string -> string list -> string list
 val build_prompt_args : string -> string -> string list
 val build_mcp_args_from_config : spawn_config -> string list -> string list
 val build_prompt_args_from_config : spawn_config -> string -> string list
-val parse_command : string -> string list
 
 (** {1 Spawning} *)
 

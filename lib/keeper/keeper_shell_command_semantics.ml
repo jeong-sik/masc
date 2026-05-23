@@ -81,14 +81,32 @@ let rec effective_stage = function
 let effective_stages_of_ir ir =
   parsed_stages_of_ir ir |> List.filter_map effective_stage
 
-let strip_simple_shell_quotes token =
-  let len = String.length token in
-  if
-    len >= 2
-    && ((token.[0] = '\'' && token.[len - 1] = '\'')
-        || (token.[0] = '"' && token.[len - 1] = '"'))
-  then String.sub token 1 (len - 2)
-  else token
+
+(** Extract literal words from a single [Shell_ir.simple] stage:
+    [[bin; arg0; arg1; ...]]. Non-literal args abort extraction. *)
+let literal_words_of_simple (simple : Masc_exec.Shell_ir.simple) : string list option =
+  let rec collect acc = function
+    | [] -> Some (List.rev acc)
+    | Masc_exec.Shell_ir.Lit (a, _) :: rest -> collect (a :: acc) rest
+    | Masc_exec.Shell_ir.Concat _ :: _ | Masc_exec.Shell_ir.Var _ :: _ -> None
+  in
+  match collect [] simple.args with
+  | None -> None
+  | Some args -> Some (Masc_exec.Bin.to_string simple.bin :: args)
+;;
+
+(** Flatten all literal stage words across pipeline segments. *)
+let flat_stage_words (ir : Masc_exec.Shell_ir.t) : string list =
+  let rec collect acc = function
+    | Masc_exec.Shell_ir.Simple s ->
+      (match literal_words_of_simple s with
+       | Some ws -> ws :: acc
+       | None -> acc)
+    | Masc_exec.Shell_ir.Pipeline stages ->
+      List.fold_left collect acc stages
+  in
+  List.rev (collect [] ir) |> List.concat
+;;
 
 let stages_targets_git_or_gh stages =
   List.exists (fun stage -> stage.bin = "git" || stage.bin = "gh") stages
@@ -96,13 +114,10 @@ let stages_targets_git_or_gh stages =
 let stages_targets_gh stages =
   List.exists (fun stage -> stage.bin = "gh") stages
 
-(** First whitespace-delimited token from a command string, with surrounding
-    quotes stripped. Used for history/logging where full parse is unnecessary. *)
-let cmd_prefix cmd =
-  let trimmed = String.trim cmd in
-  match String.split_on_char ' ' trimmed with
-  | [] | [""] -> trimmed
-  | first :: _ -> strip_simple_shell_quotes first
+let stages_prefix stages =
+  match stages with
+  | stage :: _ -> stage.bin
+  | [] -> ""
 
 let repo_flag_value = function
   | "--repo" -> None
@@ -113,7 +128,7 @@ let repo_flag_value = function
     if value = "" then None else Some value
   | _ -> None
 
-let gh_repo_flag_api_misuse_of_stages stages =
+let detect_gh_repo_flag_with_api_misuse_of_stages stages =
   let scan_args = function
     | "--repo" :: repo_arg :: "api" :: endpoint :: _ -> Some (repo_arg, endpoint)
     | flag :: "api" :: endpoint :: _ ->
@@ -122,6 +137,15 @@ let gh_repo_flag_api_misuse_of_stages stages =
   in
   List.find_map (fun stage ->
     if stage.bin = "gh" then scan_args stage.args else None) stages
+
+let strip_simple_shell_quotes token =
+  let len = String.length token in
+  if
+    len >= 2
+    && ((token.[0] = '\'' && token.[len - 1] = '\'')
+        || (token.[0] = '"' && token.[len - 1] = '"'))
+  then String.sub token 1 (len - 2)
+  else token
 
 let bare_worktrees_path token =
   let token = strip_simple_shell_quotes token in
@@ -240,11 +264,4 @@ let resolve_sandbox_root_git_cwd_of_stages
                suggested_cwd
                (String.concat ", " many)) )))
   else cwd, None
-
-let effective_stages_of_cmd cmd =
-  match Exec_policy_mutation_classifier.parsed_of_string cmd with
-  | Masc_exec.Parsed.Parsed ir -> effective_stages_of_ir ir
-  | Masc_exec.Parsed.Parse_error _
-  | Masc_exec.Parsed.Parse_aborted _
-  | Masc_exec.Parsed.Too_complex _ -> []
 

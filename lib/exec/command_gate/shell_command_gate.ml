@@ -1,10 +1,10 @@
 (* Exec shell gate SSOT — see shell_command_gate.mli for the contract.
 
-   This module accepts pre-parsed Shell IR and applies allowlist, path,
-   and redirect policies, exposing the result as a closed [verdict] sum
-   type. New callers should target this module so shell policy decisions
-   share the same parsed context instead of re-deriving command shape
-   with caller-local string scanners. *)
+   This module deliberately routes every raw command through one
+   [Bash.parse_string] call and exposes the result as a closed
+   [verdict] sum type. New callers should target this module so shell
+   policy decisions share the same parsed context instead of re-deriving
+   command shape with caller-local string scanners. *)
 
 module SI = Masc_exec.Shell_ir
 module PD = Masc_exec.Parsed
@@ -152,30 +152,14 @@ let rec command_words_run_dune = function
   | command :: args -> command_runs_dune command args
 
 and split_string_runs_dune text =
-  let stage_words_of_ir ir =
-    let rec literal acc = function
-      | [] -> Some (List.rev acc)
-      | SI.Lit (a, _) :: rest -> literal (a :: acc) rest
-      | SI.Concat _ :: _ | SI.Var _ :: _ -> None
-    in
-    let words_of_simple s =
-      match literal [] s.SI.args with
-      | None -> None
-      | Some args -> Some (Masc_exec.Bin.to_string s.SI.bin :: args)
-    in
-    let rec collect acc = function
-      | SI.Simple s ->
-        (match words_of_simple s with
-         | Some ws -> ws :: acc
-         | None -> acc)
-      | SI.Pipeline stages -> List.fold_left collect acc stages
-    in
-    List.rev (collect [] ir)
-  in
-  match Masc_exec_bash_parser.Bash.parse_string text with
-  | Masc_exec.Parsed.Parsed ir ->
-    List.exists command_words_run_dune (stage_words_of_ir ir)
-  | _ -> false
+  match Masc_exec_bash_parser.Bash_words.stages text with
+  | Error _ -> false
+  | Ok stages ->
+    List.exists
+      command_words_run_dune
+      (List.map
+         (List.map (fun w -> w.Masc_exec_bash_parser.Bash_words.value))
+         stages)
 
 and env_args_run_dune = function
   | [] -> false
@@ -417,6 +401,17 @@ let parse_only_to_stages (parsed : SI.t PD.t) :
      | Nested_pipeline -> Error (`Too_complex Unsupported_nested_pipeline))
 ;;
 
+let gate ?caller:_ ~raw ~allowlist ~path_policy ~sandbox () : verdict =
+  (* [caller] is captured for the upcoming telemetry partition
+     (RFC-0131 PR-3) and does not affect the verdict.  The
+     ignored-argument pattern is intentional: this iter establishes
+     the API surface; PR-3 wires the counters. *)
+  match parse_only_to_stages (Masc_exec_bash_parser.Bash.parse_string raw) with
+  | Error (`Cannot_parse reason) -> Cannot_parse { reason }
+  | Error (`Too_complex reason) -> Too_complex { reason }
+  | Ok stages -> apply_policy ~allowlist ~path_policy ~sandbox ~stages
+;;
+
 let gate_typed ?caller:_ ~ir ~allowlist ~path_policy ~sandbox () : verdict =
   (* Typed callers have already crossed their schema boundary, so this
      entrypoint intentionally skips Bash.parse_string while preserving
@@ -492,3 +487,9 @@ let last_stage_bin context =
 ;;
 
 let is_pipeline context = List.length context.stage_bins > 1
+
+let parse_to_ir_opt raw =
+  match Masc_exec_bash_parser.Bash.parse_string raw with
+  | PD.Parsed ir -> Some ir
+  | PD.Parse_error _ | PD.Parse_aborted _ | PD.Too_complex _ -> None
+;;

@@ -90,8 +90,6 @@ type transition_action =
   | ContractOk
   | ContractViolation
   | ReceiptLost
-  | LivelockBlocked
-  | ProviderError
   | GenericFail
   | SupervisorRequestsStop
   | HonorStopSignal

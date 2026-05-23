@@ -17,6 +17,20 @@ let coreutils = (Host_config.host ()).coreutils
 let metric_bash_history_append_failures =
   "masc_bash_history_append_failures_total"
 
+let ir_of_cmd cmd =
+  match Masc_exec_command_gate.Shell_command_gate.parse_to_ir_opt cmd with
+  | Some ir -> ir
+  | None ->
+    Masc_exec.Shell_ir.Simple
+      { bin = Masc_exec.Bin.of_known Masc_exec.Bin.Ls
+      ; args = []
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Masc_exec.Sandbox_target.host ()
+      }
+;;
+
 let () =
   Prometheus.register_counter
     ~name:metric_bash_history_append_failures
@@ -159,7 +173,14 @@ let handle_keeper_shell
     in
     (* P16: Record execution in history for failure pattern detection *)
     let success = st = Unix.WEXITED 0 in
-    let cmd_prefix = Keeper_shell_command_semantics.cmd_prefix cmd in
+    let cmd_prefix =
+      match Masc_exec_command_gate.Shell_command_gate.parse_to_ir_opt cmd with
+      | Some ir -> (
+        match Keeper_shell_command_semantics.effective_stages_of_ir ir with
+        | stage :: _ -> stage.bin
+        | [] -> String.trim cmd)
+      | None -> String.trim cmd
+    in
     let entry = Masc_exec.Bash_history.{
       ts = Unix.time ();
       cmd_hash = Masc_exec.Bash_history.cmd_hash cmd;
@@ -185,6 +206,7 @@ let handle_keeper_shell
          ~base_path:root
          ~keeper_name:meta.name
          ~cmd
+         ~ir:(ir_of_cmd cmd)
          ~extra:
            ([
              "op", `String op;
@@ -205,7 +227,14 @@ let handle_keeper_shell
   let render_completed_process_result ?cwd ~cmd ?(extra = []) st out =
     (* P16: Record execution in history for failure pattern detection *)
     let success = st = Unix.WEXITED 0 in
-    let cmd_prefix = Keeper_shell_command_semantics.cmd_prefix cmd in
+    let cmd_prefix =
+      match Masc_exec_command_gate.Shell_command_gate.parse_to_ir_opt cmd with
+      | Some ir -> (
+        match Keeper_shell_command_semantics.effective_stages_of_ir ir with
+        | stage :: _ -> stage.bin
+        | [] -> String.trim cmd)
+      | None -> String.trim cmd
+    in
     let elapsed_ms =
       List.find_map (fun (k, v) ->
         if k = "execution_time_ms" then
@@ -245,6 +274,7 @@ let handle_keeper_shell
          ~base_path:root
          ~keeper_name:meta.name
          ~cmd
+         ~ir:(ir_of_cmd cmd)
          ~extra:([
              "op", `String op;
              "cmd", `String cmd;
@@ -327,6 +357,7 @@ let handle_keeper_shell
            ~base_path:root
            ~keeper_name:meta.name
            ~cmd
+           ~ir:(ir_of_cmd cmd)
            ~extra:
              [
                "op", `String op;
@@ -825,6 +856,7 @@ let handle_keeper_shell
                  ~base_path:root
                  ~keeper_name:meta.name
                  ~cmd:"wc"
+                 ~ir:(ir_of_cmd "wc")
                  ~extra:
                    [
                      "op", `String op;
@@ -1356,7 +1388,7 @@ let handle_keeper_shell
          | Masc_exec.Shell_ir_risk.Destructive_protected ->
            let hint =
              Option.value
-               (Worker_dev_tools.structured_tool_hint_for_r2 canonical_cmd_str)
+               (Worker_dev_tools.structured_tool_hint_for_r2_of_tokens parsed_cmd.argv)
                ~default:
                  "This gh command mutates state that gh itself cannot \
                   restore. Route through the appropriate structured \
@@ -1403,8 +1435,8 @@ let handle_keeper_shell
                      ])
              | Some allowed_orgs ->
                match
-                 Worker_dev_tools.validate_gh_command
-                   ~allowed_orgs canonical_cmd_str
+                 Worker_dev_tools.validate_gh_command_of_tokens
+                   ~allowed_orgs parsed_cmd.argv
                with
                | Error reason ->
                  Yojson.Safe.to_string

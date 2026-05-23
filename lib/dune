@@ -277,6 +277,7 @@
   keeper_memory_recall
   keeper_status_bridge
   keeper_runtime_trust_timeline
+  keeper_hooks_oas_gate_attempt
   keeper_hooks_oas_output_json
   keeper_hooks_oas_response_metrics
   keeper_hooks_oas_cost_events
@@ -285,10 +286,7 @@
   keeper_tools_oas_markers
   keeper_tools_oas_workflow
   keeper_tools_oas_deterministic_error
-  keeper_tools_oas_handler_telemetry
-  keeper_tools_oas_handler_exec
   keeper_tools_oas_handler
-  keeper_tools_oas_bundle
   keeper_sandbox
   keeper_sandbox_control
   keeper_alerting_path

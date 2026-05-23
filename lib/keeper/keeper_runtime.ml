@@ -361,7 +361,7 @@ let ensure_keeper_meta config name =
        register as a semantic change. *)
     let cascade_changed =
       Keeper_cascade_profile.normalize_declared_name (cascade_name_of_meta meta)
-      <> Cascade_name.to_string resolved_target_cascade_name
+      <> resolved_target_cascade_name
     in
     (* #10061: persisted state vs TOML source can differ by a single
        trailing newline when OCaml string literals round-trip through
@@ -491,7 +491,7 @@ let ensure_keeper_meta config name =
         cascade_ref =
           if cascade_changed then
             Some Cascade_ref.{
-              group = Cascade_name.to_string resolved_target_cascade_name;
+              group = resolved_target_cascade_name;
               item = None;
             }
           else meta.cascade_ref;

@@ -89,16 +89,6 @@ let test_transition_actions_cover_tla_next () =
     ~from_state:F.Cascade_routing
     ~to_state:
       (F.Failed (F.Failure_cascade_unavailable { base = "ollama"; resolved = None }));
-  check_action
-    F.LivelockBlocked
-    ~from_state:F.Cascade_routing
-    ~to_state:
-      (F.Failed (F.Failure_turn_livelock_blocked { reason = "cycle_cap" }));
-  check_action
-    F.ProviderError
-    ~from_state:F.Cascade_routing
-    ~to_state:
-      (F.Failed (F.Failure_provider_error { kind = "openai"; detail = "rate_limit" }));
   check_action F.ProviderResponded ~from_state:F.Awaiting_provider ~to_state:F.Streaming;
   check_action
     F.ProviderTimeout
@@ -107,25 +97,6 @@ let test_transition_actions_cover_tla_next () =
   check_action F.StreamYieldsTool ~from_state:F.Streaming ~to_state:F.Awaiting_tool_result;
   check_action F.ToolReturned ~from_state:F.Awaiting_tool_result ~to_state:F.Streaming;
   check_action F.StreamComplete ~from_state:F.Streaming ~to_state:F.Completing;
-  check_action
-    F.ContractViolation
-    ~from_state:F.Streaming
-    ~to_state:
-      (F.Failed (F.Failure_tool_contract_violation { reason_code = "require_tool_use" }));
-  check_action
-    F.ReceiptLost
-    ~from_state:F.Streaming
-    ~to_state:
-      (F.Failed (F.Failure_receipt_lost { primary_error = "io"; fallback_path = None }));
-  check_action
-    F.ProviderError
-    ~from_state:F.Streaming
-    ~to_state:
-      (F.Failed (F.Failure_provider_error { kind = "openai"; detail = "rate_limit" }));
-  check_action
-    F.ProviderTimeout
-    ~from_state:F.Streaming
-    ~to_state:(F.Cancelled F.Cancelled_provider_timeout);
   check_action F.ContractOk ~from_state:F.Completing ~to_state:F.Done;
   check_action
     F.ContractViolation

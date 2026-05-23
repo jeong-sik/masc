@@ -13,9 +13,6 @@ let has_strict_shell_metachar cmd =
       | _ -> false)
     cmd
 
-(* RFC-0160 S6: private [shell_word_values] removed. Callers now route
-   through {!Exec_policy.stage_words_of_string} (single SSOT). *)
-
 (** Top-level gh CLI commands allowed. Commands not in this list are
     rejected at the allowlist gate. *)
 let gh_allowed_commands =
@@ -105,8 +102,7 @@ let gh_graphql_r2_mutations =
     "removeouterfromorganization"; "transferrepository";
     "archiverepository" ]
 
-let extract_gh_api_method cmd =
-  let tokens = Exec_policy.stage_words_of_string cmd in
+let extract_gh_api_method_of_tokens tokens =
   let rec find = function
     | [] -> "GET"
     | "-X" :: m :: _ | "--method" :: m :: _ -> String.uppercase_ascii m
@@ -146,8 +142,7 @@ let gh_blocked_operations =
 
     Only the owner segment is returned; repo/branch names are outside
     the allowlist scope. *)
-let extract_gh_repo_owner cmd =
-  let tokens = Exec_policy.stage_words_of_string cmd in
+let extract_gh_repo_owner_of_tokens tokens =
   let owner_of_slug s =
     match String.split_on_char '/' s with
     | owner :: _ :: _ when owner <> "" -> Some owner
@@ -171,8 +166,7 @@ let extract_gh_repo_owner cmd =
     for the subcommand, preventing bypass via flag insertion.
     Example: "pr view 123" -> (Some "pr", Some "view")
     Example: "workflow --repo o/r disable" -> (Some "workflow", Some "disable") *)
-let extract_gh_command_pair cmd =
-  let parts = Exec_policy.stage_words_of_string cmd in
+let extract_gh_command_pair_of_tokens parts =
   match parts with
   | [] -> (None, None)
   | [ x ] -> (Some x, None)
@@ -187,36 +181,23 @@ let extract_gh_command_pair cmd =
     in
     (Some x, find_subcmd rest)
 
-(** Validate a gh CLI command string for safety.
+(** Validate a gh CLI command token list for safety.
     Checks in order:
-      (1) shell metacharacters,
+      (1) shell metacharacters — delegated to caller (trim before tokenising),
       (2) top-level command allowlist,
       (3) blocked (command, subcommand) operation pairs,
       (4) [--repo OWNER/NAME] owner against [allowed_orgs] (if non-empty).
 
-    Check 4 is skipped when [allowed_orgs] is [] (policy not configured)
-    or when the command carries no [--repo] flag (gh falls back to
-    cwd's origin, which is already gated at clone time).
-
-    [cmd] is the portion after "gh ", e.g. "pr view 123". *)
-let validate_gh_command ?(allowed_orgs = []) cmd =
-  let trimmed = String.trim cmd in
-  if trimmed = "" then Error "gh command must not be empty"
-  else if has_strict_shell_metachar trimmed then
-    Error
-      "Blocked: chaining/redirect in gh command. Use a single subcommand. \
-       Good: cmd='pr list --state open'. Bad: cmd='pr list && echo done'."
+    [tokens] is the word list after stripping the leading "gh" literal,
+    e.g. ["pr"; "view"; "123"]. *)
+let validate_gh_command_of_tokens ?(allowed_orgs = []) tokens =
+  if tokens = [] then Error "gh command must not be empty"
   else
-    match extract_gh_command_pair trimmed with
+    match extract_gh_command_pair_of_tokens tokens with
     | (None, _) -> Error "gh command must not be empty"
     | (Some command, subcmd) ->
       let command = String.lowercase_ascii command in
       if not (List.mem command gh_allowed_commands) then
-        (* #10561: inline the allowed list so the LLM sees valid alternatives
-           on the same retry instead of random-guessing into the next
-           [gh_command_blocked] error.  Same pattern as
-           [path_not_found_under_allowed_roots] which surfaces roots=[...].
-           Memory: feedback_tool-error-messages-teach-llm. *)
         Error
           (Printf.sprintf
              "gh command blocked: '%s' is not in the approved command list (allowed=[%s])"
@@ -232,7 +213,7 @@ let validate_gh_command ?(allowed_orgs = []) cmd =
           Error
             (Printf.sprintf "gh %s %s is blocked for safety" command sub)
         else
-          match allowed_orgs, extract_gh_repo_owner trimmed with
+          match allowed_orgs, extract_gh_repo_owner_of_tokens tokens with
           | [], _ | _, None -> Ok ()
           | orgs, Some owner when List.mem owner orgs -> Ok ()
           | orgs, Some owner ->
@@ -295,13 +276,11 @@ let has_mutating_http_method parts =
          flags to POST) → R1
       4. top command + subcommand in [gh_reversible_mutations] → R1
       5. anything else → R0 (read-only default) *)
-let classify_gh_reversibility cmd =
-  (* RFC-0160 S1 regression: Bash.parse_string rejects { } in graphql
-     query strings, so extract_gh_command_pair returns (None,_).
-     Short-circuit graphql classification before parser-dependent path. *)
+let classify_gh_reversibility_of_tokens tokens =
+  let cmd = String.concat " " tokens in
   if gh_api_graphql_is_destructive cmd then R2_Irreversible
-  else 
-  match extract_gh_command_pair cmd with
+  else
+  match extract_gh_command_pair_of_tokens tokens with
   | (None, _) -> R0_Read
   | (Some command, subcmd_opt) ->
     let command = String.lowercase_ascii command in
@@ -315,24 +294,24 @@ let classify_gh_reversibility cmd =
     in
     if in_table gh_irreversible_ops then R2_Irreversible
     else if command = "api" then begin
-      let method_ = extract_gh_api_method cmd in
-      let parts = Exec_policy.stage_words_of_string cmd in
+      let method_ = extract_gh_api_method_of_tokens tokens in
       if method_ = "DELETE" then R2_Irreversible
       else if gh_api_graphql_is_destructive cmd then R2_Irreversible
       else if List.mem method_ ["POST"; "PUT"; "PATCH"] then R1_Reversible
-      else if has_mutating_http_method parts then R1_Reversible
+      else if has_mutating_http_method tokens then R1_Reversible
       else R0_Read
     end
     else if in_table gh_reversible_mutations then R1_Reversible
     else R0_Read
+
 
 (** Suggested next-action hint for a rejected R2 command.
     Returned in the gate response so small LLMs can self-recover
     without a second operator turn. Conservative: only returns a hint
     when the mapping is obvious; otherwise None → caller falls back
     to a generic message. *)
-let structured_tool_hint_for_r2 cmd =
-  match extract_gh_command_pair cmd with
+let structured_tool_hint_for_r2_of_tokens tokens =
+  match extract_gh_command_pair_of_tokens tokens with
   | (Some "pr", Some ("merge" | "ready")) ->
     Some "Do not use generic gh for PR ready/merge on agent PRs. \
           Use the environment-gated Approve Agent PR workflow after \
@@ -355,24 +334,25 @@ let structured_tool_hint_for_r2 cmd =
   | _ ->
     None
 
+
 (** Filter out flag-like tokens, keeping only positional args.
     Handles boolean flag bypass (e.g. "workflow -q delete"). *)
 let positional_tokens parts =
   List.filter (fun s -> String.length s = 0 || s.[0] <> '-') parts
 
 (** Shared tokenizer for destructive-operation checks. *)
-let gh_op_parts cmd =
-  Exec_policy.stage_words_of_string cmd |> List.map String.lowercase_ascii
+let gh_op_parts_of_tokens tokens =
+  List.map String.lowercase_ascii tokens
+
 
 let has_positional_subcmd subcmds rest =
   let positionals = positional_tokens rest in
   List.exists (fun s -> List.mem s subcmds) positionals
 
-(** Check if a gh command is a normal workflow mutation (merge, close).
+(** Check if a gh command token list is a normal workflow mutation (merge, close).
     These are legitimate for coding-preset keepers but should still be
     gated for lower-privilege presets. *)
-let is_gh_workflow_operation cmd =
-  let parts = gh_op_parts cmd in
+let is_gh_workflow_operation_of_tokens parts =
   match parts with
   | "pr" :: rest -> has_positional_subcmd [ "merge"; "close" ] rest
   | "issue" :: rest -> has_positional_subcmd [ "close" ] rest
@@ -384,15 +364,20 @@ let is_gh_workflow_operation cmd =
          [ "/merge"; "/merges"; "state=closed"; "state=\"closed\""; "state='closed'" ]
   | _ -> false
 
+let is_gh_workflow_operation cmd =
+  is_gh_workflow_operation_of_tokens (gh_op_parts cmd)
+
 (** Check if a gh command is specifically [gh pr merge]. *)
-let is_gh_pr_merge cmd =
-  let parts = gh_op_parts cmd in
+let is_gh_pr_merge_of_tokens parts =
   match parts with
   | "pr" :: rest -> has_positional_subcmd [ "merge" ] rest
   | _ -> false
 
-let gh_raw_parts cmd =
-  Exec_policy.stage_words_of_string cmd
+let is_gh_pr_merge cmd =
+  is_gh_pr_merge_of_tokens (gh_op_parts cmd)
+
+let gh_raw_parts_of_tokens tokens = tokens
+
 
 let gh_option_takes_value tok =
   let tok = String.lowercase_ascii tok in
@@ -408,8 +393,7 @@ let gh_option_takes_value tok =
 (** Return the explicit target passed to [gh pr merge], if any.
     Supports numeric PR ids, branch names, and PR URLs. Returns [None]
     when the merge command targets the current branch's PR. *)
-let gh_pr_merge_target cmd =
-  let raw_parts = gh_raw_parts cmd in
+let gh_pr_merge_target_of_tokens raw_parts =
   let lower_parts = List.map String.lowercase_ascii raw_parts in
   let rec drop_until_merge raw lower =
     match raw, lower with
@@ -442,10 +426,12 @@ let gh_pr_merge_target cmd =
       | None -> None)
   | _ -> None
 
-(** Check if a gh command is a dangerous irreversible operation (delete,
+let gh_pr_merge_target cmd =
+  gh_pr_merge_target_of_tokens (gh_raw_parts cmd)
+
+(** Check if a gh command token list is a dangerous irreversible operation (delete,
     archive, transfer). Always gated regardless of preset. *)
-let is_gh_dangerous_operation cmd =
-  let parts = gh_op_parts cmd in
+let is_gh_dangerous_operation_of_tokens parts =
   match parts with
   | "issue" :: rest -> has_positional_subcmd [ "delete"; "transfer" ] rest
   | "release" :: rest -> has_positional_subcmd [ "delete" ] rest
@@ -463,8 +449,15 @@ let is_gh_dangerous_operation cmd =
              gh_graphql_destructive_mutations)
   | _ -> false
 
+let is_gh_dangerous_operation cmd =
+  is_gh_dangerous_operation_of_tokens (gh_op_parts cmd)
+
 (** Combined check: returns [true] for any destructive mutation.
     Use [is_gh_dangerous_operation] for always-gated ops, or
     [is_gh_workflow_operation] for preset-dependent gating. *)
 let is_gh_destructive_operation cmd =
   is_gh_workflow_operation cmd || is_gh_dangerous_operation cmd
+
+let is_gh_destructive_operation_of_tokens tokens =
+  is_gh_workflow_operation_of_tokens tokens
+  || is_gh_dangerous_operation_of_tokens tokens

@@ -612,7 +612,7 @@ let max_output_tokens_ceiling_of_cascade_name cascade_name =
           let raw_name = cascade_name_to_string cascade_name in
           let resolved_name =
             match Cascade_catalog_runtime.resolve_declared_name ~raw_name () with
-            | Ok resolved -> Some (Cascade_name.to_string resolved)
+            | Ok resolved -> Some resolved
             | Error _ -> None
           in
           [ resolved_name; declarative_route_target cfg raw_name; Some raw_name ]

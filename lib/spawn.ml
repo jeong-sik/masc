@@ -24,7 +24,8 @@ type prompt_flag =
 (** Spawn configuration for an agent *)
 type spawn_config = {
   agent_name: string;
-  command: string;       (* e.g., "claude -p", "gemini", "codex" *)
+  command_argv: string list;
+    (** Pre-split argv for direct execution. No shell parsing needed. *)
   timeout_seconds: int;
   working_dir: string option;
   mcp_tools: string list;  (* MCP tools to allow, e.g., ["mcp__masc__masc_status"] *)
@@ -163,7 +164,7 @@ let spawn_config_of_key key =
   | "claude" ->
       Some {
         agent_name = "claude";
-        command = "claude --output-format json -p";
+        command_argv = ["claude"; "--output-format"; "json"; "-p"];
         timeout_seconds;
         working_dir = None;
         mcp_tools = masc_mcp_tools;
@@ -174,7 +175,7 @@ let spawn_config_of_key key =
   | "gemini" ->
       Some {
         agent_name = "gemini";
-        command = "gemini --output-format json";
+        command_argv = ["gemini"; "--output-format"; "json"];
         timeout_seconds;
         working_dir = None;
         mcp_tools = masc_mcp_tools;
@@ -185,7 +186,7 @@ let spawn_config_of_key key =
   | "codex" ->
       Some {
         agent_name = "codex";
-        command = "codex exec";
+        command_argv = ["codex"; "exec"];
         timeout_seconds;
         working_dir = None;
         mcp_tools = masc_mcp_tools;
@@ -196,7 +197,7 @@ let spawn_config_of_key key =
   | "llama" ->
       Some {
         agent_name = "llama";
-        command = Provider_runtime_projection.local_model_label "explicit-model-required";
+        command_argv = [Provider_runtime_projection.local_model_label "explicit-model-required"];
         timeout_seconds;
         working_dir = None;
         mcp_tools = masc_mcp_tools;
@@ -247,30 +248,6 @@ let build_prompt_args agent_name prompt =
   | Some config -> build_prompt_args_from_config config prompt
   | None -> []
 
-(** Parse a simple command string into executable and arguments.
-    Spawn is direct argv execution, so shell pipelines/redirects/env
-    prefixes are rejected instead of being flattened into argv. *)
-let parse_command cmd =
-  let collect_lit_args args =
-    let rec loop acc = function
-      | [] -> Some (List.rev acc)
-      | Masc_exec.Shell_ir.Lit (arg, _) :: rest -> loop (arg :: acc) rest
-      | Masc_exec.Shell_ir.Concat _ :: _
-      | Masc_exec.Shell_ir.Var (_, _) :: _ -> None
-    in
-    loop [] args
-  in
-  match Masc_exec_bash_parser.Bash.parse_string cmd with
-  | Masc_exec.Parsed.Parsed (Masc_exec.Shell_ir.Simple simple)
-    when simple.env = [] && simple.cwd = None && simple.redirects = [] ->
-    (match collect_lit_args simple.args with
-     | Some args -> Masc_exec.Bin.to_string simple.bin :: args
-     | None -> [])
-  | Masc_exec.Parsed.Parsed _
-  | Masc_exec.Parsed.Parse_error _
-  | Masc_exec.Parsed.Parse_aborted _
-  | Masc_exec.Parsed.Too_complex _ -> []
-
 let fallback_spawn_failure_output ~exit_code =
   Printf.sprintf
     "spawned agent exited with code %d without any stdout/stderr output"
@@ -307,7 +284,7 @@ let spawn ~agent_name ~prompt ?timeout_seconds ?working_dir () =
     | Some c -> c
     | None -> {
         agent_name;
-        command = agent_name;
+        command_argv = [agent_name];
         timeout_seconds = Option.value timeout_seconds ~default:Env_config.Spawn.timeout_seconds;
         working_dir;
         mcp_tools = [];
@@ -324,7 +301,7 @@ let spawn ~agent_name ~prompt ?timeout_seconds ?working_dir () =
   let prompt_args = build_prompt_args agent_name augmented_prompt in
 
   (* Build command args - direct execution without shell *)
-  let base_args = parse_command config.command |> add_default_model_arg agent_name in
+  let base_args = config.command_argv |> add_default_model_arg agent_name in
   if base_args = [] then
     {
       success = false;

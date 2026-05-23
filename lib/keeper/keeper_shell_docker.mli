@@ -82,19 +82,16 @@ val ensure_keeper_sandbox_runtime :
 (** Direct alias of [Keeper_sandbox_runtime.ensure_keeper_sandbox_runtime];
     returns the [--security-opt seccomp=...] argv fragment on success. *)
 
-(** [#10855] LLM hallucinated [gh --repo X api Y] (108 events / 24h).
-    Returns [Some (repo_arg, endpoint)] when the misuse pattern is
-    detected, [None] otherwise — caller emits a self-correcting
-    error pre-exec. *)
-(** Emit a [("gh_exit_class", ...)] JSON field when [cmd] targets
-    gh (otherwise []), and bump the matching [Legendary_counters]
-    bucket. Caller appends the returned list to its assoc payload
-    unconditionally — the empty case keeps callsite shapes stable. *)
+val stages_targets_gh :
+  Keeper_shell_command_semantics.parsed_stage list -> bool
+(** [true] when any effective stage's executable is [gh].
+    Callers pre-parse with [Shell_command_gate.parse_to_ir_opt]
+    and pass [effective_stages_of_ir]. *)
+
 val gh_exit_class_field :
-  cmd:string ->
+  stages:Keeper_shell_command_semantics.parsed_stage list ->
   status:Unix.process_status ->
   output:string ->
-  cmd_stages:Keeper_shell_command_semantics.parsed_stage list ->
   (string * Yojson.Safe.t) list
 
 (** [-v <host>:<container>:ro] mount list, or [[]] when [host] is

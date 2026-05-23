@@ -240,6 +240,16 @@ val effective_sandbox_profile :
   Keeper_types.sandbox_profile * Keeper_types.network_mode
 (** Alias of {!Keeper_shell_docker.effective_sandbox_profile}. *)
 
+val stages_targets_git_or_gh :
+  Keeper_shell_command_semantics.parsed_stage list -> bool
+(** [true] when any effective stage's executable is [git] or [gh].
+    Callers pre-parse with [Shell_command_gate.parse_to_ir_opt]
+    and pass [effective_stages_of_ir]. *)
+
+val stages_targets_gh :
+  Keeper_shell_command_semantics.parsed_stage list -> bool
+(** [true] when any effective stage's executable is [gh]. *)
+
 val ensure_keeper_sandbox_runtime :
   timeout_sec:float -> (string list, string) result
 (** Alias of {!Keeper_shell_docker.ensure_keeper_sandbox_runtime}. *)

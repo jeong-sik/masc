@@ -14,7 +14,7 @@ open Tool_args
     init time. See issue #14624. *)
 let default_cascade_name () =
   match Cascade_catalog_runtime.resolve_declared_name ~raw_name:"" () with
-  | Ok name -> Cascade_name.to_string name
+  | Ok name -> name
   | Error _ ->
     Keeper_cascade_profile.cascade_name_for_use
       Keeper_cascade_profile.Keeper_turn

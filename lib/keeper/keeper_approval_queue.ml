@@ -707,9 +707,9 @@ let normalized_input_hash (input : Yojson.Safe.t) =
 ;;
 
 let first_cmd_token (cmd : string) =
-  match Exec_policy_mutation_classifier.stage_words_of_string cmd with
-  | token :: _ -> Some token
-  | [] -> None
+  match Masc_exec_bash_parser.Bash_words.stages cmd with
+  | Ok ((token :: _) :: _) -> Some token.Masc_exec_bash_parser.Bash_words.value
+  | Ok ([] :: _) | Ok [] | Error _ -> None
 ;;
 
 module For_testing = struct

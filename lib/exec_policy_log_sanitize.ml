@@ -78,10 +78,23 @@ let sanitize_parts parts =
 ;;
 
 let sanitize_command_for_log cmd =
-  match Exec_policy_mutation_classifier.stage_words_of_string_result cmd with
-  | Ok parts -> sanitize_parts parts
-  | Error () when command_has_sensitive_marker cmd -> "[REDACTED]"
-  | Error () -> cmd |> redact_url_credentials |> redact_inline_secret_assignment
+  let parts =
+    match Masc_exec_command_gate.Shell_command_gate.parse_to_ir_opt cmd with
+    | Some ir -> Keeper_shell_command_semantics.flat_stage_words ir
+    | None -> []
+  in
+  if parts <> []
+  then sanitize_parts parts
+  else if command_has_sensitive_marker cmd
+  then "[REDACTED]"
+  else cmd |> redact_url_credentials |> redact_inline_secret_assignment
+;;
+
+let sanitize_command_for_log_of_ir ~fallback_cmd ir =
+  let parts = Keeper_shell_command_semantics.flat_stage_words ir in
+  if parts = []
+  then sanitize_command_for_log fallback_cmd
+  else sanitize_parts parts
 ;;
 
 let truncate_for_log ?(max_len = 240) s =

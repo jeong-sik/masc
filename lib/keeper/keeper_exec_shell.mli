@@ -61,6 +61,12 @@ val rewrite_docker_host_paths_to_container :
     commands to the corresponding in-container playground root before
     execution. *)
 
+val stages_targets_git_or_gh :
+  Keeper_shell_command_semantics.parsed_stage list -> bool
+(** [true] when any effective stage's executable is [git] or [gh].
+    Callers pre-parse with [Shell_command_gate.parse_to_ir_opt]
+    and pass [effective_stages_of_ir]. Exposed for unit testing. *)
+
 val handle_keeper_bash :
   turn_sandbox_factory:Keeper_sandbox_factory.t option ->
   turn_sandbox_factory_git:Keeper_sandbox_factory.t option ->

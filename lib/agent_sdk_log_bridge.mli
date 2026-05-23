@@ -14,3 +14,12 @@ val install : unit -> unit
     once before any keeper turn fires an LLM call.  Idempotent via an
     internal [Atomic.t] latch, so re-entering bootstrap (test harness,
     in-process restart) is safe. *)
+
+val render_record_message : Agent_sdk.Log.record -> string
+(** Format an OAS [Log.record] into a human-readable single-line message;
+    exposed for test/test_masc_log.ml golden assertions. *)
+
+val effective_level : Agent_sdk.Log.record -> Log.level
+(** Determine the effective [Log.level] for a record after promotion
+    rules (e.g. WARN→ERROR for known classifiers). Exposed for tests
+    that pin the promotion policy. *)

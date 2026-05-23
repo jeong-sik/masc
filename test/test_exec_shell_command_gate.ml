@@ -26,7 +26,7 @@ let allowed = [ "rg"; "sort"; "head"; "wc"; "cat"; "git"; "ls"; "grep" ]
 let gate_from_raw ?caller ~raw ~allowlist ~path_policy ~sandbox () =
   match Masc_exec_bash_parser.Bash.parse_string raw with
   | PD.Parsed ir ->
-    gate_from_raw_typed ?caller ~ir ~allowlist ~path_policy ~sandbox ()
+    Gate.gate_typed ?caller ~ir ~allowlist ~path_policy ~sandbox ()
   | PD.Parse_error _ ->
     Gate.Cannot_parse { reason = Gate.Parse_error }
   | PD.Parse_aborted reason ->

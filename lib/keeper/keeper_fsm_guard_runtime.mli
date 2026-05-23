@@ -24,3 +24,12 @@
 
 val wrap_unit : action:string -> stage:string -> (unit -> unit) -> unit
 
+val refresh_policy_for_test : unit -> unit
+(** No-op placeholder kept so test fixtures that drove the older
+    file-poll policy keep their call shape. Future tests should
+    drive the policy explicitly through the runtime config surface. *)
+
+val assert_mode_for_test : unit -> bool
+(** Always [true] — placeholder kept so test fixtures that drove the
+    older assert-mode toggle keep their call shape. *)
+

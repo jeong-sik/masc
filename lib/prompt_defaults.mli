@@ -36,3 +36,8 @@ val bootstrap_runtime :
     is propagated; any other exception during override restore
     is logged via [Log.Misc.error] and swallowed so a corrupt
     override file cannot bring the boot path down. *)
+
+val init : unit -> unit
+(** Install prompt registry observers and load prompts from the
+    currently-registered markdown directory. Live callers:
+    test/test_prompt_registry_defaults.ml, test_keeper_prompt_external.ml. *)

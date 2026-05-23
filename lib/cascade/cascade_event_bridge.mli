@@ -21,6 +21,16 @@ val start :
   bus:Agent_sdk.Event_bus.t ->
   unit
 
+val start_with_interval :
+  drain_interval_s:float ->
+  sw:Eio.Switch.t ->
+  clock:_ Eio.Time.clock ->
+  config:Coord.config ->
+  bus:Agent_sdk.Event_bus.t ->
+  unit
+(** Variant of [start] that takes an explicit drain interval, for tests
+    that need to pin the polling cadence. *)
+
 (** Serialize a single OAS event to SSE JSON.
     Exposed for unit testing. *)
 val native_event_to_json : Agent_sdk.Event_bus.event -> Yojson.Safe.t option

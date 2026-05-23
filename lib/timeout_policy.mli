@@ -47,7 +47,16 @@ module Deadline : sig
     -> t
 
   val elapsed : t -> now:float -> float
+
+  val remaining : t -> now:float -> float
+  (** [wall_cap_s -. elapsed t ~now] — remaining wall-clock budget;
+      may be negative when the deadline has passed. *)
 end
+
+(** Prometheus metric name string used by {!overshoot_warn} to register
+    the deadline-overshoot counter. Re-exported here so tests can pin
+    the metric name and label set against the public registry surface. *)
+val metric_overshoot_total : string
 
 val overshoot_warn
   :  ?slack_s:float

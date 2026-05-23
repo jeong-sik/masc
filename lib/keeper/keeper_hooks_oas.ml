@@ -21,6 +21,16 @@
     [context_max_of_telemetry]. *)
 include Keeper_hooks_oas_types
 
+(* Compatibility re-exports for tests that took an alias on
+   [Keeper_hooks_oas] before PR #18010 moved these helpers to
+   [Keeper_hooks_oas_gate_attempt]. New code should call the qualified
+   module directly. *)
+let trajectory_duration_ms =
+  Keeper_hooks_oas_gate_attempt.trajectory_duration_ms
+
+let render_pre_tool_gate_output =
+  Keeper_hooks_oas_gate_attempt.render_pre_tool_gate_output
+
 (** Keeper deny list — derived from Tool_catalog surface SSOT.
     Administrative/destructive operations that should only be invoked
     by operators or through controlled workflows.

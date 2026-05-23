@@ -26,3 +26,11 @@ val detect :
 
     Returns [Error "no Unix FD available on this socket"] when
     the flow has no Unix FD (e.g. an in-memory transport). *)
+
+val detect_from_fd :
+  Unix.file_descr -> (protocol, string) result
+(** Raw [Unix.file_descr] entry point used by {!detect}; exposed for
+    test/test_http_protocol_detect.ml. *)
+
+val protocol_to_string : protocol -> string
+(** ["HTTP/1.1"] or ["HTTP/2"]. *)

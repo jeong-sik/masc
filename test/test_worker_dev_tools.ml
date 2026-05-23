@@ -3,6 +3,7 @@
 
 open Agent_sdk
 open Masc_mcp
+module Parsed = Masc_exec.Parsed
 
 (* Helper: find tool by name from tool list *)
 let find_tool name tools =
@@ -1011,12 +1012,13 @@ let () =
         | Error _ -> ()
         | Ok () -> Alcotest.fail "should reject command outside custom allowlist");
     ];
-    "is_destructive_bash_operation", [
+    "is_destructive_bash_operation", (
       let is_destructive cmd =
         match Masc_exec_bash_parser.Bash.parse_string cmd with
         | Parsed.Parsed ir -> Worker_dev_tools.is_destructive_bash_operation ir
         | _ -> false
       in
+      [
       Alcotest.test_case "blocks force push" `Quick (fun () ->
         Alcotest.(check bool) "force push" true
           (is_destructive "git push --force"));
@@ -1071,7 +1073,7 @@ let () =
       Alcotest.test_case "allows git commit" `Quick (fun () ->
         Alcotest.(check bool) "git commit" false
           (is_destructive "git commit -m 'fix'"));
-    ];
+    ]);
     "gh_pr_merge_target", [
       Alcotest.test_case "extracts numeric pr id" `Quick (fun () ->
         Alcotest.(check (option string)) "numeric target" (Some "5934")

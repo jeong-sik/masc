@@ -13,6 +13,7 @@ module Keeper_sandbox = Masc_mcp.Keeper_sandbox
 module Keeper_shell_docker = Masc_mcp.Keeper_shell_docker
 module Keeper_types = Masc_mcp.Keeper_types
 module Json = Yojson.Safe.Util
+module Parsed = Masc_exec.Parsed
 
 let validate = Masc_mcp.Worker_dev_tools.validate_command
 

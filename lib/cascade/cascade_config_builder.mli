@@ -38,3 +38,22 @@ val with_codex_cli_preflight :
   (unit -> ('a, Agent_sdk.Error.sdk_error) result) ->
   ('a, Agent_sdk.Error.sdk_error) result
 (** Wrap an execution with a codex_cli preflight check. *)
+
+type codex_cli_prompt_preflight = {
+  prompt_bytes : int;
+  prompt_tokens : int;
+  context_window_tokens : int;
+  retry_limit_tokens : int;
+  hits_argv_limit : bool;
+  hits_context_window : bool;
+}
+(** Pre-flight measurement of a codex_cli prompt: rendered byte/token
+    size and whether it hits adapter-supplied argv / context-window
+    limits. *)
+
+val codex_cli_prompt_preflight :
+  config:Cascade_runner.config ->
+  goal:string ->
+  codex_cli_prompt_preflight option
+(** Direct accessor for the prepared codex_cli preflight payload.
+    Exposed for test/test_oas_worker.ml argv-budget assertions. *)

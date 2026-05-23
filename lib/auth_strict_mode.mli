@@ -30,3 +30,8 @@ val to_label : t -> string
 (** [to_label Off = "off"], [Dry_run = "dry_run"], [Strict = "strict"].
     Used as the Prometheus [mode] label so operators can break down
     [masc_auth_strict_would_reject_total] by mode. *)
+
+val of_string : string -> t
+(** Parse a string into an Auth strict mode value. Falls back to
+    [Dry_run] for unknown / missing values (same behaviour as
+    [current]). Live caller: test/test_auth_strict_mode.ml. *)

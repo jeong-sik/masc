@@ -10,3 +10,7 @@
 val broadcast_keeper_telemetry :
   keeper_name:string -> trace_id:string -> turn_index:int -> model_id:string -> unit
 
+val frame_update : string -> string
+(** Wrap [payload] in a Yjs frame envelope (type byte + payload). Live
+    caller: test/test_dashboard_yjs.ml asserts frame shape. *)
+

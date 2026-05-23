@@ -23,3 +23,12 @@ val count_difference
   -> present:('a -> 'b option)
   -> absent:('a -> 'b option)
   -> int
+
+val of_list_with : ('a -> 'b) -> 'a list -> ('b, unit) Hashtbl.t
+(** [of_list_with key xs] is a Hashtbl-as-set keyed by [key x] for every
+    [x] in [xs]. Building block used by [count_difference] and by
+    test/test_set_util.ml fixtures. *)
+
+val count_distinct : ('a -> 'b option) -> 'a list -> int
+(** [count_distinct key xs] counts distinct [Some _] keys produced by
+    [key] over [xs]. *)

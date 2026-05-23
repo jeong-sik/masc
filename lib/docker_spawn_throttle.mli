@@ -33,3 +33,13 @@ val with_slot : (unit -> 'a) -> 'a
 
     Exceptions from [f] propagate; the slot is always released. *)
 
+val configured_max : unit -> int
+(** Configured upper bound on in-flight docker-spawn slots (delegates
+    to [Fd_accountant.configured_concurrency ~kind:Docker_spawn]).
+    Live caller: test/test_docker_spawn_throttle.ml. *)
+
+val effective_concurrency : unit -> int
+(** Effective in-flight docker-spawn concurrency
+    ([Fd_accountant.effective_concurrency ~kind:Docker_spawn]).
+    Live caller: test/test_docker_spawn_throttle.ml. *)
+

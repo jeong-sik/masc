@@ -28,6 +28,11 @@ const CRASH_PREFIX_MAP: ReadonlyArray<{ readonly prefix: string; readonly catego
 export function categorizeCrashReason(reason: string | null | undefined): CrashCategory {
   if (!reason) return 'other'
   const lower = reason.toLowerCase()
+  // Defensive exact-match: if backend emits the category name directly
+  // (e.g. "heartbeat" instead of "heartbeat_timeout"), prefer that
+  // over prefix heuristic so "heartbeat" does not collide with an
+  // unrelated longer prefix.
+  if (CRASH_CATEGORY_KEYS.includes(lower as CrashCategory)) return lower as CrashCategory
   for (const { prefix, category } of CRASH_PREFIX_MAP) {
     if (lower.startsWith(prefix)) return category
   }

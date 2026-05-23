@@ -186,7 +186,7 @@ function canonicalTerminalCode(code: string | null): string | null {
   return code
 }
 
-function canonicalTerminalSummary(code: string | null, summary: string | null | undefined): string | null {
+function canonicalTerminalSummary(_code: string | null, summary: string | null | undefined): string | null {
   return summary?.trim() || null
 }
 

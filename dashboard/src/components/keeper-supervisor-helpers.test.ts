@@ -15,6 +15,15 @@ describe('categorizeCrashReason', () => {
     expect(categorizeCrashReason('exception_unhandled')).toBe('exception')
   })
 
+  it('prefers exact match when backend emits category name directly', () => {
+    expect(categorizeCrashReason('heartbeat')).toBe('heartbeat')
+    expect(categorizeCrashReason('turn')).toBe('turn')
+    expect(categorizeCrashReason('fiber')).toBe('fiber')
+    expect(categorizeCrashReason('exception')).toBe('exception')
+    // 'other' is the fallback, not a real category to match
+    expect(categorizeCrashReason('other')).toBe('other')
+  })
+
   it('falls back to other for unknown / empty / nullish reasons', () => {
     expect(categorizeCrashReason('mystery')).toBe('other')
     expect(categorizeCrashReason('')).toBe('other')

@@ -55,6 +55,14 @@ let must_ok_argv label = function
   | Error e ->
     Alcotest.failf "%s: expected Ok, got Error %a" label parse_error_pp e
 
+(* RFC-0160 S2/S3 contract tests need the typed [gh_simple_command]
+   value (for risk_class + to_shell_ir).  [must_ok_argv] drops the
+   typed wrapper down to [string list]; this sibling keeps it. *)
+let must_ok_cmd label = function
+  | Ok cmd -> cmd
+  | Error e ->
+    Alcotest.failf "%s: expected Ok, got Error %a" label parse_error_pp e
+
 (* ---- parse_simple_gh_command ------------------------------------ *)
 
 let test_parse_empty () =
@@ -274,20 +282,20 @@ let test_render_round_trip_simple () =
 let risk_t = Alcotest.testable Masc_exec.Shell_ir_risk.pp_risk_class ( = )
 
 let test_risk_class_read_only () =
-  let cmd = must_ok_argv "pr list" (Gh.gh_simple_command_of_argv [ "pr"; "list" ]) in
+  let cmd = must_ok_cmd "pr list" (Gh.gh_simple_command_of_argv [ "pr"; "list" ]) in
   Alcotest.check risk_t "pr list is R0_Read"
     Masc_exec.Shell_ir_risk.R0_Read
     (Gh.gh_simple_command_risk_class cmd)
 
 let test_risk_class_api_get () =
-  let cmd = must_ok_argv "api repos" (Gh.gh_simple_command_of_argv [ "api"; "repos" ]) in
+  let cmd = must_ok_cmd "api repos" (Gh.gh_simple_command_of_argv [ "api"; "repos" ]) in
   Alcotest.check risk_t "api without method is GET -> R0_Read"
     Masc_exec.Shell_ir_risk.R0_Read
     (Gh.gh_simple_command_risk_class cmd)
 
 let test_risk_class_reversible_mutation () =
   let cmd =
-    must_ok_argv "pr create" (Gh.gh_simple_command_of_argv [ "pr"; "create" ])
+    must_ok_cmd "pr create" (Gh.gh_simple_command_of_argv [ "pr"; "create" ])
   in
   Alcotest.check risk_t "pr create is R1_Reversible_mutation"
     Masc_exec.Shell_ir_risk.R1_Reversible_mutation
@@ -295,7 +303,7 @@ let test_risk_class_reversible_mutation () =
 
 let test_risk_class_api_post () =
   let cmd =
-    must_ok_argv "api POST"
+    must_ok_cmd "api POST"
       (Gh.gh_simple_command_of_argv [ "api"; "--method=POST"; "repos" ])
   in
   Alcotest.check risk_t "api POST is R1_Reversible_mutation"
@@ -304,7 +312,7 @@ let test_risk_class_api_post () =
 
 let test_risk_class_api_graphql () =
   let cmd =
-    must_ok_argv "api graphql"
+    must_ok_cmd "api graphql"
       (Gh.gh_simple_command_of_argv [ "api"; "graphql" ])
   in
   Alcotest.check risk_t "api graphql is R1_Reversible_mutation"
@@ -313,7 +321,7 @@ let test_risk_class_api_graphql () =
 
 let test_risk_class_irreversible () =
   let cmd =
-    must_ok_argv "repo delete" (Gh.gh_simple_command_of_argv [ "repo"; "delete" ])
+    must_ok_cmd "repo delete" (Gh.gh_simple_command_of_argv [ "repo"; "delete" ])
   in
   Alcotest.check risk_t "repo delete is R2_Irreversible"
     Masc_exec.Shell_ir_risk.R2_Irreversible
@@ -321,7 +329,7 @@ let test_risk_class_irreversible () =
 
 let test_risk_class_api_delete () =
   let cmd =
-    must_ok_argv "api DELETE"
+    must_ok_cmd "api DELETE"
       (Gh.gh_simple_command_of_argv [ "api"; "--method=DELETE"; "repos" ])
   in
   Alcotest.check risk_t "api DELETE is R2_Irreversible"
@@ -331,7 +339,7 @@ let test_risk_class_api_delete () =
 (* ---- gh_simple_command_to_shell_ir (RFC-0160 S2) ---------------- *)
 
 let test_to_shell_ir_bin_is_gh () =
-  let cmd = must_ok_argv "pr list" (Gh.gh_simple_command_of_argv [ "pr"; "list" ]) in
+  let cmd = must_ok_cmd "pr list" (Gh.gh_simple_command_of_argv [ "pr"; "list" ]) in
   match Gh.gh_simple_command_to_shell_ir cmd with
   | Masc_exec.Shell_ir.Simple s ->
     Alcotest.(check bool) "bin is Gh" true
@@ -340,7 +348,7 @@ let test_to_shell_ir_bin_is_gh () =
     Alcotest.fail "expected Simple, got Pipeline"
 
 let test_to_shell_ir_args_are_lit () =
-  let cmd = must_ok_argv "pr list" (Gh.gh_simple_command_of_argv [ "pr"; "list" ]) in
+  let cmd = must_ok_cmd "pr list" (Gh.gh_simple_command_of_argv [ "pr"; "list" ]) in
   match Gh.gh_simple_command_to_shell_ir cmd with
   | Masc_exec.Shell_ir.Simple s ->
     let texts =
@@ -355,17 +363,23 @@ let test_to_shell_ir_args_are_lit () =
     Alcotest.fail "expected Simple, got Pipeline"
 
 let test_to_shell_ir_sandbox_passthrough () =
-  let cmd = must_ok_argv "pr list" (Gh.gh_simple_command_of_argv [ "pr"; "list" ]) in
-  let docker = Masc_exec.Sandbox_target.host () in
-  match Gh.gh_simple_command_to_shell_ir ~sandbox:docker cmd with
+  let cmd = must_ok_cmd "pr list" (Gh.gh_simple_command_of_argv [ "pr"; "list" ]) in
+  let host_sandbox = Masc_exec.Sandbox_target.host () in
+  match Gh.gh_simple_command_to_shell_ir ~sandbox:host_sandbox cmd with
   | Masc_exec.Shell_ir.Simple s ->
+    (* [Sandbox_target.t] has a Docker variant with [runner]/[pipeline_runner]
+       function fields, so structural / derived equality is not safe.
+       This test passes Host explicitly, so a constructor-shape check is
+       sufficient and avoids adding an ad-hoc equal helper to lib. *)
     Alcotest.(check bool) "sandbox passed through" true
-      (Masc_exec.Sandbox_target.equal s.sandbox docker)
+      (match s.sandbox with
+       | Masc_exec.Sandbox_target.Host -> true
+       | Masc_exec.Sandbox_target.Docker _ -> false)
   | Masc_exec.Shell_ir.Pipeline _ ->
     Alcotest.fail "expected Simple, got Pipeline"
 
 let test_to_shell_ir_cwd_passthrough () =
-  let cmd = must_ok_argv "pr list" (Gh.gh_simple_command_of_argv [ "pr"; "list" ]) in
+  let cmd = must_ok_cmd "pr list" (Gh.gh_simple_command_of_argv [ "pr"; "list" ]) in
   match Gh.gh_simple_command_to_shell_ir ~cwd:"/tmp" cmd with
   | Masc_exec.Shell_ir.Simple s ->
     (match s.cwd with
@@ -375,7 +389,7 @@ let test_to_shell_ir_cwd_passthrough () =
     Alcotest.fail "expected Simple, got Pipeline"
 
 let test_to_shell_ir_env_empty () =
-  let cmd = must_ok_argv "pr list" (Gh.gh_simple_command_of_argv [ "pr"; "list" ]) in
+  let cmd = must_ok_cmd "pr list" (Gh.gh_simple_command_of_argv [ "pr"; "list" ]) in
   match Gh.gh_simple_command_to_shell_ir cmd with
   | Masc_exec.Shell_ir.Simple s ->
     Alcotest.(check int) "env is empty" 0 (List.length s.env)

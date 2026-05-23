@@ -65,6 +65,12 @@ let h2_respond_removed_surface h2_reqd ~surface ~extra_headers =
   in
   h2_respond_json ~status:`Gone h2_reqd body ~extra_headers
 
+let error_json_string msg =
+  Yojson.Safe.to_string (`Assoc [ ("error", `String msg) ])
+
+let error_json_string_with_ok ?(ok = false) msg =
+  Yojson.Safe.to_string (`Assoc [ ("ok", `Bool ok); ("error", `String msg) ])
+
 let h2_read_body h2_reqd callback =
   let body = H2.Reqd.request_body h2_reqd in
   let buf = Buffer.create 4096 in

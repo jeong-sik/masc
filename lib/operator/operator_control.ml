@@ -190,6 +190,19 @@ let room_action_result request result =
     ("result", result);
   ])
 
+let keeper_name_args name = `Assoc [ ("name", `String name) ]
+
+let auth_status_json_of_result = function
+  | Some (Ok (status, output)) ->
+      `Assoc
+        [
+          ("status", Keeper_alerting_path.process_status_to_json status);
+          ("output", `String output);
+        ]
+  | Some (Error err) -> `Assoc [ ("error", `String err) ]
+  | None -> `Null
+;;
+
 let execute_room_action (ctx : 'a context) (request : action_request) =
   match request.action_type with
   | "broadcast" ->
@@ -279,17 +292,7 @@ let execute_room_action (ctx : 'a context) (request : action_request) =
         | Some (Ok (Unix.WEXITED 0, _output)) -> true
         | _ -> false
       in
-      let auth_status_json =
-        match auth_result with
-        | Some (Ok (status, output)) ->
-            `Assoc
-              [
-                ("status", Keeper_alerting_path.process_status_to_json status);
-                ("output", `String output);
-              ]
-        | Some (Error err) -> `Assoc [ ("error", `String err) ]
-        | None -> `Null
-      in
+      let auth_status_json = auth_status_json_of_result auth_result in
       room_action_result request
         (`Assoc
            [
@@ -369,11 +372,11 @@ let execute_keeper_action (ctx : 'a context) (request : action_request) =
       else
         let* down_result =
           dispatch_keeper_json ctx ~tool_name:"masc_keeper_down"
-            ~args:(`Assoc [ ("name", `String resolved_name) ])
+            ~args:(keeper_name_args resolved_name)
         in
         let* up_result =
           dispatch_keeper_json ctx ~tool_name:"masc_keeper_up"
-            ~args:(`Assoc [ ("name", `String resolved_name) ])
+            ~args:(keeper_name_args resolved_name)
         in
         let* after_diagnostic = keeper_diagnostic_for_name ctx ~name:resolved_name in
         let recovered, skipped_reason =

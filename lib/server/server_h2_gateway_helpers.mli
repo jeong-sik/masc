@@ -29,4 +29,8 @@ val h2_respond_empty :
 val h2_respond_removed_surface :
   H2.Reqd.t -> surface:string -> extra_headers:(string * string) list -> unit
 
+val error_json_string : string -> string
+
+val error_json_string_with_ok : ?ok:bool -> string -> string
+
 val h2_read_body : H2.Reqd.t -> (string -> unit) -> unit

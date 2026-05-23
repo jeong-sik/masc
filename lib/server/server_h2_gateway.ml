@@ -251,7 +251,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
                         h2_respond_json h2_reqd body ~extra_headers:cors
                     | Error msg ->
                         h2_respond_json h2_reqd
-                          (Yojson.Safe.to_string (`Assoc [ ("error", `String msg) ]))
+                          (error_json_string msg)
                           ~status:`Bad_request ~extra_headers:cors))
 
       | `POST, "/webrtc/answer" ->
@@ -280,7 +280,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
                         h2_respond_json h2_reqd body ~extra_headers:cors
                     | Error msg ->
                         h2_respond_json h2_reqd
-                          (Yojson.Safe.to_string (`Assoc [ ("error", `String msg) ]))
+                          (error_json_string msg)
                           ~status:`Bad_request ~extra_headers:cors))
 
       | `GET, "/metrics" ->
@@ -660,10 +660,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
                   let json = Yojson.Safe.from_string body_str in
                   match Anti_rationalization.parse_excuse_patterns_json json with
                   | Error msg ->
-                      let err_json =
-                        Yojson.Safe.to_string
-                          (`Assoc [ ("ok", `Bool false); ("error", `String msg) ])
-                      in
+                      let err_json = error_json_string_with_ok msg in
                       h2_respond_json
                         h2_reqd
                         err_json

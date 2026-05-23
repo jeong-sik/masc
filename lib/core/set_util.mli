@@ -10,6 +10,11 @@
     backing representation needs to change, hide it behind an abstract
     type [`'k t`] in this interface first. *)
 
+(** [count_distinct key xs] counts the number of distinct keys produced
+    by [key] over [xs]. [None] results are skipped. Implementation:
+    one-pass [Hashtbl] population followed by [Hashtbl.length]. *)
+val count_distinct : ('a -> 'b option) -> 'a list -> int
+
 (** [count_difference xs ~present ~absent] counts distinct keys produced by
     [present] that are NOT also produced by [absent]. Implementation: one
     pass over [xs] populates both the [absent_set] and [present_set]

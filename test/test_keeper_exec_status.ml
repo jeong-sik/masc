@@ -558,7 +558,7 @@ let test_runtime_surface_names_no_tool_provider_details () =
         required_tool_names = [ "keeper_bash"; "masc_worktree_create" ];
         provider_rejections =
           [
-            { OWN.reason = "codex_keeper_bound_actor_required" };
+            { OWN.provider_label = "codex"; OWN.reason = "codex_keeper_bound_actor_required" };
           ];
       }
   in

@@ -97,8 +97,7 @@
    (re_export masc_mcp.cascade_ref)
    ;; RFC-0163 Phase D1 — Cascade_name leaf extracted to lib/cascade_name/.
    ;; Re-export so test code using bare `Cascade_name.X` resolves.
-   (re_export masc_mcp.cascade_name)
-   ;; RFC-0086 PR-2H — Tool_args + Tool_result shared types extracted to
+   (re_export masc_mcp.cascade_name)   ;; RFC-0086 PR-2H — Tool_args + Tool_result shared types extracted to
    ;; lib/tool_types/. Re-export so test code using bare
    ;; `Tool_args.X` / `Tool_result.X` resolves.
    (re_export masc_mcp.tool_types)

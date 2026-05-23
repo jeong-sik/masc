@@ -33,7 +33,6 @@ let gate_from_raw ?caller ~raw ~allowlist ~path_policy ~sandbox () =
     Gate.Cannot_parse { reason = Gate.Parse_aborted reason }
   | PD.Too_complex reason ->
     Gate.Too_complex { reason = Gate.Unsupported_construct reason }
-
 let allowlist : Gate.allowlist_policy =
   { redirect_allowed = false; allowed_commands = allowed; allow_pipes = true }
 ;;

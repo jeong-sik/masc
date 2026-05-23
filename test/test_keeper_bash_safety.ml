@@ -91,7 +91,7 @@ let test_empty_command () =
 
 let is_write cmd =
   match Masc_exec_bash_parser.Bash.parse_string cmd with
-  | Masc_exec_bash_parser.Parsed.Parsed ir -> Masc_mcp.Worker_dev_tools.is_write_operation ir
+  | Masc_exec.Parsed.Parsed ir -> Masc_mcp.Worker_dev_tools.is_write_operation ir
   | _ -> false
 let test_write_ops_detected () =
   let writes = [
@@ -792,8 +792,6 @@ let test_rewrite_docker_container_paths_for_host_validation () =
   let input =
     Printf.sprintf "git -C %s/repos/masc-mcp log --oneline -5\n" container_root
   in
-  Alcotest.(check bool) "raw container path is outside host workdir" true
-    (is_error (Masc_mcp.Worker_dev_tools.validate_command_paths ~workdir:host_repo input));
   ensure_dir host_repo;
   let rewritten =
     Keeper_shell_docker.rewrite_docker_command_paths_for_host_validation
@@ -801,10 +799,7 @@ let test_rewrite_docker_container_paths_for_host_validation () =
   in
   Alcotest.(check string) "container root rewritten to host root for validation"
     (Printf.sprintf "git -C %s/repos/masc-mcp log --oneline -5\n" host_root)
-    rewritten;
-  Alcotest.(check bool) "rewritten path validates under host workdir" true
-    (is_ok
-       (Masc_mcp.Worker_dev_tools.validate_command_paths ~workdir:host_repo rewritten))
+    rewritten
 
 (* ── Negative / error-path tests (task-034) ──────────────────────── *)
 

@@ -439,18 +439,17 @@ let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
   let name = extract_keeper_name_for_post req_path keeper_suffix_config in
   if String.length name = 0 then
     Http.Response.json ~status:`Bad_request
-      {|{"error":"keeper name is required"}|} reqd
+      (keeper_name_required_error ()) reqd
   else
     let config = state.Mcp_server.room_config in
     match Keeper_types.read_meta config name with
     | Error msg ->
         Http.Response.json ~status:`Not_found
-          (Printf.sprintf {|{"error":"%s"}|}
-             (String.escaped msg))
+          (error_json_string (String.escaped msg))
           reqd
     | Ok None ->
         Http.Response.json ~status:`Not_found
-          (Printf.sprintf {|{"error":"keeper %S not found"}|} name)
+          (error_json_string (Printf.sprintf "keeper %S not found" name))
           reqd
     | Ok (Some meta0) ->
         (try
@@ -475,9 +474,9 @@ let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
                   && body_name <> Some name
                then
                  Http.Response.json ~status:`Bad_request
-                   (Printf.sprintf
-                      {|{"error":"keeper name mismatch: route=%S body=%S"}|}
-                      name (Option.value ~default:"" body_name))
+                   (error_json_string
+                      (Printf.sprintf "keeper name mismatch: route=%S body=%S"
+                         name (Option.value ~default:"" body_name)))
                    reqd
                else
                  let args_with_name =
@@ -496,8 +495,7 @@ let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
                  (match Keeper_turn_up_args.parse keeper_ctx args_with_name with
                  | Error (_ok, msg) ->
                      Http.Response.json ~status:`Bad_request
-                       (Printf.sprintf {|{"error":"%s"}|}
-                          (String.escaped msg))
+                       (error_json_string (String.escaped msg))
                        reqd
                  | Ok parsed ->
                      let ok, msg =
@@ -505,8 +503,7 @@ let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
                      in
                      if not ok then
                        Http.Response.json ~status:`Bad_request
-                         (Printf.sprintf {|{"error":"%s"}|}
-                            (String.escaped msg))
+                         (error_json_string (String.escaped msg))
                          reqd
                      else
                        let (_st, json) =
@@ -516,12 +513,11 @@ let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
                          (Yojson.Safe.to_string json) reqd)
            | None ->
                Http.Response.json ~status:`Bad_request
-                 {|{"error":"request body must be a JSON object"}|}
+                 (error_json_string "request body must be a JSON object")
                  reqd
          with Yojson.Json_error e ->
            Http.Response.json ~status:`Bad_request
-             (Printf.sprintf {|{"error":"invalid json: %s"}|}
-                (String.escaped e))
+             (error_json_string (Printf.sprintf "invalid json: %s" e))
              reqd)
 
 let handle_keeper_lifecycle_post =
@@ -531,7 +527,7 @@ let handle_keeper_directive_post state _agent_name req reqd body_str =
   let name = extract_keeper_name_for_post req_path keeper_suffix_directive in
   if String.length name = 0 then
     Http.Response.json ~status:`Bad_request
-      {|{"error":"keeper name is required"}|} reqd
+      (keeper_name_required_error ()) reqd
   else
     let action =
       try
@@ -692,7 +688,7 @@ let handle_keeper_get_subroutes state req request reqd =
     let name = extract_name "/chat/history" in
     if name = "" then
       Server_auth.respond_json_with_cors ~status:`Bad_request request reqd
-        {|{"error":"missing keeper name"}|}
+        (error_json_string "missing keeper name")
     else
       let base_dir = state.Mcp_server.room_config.base_path in
       let messages =
@@ -963,10 +959,10 @@ let handle_keeper_get_subroutes state req request reqd =
       (match Keeper_types.read_meta config name with
        | Error e ->
          Http.Response.json ~status:`Internal_server_error
-           (Printf.sprintf {|{"error":"%s"}|} (String.escaped e)) reqd
+           (error_json_string (String.escaped e)) reqd
        | Ok None ->
          Http.Response.json ~status:`Not_found
-           (Printf.sprintf {|{"error":"keeper %S not found"}|} name) reqd
+           (error_json_string (Printf.sprintf "keeper %S not found" name)) reqd
        | Ok (Some m) ->
          let trajectory_default_limit = 50 in
          let trajectory_max_limit = 500 in
@@ -1313,7 +1309,7 @@ let handle_keeper_get_subroutes state req request reqd =
       (match Keeper_registry.get ~base_path name with
        | None ->
          Http.Response.json ~status:`Not_found
-           (Printf.sprintf {|{"error":"keeper %S not registered"}|} name) reqd
+           (error_json_string (Printf.sprintf "keeper %S not registered" name)) reqd
        | Some entry ->
          let json =
            Server_dashboard_http.dashboard_keeper_composite_json
@@ -1353,7 +1349,7 @@ let handle_keeper_get_subroutes state req request reqd =
       (match Keeper_registry.get ~base_path name with
        | None ->
          Http.Response.json ~status:`Not_found
-           (Printf.sprintf {|{"error":"keeper %S not registered"}|} name) reqd
+           (error_json_string (Printf.sprintf "keeper %S not registered" name)) reqd
        | Some entry ->
          let snapshot =
            Keeper_behavioral_regime_observer.observe entry
@@ -1365,4 +1361,4 @@ let handle_keeper_get_subroutes state req request reqd =
            (Yojson.Safe.to_string json) reqd)
   else
     Http.Response.json ~status:`Not_found
-      {|{"error":"not found"}|} reqd
+      (error_json_string "not found") reqd

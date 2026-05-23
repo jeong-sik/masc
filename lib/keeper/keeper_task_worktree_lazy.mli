@@ -23,16 +23,6 @@ val ensure_path :
     Non-matching paths return [Ok Not_current_task_worktree] so the normal
     path validator can render the final error. *)
 
-val ensure_command_existing_dirs :
-  config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
-  cwd:string ->
-  cmd:string ->
-  (unit, string) result
-(** Inspect [cmd] for existing-directory path requirements such as
-    [git -C <dir>] and lazily repair matching current-task worktrees relative
-    to [cwd]. *)
-
 val ensure_shell_ir_existing_dirs :
   config:Coord.config ->
   meta:Keeper_types.keeper_meta ->

@@ -190,12 +190,3 @@ let ensure_shell_ir_existing_dirs ~(config : Coord.config) ~(meta : Keeper_types
     ~cwd
     (Exec_policy.existing_dir_path_values_of_shell_ir ir)
 ;;
-
-let ensure_command_existing_dirs ~(config : Coord.config) ~(meta : Keeper_types.keeper_meta)
-      ~cwd ~cmd =
-  ensure_existing_dir_values
-    ~config
-    ~meta
-    ~cwd
-    (Exec_policy.existing_dir_path_values cmd)
-;;

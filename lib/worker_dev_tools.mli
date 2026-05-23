@@ -134,11 +134,6 @@ val validate_command_paths
     the authority for out-of-sandbox paths. *)
 val existing_dir_path_values_of_shell_ir : Masc_exec.Shell_ir.t -> string list
 
-(** Shell IR authority variant of {!existing_dir_path_values}. Prefer this
-    when the caller already has typed Shell IR so argv tokens are not
-    reconstructed through a diagnostic command string. *)
-val existing_dir_path_values : string -> string list
-
 (** {1 Bash safety classifiers} *)
 
 (** [true] iff the command performs a write/mutating operation

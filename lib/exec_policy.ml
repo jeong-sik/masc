@@ -729,14 +729,6 @@ let rec existing_dir_path_values_of_shell_ir = function
     List.concat_map existing_dir_path_values_of_shell_ir stages
 ;;
 
-let existing_dir_path_values cmd =
-  match Masc_exec_bash_parser.Bash.parse_string cmd with
-  | Masc_exec.Parsed.Parsed shell_ir -> existing_dir_path_values_of_shell_ir shell_ir
-  | Masc_exec.Parsed.Parse_error _
-  | Masc_exec.Parsed.Parse_aborted _
-  | Masc_exec.Parsed.Too_complex _ -> []
-;;
-
 let validate_shell_ir_paths ?keeper_id ?base_path ?workdir shell_ir =
   match workdir with
   | None -> Ok ()
@@ -841,15 +833,6 @@ let validate_shell_ir_paths ?keeper_id ?base_path ?workdir shell_ir =
           loop stages
       in
       validate_parsed_shell_ir shell_ir
-;;
-
-let validate_command_paths ?keeper_id ?base_path ?workdir cmd =
-  match Masc_exec_bash_parser.Bash.parse_string cmd with
-  | Masc_exec.Parsed.Parsed shell_ir ->
-    validate_shell_ir_paths ?keeper_id ?base_path ?workdir shell_ir
-  | Masc_exec.Parsed.Parse_error _
-  | Masc_exec.Parsed.Parse_aborted _
-  | Masc_exec.Parsed.Too_complex _ -> Ok ()
 ;;
 
 let is_write_operation = Mutation_classifier.is_write_operation

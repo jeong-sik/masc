@@ -20,11 +20,4 @@ type t = {
   created_at : float;
 }
 
-val empty : created_by:string -> created_at:float -> t
-(** [empty ~created_by ~created_at] constructs a provenance with no
-    origin artifacts. Useful when an artifact is the start of a new
-    creation chain (no predecessors). *)
-
 val to_json : t -> Yojson.Safe.t
-
-val of_json : Yojson.Safe.t -> (t, string) result

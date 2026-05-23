@@ -30,23 +30,36 @@ let failure_insight_extra ~base_path ~keeper_name =
     ]
 ;;
 
+let record_history ~root ~keeper_name ~op ~cmd ~success ~duration_ms =
+  let cmd_prefix = cmd_prefix_of_cmd cmd in
+  let entry = bash_history_entry ~cmd ~cmd_prefix ~op ~duration_ms ~success in
+  Keeper_shell_history.observe_history_append ~root ~keeper_name entry
+;;
+
+let render_process_json ~root ~keeper_name ~cmd ~extra ~status ~output =
+  Exec_core.process_result_json
+    ~artifact_policy:Exec_core.Inline_only
+    ~base_path:root
+    ~keeper_name
+    ~cmd
+    ~ir:(Keeper_shell_ir.of_cmd cmd)
+    ~extra
+    ~status
+    ~output
+    ()
+;;
+
 let render_process_result ~root ~keeper_name ~op ?cwd ~cmd argv =
   let st, out =
     Keeper_shell_shared.run_argv_with_status_retry_eintr ?cwd
       ~timeout_sec:Keeper_shell_timeout.io_timeout_sec argv
   in
   let success = st = Unix.WEXITED 0 in
-  let cmd_prefix = cmd_prefix_of_cmd cmd in
-  let entry = bash_history_entry ~cmd ~cmd_prefix ~op ~duration_ms:0 ~success in
-  Keeper_shell_history.observe_history_append ~root ~keeper_name entry;
+  record_history ~root ~keeper_name ~op ~cmd ~success ~duration_ms:0;
   let insight_extra = failure_insight_extra ~base_path:root ~keeper_name in
   Yojson.Safe.to_string
-    (Exec_core.process_result_json
-       ~artifact_policy:Exec_core.Inline_only
-       ~base_path:root
-       ~keeper_name
-       ~cmd
-       ~ir:(Keeper_shell_ir.of_cmd cmd)
+    (render_process_json
+       ~root ~keeper_name ~cmd
        ~extra:
          ([ "op", `String op
           ; "cmd", `String cmd
@@ -58,15 +71,13 @@ let render_process_result ~root ~keeper_name ~op ?cwd ~cmd argv =
           ]
           @ insight_extra)
        ~status:st
-       ~output:out
-       ())
+       ~output:out)
 ;;
 
 let render_completed_process_result ~root ~keeper_name ~op ?cwd ~cmd
     ?(extra = []) st out
   =
   let success = st = Unix.WEXITED 0 in
-  let cmd_prefix = cmd_prefix_of_cmd cmd in
   let elapsed_ms =
     List.find_map
       (fun (k, v) ->
@@ -79,8 +90,7 @@ let render_completed_process_result ~root ~keeper_name ~op ?cwd ~cmd
       extra
     |> Option.value ~default:0
   in
-  let entry = bash_history_entry ~cmd ~cmd_prefix ~op ~duration_ms:elapsed_ms ~success in
-  Keeper_shell_history.observe_history_append ~root ~keeper_name entry;
+  record_history ~root ~keeper_name ~op ~cmd ~success ~duration_ms:elapsed_ms;
   let insight_extra = failure_insight_extra ~base_path:root ~keeper_name in
   let extra_with_via =
     if List.exists (fun (k, _) -> k = "via") extra
@@ -88,12 +98,8 @@ let render_completed_process_result ~root ~keeper_name ~op ?cwd ~cmd
     else ("via", `String "host") :: extra
   in
   Yojson.Safe.to_string
-    (Exec_core.process_result_json
-       ~artifact_policy:Exec_core.Inline_only
-       ~base_path:root
-       ~keeper_name
-       ~cmd
-       ~ir:(Keeper_shell_ir.of_cmd cmd)
+    (render_process_json
+       ~root ~keeper_name ~cmd
        ~extra:
          ([ "op", `String op
           ; "cmd", `String cmd
@@ -105,8 +111,7 @@ let render_completed_process_result ~root ~keeper_name ~op ?cwd ~cmd
           @ extra_with_via
           @ insight_extra)
        ~status:st
-       ~output:out
-       ())
+       ~output:out)
 ;;
 
 let render_docker_process_result ~root ~keeper_name ~op ~config ~meta ~cwd
@@ -128,12 +133,8 @@ let render_docker_process_result ~root ~keeper_name ~op ~config ~meta ~cwd
           (Keeper_shell_docker.docker_private_workspace_cwd ~config ~meta cwd)
     in
     Yojson.Safe.to_string
-      (Exec_core.process_result_json
-         ~artifact_policy:Exec_core.Inline_only
-         ~base_path:root
-         ~keeper_name
-         ~cmd
-         ~ir:(Keeper_shell_ir.of_cmd cmd)
+      (render_process_json
+         ~root ~keeper_name ~cmd
          ~extra:
            [ "op", `String op
            ; "cmd", `String cmd
@@ -141,6 +142,5 @@ let render_docker_process_result ~root ~keeper_name ~op ~config ~meta ~cwd
            ; "via", `String "docker"
            ]
          ~status:result.status
-         ~output:result.output
-         ())
+         ~output:result.output)
 ;;

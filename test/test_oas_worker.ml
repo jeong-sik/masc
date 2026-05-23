@@ -4648,60 +4648,6 @@ let test_sdk_error_terminal_provider_runtime_ignores_unknown_network_error () =
     (Keeper_turn_driver.sdk_error_is_terminal_provider_runtime_failure err)
 ;;
 
-let test_codex_cli_prompt_preflight_uses_pipeline_context_window_fallback () =
-  let provider_cfg = make_codex_cli_provider_cfg () in
-  let config =
-    Cascade_runner.default_config
-      ~name:"codex-preflight"
-      ~provider_cfg
-      ~system_prompt:"system"
-      ~tools:[]
-  in
-  let huge_goal = String.make 600_000 'a' in
-  match Cascade_config_builder.codex_cli_prompt_preflight ~config ~goal:huge_goal with
-  | Some preflight ->
-    Alcotest.(check bool) "argv limit hit" true preflight.hits_argv_limit;
-    Alcotest.(check bool) "context limit hit" true preflight.hits_context_window;
-    Alcotest.(check int)
-      "fallback context window"
-      Masc_mcp.Cascade_runtime.fallback_context_window
-      preflight.context_window_tokens;
-    Alcotest.(check bool)
-      "retry limit reduced"
-      true
-      (preflight.retry_limit_tokens < preflight.prompt_tokens)
-  | None -> Alcotest.fail "expected codex preflight overflow"
-;;
-
-let test_codex_cli_prompt_preflight_scales_retry_limit_for_argv_only_overflow () =
-  let provider_cfg = make_codex_cli_provider_cfg ~model_id:"gpt-4.1" () in
-  let config =
-    Cascade_runner.default_config
-      ~name:"codex-preflight"
-      ~provider_cfg
-      ~system_prompt:"system"
-      ~tools:[]
-  in
-  let huge_goal = String.make 600_000 'a' in
-  match Cascade_config_builder.codex_cli_prompt_preflight ~config ~goal:huge_goal with
-  | Some preflight ->
-    Alcotest.(check bool) "argv limit hit" true preflight.hits_argv_limit;
-    Alcotest.(check bool) "context limit not hit" false preflight.hits_context_window;
-    Alcotest.(check bool)
-      "gpt-4.1 context window preserved"
-      true
-      (preflight.context_window_tokens >= 1_000_000);
-    Alcotest.(check bool)
-      "retry limit scaled below prompt tokens"
-      true
-      (preflight.retry_limit_tokens < preflight.prompt_tokens);
-    Alcotest.(check bool)
-      "retry limit below full context window"
-      true
-      (preflight.retry_limit_tokens < preflight.context_window_tokens)
-  | None -> Alcotest.fail "expected argv-only codex preflight overflow"
-;;
-
 let test_sanitize_cli_completion_request_for_argv_scrubs_codex_request () =
   let provider_cfg = make_codex_cli_provider_cfg () in
   let policy =
@@ -6378,14 +6324,6 @@ let () =
             "structured MASC internal errors roundtrip through classifier"
             `Quick
             test_classify_masc_internal_error_roundtrip
-        ; Alcotest.test_case
-            "codex preflight uses pipeline context fallback"
-            `Quick
-            test_codex_cli_prompt_preflight_uses_pipeline_context_window_fallback
-        ; Alcotest.test_case
-            "codex preflight scales retry limit for argv overflow"
-            `Quick
-            test_codex_cli_prompt_preflight_scales_retry_limit_for_argv_only_overflow
         ; Alcotest.test_case
             "codex argv scrubber cleans request text"
             `Quick

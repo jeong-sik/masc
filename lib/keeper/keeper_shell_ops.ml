@@ -59,50 +59,15 @@ let handle_keeper_shell
      | Error e -> path_error e
      | Ok target ->
        let limit = shell_readonly_limit args in
-       match
-         Keeper_shell_runtime.run_readonly_op ~config ~meta ?turn_sandbox_factory
-           ~op ~target
-           ~host_argv:[ Keeper_shell_runtime.coreutils.ls; "-la"; target ]
-           ~docker_argv:(fun cpath -> [ "ls"; "-la"; cpath ])
-           ~max_bytes:1_000_000
-           ~timeout_sec:Keeper_shell_shared.io_timeout_sec ()
-       with
-       | Error response -> response
-       | Ok (via, st, out) ->
-         let fields =
-           Keeper_shell_runtime.readonly_json_fields ~op ~path:target ~via
-             ~status:st ~output_field:"entries" ~output:(lines_to_json ~limit out)
-             ()
-         in
-         Keeper_shell_runtime.readonly_json_string fields)
+       Keeper_shell_runtime.run_ls_op ~config ~meta ?turn_sandbox_factory
+         ~op ~target ~limit ~timeout_sec:Keeper_shell_shared.io_timeout_sec ())
   | "cat" ->
     (match Keeper_shell_runtime.read_target ~config ~meta ~args ~root with
      | Error e -> path_error e
      | Ok target ->
        let max_bytes = shell_readonly_cat_max_bytes args in
-       match
-         Keeper_shell_runtime.run_readonly_op ~config ~meta ?turn_sandbox_factory
-           ~op ~target
-           ~host_argv:[ Keeper_shell_runtime.coreutils.cat; target ]
-           ~docker_argv:(fun cpath -> [ "cat"; cpath ])
-           ~max_bytes
-           ~timeout_sec:Keeper_shell_shared.read_timeout_sec ()
-       with
-       | Error response -> response
-       | Ok (via, st, out) ->
-         let body =
-           if String.length out > max_bytes then String.sub out 0 max_bytes else out
-         in
-         Yojson.Safe.to_string
-           (`Assoc
-               [ "ok", `Bool (st = Unix.WEXITED 0)
-               ; "op", `String op
-               ; "path", `String target
-               ; "via", `String via
-               ; "status", Keeper_alerting_path.process_status_to_json st
-               ; "truncated", `Bool (String.length out > max_bytes)
-               ; "content", `String body
-               ]))
+       Keeper_shell_runtime.run_cat_op ~config ~meta ?turn_sandbox_factory
+         ~op ~target ~max_bytes ~timeout_sec:Keeper_shell_shared.read_timeout_sec ())
   | "rg" ->
     Keeper_shell_rg.handle ~op ~meta ~config ~args ?turn_sandbox_factory ~root ~raw_path
   | "git_log" ->
@@ -114,24 +79,8 @@ let handle_keeper_shell
      | Error e -> path_error e
      | Ok target ->
        let n = max 1 (min 200 (Safe_ops.json_int ~default:20 "lines" args)) in
-       let coreutil = if op = "head" then Keeper_shell_runtime.coreutils.head else Keeper_shell_runtime.coreutils.tail in
-       match
-         Keeper_shell_runtime.run_readonly_op ~config ~meta ?turn_sandbox_factory
-           ~op ~target
-           ~host_argv:[ coreutil; "-n"; string_of_int n; target ]
-           ~docker_argv:(fun cpath -> [ coreutil; "-n"; string_of_int n; cpath ])
-           ~max_bytes:1_000_000
-           ~timeout_sec:Keeper_shell_shared.read_timeout_sec ()
-       with
-       | Error response -> response
-       | Ok (via, st, out) ->
-         let fields =
-           Keeper_shell_runtime.readonly_json_fields ~op ~path:target ~via
-             ~status:st ~output_field:"content" ~output:(`String out)
-             ~extra:[ "lines", `Int n ]
-             ()
-         in
-         Keeper_shell_runtime.readonly_json_string fields)
+       Keeper_shell_runtime.run_head_tail_op ~config ~meta ?turn_sandbox_factory
+         ~op ~target ~n ~timeout_sec:Keeper_shell_shared.read_timeout_sec ())
   | "wc" ->
     (match Keeper_shell_runtime.read_target ~config ~meta ~args ~root with
      | Error e -> path_error e
@@ -153,27 +102,8 @@ let handle_keeper_shell
      | Error e -> path_error e
      | Ok target ->
        let limit = shell_readonly_limit args in
-       let tree_base path =
-         [ "find"; path; "-maxdepth"; "3"; "-print";
-           "-not"; "-path"; "*/.git/*";
-           "-not"; "-path"; "*/_build/*" ]
-       in
-       let docker_argv cpath = tree_base cpath in
-       let host_argv = tree_base target in
-       match
-         Keeper_shell_runtime.run_readonly_op ~config ~meta ?turn_sandbox_factory
-           ~op ~target ~host_argv ~docker_argv
-           ~max_bytes:1_000_000
-           ~timeout_sec:Keeper_shell_shared.read_timeout_sec ()
-       with
-       | Error response -> response
-       | Ok (via, st, out) ->
-         let fields =
-           Keeper_shell_runtime.readonly_json_fields ~op ~path:target ~via
-             ~status:st ~output_field:"entries" ~output:(lines_to_json ~limit out)
-             ()
-         in
-         Keeper_shell_runtime.readonly_json_string fields)
+       Keeper_shell_runtime.run_tree_op ~config ~meta ?turn_sandbox_factory
+         ~op ~target ~limit ~timeout_sec:Keeper_shell_shared.read_timeout_sec ())
   | "git_diff" ->
     (match Keeper_shell_runtime.cwd_target ~config ~meta ~args ~root with
      | Error e -> path_error e

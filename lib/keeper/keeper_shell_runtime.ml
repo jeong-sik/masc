@@ -408,3 +408,96 @@ let run_cwd_op
     run_in_turn_runtime ~root ~keeper_name ~op ~config ~meta ~turn_sandbox_factory
       ~cwd ~cmd ~command_argv ~map_output ~max_bytes ~timeout_sec ()
 ;;
+
+(** {1 Op-specific readonly helpers}
+
+    Collapse the repeated read-target → run_readonly_op → json_fields
+    pattern in ops.ml dispatcher arms. *)
+
+let run_ls_op ~config ~meta ?turn_sandbox_factory ~op ~target ~limit ~timeout_sec () =
+  match
+    run_readonly_op ~config ~meta ?turn_sandbox_factory
+      ~op ~target
+      ~host_argv:[ coreutils.ls; "-la"; target ]
+      ~docker_argv:(fun cpath -> [ "ls"; "-la"; cpath ])
+      ~max_bytes:1_000_000
+      ~timeout_sec ()
+  with
+  | Error response -> response
+  | Ok (via, st, out) ->
+    let fields =
+      readonly_json_fields ~op ~path:target ~via
+        ~status:st ~output_field:"entries" ~output:(lines_to_json ~limit out)
+        ()
+    in
+    readonly_json_string fields
+;;
+
+let run_cat_op ~config ~meta ?turn_sandbox_factory ~op ~target ~max_bytes ~timeout_sec () =
+  match
+    run_readonly_op ~config ~meta ?turn_sandbox_factory
+      ~op ~target
+      ~host_argv:[ coreutils.cat; target ]
+      ~docker_argv:(fun cpath -> [ "cat"; cpath ])
+      ~max_bytes
+      ~timeout_sec ()
+  with
+  | Error response -> response
+  | Ok (via, st, out) ->
+    let body = if String.length out > max_bytes then String.sub out 0 max_bytes else out in
+    Yojson.Safe.to_string
+      (`Assoc
+        [ "ok", `Bool (st = Unix.WEXITED 0)
+        ; "op", `String op
+        ; "path", `String target
+        ; "via", `String via
+        ; "status", Keeper_alerting_path.process_status_to_json st
+        ; "truncated", `Bool (String.length out > max_bytes)
+        ; "content", `String body
+        ])
+;;
+
+let run_head_tail_op ~config ~meta ?turn_sandbox_factory ~op ~target ~n ~timeout_sec () =
+  let coreutil = if op = "head" then coreutils.head else coreutils.tail in
+  match
+    run_readonly_op ~config ~meta ?turn_sandbox_factory
+      ~op ~target
+      ~host_argv:[ coreutil; "-n"; string_of_int n; target ]
+      ~docker_argv:(fun cpath -> [ coreutil; "-n"; string_of_int n; cpath ])
+      ~max_bytes:1_000_000
+      ~timeout_sec ()
+  with
+  | Error response -> response
+  | Ok (via, st, out) ->
+    let fields =
+      readonly_json_fields ~op ~path:target ~via
+        ~status:st ~output_field:"content" ~output:(`String out)
+        ~extra:[ "lines", `Int n ]
+        ()
+    in
+    readonly_json_string fields
+;;
+
+let run_tree_op ~config ~meta ?turn_sandbox_factory ~op ~target ~limit ~timeout_sec () =
+  let tree_base path =
+    [ "find"; path; "-maxdepth"; "3"; "-print"
+    ; "-not"; "-path"; "*/.git/*"
+    ; "-not"; "-path"; "*/_build/*" ]
+  in
+  match
+    run_readonly_op ~config ~meta ?turn_sandbox_factory
+      ~op ~target
+      ~host_argv:(tree_base target)
+      ~docker_argv:(fun cpath -> tree_base cpath)
+      ~max_bytes:1_000_000
+      ~timeout_sec ()
+  with
+  | Error response -> response
+  | Ok (via, st, out) ->
+    let fields =
+      readonly_json_fields ~op ~path:target ~via
+        ~status:st ~output_field:"entries" ~output:(lines_to_json ~limit out)
+        ()
+    in
+    readonly_json_string fields
+;;

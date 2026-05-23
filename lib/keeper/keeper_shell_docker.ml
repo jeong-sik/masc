@@ -433,6 +433,19 @@ let run_trusted_docker_shell_command_with_status =
   run_docker_shell_command_with_status_internal ~validate_command_paths:false
 ;;
 
+(** Preflight checks shared by [run_docker_credentialed_bash] and
+    [run_docker_bash]: image configured, nested runtime blocked.
+    Returns [Some error_json] on failure, [None] when every gate passes. *)
+let docker_bash_preflight ~config ~meta ~cmd ~git_creds_enabled =
+  let image = resolve_sandbox_image meta in
+  let sandbox_error_json = sandbox_error_json ~config ~meta in
+  if String.trim image = ""
+  then Some (sandbox_error_json "keeper sandbox docker image is not configured")
+  else if command_uses_nested_container_runtime cmd
+  then Some (sandbox_error_json (nested_runtime_blocker ~git_creds_enabled))
+  else None
+;;
+
 let docker_bash_response ~ok ~git_creds_enabled ~image ~network_label ~status ~output
     ~cwd_response ?semantic_status ~cmd_stages
   =
@@ -462,13 +475,9 @@ let run_docker_credentialed_bash
       ~(cmd : string)
       ()
   =
-  let image = resolve_sandbox_image meta in
-  let sandbox_error_json = sandbox_error_json ~config ~meta in
-  if String.trim image = ""
-  then sandbox_error_json "keeper sandbox docker image is not configured"
-  else if command_uses_nested_container_runtime cmd
-  then sandbox_error_json (nested_runtime_blocker ~git_creds_enabled:true)
-  else (
+  match docker_bash_preflight ~config ~meta ~cmd ~git_creds_enabled:true with
+  | Some err -> err
+  | None -> (
     (* P12: check egress policy for git commands with network access *)
     match check_egress ~config ~meta ~cmd with
     | Some blocked_json -> blocked_json
@@ -514,13 +523,9 @@ let run_docker_bash
       ~(cmd : string)
       ~(network_mode : network_mode)
   =
-  let image = resolve_sandbox_image meta in
-  let sandbox_error_json = sandbox_error_json ~config ~meta in
-  if String.trim image = ""
-  then sandbox_error_json "keeper sandbox docker image is not configured"
-  else if command_uses_nested_container_runtime cmd
-  then sandbox_error_json (nested_runtime_blocker ~git_creds_enabled:false)
-  else (
+  match docker_bash_preflight ~config ~meta ~cmd ~git_creds_enabled:false with
+  | Some err -> err
+  | None -> (
     match turn_sandbox_runtime, network_mode with
     | Some runtime, Network_none ->
       (match validate_docker_dispatch_context ~config ~meta ~cwd ~cmd with

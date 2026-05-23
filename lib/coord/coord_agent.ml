@@ -13,38 +13,43 @@ let get_agents_status config =
   let agents_path = agents_dir config in
   if not (Sys.file_exists agents_path) then
     `Assoc [("agents", `List []); ("count", `Int 0)]
-  else begin
-    let agents = ref [] in
-    Sys.readdir agents_path |> Array.iter (fun name ->
-        Coord_query.safe_yield ();
-      if Filename.check_suffix name ".json" then begin
-        let path = Filename.concat agents_path name in
-        match read_agent_with_repair config path with
-        | Ok agent ->
-            let is_zombie =
-              is_zombie_agent
-                ~agent_type:agent.agent_type
-                ~agent_name:agent.name
-                agent.last_seen
-            in
-            let status = if is_zombie then "zombie" else agent_status_to_string agent.status in
-            agents := `Assoc [
-              ("name", `String agent.name);
-              ("status", `String status);
-              ("is_zombie", `Bool is_zombie);
-              ("current_task", Json_util.string_opt_to_json agent.current_task);
-              ("last_seen", `String agent.last_seen);
-              ("capabilities", `List (List.map (fun s -> `String s) agent.capabilities));
-            ] :: !agents
-        | Error msg ->
-            Log.Misc.error "agent state read failed: %s" msg
-      end
-    );
+  else
+    let agents =
+      Sys.readdir agents_path
+      |> Array.to_list
+      |> List.filter_map (fun name ->
+          Coord_query.safe_yield ();
+          if not (Filename.check_suffix name ".json") then None
+          else
+            let path = Filename.concat agents_path name in
+            match read_agent_with_repair config path with
+            | Ok agent ->
+                let is_zombie =
+                  is_zombie_agent
+                    ~agent_type:agent.agent_type
+                    ~agent_name:agent.name
+                    agent.last_seen
+                in
+                let status =
+                  if is_zombie then "zombie"
+                  else agent_status_to_string agent.status
+                in
+                Some (`Assoc [
+                  ("name", `String agent.name);
+                  ("status", `String status);
+                  ("is_zombie", `Bool is_zombie);
+                  ("current_task", Json_util.string_opt_to_json agent.current_task);
+                  ("last_seen", `String agent.last_seen);
+                  ("capabilities", `List (List.map (fun s -> `String s) agent.capabilities));
+                ])
+            | Error msg ->
+                Log.Misc.error "agent state read failed: %s" msg;
+                None)
+    in
     `Assoc [
-      ("agents", `List (List.rev !agents));
-      ("count", `Int (List.length !agents));
+      ("agents", `List agents);
+      ("count", `Int (List.length agents));
     ]
-  end
 
 (* ============================================ *)
 (* Agent Discovery - Capability Broadcasting   *)

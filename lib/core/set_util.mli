@@ -10,6 +10,14 @@
     backing representation needs to change, hide it behind an abstract
     type [`'k t`] in this interface first. *)
 
+(** [of_list_with key xs] builds a hash table set from [xs], using [key] to
+    extract the deduplication key from each element. *)
+val of_list_with : ('a -> 'b) -> 'a list -> ('b, unit) Hashtbl.t
+
+(** [count_distinct key xs] counts distinct keys produced by [key] from [xs].
+    Elements for which [key] returns [None] are skipped. *)
+val count_distinct : ('a -> 'b option) -> 'a list -> int
+
 (** [count_difference xs ~present ~absent] counts distinct keys produced by
     [present] that are NOT also produced by [absent]. Implementation: one
     pass over [xs] populates both the [absent_set] and [present_set]

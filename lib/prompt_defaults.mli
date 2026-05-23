@@ -16,6 +16,18 @@
     [bootstrapped_signature] memo ref) are hidden — callers
     consume only the entry point below. *)
 
+val resolve_prompt_markdown_dir :
+  workspace_path:string -> base_path:string -> string
+(** Return the first existing prompt markdown directory from the
+    candidate list, falling back to {!Config_dir_resolver.prompts_dir}
+    when none exist yet. *)
+
+val init : unit -> unit
+(** Scan the current markdown dir (set via {!Prompt_registry.set_markdown_dir})
+    and load all prompts with YAML frontmatter.  Installs the restore-failure
+    Prometheus observer.  Called by [bootstrap_runtime]; also usable in tests
+    after [set_markdown_dir]. *)
+
 val bootstrap_runtime :
   workspace_path:string ->
   base_path:string ->

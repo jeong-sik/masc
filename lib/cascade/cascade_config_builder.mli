@@ -31,6 +31,24 @@ val config_for_label :
 (** Build a {!Cascade_runner.config} from a model label string.  Resolves
     the provider config and fills in defaults. *)
 
+(** Preflight check result for codex CLI subprocess transport.
+    Reports token/byte limits and whether the prompt exceeds them. *)
+type codex_cli_prompt_preflight = {
+  prompt_bytes : int;
+  prompt_tokens : int;
+  context_window_tokens : int;
+  retry_limit_tokens : int;
+  hits_argv_limit : bool;
+  hits_context_window : bool;
+}
+
+(** Run preflight checks for the codex CLI subprocess transport.
+    Returns [None] when the provider does not require argv-prompt preflight. *)
+val codex_cli_prompt_preflight :
+  config:Cascade_runner.config ->
+  goal:string ->
+  codex_cli_prompt_preflight option
+
 val with_codex_cli_preflight :
   scope:string ->
   config:Cascade_runner.config ->

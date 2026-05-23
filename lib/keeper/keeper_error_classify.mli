@@ -60,6 +60,11 @@ val is_cascade_exhausted_error : Agent_sdk.Error.sdk_error -> bool
     already been attempted ([List.length attempted_cascades >= 2]; the list is
     seeded with the initial cascade name so length=1 means no rotations yet),
     and no untried fallback cascade remains. *)
+
+(** [true] when the error is a provider-level timeout (not structural OAS
+    wall-clock budget). Matches both [Agent_sdk.Error.Api (Timeout _)] and
+    [Agent_sdk.Error.Provider (Llm_provider.Error.Timeout _)]. *)
+val is_provider_timeout_error : Agent_sdk.Error.sdk_error -> bool
 val should_cap_rotation_for_contract_violation :
   attempted_cascades:string list ->
   fallback_not_yet_tried:bool ->

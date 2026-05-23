@@ -775,23 +775,15 @@ let handle_keeper_shell
                   let result =
                     Masc_exec.Exec_dispatch.dispatch_decided envelope
                   in
-                  (* rg/grep exit codes: 0=matches found, 1=no matches (not an error), 2+=real error.
-                     Treat exit 1 as success with empty results — "no match" is a valid answer. *)
-                  let is_ok =
-                    match result.status with
-                    | Unix.WEXITED 0 | Unix.WEXITED 1 -> true
-                    | _ -> false
-                  in
-                  Yojson.Safe.to_string
-                    (`Assoc
-                        [ "ok", `Bool is_ok
-                        ; "op", `String op
-                        ; "path", `String target
-                        ; "pattern", `String pattern
-                        ; "via", `String "host"
-                        ; "status", Keeper_alerting_path.process_status_to_json result.status
-                        ; "matches", lines_to_json ~limit result.stdout
-                        ]))))
+                  render_completed_process_result ~cwd:None
+                    ~cmd:(op ^ " " ^ pattern ^ " " ^ target)
+                    ~extra:[
+                      "path", `String target;
+                      "pattern", `String pattern;
+                      "matches", lines_to_json ~limit result.stdout;
+                    ]
+                    result.status result.stdout
+                )))
   | "git_log" ->
     (match cwd_target () with
      | Error e -> path_error e

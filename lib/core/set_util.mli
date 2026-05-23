@@ -2,13 +2,12 @@
     pattern that saturated across perf PRs (telemetry, dedupe, distinct
     counters).
 
-    Each helper is a one-pass [Hashtbl] kernel. We keep [Hashtbl.t] over
-    [Set.Make(Key)] because (a) callers already pass arbitrary key types
-    (strings, ints, tuples) without a functor instance, and (b) the linear
-    O(N) bucket model matches the existing call sites' allocation profile.
-
-    backing representation needs to change, hide it behind an abstract
-    type [`'k t`] in this interface first. *)
+    The one currently exported helper is a one-pass [Hashtbl] kernel.
+    [Hashtbl.t] is used over [Set.Make(Key)] because callers pass arbitrary
+    key types (strings, ints, tuples) without a functor instance, and the
+    linear O(N) bucket model matches existing call sites' allocation
+    profile. If the backing representation needs to change, hide it behind
+    an abstract type [`'k t`] in this interface first. *)
 
 (** [count_difference xs ~present ~absent] counts distinct keys produced by
     [present] that are NOT also produced by [absent]. Implementation: one

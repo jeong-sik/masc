@@ -1014,7 +1014,7 @@ let () =
     "is_destructive_bash_operation", [
       let is_destructive cmd =
         match Masc_exec_bash_parser.Bash.parse_string cmd with
-        | Parsed.Parsed ir -> Worker_dev_tools.is_destructive_bash_operation ir
+        | Masc_exec.Parsed.Parsed ir -> Worker_dev_tools.is_destructive_bash_operation ir
         | _ -> false
       in
       Alcotest.test_case "blocks force push" `Quick (fun () ->

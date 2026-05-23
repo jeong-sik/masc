@@ -129,23 +129,4 @@ val transient_mutex_contention_tool_error
   -> unit
   -> string
 
-(* Handlers moved to [Keeper_tools_oas_handler] — see
-   keeper_tools_oas_handler.mli for [make_keeper_tool_handler],
-   [make_tool_bundle], and [make_tools]. *)
-
-
-(** Build the per-tool handler closure used by both internal and
-    alias tool entries. The closure dispatches via
-    [execute_keeper_tool_call_with_outcome] using [~name] as the
-    INTERNAL tool name (telemetry SSOT). [~input_schema] is the
-    internal tool schema used for pre-execution validation after
-    [?translate_input] reshapes incoming JSON from a public alias
-    schema to the internal payload (identity by default). *)
-
-(** Build the keeper's full [tool_bundle]: internal tools +
-    alias-registered (public name) tools that translate input to
-    internal payloads. The cleanup thunk releases per-turn sandbox
-    runtimes (Docker case). *)
-
-(** Convenience over [make_tool_bundle] returning only [.tools]. *)
 

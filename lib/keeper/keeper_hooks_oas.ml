@@ -226,13 +226,6 @@ let make_hooks
      [make_hooks] closure — one state per keeper. *)
   let streak_state = Keeper_guards.make_streak_state () in
   let streak_threshold = 5 in
-  let record_gate_decision event =
-    record_pre_tool_gate_attempt
-      ~meta_ref
-      ~tool_call_count_ref
-      ?trajectory_acc
-      event
-  in
   (* Build the pre_tool_use guard chain via Hooks.compose. Each guard
      lives in Keeper_guards and emits its own masc:keeper_gate event
      on override/approval decisions. The observer persists the same
@@ -247,7 +240,7 @@ let make_hooks
       ~denied:keeper_denied_tools
       ~max_cost_usd
       ~destructive_check
-      ~on_gate_decision:record_gate_decision
+      ~on_gate_decision:Keeper_guards.ignore_gate_decision
       ~pre_tool_use_guard
   in
   let non_gate_hooks =

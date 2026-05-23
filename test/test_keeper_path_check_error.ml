@@ -47,17 +47,16 @@ let test_parse_roundtrip_variants () =
   in
   List.iter
     (fun original ->
-      let msg = to_message original in
-      match parse_prefix msg with
+      let original_msg = to_message original in
+      match parse_prefix original_msg with
       | None ->
-        Alcotest.failf "parse_prefix returned None for emitted message %S" msg
+        Alcotest.failf "parse_prefix returned None for emitted message %S" original_msg
       | Some parsed ->
-        let parsed_prefix = message_prefix parsed in
-        let original_prefix = message_prefix original in
+        let parsed_msg = to_message parsed in
         Alcotest.(check string)
-          (Printf.sprintf "prefix roundtrip for %s" original_prefix)
-          original_prefix
-          parsed_prefix)
+          (Printf.sprintf "message roundtrip for %s" original_msg)
+          original_msg
+          parsed_msg)
     cases
 ;;
 

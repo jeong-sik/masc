@@ -375,7 +375,7 @@ let risk_of_command ~write_intent ~is_destructive family =
 let classify_command ~cmd =
   let tokens, write_intent, is_destructive =
     match Masc_exec_bash_parser.Bash.parse_string cmd with
-    | Parsed.Parsed ir ->
+    | Masc_exec.Parsed.Parsed ir ->
       ( Exec_policy_mutation_classifier.flat_stage_words ir,
         Exec_policy.is_write_operation ir,
         Exec_policy.is_destructive_bash_operation ir )

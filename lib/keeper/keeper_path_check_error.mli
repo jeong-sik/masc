@@ -35,6 +35,12 @@ type t =
       (** Path exists in syntax + whitelist but the directory is
           missing on disk (worktree lifecycle issue, see #15551). *)
 
+val parse_prefix : string -> t option
+(** Typed prefix lookup — reverse of [to_message].  Returns [Some]
+    when the message starts with a known variant prefix (case-
+    insensitive).  Used by [keeper_failure_circuit_breaker] to
+    classify path-check errors without substring matching. *)
+
 val to_message : t -> string
 (** Render the user-facing error message — keeps the prior wording
     so downstream tools that match on these messages keep their

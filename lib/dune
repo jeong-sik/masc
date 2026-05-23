@@ -87,6 +87,7 @@
  keeper_meta_contract
  keeper_personality_io
  keeper_meta_json_parse
+ keeper_meta_json_scrub
  keeper_meta_json
  keeper_types_support
  keeper_meta_store
@@ -277,7 +278,6 @@
   keeper_memory_recall
   keeper_status_bridge
   keeper_runtime_trust_timeline
-  keeper_hooks_oas_gate_attempt
   keeper_hooks_oas_output_json
   keeper_hooks_oas_response_metrics
   keeper_hooks_oas_cost_events

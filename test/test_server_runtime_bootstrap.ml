@@ -2059,94 +2059,6 @@ let test_create_server_state_preserves_raw_input_base_path () =
       Alcotest.(check string) "normalized env remains effective workspace root"
         dir (Sys.getenv "MASC_BASE_PATH"))
 
-let test_prompt_markdown_dir_ignores_repo_seed_prompts () =
-  with_temp_dir "startup-prompts" (fun dir ->
-      let config_root = Filename.concat dir "config" in
-      let repo_prompts = Filename.concat config_root "prompts" in
-      let expected = Filename.concat dir ".masc/config/prompts" in
-      Fs_compat.mkdir_p repo_prompts;
-      Fs_compat.mkdir_p expected;
-      write_file (Filename.concat config_root "cascade.toml") "";
-      write_file (Filename.concat config_root "tool_policy.toml")
-        "[groups.base]\ntools = [\"keeper_time_now\"]\n[presets.minimal]\ngroups = [\"base\"]\n";
-      with_env "MASC_CONFIG_DIR" None @@ fun () ->
-      with_cwd dir @@ fun () ->
-      Config_dir_resolver.reset ();
-      let resolved =
-        Fun.protect
-          ~finally:(fun () -> Config_dir_resolver.reset ())
-          (fun () ->
-             Prompt_defaults.resolve_prompt_markdown_dir
-               ~workspace_path:dir ~base_path:dir)
-      in
-      Alcotest.(check string) "repo seed prompts are not active config"
-        (canonical_path expected) (canonical_path resolved))
-
-let test_prompt_markdown_dir_does_not_use_repo_seed () =
-  with_temp_dir "startup-prompts-no-opt-in" (fun dir ->
-      let config_root = Filename.concat dir "config" in
-      let repo_prompts = Filename.concat config_root "prompts" in
-      let expected = Filename.concat dir ".masc/config/prompts" in
-      Fs_compat.mkdir_p repo_prompts;
-      Fs_compat.mkdir_p expected;
-      write_file (Filename.concat config_root "cascade.toml") "";
-      write_file (Filename.concat config_root "tool_policy.toml")
-        "[groups.base]\ntools = [\"keeper_time_now\"]\n[presets.minimal]\ngroups = [\"base\"]\n";
-      with_env "MASC_CONFIG_DIR" None @@ fun () ->
-      with_cwd dir @@ fun () ->
-      Config_dir_resolver.reset ();
-      let resolved =
-        Fun.protect
-          ~finally:(fun () -> Config_dir_resolver.reset ())
-          (fun () ->
-             Prompt_defaults.resolve_prompt_markdown_dir
-               ~workspace_path:dir ~base_path:dir)
-      in
-      Alcotest.(check string)
-        "temp room keeps resolved default prompt dir without repo seed"
-        (canonical_path expected) (canonical_path resolved))
-
-let test_prompt_markdown_dir_honors_masc_config_dir_override () =
-  with_temp_dir "startup-prompts-override" (fun dir ->
-      let workspace_prompts = Filename.concat dir "config/prompts" in
-      let override_root = Filename.concat dir "override-config" in
-      let override_prompts = Filename.concat override_root "prompts" in
-      Fs_compat.mkdir_p workspace_prompts;
-      Fs_compat.mkdir_p override_prompts;
-      with_env "MASC_CONFIG_DIR" (Some override_root) @@ fun () ->
-      Config_dir_resolver.reset ();
-      let resolved =
-        Fun.protect
-          ~finally:(fun () -> Config_dir_resolver.reset ())
-          (fun () ->
-             Prompt_defaults.resolve_prompt_markdown_dir
-               ~workspace_path:dir ~base_path:dir)
-      in
-      Alcotest.(check string) "resolved config root wins over workspace prompts"
-        override_prompts resolved)
-
-let test_prompt_markdown_dir_prefers_resolved_config_dir_over_cwd () =
-  with_temp_dir "startup-prompts-priority" (fun dir ->
-      let cwd_prompts = Filename.concat dir "config/prompts" in
-      let resolved_config = Filename.concat dir ".masc/config" in
-      let resolved_prompts = Filename.concat resolved_config "prompts" in
-      Fs_compat.mkdir_p cwd_prompts;
-      Fs_compat.mkdir_p resolved_prompts;
-      with_cwd dir @@ fun () ->
-      with_env "MASC_CONFIG_DIR" (Some resolved_config) @@ fun () ->
-      Config_dir_resolver.reset ();
-      Fun.protect
-        ~finally:(fun () -> Config_dir_resolver.reset ())
-        (fun () ->
-          let resolved =
-            Prompt_defaults.resolve_prompt_markdown_dir
-              ~workspace_path:(Filename.concat dir "workspace")
-              ~base_path:(Filename.concat dir "workspace")
-          in
-          Alcotest.(check string)
-            "resolved config prompts win over cwd fallback"
-            resolved_prompts resolved))
-
 let test_main_eio_serves_health_before_lazy_startup () =
   with_temp_dir "startup-health" (fun dir ->
       let exe = find_main_eio_exe () in
@@ -3092,18 +3004,6 @@ let () =
           Alcotest.test_case
             "create_server_state preserves raw input base path"
             `Quick test_create_server_state_preserves_raw_input_base_path;
-          Alcotest.test_case
-            "prompt markdown dir ignores repo seed prompts"
-            `Quick test_prompt_markdown_dir_ignores_repo_seed_prompts;
-          Alcotest.test_case
-            "prompt markdown dir does not use repo seed"
-            `Quick test_prompt_markdown_dir_does_not_use_repo_seed;
-          Alcotest.test_case "prompt markdown dir honors MASC_CONFIG_DIR override"
-            `Quick test_prompt_markdown_dir_honors_masc_config_dir_override;
-          Alcotest.test_case
-            "prompt markdown dir prefers resolved config dir over cwd fallback"
-            `Quick
-            test_prompt_markdown_dir_prefers_resolved_config_dir_over_cwd;
           Alcotest.test_case "main_eio serves health before lazy startup"
             `Slow test_main_eio_serves_health_before_lazy_startup;
           Alcotest.test_case

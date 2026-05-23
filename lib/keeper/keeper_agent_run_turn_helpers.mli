@@ -79,6 +79,7 @@ val turn_progress_callbacks :
   config:Coord.config ->
   keeper_name:string ->
   downstream:(Agent_sdk.Types.sse_event -> unit) option ->
+  turn_id:int ->
   (string -> unit)
   * bool
   * (unit -> unit) option

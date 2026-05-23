@@ -49,7 +49,6 @@ let handle
             ~ok_when:(fun st -> st = Unix.WEXITED 0 || st = Unix.WEXITED 1)
             ~host_argv
             ~docker_argv:(fun cpath -> make_argv "rg" cpath)
-            ~max_bytes:1_000_000
             ~timeout_sec:Keeper_shell_shared.read_timeout_sec
             ~output_field:"matches"
             ~output_of_out:(lines_to_json ~limit)

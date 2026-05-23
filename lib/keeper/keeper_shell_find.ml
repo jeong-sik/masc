@@ -31,7 +31,6 @@ let handle
         Keeper_shell_runtime.run_readonly_json_op ~config ~meta ?turn_sandbox_factory ~op ~target
           ~host_argv:(make_argv target)
           ~docker_argv:(fun cpath -> make_argv cpath)
-          ~max_bytes:1_000_000
           ~timeout_sec:Keeper_shell_shared.read_timeout_sec
           ~output_field:"files"
           ~output_of_out:(lines_to_json ~limit)

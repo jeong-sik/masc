@@ -229,6 +229,14 @@ let readonly_json_string fields =
   Yojson.Safe.to_string (`Assoc fields)
 ;;
 
+(** {1 Docker-or-host routing}
+
+    Single decision point shared by readonly and cwd execution paths. *)
+
+let route_docker_or_host ~meta ~docker_f ~host_f =
+  if Keeper_docker_read.should_route_read ~meta then docker_f () else host_f ()
+;;
+
 (** {1 Unified readonly-op execution}
 
     Both docker and host branches return [(via_label, status, output)] on
@@ -250,20 +258,20 @@ let run_readonly_op
       ~timeout_sec
       ()
   =
-  if Keeper_docker_read.should_route_read ~meta
-  then
-    match
-      run_readonly_in_docker ~config ~meta ?turn_sandbox_factory ~ok_exit_codes
-        ~op ~target
-        ~command_argv:docker_argv ~max_bytes ~timeout_sec ()
-    with
-    | Error response -> Error response
-    | Ok (st, out) -> Ok ("docker", st, out)
-  else
-    let st, out =
-      Keeper_shell_shared.run_argv_with_status_retry_eintr ~timeout_sec host_argv
-    in
-    Ok ("host", st, out)
+  route_docker_or_host ~meta
+    ~docker_f:(fun () ->
+      match
+        run_readonly_in_docker ~config ~meta ?turn_sandbox_factory ~ok_exit_codes
+          ~op ~target
+          ~command_argv:docker_argv ~max_bytes ~timeout_sec ()
+      with
+      | Error response -> Error response
+      | Ok (st, out) -> Ok ("docker", st, out))
+    ~host_f:(fun () ->
+      let st, out =
+        Keeper_shell_shared.run_argv_with_status_retry_eintr ~timeout_sec host_argv
+      in
+      Ok ("host", st, out))
 ;;
 
 (** {1 Unified cwd-op execution}
@@ -289,13 +297,13 @@ let run_cwd_op
       ()
   =
   let docker_cmd = String.concat " " command_argv in
-  if Keeper_docker_read.should_route_read ~meta
-  then
-    render_docker_process_result ~root ~keeper_name ~op ~config ~meta ~cwd ~cmd
-      ~docker_cmd ~timeout_sec
-  else
-    run_in_turn_runtime ~root ~keeper_name ~op ~config ~meta ~turn_sandbox_factory
-      ~cwd ~cmd ~command_argv ~map_output ~max_bytes ~timeout_sec ()
+  route_docker_or_host ~meta
+    ~docker_f:(fun () ->
+      render_docker_process_result ~root ~keeper_name ~op ~config ~meta ~cwd ~cmd
+        ~docker_cmd ~timeout_sec)
+    ~host_f:(fun () ->
+      run_in_turn_runtime ~root ~keeper_name ~op ~config ~meta ~turn_sandbox_factory
+        ~cwd ~cmd ~command_argv ~map_output ~max_bytes ~timeout_sec ())
 ;;
 
 (** {1 Op-specific readonly helpers}

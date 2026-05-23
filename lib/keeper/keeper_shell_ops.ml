@@ -85,18 +85,9 @@ let handle_keeper_shell
     (match Keeper_shell_runtime.read_target ~config ~meta ~args ~root with
      | Error e -> path_error e
      | Ok target ->
-       match
-         Keeper_shell_runtime.run_readonly_op ~config ~meta ?turn_sandbox_factory
-           ~op ~target
-           ~host_argv:[ Keeper_shell_runtime.coreutils.wc; "-l"; target ]
-           ~docker_argv:(fun cpath -> [ "wc"; "-l"; cpath ])
-           ~max_bytes:4096
-           ~timeout_sec:Keeper_shell_shared.read_timeout_sec ()
-       with
-       | Error response -> response
-       | Ok (via, st, out) ->
-         Keeper_shell_runtime.render_completed_process_result ~root ~keeper_name:meta.name ~op
-           ~cmd:"wc" ~extra:[ "path", `String target; "via", `String via ] st out)
+       Keeper_shell_runtime.run_wc_op ~root ~keeper_name:meta.name ~config ~meta
+         ?turn_sandbox_factory ~op ~target
+         ~timeout_sec:Keeper_shell_shared.read_timeout_sec ())
   | "tree" ->
     (match Keeper_shell_runtime.read_target ~config ~meta ~args ~root with
      | Error e -> path_error e

@@ -501,3 +501,18 @@ let run_tree_op ~config ~meta ?turn_sandbox_factory ~op ~target ~limit ~timeout_
     in
     readonly_json_string fields
 ;;
+
+let run_wc_op ~root ~keeper_name ~config ~meta ?turn_sandbox_factory ~op ~target ~timeout_sec () =
+  match
+    run_readonly_op ~config ~meta ?turn_sandbox_factory
+      ~op ~target
+      ~host_argv:[ coreutils.wc; "-l"; target ]
+      ~docker_argv:(fun cpath -> [ "wc"; "-l"; cpath ])
+      ~max_bytes:4096
+      ~timeout_sec ()
+  with
+  | Error response -> response
+  | Ok (via, st, out) ->
+    render_completed_process_result ~root ~keeper_name ~op
+      ~cmd:"wc" ~extra:[ "path", `String target; "via", `String via ] st out
+;;

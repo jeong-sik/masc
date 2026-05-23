@@ -618,11 +618,13 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
                         | None ->
                             (* RFC-0041: derive cascade_ref from legacy
                                cascade_name string when persisted JSON
-                               predates the field. *)
-                            Some Cascade_ref.{
-                              group = identity.pk_cascade_name;
-                              item = None;
-                            })
+                               predates the field.  RFC-0163 Phase D1
+                               typed [group] as [Cascade_name.t], so we
+                               must parse via [Cascade_name.of_string]
+                               and drop non-canonical names. *)
+                            (match Cascade_name.of_string identity.pk_cascade_name with
+                             | Ok cn -> Some Cascade_ref.{ group = cn; item = None }
+                             | Error _ -> None))
                    ; models = []
                    ; will = identity.pk_will
                    ; needs = identity.pk_needs

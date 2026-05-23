@@ -2,6 +2,7 @@
     plus execution-surface cache helpers used by lifecycle + directive handlers. *)
 
 open Server_dashboard_http_keeper_api_types
+open Server_h2_gateway_helpers
 
 module Http = Http_server_eio
 
@@ -37,12 +38,12 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
   match suffix_result with
   | Error msg ->
       Http.Response.json ~status:`Bad_request
-        (Printf.sprintf {|{"error":"%s"}|} (String.escaped msg)) reqd
+        (error_json_string (String.escaped msg)) reqd
   | Ok suffix ->
   let name = extract_keeper_name_for_post req_path suffix in
   if String.length name = 0 then
     Http.Response.json ~status:`Bad_request
-      {|{"error":"keeper name is required"}|} reqd
+      (error_json_string "keeper name is required") reqd
   else
     let config = state.Mcp_server.room_config in
     let resolve_keeper_agent_name () =

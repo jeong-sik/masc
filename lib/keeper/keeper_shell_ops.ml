@@ -635,16 +635,14 @@ let handle_keeper_shell
                let body =
                  if String.length out > max_bytes then String.sub out 0 max_bytes else out
                in
-               Yojson.Safe.to_string
-                 (`Assoc
-                     [ "ok", `Bool (match result.status with Unix.WEXITED 0 -> true | _ -> false)
-                     ; "op", `String op
-                     ; "path", `String target
-                     ; "via", `String "host"
-                     ; "status", Keeper_alerting_path.process_status_to_json result.status
-                     ; "truncated", `Bool (String.length out > max_bytes)
-                     ; "content", `String body
-                     ]))))
+               render_completed_process_result ~cwd:None
+                 ~cmd:("cat " ^ target)
+                 ~extra:[
+                   "path", `String target;
+                   "truncated", `Bool (String.length out > max_bytes);
+                 ]
+                 result.status body
+             )))
   | "rg" ->
     let pattern = Safe_ops.json_string ~default:"" "pattern" args |> String.trim in
     if pattern = ""

@@ -198,3 +198,12 @@ val too_complex_reason_tag : too_complex_reason -> string
 val stage_count : parsed_context -> int
 val last_stage_bin : parsed_context -> string option
 val is_pipeline : parsed_context -> bool
+
+val parse_to_ir_opt : string -> Masc_exec.Shell_ir.t option
+(** Canonical string-to-IR parse entrypoint for callers that need typed
+    IR but no policy verdict (telemetry classifiers, work-action
+    extractors, debug tools). Returns [Some ir] when the bash subset
+    parser succeeds, [None] on any parse failure. This is the single
+    non-gate entry that callers should use instead of reaching into
+    [Masc_exec_bash_parser.Bash.parse_string] directly — prefer {!gate}
+    or {!gate_typed} when a policy verdict is needed. *)

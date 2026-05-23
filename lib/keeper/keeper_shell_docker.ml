@@ -416,6 +416,26 @@ let run_trusted_docker_shell_command_with_status =
   run_docker_shell_command_with_status_internal ~validate_command_paths:false
 ;;
 
+let docker_bash_response ~ok ~git_creds_enabled ~image ~network_label ~status ~output
+    ~cwd_response ?semantic_status ~cmd_stages
+  =
+  Yojson.Safe.to_string
+    (`Assoc
+        ([ "ok", `Bool ok
+         ; "via", `String "docker"
+         ; "cwd", Keeper_cwd_response.to_yojson_response cwd_response
+         ; "sandbox_profile", `String "docker"
+         ; "git_creds_enabled", `Bool git_creds_enabled
+         ; "network_mode", `String network_label
+         ; "effective_sandbox_image", `String image
+         ; "status", Keeper_alerting_path.process_status_to_json status
+         ]
+         @ (match semantic_status with
+            | None -> []
+            | Some s -> [ "semantic_status", `String (Exec_core.string_of_semantic_status s) ])
+         @ [ "output", `String output ]
+         @ gh_exit_class_field ~stages:cmd_stages ~status ~output))
+
 let run_docker_credentialed_bash
       ~(turn_sandbox_runtime : Keeper_turn_sandbox_runtime.t option)
       ~(config : Coord.config)
@@ -459,22 +479,16 @@ let run_docker_credentialed_bash
                   ~host_cwd:cwd
                   ~container_cwd:(docker_private_workspace_cwd ~config ~meta cwd)
               in
-              Yojson.Safe.to_string
-                (`Assoc
-                    ([ "ok", `Bool (result.status = Unix.WEXITED 0)
-                     ; "via", `String "docker"
-                     ; "cwd", Keeper_cwd_response.to_yojson_response cwd_response
-                     ; "sandbox_profile", `String "docker"
-                     ; "git_creds_enabled", `Bool true
-                     ; "network_mode", `String result.network_label
-                     ; "effective_sandbox_image", `String result.image
-                     ; "status", Keeper_alerting_path.process_status_to_json result.status
-                     ; "output", `String result.output
-                     ]
-                     @ gh_exit_class_field
-                         ~stages:cmd_stages
-                         ~status:result.status
-                         ~output:result.output))))))
+              docker_bash_response
+                ~ok:(result.status = Unix.WEXITED 0)
+                ~git_creds_enabled:true
+                ~image:result.image
+                ~network_label:result.network_label
+                ~status:result.status
+                ~output:result.output
+                ~cwd_response
+                ~cmd_stages
+                ))
 ;;
 
 let run_docker_bash
@@ -531,21 +545,17 @@ let run_docker_bash
                      runtime
                      ~host_cwd:cwd)
             in
-            Yojson.Safe.to_string
-              (`Assoc
-                  ([ "ok", `Bool semantic_ok
-                   ; "via", `String "docker"
-                   ; "cwd", Keeper_cwd_response.to_yojson_response cwd_response
-                   ; "sandbox_profile", `String "docker"
-                   ; "git_creds_enabled", `Bool false
-                   ; "network_mode", `String (network_mode_to_string network_mode)
-                   ; "effective_sandbox_image", `String image
-                   ; "status", Keeper_alerting_path.process_status_to_json st
-                   ; "semantic_status"
-                     , `String (Exec_core.string_of_semantic_status semantic_status)
-                   ; "output", `String out
-                   ]
-                   @ gh_exit_class_field ~stages:cmd_stages ~status:st ~output:out)))
+            docker_bash_response
+              ~ok:semantic_ok
+              ~git_creds_enabled:false
+              ~image
+              ~network_label:(network_mode_to_string network_mode)
+              ~status:st
+              ~output:out
+              ~cwd_response
+              ~semantic_status
+              ~cmd_stages
+              )
        | _ ->
          (match turn_sandbox_runtime with
           | Some _ ->
@@ -587,24 +597,15 @@ let run_docker_bash
                    ~host_cwd:cwd
                    ~container_cwd:(docker_private_workspace_cwd ~config ~meta cwd)
                in
-               Yojson.Safe.to_string
-                 (`Assoc
-                     ([ "ok", `Bool semantic_ok
-                      ; "via", `String "docker"
-                      ; "cwd", Keeper_cwd_response.to_yojson_response cwd_response
-                      ; "sandbox_profile", `String "docker"
-                      ; "git_creds_enabled", `Bool false
-                      ; "network_mode", `String result.network_label
-                      ; "effective_sandbox_image", `String result.image
-                      ; ( "status"
-                        , Keeper_alerting_path.process_status_to_json result.status )
-                      ; ( "semantic_status"
-                        , `String
-                            (Exec_core.string_of_semantic_status semantic_status) )
-                      ; "output", `String result.output
-                      ]
-                      @ gh_exit_class_field
-                          ~stages:cmd_stages
-                          ~status:result.status
-                          ~output:result.output)))))))
+               docker_bash_response
+                 ~ok:semantic_ok
+                 ~git_creds_enabled:false
+                 ~image:result.image
+                 ~network_label:result.network_label
+                 ~status:result.status
+                 ~output:result.output
+                 ~cwd_response
+                 ~semantic_status
+                 ~cmd_stages
+                 ))))
 ;;

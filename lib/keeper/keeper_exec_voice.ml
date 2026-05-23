@@ -1,6 +1,8 @@
 open Keeper_types
 open Keeper_exec_shared
 
+let ok_json = Yojson.Safe.to_string
+
 let handle_keeper_voice_tool
       ~(meta : keeper_meta)
       ~(name : string)
@@ -38,7 +40,7 @@ let handle_keeper_voice_tool
              ~priority
              ()
          with
-         | Ok json -> Yojson.Safe.to_string json
+         | Ok json -> ok_json json
          | Error err ->
            Tool_args.error_response_with
              [ "agent_id", `String meta.name
@@ -56,7 +58,7 @@ let handle_keeper_voice_tool
          ?language_code
          ()
      with
-     | Ok json -> Yojson.Safe.to_string json
+     | Ok json -> ok_json json
      | Error err ->
        Tool_args.error_response_with
          [ "error", `String err
@@ -64,7 +66,7 @@ let handle_keeper_voice_tool
          ])
   | "keeper_voice_agent" ->
     (match Voice_bridge.get_agent_voice ~agent_id:meta.name with
-     | Ok json -> Yojson.Safe.to_string json
+     | Ok json -> ok_json json
      | Error err ->
        Tool_args.error_response_with
          [ "agent_id", `String meta.name

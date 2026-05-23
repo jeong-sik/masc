@@ -34,4 +34,8 @@ type t =
   | Simple of simple
   | Pipeline of t list            (** length >= 2 — head | middle* | tail *)
 
+val with_cwd : Path_scope.t option -> t -> t
+(** Update the [cwd] field of a [Simple] IR. Passes through [Pipeline]
+    unchanged — pipelines do not have a single cwd by construction. *)
+
 val pp : Format.formatter -> t -> unit

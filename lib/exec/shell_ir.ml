@@ -30,6 +30,11 @@ type t =
   | Simple of simple
   | Pipeline of t list
 
+let with_cwd cwd = function
+  | Simple s -> Simple { s with cwd }
+  | Pipeline _ as p -> p
+;;
+
 let rec pp_arg fmt = function
   | Lit (s, _) -> Format.fprintf fmt "%S" s
   | Var (name, _) -> Format.fprintf fmt "$%s" name

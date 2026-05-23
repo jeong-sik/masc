@@ -124,18 +124,17 @@ let handle ~op ~(meta : keeper_meta) ~(config : Coord.config) ~(args : Yojson.Sa
              ] @ route_fields @ ctx_fields @ extras))
     in
     let run_gh_command ~display_command ~parsed_command ~cwd
-        ~(ctx : Keeper_shell_gh_context.gh_repo_context option) =
+        ~(ctx : Keeper_shell_gh_context.gh_repo_context option)
+        ~base_ir =
       if reversibility = Masc_exec.Shell_ir_risk.R1_Reversible_mutation
       then
         Log.Keeper.info
           "gh_audit: keeper=%s reversibility=R1 cwd=%s cmd=%s"
           meta.name cwd display_command;
-      let gh_ir =
-        Keeper_gh_shared.gh_simple_command_to_shell_ir
-          ~sandbox:(Masc_exec.Sandbox_target.host ())
-          ~cwd
-          parsed_command
+      let cwd_scope =
+        Some (Masc_exec.Path_scope.classify ~raw:cwd ~cwd)
       in
+      let gh_ir = Masc_exec.Shell_ir.with_cwd cwd_scope base_ir in
       let gh_process =
         match
           Masc_exec_command_gate.Shell_command_gate.gate_typed
@@ -305,6 +304,7 @@ let handle ~op ~(meta : keeper_meta) ~(config : Coord.config) ~(args : Yojson.Sa
                      ~display_command:(gh_cmd_display parsed_cmd)
                      ~parsed_command:parsed_cmd
                      ~cwd:gh_cwd ~ctx:None
+                     ~base_ir:gh_classify_ir
                  else
                    (match
                       Keeper_shell_gh_context.resolve_gh_repo_context
@@ -337,10 +337,16 @@ let handle ~op ~(meta : keeper_meta) ~(config : Coord.config) ~(args : Yojson.Sa
                               ~repo_slug parsed_cmd
                           | None -> parsed_cmd
                         in
+                        let base_ir_cmd =
+                          Keeper_gh_shared.gh_simple_command_to_shell_ir
+                            ~sandbox:(Masc_exec.Sandbox_target.host ())
+                            cmd_to_run
+                        in
                         run_gh_command
                           ~display_command:(gh_cmd_display cmd_to_run)
                           ~parsed_command:cmd_to_run
                           ~cwd:ctx.worktree_cwd
-                          ~ctx:(Some ctx))))
+                          ~ctx:(Some ctx)
+                          ~base_ir:base_ir_cmd))))
        end)
 ;;

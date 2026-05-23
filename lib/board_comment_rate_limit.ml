@@ -48,8 +48,6 @@ let record ~author ~now =
   ts_ref := now :: !ts_ref
 ;;
 
-let reset () = Hashtbl.clear comment_timestamps
-
 (** [sweep_stale ~now ~window] drops timestamps older than [window]
     seconds from every author's entry, then removes any author whose
     list became empty. Called from [board_core] [sweep] as part of the

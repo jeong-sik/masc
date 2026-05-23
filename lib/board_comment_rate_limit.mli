@@ -17,9 +17,6 @@ val check : author:string -> now:float -> float option
     drift across concurrent attempts. *)
 val record : author:string -> now:float -> unit
 
-(** [reset ()] clears the tracker entirely. Test-only. *)
-val reset : unit -> unit
-
 (** [sweep_stale ~now ~window] expires per-author timestamps older
     than [window] seconds from [now] and removes any author whose list
     became empty. Called from the board-core sweep loop. *)

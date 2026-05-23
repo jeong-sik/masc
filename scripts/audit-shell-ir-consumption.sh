@@ -76,11 +76,11 @@ g1_allowed_files=(
 )
 g1_current_files=$(rg -l 'Bash\.parse_string|Masc_exec_bash_parser\.Bash\.parse_string' lib/ 2>/dev/null \
   | rg -v '/test/' \
-  | rg -v '\.dune$' \
+  | rg -v '/dune$|\.dune$' \
   | sort)
 g1_unclassified=()
 while IFS= read -r f; do
-  local found=0
+  found=0
   for allowed in "${g1_allowed_files[@]}"; do
     if [[ "$f" == "$allowed" ]]; then found=1; break; fi
   done

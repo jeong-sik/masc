@@ -41,3 +41,14 @@ val resolve_sandbox_root_git_cwd :
   cwd:string ->
   cmd:string ->
   string * string option
+
+val resolve_sandbox_root_git_cwd_of_stages :
+  config:Coord.config ->
+  meta:Keeper_types.keeper_meta ->
+  cwd:string ->
+  cmd:string ->
+  parsed_stage list ->
+  string * string option
+(** Pre-computed stages variant of [resolve_sandbox_root_git_cwd].
+    Callers that already hold [effective_stages_of_ir ir] pass them
+    directly to avoid re-parsing. *)

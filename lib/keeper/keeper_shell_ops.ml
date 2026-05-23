@@ -55,7 +55,8 @@ let handle_keeper_shell
         ?turn_sandbox_factory ~op
     in
     let run_git_cwd =
-      run_cwd ~max_bytes:1_000_000 ~timeout_sec:Keeper_shell_shared.read_timeout_sec
+      Keeper_shell_runtime.run_git_cwd_op ~root ~keeper_name:meta.name ~config ~meta
+        ?turn_sandbox_factory ~op
     in
     let run_cat_rt = run_cat ~timeout_sec:Keeper_shell_shared.read_timeout_sec in
     let run_head_tail_rt =

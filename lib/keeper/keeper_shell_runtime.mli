@@ -218,6 +218,23 @@ val run_wc_op :
   unit ->
   string
 
+(** Git cwd operation with standard git defaults [max_bytes:1_000_000]
+    and [timeout_sec:Keeper_shell_shared.read_timeout_sec].
+    Eliminates repeated default configuration across git handlers. *)
+val run_git_cwd_op :
+  root:string ->
+  keeper_name:string ->
+  config:Coord.config ->
+  meta:Keeper_types.keeper_meta ->
+  ?turn_sandbox_factory:Keeper_sandbox_factory.t ->
+  op:string ->
+  cwd:string ->
+  cmd:string ->
+  ?map_output:(string -> string) ->
+  command_argv:string list ->
+  unit ->
+  string
+
 val run_readonly_json_op :
   config:Coord.config ->
   meta:Keeper_types.keeper_meta ->

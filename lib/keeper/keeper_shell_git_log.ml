@@ -123,10 +123,7 @@ let handle ~op ~(meta : keeper_meta) ~(config : Coord.config) ~(args : Yojson.Sa
             Yojson.Safe.to_string json)
        | None ->
          let st, out =
-           Masc_exec.Exec_gate.run_argv_with_status
-             ~actor:`Keeper_shell
-             ~raw_source:(String.concat " " argv)
-             ~summary:"keeper shell op"
+           Keeper_shell_shared.run_argv_with_status_retry_eintr
              ~timeout_sec:Keeper_shell_shared.read_timeout_sec
              argv
          in

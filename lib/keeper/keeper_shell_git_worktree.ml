@@ -18,12 +18,12 @@ let handle
   | "list" ->
       Keeper_shell_runtime.with_cwd_target ~config ~meta ~args ~root ~op ~raw_path
         (fun cwd ->
-           Keeper_shell_runtime.run_cwd_op ~root ~keeper_name:meta.name ~op ~config ~meta
+           Keeper_shell_runtime.run_git_cwd_op ~root ~keeper_name:meta.name ~op ~config ~meta
              ?turn_sandbox_factory ~cwd
              ~cmd:"git worktree list"
              ~map_output:(Keeper_shell_runtime.hostify_turn_runtime_output ~config ~meta)
              ~command_argv:[ "git"; "worktree"; "list" ]
-             ~max_bytes:1_000_000 ~timeout_sec:Keeper_shell_shared.read_timeout_sec ())
+             ())
   | "add" ->
       let branch = Safe_ops.json_string ~default:"" "branch" args |> String.trim in
       let base = Safe_ops.json_string ~default:"origin/main" "base" args |> String.trim in
@@ -60,12 +60,10 @@ let handle
                let wt_path = Printf.sprintf ".worktrees/%s"
                  (String.map (fun c -> if c = '/' then '-' else c) branch)
                in
-               Keeper_shell_runtime.run_cwd_op ~root ~keeper_name:meta.name ~op ~config ~meta
+               Keeper_shell_runtime.run_git_cwd_op ~root ~keeper_name:meta.name ~op ~config ~meta
                  ?turn_sandbox_factory ~cwd
                  ~cmd:(Printf.sprintf "git worktree add %s -b %s %s" wt_path branch base)
                  ~command_argv:[ "git"; "worktree"; "add"; wt_path; "-b"; branch; base ]
-                 ~max_bytes:1_000_000
-                 ~timeout_sec:Keeper_shell_shared.read_timeout_sec
                  ())
   | other ->
       error_json_for_op ~op

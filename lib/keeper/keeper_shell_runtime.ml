@@ -414,3 +414,10 @@ let run_wc_op ~root ~keeper_name ~config ~meta ?turn_sandbox_factory ~op ~target
     render_completed_process_result ~root ~keeper_name ~op
       ~cmd:"wc" ~extra:[ "path", `String target; "via", `String via ] st out
 ;;
+
+let run_git_cwd_op ~root ~keeper_name ~config ~meta ?turn_sandbox_factory ~op ~cwd ~cmd ?map_output
+    ~command_argv ()
+  =
+  run_cwd_op ~root ~keeper_name ~config ~meta ?turn_sandbox_factory ~op ~cwd ~cmd ?map_output
+    ~command_argv ~max_bytes:1_000_000 ~timeout_sec:Keeper_shell_shared.read_timeout_sec ()
+;;

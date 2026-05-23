@@ -216,15 +216,10 @@ let handle_keeper_shell
               ~cmd:"git -C <cwd> --no-optional-locks log --format=<fmt> -<n>"
               ~docker_cmd ~timeout_sec:Keeper_shell_shared.read_timeout_sec)
        else
-         let argv = [ "git"; "-C"; cwd ] @ Keeper_shell_runtime.git_log_argv_core ~format ~count ~grep in
-         let argv = if file_path = "" then argv else argv @ [ "--"; file_path ] in
+         let argv = [ "git"; "-C"; cwd ] @ Keeper_shell_runtime.git_log_argv_core ~format ~count ~grep ~file_path () in
          (match Keeper_sandbox_factory.resolve_opt turn_sandbox_factory ~cwd with
           | Some runtime ->
-            let argv = Keeper_shell_runtime.git_log_argv_core ~format ~count ~grep in
-            let argv =
-              if file_path = "" then argv
-              else
-                let runtime_path =
+            let runtime_path =
                   if Filename.is_relative file_path then file_path
                   else
                     match
@@ -234,8 +229,7 @@ let handle_keeper_shell
                     | Ok mapped -> mapped
                     | Error _ -> file_path
                 in
-                argv @ [ "--"; runtime_path ]
-            in
+                let argv = Keeper_shell_runtime.git_log_argv_core ~format ~count ~grep ~file_path:runtime_path () in
             (match
                Keeper_turn_sandbox_runtime.run_command_with_status runtime
                  ~cwd ~command_argv:argv
@@ -261,7 +255,7 @@ let handle_keeper_shell
                    ~ok:true ~op
                    ~cwd:(Keeper_cwd_response.to_yojson_response cwd_response)
                    ~count ~grep ~via:"docker" ~status:st
-                   ~entries:(lines_to_json ~limit:50 out)
+                   ~output:out ~limit:50
                in
                Yojson.Safe.to_string json)
           | None ->
@@ -275,7 +269,7 @@ let handle_keeper_shell
               Keeper_shell_runtime.git_log_response_json
                 ~ok:(st = Unix.WEXITED 0) ~op ~cwd:(`String cwd)
                 ~count ~grep ~status:st
-                ~entries:(lines_to_json ~limit:50 out)
+                ~output:out ~limit:50
             in
             Yojson.Safe.to_string json))
   | "find" ->

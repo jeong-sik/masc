@@ -1,4 +1,5 @@
 open Keeper_types
+open Keeper_exec_shared
 
 (** Runtime helpers for keeper shell ops.
 
@@ -218,17 +219,21 @@ let docker_git_log_path ~config ~meta host_path =
   else Keeper_docker_read.container_path_of_host ~config ~meta ~host_path
 ;;
 
-let git_log_argv_core ~format ~count ~grep =
+let git_log_argv_core ~format ~count ~grep ?file_path () =
   let base =
     [ "git"; "--no-optional-locks"; "log"
     ; Printf.sprintf "--format=%s" format
     ; Printf.sprintf "-%d" count
     ]
   in
-  if grep = "" then base else base @ [ "--grep=" ^ grep ]
+  let base = if grep = "" then base else base @ [ "--grep=" ^ grep ] in
+  match file_path with
+  | None | Some "" -> base
+  | Some path -> base @ [ "--"; path ]
 ;;
 
-let git_log_response_json ~ok ~op ~cwd ~count ~grep ?via ~status ~entries =
+let git_log_response_json ~ok ~op ~cwd ~count ~grep ?via ~status ~output ~limit =
+  let entries = lines_to_json ~limit output in
   let fields =
     [ "ok", `Bool ok
     ; "op", `String op

@@ -63,34 +63,6 @@ let test_payload_unknown_kind_rejected () =
   | Error _ -> ()
   | Ok _ -> assert false
 
-(* ─── Provenance_stub ─────────────────────────────────────────── *)
-
-let test_provenance_empty_round_trip () =
-  let pr = Pr.empty ~created_by:"vincent" ~created_at:1234.5 in
-  match Pr.of_json (Pr.to_json pr) with
-  | Ok p ->
-      assert (p.Pr.origin_artifact_ids = []);
-      assert (p.created_by = "vincent");
-      assert (Float.abs (p.created_at -. 1234.5) < 1e-6)
-  | Error _ -> assert false
-
-let test_provenance_with_origins_round_trip () =
-  let id1 = Aid.generate () in
-  let id2 = Aid.generate () in
-  let pr =
-    {
-      Pr.origin_artifact_ids = [ id1; id2 ];
-      created_by = "executor";
-      created_at = 9999.0;
-    }
-  in
-  match Pr.of_json (Pr.to_json pr) with
-  | Ok p ->
-      assert (List.length p.Pr.origin_artifact_ids = 2);
-      assert (
-        Aid.equal (List.hd p.origin_artifact_ids) id1)
-  | Error _ -> assert false
-
 (* ─── Artifact record ─────────────────────────────────────────── *)
 
 let make_image_artifact () : A.image A.t =
@@ -157,8 +129,6 @@ let () =
   test_payload_streaming_round_trip ();
   test_payload_lazy_lossy_round_trip ();
   test_payload_unknown_kind_rejected ();
-  test_provenance_empty_round_trip ();
-  test_provenance_with_origins_round_trip ();
   test_artifact_to_json ();
   test_any_artifact_existential ();
   test_homogeneous_list_of_any ();

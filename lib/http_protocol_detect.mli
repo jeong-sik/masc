@@ -17,6 +17,9 @@ type protocol =
   | Http1
   | Http2
 
+val protocol_to_string : protocol -> string
+(** Human-readable label for the protocol variant. *)
+
 val detect :
   _ Eio.Net.stream_socket ->
   (protocol, string) result

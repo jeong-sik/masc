@@ -161,6 +161,7 @@ let workflow_rejection_scope_block_record counts key (info : Keeper_tools_oas_wo
     in
     let block =
       { Keeper_tools_oas_workflow.count = previous_count + 1
+      ; task_id = info.Keeper_tools_oas_workflow.task_id
       ; rule_id = info.Keeper_tools_oas_workflow.rule_id
       ; tool_suggestion = info.Keeper_tools_oas_workflow.tool_suggestion
       ; hint = info.Keeper_tools_oas_workflow.hint

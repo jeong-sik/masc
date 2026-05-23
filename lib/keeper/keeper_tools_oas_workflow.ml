@@ -14,6 +14,7 @@ type workflow_rejection_info =
 
 type workflow_rejection_block =
   { count : int
+  ; task_id : string option
   ; rule_id : string option
   ; tool_suggestion : string option
   ; hint : string option

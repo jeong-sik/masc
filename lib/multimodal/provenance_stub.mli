@@ -20,4 +20,7 @@ type t = {
   created_at : float;
 }
 
+val empty : created_by:string -> created_at:float -> t
+(** Minimal stub with no origin artifacts. *)
+
 val to_json : t -> Yojson.Safe.t

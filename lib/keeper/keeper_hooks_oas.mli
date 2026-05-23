@@ -194,6 +194,11 @@ val make_hooks :
     pre-tool gate, post-tool accounting, idle-detection, cost guard,
     and trajectory hooks all wired together. *)
 
+val trajectory_duration_ms : float -> int
+(** Clamp and round a duration in milliseconds for trajectory records.
+    Non-finite and negative values are floored to 0; sub-millisecond
+    positives are rounded up to 1 so that 0 always means "no duration". *)
+
 val hook_introspection_json :
   ?max_cost_usd:float -> ?destructive_check:bool -> unit -> Yojson.Safe.t
 (** JSON snapshot describing which hooks are active for the dashboard

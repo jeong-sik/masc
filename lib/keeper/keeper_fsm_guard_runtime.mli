@@ -24,3 +24,8 @@
 
 val wrap_unit : action:string -> stage:string -> (unit -> unit) -> unit
 
+val assert_mode_for_test : unit -> bool
+(** [true] — assert mode is always active in this build.
+    Used by tests to verify the runtime policy without relying on
+    env-var side effects. *)
+

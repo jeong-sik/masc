@@ -25,6 +25,15 @@
     Callers wrap their spawn invocation with [with_slot]; the helper
     blocks until a slot is available. *)
 
+val configured_max : unit -> int
+(** Effective concurrency cap read from [MASC_DOCKER_SPAWN_CONCURRENCY]
+    (default 8, clamped to 1..64). *)
+
+val effective_concurrency : unit -> int
+(** Current effective concurrency cap, accounting for FD-pressure
+    degradation.  When [Keeper_fd_pressure.active ()] is [true] this
+    returns [1] regardless of the configured maximum. *)
+
 val with_slot : (unit -> 'a) -> 'a
 (** [with_slot f] acquires a docker-spawn slot, runs [f ()], releases
     the slot, and returns [f]'s result. If [Keeper_fd_pressure.active ()]

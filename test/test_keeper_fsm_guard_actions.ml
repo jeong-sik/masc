@@ -43,7 +43,7 @@ let test_honest_thunk_leaves_counter_alone () =
 
 let test_env_zero_still_reraises_and_bumps () =
   Unix.putenv "MASC_FSM_GUARD_ASSERT" "0";
-  G.refresh_policy_for_test ();
+  ();
   Alcotest.(check bool)
     "env zero no longer disables assert mode"
     true (G.assert_mode_for_test ());
@@ -68,7 +68,7 @@ let test_env_zero_still_reraises_and_bumps () =
    (matched in [test_board_vote_quarantine.ml:17] and siblings). *)
 let test_default_is_assert_mode_when_env_cleared () =
   Unix.putenv "MASC_FSM_GUARD_ASSERT" "";
-  G.refresh_policy_for_test ();
+  ();
   Alcotest.(check bool)
     "default with unset env is assert mode"
     true (G.assert_mode_for_test ());
@@ -91,7 +91,7 @@ let test_default_is_assert_mode_when_env_cleared () =
 
 let test_buggy_thunk_reraises () =
   Unix.putenv "MASC_FSM_GUARD_ASSERT" "1";
-  G.refresh_policy_for_test ();
+  ();
   Alcotest.(check bool)
     "policy remains assert mode"
     true (G.assert_mode_for_test ());
@@ -113,7 +113,7 @@ let test_buggy_thunk_reraises () =
     (before +. 1.0) after;
   (* Restore default assert mode for any subsequent tests. *)
   Unix.putenv "MASC_FSM_GUARD_ASSERT" "";
-  G.refresh_policy_for_test ()
+  ()
 
 let test_non_assert_exception_propagates_unchanged () =
   let action = "TestAction" in

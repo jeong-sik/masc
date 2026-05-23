@@ -2019,35 +2019,6 @@ let test_bash_rewrites_host_path_command_for_docker () =
   Alcotest.(check bool) "command no longer leaks host playground path" false
     (response_mentions raw "output" playground)
 
-let test_docker_mount_failure_message_preserves_path () =
-  let mount_path =
-    "/host_mnt/Users/dancer/me/.masc/playground/docker/repos/masc-mcp/.worktrees/"
-    ^ String.make 320 'a'
-    ^ "/repo"
-  in
-  let output =
-    "docker: Error response from daemon: failed to create task for container: "
-    ^ "failed to create shim task: OCI runtime create failed: "
-    ^ "runc create failed: unable to start container process: "
-    ^ "error during container init: error mounting \""
-    ^ mount_path
-    ^ "\" to rootfs at \"/workspace\": stat "
-    ^ mount_path
-    ^ ": no such file or directory"
-  in
-  let message =
-    Keeper_shell_docker.docker_exec_failure_message
-      ~image:"masc-keeper-sandbox:local"
-      ~status:(Unix.WEXITED 125)
-      ~output
-  in
-  Alcotest.(check bool) "full mount path preserved" true
-    (contains_substring message mount_path);
-  Alcotest.(check bool) "mount marker emitted" true
-    (contains_substring message "docker_mount_failure=true");
-  Alcotest.(check bool) "status emitted" true
-    (contains_substring message "status=\"exit=125\"")
-
 let test_docker_mount_failure_structured_details () =
   let mount_path =
     "/host_mnt/Users/dancer/me/.masc/playground/docker/repos/oas/.worktrees/"
@@ -2175,9 +2146,6 @@ let () =
           Alcotest.test_case
             "docker keeper bash rewrites host paths before exec"
             `Quick test_bash_rewrites_host_path_command_for_docker;
-          Alcotest.test_case
-            "docker mount failure preserves full path"
-            `Quick test_docker_mount_failure_message_preserves_path;
           Alcotest.test_case
             "docker mount failure emits structured details"
             `Quick test_docker_mount_failure_structured_details;

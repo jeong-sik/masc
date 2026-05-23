@@ -9,6 +9,11 @@
 
     Should be called exactly once during server bootstrap. *)
 
+val effective_level : Agent_sdk.Log.record -> Log.level
+(** Map an OAS log record to the masc-mcp level that will actually
+    be emitted, accounting for promotion rules (e.g. MCP server
+    failures bumped from Warn to Error). *)
+
 val install : unit -> unit
 (** Register the OAS → masc-mcp log sink as a global OAS sink.  Call
     once before any keeper turn fires an LLM call.  Idempotent via an

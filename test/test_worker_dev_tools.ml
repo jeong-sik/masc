@@ -686,6 +686,11 @@ let test_workdir_enforcement () =
   (if Sys.file_exists ok_path then Sys.remove ok_path);
   (try Unix.rmdir "/tmp/test_workdir" with _ -> ())
 
+let is_destructive cmd =
+  match Masc_exec_bash_parser.Bash.parse_string cmd with
+  | Masc_exec.Parsed.Parsed ir -> Worker_dev_tools.is_destructive_bash_operation ir
+  | _ -> false
+
 (* --- Test runner --- *)
 
 let () =
@@ -1012,14 +1017,9 @@ let () =
         | Ok () -> Alcotest.fail "should reject command outside custom allowlist");
     ];
     "is_destructive_bash_operation", [
-      let is_destructive cmd =
-        match Masc_exec_bash_parser.Bash.parse_string cmd with
-        | Masc_exec.Parsed.Parsed ir -> Worker_dev_tools.is_destructive_bash_operation ir
-        | _ -> false
-      in
       Alcotest.test_case "blocks force push" `Quick (fun () ->
         Alcotest.(check bool) "force push" true
-          (is_destructive "git push --force"));
+          (is_destructive"git push --force"));
       Alcotest.test_case "blocks push -f" `Quick (fun () ->
         Alcotest.(check bool) "push -f" true
           (is_destructive "git push -f origin feature"));

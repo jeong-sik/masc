@@ -41,6 +41,11 @@ val parse_prefix : string -> t option
     insensitive).  Used by [keeper_failure_circuit_breaker] to
     classify path-check errors without substring matching. *)
 
+val message_prefix : t -> string
+(** Stable lowercase prefix for the variant — identical to the start
+    of [to_message] so that downstream substring classifiers keep
+    working during the typed-transition period. *)
+
 val to_message : t -> string
 (** Render the user-facing error message — keeps the prior wording
     so downstream tools that match on these messages keep their

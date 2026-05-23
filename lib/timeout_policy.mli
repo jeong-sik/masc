@@ -47,7 +47,15 @@ module Deadline : sig
     -> t
 
   val elapsed : t -> now:float -> float
+
+  val remaining : t -> now:float -> float
+  (** Wall-clock seconds left before the deadline expires.
+      Negative when [now] is past the cap. *)
 end
+
+val metric_overshoot_total : string
+(** Canonical Prometheus metric name for the overshoot counter.
+    Kept stable so downstream dashboards and alert rules do not drift. *)
 
 val overshoot_warn
   :  ?slack_s:float

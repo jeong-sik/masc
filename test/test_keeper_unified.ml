@@ -3695,88 +3695,12 @@ let test_metrics_surface_model_prefers_successful_cascade_label () =
     string
     "helper redacts surface model"
     "runtime"
-    (KAR.surface_model_used result);
+    (KAR.runtime_lane_label);
   check
     string
     "last_model_used no longer stores concrete surface label"
     ""
     updated.runtime.usage.last_model_used
-;;
-
-(* Provider/model identity is OAS-owned; MASC status/metrics helpers keep the
-   legacy fields but collapse both display and resolved ids to the runtime
-   lane. *)
-let test_metrics_resolved_model_id_prefers_last_attempt_id () =
-  let result =
-    make_run_result
-      ~text:"I checked the board."
-      ~tools:[]
-      ~model:"claude-opus-4-6"
-      ~input_tok:100
-      ~output_tok:50
-      ~cascade_observation:
-        { Masc_mcp.Cascade_legacy_runner.cascade_name =
-            Masc_mcp.Keeper_cascade_profile.Runtime_name
-              Masc_mcp.(Keeper_config.default_cascade_name ())
-        ; strategy = Some "round_robin"
-        ; configured_labels = [ "claude_code:auto" ]
-        ; candidate_models = [ "claude-sonnet-4-6"; "claude-opus-4-6" ]
-        ; primary_model = Some "claude-sonnet-4-6"
-        ; selected_model = Some "claude-opus-4-6"
-        ; selected_model_raw = Some "claude-opus-4-6"
-        ; selected_index = None
-        ; fallback_hops = Some 1
-        ; fallback_applied = true
-        ; attempts =
-            [ { Masc_mcp.Cascade_legacy_runner.attempt_index = 0
-              ; model_id = "claude-sonnet-4-6"
-              ; model_label = Some "claude_code:auto"
-              ; latency_ms = None
-              ; error = Some "HTTP 503"
-              }
-            ; { attempt_index = 1
-              ; model_id = "claude-opus-4-6"
-              ; model_label = Some "claude_code:auto"
-              ; latency_ms = Some 187
-              ; error = None
-              }
-            ]
-        ; fallback_events = []
-        ; attempt_details_available = true
-        ; attempt_details_source = "oas_metrics_callbacks"
-        ; oas_internal_cascade_allowed = false
-        }
-      ()
-  in
-  check
-    string
-    "surface_model_used returns runtime lane"
-    "runtime"
-    (KAR.surface_model_used result);
-  check
-    string
-    "surface_resolved_model_id returns runtime lane"
-    "runtime"
-    (KAR.surface_resolved_model_id result)
-;;
-
-(* Non-cascade keeper turns are redacted the same way: provider-reported
-   model_used remains an OAS bridge detail, not a MASC surface. *)
-let test_metrics_resolved_model_id_fallback_to_model_used () =
-  let result =
-    make_run_result
-      ~text:"ok"
-      ~tools:[]
-      ~model:"claude-opus-4-6"
-      ~input_tok:10
-      ~output_tok:5
-      ()
-  in
-  check
-    string
-    "surface_resolved_model_id redacts provider model"
-    "runtime"
-    (KAR.surface_resolved_model_id result)
 ;;
 
 let test_metrics_tool_response () =
@@ -11409,14 +11333,6 @@ let () =
             "surface model prefers successful cascade label"
             `Quick
             test_metrics_surface_model_prefers_successful_cascade_label
-        ; test_case
-            "resolved_model_id prefers last attempt id (#9953)"
-            `Quick
-            test_metrics_resolved_model_id_prefers_last_attempt_id
-        ; test_case
-            "resolved_model_id falls back to model_used (#9953)"
-            `Quick
-            test_metrics_resolved_model_id_fallback_to_model_used
         ; test_case "tool response" `Quick test_metrics_tool_response
         ; test_case "noop response" `Quick test_metrics_noop_response
         ; test_case

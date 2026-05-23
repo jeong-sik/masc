@@ -25,8 +25,8 @@ let append_metrics_snapshot ~(config : Coord.config) ~(meta : keeper_meta)
   let now_ts = Time_compat.now () in
   let _observation = observation in
   let turn_mode = turn_mode_of_result result in
-  let surface_model_used = Keeper_agent_run.surface_model_used result in
-  let resolved_model_id = Keeper_agent_run.surface_resolved_model_id result in
+  let surface_model_used = Keeper_agent_run.runtime_lane_label in
+  let resolved_model_id = Keeper_agent_run.runtime_lane_label in
   let usage_trust =
     classify_usage_trust
       ~usage_reported:result.usage_reported

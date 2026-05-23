@@ -69,8 +69,3 @@ type run_result =
 (* RFC-0132 PR-2: agent-result surface label = external boundary; redact via SSOT. *)
 let runtime_lane_label =
   Boundary_redaction.to_string Boundary_redaction.runtime_model_label
-
-let surface_model_used (_result : run_result) : string = runtime_lane_label
-
-let surface_resolved_model_id (_result : run_result) : string =
-  runtime_lane_label

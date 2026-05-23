@@ -140,7 +140,7 @@ let read_target ~config ~meta ~args ~root =
 ;;
 
 let cwd_target ~config ~meta ~args ~root =
-  match Keeper_shell_shared.resolve_keeper_shell_read_cwd ~config ~meta ~args with
+  match Keeper_shell_path.resolve_keeper_shell_read_cwd ~config ~meta ~args with
   | Error _ as e -> e
   | Ok cwd ->
     (match containment_check ~config ~meta cwd with

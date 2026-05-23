@@ -8,21 +8,8 @@ let handle_keeper_shell
       ~(meta : keeper_meta)
       ~(args : Yojson.Safe.t)
   =
-  let raw_op =
+  let op_str =
     Safe_ops.json_string ~default:"" "op" args |> String.trim |> String.lowercase_ascii
-  in
-  (* Normalize common aliases so the model's naming variation doesn't cause
-     unsupported_op failures. *)
-  let op_str = match raw_op with
-    | "git status" | "status" -> "git_status"
-    | "git log" -> "git_log"
-    | "git diff" -> "git_diff"
-    | "git worktree" | "worktree" -> "git_worktree"
-    | "read" | "file" | "type" -> "cat"
-    | "grep" | "search" -> "rg"
-    | "dir" | "list" -> "ls"
-    | "git clone" | "clone" -> "git_clone"
-    | _ -> raw_op
   in
   let root = Keeper_alerting_path.project_root_of_config config in
   let raw_path = Safe_ops.json_string ~default:"" "path" args |> String.trim in

@@ -53,7 +53,7 @@ let handle_keeper_bash_typed
       ()
   =
   let root = Keeper_alerting_path.project_root_of_config config in
-  match Keeper_shell_shared.resolve_keeper_shell_write_cwd ~config ~meta ~args with
+  match Keeper_shell_path.resolve_keeper_shell_write_cwd ~config ~meta ~args with
     | Error e -> error_json e
     | Ok cwd ->
       let typed_args = assoc_upsert "cwd" (`String cwd) args in

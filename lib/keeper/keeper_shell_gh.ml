@@ -311,7 +311,7 @@ let handle ~op ~(meta : keeper_meta) ~(config : Coord.config) ~(args : Yojson.Sa
                     ])
             | Ok () ->
               (match
-                 Keeper_shell_shared.resolve_keeper_shell_write_cwd
+                 Keeper_shell_path.resolve_keeper_shell_write_cwd
                    ~config ~meta ~args
                with
                | Error e -> error_json e

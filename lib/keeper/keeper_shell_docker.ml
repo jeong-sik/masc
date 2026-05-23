@@ -161,35 +161,7 @@ let effective_sandbox_profile ~(meta : keeper_meta) ~in_playground =
 ;;
 
 (* ── Nested runtime detection ──────────────────────────── *)
-
-(* Nested-container runtime detection extracted to
-   [Keeper_shell_docker_nested_runtime] (godfile decomp). *)
-module Nested_runtime = Keeper_shell_docker_nested_runtime
-
-let nested_container_runtime_tokens = Nested_runtime.nested_container_runtime_tokens
-let sandbox_socket_markers = Nested_runtime.sandbox_socket_markers
-
-type shell_guard_token = Nested_runtime.shell_guard_token =
-  | Guard_word of string * bool
-  | Guard_separator
-
-let shell_guard_tokens = Nested_runtime.shell_guard_tokens
-let shell_assignment_like = Nested_runtime.shell_assignment_like
-let env_option_takes_arg = Nested_runtime.env_option_takes_arg
-let env_option_like = Nested_runtime.env_option_like
-let env_split_string_inline_value = Nested_runtime.env_split_string_inline_value
-let shell_interpreter_names = Nested_runtime.shell_interpreter_names
-let is_shell_interpreter = Nested_runtime.is_shell_interpreter
-let word_contains_runtime_token = Nested_runtime.word_contains_runtime_token
-let shell_c_payload = Nested_runtime.shell_c_payload
-let command_word_mentions_nested_runtime = Nested_runtime.command_word_mentions_nested_runtime
-
-let command_substitution_mentions_nested_runtime =
-  Nested_runtime.command_substitution_mentions_nested_runtime
-;;
-
-let unquoted_word_mentions_socket_marker = Nested_runtime.unquoted_word_mentions_socket_marker
-let command_uses_nested_container_runtime = Nested_runtime.command_uses_nested_container_runtime
+include Keeper_shell_docker_nested_runtime
 
 (* ── Sandbox runtime preflight ─────────────────────────── *)
 

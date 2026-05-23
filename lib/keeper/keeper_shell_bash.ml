@@ -134,6 +134,8 @@ let handle_keeper_bash_typed
         let envelope =
           Masc_exec.Shell_ir_risk.classify (Masc_exec.Shell_ir_risk.undecided ir)
         in
+        let ir_risk = envelope.Masc_exec.Shell_ir_risk.ir in
+        let typed_error_json msg = error_json ~fields:typed_error_fields msg in
         if Masc_exec.Shell_ir_risk.is_destructive envelope
         then
           blocked_result
@@ -160,7 +162,7 @@ let handle_keeper_bash_typed
             let gate_verdict =
               Shell_gate.gate_typed
                 ~caller:Shell_gate.Keeper_shell_bash
-                ~ir:envelope.Masc_exec.Shell_ir_risk.ir
+                ~ir:ir_risk
                 ~allowlist:{ allowed_commands; allow_pipes = true; redirect_allowed = true }
                 ~path_policy:Shell_gate.allow_all_paths
                 ~sandbox:{ target = dispatch_sandbox }
@@ -178,11 +180,11 @@ let handle_keeper_bash_typed
             in
             match gate_verdict with
             | Reject { diagnostic; _ } ->
-              error_json ~fields:typed_error_fields diagnostic
+              typed_error_json diagnostic
             | Cannot_parse _ ->
-              error_json ~fields:typed_error_fields "Cannot parse command"
+              typed_error_json "Cannot parse command"
             | Too_complex _ ->
-              error_json ~fields:typed_error_fields "Command too complex"
+              typed_error_json "Command too complex"
             | Allow _context ->
             let path_validation =
               match

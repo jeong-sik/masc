@@ -256,17 +256,14 @@ let handle_keeper_shell
                      (Keeper_turn_sandbox_runtime.container_cwd_of_host
                         runtime ~host_cwd:cwd)
                in
-               Yojson.Safe.to_string
-                 (`Assoc
-                     [ "ok", `Bool true
-                     ; "op", `String op
-                     ; "cwd", Keeper_cwd_response.to_yojson_response cwd_response
-                     ; "count", `Int count
-                     ; "grep", `String grep
-                     ; "via", `String "docker"
-                     ; "status", Keeper_alerting_path.process_status_to_json st
-                     ; "entries", lines_to_json ~limit:50 out
-                     ]))
+               let json =
+                 Keeper_shell_runtime.git_log_response_json
+                   ~ok:true ~op
+                   ~cwd:(Keeper_cwd_response.to_yojson_response cwd_response)
+                   ~count ~grep ~via:"docker" ~status:st
+                   ~entries:(lines_to_json ~limit:50 out)
+               in
+               Yojson.Safe.to_string json)
           | None ->
             let st, out =
               Masc_exec.Exec_gate.run_argv_with_status ~actor:`Keeper_shell
@@ -274,16 +271,13 @@ let handle_keeper_shell
                 ~summary:"keeper shell op"
                 ~timeout_sec:Keeper_shell_shared.read_timeout_sec argv
             in
-            Yojson.Safe.to_string
-              (`Assoc
-                  [ "ok", `Bool (st = Unix.WEXITED 0)
-                  ; "op", `String op
-                  ; "cwd", `String cwd
-                  ; "count", `Int count
-                  ; "grep", `String grep
-                  ; "status", Keeper_alerting_path.process_status_to_json st
-                  ; "entries", lines_to_json ~limit:50 out
-                  ])))
+            let json =
+              Keeper_shell_runtime.git_log_response_json
+                ~ok:(st = Unix.WEXITED 0) ~op ~cwd:(`String cwd)
+                ~count ~grep ~status:st
+                ~entries:(lines_to_json ~limit:50 out)
+            in
+            Yojson.Safe.to_string json))
   | "find" ->
     let name_pattern =
       let pattern = Safe_ops.json_string ~default:"" "pattern" args |> String.trim in

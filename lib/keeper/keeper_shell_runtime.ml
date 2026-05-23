@@ -228,6 +228,24 @@ let git_log_argv_core ~format ~count ~grep =
   if grep = "" then base else base @ [ "--grep=" ^ grep ]
 ;;
 
+let git_log_response_json ~ok ~op ~cwd ~count ~grep ?via ~status ~entries =
+  let fields =
+    [ "ok", `Bool ok
+    ; "op", `String op
+    ; "cwd", cwd
+    ; "count", `Int count
+    ; "grep", `String grep
+    ; "status", Keeper_alerting_path.process_status_to_json status
+    ; "entries", entries
+    ]
+  in
+  let fields = match via with
+    | None -> fields
+    | Some v -> fields @ [ "via", `String v ]
+  in
+  `Assoc fields
+;;
+
 let containment_check ~config ~meta target =
   Keeper_sandbox_containment.check_read_target ~config ~meta ~target
 ;;

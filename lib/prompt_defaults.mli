@@ -14,13 +14,26 @@
     Internal helpers (the [existing_dir] predicate, the
     [prompt_markdown_dir_candidates] list, and the
     [bootstrapped_signature] memo ref) are hidden — callers
-    consume only the entry point below. *)
+    consume only the entry points below. *)
 
 val resolve_prompt_markdown_dir :
   workspace_path:string -> base_path:string -> string
 (** Return the first existing prompt markdown directory from the
     candidate list, falling back to {!Config_dir_resolver.prompts_dir}
     when none exist yet. *)
+
+val init : unit -> unit
+(** Lightweight fixture-level setup. Installs the prompt-registry
+    failure observer and, if a markdown directory has been set on
+    {!Prompt_registry} (e.g. via [Prompt_registry.set_markdown_dir]
+    in a test fixture), loads every prompt file from it. No-op when
+    no directory is set.
+
+    Distinct from {!bootstrap_runtime}: this helper does not resolve
+    a directory from the workspace/base-path candidates and does not
+    restore persisted operator overrides from disk — both of which
+    are server-startup concerns. Tests that pin a markdown directory
+    and want to populate the registry use this entry point. *)
 
 val bootstrap_runtime :
   workspace_path:string ->

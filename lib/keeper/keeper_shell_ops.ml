@@ -73,7 +73,7 @@ let handle_keeper_shell
     match shell_op with
     | Pwd ->
       with_cwd (fun cwd ->
-        run_cwd ~cwd ~cmd:"pwd" ~docker_cmd:"pwd"
+        run_cwd ~cwd ~cmd:"pwd"
           ~command_argv:[ Keeper_shell_runtime.coreutils.pwd ]
           ~map_output:(Keeper_shell_runtime.hostify_turn_runtime_output ~config ~meta)
           ~max_bytes:4096 ~timeout_sec:Keeper_shell_shared.io_timeout_sec ())
@@ -81,7 +81,6 @@ let handle_keeper_shell
       with_cwd (fun cwd ->
         run_git_cwd ~cwd
           ~cmd:"git -C <cwd> --no-optional-locks status --short --branch"
-          ~docker_cmd:"git --no-optional-locks status --short --branch"
           ~command_argv:(git_nolock_argv [ "status"; "--short"; "--branch" ])
           ())
     | Ls ->
@@ -112,7 +111,6 @@ let handle_keeper_shell
     | Git_diff ->
       with_cwd (fun cwd ->
         run_git_cwd ~cwd ~cmd:"git diff --stat"
-          ~docker_cmd:"git --no-optional-locks diff --stat"
           ~command_argv:(git_nolock_argv [ "diff"; "--stat" ])
           ())
     | Git_worktree ->

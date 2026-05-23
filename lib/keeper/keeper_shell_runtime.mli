@@ -151,7 +151,6 @@ val run_cwd_op :
   ?turn_sandbox_factory:Keeper_sandbox_factory.t ->
   cwd:string ->
   cmd:string ->
-  docker_cmd:string ->
   ?map_output:(string -> string) ->
   command_argv:string list ->
   max_bytes:int ->

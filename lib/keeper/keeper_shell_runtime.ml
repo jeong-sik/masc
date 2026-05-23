@@ -282,13 +282,13 @@ let run_cwd_op
       ?turn_sandbox_factory
       ~cwd
       ~cmd
-      ~docker_cmd
       ?(map_output = fun out -> out)
       ~command_argv
       ~max_bytes
       ~timeout_sec
       ()
   =
+  let docker_cmd = String.concat " " command_argv in
   if Keeper_docker_read.should_route_read ~meta
   then
     render_docker_process_result ~root ~keeper_name ~op ~config ~meta ~cwd ~cmd

@@ -21,7 +21,6 @@ let handle
            Keeper_shell_runtime.run_cwd_op ~root ~keeper_name:meta.name ~op ~config ~meta
              ?turn_sandbox_factory ~cwd
              ~cmd:"git worktree list"
-             ~docker_cmd:"git worktree list"
              ~map_output:(Keeper_shell_runtime.hostify_turn_runtime_output ~config ~meta)
              ~command_argv:[ "git"; "worktree"; "list" ]
              ~max_bytes:1_000_000 ~timeout_sec:Keeper_shell_shared.read_timeout_sec ())

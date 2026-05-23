@@ -172,9 +172,15 @@ let one_of_required_shape_error schema = function
     if groups = []
     then None
     else (
-      let has name = List.mem_assoc name fields in
+      let has_present name =
+        match List.assoc_opt name fields with
+        | None -> false
+        | Some `Null -> false
+        | Some (`List []) -> false
+        | Some _ -> true
+      in
       let matching_groups =
-        List.filter (fun required -> List.for_all has required) groups
+        List.filter (fun required -> List.for_all has_present required) groups
       in
       match matching_groups with
       | [ _ ] -> None

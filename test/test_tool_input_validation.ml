@@ -1008,6 +1008,104 @@ let test_registered_hook_required_enum_blank_is_not_stripped () =
     (assoc_string "mode" forwarded)
 
 (* ================================================================ *)
+(* Test: oneOf with empty/null values (regression guard)             *)
+(* ================================================================ *)
+
+(** Simulate LLM populating all oneOf branches with empty values.
+    Before fix: List.mem_assoc matched on key presence alone,
+    treating pipeline:[] as a valid group match, causing false
+    "multiple mutually exclusive schemas" rejection. *)
+let test_validate_args_keeper_bash_oneof_empty_pipeline () =
+  let args =
+    `Assoc
+      [ "executable", `String "pwd"
+      ; "pipeline", `List []
+      ]
+  in
+  match
+    Tool_input_validation.validate_args
+      ~schema:keeper_bash_schema
+      ~name:"keeper_bash"
+      ~args
+      ()
+  with
+  | Ok forwarded ->
+    Alcotest.(check string) "executable preserved" "pwd"
+      (assoc_string "executable" forwarded)
+  | Error result ->
+    Alcotest.failf
+      "expected keeper_bash with executable + empty pipeline to pass, got %s"
+      (Yojson.Safe.to_string result.Tool_result.data)
+
+let test_validate_args_keeper_bash_oneof_null_stages () =
+  let args =
+    `Assoc
+      [ "executable", `String "ls"
+      ; "stages", `Null
+      ]
+  in
+  match
+    Tool_input_validation.validate_args
+      ~schema:keeper_bash_schema
+      ~name:"keeper_bash"
+      ~args
+      ()
+  with
+  | Ok forwarded ->
+    Alcotest.(check string) "executable preserved" "ls"
+      (assoc_string "executable" forwarded)
+  | Error result ->
+    Alcotest.failf
+      "expected keeper_bash with executable + null stages to pass, got %s"
+      (Yojson.Safe.to_string result.Tool_result.data)
+
+let test_validate_args_keeper_bash_oneof_all_empty () =
+  let args =
+    `Assoc
+      [ "executable", `String "echo"
+      ; "pipeline", `List []
+      ; "stages", `Null
+      ]
+  in
+  match
+    Tool_input_validation.validate_args
+      ~schema:keeper_bash_schema
+      ~name:"keeper_bash"
+      ~args
+      ()
+  with
+  | Ok forwarded ->
+    Alcotest.(check string) "executable preserved" "echo"
+      (assoc_string "executable" forwarded)
+  | Error result ->
+    Alcotest.failf
+      "expected keeper_bash with executable + empty others to pass, got %s"
+      (Yojson.Safe.to_string result.Tool_result.data)
+
+let test_validate_args_keeper_bash_oneof_real_pipeline_rejects_empty_exec () =
+  let args =
+    `Assoc
+      [ "executable", `Null
+      ; "pipeline", `List
+          [ `Assoc [ "executable", `String "echo"; "argv", `List [] ] ]
+      ]
+  in
+  match
+    Tool_input_validation.validate_args
+      ~schema:keeper_bash_schema
+      ~name:"keeper_bash"
+      ~args
+      ()
+  with
+  | Ok forwarded ->
+    Alcotest.(check bool) "executable not in forwarded" true
+      (Yojson.Safe.Util.member "executable" forwarded = `Null)
+  | Error result ->
+    Alcotest.failf
+      "expected keeper_bash pipeline with null exec to pass shape validation, got %s"
+      (Yojson.Safe.to_string result.Tool_result.data)
+
+(* ================================================================ *)
 (* Runner                                                            *)
 (* ================================================================ *)
 
@@ -1080,6 +1178,14 @@ let () =
         test_validate_args_keeper_bash_accepts_typed_pipeline;
       Alcotest.test_case "keeper_bash rejects bad typed argv" `Quick
         test_validate_args_keeper_bash_rejects_bad_argv_type;
+      Alcotest.test_case "keeper_bash oneOf: executable + empty pipeline" `Quick
+        test_validate_args_keeper_bash_oneof_empty_pipeline;
+      Alcotest.test_case "keeper_bash oneOf: executable + null stages" `Quick
+        test_validate_args_keeper_bash_oneof_null_stages;
+      Alcotest.test_case "keeper_bash oneOf: executable + all empty" `Quick
+        test_validate_args_keeper_bash_oneof_all_empty;
+      Alcotest.test_case "keeper_bash oneOf: pipeline + null exec" `Quick
+        test_validate_args_keeper_bash_oneof_real_pipeline_rejects_empty_exec;
       Alcotest.test_case "direct validation uses explicit schema" `Quick
         test_validate_args_uses_explicit_schema_without_registry;
       Alcotest.test_case "direct keeper_board_post accepts sources array" `Quick

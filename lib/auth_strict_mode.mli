@@ -26,12 +26,6 @@ val current : unit -> t
     default to [Dry_run] so that operator omissions do not silently disable
     measurement. *)
 
-val of_string : string -> t
-(** Pure parser exposed for unit tests.  Accepts ["off" | "0" | "false" |
-    "dry_run" | "dry-run" | "strict" | "1" | "true"], case-insensitive.
-    Any other input returns [Dry_run] (fail-open for telemetry, fail-closed
-    promotion happens in Phase B). *)
-
 val to_label : t -> string
 (** [to_label Off = "off"], [Dry_run = "dry_run"], [Strict = "strict"].
     Used as the Prometheus [mode] label so operators can break down

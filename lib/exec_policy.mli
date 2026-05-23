@@ -60,20 +60,12 @@ val validate_command_coding :
 val simple_literal_args : Masc_exec.Shell_ir.simple -> string list option
 
 val existing_dir_path_values_of_shell_ir : Masc_exec.Shell_ir.t -> string list
-val existing_dir_path_values : string -> string list
 
 val validate_shell_ir_paths :
   ?keeper_id:string ->
   ?base_path:string ->
   ?workdir:string ->
   Masc_exec.Shell_ir.t ->
-  (unit, string) result
-
-val validate_command_paths :
-  ?keeper_id:string ->
-  ?base_path:string ->
-  ?workdir:string ->
-  string ->
   (unit, string) result
 
 (** RFC-0160 S1: IR-typed structural mutation classifiers. *)

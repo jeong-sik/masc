@@ -430,20 +430,22 @@ let run_docker_shell_command_with_status_internal
           let validation_cmd =
             rewrite_docker_command_paths_for_host_validation ~config ~meta cmd
           in
-          (match
-             Keeper_task_worktree_lazy.ensure_command_existing_dirs
-               ~config
-               ~meta
-               ~cwd
-               ~cmd:validation_cmd
-           with
-           | Error e -> Error e
-           | Ok () ->
-             Exec_policy.validate_command_paths
-               ~keeper_id:meta.name
-               ~base_path:(Keeper_alerting_path.project_root_of_config config)
-               ~workdir:cwd
-               validation_cmd)
+          (match Masc_exec_bash_parser.Bash.parse_string validation_cmd with
+           | Masc_exec.Parsed.Parsed validation_ir ->
+             (match
+                Keeper_task_worktree_lazy.ensure_shell_ir_existing_dirs
+                  ~config ~meta ~cwd ~ir:validation_ir
+              with
+              | Error e -> Error e
+              | Ok () ->
+                Exec_policy.validate_shell_ir_paths
+                  ~keeper_id:meta.name
+                  ~base_path:(Keeper_alerting_path.project_root_of_config config)
+                  ~workdir:cwd
+                  validation_ir)
+           | Masc_exec.Parsed.Parse_error _
+           | Masc_exec.Parsed.Parse_aborted _
+           | Masc_exec.Parsed.Too_complex _ -> Ok ())
         else Ok ()
       in
       match path_validation with
@@ -792,20 +794,22 @@ let run_docker_credentialed_bash
            rewrite_docker_command_paths_for_host_validation ~config ~meta cmd
          in
          let path_validation =
-           match
-             Keeper_task_worktree_lazy.ensure_command_existing_dirs
-               ~config
-               ~meta
-               ~cwd
-               ~cmd:validation_cmd
-           with
-           | Error e -> Error e
-           | Ok () ->
-             Exec_policy.validate_command_paths
-               ~keeper_id:meta.name
-               ~base_path:(Keeper_alerting_path.project_root_of_config config)
-               ~workdir:cwd
-               validation_cmd
+           match Masc_exec_bash_parser.Bash.parse_string validation_cmd with
+           | Masc_exec.Parsed.Parsed validation_ir ->
+             (match
+                Keeper_task_worktree_lazy.ensure_shell_ir_existing_dirs
+                  ~config ~meta ~cwd ~ir:validation_ir
+              with
+              | Error e -> Error e
+              | Ok () ->
+                Exec_policy.validate_shell_ir_paths
+                  ~keeper_id:meta.name
+                  ~base_path:(Keeper_alerting_path.project_root_of_config config)
+                  ~workdir:cwd
+                  validation_ir)
+           | Masc_exec.Parsed.Parse_error _
+           | Masc_exec.Parsed.Parse_aborted _
+           | Masc_exec.Parsed.Too_complex _ -> Ok ()
          in
          (match path_validation with
           | Error err -> sandbox_error_json (Printf.sprintf "%s [blocked_cmd=%s]" err validation_cmd)
@@ -884,20 +888,22 @@ let run_docker_bash
         rewrite_docker_command_paths_for_host_validation ~config ~meta cmd
       in
       let path_validation =
-        match
-          Keeper_task_worktree_lazy.ensure_command_existing_dirs
-            ~config
-            ~meta
-            ~cwd
-            ~cmd:validation_cmd
-        with
-        | Error e -> Error e
-        | Ok () ->
-          Exec_policy.validate_command_paths
-            ~keeper_id:meta.name
-            ~base_path:(Keeper_alerting_path.project_root_of_config config)
-            ~workdir:cwd
-            validation_cmd
+        match Masc_exec_bash_parser.Bash.parse_string validation_cmd with
+        | Masc_exec.Parsed.Parsed validation_ir ->
+          (match
+             Keeper_task_worktree_lazy.ensure_shell_ir_existing_dirs
+               ~config ~meta ~cwd ~ir:validation_ir
+           with
+           | Error e -> Error e
+           | Ok () ->
+             Exec_policy.validate_shell_ir_paths
+               ~keeper_id:meta.name
+               ~base_path:(Keeper_alerting_path.project_root_of_config config)
+               ~workdir:cwd
+               validation_ir)
+        | Masc_exec.Parsed.Parse_error _
+        | Masc_exec.Parsed.Parse_aborted _
+        | Masc_exec.Parsed.Too_complex _ -> Ok ()
       in
       (match path_validation with
        | Error err -> sandbox_error_json (Printf.sprintf "%s [blocked_cmd=%s]" err validation_cmd)

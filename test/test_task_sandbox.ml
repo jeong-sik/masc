@@ -353,37 +353,39 @@ let test_command_path_lazy_creates_current_task_worktree () =
     (fun ~config ~meta ~clone_path ~task_id:_ ~worktree_name ~worktree_path ->
        check bool "worktree initially missing" false (Sys.file_exists worktree_path);
        let cmd = Printf.sprintf "git -C .worktrees/%s status -sb" worktree_name in
-       (match
-          Keeper_task_worktree_lazy.ensure_command_existing_dirs
-            ~config
-            ~meta
-            ~cwd:clone_path
-            ~cmd
-        with
-        | Error msg -> fail ("expected lazy command-path repair, got: " ^ msg)
-        | Ok () -> ());
-       check bool "worktree created" true (Sys.is_directory worktree_path);
-       match Worker_dev_tools.validate_command_paths ~workdir:clone_path cmd with
-       | Error msg -> fail ("validator should pass after lazy repair: " ^ msg)
-       | Ok () -> ())
+       (match Masc_exec_bash_parser.Bash.parse_string cmd with
+        | Masc_exec.Parsed.Parsed ir ->
+          (match
+             Keeper_task_worktree_lazy.ensure_shell_ir_existing_dirs
+               ~config ~meta ~cwd:clone_path ~ir
+           with
+           | Error msg -> fail ("expected lazy command-path repair, got: " ^ msg)
+           | Ok () -> ());
+          check bool "worktree created" true (Sys.is_directory worktree_path);
+          (match
+             Worker_dev_tools.validate_shell_ir_paths ~workdir:clone_path ir
+           with
+           | Error msg -> fail ("validator should pass after lazy repair: " ^ msg)
+           | Ok () -> ())
+        | _ -> fail "unexpected parse failure"))
 
 let test_command_descendant_path_lazy_creates_current_task_worktree () =
   with_lazy_worktree_fixture
     (fun ~config ~meta ~clone_path ~task_id:_ ~worktree_name ~worktree_path ->
        check bool "worktree initially missing" false (Sys.file_exists worktree_path);
        let cmd = Printf.sprintf "cat .worktrees/%s/README.md" worktree_name in
-       (match
-          Keeper_task_worktree_lazy.ensure_command_existing_dirs
-            ~config
-            ~meta
-            ~cwd:clone_path
-            ~cmd
-        with
-        | Error msg -> fail ("expected lazy descendant repair, got: " ^ msg)
-        | Ok () -> ());
-       check bool "worktree created" true (Sys.is_directory worktree_path);
-       check bool "descendant file materialized" true
-         (Sys.file_exists (Filename.concat worktree_path "README.md")))
+       (match Masc_exec_bash_parser.Bash.parse_string cmd with
+        | Masc_exec.Parsed.Parsed ir ->
+          (match
+             Keeper_task_worktree_lazy.ensure_shell_ir_existing_dirs
+               ~config ~meta ~cwd:clone_path ~ir
+           with
+           | Error msg -> fail ("expected lazy descendant repair, got: " ^ msg)
+           | Ok () -> ());
+          check bool "worktree created" true (Sys.is_directory worktree_path);
+          check bool "descendant file materialized" true
+            (Sys.file_exists (Filename.concat worktree_path "README.md"))
+        | _ -> fail "unexpected parse failure"))
 
 let test_full_lifecycle () =
   let base = make_temp_dir () in

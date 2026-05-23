@@ -18,6 +18,3 @@ val emit_transition :
   unit
 (** [base_path]/keepers/[keeper_name].tla-trace.jsonl 에 JSONL 한 줄 append.
     비활성 시 no-op. *)
-
-val trace_path : base_path:string -> keeper_name:string -> string
-(** Trace 파일 경로 반환. *)

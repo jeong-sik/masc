@@ -18,12 +18,6 @@
 type t =
   | Contract_rejected of { reason : string }
 
-val masc_internal_error_prefix : string
-(** Mirror of [Cascade_error_classify.masc_internal_error_prefix].  A
-    follow-up PR will promote this to a shared sub-library; for Phase A
-    the mirror is acceptable because both ends are tested against the
-    same literal. *)
-
 val sdk_error_of : t -> Error.sdk_error
 (** Encode [t] as an [Error.Internal] payload prefixed with
     [\[masc_oas_error\]] so the masc_mcp classifier routes it to the

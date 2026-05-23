@@ -218,6 +218,16 @@ let docker_git_log_path ~config ~meta host_path =
   else Keeper_docker_read.container_path_of_host ~config ~meta ~host_path
 ;;
 
+let git_log_argv_core ~format ~count ~grep =
+  let base =
+    [ "git"; "--no-optional-locks"; "log"
+    ; Printf.sprintf "--format=%s" format
+    ; Printf.sprintf "-%d" count
+    ]
+  in
+  if grep = "" then base else base @ [ "--grep=" ^ grep ]
+;;
+
 let containment_check ~config ~meta target =
   Keeper_sandbox_containment.check_read_target ~config ~meta ~target
 ;;

@@ -245,28 +245,13 @@ let handle_keeper_shell
               ~cmd:"git -C <cwd> --no-optional-locks log --format=<fmt> -<n>"
               ~docker_cmd ~timeout_sec:Keeper_shell_shared.read_timeout_sec)
        else
-         let base_argv =
-           [ "git"; "-C"; cwd; "--no-optional-locks"; "log";
-             Printf.sprintf "--format=%s" format;
-             Printf.sprintf "-%d" count ]
-         in
-         let base_argv =
-           if grep = "" then base_argv else base_argv @ [ "--grep=" ^ grep ]
-         in
-         let argv = if file_path <> "" then base_argv @ [ "--"; file_path ] else base_argv in
+         let argv = [ "git"; "-C"; cwd ] @ Keeper_shell_runtime.git_log_argv_core ~format ~count ~grep in
+         let argv = if file_path = "" then argv else argv @ [ "--"; file_path ] in
          (match Keeper_sandbox_factory.resolve_opt turn_sandbox_factory ~cwd with
           | Some runtime ->
+            let argv = Keeper_shell_runtime.git_log_argv_core ~format ~count ~grep in
             let argv =
-              let base_argv =
-                [ "git"; "--no-optional-locks"; "log";
-                  Printf.sprintf "--format=%s" format;
-                  Printf.sprintf "-%d" count ]
-              in
-              let base_argv =
-                if grep = "" then base_argv else base_argv @ [ "--grep=" ^ grep ]
-              in
-              if file_path = "" then
-                base_argv
+              if file_path = "" then argv
               else
                 let runtime_path =
                   if Filename.is_relative file_path then file_path
@@ -278,7 +263,7 @@ let handle_keeper_shell
                     | Ok mapped -> mapped
                     | Error _ -> file_path
                 in
-                base_argv @ [ "--"; runtime_path ]
+                argv @ [ "--"; runtime_path ]
             in
             (match
                Keeper_turn_sandbox_runtime.run_command_with_status runtime

@@ -240,12 +240,6 @@ val effective_sandbox_profile :
   Keeper_types.sandbox_profile * Keeper_types.network_mode
 (** Alias of {!Keeper_shell_docker.effective_sandbox_profile}. *)
 
-val cmd_targets_git_or_gh : string -> bool
-(** Command-semantics helper. Does not depend on the Docker backend. *)
-
-val cmd_targets_gh : string -> bool
-(** Command-semantics helper. Does not depend on the Docker backend. *)
-
 val ensure_keeper_sandbox_runtime :
   timeout_sec:float -> (string list, string) result
 (** Alias of {!Keeper_shell_docker.ensure_keeper_sandbox_runtime}. *)

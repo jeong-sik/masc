@@ -17,30 +17,21 @@ val effective_stages_of_ir : Masc_exec.Shell_ir.t -> parsed_stage list
 (** Extract effective command stages (after env/opam unwrap) from a
     pre-parsed Shell IR. *)
 
-val cmd_targets_git_or_gh : string -> bool
-(** [true] only when the typed bash subset parser identifies an effective
-    command stage whose executable is [git] or [gh]. Parse failures and
-    unsupported shell constructs fail closed as [false]. *)
+val effective_stages : string -> parsed_stage list
+(** String-to-stages bridge. Parses via [Bash.parse_string] and
+    returns [[]] on any parse failure. *)
 
-val cmd_targets_gh : string -> bool
-(** [true] only when the typed bash subset parser identifies an effective
-    command stage whose executable is [gh]. *)
+val stages_targets_git_or_gh : parsed_stage list -> bool
+val stages_targets_gh : parsed_stage list -> bool
 
 val cmd_prefix : string -> string
-(** Prefix used for shell-history grouping. Uses the same typed bash subset
-    parser and effective-command wrapper handling as command-shape policy.
-    Unsupported command shapes fall back to the trimmed original command. *)
+(** First binary name from a parsed command string. Falls back to
+    the trimmed string itself when parsing yields no stages. *)
 
-val detect_gh_repo_flag_with_api_misuse : string -> (string * string) option
-(** Detect the invalid [gh --repo <repo> api <endpoint>] shape.  [--repo]
-    is a subcommand flag, not a [gh api] global option. *)
-
-val resolve_sandbox_root_git_cwd :
-  config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
-  cwd:string ->
-  cmd:string ->
-  string * string option
+val gh_repo_flag_api_misuse_of_stages :
+  parsed_stage list -> (string * string) option
+(** Detect the invalid [gh --repo <repo> api <endpoint>] shape from
+    pre-computed stages. *)
 
 val resolve_sandbox_root_git_cwd_of_stages :
   config:Coord.config ->
@@ -49,6 +40,6 @@ val resolve_sandbox_root_git_cwd_of_stages :
   cmd:string ->
   parsed_stage list ->
   string * string option
-(** Pre-computed stages variant of [resolve_sandbox_root_git_cwd].
-    Callers that already hold [effective_stages_of_ir ir] pass them
-    directly to avoid re-parsing. *)
+(** Pre-computed stages variant. Callers that already hold
+    [effective_stages_of_ir ir] pass them directly to avoid
+    re-parsing. *)

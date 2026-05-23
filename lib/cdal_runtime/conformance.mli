@@ -50,10 +50,3 @@ type report =
 
 (** Generate a conformance report from a proof bundle. *)
 val report : Sessions_types.proof_bundle -> report
-
-(** Run conformance checks from a session on disk. *)
-val run
-  :  ?session_root:string
-  -> session_id:string
-  -> unit
-  -> (report, Error.sdk_error) result

@@ -1196,6 +1196,54 @@ let test_oneof_const_discriminator_rejects_missing_kind () =
 ;;
 
 (* ================================================================ *)
+(* Production schema regression: Keeper_schema.tool_access_schema   *)
+(* ================================================================ *)
+
+let test_keeper_schema_tool_access_preset () =
+  let schema = Keeper_schema.tool_access_schema "test" in
+  let args = `Assoc [("kind", `String "preset"); ("preset", `String "minimal")] in
+  match Tool_input_validation.validate_args ~schema ~name:"test" ~args () with
+  | Ok _ -> ()
+  | Error result ->
+    Alcotest.failf
+      "expected preset branch to pass: %s"
+      (Yojson.Safe.to_string result.Tool_result.data)
+;;
+
+let test_keeper_schema_tool_access_custom () =
+  let schema = Keeper_schema.tool_access_schema "test" in
+  let args = `Assoc [("kind", `String "custom"); ("tools", `List [`String "rg"])] in
+  match Tool_input_validation.validate_args ~schema ~name:"test" ~args () with
+  | Ok _ -> ()
+  | Error result ->
+    Alcotest.failf
+      "expected custom branch to pass: %s"
+      (Yojson.Safe.to_string result.Tool_result.data)
+;;
+
+let test_keeper_schema_tool_access_rejects_missing_kind () =
+  let schema = Keeper_schema.tool_access_schema "test" in
+  let args = `Assoc [("preset", `String "minimal")] in
+  match Tool_input_validation.validate_args ~schema ~name:"test" ~args () with
+  | Ok _ -> Alcotest.fail "expected missing kind to fail"
+  | Error result ->
+    let msg = result.Tool_result.legacy_message in
+    Alcotest.(check bool) "error mentions branches" true
+      (string_contains msg "exactly one of")
+;;
+
+let test_keeper_schema_tool_access_rejects_unknown_kind () =
+  let schema = Keeper_schema.tool_access_schema "test" in
+  let args = `Assoc [("kind", `String "unknown"); ("preset", `String "minimal")] in
+  match Tool_input_validation.validate_args ~schema ~name:"test" ~args () with
+  | Ok _ -> Alcotest.fail "expected unknown kind to fail"
+  | Error result ->
+    let msg = result.Tool_result.legacy_message in
+    Alcotest.(check bool) "error mentions preset/custom branches" true
+      (string_contains msg "preset" && string_contains msg "custom")
+;;
+
+(* ================================================================ *)
 (* Runner                                                            *)
 (* ================================================================ *)
 
@@ -1300,5 +1348,15 @@ let () =
         test_oneof_const_discriminator_rejects_unknown_kind;
       Alcotest.test_case "missing kind is rejected" `Quick
         test_oneof_const_discriminator_rejects_missing_kind;
+    ]);
+    ("keeper_schema_tool_access", [
+      Alcotest.test_case "preset branch passes" `Quick
+        test_keeper_schema_tool_access_preset;
+      Alcotest.test_case "custom branch passes" `Quick
+        test_keeper_schema_tool_access_custom;
+      Alcotest.test_case "missing kind rejected" `Quick
+        test_keeper_schema_tool_access_rejects_missing_kind;
+      Alcotest.test_case "unknown kind rejected" `Quick
+        test_keeper_schema_tool_access_rejects_unknown_kind;
     ]);
   ]

@@ -5,7 +5,7 @@
 
 open Alcotest
 
-module CN = Masc_mcp.Cascade_name
+module CN = Cascade_name
 
 (* ── Valid parse tests ─────────────────────────────────────────── *)
 

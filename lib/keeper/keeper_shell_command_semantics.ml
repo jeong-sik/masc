@@ -81,15 +81,14 @@ let rec effective_stage = function
 let effective_stages_of_ir ir =
   parsed_stages_of_ir ir |> List.filter_map effective_stage
 
-(** String-to-stages bridge for callers that only have a raw command string.
-    Parses via [Masc_exec_bash_parser.Bash.parse_string] and falls back to
-    [[]] on any parse failure. *)
-let effective_stages cmd =
-  match Masc_exec_bash_parser.Bash.parse_string cmd with
-  | Masc_exec.Parsed.Parsed ir -> effective_stages_of_ir ir
-  | Masc_exec.Parsed.Parse_error _
-  | Masc_exec.Parsed.Parse_aborted _
-  | Masc_exec.Parsed.Too_complex _ -> []
+let strip_simple_shell_quotes token =
+  let len = String.length token in
+  if
+    len >= 2
+    && ((token.[0] = '\'' && token.[len - 1] = '\'')
+        || (token.[0] = '"' && token.[len - 1] = '"'))
+  then String.sub token 1 (len - 2)
+  else token
 
 let stages_targets_git_or_gh stages =
   List.exists (fun stage -> stage.bin = "git" || stage.bin = "gh") stages
@@ -97,12 +96,13 @@ let stages_targets_git_or_gh stages =
 let stages_targets_gh stages =
   List.exists (fun stage -> stage.bin = "gh") stages
 
-(** First binary name from a parsed command string, or the trimmed
-    string itself when parsing yields no stages. *)
+(** First whitespace-delimited token from a command string, with surrounding
+    quotes stripped. Used for history/logging where full parse is unnecessary. *)
 let cmd_prefix cmd =
-  match effective_stages cmd with
-  | stage :: _ -> stage.bin
-  | [] -> String.trim cmd
+  let trimmed = String.trim cmd in
+  match String.split_on_char ' ' trimmed with
+  | [] | [""] -> trimmed
+  | first :: _ -> strip_simple_shell_quotes first
 
 let repo_flag_value = function
   | "--repo" -> None
@@ -122,15 +122,6 @@ let gh_repo_flag_api_misuse_of_stages stages =
   in
   List.find_map (fun stage ->
     if stage.bin = "gh" then scan_args stage.args else None) stages
-
-let strip_simple_shell_quotes token =
-  let len = String.length token in
-  if
-    len >= 2
-    && ((token.[0] = '\'' && token.[len - 1] = '\'')
-        || (token.[0] = '"' && token.[len - 1] = '"'))
-  then String.sub token 1 (len - 2)
-  else token
 
 let bare_worktrees_path token =
   let token = strip_simple_shell_quotes token in

@@ -120,10 +120,14 @@ let handle_keeper_bash_typed
         let envelope =
           Masc_exec.Shell_ir_risk.classify (Masc_exec.Shell_ir_risk.undecided ir)
         in
+        let classification =
+          Exec_core.classify_command_of_ir envelope.Masc_exec.Shell_ir_risk.ir
+        in
         if Masc_exec.Shell_ir_risk.is_destructive envelope
         then
           Yojson.Safe.to_string
             (Exec_core.blocked_result_json
+               ~classification
                ~cmd
                ~error:"destructive_operation_blocked"
                ~reason:
@@ -138,6 +142,7 @@ let handle_keeper_bash_typed
         then
           Yojson.Safe.to_string
             (Exec_core.blocked_result_json
+               ~classification
                ~cmd
                ~error:"write_operation_gated"
                ~reason:
@@ -234,6 +239,7 @@ let handle_keeper_bash_typed
                in
                Yojson.Safe.to_string
                  (Exec_core.process_result_json
+                    ~classification
                     ~base_path:root
                     ~keeper_name:meta.name
                     ~cmd

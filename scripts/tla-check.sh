@@ -275,6 +275,10 @@ fi
 
 run_tlc "$REPO_ROOT/specs/masc-ecosystem" "MASCEcosystem.tla"
 
+# RFC-0160 G6 — Shell IR carries decision invariant.
+run_tlc "$REPO_ROOT/specs/shell-ir-first-class" "ShellIRFirstClass.tla"
+run_tlc_buggy "$REPO_ROOT/specs/shell-ir-first-class" "ShellIRFirstClass.tla"
+
 # ── bug-models ─────────────────────────────────────────────────
 # Every .tla in specs/bug-models/ that has a matching .cfg and/or
 # -buggy.cfg is run automatically. Symlinks are skipped (they point

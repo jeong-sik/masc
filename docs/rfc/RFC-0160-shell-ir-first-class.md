@@ -44,7 +44,7 @@ Seven KPIs (`scripts/audit-shell-ir-consumption.sh` measures all of them):
 | G3 | `Shell_command_gate.gate_typed` refs in `lib/keeper/` | 2 | ≥ 4 (one per keeper op) |
 | G4 | Risk-stamped IR existence (`risk` field or `'decided` phantom) | 0 | ≥ 1 |
 | G5 | `validate_shell_ir_paths` non-test caller files | 4 | ≥ 4 (already met) |
-| G6 | `spec/ShellIRFirstClass.tla` exists | 0 | 1 |
+| G6 | `specs/shell-ir-first-class/ShellIRFirstClass.tla` exists | 1 | 1 |
 | G7 | Parallel parser refs (`shell_word_values` + `Bash_words.stages`) | 26 | 0 |
 
 ## §2 · Non-goals
@@ -231,7 +231,7 @@ verdict" surface today.
 
 ### S7 · Spec & ratchet
 
-- `spec/ShellIRFirstClass.tla`:
+- `specs/shell-ir-first-class/ShellIRFirstClass.tla`:
   - States: `{Raw_string, Parsed_IR_no_decision, Decided_IR, Dispatched}`
   - Actions: `parse`, `classify`, `dispatch`
   - Invariant `IR_Carries_Decision`:

@@ -3258,11 +3258,15 @@ let test_pre_dispatch_required_tool_exhaustion_is_no_tool_capable () =
       "provider rejection retained"
       1
       (List.length provider_rejections);
-    let rejection_reason =
+    let rejection_reason, rejection_label =
       match provider_rejections with
-      | [ rejection ] -> rejection.reason
-      | _ -> ""
+      | [ rejection ] -> rejection.reason, rejection.provider_label
+      | _ -> "", ""
     in
+    Alcotest.(check string)
+      "rejection provider_label field"
+      "glm-coding"
+      rejection_label;
     Alcotest.(check bool)
       "rejection records provider"
       true

@@ -18,6 +18,7 @@ val cascade_name_of_string : string -> cascade_name
 val cascade_name_to_string : cascade_name -> string
 
 type provider_rejection = {
+  provider_label : string;
   reason : string;
 }
 
@@ -136,6 +137,8 @@ val sdk_error_to_cascade_outcome :
 val message_looks_like_cli_wrapped_hard_quota : string -> bool
 
 val message_looks_like_cli_wrapped_max_turns : string -> bool
+
+val message_looks_like_capacity_backpressure : string -> bool
 
 val message_looks_like_resumable_cli_session : string -> bool
 

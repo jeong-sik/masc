@@ -125,6 +125,7 @@ let append_keeper_receipt
       turn_count = Some 7;
       oas_turn_count = None;
       oas_dispatch_mode = None;
+      oas_internal_cascade_disabled = false;
       current_task_id = None;
       goal_ids = meta.active_goal_ids;
       outcome;
@@ -173,6 +174,10 @@ let append_keeper_receipt
       extra_system_context_digest = None;
       extra_system_context_injected_size = None;
       extra_system_context_computed_size = None;
+      pre_dispatch_compacted = false;
+      pre_dispatch_compaction_trigger = None;
+      pre_dispatch_compaction_before_tokens = None;
+      pre_dispatch_compaction_after_tokens = None;
     }
   in
   Keeper_execution_receipt.append config receipt

@@ -186,7 +186,10 @@ let run_named
                cascade_name
                provider_label
                reason;
-             kept, ({ reason } : Cascade_error_classify.provider_rejection) :: rejected
+             kept,
+             ({ provider_label; reason }
+               : Cascade_error_classify.provider_rejection)
+             :: rejected
            in
            match
              Cascade_runtime_candidate.resolve_tool_lane_for_oas_tools
@@ -555,6 +558,16 @@ let run_named
                       `Int health_filtered_candidate_count );
                     ( "rejected_candidate_count",
                       `Int (List.length provider_rejections) );
+                    ( "provider_rejections",
+                      `List
+                        (List.map
+                           (fun r ->
+                             `Assoc
+                               [
+                                 ("provider_label", `String r.provider_label);
+                                 ("reason", `String r.reason);
+                               ])
+                           provider_rejections) );
                     ( "rejection_reasons",
                       `List
                         (List.map
@@ -1026,6 +1039,17 @@ let run_named
                 source = Provider_capacity;
                 detail;
                 retry_after_sec = retry_after;
+              }))
+    | Agent_sdk.Error.Internal msg
+      when message_looks_like_capacity_backpressure msg ->
+      Some
+        (sdk_error_of_masc_internal_error
+           (Capacity_backpressure
+              {
+                cascade_name = error_cascade_name;
+                source = Provider_capacity;
+                detail = msg;
+                retry_after_sec = None;
               }))
     | Agent_sdk.Error.Api _
     | Agent_sdk.Error.Provider _

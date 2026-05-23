@@ -16,6 +16,9 @@ type run_context =
   ; ctx_work : working_context
   ; resume_oas_checkpoint : Agent_sdk.Checkpoint.t option
   ; pre_dispatch_compacted : bool
+  ; pre_dispatch_compaction_trigger : string option
+  ; pre_dispatch_compaction_before_tokens : int option
+  ; pre_dispatch_compaction_after_tokens : int option
   ; pre_dispatch_checkpoint_error : Agent_sdk.Error.sdk_error option
   ; start_turn_count : int
   ; receipt_started_at : string

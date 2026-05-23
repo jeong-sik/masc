@@ -1119,7 +1119,7 @@ let make_hooks
                "keeper:%s tool=%s log_call write failed: %s"
                (!meta_ref).name tool_name (Printexc.to_string exn));
         (try
-           append_pr_review_action_metric
+           Keeper_hooks_oas_pr_metrics.append_pr_review_action_metric
              ~config
              ~meta:(!meta_ref)
              ~generation
@@ -1144,7 +1144,7 @@ let make_hooks
                "keeper:%s tool=%s pr_review_action metric append failed: %s"
                (!meta_ref).name tool_name (Printexc.to_string exn));
         (try
-           append_pr_work_action_metrics
+           Keeper_hooks_oas_pr_metrics.append_pr_work_action_metrics
              ~config
              ~meta:(!meta_ref)
              ~generation
@@ -1391,10 +1391,10 @@ let make_hooks
 
 module For_testing = struct
   let pr_review_action_metric_event_of_tool_io =
-    pr_review_action_metric_event_of_tool_io
+    Keeper_hooks_oas_pr_metrics.pr_review_action_metric_event_of_tool_io
 
   let pr_work_action_metric_events_of_tool_io =
-    pr_work_action_metric_events_of_tool_io
+    Keeper_hooks_oas_pr_metrics.pr_work_action_metric_events_of_tool_io
 end
 
 let hook_introspection_json

@@ -6,6 +6,15 @@
 
 open Ide_annotation_types
 
+let lsp_position ~line = `Assoc [("line", `Int (line - 1)); ("character", `Int 0)]
+
+let lsp_range ~line_start ~line_end =
+  `Assoc [
+    ("start", lsp_position ~line:line_start);
+    ("end", lsp_position ~line:line_end);
+  ]
+;;
+
 module Cache = struct
   let tbl : (string, annotation list) Hashtbl.t = Hashtbl.create 32
   let mutex = Eio.Mutex.create ()
@@ -71,12 +80,7 @@ let annotation_message_with_context (a : annotation) =
 ;;
 
 let codelens_to_json (a : annotation) : Yojson.Safe.t =
-  let range =
-    `Assoc [
-      ("start", `Assoc [("line", `Int (a.line_start - 1)); ("character", `Int 0)]);
-      ("end", `Assoc [("line", `Int (a.line_end - 1)); ("character", `Int 0)]);
-    ]
-  in
+  let range = lsp_range ~line_start:a.line_start ~line_end:a.line_end in
   let kind_label = annotation_kind_to_string a.kind in
   let title = Printf.sprintf "[%s] %s%s" kind_label a.content (annotation_context_suffix a) in
   `Assoc [
@@ -96,7 +100,7 @@ let inlay_hint_to_json (a : annotation) : Yojson.Safe.t =
     | label -> label
   in
   `Assoc [
-    ("position", `Assoc [("line", `Int (a.line_start - 1)); ("character", `Int 0)]);
+    ("position", lsp_position ~line:a.line_start);
     ("label", `String label);
     ("tooltip", `String (annotation_message_with_context a));
     ("kind", `Int 2);  (* TypeParameter kind for inline annotations *)
@@ -133,12 +137,7 @@ let diagnostics ~base_dir ~file_path ~(lsp_diagnostics : Yojson.Safe.t list) :
   let masc_diags = List.filter_map (fun (a : annotation) ->
     match a.kind with
     | Question ->
-        let range =
-          `Assoc [
-            ("start", `Assoc [("line", `Int (a.line_start - 1)); ("character", `Int 0)]);
-            ("end", `Assoc [("line", `Int (a.line_end - 1)); ("character", `Int 0)]);
-          ]
-        in
+        let range = lsp_range ~line_start:a.line_start ~line_end:a.line_end in
         Some (`Assoc [
           ("range", range);
           ("severity", `Int 3);  (* Information *)

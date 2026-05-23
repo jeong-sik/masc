@@ -14,6 +14,9 @@ val frame_update : string -> string
     ["runtime"] lane in the payload. Delivery is synchronous and best-effort
     through the in-process SSE observer fanout; exceptions from disconnected
     observers are logged, while cancellation is propagated. *)
+val frame_update : string -> string
+(** Encode a payload into the Yjs binary sync-protocol frame format. *)
+
 val broadcast_keeper_telemetry :
   keeper_name:string -> trace_id:string -> turn_index:int -> model_id:string -> unit
 

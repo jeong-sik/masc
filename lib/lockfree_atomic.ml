@@ -14,3 +14,8 @@ let rec update_with_commit atomic f =
   let { next_state; result } = f old_val in
   if Atomic.compare_and_set atomic old_val next_state then result
   else update_with_commit atomic f
+
+let update_with_result atomic f =
+  update_with_commit atomic (fun old_val ->
+    let next_state, result = f old_val in
+    { next_state; result })

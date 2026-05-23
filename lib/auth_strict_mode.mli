@@ -43,7 +43,6 @@ val of_string : string -> t
     "true"], case-insensitive and whitespace-trimmed. Any other input
     returns [Dry_run] (fail-open for telemetry; fail-closed promotion
     to typed reject happens in Phase B). *)
-
 val to_label : t -> string
 (** [to_label Off = "off"], [Dry_run = "dry_run"], [Strict = "strict"].
     Used as the Prometheus [mode] label so operators can break down

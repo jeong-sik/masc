@@ -82,6 +82,7 @@ val codex_cli_cannot_carry_keeper_bound_runtime_mcp :
 (** {1 Provider filter rejection classification} *)
 
 type filter_rejection_reason =
+  | Capability_profile_mismatch of string
   | Codex_keeper_bound_actor_required
   | Tool_lane_unsupported
   | Required_tool_use of Provider_tool_support.rejection_reason
@@ -94,11 +95,15 @@ val classify_filter_rejection :
   keeper_name:string ->
   ?runtime_mcp_policy:Llm_provider.Llm_transport.runtime_mcp_policy ->
   ?tools:Agent_sdk.Tool.t list ->
+  ?required_capability_profile:string ->
   require_tool_choice_support:bool ->
   require_tool_support:bool ->
   Llm_provider.Provider_config.t ->
   filter_rejection_reason option
-(** Classify why a single provider would be rejected by the tool-use gate. *)
+(** Classify why a single provider would be rejected by the tool-use gate.
+    When [required_capability_profile] is provided, the provider must
+    satisfy the named profile via {!Cascade_capability_profile} or it is
+    rejected with [Capability_profile_mismatch]. *)
 
 val filter_candidate_providers_for_tool_support :
   keeper_name:string ->
@@ -106,6 +111,7 @@ val filter_candidate_providers_for_tool_support :
   ?tools:Agent_sdk.Tool.t list ->
   require_tool_choice_support:bool ->
   require_tool_support:bool ->
+  ?required_capability_profile:string ->
   ?secondary_resolver:
     (int ->
      Llm_provider.Provider_config.t ->
@@ -117,6 +123,9 @@ val filter_candidate_providers_for_tool_support :
     empties the list, emits a deduplicated diagnostic (ERROR on first
     occurrence per signature, DEBUG on repeats).
 
+    @param required_capability_profile When set, providers whose
+    declared capabilities do not satisfy the named profile are rejected
+    before any other gate checks.
     @param secondary_resolver RFC-0027 PR-9b dual-track callback. When
     set, each rejected primary is offered to the resolver; if it returns
     a [Some secondary] candidate that itself passes the tool-use gate,

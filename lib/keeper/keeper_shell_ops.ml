@@ -44,18 +44,13 @@ let handle_keeper_shell
       Keeper_shell_runtime.run_cwd_op ~root ~keeper_name:meta.name ~op ~config ~meta
         ?turn_sandbox_factory
     in
-    let run_ls =
-      Keeper_shell_runtime.run_ls_op ~config ~meta ?turn_sandbox_factory ~op
+    let run_readonly op_fn =
+      op_fn ~config ~meta ?turn_sandbox_factory ~op
     in
-    let run_cat =
-      Keeper_shell_runtime.run_cat_op ~config ~meta ?turn_sandbox_factory ~op
-    in
-    let run_head_tail =
-      Keeper_shell_runtime.run_head_tail_op ~config ~meta ?turn_sandbox_factory ~op
-    in
-    let run_tree =
-      Keeper_shell_runtime.run_tree_op ~config ~meta ?turn_sandbox_factory ~op
-    in
+    let run_ls = run_readonly Keeper_shell_runtime.run_ls_op in
+    let run_cat = run_readonly Keeper_shell_runtime.run_cat_op in
+    let run_head_tail = run_readonly Keeper_shell_runtime.run_head_tail_op in
+    let run_tree = run_readonly Keeper_shell_runtime.run_tree_op in
     let run_wc =
       Keeper_shell_runtime.run_wc_op ~root ~keeper_name:meta.name ~config ~meta
         ?turn_sandbox_factory ~op

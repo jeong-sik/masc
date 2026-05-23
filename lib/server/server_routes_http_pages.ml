@@ -513,8 +513,7 @@ let get_server_state_result () =
   | Some s -> Ok s
   | None -> Error "server state not initialized"
 
-let server_state_error_json message =
-  Yojson.Safe.to_string (`Assoc [ ("error", `String message) ])
+let server_state_error_json = error_json_string
 
 let handle_get_graphql _request reqd =
   let nonce =

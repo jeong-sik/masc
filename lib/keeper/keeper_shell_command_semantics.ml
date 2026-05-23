@@ -240,3 +240,11 @@ let resolve_sandbox_root_git_cwd_of_stages
                suggested_cwd
                (String.concat ", " many)) )))
   else cwd, None
+
+let effective_stages_of_cmd cmd =
+  match Masc_exec_bash_parser.Bash.parse_string cmd with
+  | Masc_exec.Parsed.Parsed ir -> effective_stages_of_ir ir
+  | Masc_exec.Parsed.Parse_error _
+  | Masc_exec.Parsed.Parse_aborted _
+  | Masc_exec.Parsed.Too_complex _ -> []
+

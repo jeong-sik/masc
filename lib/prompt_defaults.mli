@@ -16,6 +16,12 @@
     [bootstrapped_signature] memo ref) are hidden — callers
     consume only the entry point below. *)
 
+val resolve_prompt_markdown_dir :
+  workspace_path:string -> base_path:string -> string
+(** Return the first existing prompt markdown directory from the
+    candidate list, falling back to {!Config_dir_resolver.prompts_dir}
+    when none exist yet. *)
+
 val bootstrap_runtime :
   workspace_path:string ->
   base_path:string ->

@@ -398,9 +398,17 @@ let run_docker_shell_command_with_status_internal
            "sandbox_profile=docker blocks nested container runtimes and host socket \
             references")
     else
+      let cmd_stages =
+        match Masc_exec_bash_parser.Bash.parse_string cmd with
+        | Masc_exec.Parsed.Parsed ir ->
+          Keeper_shell_command_semantics.effective_stages_of_ir ir
+        | Masc_exec.Parsed.Parse_error _
+        | Masc_exec.Parsed.Parse_aborted _
+        | Masc_exec.Parsed.Too_complex _ -> []
+      in
       let cwd, multi_repo_blocker =
-        Keeper_shell_command_semantics.resolve_sandbox_root_git_cwd
-          ~config ~meta ~cwd ~cmd
+        Keeper_shell_command_semantics.resolve_sandbox_root_git_cwd_of_stages
+          ~config ~meta ~cwd ~cmd cmd_stages
       in
       match multi_repo_blocker with
       | Some msg -> sandbox_error msg
@@ -764,9 +772,17 @@ let run_docker_credentialed_bash
     match check_egress ~config ~meta ~cmd with
     | Some blocked_json -> blocked_json
     | None ->
+      let cmd_stages =
+        match Masc_exec_bash_parser.Bash.parse_string cmd with
+        | Masc_exec.Parsed.Parsed ir ->
+          Keeper_shell_command_semantics.effective_stages_of_ir ir
+        | Masc_exec.Parsed.Parse_error _
+        | Masc_exec.Parsed.Parse_aborted _
+        | Masc_exec.Parsed.Too_complex _ -> []
+      in
       let cwd, sandbox_root_git_blocker =
-        Keeper_shell_command_semantics.resolve_sandbox_root_git_cwd
-          ~config ~meta ~cwd ~cmd
+        Keeper_shell_command_semantics.resolve_sandbox_root_git_cwd_of_stages
+          ~config ~meta ~cwd ~cmd cmd_stages
       in
       (match sandbox_root_git_blocker with
        | Some message -> sandbox_error_json message
@@ -858,9 +874,17 @@ let run_docker_bash
     sandbox_error_json
       "sandbox_profile=docker blocks nested container runtimes and host socket references"
   else (
+    let cmd_stages =
+      match Masc_exec_bash_parser.Bash.parse_string cmd with
+      | Masc_exec.Parsed.Parsed ir ->
+        Keeper_shell_command_semantics.effective_stages_of_ir ir
+      | Masc_exec.Parsed.Parse_error _
+      | Masc_exec.Parsed.Parse_aborted _
+      | Masc_exec.Parsed.Too_complex _ -> []
+    in
     let cwd, sandbox_root_git_blocker =
-      Keeper_shell_command_semantics.resolve_sandbox_root_git_cwd
-        ~config ~meta ~cwd ~cmd
+      Keeper_shell_command_semantics.resolve_sandbox_root_git_cwd_of_stages
+        ~config ~meta ~cwd ~cmd cmd_stages
     in
     match sandbox_root_git_blocker with
     | Some message -> sandbox_error_json message

@@ -24,7 +24,7 @@ let stage_of_simple simple =
   | Some args ->
     Some { bin = Masc_exec.Bin.to_string simple.bin; args }
 
-let parsed_stages cmd =
+let parsed_stages_of_ir ir =
   let rec loop acc = function
     | Masc_exec.Shell_ir.Simple simple -> (
         match stage_of_simple simple with
@@ -36,11 +36,13 @@ let parsed_stages cmd =
         (Some acc)
         stages
   in
+  match loop [] ir with
+  | Some stages -> List.rev stages
+  | None -> []
+
+let parsed_stages cmd =
   match Masc_exec_bash_parser.Bash.parse_string cmd with
-  | Masc_exec.Parsed.Parsed ir -> (
-      match loop [] ir with
-      | Some stages -> List.rev stages
-      | None -> [])
+  | Masc_exec.Parsed.Parsed ir -> parsed_stages_of_ir ir
   | Masc_exec.Parsed.Parse_error _
   | Masc_exec.Parsed.Parse_aborted _
   | Masc_exec.Parsed.Too_complex _ -> []
@@ -83,15 +85,23 @@ let rec effective_stage = function
      | _ -> None)
   | stage -> Some stage
 
+let effective_stages_of_ir ir =
+  parsed_stages_of_ir ir |> List.filter_map effective_stage
+
 let effective_stages cmd =
   parsed_stages cmd |> List.filter_map effective_stage
 
+let stages_targets_git_or_gh stages =
+  List.exists (fun stage -> stage.bin = "git" || stage.bin = "gh") stages
+
 let cmd_targets_git_or_gh cmd =
-  effective_stages cmd
-  |> List.exists (fun stage -> stage.bin = "git" || stage.bin = "gh")
+  effective_stages cmd |> stages_targets_git_or_gh
+
+let stages_targets_gh stages =
+  List.exists (fun stage -> stage.bin = "gh") stages
 
 let cmd_targets_gh cmd =
-  effective_stages cmd |> List.exists (fun stage -> stage.bin = "gh")
+  effective_stages cmd |> stages_targets_gh
 
 let cmd_prefix cmd =
   match effective_stages cmd with
@@ -134,7 +144,7 @@ let bare_worktrees_path token =
   || String.starts_with ~prefix:".worktrees/" token
   || String.starts_with ~prefix:"./.worktrees/" token
 
-let git_c_path cmd =
+let git_c_path_of_stages stages =
   let rec scan_git_args = function
     | "-C" :: path :: _ -> Some path
     | "--" :: _ -> None
@@ -146,9 +156,10 @@ let git_c_path cmd =
     | _ :: rest -> scan_git_args rest
     | [] -> None
   in
-  effective_stages cmd
-  |> List.find_map (fun stage ->
-       if stage.bin = "git" then scan_git_args stage.args else None)
+  List.find_map (fun stage ->
+    if stage.bin = "git" then scan_git_args stage.args else None) stages
+
+let git_c_path cmd = effective_stages cmd |> git_c_path_of_stages
 
 let normalize_repos_path_token token =
   let token = strip_simple_shell_quotes token |> String.trim in
@@ -161,19 +172,23 @@ let normalize_repos_path_token token =
   | "repos" :: repo :: _ when Coord_worktree.safe_repo_name repo -> Some token
   | _ -> None
 
-let command_repos_path_hint cmd =
-  effective_stages cmd
-  |> List.find_map (fun stage ->
-       if stage.bin <> "git" && stage.bin <> "gh"
-       then None
-       else
-         stage.args
-         |> List.find_map (fun token ->
-              match normalize_repos_path_token token with
-              | Some path -> Some (path, String.trim cmd)
-              | None -> None))
+let repos_path_hint_of_stages ~cmd stages =
+  List.find_map (fun stage ->
+    if stage.bin <> "git" && stage.bin <> "gh"
+    then None
+    else
+      stage.args
+      |> List.find_map (fun token ->
+           match normalize_repos_path_token token with
+           | Some path -> Some (path, cmd)
+           | None -> None)) stages
 
-let resolve_sandbox_root_git_cwd ~(config : Coord.config) ~(meta : Keeper_types.keeper_meta) ~cwd ~cmd =
+let command_repos_path_hint cmd =
+  effective_stages cmd |> repos_path_hint_of_stages ~cmd:(String.trim cmd)
+
+let resolve_sandbox_root_git_cwd_of_stages
+    ~(config : Coord.config) ~(meta : Keeper_types.keeper_meta) ~cwd ~cmd stages
+  =
   let host_root =
     Keeper_sandbox.host_root_abs_of_meta ~config meta
     |> Keeper_alerting_path.normalize_path_for_check
@@ -200,11 +215,12 @@ let resolve_sandbox_root_git_cwd ~(config : Coord.config) ~(meta : Keeper_types.
       | Sys_error _ -> [])
   in
   if
-    cwd_normalized = host_root && cmd_targets_gh cmd && Keeper_gh_shared.has_repo_flag cmd
+    cwd_normalized = host_root && stages_targets_gh stages
+    && Keeper_gh_shared.has_repo_flag cmd
   then cwd, None
-  else if cwd_normalized = host_root && cmd_targets_git_or_gh cmd
+  else if cwd_normalized = host_root && stages_targets_git_or_gh stages
   then (
-    let explicit_git_c_path = git_c_path cmd in
+    let explicit_git_c_path = git_c_path_of_stages stages in
     match explicit_git_c_path with
     | Some path when not (bare_worktrees_path path) -> cwd, None
     | _ -> (
@@ -222,7 +238,7 @@ let resolve_sandbox_root_git_cwd ~(config : Coord.config) ~(meta : Keeper_types.
                host_root) )
       | example_repo :: _ as many ->
         let suggested_cwd, suggested_cmd =
-          match command_repos_path_hint cmd with
+          match repos_path_hint_of_stages ~cmd:(String.trim cmd) stages with
           | Some (path, rest) -> path, rest
           | None -> "repos/" ^ example_repo, String.trim cmd
         in
@@ -243,3 +259,7 @@ let resolve_sandbox_root_git_cwd ~(config : Coord.config) ~(meta : Keeper_types.
                suggested_cwd
                (String.concat ", " many)) )))
   else cwd, None
+
+let resolve_sandbox_root_git_cwd ~(config : Coord.config) ~(meta : Keeper_types.keeper_meta) ~cwd ~cmd =
+  resolve_sandbox_root_git_cwd_of_stages
+    ~config ~meta ~cwd ~cmd (effective_stages cmd)

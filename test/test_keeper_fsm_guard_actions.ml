@@ -41,79 +41,35 @@ let test_honest_thunk_leaves_counter_alone () =
     "honest thunk does not bump the counter"
     before after
 
-let test_env_zero_still_reraises_and_bumps () =
-  Unix.putenv "MASC_FSM_GUARD_ASSERT" "0";
-  G.refresh_policy_for_test ();
-  Alcotest.(check bool)
-    "env zero no longer disables assert mode"
-    true (G.assert_mode_for_test ());
+(* Verify the env-invariance contract: [MASC_FSM_GUARD_ASSERT] is no
+   longer a runtime escape hatch (PR #17974 removed the soft-mode
+   pathway). [wrap_unit] always re-raises [Assert_failure] and bumps
+   the counter regardless of the env value. Replaces three earlier
+   tests (env=0 / env="" / env=1) that exercised the now-removed env
+   switch through [refresh_policy_for_test] / [assert_mode_for_test]
+   test backdoors. *)
+let test_assert_mode_invariant_under_env () =
   let action = "TestAction" in
-  let stage = "env_zero_assert" in
-  let before = read_count ~action ~stage in
-  let raised =
-    try
-      G.wrap_unit ~action ~stage (fun () -> assert false);
-      false
-    with Assert_failure _ -> true
-  in
-  let after = read_count ~action ~stage in
-  Alcotest.(check bool)
-    "Assert_failure propagates even with env zero"
-    true raised;
-  Alcotest.(check (float 0.0001))
-    "Assert_failure counter bumped by one before re-raise"
-    (before +. 1.0) after
-
-(* [Unix.putenv NAME ""] is the repo convention for clearing env in tests
-   (matched in [test_board_vote_quarantine.ml:17] and siblings). *)
-let test_default_is_assert_mode_when_env_cleared () =
-  Unix.putenv "MASC_FSM_GUARD_ASSERT" "";
-  G.refresh_policy_for_test ();
-  Alcotest.(check bool)
-    "default with unset env is assert mode"
-    true (G.assert_mode_for_test ());
-  let action = "TestAction" in
-  let stage = "default_assert" in
-  let before = read_count ~action ~stage in
-  let raised =
-    try
-      G.wrap_unit ~action ~stage (fun () -> assert false);
-      false
-    with Assert_failure _ -> true
-  in
-  let after = read_count ~action ~stage in
-  Alcotest.(check bool)
-    "buggy thunk re-raises under default assert mode"
-    true raised;
-  Alcotest.(check (float 0.0001))
-    "counter is bumped before re-raise under default mode"
-    (before +. 1.0) after
-
-let test_buggy_thunk_reraises () =
-  Unix.putenv "MASC_FSM_GUARD_ASSERT" "1";
-  G.refresh_policy_for_test ();
-  Alcotest.(check bool)
-    "policy remains assert mode"
-    true (G.assert_mode_for_test ());
-  let action = "TestAction" in
-  let stage = "buggy_assert" in
-  let before = read_count ~action ~stage in
-  let raised =
-    try
-      G.wrap_unit ~action ~stage (fun () -> assert false);
-      false
-    with Assert_failure _ -> true
-  in
-  let after = read_count ~action ~stage in
-  Alcotest.(check bool)
-    "Assert_failure propagates in assert mode"
-    true raised;
-  Alcotest.(check (float 0.0001))
-    "counter is bumped before re-raise"
-    (before +. 1.0) after;
-  (* Restore default assert mode for any subsequent tests. *)
-  Unix.putenv "MASC_FSM_GUARD_ASSERT" "";
-  G.refresh_policy_for_test ()
+  let stage = "env_invariant" in
+  List.iter
+    (fun env_value ->
+      Unix.putenv "MASC_FSM_GUARD_ASSERT" env_value;
+      let before = read_count ~action ~stage in
+      let raised =
+        try
+          G.wrap_unit ~action ~stage (fun () -> assert false);
+          false
+        with Assert_failure _ -> true
+      in
+      let after = read_count ~action ~stage in
+      Alcotest.(check bool)
+        (Printf.sprintf "Assert_failure propagates with env=%S" env_value)
+        true raised;
+      Alcotest.(check (float 0.0001))
+        (Printf.sprintf "counter bumped before re-raise with env=%S" env_value)
+        (before +. 1.0) after)
+    [ "0"; ""; "1" ];
+  Unix.putenv "MASC_FSM_GUARD_ASSERT" ""
 
 let test_non_assert_exception_propagates_unchanged () =
   let action = "TestAction" in
@@ -167,17 +123,13 @@ let () =
     "fail closed", [
       test_case "honest thunk does not bump" `Quick
         test_honest_thunk_leaves_counter_alone;
-      test_case "env zero still re-raises + bumps" `Quick
-        test_env_zero_still_reraises_and_bumps;
       test_case "non-assert exception propagates" `Quick
         test_non_assert_exception_propagates_unchanged;
       test_case "action label isolation" `Quick
         test_distinct_action_label_isolation;
     ];
     "assert mode", [
-      test_case "default with cleared env is assert mode" `Quick
-        test_default_is_assert_mode_when_env_cleared;
-      test_case "buggy thunk re-raises after bumping" `Quick
-        test_buggy_thunk_reraises;
+      test_case "assert behavior invariant under MASC_FSM_GUARD_ASSERT env" `Quick
+        test_assert_mode_invariant_under_env;
     ];
   ]

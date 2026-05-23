@@ -10,7 +10,6 @@
 
 open Alcotest
 module FA = Masc_mcp.Fd_accountant
-module DST = Masc_mcp.Docker_spawn_throttle
 
 let tmpdir prefix =
   Filename.concat
@@ -97,13 +96,13 @@ let test_cap_bounds_fan_in () =
   if hw > cap then
     Alcotest.failf "peak in-flight %d exceeded cap %d" hw cap
 
-let test_docker_delegation_consistent () =
-  (* DST.configured_max () must equal
-     Fd_accountant.configured_concurrency ~kind:Docker_spawn — the
-     whole point of the delegation. *)
-  let via_legacy = DST.configured_max () in
-  let via_accountant = FA.configured_concurrency ~kind:Docker_spawn in
-  check int "docker delegation cap parity" via_accountant via_legacy
+(* Removed [test_docker_delegation_consistent]: relied on
+   [DST.configured_max], which was unexported in PR #17948 as a dead
+   export. [Docker_spawn_throttle] is a thin alias over
+   [Fd_accountant.{with_slot,configured_concurrency}] wired with
+   [kind:Docker_spawn]; the parity check was therefore a tautology
+   against its own one-line definition. The with_slot delegation is
+   still exercised through [test_docker_spawn_throttle.ml]. *)
 
 let test_snapshot_shape () =
   let s = FA.fd_snapshot () in
@@ -489,11 +488,6 @@ let () =
             test_with_slot_nested_cross_kind_under_fd_pressure ;
           test_case "forked child re-enters pressure gate" `Quick
             test_forked_child_reenters_pressure_gate_after_parent_slot ;
-        ] ) ;
-      ( "delegation",
-        [
-          test_case "docker delegation cap parity" `Quick
-            test_docker_delegation_consistent ;
         ] ) ;
       ( "snapshot",
         [ test_case "shape" `Quick test_snapshot_shape ] ) ;

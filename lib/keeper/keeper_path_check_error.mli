@@ -40,3 +40,13 @@ val to_message : t -> string
     so downstream tools that match on these messages keep their
     contract. *)
 
+val message_prefix : t -> string
+(** Stable lowercase prefix token used by downstream classifiers
+    (e.g. dashboard tool-quality). Always a strict prefix of the
+    lowercase form of [to_message]. *)
+
+val parse_prefix : string -> t option
+(** Inverse of [to_message] for the variant tag only — payload fields
+    are left empty / [None] since the typed module is intended for
+    classification, not full message reconstruction. *)
+

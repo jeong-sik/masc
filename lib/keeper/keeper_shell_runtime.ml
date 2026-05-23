@@ -309,6 +309,18 @@ let path_error ~op ~meta ~raw_path e =
   Keeper_exec_shared.actionable_path_error ~op ~meta ~raw_path ~error:e
 ;;
 
+let with_read_target ~config ~meta ~args ~root ~op ~raw_path f =
+  match read_target ~config ~meta ~args ~root with
+  | Error e -> path_error ~op ~meta ~raw_path e
+  | Ok target -> f target
+;;
+
+let with_cwd_target ~config ~meta ~args ~root ~op ~raw_path f =
+  match cwd_target ~config ~meta ~args ~root with
+  | Error e -> path_error ~op ~meta ~raw_path e
+  | Ok cwd -> f cwd
+;;
+
 (** {1 Readonly-op JSON response builders}
 
     Eliminates the repeated

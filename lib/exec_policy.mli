@@ -81,6 +81,10 @@ val is_write_operation : Masc_exec.Shell_ir.t -> bool
 val is_git_branch_switch : Masc_exec.Shell_ir.t -> bool
 val is_destructive_bash_operation : Masc_exec.Shell_ir.t -> bool
 
+val flat_stage_words : Masc_exec.Shell_ir.t -> string list
+(** Flatten all literal stage words across pipeline segments.
+    Non-literal-only stages contribute their literal prefix only. *)
+
 (** Transitional string wrappers (DEPRECATED — removed in S4). *)
 val is_write_operation_of_string : string -> bool
 val is_git_branch_switch_of_string : string -> bool

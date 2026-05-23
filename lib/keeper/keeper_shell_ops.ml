@@ -120,49 +120,6 @@ let handle_keeper_shell
   let path_error e =
     actionable_path_error ~op ~meta ~raw_path ~error:e
   in
-  let run_line_count_reader ~coreutil =
-    match read_target () with
-    | Error e -> path_error e
-    | Ok target ->
-      let n = Safe_ops.json_int ~default:20 "lines" args |> fun v -> max 1 (min 200 v) in
-      if Keeper_docker_read.should_route_read ~meta then
-        (match
-           Keeper_shell_runtime.run_readonly_in_docker ~config ~meta ?turn_sandbox_factory ~op ~target
-             ~command_argv:(fun cpath ->
-               [ coreutil; "-n"; string_of_int n; cpath ])
-             ~max_bytes:1_000_000
-             ~timeout_sec:Keeper_shell_shared.read_timeout_sec
-             ()
-         with
-         | Error response -> response
-         | Ok (st, out) ->
-           Yojson.Safe.to_string
-             (`Assoc
-                 [ "ok", `Bool true
-                 ; "op", `String op
-                 ; "path", `String target
-                 ; "lines", `Int n
-                 ; "via", `String "docker"
-                 ; "status", Keeper_alerting_path.process_status_to_json st
-                 ; "content", `String out
-                 ]))
-      else
-        let st, out =
-          Keeper_shell_shared.run_argv_with_status_retry_eintr
-            ~timeout_sec:Keeper_shell_shared.read_timeout_sec
-            [ coreutil; "-n"; string_of_int n; target ]
-        in
-        Yojson.Safe.to_string
-          (`Assoc
-              [ "ok", `Bool (st = Unix.WEXITED 0)
-              ; "op", `String op
-              ; "path", `String target
-              ; "lines", `Int n
-              ; "via", `String "host"
-              ; "status", Keeper_alerting_path.process_status_to_json st
-              ; "content", `String out
-              ]))
-  in
   let docker_git_log_path host_path =
     if String.trim host_path = "" then Ok ""
     else if Filename.is_relative host_path then Ok host_path
@@ -466,8 +423,29 @@ let handle_keeper_shell
               ()
           in
           Keeper_shell_runtime.readonly_json_string fields)
-  | "head" -> run_line_count_reader ~coreutil:coreutils.head
-  | "tail" -> run_line_count_reader ~coreutil:coreutils.tail
+  | "head" | "tail" ->
+    (match read_target () with
+     | Error e -> path_error e
+     | Ok target ->
+       let n = max 1 (min 200 (Safe_ops.json_int ~default:20 "lines" args)) in
+       let coreutil = if op = "head" then coreutils.head else coreutils.tail in
+       match
+         Keeper_shell_runtime.run_readonly_op ~config ~meta ?turn_sandbox_factory
+           ~op ~target
+           ~host_argv:[ coreutil; "-n"; string_of_int n; target ]
+           ~docker_argv:(fun cpath -> [ coreutil; "-n"; string_of_int n; cpath ])
+           ~max_bytes:1_000_000
+           ~timeout_sec:Keeper_shell_shared.read_timeout_sec ()
+       with
+       | Error response -> response
+       | Ok (via, st, out) ->
+         let fields =
+           Keeper_shell_runtime.readonly_json_fields ~op ~path:target ~via
+             ~status:st ~output_field:"content" ~output:(`String out)
+             ~extra:[ "lines", `Int n ]
+             ()
+         in
+         Keeper_shell_runtime.readonly_json_string fields)
   | "wc" ->
     (match read_target () with
      | Error e -> path_error e

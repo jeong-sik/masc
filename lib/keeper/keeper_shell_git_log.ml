@@ -63,8 +63,7 @@ let handle ~op ~(meta : keeper_meta) ~(config : Coord.config) ~(args : Yojson.Sa
             Yojson.Safe.to_string json))
     else
       let argv =
-        [ "git"; "-C"; cwd ]
-        @ Keeper_shell_runtime.git_log_argv_core ~format ~count ~grep ~file_path ()
+        Keeper_shell_runtime.git_log_argv_core ~format ~count ~grep ~file_path ~cwd ()
       in
       (match Keeper_sandbox_factory.resolve_opt turn_sandbox_factory ~cwd with
        | Some runtime ->
@@ -138,6 +137,7 @@ let handle ~op ~(meta : keeper_meta) ~(config : Coord.config) ~(args : Yojson.Sa
              ~cwd:(`String cwd)
              ~count
              ~grep
+             ~via:"host"
              ~status:st
              ~output:out
              ~limit:50

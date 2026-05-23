@@ -110,12 +110,17 @@ let docker_git_log_path ~config ~meta host_path =
   else Keeper_docker_read.container_path_of_host ~config ~meta ~host_path
 ;;
 
-let git_log_argv_core ~format ~count ~grep ?file_path () =
+let git_log_argv_core ~format ~count ~grep ?file_path ?cwd () =
   let base =
     [ "git"; "--no-optional-locks"; "log"
     ; Printf.sprintf "--format=%s" format
     ; Printf.sprintf "-%d" count
     ]
+  in
+  let base =
+    match cwd with
+    | None | Some "" -> base
+    | Some dir -> "git" :: "-C" :: dir :: List.tl base
   in
   let base = if grep = "" then base else base @ [ "--grep=" ^ grep ] in
   match file_path with

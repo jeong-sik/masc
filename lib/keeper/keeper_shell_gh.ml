@@ -176,7 +176,7 @@ let handle ~op ~(meta : keeper_meta) ~(config : Coord.config) ~(args : Yojson.Sa
             if meta.sandbox_profile = Docker
             then
               match
-                Keeper_shell_shared.run_docker_shell_command_with_status
+                Keeper_shell_docker.run_docker_shell_command_with_status
                   ~config ~meta ~cwd
                   ~timeout_sec ~cmd:display_command
                   ~git_creds_enabled:true ~network_mode:Network_inherit

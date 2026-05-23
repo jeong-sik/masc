@@ -220,7 +220,7 @@ let run_pr_review_argv
   if meta.sandbox_profile = Docker then
     let cmd = Keeper_gh_pr_review_cli.quote_argv argv in
     match
-      Keeper_shell_shared.run_docker_shell_command_with_status
+      Keeper_shell_docker.run_docker_shell_command_with_status
         ~config ~meta
         ~cwd:(docker_pr_review_cwd ~config meta)
         ~timeout_sec ~cmd

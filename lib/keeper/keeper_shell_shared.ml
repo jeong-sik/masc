@@ -38,14 +38,3 @@ let update_playground_repo_cache
     ~shallow
 
 
-(* Sandbox infrastructure stays in Keeper_shell_docker; command-shape
-   interpretation stays in Keeper_shell_command_semantics. *)
-let effective_sandbox_profile = Keeper_shell_docker.effective_sandbox_profile
-let stages_targets_git_or_gh = Keeper_shell_command_semantics.stages_targets_git_or_gh
-let stages_targets_gh = Keeper_shell_command_semantics.stages_targets_gh
-
-let ensure_keeper_sandbox_runtime = Keeper_shell_docker.ensure_keeper_sandbox_runtime
-let command_uses_nested_container_runtime = Keeper_shell_docker.command_uses_nested_container_runtime
-let run_docker_shell_command_with_status = Keeper_shell_docker.run_docker_shell_command_with_status
-let run_docker_credentialed_bash = Keeper_shell_docker.run_docker_credentialed_bash
-let run_docker_bash = Keeper_shell_docker.run_docker_bash

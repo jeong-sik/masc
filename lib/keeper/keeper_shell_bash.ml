@@ -80,7 +80,7 @@ let handle_keeper_bash_typed
           || String.equal playground_abs cwd_canonical
         in
         let sandbox_profile, _sandbox_network_mode =
-          Keeper_shell_shared.effective_sandbox_profile ~meta ~in_playground
+          Keeper_shell_docker.effective_sandbox_profile ~meta ~in_playground
         in
         let dispatch_sandbox =
           match sandbox_profile with

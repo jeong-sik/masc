@@ -61,9 +61,14 @@ let test_lines_to_json_byte_budget () =
   let json = Keeper_exec_shared.lines_to_json ~max_bytes:1_000 text in
   match json with
   | `List items ->
-    (* At least one line kept, but not all 4 because 4 × (300 + 4) > 1000 *)
-    Alcotest.(check bool) "byte budget truncates" true (List.length items < 4);
-    (* Last element is an omission marker *)
+    (* 3 lines (912 bytes) fit + 1 omission marker = 4 items; the
+       original 4th 304-byte line tips the budget over 1000 and is
+       replaced by the marker.  The truncation invariant is the
+       marker's presence on the tail, not the item count: marker +
+       N kept yields the same length as N+1 kept-without-marker. *)
+    Alcotest.(check bool) "at least one line kept alongside marker" true
+      (List.length items >= 2);
+    (* Last element is an omission marker — the real truncation evidence. *)
     (match List.rev items |> List.hd with
      | `String s ->
        Alcotest.(check bool) "last item is omission marker" true

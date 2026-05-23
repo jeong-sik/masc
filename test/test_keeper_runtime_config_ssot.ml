@@ -206,8 +206,12 @@ policy_voice_enabled = false
   seed_persisted_meta config initial_meta;
   match Keeper_runtime.ensure_keeper_meta config keeper_name with
   | Error e -> fail ("ensure_keeper_meta failed: " ^ e)
-  | Ok updated ->
-      check bool "policy_voice_enabled" false updated.policy_voice_enabled
+  | Ok _updated ->
+      (* [policy_voice_enabled] was removed from [keeper_meta] during the
+         dead-export sweep; the surrounding seed/ensure roundtrip is still
+         exercised through the [Ok] branch, but the field assertion is
+         dropped. *)
+      ()
 
 let test_sandbox_policy_resync () =
   with_temp_dir "keeper-config-ssot-room" @@ fun room_dir ->

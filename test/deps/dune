@@ -57,6 +57,8 @@
    (re_export masc_mcp.briefing_compactors)
    ;; RFC-0056 Phase 1E — Dashboard_eval_feed leaf module sub-library.
    (re_export masc_mcp.dashboard_eval_feed)
+   ;; RFC-0163 Phase D1 — Cascade_name leaf sub-library.
+   (re_export masc_mcp.cascade_name)
    ;; RFC-0056 Phase 1F — Memory_jsonl leaf module sub-library.
    (re_export masc_mcp.memory_jsonl)
    ;; RFC-0056 Phase 1G — Chronicle_event leaf module sub-library.

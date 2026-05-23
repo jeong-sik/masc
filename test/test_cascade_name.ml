@@ -5,7 +5,11 @@
 
 open Alcotest
 
-module CN = Masc_mcp.Cascade_name
+(* [Cascade_name] lives in its own [masc_mcp.cascade_name] sub-library
+   (RFC-0163 Phase D1 — extracted to break the masc_mcp ↔ cascade_ref
+   circular dep). The sub-library is [(wrapped false)], so the module
+   is reachable as bare [Cascade_name] (re-exported via masc_test_deps). *)
+module CN = Cascade_name
 
 (* ── Valid parse tests ─────────────────────────────────────────── *)
 

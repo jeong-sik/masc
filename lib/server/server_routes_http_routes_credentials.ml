@@ -1,4 +1,5 @@
 open Server_auth
+open Server_h2_gateway_helpers
 open Server_utils
 
 module Http = Http_server_eio
@@ -386,8 +387,7 @@ let add_routes router =
                  match Credential_store.remove ~base_path id with
                  | Error msg ->
                      Http.Response.json ~status:`Bad_request ~request:req
-                       (Yojson.Safe.to_string
-                          (`Assoc [ ("ok", `Bool false); ("error", `String msg) ]))
+                       (ok_false_error_json_string msg)
                        reqd
                  | Ok () ->
                      Http.Response.json ~request:req

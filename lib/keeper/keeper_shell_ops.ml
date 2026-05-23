@@ -63,6 +63,12 @@ let handle_keeper_shell
     let run_git_cwd =
       run_cwd ~max_bytes:1_000_000 ~timeout_sec:Keeper_shell_shared.read_timeout_sec
     in
+    let run_cat_rt = run_cat ~timeout_sec:Keeper_shell_shared.read_timeout_sec in
+    let run_head_tail_rt =
+      run_head_tail ~timeout_sec:Keeper_shell_shared.read_timeout_sec
+    in
+    let run_tree_rt = run_tree ~timeout_sec:Keeper_shell_shared.read_timeout_sec in
+    let run_wc_rt = run_wc ~timeout_sec:Keeper_shell_shared.read_timeout_sec in
     match shell_op with
     | Pwd ->
       with_cwd (fun cwd ->
@@ -84,7 +90,7 @@ let handle_keeper_shell
     | Cat ->
       with_read (fun target ->
         let max_bytes = shell_readonly_cat_max_bytes args in
-        run_cat ~target ~max_bytes ~timeout_sec:Keeper_shell_shared.read_timeout_sec ())
+        run_cat_rt ~target ~max_bytes ())
     | Rg ->
       Keeper_shell_rg.handle ~op ~meta ~config ~args ?turn_sandbox_factory ~root ~raw_path
     | Git_log ->
@@ -94,14 +100,14 @@ let handle_keeper_shell
     | Head | Tail ->
       with_read (fun target ->
         let n = max 1 (min 200 (Safe_ops.json_int ~default:20 "lines" args)) in
-        run_head_tail ~target ~n ~timeout_sec:Keeper_shell_shared.read_timeout_sec ())
+        run_head_tail_rt ~target ~n ())
     | Wc ->
       with_read (fun target ->
-        run_wc ~target ~timeout_sec:Keeper_shell_shared.read_timeout_sec ())
+        run_wc_rt ~target ())
     | Tree ->
       with_read (fun target ->
         let limit = shell_readonly_limit args in
-        run_tree ~target ~limit ~timeout_sec:Keeper_shell_shared.read_timeout_sec ())
+        run_tree_rt ~target ~limit ())
     | Git_diff ->
       with_cwd (fun cwd ->
         run_git_cwd ~cwd ~cmd:"git diff --stat"

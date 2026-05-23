@@ -13,8 +13,8 @@
     validation, and exit classification all share.
 
     The lib-root [Masc_mcp.Shell_command_gate] transition facade has
-    been retired. Callers that need shell policy verdicts use [gate],
-    [gate_typed], or [lower_typed_pipeline] directly.
+    been retired. Callers that need shell policy verdicts use
+    [gate_typed] or [lower_typed_pipeline] directly.
 
     Output verdict separates the four operational classes the Plan's
     Goal Tree distinguishes:
@@ -36,7 +36,7 @@
 
 (** Caller identity for telemetry partition.
 
-    The optional [?caller] arg on {!gate}, {!gate_typed}, and
+    The optional [?caller] arg on {!gate_typed} and
     {!lower_typed_pipeline} is part of the stable caller/verdict
     telemetry surface. The gate verdict itself is independent of the
     caller tag. *)
@@ -140,23 +140,6 @@ val allow_all_paths : path_policy
 val host_sandbox : sandbox_context
 (** Convenience: the default {!Masc_exec.Sandbox_target.host}
     sandbox. *)
-
-val gate
-  :  ?caller:caller
-  -> raw:string
-  -> allowlist:allowlist_policy
-  -> path_policy:path_policy
-  -> sandbox:sandbox_context
-  -> unit
-  -> verdict
-(** Phase 1 SSOT entrypoint. Calls
-    {!Masc_exec_bash_parser.Bash.parse_string} once, lifts the result
-    into a {!parsed_context}, then applies allowlist and path policy
-    in that order. Sandbox context is recorded on every stage's
-    [Masc_exec.Shell_ir.simple.sandbox] field so downstream consumers
-    can route to [Exec_dispatch] in Phase 4 without re-parsing.
-    [?caller] is captured for the upcoming telemetry partition
-    (RFC-0131 PR-3) and does not affect the verdict. *)
 
 val gate_typed
   :  ?caller:caller

@@ -5,7 +5,7 @@
 
     This file exercises three contracts:
 
-    1. [Masc_exec_command_gate.Shell_command_gate.gate] verdict shape
+    1. [Masc_exec_command_gate.Shell_command_gate.gate_typed] verdict shape
        matches what {!test/fixtures/shell_gate/baseline.jsonl}
        records for each corpus row (Phase 0 - baseline pin).
     2. [Masc_mcp.Worker_dev_tools.validate_command_coding_with_allowlist]
@@ -19,8 +19,20 @@
 
 module Gate = Masc_exec_command_gate.Shell_command_gate
 module W = Masc_mcp.Worker_dev_tools
+module PD = Masc_exec.Parsed
 
 let allowed = [ "rg"; "sort"; "head"; "wc"; "cat"; "git"; "ls"; "grep" ]
+
+let gate_from_raw ?caller ~raw ~allowlist ~path_policy ~sandbox () =
+  match Masc_exec_bash_parser.Bash.parse_string raw with
+  | PD.Parsed ir ->
+    gate_from_raw_typed ?caller ~ir ~allowlist ~path_policy ~sandbox ()
+  | PD.Parse_error _ ->
+    Gate.Cannot_parse { reason = Gate.Parse_error }
+  | PD.Parse_aborted reason ->
+    Gate.Cannot_parse { reason = Gate.Parse_aborted reason }
+  | PD.Too_complex reason ->
+    Gate.Too_complex { reason = Gate.Unsupported_construct reason }
 
 let allowlist : Gate.allowlist_policy =
   { redirect_allowed = false; allowed_commands = allowed; allow_pipes = true }
@@ -137,7 +149,7 @@ let run_corpus_row fixture =
     fixture.expected_worker_verdict
     (worker_tag worker);
   let ir =
-    Gate.gate
+    gate_from_raw
       ~raw:fixture.raw_cmd
       ~allowlist
       ~path_policy:Gate.allow_all_paths
@@ -198,7 +210,7 @@ let test_corpus_covers_required_buckets () =
 let test_quoted_pipe_single_stage_shape () =
   (* Plan G2.1: quoted [|] must not become a stage delimiter. *)
   match
-    Gate.gate
+    gate_from_raw
       ~raw:"rg 'foo|bar' lib"
       ~allowlist
       ~path_policy:Gate.allow_all_paths
@@ -222,7 +234,7 @@ let test_real_three_stage_pipeline_ordering () =
   (* Plan G2.2 composition contract: typed and raw pipelines must
      produce the same non-nested ordered Simple stage list. *)
   match
-    Gate.gate
+    gate_from_raw
       ~raw:"rg foo lib | sort | head -20"
       ~allowlist
       ~path_policy:Gate.allow_all_paths
@@ -259,7 +271,7 @@ let test_real_three_stage_pipeline_ordering () =
 
 let test_pipeline_segment_rejection_carries_stage_index () =
   match
-    Gate.gate
+    gate_from_raw
       ~raw:"rg foo | sed s/a/b/ | head -20"
       ~allowlist
       ~path_policy:Gate.allow_all_paths
@@ -278,7 +290,7 @@ let test_pipes_disabled () =
     { redirect_allowed = false; allowed_commands = allowed; allow_pipes = false }
   in
   match
-    Gate.gate
+    gate_from_raw
       ~raw:"rg foo | head -20"
       ~allowlist:policy
       ~path_policy:Gate.allow_all_paths
@@ -349,7 +361,7 @@ let test_lower_typed_three_stage_matches_raw () =
       ()
   in
   let raw =
-    Gate.gate
+    gate_from_raw
       ~raw:"rg foo lib | sort | head -20"
       ~allowlist
       ~path_policy:Gate.allow_all_paths
@@ -392,7 +404,7 @@ let test_path_policy_rejects () =
   in
   let policy = { Gate.classify = Some classify } in
   match
-    Gate.gate
+    gate_from_raw
       ~raw:"cat /etc/shadow"
       ~allowlist
       ~path_policy:policy
@@ -416,7 +428,7 @@ let test_path_policy_rejects_redirect_target () =
   in
   let policy = { Gate.classify = Some classify } in
   match
-    Gate.gate
+    gate_from_raw
       ~raw:"ls > /tmp/out"
       ~allowlist
       ~path_policy:policy
@@ -441,7 +453,7 @@ let test_sandbox_target_propagates_to_every_stage () =
      supplied sandbox target. *)
   let sandbox = Gate.host_sandbox in
   match
-    Gate.gate
+    gate_from_raw
       ~raw:"rg foo lib | sort | head -20"
       ~allowlist
       ~path_policy:Gate.allow_all_paths
@@ -493,7 +505,7 @@ let test_backslash_pipe_in_double_quotes_allows () =
        quoted argv value instead of routing through the retired legacy
        shape classifier. *)
   match
-    Gate.gate
+    gate_from_raw
       ~raw:"rg \"a\\|b\""
       ~allowlist
       ~path_policy:Gate.allow_all_paths
@@ -515,7 +527,7 @@ let test_brace_expansion_is_too_complex_glob_brace () =
      [has "{" || has "}"] arm — previously no corpus row exercised
      it. *)
   match
-    Gate.gate
+    gate_from_raw
       ~raw:"ls {a,b}.txt"
       ~allowlist
       ~path_policy:Gate.allow_all_paths
@@ -539,7 +551,7 @@ let test_absolute_path_traversal_phase1_allows () =
        diff and not a silent behavior change.
      Phase 0 PR-A2: first absolute-path-outside-repo fixture. *)
   match
-    Gate.gate
+    gate_from_raw
       ~raw:"cat /etc/passwd"
       ~allowlist
       ~path_policy:Gate.allow_all_paths

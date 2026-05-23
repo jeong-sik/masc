@@ -80,12 +80,21 @@ Dispatch(c) ==
     /\ state' = [state EXCEPT ![c] = Dispatched]
     /\ risk'  = risk
 
-\* Clean transition relation: only the three lawful actions.
+\* Quiescence: every command has finished dispatch. Modeled as an
+\* explicit stuttering action so the model checker's deadlock detector
+\* does not flag the natural terminal state as a violation.
+Done ==
+    /\ \A c \in CmdIds : state[c] = Dispatched
+    /\ UNCHANGED vars
+
+\* Clean transition relation: only the three lawful actions plus
+\* the explicit quiescence stutter.
 Next ==
-    \E c \in CmdIds :
+    \/ \E c \in CmdIds :
         \/ Parse(c)
         \/ \E r \in RiskClasses : Classify(c, r)
         \/ Dispatch(c)
+    \/ Done
 
 Spec == Init /\ [][Next]_vars
 
@@ -104,6 +113,7 @@ DispatchWithoutDecision(c) ==
 NextBuggy ==
     \/ Next
     \/ \E c \in CmdIds : DispatchWithoutDecision(c)
+    \/ Done
 
 SpecBuggy == Init /\ [][NextBuggy]_vars
 

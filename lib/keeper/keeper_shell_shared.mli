@@ -11,11 +11,6 @@
     - {b shell timeouts} ({!io_timeout_sec}, {!read_timeout_sec},
       {!user_timeout_max_sec}, {!gh_min_timeout_sec},
       {!git_meta_timeout_sec}, {!clamp_shell_timeout}).
-    - {b readonly classification + diagnosis}
-      ({!readonly_shell_token_match},
-      {!readonly_hint_of_category},
-      {!diagnosis_of_readonly_category},
-      {!diagnosis_of_block_reason}).
     - {b path resolution / autocorrect} for keeper_shell read/write
       ({!resolve_keeper_shell_read_cwd},
       {!resolve_keeper_shell_write_cwd},
@@ -25,84 +20,9 @@
       {!Keeper_shell_docker} so callers (tests, doc refs) that
       historically pointed at this module continue to compile. *)
 
-(** {1 Shell op SSOT (issue #8524)} *)
+include module type of Keeper_shell_variant
 
-type shell_op =
-  | Pwd
-  | Ls
-  | Cat
-  | Rg
-  | Git_status
-  | Find
-  | Head
-  | Tail
-  | Wc
-  | Tree
-  | Git_log
-  | Git_diff
-  | Git_worktree
-  | Git_clone
-  | Gh
-
-val shell_op_to_string : shell_op -> string
-val all_shell_ops : shell_op list
-val valid_shell_op_strings : string list
-
-(** {1 Shell timeouts} *)
-
-val env_float : string -> float -> float
-(** [env_float name default] reads [name] from the process env and
-    parses it as a float; falls back to [default] on missing or
-    malformed values.  Used by the timeout constants below. *)
-
-val io_timeout_sec : float
-(** Network/disk-bound commands (git status, ls on large dirs,
-    custom bash).  Default 30s, env: [MASC_KEEPER_IO_TIMEOUT_SEC]. *)
-
-val read_timeout_sec : float
-(** Fast read-only commands (cat, rg, head, tail, find, git_log,
-    tree).  Default 15s, env: [MASC_KEEPER_READ_TIMEOUT_SEC]. *)
-
-val user_timeout_max_sec : float
-(** Upper bound for user-provided [timeout_sec] in keeper_bash.
-    Default 180s, env: [MASC_KEEPER_USER_TIMEOUT_MAX_SEC]. *)
-
-val gh_min_timeout_sec : float
-(** Floor for gh op [timeout_sec] (15s).  Hardcoded — operators
-    cannot lower; sub-network-latency timeouts cause cascading 401
-    retries (#8688). *)
-
-val keeper_bash_native_min_timeout_sec : float
-(** Floor for keeper_bash [timeout_sec] when the command runs through the
-    *native* (non-Docker) executor (5s).  Custom Bash commands often touch
-    disk or git metadata; lower caller-supplied values produce noisy
-    partial-output timeout failures rather than useful latency bounds.
-
-    The Docker dispatch path re-clamps to
-    {!Keeper_shell_docker.docker_run_min_timeout_sec} inside
-    [run_docker_shell_command_with_status_internal] because container
-    cold start adds 10-60s on top of the actual command (runtime log
-    issue #5, 2026-05-20).  Keeping a separate native floor avoids
-    penalising the host-side fast path for the Docker path's overhead. *)
-
-val keeper_bash_min_timeout_sec_for_args : Yojson.Safe.t -> float
-(** Minimum timeout_sec floor for a typed keeper_bash invocation.
-    Trivial native commands keep {!keeper_bash_native_min_timeout_sec}; git,
-    recursive scans, and local Dune wrapper invocations use the shared
-    Tool_dispatch floor. *)
-
-val git_meta_timeout_sec : float
-(** Ceiling for lightweight git metadata commands (rev-parse,
-    log --oneline).  Default 5s, env:
-    [MASC_KEEPER_GIT_META_TIMEOUT_SEC]. *)
-
-val clamp_shell_timeout :
-  ?min_sec:float -> default:float -> Yojson.Safe.t -> float
-(** [clamp_shell_timeout ?min_sec ~default args] reads the
-    optional [timeout_sec] field from [args], clamps it to
-    [\[min_sec, user_timeout_max_sec\]] (default:
-    [Timeout_floor.Native_shell]), and falls back to [default] when
-    absent. *)
+include module type of Keeper_shell_timeout
 
 (** {1 Git-token helpers} *)
 
@@ -117,31 +37,6 @@ val first_git_subcommand : string list -> string option
 (** Skip leading [git] global options and return the first
     subcommand token, or [None] when [tokens] terminates without
     one. *)
-
-(** {1 Readonly classification + diagnosis} *)
-
-val readonly_shell_token_match : string list -> (string * string) option
-(** [(matched_prefix, category)] when the token list contains a
-    write command that the readonly shell must reject.  Categories
-    are {!readonly_hint_of_category} keys: ["git_write"],
-    ["package_install"], ["destructive"]. *)
-
-val readonly_hint_of_category : string -> string
-(** Human-readable rewrite hint per category, ending with explicit
-    Good:/Bad: examples so small-LLM keepers can self-correct
-    without a retry loop (#8688).  Categories: ["chaining"],
-    ["redirect"], ["git_write"], ["package_install"],
-    ["destructive"]; unknown categories yield a generic message. *)
-
-val diagnosis_of_readonly_category : string -> Exec_core.diagnosis option
-(** Machine-parseable counterpart of {!readonly_hint_of_category}.
-    Returns [None] for unknown categories. *)
-
-val diagnosis_of_block_reason :
-  Exec_policy.block_reason -> Exec_core.diagnosis option
-(** Map a {!Exec_policy.block_reason} to a structured
-    diagnosis (rule_id + explanation + suggested rewrite or
-    [tool_suggestion]). *)
 
 (** {1 Process status helpers} *)
 

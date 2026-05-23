@@ -58,7 +58,7 @@ let split_unquoted_guard_word acc value =
   loop 0 0 acc
 ;;
 
-let guard_tokens_of_word acc (word : Masc_exec_bash_parser.Bash_words.word) =
+let guard_tokens_of_word acc (word : Exec_policy_mutation_classifier.quoted_word) =
   if word.quoted
   then push_guard_word acc ~quoted:true word.value
   else if String.equal word.value "&&"
@@ -69,16 +69,13 @@ let guard_tokens_of_word acc (word : Masc_exec_bash_parser.Bash_words.word) =
 ;;
 
 let shell_guard_tokens cmd =
-  match Masc_exec_bash_parser.Bash_words.stages cmd with
-  | Error _ -> []
-  | Ok stages ->
-    stages
-    |> List.fold_left
-         (fun acc stage ->
-            let acc = List.fold_left guard_tokens_of_word acc stage in
-            Guard_separator :: acc)
-         []
-    |> List.rev
+  Exec_policy_mutation_classifier.stages_quoted_words_of_string cmd
+  |> List.fold_left
+       (fun acc stage ->
+          let acc = List.fold_left guard_tokens_of_word acc stage in
+          Guard_separator :: acc)
+       []
+  |> List.rev
 ;;
 
 let shell_assignment_like word =

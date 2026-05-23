@@ -371,7 +371,7 @@ let handle_keeper_shell
          (* P11: Host git_status via Shell IR pipeline.
             Preserves P16 Bash_history + failure_insight. *)
          let dispatch_sandbox = Masc_exec.Sandbox_target.host () in
-         let cwd_scope = Path_scope.classify ~raw:cwd ~cwd:root in
+         let cwd_scope = Masc_exec.Path_scope.classify ~raw:cwd ~cwd:root in
          let ir =
            Masc_exec.Shell_ir.Simple
              { bin = Masc_exec.Bin.of_known Masc_exec.Bin.Git
@@ -869,15 +869,6 @@ let handle_keeper_shell
               ~cmd:"git -C <cwd> --no-optional-locks log --format=<fmt> -<n>"
               ~docker_cmd ~timeout_sec:Keeper_shell_shared.read_timeout_sec)
        else
-         let base_argv =
-           [ "git"; "-C"; cwd; "--no-optional-locks"; "log";
-             Printf.sprintf "--format=%s" format;
-             Printf.sprintf "-%d" count ]
-         in
-         let base_argv =
-           if grep = "" then base_argv else base_argv @ [ "--grep=" ^ grep ]
-         in
-         let argv = if file_path <> "" then base_argv @ [ "--"; file_path ] else base_argv in
          (match Keeper_sandbox_factory.resolve_opt turn_sandbox_factory ~cwd with
           | Some runtime ->
             let argv =
@@ -939,7 +930,7 @@ let handle_keeper_shell
             (* P11: Host git_log via Shell IR pipeline.
                Preserves P16 Bash_history + failure_insight. *)
             let dispatch_sandbox = Masc_exec.Sandbox_target.host () in
-            let cwd_scope = Path_scope.classify ~raw:cwd ~cwd:root in
+            let cwd_scope = Masc_exec.Path_scope.classify ~raw:cwd ~cwd:root in
             let base_args =
               [ Masc_exec.Shell_ir.Lit ("--no-optional-locks", Masc_exec.Shell_ir.default_meta)
               ; Masc_exec.Shell_ir.Lit ("log", Masc_exec.Shell_ir.default_meta)

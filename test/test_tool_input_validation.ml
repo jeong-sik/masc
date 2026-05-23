@@ -565,8 +565,10 @@ let test_keeper_bash_schema_exposes_typed_boundary () =
   check_param_type "executable" "string" params;
   check_param_type "argv" "array" params;
   check_param_type "pipeline" "array" params;
-  check_param_type "stages" "array" params;
   check_param_type "env" "object" params;
+  Alcotest.(check bool)
+    "stages alias not exposed in schema" true
+    (Option.is_none (param_by_name "stages" params));
   Alcotest.(check bool)
     "legacy background flag not exposed"
     true
@@ -1037,7 +1039,10 @@ let test_validate_args_keeper_bash_oneof_empty_pipeline () =
       "expected keeper_bash with executable + empty pipeline to pass, got %s"
       (Yojson.Safe.to_string result.Tool_result.data)
 
-let test_validate_args_keeper_bash_oneof_null_stages () =
+(** stages was removed from the schema (backward-compat alias only in handler).
+    Sending stages in args now triggers additionalProperties rejection since
+    the schema declares additionalProperties: false. *)
+let test_validate_args_keeper_bash_oneof_stages_rejected_by_schema () =
   let args =
     `Assoc
       [ "executable", `String "ls"
@@ -1051,20 +1056,17 @@ let test_validate_args_keeper_bash_oneof_null_stages () =
       ~args
       ()
   with
-  | Ok forwarded ->
-    Alcotest.(check string) "executable preserved" "ls"
-      (assoc_string "executable" forwarded)
   | Error result ->
-    Alcotest.failf
-      "expected keeper_bash with executable + null stages to pass, got %s"
-      (Yojson.Safe.to_string result.Tool_result.data)
+    let msg = Yojson.Safe.to_string result.Tool_result.data in
+    Alcotest.(check bool) "mentions stages" true (string_contains msg "stages")
+  | Ok _ ->
+    Alcotest.fail "expected rejection: stages is no longer a schema-advertised field"
 
-let test_validate_args_keeper_bash_oneof_all_empty () =
+let test_validate_args_keeper_bash_oneof_exec_with_empty_pipeline () =
   let args =
     `Assoc
       [ "executable", `String "echo"
       ; "pipeline", `List []
-      ; "stages", `Null
       ]
   in
   match
@@ -1079,7 +1081,7 @@ let test_validate_args_keeper_bash_oneof_all_empty () =
       (assoc_string "executable" forwarded)
   | Error result ->
     Alcotest.failf
-      "expected keeper_bash with executable + empty others to pass, got %s"
+      "expected keeper_bash with executable + empty pipeline to pass, got %s"
       (Yojson.Safe.to_string result.Tool_result.data)
 
 let test_validate_args_keeper_bash_oneof_real_pipeline_rejects_empty_exec () =
@@ -1180,10 +1182,10 @@ let () =
         test_validate_args_keeper_bash_rejects_bad_argv_type;
       Alcotest.test_case "keeper_bash oneOf: executable + empty pipeline" `Quick
         test_validate_args_keeper_bash_oneof_empty_pipeline;
-      Alcotest.test_case "keeper_bash oneOf: executable + null stages" `Quick
-        test_validate_args_keeper_bash_oneof_null_stages;
-      Alcotest.test_case "keeper_bash oneOf: executable + all empty" `Quick
-        test_validate_args_keeper_bash_oneof_all_empty;
+      Alcotest.test_case "keeper_bash oneOf: stages rejected by schema" `Quick
+        test_validate_args_keeper_bash_oneof_stages_rejected_by_schema;
+      Alcotest.test_case "keeper_bash oneOf: exec with empty pipeline" `Quick
+        test_validate_args_keeper_bash_oneof_exec_with_empty_pipeline;
       Alcotest.test_case "keeper_bash oneOf: pipeline + null exec" `Quick
         test_validate_args_keeper_bash_oneof_real_pipeline_rejects_empty_exec;
       Alcotest.test_case "direct validation uses explicit schema" `Quick

@@ -90,40 +90,16 @@ let handle_keeper_shell
      | Error e -> path_error e
      | Ok target ->
        let max_bytes = shell_readonly_cat_max_bytes args in
-       (* RFC-0006 Phase B-3b: docker route via the existing
-          read_file_in_container helper (which is already a [cat]
-          wrapper around run_command_in_container). Symmetry with
-          keeper_fs_read's [via: "docker"] response field. *)
-       if Keeper_docker_read.should_route_read ~meta then
-         (match
-            Keeper_docker_read.read_file_in_container
-              ?turn_sandbox_factory ~config ~meta
-              ~host_path:target ~max_bytes
-              ~timeout_sec:Keeper_shell_shared.read_timeout_sec
-              ()
-          with
-          | Error msg ->
-            error_json
-              ~fields:[ "op", `String op; "path", `String target ] msg
-          | Ok body ->
-            let total = String.length body in
-            let truncated = total >= max_bytes in
-            Yojson.Safe.to_string
-              (`Assoc
-                  [ "ok", `Bool true
-                  ; "op", `String op
-                  ; "path", `String target
-                  ; "via", `String "docker"
-                  ; "bytes", `Int total
-                  ; "truncated", `Bool truncated
-                  ; "content", `String body
-                  ]))
-       else
-         let st, out =
-           Keeper_shell_shared.run_argv_with_status_retry_eintr
-             ~timeout_sec:Keeper_shell_shared.read_timeout_sec
-             [ coreutils.cat; target ]
-         in
+       match
+         Keeper_shell_runtime.run_readonly_op ~config ~meta ?turn_sandbox_factory
+           ~op ~target
+           ~host_argv:[ coreutils.cat; target ]
+           ~docker_argv:(fun cpath -> [ "cat"; cpath ])
+           ~max_bytes
+           ~timeout_sec:Keeper_shell_shared.read_timeout_sec ()
+       with
+       | Error response -> response
+       | Ok (via, st, out) ->
          let body =
            if String.length out > max_bytes then String.sub out 0 max_bytes else out
          in
@@ -132,7 +108,7 @@ let handle_keeper_shell
                [ "ok", `Bool (st = Unix.WEXITED 0)
                ; "op", `String op
                ; "path", `String target
-               ; "via", `String "host"
+               ; "via", `String via
                ; "status", Keeper_alerting_path.process_status_to_json st
                ; "truncated", `Bool (String.length out > max_bytes)
                ; "content", `String body

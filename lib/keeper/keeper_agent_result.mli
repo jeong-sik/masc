@@ -36,3 +36,20 @@ type run_result =
   ; pre_dispatch_compaction_after_tokens : int option
   }
 
+val tool_call_detail_to_json : tool_call_detail -> Yojson.Safe.t
+(** Serialize a tool call detail to JSON. Reached via the
+    [include Keeper_agent_result] chain in [Keeper_agent_run], where
+    the public surface is exposed under [Keeper_agent_run.mli]. *)
+
+val surface_model_used : run_result -> string
+(** Legacy MASC-facing model label helper. Returns the neutral runtime
+    lane label; OAS owns concrete provider/model identity. Reached via
+    [Keeper_agent_run.surface_model_used] through the include chain;
+    live callers: keeper_unified_metrics_snapshot,
+    keeper_unified_metrics_result, keeper_unified_turn_success. *)
+
+val surface_resolved_model_id : run_result -> string
+(** Legacy MASC-facing resolved model helper. Returns the neutral
+    runtime lane label; OAS owns concrete provider/model identity.
+    Reached via [Keeper_agent_run.surface_resolved_model_id]. *)
+

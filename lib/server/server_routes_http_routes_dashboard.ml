@@ -10,6 +10,13 @@ module Pages = Server_routes_http_pages
 module Runtime = Server_routes_http_runtime
 module Keeper_stream = Server_routes_http_keeper_stream
 module Keeper_api = Server_dashboard_http_keeper_api
+module Cascade_profile_gate = Server_dashboard_cascade_profile_gate
+
+(* Exposed test surface (see .mli): allows focused tests to lock the
+   runtime catalog contract independently of the route pipeline.
+   Internal callers in this file use [Cascade_profile_gate.X] directly. *)
+let available_cascade_profiles = Cascade_profile_gate.available_profiles
+let invalid_cascade_profiles = Cascade_profile_gate.invalid_profiles
 
 let option_int_json = function
   | Some value -> `Int value
@@ -1170,7 +1177,7 @@ and add_keeper_cascade_routes router =
 
   |> Http.Router.get "/api/v1/keeper/cascades" (fun request reqd ->
        with_public_read (fun _state _req reqd ->
-         let gate = cascade_profile_gate () in
+         let gate = Cascade_profile_gate.compute () in
          Http.Response.json ~request:request
            (Yojson.Safe.to_string (`Assoc [
              ("profiles", `List (List.map (fun s -> `String s) gate.valid_profiles));
@@ -1205,8 +1212,8 @@ and add_keeper_cascade_routes router =
                  {|{"ok":false,"error":"requires {\"keeper\":\"...\",\"cascade_name\":\"...\"}"}|}
                  reqd
              | Some name, Some cascade ->
-               let known = available_cascade_profiles () in
-               let invalid = invalid_cascade_assignment_profiles () in
+               let known = Cascade_profile_gate.available_profiles () in
+               let invalid = Cascade_profile_gate.invalid_assignment_profiles () in
                (match List.assoc_opt cascade invalid with
                 | Some reasons ->
                   Http.Response.json ~status:`Conflict ~request:req

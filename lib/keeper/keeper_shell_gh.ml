@@ -130,14 +130,9 @@ let handle ~op ~(meta : keeper_meta) ~(config : Coord.config) ~(args : Yojson.Sa
           @ repo_fields
         | None -> []
       in
-      let gh_sandbox_target =
-        if meta.sandbox_profile = Docker
-        then Masc_exec.Sandbox_target.host ()
-        else Masc_exec.Sandbox_target.host ()
-      in
       let gh_ir =
         Keeper_gh_shared.gh_simple_command_to_shell_ir
-          ~sandbox:gh_sandbox_target
+          ~sandbox:(Masc_exec.Sandbox_target.host ())
           ~cwd
           parsed_command
       in

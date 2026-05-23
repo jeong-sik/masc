@@ -303,23 +303,33 @@ let run_cwd_op
     Collapse the repeated read-target → run_readonly_op → json_fields
     pattern in ops.ml dispatcher arms. *)
 
-let run_ls_op ~config ~meta ?turn_sandbox_factory ~op ~target ~limit ~timeout_sec () =
+let run_readonly_json_op ~config ~meta ?turn_sandbox_factory ~op ~target
+    ~host_argv ~docker_argv ~max_bytes ~timeout_sec ~output_field
+    ~output_of_out ?extra ()
+  =
   match
     run_readonly_op ~config ~meta ?turn_sandbox_factory
-      ~op ~target
-      ~host_argv:[ coreutils.ls; "-la"; target ]
-      ~docker_argv:(fun cpath -> [ "ls"; "-la"; cpath ])
-      ~max_bytes:1_000_000
-      ~timeout_sec ()
+      ~op ~target ~host_argv ~docker_argv ~max_bytes ~timeout_sec ()
   with
   | Error response -> response
   | Ok (via, st, out) ->
     let fields =
       readonly_json_fields ~op ~path:target ~via
-        ~status:st ~output_field:"entries" ~output:(lines_to_json ~limit out)
-        ()
+        ~status:st ~output_field ~output:(output_of_out out)
+        ?extra ()
     in
     readonly_json_string fields
+;;
+
+let run_ls_op ~config ~meta ?turn_sandbox_factory ~op ~target ~limit ~timeout_sec () =
+  run_readonly_json_op ~config ~meta ?turn_sandbox_factory ~op ~target
+    ~host_argv:[ coreutils.ls; "-la"; target ]
+    ~docker_argv:(fun cpath -> [ "ls"; "-la"; cpath ])
+    ~max_bytes:1_000_000
+    ~timeout_sec
+    ~output_field:"entries"
+    ~output_of_out:(lines_to_json ~limit)
+    ()
 ;;
 
 let run_cat_op ~config ~meta ?turn_sandbox_factory ~op ~target ~max_bytes ~timeout_sec () =
@@ -348,23 +358,15 @@ let run_cat_op ~config ~meta ?turn_sandbox_factory ~op ~target ~max_bytes ~timeo
 
 let run_head_tail_op ~config ~meta ?turn_sandbox_factory ~op ~target ~n ~timeout_sec () =
   let coreutil = if op = "head" then coreutils.head else coreutils.tail in
-  match
-    run_readonly_op ~config ~meta ?turn_sandbox_factory
-      ~op ~target
-      ~host_argv:[ coreutil; "-n"; string_of_int n; target ]
-      ~docker_argv:(fun cpath -> [ coreutil; "-n"; string_of_int n; cpath ])
-      ~max_bytes:1_000_000
-      ~timeout_sec ()
-  with
-  | Error response -> response
-  | Ok (via, st, out) ->
-    let fields =
-      readonly_json_fields ~op ~path:target ~via
-        ~status:st ~output_field:"content" ~output:(`String out)
-        ~extra:[ "lines", `Int n ]
-        ()
-    in
-    readonly_json_string fields
+  run_readonly_json_op ~config ~meta ?turn_sandbox_factory ~op ~target
+    ~host_argv:[ coreutil; "-n"; string_of_int n; target ]
+    ~docker_argv:(fun cpath -> [ coreutil; "-n"; string_of_int n; cpath ])
+    ~max_bytes:1_000_000
+    ~timeout_sec
+    ~output_field:"content"
+    ~output_of_out:(fun out -> `String out)
+    ~extra:[ "lines", `Int n ]
+    ()
 ;;
 
 let run_tree_op ~config ~meta ?turn_sandbox_factory ~op ~target ~limit ~timeout_sec () =
@@ -373,22 +375,14 @@ let run_tree_op ~config ~meta ?turn_sandbox_factory ~op ~target ~limit ~timeout_
     ; "-not"; "-path"; "*/.git/*"
     ; "-not"; "-path"; "*/_build/*" ]
   in
-  match
-    run_readonly_op ~config ~meta ?turn_sandbox_factory
-      ~op ~target
-      ~host_argv:(tree_base target)
-      ~docker_argv:(fun cpath -> tree_base cpath)
-      ~max_bytes:1_000_000
-      ~timeout_sec ()
-  with
-  | Error response -> response
-  | Ok (via, st, out) ->
-    let fields =
-      readonly_json_fields ~op ~path:target ~via
-        ~status:st ~output_field:"entries" ~output:(lines_to_json ~limit out)
-        ()
-    in
-    readonly_json_string fields
+  run_readonly_json_op ~config ~meta ?turn_sandbox_factory ~op ~target
+    ~host_argv:(tree_base target)
+    ~docker_argv:(fun cpath -> tree_base cpath)
+    ~max_bytes:1_000_000
+    ~timeout_sec
+    ~output_field:"entries"
+    ~output_of_out:(lines_to_json ~limit)
+    ()
 ;;
 
 let run_wc_op ~root ~keeper_name ~config ~meta ?turn_sandbox_factory ~op ~target ~timeout_sec () =

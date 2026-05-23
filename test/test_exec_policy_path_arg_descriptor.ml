@@ -72,7 +72,10 @@ let test_command_materializes_path_arg_corpus_membership () =
       Alcotest.(check bool)
         (command ^ " materializes path arg") true
         (D.command_materializes_path_arg command))
-    D.path_arg_command_corpus
+    D.path_arg_command_corpus;
+  (* tree is a keeper_shell host op — positional arg is always a path. *)
+  Alcotest.(check bool) "tree materializes path arg" true
+    (D.command_materializes_path_arg "tree")
 
 let test_command_materializes_path_arg_exclusions () =
   (* Intentional exclusions — these commands have their own typed

@@ -673,12 +673,21 @@ let path_argument_values command_name args =
                    acc
                    rest
                | None ->
-                 loop
-                   ~skip_next_pattern:None
-                   ~redirect_target:false
-                   ~seen_primary_pattern
-                   (token :: acc)
-                   rest)))
+                 if command_materializes_path_arg command_name
+                 then
+                   loop
+                     ~skip_next_pattern:None
+                     ~redirect_target:false
+                     ~seen_primary_pattern
+                     (token :: acc)
+                     rest
+                 else
+                   loop
+                     ~skip_next_pattern:None
+                     ~redirect_target:false
+                     ~seen_primary_pattern
+                     acc
+                     rest)))
   in
   loop
     ~skip_next_pattern:None

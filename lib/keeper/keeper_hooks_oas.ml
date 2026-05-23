@@ -134,13 +134,6 @@ let self_correcting_tool_failure_class ?base_path error =
     Some failure_class
   | _ -> None
 
-module Gate_attempt = Keeper_hooks_oas_gate_attempt
-
-let render_pre_tool_gate_output = Gate_attempt.render_pre_tool_gate_output
-let pre_tool_gate_error = Gate_attempt.pre_tool_gate_error
-let trajectory_duration_ms = Gate_attempt.trajectory_duration_ms
-let record_pre_tool_gate_attempt = Gate_attempt.record_pre_tool_gate_attempt
-
 include Keeper_hooks_oas_response_metrics
 
 (* cost_status / thinking_log_summary / pr_action types + telemetry helpers

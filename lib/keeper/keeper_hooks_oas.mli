@@ -17,27 +17,6 @@ val keeper_denied_tools : string list
 (** usage_has_tokens / is_keeper_board_write_tool_name / current_keeper_model
     moved to Keeper_hooks_oas_types (intra-library file split, 2026-05-16). *)
 
-val render_pre_tool_gate_output :
-  Keeper_guards.gate_decision_event -> string
-(** Render the gate decision as a tool-use response body for the LLM. *)
-
-val pre_tool_gate_error :
-  Keeper_guards.gate_decision_event -> string
-(** Render the gate decision as a structured error message for logs. *)
-
-val trajectory_duration_ms : float -> int
-(** Convert hook-reported millisecond durations for trajectory rows.
-    Positive sub-1ms durations are rounded up to 1 so real tool work does
-    not appear as missing/zero-duration telemetry. *)
-
-val record_pre_tool_gate_attempt :
-  meta_ref:Keeper_types.keeper_meta ref ->
-  tool_call_count_ref:int ref ->
-  ?trajectory_acc:Trajectory.accumulator ->
-  Keeper_guards.gate_decision_event -> unit
-(** Update keeper-local counters and trajectory accumulator on every
-    gate-checked tool attempt (allowed or denied). *)
-
 (** {1 Tool-failure metrics} *)
 
 val tool_use_failure_metric : string

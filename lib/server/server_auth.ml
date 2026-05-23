@@ -1,5 +1,6 @@
 
 open Masc_domain
+open Server_h2_gateway_helpers
 open Server_utils
 
 let trim_opt = function
@@ -661,17 +662,17 @@ let check_agent_rate_limit request reqd =
     timing side-channel attacks that could leak token bytes. *)
 let with_admin_auth handler request reqd =
   match !server_state with
-  | None -> Http_server_eio.Response.json {|{"error":"not initialized"}|} reqd
+  | None -> Http_server_eio.Response.json (error_json_string "not initialized") reqd
   | Some state ->
       let admin_token = Env_config_core.admin_token_opt () in
       let provided = auth_token_from_request request in
       match admin_token, provided with
       | None, _ ->
           Http_server_eio.Response.json ~status:`Forbidden
-            {|{"error":"MASC_ADMIN_TOKEN not configured"}|} reqd
+            (error_json_string "MASC_ADMIN_TOKEN not configured") reqd
       | Some _, None ->
           Http_server_eio.Response.json ~status:`Unauthorized
-            {|{"error":"Admin token required"}|} reqd
+            (error_json_string "Admin token required") reqd
       | Some expected, Some given ->
           (* Constant-time comparison: always XOR max(len_a, len_b) bytes.
              Length difference is folded into the diff accumulator so both
@@ -689,7 +690,7 @@ let with_admin_auth handler request reqd =
             handler state request reqd
           else
             Http_server_eio.Response.json ~status:`Forbidden
-              {|{"error":"Invalid admin token"}|} reqd
+              (error_json_string "Invalid admin token") reqd
 
 (** Public read access - no auth required (dashboard, health) *)
 let is_public_read_path path =
@@ -831,7 +832,7 @@ let rec with_public_read handler request reqd =
 
 and with_read_auth handler request reqd =
   match !server_state with
-  | None -> Http_server_eio.Response.json {|{"error":"not initialized"}|} reqd
+  | None -> Http_server_eio.Response.json (error_json_string "not initialized") reqd
   | Some state ->
       let base_path = state.Mcp_server.room_config.base_path in
       (match authorize_read_request ~base_path request with
@@ -843,7 +844,7 @@ and with_read_auth handler request reqd =
 
 and with_permission_auth ~permission handler request reqd =
   match !server_state with
-  | None -> Http_server_eio.Response.json {|{"error":"not initialized"}|} reqd
+  | None -> Http_server_eio.Response.json (error_json_string "not initialized") reqd
   | Some state ->
       let base_path = state.Mcp_server.room_config.base_path in
       (match authorize_permission_request ~base_path ~permission request with
@@ -855,7 +856,7 @@ and with_permission_auth ~permission handler request reqd =
 
 and with_tool_auth ~tool_name handler request reqd =
   match !server_state with
-  | None -> Http_server_eio.Response.json {|{"error":"not initialized"}|} reqd
+  | None -> Http_server_eio.Response.json (error_json_string "not initialized") reqd
   | Some state ->
       let base_path = state.Mcp_server.room_config.base_path in
       (match authorize_tool_request ~base_path ~tool_name request with
@@ -867,7 +868,7 @@ and with_tool_auth ~tool_name handler request reqd =
 
 and with_token_permission_auth ~permission handler request reqd =
   match !server_state with
-  | None -> Http_server_eio.Response.json {|{"error":"not initialized"}|} reqd
+  | None -> Http_server_eio.Response.json (error_json_string "not initialized") reqd
   | Some state ->
       let base_path = state.Mcp_server.room_config.base_path in
       (match authorize_token_bound_permission_request ~base_path ~permission request with

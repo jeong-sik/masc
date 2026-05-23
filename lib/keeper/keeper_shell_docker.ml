@@ -107,12 +107,21 @@ let sandbox_error ~config ~meta ?details message =
   Error message
 ;;
 
-(** Shared by [run_docker_credentialed_bash] and [run_docker_bash]:
+(** Shared by [run_docker_credentialed_bash], [run_docker_bash], and
+    [run_docker_shell_command_with_status_internal]:
     parse cmd → resolve cwd → validate paths.  Returns [Ok (cwd, cmd_stages)]
-    when every gate passes.  [run_docker_shell_command_with_status_internal]
-    performs the same steps inline because it also handles [fd_admission],
-    [gh syntax misuse], and [validate_command_paths] toggling. *)
-let validate_docker_dispatch_context ~config ~meta ~cwd ~cmd =
+    when every gate passes.
+
+    [validate_command_paths] toggles the host-side path validation gate
+    (default [true]).  Callers that already validated paths (e.g. trusted
+    internal dispatch) may pass [false]. *)
+let validate_docker_dispatch_context
+      ?(validate_command_paths = true)
+      ~(config : Coord.config)
+      ~(meta : keeper_meta)
+      ~(cwd : string)
+      ~(cmd : string)
+  =
   let cmd_stages =
     match Masc_exec_command_gate.Shell_command_gate.parse_to_ir_opt cmd with
     | Some ir -> Keeper_shell_command_semantics.effective_stages_of_ir ir
@@ -125,27 +134,30 @@ let validate_docker_dispatch_context ~config ~meta ~cwd ~cmd =
   match sandbox_root_git_blocker with
   | Some message -> Error message
   | None ->
-    let validation_cmd =
-      rewrite_docker_command_paths_for_host_validation ~config ~meta cmd
-    in
     let path_validation =
-      match Masc_exec_command_gate.Shell_command_gate.parse_to_ir_opt validation_cmd with
-      | Some validation_ir ->
-        (match
-           Keeper_task_worktree_lazy.ensure_shell_ir_existing_dirs
-             ~config ~meta ~cwd ~ir:validation_ir
-         with
-         | Error e -> Error e
-         | Ok () ->
-           Exec_policy.validate_shell_ir_paths
-             ~keeper_id:meta.name
-             ~base_path:(Keeper_alerting_path.project_root_of_config config)
-             ~workdir:cwd
-             validation_ir)
-      | None -> Ok ()
+      if validate_command_paths
+      then (
+        let validation_cmd =
+          rewrite_docker_command_paths_for_host_validation ~config ~meta cmd
+        in
+        match Masc_exec_command_gate.Shell_command_gate.parse_to_ir_opt validation_cmd with
+        | Some validation_ir ->
+          (match
+             Keeper_task_worktree_lazy.ensure_shell_ir_existing_dirs
+               ~config ~meta ~cwd ~ir:validation_ir
+           with
+           | Error e -> Error e
+           | Ok () ->
+             Exec_policy.validate_shell_ir_paths
+               ~keeper_id:meta.name
+               ~base_path:(Keeper_alerting_path.project_root_of_config config)
+               ~workdir:cwd
+               validation_ir)
+        | None -> Ok ())
+      else Ok ()
     in
     match path_validation with
-    | Error err -> Error (Printf.sprintf "%s [blocked_cmd=%s]" err validation_cmd)
+    | Error err -> Error (Printf.sprintf "%s [blocked_cmd=%s]" err cmd)
     | Ok () -> Ok (cwd, cmd_stages)
 ;;
 
@@ -169,43 +181,16 @@ let run_docker_shell_command_with_status_internal
     if command_uses_nested_container_runtime cmd
     then sandbox_error (nested_runtime_blocker ~git_creds_enabled)
     else
-      let cmd_stages =
-        match Masc_exec_command_gate.Shell_command_gate.parse_to_ir_opt cmd with
-        | Some ir -> Keeper_shell_command_semantics.effective_stages_of_ir ir
-        | None -> []
-      in
-      let cwd, multi_repo_blocker =
-        Keeper_shell_command_semantics.resolve_sandbox_root_git_cwd_of_stages
-          ~config ~meta ~cwd ~cmd cmd_stages
-      in
-      match multi_repo_blocker with
-      | Some msg -> sandbox_error msg
-      | None ->
-      let path_validation =
-        if validate_command_paths
-        then
-          let validation_cmd =
-            rewrite_docker_command_paths_for_host_validation ~config ~meta cmd
-          in
-          (match Masc_exec_command_gate.Shell_command_gate.parse_to_ir_opt validation_cmd with
-           | Some validation_ir ->
-             (match
-                Keeper_task_worktree_lazy.ensure_shell_ir_existing_dirs
-                  ~config ~meta ~cwd ~ir:validation_ir
-              with
-              | Error e -> Error e
-              | Ok () ->
-                Exec_policy.validate_shell_ir_paths
-                  ~keeper_id:meta.name
-                  ~base_path:(Keeper_alerting_path.project_root_of_config config)
-                  ~workdir:cwd
-                  validation_ir)
-           | None -> Ok ())
-        else Ok ()
-      in
-      match path_validation with
-      | Error err -> sandbox_error (Printf.sprintf "%s [blocked_cmd=%s]" err cmd)
-      | Ok () ->
+      match
+        validate_docker_dispatch_context
+          ~validate_command_paths
+          ~config
+          ~meta
+          ~cwd
+          ~cmd
+      with
+      | Error msg -> sandbox_error msg
+      | Ok (cwd, cmd_stages) ->
       (match fd_admission_error ~config with
        | Some err -> sandbox_error err
        | None ->

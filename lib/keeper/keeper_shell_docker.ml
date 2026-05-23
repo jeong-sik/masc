@@ -11,6 +11,10 @@ open Keeper_exec_shared
 include Keeper_shell_docker_preflight
 include Keeper_shell_docker_lifecycle
 
+include Keeper_shell_docker_path_rewrite
+include Keeper_shell_docker_profile
+include Keeper_shell_docker_semantic
+
 
 (* ── Container naming ──────────────────────────────────── *)
 
@@ -21,76 +25,7 @@ let keeper_private_container_root =
 let docker_private_workspace_cwd =
   Keeper_shell_docker_container_name.docker_private_workspace_cwd
 
-let rewrite_docker_command_paths ~(config : Coord.config) ~(meta : keeper_meta) cmd =
-  let raw_host_root =
-    Keeper_sandbox.host_root_abs_of_meta ~config meta
-    |> Keeper_alerting_path.strip_trailing_slashes
-  in
-  let normalized_host_root =
-    raw_host_root |> Keeper_alerting_path.normalize_path_for_check_stripped
-  in
-  let container_root = keeper_private_container_root meta in
-  let rewritten =
-    Keeper_sandbox_runtime.rewrite_host_root_to_container_root
-      ~host_root:raw_host_root
-      ~container_root
-      cmd
-  in
-  if String.equal raw_host_root normalized_host_root
-  then rewritten
-  else
-    Keeper_sandbox_runtime.rewrite_host_root_to_container_root
-      ~host_root:normalized_host_root
-      ~container_root
-      rewritten
-;;
-
-let rewrite_docker_command_paths_for_host_validation
-      ~(config : Coord.config)
-      ~(meta : keeper_meta)
-      cmd
-  =
-  let raw_host_root =
-    Keeper_sandbox.host_root_abs_of_meta ~config meta
-    |> Keeper_alerting_path.strip_trailing_slashes
-  in
-  let normalized_host_root =
-    raw_host_root |> Keeper_alerting_path.normalize_path_for_check_stripped
-  in
-  let container_root =
-    keeper_private_container_root meta |> Keeper_alerting_path.strip_trailing_slashes
-  in
-  let rewritten =
-    Keeper_sandbox_runtime.rewrite_host_root_to_container_root
-      ~host_root:container_root
-      ~container_root:raw_host_root
-      cmd
-  in
-  if String.equal raw_host_root normalized_host_root
-  then rewritten
-  else
-    Keeper_sandbox_runtime.rewrite_host_root_to_container_root
-      ~host_root:container_root
-      ~container_root:normalized_host_root
-      rewritten
-;;
-
 (* ── Profile resolution ────────────────────────────────── *)
-
-(* Invariant (root-fix family 2/3, 2026-04-28; local-overrotation fix,
-   2026-05-18): the declared sandbox profile is the execution contract.
-   Docker keepers must never silently fall back to Local, and Local keepers
-   must never silently upgrade to Docker.  DockerPlayground is a runtime
-   capability switch, not permission to reinterpret sandbox_profile=local. *)
-let effective_sandbox_profile ~(meta : keeper_meta) ~in_playground =
-  match meta.sandbox_profile with
-  | Docker ->
-    (* Invariant: meta=Docker → effective=Docker. No silent host fallback. *)
-    Docker, meta.network_mode
-  | Local ->
-    let _ = in_playground in
-    Local, meta.network_mode
-;;
 
 (* ── Nested runtime detection ──────────────────────────── *)
 include Keeper_shell_docker_nested_runtime
@@ -101,45 +36,6 @@ let ensure_keeper_sandbox_runtime ~timeout_sec =
   Keeper_sandbox_runtime.ensure_keeper_sandbox_runtime ~timeout_sec
 ;;
 
-
-(* Emit a ("gh_exit_class", "…") JSON field when [cmd] targets gh,
-   AND increment the matching Legendary_counters bucket.  Callers
-   append the returned list to their `Assoc payload unconditionally —
-   it is empty for non-gh commands, so call sites keep their shape. *)
-let gh_exit_class_field ~stages ~status ~output : (string * Yojson.Safe.t) list =
-  if not (Keeper_shell_command_semantics.stages_targets_gh stages)
-  then []
-  else (
-    let exit_code =
-      match status with
-      | Unix.WEXITED n -> n
-      | Unix.WSIGNALED n -> 128 + n
-      | Unix.WSTOPPED n -> 256 + n
-    in
-    (* Docker shell captures stdout+stderr combined into [output];
-       Gh_exit_class rules match on substrings so passing the combined
-       buffer as [stderr] is sound. *)
-    let class_ = Gh_exit_class.classify ~exit_code ~stderr:output in
-    Legendary_counters.incr_gh_exit_class class_;
-    [ "gh_exit_class", `String (Gh_exit_class.to_string class_) ])
-;;
-
-let docker_command_semantic_status ~cmd ~status ~output =
-  Exec_core.semantic_status_of_process ~cmd ~output status
-
-let docker_command_semantic_success ~cmd ~status ~output =
-  match docker_command_semantic_status ~cmd ~status ~output with
-  | Exec_core.Ok | Exec_core.No_match -> true
-  | Exec_core.Partial | Exec_core.Blocked | Exec_core.Timeout | Exec_core.Runtime_error ->
-    false
-
-let optional_ro_mount ~host ~container =
-  if host = ""
-  then []
-  else if not (Sys.file_exists host)
-  then []
-  else [ "-v"; host ^ ":" ^ container ^ ":ro" ]
-;;
 
 (* Container worktree gitdir path rewriter extracted to
    [Keeper_shell_docker_worktree_gitdir] (godfile decomp). *)

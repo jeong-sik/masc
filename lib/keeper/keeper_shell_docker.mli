@@ -5,6 +5,10 @@
     invocation. Pure infrastructure; generic command-shape policy lives
     in [Keeper_shell_command_semantics]. *)
 
+include module type of Keeper_shell_docker_path_rewrite
+include module type of Keeper_shell_docker_profile
+include module type of Keeper_shell_docker_semantic
+
 (** Diagnostic label for a [Unix.process_status]:
     [exit=N] / [signal=N] / [stopped=N]. *)
 val docker_exec_status_label : Unix.process_status -> string
@@ -34,23 +38,6 @@ val docker_private_workspace_cwd :
   string ->
   string
 
-(** Translate keeper-private in-container absolute paths back to their host
-    playground paths for host-side path validation. Actual Docker execution
-    still receives the original container paths. *)
-val rewrite_docker_command_paths_for_host_validation :
-  config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
-  string ->
-  string
-
-(** Resolve [(sandbox_profile, network_mode)] from the keeper's declared
-    profile.  [in_playground] is retained for call-site compatibility, but
-    it must not reinterpret [sandbox_profile=local] as Docker. *)
-val effective_sandbox_profile :
-  meta:Keeper_types.keeper_meta ->
-  in_playground:bool ->
-  Keeper_types.sandbox_profile * Keeper_types.network_mode
-
 (** Tokens flagged as nested container-runtime invocations. *)
 val nested_container_runtime_tokens : string list
 
@@ -73,17 +60,6 @@ val stages_targets_gh :
 (** [true] when any effective stage's executable is [gh].
     Callers pre-parse with [Shell_command_gate.parse_to_ir_opt]
     and pass [effective_stages_of_ir]. *)
-
-val gh_exit_class_field :
-  stages:Keeper_shell_command_semantics.parsed_stage list ->
-  status:Unix.process_status ->
-  output:string ->
-  (string * Yojson.Safe.t) list
-
-(** [-v <host>:<container>:ro] mount list, or [[]] when [host] is
-    blank or missing. *)
-val optional_ro_mount :
-  host:string -> container:string -> string list
 
 val repair_container_worktree_gitdirs :
   host_root:string -> container_root:string -> int

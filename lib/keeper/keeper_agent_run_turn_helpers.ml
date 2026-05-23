@@ -222,7 +222,7 @@ let run_with_setup_cleanup ~cleanup f =
       cleanup ();
       Printexc.raise_with_backtrace e backtrace
 
-let turn_progress_callbacks ~config ~keeper_name ~downstream =
+let turn_progress_callbacks ~config ~keeper_name ~downstream ~turn_id =
   let record_turn_progress event_kind =
     Keeper_registry.record_turn_progress
       ~base_path:config.Coord.base_path
@@ -234,6 +234,11 @@ let turn_progress_callbacks ~config ~keeper_name ~downstream =
     if yield_on_tool then
       Some
         (fun () ->
+          Keeper_turn_fsm.emit_transition
+            ~keeper_name
+            ~turn_id
+            ~prev:Keeper_turn_fsm.Streaming
+            Keeper_turn_fsm.Awaiting_tool_result;
           record_turn_progress "slot_yield";
           Log.Misc.debug "keeper %s: slot yielded (tool execution)" keeper_name)
     else None
@@ -242,6 +247,11 @@ let turn_progress_callbacks ~config ~keeper_name ~downstream =
     if yield_on_tool then
       Some
         (fun () ->
+          Keeper_turn_fsm.emit_transition
+            ~keeper_name
+            ~turn_id
+            ~prev:Keeper_turn_fsm.Awaiting_tool_result
+            Keeper_turn_fsm.Streaming;
           record_turn_progress "slot_resume";
           Log.Misc.debug "keeper %s: slot resumed (next LLM turn)" keeper_name)
     else None

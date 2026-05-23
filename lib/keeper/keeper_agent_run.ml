@@ -477,6 +477,7 @@ let run_turn
         ~config
         ~keeper_name:meta.name
         ~downstream:on_event
+        ~turn_id:manifest_keeper_turn_id
     in
     let priority =
       Option.value priority ~default:Llm_provider.Request_priority.Proactive

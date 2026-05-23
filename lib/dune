@@ -155,6 +155,7 @@
    keeper_shell_gh_context
    keeper_shell_shared
    keeper_shell_bash
+   keeper_shell_git_log
    keeper_shell_ops
    keeper_exec_shell
    keeper_gh_env

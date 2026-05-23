@@ -372,15 +372,10 @@ let risk_of_command ~write_intent ~is_destructive family =
     | Read | Search | List | Git_read -> Low)
 ;;
 
-let classify_command ~cmd =
-  let tokens, write_intent, is_destructive =
-    match Masc_exec_bash_parser.Bash.parse_string cmd with
-    | Parsed.Parsed ir ->
-      ( Exec_policy_mutation_classifier.flat_stage_words ir,
-        Exec_policy.is_write_operation ir,
-        Exec_policy.is_destructive_bash_operation ir )
-    | _ -> ([], false, false)
-  in
+let classify_command_of_ir ir =
+  let tokens = Exec_policy_mutation_classifier.flat_stage_words ir in
+  let write_intent = Exec_policy.is_write_operation ir in
+  let is_destructive = Exec_policy.is_destructive_bash_operation ir in
   let family =
     match base_command_of_tokens tokens with
     | Some base -> family_of_base_command ~write_intent ~tokens ~base
@@ -391,6 +386,11 @@ let classify_command ~cmd =
   ; risk = risk_of_command ~write_intent ~is_destructive family
   ; write_intent
   }
+
+let classify_command ~cmd =
+  match Masc_exec_bash_parser.Bash.parse_string cmd with
+  | Parsed.Parsed ir -> classify_command_of_ir ir
+  | _ -> { family = Unknown; reversibility = Safe; risk = Low; write_intent = false }
 ;;
 
 let string_of_command_family = function

@@ -110,7 +110,14 @@ val detect_project_kind : string -> project_kind
 val snapshot_env : cwd:string -> exec_env_snapshot
 val env_snapshot_to_json : exec_env_snapshot -> Yojson.Safe.t
 
+val classify_command_of_ir : Masc_exec.Shell_ir.t -> classification
+(** IR-based classification. Callers that already have a parsed IR
+    should use this instead of {!classify_command} to avoid re-parsing. *)
+
 val classify_command : cmd:string -> classification
+(** String bridge. Parses via [Bash.parse_string] and delegates to
+    {!classify_command_of_ir}. Returns a default {Unknown, Safe, Low}
+    classification on parse failure. *)
 val classification_to_json : classification -> Yojson.Safe.t
 
 val string_of_semantic_status : semantic_status -> string

@@ -246,6 +246,17 @@ let run_keeper_cycle
                     { kind = sdk_error_kind err; detail = error_message }));
             Error err
           | Ok initial_execution ->
+            record_pre_dispatch_terminal_observation
+              ~config
+              ~meta
+              ~generation
+              ~cascade_name:effective_cascade_runtime_name
+              ~outcome:`Ok
+              ~terminal_reason_code:"pre_dispatch_success"
+              ~activity_kind:"keeper.turn_pre_dispatch_ok"
+              ~trajectory_outcome:Trajectory.Completed
+              ~keeper_turn_id
+              ();
             let turn_id = keeper_turn_id in
             (match
                Keeper_turn_livelock.guard_and_record_turn_start

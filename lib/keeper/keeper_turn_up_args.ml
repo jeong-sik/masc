@@ -15,14 +15,10 @@ type parsed_args = {
   mid_goal_opt : string option;
   long_goal_opt : string option;
   cascade_name_opt : string option;
-  policy_voice_enabled_opt : bool option;
   allowed_paths_opt : string list option;
   autoboot_enabled_opt : bool option;
   sandbox_profile_opt : sandbox_profile option;
   network_mode_opt : network_mode option;
-  voice_enabled_opt : bool option;
-  voice_channel_opt : string option;
-  voice_agent_id_opt : string option;
   mention_targets_in : string list;
   active_goal_ids_opt : string list option;
   max_context_override_opt : int option;
@@ -240,11 +236,7 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
     let mid_goal_opt = parse_goal_horizon_opt args "mid_goal" in
     let long_goal_opt = parse_goal_horizon_opt args "long_goal" in
     let cascade_name_opt_res = parse_cascade_name_opt args in
-    let policy_voice_enabled_opt = get_bool_opt args "policy_voice_enabled" in
     let autoboot_enabled_opt = get_bool_opt args "autoboot_enabled" in
-    let voice_enabled_opt = get_bool_opt args "voice_enabled" in
-    let voice_channel_opt = get_string_opt args "voice_channel" in
-    let voice_agent_id_opt = get_string_opt args "voice_agent_id" in
     let mention_targets_in = get_string_list args "mention_targets" in
     let max_context_override_opt =
       let min_keeper_context = Keeper_config.min_keeper_context_tokens in
@@ -307,15 +299,11 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
       mid_goal_opt;
       long_goal_opt;
       cascade_name_opt;
-      policy_voice_enabled_opt;
       allowed_paths_opt;
       active_goal_ids_opt;
       autoboot_enabled_opt;
       sandbox_profile_opt;
       network_mode_opt;
-      voice_enabled_opt;
-      voice_channel_opt;
-      voice_agent_id_opt;
       mention_targets_in;
       max_context_override_opt;
       proactive_enabled_opt;

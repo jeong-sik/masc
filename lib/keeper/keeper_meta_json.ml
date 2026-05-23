@@ -44,8 +44,7 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
      ]
      @ personality_pairs
      @ [
-      "policy_voice_enabled", `Bool m.policy_voice_enabled
-    ; "sandbox_profile", `String (sandbox_profile_to_string m.sandbox_profile)
+      "sandbox_profile", `String (sandbox_profile_to_string m.sandbox_profile)
     ; "sandbox_image", Json_util.string_opt_to_json m.sandbox_image
     ; "network_mode", `String (network_mode_to_string m.network_mode)
     ; "allowed_paths", `List (List.map (fun s -> `String s) m.allowed_paths)
@@ -70,9 +69,6 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
     ; "auto_handoff", `Bool m.auto_handoff
     ; "handoff_threshold", `Float m.handoff_threshold
     ; "handoff_cooldown_sec", `Int m.handoff_cooldown_sec
-    ; "voice_enabled", `Bool m.voice_enabled
-    ; "voice_channel", `String m.voice_channel
-    ; "voice_agent_id", `String m.voice_agent_id
     ; "last_handoff_ts", `Float rt.last_handoff_ts
     ; "created_at", `String m.created_at
     ; "updated_at", `String m.updated_at
@@ -178,7 +174,6 @@ let fallback_canonical_keeper_meta_key_names =
   ; "needs"
   ; "desires"
   ; "instructions"
-  ; "policy_voice_enabled"
   ; "allowed_paths"
   ; "tool_access"
   ; "tool_denylist"
@@ -198,9 +193,6 @@ let fallback_canonical_keeper_meta_key_names =
   ; "auto_handoff"
   ; "handoff_threshold"
   ; "handoff_cooldown_sec"
-  ; "voice_enabled"
-  ; "voice_channel"
-  ; "voice_agent_id"
   ; "last_handoff_ts"
   ; "created_at"
   ; "updated_at"

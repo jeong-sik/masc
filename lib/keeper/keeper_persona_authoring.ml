@@ -161,11 +161,6 @@ let field_catalog_entries =
         "Self-model desires statement. Overrides the keeper environment default."
       ()
   ; field_catalog_entry
-      ~path:"keeper.policy_voice_enabled"
-      ~typ:"boolean"
-      ~field_effect:"Whether persona-created keepers should surface voice tools."
-      ()
-  ; field_catalog_entry
       ~path:"keeper.mention_targets"
       ~typ:"string[]"
       ~default:(`String "[<handle>]")
@@ -514,8 +509,7 @@ let normalize_keeper_json ~handle keeper_json =
                         fields
                  in
                  let fields =
-                   [ "policy_voice_enabled"
-                   ; "room_signal_prompt_enabled"
+                   [ "room_signal_prompt_enabled"
                    ; "work_discovery_enabled"
                    ; "telemetry_feedback_enabled"
                    ; "always_approve"

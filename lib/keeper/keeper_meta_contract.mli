@@ -333,7 +333,6 @@ type keeper_meta = {
   desires : string;
   instructions : string;
   (* Policy *)
-  policy_voice_enabled : bool;
   sandbox_profile : Keeper_types_profile.sandbox_profile;
   sandbox_image : string option;
   network_mode : Keeper_types_profile.network_mode;
@@ -350,10 +349,6 @@ type keeper_meta = {
   auto_handoff : bool;
   handoff_threshold : float;
   handoff_cooldown_sec : int;
-  (* Voice *)
-  voice_enabled : bool;
-  voice_channel : string;
-  voice_agent_id : string;
   (* Lifecycle *)
   created_at : string;
   updated_at : string;

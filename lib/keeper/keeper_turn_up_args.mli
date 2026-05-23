@@ -17,14 +17,10 @@ type parsed_args =
   ; mid_goal_opt : string option
   ; long_goal_opt : string option
   ; cascade_name_opt : string option
-  ; policy_voice_enabled_opt : bool option
   ; allowed_paths_opt : string list option
   ; autoboot_enabled_opt : bool option
   ; sandbox_profile_opt : sandbox_profile option
   ; network_mode_opt : network_mode option
-  ; voice_enabled_opt : bool option
-  ; voice_channel_opt : string option
-  ; voice_agent_id_opt : string option
   ; mention_targets_in : string list
   ; active_goal_ids_opt : string list option
   ; max_context_override_opt : int option

@@ -7,6 +7,7 @@
 module Http = Http_server_eio
 
 open Server_auth
+open Server_h2_gateway_helpers
 
 let add_agent_api_routes router =
   router
@@ -56,7 +57,7 @@ let add_agent_api_routes router =
          in
          if agent_name = "" then
            Http.Response.json ~status:`Bad_request
-             {|{"error":"agent_name query parameter is required"}|} reqd
+             (error_json_string "agent_name query parameter is required") reqd
          else
            let since_hours =
              match Server_utils.query_param req "since_hours" with
@@ -91,7 +92,7 @@ let add_agent_api_routes router =
          in
          if agent_name = "" then
            Http.Response.json ~status:`Bad_request
-             {|{"error":"agent_name query parameter is required"}|} reqd
+             (error_json_string "agent_name query parameter is required") reqd
          else
            let json = Dashboard_agent_relations.json ~agent_name () in
            Http.Response.json ~compress:true ~request:req

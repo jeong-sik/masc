@@ -15,6 +15,16 @@ module Keeper_types = Masc_mcp.Keeper_types
 module Json = Yojson.Safe.Util
 module Parsed = Masc_exec.Parsed
 
+(* Test-local wrapper restoring [validate_command_paths] (string entry) by
+   composing [Bash.parse_string] with [validate_shell_ir_paths] — the
+   typed Shell_ir SSOT after RFC-0160 first-class promotion. *)
+let validate_command_paths ?keeper_id ?base_path ?workdir cmd =
+  match Masc_exec_bash_parser.Bash.parse_string cmd with
+  | Parsed.Parsed ir ->
+    Masc_mcp.Worker_dev_tools.validate_shell_ir_paths
+      ?keeper_id ?base_path ?workdir ir
+  | _ -> Error "parse failure"
+
 let validate = Masc_mcp.Worker_dev_tools.validate_command
 
 let is_ok = function Ok () -> true | Error _ -> false
@@ -821,7 +831,7 @@ let test_rewrite_docker_container_paths_for_host_validation () =
     Printf.sprintf "git -C %s/repos/masc-mcp log --oneline -5\n" container_root
   in
   Alcotest.(check bool) "raw container path is outside host workdir" true
-    (is_error (Masc_mcp.Worker_dev_tools.validate_command_paths ~workdir:host_repo input));
+    (is_error (validate_command_paths ~workdir:host_repo input));
   ensure_dir host_repo;
   let rewritten =
     Keeper_shell_docker.rewrite_docker_command_paths_for_host_validation
@@ -831,8 +841,7 @@ let test_rewrite_docker_container_paths_for_host_validation () =
     (Printf.sprintf "git -C %s/repos/masc-mcp log --oneline -5\n" host_root)
     rewritten;
   Alcotest.(check bool) "rewritten path validates under host workdir" true
-    (is_ok
-       (Masc_mcp.Worker_dev_tools.validate_command_paths ~workdir:host_repo rewritten))
+    (is_ok (validate_command_paths ~workdir:host_repo rewritten))
 
 (* ── Negative / error-path tests (task-034) ──────────────────────── *)
 

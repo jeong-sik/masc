@@ -2053,7 +2053,7 @@ let test_docker_mount_failure_message_preserves_path () =
     ^ ": no such file or directory"
   in
   let message =
-    Keeper_shell_docker_exec_failure.docker_exec_failure_message
+    Masc_mcp.Keeper_shell_docker_exec_failure.docker_exec_failure_message
       ~image:"masc-keeper-sandbox:local"
       ~status:(Unix.WEXITED 125)
       ~output

@@ -8,16 +8,6 @@ let sensitive_assignment_markers =
   [ ":_authToken="; "_authToken="; "token="; "password="; "passwd="; "api-key=" ]
 ;;
 
-let shell_word_values cmd =
-  match Masc_exec_bash_parser.Bash_words.stages cmd with
-  | Error _ -> Error ()
-  | Ok stages ->
-    Ok
-      (stages
-       |> List.concat
-       |> List.map (fun (word : Masc_exec_bash_parser.Bash_words.word) -> word.value))
-;;
-
 let redact_url_credentials token =
   let redact_after_scheme token scheme =
     if String.starts_with ~prefix:scheme token
@@ -88,7 +78,7 @@ let sanitize_parts parts =
 ;;
 
 let sanitize_command_for_log cmd =
-  match shell_word_values cmd with
+  match Exec_policy_mutation_classifier.stage_words_of_string_result cmd with
   | Ok parts -> sanitize_parts parts
   | Error () when command_has_sensitive_marker cmd -> "[REDACTED]"
   | Error () -> cmd |> redact_url_credentials |> redact_inline_secret_assignment

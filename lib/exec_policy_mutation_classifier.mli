@@ -48,3 +48,14 @@ val is_destructive_bash_operation : Masc_exec.Shell_ir.t -> bool
     Returns [[]] on parse failure. Callers with [Shell_ir.t] should
     use {!flat_stage_words} directly instead. *)
 val stage_words_of_string : string -> string list
+
+(** RFC-0160 S6b: Result-shaped variant for callers that route on parse
+    failure (e.g. log sanitizer's sensitive-marker fallback). The plain
+    [stage_words_of_string] collapses parse failure to [[]] (fail-closed
+    = false suits structural classifiers); this variant preserves
+    [Error ()] so the failure path can branch separately.
+
+    Single IR producer ([Bash.parse_string]) for both shapes — replaces
+    the legacy [Bash_words.stages]-based [shell_word_values] copy in
+    [exec_policy_log_sanitize]. *)
+val stage_words_of_string_result : string -> (string list, unit) result

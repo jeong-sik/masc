@@ -210,3 +210,18 @@ let stage_words_of_string (cmd : string) : string list =
   | Parsed.Parsed ir -> flat_stage_words ir
   | _ -> []
 ;;
+
+(** RFC-0160 S6b: Result-shaped variant that preserves the parse-failure
+    signal. [stage_words_of_string] collapses failure to [[]] which suits
+    classifiers (fail-closed = false). [_result] keeps [Error ()] so
+    callers that route on failure (e.g. log sanitizer's sensitive-marker
+    fallback) can branch.
+
+    Single IR producer ([Bash.parse_string]) for both shapes — replaces
+    the legacy [Bash_words.stages]-based [shell_word_values] copy in
+    [exec_policy_log_sanitize]. *)
+let stage_words_of_string_result (cmd : string) : (string list, unit) result =
+  match Masc_exec_bash_parser.Bash.parse_string cmd with
+  | Parsed.Parsed ir -> Ok (flat_stage_words ir)
+  | _ -> Error ()
+;;

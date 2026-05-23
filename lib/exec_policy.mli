@@ -89,6 +89,11 @@ val flat_stage_words : Masc_exec.Shell_ir.t -> string list
     Callers with [Shell_ir.t] should use {!flat_stage_words}. *)
 val stage_words_of_string : string -> string list
 
+(** RFC-0160 S6b: Result-shaped variant preserving parse-failure signal
+    for callers that route on failure (log sanitizer's sensitive-marker
+    fallback). *)
+val stage_words_of_string_result : string -> (string list, unit) result
+
 val sanitize_command_for_log : string -> string
 val truncate_for_log : ?max_len:int -> string -> string
 

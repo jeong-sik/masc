@@ -90,6 +90,11 @@ val is_destructive_bash_operation_of_string : string -> bool
     replaces 3 duplicated [shell_word_values] private copies). *)
 val stage_words_of_string : string -> string list
 
+(** RFC-0160 S6b: Result-shaped variant preserving parse-failure signal
+    for callers that route on failure (log sanitizer's sensitive-marker
+    fallback). *)
+val stage_words_of_string_result : string -> (string list, unit) result
+
 val sanitize_command_for_log : string -> string
 val truncate_for_log : ?max_len:int -> string -> string
 

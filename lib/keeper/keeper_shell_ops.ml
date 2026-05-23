@@ -534,20 +534,19 @@ let handle_keeper_shell
                  then result.stdout
                  else result.stdout ^ result.stderr
                in
-               Yojson.Safe.to_string
-                 (`Assoc
-                     [ "ok", `Bool (match result.status with Unix.WEXITED 0 -> true | _ -> false)
-                     ; "op", `String op
-                     ; "path", `String target
-                     ; "via", `String "host"
-                     ; "status", Keeper_alerting_path.process_status_to_json result.status
-                     ; "entries", lines_to_json ~limit output
-                     ]))))
-  | "cat" ->
-    (match read_target () with
-     | Error e -> path_error e
-     | Ok target ->
-       let max_bytes = shell_readonly_cat_max_bytes args in
+               render_completed_process_result ~cwd:None
+                 ~cmd:"ls -la"
+                 ~extra:[
+                   "path", `String target;
+                   "entries", lines_to_json ~limit output;
+                 ]
+                 result.status output
+             )))
+     | "cat" ->
+       (match read_target () with
+        | Error e -> path_error e
+        | Ok target ->
+          let max_bytes = shell_readonly_cat_max_bytes args in
        (* RFC-0006 Phase B-3b: docker route via the existing
           read_file_in_container helper (which is already a [cat]
           wrapper around run_command_in_container). Symmetry with

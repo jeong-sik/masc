@@ -27,7 +27,6 @@ module Random = Stdlib.Random
 
 (** {1 Initialization} *)
 
-val init : unit -> unit
 val reset_for_testing : unit -> unit
 
 (** {1 Identity Resolution} *)

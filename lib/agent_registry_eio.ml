@@ -70,10 +70,6 @@ let max_session_cache_entries = 1024
 
 (** {1 Initialization} *)
 
-(** Initialize (or re-initialize) the actor state.
-    Idempotent when called more than once – the existing state is kept. *)
-let init () = ()  (* state is created eagerly at module load time *)
-
 (** Reset registry for testing.
     Replaces all state with a fresh empty record. *)
 let reset_for_testing () =

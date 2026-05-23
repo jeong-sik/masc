@@ -99,7 +99,21 @@ let handle ~op ~(meta : keeper_meta) ~(config : Coord.config) ~(args : Yojson.Sa
       then [ "via", `String "docker" ]
       else []
     in
-    let gh_base ~ok ~cwd ~command extras =
+    let gh_base ~ok ~cwd ~command ?ctx extras =
+      let ctx_fields =
+        match ctx with
+        | None -> []
+        | Some c ->
+          let repo_fields =
+            match c.repo_slug with
+            | Some repo_slug -> [ "repo", `String repo_slug ]
+            | None -> []
+          in
+          [ "task_id", `String c.task_id
+          ; "git_root", `String c.git_root
+          ]
+          @ repo_fields
+      in
       Yojson.Safe.to_string
         (`Assoc
             ([ "ok", `Bool ok
@@ -107,20 +121,7 @@ let handle ~op ~(meta : keeper_meta) ~(config : Coord.config) ~(args : Yojson.Sa
              ; "cwd", `String cwd
              ; "command", `String command
              ; "reversibility", `String rev_tag
-             ] @ route_fields @ extras))
-    in
-    let gh_context_fields_of_ctx = function
-      | None -> []
-      | Some ctx ->
-        let repo_fields =
-          match ctx.repo_slug with
-          | Some repo_slug -> [ "repo", `String repo_slug ]
-          | None -> []
-        in
-        [ "task_id", `String ctx.task_id
-        ; "git_root", `String ctx.git_root
-        ]
-        @ repo_fields
+             ] @ route_fields @ ctx_fields @ extras))
     in
     let run_gh_command ~display_command ~parsed_command ~cwd
         ~(ctx : Keeper_shell_gh_context.gh_repo_context option) =
@@ -129,7 +130,6 @@ let handle ~op ~(meta : keeper_meta) ~(config : Coord.config) ~(args : Yojson.Sa
         Log.Keeper.info
           "gh_audit: keeper=%s reversibility=R1 cwd=%s cmd=%s"
           meta.name cwd display_command;
-      let gh_context_fields = gh_context_fields_of_ctx ctx in
       let gh_ir =
         Keeper_gh_shared.gh_simple_command_to_shell_ir
           ~sandbox:(Masc_exec.Sandbox_target.host ())
@@ -185,32 +185,30 @@ let handle ~op ~(meta : keeper_meta) ~(config : Coord.config) ~(args : Yojson.Sa
       in
       match gh_process with
       | Error msg ->
-        gh_base ~command:display_command ~ok:false ~cwd
-          (gh_context_fields @ [ "error", `String msg ])
+        gh_base ~command:display_command ~ok:false ~cwd ~ctx
+          [ "error", `String msg ]
       | Ok (st, out) ->
         if Keeper_shell_shared.process_status_is_timeout st
         then
-          gh_base ~command:display_command ~ok:false ~cwd
-            (gh_context_fields
-             @ [ "error", `String "gh_command_timed_out"
-               ; "timeout_sec", `Float timeout_sec
-               ; "status", Keeper_alerting_path.process_status_to_json st
-               ; "output", `String out
-               ; "hint", `String
-                   "gh network call exceeded timeout_sec. Retry \
-                    with a larger value -- gh round-trip plus auth \
-                    handshake is usually 3-10s, so prefer \
-                    timeout_sec=30 or timeout_sec=60 rather than \
-                    the 15s floor. You may also narrow the query \
-                    (--state, --limit, --json)."
-               ])
+          gh_base ~command:display_command ~ok:false ~cwd ~ctx
+            [ "error", `String "gh_command_timed_out"
+            ; "timeout_sec", `Float timeout_sec
+            ; "status", Keeper_alerting_path.process_status_to_json st
+            ; "output", `String out
+            ; "hint", `String
+                "gh network call exceeded timeout_sec. Retry \
+                 with a larger value -- gh round-trip plus auth \
+                 handshake is usually 3-10s, so prefer \
+                 timeout_sec=30 or timeout_sec=60 rather than \
+                 the 15s floor. You may also narrow the query \
+                 (--state, --limit, --json)."
+            ]
         else
           let ok = st = Unix.WEXITED 0 in
           let base_fields =
-            gh_context_fields
-            @ [ "status", Keeper_alerting_path.process_status_to_json st
-              ; "output", `String out
-              ]
+            [ "status", Keeper_alerting_path.process_status_to_json st
+            ; "output", `String out
+            ]
           in
           let hinted_fields =
             if (not ok)
@@ -226,7 +224,7 @@ let handle ~op ~(meta : keeper_meta) ~(config : Coord.config) ~(args : Yojson.Sa
                 ]
             else base_fields
           in
-          gh_base ~command:display_command ~ok ~cwd hinted_fields
+          gh_base ~command:display_command ~ok ~cwd ~ctx hinted_fields
     in
     (match reversibility with
      | Masc_exec.Shell_ir_risk.R2_Irreversible
@@ -327,6 +325,7 @@ let handle ~op ~(meta : keeper_meta) ~(config : Coord.config) ~(args : Yojson.Sa
                       | Error msg ->
                         gh_base ~ok:false ~cwd:ctx.worktree_cwd
                           ~command:(gh_cmd_display parsed_cmd)
+                          ~ctx:(Some ctx)
                           [ "error", `String "repo_access_denied"
                           ; "hint", `String msg
                           ]

@@ -31,29 +31,6 @@ val process_status_is_timeout : Unix.process_status -> bool
 (** [WSIGNALED Sys.sigterm] or [WEXITED 124] (Process_eio's
     Eio.Time.Timeout exit code). *)
 
-val replace_all_substrings :
-  needle:string -> replacement:string -> string -> string
-(** Naive linear-scan substring replacement.  Returns [text]
-    unchanged when [needle] is empty or absent. *)
-
-val rewrite_turn_runtime_paths_to_host :
-  config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
-  string ->
-  string
-(** Rewrite occurrences of the keeper's docker container root with
-    its host playground absolute path so the LLM-facing output
-    references real host paths. *)
-
-val rewrite_docker_host_paths_to_container :
-  config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
-  string ->
-  string
-(** Rewrite host playground root occurrences in keeper-issued Docker
-    commands to the corresponding in-container playground root before
-    execution. *)
-
 val run_argv_with_status_retry_eintr :
   ?cwd:string ->
   timeout_sec:float ->
@@ -62,11 +39,6 @@ val run_argv_with_status_retry_eintr :
 (** {!Process_eio.run_argv_with_status} wrapper that retries up to
     8 times when the process exits 127 with "interrupted system
     call" output.  Other statuses are returned unchanged. *)
-
-val shell_command_available : string -> bool
-(** PATH executable probe for keeper shell read fallback selection.
-    This intentionally avoids [/bin/sh -c] and does not treat empty
-    PATH entries as the current directory. *)
 
 (** {1 Playground repo cache} *)
 

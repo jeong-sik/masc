@@ -28,3 +28,8 @@ val resolve_keeper_shell_read_path :
     {!auto_correct_path} as a fallback when the initial resolution
     fails.  Guards against playground-prefix doubling when both
     [cwd] and [path] independently include the playground prefix. *)
+
+val shell_command_available : string -> bool
+(** PATH executable probe for keeper shell read fallback selection.
+    This intentionally avoids [/bin/sh -c] and does not treat empty
+    PATH entries as the current directory. *)

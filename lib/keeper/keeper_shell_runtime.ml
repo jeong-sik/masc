@@ -13,6 +13,36 @@ let coreutils = (Host_config.host ()).coreutils
 
 include Keeper_shell_render
 
+let rewrite_turn_runtime_paths_to_host
+      ~(config : Coord.config)
+      ~(meta : keeper_meta)
+      text
+  =
+  let replace_all_substrings ~needle ~replacement text =
+    let needle_len = String.length needle in
+    if needle_len = 0 || not (String_util.contains_substring text needle) then text
+    else
+      let text_len = String.length text in
+      let buf = Buffer.create text_len in
+      let rec loop i =
+        if i >= text_len then ()
+        else if i + needle_len <= text_len
+                && String.sub text i needle_len = needle then (
+          Buffer.add_string buf replacement;
+          loop (i + needle_len))
+        else (
+          Buffer.add_char buf text.[i];
+          loop (i + 1))
+      in
+      loop 0;
+      Buffer.contents buf
+  in
+  replace_all_substrings
+    ~needle:(Keeper_sandbox.container_root meta.name)
+    ~replacement:
+      (Keeper_sandbox.host_root_abs_of_meta ~config meta
+       |> Keeper_alerting_path.strip_trailing_slashes)
+    text
 
 let run_readonly_in_docker ?(ok_exit_codes = [ 0 ]) ~config ~meta
     ?turn_sandbox_factory ~op ~target ~command_argv ~max_bytes ~timeout_sec ()

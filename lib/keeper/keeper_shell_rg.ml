@@ -25,8 +25,8 @@ let handle
           let glob_argv = if glob <> "" then [ "--glob"; glob ] else [] in
           base_argv @ type_argv @ glob_argv @ [ pattern; path ]
         in
-        let rg_available = Keeper_shell_shared.shell_command_available "rg" in
-        let grep_available = Keeper_shell_shared.shell_command_available "grep" in
+        let rg_available = Keeper_shell_path.shell_command_available "rg" in
+        let grep_available = Keeper_shell_path.shell_command_available "grep" in
         let host_base =
           if rg_available then "rg"
           else if grep_available then "grep"

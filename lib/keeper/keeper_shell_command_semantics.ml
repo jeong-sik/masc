@@ -85,12 +85,7 @@ let effective_stages_of_ir ir =
 (** Extract literal words from a single [Shell_ir.simple] stage:
     [[bin; arg0; arg1; ...]]. Non-literal args abort extraction. *)
 let literal_words_of_simple (simple : Masc_exec.Shell_ir.simple) : string list option =
-  let rec collect acc = function
-    | [] -> Some (List.rev acc)
-    | Masc_exec.Shell_ir.Lit (a, _) :: rest -> collect (a :: acc) rest
-    | Masc_exec.Shell_ir.Concat _ :: _ | Masc_exec.Shell_ir.Var _ :: _ -> None
-  in
-  match collect [] simple.args with
+  match literal_args simple.args with
   | None -> None
   | Some args -> Some (Masc_exec.Bin.to_string simple.bin :: args)
 ;;

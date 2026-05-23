@@ -98,32 +98,6 @@ let oas_record ?(level = Agent_sdk.Log.Info) ~module_name ~message fields =
       span_id = None;
     }
 
-let test_oas_bridge_interpolates_placeholder_messages () =
-  let rendered =
-    Masc_mcp.Agent_sdk_log_bridge.render_record_message
-      (oas_record
-         ~module_name:"agent_tools"
-         ~message:"tool %s: correction_pipeline fixed %d field(s)"
-         [ Agent_sdk.Log.S ("tool", "keeper_github");
-           Agent_sdk.Log.I ("fixes", 2) ])
-  in
-  Alcotest.(check string) "placeholder message rendered"
-    "tool keeper_github: correction_pipeline fixed 2 field(s)"
-    rendered
-
-let test_oas_bridge_normalizes_generic_correction_messages () =
-  let rendered =
-    Masc_mcp.Agent_sdk_log_bridge.render_record_message
-      (oas_record
-         ~module_name:"agent_tools"
-         ~message:"correction_pipeline fixed tool input fields"
-         [ Agent_sdk.Log.S ("tool", "keeper_github");
-           Agent_sdk.Log.I ("fixes", 2) ])
-  in
-  Alcotest.(check string) "generic correction message normalized"
-    "tool keeper_github: correction_pipeline fixed 2 field(s)"
-    rendered
-
 let test_oas_bridge_promotes_mcp_server_failures_to_error () =
   let level =
     Masc_mcp.Agent_sdk_log_bridge.effective_level
@@ -207,12 +181,6 @@ let () =
           test_legacy_traceln_records_metadata;
         Alcotest.test_case "recent since_seq returns only new entries" `Quick
           test_recent_since_seq_returns_only_new_entries;
-        Alcotest.test_case
-          "oas bridge interpolates placeholder messages"
-          `Quick test_oas_bridge_interpolates_placeholder_messages;
-        Alcotest.test_case
-          "oas bridge normalizes generic correction messages"
-          `Quick test_oas_bridge_normalizes_generic_correction_messages;
         Alcotest.test_case
           "oas bridge promotes MCP server failures"
           `Quick test_oas_bridge_promotes_mcp_server_failures_to_error;

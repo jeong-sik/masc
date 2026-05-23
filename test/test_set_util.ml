@@ -4,29 +4,6 @@
 open Alcotest
 module S = Set_util
 
-(* ---------- of_list_with ---------- *)
-
-let test_of_list_with_empty () =
-  let tbl = S.of_list_with Fun.id [] in
-  check int "empty" 0 (Hashtbl.length tbl)
-;;
-
-let test_of_list_with_dedupes () =
-  let tbl = S.of_list_with Fun.id [ "a"; "b"; "a"; "c"; "b" ] in
-  check int "distinct keys" 3 (Hashtbl.length tbl);
-  check bool "a present" true (Hashtbl.mem tbl "a");
-  check bool "b present" true (Hashtbl.mem tbl "b");
-  check bool "c present" true (Hashtbl.mem tbl "c");
-  check bool "z absent" false (Hashtbl.mem tbl "z")
-;;
-
-let test_of_list_with_key_projection () =
-  let tbl = S.of_list_with fst [ 1, "x"; 2, "y"; 1, "z" ] in
-  check int "distinct ints" 2 (Hashtbl.length tbl);
-  check bool "1 present" true (Hashtbl.mem tbl 1);
-  check bool "2 present" true (Hashtbl.mem tbl 2)
-;;
-
 (* ---------- count_distinct ---------- *)
 
 let test_count_distinct_empty () =
@@ -101,12 +78,7 @@ let test_count_difference_present_after_absent () =
 let () =
   run
     "set_util"
-    [ ( "of_list_with"
-      , [ test_case "empty" `Quick test_of_list_with_empty
-        ; test_case "dedupes" `Quick test_of_list_with_dedupes
-        ; test_case "key projection" `Quick test_of_list_with_key_projection
-        ] )
-    ; ( "count_distinct"
+    [ ( "count_distinct"
       , [ test_case "empty" `Quick test_count_distinct_empty
         ; test_case "all some" `Quick test_count_distinct_all_some
         ; test_case

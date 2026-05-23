@@ -213,24 +213,6 @@ let require_snapshot ?sw ?net ?clock () =
       in
       Error detail
 
-(* RFC-0066 cycle break: inlined the
-   [Keeper_cascade_profile.normalize_declared_name] body to avoid the
-   [Keeper_cascade_profile  Cascade_catalog_runtime
-   Keeper_cascade_profile] cycle that RFC-0066 Phase 1 (PR #14652)
-   completed by routing [catalog_names] through this module.
-
-   The body uses only [Cascade_routes] primitives, which this module
-   already depends on (see [Cascade_routes.configured_route_targets]
-   above), so inlining here is dependency-neutral. *)
-let normalize_declared_name (raw : string) : string =
-  let trimmed = String.trim raw in
-  if String.equal trimmed "" then
-    Cascade_routes.cascade_name_for_use Cascade_routes.Keeper_turn
-  else
-    match Cascade_routes.logical_use_of_string_opt trimmed with
-    | Some use -> Cascade_routes.cascade_name_for_use use
-    | None -> trimmed
-
 let lookup_active_profile ?sw ?net ?clock raw_name =
   match require_snapshot ?sw ?net ?clock () with
   | Error _ as e -> e
@@ -249,36 +231,47 @@ let lookup_active_profile ?sw ?net ?clock raw_name =
           profile_lookup snapshot.profiles snapshot.default_profile_name
         with
         | Some profile ->
-            Ok (snapshot, snapshot.default_profile_name, profile)
+            (* [default_profile_name] is built from canonical routes;
+               [of_string_exn] is safe here. *)
+            Ok
+              ( snapshot,
+                Cascade_name.of_string_exn snapshot.default_profile_name,
+                profile )
         | None -> (
             (* Validator invariant violation; stay defensive. *)
             match snapshot.profiles with
-            | first :: _ -> Ok (snapshot, first.name, first)
+            | first :: _ ->
+                Ok
+                  ( snapshot,
+                    Cascade_name.of_string_exn first.name,
+                    first )
             | [] ->
                 Error
                   "snapshot has no profiles; cannot resolve blank \
                    cascade name")
       else
-        let normalized =
-          match
-            [ trimmed; "tier-group." ^ trimmed; "tier." ^ trimmed ]
-            |> List.find_opt (fun candidate ->
-                   Option.is_some
-                     (profile_lookup snapshot.profiles candidate))
-          with
-          | Some candidate -> candidate
-          | None -> normalize_declared_name raw_name
-        in
-        match profile_lookup snapshot.profiles normalized with
-        | Some profile -> Ok (snapshot, normalized, profile)
-        | None ->
-            let known =
-              profile_names_of_snapshot snapshot |> String.concat ", "
-            in
+        match Cascade_name.of_string trimmed with
+        | Ok name ->
+            let canonical = Cascade_name.to_string name in
+            (match profile_lookup snapshot.profiles canonical with
+             | Some profile -> Ok (snapshot, name, profile)
+             | None ->
+                 let known =
+                   profile_names_of_snapshot snapshot |> String.concat ", "
+                 in
+                 Error
+                   (Printf.sprintf
+                      "unknown cascade_name %S (active profiles: %s)" canonical
+                      known))
+        | Error `Invalid_prefix ->
             Error
               (Printf.sprintf
-                 "unknown cascade_name %S (active profiles: %s)" normalized
-                 known))
+                 "cascade_name %S lacks required prefix (tier-group|tier|route)"
+                 trimmed)
+        | Error `Empty ->
+            (* Defensive: empty case is handled above, but [of_string]
+               enforces it too. *)
+            Error "cascade_name is empty")
 
 let resolve_declared_name ?sw ?net ?clock ~raw_name () =
   match lookup_active_profile ?sw ?net ?clock raw_name with
@@ -306,7 +299,8 @@ let models_of_cascade_name ?sw ?net ?clock raw_name =
   | Error _ as e -> e
   | Ok (_snapshot, normalized, profile) ->
       Ok
-        (expand_weighted_entries ~cascade:normalized profile.weighted_entries
+        (expand_weighted_entries ~cascade:(Cascade_name.to_string normalized)
+           profile.weighted_entries
         |> List.map (fun (entry : Cascade_config_loader.weighted_entry) ->
                entry.model))
 

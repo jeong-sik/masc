@@ -88,7 +88,12 @@ type secondary_resolution =
 
 let inspect_active = Cascade_catalog_runtime_resolve.inspect_active
 let validate_path = Cascade_catalog_runtime_validate.validate_path
-let resolve_declared_name = Cascade_catalog_runtime_resolve.resolve_declared_name
+let resolve_declared_name ?sw ?net ?clock ~raw_name () =
+  match Cascade_catalog_runtime_resolve.resolve_declared_name ?sw ?net ?clock
+          ~raw_name ()
+  with
+  | Ok name -> Ok (Cascade_name.to_string name)
+  | Error _ as e -> e
 let models_of_cascade_name = Cascade_catalog_runtime_resolve.models_of_cascade_name
 
 let resolve_named_providers =

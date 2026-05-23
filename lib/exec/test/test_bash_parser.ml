@@ -199,7 +199,11 @@ let test_multiple_env_prefixes_preserve_order () =
   | Parsed.Parsed (Shell_ir.Simple s) ->
     assert (Bin.to_string s.bin = "printenv");
     assert (s.args = [ Shell_ir.Lit ("A", Shell_ir.default_meta) ]);
-    assert (s.env = [ "A", Shell_ir.Lit ("1", Shell_ir.default_meta); "B", Shell_ir.Lit ("two words", Shell_ir.default_meta) ])
+    assert
+      (s.env
+       = [ "A", Shell_ir.Lit ("1", Shell_ir.default_meta)
+         ; "B", Shell_ir.Lit ("two words", { Shell_ir.default_meta with quoted = true })
+         ])
   | _ -> assert false
 
 let test_env_assignment_after_bin_is_arg () =

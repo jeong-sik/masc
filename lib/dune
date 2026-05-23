@@ -150,6 +150,7 @@
    keeper_exec_fs
    keeper_exec_ide
    keeper_shell_docker
+   keeper_shell_gh
    keeper_task_worktree_lazy
    keeper_shell_gh_context
    keeper_shell_shared

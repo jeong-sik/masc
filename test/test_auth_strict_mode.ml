@@ -8,6 +8,14 @@
 
 open Masc_mcp
 
+(* [Auth_strict_mode.of_string] was removed as a public surface; the
+   parser is now reached only through [current ()] which reads the
+   [MASC_AUTH_STRICT] env var. This shim sets the env, calls [current ()],
+   and is the test-local equivalent of the removed [of_string]. *)
+let of_env raw =
+  Unix.putenv "MASC_AUTH_STRICT" raw;
+  Auth_strict_mode.current ()
+
 let mode_testable =
   Alcotest.testable
     (fun fmt -> function
@@ -20,7 +28,7 @@ let test_of_string_off () =
   List.iter
     (fun raw ->
       Alcotest.check mode_testable (Printf.sprintf "%S -> Off" raw)
-        Auth_strict_mode.Off (Auth_strict_mode.of_string raw))
+        Auth_strict_mode.Off (of_env raw))
     [ "off"; "OFF"; "Off"; "0"; "false"; "FALSE"; "  off  " ]
 
 let test_of_string_strict () =
@@ -29,7 +37,7 @@ let test_of_string_strict () =
       Alcotest.check mode_testable
         (Printf.sprintf "%S -> Strict" raw)
         Auth_strict_mode.Strict
-        (Auth_strict_mode.of_string raw))
+        (of_env raw))
     [ "strict"; "STRICT"; "Strict"; "1"; "true"; "TRUE"; "  strict  " ]
 
 let test_of_string_dry_run () =
@@ -38,7 +46,7 @@ let test_of_string_dry_run () =
       Alcotest.check mode_testable
         (Printf.sprintf "%S -> Dry_run" raw)
         Auth_strict_mode.Dry_run
-        (Auth_strict_mode.of_string raw))
+        (of_env raw))
     [ "dry_run"; "Dry_Run"; "DRY-RUN"; "dry-run"; "" ]
 
 let test_of_string_unknown_defaults_dry_run () =
@@ -50,7 +58,7 @@ let test_of_string_unknown_defaults_dry_run () =
       Alcotest.check mode_testable
         (Printf.sprintf "%S -> Dry_run (unknown)" raw)
         Auth_strict_mode.Dry_run
-        (Auth_strict_mode.of_string raw))
+        (of_env raw))
     [ "yes"; "no"; "enabled"; "disabled"; "2"; "STRIKT" ]
 
 let test_to_label_canonical () =
@@ -68,7 +76,7 @@ let test_to_label_round_trips_through_of_string () =
       Alcotest.check mode_testable
         (Printf.sprintf "round-trip via label %S" label)
         mode
-        (Auth_strict_mode.of_string label))
+        (of_env label))
     [ Auth_strict_mode.Off; Auth_strict_mode.Dry_run; Auth_strict_mode.Strict ]
 
 let () =

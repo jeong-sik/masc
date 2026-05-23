@@ -2,6 +2,8 @@ open Keeper_types
 open Keeper_exec_shared
 open Ide_region_tracker
 
+let path_error_json target msg = path_error_json target msg
+
 (* Issue #8490: Variant SSOT for fs write mode. Adding a constructor
    forces compilation in [fs_write_mode_to_string] and
    [fs_write_mode_dispatch] AND extends [valid_fs_write_mode_strings];
@@ -91,7 +93,7 @@ let handle_keeper_fs_read
        strict containment so host FS cannot leak through keeper_fs_read
        while keeper_bash is container-isolated. *)
        (match Keeper_sandbox_containment.check_read_target ~config ~meta ~target with
-        | Error e -> error_json ~fields:[ "path", `String target ] e
+        | Error e -> path_error_json target e
         | Ok () ->
           (* Multi-repository Phase 2: repository-level access restriction.
        If the resolved path is under a registered repository, enforce
@@ -103,7 +105,7 @@ let handle_keeper_fs_read
                ~base_path:(Keeper_alerting_path.project_root_of_config config)
                ~path:target
            with
-           | Error msg -> error_json ~fields:[ "path", `String target ] msg
+           | Error msg -> path_error_json target msg
            | Ok () ->
              (* RFC-0006 Phase B-2: Docker keepers route the actual byte read
        through [docker run --rm <image> cat <container_path>] so the
@@ -122,7 +124,7 @@ let handle_keeper_fs_read
                    ~timeout_sec
                    ()
                with
-               | Error msg -> error_json ~fields:[ "path", `String target ] msg
+               | Error msg -> path_error_json target msg
                | Ok body ->
                  let total = String.length body in
                  let truncated = total >= max_bytes in
@@ -139,7 +141,7 @@ let handle_keeper_fs_read
                match Safe_ops.read_file_safe target with
                | Error e when String.starts_with ~prefix:file_not_found_prefix e ->
                  missing_file_error_json ~config ~target ~fallback_dir ~error:e
-               | Error e -> error_json ~fields:[ "path", `String target ] e
+               | Error e -> path_error_json target e
                | Ok content ->
                  let total = String.length content in
                  let truncated = total > max_bytes in
@@ -355,7 +357,7 @@ let track_write_region
 let validate_write_target ~config ~meta ~target =
   match Keeper_sandbox_containment.check_write_target ~config ~meta ~target with
   | Ok () -> Ok ()
-  | Error e -> Error (error_json ~fields:[ "path", `String target ] e)
+  | Error e -> Error (path_error_json target e)
 ;;
 
 let check_invariant_sandbox_isolation
@@ -419,7 +421,7 @@ let handle_keeper_fs_edit
            | Error json -> json
            | Ok () ->
              (match check_invariant_sandbox_isolation ~turn_sandbox_factory ~target with
-              | Error msg -> error_json ~fields:[ "path", `String target ] msg
+              | Error msg -> path_error_json target msg
               | Ok () ->
                 (match
                    Keeper_repo_mapping.validate_path_access
@@ -427,7 +429,7 @@ let handle_keeper_fs_edit
                      ~base_path:(Keeper_alerting_path.project_root_of_config config)
                      ~path:target
                  with
-                 | Error msg -> error_json ~fields:[ "path", `String target ] msg
+                 | Error msg -> path_error_json target msg
                  | Ok () ->
                    (try
                       let current =
@@ -445,7 +447,7 @@ let handle_keeper_fs_edit
                         match
                           apply_patch ~old_string ~new_string ~replace_all current
                         with
-                        | Error msg -> error_json ~fields:[ "path", `String target ] msg
+                        | Error msg -> path_error_json target msg
                         | Ok (updated, occurrences) ->
                           let write_result =
                             match
@@ -498,8 +500,8 @@ let handle_keeper_fs_edit
                     with
                     | Fs_edit_error json -> json
                     | Invalid_argument e ->
-                      error_json ~fields:[ "path", `String target ] e
-                    | Sys_error e -> error_json ~fields:[ "path", `String target ] e
+                      path_error_json target e
+                    | Sys_error e -> path_error_json target e
                     | Unix.Unix_error (err, _, _) ->
                       error_json
                         ~fields:[ "path", `String target ]
@@ -518,7 +520,7 @@ let handle_keeper_fs_edit
            | Error json -> json
            | Ok () ->
              (match check_invariant_sandbox_isolation ~turn_sandbox_factory ~target with
-              | Error msg -> error_json ~fields:[ "path", `String target ] msg
+              | Error msg -> path_error_json target msg
               | Ok () ->
                 (match
                    Keeper_repo_mapping.validate_path_access
@@ -526,7 +528,7 @@ let handle_keeper_fs_edit
                      ~base_path:(Keeper_alerting_path.project_root_of_config config)
                      ~path:target
                  with
-                 | Error msg -> error_json ~fields:[ "path", `String target ] msg
+                 | Error msg -> path_error_json target msg
                  | Ok () ->
                    (try
                       let write_result =
@@ -595,8 +597,8 @@ let handle_keeper_fs_edit
                     with
                     | Fs_edit_error json -> json
                     | Invalid_argument e ->
-                      error_json ~fields:[ "path", `String target ] e
-                    | Sys_error e -> error_json ~fields:[ "path", `String target ] e
+                      path_error_json target e
+                    | Sys_error e -> path_error_json target e
                     | Unix.Unix_error (err, _, _) ->
                       error_json
                         ~fields:[ "path", `String target ]

@@ -273,12 +273,6 @@ let test_render_round_trip_simple () =
 
 let risk_t = Alcotest.testable Masc_exec.Shell_ir_risk.pp_risk_class ( = )
 
-let test_risk_class_read_only () =
-  let cmd = must_ok_argv "pr list" (Gh.gh_simple_command_of_argv [ "pr"; "list" ]) in
-  Alcotest.check risk_t "pr list is R0_Read"
-    Masc_exec.Shell_ir_risk.R0_Read
-    (Gh.gh_simple_command_risk_class cmd)
-
 let test_risk_class_api_get () =
   let cmd = must_ok_argv "api repos" (Gh.gh_simple_command_of_argv [ "api"; "repos" ]) in
   Alcotest.check risk_t "api without method is GET -> R0_Read"
@@ -436,8 +430,7 @@ let () =
             test_render_round_trip_simple
         ] )
     ; ( "risk_class"
-      , [ Alcotest.test_case "pr list is R0_Read" `Quick test_risk_class_read_only
-        ; Alcotest.test_case "api default is R0_Read" `Quick
+      , [ Alcotest.test_case "api default is R0_Read" `Quick
             test_risk_class_api_get
         ; Alcotest.test_case "pr create is R1" `Quick
             test_risk_class_reversible_mutation

@@ -1168,15 +1168,14 @@ let handle_keeper_shell
                "-not"; "-path"; "*/.git/*";
                "-not"; "-path"; "*/_build/*" ]
          in
-         Yojson.Safe.to_string
-           (`Assoc
-               [ "ok", `Bool (st = Unix.WEXITED 0)
-               ; "op", `String op
-               ; "path", `String target
-               ; "via", `String "host"
-               ; "status", Keeper_alerting_path.process_status_to_json st
-               ; "entries", lines_to_json ~limit out
-               ]))
+         render_completed_process_result ~cwd:None
+           ~cmd:("find " ^ target ^ " -maxdepth 3 -print -not -path '*/.git/*' -not -path '*/_build/*'")
+           ~extra:[
+             "path", `String target;
+             "entries", lines_to_json ~limit out;
+           ]
+           st out
+       )
   | "git_diff" ->
     (match cwd_target () with
      | Error e -> path_error e

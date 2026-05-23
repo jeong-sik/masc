@@ -1,6 +1,10 @@
 open Keeper_types
 open Keeper_exec_shared
 
+let task_id_required_error =
+  "task_id is required. Use the task_id from keeper_tasks_list or keeper_tasks_audit."
+;;
+
 let keeper_task_result_json ?(typed_outcome = (None : Keeper_tool_outcome.t option)) result =
   let typed_fields =
     match typed_outcome with
@@ -378,7 +382,7 @@ let handle_keeper_task_tool
     let task_id = Safe_ops.json_string ~default:"" "task_id" args |> String.trim in
     let reason = Safe_ops.json_string ~default:"" "reason" args |> String.trim in
     if task_id = ""
-    then error_json "task_id is required. Use the task_id from keeper_tasks_list or keeper_tasks_audit."
+    then error_json task_id_required_error
     else if reason = ""
     then
       (* Schema (tool_shard_types.ml:1363) declares [reason] as a
@@ -410,7 +414,7 @@ let handle_keeper_task_tool
     let task_id = Safe_ops.json_string ~default:"" "task_id" args |> String.trim in
     let notes = Safe_ops.json_string ~default:"" "notes" args |> String.trim in
     if task_id = ""
-    then error_json "task_id is required. Use the task_id from keeper_tasks_list or keeper_tasks_audit."
+    then error_json task_id_required_error
     else if notes = ""
     then
       (* Schema (tool_shard_types.ml:1391) declares [notes] as a

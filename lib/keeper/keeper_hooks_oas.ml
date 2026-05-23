@@ -110,7 +110,7 @@ let failure_class_of_tool_error_text error =
     let json = Yojson.Safe.from_string error in
     failure_class_of_tool_error_json json
   with
-  | _ -> None
+  | Yojson.Json_error _ | Failure _ -> None
 
 let tool_error_failure_class ?base_path error =
   match Tool_output.decode_from_oas error with
@@ -134,7 +134,7 @@ let self_correcting_tool_failure_class ?base_path error =
   match tool_error_failure_class ?base_path error with
   | Some ("workflow_rejection" | "policy_rejection" as failure_class) ->
     Some failure_class
-  | _ -> None
+  | Some _ | None -> None
 
 include Keeper_hooks_oas_response_metrics
 
@@ -296,7 +296,7 @@ let make_hooks
            Log.Keeper.info "keeper:%s before_turn: injecting %s (%d chars)"
              (!meta_ref).name source (String.length text);
            Agent_sdk.Hooks.Nudge text)
-      | _ -> Agent_sdk.Hooks.Continue);
+      | _event -> Agent_sdk.Hooks.Continue);
 
     after_turn = Some (fun event ->
       match event with
@@ -388,7 +388,7 @@ let make_hooks
           match response.telemetry with
           | Some { timings = Some t; _ } ->
               t.prompt_per_second, t.predicted_per_second
-          | _ -> None, None
+          | None | Some { timings = None; _ } -> None, None
         in
         let latency_ms =
           match response.telemetry with
@@ -476,7 +476,7 @@ let make_hooks
         streak_state.Keeper_guards.entry <- ("", 0);
         tool_call_count_ref := 0;
         Agent_sdk.Hooks.Continue
-      | _ -> Agent_sdk.Hooks.Continue);
+      | _event -> Agent_sdk.Hooks.Continue);
 
     post_tool_use = Some (fun event ->
       match event with
@@ -497,7 +497,8 @@ let make_hooks
                    (match List.assoc_opt "typed_outcome" fields with
                     | Some nested -> Keeper_tool_outcome.of_json nested
                     | None -> None)
-                 | _ -> None
+                 | `Null | `Bool _ | `Int _ | `Float _ | `String _ | `List _ ->
+                   None
                in
                let stripped = Keeper_tool_outcome.strip_from_json json in
                (Yojson.Safe.to_string stripped, typed_outcome)
@@ -721,7 +722,7 @@ let make_hooks
           Log.Keeper.debug "keeper:%s social_event tool=%s"
             (!meta_ref).name tool_name;
         Agent_sdk.Hooks.Continue
-      | _ -> Agent_sdk.Hooks.Continue);
+      | _event -> Agent_sdk.Hooks.Continue);
 
     (* pre_tool_use is provided by [guard_chain] below via Hooks.compose.
        The guard chain (timing + custom + streak + deny + cost +
@@ -739,13 +740,13 @@ let make_hooks
             ]
           ();
         Agent_sdk.Hooks.Continue
-      | _ -> Agent_sdk.Hooks.Continue);
+      | _event -> Agent_sdk.Hooks.Continue);
 
     on_idle = Some (fun event ->
       match event with
       | Agent_sdk.Hooks.OnIdle { consecutive_idle_turns; tool_names; _ } ->
         keeper_idle_decision ~meta_ref ~consecutive_idle_turns ~tool_names
-      | _ -> Agent_sdk.Hooks.Continue);
+      | _event -> Agent_sdk.Hooks.Continue);
 
     on_idle_escalated = Some (fun event ->
       match event with
@@ -763,7 +764,7 @@ let make_hooks
             ]
           ();
         decision
-      | _ -> Agent_sdk.Hooks.Continue);
+      | _event -> Agent_sdk.Hooks.Continue);
 
     on_error = Some (function
       | Agent_sdk.Hooks.OnError { detail; context = err_ctx } ->
@@ -774,7 +775,7 @@ let make_hooks
         Log.Keeper.error "keeper:%s on_error: %s (context: %s)"
           (!meta_ref).name detail err_ctx;
         Agent_sdk.Hooks.Continue
-      | _ -> Agent_sdk.Hooks.Continue);
+      | _event -> Agent_sdk.Hooks.Continue);
 
     on_tool_error = Some (function
       | Agent_sdk.Hooks.OnToolError { tool_name; error } ->
@@ -832,7 +833,7 @@ let make_hooks
                   ]
                 ()));
         Agent_sdk.Hooks.Continue
-      | _ -> Agent_sdk.Hooks.Continue);
+      | _event -> Agent_sdk.Hooks.Continue);
 
     post_tool_use_failure = Some (function
       | Agent_sdk.Hooks.PostToolUseFailure { tool_name; error; _ } ->
@@ -848,7 +849,7 @@ let make_hooks
         (* #9919: this path is a count event, not a heuristic decision. *)
         record_tool_use_failure ~keeper_name:meta.name ~tool_name;
         Agent_sdk.Hooks.Continue
-      | _ -> Agent_sdk.Hooks.Continue);
+      | _event -> Agent_sdk.Hooks.Continue);
   }
   in
   (* Guards fire first (outer). If all return Continue, non_gate_hooks

@@ -36,7 +36,6 @@ val storage_type_from_env : unit -> string
 val sanitize_namespace_segment : string -> string
 val backend_config_for : string -> Backend_types.config
 val create_backend : Backend_types.config -> (storage_backend, Backend_types.error) result
-val create_backend_eio : sw:Eio.Switch.t -> Backend_types.config -> (storage_backend, Backend_types.error) result
 val reset_default_config_cache : unit -> unit
 val build_default_config : string -> config
 val default_config : string -> config

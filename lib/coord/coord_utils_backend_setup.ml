@@ -337,11 +337,6 @@ let create_backend cfg =
               Fall back to shared Memory backend for the same base path. *)
            filesystem_fallback
              "No Eio fs context for FileSystem backend;")
-(** Create backend with Eio context. *)
-let create_backend_eio ~sw cfg =
-  let _ = sw in
-  create_backend cfg
-
 (* #10919: per-call Backend init was producing 1745 inits / 2 days
    (~83 inits per server lifetime against an expected 1) plus 3490
    INFO log lines.  Hot callers — [Coord.default_config] from every
@@ -435,6 +430,7 @@ let default_config base_path =
     [on_backend_ready] is called after backend creation, allowing callers
     to initialize dependent systems (e.g., Board) without Coord depending on them. *)
 let default_config_eio ~sw ?(on_backend_ready = fun _backend -> ()) base_path =
+  let _ = sw in
   let resolved_path = resolve_masc_base_path base_path in
   sync_test_base_path_env resolved_path;
   let backend_config = backend_config_for resolved_path in
@@ -443,7 +439,7 @@ let default_config_eio ~sw ?(on_backend_ready = fun _backend -> ()) base_path =
   Log.Backend.debug "MASC Backend: type=%s"
     (Backend_types.show_backend_type backend_config.backend_type);
   let backend =
-    match create_backend_eio ~sw backend_config with
+    match create_backend backend_config with
     | Ok backend ->
         Log.Backend.debug "Backend initialized: %s"
           (match backend with

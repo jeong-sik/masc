@@ -1,30 +1,30 @@
-(* Cycle 24 / Tier B8 — Multimodal.Provenance_stub JSON round-trip tests.
+(* Multimodal.Artifact.provenance JSON round-trip tests.
 
-   Pins:
+   Pins (previously under the Provenance_stub module, folded back
+   into Artifact since the stub never grew the planned DAG):
 
-   - [empty ~created_by ~created_at] yields the documented shape
-     (no origin artifacts).
-   - [to_json]/[of_json] round-trip for empty + multi-origin
-     records.
+   - [provenance_empty ~created_by ~created_at] yields no origins.
+   - [provenance_to_json] / [provenance_of_json] round-trip for
+     empty + multi-origin records.
    - Garbage JSON returns [Error _]. *)
 
-module Pr = Multimodal.Provenance_stub
+module Pr = Multimodal.Artifact
 module Aid = Shared_types.Artifact_id
 
 let test_empty_no_origins () =
-  let p = Pr.empty ~created_by:"keeper-A" ~created_at:1700000000.0 in
-  assert (p.origin_artifact_ids = []);
+  let p = Pr.provenance_empty ~created_by:"keeper-A" ~created_at:1700000000.0 in
+  assert (p.Pr.origin_artifact_ids = []);
   assert (p.created_by = "keeper-A");
   assert (p.created_at = 1700000000.0)
 
 let test_round_trip_empty () =
   let original =
-    Pr.empty ~created_by:"keeper-B" ~created_at:1700000123.5
+    Pr.provenance_empty ~created_by:"keeper-B" ~created_at:1700000123.5
   in
-  let restored = Pr.of_json (Pr.to_json original) in
+  let restored = Pr.provenance_of_json (Pr.provenance_to_json original) in
   match restored with
   | Ok r ->
-      assert (r.origin_artifact_ids = []);
+      assert (r.Pr.origin_artifact_ids = []);
       assert (r.created_by = "keeper-B");
       assert (r.created_at = 1700000123.5)
   | Error e ->
@@ -32,25 +32,21 @@ let test_round_trip_empty () =
       assert false
 
 let test_round_trip_with_origins () =
-  (* [Aid.of_string] requires a 36-char UUID, so use [Aid.generate]
-     for fixture data and pin only the count + string round-trip
-     through [to_string], not the literal value. *)
   let id1 = Aid.generate () in
   let id2 = Aid.generate () in
-  let original =
+  let original : Pr.provenance =
     {
-      Pr.origin_artifact_ids = [ id1; id2 ];
+      origin_artifact_ids = [ id1; id2 ];
       created_by = "keeper-C";
       created_at = 1700000456.0;
     }
   in
-  let restored = Pr.of_json (Pr.to_json original) in
+  let restored = Pr.provenance_of_json (Pr.provenance_to_json original) in
   match restored with
   | Ok r ->
-      assert (List.length r.origin_artifact_ids = 2);
+      assert (List.length r.Pr.origin_artifact_ids = 2);
       assert (r.created_by = "keeper-C");
       assert (r.created_at = 1700000456.0);
-      (* Serialised form survives intact when restored. *)
       let want1 = Aid.to_string id1 in
       let want2 = Aid.to_string id2 in
       let got1 = List.nth r.origin_artifact_ids 0 |> Aid.to_string in
@@ -63,26 +59,23 @@ let test_round_trip_with_origins () =
 
 let test_of_json_garbage () =
   let j = `String "not_an_object" in
-  match Pr.of_json j with
+  match Pr.provenance_of_json j with
   | Error _ -> ()
   | Ok _ -> assert false
 
 let test_of_json_missing_created_by () =
   let j = `Assoc [ ("created_at", `Float 1.0) ] in
-  match Pr.of_json j with
+  match Pr.provenance_of_json j with
   | Error _ -> ()
   | Ok _ -> assert false
 
 let test_of_json_missing_created_at () =
-  (* Symmetric to missing_created_by — Copilot review caught
-     the [created_at] branch was untested. *)
   let j = `Assoc [ ("created_by", `String "k") ] in
-  match Pr.of_json j with
+  match Pr.provenance_of_json j with
   | Error _ -> ()
   | Ok _ -> assert false
 
 let test_of_json_origin_artifact_ids_not_list () =
-  (* "origin_artifact_ids" present but not a JSON list. *)
   let j =
     `Assoc
       [
@@ -91,23 +84,21 @@ let test_of_json_origin_artifact_ids_not_list () =
         ("created_at", `Float 1.0);
       ]
   in
-  match Pr.of_json j with
+  match Pr.provenance_of_json j with
   | Error _ -> ()
   | Ok _ -> assert false
 
 let test_of_json_origin_artifact_ids_invalid_member () =
-  (* "origin_artifact_ids" is a list, but a member is not a
-     valid Artifact_id JSON shape. *)
   let j =
     `Assoc
       [
         ( "origin_artifact_ids",
-          `List [ `Int 42 (* not a string-shaped Aid *) ] );
+          `List [ `Int 42 ] );
         ("created_by", `String "k");
         ("created_at", `Float 1.0);
       ]
   in
-  match Pr.of_json j with
+  match Pr.provenance_of_json j with
   | Error _ -> ()
   | Ok _ -> assert false
 
@@ -119,7 +110,7 @@ let test_of_json_created_by_wrong_type () =
         ("created_at", `Float 1.0);
       ]
   in
-  match Pr.of_json j with
+  match Pr.provenance_of_json j with
   | Error _ -> ()
   | Ok _ -> assert false
 
@@ -131,16 +122,11 @@ let test_of_json_created_at_wrong_type () =
         ("created_at", `String "not-a-number");
       ]
   in
-  match Pr.of_json j with
+  match Pr.provenance_of_json j with
   | Error _ -> ()
   | Ok _ -> assert false
 
 let test_of_json_origin_artifact_ids_omitted_defaults_to_empty () =
-  (* Copilot review: of_json has a separate branch
-     [None -> Ok []] for an omitted [origin_artifact_ids] key.
-     Without a positive test that behavior could change
-     silently.  Pin: omitted key produces an empty origin list,
-     not an error. *)
   let j =
     `Assoc
       [
@@ -148,9 +134,9 @@ let test_of_json_origin_artifact_ids_omitted_defaults_to_empty () =
         ("created_at", `Float 1700000000.0);
       ]
   in
-  match Pr.of_json j with
+  match Pr.provenance_of_json j with
   | Ok r ->
-      assert (r.origin_artifact_ids = []);
+      assert (r.Pr.origin_artifact_ids = []);
       assert (r.created_by = "k");
       assert (r.created_at = 1700000000.0)
   | Error e ->
@@ -158,8 +144,6 @@ let test_of_json_origin_artifact_ids_omitted_defaults_to_empty () =
       assert false
 
 let test_of_json_created_at_int_accepted () =
-  (* Implementation accepts both `Float and `Int for created_at
-     (line 46: float_of_int i).  Pin that behavior. *)
   let j =
     `Assoc
       [
@@ -167,8 +151,8 @@ let test_of_json_created_at_int_accepted () =
         ("created_at", `Int 1700000000);
       ]
   in
-  match Pr.of_json j with
-  | Ok r -> assert (r.created_at = 1700000000.0)
+  match Pr.provenance_of_json j with
+  | Ok r -> assert (r.Pr.created_at = 1700000000.0)
   | Error e ->
       Printf.eprintf "unexpected error: %s\n" e;
       assert false

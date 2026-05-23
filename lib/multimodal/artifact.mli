@@ -9,7 +9,7 @@
     - a phantom-tagged {!kind} (Code/Image/Audio/Doc),
     - a {!Payload.t} (lazy / blob_ref / streaming),
     - free-form JSON metadata,
-    - a {!Provenance_stub.t} record.
+    - a {!provenance} record (origin artifact ids + creator + timestamp).
 
     The phantom-tag pattern excludes mismatched
     [Code-kind handler over Image-kind artifact] at compile time.
@@ -85,6 +85,27 @@ val kind_to_string : 'a kind -> string
 
 val any_kind_to_string : any_kind -> string
 
+(** {1 Provenance}
+
+    A flat record carrying origin artifact ids, the producer name,
+    and the creation timestamp. Stored on every {!t}. Previously
+    lived in a separate [Provenance_stub] module pending a DAG
+    follow-up; folded back in here since the abstraction never grew. *)
+
+type provenance = {
+  origin_artifact_ids : Shared_types.Artifact_id.t list;
+  created_by : string;
+  created_at : float;
+}
+
+val provenance_empty :
+  created_by:string -> created_at:float -> provenance
+(** No-origin provenance — the start of a new creation chain. *)
+
+val provenance_to_json : provenance -> Yojson.Safe.t
+
+val provenance_of_json : Yojson.Safe.t -> (provenance, string) result
+
 (** {1 Artifact record} *)
 
 type 'a t = {
@@ -92,7 +113,7 @@ type 'a t = {
   kind : 'a kind;
   payload : Payload.t;
   metadata : Yojson.Safe.t;
-  provenance : Provenance_stub.t;
+  provenance : provenance;
 }
 
 (** Existential wrapper. Callers that need to operate over a

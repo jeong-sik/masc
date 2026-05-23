@@ -1,8 +1,8 @@
 (* Create — Cycle 24-25 / Tier A7 first half.
    See create.mli for design rationale. *)
 
-let provenance_of ?(origins = []) ~created_by ~created_at () : Provenance_stub.t =
-  { Provenance_stub.origin_artifact_ids = origins; created_by; created_at }
+let provenance_of ?(origins = []) ~created_by ~created_at () : Artifact.provenance =
+  { Artifact.origin_artifact_ids = origins; created_by; created_at }
 
 let make_artifact (type a) ~(id : Shared_types.Artifact_id.t)
     ~(kind : a Artifact.kind) ~(payload : Payload.t)

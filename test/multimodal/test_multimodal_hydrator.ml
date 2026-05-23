@@ -3,7 +3,7 @@
 module H = Multimodal.Multimodal_hydrator
 module A = Multimodal.Artifact
 module P = Multimodal.Payload
-module Pr = Multimodal.Provenance_stub
+module Pr = Multimodal.Artifact
 module Aid = Shared_types.Artifact_id
 
 (* ─── DAG construction + edge dedupe ──────────────────────────── *)
@@ -115,7 +115,7 @@ let make_doc_artifact id : A.doc A.t =
     kind = A.Doc;
     payload = P.Blob_ref (Aid.to_string id ^ "-blob");
     metadata = `Null;
-    provenance = Pr.empty ~created_by:"executor" ~created_at:1.0;
+    provenance = Pr.provenance_empty ~created_by:"executor" ~created_at:1.0;
   }
 [@@warning "-37"]
 

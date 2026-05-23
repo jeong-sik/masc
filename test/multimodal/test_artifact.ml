@@ -2,7 +2,7 @@
 
 module A = Multimodal.Artifact
 module P = Multimodal.Payload
-module Pr = Multimodal.Provenance_stub
+module Pr = Multimodal.Artifact
 module Aid = Shared_types.Artifact_id
 
 (* ─── kind / kind_tag mirror ──────────────────────────────────── *)
@@ -63,11 +63,11 @@ let test_payload_unknown_kind_rejected () =
   | Error _ -> ()
   | Ok _ -> assert false
 
-(* ─── Provenance_stub ─────────────────────────────────────────── *)
+(* ─── Provenance ──────────────────────────────────────────────── *)
 
 let test_provenance_empty_round_trip () =
-  let pr = Pr.empty ~created_by:"vincent" ~created_at:1234.5 in
-  match Pr.of_json (Pr.to_json pr) with
+  let pr = Pr.provenance_empty ~created_by:"vincent" ~created_at:1234.5 in
+  match Pr.provenance_of_json (Pr.provenance_to_json pr) with
   | Ok p ->
       assert (p.Pr.origin_artifact_ids = []);
       assert (p.created_by = "vincent");
@@ -84,7 +84,7 @@ let test_provenance_with_origins_round_trip () =
       created_at = 9999.0;
     }
   in
-  match Pr.of_json (Pr.to_json pr) with
+  match Pr.provenance_of_json (Pr.provenance_to_json pr) with
   | Ok p ->
       assert (List.length p.Pr.origin_artifact_ids = 2);
       assert (
@@ -100,7 +100,7 @@ let make_image_artifact () : A.image A.t =
     kind = A.Image;
     payload = P.Blob_ref "img-blob-1";
     metadata = `Assoc [ ("width", `Int 800); ("height", `Int 600) ];
-    provenance = Pr.empty ~created_by:"executor" ~created_at:1.0;
+    provenance = Pr.provenance_empty ~created_by:"executor" ~created_at:1.0;
   }
 [@@warning "-37"]
 
@@ -136,7 +136,7 @@ let test_homogeneous_list_of_any () =
       kind = A.Code;
       payload = P.Streaming 0;
       metadata = `Null;
-      provenance = Pr.empty ~created_by:"executor" ~created_at:2.0;
+      provenance = Pr.provenance_empty ~created_by:"executor" ~created_at:2.0;
     }
   in
   let xs = [ A.Any a_img; A.Any a_code ] in

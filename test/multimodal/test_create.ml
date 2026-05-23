@@ -3,7 +3,7 @@
 module C = Multimodal.Create
 module A = Multimodal.Artifact
 module P = Multimodal.Payload
-module Pr = Multimodal.Provenance_stub
+module Pr = Multimodal.Artifact
 module Aid = Shared_types.Artifact_id
 
 (* ─── kind-specific factories ─────────────────────────────────── *)

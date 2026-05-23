@@ -21,7 +21,7 @@
     Every constructor accepts an optional [?origins] list and a
     required [~created_by] / [~created_at] pair. When [origins]
     is omitted, the artifact is treated as the start of a new
-    creation chain (no predecessors) and {!Provenance_stub.empty}
+    creation chain (no predecessors) and {!Artifact.provenance_empty}
     is used.
 
     @stability Evolving

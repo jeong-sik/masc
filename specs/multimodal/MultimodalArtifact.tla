@@ -1,13 +1,15 @@
 ---- MODULE MultimodalArtifact ----
 \* Cycle 24 / Tier B8 catch-up spec.
 \*
-\* Mirrors the well-formedness invariants over [Multimodal.Artifact],
-\* [Multimodal.Payload], and [Multimodal.Provenance_stub] from
-\* lib/multimodal/. The runtime artifact carries:
+\* Mirrors the well-formedness invariants over [Multimodal.Artifact]
+\* and [Multimodal.Payload] from lib/multimodal/. The runtime
+\* artifact carries:
 \*   - an opaque Shared_types.Artifact_id.t (UUID v7),
 \*   - a phantom-tagged kind in {Code, Image, Audio, Doc},
 \*   - a Payload variant in {Lazy_payload, Blob_ref, Streaming},
-\*   - a Provenance_stub record carrying origin artifact ids.
+\*   - an Artifact.provenance record carrying origin artifact ids
+\*     (previously a separate Provenance_stub module; folded back
+\*     into Artifact since the abstraction never grew).
 \*
 \* This spec models a finite ArtifactIds universe and an artifacts
 \* function ArtifactIds -> Artifact, where each artifact carries a
@@ -31,7 +33,7 @@
 \*   artifacts[id].kind       | Multimodal.Artifact.kind_to_tag
 \*   artifacts[id].payload_kind
 \*                            | Multimodal.Payload.t discriminator
-\*   artifacts[id].provenance | Multimodal.Provenance_stub.t
+\*   artifacts[id].provenance | Multimodal.Artifact.provenance
 \*   dag                      | Multimodal_hydrator.provenance_dag.edges
 \*
 \* Out-of-scope (defer to A7 / B9 follow-ups):

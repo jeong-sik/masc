@@ -46,7 +46,7 @@ let payload_of_json json =
 
 let make_provenance ~origin_artifact_ids ~created_by ~now =
   {
-    Provenance_stub.origin_artifact_ids;
+    A.origin_artifact_ids;
     created_by;
     created_at = now;
   }

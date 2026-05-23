@@ -3,7 +3,6 @@
 
 module A = Multimodal.Artifact
 module P = Multimodal.Payload
-module Pv = Multimodal.Provenance_stub
 module W = Multimodal.Workspace
 
 type tool_call = {
@@ -37,7 +36,7 @@ let metadata_of_call name args =
 
 let provenance_for ~now ~created_by =
   {
-    Pv.origin_artifact_ids = [];
+    A.origin_artifact_ids = [];
     created_by;
     created_at = now;
   }

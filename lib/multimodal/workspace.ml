@@ -61,7 +61,7 @@ let timeline ws =
     List.map
       (fun (_, any) ->
         let (Artifact.Any a) = any in
-        (a.Artifact.provenance.Provenance_stub.created_at, any))
+        (a.Artifact.provenance.Artifact.created_at, any))
       ws.artifacts
   in
   List.sort (fun (a, _) (b, _) -> Float.compare a b) with_ts

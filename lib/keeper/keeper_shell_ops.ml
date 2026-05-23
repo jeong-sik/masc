@@ -474,7 +474,7 @@ let handle_keeper_shell
                        @ insight_extra)
                     ~status:result.status
                     ~output:result.stdout
-                    ())))
+                    ()))))
   | "ls" ->
     (match read_target () with
      | Error e -> path_error e
@@ -1058,7 +1058,7 @@ let handle_keeper_shell
                           @ insight_extra)
                        ~status:result.status
                        ~output:result.stdout
-                       ()))))
+                       ())))))
   | "find" ->
     let name_pattern =
       let pattern = Safe_ops.json_string ~default:"" "pattern" args |> String.trim in

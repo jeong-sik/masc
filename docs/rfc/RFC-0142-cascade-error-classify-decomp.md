@@ -3,11 +3,11 @@ rfc: "0142"
 title: "cascade_error_classify Decomposition + Typed JSON-Extraction Variant"
 status: Active
 created: 2026-05-20
-updated: 2026-05-22
+updated: 2026-05-23
 author: vincent
 supersedes: []
 superseded_by: null
-related: ["0085", "0088", "0148", "0154"]
+related: ["0085", "0088", "0089", "0148", "0154"]
 implementation_prs: [16790, 16806, 16894, 16899, 17474]
 ---
 
@@ -80,6 +80,56 @@ remainder).
 - **RFC-0154** (System_error_class typed SSOT, Implemented 2026-05-21):
   operator-facing closed-sum SSOT. The `Wrong_shape` diagnostic
   affordance here is the same parse-don't-validate discipline.
+
+### Phase 4 — `Provider_error_class` typed boundary (NEW 2026-05-23)
+
+Audit on 2026-05-23 (`memory/keeper-health-probe-hardcoding-audit-2026-05-23.html`)
+identified an adjacent surface untouched by Phases 1-3:
+`lib/keeper/keeper_health_probe.ml:provider_runtime_pressure_class`
+holds the same `contains "<needle>"` + magic HTTP status + 20-alias
+parse soup that this RFC's umbrella exists to eliminate.
+
+Inventory at `origin/main` 2026-05-23:
+
+| Surface | Count | Site |
+|---------|-------|------|
+| `String_util.contains_substring_ci` substring literals | 23 | `keeper_health_probe.ml:66-98` |
+| Magic HTTP status integer literals | 5 (`408`/`429`/`504`/`524`/`529`) | `keeper_health_probe.ml:83, 99` |
+| `runtime_pressure_class_of_label` alias strings | 20 (10 variants × 1-3 aliases) | `keeper_health_probe.ml:37-52` |
+
+The fall-through `| _ -> Provider_error` in
+`provider_runtime_pressure_class` is exactly RFC-0088 §1 *Unknown →
+Permissive Default* — an `Unknown` provider error is silently
+classified into the catch-all bucket, defeating reactor
+specialization.
+
+#### Phase 4 PR plan
+
+| PR | Scope | Acceptance |
+|----|-------|-----------|
+| **PR-A** (this PR) | `lib/keeper/provider_error_class.{ml,mli}` new module — closed-sum `t` + named `Http_status` constants + wire tags + tests. Zero callers, zero behavioural change. | `dune build lib/keeper/provider_error_class.cmi` clean; `test_provider_error_class` Alcotest green; `rg 'contains "' lib/keeper/keeper_health_probe.ml` count *unchanged* (PR-A is additive only). |
+| PR-B-Anthropic | `lib/llm_provider/anthropic_*` adapter emits `Provider_error_class.t` directly from typed error response. | Anthropic adapter test covers 6 named variants; `Unspecified` only on genuinely unknown payloads. |
+| PR-B-Openai_compat | Same for OpenAI-compatible adapter (Kimi, GLM, llamacpp-OpenAI-API). | Adapter test covers 6 variants. |
+| PR-B-Llamacpp_local | Same for local llama.cpp adapter. | Adapter test covers timeout & DNS only (no backpressure surface). |
+| PR-C | Add `classified_as : Provider_error_class.t` field to `Keeper_registry_types.Provider_runtime_error`. Producers set it from PR-B output; consumers may still ignore it. | Field present in `.ml` + `.mli`; `failure_reason_to_string` reads `classified_as |> to_short_tag` for the tag prefix; backwards-compatible serialization. |
+| PR-D | `keeper_health_probe.ml:provider_runtime_pressure_class` rewritten as pure typed `match` on `classified_as`. `runtime_pressure_class_of_label` parse function deleted. | `rg 'contains "' lib/keeper/keeper_health_probe.ml` → **0**; `rg '\b(408\|429\|504\|524\|529)\b' lib/keeper/keeper_health_probe.ml` → **0**; new typed variant in `Provider_error_class.t` triggers exhaustive-match compile error in the consumer. |
+
+#### Acceptance metric for Phase 4 closure
+
+| Metric | Before | After Phase 4 |
+|--------|--------|---------------|
+| Substring literals in `keeper_health_probe.ml` classifier branches | 23 | 0 |
+| Magic HTTP status integers in `keeper_health_probe.ml` | 5 | 0 (named constants in `Provider_error_class.Http_status`) |
+| `runtime_pressure_class_of_label` alias strings | 20 | 0 (function deleted, callers consume typed `Provider_error_class.t` directly) |
+| Classifier surface compiler-checked on new provider error addition | No (substring soup) | Yes (exhaustive `match` on closed sum) |
+
+#### Why Phase 4 belongs in RFC-0142
+
+RFC-0142's umbrella scope is "cascade/provider error classification
+substring-and-catch-all elimination" (cf. RFC-0089 string-classifier
+umbrella).  The originally-listed `cascade_error_classify.ml` was one
+file under that umbrella; `keeper_health_probe.ml` is another.  Phase
+4 closes the keeper-reaction-layer twin.
 
 ---
 

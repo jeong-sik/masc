@@ -432,11 +432,24 @@ let record t ~provider_key ~outcome ?error_kind ?error_reason
       end
     | Capacity_backpressure ->
       (* Capacity exhaustion is transient load, not persistent health
-         degradation.  Do NOT increment consecutive_failures or touch
-         cooldown_until — the event is already recorded in [state.events]
-         above for observability.  The cascade will simply try the next
-         provider and revisit this one on the next turn. *)
-      ()
+         degradation.  Do NOT increment consecutive_failures.
+         Apply cooldown using the upstream retry_after hint when present,
+         or a synthetic default otherwise, so the fleet-level backoff
+         logic can detect all-provider-cooldown and wait for recovery
+         instead of thrashing through every provider every turn. *)
+      let cooldown_dur =
+        match retry_after_s with
+        | Some s when s > 0.0 -> Float.min s soft_rate_limit_max_clamp_sec
+        | _ -> default_capacity_backpressure_backoff_sec
+      in
+      let new_until = now +. cooldown_dur in
+      if new_until > state.cooldown_until then begin
+        state.cooldown_until <- new_until;
+        Cascade_metrics.on_provider_cooldown
+          ~provider:provider_key ~reason:"capacity_backpressure";
+        Prometheus.observe_histogram Keeper_metrics.metric_keeper_provider_block_duration_sec
+          ~labels:[("provider", provider_key)] cooldown_dur
+      end
     | Hard_quota ->
       (* Hard-quota errors (balance depleted, quota exceeded, resource
          exhausted) don't recover on short-window retries — set a long

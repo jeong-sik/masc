@@ -55,19 +55,19 @@ let test_missing_retry_after_uses_synthetic_default () =
     (Some (FSM.Cbr_synthetic_default expected_default))
     (FSM.sdk_error_capacity_backpressure_retry_hint err)
 
-let test_synthetic_default_is_positive_and_below_soft_rl_cooldown () =
+let test_synthetic_default_is_positive_and_within_sane_bounds () =
   (* Sanity bounds: synthetic default should be > 0 (else cascade rotates
-     immediately) and < soft_rate_limit_cooldown_sec (because capacity
-     backpressure recovers faster than 429 in practice). *)
+     immediately) and <= soft_rate_limit_max_clamp_sec (so that the default
+     and any explicit retry_after hint share the same upper bound). *)
   let default = HT.default_capacity_backpressure_backoff_sec in
   Alcotest.(check bool)
     "default_capacity_backpressure_backoff_sec > 0"
     true
     (default > 0.0);
   Alcotest.(check bool)
-    "default_capacity_backpressure_backoff_sec <= soft_rate_limit_cooldown_sec"
+    "default_capacity_backpressure_backoff_sec <= soft_rate_limit_max_clamp_sec"
     true
-    (default <= HT.soft_rate_limit_cooldown_sec)
+    (default <= HT.soft_rate_limit_max_clamp_sec)
 
 let test_non_positive_retry_after_falls_back_to_synthetic () =
   (* retry_after_sec=Some 0.0 or negative is semantically equivalent to
@@ -110,7 +110,7 @@ let () =
           Alcotest.test_case "missing retry_after uses synthetic default" `Quick
             test_missing_retry_after_uses_synthetic_default;
           Alcotest.test_case "synthetic default within sane bounds" `Quick
-            test_synthetic_default_is_positive_and_below_soft_rl_cooldown;
+            test_synthetic_default_is_positive_and_within_sane_bounds;
           Alcotest.test_case "non-positive retry_after falls back" `Quick
             test_non_positive_retry_after_falls_back_to_synthetic;
           Alcotest.test_case "non-Capacity_backpressure → None" `Quick

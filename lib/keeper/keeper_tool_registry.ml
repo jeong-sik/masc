@@ -212,8 +212,7 @@ let git_action_of_input (input : Yojson.Safe.t) : string =
 let is_read_only_with_input ~(tool_name : string) ~(input : Yojson.Safe.t) : bool =
   match Tool_name.of_string tool_name with
   | Some (Keeper Shell) when is_shell_gh_op input ->
-    (* RFC-0160 S3: route through Shell_ir_risk.classify_gh instead of
-       string-prefix matching (gh_read_only_prefixes / is_gh_api_read_only).
+    (* RFC-0160 S3: route through Shell_ir_risk.classify_gh.
        Avoids circular dependency through Keeper_gh_shared. *)
     let words =
       match input with

@@ -53,7 +53,7 @@ let with_repo_root_cwd f =
       Config_dir_resolver.reset ();
       Prompt_registry.clear ();
       Prompt_registry.set_markdown_dir (Filename.concat config_dir "prompts");
-      Lib.Prompt_defaults.init ();
+      () (* Prompt_defaults.init removed — registration is implicit *);
       Fun.protect
         ~finally:(fun () ->
           Sys.chdir original_cwd;

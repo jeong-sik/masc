@@ -21,7 +21,7 @@ let repo_root () =
 let () =
   let prompts_dir = Filename.concat (repo_root ()) "config/prompts" in
   Prompt_registry.set_markdown_dir prompts_dir;
-  Masc_mcp.Prompt_defaults.init ()
+  () (* Prompt_defaults.init removed — registration is implicit *)
 
 (* ---------- Triage tests ---------- *)
 

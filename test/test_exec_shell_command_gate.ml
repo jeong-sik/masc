@@ -23,10 +23,17 @@ module PD = Masc_exec.Parsed
 
 let allowed = [ "rg"; "sort"; "head"; "wc"; "cat"; "git"; "ls"; "grep" ]
 
+(* Local wrapper retained for ~12 call sites below. The previous
+   [gate_from_raw_typed] symbol was a stale reference to a removed
+   bridge; [Gate.gate_typed] is the current SSOT (RFC-0160 PR #18063
+   consolidated raw-string entrypoints; [Gate.gate] exposes the same
+   parse + apply_policy pipeline as a single call). Folding this
+   wrapper into [Gate.gate] across the 12 sites is a follow-up
+   RFC-0160 cleanup tracked separately. *)
 let gate_from_raw ?caller ~raw ~allowlist ~path_policy ~sandbox () =
   match Masc_exec_bash_parser.Bash.parse_string raw with
   | PD.Parsed ir ->
-    gate_from_raw_typed ?caller ~ir ~allowlist ~path_policy ~sandbox ()
+    Gate.gate_typed ?caller ~ir ~allowlist ~path_policy ~sandbox ()
   | PD.Parse_error _ ->
     Gate.Cannot_parse { reason = Gate.Parse_error }
   | PD.Parse_aborted reason ->

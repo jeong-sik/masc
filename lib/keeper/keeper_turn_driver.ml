@@ -1002,13 +1002,18 @@ let run_named
              kind = Llm_provider.Http_client.Local_resource_exhaustion;
              message;
            }) ->
+      let retry_after_sec =
+        Some
+          (Cascade_health_tracker_config
+           .default_capacity_backpressure_backoff_sec)
+      in
       Some
         (Capacity_backpressure
            {
              cascade_name = error_cascade_name;
              source = Option.value source ~default:Cascade_slot;
              detail = message;
-             retry_after_sec = None;
+             retry_after_sec;
            })
     | Some
         (Llm_provider.Http_client.HttpError _

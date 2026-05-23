@@ -143,7 +143,7 @@ let respond_sse_rate_limited ~(deps : Server_mcp_transport_http_types.deps) ~ori
       [
         ("error", `String "sse_connection_rate_limited");
         ("reason", `String reason_label);
-        ("retry_after_seconds", `Float retry_after_s);
+        ("retry_after_seconds", `Float (Option.value ~default:0.0 retry_after_s));
       ]
     |> Yojson.Safe.to_string
   in

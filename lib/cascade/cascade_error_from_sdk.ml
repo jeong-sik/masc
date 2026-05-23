@@ -85,7 +85,15 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
                       source;
                       detail;
                       retry_after_sec =
-                        float_opt_of_assoc "retry_after_sec" json;
+                        match float_opt_of_assoc "retry_after_sec" json with
+                        | Some v -> Some v
+                        | None ->
+                          (* Inject synthetic default when upstream omits
+                             the hint — mirrors D12 fix in
+                             keeper_turn_driver.ml and cascade_internal_error. *)
+                          Some
+                            (Cascade_health_tracker_config
+                             .default_capacity_backpressure_backoff_sec);
                     })
              | None -> None)
           | _ -> None)

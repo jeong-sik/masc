@@ -10,6 +10,12 @@
     [Cascade_error_classify.Cascade_exhausted], etc. continue to compile
     unchanged. *)
 
+(** Synthetic backoff injected when a [Capacity_backpressure] is constructed
+    without a [retry_after_sec] hint.  Kept as a literal here to avoid pulling
+    in {!Cascade_health_tracker_config} (which reads env vars at init time);
+    both sites agree on the same default (5.0 s). *)
+let default_capacity_backpressure_backoff_sec = 5.0
+
 let cascade_name_to_string = Cascade_name.to_string
 
 type provider_rejection = {
@@ -178,13 +184,23 @@ let masc_internal_error_to_json = function
       ]
   | Capacity_backpressure { cascade_name; source; detail; retry_after_sec } ->
     let cascade_name = cascade_name_to_string cascade_name in
+    (* D12 encoder fix: when retry_after_sec is None the decoder already
+       injects a synthetic default (see Cascade_error_classify), but the
+       encoder was still emitting JSON [null].  Downstream JSON consumers
+       (operators, log aggregators) then saw a misleading null.  Resolve
+       None → synthetic default here so the serialised form is always a
+       meaningful float, mirroring the decoder behaviour. *)
+    let effective_retry = match retry_after_sec with
+      | Some v -> Some v
+      | None -> Some default_capacity_backpressure_backoff_sec
+    in
     `Assoc
       [
         ("kind", `String "capacity_backpressure");
         ("cascade_name", `String cascade_name);
         ("source", `String (capacity_backpressure_source_to_string source));
         ("detail", `String detail);
-        ("retry_after_sec", Json_util.float_opt_to_json retry_after_sec);
+        ("retry_after_sec", Json_util.float_opt_to_json effective_retry);
       ]
   | Resumable_cli_session { cascade_name; detail; exit_code } ->
     let cascade_name = cascade_name_to_string cascade_name in

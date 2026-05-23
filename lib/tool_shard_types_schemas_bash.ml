@@ -40,7 +40,8 @@ let keeper_bash_executable_field =
       ; ( "description"
         , `String
             "Typed argv form: allowlisted executable name. Provide argv separately; \
-             do not combine shell syntax into this field." )
+             do not combine shell syntax into this field. Mutually exclusive with \
+             pipeline; if both are provided executable takes precedence." )
       ] )
 ;;
 
@@ -64,7 +65,7 @@ let keeper_bash_pipeline_field =
       ; ( "description"
         , `String
             "Typed pipeline form: ordered exec stages. Use this instead of putting \
-             '|' in argv." )
+             '|' in argv. Mutually exclusive with executable." )
       ] )
 ;;
 
@@ -113,21 +114,22 @@ let keeper_bash_timeout_sec_field =
 ;;
 
 let keeper_bash_description =
-  "Execute one command through the typed execution gates via typed argv. Use \
-   executable/argv for one process, or pipeline for explicit Shell IR \
-   pipelines. The legacy 'cmd' string field is no longer accepted. Shell \
-   metacharacters in argv are data, not syntax. Good: executable='git' \
-   argv=['status','--short'], pipeline=[{executable='git',...}, \
-   {executable='head',...}]. Runs in the keeper sandbox by default; use cwd to \
-   target an explicit allowed directory. Paths resolve automatically — never \
-   include host storage prefixes such as '.masc/playground/your-name/' in cwd. Use \
-   'repos/X' instead. Sandbox root is NOT a git repository: git/gh calls require \
-   cwd='repos/<REPO_NAME>' (or the worktree path under it). 'not a git repository' \
-   or 'path_outside_sandbox' from the sandbox root means you forgot the cwd. For \
-   read-only search/listing use Grep when visible; for file edits use Edit. \
-   Long-running commands must be split or run through a \
-   dedicated structured workflow; this tool no longer exposes background task \
-   lifecycle tools."
+  "Execute one command through the typed execution gates via typed argv. \
+   Provide EITHER executable/argv OR pipeline, never both. If both are \
+   provided, executable takes precedence. Use executable/argv for one process, \
+   or pipeline for explicit Shell IR pipelines. The legacy 'cmd' string field \
+   is no longer accepted. Shell metacharacters in argv are data, not syntax. \
+   Good: executable='git' argv=['status','--short'], \
+   pipeline=[{executable='git',...}, {executable='head',...}]. Runs in the \
+   keeper sandbox by default; use cwd to target an explicit allowed directory. \
+   Paths resolve automatically — never include host storage prefixes such as \
+   '.masc/playground/your-name/' in cwd. Use 'repos/X' instead. Sandbox root is \
+   NOT a git repository: git/gh calls require cwd='repos/<REPO_NAME>' (or the \
+   worktree path under it). 'not a git repository' or 'path_outside_sandbox' \
+   from the sandbox root means you forgot the cwd. For read-only search/listing \
+   use Grep when visible; for file edits use Edit. Long-running commands must \
+   be split or run through a dedicated structured workflow; this tool no longer \
+   exposes background task lifecycle tools."
 ;;
 
 let keeper_bash_schema : Masc_domain.tool_schema =

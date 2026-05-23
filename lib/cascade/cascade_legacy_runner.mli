@@ -73,6 +73,7 @@ type cascade_observation = {
   fallback_events : cascade_fallback_event list;
   attempt_details_available : bool;
   attempt_details_source : string;
+  oas_internal_cascade_allowed : bool;
 }
 (** Per-turn cascade execution snapshot.  [attempts] is
     in chronological order (the internal capture stores
@@ -160,6 +161,7 @@ val cascade_observation_with_metrics :
   candidate_count:int ->
   selected_model_raw:string option ->
   capture:cascade_metrics_capture ->
+  ?oas_internal_cascade_allowed:bool ->
   unit ->
   cascade_observation
 (** Materialises a {!cascade_observation} from a finished

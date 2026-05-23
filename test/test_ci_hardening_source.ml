@@ -1317,6 +1317,7 @@ let test_keeper_zombie_field_contracts () =
       pre_dispatch_compaction_trigger = None;
       pre_dispatch_compaction_before_tokens = None;
       pre_dispatch_compaction_after_tokens = None;
+      oas_internal_cascade_allowed = false;
     }
   in
   let json = R.to_json receipt in

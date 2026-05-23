@@ -298,6 +298,7 @@ let mk_observation ?(attempts = []) ?(fallback_events = []) () :
     fallback_events;
     attempt_details_available = true;
     attempt_details_source = "oas_metrics_callbacks";
+    oas_internal_cascade_allowed = false;
   }
 
 let nth_attempt_model_id json idx =

@@ -1642,7 +1642,9 @@ let run_named
             ~cascade_name:error_cascade_name
             ?strategy:!cascade_strategy_name_ref ~configured_labels
             ~candidate_count ~selected_model_raw:(success_selected_model_raw candidate)
-            ~capture ()
+            ~capture
+          ~oas_internal_cascade_allowed:(Keeper_cascade_engine.allows_oas_internal_cascade cascade_engine)
+          ()
         in
         let result = { result with cascade_observation = Some observation } in
                 Cascade_legacy_runner.record_cascade ~keeper_name
@@ -1675,7 +1677,9 @@ let run_named
                ~cascade_name:error_cascade_name
                ?strategy:!cascade_strategy_name_ref ~configured_labels
                ~candidate_count ~selected_model_raw:(success_selected_model_raw candidate)
-               ~capture ()
+               ~capture
+          ~oas_internal_cascade_allowed:(Keeper_cascade_engine.allows_oas_internal_cascade cascade_engine)
+          ()
            in
            let result = { result with cascade_observation = Some observation } in
                    Cascade_legacy_runner.record_cascade ~keeper_name
@@ -1707,7 +1711,9 @@ let run_named
                ~cascade_name:error_cascade_name
                ?strategy:!cascade_strategy_name_ref ~configured_labels
                ~candidate_count ~selected_model_raw:error_selected_model_raw
-               ~capture ()
+               ~capture
+          ~oas_internal_cascade_allowed:(Keeper_cascade_engine.allows_oas_internal_cascade cascade_engine)
+          ()
            in
            Cascade_legacy_runner.record_cascade ~keeper_name
              ~cascade_name:error_cascade_name
@@ -1738,7 +1744,9 @@ let run_named
                ~cascade_name:error_cascade_name
                ?strategy:!cascade_strategy_name_ref ~configured_labels
                ~candidate_count ~selected_model_raw:(success_selected_model_raw candidate)
-               ~capture ()
+               ~capture
+          ~oas_internal_cascade_allowed:(Keeper_cascade_engine.allows_oas_internal_cascade cascade_engine)
+          ()
            in
            let result = { result with cascade_observation = Some observation } in
                    Cascade_legacy_runner.record_cascade ~keeper_name

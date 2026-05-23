@@ -119,40 +119,38 @@ let handle_keeper_bash_typed
         let typed_error_fields =
           [ "typed", `Bool true; "cmd", `String cmd_for_log; "cwd", `String cwd ]
         in
+        let blocked_result ~error ~reason ~alternatives =
+          Yojson.Safe.to_string
+            (Exec_core.blocked_result_json
+               ~cmd
+               ~ir
+               ~error
+               ~reason
+               ~alternatives
+               ~retryability:Exec_core.Operator_required
+               ~extra:[ "cmd", `String cmd_for_log; "typed", `Bool true; "execution_time_ms", `Int 0 ]
+               ())
+        in
         let envelope =
           Masc_exec.Shell_ir_risk.classify (Masc_exec.Shell_ir_risk.undecided ir)
         in
         if Masc_exec.Shell_ir_risk.is_destructive envelope
         then
-          Yojson.Safe.to_string
-            (Exec_core.blocked_result_json
-               ~cmd
-               ~ir
-               ~error:"destructive_operation_blocked"
-               ~reason:
-                 "This typed command is destructive and is blocked for all presets."
-               ~alternatives:[ "Use a non-destructive command or a dedicated structured tool." ]
-               ~retryability:Exec_core.Operator_required
-               ~extra:[ "cmd", `String cmd_for_log; "typed", `Bool true; "execution_time_ms", `Int 0 ]
-               ())
+          blocked_result
+            ~error:"destructive_operation_blocked"
+            ~reason:"This typed command is destructive and is blocked for all presets."
+            ~alternatives:[ "Use a non-destructive command or a dedicated structured tool." ]
         else if (not write_enabled)
              && (Masc_exec.Shell_ir_risk.is_r1 envelope
                 || Masc_exec.Shell_ir_risk.is_r2 envelope)
         then
-          Yojson.Safe.to_string
-            (Exec_core.blocked_result_json
-               ~cmd
-               ~ir
-               ~error:"write_operation_gated"
-               ~reason:
-                 "This typed command modifies state. A write-enabled preset is required."
-               ~alternatives:
-                 [ "Use read-only commands such as rg, cat, ls, git status, or git log."
-                 ; "Ask the operator for a write-enabled preset."
-                 ]
-               ~retryability:Exec_core.Operator_required
-               ~extra:[ "cmd", `String cmd_for_log; "typed", `Bool true; "execution_time_ms", `Int 0 ]
-               ())
+          blocked_result
+            ~error:"write_operation_gated"
+            ~reason:"This typed command modifies state. A write-enabled preset is required."
+            ~alternatives:
+              [ "Use read-only commands such as rg, cat, ls, git status, or git log."
+              ; "Ask the operator for a write-enabled preset."
+              ]
         else
             let allowed_commands =
               match mode with

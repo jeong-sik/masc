@@ -289,18 +289,22 @@ let test_of_json_rejects_non_string_argv () =
     (String_util.contains_substring_ci msg "$.argv[0]")
 ;;
 
-let test_of_json_rejects_mixed_exec_and_pipeline () =
-  let msg =
-    parse_json_error
+let test_of_json_prefers_exec_when_both_present () =
+  let input =
+    parse_json_exn
       (`Assoc
           [ "executable", `String "echo"
+          ; "argv", `List [ `String "hello" ]
           ; "pipeline", `List [ `Assoc [ "executable", `String "wc" ] ]
           ])
   in
-  Alcotest.(check bool)
-    "error mentions either executable or pipeline"
-    true
-    (String_util.contains_substring_ci msg "either executable or pipeline")
+  match input with
+  | Bash_input.Exec { executable; argv; cwd; env } ->
+    Alcotest.(check string) "executable takes precedence" "echo" executable;
+    Alcotest.(check (list string)) "argv preserved" [ "hello" ] argv;
+    Alcotest.(check (option string)) "cwd" None cwd;
+    Alcotest.(check (list (pair string string))) "env" [] env
+  | Bash_input.Pipeline _ -> Alcotest.fail "expected Exec when both present"
 ;;
 
 let test_of_json_stages_alias_reports_stages_path () =
@@ -496,9 +500,9 @@ let suite =
           `Quick
           test_of_json_rejects_non_string_argv
       ; Alcotest.test_case
-          "of_json_rejects_mixed_exec_and_pipeline"
+          "of_json_prefers_exec_when_both_present"
           `Quick
-          test_of_json_rejects_mixed_exec_and_pipeline
+          test_of_json_prefers_exec_when_both_present
       ; Alcotest.test_case
           "of_json_stages_alias_reports_stages_path"
           `Quick

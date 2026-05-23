@@ -200,9 +200,9 @@ let of_json (json : Yojson.Safe.t) =
   let* cwd = optional_string ~path:"$" fields "cwd" in
   let* env = optional_env ~path:"$" fields in
   match executable_present, pipeline_value with
-  | true, Some _ ->
-    Error "$ must provide either executable or pipeline/stages, not both"
-  | true, None ->
+  | true, _ ->
+    (* executable takes precedence when both are provided;
+       this is the typed-input contract advertised in the schema. *)
     let* executable = required_string ~path:"$" fields "executable" in
     let* argv = optional_string_list ~path:"$" fields "argv" in
     Ok (Exec { executable; argv; cwd; env })

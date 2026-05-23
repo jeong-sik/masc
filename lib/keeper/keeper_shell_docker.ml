@@ -52,6 +52,8 @@ type docker_shell_result =
   ; output : string
   ; image : string
   ; network_label : string
+  ; cmd_stages : string list
+  ; cwd : string
   }
 
 (* docker run --rm wall-clock covers slot_wait + spawn + container
@@ -392,7 +394,7 @@ let run_docker_shell_command_with_status_internal
                                Keeper_registry.clear_error
                                  ~base_path:config.base_path
                                  meta.name);
-                             Ok { status; output; image; network_label }
+                             Ok { status; output; image; network_label; cmd_stages; cwd }
                            with
                            | Eio.Cancel.Cancelled _ as exn -> raise exn
                            | Failure err -> sandbox_error err
@@ -456,39 +458,36 @@ let run_docker_credentialed_bash
     match check_egress ~config ~meta ~cmd with
     | Some blocked_json -> blocked_json
     | None ->
-      match validate_docker_dispatch_context ~config ~meta ~cwd ~cmd with
-      | Error message -> sandbox_error_json message
-      | Ok (cwd, cmd_stages) ->
-           let _ = turn_sandbox_runtime in
-           (match
-              run_docker_shell_command_with_status
-                ~config
-                ~meta
-                ~cwd
-                ~timeout_sec
-                ~cmd
-                ~git_creds_enabled:true
-                ~network_mode:Network_inherit
-            with
-            | Error message when is_credential_preflight_failure message ->
-              credential_preflight_failure_json ~keeper_name:meta.name ~message
-            | Error message -> error_json message
-            | Ok result ->
-              let cwd_response =
-                Keeper_cwd_response.docker
-                  ~host_cwd:cwd
-                  ~container_cwd:(docker_private_workspace_cwd ~config ~meta cwd)
-              in
-              docker_bash_response
-                ~ok:(result.status = Unix.WEXITED 0)
-                ~git_creds_enabled:true
-                ~image:result.image
-                ~network_label:result.network_label
-                ~status:result.status
-                ~output:result.output
-                ~cwd_response
-                ~cmd_stages
-                ))
+      let _ = turn_sandbox_runtime in
+      (match
+         run_docker_shell_command_with_status
+           ~config
+           ~meta
+           ~cwd
+           ~timeout_sec
+           ~cmd
+           ~git_creds_enabled:true
+           ~network_mode:Network_inherit
+       with
+       | Error message when is_credential_preflight_failure message ->
+         credential_preflight_failure_json ~keeper_name:meta.name ~message
+       | Error message -> error_json message
+       | Ok result ->
+         let cwd_response =
+           Keeper_cwd_response.docker
+             ~host_cwd:result.cwd
+             ~container_cwd:(docker_private_workspace_cwd ~config ~meta result.cwd)
+         in
+         docker_bash_response
+           ~ok:(result.status = Unix.WEXITED 0)
+           ~git_creds_enabled:true
+           ~image:result.image
+           ~network_label:result.network_label
+           ~status:result.status
+           ~output:result.output
+           ~cwd_response
+           ~cmd_stages:result.cmd_stages
+           ))
 ;;
 
 let run_docker_bash
@@ -507,11 +506,11 @@ let run_docker_bash
   else if command_uses_nested_container_runtime cmd
   then sandbox_error_json (nested_runtime_blocker ~git_creds_enabled:false)
   else (
-    match validate_docker_dispatch_context ~config ~meta ~cwd ~cmd with
-    | Error message -> sandbox_error_json message
-    | Ok (cwd, cmd_stages) ->
-      (match turn_sandbox_runtime, network_mode with
-       | Some runtime, Network_none ->
+    match turn_sandbox_runtime, network_mode with
+    | Some runtime, Network_none ->
+      (match validate_docker_dispatch_context ~config ~meta ~cwd ~cmd with
+       | Error message -> sandbox_error_json message
+       | Ok (cwd, cmd_stages) ->
          (match
             Keeper_turn_sandbox_runtime.run_bash_with_status
               runtime
@@ -555,57 +554,57 @@ let run_docker_bash
               ~cwd_response
               ~semantic_status
               ~cmd_stages
-              )
-       | _ ->
-         (match turn_sandbox_runtime with
-          | Some _ ->
-            Prometheus.inc_counter
-              Keeper_metrics.metric_keeper_docker_runtime_discarded
-              ~labels:[ "keeper", meta.name; "reason", "network_mode_mismatch" ]
-              ()
-          | None -> ());
-         (* P12: check egress policy before running networked container *)
-         (match check_egress ~config ~meta ~cmd with
-          | Some blocked_json -> blocked_json
-          | None ->
-            (match
-               run_docker_shell_command_with_status
-                 ~config
-                 ~meta
-                 ~cwd
-                 ~timeout_sec
-                 ~cmd
-                 ~git_creds_enabled:false
-                 ~network_mode
-             with
-             | Error message -> error_json message
-             | Ok result ->
-               let semantic_status =
-                 docker_command_semantic_status
-                   ~cmd
-                   ~status:result.status
-                   ~output:result.output
-               in
-               let semantic_ok =
-                 docker_command_semantic_success
-                   ~cmd
-                   ~status:result.status
-                   ~output:result.output
-               in
-               let cwd_response =
-                 Keeper_cwd_response.docker
-                   ~host_cwd:cwd
-                   ~container_cwd:(docker_private_workspace_cwd ~config ~meta cwd)
-               in
-               docker_bash_response
-                 ~ok:semantic_ok
-                 ~git_creds_enabled:false
-                 ~image:result.image
-                 ~network_label:result.network_label
-                 ~status:result.status
-                 ~output:result.output
-                 ~cwd_response
-                 ~semantic_status
-                 ~cmd_stages
-                 ))))
+              ))
+    | _ ->
+      (match turn_sandbox_runtime with
+       | Some _ ->
+         Prometheus.inc_counter
+           Keeper_metrics.metric_keeper_docker_runtime_discarded
+           ~labels:[ "keeper", meta.name; "reason", "network_mode_mismatch" ]
+           ()
+       | None -> ());
+      (* P12: check egress policy before running networked container *)
+      (match check_egress ~config ~meta ~cmd with
+       | Some blocked_json -> blocked_json
+       | None ->
+         (match
+            run_docker_shell_command_with_status
+              ~config
+              ~meta
+              ~cwd
+              ~timeout_sec
+              ~cmd
+              ~git_creds_enabled:false
+              ~network_mode
+          with
+          | Error message -> error_json message
+          | Ok result ->
+            let semantic_status =
+              docker_command_semantic_status
+                ~cmd
+                ~status:result.status
+                ~output:result.output
+            in
+            let semantic_ok =
+              docker_command_semantic_success
+                ~cmd
+                ~status:result.status
+                ~output:result.output
+            in
+            let cwd_response =
+              Keeper_cwd_response.docker
+                ~host_cwd:result.cwd
+                ~container_cwd:(docker_private_workspace_cwd ~config ~meta result.cwd)
+            in
+            docker_bash_response
+              ~ok:semantic_ok
+              ~git_creds_enabled:false
+              ~image:result.image
+              ~network_label:result.network_label
+              ~status:result.status
+              ~output:result.output
+              ~cwd_response
+              ~semantic_status
+              ~cmd_stages:result.cmd_stages
+              )))
 ;;

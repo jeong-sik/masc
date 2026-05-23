@@ -1,4 +1,4 @@
-(** Cascade config construction and Codex CLI prompt preflight.
+(** Cascade config construction and CLI prompt preflight.
 
     Kept separate from {!Cascade_error_classify}: the classifier is used by
     {!Cascade_runner}, while config/preflight needs the runner's config type. *)
@@ -56,11 +56,11 @@ let config_for_label
       approval;
     }
 
-let codex_cli_prompt_arg_limit_bytes = 512 * 1024
-let codex_cli_min_retry_tokens = 4_096
+let cli_prompt_arg_limit_bytes = 512 * 1024
+let cli_min_retry_tokens = 4_096
 module Runtime_binding = Agent_sdk.Provider_runtime_binding
 
-type codex_cli_prompt_preflight = {
+type cli_prompt_preflight = {
   prompt_bytes : int;
   prompt_tokens : int;
   context_window_tokens : int;
@@ -69,13 +69,13 @@ type codex_cli_prompt_preflight = {
   hits_context_window : bool;
 }
 
-let codex_cli_prompt_bytes_to_token_limit ~prompt_bytes ~prompt_tokens =
+let cli_prompt_bytes_to_token_limit ~prompt_bytes ~prompt_tokens =
   if prompt_bytes <= 0 then prompt_tokens
   else
     Int64.(
       div
         (mul (of_int (Stdlib.max 1 prompt_tokens))
-           (of_int codex_cli_prompt_arg_limit_bytes))
+           (of_int cli_prompt_arg_limit_bytes))
         (of_int prompt_bytes)
       |> to_int)
 
@@ -88,8 +88,8 @@ let provider_requires_argv_prompt_preflight provider_cfg =
   | None -> false
 ;;
 
-let codex_cli_prompt_preflight ~(config : Cascade_runner.config) ~(goal : string)
-    : codex_cli_prompt_preflight option =
+let cli_prompt_preflight ~(config : Cascade_runner.config) ~(goal : string)
+    : cli_prompt_preflight option =
   (* RFC-0058 §2.4 — dispatch by adapter capability flag
      ([tool_policy.argv_prompt_preflight]), never by provider variant.
      argv/context-window preflight currently applies only to the
@@ -134,20 +134,20 @@ let codex_cli_prompt_preflight ~(config : Cascade_runner.config) ~(goal : string
         ~fallback:Cascade_runtime.fallback_context_window
         (Some config.provider)
     in
-    let hits_argv_limit = prompt_bytes > codex_cli_prompt_arg_limit_bytes in
+    let hits_argv_limit = prompt_bytes > cli_prompt_arg_limit_bytes in
     let hits_context_window = prompt_tokens > context_window_tokens in
     if not hits_argv_limit && not hits_context_window then None
     else
       let retry_limit_tokens =
         let byte_limit =
-          codex_cli_prompt_bytes_to_token_limit ~prompt_bytes ~prompt_tokens
+          cli_prompt_bytes_to_token_limit ~prompt_bytes ~prompt_tokens
         in
         let limit =
           if hits_argv_limit then byte_limit else prompt_tokens
           |> fun limit ->
           if hits_context_window then min context_window_tokens limit else limit
         in
-        max codex_cli_min_retry_tokens (min prompt_tokens limit)
+        max cli_min_retry_tokens (min prompt_tokens limit)
       in
       Some
         {
@@ -159,11 +159,11 @@ let codex_cli_prompt_preflight ~(config : Cascade_runner.config) ~(goal : string
           hits_context_window;
         }
 
-let codex_cli_preflight_error ~(scope : string)
+let cli_preflight_error ~(scope : string)
     ~(provider_cfg : Llm_provider.Provider_config.t)
-    (preflight : codex_cli_prompt_preflight) =
+    (preflight : cli_prompt_preflight) =
   Log.Misc.warn
-    "codex_cli prompt preflight rejected spawn (scope=%s, model=%s, prompt_bytes=%d, prompt_tokens=%d, retry_limit=%d, context_window=%d, argv_limit=%b, context_limit=%b)"
+    "cli prompt preflight rejected spawn (scope=%s, model=%s, prompt_bytes=%d, prompt_tokens=%d, retry_limit=%d, context_window=%d, argv_limit=%b, context_limit=%b)"
     scope provider_cfg.model_id preflight.prompt_bytes
     preflight.prompt_tokens preflight.retry_limit_tokens
     preflight.context_window_tokens preflight.hits_argv_limit
@@ -176,10 +176,10 @@ let codex_cli_preflight_error ~(scope : string)
          limit = preflight.retry_limit_tokens;
        })
 
-let with_codex_cli_preflight ~(scope : string) ~(config : Cascade_runner.config)
+let with_cli_preflight ~(scope : string) ~(config : Cascade_runner.config)
     ~(goal : string) (run : unit -> ('a, Agent_sdk.Error.sdk_error) result)
     : ('a, Agent_sdk.Error.sdk_error) result =
-  match codex_cli_prompt_preflight ~config ~goal with
+  match cli_prompt_preflight ~config ~goal with
   | Some preflight ->
-    Error (codex_cli_preflight_error ~scope ~provider_cfg:config.provider_cfg preflight)
+    Error (cli_preflight_error ~scope ~provider_cfg:config.provider_cfg preflight)
   | None -> run ()

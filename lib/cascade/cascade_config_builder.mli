@@ -1,4 +1,4 @@
-(** Cascade config construction and Codex CLI prompt preflight.
+(** Cascade config construction and CLI prompt preflight.
 
     This module intentionally depends on {!Cascade_runner}; keep it out of
     {!Cascade_error_classify} so structured error conversion stays below the
@@ -31,10 +31,27 @@ val config_for_label :
 (** Build a {!Cascade_runner.config} from a model label string.  Resolves
     the provider config and fills in defaults. *)
 
-val with_codex_cli_preflight :
+type cli_prompt_preflight = {
+  prompt_bytes : int;
+  prompt_tokens : int;
+  context_window_tokens : int;
+  retry_limit_tokens : int;
+  hits_argv_limit : bool;
+  hits_context_window : bool;
+}
+(** RFC-0058 §2.4 — preflight metadata for argv-limited transports. *)
+
+val cli_prompt_preflight :
+  config:Cascade_runner.config ->
+  goal:string ->
+  cli_prompt_preflight option
+(** Compute preflight metadata for an argv-limited CLI transport.
+    Returns [None] when the provider does not require argv preflight. *)
+
+val with_cli_preflight :
   scope:string ->
   config:Cascade_runner.config ->
   goal:string ->
   (unit -> ('a, Agent_sdk.Error.sdk_error) result) ->
   ('a, Agent_sdk.Error.sdk_error) result
-(** Wrap an execution with a codex_cli preflight check. *)
+(** Wrap an execution with a CLI preflight check. *)

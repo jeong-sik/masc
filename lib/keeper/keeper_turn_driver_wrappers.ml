@@ -70,7 +70,7 @@ let run_model_by_label
           ~keeper_name:"oas-label-model"
           ~cascade_name:admission_cascade_name
           (fun () ->
-            Cascade_config_builder.with_codex_cli_preflight
+            Cascade_config_builder.with_cli_preflight
               ~scope:(Printf.sprintf "model_label:%s" model_label)
               ~config ~goal
               (fun () ->
@@ -209,7 +209,7 @@ let run_model_with_masc_tools
           ~keeper_name:"oas-explicit-model"
           ~cascade_name:admission_cascade_name
           (fun () ->
-            Cascade_config_builder.with_codex_cli_preflight
+            Cascade_config_builder.with_cli_preflight
               ~scope:(Printf.sprintf "explicit_model:%s" model_label)
               ~config ~goal
               (fun () ->

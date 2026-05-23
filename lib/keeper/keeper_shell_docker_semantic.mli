@@ -7,5 +7,4 @@ val gh_exit_class_field :
 val docker_command_semantic_status :
   cmd:string -> status:Unix.process_status -> output:string -> Exec_core.semantic_status
 
-val docker_command_semantic_success :
-  cmd:string -> status:Unix.process_status -> output:string -> bool
+val semantic_ok_of_status : Exec_core.semantic_status -> bool

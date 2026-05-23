@@ -365,14 +365,7 @@ let run_docker_shell_command_with_status_internal
                              let semantic_status =
                                docker_command_semantic_status ~cmd ~status ~output
                              in
-                             let semantic_ok =
-                               match semantic_status with
-                               | Exec_core.Ok | Exec_core.No_match -> true
-                               | Exec_core.Partial
-                               | Exec_core.Blocked
-                               | Exec_core.Timeout
-                               | Exec_core.Runtime_error -> false
-                             in
+                             let semantic_ok = semantic_ok_of_status semantic_status in
                              if not semantic_ok
                              then
                                record_docker_exec_failure
@@ -561,12 +554,7 @@ let run_docker_bash
             let semantic_status =
               docker_command_semantic_status ~cmd ~status:st ~output:out
             in
-            let semantic_ok =
-              match semantic_status with
-              | Exec_core.Ok | Exec_core.No_match -> true
-              | Exec_core.Partial | Exec_core.Blocked | Exec_core.Timeout
-              | Exec_core.Runtime_error -> false
-            in
+            let semantic_ok = semantic_ok_of_status semantic_status in
             if not semantic_ok
             then
               record_docker_exec_failure

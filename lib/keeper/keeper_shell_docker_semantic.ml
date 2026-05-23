@@ -26,8 +26,7 @@ let gh_exit_class_field ~stages ~status ~output : (string * Yojson.Safe.t) list 
 let docker_command_semantic_status ~cmd ~status ~output =
   Exec_core.semantic_status_of_process ~cmd ~output status
 
-let docker_command_semantic_success ~cmd ~status ~output =
-  match docker_command_semantic_status ~cmd ~status ~output with
+let semantic_ok_of_status = function
   | Exec_core.Ok | Exec_core.No_match -> true
   | Exec_core.Partial | Exec_core.Blocked | Exec_core.Timeout | Exec_core.Runtime_error ->
     false

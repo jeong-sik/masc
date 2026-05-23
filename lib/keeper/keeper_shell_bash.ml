@@ -98,7 +98,7 @@ let handle_keeper_bash_typed
         (match dispatch_sandbox with
          | Error e ->
            error_json
-             ~fields:[ "typed", `Bool true; "cmd", `String cmd_for_log; "cwd", `String cwd ]
+             ~fields:[ "typed", `Bool true; "cmd", `String cmd; "cwd", `String cwd ]
              e
          | Ok (dispatch_sandbox, sandbox_extra_fields) ->
         (* RFC-0160 S1: lower-then-classify. Typed argv → Shell IR
@@ -109,7 +109,7 @@ let handle_keeper_bash_typed
         match Keeper_tool_bash_input.to_shell_ir ~mode ~sandbox:dispatch_sandbox input with
         | Error e ->
           error_json
-            ~fields:[ "typed", `Bool true; "cmd", `String cmd_for_log; "cwd", `String cwd ]
+            ~fields:[ "typed", `Bool true; "cmd", `String cmd; "cwd", `String cwd ]
             (typed_validation_error_text e)
         | Ok ir ->
         let cmd_for_log =

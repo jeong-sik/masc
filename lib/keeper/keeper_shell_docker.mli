@@ -106,10 +106,8 @@ type docker_shell_result =
     pull and container creation.  Operators can override via
     [MASC_KEEPER_DOCKER_RUN_MIN_TIMEOUT_SEC] (read once at module
     load, clamped to [Timeout_floor.Docker_run]). *)
-val docker_run_min_timeout_sec : float
 
 (** Run [cmd] inside the keeper Docker sandbox; clamps
-    [timeout_sec] to [docker_run_min_timeout_sec], honours
     [git_creds_enabled] and [network_mode], records errors via
     [Keeper_registry]. *)
 val run_docker_shell_command_with_status :

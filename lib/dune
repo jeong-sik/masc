@@ -156,6 +156,7 @@
    keeper_shell_variant
    keeper_shell_timeout
    keeper_shell_shared
+   keeper_shell_render
    keeper_shell_bash
    keeper_shell_git_log
    keeper_shell_ops

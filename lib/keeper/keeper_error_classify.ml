@@ -177,13 +177,6 @@ let is_required_tool_contract_violation (err : Agent_sdk.Error.sdk_error) : bool
   | Agent_sdk.Error.A2a _
   | Agent_sdk.Error.Internal _ -> false
 
-let message_looks_like_capacity_backpressure detail =
-  let lower = String.lowercase_ascii detail in
-  string_contains_substring ~needle:"client capacity" lower
-  || string_contains_substring ~needle:"capacity exhausted" lower
-  || string_contains_substring ~needle:"local_resource_exhaustion" lower
-  || string_contains_substring ~needle:"slot full" lower
-
 let message_looks_like_gateway_backpressure detail =
   let lower = String.lowercase_ascii detail in
   string_contains_substring ~needle:"server error 524" lower
@@ -214,7 +207,7 @@ let is_auto_recoverable_cascade_exhausted_error (err : Agent_sdk.Error.sdk_error
       Keeper_turn_driver.message_looks_like_cli_wrapped_hard_quota detail
       || Keeper_turn_driver.message_looks_like_cli_wrapped_max_turns detail
       || message_looks_like_gateway_backpressure detail
-      || message_looks_like_capacity_backpressure detail
+      || Keeper_turn_driver.message_looks_like_capacity_backpressure detail
   | Some (Keeper_turn_driver.Capacity_backpressure _) ->
       true
   | Some (Keeper_turn_driver.Cascade_exhausted _) ->
@@ -387,7 +380,7 @@ let degraded_retry_after_recoverable_error
     | Some
         (Keeper_turn_driver.Cascade_exhausted
            { reason = Keeper_types.Other_detail detail; _ })
-      when message_looks_like_capacity_backpressure detail ->
+      when Keeper_turn_driver.message_looks_like_capacity_backpressure detail ->
         local_recovery_retry Capacity_backpressure
     | Some (Keeper_turn_driver.Cascade_exhausted _)
     | Some (Keeper_turn_driver.No_tool_capable_provider _)
@@ -443,7 +436,7 @@ let recoverable_cascade_failure_reason (err : Agent_sdk.Error.sdk_error) =
     | Some
         (Keeper_turn_driver.Cascade_exhausted
            { reason = Keeper_types.Other_detail detail; _ })
-      when message_looks_like_capacity_backpressure detail ->
+      when Keeper_turn_driver.message_looks_like_capacity_backpressure detail ->
         Some Capacity_backpressure
     | Some (Keeper_turn_driver.Cascade_exhausted _) ->
         (* Generic cascade exhaustion: all candidates failed without a more

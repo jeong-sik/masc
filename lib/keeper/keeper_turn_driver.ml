@@ -1027,6 +1027,17 @@ let run_named
                 detail;
                 retry_after_sec = retry_after;
               }))
+    | Agent_sdk.Error.Internal msg
+      when message_looks_like_capacity_backpressure msg ->
+      Some
+        (sdk_error_of_masc_internal_error
+           (Capacity_backpressure
+              {
+                cascade_name = error_cascade_name;
+                source = Provider_capacity;
+                detail = msg;
+                retry_after_sec = None;
+              }))
     | Agent_sdk.Error.Api _
     | Agent_sdk.Error.Provider _
     | Agent_sdk.Error.Agent _

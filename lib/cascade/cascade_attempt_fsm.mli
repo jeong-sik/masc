@@ -33,6 +33,9 @@ val message_looks_like_cli_wrapped_hard_quota : string -> bool
 val message_looks_like_cli_wrapped_max_turns : string -> bool
 (** Detect max-turns indicators in CLI-wrapped error messages. *)
 
+val message_looks_like_capacity_backpressure : string -> bool
+(** Detect capacity-backpressure indicators in error messages. *)
+
 val message_looks_like_resumable_cli_session : string -> bool
 (** Detect resumable-session indicators in CLI-wrapped error messages. *)
 

@@ -374,6 +374,19 @@ let message_looks_like_cli_wrapped_max_turns (message : string) : bool =
   in
   List.exists contains cli_wrapped_max_turns_indicators
 
+let capacity_backpressure_indicators = [
+  "client capacity";
+  "capacity exhausted";
+  "local_resource_exhaustion";
+  "slot full";
+]
+
+let message_looks_like_capacity_backpressure (message : string) : bool =
+  let contains needle =
+    String_util.contains_substring_ci message needle
+  in
+  List.exists contains capacity_backpressure_indicators
+
 let exit_code_of_message (message : string) : int option =
   let prefix = "exited with code " in
   match String.index_opt message ' ' with

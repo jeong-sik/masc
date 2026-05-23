@@ -64,6 +64,29 @@ g1_total_refs=$(rg -c 'Bash\.parse_string|Masc_exec_bash_parser\.Bash\.parse_str
   | rg -v '/test/' \
   | awk -F: '{s+=$2} END{print s+0}')
 
+# ---- G1 allowed exceptions (named; any new file must be added here) ----
+g1_allowed_files=(
+  "lib/exec/command_gate/shell_command_gate.ml"
+  "lib/exec/command_gate/shell_command_gate.mli"
+  "lib/exec_policy_mutation_classifier.ml"
+  "lib/exec_policy_mutation_classifier.mli"
+  "lib/gh_command_validation.ml"
+  "lib/keeper/keeper_shell_command_semantics.mli"
+  "lib/spawn.ml"
+)
+g1_current_files=$(rg -l 'Bash\.parse_string|Masc_exec_bash_parser\.Bash\.parse_string' lib/ 2>/dev/null \
+  | rg -v '/test/' \
+  | rg -v '\.dune$' \
+  | sort)
+g1_unclassified=()
+while IFS= read -r f; do
+  local found=0
+  for allowed in "${g1_allowed_files[@]}"; do
+    if [[ "$f" == "$allowed" ]]; then found=1; break; fi
+  done
+  if [[ "$found" -eq 0 ]]; then g1_unclassified+=("$f"); fi
+done <<< "$g1_current_files"
+
 # ---- G2: classifier signature ----
 # Heuristic: scan let signatures of is_write_operation / is_destructive_bash_operation
 g2_string_sig=$(rg -c '^let is_(write_operation|destructive_bash_operation) [a-z]+ ?=' lib/exec_policy_mutation_classifier.ml 2>/dev/null || echo 0)
@@ -108,6 +131,11 @@ ir_constructors=$(rg -c 'Shell_ir\.Simple|Shell_ir\.Pipeline' lib/ 2>/dev/null \
   | awk -F: '{s+=$2} END{print s+0}')
 
 emit_json() {
+  local allowed_json=""
+  for f in "${g1_allowed_files[@]}"; do
+    if [[ -n "$allowed_json" ]]; then allowed_json="${allowed_json},"; fi
+    allowed_json="${allowed_json}\"${f}\""
+  done
   cat <<JSON
 {
   "schema": "shell-ir-consumption/v1",
@@ -125,7 +153,10 @@ emit_json() {
   "g7_shell_word_values_refs": ${g7_shell_word_values},
   "g7_bash_words_stages_refs": ${g7_bash_words_stages},
   "g7_parallel_parser_total": ${g7_total},
-  "info_ir_constructors_nontest": ${ir_constructors}
+  "info_ir_constructors_nontest": ${ir_constructors},
+  "allowed_exceptions": {
+    "g1_parse_string": [${allowed_json}]
+  }
 }
 JSON
 }
@@ -201,11 +232,19 @@ diff_against_baseline() {
     echo "REGRESS G4 (phantom envelope): ${b_g4} → ${c_g4}"
     regressions=$((regressions + 1))
   fi
+  # Unclassified G1 sites — any file not in allowed_exceptions
+  if [[ ${#g1_unclassified[@]} -gt 0 ]]; then
+    echo "UNCLASSIFIED G1 (new parse_string caller files):"
+    for f in "${g1_unclassified[@]}"; do
+      echo "  - ${f}"
+    done
+    regressions=$((regressions + 1))
+  fi
   if [[ "$regressions" -gt 0 ]]; then
     echo "RFC-0160 baseline regressed in ${regressions} metric(s)" >&2
     exit 1
   fi
-  echo "OK (RFC-0160 ratchet: no G1/G7 regression)"
+  echo "OK (RFC-0160 ratchet: no G1/G7 regression, no unclassified sites)"
 }
 
 case "$mode" in

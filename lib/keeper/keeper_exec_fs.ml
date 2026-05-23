@@ -4,6 +4,39 @@ open Ide_region_tracker
 
 let path_error_json target msg = path_error_json target msg
 
+let file_read_ok_json ~target ~total ~truncated ~body ?via () =
+  let via_field =
+    match via with
+    | Some v -> [ "via", `String v ]
+    | None -> []
+  in
+  Yojson.Safe.to_string
+    (`Assoc
+       ([ "ok", `Bool true
+        ; "path", `String target
+        ; "bytes", `Int total
+        ; "truncated", `Bool truncated
+        ; "content", `String body
+        ]
+        @ via_field))
+;;
+
+let fs_write_ok_json ~target ~mode ~bytes_written ?replace_all ?occurrences ~via_field () =
+  let patch_fields =
+    match replace_all, occurrences with
+    | Some r, Some o -> [ "replace_all", `Bool r; "occurrences", `Int o ]
+    | _ -> []
+  in
+  Yojson.Safe.to_string
+    (`Assoc
+       ([ "ok", `Bool true
+        ; "path", `String target
+        ; "mode", `String mode
+        ; "bytes_written", `Int bytes_written
+        ]
+        @ patch_fields @ via_field))
+;;
+
 (* Issue #8490: Variant SSOT for fs write mode. Adding a constructor
    forces compilation in [fs_write_mode_to_string] and
    [fs_write_mode_dispatch] AND extends [valid_fs_write_mode_strings];
@@ -128,15 +161,7 @@ let handle_keeper_fs_read
                | Ok body ->
                  let total = String.length body in
                  let truncated = total >= max_bytes in
-                 Yojson.Safe.to_string
-                   (`Assoc
-                       [ "ok", `Bool true
-                       ; "path", `String target
-                       ; "bytes", `Int total
-                       ; "truncated", `Bool truncated
-                       ; "content", `String body
-                       ; "via", `String "docker"
-                       ]))
+                 file_read_ok_json ~target ~total ~truncated ~body ~via:"docker" ())
              else (
                match Safe_ops.read_file_safe target with
                | Error e when String.starts_with ~prefix:file_not_found_prefix e ->
@@ -148,14 +173,7 @@ let handle_keeper_fs_read
                  let body =
                    if truncated then String.sub content 0 max_bytes else content
                  in
-                 Yojson.Safe.to_string
-                   (`Assoc
-                       [ "ok", `Bool true
-                       ; "path", `String target
-                       ; "bytes", `Int total
-                       ; "truncated", `Bool truncated
-                       ; "content", `String body
-                       ])))))
+                 file_read_ok_json ~target ~total ~truncated ~body ()))))
 ;;
 
 (* RFC-0006 Phase A.4: replace [old] with [new] in [text]. When
@@ -487,16 +505,14 @@ let handle_keeper_fs_edit
                                ~old_string
                                ~new_string
                                ();
-                             Yojson.Safe.to_string
-                               (`Assoc
-                                   ([ "ok", `Bool true
-                                    ; "path", `String target
-                                    ; "mode", `String "patch"
-                                    ; "replace_all", `Bool replace_all
-                                    ; "occurrences", `Int occurrences
-                                    ; "bytes_written", `Int (String.length updated)
-                                    ]
-                                    @ via_field))))
+                             fs_write_ok_json
+                               ~target
+                               ~mode:"patch"
+                               ~bytes_written:(String.length updated)
+                               ~replace_all
+                               ~occurrences
+                               ~via_field
+                               ()))
                     with
                     | Fs_edit_error json -> json
                     | Invalid_argument e ->
@@ -586,14 +602,12 @@ let handle_keeper_fs_edit
                           ~old_string:""
                           ~new_string:""
                           ();
-                        Yojson.Safe.to_string
-                          (`Assoc
-                              ([ "ok", `Bool true
-                               ; "path", `String target
-                               ; "mode", `String mode_label
-                               ; "bytes_written", `Int (String.length content)
-                               ]
-                               @ via_field))
+                        fs_write_ok_json
+                          ~target
+                          ~mode:mode_label
+                          ~bytes_written:(String.length content)
+                          ~via_field
+                          ()
                     with
                     | Fs_edit_error json -> json
                     | Invalid_argument e ->

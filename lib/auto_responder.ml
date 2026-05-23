@@ -122,12 +122,9 @@ Respond in 1-2 sentences. Be helpful and concise.|}
 let cli_argv_of_agent_type (agent_type : string) : string list =
   match Spawn.get_config agent_type with
   | Some config ->
-    (match Masc_exec_bash_parser.Bash_words.stages config.command with
-     | Ok [ words ] ->
-       words
-       |> List.map (fun (word : Masc_exec_bash_parser.Bash_words.word) -> word.value)
-       |> List.filter (fun s -> s <> "")
-     | Ok [] | Ok (_ :: _ :: _) | Error _ ->
+    (match Exec_policy_mutation_classifier.argv_words_of_string config.command with
+     | Some words -> List.filter (fun s -> s <> "") words
+     | None ->
        let command = String.trim config.command in
        if String.equal command "" then [] else [ command ])
   | None -> [agent_type]

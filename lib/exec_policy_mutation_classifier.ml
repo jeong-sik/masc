@@ -241,3 +241,59 @@ let argv_words_of_string text =
 let parsed_of_string text =
   Masc_exec_bash_parser.Bash.parse_string text
 ;;
+
+(** Multi-stage word extractor: returns per-stage word lists, preserving
+    pipeline structure. Replaces [Bash_words.stages] callers that need
+    stage boundaries (e.g. [Exec_core.command_word_stages]).
+    Returns [[]] on parse failure or non-literal-only stages. *)
+let stages_words_of_string (cmd : string) : string list list =
+  let stage_words_of_ir (ir : Shell_ir.t) : string list list =
+    let rec collect acc = function
+      | Shell_ir.Simple s ->
+        (match literal_words_of_simple s with
+         | Some ws -> ws :: acc
+         | None -> acc)
+      | Shell_ir.Pipeline stages ->
+        List.fold_left collect acc stages
+    in
+    List.rev (collect [] ir)
+  in
+  match Masc_exec_bash_parser.Bash.parse_string cmd with
+  | Parsed.Parsed ir -> stage_words_of_ir ir
+  | _ -> []
+;;
+
+type quoted_word = {
+  value : string;
+  quoted : bool;
+}
+
+(** Extract per-stage word lists with quoting metadata.
+    Replaces [Bash_words.stages] callers that depend on [word.quoted]
+    (e.g. guard token extraction). Non-literal args ([Concat], [Var])
+    are skipped. Returns [[]] on parse failure. *)
+let stages_quoted_words_of_string (cmd : string) : quoted_word list list =
+  let words_of_simple (simple : Shell_ir.simple) : quoted_word list option =
+    let rec collect acc = function
+      | [] -> Some (List.rev acc)
+      | Shell_ir.Lit (a, meta) :: rest ->
+        collect ({ value = a; quoted = meta.Shell_ir.quoted } :: acc) rest
+      | Shell_ir.Concat _ :: _ | Shell_ir.Var _ :: _ -> None
+    in
+    match collect [] simple.args with
+    | None -> None
+    | Some args ->
+      Some ({ value = Bin.to_string simple.bin; quoted = false } :: args)
+  in
+  let rec collect acc = function
+    | Shell_ir.Simple s ->
+      (match words_of_simple s with
+       | Some ws -> ws :: acc
+       | None -> acc)
+    | Shell_ir.Pipeline stages ->
+      List.fold_left collect acc stages
+  in
+  match Masc_exec_bash_parser.Bash.parse_string cmd with
+  | Parsed.Parsed ir -> List.rev (collect [] ir)
+  | _ -> []
+;;

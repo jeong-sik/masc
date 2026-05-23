@@ -152,14 +152,30 @@ let rec command_words_run_dune = function
   | command :: args -> command_runs_dune command args
 
 and split_string_runs_dune text =
-  match Masc_exec_bash_parser.Bash_words.stages text with
-  | Error _ -> false
-  | Ok stages ->
-    List.exists
-      command_words_run_dune
-      (List.map
-         (List.map (fun w -> w.Masc_exec_bash_parser.Bash_words.value))
-         stages)
+  let stage_words_of_ir ir =
+    let rec literal acc = function
+      | [] -> Some (List.rev acc)
+      | SI.Lit (a, _) :: rest -> literal (a :: acc) rest
+      | SI.Concat _ :: _ | SI.Var _ :: _ -> None
+    in
+    let words_of_simple s =
+      match literal [] s.SI.args with
+      | None -> None
+      | Some args -> Some (Masc_exec.Bin.to_string s.SI.bin :: args)
+    in
+    let rec collect acc = function
+      | SI.Simple s ->
+        (match words_of_simple s with
+         | Some ws -> ws :: acc
+         | None -> acc)
+      | SI.Pipeline stages -> List.fold_left collect acc stages
+    in
+    List.rev (collect [] ir)
+  in
+  match Masc_exec_bash_parser.Bash.parse_string text with
+  | Masc_exec.Parsed.Parsed ir ->
+    List.exists command_words_run_dune (stage_words_of_ir ir)
+  | _ -> false
 
 and env_args_run_dune = function
   | [] -> false

@@ -92,7 +92,3 @@ val handle_keeper_shell :
     preflight before spawning a one-shot container for fs reads. *)
 val ensure_keeper_sandbox_runtime :
   timeout_sec:float -> (string list, string) result
-
-val cmd_targets_git_or_gh : string -> bool
-(** Pre-#18044 alias for [Keeper_shell_docker.cmd_targets_git_or_gh];
-    exposed for test/test_types.ml. *)

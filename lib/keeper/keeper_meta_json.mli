@@ -4,7 +4,10 @@
     keep their public API while scrubbing, parsing, and serialization
     stay in smaller private modules. *)
 
-include module type of Keeper_meta_json_scrub
+(* Scrub helpers (drop_assoc_keys, reject_removed_keeper_meta_fields,
+   legacy_keeper_meta_*, scrub_persisted_keeper_meta_json) and the
+   parse surface flow through this single [include] — see
+   keeper_meta_json_parse.mli for the canonical declarations. *)
 
 include module type of Keeper_meta_json_parse
 

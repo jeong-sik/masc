@@ -5,6 +5,22 @@ open Agent_sdk
 open Masc_mcp
 module Parsed = Masc_exec.Parsed
 
+(* Test-local ergonomic wrapper around the string→IR→validate pipeline.
+   Lives here (not in lib/) so the lib surface stays focused on
+   [validate_shell_ir_paths], which is the canonical post-RFC-0160-S4
+   entry point. *)
+module Worker_dev_tools = struct
+  include Worker_dev_tools
+
+  let validate_command_paths ?keeper_id ?base_path ?workdir cmd =
+    match Masc_exec_bash_parser.Bash.parse_string cmd with
+    | Parsed.Parsed ir ->
+      Exec_policy.validate_shell_ir_paths ?keeper_id ?base_path ?workdir ir
+    | Parsed.Parse_error _
+    | Parsed.Parse_aborted _
+    | Parsed.Too_complex _ -> Ok ()
+end
+
 (* Helper: find tool by name from tool list *)
 let find_tool name tools =
   List.find (fun (t : Tool.t) -> t.schema.name = name) tools

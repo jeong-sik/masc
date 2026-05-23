@@ -60,7 +60,6 @@ let create_store () =
 
 let check_comment_rate_limit = Board_comment_rate_limit.check
 let record_comment_timestamp = Board_comment_rate_limit.record
-let reset_comment_rate_tracker = Board_comment_rate_limit.reset
 
 (** Remove [value] from the string list stored at [key] in [tbl].
     Removes the key entirely when the list becomes empty. *)

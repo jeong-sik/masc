@@ -16,10 +16,6 @@ type gh_repo_context = Keeper_shell_gh_context.gh_repo_context = {
   repo_slug : string option;
 }
 
-(* Pre-#18044 wrapper preserved so tests that took an alias on
-   Keeper_exec_shell continue to compile. *)
-let cmd_targets_git_or_gh = Keeper_shell_docker.cmd_targets_git_or_gh
-
 let gh_repo_context_error = Keeper_shell_gh_context.gh_repo_context_error
 let gh_claim_first_hint = Keeper_shell_gh_context.gh_claim_first_hint
 let gh_repo_context_error_json = Keeper_shell_gh_context.gh_repo_context_error_json

@@ -14,18 +14,6 @@ open Keeper_exec_shared
 let docker_exec_failure_message =
   Keeper_shell_docker_exec_failure.docker_exec_failure_message
 
-(* Pre-#18044 compat wrappers: parse [cmd] once into effective stages
-   and test for gh / git-or-gh prefixes. Live test callers:
-   test/test_gh_exit_class_wiring.ml, test_keeper_local_profile_docker_playground.ml,
-   test_keeper_exec_status.ml. *)
-let cmd_targets_gh cmd =
-  Keeper_shell_command_semantics.effective_stages_of_cmd cmd
-  |> Keeper_shell_command_semantics.stages_targets_gh
-
-let cmd_targets_git_or_gh cmd =
-  Keeper_shell_command_semantics.effective_stages_of_cmd cmd
-  |> Keeper_shell_command_semantics.stages_targets_git_or_gh
-
 let path_exists path =
   try Sys.file_exists path with
   | Sys_error _ -> false

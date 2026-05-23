@@ -483,7 +483,7 @@ let () =
         witness Local; witness Docker;
         Alcotest.(check int) "count" 2 (List.length valid_sandbox_profile_strings));
       Alcotest.test_case "cmd_targets_git_or_gh dispatch predicate" `Quick (fun () ->
-        let p = Masc_mcp.Keeper_exec_shell.cmd_targets_git_or_gh in
+        let p = Masc_mcp.Keeper_shell_command_semantics.cmd_targets_git_or_gh in
         Alcotest.(check bool) "git status" true (p "git status");
         Alcotest.(check bool) "gh pr list" true (p "gh pr list");
         Alcotest.(check bool) "leading whitespace tolerated" true

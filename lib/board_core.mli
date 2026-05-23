@@ -70,9 +70,6 @@ val flush_interval_sec : float
     [flusher_inbox] capped at 1000 messages. *)
 val create_store : unit -> store
 
-(** Reset the per-author comment rate-limit tracker.  Test-only. *)
-val reset_comment_rate_tracker : unit -> unit
-
 (** Check whether [author] is currently rate-limited at time [now].
     Returns [Some retry_after] if the author has reached the limit,
     [None] otherwise. *)

@@ -116,17 +116,6 @@ val validate_shell_ir_paths
   -> Masc_exec.Shell_ir.t
   -> (unit, string) result
 
-val validate_command_paths
-  :  ?keeper_id:string
-  -> ?base_path:string
-  -> ?workdir:string
-  -> string
-  -> (unit, string) result
-(** Pre-RFC-0160-S4 string entry point: parses [cmd] once and delegates
-    to {!validate_shell_ir_paths}. Live test caller:
-    test/test_keeper_bash_safety.ml. New callers should parse to Shell_ir
-    themselves and call {!validate_shell_ir_paths} directly. *)
-
 (** Return literal path values in [cmd] that should have their containing
     sandbox materialized before execution. This includes explicit existing-directory
     requirements (for example [git -C <dir>] and [--work-tree=<dir>]) and

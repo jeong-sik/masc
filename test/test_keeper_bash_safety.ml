@@ -17,6 +17,18 @@ module Parsed = Masc_exec.Parsed
 
 let validate = Masc_mcp.Worker_dev_tools.validate_command
 
+(* Test-local string→IR→validate helper for the two call sites below.
+   The lib surface is IR-only post-RFC-0160-S4 ([validate_shell_ir_paths]);
+   this helper parses raw commands for the convenience of these tests. *)
+let validate_command_paths ?keeper_id ?base_path ~workdir cmd =
+  match Masc_exec_bash_parser.Bash.parse_string cmd with
+  | Parsed.Parsed ir ->
+    Masc_mcp.Exec_policy.validate_shell_ir_paths
+      ?keeper_id ?base_path ~workdir ir
+  | Parsed.Parse_error _
+  | Parsed.Parse_aborted _
+  | Parsed.Too_complex _ -> Ok ()
+
 let is_ok = function Ok () -> true | Error _ -> false
 let is_error = function Error _ -> true | Ok () -> false
 let error_msg = function Error m -> Masc_mcp.Worker_dev_tools.block_reason_to_string m | Ok () -> ""
@@ -821,7 +833,7 @@ let test_rewrite_docker_container_paths_for_host_validation () =
     Printf.sprintf "git -C %s/repos/masc-mcp log --oneline -5\n" container_root
   in
   Alcotest.(check bool) "raw container path is outside host workdir" true
-    (is_error (Masc_mcp.Worker_dev_tools.validate_command_paths ~workdir:host_repo input));
+    (is_error (validate_command_paths ~workdir:host_repo input));
   ensure_dir host_repo;
   let rewritten =
     Keeper_shell_docker.rewrite_docker_command_paths_for_host_validation
@@ -832,7 +844,7 @@ let test_rewrite_docker_container_paths_for_host_validation () =
     rewritten;
   Alcotest.(check bool) "rewritten path validates under host workdir" true
     (is_ok
-       (Masc_mcp.Worker_dev_tools.validate_command_paths ~workdir:host_repo rewritten))
+       (validate_command_paths ~workdir:host_repo rewritten))
 
 (* ── Negative / error-path tests (task-034) ──────────────────────── *)
 

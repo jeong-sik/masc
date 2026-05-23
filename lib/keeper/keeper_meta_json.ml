@@ -6,7 +6,12 @@
 
 open Keeper_types_profile
 open Keeper_meta_contract
-include Keeper_meta_json_scrub
+
+(* Scrub helpers (drop_assoc_keys, reject_removed_keeper_meta_fields,
+   legacy_keeper_meta_*, scrub_persisted_keeper_meta_json) live in
+   [Keeper_meta_json_parse] and reach this module's public surface
+   through the [include Keeper_meta_json_parse] at the bottom of this
+   file. *)
 
 let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
   let rt = m.runtime in

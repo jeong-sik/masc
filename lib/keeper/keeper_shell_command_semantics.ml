@@ -248,3 +248,7 @@ let effective_stages_of_cmd cmd =
   | Masc_exec.Parsed.Parse_aborted _
   | Masc_exec.Parsed.Too_complex _ -> []
 
+let cmd_targets_gh cmd = effective_stages_of_cmd cmd |> stages_targets_gh
+let cmd_targets_git_or_gh cmd =
+  effective_stages_of_cmd cmd |> stages_targets_git_or_gh
+

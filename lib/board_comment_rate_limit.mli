@@ -17,9 +17,8 @@ val check : author:string -> now:float -> float option
     drift across concurrent attempts. *)
 val record : author:string -> now:float -> unit
 
-(** [reset ()] clears the tracker entirely. Re-exported via
-    [Board_core.reset_comment_rate_tracker] for the board-core sweep
-    used by [board_votes]. *)
+(** [reset ()] clears the tracker entirely. Live caller:
+    [Board_votes.reset_global_for_test]. *)
 val reset : unit -> unit
 
 (** [sweep_stale ~now ~window] expires per-author timestamps older

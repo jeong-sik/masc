@@ -15,17 +15,17 @@ let stages_of cmd = KSCS.effective_stages_of_cmd cmd
 
 let test_cmd_targets_gh_positive () =
   Alcotest.(check bool) "gh pr list → true" true
-    (KSD.cmd_targets_gh "gh pr list")
+    (KSCS.cmd_targets_gh "gh pr list")
 
 let test_cmd_targets_gh_negative () =
   Alcotest.(check bool) "git status → false" false
-    (KSD.cmd_targets_gh "git status");
+    (KSCS.cmd_targets_gh "git status");
   Alcotest.(check bool) "cd /repo && gh pr view 1 → false" false
-    (KSD.cmd_targets_gh "cd /repo && gh pr view 1");
+    (KSCS.cmd_targets_gh "cd /repo && gh pr view 1");
   Alcotest.(check bool) "ls -la → false" false
-    (KSD.cmd_targets_gh "ls -la");
+    (KSCS.cmd_targets_gh "ls -la");
   Alcotest.(check bool) "empty → false" false
-    (KSD.cmd_targets_gh "")
+    (KSCS.cmd_targets_gh "")
 
 let test_field_empty_for_non_gh () =
   LC.reset ();

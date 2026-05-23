@@ -252,16 +252,3 @@ module For_testing : sig
     transport_success:bool ->
     pr_work_action_metric_event list
 end
-
-(** {1 Compatibility re-exports}
-
-    PR #18010 moved [trajectory_duration_ms] and
-    [render_pre_tool_gate_output] to [Keeper_hooks_oas_gate_attempt].
-    The pre-move surface is preserved here for test fixtures that took
-    a module alias on [Keeper_hooks_oas]. New code should call
-    [Keeper_hooks_oas_gate_attempt] directly. *)
-
-val trajectory_duration_ms : float -> int
-
-val render_pre_tool_gate_output :
-  Keeper_guards.gate_decision_event -> string

@@ -14,15 +14,6 @@ val docker_exec_failure_message :
   output:string ->
   string
 
-val cmd_targets_gh : string -> bool
-(** [true] iff parsing [cmd] yields effective stages whose head binary
-    is [gh] (single stage or last stage of a pipeline). Pre-#18044
-    public surface preserved for test fixtures. *)
-
-val cmd_targets_git_or_gh : string -> bool
-(** [true] iff parsing [cmd] yields effective stages whose head binary
-    is [git] or [gh]. *)
-
 (** Path of the per-keeper egress policy file
     [<sandbox_root>/egress.json]. *)
 val egress_policy_path :

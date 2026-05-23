@@ -43,3 +43,13 @@ val effective_stages_of_cmd : string -> parsed_stage list
 (** Parse-and-extract helper for callers that only hold a raw command
     string. Equivalent to [effective_stages_of_ir] but performs the
     [Bash.parse_string] internally. Returns [[]] on parse failure. *)
+
+val cmd_targets_gh : string -> bool
+(** [true] iff parsing [cmd] yields effective stages whose head binary is
+    [gh] (single stage or last stage of a pipeline). Boundary policy: this
+    lives in [Keeper_shell_command_semantics] only, never in
+    [Keeper_shell_docker] (asserted by test_keeper_sandbox_boundary_policy). *)
+
+val cmd_targets_git_or_gh : string -> bool
+(** [true] iff parsing [cmd] yields effective stages whose head binary is
+    [git] or [gh]. Same boundary policy as {!cmd_targets_gh}. *)

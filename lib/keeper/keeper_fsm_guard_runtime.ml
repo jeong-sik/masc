@@ -2,9 +2,6 @@
 
    See keeper_fsm_guard_runtime.mli for the contract. *)
 
-let refresh_policy_for_test () = ()
-let assert_mode_for_test () = true
-
 let bump_counter ~action ~stage =
   Prometheus.inc_counter
     Prometheus.metric_fsm_guard_violation

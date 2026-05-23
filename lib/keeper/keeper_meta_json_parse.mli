@@ -7,6 +7,27 @@
 open Keeper_types_profile
 open Keeper_meta_contract
 
+(* Removed-field scrub helpers (formerly Keeper_meta_json_scrub,
+   absorbed into the parse module — see .ml). *)
+
+val drop_assoc_keys : string list -> Yojson.Safe.t -> Yojson.Safe.t
+(** Drop the named keys from a top-level JSON object; passes through
+    non-objects unchanged. *)
+
+val reject_removed_keeper_meta_fields :
+  Yojson.Safe.t -> (unit, string) result
+(** Returns [Error msg] if any [removed_keeper_meta_key_names] is
+    present at the top level. *)
+
+val legacy_keeper_meta_tool_policy_key_names : string list
+val legacy_keeper_meta_key_names : string list
+
+val reject_legacy_keeper_meta_fields :
+  Yojson.Safe.t -> (unit, string) result
+
+val scrub_persisted_keeper_meta_json :
+  path:string -> Yojson.Safe.t -> Yojson.Safe.t * bool
+
 (** Parsed identity slice of a persisted keeper meta. *)
 type parsed_keeper_identity =
   { pk_name : string

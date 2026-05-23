@@ -313,7 +313,7 @@ let cleanup_oneshot_container ~container_name =
     Log.Keeper.warn
       "docker oneshot cleanup failed for %s (status=%s, output=%s)"
       container_name
-      (docker_exec_status_label status)
+      (Keeper_shell_docker_exec_failure.docker_exec_status_label status)
       (Exec_policy.truncate_for_log output)
 ;;
 

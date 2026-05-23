@@ -5,10 +5,6 @@
     invocation. Pure infrastructure; generic command-shape policy lives
     in [Keeper_shell_command_semantics]. *)
 
-(** Diagnostic label for a [Unix.process_status]:
-    [exit=N] / [signal=N] / [stopped=N]. *)
-val docker_exec_status_label : Unix.process_status -> string
-
 (** Build a structured failure message used by docker exec
     diagnostics, emphasising the exit/signal status and (when
     blank) flagging empty output explicitly. *)

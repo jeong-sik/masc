@@ -168,3 +168,8 @@ val summarize_post_commit_failure :
   kind:Keeper_registry.ambiguous_partial_commit_kind ->
   Agent_sdk.Error.sdk_error ->
   string
+
+val is_provider_timeout_error : Agent_sdk.Error.sdk_error -> bool
+(** True when [err] is a provider-timeout class failure (deadline,
+    cascade timeout, budget retry). Live caller:
+    [keeper_unified_turn.ml] degraded-retry classification. *)

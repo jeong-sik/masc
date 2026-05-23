@@ -136,36 +136,26 @@ let handle ~op ~(meta : keeper_meta) ~(config : Coord.config) ~(args : Yojson.Sa
           ~cwd
           parsed_command
       in
-      let gh_gate_verdict =
-        Masc_exec_command_gate.Shell_command_gate.gate_typed
-          ~caller:Masc_exec_command_gate.Shell_command_gate.Keeper_shell_bash
-          ~ir:gh_ir
-          ~allowlist:
-            { allowed_commands = [ "gh" ]
-            ; allow_pipes = false
-            ; redirect_allowed = false
-            }
-          ~path_policy:Masc_exec_command_gate.Shell_command_gate.allow_all_paths
-          ~sandbox:{ target = gh_sandbox_target }
-          ()
-      in
-      let gh_path_verdict =
-        match gh_gate_verdict with
-        | Masc_exec_command_gate.Shell_command_gate.Allow _ ->
-          Exec_policy.validate_shell_ir_paths
-            ~keeper_id:meta.name
-            ~workdir:cwd
-            gh_ir
-        | _ -> Ok ()
-      in
       let gh_process =
-        match gh_gate_verdict with
+        match
+          Masc_exec_command_gate.Shell_command_gate.gate_typed
+            ~caller:Masc_exec_command_gate.Shell_command_gate.Keeper_shell_bash
+            ~ir:gh_ir
+            ~allowlist:
+              { allowed_commands = [ "gh" ]
+              ; allow_pipes = false
+              ; redirect_allowed = false
+              }
+            ~path_policy:Masc_exec_command_gate.Shell_command_gate.allow_all_paths
+            ~sandbox:{ target = gh_sandbox_target }
+            ()
+        with
         | Masc_exec_command_gate.Shell_command_gate.Reject { diagnostic; _ } ->
           Error (Printf.sprintf "gh_gate_reject: %s" diagnostic)
         | Cannot_parse _ -> Error "gh_gate_cannot_parse"
         | Too_complex _ -> Error "gh_gate_too_complex"
         | Allow _ ->
-          match gh_path_verdict with
+          match Exec_policy.validate_shell_ir_paths ~keeper_id:meta.name ~workdir:cwd gh_ir with
           | Error msg -> Error (Printf.sprintf "gh_path_reject: %s" msg)
           | Ok () ->
             if meta.sandbox_profile = Docker

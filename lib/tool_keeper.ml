@@ -556,10 +556,6 @@ let resolve_keeper_meta ctx args =
   | Ok None -> Error (Printf.sprintf "keeper not found: %s" name)
   | Error err -> Error (Printf.sprintf "%s" err)
 
-let default_keeper_model_label (meta : keeper_meta) =
-  let _ = meta in
-  "runtime"
-
 let annotate_keeper_repair_json ?identity_reseed ~(keeper_name : string) body =
   let parsed =
     try Some (Yojson.Safe.from_string body) with Yojson.Json_error _ -> None
@@ -641,9 +637,7 @@ let handle_keeper_repair ctx args : tool_result =
                         ("working_dir", `String working_dir);
                         ("validator_profile", `String validator_profile);
                         ( "model_label",
-                          `String
-                            (get_string args "model_label"
-                               (default_keeper_model_label meta)) );
+                          `String (get_string args "model_label" "runtime") );
                         ("max_attempts", `Int max_attempts);
                         ( "artifact_session_id",
                           `String

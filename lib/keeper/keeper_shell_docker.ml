@@ -70,6 +70,21 @@ type docker_shell_result =
    This minimum applies only to the [docker run] path, not to
    [docker exec] against a warm container. *)
 
+let resolve_sandbox_image meta =
+  match meta.sandbox_image with
+  | Some img when String.trim img <> "" -> img
+  | _ -> Env_config_keeper.KeeperSandbox.docker_image ()
+;;
+
+let nested_runtime_blocker ~git_creds_enabled =
+  if git_creds_enabled
+  then
+    "sandbox_profile=docker+git_creds blocks nested container runtimes and host socket \
+     references"
+  else
+    "sandbox_profile=docker blocks nested container runtimes and host socket references"
+;;
+
 let run_docker_shell_command_with_status_internal
       ~validate_command_paths
       ~(config : Coord.config)
@@ -81,11 +96,7 @@ let run_docker_shell_command_with_status_internal
       ~(network_mode : network_mode)
   =
   let timeout_sec = max timeout_sec docker_run_min_timeout_sec in
-  let image =
-    match meta.sandbox_image with
-    | Some img when String.trim img <> "" -> img
-    | _ -> Env_config_keeper.KeeperSandbox.docker_image ()
-  in
+  let image = resolve_sandbox_image meta in
   let sandbox_error ?details message =
     Keeper_registry_error_recording.record ?details ~base_path:config.base_path meta.name message;
     Error message
@@ -95,15 +106,7 @@ let run_docker_shell_command_with_status_internal
   else (
     let cmd = rewrite_docker_command_paths ~config ~meta cmd in
     if command_uses_nested_container_runtime cmd
-    then
-      sandbox_error
-        (if git_creds_enabled
-         then
-           "sandbox_profile=docker+git_creds blocks nested container runtimes and host \
-            socket references"
-         else
-           "sandbox_profile=docker blocks nested container runtimes and host socket \
-            references")
+    then sandbox_error (nested_runtime_blocker ~git_creds_enabled)
     else
       let cmd_stages =
         match Masc_exec_command_gate.Shell_command_gate.parse_to_ir_opt cmd with
@@ -384,11 +387,7 @@ let run_docker_credentialed_bash
       ~(cmd : string)
       ()
   =
-  let image =
-    match meta.sandbox_image with
-    | Some img when String.trim img <> "" -> img
-    | _ -> Env_config_keeper.KeeperSandbox.docker_image ()
-  in
+  let image = resolve_sandbox_image meta in
   let sandbox_error_json message =
     Keeper_registry_error_recording.record ~base_path:config.base_path meta.name message;
     error_json message
@@ -396,10 +395,7 @@ let run_docker_credentialed_bash
   if String.trim image = ""
   then sandbox_error_json "keeper sandbox docker image is not configured"
   else if command_uses_nested_container_runtime cmd
-  then
-    sandbox_error_json
-      "sandbox_profile=docker+git_creds blocks nested container runtimes and host socket \
-       references"
+  then sandbox_error_json (nested_runtime_blocker ~git_creds_enabled:true)
   else (
     (* P12: check egress policy for git commands with network access *)
     match check_egress ~config ~meta ~cmd with

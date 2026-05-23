@@ -12,8 +12,4 @@ type snapshot_slot =
       ; stuck_warned : bool ref
       }
 
-val _snapshot_table : (string, snapshot_slot) Hashtbl.t
-val _snapshot_mu : Eio.Mutex.t
-val _snapshot_ttl_s : float
-val _maybe_evict_snapshot : unit -> unit
 val invalidate_snapshot_cache : unit -> unit

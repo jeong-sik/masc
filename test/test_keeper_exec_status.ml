@@ -519,7 +519,13 @@ let test_runtime_surface_derives_cascade_exhausted_from_meta () =
   KR.clear ();
   let base = make_meta ~name:"runtime-cascade-exhausted-test" () in
   let reason =
-    "Internal error: [masc_oas_error] {\"kind\":\"cascade_exhausted\",\"cascade_name\":\"primary\",\"detail\":\"all providers failed: Connection refused\"}"
+    (* The canonical envelope written by [masc_internal_error_to_json] in
+       lib/cascade/cascade_internal_error.ml uses a typed [reason] field
+       (variant serialization), not a free-form ["detail"] string.  Use
+       the typed value here so the runtime_blocker_summary classifier
+       (keeper_status_bridge.ml:298) can recover the variant and
+       synthesize the canonical English summary. *)
+    "Internal error: [masc_oas_error] {\"kind\":\"cascade_exhausted\",\"cascade_name\":\"primary\",\"reason\":\"connection_refused\"}"
   in
   let meta =
     {

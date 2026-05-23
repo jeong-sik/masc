@@ -176,10 +176,7 @@ let wrap_runtime_mcp_external_tool_hooks
 let max_execution_time_for_attempt ?per_provider_timeout_s () =
   match per_provider_timeout_s with
   | Some timeout_s -> Some timeout_s
-  | None ->
-    Some
-      (Keeper_runtime_resolved.oas_timeout_for_estimated_input_tokens
-         ~estimated_input_tokens:0)
+  | None -> Some (Keeper_runtime_resolved.oas_call_timeout_sec ())
 
 (** Run a single provider attempt within the cascade.
 

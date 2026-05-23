@@ -86,11 +86,7 @@ let resolve_bounded_provider_timeout_budget_with_turn_budget
     ~(estimated_input_tokens : int) ~(max_turns : int)
     ~(remaining_turn_budget_s : float) : provider_timeout_budget option =
   let runtime = Keeper_runtime_resolved.current () in
-  let adaptive_timeout_sec =
-    Keeper_runtime_resolved
-    .oas_timeout_for_estimated_input_tokens_with_turn_budget
-      ~estimated_input_tokens ~max_turns
-  in
+  let adaptive_timeout_sec = Keeper_runtime_resolved.oas_call_timeout_sec () in
   if is_retry then begin
     let time_spent_in_turn = runtime.turn_timeout_sec.value -. remaining_turn_budget_s in
     let usable_retry_budget = adaptive_timeout_sec -. time_spent_in_turn in
@@ -270,11 +266,7 @@ let decide_retry_admission_for_turn
     ~(estimated_input_tokens : int)
     ~(max_turns : int) : (unit, retry_admission_denial) result =
   let runtime = Keeper_runtime_resolved.current () in
-  let adaptive_timeout_sec =
-    Keeper_runtime_resolved
-    .oas_timeout_for_estimated_input_tokens_with_turn_budget
-      ~estimated_input_tokens ~max_turns
-  in
+  let adaptive_timeout_sec = Keeper_runtime_resolved.oas_call_timeout_sec () in
   let is_retry = attempt_kind_is_retry attempt_kind in
   if is_retry then
     let time_spent_in_turn =

@@ -347,10 +347,10 @@ module KeeperKeepalive = struct
       The default stays at 600 (the prior hard ceiling) so existing
       remote cascades keep their budget unchanged; the lifted ceiling
       only fires when an operator opts in via env or cascade override.
-      Individual OAS provider attempts are still capped by
-      [oas_timeout_default_sec] and provider-specific bounds below, so
-      the full turn budget remains a container for fallback/retry work
-      rather than one provider's spend. *)
+      RFC-0156: post-removal there is no per-provider OAS cap layered
+      below this — [oas_call_timeout_sec] reuses [turn_timeout_sec]
+      directly; cascade rotation is driven by [stream_idle_timeout_sec]
+      + HTTP error + completion contract. *)
   let turn_timeout_sec =
     Float.max
       60.0
@@ -358,8 +358,6 @@ module KeeperKeepalive = struct
          timeout_hard_ceiling_sec
          (get_float ~default:600.0 "MASC_KEEPER_TURN_TIMEOUT_SEC"))
   ;;
-
-  let oas_timeout_default_sec = 300.0
 
   (** Maximum time a proactive keeper will wait in the MASC admission queue
       before abandoning the current OAS attempt.
@@ -451,37 +449,17 @@ module KeeperKeepalive = struct
             (get_int ~default "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL_SCHEDULED_AUTONOMOUS")))
   ;;
 
-  let oas_timeout_for_estimated_input_tokens_with_turn_budget
-        ~(estimated_input_tokens : int)
-        ~(max_turns : int)
-    : float
-    =
-    let _ = max_turns in
-    let _ = estimated_input_tokens in
+  (* RFC-0156: OAS total timeout removed. Resolved OAS-call timeout = override
+     when set, else turn_timeout_sec (wall-clock cap). stream_idle_timeout
+     handles per-stream cap; cascade rotation triggers on stream_idle + HTTP
+     error + completion contract. Historic names
+     ([oas_timeout_for_estimated_input_tokens] /
+     [oas_timeout_for_estimated_input_tokens_with_turn_budget]) ignored the
+     [estimated_input_tokens] and [max_turns] args — function-name-lying. *)
+  let oas_call_timeout_sec : float =
     match oas_timeout_sec_override with
     | Some v -> v
-    | None ->
-      (* RFC-0156: OAS total timeout 제거 — turn_timeout이 wall-clock cap,
-         stream_idle_timeout이 per-stream cap. 함수 이름의 `for_estimated_input_tokens`
-         + `with_turn_budget`은 historic naming이며 v2 PR에서 rename 예정.
-
-         이전 행위: Float.min turn_timeout_sec oas_timeout_default_sec
-                    (= min(600, 300) = 300, "static_300s" source label)
-         새 행위:   turn_timeout_sec
-                    (cascade rotation은 stream_idle + HTTP error + completion contract로 trigger)
-
-         Slow-but-successful 5분+ 응답이 회수됨. cascade fallback 시간은 줄지만
-         stream_idle_timeout이 healthy slow stream을 신호로 잡음.
-
-         #10008 fm2의 의도 ("research turn 끝까지 진행") 와 정합 — token scaling
-         복원 없이 단순히 turn-level cap 한 layer로 단순화. *)
-      turn_timeout_sec
-  ;;
-
-  let oas_timeout_for_estimated_input_tokens ~(estimated_input_tokens : int) : float =
-    oas_timeout_for_estimated_input_tokens_with_turn_budget
-      ~estimated_input_tokens
-      ~max_turns:oas_max_turns_per_call
+    | None -> turn_timeout_sec
   ;;
 
   (** Idle-gap timeout for streaming OAS provider responses.

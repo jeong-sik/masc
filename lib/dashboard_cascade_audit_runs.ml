@@ -58,23 +58,25 @@ let stable_audit_run_id json =
   ^ String.sub (Digest.to_hex (Digest.string (Yojson.Safe.to_string json))) 0 16
 ;;
 
-let fallback_reason_for_model ~model_id ~model_label fallback_events =
-  let _ = model_id, model_label in
+let model_display_of_attempt attempt =
+  let _ = attempt in
+  "runtime"
+;;
+
+let fallback_reason_for_model fallback_events =
   match fallback_events with
   | [] -> None
   | _ :: _ -> Some "runtime_fallback"
 ;;
 
 let audit_hop_json ~selected_model ~fallback_events attempt =
-  let model_id = json_string_opt_member "model_id" attempt in
-  let model_label = json_string_opt_member "model_label" attempt in
-  let model = "runtime" in
+  let model = model_display_of_attempt attempt in
   let latency_ms = json_int_member "latency_ms" attempt in
   let error = json_string_opt_member "error" attempt in
   let reason =
     match error with
     | Some _ -> Some "runtime_error"
-    | None -> fallback_reason_for_model ~model_id ~model_label fallback_events
+    | None -> fallback_reason_for_model fallback_events
   in
   let selected =
     let _ = selected_model in

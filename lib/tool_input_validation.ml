@@ -152,24 +152,43 @@ let unsupported_arg_names schema = function
   | _ -> []
 ;;
 
-let simple_one_of_required_groups schema =
+type one_of_branch = {
+  required : string list;
+  consts : (string * Yojson.Safe.t) list;
+}
+
+let one_of_branch_constraints schema =
   match Yojson.Safe.Util.member "oneOf" schema with
   | `List branches ->
-    let groups =
+    let constraints =
       List.filter_map
         (fun branch ->
            let required = required_names branch in
-           if required = [] then None else Some required)
+           if required = []
+           then None
+           else
+             let consts =
+               match Yojson.Safe.Util.member "properties" branch with
+               | `Assoc props ->
+                 List.filter_map
+                   (fun (name, prop_schema) ->
+                      match Yojson.Safe.Util.member "const" prop_schema with
+                      | `Null -> None
+                      | const_value -> Some (name, const_value))
+                   props
+               | _ -> []
+             in
+             Some { required; consts })
         branches
     in
-    if List.length groups = List.length branches then groups else []
+    if List.length constraints = List.length branches then constraints else []
   | _ -> []
 ;;
 
 let one_of_required_shape_error schema = function
   | `Assoc fields ->
-    let groups = simple_one_of_required_groups schema in
-    if groups = []
+    let branches = one_of_branch_constraints schema in
+    if branches = []
     then None
     else (
       let has_present name =
@@ -179,19 +198,32 @@ let one_of_required_shape_error schema = function
         | Some (`List []) -> false
         | Some _ -> true
       in
-      let matching_groups =
-        List.filter (fun required -> List.for_all has_present required) groups
+      let const_matches name expected =
+        match List.assoc_opt name fields with
+        | Some actual -> Yojson.Safe.equal actual expected
+        | None -> false
       in
-      match matching_groups with
+      let branch_matches branch =
+        List.for_all has_present branch.required
+        && List.for_all
+             (fun (name, expected) -> const_matches name expected)
+             branch.consts
+      in
+      let matching = List.filter branch_matches branches in
+      match matching with
       | [ _ ] -> None
       | [] ->
         let options =
-          groups |> List.map (String.concat "+") |> String.concat " | "
+          branches
+          |> List.map (fun b -> String.concat "+" b.required)
+          |> String.concat " | "
         in
         Some (Printf.sprintf "arguments must include exactly one of: %s" options)
       | _ :: _ :: _ ->
         let options =
-          matching_groups |> List.map (String.concat "+") |> String.concat " | "
+          matching
+          |> List.map (fun b -> String.concat "+" b.required)
+          |> String.concat " | "
         in
         Some
           (Printf.sprintf

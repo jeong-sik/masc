@@ -21,3 +21,7 @@ val record : author:string -> now:float -> unit
     than [window] seconds from [now] and removes any author whose list
     became empty. Called from the board-core sweep loop. *)
 val sweep_stale : now:float -> window:float -> unit
+
+(** [reset] clears all comment rate-limit tracking state.
+    Used by board_core when reinitializing the store. *)
+val reset : unit -> unit

@@ -15,6 +15,7 @@ let degraded_keeper_runtime_identity_fields = Operator_control_snapshot_identity
    include flows through to [Operator_control] via
    [Operator_control_action] in the existing include chain. *)
 include Operator_control_snapshot_action_log
+include Operator_control_snapshot_cache
 
 let json_ok = Tool_args.ok_assoc
 

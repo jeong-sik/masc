@@ -20,6 +20,7 @@
     bindings — see classify_usage_trust which calls
     [context_max_of_telemetry]. *)
 include Keeper_hooks_oas_types
+open Keeper_hooks_oas_pr_metrics
 
 (** Keeper deny list — derived from Tool_catalog surface SSOT.
     Administrative/destructive operations that should only be invoked
@@ -78,6 +79,13 @@ let idle_decision_to_label = function
   | Agent_sdk.Hooks.ApprovalRequired -> "approval_required"
   | Agent_sdk.Hooks.AdjustParams _ -> "adjust_params"
   | Agent_sdk.Hooks.ElicitInput _ -> "elicit_input"
+
+let trajectory_duration_ms duration_ms =
+  if
+    (not (Float.is_finite duration_ms))
+    || Float.compare duration_ms 0.0 <= 0
+  then 0
+  else max 1 (int_of_float (Float.round duration_ms))
 
 let failure_class_of_tool_error_json json =
   let direct = Safe_ops.json_string_opt "failure_class" json in

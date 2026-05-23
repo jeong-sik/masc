@@ -62,3 +62,5 @@ let sweep_stale ~now ~window =
     comment_timestamps;
   List.iter (Hashtbl.remove comment_timestamps) !stale_authors
 ;;
+
+let reset () = Hashtbl.clear comment_timestamps

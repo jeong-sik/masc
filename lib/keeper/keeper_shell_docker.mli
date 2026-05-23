@@ -5,19 +5,6 @@
     invocation. Pure infrastructure; generic command-shape policy lives
     in [Keeper_shell_command_semantics]. *)
 
-(** Diagnostic label for a [Unix.process_status]:
-    [exit=N] / [signal=N] / [stopped=N]. *)
-val docker_exec_status_label : Unix.process_status -> string
-
-(** Build a structured failure message used by docker exec
-    diagnostics, emphasising the exit/signal status and (when
-    blank) flagging empty output explicitly. *)
-val docker_exec_failure_message :
-  image:string ->
-  status:Unix.process_status ->
-  output:string ->
-  string
-
 (** Path of the per-keeper egress policy file
     [<sandbox_root>/egress.json]. *)
 val egress_policy_path :

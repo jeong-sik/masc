@@ -3,6 +3,7 @@ include Operator_pending_confirm
 include Operator_digest
 
 include Operator_control_context_snapshot
+include Operator_control_snapshot_cache
 
 (* Keeper runtime identity fields extracted to
    [Operator_control_snapshot_identity_fields] (godfile decomp). *)

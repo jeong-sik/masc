@@ -10,8 +10,7 @@
 val update : 'a Atomic.t -> ('a -> 'a) -> unit
 
 (** Record-labelled commit describing the next state and a derived value.
-    Equivalent to the tuple form used by [update_with_result]; provided for
-    call sites where positional tuples hurt readability. *)
+    Provided for call sites where positional tuples hurt readability. *)
 type ('state, 'result) commit = {
   next_state : 'state;
   result : 'result;

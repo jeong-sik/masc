@@ -75,6 +75,8 @@ let test_degraded_mode_serializes () =
           in
           bump_peak ();
           Eio.Fiber.yield ();
+          (* fire-and-forget: previous in-flight count is irrelevant; we only
+             decrement to release the slot for the peak observation. *)
           ignore (Atomic.fetch_and_add in_flight (-1)))))
   in
   List.iter (fun p -> Eio.Promise.await_exn p) promises;

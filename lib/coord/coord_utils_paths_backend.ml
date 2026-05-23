@@ -47,14 +47,6 @@ let state_path config = Filename.concat (masc_dir config) "state.json"
 let backlog_path config = Filename.concat (tasks_dir config) "backlog.json"
 let archive_path config = Filename.concat (masc_dir config) "tasks-archive.json"
 
-(* ============================================ *)
-(* Backend dispatch functions                   *)
-(* ============================================ *)
-
-let is_pg_backend config =
-  let _ = config in
-  false
-
 (** Shared in-memory pubsub for FileSystem and Memory backends.
     All supported backends now share the same in-memory pubsub. *)
 let shared_pubsub = Backend_types.Pubsub_mem.create ()

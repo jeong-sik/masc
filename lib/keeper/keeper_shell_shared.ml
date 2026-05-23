@@ -44,6 +44,24 @@ let shell_op_to_string = function
   | Git_clone -> "git_clone"
   | Gh -> "gh"
 
+let shell_op_of_string = function
+  | "pwd" -> Some Pwd
+  | "ls" -> Some Ls
+  | "cat" -> Some Cat
+  | "rg" -> Some Rg
+  | "git_status" -> Some Git_status
+  | "find" -> Some Find
+  | "head" -> Some Head
+  | "tail" -> Some Tail
+  | "wc" -> Some Wc
+  | "tree" -> Some Tree
+  | "git_log" -> Some Git_log
+  | "git_diff" -> Some Git_diff
+  | "git_worktree" -> Some Git_worktree
+  | "git_clone" -> Some Git_clone
+  | "gh" -> Some Gh
+  | _ -> None
+
 let all_shell_ops =
   [ Pwd; Ls; Cat; Rg; Git_status; Find; Head; Tail; Wc; Tree;
     Git_log; Git_diff; Git_worktree; Git_clone; Gh ]

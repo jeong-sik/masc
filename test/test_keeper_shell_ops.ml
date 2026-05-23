@@ -80,7 +80,8 @@ let test_process_status_exited_zero () =
   | `Assoc fields ->
     Alcotest.(check (option string)) "kind = exit"
       (Some "exit")
-      (List.assoc_opt "kind" fields |> Option.map Yojson.Safe.to_string);
+      (List.assoc_opt "kind" fields
+       |> fun opt -> Option.bind opt (function `String s -> Some s | _ -> None));
     Alcotest.(check (option int)) "code = 0"
       (Some 0)
       (List.assoc_opt "code" fields
@@ -106,7 +107,8 @@ let test_process_status_timeout () =
   | `Assoc fields ->
     Alcotest.(check (option string)) "kind = timeout"
       (Some "timeout")
-      (List.assoc_opt "kind" fields |> Option.map Yojson.Safe.to_string)
+      (List.assoc_opt "kind" fields
+       |> fun opt -> Option.bind opt (function `String s -> Some s | _ -> None))
   | other ->
     Alcotest.failf "expected `Assoc, got %a" (Yojson.Safe.pretty_print ~std:false) other
 
@@ -116,7 +118,8 @@ let test_process_status_signaled () =
   | `Assoc fields ->
     Alcotest.(check (option string)) "kind = signaled"
       (Some "signaled")
-      (List.assoc_opt "kind" fields |> Option.map Yojson.Safe.to_string)
+      (List.assoc_opt "kind" fields
+       |> fun opt -> Option.bind opt (function `String s -> Some s | _ -> None))
   | other ->
     Alcotest.failf "expected `Assoc, got %a" (Yojson.Safe.pretty_print ~std:false) other
 

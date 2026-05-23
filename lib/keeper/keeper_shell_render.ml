@@ -33,7 +33,12 @@ let failure_insight_extra ~base_path ~keeper_name =
 let record_history ~root ~keeper_name ~op ~cmd ~success ~duration_ms =
   let cmd_prefix = cmd_prefix_of_cmd cmd in
   let entry = bash_history_entry ~cmd ~cmd_prefix ~op ~duration_ms ~success in
-  Keeper_shell_history.observe_history_append ~root ~keeper_name entry
+  match Masc_exec.Bash_history.append ~base_path:root ~keeper_name entry with
+  | Ok () -> ()
+  | Error exn ->
+    Log.KeeperExec.warn
+      "bash_history.append failed: keeper=%s base=%s exn=%s"
+      keeper_name root (Printexc.to_string exn)
 ;;
 
 let render_process_json ~root ~keeper_name ~cmd ~extra ~status ~output =
@@ -54,24 +59,7 @@ let render_process_result ~root ~keeper_name ~op ?cwd ~cmd argv =
     Keeper_shell_shared.run_argv_with_status_retry_eintr ?cwd
       ~timeout_sec:Keeper_shell_timeout.io_timeout_sec argv
   in
-  let success = st = Unix.WEXITED 0 in
-  record_history ~root ~keeper_name ~op ~cmd ~success ~duration_ms:0;
-  let insight_extra = failure_insight_extra ~base_path:root ~keeper_name in
-  Yojson.Safe.to_string
-    (render_process_json
-       ~root ~keeper_name ~cmd
-       ~extra:
-         ([ "op", `String op
-          ; "cmd", `String cmd
-          ; ( "cwd"
-            , match cwd with
-              | Some dir -> `String dir
-              | None -> `Null )
-          ; "via", `String "host"
-          ]
-          @ insight_extra)
-       ~status:st
-       ~output:out)
+  render_completed_process_result ~root ~keeper_name ~op ?cwd ~cmd st out
 ;;
 
 let render_completed_process_result ~root ~keeper_name ~op ?cwd ~cmd

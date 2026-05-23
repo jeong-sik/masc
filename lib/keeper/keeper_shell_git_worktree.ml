@@ -60,9 +60,13 @@ let handle
                let wt_path = Printf.sprintf ".worktrees/%s"
                  (String.map (fun c -> if c = '/' then '-' else c) branch)
                in
-               Keeper_shell_runtime.render_process_result ~root ~keeper_name:meta.name ~op ~cwd
+               Keeper_shell_runtime.run_cwd_op ~root ~keeper_name:meta.name ~op ~config ~meta
+                 ?turn_sandbox_factory ~cwd
                  ~cmd:(Printf.sprintf "git worktree add %s -b %s %s" wt_path branch base)
-                 [ "git"; "worktree"; "add"; wt_path; "-b"; branch; base ])
+                 ~command_argv:[ "git"; "worktree"; "add"; wt_path; "-b"; branch; base ]
+                 ~max_bytes:1_000_000
+                 ~timeout_sec:Keeper_shell_shared.read_timeout_sec
+                 ())
   | other ->
       error_json_for_op ~op
         (Printf.sprintf "Unknown git_worktree action '%s'. Use: list, add." other)

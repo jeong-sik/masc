@@ -94,6 +94,11 @@ let test_transition_actions_cover_tla_next () =
     ~from_state:F.Cascade_routing
     ~to_state:
       (F.Failed (F.Failure_turn_livelock_blocked { reason = "cycle_cap" }));
+  check_action
+    F.ProviderError
+    ~from_state:F.Cascade_routing
+    ~to_state:
+      (F.Failed (F.Failure_provider_error { kind = "openai"; detail = "rate_limit" }));
   check_action F.ProviderResponded ~from_state:F.Awaiting_provider ~to_state:F.Streaming;
   check_action
     F.ProviderTimeout
@@ -112,6 +117,11 @@ let test_transition_actions_cover_tla_next () =
     ~from_state:F.Streaming
     ~to_state:
       (F.Failed (F.Failure_receipt_lost { primary_error = "io"; fallback_path = None }));
+  check_action
+    F.ProviderError
+    ~from_state:F.Streaming
+    ~to_state:
+      (F.Failed (F.Failure_provider_error { kind = "openai"; detail = "rate_limit" }));
   check_action
     F.ProviderTimeout
     ~from_state:F.Streaming

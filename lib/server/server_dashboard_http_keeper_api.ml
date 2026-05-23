@@ -5,6 +5,7 @@
     /config, /boot, /shutdown endpoints. *)
 
 module Http = Http_server_eio
+open Server_h2_gateway_helpers
 module Checkpoints = Server_dashboard_http_keeper_api_checkpoints
 module Trace = Server_dashboard_http_keeper_api_trace
 
@@ -12,6 +13,12 @@ module Trace = Server_dashboard_http_keeper_api_trace
    Server_dashboard_http_keeper_api_types (intra-library file split,
    2026-05-16). *)
 include Server_dashboard_http_keeper_api_types
+
+let keeper_name_required_error () =
+  error_json_string "keeper name is required"
+
+let invalid_keeper_name_error name =
+  error_json_string (Printf.sprintf "invalid keeper name: %s" name)
 
 let dedupe_tool_names names =
   Json_util.dedupe_keep_order
@@ -697,7 +704,7 @@ let handle_keeper_get_subroutes state req request reqd =
     let name = extract_name keeper_suffix_checkpoints in
     if String.length name = 0 then
       Http.Response.json ~status:`Bad_request
-        {|{"error":"keeper name is required"}|} reqd
+        (keeper_name_required_error ()) reqd
     else
       let (st, json) = keeper_checkpoint_inventory_json state.Mcp_server.room_config name in
       let status : Httpun.Status.t =
@@ -709,7 +716,7 @@ let handle_keeper_get_subroutes state req request reqd =
     let name = extract_name keeper_suffix_runtime_trace in
     if String.length name = 0 then
       Http.Response.json ~status:`Bad_request
-        {|{"error":"keeper name is required"}|} reqd
+        (keeper_name_required_error ()) reqd
     else
       let trace_id = Server_utils.query_param req "trace_id" in
       let turn_id =
@@ -734,7 +741,7 @@ let handle_keeper_get_subroutes state req request reqd =
     let name = extract_name "/config" in
     if String.length name = 0 then
       Http.Response.json ~status:`Bad_request
-        {|{"error":"keeper name is required"}|} reqd
+        (keeper_name_required_error ()) reqd
     else
       let config = state.Mcp_server.room_config in
       let (st, json) =
@@ -749,7 +756,7 @@ let handle_keeper_get_subroutes state req request reqd =
     let name = extract_name keeper_suffix_bdi_snapshot in
     if String.length name = 0 then
       Http.Response.json ~status:`Bad_request
-        {|{"error":"keeper name is required"}|} reqd
+        (keeper_name_required_error ()) reqd
     else
       let config = state.Mcp_server.room_config in
       let (st, json) =
@@ -764,11 +771,10 @@ let handle_keeper_get_subroutes state req request reqd =
     let name = extract_name "/tool-stats" in
     if String.length name = 0 then
       Http.Response.json ~status:`Bad_request
-        {|{"error":"keeper name is required"}|} reqd
+        (keeper_name_required_error ()) reqd
     else if not (Keeper_config.validate_name name) then
       Http.Response.json ~status:`Bad_request
-        (Yojson.Safe.to_string
-           (`Assoc [("error", `String (Printf.sprintf "invalid keeper name: %s" name))])) reqd
+        (invalid_keeper_name_error name) reqd
     else
       let config = state.Mcp_server.room_config in
       let masc_root = Coord.masc_root_dir config in
@@ -863,11 +869,10 @@ let handle_keeper_get_subroutes state req request reqd =
     let name = extract_name "/tool-calls" in
     if String.length name = 0 then
       Http.Response.json ~status:`Bad_request
-        {|{"error":"keeper name is required"}|} reqd
+        (keeper_name_required_error ()) reqd
     else if not (Keeper_config.validate_name name) then
       Http.Response.json ~status:`Bad_request
-        (Yojson.Safe.to_string
-           (`Assoc [("error", `String (Printf.sprintf "invalid keeper name: %s" name))])) reqd
+        (invalid_keeper_name_error name) reqd
     else
       let limit =
         Server_utils.int_query_param req "limit" ~default:50
@@ -949,11 +954,10 @@ let handle_keeper_get_subroutes state req request reqd =
     let name = extract_name "/trajectory" in
     if String.length name = 0 then
       Http.Response.json ~status:`Bad_request
-        {|{"error":"keeper name is required"}|} reqd
+        (keeper_name_required_error ()) reqd
     else if not (Keeper_config.validate_name name) then
       Http.Response.json ~status:`Bad_request
-        (Yojson.Safe.to_string
-           (`Assoc [("error", `String (Printf.sprintf "invalid keeper name: %s" name))])) reqd
+        (invalid_keeper_name_error name) reqd
     else
       let config = state.Mcp_server.room_config in
       (match Keeper_types.read_meta config name with
@@ -1032,7 +1036,7 @@ let handle_keeper_get_subroutes state req request reqd =
     let name = extract_name "/transitions" in
     if String.length name = 0 then
       Http.Response.json ~status:`Bad_request
-        {|{"error":"keeper name is required"}|} reqd
+        (keeper_name_required_error ()) reqd
     else
       let limit =
         Server_utils.int_query_param req "limit" ~default:20
@@ -1061,7 +1065,7 @@ let handle_keeper_get_subroutes state req request reqd =
     let name = extract_name "/lifecycle" in
     if String.length name = 0 then
       Http.Response.json ~status:`Bad_request
-        {|{"error":"keeper name is required"}|} reqd
+        (keeper_name_required_error ()) reqd
     else
       let limit =
         Server_utils.int_query_param req "limit" ~default:50
@@ -1081,7 +1085,7 @@ let handle_keeper_get_subroutes state req request reqd =
     let name = extract_name "/eval" in
     if String.length name = 0 then
       Http.Response.json ~status:`Bad_request
-        {|{"error":"keeper name is required"}|} reqd
+        (keeper_name_required_error ()) reqd
     else
       let base_path = state.Mcp_server.room_config.base_path in
       let limit =
@@ -1130,7 +1134,7 @@ let handle_keeper_get_subroutes state req request reqd =
     let name = extract_name "/state-diagram" in
     if String.length name = 0 then
       Http.Response.json ~status:`Bad_request
-        {|{"error":"keeper name is required"}|} reqd
+        (keeper_name_required_error ()) reqd
     else
       let base_path = state.Mcp_server.room_config.base_path in
       let phase = Keeper_registry.get_phase ~base_path name in
@@ -1303,7 +1307,7 @@ let handle_keeper_get_subroutes state req request reqd =
     let name = extract_name "/composite" in
     if String.length name = 0 then
       Http.Response.json ~status:`Bad_request
-        {|{"error":"keeper name is required"}|} reqd
+        (keeper_name_required_error ()) reqd
     else
       let base_path = state.Mcp_server.room_config.base_path in
       (match Keeper_registry.get ~base_path name with
@@ -1343,7 +1347,7 @@ let handle_keeper_get_subroutes state req request reqd =
     let name = extract_name "/regime" in
     if String.length name = 0 then
       Http.Response.json ~status:`Bad_request
-        {|{"error":"keeper name is required"}|} reqd
+        (keeper_name_required_error ()) reqd
     else
       let base_path = state.Mcp_server.room_config.base_path in
       (match Keeper_registry.get ~base_path name with

@@ -288,7 +288,7 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
            if String.trim prev <> "" then prev
            else (Keeper_config.default_cascade_name ())
        in
-       Some Cascade_ref.{ group; item = None });
+       Some Cascade_ref.{ group = Cascade_name.of_string_exn group; item = None });
     will = new_will;
     needs = new_needs;
     desires = new_desires;

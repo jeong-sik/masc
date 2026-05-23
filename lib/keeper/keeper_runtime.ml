@@ -491,7 +491,7 @@ let ensure_keeper_meta config name =
         cascade_ref =
           if cascade_changed then
             Some Cascade_ref.{
-              group = Cascade_name.to_string resolved_target_cascade_name;
+              group = resolved_target_cascade_name;
               item = None;
             }
           else meta.cascade_ref;

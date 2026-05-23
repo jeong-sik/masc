@@ -11,4 +11,4 @@
  (name masc_mcp_cascade_ref)
  (public_name masc_mcp.cascade_ref)
  (wrapped false)
- (libraries yojson))
+ (libraries yojson masc_mcp.cascade_name))

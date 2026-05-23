@@ -46,7 +46,7 @@ type cascade_profile = {
     Used by keeper_meta and registry_entry to pin the keeper's routing
     context. [item = None] means "let the group's strategy decide". *)
 type cascade_ref = {
-  group : string;
+  group : Cascade_name.t;
   item : string option;
 }
 
@@ -195,7 +195,7 @@ let cascade_profile_of_json (json : Yojson.Safe.t) : cascade_profile option =
 
 let cascade_ref_to_json (ref_ : cascade_ref) : Yojson.Safe.t =
   `Assoc [
-    "group", `String ref_.group;
+    "group", `String (Cascade_name.to_string ref_.group);
     "item",
       (match ref_.item with
        | Some id -> `String id
@@ -207,7 +207,10 @@ let cascade_ref_of_json (json : Yojson.Safe.t) : cascade_ref option =
   | `Assoc fields ->
       let group_opt =
         match List.assoc_opt "group" fields with
-        | Some (`String s) -> Some s
+        | Some (`String s) ->
+            (match Cascade_name.of_string s with
+             | Ok cn -> Some cn
+             | Error _ -> None)
         | _ -> None
       in
       let item =
@@ -224,17 +227,19 @@ let cascade_ref_of_json (json : Yojson.Safe.t) : cascade_ref option =
 (* Migration helper: string -> cascade_ref                            *)
 (* ------------------------------------------------------------------ *)
 
-(** Convert a legacy cascade_name string into a cascade_ref.
+(** Convert a legacy cascade_name string into a cascade_ref option.
     The string is treated as both the group name and (if non-empty)
     the single item id. This preserves backward compatibility with
     existing keeper configurations that use flat cascade_name strings.
 
-    Empty string -> { group = ""; item = None } (unconfigured keeper). *)
-let cascade_ref_of_string (cascade_name : string) : cascade_ref =
-  if String.equal cascade_name "" then
-    { group = ""; item = None }
+    Empty string -> None (unconfigured keeper).
+    Non-canonical string -> None (rejected; falls back to unconfigured). *)
+let cascade_ref_of_string (cascade_name : string) : cascade_ref option =
+  if String.equal cascade_name "" then None
   else
-    { group = cascade_name; item = Some cascade_name }
+    match Cascade_name.of_string cascade_name with
+    | Ok cn -> Some { group = cn; item = Some cascade_name }
+    | Error _ -> None
 
 (* ------------------------------------------------------------------ *)
 (* Lookup helpers                                                     *)

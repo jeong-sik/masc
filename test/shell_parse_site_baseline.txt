@@ -44,7 +44,6 @@ lib/keeper/keeper_exec_preflight.ml:131  # argv_keeper
 lib/keeper/keeper_exec_preflight.ml:150  # argv_keeper
 lib/keeper/keeper_gh_shared.ml:327  # argv_keeper
 lib/keeper/keeper_gh_shared.ml:342  # argv_keeper
-lib/keeper/keeper_hooks_oas_pr_metrics.ml:129  # parser_consumer
 lib/keeper/keeper_repo_readiness.ml:24  # argv_keeper
 lib/keeper/keeper_sandbox_control.ml:215  # argv_keeper
 lib/keeper/keeper_sandbox_control.ml:319  # argv_keeper

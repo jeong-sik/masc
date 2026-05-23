@@ -3,26 +3,6 @@ open Keeper_exec_shared
 
 include Keeper_shell_variant
 include Keeper_shell_timeout
-
-let git_global_option_takes_value = function
-  | "-c" | "-C" | "--exec-path" | "--git-dir" | "--work-tree"
-  | "--namespace" | "--super-prefix" | "--config-env" -> true
-  | _ -> false
-
-let git_global_option_has_inline_value token =
-  List.exists (fun prefix -> String.starts_with ~prefix token)
-    [ "--exec-path="; "--git-dir="; "--work-tree="; "--namespace="; "--config-env=" ]
-
-let rec first_git_subcommand = function
-  | [] -> None
-  | token :: rest when git_global_option_takes_value token ->
-      (match rest with
-       | _value :: tail -> first_git_subcommand tail
-       | [] -> None)
-  | token :: rest when git_global_option_has_inline_value token ->
-      first_git_subcommand rest
-  | token :: rest when String.starts_with ~prefix:"-" token ->
-      first_git_subcommand rest
   | token :: _rest -> Some token
 
 let process_status_is_timeout = function

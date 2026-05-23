@@ -24,19 +24,6 @@ include module type of Keeper_shell_variant
 
 include module type of Keeper_shell_timeout
 
-(** {1 Git-token helpers} *)
-
-val git_global_option_takes_value : string -> bool
-(** [-c], [-C], [--exec-path], [--git-dir], [--work-tree],
-    [--namespace], [--super-prefix], [--config-env]. *)
-
-val git_global_option_has_inline_value : string -> bool
-(** [--exec-path=…], [--git-dir=…], etc. *)
-
-val first_git_subcommand : string list -> string option
-(** Skip leading [git] global options and return the first
-    subcommand token, or [None] when [tokens] terminates without
-    one. *)
 
 (** {1 Process status helpers} *)
 

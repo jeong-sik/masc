@@ -108,7 +108,33 @@ defining_mli=$("${rg_base[@]}" "$define_pat" -g '*.mli' 2>/dev/null || true)
 defining_all=$(printf '%s\n%s\n' "$defining" "$defining_mli" | sort -u | grep -v '^$' || true)
 defining_count=$(printf '%s' "$defining_all" | grep -c '^.' || true)
 echo "$defining_all"
-echo "(count: $defining_count)"
+echo "(count: $defining_count — content-based: let/and/val/type/module/exception)"
+
+# v3: Filename-based module discovery. OCaml convention treats
+# `foo.ml` as `module Foo` without an explicit `module Foo = struct`
+# declaration. The content-based scan above misses these; iter 10
+# (Keeper_shell_docker_exec_failure) and iter 13 (Parsed) both hit
+# this blind spot. When the requested symbol is capitalized, look for
+# `lower(name).ml` files in lib/ + test/ as supplementary defining
+# evidence.
+module_files=""
+module_file_count=0
+if [[ "$name" =~ ^[A-Z] ]]; then
+  lower_name=$(echo "$name" | tr '[:upper:]' '[:lower:]')
+  raw_finds=$(find lib test -type f \( -name "${lower_name}.ml" -o -name "${lower_name}.mli" \) 2>/dev/null || true)
+  module_files=$(printf '%s\n' "$raw_finds" \
+    | grep -v '_build' \
+    | grep -v '.worktrees' \
+    | grep -v '^$' \
+    | sort -u || true)
+  module_file_count=$(printf '%s' "$module_files" | grep -c '^.' || true)
+  if (( module_file_count > 0 )); then
+    echo
+    echo "$module_files"
+    echo "(count: $module_file_count — filename-based: ${lower_name}.ml/.mli on disk)"
+  fi
+fi
+defining_count=$(( defining_count + module_file_count ))
 echo
 
 # ─── 1. Qualified production callers ──────────────────────────────
@@ -205,13 +231,31 @@ any_callers=$(( prod_count + test_count + facade_count + bare_count ))
 total_callers=$(( prod_count + test_count + facade_count ))
 
 echo "─── Summary ─────────────────────────────────────────────────"
-printf '  defining sites:      %d\n' "$defining_count"
+printf '  defining sites:      %d  (content: %d, filename: %d)\n' \
+  "$defining_count" "$(( defining_count - module_file_count ))" "$module_file_count"
 printf '  production callers:  %d\n' "$prod_count"
 printf '  test callers:        %d  <- most-missed bucket\n' "$test_count"
 printf '  facade exposures:    %d\n' "$facade_count"
 printf '  mli doc mentions:    %d\n' "$doc_count"
 printf '  bare-name callers:   %d  (heuristic; review when facade>0)\n' "$bare_count"
 echo
+
+# Filename-based module exists but caller is missing an alias.
+# Distinguishes the iter 10/13 case (Keeper_shell_docker_exec_failure,
+# Parsed) from a true zombie: the symbol IS reachable as a module on
+# disk, just unbound in the calling scope. The fix is a `module X =
+# Masc_*.X` alias at the call site, not a caller-side rename.
+if (( module_file_count > 0 )) \
+   && [[ "$name" =~ ^[A-Z] ]] \
+   && (( defining_count - module_file_count == 0 )) \
+   && (( any_callers > 0 )); then
+  echo "RESULT: module '$name' exists on disk; caller likely missing alias."
+  echo "  Filename-based OCaml module ($lower_name.ml) is reachable, but"
+  echo "  the calling scope has no \`module $name = Masc_*.\$module\`."
+  echo "  Fix shape: add the alias next to neighbouring \`module X = ...\`"
+  echo "  declarations in the caller. No surface change."
+  exit 3
+fi
 
 # Inverse case: zero defining sites + callers exist = zombie callers.
 # The fix lives on the caller side, not the defining side — there is

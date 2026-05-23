@@ -855,13 +855,7 @@ let validate_command_paths ?keeper_id ?base_path ?workdir cmd =
 let is_write_operation = Mutation_classifier.is_write_operation
 let is_git_branch_switch = Mutation_classifier.is_git_branch_switch
 let is_destructive_bash_operation = Mutation_classifier.is_destructive_bash_operation
-let is_write_operation_of_string = Mutation_classifier.is_write_operation_of_string
-let is_git_branch_switch_of_string = Mutation_classifier.is_git_branch_switch_of_string
-
-let is_destructive_bash_operation_of_string =
-  Mutation_classifier.is_destructive_bash_operation_of_string
-;;
-
+let flat_stage_words = Mutation_classifier.flat_stage_words
 let stage_words_of_string = Mutation_classifier.stage_words_of_string
 
 let sanitize_command_for_log = Log_sanitize.sanitize_command_for_log

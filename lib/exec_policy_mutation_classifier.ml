@@ -1,9 +1,7 @@
 (** Mutation/destructive command classifiers — IR-typed.
 
-    RFC-0160 S1: signature migration from [string] to [Shell_ir.t].
-    String wrappers retained as transitional ([_of_string] suffix);
-    they lower internally via [Bash.parse_string] and will be removed
-    in S4 once direct callers are migrated. *)
+    RFC-0160 S4: [_of_string] wrappers removed. All callers must
+    pass [Shell_ir.t] directly. *)
 
 open Masc_exec
 
@@ -200,25 +198,13 @@ let is_destructive_bash_operation (ir : Shell_ir.t) : bool =
    structural classifier. *)
 ;;
 
-(* ---- Backward-compat string wrappers (DEPRECATED, removed in S4) - *)
+(** Shared shell-word extractor (single source of truth for what
+    used to be duplicated [shell_word_values] copies). Returns
+    the flattened literal stage words across all pipeline segments
+    ([[]] on parse failure or non-literal-only stages).
 
-let parse_and_apply (classifier : Shell_ir.t -> bool) (cmd : string) : bool =
-  match Masc_exec_bash_parser.Bash.parse_string cmd with
-  | Parsed.Parsed ir -> classifier ir
-  | _ -> false
-;;
-
-let is_write_operation_of_string = parse_and_apply is_write_operation
-let is_git_branch_switch_of_string = parse_and_apply is_git_branch_switch
-let is_destructive_bash_operation_of_string = parse_and_apply is_destructive_bash_operation
-
-(** RFC-0160 S6: shared shell-word extractor that replaces the
-    private [shell_word_values] copies previously duplicated in
-    [exec_policy_log_sanitize], [gh_command_validation], and
-    [keeper_tool_registry]. Returns flattened literal stage words
-    (or [[]] on parse failure / non-literal stages). Transitional
-    surface: callers should accept [Shell_ir.t] directly once their
-    entry points migrate (S4). *)
+    Callers that already have [Shell_ir.t] should use
+    {!flat_stage_words} directly. *)
 let stage_words_of_string (cmd : string) : string list =
   match Masc_exec_bash_parser.Bash.parse_string cmd with
   | Parsed.Parsed ir -> flat_stage_words ir

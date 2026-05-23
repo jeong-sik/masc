@@ -89,7 +89,10 @@ let test_empty_command () =
   Alcotest.(check bool) "empty blocked" true (is_error (validate ""));
   Alcotest.(check bool) "whitespace blocked" true (is_error (validate "   "))
 
-let is_write = Masc_mcp.Worker_dev_tools.is_write_operation_of_string
+let is_write cmd =
+  match Masc_exec_bash_parser.Bash.parse_string cmd with
+  | Parsed.Parsed ir -> Masc_mcp.Worker_dev_tools.is_write_operation ir
+  | _ -> false
 
 let test_write_ops_detected () =
   let writes = [
@@ -723,8 +726,16 @@ let test_keeper_shell_bash_op_does_not_execute () =
     (Sys.file_exists marker)
 
 let test_git_write_classification () =
-  let is_branch_switch = Masc_mcp.Worker_dev_tools.is_git_branch_switch_of_string in
-  let is_destructive = Masc_mcp.Worker_dev_tools.is_destructive_bash_operation_of_string in
+  let is_branch_switch cmd =
+    match Masc_exec_bash_parser.Bash.parse_string cmd with
+    | Parsed.Parsed ir -> Masc_mcp.Worker_dev_tools.is_git_branch_switch ir
+    | _ -> false
+  in
+  let is_destructive cmd =
+    match Masc_exec_bash_parser.Bash.parse_string cmd with
+    | Parsed.Parsed ir -> Masc_mcp.Worker_dev_tools.is_destructive_bash_operation ir
+    | _ -> false
+  in
   (* git checkout: branch switch, allowed in playground *)
   Alcotest.(check bool) "checkout is branch switch"
     true (is_branch_switch "git checkout -b my-feature");

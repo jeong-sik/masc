@@ -297,9 +297,8 @@ let looks_like_test_command ~base ~sub =
   | _ -> false
 ;;
 
-let family_of_base_command ~cmd ~tokens ~base =
+let family_of_base_command ~write_intent ~tokens ~base =
   let sub = second_token tokens in
-  let write_intent = Exec_policy.is_write_operation_of_string cmd in
   match String.lowercase_ascii base with
   | "git" ->
     (match
@@ -353,8 +352,8 @@ let family_of_base_command ~cmd ~tokens ~base =
   | _ -> Unknown
 ;;
 
-let reversibility_of_command ~cmd family =
-  if Exec_policy.is_destructive_bash_operation_of_string cmd
+let reversibility_of_command ~is_destructive family =
+  if is_destructive
   then Irreversible
   else (
     match family with
@@ -362,8 +361,8 @@ let reversibility_of_command ~cmd family =
     | Package_install | Clone | Git_write | Unknown -> Reversible)
 ;;
 
-let risk_of_command ~cmd ~write_intent family =
-  if Exec_policy.is_destructive_bash_operation_of_string cmd
+let risk_of_command ~write_intent ~is_destructive family =
+  if is_destructive
   then High
   else (
     match family with
@@ -374,16 +373,22 @@ let risk_of_command ~cmd ~write_intent family =
 ;;
 
 let classify_command ~cmd =
-  let tokens = first_segment_tokens cmd in
-  let write_intent = Exec_policy.is_write_operation_of_string cmd in
+  let tokens, write_intent, is_destructive =
+    match Masc_exec_bash_parser.Bash.parse_string cmd with
+    | Parsed.Parsed ir ->
+      ( Exec_policy_mutation_classifier.flat_stage_words ir,
+        Exec_policy.is_write_operation ir,
+        Exec_policy.is_destructive_bash_operation ir )
+    | _ -> ([], false, false)
+  in
   let family =
     match base_command_of_tokens tokens with
-    | Some base -> family_of_base_command ~cmd ~tokens ~base
+    | Some base -> family_of_base_command ~write_intent ~tokens ~base
     | None -> Unknown
   in
   { family
-  ; reversibility = reversibility_of_command ~cmd family
-  ; risk = risk_of_command ~cmd ~write_intent family
+  ; reversibility = reversibility_of_command ~is_destructive family
+  ; risk = risk_of_command ~write_intent ~is_destructive family
   ; write_intent
   }
 ;;

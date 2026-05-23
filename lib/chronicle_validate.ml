@@ -141,29 +141,33 @@ let validate_epoch ~workdir epoch =
   let rfc_refs_valid =
     List.map (rfc_file_exists ~workdir) epoch.Chronicle_types.rfc_refs
   in
-  let warnings = ref [] in
-  if not start_ok then
-    warnings :=
-      Printf.sprintf "start_commit %s not found"
-        epoch.Chronicle_types.start_commit
-      :: !warnings;
-  if not end_ok then
-    warnings :=
-      Printf.sprintf "end_commit %s not found"
-        epoch.Chronicle_types.end_commit
-      :: !warnings;
-  if not file_range_check && key_paths <> [] then
-    warnings := "some key_files not in commit range" :: !warnings;
   let rfc_invalid =
     List.filter (fun (_, valid) -> not valid)
       (List.combine epoch.Chronicle_types.rfc_refs rfc_refs_valid)
     |> List.map (fun (r, _) -> r)
   in
-  if rfc_invalid <> [] then
-    warnings :=
-      Printf.sprintf "missing RFC files: %s"
-        (String.concat ", " rfc_invalid)
-      :: !warnings;
+  let warnings =
+    List.filter_map Fun.id
+      [ (if not start_ok then
+           Some
+             (Printf.sprintf "start_commit %s not found"
+                epoch.Chronicle_types.start_commit)
+         else None)
+      ; (if not end_ok then
+           Some
+             (Printf.sprintf "end_commit %s not found"
+                epoch.Chronicle_types.end_commit)
+         else None)
+      ; (if (not file_range_check) && key_paths <> [] then
+           Some "some key_files not in commit range"
+         else None)
+      ; (if rfc_invalid <> [] then
+           Some
+             (Printf.sprintf "missing RFC files: %s"
+                (String.concat ", " rfc_invalid))
+         else None)
+      ]
+  in
   let verification_score =
     compute_score ~sha_check ~file_range_check ~rfc_refs_valid
   in
@@ -174,5 +178,5 @@ let validate_epoch ~workdir epoch =
   ; file_range_check
   ; rfc_refs_valid
   ; verification_score
-  ; warnings = List.rev !warnings
+  ; warnings
   }

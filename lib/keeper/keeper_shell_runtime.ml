@@ -7,6 +7,9 @@ open Keeper_exec_shared
     independently extractable.  All functions take previously-captured
     variables as explicit parameters. *)
 
+(* RFC-0084: resolve coreutils from Host_config once at module-init. *)
+let coreutils = (Host_config.host ()).coreutils
+
 (* ── Shared helpers for process-result rendering ─────────────────── *)
 
 let cmd_prefix_of_cmd cmd =

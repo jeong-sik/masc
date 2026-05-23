@@ -1,16 +1,6 @@
 open Keeper_types
 open Keeper_exec_shared
 
-(* RFC-0084 host-config-cleanup-C — coreutils path migration.
-   Resolve the 6 absolute binary paths once at module-init time
-   from the typed [Host_config.coreutils] field, then reference
-   the bound names at each shell-op call-site.  Behaviour byte-
-   identical today; a future PR can flip [host]
-   to PATH-resolved binaries for portability without touching
-   this module's call sites. *)
-let coreutils = (Host_config.host ()).coreutils
-
-
 let handle_keeper_shell
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
       ~exec_cache:(_exec_cache : Masc_exec.Exec_cache.t option)
@@ -50,7 +40,7 @@ let handle_keeper_shell
      | Ok cwd ->
        Keeper_shell_runtime.run_cwd_op ~root ~keeper_name:meta.name ~op ~config ~meta
          ?turn_sandbox_factory ~cwd ~cmd:"pwd" ~docker_cmd:"pwd"
-         ~command_argv:[ coreutils.pwd ]
+         ~command_argv:[ Keeper_shell_runtime.coreutils.pwd ]
          ~map_output:(Keeper_shell_runtime.hostify_turn_runtime_output ~config ~meta)
          ~max_bytes:4096 ~timeout_sec:Keeper_shell_shared.io_timeout_sec ())
   | "git_status" ->
@@ -72,7 +62,7 @@ let handle_keeper_shell
        match
          Keeper_shell_runtime.run_readonly_op ~config ~meta ?turn_sandbox_factory
            ~op ~target
-           ~host_argv:[ coreutils.ls; "-la"; target ]
+           ~host_argv:[ Keeper_shell_runtime.coreutils.ls; "-la"; target ]
            ~docker_argv:(fun cpath -> [ "ls"; "-la"; cpath ])
            ~max_bytes:1_000_000
            ~timeout_sec:Keeper_shell_shared.io_timeout_sec ()
@@ -93,7 +83,7 @@ let handle_keeper_shell
        match
          Keeper_shell_runtime.run_readonly_op ~config ~meta ?turn_sandbox_factory
            ~op ~target
-           ~host_argv:[ coreutils.cat; target ]
+           ~host_argv:[ Keeper_shell_runtime.coreutils.cat; target ]
            ~docker_argv:(fun cpath -> [ "cat"; cpath ])
            ~max_bytes
            ~timeout_sec:Keeper_shell_shared.read_timeout_sec ()
@@ -124,7 +114,7 @@ let handle_keeper_shell
      | Error e -> path_error e
      | Ok target ->
        let n = max 1 (min 200 (Safe_ops.json_int ~default:20 "lines" args)) in
-       let coreutil = if op = "head" then coreutils.head else coreutils.tail in
+       let coreutil = if op = "head" then Keeper_shell_runtime.coreutils.head else Keeper_shell_runtime.coreutils.tail in
        match
          Keeper_shell_runtime.run_readonly_op ~config ~meta ?turn_sandbox_factory
            ~op ~target
@@ -149,7 +139,7 @@ let handle_keeper_shell
        match
          Keeper_shell_runtime.run_readonly_op ~config ~meta ?turn_sandbox_factory
            ~op ~target
-           ~host_argv:[ coreutils.wc; "-l"; target ]
+           ~host_argv:[ Keeper_shell_runtime.coreutils.wc; "-l"; target ]
            ~docker_argv:(fun cpath -> [ "wc"; "-l"; cpath ])
            ~max_bytes:4096
            ~timeout_sec:Keeper_shell_shared.read_timeout_sec ()

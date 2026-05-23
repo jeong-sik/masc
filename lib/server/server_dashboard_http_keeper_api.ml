@@ -65,16 +65,16 @@ let handle_keeper_tools_post state req reqd =
     let tlen = String.length req_path in
     let name = String.trim (String.sub req_path plen (tlen - plen - slen)) in
     if String.length name = 0 then
-      Http.Response.json ~status:`Bad_request {|{"error":"keeper name required"}|} reqd
+      Http.Response.json ~status:`Bad_request (keeper_name_required_error ()) reqd
     else
       let config = state.Mcp_server.room_config in
       match Keeper_types.read_meta config name with
       | Error msg ->
           Http.Response.json ~status:`Not_found
-            (Printf.sprintf {|{"error":"%s"}|} (String.escaped msg)) reqd
+            (error_json_string (String.escaped msg)) reqd
       | Ok None ->
           Http.Response.json ~status:`Not_found
-            (Printf.sprintf {|{"error":"keeper %S not found"}|} name) reqd
+            (error_json_string (Printf.sprintf "keeper %S not found" name)) reqd
       | Ok (Some meta) ->
           (try
              let args = Yojson.Safe.from_string body_str in
@@ -108,7 +108,7 @@ let handle_keeper_tools_post state req reqd =
              (match updated_meta with
              | Error msg ->
                  Http.Response.json ~status:`Bad_request
-                   (Printf.sprintf {|{"error":"%s"}|} (String.escaped msg)) reqd
+                   (error_json_string (String.escaped msg)) reqd
              | Ok meta' ->
                  (* force: user-initiated tool config is authoritative.
                     Skips version CAS since user intent overrides
@@ -119,10 +119,10 @@ let handle_keeper_tools_post state req reqd =
                         (Yojson.Safe.to_string (keeper_tools_response_json meta')) reqd
                   | Error e ->
                       Http.Response.json ~status:`Internal_server_error
-                        (Printf.sprintf {|{"error":"write failed: %s"}|} (String.escaped e)) reqd))
+                        (error_json_string (Printf.sprintf "write failed: %s" e)) reqd))
            with Yojson.Json_error e ->
              Http.Response.json ~status:`Bad_request
-               (Printf.sprintf {|{"error":"invalid json: %s"}|} (String.escaped e)) reqd))
+               (error_json_string (Printf.sprintf "invalid json: %s" e)) reqd))
 
 (* keeper_post_route_kind + 5 routing helpers moved to
    Server_dashboard_http_keeper_api_types (see comment near top). *)

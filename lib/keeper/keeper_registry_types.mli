@@ -88,6 +88,7 @@ type failure_reason =
       ; detail : string
       ; provider_id : string option
       ; http_status : int option
+      ; cascade_name : string option
       }
       (** Latched from the keeper turn terminal reason when the provider,
           adapter, or cascade fails before useful keeper progress. A later

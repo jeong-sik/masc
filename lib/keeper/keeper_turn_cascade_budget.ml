@@ -812,7 +812,9 @@ let make_post_turn_resilience_executor
     Keeper_registry.set_failure_reason ~base_path:config.base_path meta.name
       (Some
          (Keeper_registry.Provider_runtime_error
-            { code; detail; provider_id = None; http_status = None }));
+            { code; detail; provider_id = None; http_status = None
+            ; cascade_name = None
+            }));
     match
       sync_keeper_paused_state_with_resume_policy
         ~config

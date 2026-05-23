@@ -63,6 +63,7 @@ type failure_reason =
       ; detail : string
       ; provider_id : string option
       ; http_status : int option
+      ; cascade_name : string option
       }
   | Tool_required_unsatisfied of
       { code : string
@@ -87,7 +88,7 @@ let failure_reason_to_string = function
     Printf.sprintf "stale_fleet_batch(distinct_count=%d)" distinct_count
   | Provider_timeout_loop { count } ->
     Printf.sprintf "provider_timeout_loop(count=%d)" count
-  | Provider_runtime_error { code; detail; provider_id; http_status } ->
+  | Provider_runtime_error { code; detail; provider_id; http_status; cascade_name = _ } ->
     let prov =
       Option.fold provider_id ~none:""
         ~some:(Printf.sprintf " provider=%s")

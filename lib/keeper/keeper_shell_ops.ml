@@ -1181,16 +1181,11 @@ let handle_keeper_shell
         in
         (* RFC-0160 S3: risk classification via IR-based Shell_ir_risk
            rather than string-based classify_gh_reversibility. *)
-        let gh_classify_ir =
-          Keeper_gh_shared.gh_simple_command_to_shell_ir
+        let reversibility =
+          Keeper_gh_shared.gh_simple_command_risk_class
             ~sandbox:(Masc_exec.Sandbox_target.host ())
             parsed_cmd
         in
-        let gh_risk_envelope =
-          Masc_exec.Shell_ir_risk.classify
-            (Masc_exec.Shell_ir_risk.undecided gh_classify_ir)
-        in
-        let reversibility = gh_risk_envelope.Masc_exec.Shell_ir_risk.risk in
         let rev_tag =
           Masc_exec.Shell_ir_risk.string_of_risk_class reversibility
         in

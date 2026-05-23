@@ -362,7 +362,18 @@ let run_docker_shell_command_with_status_internal
                                    ~stdin_content:cmd
                                    argv)
                              in
-                             if not (docker_command_semantic_success ~cmd ~status ~output)
+                             let semantic_status =
+                               docker_command_semantic_status ~cmd ~status ~output
+                             in
+                             let semantic_ok =
+                               match semantic_status with
+                               | Exec_core.Ok | Exec_core.No_match -> true
+                               | Exec_core.Partial
+                               | Exec_core.Blocked
+                               | Exec_core.Timeout
+                               | Exec_core.Runtime_error -> false
+                             in
+                             if not semantic_ok
                              then
                                record_docker_exec_failure
                                  ~config
@@ -389,17 +400,6 @@ let run_docker_shell_command_with_status_internal
                                Keeper_registry.clear_error
                                  ~base_path:config.base_path
                                  meta.name);
-                             let semantic_status =
-                               docker_command_semantic_status ~cmd ~status ~output
-                             in
-                             let semantic_ok =
-                               match semantic_status with
-                               | Exec_core.Ok | Exec_core.No_match -> true
-                               | Exec_core.Partial
-                               | Exec_core.Blocked
-                               | Exec_core.Timeout
-                               | Exec_core.Runtime_error -> false
-                             in
                              Ok
                                { status
                                ; output
@@ -558,9 +558,14 @@ let run_docker_bash
           with
           | Error message -> sandbox_error_json message
           | Ok (st, out) ->
-            let semantic_status = docker_command_semantic_status ~cmd ~status:st ~output:out in
+            let semantic_status =
+              docker_command_semantic_status ~cmd ~status:st ~output:out
+            in
             let semantic_ok =
-              docker_command_semantic_success ~cmd ~status:st ~output:out
+              match semantic_status with
+              | Exec_core.Ok | Exec_core.No_match -> true
+              | Exec_core.Partial | Exec_core.Blocked | Exec_core.Timeout
+              | Exec_core.Runtime_error -> false
             in
             if not semantic_ok
             then

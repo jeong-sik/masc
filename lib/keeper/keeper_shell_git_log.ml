@@ -4,9 +4,8 @@ open Keeper_exec_shared
 let handle ~op ~(meta : keeper_meta) ~(config : Coord.config) ~(args : Yojson.Safe.t)
     ?turn_sandbox_factory ~root
   =
-  match Keeper_shell_runtime.cwd_target ~config ~meta ~args ~root with
-  | Error e -> Keeper_shell_runtime.path_error ~op ~meta ~raw_path:"" e
-  | Ok cwd ->
+  Keeper_shell_runtime.with_cwd_target ~config ~meta ~args ~root ~op ~raw_path:""
+    (fun cwd ->
     let count = max 1 (min 50 (Safe_ops.json_int ~default:10 "count" args)) in
     let format = Safe_ops.json_string ~default:"%h %s" "format" args in
     let file_path = Safe_ops.json_string ~default:"" "path" args |> String.trim in
@@ -143,5 +142,5 @@ let handle ~op ~(meta : keeper_meta) ~(config : Coord.config) ~(args : Yojson.Sa
              ~output:out
              ~limit:50
          in
-         Yojson.Safe.to_string json)
+         Yojson.Safe.to_string json))
 ;;

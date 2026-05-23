@@ -309,7 +309,10 @@ let test_oas_event_bridge_persists_native_events () =
       let bus = Event_bus.create () in
       try
         Eio.Switch.run (fun sw ->
-            Cascade_event_bridge.start_with_interval ~drain_interval_s:0.1
+            (* [start_with_interval ~drain_interval_s] was internal-only
+               test backdoor and is no longer exported; [start] uses the
+               default tuned cadence. *)
+            Cascade_event_bridge.start
               ~sw ~clock:(Eio.Stdenv.clock env) ~config ~bus;
             Event_bus.publish bus
               (Event_bus.mk_event
@@ -365,7 +368,7 @@ let test_oas_event_bridge_broadcasts_lifecycle_to_observers () =
                       "observer-lifecycle" ~last_event_id:0);
             ignore (Masc_mcp.Sse.register ~kind:Masc_mcp.Sse.Coordinator
                       "coordinator-lifecycle" ~last_event_id:0);
-            Cascade_event_bridge.start_with_interval ~drain_interval_s:0.1
+            Cascade_event_bridge.start
               ~sw ~clock:(Eio.Stdenv.clock env) ~config ~bus;
             Cascade_events.publish_keeper_lifecycle
               ~event:(Masc_mcp.Keeper_lifecycle_events.Custom_event
@@ -401,7 +404,7 @@ let test_oas_event_bridge_retries_append_failure_then_recovers () =
         Eio.Switch.run (fun sw ->
             ignore (Masc_mcp.Sse.register ~kind:Masc_mcp.Sse.Observer
                       "observer-retry" ~last_event_id:0);
-            Cascade_event_bridge.start_with_interval ~drain_interval_s:0.1
+            Cascade_event_bridge.start
               ~sw ~clock:(Eio.Stdenv.clock env) ~config ~bus;
             Event_bus.publish bus
               (Event_bus.mk_event
@@ -445,7 +448,7 @@ let test_oas_event_bridge_drop_marker_on_exhausted_append_failure () =
         Eio.Switch.run (fun sw ->
             ignore (Masc_mcp.Sse.register ~kind:Masc_mcp.Sse.Observer
                       "observer-drop" ~last_event_id:0);
-            Cascade_event_bridge.start_with_interval ~drain_interval_s:0.1
+            Cascade_event_bridge.start
               ~sw ~clock:(Eio.Stdenv.clock env) ~config ~bus;
             Event_bus.publish bus
               (Event_bus.mk_event

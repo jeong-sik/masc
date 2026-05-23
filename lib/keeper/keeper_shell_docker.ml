@@ -198,11 +198,11 @@ let ensure_keeper_sandbox_runtime ~timeout_sec =
 ;;
 
 
-(* Emit a ("gh_exit_class", "…") JSON field when [cmd] targets gh,
+(* Emit a ("gh_exit_class", "…") JSON field when [cmd_stages] targets gh,
    AND increment the matching Legendary_counters bucket.  Callers
    append the returned list to their `Assoc payload unconditionally —
    it is empty for non-gh commands, so call sites keep their shape. *)
-let gh_exit_class_field ~cmd ~status ~output
+let gh_exit_class_field ~status ~output
     ~(cmd_stages : Keeper_shell_command_semantics.parsed_stage list)
     () : (string * Yojson.Safe.t) list =
   if not (Keeper_shell_command_semantics.stages_targets_gh cmd_stages)
@@ -687,7 +687,7 @@ let run_docker_shell_command_with_status_internal
                              in
                              if not (docker_command_semantic_success ~cmd ~status ~output)
                              then
-                               record_docker_exec_failure
+                               Keeper_shell_docker_exec_failure.record_docker_exec_failure
                                  ~config
                                  ~meta
                                  ~image
@@ -833,7 +833,6 @@ let run_docker_credentialed_bash
                      ; "output", `String result.output
                      ]
                      @ gh_exit_class_field
-                         ~cmd
                          ~status:result.status
                          ~output:result.output
                         ~cmd_stages
@@ -917,7 +916,7 @@ let run_docker_bash
             in
             if not semantic_ok
             then
-              record_docker_exec_failure
+              Keeper_shell_docker_exec_failure.record_docker_exec_failure
                 ~config
                 ~meta
                 ~image
@@ -948,7 +947,7 @@ let run_docker_bash
                      , `String (Exec_core.string_of_semantic_status semantic_status)
                    ; "output", `String out
                    ]
-                   @ gh_exit_class_field ~cmd ~status:st ~output:out ~cmd_stages ())))
+                   @ gh_exit_class_field ~status:st ~output:out ~cmd_stages ())))
        | _ ->
          (match turn_sandbox_runtime with
           | Some _ ->
@@ -1007,7 +1006,6 @@ let run_docker_bash
                       ; "output", `String result.output
                       ]
                       @ gh_exit_class_field
-                          ~cmd
                           ~status:result.status
                           ~output:result.output
                           ~cmd_stages

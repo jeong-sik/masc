@@ -252,7 +252,7 @@ strategy = "failover"
     List.find (fun (p : adapted_profile) -> p.name = "tier.medium") catalog.profiles
   in
   match medium.provider_configs with
-  | [ cfg ] ->
+  | [ (cfg, _) ] ->
     check
       bool
       "keeps registered GLM kind"
@@ -298,7 +298,7 @@ strategy = "failover"
       List.find (fun (p : adapted_profile) -> p.name = "tier.medium") catalog.profiles
     in
     match medium.provider_configs with
-    | [ cfg ] ->
+    | [ (cfg, _) ] ->
       check
         bool
         "keeps registered GLM kind"
@@ -351,7 +351,7 @@ strategy = "failover"
         catalog.profiles
     in
     match coding_tier.provider_configs with
-    | [ cfg ] ->
+    | [ (cfg, _) ] ->
       check
         bool
         "uses Ollama wire kind"
@@ -414,7 +414,7 @@ strategy = "failover"
         catalog.profiles
     in
     match primary.provider_configs with
-    | [ cfg ] ->
+    | [ (cfg, _) ] ->
       check
         bool
         "explicit openai-http wins over ollama_cloud registry defaults"
@@ -466,7 +466,7 @@ strategy = "failover"
       catalog.profiles
   in
   match tier.provider_configs with
-  | [ cfg ] ->
+  | [ (cfg, _) ] ->
     check
       (option bool)
       "supports-tool-choice override is preserved"
@@ -513,7 +513,7 @@ strategy = "failover"
     List.find (fun (p : adapted_profile) -> p.name = "tier.medium") catalog.profiles
   in
   match medium.provider_configs with
-  | [ cfg ] ->
+  | [ (cfg, _) ] ->
     check
       bool
       "uses OpenAI-compatible fallback kind"
@@ -563,7 +563,7 @@ strategy = "failover"
     List.find (fun (p : adapted_profile) -> p.name = "tier.primary") catalog.profiles
   in
   match primary.provider_configs with
-  | [ cfg ] ->
+  | [ (cfg, _) ] ->
     check
       bool
       "uses CLI provider kind from declarative provider id"
@@ -810,6 +810,7 @@ let test_duplicate_routes () =
         ; { name = "dup"; target = "tier.primary" }
         ]
     ; system_targets = []
+    ; profiles = []
     }
   in
   let catalog = adapt_config cfg in

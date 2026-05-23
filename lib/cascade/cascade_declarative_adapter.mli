@@ -30,12 +30,19 @@ type adapter_error =
 
 (** {1 Adapted types} *)
 
+type provider_config_with_override =
+  Llm_provider.Provider_config.t * Provider_tool_support.runtime_capabilities_override option
+(** Provider config paired with an optional per-provider capability override.
+    [None] inherits from the OAS runtime binding; [Some o] replaces the
+    runtime-derived value for that provider. *)
+
 type adapted_profile = {
   name : string;
   (** Profile name derived from tier or tier-group (e.g. "tier.primary",
       "tier-group.primary"). *)
-  provider_configs : Llm_provider.Provider_config.t list;
-  (** Resolved provider configs, in declaration order. *)
+  provider_configs : provider_config_with_override list;
+  (** Resolved provider configs with optional per-provider capability
+      overrides, in declaration order. *)
   strategy : Cascade_strategy.t;
   (** Mapped strategy with parameters. *)
   ollama_max_concurrent : int option;

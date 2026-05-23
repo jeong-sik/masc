@@ -412,6 +412,7 @@ let runtime_profile_of_declarative_profile
       (fun (candidate : Cascade_declarative_hotpath.candidate) ->
          { Cascade_catalog_runtime.model_string = candidate.model_string
          ; provider_cfg = candidate.provider_cfg
+         ; provider_override = candidate.provider_override
          })
       p.candidates
   in

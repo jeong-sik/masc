@@ -36,6 +36,7 @@ type candidate_probe = Cascade_catalog_runtime_cache.candidate_probe = {
 type candidate_runtime = Cascade_catalog_runtime_cache.candidate_runtime = {
   model_string : string;
   provider_cfg : Llm_provider.Provider_config.t;
+  provider_override : Provider_tool_support.runtime_capabilities_override option;
 }
 
 type profile_build = Cascade_catalog_runtime_cache.profile_build = {

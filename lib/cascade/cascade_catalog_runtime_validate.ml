@@ -206,6 +206,7 @@ let profile_build_of_declarative_profile
         {
           model_string = candidate.model_string;
           provider_cfg = candidate.provider_cfg;
+          provider_override = candidate.provider_override;
         })
       profile.candidates
   in
@@ -257,6 +258,7 @@ let profile_build_of_declarative
         {
           model_string = candidate.model_string;
           provider_cfg = candidate.provider_cfg;
+          provider_override = candidate.provider_override;
         })
       profile.candidates
   in

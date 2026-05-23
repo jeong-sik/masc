@@ -6,7 +6,12 @@ open Alcotest
 module CP = Masc_mcp.Cascade_capability_profile
 module PTS = Masc_mcp.Provider_tool_support
 
-let make_caps ~it ~itc ~rmt ~rte ~rmh : PTS.capabilities =
+(* Defensive: open the module so record disambiguation picks
+   [capabilities] over [runtime_capabilities_override] when both
+   types share field names. *)
+open PTS
+
+let make_caps ~it ~itc ~rmt ~rte ~rmh : capabilities =
   {
     supports_inline_tools = it;
     supports_inline_tool_choice = itc;
@@ -106,12 +111,12 @@ let test_lite_accepts_runtime_mcp_without_http_headers () =
    must reject every CLI runtime that strips per-request headers, and
    [lite] must accept them — that is the entire point of the split. *)
 let test_incident_2026_05_05_partition () =
-  let lacks_http_headers caps =
-    not caps.PTS.supports_runtime_mcp_http_headers
+  let lacks_http_headers (caps : PTS.capabilities) =
+    not caps.supports_runtime_mcp_http_headers
   in
   let cli_no_headers = [ gemini_cli_caps; codex_cli_caps ] in
   List.iter
-    (fun caps ->
+    (fun (caps : PTS.capabilities) ->
       check bool "incident: cli has no http headers" true
         (lacks_http_headers caps);
       check bool "incident: tool_strict rejects cli-no-headers" false

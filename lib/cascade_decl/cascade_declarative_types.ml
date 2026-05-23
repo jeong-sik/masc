@@ -49,9 +49,18 @@ type cascade_provider_healthcheck =
     as closed-variant matches in OCaml code. Schema-additive: A.1 ships
     the type + parser; A.3 migrates cascade_transport, Provider_tool_support,
     Cascade_error_classify, and Keeper_usage_trust to read these fields
-    instead of matching on provider name. *)
+    instead of matching on provider name.
+
+    Tool/event support fields ([supports_inline_tools],
+    [supports_runtime_mcp_tools], [supports_runtime_tool_events],
+    [supports_runtime_mcp_http_headers]) are wired through
+    [Provider_tool_support.runtime_capabilities_override] as of #14659.
+    Remaining fields ([requires_per_keeper_bridging_for_bound_actor_tools],
+    [identity_runtime_mcp_header_keys], [tolerates_bound_actor_fallback])
+    are still parsed-only pending their respective A.3 cutovers. *)
 type cascade_capabilities =
-  { (* Tool/event support — #14608 Phase 5.6 prep *)
+  { (* Tool/event support — #14608 Phase 5.6, A.3 cutover complete.
+       Wired through [Provider_tool_support.runtime_capabilities_override]. *)
     supports_inline_tools : bool
   ; supports_runtime_mcp_tools : bool
   ; supports_runtime_tool_events : bool
@@ -78,17 +87,16 @@ type cascade_capabilities =
           catalog also lists an adapter that requires per-keeper bridging
           (e.g. Codex CLI).
 
-          **Current data flow (parsed-only).** This PR adds the schema and
-          parser path so cascade.toml can declare the value, but
+          **Current data flow (parsed-only for this field).** The
+          tool/event support cutover (#14659) is now complete, but this
+          field remains parsed-only.
           [Cascade_catalog_validator.codex_with_bound_actor_only_issue]
-          still reads the local provider-tool support projection. Editing
-          this value in cascade.toml has no runtime effect on the catalog
-          warning until the declarative capability cutover lands.
+          still reads the local provider-tool support projection.
 
-          The cutover is a follow-up that routes
-          provider-tool policy through [tool_policy_of_cascade_capabilities]
-          (see #14659) so the cascade-decl value becomes the SSOT. This field
-          is shipped now so the schema is stable before that cutover. *)
+          A follow-up cutover will route provider-tool policy for this
+          flag through [tool_policy_of_cascade_capabilities] so the
+          cascade-decl value becomes the SSOT. This field is shipped now
+          so the schema is stable before that cutover. *)
   }
 [@@deriving show, eq]
 

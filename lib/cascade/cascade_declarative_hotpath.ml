@@ -17,6 +17,7 @@ module Loader = Cascade_config_loader
 type candidate = {
   model_string : string;
   provider_cfg : Llm_provider.Provider_config.t;
+  provider_override : Provider_tool_support.runtime_capabilities_override option;
 }
 
 type profile = {
@@ -86,9 +87,12 @@ let extract_inference_params (configs : Llm_provider.Provider_config.t list) :
 
 (* --- candidate from Provider_config.t --- *)
 
-let make_candidate (cfg : Llm_provider.Provider_config.t) : candidate =
+let make_candidate
+      ?(override : Provider_tool_support.runtime_capabilities_override option)
+      (cfg : Llm_provider.Provider_config.t) : candidate =
   { model_string = provider_config_to_model_string cfg;
-    provider_cfg = cfg }
+    provider_cfg = cfg;
+    provider_override = override }
 
 (* --- Profile conversion --- *)
 
@@ -96,9 +100,12 @@ let adapted_profile_to_profile (ap : adapted_profile) : profile option =
   match ap.provider_configs with
   | [] -> None
   | configs ->
-    let weighted_entries = List.map make_weighted_entry configs in
-    let inference_params = extract_inference_params configs in
-    let candidates = List.map make_candidate configs in
+    let configs_only = List.map fst configs in
+    let weighted_entries = List.map make_weighted_entry configs_only in
+    let inference_params = extract_inference_params configs_only in
+    let candidates =
+      List.map (fun (cfg, override) -> make_candidate ?override cfg) configs
+    in
     Some {
       name = ap.name;
       weighted_entries;

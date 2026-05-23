@@ -190,8 +190,8 @@ let initial = {
 (* ── Cross-Dimension Invariants ─────────────────────────── *)
 
 let check_invariants (state : product) : (unit, string) result =
-  (* I1: Ready implies not booting *)
-  let i1 = match state.readiness with
+  let ready_implies_not_booting =
+    match state.readiness with
     | Readiness.Ready ->
       (match state.lifecycle with
        | Lifecycle.Booting ->
@@ -199,8 +199,8 @@ let check_invariants (state : product) : (unit, string) result =
        | Lifecycle.Serving | Lifecycle.Draining | Lifecycle.Stopped -> None)
     | Readiness.NotReady -> None
   in
-  (* I2: Stopped implies not ready *)
-  let i2 = match state.lifecycle with
+  let stopped_implies_not_ready =
+    match state.lifecycle with
     | Lifecycle.Stopped ->
       (match state.readiness with
        | Readiness.Ready ->
@@ -208,8 +208,8 @@ let check_invariants (state : product) : (unit, string) result =
        | Readiness.NotReady -> None)
     | Lifecycle.Booting | Lifecycle.Serving | Lifecycle.Draining -> None
   in
-  (* I3: Pending tasks block stop *)
-  let i3 = match state.lazy_tasks with
+  let pending_blocks_stop =
+    match state.lazy_tasks with
     | Lazy_task_queue.Pending _ ->
       (match state.lifecycle with
        | Lifecycle.Stopped ->
@@ -217,8 +217,8 @@ let check_invariants (state : product) : (unit, string) result =
        | Lifecycle.Booting | Lifecycle.Serving | Lifecycle.Draining -> None)
     | Lazy_task_queue.Complete -> None
   in
-  (* I4: Degraded backend => not ready *)
-  let i4 = match state.backend with
+  let degraded_implies_not_ready =
+    match state.backend with
     | Backend.Degraded ->
       (match state.readiness with
        | Readiness.Ready ->
@@ -226,11 +226,10 @@ let check_invariants (state : product) : (unit, string) result =
        | Readiness.NotReady -> None)
     | Backend.Uninitialized | Backend.Filesystem -> None
   in
-  (* I5: Booting => backend uninitialized.
-     Backend.Filesystem | Backend.Degraded are enumerated explicitly so a
-     new Backend variant fails compilation here rather than silently
-     passing this invariant. *)
-  let i5 = match state.lifecycle with
+  (* Backend.Filesystem | Backend.Degraded are enumerated explicitly so a new
+     Backend variant fails compilation here rather than silently passing. *)
+  let booting_implies_uninitialized_backend =
+    match state.lifecycle with
     | Lifecycle.Booting ->
       (match state.backend with
        | Backend.Uninitialized -> None
@@ -239,7 +238,16 @@ let check_invariants (state : product) : (unit, string) result =
                  (Backend.phase_to_string b)))
     | Lifecycle.Serving | Lifecycle.Draining | Lifecycle.Stopped -> None
   in
-  match List.filter_map Fun.id [i1; i2; i3; i4; i5] with
+  let violations =
+    List.filter_map Fun.id
+      [ ready_implies_not_booting
+      ; stopped_implies_not_ready
+      ; pending_blocks_stop
+      ; degraded_implies_not_ready
+      ; booting_implies_uninitialized_backend
+      ]
+  in
+  match violations with
   | [] -> Ok ()
   | vs -> Error (String.concat "; " vs)
 

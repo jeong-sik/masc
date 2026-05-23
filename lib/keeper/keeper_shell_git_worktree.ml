@@ -46,7 +46,7 @@ let handle
         in
         match wt_out_result with
         | Error msg ->
-          error_json ~fields:[ "op", `String op; "cwd", `String cwd ] msg
+          error_json_for_op ~op ~extra_fields:[ "cwd", `String cwd ] msg
         | Ok wt_out ->
           if String_util.contains_substring_ci wt_out branch then
             let existing_path =

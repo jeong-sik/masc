@@ -288,7 +288,7 @@ let handle_keeper_shell
          ())
   in
   let docker_read_error ~target msg =
-    error_json ~fields:[ "op", `String op; "path", `String target ] msg
+    error_json_for_op ~op ~extra_fields:[ "path", `String target ] msg
   in
   let hostify_turn_runtime_output out =
     Keeper_shell_shared.rewrite_turn_runtime_paths_to_host ~config ~meta out
@@ -327,8 +327,8 @@ let handle_keeper_shell
            ~ok_exit_codes runtime ~cwd ~command_argv ~max_bytes ~timeout_sec ()
        with
        | Error msg ->
-         error_json
-           ~fields:([ "op", `String op; "cwd", `String cwd ] @ extra) msg
+         error_json_for_op ~op
+           ~extra_fields:([ "cwd", `String cwd ] @ extra) msg
        | Ok (st, out) ->
          render_completed_process_result ~cwd ~cmd ~extra st (map_output out))
     | None ->
@@ -339,7 +339,7 @@ let handle_keeper_shell
       Keeper_shell_shared.run_docker_shell_command_with_status ~config ~meta ~cwd ~timeout_sec
         ~cmd:docker_cmd ~git_creds_enabled:false ~network_mode:Network_none
     with
-    | Error msg -> error_json ~fields:[ "op", `String op; "cwd", `String cwd ] msg
+    | Error msg -> error_json_for_op ~op ~extra_fields:[ "cwd", `String cwd ] msg
     | Ok result ->
       (* PR #11080 sibling sweep: this helper always routes through
          docker exec, so the LLM-facing [cwd] field must hold the
@@ -511,7 +511,7 @@ let handle_keeper_shell
   | "rg" ->
     let pattern = Safe_ops.json_string ~default:"" "pattern" args |> String.trim in
     if pattern = ""
-    then error_json ~fields:[ "op", `String op ] "pattern is required for rg. Good: pattern='handle_request'. Bad: pattern=''."
+    then error_json_for_op ~op "pattern is required for rg. Good: pattern='handle_request'. Bad: pattern=''."
     else (
       match read_target () with
       | Error e -> path_error e
@@ -706,7 +706,7 @@ let handle_keeper_shell
       else Safe_ops.json_string ~default:"" "name" args |> String.trim
     in
     if name_pattern = ""
-    then error_json ~fields:[ "op", `String op ] "pattern is required for find. Good: pattern='*.ml'. Bad: pattern=''."
+    then error_json_for_op ~op "pattern is required for find. Good: pattern='*.ml'. Bad: pattern=''."
     else (
       match read_target () with
       | Error e -> path_error e
@@ -938,7 +938,7 @@ let handle_keeper_shell
       let branch = Safe_ops.json_string ~default:"" "branch" args |> String.trim in
       let base = Safe_ops.json_string ~default:"origin/main" "base" args |> String.trim in
       if branch = "" then
-        error_json ~fields:[ "op", `String op ]
+        error_json_for_op ~op
           "branch is required. Good: action='add', branch='feature/my-task'. Bad: branch=''."
       else (
         match cwd_target () with
@@ -954,7 +954,7 @@ let handle_keeper_shell
           in
           match wt_out_result with
           | Error msg ->
-            error_json ~fields:[ "op", `String op; "cwd", `String cwd ] msg
+            error_json_for_op ~op ~extra_fields:[ "cwd", `String cwd ] msg
           | Ok wt_out ->
           if String_util.contains_substring_ci wt_out branch then
             let existing_path =
@@ -983,7 +983,7 @@ let handle_keeper_shell
 	              [ "git"; "worktree"; "add"; wt_path; "-b"; branch; base ]
 	      )
     | other ->
-      error_json ~fields:[ "op", `String op ]
+      error_json_for_op ~op
         (Printf.sprintf "Unknown git_worktree action '%s'. Use: list, add." other)
     end
   | "git_clone" ->
@@ -992,7 +992,7 @@ let handle_keeper_shell
        Validates against tool_policy.toml git_clone.allowed_orgs. *)
     let url = Safe_ops.json_string ~default:"" "url" args |> String.trim in
     if url = "" then
-      error_json ~fields:[ "op", `String op ]
+      error_json_for_op ~op
         "url is required for git_clone. Good: url='https://github.com/org/repo'. Bad: url=''."
     else
       let base_path = config.base_path in
@@ -1193,7 +1193,7 @@ let handle_keeper_shell
       Keeper_shell_shared.clamp_shell_timeout ~min_sec:Keeper_shell_shared.gh_min_timeout_sec ~default:gh_default_timeout args
     in
     (match gh_command_from_args raw_cmd_str args with
-     | Error (`Input msg) -> error_json ~fields:[ "op", `String op ] msg
+     | Error (`Input msg) -> error_json_for_op ~op msg
      | Error (`Parse parse_error) ->
        let reason = gh_parse_error_reason parse_error in
        Yojson.Safe.to_string

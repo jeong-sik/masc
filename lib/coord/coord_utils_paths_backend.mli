@@ -48,9 +48,6 @@ val project_prefix : config -> string
 
 (** {1 Backend dispatch} *)
 
-(** Always [false] — postgres backend was removed. *)
-val is_pg_backend : config -> bool
-
 val backend_get :
   config -> key:string -> (string option, Backend_types.error) result
 

@@ -203,3 +203,29 @@ val resolve_strategy_config :
 
 val resolve_strategy_config_for_diagnostics :
   config_path:string -> name:string -> strategy_config
+
+(* ── Phonebook loading (RFC Cascade-Phonebook) ────────── *)
+
+(** Load a TOML file as a typed [cascade_phonebook] with mtime-based caching.
+
+    Uses [Cascade_phonebook_parser] to parse directly from Otoml into
+    typed records, bypassing the legacy JSON rendering pipeline.
+
+    @since RFC Cascade-Phonebook *)
+val load_phonebook :
+  string -> (Cascade_phonebook_types.cascade_phonebook, string) result
+
+(** Drop the cached phonebook entry for a path.
+
+    @since RFC Cascade-Phonebook *)
+val invalidate_phonebook_cache : string -> unit
+
+(** Resolve the cascade TOML path via config_dir_resolver and load phonebook.
+
+    Returns [None] when no cascade.toml is configured (missing/invalid config dir).
+    Returns [Some (Error msg)] when the file exists but fails to parse.
+    Returns [Some (Ok pb)] on success.
+
+    @since RFC Cascade-Phonebook *)
+val load_phonebook_from_config :
+  unit -> (Cascade_phonebook_types.cascade_phonebook, string) result option

@@ -1,10 +1,14 @@
-(** JSON config loading with mtime-based hot-reload.
+(** Config loading with mtime-based hot-reload.
 
-    Loads and caches cascade profile JSON files.  The cache is keyed by
-    file path and invalidated when the file mtime changes.
+    Two loading pipelines coexist:
+    1. Legacy JSON pipeline: TOML → [Cascade_toml_materializer] → Yojson.Safe.t
+    2. Phonebook pipeline:  TOML → [Cascade_phonebook_parser] → typed cascade_phonebook
+
+    Both share the same mtime-based cache invalidation strategy.
 
     @since 0.59.0
-    @since 0.92.0 extracted from Cascade_config *)
+    @since 0.92.0 extracted from Cascade_config
+    @since RFC Cascade-Phonebook added phonebook loading *)
 
 let config_cache : (string, float * Yojson.Safe.t) Hashtbl.t = Hashtbl.create 4
 
@@ -546,4 +550,109 @@ let resolve_strategy_config ~config_path ~name =
 
 let resolve_strategy_config_for_diagnostics ~config_path ~name =
   resolve_strategy_config_impl ~emit_telemetry:false ~config_path ~name
+;;
+
+(* ── Phonebook loading (RFC Cascade-Phonebook) ────────── *)
+
+(** Separate cache for typed phonebook records.  Keyed by file path,
+    invalidated on mtime change — same strategy as the JSON cache above. *)
+let phonebook_cache : (string, float * Cascade_phonebook_types.cascade_phonebook) Hashtbl.t =
+  Hashtbl.create 4
+
+(** Stat a file, return its mtime or None. *)
+let stat_mtime path =
+  try Some ((Unix.stat path).Unix.st_mtime) with
+  | Unix.Unix_error _ | Sys_error _ -> None
+
+(** Load a TOML file as a typed phonebook with mtime-based caching.
+
+    Same race-aware design as [load_toml_in_memory]:
+    1. stat → mtime_pre
+    2. cache lookup — hit returns cached phonebook
+    3. miss → Otoml parse → phonebook parse → stat → mtime_post
+    4. cache only when mtime_pre = mtime_post *)
+let load_phonebook_impl ~emit_telemetry path =
+  match stat_mtime path with
+  | None ->
+    (* File vanished or unreadable. Let Otoml surface the real error. *)
+    (try
+       let toml = Otoml.Parser.from_file path in
+       match Cascade_phonebook_parser.parse_phonebook toml with
+       | Ok pb -> Ok pb
+       | Error errs ->
+         let msg =
+           List.map (fun (e : Cascade_phonebook_parser.parse_error) ->
+             Printf.sprintf "%s: %s" e.path e.message) errs
+           |> String.concat "; "
+         in
+         Error (Printf.sprintf "phonebook parse error (%s): %s" path msg)
+     with
+     | Sys_error msg ->
+       Error (Printf.sprintf "phonebook IO error (path=%s): %s" path msg)
+     | Unix.Unix_error (err, fn, arg) ->
+       Error (Printf.sprintf "phonebook Unix error (path=%s): %s(%s): %s"
+                path fn arg (Unix.error_message err)))
+  | Some mtime_pre ->
+    let cached =
+      with_cache_lock (fun () ->
+        match Hashtbl.find_opt phonebook_cache path with
+        | Some (cached_mtime, cached_pb) when Float.equal cached_mtime mtime_pre ->
+          Some cached_pb
+        | _ -> None)
+    in
+    (match cached with
+     | Some pb -> Ok pb
+     | None ->
+       (try
+          let toml = Otoml.Parser.from_file path in
+          (match Cascade_phonebook_parser.parse_phonebook toml with
+           | Error errs ->
+             let msg =
+               List.map (fun (e : Cascade_phonebook_parser.parse_error) ->
+                 Printf.sprintf "%s: %s" e.path e.message) errs
+               |> String.concat "; "
+             in
+             Error (Printf.sprintf "phonebook parse error (%s): %s" path msg)
+           | Ok pb ->
+             let mtime_post = stat_mtime path in
+             (match mtime_post with
+              | Some mp when Float.equal mp mtime_pre ->
+                with_cache_lock (fun () ->
+                  Hashtbl.replace phonebook_cache path (mp, pb));
+                if emit_telemetry then
+                  Eio.traceln "[CascadeConfig] loaded phonebook %s mtime=%.0f" path mp;
+                Ok pb
+              | Some _mp ->
+                (* Race: mtime moved mid-read. Serve fresh but skip cache. *)
+                if emit_telemetry then
+                  Cascade_metrics.on_toml_read_race ();
+                Ok pb
+              | None ->
+                Ok pb))
+        with
+        | Sys_error msg ->
+          Error (Printf.sprintf "phonebook IO error (path=%s): %s" path msg)
+        | Unix.Unix_error (err, fn, arg) ->
+          Error (Printf.sprintf "phonebook Unix error (path=%s): %s(%s): %s"
+                   path fn arg (Unix.error_message err))))
+;;
+
+let load_phonebook path =
+  load_phonebook_impl ~emit_telemetry:true path
+;;
+
+(** Drop the cached phonebook entry for a path. *)
+let invalidate_phonebook_cache path =
+  with_cache_lock (fun () -> Hashtbl.remove phonebook_cache path)
+;;
+
+(** Resolve the cascade TOML path via config_dir_resolver and load phonebook.
+
+    Returns [None] when no cascade.toml is configured (missing/invalid config dir).
+    Returns [Some (Error msg)] when the file exists but fails to parse.
+    Returns [Some (Ok pb)] on success. *)
+let load_phonebook_from_config () =
+  match Config_dir_resolver.cascade_path_opt () with
+  | None -> None
+  | Some path -> Some (load_phonebook path)
 ;;

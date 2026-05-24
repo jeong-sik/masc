@@ -141,12 +141,16 @@ let test_fast_tier_group_no_thinking () =
 
 let test_legacy_logical_use_to_phonebook_route () =
   let pb = load_fixture () in
-  let keeper_turn = task_use_of_legacy_logical_use "keeper_turn" in
-  let models = resolve_models_for_task pb default_routing_policies keeper_turn in
-  check bool "keeper_turn → at least 1 model" true (List.length models >= 1);
-  let adversarial = task_use_of_legacy_logical_use "adversarial_reviewer" in
-  let adv_models = resolve_models_for_task pb default_routing_policies adversarial in
-  check bool "adversarial_reviewer → at least 1 model" true (List.length adv_models >= 1)
+  (match task_use_of_legacy_logical_use "keeper_turn" with
+   | Some keeper_turn ->
+     let models = resolve_models_for_task pb default_routing_policies keeper_turn in
+     check bool "keeper_turn → at least 1 model" true (List.length models >= 1)
+   | None -> failwith "keeper_turn not mapped");
+  (match task_use_of_legacy_logical_use "adversarial_reviewer" with
+   | Some adversarial ->
+     let adv_models = resolve_models_for_task pb default_routing_policies adversarial in
+     check bool "adversarial_reviewer → at least 1 model" true (List.length adv_models >= 1)
+   | None -> failwith "adversarial_reviewer not mapped")
 
 (* --- Tier-group completeness --- *)
 

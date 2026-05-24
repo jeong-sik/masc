@@ -34,40 +34,42 @@ let test_unknown_is_none () =
 
 (* --- Legacy logical_use mapping --- *)
 
+let unwrap = function Some x -> x | None -> failwith "unexpected None"
+
 let test_legacy_keeper_turn () =
   check string "keeper_turn → Code_generation"
     "code_generation"
-    (task_use_to_string (task_use_of_legacy_logical_use "keeper_turn"))
+    (task_use_to_string (unwrap (task_use_of_legacy_logical_use "keeper_turn")))
 
 let test_legacy_tool_required () =
   check string "tool_required → Tool_execution"
     "tool_execution"
-    (task_use_to_string (task_use_of_legacy_logical_use "tool_required"))
+    (task_use_to_string (unwrap (task_use_of_legacy_logical_use "tool_required")))
 
 let test_legacy_adversarial_reviewer () =
   check string "adversarial_reviewer → Code_review"
     "code_review"
-    (task_use_to_string (task_use_of_legacy_logical_use "adversarial_reviewer"))
+    (task_use_to_string (unwrap (task_use_of_legacy_logical_use "adversarial_reviewer")))
 
 let test_legacy_cross_verifier () =
   check string "cross_verifier → Code_review"
     "code_review"
-    (task_use_to_string (task_use_of_legacy_logical_use "cross_verifier"))
+    (task_use_to_string (unwrap (task_use_of_legacy_logical_use "cross_verifier")))
 
 let test_legacy_auto_responder () =
   check string "auto_responder → Quick_decision"
     "quick_decision"
-    (task_use_to_string (task_use_of_legacy_logical_use "auto_responder"))
+    (task_use_to_string (unwrap (task_use_of_legacy_logical_use "auto_responder")))
 
 let test_legacy_complex_task () =
   check string "complex_task → Long_reasoning"
     "long_reasoning"
-    (task_use_to_string (task_use_of_legacy_logical_use "complex_task"))
+    (task_use_to_string (unwrap (task_use_of_legacy_logical_use "complex_task")))
 
 let test_legacy_unknown () =
-  check string "unknown → Conversation"
-    "conversation"
-    (task_use_to_string (task_use_of_legacy_logical_use "something_new"))
+  check (option string) "unknown → None"
+    None
+    (Option.map task_use_to_string (task_use_of_legacy_logical_use "something_new"))
 
 (* --- Default routing policies --- *)
 

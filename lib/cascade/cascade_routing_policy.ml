@@ -47,19 +47,19 @@ let task_use_of_string = function
     Used during migration to translate keeper/supervisor routing
     requests without touching all callers at once. *)
 let task_use_of_legacy_logical_use = function
-  | "keeper_turn" | "phase_recovery" | "phase_buffer" -> Code_generation
-  | "tool_required" -> Tool_execution
-  | "governance_judge" | "operator_judge" -> Code_review
-  | "cross_verifier" | "verifier" | "adversarial_reviewer" -> Code_review
-  | "auto_responder" -> Quick_decision
-  | "routing" -> Quick_decision
-  | "openai_compat" -> Code_generation
-  | "persona_generation" -> Code_generation
-  | "provider_benchmark" -> Quick_decision
-  | "simple_task" | "moderate_task" -> Quick_decision
-  | "complex_task" -> Long_reasoning
-  | "tool_rerank_use" -> Tool_execution
-  | _ -> Conversation  (* unknown → safest default *)
+  | "keeper_turn" | "phase_recovery" | "phase_buffer" -> Some Code_generation
+  | "tool_required" -> Some Tool_execution
+  | "governance_judge" | "operator_judge" -> Some Code_review
+  | "cross_verifier" | "verifier" | "adversarial_reviewer" -> Some Code_review
+  | "auto_responder" -> Some Quick_decision
+  | "routing" -> Some Quick_decision
+  | "openai_compat" -> Some Code_generation
+  | "persona_generation" -> Some Code_generation
+  | "provider_benchmark" -> Some Quick_decision
+  | "simple_task" | "moderate_task" -> Some Quick_decision
+  | "complex_task" -> Some Long_reasoning
+  | "tool_rerank_use" -> Some Tool_execution
+  | _ -> None
 
 (* ── Routing Policy ──────────────────────────────────────────── *)
 

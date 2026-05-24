@@ -7,7 +7,7 @@ type task_use =
 
 val task_use_to_string : task_use -> string
 val task_use_of_string : string -> task_use option
-val task_use_of_legacy_logical_use : string -> task_use
+val task_use_of_legacy_logical_use : string -> task_use option
 
 type task_routing_policy = {
   task : task_use;

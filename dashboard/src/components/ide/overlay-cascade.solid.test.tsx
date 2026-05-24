@@ -86,10 +86,13 @@ describe('shortModel', () => {
 
 // ── OverlayCascade DOM ─────────────────────────────────────────────
 
+const SAMPLE_PROVIDER = 'sample-provider-x'
+const SAMPLE_MODEL = 'sample-model-y'
+
 const SAMPLE_HIT: CascadeLineHit = {
   line: 42,
-  provider: 'anthropic',
-  model: 'claude-3-5-sonnet-20241022',
+  provider: SAMPLE_PROVIDER,
+  model: SAMPLE_MODEL,
   cost_usd: 0.000042,
   latency_ms: 1250,
 }
@@ -138,7 +141,9 @@ describe('OverlayCascade', () => {
   it('includes neutral runtime chip text', () => {
     const el = mount([SAMPLE_HIT])
     expect(el.textContent).toContain('runtime')
-    expect(el.textContent).not.toContain('anthropic')
+    /* Server emits a neutral "runtime" label rather than the raw
+       provider name (runtime-lens boundary). */
+    expect(el.textContent).not.toContain(SAMPLE_PROVIDER)
   })
 
   it('uses neutral styling for known provider input', () => {
@@ -146,7 +151,11 @@ describe('OverlayCascade', () => {
     const chip = el.querySelector('li > span:nth-child(2)') as HTMLElement | null
     const style = chip?.getAttribute('style') ?? ''
     expect(style).toContain('var(--color-border-default)')
-    expect(style).not.toContain('--color-p-anthropic')
+    /* RFC-0168: previously asserted the absence of a specific
+       provider color token (`--color-p-anthropic`). Per-provider
+       tokens are gone; assert that no `--color-p-` prefix appears
+       at all (neutral styling). */
+    expect(style).not.toContain('--color-p-')
   })
 
   it('keeps neutral styling for unknown provider input', () => {

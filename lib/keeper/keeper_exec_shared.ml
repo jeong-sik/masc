@@ -488,10 +488,15 @@ let shell_readonly_cat_max_bytes args =
 
 let lines_to_json ?(limit = max_int) ?(max_bytes = 32_000) (text : string) : Yojson.Safe.t
   =
-  let all_lines =
+  let all_nonempty =
     String.split_on_char '\n' text
     |> List.filter (fun line -> line <> "")
-    |> fun rows -> if List.length rows > limit then take limit rows else rows
+  in
+  let total = List.length all_nonempty in
+  let truncated_by_limit, limit_overflow =
+    if total > limit
+    then take limit all_nonempty, total - limit
+    else all_nonempty, 0
   in
   (* Byte-budget: accumulate lines until max_bytes is reached.
      This prevents 200 long lines from producing 500KB+ JSON arrays
@@ -507,7 +512,8 @@ let lines_to_json ?(limit = max_int) ?(max_bytes = 32_000) (text : string) : Yoj
       then List.rev acc, List.length rest + 1
       else collect (`String line :: acc) (bytes_used + line_len) rest
   in
-  let kept, omitted = collect [] 0 all_lines in
+  let kept, byte_overflow = collect [] 0 truncated_by_limit in
+  let omitted = limit_overflow + byte_overflow in
   if omitted > 0
   then
     `List

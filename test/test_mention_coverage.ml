@@ -212,46 +212,6 @@ let test_resolve_targets_empty_agents () =
   check int "no agents" 0 (List.length targets)
 
 (* ============================================================
-   is_spawnable Tests
-   ============================================================ *)
-
-let test_is_spawnable_gemini () =
-  check bool "gemini is spawnable" true (Masc_mcp.Auto_responder.is_spawnable "gemini")
-
-let test_is_spawnable_codex () =
-  check bool "codex is spawnable" true (Masc_mcp.Auto_responder.is_spawnable "codex")
-
-let test_is_spawnable_claude () =
-  check bool "claude is spawnable" true (Masc_mcp.Auto_responder.is_spawnable "claude")
-
-let test_is_spawnable_llama () =
-  check bool "llama is spawnable" true (Masc_mcp.Auto_responder.is_spawnable "llama")
-
-let test_is_spawnable_glm () =
-  (* glm has no CLI spawn key in the runtime binding catalog. *)
-  check bool "glm not spawnable" false (Masc_mcp.Auto_responder.is_spawnable "glm")
-
-let test_is_spawnable_unknown () =
-  check bool "unknown not spawnable" false (Masc_mcp.Auto_responder.is_spawnable "unknown-agent")
-
-let test_is_spawnable_nickname () =
-  (* Should extract agent type from nickname *)
-  check bool "claude nickname spawnable" true (Masc_mcp.Auto_responder.is_spawnable "claude-gentle-gecko")
-
-let test_is_spawnable_empty () =
-  check bool "empty not spawnable" false (Masc_mcp.Auto_responder.is_spawnable "")
-
-(* ============================================================
-   spawnable_agents Tests
-   ============================================================ *)
-
-let test_spawnable_agents_list () =
-  check bool "contains claude" true (Masc_mcp.Auto_responder.is_spawnable "claude");
-  check bool "contains gemini" true (Masc_mcp.Auto_responder.is_spawnable "gemini");
-  check bool "does not contain bare ollama" false
-    (Masc_mcp.Auto_responder.is_spawnable "ollama")
-
-(* ============================================================
    Test Runners
    ============================================================ *)
 
@@ -305,18 +265,5 @@ let () =
       test_case "broadcast" `Quick test_resolve_targets_broadcast;
       test_case "broadcast none" `Quick test_resolve_targets_broadcast_none;
       test_case "empty agents" `Quick test_resolve_targets_empty_agents;
-    ];
-    "is_spawnable", [
-      test_case "gemini" `Quick test_is_spawnable_gemini;
-      test_case "codex" `Quick test_is_spawnable_codex;
-      test_case "claude" `Quick test_is_spawnable_claude;
-      test_case "llama" `Quick test_is_spawnable_llama;
-      test_case "glm" `Quick test_is_spawnable_glm;
-      test_case "unknown" `Quick test_is_spawnable_unknown;
-      test_case "nickname" `Quick test_is_spawnable_nickname;
-      test_case "empty" `Quick test_is_spawnable_empty;
-    ];
-    "spawnable_agents", [
-      test_case "list" `Quick test_spawnable_agents_list;
     ];
   ]

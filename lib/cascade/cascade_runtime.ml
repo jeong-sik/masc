@@ -111,18 +111,14 @@ let default_model_strings ~cascade_name =
     cascade_name |> cascade_name_to_string |> Keeper_cascade_profile.canonicalize
   in
   let all_labels =
-    match Provider_runtime_projection.explicit_local_model_label_result () with
-    | Ok label -> [ label ]
-    | Error _ -> (
-        match Provider_runtime_projection.preferred_execution_model_labels () with
-        | [] ->
-          (* Neither explicit llama label nor any preferred execution
-             label is configured.  Iter 25: surface so dashboards can
-             alert on missing execution-lane config. *)
-          Cascade_metrics.on_default_label_fallback
-            ~cascade:cascade_name ~reason:"no_execution_labels";
-          [ Provider_runtime_projection.default_local_fallback_label () ]
-        | labels -> labels)
+    match Provider_runtime_projection.preferred_execution_model_labels () with
+    | [] ->
+      (* No preferred execution label is configured. Surface so dashboards can
+         alert on missing execution-lane config. *)
+      Cascade_metrics.on_default_label_fallback
+        ~cascade:cascade_name ~reason:"no_execution_labels";
+      [ Provider_runtime_projection.default_local_fallback_label () ]
+    | labels -> labels
   in
   if is_local_only_cascade cascade_name then
     match List.filter is_local_label all_labels with

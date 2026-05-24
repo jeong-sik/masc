@@ -8,7 +8,7 @@ val _rp_int :
   max_v:int ->
   description:string ->
   unit ->
-  Runtime_params.t
+  'a
 
 val _rp_float :
   key:string ->
@@ -17,11 +17,11 @@ val _rp_float :
   max_v:float ->
   description:string ->
   unit ->
-  Runtime_params.t
+  'a
 
 val _rp_bool :
   key:string ->
   default:(unit -> bool) ->
   description:string ->
   unit ->
-  Runtime_params.t
+  'a

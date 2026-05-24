@@ -22,7 +22,6 @@ end
 
 (** {1 Dashboard JSON helpers (cascade-visible)} *)
 
-val dedup_strings : string list -> string list
 (** [dedup_strings items] is [List.sort_uniq String.compare items].
     Used by Dashboard_mission_assembly during agent / keeper list
     aggregation. *)

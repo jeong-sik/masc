@@ -37,9 +37,6 @@ type attention_context = Dashboard_mission_assembly.attention_context = {
   json : Yojson.Safe.t;
 }
 
-let dedup_strings items =
-  List.sort_uniq String.compare
-    (List.filter_map String_util.trim_to_option items)
 
 let top_item items =
   match items with
@@ -230,9 +227,9 @@ let rec evidence_preview_strings json =
       let compact = compact_text value in
       if compact = "" then [] else [ compact ]
   | `List items ->
-      items |> List.concat_map evidence_preview_strings |> dedup_strings |> take 4
+      items |> List.concat_map evidence_preview_strings |> Dashboard_utils.dedup_trim_strings |> take 4
   | `Assoc fields ->
-      fields |> List.map snd |> List.concat_map evidence_preview_strings |> dedup_strings |> take 4
+      fields |> List.map snd |> List.concat_map evidence_preview_strings |> Dashboard_utils.dedup_trim_strings |> take 4
   | _ -> []
 
 (* Issue #8395: root-level attention uses [target_type="root"].  This
@@ -257,7 +254,7 @@ let related_sessions_for_attention incident sessions =
                if List.mem actor_name session.member_names then Some session.session_id
                else None)
   in
-  dedup_strings (direct_session @ by_actor)
+  Dashboard_utils.dedup_trim_strings (direct_session @ by_actor)
 
 let session_by_id sessions session_id =
   List.find_opt (fun (session : session_context) -> String.equal session.session_id session_id) sessions
@@ -283,7 +280,7 @@ let build_attention_queue incidents actions sessions =
                |> List.filter_map (session_by_id sessions)
                |> List.concat_map (fun session -> session.member_names)
              in
-             dedup_strings
+             Dashboard_utils.dedup_trim_strings
                (from_sessions
                @
                match String_util.trim_to_option (string_field "actor" incident) with

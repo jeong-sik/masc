@@ -370,7 +370,7 @@ let operation_badges_for_session session operation_contexts =
            | _ -> None)
   in
   let session_operation_ids =
-    dedup_strings (Option.to_list session.operation_id @ linked_operation_ids)
+    Dashboard_utils.dedup_trim_strings (Option.to_list session.operation_id @ linked_operation_ids)
   in
   let from_contexts =
     operation_contexts

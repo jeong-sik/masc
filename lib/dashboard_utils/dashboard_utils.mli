@@ -26,6 +26,7 @@ val string_contains_ci : needle:string -> string -> bool
 (** [Some s] for non-empty trimmed text, [None] otherwise. *)
 
 val dedup_strings : string list -> string list
+val dedup_trim_strings : string list -> string list
 (** Order-preserving deduplication via local [String_set]. *)
 
 val compact_text : ?max_len:int -> string -> string

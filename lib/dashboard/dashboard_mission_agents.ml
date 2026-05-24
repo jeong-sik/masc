@@ -5,9 +5,6 @@
 
 include Dashboard_utils
 
-let dedup_strings items =
-  List.sort_uniq String.compare
-    (List.filter_map String_util.trim_to_option items)
 
 let event_detail_json event_json =
   member_assoc "detail" event_json
@@ -291,7 +288,7 @@ let build_agent_briefs config sessions attention_queue _room_json (keepers : Yoj
     |> List.map (fun (agent : Masc_domain.agent) -> (agent.name, agent))
   in
   let agent_names =
-    dedup_strings
+    Dashboard_utils.dedup_trim_strings
       (List.map (fun (agent : Masc_domain.agent) -> agent.name) room_agents
       @ List.concat_map (fun (session : session_context) -> session.member_names) sessions)
   in

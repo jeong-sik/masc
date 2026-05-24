@@ -99,23 +99,22 @@ let broadcast_tools_list_changed () =
   Sse.broadcast (jsonrpc_notification "notifications/tools/list_changed")
 ;;
 
-let dedup_strings items = items |> List.sort_uniq String.compare
 let core_status_resource_ids = [ "status"; "status.json"; "events"; "events.json" ]
 
 let task_resource_ids =
-  dedup_strings (core_status_resource_ids @ [ "tasks"; "tasks.json" ])
+  Dashboard_utils.dedup_strings (core_status_resource_ids @ [ "tasks"; "tasks.json" ])
 ;;
 
 let agent_resource_ids =
-  dedup_strings (core_status_resource_ids @ [ "who"; "who.json"; "agents"; "agents.json" ])
+  Dashboard_utils.dedup_strings (core_status_resource_ids @ [ "who"; "who.json"; "agents"; "agents.json" ])
 ;;
 
 let message_resource_ids =
-  dedup_strings (core_status_resource_ids @ [ "messages"; "messages.json" ])
+  Dashboard_utils.dedup_strings (core_status_resource_ids @ [ "messages"; "messages.json" ])
 ;;
 
 let worktree_resource_ids =
-  dedup_strings (core_status_resource_ids @ [ "worktrees"; "worktrees.json" ])
+  Dashboard_utils.dedup_strings (core_status_resource_ids @ [ "worktrees"; "worktrees.json" ])
 ;;
 
 let resource_id_of_uri uri =

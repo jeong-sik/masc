@@ -40,6 +40,9 @@ let dedup_strings (xs : string list) : string list =
   in
   go String_set.empty [] xs
 
+let dedup_trim_strings items =
+  List.sort_uniq String.compare
+    (List.filter_map String_util.trim_to_option items)
 let string_list_of_json json =
   match json with
   | `List items ->

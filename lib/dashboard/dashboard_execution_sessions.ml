@@ -158,7 +158,7 @@ let build_session_seed session_json _cards =
     let portal_count = int_field "portal_count" communication in
     let seen_count = int_field "seen_agents_count" summary in
     let member_names =
-      dedup_strings
+      Dashboard_utils.dedup_trim_strings
         (Dashboard_utils.string_list_of_json (member_assoc "agent_names" meta)
         @ Dashboard_utils.string_list_of_json (member_assoc "active_agents" summary)
         @ Dashboard_utils.string_list_of_json (member_assoc "planned_participants" summary))

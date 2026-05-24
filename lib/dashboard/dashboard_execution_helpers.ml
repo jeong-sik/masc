@@ -203,9 +203,6 @@ let skill_route_summary_of_keeper keeper =
                 source;
               ]))
 
-let dedup_strings items =
-  List.sort_uniq String.compare
-    (List.filter_map String_util.trim_to_option items)
 
 (** severity_rank works on raw JSON strings — broader matching than Dashboard_utils.tone_rank.
     Used by dashboard_mission / dashboard_mission_assembly for external JSON data. *)

@@ -114,6 +114,8 @@ let runtime_pressure_class_of_failure_reason = function
   | Some
       ( Keeper_registry.Fiber_unresolved
       | Keeper_registry.Exception _
+      | Keeper_registry.Turn_overflow_pause
+      | Keeper_registry.Turn_livelock_pause
       | Keeper_registry.Stale_termination_storm _
       | Keeper_registry.Stale_fleet_batch _
       | Keeper_registry.Ambiguous_partial_commit _ ) ->

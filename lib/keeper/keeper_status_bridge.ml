@@ -524,6 +524,18 @@ let runtime_blocker_surface_of_failure_reason (reason : Keeper_registry.failure_
            "Keeper fiber did not resolve a terminal outcome; supervisor cleanup is \
             required."
          Fiber_unresolved)
+  | Keeper_registry.Turn_overflow_pause ->
+    Some
+      { blocker_class = "turn_overflow_pause"
+      ; summary = "Context overflow with compact retry exhausted; keeper was auto-paused."
+      ; continue_gate = false
+      }
+  | Keeper_registry.Turn_livelock_pause ->
+    Some
+      { blocker_class = "turn_livelock_pause"
+      ; summary = "Turn livelock guard blocked dispatch; keeper was auto-paused."
+      ; continue_gate = false
+      }
   | Keeper_registry.Exception detail ->
     Some
       { blocker_class = "exception"

@@ -228,6 +228,8 @@ let failure_reason_batch_root_cause
       Some Cascade_unhealthy
   | Heartbeat_consecutive_failures _
   | Turn_consecutive_failures _
+  | Turn_overflow_pause
+  | Turn_livelock_pause
   | Tool_required_unsatisfied _
   | Ambiguous_partial_commit _
   | Fiber_unresolved

@@ -308,7 +308,7 @@ function Deck({ tasks, goals, providers, cascade }) {
               ))}
             </div>
             <div style={{font:"10px/1.5 var(--font-mono)",color:"var(--color-fg-muted)",paddingTop:4}}>
-              Triggered by <span style={{color:"var(--color-accent-fg)"}}>nick0cave</span> on <span style={{color:"var(--color-fg-primary)"}}>t-9f2a</span> · soft rate-limit on anthropic → fell through to moonshot at step 2 · kimi-k2 responded in 420ms.
+              Triggered by <span style={{color:"var(--color-accent-fg)"}}>nick0cave</span> on <span style={{color:"var(--color-fg-primary)"}}>t-9f2a</span> · soft rate-limit on provider-a → fell through to provider-b at step 2 · model-c responded in 420ms.
             </div>
           </div>
         )}
@@ -321,7 +321,7 @@ function Deck({ tasks, goals, providers, cascade }) {
   ↳ task=t-9f2a assigned to nick0cave
 
 > keeper.trace({ cascade: "cascade-3f19" })
-  ↳ anthropic[miss 820ms] → moonshot[hit 420ms] · total 1240ms
+  ↳ provider-a[miss 820ms] → provider-b[hit 420ms] · total 1240ms
 
 > keeper.verify("suite-merge-blockers")
   ↳ 3 FAIL / 47 PASS

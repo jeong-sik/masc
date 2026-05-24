@@ -30,10 +30,10 @@ window.MASC_DATA = (function () {
   ];
 
   const providers = [
-    { id: "anthropic", model: "claude-haiku-4-5",   tps: 1.24, status: "ok",   cascade: 1 },
-    { id: "moonshot",  model: "kimi-k2",            tps: 0.88, status: "ok",   cascade: 2 },
-    { id: "openai",    model: "gpt-4o-mini",        tps: 1.02, status: "warn", cascade: 3 },
-    { id: "xai",       model: "grok-2",             tps: 0.76, status: "idle", cascade: 4 },
+    { id: "provider-a", model: "model-a-haiku",   tps: 1.24, status: "ok",   cascade: 1 },
+    { id: "provider-b",  model: "model-c",            tps: 0.88, status: "ok",   cascade: 2 },
+    { id: "provider-d",    model: "model-d-mini",        tps: 1.02, status: "warn", cascade: 3 },
+    { id: "provider-e",       model: "model-e",             tps: 0.76, status: "idle", cascade: 4 },
   ];
 
   // Event stream for ticker and swimlanes
@@ -47,7 +47,7 @@ window.MASC_DATA = (function () {
     { t: "16:30:55Z", keeper: "masc-improver", kind: "tool",  text: "tool.grep 'claim(' → 14 hits" },
     { t: "16:30:40Z", keeper: "scholar",       kind: "note",  text: "indexed 82 files · cold-read done" },
     { t: "16:30:18Z", keeper: "nick0cave",     kind: "claim", text: "claimed t-c022 (backport)" },
-    { t: "16:29:50Z", keeper: "sangsu",        kind: "flag",  text: "cascade hit@step=2 — 1.24s anthropic→moonshot" },
+    { t: "16:29:50Z", keeper: "sangsu",        kind: "flag",  text: "cascade hit@step=2 — 1.24s provider-a→provider-b" },
     { t: "16:29:22Z", keeper: "qa-king",       kind: "err",   text: "flake in test_cascade_retry · re-running" },
   ];
 
@@ -64,9 +64,9 @@ window.MASC_DATA = (function () {
   const cascade = {
     id: "cascade-3f19",
     steps: [
-      { provider: "anthropic", status: "miss", ms: 820, reason: "rate-limit.soft" },
-      { provider: "moonshot",  status: "hit",  ms: 420, reason: "ok" },
-      { provider: "openai",    status: "—",    ms: 0,   reason: "skipped" },
+      { provider: "provider-a", status: "miss", ms: 820, reason: "rate-limit.soft" },
+      { provider: "provider-b",  status: "hit",  ms: 420, reason: "ok" },
+      { provider: "provider-d",    status: "—",    ms: 0,   reason: "skipped" },
     ],
     total_ms: 1240,
   };

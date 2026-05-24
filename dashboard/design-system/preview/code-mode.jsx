@@ -75,7 +75,7 @@ const EDITOR_LINES = [
   { n: 12, blame: { k: 'sangsu', text: 'sangsu · 1h' }, cursor: { k: 'sangsu' }, diff: 'add', code: <>&nbsp;&nbsp;&nbsp;&nbsp;<span className="tok-key">if</span> (<span className="tok-key">this</span>.<span className="tok-prop">state</span> !== <span className="tok-str">'running'</span>) <span className="tok-key">return</span>;</> },
   { n: 13, blame: { k: 'sangsu', text: 'sangsu · 1h' }, code: <>&nbsp;&nbsp;&nbsp;&nbsp;<span className="tok-fn">emit</span>(<span className="tok-str">'heartbeat'</span>, {'{'} <span className="tok-prop">id</span>: <span className="tok-key">this</span>.<span className="tok-prop">id</span>, <span className="tok-prop">ts</span>: <span className="tok-type">Date</span>.<span className="tok-fn">now</span>() {'}'});</> },
   { n: 14, blame: { k: 'sangsu', text: 'sangsu · 1h' }, code: <>&nbsp;&nbsp;&nbsp;&nbsp;<span className="tok-key">await</span> <span className="tok-key">this</span>.<span className="tok-fn">pullTasks</span>();</> },
-  { n: 15, blame: { k: 'masc', text: 'masc · 4h' }, note: true, code: <>&nbsp;&nbsp;&nbsp;&nbsp;<span className="tok-key">await</span> <span className="tok-key">this</span>.<span className="tok-fn">runCascade</span>(<span className="tok-str">'moonshot'</span>);</> },
+  { n: 15, blame: { k: 'masc', text: 'masc · 4h' }, note: true, code: <>&nbsp;&nbsp;&nbsp;&nbsp;<span className="tok-key">await</span> <span className="tok-key">this</span>.<span className="tok-fn">runCascade</span>(<span className="tok-str">'provider-b'</span>);</> },
   { n: 16, blame: { k: 'masc', text: 'masc · 4h' }, code: <>&nbsp;&nbsp;{'}'}</> },
   { n: 17, code: <>{'}'}</> },
 ];
@@ -133,7 +133,7 @@ function Editor({ height = 520 }) {
 const THREADS = [
   { kind: 'flag', anchor: 'keeper.ts:10', author: 'qa-king', ts: '2m', body: '`tick()` has no error handler — if `pullTasks` throws we silently swallow it and the heartbeat loop continues forever.', replies: 3 },
   { kind: 'question', anchor: 'keeper.ts:12', author: 'sangsu', ts: '1h', body: 'Should this also bail when `state === \'draining\'`? We have a draining state now from goal-merge-blockers.', replies: 1 },
-  { kind: 'suggest', anchor: 'keeper.ts:15', author: 'nick0cave', ts: '14m', body: 'Consider gating `runCascade(\'moonshot\')` behind the goal priority. P1 goals only? We cascade too eagerly.', replies: 2 },
+  { kind: 'suggest', anchor: 'keeper.ts:15', author: 'nick0cave', ts: '14m', body: 'Consider gating `runCascade(\'provider-b\')` behind the goal priority. P1 goals only? We cascade too eagerly.', replies: 2 },
   { kind: 'note', anchor: 'keeper.ts:5–9', author: 'masc-improver', ts: '4h', body: 'Interface change — GoalRef replaces the old string goal id. Downstream: composer, deck, and drawer.', replies: 0 },
   { kind: 'approve', anchor: 'heartbeat.ts:44', author: 'nick0cave', ts: '22m', body: 'LGTM. Matches the spec from goal-cockpit-polish.', replies: 0, resolved: true, drift: true },
 ];
@@ -353,7 +353,7 @@ function SplitMode({ w = 1400, h = 680 }) {
         <span style={{ width: 1, height: 10, background: 'var(--color-border-strong)' }} />
         <span>keeper.ts · 47 LOC · +18 −4</span>
         <span style={{ width: 1, height: 10, background: 'var(--color-border-strong)' }} />
-        <span>cascade: <span style={{ color: 'var(--color-accent-fg)' }}>moonshot@2 · 1.24s</span></span>
+        <span>cascade: <span style={{ color: 'var(--color-accent-fg)' }}>provider-b@2 · 1.24s</span></span>
         <span style={{ marginLeft: 'auto' }}>⌘K palette · ⇥ focus · esc drawer</span>
       </div>
     </div>
@@ -382,7 +382,7 @@ function ExplodeLayers({ w = 900, h = 560 }) {
         <div style={{ paddingLeft: 18 }}><span style={{ color: '#c195e8' }}>async</span> <span style={{ color: '#e8c976' }}>tick</span>() {'{'}</div>
         <div style={{ paddingLeft: 36 }}><span style={{ color: '#c195e8' }}>if</span> (this.state !== <span style={{ color: '#a8c97a' }}>'running'</span>) return;</div>
         <div style={{ paddingLeft: 36 }}><span style={{ color: '#e8c976' }}>emit</span>(<span style={{ color: '#a8c97a' }}>'heartbeat'</span>);</div>
-        <div style={{ paddingLeft: 36 }}><span style={{ color: '#c195e8' }}>await</span> this.<span style={{ color: '#e8c976' }}>runCascade</span>(<span style={{ color: '#a8c97a' }}>'moonshot'</span>);</div>
+        <div style={{ paddingLeft: 36 }}><span style={{ color: '#c195e8' }}>await</span> this.<span style={{ color: '#e8c976' }}>runCascade</span>(<span style={{ color: '#a8c97a' }}>'provider-b'</span>);</div>
         <div style={{ paddingLeft: 18 }}>{'}'}</div>
         <div>{'}'}</div>
       </div>

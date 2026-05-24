@@ -14,7 +14,7 @@ const thread = (patch: Partial<AnchoredThread>): AnchoredThread => ({
     file_path: file,
     line_start: 34,
     line_end: 35,
-    symbol_hint: 'if:moonshot-tool-choice',
+    symbol_hint: 'if:provider-b-tool-choice',
   },
   body: 'Schema failure matches the live cascade logs.',
   created_ms: 1000,

@@ -77,7 +77,7 @@ function ComposerMultiLine() {
     <div className="cb-board">
       <div style={{flex:1, background:'var(--color-bg-page)'}} aria-hidden="true" />
       <div className="cb-composer" role="region" aria-label="Multi-line command composer">
-        <pre aria-label="cascade.run(goal=&quot;goal-merge-blockers&quot;, providers=[anthropic, moonshot], dry_run=false)" style={{margin:0, font:'inherit', background:'transparent'}}>
+        <pre aria-label="cascade.run(goal=&quot;goal-merge-blockers&quot;, providers=[provider-a, provider-b], dry_run=false)" style={{margin:0, font:'inherit', background:'transparent'}}>
           <div className="line">
             <span className="prompt" aria-hidden="true">masc&gt;</span>
             <span className="fn" aria-hidden="true">cascade.run</span>
@@ -93,8 +93,8 @@ function ComposerMultiLine() {
             <span className="arg">providers</span>
             <span>=</span>
             <span>[</span>
-            <Chip kind="ghost">anthropic</Chip>
-            <Chip kind="ghost">moonshot</Chip>
+            <Chip kind="ghost">provider-a</Chip>
+            <Chip kind="ghost">provider-b</Chip>
             <span>]</span>
             <span>,</span>
           </div>
@@ -123,17 +123,17 @@ function StatusStandard() {
   return (
     <div className="cb-board">
       <div style={{flex:1, background:'var(--color-bg-page)'}} aria-hidden="true" />
-      <div className="cb-statusbar" role="status" aria-live="polite" aria-label="System status: connected, build 2604, version 0.42.1, anthropic ok, moonshot ok, openai degraded, xai offline, TPS 1.24s, time 16:32:45 UTC">
+      <div className="cb-statusbar" role="status" aria-live="polite" aria-label="System status: connected, build 2604, version 0.42.1, provider-a ok, provider-b ok, provider-d degraded, provider-e offline, TPS 1.24s, time 16:32:45 UTC">
         <span className="seg" role="group" aria-label="Connection: connected"><span className="on" aria-hidden="true">●</span>CONNECTED</span>
         <span className="sep" aria-hidden="true" />
         <span className="seg" role="group" aria-label="Build 2604">BUILD <span className="brass">2604</span></span>
         <span className="seg" role="group" aria-label="Version 0.42.1">v0.42.1</span>
         <span className="sep" aria-hidden="true" />
         <span className="seg" aria-hidden="true">PROVIDERS</span>
-        <span className="seg" role="group" aria-label="anthropic ok"><span className="on" aria-hidden="true">●</span>anthropic</span>
-        <span className="seg" role="group" aria-label="moonshot ok"><span className="on" aria-hidden="true">●</span>moonshot</span>
-        <span className="seg" role="group" aria-label="openai degraded" style={{color:'var(--warn-fg)'}}><span aria-hidden="true">●</span>openai</span>
-        <span className="seg off" role="group" aria-label="xai offline"><span aria-hidden="true">●</span>xai</span>
+        <span className="seg" role="group" aria-label="provider-a ok"><span className="on" aria-hidden="true">●</span>provider-a</span>
+        <span className="seg" role="group" aria-label="provider-b ok"><span className="on" aria-hidden="true">●</span>provider-b</span>
+        <span className="seg" role="group" aria-label="provider-d degraded" style={{color:'var(--warn-fg)'}}><span aria-hidden="true">●</span>provider-d</span>
+        <span className="seg off" role="group" aria-label="provider-e offline"><span aria-hidden="true">●</span>provider-e</span>
         <span className="seg push-right" role="group" aria-label="TPS 1.24 seconds">TPS <span className="brass">1.24s</span></span>
         <span className="sep" aria-hidden="true" />
         <span className="seg" role="group" aria-label="Clock 16:32:45 UTC">16:32:45Z</span>
@@ -202,7 +202,7 @@ function DrawerTask() {
             <dt>TOOL</dt><dd>tool.write_file</dd>
             <dt>DIFF</dt><dd>+18 −4 · keeper.ts</dd>
             <dt>STARTED</dt><dd>16:31:27Z</dd>
-            <dt>CASCADE</dt><dd>moonshot @step=2 · 1.24s</dd>
+            <dt>CASCADE</dt><dd>provider-b @step=2 · 1.24s</dd>
           </dl>
         </section>
         <section aria-labelledby="drawer-task-review">
@@ -316,10 +316,10 @@ function DrawerKeeper() {
           <Dot kind="brass" beat style={{marginRight:6, verticalAlign:'middle'}} />
           nick0cave
         </div>
-        <div className="meta" role="group" aria-label="Keeper metadata: running, 8 tool calls in 60 seconds, anthropic claude-haiku-4-5">
+        <div className="meta" role="group" aria-label="Keeper metadata: running, 8 tool calls in 60 seconds, provider-a model-a-haiku">
           <Chip kind="brass">RUNNING</Chip>
           <Chip kind="ghost">8 TOOL CALLS / 60s</Chip>
-          <Chip kind="ghost">anthropic · claude-haiku-4-5</Chip>
+          <Chip kind="ghost">provider-a · model-a-haiku</Chip>
         </div>
       </div>
       <div className="body">
@@ -379,7 +379,7 @@ function BoardPostCard() {
   // SSOT-token rendering: --accent-30 (legacy alias) → rgb(--color-accent-glow / .30),
   // --white-6 (legacy alias) → rgb(--color-fg-primary / .06).
   const posts = [
-    { id: 'p-841', author: 'nick0cave',     t: '2m',  title: 'Cascade weight=0 trial: codex_cli regression?', votes: 12, replies: 4 },
+    { id: 'p-841', author: 'nick0cave',     t: '2m',  title: 'Cascade weight=0 trial: cli-tool-a regression?', votes: 12, replies: 4 },
     { id: 'p-842', author: 'masc-improver', t: '14m', title: 'Persona TOML reconcile drift — 2880 redundant writes/day',  votes: 7,  replies: 2 },
     { id: 'p-843', author: 'sangsu',        t: '38m', title: 'OAS pin SHA vs cap range drift checklist', votes: 5,  replies: 1 },
   ];
@@ -582,13 +582,13 @@ function BoardMarkdownPreview() {
             cascade weight=0 trial · proposal
           </h3>
           <p style={{margin:'0.35rem 0', color:'var(--color-fg-secondary)'}}>
-            Drop <code style={{fontFamily:'var(--font-mono)', color:'var(--color-accent-fg)'}}>codex_cli</code>
+            Drop <code style={{fontFamily:'var(--font-mono)', color:'var(--color-accent-fg)'}}>cli-tool-a</code>
             from the cascade for 2 hours; measure rollout-thread-not-found rate against
             yesterday&apos;s baseline.
           </p>
           <ul style={{margin:'0.35rem 0', paddingLeft:18, color:'var(--color-fg-secondary)'}}>
-            <li>Hypothesis: codex internal 5-model rotation accounts for ~33% of cascade-fallback events.</li>
-            <li>Counter-hypothesis: removing it surfaces fallback elsewhere (gemini_cli ReDoS).</li>
+            <li>Hypothesis: agent-code internal 5-model rotation accounts for ~33% of cascade-fallback events.</li>
+            <li>Counter-hypothesis: removing it surfaces fallback elsewhere (cli-tool-b ReDoS).</li>
           </ul>
           <blockquote
             style={{
@@ -615,7 +615,7 @@ function BoardMarkdownPreview() {
 {`# trial cascade
 cascade.run(
   goal="goal-merge-blockers",
-  providers=[anthropic, moonshot],   # codex_cli omitted
+  providers=[provider-a, provider-b],   # cli-tool-a omitted
   dry_run=false,
 )
 # expected: rollout-thread-not-found  ↓ 30%

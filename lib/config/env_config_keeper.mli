@@ -319,6 +319,21 @@ module CascadeTierAdmission : sig
       emission. *)
 end
 
+module CascadeTierWait : sig
+  val enabled : unit -> bool
+  (** [MASC_CASCADE_TIER_WAIT_ENABLED] flag. Default false.
+
+      When true, tier admission failures enter a bounded wait loop
+      with backoff instead of immediately returning [Capacity_full].
+      Requires [MASC_CASCADE_TIER_ADMISSION_ENABLED] to be true. *)
+
+  val timeout_s : unit -> float
+  (** [MASC_CASCADE_TIER_WAIT_TIMEOUT_S]. Default 30.0. *)
+
+  val max_retries : unit -> int option
+  (** [MASC_CASCADE_TIER_WAIT_MAX_RETRIES]. Default [None] (unlimited). *)
+end
+
 (** {1 Cascade runtime overrides} *)
 
 module KeeperCascade : sig

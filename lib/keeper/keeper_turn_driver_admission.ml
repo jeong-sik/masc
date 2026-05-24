@@ -10,6 +10,9 @@ open Result.Syntax
 
 let keeper_cascade_tier_admission = Cascade_tier_admission.create ()
 
+let keeper_cascade_wait_scheduler =
+  Cascade_tier_wait_scheduler.create keeper_cascade_tier_admission
+
 let cascade_tier_admission_policy_of_priority priority =
   (* RFC-0126: exhaustive typed match over Llm_provider.Request_priority.t
      instead of the previous string-classifier (`to_string |> match`) so that
@@ -27,16 +30,64 @@ let cascade_tier_admission_policy_of_priority priority =
 
 let with_keeper_cascade_tier_admission
     ?(admission = keeper_cascade_tier_admission)
+    ?(wait_scheduler = keeper_cascade_wait_scheduler)
     ?(enabled = Env_config_keeper.CascadeTierAdmission.enabled ())
+    ?sw
     ~tier_id
     ~admission_policy
     f =
-  if enabled
-  then
-    Cascade_tier_admission.with_admission admission ~tier_id
-      ~admission_policy f
-  else
+  if not enabled then
     Ok (f ())
+  else begin
+    match admission_policy with
+    | Cascade_tier_admission.Bypass ->
+        (* Side tasks skip admission entirely *)
+        Ok (f ())
+    | Cascade_tier_admission.Required ->
+        let wait_enabled =
+          Env_config_keeper.CascadeTierWait.enabled ()
+        in
+        if wait_enabled then begin
+          match sw with
+          | None ->
+              (* No switch available — wait scheduler requires one for
+                 fork_daemon.  Fall back to non-blocking admission. *)
+              Cascade_tier_admission.with_admission admission
+                ~tier_id ~admission_policy f
+          | Some sw ->
+              (* Phase C.2: bounded wait with backoff *)
+              let wait_config =
+                { Cascade_tier_wait_scheduler.backoff =
+                    Cascade_tier_wait_scheduler.Exponential
+                      { initial_s = 0.5; factor = 2.0; max_s = 8.0 };
+                  timeout_s =
+                    Env_config_keeper.CascadeTierWait.timeout_s ();
+                  max_retries =
+                    Env_config_keeper.CascadeTierWait.max_retries ();
+                }
+              in
+              (match Cascade_tier_wait_scheduler.try_admission_or_wait
+                       wait_scheduler ~tier_id ~wait_config ~sw f with
+               | Ok v -> Ok v
+               | Error (Cascade_tier_wait_scheduler.Timeout_expired _
+                       | Cascade_tier_wait_scheduler.Max_retries_exceeded _) ->
+                   Error (Cascade_saturation_signal.Inflight_capacity_full
+                            { tier_id;
+                              max_inflight =
+                                Cascade_tier_admission.configured_max admission
+                                  ~tier_id })
+               | Error (Cascade_tier_wait_scheduler.Cancelled _) ->
+                   Error (Cascade_saturation_signal.Inflight_capacity_full
+                            { tier_id;
+                              max_inflight =
+                                Cascade_tier_admission.configured_max admission
+                                  ~tier_id }))
+        end
+        else
+          (* Phase B.2: non-blocking admission *)
+          Cascade_tier_admission.with_admission admission ~tier_id
+            ~admission_policy f
+  end
 
 let cascade_tier_admission_blocked_decision signal =
   `Assoc

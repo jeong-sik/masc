@@ -4,13 +4,29 @@
 open Alcotest
 module S = Set_util
 
-(* ---------- count_difference ---------- *)
-
 (* Mini event model isomorphic to telemetry_eio's joined/left flow. *)
 type ev =
   | Joined of string
   | Left of string
   | Other
+
+(* ---------- count_distinct ---------- *)
+
+let test_count_distinct_empty () =
+  check int "empty" 0 (S.count_distinct (fun x -> Some x) [])
+;;
+
+let test_count_distinct_skips_none_and_collapses_duplicates () =
+  let key = function
+    | Joined id -> Some id
+    | Left id -> Some id
+    | Other -> None
+  in
+  let events = [ Joined "a"; Left "a"; Other; Joined "b"; Joined "b" ] in
+  check int "distinct ids" 2 (S.count_distinct key events)
+;;
+
+(* ---------- count_difference ---------- *)
 
 let present = function
   | Joined id -> Some id
@@ -56,7 +72,14 @@ let test_count_difference_present_after_absent () =
 let () =
   run
     "set_util"
-    [ ( "count_difference"
+    [ ( "count_distinct"
+      , [ test_case "empty" `Quick test_count_distinct_empty
+        ; test_case
+            "skips none and collapses duplicates"
+            `Quick
+            test_count_distinct_skips_none_and_collapses_duplicates
+        ] )
+    ; ( "count_difference"
       , [ test_case "empty" `Quick test_count_difference_empty
         ; test_case
             "all present no absent"

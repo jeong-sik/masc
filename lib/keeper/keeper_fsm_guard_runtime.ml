@@ -29,3 +29,6 @@ let wrap_unit ~action ~stage thunk =
     bump_counter ~action ~stage;
     Printexc.raise_with_backtrace exn bt
 ;;
+
+let refresh_policy_for_test () = ()
+let assert_mode_for_test () = true

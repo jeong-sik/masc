@@ -158,13 +158,6 @@ let repos_dir_of_keeper config agent_name =
   in
   Filename.concat config.base_path repos_rel
 
-let strip_trailing_slashes path =
-  let rec loop i =
-    if i > 0 && path.[i - 1] = '/' then loop (i - 1) else i
-  in
-  let len = loop (String.length path) in
-  if len = String.length path then path else String.sub path 0 len
-
 let keeper_visible_worktree_path ~config ~agent_name ~host_path =
   Keeper_sandbox_config.visible_path_of_host_path
     ~base_path:config.base_path

@@ -137,7 +137,6 @@ let get_store (config : Coord_query.config) : Dated_jsonl.t =
       store)
 ;;
 
-let json_string_opt key json = Safe_ops.json_string_opt key json
 
 let json_int_opt key json =
   match json with
@@ -241,7 +240,7 @@ let iso8601_of_unix ts =
 ;;
 
 let claim_event_of_json json =
-  match json_string_opt "event_type" json with
+  match Safe_ops.json_string_opt "event_type" json with
   | Some "claim_created" ->
     (match claim_kind_of_string (Safe_ops.json_string ~default:"" "kind" json) with
      | Some kind ->
@@ -261,7 +260,7 @@ let claim_event_of_json json =
            ; keeper_name
            ; trace_id = ident.trace_id
            ; turn_number = json_int_opt "turn_number" json
-           ; task_id = json_string_opt "task_id" json
+           ; task_id = Safe_ops.json_string_opt "task_id" json
            ; kind
            ; subject
            ; surface
@@ -274,7 +273,7 @@ let claim_event_of_json json =
 ;;
 
 let resolution_event_of_json json =
-  match json_string_opt "event_type" json with
+  match Safe_ops.json_string_opt "event_type" json with
   | Some "claim_resolved" ->
     (match claim_status_of_string (Safe_ops.json_string ~default:"" "status" json) with
      | Some status ->
@@ -285,17 +284,17 @@ let resolution_event_of_json json =
        else
          Some
            { claim_id
-           ; agent_name = json_string_opt "agent_name" json
-           ; keeper_name = json_string_opt "keeper_name" json
-           ; task_id = json_string_opt "task_id" json
+           ; agent_name = Safe_ops.json_string_opt "agent_name" json
+           ; keeper_name = Safe_ops.json_string_opt "keeper_name" json
+           ; task_id = Safe_ops.json_string_opt "task_id" json
            ; kind =
-               (match json_string_opt "kind" json with
+               (match Safe_ops.json_string_opt "kind" json with
                 | Some value -> claim_kind_of_string value
                 | None -> None)
-           ; subject = json_string_opt "subject" json
+           ; subject = Safe_ops.json_string_opt "subject" json
            ; status
            ; resolved_at
-           ; reason = json_string_opt "reason" json
+           ; reason = Safe_ops.json_string_opt "reason" json
            ; supporting_evidence_refs =
                normalize_refs (json_string_list "supporting_evidence_refs" json)
            }
@@ -325,7 +324,7 @@ let decision_ts_unix_opt json =
   if ts_unix > 0.0
   then Some ts_unix
   else (
-    match json_string_opt "ts" json with
+    match Safe_ops.json_string_opt "ts" json with
     | Some value -> Types_core.parse_iso8601_opt value
     | None -> None)
 ;;
@@ -689,7 +688,7 @@ let record_task_transition
         ~evidence_refs:base_refs
     | Masc_domain.Release | Masc_domain.Cancel ->
       let reason =
-        match json_string_opt "reason" details with
+        match Safe_ops.json_string_opt "reason" details with
         | Some value ->
           let trimmed = String.trim value in
           if trimmed <> ""

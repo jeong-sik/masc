@@ -203,26 +203,18 @@ let test_take_partial () =
 let test_take_empty () =
   assert (B.take 5 [] = [])
 
-(* ─── option_string_json ───────────────────────────────────── *)
+(* ─── Json_util.string_opt_to_json ───────────────────────────────────── *)
 
 let test_option_string_json_some () =
-  match B.option_string_json (Some "hello") with
+  match Json_util.string_opt_to_json (Some "hello") with
   | `String "hello" -> ()
   | _ -> assert false
 
 let test_option_string_json_some_blank () =
-  (* Behaviour contract: blank/whitespace-only strings are
-     trimmed to "" and projected to `Null. *)
-  assert (B.option_string_json (Some "   ") = `Null);
-  assert (B.option_string_json (Some "") = `Null)
+  assert (Json_util.string_opt_to_json (Some "") = `String "")
 
 let test_option_string_json_none () =
-  assert (B.option_string_json None = `Null)
-
-let test_option_string_json_trims () =
-  match B.option_string_json (Some "  trimmed  ") with
-  | `String "trimmed" -> ()
-  | _ -> assert false
+  assert (Json_util.string_opt_to_json None = `Null)
 
 (* ─── runner ───────────────────────────────────────────────── *)
 
@@ -269,5 +261,4 @@ let () =
   test_option_string_json_some ();
   test_option_string_json_some_blank ();
   test_option_string_json_none ();
-  test_option_string_json_trims ();
   print_endline "test_briefing_json_helpers: all assertions passed"

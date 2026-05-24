@@ -143,8 +143,6 @@ let all_gates () =
 let enabled () = not (env_bool "MASC_TOOL_RESOURCE_GATE_DISABLED")
 let wait_timeout_sec () = env_float "MASC_TOOL_GATE_WAIT_TIMEOUT_SEC" 20.0
 
-let json_string_opt key json = Safe_ops.json_string_opt key json
-
 let command_mentions_docker cmd =
   let cmd = String.lowercase_ascii cmd in
   String.equal (String.trim cmd) "docker"
@@ -238,7 +236,7 @@ let classify_keeper_shell_op_value raw =
 ;;
 
 let classify_keeper_shell_op args =
-  match json_string_opt "op" args with
+  match Safe_ops.json_string_opt "op" args with
   | Some raw ->
     (match classify_keeper_shell_op_value raw with
      | Known_shell_op resource_class -> resource_class

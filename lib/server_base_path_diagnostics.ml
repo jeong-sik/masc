@@ -24,15 +24,6 @@ type t = {
   warning : string option;
 }
 
-let strip_trailing_slashes path =
-  let rec loop idx =
-    if idx <= 1 then String.sub path 0 idx
-    else if path.[idx - 1] = '/' then loop (idx - 1)
-    else String.sub path 0 idx
-  in
-  if path = "" then "."
-  else loop (String.length path)
-
 let normalize_path ~cwd path =
   let base = String_util.strip_trailing_slashes (String.trim path) in
   let absolute =

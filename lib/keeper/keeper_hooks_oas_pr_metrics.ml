@@ -41,9 +41,9 @@ let pr_review_action_metric_event_of_tool_io
            pr_number =
              Dashboard_utils.first_some
                (match output_json with
-                | Some json -> json_int_opt "pr_number" json
+                | Some json -> Safe_ops.json_int_opt "pr_number" json
                 | None -> None)
-               (json_int_opt "pr_number" input);
+               (Safe_ops.json_int_opt "pr_number" input);
            comment_id = None;
            success;
            route_via;
@@ -71,15 +71,15 @@ let pr_review_action_metric_event_of_tool_io
         pr_number =
           Dashboard_utils.first_some
             (match output_json with
-             | Some json -> json_int_opt "pr_number" json
+             | Some json -> Safe_ops.json_int_opt "pr_number" json
              | None -> None)
-            (json_int_opt "pr_number" input);
+            (Safe_ops.json_int_opt "pr_number" input);
         comment_id =
           Dashboard_utils.first_some
             (match output_json with
-             | Some json -> json_int_opt "comment_id" json
+             | Some json -> Safe_ops.json_int_opt "comment_id" json
              | None -> None)
-            (json_int_opt "comment_id" input);
+            (Safe_ops.json_int_opt "comment_id" input);
         success;
         route_via;
         credential;

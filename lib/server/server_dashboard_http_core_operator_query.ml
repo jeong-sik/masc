@@ -7,7 +7,6 @@
 open Masc_domain
 
 (* Sibling dependencies — already extracted in earlier godfile decomp PRs. *)
-let json_bool_opt = Server_dashboard_http_core_json.json_bool_opt
 let operator_generated_at_iso = Server_dashboard_http_core_json.operator_generated_at_iso
 let operator_cache_json = Server_dashboard_http_core_json.operator_cache_json
 
@@ -58,7 +57,7 @@ let operator_digest_query_json ~actor ~target_type ~target_id ~include_workers
     ; "target_type", Json_util.string_opt_to_json target_type
     ; "target_id", Json_util.string_opt_to_json target_id
     ; "effective_target_type", `String effective_target_type
-    ; "include_workers", json_bool_opt include_workers
+    ; "include_workers", Json_util.bool_opt_to_json include_workers
     ; "default_namespace_request", `Bool default_namespace_request
     ]
 ;;

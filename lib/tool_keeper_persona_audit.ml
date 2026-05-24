@@ -2,9 +2,6 @@ open Tool_args
 open Keeper_types
 open Keeper_runtime
 
-let json_bool_opt = function
-  | Some value -> `Bool value
-  | None -> `Null
 
 
 let existing_path_json ?(candidates = []) path_opt =
@@ -310,12 +307,12 @@ let item ctx requested_name =
         match active_goal_scope with
         | Some scope -> active_goal_scope_audit_to_json scope
         | None -> `Null );
-      ("autoboot_enabled", json_bool_opt autoboot_enabled);
+      ("autoboot_enabled", Json_util.bool_opt_to_json autoboot_enabled);
       ("dormant", `Bool dormant_autoboot_disabled);
       ( "dormant_reason",
         if dormant_autoboot_disabled then `String "autoboot_disabled" else `Null );
-      ("paused", json_bool_opt paused);
-      ("keepalive_running", json_bool_opt keepalive_running);
+      ("paused", Json_util.bool_opt_to_json paused);
+      ("keepalive_running", Json_util.bool_opt_to_json keepalive_running);
       ("keepalive_started_at", Json_util.float_opt_to_json keepalive_started_at);
       ("issues", `List (List.map (fun issue -> `String issue) issues));
       ("ok", `Bool (Stdlib.List.length issues = 0));

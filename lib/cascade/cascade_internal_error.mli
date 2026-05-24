@@ -53,6 +53,28 @@ val capacity_backpressure_source_of_string :
     growing the {!Cascade_error_classify} substring catch-all is the
     anti-pattern this RFC is closing. *)
 
+(** RFC-0158: typed denial reason carried by {!Retry_admission_denied}.
+    Defined here (cascade layer) to avoid a dependency cycle with
+    [Keeper_turn_cascade_budget].  The keeper layer re-exports via
+    [type retry_admission_denial = Cascade_internal_error.retry_admission_denial]. *)
+
+type retry_admission_denial =
+  | Retry_budget_below_min of {
+      projected_usable_budget_s : float;
+      min_required_s : float;
+      remaining_turn_budget_s : float;
+      adaptive_timeout_s : float;
+      allow_wall_clock_retry_budget : bool;
+    }
+  | First_attempt_budget_below_min of {
+      projected_usable_budget_s : float;
+      min_required_s : float;
+      remaining_turn_budget_s : float;
+    }
+
+val retry_admission_denial_to_yojson :
+  retry_admission_denial -> Yojson.Safe.t
+
 type masc_internal_error =
   | Cascade_exhausted of {
       cascade_name : Cascade_name.t;
@@ -109,6 +131,19 @@ type masc_internal_error =
       is_timeout : bool;
       tools : string list;
       original_error : string;
+    }
+  (** RFC-0158: pre-dispatch admission denial.  The keeper decided not to
+      attempt a provider call because the remaining turn budget was below the
+      minimum required for a single attempt.  Semantically distinct from
+      [Provider_timeout]: admission denial never reached the provider, so
+      cascade rotation and supervisor pause-policy should treat it differently.
+
+      [denial_reason] carries the typed budget breakdown from
+      {!Keeper_turn_cascade_budget.retry_admission_denial}; [is_retry]
+      distinguishes retry-path from first-attempt denials. *)
+  | Retry_admission_denied of {
+      denial_reason : retry_admission_denial;
+      is_retry : bool;
     }
   (** RFC-0159 Phase A: typed substrate for raw [Agent_sdk.Error.Internal]
       construction sites.  Before Phase A, three sites built [Internal] with

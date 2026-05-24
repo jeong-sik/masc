@@ -36,6 +36,47 @@ let capacity_backpressure_source_of_string = function
   | "cascade_slot" -> Some Cascade_slot
   | _ -> None
 
+(* RFC-0158: typed denial reason carried by {!Retry_admission_denied}.
+   Defined here (cascade layer) to avoid a dependency cycle with
+   [Keeper_turn_cascade_budget].  The keeper layer re-exports via
+   [type retry_admission_denial = Cascade_internal_error.retry_admission_denial]. *)
+type retry_admission_denial =
+  | Retry_budget_below_min of {
+      projected_usable_budget_s : float;
+      min_required_s : float;
+      remaining_turn_budget_s : float;
+      adaptive_timeout_s : float;
+      allow_wall_clock_retry_budget : bool;
+    }
+  | First_attempt_budget_below_min of {
+      projected_usable_budget_s : float;
+      min_required_s : float;
+      remaining_turn_budget_s : float;
+    }
+
+let retry_admission_denial_to_yojson = function
+  | Retry_budget_below_min
+      { projected_usable_budget_s; min_required_s; remaining_turn_budget_s;
+        adaptive_timeout_s; allow_wall_clock_retry_budget } ->
+    `Assoc
+      [
+        ("kind", `String "retry_budget_below_min");
+        ("projected_usable_budget_s", `Float projected_usable_budget_s);
+        ("min_required_s", `Float min_required_s);
+        ("remaining_turn_budget_s", `Float remaining_turn_budget_s);
+        ("adaptive_timeout_s", `Float adaptive_timeout_s);
+        ("allow_wall_clock_retry_budget", `Bool allow_wall_clock_retry_budget);
+      ]
+  | First_attempt_budget_below_min
+      { projected_usable_budget_s; min_required_s; remaining_turn_budget_s } ->
+    `Assoc
+      [
+        ("kind", `String "first_attempt_budget_below_min");
+        ("projected_usable_budget_s", `Float projected_usable_budget_s);
+        ("min_required_s", `Float min_required_s);
+        ("remaining_turn_budget_s", `Float remaining_turn_budget_s);
+      ]
+
 type masc_internal_error =
   | Cascade_exhausted of {
       cascade_name : Cascade_name.t;
@@ -94,6 +135,16 @@ type masc_internal_error =
       is_timeout : bool;
       tools : string list;
       original_error : string;
+    }
+  (* RFC-0158: pre-dispatch admission denial — the keeper decided not to
+     attempt a provider call because the remaining turn budget was below
+     the minimum required for a single attempt.  Distinct from
+     [Provider_timeout] (case 1: provider tried and timed out) because
+     admission denial never reached the provider; cascade rotation and
+     supervisor pause-policy should treat it differently. *)
+  | Retry_admission_denied of {
+      denial_reason : retry_admission_denial;
+      is_retry : bool;
     }
   (* RFC-0159 Phase A: typed substrate for the three raw exception
      construction sites previously emitting [Agent_sdk.Error.Internal
@@ -285,6 +336,13 @@ let masc_internal_error_to_json = function
         ("tools", string_list_json tools);
         ("original_error", `String original_error);
       ]
+  | Retry_admission_denied { denial_reason; is_retry } ->
+    `Assoc
+      [
+        ("kind", `String "retry_admission_denied");
+        ("denial_reason", retry_admission_denial_to_yojson denial_reason);
+        ("is_retry", `Bool is_retry);
+      ]
   | Internal_unhandled_exception { site; exn_repr } ->
     `Assoc
       [
@@ -379,6 +437,13 @@ let summary_of_masc_internal_error = function
      [kind_of_masc_internal_error] / the JSON payload.  Enumerated
      explicitly so adding a new [masc_internal_error] variant forces
      a decision on whether it deserves a long-form summary string. *)
+  | Retry_admission_denied { denial_reason; is_retry } ->
+      Some
+        (Printf.sprintf
+           "Pre-dispatch admission denied; is_retry=%b; reason=%s"
+           is_retry
+           (retry_admission_denial_to_yojson denial_reason
+            |> Yojson.Safe.to_string))
   | Cascade_exhausted _
   | Resumable_cli_session _
   | Accept_rejected _
@@ -414,7 +479,8 @@ let () =
        kind (cascade_exhausted | capacity_backpressure | resumable_cli_session | \
        no_tool_capable_provider | accept_rejected | \
        admission_queue_timeout | admission_queue_rejected | \
-       turn_timeout | provider_timeout | max_tokens_ceiling_violation | \
+       turn_timeout | provider_timeout | retry_admission_denied | \
+       max_tokens_ceiling_violation | \
        ambiguous_post_commit | internal_unhandled_exception | \
        internal_bridge_exception | internal_contract_rejected), \
        cascade_name (originating cascade or \"unknown\" for \
@@ -433,6 +499,7 @@ let kind_of_masc_internal_error = function
   | Provider_timeout _ -> "provider_timeout"
   | Max_tokens_ceiling_violation _ -> "max_tokens_ceiling_violation"
   | Ambiguous_post_commit _ -> "ambiguous_post_commit"
+  | Retry_admission_denied _ -> "retry_admission_denied"
   | Internal_unhandled_exception _ -> "internal_unhandled_exception"
   | Internal_bridge_exception _ -> "internal_bridge_exception"
   | Internal_contract_rejected _ -> "internal_contract_rejected"
@@ -454,6 +521,7 @@ let cascade_name_of_masc_internal_error = function
   | Admission_queue_rejected _
   | Turn_timeout _
   | Provider_timeout _
+  | Retry_admission_denied _
   | Ambiguous_post_commit _
   | Internal_unhandled_exception _
   | Internal_bridge_exception _

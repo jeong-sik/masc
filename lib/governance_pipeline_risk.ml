@@ -59,11 +59,11 @@ let assess_trifecta ~active_tool_names =
 let combinatorial_risk_escalation ~trifecta_active ~tool_name ~base_risk ~input =
   if trifecta_active then
     let caps = tool_capabilities tool_name in
-    let read_only_shell_gh =
+    let read_only_keeper_shell =
       String.equal tool_name "keeper_shell"
       && Keeper_tool_registry.is_read_only_with_input ~tool_name ~input
     in
-    if has_capability State_modification caps && not read_only_shell_gh then
+    if has_capability State_modification caps && not read_only_keeper_shell then
       max_risk_level base_risk High
     else
       base_risk
@@ -89,8 +89,9 @@ let risk_overrides : (string * risk_level) list =
     ("masc_goal_upsert", Medium);
     ("masc_goal_verify", Medium);
     ("masc_keeper_msg", Low);
-    ("masc_claim_next", Medium); ("masc_transition", Medium);
+    ("masc_claim_next", Medium);
     ("masc_worktree_create", Medium); (* routine sandbox setup; removal stays Critical *)
+    ("keeper_pr_create", Medium); (* routine PR creation; force/merge/push stay gated *)
     ("keeper_task_create", Medium); (* routine keeper backlog expansion; force/delete stays gated *)
   ]
 
@@ -315,9 +316,7 @@ let baseline_risk ~tool_name ~input =
 let keeper_mutation_requires_high_floor ~tool_name ~input =
   match tool_name with
   | "keeper_fs_edit" | "keeper_write" -> true
-  | "keeper_shell" ->
-      Keeper_tool_registry.is_shell_gh_op input
-      && not (Keeper_tool_registry.is_read_only_with_input ~tool_name ~input)
+  | "keeper_shell" -> false
   | _ -> false
 
 let assess_risk ~tool_name ~input =

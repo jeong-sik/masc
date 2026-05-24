@@ -41,8 +41,8 @@ WEB_SEARCH_TOOLS = {
 }
 PR_SURFACE_TOOLS = {
     "keeper_bash",
-    "keeper_shell",
     "keeper_preflight_check",
+    "keeper_pr_create",
     "keeper_pr_review_read",
     "keeper_pr_review_comment",
     "keeper_pr_review_reply",
@@ -55,10 +55,11 @@ PR_REVIEW_MUTATION_TOOLS = {
     "keeper_pr_review_comment",
     "keeper_pr_review_reply",
 }
-PR_CREATE_TOOLS: set[str] = set()
+PR_CREATE_TOOLS = {
+    "keeper_pr_create",
+}
 SHELL_TOOLS = {
     "keeper_bash",
-    "keeper_shell",
 }
 PRODUCT_DOMAIN_MARKERS = {
     "customer",
@@ -652,6 +653,7 @@ def pr_evidence_from_row(row: dict[str, Any]) -> tuple[set[str], set[str]]:
 
     success = row_succeeded(row)
     if tools & PR_CREATE_TOOLS and success:
+        refs.update(tools & PR_CREATE_TOOLS)
         sources.add(source)
         add_pr_refs_from_structured_output(
             refs=refs, sources=sources, source=source, row=row
@@ -961,12 +963,14 @@ def tool_call_command_candidates(row: dict[str, Any]) -> list[str]:
     input_json = row.get("input")
     if isinstance(input_json, dict):
         tool = row.get("tool")
-        if tool == "keeper_shell" and input_json.get("op") == "gh":
-            cmd = input_json.get("cmd")
-            if isinstance(cmd, str):
-                add("gh " + cmd.strip())
-        elif tool == "keeper_bash":
+        if tool == "keeper_bash":
             add(input_json.get("cmd"))
+            executable = input_json.get("executable")
+            argv = input_json.get("argv")
+            if isinstance(executable, str) and isinstance(argv, list) and all(
+                isinstance(arg, str) for arg in argv
+            ):
+                add(" ".join([executable, *argv]))
         elif tool == "masc_code_shell":
             add(input_json.get("command"))
         elif tool == "masc_code_git":
@@ -1025,6 +1029,14 @@ def pr_lifecycle_evidence_from_decision(
     tool = row.get("tool")
     if (
         row.get("event") == "tool_exec"
+        and tool_succeeded_in_row(row, "keeper_pr_create")
+    ):
+        if has_gh_pr_create_marker(row):
+            add("pr_create:keeper_pr_create:gh_pr_create")
+        else:
+            add("pr_create:keeper_pr_create")
+    if (
+        row.get("event") == "tool_exec"
         and isinstance(tool, str)
         and tool in SHELL_TOOLS
         and row_success(row)
@@ -1057,6 +1069,11 @@ def pr_lifecycle_evidence_from_tool_call(
             if command.strip().lower() == "push":
                 add("git_push:masc_code_git")
                 break
+    elif tool == "keeper_pr_create":
+        add("pr_create:keeper_pr_create")
+    elif tool == "keeper_pr_review_comment":
+        if has_pr_approve_marker(row) or output_json(row).get("event") == "APPROVE":
+            add("pr_approve:keeper_pr_review_comment")
     elif tool in SHELL_TOOLS or tool == "masc_code_shell":
         for command in tool_call_command_candidates(row):
             if command_is_git_push(command):

@@ -29,8 +29,7 @@
     - [keeper_board_post]: any post at risk Low or Medium.
     - [keeper_task_claim], [keeper_task_done],
       [keeper_task_submit_for_verification]: standard autonomous flow.
-    - [keeper_shell]: only [op=git_clone]. Shell semantics come from
-      [op], so [op] takes precedence over any incidental [action] field.
+    - [keeper_shell] has no routine auto-approval rule.
 
     These rules are not persisted; they are part of the policy code surface
     and require code review to change. Operator-managed rules continue to

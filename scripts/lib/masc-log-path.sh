@@ -11,7 +11,7 @@
 #   3. $MASC_BASE_PATH - env-provided base path; <base>/.masc/logs/system_log_TODAY.jsonl
 #   4. $PWD            - last fallback.
 #
-# Sourced by scripts/logs-follow.sh and scripts/op-f-leak-verification.sh.
+# Sourced by scripts/logs-follow.sh.
 #
 # Functions provided:
 #   masc_log_path        - echo today's resolved log path.

@@ -2,19 +2,14 @@
     [Keeper_gh_shared] gh-command parser surface.
 
     Existing coverage:
-    - [test_gh_api_classification] pins [is_gh_api_read_only].
-    - [test_keeper_github_read_only] pins
-      [is_read_only_with_input ~tool_name:"keeper_shell" ~input] for
-      gh subcommand prefixes and api flag combinations.
+    - Shell IR risk tests pin gh API and prefix classification.
 
     Gap closed here: the parser itself — [parse_simple_gh_command],
     [gh_simple_command_of_argv], and the repo-flag helpers
     [gh_simple_command_has_repo_flag] / [gh_simple_command_with_repo_flag]
-    have no dedicated tests. P9b will either add typed [gh_args]
-    fields to [keeper_shell] or split a dedicated GitHub op into its
-    own handler; either path needs this layer locked first, so the
-    schema migration is constrained by behavior the tests describe
-    rather than by prose intent.
+    have no dedicated tests. Dedicated GitHub tools use this layer, so
+    schema and execution changes are constrained by behavior the tests
+    describe rather than by prose intent.
 
     These tests are intentionally behavior-preserving. They MUST pass
     against current main; a failure here is a regression of the
@@ -71,9 +66,8 @@ let test_parse_empty () =
     (argv_of (Gh.parse_simple_gh_command "   \t  "))
 
 let test_parse_without_gh_prefix () =
-  (* The parser accepts both ["pr list"] and ["gh pr list"]. This is
-     load-bearing: callers route through [keeper_shell op=gh cmd="pr
-     list"] without re-prefixing. *)
+  (* The parser accepts both ["pr list"] and ["gh pr list"] so dedicated
+     GitHub callers can normalize either model-facing shape. *)
   let argv = must_ok_argv "pr list" (Gh.parse_simple_gh_command "pr list") in
   Alcotest.check argv_t "argv preserves token order" [ "pr"; "list" ] argv
 

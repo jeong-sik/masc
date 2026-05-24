@@ -129,6 +129,7 @@ let test_docker_does_not_own_command_semantics () =
   assert_contains semantics_ml "let resolve_sandbox_root_git_cwd_of_stages";
   assert_contains semantics_ml "let parsed_stages_of_ir";
   assert_contains semantics_ml "Masc_exec.Shell_ir.Pipeline";
+  assert_contains semantics_ml "Exec_policy.parse_string_to_ir";
   assert_not_contains semantics_ml "Option.value"
 
 let test_sandbox_failure_recording_not_shell_docker_coupled () =
@@ -203,31 +204,24 @@ let test_sandbox_runtime_sources_do_not_depend_on_shell_surface_names () =
     (fun rel -> List.iter (assert_not_contains rel) forbidden)
     sandbox_runtime_sources
 
-let test_shell_ops_delegates_gh_bridge () =
+let test_shell_ops_drops_gh_bridge () =
   let shell_ops = "lib/keeper/keeper_shell_ops.ml" in
-  let gh_bridge = "lib/keeper/keeper_shell_gh_bridge.ml" in
-  assert_contains shell_ops "Keeper_shell_gh_bridge.handle_gh_op";
+  assert_source_absent "lib/keeper/keeper_shell_gh_bridge.ml";
+  assert_source_absent "lib/keeper/keeper_shell_gh_bridge.mli";
+  assert_not_contains shell_ops "Keeper_shell_gh_bridge";
+  assert_not_contains shell_ops "\"gh\"";
   assert_not_contains shell_ops "gh_command_from_args";
-  assert_not_contains shell_ops "gh_simple_command_to_shell_ir";
-  assert_contains gh_bridge "gh_command_from_args";
-  assert_contains gh_bridge "gh_simple_command_to_shell_ir";
-  assert_contains gh_bridge "run_command_with_status";
-  assert_contains gh_bridge "Keeper_sandbox_runner.route_via";
-  assert_not_contains gh_bridge "\"via\", `String \"docker\"";
-  assert_not_contains gh_bridge "Keeper_sandbox_docker."
+  assert_not_contains shell_ops "gh_simple_command_to_shell_ir"
 
-let test_shell_ops_delegates_git_bridge () =
+let test_shell_ops_drops_git_clone_bridge () =
   let shell_ops = "lib/keeper/keeper_shell_ops.ml" in
-  let git_bridge = "lib/keeper/keeper_shell_git_bridge.ml" in
-  assert_contains shell_ops "Keeper_shell_git_bridge.handle_git_clone";
+  assert_source_absent "lib/keeper/keeper_shell_git_bridge.ml";
+  assert_source_absent "lib/keeper/keeper_shell_git_bridge.mli";
+  assert_not_contains shell_ops "Keeper_shell_git_bridge";
+  assert_not_contains shell_ops "\"git_clone\"";
+  assert_not_contains shell_ops "\"git clone\"";
   assert_not_contains shell_ops "Tool_code_write.validate_clone_url";
-  assert_not_contains shell_ops "normalize_existing_origin_to_https";
-  assert_contains git_bridge "Tool_code_write.validate_clone_url";
-  assert_contains git_bridge "normalize_existing_origin_to_https";
-  assert_contains git_bridge "run_command_with_status";
-  assert_contains git_bridge "Keeper_sandbox_runner.route_via";
-  assert_not_contains git_bridge "\"via\", `String \"docker\"";
-  assert_not_contains git_bridge "Keeper_sandbox_docker."
+  assert_not_contains shell_ops "normalize_existing_origin_to_https"
 
 let test_active_gates_do_not_name_retired_shell_docker () =
   List.iter
@@ -288,13 +282,13 @@ let () =
             `Quick
             test_sandbox_runtime_sources_do_not_depend_on_shell_surface_names;
           Alcotest.test_case
-            "shell ops delegates gh compatibility bridge"
+            "shell ops drops gh compatibility bridge"
             `Quick
-            test_shell_ops_delegates_gh_bridge;
+            test_shell_ops_drops_gh_bridge;
           Alcotest.test_case
-            "shell ops delegates git compatibility bridge"
+            "shell ops drops git compatibility bridge"
             `Quick
-            test_shell_ops_delegates_git_bridge;
+            test_shell_ops_drops_git_clone_bridge;
           Alcotest.test_case
             "active gates do not name retired shell docker"
             `Quick

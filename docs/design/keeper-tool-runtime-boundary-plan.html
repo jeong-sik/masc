@@ -274,7 +274,7 @@
           <span>Combined LOC across main hot files and new sandbox helper modules</span>
         </div>
       </div>
-      <p class="note">Slice 1 removes source-level references to <code>Keeper_shell_docker</code>, <code>Keeper_shell_docker_exec_failure</code>, and <code>Keeper_shell_bash_docker</code>. Slice 2 removes the legacy <code>Keeper_shell_shared.run_docker*</code> boundary and routes PR/GitHub tool execution through <code>Keeper_sandbox_runner</code>. Slice 3 moves <code>keeper_shell op=gh</code> compatibility execution into <code>Keeper_shell_gh_bridge</code>. Slice 4 moves <code>keeper_shell op=git_clone</code> compatibility execution into <code>Keeper_shell_git_bridge</code>. Slice 5 makes <code>Keeper_sandbox_runner</code> own route labels for bridge result shaping. Slice 6 moves shell read-side sandbox execution behind <code>Keeper_sandbox_read_runner</code>. Slice 7 applies the same boundary to file tools. Bridge and runner tests use injected mock runners.</p>
+      <p class="note">Slice 1 removes source-level references to <code>Keeper_shell_docker</code>, <code>Keeper_shell_docker_exec_failure</code>, and <code>Keeper_shell_bash_docker</code>. Slice 2 removes the legacy <code>Keeper_shell_shared.run_docker*</code> boundary and routes PR/GitHub tool execution through <code>Keeper_sandbox_runner</code>. Slice 5 removes the legacy <code>keeper_shell op=gh</code> and <code>op=git_clone</code> compatibility surface instead of preserving bridge shims. Slice 6 moves shell read-side sandbox execution behind <code>Keeper_sandbox_read_runner</code>. Slice 7 applies the same boundary to file tools. Runner tests use injected mock runners.</p>
     </section>
 
     <section>
@@ -304,8 +304,8 @@
           <tr>
             <td data-label="ID">G3</td>
             <td data-label="Goal">Move Git/GitHub semantics out of <code>keeper_shell_ops.ml</code> toward GitHub domain modules and native PR tools.</td>
-            <td data-label="Quantitative Gate"><code>keeper_shell_ops.ml</code> LOC drops below <code>1,200</code>; <code>op=gh</code> and <code>op=git_clone</code> tests pass through compatibility coverage.</td>
-            <td data-label="Status"><span class="status next">Continued in slice 4</span></td>
+            <td data-label="Quantitative Gate"><code>keeper_shell_ops.ml</code> no longer dispatches <code>op=gh</code> or <code>op=git_clone</code>; bridge modules are absent.</td>
+            <td data-label="Status"><span class="status done">Done in slice 5</span></td>
           </tr>
           <tr>
             <td data-label="ID">G4</td>
@@ -359,16 +359,16 @@
           <tr>
             <td data-label="Task">T3</td>
             <td data-label="Goal">Git/GitHub split</td>
-            <td data-label="Todo">Move <code>gh</code> and <code>git_clone</code> parsing, policy checks, repo-context binding, and runner dispatch out of <code>keeper_shell_ops.ml</code>.</td>
-            <td data-label="Verification Method"><code>./_build/default/test/test_keeper_shell_gh_bridge.exe</code>, <code>./_build/default/test/test_keeper_shell_git_bridge.exe</code>, <code>./_build/default/test/test_keeper_sandbox_boundary_policy.exe</code>, and <code>wc -l lib/keeper/keeper_shell_ops.ml</code>.</td>
-            <td data-label="Exit Criteria"><code>Keeper_shell_gh_bridge</code> owns <code>op=gh</code> and <code>Keeper_shell_git_bridge</code> owns <code>op=git_clone</code>; next slice reduces <code>keeper_shell_ops.ml</code> below <code>1,200</code> LOC.</td>
+            <td data-label="Todo">Remove <code>gh</code> and <code>git_clone</code> compatibility dispatch from <code>keeper_shell_ops.ml</code>.</td>
+            <td data-label="Verification Method"><code>./_build/default/test/test_keeper_sandbox_boundary_policy.exe</code>, schema SSOT tests, and source grep for the retired bridge modules.</td>
+            <td data-label="Exit Criteria"><code>keeper_shell</code> no longer advertises or dispatches <code>op=gh</code>/<code>op=git_clone</code>; native PR tools and typed command paths own Git/GitHub work.</td>
           </tr>
           <tr>
             <td data-label="Task">T4</td>
             <td data-label="Goal">Result shape parity</td>
-            <td data-label="Todo">Make compatibility bridge output use runner-owned route labels, then normalize Local/Docker semantic failure envelopes.</td>
-            <td data-label="Verification Method">Run <code>test_keeper_sandbox_runner</code>, <code>test_keeper_shell_git_bridge</code>, and paired Local/Docker golden tests for cwd missing, git repo missing, gh auth missing, timeout, and blocked write.</td>
-            <td data-label="Exit Criteria">Bridge JSON gets <code>via</code> from <code>Keeper_sandbox_runner</code>; matched cases share <code>semantic_status</code>, <code>failure_class</code>, retryability, and recovery hint fields.</td>
+            <td data-label="Todo">Normalize native tool and typed command Local/Docker semantic failure envelopes.</td>
+            <td data-label="Verification Method">Run <code>test_keeper_sandbox_runner</code> and paired Local/Docker golden tests for cwd missing, git repo missing, gh auth missing, timeout, and blocked write.</td>
+            <td data-label="Exit Criteria">Native tool and typed command JSON gets <code>via</code> from <code>Keeper_sandbox_runner</code>; matched cases share <code>semantic_status</code>, <code>failure_class</code>, retryability, and recovery hint fields.</td>
           </tr>
           <tr>
             <td data-label="Task">T5</td>
@@ -389,9 +389,6 @@
         <div class="command">./_build/default/test/test_keeper_sandbox_boundary_policy.exe</div>
         <div class="command">./_build/default/test/test_keeper_sandbox_runner.exe</div>
         <div class="command">./_build/default/test/test_keeper_sandbox_read_runner.exe</div>
-        <div class="command">./_build/default/test/test_keeper_shell_gh_bridge.exe</div>
-        <div class="command">./_build/default/test/test_keeper_shell_git_bridge.exe</div>
-        <div class="command">rg -n "&quot;via&quot;, `String &quot;docker&quot;" lib/keeper/keeper_shell_gh_bridge.ml lib/keeper/keeper_shell_git_bridge.ml</div>
         <div class="command">rg -n "Keeper_docker_read\\.|&quot;via&quot;, `String &quot;docker&quot;" lib/keeper/keeper_shell_ops.ml</div>
         <div class="command">rg -n "Keeper_docker_read\\.|&quot;via&quot;, `String &quot;docker&quot;" lib/keeper/keeper_exec_fs.ml</div>
         <div class="command">./_build/default/test/test_keeper_sandbox_docker_route.exe test docker_route_fires 17-21 --show-errors --compact</div>

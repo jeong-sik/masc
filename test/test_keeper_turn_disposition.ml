@@ -37,7 +37,6 @@ let canonical_app_codes : (string * D.t) list =
   [ "success", D.Success
   ; "external_cancel", D.External_cancel
   ; "turn_wall_clock_timeout", D.Turn_wall_clock_timeout
-  ; "gh_repo_context_missing_worktree", D.Gh_repo_context_missing_worktree
   ; "required_tool_use_no_tool_call", D.Required_tool_use_no_tool_call
   ; "required_tool_use_unsatisfied", D.Required_tool_use_unsatisfied
   ; "post_commit_ambiguous", D.Post_commit_ambiguous
@@ -146,7 +145,6 @@ let round_trippable : (string * D.t) list =
   [ "Success", D.Success
   ; "External_cancel", D.External_cancel
   ; "Turn_wall_clock_timeout", D.Turn_wall_clock_timeout
-  ; "Gh_repo_context_missing_worktree", D.Gh_repo_context_missing_worktree
   ; "Required_tool_use_no_tool_call", D.Required_tool_use_no_tool_call
   ; "Required_tool_use_unsatisfied", D.Required_tool_use_unsatisfied
   ; "Post_commit_ambiguous", D.Post_commit_ambiguous

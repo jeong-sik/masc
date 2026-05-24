@@ -213,27 +213,21 @@ let test_goal_verify_high_does_not_match () =
 (* ── matches: unrelated tools never match ──────────────────── *)
 
 let test_keeper_shell_arbitrary_action_does_not_match () =
-  (* The keeper_shell rule is intentionally narrow — only op=git_clone
-     auto-approves.  A bare action="ls" (no op key) must NOT match. *)
+  (* keeper_shell has no routine auto-approval rule. *)
   Alcotest.(check bool) "keeper_shell action=ls is not auto-approved"
     false
     (RA.matches ~tool_name:"keeper_shell"
        ~input:(`Assoc [ ("action", `String "ls") ])
        ~risk_level:RL.Low)
 
-let test_keeper_shell_git_clone_matches () =
-  (* PR-E (Plan v3 Leak 3): keeper_shell op=git_clone is the canonical
-     keeper bootstrap action and must auto-approve at Medium risk. *)
-  Alcotest.(check bool) "keeper_shell op=git_clone is auto-approved"
-    true
+let test_keeper_shell_git_clone_does_not_match () =
+  Alcotest.(check bool) "keeper_shell op=git_clone is not auto-approved"
+    false
     (RA.matches ~tool_name:"keeper_shell"
        ~input:(`Assoc [ ("op", `String "git_clone") ])
        ~risk_level:RL.Medium)
 
 let test_keeper_shell_force_op_does_not_match () =
-  (* allowed_actions=[git_clone] — anything else (including dangerous
-     ops like force_push, sh, exec) must still go through operator
-     approval. *)
   Alcotest.(check bool) "keeper_shell op=force_push is NOT auto-approved"
     false
     (RA.matches ~tool_name:"keeper_shell"
@@ -241,8 +235,6 @@ let test_keeper_shell_force_op_does_not_match () =
        ~risk_level:RL.Medium)
 
 let test_keeper_shell_op_takes_precedence_over_action () =
-  (* Shell semantics come from [op].  A stale or spoofed action field
-     must not hide a dangerous op and accidentally match git_clone. *)
   Alcotest.(check bool)
     "keeper_shell op=force_push wins over action=git_clone"
     false
@@ -255,9 +247,7 @@ let test_keeper_shell_op_takes_precedence_over_action () =
            ])
        ~risk_level:RL.Medium)
 
-let test_keeper_shell_git_clone_above_max_risk_rejected () =
-  (* Critical risk overrides routine — even a normally-allowlisted
-     op must not auto-approve when risk has been escalated. *)
+let test_keeper_shell_git_clone_critical_rejected () =
   Alcotest.(check bool)
     "keeper_shell op=git_clone at Critical does NOT auto-approve"
     false
@@ -432,16 +422,16 @@ let () =
           Alcotest.test_case "unknown tool" `Quick
             test_unknown_tool_does_not_match;
         ] );
-      ( "keeper_shell_git_clone_allowlist",
+      ( "keeper_shell_legacy_ops_not_allowlisted",
         [
-          Alcotest.test_case "op=git_clone matches" `Quick
-            test_keeper_shell_git_clone_matches;
+          Alcotest.test_case "op=git_clone rejected" `Quick
+            test_keeper_shell_git_clone_does_not_match;
           Alcotest.test_case "op=force_push rejected" `Quick
             test_keeper_shell_force_op_does_not_match;
           Alcotest.test_case "op takes precedence over action" `Quick
             test_keeper_shell_op_takes_precedence_over_action;
           Alcotest.test_case "Critical risk overrides routine" `Quick
-            test_keeper_shell_git_clone_above_max_risk_rejected;
+            test_keeper_shell_git_clone_critical_rejected;
         ] );
       ( "rule_label",
         [

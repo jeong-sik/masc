@@ -75,7 +75,7 @@ let gh_irreversible_ops =
 (** (command, subcommand) pairs classified as R1 reversible mutation.
     The inverse operation is also a gh subcommand (pr close ↔ reopen,
     label create ↔ delete, run cancel is always followed by rerun).
-    Allowed via op=gh but callers should audit. *)
+    Callers should audit these before execution. *)
 let gh_reversible_mutations =
   [
     ("pr",      ["create"; "close"; "reopen"; "edit"; "comment";

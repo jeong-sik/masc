@@ -78,8 +78,8 @@ let audit_event_names ~base_path ~keeper_name =
 
 let test_first_cmd_token_uses_shared_words () =
   Alcotest.(check (option string))
-    "quoted command path preserved"
-    (Some "/tmp/bin/gh cli")
+    "quoted command basename preserved"
+    (Some "gh cli")
     (AQ.For_testing.first_cmd_token {|"/tmp/bin/gh cli" pr list|});
   Alcotest.(check (option string))
     "malformed quote fails closed"
@@ -139,9 +139,22 @@ let execute_approval_get args =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_path)
     (fun () ->
+      let raw_token =
+        match
+          Masc_mcp.Auth.create_token
+            base_path
+            ~agent_name:"approval-admin"
+            ~role:Types.Admin
+        with
+        | Ok (raw, _) -> raw
+        | Error err ->
+          Alcotest.fail
+            ("admin token setup failed: " ^ Masc_domain.masc_error_to_string err)
+      in
       let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
       let result =
         Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:"approval-get-test"
+          ~auth_token:raw_token
           state ~name:"masc_approval_get" ~arguments:args
       in
       (result.Tool_result.success, Tool_result.message result))
@@ -239,13 +252,13 @@ let test_risk_classification_low () =
       (GP.risk_level_to_string actual)
   ) tools
 
-let test_keeper_shell_gh_read_only_stays_low () =
+let test_keeper_shell_retired_gh_stays_low () =
   let actual =
     GP.assess_risk
       ~tool_name:"keeper_shell"
       ~input:(`Assoc [("op", `String "gh"); ("cmd", `String "pr view 123")])
   in
-  check "keeper_shell op=gh pr view → low"
+  check "retired keeper_shell op=gh pr view → low"
     (GP.risk_level_to_string GP.Low)
     (GP.risk_level_to_string actual);
   let typed_actual =
@@ -257,18 +270,18 @@ let test_keeper_shell_gh_read_only_stays_low () =
           ; ("argv", `List [ `String "pr"; `String "view"; `String "123" ])
           ])
   in
-  check "keeper_shell op=gh argv pr view → low"
+  check "retired keeper_shell op=gh argv pr view → low"
     (GP.risk_level_to_string GP.Low)
     (GP.risk_level_to_string typed_actual)
 
-let test_keeper_shell_gh_mutation_escalates_high () =
+let test_keeper_shell_retired_gh_mutation_stays_low () =
   let actual =
     GP.assess_risk
       ~tool_name:"keeper_shell"
       ~input:(`Assoc [("op", `String "gh"); ("cmd", `String "pr comment 123 --body hi")])
   in
-  check "keeper_shell op=gh pr comment → high"
-    (GP.risk_level_to_string GP.High)
+  check "retired keeper_shell op=gh pr comment → low"
+    (GP.risk_level_to_string GP.Low)
     (GP.risk_level_to_string actual);
   let typed_actual =
     GP.assess_risk
@@ -286,8 +299,8 @@ let test_keeper_shell_gh_mutation_escalates_high () =
                 ] )
           ])
   in
-  check "keeper_shell op=gh argv pr comment → high"
-    (GP.risk_level_to_string GP.High)
+  check "retired keeper_shell op=gh argv pr comment → low"
+    (GP.risk_level_to_string GP.Low)
     (GP.risk_level_to_string typed_actual)
 
 (* ── 2. Threshold decisions ──────────────────────────────── *)
@@ -804,7 +817,7 @@ let test_approval_get_dispatch_success () =
       let ok, payload =
         execute_approval_get (`Assoc [("id", `String id)])
       in
-      Alcotest.(check bool) "dispatch approval_get success" true ok;
+      if not ok then Alcotest.fail ("dispatch approval_get failed: " ^ payload);
       let open Yojson.Safe.Util in
       let json = Yojson.Safe.from_string payload in
       Alcotest.(check string) "dispatch detail id" id
@@ -1177,21 +1190,6 @@ let test_sandbox_worktree_write_rule_rejects_unclaimed_or_root_checkout () =
        ~input:root_checkout_input
        ~risk_level:AQ.High)
 
-let test_callback_production_keeper_shell_gh_read_only_auto_approved () =
-  with_test_config @@ fun config ->
-  let cb =
-    GP.to_oas_approval_callback
-      ~config ~governance_level:"production" ~keeper_name:"test" () in
-  let decision =
-    cb ~tool_name:"keeper_shell"
-      ~input:(`Assoc [("op", `String "gh"); ("cmd", `String "pr view 123")])
-  in
-  match decision with
-  | Agent_sdk.Hooks.Approve -> ()
-  | Agent_sdk.Hooks.Reject r ->
-    Alcotest.fail ("expected Approve for read-only keeper_shell op=gh, got Reject: " ^ r)
-  | _ -> Alcotest.fail "unexpected decision"
-
 let test_callback_production_worktree_create_auto_approved () =
   with_test_config @@ fun config ->
   let pending_before = AQ.pending_count () in
@@ -1456,10 +1454,10 @@ let () =
       Alcotest.test_case "critical tools" `Quick test_risk_classification_critical;
       Alcotest.test_case "high-risk tools" `Quick test_risk_classification_high;
       Alcotest.test_case "low-risk tools" `Quick test_risk_classification_low;
-      Alcotest.test_case "keeper_shell op=gh read-only stays low" `Quick
-        test_keeper_shell_gh_read_only_stays_low;
-      Alcotest.test_case "keeper_shell op=gh mutation escalates high" `Quick
-        test_keeper_shell_gh_mutation_escalates_high;
+      Alcotest.test_case "retired keeper_shell op=gh stays low" `Quick
+        test_keeper_shell_retired_gh_stays_low;
+      Alcotest.test_case "retired keeper_shell op=gh mutation stays low" `Quick
+        test_keeper_shell_retired_gh_mutation_stays_low;
     ]);
     ("threshold_decisions", [
       Alcotest.test_case "development allows all" `Quick test_development_allows_all;
@@ -1524,8 +1522,6 @@ let () =
         "sandbox worktree write routine rejects unclaimed/root checkout"
         `Quick
         test_sandbox_worktree_write_rule_rejects_unclaimed_or_root_checkout;
-      Alcotest.test_case "production keeper_shell op=gh read-only auto-approved" `Quick
-        test_callback_production_keeper_shell_gh_read_only_auto_approved;
       Alcotest.test_case "production worktree create auto-approved" `Quick
         test_callback_production_worktree_create_auto_approved;
       Alcotest.test_case "paranoid medium risk uses remembered policy" `Quick

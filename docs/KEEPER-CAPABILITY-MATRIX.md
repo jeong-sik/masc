@@ -33,7 +33,7 @@ Notes:
 - The `voice` shard still exists, but it is no longer part of the default keeper surface. The historical weather shard is retired from `Tool_shard`.
 - The old governance petition/case tools were retired from the callable tool surface. Governance-style participation now uses board discussion/vote paths plus dashboard governance/audit read models.
 - Write-capable tools such as `keeper_fs_edit` and code mutation tools are present in the keeper surface; preset/policy and eval gates decide whether a keeper may execute the mutation.
-- `keeper_shell` is structured-only (`pwd`, `ls`, `cat`, `rg`, `find`, `head`, `tail`, `wc`, `tree`, `git_status`, `git_log`, `git_diff`, `git_worktree`, `git_clone`, `gh`). Typed command execution is model-facing as `Bash` when that alias is listed, backed internally by `keeper_bash`.
+- `keeper_shell` is structured-only (`pwd`, `ls`, `cat`, `rg`, `find`, `head`, `tail`, `wc`, `tree`, `git_status`, `git_log`, `git_diff`, `git_worktree`). Typed command execution is model-facing as `Bash` when that alias is listed, backed internally by `keeper_bash`.
 - Code mutation uses `masc_code_{write,edit,delete,shell,git}` in addition to the `coding` shard above.
 
 ## Tool Surface

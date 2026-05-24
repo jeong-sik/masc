@@ -173,156 +173,9 @@ let has_mutating_side_effect (name : string) : bool =
 ;;
 
 (* ── Input-aware read-only check ─────────────────────────────
-   Some tools (keeper_shell, masc_code_git) mix read-only and mutating
-   subcommands within a single tool name. This function inspects the
-   JSON input to distinguish calls with no side effects. *)
-
-let gh_read_only_prefixes =
-  [ "pr list"
-  ; "pr view"
-  ; "pr diff"
-  ; "pr checks"
-  ; "pr status"
-  ; "issue list"
-  ; "issue view"
-  ; "issue status"
-  ; "repo view"
-  ; "repo list"
-  ; "release list"
-  ; "release view"
-  ]
-;;
-
-(** [is_gh_api_read_only cmd_lower] returns true when a `gh api ...`
-    invocation is effectively a GET request with no mutation side effects.
-    `gh api` defaults to GET, but becomes mutating when:
-    - `-X`/`--method` specifies POST/PUT/PATCH/DELETE
-    - `-f`/`-F`/`--field`/`--raw-field` is present (implies POST)
-    - The subcommand is `graphql` (always POST)
-    The input [cmd_lower] must already be lowercased and trimmed.
-
-    Phase A F5 (2026-04-27): tokenize first, then match on the typed
-    structure.  Pre-fix used [String.is_prefix] which silently classified
-    [api2 ...] (a hypothetical sibling subcommand) as a gh-api call and
-    [graphqlx ...] as the graphql subcommand.  User hard rule: "no
-    string matching for classification". *)
-let is_gh_api_read_only (cmd_lower : string) : bool =
-  match Exec_policy.parse_string_to_ir ~mode:Strict cmd_lower with
-  | Error _ -> false
-  | Ok ir ->
-    let tokens = Exec_policy_mutation_classifier.flat_stage_words ir in
-    match tokens with
-  | "api" :: rest_after_api ->
-    let is_graphql_subcommand =
-      match rest_after_api with
-      | "graphql" :: _ -> true
-      | _ -> false
-    in
-    if is_graphql_subcommand
-    then false
-    else (
-      let has_method_flag =
-        let rec check = function
-          | [] -> false
-          | tok :: rest_toks ->
-            if tok = "-x" || tok = "--method"
-            then (
-              (* next token is the method *)
-              match rest_toks with
-              | method_tok :: _ -> method_tok <> "get"
-              | [] -> true (* flag with no value — conservative: mutating *))
-            else if String.length tok > 3 && String.starts_with tok ~prefix:"-x="
-            then (
-              let method_val = String.sub tok 3 (String.length tok - 3) in
-              method_val <> "get")
-            else if String.length tok > 9 && String.starts_with tok ~prefix:"--method="
-            then (
-              let method_val = String.sub tok 9 (String.length tok - 9) in
-              method_val <> "get")
-            else check rest_toks
-        in
-        check tokens
-      in
-      let has_field_flag =
-        List.exists
-          (fun tok ->
-             tok = "-f"
-             || tok = "-ff"
-             || (String.length tok > 3 && String.starts_with tok ~prefix:"-f=")
-             || tok = "--field"
-             || tok = "--raw-field"
-             || (String.length tok > 8 && String.starts_with tok ~prefix:"--field="))
-          tokens
-      in
-      (not has_method_flag) && not has_field_flag)
-  | _ -> false
-;;
-
-(** Extract the effective gh command string from keeper_shell op=gh input.
-    [keeper_exec_shell] accepts typed [argv] and legacy [cmd] fields. *)
-let normalize_gh_command (cmd : string) : string =
-  match Exec_policy.parse_string_to_ir ~mode:Strict cmd with
-  | Error _ -> ""
-  | Ok ir ->
-    let tokens = Exec_policy_mutation_classifier.flat_stage_words ir in
-    let rec drop_leading_gh = function
-    | token :: rest when String_util.equals_ci token "gh" -> drop_leading_gh rest
-    | remaining -> remaining
-  in
-  String.concat " " (drop_leading_gh tokens)
-;;
-
-let normalize_gh_argv argv =
-  let rec drop_leading_gh = function
-    | token :: rest when String_util.equals_ci token "gh" -> drop_leading_gh rest
-    | remaining -> remaining
-  in
-  drop_leading_gh argv |> String.concat " "
-;;
-
-let json_string_list = function
-  | `List values ->
-    let rec collect acc = function
-      | [] -> Some (List.rev acc)
-      | `String value :: rest -> collect (value :: acc) rest
-      | _ :: _ -> None
-    in
-    collect [] values
-  | _ -> None
-;;
-
-let gh_effective_cmd (input : Yojson.Safe.t) : string =
-  match input with
-  | `Assoc fields ->
-    let cmd =
-      match List.assoc_opt "cmd" fields with
-      | Some (`String s) when String.trim s <> "" -> Some (normalize_gh_command s)
-      | _ -> None
-    in
-    let has_argv_field = Option.is_some (List.assoc_opt "argv" fields) in
-    let argv =
-      match List.assoc_opt "argv" fields with
-      | Some value -> Option.map normalize_gh_argv (json_string_list value)
-      | None -> None
-    in
-    (match cmd, argv with
-     | Some _, Some _ -> ""
-     | Some _, None when has_argv_field -> ""
-     | Some cmd, None -> cmd
-     | None, Some argv -> argv
-     | None, None -> "")
-  | _ -> ""
-;;
-
-(** Check if keeper_shell input has op="gh". *)
-let is_shell_gh_op (input : Yojson.Safe.t) : bool =
-  match input with
-  | `Assoc fields ->
-    (match List.assoc_opt "op" fields with
-     | Some (`String s) -> String.trim s = "gh"
-     | _ -> false)
-  | _ -> false
-;;
+   Some tools mix read-only and mutating subcommands within a single
+   tool name. This function inspects JSON input where a live tool has
+   such a contract. *)
 
 let git_read_only_actions = [ "diff"; "status"; "log"; "branch"; "fetch" ]
 
@@ -335,21 +188,37 @@ let git_action_of_input (input : Yojson.Safe.t) : string =
   | _ -> ""
 ;;
 
+let keeper_shell_read_only_ops =
+  [ "pwd"
+  ; "ls"
+  ; "cat"
+  ; "rg"
+  ; "git_status"
+  ; "find"
+  ; "head"
+  ; "tail"
+  ; "wc"
+  ; "tree"
+  ; "git_log"
+  ; "git_diff"
+  ]
+;;
+
+let keeper_shell_op (input : Yojson.Safe.t) : string option =
+  match input with
+  | `Assoc fields ->
+    (match List.assoc_opt "op" fields with
+     | Some (`String s) -> Some (String.lowercase_ascii (String.trim s))
+     | _ -> None)
+  | _ -> None
+;;
+
 let is_read_only_with_input ~(tool_name : string) ~(input : Yojson.Safe.t) : bool =
   match Tool_name.of_string tool_name with
-  | Some (Keeper Shell) when is_shell_gh_op input ->
-    (* keeper_shell with op=gh is input-aware: gh commands can mutate state
-       even though the tool itself is marked read-only by default. *)
-    let cmd = gh_effective_cmd input in
-    let cmd_lower = String.lowercase_ascii cmd in
-    if cmd_lower = ""
-    then false
-    else if String.starts_with cmd_lower ~prefix:"api"
-    then is_gh_api_read_only cmd_lower
-    else
-      List.exists
-        (fun prefix -> String.starts_with cmd_lower ~prefix)
-        gh_read_only_prefixes
+  | Some (Keeper Shell) ->
+    (match keeper_shell_op input with
+     | Some op -> List.mem op keeper_shell_read_only_ops
+     | None -> false)
   | Some (Masc Code_git) ->
     if is_effectively_read_only_tool tool_name
     then true

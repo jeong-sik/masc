@@ -187,8 +187,7 @@ let auto_provision_sandbox_clone ~config ~agent_name ~repos_dir ~repo_name =
             (System (System_error.IoError
                (Printf.sprintf
                   "sandbox_clone_conflict: %s already exists under %s but is not \
-                   a git clone. Remove or repair it, or use keeper_shell \
-                   op=git_clone explicitly."
+                   a git clone. Remove or repair it before continuing."
                   repo_name repos_dir)))
       else
         (match Coord_worktree_repo_discovery.git_origin_url source_root with

@@ -48,7 +48,7 @@ let test_required_tool_satisfaction_rejects_passive_tools () =
     (KTD.is_passive_status_tool_name "Read");
   check bool "Grep alias remains passive progress" true
     (KTD.is_passive_status_tool_name "Grep");
-  check bool "read-only gh shell is passive" false
+  check bool "legacy keeper_shell gh does not satisfy required-action contract" false
     (satisfies_required_tool
        "keeper_shell"
        (`Assoc [ "op", `String "gh"; "cmd", `String "pr view 123" ]))
@@ -58,10 +58,10 @@ let test_required_tool_satisfaction_accepts_mutating_tools () =
   check bool "keeper_task_claim mutates" true
     (satisfies_required_tool "keeper_task_claim" (`Assoc []));
   check bool "Write alias mutates" true (satisfies_required_tool "Write" (`Assoc []));
-  check bool "mutating gh shell satisfies" true
+  check bool "mutating gh bash satisfies" true
     (satisfies_required_tool
-       "keeper_shell"
-       (`Assoc [ "op", `String "gh"; "cmd", `String "pr comment 123 --body ok" ]));
+       "keeper_bash"
+       (`Assoc [ "cmd", `String "gh pr comment 123 --body ok" ]));
   check bool "fresh worktree create result is material progress" true
     (KTD.tool_result_has_material_progress
        ~tool_name:"masc_worktree_create"

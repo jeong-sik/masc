@@ -115,7 +115,7 @@ let shard_shell : shard =
   ; tools = shell_tools
   ; read_only_tools = [ "keeper_shell" ]
   ; removable = true
-  ; description = "Shell ops: pwd, ls, cat, rg, git_status, git_clone"
+  ; description = "Shell ops: pwd, ls, cat, rg, git_status, git_worktree"
   }
 ;;
 

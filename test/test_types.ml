@@ -811,7 +811,7 @@ let () =
          tool_shard schema mirror in sync. 2026-04-30 also pins that
          generic bash execution is no longer advertised through
          keeper_shell; Bash/keeper_bash owns command execution. *)
-      Alcotest.test_case "witness covers all 15 variants" `Quick (fun () ->
+      Alcotest.test_case "witness covers all 13 variants" `Quick (fun () ->
         let module S = Masc_mcp.Keeper_exec_shell in
         let witness o =
           let actual = S.shell_op_to_string o in
@@ -821,8 +821,8 @@ let () =
         witness S.Pwd; witness S.Ls; witness S.Cat; witness S.Rg;
         witness S.Git_status; witness S.Find; witness S.Head; witness S.Tail;
         witness S.Wc; witness S.Tree; witness S.Git_log; witness S.Git_diff;
-        witness S.Git_worktree; witness S.Git_clone; witness S.Gh;
-        Alcotest.(check int) "count" 15 (List.length S.valid_shell_op_strings));
+        witness S.Git_worktree;
+        Alcotest.(check int) "count" 13 (List.length S.valid_shell_op_strings));
       Alcotest.test_case "schema mirror matches SSOT" `Quick (fun () ->
         Alcotest.(check (list string)) "tool_shard mirror == SSOT"
           Masc_mcp.Keeper_exec_shell.valid_shell_op_strings
@@ -833,6 +833,11 @@ let () =
       Alcotest.test_case "bash op not advertised" `Quick (fun () ->
         Alcotest.(check bool) "bash absent" false
           (List.mem "bash" Masc_mcp.Tool_shard.keeper_shell_op_enum_strings));
+      Alcotest.test_case "legacy git/gh ops not advertised" `Quick (fun () ->
+        Alcotest.(check bool) "git_clone absent" false
+          (List.mem "git_clone" Masc_mcp.Tool_shard.keeper_shell_op_enum_strings);
+        Alcotest.(check bool) "gh absent" false
+          (List.mem "gh" Masc_mcp.Tool_shard.keeper_shell_op_enum_strings));
     ];
     "channel_label_ssot", [
       (* Issue #8569: keeper_keepalive used to hand-build the

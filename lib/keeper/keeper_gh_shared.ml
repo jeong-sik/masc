@@ -26,11 +26,11 @@ let gh_simple_command_of_argv argv =
 
 (** RFC-0160 S2: lower a parsed [gh_simple_command] to [Shell_ir.t].
 
-    The gh op handler historically dispatched via direct argv
-    ([Exec_gate.run_argv_with_status]) without routing through
+    Historical gh dispatch used direct argv ([Exec_gate.run_argv_with_status])
+    without routing through
     {!Masc_exec_command_gate.Shell_command_gate.gate_typed} or
-    {!Exec_policy.validate_shell_ir_paths}. This helper allows the
-    handler to consume the same single gate as the op=bash path.
+    {!Exec_policy.validate_shell_ir_paths}. This helper lets GH callers
+    consume the same single gate as typed shell dispatch.
 
     Construction is total: [Bin.Gh] is unconditionally available
     (see lib/exec/bin.ml), so the result has no failure mode. The

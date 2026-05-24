@@ -31,7 +31,7 @@ audit = load_audit_module()
 
 
 class AuditKeeperFleetReadinessPathDefaultsTest(unittest.TestCase):
-    def test_default_base_path_uses_explicit_runtime_roots(self):
+    def test_default_base_path_uses_explicit_masc_base_path_only(self):
         with (
             tempfile.TemporaryDirectory() as masc_base,
             tempfile.TemporaryDirectory() as me_root,
@@ -43,9 +43,9 @@ class AuditKeeperFleetReadinessPathDefaultsTest(unittest.TestCase):
             ):
                 self.assertEqual(audit.default_base_path(), masc_base)
             with patch.dict(os.environ, {"ME_ROOT": me_root}, clear=True):
-                self.assertEqual(audit.default_base_path(), me_root)
+                self.assertIsNone(audit.default_base_path())
             with patch.dict(os.environ, {}, clear=True):
-                self.assertEqual(audit.default_base_path(), str(Path.cwd()))
+                self.assertIsNone(audit.default_base_path())
 
 
 def audit_args(base_path: Path, expected_keepers: int):
@@ -347,7 +347,7 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
         self.assertEqual(refs, set())
         self.assertEqual(sources, set())
 
-    def test_pr_creation_evidence_uses_structured_shell_command_and_output(self):
+    def test_pr_creation_evidence_ignores_retired_keeper_shell_gh_command(self):
         refs, sources = audit.pr_evidence_from_row(
             {
                 "_source_path": "events.jsonl",
@@ -358,11 +358,8 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
             }
         )
 
-        self.assertEqual(
-            refs,
-            {"gh pr create", "https://github.com/acme/repo/pull/124"},
-        )
-        self.assertEqual(sources, {"events.jsonl"})
+        self.assertEqual(refs, set())
+        self.assertEqual(sources, set())
 
     def test_pr_creation_evidence_ignores_freeform_shell_mentions(self):
         refs, sources = audit.pr_evidence_from_row(
@@ -462,7 +459,7 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
     def test_lifecycle_evidence_ignores_freeform_command_mentions(self):
         row = {
             "event": "tool_exec",
-            "tool": "keeper_shell",
+            "tool": "keeper_bash",
             "ok": True,
             "cmd": "echo gh pr create && echo git push && echo via=docker",
         }
@@ -475,15 +472,15 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
     def test_lifecycle_evidence_uses_structured_markers(self):
         row = {
             "event": "tool_exec",
-            "tool": "keeper_shell",
+            "tool": "keeper_pr_create",
             "ok": True,
             "result_markers": ["gh pr create", "via=brokered"],
         }
 
         evidence, docker_evidence = audit.pr_lifecycle_evidence_from_decision(row)
 
-        self.assertEqual(evidence, {"pr_create:keeper_shell:gh_pr_create"})
-        self.assertEqual(docker_evidence, {"pr_create:keeper_shell:gh_pr_create"})
+        self.assertEqual(evidence, {"pr_create:keeper_pr_create:gh_pr_create"})
+        self.assertEqual(docker_evidence, {"pr_create:keeper_pr_create:gh_pr_create"})
 
     def test_lifecycle_evidence_does_not_treat_sandbox_as_docker_route(self):
         row = {
@@ -557,16 +554,16 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
         self.assertEqual(evidence, {"git_push:masc_code_git"})
         self.assertEqual(docker_evidence, set())
 
-    def test_tool_call_log_drives_shell_lifecycle_evidence(self):
+    def test_tool_call_log_drives_native_pr_create_lifecycle_evidence(self):
         row = {
             "ts": 50.0,
             "keeper": "alpha",
-            "tool": "keeper_shell",
-            "input": {"op": "gh", "cmd": "pr create --draft --title t"},
+            "tool": "keeper_pr_create",
+            "input": {"title": "t"},
             "output": json.dumps(
                 {
                     "ok": True,
-                    "command": "gh 'pr' 'create' '--draft' '--title' 't'",
+                    "pr_url": "https://github.com/acme/repo/pull/123",
                     "via": "docker",
                 }
             ),
@@ -575,8 +572,8 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
 
         evidence, docker_evidence = audit.pr_lifecycle_evidence_from_tool_call(row)
 
-        self.assertEqual(evidence, {"pr_create:keeper_shell"})
-        self.assertEqual(docker_evidence, {"pr_create:keeper_shell"})
+        self.assertEqual(evidence, {"pr_create:keeper_pr_create"})
+        self.assertEqual(docker_evidence, {"pr_create:keeper_pr_create"})
 
     def test_tool_call_log_does_not_count_failed_approve(self):
         row = {
@@ -667,9 +664,9 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
                 {
                     "ts_unix": 25.0,
                     "metric_event": "keeper_pr_work_action",
-                    "tool_name": "keeper_shell",
+                    "tool_name": "keeper_pr_create",
                     "pr_work_action": "PR_CREATE",
-                    "pr_work_action_source": "keeper_shell",
+                    "pr_work_action_source": "keeper_pr_create",
                     "pr_work_action_success": True,
                     "route_via": "brokered",
                 },
@@ -711,12 +708,12 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
 
         self.assertEqual(latest_ts, 40.0)
         self.assertEqual(
-            tools, {"keeper_shell", "masc_code_git", "keeper_pr_review_comment"}
+            tools, {"keeper_pr_create", "masc_code_git", "keeper_pr_review_comment"}
         )
         self.assertEqual(
             evidence,
             {
-                "pr_create:keeper_shell",
+                "pr_create:keeper_pr_create",
                 "git_push:masc_code_git",
                 "pr_approve:keeper_pr_review_comment",
             },
@@ -766,9 +763,9 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
                     {
                         "ts_unix": recent_ts,
                         "metric_event": "keeper_pr_work_action",
-                        "tool_name": "keeper_shell",
+                        "tool_name": "keeper_pr_create",
                         "pr_work_action": "PR_CREATE",
-                        "pr_work_action_source": "keeper_shell",
+                        "pr_work_action_source": "keeper_pr_create",
                         "pr_work_action_success": True,
                     }
                 )
@@ -784,8 +781,8 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
             )
 
         self.assertEqual(latest_ts, recent_ts)
-        self.assertEqual(tools, {"keeper_shell"})
-        self.assertEqual(evidence, {"pr_create:keeper_shell"})
+        self.assertEqual(tools, {"keeper_pr_create"})
+        self.assertEqual(evidence, {"pr_create:keeper_pr_create"})
         self.assertEqual(docker_evidence, set())
 
     def test_product_and_design_evidence_use_explicit_board_domains(self):
@@ -1110,19 +1107,22 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
                     "ts": 50.0,
                     "keeper": "alpha",
                     "tool": "keeper_bash",
-                    "input": {"cmd": "git push -u origin keeper/proof"},
+                    "input": {
+                        "executable": "git",
+                        "argv": ["push", "-u", "origin", "keeper/proof"],
+                    },
                     "output": json.dumps({"ok": True, "via": "docker"}),
                     "success": True,
                 },
                 {
                     "ts": 60.0,
                     "keeper": "alpha",
-                    "tool": "keeper_shell",
-                    "input": {"op": "gh", "cmd": "pr review 123 --approve"},
+                    "tool": "keeper_pr_review_comment",
+                    "input": {"pr_number": 123, "event": "APPROVE"},
                     "output": json.dumps(
                         {
                             "ok": True,
-                            "command": "gh 'pr' 'review' '123' '--approve'",
+                            "event": "APPROVE",
                             "via": "docker",
                         }
                     ),
@@ -1131,8 +1131,8 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
                 {
                     "ts": 70.0,
                     "keeper": "beta",
-                    "tool": "keeper_shell",
-                    "input": {"op": "gh", "cmd": "pr create --draft"},
+                    "tool": "keeper_pr_create",
+                    "input": {"title": "wrong keeper"},
                     "output": json.dumps({"ok": True, "via": "docker"}),
                     "success": True,
                 },
@@ -1147,10 +1147,10 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
             )
 
         self.assertEqual(latest_ts, 60.0)
-        self.assertEqual(tools, {"keeper_bash", "keeper_shell"})
+        self.assertEqual(tools, {"keeper_bash", "keeper_pr_review_comment"})
         self.assertEqual(
             evidence,
-            {"git_push:keeper_bash", "pr_approve:keeper_shell"},
+            {"git_push:keeper_bash", "pr_approve:keeper_pr_review_comment"},
         )
         self.assertEqual(docker_evidence, evidence)
 
@@ -1467,21 +1467,24 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
                     "tool": "keeper_bash",
                     "trace_id": "trace-other-run",
                     "session_id": "trace-other-run",
-                    "input": {"cmd": "git push -u origin [REDACTED]"},
+                    "input": {
+                        "executable": "git",
+                        "argv": ["push", "-u", "origin", "[REDACTED]"],
+                    },
                     "output": json.dumps({"ok": True, "via": "docker"}),
                     "success": True,
                 },
                 {
                     "ts": 55.0,
                     "keeper": "alpha",
-                    "tool": "keeper_shell",
+                    "tool": "keeper_pr_review_comment",
                     "trace_id": "trace-other-run",
                     "session_id": "trace-other-run",
-                    "input": {"op": "gh", "cmd": "pr review 99 --approve"},
+                    "input": {"pr_number": 99, "event": "APPROVE"},
                     "output": json.dumps(
                         {
                             "ok": True,
-                            "command": "gh pr review 99 --approve",
+                            "event": "APPROVE",
                             "via": "docker",
                         }
                     ),
@@ -1493,7 +1496,10 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
                     "tool": "keeper_bash",
                     "trace_id": trace_id,
                     "session_id": trace_id,
-                    "input": {"cmd": "git push -u origin [REDACTED]"},
+                    "input": {
+                        "executable": "git",
+                        "argv": ["push", "-u", "origin", "[REDACTED]"],
+                    },
                     "output": json.dumps({"ok": True, "via": "docker"}),
                     "success": True,
                 },
@@ -1539,7 +1545,10 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
             )
 
         self.assertEqual(latest_ts, 70.0)
-        self.assertEqual(tools, {"keeper_bash", "keeper_shell", "keeper_pr_create"})
+        self.assertEqual(
+            tools,
+            {"keeper_bash", "keeper_pr_create", "keeper_pr_review_comment"},
+        )
         self.assertEqual(
             evidence,
             {"git_push:keeper_bash", "pr_create:keeper_pr_create"},
@@ -1598,20 +1607,26 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
                 {
                     "ts": 80.0,
                     "keeper": "alpha",
-                    "tool": "keeper_shell",
-                    "input": {"op": "gh", "cmd": "pr create --draft"},
-                    "output": json.dumps({"ok": True, "via": "docker"}),
+                    "tool": "keeper_pr_create",
+                    "input": {"title": "new"},
+                    "output": json.dumps(
+                        {
+                            "ok": True,
+                            "pr_url": "https://github.com/acme/repo/pull/2",
+                            "via": "docker",
+                        }
+                    ),
                     "success": True,
                 },
                 {
                     "ts": 90.0,
                     "keeper": "alpha",
-                    "tool": "keeper_shell",
-                    "input": {"op": "gh", "cmd": "pr review 2 --approve"},
+                    "tool": "keeper_pr_review_comment",
+                    "input": {"pr_number": 2, "event": "APPROVE"},
                     "output": json.dumps(
                         {
                             "ok": True,
-                            "command": "gh pr review 2 --approve",
+                            "event": "APPROVE",
                             "via": "docker",
                         }
                     ),
@@ -1636,8 +1651,8 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
             evidence,
             {
                 "git_push:keeper_bash",
-                "pr_create:keeper_shell",
-                "pr_approve:keeper_shell",
+                "pr_create:keeper_pr_create",
+                "pr_approve:keeper_pr_review_comment",
             },
         )
         self.assertEqual(docker_evidence, evidence)

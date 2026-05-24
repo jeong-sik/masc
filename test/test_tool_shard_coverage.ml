@@ -64,8 +64,7 @@ let test_shard_coding_exists () =
     Alcotest.(check bool) "removable" true s.Tool_shard.removable;
     Alcotest.(check bool) "has tools" true (List.length s.Tool_shard.tools >= 1);
     let names = List.map (fun (t : Masc_domain.tool_schema) -> t.name) s.tools in
-    (* keeper_bash is the coding shard's shell bridge.
-       keeper_shell (incl. op=gh) lives in shard_shell, not coding. *)
+    (* keeper_bash is the coding shard's shell bridge. *)
     Alcotest.(check bool) "contains keeper_bash" true (List.mem "keeper_bash" names);
     Alcotest.(check bool) "contains worktree_create" true
       (List.mem "masc_worktree_create" names);

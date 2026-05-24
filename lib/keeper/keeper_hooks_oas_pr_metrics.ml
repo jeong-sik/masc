@@ -85,28 +85,6 @@ let pr_review_action_metric_event_of_tool_io
         credential;
         identity_attestation;
       }
-  else if String.equal tool_name "keeper_shell"
-  then
-    let output_json = output_json_opt ~surface:"pr_review_action" output_text in
-    let route_via =
-      first_some (Option.bind output_json route_via_of_json)
-        route_via_fallback
-    in
-    let success =
-      output_success ~transport_success output_json
-    in
-    command_candidates_of_tool_io ~tool_name ~input ~output_json
-    |> List.find_map gh_pr_review_action_of_command
-    |> Option.map (fun (action, pr_number) ->
-         {
-           action;
-           pr_number;
-           comment_id = None;
-           success;
-           route_via;
-           credential = None;
-           identity_attestation = None;
-         })
   else None
 
 let pr_work_action_of_git_action raw =
@@ -161,7 +139,7 @@ let pr_work_actions_of_command command =
          | actions -> actions)
 
 let is_pr_work_action_tool_name tool_name =
-  List.mem tool_name [ "masc_code_git"; "keeper_shell"; "keeper_bash"; "masc_code_shell" ]
+  List.mem tool_name [ "masc_code_git"; "keeper_bash"; "masc_code_shell"; "keeper_pr_create" ]
 
 let pr_work_action_metric_events_of_tool_io
     ~route_via_fallback
@@ -172,7 +150,7 @@ let pr_work_action_metric_events_of_tool_io
   if not (is_pr_work_action_tool_name tool_name) then []
   else
   let observe_json_failure =
-    not (List.mem tool_name [ "keeper_shell"; "keeper_bash"; "masc_code_shell" ])
+    not (List.mem tool_name [ "keeper_bash"; "masc_code_shell" ])
   in
   let output_json =
     output_json_opt ~observe_failure:observe_json_failure
@@ -183,7 +161,20 @@ let pr_work_action_metric_events_of_tool_io
       route_via_fallback
   in
   let success = output_success ~transport_success output_json in
-  if String.equal tool_name "masc_code_git"
+  if String.equal tool_name "keeper_pr_create"
+  then
+    [
+      {
+        work_action = "PR_CREATE";
+        work_source = "keeper_pr_create";
+        work_ref = Safe_ops.json_string_opt "head" input;
+        pr_url = Option.bind output_json pr_url_of_json;
+        command = None;
+        success;
+        route_via;
+      };
+    ]
+  else if String.equal tool_name "masc_code_git"
   then
     let action =
       match output_json with
@@ -209,7 +200,7 @@ let pr_work_action_metric_events_of_tool_io
              route_via;
            };
          ])
-  else if List.mem tool_name [ "keeper_shell"; "keeper_bash"; "masc_code_shell" ]
+  else if List.mem tool_name [ "keeper_bash"; "masc_code_shell" ]
   then
     command_candidates_of_tool_io ~tool_name ~input ~output_json
     |> List.concat_map (fun command ->
@@ -247,7 +238,6 @@ let append_pr_review_action_metric
   let route_via_fallback =
     if meta.sandbox_profile = Docker then
       if List.mem tool_name ["keeper_pr_review_comment"; "keeper_pr_review_reply"] then Some "brokered"
-      else if String.equal tool_name "keeper_shell" then Some "docker"
       else None
     else None
   in
@@ -314,7 +304,7 @@ let append_pr_work_action_metrics
     () =
   let route_via_fallback =
     if meta.sandbox_profile = Docker
-       && List.mem tool_name ["keeper_shell"; "keeper_bash"; "masc_code_shell"; "masc_code_git"]
+       && List.mem tool_name ["keeper_bash"; "masc_code_shell"; "masc_code_git"]
     then Some "docker"
     else None
   in

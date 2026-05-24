@@ -54,8 +54,7 @@ type rule = {
     - destructive force_* actions (these are classified Critical via
       "force" pattern and stopped by [auto_approval_forbidden] anyway,
       but listing them here would be a defense-in-depth hole);
-    - shell or git tools except exact, op-backed keeper routines such as
-      [keeper_shell op=git_clone];
+    - shell or git tools;
     - broad high/critical-risk tools. The path-aware sandbox worktree code
       write exception lives below, outside this static table.
     *)
@@ -132,20 +131,6 @@ let rules : rule list =
       label = "keeper_routine.masc_goal_verify";
     };
 
-    (* PR-E (Plan v3 Leak 3): keeper_shell op=git_clone is the canonical
-       way for a keeper to bring its work tree into the docker sandbox.
-       Without this rule the [keeper_shell] tool name itself trips
-       Governance.destructive_tool_or_op (the "shell" substring filter)
-       and every git_clone is queued for operator approval, even though
-       the [op] is one of the safest possible.  Narrow the allowlist to
-       just [op=git_clone]; force_*, sh -c, and write-side ops still
-       pass through the standard approval path. *)
-    {
-      tool = "keeper_shell";
-      max_risk = RL.Medium;
-      allowed_actions = Some [ "git_clone" ];
-      label = "keeper_routine.keeper_shell.git_clone";
-    };
   ]
 
 (* ── Matching ─────────────────────────────────────────────── *)

@@ -193,7 +193,7 @@ let test_messaging_preset_exposes_board () =
     (List.mem "masc_governance_status" names);
   Alcotest.(check bool) "has keeper_shell" true
     (List.mem "keeper_shell" names);
-  (* keeper_github tool was removed in #7306 (use keeper_shell op=gh). *)
+  (* keeper_github tool was removed; GitHub PR work uses dedicated PR tools. *)
   Alcotest.(check bool) "no keeper_github (removed)" false
     (List.mem "keeper_github" names);
   Alcotest.(check bool) "has keeper_fs_read" true

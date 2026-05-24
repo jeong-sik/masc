@@ -1,9 +1,8 @@
 (** Read-only GitHub PR keeper tools.
 
-    These are intentionally narrower than [keeper_shell op=gh]: they run scoped
-    read-only [gh] argv commands after verifying the keeper/root GitHub
-    credential bundle. GitHub PR creation is not exposed as a keeper-native
-    capability. *)
+    These run scoped read-only [gh] argv commands after verifying the
+    keeper/root GitHub credential bundle. GitHub PR creation is not exposed
+    as a keeper-native capability. *)
 
 val handle_keeper_pr_list :
   config:Coord.config ->

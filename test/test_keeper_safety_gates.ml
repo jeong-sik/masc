@@ -219,7 +219,7 @@ let test_messaging_preset_tools () =
   check bool "has board tools" true (List.mem "keeper_board_post" tools);
   check bool "has keeper_fs_read" true (List.mem "keeper_fs_read" tools);
   check bool "has keeper_shell" true (List.mem "keeper_shell" tools);
-  (* keeper_github tool was removed in #7306 (use keeper_shell op=gh). *)
+  (* keeper_github tool was removed; GitHub PR work uses dedicated PR tools. *)
   check bool "no keeper_github (removed)" false (List.mem "keeper_github" tools)
 
 let test_all_keepers_have_shell_and_coding () =
@@ -327,9 +327,8 @@ let test_integration_github_force_push () =
   let input = `Assoc [("cmd", `String "push --force origin main")] in
   let cmd = Keeper_guards.extract_command_from_input input in
   (* The actual command seen by the gate would be "push --force origin main",
-     but detect_destructive looks for "git push --force" which requires "git" prefix.
-     The keeper_shell op=gh path prepends "gh" not "git", so this would NOT match
-     the git-specific patterns. This verifies the actual behavior. *)
+     but detect_destructive looks for "git push --force" which requires "git"
+     prefix. This verifies the actual behavior for an unprefixed command. *)
   match Eval_gate.detect_destructive cmd with
   | None -> ()  (* Expected: "push --force" without "git" prefix is not detected *)
   | Some _ -> () (* If it matches something else, that's also fine *)

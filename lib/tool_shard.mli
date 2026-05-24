@@ -140,7 +140,6 @@ val execute : string -> Yojson.Safe.t -> (bool * Yojson.Safe.t)
 
 val coding_tools : Masc_domain.tool_schema list
 (** Coding shard tools (keeper_bash + worktree/code inspection).
-    keeper_shell with op=gh provides GitHub CLI access.
     Not in default shards. *)
 
 val keeper_preflight_tools : Masc_domain.tool_schema list

@@ -129,15 +129,15 @@ let oas_env_has_non_empty key pairs =
 
 let effective_oas_env pairs =
   let gemini_mcp_disabled =
-    match List.assoc_opt "OAS_GEMINI_NO_MCP" pairs with
+    match List.assoc_opt "OAS_CLI_TOOL_B_NO_MCP" pairs with
     | Some value -> oas_env_truthy value
     | None -> false
   in
   let pairs =
     if
       gemini_mcp_disabled
-      && not (oas_env_has_non_empty "OAS_GEMINI_APPROVAL_MODE" pairs)
-    then pairs @ [ "OAS_GEMINI_APPROVAL_MODE", "plan" ]
+      && not (oas_env_has_non_empty "OAS_CLI_TOOL_B_APPROVAL_MODE" pairs)
+    then pairs @ [ "OAS_CLI_TOOL_B_APPROVAL_MODE", "plan" ]
     else pairs
   in
   (* Enable Provider_f CLI MCP by default: when not explicitly disabled and
@@ -146,7 +146,7 @@ let effective_oas_env pairs =
      MASC MCP server instead of the __oas_no_mcp__ sentinel. *)
   if
     (not gemini_mcp_disabled)
-    && not (oas_env_has_non_empty "OAS_GEMINI_ALLOWED_MCP" pairs)
-  then pairs @ [ "OAS_GEMINI_ALLOWED_MCP", "masc" ]
+    && not (oas_env_has_non_empty "OAS_CLI_TOOL_B_ALLOWED_MCP" pairs)
+  then pairs @ [ "OAS_CLI_TOOL_B_ALLOWED_MCP", "masc" ]
   else pairs
 ;;

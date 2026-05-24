@@ -1541,9 +1541,9 @@ let test_oas_env_parses_allowed_keys () =
 [keeper]
 persona_name = "analyst"
 [keeper.oas_env]
-OAS_CLAUDE_STRICT_MCP = "1"
-OAS_GEMINI_NO_MCP = "1"
-OAS_CODEX_CONFIG = "mcp_servers={}"
+OAS_CLI_TOOL_D_STRICT_MCP = "1"
+OAS_CLI_TOOL_B_NO_MCP = "1"
+OAS_CLI_TOOL_A_CONFIG = "mcp_servers={}"
 MASC_KEEPER_OAS_UNIFIED_MAX_TOKENS = 8192
 |} in
   match TL.parse_toml input with
@@ -1554,11 +1554,11 @@ MASC_KEEPER_OAS_UNIFIED_MAX_TOKENS = 8192
     | Ok d ->
       check int "oas_env count" 4 (List.length d.oas_env);
       check string "strict_mcp value"
-        "1" (List.assoc "OAS_CLAUDE_STRICT_MCP" d.oas_env);
+        "1" (List.assoc "OAS_CLI_TOOL_D_STRICT_MCP" d.oas_env);
       check string "no_mcp value"
-        "1" (List.assoc "OAS_GEMINI_NO_MCP" d.oas_env);
+        "1" (List.assoc "OAS_CLI_TOOL_B_NO_MCP" d.oas_env);
       check string "codex_config value"
-        "mcp_servers={}" (List.assoc "OAS_CODEX_CONFIG" d.oas_env);
+        "mcp_servers={}" (List.assoc "OAS_CLI_TOOL_A_CONFIG" d.oas_env);
       check string "unified max tokens value"
         "8192" (List.assoc "MASC_KEEPER_OAS_UNIFIED_MAX_TOKENS" d.oas_env);
       check (option int) "unified max tokens override"
@@ -1588,7 +1588,7 @@ MASC_KEEPER_UNIFIED_MAX_TOKENS = 4096
 let test_keeper_oas_context_demotes_gemini_no_mcp_to_plan () =
   let defaults =
     { KTP.empty_keeper_profile_defaults with
-      oas_env = [ "OAS_GEMINI_NO_MCP", "1" ];
+      oas_env = [ "OAS_CLI_TOOL_B_NO_MCP", "1" ];
     }
   in
   let ctx = KTP.keeper_oas_context_of_defaults defaults in
@@ -1602,8 +1602,8 @@ let test_keeper_oas_context_preserves_explicit_gemini_approval_mode () =
     { KTP.empty_keeper_profile_defaults with
       oas_env =
         [
-          "OAS_GEMINI_NO_MCP", "1";
-          "OAS_GEMINI_APPROVAL_MODE", "yolo";
+          "OAS_CLI_TOOL_B_NO_MCP", "1";
+          "OAS_CLI_TOOL_B_APPROVAL_MODE", "yolo";
         ];
     }
   in
@@ -1622,7 +1622,7 @@ persona_name = "analyst"
 [keeper.oas_env]
 PATH = "/evil/bin:/usr/bin"
 LD_PRELOAD = "/tmp/hack.so"
-OAS_CLAUDE_STRICT_MCP = "1"
+OAS_CLI_TOOL_D_STRICT_MCP = "1"
 MASC_KEEPER_AUTONOMOUS_MAX_TOKENS = "9999"
 RANDOM_VAR = "nope"
 |} in
@@ -1657,7 +1657,7 @@ let test_oas_env_not_flagged_as_unknown () =
 [keeper]
 persona_name = "analyst"
 [keeper.oas_env]
-OAS_CLAUDE_STRICT_MCP = "1"
+OAS_CLI_TOOL_D_STRICT_MCP = "1"
 |} in
   match TL.parse_toml input with
   | Error e -> fail e
@@ -1671,8 +1671,8 @@ let test_oas_env_coerces_bool_to_string () =
 [keeper]
 persona_name = "analyst"
 [keeper.oas_env]
-OAS_CLAUDE_STRICT_MCP = true
-OAS_CODEX_SKIP_GIT = false
+OAS_CLI_TOOL_D_STRICT_MCP = true
+OAS_CLI_TOOL_A_SKIP_GIT = false
 |} in
   match TL.parse_toml input with
   | Error e -> fail e
@@ -1681,9 +1681,9 @@ OAS_CODEX_SKIP_GIT = false
     | Error e -> fail e
     | Ok d ->
       check string "true → 1" "1"
-        (List.assoc "OAS_CLAUDE_STRICT_MCP" d.oas_env);
+        (List.assoc "OAS_CLI_TOOL_D_STRICT_MCP" d.oas_env);
       check string "false → 0" "0"
-        (List.assoc "OAS_CODEX_SKIP_GIT" d.oas_env)
+        (List.assoc "OAS_CLI_TOOL_A_SKIP_GIT" d.oas_env)
 
 let test_detect_unknown_keys_flags_also_allow_alias () =
   let input = {|

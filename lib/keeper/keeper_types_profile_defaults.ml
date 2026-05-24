@@ -149,15 +149,15 @@ let keeper_oas_context_of_defaults defaults =
   let module Oas_env = Keeper_types_profile_oas_env in
   let env_pairs = Oas_env.effective_oas_env defaults.oas_env in
   let gemini_mcp_disabled =
-    match List.assoc_opt "OAS_GEMINI_NO_MCP" env_pairs with
+    match List.assoc_opt "OAS_CLI_TOOL_B_NO_MCP" env_pairs with
     | Some value -> Oas_env.oas_env_truthy value
     | None -> false
   in
   let gemini_approval_mode_explicit =
-    non_empty_trimmed_assoc "OAS_GEMINI_APPROVAL_MODE" defaults.oas_env
+    non_empty_trimmed_assoc "OAS_CLI_TOOL_B_APPROVAL_MODE" defaults.oas_env
   in
   let gemini_approval_mode =
-    non_empty_trimmed_assoc "OAS_GEMINI_APPROVAL_MODE" env_pairs
+    non_empty_trimmed_assoc "OAS_CLI_TOOL_B_APPROVAL_MODE" env_pairs
   in
   let gemini_approval_mode_derived =
     gemini_mcp_disabled
@@ -165,11 +165,11 @@ let keeper_oas_context_of_defaults defaults =
     && Option.is_some gemini_approval_mode
   in
   let claude_mcp_config =
-    match List.assoc_opt "OAS_CLAUDE_MCP_CONFIG" env_pairs with
+    match List.assoc_opt "OAS_CLI_TOOL_D_MCP_CONFIG" env_pairs with
     | Some raw when String.trim raw <> "" -> Some raw
     | _ ->
       if
-        match List.assoc_opt "OAS_CLAUDE_STRICT_MCP" env_pairs with
+        match List.assoc_opt "OAS_CLI_TOOL_D_STRICT_MCP" env_pairs with
         | Some value -> Oas_env.oas_env_truthy value
         | None -> false
       then Some {|{"mcpServers":{}}|}
@@ -177,7 +177,7 @@ let keeper_oas_context_of_defaults defaults =
   in
   let gemini_allowed_mcp_derived =
     (not gemini_mcp_disabled)
-    && not (Oas_env.oas_env_has_non_empty "OAS_GEMINI_ALLOWED_MCP" defaults.oas_env)
+    && not (Oas_env.oas_env_has_non_empty "OAS_CLI_TOOL_B_ALLOWED_MCP" defaults.oas_env)
   in
   {
     env_pairs;

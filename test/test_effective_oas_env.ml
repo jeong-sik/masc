@@ -2,12 +2,12 @@
 
     Pins three invariants of [Keeper_types_profile.effective_oas_env]:
 
-    1. Default injection: when no OAS_GEMINI_* env vars are set,
-       [OAS_GEMINI_ALLOWED_MCP] is injected with value "masc".
-    2. Disabled passthrough: when [OAS_GEMINI_NO_MCP=true],
+    1. Default injection: when no OAS_CLI_TOOL_B_* env vars are set,
+       [OAS_CLI_TOOL_B_ALLOWED_MCP] is injected with value "masc".
+    2. Disabled passthrough: when [OAS_CLI_TOOL_B_NO_MCP=true],
        injection must NOT occur (operator opted out).
     3. Operator override preserved: when operator sets a custom
-       [OAS_GEMINI_ALLOWED_MCP], it is preserved verbatim.
+       [OAS_CLI_TOOL_B_ALLOWED_MCP], it is preserved verbatim.
 
     Also pins [keeper_oas_context_of_defaults] derived field:
     4. [gemini_allowed_mcp_derived] is [true] when default injection
@@ -25,33 +25,33 @@ module KTP = Masc_mcp.Keeper_types_profile
 
 let test_default_injects_masc () =
   let pairs = KTP.effective_oas_env [] in
-  match List.assoc_opt "OAS_GEMINI_ALLOWED_MCP" pairs with
+  match List.assoc_opt "OAS_CLI_TOOL_B_ALLOWED_MCP" pairs with
   | Some value ->
     check string "default injection is 'masc'" "masc" value
   | None ->
-    fail "OAS_GEMINI_ALLOWED_MCP not injected on empty input"
+    fail "OAS_CLI_TOOL_B_ALLOWED_MCP not injected on empty input"
 
 let test_disabled_skips_injection () =
   let pairs =
-    KTP.effective_oas_env [ ("OAS_GEMINI_NO_MCP", "true") ]
+    KTP.effective_oas_env [ ("OAS_CLI_TOOL_B_NO_MCP", "true") ]
   in
-  match List.assoc_opt "OAS_GEMINI_ALLOWED_MCP" pairs with
+  match List.assoc_opt "OAS_CLI_TOOL_B_ALLOWED_MCP" pairs with
   | Some _ ->
-    fail "OAS_GEMINI_ALLOWED_MCP injected despite NO_MCP=true"
+    fail "OAS_CLI_TOOL_B_ALLOWED_MCP injected despite NO_MCP=true"
   | None ->
     check bool "disabled skips injection" true true
 
 let test_operator_override_preserved () =
   let pairs =
     KTP.effective_oas_env
-      [ ("OAS_GEMINI_ALLOWED_MCP", "custom-server,other") ]
+      [ ("OAS_CLI_TOOL_B_ALLOWED_MCP", "custom-server,other") ]
   in
-  match List.assoc_opt "OAS_GEMINI_ALLOWED_MCP" pairs with
+  match List.assoc_opt "OAS_CLI_TOOL_B_ALLOWED_MCP" pairs with
   | Some value ->
     check string "operator override preserved"
       "custom-server,other" value
   | None ->
-    fail "OAS_GEMINI_ALLOWED_MCP missing despite operator setting"
+    fail "OAS_CLI_TOOL_B_ALLOWED_MCP missing despite operator setting"
 
 let test_operator_empty_string_preserved () =
   (* When operator explicitly sets empty string, the key exists in input
@@ -59,37 +59,37 @@ let test_operator_empty_string_preserved () =
      appends "masc" as a second entry. This means operator's empty-string
      opt-out is preserved — the transport reads the first value. *)
   let pairs =
-    KTP.effective_oas_env [ ("OAS_GEMINI_ALLOWED_MCP", "") ]
+    KTP.effective_oas_env [ ("OAS_CLI_TOOL_B_ALLOWED_MCP", "") ]
   in
-  match List.assoc_opt "OAS_GEMINI_ALLOWED_MCP" pairs with
+  match List.assoc_opt "OAS_CLI_TOOL_B_ALLOWED_MCP" pairs with
   | Some value ->
     check string "empty string preserved (first match)" "" value
   | None ->
-    fail "OAS_GEMINI_ALLOWED_MCP missing"
+    fail "OAS_CLI_TOOL_B_ALLOWED_MCP missing"
 
 let test_approval_mode_injected_with_no_mcp () =
   let pairs =
-    KTP.effective_oas_env [ ("OAS_GEMINI_NO_MCP", "true") ]
+    KTP.effective_oas_env [ ("OAS_CLI_TOOL_B_NO_MCP", "true") ]
   in
-  match List.assoc_opt "OAS_GEMINI_APPROVAL_MODE" pairs with
+  match List.assoc_opt "OAS_CLI_TOOL_B_APPROVAL_MODE" pairs with
   | Some value ->
     check string "approval mode injected when MCP disabled" "plan" value
   | None ->
-    fail "OAS_GEMINI_APPROVAL_MODE not injected when MCP disabled"
+    fail "OAS_CLI_TOOL_B_APPROVAL_MODE not injected when MCP disabled"
 
 let test_approval_mode_not_overridden () =
   let pairs =
     KTP.effective_oas_env
       [
-        ("OAS_GEMINI_NO_MCP", "true");
-        ("OAS_GEMINI_APPROVAL_MODE", "auto");
+        ("OAS_CLI_TOOL_B_NO_MCP", "true");
+        ("OAS_CLI_TOOL_B_APPROVAL_MODE", "auto");
       ]
   in
-  match List.assoc_opt "OAS_GEMINI_APPROVAL_MODE" pairs with
+  match List.assoc_opt "OAS_CLI_TOOL_B_APPROVAL_MODE" pairs with
   | Some value ->
     check string "operator approval mode preserved" "auto" value
   | None ->
-    fail "OAS_GEMINI_APPROVAL_MODE missing"
+    fail "OAS_CLI_TOOL_B_APPROVAL_MODE missing"
 
 (* ── keeper_oas_context_of_defaults tests ──────────────────── *)
 
@@ -103,7 +103,7 @@ let test_context_derived_flag_disabled () =
   let defaults =
     {
       KTP.empty_keeper_profile_defaults with
-      oas_env = [ ("OAS_GEMINI_NO_MCP", "true") ];
+      oas_env = [ ("OAS_CLI_TOOL_B_NO_MCP", "true") ];
     }
   in
   let ctx = KTP.keeper_oas_context_of_defaults defaults in
@@ -114,7 +114,7 @@ let test_context_derived_flag_operator () =
   let defaults =
     {
       KTP.empty_keeper_profile_defaults with
-      oas_env = [ ("OAS_GEMINI_ALLOWED_MCP", "my-server") ];
+      oas_env = [ ("OAS_CLI_TOOL_B_ALLOWED_MCP", "my-server") ];
     }
   in
   let ctx = KTP.keeper_oas_context_of_defaults defaults in
@@ -124,11 +124,11 @@ let test_context_derived_flag_operator () =
 let test_context_env_pairs_contain_masc () =
   let defaults = { KTP.empty_keeper_profile_defaults with oas_env = [] } in
   let ctx = KTP.keeper_oas_context_of_defaults defaults in
-  match List.assoc_opt "OAS_GEMINI_ALLOWED_MCP" ctx.env_pairs with
+  match List.assoc_opt "OAS_CLI_TOOL_B_ALLOWED_MCP" ctx.env_pairs with
   | Some value ->
     check string "env_pairs contains masc" "masc" value
   | None ->
-    fail "OAS_GEMINI_ALLOWED_MCP missing from env_pairs"
+    fail "OAS_CLI_TOOL_B_ALLOWED_MCP missing from env_pairs"
 
 (* ── Test suite ────────────────────────────────────────────── *)
 
@@ -137,7 +137,7 @@ let () =
     [
       ( "injection",
         [
-          Alcotest.test_case "empty input injects OAS_GEMINI_ALLOWED_MCP=masc"
+          Alcotest.test_case "empty input injects OAS_CLI_TOOL_B_ALLOWED_MCP=masc"
             `Quick test_default_injects_masc;
           Alcotest.test_case "NO_MCP=true skips injection"
             `Quick test_disabled_skips_injection;

@@ -1,6 +1,6 @@
 (* #10049: auto-construct CLI MCP config JSON for keepers whose cascade
    includes CLI providers but whose env
-   (OAS_CLAUDE_MCP_CONFIG) is unset.
+   (OAS_CLI_TOOL_D_MCP_CONFIG) is unset.
 
    Without this fallback, affected CLI providers launch with no [mcpServers]
    entry and the keeper cannot reach the masc-mcp HTTP
@@ -10,7 +10,7 @@
 
    Gated behind [MASC_AUTO_CONSTRUCT_CLAUDE_MCP] (default true since
    #10059 validation; the legacy explicit-env path still wins when
-   [OAS_CLAUDE_MCP_CONFIG] is set, and operators can opt out with
+   [OAS_CLI_TOOL_D_MCP_CONFIG] is set, and operators can opt out with
    [MASC_AUTO_CONSTRUCT_CLAUDE_MCP=false]). *)
 
 let feature_flag_env = "MASC_AUTO_CONSTRUCT_CLAUDE_MCP"

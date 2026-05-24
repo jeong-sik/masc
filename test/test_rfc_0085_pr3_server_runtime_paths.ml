@@ -33,10 +33,10 @@ let test_no_gemini_specific_policy_wiring () =
   let admin_env =
     Ast_grep.count_string_literals
       ~module_path:path
-      ~needle:"OAS_GEMINI_ADMIN_POLICY"
+      ~needle:"OAS_CLI_TOOL_B_ADMIN_POLICY"
   in
   check int "gemini_headless_admin literals in runtime_bootstrap" 0 headless;
-  check int "OAS_GEMINI_ADMIN_POLICY literals in runtime_bootstrap" 0 admin_env
+  check int "OAS_CLI_TOOL_B_ADMIN_POLICY literals in runtime_bootstrap" 0 admin_env
 ;;
 
 let test_takeover_uses_host_config () =

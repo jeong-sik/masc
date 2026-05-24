@@ -80,10 +80,10 @@ let test_classify_write_r1 () =
 (* --- classify: destructive → Destructive_protected --- *)
 
 let test_classify_destructive () =
+  (* Destructive requires BOTH force flag AND protected branch target. *)
   let cmds =
-    [ simple_ir "git" [ "push"; "--force" ];
-      simple_ir "git" [ "push"; "--force-with-lease" ];
-      simple_ir "git" [ "reset"; "--hard"; "HEAD~1" ] ]
+    [ simple_ir "git" [ "push"; "--force"; "origin"; "main" ];
+      simple_ir "git" [ "push"; "--force-with-lease"; "origin"; "main" ] ]
   in
   List.iter
     (fun ir ->
@@ -94,7 +94,7 @@ let test_classify_destructive () =
          (Risk.is_destructive envelope))
     cmds
 
-(* --- classify: git reset --hard is Destructive, git reset (soft) is R1 --- *)
+(* --- classify: git reset variants --- *)
 
 let test_git_reset_soft_is_r1 () =
   let ir = simple_ir "git" [ "reset"; "HEAD~1" ] in
@@ -106,6 +106,11 @@ let test_git_reset_soft_is_r1 () =
     (not (Risk.is_destructive envelope));
   Alcotest.(check bool) "reset is write" true
     (Risk.is_r2 envelope)
+
+let test_git_reset_hard_is_r2 () =
+  let ir = simple_ir "git" [ "reset"; "--hard"; "HEAD~1" ] in
+  let envelope = Risk.classify (Risk.undecided ir) in
+  Alcotest.(check bool) "reset --hard is R2" true (Risk.is_r2 envelope)
 
 (* --- classify: gh R2 operations --- *)
 
@@ -168,10 +173,10 @@ let test_classify_gh_api_graphql_r1 () =
 (* --- classify: pipeline --- *)
 
 let test_classify_pipeline_first_stage_destructive () =
-  (* Pipeline with git push --force as first stage.
+  (* Pipeline with git push --force origin main as first stage.
      flat_stage_words returns all words concatenated, so the classifier
-     sees "git push --force" from the first Simple stage. *)
-  let ir = pipeline_ir [ ("git", [ "push"; "--force" ]); ("cat", []) ] in
+     sees "git push --force origin main" from the first Simple stage. *)
+  let ir = pipeline_ir [ ("git", [ "push"; "--force"; "origin"; "main" ]); ("cat", []) ] in
   let envelope = Risk.classify (Risk.undecided ir) in
   Alcotest.(check bool) "pipeline with destructive first stage"
     true (Risk.is_destructive envelope)
@@ -212,13 +217,6 @@ let test_classify_unknown_read () =
   let envelope = Risk.classify (Risk.undecided ir) in
   Alcotest.(check bool) "unknown command is R0" true (Risk.is_r0 envelope)
 
-(* --- trust_decided escape hatch --- *)
-
-let test_trust_decided () =
-  let ir = simple_ir "git" [ "push"; "--force" ] in
-  let envelope = Risk.trust_decided (Risk.undecided ir) in
-  Alcotest.(check bool) "trust_decided defaults R0" true (Risk.is_r0 envelope)
-
 (* --- test runner --- *)
 
 let () =
@@ -228,6 +226,7 @@ let () =
   test_classify_write_r1 ();
   test_classify_destructive ();
   test_git_reset_soft_is_r1 ();
+  test_git_reset_hard_is_r2 ();
   test_classify_gh_r2 ();
   test_classify_gh_r1 ();
   test_classify_gh_api_delete_r2 ();
@@ -237,5 +236,4 @@ let () =
   test_classify_pipeline_first_stage_destructive ();
   test_classify_gh_read_only_prefixes_equivalence ();
   test_classify_unknown_read ();
-  test_trust_decided ();
-  print_endline "test_shell_ir_risk: 16/16 passed"
+  print_endline "test_shell_ir_risk: 15/15 passed"

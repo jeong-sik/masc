@@ -35,9 +35,7 @@ let dedupe_preserve_order (items : string list) =
 
 (* Duplicated locally for the same reason — 4-line idempotent helper
    used only by this sibling. *)
-let trim_nonempty_string raw =
-  let trimmed = String.trim raw in
-  if String.equal trimmed "" then None else Some trimmed
+let trim_nonempty_string = String_util.trim_nonempty
 ;;
 
 let runtime_mcp_policy_of_tool_names

@@ -132,9 +132,7 @@ let tool_names_are_runtime_mcp =
   Cascade_transport_mcp_tool_classifier.tool_names_are_runtime_mcp
 ;;
 
-let trim_nonempty_string raw =
-  let trimmed = String.trim raw in
-  if String.equal trimmed "" then None else Some trimmed
+let trim_nonempty_string = String_util.trim_nonempty
 ;;
 
 let runtime_mcp_policy_of_tool_names = Cascade_transport_runtime_mcp_policy_of_tool_names.runtime_mcp_policy_of_tool_names

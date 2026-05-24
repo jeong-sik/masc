@@ -49,7 +49,7 @@ let test_roundtrip_other_detail () =
     Alcotest.(check string)
       "cascade name preserved"
       "tier-group.primary"
-      (Classify.cascade_name_to_string cascade_name);
+      (Cascade_name.to_string cascade_name);
     (match reason with
      | Keeper_types.Other_detail msg ->
        Alcotest.(check string) "Other_detail payload preserved" "all providers tried" msg
@@ -126,7 +126,7 @@ let test_roundtrip_capacity_backpressure () =
     Alcotest.(check string)
       "cascade name preserved"
       "tier-group.primary"
-      (Classify.cascade_name_to_string cascade_name);
+      (Cascade_name.to_string cascade_name);
     Alcotest.(check string)
       "source preserved"
       "client_capacity"
@@ -169,7 +169,7 @@ let test_sdk_internal_nested_prefix_roundtrip () =
     Alcotest.(check string)
       "cascade name preserved"
       "tier-group.tools"
-      (Classify.cascade_name_to_string cascade_name);
+      (Cascade_name.to_string cascade_name);
     Alcotest.(check (list string))
       "required tools preserved"
       [ "masc_tool" ]

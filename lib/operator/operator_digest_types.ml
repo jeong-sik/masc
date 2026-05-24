@@ -87,7 +87,6 @@ let attention_item_to_yojson (item : attention_item) =
       ("authoritative", `Bool false);
     ]
 
-let recommended_confirm_required = Operator_approval.confirm_required
 
 let recommended_action_to_yojson ~actor (item : recommended_action) =
   let preview =
@@ -107,7 +106,7 @@ let recommended_action_to_yojson ~actor (item : recommended_action) =
       ("target_id", Json_util.string_opt_to_json item.target_id);
       ("severity", `String (operator_severity_to_string item.severity));
       ("reason", `String item.reason);
-      ("confirm_required", `Bool (recommended_confirm_required item.action_type));
+      ("confirm_required", `Bool (Operator_approval.confirm_required item.action_type));
       ("suggested_payload", item.suggested_payload);
       ("preview", preview);
       ("provenance", `String "fallback");

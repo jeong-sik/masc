@@ -122,7 +122,6 @@ let parse_string_list json key =
 
 let allowed_action_type = Operator_approval.is_allowed
 
-let confirm_required = Operator_approval.confirm_required
 
 let build_recommended_action ~actor ~target_type ~target_id json =
   match json with
@@ -163,7 +162,7 @@ let build_recommended_action ~actor ~target_type ~target_id json =
                 (key_target_id, Option.fold ~none:`Null ~some:(fun v -> `String v) target_id);
                 (key_severity, `String severity);
                 (key_reason, `String reason);
-                (key_confirm_required, `Bool (confirm_required action_type));
+                (key_confirm_required, `Bool (Operator_approval.confirm_required action_type));
                 (key_suggested_payload, suggested_payload);
                 (key_preview, preview);
                 (key_provenance, `String provenance_judgment);

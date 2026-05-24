@@ -200,7 +200,6 @@ let delegated_tool_for action_type =
   | Some action -> action.tool_name
   | None -> "unknown"
 
-let confirm_required = Operator_approval.confirm_required
 
 let preview_of_action (request : action_request) =
   let base =

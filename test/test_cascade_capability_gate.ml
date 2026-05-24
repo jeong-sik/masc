@@ -27,7 +27,7 @@ let check_violation expected_reason expected_requested expected_ceiling = functi
       string
       "cascade_name"
       "keeper_unified"
-      (CE.cascade_name_to_string cascade_name);
+      (Cascade_name.to_string cascade_name);
     check int "requested_max_tokens" expected_requested requested_max_tokens;
     check int "provider_ceiling" expected_ceiling provider_ceiling;
     check string "reason" expected_reason reason

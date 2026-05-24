@@ -59,10 +59,6 @@ val compare_recommendation : recommended_action -> recommended_action -> int
 (** Emit with [provenance = "derived"], [authoritative = false]. *)
 val attention_item_to_yojson : attention_item -> Yojson.Safe.t
 
-(** [true] if [action_type] requires operator confirmation —
-    delegated to {!Operator_approval.confirm_required}. *)
-val recommended_confirm_required : string -> bool
-
 (** Emit with preview envelope, [provenance = "fallback"],
     [authoritative = false]. *)
 val recommended_action_to_yojson :

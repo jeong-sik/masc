@@ -29,7 +29,6 @@ val compare_attention : attention_item -> attention_item -> int
 val compare_recommendation : recommended_action -> recommended_action -> int
 
 val attention_item_to_yojson : attention_item -> Yojson.Safe.t
-val recommended_confirm_required : string -> bool
 val recommended_action_to_yojson : actor:string -> recommended_action -> Yojson.Safe.t
 
 val summary_of_attention_items : attention_item list -> Yojson.Safe.t

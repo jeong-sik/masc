@@ -115,9 +115,6 @@ val delegated_tool_for : string -> string
     ["unknown"] when no match exists.  Used for confirm-step routing
     so the JSON contract knows which tool will receive the call. *)
 
-val confirm_required : string -> bool
-(** Re-export of {!Operator_approval.confirm_required}.  Pinned here
-    to keep the action contract surface in one place. *)
 
 val preview_of_action : action_request -> Yojson.Safe.t
 (** [preview_of_action r] renders a JSON preview for UI

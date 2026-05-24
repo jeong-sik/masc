@@ -151,8 +151,6 @@ val run_argv_pipeline_with_status_split :
     than buffered into OCaml strings. The returned stdout is the final stage's
     stdout; stderr is captured from every stage in stage order. *)
 
-(** {1 Detached (background) spawn primitives — P2 foundation} *)
-
 type detached_handle = {
   pid : int;
       (** Child process PID (also the process-group leader). *)
@@ -218,3 +216,4 @@ val tree_kill :
 val is_pgid_alive : pgid:int -> bool
 (** True when [-pgid] responds to signal 0, i.e. at least one member
     of the group is still alive. *)
+

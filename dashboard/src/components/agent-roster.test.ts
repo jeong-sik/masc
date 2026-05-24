@@ -202,13 +202,17 @@ describe('rosterStateNote — RFC-0135 §1.1 typed-state conditioning', () => {
     expect(note).toEqual({ label: '참고', text: '관찰 메모' })
   })
 
-  it('paused keeper produces no state note (signaled by badge elsewhere)', () => {
+  it('paused keeper surfaces its blocker reason in the state note', () => {
     const note = rosterStateNote(
       k({ paused: true, runtime_blocker_class: 'supervisor_paused' }),
       null,
       null,
     )
-    expect(note).toBeNull()
+    expect(note).toEqual({
+      label: '일시정지 원인',
+      text: 'Supervisor가 keeper를 일시정지한 상태라 재개 조건을 확인해야 합니다.',
+      kind: 'supervisor_paused',
+    })
   })
 
   it('offline keeper produces no state note', () => {
@@ -565,6 +569,57 @@ describe('AgentRoster live-only cards', () => {
     expect(text).toContain('파생')
     expect(text).toContain('현재 차단: Fiber 미해결')
     expect(text).toContain('Keeper fiber가 종료 상태를 확정하지 못해 supervisor 확인이 필요합니다.')
+  })
+
+  it('lets paused runtime truth override stale busy agent presence', async () => {
+    agents.value = [
+      makeAgent({
+        name: 'keeper-executor-agent',
+        status: 'busy',
+        current_task: 'task-463',
+        last_seen: '2026-05-24T14:01:04Z',
+      }),
+    ]
+    keepers.value = [
+      {
+        name: 'executor',
+        agent_name: 'keeper-executor-agent',
+        status: 'paused',
+        phase: 'Paused',
+        pipeline_stage: 'paused',
+        paused: true,
+        registered: false,
+        keepalive_running: false,
+        runtime_blocker_class: 'no_tool_capable_provider',
+        runtime_blocker_summary: 'no_tool_capable_provider',
+        agent: {
+          exists: true,
+          status: 'busy',
+          current_task: 'task-463',
+          last_seen: '2026-05-24T14:01:04Z',
+        },
+      } as Keeper,
+    ]
+
+    await act(async () => {
+      render(html`<${AgentRoster} keeperFilter="keeper-only" />`, container)
+    })
+    await flushUi()
+
+    const row = container.querySelector('[data-testid="keeper-operations-row"]') as HTMLElement
+    const presence = row.querySelector('[data-agent-presence]') as HTMLElement
+    expect(presence.dataset.presenceRawStatus).toBe('paused')
+    expect(presence.dataset.presenceState).toBe('paused')
+    expect(presence.dataset.presenceLabel).toBe('일시정지')
+    expect(presence.textContent).toContain('오래된 작업 신호 task-463')
+
+    const labels = Array.from(container.querySelectorAll('[data-agent-presence]'))
+      .map(el => (el as HTMLElement).dataset.presenceLabel)
+    expect(labels).not.toContain('작업 중')
+
+    const text = container.textContent ?? ''
+    expect(text).toContain('일시정지 원인: 도구 실행 Provider 없음')
+    expect(text).toContain('요구 도구를 실행할 수 있는 provider가 없어 라우팅 또는 tool surface 확인이 필요합니다.')
   })
 
   it('uses heartbeat and full keeper model for cards when action/model fallbacks disagree', async () => {

@@ -25,6 +25,10 @@ describe('agentStatusToPresence', () => {
     expect(agentStatusToPresence('idle')).toBe('idle')
   })
 
+  it('maps paused to paused', () => {
+    expect(agentStatusToPresence('paused')).toBe('paused')
+  })
+
   it('maps inactive to offline', () => {
     expect(agentStatusToPresence('inactive')).toBe('offline')
   })
@@ -50,6 +54,8 @@ describe('presenceConfig', () => {
     expect(presenceConfig('working').colorClass).toContain('var(--color-accent-fg)')
     expect(presenceConfig('idle').label).toBe('대기')
     expect(presenceConfig('idle').colorClass).toContain('var(--color-status-warn)')
+    expect(presenceConfig('paused').label).toBe('일시정지')
+    expect(presenceConfig('paused').pulse).toBe(false)
     expect(presenceConfig('offline').label).toBe('오프라인')
   })
 })
@@ -76,6 +82,18 @@ describe('summarizeAgentPresence', () => {
       size: 'sm',
       detail: '',
       detailPresent: false,
+    })
+  })
+
+  it('summarizes paused as a non-pulsing presence state', () => {
+    expect(summarizeAgentPresence('paused', '오래된 작업 신호 task-463', 'sm')).toEqual({
+      rawStatus: 'paused',
+      state: 'paused',
+      label: '일시정지',
+      pulse: false,
+      size: 'sm',
+      detail: '오래된 작업 신호 task-463',
+      detailPresent: true,
     })
   })
 })
@@ -115,6 +133,17 @@ describe('AgentPresence', () => {
     const container = document.createElement('div')
     render(h(AgentPresence, { status: 'busy' }), container)
     expect(container.textContent).toContain('작업 중')
+  })
+
+  it('renders paused label and data attributes', () => {
+    const container = document.createElement('div')
+    render(h(AgentPresence, { status: 'paused' }), container)
+    const el = container.querySelector('[data-agent-presence]') as HTMLElement
+    expect(el.dataset.presenceRawStatus).toBe('paused')
+    expect(el.dataset.presenceState).toBe('paused')
+    expect(el.dataset.presenceLabel).toBe('일시정지')
+    expect(el.hasAttribute('data-presence-pulse')).toBe(false)
+    expect(container.textContent).toContain('일시정지')
   })
 
   it('renders detail when provided', () => {

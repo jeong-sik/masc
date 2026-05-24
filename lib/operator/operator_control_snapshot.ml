@@ -353,11 +353,14 @@ let keepers_json
                           ~diagnostic
                     in
                     let aligned_status =
-                      align_keeper_runtime_status
-                        ~surface_status
-                        ~diagnostic
-                        ~agent_status_json:agent_json
-                        ~keepalive_running
+                      if meta.paused
+                      then "paused"
+                      else
+                        align_keeper_runtime_status
+                          ~surface_status
+                          ~diagnostic
+                          ~agent_status_json:agent_json
+                          ~keepalive_running
                     in
                     let t_phase = Time_compat.now () in
                     let registry_phase =
@@ -365,14 +368,23 @@ let keepers_json
                     in
                     dt_phase := Time_compat.now () -. t_phase;
                     let pipeline_stage =
-                      match registry_phase with
-                      | Some phase -> Keeper_exec_status.pipeline_stage_of_phase phase
-                      | None -> "offline"
+                      if meta.paused
+                      then "paused"
+                      else
+                        match registry_phase with
+                        | Some phase -> Keeper_exec_status.pipeline_stage_of_phase phase
+                        | None -> "offline"
                     in
                     let phase_str =
-                      match registry_phase with
-                      | Some p -> `String (Keeper_state_machine.phase_to_string p)
-                      | None -> `Null
+                      if meta.paused
+                      then (
+                        match registry_phase with
+                        | Some p -> `String (Keeper_state_machine.phase_to_string p)
+                        | None -> `String "paused")
+                      else
+                        match registry_phase with
+                        | Some p -> `String (Keeper_state_machine.phase_to_string p)
+                        | None -> `Null
                     in
                     let context_snapshot =
                       if lightweight
@@ -409,6 +421,8 @@ let keepers_json
                          ; "mid_goal", `String meta.mid_goal
                          ; "long_goal", `String meta.long_goal
                          ; "status", `String aligned_status
+                         ; "paused", `Bool meta.paused
+                         ; "pause_state", `String (if meta.paused then "paused" else "active")
                          ; "agent", agent_json
                          ; "generation", `Int meta.runtime.generation
                          ; "turn_count", `Int meta.runtime.usage.total_turns

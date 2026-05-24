@@ -4,14 +4,14 @@
 // indicator. The dot + pulse animation communicates "this agent is a
 // digital colleague" rather than an abstract process.
 //
-// Maps the internal Agent.status domain (6 values) to 4 visual presence
-// states (online / working / idle / offline). The mapping is intentionally
+// Maps the internal Agent.status domain to compact visual presence states.
+// The mapping is intentionally
 // lossy — visual density in a roster card cannot carry 6 states without
 // crowding.
 
 import { html } from 'htm/preact'
 
-export type PresenceVisualState = 'online' | 'working' | 'idle' | 'offline'
+export type PresenceVisualState = 'online' | 'working' | 'idle' | 'paused' | 'offline'
 export type AgentPresenceSize = 'sm' | 'md'
 
 export interface PresenceConfig {
@@ -46,6 +46,11 @@ const PRESENCE_CONFIG: Record<PresenceVisualState, PresenceConfig> = {
     pulse: false,
     label: '대기',
   },
+  paused: {
+    colorClass: 'bg-[var(--purple)]',
+    pulse: false,
+    label: '일시정지',
+  },
   offline: {
     colorClass: 'bg-[var(--color-bg-hover)]',
     pulse: false,
@@ -54,7 +59,7 @@ const PRESENCE_CONFIG: Record<PresenceVisualState, PresenceConfig> = {
 }
 
 /** Pure: map the backend Agent.status to a visual presence state.
-    The mapping collapses 6 backend states into 4 visual buckets so
+    The mapping collapses backend states into compact visual buckets so
     the roster grid stays scannable. */
 export function agentStatusToPresence(
   status: string | null | undefined,
@@ -67,6 +72,8 @@ export function agentStatusToPresence(
       return 'working'
     case 'idle':
       return 'idle'
+    case 'paused':
+      return 'paused'
     case 'inactive':
     case 'offline':
     default:

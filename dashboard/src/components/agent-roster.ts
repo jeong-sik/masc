@@ -67,6 +67,7 @@ import { fleetCompositeSnapshot } from '../composite-signals'
 type StatusFilter = 'all' | RuntimeBand
 
 type RosterStateNote = { label: string; text: string; kind?: string }
+type RosterPresenceDisplay = { status: string | null; detail: string | null }
 
 function stageBadgeClass(stageKey: string): string {
   if (stageKey === 'tool_use') return 'border-[var(--info-border)] bg-[var(--accent-12)] text-[var(--color-accent-fg)]'
@@ -123,6 +124,23 @@ export function rosterStateNote(
 
   const state = deriveKeeperOperationalState({ keeper, composite })
 
+  if (state.kind === 'paused') {
+    const blockerClass = keeper.runtime_blocker_class ?? undefined
+    const runtimeHint = keeperRuntimeBlockerHint(keeper)
+    if (runtimeHint) {
+      return { label: '일시정지 원인', text: runtimeHint, kind: blockerClass }
+    }
+
+    const summary = keeper.runtime_blocker_summary?.trim()
+    if (summary) {
+      return { label: '일시정지 원인', text: summary, kind: blockerClass }
+    }
+
+    const hint = monitoringHint?.trim()
+    if (hint) return { label: '일시정지', text: hint, kind: blockerClass }
+    return null
+  }
+
   if (state.kind === 'stuck') {
     const summary = keeper.runtime_blocker_summary?.trim()
     if (summary) {
@@ -160,6 +178,29 @@ export function rosterStateNote(
 function noteLooksLikeRawKind(note: RosterStateNote): boolean {
   if (!note.kind) return false
   return note.text === note.kind || note.text === `차단 종류: ${note.kind} (요약 메시지 없음)`
+}
+
+function rosterPresenceDisplay(
+  agent: Agent,
+  keeper: Keeper | null,
+  composite: KeeperCompositeSnapshot | null,
+): RosterPresenceDisplay {
+  if (!keeper) return { status: agent.status ?? null, detail: null }
+
+  const state = deriveKeeperOperationalState({ keeper, composite })
+  if (state.kind === 'paused') {
+    const staleTask = agent.current_task?.trim()
+    return {
+      status: 'paused',
+      detail: staleTask ? `오래된 작업 신호 ${staleTask}` : null,
+    }
+  }
+
+  if (state.kind === 'offline' && agent.current_task) {
+    return { status: 'offline', detail: `중단된 작업 ${agent.current_task}` }
+  }
+
+  return { status: agent.status ?? keeper.status ?? null, detail: null }
 }
 
 export function rosterBlockerDisplay(
@@ -787,6 +828,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
             band.key === 'active' ? null : keeperMonitoring?.hint ?? null,
           )
         : null
+    const presenceDisplay = rosterPresenceDisplay(agent, keeperRuntime, compositeForKeeper)
     const recentTools = uniqueToolNames(
       keeperRuntime?.recent_tool_names,
       keeperRuntime?.latest_tool_names,
@@ -827,6 +869,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
       currentWork,
       summaryText,
       stateNote,
+      presenceDisplay,
       recentTools,
       toolCallCount,
       toolAuditAt,
@@ -948,7 +991,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
                     <span class="shrink-0">
                       <${AgentAvatar}
                         name=${row.agent.name}
-                        status=${row.agent.status}
+                        status=${row.presenceDisplay.status}
                         traits=${row.agent.traits}
                         size="md"
                         currentWork=${row.currentWork}
@@ -958,7 +1001,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
                     <span class="min-w-0">
                       <span class="block truncate text-sm font-semibold text-[var(--color-fg-secondary)]">${row.displayName}</span>
                       <span class="mt-0.5 flex flex-wrap items-center gap-1.5 text-3xs text-[var(--color-fg-muted)]">
-                        <${AgentPresence} status=${row.agent.status} size="sm" />
+                        <${AgentPresence} status=${row.presenceDisplay.status} detail=${row.presenceDisplay.detail} size="sm" />
                         ${row.agent.synthetic ? html`<span class="rounded-[var(--r-0)] border border-dashed border-[var(--color-border-default)] px-1.5 py-0.5 italic">파생</span>` : null}
                       </span>
                     </span>
@@ -1009,7 +1052,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
                   <span class="text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">selected runtime</span>
                   <h3 class="m-0 mt-1 truncate text-xl font-semibold text-[var(--color-fg-secondary)]">${selectedRow.displayName}</h3>
                 </div>
-                <${AgentPresence} status=${selectedRow.agent.status} size="sm" />
+                <${AgentPresence} status=${selectedRow.presenceDisplay.status} detail=${selectedRow.presenceDisplay.detail} size="sm" />
               </div>
 
               <p class="m-0 text-sm leading-paragraph text-[var(--color-fg-primary)]" title=${selectedRow.summaryText}>${selectedRow.summaryText}</p>

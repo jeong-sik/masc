@@ -357,49 +357,34 @@ let test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust () =
       let config = Coord.default_config base_dir in
       (* See: this fixture only needs an initialized room for digest reads. *)
       ignore (Coord.init config ~agent_name:(Some "operator"));
-      let keeper_ctx : _ Tool_keeper.context =
-        {
-          config;
-          agent_name = "operator";
-          sw;
-          clock = Eio.Stdenv.clock env;
-          proc_mgr = Some (Eio.Stdenv.process_mgr env);
-          net = None;
-        }
-      in
-      let ok, _ =
-        dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_up"
-          ~args:
+      let meta =
+        match
+          Masc_test_deps.meta_of_json_fixture
             (`Assoc
               [
                 ("name", `String keeper_name);
+                ("agent_name", `String (Keeper_types.keeper_agent_name keeper_name));
+                ("trace_id", `String "trace-paused-runtime-trust");
                 ("goal", `String "Expose paused keeper failure in summary");
-                ("proactive_enabled", `Bool false);
-                ("autoboot_enabled", `Bool false);
+                ("short_goal", `String "Expose paused keeper failure in summary");
+                ("cascade_name", `String "tier-group.primary");
               ])
-      in
-      Alcotest.(check bool) "keeper up ok" true ok;
-      Keeper_keepalive.stop_keepalive keeper_name;
-      let meta =
-        match Keeper_types.read_meta config keeper_name with
-        | Ok (Some meta) -> meta
-        | Ok None -> Alcotest.fail "expected keeper meta"
-        | Error err -> Alcotest.fail err
-      in
-      let meta =
-        {
-          meta with
-          paused = true;
-          runtime =
-            {
-              meta.runtime with
-              last_blocker =
-                Some
-                  (Keeper_types.blocker_info_of_class
-                     ~detail:"Completion contract [require_tool_use] violated: actionable keeper signal was present, but the model called no keeper tools"
-                     Keeper_types.Completion_contract_violation);
-            };
-        }
+        with
+        | Ok meta ->
+          {
+            meta with
+            paused = true;
+            runtime =
+              {
+                meta.runtime with
+                last_blocker =
+                  Some
+                    (Keeper_types.blocker_info_of_class
+                       ~detail:"Completion contract [require_tool_use] violated: actionable keeper signal was present, but the model called no keeper tools"
+                       Keeper_types.Completion_contract_violation);
+              };
+          }
+        | Error err -> Alcotest.fail ("keeper meta fixture failed: " ^ err)
       in
       (match Keeper_types.write_meta config meta with
       | Ok () -> ()
@@ -475,7 +460,28 @@ let test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust () =
       Alcotest.(check string) "terminal code preserved"
         "completion_contract_violation:require_tool_use"
         (trust |> member "latest_terminal_reason" |> member "code"
-       |> to_string))
+       |> to_string);
+      Operator_control.invalidate_snapshot_cache ();
+      let full_snapshot =
+        Operator_control.snapshot_json ~view:"summary" ~include_messages:false
+          ~include_keepers:true ~include_summary_fields:false
+          ~lightweight_summary:false
+          (operator_ctx env sw config "operator")
+      in
+      let full_keeper =
+        full_snapshot |> member "keepers" |> member "items" |> to_list
+        |> List.find_opt (fun row -> row |> member "name" |> to_string = keeper_name)
+        |> Option.value ~default:`Null
+      in
+      Alcotest.(check bool) "full keeper present" true (full_keeper <> `Null);
+      Alcotest.(check string) "full paused status" "paused"
+        (full_keeper |> member "status" |> to_string);
+      Alcotest.(check bool) "full paused flag" true
+        (full_keeper |> member "paused" |> to_bool);
+      Alcotest.(check string) "full pause state" "paused"
+        (full_keeper |> member "pause_state" |> to_string);
+      Alcotest.(check string) "full paused pipeline" "paused"
+        (full_keeper |> member "pipeline_stage" |> to_string))
 
 let test_digest_room_includes_keeper_runtime_attention () =
   Eio_main.run @@ fun env ->

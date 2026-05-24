@@ -202,10 +202,9 @@ let sdk_error_is_model_access_denied (err : Agent_sdk.Error.sdk_error) =
 let provider_auth_hint_marker = "Provider auth returned 401"
 let openai_compat_not_found_hint_marker = "OpenAI-compatible endpoint returned 404"
 
-let cascade_name_to_string = Cascade_name.to_string
 
 let resolve_provider_api_key_env_name ~cascade_name ~provider_cfg =
-  let cascade_name = cascade_name_to_string cascade_name in
+  let cascade_name = Cascade_name.to_string cascade_name in
   let provider_name =
     Llm_provider.Provider_registry.provider_name_of_config provider_cfg
   in
@@ -733,7 +732,7 @@ let provider_error_capacity_scope_label = function
       "none"
 
 let emit_provider_error_metric ~cascade_name ~provider error =
-  let cascade_name = provider_label (cascade_name_to_string cascade_name) in
+  let cascade_name = provider_label (Cascade_name.to_string cascade_name) in
   let provider = provider_label provider in
   Dashboard_oas_bridge.record_provider_error ~cascade_name ~provider_id:provider
     error;
@@ -795,7 +794,7 @@ let timeout_source_label (err : Agent_sdk.Error.sdk_error) : string =
 let emit_oas_run_timeout_metric ~cascade_name ~provider:_ err =
   match err with
   | Agent_sdk.Error.Api (Llm_provider.Retry.Timeout _) ->
-      let cascade_name = provider_label (cascade_name_to_string cascade_name) in
+      let cascade_name = provider_label (Cascade_name.to_string cascade_name) in
       Prometheus.inc_counter Keeper_metrics.metric_keeper_oas_run_timeout
         ~labels:
           [
@@ -807,7 +806,7 @@ let emit_oas_run_timeout_metric ~cascade_name ~provider:_ err =
   | Agent_sdk.Error.Provider
       (Llm_provider.Error.Timeout _
       | Llm_provider.Error.NetworkError { timeout_phase = Some _; _ }) ->
-      let cascade_name = provider_label (cascade_name_to_string cascade_name) in
+      let cascade_name = provider_label (Cascade_name.to_string cascade_name) in
       Prometheus.inc_counter Keeper_metrics.metric_keeper_oas_run_timeout
         ~labels:
           [
@@ -867,7 +866,7 @@ let maybe_emit_cascade_saturation_signal ~cascade_name ~provider:_ err =
     | None -> ()
     | Some kind ->
         let cascade_name_str =
-          provider_label (cascade_name_to_string cascade_name)
+          provider_label (Cascade_name.to_string cascade_name)
         in
         Prometheus.inc_counter
           Keeper_metrics.metric_keeper_cascade_saturation_signal

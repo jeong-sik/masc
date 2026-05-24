@@ -15,7 +15,6 @@
 
 (** {1 Cascade name} *)
 
-val cascade_name_to_string : Cascade_name.t -> string
 
 (** {1 Provider rejection payload}
 

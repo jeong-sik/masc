@@ -96,7 +96,6 @@ let is_typed_declarative_label_provider = function
   | "openai_compat" -> true
   | _ -> false
 
-let cascade_name_to_string = Cascade_name.to_string
 
 let has_execution_model_config () =
   match Provider_runtime_projection.preferred_execution_model_labels () with
@@ -105,7 +104,7 @@ let has_execution_model_config () =
 
 let default_model_strings ~cascade_name =
   let cascade_name =
-    cascade_name |> cascade_name_to_string |> Keeper_cascade_profile.canonicalize
+    cascade_name |> Cascade_name.to_string |> Keeper_cascade_profile.canonicalize
   in
   let all_labels =
     match Provider_runtime_projection.preferred_execution_model_labels () with
@@ -434,10 +433,10 @@ let cascade_config_path () : string option =
 let models_of_cascade_name_result cascade_name :
     (string list, string) result =
   Cascade_catalog_runtime.models_of_cascade_name
-    (cascade_name_to_string cascade_name)
+    (Cascade_name.to_string cascade_name)
 
 let models_of_cascade_name cascade_name =
-  let cascade_name_string = cascade_name_to_string cascade_name in
+  let cascade_name_string = Cascade_name.to_string cascade_name in
   match models_of_cascade_name_result cascade_name with
   | Ok labels -> labels
   | Error detail ->
@@ -602,7 +601,7 @@ let max_output_tokens_ceiling_of_cascade_name cascade_name =
       match Cascade_declarative_parser.parse_file path with
       | Error _ -> None
       | Ok cfg ->
-          let raw_name = cascade_name_to_string cascade_name in
+          let raw_name = Cascade_name.to_string cascade_name in
           let resolved_name =
             match Cascade_catalog_runtime.resolve_declared_name ~raw_name () with
             | Ok resolved -> Some (Cascade_name.to_string resolved)
@@ -623,7 +622,7 @@ let resolve_named_providers_result ?provider_filter
     ?runtime_mcp_policy
     ~cascade_name ()
     : (Llm_provider.Provider_config.t list, string) result =
-  let cascade_name_string = cascade_name_to_string cascade_name in
+  let cascade_name_string = Cascade_name.to_string cascade_name in
   let label =
     Keeper_cascade_profile.normalize_declared_name cascade_name_string
   in
@@ -645,7 +644,7 @@ let resolve_named_providers_result_strict ?provider_filter
     ?runtime_mcp_policy
     ~cascade_name ()
     : (Llm_provider.Provider_config.t list, string) result =
-  let cascade_name_string = cascade_name_to_string cascade_name in
+  let cascade_name_string = Cascade_name.to_string cascade_name in
   let label =
     Keeper_cascade_profile.normalize_declared_name cascade_name_string
   in
@@ -675,7 +674,7 @@ let resolve_named_providers ?provider_filter
   | Error detail ->
       Log.Misc.warn "cascade %s: %s"
         (Keeper_cascade_profile.normalize_declared_name
-           (cascade_name_to_string cascade_name))
+           (Cascade_name.to_string cascade_name))
         detail;
       []
 

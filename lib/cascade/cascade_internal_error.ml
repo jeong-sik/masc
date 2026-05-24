@@ -10,7 +10,6 @@
     [Cascade_error_classify.Cascade_exhausted], etc. continue to compile
     unchanged. *)
 
-let cascade_name_to_string = Cascade_name.to_string
 
 type provider_rejection = {
   provider_label : string;
@@ -217,7 +216,7 @@ let string_opt_of_assoc key json =
 
 let masc_internal_error_to_json = function
   | Cascade_exhausted { cascade_name; reason } ->
-    let cascade_name = cascade_name_to_string cascade_name in
+    let cascade_name = Cascade_name.to_string cascade_name in
     `Assoc
       [
         ("kind", `String "cascade_exhausted");
@@ -225,7 +224,7 @@ let masc_internal_error_to_json = function
         ("reason", Keeper_types.cascade_exhaustion_reason_to_json reason);
       ]
   | Capacity_backpressure { cascade_name; source; detail; retry_after_sec } ->
-    let cascade_name = cascade_name_to_string cascade_name in
+    let cascade_name = Cascade_name.to_string cascade_name in
     `Assoc
       [
         ("kind", `String "capacity_backpressure");
@@ -235,7 +234,7 @@ let masc_internal_error_to_json = function
         ("retry_after_sec", Json_util.float_opt_to_json retry_after_sec);
       ]
   | Resumable_cli_session { cascade_name; detail; exit_code } ->
-    let cascade_name = cascade_name_to_string cascade_name in
+    let cascade_name = Cascade_name.to_string cascade_name in
     `Assoc
       [
         ("kind", `String "resumable_cli_session");
@@ -250,7 +249,7 @@ let masc_internal_error_to_json = function
         required_tool_names;
         provider_rejections;
       } ->
-    let cascade_name = cascade_name_to_string cascade_name in
+    let cascade_name = Cascade_name.to_string cascade_name in
     let rejection_reasons = provider_rejection_reasons provider_rejections in
     `Assoc
       [
@@ -271,7 +270,7 @@ let masc_internal_error_to_json = function
         ("reason", `String reason);
       ]
   | Admission_queue_timeout { keeper_name; cascade_name; wait_sec } ->
-    let cascade_name = cascade_name_to_string cascade_name in
+    let cascade_name = Cascade_name.to_string cascade_name in
     `Assoc
       [
         ("kind", `String "admission_queue_timeout");
@@ -316,7 +315,7 @@ let masc_internal_error_to_json = function
       ]
   | Max_tokens_ceiling_violation
       { cascade_name; requested_max_tokens; provider_ceiling; reason } ->
-    let cascade_name = cascade_name_to_string cascade_name in
+    let cascade_name = Cascade_name.to_string cascade_name in
     `Assoc
       [
         ("kind", `String "max_tokens_ceiling_violation");
@@ -381,7 +380,7 @@ let summary_of_masc_internal_error = function
       Some
         (Printf.sprintf
            "Capacity backpressure blocked cascade %s; source=%s; detail=%s%s"
-           (cascade_name_to_string cascade_name)
+           (Cascade_name.to_string cascade_name)
            (capacity_backpressure_source_to_string source)
            detail
            retry_after)
@@ -392,7 +391,7 @@ let summary_of_masc_internal_error = function
         required_tool_names;
         provider_rejections;
       } ->
-      let cascade_name = cascade_name_to_string cascade_name in
+      let cascade_name = Cascade_name.to_string cascade_name in
       Some
         (Printf.sprintf
            "No tool-capable provider for cascade %s; required_tools=[%s]; rejected_candidate_count=%d; rejection_reasons=[%s]; configured_candidate_count=%d"
@@ -426,7 +425,7 @@ let summary_of_masc_internal_error = function
     Some
       (Printf.sprintf
          "Invalid max_tokens budget for cascade %s; requested_max_tokens=%d; provider_ceiling=%d; reason=%s"
-         (cascade_name_to_string cascade_name)
+         (Cascade_name.to_string cascade_name)
          requested_max_tokens
          provider_ceiling
          reason)
@@ -511,7 +510,7 @@ let cascade_name_of_masc_internal_error = function
   | No_tool_capable_provider { cascade_name; _ }
   | Admission_queue_timeout { cascade_name; _ }
   | Max_tokens_ceiling_violation { cascade_name; _ } ->
-      let cascade_name = cascade_name_to_string cascade_name in
+      let cascade_name = Cascade_name.to_string cascade_name in
       if String.equal (String.trim cascade_name) "" then "unknown"
       else cascade_name
   | Accept_rejected _

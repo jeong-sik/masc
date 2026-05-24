@@ -35,7 +35,7 @@ let admission_wait_timeout_error
     ~(priority : Llm_provider.Request_priority.t)
     (wait_ms : int) =
   let wait_sec = float_of_int wait_ms /. 1000.0 in
-  let cascade_name_string = cascade_name_to_string cascade_name in
+  let cascade_name_string = Cascade_name.to_string cascade_name in
   let msg =
     Printf.sprintf
       "Admission queue wait timeout after %.1fs (wait_ms=%d, keeper=%s, cascade=%s, priority=%s)"

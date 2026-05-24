@@ -117,11 +117,7 @@ let json_string_opt key json =
       if trimmed = "" then None else Some trimmed
   | None -> None
 
-let json_bool key json default =
-  Safe_ops.json_bool ~default key json
 
-let json_float_opt key json =
-  Safe_ops.json_float_opt key json
 
 let agent_status_text agent_status =
   json_string_opt "status" agent_status
@@ -134,7 +130,7 @@ let agent_last_seen_ts_opt agent_status =
   | None -> None
 
 let agent_last_seen_ago_s agent_status =
-  json_float_opt "last_seen_ago_s" agent_status |> Option.value ~default:max_float
+  Safe_ops.json_float_opt "last_seen_ago_s" agent_status |> Option.value ~default:max_float
 
 let agent_runtime_has_live_signal agent_status =
   match agent_status_text agent_status with
@@ -194,9 +190,9 @@ let keeper_reply_snapshot_of_history (history_items : Yojson.Safe.t list) =
         | `Assoc _ ->
             let role = item |> member "role" |> to_string_option in
             let ts_unix =
-              match json_float_opt "ts_unix" item with
+              match Safe_ops.json_float_opt "ts_unix" item with
               | Some ts when ts > 0.0 -> Some ts
-              | _ -> json_float_opt "timestamp" item
+              | _ -> Safe_ops.json_float_opt "timestamp" item
             in
             let content = normalize_content item in
             (match role, ts_unix with
@@ -248,7 +244,7 @@ let keeper_error_hint ~agent_status ~meta =
 
 let classify_keeper_quiet_reason ~meta ~keepalive_running ~agent_status ~now_ts =
   let quiet_active = quiet_hours_active () in
-  let agent_exists = json_bool "exists" agent_status false in
+  let agent_exists = Safe_ops.json_bool ~default:false "exists" agent_status in
   let agent_status_text = agent_status_text agent_status in
   let live_signal_supersedes_persisted_error =
     keepalive_running
@@ -329,16 +325,16 @@ let keeper_health_state ?(fiber_health = Fiber_unknown)
   | Fiber_zombie -> KH_zombie
   | Fiber_dead -> KH_dead
   | Fiber_alive | Fiber_unknown ->
-  let agent_exists = json_bool "exists" agent_status false in
+  let agent_exists = Safe_ops.json_bool ~default:false "exists" agent_status in
   let agent_status_text =
     json_string_opt "status" agent_status
     |> Option.value ~default:"unknown"
     |> String.lowercase_ascii
   in
   let last_seen_ago_s =
-    json_float_opt "last_seen_ago_s" agent_status |> Option.value ~default:max_float
+    Safe_ops.json_float_opt "last_seen_ago_s" agent_status |> Option.value ~default:max_float
   in
-  let is_zombie = json_bool "is_zombie" agent_status false in
+  let is_zombie = Safe_ops.json_bool ~default:false "is_zombie" agent_status in
   let stale_threshold_s = 120.0 in
   let last_turn_ago_s =
     if meta.runtime.usage.last_turn_ts <= 0.0 then max_float

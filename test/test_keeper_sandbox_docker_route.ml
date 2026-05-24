@@ -1089,7 +1089,7 @@ let test_bash_missing_playground_blocks_before_docker () =
   let mount_source =
     Keeper_sandbox.host_root_abs_of_meta ~config meta
     |> Keeper_alerting_path.normalize_path_for_check
-    |> Keeper_alerting_path.strip_trailing_slashes
+    |> String_util.strip_trailing_slashes
   in
   cleanup_dir playground;
   with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
@@ -1561,7 +1561,7 @@ let test_sandbox_root_git_cwd_single_repo_auto_chdir () =
   in
   let repo =
     Keeper_alerting_path.normalize_path_for_check repo
-    |> Keeper_alerting_path.strip_trailing_slashes
+    |> String_util.strip_trailing_slashes
   in
   Alcotest.(check (option string)) "no error" None error;
   Alcotest.(check string) "auto cwd selects the only repo" repo cwd
@@ -1800,7 +1800,7 @@ let test_git_creds_mounts_only_selected_keeper_identity () =
     let other_gh = gh_dir other_identity in
     let mounted_playground =
       Keeper_alerting_path.normalize_path_for_check playground
-      |> Keeper_alerting_path.strip_trailing_slashes
+      |> String_util.strip_trailing_slashes
     in
     check_line_contains
       (github_identity ^ " selected GH bundle mounted read-only")
@@ -1825,11 +1825,11 @@ let test_git_creds_mounts_only_selected_keeper_identity () =
   in
   let mounted_playground_a =
     Keeper_alerting_path.normalize_path_for_check playground_a
-    |> Keeper_alerting_path.strip_trailing_slashes
+    |> String_util.strip_trailing_slashes
   in
   let mounted_playground_b =
     Keeper_alerting_path.normalize_path_for_check playground_b
-    |> Keeper_alerting_path.strip_trailing_slashes
+    |> String_util.strip_trailing_slashes
   in
   let line_a =
     run_for ~meta:meta_a ~playground:playground_a
@@ -2029,7 +2029,7 @@ let test_bash_rewrites_host_path_command_for_docker () =
            ~argv:
              [
                Printf.sprintf "%s/repos/masc-mcp"
-                 (Keeper_alerting_path.strip_trailing_slashes playground);
+                 (String_util.strip_trailing_slashes playground);
              ])
       ()
   in

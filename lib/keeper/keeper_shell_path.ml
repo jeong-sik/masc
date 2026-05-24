@@ -227,7 +227,7 @@ let shell_command_available name =
 
 let normalize_for_containment path =
   Keeper_alerting_path.normalize_path_for_check path
-  |> Keeper_alerting_path.strip_trailing_slashes
+  |> String_util.strip_trailing_slashes
 
 let in_playground ~root ~cwd ~meta =
   let cwd_canonical = normalize_for_containment cwd in

@@ -43,8 +43,6 @@ val first_nul_field : string -> string option
 
 val repos_dir_of_keeper : Coord_utils.config -> string -> string
 
-val strip_trailing_slashes : string -> string
-
 val keeper_visible_worktree_path :
   config:Coord_utils.config -> agent_name:string -> host_path:string -> string
 

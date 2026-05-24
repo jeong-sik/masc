@@ -173,11 +173,11 @@ let resolve_sandbox_root_git_cwd_of_stages
   let host_root =
     Keeper_sandbox.host_root_abs_of_meta ~config meta
     |> Keeper_alerting_path.normalize_path_for_check
-    |> Keeper_alerting_path.strip_trailing_slashes
+    |> String_util.strip_trailing_slashes
   in
   let cwd_normalized =
     Keeper_alerting_path.normalize_path_for_check cwd
-    |> Keeper_alerting_path.strip_trailing_slashes
+    |> String_util.strip_trailing_slashes
   in
   let repos_in_playground () =
     let repos_dir = Filename.concat host_root "repos" in

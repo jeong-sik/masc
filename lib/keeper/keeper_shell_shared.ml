@@ -395,7 +395,7 @@ let rewrite_turn_runtime_paths_to_host
     ~needle:(Keeper_sandbox.container_root meta.name)
     ~replacement:
       (Keeper_sandbox.host_root_abs_of_meta ~config meta
-       |> Keeper_alerting_path.strip_trailing_slashes)
+       |> String_util.strip_trailing_slashes)
     text
 
 let rewrite_docker_host_paths_to_container
@@ -405,16 +405,16 @@ let rewrite_docker_host_paths_to_container
   =
   let raw_host_root =
     Keeper_sandbox.host_root_abs_of_meta ~config meta
-    |> Keeper_alerting_path.strip_trailing_slashes
+    |> String_util.strip_trailing_slashes
   in
   let normalized_host_root =
     raw_host_root
     |> Keeper_alerting_path.normalize_path_for_check
-    |> Keeper_alerting_path.strip_trailing_slashes
+    |> String_util.strip_trailing_slashes
   in
   let container_root =
     Keeper_sandbox.container_root meta.name
-    |> Keeper_alerting_path.strip_trailing_slashes
+    |> String_util.strip_trailing_slashes
   in
   let rewritten =
     Keeper_sandbox_runtime.rewrite_host_root_to_container_root

@@ -92,7 +92,7 @@ let docker_private_workspace_cwd =
 let rewrite_docker_command_paths ~(config : Coord.config) ~(meta : keeper_meta) cmd =
   let raw_host_root =
     Keeper_sandbox.host_root_abs_of_meta ~config meta
-    |> Keeper_alerting_path.strip_trailing_slashes
+    |> String_util.strip_trailing_slashes
   in
   let normalized_host_root =
     raw_host_root |> Keeper_alerting_path.normalize_path_for_check_stripped
@@ -120,13 +120,13 @@ let rewrite_docker_command_paths_for_host_validation
   =
   let raw_host_root =
     Keeper_sandbox.host_root_abs_of_meta ~config meta
-    |> Keeper_alerting_path.strip_trailing_slashes
+    |> String_util.strip_trailing_slashes
   in
   let normalized_host_root =
     raw_host_root |> Keeper_alerting_path.normalize_path_for_check_stripped
   in
   let container_root =
-    keeper_private_container_root meta |> Keeper_alerting_path.strip_trailing_slashes
+    keeper_private_container_root meta |> String_util.strip_trailing_slashes
   in
   let rewritten =
     Keeper_sandbox_runtime.rewrite_host_root_to_container_root
@@ -526,7 +526,7 @@ let run_docker_shell_command_with_status_internal
         let host_root =
           Keeper_sandbox.host_root_abs_of_meta ~config meta
           |> Keeper_alerting_path.normalize_path_for_check
-          |> Keeper_alerting_path.strip_trailing_slashes
+          |> String_util.strip_trailing_slashes
         in
         (* #10424: keeper LLM이 sandbox root에서 cd 없이 git/gh 호출 시
          "fatal: not a git repository" 발생. mount point는 git repo 아니고

@@ -159,16 +159,9 @@ end
 
 include Make (Docker_backend)
 
-let strip_trailing_slashes path =
-  let rec loop i =
-    if i > 0 && path.[i - 1] = '/' then loop (i - 1) else i
-  in
-  let len = loop (String.length path) in
-  if len = String.length path then path else String.sub path 0 len
-
 let normalize p =
   Keeper_alerting_path.normalize_path_for_check p
-  |> strip_trailing_slashes
+  |> String_util.strip_trailing_slashes
 
 let in_playground ~config ~meta ~cwd =
   let host_root =

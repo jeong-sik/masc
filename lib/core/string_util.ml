@@ -210,3 +210,10 @@ let escape_xml s =
   |> replace_substring ~needle:">" ~by:"&gt;"
   |> replace_substring ~needle:"\"" ~by:"&quot;"
   |> replace_substring ~needle:"'" ~by:"&apos;"
+
+let strip_trailing_slashes path =
+  let rec loop i =
+    if i > 0 && path.[i - 1] = '/' then loop (i - 1) else i
+  in
+  let len = loop (String.length path) in
+  if len = String.length path then path else String.sub path 0 len

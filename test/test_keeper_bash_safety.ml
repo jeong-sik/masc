@@ -179,7 +179,7 @@ let playground_path_of = Masc_mcp.Keeper_alerting_path.playground_path_of_keeper
 
 let normalize_path_for_containment path =
   Masc_mcp.Keeper_alerting_path.normalize_path_for_check path
-  |> Masc_mcp.Keeper_alerting_path.strip_trailing_slashes
+  |> String_util.strip_trailing_slashes
 
 let temp_dir () =
   let dir = Filename.temp_file "keeper_bash_safety_" "" in
@@ -749,7 +749,7 @@ let test_rewrite_turn_runtime_paths_to_host () =
   let container_root = Keeper_sandbox.container_root meta.name in
   let host_root =
     Keeper_sandbox.host_root_abs_of_meta ~config meta
-    |> Masc_mcp.Keeper_alerting_path.strip_trailing_slashes
+    |> String_util.strip_trailing_slashes
   in
   let input =
     Printf.sprintf "worktree %s/repos/masc-mcp\npwd=%s/repos/masc-mcp\n"
@@ -779,7 +779,7 @@ let test_rewrite_docker_host_paths_to_container () =
   let meta = make_docker_meta "minjae" in
   let host_root =
     Keeper_sandbox.host_root_abs_of_meta ~config meta
-    |> Masc_mcp.Keeper_alerting_path.strip_trailing_slashes
+    |> String_util.strip_trailing_slashes
   in
   let container_root = Keeper_sandbox.container_root meta.name in
   let input =
@@ -802,7 +802,7 @@ let test_rewrite_docker_container_paths_for_host_validation () =
   let meta = make_docker_meta "minjae" in
   let host_root =
     Keeper_sandbox.host_root_abs_of_meta ~config meta
-    |> Masc_mcp.Keeper_alerting_path.strip_trailing_slashes
+    |> String_util.strip_trailing_slashes
   in
   let host_repo = Filename.concat (Filename.concat host_root "repos") "masc-mcp" in
   let container_root = Keeper_sandbox.container_root meta.name in

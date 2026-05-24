@@ -133,7 +133,7 @@ let binding_api_base_url (binding : Agent_sdk.Provider_runtime_binding.t) =
         | None -> ""
         | Some idx -> String.sub request_path 0 idx
       in
-      Some (Env_config_core.strip_trailing_slashes base_url ^ path_prefix)))
+      Some (String_util.strip_trailing_slashes base_url ^ path_prefix)))
 ;;
 
 let first_nonempty_env names =

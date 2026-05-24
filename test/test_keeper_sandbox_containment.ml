@@ -127,7 +127,7 @@ let test_path_just_outside_playground_blocked () =
   let bundle_normalized =
     Keeper_sandbox.host_root_abs_of_meta ~config meta
     |> Keeper_alerting_path.normalize_path_for_check
-    |> Keeper_alerting_path.strip_trailing_slashes
+    |> String_util.strip_trailing_slashes
   in
   let sibling = bundle_normalized ^ "_evil/secret.txt" in
   Alcotest.(check bool) "lookalike sibling path is blocked"

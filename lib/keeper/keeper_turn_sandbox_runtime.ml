@@ -30,7 +30,7 @@ let create
   =
   let raw_host_root =
     Keeper_sandbox.host_root_abs_of_meta ~config meta
-    |> Keeper_alerting_path.strip_trailing_slashes
+    |> String_util.strip_trailing_slashes
   in
   { config
   ; meta
@@ -39,7 +39,7 @@ let create
   ; host_root = raw_host_root |> normalize_path
   ; container_root =
       Keeper_sandbox.container_root meta.name
-      |> Keeper_alerting_path.strip_trailing_slashes
+      |> String_util.strip_trailing_slashes
   ; uid = Unix.getuid ()
   ; gid = Unix.getgid ()
   ; network_mode

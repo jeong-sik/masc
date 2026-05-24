@@ -18,8 +18,8 @@ let safe_is_dir path =
 let normalize path = Keeper_alerting_path.normalize_path_for_check_stripped path
 
 let suffix_under ~prefix path =
-  let prefix = Keeper_alerting_path.strip_trailing_slashes prefix in
-  let path = Keeper_alerting_path.strip_trailing_slashes path in
+  let prefix = String_util.strip_trailing_slashes prefix in
+  let path = String_util.strip_trailing_slashes path in
   if String.equal path prefix
   then Some ""
   else (

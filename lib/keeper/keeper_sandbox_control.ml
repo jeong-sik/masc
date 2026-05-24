@@ -39,7 +39,7 @@ let now_ms () =
 
 let normalize_path path =
   Keeper_alerting_path.normalize_path_for_check path
-  |> Keeper_alerting_path.strip_trailing_slashes
+  |> String_util.strip_trailing_slashes
 
 let rec ensure_dir path =
   if path = "" || path = "." || path = "/" then
@@ -152,7 +152,7 @@ let start_managed_container
                   ensure_dir host_root;
                   let container_root =
                     Keeper_sandbox.container_root meta.name
-                    |> Keeper_alerting_path.strip_trailing_slashes
+                    |> String_util.strip_trailing_slashes
                   in
                   let uid = Unix.getuid () in
                   let gid = Unix.getgid () in

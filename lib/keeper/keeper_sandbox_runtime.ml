@@ -204,19 +204,13 @@ let sandbox_network_label_key = "masc.mcp.network"
 let sandbox_ttl_sec_label_key = "masc.mcp.ttl_sec"
 let sandbox_turn_id_label_key = "masc.mcp.turn_id"
 
-let strip_trailing_slashes path =
-  let rec loop i = if i > 0 && path.[i - 1] = '/' then loop (i - 1) else i in
-  let len = loop (String.length path) in
-  if len = String.length path then path else String.sub path 0 len
-;;
-
 let normalize_base_path_for_hash base_path =
   let abs =
     if Filename.is_relative base_path
     then Filename.concat (Sys.getcwd ()) base_path
     else base_path
   in
-  strip_trailing_slashes abs
+  String_util.strip_trailing_slashes abs
 ;;
 
 let base_path_hash base_path =
@@ -598,8 +592,8 @@ let is_path_boundary_after text idx =
 ;;
 
 let rewrite_host_root_to_container_root ~host_root ~container_root text =
-  let host_root = strip_trailing_slashes host_root in
-  let container_root = strip_trailing_slashes container_root in
+  let host_root = String_util.strip_trailing_slashes host_root in
+  let container_root = String_util.strip_trailing_slashes container_root in
   let needle_len = String.length host_root in
   if needle_len = 0 || not (String_util.contains_substring text host_root)
   then text

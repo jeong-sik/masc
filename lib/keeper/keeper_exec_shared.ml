@@ -204,7 +204,7 @@ let keeper_sandbox_repo_names ~(config : Coord.config) ~(meta : keeper_meta) =
 
 let keeper_playground_relative_root ~(meta : keeper_meta) =
   Keeper_sandbox.allowed_root_rel_of_meta ~meta
-  |> Keeper_alerting_path.strip_trailing_slashes
+  |> String_util.strip_trailing_slashes
 ;;
 
 let keeper_playground_relative_path ~(meta : keeper_meta) rel =
@@ -213,7 +213,7 @@ let keeper_playground_relative_path ~(meta : keeper_meta) rel =
 
 let relative_path_targets_allowed_root ~(meta : keeper_meta) (raw : string) =
   let boundary prefix =
-    let prefix = Keeper_alerting_path.strip_trailing_slashes prefix in
+    let prefix = String_util.strip_trailing_slashes prefix in
     prefix <> ""
     && (String.equal raw prefix || String.starts_with ~prefix:(prefix ^ "/") raw)
   in
@@ -245,16 +245,16 @@ let strip_keeper_playground_prefix ~(meta : keeper_meta) (raw : string) =
   let sandbox_root = Keeper_sandbox.allowed_root_rel_of_meta ~meta in
   let legacy_bundle_root = Playground_paths.bundle_root meta.name in
   let short_root =
-    let rel = Keeper_alerting_path.strip_trailing_slashes sandbox_root in
+    let rel = String_util.strip_trailing_slashes sandbox_root in
     if String.starts_with ~prefix:(Common.masc_dirname ^ "/") rel
     then String.sub rel 6 (String.length rel - 6)
     else rel
   in
   let prefixes =
     [ sandbox_root
-    ; Keeper_alerting_path.strip_trailing_slashes sandbox_root
+    ; String_util.strip_trailing_slashes sandbox_root
     ; legacy_bundle_root
-    ; Keeper_alerting_path.strip_trailing_slashes legacy_bundle_root
+    ; String_util.strip_trailing_slashes legacy_bundle_root
     ; short_root ^ "/"
     ; short_root
     ]
@@ -323,7 +323,7 @@ let host_path_of_own_container_path
   if Filename.is_relative raw || meta.sandbox_profile <> Keeper_types.Docker
   then None
   else (
-    let strip = Keeper_alerting_path.strip_trailing_slashes in
+    let strip = String_util.strip_trailing_slashes in
     let normalize path = Keeper_alerting_path.normalize_path_for_check_stripped path in
     let container_root = Keeper_sandbox.container_root meta.name |> normalize in
     let raw_norm = normalize raw in
@@ -403,7 +403,7 @@ let playground_relative_unless_allowed_root
     then (
       let pg_root =
         keeper_playground_root ~config ~meta
-        |> Keeper_alerting_path.strip_trailing_slashes
+        |> String_util.strip_trailing_slashes
       in
       let pg_bundle = Keeper_sandbox.allowed_root_rel_of_meta ~meta in
       let doubled_prefix = pg_root ^ "/" ^ pg_bundle in

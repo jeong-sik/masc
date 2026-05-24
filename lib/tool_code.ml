@@ -91,7 +91,7 @@ let normalize_agent_relative_path ~(config : Coord.config) ~(agent_name : string
     if not (Filename.is_relative trimmed) then
       let own_bundle_abs =
         Filename.concat config.Coord.base_path own_bundle_rel
-        |> Keeper_alerting_path.strip_trailing_slashes
+        |> String_util.strip_trailing_slashes
       in
       let doubled_prefix = own_bundle_abs ^ "/" ^ own_bundle_rel in
       if String.starts_with ~prefix:doubled_prefix trimmed then

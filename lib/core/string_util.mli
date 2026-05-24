@@ -85,3 +85,8 @@ val escape_xml : string -> string
 (** Escape the five XML 1.0 predefined entities: ampersand,
     less-than, greater-than, double-quote, and apostrophe.
     Order is safe for round-trip use: ampersand is replaced first. *)
+
+val strip_trailing_slashes : string -> string
+(** Remove trailing [/] characters from a path.
+    Returns the empty string for inputs like [///].
+    No-op if no trailing slashes. *)

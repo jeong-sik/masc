@@ -40,7 +40,7 @@ let strip_trailing_slashes path =
   else loop (String.length path)
 
 let normalize_path ~cwd path =
-  let base = strip_trailing_slashes (String.trim path) in
+  let base = String_util.strip_trailing_slashes (String.trim path) in
   let absolute =
     if Filename.is_relative base then Filename.concat cwd base else base
   in

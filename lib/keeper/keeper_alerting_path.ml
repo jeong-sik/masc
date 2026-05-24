@@ -72,8 +72,6 @@ let project_root_of_config (config : Coord.config) : string =
 ;;
 
 let starts_with ~(prefix : string) (s : string) : bool = String.starts_with ~prefix s
-let strip_trailing_slashes = Env_config_core.strip_trailing_slashes
-
 let normalize_path_for_check (path : string) : string =
   try Fs_compat.realpath path with
   | Unix.Unix_error _ ->
@@ -101,7 +99,7 @@ let normalize_path_for_check (path : string) : string =
 ;;
 
 let normalize_path_for_check_stripped path =
-  normalize_path_for_check path |> strip_trailing_slashes
+  normalize_path_for_check path |> String_util.strip_trailing_slashes
 ;;
 
 let normalize_allowed_path_for_check ~(root : string) (path : string) : string option =
@@ -110,7 +108,7 @@ let normalize_allowed_path_for_check ~(root : string) (path : string) : string o
   then None
   else (
     let candidate = if Filename.is_relative raw then Filename.concat root raw else raw in
-    let normalized = normalize_path_for_check candidate |> strip_trailing_slashes in
+    let normalized = normalize_path_for_check candidate |> String_util.strip_trailing_slashes in
     if normalized = "" then None else Some normalized)
 ;;
 
@@ -135,7 +133,7 @@ let parent_exists (path : string) : bool =
 ;;
 
 let is_within_root_norm ~(root_norm : string) (path : string) : bool =
-  let normalized = normalize_path_for_check path |> strip_trailing_slashes in
+  let normalized = normalize_path_for_check path |> String_util.strip_trailing_slashes in
   normalized = root_norm || starts_with ~prefix:(root_norm ^ "/") normalized
 ;;
 
@@ -148,13 +146,13 @@ let find_suffix_matches_under_root
       ()
   : string list
   =
-  let root_norm = normalize_path_for_check root |> strip_trailing_slashes in
+  let root_norm = normalize_path_for_check root |> String_util.strip_trailing_slashes in
   let module StringSet = Set.Make (String) in
   let rec walk visited ~dirs_seen acc dir =
     if dirs_seen >= max_dirs || List.length acc >= max_matches
     then visited, dirs_seen, acc
     else (
-      let dir_norm = normalize_path_for_check dir |> strip_trailing_slashes in
+      let dir_norm = normalize_path_for_check dir |> String_util.strip_trailing_slashes in
       if (not (is_within_root_norm ~root_norm dir)) || StringSet.mem dir_norm visited
       then visited, dirs_seen, acc
       else (
@@ -351,7 +349,7 @@ let sandbox_path_of_meta ~(meta : Keeper_types.keeper_meta) =
 ;;
 
 let sandbox_bundle_paths_of_meta ~(meta : Keeper_types.keeper_meta) =
-  let root = sandbox_path_of_meta ~meta |> strip_trailing_slashes in
+  let root = sandbox_path_of_meta ~meta |> String_util.strip_trailing_slashes in
   [ root ^ "/"; root ^ "/mind/"; root ^ "/repos/" ]
 ;;
 
@@ -379,7 +377,7 @@ let ensure_sandbox_bundle_for_profile
   =
   let root = project_root_of_config config in
   let sandbox_root =
-    Keeper_sandbox.host_root_rel_of_profile sandbox_profile name |> strip_trailing_slashes
+    Keeper_sandbox.host_root_rel_of_profile sandbox_profile name |> String_util.strip_trailing_slashes
   in
   [ sandbox_root ^ "/"; sandbox_root ^ "/mind/"; sandbox_root ^ "/repos/" ]
   |> List.map (Filename.concat root)

@@ -22,6 +22,12 @@ let invalidation_memory_ttl_s = 3600.0
 let invalidation_memory : (string, float) Hashtbl.t = Hashtbl.create 64
 let invalidation_memory_lock = Mutex.create ()
 
+let string_starts_with ~prefix s =
+  let len_s = String.length s in
+  let len_prefix = String.length prefix in
+  len_s >= len_prefix && String.sub s 0 len_prefix = prefix
+;;
+
 let string_contains s needle =
   let len_s = String.length s in
   let len_needle = String.length needle in
@@ -34,12 +40,6 @@ let string_contains s needle =
       else loop (i + 1)
     in
     loop 0
-;;
-
-let string_starts_with ~prefix s =
-  let len_s = String.length s in
-  let len_prefix = String.length prefix in
-  len_s >= len_prefix && String.sub s 0 len_prefix = prefix
 ;;
 
 let trusted_cache_signal_sender from_agent =

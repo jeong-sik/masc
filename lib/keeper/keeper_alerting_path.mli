@@ -26,9 +26,6 @@ val project_root_of_config : Coord.config -> string
 
 val starts_with : prefix:string -> string -> bool
 
-(** Re-export of [Env_config_core.strip_trailing_slashes]. *)
-val strip_trailing_slashes : string -> string
-
 (** [Fs_compat.realpath] with a fallback that walks up the directory
     tree until an ancestor resolves, then reconstructs the suffix. *)
 val normalize_path_for_check : string -> string

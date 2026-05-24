@@ -224,7 +224,7 @@ let worktree_create_r ?(link_task=true) ?repo_name config ~agent_name ~task_id ~
             else begin
               let playground_dir =
                 Coord_worktree_paths.repos_dir_of_keeper config agent_name
-                |> Coord_worktree_paths.strip_trailing_slashes
+                |> String_util.strip_trailing_slashes
                 |> Filename.dirname
               in
               Playground_repo_cache.update ~playground_dir ~repo_name

@@ -116,7 +116,7 @@ let inspect
          "clone_path", `String clone_path;
          "sandbox_repos",
          `String
-           (Keeper_alerting_path.strip_trailing_slashes
+           (String_util.strip_trailing_slashes
               (Keeper_sandbox.allowed_root_rel_of_meta ~meta)
             ^ "/repos/");
          "default_branch", `String default_branch;

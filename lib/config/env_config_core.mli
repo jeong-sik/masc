@@ -74,7 +74,6 @@ val trim_opt : string option -> string option
 (** [Some s] with whitespace trimmed; [None] when [s] is empty
     after trim or already [None]. *)
 
-val strip_trailing_slashes : string -> string
 val strip_path_trailing_slashes : string -> string
 val expand_home_prefix : string -> string
 val normalize_path_lexically : string -> string

@@ -25,7 +25,7 @@ let typed_validation_error_text = Keeper_shell_bash_typed_input.typed_validation
 
 let normalize_path_for_keeper_shell_ir_containment path =
   Keeper_alerting_path.normalize_path_for_check path
-  |> Keeper_alerting_path.strip_trailing_slashes
+  |> String_util.strip_trailing_slashes
 
 (* Backend target helpers for typed Shell IR dispatch. *)
 let docker_sandbox_target = Keeper_sandbox_shell_ir_target.docker_target

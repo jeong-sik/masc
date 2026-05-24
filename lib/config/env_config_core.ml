@@ -108,14 +108,6 @@ let trim_opt = function
       if trimmed = "" then None else Some trimmed
   | None -> None
 
-let strip_trailing_slashes value =
-  let rec loop idx =
-    if idx <= 0 then ""
-    else if value.[idx - 1] = '/' then loop (idx - 1)
-    else String.sub value 0 idx
-  in
-  loop (String.length value)
-
 let strip_path_trailing_slashes value =
   let trimmed = String.trim value in
   let rec loop current =
@@ -248,7 +240,7 @@ let rec masc_http_base_url () =
 
 and masc_http_base_url_result () =
   match raw_value_opt http_base_url_env_key |> trim_opt with
-  | Some base -> Ok (strip_trailing_slashes base)
+  | Some base -> Ok (String_util.strip_trailing_slashes base)
   | None ->
       let host =
         match masc_host_opt () with

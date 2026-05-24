@@ -42,16 +42,38 @@ val logical_use_of_string_opt : string -> logical_use option
 val cascade_name_for_use : ?config_path:string -> logical_use -> string
 (** Runtime cascade profile for a logical call site.
 
-    Resolution order:
-    1. [routes.<logical_use_key>] from the active cascade config, when it points
-       at a live catalog profile.
-    2. The first catalog entry from the live catalog.
+    Resolution order (phonebook-first):
+    1. Phonebook: [logical_use] → [task_use] → tier-group → model strings,
+       returning the first model string.
+    2. Legacy TOML [routes.<logical_use_key>] from the active cascade config,
+       when it points at a live catalog profile.
+    3. The first catalog entry from the live catalog.
     Raises [Failure] when the catalog is empty — boot-time validation is
     the upstream gate that prevents this state at runtime.
 
     This is the boundary for code that used to hardcode profile names such as
     ["governance_judge"], ["operator_judge"], ["local_recovery"], or
     ["cross_verifier"]. *)
+
+val provider_configs_for_use :
+  ?config_path:string ->
+  ?temperature:float ->
+  ?max_tokens:int ->
+  logical_use ->
+  Llm_provider.Provider_config.t list option
+(** Resolve a logical use to [Provider_config.t] list via the phonebook.
+    Direct phonebook path: logical_use → task_use → tier-group → models →
+    providers → endpoint/auth → Provider_config.t.
+    Returns [None] when phonebook is unavailable or no models resolve.
+    @since RFC Cascade-Phonebook Phase 4 *)
+
+val model_strings_for_use :
+  ?config_path:string ->
+  logical_use ->
+  string list option
+(** Resolve a logical use to model strings via the phonebook.
+    Returns [None] when phonebook is unavailable.
+    @since RFC Cascade-Phonebook Phase 4 *)
 
 val configured_route_targets : ?config_path:string -> unit -> string list
 (** Unique non-empty profile names referenced from [routes]. *)

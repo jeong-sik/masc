@@ -21,6 +21,7 @@ include Keeper_turn_driver_helpers
 include Keeper_turn_driver_provider_attempt
 include Keeper_turn_driver_backpressure
 include Keeper_turn_driver_candidate_metrics
+include Keeper_turn_driver_client_capacity
 
 let keeper_cascade_tier_admission =
   Keeper_turn_driver_admission.keeper_cascade_tier_admission
@@ -789,18 +790,6 @@ let run_named
                 | Provider_error.ModelNotFound)
             | None -> None
           in
-  let acquire_client_capacity_slot candidate =
-    let capacity_key =
-      Cascade_runtime_candidate.capacity_key candidate |> String.trim
-    in
-    if String.equal capacity_key ""
-    then `No_client_capacity
-    else
-      match Cascade_client_capacity.try_acquire capacity_key with
-      | Unregistered -> `No_client_capacity
-      | Acquired release -> `Acquired (capacity_key, release)
-      | Full { retry_after_s } -> `Full (capacity_key, retry_after_s)
-  in
   let emit_capacity_blocked_manifest ~capacity_key =
     emit_runtime_manifest
       ~status:"blocked"

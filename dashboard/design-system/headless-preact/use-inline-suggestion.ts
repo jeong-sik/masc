@@ -15,6 +15,14 @@ import {
   type SuggestionController,
 } from '../headless-core/inline-suggestion'
 
+function sameSuggestions(
+  a: ReadonlyArray<InlineSuggestion>,
+  b: ReadonlyArray<InlineSuggestion>,
+): boolean {
+  if (a.length !== b.length) return false
+  return a.every((suggestion, index) => suggestion.id === b[index]?.id)
+}
+
 export function useFileSuggestions(
   manager: InlineSuggestionManager,
   file: string,
@@ -23,8 +31,11 @@ export function useFileSuggestions(
     manager.inFile(file),
   )
   useEffect(() => {
-    setList(manager.inFile(file))
-    const dispose = manager.subscribeFile(file, (xs) => setList(xs))
+    const updateList = (next: ReadonlyArray<InlineSuggestion>): void => {
+      setList((prev) => sameSuggestions(prev, next) ? prev : next)
+    }
+    updateList(manager.inFile(file))
+    const dispose = manager.subscribeFile(file, updateList)
     return dispose
   }, [manager, file])
   return list

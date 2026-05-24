@@ -2,6 +2,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { h } from 'preact'
 import { render } from 'preact'
+import { waitFor } from '@testing-library/preact'
 import { RichContent } from './rich-content'
 
 vi.mock('../../api/link-previews', () => ({
@@ -43,8 +44,7 @@ describe('RichContent', () => {
   it('calls fetchLinkPreviews when URLs are present', async () => {
     const container = document.createElement('div')
     render(h(RichContent, { text: 'Check out https://example.com' }), container)
-    await new Promise((r) => setTimeout(r, 10))
-    expect(mockedFetchLinkPreviews).toHaveBeenCalled()
+    await waitFor(() => expect(mockedFetchLinkPreviews).toHaveBeenCalled())
     const urls = mockedFetchLinkPreviews.mock.calls[0]?.[0] as string[]
     expect(urls).toContain('https://example.com')
     render(null, container)
@@ -73,8 +73,7 @@ describe('RichContent', () => {
     })
     const container = document.createElement('div')
     render(h(RichContent, { text: 'See https://example.com' }), container)
-    await new Promise((r) => setTimeout(r, 10))
-    expect(container.textContent).toContain('Example')
+    await waitFor(() => expect(container.textContent).toContain('Example'))
     render(null, container)
   })
 
@@ -87,7 +86,7 @@ describe('RichContent', () => {
       }),
       container,
     )
-    await new Promise((r) => setTimeout(r, 10))
+    await waitFor(() => expect(mockedFetchLinkPreviews).toHaveBeenCalled())
     const urls = mockedFetchLinkPreviews.mock.calls[0]?.[0] as string[]
     expect(urls.length).toBeLessThanOrEqual(2)
     render(null, container)
@@ -107,7 +106,7 @@ describe('RichContent', () => {
       }),
       container,
     )
-    await new Promise((r) => setTimeout(r, 10))
+    await waitFor(() => expect(mockedFetchLinkPreviews).toHaveBeenCalled())
     const urls = mockedFetchLinkPreviews.mock.calls[0]?.[0] as string[]
     expect(urls).toContain('https://link.com')
     expect(urls).not.toContain('https://img.com/pic.png')

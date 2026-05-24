@@ -3,6 +3,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { render } from 'preact'
 import { html } from 'htm/preact'
+import { waitFor } from '@testing-library/preact'
 import type { TabDescriptor } from '../headless-core/tabs'
 import { useTabs } from './use-tabs'
 
@@ -73,8 +74,7 @@ describe('useTabs', () => {
     render(html`<${Probe} />`, container)
     await flushEffects()
     captured.close('t2')
-    await flushEffects()
-    expect(captured.tabs.map((t) => t.id)).toEqual(['t1', 't3'])
+    await waitFor(() => expect(captured.tabs.map((t) => t.id)).toEqual(['t1', 't3']))
   })
 
   it('getTabListProps returns role=tablist', async () => {

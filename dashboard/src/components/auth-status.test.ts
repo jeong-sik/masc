@@ -11,6 +11,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { render } from 'preact'
 import { html } from 'htm/preact'
+import { waitFor } from '@testing-library/preact'
 
 vi.mock('../store', () => ({
   shellAuthSummary: { value: null },
@@ -115,14 +116,19 @@ describe('AuthStatus popover behavior (Iter 2)', () => {
 
     trigger.click()
     await flushUi()
-    expect(container.querySelector('[role="dialog"]')).not.toBeNull()
+    const panel = container.querySelector('[role="dialog"]')
+    expect(panel).not.toBeNull()
+    await waitFor(() => {
+      expect(panel?.contains(document.activeElement)).toBe(true)
+    })
 
     document.dispatchEvent(
       new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
     )
-    await flushUi()
 
-    expect(container.querySelector('[role="dialog"]')).toBeNull()
+    await waitFor(() => {
+      expect(container.querySelector('[role="dialog"]')).toBeNull()
+    })
     expect(document.activeElement).toBe(trigger)
   })
 })

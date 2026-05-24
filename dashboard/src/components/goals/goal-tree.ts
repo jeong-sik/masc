@@ -55,6 +55,12 @@ import {
   goalTaskLinkageLabel,
   goalTaskSummaryForNode,
 } from './goal-task-summary'
+import {
+  goalCompletionGateLabel,
+  goalCompletionLabel,
+  goalCompletionSummaryForNode,
+  goalCompletionTone,
+} from './goal-completion-summary'
 
 type GoalDetailTab = 'summary' | 'tasks' | 'evidence'
 
@@ -584,6 +590,15 @@ function GoalAttainmentChip({ attainment }: { attainment: GoalTreeNode['attainme
   `
 }
 
+function completionToneClass(tone: 'default' | 'ok' | 'warn' | 'bad'): string {
+  switch (tone) {
+    case 'ok': return 'border-ok/30 bg-ok/10 text-ok'
+    case 'warn': return 'border-warn/30 bg-warn/10 text-warn'
+    case 'bad': return 'border-bad/30 bg-bad/10 text-bad'
+    default: return 'border-card-border/60 bg-[var(--color-bg-elevated)] text-text-body'
+  }
+}
+
 function TreeSummary({
   summary,
   awaitingVerificationCount,
@@ -676,6 +691,63 @@ function TreeTask({ task }: { task: GoalTreeTask }) {
         <span class="rounded-[var(--r-1)] border border-[var(--accent-20)] bg-[var(--accent-10)] px-1.5 py-0.5 text-3xs font-medium text-accent-fg">${task.assignee}</span>
       ` : null}
       <${StatusBadge} status=${task.status} />
+    </div>
+  `
+}
+
+function GoalCompletionStrip({
+  node,
+  compact = false,
+}: {
+  node: GoalTreeNode
+  compact?: boolean
+}) {
+  const summary = goalCompletionSummaryForNode(node)
+  const tone = goalCompletionTone(summary)
+  const label = goalCompletionLabel(summary)
+  const pctLabel = summary.pct == null ? 'unmeasured' : `${summary.pct}%`
+  const gateLabel = goalCompletionGateLabel(summary)
+
+  if (compact) {
+    return html`
+      <span
+        class="rounded-[var(--r-1)] border px-2 py-0.5 text-3xs font-semibold ${completionToneClass(tone)}"
+        title=${`Completion: ${label}; ${pctLabel}; ${gateLabel}`}
+      >
+        ${label}
+      </span>
+    `
+  }
+
+  return html`
+    <div class=${CARD_BOX} data-goal-completion-summary>
+      <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <div class="text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-text-muted">완료 판정</div>
+          <div class="mt-1 text-sm text-text-body">${label} · ${pctLabel}</div>
+        </div>
+        <span class="rounded-[var(--r-1)] border px-2 py-0.5 text-3xs font-semibold ${completionToneClass(tone)}">
+          ${gateLabel}
+        </span>
+      </div>
+      <div class="grid grid-cols-[repeat(auto-fit,minmax(120px,1fr))] gap-2 text-xs">
+        <div class="rounded-[var(--r-1)] border border-card-border/50 bg-[var(--color-bg-surface)] p-2">
+          <div class="text-3xs uppercase text-text-muted">basis</div>
+          <div class="mt-1 font-semibold text-text-strong">${summary.pct_source}</div>
+        </div>
+        <div class="rounded-[var(--r-1)] border border-card-border/50 bg-[var(--color-bg-surface)] p-2">
+          <div class="text-3xs uppercase text-text-muted">task open</div>
+          <div class="mt-1 font-semibold text-text-strong">${summary.task_open}</div>
+        </div>
+        <div class="rounded-[var(--r-1)] border border-card-border/50 bg-[var(--color-bg-surface)] p-2">
+          <div class="text-3xs uppercase text-text-muted">verifier</div>
+          <div class="mt-1 font-semibold text-text-strong">${summary.requires_verifier ? 'required' : 'none'}</div>
+        </div>
+        <div class="rounded-[var(--r-1)] border border-card-border/50 bg-[var(--color-bg-surface)] p-2">
+          <div class="text-3xs uppercase text-text-muted">blocker</div>
+          <div class="mt-1 font-semibold text-text-strong">${summary.blocking_source}</div>
+        </div>
+      </div>
     </div>
   `
 }
@@ -780,6 +852,7 @@ function TreeNode({ node, depth }: { node: GoalTreeNode; depth: number }) {
             <${HealthBadge} health=${node.health} />
             <${StatusBadge} status=${node.status} />
             ${node.task_count > 0 ? html`<div class="w-32"><${TaskProgressBar} done=${node.task_done_count} total=${node.task_count} size="sm" /></div>` : null}
+            <${GoalCompletionStrip} node=${node} compact />
             <${GoalTaskRelationStrip} node=${node} compact />
             ${node.metric ? html`
               <span
@@ -1218,6 +1291,7 @@ function GoalDetailPanel({
         ${selectedNode.status_reason}
       </div>
 
+      <${GoalCompletionStrip} node=${selectedNode} />
       <${GoalTaskRelationStrip} node=${selectedNode} />
 
       <${DetailTabs} active=${activeTab} />

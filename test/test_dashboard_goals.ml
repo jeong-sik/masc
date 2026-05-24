@@ -430,11 +430,9 @@ let test_goal_task_summary_counts_status_and_source () =
            ~task_id:cancelled_task_id ~reason:"test cancellation" with
    | Ok _ -> ()
    | Error err -> fail (Masc_domain.masc_error_to_string err));
-  let summary =
-    Dashboard_goals.dashboard_goals_tree_json ~config
-    |> root_node
-    |> member "task_summary"
-  in
+  let node = Dashboard_goals.dashboard_goals_tree_json ~config |> root_node in
+  let summary = node |> member "task_summary" in
+  let completion_summary = node |> member "completion_summary" in
   check int "summary total" 3 (summary |> member "total" |> to_int);
   check int "summary done" 1 (summary |> member "done" |> to_int);
   check int "summary open" 1 (summary |> member "open" |> to_int);
@@ -450,7 +448,15 @@ let test_goal_task_summary_counts_status_and_source () =
   check int "cancelled status count" 1
     (summary |> member "by_status" |> member "cancelled" |> to_int);
   check int "explicit linkage count" 3
-    (summary |> member "by_linkage_source" |> member "explicit" |> to_int)
+    (summary |> member "by_linkage_source" |> member "explicit" |> to_int);
+  check string "completion summary state" "in_progress"
+    (completion_summary |> member "state" |> to_string);
+  check int "completion summary pct" 33
+    (completion_summary |> member "pct" |> to_int);
+  check string "completion summary pct source" "attainment"
+    (completion_summary |> member "pct_source" |> to_string);
+  check int "completion summary open tasks" 1
+    (completion_summary |> member "task_open" |> to_int)
 
 let test_goal_attainment_projects_percent_target () =
   with_room @@ fun config ->

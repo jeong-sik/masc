@@ -176,6 +176,13 @@ let rec tree_node_to_json ?(effective_policy_for_goal = fun _ -> None)
           Goal_verification.count_votes ~decision:Goal_verification.Reject request,
           Goal_verification.remaining_possible_votes request )
   in
+  let attainment = goal_attainment_to_json goal node in
+  let task_summary = task_summary_to_json node.tasks in
+  let completion_summary =
+    goal_completion_to_json ~effective_policy ~open_request goal node
+      ~attainment
+  in
+  observe_goal_attainment_metrics goal attainment;
   `Assoc
     [
       ("id", `String goal.id);
@@ -195,6 +202,8 @@ let rec tree_node_to_json ?(effective_policy_for_goal = fun _ -> None)
        match goal.metric with Some metric -> `String metric | None -> `Null);
       ("target_value",
        match goal.target_value with Some value -> `String value | None -> `Null);
+      ( "require_completion_approval",
+        `Bool goal.Goal_store.require_completion_approval );
       ("due_date",
        match goal.due_date with Some due_date -> `String due_date | None -> `Null);
       ("parent_goal_id",
@@ -203,10 +212,7 @@ let rec tree_node_to_json ?(effective_policy_for_goal = fun _ -> None)
        | None -> `Null);
       ("convergence", `Float node.convergence);
       ("convergence_pct", `Int (int_of_float (node.convergence *. 100.0)));
-      ( "attainment",
-        let attainment = goal_attainment_to_json goal node in
-        observe_goal_attainment_metrics goal attainment;
-        attainment );
+      ("attainment", attainment);
       ("tasks", `List (List.map task_to_tree_json node.tasks));
       ("task_count", `Int (List.length node.tasks));
       ("task_done_count",
@@ -215,7 +221,8 @@ let rec tree_node_to_json ?(effective_policy_for_goal = fun _ -> None)
             (List.filter
                (fun ((task, _) : Masc_domain.task * string) -> task_is_done task)
                node.tasks)));
-      ("task_summary", task_summary_to_json node.tasks);
+      ("task_summary", task_summary);
+      ("completion_summary", completion_summary);
       ( "verification_summary",
         `Assoc
           [

@@ -308,3 +308,121 @@ let goal_attainment_to_json (goal : Goal_store.goal) (node : tree_node) =
           | None ->
               unmeasured "absent"
                 "No target value or linked task evidence is available." ))
+
+let assoc_member_opt name = function
+  | `Assoc fields -> List.assoc_opt name fields
+  | _ -> None
+
+let assoc_string_opt name json =
+  match assoc_member_opt name json with
+  | Some (`String value) when String.trim value <> "" -> Some value
+  | _ -> None
+
+let assoc_int_opt name json =
+  match assoc_member_opt name json with
+  | Some (`Int value) -> Some value
+  | Some (`Intlit raw) -> int_of_string_opt raw
+  | _ -> None
+
+let goal_completion_to_json ~effective_policy ~open_request
+    (goal : Goal_store.goal) (node : tree_node) ~attainment =
+  let task_count = List.length node.tasks in
+  let task_done_count =
+    List.length
+      (List.filter
+         (fun ((task, _) : Masc_domain.task * string) -> task_is_done task)
+         node.tasks)
+  in
+  let task_terminal_count =
+    List.length
+      (List.filter
+         (fun ((task, _) : Masc_domain.task * string) -> task_is_terminal task)
+         node.tasks)
+  in
+  let task_open_count = task_count - task_terminal_count in
+  let task_completion_pct =
+    if task_count = 0 then
+      None
+    else
+      Some (pct_of_float (float_of_int task_done_count /. float_of_int task_count *. 100.0))
+  in
+  let attainment_pct = assoc_int_opt "attainment_pct" attainment in
+  let attainment_state =
+    assoc_string_opt "state" attainment |> Option.value ~default:"unmeasured"
+  in
+  let attainment_basis =
+    assoc_string_opt "basis" attainment |> Option.value ~default:"unmeasured"
+  in
+  let pct, pct_source =
+    match attainment_pct, task_completion_pct with
+    | Some pct, _ -> (Some pct, "attainment")
+    | None, Some pct -> (Some pct, "task_summary")
+    | None, None -> (None, "none")
+  in
+  let ready_to_request_completion =
+    match goal.phase with
+    | Goal_phase.Executing ->
+        String.equal attainment_state "attained"
+        || (task_count > 0 && task_open_count = 0 && task_done_count > 0)
+    | Goal_phase.Awaiting_verification | Goal_phase.Awaiting_approval
+    | Goal_phase.Blocked | Goal_phase.Paused | Goal_phase.Completed
+    | Goal_phase.Dropped ->
+        false
+  in
+  let state =
+    match goal.phase with
+    | Goal_phase.Completed -> "completed"
+    | Goal_phase.Dropped -> "dropped"
+    | Goal_phase.Blocked -> "blocked"
+    | Goal_phase.Paused -> "paused"
+    | Goal_phase.Awaiting_verification -> "awaiting_verification"
+    | Goal_phase.Awaiting_approval -> "awaiting_approval"
+    | Goal_phase.Executing ->
+        if ready_to_request_completion then
+          "ready_for_completion"
+        else if task_count = 0 && Option.is_none pct then
+          "unmeasured"
+        else if task_done_count = 0 then
+          "not_started"
+        else
+          "in_progress"
+  in
+  let gate =
+    match goal.phase with
+    | Goal_phase.Awaiting_verification -> "verification"
+    | Goal_phase.Awaiting_approval -> "approval"
+    | Goal_phase.Executing | Goal_phase.Blocked | Goal_phase.Paused
+    | Goal_phase.Completed | Goal_phase.Dropped ->
+        if Option.is_some open_request then
+          "verification"
+        else
+          "none"
+  in
+  let is_terminal =
+    match goal.phase with
+    | Goal_phase.Completed | Goal_phase.Dropped -> true
+    | Goal_phase.Executing | Goal_phase.Awaiting_verification
+    | Goal_phase.Awaiting_approval | Goal_phase.Blocked | Goal_phase.Paused ->
+        false
+  in
+  `Assoc
+    [
+      ("state", `String state);
+      ("pct", json_int_opt pct);
+      ("pct_source", `String pct_source);
+      ("attainment_state", `String attainment_state);
+      ("attainment_basis", `String attainment_basis);
+      ("task_total", `Int task_count);
+      ("task_done", `Int task_done_count);
+      ("task_open", `Int task_open_count);
+      ("is_complete", `Bool (goal.phase = Goal_phase.Completed));
+      ("is_terminal", `Bool is_terminal);
+      ("ready_to_request_completion", `Bool ready_to_request_completion);
+      ("gate", `String gate);
+      ("requires_verifier", `Bool (Option.is_some effective_policy));
+      ( "requires_completion_approval",
+        `Bool goal.Goal_store.require_completion_approval );
+      ("active_verification_request", `Bool (Option.is_some open_request));
+      ("blocking_source", `String node.blocking_source);
+      ("blocking_reason", `String node.blocking_reason);
+    ]

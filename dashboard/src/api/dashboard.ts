@@ -57,6 +57,8 @@ import type {
   GoalKeeperTrustSummary,
   GoalDetailTimelineEvent,
   GoalAttainmentProjection,
+  GoalCompletionSummary,
+  GoalTaskSummary,
   GoalTreeNode,
   GoalTreeSummary,
   GoalTreeTask,
@@ -1603,6 +1605,59 @@ function decodeGoalAttainmentProjection(
   }
 }
 
+function decodeNumberRecord(raw: unknown): Record<string, number> {
+  if (!isRecord(raw)) return {}
+  const out: Record<string, number> = {}
+  for (const [key, value] of Object.entries(raw)) {
+    const count = asInt(value)
+    if (count != null) out[key] = count
+  }
+  return out
+}
+
+function decodeGoalTaskSummary(
+  raw: unknown,
+  fallback: { taskCount: number; taskDoneCount: number; tasks: GoalTreeTask[] },
+): GoalTaskSummary | undefined {
+  if (!isRecord(raw)) return undefined
+  const terminal = asInt(raw.terminal) ?? fallback.tasks.filter(task => task.is_terminal).length
+  return {
+    total: asInt(raw.total) ?? fallback.taskCount,
+    done: asInt(raw.done) ?? fallback.taskDoneCount,
+    open: asInt(raw.open) ?? Math.max(0, fallback.taskCount - terminal),
+    terminal,
+    awaiting_verification: asInt(raw.awaiting_verification) ?? 0,
+    cancelled: asInt(raw.cancelled) ?? 0,
+    unassigned: asInt(raw.unassigned) ?? 0,
+    completion_pct: asInt(raw.completion_pct) ?? null,
+    by_status: decodeNumberRecord(raw.by_status),
+    by_linkage_source: decodeNumberRecord(raw.by_linkage_source),
+  }
+}
+
+function decodeGoalCompletionSummary(raw: unknown): GoalCompletionSummary | undefined {
+  if (!isRecord(raw)) return undefined
+  return {
+    state: asString(raw.state, 'unmeasured'),
+    pct: asInt(raw.pct) ?? null,
+    pct_source: asString(raw.pct_source, 'none'),
+    attainment_state: asString(raw.attainment_state, 'unmeasured'),
+    attainment_basis: asString(raw.attainment_basis, 'unmeasured'),
+    task_total: asInt(raw.task_total) ?? 0,
+    task_done: asInt(raw.task_done) ?? 0,
+    task_open: asInt(raw.task_open) ?? 0,
+    is_complete: asBoolean(raw.is_complete) ?? false,
+    is_terminal: asBoolean(raw.is_terminal) ?? false,
+    ready_to_request_completion: asBoolean(raw.ready_to_request_completion) ?? false,
+    gate: asString(raw.gate, 'none'),
+    requires_verifier: asBoolean(raw.requires_verifier) ?? false,
+    requires_completion_approval: asBoolean(raw.requires_completion_approval) ?? false,
+    active_verification_request: asBoolean(raw.active_verification_request) ?? false,
+    blocking_source: asString(raw.blocking_source, 'none'),
+    blocking_reason: asString(raw.blocking_reason, ''),
+  }
+}
+
 function decodeGoalTreeNode(raw: unknown): GoalTreeNode | null {
   if (!isRecord(raw)) return null
   const id = asString(raw.id)
@@ -1618,6 +1673,13 @@ function decodeGoalTreeNode(raw: unknown): GoalTreeNode | null {
   const targetValue = asNullableString(raw.target_value)
   const taskCount = asInt(raw.task_count) ?? tasks.length
   const taskDoneCount = asInt(raw.task_done_count) ?? 0
+  const attainment = decodeGoalAttainmentProjection(raw.attainment, {
+    metric,
+    targetValue,
+    taskDoneCount,
+    taskCount,
+  })
+  const verificationSummary = decodeGoalVerificationSummary(raw.verification_summary)
   return {
     id,
     title,
@@ -1634,20 +1696,22 @@ function decodeGoalTreeNode(raw: unknown): GoalTreeNode | null {
     priority: asInt(raw.priority) ?? 0,
     metric,
     target_value: targetValue,
+    require_completion_approval: asBoolean(raw.require_completion_approval) ?? false,
     due_date: asNullableString(raw.due_date),
     parent_goal_id: asNullableString(raw.parent_goal_id),
     convergence: asNumber(raw.convergence, 0),
     convergence_pct: asInt(raw.convergence_pct) ?? 0,
-    attainment: decodeGoalAttainmentProjection(raw.attainment, {
-      metric,
-      targetValue,
-      taskDoneCount,
-      taskCount,
-    }),
+    attainment,
     tasks,
     task_count: taskCount,
     task_done_count: taskDoneCount,
-    verification_summary: decodeGoalVerificationSummary(raw.verification_summary),
+    task_summary: decodeGoalTaskSummary(raw.task_summary, {
+      taskCount,
+      taskDoneCount,
+      tasks,
+    }),
+    completion_summary: decodeGoalCompletionSummary(raw.completion_summary),
+    verification_summary: verificationSummary,
     effective_verifier_policy: decodeGoalVerificationPolicySnapshot(raw.effective_verifier_policy),
     active_verification_request: decodeGoalVerificationRequest(raw.active_verification_request),
     pending_verification_count: asInt(raw.pending_verification_count) ?? 0,

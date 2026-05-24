@@ -74,6 +74,16 @@ and public tool aliases.
 
 5. Tighten boundary tests so new modules cannot reintroduce
    `shell_docker` or `shell_bash` names for sandbox-runtime concerns.
+   Started in slice 6:
+   - `Keeper_sandbox_read_runner` now hides Docker-routed read execution
+     behind a backend-neutral facade.
+   - `keeper_shell_ops.ml` no longer calls `Keeper_docker_read`
+     directly and uses runner-owned backend route labels for read
+     responses.
+   - `test_keeper_sandbox_read_runner` uses an injected mock backend to
+     pin the read facade without invoking Docker.
+   - `test_keeper_sandbox_boundary_policy` now fails if structured shell
+     read ops reselect `Keeper_docker_read` or hard-code `via=docker`.
 
 ## Verification
 
@@ -95,3 +105,7 @@ and public tool aliases.
   scripts name retired `keeper_shell_docker` files.
 - The boundary test now fails if gh/git compatibility bridges hard-code
   Docker route labels instead of asking `Keeper_sandbox_runner`.
+- The boundary test now fails if structured shell read ops call
+  `Keeper_docker_read` directly instead of `Keeper_sandbox_read_runner`.
+- `test_keeper_sandbox_read_runner` verifies facade delegation with a
+  mock backend and route labels sourced from `Keeper_sandbox_runner`.

@@ -245,6 +245,7 @@
   test_keeper_tool_alias
   test_keeper_sandbox_containment
   test_keeper_sandbox_runner
+  test_keeper_sandbox_read_runner
   test_keeper_shell_gh_bridge
   test_keeper_shell_git_bridge
   test_keeper_transition_audit
@@ -571,6 +572,7 @@
   test_keeper_tool_alias
   test_keeper_sandbox_containment
   test_keeper_sandbox_runner
+  test_keeper_sandbox_read_runner
   test_keeper_shell_gh_bridge
   test_keeper_shell_git_bridge
   test_keeper_transition_audit

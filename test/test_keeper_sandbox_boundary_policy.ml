@@ -50,6 +50,28 @@ let assert_source_absent rel =
     false
     (Sys.file_exists (Filename.concat (repo_root ()) rel))
 
+let has_suffix text suffix =
+  let text_len = String.length text in
+  let suffix_len = String.length suffix in
+  text_len >= suffix_len
+  && String.equal (String.sub text (text_len - suffix_len) suffix_len) suffix
+
+let rec source_files_under rel =
+  let root = repo_root () in
+  let rec loop rel =
+    let abs = Filename.concat root rel in
+    match Unix.lstat abs with
+    | { Unix.st_kind = Unix.S_DIR; _ } ->
+      Sys.readdir abs
+      |> Array.to_list
+      |> List.concat_map (fun name -> loop (Filename.concat rel name))
+    | { Unix.st_kind = Unix.S_REG; _ }
+      when has_suffix rel ".ml" || has_suffix rel ".mli" -> [ rel ]
+    | _ -> []
+    | exception Unix.Unix_error _ -> []
+  in
+  loop rel
+
 let test_config_contract_uses_structured_toml () =
   let rel = "lib/config/keeper_sandbox_config.ml" in
   assert_contains rel "Otoml.Parser.from_string_result";
@@ -138,6 +160,40 @@ let test_tool_layer_does_not_select_concrete_backend () =
     ; "lib/keeper/keeper_tool_pr_review.ml"
     ]
 
+let test_shell_read_ops_use_sandbox_read_runner () =
+  let rel = "lib/keeper/keeper_shell_ops.ml" in
+  assert_contains rel "Keeper_sandbox_read_runner.";
+  assert_contains rel "Keeper_sandbox_read_runner.backend_via";
+  assert_not_contains rel "Keeper_docker_read.";
+  assert_not_contains rel "\"via\", `String \"docker\""
+
+let test_sandbox_runtime_sources_do_not_depend_on_shell_surface_names () =
+  let sandbox_runtime_sources =
+    source_files_under "lib/keeper"
+    |> List.filter (fun rel ->
+      let base = Filename.basename rel in
+      String.starts_with ~prefix:"keeper_sandbox" base
+      || String.starts_with ~prefix:"keeper_docker" base
+      || String.equal base "sandbox_error.ml"
+      || String.equal base "sandbox_error.mli")
+  in
+  Alcotest.(check bool)
+    "sandbox runtime sources discovered"
+    true
+    (sandbox_runtime_sources <> []);
+  let forbidden =
+    [ "Keeper_shell_docker"
+    ; "keeper_shell_docker"
+    ; "Keeper_shell_bash_docker"
+    ; "keeper_shell_bash_docker"
+    ; "shell_docker"
+    ; "shell_bash"
+    ]
+  in
+  List.iter
+    (fun rel -> List.iter (assert_not_contains rel) forbidden)
+    sandbox_runtime_sources
+
 let test_shell_ops_delegates_gh_bridge () =
   let shell_ops = "lib/keeper/keeper_shell_ops.ml" in
   let gh_bridge = "lib/keeper/keeper_shell_gh_bridge.ml" in
@@ -210,6 +266,14 @@ let () =
             "tool layer does not select concrete backend"
             `Quick
             test_tool_layer_does_not_select_concrete_backend;
+          Alcotest.test_case
+            "shell read ops use sandbox read runner"
+            `Quick
+            test_shell_read_ops_use_sandbox_read_runner;
+          Alcotest.test_case
+            "sandbox runtime sources do not depend on shell surface names"
+            `Quick
+            test_sandbox_runtime_sources_do_not_depend_on_shell_surface_names;
           Alcotest.test_case
             "shell ops delegates gh compatibility bridge"
             `Quick

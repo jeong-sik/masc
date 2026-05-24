@@ -99,8 +99,8 @@ let handle_keeper_bash_typed
         let blocked_result ~error ~reason ~alternatives =
           Yojson.Safe.to_string
             (Exec_core.blocked_result_json
+               ~classification:(Exec_core.classify_command_of_ir ir)
                ~cmd
-               ~ir
                ~error
                ~reason
                ~alternatives
@@ -182,8 +182,8 @@ let handle_keeper_bash_typed
                   Log.Keeper.info
                     "keeper_bash shell_ir_dispatch keeper=%s sandbox=%s status=%s elapsed_ms=%d"
                     meta.name
-                    (Keeper_shell_shared.sandbox_profile_label sandbox_profile)
-                    (Keeper_shell_shared.process_status_label result.status)
+                    (Keeper_types.sandbox_profile_to_string sandbox_profile)
+                    (Keeper_shell_docker_exec_failure.docker_exec_status_label result.status)
                     elapsed_ms;
                   let output =
                     if String.equal result.stderr ""
@@ -195,10 +195,10 @@ let handle_keeper_bash_typed
                   in
                   Yojson.Safe.to_string
                     (Exec_core.process_result_json
+                       ~classification:(Exec_core.classify_command_of_ir ir)
                        ~base_path:root
                        ~keeper_name:meta.name
                        ~cmd
-                       ~ir
                        ~extra:
                          (runtime_failure_fields
                           @ sandbox_extra_fields

@@ -6,7 +6,13 @@ let classify ir =
 
 let with_cwd ~raw ~cwd ir =
   let scope = Some (Masc_exec.Path_scope.classify ~raw ~cwd) in
-  Masc_exec.Shell_ir.with_cwd scope ir
+  let rec map = function
+    | Masc_exec.Shell_ir.Simple simple ->
+      Masc_exec.Shell_ir.Simple { simple with cwd = scope }
+    | Masc_exec.Shell_ir.Pipeline stages ->
+      Masc_exec.Shell_ir.Pipeline (List.map map stages)
+  in
+  map ir
 ;;
 
 let gate_verdict_map verdict ~f_allow ~f_reject ~f_cannot_parse ~f_too_complex =

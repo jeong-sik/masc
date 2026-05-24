@@ -6,6 +6,10 @@
 
 include Keeper_shell_shared
 
+let keeper_shell_ir_native_min_timeout_sec =
+  Keeper_shell_shared.keeper_bash_native_min_timeout_sec
+;;
+
 include Keeper_shell_bash
 
 (* ── GH repo context (extracted to Keeper_shell_gh_context) ──── *)

@@ -214,7 +214,6 @@ let blocker_class_of_sdk_error (err : Agent_sdk.Error.sdk_error) : blocker_class
   | Some (Keeper_turn_driver.Internal_unhandled_exception _) -> None
   | Some (Keeper_turn_driver.Internal_bridge_exception _) -> None
   | Some (Keeper_turn_driver.Internal_contract_rejected _) -> None
-  | Some (Keeper_turn_driver.Retry_admission_denied _) -> None
   | None ->
     (match err with
      | Agent_sdk.Error.Internal msg -> blocker_class_of_string msg

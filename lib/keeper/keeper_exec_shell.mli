@@ -35,6 +35,10 @@ val gh_min_timeout_sec : float
     tests can lock the floor against drift back to sub-network-latency
     values. See #8688. *)
 
+val keeper_bash_native_min_timeout_sec : float
+(** Minimum timeout_sec floor applied to typed keeper shell execution on
+    the native executor path. *)
+
 val keeper_shell_ir_native_min_timeout_sec : float
 (** Minimum timeout_sec floor applied to keeper_shell_ir on the *native*
     executor path. Exposed so regression tests can lock the floor
@@ -61,6 +65,16 @@ val rewrite_docker_host_paths_to_container :
     execution. *)
 
 val handle_keeper_shell_ir :
+  turn_sandbox_factory:Keeper_sandbox_factory.t option ->
+  turn_sandbox_factory_git:Keeper_sandbox_factory.t option ->
+  exec_cache:Masc_exec.Exec_cache.t option ->
+  config:Coord.config ->
+  meta:Keeper_types.keeper_meta ->
+  args:Yojson.Safe.t ->
+  unit ->
+  string
+
+val handle_keeper_bash :
   turn_sandbox_factory:Keeper_sandbox_factory.t option ->
   turn_sandbox_factory_git:Keeper_sandbox_factory.t option ->
   exec_cache:Masc_exec.Exec_cache.t option ->

@@ -15,7 +15,13 @@ module Keeper_types = Masc_mcp.Keeper_types
 module Parsed = Masc_exec.Parsed
 module Json = Yojson.Safe.Util
 
-let validate = Masc_mcp.Worker_dev_tools.validate_command
+let validate cmd =
+  match
+    Masc_mcp.Exec_policy.parse_string_to_ir ~mode:Masc_mcp.Exec_policy.Strict cmd
+  with
+  | Error _ as error -> error
+  | Ok ir -> Masc_mcp.Worker_dev_tools.validate_command ir
+;;
 
 let is_ok = function Ok () -> true | Error _ -> false
 let is_error = function Error _ -> true | Ok () -> false

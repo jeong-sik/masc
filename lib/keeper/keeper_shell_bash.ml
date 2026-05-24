@@ -252,3 +252,5 @@ let handle_keeper_shell_ir
       ~fields:[ "typed", `Bool true ]
       "Typed Bash input is required. Provide executable/argv or pipeline/stages."
 ;;
+
+let handle_keeper_bash = handle_keeper_shell_ir

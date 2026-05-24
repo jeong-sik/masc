@@ -2,7 +2,7 @@
     runtime blocker surface construction.
 
     Extracted from [keeper_status_bridge.ml] during godfile decomposition.
-    Telemetry surface: blocker_class labels flow to dashboard gauges via
+    telemetry surface: blocker_class labels flow to dashboard gauges via
     [runtime_blocker_fields_json] in [keeper_status_bridge.ml].
 
     @since God file decomposition *)

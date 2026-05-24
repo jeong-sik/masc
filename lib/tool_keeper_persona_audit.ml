@@ -6,9 +6,6 @@ let json_bool_opt = function
   | Some value -> `Bool value
   | None -> `Null
 
-let json_float_opt = function
-  | Some value -> `Float value
-  | None -> `Null
 
 let existing_path_json ?(candidates = []) path_opt =
   let exists =
@@ -319,7 +316,7 @@ let item ctx requested_name =
         if dormant_autoboot_disabled then `String "autoboot_disabled" else `Null );
       ("paused", json_bool_opt paused);
       ("keepalive_running", json_bool_opt keepalive_running);
-      ("keepalive_started_at", json_float_opt keepalive_started_at);
+      ("keepalive_started_at", Json_util.float_opt_to_json keepalive_started_at);
       ("issues", `List (List.map (fun issue -> `String issue) issues));
       ("ok", `Bool (Stdlib.List.length issues = 0));
     ]

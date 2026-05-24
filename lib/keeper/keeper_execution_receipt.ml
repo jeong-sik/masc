@@ -366,10 +366,6 @@ let sandbox_kind_of_meta (meta : Keeper_types.keeper_meta) : Keeper_types.sandbo
 
 let list_json values = `List (List.map (fun value -> `String value) values)
 
-let string_opt_json = function
-  | Some value -> `String value
-  | None -> `Null
-;;
 
 let last_nonempty values =
   List.fold_left
@@ -403,7 +399,7 @@ let cascade_rotation_attempt_to_json attempt =
       , `String (Keeper_error_classify.degraded_retry_reason_to_string attempt.reason) )
     ; "outcome", `String (cascade_rotation_outcome_to_string attempt.outcome)
     ; ( "slot_release_at_phase"
-      , string_opt_json
+      , Json_util.string_opt_to_json
           (Option.map slot_release_phase_to_string attempt.slot_release_at_phase) )
     ; ( "productive_phase_elapsed_ms"
       , match attempt.productive_phase_elapsed_ms with
@@ -413,8 +409,8 @@ let cascade_rotation_attempt_to_json attempt =
       , match attempt.retry_phase_elapsed_ms with
         | Some value -> `Int value
         | None -> `Null )
-    ; "error_kind", string_opt_json (Option.map error_kind_to_string attempt.error_kind)
-    ; "error_message", string_opt_json attempt.error_message
+    ; "error_kind", Json_util.string_opt_to_json (Option.map error_kind_to_string attempt.error_kind)
+    ; "error_message", Json_util.string_opt_to_json attempt.error_message
     ; "recorded_at", `String attempt.recorded_at
     ]
 ;;
@@ -779,7 +775,7 @@ let to_json (receipt : t) =
         (`Assoc
             [ "action", `String "run_turn"
             ; "target_kind", `String "keeper"
-            ; "target_path", string_opt_json receipt.sandbox_root
+            ; "target_path", Json_util.string_opt_to_json receipt.sandbox_root
             ])
       ~success:(outcome_kind_is_terminal_success receipt.outcome)
       ~duration_ms:(receipt_duration_ms receipt)
@@ -1099,7 +1095,7 @@ let operator_broadcast_payload (receipt : t) ~disposition ~reason =
     ; ( "sandbox"
       , `Assoc
           [ "kind", `String (Keeper_types.sandbox_profile_to_string receipt.sandbox_kind)
-          ; "sandbox_root", string_opt_json receipt.sandbox_root
+          ; "sandbox_root", Json_util.string_opt_to_json receipt.sandbox_root
           ; ( "network_mode"
             , `String (Keeper_types.network_mode_to_string receipt.network_mode) )
           ] )
@@ -1277,9 +1273,9 @@ let stale_broadcast_payload
       , `String
           (Keeper_turn_terminal_code.to_wire
              (stale_terminal_reason_code_typed failure_reason)) )
-    ; "failure_reason", string_opt_json failure_reason_text
+    ; "failure_reason", Json_util.string_opt_to_json failure_reason_text
     ; "failure_reason_cohort", `String failure_reason_cohort
-    ; "stale_kill_class", string_opt_json (stale_broadcast_kill_class failure_reason)
+    ; "stale_kill_class", Json_util.string_opt_to_json (stale_broadcast_kill_class failure_reason)
     ; "stale_turn_bucket", `String (stale_turn_bucket stale_seconds)
     ; "stale_seconds", `Float stale_seconds
     ; "last_turn_ts", `Float last_turn_ts

@@ -10,7 +10,7 @@
     - receipt row matching ({!receipt_row_matches}, {!read_receipt_rows})
       — operate on raw [Yojson.Safe.t] rows + paths;
     - generic JSON helpers ({!unique_ints}, {!json_int_list},
-      {!json_int_opt}, {!Json_util.json_string_list}) — local single-use sugar;
+      {!Json_util.int_opt_to_json}, {!Json_util.json_string_list}) — local single-use sugar;
     - per-section scan summaries ({!event_bus_summary_json},
       {!memory_summary_json}) — fold the manifest scan record into a
       single [`Assoc] for dashboard payload;
@@ -45,10 +45,6 @@ let read_receipt_rows ~keeper_name ~trace_id ?turn_id paths =
 let unique_ints values = values |> List.sort_uniq Int.compare
 let json_int_list values = `List (List.map (fun value -> `Int value) values)
 
-let json_int_opt = function
-  | None -> `Null
-  | Some value -> `Int value
-;;
 
 let event_bus_summary_json
       (scan : Server_dashboard_http_keeper_runtime_manifest_scan.runtime_manifest_scan)

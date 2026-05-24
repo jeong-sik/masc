@@ -370,10 +370,6 @@ let nested_float_field outer inner json =
   | None -> None
 ;;
 
-let option_string_json = function
-  | Some value -> `String value
-  | None -> `Null
-;;
 
 let option_float_json = function
   | Some value -> `Float value
@@ -606,7 +602,7 @@ let summarize_rows ~keeper_name ~limit rows =
              (fun value -> `String value)
              (cap_list 8 pending_stimulus_ids)) )
     ; "latest_recorded_at_unix", option_float_json !latest_recorded_at
-    ; "latest_stimulus_id", option_string_json !latest_stimulus_id
+    ; "latest_stimulus_id", Json_util.string_opt_to_json !latest_stimulus_id
     ; "read_error", `Null
     ]
 ;;

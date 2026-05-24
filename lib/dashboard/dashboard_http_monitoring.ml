@@ -157,7 +157,7 @@ let board_monitoring_json ~(now_ts : float) : Yojson.Safe.t * bool =
       ("posts_total", `Int total_posts);
       ("new_posts_24h", `Int new_posts_24h);
       ("unanswered_posts", `Int unanswered_posts);
-      ("last_activity_age_s", json_int_opt last_activity_age_s);
+      ("last_activity_age_s", Json_util.int_opt_to_json last_activity_age_s);
       ("slo_target_age_s", `Int slo_target_age_s);
       ("slo_breached", `Bool slo_breached);
     ], true)

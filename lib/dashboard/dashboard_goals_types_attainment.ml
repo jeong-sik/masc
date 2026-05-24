@@ -17,13 +17,7 @@ let clamp_float lower upper value =
 let pct_of_float value =
   int_of_float (floor (clamp_float 0.0 100.0 value +. 0.5))
 
-let json_float_opt = function
-  | Some value -> `Float value
-  | None -> `Null
 
-let json_int_opt = function
-  | Some value -> `Int value
-  | None -> `Null
 
 let attainment_unit_to_string = function
   | Percent -> "percent"
@@ -192,9 +186,9 @@ let build_attainment_json ~state ~basis ~task_done_count ~task_count
       ("target_value", Json_util.string_opt_to_json goal.target_value);
       ("target_parse_status", `String target_parse_status);
       ("unit", `String (attainment_unit_to_string unit));
-      ("observed_value", json_float_opt observed_value);
-      ("target_numeric", json_float_opt target_numeric);
-      ("attainment_pct", json_int_opt attainment_pct);
+      ("observed_value", Json_util.float_opt_to_json observed_value);
+      ("target_numeric", Json_util.float_opt_to_json target_numeric);
+      ("attainment_pct", Json_util.int_opt_to_json attainment_pct);
       ("task_done_count", `Int task_done_count);
       ("task_count", `Int task_count);
       ("note", `String note);
@@ -408,7 +402,7 @@ let goal_completion_to_json ~effective_policy ~open_request
   `Assoc
     [
       ("state", `String state);
-      ("pct", json_int_opt pct);
+      ("pct", Json_util.int_opt_to_json pct);
       ("pct_source", `String pct_source);
       ("attainment_state", `String attainment_state);
       ("attainment_basis", `String attainment_basis);

@@ -40,15 +40,7 @@ let agent_completed_result_fields = function
     ]
 ;;
 
-let json_float_opt = function
-  | Some value -> `Float value
-  | None -> `Null
-;;
 
-let json_int_opt = function
-  | Some value -> `Int value
-  | None -> `Null
-;;
 
 ;;
 
@@ -89,7 +81,7 @@ let sdk_api_error_fields = function
   | Agent_sdk.Retry.RateLimited { retry_after; message } ->
     [ "variant", `String "rate_limited"
     ; "message", `String message
-    ; "retry_after_s", json_float_opt retry_after
+    ; "retry_after_s", Json_util.float_opt_to_json retry_after
     ]
   | Agent_sdk.Retry.Overloaded { message } ->
     [ "variant", `String "overloaded"; "message", `String message ]
@@ -107,7 +99,7 @@ let sdk_api_error_fields = function
   | Agent_sdk.Retry.ContextOverflow { message; limit } ->
     [ "variant", `String "context_overflow"
     ; "message", `String message
-    ; "limit", json_int_opt limit
+    ; "limit", Json_util.int_opt_to_json limit
     ]
   | Agent_sdk.Retry.NetworkError { message; kind } ->
     [ "variant", `String "network_error"
@@ -307,14 +299,14 @@ let sdk_provider_error_fields error =
     [ "variant", `String "rate_limited"
     ; "message", `String message
     ; "provider", `String provider
-    ; "retry_after_s", json_float_opt retry_after
+    ; "retry_after_s", Json_util.float_opt_to_json retry_after
     ; "detail", `String detail
     ]
   | Llm_provider.Error.HardQuota { provider; retry_after; detail } ->
     [ "variant", `String "hard_quota"
     ; "message", `String message
     ; "provider", `String provider
-    ; "retry_after_s", json_float_opt retry_after
+    ; "retry_after_s", Json_util.float_opt_to_json retry_after
     ; "detail", `String detail
     ]
   | Llm_provider.Error.CapacityExhausted
@@ -323,7 +315,7 @@ let sdk_provider_error_fields error =
     ; "message", `String message
     ; "capacity_scope", `String (Llm_provider.Error.capacity_scope_to_string scope)
     ; "affected", Json_util.json_string_list affected
-    ; "retry_after_s", json_float_opt retry_after
+    ; "retry_after_s", Json_util.float_opt_to_json retry_after
     ; "detail", `String detail
     ]
   | Llm_provider.Error.AuthError { provider; detail } ->

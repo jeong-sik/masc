@@ -36,7 +36,6 @@ val json_int_list : int list -> Yojson.Safe.t
 
 (** [json_int_opt v] returns [`Int n] when [v = Some n], [`Null]
     otherwise. *)
-val json_int_opt : int option -> Yojson.Safe.t
 
 (** [json_string_list values] wraps [values] as [`List] of [`String]. *)
 

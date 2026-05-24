@@ -296,10 +296,6 @@ let option_int_json = function
   | None -> `Null
 ;;
 
-let option_string_json = function
-  | Some v -> `String v
-  | None -> `Null
-;;
 
 let option_time_json = function
   | Some v -> `String (Dashboard_utils.iso_of_unix v)
@@ -316,8 +312,8 @@ let tlc_entry_to_json e : Yojson.Safe.t =
     ; "distinct_states", option_int_json e.distinct_states
     ; "diameter", option_int_json e.diameter
     ; "last_run_at", option_time_json e.last_run_at
-    ; "violation", option_string_json e.violation
-    ; "log_path", option_string_json e.log_path
+    ; "violation", Json_util.string_opt_to_json e.violation
+    ; "log_path", Json_util.string_opt_to_json e.log_path
     ]
 ;;
 

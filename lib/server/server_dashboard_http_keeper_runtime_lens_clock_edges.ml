@@ -4,13 +4,7 @@ open Server_dashboard_http_keeper_api_types
 open Server_dashboard_http_keeper_runtime_manifest_scan
 open Server_dashboard_http_keeper_runtime_lens_swimlane
 
-let json_string_opt = function
-  | None -> `Null
-  | Some value -> `String value
 
-let json_int_opt = function
-  | None -> `Null
-  | Some value -> `Int value
 
 let json_string_list_member key json =
   match Yojson.Safe.Util.member key json with
@@ -261,32 +255,32 @@ let clock_edge_json ~idx ~provider_attempt_index row =
            | Some value -> value
            | None -> event_source_clock event) );
       ( "started_at",
-        json_string_opt
+        Json_util.string_opt_to_json
           (first_string_opt [ clock_string row "started_at"; event_started_at row ]) );
       ( "finished_at",
-        json_string_opt
+        Json_util.string_opt_to_json
           (first_string_opt [ clock_string row "finished_at"; event_finished_at row ]) );
       ("trace_id", `String row.Keeper_runtime_manifest.trace_id);
-      ("keeper_turn_id", json_int_opt row.Keeper_runtime_manifest.keeper_turn_id);
-      ("oas_turn_count", json_int_opt row.Keeper_runtime_manifest.oas_turn_count);
-      ("provider_attempt_id", json_string_opt provider_attempt_id);
-      ("tool_batch_id", json_string_opt tool_batch_id);
-      ("checkpoint_id", json_string_opt checkpoint_id);
-      ("compaction_id", json_string_opt compaction_id);
-      ("memory_injection_id", json_string_opt memory_injection_id);
-      ("event_bus_correlation_id", json_string_opt event_bus_correlation_id);
-      ("event_bus_run_id", json_string_opt event_bus_run_id);
-      ("event_bus_event_count", json_int_opt event_bus_event_count);
+      ("keeper_turn_id", Json_util.int_opt_to_json row.Keeper_runtime_manifest.keeper_turn_id);
+      ("oas_turn_count", Json_util.int_opt_to_json row.Keeper_runtime_manifest.oas_turn_count);
+      ("provider_attempt_id", Json_util.string_opt_to_json provider_attempt_id);
+      ("tool_batch_id", Json_util.string_opt_to_json tool_batch_id);
+      ("checkpoint_id", Json_util.string_opt_to_json checkpoint_id);
+      ("compaction_id", Json_util.string_opt_to_json compaction_id);
+      ("memory_injection_id", Json_util.string_opt_to_json memory_injection_id);
+      ("event_bus_correlation_id", Json_util.string_opt_to_json event_bus_correlation_id);
+      ("event_bus_run_id", Json_util.string_opt_to_json event_bus_run_id);
+      ("event_bus_event_count", Json_util.int_opt_to_json event_bus_event_count);
       ("event_bus_payload_kinds", Json_util.json_string_list event_bus_payload_kinds);
-      ("parent_event_id", json_string_opt (clock_string row "parent_event_id"));
-      ("caused_by", json_string_opt (clock_string row "caused_by"));
+      ("parent_event_id", Json_util.string_opt_to_json (clock_string row "parent_event_id"));
+      ("caused_by", Json_util.string_opt_to_json (clock_string row "caused_by"));
       ( "links",
         `Assoc
           [
-            ("receipt_path", json_string_opt row.Keeper_runtime_manifest.links.receipt_path);
-            ("checkpoint_path", json_string_opt row.Keeper_runtime_manifest.links.checkpoint_path);
+            ("receipt_path", Json_util.string_opt_to_json row.Keeper_runtime_manifest.links.receipt_path);
+            ("checkpoint_path", Json_util.string_opt_to_json row.Keeper_runtime_manifest.links.checkpoint_path);
             ( "tool_call_log_path",
-              json_string_opt row.Keeper_runtime_manifest.links.tool_call_log_path );
+              Json_util.string_opt_to_json row.Keeper_runtime_manifest.links.tool_call_log_path );
       ] );
     ]
 

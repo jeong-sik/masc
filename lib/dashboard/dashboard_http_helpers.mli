@@ -49,7 +49,6 @@ val percentile_int : int list -> pct:float -> int option
 (** Nearest-rank percentile over a non-empty sorted copy of [values].
     Returns [None] for the empty list. *)
 
-val json_int_opt : int option -> Yojson.Safe.t
 (** [Some v -> `Int v | None -> `Null]. *)
 
 val safe_age_seconds_opt :

@@ -21,10 +21,6 @@ type t = {
 
 let schema = "masc.dashboard_surface.v1"
 
-let json_float_opt = function
-  | Some value -> `Float value
-  | None -> `Null
-;;
 
 let assoc_field key = function
   | `Assoc fields -> List.assoc_opt key fields
@@ -118,10 +114,10 @@ let to_json envelope =
       , `Assoc
           [ "state", `String envelope.cache.state
           ; "key", Json_util.string_opt_to_json envelope.cache.key
-          ; "ttl_s", json_float_opt envelope.cache.ttl_s
+          ; "ttl_s", Json_util.float_opt_to_json envelope.cache.ttl_s
           ; "stale", `Bool envelope.cache.stale
           ; "stale_reason", Json_util.string_opt_to_json envelope.cache.stale_reason
-          ; "latest_age_s", json_float_opt envelope.cache.latest_age_s
+          ; "latest_age_s", Json_util.float_opt_to_json envelope.cache.latest_age_s
           ; "health", Json_util.string_opt_to_json envelope.cache.health
           ] )
     ; ( "migration"

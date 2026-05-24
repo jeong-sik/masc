@@ -4,7 +4,6 @@ open Server_dashboard_http_keeper_runtime_lens_swimlane
 
 module Scan_summary = Server_dashboard_http_keeper_api_scan_summary
 
-let json_int_opt = Scan_summary.json_int_opt
 let memory_summary_json = Scan_summary.memory_summary_json
 let selected_keeper_turn_id = Scan_summary.selected_keeper_turn_id
 let terminal_event_present_for_turn = Scan_summary.terminal_event_present_for_turn
@@ -105,8 +104,8 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
         `Assoc
           [
             ("trace_id", `String trace_id);
-            ("keeper_turn_id", json_int_opt keeper_turn_id);
-            ("max_oas_turn_count", json_int_opt scan.max_oas_turn_count);
+            ("keeper_turn_id", Json_util.int_opt_to_json keeper_turn_id);
+            ("max_oas_turn_count", Json_util.int_opt_to_json scan.max_oas_turn_count);
             ("terminal_event_present", `Bool terminal_event_present);
             ( "terminal_event",
               if terminal_event_present then `String "turn_finished" else `Null );
@@ -169,7 +168,7 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
                              lane_decision;
                          ]) );
                   ( "visible_tool_count",
-                    json_int_opt
+                    Json_util.int_opt_to_json
                       (first_int_opt
                          [
                            json_int_member_opt "visible_tool_count"
@@ -202,7 +201,7 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
                       (json_string_member_opt "resolved_lane" lane_decision)
                   );
                   ( "effective_tool_count",
-                    json_int_opt
+                    Json_util.int_opt_to_json
                       (json_int_member_opt "effective_tool_count"
                          lane_decision) );
                   ( "runtime_mcp_policy_present",

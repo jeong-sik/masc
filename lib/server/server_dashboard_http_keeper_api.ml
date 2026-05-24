@@ -152,7 +152,6 @@ let receipt_row_matches = Scan_summary.receipt_row_matches
 let read_receipt_rows = Scan_summary.read_receipt_rows
 let unique_ints = Scan_summary.unique_ints
 let json_int_list = Scan_summary.json_int_list
-let json_int_opt = Scan_summary.json_int_opt
 let event_bus_summary_json = Scan_summary.event_bus_summary_json
 let memory_summary_json = Scan_summary.memory_summary_json
 

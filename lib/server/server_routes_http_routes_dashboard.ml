@@ -29,9 +29,6 @@ let option_int_json = function
   | Some value -> `Int value
   | None -> `Null
 
-let option_string_json = function
-  | Some value -> `String value
-  | None -> `Null
 
 (* Dashboard /logs JSON builder extracted to
    [Server_dashboard_logs_json] (godfile decomp). *)

@@ -13,10 +13,6 @@ let option_int_json = function
   | None -> `Null
 ;;
 
-let option_string_json = function
-  | Some value -> `String value
-  | None -> `Null
-;;
 
 let store_path ~masc_root =
   Filename.concat
@@ -78,7 +74,7 @@ let build
        ; "returned", `Int (List.length entries)
        ; "latest_seq", option_int_json (entry_seq_json newest)
        ; "oldest_seq", option_int_json (entry_seq_json oldest)
-       ; "latest_ts_iso", option_string_json (entry_ts_json newest)
+       ; "latest_ts_iso", Json_util.string_opt_to_json (entry_ts_json newest)
        ]
        @ fields)
   | json -> json

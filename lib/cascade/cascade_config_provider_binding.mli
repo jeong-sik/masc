@@ -27,8 +27,9 @@ val cascade_prefix_of_provider_kind :
 val provider_label_of_config : Llm_provider.Provider_config.t -> string
 
 val provider_health_key_of_config : Llm_provider.Provider_config.t -> string
-(** Key used by {!Cascade_health_tracker}. For local OpenAI-compat configs
-    the base URL is appended so each endpoint is tracked independently. *)
+(** Key used by {!Cascade_health_tracker}. For OpenAI-compatible configs
+    the model and base URL are appended so each endpoint is tracked
+    independently. *)
 
 val runtime_kind_of_binding : Runtime_binding.t -> string
 (** ["cli_agent"] | ["local"] | ["direct_api"]. *)

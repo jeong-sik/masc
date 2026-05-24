@@ -121,8 +121,7 @@ g1_total_refs=$(count_code_refs "$g1_pattern")
 g1_allowed_files=(
   "lib/exec/command_gate/shell_command_gate.ml"
   "lib/exec_policy_mutation_classifier.ml"
-  "lib/keeper/keeper_hooks_oas_pr_metrics.ml"
-  "lib/spawn.ml"
+  "lib/keeper/keeper_shell_ir.ml"
 )
 g1_current_files=$(list_code_files "$g1_pattern" \
   | rg -v '/dune$|\.dune$' \

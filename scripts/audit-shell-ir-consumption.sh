@@ -9,8 +9,8 @@
 #   G1  Bash.parse_string caller count (lib/, non-test)
 #   G2  is_write_operation / is_destructive_bash_operation signature
 #       (string vs Shell_ir.t) — heuristic via grep
-#   G3  gh op gate_typed routing (heuristic — counts gate_typed callers
-#       in keeper_shell_ops.ml and keeper handlers)
+#   G3  gh command gate_typed routing (heuristic — counts gate_typed
+#       callers in keeper handlers)
 #   G4  Risk-stamped IR (existence of Shell_ir.simple.risk or
 #       'decided phantom envelope)
 #   G5  validate_shell_ir_paths caller count (target: 4 keeper ops)
@@ -120,11 +120,17 @@ g1_total_refs=$(count_code_refs "$g1_pattern")
 # been removed — re-add only if a future code-side call resurfaces.
 #
 # S7: exec_policy.ml is the canonical `parse_string_to_ir` entry point;
-#      it wraps Bash.parse_string and is the SSOT for all other callers.
+#      it wraps Bash.parse_string and is the SSOT for general callers.
 #      shell_command_gate.ml is the low-level gate that needs direct access.
+#      exec_policy_command_syntax.ml owns transparent wrapper tokenization for
+#      env -S split strings before Exec_policy can peel the wrapper.
+#      exec_policy_log_sanitize.ml is below Exec_policy in the module graph, so
+#      it must parse directly to avoid a cycle.
 g1_allowed_files=(
   "lib/exec/command_gate/shell_command_gate.ml"
   "lib/exec_policy.ml"
+  "lib/exec_policy_command_syntax.ml"
+  "lib/exec_policy_log_sanitize.ml"
 )
 g1_current_files=$(list_code_files "$g1_pattern" \
   | rg -v '/dune$|\.dune$' \

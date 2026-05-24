@@ -16,9 +16,6 @@
     - [op] read-style ops with a [path] field (no [cwd] in
       response Assoc — those echo the input target, separate
       concern)
-    - [gh_base] under [op="gh"] — multiple route paths
-      (docker / brokered / host) deferred to a follow-up PR
-
     This test is the source-level guard that pins the wired
     sites. The runtime composition contract is already pinned
     by [test_keeper_cwd_response] (PR-1) and

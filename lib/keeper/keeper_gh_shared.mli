@@ -1,4 +1,4 @@
-(** Shared GH primitives used by PR workflow handlers and keeper_shell op=gh.
+(** Shared GH primitives used by PR workflow handlers.
 
     Contains the gh argv parser (simple-command shape) and repo-slug
     utilities. Extracted from keeper_exec_github.ml to break up the god
@@ -39,11 +39,10 @@ val gh_simple_command_with_repo_flag :
 
 (** RFC-0160 S2: lower a parsed [gh_simple_command] to [Shell_ir.t].
 
-    Used by the keeper [op=gh] handler so the gh dispatch path
-    routes through the same single gate
-    ({!Masc_exec_command_gate.Shell_command_gate.gate_typed}) and
-    path validator ({!Exec_policy.validate_shell_ir_paths}) as the
-    [op=bash] path.
+    Used by GH command validation paths that need the same single gate
+    ({!Masc_exec_command_gate.Shell_command_gate.gate_typed}) and path
+    validator ({!Exec_policy.validate_shell_ir_paths}) as typed shell
+    dispatch.
 
     Construction is total: no failure mode at this boundary. *)
 val gh_simple_command_to_shell_ir :

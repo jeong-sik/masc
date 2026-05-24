@@ -63,8 +63,8 @@ let test_classifies_host_local_bottlenecks () =
        ~args:(`Assoc [ "op", `String "rg" ]));
   check
     string
-    "keeper_shell git_clone"
-    "github"
+    "keeper_shell legacy git_clone defaults visibly to shell"
+    "shell"
     (classify
        "keeper_shell"
        ~is_read_only:true

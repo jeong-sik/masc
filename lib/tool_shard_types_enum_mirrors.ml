@@ -63,7 +63,5 @@ let keeper_shell_op_enum_strings =
   ; "git_log"
   ; "git_diff"
   ; "git_worktree"
-  ; "git_clone"
-  ; "gh"
   ]
 ;;

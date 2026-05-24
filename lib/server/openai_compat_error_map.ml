@@ -226,6 +226,11 @@ let of_agent_error (e : Agent_sdk.Error.agent_error) : t =
     ; openai_kind = kind_invalid_request
     ; openai_code = Some "tripwire_violation"
     ; message }
+  | InputRequired _ ->
+    { http_status = `Bad_request
+    ; openai_kind = kind_invalid_request
+    ; openai_code = Some "input_required"
+    ; message }
   | ExitConditionMet _ ->
     (* Non-fatal — the agent stopped voluntarily. Surface as 500 so the
        client doesn't silently treat it as success, but tag a distinct code
@@ -233,11 +238,6 @@ let of_agent_error (e : Agent_sdk.Error.agent_error) : t =
     { http_status = `Internal_server_error
     ; openai_kind = kind_server
     ; openai_code = Some "exit_condition_met"
-    ; message }
-  | InputRequired _ ->
-    { http_status = `Bad_request
-    ; openai_kind = kind_invalid_request
-    ; openai_code = Some "input_required"
     ; message }
 
 let of_mcp_error (e : Agent_sdk.Error.mcp_error) : t =

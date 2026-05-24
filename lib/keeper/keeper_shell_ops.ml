@@ -66,7 +66,6 @@ let handle_keeper_shell
     | "read" | "file" | "type" -> "cat"
     | "grep" | "search" -> "rg"
     | "dir" | "list" -> "ls"
-    | "git clone" | "clone" -> "git_clone"
     | _ -> raw_op
   in
   let root = Keeper_alerting_path.project_root_of_config config in
@@ -1200,10 +1199,6 @@ let handle_keeper_shell
       error_json ~fields:[ "op", `String op ]
         (Printf.sprintf "Unknown git_worktree action '%s'. Use: list, add." other)
     end
-  | "git_clone" ->
-    Keeper_shell_git_bridge.handle_git_clone ~config ~meta ~args ()
-  | "gh" ->
-    Keeper_shell_gh_bridge.handle_gh_op ~config ~meta ~args ~repo_check ()
   | _ ->
     Yojson.Safe.to_string
       (`Assoc

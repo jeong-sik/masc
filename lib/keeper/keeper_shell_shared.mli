@@ -41,8 +41,6 @@ type shell_op =
   | Git_log
   | Git_diff
   | Git_worktree
-  | Git_clone
-  | Gh
 
 val shell_op_to_string : shell_op -> string
 val all_shell_ops : shell_op list
@@ -68,7 +66,7 @@ val user_timeout_max_sec : float
     Default 180s, env: [MASC_KEEPER_USER_TIMEOUT_MAX_SEC]. *)
 
 val gh_min_timeout_sec : float
-(** Floor for gh op [timeout_sec] (15s).  Hardcoded — operators
+(** Floor for GitHub CLI [timeout_sec] (15s).  Hardcoded — operators
     cannot lower; sub-network-latency timeouts cause cascading 401
     retries (#8688). *)
 
@@ -82,6 +80,10 @@ val keeper_bash_native_min_timeout_sec : float
     container cold start can add 10-60s on top of the actual command
     (runtime log issue #5, 2026-05-20).  Keeping a separate native floor
     avoids penalising the host-side fast path for backend overhead. *)
+
+val keeper_shell_ir_native_min_timeout_sec : float
+(** Floor for typed Shell IR [timeout_sec] when the command runs through the
+    *native* executor. *)
 
 val keeper_bash_min_timeout_sec_for_args : Yojson.Safe.t -> float
 (** Minimum timeout_sec floor for a typed keeper_bash invocation.

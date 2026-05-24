@@ -34,6 +34,24 @@ let docker_runtime_failure_fields =
 let docker_local_fallback_target =
   Keeper_sandbox_shell_ir_target.docker_local_fallback_target
 
+let input_with_cwd cwd = function
+  | Keeper_tool_bash_input.Exec { executable; argv; cwd = _; env } ->
+    Keeper_tool_bash_input.Exec { executable; argv; cwd = Some cwd; env }
+  | Keeper_tool_bash_input.Pipeline { stages; cwd = _; env } ->
+    Keeper_tool_bash_input.Pipeline { stages; cwd = Some cwd; env }
+
+let resolve_typed_git_cwd ~config ~meta ~cwd ~cmd ~mode input =
+  match Keeper_tool_bash_input.to_shell_ir_unvalidated ~mode input with
+  | Error _ -> cwd, None
+  | Ok ir ->
+    let stages = Keeper_shell_command_semantics.effective_stages_of_ir ir in
+    Keeper_shell_command_semantics.resolve_sandbox_root_git_cwd_of_stages
+      ~config
+      ~meta
+      ~cwd
+      ~cmd
+      stages
+
 let handle_keeper_shell_ir_typed
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
       ~(config : Coord.config)
@@ -60,6 +78,10 @@ let handle_keeper_shell_ir_typed
           then Keeper_tool_bash_input.Dev_full
           else Keeper_tool_bash_input.Readonly
         in
+        let cwd, root_git_cwd_error =
+          resolve_typed_git_cwd ~config ~meta ~cwd ~cmd ~mode input
+        in
+        let input = input_with_cwd cwd input in
         let in_playground = Keeper_shell_path.in_playground ~root ~cwd ~meta in
         let sandbox_profile, _sandbox_network_mode =
           Keeper_sandbox_runner.effective_sandbox_profile ~meta ~in_playground
@@ -75,7 +97,12 @@ let handle_keeper_shell_ir_typed
               | Some fallback when in_playground -> Ok fallback
               | Some _ | None ->
                 docker_sandbox_target ~turn_sandbox_factory ~meta ~cwd
-                |> Result.map (fun target -> target, []))
+                |> Result.map (fun target ->
+                  ( target
+                  , [ "requested_sandbox", `String "docker"
+                    ; "via", `String "docker"
+                    ; "sandbox_profile", `String "docker"
+                    ] )))
         in
         (match dispatch_sandbox with
          | Error e ->
@@ -83,6 +110,12 @@ let handle_keeper_shell_ir_typed
              ~fields:[ "typed", `Bool true; "cmd", `String cmd; "cwd", `String cwd ]
              e
          | Ok (dispatch_sandbox, sandbox_extra_fields) ->
+        match root_git_cwd_error with
+        | Some e ->
+          error_json
+            ~fields:[ "typed", `Bool true; "cmd", `String cmd; "cwd", `String cwd ]
+            e
+        | None ->
         (* RFC-0160 S1: lower-then-classify. Typed argv → Shell IR
            once, then both mutation classifiers consume the same IR.
            This removes the previous double-parse (mutation classifier
@@ -252,3 +285,5 @@ let handle_keeper_shell_ir
       ~fields:[ "typed", `Bool true ]
       "Typed Bash input is required. Provide executable/argv or pipeline/stages."
 ;;
+
+let handle_keeper_bash = handle_keeper_shell_ir

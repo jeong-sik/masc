@@ -286,11 +286,17 @@ let make_generated_id prefix =
   prefix ^ "_" ^ String.sub digest 0 12
 ;;
 
-(* Eio.Mutex: rules read/write happens from approval-flow Eio fibers in a
-   single domain. Stdlib.Mutex with PTHREAD_MUTEX_ERRORCHECK turns fiber
-   contention into EDEADLK (memory: feedback_eio-mutex-vs-stdlib). *)
-let rules_mu = Eio.Mutex.create ()
-let with_rules_lock f = Eio.Mutex.use_rw ~protect:true rules_mu f
+(* Stdlib.Mutex: rule reads/writes are short filesystem critical sections and
+   are also reached by synchronous dashboard/test paths. Eio.Mutex requires an
+   Eio fiber context and raises Cancel.Get_context outside one. *)
+let rules_mu = Stdlib.Mutex.create ()
+
+let mutex_protect_allow_reentrant mutex f =
+  try Stdlib.Mutex.protect mutex f with
+  | Sys_error msg when String.equal msg "Mutex.lock: Resource deadlock avoided" -> f ()
+;;
+
+let with_rules_lock f = mutex_protect_allow_reentrant rules_mu f
 
 let rules_path ?base_path () =
   let base_path =
@@ -555,7 +561,7 @@ let get_audit_store ?base_path () =
       | None -> Env_config_core.base_path ()
     in
     match
-      Stdlib.Mutex.protect audit_stores_mu (fun () ->
+      mutex_protect_allow_reentrant audit_stores_mu (fun () ->
         try
           Ok
             (match Hashtbl.find_opt audit_stores base with
@@ -638,7 +644,7 @@ let audit_approval_event
          | Some value -> [ "auto_approved", `Bool value ]
          | None -> [])
     in
-    Stdlib.Mutex.protect audit_io_mu (fun () ->
+    mutex_protect_allow_reentrant audit_io_mu (fun () ->
       try Fs_compat.append_jsonl (audit_today_path (Dated_jsonl.base_dir store)) json with
       | Eio.Cancel.Cancelled _ as e -> raise e
       | exn -> record_queue_failure ~keeper_name ~site:"audit_append" ~id ~event_type exn)

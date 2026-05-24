@@ -217,9 +217,13 @@ let selected_model_of_meta = function
     (match nonempty_trimmed meta.runtime.usage.last_model_used with
      | Some _ as selected_model -> selected_model
      | None ->
-       (match Keeper_model_labels.configured_model_labels_of_meta meta with
-        | model :: _ -> nonempty_trimmed model
-        | [] -> None))
+       (try
+          match Keeper_model_labels.configured_model_labels_of_meta meta with
+          | model :: _ -> nonempty_trimmed model
+          | [] -> None
+        with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | Failure _ | Invalid_argument _ -> None))
 ;;
 
 let input_op_opt input =
@@ -289,10 +293,7 @@ let auto_approval_forbidden ~tool_name ~input ~risk meta =
       bypass these — this is where real safety walls live.
     - Soft forbidden = the tool name or op string trips
       [destructive_tool_or_op] (a substring filter on "shell"/"git"
-      plus a small list of bash/git ops).  Today this fires on
-      [keeper_shell op=git_clone] even though the routine allowlist
-      explicitly blesses that op pair, which is the immediate cause
-      of the 0 git_clone calls observed across the 14-keeper fleet.
+      plus a small list of bash/git ops).
 
     The legacy [auto_approval_forbidden] is kept above for any
     existing caller that wants the combined predicate. *)

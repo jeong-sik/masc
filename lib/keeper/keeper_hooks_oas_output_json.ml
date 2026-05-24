@@ -234,15 +234,6 @@ let pr_url_of_json json =
 
 let command_input_of_tool ~(tool_name : string) (input : Yojson.Safe.t) =
   match tool_name with
-  | "keeper_shell" ->
-      let op =
-        Safe_ops.json_string ~default:"" "op" input
-        |> String.trim |> String.lowercase_ascii
-      in
-      if op = "gh" then
-        Safe_ops.json_string_opt "cmd" input
-        |> Option.map (fun cmd -> "gh " ^ String.trim cmd)
-      else None
   | "keeper_bash" ->
       Safe_ops.json_string_opt "cmd" input
   | "masc_code_shell" ->

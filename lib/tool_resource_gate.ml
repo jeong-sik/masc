@@ -233,7 +233,6 @@ type keeper_shell_op_classification =
 
 let classify_keeper_shell_op_value raw =
   match String.lowercase_ascii (String.trim raw) with
-  | "gh" | "git_clone" -> Known_shell_op Github
   | "git_worktree" -> Known_shell_op Filesystem_write
   | "git_status" | "git_log" | "git_diff" -> Known_shell_op Filesystem_read
   | "rg" | "find" | "tree" | "cat" | "head" | "tail" | "wc" | "ls" ->

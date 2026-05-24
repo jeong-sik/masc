@@ -14,7 +14,21 @@ include Keeper_tool_policy
 let has_mutating_side_effect_with_input ~(tool_name : string) ~(input : Yojson.Safe.t)
   : bool
   =
-  not (Keeper_tool_registry.is_read_only_with_input ~tool_name ~input)
+  match Tool_name.of_string tool_name with
+  | Some (Keeper Shell) ->
+    let op =
+      match input with
+      | `Assoc fields ->
+        (match List.assoc_opt "op" fields with
+         | Some (`String value) -> Some (String.lowercase_ascii (String.trim value))
+         | _ -> None)
+      | _ -> None
+    in
+    (match op with
+     | Some op when List.mem op Keeper_shell_shared.valid_shell_op_strings ->
+       not (Keeper_tool_registry.is_read_only_with_input ~tool_name ~input)
+     | Some _ | None -> false)
+  | _ -> not (Keeper_tool_registry.is_read_only_with_input ~tool_name ~input)
 ;;
 
 type keeper_tool_call_recorder =
@@ -231,18 +245,22 @@ let failure_class_of_tool_result_payload payload =
       payload
   with
   | Ok json ->
-    (match Safe_ops.json_string_opt "failure_class" json with
-     | Some _ as failure_class -> failure_class
-     | None ->
-       (match Safe_ops.json_string_opt "error" json with
-        | Some "egress_blocked" -> Some "policy_rejection"
-        | Some _
-        | None -> None))
+    if Safe_ops.json_bool ~default:false "ok" json
+    then Some "success"
+    else (
+      match Safe_ops.json_string_opt "failure_class" json with
+      | Some _ as failure_class -> failure_class
+      | None ->
+        (match Safe_ops.json_string_opt "error" json with
+         | Some "egress_blocked" -> Some "policy_rejection"
+         | Some _
+         | None -> None))
   | Error _ -> None
 ;;
 
 let should_apply_circuit_breaker_to_failure_payload payload =
   match failure_class_of_tool_result_payload payload with
+  | Some "success" -> false
   | Some ("policy_rejection" | "workflow_rejection") -> false
   | Some _
   | None -> true

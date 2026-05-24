@@ -2211,14 +2211,13 @@ let test_runtime_trust_snapshot_surfaces_terminal_reason () =
              ; "goal_ids", `List [ `String "goal-terminal-reason" ]
              ; ( "terminal_reason"
                , `Assoc
-                   [ "code", `String "gh_repo_context_missing_worktree"
+                   [ "code", `String "required_tool_use_no_tool_call"
                    ; "source", `String "typed_error"
-                   ; "severity", `String "warn"
+                   ; "severity", `String "bad"
                    ; ( "summary"
                      , `String
-                         "GitHub command blocked because the active task has no linked \
-                          worktree" )
-                   ; "next_action", `String "create_or_link_worktree"
+                         "required keeper tool use was requested, but the model returned no keeper tool call" )
+                   ; "next_action", `String "inspect_model_tool_call_contract"
                    ] )
              ]);
        let snapshot =
@@ -2228,12 +2227,12 @@ let test_runtime_trust_snapshot_surfaces_terminal_reason () =
        check
          string
          "latest terminal code"
-         "gh_repo_context_missing_worktree"
+         "required_tool_use_no_tool_call"
          (snapshot |> member "latest_terminal_reason" |> member "code" |> to_string);
        check
          string
          "latest next action"
-         "create_or_link_worktree"
+         "inspect_model_tool_call_contract"
          (snapshot |> member "latest_next_action" |> to_string);
        let timeline = snapshot |> member "causal_timeline" |> to_list in
        check
@@ -3281,18 +3280,11 @@ let test_work_discovery_nudge_uses_registered_keeper_tool_schemas () =
     (contains_substring (Guidance.render_unknown_tool_guard ()) "masc_board_list");
   check
     bool
-    "keeper_shell schema documents gh claim prerequisite"
-    true
+    "keeper_shell schema no longer documents gh claim prerequisite"
+    false
     (source_file_contains
        "lib/tool_shard_types_schemas_shell.ml"
        "Requires an active claimed task/current_task_id");
-  check
-    bool
-    "keeper_shell gh runtime allows sandbox fallback"
-    true
-    (source_file_contains
-       "lib/keeper/keeper_shell_gh_context.ml"
-       "task_id = \"(sandbox)\"");
   check
     bool
     "work discovery nudge avoids pre-filter policy tool names"
@@ -5364,8 +5356,7 @@ let test_append_decision_record_classifies_legacy_worktree_error () =
          ~latency_ms:19
          ~outcome:"error"
          ~error:
-           "keeper_shell failed: gh_repo_context_missing_worktree: active task has no \
-            linked worktree"
+           "keeper_shell failed: unsupported_op: gh is not a keeper_shell operation"
          ();
        let json =
          read_jsonl_line (Keeper_types.keeper_decision_log_path config minimal_meta.name)

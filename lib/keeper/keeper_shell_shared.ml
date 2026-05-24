@@ -24,8 +24,6 @@ type shell_op =
   | Git_log
   | Git_diff
   | Git_worktree
-  | Git_clone
-  | Gh
 
 let shell_op_to_string = function
   | Pwd -> "pwd"
@@ -41,18 +39,16 @@ let shell_op_to_string = function
   | Git_log -> "git_log"
   | Git_diff -> "git_diff"
   | Git_worktree -> "git_worktree"
-  | Git_clone -> "git_clone"
-  | Gh -> "gh"
 
 let all_shell_ops =
   [ Pwd; Ls; Cat; Rg; Git_status; Find; Head; Tail; Wc; Tree;
-    Git_log; Git_diff; Git_worktree; Git_clone; Gh ]
+    Git_log; Git_diff; Git_worktree ]
 
 let valid_shell_op_strings = List.map shell_op_to_string all_shell_ops
 
 (** Shell operation timeout constants.
     - [io_timeout_sec]: commands that may block on network/disk I/O
-      (git status, gh, ls with large dirs).
+      (git status, ls with large dirs).
     - [read_timeout_sec]: fast read-only commands on local files
       (cat, rg, head, tail, find, git_log, tree).
     - [user_timeout_max_sec]: upper bound for user-provided timeout_sec
@@ -66,7 +62,7 @@ let io_timeout_sec = env_float "MASC_KEEPER_IO_TIMEOUT_SEC" 30.0
 let read_timeout_sec = env_float "MASC_KEEPER_READ_TIMEOUT_SEC" 15.0
 let user_timeout_max_sec = env_float "MASC_KEEPER_USER_TIMEOUT_MAX_SEC" 180.0
 
-(* Floor for gh op timeout_sec. GitHub API + gh auth handshake is
+(* Floor for GitHub CLI timeout_sec. GitHub API + gh auth handshake is
    usually 3-10s; previous floors (1s, then 5s) produced 41
    gh_command_timed_out rejections in 2 days, every single one at
    timeout_sec=5 (#8688). [Timeout_floor.Tool_dispatch] keeps keepers
@@ -90,6 +86,8 @@ let git_meta_timeout_sec = env_float "MASC_KEEPER_GIT_META_TIMEOUT_SEC" 5.0
 let keeper_bash_native_min_timeout_sec =
   Timeout_floor.default_sec Timeout_floor.Native_shell
 ;;
+
+let keeper_shell_ir_native_min_timeout_sec = keeper_bash_native_min_timeout_sec
 
 let string_field name fields =
   match List.assoc_opt name fields with

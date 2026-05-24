@@ -33,9 +33,6 @@ type t =
   (** Cascade aggregate outcome: all candidate attempts were exhausted.
           Operators should inspect per-attempt root causes instead of treating
           this as the root cause. *)
-  | Gh_repo_context_missing_worktree
-  (** GitHub command blocked because the active task has no linked
-          worktree. *)
   | Required_tool_use_no_tool_call
   (** Required-tool-use contract: model returned no tool call. *)
   | Required_tool_use_unsatisfied
@@ -94,7 +91,6 @@ val next_action : t -> string option
     - [External_cancel] → ["external_cancel"]
     - [Turn_wall_clock_timeout] → ["turn_wall_clock_timeout"]
     - [Cascade_attempts_exhausted] → ["cascade_attempts_exhausted"]
-    - [Gh_repo_context_missing_worktree] → ["gh_repo_context_missing_worktree"]
     - [Required_tool_use_no_tool_call] → ["required_tool_use_no_tool_call"]
     - [Required_tool_use_unsatisfied] → ["required_tool_use_unsatisfied"]
     - [Post_commit_ambiguous] → ["post_commit_ambiguous"]

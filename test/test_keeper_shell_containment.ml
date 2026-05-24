@@ -8,8 +8,6 @@
 
 module Coord = Masc_mcp.Coord
 module Keeper_exec_shell = Masc_mcp.Keeper_exec_shell
-module Keeper_gh_env = Masc_mcp.Keeper_gh_env
-module Keeper_id = Masc_mcp.Keeper_id
 module Keeper_registry = Masc_mcp.Keeper_registry
 module Keeper_sandbox = Masc_mcp.Keeper_sandbox
 module Keeper_sandbox_factory = Masc_mcp.Keeper_sandbox_factory
@@ -20,7 +18,7 @@ module Keeper_tool_policy = Masc_mcp.Keeper_tool_policy
 module Fs_compat = Fs_compat
 module Json = Yojson.Safe.Util
 
-(* P0-1 fix: tool_policy.toml must be loaded before keeper_shell op=gh
+(* P0-1 fix: tool_policy.toml must be loaded before GitHub command dispatch
    can execute.  Previously the policy_config ref started as None and
    git_clone_allowed_orgs/git_clone_denied_repos returned [] (fail-open),
    letting any org through the gh command org check even when a policy
@@ -112,38 +110,13 @@ let parse_field raw field =
 let parse_bool_field raw field =
   Yojson.Safe.from_string raw |> Json.member field |> Json.to_bool_option
 
-let run_cmd argv =
-  match argv with
-  | [] -> invalid_arg "run_cmd: empty argv"
-  | prog :: args ->
-    let pid = Unix.create_process prog (Array.of_list argv) Unix.stdin Unix.stdout Unix.stderr in
-    (match Unix.waitpid [] pid with
-     | _, Unix.WEXITED 0 -> ()
-     | _, Unix.WEXITED code ->
-       Alcotest.failf "command failed (%d): %s" code (String.concat " " (prog :: args))
-     | _, Unix.WSIGNALED signal ->
-       Alcotest.failf "command signaled (%d): %s" signal (String.concat " " (prog :: args))
-     | _, Unix.WSTOPPED signal ->
-       Alcotest.failf "command stopped (%d): %s" signal (String.concat " " (prog :: args)))
-
 let write_executable path content =
   ignore (Fs_compat.save_file_atomic path content);
   Unix.chmod path 0o755
 
-let read_file path =
-  let ic = open_in_bin path in
-  Fun.protect
-    ~finally:(fun () -> close_in_noerr ic)
-    (fun () -> really_input_string ic (in_channel_length ic))
-
 let normalize_realpath path =
   try Unix.realpath path with
   | _ -> path
-
-let existing_path () =
-  match Sys.getenv_opt "PATH" with
-  | Some value -> value
-  | None -> "/usr/bin:/bin"
 
 let test_shell_command_available_uses_path_without_shell () =
   let dir = temp_dir () in
@@ -183,66 +156,6 @@ let test_shell_command_available_rejects_empty_path_segment_cwd () =
          "empty PATH entry not cwd"
          false
          (Keeper_shell_shared.shell_command_available tool_name))
-
-let setup_task_with_worktree
-      ~base
-      ~config
-      ~(meta : Keeper_types.keeper_meta)
-      ~git_root
-      ~worktree_rel
-  =
-  ignore (Coord.init config ~agent_name:(Some meta.agent_name));
-  ignore
-    (Coord.add_task config ~title:"gh binding test" ~priority:1
-       ~description:"validate keeper gh context");
-  let task =
-    match Coord.get_tasks_safe config with
-    | [ task ] -> task
-    | tasks ->
-      Alcotest.failf "expected exactly one task, got %d" (List.length tasks)
-  in
-  let backlog_file = Filename.concat base ".masc/tasks/backlog.json" in
-  let worktree_json =
-    `Assoc
-      [
-        ("branch", `String "keeper-task");
-        ("path", `String worktree_rel);
-        ("git_root", `String git_root);
-        ("repo_name", `String (Filename.basename git_root));
-      ]
-  in
-  let task_json =
-    match Yojson.Safe.from_file backlog_file with
-    | `Assoc fields -> (
-      match List.assoc_opt "tasks" fields with
-      | Some (`List tasks) ->
-        let update_task json =
-          match json with
-          | `Assoc task_fields ->
-            let task_id_matches =
-              match List.assoc_opt "id" task_fields with
-              | Some (`String id) -> String.equal id task.id
-              | _ -> false
-            in
-            if task_id_matches
-            then
-              `Assoc
-                (("worktree", worktree_json)
-                 :: List.remove_assoc "worktree" task_fields)
-            else json
-          | _ -> json
-        in
-        `Assoc (("tasks", `List (List.map update_task tasks)) :: List.remove_assoc "tasks" fields)
-      | _ -> Alcotest.fail "backlog.json missing tasks list")
-    | _ -> Alcotest.fail "backlog.json root is not an object"
-  in
-  Yojson.Safe.to_file backlog_file task_json;
-  let current_task_id =
-    match Keeper_id.Task_id.of_string task.id with
-    | Ok task_id -> task_id
-    | Error err -> Alcotest.failf "invalid task id %s: %s" task.id err
-  in
-  { meta with current_task_id = Some current_task_id }, task.id
 
 (* ── Tests ───────────────────────────────────────────────────────── *)
 
@@ -520,93 +433,6 @@ let test_docker_git_creds_contained () =
   Alcotest.(check bool) "docker git-creds also contained" true
     (blocked_by_sandbox_boundary raw)
 
-let test_gh_binds_repo_from_active_task_worktree () =
-  setup ~keeper_name:"minjae" ~sandbox:Keeper_types.Local
-  @@ fun ~base ~config ~meta ~playground ->
-  let git_root = Filename.concat playground "repos/masc-mcp" in
-  let worktree_rel = ".worktrees/task-001" in
-  let worktree_cwd = Filename.concat git_root worktree_rel in
-  ensure_dir worktree_cwd;
-  run_cmd [ "git"; "-C"; git_root; "init"; "--quiet" ];
-  run_cmd
-    [
-      "git";
-      "-C";
-      git_root;
-      "remote";
-      "add";
-      "origin";
-      "https://github.com/jeong-sik/masc-mcp.git";
-    ];
-  let meta, _task_id =
-    setup_task_with_worktree ~base ~config ~meta
-      ~git_root ~worktree_rel
-  in
-  let bin_dir = Filename.concat playground "bin" in
-  let gh_args_file = Filename.concat playground "gh-args.txt" in
-  let gh_pwd_file = Filename.concat playground "gh-pwd.txt" in
-  ensure_dir bin_dir;
-  ensure_dir (Keeper_gh_env.root_gh_config_dir config);
-  write_executable
-    (Filename.concat bin_dir "gh")
-    "#!/bin/sh\nprintf '%s' \"$*\" > \"$GH_ARGS_FILE\"\nprintf '%s' \"$PWD\" > \"$GH_PWD_FILE\"\necho fake-gh-ok\n";
-  with_env "GH_ARGS_FILE" gh_args_file @@ fun () ->
-  with_env "GH_PWD_FILE" gh_pwd_file @@ fun () ->
-  with_env "PATH" (bin_dir ^ ":" ^ existing_path ()) @@ fun () ->
-  let raw =
-    Keeper_exec_shell.handle_keeper_shell ~turn_sandbox_factory:None ~exec_cache:None ~config ~meta
-      ~args:
-        (`Assoc
-          [
-            ("op", `String "gh");
-            ("cmd", `String "pr list --state open");
-          ])
-  in
-  if not (Sys.file_exists gh_args_file) then
-    Alcotest.failf "gh did not run: %s" raw;
-  let recorded_args = read_file gh_args_file in
-  let recorded_pwd = read_file gh_pwd_file in
-  Alcotest.(check bool) "repo flag injected"
-    true
-    (String_util.contains_substring recorded_args
-       "--repo jeong-sik/masc-mcp pr list --state open");
-  Alcotest.(check string) "gh runs from task worktree cwd"
-    (normalize_realpath worktree_cwd)
-    (normalize_realpath recorded_pwd);
-  Alcotest.(check (option string)) "repo echoed in result"
-    (Some "jeong-sik/masc-mcp")
-    (parse_field raw "repo")
-
-let test_gh_missing_worktree_returns_typed_error () =
-  setup ~keeper_name:"minjae" ~sandbox:Keeper_types.Local
-  @@ fun ~base:_ ~config ~meta ~playground:_ ->
-  ignore (Coord.init config ~agent_name:(Some meta.agent_name));
-  ignore
-    (Coord.add_task config ~title:"gh missing worktree" ~priority:1
-       ~description:"validate typed gh error");
-  let task =
-    match Coord.get_tasks_safe config with
-    | [ task ] -> task
-    | tasks ->
-      Alcotest.failf "expected exactly one task, got %d" (List.length tasks)
-  in
-  let current_task_id =
-    match Keeper_id.Task_id.of_string task.id with
-    | Ok task_id -> task_id
-    | Error err -> Alcotest.failf "invalid task id %s: %s" task.id err
-  in
-  let meta = { meta with current_task_id = Some current_task_id } in
-  let raw =
-    Keeper_exec_shell.handle_keeper_shell ~turn_sandbox_factory:None ~exec_cache:None ~config ~meta
-      ~args:(`Assoc [ ("op", `String "gh"); ("cmd", `String "pr list") ])
-  in
-  Alcotest.(check (option string)) "typed gh error"
-    (Some "gh_repo_context_missing_worktree")
-    (parse_field raw "error");
-  Alcotest.(check (option bool)) "structured failure"
-    (Some false)
-    (parse_bool_field raw "ok")
-
 let () =
   Alcotest.run "Keeper_shell_containment"
     [
@@ -640,9 +466,5 @@ let () =
             `Quick test_docker_other_container_root_stays_blocked;
           Alcotest.test_case "docker git-creds also contained" `Quick
             test_docker_git_creds_contained;
-          Alcotest.test_case "gh binds repo from active task worktree" `Quick
-            test_gh_binds_repo_from_active_task_worktree;
-          Alcotest.test_case "gh missing worktree returns typed error" `Quick
-            test_gh_missing_worktree_returns_typed_error;
         ] );
     ]

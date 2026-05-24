@@ -5,14 +5,13 @@
     surface without failing this test.
 
     The Step 9 unblock at [config/tool_policy.toml]
-    [\[presets.research\]] is what makes
-    [keeper_shell op=git_clone] / [op=gh pr view] / [op=gh pr create]
-    reach the research-tier toolset.  Before Step 9, analyst / scholar /
-    verifier keepers could only share opinions on the board.  After
-    Step 9, the capability is opened (the risk-tiered approval gate
-    in [keeper_routine_allowlist.ml] still queues high-risk ops for
-    operator confirmation).  This test is the regression sentinel for
-    that decision. *)
+    [\[presets.research\]] is what makes delivery-class coding, shell,
+    and GitHub PR tooling reach the research-tier toolset.  Before Step
+    9, analyst / scholar / verifier keepers could only share opinions on
+    the board.  After Step 9, the capability is opened and the
+    risk-tiered approval gate still queues high-risk ops for operator
+    confirmation.  This test is the regression sentinel for that
+    decision. *)
 
 open Masc_mcp
 

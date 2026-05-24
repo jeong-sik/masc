@@ -206,7 +206,7 @@ let read_public_schema =
         "offset"
         "integer"
         "Currently ignored; reads from the start. Listed for compatibility with the \
-         Anthropic Read tool surface."
+         Provider_a Read tool surface."
     ]
 ;;
 
@@ -258,7 +258,7 @@ let grep_public_schema =
     ; property
         "-i"
         "boolean"
-        "Case insensitive. Currently accepted but not yet routed; Anthropic-Code \
+        "Case insensitive. Currently accepted but not yet routed; Provider_a-Code \
          compatibility shim."
     ; property
         "-n"
@@ -388,7 +388,7 @@ let translate_grep_input input =
 ;;
 
 (** [translate_input ~public input] reshapes an LLM call payload from
-    the public schema (Anthropic Code field names) to the internal
+    the public schema (Provider_a Code field names) to the internal
     keeper tool's expected payload.
 
     For unknown public names this is the identity. *)

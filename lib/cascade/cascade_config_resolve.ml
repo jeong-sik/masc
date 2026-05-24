@@ -74,12 +74,12 @@ let openai_compatible_custom_model json provider_id api_name =
 let cascade_prefix_of_decl_protocol raw =
   let kind =
     match String.trim raw |> String.lowercase_ascii with
-    | "provider_a-cli" -> Some Llm_provider.Provider_config.Claude_code
-    | "provider_a-http" -> Some Llm_provider.Provider_config.Anthropic
-    | "provider_d-cli" -> Some Llm_provider.Provider_config.Codex_cli
-    | "provider_d-http" -> Some Llm_provider.Provider_config.OpenAI_compat
-    | "google-cli" -> Some Llm_provider.Provider_config.Gemini_cli
-    | "provider_c-cli" -> Some Llm_provider.Provider_config.Kimi_cli
+    | "provider_a-cli" -> Some Llm_provider.Provider_config.Cli_tool_d
+    | "provider_a-http" -> Some Llm_provider.Provider_config.Provider_a
+    | "provider_d-cli" -> Some Llm_provider.Provider_config.Cli_tool_a
+    | "provider_d-http" -> Some Llm_provider.Provider_config.Provider_d_compat
+    | "google-cli" -> Some Llm_provider.Provider_config.Cli_tool_b
+    | "provider_c-cli" -> Some Llm_provider.Provider_config.Cli_tool_c
     | "ollama-http" -> Some Llm_provider.Provider_config.Ollama
     | _ -> None
   in

@@ -290,7 +290,7 @@ type inference_params =
     (** [thinking_budget] is a per-turn thinking token budget seed.
       Keeper adaptive logic may adjust this per turn based on intent
       classification and error/retry signals.  Provider-specific
-      mapping (e.g. to Anthropic [budget_tokens] or DeepSeek
+      mapping (e.g. to Provider_a [budget_tokens] or DeepSeek
       [reasoning_effort]) happens downstream in OAS. *)
   }
 

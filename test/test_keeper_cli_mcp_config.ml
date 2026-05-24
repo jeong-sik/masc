@@ -1,4 +1,4 @@
-(* #10049: tests for Claude Code / Kimi CLI MCP config auto-construction. *)
+(* #10049: tests for Claude Code / Provider_c CLI MCP config auto-construction. *)
 
 open Alcotest
 

@@ -22,7 +22,7 @@
     The server is client-agnostic: the caller (CLI / API consumer)
     supplies the env var name ([~token_env_var]) and the
     token-lifetime policy ([~token_lifetime]). This module holds
-    no list of "known" MCP clients (Claude, Gemini, etc.) — those
+    no list of "known" MCP clients (Claude, Provider_f, etc.) — those
     conventions live in the operator's wrapper scripts and the
     runbook, not in server code. *)
 

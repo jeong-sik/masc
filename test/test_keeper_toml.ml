@@ -2022,9 +2022,9 @@ let () =
             test_oas_env_parses_allowed_keys;
           test_case "supports legacy unified max tokens alias" `Quick
             test_oas_env_supports_legacy_unified_max_tokens_alias;
-          test_case "demotes Gemini no-MCP runs to plan approval mode" `Quick
+          test_case "demotes Provider_f no-MCP runs to plan approval mode" `Quick
             test_keeper_oas_context_demotes_gemini_no_mcp_to_plan;
-          test_case "preserves explicit Gemini approval mode" `Quick
+          test_case "preserves explicit Provider_f approval mode" `Quick
             test_keeper_oas_context_preserves_explicit_gemini_approval_mode;
           test_case "drops non-OAS_* keys (ambient injection guard)" `Quick
             test_oas_env_drops_non_oas_prefix;

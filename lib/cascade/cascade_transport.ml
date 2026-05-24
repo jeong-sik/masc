@@ -21,7 +21,7 @@ type cli_transport_overrides = Cascade_transport_cli_overrides.cli_transport_ove
    MASC does not clamp provider-internal max_turns before dispatch. *)
 let cli_tool_d_max_turns_hard_cap =
   Llm_provider.Provider_config.max_turns_hard_cap
-    Llm_provider.Provider_config.Claude_code
+    Llm_provider.Provider_config.Cli_tool_d
   |> Option.value ~default:30
 ;;
 
@@ -384,7 +384,7 @@ let json_stream_cli_transport_ctor
 
 let () =
   Cascade_transport_non_http_registry.register_non_http_transport
-    ~kind:Llm_provider.Provider_config.Kimi_cli
+    ~kind:Llm_provider.Provider_config.Cli_tool_c
     ~ctor:json_stream_cli_transport_ctor
 ;;
 

@@ -13,7 +13,7 @@
     PR-A scope (this PR): the type, named HTTP status constants, and
     wire tags.  Zero callers, zero behavioural change.  A
     [classify_raw] helper is deliberately *not* exposed — adapter-side
-    typed emission (per-provider [Anthropic], [Openai_compat],
+    typed emission (per-provider [Provider_a], [Openai_compat],
     [Llamacpp_local], …) belongs in PR-B-family so the substring soup
     moves to its single legitimate residence (the wire boundary), not
     a relocated copy inside the keeper layer.
@@ -94,7 +94,7 @@ module Http_status : sig
   (** [429] — RFC 6585. *)
 
   val anthropic_overloaded : int
-  (** [529] — Anthropic non-standard overload signal. *)
+  (** [529] — Provider_a non-standard overload signal. *)
 
   val request_timeout : int
   (** [408] — HTTP/1.1. *)

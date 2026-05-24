@@ -305,7 +305,7 @@ let api_error_message_for_quota_scan (api_err : Llm_provider.Retry.api_error)
   | Llm_provider.Retry.NetworkError { message; _ } -> Some message
   | Llm_provider.Retry.Overloaded { message } -> Some message
   | Llm_provider.Retry.ServerError { message; _ } -> Some message
-  (* InvalidRequest covers Anthropic's HTTP 400 user-set monthly cap
+  (* InvalidRequest covers Provider_a's HTTP 400 user-set monthly cap
      ("You have reached your specified API usage limits...").  Without
      this branch, direct (non-CLI) API calls treat the cap as a
      retryable client error and the cascade burns its full turn budget
@@ -319,7 +319,7 @@ let api_error_message_for_quota_scan (api_err : Llm_provider.Retry.api_error)
 
 (** Substring indicators for hard-quota signals in CLI-wrapped error text.
 
-    These are necessary because CLI transports (Gemini CLI, Claude Code CLI)
+    These are necessary because CLI transports (Provider_f CLI, Claude Code CLI)
     serialize provider errors as plain text in [NetworkError.message] or
     [InvalidRequest.message].  The structured [Llm_provider.Retry.is_hard_quota]
     only inspects the [RateLimited] variant, so CLI-wrapped messages require
@@ -340,12 +340,12 @@ let cli_wrapped_hard_quota_indicators = [
   "monthly usage limit";
   "org's monthly usage limit";
   "resets apr ";
-  (* Anthropic console usage-limit error (HTTP 400 invalid_request_error,
+  (* Provider_a console usage-limit error (HTTP 400 invalid_request_error,
      observed 2026-04-29 with 2-day reset window).  Body shape:
        {"type":"error","error":{"type":"invalid_request_error",
         "message":"You have reached your specified API usage limits.
         You will regain access on YYYY-MM-DD at HH:MM UTC."}}
-     Earlier 429-based indicators don't match because Anthropic now
+     Earlier 429-based indicators don't match because Provider_a now
      returns 400 with the user-set monthly cap.  Without these markers
      [sdk_error_is_hard_quota] returns false → cascade keeps retrying
      cli_tool_d:auto for the full OAS turn budget (~60min). *)

@@ -157,7 +157,7 @@ let probe_chat_completion_compatible
         endpoint.url model_id timeout_sec;
       let provider_config =
         Llm_provider.Provider_config.make
-          ~kind:Llm_provider.Provider_config.OpenAI_compat
+          ~kind:Llm_provider.Provider_config.Provider_d_compat
           ~model_id ~base_url:endpoint.url
           ~request_path:Masc_network_defaults.openai_chat_completions_path
           ~max_tokens:1 ~temperature:Llm_provider.Constants.Inference_profile.deterministic.temperature ()

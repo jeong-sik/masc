@@ -349,7 +349,7 @@ let () =
             `Quick
             test_rate_limit_can_be_capacity_backpressure
         ; test_case
-            "Anthropic specified-limit body maps to capacity"
+            "Provider_a specified-limit body maps to capacity"
             `Quick
             test_anthropic_invalid_request_specified_limit_body_pins_capacity
         ; test_case

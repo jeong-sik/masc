@@ -21,7 +21,7 @@ type cascade_server_flavor =
   | Openai       (** canonical: SSE, reasoning_effort, web_search, parallel_tool_calls *)
   | Deep_seek    (** DeepSeek: thinking param, reasoning_content, reasoning_effort high/max *)
   | Zai_glm      (** Z.AI/GLM: reasoning_content, business errors 1301/1302/1303 *)
-  | Qwen         (** Qwen/DashScope: OpenAI compat, tools+stream incompatible *)
+  | Qwen         (** Qwen/Provider_h: OpenAI compat, tools+stream incompatible *)
 [@@deriving show, eq]
 
 let flavor_of_string = function
@@ -48,7 +48,7 @@ let flavor_to_string = function
 type cascade_protocol =
   | Openai_http     (** OpenAI-compatible HTTP (/v1/chat/completions) *)
   | Ollama_http     (** Ollama native HTTP (/api/chat) *)
-  | Anthropic_http  (** Anthropic Messages API (/v1/messages) *)
+  | Anthropic_http  (** Provider_a Messages API (/v1/messages) *)
   | Openai_cli      (** CLI wrapper speaking OpenAI protocol *)
 [@@deriving show, eq]
 

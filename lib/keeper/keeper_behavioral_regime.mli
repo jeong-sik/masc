@@ -5,7 +5,7 @@
     (KSM/KTC/KDP/KCL/KMC/KCB) which capture "where in the code".
 
     This axis answers the orthogonal question: "what mode is the
-    keeper actually in?" (research basis: Anthropic persona vectors,
+    keeper actually in?" (research basis: Provider_a persona vectors,
     Jason Wei CS25 V4 emergent-capability cliffs, Fowler circuit
     breaker.)
 

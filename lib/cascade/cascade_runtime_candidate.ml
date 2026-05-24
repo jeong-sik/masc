@@ -52,7 +52,7 @@ let binding_base_url_is_loopback binding =
 let binding_is_local_runtime (binding : Runtime_binding.t) =
   match binding.Runtime_binding.transport with
   | Runtime_binding.Cli -> false
-  | Runtime_binding.Http | Runtime_binding.Managed | Runtime_binding.Custom_openai_compat ->
+  | Runtime_binding.Http | Runtime_binding.Managed | Runtime_binding.Custom_provider_d_compat ->
       binding_auth_is_no_auth binding && binding_base_url_is_loopback binding
 
 let local_runtime_provider_id () =
@@ -67,7 +67,7 @@ let provider_label_of_config (cfg : Llm_provider.Provider_config.t) =
 
 let provider_health_key_of_config (cfg : Llm_provider.Provider_config.t) =
   match cfg.kind with
-  | Llm_provider.Provider_config.OpenAI_compat
+  | Llm_provider.Provider_config.Provider_d_compat
     when Llm_provider.Provider_config.is_local cfg ->
       let base_url = String.trim cfg.base_url in
       if String.equal base_url ""
@@ -141,7 +141,7 @@ let provider_config_of_runtime_label label =
   | Custom_url { model_id; base_url } ->
       Some
         (cfg_of_kind
-           ~kind:Llm_provider.Provider_config.OpenAI_compat
+           ~kind:Llm_provider.Provider_config.Provider_d_compat
            ~model_id
            ~base_url)
   | Unknown _ -> None

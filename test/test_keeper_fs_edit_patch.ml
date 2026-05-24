@@ -1,7 +1,7 @@
 (** Tests for [Keeper_exec_fs.handle_keeper_fs_edit] mode=patch.
 
     RFC-0006 Phase A.4 — string-replace edit mode added so the
-    Anthropic Code [Edit] cognate can be wired through OAS dual
+    Provider_a Code [Edit] cognate can be wired through OAS dual
     registration. *)
 
 module Coord = Masc_mcp.Coord

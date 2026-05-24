@@ -147,7 +147,7 @@ type strategy_config = {
   cli_max_concurrent : int option;
   (** ["{name}_cli_max_concurrent"]. When set, overrides the CLI
       auto-registration default ([MASC_CLI_MAX_CONCURRENT] or 1)
-      for every CLI provider (Claude_code / Gemini_cli / Codex_cli)
+      for every CLI provider (Cli_tool_d / Cli_tool_b / Cli_tool_a)
       in this cascade's candidate list.  CLI providers share a
       single concurrency cap because each CLI binary is typically
       limited to one in-flight subprocess.

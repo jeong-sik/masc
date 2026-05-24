@@ -26,9 +26,9 @@ let gh_allowed_commands =
   ]
 
 (** Reversibility classification for gh commands.
-    Based on Thariq (Anthropic) Agent SDK workshop principle:
+    Based on Thariq (Provider_a) Agent SDK workshop principle:
     "Tools for atomic/irreversible actions; bash for reversible work."
-    + Anthropic Claude Code auto mode pattern:
+    + Provider_a Claude Code auto mode pattern:
     "Safe-tool allowlist = tools that cannot modify state; everything
     else goes to classifier; irreversible requires approval."
 

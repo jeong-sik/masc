@@ -158,7 +158,7 @@ let binding_supports_runtime_mcp_http_headers (binding : Runtime_binding.t) =
   | Runtime_binding.Cli -> binding.Runtime_binding.capabilities.supports_tools
   | Runtime_binding.Http
   | Runtime_binding.Managed
-  | Runtime_binding.Custom_openai_compat -> false
+  | Runtime_binding.Custom_provider_d_compat -> false
 ;;
 
 let fallback_tool_policy_for_config (provider_cfg : Llm_provider.Provider_config.t) =
@@ -175,7 +175,7 @@ let fallback_tool_policy_for_config (provider_cfg : Llm_provider.Provider_config
          | Runtime_binding.Cli -> true
          | Runtime_binding.Http
          | Runtime_binding.Managed
-         | Runtime_binding.Custom_openai_compat -> false)
+         | Runtime_binding.Custom_provider_d_compat -> false)
     }
 ;;
 
@@ -199,7 +199,7 @@ let tool_policy_for_kind kind =
 ;;
 
 (** Whether the resolved provider config is a CLI runtime (Claude Code,
-    Codex CLI, Gemini CLI, Kimi CLI).  MASC uses this only for local
+    Codex CLI, Provider_f CLI, Provider_c CLI).  MASC uses this only for local
     tool-delivery projection after OAS has resolved provider/model
     capabilities. *)
 let is_cli_agent_provider (provider_cfg : Llm_provider.Provider_config.t) =
@@ -212,10 +212,10 @@ let is_cli_agent_provider (provider_cfg : Llm_provider.Provider_config.t) =
     [oas_capabilities_of_config] below) can avoid re-resolving for the same
     provider.
 
-    Override semantics: CLI providers (Claude Code, Codex CLI, Gemini CLI,
-    Kimi CLI) do not expose inline function-calling to this gate. Runtime MCP
+    Override semantics: CLI providers (Claude Code, Codex CLI, Provider_f CLI,
+    Provider_c CLI) do not expose inline function-calling to this gate. Runtime MCP
     support remains cascade.toml/OAS-owned because not every CLI can consume
-    request-scoped MCP policy; Gemini CLI is the known false case. *)
+    request-scoped MCP policy; Provider_f CLI is the known false case. *)
 let normalize_cli_caps_when ~is_cli (caps : Llm_provider.Capabilities.capabilities) =
   if is_cli
   then { caps with supports_tools = false; supports_tool_choice = false }

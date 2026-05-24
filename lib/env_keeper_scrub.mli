@@ -1,6 +1,6 @@
 (** Keeper subprocess env scrub / pass policy (RFC-0007 PR-1 / #9639 Cluster B).
 
-    Long-lived host credentials (Anthropic API keys, AWS secrets, OIDC
+    Long-lived host credentials (Provider_a API keys, AWS secrets, OIDC
     request tokens, OTel exporter bearer headers) MUST NOT cross the
     keeper subprocess boundary. They are consumed by the host process
     (MASC server) and are not needed inside the keeper container or shell

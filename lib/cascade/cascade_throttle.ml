@@ -43,7 +43,7 @@ let prepare_op (s : Llm_provider.Discovery.endpoint_status) : populate_op =
       | Some t -> t
       | None ->
         Llm_provider.Provider_throttle.default_for_kind
-          Llm_provider.Provider_config.OpenAI_compat
+          Llm_provider.Provider_config.Provider_d_compat
     in
     Maybe_install
       { url = s.url; candidate; new_has_slot_data = has_slot_data s }

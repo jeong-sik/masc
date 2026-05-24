@@ -4706,7 +4706,7 @@ let test_append_metrics_snapshot_nulls_unreported_usage () =
        let config = Masc_mcp.Coord.default_config base_dir in
        let result =
          make_run_result
-           ~text:"Kimi replied without usage."
+           ~text:"Provider_c replied without usage."
            ~tools:[]
            ~model:"cli_tool_c:model-c-coding"
            ~input_tok:0
@@ -5263,7 +5263,7 @@ let test_append_decision_record_nulls_unreported_usage () =
        ignore (Masc_mcp.Coord.init config ~agent_name:(Some "observer"));
        let result =
          make_run_result
-           ~text:"Kimi replied without usage."
+           ~text:"Provider_c replied without usage."
            ~tools:[]
            ~model:"cli_tool_c:model-c-coding"
            ~input_tok:0

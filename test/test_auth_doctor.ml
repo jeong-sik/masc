@@ -127,7 +127,7 @@ let test_ignores_stale_admin_raw_token_file () =
        ~needle:"No usable admin bearer source was detected"
        report.warnings)
 
-(* The previous test "reports Claude and Gemini MCP client identities"
+(* The previous test "reports Claude and Provider_f MCP client identities"
    was removed: the per-client diagnostic that it locked is gone.
    The server is now MCP-client-agnostic, so it holds no list of
    "known" clients to diagnose. Operators who need per-client

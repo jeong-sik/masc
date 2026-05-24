@@ -560,7 +560,7 @@ let test_complete_by_wrong_agent () =
     let _ = Coord.add_task config ~title:"Test" ~priority:1 ~description:"" in
     let _ = Coord.claim_task config ~agent_name:"agent_llm_a" ~task_id:"task-001" in
 
-    (* Gemini tries to complete agent_llm_a's task - should fail *)
+    (* Provider_f tries to complete agent_llm_a's task - should fail *)
     let result = transition_done config ~agent_name:"provider_f" ~task_id:"task-001" ~notes:"" in
     Alcotest.(check bool) "wrong agent blocked" true (contains_error result);
     Alcotest.(check bool) "wrong agent points at current assignee" true

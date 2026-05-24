@@ -87,7 +87,7 @@ let binding_is_direct_runtime (binding : Agent_sdk.Provider_runtime_binding.t) =
   match binding.transport with
   | Agent_sdk.Provider_runtime_binding.Http
   | Agent_sdk.Provider_runtime_binding.Managed
-  | Agent_sdk.Provider_runtime_binding.Custom_openai_compat -> true
+  | Agent_sdk.Provider_runtime_binding.Custom_provider_d_compat -> true
   | Agent_sdk.Provider_runtime_binding.Cli -> false
 ;;
 

@@ -28,12 +28,6 @@ let with_temp_dir prefix f =
   Unix.mkdir dir 0o755;
   Fun.protect ~finally:(fun () -> rm_rf dir) (fun () -> f dir)
 
-let write_file path content =
-  let oc = open_out path in
-  Fun.protect
-    ~finally:(fun () -> close_out_noerr oc)
-    (fun () -> output_string oc content)
-
 let contains_substring ~needle s =
   let nl = String.length needle in
   let sl = String.length s in
@@ -61,16 +55,6 @@ let save_credential_or_fail base_path ~agent_name ~role ~raw_token =
 
 let raw_token_file base_path agent_name =
   Filename.concat (Auth.auth_dir base_path) (agent_name ^ ".token")
-
-let find_mcp_client report client_name =
-  match
-    List.find_opt
-      (fun (client : Auth_doctor.mcp_client) ->
-        String.equal client.client_name client_name)
-      (report : Auth_doctor.t).mcp_clients
-  with
-  | Some client -> client
-  | None -> failf "missing mcp client report for %s" client_name
 
 let test_errors_when_no_admin_bearer_source_exists () =
   with_temp_dir "auth-doctor-error" @@ fun base_path ->
@@ -143,8 +127,15 @@ let test_ignores_stale_admin_raw_token_file () =
        ~needle:"No usable admin bearer source was detected"
        report.warnings)
 
-let test_reports_claude_and_gemini_mcp_client_identities () =
-  with_temp_dir "auth-doctor-mcp-clients" @@ fun base_path ->
+(* The previous test "reports Claude and Gemini MCP client identities"
+   was removed: the per-client diagnostic that it locked is gone.
+   The server is now MCP-client-agnostic, so it holds no list of
+   "known" clients to diagnose. Operators who need per-client
+   readiness checks compose them externally over the raw
+   doctor-auth JSON. *)
+
+let test_json_no_longer_emits_mcp_clients_field () =
+  with_temp_dir "auth-doctor-no-mcp-clients" @@ fun base_path ->
   let auth_cfg =
     Masc_domain.
       {
@@ -155,44 +146,25 @@ let test_reports_claude_and_gemini_mcp_client_identities () =
       }
   in
   Auth.save_auth_config base_path auth_cfg;
-  save_credential_or_fail base_path ~agent_name:"admin" ~role:Masc_domain.Admin
-    ~raw_token:"admin-token";
+  save_credential_or_fail base_path ~agent_name:"admin"
+    ~role:Masc_domain.Admin ~raw_token:"admin-token";
   Auth.save_private_text_file (raw_token_file base_path "admin")
     "admin-token";
-  save_credential_or_fail base_path ~agent_name:"claude"
-    ~role:Masc_domain.Worker ~raw_token:"claude-token";
-  Auth.save_private_text_file (raw_token_file base_path "claude")
-    "claude-token";
-  save_credential_or_fail base_path ~agent_name:"gemini"
-    ~role:Masc_domain.Worker ~raw_token:"gemini-token";
-  Auth.save_private_text_file (raw_token_file base_path "gemini")
-    "gemini-token";
   with_env "MASC_HOST" "127.0.0.1" @@ fun () ->
   with_env "MASC_HTTP_AUTH_STRICT" "" @@ fun () ->
   with_env "MASC_ADMIN_TOKEN" "" @@ fun () ->
   with_env "MASC_MCP_TOKEN" "" @@ fun () ->
-  with_env "MASC_CLAUDE_MCP_TOKEN" "" @@ fun () ->
-  with_env "MASC_GEMINI_MCP_TOKEN" "" @@ fun () ->
   let report =
     Auth_doctor.analyze ~base_path_input:base_path
       ~default_base_path:base_path ()
   in
-  let claude = find_mcp_client report "claude" in
-  check string "claude agent" "claude" claude.agent_name;
-  check string "claude env" "MASC_CLAUDE_MCP_TOKEN"
-    claude.token_env_var;
-  check string "claude token source" "token_file" claude.token_source;
-  check string "claude token status" "live" claude.token_status;
-  check bool "claude identity ready" true claude.identity_ready;
-  let gemini = find_mcp_client report "gemini" in
-  check string "gemini env" "MASC_GEMINI_MCP_TOKEN"
-    gemini.token_env_var;
-  check bool "gemini identity ready" true gemini.identity_ready;
-  check bool "json exposes mcp clients" true
-    (contains_substring ~needle:"\"mcp_clients\""
-       (Auth_doctor.to_yojson report |> Yojson.Safe.to_string));
-  check bool "text names claude env" true
-    (contains_substring ~needle:"MASC_CLAUDE_MCP_TOKEN"
+  let json_string =
+    Auth_doctor.to_yojson report |> Yojson.Safe.to_string
+  in
+  check bool "json omits mcp_clients key" false
+    (contains_substring ~needle:"\"mcp_clients\"" json_string);
+  check bool "text omits mcp_clients section" false
+    (contains_substring ~needle:"mcp_clients:"
        (Auth_doctor.render_text report))
 
 let () =
@@ -204,7 +176,7 @@ let () =
             test_errors_when_no_admin_bearer_source_exists;
           test_case "ignores stale admin raw token file" `Quick
             test_ignores_stale_admin_raw_token_file;
-          test_case "reports Claude and Gemini MCP client identities" `Quick
-            test_reports_claude_and_gemini_mcp_client_identities;
+          test_case "json omits mcp_clients field" `Quick
+            test_json_no_longer_emits_mcp_clients_field;
         ] );
     ]

@@ -5,6 +5,10 @@ type auth_change =
   | Auth_enabled
   | Require_token_enabled
 
+type token_lifetime =
+  | With_expiry
+  | Long_lived
+
 type t = {
   base_path : string;
   auth_config_path : string;
@@ -17,17 +21,6 @@ type t = {
   mcp_url : string;
   mcp_token_env_var : string;
 }
-
-let default_mcp_token_env_var = "MASC_MCP_TOKEN"
-
-let mcp_token_env_var_for_agent = function
-  | "claude" -> "MASC_CLAUDE_MCP_TOKEN"
-  | "gemini" -> "MASC_GEMINI_MCP_TOKEN"
-  | _ -> default_mcp_token_env_var
-
-let is_local_mcp_client_agent = function
-  | "claude" | "gemini" -> true
-  | _ -> false
 
 let rng_initialized = Atomic.make false
 
@@ -81,18 +74,18 @@ let ensure_required_bearer_auth ~base_path ~agent_name =
     Auth.save_auth_config base_path { cfg with require_token = true };
     Ok Require_token_enabled)
 
-let mint ~base_path ~host ~port ~agent_name ~role () =
+let create_token_for_lifetime = function
+  | With_expiry -> Auth.create_token
+  | Long_lived -> Auth.create_token_without_expiry
+
+let mint ~base_path ~host ~port ~agent_name ~role ~token_env_var
+    ~token_lifetime () =
   ensure_rng_initialized ();
   let base_path = normalize_base_path base_path in
   match ensure_required_bearer_auth ~base_path ~agent_name with
   | Error err -> Error err
   | Ok auth_change -> (
-      let create_token =
-        if is_local_mcp_client_agent agent_name then
-          Auth.create_token_without_expiry
-        else
-          Auth.create_token
-      in
+      let create_token = create_token_for_lifetime token_lifetime in
       match create_token base_path ~agent_name ~role with
       | Error err -> Error err
       | Ok (bearer_token, cred) ->
@@ -117,7 +110,7 @@ let mint ~base_path ~host ~port ~agent_name ~role () =
               raw_token_file;
               dashboard_url;
               mcp_url;
-              mcp_token_env_var = mcp_token_env_var_for_agent cred.agent_name;
+              mcp_token_env_var = token_env_var;
             })
 
 let to_yojson report =

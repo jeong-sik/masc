@@ -177,8 +177,17 @@ sub-sections.
 
 ## 5. Claude / Gemini MCP Bearers
 
-Claude and Gemini must not reuse the Codex bearer. Mint each local MCP client
-as its own worker identity, then sync the shared client config:
+> **MASC is MCP-client-agnostic.** The server holds no list of "known" clients
+> and does not derive env-var names from `--agent`. The operator names the env
+> var with `--client-env <VAR>` and chooses the lifetime with `--no-expiry`.
+> The conventions below are recommendations for the local wrapper script
+> (`~/me/scripts/mcp-sync.sh`), not server policy.
+
+Each local MCP client must mint its own worker identity so its bearer is
+distinct from the Codex bearer. Pick a per-client env var name (e.g.
+`MASC_CLAUDE_MCP_TOKEN`, `MASC_GEMINI_MCP_TOKEN`) and pass it in via
+`--client-env`. Long-running local MCP daemons typically want `--no-expiry` so
+their bearer survives across daemon restarts.
 
 ```bash
 BASE_PATH="${MASC_BASE_PATH:-/path/to/base}"
@@ -187,30 +196,36 @@ BASE_PATH="${MASC_BASE_PATH:-/path/to/base}"
   --base-path "$BASE_PATH" \
   --agent claude \
   --role worker \
+  --client-env MASC_CLAUDE_MCP_TOKEN \
+  --no-expiry \
   --shell
 
 ./_build/default/bin/main_eio.exe login \
   --base-path "$BASE_PATH" \
   --agent gemini \
   --role worker \
+  --client-env MASC_GEMINI_MCP_TOKEN \
+  --no-expiry \
   --shell
 
 ~/me/scripts/mcp-sync.sh
 ```
 
-Local startup also self-heals private non-expiring token files for `claude` and
-`gemini`. Manual `login` is for first-time setup or explicit rotation; after
-that, `~/me/scripts/mcp-sync.sh` can project those token files into client
-config.
+Manual `login` is for first-time setup or explicit rotation; after that,
+`~/me/scripts/mcp-sync.sh` projects the token files into client config.
 
-**Gemini and Claude configs should also use `bearer_token_env_var` (not a
+**Gemini and Claude configs should use `bearer_token_env_var` (not a
 hardcoded `Authorization` header).** The `mcp-sync.sh` pattern should export
 `MASC_CLAUDE_MCP_TOKEN` and `MASC_GEMINI_MCP_TOKEN` from the respective token
 files rather than embedding literal tokens in the config.
 
-`doctor auth --json` exposes `.mcp_clients[]`; `claude` should use
-`MASC_CLAUDE_MCP_TOKEN` / `X-MASC-Agent: claude`, and `gemini` should use
-`MASC_GEMINI_MCP_TOKEN` / `X-MASC-Agent: gemini`.
+Recommended local convention (enforced by the operator's wrapper, not the
+server): `claude` should use `MASC_CLAUDE_MCP_TOKEN` / `X-MASC-Agent: claude`,
+and `gemini` should use `MASC_GEMINI_MCP_TOKEN` / `X-MASC-Agent: gemini`.
+
+`doctor auth --json` no longer exposes a `.mcp_clients[]` section; compose
+per-client readiness checks externally over the raw doctor output and your
+own client roster.
 
 ## 6. Supported Local Start
 

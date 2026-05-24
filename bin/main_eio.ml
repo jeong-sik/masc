@@ -546,6 +546,27 @@ let login_shell =
   let doc = "Emit shell export commands only" in
   Arg.(value & flag & info ["shell"] ~doc)
 
+let login_client_env =
+  let doc =
+    "Env var name your MCP client reads to pick up the minted bearer \
+     token. Required; the server holds no list of \"known\" MCP \
+     clients. Examples: MASC_MCP_TOKEN (generic default convention), \
+     MASC_CLAUDE_MCP_TOKEN, MASC_GEMINI_MCP_TOKEN. The value is \
+     rendered verbatim into the shell exports and JSON output."
+  in
+  Arg.(
+    required
+    & opt (some string) None
+    & info ["client-env"] ~docv:"VAR" ~doc)
+
+let login_no_expiry =
+  let doc =
+    "Mint a long-lived token without an [expires_at] field. \
+     Appropriate for long-running local MCP daemons that cannot \
+     easily refresh on expiry. Omit for the default expiring policy."
+  in
+  Arg.(value & flag & info ["no-expiry"] ~doc)
+
 (** Graceful shutdown exception *)
 (* Shutdown exception removed: graceful shutdown returns normally from
    await_shutdown_signal, letting Eio.Fiber.first cancel run_server. *)
@@ -1564,9 +1585,14 @@ let doctor_cmd =
     ; doctor_all_cmd
     ]
 
-let login_cmd_exit base_path host port agent role as_json as_shell =
+let login_cmd_exit base_path host port agent role client_env no_expiry
+    as_json as_shell =
+  let token_lifetime : Auth_login.token_lifetime =
+    if no_expiry then Long_lived else With_expiry
+  in
   match
-    Auth_login.mint ~base_path ~host ~port ~agent_name:agent ~role ()
+    Auth_login.mint ~base_path ~host ~port ~agent_name:agent ~role
+      ~token_env_var:client_env ~token_lifetime ()
   with
   | Error err ->
       Printf.eprintf "login failed: %s\n" (Masc_domain.masc_error_to_string err);
@@ -1586,13 +1612,16 @@ let login_cmd_exit base_path host port agent role as_json as_shell =
 let login_cmd =
   let doc =
     "Mint a local bearer token, persist its raw token file, and print \
-     dashboard/Codex MCP auth exports"
+     dashboard / MCP auth exports. Requires --client-env <VAR> to \
+     name the env var your MCP client reads; the server itself is \
+     client-agnostic."
   in
   let info = Cmd.info "login" ~doc in
   Cmd.v info
     Term.(
       const login_cmd_exit $ base_path $ host $ port $ login_agent
-      $ login_role $ doctor_json $ login_shell)
+      $ login_role $ login_client_env $ login_no_expiry $ doctor_json
+      $ login_shell)
 
 let init_force =
   let doc = "Overwrite existing config files instead of skipping them" in

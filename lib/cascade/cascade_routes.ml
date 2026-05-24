@@ -258,27 +258,6 @@ let warn_unvalidated_route_target_once ~route_key ~target ~fallback =
       route_key target fallback
   end
 
-let cascade_name_for_use ?config_path use =
-  let route_key = logical_use_key use in
-  let route_target =
-    configured_route_bindings ?config_path ()
-    |> List.find_map (fun (key, target) ->
-           if String.equal key route_key then Some target else None)
-  in
-  let catalog_names = live_catalog_names ?config_path () in
-  let fallback = fallback_name_for_catalog use ~catalog:catalog_names in
-  match route_target with
-  | Some target when catalog_names = [] ->
-      Cascade_metrics.on_route_resolve_fallback ~reason:"catalog_unvalidated";
-      warn_unvalidated_route_target_once ~route_key ~target ~fallback;
-      target
-  | Some target when List.mem target catalog_names -> target
-  | Some target ->
-      Cascade_metrics.on_route_resolve_fallback ~reason:"target_not_in_catalog";
-      warn_invalid_route_target_once ~route_key ~target ~fallback;
-      fallback
-  | None -> fallback
-
 (* ── Phonebook-based routing (RFC Cascade-Phonebook Phase 4) ───── *)
 
 (** Resolve a logical_use to model strings via the phonebook.
@@ -347,3 +326,33 @@ let cascade_provider_configs_for_use_via_phonebook
           ?temperature ?max_tokens pb task
       in
       if configs = [] then None else Some configs
+
+(** Phonebook-first resolution for legacy callers.
+
+    Tries the phonebook path ([logical_use] → [task_use] → tier-group →
+    model strings), returning the first model string. Falls back to the
+    legacy TOML [routes] binding system when the phonebook is unavailable
+    or returns no models. *)
+let cascade_name_for_use ?config_path use =
+  match cascade_models_for_use_via_phonebook ?config_path use with
+  | Some (first_model :: _) -> first_model
+  | _ ->
+    let route_key = logical_use_key use in
+    let route_target =
+      configured_route_bindings ?config_path ()
+      |> List.find_map (fun (key, target) ->
+             if String.equal key route_key then Some target else None)
+    in
+    let catalog_names = live_catalog_names ?config_path () in
+    let fallback = fallback_name_for_catalog use ~catalog:catalog_names in
+    match route_target with
+    | Some target when catalog_names = [] ->
+        Cascade_metrics.on_route_resolve_fallback ~reason:"catalog_unvalidated";
+        warn_unvalidated_route_target_once ~route_key ~target ~fallback;
+        target
+    | Some target when List.mem target catalog_names -> target
+    | Some target ->
+        Cascade_metrics.on_route_resolve_fallback ~reason:"target_not_in_catalog";
+        warn_invalid_route_target_once ~route_key ~target ~fallback;
+        fallback
+    | None -> fallback

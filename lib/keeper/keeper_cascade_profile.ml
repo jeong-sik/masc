@@ -37,6 +37,18 @@ let logical_use_of_string_opt = Cascade_routes.logical_use_of_string_opt
 let configured_route_targets = Cascade_routes.configured_route_targets
 let cascade_name_for_use = Cascade_routes.cascade_name_for_use
 
+(** Phonebook-based [Provider_config.t] resolution.
+    Directly returns typed provider configs without string intermediaries.
+    Returns [None] when phonebook is unavailable or no models resolve. *)
+let provider_configs_for_use ?config_path ?temperature ?max_tokens use =
+  Cascade_routes.cascade_provider_configs_for_use_via_phonebook
+    ?config_path ?temperature ?max_tokens use
+
+(** Phonebook-based model string list resolution.
+    Returns [None] when phonebook is unavailable. *)
+let model_strings_for_use ?config_path use =
+  Cascade_routes.cascade_models_for_use_via_phonebook ?config_path use
+
 let tier_group_prefix = "tier-group."
 let tier_prefix = "tier."
 

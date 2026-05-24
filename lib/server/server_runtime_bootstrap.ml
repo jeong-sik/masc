@@ -358,8 +358,6 @@ let sync_internal_keeper_token_env (state : Mcp_server.server_state) =
   Log.Server.info
     "startup internal keeper MCP token synced via MASC_INTERNAL_MCP_TOKEN"
 
-include Server_runtime_codex_mcp_sync
-
 let sync_bootable_keeper_credentials (state : Mcp_server.server_state) =
   let base_path = state.Mcp_server.room_config.base_path in
   let keeper_names =
@@ -896,7 +894,6 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       sync_admin_token_env state;
       sync_internal_keeper_token_env state;
       sync_bootable_keeper_credentials state;
-      sync_mcp_client_token_files ~base_path;
       let path_diagnostics =
         runtime_path_diagnostics ~input_base_path:base_path state
       in

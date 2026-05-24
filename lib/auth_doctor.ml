@@ -14,20 +14,6 @@ type watched_agent = {
   raw_token_file_present : bool;
 }
 
-type codex_mcp = {
-  server_name : string;
-  auth_model : string;
-  token_env_var : string;
-  token_env_configured : bool;
-  token_status : string;
-  token_agent : string option;
-  token_role : string option;
-  token_can_read_state : bool option;
-  login_supported : bool;
-  login_note : string;
-  config : Codex_mcp_config_doctor.t;
-}
-
 type mcp_client = {
   client_name : string;
   agent_name : string;
@@ -67,7 +53,6 @@ type t = {
   credential_count : int;
   role_counts : (string * int) list;
   watched_agents : watched_agent list;
-  codex_mcp : codex_mcp;
   mcp_clients : mcp_client list;
   warnings : string list;
   next_actions : string list;
@@ -84,11 +69,6 @@ let status_to_string = function
   | Warn -> "warn"
   | Error -> "error"
 
-let codex_mcp_token_env_var = "MASC_MCP_TOKEN"
-
-let codex_mcp_login_note =
-  "`codex mcp login` is OAuth-only; masc-mcp uses bearer token auth."
-
 type mcp_client_spec = {
   client_name : string;
   agent_name : string;
@@ -97,11 +77,6 @@ type mcp_client_spec = {
 
 let mcp_client_specs =
   [
-    {
-      client_name = "codex";
-      agent_name = "codex-mcp-client";
-      token_env_var = codex_mcp_token_env_var;
-    };
     {
       client_name = "claude";
       agent_name = "claude";
@@ -175,8 +150,6 @@ let watched_agent_of_credential ~auth_dir agent_name credential_opt =
 
 let watched_agent_names ~initial_admin admin_token_env_agent =
   [
-    Some "codex";
-    Some "codex-mcp-client";
     Some "dashboard-dev";
     Some "admin";
     initial_admin;
@@ -255,57 +228,6 @@ let admin_bearer_sources ~base_path ~auth_dir ~dashboard_dev_token_available
   in
   env_sources @ dashboard_sources @ token_file_sources
   |> dedupe_keep_order
-
-let codex_mcp_report ~base_path =
-  let config = Codex_mcp_config_doctor.analyze_default () in
-  match
-    Sys.getenv_opt codex_mcp_token_env_var |> Env_config_core.trim_opt
-  with
-  | None ->
-      {
-        server_name = "masc";
-        auth_model = "bearer_token_env";
-        token_env_var = codex_mcp_token_env_var;
-        token_env_configured = false;
-        token_status = "unset";
-        token_agent = None;
-        token_role = None;
-        token_can_read_state = None;
-        login_supported = false;
-        login_note = codex_mcp_login_note;
-        config;
-      }
-  | Some raw_token -> (
-      match Auth.find_credential_by_token base_path ~token:raw_token with
-      | Ok cred ->
-          {
-            server_name = "masc";
-            auth_model = "bearer_token_env";
-            token_env_var = codex_mcp_token_env_var;
-            token_env_configured = true;
-            token_status = "live";
-            token_agent = Some cred.agent_name;
-            token_role = Some (agent_role_to_string cred.role);
-            token_can_read_state =
-              Some (has_permission cred.role CanReadState);
-            login_supported = false;
-            login_note = codex_mcp_login_note;
-            config;
-          }
-      | Error _ ->
-          {
-            server_name = "masc";
-            auth_model = "bearer_token_env";
-            token_env_var = codex_mcp_token_env_var;
-            token_env_configured = true;
-            token_status = "invalid_or_expired";
-            token_agent = None;
-            token_role = None;
-            token_can_read_state = None;
-            login_supported = false;
-            login_note = codex_mcp_login_note;
-            config;
-          })
 
 let mcp_client_report ~base_path ~auth_dir
     ({ client_name; agent_name; token_env_var } : mcp_client_spec) =
@@ -416,7 +338,6 @@ let analyze ~base_path_input ~default_base_path () =
     admin_bearer_sources ~base_path ~auth_dir
       ~dashboard_dev_token_available ~admin_token_env_state credentials
   in
-  let codex_mcp = codex_mcp_report ~base_path in
   let mcp_clients =
     List.map (mcp_client_report ~base_path ~auth_dir) mcp_client_specs
   in
@@ -430,10 +351,6 @@ let analyze ~base_path_input ~default_base_path () =
              (Auth.load_credential base_path agent_name))
   in
   let admin_permission = show_permission CanAdmin in
-  let codex = Auth.load_credential base_path "codex" in
-  let codex_mcp_client =
-    Auth.load_credential base_path "codex-mcp-client"
-  in
   let warnings =
     [
       (if not auth_cfg.enabled then
@@ -467,44 +384,15 @@ let analyze ~base_path_input ~default_base_path () =
            "No usable admin bearer source was detected for token-bound admin HTTP mutation routes."
        else
          None);
-      (match codex with
-       | Some cred when not (has_permission cred.role CanAdmin) ->
-           Some
-             (Printf.sprintf
-                "codex is role=%s, so requests authenticated as codex cannot satisfy %s."
-                (agent_role_to_string cred.role)
-                admin_permission)
-       | _ -> None);
-      (match codex_mcp_client with
-       | Some cred when not (has_permission cred.role CanAdmin) ->
-           Some
-             (Printf.sprintf
-                "codex-mcp-client is role=%s, so dashboard save flows using that bearer will fail on admin-only routes such as POST /api/v1/cascade/config/raw."
-                (agent_role_to_string cred.role))
-       | _ -> None);
       (if not dashboard_dev_token_available then
          Some
            "Dashboard dev-token bootstrap is unavailable because the bind host is non-loopback or HTTP strict auth is enabled."
        else
          None);
-      (if auth_cfg.enabled && auth_cfg.require_token then
-         match codex_mcp.token_status with
-         | "unset" ->
-             Some
-               "Codex MCP bearer env var MASC_MCP_TOKEN is unset; Codex should use bearer_token_env_var, not `codex mcp login`."
-         | "invalid_or_expired" ->
-             Some
-               "Codex MCP bearer env var MASC_MCP_TOKEN is set, but it does not resolve to a live credential in this base path."
-         | "live" -> None
-         | _ -> None
-       else
-         None);
     ]
     |> List.filter_map Fun.id
     |> (fun values ->
-         values
-         @ List.filter_map mcp_client_warning mcp_clients
-         @ Codex_mcp_config_doctor.warnings codex_mcp.config)
+         values @ List.filter_map mcp_client_warning mcp_clients)
     |> dedupe_keep_order
   in
   let next_actions =
@@ -524,14 +412,6 @@ let analyze ~base_path_input ~default_base_path () =
        else
          None);
       (if auth_cfg.enabled && auth_cfg.require_token
-          && (match codex_mcp_client with
-              | Some cred -> not (has_permission cred.role CanAdmin)
-              | None -> false) then
-         Some
-           "Use dashboard-dev or another admin bearer for POST /api/v1/cascade/config/raw; the codex-mcp-client worker bearer cannot satisfy CanAdmin."
-       else
-         None);
-      (if auth_cfg.enabled && auth_cfg.require_token
           && dashboard_dev_token_available then
          Some
            "On loopback dev setups, fetch an admin bearer from GET /api/v1/dashboard/dev-token before using admin-only dashboard actions."
@@ -543,20 +423,11 @@ let analyze ~base_path_input ~default_base_path () =
            "Follow docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md to bootstrap an admin bearer under the live auth root."
        else
          None);
-      (if auth_cfg.enabled && auth_cfg.require_token
-          && not (String.equal codex_mcp.token_status "live") then
-         Some
-           "For Codex MCP, run `masc-mcp login --agent codex-mcp-client --role worker --shell` and export MASC_MCP_TOKEN; do not run `codex mcp login masc`."
-       else
-         None);
-      Some "For Codex MCP pipeline drift, inspect the codex_mcp.config.stages section from `masc-mcp doctor auth --json`.";
       Some "Rerun `masc-mcp doctor auth` after editing auth files or rotating tokens.";
     ]
     |> List.filter_map Fun.id
     |> (fun values ->
-         values
-         @ List.filter_map mcp_client_next_action mcp_clients
-         @ Codex_mcp_config_doctor.next_actions codex_mcp.config)
+         values @ List.filter_map mcp_client_next_action mcp_clients)
     |> dedupe_keep_order
   in
   let status =
@@ -591,7 +462,6 @@ let analyze ~base_path_input ~default_base_path () =
     credential_count = List.length credentials;
     role_counts = role_counts_of_credentials credentials;
     watched_agents;
-    codex_mcp;
     mcp_clients;
     warnings;
     next_actions;
@@ -609,25 +479,6 @@ let watched_agent_to_yojson (agent : watched_agent) =
         | None -> `Null );
       (option_field "expires_at" agent.expires_at);
       ("raw_token_file_present", `Bool agent.raw_token_file_present);
-    ]
-
-let codex_mcp_to_yojson codex_mcp =
-  `Assoc
-    [
-      ("server_name", `String codex_mcp.server_name);
-      ("auth_model", `String codex_mcp.auth_model);
-      ("token_env_var", `String codex_mcp.token_env_var);
-      ("token_env_configured", `Bool codex_mcp.token_env_configured);
-      ("token_status", `String codex_mcp.token_status);
-      (option_field "token_agent" codex_mcp.token_agent);
-      (option_field "token_role" codex_mcp.token_role);
-      ( "token_can_read_state",
-        match codex_mcp.token_can_read_state with
-        | Some value -> `Bool value
-        | None -> `Null );
-      ("login_supported", `Bool codex_mcp.login_supported);
-      ("login_note", `String codex_mcp.login_note);
-      ("config", Codex_mcp_config_doctor.to_yojson codex_mcp.config);
     ]
 
 let mcp_client_to_yojson (client : mcp_client) =
@@ -690,7 +541,6 @@ let to_yojson (report : t) =
              report.role_counts) );
       ( "watched_agents",
         `List (List.map watched_agent_to_yojson report.watched_agents) );
-      ("codex_mcp", codex_mcp_to_yojson report.codex_mcp);
       ( "mcp_clients",
         `List (List.map mcp_client_to_yojson report.mcp_clients) );
       ("warnings", `List (List.map (fun value -> `String value) report.warnings));
@@ -769,56 +619,6 @@ let render_text (report : t) =
            (yes_no agent.raw_token_file_present)
            (option_value agent.expires_at)))
     report.watched_agents;
-  add_line "";
-  add_line "codex_mcp:";
-  add_line
-    (Printf.sprintf "- server_name: %s" report.codex_mcp.server_name);
-  add_line
-    (Printf.sprintf "- auth_model: %s" report.codex_mcp.auth_model);
-  add_line
-    (Printf.sprintf "- token_env_var: %s"
-       report.codex_mcp.token_env_var);
-  add_line
-    (Printf.sprintf "- token_env_configured: %s"
-       (yes_no report.codex_mcp.token_env_configured));
-  add_line
-    (Printf.sprintf "- token_status: %s"
-       report.codex_mcp.token_status);
-  add_line
-    (Printf.sprintf "- token_agent: %s"
-       (option_value report.codex_mcp.token_agent));
-  add_line
-    (Printf.sprintf "- token_role: %s"
-       (option_value report.codex_mcp.token_role));
-  add_line
-    (Printf.sprintf "- token_can_read_state: %s"
-       (match report.codex_mcp.token_can_read_state with
-        | Some value -> yes_no value
-        | None -> "(n/a)"));
-  add_line
-    (Printf.sprintf "- login_supported: %s"
-       (yes_no report.codex_mcp.login_supported));
-  add_line (Printf.sprintf "- login_note: %s" report.codex_mcp.login_note);
-  add_line "- config:";
-  add_line
-    (Printf.sprintf "  path: %s"
-       (option_value report.codex_mcp.config.config_path));
-  add_line
-    (Printf.sprintf "  file_present: %s"
-       (yes_no report.codex_mcp.config.file_present));
-  add_line
-    (Printf.sprintf "  server_names: %s"
-       (match report.codex_mcp.config.server_names with
-        | [] -> "(none)"
-        | names -> String.concat ", " names));
-  add_line "  stages:";
-  List.iter
-    (fun (stage : Codex_mcp_config_doctor.stage) ->
-      add_line
-        (Printf.sprintf "  - %s: %s - %s" stage.name
-           (Codex_mcp_config_doctor.stage_status_to_string stage.status)
-           stage.detail))
-    report.codex_mcp.config.stages;
   add_line "";
   add_line "mcp_clients:";
   List.iter

@@ -82,11 +82,27 @@ let active_fail_open_excluded_route_targets () =
   |> dedupe_keep_order
 
 let active_fail_open_rotation_cascades () =
-  fail_open_rotation_cascades_from_catalog
-    ~excluded_targets:(active_fail_open_excluded_route_targets ())
-    ~catalog_names:(Keeper_cascade_profile.catalog_names ())
-    ~keeper_assignable:(Keeper_cascade_profile.keeper_catalog_names ())
-    ()
+  let qualified_names =
+    match Keeper_cascade_profile.catalog_metadata_query () with
+    | Keeper_cascade_profile.Catalog_ok meta ->
+        meta.Keeper_cascade_profile.qualified_names
+    | Keeper_cascade_profile.Catalog_unavailable _ -> []
+  in
+  let qualify_public_name pub =
+    List.find_opt
+      (fun q -> String.equal (public_profile_name q) pub)
+      qualified_names
+    |> Option.value ~default:pub
+  in
+  match
+    fail_open_rotation_cascades_from_catalog
+      ~excluded_targets:(active_fail_open_excluded_route_targets ())
+      ~catalog_names:(Keeper_cascade_profile.catalog_names ())
+      ~keeper_assignable:(Keeper_cascade_profile.keeper_catalog_names ())
+      ()
+  with
+  | None -> None
+  | Some names -> Some (List.map qualify_public_name names)
 
 let tool_required_rotation_cascade_name () =
   try

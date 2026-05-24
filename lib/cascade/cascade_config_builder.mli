@@ -48,8 +48,7 @@ val cli_prompt_preflight :
 (** Compute preflight metadata for an argv-limited CLI transport.
     Returns [None] when the provider does not require argv preflight. *)
 
-val with_cli_preflight :
-  scope:string ->
+val with_cli_preflight :  scope:string ->
   config:Cascade_runner.config ->
   goal:string ->
   (unit -> ('a, Agent_sdk.Error.sdk_error) result) ->

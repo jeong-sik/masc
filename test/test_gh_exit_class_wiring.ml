@@ -14,7 +14,8 @@ let test_field_empty_for_non_gh () =
   LC.reset ();
   let fields =
     KSD.gh_exit_class_field
-      ~cmd:"git status" ~status:(Unix.WEXITED 0) ~output:""
+      ~cmd_stages:git_status_stages ~status:(Unix.WEXITED 0) ~output:""
+      ()
   in
   Alcotest.(check int) "no field emitted" 0 (List.length fields);
   let s = LC.snapshot () in
@@ -24,7 +25,8 @@ let test_field_ok_for_gh_exit_0 () =
   LC.reset ();
   let fields =
     KSD.gh_exit_class_field
-      ~cmd:"gh pr list" ~status:(Unix.WEXITED 0) ~output:""
+      ~cmd_stages:gh_pr_list_stages ~status:(Unix.WEXITED 0) ~output:""
+      ()
   in
   Alcotest.(check int) "one field emitted" 1 (List.length fields);
   (match fields with
@@ -39,9 +41,10 @@ let test_field_auth_failed_from_combined_output () =
   LC.reset ();
   let fields =
     KSD.gh_exit_class_field
-      ~cmd:"gh api /user"
+      ~cmd_stages:gh_api_stages
       ~status:(Unix.WEXITED 1)
       ~output:"HTTP 401: Bad credentials (https://api.github.com/user)"
+      ()
   in
   (match fields with
    | [ ("gh_exit_class", `String v) ] ->
@@ -55,7 +58,9 @@ let test_field_signal_maps_to_unknown () =
   LC.reset ();
   let fields =
     KSD.gh_exit_class_field
-      ~cmd:"gh pr list" ~status:(Unix.WSIGNALED 9) ~output:""
+      ~cmd_stages:gh_pr_list_stages
+      ~status:(Unix.WSIGNALED 9) ~output:""
+      ()
   in
   (match fields with
    | [ ("gh_exit_class", `String v) ] ->

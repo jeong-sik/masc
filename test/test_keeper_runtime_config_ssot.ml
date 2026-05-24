@@ -178,7 +178,6 @@ instructions = "TOML instructions"
    a policy field to drive the assertion. test_sandbox_policy_resync
    below preserves the same TOML-resync coverage on the sandbox
    policy fields, which remain part of keeper_meta. *)
-
 let test_sandbox_policy_resync () =
   with_temp_dir "keeper-config-ssot-room" @@ fun room_dir ->
   with_config_dir @@ fun config_dir ->

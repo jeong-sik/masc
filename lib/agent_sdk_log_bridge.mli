@@ -14,3 +14,8 @@ val install : unit -> unit
     once before any keeper turn fires an LLM call.  Idempotent via an
     internal [Atomic.t] latch, so re-entering bootstrap (test harness,
     in-process restart) is safe. *)
+
+val effective_level : Agent_sdk.Log.record -> Log.level
+(** Return the effective log level for an OAS record after bridge-level
+    promotion/demotion rules (e.g. MCP server failure → Error).
+    Test-only surface — do not call from production code paths. *)

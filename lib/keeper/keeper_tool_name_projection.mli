@@ -38,6 +38,10 @@ type model_resolution =
       }
   | Unknown_name of string
 
+val visible_set : string list -> (string, unit) Hashtbl.t
+
+val public_aliases_for_internal_name : string -> string list
+
 val resolve_model_name :
   visible_tool_names:string list ->
   string ->

@@ -22,6 +22,10 @@ val resolve_prompt_markdown_dir :
     candidate list, falling back to {!Config_dir_resolver.prompts_dir}
     when none exist yet. *)
 
+val init : unit -> unit
+(** Initialise prompt defaults from the environment.
+    Idempotent — safe to call multiple times. *)
+
 val bootstrap_runtime :
   workspace_path:string ->
   base_path:string ->

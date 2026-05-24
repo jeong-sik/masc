@@ -10,6 +10,7 @@
 open Alcotest
 module KG = Masc_mcp.Keeper_guards
 module HK = Masc_mcp.Keeper_hooks_oas
+module HGA = Masc_mcp.Keeper_hooks_oas_gate_attempt
 module P = Masc_mcp.Prometheus
 
 (* ----------------------------------------------------------------- *)
@@ -144,13 +145,13 @@ let make_gate_event ?(decision = KG.Gate_override) () =
   }
 
 let test_render_pre_tool_gate_output_preserves_source () =
-  let blocked = HK.render_pre_tool_gate_output (make_gate_event ()) in
+  let blocked = HGA.render_pre_tool_gate_output (make_gate_event ()) in
   check bool "override output carries source path" true
     (contains_substring blocked "source_path=lib/keeper/keeper_guards.ml");
   check bool "override output carries source line" true
     (contains_substring blocked "source_line=123");
   let approval =
-    HK.render_pre_tool_gate_output
+    HGA.render_pre_tool_gate_output
       (make_gate_event ~decision:KG.Gate_approval_required ())
   in
   check bool "approval output carries source path" true

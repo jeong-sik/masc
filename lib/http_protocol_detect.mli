@@ -17,6 +17,14 @@ type protocol =
   | Http1
   | Http2
 
+val detect_from_fd : Unix.file_descr -> (protocol, string) result
+(** [detect_from_fd fd] peeks at the first bytes on [fd] using
+    [Unix.recv MSG_PEEK] and returns the inferred protocol.
+    Test-only surface for direct Unix FD testing. *)
+
+val protocol_to_string : protocol -> string
+(** String representation for logging and test assertions. *)
+
 val detect :
   _ Eio.Net.stream_socket ->
   (protocol, string) result

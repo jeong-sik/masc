@@ -1,6 +1,7 @@
 open Alcotest
 open Yojson.Safe.Util
 module Hooks = Masc_mcp.Keeper_hooks_oas
+module HGA = Masc_mcp.Keeper_hooks_oas_gate_attempt
 
 let temp_counter = ref 0
 
@@ -559,15 +560,15 @@ let test_tool_execution_summary_derives_provider_and_outcome () =
 ;;
 
 let test_trajectory_duration_ms_preserves_positive_sub_ms () =
-  check int "positive sub-ms" 1 (Hooks.trajectory_duration_ms 0.4);
-  check int "rounded positive" 13 (Hooks.trajectory_duration_ms 12.5)
+  check int "positive sub-ms" 1 (HGA.trajectory_duration_ms 0.4);
+  check int "rounded positive" 13 (HGA.trajectory_duration_ms 12.5)
 ;;
 
 let test_trajectory_duration_ms_rejects_zero_and_non_finite () =
-  check int "zero" 0 (Hooks.trajectory_duration_ms 0.0);
-  check int "negative" 0 (Hooks.trajectory_duration_ms (-0.1));
-  check int "nan" 0 (Hooks.trajectory_duration_ms nan);
-  check int "infinity" 0 (Hooks.trajectory_duration_ms infinity)
+  check int "zero" 0 (HGA.trajectory_duration_ms 0.0);
+  check int "negative" 0 (HGA.trajectory_duration_ms (-0.1));
+  check int "nan" 0 (HGA.trajectory_duration_ms nan);
+  check int "infinity" 0 (HGA.trajectory_duration_ms infinity)
 ;;
 
 let test_record_keeper_tool_duration_metric_tracks_labels () =

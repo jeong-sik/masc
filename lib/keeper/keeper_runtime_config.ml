@@ -52,7 +52,7 @@ let key_to_env =
     "turn.llm_rerank_cascade",          "MASC_KEEPER_LLM_RERANK_CASCADE";
     "turn.temperature",                 "MASC_KEEPER_UNIFIED_TEMP";
     "turn.max_output_tokens",           "MASC_KEEPER_UNIFIED_MAX_TOKENS";
-    "turn.llama_slots",                 "MASC_KEEPER_LLAMA_SLOTS";
+    "turn.slot_pool_size",              "MASC_KEEPER_SLOT_POOL_SIZE";
     "turn.enable_thinking",             "MASC_KEEPER_ENABLE_THINKING";
     "turn.adaptive_thinking",           "MASC_KEEPER_ADAPTIVE_THINKING";
     "turn.adaptive_thinking_mode",      "MASC_KEEPER_ADAPTIVE_THINKING_MODE";

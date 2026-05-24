@@ -105,7 +105,7 @@ let auto_recoverable_paused_keeper_names ?now config =
 
 (* PR-3b1: convert a credential lookup name to its canonical
    keeper-<n>-agent form when it refers to a bootable keeper.
-   Non-keeper names (dashboard, admin, codex-mcp-client, ...) are
+   Non-keeper names (dashboard, admin, external MCP clients, ...) are
    returned unchanged so this is safe to apply at any lookup site.
    Spec: AuthIdentityFSM.tla I1 IdentityBindsToken (a token must
    bind to one principal -- the bare-name lookup path that

@@ -1846,7 +1846,7 @@ let run_named
                  [cli_wrapped_max_turns] and [hard_quota] inside
                  NetworkError messages stay legible at the dashboard /
                  log-grep layer.  Pre-fix the log read "Network error:
-                 claude exited with code 1: {...subtype error_max_turns...}"
+                 CLI agent exited with code 1: {...subtype error_max_turns...}"
                  which masked that this was a graceful turn-budget exit
                  (33/day claude_code, 2.5x growth). *)
               let class_label =

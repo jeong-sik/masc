@@ -49,7 +49,7 @@ let min_keeper_context_tokens = 64_000
 
 (** Maximum context window (tokens) accepted for [max_context_override] on
     keeper turn-up args (#9953).  Matches the largest published context
-    window among supported providers (Claude Opus 4.7 / Sonnet 4.6 = 1M).
+    window among supported providers (largest published = 1M).
     Bumps to a 2M-class model must update this constant alongside the
     provider registry entry. *)
 let max_keeper_context_tokens = 1_000_000
@@ -201,7 +201,7 @@ let present_json_keys (keys : string list) (json : Yojson.Safe.t) : string list 
 
 let reject_removed_keeper_input_keys ~tool_name (args : Yojson.Safe.t) =
   (* #9752: non-public args (currently only [social_model]) should not
-     fail the whole call. External clients like codex-mcp-client have
+     fail the whole call. External MCP clients have
      sent [social_model] in real traffic — hard-rejecting DoS's the
      call for a field that is never consumed downstream from the args
      blob anyway ([social_model] runtime value comes from the keeper
@@ -952,19 +952,19 @@ let keeper_tool_search_top_k () : int =
 let ensure_runtime_params_init () =
   ignore (Runtime_params.get keeper_unified_temperature_rp)
 
-let keeper_llama_slots_rp =
-  _rp_int ~key:"keeper.turn.llama_slots"
-    ~default:(fun () -> int_of_env_default "MASC_KEEPER_LLAMA_SLOTS"
+let keeper_slot_pool_size_rp =
+  _rp_int ~key:"keeper.turn.slot_pool_size"
+    ~default:(fun () -> int_of_env_default "MASC_KEEPER_SLOT_POOL_SIZE"
                           ~default:4 ~min_v:0 ~max_v:32)
     ~min_v:0 ~max_v:32
-    ~description:"llama-server KV cache slots for keeper pinning (0=disabled)" ()
-let keeper_llama_slots () : int =
-  Runtime_params.get keeper_llama_slots_rp
+    ~description:"slot pool size for keeper deterministic pinning (0=disabled)" ()
+let keeper_slot_pool_size () : int =
+  Runtime_params.get keeper_slot_pool_size_rp
 
 (** Compute a deterministic slot_id for a keeper name.
     Returns [None] when slot pinning is disabled (num_slots = 0). *)
 let keeper_slot_id (name : string) : int option =
-  let num_slots = keeper_llama_slots () in
+  let num_slots = keeper_slot_pool_size () in
   if num_slots <= 0 then None
   else
     let h = Hashtbl.hash name in

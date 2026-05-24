@@ -66,7 +66,7 @@ val canonicalize_if_keeper : Coord.config -> string -> string
 (** [canonicalize_if_keeper config name] returns [keeper-<n>-agent]
     when [name] (bare or already canonical) refers to a configured
     keeper, else returns [name] unchanged. Safe to apply at credential
-    lookup sites: dashboard / admin / codex-mcp-client pass through
+    lookup sites: dashboard / admin / external MCP clients pass through
     untouched, keeper bare names get canonicalized so the bare-stub
     redirect path stops being load-bearing. (PR-3b1, AuthIdentityFSM
     invariant I1 IdentityBindsToken.) *)

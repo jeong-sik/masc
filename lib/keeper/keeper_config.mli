@@ -266,7 +266,7 @@ val keeper_tool_search_top_k : unit -> int
 
 val keeper_status_fast_default : unit -> bool
 
-val keeper_llama_slots : unit -> int
+val keeper_slot_pool_size : unit -> int
 
 (** Compute a deterministic slot_id for a keeper name.
     Returns [None] when slot pinning is disabled. *)

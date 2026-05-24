@@ -94,11 +94,7 @@ let handle ~op ~(meta : keeper_meta) ~(config : Coord.config) ~(args : Yojson.Sa
       Printf.sprintf "gh %s"
         (Keeper_gh_shared.render_simple_gh_command cmd)
     in
-    let route_fields =
-      if meta.sandbox_profile = Docker
-      then [ "via", `String "docker" ]
-      else []
-    in
+    let route_fields = sandbox_profile_via_fields meta in
     let gh_base ~ok ~cwd ~command ?ctx extras =
       let ctx_fields =
         match ctx with

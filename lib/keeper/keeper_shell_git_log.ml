@@ -98,7 +98,7 @@ let handle ~op ~(meta : keeper_meta) ~(config : Coord.config) ~(args : Yojson.Sa
           with
           | Error msg ->
             Keeper_exec_shared.error_json_for_op ~op
-              ~extra_fields:[ "op", `String op; "cwd", `String cwd ]
+              ~extra_fields:[ "cwd", `String cwd ]
               msg
           | Ok (st, out) ->
             let cwd_response =

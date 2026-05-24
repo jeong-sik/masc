@@ -867,6 +867,131 @@ let test_shell_unsupported_op () =
   | None ->
       Alcotest.fail ("expected error json for unsupported op, got: " ^ raw)
 
+(* ── Regex pipe safety (issue #16933) ──────────────────────── *)
+
+let test_rg_regex_pipe_pattern_via_typed_bash () =
+  with_eio_fs @@ fun () ->
+  let base_path, config = make_config () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  Keeper_registry.clear ();
+  let meta = make_readonly_meta "rg-pipe" in
+  let playground = Filename.concat base_path (playground_path_of meta.name) in
+  ensure_dir playground;
+  let lib_dir = Filename.concat playground "lib" in
+  ensure_dir lib_dir;
+  ignore (Fs_compat.save_file_atomic (Filename.concat lib_dir "demo.ml")
+    "let ghost_value = 1\nlet task_value = 2\nlet other = 3\n");
+  let raw =
+    Keeper_exec_shell.handle_keeper_bash
+      ~turn_sandbox_factory:None
+      ~turn_sandbox_factory_git:None
+      ~exec_cache:None
+      ~config
+      ~meta
+      ~args:
+        (`Assoc
+           [ "executable", `String "rg"
+           ; "argv", `List [ `String "ghost\\|task"; `String "lib/" ]
+           ; "cwd", `String playground
+           ])
+      ()
+  in
+  let json = Yojson.Safe.from_string raw in
+  Alcotest.(check bool) "rg with regex pipe succeeds" true
+    (json |> Json.member "ok" |> Json.to_bool)
+
+let test_rg_literal_pipe_in_pattern () =
+  with_eio_fs @@ fun () ->
+  let base_path, config = make_config () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  Keeper_registry.clear ();
+  let meta = make_readonly_meta "rg-lit-pipe" in
+  let playground = Filename.concat base_path (playground_path_of meta.name) in
+  ensure_dir playground;
+  let lib_dir = Filename.concat playground "lib" in
+  ensure_dir lib_dir;
+  ignore (Fs_compat.save_file_atomic (Filename.concat lib_dir "data.txt")
+    "a|b\nc|d\ne f\n");
+  let raw =
+    Keeper_exec_shell.handle_keeper_bash
+      ~turn_sandbox_factory:None
+      ~turn_sandbox_factory_git:None
+      ~exec_cache:None
+      ~config
+      ~meta
+      ~args:
+        (`Assoc
+           [ "executable", `String "rg"
+           ; "argv", `List [ `String "a\\|c"; `String "lib/" ]
+           ; "cwd", `String playground
+           ])
+      ()
+  in
+  let json = Yojson.Safe.from_string raw in
+  Alcotest.(check bool) "rg with backslash-pipe executes (not blocked as pipe)" true
+    (json |> Json.member "ok" |> Json.to_bool)
+
+let test_rg_metachar_not_pipe () =
+  with_eio_fs @@ fun () ->
+  let base_path, config = make_config () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  Keeper_registry.clear ();
+  let meta = make_readonly_meta "rg-meta" in
+  let playground = Filename.concat base_path (playground_path_of meta.name) in
+  ensure_dir playground;
+  let lib_dir = Filename.concat playground "lib" in
+  ensure_dir lib_dir;
+  ignore (Fs_compat.save_file_atomic (Filename.concat lib_dir "test.ml")
+    "let x = 1\nlet y = 2\n");
+  let raw =
+    Keeper_exec_shell.handle_keeper_bash
+      ~turn_sandbox_factory:None
+      ~turn_sandbox_factory_git:None
+      ~exec_cache:None
+      ~config
+      ~meta
+      ~args:
+        (`Assoc
+           [ "executable", `String "rg"
+           ; "argv", `List [ `String "x\\|y"; `String "lib/" ]
+           ; "cwd", `String playground
+           ])
+      ()
+  in
+  let json = Yojson.Safe.from_string raw in
+  Alcotest.(check bool) "rg with x\\|y pattern succeeds" true
+    (json |> Json.member "ok" |> Json.to_bool)
+
+let test_literal_pipe_in_typed_argv () =
+  with_eio_fs @@ fun () ->
+  let base_path, config = make_config () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  Keeper_registry.clear ();
+  let meta = make_readonly_meta "real-pipe" in
+  let playground = Filename.concat base_path (playground_path_of meta.name) in
+  ensure_dir playground;
+  let raw =
+    Keeper_exec_shell.handle_keeper_bash
+      ~turn_sandbox_factory:None
+      ~turn_sandbox_factory_git:None
+      ~exec_cache:None
+      ~config
+      ~meta
+      ~args:
+        (`Assoc
+           [ "executable", `String "echo"
+           ; "argv", `List [ `String "a|b" ]
+           ; "cwd", `String playground
+           ])
+      ()
+  in
+  let json = Yojson.Safe.from_string raw in
+  Alcotest.(check bool) "literal pipe in typed argv succeeds" true
+    (json |> Json.member "ok" |> Json.to_bool);
+  let output = json |> Json.member "output" |> Json.to_string in
+  Alcotest.(check bool) "output is literal a|b" true
+    (String_util.contains_substring output "a|b")
+
 let () =
   Alcotest.run
     "Keeper bash safety"
@@ -999,6 +1124,24 @@ let () =
             "docker container paths validate as host paths"
             `Quick
             test_rewrite_docker_container_paths_for_host_validation
+        ] )
+    ; ( "regex_pipe"
+      , [ Alcotest.test_case
+            "rg regex pipe pattern via typed bash"
+            `Quick
+            test_rg_regex_pipe_pattern_via_typed_bash
+        ; Alcotest.test_case
+            "rg literal pipe in pattern"
+            `Quick
+            test_rg_literal_pipe_in_pattern
+        ; Alcotest.test_case
+            "rg metachar not pipe"
+            `Quick
+            test_rg_metachar_not_pipe
+        ; Alcotest.test_case
+            "literal pipe in typed argv"
+            `Quick
+            test_literal_pipe_in_typed_argv
         ] )
     ; ( "negative_path"
       , [ Alcotest.test_case

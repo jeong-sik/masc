@@ -1,11 +1,11 @@
 ---
 rfc-id: RFC-0176
-title: OAS vendor-purge migration — consume agent_sdk 0.197.0
+title: OAS vendor-purge migration — consume agent_sdk 0.198.0
 status: Implemented
 authors: Claude (Vincent)
 created: 2026-05-24
 implemented: 2026-05-24 (PR #18262)
-related: OAS RFC-0001 (PR #1727, #1729, #1731), OAS PR #1737 (version bump)
+related: OAS RFC-0001 (PR #1727, #1729, #1731), OAS PR #1737 (version bump), OAS PR #1743 (0.198.0 release)
 renumber-note: Originally written as RFC-0174 in PR #18262; renumbered to RFC-0176 here to resolve numbering collision with the pre-existing RFC-0174-dashboard-substring-classifier-to-typed.md. The commit history references for the original PR retain the RFC-0174 string as historical record.
 ---
 
@@ -20,7 +20,7 @@ OAS RFC-0001 (PRs #1727 / #1729 / #1731) renamed the entire public SDK identifie
 
 masc-mcp consumes `agent_sdk` via opam pin and has ~115 SDK call sites referencing the old names. They must migrate atomically with the new SDK version.
 
-OAS PR #1737 bumps `agent_sdk` to `0.197.0` (gated, pending merge). This RFC's PR is sequenced after #1737 merges.
+OAS PR #1737 introduced the post-purge `agent_sdk` floor, and OAS PR #1743 released the reachable downstream pin as `0.198.0`.
 
 ## 2. Decision
 
@@ -63,12 +63,12 @@ OAS PR #1737 bumps `agent_sdk` to `0.197.0` (gated, pending merge). This RFC's P
 
 ### dune-project
 
-`(agent_sdk (>= 0.196.16))` → `(agent_sdk (>= 0.197.0))` — forces opam to refresh to the post-purge SDK.
+`(agent_sdk (>= 0.196.16))` -> `(agent_sdk (>= 0.198.0))` — forces opam to refresh to the post-purge SDK.
 
 ## 3. Out of scope
 
 - **masc-mcp 자체 vendor-coupled enum** (`Phonebook.Zai_glm`, `Phonebook.Qwen`, `cascade_phonebook_types.Anthropic_http`, dashboard string `"provider_a-cli"`, etc.) — separate RFC. These are internal classifications that map *to* the SDK; the mapping is updated here (e.g., `Zai_glm -> Llm_provider.Provider_config.Provider_k`), but the masc-mcp side identifiers are preserved pending a future audit.
-- **opam state cleanup** for local development — operator responsibility (`opam pin remove agent_sdk && opam pin add agent_sdk git+https://github.com/jeong-sik/oas.git --yes` after #1737 merges).
+- **opam state cleanup** for local development — operator responsibility (`opam pin remove agent_sdk && opam pin add agent_sdk git+https://github.com/jeong-sik/oas.git --yes` after #1743 merges).
 
 ## 4. Verification plan
 
@@ -83,6 +83,6 @@ All 7 signatures: NO.
 
 ## 6. Sequencing
 
-1. OAS PR #1737 (version 0.197.0) merges → opam-repository auto-publish via release-please tag.
-2. This PR's CI fetches fresh agent_sdk.0.197.0 → caller migration validates.
+1. OAS PR #1737 (version 0.197.0) merges, then PR #1743 publishes the reachable 0.198.0 release boundary.
+2. This PR's CI fetches fresh agent_sdk.0.198.0 → caller migration validates.
 3. masc-mcp operator runs `opam pin remove agent_sdk; opam install masc-mcp` for local development to pick up the new SDK.

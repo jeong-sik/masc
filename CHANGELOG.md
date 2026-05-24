@@ -3,6 +3,8 @@
 ## [0.19.30] - 2026-05-24
 
 ### Changed
+- Bumped the downstream OAS `agent_sdk` pin from `v0.196.17` to
+  `v0.198.0` and raised the dependency floor to `agent_sdk >= 0.198.0`.
 - Continued Keeper Tool/Backend boundary cleanup by retiring the
   `Keeper_docker_read` module surface in favor of
   `Keeper_sandbox_read_backend`, keeping tool callers behind

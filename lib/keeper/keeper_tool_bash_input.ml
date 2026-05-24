@@ -328,12 +328,17 @@ let shell_bin ~mode executable =
     Error (Executable_not_allowlisted { name; mode })
 ;;
 
+let strip_leading_executable executable = function
+  | arg :: rest when String.equal arg executable -> rest
+  | argv -> argv
+
 let shell_simple ~mode ?(sandbox = Masc_exec.Sandbox_target.host ()) ?cwd ?(env = []) { executable; argv } =
   let ( let* ) = Result.bind in
   let* bin = shell_bin ~mode executable in
+  let normalized_argv = strip_leading_executable executable argv in
   Ok
     { Masc_exec.Shell_ir.bin
-    ; args = List.map shell_arg argv
+    ; args = List.map shell_arg normalized_argv
     ; env = shell_env env
     ; cwd = shell_cwd cwd
     ; redirects = []

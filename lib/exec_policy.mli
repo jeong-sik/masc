@@ -77,11 +77,9 @@ val is_destructive_bash_operation : Masc_exec.Shell_ir.t -> bool
     Replaces the historical string-era extractors. *)
 val flat_stage_words : Masc_exec.Shell_ir.t -> string list
 
-(** Shared shell-word extractor for callers with raw strings.
-    Callers with [Shell_ir.t] should use {!flat_stage_words}. *)
-val stage_words_of_string : string -> string list
-
 val sanitize_command_for_log : string -> string
+val sanitize_command_for_log_of_ir :
+  fallback_cmd:string -> Masc_exec.Shell_ir.t -> string
 val truncate_for_log : ?max_len:int -> string -> string
 
 val block_reason_tag : block_reason -> string

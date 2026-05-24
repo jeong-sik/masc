@@ -23,8 +23,6 @@ let error_kind_of_string value =
   | "internal" -> Some Internal
   | _ -> None
 
-let option_to_yojson = Json_util.option_to_yojson
-
 open Result.Syntax
 
 (* Every parse error below now distinguishes between *Intlit overflow*
@@ -104,7 +102,7 @@ let string_list_of_yojson = function
            (Json_util.kind_name other))
 
 let api_response_to_yojson =
-  option_to_yojson Llm_provider.Cache.response_to_json
+  Json_util.option_to_yojson Llm_provider.Cache.response_to_json
 
 let api_response_of_yojson = function
   | `Null -> Ok None
@@ -114,7 +112,7 @@ let api_response_of_yojson = function
       | None -> Error "invalid api_response in worker helper payload")
 
 let proof_to_yojson =
-  option_to_yojson Masc_mcp_cdal_runtime.Cdal_proof.to_json
+  Json_util.option_to_yojson Masc_mcp_cdal_runtime.Cdal_proof.to_json
 
 let proof_of_yojson = function
   | `Null -> Ok None
@@ -128,14 +126,14 @@ let run_result_to_yojson (run_result : Worker_container_types.run_result) =
     [
       ("output", `String run_result.output);
       ("model_used", `String run_result.model_used);
-      ("input_tokens", option_to_yojson (fun v -> `Int v) run_result.input_tokens);
-      ("output_tokens", option_to_yojson (fun v -> `Int v) run_result.output_tokens);
-      ("cost_usd", option_to_yojson (fun v -> `Float v) run_result.cost_usd);
+      ("input_tokens", Json_util.option_to_yojson (fun v -> `Int v) run_result.input_tokens);
+      ("output_tokens", Json_util.option_to_yojson (fun v -> `Int v) run_result.output_tokens);
+      ("cost_usd", Json_util.option_to_yojson (fun v -> `Float v) run_result.cost_usd);
       ("tool_call_count", `Int run_result.tool_call_count);
       ("tool_names", `List (List.map (fun name -> `String name) run_result.tool_names));
       ("session_id", `String run_result.session_id);
       ( "raw_trace_run",
-        option_to_yojson Agent_sdk.Raw_trace.run_ref_to_yojson run_result.raw_trace_run );
+        Json_util.option_to_yojson Agent_sdk.Raw_trace.run_ref_to_yojson run_result.raw_trace_run );
       ("api_response", api_response_to_yojson run_result.api_response);
       ("proof", proof_to_yojson run_result.proof);
     ]

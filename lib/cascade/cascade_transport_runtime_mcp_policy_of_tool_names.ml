@@ -35,7 +35,6 @@ let dedupe_preserve_order (items : string list) =
 
 (* Duplicated locally for the same reason — 4-line idempotent helper
    used only by this sibling. *)
-let trim_nonempty_string = String_util.trim_nonempty
 ;;
 
 let runtime_mcp_policy_of_tool_names
@@ -51,7 +50,7 @@ let runtime_mcp_policy_of_tool_names
   if not (Mcp_tool_classifier.tool_names_are_runtime_mcp ~allow_keeper_internal tool_names)
   then None
   else (
-    let agent_name = Option.bind agent_name trim_nonempty_string in
+    let agent_name = Option.bind agent_name String_util.trim_nonempty in
     let keeper_name = Option.bind agent_name Authorization.keeper_name_of_agent_name in
     let internal_keeper_token =
       Mcp_policy_helpers.first_nonempty_env [ "MASC_INTERNAL_MCP_TOKEN" ]

@@ -5,7 +5,6 @@ open Server_dashboard_http_keeper_runtime_lens_swimlane
 module Scan_summary = Server_dashboard_http_keeper_api_scan_summary
 
 let json_int_opt = Scan_summary.json_int_opt
-let json_string_list = Json_util.json_string_list
 let memory_summary_json = Scan_summary.memory_summary_json
 let selected_keeper_turn_id = Scan_summary.selected_keeper_turn_id
 let terminal_event_present_for_turn = Scan_summary.terminal_event_present_for_turn
@@ -148,11 +147,11 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
             ( "tool_surface",
               `Assoc
                 [
-                  ("requested_tools", json_string_list requested_tools);
-                  ("required_tools", json_string_list required_tools);
-                  ("materialized_tools", json_string_list materialized_tools);
+                  ("requested_tools", Json_util.json_string_list requested_tools);
+                  ("required_tools", Json_util.json_string_list required_tools);
+                  ("materialized_tools", Json_util.json_string_list materialized_tools);
                   ( "missing_required_tools",
-                    json_string_list missing_required_tools );
+                    Json_util.json_string_list missing_required_tools );
                   ( "turn_lane",
                     json_string_opt
                       (json_string_member_opt "turn_lane" tool_decision) );
@@ -213,10 +212,10 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
                     with
                     | Some value -> `Bool value
                     | None -> `Null );
-                  ("required_tools", json_string_list required_tools);
-                  ("materialized_tools", json_string_list materialized_tools);
+                  ("required_tools", Json_util.json_string_list required_tools);
+                  ("materialized_tools", Json_util.json_string_list materialized_tools);
                   ( "missing_required_tools",
-                    json_string_list missing_required_tools );
+                    Json_util.json_string_list missing_required_tools );
                 ] );
             ( "tool_lineage",
               `Assoc

@@ -132,7 +132,6 @@ let tool_names_are_runtime_mcp =
   Cascade_transport_mcp_tool_classifier.tool_names_are_runtime_mcp
 ;;
 
-let trim_nonempty_string = String_util.trim_nonempty
 ;;
 
 let runtime_mcp_policy_of_tool_names = Cascade_transport_runtime_mcp_policy_of_tool_names.runtime_mcp_policy_of_tool_names
@@ -172,7 +171,7 @@ let resolve_tool_lane_for_oas_tools
   =
   let public_tools = public_mcp_tools_of_oas_tools tools in
   let public_tool_names = public_mcp_tool_names_of_oas_tools public_tools in
-  let requested_agent_name = Option.bind agent_name trim_nonempty_string in
+  let requested_agent_name = Option.bind agent_name String_util.trim_nonempty in
   let keeper_internal_tool_names =
     match requested_agent_name with
     | Some agent_name when Option.is_some (keeper_name_of_agent_name agent_name) ->

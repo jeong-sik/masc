@@ -14,8 +14,6 @@ type t = {
   timeout_sec : int;
 }
 
-let option_to_yojson = Json_util.option_to_yojson
-
 let required_trimmed_string field = function
   | `String value ->
       let trimmed = String.trim value in
@@ -73,12 +71,12 @@ let to_yojson (spec : t) =
       ("base_path", `String spec.base_path);
       ("worker_name", `String spec.worker_name);
       ("model_label", `String spec.model_label);
-      ("working_dir", option_to_yojson (fun s -> `String s) spec.working_dir);
+      ("working_dir", Json_util.option_to_yojson (fun s -> `String s) spec.working_dir);
       ("runtime_backend", Worker_execution_backend.to_yojson spec.runtime_backend);
-      ("thinking_enabled", option_to_yojson (fun v -> `Bool v) spec.thinking_enabled);
-      ("worker_run_id", option_to_yojson (fun s -> `String s) spec.worker_run_id);
-      ("role", option_to_yojson (fun s -> `String s) spec.role);
-      ("selection_note", option_to_yojson (fun s -> `String s) spec.selection_note);
+      ("thinking_enabled", Json_util.option_to_yojson (fun v -> `Bool v) spec.thinking_enabled);
+      ("worker_run_id", Json_util.option_to_yojson (fun s -> `String s) spec.worker_run_id);
+      ("role", Json_util.option_to_yojson (fun s -> `String s) spec.role);
+      ("selection_note", Json_util.option_to_yojson (fun s -> `String s) spec.selection_note);
       ("prompt", `String spec.prompt);
       ("timeout_sec", `Int spec.timeout_sec);
     ]

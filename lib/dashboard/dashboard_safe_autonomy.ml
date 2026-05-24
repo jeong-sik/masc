@@ -82,13 +82,6 @@ let level_rank = Dashboard_safe_autonomy_level.level_rank
 let worse_level = Dashboard_safe_autonomy_level.worse_level
 let worst_level = Dashboard_safe_autonomy_level.worst_level
 
-let non_empty_string_opt value =
-  let trimmed = String.trim value in
-  if trimmed = "" then None else Some trimmed
-
-let normalize_string_opt = String_util.option_trim
-
-
 let evidence_ref_json (entry : evidence_ref) =
   `Assoc
     [
@@ -533,11 +526,11 @@ let classify_cascade_fsm ~(config : Coord.config) ~(meta : keeper_meta) =
   let blocker_json = `Assoc blocker_fields in
   let blocker_class =
     Safe_ops.json_string_opt "runtime_blocker_class" blocker_json
-    |> normalize_string_opt
+    |> String_util.option_trim
   in
   let blocker_summary =
     Safe_ops.json_string_opt "runtime_blocker_summary" blocker_json
-    |> normalize_string_opt
+    |> String_util.option_trim
   in
   let continue_gate =
     Safe_ops.json_bool ~default:false "runtime_blocker_continue_gate" blocker_json

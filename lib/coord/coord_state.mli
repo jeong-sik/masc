@@ -33,7 +33,6 @@ val read_backlog : Coord_utils_backend_setup.config -> Masc_domain.backlog
 val write_backlog :
   Coord_utils_backend_setup.config -> Masc_domain.backlog -> unit
 
-val non_empty_string_opt : string option -> string option
 val normalized_string_list : string list -> string list
 
 (** Project a JSON entry of the [active_agents] array to the agent

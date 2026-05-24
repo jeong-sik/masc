@@ -814,7 +814,8 @@ let is_ambiguous_side_effect_error (err : Agent_sdk.Error.sdk_error) : bool =
   (* RFC-0159 Phase A: opaque internal failures are unambiguous failures. *)
   | Some (Keeper_turn_driver.Internal_unhandled_exception _)
   | Some (Keeper_turn_driver.Internal_bridge_exception _)
-  | Some (Keeper_turn_driver.Internal_contract_rejected _) -> false
+  | Some (Keeper_turn_driver.Internal_contract_rejected _) ->
+      true
 
 let reclassify_error_after_side_effect
     ~(tool_names : string list)
@@ -998,7 +999,7 @@ let is_cascade_exhausted_error (err : Agent_sdk.Error.sdk_error) : bool =
   (* RFC-0159 Phase A: opaque internal failures are not cascade exhaustion. *)
   | Some (Keeper_turn_driver.Internal_unhandled_exception _)
   | Some (Keeper_turn_driver.Internal_bridge_exception _)
-  | Some (Keeper_turn_driver.Internal_contract_rejected _) -> false
+  | Some (Keeper_turn_driver.Internal_contract_rejected _)
   | None -> false
 
 (** [true] when the rotation-cap fast-fail should fire for a

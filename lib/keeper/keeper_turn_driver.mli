@@ -10,124 +10,14 @@
 
     @since God file decomposition — extracted from oas_worker.ml *)
 
-(** {1 MASC/OAS structured errors} *)
+(** {1 MASC/OAS structured errors}
 
-type provider_rejection = {
-  provider_label : string;
-  reason : string;
-}
+    Re-exported from {!Cascade_error_classify} (which itself includes
+    {!Cascade_internal_error}). Using [include module type of] instead of a
+    manual type copy so the interface stays structurally identical to the
+    implementation's [include Cascade_error_classify]. *)
 
-type capacity_backpressure_source =
-  | Provider_capacity
-  | Client_capacity
-  | Tier_admission
-  | Cascade_slot
-
-type masc_internal_error =
-  | Cascade_exhausted of {
-      cascade_name : Cascade_name.t;
-      reason : Keeper_types.cascade_exhaustion_reason;
-    }
-  | Capacity_backpressure of {
-      cascade_name : Cascade_name.t;
-      source : capacity_backpressure_source;
-      detail : string;
-      retry_after_sec : float option;
-    }
-  | Resumable_cli_session of {
-      cascade_name : Cascade_name.t;
-      detail : string;
-      exit_code : int option;
-    }
-  | No_tool_capable_provider of {
-      cascade_name : Cascade_name.t;
-      configured_labels : string list;
-      required_tool_names : string list;
-      provider_rejections : provider_rejection list;
-    }
-  | Accept_rejected of {
-      scope : string;
-      model : string option;
-      reason : string;
-    }
-  | Admission_queue_timeout of {
-      keeper_name : string;
-      cascade_name : Cascade_name.t;
-      wait_sec : float;
-    }
-  | Admission_queue_rejected of {
-      keeper_name : string;
-      reason : string;
-    }
-  | Turn_timeout of { elapsed_sec : float }
-  | Provider_timeout of {
-      budget_sec : float;
-      keeper_turn_timeout_sec : float;
-      estimated_input_tokens : int;
-      source : string;
-      remaining_turn_budget_sec : float option;
-      min_required_sec : float;
-      phase : string;
-    }
-  | Max_tokens_ceiling_violation of {
-      cascade_name : Cascade_name.t;
-      requested_max_tokens : int;
-      provider_ceiling : int;
-      reason : string;
-    }
-  | Ambiguous_post_commit of {
-      is_timeout : bool;
-      tools : string list;
-      original_error : string;
-    }
-  (** RFC-0158: pre-dispatch admission denial — budget too low for provider attempt. *)
-  | Retry_admission_denied of {
-      denial_reason : Cascade_internal_error.retry_admission_denial;
-      is_retry : bool;
-    }
-  (** RFC-0159 Phase A: typed substrate for raw [Agent_sdk.Error.Internal]
-      construction sites previously routed to the [Reason_internal_error]
-      catch-all. *)
-  | Internal_unhandled_exception of {
-      site : string;
-      exn_repr : string;
-    }
-  | Internal_bridge_exception of {
-      caller : string;
-      exn_repr : string;
-    }
-  | Internal_contract_rejected of {
-      reason : string;
-    }
-
-val masc_internal_error_to_json : masc_internal_error -> Yojson.Safe.t
-
-val summary_of_masc_internal_error : masc_internal_error -> string option
-
-val capacity_backpressure_source_to_string :
-  capacity_backpressure_source -> string
-
-val sdk_error_of_masc_internal_error :
-  masc_internal_error -> Agent_sdk.Error.sdk_error
-
-val classify_masc_internal_error :
-  Agent_sdk.Error.sdk_error -> masc_internal_error option
-
-val classify_masc_internal_error_of_string :
-  string -> masc_internal_error option
-
-val kind_of_masc_internal_error : masc_internal_error -> string
-
-val cascade_name_of_masc_internal_error : masc_internal_error -> string
-
-val masc_oas_error_total_metric : string
-
-val admission_wait_timeout_error :
-  keeper_name:string ->
-  cascade_name:Cascade_name.t ->
-  priority:Llm_provider.Request_priority.t ->
-  int ->
-  (string, Agent_sdk.Error.sdk_error) result
+include module type of Cascade_error_classify
 
 (** {1 Cascade error helpers} *)
 

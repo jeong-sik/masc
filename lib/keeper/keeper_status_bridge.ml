@@ -213,7 +213,7 @@ let blocker_class_of_sdk_error (err : Agent_sdk.Error.sdk_error) : blocker_class
      introduce a typed blocker_class for unhandled internal failures. *)
   | Some (Keeper_turn_driver.Internal_unhandled_exception _) -> None
   | Some (Keeper_turn_driver.Internal_bridge_exception _) -> None
-  | Some (Keeper_turn_driver.Internal_contract_rejected _) -> None
+  | Some (Keeper_turn_driver.Internal_contract_rejected _)
   | None ->
     (match err with
      | Agent_sdk.Error.Internal msg -> blocker_class_of_string msg

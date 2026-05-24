@@ -70,6 +70,42 @@ let test_openai_compat_declarative_labels_do_not_require_registry_entry () =
        (Masc_mcp.Cascade_runtime.ensure_api_keys_for_labels
           [ "openai_compat:qwen3.5" ]))
 
+let test_custom_urls_use_endpoint_scoped_health_keys () =
+  let first = "custom:runpod-qwen@https://runpod.example.test/v1" in
+  let second = "custom:glm-5-turbo@https://api.z.ai/api/coding/paas/v4" in
+  match
+    Masc_mcp.Cascade_config.parse_model_string first,
+    Masc_mcp.Cascade_config.parse_model_string second
+  with
+  | Some first_cfg, Some second_cfg ->
+    let binding_first =
+      Masc_mcp.Cascade_config_provider_binding.provider_health_key_of_config
+        first_cfg
+    in
+    let binding_second =
+      Masc_mcp.Cascade_config_provider_binding.provider_health_key_of_config
+        second_cfg
+    in
+    let runtime_keys =
+      Masc_mcp.Cascade_runtime_candidate.runtime_health_keys_of_labels
+        [ first; second ]
+    in
+    check
+      bool
+      "binding health keys are endpoint-scoped"
+      true
+      (not (String.equal binding_first binding_second));
+    check bool "first key contains base URL"
+      true
+      (String.contains binding_first '@');
+    check bool "second key contains base URL"
+      true
+      (String.contains binding_second '@');
+    check int "runtime has separate custom URL health keys"
+      2
+      (List.length runtime_keys)
+  | _ -> fail "custom URL specs should parse"
+
 let () =
   run "Cascade_runtime"
     [
@@ -81,5 +117,7 @@ let () =
             test_oas_failure_classification_keeps_terminal_branches_non_cascading;
           test_case "typed openai_compat labels skip registry api-key gate" `Quick
             test_openai_compat_declarative_labels_do_not_require_registry_entry;
+          test_case "custom URLs use endpoint-scoped health keys" `Quick
+            test_custom_urls_use_endpoint_scoped_health_keys;
         ] );
     ]

@@ -725,6 +725,68 @@ strategy = "priority_tier"
   check_kind "tier.priority-t" Cascade_strategy.Priority_tier
 ;;
 
+let test_provider_d_http_tier_group_uses_endpoint_scoped_health_keys () =
+  let toml =
+    {|
+[providers.runpod]
+protocol = "provider_d-http"
+endpoint = "https://runpod.example.test/v1"
+
+[providers.glm]
+protocol = "provider_d-http"
+endpoint = "https://api.z.ai/api/coding/paas/v4"
+
+[models.runpod-qwen]
+max-context = 128000
+api-name = "runpod-qwen"
+tools-support = true
+
+[models.glm-5-turbo]
+max-context = 128000
+api-name = "glm-5-turbo"
+tools-support = true
+
+[runpod.runpod-qwen]
+[glm.glm-5-turbo]
+
+[tier.runpod]
+members = ["runpod.runpod-qwen"]
+strategy = "failover"
+
+[tier.glm]
+members = ["glm.glm-5-turbo"]
+strategy = "failover"
+
+[tier-group.custom-priority]
+tiers = ["runpod", "glm"]
+strategy = "priority_tier"
+|}
+  in
+  let catalog = adapt_toml toml in
+  no_errors catalog.errors;
+  let profile =
+    List.find
+      (fun (p : adapted_profile) -> p.name = "tier-group.custom-priority")
+      catalog.profiles
+  in
+  match profile.strategy.Cascade_strategy.tiers with
+  | [ [ first ]; [ second ] ] ->
+    check bool "tier health keys are endpoint-scoped"
+      true
+      (not (String.equal first second));
+    check bool "runpod tier key includes endpoint"
+      true
+      (String.contains first '@');
+    check bool "glm tier key includes endpoint"
+      true
+      (String.contains second '@')
+  | tiers ->
+    fail
+      (Printf.sprintf
+         "expected two single-entry tiers, got %d tiers"
+         (List.length tiers))
+;;
+
 (* --- Multiple errors accumulated --- *)
 
 let test_multiple_errors () =
@@ -902,7 +964,12 @@ let () =
         ; test_case "duplicate routes" `Quick test_duplicate_routes
         ] )
     ; ( "strategy"
-      , [ test_case "supported variants" `Quick test_strategy_mapping ] )
+      , [ test_case "supported variants" `Quick test_strategy_mapping
+        ; test_case
+            "provider_d-http tier-group keys are endpoint-scoped"
+            `Quick
+            test_provider_d_http_tier_group_uses_endpoint_scoped_health_keys
+        ] )
     ; "edge_cases", [ test_case "empty tier-group" `Quick test_empty_tier_group ]
     ]
 ;;

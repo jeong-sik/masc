@@ -77,8 +77,7 @@ let provider_label_of_config (cfg : Llm_provider.Provider_config.t) =
 
 let provider_health_key_of_config (cfg : Llm_provider.Provider_config.t) =
   match cfg.kind with
-  | Llm_provider.Provider_config.Provider_d_compat
-    when Llm_provider.Provider_config.is_local cfg ->
+  | Llm_provider.Provider_config.Provider_d_compat ->
     let base_url = String.trim cfg.base_url in
     if base_url = ""
     then provider_label_of_config cfg

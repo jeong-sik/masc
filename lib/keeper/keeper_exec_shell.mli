@@ -37,10 +37,9 @@ val gh_min_timeout_sec : float
 
 val keeper_bash_native_min_timeout_sec : float
 (** Minimum timeout_sec floor applied to keeper_bash on the *native*
-    (non-Docker) executor path. Exposed so regression tests can lock the
-    floor against drift back to sub-I/O-latency values.  The Docker
-    dispatch path re-clamps independently to
-    {!Keeper_sandbox_docker.docker_run_min_timeout_sec}. *)
+    executor path. Exposed so regression tests can lock the floor
+    against drift back to sub-I/O-latency values.  Container-backed
+    dispatch paths re-clamp independently inside their backend. *)
 
 val rewrite_turn_runtime_paths_to_host :
   config:Coord.config ->
@@ -82,13 +81,3 @@ val handle_keeper_shell :
   meta:Keeper_types.keeper_meta ->
   args:Yojson.Safe.t ->
   string
-
-(** [ensure_keeper_sandbox_runtime ~timeout_sec] preflights the host
-    Docker runtime against the configured hardening requirements
-    (seccomp profile present, optional rootless / userns checks).
-    Returns the [--security-opt seccomp=...] argv fragment when the
-    runtime passes; [Error _] when something is missing. Exposed for
-    [Keeper_docker_read] (RFC-0006 Phase B-2) which reuses the same
-    preflight before spawning a one-shot container for fs reads. *)
-val ensure_keeper_sandbox_runtime :
-  timeout_sec:float -> (string list, string) result

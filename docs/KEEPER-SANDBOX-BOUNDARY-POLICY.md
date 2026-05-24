@@ -20,6 +20,7 @@ failure just because a keeper uses the Docker backend.
 | `Tool_code` / write tools | Tool input validation and sandbox-visible path normalization via `Keeper_sandbox` | Docker prefix literals, profile detection, keeper TOML reads |
 | `Keeper_shell_command_semantics` | Pure command-shape and cwd policy for `git`/`gh` commands | Docker process execution |
 | `Keeper_sandbox_shell_ir_target` | Backend target construction for typed Shell IR dispatch | Tool-surface ownership, command parsing, `keeper_bash` policy |
+| `Keeper_sandbox_runner` | Backend-neutral command execution facade used by tools; route selection between host and sandbox backend; mockable backend contract | Git/GitHub workflow semantics, tool input validation, command parsing ownership |
 | `Keeper_sandbox_docker` | Docker runtime setup, mounts, network mode, command execution, Docker result envelope | Generic command classification or cwd policy ownership |
 | `Keeper_sandbox_exec_failure` | Sandbox backend failure messages and registry recording | Tool-surface naming, command classification, shell-specific policy |
 
@@ -32,6 +33,9 @@ failure just because a keeper uses the Docker backend.
   not literals in tool code.
 - Per-command `git`/`gh` behavior is command semantics, not a sandbox
   profile.
+- Tool modules must not branch on `meta.sandbox_profile = Docker` or call
+  `Keeper_sandbox_docker` directly. They pass host/backend command
+  projections to `Keeper_sandbox_runner`.
 - Command semantics may only interpret commands accepted by the typed
   bash subset parser. Unsupported shell constructs fail closed and must
   not be reinterpreted with space splitting or fallback token scans.
@@ -47,6 +51,7 @@ Focused behavioral tests verify path and command behavior:
 Source-level boundary tests prevent regressions in layer ownership:
 
 - `test_keeper_sandbox_boundary_policy`
+- `test_keeper_sandbox_runner`
 
 The boundary test intentionally fails if:
 
@@ -54,6 +59,8 @@ The boundary test intentionally fails if:
 - coord worktree helpers reintroduce Docker container-root construction
   or sandbox-profile parsing;
 - Docker shell code re-exports generic command classification;
+- PR/GitHub tool code calls `Keeper_sandbox_docker` or selects Docker via
+  `meta.sandbox_profile = Docker`;
 - typed Shell IR backend target helpers are coupled to a `shell_bash`
   module name;
 - sandbox backend failure recording is coupled to a `shell_docker`

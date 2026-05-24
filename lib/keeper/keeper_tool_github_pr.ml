@@ -148,27 +148,27 @@ let quote_argv argv =
 
 let run_gh_argv ~(config : Coord.config) ~(meta : keeper_meta) ~env ~cwd
     ~timeout_sec argv =
-  if meta.sandbox_profile = Docker then
-    match
-      Keeper_sandbox_docker.run_trusted_docker_shell_command_with_status
-        ~config ~meta ~cwd ~timeout_sec ~cmd:(quote_argv argv)
-        ~git_creds_enabled:true ~network_mode:Network_inherit
-    with
-    | Ok result ->
-        { status = result.Keeper_sandbox_docker.status
-        ; output = result.output
-        ; via = "docker"
+  let command_text = quote_argv argv in
+  let result =
+    Keeper_sandbox_runner.run_command_with_status
+      ~config ~meta ~timeout_sec
+      ~host:
+        { actor = `Coord_git
+        ; raw_source = command_text
+        ; summary = "keeper tool gh host"
+        ; env = Some env
+        ; cwd = Some cwd
+        ; argv
         }
-    | Error msg ->
-        { status = Unix.WEXITED 1; output = msg; via = "docker" }
-  else
-    let status, output =
-      Masc_exec.Exec_gate.run_argv_with_status ~actor:`Coord_git
-        ~raw_source:(quote_argv argv)
-        ~summary:"keeper tool gh host"
-        ~env ~cwd ~timeout_sec argv
-    in
-    { status; output; via = "host" }
+      ~backend:
+        { cwd
+        ; command_text
+        ; git_creds_enabled = true
+        ; network_mode = Network_inherit
+        ; trust = Keeper_sandbox_runner.Trusted_tool
+        }
+  in
+  { status = result.status; output = result.output; via = result.via }
 
 let sandbox_profile_string (meta : keeper_meta) =
   match meta.sandbox_profile with

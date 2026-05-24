@@ -158,15 +158,17 @@ let effective_repo_slug ~(config : Coord.config) ~(repo : string)
     | Some slug -> Ok slug
     | None -> Error "Could not determine repository. Provide repo parameter."
 
-let docker_pr_review_cwd ~(config : Coord.config) meta =
+let sandbox_pr_review_cwd ~(config : Coord.config) meta =
   let root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   let cwd = Filename.concat root ".gh-pr-review" in
   ignore (Keeper_fs.ensure_dir cwd);
   cwd
 
 let pr_review_body_file_dir ~(config : Coord.config) (meta : keeper_meta) =
-  if meta.sandbox_profile = Docker
-  then docker_pr_review_cwd ~config meta
+  if
+    Keeper_sandbox_runner.uses_backend
+      ~config ~meta ~cwd:(Keeper_sandbox.host_root_abs_of_meta ~config meta)
+  then sandbox_pr_review_cwd ~config meta
   else (
     let root = Keeper_alerting_path.project_root_of_config config in
     let dir = Filename.concat (Filename.concat root Common.masc_dirname) "pr-review" in
@@ -202,7 +204,11 @@ let with_pr_review_body_file ~(config : Coord.config) ~(meta : keeper_meta) ~bod
   in
   let host_path = create_file 0 in
   let command_path =
-    if meta.sandbox_profile = Docker then Filename.basename host_path else host_path
+    if
+      Keeper_sandbox_runner.uses_backend
+        ~config ~meta ~cwd:(Keeper_sandbox.host_root_abs_of_meta ~config meta)
+    then Filename.basename host_path
+    else host_path
   in
   Fun.protect
     ~finally:(fun () ->
@@ -217,39 +223,28 @@ let run_pr_review_argv
       ~summary
       ~argv
   =
-  if meta.sandbox_profile = Docker then
-    let cmd = Keeper_gh_pr_review_cli.quote_argv argv in
-    match
-      Keeper_shell_shared.run_docker_shell_command_with_status
-        ~config ~meta
-        ~cwd:(docker_pr_review_cwd ~config meta)
-        ~timeout_sec ~cmd
-        ~git_creds_enabled:true
-        ~network_mode:Network_inherit
-    with
-    | Ok result ->
-        { status = result.Keeper_sandbox_docker.status
-        ; output = result.output
-        ; via = "docker"
+  let command_text = Keeper_gh_pr_review_cli.quote_argv argv in
+  let root = Keeper_alerting_path.project_root_of_config config in
+  let result =
+    Keeper_sandbox_runner.run_command_with_status
+      ~config ~meta ~timeout_sec
+      ~host:
+        { actor = `Keeper_shell
+        ; raw_source = command_text
+        ; summary
+        ; env = Keeper_gh_env.process_env config
+        ; cwd = Some root
+        ; argv
         }
-    | Error msg ->
-        { status = Unix.WEXITED 1
-        ; output = msg
-        ; via = "docker"
+      ~backend:
+        { cwd = sandbox_pr_review_cwd ~config meta
+        ; command_text
+        ; git_creds_enabled = true
+        ; network_mode = Network_inherit
+        ; trust = Keeper_sandbox_runner.User_shell
         }
-  else
-    let root = Keeper_alerting_path.project_root_of_config config in
-    let status, output =
-      Masc_exec.Exec_gate.run_argv_with_status
-        ~actor:`Keeper_shell
-        ~raw_source:(Keeper_gh_pr_review_cli.quote_argv argv)
-        ~summary
-        ?env:(Keeper_gh_env.process_env config)
-        ~cwd:root
-        ~timeout_sec
-        argv
-    in
-    { status; output; via = "host" }
+  in
+  { status = result.status; output = result.output; via = result.via }
 
 let repo_unresolved_json ~(config : Coord.config) (meta : keeper_meta)
     ~repo_slug ~(result : pr_review_exec_result) ?pr_number ?event () =

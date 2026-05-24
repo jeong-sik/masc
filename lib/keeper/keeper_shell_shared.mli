@@ -78,12 +78,10 @@ val keeper_bash_native_min_timeout_sec : float
     disk or git metadata; lower caller-supplied values produce noisy
     partial-output timeout failures rather than useful latency bounds.
 
-    The Docker dispatch path re-clamps to
-    {!Keeper_sandbox_docker.docker_run_min_timeout_sec} inside
-    [run_docker_shell_command_with_status_internal] because container
-    cold start adds 10-60s on top of the actual command (runtime log
-    issue #5, 2026-05-20).  Keeping a separate native floor avoids
-    penalising the host-side fast path for the Docker path's overhead. *)
+    The sandbox backend dispatch path re-clamps again where needed because
+    container cold start can add 10-60s on top of the actual command
+    (runtime log issue #5, 2026-05-20).  Keeping a separate native floor
+    avoids penalising the host-side fast path for backend overhead. *)
 
 val keeper_bash_min_timeout_sec_for_args : Yojson.Safe.t -> float
 (** Minimum timeout_sec floor for a typed keeper_bash invocation.
@@ -232,50 +230,4 @@ val resolve_keeper_shell_read_path :
     fails.  Guards against playground-prefix doubling when both
     [cwd] and [path] independently include the playground prefix. *)
 
-(** {1 Sandbox dispatch and command semantics} *)
-
-val effective_sandbox_profile :
-  meta:Keeper_types.keeper_meta ->
-  in_playground:bool ->
-  Keeper_types.sandbox_profile * Keeper_types.network_mode
-(** Alias of {!Keeper_sandbox_docker.effective_sandbox_profile}. *)
-
-val ensure_keeper_sandbox_runtime :
-  timeout_sec:float -> (string list, string) result
-(** Alias of {!Keeper_sandbox_docker.ensure_keeper_sandbox_runtime}. *)
-
-val command_uses_nested_container_runtime : string -> bool
-(** Alias of {!Keeper_sandbox_docker.command_uses_nested_container_runtime}. *)
-
-val run_docker_shell_command_with_status :
-  config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
-  cwd:string ->
-  timeout_sec:float ->
-  cmd:string ->
-  git_creds_enabled:bool ->
-  network_mode:Keeper_types.network_mode ->
-  (Keeper_sandbox_docker.docker_shell_result, string) result
-(** Alias of {!Keeper_sandbox_docker.run_docker_shell_command_with_status}. *)
-
-val run_docker_credentialed_bash :
-  turn_sandbox_runtime:Keeper_turn_sandbox_runtime.t option ->
-  config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
-  cwd:string ->
-  timeout_sec:float ->
-  cmd:string ->
-  unit ->
-  string
-(** Alias of {!Keeper_sandbox_docker.run_docker_credentialed_bash}. *)
-
-val run_docker_bash :
-  turn_sandbox_runtime:Keeper_turn_sandbox_runtime.t option ->
-  config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
-  cwd:string ->
-  timeout_sec:float ->
-  cmd:string ->
-  network_mode:Keeper_types.network_mode ->
-  string
-(** Alias of {!Keeper_sandbox_docker.run_docker_bash}. *)
+(** {1 Command semantics} *)

@@ -82,13 +82,11 @@ let gh_min_timeout_sec =
 let git_meta_timeout_sec = env_float "MASC_KEEPER_GIT_META_TIMEOUT_SEC" 5.0
 
 (* Floor applied to caller-supplied [timeout_sec] for keeper_bash when
-   the command runs through the *native* (non-Docker) executor.  The
-   Docker dispatch path re-clamps inside
-   [Keeper_sandbox_docker.run_docker_shell_command_with_status_internal]
-   to [docker_run_min_timeout_sec] because container cold start adds
-   10-60s on top of the actual command — see runtime log issue #5
+   the command runs through the native executor.  Container-backed
+   dispatch re-clamps inside its backend because cold start adds 10-60s
+   on top of the actual command — see runtime log issue #5
    (2026-05-20).  Keeping a separate native floor avoids penalising
-   the host-side fast path for the Docker path's overhead. *)
+   the host-side fast path for backend overhead. *)
 let keeper_bash_native_min_timeout_sec =
   Timeout_floor.default_sec Timeout_floor.Native_shell
 ;;
@@ -681,14 +679,3 @@ let resolve_keeper_shell_read_path
         resolved_raw_path
     in
     resolve_with_autocorrect resolver_path
-
-(* Sandbox infrastructure stays in Keeper_sandbox_docker; command-shape
-   interpretation stays in Keeper_shell_command_semantics. *)
-let effective_sandbox_profile = Keeper_sandbox_docker.effective_sandbox_profile
-
-
-let ensure_keeper_sandbox_runtime = Keeper_sandbox_docker.ensure_keeper_sandbox_runtime
-let command_uses_nested_container_runtime = Keeper_sandbox_docker.command_uses_nested_container_runtime
-let run_docker_shell_command_with_status = Keeper_sandbox_docker.run_docker_shell_command_with_status
-let run_docker_credentialed_bash = Keeper_sandbox_docker.run_docker_credentialed_bash
-let run_docker_bash = Keeper_sandbox_docker.run_docker_bash

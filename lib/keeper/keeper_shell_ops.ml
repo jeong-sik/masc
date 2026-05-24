@@ -308,7 +308,7 @@ let handle_keeper_shell
   in
   let render_docker_process_result ~cwd ~cmd ~docker_cmd ~timeout_sec =
     match
-      Keeper_shell_shared.run_docker_shell_command_with_status ~config ~meta ~cwd ~timeout_sec
+      Keeper_sandbox_runner.run_shell_command_with_status ~config ~meta ~cwd ~timeout_sec
         ~cmd:docker_cmd ~git_creds_enabled:false ~network_mode:Network_none
     with
     | Error msg -> error_json ~fields:[ "op", `String op; "cwd", `String cwd ] msg
@@ -320,7 +320,7 @@ let handle_keeper_shell
       let cwd_response =
         Keeper_cwd_response.docker ~host_cwd:cwd
           ~container_cwd:
-            (Keeper_sandbox_docker.docker_private_workspace_cwd ~config
+            (Keeper_sandbox_runner.private_workspace_cwd ~config
                ~meta cwd)
       in
       Yojson.Safe.to_string
@@ -1303,7 +1303,7 @@ let handle_keeper_shell
          in
          let clone_path = Filename.concat repos_dir repo_name in
          let route_fields =
-           if meta.sandbox_profile = Docker then
+           if Keeper_sandbox_runner.uses_backend ~config ~meta ~cwd:repos_dir then
              [ "via", `String "docker" ]
            else
              []
@@ -1361,24 +1361,31 @@ let handle_keeper_shell
                   normalize_existing_origin_to_https clone_path
                 in
                 (* Already cloned — pull latest instead *)
-                let st, out =
-                  if meta.sandbox_profile = Docker then
-                    match
-                      Keeper_shell_shared.run_docker_shell_command_with_status ~config ~meta
-                        ~cwd:repos_dir ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Shell ())
-                        ~cmd:(Printf.sprintf "git -C %s pull --ff-only"
-                                (Filename.quote repo_name))
-                        ~git_creds_enabled:true ~network_mode:Network_inherit
-                    with
-                    | Ok result -> (result.status, result.output)
-                    | Error msg -> (Unix.WEXITED 127, msg)
-                  else
-                    Masc_exec.Exec_gate.run_argv_with_status ~actor:`Coord_git
-                      ~raw_source:("git -C " ^ clone_path ^ " pull --ff-only")
-                      ~summary:"keeper git pull"
-                      ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Shell ())
-                      [ "git"; "-C"; clone_path; "pull"; "--ff-only" ]
+                let pull_timeout =
+                  Env_config_exec_timeout.timeout_sec ~caller:Shell ()
                 in
+                let pull_result =
+                  Keeper_sandbox_runner.run_command_with_status
+                    ~config ~meta ~timeout_sec:pull_timeout
+                    ~host:
+                      { actor = `Coord_git
+                      ; raw_source = "git -C " ^ clone_path ^ " pull --ff-only"
+                      ; summary = "keeper git pull"
+                      ; env = None
+                      ; cwd = None
+                      ; argv = [ "git"; "-C"; clone_path; "pull"; "--ff-only" ]
+                      }
+                    ~backend:
+                      { cwd = repos_dir
+                      ; command_text =
+                          Printf.sprintf "git -C %s pull --ff-only"
+                            (Filename.quote repo_name)
+                      ; git_creds_enabled = true
+                      ; network_mode = Network_inherit
+                      ; trust = Keeper_sandbox_runner.Trusted_tool
+                      }
+                in
+                let st, out = pull_result.status, pull_result.output in
                 if st = Unix.WEXITED 0 then
                   Keeper_shell_shared.update_playground_repo_cache
                     ~playground_dir:playground ~repo_name ~repo_path:clone_path
@@ -1407,28 +1414,34 @@ let handle_keeper_shell
              if depth > 0 then ["--depth"; string_of_int depth] else []
            in
            let shallow = depth > 0 in
-           let st, out =
-             if meta.sandbox_profile = Docker then
-               let clone_cmd =
-                 String.concat " "
-                   (List.map Filename.quote
-                      ("git" :: "clone" :: depth_args @ [ clone_url; repo_name ]))
-               in
-               match
-                 Keeper_shell_shared.run_docker_shell_command_with_status ~config ~meta ~cwd:repos_dir
-                   ~timeout_sec:(Keeper_tool_policy.clone_timeout_sec ())
-                   ~cmd:clone_cmd
-                   ~git_creds_enabled:true ~network_mode:Network_inherit
-               with
-               | Ok result -> (result.status, result.output)
-               | Error msg -> (Unix.WEXITED 127, msg)
-             else
-               Masc_exec.Exec_gate.run_argv_with_status ~actor:`Coord_git
-                 ~raw_source:("git clone " ^ String.concat " " depth_args ^ " " ^ clone_url ^ " " ^ clone_path)
-                 ~summary:"keeper git clone"
-                 ~timeout_sec:(Keeper_tool_policy.clone_timeout_sec ())
-                 ("git" :: "clone" :: depth_args @ [ clone_url; clone_path ])
+           let clone_cmd =
+             String.concat " "
+               (List.map Filename.quote
+                  ("git" :: "clone" :: depth_args @ [ clone_url; repo_name ]))
            in
+           let clone_timeout = Keeper_tool_policy.clone_timeout_sec () in
+           let clone_result =
+             Keeper_sandbox_runner.run_command_with_status
+               ~config ~meta ~timeout_sec:clone_timeout
+               ~host:
+                 { actor = `Coord_git
+                 ; raw_source =
+                     "git clone " ^ String.concat " " depth_args ^ " "
+                     ^ clone_url ^ " " ^ clone_path
+                 ; summary = "keeper git clone"
+                 ; env = None
+                 ; cwd = None
+                 ; argv = "git" :: "clone" :: depth_args @ [ clone_url; clone_path ]
+                 }
+               ~backend:
+                 { cwd = repos_dir
+                 ; command_text = clone_cmd
+                 ; git_creds_enabled = true
+                 ; network_mode = Network_inherit
+                 ; trust = Keeper_sandbox_runner.Trusted_tool
+                 }
+           in
+           let st, out = clone_result.status, clone_result.output in
            if st = Unix.WEXITED 0 then
              Keeper_shell_shared.update_playground_repo_cache
                ~playground_dir:playground ~repo_name ~repo_path:clone_path
@@ -1492,7 +1505,7 @@ let handle_keeper_shell
         in
         let gh_base ~ok ~cwd ~command extras =
           let route_fields =
-            if meta.sandbox_profile = Docker then
+            if Keeper_sandbox_runner.uses_backend ~config ~meta ~cwd then
               [ "via", `String "docker" ]
             else
               []
@@ -1532,16 +1545,11 @@ let handle_keeper_shell
              [gate_typed] + [validate_shell_ir_paths] before the
              actual dispatch. The dispatch step itself still uses the
              existing argv path ([run_argv_with_status] /
-             [run_docker_shell_command_with_status]); routing the
+             sandbox runner); routing the
              execution through [Exec_dispatch.dispatch_decided] is deferred
              (gh requires env / timeout / docker-routing fields that
              [Exec_dispatch] does not yet thread). *)
-          let gh_sandbox_target =
-            if meta.sandbox_profile = Docker
-            then Masc_exec.Sandbox_target.host ()
-              (* docker routing handled below; gate runs on host-shape IR *)
-            else Masc_exec.Sandbox_target.host ()
-          in
+          let gh_sandbox_target = Masc_exec.Sandbox_target.host () in
           let gh_ir =
             Keeper_gh_shared.gh_simple_command_to_shell_ir
               ~sandbox:gh_sandbox_target
@@ -1580,26 +1588,32 @@ let handle_keeper_shell
             match gh_path_verdict with
             | Error msg -> Error (Printf.sprintf "gh_path_reject: %s" msg)
             | Ok () ->
-            if meta.sandbox_profile = Docker
-            then
-              match
-                Keeper_shell_shared.run_docker_shell_command_with_status ~config ~meta ~cwd
-                  ~timeout_sec ~cmd:display_command
-                  ~git_creds_enabled:true ~network_mode:Network_inherit
-              with
-              | Ok result -> Ok (result.status, result.output)
-              | Error msg -> Error msg
-            else
-              (match Keeper_gh_env.keeper_process_env config ~keeper_name:meta.name with
-               | Error err -> Error err
-               | Ok env ->
-                   let gh_argv =
-                     "gh" :: Keeper_gh_shared.gh_simple_command_argv parsed_command
-                   in
-                   Ok (Masc_exec.Exec_gate.run_argv_with_status ~actor:`Keeper_shell
-                         ~raw_source:(String.concat " " gh_argv)
-                         ~summary:"keeper gh command"
-                         ?env ~cwd ~timeout_sec gh_argv))
+            (match Keeper_gh_env.keeper_process_env config ~keeper_name:meta.name with
+             | Error err -> Error err
+             | Ok env ->
+               let gh_argv =
+                 "gh" :: Keeper_gh_shared.gh_simple_command_argv parsed_command
+               in
+               let result =
+                 Keeper_sandbox_runner.run_command_with_status
+                   ~config ~meta ~timeout_sec
+                   ~host:
+                     { actor = `Keeper_shell
+                     ; raw_source = String.concat " " gh_argv
+                     ; summary = "keeper gh command"
+                     ; env
+                     ; cwd = Some cwd
+                     ; argv = gh_argv
+                     }
+                   ~backend:
+                     { cwd
+                     ; command_text = display_command
+                     ; git_creds_enabled = true
+                     ; network_mode = Network_inherit
+                     ; trust = Keeper_sandbox_runner.User_shell
+                     }
+               in
+               Ok (result.status, result.output))
           in
           match gh_process with
           | Error msg ->

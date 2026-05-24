@@ -149,7 +149,8 @@ check-social: check-all
 
 OTHER_DIRS := admission-queue auth autonomous boundary bug-models cascade \
               checkpoint-trim keeper-switch-hierarchy keeper-turn-fsm \
-              multimodal resilience server-state shared task-lifecycle
+              multimodal resilience server-state shared shell-ir-first-class \
+              task-lifecycle
 check-others: CLEAN_CFGS := $(foreach d,$(OTHER_DIRS),$(call clean_cfgs_in,$(d)/))
 check-others: BUGGY_CFGS := $(foreach d,$(OTHER_DIRS),$(call buggy_cfgs_in,$(d)/))
 check-others: check-all

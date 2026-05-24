@@ -141,6 +141,7 @@ type gh_exec_result =
   { status : Unix.process_status
   ; output : string
   ; via : string
+  ; error : string option
   }
 
 let quote_argv argv =
@@ -161,14 +162,19 @@ let run_gh_argv ~(config : Coord.config) ~(meta : keeper_meta) ~env ~cwd
         ; argv
         }
       ~backend:
-        { cwd
+        { route_cwd = cwd
+        ; cwd = (fun () -> cwd)
         ; command_text
         ; git_creds_enabled = true
         ; network_mode = Network_inherit
         ; trust = Keeper_sandbox_runner.Trusted_tool
         }
   in
-  { status = result.status; output = result.output; via = result.via }
+  { status = result.status
+  ; output = result.output
+  ; via = result.via
+  ; error = result.backend_error
+  }
 
 let sandbox_profile_string (meta : keeper_meta) =
   match meta.sandbox_profile with
@@ -224,8 +230,13 @@ let run_gh ~tool ~operation ~config ~meta ~args ~write argv =
             run_gh_argv ~config ~meta ~env ~cwd ~timeout_sec argv
           in
           let result_ok = status_ok result.status in
+          let extra_fields =
+            match result.error with
+            | None -> []
+            | Some error -> [ "error", `String error ]
+          in
           output_json ~ok:result_ok ~tool ~operation ~meta ~binding ~state
-            ~cwd ~via:result.via ~output:result.output ())
+            ~cwd ~via:result.via ~output:result.output ~extra_fields ())
 
 let handle_keeper_pr_list ~(config : Coord.config) ~(meta : keeper_meta)
     ~(args : Yojson.Safe.t) =

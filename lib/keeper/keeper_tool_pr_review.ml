@@ -141,6 +141,7 @@ type pr_review_exec_result =
   { status : Unix.process_status
   ; output : string
   ; via : string
+  ; error : string option
   }
 
 let status_ok = function
@@ -237,14 +238,19 @@ let run_pr_review_argv
         ; argv
         }
       ~backend:
-        { cwd = sandbox_pr_review_cwd ~config meta
+        { route_cwd = root
+        ; cwd = (fun () -> sandbox_pr_review_cwd ~config meta)
         ; command_text
         ; git_creds_enabled = true
         ; network_mode = Network_inherit
         ; trust = Keeper_sandbox_runner.User_shell
         }
   in
-  { status = result.status; output = result.output; via = result.via }
+  { status = result.status
+  ; output = result.output
+  ; via = result.via
+  ; error = result.backend_error
+  }
 
 let repo_unresolved_json ~(config : Coord.config) (meta : keeper_meta)
     ~repo_slug ~(result : pr_review_exec_result) ?pr_number ?event () =

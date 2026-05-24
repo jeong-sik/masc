@@ -157,6 +157,37 @@ let test_uses_backend_respects_profile () =
          (Keeper_sandbox_runner.uses_backend
             ~config ~meta:local_meta ~cwd:local_cwd))
 
+let test_local_route_does_not_force_backend_cwd () =
+  let base = temp_dir "keeper_sandbox_runner_lazy_cwd_" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base)
+    (fun () ->
+       let config = Coord.default_config base in
+       let meta = make_meta ~sandbox:Keeper_types.Local in
+       let cwd = Keeper_sandbox.host_root_abs_of_meta ~config meta in
+       let result =
+         Keeper_sandbox_runner.run_command_with_status
+           ~config ~meta ~timeout_sec:5.0
+           ~host:
+             { actor = `Keeper_shell
+             ; raw_source = "true"
+             ; summary = "runner lazy cwd host smoke"
+             ; env = None
+             ; cwd = Some cwd
+             ; argv = [ "true" ]
+             }
+           ~backend:
+             { route_cwd = cwd
+             ; cwd = (fun () -> failwith "backend cwd evaluated on host route")
+             ; command_text = "true"
+             ; git_creds_enabled = false
+             ; network_mode = Keeper_types.Network_none
+             ; trust = Keeper_sandbox_runner.User_shell
+             }
+       in
+       check string "via" "host" result.via;
+       check bool "no backend error" true (Option.is_none result.backend_error))
+
 let () =
   Alcotest.run
     "keeper_sandbox_runner"
@@ -166,5 +197,9 @@ let () =
         ] )
     ; ( "routing",
         [ test_case "profile selects backend" `Quick test_uses_backend_respects_profile
+        ; test_case
+            "local route does not force backend cwd"
+            `Quick
+            test_local_route_does_not_force_backend_cwd
         ] )
     ]

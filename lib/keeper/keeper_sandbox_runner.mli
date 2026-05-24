@@ -29,7 +29,8 @@ type host_command =
   }
 
 type backend_command =
-  { cwd : string
+  { route_cwd : string
+  ; cwd : unit -> string
   ; command_text : string
   ; git_creds_enabled : bool
   ; network_mode : Keeper_types.network_mode
@@ -40,6 +41,7 @@ type routed_result =
   { status : Unix.process_status
   ; output : string
   ; via : string
+  ; backend_error : string option
   }
 
 module type Backend = sig

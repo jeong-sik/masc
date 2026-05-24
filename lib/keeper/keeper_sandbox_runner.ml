@@ -23,7 +23,8 @@ type host_command =
   }
 
 type backend_command =
-  { cwd : string
+  { route_cwd : string
+  ; cwd : unit -> string
   ; command_text : string
   ; git_creds_enabled : bool
   ; network_mode : Keeper_types.network_mode
@@ -34,6 +35,7 @@ type routed_result =
   { status : Unix.process_status
   ; output : string
   ; via : string
+  ; backend_error : string option
   }
 
 module type Backend = sig
@@ -190,9 +192,10 @@ let run_host_command ~timeout_sec (host : host_command) =
       ?cwd:host.cwd
       host.argv
   in
-  { status; output; via = "host" }
+  { status; output; via = "host"; backend_error = None }
 
 let run_backend_command ~config ~meta ~timeout_sec (backend : backend_command) =
+  let cwd = backend.cwd () in
   let runner =
     match backend.trust with
     | User_shell -> run_shell_command_with_status
@@ -201,19 +204,27 @@ let run_backend_command ~config ~meta ~timeout_sec (backend : backend_command) =
   match
     runner
       ~config ~meta
-      ~cwd:backend.cwd
+      ~cwd
       ~timeout_sec
       ~cmd:backend.command_text
       ~git_creds_enabled:backend.git_creds_enabled
       ~network_mode:backend.network_mode
   with
   | Ok result ->
-    { status = result.status; output = result.output; via = "docker" }
+    { status = result.status
+    ; output = result.output
+    ; via = "docker"
+    ; backend_error = None
+    }
   | Error msg ->
-    { status = Unix.WEXITED 127; output = msg; via = "docker" }
+    { status = Unix.WEXITED 127
+    ; output = msg
+    ; via = "docker"
+    ; backend_error = Some msg
+    }
 
 let run_command_with_status ~config ~meta ~timeout_sec ~host ~backend =
-  if uses_backend ~config ~meta ~cwd:backend.cwd then
+  if uses_backend ~config ~meta ~cwd:backend.route_cwd then
     run_backend_command ~config ~meta ~timeout_sec backend
   else
     run_host_command ~timeout_sec host

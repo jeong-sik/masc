@@ -1376,7 +1376,8 @@ let handle_keeper_shell
                       ; argv = [ "git"; "-C"; clone_path; "pull"; "--ff-only" ]
                       }
                     ~backend:
-                      { cwd = repos_dir
+                      { route_cwd = repos_dir
+                      ; cwd = (fun () -> repos_dir)
                       ; command_text =
                           Printf.sprintf "git -C %s pull --ff-only"
                             (Filename.quote repo_name)
@@ -1432,9 +1433,10 @@ let handle_keeper_shell
                  ; env = None
                  ; cwd = None
                  ; argv = "git" :: "clone" :: depth_args @ [ clone_url; clone_path ]
-                 }
+               }
                ~backend:
-                 { cwd = repos_dir
+                 { route_cwd = repos_dir
+                 ; cwd = (fun () -> repos_dir)
                  ; command_text = clone_cmd
                  ; git_creds_enabled = true
                  ; network_mode = Network_inherit
@@ -1588,12 +1590,20 @@ let handle_keeper_shell
             match gh_path_verdict with
             | Error msg -> Error (Printf.sprintf "gh_path_reject: %s" msg)
             | Ok () ->
-            (match Keeper_gh_env.keeper_process_env config ~keeper_name:meta.name with
+            let gh_argv =
+              "gh" :: Keeper_gh_shared.gh_simple_command_argv parsed_command
+            in
+            let use_backend =
+              Keeper_sandbox_runner.uses_backend ~config ~meta ~cwd
+            in
+            let host_env_result =
+              if use_backend
+              then Ok None
+              else Keeper_gh_env.keeper_process_env config ~keeper_name:meta.name
+            in
+            (match host_env_result with
              | Error err -> Error err
              | Ok env ->
-               let gh_argv =
-                 "gh" :: Keeper_gh_shared.gh_simple_command_argv parsed_command
-               in
                let result =
                  Keeper_sandbox_runner.run_command_with_status
                    ~config ~meta ~timeout_sec
@@ -1604,16 +1614,19 @@ let handle_keeper_shell
                      ; env
                      ; cwd = Some cwd
                      ; argv = gh_argv
-                     }
-                   ~backend:
-                     { cwd
+                   }
+                 ~backend:
+                     { route_cwd = cwd
+                     ; cwd = (fun () -> cwd)
                      ; command_text = display_command
                      ; git_creds_enabled = true
                      ; network_mode = Network_inherit
                      ; trust = Keeper_sandbox_runner.User_shell
                      }
                in
-               Ok (result.status, result.output))
+               match result.backend_error with
+               | Some msg -> Error msg
+               | None -> Ok (result.status, result.output))
           in
           match gh_process with
           | Error msg ->

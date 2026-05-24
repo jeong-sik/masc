@@ -13,8 +13,8 @@ let has_strict_shell_metachar cmd =
       | _ -> false)
     cmd
 
-(* RFC-0160 S6: private string extractor removed. Callers now route
-   through {!Exec_policy.stage_words_of_string} (single SSOT). *)
+(* RFC-0160 S7: callers route through {!Exec_policy.parse_string_to_ir}
+   + {!Exec_policy_mutation_classifier.flat_stage_words}. *)
 
 (** Top-level gh CLI commands allowed. Commands not in this list are
     rejected at the allowlist gate. *)
@@ -106,7 +106,11 @@ let gh_graphql_r2_mutations =
     "archiverepository" ]
 
 let extract_gh_api_method cmd =
-  let tokens = Exec_policy.stage_words_of_string cmd in
+  let tokens =
+    match Exec_policy.parse_string_to_ir ~mode:Strict cmd with
+    | Ok ir -> Exec_policy_mutation_classifier.flat_stage_words ir
+    | Error _ -> []
+  in
   let rec find = function
     | [] -> "GET"
     | "-X" :: m :: _ | "--method" :: m :: _ -> String.uppercase_ascii m
@@ -147,7 +151,11 @@ let gh_blocked_operations =
     Only the owner segment is returned; repo/branch names are outside
     the allowlist scope. *)
 let extract_gh_repo_owner cmd =
-  let tokens = Exec_policy.stage_words_of_string cmd in
+  let tokens =
+    match Exec_policy.parse_string_to_ir ~mode:Strict cmd with
+    | Ok ir -> Exec_policy_mutation_classifier.flat_stage_words ir
+    | Error _ -> []
+  in
   let owner_of_slug s =
     match String.split_on_char '/' s with
     | owner :: _ :: _ when owner <> "" -> Some owner
@@ -172,7 +180,11 @@ let extract_gh_repo_owner cmd =
     Example: "pr view 123" -> (Some "pr", Some "view")
     Example: "workflow --repo o/r disable" -> (Some "workflow", Some "disable") *)
 let extract_gh_command_pair cmd =
-  let parts = Exec_policy.stage_words_of_string cmd in
+  let parts =
+    match Exec_policy.parse_string_to_ir ~mode:Strict cmd with
+    | Ok ir -> Exec_policy_mutation_classifier.flat_stage_words ir
+    | Error _ -> []
+  in
   match parts with
   | [] -> (None, None)
   | [ x ] -> (Some x, None)
@@ -316,7 +328,11 @@ let classify_gh_reversibility cmd =
     if in_table gh_irreversible_ops then R2_Irreversible
     else if command = "api" then begin
       let method_ = extract_gh_api_method cmd in
-      let parts = Exec_policy.stage_words_of_string cmd in
+      let parts =
+        match Exec_policy.parse_string_to_ir ~mode:Strict cmd with
+        | Ok ir -> Exec_policy_mutation_classifier.flat_stage_words ir
+        | Error _ -> []
+      in
       if method_ = "DELETE" then R2_Irreversible
       else if gh_api_graphql_is_destructive cmd then R2_Irreversible
       else if List.mem method_ ["POST"; "PUT"; "PATCH"] then R1_Reversible
@@ -362,7 +378,9 @@ let positional_tokens parts =
 
 (** Shared tokenizer for destructive-operation checks. *)
 let gh_op_parts cmd =
-  Exec_policy.stage_words_of_string cmd |> List.map String.lowercase_ascii
+  match Exec_policy.parse_string_to_ir ~mode:Strict cmd with
+  | Ok ir -> Exec_policy_mutation_classifier.flat_stage_words ir |> List.map String.lowercase_ascii
+  | Error _ -> []
 
 let has_positional_subcmd subcmds rest =
   let positionals = positional_tokens rest in
@@ -392,7 +410,9 @@ let is_gh_pr_merge cmd =
   | _ -> false
 
 let gh_raw_parts cmd =
-  Exec_policy.stage_words_of_string cmd
+  match Exec_policy.parse_string_to_ir ~mode:Strict cmd with
+  | Ok ir -> Exec_policy_mutation_classifier.flat_stage_words ir
+  | Error _ -> []
 
 let gh_option_takes_value tok =
   let tok = String.lowercase_ascii tok in

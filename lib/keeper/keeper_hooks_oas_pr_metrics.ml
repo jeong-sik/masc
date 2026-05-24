@@ -117,22 +117,28 @@ let pr_work_action_of_git_action raw =
   else None
 
 let pr_work_actions_of_git_segment segment =
-  match Exec_policy_mutation_classifier.argv_words_of_string segment with
-  | Some ("git" :: action :: _) ->
-      pr_work_action_of_git_action action |> Option.to_list
-  | Some ("git" :: []) -> []
-  | Some _ -> []
-  | None ->
-      let lower = String.trim segment |> String.lowercase_ascii in
-      let starts_with_word prefix =
-        String.equal lower prefix
-        || (String.length lower > String.length prefix
-            && String.starts_with ~prefix:(prefix ^ " ") lower)
-      in
-      if starts_with_word "git push" then [ "GIT_PUSH" ]
-      else if starts_with_word "git commit" then [ "GIT_COMMIT" ]
-      else if starts_with_word "git add" then [ "GIT_ADD" ]
-      else []
+  let fallback () =
+    let lower = String.trim segment |> String.lowercase_ascii in
+    let starts_with_word prefix =
+      String.equal lower prefix
+      || (String.length lower > String.length prefix
+          && String.starts_with ~prefix:(prefix ^ " ") lower)
+    in
+    if starts_with_word "git push" then [ "GIT_PUSH" ]
+    else if starts_with_word "git commit" then [ "GIT_COMMIT" ]
+    else if starts_with_word "git add" then [ "GIT_ADD" ]
+    else []
+  in
+  match Exec_policy.parse_string_to_ir ~mode:Strict segment with
+  | Error _ -> fallback ()
+  | Ok (Masc_exec.Shell_ir.Pipeline _) -> fallback ()
+  | Ok (Masc_exec.Shell_ir.Simple simple) ->
+    (match Exec_policy_mutation_classifier.literal_words_of_simple simple with
+     | Some ("git" :: action :: _) ->
+         pr_work_action_of_git_action action |> Option.to_list
+     | Some ("git" :: []) -> []
+     | Some _ -> []
+     | None -> fallback ())
 
 let pr_work_actions_of_gh_segment segment =
   match gh_argv_of_segment segment with

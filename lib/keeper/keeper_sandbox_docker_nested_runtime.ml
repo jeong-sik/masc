@@ -69,13 +69,16 @@ let guard_tokens_of_word acc (word : Exec_policy_mutation_classifier.quoted_word
 ;;
 
 let shell_guard_tokens cmd =
-  Exec_policy_mutation_classifier.stages_quoted_words_of_string cmd
-  |> List.fold_left
-       (fun acc stage ->
-          let acc = List.fold_left guard_tokens_of_word acc stage in
-          Guard_separator :: acc)
-       []
-  |> List.rev
+  match Exec_policy.parse_string_to_ir ~mode:Strict cmd with
+  | Error _ -> []
+  | Ok ir ->
+    Exec_policy_mutation_classifier.stages_quoted_words_of_ir ir
+    |> List.fold_left
+         (fun acc stage ->
+            let acc = List.fold_left guard_tokens_of_word acc stage in
+            Guard_separator :: acc)
+         []
+    |> List.rev
 ;;
 
 let shell_assignment_like word =

@@ -5,9 +5,7 @@ val allowed_shell_commands : string list
 
 val code_shell_command_context
   :  string
-  -> (Masc_exec_command_gate.Shell_command_gate.parsed_context,
-      Exec_policy.block_reason)
-     result
+  -> (Masc_exec_command_gate.Shell_command_gate.parsed_context, string) result
 
 val validate_code_shell_command : string -> (unit, string) result
 

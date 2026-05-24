@@ -1,4 +1,4 @@
-(** Mutation/destructive command classifiers — IR-typed.
+(** Mutation/destructive command classifiers -- IR-typed.
 
     RFC-0160 S4: [_of_string] wrappers removed. All callers must
     pass [Shell_ir.t] directly. *)
@@ -9,7 +9,7 @@ open Masc_exec
 
 (** Extract literal words from a single [Shell_ir.simple] stage:
     [[bin; arg0; arg1; ...]]. Non-literal args ([Concat], [Var])
-    abort the extraction by returning [None] — these were valid IR
+    abort the extraction by returning [None] -- these were valid IR
     parses but cannot be matched against the closed sub-command set,
     so they fall through to a [false] classification (mirroring the
     string-era behavior where the legacy tokenizer also returned [Ok]
@@ -109,6 +109,10 @@ let is_git_branch_switch (ir : Shell_ir.t) : bool =
   | _ :: _ -> false
 ;;
 
+let is_write_operation (ir : Shell_ir.t) : bool =
+  Masc_exec.Shell_ir_risk.is_write_operation (flat_stage_words ir)
+;;
+
 let is_destructive_bash_operation (ir : Shell_ir.t) : bool =
   let parts = flat_stage_words ir in
   let is_short_option arg = String.length arg > 1 && arg.[0] = '-' && arg.[1] <> '-' in
@@ -175,78 +179,19 @@ let is_destructive_bash_operation (ir : Shell_ir.t) : bool =
    structural classifier. *)
 ;;
 
-(** Shared shell-word extractor (single source of truth for what
-    used to be duplicated string-extractor copies). Returns
-    the flattened literal stage words across all pipeline segments
-    ([[]] on parse failure or non-literal-only stages).
-
-    Callers that already have [Shell_ir.t] should use
-    {!flat_stage_words} directly. *)
-let stage_words_of_string (cmd : string) : string list =
-  match Masc_exec_bash_parser.Bash.parse_string cmd with
-  | Parsed.Parsed ir -> flat_stage_words ir
-  | Parsed.Parse_error _ -> []
-  | Parsed.Parse_aborted _ -> []
-  | Parsed.Too_complex _ -> []
-;;
-
-(** RFC-0160 S6b: Result-shaped variant that preserves the parse-failure
-    signal. [stage_words_of_string] collapses failure to [[]] which suits
-    classifiers (fail-closed = false). [_result] keeps [Error ()] so
-    callers that route on failure (e.g. log sanitizer's sensitive-marker
-    fallback) can branch.
-
-    Single IR producer (raw-string parser) for both shapes — replaces
-    the legacy tokenizer-based string-extractor copy in
-    [exec_policy_log_sanitize]. *)
-let stage_words_of_string_result (cmd : string) : (string list, unit) result =
-  match Masc_exec_bash_parser.Bash.parse_string cmd with
-  | Parsed.Parsed ir -> Ok (flat_stage_words ir)
-  | Parsed.Parse_error _ -> Error ()
-  | Parsed.Parse_aborted _ -> Error ()
-  | Parsed.Too_complex _ -> Error ()
-;;
-
-(** Parse a string as a single simple command and extract its argv words.
-    Returns [None] for pipelines, parse errors, or non-literal args.
-    Replaces the duplicate parse in [Exec_policy_command_syntax.argv_words_of_split_string]. *)
-let argv_words_of_string text =
-  match Masc_exec_bash_parser.Bash.parse_string text with
-  | Parsed.Parsed (Shell_ir.Simple simple) -> literal_words_of_simple simple
-  | Parsed.Parsed (Shell_ir.Pipeline _) -> None
-  | Parsed.Parse_error _ -> None
-  | Parsed.Parse_aborted _ -> None
-  | Parsed.Too_complex _ -> None
-;;
-
-(** Expose the raw parser result so that callers needing
-    [Shell_ir.t Parsed.t] (e.g. gh command validation) don't need to
-    import [Masc_exec_bash_parser] directly. *)
-let parsed_of_string text =
-  Masc_exec_bash_parser.Bash.parse_string text
-;;
-
-(** Multi-stage word extractor: returns per-stage word lists, preserving
-    pipeline structure. Replaces the legacy stage-extraction callers that
-    need stage boundaries (e.g. [Exec_core.command_word_stages]).
-    Returns [[]] on parse failure or non-literal-only stages. *)
-let stages_words_of_string (cmd : string) : string list list =
-  let stage_words_of_ir (ir : Shell_ir.t) : string list list =
-    let rec collect acc = function
-      | Shell_ir.Simple s ->
-        (match literal_words_of_simple s with
-         | Some ws -> ws :: acc
-         | None -> acc)
-      | Shell_ir.Pipeline stages ->
-        List.fold_left collect acc stages
-    in
-    List.rev (collect [] ir)
+(** Multi-stage word extractor: per-stage word lists preserving pipeline
+    structure. Replaces the legacy stage-extraction callers
+    (e.g. [Exec_core.command_word_stages]). *)
+let stages_words_of_ir (ir : Shell_ir.t) : string list list =
+  let rec collect acc = function
+    | Shell_ir.Simple s ->
+      (match literal_words_of_simple s with
+       | Some ws -> ws :: acc
+       | None -> acc)
+    | Shell_ir.Pipeline stages ->
+      List.fold_left collect acc stages
   in
-  match Masc_exec_bash_parser.Bash.parse_string cmd with
-  | Parsed.Parsed ir -> stage_words_of_ir ir
-  | Parsed.Parse_error _ -> []
-  | Parsed.Parse_aborted _ -> []
-  | Parsed.Too_complex _ -> []
+  List.rev (collect [] ir)
 ;;
 
 type quoted_word = {
@@ -254,11 +199,11 @@ type quoted_word = {
   quoted : bool;
 }
 
-(** Extract per-stage word lists with quoting metadata.
+(** Per-stage word extraction with quoting metadata.
     Replaces the legacy quoted-word extraction callers that depend on
     [word.quoted] (e.g. guard token extraction). Non-literal args
-    ([Concat], [Var]) are skipped. Returns [[]] on parse failure. *)
-let stages_quoted_words_of_string (cmd : string) : quoted_word list list =
+    ([Concat], [Var]) are skipped. *)
+let stages_quoted_words_of_ir (ir : Shell_ir.t) : quoted_word list list =
   let words_of_simple (simple : Shell_ir.simple) : quoted_word list option =
     let rec collect acc = function
       | [] -> Some (List.rev acc)
@@ -279,9 +224,5 @@ let stages_quoted_words_of_string (cmd : string) : quoted_word list list =
     | Shell_ir.Pipeline stages ->
       List.fold_left collect acc stages
   in
-  match Masc_exec_bash_parser.Bash.parse_string cmd with
-  | Parsed.Parsed ir -> List.rev (collect [] ir)
-  | Parsed.Parse_error _ -> []
-  | Parsed.Parse_aborted _ -> []
-  | Parsed.Too_complex _ -> []
+  List.rev (collect [] ir)
 ;;

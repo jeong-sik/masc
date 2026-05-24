@@ -19,42 +19,47 @@ val block_reason_to_string : block_reason -> string
 val block_reason_to_string_with_allowlist :
   allowed_commands:string list -> block_reason -> string
 
+type parse_mode = Strict | Coding
+
+val parse_string_to_ir :
+  mode:parse_mode -> string -> (Masc_exec.Shell_ir.t, block_reason) result
+
 val dev_allowed_commands : string list
 
 val command_context_with_allowlist :
   ?caller:Masc_exec_command_gate.Shell_command_gate.caller ->
   allowed_commands:string list ->
-  string ->
+  Masc_exec.Shell_ir.t ->
   (Masc_exec_command_gate.Shell_command_gate.parsed_context, block_reason) result
 
 val validate_command_with_allowlist :
   ?caller:Masc_exec_command_gate.Shell_command_gate.caller ->
   allowed_commands:string list ->
-  string ->
+  Masc_exec.Shell_ir.t ->
   (unit, block_reason) result
 
 val validate_command :
   ?caller:Masc_exec_command_gate.Shell_command_gate.caller ->
-  string ->
+  Masc_exec.Shell_ir.t ->
   (unit, block_reason) result
 
 val command_context_coding_with_allowlist :
   ?caller:Masc_exec_command_gate.Shell_command_gate.caller ->
   ?allow_pipes:bool ->
   allowed_commands:string list ->
-  string ->
+  Masc_exec.Shell_ir.t ->
   (Masc_exec_command_gate.Shell_command_gate.parsed_context, block_reason) result
 
 val validate_command_coding_with_allowlist :
   ?caller:Masc_exec_command_gate.Shell_command_gate.caller ->
   ?allow_pipes:bool ->
   allowed_commands:string list ->
-  string ->
+  Masc_exec.Shell_ir.t ->
   (unit, block_reason) result
 
 val validate_command_coding :
   ?caller:Masc_exec_command_gate.Shell_command_gate.caller ->
-  string ->
+  Masc_exec.Shell_ir.t ->
   (unit, block_reason) result
 
 val simple_literal_args : Masc_exec.Shell_ir.simple -> string list option
@@ -77,10 +82,8 @@ val is_destructive_bash_operation : Masc_exec.Shell_ir.t -> bool
     Replaces the historical string-era extractors. *)
 val flat_stage_words : Masc_exec.Shell_ir.t -> string list
 
-val stage_words_of_string : string -> string list
-(** Parse a raw command string and flatten literal stage words.
-    Compatibility entrypoint for legacy string callers; typed paths should
-    prefer {!flat_stage_words}. *)
+(** All typed callers now route through {!parse_string_to_ir} +
+    {!Exec_policy_mutation_classifier.flat_stage_words}. *)
 
 val sanitize_command_for_log : string -> string
 val sanitize_command_for_log_of_ir :

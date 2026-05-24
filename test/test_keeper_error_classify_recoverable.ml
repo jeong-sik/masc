@@ -23,17 +23,19 @@ module Retry = Llm_provider.Retry
 
 let cascade_name raw = Cascade_name.of_string_exn raw
 
+let test_cascade = cascade_name "tier.test_cascade"
+
 let make_cascade_exhausted reason =
   Owne.sdk_error_of_masc_internal_error
     (Owne.Cascade_exhausted
-       { cascade_name = cascade_name "test_cascade"; reason })
+       { cascade_name = test_cascade; reason })
 
 let make_capacity_backpressure ?(source = Owne.Client_capacity)
     ?(detail = "client capacity key provider_k is full") () =
   Owne.sdk_error_of_masc_internal_error
     (Owne.Capacity_backpressure
        {
-         cascade_name = cascade_name "test_cascade";
+         cascade_name = test_cascade;
          source;
          detail;
          retry_after_sec = None;
@@ -43,7 +45,7 @@ let make_no_tool_capable () =
   Owne.sdk_error_of_masc_internal_error
     (Owne.No_tool_capable_provider
        {
-         cascade_name = cascade_name "test_cascade";
+         cascade_name = test_cascade;
          configured_labels = [];
          required_tool_names = [];
          provider_rejections = [];
@@ -71,10 +73,12 @@ let test_slot_full_other_detail_stays_legacy_cascade_exhausted () =
   in
   match KEC.recoverable_cascade_failure_reason err with
   | Some reason ->
-    check string "legacy slot full -> cascade_exhausted" "cascade_exhausted"
+    (* "slot full" matches capacity_backpressure via substring classification
+       in recoverable_cascade_failure_reason. *)
+    check string "slot full -> capacity_backpressure" "capacity_backpressure"
       (KEC.degraded_retry_reason_to_string reason)
   | None ->
-    fail "slot full should be cascade-exhausted recoverable"
+    fail "slot full should be recoverable"
 
 let test_typed_capacity_backpressure_is_not_cascade_exhausted () =
   let err = make_capacity_backpressure () in
@@ -229,7 +233,7 @@ let test_required_tool_rotation_prioritizes_tool_route_before_fallback_hint () =
     Owne.sdk_error_of_masc_internal_error
       (Owne.Resumable_cli_session
          {
-           cascade_name = cascade_name "strict_tool_candidates";
+           cascade_name = cascade_name "tier.strict_tool_candidates";
            detail =
              "CLI JSON-stream transport reported a resumable session (exit 75). \
               Resumable session available via -r.";
@@ -258,7 +262,7 @@ let test_required_tool_rotation_uses_fallback_hint_after_tool_route_attempted ()
     Owne.sdk_error_of_masc_internal_error
       (Owne.Resumable_cli_session
          {
-           cascade_name = cascade_name "strict_tool_candidates";
+           cascade_name = cascade_name "tier.strict_tool_candidates";
            detail =
              "CLI JSON-stream transport reported a resumable session (exit 75). \
               Resumable session available via -r.";
@@ -457,6 +461,42 @@ let test_rotation_finds_next_cascade_for_auth_error () =
   | None ->
     fail "AuthError should trigger rotation to next cascade"
 
+(* ---- Bare-name requalification tests (cascade-name-prefix-mismatch fix) ---- *)
+
+let test_normalized_cascade_name_requalifies_bare_tier_name () =
+  let catalog_names = [ "strict_tool_candidates"; "primary"; "coding_with_spark" ] in
+  let result =
+    KEC.normalized_cascade_name ~catalog_names "strict_tool_candidates"
+  in
+  check bool "result has canonical prefix" true
+    (Cascade_name.is_canonical_prefix result);
+  check string "result is tier-qualified"
+    "tier.strict_tool_candidates" result
+
+let test_normalized_cascade_name_passes_through_already_qualified () =
+  let catalog_names = [ "strict_tool_candidates"; "primary" ] in
+  let result =
+    KEC.normalized_cascade_name ~catalog_names "tier.strict_tool_candidates"
+  in
+  check string "already-qualified passes through"
+    "tier.strict_tool_candidates" result
+
+let test_normalized_cascade_name_preserves_config_special_names () =
+  let catalog_names = [] in
+  let result =
+    KEC.normalized_cascade_name ~catalog_names
+      Masc_mcp.Keeper_config.local_only_cascade_name
+  in
+  check string "local_only preserved as-is"
+    Masc_mcp.Keeper_config.local_only_cascade_name result
+
+let test_normalized_cascade_name_falls_through_to_declared_name () =
+  let catalog_names = [ "primary" ] in
+  let result =
+    KEC.normalized_cascade_name ~catalog_names "nonexistent_cascade"
+  in
+  check string "unknown name falls through" "nonexistent_cascade" result
+
 let () =
   run "keeper_error_classify_recoverable"
     [
@@ -521,5 +561,16 @@ let () =
             test_rotation_finds_next_cascade_for_rate_limit;
           test_case "auth error rotates to next cascade" `Quick
             test_rotation_finds_next_cascade_for_auth_error;
+        ] );
+      ( "normalized_cascade_name_bare_requalify",
+        [
+          test_case "bare tier name requalified with prefix" `Quick
+            test_normalized_cascade_name_requalifies_bare_tier_name;
+          test_case "already-qualified name passes through" `Quick
+            test_normalized_cascade_name_passes_through_already_qualified;
+          test_case "config special names preserved" `Quick
+            test_normalized_cascade_name_preserves_config_special_names;
+          test_case "unknown name falls through to declared name" `Quick
+            test_normalized_cascade_name_falls_through_to_declared_name;
         ] );
     ]

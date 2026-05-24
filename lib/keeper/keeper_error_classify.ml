@@ -564,6 +564,19 @@ let recoverable_cascade_failure_reason (err : Agent_sdk.Error.sdk_error) =
          | Agent_sdk.Error.A2a _
          | Agent_sdk.Error.Internal _ -> None)
 
+let requalify_bare_catalog_name bare =
+  let tier_q = "tier." ^ bare in
+  let tg_q = "tier-group." ^ bare in
+  (* Prefer tier. over tier-group. when both collide — in practice
+     catalog_names strips both, but the qualified form disambiguates. *)
+  match
+    Cascade_name.of_string tier_q |> Result.is_ok,
+    Cascade_name.of_string tg_q |> Result.is_ok
+  with
+  | true, _ -> tier_q
+  | false, true -> tg_q
+  | false, false -> bare
+
 let normalized_cascade_name ~catalog_names name =
   let trimmed = String.trim name in
   let is_live_catalog_profile =
@@ -571,13 +584,19 @@ let normalized_cascade_name ~catalog_names name =
   in
   (* Fallback candidates are concrete catalog profiles, not keeper-declared
      logical routes.  Preserve live profile names like [local_recovery] so a
-     fallback_cascade does not collapse back to routes.phase_recovery. *)
+     fallback_cascade does not collapse back to routes.phase_recovery.
+     When the input is a bare catalog name (stripped of tier/tier-group
+     prefix), re-qualify it so downstream [Cascade_name.of_string_exn]
+     does not crash on the missing canonical prefix. *)
   if
     is_live_catalog_profile
     || String.equal trimmed Keeper_config.local_only_cascade_name
     || String.equal trimmed Keeper_config.local_recovery_cascade_name
     || String.equal trimmed Keeper_config.tool_use_strict_cascade_name
-  then trimmed
+  then
+    if is_live_catalog_profile && not (Cascade_name.is_canonical_prefix trimmed)
+    then requalify_bare_catalog_name trimmed
+    else trimmed
   else Keeper_cascade_profile.normalize_declared_name trimmed
 
 let strip_prefix ~prefix value =

@@ -7,7 +7,7 @@
 #
 # Background: PR #11080 fixed the host path leak in
 # keeper_status_detail.execution_context. Sibling response builders
-# in keeper_shell_docker.ml and keeper_exec_shell.ml had the same
+# in the sandbox Docker and keeper shell execution paths had the same
 # bug class — Docker `--workdir` was translated to the in-container
 # path, but the response JSON echoed the host abs path, so the LLM
 # emitted `cd /Users/...` on the next turn (invalid inside the
@@ -64,7 +64,7 @@ if [ "${failures}" -gt 0 ]; then
   echo "${failures} host_cwd leak(s) detected near a (\"via\", \`String \"docker\") tag." >&2
   echo "Wire the response builder through Keeper_cwd_response.to_yojson_response." >&2
   echo "Reference: lib/keeper/keeper_cwd_response.mli (PR #11323), and the wiring patterns in" >&2
-  echo "  lib/keeper/keeper_shell_docker.ml (PR #11336)" >&2
+  echo "  lib/keeper/keeper_sandbox_docker.ml" >&2
   echo "  lib/keeper/keeper_exec_shell.ml (PR #11349)" >&2
   exit 1
 fi

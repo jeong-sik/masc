@@ -43,6 +43,15 @@ and public tool aliases.
    Git/GitHub domain modules or native PR tools. The structured
    `keeper_shell op=gh` path should be a compatibility surface, not the
    center of GitHub execution.
+   Started in slice 3:
+   - `Keeper_shell_gh_bridge` now owns `keeper_shell op=gh`
+     parsing, policy checks, repo-context binding, and
+     `Keeper_sandbox_runner` dispatch.
+   - `keeper_shell_ops.ml` delegates `op=gh` to the bridge instead of
+     carrying GitHub command semantics inline.
+   - `test_keeper_shell_gh_bridge` uses an injected mock runner to
+     verify backend routing and structured backend-error preservation
+     without invoking Docker or `gh`.
 
 4. Collapse local-vs-Docker result shaping so command failures carry the
    same semantic fields regardless of backend. Backend-specific details
@@ -58,5 +67,10 @@ and public tool aliases.
   behavior while names and ownership move.
 - `test_keeper_sandbox_runner` uses a mock backend to verify the facade
   delegates user-shell and trusted-tool commands without invoking Docker.
+- `test_keeper_shell_gh_bridge` uses a mock runner to pin `op=gh`
+  compatibility behavior without invoking Docker or `gh`.
 - The boundary test now fails if PR/GitHub tool modules select the
   concrete Docker backend directly.
+- The boundary test now fails if `keeper_shell_ops.ml` reabsorbs
+  `op=gh` command semantics or active gate scripts name retired
+  `keeper_shell_docker` files.

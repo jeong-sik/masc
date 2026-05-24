@@ -26,67 +26,51 @@ let public_runtime_lane_label model_key =
 (* ── JSON serialization ─────────────────────────────────── *)
 
 let bucket_metric_to_json (b : bucket_metric) : Yojson.Safe.t =
-  let opt_float = function
-    | Some f -> `Float f
-    | None -> `Null
-  in
   `Assoc
     [ "ts_start", `Float b.b_ts_start
     ; "entry_count", `Int b.b_entry_count
     ; "success_count", `Int b.b_success_count
     ; "error_count", `Int b.b_error_count
-    ; "p50_latency_ms", opt_float b.b_p50_latency_ms
-    ; "p95_latency_ms", opt_float b.b_p95_latency_ms
+    ; "p50_latency_ms", Json_util.float_opt_to_json b.b_p50_latency_ms
+    ; "p95_latency_ms", Json_util.float_opt_to_json b.b_p95_latency_ms
     ; "error_rate", `Float b.b_error_rate
-    ; "total_cost_usd", opt_float b.b_total_cost_usd
-    ; "cache_hit_ratio", opt_float b.b_cache_hit_ratio
+    ; "total_cost_usd", Json_util.float_opt_to_json b.b_total_cost_usd
+    ; "cache_hit_ratio", Json_util.float_opt_to_json b.b_cache_hit_ratio
     ]
 ;;
 
 let model_stats_to_json ?(model_label = public_runtime_label) (s : model_stats)
   : Yojson.Safe.t
   =
-  let opt_float = function
-    | Some f -> `Float f
-    | None -> `Null
-  in
-  let opt_int = function
-    | Some n -> `Int n
-    | None -> `Null
-  in
-  let opt_string = function
-    | Some s -> `String s
-    | None -> `Null
-  in
   `Assoc
     [ "model_id", `String model_label
     ; "provider", `Null
     ; "entry_count", `Int s.entry_count
-    ; "avg_tok_per_sec", opt_float s.avg_tok_per_sec
-    ; "p50_tok_per_sec", opt_float s.p50_tok_per_sec
-    ; "p95_tok_per_sec", opt_float s.p95_tok_per_sec
-    ; "prompt_avg_tok_per_sec", opt_float s.prompt_avg_tok_per_sec
-    ; "prompt_p50_tok_per_sec", opt_float s.prompt_p50_tok_per_sec
-    ; "prompt_p95_tok_per_sec", opt_float s.prompt_p95_tok_per_sec
-    ; "hw_decode_avg_tok_per_sec", opt_float s.hw_decode_avg_tok_per_sec
-    ; "hw_decode_p50_tok_per_sec", opt_float s.hw_decode_p50_tok_per_sec
-    ; "hw_decode_p95_tok_per_sec", opt_float s.hw_decode_p95_tok_per_sec
-    ; "max_peak_memory_gb", opt_float s.max_peak_memory_gb
-    ; "thinking_fraction", opt_float s.thinking_fraction
-    ; "avg_latency_ms", opt_float s.avg_latency_ms
-    ; "p50_latency_ms", opt_float s.p50_latency_ms
-    ; "p95_latency_ms", opt_float s.p95_latency_ms
-    ; "total_input_tokens", opt_int s.total_input_tokens
-    ; "total_output_tokens", opt_int s.total_output_tokens
-    ; "total_cache_read_tokens", opt_int s.total_cache_read_tokens
-    ; "total_reasoning_tokens", opt_int s.total_reasoning_tokens
+    ; "avg_tok_per_sec", Json_util.float_opt_to_json s.avg_tok_per_sec
+    ; "p50_tok_per_sec", Json_util.float_opt_to_json s.p50_tok_per_sec
+    ; "p95_tok_per_sec", Json_util.float_opt_to_json s.p95_tok_per_sec
+    ; "prompt_avg_tok_per_sec", Json_util.float_opt_to_json s.prompt_avg_tok_per_sec
+    ; "prompt_p50_tok_per_sec", Json_util.float_opt_to_json s.prompt_p50_tok_per_sec
+    ; "prompt_p95_tok_per_sec", Json_util.float_opt_to_json s.prompt_p95_tok_per_sec
+    ; "hw_decode_avg_tok_per_sec", Json_util.float_opt_to_json s.hw_decode_avg_tok_per_sec
+    ; "hw_decode_p50_tok_per_sec", Json_util.float_opt_to_json s.hw_decode_p50_tok_per_sec
+    ; "hw_decode_p95_tok_per_sec", Json_util.float_opt_to_json s.hw_decode_p95_tok_per_sec
+    ; "max_peak_memory_gb", Json_util.float_opt_to_json s.max_peak_memory_gb
+    ; "thinking_fraction", Json_util.float_opt_to_json s.thinking_fraction
+    ; "avg_latency_ms", Json_util.float_opt_to_json s.avg_latency_ms
+    ; "p50_latency_ms", Json_util.float_opt_to_json s.p50_latency_ms
+    ; "p95_latency_ms", Json_util.float_opt_to_json s.p95_latency_ms
+    ; "total_input_tokens", Json_util.int_opt_to_json s.total_input_tokens
+    ; "total_output_tokens", Json_util.int_opt_to_json s.total_output_tokens
+    ; "total_cache_read_tokens", Json_util.int_opt_to_json s.total_cache_read_tokens
+    ; "total_reasoning_tokens", Json_util.int_opt_to_json s.total_reasoning_tokens
     ; "usage_sample_count", `Int s.usage_sample_count
     ; "telemetry_sample_count", `Int s.telemetry_sample_count
     ; "usage_missing_count", `Int s.usage_missing_count
     ; "telemetry_missing_count", `Int s.telemetry_missing_count
     ; "coverage_status", `String s.coverage_status
-    ; "primary_coverage_stage", opt_string s.primary_coverage_stage
-    ; "primary_coverage_reason", opt_string s.primary_coverage_reason
+    ; "primary_coverage_stage", Json_util.string_opt_to_json s.primary_coverage_stage
+    ; "primary_coverage_reason", Json_util.string_opt_to_json s.primary_coverage_reason
     ; ( "coverage_reason_counts"
       , `List
           (List.map
@@ -96,7 +80,7 @@ let model_stats_to_json ?(model_label = public_runtime_label) (s : model_stats)
     ; "fallback_count", `Int s.fallback_count
     ; "success_count", `Int s.success_count
     ; "error_count", `Int s.error_count
-    ; "total_cost_usd", opt_float s.total_cost_usd
+    ; "total_cost_usd", Json_util.float_opt_to_json s.total_cost_usd
     ; "avg_tool_calls_per_turn", `Float s.avg_tool_calls_per_turn
     ; "total_tool_calls", `Int s.total_tool_calls
     ; ( "top_tools"
@@ -112,14 +96,14 @@ let model_stats_to_json ?(model_label = public_runtime_label) (s : model_stats)
                   [ "ts_unix", `Float r.re_ts_unix
                   ; "provider", `Null
                   ; "outcome", `String r.re_outcome
-                  ; "stop_reason", opt_string r.re_stop_reason
-                  ; "turn_lane", opt_string r.re_turn_lane
-                  ; "input_tokens", opt_int r.re_input_tokens
-                  ; "output_tokens", opt_int r.re_output_tokens
-                  ; "latency_ms", opt_float r.re_latency_ms
-                  ; "prompt_tok_per_sec", opt_float r.re_prompt_tok_per_sec
-                  ; "peak_memory_gb", opt_float r.re_peak_memory_gb
-                  ; "cost_usd", opt_float r.re_cost_usd
+                  ; "stop_reason", Json_util.string_opt_to_json r.re_stop_reason
+                  ; "turn_lane", Json_util.string_opt_to_json r.re_turn_lane
+                  ; "input_tokens", Json_util.int_opt_to_json r.re_input_tokens
+                  ; "output_tokens", Json_util.int_opt_to_json r.re_output_tokens
+                  ; "latency_ms", Json_util.float_opt_to_json r.re_latency_ms
+                  ; "prompt_tok_per_sec", Json_util.float_opt_to_json r.re_prompt_tok_per_sec
+                  ; "peak_memory_gb", Json_util.float_opt_to_json r.re_peak_memory_gb
+                  ; "cost_usd", Json_util.float_opt_to_json r.re_cost_usd
                   ; "tools_count", `Int r.re_tools_count
                   ; ( "usage_reported"
                     , match r.re_usage_reported with
@@ -129,14 +113,14 @@ let model_stats_to_json ?(model_label = public_runtime_label) (s : model_stats)
                     , match r.re_telemetry_reported with
                       | Some value -> `Bool value
                       | None -> `Null )
-                  ; "usage_trust", opt_string r.re_usage_trust
+                  ; "usage_trust", Json_util.string_opt_to_json r.re_usage_trust
                   ; ( "usage_anomaly_reasons"
                     , `List
                         (List.map
                            (fun reason -> `String reason)
                            r.re_usage_anomaly_reasons) )
-                  ; "coverage_reason", opt_string r.re_coverage_reason
-                  ; "coverage_stage", opt_string r.re_coverage_stage
+                  ; "coverage_reason", Json_util.string_opt_to_json r.re_coverage_reason
+                  ; "coverage_stage", Json_util.string_opt_to_json r.re_coverage_stage
                   ])
              s.recent_entries) )
     ; "buckets", `List (List.map bucket_metric_to_json s.buckets)
@@ -279,21 +263,17 @@ let render_keeper_prompt_feedback (agg : aggregate) =
 (* ── Provider stats JSON ────────────────────────────────── *)
 
 let provider_stats_to_json (s : provider_stats) : Yojson.Safe.t =
-  let opt_float = function
-    | Some f -> `Float f
-    | None -> `Null
-  in
   `Assoc
     [ "provider", `String public_runtime_label
     ; "entry_count", `Int s.ps_entry_count
     ; "model_count", `Int 0
-    ; "avg_tok_per_sec", opt_float s.ps_avg_tok_per_sec
-    ; "avg_prompt_tok_per_sec", opt_float s.ps_avg_prompt_tok_per_sec
-    ; "avg_decode_tok_per_sec", opt_float s.ps_avg_decode_tok_per_sec
-    ; "avg_latency_ms", opt_float s.ps_avg_latency_ms
-    ; "p50_latency_ms", opt_float s.ps_p50_latency_ms
-    ; "p95_latency_ms", opt_float s.ps_p95_latency_ms
-    ; "total_cost_usd", opt_float s.ps_total_cost_usd
+    ; "avg_tok_per_sec", Json_util.float_opt_to_json s.ps_avg_tok_per_sec
+    ; "avg_prompt_tok_per_sec", Json_util.float_opt_to_json s.ps_avg_prompt_tok_per_sec
+    ; "avg_decode_tok_per_sec", Json_util.float_opt_to_json s.ps_avg_decode_tok_per_sec
+    ; "avg_latency_ms", Json_util.float_opt_to_json s.ps_avg_latency_ms
+    ; "p50_latency_ms", Json_util.float_opt_to_json s.ps_p50_latency_ms
+    ; "p95_latency_ms", Json_util.float_opt_to_json s.ps_p95_latency_ms
+    ; "total_cost_usd", Json_util.float_opt_to_json s.ps_total_cost_usd
     ]
 ;;
 
@@ -305,10 +285,6 @@ let provider_stats_to_json (s : provider_stats) : Yojson.Safe.t =
    derived from that single pass. *)
 
 let compute_cost_latency_json ~base_path ~window_minutes : Yojson.Safe.t =
-  let opt_float = function
-    | Some f -> `Float f
-    | None -> `Null
-  in
   let since_unix = Time_compat.now () -. (Float.of_int window_minutes *. 60.0) in
   let entries = read_all_entries ~base_path ~since_unix in
   let model_stats_list = aggregate_by_model entries in
@@ -331,8 +307,8 @@ let compute_cost_latency_json ~base_path ~window_minutes : Yojson.Safe.t =
         (* sound-partial: allow missing cost in legacy rows; absence means zero
            observed spend, not a provider/model routing choice. *)
         ; "cost", `Float (Option.value ~default:0.0 m.total_cost_usd)
-        ; "p50_ms", opt_float m.p50_latency_ms
-        ; "p95_ms", opt_float m.p95_latency_ms
+        ; "p50_ms", Json_util.float_opt_to_json m.p50_latency_ms
+        ; "p95_ms", Json_util.float_opt_to_json m.p95_latency_ms
         ])
   in
   (* Public matrix keeps cost shape without exporting provider/model identities. *)
@@ -394,8 +370,8 @@ let compute_cost_latency_json ~base_path ~window_minutes : Yojson.Safe.t =
           ; "grid", `List grid
           ] )
     ; "latencyBuckets", `List (List.map latency_bucket_to_json latency_buckets)
-    ; "p50", opt_float global_p50
-    ; "p95", opt_float global_p95
+    ; "p50", Json_util.float_opt_to_json global_p50
+    ; "p95", Json_util.float_opt_to_json global_p95
     ; "total_cost_usd", `Float total_cost_usd
     ; "window_minutes", `Int window_minutes
     ; "generated_at", `Float (Time_compat.now ())

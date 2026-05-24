@@ -69,10 +69,6 @@ let provider_entry_to_json
       (info : Health.provider_info)
   : Yojson.Safe.t
   =
-  let opt_float = function
-    | Some f -> `Float f
-    | None -> `Null
-  in
   let trust_score = Cascade_trust.trust_score info in
   let health_score =
     let score = Float.max 0.0 (Float.min 1.0 trust_score) in
@@ -96,12 +92,12 @@ let provider_entry_to_json
       ; "request_count", `Null
       ]
     | Some (stats : Model_inference_metrics.provider_stats) ->
-      [ "avg_prompt_tok_per_sec", opt_float stats.ps_avg_prompt_tok_per_sec
-      ; "avg_decode_tok_per_sec", opt_float stats.ps_avg_decode_tok_per_sec
-      ; "avg_tok_per_sec", opt_float stats.ps_avg_tok_per_sec
-      ; "avg_latency_ms", opt_float stats.ps_avg_latency_ms
-      ; "p50_latency_ms", opt_float stats.ps_p50_latency_ms
-      ; "p95_latency_ms", opt_float stats.ps_p95_latency_ms
+      [ "avg_prompt_tok_per_sec", Json_util.float_opt_to_json stats.ps_avg_prompt_tok_per_sec
+      ; "avg_decode_tok_per_sec", Json_util.float_opt_to_json stats.ps_avg_decode_tok_per_sec
+      ; "avg_tok_per_sec", Json_util.float_opt_to_json stats.ps_avg_tok_per_sec
+      ; "avg_latency_ms", Json_util.float_opt_to_json stats.ps_avg_latency_ms
+      ; "p50_latency_ms", Json_util.float_opt_to_json stats.ps_p50_latency_ms
+      ; "p95_latency_ms", Json_util.float_opt_to_json stats.ps_p95_latency_ms
       ; "request_count", `Int stats.ps_entry_count
       ]
   in
@@ -133,10 +129,10 @@ let provider_entry_to_json
        can show "which error keeps recurring" alongside the existing
        success-rate snapshot. *)
        "top_fingerprints", top_fingerprints_json
-     ; "last_failure_at", opt_float info.last_failure_at
+     ; "last_failure_at", Json_util.float_opt_to_json info.last_failure_at
      ; "declared", `Bool declared
      ; "status", `String (provider_status info)
-     ; "avg_confidence", opt_float info.avg_confidence
+     ; "avg_confidence", Json_util.float_opt_to_json info.avg_confidence
      ; "confidence_samples", `Int info.confidence_samples
      ]
      @ perf_fields)

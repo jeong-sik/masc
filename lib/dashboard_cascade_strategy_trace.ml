@@ -4,10 +4,6 @@
 open Dashboard_cascade_helpers
 
 let strategy_trace_event_to_json (ev : Cascade_strategy_trace.event) : Yojson.Safe.t =
-  let opt_float = function
-    | Some f -> `Float f
-    | None -> `Null
-  in
   let cascade_name = Cascade_name.to_string ev.cascade_name in
   let trace_id_json =
     match ev.trace_id with
@@ -24,7 +20,7 @@ let strategy_trace_event_to_json (ev : Cascade_strategy_trace.event) : Yojson.Sa
     ; "backoff_ms", `Int ev.backoff_ms
     ; "kind", `String (Cascade_strategy_trace.kind_to_string ev.kind)
     ; "trace_id", trace_id_json
-    ; "confidence_score", opt_float ev.confidence_score
+    ; "confidence_score", Json_util.float_opt_to_json ev.confidence_score
     ]
 ;;
 

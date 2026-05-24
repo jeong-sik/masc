@@ -122,6 +122,12 @@ let ir_detail_tag = function
   | Gate.Too_complex { reason } -> Some (Gate.too_complex_reason_tag reason)
 ;;
 
+let validate_worker_coding_raw ~allowed_commands raw_cmd =
+  match Masc_mcp.Exec_policy.parse_string_to_ir ~mode:Coding raw_cmd with
+  | Error reason -> Error reason
+  | Ok ir -> W.validate_command_coding_with_allowlist ~allowed_commands ir
+;;
+
 let run_corpus_row fixture =
   let label =
     Printf.sprintf
@@ -132,7 +138,7 @@ let run_corpus_row fixture =
        else fixture.raw_cmd)
   in
   let worker =
-    W.validate_command_coding_with_allowlist ~allowed_commands:allowed fixture.raw_cmd
+    validate_worker_coding_raw ~allowed_commands:allowed fixture.raw_cmd
   in
   Alcotest.(check string)
     (label ^ " worker verdict")

@@ -4,6 +4,42 @@
 open Agent_sdk
 open Masc_mcp
 
+module Raw_worker_dev_tools = Worker_dev_tools
+module Worker_dev_tools = struct
+  include Raw_worker_dev_tools
+
+  let validate_text ~mode command f =
+    match Exec_policy.parse_string_to_ir ~mode command with
+    | Error reason -> Error reason
+    | Ok ir -> f ir
+
+  let validate_command ?caller command =
+    validate_text
+      ~mode:Exec_policy.Strict
+      command
+      (Raw_worker_dev_tools.validate_command ?caller)
+
+  let validate_command_coding ?caller command =
+    validate_text
+      ~mode:Exec_policy.Coding
+      command
+      (Raw_worker_dev_tools.validate_command_coding ?caller)
+
+  let validate_command_coding_with_allowlist
+        ?caller
+        ?allow_pipes
+        ~allowed_commands
+        command
+    =
+    validate_text
+      ~mode:Exec_policy.Coding
+      command
+      (Raw_worker_dev_tools.validate_command_coding_with_allowlist
+         ?caller
+         ?allow_pipes
+         ~allowed_commands)
+end
+
 (* Helper: find tool by name from tool list *)
 let find_tool name tools =
   List.find (fun (t : Tool.t) -> t.schema.name = name) tools

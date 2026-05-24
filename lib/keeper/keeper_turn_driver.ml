@@ -22,6 +22,7 @@ include Keeper_turn_driver_provider_attempt
 include Keeper_turn_driver_backpressure
 include Keeper_turn_driver_candidate_metrics
 include Keeper_turn_driver_client_capacity
+include Keeper_turn_driver_provider_health
 
 let keeper_cascade_tier_admission =
   Keeper_turn_driver_admission.keeper_cascade_tier_admission
@@ -425,36 +426,6 @@ let run_named
       tool_filtered_candidate_count
       local_prefiltered_candidate_count;
   let provider_attempt_provenance = base_provider_attempt_provenance in
-  let filter_provider_health_fail_open candidates =
-    match Provider_health.active () with
-    | None -> candidates
-    | Some health ->
-      Provider_health.filter_healthy health
-        ~provider_id:Cascade_runtime_candidate.health_key
-        candidates
-  in
-  let record_provider_health_result candidate ~success ~http_status =
-    match Provider_health.active () with
-    | None -> ()
-    | Some health ->
-      Provider_health.record_attempt_result health
-        ~provider_id:(Cascade_runtime_candidate.health_key candidate)
-        ~success
-        ~http_status
-  in
-  let record_provider_health_error candidate = function
-    | Provider_error.ServerError { code; _ } ->
-      record_provider_health_result candidate ~success:false ~http_status:(Some code)
-    | Provider_error.CapacityBackpressure _
-    | Provider_error.RateLimit _
-    | Provider_error.AuthError
-    | Provider_error.InvalidRequest _
-    | Provider_error.CliWrappedHardQuota _
-    | Provider_error.CliWrappedMaxTurns _
-    | Provider_error.CliWrappedResumableSession _
-    | Provider_error.PermissionDenied _
-    | Provider_error.ModelNotFound -> ()
-  in
   match candidates with
   | [] ->
       let required_tool_names =

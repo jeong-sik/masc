@@ -177,7 +177,7 @@ let handle_keeper_bash_typed
             let path_validation =
               match
                 Keeper_task_worktree_lazy.ensure_shell_ir_existing_dirs
-                  ~config ~meta ~cwd ~ir:envelope.Masc_exec.Shell_ir_risk.ir
+                  ~config ~meta ~cwd ~ir:ir_risk
               with
               | Error e -> Error e
               | Ok () ->
@@ -185,7 +185,7 @@ let handle_keeper_bash_typed
                   ~keeper_id:meta.name
                   ~base_path:root
                   ~workdir:cwd
-                  envelope.Masc_exec.Shell_ir_risk.ir
+                  ir_risk
             in
             (match path_validation with
              | Error e -> error_json ~fields:[ "blocked_cmd", `String cmd_for_log ] e

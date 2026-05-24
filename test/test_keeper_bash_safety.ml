@@ -15,7 +15,10 @@ module Keeper_types = Masc_mcp.Keeper_types
 module Parsed = Masc_exec.Parsed
 module Json = Yojson.Safe.Util
 
-let validate = Masc_mcp.Worker_dev_tools.validate_command
+let validate cmd =
+  match Masc_exec_bash_parser.Bash.parse_string cmd with
+  | Masc_exec.Parsed.Parsed ir -> Masc_mcp.Worker_dev_tools.validate_command ir
+  | _ -> Error Masc_mcp.Worker_dev_tools.Empty_command
 
 let is_ok = function Ok () -> true | Error _ -> false
 let is_error = function Error _ -> true | Ok () -> false
@@ -326,9 +329,9 @@ let test_keeper_bash_timeout_floor_is_not_sub_io_latency () =
   let args = `Assoc [ "timeout_sec", `Float 1.0 ] in
   Alcotest.(check (float 0.001))
     "keeper_bash native timeout floor"
-    Keeper_exec_shell.keeper_bash_native_min_timeout_sec
+    Keeper_exec_shell.keeper_shell_ir_native_min_timeout_sec
     (Masc_mcp.Keeper_shell_shared.clamp_shell_timeout
-       ~min_sec:Keeper_exec_shell.keeper_bash_native_min_timeout_sec
+       ~min_sec:Keeper_exec_shell.keeper_shell_ir_native_min_timeout_sec
        ~default:Masc_mcp.Keeper_shell_shared.io_timeout_sec
        args)
 
@@ -342,7 +345,7 @@ let test_keeper_bash_load_bearing_timeout_floor () =
   check
     "trivial command keeps native floor"
     (`Assoc [ "executable", `String "echo"; "argv", `List [ `String "ok" ] ])
-    Keeper_exec_shell.keeper_bash_native_min_timeout_sec;
+    Keeper_exec_shell.keeper_shell_ir_native_min_timeout_sec;
   check
     "git command uses tool dispatch floor"
     (`Assoc
@@ -523,7 +526,7 @@ let test_keeper_bash_typed_process_runs_via_shell_ir () =
   let playground = Filename.concat base_path (playground_path_of meta.name) in
   ensure_dir playground;
   let raw =
-    Keeper_exec_shell.handle_keeper_bash
+    Keeper_exec_shell.handle_keeper_shell_ir
       ~turn_sandbox_factory:None
       ~turn_sandbox_factory_git:None
       ~exec_cache:None
@@ -557,7 +560,7 @@ let test_keeper_bash_typed_pipeline_runs_via_shell_ir () =
   let playground = Filename.concat base_path (playground_path_of meta.name) in
   ensure_dir playground;
   let raw =
-    Keeper_exec_shell.handle_keeper_bash
+    Keeper_exec_shell.handle_keeper_shell_ir
       ~turn_sandbox_factory:None
       ~turn_sandbox_factory_git:None
       ~exec_cache:None
@@ -600,7 +603,7 @@ let test_keeper_bash_typed_docker_requires_factory () =
   let playground = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   ensure_dir playground;
   let raw =
-    Keeper_exec_shell.handle_keeper_bash
+    Keeper_exec_shell.handle_keeper_shell_ir
       ~turn_sandbox_factory:None
       ~turn_sandbox_factory_git:None
       ~exec_cache:None
@@ -813,7 +816,7 @@ let test_bash_missing_typed_input_field () =
   Keeper_registry.clear ();
   let meta = make_docker_meta "missing-typed-input" in
   let raw =
-    Keeper_exec_shell.handle_keeper_bash
+    Keeper_exec_shell.handle_keeper_shell_ir
       ~turn_sandbox_factory:None
       ~turn_sandbox_factory_git:None ~exec_cache:None
       ~config ~meta
@@ -882,7 +885,7 @@ let test_rg_regex_pipe_pattern_via_typed_bash () =
   ignore (Fs_compat.save_file_atomic (Filename.concat lib_dir "demo.ml")
     "let ghost_value = 1\nlet task_value = 2\nlet other = 3\n");
   let raw =
-    Keeper_exec_shell.handle_keeper_bash
+    Keeper_exec_shell.handle_keeper_shell_ir
       ~turn_sandbox_factory:None
       ~turn_sandbox_factory_git:None
       ~exec_cache:None
@@ -913,7 +916,7 @@ let test_rg_literal_pipe_in_pattern () =
   ignore (Fs_compat.save_file_atomic (Filename.concat lib_dir "data.txt")
     "a|b\nc|d\ne f\n");
   let raw =
-    Keeper_exec_shell.handle_keeper_bash
+    Keeper_exec_shell.handle_keeper_shell_ir
       ~turn_sandbox_factory:None
       ~turn_sandbox_factory_git:None
       ~exec_cache:None
@@ -944,7 +947,7 @@ let test_rg_metachar_not_pipe () =
   ignore (Fs_compat.save_file_atomic (Filename.concat lib_dir "test.ml")
     "let x = 1\nlet y = 2\n");
   let raw =
-    Keeper_exec_shell.handle_keeper_bash
+    Keeper_exec_shell.handle_keeper_shell_ir
       ~turn_sandbox_factory:None
       ~turn_sandbox_factory_git:None
       ~exec_cache:None
@@ -971,7 +974,7 @@ let test_literal_pipe_in_typed_argv () =
   let playground = Filename.concat base_path (playground_path_of meta.name) in
   ensure_dir playground;
   let raw =
-    Keeper_exec_shell.handle_keeper_bash
+    Keeper_exec_shell.handle_keeper_shell_ir
       ~turn_sandbox_factory:None
       ~turn_sandbox_factory_git:None
       ~exec_cache:None

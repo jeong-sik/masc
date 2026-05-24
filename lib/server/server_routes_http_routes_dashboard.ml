@@ -25,9 +25,6 @@ let invalid_cascade_profiles = Cascade_profile_gate.invalid_profiles
 let invalid_cascade_assignment_profiles =
   Cascade_profile_gate.invalid_assignment_profiles
 
-let option_int_json = function
-  | Some value -> `Int value
-  | None -> `Null
 
 
 (* Dashboard /logs JSON builder extracted to

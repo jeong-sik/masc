@@ -565,10 +565,6 @@ let admitted = function
   | Block _ -> false
 ;;
 
-let option_int_json = function
-  | Some value -> `Int value
-  | None -> `Null
-;;
 
 let admission_block_to_json = function
   | Fd_pressure_cooldown remaining_sec ->
@@ -589,7 +585,7 @@ let admission_block_to_json = function
     `Assoc
       [ "kind", `String "projected_fd_budget_exhausted"
       ; "soft_limit", `Int soft_limit
-      ; "open_fds", option_int_json open_fds
+      ; "open_fds", Json_util.int_opt_to_json open_fds
       ; "active_keepers", `Int active_keepers
       ; "starting_keepers", `Int starting_keepers
       ; "projected_fds", `Int projected_fds
@@ -707,8 +703,8 @@ let runtime_state_json ?(soft_limit = process_nofile_soft_limit ())
     ; "reason", reason
     ; "degraded", `Bool (active ())
     ; "fd_pressure_remaining_sec", `Float (remaining_sec ())
-    ; "soft_limit", option_int_json soft_limit
-    ; "open_fds", option_int_json open_fds
+    ; "soft_limit", Json_util.int_opt_to_json soft_limit
+    ; "open_fds", Json_util.int_opt_to_json open_fds
     ; "system_open_files", system_open_files
     ; "system_max_files", system_max_files
     ; "system_fd_remaining", system_fd_remaining

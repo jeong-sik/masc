@@ -2,9 +2,6 @@
 
 module Cascade_decl = Cascade_declarative_types
 
-let option_int_json = function
-  | Some value -> `Int value
-  | None -> `Null
 
 
 let provider_log_surface = "/api/v1/dashboard/provider-logs"
@@ -70,8 +67,8 @@ let provider_log_metadata_json
       ("enabled", `Bool log.enabled);
       ("path", Json_util.string_opt_to_json log.path);
       ("resolved_path", resolved_path);
-      ("default_lines", option_int_json log.default_lines);
-      ("max_bytes", option_int_json log.max_bytes);
+      ("default_lines", Json_util.int_opt_to_json log.default_lines);
+      ("max_bytes", Json_util.int_opt_to_json log.max_bytes);
       ("cascade_config_path", `String config_path);
     ]
 

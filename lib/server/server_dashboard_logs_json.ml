@@ -8,10 +8,6 @@
    Pure JSON builder over [Log.Ring.entry list] - the ring read happens
    in the caller. *)
 
-let option_int_json = function
-  | Some value -> `Int value
-  | None -> `Null
-;;
 
 
 let store_path ~masc_root =
@@ -69,11 +65,11 @@ let build
              ; "applied_level", `String (Log.level_to_string applied_level)
              ; "min_level", `Int min_level
              ; "module", `String module_filter
-             ; "since_seq", option_int_json since_seq
+             ; "since_seq", Json_util.int_opt_to_json since_seq
              ] )
        ; "returned", `Int (List.length entries)
-       ; "latest_seq", option_int_json (entry_seq_json newest)
-       ; "oldest_seq", option_int_json (entry_seq_json oldest)
+       ; "latest_seq", Json_util.int_opt_to_json (entry_seq_json newest)
+       ; "oldest_seq", Json_util.int_opt_to_json (entry_seq_json oldest)
        ; "latest_ts_iso", Json_util.string_opt_to_json (entry_ts_json newest)
        ]
        @ fields)

@@ -151,6 +151,9 @@ let cascade_exhausted_failure_reason_of_raw_error ~detail raw_error =
       | Cascade_error_classify.Provider_timeout _
       | Cascade_error_classify.Max_tokens_ceiling_violation _
       | Cascade_error_classify.Ambiguous_post_commit _
+      (* RFC-0158: pre-dispatch admission denial is not a cascade-exhaustion
+         reason; the keeper decided not to attempt a provider call. *)
+      | Cascade_error_classify.Retry_admission_denied _
       (* RFC-0159 Phase A: typed [Internal_*] variants are not
          cascade-exhaustion reasons; they map to opaque
          internal-error events upstream. *)

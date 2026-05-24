@@ -762,6 +762,8 @@ let review
                   | Keeper_turn_driver.Provider_timeout _
                   | Keeper_turn_driver.Max_tokens_ceiling_violation _
                   | Keeper_turn_driver.Ambiguous_post_commit _
+                  (* RFC-0158: admission denial — budget too low. *)
+                  | Keeper_turn_driver.Retry_admission_denied _
                   (* RFC-0159 Phase A: opaque internal failures. *)
                   | Keeper_turn_driver.Internal_unhandled_exception _
                   | Keeper_turn_driver.Internal_bridge_exception _

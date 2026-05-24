@@ -236,7 +236,7 @@ let provider_retry_budget_available_for_turn
      change is the natural typed boundary expansion. *)
 
 type retry_admission_denial =
-  Keeper_turn_cascade_budget_admission.retry_admission_denial =
+  Cascade_internal_error.retry_admission_denial =
   | Retry_budget_below_min of {
       projected_usable_budget_s : float;
       min_required_s : float;
@@ -257,7 +257,7 @@ type attempt_kind = Keeper_turn_cascade_budget_admission.attempt_kind =
 let attempt_kind_is_retry =
   Keeper_turn_cascade_budget_admission.attempt_kind_is_retry
 let retry_admission_denial_to_yojson =
-  Keeper_turn_cascade_budget_admission.retry_admission_denial_to_yojson
+  Cascade_internal_error.retry_admission_denial_to_yojson
 
 let decide_retry_admission_for_turn
     ~(remaining_turn_budget_s : float)
@@ -371,6 +371,8 @@ let degraded_retry_bypasses_slot_phase_guard
       | Keeper_turn_driver.Turn_timeout _
       | Keeper_turn_driver.Max_tokens_ceiling_violation _
       | Keeper_turn_driver.Ambiguous_post_commit _
+      (* RFC-0158: admission denial is not an OAS-budget timeout bypass. *)
+      | Keeper_turn_driver.Retry_admission_denied _
       (* RFC-0159 Phase A: Internal_* variants are not OAS-budget timeouts. *)
       | Keeper_turn_driver.Internal_unhandled_exception _
       | Keeper_turn_driver.Internal_bridge_exception _

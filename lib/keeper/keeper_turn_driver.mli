@@ -80,6 +80,11 @@ type masc_internal_error =
       tools : string list;
       original_error : string;
     }
+  (** RFC-0158: pre-dispatch admission denial — budget too low for provider attempt. *)
+  | Retry_admission_denied of {
+      denial_reason : Cascade_internal_error.retry_admission_denial;
+      is_retry : bool;
+    }
   (** RFC-0159 Phase A: typed substrate for raw [Agent_sdk.Error.Internal]
       construction sites previously routed to the [Reason_internal_error]
       catch-all. *)

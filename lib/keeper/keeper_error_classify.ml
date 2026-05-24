@@ -238,6 +238,9 @@ let is_auto_recoverable_cascade_exhausted_error (err : Agent_sdk.Error.sdk_error
   | Some (Keeper_turn_driver.Provider_timeout _)
   | Some (Keeper_turn_driver.Max_tokens_ceiling_violation _)
   | Some (Keeper_turn_driver.Ambiguous_post_commit _)
+  (* RFC-0158: pre-dispatch admission denial — budget too low to attempt.
+     Not auto-recoverable because rotation does not increase the turn budget. *)
+  | Some (Keeper_turn_driver.Retry_admission_denied _)
   (* RFC-0159 Phase A: opaque internal failures. *)
   | Some (Keeper_turn_driver.Internal_unhandled_exception _)
   | Some (Keeper_turn_driver.Internal_bridge_exception _)
@@ -258,6 +261,8 @@ let is_resumable_cli_session_error (err : Agent_sdk.Error.sdk_error) : bool =
   | Some (Keeper_turn_driver.Provider_timeout _)
   | Some (Keeper_turn_driver.Max_tokens_ceiling_violation _)
   | Some (Keeper_turn_driver.Ambiguous_post_commit _)
+  (* RFC-0158: admission denial is not a CLI session error. *)
+  | Some (Keeper_turn_driver.Retry_admission_denied _)
   (* RFC-0159 Phase A: opaque internal failures. *)
   | Some (Keeper_turn_driver.Internal_unhandled_exception _)
   | Some (Keeper_turn_driver.Internal_bridge_exception _)
@@ -405,6 +410,9 @@ let degraded_retry_after_recoverable_error
     | Some (Keeper_turn_driver.Admission_queue_rejected _)
     | Some (Keeper_turn_driver.Max_tokens_ceiling_violation _)
     | Some (Keeper_turn_driver.Ambiguous_post_commit _)
+    (* RFC-0158: admission denial has no local-recovery retry — budget
+       exhaustion is not resolved by cascade rotation. *)
+    | Some (Keeper_turn_driver.Retry_admission_denied _)
     (* RFC-0159 Phase A: opaque internal failures have no
        local-recovery retry mapping. *)
     | Some (Keeper_turn_driver.Internal_unhandled_exception _)
@@ -469,6 +477,8 @@ let recoverable_cascade_failure_reason (err : Agent_sdk.Error.sdk_error) =
     | Some (Keeper_turn_driver.Admission_queue_rejected _)
     | Some (Keeper_turn_driver.Max_tokens_ceiling_violation _)
     | Some (Keeper_turn_driver.Ambiguous_post_commit _)
+    (* RFC-0158: admission denial is not a cascade-rotation reason. *)
+    | Some (Keeper_turn_driver.Retry_admission_denied _)
     (* RFC-0159 Phase A: typed [Internal_*] variants are not cascade-rotation
        reasons; they expose previously-opaque raw exception payloads.  *)
     | Some (Keeper_turn_driver.Internal_unhandled_exception _)
@@ -748,6 +758,9 @@ let should_warn_keeper_cycle_failed (err : Agent_sdk.Error.sdk_error) : bool =
   | Some (Keeper_turn_driver.Turn_timeout _)
   | Some (Keeper_turn_driver.Max_tokens_ceiling_violation _)
   | Some (Keeper_turn_driver.Ambiguous_post_commit _)
+  (* RFC-0158: admission denial should not trigger keeper-cycle-failed WARN;
+     the turn budget was simply insufficient. *)
+  | Some (Keeper_turn_driver.Retry_admission_denied _)
   (* RFC-0159 Phase A: opaque internal failures should not trigger the
      keeper-cycle-failed WARN by themselves; the surrounding handler
      already logs the exception detail. *)
@@ -796,6 +809,8 @@ let is_ambiguous_side_effect_error (err : Agent_sdk.Error.sdk_error) : bool =
   | Some (Keeper_turn_driver.Turn_timeout _)
   | Some (Keeper_turn_driver.Provider_timeout _)
   | Some (Keeper_turn_driver.Max_tokens_ceiling_violation _)
+  (* RFC-0158: admission denial is an unambiguous failure. *)
+  | Some (Keeper_turn_driver.Retry_admission_denied _)
   (* RFC-0159 Phase A: opaque internal failures are unambiguous failures. *)
   | Some (Keeper_turn_driver.Internal_unhandled_exception _)
   | Some (Keeper_turn_driver.Internal_bridge_exception _)
@@ -978,6 +993,8 @@ let is_cascade_exhausted_error (err : Agent_sdk.Error.sdk_error) : bool =
   | Some (Keeper_turn_driver.Turn_timeout _)
   | Some (Keeper_turn_driver.Max_tokens_ceiling_violation _)
   | Some (Keeper_turn_driver.Ambiguous_post_commit _)
+  (* RFC-0158: admission denial is not cascade exhaustion. *)
+  | Some (Keeper_turn_driver.Retry_admission_denied _)
   (* RFC-0159 Phase A: opaque internal failures are not cascade exhaustion. *)
   | Some (Keeper_turn_driver.Internal_unhandled_exception _)
   | Some (Keeper_turn_driver.Internal_bridge_exception _)

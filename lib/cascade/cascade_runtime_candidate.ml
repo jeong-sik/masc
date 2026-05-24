@@ -153,11 +153,18 @@ let cli_sentinel_of_kind kind =
     None
 
 let capacity_key_of_config (cfg : Llm_provider.Provider_config.t) =
-  if cfg.base_url <> "" then cfg.base_url
-  else
-    match cli_sentinel_of_kind cfg.kind with
-    | Some sentinel -> sentinel
-    | None -> ""
+  let base =
+    if cfg.base_url <> "" then cfg.base_url
+    else
+      match cli_sentinel_of_kind cfg.kind with
+      | Some sentinel -> sentinel
+      | None -> ""
+  in
+  (* Include model_id to prevent SPOF: multiple models on the same
+     base_url previously shared one capacity bucket, causing all 12
+     candidates to be rejected simultaneously. *)
+  if cfg.model_id = "" || cfg.model_id = "auto" then base
+  else base ^ ":" ^ cfg.model_id
 
 let http_probe_url_of_config (cfg : Llm_provider.Provider_config.t) =
   Cascade_http_probe_url.of_provider_config cfg

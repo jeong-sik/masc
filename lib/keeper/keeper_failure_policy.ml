@@ -153,6 +153,9 @@ type failure =
   | Fatal_environment of { detail : string option }
   | Stale_turn of { progress_seen : bool }
   | Stale_termination_storm of { count : int }
+  | Turn_failure_streak of { count : int }
+  | Turn_overflow_pause
+  | Turn_livelock_pause
   | Ambiguous_partial_commit
 
 type failure_scope =
@@ -403,6 +406,30 @@ let decide = function
       ~operator_action:Inspect_keeper_liveness
       ~keeper_death_allowed:false
       ~reason:("stale_termination_storm:" ^ string_of_int count)
+  | Turn_failure_streak { count } ->
+    make_decision
+      ~failure_scope:Turn_scope
+      ~lifecycle_effect:Pause_keeper
+      ~circuit_effect:Operator_breaker
+      ~operator_action:Inspect_keeper_liveness
+      ~keeper_death_allowed:false
+      ~reason:("turn_failure_streak:" ^ string_of_int count)
+  | Turn_overflow_pause ->
+    make_decision
+      ~failure_scope:Turn_scope
+      ~lifecycle_effect:Pause_keeper
+      ~circuit_effect:Operator_breaker
+      ~operator_action:Inspect_keeper_liveness
+      ~keeper_death_allowed:false
+      ~reason:"turn_overflow_pause"
+  | Turn_livelock_pause ->
+    make_decision
+      ~failure_scope:Turn_scope
+      ~lifecycle_effect:Pause_keeper
+      ~circuit_effect:Operator_breaker
+      ~operator_action:Inspect_keeper_liveness
+      ~keeper_death_allowed:false
+      ~reason:"turn_livelock_pause"
   | Ambiguous_partial_commit ->
     make_decision
       ~failure_scope:Turn_scope

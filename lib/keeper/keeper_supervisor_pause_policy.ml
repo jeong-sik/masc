@@ -211,9 +211,15 @@ let failure_reason_policy_decision
          Keeper_failure_policy.Required_tool_contract_violation)
   | Some (Keeper_registry.Ambiguous_partial_commit _) ->
     Some (Keeper_failure_policy.decide Keeper_failure_policy.Ambiguous_partial_commit)
+  | Some (Keeper_registry.Turn_consecutive_failures count) ->
+    Some
+      (Keeper_failure_policy.decide (Keeper_failure_policy.Turn_failure_streak { count }))
+  | Some Keeper_registry.Turn_overflow_pause ->
+    Some (Keeper_failure_policy.decide Keeper_failure_policy.Turn_overflow_pause)
+  | Some Keeper_registry.Turn_livelock_pause ->
+    Some (Keeper_failure_policy.decide Keeper_failure_policy.Turn_livelock_pause)
   | Some
       ( Keeper_registry.Heartbeat_consecutive_failures _
-      | Keeper_registry.Turn_consecutive_failures _
       | Keeper_registry.Stale_fleet_batch _
       | Keeper_registry.Provider_runtime_error _
       | Keeper_registry.Fiber_unresolved

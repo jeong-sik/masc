@@ -60,6 +60,9 @@ type failure =
   | Fatal_environment of { detail : string option }
   | Stale_turn of { progress_seen : bool }
   | Stale_termination_storm of { count : int }
+  | Turn_failure_streak of { count : int }
+  | Turn_overflow_pause
+  | Turn_livelock_pause
   | Ambiguous_partial_commit
 
 type failure_scope =

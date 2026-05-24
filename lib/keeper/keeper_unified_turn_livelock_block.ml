@@ -128,5 +128,9 @@ let handle
      scheduler observed total_turns+1 candidate turn and re-blocked the
      same (keeper, turn_id), fuelling the repeated ERROR log surface. *)
   persist_turn_livelock_pause ~config ~meta ~detail:error_message;
+  Keeper_registry.set_failure_reason
+    ~base_path:config.base_path
+    meta.name
+    (Some Keeper_registry.Turn_livelock_pause);
   Error (Agent_sdk.Error.Internal error_message)
 ;;

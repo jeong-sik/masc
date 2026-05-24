@@ -623,6 +623,10 @@ let pause_keeper_for_overflow
       ~config
       ~keeper_name:meta.name
       Keeper_state_machine.Compact_retry_exhausted;
+    Keeper_registry.set_failure_reason
+      ~base_path:config.base_path
+      meta.name
+      (Some Keeper_registry.Turn_overflow_pause);
     paused_meta
   | Error _err ->
     (* Fallback: write failed but we must not leave the caller with
@@ -641,6 +645,10 @@ let pause_keeper_for_overflow
       }
     in
     Keeper_registry.update_meta ~base_path:config.base_path meta.name paused_meta;
+    Keeper_registry.set_failure_reason
+      ~base_path:config.base_path
+      meta.name
+      (Some Keeper_registry.Turn_overflow_pause);
     dispatch_keeper_phase_event
       ~config
       ~keeper_name:meta.name

@@ -707,7 +707,7 @@ let run_docker_shell_command_with_status_internal
                                @@ fun () ->
                                Docker_spawn_throttle.with_slot (fun () ->
                                  Masc_exec.Exec_gate.run_argv_with_stdin_and_status
-                                   ~actor:`Keeper_shell
+                                   ~actor:`System_task_sandbox
                                    ~raw_source:(String.concat " " argv)
                                    ~summary:"keeper docker command"
                                    ~env:(Unix.environment ())

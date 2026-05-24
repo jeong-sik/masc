@@ -86,6 +86,11 @@ and public tool aliases.
      implementation details and tests.
    - `test_keeper_sandbox_boundary_policy` now fails if the retired
      `keeper_docker_read` files or `Keeper_docker_read` references return.
+   Continued in slice 9:
+   - `Keeper_sandbox_docker` now runs host-side Docker process execution
+     under the sandbox backend actor, not the public shell tool actor.
+   - `test_keeper_sandbox_boundary_policy` now fails if sandbox backend
+     sources use `Keeper_shell` as their process execution actor.
 
 ## Verification
 
@@ -108,3 +113,6 @@ and public tool aliases.
   mock backend and route labels sourced from `Keeper_sandbox_runner`.
 - `test_keeper_sandbox_read_backend` protects the concrete backend behavior
   without leaking the retired `Keeper_docker_read` public module name.
+- The boundary test now fails if concrete sandbox backend modules execute
+  host processes as `Keeper_shell` instead of a backend-owned actor such as
+  `System_task_sandbox`.

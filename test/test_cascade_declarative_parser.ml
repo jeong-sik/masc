@@ -503,6 +503,14 @@ let test_api_format_of_protocol () =
     (api_format_of_protocol "provider_f-cli" = Ok Chat_completions_api);
   check bool "provider_c-cli" true (api_format_of_protocol "provider_c-cli" = Ok Chat_completions_api);
   check bool "ollama-http" true (api_format_of_protocol "ollama-http" = Ok Ollama_api);
+  (match api_format_of_protocol "google-cli" with
+   | Ok _ -> fail "legacy google-cli protocol should not parse"
+   | Error msg ->
+     check
+       string
+       "legacy protocol hint uses canonical provider_f-cli"
+       "unknown protocol \"google-cli\": expected one of provider_a-cli, provider_a-http, provider_d-cli, provider_d-http, provider_f-cli, provider_c-cli, ollama-http"
+       msg);
   check bool "unknown" true (api_format_of_protocol "unknown" |> Result.is_error)
 ;;
 

@@ -876,25 +876,21 @@ let extract_after_all_errors_guard ~label = function
 ;;
 
 let parse_toml (toml : Otoml.t) : (cascade_config, parse_error list) result =
-  let all_errors = ref [] in
-  let collect = function
-    | Ok _ -> ()
-    | Error errs -> all_errors := !all_errors @ errs
-  in
   let providers_result = parse_providers toml in
   let models_result = parse_models toml in
   let tiers_result = parse_tiers toml in
   let tier_groups_result = parse_tier_groups toml in
-  collect providers_result;
-  collect models_result;
-  collect tiers_result;
-  collect tier_groups_result;
+  let errs = function Ok _ -> [] | Error errs -> errs in
+  let all_errors =
+    errs providers_result @ errs models_result
+    @ errs tiers_result @ errs tier_groups_result
+  in
   let bindings, aliases = parse_bindings_and_aliases toml in
   let routes = parse_routes toml in
   let system_targets = parse_system_targets toml in
   let profiles = parse_profiles toml in
-  if !all_errors <> []
-  then Error !all_errors
+  if all_errors <> []
+  then Error all_errors
   else (
     let providers =
       extract_after_all_errors_guard ~label:"providers" providers_result

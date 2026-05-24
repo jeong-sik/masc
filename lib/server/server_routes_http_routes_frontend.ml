@@ -104,14 +104,6 @@ let add_routes ~port ~host router =
        ) request reqd)
   |> Http.Router.get "/ag-ui/events" handle_ag_ui_events
   |> Http.Router.get "/events/presence" handle_presence_events
-  (* Dashboard sub-routes: must come before the SPA catchall *)
-  |> Http.Router.get "/dashboard/credits" (fun request reqd ->
-       with_canonical_loopback_host ~port
-         (fun request reqd ->
-           with_public_read (fun _state _req reqd ->
-             Http.Response.html (Credits_dashboard.html ()) reqd
-           ) request reqd)
-         request reqd)
   (* Dashboard Bonsai island — static JS bundle and SPA shell.
      Must precede /dashboard/assets/ and /dashboard/ catchalls below. *)
   |> Http.Router.prefix_get "/dashboard/b/assets/"
@@ -198,10 +190,6 @@ let add_routes ~port ~host router =
                  Http.Response.not_found reqd
              ) request reqd)
            request reqd)
-  |> Http.Router.get "/api/v1/credits" (fun request reqd ->
-       with_public_read (fun _state _req reqd ->
-         Http.Response.json (Credits_dashboard.json_api ()) reqd
-       ) request reqd)
   |> Http.Router.get "/api/v1/openapi.json" (fun request reqd ->
        with_public_read (fun _state req reqd ->
          let host_header = Httpun.Headers.get req.Httpun.Request.headers "host" in

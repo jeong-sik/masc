@@ -521,9 +521,6 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
       | `GET, "/dashboard" | `GET, "/dashboard/" ->
           h2_respond_dashboard_index ()
 
-      | `GET, "/dashboard/credits" ->
-          h2_respond_html h2_reqd (Credits_dashboard.html ()) ~extra_headers:cors
-
       | `GET, p when is_dashboard_spa_deep_link p ->
           h2_respond_dashboard_index ()
 
@@ -895,9 +892,6 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
               ("paused", `Bool room_state.paused);
             ] in
             h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors)
-
-      | `GET, "/api/v1/credits" ->
-          h2_respond_json h2_reqd (Credits_dashboard.json_api ()) ~extra_headers:cors
 
       | `GET, "/api/v1/openapi.json" ->
           let host_header = get_header_any_case httpun_request.headers "host" in

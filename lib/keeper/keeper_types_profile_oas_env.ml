@@ -18,10 +18,6 @@ let string_of_toml_value_for_env = function
 
 let oas_env_key_prefix = "keeper.oas_env."
 
-let oas_env_allowed_prefixes =
-  [ "OAS_CLAUDE_"; "OAS_CODEX_"; "OAS_GEMINI_"; "MASC_KEEPER_OAS_" ]
-;;
-
 let keeper_unified_max_tokens_oas_env_key = "MASC_KEEPER_OAS_UNIFIED_MAX_TOKENS"
 
 let legacy_keeper_unified_max_tokens_oas_env_key =
@@ -32,16 +28,19 @@ let oas_env_allowed_exact_keys = [ legacy_keeper_unified_max_tokens_oas_env_key 
 
 let oas_env_key_is_allowed suffix =
   List.mem suffix oas_env_allowed_exact_keys
-  || List.exists
-       (fun p ->
-         String.length suffix > String.length p
-         && String.sub suffix 0 (String.length p) = p)
-       oas_env_allowed_prefixes
+  || String.starts_with suffix ~prefix:"MASC_KEEPER_OAS_"
+  || (String.starts_with suffix ~prefix:"OAS_"
+      && (try
+            let after_oas =
+              String.sub suffix 4 (String.length suffix - 4)
+            in
+            String.contains after_oas '_'
+          with Invalid_argument _ -> false))
 ;;
 
 (* Observability for the env-key allowlist drop branch.  Previously
    any [keeper.oas_env.<X>] entry whose suffix did not match
-   [OAS_(CLAUDE|CODEX|GEMINI)_] or [MASC_KEEPER_OAS_*] was filtered out with
+   [OAS_<PROVIDER>_<KEY>] or [MASC_KEEPER_OAS_*] was filtered out with
    no signal — operators could not tell whether a typo'd key
    (e.g. [OAS_CLUADE_API_KEY]) had been silently ignored.
    Closes the silent-drop gap noted in
@@ -75,8 +74,8 @@ let extract_oas_env_from_doc (doc : Keeper_toml_loader.toml_doc)
             ();
           Log.Keeper.warn
             "keeper.oas_env: dropping key=%S — suffix %S not in \
-             allowlist (OAS_CLAUDE_* | OAS_CODEX_* | OAS_GEMINI_* | \
-             MASC_KEEPER_OAS_<suffix>); fix the TOML or expand the allowlist"
+             allowlist (OAS_<PROVIDER>_* | MASC_KEEPER_OAS_<suffix>); \
+             fix the TOML or expand the allowlist"
             k
             suffix;
           ignore v;

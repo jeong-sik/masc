@@ -54,7 +54,7 @@ type keeper_profile_defaults = {
   max_turns_per_call_scheduled_autonomous : int option;
   (* Per-keeper OAS CLI transport env vars (OAS 0.159+).
      Parsed from [[keeper.oas_env]] table.  Keys MUST match
-     ^OAS_(CLAUDE|CODEX|GEMINI)_.+ — any other entries are dropped with
+     ^OAS_[A-Z]+_.+ — any other entries are dropped with
      a warning to avoid ambient env injection via keeper TOML.
      Applied via Unix.putenv right before each turn so OAS transport
      build_args picks them up.  Empty list = no overrides. *)

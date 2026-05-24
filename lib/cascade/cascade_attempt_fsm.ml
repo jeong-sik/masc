@@ -355,7 +355,7 @@ let message_looks_like_cli_wrapped_hard_quota (message : string) : bool =
   in
   List.exists contains cli_wrapped_hard_quota_indicators
   ||
-  (contains "claude exited with code 1"
+  (contains "exited with code 1"
    && contains "\"api_error_status\":429"
    && contains "you've hit your limit")
 

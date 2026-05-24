@@ -462,7 +462,7 @@ let list_credentials config : agent_credential list =
 
 (** #9786: detect credentials sharing the same bearer token.
 
-    The 2026-04-23 audit found [codex-mcp-client] and [admin]
+    The 2026-04-23 audit found [external MCP clients] and [admin]
     tokens being presented for [keeper-sangsu-agent] /
     [nick0cave-sage-heron] requests — symptom of multiple
     credentials hashing to the same token, or a single MCP

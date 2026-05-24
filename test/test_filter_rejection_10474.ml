@@ -14,7 +14,7 @@ module L = Llm_provider
 let make_provider ~kind ~model_id =
   L.Provider_config.make ~kind ~model_id ~base_url:"" ()
 
-let agent_code = make_provider ~kind:Cli_tool_a ~model_id:"gpt-5.4"
+let agent_code = make_provider ~kind:Cli_tool_a ~model_id:"model-d-5.4"
 let provider_c = make_provider ~kind:Cli_tool_c ~model_id:"model-c-coding"
 
 let policy_with_headers : L.Llm_transport.runtime_mcp_policy =

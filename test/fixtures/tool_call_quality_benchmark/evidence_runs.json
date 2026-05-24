@@ -3,7 +3,7 @@
     {
       "case_id": "read_search_prompt_fingerprint",
       "provider": "provider-d",
-      "model": "gpt-5.4",
+      "model": "model-d-5.4",
       "keeper_profile": "bench-analyst",
       "run_id": "run-provider-d-analyst-1",
       "repeat_index": 1,
@@ -41,7 +41,7 @@
     {
       "case_id": "read_search_prompt_fingerprint",
       "provider": "provider-d",
-      "model": "gpt-5.4",
+      "model": "model-d-5.4",
       "keeper_profile": "bench-analyst",
       "run_id": "run-provider-d-analyst-2",
       "repeat_index": 2,
@@ -79,7 +79,7 @@
     {
       "case_id": "read_search_prompt_fingerprint",
       "provider": "provider-d",
-      "model": "gpt-5.4",
+      "model": "model-d-5.4",
       "keeper_profile": "bench-executor",
       "run_id": "run-provider-d-executor-1",
       "repeat_index": 1,
@@ -125,7 +125,7 @@
     {
       "case_id": "text_only_triage",
       "provider": "provider-d",
-      "model": "gpt-5.4",
+      "model": "model-d-5.4",
       "keeper_profile": "bench-analyst",
       "run_id": "run-provider-d-text-only-1",
       "repeat_index": 1,
@@ -146,7 +146,7 @@
     {
       "case_id": "recovery_after_failed_read",
       "provider": "provider-d",
-      "model": "gpt-5.4-mini",
+      "model": "model-d-5.4-mini",
       "keeper_profile": "bench-verifier",
       "run_id": "run-provider-d-verifier-1",
       "repeat_index": 1,
@@ -192,7 +192,7 @@
     {
       "case_id": "recovery_after_failed_read",
       "provider": "provider-d",
-      "model": "gpt-5.4-mini",
+      "model": "model-d-5.4-mini",
       "keeper_profile": "bench-verifier",
       "run_id": "run-provider-d-verifier-2",
       "repeat_index": 2,

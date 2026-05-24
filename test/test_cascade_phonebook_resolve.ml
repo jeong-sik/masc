@@ -120,10 +120,10 @@ let test_flavor_to_kind () =
     [ (Llama_cpp, `Provider_d_compat)
     ; (Ollama, `Ollama)
     ; (Vllm, `Provider_d_compat)
-    ; (Openai, `Provider_d_compat)
-    ; (Deep_seek, `Provider_d_compat)
-    ; (Zai_glm, `Provider_k)
-    ; (Qwen, `Provider_h)
+    ; (Provider_d_wire, `Provider_d_compat)
+    ; (Provider_g_wire, `Provider_d_compat)
+    ; (Provider_k_zai, `Provider_k)
+    ; (Provider_h_wire, `Provider_h)
     ]
   in
   List.iter (fun (flavor, _expected_kind) ->

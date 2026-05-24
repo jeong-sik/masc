@@ -649,7 +649,7 @@ let test_agent_completed_includes_usage () =
   let resp : Llm_provider.Types.api_response =
     {
       id = "msg-test";
-      model = "gpt-5";
+      model = "model-d-5";
       stop_reason = EndTurn;
       content = [];
       usage = Some usage;
@@ -692,7 +692,7 @@ let test_agent_completed_includes_usage () =
       Alcotest.(check bool) "success" true (bool_field "success");
       Alcotest.(check string) "result" "ok" (string_field "result");
       Alcotest.(check string) "response_id" "msg-test" (string_field "response_id");
-      Alcotest.(check string) "model" "gpt-5" (string_field "model");
+      Alcotest.(check string) "model" "model-d-5" (string_field "model");
       Alcotest.(check string) "stop_reason" "end_turn" (string_field "stop_reason");
       Alcotest.(check bool) "usage_reported" true (bool_field "usage_reported");
       Alcotest.(check int) "input_tokens" 500 (int_field "input_tokens");
@@ -1132,7 +1132,7 @@ let test_inference_telemetry_aggregates_without_sse_relay () =
            agent_name = "test-agent";
            turn = 1;
            provider = "provider_d";
-           model = "gpt-5";
+           model = "model-d-5";
            prompt_tokens = Some 10;
            completion_tokens = Some 9000;
            prompt_ms = Some 5.0;

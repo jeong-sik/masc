@@ -14,10 +14,10 @@ type cascade_server_flavor = Cascade_phonebook_types.cascade_server_flavor =
   | Llama_cpp
   | Ollama
   | Vllm
-  | Openai
-  | Deep_seek
-  | Zai_glm
-  | Qwen
+  | Provider_d_wire
+  | Provider_g_wire
+  | Provider_k_zai
+  | Provider_h_wire
 
 (* ── Error types ─────────────────────────────────────────────── *)
 
@@ -28,7 +28,7 @@ type flavor_error =
   | Content_filter of string
       (** DeepSeek content_filter finish_reason *)
   | Tools_stream_incompatible
-      (** Qwen: tools + stream=True not supported *)
+      (** Provider_h_wire: tools + stream=True not supported *)
   | Reasoning_budget_exceeded
       (** Thinking budget exceeded model limits *)
   | Unknown_finish_reason of string
@@ -62,20 +62,20 @@ let thinking_control_for_flavor
     Llama_cpp_thinking { enable = thinking_requested; budget }
   | Ollama ->
     Ollama_think { think = thinking_requested }
-  | Openai ->
+  | Provider_d_wire ->
     if not thinking_requested then No_thinking
     else
       (match budget with
        | Some _ -> Openai_reasoning_effort { effort = "high" }
        | None -> Openai_reasoning_effort { effort = "medium" })
-  | Deep_seek ->
+  | Provider_g_wire ->
     Deep_seek_thinking { enabled = thinking_requested }
-  | Zai_glm ->
+  | Provider_k_zai ->
     (* Z.AI/GLM has built-in thinking for GLM-5.x, no external control *)
     No_thinking
   | Vllm ->
     No_thinking
-  | Qwen ->
+  | Provider_h_wire ->
     No_thinking
 
 (* ── Finish reason mapping ───────────────────────────────────── *)
@@ -95,7 +95,7 @@ let finish_reason_of_string
     (raw : string option)
   : finish_reason =
   match raw with
-  | None | Some "" | Some "null" -> Stop  (* Qwen returns null during generation *)
+  | None | Some "" | Some "null" -> Stop  (* Provider_h_wire returns null during generation *)
   | Some "stop" -> Stop
   | Some "length" -> Length
   | Some "tool_calls" -> Tool_calls
@@ -128,7 +128,7 @@ type flavor_constraints =
   { supports_tools_with_streaming : bool
   ; supports_response_format : bool
   ; supports_parallel_tool_calls : bool
-  ; finish_reason_nullable : bool  (* Qwen returns null during generation *)
+  ; finish_reason_nullable : bool  (* Provider_h_wire returns null during generation *)
   ; arguments_as_json_object : bool  (* Ollama returns JSON object, not string *)
   }
 [@@deriving show, eq]
@@ -156,28 +156,28 @@ let constraints_of_flavor = function
     ; finish_reason_nullable = false
     ; arguments_as_json_object = false
     }
-  | Openai ->
+  | Provider_d_wire ->
     { supports_tools_with_streaming = true
     ; supports_response_format = true
     ; supports_parallel_tool_calls = true
     ; finish_reason_nullable = false
     ; arguments_as_json_object = false
     }
-  | Deep_seek ->
+  | Provider_g_wire ->
     { supports_tools_with_streaming = true
     ; supports_response_format = true
     ; supports_parallel_tool_calls = true
     ; finish_reason_nullable = false
     ; arguments_as_json_object = false
     }
-  | Zai_glm ->
+  | Provider_k_zai ->
     { supports_tools_with_streaming = true
     ; supports_response_format = true
     ; supports_parallel_tool_calls = true
     ; finish_reason_nullable = false
     ; arguments_as_json_object = false
     }
-  | Qwen ->
+  | Provider_h_wire ->
     { supports_tools_with_streaming = false  (* CRITICAL: tools + stream=True incompatible *)
     ; supports_response_format = false       (* response_format not supported *)
     ; supports_parallel_tool_calls = true

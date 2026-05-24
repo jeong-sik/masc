@@ -361,7 +361,7 @@ tiers = [%S]
   in
   Printf.sprintf
     {|[providers.custom]
-protocol = "openai-http"
+protocol = "provider_d-http"
 endpoint = %S
 
 [models.mock]
@@ -1326,7 +1326,7 @@ let test_invalid_profile_projection_keeps_internal_names () =
   let cascade_toml =
     Printf.sprintf
       {|[providers.custom]
-protocol = "openai-http"
+protocol = "provider_d-http"
 endpoint = %S
 
 [models.mock]

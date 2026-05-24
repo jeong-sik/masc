@@ -171,7 +171,7 @@ let test_provider_kind_of_model_used () =
   Alcotest.(check string) "custom endpoint label remains bounded"
     "runtime" (M.provider_kind_of_model_used "custom:model@https://example.test/v1");
   Alcotest.(check string) "unprefixed"
-    "runtime" (M.provider_kind_of_model_used "gpt-5.4");
+    "runtime" (M.provider_kind_of_model_used "model-d-5.4");
   Alcotest.(check string) "empty" "runtime" (M.provider_kind_of_model_used "")
 
 let test_record_by_model_bucket () =

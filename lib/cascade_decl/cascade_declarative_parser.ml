@@ -45,7 +45,7 @@ let partition_results
 let api_format_of_protocol (s : string) : (cascade_api_format, string) result =
   match s with
   | "provider_a-cli" | "provider_a-http" -> Ok Messages_api
-  | "provider_d-cli" | "provider_d-http" | "google-cli" | "provider_c-cli" ->
+  | "provider_d-cli" | "provider_d-http" | "provider_f-cli" | "provider_c-cli" ->
     Ok Chat_completions_api
   | "ollama-http" -> Ok Ollama_api
   | _ ->

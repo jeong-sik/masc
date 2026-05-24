@@ -18,51 +18,51 @@ type cascade_server_flavor =
   | Llama_cpp    (** llama.cpp server: chat_template_kwargs, grammar, reasoning_budget *)
   | Ollama       (** ollama: /api/chat native, think, done_reason, arguments=JSON object *)
   | Vllm         (** vLLM: extra_body, guided_json, guided_grammar, prefix_cached *)
-  | Openai       (** canonical: SSE, reasoning_effort, web_search, parallel_tool_calls *)
-  | Deep_seek    (** DeepSeek: thinking param, reasoning_content, reasoning_effort high/max *)
-  | Zai_glm      (** Z.AI/GLM: reasoning_content, business errors 1301/1302/1303 *)
-  | Qwen         (** Qwen/Provider_h: OpenAI compat, tools+stream incompatible *)
+  | Provider_d_wire       (** canonical: SSE, reasoning_effort, web_search, parallel_tool_calls *)
+  | Provider_g_wire    (** DeepSeek: thinking param, reasoning_content, reasoning_effort high/max *)
+  | Provider_k_zai      (** Z.AI/GLM: reasoning_content, business errors 1301/1302/1303 *)
+  | Provider_h_wire         (** Provider_h_wire/Provider_h: OpenAI compat, tools+stream incompatible *)
 [@@deriving show, eq]
 
 let flavor_of_string = function
   | "llama-cpp" -> Llama_cpp
   | "ollama" -> Ollama
   | "vllm" -> Vllm
-  | "provider_d" -> Openai
-  | "provider_g" -> Deep_seek
-  | "zai-provider_k" -> Zai_glm
-  | "provider_h" -> Qwen
+  | "provider_d" -> Provider_d_wire
+  | "provider_g" -> Provider_g_wire
+  | "zai-provider_k" -> Provider_k_zai
+  | "provider_h" -> Provider_h_wire
   | s -> failwith (Printf.sprintf "Unknown server flavor: %s" s)
 
 let flavor_to_string = function
   | Llama_cpp -> "llama-cpp"
   | Ollama -> "ollama"
   | Vllm -> "vllm"
-  | Openai -> "provider_d"
-  | Deep_seek -> "provider_g"
-  | Zai_glm -> "zai-provider_k"
-  | Qwen -> "provider_h"
+  | Provider_d_wire -> "provider_d"
+  | Provider_g_wire -> "provider_g"
+  | Provider_k_zai -> "zai-provider_k"
+  | Provider_h_wire -> "provider_h"
 
 (* ── Protocol ────────────────────────────────────────────────── *)
 
 type cascade_protocol =
   | Openai_http     (** OpenAI-compatible HTTP (/v1/chat/completions) *)
   | Ollama_http     (** Ollama native HTTP (/api/chat) *)
-  | Anthropic_http  (** Provider_a Messages API (/v1/messages) *)
+  | Provider_a_http  (** Provider_a Messages API (/v1/messages) *)
   | Openai_cli      (** CLI wrapper speaking OpenAI protocol *)
 [@@deriving show, eq]
 
 let protocol_of_string = function
   | "provider_d-http" -> Openai_http
   | "ollama-http" -> Ollama_http
-  | "provider_a-http" -> Anthropic_http
+  | "provider_a-http" -> Provider_a_http
   | "provider_d-cli" -> Openai_cli
   | s -> failwith (Printf.sprintf "Unknown protocol: %s" s)
 
 let protocol_to_string = function
   | Openai_http -> "provider_d-http"
   | Ollama_http -> "ollama-http"
-  | Anthropic_http -> "provider_a-http"
+  | Provider_a_http -> "provider_a-http"
   | Openai_cli -> "provider_d-cli"
 
 (* ── Provider ────────────────────────────────────────────────── *)

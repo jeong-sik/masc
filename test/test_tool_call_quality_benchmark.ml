@@ -45,8 +45,8 @@ let test_summary_rollups_and_stability () =
   check int "runtime unreachable runs" 0 summary.runtime_unreachable_runs;
   let analyst_row =
     find_row
-      ~provider:(Some "openai")
-      ~model:(Some "gpt-5.4")
+      ~provider:(Some "provider_d")
+      ~model:(Some "model-d-5.4")
       ~keeper:(Some "bench-analyst")
       summary.grouped_by_provider_model_keeper
   in
@@ -57,8 +57,8 @@ let test_summary_rollups_and_stability () =
   check int "analyst repeated groups" 1 analyst_row.repeated_case_groups;
   let executor_row =
     find_row
-      ~provider:(Some "openai")
-      ~model:(Some "gpt-5.4")
+      ~provider:(Some "provider_d")
+      ~model:(Some "model-d-5.4")
       ~keeper:(Some "bench-executor")
       summary.grouped_by_provider_model_keeper
   in
@@ -68,8 +68,8 @@ let test_summary_rollups_and_stability () =
     true (executor_row.correct_tool_rate < 1.0);
   let verifier_row =
     find_row
-      ~provider:(Some "openai")
-      ~model:(Some "gpt-5.4-mini")
+      ~provider:(Some "provider_d")
+      ~model:(Some "model-d-5.4-mini")
       ~keeper:(Some "bench-verifier")
       summary.grouped_by_provider_model_keeper
   in
@@ -83,8 +83,8 @@ let test_summary_rollups_and_stability () =
   let provider_row =
     List.find
       (fun (row : Tool_call_quality_benchmark.summary_row) ->
-        row.provider = Some "openai"
-        && row.model = Some "gpt-5.4"
+        row.provider = Some "provider_d"
+        && row.model = Some "model-d-5.4"
         && row.keeper_profile = None)
       summary.grouped_by_provider_model
   in

@@ -15,9 +15,9 @@ let test_split_ws_preserves_quoted_cmdline_values () =
   check
     (list string)
     "quoted model path remains one argv"
-    [ "/opt/bin/llama-server"; "-m"; "/models/Qwen 3.5.gguf"; "--port"; "8080" ]
+    [ "/opt/bin/llama-server"; "-m"; "/models/Provider_h_wire 3.5.gguf"; "--port"; "8080" ]
     (Masc_mcp.Tool_local_runtime.split_ws
-       {|/opt/bin/llama-server -m "/models/Qwen 3.5.gguf" --port 8080|})
+       {|/opt/bin/llama-server -m "/models/Provider_h_wire 3.5.gguf" --port 8080|})
 
 let test_classify_runtime_blocker_prefers_slot_count_when_health_ok () =
   let blocker, detail =

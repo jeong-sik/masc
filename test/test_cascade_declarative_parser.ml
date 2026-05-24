@@ -498,9 +498,9 @@ let test_api_format_of_protocol () =
     (api_format_of_protocol "provider_d-cli" = Ok Chat_completions_api);
   check
     bool
-    "google-cli"
+    "provider_f-cli"
     true
-    (api_format_of_protocol "google-cli" = Ok Chat_completions_api);
+    (api_format_of_protocol "provider_f-cli" = Ok Chat_completions_api);
   check bool "provider_c-cli" true (api_format_of_protocol "provider_c-cli" = Ok Chat_completions_api);
   check bool "ollama-http" true (api_format_of_protocol "ollama-http" = Ok Ollama_api);
   check bool "unknown" true (api_format_of_protocol "unknown" |> Result.is_error)
@@ -1308,16 +1308,16 @@ match-prefixes = ["agent_llm_a-"]
     None
     (Option.map
        (fun (m : cascade_model_spec) -> m.id)
-       (model_spec_for_api_name cfg "gpt-5"))
+       (model_spec_for_api_name cfg "model-d-5"))
 ;;
 
 let test_model_capabilities_for_api_name_via_prefix () =
   let toml =
     {|
 [models.gpt-5-family]
-api-name = "gpt-5-family-default"
+api-name = "model-d-5-family-default"
 max-context = 1050000
-match-prefixes = ["gpt-5"]
+match-prefixes = ["model-d-5"]
 
 [models.gpt-5-family.capabilities]
 supports-parallel-tool-calls = true

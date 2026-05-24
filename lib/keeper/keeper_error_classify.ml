@@ -165,7 +165,8 @@ let is_required_tool_contract_violation (err : Agent_sdk.Error.sdk_error) : bool
   | Agent_sdk.Error.Agent (ToolRetryExhausted _)
   | Agent_sdk.Error.Agent (GuardrailViolation _)
   | Agent_sdk.Error.Agent (TripwireViolation _)
-  | Agent_sdk.Error.Agent (ExitConditionMet _) -> false
+  | Agent_sdk.Error.Agent (ExitConditionMet _)
+  | Agent_sdk.Error.Agent (InputRequired _) -> false
   (* Non-Agent error families. *)
   | Agent_sdk.Error.Api _
   | Agent_sdk.Error.Provider _
@@ -951,7 +952,8 @@ let is_context_overflow (err : Agent_sdk.Error.sdk_error) : bool =
   | Agent_sdk.Error.Agent (CompletionContractViolation _)
   | Agent_sdk.Error.Agent (GuardrailViolation _)
   | Agent_sdk.Error.Agent (TripwireViolation _)
-  | Agent_sdk.Error.Agent (ExitConditionMet _) -> false
+  | Agent_sdk.Error.Agent (ExitConditionMet _)
+  | Agent_sdk.Error.Agent (InputRequired _) -> false
   (* Non-API / non-Agent error families. *)
   | Agent_sdk.Error.Mcp _
   | Agent_sdk.Error.Config _

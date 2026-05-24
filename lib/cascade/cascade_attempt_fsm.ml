@@ -167,7 +167,8 @@ let sdk_error_to_cascade_outcome (err : Agent_sdk.Error.sdk_error)
   | Agent_sdk.Error.Agent (ToolRetryExhausted _)
   | Agent_sdk.Error.Agent (GuardrailViolation _)
   | Agent_sdk.Error.Agent (TripwireViolation _)
-  | Agent_sdk.Error.Agent (ExitConditionMet _) -> None
+  | Agent_sdk.Error.Agent (ExitConditionMet _)
+  | Agent_sdk.Error.Agent (InputRequired _) -> None
   (* Other Config errors (different InvalidConfig field, MissingEnvVar,
      UnsupportedProvider) and non-Api / non-Agent / non-Config families are
      not cascade-recoverable. *)

@@ -234,6 +234,11 @@ let of_agent_error (e : Agent_sdk.Error.agent_error) : t =
     ; openai_kind = kind_server
     ; openai_code = Some "exit_condition_met"
     ; message }
+  | InputRequired _ ->
+    { http_status = `Bad_request
+    ; openai_kind = kind_invalid_request
+    ; openai_code = Some "input_required"
+    ; message }
 
 let of_mcp_error (e : Agent_sdk.Error.mcp_error) : t =
   let message = Agent_sdk.Error.to_string (Agent_sdk.Error.Mcp e) in

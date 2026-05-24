@@ -11,7 +11,6 @@
 
 open Keeper_types
 
-let contains_ci = String_util.contains_substring_ci
 
 (* ================================================================ *)
 (* Re-export from Keeper_context_core                                *)
@@ -457,7 +456,7 @@ let append_trait_clause ~(base : string) ~(clause : string) : string =
   let c = String.trim clause in
   if c = "" then b
   else if b = "" then c
-  else if contains_ci b c then b
+  else if String_util.contains_substring_ci b c then b
   else Printf.sprintf "%s; %s" b c
 
 

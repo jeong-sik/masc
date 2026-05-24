@@ -14,7 +14,7 @@ let pr_review_action_metric_event_of_tool_io
   then
     let output_json = output_json_opt ~surface:"pr_review_action" output_text in
     let route_via =
-      first_some (Option.bind output_json route_via_of_json)
+      Dashboard_utils.first_some (Option.bind output_json route_via_of_json)
         route_via_fallback
     in
     let action =
@@ -39,7 +39,7 @@ let pr_review_action_metric_event_of_tool_io
          {
            action;
            pr_number =
-             first_some
+             Dashboard_utils.first_some
                (match output_json with
                 | Some json -> json_int_opt "pr_number" json
                 | None -> None)
@@ -55,7 +55,7 @@ let pr_review_action_metric_event_of_tool_io
   then
     let output_json = output_json_opt ~surface:"pr_review_action" output_text in
     let route_via =
-      first_some (Option.bind output_json route_via_of_json)
+      Dashboard_utils.first_some (Option.bind output_json route_via_of_json)
         route_via_fallback
     in
     let success =
@@ -69,13 +69,13 @@ let pr_review_action_metric_event_of_tool_io
       {
         action = "REPLY";
         pr_number =
-          first_some
+          Dashboard_utils.first_some
             (match output_json with
              | Some json -> json_int_opt "pr_number" json
              | None -> None)
             (json_int_opt "pr_number" input);
         comment_id =
-          first_some
+          Dashboard_utils.first_some
             (match output_json with
              | Some json -> json_int_opt "comment_id" json
              | None -> None)
@@ -158,7 +158,7 @@ let pr_work_action_metric_events_of_tool_io
       ~surface:"pr_work_action" output_text
   in
   let route_via =
-    first_some (Option.bind output_json route_via_of_json)
+    Dashboard_utils.first_some (Option.bind output_json route_via_of_json)
       route_via_fallback
   in
   let success = output_success ~transport_success output_json in

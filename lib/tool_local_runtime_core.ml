@@ -59,7 +59,6 @@ let split_ws text =
       if String.equal trimmed "" then [] else [ trimmed ]
   | Ok ir -> Exec_policy.flat_stage_words ir
 
-let string_contains_substring = String_util.contains_substring
 
 let parse_pid_and_command line =
   let trimmed = String.trim line in
@@ -136,7 +135,7 @@ let discover_processes () =
         |> String.split_on_char '\n'
         |> List.filter_map (fun line ->
                let pid, command = parse_pid_and_command line in
-               if String.equal command "" || not (string_contains_substring command "llama-server") then
+               if String.equal command "" || not (String_util.contains_substring command "llama-server") then
                  None
                else
                  let tokens = split_ws command in

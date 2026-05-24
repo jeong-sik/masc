@@ -84,7 +84,6 @@ val split_ws : string -> string list
     bash-subset word parser, preserving quoted values.  Used to tokenise
     cmdlines into argv-like lists for process discovery. *)
 
-val string_contains_substring : string -> string -> bool
 (** Alias over {!String_util.contains_substring} — case-
     sensitive. *)
 

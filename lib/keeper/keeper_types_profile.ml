@@ -40,7 +40,6 @@ let take n xs =
 
 (* Delegated to Keeper_fs — single fiber-safe ensure_dir implementation. *)
 let ensure_dir = Keeper_fs.ensure_dir
-
 let dedupe_keep_order = Json_util.dedupe_keep_order
 
 let normalize_name_list items =
@@ -88,7 +87,6 @@ let normalize_tool_preset_raw raw =
   let normalized = String.trim (String.lowercase_ascii raw) in
   if List.mem normalized valid_tool_preset_raw_strings then Some normalized else None
 
-let first_some = Dashboard_utils.first_some
 
 let room_seq_map_to_json (items : (string * int) list) : Yojson.Safe.t =
   `Assoc (List.map (fun (room_id, seq) -> (room_id, `Int seq)) items)

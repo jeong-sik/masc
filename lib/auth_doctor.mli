@@ -43,25 +43,13 @@ type watched_agent = {
 (** Per-agent credential snapshot.  Aggregated under
     {!t.watched_agents}. *)
 
-type mcp_client = {
-  client_name : string;
-  agent_name : string;
-  token_env_var : string;
-  token_file_path : string;
-  credential_present : bool;
-  credential_role : string option;
-  raw_token_file_present : bool;
-  token_source : string;
-  token_status : string;
-  token_agent : string option;
-  token_role : string option;
-  token_can_read_state : bool option;
-  identity_ready : bool;
-}
-(** Per-client MCP identity readiness for local Codex/Claude/Gemini
-    bearer-token wiring.  [token_source] is ["env"], ["token_file"],
-    or ["missing"]; [token_status] is ["live"], ["wrong_agent"],
-    ["invalid_or_expired"], or ["missing"]. *)
+(** Per-client MCP identity readiness was previously exposed here as
+    [type mcp_client] alongside a hardcoded list of "known" MCP
+    clients (Claude, Gemini). That list lived inside server code and
+    made the server client-aware — the wrong direction for an MCP
+    server. The diagnostic is removed; operators who need per-client
+    readiness checks compose them externally over the raw
+    [doctor auth --json] output and their own client roster. *)
 
 (** {1 Aggregate report} *)
 
@@ -88,7 +76,6 @@ type t = {
   credential_count : int;
   role_counts : (string * int) list;
   watched_agents : watched_agent list;
-  mcp_clients : mcp_client list;
   warnings : string list;
   next_actions : string list;
 }
@@ -114,7 +101,6 @@ val analyze :
     + Admin-token env-var status + admin-bearer source
       enumeration ([admin_bearer_sources]).
     + Codex MCP config via {!Codex_mcp_config_doctor}.
-    + Local MCP client identities for Codex, Claude, and Gemini.
 
     Side-effecting (file reads); pure with respect to the
     process registry — does not mutate auth state. *)

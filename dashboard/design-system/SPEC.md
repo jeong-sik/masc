@@ -150,14 +150,11 @@ Keeper hues sit at C=0.09 (muted ring). Status hues use higher chroma
 keeper hex coincides with any status hex. Components MUST NOT reuse
 `--color-status-*` tokens for attribution, and vice-versa.
 
-#### 3.6.5 Provider cascade (unchanged)
+#### 3.6.5 Provider cascade (removed by RFC-0168 / RFC-0170)
 
-| Canonical | dashboard raw | 의미 |
-|-----------|---------------|------|
-| `--p-anthropic` | `--p-anthropic` | provider cascade chip |
-| `--p-moonshot`  | `--p-moonshot`  | provider cascade chip |
-| `--p-openai`    | `--p-openai`    | provider cascade chip |
-| `--p-xai`       | `--p-xai`       | provider cascade chip |
+The closed-roster `--p-<vendor>` palette was removed by RFC-0168
+(13 vendor tokens) and RFC-0170 (the missed `--p-moonshot` triple).
+Cascade chips now render with neutral border-default styling.
 
 bonsai는 현재 keeper attribution을 색이 아닌 텍스트(`@nick0cave` 등)로
 표현 — SPEC v0.3에서도 텍스트-only 가 valid attribution 으로 인정된다

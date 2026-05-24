@@ -94,7 +94,7 @@ Phase 1 corpus는 `masc-mcp` 단일 repo다.
 ./scripts/harness_repo_synthesis_benchmark.sh
 ```
 
-question set은 `benchmark/repo_synthesis_question_set.json`에 있고,
+question set은 `benchmarks/data/repo_synthesis_question_set.json`에 있고,
 baseline/fleet fixture answers는 `test/fixtures/repo_synthesis_benchmark/`에 있다.
 
 ## 준비 순서

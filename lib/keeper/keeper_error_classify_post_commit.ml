@@ -23,8 +23,7 @@ let is_ambiguous_side_effect_error (err : Agent_sdk.Error.sdk_error) : bool =
   | None -> (
       match err with
       | Agent_sdk.Error.Internal msg ->
-          Keeper_error_classify.string_contains_substring
-            ~needle:ambiguous_side_effect_error_prefix msg
+          String_util.contains_substring msg ambiguous_side_effect_error_prefix
       (* Non-Internal sdk_error variants do not encode the legacy
          ambiguous-side-effect string prefix; the structured
          [Ambiguous_post_commit] arm above covers the new path. *)

@@ -24,7 +24,7 @@ type prompt_flag =
 (** Spawn configuration for an agent *)
 type spawn_config = {
   agent_name: string;
-  command: string;       (* e.g., "claude -p", "gemini", "codex" *)
+  command: string;       (* e.g., "claude -p", "gemini", "llama" *)
   timeout_seconds: int;
   working_dir: string option;
   mcp_tools: string list;  (* MCP tools to allow, e.g., ["mcp__masc__masc_status"] *)
@@ -181,17 +181,6 @@ let spawn_config_of_key key =
         parse_output = parse_gemini_output;
         mcp_mode = Mcp_spread "--allowed-tools";
         prompt_mode = Prompt_flag "-p";
-      }
-  | "codex" ->
-      Some {
-        agent_name = "codex";
-        command = "codex exec";
-        timeout_seconds;
-        working_dir = None;
-        mcp_tools = masc_mcp_tools;
-        parse_output = parse_raw_output;
-        mcp_mode = Mcp_none;
-        prompt_mode = Prompt_stdin;
       }
   | "llama" ->
       Some {

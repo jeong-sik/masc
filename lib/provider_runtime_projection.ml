@@ -121,7 +121,7 @@ let supported_models_of_binding (binding : Runtime_binding.t) =
   | None -> []
 ;;
 
-let spawn_command_keys = [ "claude"; "codex"; "gemini"; "llama" ]
+let spawn_command_keys = [ "claude"; "gemini"; "llama" ]
 
 let spawn_key_of_binding (binding : Runtime_binding.t) =
   match binding.Runtime_binding.command with

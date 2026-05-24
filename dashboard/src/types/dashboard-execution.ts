@@ -725,6 +725,39 @@ export interface GoalTreeTask {
   updated_at: string
 }
 
+export interface GoalTaskSummary {
+  total: number
+  done: number
+  open: number
+  terminal: number
+  awaiting_verification: number
+  cancelled: number
+  unassigned: number
+  completion_pct: number | null
+  by_status: Record<string, number>
+  by_linkage_source: Record<string, number>
+}
+
+export interface GoalCompletionSummary {
+  state: string
+  pct: number | null
+  pct_source: string
+  attainment_state: string
+  attainment_basis: string
+  task_total: number
+  task_done: number
+  task_open: number
+  is_complete: boolean
+  is_terminal: boolean
+  ready_to_request_completion: boolean
+  gate: 'none' | 'verification' | 'approval' | string
+  requires_verifier: boolean
+  requires_completion_approval: boolean
+  active_verification_request: boolean
+  blocking_source: GoalTreeNode['blocking_source']
+  blocking_reason: string
+}
+
 export interface GoalVerificationVote {
   principal: {
     kind: string
@@ -860,6 +893,7 @@ export interface GoalTreeNode {
   priority: number
   metric: string | null
   target_value: string | null
+  require_completion_approval: boolean
   due_date: string | null
   parent_goal_id: string | null
   convergence: number
@@ -868,6 +902,8 @@ export interface GoalTreeNode {
   tasks: GoalTreeTask[]
   task_count: number
   task_done_count: number
+  task_summary?: GoalTaskSummary
+  completion_summary?: GoalCompletionSummary
   verification_summary: GoalVerificationSummary
   effective_verifier_policy?: GoalVerificationRequest['policy_snapshot'] | null
   active_verification_request?: GoalVerificationRequest | null

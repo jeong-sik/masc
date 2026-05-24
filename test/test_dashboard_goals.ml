@@ -85,6 +85,8 @@ let rewrite_goal_updated_at config ~goal_id ~updated_at =
   in
   Goal_store.write_state config { state with updated_at; goals }
 
+let test_cascade_name = "tier.test"
+
 let make_keeper_meta ~name ~goal_id =
   match
     Masc_test_deps.meta_of_json_fixture
@@ -94,7 +96,7 @@ let make_keeper_meta ~name ~goal_id =
           ("agent_name", `String (name ^ "-agent"));
           ("trace_id", `String ("trace-" ^ name));
           ("goal", `String "Goal-linked keeper");
-          ("cascade_name", `String (Keeper_config.default_cascade_name ()));
+          ("cascade_name", `String test_cascade_name);
         ])
   with
   | Ok meta -> { meta with active_goal_ids = [ goal_id ] }
@@ -398,6 +400,63 @@ let test_title_marker_does_not_link_task () =
     (node |> member "tasks" |> to_list |> List.length);
   check string "node linkage source" "none"
     (node |> member "linkage_source" |> to_string)
+
+let test_goal_task_summary_counts_status_and_source () =
+  with_room @@ fun config ->
+  let goal, _kind =
+    match Goal_store.upsert_goal config ~title:"Task summary goal" () with
+    | Ok payload -> payload
+    | Error msg -> fail msg
+  in
+  create_done_task config ~goal_id:goal.id ~title:"Summary done task";
+  ignore
+    (Coord_task.add_task ~goal_id:goal.id config ~title:"Summary open task"
+       ~priority:3 ~description:"still open");
+  ignore
+    (Coord_task.add_task ~goal_id:goal.id config
+       ~title:"Summary cancelled task" ~priority:3 ~description:"cancelled");
+  let cancelled_task_id =
+    Coord.get_tasks_raw config
+    |> List.find_map (fun (task : Masc_domain.task) ->
+           if String.equal task.title "Summary cancelled task" then
+             Some task.id
+           else
+             None)
+    |> function
+    | Some task_id -> task_id
+    | None -> fail "cancelled task not found"
+  in
+  (match Coord.cancel_task_r config ~agent_name:"planner"
+           ~task_id:cancelled_task_id ~reason:"test cancellation" with
+   | Ok _ -> ()
+   | Error err -> fail (Masc_domain.masc_error_to_string err));
+  let node = Dashboard_goals.dashboard_goals_tree_json ~config |> root_node in
+  let summary = node |> member "task_summary" in
+  let completion_summary = node |> member "completion_summary" in
+  check int "summary total" 3 (summary |> member "total" |> to_int);
+  check int "summary done" 1 (summary |> member "done" |> to_int);
+  check int "summary open" 1 (summary |> member "open" |> to_int);
+  check int "summary terminal" 2 (summary |> member "terminal" |> to_int);
+  check int "summary cancelled" 1
+    (summary |> member "cancelled" |> to_int);
+  check int "summary completion pct" 33
+    (summary |> member "completion_pct" |> to_int);
+  check int "completed status count" 1
+    (summary |> member "by_status" |> member "completed" |> to_int);
+  check int "pending status count" 1
+    (summary |> member "by_status" |> member "pending" |> to_int);
+  check int "cancelled status count" 1
+    (summary |> member "by_status" |> member "cancelled" |> to_int);
+  check int "explicit linkage count" 3
+    (summary |> member "by_linkage_source" |> member "explicit" |> to_int);
+  check string "completion summary state" "in_progress"
+    (completion_summary |> member "state" |> to_string);
+  check int "completion summary pct" 33
+    (completion_summary |> member "pct" |> to_int);
+  check string "completion summary pct source" "attainment"
+    (completion_summary |> member "pct_source" |> to_string);
+  check int "completion summary open tasks" 1
+    (completion_summary |> member "task_open" |> to_int)
 
 let test_goal_attainment_projects_percent_target () =
   with_room @@ fun config ->
@@ -1015,8 +1074,8 @@ let test_goal_detail_promotes_newer_runtime_blocker_over_stale_receipt () =
       check string "latest terminal reason comes from blocker"
         "runtime_blocker"
         (terminal_reason |> member "source" |> to_string);
-      check string "latest terminal reason is normalized turn timeout"
-        "turn_timeout"
+      check string "latest terminal reason is normalized wall-clock timeout"
+        "turn_wall_clock_timeout"
         (terminal_reason |> member "code" |> to_string);
       check string "latest causal event follows runtime blocker"
         "runtime_blocker"
@@ -1116,7 +1175,7 @@ let test_goal_detail_derives_attention_from_receipt_disposition () =
         "execution_receipt"
         (terminal_reason |> member "source" |> to_string);
       check string "next action follows terminal reason"
-        "inspect_provider_tool_contract"
+        "inspect_tool_contract_rejection"
         (runtime_trust |> member "next_human_action" |> to_string)
 
 let () =
@@ -1134,6 +1193,8 @@ let () =
             test_cancelled_only_goal_is_at_risk;
           test_case "title marker does not link task" `Quick
             test_title_marker_does_not_link_task;
+          test_case "goal task summary counts status and source" `Quick
+            test_goal_task_summary_counts_status_and_source;
           test_case "goal attainment projects percent targets" `Quick
             test_goal_attainment_projects_percent_target;
           test_case "goal attainment exports prometheus metric" `Quick

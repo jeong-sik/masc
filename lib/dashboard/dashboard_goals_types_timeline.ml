@@ -72,6 +72,80 @@ let task_to_tree_json ((task, linkage_source) : Masc_domain.task * string) =
       ("updated_at", `String (task_updated_at task));
     ]
 
+let count_assoc_json preferred_keys table =
+  let keys =
+    Hashtbl.fold (fun key _ acc -> key :: acc) table []
+    |> List.sort_uniq String.compare
+  in
+  let ordered_keys =
+    preferred_keys
+    @ List.filter (fun key -> not (List.mem key preferred_keys)) keys
+  in
+  `Assoc
+    (List.map
+       (fun key -> key, `Int (Option.value ~default:0 (Hashtbl.find_opt table key)))
+       ordered_keys)
+
+let task_summary_to_json tasks =
+  let by_status = Hashtbl.create 8 in
+  let by_linkage_source = Hashtbl.create 4 in
+  let bump table key =
+    let current = Option.value ~default:0 (Hashtbl.find_opt table key) in
+    Hashtbl.replace table key (current + 1)
+  in
+  let done_count = ref 0 in
+  let open_count = ref 0 in
+  let terminal_count = ref 0 in
+  let awaiting_verification_count = ref 0 in
+  let cancelled_count = ref 0 in
+  let unassigned_count = ref 0 in
+  List.iter
+    (fun ((task, linkage_source) : Masc_domain.task * string) ->
+      let status = task_status_label task in
+      bump by_status status;
+      bump by_linkage_source linkage_source;
+      if task_is_done task then incr done_count;
+      if task_is_terminal task then incr terminal_count else incr open_count;
+      if String.equal status "awaiting_verification" then
+        incr awaiting_verification_count;
+      if String.equal status "cancelled" then incr cancelled_count;
+      match task_assignee task with None -> incr unassigned_count | Some _ -> ())
+    tasks;
+  let total = List.length tasks in
+  let completion_pct =
+    if total = 0 then
+      `Null
+    else
+      `Int
+        (int_of_float
+           (float_of_int !done_count /. float_of_int total *. 100.0))
+  in
+  `Assoc
+    [
+      ("total", `Int total);
+      ("done", `Int !done_count);
+      ("open", `Int !open_count);
+      ("terminal", `Int !terminal_count);
+      ("awaiting_verification", `Int !awaiting_verification_count);
+      ("cancelled", `Int !cancelled_count);
+      ("unassigned", `Int !unassigned_count);
+      ("completion_pct", completion_pct);
+      ( "by_status",
+        count_assoc_json
+          [
+            "pending";
+            "claimed";
+            "in_progress";
+            "awaiting_verification";
+            "completed";
+            "cancelled";
+          ]
+          by_status );
+      ( "by_linkage_source",
+        count_assoc_json [ "explicit"; "title_tag"; "mixed"; "none" ]
+          by_linkage_source );
+    ]
+
 let rec flatten_tree acc = function
   | [] -> List.rev acc
   | node :: rest ->

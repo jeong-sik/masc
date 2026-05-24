@@ -8,6 +8,7 @@ val goal_health_color : string -> string
 val task_status_color : string -> string
 
 val task_to_tree_json : Masc_domain.task * string -> Yojson.Safe.t
+val task_summary_to_json : (Masc_domain.task * string) list -> Yojson.Safe.t
 
 val flatten_tree : tree_node list -> tree_node list -> tree_node list
 val goal_detail_keeper_json : goal_detail_keeper -> Yojson.Safe.t

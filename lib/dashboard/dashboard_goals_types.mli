@@ -142,6 +142,14 @@ val goal_attainment_measured_help : string
 val goal_attainment_to_json :
   Goal_store.goal -> tree_node -> Yojson.Safe.t
 
+val goal_completion_to_json :
+  effective_policy:'a option ->
+  open_request:'b option ->
+  Goal_store.goal ->
+  tree_node ->
+  attainment:Yojson.Safe.t ->
+  Yojson.Safe.t
+
 (** {1 Goal phase health + reason + tree badges (pure)} *)
 
 val goal_phase_to_health : Goal_phase.t -> string option
@@ -218,6 +226,7 @@ val goal_health_color : string -> string
 val task_status_color : string -> string
 
 val task_to_tree_json : Masc_domain.task * string -> Yojson.Safe.t
+val task_summary_to_json : (Masc_domain.task * string) list -> Yojson.Safe.t
 
 (** {1 Tree flatten + goal-detail JSON + timeline projection (pure)} *)
 

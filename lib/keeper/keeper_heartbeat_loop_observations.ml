@@ -205,7 +205,8 @@ let is_provider_timeout_error (err : Agent_sdk.Error.sdk_error) =
       (* RFC-0159 Phase A: Internal_* variants are not OAS-budget timeouts. *)
       | Keeper_turn_driver.Internal_unhandled_exception _
       | Keeper_turn_driver.Internal_bridge_exception _
-      | Keeper_turn_driver.Internal_contract_rejected _ )
+      | Keeper_turn_driver.Internal_contract_rejected _
+      | Keeper_turn_driver.Retry_admission_denied _ )
   | None ->
     false
 ;;
@@ -250,7 +251,8 @@ let provider_timeout_policy_decision
       (* RFC-0159 Phase A: Internal_* variants are not OAS-budget timeouts. *)
       | Keeper_turn_driver.Internal_unhandled_exception _
       | Keeper_turn_driver.Internal_bridge_exception _
-      | Keeper_turn_driver.Internal_contract_rejected _ )
+      | Keeper_turn_driver.Internal_contract_rejected _
+      | Keeper_turn_driver.Retry_admission_denied _ )
   | None ->
     None
 ;;

@@ -214,6 +214,7 @@ let blocker_class_of_sdk_error (err : Agent_sdk.Error.sdk_error) : blocker_class
   | Some (Keeper_turn_driver.Internal_unhandled_exception _) -> None
   | Some (Keeper_turn_driver.Internal_bridge_exception _) -> None
   | Some (Keeper_turn_driver.Internal_contract_rejected _) -> None
+  | Some (Keeper_turn_driver.Retry_admission_denied _) -> None
   | None ->
     (match err with
      | Agent_sdk.Error.Internal msg -> blocker_class_of_string msg
@@ -233,7 +234,7 @@ let blocker_class_of_sdk_error (err : Agent_sdk.Error.sdk_error) : blocker_class
      | Agent_sdk.Error.Agent (GuardrailViolation _) -> Some Sdk_guardrail_violation
      | Agent_sdk.Error.Agent (TripwireViolation _) -> Some Sdk_tripwire_violation
      | Agent_sdk.Error.Agent (ExitConditionMet _) -> Some Sdk_exit_condition_met
-     | Agent_sdk.Error.Agent (InputRequired _) -> Some Sdk_input_required
+     | Agent_sdk.Error.Agent (InputRequired _) -> None
      (* Provider-level [Api] errors are surfaced via OAS retry / cascade
          layers and do not map to a typed blocker_class by themselves. *)
      | Agent_sdk.Error.Api _

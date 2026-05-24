@@ -767,7 +767,8 @@ let review
                   (* RFC-0159 Phase A: opaque internal failures. *)
                   | Keeper_turn_driver.Internal_unhandled_exception _
                   | Keeper_turn_driver.Internal_bridge_exception _
-                  | Keeper_turn_driver.Internal_contract_rejected _ )
+                  | Keeper_turn_driver.Internal_contract_rejected _
+                  | Keeper_turn_driver.Retry_admission_denied _ )
               | None ->
                 false
             in

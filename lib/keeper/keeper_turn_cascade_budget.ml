@@ -376,7 +376,8 @@ let degraded_retry_bypasses_slot_phase_guard
       (* RFC-0159 Phase A: Internal_* variants are not OAS-budget timeouts. *)
       | Keeper_turn_driver.Internal_unhandled_exception _
       | Keeper_turn_driver.Internal_bridge_exception _
-      | Keeper_turn_driver.Internal_contract_rejected _ )
+      | Keeper_turn_driver.Internal_contract_rejected _
+      | Keeper_turn_driver.Retry_admission_denied _ )
   | None ->
     false
 

@@ -165,7 +165,7 @@ let is_required_tool_contract_violation (err : Agent_sdk.Error.sdk_error) : bool
   | Agent_sdk.Error.Agent (ToolRetryExhausted _)
   | Agent_sdk.Error.Agent (GuardrailViolation _)
   | Agent_sdk.Error.Agent (TripwireViolation _)
-  | Agent_sdk.Error.Agent (ExitConditionMet _)
+  | Agent_sdk.Error.Agent (ExitConditionMet _) -> false
   | Agent_sdk.Error.Agent (InputRequired _) -> false
   (* Non-Agent error families. *)
   | Agent_sdk.Error.Api _
@@ -245,6 +245,7 @@ let is_auto_recoverable_cascade_exhausted_error (err : Agent_sdk.Error.sdk_error
   | Some (Keeper_turn_driver.Internal_unhandled_exception _)
   | Some (Keeper_turn_driver.Internal_bridge_exception _)
   | Some (Keeper_turn_driver.Internal_contract_rejected _)
+  | Some (Keeper_turn_driver.Retry_admission_denied _)
   | None ->
       false
 
@@ -267,6 +268,7 @@ let is_resumable_cli_session_error (err : Agent_sdk.Error.sdk_error) : bool =
   | Some (Keeper_turn_driver.Internal_unhandled_exception _)
   | Some (Keeper_turn_driver.Internal_bridge_exception _)
   | Some (Keeper_turn_driver.Internal_contract_rejected _)
+  | Some (Keeper_turn_driver.Retry_admission_denied _)
   | None ->
       false
 
@@ -418,6 +420,7 @@ let degraded_retry_after_recoverable_error
     | Some (Keeper_turn_driver.Internal_unhandled_exception _)
     | Some (Keeper_turn_driver.Internal_bridge_exception _)
     | Some (Keeper_turn_driver.Internal_contract_rejected _)
+    | Some (Keeper_turn_driver.Retry_admission_denied _)
     | None ->
         None
 
@@ -483,7 +486,8 @@ let recoverable_cascade_failure_reason (err : Agent_sdk.Error.sdk_error) =
        reasons; they expose previously-opaque raw exception payloads.  *)
     | Some (Keeper_turn_driver.Internal_unhandled_exception _)
     | Some (Keeper_turn_driver.Internal_bridge_exception _)
-    | Some (Keeper_turn_driver.Internal_contract_rejected _) ->
+    | Some (Keeper_turn_driver.Internal_contract_rejected _)
+    | Some (Keeper_turn_driver.Retry_admission_denied _) ->
         None
     | None ->
         (* Status-code-aware cascade rotation: raw provider API errors that are
@@ -767,6 +771,7 @@ let should_warn_keeper_cycle_failed (err : Agent_sdk.Error.sdk_error) : bool =
   | Some (Keeper_turn_driver.Internal_unhandled_exception _)
   | Some (Keeper_turn_driver.Internal_bridge_exception _)
   | Some (Keeper_turn_driver.Internal_contract_rejected _)
+  | Some (Keeper_turn_driver.Retry_admission_denied _)
   | None ->
     false
 
@@ -814,7 +819,8 @@ let is_ambiguous_side_effect_error (err : Agent_sdk.Error.sdk_error) : bool =
   (* RFC-0159 Phase A: opaque internal failures are unambiguous failures. *)
   | Some (Keeper_turn_driver.Internal_unhandled_exception _)
   | Some (Keeper_turn_driver.Internal_bridge_exception _)
-  | Some (Keeper_turn_driver.Internal_contract_rejected _) -> false
+  | Some (Keeper_turn_driver.Internal_contract_rejected _)
+  | Some (Keeper_turn_driver.Retry_admission_denied _) -> false
 
 let reclassify_error_after_side_effect
     ~(tool_names : string list)
@@ -967,7 +973,7 @@ let is_context_overflow (err : Agent_sdk.Error.sdk_error) : bool =
   | Agent_sdk.Error.Agent (CompletionContractViolation _)
   | Agent_sdk.Error.Agent (GuardrailViolation _)
   | Agent_sdk.Error.Agent (TripwireViolation _)
-  | Agent_sdk.Error.Agent (ExitConditionMet _)
+  | Agent_sdk.Error.Agent (ExitConditionMet _) -> false
   | Agent_sdk.Error.Agent (InputRequired _) -> false
   (* Non-API / non-Agent error families. *)
   | Agent_sdk.Error.Mcp _
@@ -998,7 +1004,8 @@ let is_cascade_exhausted_error (err : Agent_sdk.Error.sdk_error) : bool =
   (* RFC-0159 Phase A: opaque internal failures are not cascade exhaustion. *)
   | Some (Keeper_turn_driver.Internal_unhandled_exception _)
   | Some (Keeper_turn_driver.Internal_bridge_exception _)
-  | Some (Keeper_turn_driver.Internal_contract_rejected _) -> false
+  | Some (Keeper_turn_driver.Internal_contract_rejected _)
+  | Some (Keeper_turn_driver.Retry_admission_denied _) -> false
   | None -> false
 
 (** [true] when the rotation-cap fast-fail should fire for a

@@ -307,11 +307,6 @@ let test_risk_precedence_critical_over_high () =
   Alcotest.(check string) "force_create is critical (force wins)"
     "critical" (Gp.risk_level_to_string risk)
 
-let test_risk_metadata_destructive_override () =
-  let risk = Gp.assess_risk ~tool_name:"masc_operation_stop" ~input:no_args in
-  Alcotest.(check string) "operation_stop metadata marks destructive"
-    "critical" (Gp.risk_level_to_string risk)
-
 let test_risk_metadata_admin_cleanup_override () =
   let risk = Gp.assess_risk ~tool_name:"masc_admin_cleanup" ~input:no_args in
   Alcotest.(check string) "admin_cleanup metadata marks destructive"
@@ -984,8 +979,6 @@ let () =
       Alcotest.test_case "low: unknown" `Quick test_risk_low_unknown;
       Alcotest.test_case "precedence: critical > high" `Quick
         test_risk_precedence_critical_over_high;
-      Alcotest.test_case "metadata: destructive override" `Quick
-        test_risk_metadata_destructive_override;
       Alcotest.test_case "metadata: admin cleanup override" `Quick
         test_risk_metadata_admin_cleanup_override;
       Alcotest.test_case "metadata: pg query override" `Quick

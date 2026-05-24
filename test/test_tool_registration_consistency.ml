@@ -26,7 +26,6 @@ let test_workflow_guide_tools_exist () =
     "masc_heartbeat"; "masc_broadcast";
     "masc_worktree_create"; "masc_init";
     "masc_operator_digest";
-    "masc_operation_start"; "masc_dispatch_tick";
     (* team session tools removed — team session cleanup *)
   ] in
   List.iter (fun tool_name ->

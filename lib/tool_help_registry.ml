@@ -81,25 +81,19 @@ let truncate ~max_len text =
    family.  After this point every consumer uses the variant
    directly; no caller re-classifies by string. *)
 type tool_family =
-  | Operation
   | Dispatch
-  | Unit
   | Policy
   | Observe
-  | Detachment
   | Keeper
 
 let tool_family_prefix = function
-  | Operation -> "masc_operation_"
   | Dispatch -> "masc_dispatch_"
-  | Unit -> "masc_unit_"
   | Policy -> "masc_policy_"
   | Observe -> "masc_observe_"
-  | Detachment -> "masc_detachment_"
   | Keeper -> "masc_keeper_"
 
 let all_tool_families =
-  [ Operation; Dispatch; Unit; Policy; Observe; Detachment; Keeper ]
+  [ Dispatch; Policy; Observe; Keeper ]
 
 (* The single boundary parser.  Internal callers receive
    [tool_family option] and dispatch via exhaustive [match];
@@ -111,12 +105,9 @@ let classify_tool_family name =
 
 let help_doc_refs name =
   match classify_tool_family name with
-  | Some Operation
   | Some Dispatch
-  | Some Unit
   | Some Policy
-  | Some Observe
-  | Some Detachment ->
+  | Some Observe ->
       [
         "docs/COMMAND-PLANE-RUNBOOK.md";
         "docs/BENCHMARK-RUNBOOK.md";

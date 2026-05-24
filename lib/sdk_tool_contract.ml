@@ -131,7 +131,6 @@ let core_remote_operation_names =
         "masc_operator_digest";
         "masc_operator_action";
         "masc_operator_confirm";
-        "masc_dispatch_tick";
         "masc_policy_approve";
         "masc_policy_freeze_unit";
         "masc_policy_kill_switch";

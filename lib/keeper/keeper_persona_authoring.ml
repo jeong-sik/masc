@@ -41,12 +41,7 @@ let assoc_keys = function
   | _ -> []
 ;;
 
-let trim_nonempty_opt = function
-  | Some raw ->
-    let value = String.trim raw in
-    if value = "" then None else Some value
-  | None -> None
-;;
+let trim_nonempty_opt = String_util.option_trim
 
 let json_trimmed_string_opt key json =
   Safe_ops.json_string_opt key json |> trim_nonempty_opt
@@ -963,4 +958,3 @@ let handle_persona_generate ctx args =
                 , error_response_typed
                     ~code:Validation_error
                     (Printf.sprintf "generation did not return parseable JSON: %s" msg) )))
-;;

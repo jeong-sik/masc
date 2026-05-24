@@ -1,18 +1,7 @@
-(** Keeper_hooks_oas_pr_metrics — PR action metric helpers.
-
-    Extracted from [Keeper_hooks_oas] (2026-05-23) to keep
-    [keeper_hooks_oas.ml] under the RFC-0151 godfile_loc_1000plus
-    threshold and to disperse its catch-all match arms across
-    sibling modules.
-
-    Historical note: this code was previously a sibling module, deleted
-    by PR #18011 as falsely-dead (its only production consumer is the
-    parent [Keeper_hooks_oas.make_hooks], reached via parent-internal
-    call — a path missed by bare-name grep audits), then incorrectly
-    inline-restored by PR #18089. This file restores the original
-    sibling decomposition. *)
+(** PR action metric helpers for [Keeper_hooks_oas]. *)
 
 open Keeper_hooks_oas_types
+
 open Keeper_hooks_oas_output_json
 
 let pr_review_action_metric_event_of_tool_io
@@ -21,128 +10,119 @@ let pr_review_action_metric_event_of_tool_io
     ~(input : Yojson.Safe.t)
     ~(output_text : string)
     ~(transport_success : bool) =
-  match tool_name with
-  | "keeper_pr_review_comment" ->
-      let output_json = output_json_opt ~surface:"pr_review_action" output_text in
-      let route_via =
-        first_some (Option.bind output_json route_via_of_json)
-          route_via_fallback
-      in
-      let action =
-        match output_json with
-        | Some json -> Safe_ops.json_string_opt "event" json
-        | None -> None
-      in
-      let action =
-        match action with
-        | Some value -> Some value
-        | None -> Safe_ops.json_string_opt "event" input
-      in
-      let success =
-        output_success ~transport_success output_json
-      in
-      let credential = Option.bind output_json (assoc_json_opt "credential") in
-      let identity_attestation =
-        Option.bind output_json (assoc_json_opt "identity_attestation")
-      in
-      Option.map
-        (fun action ->
-           {
-             action;
-             pr_number =
-               first_some
-                 (match output_json with
-                  | Some json -> json_int_opt "pr_number" json
-                  | None -> None)
-                 (json_int_opt "pr_number" input);
-             comment_id = None;
-             success;
-             route_via;
-             credential;
-             identity_attestation;
-           })
-        (Option.bind action normalize_pr_review_action)
-  | "keeper_pr_review_reply" ->
-      let output_json = output_json_opt ~surface:"pr_review_action" output_text in
-      let route_via =
-        first_some (Option.bind output_json route_via_of_json)
-          route_via_fallback
-      in
-      let success =
-        output_success ~transport_success output_json
-      in
-      let credential = Option.bind output_json (assoc_json_opt "credential") in
-      let identity_attestation =
-        Option.bind output_json (assoc_json_opt "identity_attestation")
-      in
-      Some
-        {
-          action = "REPLY";
-          pr_number =
-            first_some
-              (match output_json with
-               | Some json -> json_int_opt "pr_number" json
-               | None -> None)
-              (json_int_opt "pr_number" input);
-          comment_id =
-            first_some
-              (match output_json with
-               | Some json -> json_int_opt "comment_id" json
-               | None -> None)
-              (json_int_opt "comment_id" input);
-          success;
-          route_via;
-          credential;
-          identity_attestation;
-        }
-  | "keeper_shell" ->
-      let output_json = output_json_opt ~surface:"pr_review_action" output_text in
-      let route_via =
-        first_some (Option.bind output_json route_via_of_json)
-          route_via_fallback
-      in
-      let success =
-        output_success ~transport_success output_json
-      in
-      command_candidates_of_tool_io ~tool_name ~input ~output_json
-      |> List.find_map gh_pr_review_action_of_command
-      |> Option.map (fun (action, pr_number) ->
-           {
-             action;
-             pr_number;
-             comment_id = None;
-             success;
-             route_via;
-             credential = None;
-             identity_attestation = None;
-           })
-  | _ -> None
+  if String.equal tool_name "keeper_pr_review_comment"
+  then
+    let output_json = output_json_opt ~surface:"pr_review_action" output_text in
+    let route_via =
+      first_some (Option.bind output_json route_via_of_json)
+        route_via_fallback
+    in
+    let action =
+      match output_json with
+      | Some json -> Safe_ops.json_string_opt "event" json
+      | None -> None
+    in
+    let action =
+      match action with
+      | Some value -> Some value
+      | None -> Safe_ops.json_string_opt "event" input
+    in
+    let success =
+      output_success ~transport_success output_json
+    in
+    let credential = Option.bind output_json (assoc_json_opt "credential") in
+    let identity_attestation =
+      Option.bind output_json (assoc_json_opt "identity_attestation")
+    in
+    Option.map
+      (fun action ->
+         {
+           action;
+           pr_number =
+             first_some
+               (match output_json with
+                | Some json -> json_int_opt "pr_number" json
+                | None -> None)
+               (json_int_opt "pr_number" input);
+           comment_id = None;
+           success;
+           route_via;
+           credential;
+           identity_attestation;
+         })
+      (Option.bind action normalize_pr_review_action)
+  else if String.equal tool_name "keeper_pr_review_reply"
+  then
+    let output_json = output_json_opt ~surface:"pr_review_action" output_text in
+    let route_via =
+      first_some (Option.bind output_json route_via_of_json)
+        route_via_fallback
+    in
+    let success =
+      output_success ~transport_success output_json
+    in
+    let credential = Option.bind output_json (assoc_json_opt "credential") in
+    let identity_attestation =
+      Option.bind output_json (assoc_json_opt "identity_attestation")
+    in
+    Some
+      {
+        action = "REPLY";
+        pr_number =
+          first_some
+            (match output_json with
+             | Some json -> json_int_opt "pr_number" json
+             | None -> None)
+            (json_int_opt "pr_number" input);
+        comment_id =
+          first_some
+            (match output_json with
+             | Some json -> json_int_opt "comment_id" json
+             | None -> None)
+            (json_int_opt "comment_id" input);
+        success;
+        route_via;
+        credential;
+        identity_attestation;
+      }
+  else if String.equal tool_name "keeper_shell"
+  then
+    let output_json = output_json_opt ~surface:"pr_review_action" output_text in
+    let route_via =
+      first_some (Option.bind output_json route_via_of_json)
+        route_via_fallback
+    in
+    let success =
+      output_success ~transport_success output_json
+    in
+    command_candidates_of_tool_io ~tool_name ~input ~output_json
+    |> List.find_map gh_pr_review_action_of_command
+    |> Option.map (fun (action, pr_number) ->
+         {
+           action;
+           pr_number;
+           comment_id = None;
+           success;
+           route_via;
+           credential = None;
+           identity_attestation = None;
+         })
+  else None
 
 let pr_work_action_of_git_action raw =
-  match String.trim raw |> String.lowercase_ascii with
-  | "add" -> Some "GIT_ADD"
-  | "commit" -> Some "GIT_COMMIT"
-  | "push" -> Some "GIT_PUSH"
-  | _ -> None
+  let lower = String.trim raw |> String.lowercase_ascii in
+  if String.equal lower "add" then Some "GIT_ADD"
+  else if String.equal lower "commit" then Some "GIT_COMMIT"
+  else if String.equal lower "push" then Some "GIT_PUSH"
+  else None
 
 let pr_work_actions_of_git_segment segment =
-  (* RFC-0160 §S4: route via the gate module's canonical parse entry
-     [Shell_command_gate.parse_to_ir_opt] instead of reaching into the
-     legacy bash parser directly. Behavior is unchanged — the wrapper
-     unwraps the same Parsed variant the call-site already
-     pattern-matches. *)
-  match
-    Masc_exec_command_gate.Shell_command_gate.parse_to_ir_opt segment
-  with
-  | Some (Masc_exec.Shell_ir.Simple simple)
-    when String.equal
-           (Masc_exec.Bin.to_string simple.bin |> String.lowercase_ascii)
-           "git" ->
-      (match simple.args with
-       | Masc_exec.Shell_ir.Lit (action, _) :: _ ->
-           pr_work_action_of_git_action action |> Option.to_list
-       | _ -> [])
-  | _ ->
+  match Exec_policy_mutation_classifier.argv_words_of_string segment with
+  | Some ("git" :: action :: _) ->
+      pr_work_action_of_git_action action |> Option.to_list
+  | Some ("git" :: []) -> []
+  | Some _ -> []
+  | None ->
       let lower = String.trim segment |> String.lowercase_ascii in
       let starts_with_word prefix =
         String.equal lower prefix
@@ -160,7 +140,7 @@ let pr_work_actions_of_gh_segment segment =
     when String.equal (String.lowercase_ascii subcommand) "pr"
          && String.equal (String.lowercase_ascii action) "create" ->
       [ "PR_CREATE" ]
-  | _ -> []
+  | Some [] | Some [ _ ] | Some (_ :: _ :: _) | None -> []
 
 let pr_work_actions_of_command command =
   Masc_exec_bash_parser.Bash_words.top_level_command_segments command
@@ -174,12 +154,8 @@ let pr_work_actions_of_command command =
          | [] -> pr_work_actions_of_git_segment segment
          | actions -> actions)
 
-let is_pr_work_action_tool_name = function
-  | "masc_code_git"
-  | "keeper_shell"
-  | "keeper_bash"
-  | "masc_code_shell" -> true
-  | _ -> false
+let is_pr_work_action_tool_name tool_name =
+  List.mem tool_name [ "masc_code_git"; "keeper_shell"; "keeper_bash"; "masc_code_shell" ]
 
 let pr_work_action_metric_events_of_tool_io
     ~route_via_fallback
@@ -190,9 +166,7 @@ let pr_work_action_metric_events_of_tool_io
   if not (is_pr_work_action_tool_name tool_name) then []
   else
   let observe_json_failure =
-    match tool_name with
-    | "keeper_shell" | "keeper_bash" | "masc_code_shell" -> false
-    | _ -> true
+    not (List.mem tool_name [ "keeper_shell"; "keeper_bash"; "masc_code_shell" ])
   in
   let output_json =
     output_json_opt ~observe_failure:observe_json_failure
@@ -203,55 +177,56 @@ let pr_work_action_metric_events_of_tool_io
       route_via_fallback
   in
   let success = output_success ~transport_success output_json in
-  match tool_name with
-  | "masc_code_git" ->
-      let action =
-        match output_json with
-        | Some json -> Safe_ops.json_string_opt "action" json
-        | None -> None
-      in
-      let action =
-        match action with
-        | Some value -> Some value
-        | None -> Safe_ops.json_string_opt "action" input
-      in
-      (match Option.bind action pr_work_action_of_git_action with
-       | None -> []
-       | Some work_action ->
-           [
-             {
-               work_action;
-               work_source = "masc_code_git";
-               work_ref = None;
-               pr_url = None;
-               command = None;
-               success;
-               route_via;
-             };
-           ])
-  | "keeper_shell" | "keeper_bash" | "masc_code_shell" ->
-      command_candidates_of_tool_io ~tool_name ~input ~output_json
-      |> List.concat_map (fun command ->
-           pr_work_actions_of_command command
-           |> List.map (fun work_action ->
-                ( command,
-                  {
-                    work_action;
-                    work_source = tool_name;
-                    work_ref = None;
-                    pr_url = None;
-                    command = Some command;
-                    success;
-                    route_via;
-                  } )))
-      |> List.fold_left
-           (fun (seen, events) (_command, event) ->
-              let key = event.work_action in
-              if List.mem key seen then (seen, events)
-              else (key :: seen, events @ [ event ]))
-           ([], [])
-      |> snd
-  | _ -> []
+  if String.equal tool_name "masc_code_git"
+  then
+    let action =
+      match output_json with
+      | Some json -> Safe_ops.json_string_opt "action" json
+      | None -> None
+    in
+    let action =
+      match action with
+      | Some value -> Some value
+      | None -> Safe_ops.json_string_opt "action" input
+    in
+    (match Option.bind action pr_work_action_of_git_action with
+     | None -> []
+     | Some work_action ->
+         [
+           {
+             work_action;
+             work_source = "masc_code_git";
+             work_ref = None;
+             pr_url = None;
+             command = None;
+             success;
+             route_via;
+           };
+         ])
+  else if List.mem tool_name [ "keeper_shell"; "keeper_bash"; "masc_code_shell" ]
+  then
+    command_candidates_of_tool_io ~tool_name ~input ~output_json
+    |> List.concat_map (fun command ->
+         pr_work_actions_of_command command
+         |> List.map (fun work_action ->
+              ( command,
+                {
+                  work_action;
+                  work_source = tool_name;
+                  work_ref = None;
+                  pr_url = None;
+                  command = Some command;
+                  success;
+                  route_via;
+                } )))
+    |> List.fold_left
+         (fun (seen, events) (_command, event) ->
+            let key = event.work_action in
+            if List.mem key seen then (seen, events)
+            else (key :: seen, events @ [ event ]))
+         ([], [])
+    |> snd
+  else []
 
 let append_pr_review_action_metric
     ~(config : Coord.config)
@@ -264,12 +239,11 @@ let append_pr_review_action_metric
     ~(duration_ms : float)
     () =
   let route_via_fallback =
-    match meta.sandbox_profile, tool_name with
-    | Docker, ("keeper_pr_review_comment" | "keeper_pr_review_reply") ->
-        Some "brokered"
-    | Docker, "keeper_shell" ->
-        Some "docker"
-    | _ -> None
+    if meta.sandbox_profile = Docker then
+      if List.mem tool_name ["keeper_pr_review_comment"; "keeper_pr_review_reply"] then Some "brokered"
+      else if String.equal tool_name "keeper_shell" then Some "docker"
+      else None
+    else None
   in
   match
     pr_review_action_metric_event_of_tool_io
@@ -333,11 +307,10 @@ let append_pr_work_action_metrics
     ~(duration_ms : float)
     () =
   let route_via_fallback =
-    match meta.sandbox_profile, tool_name with
-    | Docker, "keeper_shell" -> Some "docker"
-    | Docker, ("keeper_bash" | "masc_code_shell" | "masc_code_git") ->
-        Some "docker"
-    | _ -> None
+    if meta.sandbox_profile = Docker
+       && List.mem tool_name ["keeper_shell"; "keeper_bash"; "masc_code_shell"; "masc_code_git"]
+    then Some "docker"
+    else None
   in
   let events =
     pr_work_action_metric_events_of_tool_io

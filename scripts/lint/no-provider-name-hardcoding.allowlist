@@ -12,7 +12,6 @@ lib/provider_runtime_projection.ml:84:llama.cpp
 lib/provider_runtime_projection.ml:84:llamacpp
 lib/provider_runtime_projection.ml:115:auto
 lib/provider_runtime_projection.ml:124:claude
-lib/provider_runtime_projection.ml:124:codex
 lib/provider_runtime_projection.ml:124:gemini
 lib/provider_runtime_projection.ml:124:llama
 lib/provider_runtime_projection.ml:222:llama

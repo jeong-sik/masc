@@ -64,14 +64,6 @@ val source_of_string_opt : string -> library_source option
     contract seam — fail-closed parsing is the SSOT contract for
     the [source] field. *)
 
-(** {1 String helper} *)
-
-val string_contains : sub:string -> string -> bool
-(** [string_contains ~sub s] is [true] iff [sub] is a contiguous
-    substring of [s].  Byte-wise — case-sensitive.  Callers
-    lowercase both inputs when case-insensitive matching is
-    required (see {!handle_read} / {!handle_search}). *)
-
 (** {1 Context} *)
 
 type context = {

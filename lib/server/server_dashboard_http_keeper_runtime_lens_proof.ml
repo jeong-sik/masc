@@ -37,19 +37,6 @@ let runtime_lens_proof_acc () =
   ; network_modes = Hashtbl.create 4
   }
 
-let string_contains ~needle value =
-  let value = String.lowercase_ascii value in
-  let needle = String.lowercase_ascii needle in
-  let value_len = String.length value in
-  let needle_len = String.length needle in
-  if needle_len = 0 then true
-  else
-    let rec loop idx =
-      idx + needle_len <= value_len
-      && (String.equal (String.sub value idx needle_len) needle || loop (idx + 1))
-    in
-    loop 0
-
 let runtime_lens_set_add table value =
   let value = String.trim value in
   if value <> "" then Hashtbl.replace table value ()
@@ -114,7 +101,7 @@ let runtime_lens_tool_text json =
   input ^ "\n" ^ output
 
 let runtime_lens_text_contains text needle =
-  string_contains ~needle text
+  Dashboard_utils.string_contains_ci ~needle text
 
 let runtime_lens_call_has_docker_proof json output_opt text =
   json_string_member_opt "sandbox_profile" json = Some "docker"

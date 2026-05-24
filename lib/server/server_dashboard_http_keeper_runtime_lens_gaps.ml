@@ -12,19 +12,6 @@ let first_non_empty_string_list values =
   | Some values -> values
   | None -> []
 
-let string_contains ~needle value =
-  let value = String.lowercase_ascii value in
-  let needle = String.lowercase_ascii needle in
-  let value_len = String.length value in
-  let needle_len = String.length needle in
-  if needle_len = 0 then true
-  else
-    let rec loop idx =
-      idx + needle_len <= value_len
-      && (String.equal (String.sub value idx needle_len) needle || loop (idx + 1))
-    in
-    loop 0
-
 let runtime_lens_tool_surface_parts scan =
   (* sound-partial: allow absent runtime-lens decisions as empty evidence while
      preserving explicit decision payloads when the scanner emits them. *)
@@ -173,7 +160,7 @@ let runtime_lens_gaps ~terminal_event_present ~claim_scope ~config_drift scan =
        else gaps)
   |> (fun gaps ->
        match pre_dispatch_reason with
-       | Some reason when string_contains ~needle:"no_tool_capable_provider" reason ->
+       | Some reason when Dashboard_utils.string_contains_ci ~needle:"no_tool_capable_provider" reason ->
          add
            { code = "route_tool_capability_gap"
            ; severity = "bad"

@@ -145,29 +145,25 @@ let wait_timeout_sec () = env_float "MASC_TOOL_GATE_WAIT_TIMEOUT_SEC" 20.0
 
 let json_string_opt key json = Safe_ops.json_string_opt key json
 
-let string_contains haystack needle =
-  String_util.contains_substring_ci haystack needle
-;;
-
 let command_mentions_docker cmd =
   let cmd = String.lowercase_ascii cmd in
   String.equal (String.trim cmd) "docker"
-  || string_contains cmd "docker "
-  || string_contains cmd " docker"
-  || string_contains cmd "docker-compose"
+  || String_util.contains_substring_ci cmd "docker "
+  || String_util.contains_substring_ci cmd " docker"
+  || String_util.contains_substring_ci cmd "docker-compose"
 ;;
 
 let command_mentions_github cmd =
   let cmd = String.lowercase_ascii cmd in
-  string_contains cmd "gh "
+  String_util.contains_substring_ci cmd "gh "
   || String.starts_with ~prefix:"gh " (String.trim cmd)
-  || string_contains cmd " git clone"
+  || String_util.contains_substring_ci cmd " git clone"
   || String.starts_with ~prefix:"git clone" (String.trim cmd)
-  || string_contains cmd " git fetch"
+  || String_util.contains_substring_ci cmd " git fetch"
   || String.starts_with ~prefix:"git fetch" (String.trim cmd)
-  || string_contains cmd " git pull"
+  || String_util.contains_substring_ci cmd " git pull"
   || String.starts_with ~prefix:"git pull" (String.trim cmd)
-  || string_contains cmd " git push"
+  || String_util.contains_substring_ci cmd " git push"
   || String.starts_with ~prefix:"git push" (String.trim cmd)
 ;;
 
@@ -415,10 +411,10 @@ let classify ~tool_name ~arguments ~is_read_only =
     else if String.equal tool_name "dashboard_worktree_status.gh_pr_list" then Github
     else if String.starts_with ~prefix:"keeper_bash" tool_name then Shell
     else if String.equal tool_name "shell_exec" then Shell
-    else if string_contains tool_name "docker" || string_contains tool_name "sandbox"
+    else if String_util.contains_substring_ci tool_name "docker" || String_util.contains_substring_ci tool_name "sandbox"
     then Docker
-    else if string_contains tool_name "web_" then Web
-    else if string_contains tool_name "code_" || string_contains tool_name "fs_"
+    else if String_util.contains_substring_ci tool_name "web_" then Web
+    else if String_util.contains_substring_ci tool_name "code_" || String_util.contains_substring_ci tool_name "fs_"
     then if is_read_only then Filesystem_read else Filesystem_write
     else if is_read_only
     then Ungated

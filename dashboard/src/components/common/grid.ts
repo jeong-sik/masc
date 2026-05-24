@@ -1,5 +1,5 @@
 // Grid — ARIA grid with row-level keyboard navigation
-// Kimi sec06 ARIA pattern: grid. ArrowUp/Down moves between rows;
+// MASC sec06 ARIA pattern: grid. ArrowUp/Down moves between rows;
 // Home/End jumps to first/last row; Enter selects.
 
 import { html } from 'htm/preact'

@@ -1,6 +1,6 @@
 // FileTree — AX molecule for visualizing agent file systems.
 //
-// Kimi design system sec02 reference: 2.1.2 virtualized + collapsible file tree
+// MASC dashboard sec02 reference: 2.1.2 virtualized + collapsible file tree
 // with git status badges.
 
 import { html } from 'htm/preact'

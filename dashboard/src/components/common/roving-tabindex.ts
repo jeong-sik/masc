@@ -1,6 +1,6 @@
 // roving-tabindex.ts — Roving Tabindex hook for tablist / radiogroup / toolbar
 //
-// Kimi design system sec01 1.3.2: one item is tabbable (tabindex=0), rest are
+// MASC dashboard sec01 1.3.2: one item is tabbable (tabindex=0), rest are
 // tabindex=-1. Arrow keys move focus; Home/End jump to extremes.
 
 import { useState } from 'preact/hooks'

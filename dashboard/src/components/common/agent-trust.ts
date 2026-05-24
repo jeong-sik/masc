@@ -1,7 +1,7 @@
 // AgentTrust — AX organism that visualizes an agent's trust score and approval history.
 //
-// Kimi design system sec05 reference: Anthropic Constitutional AI-inspired
-// confidence indicator. Score bar + approval/rejection/override counts.
+// MASC dashboard sec05 reference: Constitutional-AI-style confidence
+// indicator. Score bar + approval/rejection/override counts.
 
 import { html } from 'htm/preact'
 

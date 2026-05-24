@@ -1,5 +1,5 @@
 // KeyboardShortcut — shortcut conflict detection and context binding sheet
-// Kimi design system sec02 2.4.2: shortcut conflict detection, context binding.
+// MASC dashboard sec02 2.4.2: shortcut conflict detection, context binding.
 // Zero-dependency fallback (no fuzzysort).
 
 import { html } from 'htm/preact'

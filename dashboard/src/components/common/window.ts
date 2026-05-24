@@ -1,5 +1,5 @@
 // Window — modal window with Alt+F4 close contract
-// Kimi sec06 ARIA pattern: window. role="dialog" + Alt+F4 keyboard contract.
+// MASC sec06 ARIA pattern: window. role="dialog" + Alt+F4 keyboard contract.
 
 import { html } from 'htm/preact'
 import type { ComponentChildren } from 'preact'

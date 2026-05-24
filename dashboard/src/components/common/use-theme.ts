@@ -1,6 +1,6 @@
 // use-theme.ts — theme context provider and consumer hook
 //
-// Kimi design system sec08 8.2.1: ThemeProvider + useTheme manage data-theme
+// MASC dashboard sec08 8.2.1: ThemeProvider + useTheme manage data-theme
 // attribute, localStorage persistence, and system-preference detection.
 
 import { createContext } from 'preact'

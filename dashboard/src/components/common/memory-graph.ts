@@ -1,5 +1,5 @@
 // MemoryGraph — Obsidian-style node-edge graph for long-term memory
-// Kimi design system sec03 3.1.1: agent memory node-edge graph.
+// MASC dashboard sec03 3.1.1: agent memory node-edge graph.
 // Zero-dependency SVG fallback (no D3).
 
 import { html } from 'htm/preact'

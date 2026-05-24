@@ -1,6 +1,6 @@
 // CommandBar — inline fuzzy-search command input molecule.
 //
-// Kimi design system sec09 Phase 1 reference: fuzzy search, windowing,
+// MASC dashboard sec09 Phase 1 reference: fuzzy search, windowing,
 // split pane. This is the inline command bar (not the modal CommandPalette
 // which uses ninja-keys).
 

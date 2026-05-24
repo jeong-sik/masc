@@ -1,6 +1,6 @@
 // focus-scope.ts — tabbable element collection + cyclic focus management
 //
-// Kimi design system sec01 1.3.1: createFocusScope for focus traps in dialogs,
+// MASC dashboard sec01 1.3.1: createFocusScope for focus traps in dialogs,
 // drawers, and modals. Returns first/last refs and a cycle() handler for Tab.
 
 const TABBABLE_SELECTOR =

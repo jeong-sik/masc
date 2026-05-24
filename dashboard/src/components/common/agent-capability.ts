@@ -1,6 +1,6 @@
 // AgentCapability — AX molecule that renders an agent's tool set.
 //
-// Kimi design system sec05 reference: icon + tooltip badges for each tool
+// MASC dashboard sec05 reference: icon + tooltip badges for each tool
 // an agent can use. The compact badge row lets operators quickly scan
 // an agent's capability envelope without opening a detail panel.
 //

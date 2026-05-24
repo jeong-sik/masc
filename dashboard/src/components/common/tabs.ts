@@ -1,5 +1,5 @@
 // Tabs — tablist/tab/tabpanel primitive
-// Kimi sec06 ARIA pattern: tablist. Keyboard arrows cycle tabs;
+// MASC sec06 ARIA pattern: tablist. Keyboard arrows cycle tabs;
 // Home/End jump to first/last.
 
 import { html } from 'htm/preact'

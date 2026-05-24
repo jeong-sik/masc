@@ -1,5 +1,5 @@
 // List — ARIA list primitive
-// Kimi sec06 ARIA pattern: list. role="list" container + role="listitem" items.
+// MASC sec06 ARIA pattern: list. role="list" container + role="listitem" items.
 
 import { html } from 'htm/preact'
 import type { ComponentChildren } from 'preact'

@@ -1,6 +1,6 @@
 // EventStream — AX molecule for real-time event log visualization.
 //
-// Kimi design system sec02 reference: 2.1.3 agent log stream with level-based
+// MASC dashboard sec02 reference: 2.1.3 agent log stream with level-based
 // color coding and live append semantics.
 
 import { html } from 'htm/preact'

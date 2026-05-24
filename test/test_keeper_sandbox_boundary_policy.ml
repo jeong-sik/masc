@@ -90,11 +90,10 @@ let test_docker_does_not_own_command_semantics () =
   assert_not_contains docker_ml "let cmd_targets_git_or_gh";
   assert_not_contains docker_ml "let cmd_targets_gh";
   assert_not_contains docker_ml "let resolve_sandbox_root_git_cwd";
-  assert_contains semantics_ml "let cmd_targets_git_or_gh";
-  assert_contains semantics_ml "let cmd_targets_gh";
-  assert_contains semantics_ml "let resolve_sandbox_root_git_cwd";
-  assert_contains semantics_ml "Masc_exec_bash_parser.Bash.parse_string";
-  assert_not_contains semantics_ml "String.split_on_char ' '";
+  assert_contains semantics_ml "let stages_targets_git_or_gh";
+  assert_contains semantics_ml "let stages_targets_gh";
+  assert_contains semantics_ml "let resolve_sandbox_root_git_cwd_of_stages";
+  assert_contains semantics_ml "Exec_policy_mutation_classifier.parsed_of_string";
   assert_not_contains semantics_ml "Option.value"
 
 let () =

@@ -786,7 +786,6 @@
   test_keeper_path_check_error
   test_destructive_class
   test_board_content_dedup
-  test_legendary_counters
   test_oas_integration
   test_memory_oas_5tier
   test_verifier_oas_bridge
@@ -1013,7 +1012,6 @@
   test_keeper_path_check_error
   test_destructive_class
   test_board_content_dedup
-  test_legendary_counters
   test_oas_integration
   test_memory_oas_5tier
   test_verifier_oas_bridge

@@ -78,9 +78,8 @@ val ensure_keeper_sandbox_runtime :
     detected, [None] otherwise — caller emits a self-correcting
     error pre-exec. *)
 (** Emit a [("gh_exit_class", ...)] JSON field when [cmd_stages] target
-    gh (otherwise []), and bump the matching [Legendary_counters]
-    bucket. Caller appends the returned list to its assoc payload
-    unconditionally — the empty case keeps callsite shapes stable. *)
+    gh (otherwise []). Caller appends the returned list to its assoc
+    payload unconditionally — the empty case keeps callsite shapes stable. *)
 val gh_exit_class_field :
   stages:Keeper_shell_command_semantics.parsed_stage list ->
   status:Unix.process_status ->

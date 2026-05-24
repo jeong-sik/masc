@@ -228,7 +228,7 @@ let run_pr_review_argv
         ~network_mode:Network_inherit
     with
     | Ok result ->
-        { status = result.Keeper_shell_docker.status
+        { status = result.Keeper_sandbox_docker.status
         ; output = result.output
         ; via = "docker"
         }

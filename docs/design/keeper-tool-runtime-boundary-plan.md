@@ -1,0 +1,57 @@
+# Keeper Tool Runtime Boundary Plan
+
+Last updated: 2026-05-24
+
+## Problem
+
+Keeper execution currently has several module names that couple tool
+surfaces to runtime environments, for example shell/bash/GitHub logic
+combined with Docker-specific helpers. This makes Docker vs local look
+like a tool semantics choice, even though sandbox backend selection
+should be orthogonal to typed command validation, Git/GitHub semantics,
+and public tool aliases.
+
+## Principles
+
+- Public tool surfaces name user capabilities: `Bash`, `keeper_bash`,
+  `keeper_shell`, PR tools, file tools.
+- Sandbox modules name runtime responsibilities: backend selection,
+  target construction, mounts, credentials, process execution, failure
+  recording.
+- Git and GitHub modules name domain semantics: repo context, `gh`
+  command validation, credential binding, PR workflow.
+- Docker/local selection must happen after command input is typed,
+  parsed, permission-gated, and lowered to the backend-neutral execution
+  request.
+
+## Refactor Sequence
+
+1. Decouple obvious godfile-decomp helpers from shell/docker names.
+   Done in this slice:
+   - `Keeper_shell_docker` -> `Keeper_sandbox_docker`
+   - `Keeper_shell_docker_exec_failure` -> `Keeper_sandbox_exec_failure`
+   - `Keeper_shell_bash_docker` -> `Keeper_sandbox_shell_ir_target`
+
+2. Replace direct `Keeper_sandbox_docker` calls from tool-specific modules
+   with a backend-neutral sandbox command runner facade. Keep temporary
+   aliases only at the old boundary while callers move.
+
+3. Move Git/GitHub command semantics out of `keeper_shell_ops.ml` into
+   Git/GitHub domain modules or native PR tools. The structured
+   `keeper_shell op=gh` path should be a compatibility surface, not the
+   center of GitHub execution.
+
+4. Collapse local-vs-Docker result shaping so command failures carry the
+   same semantic fields regardless of backend. Backend-specific details
+   may remain as optional evidence fields.
+
+5. Tighten boundary tests so new modules cannot reintroduce
+   `shell_docker` or `shell_bash` names for sandbox-runtime concerns.
+
+## Verification
+
+- `test_keeper_sandbox_boundary_policy` protects source-level ownership.
+- `test_keeper_sandbox_docker_route` protects existing Docker route
+  behavior while names and ownership move.
+- Follow-up slices should add facade-level tests before deleting old
+  compatibility aliases.

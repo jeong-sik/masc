@@ -10,7 +10,7 @@
    - [prepare_*] rewrites host->container before the container runs
    - [repair_*]  rewrites container->host after the container exits
 
-   Extracted from [Keeper_shell_docker] (godfile decomp). All side
+   Extracted from [Keeper_sandbox_docker] (godfile decomp). All side
    effects are filesystem reads/writes on git internal pointer files. *)
 
 let safe_readdir dir =

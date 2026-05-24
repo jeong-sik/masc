@@ -1,7 +1,7 @@
 (** Integration pin for PR-2 of the [Keeper_cwd_response] series.
 
     Asserts that the helper functions wired into
-    [keeper_shell_docker.ml] response builders produce the
+    [keeper_sandbox_docker.ml] response builders produce the
     in-container path (not the host abs path) when composed.
 
     Background: PR #11080 removed [sandbox_host_root] /
@@ -63,7 +63,7 @@ let test_container_path_translation_under_sandbox () =
       let host_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
       let host_cwd = Filename.concat host_root "repos/foo" in
       let container_cwd =
-        Keeper_shell_docker.docker_private_workspace_cwd ~config ~meta
+        Keeper_sandbox_docker.docker_private_workspace_cwd ~config ~meta
           host_cwd
       in
       (* Sanity: translation produced an in-container path rooted
@@ -93,16 +93,16 @@ let test_container_path_translation_under_sandbox () =
         (Keeper_cwd_response.operator_host cwd_response))
 
 (* Source-level pin: assert that no [("cwd", `String <ident>)]
-   literal remains in keeper_shell_docker.ml. The four sites
+   literal remains in keeper_sandbox_docker.ml. The four sites
    from #11080's sibling leak class must be wired through
    [Keeper_cwd_response.to_yojson_response]. Belt-and-braces
    guard against accidental revert. *)
 let test_source_has_no_raw_cwd_string_literal () =
   let candidate_paths =
     [
-      "lib/keeper/keeper_shell_docker.ml"
-    ; "../lib/keeper/keeper_shell_docker.ml"
-    ; "../../lib/keeper/keeper_shell_docker.ml"
+      "lib/keeper/keeper_sandbox_docker.ml"
+    ; "../lib/keeper/keeper_sandbox_docker.ml"
+    ; "../../lib/keeper/keeper_sandbox_docker.ml"
     ]
   in
   let path =
@@ -128,12 +128,12 @@ let test_source_has_no_raw_cwd_string_literal () =
          with End_of_file -> ());
         let src = Buffer.contents buf in
         check bool
-          "no raw (\"cwd\", `String cwd) literal in keeper_shell_docker.ml"
+          "no raw (\"cwd\", `String cwd) literal in keeper_sandbox_docker.ml"
           false
           (Astring.String.is_infix ~affix:"(\"cwd\", `String cwd)" src))
 
 let () =
-  run "keeper_shell_docker_cwd_response"
+  run "keeper_sandbox_docker_cwd_response"
     [
       ( "translation"
       , [

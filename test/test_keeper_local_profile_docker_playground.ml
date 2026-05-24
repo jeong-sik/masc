@@ -1,6 +1,6 @@
 open Alcotest
 
-module KSD = Masc_mcp.Keeper_shell_docker
+module KSD = Masc_mcp.Keeper_sandbox_docker
 module KT = Masc_mcp.Keeper_types
 
 let make_meta ~name ~sandbox_profile ~network_mode =

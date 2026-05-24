@@ -12,7 +12,7 @@
      containerd/buildkit)
    - `sh -c '...'` payloads (recursive)
 
-   Extracted from [Keeper_shell_docker] (godfile decomp). Pure shell
+   Extracted from [Keeper_sandbox_docker] (godfile decomp). Pure shell
    tokenizer + classifier - no I/O, no shared state. *)
 
 let nested_container_runtime_tokens = [ "docker"; "podman"; "nerdctl"; "buildah" ]

@@ -10,7 +10,7 @@ module Coord = Masc_mcp.Coord
 module Keeper_exec_shell = Masc_mcp.Keeper_exec_shell
 module Keeper_registry = Masc_mcp.Keeper_registry
 module Keeper_sandbox = Masc_mcp.Keeper_sandbox
-module Keeper_shell_docker = Masc_mcp.Keeper_shell_docker
+module Keeper_sandbox_docker = Masc_mcp.Keeper_sandbox_docker
 module Keeper_types = Masc_mcp.Keeper_types
 module Parsed = Masc_exec.Parsed
 module Json = Yojson.Safe.Util
@@ -373,91 +373,91 @@ let test_nested_runtime_detector_ignores_git_commit_message () =
   Alcotest.(check bool)
     "quoted docker in git commit message is not a nested runtime"
     false
-    (Keeper_shell_docker.command_uses_nested_container_runtime
+    (Keeper_sandbox_docker.command_uses_nested_container_runtime
        "git commit -m 'docs: Docker sandbox proof'");
   Alcotest.(check bool)
     "unquoted docker argument is not a nested runtime unless command-position"
     false
-    (Keeper_shell_docker.command_uses_nested_container_runtime
+    (Keeper_sandbox_docker.command_uses_nested_container_runtime
        "git commit -m Docker-sandbox-proof");
   Alcotest.(check bool)
     "docker after command separator is still blocked"
     true
-    (Keeper_shell_docker.command_uses_nested_container_runtime
+    (Keeper_sandbox_docker.command_uses_nested_container_runtime
        "git status && docker run --rm alpine true");
   Alcotest.(check bool)
     "docker after compact separator is still blocked"
     true
-    (Keeper_shell_docker.command_uses_nested_container_runtime
+    (Keeper_sandbox_docker.command_uses_nested_container_runtime
        "git status;docker run --rm alpine true");
   Alcotest.(check bool)
     "quoted separator text is not a command boundary"
     false
-    (Keeper_shell_docker.command_uses_nested_container_runtime
+    (Keeper_sandbox_docker.command_uses_nested_container_runtime
        "git commit -m 'status;docker run --rm alpine true'");
   Alcotest.(check bool)
     "quoted docker command word is still blocked"
     true
-    (Keeper_shell_docker.command_uses_nested_container_runtime
+    (Keeper_sandbox_docker.command_uses_nested_container_runtime
        "\"docker\" run --rm alpine true");
   Alcotest.(check bool)
     "partially quoted docker command word is still blocked"
     true
-    (Keeper_shell_docker.command_uses_nested_container_runtime
+    (Keeper_sandbox_docker.command_uses_nested_container_runtime
        "do\"cker\" run --rm alpine true");
   Alcotest.(check bool)
     "env option wrapper still exposes docker command"
     true
-    (Keeper_shell_docker.command_uses_nested_container_runtime
+    (Keeper_sandbox_docker.command_uses_nested_container_runtime
        "env -i docker run --rm alpine true");
   Alcotest.(check bool)
     "env terminator still exposes docker command"
     true
-    (Keeper_shell_docker.command_uses_nested_container_runtime
+    (Keeper_sandbox_docker.command_uses_nested_container_runtime
        "env -- docker run --rm alpine true");
   Alcotest.(check bool)
     "env value option does not treat its argument as command"
     false
-    (Keeper_shell_docker.command_uses_nested_container_runtime
+    (Keeper_sandbox_docker.command_uses_nested_container_runtime
        "env -u docker git commit -m Docker-sandbox-proof");
   Alcotest.(check bool)
     "env split-string wrapper still exposes docker command"
     true
-    (Keeper_shell_docker.command_uses_nested_container_runtime
+    (Keeper_sandbox_docker.command_uses_nested_container_runtime
        "env -S 'docker run --rm alpine true'");
   Alcotest.(check bool)
     "env inline split-string wrapper still exposes docker command"
     true
-    (Keeper_shell_docker.command_uses_nested_container_runtime
+    (Keeper_sandbox_docker.command_uses_nested_container_runtime
        "env --split-string='docker run --rm alpine true'");
   Alcotest.(check bool)
     "env split-string assignment without runtime remains allowed"
     false
-    (Keeper_shell_docker.command_uses_nested_container_runtime
+    (Keeper_sandbox_docker.command_uses_nested_container_runtime
        "env -S 'FOO=docker git commit -m Docker-sandbox-proof'");
   Alcotest.(check bool)
     "quoted socket text is not a nested docker runtime"
     false
-    (Keeper_shell_docker.command_uses_nested_container_runtime
+    (Keeper_sandbox_docker.command_uses_nested_container_runtime
        "git commit -m \"mention /var/run/docker.sock in review text\"");
   Alcotest.(check bool) "shell -c docker runtime is blocked" true
-    (Keeper_shell_docker.command_uses_nested_container_runtime
+    (Keeper_sandbox_docker.command_uses_nested_container_runtime
        "bash -lc \"docker run --rm alpine true\"");
   Alcotest.(check bool) "command substitution docker runtime is blocked" true
-    (Keeper_shell_docker.command_uses_nested_container_runtime
+    (Keeper_sandbox_docker.command_uses_nested_container_runtime
        "echo $(docker run --rm alpine true)");
   Alcotest.(check bool) "path-prefixed docker runtime is blocked" true
-    (Keeper_shell_docker.command_uses_nested_container_runtime
+    (Keeper_sandbox_docker.command_uses_nested_container_runtime
        "/usr/bin/docker run --rm alpine true")
 
 let test_docker_nested_guard_blocks_command_substitution () =
   Alcotest.(check bool) "command substitution docker runtime is blocked" true
-    (Keeper_shell_docker.command_uses_nested_container_runtime
+    (Keeper_sandbox_docker.command_uses_nested_container_runtime
        "echo $(docker run --rm alpine true)")
 
 let test_docker_nested_guard_blocks_path_prefixed_runtime () =
   Alcotest.(check bool) "path-prefixed docker runtime is blocked" true
-    (Keeper_shell_docker.command_uses_nested_container_runtime
+    (Keeper_sandbox_docker.command_uses_nested_container_runtime
        "/usr/bin/docker run --rm alpine true")
 
 let test_playground_guard_traversal () =
@@ -797,7 +797,7 @@ let test_rewrite_docker_container_paths_for_host_validation () =
   in
   ensure_dir host_repo;
   let rewritten =
-    Keeper_shell_docker.rewrite_docker_command_paths_for_host_validation
+    Keeper_sandbox_docker.rewrite_docker_command_paths_for_host_validation
       ~config ~meta input
   in
   Alcotest.(check string) "container root rewritten to host root for validation"

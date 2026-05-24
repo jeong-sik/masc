@@ -2,7 +2,7 @@
     pipelines.
 
     Co-locates SSOT pieces shared across the per-op dispatchers
-    (keeper_shell_ops, keeper_shell_bash, keeper_shell_docker):
+    (keeper_shell_ops, keeper_shell_bash, keeper_sandbox_docker):
 
     - {b shell op SSOT} ({!shell_op}, {!shell_op_to_string},
       {!all_shell_ops}, {!valid_shell_op_strings}) — adding a
@@ -22,7 +22,7 @@
       {!resolve_keeper_shell_read_path},
       {!auto_correct_path}).
     - {b docker dispatch aliases} re-exported from
-      {!Keeper_shell_docker} so callers (tests, doc refs) that
+      {!Keeper_sandbox_docker} so callers (tests, doc refs) that
       historically pointed at this module continue to compile. *)
 
 (** {1 Shell op SSOT (issue #8524)} *)
@@ -79,7 +79,7 @@ val keeper_bash_native_min_timeout_sec : float
     partial-output timeout failures rather than useful latency bounds.
 
     The Docker dispatch path re-clamps to
-    {!Keeper_shell_docker.docker_run_min_timeout_sec} inside
+    {!Keeper_sandbox_docker.docker_run_min_timeout_sec} inside
     [run_docker_shell_command_with_status_internal] because container
     cold start adds 10-60s on top of the actual command (runtime log
     issue #5, 2026-05-20).  Keeping a separate native floor avoids
@@ -238,14 +238,14 @@ val effective_sandbox_profile :
   meta:Keeper_types.keeper_meta ->
   in_playground:bool ->
   Keeper_types.sandbox_profile * Keeper_types.network_mode
-(** Alias of {!Keeper_shell_docker.effective_sandbox_profile}. *)
+(** Alias of {!Keeper_sandbox_docker.effective_sandbox_profile}. *)
 
 val ensure_keeper_sandbox_runtime :
   timeout_sec:float -> (string list, string) result
-(** Alias of {!Keeper_shell_docker.ensure_keeper_sandbox_runtime}. *)
+(** Alias of {!Keeper_sandbox_docker.ensure_keeper_sandbox_runtime}. *)
 
 val command_uses_nested_container_runtime : string -> bool
-(** Alias of {!Keeper_shell_docker.command_uses_nested_container_runtime}. *)
+(** Alias of {!Keeper_sandbox_docker.command_uses_nested_container_runtime}. *)
 
 val run_docker_shell_command_with_status :
   config:Coord.config ->
@@ -255,8 +255,8 @@ val run_docker_shell_command_with_status :
   cmd:string ->
   git_creds_enabled:bool ->
   network_mode:Keeper_types.network_mode ->
-  (Keeper_shell_docker.docker_shell_result, string) result
-(** Alias of {!Keeper_shell_docker.run_docker_shell_command_with_status}. *)
+  (Keeper_sandbox_docker.docker_shell_result, string) result
+(** Alias of {!Keeper_sandbox_docker.run_docker_shell_command_with_status}. *)
 
 val run_docker_credentialed_bash :
   turn_sandbox_runtime:Keeper_turn_sandbox_runtime.t option ->
@@ -267,7 +267,7 @@ val run_docker_credentialed_bash :
   cmd:string ->
   unit ->
   string
-(** Alias of {!Keeper_shell_docker.run_docker_credentialed_bash}. *)
+(** Alias of {!Keeper_sandbox_docker.run_docker_credentialed_bash}. *)
 
 val run_docker_bash :
   turn_sandbox_runtime:Keeper_turn_sandbox_runtime.t option ->
@@ -278,4 +278,4 @@ val run_docker_bash :
   cmd:string ->
   network_mode:Keeper_types.network_mode ->
   string
-(** Alias of {!Keeper_shell_docker.run_docker_bash}. *)
+(** Alias of {!Keeper_sandbox_docker.run_docker_bash}. *)

@@ -5,9 +5,9 @@
     invocation. Pure infrastructure; generic command-shape policy lives
     in [Keeper_shell_command_semantics].
 
-    The failure-message and failure-recording surfaces moved out to
-    [Keeper_shell_docker_exec_failure] during godfile decomp. Call
-    those qualified rather than relying on a re-export here. *)
+    Sandbox backend failure-message and failure-recording surfaces live
+    in [Keeper_sandbox_exec_failure]. Call those qualified rather than
+    relying on a re-export here. *)
 
 (** Path of the per-keeper egress policy file
     [<sandbox_root>/egress.json]. *)

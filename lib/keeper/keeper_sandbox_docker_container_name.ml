@@ -16,7 +16,7 @@
     appended to container_root; otherwise the call falls back to
     container_root so the keeper still lands inside its sandbox.
 
-    Verbatim extract from [Keeper_shell_docker]; all 3 functions
+    Verbatim extract from [Keeper_sandbox_docker]; all 3 functions
     are exposed by the parent .mli at lines 37, 40, 45. *)
 
 let keeper_sandbox_container_name (meta : Keeper_types.keeper_meta) =

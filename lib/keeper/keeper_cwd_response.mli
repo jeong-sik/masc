@@ -20,10 +20,10 @@
     Background: PR #11080 removed [sandbox_host_root] and
     [playground_path] from [keeper_status_detail]'s
     [execution_context], but sibling [cwd] fields in
-    [keeper_shell_docker] and [keeper_exec_shell] response
+    [keeper_sandbox_docker] and [keeper_exec_shell] response
     builders still echoed the host abs path. The Docker
     [--workdir] argument was correctly translated via
-    [Keeper_shell_docker.docker_private_workspace_cwd], yet the
+    [Keeper_sandbox_docker.docker_private_workspace_cwd], yet the
     same translation was not propagated to the response JSON.
     The LLM then re-emitted [cd /Users/...] on the next turn,
     which fails inside the container. *)
@@ -50,7 +50,7 @@ val local : host_cwd:string -> t
     logs can surface the host-side location.
 
     Callers typically compute [container_cwd] via
-    [Keeper_shell_docker.docker_private_workspace_cwd] for the
+    [Keeper_sandbox_docker.docker_private_workspace_cwd] for the
     docker [--workdir] argument and pass the same value here so
     the response and the actual exec environment stay in sync. *)
 val docker : host_cwd:string -> container_cwd:string -> t

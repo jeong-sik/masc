@@ -150,12 +150,12 @@ let run_gh_argv ~(config : Coord.config) ~(meta : keeper_meta) ~env ~cwd
     ~timeout_sec argv =
   if meta.sandbox_profile = Docker then
     match
-      Keeper_shell_docker.run_trusted_docker_shell_command_with_status
+      Keeper_sandbox_docker.run_trusted_docker_shell_command_with_status
         ~config ~meta ~cwd ~timeout_sec ~cmd:(quote_argv argv)
         ~git_creds_enabled:true ~network_mode:Network_inherit
     with
     | Ok result ->
-        { status = result.Keeper_shell_docker.status
+        { status = result.Keeper_sandbox_docker.status
         ; output = result.output
         ; via = "docker"
         }

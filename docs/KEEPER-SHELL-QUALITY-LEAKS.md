@@ -38,13 +38,13 @@ Adjacent tool-surface sample from the same 240h window:
 | Leak class | Baseline count | Code boundary | Current fix path |
 |---|---:|---|---|
 | `shape_block:pipe_or_redirect` | 2,606 | historical `keeper_bash` raw command logs, `scripts/analyze-keeper-bash-failures.sh` | Retired for public `keeper_bash`. Unsafe shell syntax no longer enters `keeper_bash` as a raw string; callers must use typed `executable`/`argv` or explicit typed pipeline/stage input. The historical bucket remains only for old runtime samples and adjacent shell surfaces. |
-| Missing path or wrong cwd | 1,602 | `lib/worker_dev_tools.ml`, `lib/keeper/keeper_shell_docker.ml` | Preserve path validation, but make public `Bash` expose `cwd`, make retry hints use the typed `Bash { executable, argv, cwd }` shape, and allow the safe `/dev/null` sentinel instead of treating `cat /dev/null` as an out-of-whitelist path. |
+| Missing path or wrong cwd | 1,602 | `lib/worker_dev_tools.ml`, `lib/keeper/keeper_sandbox_docker.ml` | Preserve path validation, but make public `Bash` expose `cwd`, make retry hints use the typed `Bash { executable, argv, cwd }` shape, and allow the safe `/dev/null` sentinel instead of treating `cat /dev/null` as an out-of-whitelist path. |
 | `shape_block:chaining` | 1,275 | historical `keeper_bash` raw command logs | Retired for public `keeper_bash`. `cd repos/... && ...` is not normalized into a keeper command; callers must pass typed `cwd` plus `executable`/`argv`. |
 | Non-zero command exits | 846 | `lib/exec_core.ml`, `lib/keeper_tool_call_log.ml` | Treat structured `ok=true` and `semantic_status=no_match` as semantic success even when the transport-level call was marked failed. |
 | Retired path-tokenizer diagnostic | 540 | `lib/worker_dev_tools.ml`, `lib/keeper/keeper_path_check_error.ml`, `lib/keeper/keeper_tool_pr_review.ml` | Retired. Path safety now validates literal Shell IR argv/redirect values for containment; quote/glob/brace/backslash syntax no longer has a separate log bucket. PR review mutation tools write review bodies to temp files and pass `--body-file` / `-F body=@file`, so body prose is no longer parsed as path-bearing shell syntax. |
 | `other` / unclassified failures | 459 | `lib/keeper_tool_call_log.ml`, `lib/dashboard/dashboard_http_tool_quality.ml` | Promote structured `semantic_status`, `shape_block`, and diagnosis fields into stable failure categories. |
 | `shape_block:unknown` | 352 | historical `keeper_bash` raw command logs, `scripts/analyze-keeper-bash-failures.sh` | Historical only for public `keeper_bash`; new calls fail typed input validation before raw shape parsing. Keep the bucket for old samples and adjacent shell surfaces that still report parser-unknown shape blocks. |
-| Multi-repo cwd required | 286 | `lib/keeper/keeper_shell_docker.ml`, `lib/keeper/keeper_tool_alias.ml` | Return a typed public `Bash { executable, argv, cwd }` retry shape when sandbox-root git/gh cannot be resolved. Do not infer repository scope from `cd ... &&` command text. |
+| Multi-repo cwd required | 286 | `lib/keeper/keeper_sandbox_docker.ml`, `lib/keeper/keeper_tool_alias.ml` | Return a typed public `Bash { executable, argv, cwd }` retry shape when sandbox-root git/gh cannot be resolved. Do not infer repository scope from `cd ... &&` command text. |
 | Timeout | 271 | `lib/exec_core.ml`, Docker shell runtime | Classify as `semantic_status:timeout` for the quality loop; command scoping remains the caller-side correction. |
 | Repeat/streak gates | 203 | OAS retry cache, keeper tool diversity gates | Measure separately as `repeat_or_streak_gate` so retries are not mistaken for new Bash defects. |
 | Wrong tool channel | 164 | typed `keeper_bash` allowlist, dedicated PR/MASC tools, `scripts/analyze-keeper-bash-failures.sh` | Preserve pre-exec rejection, but do it through typed command allowlists and dedicated tool routing. Public `gh` PR/status mutations belong to PR tools, not a raw Bash string channel. |
@@ -85,7 +85,7 @@ Focused tests:
 scripts/dune-local.sh build test/test_keeper_bash_safety.exe
 scripts/dune-local.sh build test/test_tool_input_validation.exe
 scripts/dune-local.sh build test/test_keeper_bash_typed_input.exe
-scripts/dune-local.sh build test/test_keeper_shell_docker_route.exe
+scripts/dune-local.sh build test/test_keeper_sandbox_docker_route.exe
 scripts/dune-local.sh build test/test_keeper_tool_alias.exe
 ```
 

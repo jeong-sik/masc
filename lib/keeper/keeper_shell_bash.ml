@@ -23,11 +23,16 @@ let typed_input_command_text = Keeper_shell_bash_typed_input.typed_input_command
 let typed_input_has_env = Keeper_shell_bash_typed_input.typed_input_has_env
 let typed_validation_error_text = Keeper_shell_bash_typed_input.typed_validation_error_text
 
-(* Docker helpers extracted to [Keeper_shell_bash_docker] (godfile decomp). *)
-let typed_docker_image = Keeper_shell_bash_docker.typed_docker_image
-let typed_docker_sandbox_target = Keeper_shell_bash_docker.typed_docker_sandbox_target
-let typed_docker_runtime_failure_fields = Keeper_shell_bash_docker.typed_docker_runtime_failure_fields
-let typed_docker_local_fallback_target = Keeper_shell_bash_docker.typed_docker_local_fallback_target
+let normalize_path_for_keeper_bash_containment path =
+  Keeper_alerting_path.normalize_path_for_check path
+  |> Keeper_alerting_path.strip_trailing_slashes
+
+(* Backend target helpers for typed Shell IR dispatch. *)
+let docker_sandbox_target = Keeper_sandbox_shell_ir_target.docker_target
+let docker_runtime_failure_fields =
+  Keeper_sandbox_shell_ir_target.docker_runtime_failure_fields
+let docker_local_fallback_target =
+  Keeper_sandbox_shell_ir_target.docker_local_fallback_target
 
 let handle_keeper_bash_typed
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
@@ -57,7 +62,7 @@ let handle_keeper_bash_typed
         in
         let in_playground = Keeper_shell_path.in_playground ~root ~cwd ~meta in
         let sandbox_profile, _sandbox_network_mode =
-          Keeper_shell_docker.effective_sandbox_profile ~meta ~in_playground
+          Keeper_sandbox_docker.effective_sandbox_profile ~meta ~in_playground
         in
         let dispatch_sandbox =
           match sandbox_profile with
@@ -66,10 +71,10 @@ let handle_keeper_bash_typed
             if typed_input_has_env input
             then Error "typed Bash Docker Shell IR dispatch does not support env yet"
             else (
-              match typed_docker_local_fallback_target ~meta ~timeout_sec with
+              match docker_local_fallback_target ~meta ~timeout_sec with
               | Some fallback when in_playground -> Ok fallback
               | Some _ | None ->
-                typed_docker_sandbox_target ~turn_sandbox_factory ~meta ~cwd
+                docker_sandbox_target ~turn_sandbox_factory ~meta ~cwd
                 |> Result.map (fun target -> target, []))
         in
         (match dispatch_sandbox with
@@ -183,7 +188,7 @@ let handle_keeper_bash_typed
                     "keeper_bash shell_ir_dispatch keeper=%s sandbox=%s status=%s elapsed_ms=%d"
                     meta.name
                     (Keeper_types.sandbox_profile_to_string sandbox_profile)
-                    (Keeper_shell_docker_exec_failure.docker_exec_status_label result.status)
+                    (Keeper_sandbox_exec_failure.status_label result.status)
                     elapsed_ms;
                   let output =
                     if String.equal result.stderr ""
@@ -191,7 +196,7 @@ let handle_keeper_bash_typed
                     else result.stdout ^ result.stderr
                   in
                   let runtime_failure_fields =
-                    typed_docker_runtime_failure_fields output
+                    docker_runtime_failure_fields output
                   in
                   Yojson.Safe.to_string
                     (Exec_core.process_result_json

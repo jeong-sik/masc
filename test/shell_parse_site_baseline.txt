@@ -48,9 +48,9 @@ lib/keeper/keeper_repo_readiness.ml:24  # argv_keeper
 lib/keeper/keeper_sandbox_control.ml:215  # argv_keeper
 lib/keeper/keeper_sandbox_control.ml:319  # argv_keeper
 lib/keeper/keeper_sandbox_runtime.ml:49  # argv_keeper
-lib/keeper/keeper_shell_docker.ml:306  # argv_keeper
-lib/keeper/keeper_shell_docker.ml:346  # argv_keeper
-lib/keeper/keeper_shell_docker.ml:684  # argv_keeper
+lib/keeper/keeper_sandbox_docker.ml:306  # argv_keeper
+lib/keeper/keeper_sandbox_docker.ml:346  # argv_keeper
+lib/keeper/keeper_sandbox_docker.ml:684  # argv_keeper
 lib/keeper/keeper_shell_ops.ml:1313  # argv_keeper
 lib/keeper/keeper_shell_ops.ml:1325  # argv_keeper
 lib/keeper/keeper_shell_ops.ml:1376  # argv_keeper

@@ -13,12 +13,12 @@ module Keeper_exec_shell = Masc_mcp.Keeper_exec_shell
 module Keeper_exec_tools = Masc_mcp.Keeper_exec_tools
 module Keeper_registry = Masc_mcp.Keeper_registry
 module Keeper_sandbox = Masc_mcp.Keeper_sandbox
+module Keeper_sandbox_exec_failure = Masc_mcp.Keeper_sandbox_exec_failure
 module Keeper_sandbox_factory = Masc_mcp.Keeper_sandbox_factory
 module Keeper_sandbox_runtime = Masc_mcp.Keeper_sandbox_runtime
 module Keeper_turn_sandbox_runtime = Masc_mcp.Keeper_turn_sandbox_runtime
 module Keeper_shell_command_semantics = Masc_mcp.Keeper_shell_command_semantics
-module Keeper_shell_docker = Masc_mcp.Keeper_shell_docker
-module Keeper_shell_docker_exec_failure = Masc_mcp.Keeper_shell_docker_exec_failure
+module Keeper_sandbox_docker = Masc_mcp.Keeper_sandbox_docker
 module Keeper_types = Masc_mcp.Keeper_types
 module Keeper_alerting_path = Masc_mcp.Keeper_alerting_path
 module Tool_code_write = Masc_mcp.Tool_code_write
@@ -61,7 +61,7 @@ let with_config_dir config_dir f =
       f ())
 
 let temp_dir () =
-  let dir = Filename.temp_file "keeper_shell_docker_route_" "" in
+  let dir = Filename.temp_file "keeper_sandbox_docker_route_" "" in
   Unix.unlink dir;
   Unix.mkdir dir 0o755;
   dir
@@ -1010,7 +1010,7 @@ let test_bash_missing_playground_blocks_before_docker () =
   with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
   let err =
     match
-      Keeper_shell_docker.run_trusted_docker_shell_command_with_status
+      Keeper_sandbox_docker.run_trusted_docker_shell_command_with_status
       ~config
       ~meta
       ~cwd:playground
@@ -1154,7 +1154,7 @@ let test_repair_container_worktree_gitdirs () =
     (Printf.sprintf "%s/repos/masc-mcp/.worktrees/task-044/.git\n"
        container_root);
   let repaired =
-    Keeper_shell_docker.repair_container_worktree_gitdirs
+    Keeper_sandbox_docker.repair_container_worktree_gitdirs
       ~host_root:playground ~container_root
   in
   Alcotest.(check int) "repaired both gitdir pointer files" 2 repaired;
@@ -1183,7 +1183,7 @@ let test_prepare_container_worktree_gitdirs () =
     (Printf.sprintf "%s/repos/masc-mcp/.worktrees/task-045/.git\n"
        playground);
   let prepared =
-    Keeper_shell_docker.prepare_container_worktree_gitdirs
+    Keeper_sandbox_docker.prepare_container_worktree_gitdirs
       ~host_root:playground ~container_root
   in
   Alcotest.(check int) "prepared both gitdir pointer files" 2 prepared;
@@ -1192,7 +1192,7 @@ let test_prepare_container_worktree_gitdirs () =
   Alcotest.(check bool) "host path removed from worktree .git" false
     (contains_substring (read_file wt_git) playground);
   let repaired =
-    Keeper_shell_docker.repair_container_worktree_gitdirs
+    Keeper_sandbox_docker.repair_container_worktree_gitdirs
       ~host_root:playground ~container_root
   in
   Alcotest.(check int) "repaired both files back to host" 2 repaired;
@@ -1287,7 +1287,7 @@ let test_docker_shell_missing_image_fails_before_run () =
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
   match
-    Keeper_shell_docker.run_docker_shell_command_with_status
+    Keeper_sandbox_docker.run_docker_shell_command_with_status
       ~config
       ~meta
       ~cwd:playground
@@ -1360,7 +1360,7 @@ let test_docker_shell_mounts_masc_config_runtime_paths () =
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_CLEANUP_ENABLED" "false" @@ fun () ->
   match
-    Keeper_shell_docker.run_docker_shell_command_with_status
+    Keeper_sandbox_docker.run_docker_shell_command_with_status
       ~config
       ~meta
       ~cwd:playground
@@ -1371,7 +1371,7 @@ let test_docker_shell_mounts_masc_config_runtime_paths () =
   with
   | Error msg -> Alcotest.failf "expected fake docker run, got %s" msg
   | Ok result ->
-    (match result.Keeper_shell_docker.status with
+    (match result.Keeper_sandbox_docker.status with
      | Unix.WEXITED 0 -> ()
      | Unix.WEXITED code -> Alcotest.failf "expected exit 0, got %d" code
      | Unix.WSIGNALED code -> Alcotest.failf "expected exit 0, signaled %d" code
@@ -1431,7 +1431,7 @@ let run_git_creds_docker_shell ~config ~(meta : Keeper_types.keeper_meta) ~playg
          (Masc_mcp.Keeper_sandbox_runtime.docker_command ())
    | None -> ());
   match
-    Keeper_shell_docker.run_docker_shell_command_with_status
+    Keeper_sandbox_docker.run_docker_shell_command_with_status
       ~config ~meta ~cwd:playground ~timeout_sec:5.0
       ~cmd:"git status" ~git_creds_enabled:true
       ~network_mode:Keeper_types.Network_inherit
@@ -1440,7 +1440,7 @@ let run_git_creds_docker_shell ~config ~(meta : Keeper_types.keeper_meta) ~playg
       Alcotest.failf "expected fake docker git-creds run, got %s" msg
   | Ok result ->
       let observed =
-        match result.Keeper_shell_docker.status with
+        match result.Keeper_sandbox_docker.status with
         | Unix.WEXITED code -> ("exit", code)
         | Unix.WSIGNALED code -> ("signaled", code)
         | Unix.WSTOPPED code -> ("stopped", code)
@@ -1448,7 +1448,7 @@ let run_git_creds_docker_shell ~config ~(meta : Keeper_types.keeper_meta) ~playg
       if observed <> ("exit", 0) then
         Alcotest.failf "expected fake docker exit 0, got %s %d; log=%S; output=%S"
           (fst observed) (snd observed) (read_file log_path)
-          result.Keeper_shell_docker.output;
+          result.Keeper_sandbox_docker.output;
       docker_run_line log_path
 
 let test_sandbox_root_git_cwd_zero_repo_blocks_before_exec () =
@@ -2054,7 +2054,7 @@ let test_docker_mount_failure_message_preserves_path () =
     ^ ": no such file or directory"
   in
   let message =
-    Masc_mcp.Keeper_shell_docker_exec_failure.docker_exec_failure_message
+    Keeper_sandbox_exec_failure.docker_failure_message
       ~image:"masc-keeper-sandbox:local"
       ~status:(Unix.WEXITED 125)
       ~output
@@ -2138,7 +2138,7 @@ let test_docker_mount_failure_requires_daemon_origin () =
     (Keeper_sandbox_runtime.docker_mount_failure_path app_oci_output)
 
 let () =
-  Alcotest.run "Keeper_shell_docker_route"
+  Alcotest.run "Keeper_sandbox_docker_route"
     [
       ( "docker_route_fires",
         [

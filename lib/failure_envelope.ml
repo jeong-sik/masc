@@ -50,11 +50,7 @@ let to_severity : severity -> Severity.t = function
   | Bad -> Error
   | Critical -> Critical
 
-let option_to_json f = function
-  | Some value -> f value
-  | None -> `Null
-
-
+let option_to_json = Json_util.option_to_yojson
 let first_non_empty values =
   List.find_map (fun value -> Option.bind value String_util.trim_to_option) values
 

@@ -148,8 +148,8 @@ let make
 ;;
 
 let option_to_json f = function
+  | Some value -> f value
   | None -> `Null
-  | Some v -> f v
 ;;
 
 let to_json t =

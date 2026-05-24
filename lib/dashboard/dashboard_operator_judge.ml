@@ -93,11 +93,7 @@ let room_ttl_sec () = Env_config.Operator.room_ttl_sec
 
 let session_ttl_sec () = Env_config.Operator.session_ttl_sec
 
-let iso_of_unix unix_ts =
-  let tm = Unix.gmtime unix_ts in
-  Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
-    (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday tm.Unix.tm_hour
-    tm.Unix.tm_min tm.Unix.tm_sec
+let iso_of_unix = Dashboard_utils.iso_of_unix
 
 let runtime_status base_path =
   let st = get_state base_path in

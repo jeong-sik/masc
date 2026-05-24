@@ -10,10 +10,7 @@ type 'a context = {
   mcp_session_id : string option;
 }
 
-let option_to_json f = function
-  | Some value -> f value
-  | None -> `Null
-
+let option_to_json = Json_util.option_to_yojson
 let string_option_to_json = option_to_json (fun value -> `String value)
 
 let operator_dir config =

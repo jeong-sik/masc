@@ -25,10 +25,7 @@ let float_opt_to_json = function
   | Some value -> `Float value
   | None -> `Null
 
-let option_to_json f = function
-  | Some value -> f value
-  | None -> `Null
-
+let option_to_json = Json_util.option_to_yojson
 let generation_id ~keeper_name ~generation ~trace_id =
   Printf.sprintf "%s:%d:%s" keeper_name generation trace_id
 

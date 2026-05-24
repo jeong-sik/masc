@@ -120,10 +120,7 @@ let list_field key of_item fields =
                        (Yojson.Safe.to_string j))
   | None -> Ok []
 
-let option_to_json f = function
-  | Some v -> f v
-  | None -> `Null
-
+let option_to_json = Json_util.option_to_yojson
 (* ================================================================ *)
 (* contract_finding JSON                                             *)
 (* ================================================================ *)

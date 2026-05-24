@@ -81,10 +81,7 @@ let option_or_else fallback = function
   | Some _ as value -> value
   | None -> fallback ()
 
-let option_to_json f = function
-  | Some value -> f value
-  | None -> `Null
-
+let option_to_json = Json_util.option_to_yojson
 let member_assoc key json =
   match json with
   | `Assoc fields -> (match List.assoc_opt key fields with Some value -> value | None -> `Null)

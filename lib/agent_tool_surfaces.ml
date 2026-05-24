@@ -27,7 +27,6 @@ open Masc_domain
 
 module SS = Set.Make (String)
 
-let unique_preserve_order = Json_util.dedupe_keep_order
 
 let dedupe_schemas (schemas : Masc_domain.tool_schema list) =
   let unique, _ =
@@ -56,7 +55,7 @@ let lookup_schemas_by_name_exn ~label all_schemas values =
     values
     |> List.map String.trim
     |> List.filter (fun value -> not (String.equal value ""))
-    |> unique_preserve_order
+    |> Json_util.dedupe_keep_order
   in
   let by_name = Hashtbl.create (List.length all_schemas) in
   List.iter
@@ -148,7 +147,7 @@ let resolve_named_schemas all_schemas values :
     values
     |> List.map String.trim
     |> List.filter (fun value -> not (String.equal value ""))
-    |> unique_preserve_order
+    |> Json_util.dedupe_keep_order
   in
   (* Materialise both directions of the membership relation once:
      - [requested_set] for the first filter (per-schema lookup),
@@ -214,7 +213,7 @@ let filter_catalog_to_available ~available names =
   let available = SS.of_list available in
   names
   |> List.filter (fun name -> SS.mem name available)
-  |> unique_preserve_order
+  |> Json_util.dedupe_keep_order
 
 (** Build a role-based tool catalog from the full registered tool set.
     [role] determines which subset of tools the agent sees:
@@ -225,7 +224,7 @@ let filter_catalog_to_available ~available names =
 let build_tool_catalog ~(role : string) () : string list =
   let all_names =
     spawned_agent_public_tool_names @ local_worker_public_tool_names
-    |> unique_preserve_order
+    |> Json_util.dedupe_keep_order
   in
   let filtered =
     match role with
@@ -239,7 +238,7 @@ let build_tool_catalog ~(role : string) () : string list =
         let admin_set = name_set admin_tool_names in
         List.filter (fun name -> not (Hashtbl.mem admin_set name)) all_names
   in
-  unique_preserve_order filtered
+  Json_util.dedupe_keep_order filtered
 
 (** [local_worker_resolvable_tool_names ()] returns only the tool names
     that [local_worker_tool_schemas] can actually resolve.  Use this to

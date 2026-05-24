@@ -50,7 +50,6 @@ let json_ok = Tool_args.ok_response
 let parse_int_opt value =
   Stdlib.int_of_string_opt ((String.trim value))
 
-let unique_preserve_order = Json_util.dedupe_keep_order
 
 let split_ws text =
   match Exec_policy.parse_string_to_ir ~mode:Strict text with

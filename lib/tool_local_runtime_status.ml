@@ -75,7 +75,7 @@ let runtime_status_json ?(include_models = true) () =
                    (fun item -> Yojson.Safe.Util.to_string_option item)
                    items
              | _ -> [])
-      |> unique_preserve_order
+      |> Json_util.dedupe_keep_order
   in
   let configured_capacity = Local_runtime_pool.configured_capacity () in
   let allocated_slots = Local_runtime_pool.allocated_slots () in

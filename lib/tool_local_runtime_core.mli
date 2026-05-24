@@ -76,7 +76,6 @@ val parse_int_opt : string -> int option
     {!String.trim} — convenience for cmdline / JSON-string-int
     coercion. *)
 
-val unique_preserve_order : string list -> string list
 (** Alias over {!Json_util.dedupe_keep_order}. *)
 
 val split_ws : string -> string list

@@ -164,7 +164,7 @@ let handle_gh_op
       in
       let gh_gate_verdict =
         Masc_exec_command_gate.Shell_command_gate.gate_typed
-          ~caller:Masc_exec_command_gate.Shell_command_gate.Keeper_shell_bash
+          ~caller:Masc_exec_command_gate.Shell_command_gate.Keeper_shell_ir
           ~ir:gh_ir
           ~allowlist:
             { allowed_commands = [ "gh" ]

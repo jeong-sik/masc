@@ -1,6 +1,6 @@
 (** Keeper shell tool handlers — command execution and structured shell ops.
 
-    Handles [keeper_bash] (arbitrary commands with blocklist) and
+    Handles [keeper_shell_ir] (arbitrary commands with blocklist) and
     [keeper_shell] (structured ops: ls, cat, find, rg, head, tail, wc, tree,
     git-log, git-diff, git-status, git-clone, git-worktree, gh).
 
@@ -35,8 +35,8 @@ val gh_min_timeout_sec : float
     tests can lock the floor against drift back to sub-network-latency
     values. See #8688. *)
 
-val keeper_bash_native_min_timeout_sec : float
-(** Minimum timeout_sec floor applied to keeper_bash on the *native*
+val keeper_shell_ir_native_min_timeout_sec : float
+(** Minimum timeout_sec floor applied to keeper_shell_ir on the *native*
     executor path. Exposed so regression tests can lock the floor
     against drift back to sub-I/O-latency values.  Container-backed
     dispatch paths re-clamp independently inside their backend. *)
@@ -60,7 +60,7 @@ val rewrite_docker_host_paths_to_container :
     commands to the corresponding in-container playground root before
     execution. *)
 
-val handle_keeper_bash :
+val handle_keeper_shell_ir :
   turn_sandbox_factory:Keeper_sandbox_factory.t option ->
   turn_sandbox_factory_git:Keeper_sandbox_factory.t option ->
   exec_cache:Masc_exec.Exec_cache.t option ->

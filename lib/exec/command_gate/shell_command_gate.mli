@@ -44,7 +44,7 @@
 type caller =
   | Worker_dev_tools
   | Tool_code_write
-  | Keeper_shell_bash
+  | Keeper_shell_ir
 
 (** Parsed-but-rejected reasons. *)
 type reject_reason =

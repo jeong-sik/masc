@@ -345,7 +345,7 @@ let handle_keeper_shell
          let allowed_commands = Dev_exec_allowlist.dev in
          let gate_verdict =
            Shell_gate.gate_typed
-             ~caller:Shell_gate.Keeper_shell_bash
+             ~caller:Shell_gate.Keeper_shell_ir
              ~ir:envelope.Masc_exec.Shell_ir_risk.ir
              ~allowlist:{ allowed_commands; allow_pipes = true; redirect_allowed = true }
              ~path_policy:Shell_gate.allow_all_paths
@@ -446,7 +446,7 @@ let handle_keeper_shell
          let allowed_commands = Dev_exec_allowlist.readonly in
          let gate_verdict =
            Shell_gate.gate_typed
-             ~caller:Shell_gate.Keeper_shell_bash
+             ~caller:Shell_gate.Keeper_shell_ir
              ~ir:envelope.Masc_exec.Shell_ir_risk.ir
              ~allowlist:{ allowed_commands; allow_pipes = true; redirect_allowed = true }
              ~path_policy:Shell_gate.allow_all_paths
@@ -546,7 +546,7 @@ let handle_keeper_shell
          let allowed_commands = Dev_exec_allowlist.readonly in
          let gate_verdict =
            Shell_gate.gate_typed
-             ~caller:Shell_gate.Keeper_shell_bash
+             ~caller:Shell_gate.Keeper_shell_ir
              ~ir:envelope.Masc_exec.Shell_ir_risk.ir
              ~allowlist:{ allowed_commands; allow_pipes = true; redirect_allowed = true }
              ~path_policy:Shell_gate.allow_all_paths
@@ -692,7 +692,7 @@ let handle_keeper_shell
             let allowed_commands = Dev_exec_allowlist.readonly in
             let gate_verdict =
               Shell_gate.gate_typed
-                ~caller:Shell_gate.Keeper_shell_bash
+                ~caller:Shell_gate.Keeper_shell_ir
                 ~ir:envelope.Masc_exec.Shell_ir_risk.ir
                 ~allowlist:{ allowed_commands; allow_pipes = true; redirect_allowed = true }
                 ~path_policy:Shell_gate.allow_all_paths
@@ -871,7 +871,7 @@ let handle_keeper_shell
             let allowed_commands = Dev_exec_allowlist.dev in
             let gate_verdict =
               Shell_gate.gate_typed
-                ~caller:Shell_gate.Keeper_shell_bash
+                ~caller:Shell_gate.Keeper_shell_ir
                 ~ir:envelope.Masc_exec.Shell_ir_risk.ir
                 ~allowlist:{ allowed_commands; allow_pipes = true; redirect_allowed = true }
                 ~path_policy:Shell_gate.allow_all_paths

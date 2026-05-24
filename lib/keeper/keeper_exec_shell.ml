@@ -1,6 +1,6 @@
 (* Facade: keeper_exec_shell — thin re-export layer.
    Types, constants, and helpers live in [Keeper_shell_shared].
-   [handle_keeper_bash] lives in [Keeper_shell_bash].
+   [handle_keeper_shell_ir] lives in [Keeper_shell_bash].
    [handle_keeper_shell] lives in [Keeper_shell_ops].
    Docker/GH-context sub-modules remain as before. *)
 

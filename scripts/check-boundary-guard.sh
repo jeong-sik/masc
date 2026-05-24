@@ -118,7 +118,8 @@ check_forbidden_outside "V10-provider-filter-ownership" \
   "lib/keeper/keeper_types.mli" \
   "lib/keeper/keeper_meta_json_scrub.ml" \
   "lib/keeper/keeper_meta_json_scrub.mli" \
-  "lib/keeper/keeper_config.ml"
+  "lib/keeper/keeper_config.ml" \
+  "lib/keeper/keeper_config_text.ml"
 
 # V11: proof-store layout knowledge must stay inside the CDAL proof-store owner
 # and proof reader adapter.

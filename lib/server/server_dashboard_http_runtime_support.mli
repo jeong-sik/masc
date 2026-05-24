@@ -7,12 +7,7 @@
     starve other dashboard tabs. The pool itself is owned by
     {!Executor_pool_ref} (process-wide single-writer); this
     module is a thin orchestration layer that picks the strategy
-    and falls back to inline compute when no pool is registered.
-
-    Internal helper [create] (currently a [unit -> unit]
-    placeholder) and the [default_state] singleton it produces
-    are hidden — callers consume {!default} for the
-    process-wide handle. *)
+    and falls back to inline compute when no pool is registered. *)
 
 type dashboard_compute_mode =
   | Inline_shared
@@ -31,24 +26,12 @@ type runtime = {
     captured so a future "pool-side network" use-case does not
     have to thread the resource separately. *)
 
-type t
-(** Opaque handle to the runtime-support state. The current
-    implementation has no per-handle state (the executor pool
-    lives in {!Executor_pool_ref}); the type is kept abstract so
-    a future stateful expansion (e.g. per-pool metrics) does not
-    break callers. *)
-
-val default : unit -> t
-(** Return the process-wide handle. Identity-stable across
-    calls. *)
-
 val set_executor_pool : Eio.Executor_pool.t -> unit
 (** Register the executor pool for [Offloaded_readonly] compute.
     Last-writer-wins via {!Executor_pool_ref}.[set]; the slot is
     intended to be filled exactly once at server startup. *)
 
 val run_dashboard_compute :
-  t ->
   ?mode:dashboard_compute_mode ->
   ?runtime:runtime ->
   sw:Eio.Switch.t ->

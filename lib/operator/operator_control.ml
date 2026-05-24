@@ -445,13 +445,12 @@ let execute_keeper_action (ctx : 'a context) (request : action_request) =
           net = ctx.net;
         }
       in
-      let* ok, body =
+      let* body =
         match Tool_keeper.dispatch keeper_ctx ~name:"masc_keeper_msg" ~args with
-        | Some (true, body) -> Ok (true, body)
+        | Some (true, body) -> Ok body
         | Some (false, err) -> Error err
         | None -> Error "masc_keeper_msg dispatch unavailable"
       in
-      let _ = ok in
       Ok
         (`Assoc
           [

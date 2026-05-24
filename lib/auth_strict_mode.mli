@@ -21,10 +21,28 @@
 
 type t = Off | Dry_run | Strict
 
+val of_string : string -> t
+(** Pure parser for [MASC_AUTH_STRICT] values.  Case-insensitive,
+    whitespace-trimmed.  Accepts [off|0|false], [strict|1|true],
+    [dry_run|dry-run|""].  Unknown values fall through to [Dry_run] so
+    operator omissions and typos do not silently disable measurement.
+
+    Exposed so the pre-Phase-B contract (pinned variants, pinned default)
+    is testable in isolation — the runtime [current ()] is not. *)
+
 val current : unit -> t
 (** Read [MASC_AUTH_STRICT] from the environment.  Unknown / missing values
     default to [Dry_run] so that operator omissions do not silently disable
     measurement. *)
+
+val of_string : string -> t
+(** Pure parser exposed for unit tests so Phase B PR-2's promotion of
+    [Strict] to a typed reject lands on a parser whose canonical / alias
+    / unknown handling has been pinned at the test boundary. Accepts
+    ["off" | "0" | "false" | "dry_run" | "dry-run" | "strict" | "1" |
+    "true"], case-insensitive and whitespace-trimmed. Any other input
+    returns [Dry_run] (fail-open for telemetry; fail-closed promotion
+    to typed reject happens in Phase B). *)
 
 val to_label : t -> string
 (** [to_label Off = "off"], [Dry_run = "dry_run"], [Strict = "strict"].

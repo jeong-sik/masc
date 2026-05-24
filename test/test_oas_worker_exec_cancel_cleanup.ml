@@ -58,10 +58,10 @@ let () =
   let exe = Sys.executable_name in
   let project_root = parent (parent (parent (parent exe))) in
   let candidates =
-    [ Filename.concat project_root "lib/oas_worker_exec.ml"
-    ; "lib/oas_worker_exec.ml"
-    ; "../lib/oas_worker_exec.ml"
-    ; "../../lib/oas_worker_exec.ml"
+    [ Filename.concat project_root "lib/cascade/cascade_runner.ml"
+    ; "lib/cascade/cascade_runner.ml"
+    ; "../lib/cascade/cascade_runner.ml"
+    ; "../../lib/cascade/cascade_runner.ml"
     ]
   in
   let src =
@@ -70,7 +70,7 @@ let () =
     | None ->
         failwith
           (Printf.sprintf
-             "no candidate Cascade_runner source path resolved \
+             "no candidate cascade_runner.ml source path resolved \
               (cwd=%s, exe=%s)"
              (Sys.getcwd ()) exe)
   in

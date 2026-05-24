@@ -325,15 +325,12 @@ let do_request t ?headers ?body ~method_ uri : (response, string) result =
   let host_origin = Uri.with_uri ~path:(Some "") ~query:None uri in
   let acquired =
     match try_acquire_idle t key with
-    | Some c -> Ok (c, `Reused)
-    | None ->
-      (match create_fresh t host_origin with
-       | Ok c -> Ok (c, `Fresh)
-       | Error e -> Error e)
+    | Some c -> Ok c
+    | None -> create_fresh t host_origin
   in
   match acquired with
   | Error e -> Error e
-  | Ok (client, origin) ->
+  | Ok client ->
     let path = path_and_query uri in
     let body_piaf = Option.map Piaf.Body.of_string body in
     t.counters.inflight <- t.counters.inflight + 1;
@@ -348,7 +345,6 @@ let do_request t ?headers ?body ~method_ uri : (response, string) result =
     | Error err ->
       (* Connection is suspect; close, do not park. *)
       release t key client ~close_only:true;
-      let _ = origin in
       Error (Piaf.Error.to_string (err :> Piaf.Error.t))
     | Ok resp ->
       let status = Piaf.Status.to_code (Piaf.Response.status resp) in

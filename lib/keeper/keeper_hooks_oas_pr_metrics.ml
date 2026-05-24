@@ -126,8 +126,15 @@ let pr_work_action_of_git_action raw =
   | _ -> None
 
 let pr_work_actions_of_git_segment segment =
-  match Masc_exec_bash_parser.Bash.parse_string segment with
-  | Masc_exec.Parsed.Parsed (Masc_exec.Shell_ir.Simple simple)
+  (* RFC-0160 §S4: route via the gate module's canonical parse entry
+     [Shell_command_gate.parse_to_ir_opt] instead of reaching into the
+     legacy bash parser directly. Behavior is unchanged — the wrapper
+     unwraps the same Parsed variant the call-site already
+     pattern-matches. *)
+  match
+    Masc_exec_command_gate.Shell_command_gate.parse_to_ir_opt segment
+  with
+  | Some (Masc_exec.Shell_ir.Simple simple)
     when String.equal
            (Masc_exec.Bin.to_string simple.bin |> String.lowercase_ascii)
            "git" ->

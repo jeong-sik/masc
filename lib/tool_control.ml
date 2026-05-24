@@ -31,21 +31,29 @@ type context = {
 
 let keeper_pause_status_json ctx =
   let names = Keeper_types.keeper_names ctx.config in
-  let read_errors = ref [] in
-  let paused_by_meta = ref [] in
-  let paused_by_phase = ref [] in
-  List.iter
-    (fun name ->
-      (match Keeper_types.read_meta ctx.config name with
-       | Ok (Some meta) when meta.paused -> paused_by_meta := meta.name :: !paused_by_meta
-       | Ok _ -> ()
-       | Error err -> read_errors := (name, err) :: !read_errors);
-      match Keeper_registry.get_phase ~base_path:ctx.config.base_path name with
-      | Some Keeper_state_machine.Paused -> paused_by_phase := name :: !paused_by_phase
-      | _ -> ())
-    names;
-  let meta_paused_names = List.rev !paused_by_meta in
-  let phase_paused_names = List.rev !paused_by_phase in
+  (* Triple accumulator folded over [names].  All three lists are kept in
+     reverse-prepend order during the fold; downstream consumers
+     ([List.rev], [List.rev_map]) restore the natural order. *)
+  let read_errors_rev, paused_by_meta_rev, paused_by_phase_rev =
+    List.fold_left
+      (fun (errs, by_meta, by_phase) name ->
+        let by_meta, errs =
+          match Keeper_types.read_meta ctx.config name with
+          | Ok (Some meta) when meta.paused -> (meta.name :: by_meta, errs)
+          | Ok _ -> (by_meta, errs)
+          | Error err -> (by_meta, (name, err) :: errs)
+        in
+        let by_phase =
+          match Keeper_registry.get_phase ~base_path:ctx.config.base_path name with
+          | Some Keeper_state_machine.Paused -> name :: by_phase
+          | Some _ | None -> by_phase
+        in
+        (errs, by_meta, by_phase))
+      ([], [], [])
+      names
+  in
+  let meta_paused_names = List.rev paused_by_meta_rev in
+  let phase_paused_names = List.rev paused_by_phase_rev in
   let paused_names =
     Keeper_types.dedupe_keep_order (meta_paused_names @ phase_paused_names)
   in
@@ -61,7 +69,7 @@ let keeper_pause_status_json ctx =
           (List.rev_map
              (fun (name, error) ->
                `Assoc [ ("name", `String name); ("error", `String error) ])
-             !read_errors) );
+             read_errors_rev) );
     ]
 
 let handle_pause ~tool_name ~start_time ctx args =

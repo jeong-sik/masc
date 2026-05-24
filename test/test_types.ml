@@ -482,18 +482,6 @@ let () =
         in
         witness Local; witness Docker;
         Alcotest.(check int) "count" 2 (List.length valid_sandbox_profile_strings));
-      Alcotest.test_case "cmd_targets_git_or_gh dispatch predicate" `Quick (fun () ->
-        let p = Masc_mcp.Keeper_exec_shell.cmd_targets_git_or_gh in
-        Alcotest.(check bool) "git status" true (p "git status");
-        Alcotest.(check bool) "gh pr list" true (p "gh pr list");
-        Alcotest.(check bool) "leading whitespace tolerated" true
-          (p "  git diff HEAD~1");
-        Alcotest.(check bool) "bare git" true (p "git");
-        Alcotest.(check bool) "ls is not git" false (p "ls -la");
-        Alcotest.(check bool) "git substring is not git command" false
-          (p "git-foo bar");
-        Alcotest.(check bool) "github CLI other binary" false
-          (p "github-cli pr list"));
       Alcotest.test_case "network_mode witness covers both variants" `Quick (fun () ->
         let open Masc_mcp.Keeper_types_profile in
         let witness s =

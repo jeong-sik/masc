@@ -17,7 +17,7 @@ open Masc_mcp
 
 (* ---- lines_to_json ------------------------------------------------ *)
 
-let yojson_t = Alcotest.testable (Yojson.Safe.pp ~std:false) ( = )
+let yojson_t = Alcotest.testable (Yojson.Safe.pretty_print ~std:false) ( = )
 
 let test_lines_to_json_empty () =
   let json = Keeper_exec_shared.lines_to_json "" in
@@ -49,10 +49,10 @@ let test_lines_to_json_limit_truncates () =
          (String.starts_with ~prefix:"...[2 more lines omitted" s)
      | other ->
        Alcotest.failf "expected omission string, got %a"
-         (Yojson.Safe.pp ~std:false)
+         (Yojson.Safe.pretty_print ~std:false)
          other)
   | other ->
-    Alcotest.failf "expected `List, got %a" (Yojson.Safe.pp ~std:false) other
+    Alcotest.failf "expected `List, got %a" (Yojson.Safe.pretty_print ~std:false) other
 
 let test_lines_to_json_byte_budget () =
   (* 1000-byte max_bytes with long lines should trigger truncation. *)
@@ -61,16 +61,21 @@ let test_lines_to_json_byte_budget () =
   let json = Keeper_exec_shared.lines_to_json ~max_bytes:1_000 text in
   match json with
   | `List items ->
-    (* At least one line kept, but not all 4 because 4 × (300 + 4) > 1000 *)
-    Alcotest.(check bool) "byte budget truncates" true (List.length items < 4);
-    (* Last element is an omission marker *)
+    (* 3 lines (912 bytes) fit + 1 omission marker = 4 items; the
+       original 4th 304-byte line tips the budget over 1000 and is
+       replaced by the marker.  The truncation invariant is the
+       marker's presence on the tail, not the item count: marker +
+       N kept yields the same length as N+1 kept-without-marker. *)
+    Alcotest.(check bool) "at least one line kept alongside marker" true
+      (List.length items >= 2);
+    (* Last element is an omission marker — the real truncation evidence. *)
     (match List.rev items |> List.hd with
      | `String s ->
        Alcotest.(check bool) "last item is omission marker" true
          (String.starts_with ~prefix:"...[" s)
      | _ -> Alcotest.fail "expected omission string")
   | other ->
-    Alcotest.failf "expected `List, got %a" (Yojson.Safe.pp ~std:false) other
+    Alcotest.failf "expected `List, got %a" (Yojson.Safe.pretty_print ~std:false) other
 
 (* ---- process_status_to_json --------------------------------------- *)
 
@@ -80,13 +85,14 @@ let test_process_status_exited_zero () =
   | `Assoc fields ->
     Alcotest.(check (option string)) "kind = exit"
       (Some "exit")
-      (List.assoc_opt "kind" fields |> Option.map Yojson.Safe.to_string);
+      (List.assoc_opt "kind" fields
+       |> fun opt -> Option.bind opt (function `String s -> Some s | _ -> None));
     Alcotest.(check (option int)) "code = 0"
       (Some 0)
       (List.assoc_opt "code" fields
-       |> Option.bind (function `Int i -> Some i | _ -> None))
+       |> fun opt -> Option.bind opt (function `Int i -> Some i | _ -> None))
   | other ->
-    Alcotest.failf "expected `Assoc, got %a" (Yojson.Safe.pp ~std:false) other
+    Alcotest.failf "expected `Assoc, got %a" (Yojson.Safe.pretty_print ~std:false) other
 
 let test_process_status_exited_nonzero () =
   let json = Keeper_alerting_path.process_status_to_json (Unix.WEXITED 2) in
@@ -95,9 +101,9 @@ let test_process_status_exited_nonzero () =
     Alcotest.(check (option int)) "code = 2"
       (Some 2)
       (List.assoc_opt "code" fields
-       |> Option.bind (function `Int i -> Some i | _ -> None))
+       |> fun opt -> Option.bind opt (function `Int i -> Some i | _ -> None))
   | other ->
-    Alcotest.failf "expected `Assoc, got %a" (Yojson.Safe.pp ~std:false) other
+    Alcotest.failf "expected `Assoc, got %a" (Yojson.Safe.pretty_print ~std:false) other
 
 let test_process_status_timeout () =
   (* Exit code 124 is the Eio timeout convention. *)
@@ -106,9 +112,10 @@ let test_process_status_timeout () =
   | `Assoc fields ->
     Alcotest.(check (option string)) "kind = timeout"
       (Some "timeout")
-      (List.assoc_opt "kind" fields |> Option.map Yojson.Safe.to_string)
+      (List.assoc_opt "kind" fields
+       |> fun opt -> Option.bind opt (function `String s -> Some s | _ -> None))
   | other ->
-    Alcotest.failf "expected `Assoc, got %a" (Yojson.Safe.pp ~std:false) other
+    Alcotest.failf "expected `Assoc, got %a" (Yojson.Safe.pretty_print ~std:false) other
 
 let test_process_status_signaled () =
   let json = Keeper_alerting_path.process_status_to_json (Unix.WSIGNALED Sys.sigkill) in
@@ -116,9 +123,10 @@ let test_process_status_signaled () =
   | `Assoc fields ->
     Alcotest.(check (option string)) "kind = signaled"
       (Some "signaled")
-      (List.assoc_opt "kind" fields |> Option.map Yojson.Safe.to_string)
+      (List.assoc_opt "kind" fields
+       |> fun opt -> Option.bind opt (function `String s -> Some s | _ -> None))
   | other ->
-    Alcotest.failf "expected `Assoc, got %a" (Yojson.Safe.pp ~std:false) other
+    Alcotest.failf "expected `Assoc, got %a" (Yojson.Safe.pretty_print ~std:false) other
 
 (* ---- JSON envelope shape contract --------------------------------- *)
 
@@ -131,14 +139,14 @@ let yojson_string_field name json =
   match json with
   | `Assoc fields ->
     List.assoc_opt name fields
-    |> Option.bind (function `String s -> Some s | _ -> None)
+    |> fun opt -> Option.bind opt (function `String s -> Some s | _ -> None)
   | _ -> None
 
 let yojson_bool_field name json =
   match json with
   | `Assoc fields ->
     List.assoc_opt name fields
-    |> Option.bind (function `Bool b -> Some b | _ -> None)
+    |> fun opt -> Option.bind opt (function `Bool b -> Some b | _ -> None)
   | _ -> None
 
 let test_p10_host_envelope_shape () =

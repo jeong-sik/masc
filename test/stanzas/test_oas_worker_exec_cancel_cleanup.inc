@@ -4,4 +4,4 @@
 (test
  (name test_oas_worker_exec_cancel_cleanup)
  (modules test_oas_worker_exec_cancel_cleanup)
- (deps ../lib/oas_worker_exec.ml))
+ (deps ../lib/cascade/cascade_runner.ml))

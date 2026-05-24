@@ -323,7 +323,7 @@ let extract_mcp_result json =
   | e -> Error (Printf.sprintf "Parse error: %s" (Printexc.to_string e))
 ;;
 
-let call_voice_mcp_endpoint ~sw ~clock ~net ~endpoint ~tool_name ~arguments =
+let call_voice_mcp_endpoint ~clock ~net ~endpoint ~tool_name ~arguments =
   let uri =
     match Voice_runtime_overlay.session_mcp_url_of_endpoint endpoint with
     | Ok url -> Uri.of_string url
@@ -341,7 +341,6 @@ let call_voice_mcp_endpoint ~sw ~clock ~net ~endpoint ~tool_name ~arguments =
   let headers_list =
     [ "Content-Type", "application/json"; "Accept", "application/json" ]
   in
-  let _ = sw in
   let operation () =
     let timeout =
       Option.value endpoint.timeout_seconds ~default:(request_timeout_seconds ())
@@ -450,7 +449,6 @@ let attempt_tts_endpoint
     with_voice_output_turn ~agent_id (fun () ->
       match
         call_voice_mcp_endpoint
-          ~sw
           ~clock
           ~net
           ~endpoint
@@ -545,7 +543,7 @@ let call_session_tool ~sw ~clock ~net ~tool_name ~arguments =
   match session_endpoint_result () with
   | Error message -> Error message
   | Ok endpoint ->
-    (match call_voice_mcp_endpoint ~sw ~clock ~net ~endpoint ~tool_name ~arguments with
+    (match call_voice_mcp_endpoint ~clock ~net ~endpoint ~tool_name ~arguments with
      | Ok json ->
        (match extract_mcp_result json with
         | Ok data -> Ok (append_provider_metadata data endpoint)

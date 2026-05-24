@@ -12,6 +12,7 @@ module Keeper_registry = Masc_mcp.Keeper_registry
 module Keeper_sandbox = Masc_mcp.Keeper_sandbox
 module Keeper_shell_docker = Masc_mcp.Keeper_shell_docker
 module Keeper_types = Masc_mcp.Keeper_types
+module Parsed = Masc_exec.Parsed
 module Json = Yojson.Safe.Util
 
 let validate = Masc_mcp.Worker_dev_tools.validate_command
@@ -88,11 +89,6 @@ let test_shell_metachar_blocked () =
 let test_empty_command () =
   Alcotest.(check bool) "empty blocked" true (is_error (validate ""));
   Alcotest.(check bool) "whitespace blocked" true (is_error (validate "   "))
-
-let is_write cmd =
-  match Masc_exec_bash_parser.Bash.parse_string cmd with
-  | Parsed.Parsed ir -> Masc_mcp.Worker_dev_tools.is_write_operation ir
-  | _ -> false
 
 let test_write_ops_detected () =
   let writes = [
@@ -725,32 +721,6 @@ let test_keeper_shell_bash_op_does_not_execute () =
   Alcotest.(check bool) "bash op did not execute" false
     (Sys.file_exists marker)
 
-let test_git_write_classification () =
-  let is_branch_switch cmd =
-    match Masc_exec_bash_parser.Bash.parse_string cmd with
-    | Parsed.Parsed ir -> Masc_mcp.Worker_dev_tools.is_git_branch_switch ir
-    | _ -> false
-  in
-  let is_destructive cmd =
-    match Masc_exec_bash_parser.Bash.parse_string cmd with
-    | Parsed.Parsed ir -> Masc_mcp.Worker_dev_tools.is_destructive_bash_operation ir
-    | _ -> false
-  in
-  (* git checkout: branch switch, allowed in playground *)
-  Alcotest.(check bool) "checkout is branch switch"
-    true (is_branch_switch "git checkout -b my-feature");
-  Alcotest.(check bool) "switch is branch switch"
-    true (is_branch_switch "git switch -c my-feature");
-  (* git push: write op, allowed in playground *)
-  Alcotest.(check bool) "push is write" true (is_write "git push origin my-branch");
-  Alcotest.(check bool) "commit is write" true (is_write "git commit -m 'msg'");
-  (* destructive: blocked everywhere including playground *)
-  Alcotest.(check bool) "rm -rf is destructive"
-    true (is_destructive "rm -rf /tmp/something");
-  (* git push is NOT destructive (it's write, not destructive) *)
-  Alcotest.(check bool) "push is not destructive"
-    false (is_destructive "git push origin my-branch")
-
 let test_rewrite_turn_runtime_paths_to_host () =
   with_eio_fs @@ fun () ->
   let base_path, config = make_config () in
@@ -942,7 +912,6 @@ let () =
             "path traversal blocked after canonicalization"
             `Quick
             test_playground_guard_traversal
-        ; Alcotest.test_case "git write classification" `Quick test_git_write_classification
         ] )
     ; ( "edge"
       , [ Alcotest.test_case

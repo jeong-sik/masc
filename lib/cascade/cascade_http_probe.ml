@@ -84,8 +84,7 @@ let store_capacity ~url ~capacity ~now =
    [OLLAMA_NUM_PARALLEL=1] (the ollama default).  Users running
    parallel mode can override [total] via the optional argument
    so [process_available] is still meaningful. *)
-let parse_response ?(total = 1) ?now json =
-  let _ = now in
+let parse_response ?(total = 1) json =
   let open Yojson.Safe.Util in
   match json with
   | `Assoc _ ->
@@ -182,7 +181,7 @@ let try_probe ~sw ~net:_ ?clock ?timeout_s ?now url =
     in
     (match parsed with
      | Ok json ->
-       (match parse_response ~now json with
+       (match parse_response json with
         | None -> None
         | Some cap ->
           store_capacity ~url ~capacity:cap ~now;

@@ -12,7 +12,6 @@ type dashboard_compute_mode =
 
 (* Dashboard runtime helpers extracted to
    [Server_dashboard_http_core_runtime] (godfile decomp). *)
-let runtime_support = Server_dashboard_http_core_runtime.runtime_support
 let set_executor_pool = Server_dashboard_http_core_runtime.set_executor_pool
 let dashboard_runtime = Server_dashboard_http_core_runtime.dashboard_runtime
 let run_dashboard_compute = Server_dashboard_http_core_runtime.run_dashboard_compute

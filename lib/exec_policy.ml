@@ -642,6 +642,22 @@ let path_argument_values command_name args =
                    ~seen_primary_pattern:(seen_primary_pattern || consumes_primary_pattern)
                    acc
                    rest
+               | None when is_path_flag token ->
+                 (match rest with
+                  | path_value :: rest' ->
+                    loop
+                      ~skip_next_pattern:None
+                      ~redirect_target:false
+                      ~seen_primary_pattern
+                      (path_value :: token :: acc)
+                      rest'
+                  | [] ->
+                    loop
+                      ~skip_next_pattern:None
+                      ~redirect_target:false
+                      ~seen_primary_pattern
+                      (token :: acc)
+                      rest)
                | None when command_treats_plain_args_as_content command_name ->
                  loop ~skip_next_pattern:None ~redirect_target:false ~seen_primary_pattern acc rest
                | None when command_name = "sed"

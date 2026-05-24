@@ -1,6 +1,5 @@
 (** Keeper context snapshot helpers for operator control snapshots. *)
 
-val resolved_context_budget_of_meta : Keeper_types.keeper_meta -> int option
 val compute_context_ratio : Keeper_types.keeper_meta -> float option
 
 type keeper_context_snapshot =

@@ -506,3 +506,9 @@ let last_stage_bin context =
 ;;
 
 let is_pipeline context = List.length context.stage_bins > 1
+
+let parse_to_ir_opt text =
+  match Masc_exec_bash_parser.Bash.parse_string text with
+  | Masc_exec.Parsed.Parsed ir -> Some ir
+  | _ -> None
+;;

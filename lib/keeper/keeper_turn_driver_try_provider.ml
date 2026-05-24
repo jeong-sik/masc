@@ -176,10 +176,7 @@ let wrap_runtime_mcp_external_tool_hooks
 let max_execution_time_for_attempt ?per_provider_timeout_s () =
   match per_provider_timeout_s with
   | Some timeout_s -> Some timeout_s
-  | None ->
-    Some
-      (Keeper_runtime_resolved.oas_timeout_for_estimated_input_tokens
-         ~estimated_input_tokens:0)
+  | None -> Some (Keeper_runtime_resolved.oas_call_timeout_sec ())
 
 (** Run a single provider attempt within the cascade.
 
@@ -482,7 +479,7 @@ let run_try_provider
         Printexc.raise_with_backtrace exn bt
     in
     (match
-       Cascade_config_builder.with_codex_cli_preflight
+       Cascade_config_builder.with_cli_preflight
          ~scope:(Printf.sprintf "cascade:%s/runtime" ctx.cascade_name)
          ~config
          ~goal:ctx.goal

@@ -296,24 +296,14 @@ let stream_idle_timeout_for_total_timeout ~(total_timeout_s : float) =
 let body_timeout_override_sec () =
   (current ()).body_timeout_override_sec.value
 
-let oas_timeout_for_estimated_input_tokens_with_turn_budget
-    ~(estimated_input_tokens : int) ~(max_turns : int) : float =
-  let _ = estimated_input_tokens in
-  let _ = max_turns in
+(* RFC-0156: OAS total timeout removed — turn_timeout_sec is the wall-clock
+   cap, stream_idle_timeout is the per-stream cap. Kept in lockstep with
+   [Env_config.KeeperKeepalive.oas_call_timeout_sec]. Historic names
+   ([oas_timeout_for_estimated_input_tokens] /
+   [oas_timeout_for_estimated_input_tokens_with_turn_budget]) ignored their
+   args — function-name-lying. *)
+let oas_call_timeout_sec () : float =
   let runtime = current () in
   match runtime.oas_timeout_override_sec.value with
   | Some value -> value
-  | None ->
-      (* RFC-0156: OAS total timeout removed — turn_timeout_sec is the
-         wall-clock cap, stream_idle_timeout is the per-stream cap.
-         Kept in lockstep with
-         [Env_config.KeeperKeepalive.oas_timeout_for_estimated_input_tokens_with_turn_budget].
-         Old: Float.min turn_timeout_sec oas_timeout_default_sec (= 300s clamp).
-         New: turn_timeout_sec (no 300s clamp; cascade handled by rotation). *)
-      runtime.turn_timeout_sec.value
-
-let oas_timeout_for_estimated_input_tokens ~(estimated_input_tokens : int) :
-    float =
-  oas_timeout_for_estimated_input_tokens_with_turn_budget
-    ~estimated_input_tokens
-    ~max_turns:(reactive_max_turns_per_call ())
+  | None -> runtime.turn_timeout_sec.value

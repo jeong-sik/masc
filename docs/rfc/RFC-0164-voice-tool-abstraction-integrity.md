@@ -160,7 +160,7 @@ Plus `lib/keeper/keeper_tool_policy.ml:342-346` carries a hardcoded fallback lis
 
 ### 2.5 Config keys to delete
 
-`~/me/.masc/voice_config.json`:
+`<base-path>/.masc/voice_config.json`:
 
 | Key | Reason |
 |---|---|
@@ -228,7 +228,7 @@ Single PR. No PR-1/PR-2 split because the changes are coupled — removing a fie
 
 Reference path proven on 2026-05-23 via direct ElevenLabs probe (HTTP 200, 81KB mp3, afplay playback). After this RFC's deletion:
 
-1. Persona prompt in `~/me/.masc/config/keepers/sangsu.toml`: add one-line guidance — *"가끔 음성으로 한 마디 던져도 된다"* — into `instructions`.
+1. Persona prompt in `<base-path>/.masc/config/keepers/sangsu.toml`: add one-line guidance — *"가끔 음성으로 한 마디 던져도 된다"* — into `instructions`.
 2. Start a normal sangsu turn (no `voice_enabled` flag needed — there is no such flag).
 3. sangsu LLM emits `keeper_voice_speak({message: "..."})` per its persona discretion.
 4. `keeper_exec_voice.ml` intercepts, calls `Voice_bridge.agent_speak`, which calls ElevenLabs HTTP, returns mp3 bytes, `local_playback` plays via `afplay`.

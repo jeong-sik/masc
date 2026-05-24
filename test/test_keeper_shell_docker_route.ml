@@ -18,6 +18,7 @@ module Keeper_sandbox_runtime = Masc_mcp.Keeper_sandbox_runtime
 module Keeper_turn_sandbox_runtime = Masc_mcp.Keeper_turn_sandbox_runtime
 module Keeper_shell_command_semantics = Masc_mcp.Keeper_shell_command_semantics
 module Keeper_shell_docker = Masc_mcp.Keeper_shell_docker
+module Keeper_shell_docker_exec_failure = Masc_mcp.Keeper_shell_docker_exec_failure
 module Keeper_types = Masc_mcp.Keeper_types
 module Keeper_alerting_path = Masc_mcp.Keeper_alerting_path
 module Tool_code_write = Masc_mcp.Tool_code_write
@@ -2053,7 +2054,7 @@ let test_docker_mount_failure_message_preserves_path () =
     ^ ": no such file or directory"
   in
   let message =
-    Keeper_shell_docker_exec_failure.docker_exec_failure_message
+    Masc_mcp.Keeper_shell_docker_exec_failure.docker_exec_failure_message
       ~image:"masc-keeper-sandbox:local"
       ~status:(Unix.WEXITED 125)
       ~output

@@ -5,23 +5,6 @@
 
 let default_capacity = 16
 
-let of_list_with (key : 'a -> 'b) (xs : 'a list) : ('b, unit) Hashtbl.t =
-  let tbl = Hashtbl.create default_capacity in
-  List.iter (fun x -> Hashtbl.replace tbl (key x) ()) xs;
-  tbl
-;;
-
-let count_distinct (key : 'a -> 'b option) (xs : 'a list) : int =
-  let seen : ('b, unit) Hashtbl.t = Hashtbl.create default_capacity in
-  List.iter
-    (fun x ->
-       match key x with
-       | Some k -> Hashtbl.replace seen k ()
-       | None -> ())
-    xs;
-  Hashtbl.length seen
-;;
-
 let count_difference
       (xs : 'a list)
       ~(present : 'a -> 'b option)

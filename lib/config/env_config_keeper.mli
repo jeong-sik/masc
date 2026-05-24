@@ -177,12 +177,9 @@ module KeeperKeepalive : sig
   val oas_max_turns_per_call : int
   val oas_max_turns_per_call_scheduled_autonomous : int
 
-  val oas_timeout_for_estimated_input_tokens_with_turn_budget
-    :  estimated_input_tokens:int
-    -> max_turns:int
-    -> float
-
-  val oas_timeout_for_estimated_input_tokens : estimated_input_tokens:int -> float
+  val oas_call_timeout_sec : float
+  (** Resolved OAS-call timeout: [oas_timeout_sec_override] when set, otherwise
+      [turn_timeout_sec]. RFC-0156: no token- or turn-budget dependence. *)
   val stream_idle_timeout_sec : float
 
   val body_timeout_sec_override : float option

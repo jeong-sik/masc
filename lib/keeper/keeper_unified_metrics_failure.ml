@@ -101,7 +101,8 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
             | Keeper_turn_driver.Admission_queue_rejected _
             | Keeper_turn_driver.Resumable_cli_session _
             | Keeper_turn_driver.Capacity_backpressure _
-            | Keeper_turn_driver.No_tool_capable_provider _) ->
+            | Keeper_turn_driver.No_tool_capable_provider _
+            | Keeper_turn_driver.Retry_admission_denied _) ->
             true
         | Some _ | None -> false)
     | None -> false

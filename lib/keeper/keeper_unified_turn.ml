@@ -659,14 +659,38 @@ let run_keeper_cycle
                              let remaining_turn_budget_sec =
                                remaining_turn_budget_s ()
                              in
-                             Error
-                               (Keeper_turn_driver.sdk_error_of_masc_internal_error
-                                  (Keeper_turn_driver.Turn_timeout
-                                     {
-                                       elapsed_sec =
-                                         Float.max 0.0
-                                           (timeout_sec -. remaining_turn_budget_sec);
-                                     }))
+                             let attempt_kind =
+                               if is_retry
+                               then Keeper_turn_cascade_budget.Retry_attempt
+                               else Keeper_turn_cascade_budget.First_attempt
+                             in
+                             (match
+                                Keeper_turn_cascade_budget.decide_retry_admission_for_turn
+                                  ~remaining_turn_budget_s:remaining_turn_budget_sec
+                                  ~attempt_kind
+                                  ~allow_wall_clock_retry_budget
+                                  ~estimated_input_tokens:prompt_timeout_estimate_tokens
+                                  ~max_turns
+                              with
+                             | Error (denial : Cascade_internal_error.retry_admission_denial) ->
+                               Error
+                                 (Keeper_turn_driver.sdk_error_of_masc_internal_error
+                                    (Keeper_turn_driver.Retry_admission_denied
+                                       {
+                                         denial_reason = denial;
+                                         is_retry;
+                                       }))
+                             | Ok () ->
+                               (* Budget was None but admission passed — should not
+                                  happen. Fall through to generic Turn_timeout. *)
+                               Error
+                                 (Keeper_turn_driver.sdk_error_of_masc_internal_error
+                                    (Keeper_turn_driver.Turn_timeout
+                                       {
+                                         elapsed_sec =
+                                           Float.max 0.0
+                                             (timeout_sec -. remaining_turn_budget_sec);
+                                       })))
                            | Some provider_timeout_budget ->
                              attempt_provider_timeout_budget := Some provider_timeout_budget;
                              last_provider_timeout_budget := Some provider_timeout_budget;

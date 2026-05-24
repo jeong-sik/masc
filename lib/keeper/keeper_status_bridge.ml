@@ -203,6 +203,10 @@ let blocker_class_of_sdk_error (err : Agent_sdk.Error.sdk_error) : blocker_class
   | Some (Keeper_turn_driver.Ambiguous_post_commit { is_timeout; _ }) ->
     Some
       (if is_timeout then Ambiguous_post_commit_timeout else Ambiguous_post_commit_failure)
+  (* RFC-0158: admission denial — budget too low for any provider attempt.
+     Not a cascade-exhaustion or provider-failure blocker; the turn budget
+     was simply insufficient. *)
+  | Some (Keeper_turn_driver.Retry_admission_denied _) -> None
   (* RFC-0159 Phase A: typed [Internal_*] variants carry an opaque exception
      repr.  They are not yet mapped to a dedicated [blocker_class]; returning
      [None] keeps Phase A scope to typed substrate only.  A follow-up RFC may

@@ -263,7 +263,7 @@ let test_of_json_rejects_cmd_string_only () =
   Alcotest.(check bool)
     "error mentions typed input"
     true
-    (String_util.contains_substring_ci msg "typed keeper_bash input")
+    (String_util.contains_substring_ci msg "typed Shell IR input")
 ;;
 
 let test_of_json_rejects_cmd_string_with_exec () =
@@ -274,7 +274,7 @@ let test_of_json_rejects_cmd_string_with_exec () =
   Alcotest.(check bool)
     "error mentions typed input"
     true
-    (String_util.contains_substring_ci msg "typed keeper_bash input")
+    (String_util.contains_substring_ci msg "typed Shell IR input")
 ;;
 
 let test_of_json_rejects_non_string_argv () =

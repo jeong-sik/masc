@@ -6,8 +6,6 @@
 
 include Keeper_shell_shared
 
-let keeper_shell_ir_native_min_timeout_sec = keeper_bash_native_min_timeout_sec
-
 include Keeper_shell_bash
 
 include Keeper_shell_ops

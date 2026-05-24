@@ -1,4 +1,4 @@
-(** Keeper_shell_shared — shared helpers for keeper_shell / keeper_bash
+(** Keeper_shell_shared — shared helpers for keeper_shell / Shell IR
     pipelines.
 
     Co-locates SSOT pieces shared across the per-op dispatchers
@@ -21,9 +21,8 @@
       {!resolve_keeper_shell_write_cwd},
       {!resolve_keeper_shell_read_path},
       {!auto_correct_path}).
-    - {b docker dispatch aliases} re-exported from
-      {!Keeper_sandbox_docker} so callers (tests, doc refs) that
-      historically pointed at this module continue to compile. *)
+    - {b docker dispatch helpers} re-exported from
+      {!Keeper_sandbox_docker}. *)
 
 (** {1 Shell op SSOT (issue #8524)} *)
 
@@ -55,14 +54,14 @@ val env_float : string -> float -> float
 
 val io_timeout_sec : float
 (** Network/disk-bound commands (git status, ls on large dirs,
-    custom bash).  Default 30s, env: [MASC_KEEPER_IO_TIMEOUT_SEC]. *)
+    custom Shell IR).  Default 30s, env: [MASC_KEEPER_IO_TIMEOUT_SEC]. *)
 
 val read_timeout_sec : float
 (** Fast read-only commands (cat, rg, head, tail, find, git_log,
     tree).  Default 15s, env: [MASC_KEEPER_READ_TIMEOUT_SEC]. *)
 
 val user_timeout_max_sec : float
-(** Upper bound for user-provided [timeout_sec] in keeper_bash.
+(** Upper bound for user-provided [timeout_sec] in Shell IR.
     Default 180s, env: [MASC_KEEPER_USER_TIMEOUT_MAX_SEC]. *)
 
 val gh_min_timeout_sec : float
@@ -70,24 +69,20 @@ val gh_min_timeout_sec : float
     cannot lower; sub-network-latency timeouts cause cascading 401
     retries (#8688). *)
 
-val keeper_bash_native_min_timeout_sec : float
-(** Floor for keeper_bash [timeout_sec] when the command runs through the
-    *native* (non-Docker) executor (5s).  Custom Bash commands often touch
-    disk or git metadata; lower caller-supplied values produce noisy
-    partial-output timeout failures rather than useful latency bounds.
+val keeper_shell_ir_native_min_timeout_sec : float
+(** Floor for typed Shell IR [timeout_sec] when the command runs through the
+    *native* (non-Docker) executor (5s).  Custom commands often touch disk or
+    git metadata; lower caller-supplied values produce noisy partial-output
+    timeout failures rather than useful latency bounds.
 
     The sandbox backend dispatch path re-clamps again where needed because
     container cold start can add 10-60s on top of the actual command
     (runtime log issue #5, 2026-05-20).  Keeping a separate native floor
     avoids penalising the host-side fast path for backend overhead. *)
 
-val keeper_shell_ir_native_min_timeout_sec : float
-(** Floor for typed Shell IR [timeout_sec] when the command runs through the
-    *native* executor. *)
-
-val keeper_bash_min_timeout_sec_for_args : Yojson.Safe.t -> float
-(** Minimum timeout_sec floor for a typed keeper_bash invocation.
-    Trivial native commands keep {!keeper_bash_native_min_timeout_sec}; git,
+val keeper_shell_ir_min_timeout_sec_for_args : Yojson.Safe.t -> float
+(** Minimum timeout_sec floor for a typed Shell IR invocation.
+    Trivial native commands keep {!keeper_shell_ir_native_min_timeout_sec}; git,
     recursive scans, and local Dune wrapper invocations use the shared
     Tool_dispatch floor. *)
 

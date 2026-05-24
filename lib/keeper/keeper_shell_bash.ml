@@ -261,7 +261,7 @@ let handle_keeper_shell_ir
   =
   let timeout_sec =
     Keeper_shell_shared.clamp_shell_timeout
-      ~min_sec:(Keeper_shell_shared.keeper_bash_min_timeout_sec_for_args args)
+      ~min_sec:(Keeper_shell_shared.keeper_shell_ir_min_timeout_sec_for_args args)
       ~default:Keeper_shell_shared.io_timeout_sec
       args
   in

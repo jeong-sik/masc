@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.19.29] - 2026-05-24
+
+### Changed
+- Bumped `agent_sdk` (OAS) minimum from `0.196.10` to `0.196.16`.
+- Continued Keeper Tool/Backend boundary cleanup by routing file read tools
+  through `Keeper_sandbox_read_runner` and moving file-tool route labels to
+  sandbox runner facades.
+
 ## [0.19.28] - 2026-05-21
 
 ### Changed

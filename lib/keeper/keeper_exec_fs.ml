@@ -105,15 +105,15 @@ let handle_keeper_fs_read
            with
            | Error msg -> error_json ~fields:[ "path", `String target ] msg
            | Ok () ->
-             (* RFC-0006 Phase B-2: Docker keepers route the actual byte read
-       through [docker run --rm <image> cat <container_path>] so the
-       container's mount restrictions are the load-bearing isolation.
-       The host containment check above remains as defense-in-depth. *)
-             if Keeper_docker_read.should_route_read ~meta
+             (* RFC-0006 Phase B-2: sandbox-backed keepers route the actual
+       byte read through the backend read runner so the backend mount
+       restrictions are the load-bearing isolation. The host containment
+       check above remains as defense-in-depth. *)
+             if Keeper_sandbox_read_runner.should_route_read ~meta
              then (
                let timeout_sec = Env_config_exec_timeout.timeout_sec ~caller:Fs () in
                match
-                 Keeper_docker_read.read_file_in_container
+                 Keeper_sandbox_read_runner.read_file
                    ?turn_sandbox_factory
                    ~config
                    ~meta
@@ -133,7 +133,7 @@ let handle_keeper_fs_read
                        ; "bytes", `Int total
                        ; "truncated", `Bool truncated
                        ; "content", `String body
-                       ; "via", `String "docker"
+                       ; "via", `String Keeper_sandbox_read_runner.backend_via
                        ]))
              else (
                match Safe_ops.read_file_safe target with
@@ -385,7 +385,12 @@ let handle_keeper_fs_edit
   @@ fun meta ->
   let via_field =
     match turn_sandbox_factory with
-    | Some _ -> [ "via", `String "docker" ]
+    | Some _ ->
+      [ ( "via"
+        , `String
+            (Keeper_sandbox_runner.route_label
+               Keeper_sandbox_runner.Sandbox_backend) )
+      ]
     | None -> []
   in
   let path = Safe_ops.json_string ~default:"" "path" args in

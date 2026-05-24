@@ -547,7 +547,7 @@ let make_shell_exec_with_allowlist
                          ~error_message:exn_msg
                          ())
                     on_exec;
-                  tool_error (Printf.sprintf "Command failed: %s" exn_msg)))))
+                  tool_error (Printf.sprintf "Command failed: %s" exn_msg))))))
 ;;
 
 let make_shell_exec ~workdir ~on_exec ~proc_mgr ~clock =

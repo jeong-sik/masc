@@ -1,6 +1,6 @@
 {
-  "pinned_sha": "6ef847dd2951785d318016afdd34e6b4f8bf5b1b",
-  "pinned_version": "v0.196.10",
+  "pinned_sha": "c77aa8161ada98ae6e07be04110f97052c97b88d",
+  "pinned_version": "v0.196.16",
   "surfaces": {
     "event_bus_payload_variants": [
       "AgentCompleted",

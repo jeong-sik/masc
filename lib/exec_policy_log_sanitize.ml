@@ -82,11 +82,11 @@ let sanitize_command_for_log cmd =
   if trimmed = ""
   then "[EMPTY]"
   else (
-    match Exec_policy.parse_string_to_ir ~mode:Coding trimmed with
-    | Ok ir ->
+    match Masc_exec_bash_parser.Bash.parse_string trimmed with
+    | Masc_exec.Parsed.Parsed ir ->
       sanitize_parts (Exec_policy_mutation_classifier.flat_stage_words ir)
-    | Error _ when command_has_sensitive_marker cmd -> "[REDACTED]"
-    | Error _ -> cmd |> redact_url_credentials |> redact_inline_secret_assignment)
+    | _ when command_has_sensitive_marker cmd -> "[REDACTED]"
+    | _ -> cmd |> redact_url_credentials |> redact_inline_secret_assignment)
 ;;
 
 let sanitize_command_for_log_of_ir ~fallback_cmd ir =

@@ -274,7 +274,7 @@
           <span>Combined LOC across main hot files and new sandbox helper modules</span>
         </div>
       </div>
-      <p class="note">Slice 1 removes source-level references to <code>Keeper_shell_docker</code>, <code>Keeper_shell_docker_exec_failure</code>, and <code>Keeper_shell_bash_docker</code>. Slice 2 removes the legacy <code>Keeper_shell_shared.run_docker*</code> boundary and routes PR/GitHub tool execution through <code>Keeper_sandbox_runner</code>. Slice 3 moves <code>keeper_shell op=gh</code> compatibility execution into <code>Keeper_shell_gh_bridge</code>. Slice 4 moves <code>keeper_shell op=git_clone</code> compatibility execution into <code>Keeper_shell_git_bridge</code>. Slice 5 makes <code>Keeper_sandbox_runner</code> own route labels for bridge result shaping. Slice 6 moves read-side sandbox execution behind <code>Keeper_sandbox_read_runner</code>. Bridge and runner tests use injected mock runners.</p>
+      <p class="note">Slice 1 removes source-level references to <code>Keeper_shell_docker</code>, <code>Keeper_shell_docker_exec_failure</code>, and <code>Keeper_shell_bash_docker</code>. Slice 2 removes the legacy <code>Keeper_shell_shared.run_docker*</code> boundary and routes PR/GitHub tool execution through <code>Keeper_sandbox_runner</code>. Slice 3 moves <code>keeper_shell op=gh</code> compatibility execution into <code>Keeper_shell_gh_bridge</code>. Slice 4 moves <code>keeper_shell op=git_clone</code> compatibility execution into <code>Keeper_shell_git_bridge</code>. Slice 5 makes <code>Keeper_sandbox_runner</code> own route labels for bridge result shaping. Slice 6 moves shell read-side sandbox execution behind <code>Keeper_sandbox_read_runner</code>. Slice 7 applies the same boundary to file tools. Bridge and runner tests use injected mock runners.</p>
     </section>
 
     <section>
@@ -318,6 +318,12 @@
             <td data-label="Goal">Keep structured shell read ops out of concrete Docker backend selection.</td>
             <td data-label="Quantitative Gate"><code>keeper_shell_ops.ml</code> has <code>0</code> direct <code>Keeper_docker_read</code> calls and <code>0</code> bridge-local <code>via=docker</code> literals.</td>
             <td data-label="Status"><span class="status next">Started in slice 6</span></td>
+          </tr>
+          <tr>
+            <td data-label="ID">G6</td>
+            <td data-label="Goal">Keep file read/edit tools out of concrete Docker backend selection.</td>
+            <td data-label="Quantitative Gate"><code>keeper_exec_fs.ml</code> has <code>0</code> direct <code>Keeper_docker_read</code> calls and <code>0</code> hard-coded <code>via=docker</code> literals.</td>
+            <td data-label="Status"><span class="status next">Started in slice 7</span></td>
           </tr>
         </tbody>
       </table>
@@ -369,7 +375,7 @@
             <td data-label="Goal">Guardrails</td>
             <td data-label="Todo">Extend source-level boundary tests to prevent tool-surface names, direct Docker-read backend calls, and hard-coded Docker route labels from returning to tool bridges.</td>
             <td data-label="Verification Method"><code>./_build/default/test/test_keeper_sandbox_boundary_policy.exe</code>, <code>./_build/default/test/test_keeper_sandbox_read_runner.exe</code></td>
-            <td data-label="Exit Criteria">Test fails on new <code>shell_docker</code>/<code>shell_bash</code> sandbox helpers, direct <code>Keeper_docker_read</code> use from <code>keeper_shell_ops.ml</code>, or bridge-local <code>via=docker</code> shaping.</td>
+            <td data-label="Exit Criteria">Test fails on new <code>shell_docker</code>/<code>shell_bash</code> sandbox helpers, direct <code>Keeper_docker_read</code> use from tool surfaces, or tool-local <code>via=docker</code> shaping.</td>
           </tr>
         </tbody>
       </table>
@@ -387,6 +393,7 @@
         <div class="command">./_build/default/test/test_keeper_shell_git_bridge.exe</div>
         <div class="command">rg -n "&quot;via&quot;, `String &quot;docker&quot;" lib/keeper/keeper_shell_gh_bridge.ml lib/keeper/keeper_shell_git_bridge.ml</div>
         <div class="command">rg -n "Keeper_docker_read\\.|&quot;via&quot;, `String &quot;docker&quot;" lib/keeper/keeper_shell_ops.ml</div>
+        <div class="command">rg -n "Keeper_docker_read\\.|&quot;via&quot;, `String &quot;docker&quot;" lib/keeper/keeper_exec_fs.ml</div>
         <div class="command">./_build/default/test/test_keeper_sandbox_docker_route.exe test docker_route_fires 17-21 --show-errors --compact</div>
         <div class="command">rg -n "Keeper_shell_docker|Keeper_shell_docker_exec_failure|Keeper_shell_bash_docker|keeper_shell_docker|keeper_shell_docker_exec_failure|keeper_shell_bash_docker" lib/keeper</div>
         <div class="command">rg -n "Keeper_sandbox_docker\\.run_|Keeper_shell_shared\\.run_docker" lib/keeper</div>

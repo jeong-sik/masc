@@ -55,9 +55,10 @@ let classify_write_detail (words : string list) : risk_class option =
   | ("npm" | "pnpm" | "yarn") :: _ -> Some R1_Reversible_mutation
   | "dune" :: _ -> Some R1_Reversible_mutation
   | "make" :: _ -> Some R1_Reversible_mutation
-  | ("mv" | "cp" | "mkdir" | "touch" | "chmod" | "chown" | "chgrp") :: _ ->
+  | ("mv" | "cp" | "mkdir" | "touch" | "chmod" | "chown" | "chgrp"
+    | "truncate" | "mktemp" | "tee") :: _ ->
     Some R1_Reversible_mutation
-  | ("rm" | "rmdir" | "ln" | "unlink" | "install" | "dd") :: _ ->
+  | ("rm" | "rmdir" | "ln" | "unlink" | "install" | "dd" | "shred") :: _ ->
     Some R2_Irreversible
   | _ -> None
 
@@ -225,6 +226,10 @@ let is_write_operation (words : string list) =
       ; "dd"
       ; "chown"
       ; "chgrp"
+      ; "truncate"
+      ; "mktemp"
+      ; "tee"
+      ; "shred"
       ]
   | [] -> false
 ;;
@@ -245,13 +250,14 @@ let is_destructive_bash_operation (words : string list) =
   in
   match words with
   | "git" :: "push" :: rest ->
-    List.exists
-      (fun arg ->
-         arg = "--force" || arg = "-f"
-         || String.starts_with ~prefix:"--force-with-lease" arg)
-      rest
-    || List.exists is_protected_branch_target rest
-  | "git" :: "reset" :: rest -> List.mem "--hard" rest
+    let has_force =
+      List.exists
+        (fun arg ->
+           arg = "--force" || arg = "-f"
+           || String.starts_with ~prefix:"--force-with-lease" arg)
+        rest
+    in
+    has_force && List.exists is_protected_branch_target rest
   | "rm" :: rest ->
     let option_args =
       List.filter (fun arg -> String.length arg > 0 && arg.[0] = '-') rest

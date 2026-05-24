@@ -443,7 +443,6 @@ let parse_string_list json key =
              | _ -> None)
   | _ -> []
 
-let normalize_text = Dashboard_http_helpers.normalize_text
 
 let normalize_allowed_tool_name value =
   value |> String.trim |> String.lowercase_ascii
@@ -480,7 +479,7 @@ let parse_recommended_action json =
             ("target_id", action_json |> member "target_id");
             ( "reason",
               `String
-                (normalize_text
+                (Dashboard_http_helpers.normalize_text
                    (action_json |> member "reason" |> to_string_option
                   |> Option.value ~default:"")) );
             ("payload_preview", action_json |> member "payload_preview");
@@ -548,7 +547,7 @@ let parse_item_judgment ~generated_at ~expires_at ~model_used:_ json =
   if target_kind = "" || target_id = "" then Ok None
   else
     let summary =
-      normalize_text (json |> member "summary" |> to_string_option |> Option.value ~default:"")
+      Dashboard_http_helpers.normalize_text (json |> member "summary" |> to_string_option |> Option.value ~default:"")
     in
     if summary = "" then Ok None
     else

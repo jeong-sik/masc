@@ -8,8 +8,6 @@
     - [runtime_mcp_policy_without_http_headers] strips all headers from
       every HTTP server. *)
 
-let upsert_http_header = Cascade_transport_authorization.upsert_http_header
-let keeper_name_of_agent_name = Cascade_transport_authorization.keeper_name_of_agent_name
 
 ;;
 
@@ -32,24 +30,24 @@ let runtime_mcp_policy_with_masc_agent_name
           | Llm_provider.Llm_transport.Http_server ({ name; headers; _ } as server)
             when String.equal name "masc" ->
             let headers =
-              upsert_http_header ~key:"x-masc-agent-name" ~value:agent_name headers
+              Cascade_transport_authorization.upsert_http_header ~key:"x-masc-agent-name" ~value:agent_name headers
             in
             let headers =
               if include_internal_token
               then (
                 match
                   ( first_nonempty_env [ "MASC_INTERNAL_MCP_TOKEN" ]
-                  , keeper_name_of_agent_name agent_name )
+                  , Cascade_transport_authorization.keeper_name_of_agent_name agent_name )
                 with
                 | Some token, Some _ ->
-                  upsert_http_header ~key:"x-masc-internal-token" ~value:token headers
+                  Cascade_transport_authorization.upsert_http_header ~key:"x-masc-internal-token" ~value:token headers
                 | _ -> headers)
               else headers
             in
             let headers =
-              match keeper_name_of_agent_name agent_name with
+              match Cascade_transport_authorization.keeper_name_of_agent_name agent_name with
               | Some keeper_name ->
-                upsert_http_header ~key:"x-masc-keeper-name" ~value:keeper_name headers
+                Cascade_transport_authorization.upsert_http_header ~key:"x-masc-keeper-name" ~value:keeper_name headers
               | None -> headers
             in
             Llm_provider.Llm_transport.Http_server { server with headers }

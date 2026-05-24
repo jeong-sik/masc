@@ -107,7 +107,6 @@ let runtime_status base_path =
         last_error = st.last_error;
       })
 
-let normalize_text = Dashboard_http_helpers.normalize_text
 
 let parse_string_list json key =
   match json |> member key with
@@ -136,7 +135,7 @@ let build_recommended_action ~actor ~target_type ~target_id json =
             |> Option.value ~default:severity_warn
           in
           let reason =
-            normalize_text
+            Dashboard_http_helpers.normalize_text
               (json |> member member_reason |> to_string_option |> Option.value ~default:"")
           in
           let suggested_payload =
@@ -183,7 +182,7 @@ let parse_room_judgment ~config ~generated_at ~generated_at_unix ~model_used:_ j
   match json with
   | `Assoc _ ->
       let summary =
-        normalize_text
+        Dashboard_http_helpers.normalize_text
           (json |> member member_summary |> to_string_option |> Option.value ~default:"")
       in
       if summary = "" then None

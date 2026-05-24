@@ -4,8 +4,6 @@
 module U = Yojson.Safe.Util
 
 let string_opt_to_json = Json_util.string_opt_to_json
-let merge_tool_name_lists = Operator_control_snapshot_tool_names.merge_tool_name_lists
-let collect_recent_tool_names = Operator_control_snapshot_tool_names.collect_recent_tool_names
 
 let lightweight_tool_audit_fallback_json (meta : Keeper_types.keeper_meta) =
   let last_autonomous = String.trim meta.runtime.last_autonomous_action_at in
@@ -47,9 +45,9 @@ let recent_tool_names_from_files config keeper_name =
       let path = Keeper_types.keeper_metrics_path config keeper_name in
       Keeper_memory.read_file_tail_lines path ~max_bytes:120000 ~max_lines:120)
   in
-  merge_tool_name_lists
-    (collect_recent_tool_names decision_lines)
-    (collect_recent_tool_names metrics_lines)
+  Operator_control_snapshot_tool_names.merge_tool_name_lists
+    (Operator_control_snapshot_tool_names.collect_recent_tool_names decision_lines)
+    (Operator_control_snapshot_tool_names.collect_recent_tool_names metrics_lines)
 ;;
 
 let keeper_tool_audit_fields

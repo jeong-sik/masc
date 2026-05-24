@@ -79,11 +79,9 @@ let dedupe_preserve_order (items : string list) =
     items
 ;;
 
-let upsert_http_header = Cascade_transport_authorization.upsert_http_header
 (* String_util.trim_nonempty + first_nonempty_env + runtime-MCP policy header helpers
    extracted to [Cascade_transport_mcp_policy_helpers] (godfile decomp). *)
 let first_nonempty_env = Cascade_transport_mcp_policy_helpers.first_nonempty_env
-let keeper_name_of_agent_name = Cascade_transport_authorization.keeper_name_of_agent_name
 
 let runtime_mcp_policy_with_masc_agent_name =
   Cascade_transport_mcp_policy_helpers.runtime_mcp_policy_with_masc_agent_name
@@ -93,11 +91,6 @@ let runtime_mcp_policy_without_http_headers =
   Cascade_transport_mcp_policy_helpers.runtime_mcp_policy_without_http_headers
 ;;
 
-let is_authorization_header = Cascade_transport_authorization.is_authorization_header
-let authorization_header_from_policy = Cascade_transport_authorization.authorization_header_from_policy
-let per_keeper_authorization_header = Cascade_transport_authorization.per_keeper_authorization_header
-let runtime_mcp_policy_uses_bound_actor_tools = Cascade_transport_authorization.runtime_mcp_policy_uses_bound_actor_tools
-let add_masc_authorization_header = Cascade_transport_authorization.add_masc_authorization_header
 
 (* Per-keeper authorization bridging extracted to
    [Cascade_transport_auth_bridging] (godfile decomp). *)
@@ -174,7 +167,7 @@ let resolve_tool_lane_for_oas_tools
   let requested_agent_name = Option.bind agent_name String_util.trim_nonempty in
   let keeper_internal_tool_names =
     match requested_agent_name with
-    | Some agent_name when Option.is_some (keeper_name_of_agent_name agent_name) ->
+    | Some agent_name when Option.is_some (Cascade_transport_authorization.keeper_name_of_agent_name agent_name) ->
       tools
       |> List.filter (fun (tool : Agent_sdk.Tool.t) ->
         Tool_catalog.is_on_surface Tool_catalog.Keeper_internal tool.schema.name)
@@ -191,15 +184,15 @@ let resolve_tool_lane_for_oas_tools
     match requested_agent_name with
     | Some agent_name
       when requires_per_keeper_bridging
-           && Option.is_some (keeper_name_of_agent_name agent_name) ->
-      Option.is_some (per_keeper_authorization_header ~agent_name)
+           && Option.is_some (Cascade_transport_authorization.keeper_name_of_agent_name agent_name) ->
+      Option.is_some (Cascade_transport_authorization.per_keeper_authorization_header ~agent_name)
     | _ -> false
   in
   let omitted_keeper_bound_actor_tools =
     match requested_agent_name with
     | Some agent_name
       when requires_per_keeper_bridging
-           && Option.is_some (keeper_name_of_agent_name agent_name)
+           && Option.is_some (Cascade_transport_authorization.keeper_name_of_agent_name agent_name)
            && not provider_can_auth_keeper_bound_actor_tools ->
       List.filter
         runtime_mcp_tool_requires_bound_actor

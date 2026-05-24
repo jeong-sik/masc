@@ -17,9 +17,6 @@ module Exec_shell_gate = Masc_exec_command_gate.Shell_command_gate
 
 (* --- Safety validation --- *)
 
-let normalize_path = Paths.normalize_path
-let resolve_path = Paths.resolve_path
-let validate_path = Paths.validate_path
 
 let tool_error ?(recoverable = false) message : Agent_sdk.Types.tool_result =
   Error { Agent_sdk.Types.message; recoverable; error_class = None }
@@ -133,8 +130,8 @@ let make_file_read ?workdir ?on_exec () =
        | Error e -> tool_error e
        | Ok path ->
          let started = Time_compat.now () in
-         let resolved_path = resolve_path ?base_dir:workdir path in
-         if not (validate_path ?workdir path)
+         let resolved_path = Paths.resolve_path ?base_dir:workdir path in
+         if not (Paths.validate_path ?workdir path)
          then (
            let err =
              Keeper_path_check_error.(
@@ -213,8 +210,8 @@ let make_file_write ?workdir ?on_exec () =
        | Error e, _ | _, Error e -> tool_error e
        | Ok path, Ok content ->
          let started = Time_compat.now () in
-         let resolved_path = resolve_path ?base_dir:workdir path in
-         if not (validate_path ?workdir path)
+         let resolved_path = Paths.resolve_path ?base_dir:workdir path in
+         if not (Paths.validate_path ?workdir path)
          then (
            let err =
              Keeper_path_check_error.(

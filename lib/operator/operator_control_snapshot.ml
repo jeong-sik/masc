@@ -49,9 +49,6 @@ let recent_messages_json config =
   |> fun rows -> `List rows
 ;;
 
-let merge_tool_name_lists = Operator_control_snapshot_tool_names.merge_tool_name_lists
-let tool_names_of_recent_json = Operator_control_snapshot_tool_names.tool_names_of_recent_json
-let collect_recent_tool_names = Operator_control_snapshot_tool_names.collect_recent_tool_names
 let lightweight_tool_audit_fallback_json = Operator_control_snapshot_tool_audit.lightweight_tool_audit_fallback_json
 let recent_tool_names_from_files = Operator_control_snapshot_tool_audit.recent_tool_names_from_files
 let keeper_tool_audit_fields = Operator_control_snapshot_tool_audit.keeper_tool_audit_fields

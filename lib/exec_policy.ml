@@ -11,8 +11,6 @@ module Exec_shell_gate = Masc_exec_command_gate.Shell_command_gate
 
 open Command_syntax
 
-let resolve_path = Paths.resolve_path
-let validate_path = Paths.validate_path
 
 let dev_allowed_commands = Dev_exec_allowlist.dev
 
@@ -440,7 +438,7 @@ let command_materializes_path_arg =
 ;;
 
 let path_is_existing_dir ?workdir path =
-  let resolved = resolve_path ?base_dir:workdir path in
+  let resolved = Paths.resolve_path ?base_dir:workdir path in
   try Sys.file_exists resolved && Sys.is_directory resolved with
   | Sys_error _ -> false
 ;;
@@ -479,7 +477,7 @@ let git_revisionish_token ?workdir token =
   && (not (token_value_is_explicit_path token))
   && not (token_has_parent_dir_segment token)
   &&
-  let resolved = resolve_path ?base_dir:workdir token in
+  let resolved = Paths.resolve_path ?base_dir:workdir token in
   not (Sys.file_exists resolved)
 ;;
 
@@ -720,7 +718,7 @@ let validate_shell_ir_paths ?keeper_id ?base_path ?workdir shell_ir =
       let validate_path_value ~requires_existing_dir value =
         if String.equal value "/dev/null"
         then Ok ()
-        else if not (validate_path ?keeper_id ?base_path ?workdir value)
+        else if not (Paths.validate_path ?keeper_id ?base_path ?workdir value)
         then
           Error
             (Keeper_path_check_error.(

@@ -10,7 +10,6 @@ type 'a context = {
   mcp_session_id : string option;
 }
 
-let string_option_to_json = Json_util.option_to_yojson (fun value -> `String value)
 
 let operator_dir config =
   Filename.concat (Coord.masc_dir config) "operator"
@@ -44,11 +43,11 @@ let operator_judge_runtime_json (config : Coord.config) =
       ("enabled", `Bool runtime.enabled);
       ("judge_online", `Bool runtime.judge_online);
       ("refreshing", `Bool runtime.refreshing);
-      ("generated_at", string_option_to_json runtime.generated_at);
-      ("expires_at", string_option_to_json runtime.expires_at);
+      ("generated_at", Json_util.string_opt_to_json runtime.generated_at);
+      ("expires_at", Json_util.string_opt_to_json runtime.expires_at);
       ("model_used", `Null);
       ("keeper_name", `String runtime.keeper_name);
-      ("last_error", string_option_to_json runtime.last_error);
+      ("last_error", Json_util.string_opt_to_json runtime.last_error);
     ]
 
 type pending_confirm = {
@@ -90,7 +89,7 @@ let preview_of_pending_confirm (entry : pending_confirm) =
       ("actor", `String entry.actor);
       ("action_type", `String entry.action_type);
       ("target_type", `String entry.target_type);
-      ("target_id", string_option_to_json entry.target_id);
+      ("target_id", Json_util.string_opt_to_json entry.target_id);
       ("payload", entry.payload);
     ]
 
@@ -103,11 +102,11 @@ let pending_confirm_to_yojson (entry : pending_confirm) =
       ("actor", `String entry.actor);
       ("action_type", `String entry.action_type);
       ("target_type", `String entry.target_type);
-      ("target_id", string_option_to_json entry.target_id);
+      ("target_id", Json_util.string_opt_to_json entry.target_id);
       ("payload", entry.payload);
       ("delegated_tool", `String entry.delegated_tool);
       ("created_at", `String entry.created_at);
-      ("expires_at", string_option_to_json entry.expires_at);
+      ("expires_at", Json_util.string_opt_to_json entry.expires_at);
       ("preview", preview_of_pending_confirm entry);
     ]
 
@@ -312,7 +311,7 @@ let pending_confirm_summary_json_of_scope scope =
   in
   `Assoc
     [
-      ("actor_filter", string_option_to_json scope.actor_filter);
+      ("actor_filter", Json_util.string_opt_to_json scope.actor_filter);
       ("filter_active", `Bool (Option.is_some scope.actor_filter));
       ("visible_count", `Int (List.length scope.visible_entries));
       ("total_count", `Int (List.length scope.all_entries));

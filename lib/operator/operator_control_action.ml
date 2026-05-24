@@ -208,7 +208,7 @@ let preview_of_action (request : action_request) =
       ("actor", `String request.actor);
       ("action_type", `String request.action_type);
       ("target_type", `String request.target_type);
-      ("target_id", string_option_to_json request.target_id);
+      ("target_id", Json_util.string_opt_to_json request.target_id);
     ]
   in
   let payload_fields =

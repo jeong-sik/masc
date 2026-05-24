@@ -183,8 +183,8 @@ let keeper_attention_projection config (meta : Keeper_types.keeper_meta) =
             [
               ("source", `String "operator_digest");
               ("keeper", `String meta.name);
-              ("reason", string_option_to_json reason);
-              ("next_human_action", string_option_to_json next_human_action);
+              ("reason", Json_util.string_opt_to_json reason);
+              ("next_human_action", Json_util.string_opt_to_json next_human_action);
             ];
       }
     in
@@ -216,7 +216,7 @@ let room_state_json config =
         ("project", `String state.project);
         ("cluster", `String (Env_config_core.cluster_name ()));
         ("paused", `Bool state.paused);
-        ("pause_reason", string_option_to_json state.pause_reason);
+        ("pause_reason", Json_util.string_opt_to_json state.pause_reason);
       ]
 
 let digest_json ?actor ?target_type ?target_id:_target_id ?include_workers:_include_workers

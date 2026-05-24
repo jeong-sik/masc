@@ -1,7 +1,6 @@
 (** JSON helpers + projection-diagnostic field readers + operator
     cache JSON wrapper, extracted from server_dashboard_http_core.ml. *)
 
-let json_string_opt = Json_util.string_opt_to_json
 
 
 let json_assoc_field_opt key = function

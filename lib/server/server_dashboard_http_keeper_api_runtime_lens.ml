@@ -152,14 +152,14 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
                   ( "missing_required_tools",
                     Json_util.json_string_list missing_required_tools );
                   ( "turn_lane",
-                    json_string_opt
+                    Json_util.string_opt_to_json
                       (json_string_member_opt "turn_lane" tool_decision) );
                   ( "tool_surface_class",
-                    json_string_opt
+                    Json_util.string_opt_to_json
                       (json_string_member_opt "tool_surface_class"
                          tool_decision) );
                   ( "tool_requirement",
-                    json_string_opt
+                    Json_util.string_opt_to_json
                       (first_string_opt
                          [
                            json_string_member_opt "tool_requirement"
@@ -195,9 +195,9 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
               `Assoc
                 [
                   ("resolved", `Bool has_provider_lane);
-                  ("status", json_string_opt provider_lane_status);
+                  ("status", Json_util.string_opt_to_json provider_lane_status);
                   ( "resolved_lane",
-                    json_string_opt
+                    Json_util.string_opt_to_json
                       (json_string_member_opt "resolved_lane" lane_decision)
                   );
                   ( "effective_tool_count",
@@ -243,7 +243,7 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
                   ("started_count", `Int scan.provider_started_count);
                   ("finished_count", `Int scan.provider_finished_count);
                   ( "terminal_status",
-                    json_string_opt
+                    Json_util.string_opt_to_json
                       (Option.map
                          (fun row -> row.Keeper_runtime_manifest.status)
                          scan.provider_terminal_row) );

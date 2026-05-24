@@ -86,7 +86,6 @@ val json_int_member_opt : string -> Yojson.Safe.t -> int option
 val json_string_member_opt : string -> Yojson.Safe.t -> string option
 val json_bool_member_opt : string -> Yojson.Safe.t -> bool option
 val json_string_list_member : string -> Yojson.Safe.t -> string list
-val json_string_opt : string option -> Yojson.Safe.t
 val take_last : int -> 'a list -> 'a list
 val json_assoc_member_opt : string -> Yojson.Safe.t -> Yojson.Safe.t option
 val json_string_value_opt : Yojson.Safe.t -> string option

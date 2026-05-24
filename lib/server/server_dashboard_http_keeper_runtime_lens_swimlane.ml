@@ -19,7 +19,7 @@ let runtime_lens_gap_json gap =
       ("code", `String gap.code);
       ("severity", `String gap.severity);
       ("lane", `String gap.lane);
-      ("detail", json_string_opt gap.detail);
+      ("detail", Json_util.string_opt_to_json gap.detail);
     ]
 
 let runtime_lens_gap_codes_for_lane gaps lane =

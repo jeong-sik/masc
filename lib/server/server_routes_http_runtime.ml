@@ -185,7 +185,6 @@ let empty_paused_keeper_scan =
 let sorted_unique_strings values = List.sort_uniq String.compare values
 
 
-let json_string_opt = Json_util.string_opt_to_json
 
 let effective_autoboot_enabled name (meta : Keeper_types.keeper_meta) =
   match (Keeper_types_profile.load_keeper_profile_defaults name).autoboot_enabled with
@@ -242,11 +241,11 @@ let paused_keeper_detail_json ~now ~name ~(autoboot_enabled : bool)
     ("auto_resume_after_sec", Json_util.float_opt_to_json meta.auto_resume_after_sec);
     ( "persisted_auto_resume_after_sec"
     , Json_util.float_opt_to_json meta.auto_resume_after_sec );
-    ("auto_resume_source", json_string_opt (pause_auto_resume_source meta));
+    ("auto_resume_source", Json_util.string_opt_to_json (pause_auto_resume_source meta));
     ("paused_elapsed_sec", Json_util.float_opt_to_json elapsed);
     ("auto_resume_remaining_sec", Json_util.float_opt_to_json remaining);
-    ("last_blocker_class", json_string_opt (blocker_class_string last_blocker));
-    ("last_blocker_detail", json_string_opt (blocker_detail last_blocker));
+    ("last_blocker_class", Json_util.string_opt_to_json (blocker_class_string last_blocker));
+    ("last_blocker_detail", Json_util.string_opt_to_json (blocker_detail last_blocker));
     ( "missing_pause_root_cause",
       `Bool
         (Option.is_some meta.auto_resume_after_sec
@@ -635,7 +634,7 @@ let keeper_fleet_safety_health_json
   in
   `Assoc
     [ "status", `String status
-    ; ("blocker", json_string_opt blocker)
+    ; ("blocker", Json_util.string_opt_to_json blocker)
     ; "bootable_keeper_count", `Int bootable_count
     ; ( "bootable_keeper_names"
       , `List (List.map (fun name -> `String name) bootable_names) )

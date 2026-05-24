@@ -1,6 +1,5 @@
 (** JSON helpers for dashboard HTTP core projections. *)
 
-val json_string_opt : string option -> Yojson.Safe.t
 val json_assoc_field_opt : string -> Yojson.Safe.t -> Yojson.Safe.t option
 val json_assoc_string_opt : string -> Yojson.Safe.t -> string option
 val json_assoc_int_opt : string -> Yojson.Safe.t -> int option

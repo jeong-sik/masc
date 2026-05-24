@@ -153,7 +153,6 @@ let json_string_list_member name json =
     |> Json_util.dedupe_keep_order
   | _ -> []
 
-let json_string_opt = Json_util.string_opt_to_json
 let take_last limit values =
   let len = List.length values in
   if len <= limit then values
@@ -191,18 +190,18 @@ let provider_attempt_row_json (row : Keeper_runtime_manifest.t) =
     [
       ("ts", `String row.ts);
       ("event", `String (Keeper_runtime_manifest.event_kind_to_string row.event));
-      ("cascade_name", json_string_opt row.cascade_name);
-      ("model_source", json_string_opt (decision_string "model_source"));
+      ("cascade_name", Json_util.string_opt_to_json row.cascade_name);
+      ("model_source", Json_util.string_opt_to_json (decision_string "model_source"));
       ( "resolved_model_source",
-        json_string_opt (decision_string "resolved_model_source") );
-      ("capability_source", json_string_opt (decision_string "capability_source"));
-      ("fallback_authority", json_string_opt (decision_string "fallback_authority"));
+        Json_util.string_opt_to_json (decision_string "resolved_model_source") );
+      ("capability_source", Json_util.string_opt_to_json (decision_string "capability_source"));
+      ("fallback_authority", Json_util.string_opt_to_json (decision_string "fallback_authority"));
       ( "provider_source_cascade",
-        json_string_opt (decision_string "provider_source_cascade") );
+        Json_util.string_opt_to_json (decision_string "provider_source_cascade") );
       ("status", `String row.status);
-      ("error", json_string_opt (decision_string "error"));
+      ("error", Json_util.string_opt_to_json (decision_string "error"));
       ( "exception_kind",
-        json_string_opt (decision_string "exception_kind") );
+        Json_util.string_opt_to_json (decision_string "exception_kind") );
     ]
 
 let string_contains_substring haystack needle =

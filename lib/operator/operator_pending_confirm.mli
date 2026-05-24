@@ -8,7 +8,6 @@ type 'a context = {
   mcp_session_id : string option;
 }
 
-val string_option_to_json : string option -> Yojson.Safe.t
 val operator_dir : Coord.config -> string
 val pending_confirms_path : Coord.config -> string
 val trace_id : string -> string

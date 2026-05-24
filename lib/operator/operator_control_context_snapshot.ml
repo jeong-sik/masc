@@ -109,6 +109,6 @@ let keeper_context_snapshot_fields (snapshot : keeper_context_snapshot) =
         (fun value -> `Int value)
         snapshot.context_max )
   ; ( "context_source"
-    , Operator_pending_confirm.string_option_to_json snapshot.context_source )
+    , Json_util.string_opt_to_json snapshot.context_source )
   ]
 ;;

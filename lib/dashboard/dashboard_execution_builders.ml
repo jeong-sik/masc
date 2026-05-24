@@ -79,7 +79,7 @@ let worker_state_of_agent
   let key = String.lowercase_ascii (String.trim agent.name) in
   let message_opt = Hashtbl.find_opt messages_by_agent key in
   let last_seen_ts =
-    parse_iso_opt (String_util.trim_to_option agent.last_seen) |> Option.value ~default:0.0
+    Dashboard_utils.parse_iso_opt (String_util.trim_to_option agent.last_seen) |> Option.value ~default:0.0
   in
   let last_message_ts =
     match message_opt with
@@ -160,7 +160,7 @@ let worker_state_of_agent
   in
   let (emoji, korean_name) = get_agent_identity agent.name in
   {
-    tone_rank = tone_rank tone;
+    tone_rank = Dashboard_utils.tone_rank tone;
     last_signal_ts;
     related_session_id;
     json =
@@ -177,7 +177,7 @@ let worker_state_of_agent
             | Some meta -> json_string_option meta.keeper_id
             | None -> `Null);
           ("status", `String status_string);
-          ("tone", `String (string_of_tone tone));
+          ("tone", `String (Dashboard_utils.string_of_tone tone));
           ("state", `String state);
           ("note", `String note);
           ("focus", `String focus);
@@ -226,8 +226,8 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
       ]
   in
   let last_signal_at = latest_iso_timestamp [ last_action_at; last_heartbeat_at ] in
-  let last_action_ts = parse_iso_opt last_action_at |> Option.value ~default:0.0 in
-  let last_signal_ts = parse_iso_opt last_signal_at |> Option.value ~default:0.0 in
+  let last_action_ts = Dashboard_utils.parse_iso_opt last_action_at |> Option.value ~default:0.0 in
+  let last_signal_ts = Dashboard_utils.parse_iso_opt last_signal_at |> Option.value ~default:0.0 in
   let last_action_age_s =
     if last_action_ts > 0.0 then max 0.0 (now_ts -. last_action_ts)
     else infinity
@@ -244,7 +244,7 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
   let generation = int_field "generation" keeper in
   let goal_count = List.length (list_field "active_goal_ids" keeper) in
   let lifecycle =
-    if is_keeper_offline status then Lc_offline
+    if Dashboard_utils.is_keeper_offline status then Lc_offline
     else if Option.value ~default:0.0 context_ratio >= ctx_handoff_imminent then Lc_handoff_imminent
     else if Option.value ~default:0.0 context_ratio >= ctx_preparing then Lc_preparing
     else if Option.value ~default:0.0 context_ratio >= ctx_compacting then Lc_compacting
@@ -253,7 +253,7 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
     else Lc_idle
   in
   let (state, tone, note) =
-    if is_keeper_offline status then
+    if Dashboard_utils.is_keeper_offline status then
       (Exec_critical, Tone_bad, "keeper 오프라인")
     else
       match lifecycle with
@@ -311,7 +311,7 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
   let skill_route_summary = skill_route_summary_of_keeper keeper in
   let (emoji, korean_name) = get_agent_identity name in
   {
-    tone_rank = tone_rank tone;
+    tone_rank = Dashboard_utils.tone_rank tone;
     last_signal_ts;
     related_session_id;
     json =
@@ -321,7 +321,7 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
            ("agent_name", member_assoc "agent_name" keeper);
            ("keeper_id", member_assoc "keeper_id" keeper);
            ("status", `String status);
-           ("tone", `String (string_of_tone tone));
+           ("tone", `String (Dashboard_utils.string_of_tone tone));
            ("state", `String (keeper_exec_state_to_string state));
            ("note", `String note);
            ("focus", `String focus);
@@ -329,7 +329,7 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
            ("last_autonomous_action_at", json_string_option last_signal_at);
            ("generation", member_assoc "generation" keeper);
            ("turn_count", member_assoc "turn_count" keeper);
-           ("context_ratio", option_to_json (fun value -> `Float value) context_ratio);
+           ("context_ratio", Json_util.option_to_yojson (fun value -> `Float value) context_ratio);
            ("continuity", `String continuity);
            ("lifecycle", `String (keeper_lifecycle_to_string lifecycle));
            ("related_session_id", json_string_option related_session_id);
@@ -340,7 +340,7 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
          ]
         @ tool_preview_fields "allowed_tool" allowed_tool_names
         @ [
-            ("latest_tool_call_count", option_to_json (fun value -> `Int value) audit.latest_tool_call_count);
+            ("latest_tool_call_count", Json_util.option_to_yojson (fun value -> `Int value) audit.latest_tool_call_count);
             ("latest_action_source", json_string_option latest_action_source);
             ("tool_audit_source", json_string_option audit.tool_audit_source);
             ("tool_audit_at", json_string_option audit.tool_audit_at);
@@ -432,7 +432,7 @@ let build_operation_contexts ~(tasks : Masc_domain.task list) =
              Option.bind links.session_id (fun value -> String_util.trim_to_option value)
            in
            let last_seen_ts =
-             parse_iso_opt (Some updated_at) |> Option.value ~default:0.0
+             Dashboard_utils.parse_iso_opt (Some updated_at) |> Option.value ~default:0.0
            in
            Some
              {
@@ -452,7 +452,7 @@ let build_operation_contexts ~(tasks : Masc_domain.task list) =
                      ("updated_at", `String updated_at);
                      ("source", `String "task_contract");
                      ("task_id", `String task.id);
-                     ("severity", `String (string_of_tone severity));
+                     ("severity", `String (Dashboard_utils.string_of_tone severity));
                      ("linked_session_id", json_string_option linked_session_id);
                      ("linked_detachment_id", `Null);
                      ( "handoff",
@@ -466,7 +466,7 @@ let build_operation_contexts ~(tasks : Masc_domain.task list) =
                    ];
              })
   |> List.sort (fun left right ->
-         let by_tone = Int.compare (tone_rank right.severity) (tone_rank left.severity) in
+         let by_tone = Int.compare (Dashboard_utils.tone_rank right.severity) (Dashboard_utils.tone_rank left.severity) in
          if by_tone <> 0 then by_tone
          else Float.compare right.last_seen_ts left.last_seen_ts)
 

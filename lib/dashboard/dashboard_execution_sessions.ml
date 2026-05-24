@@ -77,11 +77,11 @@ let event_summary event_json =
 let session_severity ~(health : Dashboard_utils.health_level)
     ~(status : Dashboard_utils.session_lifecycle) ~runtime_blocker =
   if status = SL_completed then
-    if is_health_critical health || is_health_warning health then Tone_warn
+    if Dashboard_utils.is_health_critical health || Dashboard_utils.is_health_warning health then Tone_warn
     else Tone_ok
-  else if is_health_critical health || is_session_blocked status then
+  else if Dashboard_utils.is_health_critical health || Dashboard_utils.is_session_blocked status then
     Tone_bad
-  else if is_health_warning health
+  else if Dashboard_utils.is_health_warning health
           || status = SL_paused
           || Option.is_some runtime_blocker
   then
@@ -102,11 +102,11 @@ let build_session_seed session_json _cards =
       recent_events
       |> List.sort (fun left right ->
              let right_ts =
-               parse_iso_opt (String_util.trim_to_option (string_field "ts_iso" right))
+               Dashboard_utils.parse_iso_opt (String_util.trim_to_option (string_field "ts_iso" right))
                |> Option.value ~default:0.0
              in
              let left_ts =
-               parse_iso_opt (String_util.trim_to_option (string_field "ts_iso" left))
+               Dashboard_utils.parse_iso_opt (String_util.trim_to_option (string_field "ts_iso" left))
                |> Option.value ~default:0.0
              in
              Float.compare right_ts left_ts)
@@ -159,19 +159,19 @@ let build_session_seed session_json _cards =
     let seen_count = int_field "seen_agents_count" summary in
     let member_names =
       dedup_strings
-        (string_list_of_json (member_assoc "agent_names" meta)
-        @ string_list_of_json (member_assoc "active_agents" summary)
-        @ string_list_of_json (member_assoc "planned_participants" summary))
+        (Dashboard_utils.string_list_of_json (member_assoc "agent_names" meta)
+        @ Dashboard_utils.string_list_of_json (member_assoc "active_agents" summary)
+        @ Dashboard_utils.string_list_of_json (member_assoc "planned_participants" summary))
     in
     let planned_count =
       let planned =
-        string_list_of_json (member_assoc "planned_participants" summary)
+        Dashboard_utils.string_list_of_json (member_assoc "planned_participants" summary)
       in
       let explicit = List.length planned in
       if explicit > 0 then explicit else List.length member_names
     in
     let counts_basis =
-      if string_list_of_json (member_assoc "planned_participants" summary) <> [] then
+      if Dashboard_utils.string_list_of_json (member_assoc "planned_participants" summary) <> [] then
         "live=recent_turns · planned=planned_participants"
       else
         "live=recent_turns · planned=known_members"
@@ -201,7 +201,7 @@ let build_session_seed session_json _cards =
               String_util.trim_to_option (string_field "ts_iso" json));
         last_activity_ts =
           Option.bind last_event (fun json ->
-              parse_iso_opt (String_util.trim_to_option (string_field "ts_iso" json)))
+              Dashboard_utils.parse_iso_opt (String_util.trim_to_option (string_field "ts_iso" json)))
           |> Option.value ~default:0.0;
         last_activity_summary =
           (match last_event with
@@ -329,8 +329,8 @@ let build_session_contexts seeds operation_contexts : session_context list =
   |> List.sort (fun (left : session_context) (right : session_context) ->
          let by_severity =
            Int.compare
-             (tone_rank right.severity)
-             (tone_rank left.severity)
+             (Dashboard_utils.tone_rank right.severity)
+             (Dashboard_utils.tone_rank left.severity)
          in
          if by_severity <> 0 then by_severity
          else Float.compare right.last_seen_ts left.last_seen_ts)
@@ -356,20 +356,20 @@ let build_execution_queue session_contexts operation_contexts =
     |> List.filter (fun (session : session_context) -> session.severity <> Tone_ok)
     |> List.map (fun (session : session_context) ->
            {
-             severity_rank = tone_rank session.severity;
+             severity_rank = Dashboard_utils.tone_rank session.severity;
              last_seen_ts = session.last_seen_ts;
              json =
                `Assoc
                  [
                    ("id", `String ("session-" ^ session.session_id));
                    ("kind", `String "session");
-                   ("severity", `String (string_of_tone session.severity));
+                   ("severity", `String (Dashboard_utils.string_of_tone session.severity));
                    ("status", member_assoc "status" session.json);
                    ("summary", `String (queue_summary_of_session session));
                    ("target_type", `String "operation");
                    ("target_id", `String session.session_id);
                    ("linked_session_id", `String session.session_id);
-                   ("linked_operation_id", option_to_json (fun value -> `String value) session.linked_operation_id);
+                   ("linked_operation_id", Json_util.option_to_yojson (fun value -> `String value) session.linked_operation_id);
                    ("last_seen_at", member_assoc "last_activity_at" session.json);
                    ("top_handoff", member_assoc "top_handoff" session.json);
                    ("intervene_handoff", member_assoc "intervene_handoff" session.json);
@@ -387,14 +387,14 @@ let build_execution_queue session_contexts operation_contexts =
            | None -> true)
     |> List.map (fun (operation : operation_context) ->
            {
-             severity_rank = tone_rank operation.severity;
+             severity_rank = Dashboard_utils.tone_rank operation.severity;
              last_seen_ts = operation.last_seen_ts;
              json =
                `Assoc
                  [
                    ("id", `String ("operation-" ^ operation.operation_id));
                    ("kind", `String "operation");
-                   ("severity", `String (string_of_tone operation.severity));
+                   ("severity", `String (Dashboard_utils.string_of_tone operation.severity));
                    ("status", member_assoc "status" operation.json);
                    ( "summary",
                      match String_util.trim_to_option (string_field "blocker_summary" operation.json) with

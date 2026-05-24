@@ -299,8 +299,8 @@ let build_attention_queue incidents actions sessions =
                     | None -> None)
              |> List.sort (fun left right ->
                     Float.compare
-                      (parse_iso_opt (Some right) |> Option.value ~default:0.0)
-                      (parse_iso_opt (Some left) |> Option.value ~default:0.0))
+                      (Dashboard_utils.parse_iso_opt (Some right) |> Option.value ~default:0.0)
+                      (Dashboard_utils.parse_iso_opt (Some left) |> Option.value ~default:0.0))
              |> function
              | value :: _ -> Some value
              | [] -> None
@@ -314,7 +314,7 @@ let build_attention_queue incidents actions sessions =
                severity;
                has_action = Option.is_some top_action;
                last_seen_ts =
-                 parse_iso_opt last_seen_at |> Option.value ~default:0.0;
+                 Dashboard_utils.parse_iso_opt last_seen_at |> Option.value ~default:0.0;
                related_session_ids;
                related_agent_names;
                json =
@@ -326,7 +326,7 @@ let build_attention_queue incidents actions sessions =
                      ("summary", `String summary);
                      ("target_type", `String target_type);
                      ("target_id", json_string_option target_id);
-                     ("top_action", option_to_json (fun value -> value) top_action);
+                     ("top_action", Json_util.option_to_yojson (fun value -> value) top_action);
                      ("related_session_ids", `List (List.map (fun value -> `String value) related_session_ids));
                      ("related_agent_names", `List (List.map (fun value -> `String value) related_agent_names));
                      ("evidence_preview", `List (List.map (fun value -> `String value) (evidence_preview_strings (member_assoc "evidence" incident))));
@@ -542,7 +542,7 @@ let session_json ?actor ~session_id ~config ~sw
     [
       ("generated_at", `String projection.generated_at);
       ("session_id", `String session_id);
-      ("session", option_to_json (fun value -> value) session_row_json);
+      ("session", Json_util.option_to_yojson (fun value -> value) session_row_json);
       ( "timeline",
         `List
           (match session_source_json with

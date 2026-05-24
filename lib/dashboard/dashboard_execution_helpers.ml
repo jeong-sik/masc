@@ -81,7 +81,6 @@ let option_or_else fallback = function
   | Some _ as value -> value
   | None -> fallback ()
 
-let option_to_json = Json_util.option_to_yojson
 let member_assoc key json =
   match json with
   | `Assoc fields -> (match List.assoc_opt key fields with Some value -> value | None -> `Null)
@@ -125,15 +124,13 @@ let compact_text ?(max_len = 160) raw =
   if normalized = "" then ""
   else String_util.utf8_safe ~max_bytes:((max_len - 1) + 3) ~suffix:"…" normalized |> String_util.to_string
 
-let parse_iso_opt = Dashboard_utils.parse_iso_opt
-let string_list_of_json = Dashboard_utils.string_list_of_json
 
 let latest_iso_timestamp values =
   let pick_latest best candidate =
     match candidate with
     | None -> best
     | Some candidate -> (
-        match parse_iso_opt (Some candidate) with
+        match Dashboard_utils.parse_iso_opt (Some candidate) with
         | None -> best
         | Some candidate_ts -> (
             match best with
@@ -146,17 +143,10 @@ let latest_iso_timestamp values =
   |> Option.map fst
 
 let string_list_of_field key json =
-  member_assoc key json |> string_list_of_json
+  member_assoc key json |> Dashboard_utils.string_list_of_json
 
 (** Status/health predicates — re-exported from Dashboard_utils (SSOT). *)
-let is_keeper_offline = Dashboard_utils.is_keeper_offline
-let is_health_critical = Dashboard_utils.is_health_critical
-let is_health_warning = Dashboard_utils.is_health_warning
-let is_health_at_risk = Dashboard_utils.is_health_at_risk
-let is_session_terminal = Dashboard_utils.is_session_terminal
-let is_session_blocked = Dashboard_utils.is_session_blocked
 
-let string_of_tone = Dashboard_utils.string_of_tone
 
 let execution_tool_preview_limit = 8
 
@@ -217,14 +207,13 @@ let dedup_strings items =
   List.sort_uniq String.compare
     (List.filter_map String_util.trim_to_option items)
 
-(** severity_rank works on raw JSON strings — broader matching than tone_rank.
+(** severity_rank works on raw JSON strings — broader matching than Dashboard_utils.tone_rank.
     Used by dashboard_mission / dashboard_mission_assembly for external JSON data. *)
 let severity_rank = function
   | "bad" | "critical" | "failed" -> 2
   | "warn" | "blocked" | "paused" | "interrupted" -> 1
   | _ -> 0
 
-let tone_rank = Dashboard_utils.tone_rank
 
 let dashboard_fixture_name ?fixture () =
   let fixtures_enabled = Env_config.Dashboard_config.fixtures_enabled () in

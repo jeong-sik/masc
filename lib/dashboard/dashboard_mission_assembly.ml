@@ -25,10 +25,10 @@ let keeper_tool_audit_json_fields config registry_lookup keeper agent_name =
          | Some (entry : Keeper_registry.registry_entry) ->
            Keeper_exec_tools.keeper_allowed_tool_names entry.meta
          | None -> [])
-    | _ -> string_list_of_json raw_allowed
+    | _ -> Dashboard_utils.string_list_of_json raw_allowed
   in
   let fallback_latest =
-    string_list_of_json (member_assoc "latest_tool_names" keeper)
+    Dashboard_utils.string_list_of_json (member_assoc "latest_tool_names" keeper)
   in
   let fallback_count =
     match member_assoc "latest_tool_call_count" keeper with
@@ -99,7 +99,7 @@ let keeper_tool_audit_json_fields config registry_lookup keeper agent_name =
     ("allowed_tool_names", Json_util.json_string_list allowed_tool_names);
     ("latest_tool_names", Json_util.json_string_list latest_tool_names);
     ( "latest_tool_call_count",
-      option_to_json (fun value -> `Int value) latest_tool_call_count );
+      Json_util.option_to_yojson (fun value -> `Int value) latest_tool_call_count );
     ("latest_action_source", json_string_option latest_action_source);
     ("tool_audit_source", json_string_option tool_audit_source);
     ("tool_audit_at", json_string_option tool_audit_at);
@@ -207,7 +207,7 @@ let build_keeper_briefs (config : Coord.config) (keepers : Yojson.Safe.t list) =
              {
                pressure_rank;
                last_seen_ts =
-                 parse_iso_opt
+                 Dashboard_utils.parse_iso_opt
                    (String_util.trim_to_option
                       (match String_util.trim_to_option (string_field "last_autonomous_action_at" keeper) with
                       | Some value -> value
@@ -220,7 +220,7 @@ let build_keeper_briefs (config : Coord.config) (keepers : Yojson.Safe.t list) =
                       ("agent_name", member_assoc "agent_name" keeper);
                       ("status", `String status);
                       ("generation", member_assoc "generation" keeper);
-                      ("context_ratio", option_to_json (fun value -> `Float value) context_ratio);
+                      ("context_ratio", Json_util.option_to_yojson (fun value -> `Float value) context_ratio);
                       ("last_turn_ago_s", member_assoc "last_turn_ago_s" keeper);
                       ( "current_work",
                         json_string_option
@@ -259,7 +259,7 @@ let build_internal_signals incidents actions =
                    ("target_type", member_assoc "target_type" incident);
                    ("target_id", member_assoc "target_id" incident);
                    ("attention", incident);
-                   ("action", option_to_json (fun value -> value) action);
+                   ("action", Json_util.option_to_yojson (fun value -> value) action);
                  ];
            })
   in
@@ -454,9 +454,9 @@ let build_sessions ?(operation_contexts = []) sessions attention_queue agent_bri
   sessions
   |> List.map (fun (session : session_context) ->
          let attention_count = related_attention_count session.session_id in
-         let top_attention = option_to_json (fun value -> value) session.top_attention in
+         let top_attention = Json_util.option_to_yojson (fun value -> value) session.top_attention in
          let top_recommendation =
-           option_to_json (fun value -> value) session.top_recommendation
+           Json_util.option_to_yojson (fun value -> value) session.top_recommendation
          in
          ( attention_count,
            severity_rank
@@ -478,7 +478,7 @@ let build_sessions ?(operation_contexts = []) sessions attention_queue agent_bri
                ("health", `String (Dashboard_utils.string_of_health_level session.health));
                ("member_names", Json_util.json_string_list session.member_names);
                ("started_at", json_string_option session.started_at);
-               ("elapsed_sec", option_to_json (fun value -> `Int value) session.elapsed_sec);
+               ("elapsed_sec", Json_util.option_to_yojson (fun value -> `Int value) session.elapsed_sec);
                ("operation_id", json_string_option session.operation_id);
                ("blocker_summary", json_string_option session.blocker_summary);
                ("last_event_at", json_string_option session.last_event_at);
@@ -513,11 +513,11 @@ let session_timeline_json session_json =
   session_recent_events session_json
   |> List.sort (fun left right ->
          let right_ts =
-           parse_iso_opt (String_util.trim_to_option (string_field "ts_iso" right))
+           Dashboard_utils.parse_iso_opt (String_util.trim_to_option (string_field "ts_iso" right))
            |> Option.value ~default:0.0
          in
          let left_ts =
-           parse_iso_opt (String_util.trim_to_option (string_field "ts_iso" left))
+           Dashboard_utils.parse_iso_opt (String_util.trim_to_option (string_field "ts_iso" left))
            |> Option.value ~default:0.0
          in
          Float.compare right_ts left_ts)

@@ -8,7 +8,7 @@ let status_is_live value =
     [ "running"; "active"; "paused"; "starting"; "stopping"; "waiting" ]
 
 let event_timestamp json =
-  parse_iso_opt (String_util.option_trim (Some (string_field "ts_iso" json)))
+  Dashboard_utils.parse_iso_opt (String_util.option_trim (Some (string_field "ts_iso" json)))
 
 let session_recent_enough ~now_ts session_json =
   let recent_events =

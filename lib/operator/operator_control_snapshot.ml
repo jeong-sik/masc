@@ -471,7 +471,7 @@ let keepers_json
                                  (List.map (fun value -> `String value) recent_tool_names)
                              )
                            ; ( "latest_tool_call_count"
-                             , option_to_json
+                             , Json_util.option_to_yojson
                                  (fun value -> `Int value)
                                  latest_tool_call_count )
                            ; ( "latest_action_source"

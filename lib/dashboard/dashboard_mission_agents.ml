@@ -351,7 +351,7 @@ let build_agent_briefs config sessions attention_queue _room_json (keepers : Yoj
          let last_seen_ts =
            match agent with
             | Some value ->
-                parse_iso_opt (String_util.trim_to_option value.last_seen) |> Option.value ~default:0.0
+                Dashboard_utils.parse_iso_opt (String_util.trim_to_option value.last_seen) |> Option.value ~default:0.0
             | None ->
                 (match related_session with
                 | Some session -> session.last_event_ts
@@ -397,7 +397,7 @@ let build_agent_briefs config sessions attention_queue _room_json (keepers : Yoj
                   ("current_work", json_string_option current_work);
                   ("related_session_id", json_string_option (Option.map (fun s -> s.session_id) related_session));
                   ("last_activity_at", json_string_option last_activity_at);
-                  ("last_activity_age_sec", option_to_json (fun value -> `Int value) last_activity_age_sec);
+                  ("last_activity_age_sec", Json_util.option_to_yojson (fun value -> `Int value) last_activity_age_sec);
                   ("signal_truth", `String signal_truth);
                   ("evidence_source", `String evidence_source);
                   ("recent_output_preview", json_string_option recent_output_preview);

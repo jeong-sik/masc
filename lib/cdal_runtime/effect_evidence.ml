@@ -147,7 +147,7 @@ let make
   }
 ;;
 
-let option_to_json f = function
+let option_to_yojson f = function
   | Some value -> f value
   | None -> `Null
 ;;
@@ -162,16 +162,16 @@ let to_json t =
     ; "decision_source", `String t.decision_source
     ; "input_hash", `String t.input_hash
     ; "input_summary", `String t.input_summary
-    ; "sandbox", option_to_json (fun v -> `String v) t.sandbox
-    ; "workdir", option_to_json (fun v -> `String v) t.workdir
-    ; "source_path", option_to_json (fun v -> `String v) t.source_path
-    ; "source_line", option_to_json (fun v -> `Int v) t.source_line
+    ; "sandbox", option_to_yojson (fun v -> `String v) t.sandbox
+    ; "workdir", option_to_yojson (fun v -> `String v) t.workdir
+    ; "source_path", option_to_yojson (fun v -> `String v) t.source_path
+    ; "source_line", option_to_yojson (fun v -> `Int v) t.source_line
     ; "started_at", `Float t.started_at
-    ; "ended_at", option_to_json (fun v -> `Float v) t.ended_at
+    ; "ended_at", option_to_yojson (fun v -> `Float v) t.ended_at
     ; "result_status", `String (result_status_to_string t.result_status)
-    ; "violation_kind", option_to_json (fun v -> `String v) t.violation_kind
-    ; "turn", option_to_json (fun v -> `Int v) t.turn
-    ; "execution_mode", option_to_json (fun v -> `String v) t.execution_mode
+    ; "violation_kind", option_to_yojson (fun v -> `String v) t.violation_kind
+    ; "turn", option_to_yojson (fun v -> `Int v) t.turn
+    ; "execution_mode", option_to_yojson (fun v -> `String v) t.execution_mode
     ]
 ;;
 

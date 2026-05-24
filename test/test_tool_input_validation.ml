@@ -1013,11 +1013,11 @@ let test_registered_hook_required_enum_blank_is_not_stripped () =
 (* Test: oneOf with empty/null values (regression guard)             *)
 (* ================================================================ *)
 
-(** Simulate LLM populating all oneOf branches with empty values.
-    Before fix: List.mem_assoc matched on key presence alone,
-    treating pipeline:[] as a valid group match, causing false
-    "multiple mutually exclusive schemas" rejection. *)
-let test_validate_args_keeper_bash_oneof_empty_pipeline () =
+(** Regression guard: LLM may send both executable and pipeline.
+    Schema no longer advertises oneOf (PR #18110); handler precedence
+    picks executable. Empty pipeline:[] must not trigger any validation
+    error from the pre-hook shape check. *)
+let test_validate_args_keeper_bash_exec_with_empty_pipeline () =
   let args =
     `Assoc
       [ "executable", `String "pwd"
@@ -1042,7 +1042,7 @@ let test_validate_args_keeper_bash_oneof_empty_pipeline () =
 (** stages was removed from the schema (backward-compat alias only in handler).
     Sending stages in args now triggers additionalProperties rejection since
     the schema declares additionalProperties: false. *)
-let test_validate_args_keeper_bash_oneof_stages_rejected_by_schema () =
+let test_validate_args_keeper_bash_stages_rejected_by_schema () =
   let args =
     `Assoc
       [ "executable", `String "ls"
@@ -1062,29 +1062,7 @@ let test_validate_args_keeper_bash_oneof_stages_rejected_by_schema () =
   | Ok _ ->
     Alcotest.fail "expected rejection: stages is no longer a schema-advertised field"
 
-let test_validate_args_keeper_bash_oneof_exec_with_empty_pipeline () =
-  let args =
-    `Assoc
-      [ "executable", `String "echo"
-      ; "pipeline", `List []
-      ]
-  in
-  match
-    Tool_input_validation.validate_args
-      ~schema:keeper_bash_schema
-      ~name:"keeper_bash"
-      ~args
-      ()
-  with
-  | Ok forwarded ->
-    Alcotest.(check string) "executable preserved" "echo"
-      (assoc_string "executable" forwarded)
-  | Error result ->
-    Alcotest.failf
-      "expected keeper_bash with executable + empty pipeline to pass, got %s"
-      (Yojson.Safe.to_string result.Tool_result.data)
-
-let test_validate_args_keeper_bash_oneof_real_pipeline_rejects_empty_exec () =
+let test_validate_args_keeper_bash_pipeline_rejects_null_exec () =
   let args =
     `Assoc
       [ "executable", `Null
@@ -1106,6 +1084,284 @@ let test_validate_args_keeper_bash_oneof_real_pipeline_rejects_empty_exec () =
     Alcotest.failf
       "expected keeper_bash pipeline with null exec to pass shape validation, got %s"
       (Yojson.Safe.to_string result.Tool_result.data)
+
+(* ================================================================ *)
+(* Test: oneOf with const discriminator                              *)
+(* ================================================================ *)
+
+(** Schema where two branches share the same required fields but are
+    distinguished by a const value on the 'kind' field. This exercises
+    the improvement to [one_of_required_shape_error] that respects
+    const discriminators instead of matching purely on required field
+    presence. *)
+let oneof_const_schema =
+  `Assoc
+    [
+      ("type", `String "object");
+      ( "oneOf"
+      , `List
+          [
+            `Assoc
+              [
+                ( "properties"
+                , `Assoc
+                    [
+                      ("kind", `Assoc [("const", `String "preset")])
+                    ; ("value", `Assoc [("type", `String "string")])
+                    ] )
+              ; ("required", `List [`String "kind"; `String "value"])
+              ]
+          ; `Assoc
+              [
+                ( "properties"
+                , `Assoc
+                    [
+                      ("kind", `Assoc [("const", `String "custom")])
+                    ; ("value", `Assoc [("type", `String "string")])
+                    ] )
+              ; ("required", `List [`String "kind"; `String "value"])
+              ]
+          ] )
+    ]
+;;
+
+let test_oneof_const_discriminator_preset_branch () =
+  let args = `Assoc [("kind", `String "preset"); ("value", `String "minimal")] in
+  match
+    Tool_input_validation.validate_args
+      ~schema:oneof_const_schema
+      ~name:"test_oneof_const"
+      ~args
+      ()
+  with
+  | Ok forwarded ->
+    Alcotest.(check bool) "args unchanged" true (Yojson.Safe.equal args forwarded)
+  | Error result ->
+    Alcotest.failf
+      "expected preset branch to match, got %s"
+      (Yojson.Safe.to_string result.Tool_result.data)
+;;
+
+let test_oneof_const_discriminator_custom_branch () =
+  let args = `Assoc [("kind", `String "custom"); ("value", `String "my-tool")] in
+  match
+    Tool_input_validation.validate_args
+      ~schema:oneof_const_schema
+      ~name:"test_oneof_const"
+      ~args
+      ()
+  with
+  | Ok forwarded ->
+    Alcotest.(check bool) "args unchanged" true (Yojson.Safe.equal args forwarded)
+  | Error result ->
+    Alcotest.failf
+      "expected custom branch to match, got %s"
+      (Yojson.Safe.to_string result.Tool_result.data)
+;;
+
+let test_oneof_const_discriminator_rejects_unknown_kind () =
+  let args = `Assoc [("kind", `String "unknown"); ("value", `String "x")] in
+  match
+    Tool_input_validation.validate_args
+      ~schema:oneof_const_schema
+      ~name:"test_oneof_const"
+      ~args
+      ()
+  with
+  | Error result ->
+    let msg = Yojson.Safe.to_string result.Tool_result.data in
+    Alcotest.(check bool) "error mentions exact-one-of" true
+      (string_contains msg "exactly one of");
+    Alcotest.(check bool) "error mentions preset branch label" true
+      (string_contains msg "\"preset\"");
+    Alcotest.(check bool) "error mentions custom branch label" true
+      (string_contains msg "\"custom\"")
+  | Ok _ -> Alcotest.fail "expected rejection for unknown kind value"
+;;
+
+let test_oneof_const_discriminator_rejects_missing_kind () =
+  let args = `Assoc [("value", `String "x")] in
+  match
+    Tool_input_validation.validate_args
+      ~schema:oneof_const_schema
+      ~name:"test_oneof_const"
+      ~args
+      ()
+  with
+  | Error result ->
+    let msg = Yojson.Safe.to_string result.Tool_result.data in
+    Alcotest.(check bool) "error mentions exact-one-of" true
+      (string_contains msg "exactly one of")
+  | Ok _ -> Alcotest.fail "expected rejection for missing kind field"
+;;
+
+(** P1 regression: const fields that are not in the branch's required list
+    must be treated as optional.  A schema with disjoint required sets and
+    optional const discriminators should not reject an input that satisfies
+    exactly one branch just because the optional const key is absent. *)
+let oneof_optional_const_schema =
+  `Assoc
+    [
+      ("type", `String "object");
+      ( "oneOf"
+      , `List
+          [
+            `Assoc
+              [
+                ( "properties"
+                , `Assoc
+                    [
+                      ("kind", `Assoc [("const", `String "a")])
+                    ; ("foo", `Assoc [("type", `String "string")])
+                    ] )
+              ; ("required", `List [`String "foo"])
+              ]
+          ; `Assoc
+              [
+                ( "properties"
+                , `Assoc
+                    [
+                      ("kind", `Assoc [("const", `String "b")])
+                    ; ("bar", `Assoc [("type", `String "string")])
+                    ] )
+              ; ("required", `List [`String "bar"])
+              ]
+          ] )
+    ]
+;;
+
+let test_oneof_optional_const_branch_matches_without_const () =
+  let args = `Assoc [("foo", `String "x")] in
+  match
+    Tool_input_validation.validate_args
+      ~schema:oneof_optional_const_schema
+      ~name:"test_oneof_optional_const"
+      ~args
+      ()
+  with
+  | Ok forwarded ->
+    Alcotest.(check bool) "args unchanged" true (Yojson.Safe.equal args forwarded)
+  | Error result ->
+    Alcotest.failf
+      "expected branch A to match without optional const, got %s"
+      (Yojson.Safe.to_string result.Tool_result.data)
+;;
+
+(** P2 regression: "const": null in the schema must be distinguishable from
+    a missing const key.  Two branches with the same required field but
+    distinguished by null vs non-null const should resolve unambiguously. *)
+let oneof_null_const_schema =
+  `Assoc
+    [
+      ("type", `String "object");
+      ( "oneOf"
+      , `List
+          [
+            `Assoc
+              [
+                ( "properties"
+                , `Assoc
+                    [
+                      ("mode", `Assoc [("const", `Null)])
+                    ; ("name", `Assoc [("type", `String "string")])
+                    ] )
+              ; ("required", `List [`String "name"])
+              ]
+          ; `Assoc
+              [
+                ( "properties"
+                , `Assoc
+                    [
+                      ("mode", `Assoc [("const", `String "active")])
+                    ; ("name", `Assoc [("type", `String "string")])
+                    ] )
+              ; ("required", `List [`String "name"])
+              ]
+          ] )
+    ]
+;;
+
+let test_oneof_null_const_matches_null_branch () =
+  let args = `Assoc [("name", `String "x"); ("mode", `Null)] in
+  match
+    Tool_input_validation.validate_args
+      ~schema:oneof_null_const_schema
+      ~name:"test_oneof_null_const"
+      ~args
+      ()
+  with
+  | Ok forwarded ->
+    Alcotest.(check bool) "args unchanged" true (Yojson.Safe.equal args forwarded)
+  | Error result ->
+    Alcotest.failf
+      "expected null-const branch to match, got %s"
+      (Yojson.Safe.to_string result.Tool_result.data)
+;;
+
+let test_oneof_null_const_matches_non_null_branch () =
+  let args = `Assoc [("name", `String "x"); ("mode", `String "active")] in
+  match
+    Tool_input_validation.validate_args
+      ~schema:oneof_null_const_schema
+      ~name:"test_oneof_null_const"
+      ~args
+      ()
+  with
+  | Ok forwarded ->
+    Alcotest.(check bool) "args unchanged" true (Yojson.Safe.equal args forwarded)
+  | Error result ->
+    Alcotest.failf
+      "expected active-const branch to match, got %s"
+      (Yojson.Safe.to_string result.Tool_result.data)
+;;
+
+(* ================================================================ *)
+(* Production schema regression: Keeper_schema.tool_access_schema   *)
+(* ================================================================ *)
+
+let test_keeper_schema_tool_access_preset () =
+  let schema = Keeper_schema.tool_access_schema "test" in
+  let args = `Assoc [("kind", `String "preset"); ("preset", `String "minimal")] in
+  match Tool_input_validation.validate_args ~schema ~name:"test" ~args () with
+  | Ok _ -> ()
+  | Error result ->
+    Alcotest.failf
+      "expected preset branch to pass: %s"
+      (Yojson.Safe.to_string result.Tool_result.data)
+;;
+
+let test_keeper_schema_tool_access_custom () =
+  let schema = Keeper_schema.tool_access_schema "test" in
+  let args = `Assoc [("kind", `String "custom"); ("tools", `List [`String "rg"])] in
+  match Tool_input_validation.validate_args ~schema ~name:"test" ~args () with
+  | Ok _ -> ()
+  | Error result ->
+    Alcotest.failf
+      "expected custom branch to pass: %s"
+      (Yojson.Safe.to_string result.Tool_result.data)
+;;
+
+let test_keeper_schema_tool_access_rejects_missing_kind () =
+  let schema = Keeper_schema.tool_access_schema "test" in
+  let args = `Assoc [("preset", `String "minimal")] in
+  match Tool_input_validation.validate_args ~schema ~name:"test" ~args () with
+  | Ok _ -> Alcotest.fail "expected missing kind to fail"
+  | Error result ->
+    let msg = result.Tool_result.legacy_message in
+    Alcotest.(check bool) "error mentions branches" true
+      (string_contains msg "exactly one of")
+;;
+
+let test_keeper_schema_tool_access_rejects_unknown_kind () =
+  let schema = Keeper_schema.tool_access_schema "test" in
+  let args = `Assoc [("kind", `String "unknown"); ("preset", `String "minimal")] in
+  match Tool_input_validation.validate_args ~schema ~name:"test" ~args () with
+  | Ok _ -> Alcotest.fail "expected unknown kind to fail"
+  | Error result ->
+    let msg = result.Tool_result.legacy_message in
+    Alcotest.(check bool) "error mentions preset/custom branches" true
+      (string_contains msg "preset" && string_contains msg "custom")
+;;
 
 (* ================================================================ *)
 (* Runner                                                            *)
@@ -1180,14 +1436,12 @@ let () =
         test_validate_args_keeper_bash_accepts_typed_pipeline;
       Alcotest.test_case "keeper_bash rejects bad typed argv" `Quick
         test_validate_args_keeper_bash_rejects_bad_argv_type;
-      Alcotest.test_case "keeper_bash oneOf: executable + empty pipeline" `Quick
-        test_validate_args_keeper_bash_oneof_empty_pipeline;
-      Alcotest.test_case "keeper_bash oneOf: stages rejected by schema" `Quick
-        test_validate_args_keeper_bash_oneof_stages_rejected_by_schema;
-      Alcotest.test_case "keeper_bash oneOf: exec with empty pipeline" `Quick
-        test_validate_args_keeper_bash_oneof_exec_with_empty_pipeline;
-      Alcotest.test_case "keeper_bash oneOf: pipeline + null exec" `Quick
-        test_validate_args_keeper_bash_oneof_real_pipeline_rejects_empty_exec;
+      Alcotest.test_case "keeper_bash exec + empty pipeline" `Quick
+        test_validate_args_keeper_bash_exec_with_empty_pipeline;
+      Alcotest.test_case "keeper_bash stages rejected by schema" `Quick
+        test_validate_args_keeper_bash_stages_rejected_by_schema;
+      Alcotest.test_case "keeper_bash pipeline + null exec" `Quick
+        test_validate_args_keeper_bash_pipeline_rejects_null_exec;
       Alcotest.test_case "direct validation uses explicit schema" `Quick
         test_validate_args_uses_explicit_schema_without_registry;
       Alcotest.test_case "direct keeper_board_post accepts sources array" `Quick
@@ -1204,5 +1458,31 @@ let () =
         test_registered_hook_goal_list_preserves_invalid_enum_for_handler;
       Alcotest.test_case "required enum blanks are not stripped" `Quick
         test_registered_hook_required_enum_blank_is_not_stripped;
+    ]);
+    ("oneof_const_discriminator", [
+      Alcotest.test_case "preset branch matches via const" `Quick
+        test_oneof_const_discriminator_preset_branch;
+      Alcotest.test_case "custom branch matches via const" `Quick
+        test_oneof_const_discriminator_custom_branch;
+      Alcotest.test_case "unknown kind is rejected" `Quick
+        test_oneof_const_discriminator_rejects_unknown_kind;
+      Alcotest.test_case "missing kind is rejected" `Quick
+        test_oneof_const_discriminator_rejects_missing_kind;
+      Alcotest.test_case "optional const: branch matches without const key" `Quick
+        test_oneof_optional_const_branch_matches_without_const;
+      Alcotest.test_case "null const: null branch matches" `Quick
+        test_oneof_null_const_matches_null_branch;
+      Alcotest.test_case "null const: non-null branch matches" `Quick
+        test_oneof_null_const_matches_non_null_branch;
+    ]);
+    ("keeper_schema_tool_access", [
+      Alcotest.test_case "preset branch passes" `Quick
+        test_keeper_schema_tool_access_preset;
+      Alcotest.test_case "custom branch passes" `Quick
+        test_keeper_schema_tool_access_custom;
+      Alcotest.test_case "missing kind rejected" `Quick
+        test_keeper_schema_tool_access_rejects_missing_kind;
+      Alcotest.test_case "unknown kind rejected" `Quick
+        test_keeper_schema_tool_access_rejects_unknown_kind;
     ]);
   ]

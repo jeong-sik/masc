@@ -82,10 +82,8 @@ val is_destructive_bash_operation : Masc_exec.Shell_ir.t -> bool
     Replaces the historical string-era extractors. *)
 val flat_stage_words : Masc_exec.Shell_ir.t -> string list
 
-val stage_words_of_string : string -> string list
-(** Parse a raw command string and flatten literal stage words.
-    Compatibility entrypoint for legacy string callers; typed paths should
-    prefer {!flat_stage_words}. *)
+(** All typed callers now route through {!parse_string_to_ir} +
+    {!Exec_policy_mutation_classifier.flat_stage_words}. *)
 
 val sanitize_command_for_log : string -> string
 val sanitize_command_for_log_of_ir :

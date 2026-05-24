@@ -78,10 +78,15 @@ let sanitize_parts parts =
 ;;
 
 let sanitize_command_for_log cmd =
-  match Exec_policy_mutation_classifier.stage_words_of_string_result cmd with
-  | Ok parts -> sanitize_parts parts
-  | Error () when command_has_sensitive_marker cmd -> "[REDACTED]"
-  | Error () -> cmd |> redact_url_credentials |> redact_inline_secret_assignment
+  let trimmed = String.trim cmd in
+  if trimmed = ""
+  then "[EMPTY]"
+  else (
+    match Masc_exec_bash_parser.Bash.parse_string trimmed with
+    | Masc_exec.Parsed.Parsed ir ->
+      sanitize_parts (Exec_policy_mutation_classifier.flat_stage_words ir)
+    | _ when command_has_sensitive_marker cmd -> "[REDACTED]"
+    | _ -> cmd |> redact_url_credentials |> redact_inline_secret_assignment)
 ;;
 
 let sanitize_command_for_log_of_ir ~fallback_cmd ir =

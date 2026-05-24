@@ -429,11 +429,9 @@ let sandbox_error ~(config : Coord.config) ~(meta : keeper_meta) ?details messag
 ;;
 
 let parse_cmd_to_ir_opt cmd =
-  match Exec_policy_mutation_classifier.parsed_of_string cmd with
-  | Masc_exec.Parsed.Parsed ir -> Some ir
-  | Masc_exec.Parsed.Parse_error _
-  | Masc_exec.Parsed.Parse_aborted _
-  | Masc_exec.Parsed.Too_complex _ -> None
+  match Exec_policy.parse_string_to_ir ~mode:Strict cmd with
+  | Ok ir -> Some ir
+  | Error _ -> None
 ;;
 
 (** Shared by [run_docker_credentialed_bash], [run_docker_bash], and

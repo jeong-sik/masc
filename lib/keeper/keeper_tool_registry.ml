@@ -13,8 +13,8 @@ let dedupe_tool_names names =
   dedupe_keep_order (names |> List.map String.trim |> List.filter (fun name -> name <> ""))
 ;;
 
-(* RFC-0160 S6: private string extractor removed. Callers route
-   through {!Exec_policy.stage_words_of_string} (single SSOT). *)
+(* RFC-0160 S7: callers route through {!Exec_policy.parse_string_to_ir}
+   + {!Exec_policy_mutation_classifier.flat_stage_words}. *)
 
 (* ── Runtime-resolved tool names ─────────────────────────────── *)
 
@@ -207,8 +207,11 @@ let gh_read_only_prefixes =
     [graphqlx ...] as the graphql subcommand.  User hard rule: "no
     string matching for classification". *)
 let is_gh_api_read_only (cmd_lower : string) : bool =
-  let tokens = Exec_policy.stage_words_of_string cmd_lower in
-  match tokens with
+  match Exec_policy.parse_string_to_ir ~mode:Strict cmd_lower with
+  | Error _ -> false
+  | Ok ir ->
+    let tokens = Exec_policy_mutation_classifier.flat_stage_words ir in
+    match tokens with
   | "api" :: rest_after_api ->
     let is_graphql_subcommand =
       match rest_after_api with
@@ -258,8 +261,11 @@ let is_gh_api_read_only (cmd_lower : string) : bool =
 (** Extract the effective gh command string from keeper_shell op=gh input.
     [keeper_exec_shell] accepts typed [argv] and legacy [cmd] fields. *)
 let normalize_gh_command (cmd : string) : string =
-  let tokens = Exec_policy.stage_words_of_string cmd in
-  let rec drop_leading_gh = function
+  match Exec_policy.parse_string_to_ir ~mode:Strict cmd with
+  | Error _ -> ""
+  | Ok ir ->
+    let tokens = Exec_policy_mutation_classifier.flat_stage_words ir in
+    let rec drop_leading_gh = function
     | token :: rest when String_util.equals_ci token "gh" -> drop_leading_gh rest
     | remaining -> remaining
   in

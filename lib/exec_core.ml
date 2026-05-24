@@ -223,7 +223,9 @@ let artifact_threshold_bytes =
 ;;
 
 let command_word_stages cmd =
-  Exec_policy_mutation_classifier.stages_words_of_string cmd
+  match Exec_policy.parse_string_to_ir ~mode:Strict cmd with
+  | Error _ -> []
+  | Ok ir -> Exec_policy_mutation_classifier.stages_words_of_ir ir
 ;;
 
 let first_segment_tokens cmd =

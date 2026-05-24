@@ -1,16 +1,13 @@
 (** Projection from internal keeper tool IDs to active model-facing names.
 
-    Resolves how an internal tool identifier should be referenced when
-    composing a model-visible payload: whether the current schema
-    exposes a public alias, whether the internal identifier is itself
-    visible, or whether the tool is not bound at all on this turn.
+    This module is the SSOT for model-facing tool name resolution. All
+    production code paths that produce model-visible text about tools
+    (error messages, suggestions, recovery guidance) must route through
+    this module rather than calling [Keeper_tool_alias] directly.
 
-    Historical note: the bulk of this logic was extracted from
-    [Keeper_tool_disclosure] by PR #17043 as a typed-result boundary,
-    but the consumer migration is not yet complete — [Keeper_tool_disclosure]
-    still carries an inline duplicate of [public_aliases_for_internal_name].
-    Wiring the production callers (Agent.run() pre-tool disclosure path)
-    to this module remains a separate follow-up. *)
+    The consumer migration is complete: [mcp_server_eio_execute] uses
+    [filter_model_visible_suggestions] for "did you mean" error paths,
+    and [keeper_tool_guidance] uses [model_facing_name] for hint rendering. *)
 
 (** Surface context. Internal audit emits the raw internal identifier;
     model-facing rendering goes through alias resolution. *)
@@ -41,6 +38,11 @@ type model_resolution =
 val visible_set : string list -> (string, unit) Hashtbl.t
 
 val public_aliases_for_internal_name : string -> string list
+
+val public_alias_for_internal : string -> string option
+(** First public alias for an internal name, or [None]. Semantically
+    equivalent to [Keeper_tool_alias.public_name_for_internal] but
+    routes through this module as the SSOT. *)
 
 val resolve_model_name :
   visible_tool_names:string list ->
@@ -78,3 +80,8 @@ val blocker_guidance :
     this turn, return guidance directing the model to report the
     blocker (and, where available, mention which public alias would
     be needed). Returns [None] for visible / unknown tools. *)
+
+val filter_model_visible_suggestions : string list -> string list
+(** Replace internal [keeper_*] names with their public aliases and
+    remove any that have no mapping. Used to sanitize "did you mean"
+    suggestion lists so the model never sees internal handler names. *)

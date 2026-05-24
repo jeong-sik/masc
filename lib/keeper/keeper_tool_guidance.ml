@@ -193,7 +193,7 @@ let allowed_lookup allowed_tool_names =
 ;;
 
 let model_facing_name name =
-  match Keeper_tool_alias.public_name_for_internal name with
+  match Keeper_tool_name_projection.public_alias_for_internal name with
   | Some public -> public
   | None -> name
 ;;

@@ -979,6 +979,32 @@ let is_context_overflow (err : Agent_sdk.Error.sdk_error) : bool =
   | Agent_sdk.Error.A2a _
   | Agent_sdk.Error.Internal _ -> false
 
+(** [true] when the error is an OAS [InputRequired] — the agent paused
+    to request human input.  Not a failure; a special stop condition. *)
+let is_input_required_error (err : Agent_sdk.Error.sdk_error) : bool =
+  match err with
+  | Agent_sdk.Error.Agent (Agent_sdk.Error.InputRequired _) -> true
+  | Agent_sdk.Error.Agent (MaxTurnsExceeded _)
+  | Agent_sdk.Error.Agent (CostBudgetExceeded _)
+  | Agent_sdk.Error.Agent (CostBudgetUnenforceable _)
+  | Agent_sdk.Error.Agent (TokenBudgetExceeded _)
+  | Agent_sdk.Error.Agent (UnrecognizedStopReason _)
+  | Agent_sdk.Error.Agent (IdleDetected _)
+  | Agent_sdk.Error.Agent (ToolRetryExhausted _)
+  | Agent_sdk.Error.Agent (CompletionContractViolation _)
+  | Agent_sdk.Error.Agent (GuardrailViolation _)
+  | Agent_sdk.Error.Agent (TripwireViolation _)
+  | Agent_sdk.Error.Agent (ExitConditionMet _) -> false
+  | Agent_sdk.Error.Api _
+  | Agent_sdk.Error.Provider _
+  | Agent_sdk.Error.Mcp _
+  | Agent_sdk.Error.Config _
+  | Agent_sdk.Error.Serialization _
+  | Agent_sdk.Error.Io _
+  | Agent_sdk.Error.Orchestration _
+  | Agent_sdk.Error.A2a _
+  | Agent_sdk.Error.Internal _ -> false
+
 (** [true] when an error represents terminal cascade exhaustion or a
     final accept-rejected result from the MASC OAS boundary. *)
 let is_cascade_exhausted_error (err : Agent_sdk.Error.sdk_error) : bool =

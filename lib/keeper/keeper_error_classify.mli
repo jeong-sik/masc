@@ -51,6 +51,10 @@ val is_ambiguous_side_effect_error : Agent_sdk.Error.sdk_error -> bool
 (** [true] when a structured error indicates context overflow. *)
 val is_context_overflow : Agent_sdk.Error.sdk_error -> bool
 
+(** [true] when the error is an OAS [InputRequired] — the agent paused
+    to request human input.  Not a failure; a special stop condition. *)
+val is_input_required_error : Agent_sdk.Error.sdk_error -> bool
+
 (** [true] when an error represents terminal cascade exhaustion or a
     final accept-rejected result from the MASC OAS boundary. *)
 val is_cascade_exhausted_error : Agent_sdk.Error.sdk_error -> bool

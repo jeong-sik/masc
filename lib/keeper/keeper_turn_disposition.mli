@@ -28,6 +28,10 @@ type t =
   | Success (** Turn completed normally. *)
   | External_cancel
   (** Turn cancelled before completion (operator stop, switch_keeper, …). *)
+  | Input_required
+  (** Agent paused to request human input. Not a failure — a special
+          stop condition analogous to [ExitConditionMet]. Operator action:
+          provide input or decline. *)
   | Turn_wall_clock_timeout (** Turn exceeded its wall-clock budget. *)
   | Cascade_attempts_exhausted
   (** Cascade aggregate outcome: all candidate attempts were exhausted.
@@ -88,6 +92,7 @@ val next_action : t -> string option
 
     Mapping:
     - [Success] → ["success"]
+    - [Input_required] → ["input_required"]
     - [External_cancel] → ["external_cancel"]
     - [Turn_wall_clock_timeout] → ["turn_wall_clock_timeout"]
     - [Cascade_attempts_exhausted] → ["cascade_attempts_exhausted"]

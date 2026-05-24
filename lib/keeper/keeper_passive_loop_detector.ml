@@ -42,7 +42,7 @@ let progress_class_of_disposition (d : Keeper_turn_disposition.t) =
       Some required_tool_no_call_progress_class
   | Required_tool_use_unsatisfied ->
       Some required_tool_unsatisfied_progress_class
-  | Success | External_cancel | Turn_wall_clock_timeout
+  | Success | External_cancel | Input_required | Turn_wall_clock_timeout
   | Post_commit_ambiguous
   | Cascade_attempts_exhausted
   | Provider_error _ | Unknown _ ->

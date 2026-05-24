@@ -50,6 +50,7 @@ type sdk_termination_semantics =
   | Oas_tool_retry_exhausted
   | Oas_guardrail_violation
   | Oas_tripwire_violation
+  | Oas_input_required
   | Sdk_error_failure
 
 val sdk_termination_semantics

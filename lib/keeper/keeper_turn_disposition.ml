@@ -11,6 +11,7 @@ module Code = Keeper_turn_terminal_code
 type t =
   | Success
   | External_cancel
+  | Input_required
   | Turn_wall_clock_timeout
   | Cascade_attempts_exhausted
   | Required_tool_use_no_tool_call
@@ -27,6 +28,7 @@ type severity =
 
 let severity = function
   | Success -> Ok
+  | Input_required -> Ok
   | External_cancel
   | Turn_wall_clock_timeout
   | Cascade_attempts_exhausted -> Warn
@@ -39,6 +41,7 @@ let severity = function
 
 let summary = function
   | Success -> "turn completed"
+  | Input_required -> "agent paused to request human input"
   | External_cancel -> "keeper turn was cancelled before completion"
   | Turn_wall_clock_timeout ->
     "keeper turn hit the wall-clock timeout"
@@ -58,6 +61,7 @@ let summary = function
 
 let next_action = function
   | Success -> None
+  | Input_required -> Some "provide_input_or_decline"
   | External_cancel -> Some "rerun_if_still_relevant"
   | Turn_wall_clock_timeout -> Some "inspect_turn_timeout"
   | Cascade_attempts_exhausted -> Some "inspect_cascade_attempts"
@@ -71,6 +75,7 @@ let next_action = function
 
 let to_wire = function
   | Success -> "success"
+  | Input_required -> "input_required"
   | External_cancel -> "external_cancel"
   | Turn_wall_clock_timeout -> "turn_wall_clock_timeout"
   | Cascade_attempts_exhausted -> "cascade_attempts_exhausted"
@@ -114,6 +119,7 @@ let of_termination_code (c : Code.t) : t =
 
 let of_wire = function
   | "success" -> Success
+  | "input_required" -> Input_required
   | "external_cancel" -> External_cancel
   | "turn_wall_clock_timeout" -> Turn_wall_clock_timeout
   | "cascade_attempts_exhausted" -> Cascade_attempts_exhausted
@@ -130,6 +136,7 @@ let of_wire = function
 let equal a b =
   match a, b with
   | Success, Success
+  | Input_required, Input_required
   | External_cancel, External_cancel
   | Turn_wall_clock_timeout, Turn_wall_clock_timeout
   | Cascade_attempts_exhausted, Cascade_attempts_exhausted
@@ -139,6 +146,7 @@ let equal a b =
   | Provider_error a, Provider_error b -> String.equal (Code.to_wire a) (Code.to_wire b)
   | Unknown a, Unknown b -> String.equal a.raw_error b.raw_error
   | Success, _
+  | Input_required, _
   | External_cancel, _
   | Turn_wall_clock_timeout, _
   | Cascade_attempts_exhausted, _

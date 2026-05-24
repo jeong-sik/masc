@@ -89,6 +89,8 @@ let disposition_of_runtime_blocker_class raw_blocker_class =
       Keeper_turn_disposition.Turn_wall_clock_timeout
   | "ambiguous_post_commit_timeout" | "ambiguous_post_commit_failure" ->
       Keeper_turn_disposition.Post_commit_ambiguous
+  | "sdk_input_required" ->
+      Keeper_turn_disposition.Input_required
   | ("cascade_exhausted" | "no_tool_capable_provider"
      | "provider_runtime_error") as cls ->
       Keeper_turn_disposition.Provider_error

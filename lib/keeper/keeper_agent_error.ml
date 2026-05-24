@@ -68,6 +68,7 @@ type sdk_termination_semantics =
   | Oas_tool_retry_exhausted
   | Oas_guardrail_violation
   | Oas_tripwire_violation
+  | Oas_input_required
   | Sdk_error_failure
 
 let sdk_termination_semantics = function
@@ -96,7 +97,7 @@ let sdk_termination_semantics = function
     Oas_guardrail_violation
   | Agent_sdk.Error.Agent (Agent_sdk.Error.TripwireViolation _) ->
     Oas_tripwire_violation
-  | Agent_sdk.Error.Agent (Agent_sdk.Error.InputRequired _) -> Sdk_error_failure
+  | Agent_sdk.Error.Agent (Agent_sdk.Error.InputRequired _) -> Oas_input_required
   | Agent_sdk.Error.Agent (Agent_sdk.Error.UnrecognizedStopReason _) -> Sdk_error_failure
   | Agent_sdk.Error.Provider _ -> Sdk_error_failure
   | Agent_sdk.Error.Api _ -> Sdk_error_failure
@@ -121,6 +122,7 @@ let sdk_termination_semantics_to_string = function
   | Oas_tool_retry_exhausted -> "oas_tool_retry_exhausted"
   | Oas_guardrail_violation -> "oas_guardrail_violation"
   | Oas_tripwire_violation -> "oas_tripwire_violation"
+  | Oas_input_required -> "oas_input_required"
   | Sdk_error_failure -> "sdk_error_failure"
 ;;
 
@@ -324,6 +326,7 @@ let receipt_outcome_kind_of_sdk_error err =
   | Oas_turn_budget_exhausted
   | Oas_idle_budget_exhausted
   | Oas_exit_condition_reached -> `Cancelled
+  | Oas_input_required -> `Cancelled
   | Oas_token_budget_exhausted
   | Oas_cost_budget_exhausted
   | Oas_cost_budget_unenforceable

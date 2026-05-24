@@ -305,40 +305,33 @@ let command_context_with_allowlist ?caller ~allowed_commands cmd =
   if trimmed = ""
   then Error Empty_command
   else (
-    match Masc_exec_bash_parser.Bash.parse_string trimmed with
-    | (Masc_exec.Parsed.Parse_error _ | Masc_exec.Parsed.Parse_aborted _) ->
-      Error Chain_or_redirect
-    | Masc_exec.Parsed.Too_complex reason ->
-      Error (block_reason_of_exec_too_complex (Unsupported_construct reason))
-    | Masc_exec.Parsed.Parsed ir ->
-      let verdict =
-        Exec_shell_gate.gate_typed
-          ?caller
-          ~ir
-          ~allowlist:(strict_allowlist_policy ~allowed_commands)
-          ~path_policy:Exec_shell_gate.allow_all_paths
-          ~sandbox:Exec_shell_gate.host_sandbox
-          ()
-      in
-      match verdict with
-      | Allow context ->
-        if context.Exec_shell_gate.direct_dune_seen
-        then Error Direct_dune_invocation
-        else (
-          match validate_no_unquoted_glob context.Exec_shell_gate.ast with
-          | Error _ as err -> err
-          | Ok () ->
-            (match
-               validate_wrapped_stages ~allowed_commands context.Exec_shell_gate.ast
-             with
-             | Ok () -> Ok context
-             | Error _ as err -> err))
-      | Reject { context; reason; _ } ->
-        if context.Exec_shell_gate.direct_dune_seen
-        then Error Direct_dune_invocation
-        else Error (block_reason_of_exec_reject reason)
-      | Cannot_parse _ -> Error Chain_or_redirect
-      | Too_complex { reason } -> Error (block_reason_of_exec_too_complex reason))
+    match
+      Exec_shell_gate.gate_raw
+        ?caller
+        ~text:trimmed
+        ~allowlist:(strict_allowlist_policy ~allowed_commands)
+        ~path_policy:Exec_shell_gate.allow_all_paths
+        ~sandbox:Exec_shell_gate.host_sandbox
+        ()
+    with
+    | Allow context ->
+      if context.Exec_shell_gate.direct_dune_seen
+      then Error Direct_dune_invocation
+      else (
+        match validate_no_unquoted_glob context.Exec_shell_gate.ast with
+        | Error _ as err -> err
+        | Ok () ->
+          (match
+             validate_wrapped_stages ~allowed_commands context.Exec_shell_gate.ast
+           with
+           | Ok () -> Ok context
+           | Error _ as err -> err))
+    | Reject { context; reason; _ } ->
+      if context.Exec_shell_gate.direct_dune_seen
+      then Error Direct_dune_invocation
+      else Error (block_reason_of_exec_reject reason)
+    | Cannot_parse _ -> Error Chain_or_redirect
+    | Too_complex { reason } -> Error (block_reason_of_exec_too_complex reason))
 ;;
 
 let validate_command_with_allowlist ?caller ~allowed_commands cmd =
@@ -360,42 +353,35 @@ let command_context_coding_with_allowlist
   if trimmed = ""
   then Error Empty_command
   else (
-    match Masc_exec_bash_parser.Bash.parse_string trimmed with
-    | (Masc_exec.Parsed.Parse_error _ | Masc_exec.Parsed.Parse_aborted _) ->
-      Error Injection
-    | Masc_exec.Parsed.Too_complex reason ->
-      Error (block_reason_of_exec_too_complex (Unsupported_construct reason))
-    | Masc_exec.Parsed.Parsed ir ->
-      let verdict =
-        Exec_shell_gate.gate_typed
-          ?caller
-          ~ir
-          ~allowlist:(coding_allowlist_policy ~allow_pipes ~allowed_commands ())
-          ~path_policy:Exec_shell_gate.allow_all_paths
-          ~sandbox:Exec_shell_gate.host_sandbox
-          ()
-      in
-      match verdict with
-      | Allow context ->
-        if context.Exec_shell_gate.direct_dune_seen
-        then Error Direct_dune_invocation
-        else (
-          match validate_no_unquoted_glob context.Exec_shell_gate.ast with
-          | Error _ as err -> err
-          | Ok () ->
-            (match
-               validate_wrapped_stages ~allowed_commands context.Exec_shell_gate.ast
-             with
-             | Ok () -> Ok context
-             | Error _ as err -> err))
-      | Reject { context; reason; _ } ->
-        (match reason with
-         | Pipes_not_allowed _ -> Error Pipes_not_allowed
-         | _ when context.Exec_shell_gate.direct_dune_seen ->
-           Error Direct_dune_invocation
-         | _ -> Error (block_reason_of_exec_reject reason))
-      | Cannot_parse _ -> Error Injection
-      | Too_complex { reason } -> Error (block_reason_of_exec_too_complex reason))
+    match
+      Exec_shell_gate.gate_raw
+        ?caller
+        ~text:trimmed
+        ~allowlist:(coding_allowlist_policy ~allow_pipes ~allowed_commands ())
+        ~path_policy:Exec_shell_gate.allow_all_paths
+        ~sandbox:Exec_shell_gate.host_sandbox
+        ()
+    with
+    | Allow context ->
+      if context.Exec_shell_gate.direct_dune_seen
+      then Error Direct_dune_invocation
+      else (
+        match validate_no_unquoted_glob context.Exec_shell_gate.ast with
+        | Error _ as err -> err
+        | Ok () ->
+          (match
+             validate_wrapped_stages ~allowed_commands context.Exec_shell_gate.ast
+           with
+           | Ok () -> Ok context
+           | Error _ as err -> err))
+    | Reject { context; reason; _ } ->
+      (match reason with
+       | Pipes_not_allowed _ -> Error Pipes_not_allowed
+       | _ when context.Exec_shell_gate.direct_dune_seen ->
+         Error Direct_dune_invocation
+       | _ -> Error (block_reason_of_exec_reject reason))
+    | Cannot_parse _ -> Error Injection
+    | Too_complex { reason } -> Error (block_reason_of_exec_too_complex reason))
 ;;
 
 let validate_command_coding_with_allowlist ?caller ?allow_pipes ~allowed_commands cmd =

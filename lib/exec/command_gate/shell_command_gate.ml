@@ -403,15 +403,24 @@ let parse_only_to_stages (parsed : SI.t PD.t) :
 let gate_typed ?caller:_ ~ir ~allowlist ~path_policy ~sandbox () : verdict =
   (* Typed callers have already crossed their schema boundary, so this
      entrypoint intentionally skips raw-string parsing while preserving
-     the same policy and verdict surface as [gate]. *)
+     the same policy and verdict surface as [gate_raw]. *)
   match parse_only_to_stages (PD.Parsed ir) with
   | Error (`Cannot_parse reason) -> Cannot_parse { reason }
   | Error (`Too_complex reason) -> Too_complex { reason }
   | Ok stages -> apply_policy ~allowlist ~path_policy ~sandbox ~stages
 ;;
 
+let gate_raw ?caller ~text ~allowlist ~path_policy ~sandbox () : verdict =
+  match Masc_exec_bash_parser.Bash.parse_string text with
+  | PD.Parsed ir -> gate_typed ?caller ~ir ~allowlist ~path_policy ~sandbox ()
+  | PD.Parse_error _ -> Cannot_parse { reason = Parse_error }
+  | PD.Parse_aborted reason -> Cannot_parse { reason = Parse_aborted reason }
+  | PD.Too_complex reason ->
+    Too_complex { reason = Unsupported_construct reason }
+;;
+
 let lower_typed_pipeline ?caller:_ ~stages ~sandbox () : verdict =
-  (* See note on [gate] — [caller] is API-shape-only for now. *)
+  (* See note on [gate_typed] — [caller] is API-shape-only for now. *)
   match stages with
   | [] -> Cannot_parse { reason = Parse_error }
   | _ ->

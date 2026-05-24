@@ -138,6 +138,26 @@ let test_tool_layer_does_not_select_concrete_backend () =
     ; "lib/keeper/keeper_tool_pr_review.ml"
     ]
 
+let test_shell_ops_delegates_gh_bridge () =
+  let shell_ops = "lib/keeper/keeper_shell_ops.ml" in
+  let gh_bridge = "lib/keeper/keeper_shell_gh_bridge.ml" in
+  assert_contains shell_ops "Keeper_shell_gh_bridge.handle_gh_op";
+  assert_not_contains shell_ops "gh_command_from_args";
+  assert_not_contains shell_ops "gh_simple_command_to_shell_ir";
+  assert_contains gh_bridge "gh_command_from_args";
+  assert_contains gh_bridge "gh_simple_command_to_shell_ir";
+  assert_contains gh_bridge "run_command_with_status";
+  assert_not_contains gh_bridge "Keeper_sandbox_docker."
+
+let test_active_gates_do_not_name_retired_shell_docker () =
+  List.iter
+    (fun rel ->
+       assert_not_contains rel "lib/keeper/keeper_shell_docker.ml";
+       assert_not_contains rel "keeper_shell_docker.ml")
+    [ "scripts/keeper-cwd-leak-gate.sh"
+    ; "scripts/lint/exhaustive-guard.allowlist"
+    ]
+
 let () =
   Alcotest.run
     "keeper_sandbox_boundary_policy"
@@ -175,5 +195,13 @@ let () =
             "tool layer does not select concrete backend"
             `Quick
             test_tool_layer_does_not_select_concrete_backend;
+          Alcotest.test_case
+            "shell ops delegates gh compatibility bridge"
+            `Quick
+            test_shell_ops_delegates_gh_bridge;
+          Alcotest.test_case
+            "active gates do not name retired shell docker"
+            `Quick
+            test_active_gates_do_not_name_retired_shell_docker;
         ] );
     ]

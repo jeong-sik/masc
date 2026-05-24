@@ -535,10 +535,6 @@ lib/keeper/keeper_shell_bash.ml:150
 lib/keeper/keeper_shell_bash.ml:274
 lib/keeper/keeper_shell_bash.ml:729
 lib/keeper/keeper_shell_bash.ml:744
-lib/keeper/keeper_shell_docker.ml:214
-lib/keeper/keeper_shell_docker.ml:221
-lib/keeper/keeper_shell_docker.ml:253
-lib/keeper/keeper_shell_docker.ml:256
 lib/keeper/keeper_shell_ops.ml:979
 lib/keeper/keeper_shell_shared.ml:90
 lib/keeper/keeper_shell_shared.ml:136

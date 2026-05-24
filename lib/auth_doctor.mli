@@ -5,17 +5,16 @@
     that is rendered as JSON ({!to_yojson}) or human text
     ({!render_text}) and graded by {!exit_code} for CLI use.
 
-    Internal: ~16 helpers + 1 type stay private —
-    \[admin_token_env_state] enum, [codex_mcp_token_env_var] /
-    [codex_mcp_login_note] pinned literals,
+    Internal: ~14 helpers stay private —
+    \[admin_token_env_state] enum,
     [canonicalize_path] / [file_exists] / [read_nonempty_text_file]
     file-system helpers, [dedupe_keep_order], [option_field],
     [raw_token_file_path], [watched_agent_of_credential],
     [watched_agent_names], [admin_token_env_state],
     [admin_token_env_fields], [role_counts_of_credentials],
     [live_admin_token_file_source], [admin_bearer_sources],
-    [codex_mcp_report], MCP client identity checks, plus the per-record yojson encoders
-    ([watched_agent_to_yojson], [codex_mcp_to_yojson]).
+    MCP client identity checks, plus the per-record yojson encoder
+    ([watched_agent_to_yojson]).
     All consumed only inside {!analyze} / {!to_yojson} /
     {!render_text}. *)
 
@@ -43,23 +42,6 @@ type watched_agent = {
 }
 (** Per-agent credential snapshot.  Aggregated under
     {!t.watched_agents}. *)
-
-type codex_mcp = {
-  server_name : string;
-  auth_model : string;
-  token_env_var : string;
-  token_env_configured : bool;
-  token_status : string;
-  token_agent : string option;
-  token_role : string option;
-  token_can_read_state : bool option;
-  login_supported : bool;
-  login_note : string;
-  config : Codex_mcp_config_doctor.t;
-}
-(** Codex MCP wiring snapshot.  [login_note] documents that
-    [codex mcp login] is OAuth-only while masc-mcp uses bearer
-    token auth — pinned at the contract seam. *)
 
 type mcp_client = {
   client_name : string;
@@ -106,7 +88,6 @@ type t = {
   credential_count : int;
   role_counts : (string * int) list;
   watched_agents : watched_agent list;
-  codex_mcp : codex_mcp;
   mcp_clients : mcp_client list;
   warnings : string list;
   next_actions : string list;

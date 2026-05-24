@@ -33,11 +33,11 @@ let contains_substring ~needle s =
     in
     loop 0
 
-let test_login_enables_bearer_auth_and_prints_codex_exports () =
+let test_login_enables_bearer_auth_and_prints_exports () =
   with_temp_dir "auth-login" @@ fun base_path ->
   match
     Auth_login.mint ~base_path ~host:"127.0.0.1" ~port:8935
-      ~agent_name:"codex-mcp-client" ~role:Masc_domain.Worker ()
+      ~agent_name:"test-agent" ~role:Masc_domain.Worker ()
   with
   | Error err ->
       failf "login mint failed: %s" (Masc_domain.masc_error_to_string err)
@@ -45,15 +45,11 @@ let test_login_enables_bearer_auth_and_prints_codex_exports () =
       let cfg = Auth.load_auth_config base_path in
       check bool "auth enabled" true cfg.enabled;
       check bool "require token" true cfg.require_token;
-      check string "agent" "codex-mcp-client" report.agent_name;
+      check string "agent" "test-agent" report.agent_name;
       check string "role" "worker"
         (Masc_domain.agent_role_to_string report.role);
-      check string "codex env" "MASC_MCP_TOKEN"
-        report.codex_token_env_var;
       check string "client env" "MASC_MCP_TOKEN"
         report.mcp_token_env_var;
-      check bool "codex login unsupported" false
-        report.codex_login_supported;
       check bool "raw token file exists" true
         (Sys.file_exists report.raw_token_file);
       (match
@@ -61,7 +57,7 @@ let test_login_enables_bearer_auth_and_prints_codex_exports () =
            ~token:report.bearer_token
        with
        | Ok cred ->
-           check string "token owner" "codex-mcp-client"
+           check string "token owner" "test-agent"
              cred.agent_name;
            check (option string) "mcp token does not expire" None
              cred.expires_at
@@ -72,11 +68,6 @@ let test_login_enables_bearer_auth_and_prints_codex_exports () =
       check bool "shell exports mcp token" true
         (contains_substring ~needle:"export MASC_MCP_TOKEN="
            shell);
-      let text = Auth_login.render_text report in
-      check bool "text explains codex login" true
-        (contains_substring
-           ~needle:"`codex mcp login` is OAuth-only"
-           text);
       let json = Auth_login.to_yojson report in
       check string "json status" "ok"
         (Yojson.Safe.Util.member "status" json
@@ -104,14 +95,10 @@ let test_login_prints_claude_client_env () =
        | Error err ->
            failf "minted claude token did not verify: %s"
              (Masc_domain.masc_error_to_string err));
-      check string "codex env remains pinned" "MASC_MCP_TOKEN"
-        report.codex_token_env_var;
       let shell = Auth_login.render_shell report in
       check bool "shell exports claude token" true
         (contains_substring ~needle:"export MASC_CLAUDE_MCP_TOKEN="
            shell);
-      check bool "shell does not export codex token for claude login" false
-        (contains_substring ~needle:"export MASC_MCP_TOKEN=" shell);
       let json = Auth_login.to_yojson report in
       check string "json client env" "MASC_CLAUDE_MCP_TOKEN"
         (Yojson.Safe.Util.member "mcp_client" json
@@ -123,8 +110,8 @@ let () =
     [
       ( "login",
         [
-          test_case "enables bearer auth and prints Codex exports" `Quick
-            test_login_enables_bearer_auth_and_prints_codex_exports;
+          test_case "enables bearer auth and prints exports" `Quick
+            test_login_enables_bearer_auth_and_prints_exports;
           test_case "prints Claude client env" `Quick
             test_login_prints_claude_client_env;
         ] );

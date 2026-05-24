@@ -74,7 +74,6 @@
   test_subscriptions
   test_session
   test_progress
-  test_spawn
   test_validation
   test_response
   test_channel_gate_connector_routes
@@ -92,7 +91,6 @@
   test_transport_read_model
   test_multi_room
   test_worktree_detection
-  test_bounded
   test_mention
   test_mention_dedup
   test_heartbeat_qw
@@ -396,7 +394,6 @@
   test_subscriptions
   test_session
   test_progress
-  test_spawn
   test_validation
   test_response
   test_channel_gate_connector_routes
@@ -414,7 +411,6 @@
   test_transport_read_model
   test_multi_room
   test_worktree_detection
-  test_bounded
   test_mention
   test_mention_dedup
   test_heartbeat_qw
@@ -748,7 +744,6 @@
   test_dashboard_namespace_truth
   test_dashboard_snapshot
   test_server_runtime_bootstrap
-  test_server_runtime_bootstrap_codex_config
   test_server_base_path_diagnostics
   test_server_timing
   test_server_startup_takeover
@@ -974,7 +969,6 @@
   test_dashboard_namespace_truth
   test_dashboard_snapshot
   test_server_runtime_bootstrap
-  test_server_runtime_bootstrap_codex_config
   test_server_base_path_diagnostics
   test_server_timing
   test_server_startup_takeover
@@ -1230,10 +1224,8 @@
   test_mention_coverage
   test_resilience_coverage
   test_types_coverage
-  test_spawn_coverage
   test_dashboard_coverage
   test_rate_limit_coverage
-  test_bounded_coverage
   test_session_coverage
   test_cache_eio_coverage
   test_run_eio_coverage
@@ -1289,10 +1281,8 @@
   test_mention_coverage
   test_resilience_coverage
   test_types_coverage
-  test_spawn_coverage
   test_dashboard_coverage
   test_rate_limit_coverage
-  test_bounded_coverage
   test_session_coverage
   test_cache_eio_coverage
   test_run_eio_coverage

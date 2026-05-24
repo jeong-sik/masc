@@ -539,7 +539,7 @@ let login_agent =
   let doc = "Agent identity bound to the minted bearer token" in
   Arg.(
     value
-    & opt string "codex-local-admin"
+    & opt string "local-admin"
     & info ["agent"] ~docv:"AGENT" ~doc)
 
 let login_shell =

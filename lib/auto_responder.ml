@@ -14,12 +14,11 @@
 
 open Yojson.Safe.Util
 
-type mode = Disabled | Spawn | Model
+type mode = Disabled | Model
 
 let get_mode () =
   match Env_config_core.auto_respond_opt () with
-  | Some "true" | Some "1" | Some "yes" | Some "spawn" -> Spawn
-  | Some "model" | Some "fast" -> Model
+  | Some "true" | Some "1" | Some "yes" | Some "model" | Some "fast" -> Model
   | _ -> Disabled
 
 let is_enabled () = get_mode () <> Disabled
@@ -47,7 +46,7 @@ let activity_log ~mode ~from_agent ~mention ~status ~detail =
       time.Unix.tm_min
       time.Unix.tm_sec
   in
-  let mode_str = match mode with Disabled -> "OFF" | Spawn -> "SPAWN" | Model -> "MODEL" in
+  let mode_str = match mode with Disabled -> "OFF" | Model -> "MODEL" in
   let line = Printf.sprintf "[%s] [%s] %s → @%s | %s | %s\n"
     timestamp mode_str from_agent mention status detail in
   try Fs_compat.append_file log_file line
@@ -96,66 +95,6 @@ let should_throttle ~agent_type =
 (* --- Mention helpers (re-export) --- *)
 
 let agent_type_of_mention = Mention.agent_type_of_mention
-
-let is_spawnable mention =
-  let base = agent_type_of_mention mention in
-  Option.is_some (Spawn.get_config base)
-
-(* --- CLI spawn (Spawn mode) --- *)
-
-let build_response_prompt ~from_agent ~content ~mention =
-  Printf.sprintf {|You received a mention in the MASC room from %s.
-
-Message: "%s"
-
-Quick response protocol:
-1. Call mcp__masc__masc_join(agent_name="%s")
-   → Read the response to get your assigned nickname (e.g., "gemini-rare-beaver")
-2. Call mcp__masc__masc_broadcast using YOUR ASSIGNED NICKNAME from step 1:
-   mcp__masc__masc_broadcast(agent_name="<your-assigned-nickname>", message="[your concise response]")
-   IMPORTANT: Do NOT use "%s" - use the full nickname from the join response!
-3. Call mcp__masc__masc_leave()
-
-Respond in 1-2 sentences. Be helpful and concise.|}
-    from_agent content mention mention
-
-let cli_argv_of_agent_type (agent_type : string) : string list =
-  match Spawn.get_config agent_type with
-  | Some config ->
-    (match Exec_policy_mutation_classifier.argv_words_of_string config.command with
-     | Some words -> List.filter (fun s -> s <> "") words
-     | None ->
-       let command = String.trim config.command in
-       if String.equal command "" then [] else [ command ])
-  | None -> [agent_type]
-
-let run_cli_agent ~agent_type ~prompt =
-  match Spawn.get_config agent_type with
-  | None -> debug_log (Printf.sprintf "SPAWN_SKIP not spawnable: %s" agent_type)
-  | Some _ ->
-    let base = cli_argv_of_agent_type agent_type in
-    let argv = base in
-    let raw_source = String.concat " " (List.map Filename.quote argv) in
-    debug_log (Printf.sprintf "SPAWN argv=%s" (String.concat " " (List.map Filename.quote argv)));
-    let (status, output) =
-      Masc_exec.Exec_gate.run_argv_with_stdin_and_status
-        ~actor:(Masc_exec.Agent_id.of_string "system/auto_responder")
-        ~raw_source
-        ~summary:"auto responder cli spawn"
-        ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Auto_responder ())
-        ~stdin_content:prompt
-        argv
-    in
-    let status_s = match status with
-      | Unix.WEXITED n -> Printf.sprintf "exit=%d" n
-      | Unix.WSIGNALED n -> Printf.sprintf "signaled=%d" n
-      | Unix.WSTOPPED n -> Printf.sprintf "stopped=%d" n
-    in
-    let preview =
-      let s = String.trim output in
-      String_util.utf8_safe ~max_bytes:203 ~suffix:"..." s |> String_util.to_string
-    in
-    debug_log (Printf.sprintf "SPAWN_DONE %s output=%s" status_s preview)
 
 (* --- MODEL mode: shared cascade + in-process MASC HTTP tools/call --- *)
 
@@ -316,7 +255,7 @@ let call_model_and_broadcast ~sw ~agent_type ~prompt ~mention =
 
 let maybe_respond ~sw ~base_path:_ ~from_agent ~content ~mention =
   let mode = get_mode () in
-  let mode_str = match mode with Disabled -> "Disabled" | Spawn -> "Spawn" | Model -> "Model" in
+  let mode_str = match mode with Disabled -> "Disabled" | Model -> "Model" in
   debug_log (Printf.sprintf "CALLED: from=%s mention=%s mode=%s enabled=%b"
     from_agent (match mention with Some m -> m | None -> "NONE") mode_str (is_enabled ()));
   match mention with
@@ -331,15 +270,10 @@ let maybe_respond ~sw ~base_path:_ ~from_agent ~content ~mention =
   | Some m ->
       let from_base = agent_type_of_mention from_agent in
       let mention_base = agent_type_of_mention m in
-      debug_log (Printf.sprintf "CHECK: from_base=%s mention_base=%s spawnable=%b" from_base mention_base (is_spawnable m));
+      debug_log (Printf.sprintf "CHECK: from_base=%s mention_base=%s" from_base mention_base);
       if from_base = mention_base then (
         debug_log "EXIT: Self-mention";
         Log.AutoResponder.info "Skip self-mention @%s from %s" m from_agent;
-        None
-      ) else if not (is_spawnable m) then (
-        debug_log "EXIT: Not spawnable";
-        activity_log ~mode ~from_agent ~mention:m ~status:"SKIP" ~detail:"Not spawnable agent type";
-        Log.AutoResponder.info "@%s not spawnable" m;
         None
       ) else if should_throttle ~agent_type:mention_base then (
         debug_log "EXIT: Throttled";
@@ -354,7 +288,7 @@ let maybe_respond ~sw ~base_path:_ ~from_agent ~content ~mention =
         in
         debug_log (Printf.sprintf "DISPATCH: mode=%s task_id=%s" mode_str task_id);
         activity_log ~mode ~from_agent ~mention:m
-          ~status:(match mode with Spawn -> "SPAWN" | Model -> "MODEL" | Disabled -> "OFF")
+          ~status:(match mode with Model -> "MODEL" | Disabled -> "OFF")
           ~detail:task_id;
         Eio.Fiber.fork ~sw (fun () ->
           try
@@ -363,10 +297,6 @@ let maybe_respond ~sw ~base_path:_ ~from_agent ~content ~mention =
             | Model ->
                 Log.AutoResponder.info "Calling %s for @%s" mention_base m;
                 call_model_and_broadcast ~sw ~agent_type:mention_base ~prompt:content ~mention:from_agent
-            | Spawn ->
-                let prompt = build_response_prompt ~from_agent ~content ~mention:m in
-                Log.AutoResponder.info "Spawning %s for @%s from %s" mention_base m from_agent;
-                run_cli_agent ~agent_type:mention_base ~prompt
           with
           | Eio.Cancel.Cancelled _ as e -> raise e
           | exn ->

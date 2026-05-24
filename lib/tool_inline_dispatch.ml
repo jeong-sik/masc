@@ -285,48 +285,8 @@ let dispatch (ctx : context) ~(name : string) : Tool_result.t option =
      governance_set removed — pruned from surfaces *)
 
   | "masc_spawn" ->
-      let spawn_agent_name = arg_get_string "agent_name" "" in
-      let prompt = arg_get_string "prompt" "" in
-      if String.equal prompt "" then Some (Tool_result.error ~tool_name:name ~start_time:start "prompt is required")
-      else
-      let timeout_seconds = arg_get_int "timeout_seconds" 300 in
-      let model_name =
-        match arguments |> Yojson.Safe.Util.member "model" with
-        | `String s ->
-            let trimmed = String.trim s in
-            if String.equal trimmed "" then None else Some trimmed
-        | _ -> None
-      in
-      let runtime_model_valid =
-        match (spawn_agent_name, model_name) with
-        | "llama", None -> Error "model is required when agent_name=llama"
-        | "llama", Some raw ->
-            let spec_name =
-              if String.contains raw ':' then raw else Cascade_runtime.local_model_label raw
-            in
-            (* Validate the label parses without retaining model_spec *)
-            (match Cascade_config.parse_model_string spec_name with Some _ -> Ok () | None -> Error "invalid model spec")
-        | _ ->
-            if Cascade_runtime.has_execution_model_config ()
-            then Ok ()
-            else Error "no execution model"
-      in
-      let module U = Yojson.Safe.Util in
-      let working_dir = match arguments |> U.member "working_dir" with
-        | `String s when not (String.equal s "") -> Some s
-        | _ -> None
-      in
-       (match runtime_model_valid with
-       | Error e -> Some (Tool_result.error ~tool_name:name ~start_time:start e)
-       | Ok () ->
-           ignore (sw, state);
-           let result =
-             Spawn.spawn ~agent_name:spawn_agent_name
-               ~prompt ~timeout_seconds ?working_dir ()
-           in
-           let msg = Spawn.result_to_string result in
-           Some (if result.Spawn.success then Tool_result.ok ~tool_name:name ~start_time:start msg
-                 else Tool_result.error ~tool_name:name ~start_time:start msg))
+      Some (Tool_result.error ~tool_name:name ~start_time:start
+        "masc_spawn removed: vendor-specific agent spawning belongs to OAS domain")
 
   (* ── Tool discovery ─────────────────────────────────────────── *)
   | "masc_discover_tools" ->

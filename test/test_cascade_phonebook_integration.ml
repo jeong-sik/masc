@@ -92,7 +92,7 @@ let test_model_flavor_lookup () =
      | None -> failwith "provider not found"
      | Some p ->
        check string "flavor" "provider_h" (flavor_to_string p.flavor);
-       check bool "Qwen cannot stream with tools" false
+       check bool "Provider_h_wire cannot stream with tools" false
          (can_stream_with_tools (flavor_of_phonebook p.flavor)))
 
 let test_thinking_control_per_model () =

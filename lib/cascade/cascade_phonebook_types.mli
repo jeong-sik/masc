@@ -1,14 +1,14 @@
 (** Phonebook types — public interface. *)
 
 type cascade_server_flavor =
-  | Llama_cpp | Ollama | Vllm | Openai | Deep_seek | Zai_glm | Qwen
+  | Llama_cpp | Ollama | Vllm | Provider_d_wire | Provider_g_wire | Provider_k_zai | Provider_h_wire
 [@@deriving show, eq]
 
 val flavor_of_string : string -> cascade_server_flavor
 val flavor_to_string : cascade_server_flavor -> string
 
 type cascade_protocol =
-  | Openai_http | Ollama_http | Anthropic_http | Openai_cli
+  | Openai_http | Ollama_http | Provider_a_http | Openai_cli
 [@@deriving show, eq]
 
 val protocol_of_string : string -> cascade_protocol

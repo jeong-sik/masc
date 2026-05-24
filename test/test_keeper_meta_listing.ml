@@ -58,7 +58,7 @@ let write_minimal_cascade_toml config_root =
   write_file
     (Filename.concat config_root "cascade.toml")
     {|[providers.custom]
-protocol = "openai-http"
+protocol = "provider_d-http"
 endpoint = "http://127.0.0.1:9/v1"
 
 [models.mock]

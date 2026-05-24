@@ -3452,7 +3452,7 @@ let test_public_projection_allowlist_filters_provider_model () =
       ; ("lane", `String "L1")
       ; ("source_clock", `String "wall")
       ; ("compaction_source", `String "pre_dispatch_hygiene")
-      ; ("model_source", `String "gpt-4")
+      ; ("model_source", `String "model-d-4")
       ; ("provider_attempt_id", `String "pa1")
       ; ( "clock_refs"
         , `Assoc
@@ -3497,7 +3497,7 @@ let test_to_json_preserves_full_decision () =
     M.make ~keeper_name:"k" ~trace_id:"t" ~event:M.Turn_started
       ~decision:
         (`Assoc
-           [ ("model_source", `String "gpt-4")
+           [ ("model_source", `String "model-d-4")
            ; ("provider_secret", `String "shh")
            ])
       ()
@@ -3515,7 +3515,7 @@ let test_public_to_json_redacts_decision () =
       ~decision:
         (`Assoc
            [ ("edge_id", `String "e1")
-           ; ("model_source", `String "gpt-4")
+           ; ("model_source", `String "model-d-4")
            ; ("provider_secret", `String "shh")
            ])
       ()

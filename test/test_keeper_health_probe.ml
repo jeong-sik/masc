@@ -97,7 +97,7 @@ let test_runtime_pressure_classifier () =
        (R.Provider_runtime_error
           { code = "provider_capacity_backpressure"
           ; detail = "rate limit"
-          ; provider_id = Some "openai"
+          ; provider_id = Some "provider_d"
           ; http_status = Some 429
           ; cascade_name = None
           }));

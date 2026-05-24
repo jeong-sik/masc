@@ -455,11 +455,11 @@ let test_sample_of_response_uses_usage_and_native_telemetry () =
     }
   in
   let telemetry = make_telemetry ~timings ~request_latency_ms:620 () in
-  let response = make_response ~usage ~telemetry ~model:"gpt-4" () in
+  let response = make_response ~usage ~telemetry ~model:"model-d-4" () in
   let sample =
     DOB.sample_of_response
       ~provider_id:"openai_compat"
-      ~model_id:"gpt-4"
+      ~model_id:"model-d-4"
       ~status:DOB.Success
       response
   in
@@ -673,7 +673,7 @@ let test_serialization_ms_propagates_through_sample_of_response () =
   let sample =
     DOB.sample_of_response
       ~provider_id:"openai_compat"
-      ~model_id:"gpt-4"
+      ~model_id:"model-d-4"
       ~serialization_ms:7.5
       ~status:DOB.Success
       response

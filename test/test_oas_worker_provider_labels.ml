@@ -27,7 +27,7 @@ let make_ollama_provider_cfg ?(model_id = "qwen3:27b") () =
 ;;
 
 let make_openai_compat_provider_cfg
-      ?(model_id = "gpt-4.1")
+      ?(model_id = "model-d-4.1")
       ?(base_url = "http://127.0.0.1:18080/v1")
       ()
   =

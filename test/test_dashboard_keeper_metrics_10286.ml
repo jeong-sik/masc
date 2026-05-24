@@ -309,7 +309,7 @@ let test_metrics_window_redacts_model_and_handoff_labels () =
       ~compact:false
       ~series_points:80
       ~metrics_window_max_bytes:200_000
-      ~primary_model_norm:"gpt-5.4"
+      ~primary_model_norm:"model-d-5.4"
       ~primary_model:"provider_d:gpt-5.4"
   in
   let open Yojson.Safe.Util in

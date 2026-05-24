@@ -110,13 +110,13 @@ let test_build_manifest_picks_only_fully_passing_rows () =
       unknown_case_runs = 0;
       grouped_by_provider_model_keeper =
         [
-          row ~provider:"openai" ~model:"gpt-5.4" ~keeper_profile:"bench-analyst"
+          row ~provider:"provider_d" ~model:"model-d-5.4" ~keeper_profile:"bench-analyst"
             ~composite_score:100.0 ~cases_total:2 ~cases_passed:2
             ~stability_score:1.0 ();
-          row ~provider:"openai" ~model:"gpt-5.4-mini"
+          row ~provider:"provider_d" ~model:"model-d-5.4-mini"
             ~keeper_profile:"bench-verifier" ~composite_score:100.0
             ~stability_score:0.6666666667 ();
-          row ~provider:"openai" ~model:"gpt-5.4" ~keeper_profile:"bench-executor"
+          row ~provider:"provider_d" ~model:"model-d-5.4" ~keeper_profile:"bench-executor"
             ~composite_score:75.0 ~cases_passed:0 ();
         ];
       grouped_by_provider_model = [];

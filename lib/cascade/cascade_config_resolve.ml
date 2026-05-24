@@ -78,7 +78,7 @@ let cascade_prefix_of_decl_protocol raw =
     | "provider_a-http" -> Some Llm_provider.Provider_config.Provider_a
     | "provider_d-cli" -> Some Llm_provider.Provider_config.Cli_tool_a
     | "provider_d-http" -> Some Llm_provider.Provider_config.Provider_d_compat
-    | "google-cli" -> Some Llm_provider.Provider_config.Cli_tool_b
+    | "provider_f-cli" -> Some Llm_provider.Provider_config.Cli_tool_b
     | "provider_c-cli" -> Some Llm_provider.Provider_config.Cli_tool_c
     | "ollama-http" -> Some Llm_provider.Provider_config.Ollama
     | _ -> None

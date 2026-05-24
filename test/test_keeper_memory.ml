@@ -1126,7 +1126,7 @@ let test_llm_summary_direct_provider_filter () =
     (Keeper_memory_llm_summary.is_direct_completion_provider
        (llm_summary_provider
           ~kind:Llm_provider.Provider_config.Cli_tool_a
-          ~model_id:"gpt-5.4"));
+          ~model_id:"model-d-5.4"));
   check bool "agent_llm_a cli excluded" false
     (Keeper_memory_llm_summary.is_direct_completion_provider
        (llm_summary_provider

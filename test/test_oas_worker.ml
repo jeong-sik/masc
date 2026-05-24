@@ -2489,7 +2489,7 @@ let make_ollama_provider_cfg ?(model_id = "qwen3:27b") () =
 ;;
 
 let make_openai_compat_provider_cfg
-      ?(model_id = "gpt-4.1")
+      ?(model_id = "model-d-4.1")
       ?(base_url = "http://127.0.0.1:18080/v1")
       ()
   =
@@ -4674,7 +4674,7 @@ let test_cli_prompt_preflight_uses_pipeline_context_window_fallback () =
 ;;
 
 let test_cli_prompt_preflight_scales_retry_limit_for_argv_only_overflow () =
-  let provider_cfg = make_cli_tool_a_provider_cfg ~model_id:"gpt-4.1" () in
+  let provider_cfg = make_cli_tool_a_provider_cfg ~model_id:"model-d-4.1" () in
   let config =
     Cascade_runner.default_config
       ~name:"cli-preflight"

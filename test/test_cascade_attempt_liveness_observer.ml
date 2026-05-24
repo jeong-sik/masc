@@ -165,7 +165,7 @@ let test_observe_done_completes () =
 
 let test_observe_timing_histograms_use_bounded_provider_label () =
   let cascade = "observe_provider_bucket_cascade" in
-  let provider = "openai" in
+  let provider = "provider_d" in
   let obs =
     mk_observer
       ~mode:Cfg.Observe

@@ -111,7 +111,7 @@ let recent_event ?(event_type = "task_done") ?(ts_iso = "2026-05-05T03:00:00Z")
     ]
 
 let keeper_fixture ?(name = "k-1") ?(status = "active")
-    ?(agent_name = "claude-1") ?(generation = 2) ?(context_ratio = 0.42)
+    ?(agent_name = "agent_llm_a-1") ?(generation = 2) ?(context_ratio = 0.42)
     ?(current_task = "do thing") ?(last_reply_status = "replied")
     ?(last_reply_preview = "preview text") ?(skill_primary = "ocaml")
     () =
@@ -136,7 +136,7 @@ let keeper_fixture ?(name = "k-1") ?(status = "active")
       ("agent", `Assoc [ ("current_task", json_string current_task) ]);
     ]
 
-let agent_fixture ?(name = "a-1") ?(agent_type = "claude")
+let agent_fixture ?(name = "a-1") ?(agent_type = "agent_llm_a")
     ?(status = T.Active) ?(capabilities = [ "ocaml"; "python"; "rust" ])
     ?(current_task = Some "implement X")
     ?(joined_at = "2026-05-05T00:00:00Z")

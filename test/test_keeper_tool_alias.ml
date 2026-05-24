@@ -810,11 +810,11 @@ let () =
             `Quick
             test_hallucinated_builtin_still_unexpected
         ; Alcotest.test_case
-            "mcp-prefixed anthropic alias routes"
+            "mcp-prefixed provider_a alias routes"
             `Quick
             test_mcp_prefixed_anthropic_alias_routes
         ; Alcotest.test_case
-            "mcp-prefixed anthropic alias telemetry uses stripped tool label"
+            "mcp-prefixed provider_a alias telemetry uses stripped tool label"
             `Quick
             test_mcp_prefixed_anthropic_alias_telemetry_uses_stripped
         ; Alcotest.test_case

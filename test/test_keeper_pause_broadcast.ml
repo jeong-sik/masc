@@ -253,7 +253,7 @@ let test_provider_failure_not_reported_as_tool_unsatisfied () =
       ~terminal_reason_code:"api_error_invalid_request"
       ~error_kind:(Some (R.error_kind_of_string "api"))
       ~error_message:
-        (Some "Invalid request: kimi_cli startup crash while setting process title")
+        (Some "Invalid request: cli_tool_c startup crash while setting process title")
       ()
   in
   check_disp "provider failure before tool use" r "pause_human" "provider_runtime_error"

@@ -97,7 +97,7 @@ type cascade_provider =
       outcomes with in-band cascade attempt results. *)
   ; headers : (string * string) list option
     (** Reserved schema (Phase 5.6 prep). Additional HTTP headers per
-      provider, e.g. [("anthropic-version", "2023-06-01")] for Anthropic
+      provider, e.g. [("provider_a-version", "2023-06-01")] for Anthropic
       HTTP API. Sorted by key for deterministic show/eq. [None] means
       no [\[providers.<id>.headers\]] sub-table; [Some \[\]] means
       declared but empty (or all entries rejected as non-string).
@@ -139,7 +139,7 @@ type cascade_thinking_control_format =
     Schema-additive: no callers consume the fields in this PR. M2
     follow-up wires OAS [for_model_id_static], which currently
     substring-matches on the upstream API model identifier (e.g.
-    ['claude-sonnet-4-6'] — Llm_provider.Capabilities.for_model_id
+    ['model-a-sonnet'] — Llm_provider.Capabilities.for_model_id
     receives the api-name, not the cascade [\[models.<id>\]] key
     ['sonnet']), to read these fields via {!model_capabilities_for_id} —
     keyed on the cascade [<id>] (the cascade key, not the api-name).

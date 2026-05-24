@@ -31,10 +31,10 @@ let test_emit_and_list_events () =
   with_config (fun config ->
       ignore
         (Activity_graph.emit config ~kind:"agent.joined"
-           ~actor:(Activity_graph.entity ~kind:"agent" "claude")
-           ~subject:(Activity_graph.entity ~kind:"agent" "claude")
+           ~actor:(Activity_graph.entity ~kind:"agent" "agent_llm_a")
+           ~subject:(Activity_graph.entity ~kind:"agent" "agent_llm_a")
            ~tags:[ "agent"; "join" ]
-           ~payload:(`Assoc [ ("agent_name", `String "claude") ])
+           ~payload:(`Assoc [ ("agent_name", `String "agent_llm_a") ])
            ());
       ignore
         (Activity_graph.emit config ~kind:"task.created"
@@ -233,9 +233,9 @@ let test_events_json_exposes_provenance_and_non_stale_latest_seq () =
   with_config (fun config ->
       let first =
         Activity_graph.emit config ~kind:"agent.joined"
-          ~actor:(Activity_graph.entity ~kind:"agent" "claude")
-          ~subject:(Activity_graph.entity ~kind:"agent" "claude")
-          ~payload:(`Assoc [ ("agent_name", `String "claude") ])
+          ~actor:(Activity_graph.entity ~kind:"agent" "agent_llm_a")
+          ~subject:(Activity_graph.entity ~kind:"agent" "agent_llm_a")
+          ~payload:(`Assoc [ ("agent_name", `String "agent_llm_a") ])
           ()
       in
       let second =
@@ -377,10 +377,10 @@ let test_graph_json_summarizes_relationships () =
   with_config (fun config ->
       ignore
         (Activity_graph.emit config ~kind:"agent.joined"
-           ~actor:(Activity_graph.entity ~kind:"agent" "claude")
-           ~subject:(Activity_graph.entity ~kind:"agent" "claude")
+           ~actor:(Activity_graph.entity ~kind:"agent" "agent_llm_a")
+           ~subject:(Activity_graph.entity ~kind:"agent" "agent_llm_a")
            ~tags:[ "agent"; "join" ]
-           ~payload:(`Assoc [ ("agent_name", `String "claude") ])
+           ~payload:(`Assoc [ ("agent_name", `String "agent_llm_a") ])
            ());
       ignore
         (Activity_graph.emit config ~kind:"task.created"
@@ -391,7 +391,7 @@ let test_graph_json_summarizes_relationships () =
            ());
       ignore
         (Activity_graph.emit config ~kind:"task.claimed"
-           ~actor:(Activity_graph.entity ~kind:"agent" "claude")
+           ~actor:(Activity_graph.entity ~kind:"agent" "agent_llm_a")
            ~subject:(Activity_graph.entity ~kind:"task" "task-003")
            ~tags:[ "task"; "claim" ]
            ~payload:(`Assoc [ ("task_id", `String "task-003") ])
@@ -421,28 +421,28 @@ let test_graph_json_tracks_runtime_activity_kinds () =
            ());
       ignore
         (Activity_graph.emit config ~kind:"team.turn"
-           ~actor:(Activity_graph.entity ~kind:"agent" "claude")
+           ~actor:(Activity_graph.entity ~kind:"agent" "agent_llm_a")
            ~subject:(Activity_graph.entity ~kind:"operation" "sess-001")
            ~tags:[ "operation"; "team.turn" ]
            ~payload:(`Assoc [ ("kind", `String "broadcast") ])
            ());
       ignore
         (Activity_graph.emit config ~kind:"task.started"
-           ~actor:(Activity_graph.entity ~kind:"agent" "claude")
+           ~actor:(Activity_graph.entity ~kind:"agent" "agent_llm_a")
            ~subject:(Activity_graph.entity ~kind:"task" "task-777")
            ~tags:[ "task"; "task.started" ]
            ~payload:(`Assoc [ ("task_id", `String "task-777") ])
            ());
       ignore
         (Activity_graph.emit config           ~kind:"board.posted"
-           ~actor:(Activity_graph.entity ~kind:"agent" "claude")
+           ~actor:(Activity_graph.entity ~kind:"agent" "agent_llm_a")
            ~subject:(Activity_graph.entity ~kind:"post" "post-42")
            ~tags:[ "board"; "board.posted" ]
            ~payload:(`Assoc [ ("post_id", `String "post-42") ])
            ());
       ignore
         (Activity_graph.emit config           ~kind:"board.voted"
-           ~actor:(Activity_graph.entity ~kind:"agent" "gemini")
+           ~actor:(Activity_graph.entity ~kind:"agent" "provider_f")
            ~subject:(Activity_graph.entity ~kind:"post" "post-42")
            ~tags:[ "board"; "board.voted" ]
            ~payload:(`Assoc [ ("target_id", `String "post-42") ])
@@ -483,19 +483,19 @@ let test_graph_json_reports_kind_counts_and_heatmap_totals () =
   with_config (fun config ->
       ignore
         (Activity_graph.emit config ~kind:"message.broadcast"
-           ~actor:(Activity_graph.entity ~kind:"agent" "claude")
+           ~actor:(Activity_graph.entity ~kind:"agent" "agent_llm_a")
            ~tags:[ "message"; "broadcast" ]
            ~payload:(`Assoc [ ("content", `String "hello") ])
            ());
       ignore
         (Activity_graph.emit config ~kind:"message.broadcast"
-           ~actor:(Activity_graph.entity ~kind:"agent" "claude")
+           ~actor:(Activity_graph.entity ~kind:"agent" "agent_llm_a")
            ~tags:[ "message"; "broadcast" ]
            ~payload:(`Assoc [ ("content", `String "world") ])
            ());
       ignore
         (Activity_graph.emit config ~kind:"task.started"
-           ~actor:(Activity_graph.entity ~kind:"agent" "claude")
+           ~actor:(Activity_graph.entity ~kind:"agent" "agent_llm_a")
            ~subject:(Activity_graph.entity ~kind:"task" "task-900")
            ~tags:[ "task"; "task.started" ]
            ~payload:(`Assoc [ ("task_id", `String "task-900") ])
@@ -524,7 +524,7 @@ let test_agent_spans_json_honors_since_ms () =
   with_config (fun config ->
       ignore
         (Activity_graph.emit config ~kind:"task.started"
-           ~actor:(Activity_graph.entity ~kind:"agent" "claude")
+           ~actor:(Activity_graph.entity ~kind:"agent" "agent_llm_a")
            ~subject:(Activity_graph.entity ~kind:"task" "task-old")
            ~tags:[ "task"; "task.started" ]
            ~payload:(`Assoc [ ("task_id", `String "task-old") ])
@@ -533,14 +533,14 @@ let test_agent_spans_json_honors_since_ms () =
       let cutoff_ms = int_of_float (Time_compat.now () *. 1000.0) in
       ignore
         (Activity_graph.emit config ~kind:"task.started"
-           ~actor:(Activity_graph.entity ~kind:"agent" "claude")
+           ~actor:(Activity_graph.entity ~kind:"agent" "agent_llm_a")
            ~subject:(Activity_graph.entity ~kind:"task" "task-new")
            ~tags:[ "task"; "task.started" ]
            ~payload:(`Assoc [ ("task_id", `String "task-new") ])
            ());
       ignore
         (Activity_graph.emit config ~kind:"task.done"
-           ~actor:(Activity_graph.entity ~kind:"agent" "claude")
+           ~actor:(Activity_graph.entity ~kind:"agent" "agent_llm_a")
            ~subject:(Activity_graph.entity ~kind:"task" "task-new")
            ~tags:[ "task"; "task.done" ]
            ~payload:(`Assoc [ ("task_id", `String "task-new") ])

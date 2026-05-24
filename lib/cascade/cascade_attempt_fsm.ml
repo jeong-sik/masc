@@ -269,7 +269,7 @@ let enrich_sdk_error ~cascade_name
        not_found pattern.  CLI providers' not_found errors rarely surface
        through this code path (they emit text errors, not the OpenAI-compat
        InvalidRequest shape), so the practical effect is a no-op for CLI
-       agents while still helping HTTP providers (openai-compat, glm, etc.)
+       agents while still helping HTTP providers (provider_d-compat, provider_k, etc.)
        diagnose endpoint drift.  RFC-0058 §2.4: no closed-variant dispatch. *)
     let detail =
       Printf.sprintf "base_url=%s request_path=%s endpoint=%s"
@@ -344,7 +344,7 @@ let cli_wrapped_hard_quota_indicators = [
      Earlier 429-based indicators don't match because Anthropic now
      returns 400 with the user-set monthly cap.  Without these markers
      [sdk_error_is_hard_quota] returns false → cascade keeps retrying
-     claude_code:auto for the full OAS turn budget (~60min). *)
+     cli_tool_d:auto for the full OAS turn budget (~60min). *)
   "reached your specified api usage limits";
   "you will regain access on";
 ]

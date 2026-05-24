@@ -203,7 +203,7 @@ let parse_model_string
   | _ ->
   (* Kind classification goes through [Provider_kind_resolver] — a sum-typed
      resolver that consults Provider_registry as SSOT and never flattens
-     unknown specs to [OpenAI_compat]. This keeps ["gemini:gemini-3-flash-preview"]
+     unknown specs to [OpenAI_compat]. This keeps ["provider_f:provider_f-3-flash-preview"]
      from being misclassified by any downstream substring heuristic
      (issue #8159). *)
     match Provider_kind_resolver.resolve s with

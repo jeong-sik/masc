@@ -16,7 +16,7 @@ let () =
               let s : Mcp_server_eio_governance.mcp_session_record =
                 {
                   id = "sess-001";
-                  agent_name = Some "claude";
+                  agent_name = Some "agent_llm_a";
                   created_at = 1711234567.0;
                   last_seen = 1711234890.0;
                 }
@@ -73,7 +73,7 @@ let () =
                 `Assoc
                   [
                     ("id", `String "int-ts-sess");
-                    ("agent_name", `String "gemini");
+                    ("agent_name", `String "provider_f");
                     ("created_at", `Int 1711234567);
                     ("last_seen", `Int 1711234890);
                   ]
@@ -104,7 +104,7 @@ let () =
                 `Assoc
                   [
                     ("id", `String "extra-keys");
-                    ("agent_name", `String "codex");
+                    ("agent_name", `String "agent_code");
                     ("created_at", `Float 1000.0);
                     ("last_seen", `Float 2000.0);
                     ("extra_field", `String "should be ignored");

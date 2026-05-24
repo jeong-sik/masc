@@ -16,16 +16,16 @@ module Nickname = Nickname
    ============================================================ *)
 
 let test_generate_format () =
-  let nick = Nickname.generate "claude" in
+  let nick = Nickname.generate "agent_llm_a" in
   let parts = String.split_on_char '-' nick in
   check int "3 parts" 3 (List.length parts);
-  check string "starts with agent_type" "claude" (List.hd parts)
+  check string "starts with agent_type" "agent_llm_a" (List.hd parts)
 
 let test_generate_different_agent_types () =
-  let claude = Nickname.generate "claude" in
-  let gemini = Nickname.generate "gemini" in
-  check bool "claude starts with claude" true (String.sub claude 0 6 = "claude");
-  check bool "gemini starts with gemini" true (String.sub gemini 0 6 = "gemini")
+  let agent_llm_a = Nickname.generate "agent_llm_a" in
+  let provider_f = Nickname.generate "provider_f" in
+  check bool "agent_llm_a starts with agent_llm_a" true (String.sub agent_llm_a 0 6 = "agent_llm_a");
+  check bool "provider_f starts with provider_f" true (String.sub provider_f 0 6 = "provider_f")
 
 let test_generate_randomness () =
   let nick1 = Nickname.generate "test" in
@@ -43,10 +43,10 @@ let test_generate_empty_agent_type () =
    ============================================================ *)
 
 let test_generate_unique_format () =
-  let nick = Nickname.generate_unique "claude" in
+  let nick = Nickname.generate_unique "agent_llm_a" in
   let parts = String.split_on_char '-' nick in
   check int "4 parts" 4 (List.length parts);
-  check string "starts with agent_type" "claude" (List.hd parts)
+  check string "starts with agent_type" "agent_llm_a" (List.hd parts)
 
 let test_generate_unique_suffix_length () =
   let nick = Nickname.generate_unique "test" in
@@ -64,16 +64,16 @@ let test_generate_unique_different () =
    ============================================================ *)
 
 let test_is_generated_nickname_valid () =
-  let nick = Nickname.generate "claude" in
+  let nick = Nickname.generate "agent_llm_a" in
   check bool "generated is valid" true (Nickname.is_generated_nickname nick)
 
 let test_is_generated_nickname_manual () =
-  check bool "three parts valid" true (Nickname.is_generated_nickname "claude-swift-fox");
-  check bool "four parts valid" true (Nickname.is_generated_nickname "claude-swift-fox-a3b2")
+  check bool "three parts valid" true (Nickname.is_generated_nickname "agent_llm_a-swift-fox");
+  check bool "four parts valid" true (Nickname.is_generated_nickname "agent_llm_a-swift-fox-a3b2")
 
 let test_is_generated_nickname_short () =
-  check bool "two parts invalid" false (Nickname.is_generated_nickname "claude-opus");
-  check bool "one part invalid" false (Nickname.is_generated_nickname "claude")
+  check bool "two parts invalid" false (Nickname.is_generated_nickname "agent_llm_a-opus");
+  check bool "one part invalid" false (Nickname.is_generated_nickname "agent_llm_a")
 
 let test_is_generated_nickname_empty () =
   check bool "empty invalid" false (Nickname.is_generated_nickname "")
@@ -86,17 +86,17 @@ let test_is_generated_nickname_empty () =
    bearer-token rewrite path, and produced [silent:auth_token_resolve_error]
    storms (~20 events / 5min observed in fleet logs 2026-04-26). *)
 let test_is_dictionary_generated_nickname_accepts_real () =
-  check bool "claude-swift-fox" true
-    (Nickname.is_dictionary_generated_nickname "claude-swift-fox");
-  check bool "claude-swift-fox-a3b2" true
-    (Nickname.is_dictionary_generated_nickname "claude-swift-fox-a3b2");
+  check bool "agent_llm_a-swift-fox" true
+    (Nickname.is_dictionary_generated_nickname "agent_llm_a-swift-fox");
+  check bool "agent_llm_a-swift-fox-a3b2" true
+    (Nickname.is_dictionary_generated_nickname "agent_llm_a-swift-fox-a3b2");
   check bool "qa-king-warm-heron multi-part type" true
     (Nickname.is_dictionary_generated_nickname "qa-king-warm-heron");
   check bool "fresh generated" true
-    (Nickname.is_dictionary_generated_nickname (Nickname.generate "claude"));
+    (Nickname.is_dictionary_generated_nickname (Nickname.generate "agent_llm_a"));
   check bool "fresh unique" true
     (Nickname.is_dictionary_generated_nickname
-       (Nickname.generate_unique "claude"))
+       (Nickname.generate_unique "agent_llm_a"))
 
 let test_is_dictionary_generated_nickname_rejects_structured () =
   check bool "keeper-sangsu-agent" false
@@ -110,9 +110,9 @@ let test_is_dictionary_generated_nickname_rejects_structured () =
   check bool "admin-board-keeper" false
     (Nickname.is_dictionary_generated_nickname "admin-board-keeper");
   check bool "non-list adj/animal" false
-    (Nickname.is_dictionary_generated_nickname "claude-foo-bar");
+    (Nickname.is_dictionary_generated_nickname "agent_llm_a-foo-bar");
   check bool "two parts" false
-    (Nickname.is_dictionary_generated_nickname "claude-opus");
+    (Nickname.is_dictionary_generated_nickname "agent_llm_a-opus");
   check bool "empty" false
     (Nickname.is_dictionary_generated_nickname "")
 
@@ -121,19 +121,19 @@ let test_is_dictionary_generated_nickname_rejects_structured () =
    ============================================================ *)
 
 let test_extract_agent_type_generated () =
-  let nick = Nickname.generate "claude" in
+  let nick = Nickname.generate "agent_llm_a" in
   match Nickname.extract_agent_type nick with
-  | Some at -> check string "extracted claude" "claude" at
+  | Some at -> check string "extracted agent_llm_a" "agent_llm_a" at
   | None -> fail "should extract agent_type"
 
 let test_extract_agent_type_manual () =
-  match Nickname.extract_agent_type "gemini-brave-tiger" with
-  | Some at -> check string "extracted gemini" "gemini" at
+  match Nickname.extract_agent_type "provider_f-brave-tiger" with
+  | Some at -> check string "extracted provider_f" "provider_f" at
   | None -> fail "should extract agent_type"
 
 let test_extract_agent_type_legacy () =
-  match Nickname.extract_agent_type "claude" with
-  | Some at -> check string "legacy claude" "claude" at
+  match Nickname.extract_agent_type "agent_llm_a" with
+  | Some at -> check string "legacy agent_llm_a" "agent_llm_a" at
   | None -> fail "should extract legacy agent_type"
 
 let test_extract_agent_type_empty () =
@@ -144,9 +144,9 @@ let test_extract_agent_type_empty () =
   | None -> fail "should return Some, not None"
 
 let test_extract_agent_type_unique () =
-  let nick = Nickname.generate_unique "codex" in
+  let nick = Nickname.generate_unique "agent_code" in
   match Nickname.extract_agent_type nick with
-  | Some at -> check string "extracted codex" "codex" at
+  | Some at -> check string "extracted agent_code" "agent_code" at
   | None -> fail "should extract from unique"
 
 let test_extract_agent_type_hyphenated_manual () =

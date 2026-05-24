@@ -31,7 +31,7 @@ let sample_time_cap_fired =
   S.Time_cap_fired
     { observed_latency_ms = 300100;
       cap_ms = 300000;
-      provider_id = Some "glm-coding";
+      provider_id = Some "provider_k-coding";
     }
 
 let sample_time_cap_fired_no_provider =

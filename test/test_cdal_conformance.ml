@@ -37,8 +37,8 @@ let cdal_proof_v1_json = {|{
   "mode_decision_source": "risk_class_downgrade",
   "risk_class": "high",
   "provider_snapshot": {
-    "provider_name": "glm",
-    "model_id": "glm-4-plus",
+    "provider_name": "provider_k",
+    "model_id": "provider_k-4-plus",
     "api_version": null
   },
   "capability_snapshot": {
@@ -98,8 +98,8 @@ let test_cdal_proof_fixture () =
     check string "mode_decision_source" "risk_class_downgrade"
       proof.mode_decision_source;
     check string "risk_class" "high" (RK.to_string proof.risk_class);
-    check string "provider" "glm" proof.provider_snapshot.provider_name;
-    check string "model_id" "glm-4-plus" proof.provider_snapshot.model_id;
+    check string "provider" "provider_k" proof.provider_snapshot.provider_name;
+    check string "model_id" "provider_k-4-plus" proof.provider_snapshot.model_id;
     check int "tool_trace_refs count" 1 (List.length proof.tool_trace_refs);
     check bool "result_status is Completed" true
       (proof.result_status = Proof.Completed)

@@ -411,7 +411,7 @@ let test_docker_keeper_allows_inside_playground () =
     (blocked_by_sandbox_boundary raw)
 
 let test_docker_relative_repos_path_resolves_inside_playground () =
-  setup ~keeper_name:"glm-coding" ~sandbox:Keeper_types.Docker
+  setup ~keeper_name:"provider_k-coding" ~sandbox:Keeper_types.Docker
   @@ fun ~base:_ ~config ~meta ~playground ->
   let repos = Filename.concat playground "repos" in
   ensure_dir repos;
@@ -426,7 +426,7 @@ let test_docker_relative_repos_path_resolves_inside_playground () =
     Alcotest.fail ("bare repos should stay inside playground: " ^ e)
 
 let test_docker_relative_repos_cwd_resolves_inside_playground () =
-  setup ~keeper_name:"glm-coding" ~sandbox:Keeper_types.Docker
+  setup ~keeper_name:"provider_k-coding" ~sandbox:Keeper_types.Docker
   @@ fun ~base:_ ~config ~meta ~playground ->
   let repo = Filename.concat playground "repos/masc-mcp" in
   ensure_dir repo;

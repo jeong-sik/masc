@@ -66,8 +66,8 @@ type sample = {
   throughput_tokens_per_s : float option;
       (** [output_tokens / max(total_duration_ms - ttfb_ms, 1.0) * 1000.0]. *)
   cost_usd : float option;
-      (** Dollar cost, when reported — CLI providers (codex_cli, gemini_cli,
-          kimi_cli) intentionally strip usage metadata. *)
+      (** Dollar cost, when reported — CLI providers (cli_tool_a, cli_tool_b,
+          cli_tool_c) intentionally strip usage metadata. *)
   cache_hit : bool option;
       (** Prefix or implicit cache hit detected by the provider. *)
   status : status;  (** Outcome of the call. *)

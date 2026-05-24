@@ -140,16 +140,16 @@ let test_strict_tool_group_does_not_bypass_glm_before_ollama_cloud () =
     (match index_of "ollama_cloud_stable" group.tiers with
      | None -> ()
      | Some cloud_index ->
-       (match index_of "glm-coding-with-spark" group.tiers with
+       (match index_of "provider_k-coding-with-spark" group.tiers with
         | Some glm_index when glm_index < cloud_index -> ()
         | Some _ ->
           fail
-            "strict_tool_candidates must try glm-coding-with-spark before \
+            "strict_tool_candidates must try provider_k-coding-with-spark before \
              ollama_cloud_stable"
         | None ->
           fail
             "strict_tool_candidates must not include ollama_cloud_stable without \
-             glm-coding-with-spark ahead of it"))
+             provider_k-coding-with-spark ahead of it"))
 ;;
 
 let check_qwen_thinking_control cfg model_id =
@@ -189,7 +189,7 @@ let () =
             `Quick
             test_strict_tool_group_does_not_bypass_glm_before_ollama_cloud
         ; test_case
-            "qwen models use chat_template_kwargs thinking control"
+            "provider_h models use chat_template_kwargs thinking control"
             `Quick
             test_qwen_models_use_chat_template_kwargs
         ] )

@@ -22,13 +22,13 @@
       [invalid_runtime_config "proc_mgr" detail] error if the
       process manager isn't initialized.
 
-    - 4 transport constructors: [claude_code_transport_ctor],
-      [gemini_cli_transport_ctor], [json_stream_cli_transport_ctor]
-      (used by Kimi CLI), [codex_cli_transport_ctor]. Each reads
+    - 4 transport constructors: [cli_tool_d_transport_ctor],
+      [cli_tool_b_transport_ctor], [json_stream_cli_transport_ctor]
+      (used by Kimi CLI), [cli_tool_a_transport_ctor]. Each reads
       [cli_transport_overrides] from the caller (falling back to
       defaults), builds the provider's transport-specific config,
       and returns a per-call switched transport wrapped in
-      [Process_eio.get_proc_mgr]. The codex ctor additionally
+      [Process_eio.get_proc_mgr]. The agent_code ctor additionally
       wraps in [make_cli_argv_sanitizing_transport] for UTF-8 argv
       hygiene.
 
@@ -67,7 +67,7 @@ let with_proc_mgr (f : mgr:_ -> Llm_provider.Llm_transport.t) =
   | Ok mgr -> Ok (f ~mgr)
 ;;
 
-let claude_code_transport_ctor
+let cli_tool_d_transport_ctor
       ~(provider_cfg : Llm_provider.Provider_config.t)
       ~runtime_mcp_policy:_
       ~cli_transport_overrides
@@ -90,7 +90,7 @@ let claude_code_transport_ctor
       Llm_provider.Transport_claude_code.create ~sw ~mgr ~config))
 ;;
 
-let gemini_cli_transport_ctor
+let cli_tool_b_transport_ctor
       ~(provider_cfg : Llm_provider.Provider_config.t)
       ~runtime_mcp_policy:_
       ~cli_transport_overrides
@@ -110,7 +110,7 @@ let gemini_cli_transport_ctor
       Llm_provider.Transport_gemini_cli.create ~sw ~mgr ~config))
 ;;
 
-let codex_cli_transport_ctor
+let cli_tool_a_transport_ctor
       ~provider_cfg:_
       ~runtime_mcp_policy:_
       ~cli_transport_overrides
@@ -128,11 +128,11 @@ let codex_cli_transport_ctor
 let () =
   Registry.register_non_http_transport
     ~kind:Llm_provider.Provider_config.Claude_code
-    ~ctor:claude_code_transport_ctor;
+    ~ctor:cli_tool_d_transport_ctor;
   Registry.register_non_http_transport
     ~kind:Llm_provider.Provider_config.Gemini_cli
-    ~ctor:gemini_cli_transport_ctor;
+    ~ctor:cli_tool_b_transport_ctor;
   Registry.register_non_http_transport
     ~kind:Llm_provider.Provider_config.Codex_cli
-    ~ctor:codex_cli_transport_ctor
+    ~ctor:cli_tool_a_transport_ctor
 ;;

@@ -88,21 +88,21 @@ let test_event_to_sse_format () =
 (* ---------- MASC → AG-UI Mapping Tests ---------- *)
 
 let test_of_agent_joined () =
-  let e = of_agent_joined ~agent_name:"claude" in
+  let e = of_agent_joined ~agent_name:"agent_llm_a" in
   assert (e.event_type = Run_started);
   assert (e.thread_id = "default");
-  assert (e.run_id = Some "claude");
+  assert (e.run_id = Some "agent_llm_a");
   assert (e.custom_name = Some "AGENT_JOINED")
 
 let test_of_agent_left () =
-  let e = of_agent_left ~agent_name:"claude" in
+  let e = of_agent_left ~agent_name:"agent_llm_a" in
   assert (e.event_type = Run_finished);
   assert (e.thread_id = "default");
-  assert (e.run_id = Some "claude")
+  assert (e.run_id = Some "agent_llm_a")
 
 let test_of_broadcast () =
   let events = of_broadcast
-    ~agent_name:"claude" ~message:"Hello" ~message_id:"msg-001" in
+    ~agent_name:"agent_llm_a" ~message:"Hello" ~message_id:"msg-001" in
   assert (List.length events = 3);
   let e0 = List.nth events 0 in
   let e1 = List.nth events 1 in
@@ -115,19 +115,19 @@ let test_of_broadcast () =
 
 let test_of_task_claimed () =
   let e = of_task_claimed
-    ~agent_name:"claude" ~task_id:"task-001" in
+    ~agent_name:"agent_llm_a" ~task_id:"task-001" in
   assert (e.event_type = Step_started);
   assert (e.step_name = Some "task-001")
 
 let test_of_task_done () =
   let e = of_task_done
-    ~agent_name:"claude" ~task_id:"task-001" in
+    ~agent_name:"agent_llm_a" ~task_id:"task-001" in
   assert (e.event_type = Step_finished);
   assert (e.step_name = Some "task-001")
 
 let test_of_tool_call () =
   let events = of_tool_call
-    ~agent_name:"claude" ~tool_name:"search"
+    ~agent_name:"agent_llm_a" ~tool_name:"search"
     ~call_id:"call-001" ~args_json:"{\"q\": \"test\"}" in
   assert (List.length events = 3);
   let e0 = List.nth events 0 in
@@ -157,7 +157,7 @@ let test_of_task_update_claimed () =
   let json = `Assoc [
     ("id", `String "task-001");
     ("status", `String "claimed");
-    ("agent", `String "claude");
+    ("agent", `String "agent_llm_a");
   ] in
   let e = of_task_update json in
   assert (e.event_type = Step_started)
@@ -166,7 +166,7 @@ let test_of_task_update_done () =
   let json = `Assoc [
     ("id", `String "task-001");
     ("status", `String "done");
-    ("agent", `String "claude");
+    ("agent", `String "agent_llm_a");
   ] in
   let e = of_task_update json in
   assert (e.event_type = Step_finished)
@@ -175,7 +175,7 @@ let test_of_task_update_other () =
   let json = `Assoc [
     ("id", `String "task-001");
     ("status", `String "in_progress");
-    ("agent", `String "claude");
+    ("agent", `String "agent_llm_a");
   ] in
   let e = of_task_update json in
   assert (e.event_type = Custom);

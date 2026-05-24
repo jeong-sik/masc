@@ -196,7 +196,7 @@ let resolve_named_providers ?sw ?net ?clock ?provider_filter
            Compare against the profile after provider:auto expansion,
            canonical provider parsing, and provider_filter fallback.  The
            raw declared strings can be aliases such as
-           [codex_cli:auto] or [custom:model@url], while Provider_config
+           [cli_tool_a:auto] or [custom:model@url], while Provider_config
            carries concrete/canonical labels.
            See memory/handoff-2026-04-24-masc-runtime-mcp-auth-resolved.md *)
         let declared = List.map provider_label filtered_configs in

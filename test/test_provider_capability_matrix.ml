@@ -35,7 +35,7 @@
     Cross-reference:
     - [lib/provider_tool_support.ml] — [oas_capabilities_of_config]
       and [normalize_cli_caps_when]
-    - [planning/claude-plans/me-workspace-yousleepwhen-masc-mcp-hashed-pretzel.md]
+    - [planning/agent_llm_a-plans/me-workspace-yousleepwhen-masc-mcp-hashed-pretzel.md]
       Step 15 line item ("test_provider_capability_matrix.ml")
 *)
 

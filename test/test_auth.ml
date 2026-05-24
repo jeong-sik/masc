@@ -184,11 +184,11 @@ let test_auth_config_saved_private () =
 
 let test_create_credential () =
   let dir = setup_test_room () in
-  let result = Auth.create_token dir ~agent_name:"claude" ~role:Masc_domain.Worker in
+  let result = Auth.create_token dir ~agent_name:"agent_llm_a" ~role:Masc_domain.Worker in
   cleanup_test_room dir;
   match result with
   | Ok (raw_token, cred) ->
-      check string "agent_name matches" "claude" cred.agent_name;
+      check string "agent_name matches" "agent_llm_a" cred.agent_name;
       check bool "role is Worker" true (cred.role = Masc_domain.Worker);
       check int "raw token is 64 chars" 64 (String.length raw_token);
       check int "stored token is 64 chars" 64 (String.length cred.token)
@@ -200,10 +200,10 @@ let test_credential_saved_private () =
   Fun.protect
     ~finally:(fun () -> cleanup_test_room dir)
     (fun () ->
-      match Auth.create_token dir ~agent_name:"claude" ~role:Masc_domain.Worker with
+      match Auth.create_token dir ~agent_name:"agent_llm_a" ~role:Masc_domain.Worker with
       | Ok _ ->
           check int "credential mode 0600" 0o600
-            (permission_bits (Auth.credential_file dir "claude"))
+            (permission_bits (Auth.credential_file dir "agent_llm_a"))
       | Error e ->
           fail
             (Printf.sprintf "create_token should succeed: %s"
@@ -220,15 +220,15 @@ let test_room_secret_saved_private () =
 
 let test_verify_token () =
   let dir = setup_test_room () in
-  let create_result = Auth.create_token dir ~agent_name:"claude" ~role:Masc_domain.Admin in
+  let create_result = Auth.create_token dir ~agent_name:"agent_llm_a" ~role:Masc_domain.Admin in
   let verify_result = match create_result with
-    | Ok (raw_token, _) -> Auth.verify_token dir ~agent_name:"claude" ~token:raw_token
+    | Ok (raw_token, _) -> Auth.verify_token dir ~agent_name:"agent_llm_a" ~token:raw_token
     | Error e -> Error e
   in
   cleanup_test_room dir;
   match create_result, verify_result with
   | Ok _, Ok cred ->
-      check string "verified agent matches" "claude" cred.agent_name;
+      check string "verified agent matches" "agent_llm_a" cred.agent_name;
       check bool "verified role matches" true (cred.role = Masc_domain.Admin)
   | Ok _, Error e ->
       fail (Printf.sprintf "verify_token should succeed: %s" (Masc_domain.masc_error_to_string e))
@@ -237,9 +237,9 @@ let test_verify_token () =
 
 let test_verify_wrong_token () =
   let dir = setup_test_room () in
-  let create_result = Auth.create_token dir ~agent_name:"claude" ~role:Masc_domain.Worker in
+  let create_result = Auth.create_token dir ~agent_name:"agent_llm_a" ~role:Masc_domain.Worker in
   let verify_result = match create_result with
-    | Ok _ -> Auth.verify_token dir ~agent_name:"claude" ~token:"wrongtoken"
+    | Ok _ -> Auth.verify_token dir ~agent_name:"agent_llm_a" ~token:"wrongtoken"
     | Error e -> Error e
   in
   cleanup_test_room dir;
@@ -256,10 +256,10 @@ let test_verify_wrong_token () =
 
 let test_verify_token_reports_token_owner_on_agent_mismatch () =
   let dir = setup_test_room () in
-  let create_result = Auth.create_token dir ~agent_name:"codex" ~role:Masc_domain.Worker in
+  let create_result = Auth.create_token dir ~agent_name:"agent_code" ~role:Masc_domain.Worker in
   let verify_result =
     match create_result with
-    | Ok (raw_token, _) -> Auth.verify_token dir ~agent_name:"gemini" ~token:raw_token
+    | Ok (raw_token, _) -> Auth.verify_token dir ~agent_name:"provider_f" ~token:raw_token
     | Error e -> Error e
   in
   cleanup_test_room dir;
@@ -268,10 +268,10 @@ let test_verify_token_reports_token_owner_on_agent_mismatch () =
       let rendered = Masc_domain.masc_error_to_string (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized msg)) in
       check bool "mismatch message names token owner" true
         (String.contains rendered '('
-         && contains_substring rendered "bearer token belongs to codex");
+         && contains_substring rendered "bearer token belongs to agent_code");
       check bool "mismatch message explains fix" true
         (contains_substring rendered
-           "masc-mcp login --agent gemini --role worker --shell")
+           "masc-mcp login --agent provider_f --role worker --shell")
   | Ok _, Ok _ ->
       fail "verify_token should fail when token owner and requested agent differ"
   | Ok _, Error e ->
@@ -317,17 +317,17 @@ let test_resolve_agent_from_token () =
 
 let test_list_credentials () =
   let dir = setup_test_room () in
-  let _ = Auth.create_token dir ~agent_name:"claude" ~role:Masc_domain.Admin in
-  let _ = Auth.create_token dir ~agent_name:"gemini" ~role:Masc_domain.Worker in
-  let _ = Auth.create_token dir ~agent_name:"codex" ~role:Masc_domain.Worker in
+  let _ = Auth.create_token dir ~agent_name:"agent_llm_a" ~role:Masc_domain.Admin in
+  let _ = Auth.create_token dir ~agent_name:"provider_f" ~role:Masc_domain.Worker in
+  let _ = Auth.create_token dir ~agent_name:"agent_code" ~role:Masc_domain.Worker in
   let creds = Auth.list_credentials dir in
   cleanup_test_room dir;
   check int "3 credentials" 3 (List.length creds)
 
 let test_delete_credential () =
   let dir = setup_test_room () in
-  let _ = Auth.create_token dir ~agent_name:"claude" ~role:Masc_domain.Worker in
-  Auth.delete_credential dir "claude";
+  let _ = Auth.create_token dir ~agent_name:"agent_llm_a" ~role:Masc_domain.Worker in
+  Auth.delete_credential dir "agent_llm_a";
   let creds = Auth.list_credentials dir in
   cleanup_test_room dir;
   check int "0 credentials after delete" 0 (List.length creds)
@@ -1078,9 +1078,9 @@ let test_ensure_keeper_credential_reuses_persisted_raw_token_when_env_mismatched
       let raw_token_path =
         Filename.concat (Auth.auth_dir dir) "keeper-masc-improver-agent.token"
       in
-      let shared_raw_token = "shared-codex-token" in
+      let shared_raw_token = "shared-agent_code-token" in
       let _ =
-        Auth.save_raw_token_credential dir ~agent_name:"codex-mcp-client"
+        Auth.save_raw_token_credential dir ~agent_name:"agent_code-mcp-client"
           ~role:Masc_domain.Admin ~raw_token:shared_raw_token
       in
       let reused_result =
@@ -1179,7 +1179,7 @@ let test_auth_disabled_allows_all () =
 let test_auth_enabled_requires_token () =
   let dir = setup_test_room () in
   let _ = Auth.enable_auth dir ~require_token:true ~agent_name:"test-admin" in
-  let result = Auth.check_permission dir ~agent_name:"claude" ~token:None ~permission:Masc_domain.CanClaimTask in
+  let result = Auth.check_permission dir ~agent_name:"agent_llm_a" ~token:None ~permission:Masc_domain.CanClaimTask in
   cleanup_test_room dir;
   match result with
   | Ok () -> fail "should require token"
@@ -1189,10 +1189,10 @@ let test_auth_enabled_requires_token () =
 let test_auth_enabled_with_valid_token () =
   let dir = setup_test_room () in
   let _ = Auth.enable_auth dir ~require_token:true ~agent_name:"test-admin" in
-  let create_result = Auth.create_token dir ~agent_name:"claude" ~role:Masc_domain.Worker in
+  let create_result = Auth.create_token dir ~agent_name:"agent_llm_a" ~role:Masc_domain.Worker in
   let check_result = match create_result with
     | Ok (raw_token, _) ->
-        Auth.check_permission dir ~agent_name:"claude" ~token:(Some raw_token) ~permission:Masc_domain.CanClaimTask
+        Auth.check_permission dir ~agent_name:"agent_llm_a" ~token:(Some raw_token) ~permission:Masc_domain.CanClaimTask
     | Error e -> Error e
   in
   cleanup_test_room dir;

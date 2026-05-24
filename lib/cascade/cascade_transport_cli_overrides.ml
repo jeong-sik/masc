@@ -32,7 +32,7 @@ type cli_transport_overrides =
      stdout line arrives within [s] seconds. Currently honoured only
      by [Json_stream_cli_transport_local], which calls
      [Cli_common_subprocess.run_stream_lines] directly. The other CLI
-     transports (claude_code, gemini_cli, codex_cli) route through
+     transports (cli_tool_d, cli_tool_b, cli_tool_a) route through
      agent_sdk [Transport_*_cli.create] whose configs do not yet
      expose [stdout_idle_timeout_s]; an OAS upstream change is needed
      to honour this field there. *)

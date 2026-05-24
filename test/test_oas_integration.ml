@@ -142,7 +142,7 @@ let test_oas_worker_failed_lifecycle_includes_error () =
     ~attrs:
       [
         ("provider_kind", `String "openai_compat");
-        ("model_id", `String "deepseek-v4-pro:cloud");
+        ("model_id", `String "provider_g-v4-pro:cloud");
         ("base_url", `String "https://ollama.com/v1");
         ("request_path", `String "/chat/completions");
         ("endpoint", `String "https://ollama.com/v1/chat/completions");
@@ -163,7 +163,7 @@ let test_oas_worker_failed_lifecycle_includes_error () =
         (payload |> member "status" |> to_string);
       Alcotest.(check string) "provider_kind" "openai_compat"
         (payload |> member "provider_kind" |> to_string);
-      Alcotest.(check string) "model_id" "deepseek-v4-pro:cloud"
+      Alcotest.(check string) "model_id" "provider_g-v4-pro:cloud"
         (payload |> member "model_id" |> to_string);
       Alcotest.(check string) "endpoint"
         "https://ollama.com/v1/chat/completions"
@@ -627,7 +627,7 @@ let test_compact_syncs_oas_context () =
 let test_agent_completed_includes_usage () =
   let open Agent_sdk in
   let cost_labels =
-    [ ("provider", "openai"); ("model_bucket", "openai") ]
+    [ ("provider", "provider_d"); ("model_bucket", "provider_d") ]
   in
   let cost_metric = Prometheus.metric_oas_inference_cost_usd in
   let before_cost =
@@ -932,7 +932,7 @@ let test_oas_log_bridge_turn_completed_summary () =
       Agent_sdk.Log.I ("turn", 72);
       Agent_sdk.Log.I ("max_turns", 120);
       Agent_sdk.Log.F ("turn_duration_sec", 1.25);
-      Agent_sdk.Log.S ("model", "glm-5-turbo");
+      Agent_sdk.Log.S ("model", "provider_k-5-turbo");
       Agent_sdk.Log.S ("stop", "end_turn");
     ];
   let entries =
@@ -945,7 +945,7 @@ let test_oas_log_bridge_turn_completed_summary () =
       Alcotest.(check bool) "message includes turn" true
         (contains_substring entry.message "turn=72");
       Alcotest.(check bool) "message includes model" true
-        (contains_substring entry.message "model=glm-5-turbo");
+        (contains_substring entry.message "model=provider_k-5-turbo");
       Alcotest.(check bool) "message includes stop" true
         (contains_substring entry.message "stop=end_turn");
       (match entry.details with
@@ -1092,14 +1092,14 @@ let inference_token_labels ~model_bucket ~phase ~token_bucket =
 
 let test_inference_telemetry_aggregates_without_sse_relay () =
   let prompt_labels =
-    inference_token_labels ~model_bucket:"openai" ~phase:"prompt"
+    inference_token_labels ~model_bucket:"provider_d" ~phase:"prompt"
       ~token_bucket:"1_1k"
   in
   let completion_labels =
-    inference_token_labels ~model_bucket:"openai" ~phase:"completion"
+    inference_token_labels ~model_bucket:"provider_d" ~phase:"completion"
       ~token_bucket:"over_8k"
   in
-  let rate_labels = [ ("model_bucket", "openai") ] in
+  let rate_labels = [ ("model_bucket", "provider_d") ] in
   let token_metric = Prometheus.metric_oas_inference_telemetry_tokens in
   let prompt_rate_metric = Prometheus.metric_oas_inference_prompt_tok_per_sec in
   let decode_rate_metric = Prometheus.metric_oas_inference_decode_tok_per_sec in
@@ -1131,7 +1131,7 @@ let test_inference_telemetry_aggregates_without_sse_relay () =
          {
            agent_name = "test-agent";
            turn = 1;
-           provider = "openai";
+           provider = "provider_d";
            model = "gpt-5";
            prompt_tokens = Some 10;
            completion_tokens = Some 9000;

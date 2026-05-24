@@ -58,16 +58,16 @@ module Http_client : sig
             limit is local to this provider. *)
     | Model_unsupported
         (** Provider explicitly reports that the requested model or
-            capability is not supported (M05).  Covers codex_cli
+            capability is not supported (M05).  Covers cli_tool_a
             [runtime_mcp_auth] / [tool_support] InvalidConfig wrappers.
             Another provider in the cascade may support the capability. *)
     | Request_rejected
         (** Provider subprocess exited with a permanent rejection (M05).
-            Canonical case: kimi_cli exit 1.  The auth/config error is
+            Canonical case: cli_tool_c exit 1.  The auth/config error is
             provider-local; other providers are unaffected (#9932). *)
     | Startup_crash
         (** Provider CLI crashed before processing the request (M05).
-            Covers gemini_cli top-level-await / yoga_wasm and kimi_cli
+            Covers cli_tool_b top-level-await / yoga_wasm and cli_tool_c
             process-title UnicodeDecodeError.  The CLI source marks these
             "so the cascade can move on". *)
 
@@ -112,14 +112,14 @@ module Http_client : sig
       - [Model_unsupported] — MASC's worker-layer wrapping of OAS
         [InvalidConfig] errors for [runtime_mcp_auth] and [tool_support]
         (documented at [oas_worker_named.ml:661-678]).
-      - [Request_rejected] — kimi_cli exit 1. The auth/config error is
+      - [Request_rejected] — cli_tool_c exit 1. The auth/config error is
         provider-local; another provider can succeed.
-      - [Startup_crash] — gemini_cli top-level await / yoga_wasm or
-        kimi_cli process-title UnicodeDecodeError. The CLI source
+      - [Startup_crash] — cli_tool_b top-level await / yoga_wasm or
+        cli_tool_c process-title UnicodeDecodeError. The CLI source
         explicitly marks this "so the cascade can move on".
       All of these are per-provider, not cascade-wide; a fallback provider
       may succeed where the current one rejected. See masc-mcp #9932
-      (kimi fallback), #9850 (codex_cli runtime_mcp_auth).
+      (provider_c fallback), #9850 (cli_tool_a runtime_mcp_auth).
 
       [ProviderFailure] is already typed by OAS, so this adapter maps it
       without marker matching. Capacity, quota, capability, CLI policy/startup,

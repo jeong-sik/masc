@@ -136,7 +136,7 @@ let declarative_http_profile_toml ~profile bindings =
            ( Printf.sprintf
                {|
 [providers.%s]
-protocol = "openai-http"
+protocol = "provider_d-http"
 endpoint = %s
 |}
                provider
@@ -1119,8 +1119,8 @@ let test_enrich_sdk_error_for_provider_auth_includes_env_hint () =
   let provider_cfg =
     Llm_provider.Provider_config.make
       ~kind:Llm_provider.Provider_config.Kimi
-      ~model_id:"kimi-for-coding"
-      ~base_url:"https://api.kimi.com/coding"
+      ~model_id:"model-c-coding"
+      ~base_url:"https://api.provider_c.com/coding"
       ~request_path:"/v1/messages"
       ~api_key:"sk-test"
       ()
@@ -1585,7 +1585,7 @@ let test_zero_turn_attempt_preserves_checkpoint () =
        | None -> Alcotest.fail "expected zero-turn checkpoint")
 ;;
 
-let make_worker_meta ?(effective_model = "local-qwen") ()
+let make_worker_meta ?(effective_model = "local-provider_h") ()
   : Worker_container_types.worker_container_meta
   =
   { Worker_container_types.version = Worker_container_types.worker_container_version
@@ -1769,7 +1769,7 @@ let test_oas_worker_exec_build_installs_ollama_kind_preserving_transport () =
   let provider_cfg =
     Llm_provider.Provider_config.make
       ~kind:Llm_provider.Provider_config.Ollama
-      ~model_id:"glm-5.1:cloud"
+      ~model_id:"provider_k-5.1:cloud"
       ~base_url:"https://ollama.com"
       ~request_path:"/api/chat"
       ()
@@ -1798,7 +1798,7 @@ let test_cascade_runner_request_patch_preserves_tool_choice_override () =
   let base =
     Llm_provider.Provider_config.make
       ~kind:Llm_provider.Provider_config.Glm
-      ~model_id:"glm-5.1"
+      ~model_id:"provider_k-5.1"
       ~base_url:"https://api.z.ai/api/coding/paas/v4"
       ~supports_tool_choice_override:true
       ()
@@ -1806,7 +1806,7 @@ let test_cascade_runner_request_patch_preserves_tool_choice_override () =
   let req =
     Llm_provider.Provider_config.make
       ~kind:Llm_provider.Provider_config.OpenAI_compat
-      ~model_id:"glm-5.1"
+      ~model_id:"provider_k-5.1"
       ~base_url:"http://agent-sdk-reconstructed.invalid/v1"
       ~max_tokens:1234
       ~tool_choice:Agent_sdk.Types.Any
@@ -1835,14 +1835,14 @@ let test_oas_worker_exec_build_applies_tool_choice_override_to_contract () =
   let provider_cfg =
     Llm_provider.Provider_config.make
       ~kind:Llm_provider.Provider_config.Glm
-      ~model_id:"glm-5.1"
+      ~model_id:"provider_k-5.1"
       ~base_url:"https://api.z.ai/api/coding/paas/v4"
       ~supports_tool_choice_override:true
       ()
   in
   let config =
     Cascade_runner.default_config
-      ~name:"oas-worker-glm-tool-choice-override"
+      ~name:"oas-worker-provider_k-tool-choice-override"
       ~provider_cfg
       ~system_prompt:"system"
       ~tools:[ make_noop_tool () ]
@@ -1933,13 +1933,13 @@ let test_oas_worker_exec_build_supports_kimi_direct () =
   let provider_cfg =
     Llm_provider.Provider_config.make
       ~kind:Llm_provider.Provider_config.Kimi
-      ~model_id:"kimi-for-coding"
-      ~base_url:"https://api.kimi.com/coding"
+      ~model_id:"model-c-coding"
+      ~base_url:"https://api.provider_c.com/coding"
       ()
   in
   let config =
     Cascade_runner.default_config
-      ~name:"oas-worker-kimi-direct"
+      ~name:"oas-worker-provider_c-direct"
       ~provider_cfg
       ~system_prompt:"system"
       ~tools:[ make_noop_tool () ]
@@ -1951,17 +1951,17 @@ let test_oas_worker_exec_build_supports_kimi_direct () =
   | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
 ;;
 
-let test_oas_worker_exec_build_supports_kimi_cli () =
+let test_oas_worker_exec_build_supports_cli_tool_c () =
   let provider_cfg =
     Llm_provider.Provider_config.make
       ~kind:Llm_provider.Provider_config.Kimi_cli
-      ~model_id:"kimi-for-coding"
+      ~model_id:"model-c-coding"
       ~base_url:""
       ()
   in
   let config =
     Cascade_runner.default_config
-      ~name:"oas-worker-kimi-cli"
+      ~name:"oas-worker-provider_c-cli"
       ~provider_cfg
       ~system_prompt:"system"
       ~tools:[ make_named_noop_tool "masc_status" ]
@@ -2456,7 +2456,7 @@ let test_classify_masc_internal_error_roundtrip () =
   | _ -> Alcotest.fail "expected structured resumable CLI session error"
 ;;
 
-let make_codex_cli_provider_cfg ?(model_id = "codex") () =
+let make_cli_tool_a_provider_cfg ?(model_id = "agent_code") () =
   Llm_provider.Provider_config.make
     ~kind:Llm_provider.Provider_config.Codex_cli
     ~model_id
@@ -2464,7 +2464,7 @@ let make_codex_cli_provider_cfg ?(model_id = "codex") () =
     ()
 ;;
 
-let make_claude_code_provider_cfg ?(model_id = "auto") () =
+let make_cli_tool_d_provider_cfg ?(model_id = "auto") () =
   Llm_provider.Provider_config.make
     ~kind:Llm_provider.Provider_config.Claude_code
     ~model_id
@@ -2472,7 +2472,7 @@ let make_claude_code_provider_cfg ?(model_id = "auto") () =
     ()
 ;;
 
-let make_gemini_cli_provider_cfg ?(model_id = "gemini-3.1-pro-preview") () =
+let make_cli_tool_b_provider_cfg ?(model_id = "provider_f-3.1-pro-preview") () =
   Llm_provider.Provider_config.make
     ~kind:Llm_provider.Provider_config.Gemini_cli
     ~model_id
@@ -2506,11 +2506,11 @@ let provider_binding_base_url_exn id =
   | None -> Alcotest.failf "expected OAS runtime binding %S" id
 ;;
 
-let make_glm_provider_cfg ?base_url ?(model_id = "glm-5.1") () =
+let make_glm_provider_cfg ?base_url ?(model_id = "provider_k-5.1") () =
   let base_url =
     match base_url with
     | Some url -> url
-    | None -> provider_binding_base_url_exn "glm"
+    | None -> provider_binding_base_url_exn "provider_k"
   in
   Llm_provider.Provider_config.make
     ~kind:Llm_provider.Provider_config.Glm
@@ -2526,7 +2526,7 @@ let provider_registry_entry_exn name =
   | None -> Alcotest.failf "expected provider registry entry %S" name
 ;;
 
-let make_openrouter_provider_cfg ?(model_id = "anthropic/claude-3.5") () =
+let make_openrouter_provider_cfg ?(model_id = "provider_a/model-a-sonnet") () =
   let entry = provider_registry_entry_exn "openrouter" in
   Llm_provider.Provider_config.make
     ~kind:Llm_provider.Provider_config.OpenAI_compat
@@ -2536,16 +2536,16 @@ let make_openrouter_provider_cfg ?(model_id = "anthropic/claude-3.5") () =
     ()
 ;;
 
-let make_kimi_provider_cfg ?(model_id = "kimi-for-coding") () =
+let make_kimi_provider_cfg ?(model_id = "model-c-coding") () =
   Llm_provider.Provider_config.make
     ~kind:Llm_provider.Provider_config.Kimi
     ~model_id
-    ~base_url:"https://api.kimi.com/coding"
+    ~base_url:"https://api.provider_c.com/coding"
     ~request_path:"/v1/messages"
     ()
 ;;
 
-let make_kimi_cli_provider_cfg ?(model_id = "kimi-for-coding") () =
+let make_cli_tool_c_provider_cfg ?(model_id = "model-c-coding") () =
   Llm_provider.Provider_config.make
     ~kind:Llm_provider.Provider_config.Kimi_cli
     ~model_id
@@ -2553,7 +2553,7 @@ let make_kimi_cli_provider_cfg ?(model_id = "kimi-for-coding") () =
     ()
 ;;
 
-let test_resolve_tool_lane_for_codex_cli_public_tools_uses_runtime_mcp_policy () =
+let test_resolve_tool_lane_for_cli_tool_a_public_tools_uses_runtime_mcp_policy () =
   with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935"
   @@ fun () ->
   with_env "MASC_INTERNAL_MCP_TOKEN" ""
@@ -2563,7 +2563,7 @@ let test_resolve_tool_lane_for_codex_cli_public_tools_uses_runtime_mcp_policy ()
   let tools = [ make_named_noop_tool "masc_status"; make_named_noop_tool "masc_tasks" ] in
   match
     Cascade_runner.resolve_tool_lane_for_oas_tools
-      ~provider_cfg:(make_codex_cli_provider_cfg ())
+      ~provider_cfg:(make_cli_tool_a_provider_cfg ())
       ~tools
       ()
   with
@@ -2595,15 +2595,15 @@ let test_resolve_tool_lane_for_codex_cli_public_tools_uses_runtime_mcp_policy ()
     Alcotest.(check bool) "strict runtime policy" true policy.strict;
     Alcotest.(check bool) "builtins disabled" true policy.disable_builtin_tools;
     Alcotest.(check (option string))
-      "codex_cli runtime lane strips bearer header"
+      "cli_tool_a runtime lane strips bearer header"
       None
       (Option.bind masc_headers (List.assoc_opt "Authorization"))
   | Ok (_, None) ->
-    Alcotest.fail "expected codex_cli public MCP tools to use runtime MCP lane"
+    Alcotest.fail "expected cli_tool_a public MCP tools to use runtime MCP lane"
   | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
 ;;
 
-let test_resolve_tool_lane_for_codex_cli_public_tools_with_agent_name_keeps_identity_headers
+let test_resolve_tool_lane_for_cli_tool_a_public_tools_with_agent_name_keeps_identity_headers
       ()
   =
   with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935"
@@ -2612,13 +2612,13 @@ let test_resolve_tool_lane_for_codex_cli_public_tools_with_agent_name_keeps_iden
   @@ fun () ->
   with_env "MASC_MCP_TOKEN" ""
   @@ fun () ->
-  with_temp_masc_base_path "codex-public-runtime-mcp"
+  with_temp_masc_base_path "agent_code-public-runtime-mcp"
   @@ fun _base_path ->
   let tools = [ make_named_noop_tool "masc_status"; make_named_noop_tool "masc_tasks" ] in
   match
     Cascade_runner.resolve_tool_lane_for_oas_tools
       ~agent_name:"keeper-sangsu-agent"
-      ~provider_cfg:(make_codex_cli_provider_cfg ())
+      ~provider_cfg:(make_cli_tool_a_provider_cfg ())
       ~tools
       ()
   with
@@ -2636,31 +2636,31 @@ let test_resolve_tool_lane_for_codex_cli_public_tools_with_agent_name_keeps_iden
       0
       (List.length effective_tools);
     Alcotest.(check (option string))
-      "codex_cli preserves agent identity header"
+      "cli_tool_a preserves agent identity header"
       (Some "keeper-sangsu-agent")
       (Option.bind masc_headers (List.assoc_opt "x-masc-agent-name"));
     Alcotest.(check (option string))
-      "codex_cli preserves keeper identity header"
+      "cli_tool_a preserves keeper identity header"
       (Some "sangsu")
       (Option.bind masc_headers (List.assoc_opt "x-masc-keeper-name"));
     Alcotest.(check (option string))
-      "codex_cli strips bearer header"
+      "cli_tool_a strips bearer header"
       None
       (Option.bind masc_headers (List.assoc_opt "Authorization"))
   | Ok (_, None) ->
     Alcotest.fail
-      "expected codex_cli public MCP tools with agent_name to use runtime MCP lane"
+      "expected cli_tool_a public MCP tools with agent_name to use runtime MCP lane"
   | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
 ;;
 
-let test_resolve_tool_lane_for_codex_cli_keeper_bound_public_tools_omits_bound_tools () =
+let test_resolve_tool_lane_for_cli_tool_a_keeper_bound_public_tools_omits_bound_tools () =
   with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935"
   @@ fun () ->
   with_env "MASC_INTERNAL_MCP_TOKEN" "internal-keeper-token"
   @@ fun () ->
   with_env "MASC_MCP_TOKEN" ""
   @@ fun () ->
-  with_temp_masc_base_path "codex-bound-no-token"
+  with_temp_masc_base_path "agent_code-bound-no-token"
   @@ fun _base_path ->
   let tools =
     [ make_named_noop_tool "masc_status"; make_named_noop_tool "masc_claim_next" ]
@@ -2669,7 +2669,7 @@ let test_resolve_tool_lane_for_codex_cli_keeper_bound_public_tools_omits_bound_t
     Cascade_runner.resolve_tool_lane_for_oas_tools
       ~tool_requirement:`Optional
       ~agent_name:"keeper-sangsu-agent"
-      ~provider_cfg:(make_codex_cli_provider_cfg ())
+      ~provider_cfg:(make_cli_tool_a_provider_cfg ())
       ~tools
       ()
   with
@@ -2687,28 +2687,28 @@ let test_resolve_tool_lane_for_codex_cli_keeper_bound_public_tools_omits_bound_t
       0
       (List.length effective_tools);
     Alcotest.(check (list string))
-      "keeper-bound tool omitted for codex_cli"
+      "keeper-bound tool omitted for cli_tool_a"
       [ "masc_status" ]
       policy.allowed_tool_names;
     Alcotest.(check (option string))
-      "codex_cli preserves agent identity header"
+      "cli_tool_a preserves agent identity header"
       (Some "keeper-sangsu-agent")
       (Option.bind masc_headers (List.assoc_opt "x-masc-agent-name"));
     Alcotest.(check (option string))
-      "codex_cli preserves keeper identity header"
+      "cli_tool_a preserves keeper identity header"
       (Some "sangsu")
       (Option.bind masc_headers (List.assoc_opt "x-masc-keeper-name"));
     Alcotest.(check (option string))
-      "codex_cli strips internal token"
+      "cli_tool_a strips internal token"
       None
       (Option.bind masc_headers (List.assoc_opt "x-masc-internal-token"))
   | Ok (_, None) ->
     Alcotest.fail
-      "expected codex_cli keeper-bound public MCP tools to keep safe runtime lane"
+      "expected cli_tool_a keeper-bound public MCP tools to keep safe runtime lane"
   | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
 ;;
 
-let test_resolve_tool_lane_for_codex_cli_keeper_bound_public_tools_with_per_keeper_token_keeps_bound_tools
+let test_resolve_tool_lane_for_cli_tool_a_keeper_bound_public_tools_with_per_keeper_token_keeps_bound_tools
       ()
   =
   with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935"
@@ -2717,7 +2717,7 @@ let test_resolve_tool_lane_for_codex_cli_keeper_bound_public_tools_with_per_keep
   @@ fun () ->
   with_env "MASC_MCP_TOKEN" ""
   @@ fun () ->
-  with_temp_masc_base_path "codex-bound-token"
+  with_temp_masc_base_path "agent_code-bound-token"
   @@ fun () ->
   let base_path = Sys.getenv "MASC_BASE_PATH" in
   seed_raw_token base_path "keeper-sangsu-agent" "keeper-bearer-xyz";
@@ -2727,7 +2727,7 @@ let test_resolve_tool_lane_for_codex_cli_keeper_bound_public_tools_with_per_keep
   match
     Cascade_runner.resolve_tool_lane_for_oas_tools
       ~agent_name:"keeper-sangsu-agent"
-      ~provider_cfg:(make_codex_cli_provider_cfg ())
+      ~provider_cfg:(make_cli_tool_a_provider_cfg ())
       ~tools
       ()
   with
@@ -2745,34 +2745,34 @@ let test_resolve_tool_lane_for_codex_cli_keeper_bound_public_tools_with_per_keep
       0
       (List.length effective_tools);
     Alcotest.(check (list string))
-      "keeper-bound tool preserved for codex_cli"
+      "keeper-bound tool preserved for cli_tool_a"
       [ "masc_status"; "masc_claim_next" ]
       policy.allowed_tool_names;
     Alcotest.(check (option string))
-      "codex_cli uses per-keeper bearer"
+      "cli_tool_a uses per-keeper bearer"
       (Some "Bearer keeper-bearer-xyz")
       (Option.bind masc_headers (List.assoc_opt "Authorization"));
     Alcotest.(check (option string))
-      "codex_cli preserves agent identity header"
+      "cli_tool_a preserves agent identity header"
       (Some "keeper-sangsu-agent")
       (Option.bind masc_headers (List.assoc_opt "x-masc-agent-name"));
     Alcotest.(check (option string))
-      "codex_cli strips internal token"
+      "cli_tool_a strips internal token"
       None
       (Option.bind masc_headers (List.assoc_opt "x-masc-internal-token"))
   | Ok (_, None) ->
     Alcotest.fail
-      "expected codex_cli keeper-bound public MCP tools to use runtime MCP lane"
+      "expected cli_tool_a keeper-bound public MCP tools to use runtime MCP lane"
   | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
 ;;
 
-let test_resolve_tool_lane_for_kimi_cli_public_tools_uses_runtime_mcp_policy () =
+let test_resolve_tool_lane_for_cli_tool_c_public_tools_uses_runtime_mcp_policy () =
   with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935"
   @@ fun () ->
   let tools = [ make_named_noop_tool "masc_status"; make_named_noop_tool "masc_tasks" ] in
   match
     Cascade_runner.resolve_tool_lane_for_oas_tools
-      ~provider_cfg:(make_kimi_cli_provider_cfg ())
+      ~provider_cfg:(make_cli_tool_c_provider_cfg ())
       ~tools
       ()
   with
@@ -2796,11 +2796,11 @@ let test_resolve_tool_lane_for_kimi_cli_public_tools_uses_runtime_mcp_policy () 
     Alcotest.(check bool) "strict runtime policy" true policy.strict;
     Alcotest.(check bool) "builtins disabled" true policy.disable_builtin_tools
   | Ok (_, None) ->
-    Alcotest.fail "expected kimi_cli public MCP tools to use runtime MCP lane"
+    Alcotest.fail "expected cli_tool_c public MCP tools to use runtime MCP lane"
   | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
 ;;
 
-let test_resolve_tool_lane_for_kimi_cli_public_tools_with_agent_name_keeps_runtime_headers
+let test_resolve_tool_lane_for_cli_tool_c_public_tools_with_agent_name_keeps_runtime_headers
       ()
   =
   with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935"
@@ -2809,7 +2809,7 @@ let test_resolve_tool_lane_for_kimi_cli_public_tools_with_agent_name_keeps_runti
   match
     Cascade_runner.resolve_tool_lane_for_oas_tools
       ~agent_name:"keeper-sangsu-agent"
-      ~provider_cfg:(make_kimi_cli_provider_cfg ())
+      ~provider_cfg:(make_cli_tool_c_provider_cfg ())
       ~tools
       ()
   with
@@ -2832,11 +2832,11 @@ let test_resolve_tool_lane_for_kimi_cli_public_tools_with_agent_name_keeps_runti
       (Option.bind masc_headers (List.assoc_opt "x-masc-agent-name"))
   | Ok (_, None) ->
     Alcotest.fail
-      "expected kimi_cli public MCP tools with agent_name to use runtime MCP lane"
+      "expected cli_tool_c public MCP tools with agent_name to use runtime MCP lane"
   | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
 ;;
 
-let test_resolve_tool_lane_for_claude_code_keeper_internal_tools_uses_runtime_mcp_policy
+let test_resolve_tool_lane_for_cli_tool_d_keeper_internal_tools_uses_runtime_mcp_policy
       ()
   =
   with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935"
@@ -2847,7 +2847,7 @@ let test_resolve_tool_lane_for_claude_code_keeper_internal_tools_uses_runtime_mc
   match
     Cascade_runner.resolve_tool_lane_for_oas_tools
       ~agent_name:"keeper-sangsu-agent"
-      ~provider_cfg:(make_claude_code_provider_cfg ())
+      ~provider_cfg:(make_cli_tool_d_provider_cfg ())
       ~tools
       ()
   with
@@ -2877,11 +2877,11 @@ let test_resolve_tool_lane_for_claude_code_keeper_internal_tools_uses_runtime_mc
       (Some "internal-keeper-token")
       (Option.bind masc_headers (List.assoc_opt "x-masc-internal-token"))
   | Ok (_, None) ->
-    Alcotest.fail "expected claude_code keeper-internal tools to use runtime MCP lane"
+    Alcotest.fail "expected cli_tool_d keeper-internal tools to use runtime MCP lane"
   | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
 ;;
 
-let test_resolve_tool_lane_for_kimi_cli_keeper_internal_tools_uses_runtime_mcp_policy () =
+let test_resolve_tool_lane_for_cli_tool_c_keeper_internal_tools_uses_runtime_mcp_policy () =
   with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935"
   @@ fun () ->
   with_env "MASC_INTERNAL_MCP_TOKEN" "internal-keeper-token"
@@ -2890,7 +2890,7 @@ let test_resolve_tool_lane_for_kimi_cli_keeper_internal_tools_uses_runtime_mcp_p
   match
     Cascade_runner.resolve_tool_lane_for_oas_tools
       ~agent_name:"keeper-sangsu-agent"
-      ~provider_cfg:(make_kimi_cli_provider_cfg ())
+      ~provider_cfg:(make_cli_tool_c_provider_cfg ())
       ~tools
       ()
   with
@@ -2904,11 +2904,11 @@ let test_resolve_tool_lane_for_kimi_cli_keeper_internal_tools_uses_runtime_mcp_p
       [ "keeper_bash" ]
       policy.allowed_tool_names
   | Ok (_, None) ->
-    Alcotest.fail "expected kimi_cli keeper-internal tools to use runtime MCP lane"
+    Alcotest.fail "expected cli_tool_c keeper-internal tools to use runtime MCP lane"
   | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
 ;;
 
-let test_resolve_tool_lane_for_kimi_cli_mixed_tools_keeps_public_runtime_subset () =
+let test_resolve_tool_lane_for_cli_tool_c_mixed_tools_keeps_public_runtime_subset () =
   with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935"
   @@ fun () ->
   let tools =
@@ -2919,7 +2919,7 @@ let test_resolve_tool_lane_for_kimi_cli_mixed_tools_keeps_public_runtime_subset 
   in
   match
     Cascade_runner.resolve_tool_lane_for_oas_tools
-      ~provider_cfg:(make_kimi_cli_provider_cfg ())
+      ~provider_cfg:(make_cli_tool_c_provider_cfg ())
       ~tools
       ()
   with
@@ -2933,7 +2933,7 @@ let test_resolve_tool_lane_for_kimi_cli_mixed_tools_keeps_public_runtime_subset 
       [ "masc_status"; "masc_tasks" ]
       policy.allowed_tool_names
   | Ok (_, None) ->
-    Alcotest.fail "expected kimi_cli mixed surface to keep the public MCP runtime subset"
+    Alcotest.fail "expected cli_tool_c mixed surface to keep the public MCP runtime subset"
   | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
 ;;
 
@@ -2957,49 +2957,49 @@ let test_resolve_tool_lane_for_openai_public_tools_keeps_inline_tools () =
   | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
 ;;
 
-let test_resolve_tool_lane_for_codex_cli_internal_tools_rejects () =
+let test_resolve_tool_lane_for_cli_tool_a_internal_tools_rejects () =
   with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935"
   @@ fun () ->
   match
     Cascade_runner.resolve_tool_lane_for_oas_tools
-      ~provider_cfg:(make_codex_cli_provider_cfg ())
+      ~provider_cfg:(make_cli_tool_a_provider_cfg ())
       ~tools:[ make_named_noop_tool "keeper_board_get" ]
       ()
   with
   | Ok _ ->
     Alcotest.fail
-      "expected codex_cli to reject keeper-internal tools without inline tool support"
+      "expected cli_tool_a to reject keeper-internal tools without inline tool support"
   | Error (Agent_sdk.Error.Config (Agent_sdk.Error.InvalidConfig { field; _ })) ->
     Alcotest.(check string) "field" "tool_support" field
   | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
 ;;
 
-let test_resolve_tool_lane_for_codex_cli_keeper_internal_tools_with_agent_rejects () =
+let test_resolve_tool_lane_for_cli_tool_a_keeper_internal_tools_with_agent_rejects () =
   with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935"
   @@ fun () ->
   with_env "MASC_INTERNAL_MCP_TOKEN" "internal-keeper-token"
   @@ fun () ->
   with_env "MASC_MCP_TOKEN" ""
   @@ fun () ->
-  with_temp_masc_base_path "codex-internal-no-token"
+  with_temp_masc_base_path "agent_code-internal-no-token"
   @@ fun _base_path ->
   match
     Cascade_runner.resolve_tool_lane_for_oas_tools
       ~agent_name:"keeper-sangsu-agent"
-      ~provider_cfg:(make_codex_cli_provider_cfg ())
+      ~provider_cfg:(make_cli_tool_a_provider_cfg ())
       ~tools:[ make_named_noop_tool "keeper_bash" ]
       ()
   with
   | Ok _ ->
     Alcotest.fail
-      "expected codex_cli to reject keeper-internal tools requiring request-scoped \
+      "expected cli_tool_a to reject keeper-internal tools requiring request-scoped \
        headers"
   | Error (Agent_sdk.Error.Config (Agent_sdk.Error.InvalidConfig { field; _ })) ->
     Alcotest.(check string) "field" "tool_support" field
   | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
 ;;
 
-let test_resolve_tool_lane_for_codex_cli_keeper_internal_tools_with_agent_and_per_keeper_token_uses_runtime_mcp
+let test_resolve_tool_lane_for_cli_tool_a_keeper_internal_tools_with_agent_and_per_keeper_token_uses_runtime_mcp
       ()
   =
   with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935"
@@ -3008,14 +3008,14 @@ let test_resolve_tool_lane_for_codex_cli_keeper_internal_tools_with_agent_and_pe
   @@ fun () ->
   with_env "MASC_MCP_TOKEN" ""
   @@ fun () ->
-  with_temp_masc_base_path "codex-internal-token"
+  with_temp_masc_base_path "agent_code-internal-token"
   @@ fun () ->
   let base_path = Sys.getenv "MASC_BASE_PATH" in
   seed_raw_token base_path "keeper-sangsu-agent" "keeper-bearer-abc";
   match
     Cascade_runner.resolve_tool_lane_for_oas_tools
       ~agent_name:"keeper-sangsu-agent"
-      ~provider_cfg:(make_codex_cli_provider_cfg ())
+      ~provider_cfg:(make_cli_tool_a_provider_cfg ())
       ~tools:[ make_named_noop_tool "keeper_bash" ]
       ()
   with
@@ -3037,44 +3037,44 @@ let test_resolve_tool_lane_for_codex_cli_keeper_internal_tools_with_agent_and_pe
       [ "keeper_bash" ]
       policy.allowed_tool_names;
     Alcotest.(check (option string))
-      "codex_cli uses per-keeper bearer"
+      "cli_tool_a uses per-keeper bearer"
       (Some "Bearer keeper-bearer-abc")
       (Option.bind masc_headers (List.assoc_opt "Authorization"));
     Alcotest.(check (option string))
-      "codex_cli strips internal token"
+      "cli_tool_a strips internal token"
       None
       (Option.bind masc_headers (List.assoc_opt "x-masc-internal-token"))
   | Ok (_, None) ->
     Alcotest.fail
-      "expected codex_cli keeper-internal tools with per-keeper token to use runtime MCP \
+      "expected cli_tool_a keeper-internal tools with per-keeper token to use runtime MCP \
        lane"
   | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
 ;;
 
-let test_resolve_tool_lane_for_kimi_cli_internal_tools_rejects () =
+let test_resolve_tool_lane_for_cli_tool_c_internal_tools_rejects () =
   with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935"
   @@ fun () ->
   match
     Cascade_runner.resolve_tool_lane_for_oas_tools
-      ~provider_cfg:(make_kimi_cli_provider_cfg ())
+      ~provider_cfg:(make_cli_tool_c_provider_cfg ())
       ~tools:[ make_named_noop_tool "keeper_board_get" ]
       ()
   with
   | Ok _ ->
     Alcotest.fail
-      "expected kimi_cli to reject keeper-internal tools without inline tool support"
+      "expected cli_tool_c to reject keeper-internal tools without inline tool support"
   | Error (Agent_sdk.Error.Config (Agent_sdk.Error.InvalidConfig { field; _ })) ->
     Alcotest.(check string) "field" "tool_support" field
   | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
 ;;
 
-let test_resolve_tool_lane_for_codex_cli_internal_tools_optional_drops_tools () =
+let test_resolve_tool_lane_for_cli_tool_a_internal_tools_optional_drops_tools () =
   with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935"
   @@ fun () ->
   match
     Cascade_runner.resolve_tool_lane_for_oas_tools
       ~tool_requirement:`Optional
-      ~provider_cfg:(make_codex_cli_provider_cfg ())
+      ~provider_cfg:(make_cli_tool_a_provider_cfg ())
       ~tools:[ make_named_noop_tool "keeper_board_get" ]
       ()
   with
@@ -3093,7 +3093,7 @@ let test_resolve_tool_lane_for_codex_cli_internal_tools_optional_drops_tools () 
 let test_filter_candidate_providers_for_tool_support_normalizes_codex_headers () =
   with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935"
   @@ fun () ->
-  with_env "MASC_MCP_TOKEN" "shared-codex-token"
+  with_env "MASC_MCP_TOKEN" "shared-agent_code-token"
   @@ fun () ->
   let runtime_mcp_policy =
     Cascade_runner.public_mcp_runtime_policy_of_tool_names
@@ -3107,15 +3107,15 @@ let test_filter_candidate_providers_for_tool_support_normalizes_codex_headers ()
       ~require_tool_choice_support:true
       ~require_tool_support:true
       ~label:"primary"
-      [ make_codex_cli_provider_cfg () ]
+      [ make_cli_tool_a_provider_cfg () ]
   in
   Alcotest.(check int)
-    "codex survives provider-normalized runtime MCP tool filter"
+    "agent_code survives provider-normalized runtime MCP tool filter"
     1
     (List.length filtered)
 ;;
 
-let test_filter_candidate_providers_for_tool_support_drops_codex_cli_keeper_bound_actor_tools
+let test_filter_candidate_providers_for_tool_support_drops_cli_tool_a_keeper_bound_actor_tools
       ()
   =
   with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935"
@@ -3124,14 +3124,14 @@ let test_filter_candidate_providers_for_tool_support_drops_codex_cli_keeper_boun
   @@ fun () ->
   with_env "MASC_MCP_TOKEN" ""
   @@ fun () ->
-  with_temp_masc_base_path "codex-filter-no-token"
+  with_temp_masc_base_path "agent_code-filter-no-token"
   @@ fun _base_path ->
   let runtime_mcp_policy =
     Cascade_runner.public_mcp_runtime_policy_of_tool_names
       ~agent_name:"keeper-sangsu-agent"
       [ "masc_status"; "masc_claim_next" ]
   in
-  let codex_provider = make_codex_cli_provider_cfg () in
+  let codex_provider = make_cli_tool_a_provider_cfg () in
   (* Post-#13149 review: this test originally pinned the
      [codex_keeper_bound_skip_log_message] pure helper.  That left
      the production [log_codex_keeper_bound_skip] emission path
@@ -3157,7 +3157,7 @@ let test_filter_candidate_providers_for_tool_support_drops_codex_cli_keeper_boun
       ~require_tool_choice_support:true
       ~require_tool_support:true
       ~label:"tool_use_strict"
-      [ codex_provider; make_kimi_cli_provider_cfg () ]
+      [ codex_provider; make_cli_tool_c_provider_cfg () ]
   in
   let codex_skip_entries =
     Log.Ring.recent ~limit:50 ~module_filter:"Misc" ?since_seq:before_seq ()
@@ -3167,7 +3167,7 @@ let test_filter_candidate_providers_for_tool_support_drops_codex_cli_keeper_boun
   (match codex_skip_entries with
    | [] ->
      Alcotest.failf
-       "expected at least one codex bound-actor skip log entry; observed none under \
+       "expected at least one agent_code bound-actor skip log entry; observed none under \
         module_filter=Misc since seq=%s"
        (match before_seq with
         | Some s -> string_of_int s
@@ -3178,9 +3178,9 @@ let test_filter_candidate_providers_for_tool_support_drops_codex_cli_keeper_boun
        true
        (contains_substring ~needle:"cascade tool_use_strict:" entry.message);
      Alcotest.(check bool)
-       "skip log mentions provider=codex_cli:codex"
+       "skip log mentions provider=cli_tool_a:agent_code"
        true
-       (contains_substring ~needle:"provider=codex_cli:codex" entry.message);
+       (contains_substring ~needle:"provider=cli_tool_a:agent_code" entry.message);
      Alcotest.(check bool)
        "skip log mentions keeper=sangsu"
        true
@@ -3188,12 +3188,12 @@ let test_filter_candidate_providers_for_tool_support_drops_codex_cli_keeper_boun
   match filtered with
   | [ provider_cfg ] ->
     Alcotest.(check bool)
-      "kimi remains after codex bound-actor filter"
+      "provider_c remains after agent_code bound-actor filter"
       true
       (provider_cfg.kind = Llm_provider.Provider_config.Kimi_cli)
   | _ ->
     Alcotest.failf
-      "expected only kimi_cli provider to remain, got %d"
+      "expected only cli_tool_c provider to remain, got %d"
       (List.length filtered)
 ;;
 
@@ -3202,7 +3202,7 @@ let test_filter_candidate_providers_for_tool_support_keeps_codex_with_per_keeper
   @@ fun () ->
   with_env "MASC_MCP_TOKEN" ""
   @@ fun () ->
-  with_temp_masc_base_path "codex-bound-token"
+  with_temp_masc_base_path "agent_code-bound-token"
   @@ fun () ->
   let base_path = Sys.getenv "MASC_BASE_PATH" in
   seed_raw_token base_path "keeper-sangsu-agent" "keeper-raw-token";
@@ -3218,11 +3218,11 @@ let test_filter_candidate_providers_for_tool_support_keeps_codex_with_per_keeper
       ~require_tool_choice_support:true
       ~require_tool_support:true
       ~label:"tool_use_strict"
-      [ make_codex_cli_provider_cfg (); make_kimi_cli_provider_cfg () ]
+      [ make_cli_tool_a_provider_cfg (); make_cli_tool_c_provider_cfg () ]
   in
   Alcotest.(check (list string))
-    "codex remains when bearer auth can be sourced"
-    [ "codex_cli:codex"; "kimi_cli:kimi-for-coding" ]
+    "agent_code remains when bearer auth can be sourced"
+    [ "cli_tool_a:agent_code"; "cli_tool_c:model-c-coding" ]
     (List.map Provider_tool_support.provider_debug_label filtered)
 ;;
 
@@ -3235,7 +3235,7 @@ let test_filter_candidate_providers_for_tool_support_keeps_header_capable_cli_fo
   @@ fun () ->
   with_env "MASC_MCP_TOKEN" ""
   @@ fun () ->
-  with_temp_masc_base_path "codex-header-capable-no-token"
+  with_temp_masc_base_path "agent_code-header-capable-no-token"
   @@ fun _base_path ->
   let tools = [ make_named_noop_tool "keeper_bash" ] in
   let runtime_mcp_policy =
@@ -3249,14 +3249,14 @@ let test_filter_candidate_providers_for_tool_support_keeps_header_capable_cli_fo
       ~require_tool_choice_support:true
       ~require_tool_support:true
       ~label:"tool_use_strict"
-      [ make_claude_code_provider_cfg ()
-      ; make_codex_cli_provider_cfg ()
-      ; make_kimi_cli_provider_cfg ()
+      [ make_cli_tool_d_provider_cfg ()
+      ; make_cli_tool_a_provider_cfg ()
+      ; make_cli_tool_c_provider_cfg ()
       ]
   in
   Alcotest.(check (list string))
     "header-capable CLI providers remain"
-    [ "claude_code:auto"; "kimi_cli:kimi-for-coding" ]
+    [ "cli_tool_d:auto"; "cli_tool_c:model-c-coding" ]
     (List.map Provider_tool_support.provider_debug_label filtered)
 ;;
 
@@ -3290,13 +3290,13 @@ let test_keeper_internal_tools_force_materialized_runtime_surface () =
       ~require_tool_choice_support:false
       ~require_tool_support
       ~label:"primary"
-      [ make_gemini_cli_provider_cfg ~model_id:"gemini-3-flash-preview" ()
-      ; make_glm_provider_cfg ~model_id:"glm-5-turbo" ()
+      [ make_cli_tool_b_provider_cfg ~model_id:"provider_f-3-flash-preview" ()
+      ; make_glm_provider_cfg ~model_id:"provider_k-5-turbo" ()
       ]
   in
   Alcotest.(check (list string))
     "text-only CLI path is removed before it can drop keeper PR-review tools"
-    [ "glm:glm-5-turbo" ]
+    [ "provider_k:provider_k-5-turbo" ]
     (List.map Provider_tool_support.provider_debug_label filtered)
 ;;
 
@@ -3305,7 +3305,7 @@ let test_filter_candidate_providers_for_tool_support_secondary_preserves_priorit
   @@ fun () ->
   with_env "MASC_INTERNAL_MCP_TOKEN" "internal-keeper-token"
   @@ fun () ->
-  with_temp_masc_base_path "codex-secondary-priority"
+  with_temp_masc_base_path "agent_code-secondary-priority"
   @@ fun () ->
   let tools = [ make_named_noop_tool "keeper_bash" ] in
   let runtime_mcp_policy =
@@ -3321,14 +3321,14 @@ let test_filter_candidate_providers_for_tool_support_secondary_preserves_priorit
       ~secondary_resolver:(fun provider_index provider_cfg ->
         if
           provider_index = 0 && provider_cfg.kind = Llm_provider.Provider_config.Codex_cli
-        then Some (make_claude_code_provider_cfg ())
+        then Some (make_cli_tool_d_provider_cfg ())
         else None)
       ~label:"tool_use_strict"
-      [ make_codex_cli_provider_cfg (); make_kimi_cli_provider_cfg () ]
+      [ make_cli_tool_a_provider_cfg (); make_cli_tool_c_provider_cfg () ]
   in
   Alcotest.(check (list string))
     "secondary replaces rejected primary in its original priority slot"
-    [ "claude_code:auto"; "kimi_cli:kimi-for-coding" ]
+    [ "cli_tool_d:auto"; "cli_tool_c:model-c-coding" ]
     (List.map Provider_tool_support.provider_debug_label filtered)
 ;;
 
@@ -3337,7 +3337,7 @@ let test_filter_candidate_providers_for_tool_support_secondary_uses_candidate_in
   @@ fun () ->
   with_env "MASC_INTERNAL_MCP_TOKEN" "internal-keeper-token"
   @@ fun () ->
-  with_temp_masc_base_path "codex-secondary-index"
+  with_temp_masc_base_path "agent_code-secondary-index"
   @@ fun () ->
   let tools = [ make_named_noop_tool "keeper_bash" ] in
   let runtime_mcp_policy =
@@ -3354,18 +3354,18 @@ let test_filter_candidate_providers_for_tool_support_secondary_uses_candidate_in
         if provider_cfg.kind = Llm_provider.Provider_config.Codex_cli
         then
           Some
-            (make_claude_code_provider_cfg
+            (make_cli_tool_d_provider_cfg
                ~model_id:(Printf.sprintf "fallback-%d" provider_index)
                ())
         else None)
       ~label:"tool_use_strict"
-      [ make_codex_cli_provider_cfg ~model_id:"same-primary" ()
-      ; make_codex_cli_provider_cfg ~model_id:"same-primary" ()
+      [ make_cli_tool_a_provider_cfg ~model_id:"same-primary" ()
+      ; make_cli_tool_a_provider_cfg ~model_id:"same-primary" ()
       ]
   in
   Alcotest.(check (list string))
     "duplicate primary slots get their own secondary"
-    [ "claude_code:fallback-0"; "claude_code:fallback-1" ]
+    [ "cli_tool_d:fallback-0"; "cli_tool_d:fallback-1" ]
     (List.map Provider_tool_support.provider_debug_label filtered)
 ;;
 
@@ -3385,13 +3385,13 @@ let test_dual_track_swap_emits_secondary_kind_label_on_success () =
   @@ fun () ->
   with_env "MASC_INTERNAL_MCP_TOKEN" "internal-keeper-token"
   @@ fun () ->
-  with_temp_masc_base_path "codex-secondary-metric-success"
+  with_temp_masc_base_path "agent_code-secondary-metric-success"
   @@ fun () ->
   let tools = [ make_named_noop_tool "keeper_bash" ] in
   let runtime_mcp_policy =
     Masc_mcp.Cascade_oas_runner.runtime_mcp_policy_for_tools ~keeper_name:"sangsu" tools
   in
-  let before = count_swap_metric ~detail:"swapped:claude_code" in
+  let before = count_swap_metric ~detail:"swapped:cli_tool_d" in
   let _ =
     Masc_mcp.Cascade_oas_runner.filter_candidate_providers_for_tool_support
       ~keeper_name:"sangsu"
@@ -3401,12 +3401,12 @@ let test_dual_track_swap_emits_secondary_kind_label_on_success () =
       ~require_tool_support:true
       ~secondary_resolver:(fun _ provider_cfg ->
         if provider_cfg.kind = Llm_provider.Provider_config.Codex_cli
-        then Some (make_claude_code_provider_cfg ())
+        then Some (make_cli_tool_d_provider_cfg ())
         else None)
       ~label:"tool_use_strict"
-      [ make_codex_cli_provider_cfg () ]
+      [ make_cli_tool_a_provider_cfg () ]
   in
-  let after = count_swap_metric ~detail:"swapped:claude_code" in
+  let after = count_swap_metric ~detail:"swapped:cli_tool_d" in
   Alcotest.(check (float 0.0001))
     "successful swap bumps swapped:<secondary_kind>"
     (before +. 1.0)
@@ -3418,16 +3418,16 @@ let test_dual_track_swap_emits_secondary_kind_label_on_rejection () =
   @@ fun () ->
   with_env "MASC_INTERNAL_MCP_TOKEN" "internal-keeper-token"
   @@ fun () ->
-  with_temp_masc_base_path "codex-secondary-metric-rejection"
+  with_temp_masc_base_path "agent_code-secondary-metric-rejection"
   @@ fun () ->
   let tools = [ make_named_noop_tool "keeper_bash" ] in
   let runtime_mcp_policy =
     Masc_mcp.Cascade_oas_runner.runtime_mcp_policy_for_tools ~keeper_name:"sangsu" tools
   in
   (* Rejected primary, secondary that *also* fails the gate (another
-     codex_cli with bound-actor tools). Detail format is
+     cli_tool_a with bound-actor tools). Detail format is
      [rejected:<secondary_kind>:<rejection_reason_label>]. *)
-  let detail = "rejected:codex_cli:codex_keeper_bound_actor_required" in
+  let detail = "rejected:cli_tool_a:codex_keeper_bound_actor_required" in
   let before = count_swap_metric ~detail in
   let _ =
     Masc_mcp.Cascade_oas_runner.filter_candidate_providers_for_tool_support
@@ -3438,10 +3438,10 @@ let test_dual_track_swap_emits_secondary_kind_label_on_rejection () =
       ~require_tool_support:true
       ~secondary_resolver:(fun _ provider_cfg ->
         if provider_cfg.kind = Llm_provider.Provider_config.Codex_cli
-        then Some (make_codex_cli_provider_cfg ())
+        then Some (make_cli_tool_a_provider_cfg ())
         else None)
       ~label:"tool_use_strict"
-      [ make_codex_cli_provider_cfg () ]
+      [ make_cli_tool_a_provider_cfg () ]
   in
   let after = count_swap_metric ~detail in
   Alcotest.(check (float 0.0001))
@@ -3462,7 +3462,7 @@ let test_classify_filter_rejection_codex_keeper_bound_actor () =
   @@ fun () ->
   with_env "MASC_MCP_TOKEN" ""
   @@ fun () ->
-  with_temp_masc_base_path "codex-classify-no-token"
+  with_temp_masc_base_path "agent_code-classify-no-token"
   @@ fun _base_path ->
   let runtime_mcp_policy =
     Cascade_runner.public_mcp_runtime_policy_of_tool_names
@@ -3486,10 +3486,10 @@ let test_classify_filter_rejection_codex_keeper_bound_actor () =
       ?runtime_mcp_policy
       ~require_tool_choice_support:true
       ~require_tool_support:true
-      (make_codex_cli_provider_cfg ())
+      (make_cli_tool_a_provider_cfg ())
   in
   Alcotest.(check (option string))
-    "codex_cli with bound-actor policy classified as keeper_bound_actor"
+    "cli_tool_a with bound-actor policy classified as keeper_bound_actor"
     (Some "codex_keeper_bound_actor_required")
     (Option.map Masc_mcp.Cascade_oas_runner.filter_rejection_reason_label reason)
 ;;
@@ -3503,7 +3503,7 @@ let test_classify_filter_rejection_codex_keeper_bound_actor_passes_with_per_keep
   @@ fun () ->
   with_env "MASC_MCP_TOKEN" ""
   @@ fun () ->
-  with_temp_masc_base_path "codex-classify-token"
+  with_temp_masc_base_path "agent_code-classify-token"
   @@ fun () ->
   let base_path = Sys.getenv "MASC_BASE_PATH" in
   seed_raw_token base_path "keeper-sangsu-agent" "keeper-bearer-xyz";
@@ -3518,10 +3518,10 @@ let test_classify_filter_rejection_codex_keeper_bound_actor_passes_with_per_keep
       ~tools
       ~require_tool_choice_support:true
       ~require_tool_support:true
-      (make_codex_cli_provider_cfg ())
+      (make_cli_tool_a_provider_cfg ())
   in
   Alcotest.(check (option string))
-    "codex_cli passes keeper-bound policy when per-keeper bearer exists"
+    "cli_tool_a passes keeper-bound policy when per-keeper bearer exists"
     None
     (Option.map Masc_mcp.Cascade_oas_runner.filter_rejection_reason_label reason)
 ;;
@@ -3529,7 +3529,7 @@ let test_classify_filter_rejection_codex_keeper_bound_actor_passes_with_per_keep
 let test_classify_filter_rejection_passes_when_provider_supported () =
   with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935"
   @@ fun () ->
-  with_env "MASC_MCP_TOKEN" "shared-codex-token"
+  with_env "MASC_MCP_TOKEN" "shared-agent_code-token"
   @@ fun () ->
   let runtime_mcp_policy =
     Cascade_runner.public_mcp_runtime_policy_of_tool_names
@@ -3542,10 +3542,10 @@ let test_classify_filter_rejection_passes_when_provider_supported () =
       ?runtime_mcp_policy
       ~require_tool_choice_support:true
       ~require_tool_support:true
-      (make_codex_cli_provider_cfg ())
+      (make_cli_tool_a_provider_cfg ())
   in
   Alcotest.(check bool)
-    "codex_cli passing the filter classifies as None"
+    "cli_tool_a passing the filter classifies as None"
     true
     (reason = None)
 ;;
@@ -3557,10 +3557,10 @@ let test_classify_filter_rejection_capability_profile_mismatch () =
       ~required_capability_profile:"tool_strict"
       ~require_tool_choice_support:true
       ~require_tool_support:true
-      (make_codex_cli_provider_cfg ())
+      (make_cli_tool_a_provider_cfg ())
   in
   Alcotest.(check bool)
-    "codex_cli with tool_strict profile → Capability_profile_mismatch"
+    "cli_tool_a with tool_strict profile → Capability_profile_mismatch"
     true
     (match reason with
      | Some (Masc_mcp.Cascade_oas_runner.Capability_profile_mismatch "tool_strict") ->
@@ -3575,19 +3575,19 @@ let test_classify_filter_rejection_capability_profile_passes () =
       ~required_capability_profile:"tool_strict"
       ~require_tool_choice_support:true
       ~require_tool_support:true
-      (make_claude_code_provider_cfg ())
+      (make_cli_tool_d_provider_cfg ())
   in
   Alcotest.(check bool)
-    "claude_code with tool_strict profile → None (passes)"
+    "cli_tool_d with tool_strict profile → None (passes)"
     true
     (reason = None)
 ;;
 
 let test_filter_candidate_providers_for_tool_support_capability_profile_filters () =
   let providers =
-    [ make_claude_code_provider_cfg ()
-    ; make_codex_cli_provider_cfg ()
-    ; make_gemini_cli_provider_cfg ()
+    [ make_cli_tool_d_provider_cfg ()
+    ; make_cli_tool_a_provider_cfg ()
+    ; make_cli_tool_b_provider_cfg ()
     ]
   in
   let filtered =
@@ -3600,11 +3600,11 @@ let test_filter_candidate_providers_for_tool_support_capability_profile_filters 
       providers
   in
   Alcotest.(check int)
-    "tool_strict keeps only claude_code (runtime_mcp + headers)"
+    "tool_strict keeps only cli_tool_d (runtime_mcp + headers)"
     1
     (List.length filtered);
   Alcotest.(check bool)
-    "tool_strict survivor is claude_code"
+    "tool_strict survivor is cli_tool_d"
     true
     (match filtered with
      | [ cfg ] ->
@@ -3615,8 +3615,8 @@ let test_filter_candidate_providers_for_tool_support_capability_profile_filters 
 
 let test_filter_candidate_providers_for_tool_support_no_profile_skips_check () =
   let providers =
-    [ make_claude_code_provider_cfg ()
-    ; make_codex_cli_provider_cfg ()
+    [ make_cli_tool_d_provider_cfg ()
+    ; make_cli_tool_a_provider_cfg ()
     ]
   in
   let filtered =
@@ -3800,7 +3800,7 @@ let test_public_mcp_runtime_policy_binds_keeper_internal_headers () =
   | None -> Alcotest.fail "expected public MCP runtime policy"
 ;;
 
-let test_runtime_mcp_policy_for_provider_codex_cli_preserves_identity_header () =
+let test_runtime_mcp_policy_for_provider_cli_tool_a_preserves_identity_header () =
   (* PR-F (Plan v3 Leak 2a): Codex CLI runtime MCP rejects most
      per-request HTTP headers, but the masc HTTP server still needs the
      keeper's identity to avoid collapsing to find_credential_by_token's
@@ -3808,7 +3808,7 @@ let test_runtime_mcp_policy_for_provider_codex_cli_preserves_identity_header () 
      pins the new behavior:
      - x-masc-agent-name MUST be preserved (pre-PR-F was None).
      - Authorization is still stripped for Codex CLI compatibility.
-     - openai-compat path is unchanged. *)
+     - provider_d-compat path is unchanged. *)
   let policy =
     { Llm_provider.Llm_transport.empty_runtime_mcp_policy with
       servers =
@@ -3835,7 +3835,7 @@ let test_runtime_mcp_policy_for_provider_codex_cli_preserves_identity_header () 
   let codex_headers =
     find_masc_headers
       (Cascade_runner.runtime_mcp_policy_for_provider
-         ~provider_cfg:(make_codex_cli_provider_cfg ())
+         ~provider_cfg:(make_cli_tool_a_provider_cfg ())
          ~agent_name:"keeper-sangsu-agent"
          (Some policy))
   in
@@ -3849,15 +3849,15 @@ let test_runtime_mcp_policy_for_provider_codex_cli_preserves_identity_header () 
   match codex_headers, openai_headers with
   | Some codex_headers, Some openai_headers ->
     Alcotest.(check (option string))
-      "codex_cli now preserves agent identity header (PR-F)"
+      "cli_tool_a now preserves agent identity header (PR-F)"
       (Some "keeper-sangsu-agent")
       (List.assoc_opt "x-masc-agent-name" codex_headers);
     Alcotest.(check (option string))
-      "codex_cli also preserves keeper-name header (PR-F)"
+      "cli_tool_a also preserves keeper-name header (PR-F)"
       (Some "sangsu")
       (List.assoc_opt "x-masc-keeper-name" codex_headers);
     Alcotest.(check (option string))
-      "codex_cli still strips bearer/auth header"
+      "cli_tool_a still strips bearer/auth header"
       None
       (List.assoc_opt "Authorization" codex_headers);
     Alcotest.(check (option string))
@@ -3867,7 +3867,7 @@ let test_runtime_mcp_policy_for_provider_codex_cli_preserves_identity_header () 
   | _ -> Alcotest.fail "expected masc runtime server headers"
 ;;
 
-let test_runtime_mcp_policy_for_provider_codex_cli_no_agent_strips_all () =
+let test_runtime_mcp_policy_for_provider_cli_tool_a_no_agent_strips_all () =
   (* PR-F regression: when the caller has no agent_name to inject,
      fall back to the legacy strip-all behavior so existing
      ambient-env auth flows remain unaffected. *)
@@ -3900,7 +3900,7 @@ let test_runtime_mcp_policy_for_provider_codex_cli_no_agent_strips_all () =
   let result =
     find_masc_headers
       (Cascade_runner.runtime_mcp_policy_for_provider
-         ~provider_cfg:(make_codex_cli_provider_cfg ())
+         ~provider_cfg:(make_cli_tool_a_provider_cfg ())
          ~agent_name:""
          (Some policy))
   in
@@ -3953,7 +3953,7 @@ let test_json_stream_cli_build_args_include_runtime_mcp_config () =
   let argv =
     Cascade_transport.Json_stream_cli_transport_local.build_args
       ~config:Cascade_transport.Json_stream_cli_transport_local.default_config
-      ~req_config:(make_kimi_cli_provider_cfg ())
+      ~req_config:(make_cli_tool_c_provider_cfg ())
       ~mcp_config_json
       ~prompt:"hello"
   in
@@ -3969,7 +3969,7 @@ let test_json_stream_cli_build_args_uses_stdin_for_large_prompt () =
   let argv =
     Cascade_transport.Json_stream_cli_transport_local.build_args
       ~config:Cascade_transport.Json_stream_cli_transport_local.default_config
-      ~req_config:(make_kimi_cli_provider_cfg ())
+      ~req_config:(make_cli_tool_c_provider_cfg ())
       ~mcp_config_json:[]
       ~prompt:long_prompt
   in
@@ -3985,7 +3985,7 @@ let test_json_stream_cli_build_args_uses_stdin_for_non_ascii_prompt () =
   let argv =
     Cascade_transport.Json_stream_cli_transport_local.build_args
       ~config:Cascade_transport.Json_stream_cli_transport_local.default_config
-      ~req_config:(make_kimi_cli_provider_cfg ())
+      ~req_config:(make_cli_tool_c_provider_cfg ())
       ~mcp_config_json:[]
       ~prompt
   in
@@ -4001,7 +4001,7 @@ let test_json_stream_cli_build_args_sanitizes_broken_utf8_prompt () =
   let argv =
     Cascade_transport.Json_stream_cli_transport_local.build_args
       ~config:Cascade_transport.Json_stream_cli_transport_local.default_config
-      ~req_config:(make_kimi_cli_provider_cfg ())
+      ~req_config:(make_cli_tool_c_provider_cfg ())
       ~mcp_config_json:[]
       ~prompt
   in
@@ -4056,7 +4056,7 @@ let direct_runtime_binding_for_cli_provider_exn provider_cfg =
 ;;
 
 let test_cli_model_for_provider_config_uses_runtime_default_on_auto () =
-  let provider_cfg = make_kimi_cli_provider_cfg () in
+  let provider_cfg = make_cli_tool_c_provider_cfg () in
   Alcotest.(check (option string))
     "auto uses runtime binding default"
     (runtime_binding_default_model_exn provider_cfg)
@@ -4136,7 +4136,7 @@ let test_json_stream_cli_rejects_invalid_tool_argument_json () =
   in
   let req =
     { (mock_completion_request ()) with
-      config = make_kimi_cli_provider_cfg ()
+      config = make_cli_tool_c_provider_cfg ()
     ; messages =
         [ { Agent_sdk.Types.role = Agent_sdk.Types.User
           ; content = [ Agent_sdk.Types.Text "hello" ]
@@ -4206,7 +4206,7 @@ let test_json_stream_cli_treats_whitespace_tool_arguments_as_empty_json () =
   in
   let req =
     { (mock_completion_request ()) with
-      config = make_kimi_cli_provider_cfg ()
+      config = make_cli_tool_c_provider_cfg ()
     ; messages =
         [ { Agent_sdk.Types.role = Agent_sdk.Types.User
           ; content = [ Agent_sdk.Types.Text "hello" ]
@@ -4282,7 +4282,7 @@ let test_json_stream_cli_stream_rejects_invalid_tool_argument_json () =
   in
   let req =
     { (mock_completion_request ()) with
-      config = make_kimi_cli_provider_cfg ()
+      config = make_cli_tool_c_provider_cfg ()
     ; messages =
         [ { Agent_sdk.Types.role = Agent_sdk.Types.User
           ; content = [ Agent_sdk.Types.Text "hello" ]
@@ -4368,7 +4368,7 @@ let test_json_stream_cli_error_completion_uses_measured_latency () =
   in
   let req =
     { (mock_completion_request ()) with
-      config = make_kimi_cli_provider_cfg ()
+      config = make_cli_tool_c_provider_cfg ()
     ; messages =
         [ { Agent_sdk.Types.role = Agent_sdk.Types.User
           ; content = [ Agent_sdk.Types.Text "hello" ]
@@ -4649,7 +4649,7 @@ let test_sdk_error_terminal_provider_runtime_ignores_unknown_network_error () =
 ;;
 
 let test_cli_prompt_preflight_uses_pipeline_context_window_fallback () =
-  let provider_cfg = make_codex_cli_provider_cfg () in
+  let provider_cfg = make_cli_tool_a_provider_cfg () in
   let config =
     Cascade_runner.default_config
       ~name:"cli-preflight"
@@ -4674,7 +4674,7 @@ let test_cli_prompt_preflight_uses_pipeline_context_window_fallback () =
 ;;
 
 let test_cli_prompt_preflight_scales_retry_limit_for_argv_only_overflow () =
-  let provider_cfg = make_codex_cli_provider_cfg ~model_id:"gpt-4.1" () in
+  let provider_cfg = make_cli_tool_a_provider_cfg ~model_id:"gpt-4.1" () in
   let config =
     Cascade_runner.default_config
       ~name:"cli-preflight"
@@ -4699,11 +4699,11 @@ let test_cli_prompt_preflight_scales_retry_limit_for_argv_only_overflow () =
       "retry limit below full context window"
       true
       (preflight.retry_limit_tokens < preflight.context_window_tokens)
-  | None -> Alcotest.fail "expected argv-only codex preflight overflow"
+  | None -> Alcotest.fail "expected argv-only agent_code preflight overflow"
 ;;
 
 let test_sanitize_cli_completion_request_for_argv_scrubs_codex_request () =
-  let provider_cfg = make_codex_cli_provider_cfg () in
+  let provider_cfg = make_cli_tool_a_provider_cfg () in
   let policy =
     { Llm_provider.Llm_transport.empty_runtime_mcp_policy with
       servers =
@@ -6325,7 +6325,7 @@ let () =
         ; Alcotest.test_case
             "oas_worker builds Kimi CLI config"
             `Quick
-            test_oas_worker_exec_build_supports_kimi_cli
+            test_oas_worker_exec_build_supports_cli_tool_c
         ; Alcotest.test_case
             "resume propagates approval (no silent ApprovalRequired drift)"
             `Quick
@@ -6387,79 +6387,79 @@ let () =
             `Quick
             test_cli_prompt_preflight_scales_retry_limit_for_argv_only_overflow
         ; Alcotest.test_case
-            "codex argv scrubber cleans request text"
+            "agent_code argv scrubber cleans request text"
             `Quick
             test_sanitize_cli_completion_request_for_argv_scrubs_codex_request
         ; Alcotest.test_case
-            "public MCP tools on codex_cli use runtime MCP lane"
+            "public MCP tools on cli_tool_a use runtime MCP lane"
             `Quick
-            test_resolve_tool_lane_for_codex_cli_public_tools_uses_runtime_mcp_policy
+            test_resolve_tool_lane_for_cli_tool_a_public_tools_uses_runtime_mcp_policy
         ; Alcotest.test_case
-            "public MCP tools on codex_cli keep identity runtime MCP headers"
+            "public MCP tools on cli_tool_a keep identity runtime MCP headers"
             `Quick
-            test_resolve_tool_lane_for_codex_cli_public_tools_with_agent_name_keeps_identity_headers
+            test_resolve_tool_lane_for_cli_tool_a_public_tools_with_agent_name_keeps_identity_headers
         ; Alcotest.test_case
-            "keeper-bound public MCP tools on codex_cli omit request-scoped tools"
+            "keeper-bound public MCP tools on cli_tool_a omit request-scoped tools"
             `Quick
-            test_resolve_tool_lane_for_codex_cli_keeper_bound_public_tools_omits_bound_tools
+            test_resolve_tool_lane_for_cli_tool_a_keeper_bound_public_tools_omits_bound_tools
         ; Alcotest.test_case
-            "keeper-bound public MCP tools on codex_cli use per-keeper bearer"
+            "keeper-bound public MCP tools on cli_tool_a use per-keeper bearer"
             `Quick
-            test_resolve_tool_lane_for_codex_cli_keeper_bound_public_tools_with_per_keeper_token_keeps_bound_tools
+            test_resolve_tool_lane_for_cli_tool_a_keeper_bound_public_tools_with_per_keeper_token_keeps_bound_tools
         ; Alcotest.test_case
-            "public MCP tools on kimi_cli use runtime MCP lane"
+            "public MCP tools on cli_tool_c use runtime MCP lane"
             `Quick
-            test_resolve_tool_lane_for_kimi_cli_public_tools_uses_runtime_mcp_policy
+            test_resolve_tool_lane_for_cli_tool_c_public_tools_uses_runtime_mcp_policy
         ; Alcotest.test_case
-            "public MCP tools on kimi_cli keep runtime MCP headers"
+            "public MCP tools on cli_tool_c keep runtime MCP headers"
             `Quick
-            test_resolve_tool_lane_for_kimi_cli_public_tools_with_agent_name_keeps_runtime_headers
+            test_resolve_tool_lane_for_cli_tool_c_public_tools_with_agent_name_keeps_runtime_headers
         ; Alcotest.test_case
-            "mixed tool surface on kimi_cli keeps public runtime subset"
+            "mixed tool surface on cli_tool_c keeps public runtime subset"
             `Quick
-            test_resolve_tool_lane_for_kimi_cli_mixed_tools_keeps_public_runtime_subset
+            test_resolve_tool_lane_for_cli_tool_c_mixed_tools_keeps_public_runtime_subset
         ; Alcotest.test_case
             "public MCP tools on openai_compat stay inline"
             `Quick
             test_resolve_tool_lane_for_openai_public_tools_keeps_inline_tools
         ; Alcotest.test_case
-            "keeper-internal tools on claude_code use runtime MCP lane"
+            "keeper-internal tools on cli_tool_d use runtime MCP lane"
             `Quick
-            test_resolve_tool_lane_for_claude_code_keeper_internal_tools_uses_runtime_mcp_policy
+            test_resolve_tool_lane_for_cli_tool_d_keeper_internal_tools_uses_runtime_mcp_policy
         ; Alcotest.test_case
-            "keeper-internal tools on kimi_cli use runtime MCP lane when keeper-bound"
+            "keeper-internal tools on cli_tool_c use runtime MCP lane when keeper-bound"
             `Quick
-            test_resolve_tool_lane_for_kimi_cli_keeper_internal_tools_uses_runtime_mcp_policy
+            test_resolve_tool_lane_for_cli_tool_c_keeper_internal_tools_uses_runtime_mcp_policy
         ; Alcotest.test_case
-            "keeper-internal tools on codex_cli are rejected"
+            "keeper-internal tools on cli_tool_a are rejected"
             `Quick
-            test_resolve_tool_lane_for_codex_cli_internal_tools_rejects
+            test_resolve_tool_lane_for_cli_tool_a_internal_tools_rejects
         ; Alcotest.test_case
-            "keeper-internal tools on codex_cli with keeper actor are rejected"
+            "keeper-internal tools on cli_tool_a with keeper actor are rejected"
             `Quick
-            test_resolve_tool_lane_for_codex_cli_keeper_internal_tools_with_agent_rejects
+            test_resolve_tool_lane_for_cli_tool_a_keeper_internal_tools_with_agent_rejects
         ; Alcotest.test_case
-            "keeper-internal tools on codex_cli with per-keeper bearer use runtime MCP"
+            "keeper-internal tools on cli_tool_a with per-keeper bearer use runtime MCP"
             `Quick
-            test_resolve_tool_lane_for_codex_cli_keeper_internal_tools_with_agent_and_per_keeper_token_uses_runtime_mcp
+            test_resolve_tool_lane_for_cli_tool_a_keeper_internal_tools_with_agent_and_per_keeper_token_uses_runtime_mcp
         ; Alcotest.test_case
-            "keeper-internal tools on kimi_cli are rejected"
+            "keeper-internal tools on cli_tool_c are rejected"
             `Quick
-            test_resolve_tool_lane_for_kimi_cli_internal_tools_rejects
+            test_resolve_tool_lane_for_cli_tool_c_internal_tools_rejects
         ; Alcotest.test_case
-            "optional keeper-internal tools on codex_cli drop to text"
+            "optional keeper-internal tools on cli_tool_a drop to text"
             `Quick
-            test_resolve_tool_lane_for_codex_cli_internal_tools_optional_drops_tools
+            test_resolve_tool_lane_for_cli_tool_a_internal_tools_optional_drops_tools
         ; Alcotest.test_case
-            "provider-normalized filter keeps codex public MCP lane"
+            "provider-normalized filter keeps agent_code public MCP lane"
             `Quick
             test_filter_candidate_providers_for_tool_support_normalizes_codex_headers
         ; Alcotest.test_case
-            "provider-normalized filter drops codex keeper-bound actor tools"
+            "provider-normalized filter drops agent_code keeper-bound actor tools"
             `Quick
-            test_filter_candidate_providers_for_tool_support_drops_codex_cli_keeper_bound_actor_tools
+            test_filter_candidate_providers_for_tool_support_drops_cli_tool_a_keeper_bound_actor_tools
         ; Alcotest.test_case
-            "provider-normalized filter keeps codex bound actor with per-keeper token"
+            "provider-normalized filter keeps agent_code bound actor with per-keeper token"
             `Quick
             test_filter_candidate_providers_for_tool_support_keeps_codex_with_per_keeper_token
         ; Alcotest.test_case
@@ -6487,11 +6487,11 @@ let () =
             `Quick
             test_dual_track_swap_emits_secondary_kind_label_on_rejection
         ; Alcotest.test_case
-            "classify_filter_rejection: codex bound-actor policy → keeper_bound_actor"
+            "classify_filter_rejection: agent_code bound-actor policy → keeper_bound_actor"
             `Quick
             test_classify_filter_rejection_codex_keeper_bound_actor
         ; Alcotest.test_case
-            "classify_filter_rejection: codex bound-actor policy passes with per-keeper \
+            "classify_filter_rejection: agent_code bound-actor policy passes with per-keeper \
              bearer"
             `Quick
             test_classify_filter_rejection_codex_keeper_bound_actor_passes_with_per_keeper_token
@@ -6500,11 +6500,11 @@ let () =
             `Quick
             test_classify_filter_rejection_passes_when_provider_supported
         ; Alcotest.test_case
-            "classify_filter_rejection: tool_strict rejects codex_cli (no headers)"
+            "classify_filter_rejection: tool_strict rejects cli_tool_a (no headers)"
             `Quick
             test_classify_filter_rejection_capability_profile_mismatch
         ; Alcotest.test_case
-            "classify_filter_rejection: tool_strict accepts claude_code (headers)"
+            "classify_filter_rejection: tool_strict accepts cli_tool_d (headers)"
             `Quick
             test_classify_filter_rejection_capability_profile_passes
         ; Alcotest.test_case
@@ -6532,14 +6532,14 @@ let () =
             `Quick
             test_public_mcp_runtime_policy_binds_keeper_internal_headers
         ; Alcotest.test_case
-            "provider-aware runtime MCP policy preserves codex_cli identity header (PR-F)"
+            "provider-aware runtime MCP policy preserves cli_tool_a identity header (PR-F)"
             `Quick
-            test_runtime_mcp_policy_for_provider_codex_cli_preserves_identity_header
+            test_runtime_mcp_policy_for_provider_cli_tool_a_preserves_identity_header
         ; Alcotest.test_case
-            "provider-aware runtime MCP policy strips all when codex_cli has no \
+            "provider-aware runtime MCP policy strips all when cli_tool_a has no \
              agent_name"
             `Quick
-            test_runtime_mcp_policy_for_provider_codex_cli_no_agent_strips_all
+            test_runtime_mcp_policy_for_provider_cli_tool_a_no_agent_strips_all
         ; Alcotest.test_case
             "CLI request runtime MCP config is merged"
             `Quick

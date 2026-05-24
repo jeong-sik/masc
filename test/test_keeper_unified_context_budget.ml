@@ -29,7 +29,7 @@ let test_pure_local_labels_detection () =
     bool
     "mixed cascade is not pure local"
     false
-    (OMR.labels_are_pure_local [ "glm:glm-5.1"; "ollama:qwen3.5:35b-a3b-nvfp4" ])
+    (OMR.labels_are_pure_local [ "provider_k:provider_k-5.1"; "ollama:qwen3.5:35b-a3b-nvfp4" ])
 ;;
 
 let test_clamp_context_for_pure_local_labels () =
@@ -46,12 +46,12 @@ let test_clamp_context_for_pure_local_labels () =
     "mixed cascade keeps raw context"
     262_144
     (OMR.clamp_context_for_pure_local_labels
-       ~labels:[ "glm:glm-5.1"; "ollama:qwen3.5:35b-a3b-nvfp4" ]
+       ~labels:[ "provider_k:provider_k-5.1"; "ollama:qwen3.5:35b-a3b-nvfp4" ]
        ~max_context:262_144)
 ;;
 
 let test_resolved_max_context_for_turn_uses_primary_budget () =
-  let labels = [ "glm:glm-5.1"; "ollama:qwen3.5:35b-a3b-nvfp4" ] in
+  let labels = [ "provider_k:provider_k-5.1"; "ollama:qwen3.5:35b-a3b-nvfp4" ] in
   let expected = OMR.resolve_primary_max_context labels in
   check
     int

@@ -25,7 +25,7 @@
       cascade exhaustion).
     - System log slice 2026-05-18, last 30min:
       [strict_tool_candidates: preflight skipped 1 unhealthy] x35,
-      [glm-coding-with-spark: preflight skipped 1 unhealthy] x12. *)
+      [provider_k-coding-with-spark: preflight skipped 1 unhealthy] x12. *)
 
 (** Reason for a single preflight unhealthy-skip event. Closed sum,
     extend by adding a constructor (compiler enforces exhaustive

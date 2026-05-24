@@ -33,39 +33,39 @@ let with_temp_masc_dir f =
 
 let test_create_metric () =
   let metric = Metrics_store_eio.create_metric
-    ~agent_id:"claude"
+    ~agent_id:"agent_llm_a"
     ~task_id:"task-001"
-    ~collaborators:["gemini"]
+    ~collaborators:["provider_f"]
     ()
   in
-  assert (metric.agent_id = "claude");
+  assert (metric.agent_id = "agent_llm_a");
   assert (metric.task_id = "task-001");
-  assert (List.mem "gemini" metric.collaborators);
+  assert (List.mem "provider_f" metric.collaborators);
   assert (metric.success = false);  (* Default *)
   assert (Option.is_none metric.completed_at);
   print_endline "✓ test_create_metric passed"
 
 let test_complete_metric () =
   let metric = Metrics_store_eio.create_metric
-    ~agent_id:"gemini"
+    ~agent_id:"provider_f"
     ~task_id:"task-002"
     ()
   in
   let completed = Metrics_store_eio.complete_metric metric
     ~success:true
-    ~handoff_to:"codex"
+    ~handoff_to:"agent_code"
     ()
   in
   assert (completed.success = true);
   assert (Option.is_some completed.completed_at);
-  assert (completed.handoff_to = Some "codex");
+  assert (completed.handoff_to = Some "agent_code");
   print_endline "✓ test_complete_metric passed"
 
 let test_record_and_get () =
   with_temp_masc_dir (fun config ->
     (* Create and record a metric *)
     let metric = Metrics_store_eio.create_metric
-      ~agent_id:"claude"
+      ~agent_id:"agent_llm_a"
       ~task_id:"task-record"
       ()
     in
@@ -73,7 +73,7 @@ let test_record_and_get () =
     Metrics_store_eio.record config completed;
 
     (* Get recent metrics *)
-    let recent = Metrics_store_eio.get_recent config ~agent_id:"claude" ~days:1 in
+    let recent = Metrics_store_eio.get_recent config ~agent_id:"agent_llm_a" ~days:1 in
     assert (List.length recent >= 1);
 
     (* Find our metric *)
@@ -87,7 +87,7 @@ let test_calculate_agent_metrics () =
     (* Record several metrics *)
     for i = 1 to 5 do
       let metric = Metrics_store_eio.create_metric
-        ~agent_id:"claude"
+        ~agent_id:"agent_llm_a"
         ~task_id:(Printf.sprintf "calc-task-%d" i)
         ()
       in
@@ -97,7 +97,7 @@ let test_calculate_agent_metrics () =
     done;
 
     (* Calculate aggregated metrics *)
-    match Metrics_store_eio.calculate_agent_metrics config ~agent_id:"claude" ~days:1 with
+    match Metrics_store_eio.calculate_agent_metrics config ~agent_id:"agent_llm_a" ~days:1 with
     | Some metrics ->
       assert (metrics.total_tasks = 5);
       (* completed_tasks counts successful tasks: i=2 and i=4 (even numbers) *)
@@ -112,7 +112,7 @@ let test_calculate_agent_metrics () =
 let test_get_all_agents () =
   with_temp_masc_dir (fun config ->
     (* Record metrics for multiple agents *)
-    let agents = ["claude"; "gemini"; "codex"] in
+    let agents = ["agent_llm_a"; "provider_f"; "agent_code"] in
     List.iter (fun agent ->
       let metric = Metrics_store_eio.create_metric
         ~agent_id:agent
@@ -133,18 +133,18 @@ let test_get_all_agents () =
 let test_collaborators () =
   with_temp_masc_dir (fun config ->
     let metric = Metrics_store_eio.create_metric
-      ~agent_id:"claude"
+      ~agent_id:"agent_llm_a"
       ~task_id:"collab-task"
-      ~collaborators:["gemini"; "codex"]
+      ~collaborators:["provider_f"; "agent_code"]
       ()
     in
     let completed = Metrics_store_eio.complete_metric metric ~success:true () in
     Metrics_store_eio.record config completed;
 
-    match Metrics_store_eio.calculate_agent_metrics config ~agent_id:"claude" ~days:1 with
+    match Metrics_store_eio.calculate_agent_metrics config ~agent_id:"agent_llm_a" ~days:1 with
     | Some metrics ->
-      assert (List.mem "gemini" metrics.unique_collaborators);
-      assert (List.mem "codex" metrics.unique_collaborators)
+      assert (List.mem "provider_f" metrics.unique_collaborators);
+      assert (List.mem "agent_code" metrics.unique_collaborators)
     | None -> failwith "Expected metrics"
   );
   print_endline "✓ test_collaborators passed"
@@ -153,23 +153,23 @@ let test_handoff_tracking () =
   with_temp_masc_dir (fun config ->
     (* Record handoff metrics *)
     let m1 = Metrics_store_eio.create_metric
-      ~agent_id:"claude"
+      ~agent_id:"agent_llm_a"
       ~task_id:"handoff-1"
-      ~handoff_from:"gemini"
+      ~handoff_from:"provider_f"
       ()
     in
     let c1 = Metrics_store_eio.complete_metric m1 ~success:true () in
     Metrics_store_eio.record config c1;
 
     let m2 = Metrics_store_eio.create_metric
-      ~agent_id:"claude"
+      ~agent_id:"agent_llm_a"
       ~task_id:"handoff-2"
       ()
     in
-    let c2 = Metrics_store_eio.complete_metric m2 ~success:true ~handoff_to:"codex" () in
+    let c2 = Metrics_store_eio.complete_metric m2 ~success:true ~handoff_to:"agent_code" () in
     Metrics_store_eio.record config c2;
 
-    match Metrics_store_eio.calculate_agent_metrics config ~agent_id:"claude" ~days:1 with
+    match Metrics_store_eio.calculate_agent_metrics config ~agent_id:"agent_llm_a" ~days:1 with
     | Some metrics ->
       assert (metrics.handoff_success_rate = 1.0);  (* Both handoffs successful *)
       print_endline (Printf.sprintf "  Handoff success rate: %.0f%%" (metrics.handoff_success_rate *. 100.0))

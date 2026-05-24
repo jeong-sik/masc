@@ -6,7 +6,7 @@
     The adapter resolves declared TOML providers directly into
     [Provider_config.t] values. Undeclared legacy provider bindings fail closed
     instead of re-parsing synthetic provider:model strings. Tests use provider
-    IDs from the typed provider-kind surface (claude_code, codex_cli, ollama,
+    IDs from the typed provider-kind surface (cli_tool_d, cli_tool_a, ollama,
     etc.). *)
 
 open Alcotest
@@ -94,15 +94,15 @@ let with_env name value f =
 (* --- TOML fixtures ---
 
    Provider IDs must match runtime binding cascade prefix values:
-   claude_code, codex_cli, gemini_cli, ollama, glm-coding, etc.
+   cli_tool_d, cli_tool_a, cli_tool_b, ollama, provider_k-coding, etc.
 
    Model api_names must be valid runtime model ids for the declared provider. *)
 
 let valid_toml =
   {|
-[providers.claude_code]
-protocol = "anthropic-cli"
-command = "claude"
+[providers.cli_tool_d]
+protocol = "provider_a-cli"
+command = "agent_llm_a"
 
 [providers.ollama]
 protocol = "ollama-http"
@@ -110,12 +110,12 @@ endpoint = "http://localhost:11434"
 
 [models.haiku]
 max-context = 200000
-api-name = "claude-haiku-4-5-20251001"
+api-name = "model-a-haiku"
 tools-support = true
 
 [models.sonnet]
 max-context = 200000
-api-name = "claude-sonnet-4-6"
+api-name = "model-a-sonnet"
 tools-support = true
 
 [models.qwen3]
@@ -123,24 +123,24 @@ max-context = 32768
 api-name = "qwen3:8b"
 tools-support = true
 
-[claude_code.haiku]
+[cli_tool_d.haiku]
 is-default = true
 max-concurrent = 3
 
-[claude_code.sonnet]
+[cli_tool_d.sonnet]
 max-concurrent = 2
 
-[claude_code.haiku.for-scoring]
+[cli_tool_d.haiku.for-scoring]
 max-input = 4096
 
 [ollama.qwen3]
 
 [tier.rerank]
-members = ["claude_code.haiku.for-scoring"]
+members = ["cli_tool_d.haiku.for-scoring"]
 strategy = "failover"
 
 [tier.primary]
-members = ["claude_code.sonnet", "claude_code.haiku"]
+members = ["cli_tool_d.sonnet", "cli_tool_d.haiku"]
 strategy = "failover"
 
 [tier.local]
@@ -155,7 +155,7 @@ strategy = "priority_tier"
 target = "tier-group.primary"
 
 [system.governance]
-target = "claude_code.haiku.for-scoring"
+target = "cli_tool_d.haiku.for-scoring"
 |}
 ;;
 
@@ -214,7 +214,7 @@ let test_valid_system_targets () =
     bool
     "system target is alias key"
     true
-    (List.mem "claude_code.haiku.for-scoring" targets)
+    (List.mem "cli_tool_d.haiku.for-scoring" targets)
 ;;
 
 let test_valid_default_profile () =
@@ -225,24 +225,24 @@ let test_valid_default_profile () =
 let test_registered_http_provider_uses_toml_endpoint_without_api_key () =
   let toml =
     {|
-[providers.glm-coding]
-protocol = "openai-http"
+[providers.provider_k-coding]
+protocol = "provider_d-http"
 endpoint = "https://api.z.ai/api/coding/paas/v4"
 
-[providers.glm-coding.credentials]
+[providers.provider_k-coding.credentials]
 type = "env"
 key = "ZAI_API_KEY"
 
-[models.glm-5-turbo]
+[models.provider_k-5-turbo]
 max-context = 128000
-api-name = "glm-5-turbo"
+api-name = "provider_k-5-turbo"
 tools-support = true
 
-[glm-coding.glm-5-turbo]
+[provider_k-coding.provider_k-5-turbo]
 max-concurrent = 2
 
 [tier.medium]
-members = ["glm-coding.glm-5-turbo"]
+members = ["provider_k-coding.provider_k-5-turbo"]
 strategy = "failover"
 |}
   in
@@ -263,7 +263,7 @@ strategy = "failover"
       "uses TOML endpoint"
       "https://api.z.ai/api/coding/paas/v4"
       cfg.Llm_provider.Provider_config.base_url;
-    check string "uses model api-name" "glm-5-turbo" cfg.model_id
+    check string "uses model api-name" "provider_k-5-turbo" cfg.model_id
   | configs ->
     fail
       (Printf.sprintf
@@ -275,20 +275,20 @@ let test_registered_http_provider_without_credentials_uses_registry_api_key_env 
   with_env "ZAI_API_KEY" "zai-review-test-key" (fun () ->
     let toml =
       {|
-[providers.glm-coding]
-protocol = "openai-http"
+[providers.provider_k-coding]
+protocol = "provider_d-http"
 endpoint = "https://api.z.ai/api/coding/paas/v4"
 
-[models.glm-5-turbo]
+[models.provider_k-5-turbo]
 max-context = 128000
-api-name = "glm-5-turbo"
+api-name = "provider_k-5-turbo"
 tools-support = true
 
-[glm-coding.glm-5-turbo]
+[provider_k-coding.provider_k-5-turbo]
 max-concurrent = 2
 
 [tier.medium]
-members = ["glm-coding.glm-5-turbo"]
+members = ["provider_k-coding.provider_k-5-turbo"]
 strategy = "failover"
 |}
     in
@@ -330,16 +330,16 @@ endpoint = "https://ollama.com"
 type = "env"
 key = "OLLAMA_CLOUD_API_KEY"
 
-[models.glm-5-1-cloud]
+[models.provider_k-5-1-cloud]
 max-context = 262144
-api-name = "glm-5.1:cloud"
+api-name = "provider_k-5.1:cloud"
 tools-support = true
 
-[ollama_cloud.glm-5-1-cloud]
+[ollama_cloud.provider_k-5-1-cloud]
 max-concurrent = 1
 
-[tier.glm-coding-with-spark]
-members = ["ollama_cloud.glm-5-1-cloud"]
+[tier.provider_k-coding-with-spark]
+members = ["ollama_cloud.provider_k-5-1-cloud"]
 strategy = "failover"
 |}
     in
@@ -347,7 +347,7 @@ strategy = "failover"
     no_errors catalog.errors;
     let coding_tier =
       List.find
-        (fun (p : adapted_profile) -> p.name = "tier.glm-coding-with-spark")
+        (fun (p : adapted_profile) -> p.name = "tier.provider_k-coding-with-spark")
         catalog.profiles
     in
     match coding_tier.provider_configs with
@@ -383,7 +383,7 @@ let test_ollama_cloud_openai_protocol_uses_chat_completions () =
     let toml =
       {|
 [providers.ollama_cloud]
-protocol = "openai-http"
+protocol = "provider_d-http"
 endpoint = "https://ollama.com/v1"
 
 [providers.ollama_cloud.credentials]
@@ -417,7 +417,7 @@ strategy = "failover"
     | [ (cfg, _) ] ->
       check
         bool
-        "explicit openai-http wins over ollama_cloud registry defaults"
+        "explicit provider_d-http wins over ollama_cloud registry defaults"
         true
         (cfg.Llm_provider.Provider_config.kind
          = Llm_provider.Provider_config.OpenAI_compat);
@@ -438,23 +438,23 @@ strategy = "failover"
 let test_model_capabilities_tool_choice_reaches_provider_config () =
   let toml =
     {|
-[providers.glm-coding]
-protocol = "openai-http"
+[providers.provider_k-coding]
+protocol = "provider_d-http"
 endpoint = "https://api.z.ai/api/coding/paas/v4"
 
-[models.glm-5-1]
+[models.provider_k-5-1]
 max-context = 128000
-api-name = "glm-5.1"
+api-name = "provider_k-5.1"
 tools-support = true
 
-[models.glm-5-1.capabilities]
+[models.provider_k-5-1.capabilities]
 supports-tool-choice = true
 
-[glm-coding.glm-5-1]
+[provider_k-coding.provider_k-5-1]
 max-concurrent = 1
 
-[tier.glm-coding-primary]
-members = ["glm-coding.glm-5-1"]
+[tier.provider_k-coding-primary]
+members = ["provider_k-coding.provider_k-5-1"]
 strategy = "failover"
 |}
   in
@@ -462,7 +462,7 @@ strategy = "failover"
   no_errors catalog.errors;
   let tier =
     List.find
-      (fun (p : adapted_profile) -> p.name = "tier.glm-coding-primary")
+      (fun (p : adapted_profile) -> p.name = "tier.provider_k-coding-primary")
       catalog.profiles
   in
   match tier.provider_configs with
@@ -487,11 +487,11 @@ strategy = "failover"
 let test_declared_http_provider_v1_endpoint_dedupes_request_path () =
   let toml =
     {|
-[providers.local-openai]
-protocol = "openai-http"
+[providers.local-provider_d]
+protocol = "provider_d-http"
 endpoint = "http://127.0.0.1:18080/v1"
 
-[providers.local-openai.credentials]
+[providers.local-provider_d.credentials]
 type = "env"
 key = "LOCAL_OPENAI_API_KEY"
 
@@ -500,10 +500,10 @@ max-context = 4096
 api-name = "remote-model"
 tools-support = true
 
-[local-openai.remote]
+[local-provider_d.remote]
 
 [tier.medium]
-members = ["local-openai.remote"]
+members = ["local-provider_d.remote"]
 strategy = "failover"
 |}
   in
@@ -540,20 +540,20 @@ strategy = "failover"
 let test_cli_provider_resolves_without_runtime_binary () =
   let toml =
     {|
-[providers.claude_code]
-protocol = "anthropic-cli"
+[providers.cli_tool_d]
+protocol = "provider_a-cli"
 command = "__missing_claude_for_adapter_test__"
 
 [models.haiku]
 max-context = 200000
-api-name = "claude-haiku-4-5-20251001"
+api-name = "model-a-haiku"
 tools-support = true
 
-[claude_code.haiku]
+[cli_tool_d.haiku]
 max-concurrent = 1
 
 [tier.primary]
-members = ["claude_code.haiku"]
+members = ["cli_tool_d.haiku"]
 strategy = "failover"
 |}
   in
@@ -569,7 +569,7 @@ strategy = "failover"
       "uses CLI provider kind from declarative provider id"
       true
       (cfg.Llm_provider.Provider_config.kind = Llm_provider.Provider_config.Claude_code);
-    check string "uses model api-name" "claude-haiku-4-5-20251001" cfg.model_id;
+    check string "uses model api-name" "model-a-haiku" cfg.model_id;
     check string "CLI providers do not need an HTTP base URL" "" cfg.base_url
   | configs ->
     fail
@@ -585,7 +585,7 @@ let test_unknown_provider () =
     {|
 [models.haiku]
 max-context = 200000
-api-name = "claude-haiku-4-5-20251001"
+api-name = "model-a-haiku"
 
 [nonexistent.haiku]
 is-default = true
@@ -600,15 +600,15 @@ is-default = true
 let test_unknown_model () =
   let toml =
     {|
-[providers.claude_code]
-protocol = "anthropic-cli"
-command = "claude"
+[providers.cli_tool_d]
+protocol = "provider_a-cli"
+command = "agent_llm_a"
 
 [models.haiku]
 max-context = 200000
-api-name = "claude-haiku-4-5-20251001"
+api-name = "model-a-haiku"
 
-[claude_code.nonexistent-model]
+[cli_tool_d.nonexistent-model]
 is-default = true
 |}
   in
@@ -623,7 +623,7 @@ let test_alias_parent_missing () =
     { providers =
         [ { id = "x"
           ; display_name = "X"
-          ; protocol = "anthropic"
+          ; protocol = "provider_a"
           ; api_format = Messages_api
           ; transport = Cli "x"
           ; is_non_interactive = false
@@ -684,22 +684,22 @@ let test_alias_parent_missing () =
 let test_strategy_mapping () =
   let toml =
     {|
-[providers.claude_code]
-protocol = "anthropic-cli"
-command = "claude"
+[providers.cli_tool_d]
+protocol = "provider_a-cli"
+command = "agent_llm_a"
 
 [models.haiku]
 max-context = 200000
-api-name = "claude-haiku-4-5-20251001"
+api-name = "model-a-haiku"
 
-[claude_code.haiku]
+[cli_tool_d.haiku]
 
 [tier.failover-t]
-members = ["claude_code.haiku"]
+members = ["cli_tool_d.haiku"]
 strategy = "failover"
 
 [tier.priority-t]
-members = ["claude_code.haiku"]
+members = ["cli_tool_d.haiku"]
 strategy = "priority_tier"
 |}
   in
@@ -731,17 +731,17 @@ let test_multiple_errors () =
   let toml =
     {|
 [providers.good]
-protocol = "anthropic-cli"
-command = "claude"
+protocol = "provider_a-cli"
+command = "agent_llm_a"
 
 [models.haiku]
 max-context = 200000
-api-name = "claude-haiku-4-5-20251001"
+api-name = "model-a-haiku"
 
 [bad-provider.haiku]
 is-default = true
 
-[claude_code.nonexistent]
+[cli_tool_d.nonexistent]
 is-default = true
 |}
   in
@@ -756,11 +756,11 @@ is-default = true
 let test_duplicate_routes () =
   let cfg =
     { providers =
-        [ { id = "claude_code"
+        [ { id = "cli_tool_d"
           ; display_name = "Claude Code"
-          ; protocol = "anthropic"
+          ; protocol = "provider_a"
           ; api_format = Messages_api
-          ; transport = Cli "claude"
+          ; transport = Cli "agent_llm_a"
           ; is_non_interactive = false
           ; credentials = None
           ; capabilities = None
@@ -771,7 +771,7 @@ let test_duplicate_routes () =
         ]
     ; models =
         [ { id = "haiku"
-          ; api_name = "claude-haiku-4-5-20251001"
+          ; api_name = "model-a-haiku"
           ; max_context = 200000
           ; tools_support = true
           ; thinking_support = false
@@ -782,7 +782,7 @@ let test_duplicate_routes () =
           }
         ]
     ; bindings =
-        [ { provider_id = "claude_code"
+        [ { provider_id = "cli_tool_d"
           ; model_id = "haiku"
           ; is_default = true
           ; max_concurrent = 1
@@ -795,7 +795,7 @@ let test_duplicate_routes () =
     ; aliases = []
     ; tiers =
         [ { name = "primary"
-          ; members = [ "claude_code.haiku" ]
+          ; members = [ "cli_tool_d.haiku" ]
           ; strategy = Failover
           ; max_concurrent = None
           ; cycle_policy = None
@@ -822,18 +822,18 @@ let test_duplicate_routes () =
 let test_empty_tier_group () =
   let toml =
     {|
-[providers.claude_code]
-protocol = "anthropic-cli"
-command = "claude"
+[providers.cli_tool_d]
+protocol = "provider_a-cli"
+command = "agent_llm_a"
 
 [models.haiku]
 max-context = 200000
-api-name = "claude-haiku-4-5-20251001"
+api-name = "model-a-haiku"
 
-[claude_code.haiku]
+[cli_tool_d.haiku]
 
 [tier.real]
-members = ["claude_code.haiku"]
+members = ["cli_tool_d.haiku"]
 strategy = "failover"
 
 [tier-group.empty]
@@ -878,7 +878,7 @@ let () =
             `Quick
             test_ollama_cloud_http_provider_adds_bearer_auth_header
         ; test_case
-            "ollama_cloud openai-http uses chat completions"
+            "ollama_cloud provider_d-http uses chat completions"
             `Quick
             test_ollama_cloud_openai_protocol_uses_chat_completions
         ; test_case

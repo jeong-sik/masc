@@ -144,7 +144,7 @@ let test_oas_bridge_demotes_tool_choice_relaxation_to_debug () =
          ~level:Agent_sdk.Log.Info
          ~module_name:"completion_contract"
          ~message:"tool_choice contract relaxed (provider does not support tool_choice)"
-         [ Agent_sdk.Log.S ("provider", "glm") ])
+         [ Agent_sdk.Log.S ("provider", "provider_k") ])
   in
   Alcotest.(check string) "tool_choice fallback demoted" "DEBUG"
     (Log.level_to_string level)

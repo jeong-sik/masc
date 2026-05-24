@@ -78,7 +78,7 @@ let cli_prompt_bytes_to_token_limit ~prompt_bytes ~prompt_tokens =
         (of_int prompt_bytes)
       |> to_int)
 
-(* RFC-0166: previously dispatched on [binding.command = "codex"] to
+(* RFC-0166: previously dispatched on [binding.command = "agent_code"] to
    pick the only argv-limited transport that needed argv-byte
    preflight. The server no longer enumerates client commands. The
    cascade-decl [argv_prompt_preflight] capability flag exists for

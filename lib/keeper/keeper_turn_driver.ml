@@ -1848,7 +1848,7 @@ let run_named
                  log-grep layer.  Pre-fix the log read "Network error:
                  CLI agent exited with code 1: {...subtype error_max_turns...}"
                  which masked that this was a graceful turn-budget exit
-                 (33/day claude_code, 2.5x growth). *)
+                 (33/day cli_tool_d, 2.5x growth). *)
               let class_label =
                 match sdk_error_cascade_fallback_class sdk_err with
                 | Some class_name -> Printf.sprintf "[%s] " class_name

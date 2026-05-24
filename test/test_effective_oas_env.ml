@@ -15,7 +15,7 @@
 
     Cross-reference:
     - [lib/keeper/keeper_types_profile.ml] — [effective_oas_env]
-    - OAS [transport_gemini_cli.ml:67-85] — sentinel behavior *)
+    - OAS [transport_cli_tool_b.ml:67-85] — sentinel behavior *)
 
 open Alcotest
 

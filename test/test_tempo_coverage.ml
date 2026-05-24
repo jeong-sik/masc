@@ -134,15 +134,15 @@ let test_is_pending_task_todo () =
   check bool "todo is pending" true (Tempo.is_pending_task task)
 
 let test_is_pending_task_claimed () =
-  let task = make_task ~id:"t2" ~status:(Masc_domain.Claimed { assignee = "claude"; claimed_at = "2024-01-01T00:00:00Z" }) in
+  let task = make_task ~id:"t2" ~status:(Masc_domain.Claimed { assignee = "agent_llm_a"; claimed_at = "2024-01-01T00:00:00Z" }) in
   check bool "claimed is pending" true (Tempo.is_pending_task task)
 
 let test_is_pending_task_in_progress () =
-  let task = make_task ~id:"t3" ~status:(Masc_domain.InProgress { assignee = "claude"; started_at = "2024-01-01T00:00:00Z" }) in
+  let task = make_task ~id:"t3" ~status:(Masc_domain.InProgress { assignee = "agent_llm_a"; started_at = "2024-01-01T00:00:00Z" }) in
   check bool "in_progress is pending" true (Tempo.is_pending_task task)
 
 let test_is_pending_task_done () =
-  let task = make_task ~id:"t4" ~status:(Masc_domain.Done { assignee = "claude"; completed_at = "2024-01-01T00:00:00Z"; notes = None }) in
+  let task = make_task ~id:"t4" ~status:(Masc_domain.Done { assignee = "agent_llm_a"; completed_at = "2024-01-01T00:00:00Z"; notes = None }) in
   check bool "done is not pending" false (Tempo.is_pending_task task)
 
 let test_is_pending_task_cancelled () =

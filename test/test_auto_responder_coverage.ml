@@ -64,10 +64,10 @@ let test_activity_log_file_ends_with_log () =
    ============================================================ *)
 
 let test_extract_nickname_returns_option () =
-  let response = "Some text\n  Nickname: claude-rare-beaver\nMore text" in
+  let response = "Some text\n  Nickname: agent_llm_a-rare-beaver\nMore text" in
   let nick = Auto_responder.extract_nickname response in
   check (option string) "returns parsed nickname"
-    (Some "claude-rare-beaver") nick
+    (Some "agent_llm_a-rare-beaver") nick
 
 let test_extract_nickname_empty () =
   let nick = Auto_responder.extract_nickname "" in
@@ -93,12 +93,12 @@ let test_extract_nickname_multiline () =
    ============================================================ *)
 
 let test_agent_type_of_mention_claude () =
-  let t = Auto_responder.agent_type_of_mention "claude-rare-beaver" in
-  check string "claude" "claude" t
+  let t = Auto_responder.agent_type_of_mention "agent_llm_a-rare-beaver" in
+  check string "agent_llm_a" "agent_llm_a" t
 
 let test_agent_type_of_mention_gemini () =
-  let t = Auto_responder.agent_type_of_mention "gemini-fast-fox" in
-  check string "gemini" "gemini" t
+  let t = Auto_responder.agent_type_of_mention "provider_f-fast-fox" in
+  check string "provider_f" "provider_f" t
 
 (* ============================================================
    chain_limit and chain_window_sec Tests
@@ -161,8 +161,8 @@ let () =
       test_case "multiline" `Quick test_extract_nickname_multiline;
     ];
     "re-exports", [
-      test_case "agent_type_of_mention claude" `Quick test_agent_type_of_mention_claude;
-      test_case "agent_type_of_mention gemini" `Quick test_agent_type_of_mention_gemini;
+      test_case "agent_type_of_mention agent_llm_a" `Quick test_agent_type_of_mention_claude;
+      test_case "agent_type_of_mention provider_f" `Quick test_agent_type_of_mention_gemini;
     ];
     "chain_config", [
       test_case "limit positive" `Quick test_chain_limit_positive;

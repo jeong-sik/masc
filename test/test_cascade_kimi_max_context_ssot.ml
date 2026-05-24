@@ -12,31 +12,31 @@ module CC = Masc_mcp.Cascade_config
 module Runtime_binding = Agent_sdk.Provider_runtime_binding
 
 let oas_kimi_max_context () =
-  match Runtime_binding.find "kimi" with
+  match Runtime_binding.find "provider_c" with
   | Some binding -> (
       match binding.Runtime_binding.capabilities.max_context_tokens with
       | Some n -> n
       | None ->
-          Alcotest.fail "OAS runtime binding for kimi missing max_context_tokens"
+          Alcotest.fail "OAS runtime binding for provider_c missing max_context_tokens"
       )
-  | None -> Alcotest.fail "OAS runtime binding missing kimi"
+  | None -> Alcotest.fail "OAS runtime binding missing provider_c"
 
 (* Sanity: the OAS SSOT still publishes a numeric cap. This pins
    the reference the resolver reads from — if the OAS pin bumps
-   and kimi max_context changes, this test documents the coupling. *)
+   and provider_c max_context changes, this test documents the coupling. *)
 let test_oas_ssot_publishes_max_context () =
   let n = oas_kimi_max_context () in
   Alcotest.(check bool) "positive" true (n > 0)
 
-(* Parse a kimi model string and verify the produced Provider_config
+(* Parse a provider_c model string and verify the produced Provider_config
    reports the OAS SSOT value. *)
 let test_parse_model_string_uses_oas_ssot () =
   let expected = oas_kimi_max_context () in
   Unix.putenv "KIMI_API_KEY" "sk-test-9953";
-  match CC.parse_model_string "kimi:kimi-for-coding" with
+  match CC.parse_model_string "provider_c:model-c-coding" with
   | None ->
     Alcotest.fail
-      "parse_model_string returned None for 'kimi:kimi-for-coding' \
+      "parse_model_string returned None for 'provider_c:model-c-coding' \
        (expected a Provider_config with max_context from OAS SSOT)"
   | Some cfg ->
     Alcotest.(check (option int))
@@ -50,8 +50,8 @@ let test_parse_model_string_uses_oas_ssot () =
    with OAS and reopen #9953. *)
 let test_no_local_256000_literal () =
   Unix.putenv "KIMI_API_KEY" "sk-test-9953";
-  match CC.parse_model_string "kimi:auto" with
-  | None -> Alcotest.fail "parse_model_string None for 'kimi:auto'"
+  match CC.parse_model_string "provider_c:auto" with
+  | None -> Alcotest.fail "parse_model_string None for 'provider_c:auto'"
   | Some cfg ->
     Alcotest.(check bool)
       "max_context must not be the legacy decimal literal 256_000"

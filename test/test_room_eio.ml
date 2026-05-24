@@ -37,9 +37,9 @@ let with_eio_env f =
 
 let test_register_agent () =
   with_eio_env @@ fun config ->
-  match Coord_eio.register_agent config ~name:"claude" () with
+  match Coord_eio.register_agent config ~name:"agent_llm_a" () with
   | Ok agent ->
-      Alcotest.(check string) "agent name" "claude" agent.name;
+      Alcotest.(check string) "agent name" "agent_llm_a" agent.name;
       Alcotest.(check string) "agent status" "active" agent.status
   | Error e ->
       Alcotest.failf "register_agent failed: %s" e
@@ -47,12 +47,12 @@ let test_register_agent () =
 let test_get_agent () =
   with_eio_env @@ fun config ->
   (* Register first *)
-  let _ = Coord_eio.register_agent config ~name:"gemini" ~capabilities:["code"; "review"] () in
+  let _ = Coord_eio.register_agent config ~name:"provider_f" ~capabilities:["code"; "review"] () in
 
   (* Get agent *)
-  match Coord_eio.get_agent config ~name:"gemini" with
+  match Coord_eio.get_agent config ~name:"provider_f" with
   | Ok agent ->
-      Alcotest.(check string) "agent name" "gemini" agent.name;
+      Alcotest.(check string) "agent name" "provider_f" agent.name;
       Alcotest.(check (list string)) "capabilities" ["code"; "review"] agent.capabilities
   | Error e ->
       Alcotest.failf "get_agent failed: %s" e
@@ -60,15 +60,15 @@ let test_get_agent () =
 let test_remove_agent () =
   with_eio_env @@ fun config ->
   (* Register *)
-  let _ = Coord_eio.register_agent config ~name:"codex" () in
+  let _ = Coord_eio.register_agent config ~name:"agent_code" () in
 
   (* Remove *)
-  (match Coord_eio.remove_agent config ~name:"codex" with
+  (match Coord_eio.remove_agent config ~name:"agent_code" with
    | Ok () -> ()
    | Error e -> Alcotest.failf "remove_agent failed: %s" e);
 
   (* Verify removed *)
-  match Coord_eio.get_agent config ~name:"codex" with
+  match Coord_eio.get_agent config ~name:"agent_code" with
   | Error _ -> ()  (* Expected: not found *)
   | Ok _ -> Alcotest.fail "agent should have been removed"
 
@@ -76,10 +76,10 @@ let test_remove_agent () =
 
 let test_acquire_lock () =
   with_eio_env @@ fun config ->
-  match Coord_eio.acquire_lock config ~resource:"file.txt" ~owner:"claude" with
+  match Coord_eio.acquire_lock config ~resource:"file.txt" ~owner:"agent_llm_a" with
   | Ok (Some lock) ->
       Alcotest.(check string) "lock resource" "file.txt" lock.resource;
-      Alcotest.(check string) "lock owner" "claude" lock.owner
+      Alcotest.(check string) "lock owner" "agent_llm_a" lock.owner
   | Ok None ->
       Alcotest.fail "lock should have been acquired"
   | Error e ->
@@ -88,26 +88,26 @@ let test_acquire_lock () =
 let test_lock_conflict () =
   with_eio_env @@ fun config ->
   (* First agent acquires lock *)
-  let _ = Coord_eio.acquire_lock config ~resource:"shared.txt" ~owner:"claude" in
+  let _ = Coord_eio.acquire_lock config ~resource:"shared.txt" ~owner:"agent_llm_a" in
 
   (* Second agent tries to acquire same lock *)
-  match Coord_eio.acquire_lock config ~resource:"shared.txt" ~owner:"gemini" with
-  | Ok None -> ()  (* Expected: lock held by claude *)
+  match Coord_eio.acquire_lock config ~resource:"shared.txt" ~owner:"provider_f" with
+  | Ok None -> ()  (* Expected: lock held by agent_llm_a *)
   | Ok (Some _) -> Alcotest.fail "second agent should not get lock"
   | Error e -> Alcotest.failf "unexpected error: %s" e
 
 let test_release_lock () =
   with_eio_env @@ fun config ->
   (* Acquire *)
-  let _ = Coord_eio.acquire_lock config ~resource:"temp.txt" ~owner:"claude" in
+  let _ = Coord_eio.acquire_lock config ~resource:"temp.txt" ~owner:"agent_llm_a" in
 
   (* Release *)
-  (match Coord_eio.release_lock config ~resource:"temp.txt" ~owner:"claude" with
+  (match Coord_eio.release_lock config ~resource:"temp.txt" ~owner:"agent_llm_a" with
    | Ok () -> ()
    | Error e -> Alcotest.failf "release_lock failed: %s" e);
 
   (* Now another agent can acquire *)
-  match Coord_eio.acquire_lock config ~resource:"temp.txt" ~owner:"gemini" with
+  match Coord_eio.acquire_lock config ~resource:"temp.txt" ~owner:"provider_f" with
   | Ok (Some _) -> ()  (* Expected: lock now available *)
   | Ok None -> Alcotest.fail "lock should be available after release"
   | Error e -> Alcotest.failf "acquire after release failed: %s" e
@@ -116,26 +116,26 @@ let test_release_lock () =
 
 let test_broadcast_message () =
   with_eio_env @@ fun config ->
-  match Coord_eio.broadcast config ~from_agent:"claude" ~content:"Hello world!" with
+  match Coord_eio.broadcast config ~from_agent:"agent_llm_a" ~content:"Hello world!" with
   | Ok msg ->
       Alcotest.(check bool) "seq > 0" true (msg.seq > 0);
-      Alcotest.(check string) "from_agent" "claude" msg.from_agent;
+      Alcotest.(check string) "from_agent" "agent_llm_a" msg.from_agent;
       Alcotest.(check string) "content" "Hello world!" msg.content
   | Error e ->
       Alcotest.failf "broadcast failed: %s" e
 
 let test_mention_extraction () =
   with_eio_env @@ fun config ->
-  match Coord_eio.broadcast config ~from_agent:"claude" ~content:"@gemini please review" with
+  match Coord_eio.broadcast config ~from_agent:"agent_llm_a" ~content:"@provider_f please review" with
   | Ok msg ->
-      Alcotest.(check (option string)) "mention extracted" (Some "gemini") msg.mention
+      Alcotest.(check (option string)) "mention extracted" (Some "provider_f") msg.mention
   | Error e ->
       Alcotest.failf "broadcast failed: %s" e
 
 let test_get_message () =
   with_eio_env @@ fun config ->
   (* Broadcast first *)
-  let msg_result = Coord_eio.broadcast config ~from_agent:"claude" ~content:"Test message" in
+  let msg_result = Coord_eio.broadcast config ~from_agent:"agent_llm_a" ~content:"Test message" in
   match msg_result with
   | Error e -> Alcotest.failf "broadcast failed: %s" e
   | Ok msg ->
@@ -151,8 +151,8 @@ let test_get_message () =
 let test_room_state () =
   with_eio_env @@ fun config ->
   (* Register some agents *)
-  let _ = Coord_eio.register_agent config ~name:"claude" () in
-  let _ = Coord_eio.register_agent config ~name:"gemini" () in
+  let _ = Coord_eio.register_agent config ~name:"agent_llm_a" () in
+  let _ = Coord_eio.register_agent config ~name:"provider_f" () in
 
   (* Read state *)
   match Coord_eio.read_state config with
@@ -164,7 +164,7 @@ let test_room_state () =
 
 let test_room_status () =
   with_eio_env @@ fun config ->
-  let _ = Coord_eio.register_agent config ~name:"claude" () in
+  let _ = Coord_eio.register_agent config ~name:"agent_llm_a" () in
   let status = Coord_eio.status config in
 
   let open Yojson.Safe.Util in

@@ -46,7 +46,7 @@ val headers_with_auth :
 (** Parse a "provider:model_id" string into a {!Llm_provider.Provider_config.t}.
 
     Supported providers are determined by {!Llm_provider.Provider_registry.default}.
-    Built-in: llama, claude, gemini, glm, openrouter, custom.
+    Built-in: llama, agent_llm_a, provider_f, provider_k, openrouter, custom.
 
     Returns [None] when the provider is unknown or the required API key
     env var is not set (provider is unavailable). *)

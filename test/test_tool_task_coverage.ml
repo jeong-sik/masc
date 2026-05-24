@@ -342,7 +342,7 @@ let () = test "handle_transition_respects_completion_contract_and_records_custom
         ("action", `String "done");
         ("notes", `String "Applied the fix to the login path.");
         ("completion_contract", `List [ `String "test coverage"; `String "migration" ]);
-        ("evaluator_cascade", `String "glm:auto");
+        ("evaluator_cascade", `String "provider_k:auto");
       ]) in
     assert (not result.Tool_result.success);
     assert (str_contains result.Tool_result.legacy_message "completion contract not satisfied");
@@ -355,7 +355,7 @@ let () = test "handle_transition_respects_completion_contract_and_records_custom
       Yojson.Safe.Util.(first |> member "evaluator_cascade" |> to_string)
     in
     assert (gate = "contract");
-    assert (evaluator_cascade = "glm:auto");
+    assert (evaluator_cascade = "provider_k:auto");
     Eval_calibration.reset_store_for_testing ())
 )
 
@@ -1179,7 +1179,7 @@ let () = test "handle_claim_sets_planning_current_task" (fun () ->
 )
 
 let () = test "keeper_claim_does_not_clobber_planning_current_task" (fun () ->
-  let ctx = make_test_ctx_with_agent "codex-mcp-client" in
+  let ctx = make_test_ctx_with_agent "agent_code-mcp-client" in
   let _ =
     Tool_task.handle_add_task
       ~tool_name:"test_tool"
@@ -1216,7 +1216,7 @@ let () = test "keeper_claim_does_not_clobber_planning_current_task" (fun () ->
   assert (Planning_eio.get_current_task ctx.config = Some "task-001"))
 
 let () = test "keeper_alias_claim_does_not_clobber_planning_current_task" (fun () ->
-  let ctx = make_test_ctx_with_agent "codex-mcp-client" in
+  let ctx = make_test_ctx_with_agent "agent_code-mcp-client" in
   let _ =
     Tool_task.handle_add_task
       ~tool_name:"test_tool"
@@ -1253,7 +1253,7 @@ let () = test "keeper_alias_claim_does_not_clobber_planning_current_task" (fun (
   assert (Planning_eio.get_current_task ctx.config = Some "task-001"))
 
 let () = test "keeper_generated_alias_claim_does_not_clobber_planning_current_task" (fun () ->
-  let ctx = make_test_ctx_with_agent "codex-mcp-client" in
+  let ctx = make_test_ctx_with_agent "agent_code-mcp-client" in
   let _ =
     Tool_task.handle_add_task
       ~tool_name:"test_tool"
@@ -1293,7 +1293,7 @@ let () = test "keeper_generated_alias_claim_does_not_clobber_planning_current_ta
   assert (Planning_eio.get_current_task ctx.config = Some "task-001"))
 
 let () = test "keeper_separator_alias_claim_does_not_clobber_planning_current_task" (fun () ->
-  let ctx = make_test_ctx_with_agent "codex-mcp-client" in
+  let ctx = make_test_ctx_with_agent "agent_code-mcp-client" in
   let _ =
     Tool_task.handle_add_task
       ~tool_name:"test_tool"
@@ -1333,7 +1333,7 @@ let () = test "keeper_separator_alias_claim_does_not_clobber_planning_current_ta
   assert (Planning_eio.get_current_task ctx.config = Some "task-001"))
 
 let () = test "keeper_shaped_non_keeper_claim_updates_planning_current_task" (fun () ->
-  let ctx = make_test_ctx_with_agent "codex-mcp-client" in
+  let ctx = make_test_ctx_with_agent "agent_code-mcp-client" in
   let _ =
     Tool_task.handle_add_task
       ~tool_name:"test_tool"
@@ -1733,7 +1733,7 @@ let () = test "transition_submit_for_verification_rejects_placeholder_evidence_r
 
 let () = test "transition_submit_for_verification_aliases_todo_pr_evidence" (fun () ->
   with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
-    let ctx = make_test_ctx_with_agent "codex-mcp-client" in
+    let ctx = make_test_ctx_with_agent "agent_code-mcp-client" in
     let pr_url = "https://github.com/jeong-sik/masc-mcp/pull/13169" in
     add_task_requiring_tools ctx ~title:"Codex CLI approval follow-up" [ "keeper_bash" ];
     let result =
@@ -1752,7 +1752,7 @@ let () = test "transition_submit_for_verification_aliases_todo_pr_evidence" (fun
           ])
     in
     if not result.Tool_result.success then failwith result.Tool_result.legacy_message;
-    assert_task_awaiting_verification_by ctx "codex-mcp-client";
+    assert_task_awaiting_verification_by ctx "agent_code-mcp-client";
     match (only_task ctx).handoff_context with
     | Some hc -> assert (List.mem pr_url hc.evidence_refs)
     | None -> failwith "expected handoff_context to receive pr_url evidence")
@@ -1760,7 +1760,7 @@ let () = test "transition_submit_for_verification_aliases_todo_pr_evidence" (fun
 
 let () = test "transition_submit_for_verification_todo_still_requires_evidence" (fun () ->
   with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
-    let ctx = make_test_ctx_with_agent "codex-mcp-client" in
+    let ctx = make_test_ctx_with_agent "agent_code-mcp-client" in
     add_task_requiring_tools ctx ~title:"Codex CLI approval follow-up" [ "keeper_bash" ];
     let result =
       Tool_task.handle_transition
@@ -1785,7 +1785,7 @@ let () = test "transition_submit_for_verification_todo_still_requires_evidence" 
    into the [notes] string blob. *)
 let () = test "transition_normalize_pr_url_into_typed_handoff_context" (fun () ->
   with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
-    let ctx = make_test_ctx_with_agent "codex-mcp-client" in
+    let ctx = make_test_ctx_with_agent "agent_code-mcp-client" in
     add_task_requiring_tools ctx ~title:"Typed pr_url normalize" [ "keeper_bash" ];
     let pr_url = "https://github.com/jeong-sik/masc-mcp/pull/77777" in
     let submit_result =
@@ -1816,7 +1816,7 @@ let () = test "transition_normalize_pr_url_into_typed_handoff_context" (fun () -
    to the notes blob. *)
 let () = test "transition_normalize_pr_url_merges_into_existing_handoff_context" (fun () ->
   with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
-    let ctx = make_test_ctx_with_agent "codex-mcp-client" in
+    let ctx = make_test_ctx_with_agent "agent_code-mcp-client" in
     add_task_requiring_tools ctx ~title:"pr_url merge" [ "keeper_bash" ];
     let existing_ref = "logs/run-42.json" in
     let pr_url = "https://github.com/jeong-sik/masc-mcp/pull/88888" in
@@ -1852,7 +1852,7 @@ let () = test "transition_normalize_pr_url_merges_into_existing_handoff_context"
 
 let () = test "transition_submit_pr_evidence_accepts_todo_pr_evidence_without_required_tool" (fun () ->
   with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
-    let ctx = make_test_ctx_with_agent "codex-mcp-client" in
+    let ctx = make_test_ctx_with_agent "agent_code-mcp-client" in
     add_task_requiring_tools ctx ~title:"Codex CLI approval follow-up" [ "keeper_bash" ];
     let claim_result =
       Tool_task.handle_transition
@@ -1884,13 +1884,13 @@ let () = test "transition_submit_pr_evidence_accepts_todo_pr_evidence_without_re
           ])
     in
     if not submit_result.Tool_result.success then failwith submit_result.Tool_result.legacy_message;
-    assert_task_awaiting_verification_by ctx "codex-mcp-client";
+    assert_task_awaiting_verification_by ctx "agent_code-mcp-client";
     assert (Planning_eio.get_current_task ctx.config = None))
 )
 
 let () = test "transition_claim_clears_stale_do_not_reclaim_reason" (fun () ->
   with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
-    let ctx = make_test_ctx_with_agent "codex-mcp-client" in
+    let ctx = make_test_ctx_with_agent "agent_code-mcp-client" in
     let result =
       Tool_task.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
         (`Assoc
@@ -1911,7 +1911,7 @@ let () = test "transition_claim_clears_stale_do_not_reclaim_reason" (fun () ->
           ])
     in
     if not claim_result.Tool_result.success then failwith claim_result.Tool_result.legacy_message;
-    assert_task_claimed_by ctx "codex-mcp-client";
+    assert_task_claimed_by ctx "agent_code-mcp-client";
     assert (Planning_eio.get_current_task ctx.config = Some "task-001"))
 )
 
@@ -1941,7 +1941,7 @@ let () = test "dispatch_transition_claim_uses_server_surface_not_payload_surface
    transition Todo -> AwaitingVerification without claiming. *)
 let () = test "submit_pr_evidence_bypasses_required_tool_gate_on_todo_task" (fun () ->
   with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
-    let ctx = make_test_ctx_with_agent "codex-mcp-client" in
+    let ctx = make_test_ctx_with_agent "agent_code-mcp-client" in
     add_task_requiring_tools ctx ~title:"Needs bash" [ "keeper_bash" ];
     let result =
       Tool_task.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ~agent_tool_names:[ "masc_status" ] ctx

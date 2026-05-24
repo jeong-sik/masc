@@ -160,12 +160,12 @@ let test_warn_threshold_reads_env () =
    | None -> Unix.putenv "MASC_KEEPER_LONG_TURN_WARN_MS" "")
 
 let test_provider_kind_of_model_used () =
-  Alcotest.(check string) "claude_code label"
-    "runtime" (M.provider_kind_of_model_used "claude_code:auto");
-  Alcotest.(check string) "kimi_cli label"
-    "runtime" (M.provider_kind_of_model_used " kimi_cli:kimi-for-coding ");
+  Alcotest.(check string) "cli_tool_d label"
+    "runtime" (M.provider_kind_of_model_used "cli_tool_d:auto");
+  Alcotest.(check string) "cli_tool_c label"
+    "runtime" (M.provider_kind_of_model_used " cli_tool_c:model-c-coding ");
   Alcotest.(check string) "direct api prefix stays distinct from cli"
-    "runtime" (M.provider_kind_of_model_used "claude:auto");
+    "runtime" (M.provider_kind_of_model_used "agent_llm_a:auto");
   Alcotest.(check string) "unknown prefixed label is not trusted"
     "runtime" (M.provider_kind_of_model_used "pretend_provider:model");
   Alcotest.(check string) "custom endpoint label remains bounded"
@@ -181,16 +181,16 @@ let test_record_by_model_bucket () =
       ~keeper
       ~channel:"scheduled_autonomous"
       ~provider_kind:"runtime"
-      ~model_used:"claude_code:auto"
-      ~resolved_model_id:"claude-sonnet-4.7"
+      ~model_used:"cli_tool_d:auto"
+      ~resolved_model_id:"model-a-sonnet"
       ~cascade_profile:"primary"
       ~bucket:"over_1200s"
   in
   M.record_turn_latency_by_model_bucket
     ~keeper
     ~channel:"scheduled_autonomous"
-    ~model_used:"claude_code:auto"
-    ~resolved_model_id:"claude-sonnet-4.7"
+    ~model_used:"cli_tool_d:auto"
+    ~resolved_model_id:"model-a-sonnet"
     ~cascade_profile:"primary"
     ~latency_ms:1_200_000;
   Alcotest.(check (float 0.0001))
@@ -200,8 +200,8 @@ let test_record_by_model_bucket () =
        ~keeper
        ~channel:"scheduled_autonomous"
        ~provider_kind:"runtime"
-       ~model_used:"claude_code:auto"
-       ~resolved_model_id:"claude-sonnet-4.7"
+       ~model_used:"cli_tool_d:auto"
+       ~resolved_model_id:"model-a-sonnet"
        ~cascade_profile:"primary"
        ~bucket:"over_1200s");
   Alcotest.(check (float 0.0001))
@@ -211,8 +211,8 @@ let test_record_by_model_bucket () =
        ~keeper
        ~channel:"scheduled_autonomous"
        ~provider_kind:"runtime"
-       ~model_used:"claude_code:auto"
-       ~resolved_model_id:"claude-sonnet-4.7"
+       ~model_used:"cli_tool_d:auto"
+       ~resolved_model_id:"model-a-sonnet"
        ~cascade_profile:"tool_use_strict"
        ~bucket:"over_1200s")
 

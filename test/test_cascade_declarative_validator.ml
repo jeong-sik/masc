@@ -45,9 +45,9 @@ let validate_toml (toml : string) : validation_error list =
 (* --- Valid config: 0 errors --- *)
 
 let valid_toml = {|
-[providers.claude-code]
-protocol = "anthropic-cli"
-command = "claude"
+[providers.agent_llm_a-code]
+protocol = "provider_a-cli"
+command = "agent_llm_a"
 
 [providers.ollama]
 protocol = "ollama-http"
@@ -65,25 +65,25 @@ tools-support = true
 max-context = 32768
 tools-support = true
 
-[claude-code.haiku]
+[agent_llm_a-code.haiku]
 is-default = true
 max-concurrent = 3
 
-[claude-code.sonnet]
+[agent_llm_a-code.sonnet]
 max-concurrent = 2
 
-[claude-code.haiku.for-scoring]
+[agent_llm_a-code.haiku.for-scoring]
 max-input = 4096
 
 [ollama.qwen3-8b]
 max-concurrent = 1
 
 [tier.rerank]
-members = ["claude-code.haiku.for-scoring"]
+members = ["agent_llm_a-code.haiku.for-scoring"]
 strategy = "failover"
 
 [tier.primary]
-members = ["claude-code.sonnet", "claude-code.haiku"]
+members = ["agent_llm_a-code.sonnet", "agent_llm_a-code.haiku"]
 strategy = "failover"
 
 [tier.local]
@@ -98,7 +98,7 @@ strategy = "priority_tier"
 target = "tier-group.primary"
 
 [system.governance]
-target = "claude-code.haiku.for-scoring"
+target = "agent_llm_a-code.haiku.for-scoring"
 |}
 
 let test_valid_config () =
@@ -110,8 +110,8 @@ let test_valid_config () =
 let test_r1_unknown_provider () =
   let toml = {|
 [providers.good]
-protocol = "anthropic-cli"
-command = "claude"
+protocol = "provider_a-cli"
+command = "agent_llm_a"
 
 [models.haiku]
 max-context = 200000
@@ -126,18 +126,18 @@ is-default = true
 
 let test_r2_unknown_model () =
   let toml = {|
-[providers.claude-code]
-protocol = "anthropic-cli"
-command = "claude"
+[providers.agent_llm_a-code]
+protocol = "provider_a-cli"
+command = "agent_llm_a"
 
 [models.haiku]
 max-context = 200000
 
-[claude-code.nonexistent-model]
+[agent_llm_a-code.nonexistent-model]
 is-default = true
 |} in
   let errs = validate_toml toml in
-  has_rule_at "R2" "claude-code.nonexistent-model" errs
+  has_rule_at "R2" "agent_llm_a-code.nonexistent-model" errs
 
 (* --- R3: Alias → unknown binding --- *)
 (* Parser synthesizes a parent binding when [p.m.a] exists without [p.m],
@@ -173,17 +173,17 @@ let test_r3_unknown_binding () =
 
 let test_r4_max_input_exceeds () =
   let toml = {|
-[providers.claude-code]
-protocol = "anthropic-cli"
-command = "claude"
+[providers.agent_llm_a-code]
+protocol = "provider_a-cli"
+command = "agent_llm_a"
 
 [models.haiku]
 max-context = 4096
 
-[claude-code.haiku]
+[agent_llm_a-code.haiku]
 is-default = true
 
-[claude-code.haiku.too-big]
+[agent_llm_a-code.haiku.too-big]
 max-input = 999999
 |} in
   let errs = validate_toml toml in
@@ -191,18 +191,18 @@ max-input = 999999
 
 let test_r4_max_input_ok () =
   let toml = {|
-[providers.claude-code]
-protocol = "anthropic-cli"
-command = "claude"
+[providers.agent_llm_a-code]
+protocol = "provider_a-cli"
+command = "agent_llm_a"
 
 [models.haiku]
 max-context = 200000
 
-[claude-code.haiku]
+[agent_llm_a-code.haiku]
 is-default = true
 max-concurrent = 1
 
-[claude-code.haiku.ok-alias]
+[agent_llm_a-code.haiku.ok-alias]
 max-input = 4096
 |} in
   let errs = validate_toml toml in
@@ -212,18 +212,18 @@ max-input = 4096
 
 let test_r5_unknown_tier_member () =
   let toml = {|
-[providers.claude-code]
-protocol = "anthropic-cli"
-command = "claude"
+[providers.agent_llm_a-code]
+protocol = "provider_a-cli"
+command = "agent_llm_a"
 
 [models.haiku]
 max-context = 200000
 
-[claude-code.haiku]
+[agent_llm_a-code.haiku]
 is-default = true
 
 [tier.bad-tier]
-members = ["claude-code.haiku", "nonexistent.binding"]
+members = ["agent_llm_a-code.haiku", "nonexistent.binding"]
 strategy = "failover"
 |} in
   let errs = validate_toml toml in
@@ -231,22 +231,22 @@ strategy = "failover"
 
 let test_r5_alias_member_ok () =
   let toml = {|
-[providers.claude-code]
-protocol = "anthropic-cli"
-command = "claude"
+[providers.agent_llm_a-code]
+protocol = "provider_a-cli"
+command = "agent_llm_a"
 
 [models.haiku]
 max-context = 200000
 
-[claude-code.haiku]
+[agent_llm_a-code.haiku]
 is-default = true
 max-concurrent = 1
 
-[claude-code.haiku.alias-a]
+[agent_llm_a-code.haiku.alias-a]
 max-input = 4096
 
 [tier.t]
-members = ["claude-code.haiku.alias-a"]
+members = ["agent_llm_a-code.haiku.alias-a"]
 strategy = "failover"
 |} in
   let errs = validate_toml toml in
@@ -256,18 +256,18 @@ strategy = "failover"
 
 let test_r6_unknown_tier () =
   let toml = {|
-[providers.claude-code]
-protocol = "anthropic-cli"
-command = "claude"
+[providers.agent_llm_a-code]
+protocol = "provider_a-cli"
+command = "agent_llm_a"
 
 [models.haiku]
 max-context = 200000
 
-[claude-code.haiku]
+[agent_llm_a-code.haiku]
 is-default = true
 
 [tier.real]
-members = ["claude-code.haiku"]
+members = ["agent_llm_a-code.haiku"]
 strategy = "failover"
 
 [tier-group.broken]
@@ -281,14 +281,14 @@ strategy = "failover"
 
 let test_r7_unknown_route_target () =
   let toml = {|
-[providers.claude-code]
-protocol = "anthropic-cli"
-command = "claude"
+[providers.agent_llm_a-code]
+protocol = "provider_a-cli"
+command = "agent_llm_a"
 
 [models.haiku]
 max-context = 200000
 
-[claude-code.haiku]
+[agent_llm_a-code.haiku]
 is-default = true
 
 [routes.dead-end]
@@ -299,38 +299,38 @@ target = "tier-group.nowhere"
 
 let test_r7_route_to_binding () =
   let toml = {|
-[providers.claude-code]
-protocol = "anthropic-cli"
-command = "claude"
+[providers.agent_llm_a-code]
+protocol = "provider_a-cli"
+command = "agent_llm_a"
 
 [models.haiku]
 max-context = 200000
 
-[claude-code.haiku]
+[agent_llm_a-code.haiku]
 is-default = true
 max-concurrent = 1
 
 [routes.direct]
-target = "claude-code.haiku"
+target = "agent_llm_a-code.haiku"
 |} in
   let errs = validate_toml toml in
   no_errors errs
 
 let test_r7_route_to_tier () =
   let toml = {|
-[providers.claude-code]
-protocol = "anthropic-cli"
-command = "claude"
+[providers.agent_llm_a-code]
+protocol = "provider_a-cli"
+command = "agent_llm_a"
 
 [models.haiku]
 max-context = 200000
 
-[claude-code.haiku]
+[agent_llm_a-code.haiku]
 is-default = true
 max-concurrent = 1
 
 [tier.primary]
-members = ["claude-code.haiku"]
+members = ["agent_llm_a-code.haiku"]
 strategy = "failover"
 
 [routes.via-tier]
@@ -343,14 +343,14 @@ target = "tier.primary"
 
 let test_r8_unknown_system_target () =
   let toml = {|
-[providers.claude-code]
-protocol = "anthropic-cli"
-command = "claude"
+[providers.agent_llm_a-code]
+protocol = "provider_a-cli"
+command = "agent_llm_a"
 
 [models.haiku]
 max-context = 200000
 
-[claude-code.haiku]
+[agent_llm_a-code.haiku]
 is-default = true
 
 [system.broken]
@@ -361,22 +361,22 @@ target = "nonexistent.binding"
 
 let test_r8_system_to_alias () =
   let toml = {|
-[providers.claude-code]
-protocol = "anthropic-cli"
-command = "claude"
+[providers.agent_llm_a-code]
+protocol = "provider_a-cli"
+command = "agent_llm_a"
 
 [models.haiku]
 max-context = 200000
 
-[claude-code.haiku]
+[agent_llm_a-code.haiku]
 is-default = true
 max-concurrent = 1
 
-[claude-code.haiku.gov]
+[agent_llm_a-code.haiku.gov]
 max-input = 8192
 
 [system.governance]
-target = "claude-code.haiku.gov"
+target = "agent_llm_a-code.haiku.gov"
 |} in
   let errs = validate_toml toml in
   no_errors errs
@@ -385,9 +385,9 @@ target = "claude-code.haiku.gov"
 
 let test_r9_multiple_defaults () =
   let toml = {|
-[providers.claude-code]
-protocol = "anthropic-cli"
-command = "claude"
+[providers.agent_llm_a-code]
+protocol = "provider_a-cli"
+command = "agent_llm_a"
 
 [models.haiku]
 max-context = 200000
@@ -395,10 +395,10 @@ max-context = 200000
 [models.sonnet]
 max-context = 200000
 
-[claude-code.haiku]
+[agent_llm_a-code.haiku]
 is-default = true
 
-[claude-code.sonnet]
+[agent_llm_a-code.sonnet]
 is-default = true
 |} in
   let errs = validate_toml toml in
@@ -406,9 +406,9 @@ is-default = true
 
 let test_r9_single_default_ok () =
   let toml = {|
-[providers.claude-code]
-protocol = "anthropic-cli"
-command = "claude"
+[providers.agent_llm_a-code]
+protocol = "provider_a-cli"
+command = "agent_llm_a"
 
 [models.haiku]
 max-context = 200000
@@ -416,11 +416,11 @@ max-context = 200000
 [models.sonnet]
 max-context = 200000
 
-[claude-code.haiku]
+[agent_llm_a-code.haiku]
 is-default = true
 max-concurrent = 1
 
-[claude-code.sonnet]
+[agent_llm_a-code.sonnet]
 max-concurrent = 1
 |} in
   let errs = validate_toml toml in
@@ -431,8 +431,8 @@ max-concurrent = 1
 let test_multiple_errors () =
   let toml = {|
 [providers.good]
-protocol = "anthropic-cli"
-command = "claude"
+protocol = "provider_a-cli"
+command = "agent_llm_a"
 
 [models.haiku]
 max-context = 200000
@@ -440,7 +440,7 @@ max-context = 200000
 [bad-provider.haiku]
 is-default = true
 
-[claude-code.nonexistent]
+[agent_llm_a-code.nonexistent]
 is-default = true
 
 [system.broken]
@@ -457,7 +457,7 @@ target = "no.such.binding"
 let test_r10_cycle_policy_on_wrong_strategy () =
   let toml = {|
 [providers.p]
-protocol = "anthropic-cli"
+protocol = "provider_a-cli"
 command = "c"
 
 [models.m]
@@ -479,7 +479,7 @@ backoff-cap-ms = 10000
 let test_retired_cycle_policy_strategy_rejected_by_parser () =
   let toml = {|
 [providers.p]
-protocol = "anthropic-cli"
+protocol = "provider_a-cli"
 command = "c"
 
 [models.m]
@@ -502,7 +502,7 @@ backoff-cap-ms = 10000
 let test_r10_sticky_ttl_on_wrong_strategy () =
   let toml = {|
 [providers.p]
-protocol = "anthropic-cli"
+protocol = "provider_a-cli"
 command = "c"
 
 [models.m]
@@ -522,7 +522,7 @@ sticky-ttl-ms = 600000
 let test_retired_sticky_strategy_rejected_by_parser () =
   let toml = {|
 [providers.p]
-protocol = "anthropic-cli"
+protocol = "provider_a-cli"
 command = "c"
 
 [models.m]
@@ -543,7 +543,7 @@ sticky-ttl-ms = 600000
 let test_r10_scoring_on_wrong_strategy () =
   let toml = {|
 [providers.p]
-protocol = "anthropic-cli"
+protocol = "provider_a-cli"
 command = "c"
 
 [models.m]
@@ -569,7 +569,7 @@ server-error-skip-after = 5
 let test_retired_scoring_strategy_rejected_by_parser () =
   let toml = {|
 [providers.p]
-protocol = "anthropic-cli"
+protocol = "provider_a-cli"
 command = "c"
 
 [models.m]
@@ -596,7 +596,7 @@ server-error-skip-after = 5
 let test_r10_no_strategy_fields_is_ok () =
   let toml = {|
 [providers.p]
-protocol = "anthropic-cli"
+protocol = "provider_a-cli"
 command = "c"
 
 [models.m]
@@ -615,7 +615,7 @@ strategy = "failover"
 let test_r10_multiple_mismatches () =
   let toml = {|
 [providers.p]
-protocol = "anthropic-cli"
+protocol = "provider_a-cli"
 command = "c"
 
 [models.m]
@@ -643,14 +643,14 @@ sticky-ttl-ms = 600000
 
 let test_r12_cli_protocol_with_cli_transport () =
   let toml = {|
-[providers.claude-code]
-protocol = "anthropic-cli"
-command = "claude"
+[providers.agent_llm_a-code]
+protocol = "provider_a-cli"
+command = "agent_llm_a"
 
 [models.haiku]
 max-context = 200000
 
-[claude-code.haiku]
+[agent_llm_a-code.haiku]
 is-default = true
 max-concurrent = 1
 |} in
@@ -677,7 +677,7 @@ max-concurrent = 1
 let test_r12_cli_protocol_with_http_transport () =
   let toml = {|
 [providers.bad]
-protocol = "anthropic-cli"
+protocol = "provider_a-cli"
 endpoint = "http://localhost:8080"
 
 [models.m]
@@ -692,7 +692,7 @@ max-concurrent = 1
 let test_r12_http_protocol_with_cli_transport () =
   let toml = {|
 [providers.bad]
-protocol = "openai-http"
+protocol = "provider_d-http"
 command = "my-cli"
 
 [models.m]

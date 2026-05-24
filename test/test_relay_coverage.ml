@@ -43,35 +43,35 @@ let test_default_config_neo4j_episode () =
 let test_custom_config () =
   let c : Relay.relay_config = {
     threshold = 0.5;
-    target_agent = "gemini";
+    target_agent = "provider_f";
     compress_ratio = 0.2;
     include_todos = false;
     include_pdca = false;
     neo4j_episode = false;
   } in
   check bool "custom threshold" true (abs_float (c.threshold -. 0.5) < 0.001);
-  check string "custom agent" "gemini" c.target_agent
+  check string "custom agent" "provider_f" c.target_agent
 
 (* ============================================================
    estimate_context Tests
    ============================================================ *)
 
 let test_estimate_context_claude () =
-  let m = Relay.estimate_context ~messages:10 ~tool_calls:5 ~model:"claude" in
+  let m = Relay.estimate_context ~messages:10 ~tool_calls:5 ~model:"agent_llm_a" in
   check bool "positive estimated" true (m.estimated_tokens > 0);
-  check int "max tokens claude" 200000 m.max_tokens;
+  check int "max tokens agent_llm_a" 200000 m.max_tokens;
   check int "message count" 10 m.message_count;
   check int "tool call count" 5 m.tool_call_count
 
 let test_estimate_context_gemini () =
-  let m = Relay.estimate_context ~messages:10 ~tool_calls:5 ~model:"gemini" in
-  check int "max tokens gemini" 1000000 m.max_tokens
+  let m = Relay.estimate_context ~messages:10 ~tool_calls:5 ~model:"provider_f" in
+  check int "max tokens provider_f" 1000000 m.max_tokens
 
 let test_estimate_context_codex () =
-  (* "codex" not in OAS Provider_registry; 128K fallback
+  (* "agent_code" not in OAS Provider_registry; 128K fallback
      (matches Cascade_runtime.resolve_primary_max_context). *)
-  let m = Relay.estimate_context ~messages:10 ~tool_calls:5 ~model:"codex" in
-  check int "max tokens codex" 128000 m.max_tokens
+  let m = Relay.estimate_context ~messages:10 ~tool_calls:5 ~model:"agent_code" in
+  check int "max tokens agent_code" 128000 m.max_tokens
 
 let test_estimate_context_gpt () =
   (* "gpt" not in OAS Provider_registry; same 128K fallback. *)
@@ -79,24 +79,24 @@ let test_estimate_context_gpt () =
   check int "max tokens gpt" 128000 m.max_tokens
 
 let test_estimate_context_claude_opus () =
-  let m = Relay.estimate_context ~messages:10 ~tool_calls:5 ~model:"claude-opus" in
-  check int "max tokens claude-opus" 200000 m.max_tokens
+  let m = Relay.estimate_context ~messages:10 ~tool_calls:5 ~model:"agent_llm_a-opus" in
+  check int "max tokens agent_llm_a-opus" 200000 m.max_tokens
 
 let test_estimate_context_unknown_model () =
   let m = Relay.estimate_context ~messages:10 ~tool_calls:5 ~model:"unknown" in
   check int "max tokens unknown" 128000 m.max_tokens
 
 let test_estimate_context_usage_ratio () =
-  let m = Relay.estimate_context ~messages:100 ~tool_calls:50 ~model:"claude" in
+  let m = Relay.estimate_context ~messages:100 ~tool_calls:50 ~model:"agent_llm_a" in
   check bool "usage_ratio between 0 and 1" true (m.usage_ratio > 0.0 && m.usage_ratio < 1.0)
 
 let test_estimate_context_zero_messages () =
-  let m = Relay.estimate_context ~messages:0 ~tool_calls:0 ~model:"claude" in
+  let m = Relay.estimate_context ~messages:0 ~tool_calls:0 ~model:"agent_llm_a" in
   check int "zero estimated" 0 m.estimated_tokens;
   check bool "zero ratio" true (abs_float m.usage_ratio < 0.001)
 
 let test_estimate_context_many_messages () =
-  let m = Relay.estimate_context ~messages:1000 ~tool_calls:500 ~model:"claude" in
+  let m = Relay.estimate_context ~messages:1000 ~tool_calls:500 ~model:"agent_llm_a" in
   check bool "large estimated" true (m.estimated_tokens > 100000)
 
 (* ============================================================
@@ -843,12 +843,12 @@ let test_record_actual_tokens_zero_estimated () =
   | _ -> failwith "expected Assoc"
 
 (* ============================================================
-   estimate_context claude-sonnet branch Tests
+   estimate_context agent_llm_a-sonnet branch Tests
    ============================================================ *)
 
 let test_estimate_context_claude_sonnet () =
-  let m = Relay.estimate_context ~messages:10 ~tool_calls:5 ~model:"claude-sonnet" in
-  check int "max tokens claude-sonnet" 200000 m.max_tokens
+  let m = Relay.estimate_context ~messages:10 ~tool_calls:5 ~model:"agent_llm_a-sonnet" in
+  check int "max tokens agent_llm_a-sonnet" 200000 m.max_tokens
 
 (* ============================================================
    Test Runners
@@ -868,12 +868,12 @@ let () =
       test_case "custom config" `Quick test_custom_config;
     ];
     "estimate_context", [
-      test_case "claude" `Quick test_estimate_context_claude;
-      test_case "gemini" `Quick test_estimate_context_gemini;
-      test_case "codex" `Quick test_estimate_context_codex;
+      test_case "agent_llm_a" `Quick test_estimate_context_claude;
+      test_case "provider_f" `Quick test_estimate_context_gemini;
+      test_case "agent_code" `Quick test_estimate_context_codex;
       test_case "gpt" `Quick test_estimate_context_gpt;
-      test_case "claude-opus" `Quick test_estimate_context_claude_opus;
-      test_case "claude-sonnet" `Quick test_estimate_context_claude_sonnet;
+      test_case "agent_llm_a-opus" `Quick test_estimate_context_claude_opus;
+      test_case "agent_llm_a-sonnet" `Quick test_estimate_context_claude_sonnet;
       test_case "unknown model" `Quick test_estimate_context_unknown_model;
       test_case "usage ratio" `Quick test_estimate_context_usage_ratio;
       test_case "zero messages" `Quick test_estimate_context_zero_messages;

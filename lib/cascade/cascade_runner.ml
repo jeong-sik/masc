@@ -172,8 +172,8 @@ let runtime_mcp_tool_requires_bound_actor =
 let runtime_mcp_policy_with_masc_agent_name =
   Cascade_transport.runtime_mcp_policy_with_masc_agent_name
 
-let codex_cli_can_auth_keeper_bound_runtime_mcp =
-  Cascade_transport.codex_cli_can_auth_keeper_bound_runtime_mcp
+let cli_tool_a_can_auth_keeper_bound_runtime_mcp =
+  Cascade_transport.cli_tool_a_can_auth_keeper_bound_runtime_mcp
 
 let runtime_mcp_policy_for_provider =
   Cascade_transport.runtime_mcp_policy_for_provider
@@ -193,8 +193,8 @@ let runtime_mcp_policy_of_tool_names =
 let provider_label =
   Cascade_transport.provider_label
 
-let claude_code_max_turns_hard_cap =
-  Cascade_transport.claude_code_max_turns_hard_cap
+let cli_tool_d_max_turns_hard_cap =
+  Cascade_transport.cli_tool_d_max_turns_hard_cap
 
 let provider_effective_max_turns =
   Cascade_transport.provider_effective_max_turns

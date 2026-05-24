@@ -112,7 +112,7 @@ let test_roundtrip_capacity_backpressure () =
       [ ("kind", `String "capacity_backpressure")
       ; ("cascade_name", `String "primary")
       ; ("source", `String "client_capacity")
-      ; ("detail", `String "client capacity key glm is full")
+      ; ("detail", `String "client capacity key provider_k is full")
       ; ("retry_after_sec", `Float 2.5)
       ]
   in
@@ -133,7 +133,7 @@ let test_roundtrip_capacity_backpressure () =
       (Classify.capacity_backpressure_source_to_string source);
     Alcotest.(check string)
       "detail preserved"
-      "client capacity key glm is full"
+      "client capacity key provider_k is full"
       detail;
     Alcotest.(check (option (float 0.001)))
       "retry_after preserved"

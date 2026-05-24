@@ -386,7 +386,7 @@ let rec join_until_ready ~port ~retries_left =
       ~extra_headers:[ "X-MASC-Agent: dashboard-header-actor" ]
       ~payload:
         (tool_payload ~id:202 ~name:"masc_join"
-           ~arguments:(`Assoc [ ("agent_name", `String "gemini") ]))
+           ~arguments:(`Assoc [ ("agent_name", `String "provider_f") ]))
       ()
   in
   match (result.status, retries_left) with
@@ -416,7 +416,7 @@ let test_post_tools_call_preserves_explicit_tool_agent_name () =
     |> U.member "text" |> U.to_string
   in
   check bool "explicit tool agent_name preserved" true
-    (contains_substr "Type: gemini" text);
+    (contains_substr "Type: provider_f" text);
   check bool "header actor not used as tool target agent_name" false
     (contains_substr "Type: dashboard-header-actor" text)
 

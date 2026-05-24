@@ -38,7 +38,7 @@ let write_runtime_fixture_cascade ~base_dir ~cascade_name ~model_id ~endpoint =
     (Filename.concat config_dir "cascade.toml")
     (Printf.sprintf
        {|[providers.runtime_mock]
-protocol = "openai-http"
+protocol = "provider_d-http"
 endpoint = %S
 
 [models.%s]
@@ -386,7 +386,7 @@ let test_json_roundtrip () =
             ("phase", `String "work");
             ("attempt", `Int 2);
             ("tool_surface", `String "inline");
-            ("provider_kind", `String "openai");
+            ("provider_kind", `String "provider_d");
             ("model_id", `String "gpt-test");
             ("response_model", `String "gpt-test");
             ("per_provider_timeout_s", `Float 12.5);
@@ -470,7 +470,7 @@ let test_json_roundtrip () =
             ("oas_turn_count", `Null);
             ("event", `String "provider_attempt_started");
             ("cascade_name", `String "default");
-            ("provider_kind", `String "openai");
+            ("provider_kind", `String "provider_d");
             ("model_id", `String "gpt-test");
             ("status", `String "started");
             ("decision", `Assoc [ ("response_model", `String "gpt-test") ]);
@@ -1159,10 +1159,10 @@ let test_runtime_trace_lens_summarizes_tool_axis () =
                  ("effective_tool_count", `Int 1);
                  ("runtime_mcp_policy_present", `Bool false);
                  ("tool_requirement", `String "required");
-                 ("provider_health_key", `String "glm");
-                 ("provider_model_health_key", `String "glm:glm-5.1");
-                 ("response_model", `String "glm-5.1");
-                 ("configured_labels", strings [ "glm:glm-5.1" ]);
+                 ("provider_health_key", `String "provider_k");
+                 ("provider_model_health_key", `String "provider_k:provider_k-5.1");
+                 ("response_model", `String "provider_k-5.1");
+                 ("configured_labels", strings [ "provider_k:provider_k-5.1" ]);
                ])
            ());
       append_manifest_or_fail config
@@ -2026,7 +2026,7 @@ let test_runtime_trace_lens_surfaces_artifact_link_gaps () =
         (M.make ~ts:"2026-05-13T00:00:02Z" ~keeper_name
            ~trace_id ~keeper_turn_id ~oas_turn_count:1
            ~event:M.Provider_attempt_finished ~status:"ok"
-           ~decision:(`Assoc [ ("terminal_provider_kind", `String "openai") ])
+           ~decision:(`Assoc [ ("terminal_provider_kind", `String "provider_d") ])
            ());
       append_manifest_or_fail config
         (M.make ~ts:"2026-05-13T00:00:03Z" ~keeper_name
@@ -3074,7 +3074,7 @@ let test_context_helper () =
   let manifest =
     M.make_for_context ctx ~event:M.Provider_attempt_started
       ~oas_turn_count:2 ~cascade_name:"default" ~status:"started"
-      ~decision:(`Assoc [ ("provider_health_key", `String "openai:gpt-test") ])
+      ~decision:(`Assoc [ ("provider_health_key", `String "provider_d:gpt-test") ])
       ()
   in
   Alcotest.(check string) "keeper" "sangsu" manifest.keeper_name;
@@ -3232,7 +3232,7 @@ let test_pre_dispatch_required_tool_exhaustion_is_no_tool_capable () =
   let module FT = Masc_mcp.Keeper_turn_driver_helpers in
   let provider_rejection =
     FT.provider_rejection_for_required_tool_unsupported
-      ~provider_label:"glm-coding"
+      ~provider_label:"provider_k-coding"
       ~missing_required_tools:[ "keeper_bash" ]
   in
   match
@@ -3240,7 +3240,7 @@ let test_pre_dispatch_required_tool_exhaustion_is_no_tool_capable () =
       ~cascade_name:
         (Cascade_name.of_string_exn
            "strict_tool_candidates")
-      ~configured_labels:[ "glm-coding.glm-5.keeper" ]
+      ~configured_labels:[ "provider_k-coding.provider_k-5.keeper" ]
       ~runtime_manifest_required_tool_names:[ "keeper_bash" ]
       ~runtime_mcp_policy:None
       ~tools:[]
@@ -3265,12 +3265,12 @@ let test_pre_dispatch_required_tool_exhaustion_is_no_tool_capable () =
     in
     Alcotest.(check string)
       "rejection provider_label field"
-      "glm-coding"
+      "provider_k-coding"
       rejection_label;
     Alcotest.(check bool)
       "rejection records provider"
       true
-      (contains_substring rejection_reason "provider=glm-coding");
+      (contains_substring rejection_reason "provider=provider_k-coding");
     Alcotest.(check bool)
       "rejection records missing tool"
       true
@@ -3329,17 +3329,17 @@ let test_health_filter_fail_open_preserves_tool_capable_candidates () =
   let module FT = Masc_mcp.Keeper_turn_driver_helpers in
   let candidates, fail_open =
     FT.fail_open_health_filtered_candidates
-      ~tool_filtered_candidates:[ "openai"; "ollama" ]
+      ~tool_filtered_candidates:[ "provider_d"; "ollama" ]
       ~health_filtered_candidates:[]
   in
   Alcotest.(check (list string))
     "all-cooldown fallback returns pre-health candidates"
-    [ "openai"; "ollama" ]
+    [ "provider_d"; "ollama" ]
     candidates;
   Alcotest.(check bool) "all-cooldown fallback marked" true fail_open;
   let candidates, fail_open =
     FT.fail_open_health_filtered_candidates
-      ~tool_filtered_candidates:[ "openai"; "ollama" ]
+      ~tool_filtered_candidates:[ "provider_d"; "ollama" ]
       ~health_filtered_candidates:[ "ollama" ]
   in
   Alcotest.(check (list string))
@@ -3369,7 +3369,7 @@ let test_local_preflight_filters_unhealthy_local_endpoints () =
       ~model_id:"gemma4:e2b" ~base_url:"http://localhost:11434/" ()
   in
   let cloud =
-    provider_config ~model_id:"glm-5-turbo"
+    provider_config ~model_id:"provider_k-5-turbo"
       ~base_url:"https://api.example.com/v1" ()
   in
   let candidates = C.of_provider_configs [ ollama; cloud ] in

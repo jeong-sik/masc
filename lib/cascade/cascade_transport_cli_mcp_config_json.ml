@@ -1,7 +1,7 @@
 (* CLI MCP config JSON serializer.
 
    Builds the `{ "mcpServers": { name: { ... } } }` JSON document that
-   CLI providers (codex, claude_code, gemini variants) expect as
+   CLI providers (agent_code, cli_tool_d, provider_f variants) expect as
    --mcp-config argv. Filters servers by the runtime mcp policy's
    allowed_server_names whitelist (empty = allow all).
 

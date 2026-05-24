@@ -31,7 +31,7 @@ let test_system_internal_details_deduplicate_canonical_keys () =
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
       let config = Coord.default_config base_dir in
-      Audit_log.log_system_internal_tool_call config ~agent_id:"codex"
+      Audit_log.log_system_internal_tool_call config ~agent_id:"agent_code"
         ~tool_name:"masc_status" ~success:true ~error_msg:None
         ~details:
           (`Assoc

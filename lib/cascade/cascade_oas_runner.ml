@@ -116,7 +116,7 @@ let runtime_mcp_policy_for_provider
   let agent_name = keeper_agent_name_opt keeper_name |> Option.value ~default:"" in
   Cascade_runner.runtime_mcp_policy_for_provider ~provider_cfg ~agent_name policy_opt
 
-let codex_cli_cannot_carry_keeper_bound_runtime_mcp
+let cli_tool_a_cannot_carry_keeper_bound_runtime_mcp
       ~(keeper_name : string)
       ~(provider_cfg : Llm_provider.Provider_config.t)
       (policy_opt : Llm_provider.Llm_transport.runtime_mcp_policy option)
@@ -133,7 +133,7 @@ let codex_cli_cannot_carry_keeper_bound_runtime_mcp
     | Some agent_name, Some policy
       when Option.is_some (Keeper_identity.keeper_name_from_agent_name agent_name) ->
       (not
-         (Cascade_runner.codex_cli_can_auth_keeper_bound_runtime_mcp ~agent_name policy))
+         (Cascade_runner.cli_tool_a_can_auth_keeper_bound_runtime_mcp ~agent_name policy))
       && List.exists
            Cascade_runner.runtime_mcp_tool_requires_bound_actor
            policy.allowed_tool_names
@@ -151,7 +151,7 @@ let codex_cli_cannot_carry_keeper_bound_runtime_mcp
       capabilities do not satisfy the tier-group's
       [required_capability_profile] (e.g. [tool_strict] requiring
       [runtime_mcp_tools], [runtime_tool_events], [runtime_mcp_http_headers]).
-   1. [Codex_keeper_bound_actor_required] — codex_cli cannot carry a
+   1. [Codex_keeper_bound_actor_required] — cli_tool_a cannot carry a
       runtime MCP policy that requires bound-actor tools (keeper-scoped).
    2. [Tool_lane_unsupported] — [resolve_tool_lane_for_oas_tools]
       returned [Error], typically transport/auth/capability mismatch
@@ -244,7 +244,7 @@ let classify_filter_rejection
   | Some _ -> profile_mismatch
   | None ->
     if
-      codex_cli_cannot_carry_keeper_bound_runtime_mcp
+      cli_tool_a_cannot_carry_keeper_bound_runtime_mcp
         ~keeper_name
         ~provider_cfg
         runtime_mcp_policy
@@ -287,7 +287,7 @@ let classify_filter_rejection
 (* #11060: cascade-empty WARN dedupe.
 
    When the tool-use gate empties a cascade (every configured
-   provider rejected — e.g. [keeper_unified] with only [codex_cli]
+   provider rejected — e.g. [keeper_unified] with only [cli_tool_a]
    providers under a keeper-bound runtime MCP policy), the WARN
    fires once per filtering invocation. Field log: 18 identical
    WARN events / 49 min for a single misconfigured cascade — the

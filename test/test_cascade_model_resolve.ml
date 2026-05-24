@@ -34,11 +34,11 @@ let synthetic_catalog_json =
     {
       "id": "synthetic-cli",
       "aliases": ["synthetic_cli"],
-      "kind": "codex_cli",
+      "kind": "cli_tool_a",
       "transport": "cli",
       "command": "synthetic-cli",
       "auth": {"type": "cli_cached_login"},
-      "capabilities_base": "codex_cli",
+      "capabilities_base": "cli_tool_a",
       "non_interactive": true,
       "interactive_required": false,
       "daemon_safe": true

@@ -60,12 +60,12 @@ let test_verify_handoff_factual_drift () =
 let test_verify_and_log_and_stats () =
   with_temp_masc_dir (fun config ->
       ignore
-        (Drift_guard.verify_and_log config ~from_agent:"claude"
-           ~to_agent:"gemini" ~task_id:"task-001" ~original:"same text"
+        (Drift_guard.verify_and_log config ~from_agent:"agent_llm_a"
+           ~to_agent:"provider_f" ~task_id:"task-001" ~original:"same text"
            ~received:"same text" ());
       ignore
-        (Drift_guard.verify_and_log config ~from_agent:"gemini"
-           ~to_agent:"codex" ~task_id:"task-002"
+        (Drift_guard.verify_and_log config ~from_agent:"provider_f"
+           ~to_agent:"agent_code" ~task_id:"task-002"
            ~original:"Use PostgreSQL and Redis for this service."
            ~received:"Use MongoDB for this service." ());
       check bool "log file exists" true

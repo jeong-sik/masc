@@ -846,8 +846,8 @@ end
 module KeeperCascade = struct
   (** Comma-separated provider kind allowlist for every keeper cascade call.
       Values are OAS [Provider_config.string_of_provider_kind]:
-      [ollama], [glm], [anthropic], [gemini], [openai_compat], [claude_code],
-      [kimi], [kimi_cli], [gemini_cli], [codex_cli].
+      [ollama], [provider_k], [provider_a], [provider_f], [openai_compat], [cli_tool_d],
+      [provider_c], [cli_tool_c], [cli_tool_b], [cli_tool_a].
       Matching is case-insensitive; empty entries are dropped.
 
       Semantics: when set, keeper turns pass this list as [provider_filter]

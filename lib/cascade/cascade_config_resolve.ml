@@ -74,12 +74,12 @@ let openai_compatible_custom_model json provider_id api_name =
 let cascade_prefix_of_decl_protocol raw =
   let kind =
     match String.trim raw |> String.lowercase_ascii with
-    | "anthropic-cli" -> Some Llm_provider.Provider_config.Claude_code
-    | "anthropic-http" -> Some Llm_provider.Provider_config.Anthropic
-    | "openai-cli" -> Some Llm_provider.Provider_config.Codex_cli
-    | "openai-http" -> Some Llm_provider.Provider_config.OpenAI_compat
+    | "provider_a-cli" -> Some Llm_provider.Provider_config.Claude_code
+    | "provider_a-http" -> Some Llm_provider.Provider_config.Anthropic
+    | "provider_d-cli" -> Some Llm_provider.Provider_config.Codex_cli
+    | "provider_d-http" -> Some Llm_provider.Provider_config.OpenAI_compat
     | "google-cli" -> Some Llm_provider.Provider_config.Gemini_cli
-    | "kimi-cli" -> Some Llm_provider.Provider_config.Kimi_cli
+    | "provider_c-cli" -> Some Llm_provider.Provider_config.Kimi_cli
     | "ollama-http" -> Some Llm_provider.Provider_config.Ollama
     | _ -> None
   in
@@ -97,7 +97,7 @@ let materialized_member_model_string json provider_id api_name =
          |> Option.map (fun protocol -> String.trim protocol |> String.lowercase_ascii)
        in
        match protocol with
-       | Some "openai-http" -> openai_compatible_custom_model json provider_id api_name
+       | Some "provider_d-http" -> openai_compatible_custom_model json provider_id api_name
        | Some protocol ->
          cascade_prefix_of_decl_protocol protocol
          |> Option.map (fun prefix -> Printf.sprintf "%s:%s" prefix api_name)

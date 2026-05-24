@@ -13,7 +13,7 @@ let test_identity_from_mcp_params () =
   Agent_registry_eio.reset_for_testing ();
   
   let params = `Assoc [
-    ("_agent_name", `String "claude-code-agent");
+    ("_agent_name", `String "agent_llm_a-code-agent");
     ("_channel", `String "telegram");
     ("_user_id", `String "user-12345");
     ("_session_key", `String "session-abc-123");
@@ -23,7 +23,7 @@ let test_identity_from_mcp_params () =
   
   let identity = Agent_registry_eio.get_or_create_identity params in
   
-  check string "agent_name" "claude-code-agent" identity.agent_name;
+  check string "agent_name" "agent_llm_a-code-agent" identity.agent_name;
   check (option string) "room" (Some "project-room") identity.room_id;
   check bool "has code cap" true (Agent_identity.has_capability identity "code");
   check bool "no admin cap" false (Agent_identity.has_capability identity "admin")

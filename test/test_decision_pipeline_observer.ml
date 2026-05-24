@@ -263,7 +263,7 @@ let test_observer_last_outcome_populated_after_turn () =
   Reg.set_turn_decision_stage
     ~base_path:test_obs_bp name Reg.Decision_active_tool_policy_selected;
   Reg.set_turn_cascade_state ~base_path:test_obs_bp name (Reg.Packed Reg.Cascade_done);
-  Reg.set_turn_selected_model ~base_path:test_obs_bp name (Some "glm-4.5");
+  Reg.set_turn_selected_model ~base_path:test_obs_bp name (Some "provider_k-4.5");
   Reg.mark_turn_finished ~base_path:test_obs_bp name;
   match Reg.get ~base_path:test_obs_bp name with
   | None -> Alcotest.fail "entry missing"
@@ -282,7 +282,7 @@ let test_observer_last_outcome_populated_after_turn () =
           check string "last_outcome cascade persisted"
             "done" (Obs.cascade_state_to_string lo.cascade_state);
           check (option string) "last_outcome selected_model persisted"
-            (Some "glm-4.5") lo.selected_model
+            (Some "provider_k-4.5") lo.selected_model
 
 let test_observer_last_outcome_preserved_across_finish_idempotent () =
   Eio_main.run @@ fun _env ->
@@ -314,7 +314,7 @@ let test_observer_json_includes_terminal_fields () =
   Reg.set_turn_decision_stage
     ~base_path:test_obs_bp name Reg.Decision_active_tool_policy_selected;
   Reg.set_turn_cascade_state ~base_path:test_obs_bp name (Reg.Packed Reg.Cascade_done);
-  Reg.set_turn_selected_model ~base_path:test_obs_bp name (Some "glm-4.5");
+  Reg.set_turn_selected_model ~base_path:test_obs_bp name (Some "provider_k-4.5");
   Reg.mark_turn_finished ~base_path:test_obs_bp name;
   match Reg.get ~base_path:test_obs_bp name with
   | None -> Alcotest.fail "entry missing"
@@ -329,7 +329,7 @@ let test_observer_json_includes_terminal_fields () =
         "done"
         (json |> member "last_outcome" |> member "cascade_state" |> to_string);
       check string "selected model rendered"
-        "glm-4.5"
+        "provider_k-4.5"
         (json |> member "last_outcome" |> member "selected_model" |> to_string)
 
 let test_observer_event_priority_detects_competing_measurement () =
@@ -357,7 +357,7 @@ let test_turn_retry_after_compaction_resets_cascade_attempt () =
   Reg.set_turn_decision_stage
     ~base_path:test_obs_bp name Reg.Decision_active_tool_policy_selected;
   Reg.set_turn_cascade_state ~base_path:test_obs_bp name (Reg.Packed Reg.Cascade_trying);
-  Reg.set_turn_selected_model ~base_path:test_obs_bp name (Some "glm-4.5");
+  Reg.set_turn_selected_model ~base_path:test_obs_bp name (Some "provider_k-4.5");
   Reg.set_turn_phase ~base_path:test_obs_bp name Reg.(Packed Turn_compacting);
   Reg.prepare_turn_retry_after_compaction ~base_path:test_obs_bp name;
   match Reg.get ~base_path:test_obs_bp name with

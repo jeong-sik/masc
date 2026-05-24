@@ -415,7 +415,7 @@ let tool_name_can_satisfy_required_contract name =
      satisfy the contract even though their effect_domain is Read_only.
      Without this exemption, analyst/janitor keepers that correctly
      call keeper_stay_silent alongside status reads trigger false
-     contract violations — observed 2026-04-28 when codex-spark
+     contract violations — observed 2026-04-28 when agent_code-spark
      returned stay_silent + keeper_task_list on an actionable signal. *)
   if observation_alias
   then false

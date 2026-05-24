@@ -27,38 +27,38 @@ let entry ?(weight = 1) ?supports_tool_choice ?secondary
 
 let test_non_auto_passes_through () =
   let inputs =
-    [ entry ~secondary:"openai:gpt-4-turbo" "anthropic:claude-3-5" ]
+    [ entry ~secondary:"provider_d:gpt-4-turbo" "provider_a:agent_llm_a-3-5" ]
   in
   let outs = Cfg.expand_weighted_auto_entries inputs in
   check int "single entry preserved" 1 (List.length outs);
   let e = List.hd outs in
-  check string "model unchanged" "anthropic:claude-3-5" e.model;
+  check string "model unchanged" "provider_a:agent_llm_a-3-5" e.model;
   check (option string) "secondary preserved"
-    (Some "openai:gpt-4-turbo") e.secondary
+    (Some "provider_d:gpt-4-turbo") e.secondary
 
 let test_auto_expansion_carries_secondary () =
-  (* claude_code:auto expands to multiple concrete models; every
+  (* cli_tool_d:auto expands to multiple concrete models; every
      expanded entry must keep the same secondary so the dual-track
      resolver can match any of them back to a fallback. *)
   let inputs =
     [ entry
-        ~secondary:"anthropic:claude-3-5-sonnet-20251022"
+        ~secondary:"provider_a:model-a-sonnet"
         ~secondary_supports_tool_choice:true
-        "claude_code:auto" ]
+        "cli_tool_d:auto" ]
   in
   let outs = Cfg.expand_weighted_auto_entries inputs in
-  (* claude_code:auto must expand to >=2 models, otherwise the auto
+  (* cli_tool_d:auto must expand to >=2 models, otherwise the auto
      model list collapsed and this test would not exercise the
      preservation path. *)
   if List.length outs < 2 then
     failf
-      "claude_code:auto expanded to only %d entries; expected >=2"
+      "cli_tool_d:auto expanded to only %d entries; expected >=2"
       (List.length outs);
   List.iter
     (fun (e : Loader.weighted_entry) ->
       check (option string)
         (Printf.sprintf "secondary preserved on expanded model %s" e.model)
-        (Some "anthropic:claude-3-5-sonnet-20251022") e.secondary;
+        (Some "provider_a:model-a-sonnet") e.secondary;
       check (option bool)
         (Printf.sprintf
            "secondary_supports_tool_choice preserved on %s" e.model)
@@ -66,7 +66,7 @@ let test_auto_expansion_carries_secondary () =
     outs
 
 let test_no_secondary_stays_none_after_expansion () =
-  let inputs = [ entry "claude_code:auto" ] in
+  let inputs = [ entry "cli_tool_d:auto" ] in
   let outs = Cfg.expand_weighted_auto_entries inputs in
   List.iter
     (fun (e : Loader.weighted_entry) ->
@@ -80,8 +80,8 @@ let test_no_secondary_stays_none_after_expansion () =
 let test_mixed_entries_preserve_per_entry () =
   let inputs =
     [
-      entry ~secondary:"openai:gpt-4-turbo" "anthropic:claude-3-5";
-      entry "openai:gpt-4-turbo";
+      entry ~secondary:"provider_d:gpt-4-turbo" "provider_a:agent_llm_a-3-5";
+      entry "provider_d:gpt-4-turbo";
     ]
   in
   let outs = Cfg.expand_weighted_auto_entries inputs in
@@ -91,7 +91,7 @@ let test_mixed_entries_preserve_per_entry () =
   let e1 = List.nth outs 0 in
   let e2 = List.nth outs 1 in
   check (option string) "first entry secondary preserved"
-    (Some "openai:gpt-4-turbo") e1.secondary;
+    (Some "provider_d:gpt-4-turbo") e1.secondary;
   check (option string) "second entry has no secondary"
     None e2.secondary
 

@@ -426,7 +426,7 @@ let case_for_name name =
         Generic.prepare_for_name fixture.generic name;
         (* In the keeper tool matrix, masc_worktree_* runs inside a
            keeper context whose meta.name is "keeper-tool-matrix", not
-           the generic fixture's "codex-tool-matrix". After PRs
+           the generic fixture's "agent_code-tool-matrix". After PRs
            #6533/#6542 the worktree resolver requires a clone under
            the keeper's own playground, so mirror the generic
            ensure_playground_clone for the keeper meta name too.

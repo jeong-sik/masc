@@ -19,7 +19,7 @@ type cli_transport_overrides = Cascade_transport_cli_overrides.cli_transport_ove
 (* OAS owns provider subprocess hard caps. This constant is a
    backward-compat re-export for tests and operator-facing labels only;
    MASC does not clamp provider-internal max_turns before dispatch. *)
-let claude_code_max_turns_hard_cap =
+let cli_tool_d_max_turns_hard_cap =
   Llm_provider.Provider_config.max_turns_hard_cap
     Llm_provider.Provider_config.Claude_code
   |> Option.value ~default:30
@@ -102,7 +102,7 @@ let add_masc_authorization_header = Cascade_transport_authorization.add_masc_aut
 
 (* Per-keeper authorization bridging extracted to
    [Cascade_transport_auth_bridging] (godfile decomp). *)
-let codex_cli_can_auth_keeper_bound_runtime_mcp = Cascade_transport_auth_bridging.codex_cli_can_auth_keeper_bound_runtime_mcp
+let cli_tool_a_can_auth_keeper_bound_runtime_mcp = Cascade_transport_auth_bridging.cli_tool_a_can_auth_keeper_bound_runtime_mcp
 let bridged_runtime_mcp_policy_for_agent = Cascade_transport_auth_bridging.bridged_runtime_mcp_policy_for_agent
 
 (* Provider-driven runtime MCP policy resolver extracted to
@@ -211,9 +211,9 @@ let resolve_tool_lane_for_oas_tools
     | _ -> []
   in
   (* RFC-0167: previously routed [omitted_keeper_bound_actor_tools] through
-     [Cascade_transport_codex_omission_dedup.record_codex_cli_omission_for_agent]
+     [Cascade_transport_codex_omission_dedup.record_cli_tool_a_omission_for_agent]
      for WARN-dedup + per-tool counter. The dedup module was a
-     client-named adapter (codex_cli wire-quirk) and is removed; the
+     client-named adapter (cli_tool_a wire-quirk) and is removed; the
      omission is now silently reflected only in the [Error
      (invalid_runtime_config ...)] returned below. *)
   if tool_requirement = `Required && omitted_keeper_bound_actor_tools <> []

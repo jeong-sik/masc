@@ -2,7 +2,7 @@
 
 open Masc_mcp
 
-let make_claude_code_provider_cfg ?(model_id = "auto") () =
+let make_cli_tool_d_provider_cfg ?(model_id = "auto") () =
   Llm_provider.Provider_config.make
     ~kind:Llm_provider.Provider_config.Claude_code
     ~model_id
@@ -10,7 +10,7 @@ let make_claude_code_provider_cfg ?(model_id = "auto") () =
     ()
 ;;
 
-let make_gemini_cli_provider_cfg ?(model_id = "gemini-3.1-pro-preview") () =
+let make_cli_tool_b_provider_cfg ?(model_id = "provider_f-3.1-pro-preview") () =
   Llm_provider.Provider_config.make
     ~kind:Llm_provider.Provider_config.Gemini_cli
     ~model_id
@@ -44,11 +44,11 @@ let provider_binding_base_url_exn id =
   | None -> Alcotest.failf "expected OAS runtime binding %S" id
 ;;
 
-let make_glm_provider_cfg ?base_url ?(model_id = "glm-5.1") () =
+let make_glm_provider_cfg ?base_url ?(model_id = "provider_k-5.1") () =
   let base_url =
     match base_url with
     | Some url -> url
-    | None -> provider_binding_base_url_exn "glm"
+    | None -> provider_binding_base_url_exn "provider_k"
   in
   Llm_provider.Provider_config.make
     ~kind:Llm_provider.Provider_config.Glm
@@ -64,7 +64,7 @@ let provider_registry_entry_exn name =
   | None -> Alcotest.failf "expected provider registry entry %S" name
 ;;
 
-let make_openrouter_provider_cfg ?(model_id = "anthropic/claude-3.5") () =
+let make_openrouter_provider_cfg ?(model_id = "provider_a/model-a-sonnet") () =
   let entry = provider_registry_entry_exn "openrouter" in
   Llm_provider.Provider_config.make
     ~kind:Llm_provider.Provider_config.OpenAI_compat
@@ -74,16 +74,16 @@ let make_openrouter_provider_cfg ?(model_id = "anthropic/claude-3.5") () =
     ()
 ;;
 
-let make_kimi_provider_cfg ?(model_id = "kimi-for-coding") () =
+let make_kimi_provider_cfg ?(model_id = "model-c-coding") () =
   Llm_provider.Provider_config.make
     ~kind:Llm_provider.Provider_config.Kimi
     ~model_id
-    ~base_url:"https://api.kimi.com/coding"
+    ~base_url:"https://api.provider_c.com/coding"
     ~request_path:"/v1/messages"
     ()
 ;;
 
-let make_kimi_cli_provider_cfg ?(model_id = "kimi-for-coding") () =
+let make_cli_tool_c_provider_cfg ?(model_id = "model-c-coding") () =
   Llm_provider.Provider_config.make
     ~kind:Llm_provider.Provider_config.Kimi_cli
     ~model_id
@@ -92,18 +92,18 @@ let make_kimi_cli_provider_cfg ?(model_id = "kimi-for-coding") () =
 ;;
 
 let test_cascade_provider_labels_keep_glm_and_glm_coding_distinct () =
-  let glm = Cascade_legacy_runner.provider_name_of_config (make_glm_provider_cfg ()) in
+  let provider_k = Cascade_legacy_runner.provider_name_of_config (make_glm_provider_cfg ()) in
   let glm_coding =
     Cascade_legacy_runner.provider_name_of_config
-      (make_glm_provider_cfg ~base_url:(provider_binding_base_url_exn "glm-coding") ())
+      (make_glm_provider_cfg ~base_url:(provider_binding_base_url_exn "provider_k-coding") ())
   in
-  Alcotest.(check string) "general GLM label" "glm" glm;
-  Alcotest.(check string) "coding GLM label" "glm-coding" glm_coding
+  Alcotest.(check string) "general GLM label" "provider_k" provider_k;
+  Alcotest.(check string) "coding GLM label" "provider_k-coding" glm_coding
 ;;
 
-let test_provider_effective_max_turns_passes_claude_code_budget_to_oas () =
+let test_provider_effective_max_turns_passes_cli_tool_d_budget_to_oas () =
   Alcotest.(check int)
-    "claude_code max_turns is passed through to OAS"
+    "cli_tool_d max_turns is passed through to OAS"
     39
     (Cascade_runner.provider_effective_max_turns
        Llm_provider.Provider_config.Claude_code
@@ -152,25 +152,25 @@ let check_timeout_resolution label expected_timeout expected_source actual =
     actual.Cascade_runtime_candidate.source
 ;;
 
-let test_provider_attempt_timeout_passes_claude_code_configured_timeout () =
+let test_provider_attempt_timeout_passes_cli_tool_d_configured_timeout () =
   check_timeout_opt
-    "claude_code configured attempt timeout passes through"
+    "cli_tool_d configured attempt timeout passes through"
     (Some 300.0)
-    (provider_timeout ~configured:300.0 (make_claude_code_provider_cfg ()))
+    (provider_timeout ~configured:300.0 (make_cli_tool_d_provider_cfg ()))
 ;;
 
-let test_provider_attempt_timeout_passes_kimi_cli_configured_timeout () =
+let test_provider_attempt_timeout_passes_cli_tool_c_configured_timeout () =
   check_timeout_opt
-    "kimi_cli configured attempt timeout passes through"
+    "cli_tool_c configured attempt timeout passes through"
     (Some 300.0)
-    (provider_timeout ~configured:300.0 (make_kimi_cli_provider_cfg ()))
+    (provider_timeout ~configured:300.0 (make_cli_tool_c_provider_cfg ()))
 ;;
 
-let test_provider_attempt_timeout_passes_gemini_cli_configured_timeout () =
+let test_provider_attempt_timeout_passes_cli_tool_b_configured_timeout () =
   check_timeout_opt
-    "gemini_cli configured attempt timeout passes through"
+    "cli_tool_b configured attempt timeout passes through"
     (Some 300.0)
-    (provider_timeout ~configured:300.0 (make_gemini_cli_provider_cfg ()))
+    (provider_timeout ~configured:300.0 (make_cli_tool_b_provider_cfg ()))
 ;;
 
 let test_provider_attempt_timeout_floors_ollama_configured_timeout () =
@@ -199,10 +199,10 @@ let test_provider_attempt_timeout_passes_final_configured_timeout () =
 
 let test_provider_attempt_timeout_resolution_sources () =
   check_timeout_resolution
-    "claude_code configured timeout"
+    "cli_tool_d configured timeout"
     (Some 300.0)
     "configured_per_provider_timeout"
-    (provider_timeout_resolution ~configured:300.0 (make_claude_code_provider_cfg ()));
+    (provider_timeout_resolution ~configured:300.0 (make_cli_tool_d_provider_cfg ()));
   check_timeout_resolution
     "ollama lifted configured timeout"
     (Some local_runtime_timeout_floor_s)
@@ -214,7 +214,7 @@ let test_provider_attempt_timeout_resolution_sources () =
     "local_runtime_floor"
     (provider_timeout_resolution (make_ollama_provider_cfg ()));
   check_timeout_resolution
-    "openai compat unset timeout"
+    "provider_d compat unset timeout"
     None
     "unset_oas_default"
     (provider_timeout_resolution
@@ -231,7 +231,7 @@ let test_cascade_provider_labels_preserve_registered_openai_compat_family () =
   Alcotest.(check string) "openrouter provider name" "openrouter" provider_name;
   Alcotest.(check string)
     "openrouter model label"
-    "openrouter:anthropic/claude-3.5"
+    "openrouter:provider_a/model-a-sonnet"
     model_label
 ;;
 
@@ -242,35 +242,35 @@ let test_cascade_provider_labels_detect_kimi_from_kind_metadata () =
   let model_label =
     Cascade_legacy_runner.model_label_of_config (make_kimi_provider_cfg ())
   in
-  Alcotest.(check string) "kimi provider name" "kimi" provider_name;
-  Alcotest.(check string) "kimi model label" "kimi:kimi-for-coding" model_label
+  Alcotest.(check string) "provider_c provider name" "provider_c" provider_name;
+  Alcotest.(check string) "provider_c model label" "provider_c:model-c-coding" model_label
 ;;
 
 let cases =
   [ Alcotest.test_case
-      "cascade provider labels keep glm and glm-coding distinct"
+      "cascade provider labels keep provider_k and provider_k-coding distinct"
       `Quick
       test_cascade_provider_labels_keep_glm_and_glm_coding_distinct
   ; Alcotest.test_case
-      "provider max_turns passes claude_code budget to OAS"
+      "provider max_turns passes cli_tool_d budget to OAS"
       `Quick
-      test_provider_effective_max_turns_passes_claude_code_budget_to_oas
+      test_provider_effective_max_turns_passes_cli_tool_d_budget_to_oas
   ; Alcotest.test_case
       "provider max_turns leaves ollama uncapped"
       `Quick
       test_provider_effective_max_turns_keeps_ollama_budget
   ; Alcotest.test_case
-      "provider timeout passes claude_code configured timeout"
+      "provider timeout passes cli_tool_d configured timeout"
       `Quick
-      test_provider_attempt_timeout_passes_claude_code_configured_timeout
+      test_provider_attempt_timeout_passes_cli_tool_d_configured_timeout
   ; Alcotest.test_case
-      "provider timeout passes kimi_cli configured timeout"
+      "provider timeout passes cli_tool_c configured timeout"
       `Quick
-      test_provider_attempt_timeout_passes_kimi_cli_configured_timeout
+      test_provider_attempt_timeout_passes_cli_tool_c_configured_timeout
   ; Alcotest.test_case
-      "provider timeout passes gemini_cli configured timeout"
+      "provider timeout passes cli_tool_b configured timeout"
       `Quick
-      test_provider_attempt_timeout_passes_gemini_cli_configured_timeout
+      test_provider_attempt_timeout_passes_cli_tool_b_configured_timeout
   ; Alcotest.test_case
       "provider timeout floors ollama configured timeout"
       `Quick
@@ -292,7 +292,7 @@ let cases =
       `Quick
       test_cascade_provider_labels_preserve_registered_openai_compat_family
   ; Alcotest.test_case
-      "cascade provider labels detect kimi from kind metadata"
+      "cascade provider labels detect provider_c from kind metadata"
       `Quick
       test_cascade_provider_labels_detect_kimi_from_kind_metadata
   ]

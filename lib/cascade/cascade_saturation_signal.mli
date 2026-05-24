@@ -68,7 +68,7 @@ type t =
 val to_log_string : t -> string
 (** Human-readable log line. 형식 예:
     - ["provider_rate_limited provider=runpod_mtp retry_after_ms=1200"]
-    - ["time_cap_fired observed_latency_ms=300100 cap_ms=300000 provider=glm-coding"]
+    - ["time_cap_fired observed_latency_ms=300100 cap_ms=300000 provider=provider_k-coding"]
     - ["all_tiers_filtered_after_cycles cascade=strict_tool_candidates cycles=3"]
     - ["inflight_capacity_full tier=strict_tool_candidates max_inflight=8"]
 

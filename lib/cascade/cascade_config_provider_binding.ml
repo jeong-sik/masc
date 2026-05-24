@@ -116,7 +116,7 @@ let headers_with_auth ~(kind : Llm_provider.Provider_config.provider_kind) ~api_
     else match kind with
     | Anthropic | Kimi ->
         ("x-api-key", api_key)
-        :: ("anthropic-version", "2023-06-01")
+        :: ("provider_a-version", "2023-06-01")
         :: base
     | OpenAI_compat | Ollama | Gemini | Glm | Claude_code | DashScope ->
         ("Authorization", "Bearer " ^ api_key) :: base

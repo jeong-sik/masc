@@ -88,7 +88,7 @@ let test_capacity_backpressure_kind () =
          {
            cascade_name = typed_cascade_name cascade_name;
            source = OWN.Client_capacity;
-           detail = "client capacity key glm is full";
+           detail = "client capacity key provider_k is full";
            retry_after_sec = None;
          })
   in
@@ -124,7 +124,7 @@ let test_no_tool_capable_provider_kind () =
       (OWN.No_tool_capable_provider
          {
            cascade_name = typed_cascade_name cascade_name;
-           configured_labels = [ "openai"; "anthropic" ];
+           configured_labels = [ "provider_d"; "provider_a" ];
            required_tool_names = [];
            provider_rejections = [];
          })
@@ -150,12 +150,12 @@ let test_no_tool_capable_provider_payload_names_tools_and_rejections () =
     OWN.No_tool_capable_provider
       {
         cascade_name = typed_cascade_name "tool_required";
-        configured_labels = [ "codex"; "kimi" ];
+        configured_labels = [ "agent_code"; "provider_c" ];
         required_tool_names = [ "keeper_bash"; "masc_worktree_create" ];
         provider_rejections =
           [
-            { OWN.provider_label = "codex"; OWN.reason = "codex_keeper_bound_actor_required" };
-            { OWN.provider_label = "kimi"; OWN.reason = "tool_lane_unsupported" };
+            { OWN.provider_label = "agent_code"; OWN.reason = "codex_keeper_bound_actor_required" };
+            { OWN.provider_label = "provider_c"; OWN.reason = "tool_lane_unsupported" };
           ];
       }
   in
@@ -180,8 +180,8 @@ let test_no_tool_capable_provider_payload_names_tools_and_rejections () =
     (json |> member "rejection_reasons" |> to_list |> List.map to_string);
   Alcotest.(check (list (pair string string)))
     "provider rejection identities serialized"
-    [ ("codex", "codex_keeper_bound_actor_required")
-    ; ("kimi", "tool_lane_unsupported")
+    [ ("agent_code", "codex_keeper_bound_actor_required")
+    ; ("provider_c", "tool_lane_unsupported")
     ]
     (json |> member "provider_rejections" |> to_list
      |> List.map (fun item ->
@@ -198,7 +198,7 @@ let test_no_tool_capable_provider_payload_names_tools_and_rejections () =
             (contains_substring summary
                "codex_keeper_bound_actor_required");
           Alcotest.(check bool) "summary omits rejected provider identity" false
-            (contains_substring summary "codex_cli:codex")
+            (contains_substring summary "cli_tool_a:agent_code")
       | None -> Alcotest.fail "expected no-tool summary")
   | None -> Alcotest.fail "expected no-tool error round-trip"
 
@@ -208,15 +208,15 @@ let test_no_tool_capable_provider_legacy_rejections_are_redacted () =
       [
         ("kind", `String "no_tool_capable_provider");
         ("cascade_name", `String "tool_required");
-        ("configured_labels", `List [ `String "codex"; `String "kimi" ]);
+        ("configured_labels", `List [ `String "agent_code"; `String "provider_c" ]);
         ("required_tool_names", `List [ `String "keeper_bash" ]);
         ( "provider_rejections",
           `List
             [
               `Assoc
                 [
-                  ("provider_label", `String "codex_cli:codex");
-                  ("provider_kind", `String "codex_cli");
+                  ("provider_label", `String "cli_tool_a:agent_code");
+                  ("provider_kind", `String "cli_tool_a");
                   ("reason", `String "codex_keeper_bound_actor_required");
                 ];
             ] );
@@ -230,7 +230,7 @@ let test_no_tool_capable_provider_legacy_rejections_are_redacted () =
       let open Yojson.Safe.Util in
       Alcotest.(check (list (pair string string)))
         "legacy provider_rejections preserved with identity"
-        [ ("codex_cli:codex", "codex_keeper_bound_actor_required") ]
+        [ ("cli_tool_a:agent_code", "codex_keeper_bound_actor_required") ]
         (redacted |> member "provider_rejections" |> to_list
          |> List.map (fun item ->
               (item |> member "provider_label" |> to_string,
@@ -246,7 +246,7 @@ let test_no_tool_capable_provider_legacy_rejections_are_redacted () =
           Alcotest.(check bool)
             "legacy summary omits rejected provider identity"
             false
-            (contains_substring summary "codex_cli:codex"))
+            (contains_substring summary "cli_tool_a:agent_code"))
 
 let test_accept_rejected_kind () =
   let kind = "accept_rejected" in
@@ -256,7 +256,7 @@ let test_accept_rejected_kind () =
       (OWN.Accept_rejected
          {
            scope = "keeper_turn";
-           model = Some "codex";
+           model = Some "agent_code";
            reason = "accept=false";
          })
   in
@@ -335,10 +335,10 @@ let test_resumable_cli_session_per_cascade_isolation () =
   (* The exact #10285 shape: resumable_cli_session events are
      unevenly distributed across 5 cascades.  Bumping
      [governance_judge] must NOT move the counter for
-     [kimi_cli_keeper] — operators rate-alert and demote per cascade. *)
+     [cli_tool_c_keeper] — operators rate-alert and demote per cascade. *)
   let kind = "resumable_cli_session" in
   let cascade_a = "governance_judge" in
-  let cascade_b = "kimi_cli_keeper" in
+  let cascade_b = "cli_tool_c_keeper" in
   let b_before = counter_for ~cascade_name:cascade_b kind in
   let a_before = counter_for ~cascade_name:cascade_a kind in
   let _ =
@@ -355,7 +355,7 @@ let test_resumable_cli_session_per_cascade_isolation () =
     (a_before +. 1.0)
     (counter_for ~cascade_name:cascade_a kind);
   Alcotest.(check (float 0.0001))
-    "kimi_cli_keeper counter unchanged by governance_judge bump"
+    "cli_tool_c_keeper counter unchanged by governance_judge bump"
     b_before
     (counter_for ~cascade_name:cascade_b kind)
 

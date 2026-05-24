@@ -830,7 +830,7 @@ let run_keeper_cycle
                      hitting the same violation before the OAS retry guard
                      finally aborted the cycle (see fleet logs:
                      "passive status/read tools" cascade=default →
-                     keeper_unified → kimi_cli_keeper → … →
+                     keeper_unified → cli_tool_c_keeper → … →
                      provider_timeout at 1064s/1200s).  Cap at 1 rotation
                      so the keeper releases its turn budget promptly.
 

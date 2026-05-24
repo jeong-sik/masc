@@ -90,9 +90,9 @@ let find_profile (snapshot : Hotpath.decl_snapshot) (name : string) :
 (* --- TOML fixture --- *)
 
 let valid_toml = {|
-[providers.claude_code]
-protocol = "anthropic-cli"
-command = "claude"
+[providers.cli_tool_d]
+protocol = "provider_a-cli"
+command = "agent_llm_a"
 
 [providers.ollama]
 protocol = "ollama-http"
@@ -100,12 +100,12 @@ endpoint = "http://localhost:11434"
 
 [models.haiku]
 max-context = 200000
-api-name = "claude-haiku-4-5-20251001"
+api-name = "model-a-haiku"
 tools-support = true
 
 [models.sonnet]
 max-context = 200000
-api-name = "claude-sonnet-4-6"
+api-name = "model-a-sonnet"
 tools-support = true
 
 [models.qwen3]
@@ -113,24 +113,24 @@ max-context = 32768
 api-name = "qwen3:8b"
 tools-support = true
 
-[claude_code.haiku]
+[cli_tool_d.haiku]
 is-default = true
 max-concurrent = 3
 
-[claude_code.sonnet]
+[cli_tool_d.sonnet]
 max-concurrent = 2
 
-[claude_code.haiku.for-scoring]
+[cli_tool_d.haiku.for-scoring]
 max-input = 4096
 
 [ollama.qwen3]
 
 [tier.rerank]
-members = ["claude_code.haiku.for-scoring"]
+members = ["cli_tool_d.haiku.for-scoring"]
 strategy = "failover"
 
 [tier.primary]
-members = ["claude_code.sonnet", "claude_code.haiku"]
+members = ["cli_tool_d.sonnet", "cli_tool_d.haiku"]
 strategy = "failover"
 
 [tier.local]
@@ -145,7 +145,7 @@ strategy = "priority_tier"
 target = "tier-group.primary"
 
 [system.governance]
-target = "claude_code.haiku.for-scoring"
+target = "cli_tool_d.haiku.for-scoring"
 |}
 
 (* --- Tests: snapshot conversion --- *)
@@ -181,9 +181,9 @@ let test_candidates () =
 let test_failover_inference_max_tokens_uses_narrowest_candidate () =
   let toml =
     {|
-[providers.claude_code]
-protocol = "anthropic-cli"
-command = "claude"
+[providers.cli_tool_d]
+protocol = "provider_a-cli"
+command = "agent_llm_a"
 
 [models.wide]
 max-context = 200000
@@ -195,16 +195,16 @@ max-context = 32768
 api-name = "narrow"
 tools-support = true
 
-[claude_code.wide.tool]
+[cli_tool_d.wide.tool]
 max-output = 64000
 temperature = 0.2
 
-[claude_code.narrow.recovery]
+[cli_tool_d.narrow.recovery]
 max-output = 8192
 temperature = 0.2
 
 [tier.mixed]
-members = ["claude_code.wide.tool", "claude_code.narrow.recovery"]
+members = ["cli_tool_d.wide.tool", "cli_tool_d.narrow.recovery"]
 strategy = "failover"
 |}
   in
@@ -229,28 +229,28 @@ let test_tier_group_inference_max_tokens_uses_model_capability () =
   let toml =
     {|
 [providers.runpod_mtp]
-protocol = "openai-http"
+protocol = "provider_d-http"
 endpoint = "https://example.test/v1"
 
-[providers.glm-coding]
-protocol = "openai-http"
-endpoint = "https://glm.example.test/v1"
+[providers.provider_k-coding]
+protocol = "provider_d-http"
+endpoint = "https://provider_k.example.test/v1"
 
 [models.qwen36-mtp]
 max-context = 160000
-api-name = "qwen"
+api-name = "provider_h"
 tools-support = true
 
 [models.qwen36-mtp.capabilities]
 max-output-tokens = 8192
 supports-tool-choice = true
 
-[models.glm-turbo]
+[models.provider_k-turbo]
 max-context = 128000
-api-name = "glm-5-turbo"
+api-name = "provider_k-5-turbo"
 tools-support = true
 
-[models.glm-turbo.capabilities]
+[models.provider_k-turbo.capabilities]
 max-output-tokens = 16384
 supports-tool-choice = true
 
@@ -260,15 +260,15 @@ is-default = true
 [runpod_mtp.qwen36-mtp.keeper]
 temperature = 0.3
 
-[glm-coding.glm-turbo]
+[provider_k-coding.provider_k-turbo]
 is-default = true
 
-[glm-coding.glm-turbo.keeper]
+[provider_k-coding.provider_k-turbo.keeper]
 max-output = 16384
 temperature = 0.3
 
 [tier.strict_tool_candidates]
-members = ["runpod_mtp.qwen36-mtp.keeper", "glm-coding.glm-turbo.keeper"]
+members = ["runpod_mtp.qwen36-mtp.keeper", "provider_k-coding.provider_k-turbo.keeper"]
 strategy = "failover"
 
 [tier-group.strict_tool_candidates]
@@ -284,17 +284,17 @@ strategy = "failover"
     (Some 8192)
     strict.Hotpath.inference_params.max_tokens;
   match strict.Hotpath.candidates with
-  | qwen :: glm :: _ ->
+  | provider_h :: provider_k :: _ ->
     check
       (option int)
-      "qwen candidate inherits model output cap"
+      "provider_h candidate inherits model output cap"
       (Some 8192)
-      qwen.Hotpath.provider_cfg.Llm_provider.Provider_config.max_tokens;
+      provider_h.Hotpath.provider_cfg.Llm_provider.Provider_config.max_tokens;
     check
       (option int)
-      "glm candidate keeps alias cap"
+      "provider_k candidate keeps alias cap"
       (Some 16384)
-      glm.Hotpath.provider_cfg.Llm_provider.Provider_config.max_tokens
+      provider_k.Hotpath.provider_cfg.Llm_provider.Provider_config.max_tokens
   | candidates ->
     fail
       (Printf.sprintf
@@ -366,23 +366,23 @@ let test_empty_catalog () =
 
 let test_errors_catalog_snapshot () =
   let toml = {|
-[providers.claude_code]
-protocol = "anthropic-cli"
-command = "claude"
+[providers.cli_tool_d]
+protocol = "provider_a-cli"
+command = "agent_llm_a"
 
 [models.haiku]
 max-context = 200000
-api-name = "claude-haiku-4-5-20251001"
+api-name = "model-a-haiku"
 tools-support = true
 
-[claude_code.haiku]
+[cli_tool_d.haiku]
 is-default = true
 
 [bad-provider.haiku]
 is-default = true
 
 [tier.primary]
-members = ["claude_code.haiku"]
+members = ["cli_tool_d.haiku"]
 strategy = "failover"
 |} in
   let catalog = adapt_toml toml in
@@ -439,7 +439,7 @@ type = "env"
 key = "OLLAMA_CLOUD_API_KEY"
 
 [models.ollama-cloud-default]
-api-name = "glm-5.1"
+api-name = "provider_k-5.1"
 max-context = 128000
 tools-support = true
 streaming = true
@@ -455,13 +455,13 @@ max-concurrent = 1
 members = ["ollama_cloud.ollama-cloud-default"]
 strategy = "failover"
 
-[tier-group.glm-coding-with-spark]
+[tier-group.provider_k-coding-with-spark]
 tiers = ["ollama_cloud_primary"]
 strategy = "failover"
 fallback = false
 
 [routes.keeper_turn]
-target = "tier-group.glm-coding-with-spark"
+target = "tier-group.provider_k-coding-with-spark"
 |}
   in
   with_env "OLLAMA_CLOUD_API_KEY" "test-token" @@ fun () ->
@@ -470,7 +470,7 @@ target = "tier-group.glm-coding-with-spark"
     Masc_mcp.Cascade_catalog_runtime.resolve_named_providers_strict
       ~require_tool_choice_support:true
       ~require_tool_support:true
-      ~cascade_name:"tier-group.glm-coding-with-spark"
+      ~cascade_name:"tier-group.provider_k-coding-with-spark"
       ()
   with
   | Error err -> fail err
@@ -508,7 +508,7 @@ type = "env"
 key = "OLLAMA_CLOUD_API_KEY"
 
 [models.ollama-cloud-default]
-api-name = "glm-5.1"
+api-name = "provider_k-5.1"
 max-context = 128000
 tools-support = true
 streaming = true
@@ -519,7 +519,7 @@ streaming = true
 members = ["ollama_cloud.ollama-cloud-default"]
 strategy = "failover"
 
-[tier-group.glm-coding-with-spark]
+[tier-group.provider_k-coding-with-spark]
 tiers = ["ollama_cloud_primary"]
 strategy = "failover"
 fallback = false
@@ -529,12 +529,12 @@ fallback = false
   with_temp_cascade_config toml @@ fun () ->
   match
     Masc_mcp.Cascade_catalog_runtime.resolve_named_providers_strict_with_secondary_resolver
-      ~cascade_name:"tier-group.glm-coding-with-spark"
+      ~cascade_name:"tier-group.provider_k-coding-with-spark"
       ()
   with
   | Error err -> fail err
   | Ok { tiered_providers = [ tiered ]; _ } ->
-    check string "tier id" "tier-group.glm-coding-with-spark" tiered.tier_id
+    check string "tier id" "tier-group.provider_k-coding-with-spark" tiered.tier_id
   | Ok resolution ->
     fail
       (Printf.sprintf
@@ -545,7 +545,7 @@ let test_runtime_resolution_splits_multi_tier_group_admission_ids () =
   let toml =
     {|
 [providers.runpod_mtp]
-protocol = "openai-http"
+protocol = "provider_d-http"
 endpoint = "https://runpod.example.test/v1"
 
 [providers.ollama_cloud]
@@ -566,26 +566,26 @@ streaming = true
 supports-tool-choice = true
 supports-native-streaming = true
 
-[models.kimi-cloud]
-api-name = "kimi-k2.6"
+[models.provider_c-cloud]
+api-name = "model-c"
 max-context = 128000
 tools-support = true
 streaming = true
 
-[models.kimi-cloud.capabilities]
+[models.provider_c-cloud.capabilities]
 supports-tool-choice = true
 supports-native-streaming = true
 
 [runpod_mtp.qwen36-mtp]
 
-[ollama_cloud.kimi-cloud]
+[ollama_cloud.provider_c-cloud]
 
 [tier.runpod_primary]
 members = ["runpod_mtp.qwen36-mtp"]
 strategy = "failover"
 
 [tier.ollama_cloud_stable]
-members = ["ollama_cloud.kimi-cloud"]
+members = ["ollama_cloud.provider_c-cloud"]
 strategy = "failover"
 
 [tier-group.strict_tool_candidates]

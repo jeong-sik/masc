@@ -1,6 +1,6 @@
 (* UTF-8 argv sanitization for CLI-driven LLM transports.
 
-   CLI-bound providers (codex, claude_code, gemini, json-stream variants)
+   CLI-bound providers (agent_code, cli_tool_d, provider_f, json-stream variants)
    cannot accept invalid UTF-8 in argv/env/payload without misbehaving;
    this layer scrubs strings through [Inference_utils.sanitize_text_utf8]
    before they cross the transport boundary.

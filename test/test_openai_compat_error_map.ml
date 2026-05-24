@@ -99,7 +99,7 @@ let test_provider_timeout () =
     ~input:
       (E.Provider
          (Llm_provider.Error.Timeout
-            { provider = "claude"; timeout_phase = None; detail = "provider timed out" }))
+            { provider = "agent_llm_a"; timeout_phase = None; detail = "provider timed out" }))
     ~expected_status:`Gateway_timeout
     ~expected_kind:"server_error"
     ~expected_code:(Some "provider_timeout")
@@ -111,7 +111,7 @@ let test_provider_hard_quota () =
     ~input:
       (E.Provider
          (Llm_provider.Error.HardQuota
-            { provider = "claude"; retry_after = None; detail = "quota exhausted" }))
+            { provider = "agent_llm_a"; retry_after = None; detail = "quota exhausted" }))
     ~expected_status:`Too_many_requests
     ~expected_kind:"rate_limit_error"
     ~expected_code:(Some "provider_hard_quota")
@@ -123,7 +123,7 @@ let test_provider_invalid_request () =
     ~input:
       (E.Provider
          (Llm_provider.Error.InvalidRequest
-            { provider = "claude"; reason = "bad request" }))
+            { provider = "agent_llm_a"; reason = "bad request" }))
     ~expected_status:`Bad_request
     ~expected_kind:"invalid_request_error"
     ~expected_code:(Some "provider_invalid_request")
@@ -253,7 +253,7 @@ let test_message_nonempty () =
     [ E.Api (E.Retry.RateLimited { retry_after = None; message = "x" })
     ; E.Provider
         (Llm_provider.Error.ProviderUnavailable
-           { provider = "claude"; detail = "not available" })
+           { provider = "agent_llm_a"; detail = "not available" })
     ; E.Agent (E.IdleDetected { consecutive_idle_turns = 3 })
     ; E.Mcp (E.InitializeFailed { detail = "boom" })
     ; E.Config (E.InvalidConfig { field = "f"; detail = "d" })

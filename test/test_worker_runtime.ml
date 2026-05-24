@@ -165,10 +165,10 @@ let test_worker_runtime_invalid_config_fails_closed () =
 let test_rewrite_custom_model_label_for_container () =
   let rewritten =
     Lib.Worker_runtime_docker.rewrite_model_label_for_container
-      "custom:qwen-test@http://127.0.0.1:19001"
+      "custom:provider_h-test@http://127.0.0.1:19001"
   in
   check string "loopback custom label rewritten to host alias"
-    "custom:qwen-test@http://host.docker.internal:19001" rewritten
+    "custom:provider_h-test@http://host.docker.internal:19001" rewritten
 
 let test_run_process_with_timeout_returns_124_on_timeout () =
   with_eio @@ fun env ->
@@ -221,7 +221,7 @@ let test_worker_execution_spec_rejects_removed_fields () =
       {|{
   "base_path": "/tmp/base",
   "worker_name": "worker",
-  "model_label": "custom:qwen@http://127.0.0.1:19001",
+  "model_label": "custom:provider_h@http://127.0.0.1:19001",
   "runtime_backend": "docker",
   "prompt": "hello",
   "timeout_sec": 30,

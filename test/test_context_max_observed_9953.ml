@@ -1,7 +1,7 @@
 (* test/test_context_max_observed_9953.ml
 
    #9953: same model label was recording 3 different
-   [context_max] values across turns (claude_code:auto getting
+   [context_max] values across turns (cli_tool_d:auto getting
    42% / 17% / 41% split between 64k / 262k / 1M).  The data was
    in the JSONL ledger but invisible to Prometheus dashboards.
 
@@ -103,8 +103,8 @@ let test_bucket_boundary_1m () =
    isolated across (keeper, model_used, resolved_model_id). *)
 let test_record_increments_correct_bucket () =
   let keeper = "test-keeper-9953" in
-  let model = "claude_code:auto-9953" in
-  let resolved = "anthropic-claude-opus-4-7" in
+  let model = "cli_tool_d:auto-9953" in
+  let resolved = "provider_a-model-a-opus" in
   let before_1m =
     counter_for ~keeper ~model_used:model ~resolved_model_id:resolved
       ~bucket:"1m"
@@ -134,7 +134,7 @@ let test_record_increments_correct_bucket () =
    pins the OBSERVABILITY contract, not the underlying bug. *)
 let test_drift_visible_as_two_bucket_rows () =
   let keeper = "test-keeper-drift-9953" in
-  let model = "claude_code:auto-drift-9953" in
+  let model = "cli_tool_d:auto-drift-9953" in
   let resolved = "auto-drift-resolved-9953" in
   let before_64k =
     counter_for ~keeper ~model_used:model ~resolved_model_id:resolved

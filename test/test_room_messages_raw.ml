@@ -10,7 +10,7 @@ let with_test_env f =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let config = Coord.default_config tmp_dir in
-  let _ = Coord.init config ~agent_name:(Some "claude") in
+  let _ = Coord.init config ~agent_name:(Some "agent_llm_a") in
   try
     f config;
     let _ = Coord.reset config in
@@ -22,9 +22,9 @@ let with_test_env f =
 
 let test_get_messages_raw_limit_and_order () =
   with_test_env (fun config ->
-    let _ = Coord.broadcast config ~from_agent:"claude" ~content:"Message 1" in
-    let _ = Coord.broadcast config ~from_agent:"claude" ~content:"Message 2" in
-    let _ = Coord.broadcast config ~from_agent:"claude" ~content:"Message 3" in
+    let _ = Coord.broadcast config ~from_agent:"agent_llm_a" ~content:"Message 1" in
+    let _ = Coord.broadcast config ~from_agent:"agent_llm_a" ~content:"Message 2" in
+    let _ = Coord.broadcast config ~from_agent:"agent_llm_a" ~content:"Message 3" in
     let msgs = Coord.get_messages_raw config ~since_seq:0 ~limit:2 in
     let contents = List.map (fun (msg : Masc_domain.message) -> msg.content) msgs in
     Alcotest.(check int) "limit respected" 2 (List.length msgs);
@@ -34,9 +34,9 @@ let test_get_messages_raw_limit_and_order () =
 
 let test_get_messages_raw_since_seq_stops_early () =
   with_test_env (fun config ->
-    let _ = Coord.broadcast config ~from_agent:"claude" ~content:"Message 1" in
-    let _ = Coord.broadcast config ~from_agent:"claude" ~content:"Message 2" in
-    let _ = Coord.broadcast config ~from_agent:"claude" ~content:"Message 3" in
+    let _ = Coord.broadcast config ~from_agent:"agent_llm_a" ~content:"Message 1" in
+    let _ = Coord.broadcast config ~from_agent:"agent_llm_a" ~content:"Message 2" in
+    let _ = Coord.broadcast config ~from_agent:"agent_llm_a" ~content:"Message 3" in
     let baseline = Coord.get_messages_raw config ~since_seq:0 ~limit:10 in
     let cutoff_seq =
       match baseline with
@@ -53,7 +53,7 @@ let test_get_messages_raw_large_history_keeps_newest_window () =
   with_test_env (fun config ->
     for i = 1 to 20 do
       let _ =
-        Coord.broadcast config ~from_agent:"claude"
+        Coord.broadcast config ~from_agent:"agent_llm_a"
           ~content:(Printf.sprintf "Message %d" i)
       in
       ()

@@ -145,7 +145,7 @@ let model_entry_json ~path value =
                        validator rejected weight=0, breaking dashboard
                        cascade.toml rendering on every hot-reload
                        once #10097 introduced explicit weight=0 entries
-                       to disable codex_cli without removing it from the
+                       to disable cli_tool_a without removing it from the
                        seed list.  Negative weights stay rejected — they
                        have no operational meaning. *)
               (match int_value ~path:(path ^ ".weight") field_value with
@@ -398,7 +398,7 @@ let render_toml_to_yojson toml =
         then loop ([ key, otoml_to_yojson value ] :: acc) rest
         else (
           (* Layer-3 bindings appear as [<provider>.<model>] tables under
-                 a top-level provider key (e.g. [claude_code.haiku]). Detect
+                 a top-level provider key (e.g. [cli_tool_d.haiku]). Detect
                  by checking whether [key] matches a provider table that was
                  declared earlier under [providers]; if so, pass through. *)
           let is_provider_binding =

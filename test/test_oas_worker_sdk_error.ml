@@ -12,12 +12,12 @@ let contains_substring ~needle haystack =
   n = 0 || loop 0
 ;;
 
-let test_sdk_error_is_hard_quota_detects_gemini_cli_network_wrapper () =
+let test_sdk_error_is_hard_quota_detects_cli_tool_b_network_wrapper () =
   let err =
     Agent_sdk.Error.Api
       (Llm_provider.Retry.NetworkError
          { message =
-             "gemini exited with code 1: TerminalQuotaError: You have exhausted your \
+             "provider_f exited with code 1: TerminalQuotaError: You have exhausted your \
               capacity on this model. Your quota will reset after 4h41m7s. \
               reason=QUOTA_EXHAUSTED"
          ; kind = Llm_provider.Http_client.Unknown
@@ -34,7 +34,7 @@ let test_sdk_error_is_hard_quota_detects_claude_cli_limit_wrapper () =
     Agent_sdk.Error.Api
       (Llm_provider.Retry.NetworkError
          { message =
-             "claude exited with code 1: \
+             "agent_llm_a exited with code 1: \
               {\"type\":\"result\",\"subtype\":\"success\",\"is_error\":true,\"api_error_status\":429,\"result\":\"You've \
               hit your limit · resets Apr 24 at 4am (Asia/Seoul)\"}"
          ; kind = Llm_provider.Http_client.Unknown
@@ -51,7 +51,7 @@ let test_sdk_error_is_hard_quota_detects_claude_org_monthly_limit_wrapper () =
     Agent_sdk.Error.Api
       (Llm_provider.Retry.NetworkError
          { message =
-             "claude exited with code 1: \
+             "agent_llm_a exited with code 1: \
               {\"type\":\"result\",\"subtype\":\"success\",\"is_error\":true,\"api_error_status\":429,\"result\":\"You've \
               hit your org's monthly usage limit\"}"
          ; kind = Llm_provider.Http_client.Unknown
@@ -71,7 +71,7 @@ let test_sdk_error_is_hard_quota_detects_claude_specified_limit_cli_wrapper () =
     Agent_sdk.Error.Api
       (Llm_provider.Retry.NetworkError
          { message =
-             "claude exited with code 1: API Error: 400 \
+             "agent_llm_a exited with code 1: API Error: 400 \
               {\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"You \
               have reached your specified API usage limits. You will regain access on \
               2026-05-01 at 00:00 UTC.\"}}"
@@ -104,7 +104,7 @@ let test_sdk_error_is_max_turns_detects_claude_cli_wrapper () =
     Agent_sdk.Error.Api
       (Llm_provider.Retry.NetworkError
          { message =
-             "claude exited with code 1: \
+             "agent_llm_a exited with code 1: \
               {\"type\":\"result\",\"subtype\":\"error_max_turns\",\"is_error\":true,\"terminal_reason\":\"max_turns\",\"errors\":[\"Reached \
               maximum number of turns (10)\"]}"
          ; kind = Llm_provider.Http_client.Unknown
@@ -124,7 +124,7 @@ let test_sdk_error_is_hard_quota_keeps_transient_network_errors_false () =
   let err =
     Agent_sdk.Error.Api
       (Llm_provider.Retry.NetworkError
-         { message = "gemini exited with code 1: connection reset by peer"
+         { message = "provider_f exited with code 1: connection reset by peer"
          ; kind = Llm_provider.Http_client.Connection_refused
          })
   in
@@ -190,7 +190,7 @@ let test_sdk_error_to_cascade_outcome_keeps_invalid_request_as_400 () =
 ;;
 
 let test_sdk_error_to_cascade_outcome_cascades_model_access_denied () =
-  let message = "Invalid request: You do not have permission to access glm-5-code" in
+  let message = "Invalid request: You do not have permission to access provider_k-5-code" in
   let err = Agent_sdk.Error.Api (Llm_provider.Retry.InvalidRequest { message }) in
   match Keeper_turn_driver.sdk_error_to_cascade_outcome err with
   | Some
@@ -205,7 +205,7 @@ let test_sdk_error_to_cascade_outcome_cascades_model_access_denied () =
     Alcotest.(check bool)
       "failed model name visible"
       true
-      (contains_substring ~needle:"glm-5-code" actual_message);
+      (contains_substring ~needle:"provider_k-5-code" actual_message);
     Alcotest.(check bool)
       "model access denial cascades"
       true
@@ -221,7 +221,7 @@ let test_sdk_error_is_model_access_denied_predicate () =
   let denied =
     Agent_sdk.Error.Api
       (Llm_provider.Retry.InvalidRequest
-         { message = "Invalid request: You do not have permission to access glm-5-code" })
+         { message = "Invalid request: You do not have permission to access provider_k-5-code" })
   in
   let ordinary =
     Agent_sdk.Error.Api
@@ -238,7 +238,7 @@ let test_sdk_error_is_model_access_denied_predicate () =
 ;;
 
 let test_sdk_error_to_cascade_outcome_cascades_runtime_mcp_auth_config () =
-  let detail = "codex_cli runtime MCP cannot carry keeper-bound auth headers" in
+  let detail = "cli_tool_a runtime MCP cannot carry keeper-bound auth headers" in
   let err =
     Agent_sdk.Error.Config
       (Agent_sdk.Error.InvalidConfig { field = "runtime_mcp_auth"; detail })
@@ -347,7 +347,7 @@ let cases =
   [ Alcotest.test_case
       "sdk_error_is_hard_quota detects Gemini CLI wrapper"
       `Quick
-      test_sdk_error_is_hard_quota_detects_gemini_cli_network_wrapper
+      test_sdk_error_is_hard_quota_detects_cli_tool_b_network_wrapper
   ; Alcotest.test_case
       "sdk_error_is_hard_quota detects Claude CLI limit wrapper"
       `Quick

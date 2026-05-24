@@ -109,7 +109,7 @@ let test_cascade_output_cap_not_context_window () =
   with_temp_cascade_toml
     {|
 [providers.remote]
-protocol = "openai-http"
+protocol = "provider_d-http"
 endpoint = "https://example.test/v1"
 
 [models.long]
@@ -140,7 +140,7 @@ let test_public_cap_helper_clamps_caller_override_to_cascade_ceiling () =
   with_temp_cascade_toml
     {|
 [providers.remote]
-protocol = "openai-http"
+protocol = "provider_d-http"
 endpoint = "https://example.test/v1"
 
 [models.narrow]
@@ -177,48 +177,48 @@ target = "tier.primary"
 let test_resolve_max_tokens_caps_automatic_value_to_cascade_ceiling () =
   with_temp_cascade_toml
     {|
-[providers.claude_code]
-protocol = "anthropic-cli"
-command = "claude"
+[providers.cli_tool_d]
+protocol = "provider_a-cli"
+command = "agent_llm_a"
 is-non-interactive = true
 
-[providers.kimi_cli]
-protocol = "kimi-cli"
-command = "kimi"
+[providers.cli_tool_c]
+protocol = "provider_c-cli"
+command = "provider_c"
 is-non-interactive = true
 
-[models.claude-auto]
+[models.agent_llm_a-auto]
 api-name = "auto"
 max-context = 200000
 tools-support = true
 
-[models.claude-auto.capabilities]
+[models.agent_llm_a-auto.capabilities]
 max-output-tokens = 64000
 
-[models.kimi-cli-coding]
-api-name = "kimi-for-coding"
+[models.provider_c-cli-coding]
+api-name = "model-c-coding"
 max-context = 128000
 tools-support = true
 
-[models.kimi-cli-coding.capabilities]
+[models.provider_c-cli-coding.capabilities]
 max-output-tokens = 16384
 
-[claude_code.claude-auto]
+[cli_tool_d.agent_llm_a-auto]
 max-concurrent = 1
 
-[kimi_cli.kimi-cli-coding]
+[cli_tool_c.provider_c-cli-coding]
 max-concurrent = 1
 
-[claude_code.claude-auto.tool_candidate]
+[cli_tool_d.agent_llm_a-auto.tool_candidate]
 max-output = 64000
 temperature = 0.2
 
-[kimi_cli.kimi-cli-coding.tool_candidate]
+[cli_tool_c.provider_c-cli-coding.tool_candidate]
 max-output = 64000
 temperature = 0.2
 
 [tier.strict_tool_candidates]
-members = ["claude_code.claude-auto.tool_candidate", "kimi_cli.kimi-cli-coding.tool_candidate"]
+members = ["cli_tool_d.agent_llm_a-auto.tool_candidate", "cli_tool_c.provider_c-cli-coding.tool_candidate"]
 strategy = "failover"
 
 [tier-group.strict_tool_candidates]
@@ -284,34 +284,34 @@ let test_auto_max_tokens_clamp_warning_dedupes_by_tuple () =
 let test_resolve_provider_derived_max_tokens_matches_failover_ceiling () =
   with_temp_cascade_toml
     {|
-[providers.claude_code]
-protocol = "anthropic-cli"
-command = "claude"
+[providers.cli_tool_d]
+protocol = "provider_a-cli"
+command = "agent_llm_a"
 is-non-interactive = true
 
-[providers.kimi_cli]
-protocol = "kimi-cli"
-command = "kimi"
+[providers.cli_tool_c]
+protocol = "provider_c-cli"
+command = "provider_c"
 is-non-interactive = true
 
 [providers.ollama]
 protocol = "ollama-http"
 endpoint = "http://localhost:11434"
 
-[models.claude-auto]
+[models.agent_llm_a-auto]
 api-name = "auto"
 max-context = 200000
 tools-support = true
 
-[models.claude-auto.capabilities]
+[models.agent_llm_a-auto.capabilities]
 max-output-tokens = 64000
 
-[models.kimi-cli-coding]
-api-name = "kimi-for-coding"
+[models.provider_c-cli-coding]
+api-name = "model-c-coding"
 max-context = 128000
 tools-support = true
 
-[models.kimi-cli-coding.capabilities]
+[models.provider_c-cli-coding.capabilities]
 max-output-tokens = 16384
 
 [models.local-recovery]
@@ -322,20 +322,20 @@ tools-support = true
 [models.local-recovery.capabilities]
 max-output-tokens = 8192
 
-[claude_code.claude-auto]
+[cli_tool_d.agent_llm_a-auto]
 max-concurrent = 1
 
-[kimi_cli.kimi-cli-coding]
+[cli_tool_c.provider_c-cli-coding]
 max-concurrent = 1
 
 [ollama.local-recovery]
 max-concurrent = 1
 
-[claude_code.claude-auto.tool_candidate]
+[cli_tool_d.agent_llm_a-auto.tool_candidate]
 max-output = 64000
 temperature = 0.2
 
-[kimi_cli.kimi-cli-coding.tool_candidate]
+[cli_tool_c.provider_c-cli-coding.tool_candidate]
 max-output = 16384
 temperature = 0.2
 
@@ -344,7 +344,7 @@ max-output = 8192
 temperature = 0.2
 
 [tier.strict_tool_candidates]
-members = ["claude_code.claude-auto.tool_candidate", "kimi_cli.kimi-cli-coding.tool_candidate"]
+members = ["cli_tool_d.agent_llm_a-auto.tool_candidate", "cli_tool_c.provider_c-cli-coding.tool_candidate"]
 strategy = "failover"
 
 [tier.local_recovery]
@@ -379,15 +379,15 @@ let test_resolve_tier_group_max_tokens_uses_model_capability_ceiling () =
   with_temp_cascade_toml
     {|
 [providers.runpod_mtp]
-protocol = "openai-http"
+protocol = "provider_d-http"
 endpoint = "https://example.test/v1"
 
-[providers.glm-coding]
-protocol = "openai-http"
-endpoint = "https://glm.example.test/v1"
+[providers.provider_k-coding]
+protocol = "provider_d-http"
+endpoint = "https://provider_k.example.test/v1"
 
 [models.qwen36-mtp]
-api-name = "qwen"
+api-name = "provider_h"
 max-context = 160000
 tools-support = true
 
@@ -395,12 +395,12 @@ tools-support = true
 max-output-tokens = 8192
 supports-tool-choice = true
 
-[models.glm-turbo]
-api-name = "glm-5-turbo"
+[models.provider_k-turbo]
+api-name = "provider_k-5-turbo"
 max-context = 128000
 tools-support = true
 
-[models.glm-turbo.capabilities]
+[models.provider_k-turbo.capabilities]
 max-output-tokens = 16384
 supports-tool-choice = true
 
@@ -410,15 +410,15 @@ is-default = true
 [runpod_mtp.qwen36-mtp.keeper]
 temperature = 0.3
 
-[glm-coding.glm-turbo]
+[provider_k-coding.provider_k-turbo]
 is-default = true
 
-[glm-coding.glm-turbo.keeper]
+[provider_k-coding.provider_k-turbo.keeper]
 max-output = 16384
 temperature = 0.3
 
 [tier.strict_tool_candidates]
-members = ["runpod_mtp.qwen36-mtp.keeper", "glm-coding.glm-turbo.keeper"]
+members = ["runpod_mtp.qwen36-mtp.keeper", "provider_k-coding.provider_k-turbo.keeper"]
 strategy = "failover"
 
 [tier-group.strict_tool_candidates]

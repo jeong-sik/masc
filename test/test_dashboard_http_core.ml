@@ -684,7 +684,7 @@ let test_dashboard_shell_auth_json_canonicalizes_token_owner () =
     { Masc_domain.default_auth_config with enabled = true; require_token = true }
   in
   Auth.save_auth_config config.base_path cfg;
-  match Auth.create_token config.base_path ~agent_name:"codex" ~role:Masc_domain.Worker with
+  match Auth.create_token config.base_path ~agent_name:"agent_code" ~role:Masc_domain.Worker with
   | Error e -> fail (Masc_domain.masc_error_to_string e)
   | Ok (raw_token, _) ->
       let json =
@@ -702,9 +702,9 @@ let test_dashboard_shell_auth_json_canonicalizes_token_owner () =
       check bool "token_valid true" true (auth |> member "token_valid" |> to_bool);
       check string "requested actor surfaced" "dashboard"
         (auth |> member "requested_agent" |> to_string);
-      check string "token owner surfaced" "codex"
+      check string "token owner surfaced" "agent_code"
         (auth |> member "token_agent" |> to_string);
-      check string "effective actor canonicalized to token owner" "codex"
+      check string "effective actor canonicalized to token owner" "agent_code"
         (auth |> member "effective_agent" |> to_string);
       check bool "auth error cleared after canonicalization" true
         (match auth |> member "auth_error_code" with `Null -> true | _ -> false);
@@ -771,7 +771,7 @@ let test_execution_actor_for_request_canonicalizes_token_owner () =
     { Masc_domain.default_auth_config with enabled = true; require_token = true }
   in
   Auth.save_auth_config config.base_path cfg;
-  match Auth.create_token config.base_path ~agent_name:"codex" ~role:Masc_domain.Worker with
+  match Auth.create_token config.base_path ~agent_name:"agent_code" ~role:Masc_domain.Worker with
   | Error e -> fail (Masc_domain.masc_error_to_string e)
   | Ok (raw_token, _) ->
       let actor =
@@ -784,7 +784,7 @@ let test_execution_actor_for_request_canonicalizes_token_owner () =
              ])
       in
       check (option string) "execution actor canonicalized to token owner"
-        (Some "codex") actor
+        (Some "agent_code") actor
 
 let test_verifier_of_request_canonicalizes_token_owner () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
@@ -792,7 +792,7 @@ let test_verifier_of_request_canonicalizes_token_owner () =
     { Masc_domain.default_auth_config with enabled = true; require_token = true }
   in
   Auth.save_auth_config config.base_path cfg;
-  match Auth.create_token config.base_path ~agent_name:"codex" ~role:Masc_domain.Worker with
+  match Auth.create_token config.base_path ~agent_name:"agent_code" ~role:Masc_domain.Worker with
   | Error e -> fail (Masc_domain.masc_error_to_string e)
   | Ok (raw_token, _) ->
       let verifier =
@@ -805,7 +805,7 @@ let test_verifier_of_request_canonicalizes_token_owner () =
              ])
       in
       check string "verification verifier canonicalized to token owner"
-        "operator:codex" verifier
+        "operator:agent_code" verifier
 
 let test_dashboard_message_json_surfaces_temporal_decay_fields () =
   let message : Types.message =
@@ -958,9 +958,9 @@ let test_dashboard_shell_light_counts_agents_from_summary_fields () =
         ; "last_seen", `String "2026-05-20T00:00:00Z"
         ])
   in
-  write_agent ~name:"codex-active" ~agent_type:"codex" ~status:"active";
+  write_agent ~name:"agent_code-active" ~agent_type:"agent_code" ~status:"active";
   write_agent ~name:"keeper-active" ~agent_type:"keeper" ~status:"busy";
-  write_agent ~name:"codex-inactive" ~agent_type:"codex" ~status:"inactive";
+  write_agent ~name:"agent_code-inactive" ~agent_type:"agent_code" ~status:"inactive";
   let json =
     Lib.Server_dashboard_http_core.dashboard_shell_http_json ~light:true config
   in

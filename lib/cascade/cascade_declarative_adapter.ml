@@ -232,7 +232,7 @@ let provider_config_from_declared_provider
          let custom_headers = Option.value ~default:[] provider.headers in
          (* TOML-declared custom headers override generated auth headers by key.
             This allows operators to set provider-specific headers (e.g.
-            anthropic-version) while preserving auth and Content-Type. *)
+            provider_a-version) while preserving auth and Content-Type. *)
          let custom_keys = List.map fst custom_headers in
          let headers =
            custom_headers @ List.filter (fun (k, _) -> not (List.mem k custom_keys)) auth_headers

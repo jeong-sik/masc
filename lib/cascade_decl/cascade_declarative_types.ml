@@ -211,8 +211,8 @@ type cascade_model_capabilities =
     (** True when the provider's standard response carries
           [input_tokens]/[output_tokens] (direct APIs like Anthropic,
           OpenAI, Gemini, Kimi-API, GLM, Ollama). False for CLI-class
-          wrappers that strip usage before returning (codex_cli,
-          gemini_cli, kimi_cli). Default-true matches OAS. *)
+          wrappers that strip usage before returning (cli_tool_a,
+          cli_tool_b, cli_tool_c). Default-true matches OAS. *)
   ; (* Advanced modalities *)
     supports_computer_use : bool
   }
@@ -271,17 +271,17 @@ type cascade_model_spec =
           [model_id] starts with [p].
 
           Single-spec example: [\[models.sonnet\]] with [api-name =
-          "claude-sonnet-4-6"] and [match-prefixes = []] matches only
-          [claude-sonnet-4-6]. Family example: [\[models.sonnet-family\]]
-          with [match-prefixes = ["claude-sonnet-4"]] matches every
-          [claude-sonnet-4-*] release.
+          "model-a-sonnet"] and [match-prefixes = []] matches only
+          [model-a-sonnet]. Family example: [\[models.sonnet-family\]]
+          with [match-prefixes = ["model-a-sonnet"]] matches every
+          [model-a-sonnet*] release.
 
           Longest-prefix-first resolves precedence without an explicit
-          priority field: [match-prefixes = ["glm-5-turbo"]] beats
-          [match-prefixes = ["glm-5"]] because the former is longer.
+          priority field: [match-prefixes = ["provider_k-5-turbo"]] beats
+          [match-prefixes = ["provider_k-5"]] because the former is longer.
           Mirrors the implicit ordering of OAS's if/elsif tree
-          ([starts_with "glm-5-turbo"] checked before [starts_with
-          "glm-5"]). *)
+          ([starts_with "provider_k-5-turbo"] checked before [starts_with
+          "provider_k-5"]). *)
   }
 [@@deriving show, eq]
 

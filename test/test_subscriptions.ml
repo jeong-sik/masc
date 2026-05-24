@@ -36,17 +36,17 @@ let test_change_type_to_string () =
 (** Subscription tests *)
 let test_subscribe () =
   let sub = Subscriptions.SubscriptionStore.subscribe
-    ~subscriber:"claude"
+    ~subscriber:"agent_llm_a"
     ~resource:Subscriptions.Tasks
     () in
   check bool "has id" true (String.length sub.id > 0);
-  check string "subscriber" "claude" sub.subscriber;
+  check string "subscriber" "agent_llm_a" sub.subscriber;
   check bool "resource is Tasks" true (sub.resource = Subscriptions.Tasks);
   check (option string) "no filter" None sub.filter
 
 let test_subscribe_with_filter () =
   let sub = Subscriptions.SubscriptionStore.subscribe
-    ~subscriber:"gemini"
+    ~subscriber:"provider_f"
     ~resource:Subscriptions.Tasks
     ~filter:"task-001"
     () in
@@ -54,7 +54,7 @@ let test_subscribe_with_filter () =
 
 let test_unsubscribe () =
   let sub = Subscriptions.SubscriptionStore.subscribe
-    ~subscriber:"codex"
+    ~subscriber:"agent_code"
     ~resource:Subscriptions.Messages
     () in
   let id = sub.id in

@@ -87,7 +87,7 @@ let with_config_dir f =
       write_file
         cascade_path
         {|[providers.custom]
-protocol = "openai-http"
+protocol = "provider_d-http"
 endpoint = "http://127.0.0.1:9/v1"
 
 [models.mock]
@@ -1196,7 +1196,7 @@ goal = "orphan"
 (* PR-3b1: canonicalize_if_keeper redirects bare lookup names to
    their [keeper-<n>-agent] canonical form when the name belongs to
    a configured keeper, leaving non-keeper credentials (dashboard,
-   admin, codex-mcp-client, ...) untouched. Spec: AuthIdentityFSM
+   admin, agent_code-mcp-client, ...) untouched. Spec: AuthIdentityFSM
    I1 IdentityBindsToken. *)
 let test_canonicalize_if_keeper () =
   with_temp_dir "canonicalize-room" @@ fun room_dir ->
@@ -1223,9 +1223,9 @@ goal = "test goal"
   check string "non-keeper name (admin) passes through untouched"
     "admin"
     (Keeper_runtime.canonicalize_if_keeper config "admin");
-  check string "non-keeper name (codex-mcp-client) passes through untouched"
-    "codex-mcp-client"
-    (Keeper_runtime.canonicalize_if_keeper config "codex-mcp-client")
+  check string "non-keeper name (agent_code-mcp-client) passes through untouched"
+    "agent_code-mcp-client"
+    (Keeper_runtime.canonicalize_if_keeper config "agent_code-mcp-client")
 
 let () =
   run "Keeper_runtime config SSOT resync"

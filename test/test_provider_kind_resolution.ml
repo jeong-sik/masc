@@ -1,5 +1,5 @@
 (** Tests for [Provider_kind_resolver] and the cascade parser's
-    use of it. Covers issue #8159: ["gemini:gemini-3-flash-preview"] must
+    use of it. Covers issue #8159: ["provider_f:provider_f-3-flash-preview"] must
     resolve to [Gemini], never silently flatten to [OpenAI_compat]. *)
 
 open Alcotest
@@ -31,46 +31,46 @@ let kind_testable : Pk.provider_kind testable =
 (* ────────────────────────────────────────────────────────────────── *)
 
 let test_gemini_prefix_resolves_to_gemini () =
-  match Resolver.resolve "gemini:gemini-3-flash-preview" with
+  match Resolver.resolve "provider_f:provider_f-3-flash-preview" with
   | Registered { provider_name; model_id; kind } ->
-    check string "provider_name" "gemini" provider_name;
-    check string "model_id" "gemini-3-flash-preview" model_id;
+    check string "provider_name" "provider_f" provider_name;
+    check string "model_id" "provider_f-3-flash-preview" model_id;
     check kind_testable "kind is Gemini" Pk.Gemini kind
-  | Custom_url _ -> fail "gemini: resolved to Custom_url"
-  | Unknown msg -> fail ("gemini: resolved to Unknown: " ^ msg)
+  | Custom_url _ -> fail "provider_f: resolved to Custom_url"
+  | Unknown msg -> fail ("provider_f: resolved to Unknown: " ^ msg)
 
 let test_openai_compat_prefix_not_misrouted () =
-  (* Registered OpenAI_compat-kind providers (openrouter/groq/deepseek)
+  (* Registered OpenAI_compat-kind providers (openrouter/provider_i/provider_g)
      must resolve to OpenAI_compat. Guards against the inverse mistake
-     of flipping everything to Gemini, and guards that "openai" is NOT
+     of flipping everything to Gemini, and guards that "provider_d" is NOT
      a registered provider name (historically a point of confusion). *)
-  (match Resolver.resolve "openrouter:anthropic/claude-3.5" with
+  (match Resolver.resolve "openrouter:provider_a/model-a-sonnet" with
    | Registered { kind; _ } ->
      check kind_testable "openrouter kind is OpenAI_compat" Pk.OpenAI_compat kind
    | Custom_url _ -> fail "openrouter: resolved to Custom_url"
    | Unknown msg -> fail ("openrouter: resolved to Unknown: " ^ msg));
-  (* "openai" is NOT in the registry — it must return Unknown, not be
+  (* "provider_d" is NOT in the registry — it must return Unknown, not be
      silently mapped to any kind. This is the fail-closed contract. *)
-  match Resolver.resolve "openai:gpt-4o" with
+  match Resolver.resolve "provider_d:model-d" with
   | Unknown _ -> ()
-  | Registered _ -> fail "openai: silently registered (should be Unknown)"
-  | Custom_url _ -> fail "openai: silently treated as custom"
+  | Registered _ -> fail "provider_d: silently registered (should be Unknown)"
+  | Custom_url _ -> fail "provider_d: silently treated as custom"
 
 let test_claude_prefix_resolves_to_anthropic () =
-  match Resolver.resolve "claude:claude-haiku-4-5-20251001" with
+  match Resolver.resolve "agent_llm_a:model-a-haiku" with
   | Registered { kind; _ } ->
     check kind_testable "kind is Anthropic" Pk.Anthropic kind
-  | Custom_url _ -> fail "claude: resolved to Custom_url"
-  | Unknown msg -> fail ("claude: resolved to Unknown: " ^ msg)
+  | Custom_url _ -> fail "agent_llm_a: resolved to Custom_url"
+  | Unknown msg -> fail ("agent_llm_a: resolved to Unknown: " ^ msg)
 
 let test_kimi_prefix_resolves_to_kimi () =
-  match Resolver.resolve "kimi:kimi-for-coding" with
+  match Resolver.resolve "provider_c:model-c-coding" with
   | Registered { provider_name; model_id; kind } ->
-    check string "provider_name" "kimi" provider_name;
-    check string "model_id preserved" "kimi-for-coding" model_id;
+    check string "provider_name" "provider_c" provider_name;
+    check string "model_id preserved" "model-c-coding" model_id;
     check kind_testable "kind is Kimi" Pk.Kimi kind
-  | Custom_url _ -> fail "kimi: resolved to Custom_url"
-  | Unknown msg -> fail ("kimi: resolved to Unknown: " ^ msg)
+  | Custom_url _ -> fail "provider_c: resolved to Custom_url"
+  | Unknown msg -> fail ("provider_c: resolved to Unknown: " ^ msg)
 
 let test_unknown_vendor_returns_unknown () =
   (* Anti-pattern guard: unknown prefix must NOT fall through to
@@ -98,9 +98,9 @@ let test_custom_prefix_resolves_to_custom_url () =
   | Unknown msg -> fail ("custom: resolved to Unknown: " ^ msg)
 
 let test_kind_of_spec_api () =
-  check (option kind_testable) "gemini kind via helper"
+  check (option kind_testable) "provider_f kind via helper"
     (Some Pk.Gemini)
-    (Resolver.kind_of_spec "gemini:gemini-3-flash-preview");
+    (Resolver.kind_of_spec "provider_f:provider_f-3-flash-preview");
   check (option kind_testable) "unknown returns None"
     None
     (Resolver.kind_of_spec "unknownvendor:foo")
@@ -112,7 +112,7 @@ let test_kind_of_spec_api () =
 let test_cascade_parse_gemini_preserves_kind () =
   (* End-to-end: the exact spec from issue #8159 must yield kind=Gemini
      after going through Cascade_config.parse_model_string. *)
-  match Cascade.parse_model_string "gemini:gemini-3-flash-preview" with
+  match Cascade.parse_model_string "provider_f:provider_f-3-flash-preview" with
   | None ->
     (* parse_model_string returns None when the provider is not
        available (missing GEMINI_API_KEY env var in test env). In that
@@ -120,12 +120,12 @@ let test_cascade_parse_gemini_preserves_kind () =
        classification; accept None here. *)
     check bool "resolver confirms Gemini kind when provider unavailable"
       true
-      (Resolver.kind_of_spec "gemini:gemini-3-flash-preview"
+      (Resolver.kind_of_spec "provider_f:provider_f-3-flash-preview"
        = Some Pk.Gemini)
   | Some cfg ->
     check kind_testable "cfg.kind is Gemini (not OpenAI_compat)"
       Pk.Gemini cfg.kind;
-    check string "cfg.model_id" "gemini-3-flash-preview" cfg.model_id
+    check string "cfg.model_id" "provider_f-3-flash-preview" cfg.model_id
 
 let test_cascade_parse_unknown_returns_none () =
   match Cascade.parse_model_string "unknownvendor:foo" with
@@ -145,12 +145,12 @@ let test_cascade_parse_custom_v1_base_url_dedupes_request_path () =
 
 let test_cascade_parse_kimi_uses_oas_registry_defaults () =
   with_env "KIMI_API_KEY" (Some "dummy-key") (fun () ->
-      match Cascade.parse_model_string "kimi:kimi-for-coding" with
-      | None -> fail "kimi should parse when KIMI_API_KEY is set"
+      match Cascade.parse_model_string "provider_c:model-c-coding" with
+      | None -> fail "provider_c should parse when KIMI_API_KEY is set"
       | Some cfg ->
         check kind_testable "cfg.kind is Kimi" Pk.Kimi cfg.kind;
         check string "request path from OAS registry" "/v1/messages" cfg.request_path;
-        check string "base url from OAS registry" "https://api.kimi.com/coding" cfg.base_url)
+        check string "base url from OAS registry" "https://api.provider_c.com/coding" cfg.base_url)
 
 (* ────────────────────────────────────────────────────────────────── *)
 (* Suite                                                              *)
@@ -160,11 +160,11 @@ let () =
   run "provider_kind_resolution" [
     ( "resolver",
       [
-        test_case "gemini: -> Gemini" `Quick test_gemini_prefix_resolves_to_gemini;
-        test_case "openrouter: -> OpenAI_compat; openai: -> Unknown" `Quick
+        test_case "provider_f: -> Gemini" `Quick test_gemini_prefix_resolves_to_gemini;
+        test_case "openrouter: -> OpenAI_compat; provider_d: -> Unknown" `Quick
           test_openai_compat_prefix_not_misrouted;
-        test_case "claude: -> Anthropic" `Quick test_claude_prefix_resolves_to_anthropic;
-        test_case "kimi: -> Kimi" `Quick
+        test_case "agent_llm_a: -> Anthropic" `Quick test_claude_prefix_resolves_to_anthropic;
+        test_case "provider_c: -> Kimi" `Quick
           test_kimi_prefix_resolves_to_kimi;
         test_case "unknown vendor -> Unknown (no OpenAI_compat fallback)" `Quick
           test_unknown_vendor_returns_unknown;

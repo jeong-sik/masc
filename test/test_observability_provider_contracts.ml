@@ -55,29 +55,29 @@ let resolution_provenance =
 let test_dashboard_provider_snapshots_include_cli_and_api () =
   Eio_main.run (fun _env ->
     let open Masc_mcp.Dashboard_provider_runs in
-    let claude_cli = provider_snapshot_by_name "claude_code" in
-    let claude_api = provider_snapshot_by_name "claude" in
-    let gemini_cli = provider_snapshot_by_name "gemini_cli" in
-    let glm_api = provider_snapshot_by_name "glm" in
-    let glm_coding = provider_snapshot_by_name "glm-coding" in
-    let legacy_claude_api = provider_snapshot_by_name "claude-api" in
-    let legacy_glm_api = provider_snapshot_by_name "glm-api" in
+    let claude_cli = provider_snapshot_by_name "cli_tool_d" in
+    let claude_api = provider_snapshot_by_name "agent_llm_a" in
+    let cli_tool_b = provider_snapshot_by_name "cli_tool_b" in
+    let glm_api = provider_snapshot_by_name "provider_k" in
+    let glm_coding = provider_snapshot_by_name "provider_k-coding" in
+    let legacy_claude_api = provider_snapshot_by_name "agent_llm_a-api" in
+    let legacy_glm_api = provider_snapshot_by_name "provider_k-api" in
     check bool "cli snapshot present" true (Option.is_some claude_cli);
     check bool "api snapshot present" true (Option.is_some claude_api);
-    check bool "gemini cli snapshot present" true (Option.is_some gemini_cli);
-    check bool "glm api snapshot present" true (Option.is_some glm_api);
-    check bool "glm coding snapshot present" true (Option.is_some glm_coding);
-    check bool "legacy claude-api snapshot removed" false
+    check bool "provider_f cli snapshot present" true (Option.is_some cli_tool_b);
+    check bool "provider_k api snapshot present" true (Option.is_some glm_api);
+    check bool "provider_k coding snapshot present" true (Option.is_some glm_coding);
+    check bool "legacy agent_llm_a-api snapshot removed" false
       (Option.is_some legacy_claude_api);
-    check bool "legacy glm-api snapshot removed" false
+    check bool "legacy provider_k-api snapshot removed" false
       (Option.is_some legacy_glm_api);
     check string "cli runtime kind" "cli_agent"
       (Option.get claude_cli).runtime_kind;
     check string "api runtime kind" "direct_api"
       (Option.get claude_api).runtime_kind;
-    check string "glm api runtime kind" "direct_api"
+    check string "provider_k api runtime kind" "direct_api"
       (Option.get glm_api).runtime_kind;
-    check string "glm coding runtime kind" "direct_api"
+    check string "provider_k coding runtime kind" "direct_api"
       (Option.get glm_coding).runtime_kind;
     check string "cli source" "oas/provider-runtime-binding"
       (Option.get claude_cli).source;
@@ -89,13 +89,13 @@ let test_default_registry_populated () =
      Direct access to Llm_provider.Provider_registry types avoided —
      OAS SDK internals are not MASC's contract boundary. *)
   let ctx = Masc_mcp.Cascade_runtime.max_context_of_label
-      "claude:claude-sonnet-4-6" in
+      "agent_llm_a:model-a-sonnet" in
   check bool "registry resolves known provider" true (ctx > 0)
 
 let test_provider_name_of_label () =
   let name = Masc_mcp.Cascade_runtime.provider_name_of_label
-      "claude:claude-sonnet-4-6" in
-  check (option string) "provider name" (Some "claude") name;
+      "agent_llm_a:model-a-sonnet" in
+  check (option string) "provider name" (Some "agent_llm_a") name;
   let no_colon = Masc_mcp.Cascade_runtime.provider_name_of_label
       "just-a-model" in
   check (option string) "no colon returns None" None no_colon;
@@ -104,7 +104,7 @@ let test_provider_name_of_label () =
 
 let test_max_context_of_label () =
   let ctx = Masc_mcp.Cascade_runtime.max_context_of_label
-      "claude:claude-sonnet-4-6" in
+      "agent_llm_a:model-a-sonnet" in
   check bool "max context > 0" true (ctx > 0);
   let fallback = Masc_mcp.Cascade_runtime.max_context_of_label
       "nonexistent:model" in
@@ -139,7 +139,7 @@ let test_resolve_max_cascade_context () =
     (Masc_mcp.Cascade_runtime.resolve_max_cascade_context [ "nocolonlabel" ]);
   (* Known provider with available key returns max context > 0 *)
   let ctx = Masc_mcp.Cascade_runtime.resolve_max_cascade_context
-      [ "claude:claude-sonnet-4-6" ] in
+      [ "agent_llm_a:model-a-sonnet" ] in
   check bool "known provider returns positive context" true (ctx > 0)
 
 let fake_registry_entry ~name ~max_context ~available =
@@ -174,33 +174,33 @@ let test_resolve_primary_max_context_uses_first_available_label () =
 let test_labels_require_local_discovery () =
   check bool "llama labels refresh local discovery" true
     (Masc_mcp.Cascade_runtime.labels_require_local_discovery
-       [ "llama:auto"; "glm:auto" ]);
+       [ "llama:auto"; "provider_k:auto" ]);
   check bool "mixed non-local labels skip refresh" false
     (Masc_mcp.Cascade_runtime.labels_require_local_discovery
-       [ "glm:auto"; "claude:auto" ]);
+       [ "provider_k:auto"; "agent_llm_a:auto" ]);
   check bool "malformed labels skip refresh" false
     (Masc_mcp.Cascade_runtime.labels_require_local_discovery
-       [ "default"; "glm:auto" ])
+       [ "default"; "provider_k:auto" ])
 
 let test_cascade_model_resolve_unregistered_default_provenance () =
   let resolved =
-    Model_resolve.resolve_auto_model ~getenv:(fun _ -> None) "openai"
+    Model_resolve.resolve_auto_model ~getenv:(fun _ -> None) "provider_d"
       (Model_resolve.model_selector_of_string "auto")
   in
-  check string "openai generic default" "auto" resolved.resolved_model_id;
+  check string "provider_d generic default" "auto" resolved.resolved_model_id;
   check resolution_provenance "unregistered provider provenance"
     Model_resolve.Unresolved_auto resolved.provenance
 
 let test_cascade_model_resolve_env_default_provenance () =
   let getenv = function
-    | "GEMINI_DEFAULT_MODEL" -> Some "gemini-3-flash-preview"
+    | "GEMINI_DEFAULT_MODEL" -> Some "provider_f-3-flash-preview"
     | _ -> None
   in
   let resolved =
-    Model_resolve.resolve_auto_model ~getenv "gemini"
+    Model_resolve.resolve_auto_model ~getenv "provider_f"
       (Model_resolve.model_selector_of_string "auto")
   in
-  check string "gemini env default" "gemini-3-flash-preview"
+  check string "provider_f env default" "provider_f-3-flash-preview"
     resolved.resolved_model_id;
   check resolution_provenance "env provenance"
     (Model_resolve.Env_default "GEMINI_DEFAULT_MODEL")

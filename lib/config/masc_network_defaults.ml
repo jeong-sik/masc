@@ -65,7 +65,7 @@ let is_ollama_url url =
     in
     loop 0
 
-(** Sentinel prefix marking a CLI-backed transport (e.g. [cli:codex]).
+(** Sentinel prefix marking a CLI-backed transport (e.g. [cli:agent_code]).
     Used by capacity classifiers to distinguish CLI endpoints from HTTP
     ones. *)
 let cli_sentinel_prefix = "cli:"

@@ -97,7 +97,7 @@ let test_join_uses_default_namespace () =
           Atomic.set Coord_hooks.observe_agent_lifecycle_fn (fun _config ~agent_id:_ ~event ~details:_ ->
               captured_event_kind := Some (Coord_hooks.agent_lifecycle_event_to_string event));
           let result =
-            Coord.join config ~agent_name:"claude"
+            Coord.join config ~agent_name:"agent_llm_a"
               ~capabilities:[ "debug" ] ()
           in
           check bool "join succeeds" true

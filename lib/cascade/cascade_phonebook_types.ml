@@ -28,20 +28,20 @@ let flavor_of_string = function
   | "llama-cpp" -> Llama_cpp
   | "ollama" -> Ollama
   | "vllm" -> Vllm
-  | "openai" -> Openai
-  | "deepseek" -> Deep_seek
-  | "zai-glm" -> Zai_glm
-  | "qwen" -> Qwen
+  | "provider_d" -> Openai
+  | "provider_g" -> Deep_seek
+  | "zai-provider_k" -> Zai_glm
+  | "provider_h" -> Qwen
   | s -> failwith (Printf.sprintf "Unknown server flavor: %s" s)
 
 let flavor_to_string = function
   | Llama_cpp -> "llama-cpp"
   | Ollama -> "ollama"
   | Vllm -> "vllm"
-  | Openai -> "openai"
-  | Deep_seek -> "deepseek"
-  | Zai_glm -> "zai-glm"
-  | Qwen -> "qwen"
+  | Openai -> "provider_d"
+  | Deep_seek -> "provider_g"
+  | Zai_glm -> "zai-provider_k"
+  | Qwen -> "provider_h"
 
 (* ── Protocol ────────────────────────────────────────────────── *)
 
@@ -53,17 +53,17 @@ type cascade_protocol =
 [@@deriving show, eq]
 
 let protocol_of_string = function
-  | "openai-http" -> Openai_http
+  | "provider_d-http" -> Openai_http
   | "ollama-http" -> Ollama_http
-  | "anthropic-http" -> Anthropic_http
-  | "openai-cli" -> Openai_cli
+  | "provider_a-http" -> Anthropic_http
+  | "provider_d-cli" -> Openai_cli
   | s -> failwith (Printf.sprintf "Unknown protocol: %s" s)
 
 let protocol_to_string = function
-  | Openai_http -> "openai-http"
+  | Openai_http -> "provider_d-http"
   | Ollama_http -> "ollama-http"
-  | Anthropic_http -> "anthropic-http"
-  | Openai_cli -> "openai-cli"
+  | Anthropic_http -> "provider_a-http"
+  | Openai_cli -> "provider_d-cli"
 
 (* ── Provider ────────────────────────────────────────────────── *)
 

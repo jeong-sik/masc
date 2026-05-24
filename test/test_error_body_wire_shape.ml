@@ -55,7 +55,7 @@ let test_error_body_echoes_request_id () =
   check json_testable "id echoes back when supplied" expected body
 
 let test_error_body_includes_data_when_supplied () =
-  let data = `Assoc [ ("provider", `String "anthropic"); ("budget_ms", `Int 30000) ] in
+  let data = `Assoc [ ("provider", `String "provider_a"); ("budget_ms", `Int 30000) ] in
   let body =
     R.error_body ~data ~code:C.Provider_timeout "upstream stalled"
   in

@@ -33,19 +33,19 @@ let test_provider_cli_exit_1_cascades () =
   let err = Http_client.AcceptRejected { reason } in
   Alcotest.(check bool)
     "provider CLI exit 1 must cascade — permanent error is provider-local, \
-     next cascade hop (claude/gpt/ollama) unaffected"
+     next cascade hop (agent_llm_a/gpt/ollama) unaffected"
     true
     (Oas_compat.Http_client.should_cascade err)
 
-let test_gemini_cli_startup_crash_cascades () =
+let test_cli_tool_b_startup_crash_cascades () =
   let reason =
-    "gemini_cli startup crash detected (unsettled top-level await / \
+    "cli_tool_b startup crash detected (unsettled top-level await / \
      yoga_wasm). Known bad CLI runtime; rejecting without retry so the \
      cascade can move on."
   in
   let err = Http_client.AcceptRejected { reason } in
   Alcotest.(check bool)
-    "gemini_cli startup crash must cascade — OAS source labels intent \
+    "cli_tool_b startup crash must cascade — OAS source labels intent \
      explicitly ('so the cascade can move on')"
     true
     (Oas_compat.Http_client.should_cascade err)
@@ -65,13 +65,13 @@ let test_provider_cli_startup_crash_cascades () =
 
 let test_does_not_support_still_cascades () =
   (* Regression pin for #9850: the provider-capability-mismatch marker
-     added by codex_cli runtime_mcp_auth / tool_support must keep
+     added by cli_tool_a runtime_mcp_auth / tool_support must keep
      cascading. *)
   let err =
     Http_client.AcceptRejected
       {
         reason =
-          "codex_cli does not support runtime_mcp_auth headers for \
+          "cli_tool_a does not support runtime_mcp_auth headers for \
            masc_plan_set_task, masc_claim_next, masc_transition";
       }
   in
@@ -221,7 +221,7 @@ let test_provider_failure_capacity_cascades () =
             {
               scope = Failure_scope_model;
               retry_after = Some 3.0;
-              model = Some "gemini-3.1-pro-preview";
+              model = Some "provider_f-3.1-pro-preview";
             };
         message = "model overloaded";
       }
@@ -262,7 +262,7 @@ let test_provider_failure_capability_mismatch_cascades () =
     Http_client.ProviderFailure
       {
         kind = Capability_mismatch { capability = Some "runtime_mcp_tools" };
-        message = "gemini_cli cannot receive runtime MCP tools";
+        message = "cli_tool_b cannot receive runtime MCP tools";
       }
   in
   Alcotest.(check bool)
@@ -304,9 +304,9 @@ let test_error_message_baseline () =
               { message = "boom"; kind = Llm_provider.Http_client.Unknown } in
   Alcotest.(check string) "NetworkError -> message"
     "boom" (Oas_compat.Http_client.error_message net);
-  let cli = Http_client.CliTransportRequired { kind = "claude" } in
+  let cli = Http_client.CliTransportRequired { kind = "agent_llm_a" } in
   Alcotest.(check string) "CliTransportRequired -> humanised"
-    "claude provider requires a CLI transport"
+    "agent_llm_a provider requires a CLI transport"
     (Oas_compat.Http_client.error_message cli);
   let acc = Http_client.AcceptRejected { reason = "x" } in
   Alcotest.(check string) "AcceptRejected -> reason"
@@ -328,7 +328,7 @@ let retryable_error_to_string = function
      compile error here, ensuring this helper stays synchronised. *)
 
 let test_classify_accept_rejected_model_unsupported () =
-  let reason = "codex_cli does not support runtime_mcp_auth headers" in
+  let reason = "cli_tool_a does not support runtime_mcp_auth headers" in
   (match Oas_compat.Http_client.classify_accept_rejected reason with
    | Some Oas_compat.Http_client.Model_unsupported -> ()
    | other ->
@@ -349,7 +349,7 @@ let test_classify_accept_rejected_request_rejected () =
 
 let test_classify_accept_rejected_startup_crash () =
   let reason =
-    "gemini_cli startup crash detected (unsettled top-level await / yoga_wasm)"
+    "cli_tool_b startup crash detected (unsettled top-level await / yoga_wasm)"
   in
   (match Oas_compat.Http_client.classify_accept_rejected reason with
    | Some Oas_compat.Http_client.Startup_crash -> ()
@@ -413,8 +413,8 @@ let () =
         [
           Alcotest.test_case "provider_cli exit 1 cascades"
             `Quick test_provider_cli_exit_1_cascades;
-          Alcotest.test_case "gemini_cli startup crash cascades"
-            `Quick test_gemini_cli_startup_crash_cascades;
+          Alcotest.test_case "cli_tool_b startup crash cascades"
+            `Quick test_cli_tool_b_startup_crash_cascades;
           Alcotest.test_case "provider_cli startup crash cascades"
             `Quick test_provider_cli_startup_crash_cascades;
         ] );

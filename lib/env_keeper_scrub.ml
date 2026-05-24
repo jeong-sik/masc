@@ -1,4 +1,4 @@
-(* Exact keys copied from claude-code's GHA_SUBPROCESS_SCRUB list at
+(* Exact keys copied from agent_llm_a-code's GHA_SUBPROCESS_SCRUB list at
    src/utils/subprocessEnv.ts:15-53.
 
    Each group is documented in the reference. Rationale preserved so a

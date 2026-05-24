@@ -18,7 +18,7 @@ let filtered_names filtered =
   List.map (fun ((p : Capability.t), _missing) -> p.provider_name) filtered
 
 let test_unknown_snapshot_is_non_filtering () =
-  let candidate = Capability.unknown ~provider_name:"glm" in
+  let candidate = Capability.unknown ~provider_name:"provider_k" in
   check
     bool_option
     "unknown capability passes through"
@@ -30,7 +30,7 @@ let test_unknown_snapshot_is_non_filtering () =
 let test_known_snapshot_satisfies_required_tools () =
   let candidate =
     Capability.known
-      ~provider_name:"claude"
+      ~provider_name:"agent_llm_a"
       ~satisfying_tools:[ "mcp__masc__keeper_bash"; "keeper_task_claim" ]
       ~tool_choice_support:true
   in
@@ -119,7 +119,7 @@ let test_filter_candidates_preserves_order_and_missing_evidence () =
 let test_skip_reason_manifest_shape () =
   let json =
     Skip_reason.to_yojson
-      ~candidate:"glm"
+      ~candidate:"provider_k"
       (Skip_reason.Required_tool_unsupported { missing = [ "keeper_bash" ] })
   in
   check
@@ -130,7 +130,7 @@ let test_skip_reason_manifest_shape () =
   check
     string
     "candidate"
-    "glm"
+    "provider_k"
     (Yojson.Safe.Util.(json |> member "candidate" |> to_string));
   check
     (list string)

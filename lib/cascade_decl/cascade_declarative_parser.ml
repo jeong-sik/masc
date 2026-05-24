@@ -44,15 +44,15 @@ let partition_results
 
 let api_format_of_protocol (s : string) : (cascade_api_format, string) result =
   match s with
-  | "anthropic-cli" | "anthropic-http" -> Ok Messages_api
-  | "openai-cli" | "openai-http" | "google-cli" | "kimi-cli" ->
+  | "provider_a-cli" | "provider_a-http" -> Ok Messages_api
+  | "provider_d-cli" | "provider_d-http" | "google-cli" | "provider_c-cli" ->
     Ok Chat_completions_api
   | "ollama-http" -> Ok Ollama_api
   | _ ->
     Error
       (Printf.sprintf
-         "unknown protocol %S: expected one of anthropic-cli, anthropic-http, \
-          openai-cli, openai-http, google-cli, kimi-cli, ollama-http"
+         "unknown protocol %S: expected one of provider_a-cli, provider_a-http, \
+          provider_d-cli, provider_d-http, google-cli, provider_c-cli, ollama-http"
          s)
 ;;
 
@@ -138,7 +138,7 @@ let parse_capabilities ~(path : string) (tbl : Otoml.t) : cascade_capabilities =
   ; identity_runtime_mcp_header_keys =
       string_list_field "identity-runtime-mcp-header-keys"
   ; argv_prompt_preflight = b "argv-prompt-preflight"
-  ; uses_anthropic_caching = b "uses-anthropic-caching"
+  ; uses_anthropic_caching = b "uses-provider_a-caching"
   ; max_turns_per_attempt = positive_int_opt_field "max-turns-per-attempt"
   ; tolerates_bound_actor_fallback = b "tolerates-bound-actor-fallback"
   }

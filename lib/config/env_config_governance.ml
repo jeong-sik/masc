@@ -155,7 +155,7 @@ end
 (** {1 Model Routing Defaults} *)
 
 module Model_defaults = struct
-  (** Default cascade label (e.g. "gemini:pro,claude:sonnet"). *)
+  (** Default cascade label (e.g. "provider_f:pro,agent_llm_a:sonnet"). *)
   let default_cascade_opt () =
     Sys.getenv_opt "MASC_DEFAULT_CASCADE" |> trim_opt
 

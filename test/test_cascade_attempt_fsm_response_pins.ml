@@ -25,11 +25,11 @@ let hard_quota_fixtures =
     , true )
   ; ( "anthropic_429_you_hit_limit"
     , {|
-{"type":"error","error":{"type":"error","message":"You've hit your limit for claude-sonnet. Your usage will reset on 2026-05-10."}}
+{"type":"error","error":{"type":"error","message":"You've hit your limit for agent_llm_a-sonnet. Your usage will reset on 2026-05-10."}}
 |}
     , true )
   ; ( "anthropic_429_exit_code_1"
-    , {|claude exited with code 1 {"api_error_status":429,"error":"you've hit your limit for this model"}|}
+    , {|agent_llm_a exited with code 1 {"api_error_status":429,"error":"you've hit your limit for this model"}|}
     , true )
   ; ( "openrouter_quota_exhausted"
     , {|{"error":{"message":"This model's quota is exhausted. Quota will reset after 2026-05-10T00:00:00Z.","type":"insufficient_quota"}}|}
@@ -69,10 +69,10 @@ let test_hard_quota_pins () =
 (* ── Max turns pin tests ───────────────────────────────────────── *)
 
 let max_turns_fixtures =
-  [ ( "claude_code_error_max_turns"
+  [ ( "cli_tool_d_error_max_turns"
     , {|{"subtype":"error_max_turns","cost_usd":0.05,"duration_ms":120000}|}
     , true )
-  ; ( "claude_code_terminal_reason_max_turns"
+  ; ( "cli_tool_d_terminal_reason_max_turns"
     , {|{"terminal_reason":"max_turns","is_error":true}|}
     , true )
   ; "text_max_turns_exceeded", {|Error: max turns exceeded for this session.|}, true

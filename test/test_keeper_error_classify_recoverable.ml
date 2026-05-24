@@ -29,7 +29,7 @@ let make_cascade_exhausted reason =
        { cascade_name = cascade_name "test_cascade"; reason })
 
 let make_capacity_backpressure ?(source = Owne.Client_capacity)
-    ?(detail = "client capacity key glm is full") () =
+    ?(detail = "client capacity key provider_k is full") () =
   Owne.sdk_error_of_masc_internal_error
     (Owne.Capacity_backpressure
        {
@@ -209,7 +209,7 @@ let test_rotation_skips_direct_tier_after_attempted_tier_group () =
   match
     KEC.degraded_rotation_after_recoverable_error
       ~rotation_cascades:
-        [ "tier.strict_tool_candidates"; "tier-group.glm-coding-with-spark" ]
+        [ "tier.strict_tool_candidates"; "tier-group.provider_k-coding-with-spark" ]
       ~base_cascade:"tier-group.strict_tool_candidates"
       ~effective_cascade:"tier-group.strict_tool_candidates"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
@@ -220,7 +220,7 @@ let test_rotation_skips_direct_tier_after_attempted_tier_group () =
     check
       string
       "skip direct tier duplicate"
-      "tier-group.glm-coding-with-spark"
+      "tier-group.provider_k-coding-with-spark"
       retry.next_cascade
   | None -> fail "Expected rotation to skip duplicate direct tier candidate"
 
@@ -238,7 +238,7 @@ let test_required_tool_rotation_prioritizes_tool_route_before_fallback_hint () =
   in
   match
     KEC.degraded_rotation_after_recoverable_error
-      ~rotation_cascades:[ "glm-coding-with-spark"; "strict_tool_candidates" ]
+      ~rotation_cascades:[ "provider_k-coding-with-spark"; "strict_tool_candidates" ]
       ~fallback_hint:"ollama_cloud_stable"
       ~base_cascade:"strict_tool_candidates"
       ~effective_cascade:"strict_tool_candidates"
@@ -247,7 +247,7 @@ let test_required_tool_rotation_prioritizes_tool_route_before_fallback_hint () =
       err
   with
   | Some retry ->
-    check string "tool-required route wins" "glm-coding-with-spark"
+    check string "tool-required route wins" "provider_k-coding-with-spark"
       retry.next_cascade;
     check string "reason is resumable_cli_session" "resumable_cli_session"
       (KEC.degraded_retry_reason_to_string retry.fallback_reason)
@@ -267,12 +267,12 @@ let test_required_tool_rotation_uses_fallback_hint_after_tool_route_attempted ()
   in
   match
     KEC.degraded_rotation_after_recoverable_error
-      ~rotation_cascades:[ "glm-coding-with-spark"; "strict_tool_candidates" ]
+      ~rotation_cascades:[ "provider_k-coding-with-spark"; "strict_tool_candidates" ]
       ~fallback_hint:"ollama_cloud_stable"
       ~base_cascade:"strict_tool_candidates"
       ~effective_cascade:"strict_tool_candidates"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Required
-      ~attempted_cascades:[ "strict_tool_candidates"; "glm-coding-with-spark" ]
+      ~attempted_cascades:[ "strict_tool_candidates"; "provider_k-coding-with-spark" ]
       err
   with
   | Some retry ->

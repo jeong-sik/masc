@@ -168,30 +168,31 @@ let find_agents_by_capability config ~capability =
   let agents_path = agents_dir config in
   if not (Sys.file_exists agents_path) then
     `Assoc [("agents", `List []); ("count", `Int 0)]
-  else begin
-    let matching = ref [] in
-    Sys.readdir agents_path |> Array.iter (fun name ->
-        Coord_query.safe_yield ();
-      if Filename.check_suffix name ".json" then begin
-        let path = Filename.concat agents_path name in
-        match read_agent_with_repair config path with
-        | Ok agent
-          when List.mem capability agent.capabilities
-               && not (is_zombie_agent
-                         ~agent_type:agent.agent_type
-                         ~agent_name:agent.name
-                         agent.last_seen) ->
-            matching := `Assoc [
-              ("name", `String agent.name);
-              ("status", `String (agent_status_to_string agent.status));
-              ("capabilities", `List (List.map (fun s -> `String s) agent.capabilities));
-            ] :: !matching
-        | Ok _ | Error _ -> ()
-      end
-    );
+  else
+    let matching =
+      Sys.readdir agents_path
+      |> Array.to_list
+      |> List.filter_map (fun name ->
+          Coord_query.safe_yield ();
+          if not (Filename.check_suffix name ".json") then None
+          else
+            let path = Filename.concat agents_path name in
+            match read_agent_with_repair config path with
+            | Ok agent
+              when List.mem capability agent.capabilities
+                   && not (is_zombie_agent
+                             ~agent_type:agent.agent_type
+                             ~agent_name:agent.name
+                             agent.last_seen) ->
+                Some (`Assoc [
+                  ("name", `String agent.name);
+                  ("status", `String (agent_status_to_string agent.status));
+                  ("capabilities", `List (List.map (fun s -> `String s) agent.capabilities));
+                ])
+            | Ok _ | Error _ -> None)
+    in
     `Assoc [
       ("capability", `String capability);
-      ("agents", `List (List.rev !matching));
-      ("count", `Int (List.length !matching));
+      ("agents", `List matching);
+      ("count", `Int (List.length matching));
     ]
-  end

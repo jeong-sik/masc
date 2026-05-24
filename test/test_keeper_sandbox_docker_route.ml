@@ -5,7 +5,7 @@
     environment sets
     [MASC_KEEPER_SANDBOX_DOCKER_IMAGE=""], so the response must
     surface the structured "docker image is not configured" error from
-    [Keeper_docker_read] — proof that control reached the docker
+    [Keeper_sandbox_read_backend] — proof that control reached the docker
     route. *)
 
 module Coord = Masc_mcp.Coord

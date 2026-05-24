@@ -12,7 +12,7 @@ module type Backend = sig
     host_path:string ->
     (string, string) result
 
-  val read_file_in_container :
+  val read_file :
     ?turn_sandbox_factory:Keeper_sandbox_factory.t ->
     config:Coord.config ->
     meta:Keeper_types.keeper_meta ->
@@ -22,7 +22,7 @@ module type Backend = sig
     unit ->
     (string, string) result
 
-  val run_command_in_container_with_status :
+  val run_command_with_status :
     ?turn_sandbox_factory:Keeper_sandbox_factory.t ->
     ?ok_exit_codes:int list ->
     config:Coord.config ->
@@ -33,7 +33,7 @@ module type Backend = sig
     unit ->
     (Unix.process_status * string, string) result
 
-  val run_command_in_container :
+  val run_command :
     ?turn_sandbox_factory:Keeper_sandbox_factory.t ->
     ?ok_exit_codes:int list ->
     config:Coord.config ->

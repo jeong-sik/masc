@@ -17,7 +17,7 @@
     (2026-05-12, iter 34 of cron 7493fe21).
 
     This module defines the closed sum so downstream callers
-    ([keeper_docker_read], [keeper_sandbox_runtime],
+    ([keeper_sandbox_read_backend], [keeper_sandbox_runtime],
     [keeper_turn_sandbox_runtime]) can be migrated incrementally to
     [(_, sandbox_error) result] without re-parsing strings. Producer-
     and consumer-side migration is tracked under RFC-0070 Phase 4.1

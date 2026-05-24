@@ -54,7 +54,7 @@ let map_status_to_exec_result
 (* ── Gated spawn (RFC-0070 Phase 4.1-g) ──────────────────────────
    All docker spawns go through {!Masc_exec.Exec_gate} with
    [~actor:`System_task_sandbox], the same actor the keeper sandbox
-   subsystem already uses ([keeper_sandbox_runtime], [keeper_docker_read],
+   subsystem already uses ([keeper_sandbox_runtime], [keeper_sandbox_read_backend],
    [keeper_turn_sandbox_runtime]). Before this phase the [Real] client
    called [Process_eio.run_argv_with_status*] directly, bypassing the
    gate's actor accounting / approval-policy hook — a regression once a

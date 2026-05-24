@@ -35,7 +35,7 @@ module Mock_backend = struct
     Calls.push ("container_path:" ^ host_path);
     Ok ("/container" ^ host_path)
 
-  let read_file_in_container
+  let read_file
       ?turn_sandbox_factory:_
       ~config:_
       ~meta:_
@@ -51,7 +51,7 @@ module Mock_backend = struct
          timeout_sec);
     Ok "mock file body"
 
-  let run_command_in_container_with_status
+  let run_command_with_status
       ?turn_sandbox_factory:_
       ?(ok_exit_codes = [ 0 ])
       ~config:_
@@ -69,7 +69,7 @@ module Mock_backend = struct
          timeout_sec);
     Ok (Unix.WEXITED 0, "mock command output")
 
-  let run_command_in_container
+  let run_command
       ?turn_sandbox_factory:_
       ?(ok_exit_codes = [ 0 ])
       ~config:_

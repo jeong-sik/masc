@@ -2,6 +2,7 @@
     cascade budget reasoner. *)
 
 type retry_admission_denial =
+  Cascade_internal_error.retry_admission_denial =
   | Retry_budget_below_min of {
       projected_usable_budget_s : float;
       min_required_s : float;

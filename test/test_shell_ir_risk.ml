@@ -82,6 +82,61 @@ let test_destructive_commands () =
   check "git push -f origin main" Shell_ir_risk.Destructive_protected
 ;;
 
+let test_gh_r0_read () =
+  check "gh pr view 123" Shell_ir_risk.R0_Read;
+  check "gh issue list" Shell_ir_risk.R0_Read;
+  check "gh repo view owner/repo" Shell_ir_risk.R0_Read;
+  check "gh release list" Shell_ir_risk.R0_Read;
+  check "gh run list" Shell_ir_risk.R0_Read;
+  check "gh api repos/owner/repo" Shell_ir_risk.R0_Read
+;;
+
+let test_gh_r1_reversible () =
+  check "gh pr create" Shell_ir_risk.R1_Reversible_mutation;
+  check "gh pr close 123" Shell_ir_risk.R1_Reversible_mutation;
+  check "gh pr reopen 123" Shell_ir_risk.R1_Reversible_mutation;
+  check "gh issue create" Shell_ir_risk.R1_Reversible_mutation;
+  check "gh issue edit 123" Shell_ir_risk.R1_Reversible_mutation;
+  check "gh release create v1.0.0" Shell_ir_risk.R1_Reversible_mutation;
+  check "gh release upload v1.0.0 file.tgz" Shell_ir_risk.R1_Reversible_mutation;
+  check "gh repo fork owner/repo" Shell_ir_risk.R1_Reversible_mutation;
+  check "gh repo create repo-name" Shell_ir_risk.R1_Reversible_mutation;
+  check "gh run cancel 123" Shell_ir_risk.R1_Reversible_mutation;
+  check "gh run rerun 123" Shell_ir_risk.R1_Reversible_mutation;
+  check "gh workflow enable workflow.yml" Shell_ir_risk.R1_Reversible_mutation;
+  check "gh workflow run workflow.yml" Shell_ir_risk.R1_Reversible_mutation;
+  check "gh label create bug" Shell_ir_risk.R1_Reversible_mutation;
+  check "gh project create title" Shell_ir_risk.R1_Reversible_mutation;
+  check "gh gist create file.txt" Shell_ir_risk.R1_Reversible_mutation;
+  check "gh ruleset create" Shell_ir_risk.R1_Reversible_mutation;
+  check "gh api repos/owner/repo/issues -X POST" Shell_ir_risk.R1_Reversible_mutation;
+  check "gh api repos/owner/repo/issues --method POST" Shell_ir_risk.R1_Reversible_mutation;
+  check "gh api repos/owner/repo/issues -X PUT" Shell_ir_risk.R1_Reversible_mutation;
+  check "gh api repos/owner/repo/issues -X PATCH" Shell_ir_risk.R1_Reversible_mutation;
+  check "gh api graphql" Shell_ir_risk.R1_Reversible_mutation;
+  check "gh api repos/owner/repo --field name=value" Shell_ir_risk.R1_Reversible_mutation;
+  check "gh api repos/owner/repo --raw-field name=value" Shell_ir_risk.R1_Reversible_mutation
+;;
+
+let test_gh_r2_irreversible () =
+  check "gh pr merge 123" Shell_ir_risk.R2_Irreversible;
+  check "gh pr ready 123" Shell_ir_risk.R2_Irreversible;
+  check "gh repo delete owner/repo" Shell_ir_risk.R2_Irreversible;
+  check "gh repo archive owner/repo" Shell_ir_risk.R2_Irreversible;
+  check "gh repo transfer owner/repo" Shell_ir_risk.R2_Irreversible;
+  check "gh release delete v1.0.0" Shell_ir_risk.R2_Irreversible;
+  check "gh secret delete SECRET" Shell_ir_risk.R2_Irreversible;
+  check "gh secret remove SECRET" Shell_ir_risk.R2_Irreversible;
+  check "gh ssh-key delete 123" Shell_ir_risk.R2_Irreversible;
+  check "gh workflow disable workflow.yml" Shell_ir_risk.R2_Irreversible;
+  check "gh auth logout" Shell_ir_risk.R2_Irreversible;
+  check "gh auth token" Shell_ir_risk.R2_Irreversible;
+  check "gh gist delete 123" Shell_ir_risk.R2_Irreversible;
+  check "gh ruleset delete 123" Shell_ir_risk.R2_Irreversible;
+  check "gh api repos/owner/repo -X DELETE" Shell_ir_risk.R2_Irreversible;
+  check "gh api repos/owner/repo --method DELETE" Shell_ir_risk.R2_Irreversible
+;;
+
 let () =
   Alcotest.run
     "Shell IR risk classification"
@@ -93,5 +148,11 @@ let () =
       , [ Alcotest.test_case "bare commands" `Quick test_r2_irreversible_commands ] )
     ; ( "Destructive protected"
       , [ Alcotest.test_case "destructive commands" `Quick test_destructive_commands ] )
+    ; ( "gh R0 read"
+      , [ Alcotest.test_case "gh read commands" `Quick test_gh_r0_read ] )
+    ; ( "gh R1 reversible"
+      , [ Alcotest.test_case "gh mutation commands" `Quick test_gh_r1_reversible ] )
+    ; ( "gh R2 irreversible"
+      , [ Alcotest.test_case "gh destructive commands" `Quick test_gh_r2_irreversible ] )
     ]
 ;;

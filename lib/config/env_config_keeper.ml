@@ -833,6 +833,20 @@ module CascadeTierAdmission = struct
     Feature_flag_registry.get_bool "MASC_CASCADE_TIER_ADMISSION_ENABLED"
 end
 
+module CascadeTierWait = struct
+  let enabled () =
+    Feature_flag_registry.get_bool "MASC_CASCADE_TIER_WAIT_ENABLED"
+
+  let timeout_s () =
+    get_float_nonneg ~default:30.0 "MASC_CASCADE_TIER_WAIT_TIMEOUT_S"
+
+  let max_retries () =
+    let v = get_string ~default:"" "MASC_CASCADE_TIER_WAIT_MAX_RETRIES" in
+    match v with
+    | "" | "none" | "unlimited" -> None
+    | s -> (try Some (int_of_string s) with _ -> None)
+end
+
 (** {1 Cascade Runtime Overrides}
 
     Runtime-only narrowing of the MASC cascade provider set. The underlying

@@ -5,13 +5,20 @@ val keeper_cascade_tier_admission : Cascade_tier_admission.t
 val cascade_tier_admission_policy_of_priority :
   Llm_provider.Request_priority.t -> Cascade_tier_admission.admission_policy
 
+val keeper_cascade_wait_scheduler :
+  Cascade_tier_wait_scheduler.t
+
 val with_keeper_cascade_tier_admission :
   ?admission:Cascade_tier_admission.t ->
+  ?wait_scheduler:Cascade_tier_wait_scheduler.t ->
   ?enabled:bool ->
+  ?sw:Eio.Switch.t ->
   tier_id:Cascade_tier_admission.tier_id ->
   admission_policy:Cascade_tier_admission.admission_policy ->
   (unit -> 'a) ->
   ('a, Cascade_saturation_signal.t) result
+(** When [?sw] is provided and wait is enabled (env flag), uses bounded
+    wait with backoff.  Otherwise falls back to non-blocking admission. *)
 
 val cascade_tier_admission_blocked_decision :
   Cascade_saturation_signal.t -> Yojson.Safe.t

@@ -9,7 +9,7 @@ open Keeper_meta_contract
 let drop_assoc_keys (keys : string list) (json : Yojson.Safe.t) : Yojson.Safe.t =
   match json with
   | `Assoc fields -> `Assoc (List.filter (fun (key, _) -> not (List.mem key keys)) fields)
-  | _ -> json
+  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ as j -> j
 ;;
 
 let reject_removed_keeper_meta_fields (json : Yojson.Safe.t) =
@@ -57,7 +57,7 @@ let scrub_persisted_keeper_meta_json ~path (json : Yojson.Safe.t) : Yojson.Safe.
       let migrate_legacy_disabled_keepalive =
         (match List.assoc_opt "presence_keepalive" fields with
          | Some (`Bool false) -> true
-         | _ -> false)
+         | Some _ | None -> false)
         && not (List.mem_assoc "paused" fields)
       in
       let scrubbed =
@@ -65,7 +65,8 @@ let scrub_persisted_keeper_meta_json ~path (json : Yojson.Safe.t) : Yojson.Safe.
         match base with
         | `Assoc base_fields when migrate_legacy_disabled_keepalive ->
           `Assoc (("paused", `Bool true) :: List.remove_assoc "paused" base_fields)
-        | _ -> base
+        | `Assoc _ -> base
+        | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> base
       in
       let content = Yojson.Safe.pretty_to_string scrubbed in
       (try
@@ -89,5 +90,5 @@ let scrub_persisted_keeper_meta_json ~path (json : Yojson.Safe.t) : Yojson.Safe.
            path
            (Printexc.to_string exn));
       scrubbed, true)
-  | _ -> json, false
+  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ as j -> j, false
 ;;

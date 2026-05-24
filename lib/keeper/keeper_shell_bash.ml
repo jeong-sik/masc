@@ -109,7 +109,7 @@ let handle_keeper_bash_typed
         (* RFC-0160 S1: lower-then-classify. Typed argv → Shell IR
            once, then both mutation classifiers consume the same IR.
            This removes the previous double-parse (mutation classifier
-           re-tokenized cmd:string via Bash_words.stages before IR
+           re-tokenized cmd:string via the legacy string tokenizer before IR
            was even built). *)
         match Keeper_tool_bash_input.to_shell_ir ~mode ~sandbox:dispatch_sandbox input with
         | Error e ->

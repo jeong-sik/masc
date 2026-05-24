@@ -41,5 +41,5 @@ val resolve_sandbox_root_git_cwd_of_stages :
 
 val effective_stages_of_cmd : string -> parsed_stage list
 (** Parse-and-extract helper for callers that only hold a raw command
-    string. Equivalent to [effective_stages_of_ir] but performs the
-    [Bash.parse_string] internally. Returns [[]] on parse failure. *)
+    string. Equivalent to [effective_stages_of_ir] but parses internally.
+    Returns [[]] on parse failure. *)

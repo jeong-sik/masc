@@ -4,7 +4,7 @@
     in [lib/exec/command_gate/] as the [masc_exec_command_gate]
     sub-library so it can depend on both [masc_exec] (Shell_ir /
     Parsed / Bin / Sandbox_target) and [masc_exec_bash_parser]
-    (Bash.parse_string) without introducing a cycle through
+    (the bash subset parser) without introducing a cycle through
     [masc_exec].
 
     This module is the canonical bridge between raw shell strings and
@@ -149,12 +149,13 @@ val gate
   -> sandbox:sandbox_context
   -> unit
   -> verdict
-(** Policy-aware gate for raw shell command strings. Parses [raw] through
-    the Bash parser, then applies the same allowlist, redirect, path
-    policy, sandbox, and nested-pipeline handling as {!gate_typed}.
-    Live caller: [Exec_policy.command_context_with_allowlist] via the
-    [Exec_shell_gate = Masc_exec_command_gate.Shell_command_gate]
-    module alias. *)
+(** Phase 1 SSOT entrypoint. Calls the bash subset parser once, lifts the result
+    into a {!parsed_context}, then applies allowlist and path policy
+    in that order. Sandbox context is recorded on every stage's
+    [Masc_exec.Shell_ir.simple.sandbox] field so downstream consumers
+    can route to [Exec_dispatch] in Phase 4 without re-parsing.
+    [?caller] is captured for the upcoming telemetry partition
+    (RFC-0131 PR-3) and does not affect the verdict. *)
 
 val gate_typed
   :  ?caller:caller
@@ -198,12 +199,3 @@ val too_complex_reason_tag : too_complex_reason -> string
 val stage_count : parsed_context -> int
 val last_stage_bin : parsed_context -> string option
 val is_pipeline : parsed_context -> bool
-
-val parse_to_ir_opt : string -> Masc_exec.Shell_ir.t option
-(** Canonical string-to-IR parse entrypoint for callers that need typed
-    IR but no policy verdict (telemetry classifiers, work-action
-    extractors, debug tools). Returns [Some ir] when the bash subset
-    parser succeeds, [None] on any parse failure. This is the single
-    non-gate entry that callers should use instead of reaching into
-    [Masc_exec_bash_parser.Bash.parse_string] directly — prefer {!gate}
-    or {!gate_typed} when a policy verdict is needed. *)

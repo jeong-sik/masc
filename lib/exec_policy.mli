@@ -74,7 +74,7 @@ val is_git_branch_switch : Masc_exec.Shell_ir.t -> bool
 val is_destructive_bash_operation : Masc_exec.Shell_ir.t -> bool
 
 (** Flatten all literal stage words from a parsed shell IR.
-    Replaces the historical [shell_word_values] string extractors. *)
+    Replaces the historical string-era extractors. *)
 val flat_stage_words : Masc_exec.Shell_ir.t -> string list
 
 (** Shared shell-word extractor for callers with raw strings.

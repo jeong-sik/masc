@@ -260,7 +260,7 @@ let parse_command cmd =
     in
     loop [] args
   in
-  match Masc_exec_bash_parser.Bash.parse_string cmd with
+  match Exec_policy_mutation_classifier.parsed_of_string cmd with
   | Masc_exec.Parsed.Parsed (Masc_exec.Shell_ir.Simple simple)
     when simple.env = [] && simple.cwd = None && simple.redirects = [] ->
     (match collect_lit_args simple.args with

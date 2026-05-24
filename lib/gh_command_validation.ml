@@ -13,7 +13,7 @@ let has_strict_shell_metachar cmd =
       | _ -> false)
     cmd
 
-(* RFC-0160 S6: private [shell_word_values] removed. Callers now route
+(* RFC-0160 S6: private string extractor removed. Callers now route
    through {!Exec_policy.stage_words_of_string} (single SSOT). *)
 
 (** Top-level gh CLI commands allowed. Commands not in this list are
@@ -296,7 +296,7 @@ let has_mutating_http_method parts =
       4. top command + subcommand in [gh_reversible_mutations] → R1
       5. anything else → R0 (read-only default) *)
 let classify_gh_reversibility cmd =
-  (* RFC-0160 S1 regression: Bash.parse_string rejects { } in graphql
+  (* RFC-0160 S1 regression: the bash subset parser rejects { } in graphql
      query strings, so extract_gh_command_pair returns (None,_).
      Short-circuit graphql classification before parser-dependent path. *)
   if gh_api_graphql_is_destructive cmd then R2_Irreversible

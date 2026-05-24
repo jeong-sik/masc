@@ -155,6 +155,7 @@ type blocker_class =
   | Sdk_guardrail_violation
   | Sdk_tripwire_violation
   | Sdk_exit_condition_met
+  | Sdk_input_required
 
 let blocker_class_to_string = function
   | Cascade_exhausted _ -> "cascade_exhausted"
@@ -181,6 +182,7 @@ let blocker_class_to_string = function
   | Sdk_guardrail_violation -> "sdk_guardrail_violation"
   | Sdk_tripwire_violation -> "sdk_tripwire_violation"
   | Sdk_exit_condition_met -> "sdk_exit_condition_met"
+  | Sdk_input_required -> "sdk_input_required"
 ;;
 
 let blocker_class_of_serialized_string = function
@@ -208,6 +210,7 @@ let blocker_class_of_serialized_string = function
   | "sdk_guardrail_violation" -> Some Sdk_guardrail_violation
   | "sdk_tripwire_violation" -> Some Sdk_tripwire_violation
   | "sdk_exit_condition_met" -> Some Sdk_exit_condition_met
+  | "sdk_input_required" -> Some Sdk_input_required
   | _ -> None
 ;;
 
@@ -253,7 +256,8 @@ let blocker_class_continue_gate = function
   | Sdk_tool_retry_exhausted
   | Sdk_guardrail_violation
   | Sdk_tripwire_violation
-  | Sdk_exit_condition_met -> false
+  | Sdk_exit_condition_met
+  | Sdk_input_required -> false
 ;;
 
 let cascade_exhaustion_reason_to_json = function

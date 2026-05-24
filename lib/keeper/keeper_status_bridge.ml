@@ -229,6 +229,7 @@ let blocker_class_of_sdk_error (err : Agent_sdk.Error.sdk_error) : blocker_class
      | Agent_sdk.Error.Agent (GuardrailViolation _) -> Some Sdk_guardrail_violation
      | Agent_sdk.Error.Agent (TripwireViolation _) -> Some Sdk_tripwire_violation
      | Agent_sdk.Error.Agent (ExitConditionMet _) -> Some Sdk_exit_condition_met
+     | Agent_sdk.Error.Agent (InputRequired _) -> Some Sdk_input_required
      (* Provider-level [Api] errors are surfaced via OAS retry / cascade
          layers and do not map to a typed blocker_class by themselves. *)
      | Agent_sdk.Error.Api _

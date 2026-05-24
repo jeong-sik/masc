@@ -97,6 +97,7 @@ let sdk_termination_semantics = function
   | Agent_sdk.Error.Agent (Agent_sdk.Error.TripwireViolation _) ->
     Oas_tripwire_violation
   | Agent_sdk.Error.Agent (Agent_sdk.Error.UnrecognizedStopReason _) -> Sdk_error_failure
+  | Agent_sdk.Error.Agent (Agent_sdk.Error.InputRequired _) -> Sdk_error_failure
   | Agent_sdk.Error.Provider _ -> Sdk_error_failure
   | Agent_sdk.Error.Api _ -> Sdk_error_failure
   | Agent_sdk.Error.Mcp _ -> Sdk_error_failure
@@ -236,6 +237,8 @@ let agent_error_terminal_reason_code = function
     Printf.sprintf "agent_error_guardrail_violation:validator=%s" validator
   | Agent_sdk.Error.TripwireViolation { tripwire; reason = _ } ->
     Printf.sprintf "agent_error_tripwire_violation:tripwire=%s" tripwire
+  | Agent_sdk.Error.InputRequired { request_id; question } ->
+    Printf.sprintf "agent_error_input_required:request_id=%s,question=%s" request_id question
 ;;
 
 let network_error_kind_to_wire = function

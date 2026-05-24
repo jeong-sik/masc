@@ -1,13 +1,15 @@
 ---
-rfc-id: RFC-0174
+rfc-id: RFC-0176
 title: OAS vendor-purge migration — consume agent_sdk 0.197.0
-status: Draft
+status: Implemented
 authors: Claude (Vincent)
 created: 2026-05-24
+implemented: 2026-05-24 (PR #18262)
 related: OAS RFC-0001 (PR #1727, #1729, #1731), OAS PR #1737 (version bump)
+renumber-note: Originally written as RFC-0174 in PR #18262; renumbered to RFC-0176 here to resolve numbering collision with the pre-existing RFC-0174-dashboard-substring-classifier-to-typed.md. The commit history references for the original PR retain the RFC-0174 string as historical record.
 ---
 
-# RFC-0174 OAS vendor-purge migration
+# RFC-0176 OAS vendor-purge migration
 
 ## 1. Problem
 

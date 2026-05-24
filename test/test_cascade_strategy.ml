@@ -90,7 +90,7 @@ let mk_ctx ?(health = H.create ())
            ?(now = 0.0)
            ?(rand = fun _ -> 0)
            ?(keeper_name = "")
-           ?(cascade_name = "")
+           ?(cascade_name = "tier.test")
            () : S.signal_ctx =
   { health; capacity; now; rand_int = rand;
     keeper_name; cascade_name = Cascade_name.of_string_exn cascade_name }
@@ -119,6 +119,40 @@ let test_failover_filters_cooldown () =
   let ordered = S.order_candidates S.failover ~adapter ~ctx ~cycle:0 cands in
   check (list string) "cooldown candidate removed, remaining order preserved"
     ["b"; "c"] (names ordered)
+
+let test_failover_dedupes_full_shared_capacity_key () =
+  let cands =
+    [
+      { name = "a"; url = "https://shared.example/v1" };
+      { name = "b"; url = "https://shared.example/v1" };
+      { name = "c"; url = "https://other.example/v1" };
+    ]
+  in
+  let table =
+    [
+      "https://shared.example/v1", mk_capacity_info ~total:1 ~active:1;
+      "https://other.example/v1", mk_capacity_info ~total:1 ~active:0;
+    ]
+  in
+  let ctx = mk_ctx ~capacity:(stub_capacity table) () in
+  let ordered = S.order_candidates S.failover ~adapter ~ctx ~cycle:0 cands in
+  check (list string) "shared full capacity key represented once"
+    ["a"; "c"] (names ordered)
+
+let test_failover_keeps_available_shared_capacity_key () =
+  let cands =
+    [
+      { name = "a"; url = "https://shared.example/v1" };
+      { name = "b"; url = "https://shared.example/v1" };
+    ]
+  in
+  let table =
+    [ "https://shared.example/v1", mk_capacity_info ~total:2 ~active:0 ]
+  in
+  let ctx = mk_ctx ~capacity:(stub_capacity table) () in
+  let ordered = S.order_candidates S.failover ~adapter ~ctx ~cycle:0 cands in
+  check (list string) "available shared capacity key keeps model fallback"
+    ["a"; "b"] (names ordered)
 
 (* ── Cycle policy + backoff ───────────────────────────────────── *)
 
@@ -458,6 +492,22 @@ let test_priority_tier_starvation_guard () =
   check (list string) "all-busy tier → fall through with tier list"
     ["a"; "b"] (names ordered)
 
+let test_priority_tier_starvation_guard_dedupes_full_shared_capacity_key () =
+  let cands =
+    [
+      { name = "a"; url = "https://shared.example/v1" };
+      { name = "b"; url = "https://shared.example/v1" };
+    ]
+  in
+  let table =
+    [ "https://shared.example/v1", mk_capacity_info ~total:1 ~active:1 ]
+  in
+  let strat = mk_t S.Priority_tier ~tiers:[["a"; "b"]] in
+  let ctx = mk_ctx ~capacity:(stub_capacity table) () in
+  let ordered = S.order_candidates strat ~adapter ~ctx ~cycle:0 cands in
+  check (list string) "all-busy shared key → one representative"
+    ["a"] (names ordered)
+
 (* ── Cascade_state auto-rotation primitive ───────────────────── *)
 
 let test_cascade_state_round_robin_negative_bound () =
@@ -716,7 +766,7 @@ let test_history_json_exposes_provenance () =
 
 (* ── Strategy decision trace (LT-5) ─────────────────── *)
 
-let mk_trace_event ?(ts = 0.0) ?(cascade_name = "primary")
+let mk_trace_event ?(ts = 0.0) ?(cascade_name = "tier.primary")
     ?(strategy = "failover") ?(cycle = 0) ?(candidates_in = 3)
     ?(candidates_out = 3) ?(backoff_ms = 0) ?(kind = ST.Ordered)
     ?trace_id ?(confidence_score = None) () =
@@ -745,17 +795,17 @@ let test_trace_record_snapshot_roundtrip () =
 
 let test_trace_cascade_filter () =
   ST.clear ();
-  ST.record (mk_trace_event ~cascade_name:"primary" ~ts:1.0 ());
-  ST.record (mk_trace_event ~cascade_name:"nick0cave" ~ts:2.0 ());
-  ST.record (mk_trace_event ~cascade_name:"primary" ~ts:3.0 ());
-  let unified = ST.snapshot ~cascade:"primary" () in
+  ST.record (mk_trace_event ~cascade_name:"tier.primary" ~ts:1.0 ());
+  ST.record (mk_trace_event ~cascade_name:"tier.nick0cave" ~ts:2.0 ());
+  ST.record (mk_trace_event ~cascade_name:"tier.primary" ~ts:3.0 ());
+  let unified = ST.snapshot ~cascade:"tier.primary" () in
   check int "primary → 2 events" 2 (List.length unified);
   List.iter
     (fun e ->
-      check string "cascade filter" "primary"
+      check string "cascade filter" "tier.primary"
         (Cascade_name.to_string e.ST.cascade_name))
     unified;
-  let missing = ST.snapshot ~cascade:"does_not_exist" () in
+  let missing = ST.snapshot ~cascade:"tier.does_not_exist" () in
   check int "missing cascade → empty" 0 (List.length missing)
 
 let test_trace_ring_drops_oldest () =
@@ -831,25 +881,25 @@ let test_trace_prometheus_counter_increments () =
   let before =
     find_strategy_counter_value
       (Masc_mcp.Prometheus.to_prometheus_text ())
-      ~cascade:"primary" ~strategy:"failover" ~kind:"ordered"
+      ~cascade:"tier.primary" ~strategy:"failover" ~kind:"ordered"
     |> Option.value ~default:0.0
   in
-  ST.record (mk_trace_event ~cascade_name:"primary"
+  ST.record (mk_trace_event ~cascade_name:"tier.primary"
                ~strategy:"failover" ~kind:ST.Ordered ());
-  ST.record (mk_trace_event ~cascade_name:"primary"
+  ST.record (mk_trace_event ~cascade_name:"tier.primary"
                ~strategy:"failover" ~kind:ST.Ordered ());
-  ST.record (mk_trace_event ~cascade_name:"nick0cave"
+  ST.record (mk_trace_event ~cascade_name:"tier.nick0cave"
                ~strategy:"priority_tier"
                ~kind:ST.Filtered_empty ~backoff_ms:500 ());
   let text = Masc_mcp.Prometheus.to_prometheus_text () in
   let ordered =
     find_strategy_counter_value text
-      ~cascade:"primary" ~strategy:"failover" ~kind:"ordered"
+      ~cascade:"tier.primary" ~strategy:"failover" ~kind:"ordered"
     |> Option.value ~default:0.0
   in
   let filtered =
     find_strategy_counter_value text
-      ~cascade:"nick0cave" ~strategy:"priority_tier"
+      ~cascade:"tier.nick0cave" ~strategy:"priority_tier"
       ~kind:"filtered_empty"
     |> Option.value ~default:0.0
   in
@@ -861,9 +911,9 @@ let test_trace_prometheus_counter_increments () =
 let test_strategy_trace_json_exposes_provenance () =
   ST.clear ();
   ST.record
-    (mk_trace_event ~cascade_name:"primary" ~strategy:"failover"
+    (mk_trace_event ~cascade_name:"tier.primary" ~strategy:"failover"
        ~kind:ST.Ordered ());
-  let json = DC.strategy_trace_json ~limit:1 ~cascade:"primary" () in
+  let json = DC.strategy_trace_json ~limit:1 ~cascade:"tier.primary" () in
   check string "dashboard surface" "/api/v1/cascade/strategy_trace"
     (json_string "dashboard_surface" json);
   check string "source" "cascade_strategy_trace_ring" (json_string "source" json);
@@ -876,7 +926,7 @@ let test_strategy_trace_json_exposes_provenance () =
   check int "ring capacity" (ST.capacity ()) (json_int "ring_capacity" retention);
   let query = json_object "query" json in
   check int "query limit" 1 (json_int "limit" query);
-  check string "query cascade" "primary" (json_string "cascade" query)
+  check string "query cascade" "tier.primary" (json_string "cascade" query)
 
 let test_audit_runs_json_exposes_provenance () =
   let base_path =
@@ -905,6 +955,10 @@ let () =
     "failover", [
       test_case "preserves order" `Quick test_failover_preserves_order;
       test_case "filters cooldown" `Quick test_failover_filters_cooldown;
+      test_case "dedupes full shared capacity key" `Quick
+        test_failover_dedupes_full_shared_capacity_key;
+      test_case "keeps available shared capacity key" `Quick
+        test_failover_keeps_available_shared_capacity_key;
     ];
     "cycle_policy", [
       test_case "default policy backward-compat" `Quick
@@ -960,6 +1014,8 @@ let () =
         test_priority_tier_capacity_filter;
       test_case "all-busy tier falls through (starvation guard)" `Quick
         test_priority_tier_starvation_guard;
+      test_case "all-busy shared key falls through once" `Quick
+        test_priority_tier_starvation_guard_dedupes_full_shared_capacity_key;
     ];
     "cascade_state", [
       test_case "round_robin bound<=0 returns 0" `Quick

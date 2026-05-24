@@ -1,7 +1,7 @@
 # RFC 0022 — IDE Plane Assembly v1 (Umbrella)
 
 - **Status**: Draft
-- **Author**: Vincent + Claude (auto mode session 2026-05-05)
+- **Author**: Vincent + Agent-LLM-A (auto mode session 2026-05-05)
 - **Created**: 2026-05-05
 - **Depends on (existing RFCs)**:
   - RFC 0010 (CollaborationCursor — keeper presence anchor primitive)

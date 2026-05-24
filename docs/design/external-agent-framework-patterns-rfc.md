@@ -24,7 +24,7 @@ Morph의 agent framework 비교 글을 출발점으로 삼되, `masc-mcp`에 바
 
 - 외부 패턴 비교:
   - LangGraph durable execution / replay
-  - OpenAI Agents SDK workflow / guardrails / tracing
+  - Provider-D Agents SDK workflow / guardrails / tracing
   - Google ADK + A2A Agent Card / discovery
   - Morph가 강조한 infra-first execution primitive 관점
 - 내부 적용 축:
@@ -35,7 +35,7 @@ Morph의 agent framework 비교 글을 출발점으로 삼되, `masc-mcp`에 바
 
 ## Non-goals
 
-- Claude Agent SDK, OpenAI Agents SDK, Google ADK, CrewAI, LangGraph를
+- Agent-LLM-A Agent SDK, Provider-D Agents SDK, Google ADK, CrewAI, LangGraph를
   `masc-mcp` core runtime 위에 직접 embedding 하는 것
 - role-play crew abstraction을 coordination core로 채택하는 것
 - code-generating execution model을 keeper default로 바꾸는 것
@@ -44,7 +44,7 @@ Morph의 agent framework 비교 글을 출발점으로 삼되, `masc-mcp`에 바
 
 1. `masc-mcp`는 orchestration/control plane으로 유지하고, single-agent runtime은 계속 OAS에 둔다.
 2. 외부 비교에서 가장 먼저 가져올 패턴은 LangGraph류의 `checkpoint truth + replay discipline`이다.
-3. 두 번째는 OpenAI Agents SDK가 보여주는 `typed workflow surface + guardrail/eval-friendly tracing`이다.
+3. 두 번째는 Provider-D Agents SDK가 보여주는 `typed workflow surface + guardrail/eval-friendly tracing`이다.
 4. 세 번째는 Morph 글이 강조한 `framework보다 infra primitive가 중요하다`는 관점이다.
 5. 네 번째는 Google ADK/A2A 쪽의 `Agent Card based discovery`를 remote interoperability 용도로 다듬는 것이다.
 
@@ -53,7 +53,7 @@ Morph의 agent framework 비교 글을 출발점으로 삼되, `masc-mcp`에 바
 | External pattern | External claim | Current `masc-mcp` state | Decision |
 |---|---|---|---|
 | LangGraph durable execution | checkpoint, resume, replay/fork are first-class | keeper checkpoint는 실재하지만 truth/replay contract가 아직 분산됨 | adopt |
-| OpenAI workflow primitives | handoff, guardrails, traces, evals are workflow-level building blocks | verification/proof/handoff는 있으나 envelope family가 분산됨 | adopt selectively |
+| Provider-D workflow primitives | handoff, guardrails, traces, evals are workflow-level building blocks | verification/proof/handoff는 있으나 envelope family가 분산됨 | adopt selectively |
 | Google ADK + A2A | Agent Cards and protocol boundary for remote discovery | Agent Card/A2A surface는 이미 존재하나 canonical contract가 흩어져 있음 | adopt selectively |
 | Morph infra-first view | orchestration보다 apply/search/sandbox/compaction primitive quality가 중요 | search/apply/sandbox/compaction이 각각 존재하지만 shared infra model이 없음 | adopt |
 | CrewAI role-based crews | natural-language role composition | `masc-mcp`의 문제는 역할극보다 correctness / observability / state truth | reject for core |
@@ -214,11 +214,11 @@ Reason:
   https://docs.langchain.com/oss/python/langgraph/persistence ,
   https://docs.langchain.com/oss/python/langgraph/use-time-travel ;
   확인일시 2026-04-12 ; 신뢰도 High
-- [근거] OpenAI Agents SDK / Agent Builder / trace grading / agent evals:
-  https://platform.openai.com/docs/guides/agents-sdk/ ,
-  https://platform.openai.com/docs/guides/agent-builder ,
-  https://platform.openai.com/docs/guides/trace-grading ,
-  https://platform.openai.com/docs/guides/agent-evals ;
+- [근거] Provider-D Agents SDK / Agent Builder / trace grading / agent evals:
+  https://platform.provider-d.com/docs/guides/agents-sdk/ ,
+  https://platform.provider-d.com/docs/guides/agent-builder ,
+  https://platform.provider-d.com/docs/guides/trace-grading ,
+  https://platform.provider-d.com/docs/guides/agent-evals ;
   확인일시 2026-04-12 ; 신뢰도 High
 - [근거] Google ADK + A2A:
   https://google.github.io/adk-docs/ ,

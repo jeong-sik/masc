@@ -104,10 +104,10 @@ let rec try_cascade candidates ... =
 |---|---|
 | 전체 attempt | 8917 / 14일 |
 | failure 비율 | 3877 / 43.5% |
-| cascade_exhausted (서버 로그) | 419건 (glm-three 263 + restart 124 + 8935 12 + hotfix 20) |
+| cascade_exhausted (서버 로그) | 419건 (provider-k-three 263 + restart 124 + 8935 12 + hotfix 20) |
 | 그 중 사유 = `candidates_filtered_after_cycles` | 123/123 (100%) — **downstream symptom** |
 | 그 중 메시지 = `max_execution_time_s 300s` | 138 중 57이 정확히 300.0s 동률 — **real root** |
-| cascade_exhausted at minute peak (glm-three 05-16) | 02:34 = 19/min, 02:27 = 18/min |
+| cascade_exhausted at minute peak (provider-k-three 05-16) | 02:34 = 19/min, 02:27 = 18/min |
 | `client_capacity_full` 폭증 (2026-05-19~20) | 486건/2일 (이전 0) — 기존 `Cascade_client_capacity` (per-URL, ollama 등) 백프레셔 *작동 중* signal. regression 아닐 가능성 큼 — §4.2 layer matrix 참조 |
 | 회복 방식 | 100% 사용자 수동 `update_keeper resumed` (최근 paused_since = 18137s) |
 | auto-resume 작동 | 사실상 비활성 (`failure_ratio` 게이트 즉시 차단) |
@@ -601,7 +601,7 @@ Phase B/C/E는 세 framework 모두 안 함. **완화**: tower::limit::Concurren
 
 ### 런타임 Evidence
 - `<base-path>/.masc/cascade_audit/2026-05/*.jsonl` — 14일치 8917 attempt
-- `<base-path>/.masc/logs/masc-mcp-glm-three-20260516T0152.log` — 02:34 peak 19/min stampede
+- `<base-path>/.masc/logs/masc-mcp-provider-k-three-20260516T0152.log` — 02:34 peak 19/min stampede
 - `<base-path>/.masc/logs/masc-mcp-8935.log` — 03:22:47~48 sangsu 사건 사슬
 
 ### 관련 RFC

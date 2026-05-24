@@ -125,7 +125,7 @@ So this is a *coverage breadth* finding, not a runtime bug.  Production correctn
 | KCT S2/S3 (#14787) | string-literal cascade names | catalog-resolved names | OCaml more configurable |
 | **KCAF D-1 (this)** | 3-way alphabet + closed FSM | 1-way constructor + runtime classifier + implicit FSM | **Runtime classification at type boundary** |
 
-KCAF is the first audit where the drift is *runtime predicate vs static type alphabet* — a new shape.  R-D-1.a's split would convert that runtime classification into a type-level distinction, the same pattern as Alexis King's "parse, don't validate" (CLAUDE.md §Coding Principle).
+KCAF is the first audit where the drift is *runtime predicate vs static type alphabet* — a new shape.  R-D-1.a's split would convert that runtime classification into a type-level distinction, the same pattern as Alexis King's "parse, don't validate" (AGENT-LLM-A.md §Coding Principle).
 
 ## Out-of-scope for this iteration
 

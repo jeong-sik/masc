@@ -34,7 +34,7 @@ Keeper attribution runs on a **12-slot palette** (infrastructure capability — 
 | **qa-king** | QA | Red `#c46a5a` |
 | **rama** (ramarama) | Researcher | Purple `#8a6aa0` |
 
-There are also supporting roles (scholar, janitor, issue_king, taskmaster, verifier, executor, velvet-hammer, ollama-local) and providers (Anthropic, Moonshot, OpenAI, xAI) that appear in the cascade chain and provider matrix. Unnamed keepers hash onto the remaining slots via `kSlot(id)` (FNV-1a mod 12).
+There are also supporting roles (scholar, janitor, issue_king, taskmaster, verifier, executor, velvet-hammer, ollama-local) and providers (Provider-A, Provider-B, Provider-D, Provider-E) that appear in the cascade chain and provider matrix. Unnamed keepers hash onto the remaining slots via `kSlot(id)` (FNV-1a mod 12).
 
 ### Goals seen in the system (Korean + English mixed)
 
@@ -83,7 +83,7 @@ Examples seen in the system:
 ```
 goal-merge-blockers       ACTIVE   3/3    priority 1
 nick0cave  →  t-9f2a  tool.write_file  +18 −4   2m ago
-CASCADE  anthropic > moonshot > openai   hit@2   1.24s
+CASCADE  provider-a > provider-b > provider-d   hit@2   1.24s
 FLAG  @sangsu  drift detected at L187    +2 replies
 ```
 

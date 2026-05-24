@@ -1,7 +1,7 @@
 # RFC-0019: Keeper Credential Unification
 
 - **Status**: Draft
-- **Author**: vincent (with Claude Opus 4.7 1M, exploratory session)
+- **Author**: vincent (with Agent-LLM-A Opus 4.7 1M, exploratory session)
 - **Created**: 2026-04-30
 - **Supersedes context for**: `~/me/planning/claude-plans/fancy-prancing-thompson.md` (2026-04-30, retired — built without awareness of #12304)
 - **Related**: RFC-0008 (Credential Provider trait), PR #10660 (RFC-0008 PR-1 merged 2026-04-26), PR #12304 (multi-repo architecture merged 2026-04-30 12:37)
@@ -23,7 +23,7 @@ Worse: §7 of the synthesis shows the combined main has **regressed F-1 and F-4*
 
 ## 2. Why two ships in 4 days (process root cause)
 
-Both PRs were committed by jeong-sik (Vincent). RFC-0008 PR-1 was *human-authored* with full RFC discipline (`docs/rfc/RFC-0008-credential-provider.md` + pre-RFC evidence record). #12304 was *agent-co-authored* (`Co-Authored-By: Claude Sonnet 4.6` across 5 commits, ~4,600 LOC) with **zero references** to RFC-0008, `Credential_provider`, `keeper_gh_env`, or `Host_config_provider` in any commit message or any of the changed files.
+Both PRs were committed by jeong-sik (Vincent). RFC-0008 PR-1 was *human-authored* with full RFC discipline (`docs/rfc/RFC-0008-credential-provider.md` + pre-RFC evidence record). #12304 was *agent-co-authored* (`Co-Authored-By: Agent-LLM-A Sonnet 4.6` across 5 commits, ~4,600 LOC) with **zero references** to RFC-0008, `Credential_provider`, `keeper_gh_env`, or `Host_config_provider` in any commit message or any of the changed files.
 
 The workflow rule (`~/me/instructions/workflow.md:21-31`):
 
@@ -248,7 +248,7 @@ This RFC lays out 4 PRs. Each is independently shippable, each ramps acceptance-
 
 - `~/me/.claude/hooks/pr-creation.sh` (new): on `gh pr create`, scan `docs/rfc/` and `docs/design/` for keyword overlap with the changed files (e.g. files matching `lib/keeper/`, `lib/repo_manager/`, `*credential*` → check for prior RFCs). Emit `[WARN] this PR touches subsystems with prior RFCs: …` and require either an RFC link in body or `--skip-rfc-check` flag with explicit reason.
 - `~/me/instructions/workflow-pr.md`: add clause "PR touching credential / keeper / repo_manager / operator subsystems MUST cite an RFC in body or include `RFC-WAIVED: <reason>` line".
-- `~/me/CLAUDE.md` `<agent_delegation>`: codify the agent gate from §3.2 P9.
+- `~/me/AGENT-LLM-A.md` `<agent_delegation>`: codify the agent gate from §3.2 P9.
 - `docs/KEEPER-USER-MANUAL.md`: rewrite the "github_identity" section to teach the unified `Credential_store` model. Old `github_identity` field documented as legacy with deprecation date.
 - `docs/rfc/RFC-0008-credential-provider.md`: add "Status: Superseded by RFC-0019" header; keep file for history.
 
@@ -283,11 +283,11 @@ A bash hook fires on `gh pr create` (or git push for PR-bound branches). It:
    ```
 5. Exits non-zero unless body cites or override flag is present.
 
-### 7.2 Agent delegation gate (PR-D, CLAUDE.md)
+### 7.2 Agent delegation gate (PR-D, AGENT-LLM-A.md)
 
 ```xml
 <agent_delegation>
-  Autonomous coding agents (Claude Sonnet, Codex, autocoder) MUST NOT
+  Autonomous coding agents (Agent-LLM-A Sonnet, Agent-Code, autocoder) MUST NOT
   produce PRs in the following subsystems without a prior human-reviewed RFC:
     - lib/keeper/credential_*
     - lib/repo_manager/
@@ -297,7 +297,7 @@ A bash hook fires on `gh pr create` (or git push for PR-bound branches). It:
     - dashboard/src/components/keeper-repo-mapping.ts
   Enforcement (one of):
     (a) Pre-task review: human posts "RFC review LGTM, agent-delegate authorized for <RFC#>" before the agent starts.
-    (b) Hook: if an agent commit author contains "Co-Authored-By: Claude|Codex|Autocoder" AND files touch the above paths AND PR body lacks RFC citation, hook blocks merge.
+    (b) Hook: if an agent commit author contains "Co-Authored-By: Agent-LLM-A|Agent-Code|Autocoder" AND files touch the above paths AND PR body lacks RFC citation, hook blocks merge.
 </agent_delegation>
 ```
 

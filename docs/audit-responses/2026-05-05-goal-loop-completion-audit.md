@@ -151,21 +151,21 @@
   `source_catalog_id`, strict-row schema, or 206 itemized rows. A workspace/tmp
   sweep checked 16 generated JSON artifacts mentioning the catalog id; those
   were Orient/status/catalog snapshots with 18 or 19 rows, not a complete
-  strict 206-row corpus. A Kimi keeper spec archive with an older GOAL LOOP
+  strict 206-row corpus. A Provider-C keeper spec archive with an older GOAL LOOP
   fixture/script snapshot was also checked and has no `source_catalog_id`,
   `expected_findings_total`, strict-row schema, or 206-row corpus artifact in
   its goal-loop members. A broader filename-level sweep of 43 Downloads zip
-  archives matching Kimi/audit/goal/keeper/masc found no `source_catalog_id`,
+  archives matching Provider-C/audit/goal/keeper/masc found no `source_catalog_id`,
   `corpus_id`, `expected_findings_total`, strict-row marker, or GOAL LOOP
   catalog-id marker in text-like archive members. A non-archive text-like
   Downloads sweep also checked 13,031 files, including 10,848 files in
-  Kimi/audit/goal/keeper/masc paths, and found 0 strict-corpus marker hits; the
+  Provider-C/audit/goal/keeper/masc paths, and found 0 strict-corpus marker hits; the
   17 near-miss files carried only aggregate/examples or unrelated field names.
   Standalone docx and PDF sweeps checked 43 docx files and 91 PDF files; there
   were 0 strict-corpus marker hits, and the two unreadable PDFs were not in
-  Kimi/audit/goal/keeper/masc paths. A standalone spreadsheet sweep checked 24
+  Provider-C/audit/goal/keeper/masc paths. A standalone spreadsheet sweep checked 24
   xlsx/xls files and found 0 marker hits; no spreadsheet paths matched
-  Kimi/audit/goal/keeper/masc. A local MASC runtime sweep indexed 118,911
+  Provider-C/audit/goal/keeper/masc. A local MASC runtime sweep indexed 118,911
   files and found 0 strict-corpus marker hits; the 20 corpus-named runtime
   paths were ordinary repo script copies, not GOAL LOOP strict row artifacts.
   A top-level temp sweep checked 2,880 files in `/tmp` and `/private/tmp`; it

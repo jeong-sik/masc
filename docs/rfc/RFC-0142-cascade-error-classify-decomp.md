@@ -43,14 +43,14 @@ landed in part; Phase 2/3 remain.
 `cascade_error_classify.ml` has been reduced from **939 LoC** at
 2026-05-21 to **111 LoC** on `origin/main` (2026-05-22).  Two of
 the three planned target modules now exist; PR-3 was cancelled
-when the codex-preflight content was reorganized into
+when the agent-code-preflight content was reorganized into
 `cascade_config_builder.ml` instead of a new sibling.
 
 | Phase 2 PR | Target | Status |
 |------------|--------|--------|
 | PR-1 | `lib/cascade/cascade_internal_error.ml(.mli)` | **landed** (file present on `origin/main`) |
 | PR-2 | `lib/cascade/cascade_error_from_sdk.ml(.mli)` | **landed** (PR #17474, merged 2026-05-22; appears in §frontmatter `implementation_prs`) |
-| PR-3 | `lib/cascade/cascade_codex_preflight.ml(.mli)` | **cancelled** — the Codex CLI prompt preflight content lives in `lib/cascade/cascade_config_builder.ml`, whose module-header comment reads *"Cascade config construction and Codex CLI prompt preflight"*.  The functions reachable via `grep -n 'preflight' lib/cascade/cascade_config_builder.ml` cover the original PR-3 scope without creating a third sibling module. |
+| PR-3 | `lib/cascade/cascade_codex_preflight.ml(.mli)` | **cancelled** — the CLI-Tool-B prompt preflight content lives in `lib/cascade/cascade_config_builder.ml`, whose module-header comment reads *"Cascade config construction and CLI-Tool-B prompt preflight"*.  The functions reachable via `grep -n 'preflight' lib/cascade/cascade_config_builder.ml` cover the original PR-3 scope without creating a third sibling module. |
 
 Net Phase 2 effect: the originating godfile is **88% smaller**
 (939 → 111 LoC) and the two new modules carry the typed bodies
@@ -108,8 +108,8 @@ specialization.
 | PR | Scope | Acceptance |
 |----|-------|-----------|
 | **PR-A** (this PR) | `lib/keeper/provider_error_class.{ml,mli}` new module — closed-sum `t` + named `Http_status` constants + wire tags + tests. Zero callers, zero behavioural change. | `dune build lib/keeper/provider_error_class.cmi` clean; `test_provider_error_class` Alcotest green; `rg 'contains "' lib/keeper/keeper_health_probe.ml` count *unchanged* (PR-A is additive only). |
-| PR-B-Anthropic | `lib/llm_provider/anthropic_*` adapter emits `Provider_error_class.t` directly from typed error response. | Anthropic adapter test covers 6 named variants; `Unspecified` only on genuinely unknown payloads. |
-| PR-B-Openai_compat | Same for OpenAI-compatible adapter (Kimi, GLM, llamacpp-OpenAI-API). | Adapter test covers 6 variants. |
+| PR-B-Provider-A | `lib/llm_provider/provider-a_*` adapter emits `Provider_error_class.t` directly from typed error response. | Provider-A adapter test covers 6 named variants; `Unspecified` only on genuinely unknown payloads. |
+| PR-B-Openai_compat | Same for Provider-D-compatible adapter (Provider-C, Provider-K, llamacpp-Provider-D-API). | Adapter test covers 6 variants. |
 | PR-B-Llamacpp_local | Same for local llama.cpp adapter. | Adapter test covers timeout & DNS only (no backpressure surface). |
 | PR-C | Add `classified_as : Provider_error_class.t` field to `Keeper_registry_types.Provider_runtime_error`. Producers set it from PR-B output; consumers may still ignore it. | Field present in `.ml` + `.mli`; `failure_reason_to_string` reads `classified_as |> to_short_tag` for the tag prefix; backwards-compatible serialization. |
 | PR-D | `keeper_health_probe.ml:provider_runtime_pressure_class` rewritten as pure typed `match` on `classified_as`. `runtime_pressure_class_of_label` parse function deleted. | `rg 'contains "' lib/keeper/keeper_health_probe.ml` → **0**; `rg '\b(408\|429\|504\|524\|529)\b' lib/keeper/keeper_health_probe.ml` → **0**; new typed variant in `Provider_error_class.t` triggers exhaustive-match compile error in the consumer. |
@@ -161,7 +161,7 @@ These coexist with three distinct concerns intertwined in one module:
 
 - **Concern A** — `masc_internal_error` variant definition + JSON serialization (lines ~1-300).
 - **Concern B** — SDK error (`Anthropic_sdk.Error.t`, `Openai_sdk.Error.t`) → `masc_internal_error` classification (lines ~300-650).
-- **Concern C** — codex CLI prompt preflight (lines ~650-873).
+- **Concern C** — agent-code CLI prompt preflight (lines ~650-873).
 
 The godfile header itself documents extraction from `oas_worker_named.ml`. A second extraction is overdue.
 

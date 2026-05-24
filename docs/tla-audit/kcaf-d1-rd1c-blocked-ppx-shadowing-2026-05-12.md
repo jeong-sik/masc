@@ -97,7 +97,7 @@ The cheapest *implementable* KCAF fix is now R-D-1.b (validator-side, doesn't de
 - Identifies a previously-invisible prerequisite (R-D-1.d).
 - Establishes the *Loop Discipline*: when an audit claims LOW risk, an attempted fix is the cheapest way to confirm.  When the fix surfaces a hidden constraint, the audit memo is *more valuable than the fix would have been* — it prevents the same misclassification in adjacent slices.
 
-This is the audit-correction shape that the operator's local "Workaround Rejection Bar" guidance flags as healthy: **prefer surfacing constraints over silencing them with workarounds**.  (The guidance lives in the operator-local `~/me/CLAUDE.md` / `~/me/instructions/software-development.md` and is not tracked in this repo — see also RFC-0064 §Workaround Anti-pattern and RFC-0068 for in-repo applications of the same rule.)  A naïve approach to this constraint (renaming all test references, or putting `decision` in a sub-module to break shadowing) would be a string-classifier-style workaround.  The structural fix is ppx_tla extension.
+This is the audit-correction shape that the operator's local "Workaround Rejection Bar" guidance flags as healthy: **prefer surfacing constraints over silencing them with workarounds**.  (The guidance lives in the operator-local `~/me/AGENT-LLM-A.md` / `~/me/instructions/software-development.md` and is not tracked in this repo — see also RFC-0064 §Workaround Anti-pattern and RFC-0068 for in-repo applications of the same rule.)  A naïve approach to this constraint (renaming all test references, or putting `decision` in a sub-module to break shadowing) would be a string-classifier-style workaround.  The structural fix is ppx_tla extension.
 
 ## References
 

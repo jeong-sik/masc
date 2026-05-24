@@ -3,7 +3,7 @@
 ## 공통 헤더
 
 - 날짜(ISO8601): `2026-05-05T18:00:00+09:00`
-- 작성자: Claude (Opus 4.7) for jeong-sik (vincent)
+- 작성자: Agent-LLM-A (Opus 4.7) for jeong-sik (vincent)
 - 결정 ID: `fundamental-roadmap-reality-check-2026-05-05`
 - 적용 대상: `~/me/planning/claude-plans/joyful-tumbling-dragon.md`, `docs/audit/2026-05-05-fundamental-roadmap-reality-check.md`
 - 결정 상태: 확정 (10-week re-scoped plan; 26-week roadmap rejected as authoritative source)
@@ -16,7 +16,7 @@
 | `keeper_unified_turn.ml` records FSM transitions, not silent skip | `lib/keeper/keeper_unified_turn.ml:60,159,188,203,324,344,419,468,2279` | 2026-05-05T17:56:00+09:00 | High | 8 사이트 모두 telemetry 동반 |
 | `lib/cascade/capabilities.ml` does not exist | `find . -name 'capabilities*.ml'` returned empty | 2026-05-05T17:57:00+09:00 | High | 파일 자체 부재; 로드맵 §3-1 검증 불가 |
 | 6/7 cited PRs already merged | `gh pr view <N> --json state,mergedAt` for #12955,12959,12971,12986,12988,12990,12992 | 2026-05-05T17:00:00+09:00 (Explore agent) | High | #12988만 OPEN |
-| oas backend 5종 분리 이미 존재 | `wc -l ~/me/workspace/yousleepwhen/oas/lib/llm_provider/backend_*.ml` | 2026-05-05T17:58:00+09:00 | High | OpenAI 1550 + Anthropic 210 + Gemini 363 + Ollama 641 + GLM 452 |
+| oas backend 5종 분리 이미 존재 | `wc -l ~/me/workspace/yousleepwhen/oas/lib/llm_provider/backend_*.ml` | 2026-05-05T17:58:00+09:00 | High | Provider-D 1550 + Provider-A 210 + Provider-F 363 + Ollama 641 + Provider-K 452 |
 | `backend.mli` signature 부재 | `lsd ~/me/workspace/yousleepwhen/oas/lib/llm_provider/backend.mli` → ENOENT | 2026-05-05T17:58:00+09:00 | High | Sprint 2 신규 |
 | `cancellation.ml:135` `Atomic.set t.cancelled true;` only | `rg -n 'Atomic\.set\|Eio\.Cancel\.cancel' lib/cancellation.ml` | 2026-05-05T17:56:00+09:00 | High | `Eio.Cancel.cancel` 0건 |
 | Recovery Strategy GADT 정의됨, 실행 1곳 | `rg -n 'type _ strategy' lib/resilience/recovery.ml` (line 26) + `strategy_to_tla_symbol` (line 60) | 2026-05-05T17:56:00+09:00 | High | 호출 사이트 수동 검증 필요 (Sprint 1) |

@@ -52,7 +52,7 @@ let required_tool_satisfaction call =
    window** 를 인식해 `board_list` 같은 *읽기 turn* 을 contract violation
    으로 변환하지 않는다.
 2. `tier-group.coding_plan` 의 단일-lane 구조 (`tiers =
-   ["coding_plan_primary"]`, `members = ["glm-coding.glm-5-1"]`) 가
+   ["coding_plan_primary"]`, `members = ["provider-k-coding.provider-k-5-1"]`) 가
    **multi-lane** 으로 확장돼 단일 모델 fail 이 fleet 정지로 confluence
    되지 않는다.
 3. `cascade rotation cap` (`max_consecutive_rotation_failures`) 가
@@ -151,7 +151,7 @@ WARN  Keeper rotation retry on cascade=direct_api_manual
 ```
 
 3개 cascade lane (`coding_plan_primary`, `cli_manual`, `direct_api_manual`)
-가 *모두* 같은 model 패턴 (`glm-coding.glm-5-1`) 로 fail. fleet 18/19
+가 *모두* 같은 model 패턴 (`provider-k-coding.provider-k-5-1`) 로 fail. fleet 18/19
 route SPOF.
 
 ### §5.2 위치 + 현재 동작
@@ -163,7 +163,7 @@ route SPOF.
 tiers = ["coding_plan_primary"]
 
 [tier.coding_plan_primary]
-members = ["glm-coding.glm-5-1"]
+members = ["provider-k-coding.provider-k-5-1"]
 ```
 
 단일 tier × 단일 member. quota fail / 5xx / 네트워크 차단이
@@ -178,10 +178,10 @@ multi-lane:
 tiers = ["coding_plan_primary", "coding_plan_secondary"]
 
 [tier.coding_plan_primary]
-members = ["glm-coding.glm-5-1"]
+members = ["provider-k-coding.provider-k-5-1"]
 
 [tier.coding_plan_secondary]
-members = ["kimi-k2-coding", "qwen3-coder-72b"]
+members = ["model-c-coding", "qwen3-coder-72b"]
 ```
 
 Schema 변경 없음. RFC-0086 의 keeper namespace bulk promotion 흐름
@@ -190,7 +190,7 @@ Schema 변경 없음. RFC-0086 의 keeper namespace bulk promotion 흐름
 ### §5.4 결정 필요
 
 - secondary lane 의 model 선택 — provider 가용성 + cost trade-off.
-  Kimi / Qwen 후보는 메모리 노트 (`reference_kidsnote_*`) 의 fleet
+  Provider-C / Provider-H 후보는 메모리 노트 (`reference_kidsnote_*`) 의 fleet
   capability 와 cross-check.
 - secondary lane 의 trigger 조건 — primary 가 *모든* member 실패한
   후 vs *N consecutive* 실패 후. 후자 (N=3) 가 cooldown amplification

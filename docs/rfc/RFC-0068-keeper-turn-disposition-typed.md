@@ -6,7 +6,7 @@
 > RFC-0057 → RFC-0067 renumber pattern (#14672).
 
 - **Status**: Draft
-- **Author**: vincent (with Claude)
+- **Author**: vincent (with Agent-LLM-A)
 - **Created**: 2026-05-08
 - **Related**:
   - RFC-0042 (closed sum for runtime terminal code, MERGED)

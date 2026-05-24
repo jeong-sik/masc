@@ -9,7 +9,7 @@ implementation_prs: []
 # RFC-0065 — Keeper Tool Selection Lifecycle: TLA+ Coverage Extension
 
 **Status**: Active (frontmatter SSOT)
-**Author**: jeong-sik (with Claude Opus 4.7)
+**Author**: jeong-sik (with Agent-LLM-A Opus 4.7)
 **Date**: 2026-05-11
 **Supersedes**: —
 **Related**:
@@ -115,8 +115,8 @@ A new TLA+ spec is integrated into KeeperCompositeLifecycle observer if and only
 | Gate | Definition | Verification |
 |---|---|---|
 | **G1: Clean PASS** | `tlc -config <Spec>.cfg <Spec>.tla` exits 0 with no invariant violation, no deadlock, bounded state space ≤ 1M states. | TLC stdout + `make -C specs check-clean`. |
-| **G2: Buggy VIOLATED** | `tlc -config <Spec>-buggy.cfg <Spec>.tla` reports invariant violation in ≤ MaxSteps. Buggy cfg must model the *class* of bug we want to prevent (CLAUDE.md §TLA+ Bug Model), not a single instance. | TLC reports `Invariant <Name> is violated`. |
-| **G3: Provider opacity** | The spec and both cfgs contain zero literal provider identifiers (`anthropic`, `openai`, `claude`, `gpt`, `gemini`, `sonnet`, `opus`, `haiku`). Provider symbols are abstract (`Provider_1`, `Tier_A`, etc.). | `rg -i '<provider-regex>' <Spec>.tla <Spec>*.cfg` → 0 hits. |
+| **G2: Buggy VIOLATED** | `tlc -config <Spec>-buggy.cfg <Spec>.tla` reports invariant violation in ≤ MaxSteps. Buggy cfg must model the *class* of bug we want to prevent (AGENT-LLM-A.md §TLA+ Bug Model), not a single instance. | TLC reports `Invariant <Name> is violated`. |
+| **G3: Provider opacity** | The spec and both cfgs contain zero literal provider identifiers (`provider-a`, `provider-d`, `agent-llm-a`, `gpt`, `provider-f`, `sonnet`, `opus`, `haiku`). Provider symbols are abstract (`Provider_1`, `Tier_A`, etc.). | `rg -i '<provider-regex>' <Spec>.tla <Spec>*.cfg` → 0 hits. |
 | **G4: Observer integration** | Adding the new sub-FSM to `KeeperCompositeLifecycle.tla` keeps all existing joint invariants passing. The new sub-FSM exports a small projection (≤ 8 ghost variables) consumed by Composite. | TLC on `KeeperCompositeLifecycle.cfg` + `-buggy-*.cfg` pairs. |
 | **G5: OCaml correspondence** | Every spec state has a documented OCaml seam (file:line range). `test_keeper_ocaml_tla_correspondence.ml` (§3.6) maps each spec transition to a matching OCaml transition; missing mapping fails the test. | Alcotest. |
 
@@ -293,7 +293,7 @@ Three phases, each in its own PR. Each PR self-contained (no cross-PR atomicity 
 
 - [ ] `tlc -config <Spec>.cfg <Spec>.tla` → no error (G1)
 - [ ] `tlc -config <Spec>-buggy.cfg <Spec>.tla` → invariant violated (G2)
-- [ ] `rg -i 'anthropic|openai|claude|gpt|gemini|sonnet|opus|haiku' <Spec>.tla <Spec>*.cfg` → 0 hits (G3)
+- [ ] `rg -i 'provider-a|provider-d|agent-llm-a|gpt|provider-f|sonnet|opus|haiku' <Spec>.tla <Spec>*.cfg` → 0 hits (G3)
 - [ ] `tlc -config KeeperCompositeLifecycle.cfg KeeperCompositeLifecycle.tla` after new sub-FSM added → no error (G4)
 - [ ] `dune runtest test/test_keeper_ocaml_tla_correspondence.ml` PASS (G5)
 - [ ] `bash scripts/gen-tla-index.sh > specs/INDEX.md` and commit the regenerated index (drift-check CI)
@@ -330,6 +330,6 @@ This RFC is implementable when:
 - RFC-0056 §3.1 — extraction gate G1-G5 (the gate format reused here)
 - RFC-0062 — typed `blocker_class` enum (the type domain B3 reasons over)
 - PR #14613 — Track A, `KeeperRolloverDecision.tla` (the predecessor spec)
-- CLAUDE.md `software-development.md` §TLA+ Bug Model 패턴 — clean+buggy cfg convention
-- CLAUDE.md `software-development.md` §AI 코드 생성 안티패턴 #4 — FSM Sparse Match (the catch-all this RFC's invariants forbid)
+- AGENT-LLM-A.md `software-development.md` §TLA+ Bug Model 패턴 — clean+buggy cfg convention
+- AGENT-LLM-A.md `software-development.md` §AI 코드 생성 안티패턴 #4 — FSM Sparse Match (the catch-all this RFC's invariants forbid)
 - Memory `reference_keeper_state_machine_specs_consolidation_status` (operator-local) — P5 OPEN item closed by §3.3

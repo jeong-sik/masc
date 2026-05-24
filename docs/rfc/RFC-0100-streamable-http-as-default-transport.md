@@ -31,7 +31,7 @@ Three concrete defects of the legacy shape:
 
 ### 1.1 Streaming is opt-in via separate endpoint
 
-Clients must know to open a separate `GET /sse` for streaming events. MCP 2025-03-26 clients (and the new Anthropic / OpenAI client SDKs) instead expect `POST /mcp` to be either synchronous *or* chunked depending on the server's processing time — one URL, one connection.
+Clients must know to open a separate `GET /sse` for streaming events. MCP 2025-03-26 clients (and the new Provider-A / Provider-D client SDKs) instead expect `POST /mcp` to be either synchronous *or* chunked depending on the server's processing time — one URL, one connection.
 
 ### 1.2 Session keying via query string
 
@@ -168,5 +168,5 @@ PR-2 is **wire-shape-changing** (chunked framing replaces full-body); but the *b
 - [HTTP Deprecation header — RFC 8594](https://www.rfc-editor.org/rfc/rfc8594)
 - [[RFC-0098]] — Typed JSON-RPC error envelope (response edge, IMPROVE-01)
 - [[RFC-0099]] — Session lifecycle typed events (transport edge, IMPROVE-05)
-- [[RFC-0095]] — OpenAI-compat provider streaming wire-up (provider edge, in main)
+- [[RFC-0095]] — Provider-D-compat provider streaming wire-up (provider edge, in main)
 - [[RFC-OAS-020]] — TTFT instrumentation in oas (IMPROVE-04)

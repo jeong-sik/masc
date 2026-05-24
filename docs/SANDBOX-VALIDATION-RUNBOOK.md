@@ -109,5 +109,5 @@ four are closed) when:
 
 Reference threads:
 - Sandbox root-fix family — #11594, #11610, #11627, #11679
-- Plan SSOT — `planning/claude-plans/30m-users-dancer-downloads-kimi-agent-greedy-pebble.md`
+- Plan SSOT — `planning/claude-plans/30m-users-dancer-downloads-provider-c-agent-greedy-pebble.md`
 - TLA spec — `specs/boundary/SandboxDispatch.tla` (#11638)

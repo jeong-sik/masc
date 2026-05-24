@@ -95,7 +95,7 @@ Implemented in this branch:
   - a producer fixture that calls the pre-dispatch terminal path and verifies
     manifest JSONL rows plus the linked receipt path;
   - a successful provider/OAS-run fixture that calls `keeper_tool_search`
-    through a local OpenAI-compatible mock and verifies the manifest,
+    through a local Provider-D-compatible mock and verifies the manifest,
     checkpoint, state sidecar, tool-call log, and receipt chain together.
   - a provider-lane matrix regression that covers inline-only,
     runtime-MCP-only, mixed, no-tool, and runtime-MCP-connect-only surfaces.
@@ -195,7 +195,7 @@ Latest verification:
 - `opam exec -- ocamlformat --check lib/config_doctor.ml lib/config_doctor.mli test/test_config_doctor.ml`
 - `MASC_CONFIG_DIR=/Users/dancer/me/.masc/config MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false ./_build/default/bin/main_eio.exe doctor config --base-path /Users/dancer/me --json`
   (expected exit 1: live `keeper_turn` and `tool_required` both target
-  `tier-group.glm-coding-with-spark`, whose single candidate lacks the required tool
+  `tier-group.provider-k-coding-with-spark`, whose single candidate lacks the required tool
   lane; doctor now reports `no_tool_capable_provider` risk before runtime
   dispatch)
 - `scripts/keeper-runtime-truth-gate.sh --self-test` (success fixture plus
@@ -203,7 +203,7 @@ Latest verification:
 - `env RUN_ID=keeper-runtime-truth-live-20260512-codex5 RUN_DIR=/private/tmp/keeper-runtime-truth-live-20260512-codex5 KEEP_ARTIFACTS=1 TARGET_PHASES=bootstrap,liveness MAX_TURNS=1 TURN_TIMEOUT_SEC=120 HEALTH_TIMEOUT_SEC=45 HEARTBEAT_WAIT_SEC=20 PRESSURE_BYTES=1000 MASC_CONFIG_DIR=/Users/dancer/me/.masc/config scripts/harness_keeper_continuity_validation.sh`
   (expected FAIL before tick-stop fix: provider API error was masked as outer timeout)
 - `env RUN_ID=keeper-runtime-truth-live-20260513-codex8 RUN_DIR=/private/tmp/keeper-runtime-truth-live-20260513-codex8 KEEP_ARTIFACTS=1 TARGET_PHASES=bootstrap,liveness MAX_TURNS=1 TURN_TIMEOUT_SEC=120 HEALTH_TIMEOUT_SEC=45 HEARTBEAT_WAIT_SEC=20 PRESSURE_BYTES=1000 MASC_CONFIG_DIR=/Users/dancer/me/.masc/config scripts/harness_keeper_continuity_validation.sh`
-  (expected FAIL after tick-stop fix: GLM insufficient-balance error propagates in 0.74s; keeper turn then fails on no tool-capable provider)
+  (expected FAIL after tick-stop fix: Provider-K insufficient-balance error propagates in 0.74s; keeper turn then fails on no tool-capable provider)
 - `env RUN_ID=keeper-runtime-truth-live-20260513-codex9 RUN_DIR=/private/tmp/keeper-runtime-truth-live-20260513-codex9 KEEP_ARTIFACTS=1 TARGET_PHASES=bootstrap,liveness MAX_TURNS=1 TURN_TIMEOUT_SEC=30 HEALTH_TIMEOUT_SEC=30 HEARTBEAT_WAIT_SEC=10 PRESSURE_BYTES=1000 MASC_CONFIG_DIR=/Users/dancer/me/.masc/config scripts/harness_keeper_continuity_validation.sh`
   (expected FAIL: terminal reason is now `no_tool_capable_provider` and manifest includes `pre_dispatch_blocked`)
 - `scripts/keeper-runtime-truth-gate.sh --base-path /var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T//keeper-continuity.keeper-runtime-truth-live-20260512-codex5.2OnAhW --keeper continuity-keeper-runtime-truth-live-20260512-codex5 --trace-id trace-1778579781467-00000 --turn-id 1 --mode provider`
@@ -222,7 +222,7 @@ Latest-main live evidence:
   classified `PASS`; phase log shows active keepalive and room presence.
 - The active config root used in the live run was
   `/Users/dancer/me/.masc/config`, whose active catalog default was
-  `glm-coding-with-spark`. The harness no longer hardcodes `primary`.
+  `provider-k-coding-with-spark`. The harness no longer hardcodes `primary`.
 - Latest post-fix live-like liveness rerun:
   `/private/tmp/keeper-runtime-truth-live-20260512-codex5`
   classified `FAIL`; bootstrap passed, liveness still timed out after the
@@ -253,7 +253,7 @@ Latest-main live evidence:
   `terminal_reason_code = no_tool_capable_provider`.
 - Current live `masc-mcp doctor config --base-path /Users/dancer/me --json`
   also reports `status = error` for the same route capability gap:
-  both `keeper_turn` and `tool_required` target `tier-group.glm-coding-with-spark`, and
+  both `keeper_turn` and `tool_required` target `tier-group.provider-k-coding-with-spark`, and
   its single candidate is rejected for forced required-tool use with
   `runtime_mcp_caps_missing`.
 
@@ -417,7 +417,7 @@ Mapping:
   or provider-attempt FSM surfaces, and it now exposes an explicit structured
   error surface instead of all `Cascade_error_classify` helpers. Provider/model
   shaped helpers such as tool-filter classification, default model-string
-  lookup, label-to-config construction, Codex preflight, and provider-specific
+  lookup, label-to-config construction, Agent-Code preflight, and provider-specific
   error enrichment must be reached through lower-level OAS boundary modules,
   not the keeper facade.
 - `/runtime-trace.manifest_rows` and `/runtime-trace.receipts` are public API
@@ -557,7 +557,7 @@ Fragile parts:
   route has no candidate that materializes the required keeper tool support.
   `masc-mcp doctor config` now catches this same route-capability
   gap without starting a keeper turn.
-- Live config drift is real: the current config root exposes `glm-coding-with-spark` as
+- Live config drift is real: the current config root exposes `provider-k-coding-with-spark` as
   the only active catalog profile, while older scripts assumed `primary`.
   The harness now avoids that hardcoded default, but operator docs/config still
   need cleanup.
@@ -575,7 +575,7 @@ It is acceptable to ship behind an operator-facing experimental gate if the
 goal is observability hardening. It is not yet acceptable as a final product
 runtime guarantee because the strongest live-like evidence on latest main now
 fails at route capability: the keeper message queues, but the active
-`tier-group.glm-coding-with-spark` route has no tool-capable provider for the keeper's
+`tier-group.provider-k-coding-with-spark` route has no tool-capable provider for the keeper's
 materialized internal tool surface.
 
 Highest-risk gaps:
@@ -585,7 +585,7 @@ Highest-risk gaps:
    `no_tool_capable_provider`. The manifest now records
    `pre_dispatch_blocked`, and the receipt/turn terminal reason stays
    structured. `masc-mcp doctor config` now fails with the same diagnosis
-   before dispatch. Still open: configure `tier-group.glm-coding-with-spark` with a
+   before dispatch. Still open: configure `tier-group.provider-k-coding-with-spark` with a
    concrete tool-capable provider for keeper-internal tools, or route these
    keeper turns to a provider lane that can materialize runtime MCP/inline
    tools.
@@ -670,8 +670,8 @@ Prompt-to-artifact checklist:
    `Keeper_cascade_engine` boundary, manifest fields
    `cascade_engine`, `oas_dispatch_mode`, and
    `oas_internal_cascade_allowed`, plus route/cascade regression tests.
-4. External Agent SDK comparison: covered by the audit's Claude Agent SDK,
-   Google ADK, OpenAI Agents SDK, OpenClaw, and Hermes sections using the
+4. External Agent SDK comparison: covered by the audit's Agent-LLM-A Agent SDK,
+   Google ADK, Provider-D Agents SDK, OpenClaw, and Hermes sections using the
    checked primary-source links recorded in the audit.
 5. Compaction/memory/context insertion/removal: covered by audit section 5,
    manifest rows for `context_injected`, `context_compacted`,
@@ -681,7 +681,7 @@ Prompt-to-artifact checklist:
    observability/reliability improvement. It is not yet a final product
   runtime guarantee because the latest-main live-like run failed with a
   structured route-capability error:
-   `no_tool_capable_provider` for `tier-group.glm-coding-with-spark` with no candidate
+   `no_tool_capable_provider` for `tier-group.provider-k-coding-with-spark` with no candidate
    that materializes the required keeper tool support.
 
 Completion status: not complete as a full product-readiness goal. The immediate

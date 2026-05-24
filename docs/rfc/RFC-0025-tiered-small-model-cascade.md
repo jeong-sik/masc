@@ -1,7 +1,7 @@
 # RFC-0025: Tiered Small-Model Cascade (4B → 9B → 70B+)
 
 - **Status**: Draft
-- **Author**: vincent (with Claude)
+- **Author**: vincent (with Agent-LLM-A)
 - **Created**: 2026-05-03
 - **Related**: RFC-0024 (Ollama integration), oas_worker_named_cascade.ml, cascade_fsm.ml, config/cascade.toml
 
@@ -12,9 +12,9 @@
 ## 2. Current Architecture
 
 ```
-keeper_turn → [primary] → codex_cli → gemini_cli → kimi_cli → glm-coding → claude_code
+keeper_turn → [primary] → cli-tool-a → cli-tool-b → cli-tool-c → provider-k-coding → cli-tool-d
                                     ↓ timeout/error
-                              [keeper_diverse] → claude_code → gemini_cli → codex_cli
+                              [keeper_diverse] → cli-tool-d → cli-tool-b → cli-tool-a
 ```
 
 모든 요청이 동일 프로파일을 순차 순회. 태스크 복잡도에 따른 라우팅 없음.
@@ -56,7 +56,7 @@ fallback_cascade = "tier_medium"
 comment = "9B-class models. Cost optimized."
 models = [
   "ollama:llama3.2:8b",
-  "codex_cli:gpt-5.3-codex-spark",
+  "cli-tool-a:model-d-spark",
 ]
 temperature = 0.2
 max_tokens = 4096

@@ -3,7 +3,7 @@
 - 일자: 2026-05-12
 - 대상: `lib/keeper/keeper_unified_turn.ml`
 - 모드: READ-ONLY 감사 (코드 변경 없음, 본 문서 1개 파일만 생성)
-- 트리거: CLAUDE.md §software-development.md 300/500줄 임계, 최근 200 PR 중 9회 touch, self-eval가 "godfile-pressure-ignored"로 표시.
+- 트리거: AGENT-LLM-A.md §software-development.md 300/500줄 임계, 최근 200 PR 중 9회 touch, self-eval가 "godfile-pressure-ignored"로 표시.
 
 > Memory `feedback_explore_agent_dead_code_triage_oversells.md` 경고를 따라, "사용되지 않음" 주장은 직접 grep cross-check 후에만 기록한다.
 
@@ -176,7 +176,7 @@ closure로 캡처되는 ref들은 *같은 turn 사이클 동안의 누적 상태
 **Tradeoff**:
 - ➕ 위험 0. 최근 9회 touch가 모두 typed-variant 마이그레이션(즉, *수렴*하는 작업)이므로 자연 안정화 가능성 있음.
 - ➕ TLA+ spec 8 파일에 line-anchored 주석이 살아 있음. 분할 비용 절약.
-- ➖ `wrong_approach` 누적 신호 — CLAUDE.md `software-development.md` "파일이 임계값을 넘으면 분할 검토" 기본 원칙 위반.
+- ➖ `wrong_approach` 누적 신호 — AGENT-LLM-A.md `software-development.md` "파일이 임계값을 넘으면 분할 검토" 기본 원칙 위반.
 - ➖ 105 commits / 2 months 빈도는 *touch surface*가 넓다는 신호.
 
 ### 권고 — **Option B**

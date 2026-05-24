@@ -11,7 +11,7 @@ withdrawn_reason: "Self-declared superseded by RFC-0058 in original body (2026-0
 # RFC-0055: Cascade Fallback Chain Capability-Tier Routing
 
 **Status**: Superseded by RFC-0058 (declarative cascade config — RFC-0058 §1 / Supersedes ledger explicitly absorbs the capability-tier routing concern)  
-**Author**: Agent (Claude Sonnet 4.6)  
+**Author**: Agent (Agent-LLM-A Sonnet 4.6)  
 **Date**: 2026-05-09 · Superseded 2026-05-11  
 **Related**: RFC-0041 (hierarchical cascade config), RFC-0058 (declarative cascade config), PR #14358, PR #14360, 2026-05-04 ollama_bench incident
 
@@ -56,7 +56,7 @@ Ollama (all variants) returns `supports_runtime_mcp_tools = false` because it is
 ### 1.3 Operational Impact
 
 - **2026-05-04 incident** (`cascade.json:169` comment): `ollama_bench` escalation into the general keeper path hit the 600 s `MASC_KEEPER_TURN_TIMEOUT_SEC` ceiling. The fiber stayed in `with_timeout_exn` long enough that all 14 keepers entered the 60 s "peers holding slot" skip branch, producing **5,963 skip-turn events in 24 h** until manual restart.
-- **2026-05-09 prod log** (09:35:20--09:50:36): `primary` weighted random selected `claude:claude-sonnet-4-6` (weight 3) and `gemini:gemini-2.5-flash` (weight 4). Both failed with external errors (429 admin-disabled, insufficient balance, quota exceeded). Fallback to `local_recovery` produced 100% `Runtime_mcp_caps_missing` rejections. No terminal successful dispatch occurred.
+- **2026-05-09 prod log** (09:35:20--09:50:36): `primary` weighted random selected `agent-llm-a:model-a-sonnet` (weight 3) and `provider-f:provider-f-2.5-flash` (weight 4). Both failed with external errors (429 admin-disabled, insufficient balance, quota exceeded). Fallback to `local_recovery` produced 100% `Runtime_mcp_caps_missing` rejections. No terminal successful dispatch occurred.
 
 The cascade system has no terminal fallback that satisfies the capability requirements of the original request.
 
@@ -162,9 +162,9 @@ let retired_tool_profile : assignable cascade_def =
   Assignable {
     id = ("retired_tool_profile" :> assignable cascade_id);
     models = [
-      { model = "claude_code:auto"; weight = 3; supports_tool_choice = Some true };
-      { model = "glm-coding:auto"; weight = 2; supports_tool_choice = Some true };
-      { model = "kimi_cli:kimi-for-coding"; weight = 1; supports_tool_choice = Some true };
+      { model = "cli-tool-d:auto"; weight = 3; supports_tool_choice = Some true };
+      { model = "provider-k-coding:auto"; weight = 2; supports_tool_choice = Some true };
+      { model = "cli-tool-c:model-c-coding"; weight = 1; supports_tool_choice = Some true };
     ];
     fallback = ("retired_fast_profile" :> assignable cascade_id);
     min_capability = Capability_set.of_list [ Runtime_mcp_tools; Inline_tools; Tool_choice ];
@@ -202,9 +202,9 @@ Where `retired_cloud_profile` is a new assignable cascade containing only cloud 
 ```json
 {
   "retired_cloud_profile_models": [
-    { "model": "claude_code:auto", "weight": 3, "supports_tool_choice": true },
-    { "model": "glm-coding:auto", "weight": 2, "supports_tool_choice": true },
-    { "model": "kimi_cli:kimi-for-coding", "weight": 1, "supports_tool_choice": true }
+    { "model": "cli-tool-d:auto", "weight": 3, "supports_tool_choice": true },
+    { "model": "provider-k-coding:auto", "weight": 2, "supports_tool_choice": true },
+    { "model": "cli-tool-c:model-c-coding", "weight": 1, "supports_tool_choice": true }
   ],
   "retired_cloud_profile_temperature": 0.2,
   "retired_cloud_profile_max_tokens": 30000,

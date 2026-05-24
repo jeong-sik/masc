@@ -25,7 +25,7 @@ const snapshot = {
     {
       ts_unix: 1777986000,
       channel: 'turn',
-      model: 'glm:auto',
+      model: 'provider-k:auto',
       input_tokens: 120,
       output_tokens: 45,
       total_tokens: 165,

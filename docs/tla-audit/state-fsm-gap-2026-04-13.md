@@ -11,7 +11,7 @@
 > - **P2 / P5** unchanged from the original disposition.
 
 Date: 2026-04-13
-Auditor: Claude Opus 4.6 (1M context)
+Auditor: Agent-LLM-A Opus 4.6 (1M context)
 PR: #6834 (fix), this document: audit branch `audit/tla-state-gap`
 
 ## 1. Bug Summary

@@ -1,7 +1,7 @@
 # RFC 0034.v2 — Per-Goal Cap to All Task-Creation Callers (post-#13981)
 
 - **Status**: Draft (loop-iter-5, 2026-05-07)
-- **Author**: Vincent + Claude (auto-mode loop)
+- **Author**: Vincent + Agent-LLM-A (auto-mode loop)
 - **Builds on**: #13981 ("fix(keeper): cap goal-scoped task creation")
 - **Sister**: RFC-0026 work-conserving-keeper-admission, RFC-0002 keeper-state-machine
 - **Resolves Board Issue**: "taskmaster — Per-goal limit violation: oas-bridge-stabilization has 8 open tasks"

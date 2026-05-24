@@ -129,7 +129,7 @@ LT-16-KCB Phases 1–3 (#7793 / #7801 / #7822) landed the circuit-breaker axis e
 
 2. **Spec was not under CI.** The file lived at `specs/KeeperCircuitBreaker.tla` (repo top-level `specs/`), while every other axis lives in `specs/keeper-state-machine/`. `scripts/tla-check.sh` iterates only `specs/keeper-state-machine/`, `specs/boundary/`, `specs/bug-models/`, `specs/masc-ecosystem/`, and `tla/`. The KCB spec was therefore a **dead document** — present on disk but never model-checked, which is what allowed the mis-description above to persist.
 
-Both drifts are resolved in this PR: spec + both `.cfg`s relocated into `specs/keeper-state-machine/`, and `tla-check.sh` gained one clean + one buggy line for `KeeperCircuitBreaker.tla`. Local TLC confirms 334 distinct states under `Spec` (no violation) and exit code 12 (`Invariant TripOnlyWithStreak is violated`) under `SpecBuggy` — the Bug Model pattern from CLAUDE.md is now live on the KCB axis.
+Both drifts are resolved in this PR: spec + both `.cfg`s relocated into `specs/keeper-state-machine/`, and `tla-check.sh` gained one clean + one buggy line for `KeeperCircuitBreaker.tla`. Local TLC confirms 334 distinct states under `Spec` (no violation) and exit code 12 (`Invariant TripOnlyWithStreak is violated`) under `SpecBuggy` — the Bug Model pattern from AGENT-LLM-A.md is now live on the KCB axis.
 
 ### New drift class: "spec is present but unguarded"
 

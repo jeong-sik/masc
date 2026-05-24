@@ -1,7 +1,7 @@
 # TLA+ Specs Gap Audit — Phase 2 (tautology triage)
 
 > Status: Phase 2 of N. Triages the 21 tautology candidates from Phase 1 §3.2.
-> Author: Vincent (jeong-sik) with Claude
+> Author: Vincent (jeong-sik) with Agent-LLM-A
 > Created: 2026-04-30
 > Tracks: Q-P0-2 follow-up
 > Related: PR #12123 (Phase 1, MERGED)
@@ -12,7 +12,7 @@
 
 Phase 1 §3.2 surfaced **21 specs** where `INDEX.md` shows the clean and buggy invariant sets are textually identical. The framing was:
 
-> This may still be valid: the buggy cfg can override the Spec/Init/Next action (e.g. via a separate SpecBuggy definition that includes BugAction) while keeping the same invariants — that *is* the CLAUDE.md pattern. […] The point is structural: INDEX.md reveals 21 candidate-tautology rows that warrant per-spec inspection, not that all 21 are wrong.
+> This may still be valid: the buggy cfg can override the Spec/Init/Next action (e.g. via a separate SpecBuggy definition that includes BugAction) while keeping the same invariants — that *is* the AGENT-LLM-A.md pattern. […] The point is structural: INDEX.md reveals 21 candidate-tautology rows that warrant per-spec inspection, not that all 21 are wrong.
 
 A spot-check on `auth/AuthIdentityFSM` confirmed `Spec` vs `SpecBuggy` distinction. Phase 2 runs the same check across all 21.
 
@@ -70,7 +70,7 @@ $ rg "^SpecBuggy|^NextBuggy|^NextUnsafe" specs/...
 | `bug-models/HebbianLearning.tla` | `SpecBuggy == Init /\ [][NextUnsafe]_vars` | renamed `NextUnsafe` |
 | `admission-queue/AdmissionQueue.tla` | `SpecBuggy == Init /\ [][NextBuggy]_vars` | `NextBuggy == \/ Next \/ FdGuardSkip \/ ReleaseSkipped` (extends `Next`) |
 
-All four use the CLAUDE.md `Next \/ BugAction` recipe with one cosmetic divergence: **three different names** for the bug-extended transition relation (`NextBuggy`, `NextUnsafe`, occasionally inline). This is style drift, not correctness — addressed in §6.
+All four use the AGENT-LLM-A.md `Next \/ BugAction` recipe with one cosmetic divergence: **three different names** for the bug-extended transition relation (`NextBuggy`, `NextUnsafe`, occasionally inline). This is style drift, not correctness — addressed in §6.
 
 ## 5. Phase 1 verdict revision
 
@@ -94,7 +94,7 @@ Three names in use for the bug-extended transition:
 - `NextUnsafe` (HebbianLearning)
 - inline `\/ Next \/ <BugAction>` directly in `SpecBuggy` (rarer)
 
-`KeeperOASAdvanced.tla` (the canonical example referenced in CLAUDE.md) uses `CancelledNeverAbsorbed` invariant + `CancelledAbsorbed` BugAction directly inside `Next`. So even the "canonical" spec doesn't follow a single naming convention.
+`KeeperOASAdvanced.tla` (the canonical example referenced in AGENT-LLM-A.md) uses `CancelledNeverAbsorbed` invariant + `CancelledAbsorbed` BugAction directly inside `Next`. So even the "canonical" spec doesn't follow a single naming convention.
 
 This is a hygiene finding worth tracking, not blocking. A follow-up could:
 1. Pick `NextBuggy` as canonical (most-used)
@@ -133,9 +133,9 @@ For future audits in this style, expect the second pass to delete more than it a
 - `docs/audit/TLA-SPECS-GAP-AUDIT-2026-04.md` — Phase 1 (MERGED in #12123)
 - `specs/INDEX.md` — auto-generated, source for Phase 1 §3.2 candidate list
 - `/tmp/cycle11-tautology-sweep.sh` — sweep script (output reproduced in §3)
-- `specs/keeper-state-machine/KeeperOASAdvanced.tla` — canonical Bug Model example referenced in CLAUDE.md
+- `specs/keeper-state-machine/KeeperOASAdvanced.tla` — canonical Bug Model example referenced in AGENT-LLM-A.md
 - `docs/audit/OAS-MASC-BOUNDARY-AUDIT-2026-04-PHASE2.md` — sister audit's Phase 2 (NEEDS SWEEP→PASS via C1–C4 taxonomy)
-- CLAUDE.md `TLA+ Bug Model 패턴` section
+- AGENT-LLM-A.md `TLA+ Bug Model 패턴` section
 - Memory: `feedback_self_confession_comments_must_be_measured` (don't trust prose alone — measure)
 
 *Audit date: 2026-04-30 / Phase 2 of 4 / docs-only / verifies Phase 1 framing*

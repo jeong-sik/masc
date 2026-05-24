@@ -91,9 +91,9 @@ effective_timeout_sec              = min(adaptive, retry_reserved_cap)
 ```
 
 The receipt rotation distribution today is
-**strict_tool_candidates → glm-spark : 9** versus
-**glm-spark → strict_tool_candidates : 5**. Both tier-groups hit the
-same cap because they share members (GLM-5-1, codex-spark, ollama)
+**strict_tool_candidates → provider-k-spark : 9** versus
+**provider-k-spark → strict_tool_candidates : 5**. Both tier-groups hit the
+same cap because they share members (Provider-K-5-1, agent-code-spark, ollama)
 and route through the same cap chain.
 
 ## §2 Why the band-aid is stale
@@ -163,7 +163,7 @@ Two related-but-non-gating tracks are explicitly separated below
 ### §4.1 Fleet fix — PR-2 (#16158)
 
 Pure removal. Same-diff legacy deletion per
-`CLAUDE.md` workaround-rejection bar:
+`AGENT-LLM-A.md` workaround-rejection bar:
 
 - `lib/keeper/keeper_turn_cascade_budget.ml`: delete the constant,
   delete the parameter, delete the branch, collapse the source

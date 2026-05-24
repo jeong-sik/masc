@@ -63,7 +63,7 @@ Replace `Otoml.find_result toml … |> function Ok v -> Ok v | Error _ -> Ok def
 - `lib/repo_manager/credential_store.ml:75-94` (4 sites)
 - `lib/repo_manager/credential_materializer.ml` (2 sites, `try … with _ ->` swallow)
 
-Total 10 sites. All in the credential/repo_manager subsystem flagged by CLAUDE.md `<agent_delegation>` for RFC-required PRs.
+Total 10 sites. All in the credential/repo_manager subsystem flagged by AGENT-LLM-A.md `<agent_delegation>` for RFC-required PRs.
 
 ## 2. Background — what fails today
 

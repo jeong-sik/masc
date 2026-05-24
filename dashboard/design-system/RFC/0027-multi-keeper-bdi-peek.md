@@ -1,7 +1,7 @@
 # RFC 0027 — Multi-Keeper BDI Peek (extends RFC 0024)
 
 - **Status**: Draft
-- **Author**: Vincent + Claude (auto mode 2026-05-05)
+- **Author**: Vincent + Agent-LLM-A (auto mode 2026-05-05)
 - **Created**: 2026-05-05
 - **Extends**: RFC 0024 (BDI Inspector Slot)
 - **Depends on**: RFC 0008 (AgentPresence), RFC 0019 (Keeper Line Ownership), RFC 0024

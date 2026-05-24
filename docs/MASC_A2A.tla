@@ -12,7 +12,7 @@
 EXTENDS Naturals, Sequences, FiniteSets
 
 CONSTANTS
-    Agents,          \* Set of all possible agents (e.g., {claude, gemini, codex})
+    Agents,          \* Set of all possible agents (e.g., {agent-llm-a, provider-f, agent-code})
     MaxMessages      \* Maximum messages for model checking bound
 
 VARIABLES
@@ -131,7 +131,7 @@ EventualDelivery ==
 (* Model Checking Configuration *)
 (*
  * To check with TLC:
- *   Agents <- {claude, gemini, codex}
+ *   Agents <- {agent-llm-a, provider-f, agent-code}
  *   MaxMessages <- 3
  *   Check: TypeInvariant, NoMessageLoss
  *   Check Liveness: EventualDelivery

@@ -18,7 +18,7 @@ implementation_prs: []
 `~/me/.tmp/pr-audit-2026-05-20/AUDIT-REPORT.md` Cluster A documents an
 iter-reproducible chain of 7 merged PRs that wrap silent parse failures
 with a warn + Prometheus counter while explicitly preserving the
-`None`/`[]`/default return value. CLAUDE.md §"워크어라운드 거부 기준"
+`None`/`[]`/default return value. AGENT-LLM-A.md §"워크어라운드 거부 기준"
 signature #1 (Telemetry-as-Fix) classifies this exact shape as a
 workaround: the counter is an *alarm*, not a *fix*.
 
@@ -109,7 +109,7 @@ boundary; sites that do not link Yojson still get a useful
 
 ### 4.4 Why this is not itself a workaround
 
-CLAUDE.md signatures 1–3 require the change to *suppress* visibility or
+AGENT-LLM-A.md signatures 1–3 require the change to *suppress* visibility or
 *add* a classifier without removing the underlying ambiguity. The
 opposite holds here:
 

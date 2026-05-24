@@ -4,7 +4,7 @@ title: "OAS retry-admission typed error — split server timeout from didn't-try
 status: Draft
 created: 2026-05-21
 updated: 2026-05-21
-author: claude-opus
+author: agent-llm-a-opus
 supersedes: []
 superseded_by: null
 related: ["0148", "0157"]

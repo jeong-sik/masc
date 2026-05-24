@@ -9,7 +9,7 @@ implementation_prs: []
 # RFC-0046 — Keeper Detail FSM Hub as SSOT
 
 Status: Active (frontmatter SSOT; body header retained for historical authoring trail)
-Author: jeong-sik (with Claude Opus 4.7)
+Author: jeong-sik (with Agent-LLM-A Opus 4.7)
 Date: 2026-05-08
 Supersedes: —
 Related: PR #14219, #14220 (dashboard cleanup precursors), KeeperCompositeLifecycle.tla

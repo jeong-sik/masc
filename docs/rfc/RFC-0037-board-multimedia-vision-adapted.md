@@ -1,11 +1,11 @@
 # RFC-0037: Board Multimedia & Vision — Eio/File-Based Adaptation
 
 - **Status**: Draft
-- **Author**: vincent (with Claude Opus 4.7)
+- **Author**: vincent (with Agent-LLM-A Opus 4.7)
 - **Created**: 2026-05-07
 - **Drives**: adaptation of an externally authored 2025-05 plan document for board multimedia + AI vision integration. The external plan as written is not implementable on masc-mcp main; this RFC documents the verified gap and proposes a stack-aligned path.
 - **Related**:
-  - `docs/rfc/RFC-0008-credential-provider.md` — credential surface that any external API integration (Anthropic / OpenAI) must respect.
+  - `docs/rfc/RFC-0008-credential-provider.md` — credential surface that any external API integration (Provider-A / Provider-D) must respect.
   - `lib/board_types/board_types.mli` — current post type SSOT (line 76 onward).
   - `lib/provider_adapter.ml` — existing AI provider abstraction (1626 LOC + 397 mli) that this RFC builds on rather than replacing.
   - `~/me/common/evidence-record.md` — currency policy that any model-id / pricing claim must satisfy at PR time.
@@ -18,7 +18,7 @@ An external 2025-05 plan document (~2040 lines) proposes adding image / video / 
 |---|---|---|
 | §1 codebase analysis | 7 | 6 (paths wrong, nonexistent frontend files) |
 | §3 architecture stack | 5 | 4 (Dream/Opium → actual httpun, Lwt → actual Eio, Redis/RabbitMQ → unused, PostgreSQL → unused) + 1 ignored existing abstraction (`provider_adapter.ml`) |
-| §5 cost / model selection | 7 | 5/5 pricing claims with no Evidence Record + 2/2 model IDs (`claude-3-5-sonnet`, `gpt-4o`) predate Claude 4.X family |
+| §5 cost / model selection | 7 | 5/5 pricing claims with no Evidence Record + 2/2 model IDs (`model-a-sonnet`, `model-d`) predate Agent-LLM-A 4.X family |
 | §6 phase tables | repeats §3 stack | propagates |
 | §7.1 frontend file targets | 7 | 3 inexistent (`post-editor.ts`, `comment-form.ts`, `comment-tree.ts`) |
 | §7.1 backend file targets | 3 | 2 inexistent (`lib/board_store.ml`, `lib/board_handler.ml`) — actual: `lib/board.ml`, `lib/board_dispatch.ml`, `lib/board_core.ml` |
@@ -56,7 +56,7 @@ The plan's **intent** (give board posts a media surface and automate analysis) i
 | Comment type | `board_types.mli:95-105` — analogous structure, no `meta_json` field today |
 | API dispatch | `lib/board_dispatch.ml`, `lib/board.ml`, `lib/board_core.ml` |
 | AI provider abstraction | `lib/provider_adapter.ml` (1626 LOC + 397 mli) — `runtime_kind` (Local / Cli_agent / Direct_api), `auth_mode`, `model_family`, `model_policy` |
-| OpenAI compat surface | `lib/server/server_openai_compat.ml` — receives OpenAI-style requests but is not vision-aware today |
+| Provider-D compat surface | `lib/server/server_openai_compat.ml` — receives Provider-D-style requests but is not vision-aware today |
 | Frontend board components | 12 files in `dashboard/src/components/board/` — board-state, board-surface (863 LOC), post-detail (538 LOC), mention-inbox, message-room-timeline, board-curation-panel, board-karma-panel, reaction-bar, state-block-messages, sub-board-surface, index, plus tests |
 
 ## 4. Phased proposal
@@ -159,7 +159,7 @@ The plan proposes a separate `VisionProvider` module hierarchy (with its own `na
   ```
 - Reuse existing `auth_mode` (`Api_key` / `Vertex_adc`) — no new credential paths.
 
-**Currency placeholder**: model selection is deferred to PR-time fetch of the official Anthropic and OpenAI model lists, with Evidence Record entries created per `~/me/common/evidence-record.md`. This RFC explicitly does **not** commit to specific model strings.
+**Currency placeholder**: model selection is deferred to PR-time fetch of the official Provider-A and Provider-D model lists, with Evidence Record entries created per `~/me/common/evidence-record.md`. This RFC explicitly does **not** commit to specific model strings.
 
 ### 4.4 Phase C — deferred
 
@@ -180,7 +180,7 @@ The `meta_json`-as-carrier choice is what makes Phase A0 zero-migration. Phase A
 
 1. **Phase A0 module placement**: `lib/board_attachment_meta.ml` (top-level masc_mcp) versus `lib/board_types/board_attachment_meta.ml` (sub-module of board_types). Sub-module is cleaner if attachments are conceptually part of the board type SSOT; top-level is cleaner if attachments may be reused by non-board surfaces (e.g. keeper artefact attachments) in future.
 2. **Attachment_id prefix**: `a-` (consistent with `p-` for posts, `c-` for comments) or `att-` (more descriptive but breaks the one-letter convention).
-3. **Phase B model commitment**: do we decide on a Claude-family default upfront (with provider_adapter routing as the override), or stay provider-agnostic and let the adapter pick at call-time? Latter has lower lock-in but harder to reason about cost.
+3. **Phase B model commitment**: do we decide on a Agent-LLM-A-family default upfront (with provider_adapter routing as the override), or stay provider-agnostic and let the adapter pick at call-time? Latter has lower lock-in but harder to reason about cost.
 4. **Frontend scope**: extend `post-detail.ts` (538 LOC, already complex) versus add a new sibling component for media-aware rendering. The plan named `post-editor.ts` — that file does not exist, so this is a real decision.
 
 ## 7. Out of scope for this RFC

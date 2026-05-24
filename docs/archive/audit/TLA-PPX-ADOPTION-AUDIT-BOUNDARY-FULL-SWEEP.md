@@ -1,7 +1,7 @@
 # TLA+ PPX Adoption Audit — boundary domain full sweep
 
 > Status: Mechanical sweep of all 18 boundary specs.
-> Author: Vincent (jeong-sik) with Claude
+> Author: Vincent (jeong-sik) with Agent-LLM-A
 > Created: 2026-04-30
 > Tracks: PR #12149 (spot-check) extension
 > Related: PR #12143 (audit), PR #12150 (resilience adoption), PR #12151 (ratchet)

@@ -1,7 +1,7 @@
 # RFC-0035: Cognitive IDE Master Plan Integration
 
 - **Status**: Draft
-- **Author**: Claude (autonomous, /loop iteration 1)
+- **Author**: Agent-LLM-A (autonomous, /loop iteration 1)
 - **Created**: 2026-05-06
 - **Source basis**: self-contained summary of the operator-provided Master
   Report (137KB / 3417 lines / 12 chapters / 11 dimensions). This RFC records

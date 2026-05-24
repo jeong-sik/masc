@@ -15,7 +15,7 @@ withdrawn_reason: "Sender-side dedup approach abandoned. Receive-side dedup (RFC
 > the iter-8 draft.
 
 - **Status**: Draft (loop-iter-8, 2026-05-07) — *replaces* iter-6/7 sketch
-- **Author**: Vincent + Claude (auto-mode loop)
+- **Author**: Vincent + Agent-LLM-A (auto-mode loop)
 - **Resolves Board Issues**: "24+ mention spam to nick0cave" (taskmaster), "Tripartite Coordination Breakdown — same task re-mention" (sangsu/imseonghan)
 - **Sister**: RFC-0035 (memory write — orthogonal complement that lets keepers act on mentions)
 

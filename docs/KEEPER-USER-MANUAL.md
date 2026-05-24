@@ -32,29 +32,29 @@ OAS pin metadata is generated from `scripts/oas-agent-sdk-pin.sh`. Current depen
 
 #### 1.1.1 OAS transport 환경 변수 (keeper 운영자용)
 
-OAS 0.159.0부터 비대화형 CLI transport(`transport_claude_code`, `transport_codex_cli`, `transport_gemini_cli`)가 `build_args` 시점에 다음 환경 변수를 읽어 플래그를 덧붙인다. 미설정 → 기존 argv 동일 (no-op). keeper 프로세스를 띄우는 systemd/launchd/service 파일에 export하면 masc 코드 변경 없이 per-deployment 튜닝이 가능하다.
+OAS 0.159.0부터 비대화형 CLI transport(`transport_cli-tool-d`, `transport_cli-tool-a`, `transport_cli-tool-b`)가 `build_args` 시점에 다음 환경 변수를 읽어 플래그를 덧붙인다. 미설정 → 기존 argv 동일 (no-op). keeper 프로세스를 띄우는 systemd/launchd/service 파일에 export하면 masc 코드 변경 없이 per-deployment 튜닝이 가능하다.
 
 | Env var | 적용 CLI | 효과 |
 |---|---|---|
-| `OAS_CLAUDE_STRICT_MCP=1` | Claude Code | `--strict-mcp-config` — ambient MCP 서버 전부 무시 |
-| `OAS_CLAUDE_MCP_CONFIG=<file\|json>` | Claude Code | `--mcp-config <v>` fallback (programmatic config이 없을 때만) |
-| `OAS_CLAUDE_DISALLOWED_TOOLS=Bash,Write` | Claude Code | 쉼표 분리된 각 항목마다 `--disallowedTools` |
-| `OAS_CODEX_CONFIG=mcp_servers={},sandbox_mode=read-only` | Codex CLI | 각각 `-c k=v`로 분해. Codex는 이게 유일한 MCP/hook 차단 경로 |
-| `OAS_CODEX_SANDBOX=read-only\|workspace-write\|danger-full-access` | Codex CLI | `-s <v>` |
-| `OAS_CODEX_PROFILE=<name>` | Codex CLI | `-p <name>` (`~/.codex/config.toml`의 profile) |
-| `OAS_CODEX_SKIP_GIT=1` | Codex CLI | `--skip-git-repo-check` |
-| `OAS_GEMINI_NO_MCP=1` | Gemini CLI | sentinel whitelist(`__oas_no_mcp__`)로 MCP 전부 OFF |
-| `OAS_GEMINI_ALLOWED_MCP=a,b` | Gemini CLI | per-서버 whitelist |
-| `OAS_GEMINI_APPROVAL_MODE=default\|auto_edit\|yolo\|plan` | Gemini CLI | `--approval-mode <v>`, set 되면 `config.yolo` 무시 |
-| `OAS_GEMINI_EXTENSIONS=a,b` | Gemini CLI | 각 항목마다 `-e` |
+| `OAS_CLI_TOOL_A_STRICT_MCP=1` | CLI-Tool-A | `--strict-mcp-config` — ambient MCP 서버 전부 무시 |
+| `OAS_CLI_TOOL_A_MCP_CONFIG=<file\|json>` | CLI-Tool-A | `--mcp-config <v>` fallback (programmatic config이 없을 때만) |
+| `OAS_CLI_TOOL_A_DISALLOWED_TOOLS=Bash,Write` | CLI-Tool-A | 쉼표 분리된 각 항목마다 `--disallowedTools` |
+| `OAS_CLI_TOOL_B_CONFIG=mcp_servers={},sandbox_mode=read-only` | CLI-Tool-B | 각각 `-c k=v`로 분해. Agent-Code는 이게 유일한 MCP/hook 차단 경로 |
+| `OAS_CLI_TOOL_B_SANDBOX=read-only\|workspace-write\|danger-full-access` | CLI-Tool-B | `-s <v>` |
+| `OAS_CLI_TOOL_B_PROFILE=<name>` | CLI-Tool-B | `-p <name>` (`~/.agent-code/config.toml`의 profile) |
+| `OAS_CLI_TOOL_B_SKIP_GIT=1` | CLI-Tool-B | `--skip-git-repo-check` |
+| `OAS_CLI_TOOL_C_NO_MCP=1` | CLI-Tool-C | sentinel whitelist(`__oas_no_mcp__`)로 MCP 전부 OFF |
+| `OAS_CLI_TOOL_C_ALLOWED_MCP=a,b` | CLI-Tool-C | per-서버 whitelist |
+| `OAS_CLI_TOOL_C_APPROVAL_MODE=default\|auto_edit\|yolo\|plan` | CLI-Tool-C | `--approval-mode <v>`, set 되면 `config.yolo` 무시 |
+| `OAS_CLI_TOOL_C_EXTENSIONS=a,b` | CLI-Tool-C | 각 항목마다 `-e` |
 
 운영 참고:
-- Claude Code의 LSP / hooks / auto-memory / CLAUDE.md auto-discovery는 그대로 유지됨. `--bare`는 채택하지 않음(keeper가 코드 편집 시 필요한 보조).
-- Gemini CLI는 hook 런타임 off 플래그가 없다. hook 제어가 필요하면 `gemini hooks <cmd>` subcommand로 keeper 기동 전에 비활성화한다.
-- "empty string = disable all" 구분이 필요한 MCP whitelist만 `OAS_GEMINI_NO_MCP` 불 env로 분리되어 있음(`Unix.putenv`로는 진짜 unset이 불가한 제약 반영).
-- `OAS_GEMINI_NO_MCP=1`인데 `OAS_GEMINI_APPROVAL_MODE`가 비어 있으면 keeper 런타임은 `plan`을 기본 적용한다. MCP를 숨긴 상태에서 Gemini CLI built-in mutating tool이 `--yolo`로 실행되는 것을 막기 위한 보수적 기본값이다. 명시적으로 `yolo`/`auto_edit`가 필요하면 `OAS_GEMINI_APPROVAL_MODE`를 설정한다.
+- CLI-Tool-A의 LSP / hooks / auto-memory / AGENT-LLM-A.md auto-discovery는 그대로 유지됨. `--bare`는 채택하지 않음(keeper가 코드 편집 시 필요한 보조).
+- CLI-Tool-C는 hook 런타임 off 플래그가 없다. hook 제어가 필요하면 `provider-f hooks <cmd>` subcommand로 keeper 기동 전에 비활성화한다.
+- "empty string = disable all" 구분이 필요한 MCP whitelist만 `OAS_CLI_TOOL_C_NO_MCP` 불 env로 분리되어 있음(`Unix.putenv`로는 진짜 unset이 불가한 제약 반영).
+- `OAS_CLI_TOOL_C_NO_MCP=1`인데 `OAS_CLI_TOOL_C_APPROVAL_MODE`가 비어 있으면 keeper 런타임은 `plan`을 기본 적용한다. MCP를 숨긴 상태에서 CLI-Tool-C built-in mutating tool이 `--yolo`로 실행되는 것을 막기 위한 보수적 기본값이다. 명시적으로 `yolo`/`auto_edit`가 필요하면 `OAS_CLI_TOOL_C_APPROVAL_MODE`를 설정한다.
 
-**선언적 설정 (권장)**: process env 대신 `config/keepers/<name>.toml`의 `[keeper.oas_env]` 테이블에 적어두면 턴 시작 시 `Unix.putenv`로 자동 적용된다. 4개 built-in keeper는 `OAS_CLAUDE_STRICT_MCP=1` + `OAS_GEMINI_NO_MCP=1` + `OAS_GEMINI_APPROVAL_MODE=plan` + `OAS_CODEX_CONFIG=mcp_servers={}` 기본값이 이미 들어있다. 예시:
+**선언적 설정 (권장)**: process env 대신 `config/keepers/<name>.toml`의 `[keeper.oas_env]` 테이블에 적어두면 턴 시작 시 `Unix.putenv`로 자동 적용된다. 4개 built-in keeper는 `OAS_CLI_TOOL_A_STRICT_MCP=1` + `OAS_CLI_TOOL_C_NO_MCP=1` + `OAS_CLI_TOOL_C_APPROVAL_MODE=plan` + `OAS_CLI_TOOL_B_CONFIG=mcp_servers={}` 기본값이 이미 들어있다. 예시:
 
 ```toml
 [keeper]
@@ -62,15 +62,15 @@ persona_name = "analyst"
 # ...
 
 [keeper.oas_env]
-OAS_CLAUDE_STRICT_MCP = "1"
-OAS_GEMINI_NO_MCP = "1"
-OAS_GEMINI_APPROVAL_MODE = "plan"
-# Codex는 -c TOML override로만 제어 가능
-OAS_CODEX_CONFIG = "mcp_servers={},sandbox_mode=read-only"
+OAS_CLI_TOOL_A_STRICT_MCP = "1"
+OAS_CLI_TOOL_C_NO_MCP = "1"
+OAS_CLI_TOOL_C_APPROVAL_MODE = "plan"
+# Agent-Code는 -c TOML override로만 제어 가능
+OAS_CLI_TOOL_B_CONFIG = "mcp_servers={},sandbox_mode=read-only"
 MASC_KEEPER_OAS_UNIFIED_MAX_TOKENS = 8192
 ```
 
-키는 반드시 `^OAS_(CLAUDE|CODEX|GEMINI)_.+` 또는 `^MASC_KEEPER_OAS_.+` 패턴에 맞아야 한다. `MASC_KEEPER_OAS_UNIFIED_MAX_TOKENS`는 해당 keeper turn의 `max_tokens` fallback에도 반영된다. 그 외 키(`PATH`, `LD_PRELOAD`, 임의 변수 등)는 silently 드롭되어 ambient env 주입을 차단한다. bool 값은 `true`→`"1"`, `false`→`"0"`으로 자동 변환된다.
+키는 반드시 `^OAS_(AGENT-LLM-A|AGENT-CODE|PROVIDER-F)_.+` 또는 `^MASC_KEEPER_OAS_.+` 패턴에 맞아야 한다. `MASC_KEEPER_OAS_UNIFIED_MAX_TOKENS`는 해당 keeper turn의 `max_tokens` fallback에도 반영된다. 그 외 키(`PATH`, `LD_PRELOAD`, 임의 변수 등)는 silently 드롭되어 ambient env 주입을 차단한다. bool 값은 `true`→`"1"`, `false`→`"0"`으로 자동 변환된다.
 
 ### 1.2 MASC --- 조정 레이어
 
@@ -387,7 +387,7 @@ guardrail:
 
 ### 3.1.2 Legendary Bash 도구 표면
 
-`keeper_bash`는 claude-code BashTool 시맨틱 중 현재 남은 foreground
+`keeper_bash`는 agent-llm-a-code BashTool 시맨틱 중 현재 남은 foreground
 typed 실행 surface를 OCaml + Eio로 체화한 Legendary Bash 구현이다.
 운영자 flag 매트릭스와 flip 절차는
 [`LEGENDARY-BASH-RUNBOOK.md`](./LEGENDARY-BASH-RUNBOOK.md) 단일 문서가
@@ -626,16 +626,16 @@ Next Model Hint는 handoff 시 successor에게 추천할 모델이다.
 
 | Provider | 예시 | API |
 |----------|------|-----|
-| `glm` | `glm:glm-4.7-flash` | Z.ai ChatCompletions |
-| `claude` | `claude:sonnet` | Anthropic Messages API |
-| `gemini` | `gemini:pro` | Google AI API |
+| `provider-k` | `provider-k:provider-k-4.7-flash` | Z.ai ChatCompletions |
+| `agent-llm-a` | `agent-llm-a:sonnet` | Provider-A Messages API |
+| `provider-f` | `provider-f:pro` | Google AI API |
 | `openrouter` | `openrouter:meta-llama/llama-3` | OpenRouter API |
-| `custom` | `custom:model@http://host:port` | OpenAI 호환 엔드포인트 |
+| `custom` | `custom:model@http://host:port` | Provider-D 호환 엔드포인트 |
 
 ### 5.4 모델 변경 시 주의사항
 
 - keeper는 per-call `models` override나 persisted `active_model` pinning을 지원하지 않는다
-- handoff 시 cross-model 정규화가 자동 적용된다: Llama는 Tool 메시지 변환, Claude는 alternating 규칙 적용
+- handoff 시 cross-model 정규화가 자동 적용된다: Llama는 Tool 메시지 변환, Agent-LLM-A는 alternating 규칙 적용
 - cascade fallback은 resolved config root의 `cascade.toml`에 있는 해당 cascade 순서대로 시도한다
 
 ---

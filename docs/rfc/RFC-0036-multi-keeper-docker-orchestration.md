@@ -1,7 +1,7 @@
 # RFC-0036: Multi-Keeper Docker Orchestration & Lifecycle Cleanup
 
 - **Status**: Draft
-- **Author**: vincent (with Claude Opus 4.7)
+- **Author**: vincent (with Agent-LLM-A Opus 4.7)
 - **Created**: 2026-05-06
 - **Drives**: closes verification report items #30, #32, #34 (single coupled track)
 - **Related**:

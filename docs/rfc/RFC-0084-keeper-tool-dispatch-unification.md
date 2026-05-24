@@ -49,7 +49,7 @@ masc-mcp Keeper→Tool 실행 사이클은 현재 **3개의 dispatch entry**가 
 
 어떤 PR도 이 invariant를 *느슨하게* 만들면 거부.
 
-### 0.2 비대칭 분류 (CLAUDE.md "경계 명시 원칙")
+### 0.2 비대칭 분류 (AGENT-LLM-A.md "경계 명시 원칙")
 
 | 비대칭 종류 | 행동 |
 |---|---|
@@ -180,7 +180,7 @@ OAS측 `Tool.disclosure_level` Hybrid + `Disclosure_resolver`는 `lib/pipeline/s
 
 → 모든 keeper tool은 현재 Full_schema 단일 사이클. RFC-OAS-013 §1.3 경고가 정확히 main에 실현됨.
 
-### §1.7 Workaround Rejection Signature 매핑 (CLAUDE.md §워크어라운드 거부 기준)
+### §1.7 Workaround Rejection Signature 매핑 (AGENT-LLM-A.md §워크어라운드 거부 기준)
 
 | 시그니처 | 현재 코드에 있는 hit |
 |---|---|
@@ -444,12 +444,12 @@ let () = QCheck.Test.check_exn @@ QCheck.Test.make
 | **RFC-0080 Phase 3** (13 source pruning) | Multi-sprint. 각 source ownership audit 필요. 본 sprint는 typed shim 유지하고 Phase 3은 별도 RFC. |
 | **oas RFC-OAS-013 closeout** (`resolve_disclosure_level` dedup) | oas repo의 SDK Independence Gate + Draft Auto-Merge Guard. 별도 track. |
 | **Keeper sub-library extraction** | Memory `project_keeper_sublib_extraction_analysis`: 189↔118 cycle. 본 sprint는 typed boundary *준비*. |
-| **TLA+ spec for new dispatch FSM** | CLAUDE.md TLA+ Bug Model. Property test (PR-14)가 1차 안전선. TLA+ spec은 다음 RFC. |
+| **TLA+ spec for new dispatch FSM** | AGENT-LLM-A.md TLA+ Bug Model. Property test (PR-14)가 1차 안전선. TLA+ spec은 다음 RFC. |
 | **MCP `_meta` field로 descriptor 전달** | RFC-OAS-012 영역. masc-mcp 변경 0. |
 
 ---
 
-## §8 Workaround-Rejection Self-Check (CLAUDE.md §워크어라운드 거부 기준)
+## §8 Workaround-Rejection Self-Check (AGENT-LLM-A.md §워크어라운드 거부 기준)
 
 본 RFC의 14 PR이 다음 시그니처에 해당하지 않음을 명시:
 

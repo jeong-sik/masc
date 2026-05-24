@@ -56,7 +56,7 @@ describe('log diagnostics', () => {
         entry({
           level: 'ERROR',
           message:
-            'all cascades exhausted: Cascade attempt liveness guard killed runtime lane glm-coding-with-spark: inter_chunk_idle',
+            'all cascades exhausted: Cascade attempt liveness guard killed runtime lane provider-k-coding-with-spark: inter_chunk_idle',
         }),
       ),
     ).toBeNull()

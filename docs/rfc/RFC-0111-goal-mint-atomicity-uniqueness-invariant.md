@@ -32,7 +32,7 @@ type repair_source = [ `Created | `Reused ]
 
 ### 워크어라운드 3 시그니처 동시 발화
 
-PR #15893 가 한 PR 안에 CLAUDE.md `software-development.md` §"워크어라운드 거부 기준" 의 **3 시그니처를 동시** 도입:
+PR #15893 가 한 PR 안에 AGENT-LLM-A.md `software-development.md` §"워크어라운드 거부 기준" 의 **3 시그니처를 동시** 도입:
 
 1. **String/Substring 분류기 보강** (§"String classifier"):
    - `goal_title_of_purpose` 가 모든 auto-goal 에 `" (auto)"` 접미사 부착
@@ -65,7 +65,7 @@ Goal_store.upsert ~goal_id ~title ~purpose ...
 
 ### Why this needs an RFC
 
-1. **누적 메커니즘**: 다른 mint caller (예: 사용자 generated goal, MASC API `masc_goal_upsert`) 도 같은 invariant 문제. PR #15893 는 *Keeper_goal_repair* 한 caller 만 수정 — 다른 caller 가 같은 race 재발 시 또 다른 PR 필요. CLAUDE.md §"N-of-M 패치".
+1. **누적 메커니즘**: 다른 mint caller (예: 사용자 generated goal, MASC API `masc_goal_upsert`) 도 같은 invariant 문제. PR #15893 는 *Keeper_goal_repair* 한 caller 만 수정 — 다른 caller 가 같은 race 재발 시 또 다른 PR 필요. AGENT-LLM-A.md §"N-of-M 패치".
 2. **String classifier 의존**: " (auto)" 접미사로 *어떤 goal 이 auto* 인지 결정. 사용자가 manually 같은 title 의 goal 을 만들면 janitor 가 잘못 sweep. closed sum (`Goal_source : Auto | User | System`) 으로 좁힐 수 있음.
 3. **Cap 의 의미 분리 부재**: `auto_stagnant_days = 7` 은 *idle stagnant* 와 *auto-goal lifecycle* 두 의미를 하나의 cap 으로 합침. RFC-0094 (compact cooldown semantics split) 와 같은 family.
 

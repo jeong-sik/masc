@@ -4,7 +4,7 @@ title: "Tier-group capability profile route canonicalization — typed dedup and
 status: Draft
 created: 2026-05-23
 updated: 2026-05-23
-author: claude-opus
+author: agent-llm-a-opus
 supersedes: []
 superseded_by: null
 related: ["0058", "0153", "0157"]

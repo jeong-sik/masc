@@ -158,7 +158,7 @@
         "strict-row",
         "goal-loop-206-audit-external-claim-2026-05-05"
       ],
-      "note": "Filename-level sweep of Downloads zip archives matching Kimi, audit, goal, keeper, or masc found no strict-corpus markers in text-like archive members."
+      "note": "Filename-level sweep of Downloads zip archives matching Provider-C, audit, goal, keeper, or masc found no strict-corpus markers in text-like archive members."
     },
     {
       "artifact_name": "downloads_textlike_strict_corpus_marker_sweep",
@@ -216,7 +216,7 @@
         "strict-row",
         "goal-loop-206-audit-external-claim-2026-05-05"
       ],
-      "note": "Standalone Downloads PDFs were searched with pdftotext where readable. Strict-corpus marker hits and near-miss hits were 0; the two unreadable PDFs were not in Kimi/audit/goal/keeper/masc paths."
+      "note": "Standalone Downloads PDFs were searched with pdftotext where readable. Strict-corpus marker hits and near-miss hits were 0; the two unreadable PDFs were not in Provider-C/audit/goal/keeper/masc paths."
     },
     {
       "artifact_name": "downloads_spreadsheet_strict_corpus_marker_sweep",
@@ -237,7 +237,7 @@
         "strict-row",
         "goal-loop-206-audit-external-claim-2026-05-05"
       ],
-      "note": "Standalone Downloads xlsx/xls files were searched by extracting XML where readable. Strict-corpus marker hits and near-miss hits were 0; none of the spreadsheet paths matched Kimi, audit, goal, keeper, or masc."
+      "note": "Standalone Downloads xlsx/xls files were searched by extracting XML where readable. Strict-corpus marker hits and near-miss hits were 0; none of the spreadsheet paths matched Provider-C, audit, goal, keeper, or masc."
     },
     {
       "artifact_name": "masc_runtime_strict_corpus_marker_sweep",
@@ -408,7 +408,7 @@
         "strict-row",
         "goal-loop-206-audit-external-claim-2026-05-05"
       ],
-      "note": "Local Codex session and TUI log history containing exact strict-corpus markers was reviewed by category. Hits were self-referential transcripts from #13266/#13577 tooling, generated fixtures, status snapshots, synthetic contract tests, review comments, and negative searches; no independent strict 206-row corpus artifact was present."
+      "note": "Local Agent-Code session and TUI log history containing exact strict-corpus markers was reviewed by category. Hits were self-referential transcripts from #13266/#13577 tooling, generated fixtures, status snapshots, synthetic contract tests, review comments, and negative searches; no independent strict 206-row corpus artifact was present."
     },
     {
       "artifact_name": "other_local_agent_history_exact_corpus_marker_sweep",
@@ -416,7 +416,7 @@
       "result": "NOT_ROW_CORPUS",
       "observed_roots_checked": [
         "claude_history",
-        "gemini_history",
+        "provider-f_history",
         "me_memory"
       ],
       "observed_exact_marker_files": 0,
@@ -436,7 +436,7 @@
         "206-row strict",
         "goal-loop-206-audit-external-claim-2026-05-05"
       ],
-      "note": "Claude project history, Gemini history, and local me memory were searched for exact GOAL LOOP strict-corpus markers with high-noise cache directories excluded. No exact corpus marker file was found."
+      "note": "Agent-LLM-A project history, Provider-F history, and local me memory were searched for exact GOAL LOOP strict-corpus markers with high-noise cache directories excluded. No exact corpus marker file was found."
     },
     {
       "artifact_name": "downloads_discovery_cli_strict_corpus_validation_sweep",

@@ -76,7 +76,7 @@ when [meta.continuity_summary] has not changed in days.
 
 Three pressures converge:
 
-1. **Code level (CLAUDE.md "Workaround Rejection Bar")** — V01's
+1. **Code level (AGENT-LLM-A.md "Workaround Rejection Bar")** — V01's
    counter [keeper_state_snapshot_skipped_no_state_total] is a *telemetry
    without typed root-fix*. RFC-0088 has already named this anti-pattern.
    The counter belongs as an observability sidecar to a typed split,
@@ -261,7 +261,7 @@ telemetry-as-fix anti-pattern (memory: [[reference_masc_mcp_lib_types_agent_sdk_
 Compute "last successful state write" on-demand by scanning the
 checkpoint message stream for [STATE] markers. Rejected: O(messages)
 scan on every dashboard tick, and the marker scan is itself a
-string-classifier anti-pattern (CLAUDE.md S2 "string/substring
+string-classifier anti-pattern (AGENT-LLM-A.md S2 "string/substring
 classifier boost"). RFC-0089 prescribes typed-variant detection paths
 for exactly this case.
 
@@ -279,7 +279,7 @@ problem as 8.2.
 
 Let every turn re-evaluate compact eligibility without throttling.
 Rejected: thrash under sustained context-overflow. The cooldown gate
-exists for backpressure (CLAUDE.md "Eio drain loop must yield" Reason),
+exists for backpressure (AGENT-LLM-A.md "Eio drain loop must yield" Reason),
 and removing it shifts the failure mode from "stale display" to "compact
 storm under failure."
 
@@ -305,7 +305,7 @@ _Reserved for closeout commit after Phase 3._
 - RFC-0088 — Counter-as-fix anti-pattern. This RFC follows the same
   discriminated-union refactor pattern.
 - RFC-0089 — String classifier to typed variant. Cited in §8.2 rejection.
-- CLAUDE.md "Workaround Rejection Bar" — Section "Symptom 억제 패턴",
+- AGENT-LLM-A.md "Workaround Rejection Bar" — Section "Symptom 억제 패턴",
   pattern *Counter / Cooldown / Fallback Resolution*.
 - [keeper_post_turn.ml] — Primary code site for Phase 2.
 - [keeper_compact_policy.ml:64] — Primary reader to re-route.

@@ -8,8 +8,8 @@ import {
 
 describe('cascade config authoring snippets', () => {
   it('builds provider-model binding snippets with client capacity', () => {
-    expect(buildCascadeBindingSnippet('runpod', 'qwen-coder', 2)).toBe([
-      '[runpod.qwen-coder]',
+    expect(buildCascadeBindingSnippet('runpod', 'provider-h-coder', 2)).toBe([
+      '[runpod.provider-h-coder]',
       'is-default = false',
       'max-concurrent = 2',
     ].join('\n'))
@@ -25,6 +25,6 @@ describe('cascade config authoring snippets', () => {
   })
 
   it('clamps tier max-concurrent snippets to at least one', () => {
-    expect(buildCascadeTierSnippet('primary', 'runpod.qwen-coder', 0)).toContain('max-concurrent = 1')
+    expect(buildCascadeTierSnippet('primary', 'runpod.provider-h-coder', 0)).toContain('max-concurrent = 1')
   })
 })

@@ -1,4 +1,4 @@
-# RFC-0170 Dashboard moonshot palette closure (RFC-0168 N-of-M follow-up)
+# RFC-0170 Dashboard provider-b palette closure (RFC-0168 N-of-M follow-up)
 
 | | |
 |---|---|
@@ -10,21 +10,21 @@
 
 ## 1. Problem
 
-RFC-0168 (PR #18219) removed 14 closed-roster `--p-<vendor>` color tokens (`anthropic`, `kimi`, `openai`, `xai`, `gemini`, `deepseek`, `qwen`, `mistral`, `nemotron`, `ollama`, `llamacpp`, `glm`, `gemini-cli`, `codex-cli`) from `dashboard/design-system/tokens/source.ts` and the live generated CSS surfaces.
+RFC-0168 (PR #18219) removed 14 closed-roster `--p-<vendor>` color tokens (`provider-a`, `provider-c`, `provider-d`, `provider-e`, `provider-f`, `provider-g`, `provider-h`, `provider-j`, `provider-l`, `ollama`, `llamacpp`, `provider-k`, `provider-f-cli`, `agent-code-cli`) from `dashboard/design-system/tokens/source.ts` and the live generated CSS surfaces.
 
-**RFC-0168 inventory was 14-of-15**: `--p-moonshot` / `--p-moonshot-soft` / `--p-moonshot-border` was carried in both `dashboard/design-system/tokens.generated.css` and `dashboard/design-system/ui_kits/cockpit/tokens.generated.css` but missed by the source.ts sweep. This is the workaround-rejection §3 (N-of-M patch) signature.
+**RFC-0168 inventory was 14-of-15**: `--p-provider-b` / `--p-provider-b-soft` / `--p-provider-b-border` was carried in both `dashboard/design-system/tokens.generated.css` and `dashboard/design-system/ui_kits/cockpit/tokens.generated.css` but missed by the source.ts sweep. This is the workaround-rejection §3 (N-of-M patch) signature.
 
 `SPEC.md §3.6.5 "Provider cascade (unchanged)"` and `preview/colors.html §"Provider Palette (W15)"` still document the removed tokens as live surfaces.
 
-`rg -l 'p-moonshot' dashboard/src/` returned **zero production consumers** — the token has been dead since RFC-0168 merged.
+`rg -l 'p-provider-b' dashboard/src/` returned **zero production consumers** — the token has been dead since RFC-0168 merged.
 
 ## 2. Decision
 
-- Delete `--color-p-moonshot` (line 55), `--color-p-moonshot-soft` / `--color-p-moonshot-border` (lines 262-263) from `dashboard/design-system/tokens.generated.css`.
-- Delete `--p-moonshot` (line 56), `--p-moonshot-soft` / `--p-moonshot-border` (lines 263-264) from `dashboard/design-system/ui_kits/cockpit/tokens.generated.css`.
+- Delete `--color-p-provider-b` (line 55), `--color-p-provider-b-soft` / `--color-p-provider-b-border` (lines 262-263) from `dashboard/design-system/tokens.generated.css`.
+- Delete `--p-provider-b` (line 56), `--p-provider-b-soft` / `--p-provider-b-border` (lines 263-264) from `dashboard/design-system/ui_kits/cockpit/tokens.generated.css`.
 - Rewrite `SPEC.md §3.6.5` from `"Provider cascade (unchanged)"` to `"Provider cascade (removed by RFC-0168 / RFC-0170)"` with a one-paragraph rationale.
 - Replace `preview/colors.html §"Provider Palette (W15)"` (44 lines of dead chip markup) with a comment marker pointing at the two RFCs.
-- Rewrite the `preview/index.html` link card description from `LLM provider tints — desaturated, muted. ... <code>--p-anthropic</code> etc.` to `Closed-roster vendor palette removed by RFC-0168 / RFC-0170. Cascade chips render with neutral styling.`
+- Rewrite the `preview/index.html` link card description from `LLM provider tints — desaturated, muted. ... <code>--p-provider-a</code> etc.` to `Closed-roster vendor palette removed by RFC-0168 / RFC-0170. Cascade chips render with neutral styling.`
 
 ## 3. Out of scope (intentional)
 
@@ -33,13 +33,13 @@ RFC-0168 (PR #18219) removed 14 closed-roster `--p-<vendor>` color tokens (`anth
 | `dashboard/design-system/audits/*.md` | Historical design audit reports; same role as RFC body citation — preserved for design history. |
 | `dashboard/design-system/preview/cb-*.jsx`, `preview/*.html` mock data | Design canvas snapshot; vendor names inside mock UI text are part of the original design illustration (cascade chip examples, status bar mocks, etc.). Rewriting to generic strings would erase design history without removing any token / code path. |
 | `dashboard/design-system/RFC/00{21,23}*.md` | Internal design RFC bodies; same as above. |
-| `dashboard/src/**/*.test.ts`, `test/` OCaml fixtures | These mirror backend wire format (`model_id: 'kimi-k2.6:cloud'`, `actor: 'claude'`, `Llm_provider.Provider_config.Kimi_cli` etc.). The vendor names are *protocol-level model IDs* from external SDKs and *closed-sum variant constructors* defined in the `agent_sdk.llm_provider` opam package — neither is within masc-mcp's scope to rename. |
+| `dashboard/src/**/*.test.ts`, `test/` OCaml fixtures | These mirror backend wire format (`model_id: 'model-c:cloud'`, `actor: 'agent-llm-a'`, `Llm_provider.Provider_config.Kimi_cli` etc.). The vendor names are *protocol-level model IDs* from external SDKs and *closed-sum variant constructors* defined in the `agent_sdk.llm_provider` opam package — neither is within masc-mcp's scope to rename. |
 | `docs/` history references | RFC body and audit citations; same as audits/. |
 
 ## 4. Verification
 
-- `rg -i 'p-moonshot|p-anthropic|p-kimi|p-openai|p-xai|p-gemini|p-codex' dashboard/design-system/tokens*.css dashboard/design-system/ui_kits/cockpit/tokens.generated.css` returns 0 hits (token defs).
-- `rg -l 'p-moonshot' dashboard/src/` returns 0 (no production consumer).
+- `rg -i 'p-provider-b|p-provider-a|p-provider-c|p-provider-d|p-provider-e|p-provider-f|p-agent-code' dashboard/design-system/tokens*.css dashboard/design-system/ui_kits/cockpit/tokens.generated.css` returns 0 hits (token defs).
+- `rg -l 'p-provider-b' dashboard/src/` returns 0 (no production consumer).
 - `pnpm run typecheck` unchanged (no TS touched).
 - `dune build lib/ bin/` unchanged (no OCaml touched).
 

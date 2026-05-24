@@ -162,7 +162,7 @@ frontmatter.
 | RELEASE-EVIDENCE.md | A | 5 refs in README + scripts | keep+frontmatter | low |
 | REMOTE-MCP-OPERATOR.md | B | superseded by `spec/09-server-transport.md` | archive (in-flight) | med |
 | RESEARCH-BASED-IMPROVEMENTS.md | C | "Proposal (not implemented/verified)" 2026-01-09 | delete | low |
-| research/qwen-function-calling-harness-2026-04-15.md | C | "saved for local adoption review", no active harness | delete | low |
+| research/provider-h-function-calling-harness-2026-04-15.md | C | "saved for local adoption review", no active harness | delete | low |
 | research/tool-parameter-hallucination-harness.md | C | "research report", no active handler | delete | low |
 | rfc/RFC-0001-det-nondet-boundary-harness.md | B | superseded by RFC-0002/0003 | archive | med |
 | rfc/RFC-0002-keeper-state-machine.md | A | active state design, refs in `keeper_registry.ml` | keep+frontmatter | low |

@@ -26,7 +26,7 @@ This document is the execution companion for work that stays inside the
 We are the middle layer between:
 
 - OAS, which provides agent-runtime primitives
-- agent clients such as Claude Code, Codex, and Gemini
+- agent clients such as CLI-Tool-A, Agent-Code, and Provider-F
 - the human operator who uses those agent clients
 - the current development session maintaining MASC itself
 

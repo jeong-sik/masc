@@ -1,7 +1,7 @@
 # RFC-0038 — Opaque Identifier Types for Provider, Cascade, Model
 
 - **Status**: Draft
-- **Author**: vincent (with Claude Opus 4.7)
+- **Author**: vincent (with Agent-LLM-A Opus 4.7)
 - **Created**: 2026-05-07
 - **Related**: RFC-0024 (ollama cascade integration), RFC-0027 (capability-typed cascade), RFC-0032 (env knob unification), RFC-0037 (local-first enablement boundary)
 - **Files referenced**:
@@ -82,12 +82,12 @@ val equal : t -> t -> bool
 (* Stable accessors for the names the codebase already uses. *)
 val ollama : t
 val llama : t
-val claude : t
+val agent-llm-a : t
 val claude_api : t
-val codex : t
-val gemini : t
-val kimi : t
-val glm : t
+val agent-code : t
+val provider-f : t
+val provider-c : t
+val provider-k : t
 val custom : t
 (* ... one per legacy provider-name constant *)
 ```
@@ -145,7 +145,7 @@ else if Masc_network_defaults.is_ollama_url url then "ollama"
 
 ```ocaml
 (* tempting alternative *)
-type provider_id = Ollama | Claude | Glm | ...
+type provider_id = Ollama | Agent-LLM-A | Glm | ...
 ```
 
 Variants are *closed*. RFC-0024 established that adding a provider

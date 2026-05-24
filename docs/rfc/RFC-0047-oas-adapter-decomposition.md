@@ -113,8 +113,8 @@ Closed across 10 PRs:
    though the change was purely cascade strategy. Cascade authors must
    either learn the OAS-named adapter idiom or risk wrong-layer change.
 
-3. **Aspirational naming creates anti-learning.** AI agents (Claude /
-   Codex / Gemini) trained on this codebase will infer that "OAS knows
+3. **Aspirational naming creates anti-learning.** AI agents (Agent-LLM-A /
+   Agent-Code / Provider-F) trained on this codebase will infer that "OAS knows
    about Cascade" is an accepted pattern, since 26+ Cascade refs live in
    an `oas_*`-named file. Future code generation reproduces the pattern.
    This is exactly the workaround-as-precedent mechanism documented in
@@ -353,7 +353,7 @@ to Phase 4, when its dependents are dissolved.
 - Update `instructions/software-development.md` with a new entry under
   AI 코드 생성 안티패턴 #5: "OAS prefix in masc-mcp consumer code".
   Reference RFC-0047.
-- Update `agent_delegation` subsystem list in `~/me/CLAUDE.md` to
+- Update `agent_delegation` subsystem list in `~/me/AGENT-LLM-A.md` to
   include cascade/agent_sdk_call as RFC-required scopes.
 
 ## 7. Test plan
@@ -439,7 +439,7 @@ follow-up RFC:
 - **Keeper sub-library extraction.** That work is tracked separately
   (memory `project_keeper_sublib_extraction_analysis.md`) and is
   serialized after this RFC completes.
-- **Provider behavior changes.** Anthropic/OpenAI/ZAI provider routing,
+- **Provider behavior changes.** Provider-A/Provider-D/ZAI provider routing,
   retry, and tool execution semantics are byte-identical pre/post.
 - **Tool schema redesign.** `Masc_domain.tool_schema` remains the
   consumer-side type; OAS adapter converts to `Agent_sdk.Types.tool`

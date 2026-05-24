@@ -11,11 +11,11 @@ default_thinking_budget = 8192
 
 # ── Providers ─────────────────────────────────────────────────────
 # flavor: OAS adapter hint (string, not logic)
-# protocol: transport method (openai-http, ollama-http, openai-cli)
+# protocol: transport method (provider-d-http, ollama-http, provider-d-cli)
 
 [providers.runpod-llama]
 endpoint = "https://ma8xbr1kgbclkl-19123.proxy.runpod.net/v1"
-protocol = "openai-http"
+protocol = "provider-d-http"
 flavor = "llama-cpp"
 auth_env = "RUNPOD_API_TOKEN"
 
@@ -24,43 +24,43 @@ endpoint = "http://127.0.0.1:11434"
 protocol = "ollama-http"
 flavor = "ollama"
 
-[providers.openai-cloud]
-endpoint = "https://api.openai.com/v1"
-protocol = "openai-http"
-flavor = "openai"
+[providers.provider-d-cloud]
+endpoint = "https://api.provider-d.com/v1"
+protocol = "provider-d-http"
+flavor = "provider-d"
 auth_env = "OPENAI_API_KEY"
 
-[providers.deepseek-cloud]
-endpoint = "https://api.deepseek.com"
-protocol = "openai-http"
-flavor = "deepseek"
+[providers.provider-g-cloud]
+endpoint = "https://api.provider-g.com"
+protocol = "provider-d-http"
+flavor = "provider-g"
 auth_env = "DEEPSEEK_API_KEY"
 
-[providers.qwen-dashscope-intl]
+[providers.provider-h-dashscope-intl]
 endpoint = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
-protocol = "openai-http"
-flavor = "qwen"
+protocol = "provider-d-http"
+flavor = "provider-h"
 auth_env = "DASHSCOPE_API_KEY"
 note = "Singapore region (closest to Korea)"
 
-[providers.qwen-dashscope-cn]
+[providers.provider-h-dashscope-cn]
 endpoint = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-protocol = "openai-http"
-flavor = "qwen"
+protocol = "provider-d-http"
+flavor = "provider-h"
 auth_env = "DASHSCOPE_API_KEY"
 note = "Beijing region (for China-internal needs)"
 
-[providers.zai-glm-api]
+[providers.zai-provider-k-api]
 endpoint = "https://open.bigmodel.cn/api/paas/v4"
-protocol = "openai-http"
-flavor = "zai-glm"
+protocol = "provider-d-http"
+flavor = "zai-provider-k"
 auth_env = "ZAI_API_KEY"
-note = "glm-5.1, glm-5, glm-5-turbo general models"
+note = "provider-k-5.1, provider-k-5, provider-k-5-turbo general models"
 
-[providers.zai-glm-coding]
+[providers.zai-provider-k-coding]
 endpoint = "https://open.bigmodel.cn/api/paas/v4"
-protocol = "openai-http"
-flavor = "zai-glm"
+protocol = "provider-d-http"
+flavor = "zai-provider-k"
 auth_env = "ZAI_API_KEY"
 note = "CodeGeeX coding models — separate provider from general API"
 
@@ -72,51 +72,51 @@ provider = "runpod-llama"
 model_id = "qwen3-235b-a22b"
 capabilities = { max_output_tokens = 32768, supports_tool_choice = true, supports_extended_thinking = true, thinking_control_format = "chat_template_kwargs", supports_image_input = true }
 
-[models.glm-5]
-provider = "zai-glm-api"
-model_id = "glm-5"
+[models.provider-k-5]
+provider = "zai-provider-k-api"
+model_id = "provider-k-5"
 capabilities = { max_output_tokens = 16384, supports_tool_choice = true, supports_extended_thinking = true, thinking_control_format = "reasoning_content", supports_image_input = false }
 
-[models.glm-5-turbo]
-provider = "zai-glm-api"
-model_id = "glm-5-turbo"
+[models.provider-k-5-turbo]
+provider = "zai-provider-k-api"
+model_id = "provider-k-5-turbo"
 capabilities = { max_output_tokens = 8192, supports_tool_choice = true, supports_extended_thinking = false, thinking_control_format = "reasoning_content", supports_image_input = false }
 note = "Fast variant, lower cost"
 
-[models.glm-4-7-flash]
-provider = "zai-glm-api"
-model_id = "glm-4.7-flash"
+[models.provider-k-4-7-flash]
+provider = "zai-provider-k-api"
+model_id = "provider-k-4.7-flash"
 capabilities = { max_output_tokens = 4096, supports_tool_choice = true, supports_extended_thinking = false, thinking_control_format = "reasoning_content", supports_image_input = false }
 note = "30B-A3B MoE, free tier"
 
 [models.o3-mini]
-provider = "openai-cloud"
+provider = "provider-d-cloud"
 model_id = "o3-mini"
 capabilities = { max_output_tokens = 65536, supports_tool_choice = true, supports_reasoning_budget = true, thinking_control_format = "reasoning_effort", supports_image_input = false }
 
-[models.deepseek-v4-flash]
-provider = "deepseek-cloud"
-model_id = "deepseek-v4-flash"
+[models.provider-g-v4-flash]
+provider = "provider-g-cloud"
+model_id = "provider-g-v4-flash"
 capabilities = { max_output_tokens = 65536, supports_tool_choice = true, supports_extended_thinking = true, thinking_control_format = "reasoning_param", supports_image_input = false }
 
-[models.deepseek-v4-pro]
-provider = "deepseek-cloud"
-model_id = "deepseek-v4-pro"
+[models.provider-g-v4-pro]
+provider = "provider-g-cloud"
+model_id = "provider-g-v4-pro"
 capabilities = { max_output_tokens = 65536, supports_tool_choice = true, supports_extended_thinking = true, thinking_control_format = "reasoning_param", supports_image_input = false }
 
 [models.qwen3-5-plus]
-provider = "qwen-dashscope-intl"
+provider = "provider-h-dashscope-intl"
 model_id = "qwen3.5-plus"
 capabilities = { max_output_tokens = 16384, supports_tool_choice = true, supports_extended_thinking = false, thinking_control_format = "no_thinking_control", supports_image_input = false }
 note = "tools + stream=True not supported"
 
 [models.qwen3-coder-plus]
-provider = "qwen-dashscope-intl"
+provider = "provider-h-dashscope-intl"
 model_id = "qwen3-coder-plus"
 capabilities = { max_output_tokens = 32768, supports_tool_choice = true, supports_extended_thinking = false, thinking_control_format = "no_thinking_control", supports_image_input = false }
 
 [models.codegeex-4]
-provider = "zai-glm-coding"
+provider = "zai-provider-k-coding"
 model_id = "codegeex-4"
 capabilities = { max_output_tokens = 16384, supports_tool_choice = true, supports_extended_thinking = false, thinking_control_format = "reasoning_content", supports_image_input = false }
 note = "CodeGeeX coding specialist"
@@ -129,17 +129,17 @@ members = ["qwen3-235b"]
 weight = 100
 
 [tier-groups.cross-verify]
-members = ["glm-5", "o3-mini", "deepseek-v4-flash"]
+members = ["provider-k-5", "o3-mini", "provider-g-v4-flash"]
 constraint = "diverse_from_primary"
 note = "Independent from primary provider for adversarial review"
 
 [tier-groups.coding-verify]
-members = ["deepseek-v4-pro", "qwen3-coder-plus"]
+members = ["provider-g-v4-pro", "qwen3-coder-plus"]
 constraint = "diverse_from_primary"
 note = "Coding-specialist cross-verification"
 
 [tier-groups.fast]
-members = ["glm-5-turbo", "glm-4-7-flash", "qwen3-5-plus"]
+members = ["provider-k-5-turbo", "provider-k-4-7-flash", "qwen3-5-plus"]
 weight = 80
 note = "Quick decisions and fast responses"
 

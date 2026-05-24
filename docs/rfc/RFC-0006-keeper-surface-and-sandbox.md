@@ -1,7 +1,7 @@
 # RFC-0006: Keeper Tool Surface Realignment & Symmetric Sandbox
 
 - **Status**: Draft
-- **Author**: vincent (with Claude)
+- **Author**: vincent (with Agent-LLM-A)
 - **Created**: 2026-04-20
 - **Related**: #8773, #8778, #8471
 - **Drives**: 18% turn-loss recovery + closes host FS leak for `docker_hardened` keepers
@@ -12,12 +12,12 @@ Two failures observed on 2026-04-20 are symptoms of the same architectural decis
 
 | # | Symptom | Mechanism |
 |---|---------|-----------|
-| A | Tool metrics underreport: 525/2906 (≈18%) keeper turns nuked with `unexpected tool names` | LLM emits Claude Code built-in names (`Bash`/`Read`/`Edit`/`Skill`/`Agent`/`Grep`/`Write`/`WebSearch`). `keeper_agent_run.ml:1893` returns `Error (Internal …)` when no valid call mixes in. |
+| A | Tool metrics underreport: 525/2906 (≈18%) keeper turns nuked with `unexpected tool names` | LLM emits CLI-Tool-A built-in names (`Bash`/`Read`/`Edit`/`Skill`/`Agent`/`Grep`/`Write`/`WebSearch`). `keeper_agent_run.ml:1893` returns `Error (Internal …)` when no valid call mixes in. |
 | B | `minjae` (sandbox_profile=docker_hardened) reads host paths under `/Users/dancer/...` | `keeper_bash` is gated to docker, but `keeper_fs_read` and `keeper_shell` (op=rg/ls/find/cat) execute as the host process. Containment is asymmetric. |
 
 Root cause:
 
-1. **Surface mismatch with the model's training distribution.** We expose `keeper_*` prefixed tools while every Claude/GLM/Codex variant has been heavily trained on the unprefixed Anthropic-Code names. The prefix is for *our* introspection, not the model.
+1. **Surface mismatch with the model's training distribution.** We expose `keeper_*` prefixed tools while every Agent-LLM-A/Provider-K/Agent-Code variant has been heavily trained on the unprefixed Provider-A-Code names. The prefix is for *our* introspection, not the model.
 2. **Sandbox boundary follows tool name, not keeper identity.** `effective_sandbox_profile` is read once for `keeper_bash`. Other tools never consult it.
 
 Fix A (alias router) addresses #8778 narrowly but leaves #B and the prefix design intact. We treat both symptoms as one redesign.
@@ -25,10 +25,10 @@ Fix A (alias router) addresses #8778 narrowly but leaves #B and the prefix desig
 ## 2. Goals / Non-Goals
 
 **Goals**
-- G1. Zero `unexpected tool names` nukes for the eight Claude Code built-ins listed in #8778.
+- G1. Zero `unexpected tool names` nukes for the eight CLI-Tool-A built-ins listed in #8778.
 - G2. For `sandbox_profile=docker_hardened` keepers, **all** tool execution (read + write + shell) happens inside the same container.
 - G3. Backward compatible with current personas, prompts, and metrics consumers (no decisions.jsonl shape break).
-- G4. No regression on prompt cache hit rate (Anthropic input cache).
+- G4. No regression on prompt cache hit rate (Provider-A input cache).
 
 **Non-Goals**
 - Replace OAS Agent.run loop.
@@ -39,7 +39,7 @@ Fix A (alias router) addresses #8778 narrowly but leaves #B and the prefix desig
 
 ### 3.1 Surface realignment (LLM-facing rename, internal alias map)
 
-Public tool names exposed to OAS / LLM become the Anthropic Code built-in set:
+Public tool names exposed to OAS / LLM become the Provider-A Code built-in set:
 
 | Current (internal key) | New (LLM-facing) |
 |------------------------|------------------|
@@ -103,9 +103,9 @@ Each phase is independently mergeable and revertable.
 - `test/test_keeper_tool_alias.ml` — alias map round-trip + unknown name → teaching error.
 - `test/test_keeper_symmetric_sandbox.ml` — assert that for `Docker_hardened` keepers, `keeper_fs_read` resolves through `docker exec`, not `Eio_unix.openfile`.
 - 24h replay metric:
-  - `unexpected_tool_names` distinct count over 24h: target **0** for the Anthropic 5 (`Bash|Read|Edit|Grep|Write`).
+  - `unexpected_tool_names` distinct count over 24h: target **0** for the Provider-A 5 (`Bash|Read|Edit|Grep|Write`).
   - `Read` calls outside `/work/...` for hardened keepers: target **0**.
-- Prompt cache: compare `cache_read_input_tokens` ratio before/after on `claude-opus-4-7` keepers (target ≥ baseline).
+- Prompt cache: compare `cache_read_input_tokens` ratio before/after on `model-a-opus` keepers (target ≥ baseline).
 
 ## 6. Open Questions
 

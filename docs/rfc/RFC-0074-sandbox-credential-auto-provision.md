@@ -26,7 +26,7 @@ RFC-0073 이 *gap 을 진단*한다면 이 RFC 는 *gap 을 닫는다*.
 - 결과: dashboard 상 "허용 54" 와 실제 호출 가능한 도구 사이 항구적 gap.
 - credential 부착은 *security surface* — 모든 keeper 에 자동 주입은 부적절. preset-aware 가 필요.
 
-CLAUDE.md §워크어라운드 거부 기준 시그니처 #3 (N-of-M abstraction admission) 의 회피 대상.
+AGENT-LLM-A.md §워크어라운드 거부 기준 시그니처 #3 (N-of-M abstraction admission) 의 회피 대상.
 
 ## 3. Proposal — `resource_plan` per Preset
 

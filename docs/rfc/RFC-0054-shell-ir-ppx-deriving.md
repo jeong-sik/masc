@@ -9,7 +9,7 @@ implementation_prs: []
 # RFC-0054 — `[@@deriving shell_ir]` PPX for Typed Capability Substrate Phase 2
 
 Status: Active · PPX track CLOSED 2026-05-09 (5/5 approaches fail) · codegen track ACTIVE (POC PASSED, see §6.1)
-Author: jeong-sik (with Claude Opus 4.7)
+Author: jeong-sik (with Agent-LLM-A Opus 4.7)
 Date: 2026-05-09 (drafted) · 2026-05-09 (§5.3.1 + §5.3.3 + §6.1 amendments)
 Supersedes: —
 Related: RFC-0005 §3.2 (Phase 2 PPX, listed but unsourced),

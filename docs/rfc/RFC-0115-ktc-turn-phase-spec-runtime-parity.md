@@ -75,7 +75,7 @@ OCaml 가 *spec classification intent* 를 type 자체에 embed:
 
 1. **RFC-0114 의 자매**: KSM safety + KTC vocabulary, 같은 family. 단일 RFC 로 합치기엔 deliverable 분리 (KSM 은 OCaml fix, KTC 는 spec fix).
 2. **PR #14395 가 *spec PR 없이* phase 추가**: 새 phase 도입 시 spec 동시 PR 강제 없음 → drift 누적. 본 RFC 가 그 *동시-PR 정책* 을 명시.
-3. **`[@tla.*]` PPX → spec lint 자동화 후보**: attribute 를 *spec generator* 로 활용, OCaml 가 spec 의 `TurnPhaseSet` enumerate 자동 생성 가능. CLAUDE.md §"AI 코드 생성 안티패턴 §4 FSM Sparse Match" 정확히 같은 문제.
+3. **`[@tla.*]` PPX → spec lint 자동화 후보**: attribute 를 *spec generator* 로 활용, OCaml 가 spec 의 `TurnPhaseSet` enumerate 자동 생성 가능. AGENT-LLM-A.md §"AI 코드 생성 안티패턴 §4 FSM Sparse Match" 정확히 같은 문제.
 4. **audit doc 가 3 invariant candidate 제공**: `RoutingRequiresToolPolicy`, `ExhaustedRequiresTerminalCascade`, +1. RFC 가 spec PR 의 source-of-truth 정리.
 
 근본 원인: **TLA+ spec 가 OCaml 의 closed-sum 보다 *수동* 관리 — 새 variant 추가 시 spec update 자동 trigger 없음.**

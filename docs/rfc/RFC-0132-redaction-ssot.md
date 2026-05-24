@@ -4,7 +4,7 @@ title: "Redaction SSOT — `runtime` boundary-label private type"
 status: Implemented
 created: 2026-05-19
 updated: 2026-05-21
-author: claude-cron-loop (vincent)
+author: agent-llm-a-cron-loop (vincent)
 supersedes: []
 superseded_by: null
 related: ["0085", "0088", "0089", "0126", "0131"]
@@ -47,7 +47,7 @@ All three §4 phases shipped:
 # RFC-0132 — Redaction SSOT for `"runtime"` boundary label
 
 Status: Draft
-Author: Claude (cron loop) on behalf of vincent
+Author: Agent-LLM-A (cron loop) on behalf of vincent
 Date: 2026-05-19
 
 Plan SSOT cross-reference:

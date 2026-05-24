@@ -57,7 +57,7 @@ Runtime scope has moved since the original draft.
 - benchmark가 raw selection, BM25 selection, oracle self-heal upper-bound로 흩어져 있다
 - `samchon`식 recovery가 OAS 안에 부분적으로 존재하지만 generic helper로 표면화돼 있지 않다
 - `masc-mcp` public MCP path에 retry를 넣어야 하는지에 대한 경계가 문서화돼 있지 않다
-- MLX 실험은 필요하지만 현재 harness가 `OpenAI-compatible endpoint` 전제라 바로 붙일 수 없다
+- MLX 실험은 필요하지만 현재 harness가 `Provider-D-compatible endpoint` 전제라 바로 붙일 수 없다
 - 최신 모델 추가가 ad hoc하게 일어나고, artifact schema와 acceptance gate가 고정돼 있지 않다
 
 이 RFC의 목적은 더 많은 모델을 늘어놓는 것이 아니다. `tool call quality`를 하나의 typed program으로 만들고, 그 위에서 model/backend/repair policy를 비교할 수 있게 하는 것이다.
@@ -69,7 +69,7 @@ Runtime scope has moved since the original draft.
 - public MCP wire protocol을 변경하지 않는다
 - public MCP one-shot call에 model-facing auto-retry를 추가하지 않는다
 - OAS에 deprecated MLX provider surface를 되살리지 않는다
-- Anthropic식 hidden-state probe, steering, interpretability 실험을 1차 범위에 넣지 않는다
+- Provider-A식 hidden-state probe, steering, interpretability 실험을 1차 범위에 넣지 않는다
 - reward-hacking bench를 safety verdict engine으로 과장하지 않는다
 - benchmark artifact를 곧바로 production policy truth로 승격하지 않는다
 
@@ -82,12 +82,12 @@ Runtime scope has moved since the original draft.
 - `Gemma 4 E4B raw`: selection `96.3%`, exact first-try `92.6%`, avg latency `544ms`
 - `Gemma 4 E4B BM25 + improved`: selection `100.0%`, exact first-try `96.3%`, normalized first-try `100.0%`, avg latency `1481ms`
 - `Qwen3-Coder-Next raw`: selection `96.3%`, exact first-try `92.6%`, avg latency `4024ms`
-- `Qwen 9B BM25 + improved`: selection `48.1%`, exact first-try `44.4%`, avg latency `3187ms`
+- `Provider-H 9B BM25 + improved`: selection `48.1%`, exact first-try `44.4%`, avg latency `3187ms`
 
 현재 self-healing harness는 oracle upper-bound다.
 
-- `Qwen 9B raw`: `33.3% -> 100.0% final exact`
-- `Qwen 9B BM25`: `44.4% -> 100.0% final exact`
+- `Provider-H 9B raw`: `33.3% -> 100.0% final exact`
+- `Provider-H 9B BM25`: `44.4% -> 100.0% final exact`
 - `Gemma 4 E4B raw no-think`: `88.9% -> 100.0% final exact`
 
 즉, `better first pass`와 `bounded recovery`는 둘 다 중요하며, 둘을 하나의 표에서 같이 봐야 한다.
@@ -113,7 +113,7 @@ Runtime scope has moved since the original draft.
 
 ### 3.3 Backend truth
 
-현재 benchmark harness는 사실상 `llama.cpp server` 같은 OpenAI-compatible endpoint를 가정한다.
+현재 benchmark harness는 사실상 `llama.cpp server` 같은 Provider-D-compatible endpoint를 가정한다.
 
 - current runners: endpoint POST `/v1/chat/completions`
 - current score artifacts: JSON output files under `data/tool-calling-benchmark/results-*`
@@ -232,8 +232,8 @@ Phase-1 표준 매트릭스는 여섯 개로 고정한다.
 
 - `gguf/gemma4-e4b-it-q4`
 - `gguf/gemma4-e2b-it-q8`
-- `gguf/nemotron-cascade-2-30b-a3b-q4km`
-- `mlx/nemotron-cascade-2-30b-a3b-4bit`
+- `gguf/provider-l-cascade-2-30b-a3b-q4km`
+- `mlx/provider-l-cascade-2-30b-a3b-4bit`
 - `mlx/qwen3-coder-next-4bit`
 - `mlx/lfm2.5-1.2b-thinking-6bit`
 
@@ -307,7 +307,7 @@ prefilter는 serving path와 benchmark path 모두에서 description quality에 
 
 ## 8. Pressure Behavior v1
 
-Anthropic의 `desperate/calm` 결과는 1차에서 behavioral benchmark로만 가져온다.
+Provider-A의 `desperate/calm` 결과는 1차에서 behavioral benchmark로만 가져온다.
 
 case family:
 

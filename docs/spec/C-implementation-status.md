@@ -125,7 +125,7 @@ code_refs:
 | Transport | Status | Evidence |
 |-----------|--------|----------|
 | HTTP/1.1 (httpun-eio) | **IMPL** | Canonical, 매일 사용 |
-| stdio (Claude Code) | **IMPL** | Claude Code MCP 통합 |
+| stdio (CLI-Tool-A) | **IMPL** | CLI-Tool-A MCP 통합 |
 | MCP JSON-RPC | **IMPL** | 전체 프로토콜 준수 |
 | SSE Event Streaming | **IMPL** | 매일 브로드캐스트 |
 | Auth/RBAC | **IMPL** | Bearer token + 3 role |

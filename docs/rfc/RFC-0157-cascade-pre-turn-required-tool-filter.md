@@ -4,7 +4,7 @@ title: "Cascade pre-turn required-tool filter — provider capability boundary"
 status: Active
 created: 2026-05-21
 updated: 2026-05-21
-author: claude-opus
+author: agent-llm-a-opus
 supersedes: []
 superseded_by: null
 related: ["0042", "0088", "0097", "0127", "0148", "0153", "0154"]
@@ -33,7 +33,7 @@ implementation_prs: []
 | `fallback_class_required_tool_contract_violation` (`"required_tool_contract_violation"`) | `lib/cascade/cascade_attempt_fsm.ml::fallback_class_required_tool_contract_violation` | cascade rotation 분류 라벨 |
 | `should_auto_pause_required_tool_contract_violation` | `lib/keeper/keeper_unified_turn_types.ml::should_auto_pause_required_tool_contract_violation` | 반복 발생 시 keeper turn auto-pause 트리거 |
 
-세 신호 모두 `Agent.run` *이후* call path 에서 분류된다. 즉 candidate 가 required-tool 을 만족할 수 없음을 알면서도 매번 dispatch → fail → cascade rotation 비용을 지불하고 있다. 2026-05-17 cascade tier-group misroute 사고 (`nickNcave` keeper FAILED) 가 직접 사례 — `routes.tool_required → tier-group.strict_tool_candidates → glm cloud` 가 `keeper_shell/keeper_bash` inline materialize 실패로 매 cascade 반복.
+세 신호 모두 `Agent.run` *이후* call path 에서 분류된다. 즉 candidate 가 required-tool 을 만족할 수 없음을 알면서도 매번 dispatch → fail → cascade rotation 비용을 지불하고 있다. 2026-05-17 cascade tier-group misroute 사고 (`nickNcave` keeper FAILED) 가 직접 사례 — `routes.tool_required → tier-group.strict_tool_candidates → provider-k cloud` 가 `keeper_shell/keeper_bash` inline materialize 실패로 매 cascade 반복.
 
 사용자 보고: "required-tool 을 못 만족하면 그 candidate 를 *애초에* 시도하지 말아야 한다."
 
@@ -84,7 +84,7 @@ dispatch candidate
 
 ### 1.4 사전 필터가 부재한 직접 비용
 
-- provider RTT 낭비 (특히 GLM/Kimi cloud 의 cold start)
+- provider RTT 낭비 (특히 Provider-K/Provider-C cloud 의 cold start)
 - token budget 낭비 (system + tool schema prompt 가 매 candidate 마다 재전송)
 - cascade clock 낭비 → RFC-0153 의 `max_execution_time_s 300s` budget 잠식
 - operator 가 "왜 이 candidate 가 시도됐는가" 를 trace 할 수 없음 (manifest 가 dispatch 결과만 기록)
@@ -94,7 +94,7 @@ dispatch candidate
 명시적 제외:
 
 1. **Post-dispatch recovery** — PR #17046 (사후 검출 후 turn 재시도) 의 scope. 본 RFC 는 *사전 회피* 이며 사후 recovery 와 직교한다. 둘 다 필요.
-2. **OAS provider-side filtering** — provider (OpenAI, Anthropic, GLM, ...) 가 내부적으로 `tool_required` 를 무시하는 케이스. MASC 통제 밖. 본 RFC 는 MASC 가 *알 수 있는 capability 정보* 로만 필터.
+2. **OAS provider-side filtering** — provider (Provider-D, Provider-A, Provider-K, ...) 가 내부적으로 `tool_required` 를 무시하는 케이스. MASC 통제 밖. 본 RFC 는 MASC 가 *알 수 있는 capability 정보* 로만 필터.
 3. **Required-tool semantics 확장** — 현재 contract (단순 도구 이름 매칭) 를 유지. 정규식/패턴/wildcard 매칭은 별도 RFC.
 4. **Cascade-level concurrency** — RFC-0153 Phase B scope. 본 RFC 는 순차 cascade 안에서 candidate 단위 필터.
 5. **Provider downtime detection** — RFC-0127 scope. health/cooldown 체크는 본 RFC 게이트 *후* 그대로 유지.
@@ -309,8 +309,8 @@ cascade_pre_dispatch_required_tool_filtered{
 | Phase | 작업 | 측정 (falsifiable) |
 |---|---|---|
 | **A** | `Provider_capability` 모듈 신설. `can_satisfy_required_action` 이 모든 provider 에 대해 `None` 반환 (snapshot 없음). `try_cascade` 에 게이트 wiring 추가 — 실 동작 변화 0. baseline 카운터 `required_tool_contract_violation_classified_total` emit 시작. | (a) unit test green (`None`/`Some true`/`Some false`/`No_providers_satisfy_required_tools` 4 case PASS); (b) baseline 카운터 24h 표본 ≥ 1건 emit 확인; (c) `cascade_pre_dispatch_required_tool_filtered` 24h 합계 = 0 (snapshot 미존재이므로) |
-| **B** | 첫 provider (예: GLM) 의 capability snapshot 캡처 경로 신설. OAS manifest 의 `satisfying_tools` 가 `Provider_capability.t` 로 흘러가는 wire 추가. snapshot 은 capture 되지만 `can_satisfy_required_action` 은 여전히 `None` 반환 (필터 미작동). | (a) Phase B target provider 중 **최소 1개 provider** 의 manifest 응답에서 `provider_capability.snapshot` 필드가 non-null; (b) 24h 동안 해당 provider 의 snapshot 갱신 횟수 ≥ 1; (c) `cascade_pre_dispatch_required_tool_filtered` 24h 합계 = 0 (필터 미작동 보장) |
-| **C** | Phase B provider 에 한해 `can_satisfy_required_action` 이 `Some _` 반환 시작. `cascade_pre_dispatch_required_tool_filtered{provider="glm"}` 측정 시작. | 24h sustained 후 §4.4 anti-pattern guard 두 조건 동시 PASS: (a) Phase A baseline 카운터가 Phase A 24h 표본 대비 *감소*; (b) `cascade_pre_dispatch_required_tool_filtered.sum / phase_A_baseline ≥ 0.5` |
+| **B** | 첫 provider (예: Provider-K) 의 capability snapshot 캡처 경로 신설. OAS manifest 의 `satisfying_tools` 가 `Provider_capability.t` 로 흘러가는 wire 추가. snapshot 은 capture 되지만 `can_satisfy_required_action` 은 여전히 `None` 반환 (필터 미작동). | (a) Phase B target provider 중 **최소 1개 provider** 의 manifest 응답에서 `provider_capability.snapshot` 필드가 non-null; (b) 24h 동안 해당 provider 의 snapshot 갱신 횟수 ≥ 1; (c) `cascade_pre_dispatch_required_tool_filtered` 24h 합계 = 0 (필터 미작동 보장) |
+| **C** | Phase B provider 에 한해 `can_satisfy_required_action` 이 `Some _` 반환 시작. `cascade_pre_dispatch_required_tool_filtered{provider="provider-k"}` 측정 시작. | 24h sustained 후 §4.4 anti-pattern guard 두 조건 동시 PASS: (a) Phase A baseline 카운터가 Phase A 24h 표본 대비 *감소*; (b) `cascade_pre_dispatch_required_tool_filtered.sum / phase_A_baseline ≥ 0.5` |
 | **D** | Phase C 결과가 만족스러우면 나머지 provider 반복. anti-pattern guard 미통과 provider 는 Phase B 로 회귀하여 snapshot 수집 경로 수정. | (a) `providers_with_capability_snapshot / total_active_providers ≥ 0.5`; (b) 24h 합계 `required_tool_contract_violation_classified_total` 가 Phase A baseline 대비 ≥ 50% 감소 (Phase A 절대치 측정 후 수치 정합 검토) |
 
 각 Phase 는 별도 PR. Phase A 가 first commit (메커니즘만, 동작 변화 없음). Phase D 가 완료되면 본 RFC `Implemented` 로 이행.

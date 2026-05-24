@@ -157,7 +157,7 @@ Removed. Team-session compat harnesses and the command-plane HTTP lane are both 
     "unit_id": "company-radar",
     "kind": "company",
     "label": "AI Research Radar Company",
-    "leader_id": "codex"
+    "leader_id": "agent-code"
   }
 }
 ```
@@ -170,7 +170,7 @@ Removed. Team-session compat harnesses and the command-plane HTTP lane are both 
     "kind": "platoon",
     "label": "Research Platoon",
     "parent_unit_id": "company-radar",
-    "leader_id": "codex",
+    "leader_id": "agent-code",
     "policy": {
       "autonomy_level": "L4_Autonomous"
     }
@@ -199,7 +199,7 @@ Removed. Team-session compat harnesses and the command-plane HTTP lane are both 
   "method": "POST",
   "path": "/api/v1/command-plane/operations",
   "headers": {
-    "x-masc-agent-name": "codex"
+    "x-masc-agent-name": "agent-code"
   },
   "body": {
     "assigned_unit_id": "squad-verify",

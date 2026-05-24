@@ -55,7 +55,7 @@ Internal `keeper_*` names become **implementation details** of the routing layer
 | Function                | Reason                                                                 |
 |------------------------|------------------------------------------------------------------------|
 | `translate_input`      | Legitimate field mapping (`command`→`cmd`, `file_path`→`path`). This is the only function that reshapes data, not classifies names. |
-| `public_input_schema`  | LLM-facing JSON schemas for the 7 native tools. The LLM expects Anthropic Code field names, not our internal names. |
+| `public_input_schema`  | LLM-facing JSON schemas for the 7 native tools. The LLM expects Provider-A Code field names, not our internal names. |
 | Routing table         | The mapping from public name to internal handler is a simple lookup — no classification tier. |
 
 ### 2.2 What Is Removed
@@ -173,6 +173,6 @@ A routing miss increments the counter with `routed_to="none"`. No upfront classi
 
 ## 7. References
 
-- Workaround Rejection Bar (CLAUDE.md §software-development.md): criteria #2 (string classifier) and #3 (N-of-M patch)
+- Workaround Rejection Bar (AGENT-LLM-A.md §software-development.md): criteria #2 (string classifier) and #3 (N-of-M patch)
 - User insight (2026-05-11): *"우리가 제공한 도구가 있고 걔네 도구가 있고 알아서 선택하게 하면 됨. 사용만 하도록 어거지로 번역하지 마."*
 - RFC-0062: Phase 4 handler migration (concurrent, orthogonal)

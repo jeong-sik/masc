@@ -11,7 +11,7 @@ lens redacts at **external boundaries**, not at every serializer.
 ## What the lens redacts
 
 The Runtime Lens replaces concrete provider/model identity strings
-(`claude_code.claude-auto`, `ollama_cloud.ollama-cloud-deepseek-v4-pro`,
+(`cli-tool-d.claude-auto`, `ollama_cloud.ollama-cloud-provider-g-v4-pro`,
 `https://ollama.com`, etc.) with `public_runtime_*_label` constants
 (`"runtime"` / `"runtime"` / `""`). The intent is to prevent identity
 leakage across the OAS/MASC boundary and into externally-exposed

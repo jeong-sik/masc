@@ -54,7 +54,7 @@ PR #15806 follow-up:
 ### Why this needs an RFC
 
 1. **RFC-0110 와 sibling family**: 같은 *Repair / Sanitize* 워크어라운드 시그니처. 통합 spec 으로 *fabrication boundary* 일반화 가능.
-2. **PR #15777 의 typed variant 가 *Counter-as-Fix 시그니처***: CLAUDE.md §1 "make data loss visible to operators". 정확히 시그니처.
+2. **PR #15777 의 typed variant 가 *Counter-as-Fix 시그니처***: AGENT-LLM-A.md §1 "make data loss visible to operators". 정확히 시그니처.
 3. **`last_event` 의 root**: dashboard / operator handoff / debug dump 호출자가 `last_event : record` 가정. *empty session* 도 `last_event : record` 강제 → 강제로 fabricate.
 4. **3+ caller 가 fabricated 와 real 분리 처리 필요**: dashboard mission briefing (`lib/dashboard/dashboard_mission_briefing.ml`), keeper metrics. 각 caller 가 `match source` 로 branch — RFC 가 *option type* 으로 단순화 가능.
 

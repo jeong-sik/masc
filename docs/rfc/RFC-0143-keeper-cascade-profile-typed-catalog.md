@@ -80,7 +80,7 @@ the bridge boundary, not at any caller boundary.
 
 Callers cannot tell whether the absence is intentional config or a runtime fault, so misconfigured fleets degrade silently.
 
-The fix needs a typed catalog query result variant and a caller-side decision protocol. 25+ caller files makes this an N-of-M migration — RFC required to scope the rollout (CLAUDE.md `<agent_delegation>` `keeper_*` neighborhood; not a hard gate but bundling 25+ files in a single PR violates Surgical Changes).
+The fix needs a typed catalog query result variant and a caller-side decision protocol. 25+ caller files makes this an N-of-M migration — RFC required to scope the rollout (AGENT-LLM-A.md `<agent_delegation>` `keeper_*` neighborhood; not a hard gate but bundling 25+ files in a single PR violates Surgical Changes).
 
 ## 2. Surface today
 

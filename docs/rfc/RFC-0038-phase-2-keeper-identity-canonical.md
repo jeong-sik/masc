@@ -21,7 +21,7 @@ related:
 RFC-0038 Phase 1이 opaque identifier types (`Provider_id.t = private string`, `Cascade_name.t = private string`)를 도입했으나 keeper identity는 여전히 raw string으로 비교된다. 이로 인해:
 - `nick0cave` vs `keeper-nick0cave-agent` vs generated nickname이 **같은 keeper를 참조하나 string equality로 reject**
 - task ownership `release/done/cancel` 경로에서 false rejection
-- codex-connector P1 review: alias 매칭 통과 후 `transition_task_r`이 canonical assignee의 `current_task` 클리어를 누락 → backlog/agent metadata drift
+- agent-code-connector P1 review: alias 매칭 통과 후 `transition_task_r`이 canonical assignee의 `current_task` 클리어를 누락 → backlog/agent metadata drift
 
 본 Phase 2는 **keeper identity canonical form**을 type level로 표현하여 모든 alias가 single canonical form으로 normalize되어야 함을 컴파일러 강제.
 
@@ -53,7 +53,7 @@ let same_agent assignee = String.equal assignee agent_name in
 
 → **0개 typed identity comparison**. `Keeper_identity.canonical_keeper_name_from_agent_name` 등 canonicalization helper가 존재하나 task FSM에서는 전혀 사용되지 않음.
 
-**PR #14038 / codex-connector P1 review에서 지적한 버그**:
+**PR #14038 / agent-code-connector P1 review에서 지적한 버그**:
 > "`transition_task_r`이 caller string 그대로 agent state를 갱신하면, canonical assignee의 `current_task` 클리어 + status update가 발생하지 않아"
 
 실제 코드 확인: `transition_task_r` line 48에서 `resolve_agent_name_strict`로 caller를 canonicalize한 뒤 `update_local_agent_state`를 호출. 이는 **caller 측** state는 올바르게 갱신하나, task가 **다른 alias**로 claim된 경우 assignee 측 state 파일은 건드리지 않음.
@@ -213,7 +213,7 @@ let transition_task_r ~identity ~task_state =
 1. nickname → canonical form mapping table의 persistence (SQLite? pgvector? memory-only?)
 2. generated nickname이 셔플되면 이전 identity mapping은 invalid? or versioned?
 3. `Keeper_identity.t`가 RFC-0038의 `Provider_id`, `Cascade_name`와 동일한 module (opaque) convention을 따르는가, or separate?
-4. codex-connector P1 review에서 지적한 `transition_task_r` backward-compat: 기존 task record의 `owner` 필드는 그대로 두고 비교 시점만 canonicalize하는 방식 vs migration
+4. agent-code-connector P1 review에서 지적한 `transition_task_r` backward-compat: 기존 task record의 `owner` 필드는 그대로 두고 비교 시점만 canonicalize하는 방식 vs migration
 5. sub-agent Topic C.2 결과로 alias 생성 사이트 추가
 
 ## §7 References
@@ -230,7 +230,7 @@ let transition_task_r ~identity ~task_state =
 ### 사내
 
 - RFC-0038 Phase 1 (opaque identifier types — `Provider_id.t`, `Cascade_name.t`)
-- PR #14038 — reference fix + codex-connector P1 review
+- PR #14038 — reference fix + agent-code-connector P1 review
 - `instructions/software-development.md` §2 Unknown → Permissive Default anti-pattern
 - (sub-agent Topic C.1) `same_task_actor` caller 전수 + `transition_task_r` 연결 — `.tmp/rfc-0038-p2-caller-context.md`
 - (sub-agent Topic C.2) alias 생성 사이트 분석 — `.tmp/rfc-0038-p2-caller-context.md`

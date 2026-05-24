@@ -10,7 +10,7 @@ withdrawn_reason: "Dashboard cache work proceeded via RFC-0138 lock-free immutab
 # RFC 0061 — Cache-invalidation broadcast envelope
 
 - **Status**: Draft
-- **Author**: Vincent + Claude
+- **Author**: Vincent + Agent-LLM-A
 - **Depends on**: RFC-0040 (mention-dedup)
 - **Resolves**: Reactive axis stage-1 death — broadcast rewrite swallows mention tokens before `pre_extract_mention` runs.
 
@@ -123,7 +123,7 @@ RFC-0040 introduced sender-side mention dedup at `coord_broadcast.ml:122`. Its `
 
 ## 5. TLA+ Bug Model Requirement
 
-Per CLAUDE.md TLA+ Bug Model pattern, provide a spec that proves the invariant catches the bug.
+Per AGENT-LLM-A.md TLA+ Bug Model pattern, provide a spec that proves the invariant catches the bug.
 
 ### 5.1 Actions
 
@@ -209,5 +209,5 @@ Total **~125 LOC** (OCaml) + **~40 LOC** (TLA+).
 - `lib/coord/coord_broadcast.ml:64-198` — current broadcast implementation.
 - `lib/keeper/keeper_prompt.ml:16` — pull-model mention check.
 - `lib/keeper/keeper_exec_context.ml:418` — direct_mention boolean injection.
-- CLAUDE.md TLA+ Bug Model pattern — `BugAction` + `SafetyInvariant` verification.
+- AGENT-LLM-A.md TLA+ Bug Model pattern — `BugAction` + `SafetyInvariant` verification.
 - Memory: `feedback_main_blocker_chain_4x_session` — admin-merge / PR chain bypass forbidden.

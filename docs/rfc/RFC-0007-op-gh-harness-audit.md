@@ -1,10 +1,10 @@
 # RFC-0007: Pragmatic `keeper_shell op=gh` Hardening
 
 - **Status**: Draft (rev.3)
-- **Author**: vincent (with Claude)
+- **Author**: vincent (with Agent-LLM-A)
 - **Created**: 2026-04-24
 - **Revised**:
-  - 2026-04-24 rev.2 — replaced Samchon 4-layer big-bang with a claude-code-inspired 3-PR phasing (rev.1 sketch preserved in §8 Appendix).
+  - 2026-04-24 rev.2 — replaced Samchon 4-layer big-bang with a agent-llm-a-code-inspired 3-PR phasing (rev.1 sketch preserved in §8 Appendix).
   - 2026-04-24 rev.3 — evidence correction: `GIT_ASKPASS` / `GIT_TERMINAL_PROMPT` are **absent** in the current codebase, not "scattered" as rev.2 claimed. PR-1 cost estimate bumped 80 → 120 lines accordingly.
 - **Related**: RFC-0005 (typed capability substrate), RFC-0006 (surface + symmetric sandbox), RFC-0008 (CredentialProvider — same review cycle), #8773, #6814
 - **Drives**: reduce LLM-facing tool error rate without rewriting the gh surface; keep every change landable in a single PR
@@ -20,13 +20,13 @@ Both are fixable without the Samchon 4-layer rewrite proposed in rev.1. Splittin
 
 ## 2. Design principles (directly borrowed from `~/me/workspace/yousleepwhen/claude-code`)
 
-| # | Principle | claude-code source | masc-mcp analog |
+| # | Principle | agent-llm-a-code source | masc-mcp analog |
 |---|-----------|--------------------|-----------------|
 | P1 | **Permission → Sandbox → Exec, strictly serial.** Any gate must be in front of subprocess spawn. | `src/tools/BashTool/BashTool.tsx:540, 881` — `checkPermissions() → runShellCommand(shouldUseSandbox(), subprocessEnv())` | `validate_gh_command → effective_sandbox_profile → run_docker_shell_command_with_status`. Preserve. |
 | P2 | **Keeper credential scope is bundle scope.** Long-lived host secrets and ambient operator GitHub state are scrubbed; keeper git/gh uses only the selected MASC identity bundle. | `src/utils/subprocessEnv.ts:15-53` — upstream pass-through is job-scoped, but MASC keepers are long-running identities, not CI jobs. | Curate `KEEPER_ENV_SCRUB` and `KEEPER_ENV_PASS` as a single file; `GH_TOKEN`, `GITHUB_TOKEN`, `GH_CONFIG_DIR`, and `SSH_AUTH_SOCK` are scrubbed for keeper GH paths. |
 | P3 | **Non-interactive defaults are a constant, not an opinion.** | `src/utils/worktree.ts:199-202` — `GIT_NO_PROMPT_ENV = { GIT_TERMINAL_PROMPT:'0', GIT_ASKPASS:'' }` | Introduce `lib/env_git_noninteractive.ml` with the same record. All docker/exec callsites read from it. |
 | P4 | **Errors have shape.** Structured result ≠ scripting nightmare; `{stdout, stderr, exit_code, interpretation?}` is enough to drive LLM retry. | `src/tools/BashTool/BashTool.tsx:280` — `outputSchema` Zod with `returnCodeInterpretation` | `type gh_result = { stdout; stderr; exit_code; class_; interpretation : string option; reversibility }`. Interpretation is a lookup on `(exit_code × class)`, not a parser. |
-| P5 | **Do not reinvent parsers or sandbox runtimes.** claude-code wraps tree-sitter and `@anthropic-ai/sandbox-runtime`; it does **not** write its own. | `src/utils/bash/bashParser.ts` (tree-sitter wrapper), `src/utils/sandbox/sandbox-adapter.ts` (external runtime wrapper) | Keep `extract_gh_command_pair` and the docker CLI exactly as is; no lenient parser, no custom daemon. |
+| P5 | **Do not reinvent parsers or sandbox runtimes.** agent-llm-a-code wraps tree-sitter and `@provider-a-ai/sandbox-runtime`; it does **not** write its own. | `src/utils/bash/bashParser.ts` (tree-sitter wrapper), `src/utils/sandbox/sandbox-adapter.ts` (external runtime wrapper) | Keep `extract_gh_command_pair` and the docker CLI exactly as is; no lenient parser, no custom daemon. |
 
 These principles are the whole RFC. Everything below is mechanical execution.
 
@@ -35,7 +35,7 @@ These principles are the whole RFC. Everything below is mechanical execution.
 ### PR-1 — `env_git_noninteractive` + scrub list (≈120 lines + tests)
 
 - **What**: new `lib/env_git_noninteractive.mli` exposing `val env : (string * string) list = [("GIT_ASKPASS",""); ("GIT_TERMINAL_PROMPT","0")]`. These constants do not exist anywhere in `lib/`/`test/`/`scripts/` today (verified rev.3); PR-1 introduces them and wires them into `keeper_shell_docker.ml:234-245` alongside the existing `HOME`/`GH_CONFIG_DIR`/`GIT_CONFIG_*` block. `keeper_exec_shell.ml` is currently free of git env (verified), so there is a single callsite for this PR.
-- **Also**: `lib/env_keeper_scrub.ml` with two lists `scrub : string list` (Anthropic keys, AWS creds, OIDC tokens, plus ambient GitHub state: `GH_TOKEN`, `GITHUB_TOKEN`, `GH_CONFIG_DIR`, `SSH_AUTH_SOCK`) and `pass : string list` (`GIT_*` behavioral env only). docker run argv construction uses both.
+- **Also**: `lib/env_keeper_scrub.ml` with two lists `scrub : string list` (Provider-A keys, AWS creds, OIDC tokens, plus ambient GitHub state: `GH_TOKEN`, `GITHUB_TOKEN`, `GH_CONFIG_DIR`, `SSH_AUTH_SOCK`) and `pass : string list` (`GIT_*` behavioral env only). docker run argv construction uses both.
 - **Why safe**: additive — we are introducing constants that currently don't exist, not deleting or refactoring an existing pattern. A regression test asserts that every docker `-e` argv produced by `keeper_shell_docker.run_docker_shell_command_with_status` contains both keys.
 - **Observability**: metric `keeper_shell_docker.git_prompt_env_missing_total` (should be 0 after PR, and is effectively undefined before PR — the test is the more reliable gate).
 
@@ -124,7 +124,7 @@ The rev.1 Samchon 4-layer design (typed `gh_request.t` with full subcommand cove
 - PoC artifacts: `~/me/.tmp/keeper-docker-gh/` — Option A (RO mount) and Option B (`gh auth login --with-token`) both passed end-to-end.
 - Evidence record: `~/me/memory/procedural-memory/2026-04-24-keeper-docker-github-provider-evidence-record.md`.
 - masc-mcp commit audited: `0e408ffc1d5b34badb0cc1b9f3704a9e725fb8c6`.
-- claude-code reference points (read-only observation):
+- agent-llm-a-code reference points (read-only observation):
   - `src/tools/BashTool/BashTool.tsx:540, 881` — execute pipeline order.
   - `src/tools/BashTool/shouldUseSandbox.ts:18-20, 130-153` — "sandbox permission is the actual security control" (contrast: our docker-is-primary).
   - `src/utils/subprocessEnv.ts:15-53` — scrub/pass lists.

@@ -189,7 +189,7 @@ type run_result = {
 
 Runtime failsafe fallback (cascade.toml 없을 때):
 - `llama:{MASC_DEFAULT_MODEL}` (로컬)
-- `glm:auto` (ZAI_API_KEY 존재 시)
+- `provider-k:auto` (ZAI_API_KEY 존재 시)
 
 이 fallback은 runtime failsafe다. 저장소에 커밋되는 `config/cascade.toml`
 기본값과 동일시하지 않는다.
@@ -271,7 +271,7 @@ cascade_name (e.g. "keeper", "verifier", "context_router")
 
 Provider/model-free here means MASC policy code does not branch on vendor or
 model literals. Provider/model ids remain operator-authored config data and may
-come from an OAS provider catalog for cloud APIs, local OpenAI-compatible
+come from an OAS provider catalog for cloud APIs, local Provider-D-compatible
 servers, or non-interactive subscription CLI runtimes.
 
 ### 6.2 Cascade Inference Parameters
@@ -280,7 +280,7 @@ servers, or non-interactive subscription CLI runtimes.
 
 ```json
 {
-  "keeper_models": ["llama:qwen3.5", "glm:glm-5.1"],
+  "keeper_models": ["llama:qwen3.5", "provider-k:provider-k-5.1"],
   "keeper_temperature": 0.7,
   "keeper_max_tokens": 4096,
   "default_temperature": 0.5,
@@ -544,7 +544,7 @@ Detailed implementation checklist lives in
 | `MASC_CONTEXT_BUDGET_MAX` | 100,000 | Context budget 상한 |
 | `MASC_CONTEXT_ROUTER_MODE` | heuristic | Intent classification 모드 |
 | `MASC_MEMORY_OAS_DEFAULT_IMPORTANCE` | 5 | OAS Memory store 기본 importance |
-| `ZAI_API_KEY` | (없음) | GLM Cloud cascade fallback 활성화 |
+| `ZAI_API_KEY` | (없음) | Provider-K Cloud cascade fallback 활성화 |
 
 cascade.toml 기반 변수는 환경변수가 아니라 config 파일에서 관리된다.
 

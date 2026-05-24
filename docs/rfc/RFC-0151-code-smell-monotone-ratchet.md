@@ -31,7 +31,7 @@ monotone-decreasing baseline 으로 ratchet 한다. 새 PR 은 baseline 위로
 이후 추가 누적 0) 을 enforce 하므로, 단발적 godfile split / catch-all
 elimination 작업이 자연스럽게 baseline 을 끌어내린다.
 
-이 접근은 CLAUDE.md §"워크어라운드 거부 기준" 시그니처 3종 중 #2
+이 접근은 AGENT-LLM-A.md §"워크어라운드 거부 기준" 시그니처 3종 중 #2
 (string/substring 분류기) + #3 (N-of-M 패치) 의 누적을 사후가 아니라
 *PR 게이트 단계에서* 감지하는 것을 목적으로 한다. 기존 godfile cap 식
 (`prometheus.ml` 등의 LoC 상한) 은 cap 자체가 PR-evasion 을 유도했기에
@@ -99,10 +99,10 @@ CI 는 `RATCHET-WAIVED` 라인을 *count* 하고 `do-not-merge` 라벨을
 이 목적). 단, `RATCHET-WAIVED` 가 한 PR 에 2+ metric 동시 사용 시
 adversarial-reviewer agent invoke 를 트리거 (impl PR 에서 wiring).
 
-## 6. Override 3-요건 (CLAUDE.md §"Override 조건" 정합)
+## 6. Override 3-요건 (AGENT-LLM-A.md §"Override 조건" 정합)
 
 본 ratchet 자체는 *Workaround* 가 아니라 *Workaround 감지기* 이므로
-"CLAUDE.md §워크어라운드 거부 기준" 의 직접 대상이 아니다. 그러나
+"AGENT-LLM-A.md §워크어라운드 거부 기준" 의 직접 대상이 아니다. 그러나
 *ratchet 도입에 의해 새로 생기는 워크어라운드 패턴* (예: 사람이 metric
 회피용으로 한 파일을 두 파일로 가짜 split) 을 막기 위해 다음 3 가지
 조건을 RFC 본문에 명시:
@@ -134,7 +134,7 @@ adversarial-reviewer agent invoke 를 트리거 (impl PR 에서 wiring).
 ## 8. References
 
 - 사전 attempt: PR #16833 (CLOSED, "DIRTY + CI/RFC policy surfaces").
-- CLAUDE.md §"워크어라운드 거부 기준" 시그니처 3종 + 체크리스트 7항.
+- AGENT-LLM-A.md §"워크어라운드 거부 기준" 시그니처 3종 + 체크리스트 7항.
 - `memory/feedback_prometheus_extract_too_evasive.md` (godfile cap 의
   evasion 패턴 → ratchet 으로 전환 근거).
 - RFC-0085 keeper godfile decomp track.

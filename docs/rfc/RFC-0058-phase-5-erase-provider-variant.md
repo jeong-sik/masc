@@ -16,21 +16,21 @@ on `feat/rfc-0058-phase4`:
 
 | File | Symptom |
 |------|---------|
-| `lib/provider_adapter.ml` | `cascade_prefix = "claude_code" / "codex_cli" / "kimi_cli" / "gemini_cli" / "glm-coding"` and per-provider `aliases = [...]` lists hardcode every vendor name and its synonyms |
+| `lib/provider_adapter.ml` | `cascade_prefix = "cli-tool-d" / "cli-tool-a" / "cli-tool-c" / "cli-tool-b" / "provider-k-coding"` and per-provider `aliases = [...]` lists hardcode every vendor name and its synonyms |
 | `lib/provider_tool_support.ml` | Closed variant `Claude_code | Gemini_cli | Kimi_cli | Codex_cli` with per-variant capability lookup |
-| `lib/cascade/cascade_attempt_liveness_config.ml:54-56` | Liveness tunables keyed by literal `"codex_cli"` / `"claude_code"` / `"glm-coding"` etc. |
+| `lib/cascade/cascade_attempt_liveness_config.ml:54-56` | Liveness tunables keyed by literal `"cli-tool-a"` / `"cli-tool-d"` / `"provider-k-coding"` etc. |
 | `lib/cascade/cascade_catalog_validator.ml:162-168` | Warn message and detection logic enumerate provider names |
-| `lib/cascade/cascade_config.mli:152-154` | `auto` expansion logic referencing `"gemini_cli:auto"` etc. |
-| `lib/cascade/cascade_error_classify.mli:147-168` | `codex_cli_prompt_preflight` type and helpers — preflight is provider-specific by design |
-| `lib/prometheus.ml:530` | Metric name `masc_codex_cli_mcp_tool_omission_total` baked into code |
-| `lib/dashboard_cascade.mli` | Documentation literals (`cli:claude_code`, `kimi_cli`, …) — driven by runtime data but the contract surface still spells them out |
+| `lib/cascade/cascade_config.mli:152-154` | `auto` expansion logic referencing `"cli-tool-b:auto"` etc. |
+| `lib/cascade/cascade_error_classify.mli:147-168` | `cli-tool-a_prompt_preflight` type and helpers — preflight is provider-specific by design |
+| `lib/prometheus.ml:530` | Metric name `masc_cli-tool-a_mcp_tool_omission_total` baked into code |
+| `lib/dashboard_cascade.mli` | Documentation literals (`cli:cli-tool-d`, `cli-tool-c`, …) — driven by runtime data but the contract surface still spells them out |
 
 The provider name leaks into call sites in three forms:
 
 1. **Closed variant** (`type provider_id = Claude_code | …`) — exhaustive
    match enforces that any new vendor needs a code change in every dispatch
    site.
-2. **Cascade prefix literal** (`"claude_code"`, `"codex_cli"`, …) —
+2. **Cascade prefix literal** (`"cli-tool-d"`, `"cli-tool-a"`, …) —
    string compared against runtime config; adding a vendor means hunting
    for every match site.
 3. **Per-vendor configuration tables** baked into OCaml (`auto_register_for_candidates`,
@@ -62,11 +62,11 @@ Phased to keep `main` green at every step. Each step is one PR.
 - Replace `type provider_id = Claude_code | …` with `Provider_id of string`
   (id is the TOML `[providers.<id>]` key).
 - Move per-provider capability defaults from
-  `Llm_provider.Capabilities.{claude_code,gemini_cli,kimi_cli,codex_cli}_capabilities`
+  `Llm_provider.Capabilities.{cli-tool-d,cli-tool-b,cli-tool-c,cli-tool-a}_capabilities`
   into a `[providers.<p>.capabilities]` TOML sub-table. New section parses
   to `provider_capabilities` record and the dispatch reads from it.
 - Caller-site grep: `provider_tool_support`, `runtime_mcp_policy_requires_http_headers`,
-  `codex_cli_identity_runtime_mcp_header`. Each becomes a TOML lookup.
+  `cli-tool-a_identity_runtime_mcp_header`. Each becomes a TOML lookup.
 
 ### Phase 5.2 — Remove static liveness classes
 
@@ -89,7 +89,7 @@ resolved budget used for the attempt.
 - Do not replace the old match with a provider-id keyed budget lookup;
   that still makes provider identity the budget taxonomy. Keeper dispatch
   should use a concrete provider/model candidate key.
-- The hardcoded `match cascade_prefix with "codex_cli" | "claude_code" |
+- The hardcoded `match cascade_prefix with "cli-tool-a" | "cli-tool-d" |
   …` block is deleted without replacing it with static provider classes.
 - If validator rules are added, they should ensure no shipped provider
   declares a liveness class so future entries cannot silently regress.
@@ -103,7 +103,7 @@ resolved budget used for the attempt.
 
 ### Phase 5.4 — Generalize Prometheus metric names
 
-- `metric_codex_cli_mcp_tool_omission` becomes a labelled metric:
+- `metric_cli-tool-a_mcp_tool_omission` becomes a labelled metric:
   `masc_provider_mcp_tool_omission_total{provider="<id>"}`. Dashboards
   follow.
 
@@ -158,7 +158,7 @@ For each Phase 5.N PR:
 - G1: `rg "Claude_code|Codex_cli|Kimi_cli|Gemini_cli" lib/ -t ocaml` shrinks
   monotonically. Phase 5.1 must zero out the variant occurrences in
   `provider_tool_support`.
-- G2: `rg '"claude_code"|"codex_cli"|"kimi_cli"|"gemini_cli"|"glm-coding"' lib/ -t ocaml`
+- G2: `rg '"cli-tool-d"|"cli-tool-a"|"cli-tool-c"|"cli-tool-b"|"provider-k-coding"' lib/ -t ocaml`
   shrinks monotonically. Phase 5.3 must zero them out under `lib/` (test
   fixtures and migration tools excluded).
 - G3: `dune build --root .` and `dune test` pass. Test fixtures may be
@@ -180,11 +180,11 @@ For each Phase 5.N PR:
 
 ## 7. Open Questions
 
-1. Should provider `aliases` (synonym strings like `"claude"`/`"claude-code"`/`"claude_code"`)
+1. Should provider `aliases` (synonym strings like `"agent-llm-a"`/`"agent-llm-a-code"`/`"cli-tool-d"`)
    be moved to TOML or eliminated entirely by canonicalizing all callers
    to the TOML id? Eliminating is cleaner but touches more call sites.
-2. Per-provider preflight (`codex_cli_prompt_preflight`) — is the argv/prompt
-   length check truly Codex-specific, or a general constraint that should
+2. Per-provider preflight (`cli-tool-a_prompt_preflight`) — is the argv/prompt
+   length check truly Agent-Code-specific, or a general constraint that should
    live as a TOML `[providers.<p>.preflight]` policy?
 3. Dashboard contract literals (`dashboard_cascade.mli` docstrings, JSON
    shape examples) — leave them as documentation, or drive examples from

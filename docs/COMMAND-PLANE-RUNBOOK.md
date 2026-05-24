@@ -72,7 +72,7 @@ Step-by-step:
 {
   "tool": "masc_join",
   "arguments": {
-    "agent_name": "codex",
+    "agent_name": "agent-code",
     "capabilities": ["ocaml", "dashboard", "documentation"]
   }
 }
@@ -82,7 +82,7 @@ Step-by-step:
 
 ```json
 {
-  "agent": "codex-...",
+  "agent": "agent-code-...",
   "status": "joined"
 }
 ```
@@ -315,7 +315,7 @@ does not take the Dune lock later and extend the local build queue.
 
 ```http
 POST /api/v1/command-plane/operations
-x-masc-agent-name: codex
+x-masc-agent-name: agent-code
 Content-Type: application/json
 
 {

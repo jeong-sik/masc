@@ -46,7 +46,7 @@ Delta entry 포맷(P2-2)을 도입하려면 "어느 것이 SSOT인가"를 먼저
 | **정의** | `~/me/skills/handoff/SKILL.md` (me repo, not masc-mcp) |
 | **포맷** | Semi-structured markdown (template 기반, 자유 텍스트) |
 | **저장** | PostgreSQL (`sb retro save`) + `.claude/session-state.md` |
-| **생산자** | Claude Code 세션 종료 시 `/handoff` skill 실행 |
+| **생산자** | CLI-Tool-A 세션 종료 시 `/handoff` skill 실행 |
 | **소비자** | 다음 세션에서 `.claude/session-state.md` 읽기, retrospective 검색 |
 | **내구성** | PG: 영구. session-state.md: 파일 시스템 (덮어쓰기) |
 | **범위** | **inter-session**: 세션 간 인계 |
@@ -59,7 +59,7 @@ Delta entry 포맷(P2-2)을 도입하려면 "어느 것이 SSOT인가"를 먼저
 | **정의** | `~/me/memory/handoff-*.md` (me repo, auto-memory) |
 | **포맷** | Freetext markdown (frontmatter 포함) |
 | **저장** | 파일 시스템 (auto-memory 디렉토리) |
-| **생산자** | Claude Code auto-memory 시스템 (MEMORY.md index 참조) |
+| **생산자** | CLI-Tool-A auto-memory 시스템 (MEMORY.md index 참조) |
 | **소비자** | 다음 세션 시작 시 MEMORY.md → 관련 memory 로드 |
 | **내구성** | 영구 (수동 삭제 전까지) |
 | **범위** | **cross-conversation**: 장기 컨텍스트 보존 |
@@ -93,7 +93,7 @@ P2-2의 "handoff delta entries"는 **세션 간 재개** 시 변경분만 로드
 
 ### Path 3은 관심사가 다르다
 
-local memory는 Claude Code auto-memory 시스템의 영역이다.
+local memory는 CLI-Tool-A auto-memory 시스템의 영역이다.
 masc-mcp가 직접 관리하는 것이 아니며, 포맷도 user-facing markdown이다.
 Delta entry 시스템이 이를 직접 소비하는 것은 경계 위반이다.
 

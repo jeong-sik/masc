@@ -65,7 +65,7 @@ type reaction_kind =
   | Unknown_reaction of string         (* (2) *)
 ```
 
-(1) 과 (2) 의 `Unknown of string` catch-all 은 **CLAUDE.md `software-development.md` §"AI 코드 생성 안티패턴" §2 "Unknown → Permissive Default"** 시그니처:
+(1) 과 (2) 의 `Unknown of string` catch-all 은 **AGENT-LLM-A.md `software-development.md` §"AI 코드 생성 안티패턴" §2 "Unknown → Permissive Default"** 시그니처:
 
 > 알 수 없는 입력을 에러 대신 "편리한 기본값" 으로 매핑.
 > **규칙**: unknown 입력은 `Error`/`None`/`Unknown` 변형으로 처리. `option`을 `Some default` 로 압축하지 않는다.
@@ -74,12 +74,12 @@ type reaction_kind =
 
 ### Why this needs an RFC
 
-1. **5 PR 진행 후 RFC 작성 — 정확한 *retroactive umbrella* 시점**: CLAUDE.md `pre_workflow.md` §"진입 장벽" — "복잡한 비즈니스 로직: 상태 다이어그램/의사코드/테스트 케이스 먼저 작성".
+1. **5 PR 진행 후 RFC 작성 — 정확한 *retroactive umbrella* 시점**: AGENT-LLM-A.md `pre_workflow.md` §"진입 장벽" — "복잡한 비즈니스 로직: 상태 다이어그램/의사코드/테스트 케이스 먼저 작성".
 2. **TLA+ spec 과 runtime 의 정합성 검증 부재**: 현재 L1 partial 구현이 spec 의 L1 invariant 와 자동 cross-check 안됨. spec 이 update 되어도 runtime 가 catch 안함.
 3. **MASC task-134 가 tracking owner** 인데 RFC 없음 — task 가 *what to build* 만, *why this shape* 안 다룸.
 4. **5 mirror entry point 중 3 missing** — module 신설 순서를 RFC 가 commit 해야 N-of-M 막음 (각 entry point 가 별도 PR 로 hand-build 되면 catch-all 누적).
 
-근본 원인: **TLA+ spec → OCaml runtime 의 *bidirectional contract* 를 RFC 가 박혀있지 않음**. CLAUDE.md `software-development.md` §"TLA+ Bug Model" 패턴이 spec invariant 와 buggy.cfg 양쪽 통과를 요구하는데, 본 spec 은 그 패턴 (KRL + KRL-buggy.cfg) 을 *이미 갖춤* — 다만 runtime side 가 비어있음.
+근본 원인: **TLA+ spec → OCaml runtime 의 *bidirectional contract* 를 RFC 가 박혀있지 않음**. AGENT-LLM-A.md `software-development.md` §"TLA+ Bug Model" 패턴이 spec invariant 와 buggy.cfg 양쪽 통과를 요구하는데, 본 spec 은 그 패턴 (KRL + KRL-buggy.cfg) 을 *이미 갖춤* — 다만 runtime side 가 비어있음.
 
 ## §2 Approach
 

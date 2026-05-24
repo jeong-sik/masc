@@ -104,9 +104,9 @@ describe('isPlaceholderModel', () => {
   })
 
   it('returns false for real model names', () => {
-    expect(isPlaceholderModel('claude-sonnet-4-6')).toBe(false)
-    expect(isPlaceholderModel('gpt-4o')).toBe(false)
-    expect(isPlaceholderModel('claude_code:auto')).toBe(false)
+    expect(isPlaceholderModel('model-a-sonnet')).toBe(false)
+    expect(isPlaceholderModel('model-d')).toBe(false)
+    expect(isPlaceholderModel('cli-tool-d:auto')).toBe(false)
   })
 
   it('is case-insensitive', () => {
@@ -124,7 +124,7 @@ describe('normalizeModelText', () => {
   })
 
   it('returns trimmed text for valid models', () => {
-    expect(normalizeModelText(' claude-sonnet-4-6 ')).toBe('claude-sonnet-4-6')
+    expect(normalizeModelText(' model-a-sonnet ')).toBe('model-a-sonnet')
   })
 })
 
@@ -161,10 +161,10 @@ describe('buildFleetRows runtime labels', () => {
         keepalive_running: true,
         cascade_name: 'oas-keeper_unified',
         cascade_canonical: 'primary',
-        active_model_label: 'codex_cli:auto',
+        active_model_label: 'cli-tool-a:auto',
         trust: {
           execution_summary: {
-            provider_selected_model: 'anthropic:claude-sonnet-4-6',
+            provider_selected_model: 'provider-a:model-a-sonnet',
             provider_attempt_count: 2,
             provider_fallback_applied: true,
             cascade_outcome: 'passed_to_next_model',
@@ -183,7 +183,7 @@ describe('buildFleetRows runtime labels', () => {
             is_compaction: false,
             compaction_saved_tokens: 0,
             compaction_trigger: null,
-            model_used: 'anthropic:claude-sonnet-4-6',
+            model_used: 'provider-a:model-a-sonnet',
             cost_usd: 0,
             handoff_to_model: null,
             handoff_new_generation: null,
@@ -197,14 +197,14 @@ describe('buildFleetRows runtime labels', () => {
             wall_tokens_per_second: null,
             inference_telemetry: null,
             cascade_name: 'primary',
-            cascade_selected_model: 'anthropic:claude-sonnet-4-6',
+            cascade_selected_model: 'provider-a:model-a-sonnet',
             cascade_attempt_count: 2,
             cascade_outcome: 'passed_to_next_model',
             cascade_strategy: 'round_robin',
             fallback_applied: true,
             fallback_hops: 1,
-            fallback_from: 'openai:gpt-5.4',
-            fallback_to: 'anthropic:claude-sonnet-4-6',
+            fallback_from: 'provider-d:gpt-5.4',
+            fallback_to: 'provider-a:model-a-sonnet',
             fallback_reason: 'turn_timeout',
           },
         ],

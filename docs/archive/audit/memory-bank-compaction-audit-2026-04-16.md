@@ -345,7 +345,7 @@ None of these are live bugs. Every drift item is either documentation-level (#1,
 
 ---
 
-**Audit author**: Claude (Opus 4.6)
+**Audit author**: Agent-LLM-A (Opus 4.6)
 **Date**: 2026-04-16
 **Verified files**:
 - `specs/bug-models/MemoryCompaction.tla` (199 lines, read end-to-end)

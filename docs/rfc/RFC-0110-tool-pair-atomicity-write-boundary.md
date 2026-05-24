@@ -33,7 +33,7 @@ rollover:266   repair_orphan_tool_result_messages    # 자동 호출
 
 ### 패턴 분류
 
-CLAUDE.md `software-development.md` 의 워크어라운드 시그니처 §"Repair / Sanitize":
+AGENT-LLM-A.md `software-development.md` 의 워크어라운드 시그니처 §"Repair / Sanitize":
 
 > **Repair / Sanitize**: signals "UTF-8 repair", "JSON normalize on read". Root: Protocol boundary enforce (validate at write, reject on read).
 
@@ -46,7 +46,7 @@ CLAUDE.md `software-development.md` 의 워크어라운드 시그니처 §"Repai
 ### Why this needs an RFC
 
 1. **재발 메커니즘**: write-side atomicity 없으면 같은 root 가 반복 발생. 새 tool dispatch path 추가 시 (e.g. RFC-0100 streaming) 또 같은 repair 경로 통과.
-2. **메트릭 vs fix**: PR #15888 의 `was_fabricated` 메타 + `downgraded_tool_uses`/`downgraded_tool_results` counter 는 **CLAUDE.md "Counter-as-Fix" 시그니처 §1**. visible 하지만 fix 가 아님.
+2. **메트릭 vs fix**: PR #15888 의 `was_fabricated` 메타 + `downgraded_tool_uses`/`downgraded_tool_results` counter 는 **AGENT-LLM-A.md "Counter-as-Fix" 시그니처 §1**. visible 하지만 fix 가 아님.
 3. **fabrication 책임 분산**: 4 call site 마다 `~repair_orphans` 인자 판단을 caller 에게 떠넘김. atomicity 가 boundary type 에 박혀있지 않음.
 4. **RFC-0088 / RFC-0077 / RFC-0042 와 연속**: RFC-0042 closed-sum, RFC-0077 write-side silent failure, RFC-0088 counter-as-fix umbrella — 본 RFC 는 같은 family 의 *tool-pair* surface.
 
@@ -110,7 +110,7 @@ P3 가 핵심 — fabrication 대신 Result.Error 반환 시 caller (post_turn /
 
 - **메시지 외 source 의 fabrication** (예: cascade transport, oas event) — 본 RFC 는 `Agent_sdk.Types.message` 안의 tool-pair 만.
 - **fabrication 메타데이터 schema 변경** — PR #15888 의 `was_fabricated` / `fabrication_source` / `masc.tool_pair_repair` 메타 schema 는 유지. P5 에서 신규 fabrication 만 0 으로.
-- **Provider-side tool API 변경** — Anthropic / OpenAI / GLM 의 tool API contract 는 unchanged. atomicity 는 *내부 history 모델* 의 invariant.
+- **Provider-side tool API 변경** — Provider-A / Provider-D / Provider-K 의 tool API contract 는 unchanged. atomicity 는 *내부 history 모델* 의 invariant.
 
 ## §6 Risk & rollback
 

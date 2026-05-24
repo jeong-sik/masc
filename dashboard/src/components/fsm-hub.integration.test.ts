@@ -62,7 +62,7 @@ const REAL_COMPOSITE_SHAPE: KeeperCompositeSnapshot = {
     ended_at: 1776234638.709722,
     decision_stage: 'tool_policy_selected',
     cascade_state: 'done',
-    selected_model: 'glm-4.5',
+    selected_model: 'provider-k-4.5',
   },
   recommended_actions: [],
 }

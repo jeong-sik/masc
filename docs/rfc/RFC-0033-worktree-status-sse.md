@@ -1,7 +1,7 @@
 # RFC 0033 — Worktree Status SSE Channel
 
 - **Status**: Draft
-- **Author**: Vincent + Claude (auto mode 2026-05-05)
+- **Author**: Vincent + Agent-LLM-A (auto mode 2026-05-05)
 - **Created**: 2026-05-05
 - **Sister RFC**: design-system `dashboard/design-system/RFC/0022-ide-plane-assembly.md`
 - **Depends on**: `lib/coord/coord_worktree.ml` (existing)

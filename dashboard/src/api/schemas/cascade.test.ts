@@ -19,12 +19,12 @@ const validConfig = {
       keeper_assignable: true,
       candidates: [
         {
-          model: 'glm-coding:auto',
-          display_model: 'glm-coding',
-          provider_name: 'glm',
+          model: 'provider-k-coding:auto',
+          display_model: 'provider-k-coding',
+          provider_name: 'provider-k',
           display_provider_name: 'GLM',
           runtime_kind: 'cli',
-          expanded_models: ['glm-coding:auto'],
+          expanded_models: ['provider-k-coding:auto'],
           config_weight: 1,
           effective_weight: 1,
           success_rate: 0.98,
@@ -47,7 +47,7 @@ describe('cascade API schemas', () => {
     const parsed = parseCascadeConfigResponse(validConfig)
 
     expect(parsed.validation_status).toBe('validated')
-    expect(parsed.profiles[0]?.candidates[0]?.model).toBe('glm-coding:auto')
+    expect(parsed.profiles[0]?.candidates[0]?.model).toBe('provider-k-coding:auto')
   })
 
   it('throws typed drift errors when a required config field is missing', () => {
@@ -65,10 +65,10 @@ describe('cascade API schemas', () => {
       source_text: '[profiles.keeper_unified]\n',
       assist: {
         parse_status: 'parsed',
-        providers: ['glm-coding'],
-        models: ['glm-auto'],
-        bindings: ['glm-coding.glm-auto'],
-        aliases: ['glm-coding.glm-auto.deep'],
+        providers: ['provider-k-coding'],
+        models: ['provider-k-auto'],
+        bindings: ['provider-k-coding.provider-k-auto'],
+        aliases: ['provider-k-coding.provider-k-auto.deep'],
         tiers: ['primary'],
         tier_groups: ['primary'],
         routes: ['keeper_turn'],
@@ -105,7 +105,7 @@ describe('cascade API schemas', () => {
       perf_window_minutes: null,
       providers: [
         {
-          provider_key: 'glm',
+          provider_key: 'provider-k',
           success_rate: 1,
           consecutive_failures: 0,
           in_cooldown: false,

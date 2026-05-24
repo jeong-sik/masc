@@ -6,7 +6,7 @@
 
 ## Positioning axes
 
-| Dimension | Claude Code / OpenAI Agent SDK / ADK | OpenClaw / Hermes / DAW | MASC |
+| Dimension | CLI-Tool-A / Provider-D Agent SDK / ADK | OpenClaw / Hermes / DAW | MASC |
 |---|---|---|---|
 | **Orchestration center** | Runner / session loop in the SDK | Workspace / memory graph | Operator-governed supervisor + cascade router |
 | **Unit of execution** | Single agent turn (SDK dispatches) | Tool composition graph | Keeper turn with pre-dispatch gates, provider attempts, and receipt proofs |
@@ -33,19 +33,19 @@
 
 | Anti-pattern | Why it misleads | Correct framing |
 |---|---|---|
-| "MASC is slower than Claude Code" | Ignores pre-dispatch determinism | MASC turns are receipt-guaranteed; SDK turns are fire-and-forget unless the client adds bookkeeping |
+| "MASC is slower than CLI-Tool-A" | Ignores pre-dispatch determinism | MASC turns are receipt-guaranteed; SDK turns are fire-and-forget unless the client adds bookkeeping |
 | "MASC is like AutoGPT" | AutoGPT is goal-driven loop; MASC is operator-governed phase machine | Keeper autonomy is bounded by phase policy and cascade materialization, not by goal decomposition |
-| "MASC replaces the OpenAI SDK" | MASC sits at a different layer | MASC dispatch emits SDK calls (OpenAI, Anthropic, GLM, Ollama) as provider attempts; it is a router, not a client replacement |
+| "MASC replaces the Provider-D SDK" | MASC sits at a different layer | MASC dispatch emits SDK calls (Provider-D, Provider-A, Provider-K, Ollama) as provider attempts; it is a router, not a client replacement |
 
 ## When to use what
 
-| Situation | Use Claude Code / ADK | Use MASC |
+| Situation | Use CLI-Tool-A / ADK | Use MASC |
 |---|---|---|
 | One-shot script, single provider, developer machine | Direct SDK call is sufficient | Overhead exceeds value |
 | Multi-step workflow with tool failure retry | SDK runner with retry config | Keeper turn FSM handles retry as cascade rotation with receipt proof |
 | Fleet of agents with different policies | Manage N SDK clients externally | Single coordinator with per-keeper phase and cascade rules |
 | Operator must approve or audit every action | Not supported natively | Phase gate blocks autonomous turns until operator releases |
-| Cross-provider failover (OpenAI down → GLM) | Manual fallback code | Cascade router materializes alternatives automatically |
+| Cross-provider failover (Provider-D down → Provider-K) | Manual fallback code | Cascade router materializes alternatives automatically |
 
 ## References
 

@@ -45,7 +45,7 @@ audit + activity decay + README cross-check):
 | 0013 | IO-wait Sampler | Self-declared deferred; parent plan abandoned |
 | 0017 | OCaml ↔ CRDT Boundary | Awareness channel work took different direction |
 | 0018 | Compile-time receipt enforcement | Runtime check (Cycle 5) deemed sufficient |
-| 0023 | Kimi Coding API Provider | Provider ships via adapter; spec never ratified |
+| 0023 | Provider-C Coding API Provider | Provider ships via adapter; spec never ratified |
 | 0028 | Bounded Token Prediction | Research idea; never implemented |
 | 0030 | masc create CLI | Authoring uses MCP tools + dashboard instead |
 | 0031 | Three-Tier Config Disclosure | Env knob work took different direction (RFC-0138/0125) |

@@ -103,9 +103,9 @@ describe('keeperDisplayModel', () => {
   it('redacts active runtime labels', () => {
     expect(
       keeperDisplayModel({
-        active_model_label: 'claude_code:auto',
-        active_model: 'claude',
-        model: 'claude',
+        active_model_label: 'cli-tool-d:auto',
+        active_model: 'agent-llm-a',
+        model: 'agent-llm-a',
       }),
     ).toBeNull()
   })
@@ -113,10 +113,10 @@ describe('keeperDisplayModel', () => {
   it('does not fall back to metrics-series model labels', () => {
     expect(
       keeperDisplayModel({
-        active_model: 'claude_code:auto',
+        active_model: 'cli-tool-d:auto',
         metrics_series: [
-          { model_used: 'openai:gpt-5.4' },
-          { model_used: 'anthropic:claude-sonnet-4-6' },
+          { model_used: 'provider-d:gpt-5.4' },
+          { model_used: 'provider-a:model-a-sonnet' },
         ],
       }),
     ).toBeNull()
@@ -126,8 +126,8 @@ describe('keeperDisplayModel', () => {
     expect(
       keeperDisplayModel({
         last_model_used: 'unknown',
-        active_model: 'claude_code:auto',
-        model: 'claude',
+        active_model: 'cli-tool-d:auto',
+        model: 'agent-llm-a',
       }),
     ).toBeNull()
   })
@@ -137,8 +137,8 @@ describe('keeperDisplayModel', () => {
       keeperDisplayModel({
         last_model_used_label: 'default',
         last_model_used: 'auto',
-        active_model_label: 'codex_cli:auto',
-        primary_model: 'openai:gpt-5.4',
+        active_model_label: 'cli-tool-a:auto',
+        primary_model: 'provider-d:gpt-5.4',
       }),
     ).toBeNull()
   })
@@ -147,8 +147,8 @@ describe('keeperDisplayModel', () => {
     expect(
       keeperDisplayModel({
         metrics_series: [
-          { model_used: 'openai:gpt-5.4' },
-          { model_used: 'anthropic:claude-sonnet-4-6' },
+          { model_used: 'provider-d:gpt-5.4' },
+          { model_used: 'provider-a:model-a-sonnet' },
         ],
       }),
     ).toBeNull()

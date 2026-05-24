@@ -10,15 +10,15 @@ withdrawn_reason: "Cycle 5 runtime check + Result.Error promotion (lib/keeper/ke
 # RFC-0018: Compile-time receipt enforcement at `run_turn` boundary
 
 - **Status**: Draft
-- **Author**: vincent (with Claude)
+- **Author**: vincent (with Agent-LLM-A)
 - **Created**: 2026-04-30
-- **Related**: 2026-04-28 Kimi keeper FSM audit (§1.2.2 SilentReceiptDrop, §8.3 "Receipt is a Side Effect"); Cycle 5 PR (`keeper_agent_run.ml:1290-1343` Result.Error promotion); RFC-0003 (KeeperCompositeLifecycle invariants)
+- **Related**: 2026-04-28 Provider-C keeper FSM audit (§1.2.2 SilentReceiptDrop, §8.3 "Receipt is a Side Effect"); Cycle 5 PR (`keeper_agent_run.ml:1290-1343` Result.Error promotion); RFC-0003 (KeeperCompositeLifecycle invariants)
 - **Drives**: Make "turn exits without an authoritative receipt" a compile-time error at the `run_turn` boundary. Move enforcement upstream of the runtime check that Cycle 5 already established.
 - **Supersedes for this codebase**: the audit's §8.3 Option (a) — embedding `receipt` as a payload field on `Keeper_turn_fsm.turn_state` constructors `Done | Failed | Cancelled`. See §2 for why the literal recommendation does not fit this codebase's actual `turn_state` role.
 
 ## 1. Problem
 
-The Kimi audit (§1.2.2) flagged `SilentReceiptDrop`: a turn could exit `run_turn` reporting `Ok` without having appended a durable execution receipt. TLA+ specs `EveryTurnHasTerminalReceipt` and `ReceiptMatchesState` (specs/keeper-turn-fsm/KeeperTurnFSM.tla:314-327) formalise the invariant; OCaml had no compile-time enforcement.
+The Provider-C audit (§1.2.2) flagged `SilentReceiptDrop`: a turn could exit `run_turn` reporting `Ok` without having appended a durable execution receipt. TLA+ specs `EveryTurnHasTerminalReceipt` and `ReceiptMatchesState` (specs/keeper-turn-fsm/KeeperTurnFSM.tla:314-327) formalise the invariant; OCaml had no compile-time enforcement.
 
 Cycle 5 (PR landed before 2026-04-29) plugged the runtime channel: receipt-append failure now propagates as `Error (Oas.Error.Internal _)` instead of a WARN log + silent continue (`lib/keeper/keeper_agent_run.ml:1290-1343`). This means *if* the receipt-append site is reached, drop is impossible.
 

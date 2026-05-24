@@ -99,7 +99,7 @@ check bool "zombie_timeout_reached persisted" true updated.zombie_timeout_reache
 ### F-3.3 (LOW risk, design comment clarity)
 OCaml line 422 inline comment ("Forced terminal state — external cleanup/credential signals.") describes WHAT priority 0 does but not WHY (the defense-in-depth intent). A future reader removing priority 0 in pursuit of "spec alignment" could introduce the bug described in F-3.1.
 
-Per CLAUDE.md `<tone>` "Don't explain WHAT" rule, *the comment shouldn't grow* — but the audit memo (this file) is the right place for the WHY documentation.
+Per AGENT-LLM-A.md `<tone>` "Don't explain WHAT" rule, *the comment shouldn't grow* — but the audit memo (this file) is the right place for the WHY documentation.
 
 ## Verification (this iteration)
 

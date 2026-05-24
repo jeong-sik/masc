@@ -1,7 +1,7 @@
 # OAS ↔ MASC Boundary Audit — Phase 2 (Layer C sweep + Phase 1 refinement)
 
 > Status: Phase 2 of 4. Refines Phase 1's Layer C verdict (`NEEDS SWEEP` → mostly `PASS`).
-> Author: Vincent (jeong-sik) with Claude
+> Author: Vincent (jeong-sik) with Agent-LLM-A
 > Created: 2026-04-30
 > Tracks: Q-P0-3 follow-up
 > Related: PR #12112 (Phase 1), PR #12102 (`track2_sync_boundary` MERGED, `track2_sync_boundary.ml` 107 lines + `.mli` 56 lines)

@@ -1,7 +1,7 @@
 # RFC-0037 — Local-first Keeper Enablement: Harness/User Boundary
 
 - **Status**: Draft
-- **Author**: vincent (with Claude Opus 4.7)
+- **Author**: vincent (with Agent-LLM-A Opus 4.7)
 - **Created**: 2026-05-07
 - **Related**: RFC-0024 (Ollama Cascade Integration — registration done, 2026-05-03), RFC-0027 (capability-typed cascade), RFC-0032 (env knob unification)
 - **Files referenced**:
@@ -229,7 +229,7 @@ Defer until Phase 2 stabilizes.
 | C1 | Phase 1 PRs each cite RFC-0037 §X.Y in body | manual review |
 | C2 | After Phase 1: keeper with `cascade = "tier_small"` and uncommented model in cascade.toml routes through Ollama with **no** Eio_context special-casing required | integration test |
 | C3 | After Phase 2: keeper with only `providers = ["ollama"]` (no cascade.toml edit) routes through Ollama | integration test |
-| C4 | Local provider cooldown: simulated 4 consecutive Ollama failures keep the endpoint usable; 4 consecutive Claude failures cool it down | unit test |
+| C4 | Local provider cooldown: simulated 4 consecutive Ollama failures keep the endpoint usable; 4 consecutive Agent-LLM-A failures cool it down | unit test |
 | C5 | URL classification: `http://my-server:8080` with `~explicit_provider:"ollama"` returns true; `http://example.com:9000` returns false | unit test |
 
 ## 8. Risks and Tradeoffs
@@ -252,7 +252,7 @@ Defer until Phase 2 stabilizes.
 
 ## 9. Open Questions
 
-- **OQ1**: Should `providers = ["ollama", "claude"]` mean *failover order*
+- **OQ1**: Should `providers = ["ollama", "agent-llm-a"]` mean *failover order*
   or *load-balance pool*? Current proposal: failover order matching
   cascade semantics.
 - **OQ2**: Should the §4.3 fallback warn-once or warn-each-tick? Probably

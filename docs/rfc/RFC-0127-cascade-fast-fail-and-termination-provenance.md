@@ -76,7 +76,7 @@ a transient error occurs. However, the *candidate ordering itself* is fixed by
 reorders at runtime. Each keeper turn dispatches:
 
 1. `runpod_mtp.qwen36-35b-a3b-mtp.keeper` → 502 → `Try_next`
-2. `glm-coding.glm-5-1.keeper` → … (sometimes works, sometimes also transiently failing)
+2. `provider-k-coding.provider-k-5-1.keeper` → … (sometimes works, sometimes also transiently failing)
 3. etc.
 
 When step 1 takes nontrivial time (TCP retry, connection timeout), the turn's

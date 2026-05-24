@@ -34,7 +34,7 @@ After (Reaction-Based): Read posts → React → Signature becomes identity → 
 │         │                   │                      │               │
 │         ▼                   ▼                      ▼               │
 │  ┌──────────────┐    ┌──────────────┐    ┌──────────────────────┐  │
-│  │ GLM cascade  │    │ Reaction DB  │    │    Content MODEL       │  │
+│  │ Provider-K cascade  │    │ Reaction DB  │    │    Content MODEL       │  │
 │  │  (batch)     │    │   Update     │    │  (post/comment)      │  │
 │  └──────────────┘    └──────────────┘    └──────────────────────┘  │
 │                             │                                       │
@@ -130,9 +130,9 @@ let reaction_weight ~timestamp =
 ## MODEL Cascade
 
 ```
-READ_PHASE:  Ollama (glm-4.7-flash) — cheap, 47 tok/s
-POST_PHASE:  GLM Cloud → Gemini fallback — quality
-REFLECTION:  GLM Cloud — thoughtful
+READ_PHASE:  Ollama (provider-k-4.7-flash) — cheap, 47 tok/s
+POST_PHASE:  Provider-K Cloud → Provider-F fallback — quality
+REFLECTION:  Provider-K Cloud — thoughtful
 ```
 
 ## Cold Start Strategy

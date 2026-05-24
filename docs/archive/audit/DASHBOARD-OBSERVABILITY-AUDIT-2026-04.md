@@ -1,7 +1,7 @@
 # Dashboard Observability Audit — 2026-04-30 (Phase 1)
 
 > Status: Phase 1 / Survey. First-pass audit applying the 4-phase pattern from `docs/process/AUDIT-CHAIN-4-PHASE-PATTERN.md` (PR #12193) to a new domain.
-> Author: Vincent (jeong-sik) with Claude
+> Author: Vincent (jeong-sik) with Agent-LLM-A
 > Created: 2026-04-30
 > Tracks: First survey using the codified audit pattern
 
@@ -32,7 +32,7 @@ rg "metric_fn|read_keeper_metric_records" lib/dashboard/
 
 ## 3. Findings
 
-### 3.1 Metric emitter classification (per CLAUDE.md tropes — measure, don't claim)
+### 3.1 Metric emitter classification (per AGENT-LLM-A.md tropes — measure, don't claim)
 
 | File | Class | Notes |
 |---|---|---|

@@ -143,7 +143,7 @@ A single component `dashboard/src/components/keeper-timeline.ts`:
 
 - props: `{ source: { kind: 'keeper'; name: string } | { kind: 'goal'; id: string }; since?: Date; until?: Date }`.
 - internal signal `layoutMode: 'vertical' | 'horizontal'`. Default: `vertical`.
-- Data fetch via `useQuery` (no `useEffect`, per CLAUDE.md §react).
+- Data fetch via `useQuery` (no `useEffect`, per AGENT-LLM-A.md §react).
 - `vertical` rendering: turn header (collapsible) → chronological child events (tool_call, stream_summary, board_post). Reuses the visual pattern of `agent-detail-timeline.ts`.
 - `horizontal` rendering: `vis-timeline` (already a dashboard dep via `fsm-hub-timeline-panels.ts`), one lane per `keeper_turn_id`, each event as an item on its lane.
 
@@ -164,7 +164,7 @@ If RFC-OAS-019 ships before RFC-0081, the pivot UI shows the typed `Streaming_su
 
 If RFC-0081 ships first, the pivot UI groups raw `Streaming_chunk_n` records (still hundreds per attempt). The grouping is correct but each turn balloons. This is operationally usable (filter by `payload[0] == "Streaming_summary"` once RFC-OAS-019 lands) and not a regression versus today.
 
-If RFC-0081 ships and RFC-OAS-019 stalls, masc-mcp does *not* take on receive-side aggregation as a workaround. CLAUDE.md §Workaround Rejection Bar §1 (telemetry-as-fix). Wait for upstream.
+If RFC-0081 ships and RFC-OAS-019 stalls, masc-mcp does *not* take on receive-side aggregation as a workaround. AGENT-LLM-A.md §Workaround Rejection Bar §1 (telemetry-as-fix). Wait for upstream.
 
 ### 5.3 Cross-RFC interlock
 

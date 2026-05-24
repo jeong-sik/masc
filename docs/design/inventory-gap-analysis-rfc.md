@@ -186,7 +186,7 @@ ls .masc/keepers/ | wc -l
 **C. Structured output constraint (constrained decoding)**:
 - LLM 출력에 structured output / JSON mode 강제
 - memory 관련 필드를 response schema에 포함
-- 이것은 모델이 지원하는 경우에만 결정론적 (llama.cpp JSON grammar, Claude tool_use)
+- 이것은 모델이 지원하는 경우에만 결정론적 (llama.cpp JSON grammar, Agent-LLM-A tool_use)
 - 모든 모델에서 보장되지 않으므로 단독 사용 불가
 
 **권장**: B를 guarantee path로 두고, A를 선택적 enrichment path로 결합한다. 즉 system-owned post-turn write가 항상 실행되고, tool call은 salience/selection 품질을 높일 때만 추가한다. 두 경로 모두 LLM 출력 **포맷**에 의존하지 않는다.

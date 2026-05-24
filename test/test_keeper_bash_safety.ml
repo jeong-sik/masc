@@ -325,22 +325,22 @@ let test_keeper_bash_elapsed_duration_preserves_positive_sub_ms () =
   Alcotest.(check int) "nan duration is zero" 0
     (elapsed ~start_time:Float.nan ~end_time:10.0)
 
-let test_keeper_bash_timeout_floor_is_not_sub_io_latency () =
+let test_keeper_shell_ir_timeout_floor_is_not_sub_io_latency () =
   let args = `Assoc [ "timeout_sec", `Float 1.0 ] in
   Alcotest.(check (float 0.001))
-    "keeper_bash native timeout floor"
+    "keeper_shell_ir native timeout floor"
     Keeper_exec_shell.keeper_shell_ir_native_min_timeout_sec
     (Masc_mcp.Keeper_shell_shared.clamp_shell_timeout
        ~min_sec:Keeper_exec_shell.keeper_shell_ir_native_min_timeout_sec
        ~default:Masc_mcp.Keeper_shell_shared.io_timeout_sec
        args)
 
-let test_keeper_bash_load_bearing_timeout_floor () =
+let test_keeper_shell_ir_load_bearing_timeout_floor () =
   let check name args expected =
     Alcotest.(check (float 0.001))
       name
       expected
-      (Masc_mcp.Keeper_shell_shared.keeper_bash_min_timeout_sec_for_args args)
+      (Masc_mcp.Keeper_shell_shared.keeper_shell_ir_min_timeout_sec_for_args args)
   in
   check
     "trivial command keeps native floor"
@@ -1059,13 +1059,13 @@ let () =
             `Quick
             test_keeper_bash_elapsed_duration_preserves_positive_sub_ms
         ; Alcotest.test_case
-            "keeper_bash timeout floor avoids 1s I/O failures"
+            "keeper_shell_ir timeout floor avoids 1s I/O failures"
             `Quick
-            test_keeper_bash_timeout_floor_is_not_sub_io_latency
+            test_keeper_shell_ir_timeout_floor_is_not_sub_io_latency
         ; Alcotest.test_case
-            "keeper_bash load-bearing timeout floor"
+            "keeper_shell_ir load-bearing timeout floor"
             `Quick
-            test_keeper_bash_load_bearing_timeout_floor
+            test_keeper_shell_ir_load_bearing_timeout_floor
         ; Alcotest.test_case
             "nested runtime detector ignores commit messages"
             `Quick

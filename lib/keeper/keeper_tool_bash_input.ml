@@ -177,7 +177,7 @@ let of_json (json : Yojson.Safe.t) =
     if Option.is_some (member fields "cmd")
     then
       Error
-        "cmd string is not a typed keeper_bash input; provide \
+        "cmd string is not a typed Shell IR input; provide \
          executable/argv or pipeline stages"
     else Ok ()
   in

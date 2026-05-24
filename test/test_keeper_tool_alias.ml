@@ -883,7 +883,10 @@ let () =
             "WebSearch schema uses public field names"
             `Quick
             test_web_search_schema_uses_public_fields
-        ; Alcotest.test_case "translate Bash input shape" `Quick test_translate_bash_input
+        ; Alcotest.test_case
+            "translate Shell IR input shape"
+            `Quick
+            test_translate_bash_input
         ; Alcotest.test_case "translate Read input shape" `Quick test_translate_read_input
         ; Alcotest.test_case "translate Edit input shape" `Quick test_translate_edit_input
         ; Alcotest.test_case

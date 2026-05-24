@@ -52,7 +52,7 @@ let valid_shell_op_strings = List.map shell_op_to_string all_shell_ops
     - [read_timeout_sec]: fast read-only commands on local files
       (cat, rg, head, tail, find, git_log, tree).
     - [user_timeout_max_sec]: upper bound for user-provided timeout_sec
-      in keeper_bash (prevents indefinite blocking). *)
+      in Shell IR (prevents indefinite blocking). *)
 let env_float name default =
   match Sys.getenv_opt name with
   | Some s -> (match float_of_string_opt s with Some f -> f | None -> default)
@@ -77,17 +77,15 @@ let gh_min_timeout_sec =
    Coord_worktree can update the same cache without depending on this file. *)
 let git_meta_timeout_sec = env_float "MASC_KEEPER_GIT_META_TIMEOUT_SEC" 5.0
 
-(* Floor applied to caller-supplied [timeout_sec] for keeper_bash when
+(* Floor applied to caller-supplied [timeout_sec] for typed Shell IR when
    the command runs through the native executor.  Container-backed
    dispatch re-clamps inside its backend because cold start adds 10-60s
    on top of the actual command — see runtime log issue #5
    (2026-05-20).  Keeping a separate native floor avoids penalising
    the host-side fast path for backend overhead. *)
-let keeper_bash_native_min_timeout_sec =
+let keeper_shell_ir_native_min_timeout_sec =
   Timeout_floor.default_sec Timeout_floor.Native_shell
 ;;
-
-let keeper_shell_ir_native_min_timeout_sec = keeper_bash_native_min_timeout_sec
 
 let string_field name fields =
   match List.assoc_opt name fields with
@@ -130,22 +128,22 @@ let typed_stage_needs_tool_dispatch_floor fields =
     || (String.equal executable "grep" && List.exists arg_has_recursive_flag argv)
 ;;
 
-let rec keeper_bash_args_need_tool_dispatch_floor = function
+let rec keeper_shell_ir_args_need_tool_dispatch_floor = function
   | `Assoc fields ->
     typed_stage_needs_tool_dispatch_floor fields
     ||
     (match List.assoc_opt "pipeline" fields, List.assoc_opt "stages" fields with
      | Some (`List stages), _
      | _, Some (`List stages) ->
-       List.exists keeper_bash_args_need_tool_dispatch_floor stages
+       List.exists keeper_shell_ir_args_need_tool_dispatch_floor stages
      | _other -> false)
   | _other -> false
 ;;
 
-let keeper_bash_min_timeout_sec_for_args args =
-  if keeper_bash_args_need_tool_dispatch_floor args
+let keeper_shell_ir_min_timeout_sec_for_args args =
+  if keeper_shell_ir_args_need_tool_dispatch_floor args
   then Timeout_floor.default_sec Timeout_floor.Tool_dispatch
-  else keeper_bash_native_min_timeout_sec
+  else keeper_shell_ir_native_min_timeout_sec
 ;;
 
 let clamp_shell_timeout

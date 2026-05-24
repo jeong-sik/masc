@@ -17,6 +17,8 @@ type cancel_reason =
           past the cooperative-cancel deadline. *)
   | Cancelled_fleet_shutdown
       (** Process is exiting; no more turns will be dispatched. *)
+  | Cancelled_input_required
+      (** Agent paused to request human input (InputRequired). *)
 
 type failure_reason =
   | Failure_cascade_unavailable of {

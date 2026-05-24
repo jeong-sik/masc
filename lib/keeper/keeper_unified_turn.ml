@@ -614,12 +614,37 @@ let run_keeper_cycle
                            Cascade_name.to_string execution.cascade_name
                          in
                          let mark_terminal_error err =
-                           Keeper_unified_turn_terminal_error.handle
-                             ~config
-                             ~keeper_name:meta.name
-                             ~attempt
-                             ~attempted_cascades
-                             err
+                           if EC.is_input_required_error err then begin
+                             let ir =
+                               match err with
+                               | Agent_sdk.Error.Agent (Agent_sdk.Error.InputRequired ir) -> ir
+                               | _ -> assert false
+                             in
+                             Keeper_registry.mark_turn_cascade_done
+                               ~base_path:config.base_path
+                               meta.name;
+                             Log.Keeper.info
+                               "[input_required] keeper=%s agent paused: request_id=%s \
+                                question=%s"
+                               meta.name
+                               ir.Agent_sdk.Error.request_id
+                               (let q = ir.Agent_sdk.Error.question in
+                                if String.length q > 80
+                                then String.sub q 0 80 ^ "…"
+                                else q);
+                             Keeper_turn_fsm.emit_transition
+                               ~keeper_name:meta.name
+                               ~turn_id:keeper_turn_id
+                               ~prev:Keeper_turn_fsm.Streaming
+                               (Keeper_turn_fsm.Cancelled
+                                  Keeper_turn_fsm.Cancelled_input_required)
+                           end else
+                             Keeper_unified_turn_terminal_error.handle
+                               ~config
+                               ~keeper_name:meta.name
+                               ~attempt
+                               ~attempted_cascades
+                               err
                          in
                          let attempt_provider_timeout_budget = ref None in
                          let max_turns =
@@ -1403,6 +1428,23 @@ let run_keeper_cycle
                     ~success
                 | None -> ());
                (match run_result with
+                | Error err when EC.is_input_required_error err ->
+                  (* InputRequired: special stop condition (not a failure).
+                     mark_terminal_error already emitted FSM Cancelled
+                     transition and info-level log. Surface as Ok so the
+                     keeper cycle does not enter failure processing. *)
+                  finalize_trajectory_acc
+                    ~config
+                    ~keeper_name:meta.name
+                    trajectory_acc
+                    (Trajectory.Gated "input_required");
+                  Prometheus.inc_counter
+                    Keeper_metrics.metric_keeper_turns
+                    ~labels:[ "keeper_name", meta.name; "outcome", "input_required" ]
+                    ();
+                  cycle_completed := true;
+                  post_turn_complete_task ~cycle_completed;
+                  Ok meta
                 | Error err ->
                   let final_execution = !last_execution in
                   finalize_trajectory_acc

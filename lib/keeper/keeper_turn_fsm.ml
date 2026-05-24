@@ -3,6 +3,7 @@ type cancel_reason =
   | Cancelled_phase_gate_close
   | Cancelled_provider_timeout
   | Cancelled_fleet_shutdown
+  | Cancelled_input_required
 
 type failure_reason =
   | Failure_cascade_unavailable of {
@@ -77,6 +78,7 @@ let cancel_reason_label = function
   | Cancelled_phase_gate_close -> "phase_gate_close"
   | Cancelled_provider_timeout -> "provider_timeout"
   | Cancelled_fleet_shutdown -> "fleet_shutdown"
+  | Cancelled_input_required -> "input_required"
 
 let failure_reason_label = function
   | Failure_cascade_unavailable _ -> "cascade_unavailable"

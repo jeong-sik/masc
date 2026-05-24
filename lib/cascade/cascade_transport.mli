@@ -42,27 +42,12 @@ val sanitize_cli_completion_request_for_argv :
     invalid UTF-8 in history, system prompt, or request-scoped MCP overrides
     can make the subprocess fail before the cascade reaches provider logic. *)
 
-(** Sorted, comma-joined fingerprint of a tool list.  Used as the dedup key
-    by the [#10097] omission machinery — identical sets fingerprint to the
-    same string regardless of input order. *)
-val codex_cli_omission_fingerprint : string list -> string
-
-(** Whether a fingerprint has already been observed by the omission machinery
-    for the [<no_agent>] bucket.  Returns [false] only when the fingerprint
-    is new (and updates dedup state as a side effect, equivalent to a
-    [should_log] probe with the [<no_agent>] key). *)
-val codex_cli_omission_fingerprint_seen : string -> bool
-
-(** Record a [#10097] codex_cli MCP-tool omission for an unspecified agent.
-    Increments per-tool Prometheus counters every call; the structural WARN
-    log fires only when a new tool fingerprint is seen.  See
-    {!record_codex_cli_omission_for_agent} for the per-agent variant used by
-    the cascade pipeline. *)
-val record_codex_cli_omission : tools:string list -> unit
-
-(** Reset the codex_cli omission dedup state.  Test-only helper exposed for
-    [test_codex_cli_omission_dedup_10097]. *)
-val reset_codex_cli_omission_dedup_for_tests : unit -> unit
+(* RFC-0167: the client-named omission-dedup helpers
+   ([codex_cli_omission_fingerprint], [codex_cli_omission_fingerprint_seen],
+   [record_codex_cli_omission], [record_codex_cli_omission_for_agent],
+   [reset_codex_cli_omission_dedup_for_tests]) were removed in the
+   big-bang sweep along with [Cascade_transport_codex_omission_dedup].
+   Structural omission detection remains in the resolver below. *)
 
 (** Failure modes for {!resolve_provider_config_of_label}. *)
 type label_resolution_error =

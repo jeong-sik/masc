@@ -32,10 +32,6 @@ let argv_words_of_simple (simple : Masc_exec.Shell_ir.simple) =
     (loop [] simple.Masc_exec.Shell_ir.args)
 ;;
 
-let argv_words_of_split_string text =
-  Exec_policy_mutation_classifier.argv_words_of_string text
-;;
-
 let basename_token token = Filename.basename token
 
 let is_env_assignment token =

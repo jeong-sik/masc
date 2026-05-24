@@ -308,6 +308,45 @@ let test_model_string_format () =
   check bool "model_string contains colon" true
     (String.contains candidate.Hotpath.model_string ':')
 
+let test_provider_d_http_model_string_uses_custom_label () =
+  let toml =
+    {|
+[providers.glm-coding]
+protocol = "provider_d-http"
+endpoint = "https://api.z.ai/api/coding/paas/v4"
+
+[models.glm-5-turbo]
+max-context = 128000
+api-name = "glm-5-turbo"
+tools-support = true
+
+[glm-coding.glm-5-turbo]
+
+[tier.glm]
+members = ["glm-coding.glm-5-turbo"]
+strategy = "failover"
+|}
+  in
+  let snapshot = get_snapshot toml in
+  let profile = find_profile snapshot "tier.glm" in
+  match profile.Hotpath.candidates, profile.Hotpath.weighted_entries with
+  | [ candidate ], [ entry ] ->
+    let expected =
+      "custom:glm-5-turbo@https://api.z.ai/api/coding/paas/v4"
+    in
+    check string "candidate model label" expected
+      candidate.Hotpath.model_string;
+    check string "weighted entry model label" expected entry.model;
+    check bool "pre-dispatch api-key gate accepts custom label" true
+      (Result.is_ok
+         (Masc_mcp.Cascade_runtime.ensure_api_keys_for_labels [ entry.model ]))
+  | candidates, entries ->
+    fail
+      (Printf.sprintf
+         "expected one candidate and one weighted entry, got %d/%d"
+         (List.length candidates)
+         (List.length entries))
+
 let test_weighted_entries_count () =
   let snapshot = get_snapshot valid_toml in
   List.iter
@@ -860,6 +899,10 @@ let () =
         test_case "profile names" `Quick test_profile_names;
         test_case "candidates" `Quick test_candidates;
         test_case "model_string format" `Quick test_model_string_format;
+        test_case
+          "provider_d-http model strings use custom labels"
+          `Quick
+          test_provider_d_http_model_string_uses_custom_label;
         test_case "weighted_entries count" `Quick test_weighted_entries_count;
         test_case
           "failover inference max_tokens uses narrowest candidate"

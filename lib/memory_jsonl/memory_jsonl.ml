@@ -316,16 +316,18 @@ let make_backend_with_query_observer ~on_query_result ~base_dir ~agent_name
   in
 
   let batch_persist pairs =
-    let errors = ref [] in
-    List.iter (fun (key, json) ->
-      match persist ~key json with
-      | Ok () -> ()
-      | Error msg -> errors := msg :: !errors
-    ) pairs;
-    match !errors with
+    let errs =
+      List.fold_left
+        (fun acc (key, json) ->
+          match persist ~key json with
+          | Ok () -> acc
+          | Error msg -> msg :: acc)
+        []
+        pairs
+    in
+    match errs with
     | [] -> Ok ()
-    | errs ->
-      let first_err = match errs with e :: _ -> e | [] -> "unknown" in
+    | first_err :: _ ->
       let msg = Printf.sprintf "memory_jsonl batch_persist: %d/%d failed: %s"
           (List.length errs) (List.length pairs)
           first_err in

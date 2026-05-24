@@ -36,6 +36,26 @@ let with_env name value f =
       | None -> Unix.putenv name "")
     f
 
+let validate_command_coding_text ?caller cmd =
+  match Exec_policy.parse_string_to_ir ~mode:Coding cmd with
+  | Ok ir -> Worker_dev_tools.validate_command_coding ?caller ir
+  | Error reason -> Error reason
+
+let validate_command_coding_with_allowlist_text
+      ?caller
+      ?allow_pipes
+      ~allowed_commands
+      cmd
+  =
+  match Exec_policy.parse_string_to_ir ~mode:Coding cmd with
+  | Ok ir ->
+    Worker_dev_tools.validate_command_coding_with_allowlist
+      ?caller
+      ?allow_pipes
+      ~allowed_commands
+      ir
+  | Error reason -> Error reason
+
 let rec ensure_dir path =
   if path = "" || path = "." || path = "/" || Sys.file_exists path then ()
   else (
@@ -436,6 +456,11 @@ let test_shell_exec_blocked_command () =
    | Ok _ -> Alcotest.fail "should reject rm -rf /")
 
 let test_shell_exec_blocks_env_wrapped_disallowed_command () =
+  let validate_command_text cmd =
+    match Exec_policy.parse_string_to_ir ~mode:Strict cmd with
+    | Ok ir -> Worker_dev_tools.validate_command ir
+    | Error reason -> Error reason
+  in
   let cases =
     [
       ("env rm -rf /", "rm");
@@ -447,7 +472,7 @@ let test_shell_exec_blocks_env_wrapped_disallowed_command () =
   in
   List.iter
     (fun (cmd, blocked) ->
-      match Worker_dev_tools.validate_command cmd with
+      match validate_command_text cmd with
       | Error (Worker_dev_tools.Command_not_allowed got) when String.equal got blocked -> ()
       | Error reason ->
         Alcotest.fail
@@ -745,12 +770,12 @@ let () =
     ];
     "validate_command_coding", [
       Alcotest.test_case "allows pipe" `Quick (fun () ->
-        match Worker_dev_tools.validate_command_coding "git log | head -5" with
+        match validate_command_coding_text "git log | head -5" with
         | Ok () -> ()
         | Error e -> Alcotest.fail ("should allow pipe: " ^ Worker_dev_tools.block_reason_to_string e));
       Alcotest.test_case "keeps escaped pipe inside quoted rg pattern" `Quick (fun () ->
         match
-          Worker_dev_tools.validate_command_coding
+          validate_command_coding_text
             {|rg -n "task-259\|task-270\|task-272" repos/masc-mcp/.masc/backlog.json|}
         with
         | Ok () -> ()
@@ -762,7 +787,7 @@ let () =
         `Quick
         (fun () ->
           match
-            Worker_dev_tools.validate_command_coding
+            validate_command_coding_text
               {|grep -E 'task-259|task-270' repos/masc-mcp/.masc/backlog.json|}
           with
           | Ok () -> ()
@@ -772,7 +797,7 @@ let () =
                ^ Worker_dev_tools.block_reason_to_string e));
       Alcotest.test_case "allows quoted regex alternation under typed gate" `Quick (fun () ->
         match
-          Worker_dev_tools.validate_command_coding
+          validate_command_coding_text
             "rg \"tool_policy\\|tool_preset\\|preset_policy\\|toolset\" --type=ml -l"
         with
         | Ok () -> ()
@@ -782,7 +807,7 @@ let () =
              ^ Worker_dev_tools.block_reason_to_string e));
       Alcotest.test_case "allows quoted regex alternation before real pipe" `Quick (fun () ->
         match
-          Worker_dev_tools.validate_command_coding
+          validate_command_coding_text
             "rg 'keeper.*tool|tool.*keeper' --type=ml -l | head -20"
         with
         | Ok () -> ()
@@ -792,7 +817,7 @@ let () =
              ^ Worker_dev_tools.block_reason_to_string e));
       Alcotest.test_case "allows three-stage regex pipeline" `Quick (fun () ->
         match
-          Worker_dev_tools.validate_command_coding
+          validate_command_coding_text
             "rg 'keeper.*tool|tool.*keeper' --type=ml -l | head -20 | wc -l"
         with
         | Ok () -> ()
@@ -802,23 +827,23 @@ let () =
              ^ Worker_dev_tools.block_reason_to_string e));
       Alcotest.test_case "rejects wrapper redirect" `Quick (fun () ->
         match
-          Worker_dev_tools.validate_command_coding
+          validate_command_coding_text
             "scripts/dune-local.sh build 2>&1"
         with
         | Error _ -> ()
         | Ok () -> Alcotest.fail "strict gate should reject fd redirect syntax");
       Alcotest.test_case "blocks parser-supported direct dune" `Quick (fun () ->
-        match Worker_dev_tools.validate_command_coding "dune build" with
+        match validate_command_coding_text "dune build" with
         | Error Worker_dev_tools.Direct_dune_invocation -> ()
         | Error e -> Alcotest.fail ("wrong rejection: " ^ Worker_dev_tools.block_reason_to_string e)
         | Ok () -> Alcotest.fail "should reject bare dune");
       Alcotest.test_case "blocks direct dune" `Quick (fun () ->
-        match Worker_dev_tools.validate_command_coding "dune build 2>&1" with
+        match validate_command_coding_text "dune build 2>&1" with
         | Error _ -> ()
         | Ok () -> Alcotest.fail "should reject bare dune");
       Alcotest.test_case "blocks env-wrapped direct dune" `Quick (fun () ->
         match
-          Worker_dev_tools.validate_command_coding
+          validate_command_coding_text
             "env DUNE_JOBS=1 dune build 2>&1"
         with
         | Error _ -> ()
@@ -826,7 +851,7 @@ let () =
       Alcotest.test_case "blocks env option wrapped direct dune" `Quick (fun () ->
         List.iter
           (fun cmd ->
-            match Worker_dev_tools.validate_command_coding cmd with
+            match validate_command_coding_text cmd with
             | Error _ -> ()
             | Ok () -> Alcotest.fail ("should reject env-wrapped bare dune: " ^ cmd))
           [
@@ -838,7 +863,7 @@ let () =
       Alcotest.test_case "blocks env-wrapped disallowed command" `Quick (fun () ->
         List.iter
           (fun cmd ->
-            match Worker_dev_tools.validate_command_coding cmd with
+            match validate_command_coding_text cmd with
             | Error (Worker_dev_tools.Command_not_allowed "rm") -> ()
             | Error e ->
               Alcotest.fail
@@ -856,7 +881,7 @@ let () =
             "git status | env rm -rf /";
           ]);
       Alcotest.test_case "blocks standalone env dump" `Quick (fun () ->
-        match Worker_dev_tools.validate_command_coding "env" with
+        match validate_command_coding_text "env" with
         | Error (Worker_dev_tools.Command_not_allowed "env") -> ()
         | Error e ->
           Alcotest.fail
@@ -865,7 +890,7 @@ let () =
       Alcotest.test_case "allows env-wrapped allowed command" `Quick (fun () ->
         List.iter
           (fun cmd ->
-            match Worker_dev_tools.validate_command_coding cmd with
+            match validate_command_coding_text cmd with
             | Ok () -> ()
             | Error e ->
               Alcotest.fail
@@ -880,7 +905,7 @@ let () =
           ]);
       Alcotest.test_case "blocks opam-exec direct dune" `Quick (fun () ->
         match
-          Worker_dev_tools.validate_command_coding
+          validate_command_coding_text
             "opam exec -- dune build 2>&1"
         with
         | Error _ -> ()
@@ -888,7 +913,7 @@ let () =
       Alcotest.test_case "blocks opam exec option wrapped direct dune" `Quick (fun () ->
         List.iter
           (fun cmd ->
-            match Worker_dev_tools.validate_command_coding cmd with
+            match validate_command_coding_text cmd with
             | Error _ -> ()
             | Ok () -> Alcotest.fail ("should reject opam-exec bare dune: " ^ cmd))
           [
@@ -900,7 +925,7 @@ let () =
         (fun () ->
            List.iter
              (fun cmd ->
-               match Worker_dev_tools.validate_command_coding cmd with
+               match validate_command_coding_text cmd with
                | Error (Worker_dev_tools.Command_not_allowed "rm") -> ()
                | Error e ->
                  Alcotest.fail
@@ -920,7 +945,7 @@ let () =
         (fun () ->
            List.iter
              (fun cmd ->
-               match Worker_dev_tools.validate_command_coding cmd with
+               match validate_command_coding_text cmd with
                | Ok () -> ()
                | Error e ->
                  Alcotest.fail
@@ -934,48 +959,48 @@ let () =
                "opam exec -- git status | head -5";
              ]);
       Alcotest.test_case "blocks semicolon" `Quick (fun () ->
-        match Worker_dev_tools.validate_command_coding "ls; rm -rf /" with
+        match validate_command_coding_text "ls; rm -rf /" with
         | Error _ -> ()
         | Ok () -> Alcotest.fail "should block semicolon");
       Alcotest.test_case "blocks backtick" `Quick (fun () ->
-        match Worker_dev_tools.validate_command_coding "echo `whoami`" with
+        match validate_command_coding_text "echo `whoami`" with
         | Error _ -> ()
         | Ok () -> Alcotest.fail "should block backtick");
       Alcotest.test_case "blocks dollar" `Quick (fun () ->
-        match Worker_dev_tools.validate_command_coding "echo $HOME" with
+        match validate_command_coding_text "echo $HOME" with
         | Error _ -> ()
         | Ok () -> Alcotest.fail "should block dollar");
       Alcotest.test_case "validates first command in pipe" `Quick (fun () ->
-        match Worker_dev_tools.validate_command_coding "evil_cmd | head" with
+        match validate_command_coding_text "evil_cmd | head" with
         | Error _ -> ()
         | Ok () -> Alcotest.fail "should block unknown first command");
       Alcotest.test_case "blocks unknown command after pipe" `Quick (fun () ->
-        match Worker_dev_tools.validate_command_coding "git status | rm -rf /" with
+        match validate_command_coding_text "git status | rm -rf /" with
         | Error _ -> ()
         | Ok () -> Alcotest.fail "should block unknown command after pipe");
       Alcotest.test_case "blocks ampersand chaining" `Quick (fun () ->
-        match Worker_dev_tools.validate_command_coding "git log && rm -rf /" with
+        match validate_command_coding_text "git log && rm -rf /" with
         | Error _ -> ()
         | Ok () -> Alcotest.fail "should block && chaining");
       Alcotest.test_case "blocks double-pipe chaining" `Quick (fun () ->
-        match Worker_dev_tools.validate_command_coding "git status || rm -rf /" with
+        match validate_command_coding_text "git status || rm -rf /" with
         | Error _ -> ()
         | Ok () -> Alcotest.fail "should block || chaining");
       Alcotest.test_case "blocks process substitution" `Quick (fun () ->
-        match Worker_dev_tools.validate_command_coding "git diff >(/tmp/out)" with
+        match validate_command_coding_text "git diff >(/tmp/out)" with
         | Error _ -> ()
         | Ok () -> Alcotest.fail "should block process substitution");
       Alcotest.test_case "blocks file output redirect" `Quick (fun () ->
-        match Worker_dev_tools.validate_command_coding "echo hi > /tmp/out.txt" with
+        match validate_command_coding_text "echo hi > /tmp/out.txt" with
         | Error _ -> ()
         | Ok () -> Alcotest.fail "should block file output redirect");
       Alcotest.test_case "blocks file input redirect" `Quick (fun () ->
-        match Worker_dev_tools.validate_command_coding "cat < /etc/passwd" with
+        match validate_command_coding_text "cat < /etc/passwd" with
         | Error _ -> ()
         | Ok () -> Alcotest.fail "should block file input redirect");
       Alcotest.test_case "rejects 2>&1 redirect" `Quick (fun () ->
         match
-          Worker_dev_tools.validate_command_coding
+          validate_command_coding_text
             "scripts/dune-local.sh test 2>&1"
         with
         | Error _ -> ()
@@ -983,14 +1008,14 @@ let () =
       Alcotest.test_case "rejects /dev/null fd sink through pipe" `Quick
         (fun () ->
            match
-             Worker_dev_tools.validate_command_coding
+             validate_command_coding_text
                "rg \"task-317\" repos/masc-mcp/ --files-with-matches 2>/dev/null | head -5"
            with
            | Error _ -> ()
            | Ok () -> Alcotest.fail "strict gate should reject fd sink syntax");
       Alcotest.test_case "single-command contract rejects pipe" `Quick (fun () ->
         match
-          Worker_dev_tools.validate_command_coding_with_allowlist
+          validate_command_coding_with_allowlist_text
             ~allow_pipes:false
             ~allowed_commands:["dune-local.sh"; "git"; "head"]
             "scripts/dune-local.sh build 2>&1 | tail -5"
@@ -999,7 +1024,7 @@ let () =
         | Ok () -> Alcotest.fail "should reject pipe under single-command contract");
       Alcotest.test_case "single-command contract rejects redirect" `Quick (fun () ->
         match
-          Worker_dev_tools.validate_command_coding_with_allowlist
+          validate_command_coding_with_allowlist_text
             ~allow_pipes:false
             ~allowed_commands:["dune-local.sh"; "git"; "head"]
             "scripts/dune-local.sh build 2>&1"
@@ -1008,7 +1033,7 @@ let () =
         | Ok () -> Alcotest.fail "single-command contract should reject fd redirect");
       Alcotest.test_case "single-command contract enforces custom allowlist" `Quick (fun () ->
         match
-          Worker_dev_tools.validate_command_coding_with_allowlist
+          validate_command_coding_with_allowlist_text
             ~allow_pipes:false
             ~allowed_commands:["git"]
             "scripts/dune-local.sh build"

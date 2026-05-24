@@ -1236,7 +1236,6 @@
   test_notify_coverage
   test_mcp_session_coverage
   test_sse_coverage
-  test_credits_dashboard_coverage
   test_room_utils_coverage
   test_orchestrator_coverage
   test_web_dashboard_coverage
@@ -1293,7 +1292,6 @@
   test_notify_coverage
   test_mcp_session_coverage
   test_sse_coverage
-  test_credits_dashboard_coverage
   test_room_utils_coverage
   test_orchestrator_coverage
   test_web_dashboard_coverage

@@ -371,7 +371,8 @@ let runtime_blocker_surface_of_typed_class ?(summary = "") (cls : blocker_class)
     | Sdk_tool_retry_exhausted
     | Sdk_guardrail_violation
     | Sdk_tripwire_violation
-    | Sdk_exit_condition_met -> if summary = "" then str else summary
+    | Sdk_exit_condition_met
+    | Sdk_input_required -> if summary = "" then str else summary
   in
   { blocker_class = str; summary; continue_gate }
 ;;
@@ -403,7 +404,8 @@ let runtime_blocker_surface_of_legacy_string reason cls =
   | Sdk_tool_retry_exhausted
   | Sdk_guardrail_violation
   | Sdk_tripwire_violation
-  | Sdk_exit_condition_met -> runtime_blocker_surface_of_typed_class ~summary:reason cls
+  | Sdk_exit_condition_met
+  | Sdk_input_required -> runtime_blocker_surface_of_typed_class ~summary:reason cls
 ;;
 
 let stale_kill_class_summary (kill_class : Keeper_registry.stale_kill_class) =

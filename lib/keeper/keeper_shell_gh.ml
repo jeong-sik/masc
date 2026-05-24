@@ -82,10 +82,7 @@ let handle ~op ~(meta : keeper_meta) ~(config : Coord.config) ~(args : Yojson.Sa
         ~sandbox:(Masc_exec.Sandbox_target.host ())
         parsed_cmd
     in
-    let gh_risk_envelope =
-      Masc_exec.Shell_ir_risk.classify
-        (Masc_exec.Shell_ir_risk.undecided gh_classify_ir)
-    in
+    let gh_risk_envelope = Keeper_shell_ir.classify gh_classify_ir in
     let reversibility = gh_risk_envelope.Masc_exec.Shell_ir_risk.risk in
     let rev_tag =
       Masc_exec.Shell_ir_risk.string_of_risk_class reversibility
@@ -114,10 +111,7 @@ let handle ~op ~(meta : keeper_meta) ~(config : Coord.config) ~(args : Yojson.Sa
         Log.Keeper.info
           "gh_audit: keeper=%s reversibility=R1 cwd=%s cmd=%s"
           meta.name cwd display_command;
-      let cwd_scope =
-        Some (Masc_exec.Path_scope.classify ~raw:cwd ~cwd)
-      in
-      let gh_ir = Masc_exec.Shell_ir.with_cwd cwd_scope base_ir in
+      let gh_ir = Keeper_shell_ir.with_cwd ~raw:cwd ~cwd base_ir in
       let gh_process =
         match
           Masc_exec_command_gate.Shell_command_gate.gate_typed
@@ -330,6 +324,6 @@ let handle ~op ~(meta : keeper_meta) ~(config : Coord.config) ~(args : Yojson.Sa
                           ~parsed_command:cmd_to_run
                           ~cwd:ctx.worktree_cwd
                           ~ctx:(Some ctx)
-                          ~base_ir:base_ir_cmd))))
+                          ~base_ir:base_ir_cmd)))
        end)
 ;;

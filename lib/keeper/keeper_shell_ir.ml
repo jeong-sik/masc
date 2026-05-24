@@ -1,6 +1,15 @@
+let classify ir =
+  Masc_exec.Shell_ir_risk.classify (Masc_exec.Shell_ir_risk.undecided ir)
+;;
+
+let with_cwd ~raw ~cwd ir =
+  let scope = Some (Masc_exec.Path_scope.classify ~raw ~cwd) in
+  Masc_exec.Shell_ir.with_cwd scope ir
+;;
+
 let of_cmd cmd =
-  match Masc_exec.Bash_parser.parse_string cmd with
-  | Parsed.Parsed ir -> ir
+  match Masc_exec_bash_parser.Bash.parse_string cmd with
+  | Masc_exec.Parsed.Parsed ir -> ir
   | _ ->
     let trimmed = String.trim cmd in
     let bin_str =

@@ -121,9 +121,7 @@ let handle_keeper_bash_typed
                ~extra:[ "cmd", `String cmd_for_log; "typed", `Bool true; "execution_time_ms", `Int 0 ]
                ())
         in
-        let envelope =
-          Masc_exec.Shell_ir_risk.classify (Masc_exec.Shell_ir_risk.undecided ir)
-        in
+        let envelope = Keeper_shell_ir.classify ir in
         let ir_risk = envelope.Masc_exec.Shell_ir_risk.ir in
         let typed_error_json msg = error_json ~fields:typed_error_fields msg in
         if Masc_exec.Shell_ir_risk.is_destructive envelope

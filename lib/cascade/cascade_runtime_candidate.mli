@@ -96,7 +96,7 @@ val default_config :
   Cascade_runner.config
 
 val enrich_sdk_error :
-  cascade_name:Cascade_error_classify.cascade_name ->
+  cascade_name:Cascade_name.t ->
   t ->
   Agent_sdk.Error.sdk_error ->
   Agent_sdk.Error.sdk_error

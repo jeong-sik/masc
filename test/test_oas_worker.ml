@@ -53,8 +53,8 @@ let () = pin_direct_run_masc_env ()
 open Masc_mcp
 module Oas = Agent_sdk
 
-let internal_cascade_name = Keeper_turn_driver.cascade_name_of_string
-let internal_cascade_name_to_string = Keeper_turn_driver.cascade_name_to_string
+let internal_cascade_name = Cascade_name.of_string_exn
+let internal_cascade_name_to_string = Cascade_name.to_string
 let ctx_messages = Keeper_exec_context.messages_of_context
 let ctx_system_prompt = Keeper_exec_context.system_prompt_of_context
 
@@ -824,7 +824,7 @@ let test_cascade_inference_normalizes_keeper_aliases () =
 let test_cascade_observation_json_includes_fallback_fields () =
   let observation : Cascade_legacy_runner.cascade_observation =
     { cascade_name =
-        Masc_mcp.Keeper_cascade_profile.Runtime_name
+        Cascade_name.of_string_exn
           Masc_mcp.(Keeper_config.default_cascade_name ())
     ; strategy = Some "round_robin"
     ; configured_labels = [ "primary:auto"; "secondary:auto" ]
@@ -1018,7 +1018,7 @@ let test_cascade_audit_persists_observation () =
        Unix.putenv "MASC_BASE_PATH" base;
        Unix.putenv "MASC_BASE_PATH_INPUT" base;
        let observation : Masc_mcp.Cascade_legacy_runner.cascade_observation =
-         { cascade_name = Masc_mcp.Keeper_cascade_profile.Runtime_name "audit-cascade"
+         { cascade_name = Cascade_name.of_string_exn "audit-cascade"
          ; strategy = Some "round_robin"
          ; configured_labels = [ "primary:auto"; "secondary:auto" ]
          ; candidate_models = [ "primary:model-alpha"; "secondary:model-beta" ]

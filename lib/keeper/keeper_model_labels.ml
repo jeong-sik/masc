@@ -5,4 +5,4 @@ let configured_model_labels_of_meta (m : keeper_meta) : string list =
      [meta.models] and benchmark-canary labels are legacy hints and can carry
      stale provider strings across reconfiguration. *)
   Cascade_runtime.models_of_cascade_name
-    (Keeper_cascade_profile.Runtime_name (cascade_name_of_meta m))
+    (Cascade_name.of_string_exn (cascade_name_of_meta m))

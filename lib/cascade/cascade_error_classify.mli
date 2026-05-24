@@ -18,7 +18,7 @@ include module type of Cascade_internal_error
 
 val admission_wait_timeout_error :
   keeper_name:string ->
-  cascade_name:cascade_name ->
+  cascade_name:Cascade_name.t ->
   priority:Llm_provider.Request_priority.t ->
   int ->
   (string, Agent_sdk.Error.sdk_error) result

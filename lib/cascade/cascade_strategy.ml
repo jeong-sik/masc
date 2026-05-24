@@ -6,11 +6,11 @@ type signal_ctx = {
   now : float;
   rand_int : int -> int;
   keeper_name : string;
-  cascade_name : Cascade_ref.runtime_name;
+  cascade_name : Cascade_name.t;
 }
 
 let signal_cascade_name ctx =
-  Cascade_ref.runtime_name_to_string ctx.cascade_name
+  Cascade_name.to_string ctx.cascade_name
 
 type cycle_policy = {
   max_cycles : int;

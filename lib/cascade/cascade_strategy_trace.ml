@@ -4,7 +4,7 @@ type event_kind = Ordered | Filtered_empty | Exhausted
 
 type event = {
   ts : float;
-  cascade_name : Keeper_cascade_profile.runtime_name;
+  cascade_name : Cascade_name.t;
   strategy : string;
   cycle : int;
   candidates_in : int;
@@ -59,7 +59,7 @@ let ensure_initialised_locked () =
 let bump_prometheus_counter (ev : event) =
   Prometheus.inc_counter Prometheus.metric_cascade_strategy_decisions
     ~labels:[
-      "cascade", Keeper_cascade_profile.runtime_name_to_string ev.cascade_name;
+      "cascade", Cascade_name.to_string ev.cascade_name;
       "strategy", ev.strategy;
       "kind", kind_to_string ev.kind;
     ] ()
@@ -112,7 +112,7 @@ let snapshot ?(limit = 100) ?cascade () =
     | Some c ->
         fun (e : event) ->
           String.equal
-            (Keeper_cascade_profile.runtime_name_to_string e.cascade_name)
+            (Cascade_name.to_string e.cascade_name)
             c
   in
   let limit = max 0 limit in

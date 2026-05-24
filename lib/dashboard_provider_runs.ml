@@ -539,7 +539,7 @@ let execute_single_agent_run ~sw ~net ~run_id ~provider ~model ~prompt =
                provider)
         else (
           let inference_cascade_name =
-            Keeper_cascade_profile.Runtime_name
+            Cascade_name.of_string_exn
               (Keeper_cascade_profile.cascade_name_for_use
                  Keeper_cascade_profile.Provider_benchmark)
           in

@@ -83,7 +83,7 @@ val record_streaming_cancelled_observation :
   config:Coord.config ->
   run_meta:Keeper_types.keeper_meta ->
   run_generation:int ->
-  cascade_name:Keeper_execution_receipt.cascade_name ->
+  cascade_name:Cascade_name.t ->
   keeper_turn_id:int ->
   unit ->
   unit

@@ -39,7 +39,7 @@ type signal_ctx = {
   (** Owning keeper.  Kept in the signal context for call-site stability;
       current shipped strategies do not read it. *)
 
-  cascade_name : Cascade_ref.runtime_name;
+  cascade_name : Cascade_name.t;
   (** Cascade identifier (the [<name>] in [<name>_models]).  Used for
       priority-tier starvation telemetry. *)
 }

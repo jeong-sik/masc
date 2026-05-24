@@ -12,11 +12,6 @@
 
 (** {1 MASC/OAS structured errors} *)
 
-type cascade_name = Keeper_cascade_profile.runtime_name
-
-val cascade_name_of_string : string -> cascade_name
-val cascade_name_to_string : cascade_name -> string
-
 type provider_rejection = {
   provider_label : string;
   reason : string;
@@ -30,22 +25,22 @@ type capacity_backpressure_source =
 
 type masc_internal_error =
   | Cascade_exhausted of {
-      cascade_name : cascade_name;
+      cascade_name : Cascade_name.t;
       reason : Keeper_types.cascade_exhaustion_reason;
     }
   | Capacity_backpressure of {
-      cascade_name : cascade_name;
+      cascade_name : Cascade_name.t;
       source : capacity_backpressure_source;
       detail : string;
       retry_after_sec : float option;
     }
   | Resumable_cli_session of {
-      cascade_name : cascade_name;
+      cascade_name : Cascade_name.t;
       detail : string;
       exit_code : int option;
     }
   | No_tool_capable_provider of {
-      cascade_name : cascade_name;
+      cascade_name : Cascade_name.t;
       configured_labels : string list;
       required_tool_names : string list;
       provider_rejections : provider_rejection list;
@@ -57,7 +52,7 @@ type masc_internal_error =
     }
   | Admission_queue_timeout of {
       keeper_name : string;
-      cascade_name : cascade_name;
+      cascade_name : Cascade_name.t;
       wait_sec : float;
     }
   | Admission_queue_rejected of {
@@ -75,7 +70,7 @@ type masc_internal_error =
       phase : string;
     }
   | Max_tokens_ceiling_violation of {
-      cascade_name : cascade_name;
+      cascade_name : Cascade_name.t;
       requested_max_tokens : int;
       provider_ceiling : int;
       reason : string;
@@ -124,7 +119,7 @@ val masc_oas_error_total_metric : string
 
 val admission_wait_timeout_error :
   keeper_name:string ->
-  cascade_name:cascade_name ->
+  cascade_name:Cascade_name.t ->
   priority:Llm_provider.Request_priority.t ->
   int ->
   (string, Agent_sdk.Error.sdk_error) result
@@ -143,7 +138,7 @@ val message_looks_like_capacity_backpressure : string -> bool
 val message_looks_like_resumable_cli_session : string -> bool
 
 val sdk_error_to_resumable_cli_session :
-  cascade_name:Cascade_error_classify.cascade_name ->
+  cascade_name:Cascade_name.t ->
   Agent_sdk.Error.sdk_error ->
   Agent_sdk.Error.sdk_error option
 

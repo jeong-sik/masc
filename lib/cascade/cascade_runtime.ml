@@ -99,7 +99,7 @@ let is_typed_declarative_label_provider = function
   | "openai_compat" -> true
   | _ -> false
 
-let cascade_name_to_string = Keeper_cascade_profile.runtime_name_to_string
+let cascade_name_to_string = Cascade_name.to_string
 
 let has_execution_model_config () =
   match Provider_runtime_projection.preferred_execution_model_labels () with

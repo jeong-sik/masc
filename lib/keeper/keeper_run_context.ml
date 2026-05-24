@@ -38,7 +38,7 @@ let prepare_run_context
       ~(meta : keeper_meta)
       ~(base_dir : string)
       ~(max_context : int)
-      ~(cascade_name : Keeper_cascade_profile.runtime_name)
+      ~(cascade_name : Cascade_name.t)
       ?temperature
       ?max_tokens
       ?shared_context

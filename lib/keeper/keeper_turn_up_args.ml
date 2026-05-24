@@ -139,7 +139,7 @@ let parse_cascade_name_opt args =
           else
             match
               Cascade_runtime.models_of_cascade_name_result
-                (Keeper_cascade_profile.Runtime_name normalized)
+                (Cascade_name.of_string_exn normalized)
             with
             | Ok _ -> Ok (Some normalized)
             | Error detail ->

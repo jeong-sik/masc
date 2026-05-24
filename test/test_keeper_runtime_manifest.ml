@@ -723,7 +723,7 @@ let test_pre_dispatch_terminal_observation_emits_manifest_rows () =
         ~meta
         ~generation:meta.runtime.generation
         ~cascade_name:
-          (Masc_mcp.Keeper_execution_receipt.cascade_name_of_string "default")
+          (Cascade_name.of_string_exn "default")
         ~outcome:`Skipped
         ~terminal_reason_code:"phase_not_executable"
         ~activity_kind:"keeper.turn_skipped"
@@ -821,7 +821,7 @@ let test_pre_dispatch_receipt_failure_closes_manifest_with_gap () =
         ~meta
         ~generation:meta.runtime.generation
         ~cascade_name:
-          (Masc_mcp.Keeper_execution_receipt.cascade_name_of_string "default")
+          (Cascade_name.of_string_exn "default")
         ~outcome:`Skipped
         ~terminal_reason_code:"phase_not_executable"
         ~activity_kind:"keeper.turn_skipped"
@@ -942,7 +942,7 @@ let test_pre_dispatch_terminal_observation_invalidates_keeper_status_cache () =
         ~meta
         ~generation:meta.runtime.generation
         ~cascade_name:
-          (Masc_mcp.Keeper_execution_receipt.cascade_name_of_string "default")
+          (Cascade_name.of_string_exn "default")
         ~outcome:`Skipped
         ~terminal_reason_code:"phase_not_executable"
         ~activity_kind:"keeper.turn_skipped"
@@ -972,7 +972,7 @@ let test_runtime_trace_api_links_manifest_and_receipt_rows () =
         ~meta
         ~generation:meta.runtime.generation
         ~cascade_name:
-          (Masc_mcp.Keeper_execution_receipt.cascade_name_of_string "default")
+          (Cascade_name.of_string_exn "default")
         ~outcome:`Skipped
         ~terminal_reason_code:"phase_not_executable"
         ~activity_kind:"keeper.turn_skipped"
@@ -1063,7 +1063,7 @@ let test_runtime_trace_api_bounds_rows_but_counts_full_manifest () =
         ~meta
         ~generation:meta.runtime.generation
         ~cascade_name:
-          (Masc_mcp.Keeper_execution_receipt.cascade_name_of_string "default")
+          (Cascade_name.of_string_exn "default")
         ~outcome:`Skipped
         ~terminal_reason_code:"phase_not_executable"
         ~activity_kind:"keeper.turn_skipped"
@@ -2211,7 +2211,7 @@ let test_successful_provider_turn_links_runtime_artifacts () =
               ~build_turn_prompt
               ~user_message:"Call keeper_board_post once, then answer."
               ~cascade_name:
-                (Masc_mcp.Keeper_cascade_profile.runtime_name_of_string
+                (Cascade_name.of_string_exn
                    cascade_name)
               ~generation:meta.runtime.generation
               ~max_turns:3
@@ -2639,7 +2639,7 @@ let test_provider_attempt_finish_recorded_on_oas_timeout () =
                   ~build_turn_prompt
                   ~user_message:"Say hello slowly."
                   ~cascade_name:
-                    (Masc_mcp.Keeper_cascade_profile.runtime_name_of_string
+                    (Cascade_name.of_string_exn
                        cascade_name)
                   ~generation:meta.runtime.generation
                   ~max_turns:1
@@ -3238,7 +3238,7 @@ let test_pre_dispatch_required_tool_exhaustion_is_no_tool_capable () =
   match
     FT.no_tool_capable_provider_of_pre_dispatch_rejections
       ~cascade_name:
-        (Masc_mcp.Keeper_turn_driver.cascade_name_of_string
+        (Cascade_name.of_string_exn
            "strict_tool_candidates")
       ~configured_labels:[ "glm-coding.glm-5.keeper" ]
       ~runtime_manifest_required_tool_names:[ "keeper_bash" ]

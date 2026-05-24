@@ -90,7 +90,7 @@ let run_turn
       ~(build_turn_prompt :
          base_system_prompt:string -> messages:Agent_sdk.Types.message list -> turn_prompt)
       ~(user_message : string)
-      ~(cascade_name : Keeper_cascade_profile.runtime_name)
+      ~(cascade_name : Cascade_name.t)
       ?world_observation
       ?(turn_affordances = [])
       ?(required_tool_names = [])
@@ -156,7 +156,7 @@ let run_turn
   Eio.Switch.run @@ fun turn_sw ->
   Eio_context.with_turn_switch turn_sw
   @@ fun () ->
-  let cascade_name_string = Keeper_cascade_profile.runtime_name_to_string cascade_name in
+  let cascade_name_string = Cascade_name.to_string cascade_name in
   (* Steps 0–4: inference params, session dir, checkpoint, base prompt,
      working context, checkpoint hygiene — all in Keeper_run_context. *)
   let ctx =
@@ -1571,7 +1571,7 @@ let run_turn
          ; degraded_retry_applied
          ; degraded_retry_cascade =
              Option.map
-               Keeper_execution_receipt.cascade_name_of_string
+               Cascade_name.of_string_exn
                degraded_retry_cascade
          ; fallback_reason
          ; cascade_rotation_attempts
@@ -1606,8 +1606,7 @@ let run_turn
              ("terminal_reason_code", `String receipt.terminal_reason_code);
              ( "cascade_name",
                `String
-                 (Keeper_execution_receipt.cascade_name_to_string
-                    receipt.cascade_name) );
+                 (Cascade_name.to_string receipt.cascade_name) );
              ("cascade_attempt_count", `Int receipt.cascade_attempt_count);
              ("cascade_fallback_applied", `Bool receipt.cascade_fallback_applied);
              ( "cascade_outcome",
@@ -1654,7 +1653,7 @@ let run_turn
            ~keeper_turn_id:manifest_keeper_turn_id ~event
            ?oas_turn_count
            ~cascade_name:
-             (Keeper_execution_receipt.cascade_name_to_string receipt.cascade_name)
+             (Cascade_name.to_string receipt.cascade_name)
            ~status ~decision ~receipt_path ?tool_call_log_path ()
          |> Keeper_runtime_manifest.append_best_effort ~site config
        in

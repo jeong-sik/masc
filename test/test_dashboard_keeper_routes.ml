@@ -804,7 +804,7 @@ let append_execution_receipt
       approval_profile = Some "trusted_local";
       approval_profile_derived = false;
       cascade_name =
-        Masc_mcp.Keeper_execution_receipt.cascade_name_of_string
+        Cascade_name.of_string_exn
           (Masc_mcp.Keeper_types.cascade_name_of_meta meta);
       cascade_selected_model = Some "custom:mock";
       cascade_attempt_count = 2;
@@ -812,7 +812,7 @@ let append_execution_receipt
       cascade_outcome;
       degraded_retry_applied;
       degraded_retry_cascade =
-        Option.map Masc_mcp.Keeper_execution_receipt.cascade_name_of_string
+        Option.map Cascade_name.of_string_exn
           degraded_retry_cascade;
       fallback_reason;
       cascade_rotation_attempts =
@@ -821,10 +821,10 @@ let append_execution_receipt
            [
              {
                from_cascade =
-                 Masc_mcp.Keeper_execution_receipt.cascade_name_of_string
+                 Cascade_name.of_string_exn
                    (Masc_mcp.Keeper_types.cascade_name_of_meta meta);
                to_cascade =
-                 Masc_mcp.Keeper_execution_receipt.cascade_name_of_string
+                 Cascade_name.of_string_exn
                    retry_cascade;
                reason;
                outcome =

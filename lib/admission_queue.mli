@@ -14,7 +14,7 @@
 (** Metadata carried per waiter — for observability, not scheduling. *)
 type waiter_info = {
   keeper_name : string;
-  cascade_name : Keeper_cascade_profile.runtime_name;
+  cascade_name : Cascade_name.t;
   enqueue_ts : float;
   priority : Llm_provider.Request_priority.t;
 }
@@ -39,7 +39,7 @@ val with_permit :
   ?wait_timeout_sec:float ->
   priority:Llm_provider.Request_priority.t ->
   keeper_name:string ->
-  cascade_name:Keeper_cascade_profile.runtime_name ->
+  cascade_name:Cascade_name.t ->
   (unit -> 'a) ->
   ('a, [> `Host_resource_saturated of string ]) result
 (** Run [f] in passthrough mode and record inflight observation for metrics
@@ -52,7 +52,7 @@ val with_permit :
 val try_with_permit :
   priority:Llm_provider.Request_priority.t ->
   keeper_name:string ->
-  cascade_name:Keeper_cascade_profile.runtime_name ->
+  cascade_name:Cascade_name.t ->
   (unit -> 'a) ->
   'a option
 (** Non-blocking variant. Returns [None] if host resources are saturated. *)

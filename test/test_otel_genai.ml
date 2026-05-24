@@ -2,7 +2,7 @@ module Lib = Masc_mcp
 open Alcotest
 
 let assoc key attrs = List.assoc_opt key attrs
-let cascade_name raw = Lib.Keeper_cascade_profile.Runtime_name raw
+let cascade_name raw = Cascade_name.of_string_exn raw
 let attr_string = function
   | Some (`String s) -> Some s
   | _ -> None

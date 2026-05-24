@@ -203,7 +203,7 @@ let profile_json_runtime ~keeper_assignable_names name =
 let profile_json_raw ~config_path ~keeper_assignable_names name =
   let defaults =
     Cascade_runtime.default_model_strings
-      ~cascade_name:(Keeper_cascade_profile.Runtime_name name)
+      ~cascade_name:(Cascade_name.of_string_exn name)
   in
   let _models, trace =
     CC.resolve_model_strings_with_trace ?config_path ~name ~defaults ()
@@ -243,7 +243,7 @@ let keeper_profile_fields ~keeper ~cascade_name : (string * Yojson.Safe.t) list 
   let canonical_json =
     match Keeper_cascade_profile.resolve_live_result cascade_name with
     | Ok runtime ->
-      `String (Keeper_cascade_profile.runtime_name_to_string runtime)
+      `String (Cascade_name.to_string runtime)
     | Error (`Unresolved _) -> `Null
   in
   [ "keeper", `String keeper

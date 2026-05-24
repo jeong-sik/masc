@@ -83,9 +83,9 @@ let for_cascade ~(name : string) : t =
 
 (** Resolve a temperature value: cascade config -> fallback. *)
 let resolve_temperature
-    ~(cascade_name : Keeper_cascade_profile.runtime_name)
+    ~(cascade_name : Cascade_name.t)
     ~(fallback : unit -> float) : float =
-  let cascade_name = Keeper_cascade_profile.runtime_name_to_string cascade_name in
+  let cascade_name = Cascade_name.to_string cascade_name in
   match (for_cascade ~name:cascade_name).temperature with
   | Some t -> t
   | None -> fallback ()
@@ -96,7 +96,7 @@ let auto_max_tokens_clamp_seen_mutex = Mutex.create ()
 let auto_max_tokens_clamp_key ~cascade_name ~source ~max_tokens ~ceiling =
   Printf.sprintf
     "%s\x1f%s\x1f%d\x1f%d"
-    (Keeper_cascade_profile.runtime_name_to_string cascade_name)
+    (Cascade_name.to_string cascade_name)
     source
     max_tokens
     ceiling
@@ -135,7 +135,7 @@ let cap_max_tokens_to_ceiling ~cascade_name ~source ~ceiling max_tokens =
       Log.warn ~ctx:"cascade"
         "%s: resolved max_tokens=%d from %s exceeds output ceiling=%d; \
          using ceiling; suppressing repeats for this tuple"
-        (Keeper_cascade_profile.runtime_name_to_string cascade_name)
+        (Cascade_name.to_string cascade_name)
         max_tokens source ceiling;
     ceiling)
   else max_tokens
@@ -148,10 +148,10 @@ let cap_max_tokens_to_cascade_ceiling ~cascade_name ~source max_tokens =
 
 (** Resolve a max_tokens value: cascade config (capped) -> capped fallback. *)
 let resolve_max_tokens
-    ~(cascade_name : Keeper_cascade_profile.runtime_name)
+    ~(cascade_name : Cascade_name.t)
     ~(fallback : unit -> int) : int =
   let cascade_name_string =
-    Keeper_cascade_profile.runtime_name_to_string cascade_name
+    Cascade_name.to_string cascade_name
   in
   match (for_cascade ~name:cascade_name_string).max_tokens with
   | Some t ->
@@ -161,7 +161,7 @@ let resolve_max_tokens
 
 (** Validate and clamp max_tokens against provider ceilings before dispatch. *)
 let validate_max_tokens_within_ceiling
-    ~(cascade_name : Keeper_cascade_profile.runtime_name)
+    ~(cascade_name : Cascade_name.t)
     ~(provider_ceiling : int option)
     (max_tokens : int)
   : (int, Cascade_error_classify.masc_internal_error) result =
@@ -213,7 +213,7 @@ module For_testing = struct
         Log.warn ~ctx:"cascade"
           "%s: resolved max_tokens=%d from %s exceeds output ceiling=%d; \
            using ceiling; suppressing repeats for this tuple"
-          (Keeper_cascade_profile.runtime_name_to_string cascade_name)
+          (Cascade_name.to_string cascade_name)
           max_tokens source c;
       c
     | _ -> max_tokens

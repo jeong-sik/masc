@@ -10,7 +10,7 @@ module CE = Masc_mcp.Cascade_error_classify
 module CR = Masc_mcp.Cascade_runtime
 module P = Masc_mcp.Prometheus
 
-let cascade_name = Masc_mcp.Keeper_cascade_profile.Runtime_name "keeper_unified"
+let cascade_name = Cascade_name.of_string_exn "keeper_unified"
 let metric_max_tokens_clamped = "masc_cascade_max_tokens_clamped_total"
 
 let validate ?(provider_ceiling = Some 40960) max_tokens =
@@ -373,7 +373,7 @@ target = "tier-group.strict_tool_candidates"
 
 let test_resolve_tier_group_max_tokens_uses_model_capability_ceiling () =
   let cascade_name =
-    Masc_mcp.Keeper_cascade_profile.Runtime_name
+    Cascade_name.of_string_exn
       "tier-group.strict_tool_candidates"
   in
   with_temp_cascade_toml
